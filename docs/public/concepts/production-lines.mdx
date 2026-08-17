@@ -1,0 +1,50 @@
+---
+title: "Production lines"
+description: "A production line takes an Order through stations until the work is complete. Lines group into plants. Assembly lines join their outputs."
+---
+
+A production line is a staged path through a graph. An Order enters the line.
+Stations transform it. The line completes when the Order satisfies its
+criteria.
+
+A station can run an agent, run a command, or apply a check. A callback gate
+is a station that waits for an answerer.
+
+## Batches of one
+
+A software line flows one Order at a time. There is no tool change and no
+batch economics. Each Order moves through the line at its own speed.
+
+## Plants
+
+A plant is a group of production lines that share the context of one domain.
+A repository with its process bank is a plant. One plant can run many lines
+at the same time.
+
+The word plant is vocabulary, not a runtime object. You do not configure a
+plant. You see one when your lines share a home.
+
+## Assembly lines
+
+An assembly line is a production line with a special property. Its declared
+inputs are the artifact outputs of other lines.
+
+Examples: a release line that joins the outputs of three component lines. An
+integration line that merges frontend work and backend work into one change.
+
+Artifact flow between lines is event-driven. When a line completes an
+artifact, an event announces it. An assembly line consumes the artifact
+through its content hash. Remote delivery over HTTP is a reserved channel,
+so plants can live on different computers.
+
+The word assembly line is also vocabulary. The pattern uses public runtime
+contracts. It does not need a new runtime object.
+
+## Where line definitions live
+
+A line definition is source code. It lives in your repository, in a shared
+repository, or in a package. You can edit it, version it, review it, and
+share it.
+
+The recipe bank supplies complete, runnable lines as examples. Copy one,
+then change it. The bank shows patterns. It does not set rules.

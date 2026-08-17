@@ -1,0 +1,55 @@
+---
+title: "The Lines runtime"
+description: "Lines is a product-neutral graph runtime. It owns graphs, runs, events, artifacts, engines, workspace contracts, and callback gates."
+---
+
+Lines is the runtime below Obversa. It is one npm package:
+`@obversa/lines`. It is product-neutral. Any tool can use it through its
+public contracts.
+
+## The promise
+
+Bring your own graph topology. Keep one trusted runtime.
+
+A graph type defines what an edge means and when a node can run. DAG, loop,
+directed-state, and bounded-item graphs are built in. Your graph types use
+the same public contract as the built-in types.
+
+## What Lines owns
+
+- **Graphs**: definitions, versions, and frozen run plans.
+- **Runs**: execution, pause, resume, and playback.
+- **Events**: the durable record of what happened and why.
+- **Artifacts**: content-hashed outputs that runs exchange.
+- **Engines**: adapters for the agents that do the work.
+- **Workspace contracts**: one logical workspace per run.
+- **Callback gates**: durable requests, router assignment, and responses.
+
+## What Lines does not own
+
+Lines does not own Orders, Context, Process records, Output records, or
+Evidence records. Those belong to the product layer above it.
+
+Lines does not select or embed an editor, a terminal, a browser, or a
+multiplexer. Lines does not import Surfacer.
+
+This boundary is deliberate. The runtime stays small, neutral, and
+replaceable in principle. The product stays free to change without a runtime
+change.
+
+## Frozen plans
+
+A run starts from a resolved plan: the graph, the policies, the permissions,
+and the schemas. An edit creates a new graph version. An edit does not change
+an active run.
+
+Thus playback is exact. You can replay a run and see each decision with the
+data that caused it. Playback makes no model call and writes no file.
+
+## Events before checkpoints
+
+Domain events are the record of what happened. Checkpoints only make resume
+fast. If a checkpoint is lost or stale, the events rebuild the state.
+
+This rule protects long runs. An unattended run can stop at any point and
+continue without guesses.
