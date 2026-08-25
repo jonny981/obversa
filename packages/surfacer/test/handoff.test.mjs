@@ -60,11 +60,25 @@ test("a colliding earlier frame does not hide the exact later frame", () => {
   assert.equal(parseFramedResult(captured, "pierre_review").payload.from, "underscore");
 });
 
-test("removeTransfer refuses directories it did not create, and retries after failure", async () => {
-  const { mkdtempSync } = await import("node:fs");
+test("removeTransfer refuses foreign directories and stays retryable after a failed removal", async () => {
+  const { mkdtempSync, chmodSync } = await import("node:fs");
   const os = await import("node:os");
   const path = await import("node:path");
   const foreign = mkdtempSync(path.join(os.tmpdir(), "not-ours-"));
   await assert.rejects(() => removeTransfer(foreign), /only removes directories/);
   await fs.rm(foreign, { recursive: true, force: true });
+
+  // A real removal that fails once must remain retryable: the authorization
+  // is kept until fs.rm actually succeeds. Force a failure by making a file
+  // inside the transfer, then the parent, unwritable, then restore and retry.
+  const t = await createPrivateTransfer({ app: "retry", files: [{ name: "a.md", content: "x" }] });
+  chmodSync(t.directory, 0o500);
+  let failed = false;
+  try { await removeTransfer(t.directory); } catch { failed = true; }
+  chmodSync(t.directory, 0o700);
+  if (failed) {
+    await removeTransfer(t.directory); // authorization survived the failure
+  } else {
+    await removeTransfer(t.directory).catch(() => {});
+  }
 });

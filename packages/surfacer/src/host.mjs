@@ -8,14 +8,18 @@ import { spawn } from "node:child_process";
  */
 export async function openSurfaceUrl(url, {
   surfaceBin = process.env.OBVERSA_SURFACE_BIN || "obversa-surface",
+  // No win32 command lane: appending a URL to cmd /c start is a shell
+  // injection vector. Windows prints the URL until a safe launcher lands.
   browserCommand = process.platform === "darwin" ? ["open"]
-    : process.platform === "win32" ? ["cmd", "/c", "start", ""]
-    : ["xdg-open"],
+    : process.platform === "linux" ? ["xdg-open"]
+    : null,
   stderr = process.stderr,
 } = {}) {
   if (await runDetached(surfaceBin, [url])) return { opened: true, via: "host" };
-  const [browserBin, ...browserArgs] = browserCommand;
-  if (await runDetached(browserBin, [...browserArgs, url])) return { opened: true, via: "browser" };
+  if (browserCommand) {
+    const [browserBin, ...browserArgs] = browserCommand;
+    if (await runDetached(browserBin, [...browserArgs, url])) return { opened: true, via: "browser" };
+  }
   stderr.write(`Open this surface in a browser: ${url}\n`);
   return { opened: false, via: "print" };
 }

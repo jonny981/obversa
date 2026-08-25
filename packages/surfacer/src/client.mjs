@@ -12,9 +12,17 @@ export function createSurfaceClient({ heartbeatMs = 15_000 } = {}) {
   if (!token) throw new Error("This surface needs its session link, not a bare URL");
 
   async function api(endpoint, body) {
-    if (typeof endpoint !== "string" || !endpoint.startsWith("/")
-      || endpoint.startsWith("//") || endpoint.startsWith("/\\")) {
-      throw new Error("Surface API endpoints are same-origin paths starting with a single /");
+    // Resolve against our origin and require it stays here. URL parsing
+    // strips tabs and newlines, so string-prefix checks are not enough:
+    // "/\t/evil/x" resolves off-origin. Compare resolved origins instead.
+    let resolved;
+    try {
+      resolved = new URL(endpoint, location.origin);
+    } catch {
+      throw new Error("Surface API endpoint is not a valid path");
+    }
+    if (resolved.origin !== location.origin) {
+      throw new Error("Surface API endpoints must stay on the session origin");
     }
     const response = await fetch(endpoint, {
       method: body === undefined ? "GET" : "POST",

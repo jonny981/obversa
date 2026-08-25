@@ -3,6 +3,7 @@
 import { mkdtempSync, writeFileSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import { rmSync } from "node:fs";
 import { runSurface } from "../src/launcher.mjs";
 
 const directory = mkdtempSync(path.join(os.tmpdir(), "hello-surface-"));
@@ -20,7 +21,9 @@ document.getElementById("yes").onclick = async () => { const r = await api("/api
 document.getElementById("no").onclick = async () => { const r = await api("/api/cancel", {}); await api("/api/ack", { operationId: r.operationId }); document.body.textContent = "Done."; };
 `);
 
-const { result } = await runSurface({
+let result;
+try {
+  ({ result } = await runSurface({
   app: "hello-surface",
   assets: { directory, files: {
     "/": ["index.html", "text/html; charset=utf-8"],
@@ -32,6 +35,9 @@ const { result } = await runSurface({
       return null;
     },
   },
-  leaseTimeoutMs: 120_000,
-});
+    leaseTimeoutMs: 120_000,
+  }));
+} finally {
+  rmSync(directory, { recursive: true, force: true });
+}
 process.exit(result.status === "completed" ? 0 : 1);

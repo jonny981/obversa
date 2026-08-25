@@ -26,6 +26,9 @@ while [ $# -gt 0 ]; do
   esac
 done
 [ -n "$AGENT" ] || { echo "obversa-peer-send: no sender. Pass --from <agent> or set OBVERSA_AGENT." >&2; usage >&2; exit 2; }
+case "$AGENT" in
+  *[!A-Za-z0-9._-]*) echo "obversa-peer-send: sender must use only letters, digits, '.', '_', '-': $AGENT" >&2; exit 2 ;;
+esac
 [ $# -gt 0 ] || { usage >&2; exit 2; }
 
 CHANNEL="${OBVERSA_CHANNEL:-$HOME/dev/personal/obversa-coordination/channel.md}"
