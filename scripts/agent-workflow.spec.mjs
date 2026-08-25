@@ -3,6 +3,7 @@ import {
   existsSync,
   mkdirSync,
   mkdtempSync,
+  lstatSync,
   readFileSync,
   rmSync,
   symlinkSync,
@@ -11,7 +12,7 @@ import {
 import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { spawnSync } from 'node:child_process';
+import { spawn, spawnSync } from 'node:child_process';
 import test from 'node:test';
 import { manageStage } from './stage-merge.mjs';
 
@@ -19,6 +20,7 @@ const projectRoot = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const checkInstructions = join(projectRoot, 'scripts', 'check-agent-instructions.mjs');
 const checkBranch = join(projectRoot, 'scripts', 'check-workstream-branch.mjs');
 const stageMerge = join(projectRoot, 'scripts', 'stage-merge.mjs');
+const stageLeaseRef = 'refs/obversa/stage-merge';
 const temporaryDirectories = [];
 
 test.after(() => {
@@ -111,16 +113,33 @@ test('finishing refuses a commit that fails the public commit policy', () => {
   assert.deepEqual(branchHeads(repository), before);
 });
 
-test('finishing an integrated stage is safe to repeat', () => {
+test('finishing an integrated stage reports converged state without claiming again', () => {
   const repository = createRepository({ feature: true });
   commitFile(repository.feature, 'lines.txt', 'D1\n', 'finish D1');
   assert.equal(runStage('claim', 'D1', repository.feature).status, 0);
   assert.equal(runStage('finish', 'D1', repository.feature).status, 0);
+  const before = branchHeads(repository);
 
   const repeated = runStage('finish', 'D1', repository.feature);
 
   assert.equal(repeated.status, 0, repeated.stderr);
   assert.match(repeated.stdout, /D1 is already on main/);
+  assert.deepEqual(branchHeads(repository), before);
+  assert.equal(stageClaimExists(repository), false);
+});
+
+test('finishing recovers after main moved but the lease was not released', () => {
+  const repository = createRepository({ feature: true });
+  commitFile(repository.feature, 'lines.txt', 'D1\n', 'finish D1');
+  const featureHead = git(repository.feature, 'rev-parse', 'HEAD').stdout.trim();
+  assert.equal(runStage('claim', 'D1', repository.feature).status, 0);
+  git(repository.main, 'merge', '--ff-only', featureHead);
+
+  const result = runStage('finish', 'D1', repository.feature);
+
+  assert.equal(result.status, 0, result.stderr);
+  assert.match(result.stdout, /D1 is already on main/);
+  assert.equal(stageClaimExists(repository), false);
 });
 
 test('finishing an unchanged claimed stage releases its merge turn', () => {
@@ -131,7 +150,7 @@ test('finishing an unchanged claimed stage releases its merge turn', () => {
 
   assert.equal(result.status, 0, result.stderr);
   assert.match(result.stdout, /D1 is already on main/);
-  assert.equal(existsSync(stageLock(repository)), false);
+  assert.equal(stageClaimExists(repository), false);
 });
 
 test('an integrated branch cannot ignore another stage claim', () => {
@@ -147,21 +166,25 @@ test('an integrated branch cannot ignore another stage claim', () => {
   assert.equal(readFileSync(join(lock, 'owner.json'), 'utf8'), '{"stage":"F0"}\n');
 });
 
-test('claiming a stage records its branch, worktree, stage, and main head', () => {
+test('claiming a stage stores a complete versioned owner without a machine path', () => {
   const repository = createRepository({ feature: true });
   const mainHead = git(repository.main, 'rev-parse', 'HEAD').stdout.trim();
-  const worktree = git(repository.feature, 'rev-parse', '--show-toplevel').stdout.trim();
 
   const result = runStage('claim', 'D1', repository.feature);
 
   assert.equal(result.status, 0, result.stderr);
-  const owner = JSON.parse(readFileSync(join(stageLock(repository), 'owner.json'), 'utf8'));
-  assert.deepEqual(owner, {
+  assert.equal(existsSync(stageLock(repository)), false);
+  const { objectId, owner } = readStageLease(repository);
+  assert.equal(git(repository.feature, 'cat-file', '-t', objectId).stdout.trim(), 'blob');
+  assert.match(owner.acquisitionToken, /^[0-9a-f-]{36}$/);
+  assert.deepEqual({ ...owner, acquisitionToken: '<token>' }, {
+    acquisitionToken: '<token>',
     branch: 'feat/lines-v1',
     mainHead,
     stage: 'D1',
-    worktree,
+    version: 1,
   });
+  assert.equal('worktree' in owner, false);
 });
 
 test('dirty main blocks a stage claim without changing either branch', () => {
@@ -207,7 +230,7 @@ test('diverged branches block a stage without creating a merge commit', () => {
   assert.notEqual(result.status, 0);
   assert.match(result.stderr, /cannot fast-forward main/);
   assert.deepEqual(branchHeads(repository), before);
-  assert.equal(readFileSync(join(stageLock(repository), 'owner.json'), 'utf8').length > 0, true);
+  assert.equal(readStageOwner(repository).length > 0, true);
 });
 
 test('finishing without a matching stage claim changes no branch', () => {
@@ -238,6 +261,107 @@ test('an existing merge lock blocks a second stage claimant', () => {
   assert.equal(readFileSync(join(lock, 'owner.json'), 'utf8'), '{"stage":"F0"}\n');
 });
 
+test('an incomplete legacy claim requires explicit recovery', () => {
+  const repository = createRepository({ feature: true });
+  const lock = stageLock(repository);
+  mkdirSync(lock);
+
+  const blocked = runStage('claim', 'D1', repository.feature);
+
+  assert.notEqual(blocked.status, 0);
+  assert.match(blocked.stderr, /incomplete stage merge claim/);
+  assert.match(blocked.stderr, /stage:release D1/);
+  assert.equal(existsSync(lock), true);
+
+  const unfinished = runStage('finish', 'D1', repository.feature);
+  assert.notEqual(unfinished.status, 0);
+  assert.match(unfinished.stderr, /incomplete stage merge claim/);
+  assert.match(unfinished.stderr, /stage:release D1/);
+
+  const released = runStage('release', 'D1', repository.feature);
+  assert.equal(released.status, 0, released.stderr);
+  assert.match(released.stdout, /cleared the incomplete stage merge claim/);
+  assert.equal(existsSync(lock), false);
+
+  const reclaimed = runStage('claim', 'D1', repository.feature);
+  assert.equal(reclaimed.status, 0, reclaimed.stderr);
+});
+
+test('release never clears an unreadable owner record', () => {
+  const repository = createRepository({ feature: true });
+  const lock = stageLock(repository);
+  writeFileSync(lock, 'not json\n');
+
+  const result = runStage('release', 'D1', repository.feature);
+
+  assert.notEqual(result.status, 0);
+  assert.match(result.stderr, /stage merge lock is unreadable/);
+  assert.equal(readFileSync(lock, 'utf8'), 'not json\n');
+});
+
+test('incomplete legacy recovery preserves a claim that becomes non-empty', () => {
+  const repository = createRepository({ feature: true });
+  const lock = stageLock(repository);
+  mkdirSync(lock);
+  writeFileSync(join(lock, 'claiming'), 'still active\n');
+
+  const result = runStage('release', 'D1', repository.feature);
+
+  assert.notEqual(result.status, 0);
+  assert.match(result.stderr, /claim changed; nothing removed/);
+  assert.equal(readFileSync(join(lock, 'claiming'), 'utf8'), 'still active\n');
+});
+
+test('an unreadable legacy lock blocks another claimant without changing its bytes', () => {
+  const repository = createRepository({ feature: true });
+  const lock = stageLock(repository);
+  const owner = '{"stage":"F0"}\n';
+  writeFileSync(lock, owner);
+
+  const result = runStage('claim', 'D1', repository.feature);
+
+  assert.notEqual(result.status, 0);
+  assert.match(result.stderr, /another stage merge is active/);
+  assert.equal(readFileSync(lock, 'utf8'), owner);
+});
+
+test('two parallel claims produce one complete owner record', async () => {
+  const repository = createRepository({ feature: true });
+
+  const results = await Promise.all([
+    runStageAsync('claim', 'D1', repository.feature),
+    runStageAsync('claim', 'D1', repository.feature),
+  ]);
+
+  assert.deepEqual(results.map((result) => result.status).sort(), [0, 1]);
+  assert.equal(results.some((result) => /another stage merge is active/.test(result.stderr)), true);
+  const { owner } = readStageLease(repository);
+  assert.equal(owner.stage, 'D1');
+  assert.equal(owner.branch, 'feat/lines-v1');
+});
+
+test('finishing supports a complete legacy directory claim', () => {
+  const repository = createRepository({ feature: true });
+  commitFile(repository.feature, 'lines.txt', 'D1\n', 'finish D1');
+  const lock = stageLock(repository);
+  mkdirSync(lock);
+  writeFileSync(join(lock, 'owner.json'), `${JSON.stringify({
+    branch: 'feat/lines-v1',
+    mainHead: git(repository.main, 'rev-parse', 'HEAD').stdout.trim(),
+    stage: 'D1',
+    worktree: git(repository.feature, 'rev-parse', '--show-toplevel').stdout.trim(),
+  })}\n`);
+
+  const result = runStage('finish', 'D1', repository.feature);
+
+  assert.equal(result.status, 0, result.stderr);
+  assert.equal(
+    git(repository.main, 'rev-parse', 'HEAD').stdout.trim(),
+    git(repository.feature, 'rev-parse', 'HEAD').stdout.trim(),
+  );
+  assert.equal(existsSync(lock), false);
+});
+
 test('main moving after a claim invalidates the merge turn', () => {
   const repository = createRepository({ feature: true });
   commitFile(repository.feature, 'lines.txt', 'D1\n', 'finish D1');
@@ -264,6 +388,48 @@ test('releasing a claim lets the other workstream take the merge turn', () => {
   assert.equal(released.status, 0, released.stderr);
   assert.equal(reclaimed.status, 0, reclaimed.stderr);
   assert.match(reclaimed.stdout, /F0 claimed the stage merge turn/);
+});
+
+test('reacquiring the same stage creates a lease an old release cannot delete', () => {
+  const repository = createRepository({ feature: true });
+  assert.equal(runStage('claim', 'D1', repository.feature).status, 0);
+  const firstObjectId = stageLeaseObjectId(repository);
+  assert.equal(runStage('release', 'D1', repository.feature).status, 0);
+
+  assert.equal(runStage('claim', 'D1', repository.feature).status, 0);
+  const replacementObjectId = stageLeaseObjectId(repository);
+  const staleDelete = spawnSync(
+    'git',
+    ['update-ref', '-d', stageLeaseRef, firstObjectId],
+    { cwd: repository.feature, encoding: 'utf8' },
+  );
+
+  assert.notEqual(replacementObjectId, firstObjectId);
+  assert.notEqual(staleDelete.status, 0);
+  assert.equal(stageLeaseObjectId(repository), replacementObjectId);
+});
+
+test('a delayed release cannot delete a replacement lease', () => {
+  const repository = createRepository({ feature: true });
+  const factory = join(repository.directory, 'factory');
+  git(repository.main, 'worktree', 'add', '-b', 'feat/factory-v1', factory);
+  assert.equal(runStage('claim', 'D1', repository.feature).status, 0);
+  let replacementObjectId;
+
+  const released = runStage('release', 'D1', repository.feature, {
+    beforeLeaseDelete() {
+      const originalObjectId = stageLeaseObjectId(repository);
+      git(repository.feature, 'update-ref', '-d', stageLeaseRef, originalObjectId);
+      const reclaimed = runStage('claim', 'F0', factory);
+      assert.equal(reclaimed.status, 0, reclaimed.stderr);
+      replacementObjectId = stageLeaseObjectId(repository);
+    },
+  });
+
+  assert.notEqual(released.status, 0);
+  assert.match(released.stderr, /stage merge claim changed; nothing removed/);
+  assert.equal(stageLeaseObjectId(repository), replacementObjectId);
+  assert.equal(readStageLease(repository).owner.stage, 'F0');
 });
 
 function createRepository({ feature = false, instructions, branch = 'feat/lines-v1' } = {}) {
@@ -317,6 +483,39 @@ function stageLock({ feature }) {
   return join(commonDirectory, 'obversa-stage-merge.lock');
 }
 
+function readStageOwner(repository) {
+  const objectId = stageLeaseObjectId(repository, { required: false });
+  if (objectId) return git(repository.feature, 'cat-file', 'blob', objectId).stdout;
+  const lock = stageLock(repository);
+  return lstatSync(lock).isDirectory()
+    ? readFileSync(join(lock, 'owner.json'), 'utf8')
+    : readFileSync(lock, 'utf8');
+}
+
+function readStageLease(repository) {
+  const objectId = stageLeaseObjectId(repository);
+  return {
+    objectId,
+    owner: JSON.parse(git(repository.feature, 'cat-file', 'blob', objectId).stdout),
+  };
+}
+
+function stageLeaseObjectId(repository, { required = true } = {}) {
+  const result = spawnSync(
+    'git',
+    ['rev-parse', '--verify', '--quiet', stageLeaseRef],
+    { cwd: repository.feature, encoding: 'utf8' },
+  );
+  if (result.status === 0) return result.stdout.trim();
+  if (!required && result.status === 1) return undefined;
+  assert.equal(result.status, 0, result.stderr || `missing ${stageLeaseRef}`);
+}
+
+function stageClaimExists(repository) {
+  return existsSync(stageLock(repository))
+    || stageLeaseObjectId(repository, { required: false }) !== undefined;
+}
+
 function git(cwd, ...args) {
   const result = spawnSync('git', args, { cwd, encoding: 'utf8' });
   assert.equal(result.status, 0, result.stderr);
@@ -330,11 +529,12 @@ function runNode(script, args, cwd) {
   });
 }
 
-function runStage(command, stage, cwd) {
+function runStage(command, stage, cwd, options = {}) {
   try {
     const output = manageStage([command, stage], {
       cwd,
       assertCommitRange: () => 1,
+      ...options,
     });
     return { status: 0, stderr: '', stdout: `${output}\n` };
   } catch (error) {
@@ -348,4 +548,15 @@ function runStage(command, stage, cwd) {
 
 function runStageCli(command, stage, cwd) {
   return runNode(stageMerge, [command, stage], cwd);
+}
+
+function runStageAsync(command, stage, cwd) {
+  return new Promise((resolvePromise) => {
+    const child = spawn(process.execPath, [stageMerge, command, stage], { cwd });
+    let stdout = '';
+    let stderr = '';
+    child.stdout.setEncoding('utf8').on('data', (chunk) => { stdout += chunk; });
+    child.stderr.setEncoding('utf8').on('data', (chunk) => { stderr += chunk; });
+    child.on('close', (status) => resolvePromise({ status, stdout, stderr }));
+  });
 }

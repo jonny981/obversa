@@ -8,6 +8,7 @@ const packageRules = new Map([
     version: '1.0.0',
     dependencies: [],
     peerDependencies: ['@obversa/memory'],
+    peerDependencyVersions: { '@obversa/memory': '>=0.1.0 <0.2.0' },
   }],
   ['@obversa/memory', { version: '0.1.0', dependencies: [], peerDependencies: [] }],
   ['@obversa/memory-simple', {
@@ -24,11 +25,19 @@ const packageRules = new Map([
 const scanRoots = [
   '.changeset',
   'packages',
+  'hosts',
   'docs/public',
   'examples',
   'scripts',
   '.github',
   '.githooks',
+];
+const requiredScanRoots = ['hosts'];
+const requiredScannedFiles = [
+  'hosts/cmux/bin/obversa-order-workspace',
+  'hosts/cmux/bin/obversa-plannotator-browser',
+  'hosts/cmux/bin/obversa-surface',
+  'hosts/cmux/test/f0-proof.sh',
 ];
 const scanFiles = [
   '.gitignore',
@@ -52,6 +61,7 @@ const textExtensions = new Set([
   '.md',
   '.mdx',
   '.mjs',
+  '.sh',
   '.ts',
   '.tsx',
   '.yaml',
@@ -95,6 +105,10 @@ const forbidden = [
 
 const failures = [];
 
+for (const path of requiredScanRoots) {
+  if (!scanRoots.includes(path)) failures.push(`boundary scan must include ${path}/`);
+}
+
 const gitignore = (await readFile(join(root, '.gitignore'), 'utf8'))
   .split(/\r?\n/)
   .map((line) => line.trim());
@@ -135,6 +149,16 @@ for (const [name, rule] of packageRules) {
       `${name}: internal peers must be ${expectedPeers.join(', ') || 'none'}; found ${peers.join(', ') || 'none'}`,
     );
   }
+  for (const [dependency, expectedVersion] of Object.entries(
+    rule.peerDependencyVersions ?? {},
+  )) {
+    const actualVersion = manifest.peerDependencies?.[dependency];
+    if (actualVersion !== expectedVersion) {
+      failures.push(
+        `${name}: peer ${dependency} must use ${expectedVersion}; found ${actualVersion ?? 'none'}`,
+      );
+    }
+  }
 
   for (const value of Object.values({
     ...manifest.dependencies,
@@ -149,9 +173,12 @@ for (const [name, rule] of packageRules) {
 
 for (const path of [
   'packages/lines/src/cli.ts',
+  'packages/lines/src/cli.tsx',
   'packages/lines/src/index.ts',
+  'packages/lines/src/reporters.ts',
   'packages/lines/src/tui',
   'packages/lines/src/helm',
+  'packages/lines/bin',
   'packages/lines/src/core/forge.ts',
   'packages/lines/src/core/pr.ts',
   'packages/lines/src/core/human.ts',
@@ -165,12 +192,15 @@ for (const path of [
   'packages/lines/src/runtime/signals.ts',
   'packages/lines/src/runtime/semantic.ts',
   'packages/lines/src/runtime/semantic-schema.ts',
+  'packages/lines/src/env/docker.ts',
+  'packages/lines/src/env/sst.ts',
 ]) {
   const absolute = join(root, path);
   if (await containsFile(absolute)) failures.push(`${path}: retired D1 surface remains`);
 }
 
 const files = [];
+const scannedTextFiles = new Set();
 for (const path of scanRoots) {
   const absolute = join(root, path);
   if (await exists(absolute)) await walk(absolute, files);
@@ -189,7 +219,11 @@ for (const absolute of files) {
   ) {
     failures.push(`${path}: generated build output must not be stored under src`);
   }
-  if (!textExtensions.has(extname(absolute)) && !absolute.endsWith('LICENSE')) continue;
+  const extension = extname(absolute);
+  const extensionlessHostFile = path.startsWith('hosts/') && extension.length === 0;
+  if (!textExtensions.has(extension) && !absolute.endsWith('LICENSE') && !extensionlessHostFile)
+    continue;
+  scannedTextFiles.add(path);
   const buffer = await readFile(absolute);
   if (buffer.includes(0)) {
     failures.push(`${path}: text file contains a NUL byte`);
@@ -216,6 +250,10 @@ for (const absolute of files) {
         failures.push(`${path}: ${ownerName} must not import ${dependency}`);
     }
   }
+}
+
+for (const path of requiredScannedFiles) {
+  if (!scannedTextFiles.has(path)) failures.push(`${path}: public host file is not scanned`);
 }
 
 if (failures.length) {

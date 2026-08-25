@@ -1,9 +1,18 @@
 import { spawnSync } from 'node:child_process';
-import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { randomUUID } from 'node:crypto';
+import {
+  existsSync,
+  lstatSync,
+  readFileSync,
+  rmdirSync,
+  rmSync,
+} from 'node:fs';
 import { join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { assertCommitRange } from './check-commit-policy.mjs';
 import { configureGitHooks } from './configure-git-hooks.mjs';
+
+const leaseRef = 'refs/obversa/stage-merge';
 
 export function manageStage(args, options = {}) {
   if (args.length !== 2 || !['claim', 'finish', 'release'].includes(args[0])) {
@@ -19,38 +28,62 @@ export function manageStage(args, options = {}) {
   if (command === 'finish') {
     return finish(context, {
       assertCommitRange: options.assertCommitRange ?? assertCommitRange,
+      beforeLeaseDelete: options.beforeLeaseDelete,
       configureGitHooks: options.configureGitHooks ?? configureGitHooks,
     });
   }
-  return release(context);
+  return release(context, { beforeLeaseDelete: options.beforeLeaseDelete });
 }
 
 function claim(context) {
-  try {
-    mkdirSync(context.lockDirectory);
-  } catch (error) {
-    if (error?.code === 'EEXIST') {
-      throw new Error(`another stage merge is active (${context.lockDirectory})`);
+  const mainWorktree = findMainWorktree(context.worktree);
+  assertClean(context.worktree, 'feature');
+  assertClean(mainWorktree, 'main');
+  if (existsSync(context.legacyLockPath)) {
+    if (isIncompleteLegacyLock(context)) {
+      throw new Error(
+        `incomplete stage merge claim; run pnpm stage:release ${context.stage}, then retry`,
+      );
     }
-    throw error;
+    throw new Error(`another stage merge is active (${context.legacyLockPath})`);
   }
 
-  try {
-    const mainWorktree = findMainWorktree(context.worktree);
-    assertClean(context.worktree, 'feature');
-    assertClean(mainWorktree, 'main');
-    const owner = {
-      branch: context.branch,
-      mainHead: git(mainWorktree, 'rev-parse', 'HEAD').trim(),
-      stage: context.stage,
-      worktree: context.worktree,
-    };
-    writeFileSync(context.ownerPath, `${JSON.stringify(owner, null, 2)}\n`);
-    return `${context.stage} claimed the stage merge turn from ${owner.mainHead}.`;
-  } catch (error) {
-    rmSync(context.lockDirectory, { force: true, recursive: true });
-    throw error;
+  const owner = {
+    acquisitionToken: randomUUID(),
+    branch: context.branch,
+    mainHead: git(mainWorktree, 'rev-parse', 'HEAD').trim(),
+    stage: context.stage,
+    version: 1,
+  };
+  const objectId = gitWithInput(
+    context.worktree,
+    `${JSON.stringify(owner, null, 2)}\n`,
+    'hash-object',
+    '-w',
+    '--stdin',
+  ).trim();
+  const result = rawGit(
+    context.worktree,
+    'update-ref',
+    context.leaseRef,
+    objectId,
+    '0'.repeat(objectId.length),
+  );
+  if (result.status !== 0) {
+    throw new Error(`another stage merge is active (${context.leaseRef})`);
   }
+
+  if (existsSync(context.legacyLockPath)) {
+    deleteRefLease(context, objectId);
+    if (isIncompleteLegacyLock(context)) {
+      throw new Error(
+        `incomplete stage merge claim; run pnpm stage:release ${context.stage}, then retry`,
+      );
+    }
+    throw new Error(`another stage merge is active (${context.legacyLockPath})`);
+  }
+
+  return `${context.stage} claimed the stage merge turn from ${owner.mainHead}.`;
 }
 
 function finish(context, dependencies) {
@@ -61,23 +94,36 @@ function finish(context, dependencies) {
   const featureHead = git(context.worktree, 'rev-parse', 'HEAD').trim();
   const mainHead = git(mainWorktree, 'rev-parse', 'HEAD').trim();
   if (featureHead === mainHead) {
-    if (existsSync(context.lockDirectory)) {
-      const owner = readOwner(context, 'claim the stage merge turn first');
-      assertOwner(context, owner);
-      if (owner.mainHead !== mainHead) {
-        throw new Error(`${context.stage} cannot finish because main changed after ${context.stage} claimed the merge turn`);
+    const lease = readLease(context, 'claim the stage merge turn first', { optional: true });
+    if (lease) {
+      assertOwner(context, lease.owner);
+      if (lease.owner.mainHead !== mainHead) {
+        const ancestry = rawGit(
+          context.worktree,
+          'merge-base',
+          '--is-ancestor',
+          lease.owner.mainHead,
+          mainHead,
+        );
+        if (ancestry.status !== 0) {
+          throw new Error(`${context.stage} cannot finish because main changed after ${context.stage} claimed the merge turn`);
+        }
+        dependencies.assertCommitRange(`${lease.owner.mainHead}..${featureHead}`, {
+          cwd: context.worktree,
+        });
+        git(context.worktree, 'diff', '--check', `${lease.owner.mainHead}..${featureHead}`);
       }
       dependencies.configureGitHooks(mainWorktree);
-      rmSync(context.lockDirectory, { force: true, recursive: true });
+      deleteLease(context, lease, dependencies.beforeLeaseDelete);
     } else {
       dependencies.configureGitHooks(mainWorktree);
     }
     return `${context.stage} is already on main at ${featureHead}.`;
   }
 
-  const owner = readOwner(context, 'claim the stage merge turn first');
-  assertOwner(context, owner);
-  if (owner.mainHead !== mainHead) {
+  const lease = readLease(context, 'claim the stage merge turn first');
+  assertOwner(context, lease.owner);
+  if (lease.owner.mainHead !== mainHead) {
     throw new Error(`${context.stage} cannot finish because main changed after ${context.stage} claimed the merge turn`);
   }
 
@@ -102,14 +148,18 @@ function finish(context, dependencies) {
   if (mergedHead !== featureHead) throw new Error('main did not reach the reviewed feature commit');
 
   dependencies.configureGitHooks(mainWorktree);
-  rmSync(context.lockDirectory, { force: true, recursive: true });
+  deleteLease(context, lease, dependencies.beforeLeaseDelete);
   return `${context.stage} merged to main at ${featureHead}.`;
 }
 
-function release(context) {
-  const owner = readOwner(context, 'no stage merge turn is active');
-  assertOwner(context, owner);
-  rmSync(context.lockDirectory, { force: true, recursive: true });
+function release(context, dependencies) {
+  if (isIncompleteLegacyLock(context)) {
+    clearIncompleteLegacyLock(context);
+    return `${context.stage} cleared the incomplete stage merge claim; retry stage:claim.`;
+  }
+  const lease = readLease(context, 'no stage merge turn is active');
+  assertOwner(context, lease.owner);
+  deleteLease(context, lease, dependencies.beforeLeaseDelete);
   return `${context.stage} released the stage merge turn.`;
 }
 
@@ -131,34 +181,127 @@ function featureContext(stage, cwd) {
     '--path-format=absolute',
     '--git-common-dir',
   ).trim();
-  const lockDirectory = join(commonDirectory, 'obversa-stage-merge.lock');
+  const legacyLockPath = join(commonDirectory, 'obversa-stage-merge.lock');
   return {
     branch,
-    lockDirectory,
-    ownerPath: join(lockDirectory, 'owner.json'),
+    leaseRef,
+    legacyLockPath,
+    legacyOwnerPath: join(legacyLockPath, 'owner.json'),
     stage,
     worktree,
   };
 }
 
 function assertOwner(context, owner) {
-  if (
-    owner.branch !== context.branch
-    || owner.stage !== context.stage
-    || owner.worktree !== context.worktree
-  ) {
+  if (owner.branch !== context.branch || owner.stage !== context.stage) {
     throw new Error(
       `stage merge turn belongs to ${owner.stage ?? 'unknown'} on ${owner.branch ?? 'unknown'}`,
     );
   }
 }
 
-function readOwner(context, missingMessage) {
+function readLease(context, missingMessage, { optional = false } = {}) {
+  const objectId = leaseObjectId(context);
+  const hasLegacyLock = existsSync(context.legacyLockPath);
+  if (objectId && hasLegacyLock) {
+    throw new Error('multiple stage merge claims exist; nothing changed');
+  }
+  if (objectId) {
+    const result = rawGit(context.worktree, 'cat-file', 'blob', objectId);
+    if (result.status !== 0) throw unreadableLease(context);
+    try {
+      const owner = JSON.parse(result.stdout);
+      if (
+        owner.version !== 1
+        || typeof owner.acquisitionToken !== 'string'
+        || owner.acquisitionToken.length === 0
+        || typeof owner.branch !== 'string'
+        || typeof owner.mainHead !== 'string'
+        || typeof owner.stage !== 'string'
+      ) {
+        throw new Error('invalid owner');
+      }
+      return { kind: 'ref', objectId, owner };
+    } catch {
+      throw unreadableLease(context);
+    }
+  }
+
+  if (!hasLegacyLock) {
+    if (optional) return undefined;
+    throw new Error(missingMessage);
+  }
+  if (isIncompleteLegacyLock(context)) {
+    throw new Error(
+      `incomplete stage merge claim; run pnpm stage:release ${context.stage}, then retry`,
+    );
+  }
+
   try {
-    return JSON.parse(readFileSync(context.ownerPath, 'utf8'));
+    if (!lstatSync(context.legacyLockPath).isDirectory()) throw new Error('unsupported');
+    return {
+      kind: 'legacy',
+      owner: JSON.parse(readFileSync(context.legacyOwnerPath, 'utf8')),
+    };
+  } catch {
+    throw unreadableLease(context);
+  }
+}
+
+function isIncompleteLegacyLock(context) {
+  try {
+    return lstatSync(context.legacyLockPath).isDirectory()
+      && !existsSync(context.legacyOwnerPath);
   } catch (error) {
-    if (error?.code === 'ENOENT') throw new Error(missingMessage);
-    throw new Error(`stage merge lock is unreadable (${context.ownerPath})`);
+    if (error?.code === 'ENOENT') return false;
+    throw error;
+  }
+}
+
+function deleteLease(context, lease, beforeDelete) {
+  if (lease.kind === 'ref') {
+    beforeDelete?.(lease);
+    deleteRefLease(context, lease.objectId);
+    return;
+  }
+  rmSync(context.legacyLockPath, { force: true, recursive: true });
+}
+
+function deleteRefLease(context, objectId) {
+  const result = rawGit(
+    context.worktree,
+    'update-ref',
+    '-d',
+    context.leaseRef,
+    objectId,
+  );
+  if (result.status !== 0) {
+    throw new Error('stage merge claim changed; nothing removed');
+  }
+}
+
+function leaseObjectId(context) {
+  const result = rawGit(
+    context.worktree,
+    'rev-parse',
+    '--verify',
+    '--quiet',
+    context.leaseRef,
+  );
+  if (result.status === 0) return result.stdout.trim();
+  if (result.status === 1) return undefined;
+  throw unreadableLease(context);
+}
+
+function unreadableLease(context) {
+  return new Error(`stage merge lock is unreadable (${context.leaseRef})`);
+}
+
+function clearIncompleteLegacyLock(context) {
+  try {
+    rmdirSync(context.legacyLockPath);
+  } catch {
+    throw new Error('incomplete stage merge claim changed; nothing removed');
   }
 }
 
@@ -180,6 +323,14 @@ function findMainWorktree(cwd) {
 
 function git(cwd, ...args) {
   const result = rawGit(cwd, ...args);
+  if (result.status !== 0) {
+    throw new Error(result.stderr.trim() || `git ${args.join(' ')} failed`);
+  }
+  return result.stdout;
+}
+
+function gitWithInput(cwd, input, ...args) {
+  const result = spawnSync('git', args, { cwd, encoding: 'utf8', input });
   if (result.status !== 0) {
     throw new Error(result.stderr.trim() || `git ${args.join(' ')} failed`);
   }
