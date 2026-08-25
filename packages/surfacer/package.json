@@ -1,0 +1,17 @@
+{
+  "name": "@obversa/surfacer",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Secure local surface sessions: one loopback server, one opaque result, host-native placement.",
+  "type": "module",
+  "exports": {
+    ".": "./src/index.mjs",
+    "./client": "./src/client.mjs"
+  },
+  "scripts": {
+    "test": "node --test test/*.test.mjs"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}
