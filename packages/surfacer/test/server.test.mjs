@@ -210,3 +210,34 @@ test("unknown routes 404 and schema violations 400", async () => {
     await surface.stop();
   }
 });
+
+test("a handler finishing after a timeout cannot report success", async () => {
+  const surface = await startSurface({
+    app: "test-app",
+    assets: { directory: assetsDir, files: { "/": ["index.html", "text/html; charset=utf-8"] } },
+    leaseTimeoutMs: 250,
+    api: {
+      "POST /api/slow": async () => {
+        await new Promise((resolve) => setTimeout(resolve, 900));
+        return { status: 200, body: { ok: true } };
+      },
+    },
+  });
+  try {
+    const response = await request(surface, "/api/slow", { body: {} });
+    assert.equal(response.status, 409);
+    const decision = await surface.waitForDecision();
+    assert.equal(decision.status, "timed_out");
+  } finally {
+    await surface.stop();
+  }
+});
+
+test("authorization, cookie, and Basic values are redacted", async () => {
+  const { sanitizeValue, redactText } = await import("../src/sanitize.mjs");
+  const clean = sanitizeValue({ authorization: "Basic YWRtaW46cGFzc3dvcmQ=", cookie: "sid=abc", authToken: "x" });
+  assert.equal(clean.authorization, "[REDACTED]");
+  assert.equal(clean.cookie, "[REDACTED]");
+  assert.equal(clean.authToken, "[REDACTED]");
+  assert.match(redactText("Basic YWRtaW46cGFzc3dvcmQ="), /Basic \[REDACTED\]/);
+});

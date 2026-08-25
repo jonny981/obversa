@@ -39,9 +39,14 @@ export function createSurfaceClient({ heartbeatMs = 15_000 } = {}) {
   return {
     api,
     async submit(endpoint, body) {
-      const result = await api(endpoint, body);
-      await acknowledge(result.operationId);
-      return result;
+      try {
+        const result = await api(endpoint, body);
+        await acknowledge(result.operationId);
+        return result;
+      } catch (error) {
+        clearInterval(heartbeat);
+        throw error;
+      }
     },
     async cancel() {
       const result = await api("/api/cancel", {}).catch(() => ({}));

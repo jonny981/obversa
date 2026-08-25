@@ -140,8 +140,16 @@ export async function startSurface({
       requireOpenSession();
       renewLease();
       const body = request.method === "GET" ? null : await readJson(request);
+      const claimBefore = terminalClaim;
       const outcome = await handler({ body, session });
       if (response.headersSent || response.destroyed) return;
+      // A terminal decision that arrived DURING the handler but was not this
+      // handler's own completion (a lease or session timeout) must not look
+      // like success — and its operationId must never reach this client.
+      if (terminalClaim && terminalClaim !== claimBefore && terminalClaim.status !== "completed") {
+        sendJson(response, 409, { error: "This session is closed" });
+        return;
+      }
       if (terminalClaim && outcome?.body && typeof outcome.body === "object" && !Array.isArray(outcome.body)) {
         sendJson(response, outcome.status ?? 200, { ...outcome.body, operationId: terminalClaim.operationId });
         return;
