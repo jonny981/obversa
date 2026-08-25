@@ -1,0 +1,173 @@
+/** Public programmatic API for the Lines graph runtime. */
+
+export type {
+  Job,
+  JobMeta,
+  JobContext,
+  Outcome,
+  OutcomeStatus,
+  FeedbackActionSeverity,
+  FeedbackDecision,
+  FeedbackFinding,
+  FeedbackSeverity,
+  RevisionRequest,
+  RevisionRerun,
+  GraphPosition,
+  LimitPolicy,
+  Condition,
+  ConditionInput,
+  ConditionResult,
+  RawPredicate,
+  LoopConfig,
+  RetryPolicy,
+  DagConfig,
+  DagNode,
+  LoopEvent,
+  LogLevel,
+  Workspace,
+  ProofKind,
+  ProofArtifact,
+  ProofRecord,
+} from './core/types.js';
+
+export { loop } from './core/loop.js';
+export { dag, sequence, parallel } from './core/dag.js';
+export { pipeline, type PipelineStage } from './core/pipeline.js';
+export { tournament, type TournamentConfig } from './core/tournament.js';
+export {
+  agentJob,
+  fnJob,
+  prove,
+  kickback,
+  revisionRequest,
+  type AgentJobConfig,
+  type AgentRoute,
+  type ProofDescriptor,
+  type ProofProducer,
+} from './core/job.js';
+export {
+  reviewPanel,
+  reviewContext,
+  type ReviewPanelConfig,
+  type ReviewContextConfig,
+  type RevisionRequestInput,
+} from './core/feedback.js';
+
+export { jobMeta, renderPlan, describeConditions } from './core/describe.js';
+export {
+  assertGraph,
+  type GraphShape,
+  type GraphNodeShape,
+} from './core/assert-graph.js';
+
+export {
+  defineAgent,
+  defineSkill,
+  fromFile,
+  type AgentContractSummary,
+  type AgentDef,
+  type AgentFailureMode,
+  type AgentOutputContract,
+  type AgentSkillRef,
+  type AgentTier,
+  type Skill,
+} from './core/agent.js';
+export { defineAgentFromMarkdown } from './core/agent-md.js';
+
+export { isolated, type IsolatedOptions } from './core/isolated.js';
+export {
+  confidenceCondition,
+  confidenceFromText,
+  lastDecisionLine,
+  lastGateBrief,
+  type ConfidenceConditionOptions,
+  type LastDecisionLineOptions,
+  type LastGateBriefOptions,
+} from './core/decision.js';
+export {
+  toCondition,
+  predicate,
+  bodyPassed,
+  minConfidence,
+  commandSucceeds,
+  all,
+  any,
+  not,
+  quorum,
+  always,
+  never,
+  agentCheck,
+  gateJob,
+  type AgentCheckConfig,
+} from './core/condition.js';
+export type {
+  NoProgressConfig,
+  NoProgressInput,
+  StallReport,
+} from './core/progress.js';
+export { LoopError, type LoopErrorCode } from './core/errors.js';
+export type { BudgetConfig } from './core/budget.js';
+
+export type {
+  Engine,
+  EngineRef,
+  EngineName,
+  EngineOptions,
+  AgentRequest,
+  AgentResult,
+  EngineStreamEvent,
+  Usage,
+} from './engines/engine.js';
+export type { EngineFactory } from './engines/registry.js';
+
+export type { Environment, EnvHandle } from './env/environment.js';
+export { withEnv } from './core/env-overlay.js';
+
+export {
+  run,
+  exitCodeFor,
+  EXIT_PAUSED,
+  type RunOptions,
+  type RunResult,
+} from './runtime/runner.js';
+export type { StatsSnapshot } from './core/stats.js';
+export {
+  classifyEngineFailure,
+  LANE_DEAD_FAILURES,
+  type EngineFailureKind,
+} from './engines/failure.js';
+export {
+  fallbackEngine,
+  type FallbackOptions,
+  type FallbackInfo,
+} from './engines/fallback.js';
+export {
+  preflight,
+  preflightEngine,
+  formatPreflight,
+  type PreflightResult,
+  type PreflightOptions,
+} from './engines/preflight.js';
+export {
+  costReport,
+  formatCostReport,
+  type PriceTable,
+  type ModelPrice,
+  type ModelCost,
+  type CostReport,
+} from './core/cost.js';
+export {
+  ratchet,
+  writeScope,
+  sampled,
+  type RatchetOptions,
+  type WriteScopeOptions,
+  type SampledOptions,
+} from './core/guards.js';
+
+import type { Job } from './core/types.js';
+
+/** Preserve the exact `Job` type of a default export. */
+export function defineJob(job: Job): Job {
+  return job;
+}

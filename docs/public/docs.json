@@ -1,0 +1,44 @@
+{
+  "$schema": "https://mintlify.com/docs.json",
+  "theme": "mint",
+  "name": "Obversa",
+  "description": "Public documentation for the Obversa packages",
+  "colors": {
+    "primary": "#2F6F5E",
+    "light": "#3F8C76",
+    "dark": "#235247"
+  },
+  "navigation": {
+    "groups": [
+      {
+        "group": "Start",
+        "pages": [
+          "index",
+          "get-started/installation",
+          "get-started/first-run"
+        ]
+      },
+      {
+        "group": "Memory",
+        "pages": [
+          "memory/index",
+          "memory/adapters",
+          "memory/mechanics"
+        ]
+      },
+      {
+        "group": "Production lines",
+        "pages": [
+          "production-lines/index",
+          "production-lines/offline-review"
+        ]
+      },
+      {
+        "group": "Hosts",
+        "pages": [
+          "hosts/cmux"
+        ]
+      }
+    ]
+  }
+}

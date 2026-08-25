@@ -1,0 +1,62 @@
+{
+  "name": "@obversa/lines",
+  "version": "1.0.0",
+  "description": "A standalone TypeScript runtime for reliable, nestable agent graphs.",
+  "license": "MIT",
+  "author": "Jonny Neill <jonnyneill@hotmail.com>",
+  "type": "module",
+  "main": "./dist/api.js",
+  "types": "./dist/api.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/api.d.ts",
+      "import": "./dist/api.js"
+    },
+    "./testing": {
+      "types": "./dist/testing.d.ts",
+      "import": "./dist/testing.js"
+    },
+    "./env/command": {
+      "types": "./dist/env/command.d.ts",
+      "import": "./dist/env/command.js"
+    },
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "dist",
+    "README.md",
+    "LICENSE"
+  ],
+  "publishConfig": {
+    "access": "public"
+  },
+  "scripts": {
+    "build": "tsup && tsc -p tsconfig.build.json",
+    "typecheck": "tsc --noEmit",
+    "typecheck:ts6": "tsc6 --noEmit",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "prepack": "pnpm run build"
+  },
+  "engines": {
+    "node": ">=22.12.0"
+  },
+  "dependencies": {
+    "@anthropic-ai/claude-agent-sdk": "0.3.241",
+    "@anthropic-ai/sdk": "0.105.0",
+    "execa": "^9.6.1",
+    "p-limit": "^7.3.0",
+    "p-retry": "^8.0.0",
+    "p-timeout": "^7.0.1",
+    "toposort": "^2.0.2",
+    "zod": "^4.4.3"
+  },
+  "peerDependencies": {
+    "@obversa/memory": ">=0.1.0 <1.0.0"
+  },
+  "devDependencies": {
+    "@obversa/memory": "workspace:^",
+    "@types/node": "22.12.0",
+    "@types/toposort": "^2.0.7"
+  }
+}

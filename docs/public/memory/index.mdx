@@ -1,0 +1,140 @@
+---
+title: "Memory port"
+description: "Use one small command contract for runtime memory."
+---
+
+`@obversa/memory` defines one storage-neutral memory port. The port has a
+scope and one `execute` method.
+
+```ts
+interface Memory {
+  readonly scope: string;
+  execute(command: MemoryCommand): Promise<MemoryResult>;
+}
+```
+
+All memory paths start with `/memories`. The port accepts these commands:
+
+| Command | Result |
+| --- | --- |
+| `view` | Reads a file, a line range, or a directory |
+| `create` | Creates or replaces a file |
+| `str_replace` | Replaces one unique text value |
+| `insert` | Inserts text at a zero-based line slot |
+| `delete` | Deletes a file or directory |
+| `rename` | Moves a file or directory |
+
+A result has `ok: true` and a typed value, or `ok: false` and a typed error.
+Adapters use the same limits and error codes. A conformance kit checks this
+contract without a network service.
+
+## Command examples
+
+Use `viewRange: [start, end]` to read selected lines. Line numbers in a view
+start at 1. Use `-1` as the end to read the rest of the file.
+
+```ts
+await memory.execute({
+  command: 'view',
+  path: '/memories/notes.md',
+  viewRange: [2, -1],
+});
+```
+
+`create` makes a file. It replaces the file if the path exists.
+
+```ts
+await memory.execute({
+  command: 'create',
+  path: '/memories/notes.md',
+  text: 'First note.\n',
+});
+```
+
+`str_replace` changes one text match. It fails if it finds zero matches or
+more than one non-overlapping match.
+
+```ts
+await memory.execute({
+  command: 'str_replace',
+  path: '/memories/notes.md',
+  oldText: 'First',
+  newText: 'Updated',
+});
+```
+
+`insertLine` is a zero-based slot. Use `0` to insert before the first line.
+Use `1` to insert after the first line.
+
+An insert rewrites the file with `\n` line endings. A full view and a text
+replacement preserve the stored line endings.
+
+```ts
+await memory.execute({
+  command: 'insert',
+  path: '/memories/notes.md',
+  insertLine: 1,
+  text: 'Second note.',
+});
+```
+
+`delete` removes one file or a directory and all files below it.
+
+```ts
+await memory.execute({
+  command: 'delete',
+  path: '/memories/archive',
+});
+```
+
+`rename` moves a file or a complete directory. It does not replace an existing
+destination.
+
+```ts
+await memory.execute({
+  command: 'rename',
+  oldPath: '/memories/notes.md',
+  newPath: '/memories/archive/notes.md',
+});
+```
+
+## Storage limits
+
+The two initial adapters use these default limits:
+
+- One file can contain 65,536 bytes.
+- One scope can contain 1,048,576 bytes.
+- One scope can contain 256 files.
+
+The adapters accept `.txt`, `.md`, `.json`, `.py`, `.yaml`, and `.yml` files.
+
+When a write exceeds a scope limit, the adapter removes the file with the
+earliest write time. A read does not change the write time. The adapter does
+not remove the target of the new write.
+
+## Path rules
+
+A path can contain letters, numbers, periods, underscores, and hyphens. Each
+path segment can contain 128 characters. A complete path can contain 1,024
+bytes.
+
+A scope and all written text must contain complete Unicode characters. The
+adapters reject malformed Unicode instead of replacing incomplete characters.
+
+The memory root cannot be a file. A caller cannot delete or rename the memory
+root. Directory deletion is recursive. A rename does not replace an existing
+path.
+
+## Errors
+
+| Area | Error codes |
+| --- | --- |
+| Command input | `INVALID_COMMAND`, `INVALID_ARGUMENT` |
+| Paths and files | `INVALID_PATH`, `ROOT_PROTECTED`, `INVALID_EXTENSION`, `PATH_CONFLICT` |
+| Missing or existing data | `NOT_FOUND`, `ALREADY_EXISTS` |
+| Text and line selection | `INVALID_RANGE`, `MATCH_NOT_FOUND`, `MATCH_NOT_UNIQUE` |
+| Limits and concurrent writes | `LIMIT_EXCEEDED`, `CONFLICT` |
+| Adapter storage | `UNSAFE_STORAGE`, `STORAGE_ERROR` |
+
+An unsuccessful result contains the command, the error code, and a message.
+Some errors also contain the applicable path and structured details.

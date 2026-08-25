@@ -1,0 +1,38 @@
+---
+title: "First run"
+description: "Run one job with the programmatic Lines API and a scripted engine."
+---
+
+This program runs one agent job through a scripted engine. The scripted engine
+does not make a network call.
+
+```ts
+import { agentJob, run } from '@obversa/lines';
+import { MockEngine } from '@obversa/lines/testing';
+
+const engine = new MockEngine(() => 'ready');
+
+const job = agentJob({
+  label: 'prepare-item',
+  engine: 'offline',
+  prompt: 'Prepare the item.',
+});
+
+const result = await run(job, {
+  engine: 'offline',
+  engines: { offline: engine },
+});
+
+console.log(result.outcome.status);
+```
+
+The result is:
+
+```text
+pass
+```
+
+`agentJob` creates one unit of work. `run` supplies the run context and starts
+the job. `MockEngine` follows the public engine contract with fixed responses.
+
+This package does not expose a `lines` command. Use the programmatic API.

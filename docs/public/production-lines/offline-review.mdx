@@ -1,0 +1,133 @@
+---
+title: "Offline review and revision"
+description: "Run a bounded line that acts on review feedback before it passes."
+---
+
+Use this production line to learn the review and revision path without a model
+account. The first review sends the work back. The author receives the reason,
+changes the work, and passes the second review.
+
+## Graph
+
+1. The `author` job writes a base configuration.
+2. A deterministic gate confirms that a draft exists.
+3. The `review` job rejects the first draft because it has no timeout.
+4. The loop gives that reason to the next `author` attempt.
+5. The second review passes the corrected configuration.
+
+## Contract
+
+| Item | Value |
+| --- | --- |
+| Input | None |
+| Output | A pass result and the final review summary |
+| Permissions | No file writes and no network access |
+| Limit | Four attempts |
+| Evidence | One JSON result on standard output |
+
+## Source
+
+Copy `examples/production-lines/offline-review.line.ts` from the repository.
+
+The example imports only the public package exports.
+
+```ts
+import {
+  defineJob,
+  fnJob,
+  loop,
+  predicate,
+  revisionRequest,
+  run,
+} from '@obversa/lines';
+
+let attempts = 0;
+
+const productionLine = defineJob(
+  loop({
+    name: 'write-config',
+    max: 4,
+    body: fnJob('author', async (ctx) => {
+      attempts += 1;
+      const fix = ctx.lastReview?.revision?.reason;
+      return {
+        status: 'pass',
+        summary: fix ? `added a timeout after: ${fix}` : 'wrote the base config',
+      };
+    }),
+    until: predicate(() => true, 'a draft exists'),
+    review: fnJob('review', async () =>
+      attempts > 1
+        ? { status: 'pass', summary: 'config is complete' }
+        : revisionRequest({
+            reason: 'Missing a request timeout.',
+            findings: [
+              {
+                reviewer: 'correctness',
+                evidence: 'No timeout set; a hung upstream call blocks forever.',
+              },
+            ],
+          }),
+    ),
+  }),
+);
+
+async function main(): Promise<void> {
+  const result = await run(productionLine);
+
+  console.log(
+    JSON.stringify(
+      {
+        status: result.outcome.status,
+        attempts,
+        summary: result.outcome.summary,
+      },
+      null,
+      2,
+    ),
+  );
+
+  if (result.outcome.status !== 'pass') process.exitCode = 1;
+}
+
+void main();
+```
+
+## Run the line
+
+From an Obversa checkout, run:
+
+```bash
+pnpm example:offline
+```
+
+After you copy the source into a project that has `@obversa/lines` and `tsx`
+installed, run:
+
+```bash
+pnpm exec tsx offline-review.line.ts
+```
+
+The result is:
+
+```json
+{
+  "status": "pass",
+  "attempts": 2,
+  "summary": "config is complete"
+}
+```
+
+## Failure behavior
+
+The line allows four attempts. If review keeps asking for a revision, the line
+ends with an exhausted result and the process exits with code 1.
+
+## Pause, resume, and retry behavior
+
+This line does not pause and does not store state. Run it again from the start.
+The line has no external effect, so a full retry is safe.
+
+## Engine lanes
+
+This line uses function jobs. It does not call an engine.

@@ -1,0 +1,32 @@
+---
+title: "Obversa"
+description: "Build reliable agent production lines from small TypeScript packages."
+---
+
+Obversa supplies small TypeScript packages for agent production lines.
+
+`@obversa/lines` runs jobs and graph forms. The memory packages give each run
+one explicit memory port and two storage choices.
+
+## Packages
+
+| Package | Purpose | Version |
+| --- | --- | --- |
+| `@obversa/lines` | Runs nestable jobs, loop graphs, and directed acyclic graphs | `1.0.0` |
+| `@obversa/memory` | Defines the memory command contract | `0.1.0` |
+| `@obversa/memory-simple` | Stores memory in one process | `0.1.0` |
+| `@obversa/memory-git` | Stores memory in private Git references | `0.1.0` |
+
+These are unreleased workspace seed versions. The public contract is locked at
+the version-1 release.
+
+The packages have one dependency direction. Lines imports the memory port.
+Each memory adapter also imports the memory port. Lines does not import a
+memory adapter.
+
+## Start here
+
+1. [Install the local packages](/get-started/installation).
+2. [Run the first program](/get-started/first-run).
+3. [Copy an offline production line](/production-lines/offline-review).
+4. [Use Obversa in cmux](/hosts/cmux).

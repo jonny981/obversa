@@ -1,0 +1,13 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "paths": {
+      "@obversa/lines": ["./src/api.ts"],
+      "@obversa/lines/testing": ["./src/testing.ts"],
+      "@obversa/lines/env/command": ["./src/env/command.ts"],
+      "@obversa/memory": ["../memory/src/index.ts"]
+    },
+    "types": ["node"]
+  },
+  "include": ["src", "tests", "tsup.config.ts", "vitest.config.ts"]
+}

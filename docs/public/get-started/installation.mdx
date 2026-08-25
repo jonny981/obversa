@@ -1,0 +1,33 @@
+---
+title: "Installation"
+description: "Install and build the Obversa workspace from a local checkout."
+---
+
+## Requirements
+
+- Node.js 22.12 or later
+- pnpm 10.15.1
+
+## Install the workspace
+
+From an Obversa checkout, run:
+
+```bash
+corepack enable
+pnpm install --frozen-lockfile
+pnpm build
+```
+
+The build creates JavaScript and TypeScript declaration files for each
+package.
+
+## Do the package checks
+
+```bash
+pnpm typecheck
+pnpm typecheck:ts6
+pnpm test
+```
+
+The first type check uses TypeScript 7. The second type check uses TypeScript
+6. All unit tests run offline.

@@ -1,0 +1,10 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "paths": {
+      "@obversa/memory": ["./src/index.ts"],
+      "@obversa/memory/testing": ["./src/testing.ts"]
+    }
+  },
+  "include": ["src", "tests"]
+}

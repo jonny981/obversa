@@ -8,3 +8,5 @@ build/
 *.log
 .firecrawl/
 .claude/
+.Codex/
+.superpowers/

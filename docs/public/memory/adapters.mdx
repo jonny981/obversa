@@ -1,0 +1,73 @@
+---
+title: "Memory adapters"
+description: "Select in-process memory or memory stored in private Git references."
+---
+
+Lines accepts the `Memory` port. Your program selects and creates the adapter.
+
+## In-process adapter
+
+Use `@obversa/memory-simple` for tests and short runs. Its data stays in one
+process.
+
+```ts
+import { createSimpleMemory } from '@obversa/memory-simple';
+
+const memory = createSimpleMemory({ scope: 'example-run' });
+
+await memory.execute({
+  command: 'create',
+  path: '/memories/notes.md',
+  text: 'Keep the result small.\n',
+});
+
+const result = await memory.execute({
+  command: 'view',
+  path: '/memories/notes.md',
+});
+```
+
+Set smaller limits when a run has a smaller memory budget:
+
+```ts
+const memory = createSimpleMemory({
+  scope: 'example-run',
+  limits: {
+    maxFileBytes: 8_192,
+    maxTotalBytes: 65_536,
+    maxFiles: 32,
+  },
+});
+```
+
+## Git adapter
+
+Use `@obversa/memory-git` when memory must stay after the process exits.
+
+```ts
+import { openGitMemory } from '@obversa/memory-git';
+
+const memory = await openGitMemory({
+  repositoryPath: process.cwd(),
+  scope: 'example-run',
+});
+```
+
+The adapter stores each scope in a private Git reference. It does not change
+the current branch, the index, or the worktree.
+
+Delete and eviction remove a path from that private reference. The older Git
+object can remain in the repository until Git removes unused objects. Git
+mirror clones, mirror pushes, and bundles made with `--all` copy the private
+reference and its plain-text contents. Backups can also retain it. Do not treat
+the reference as local-only, and do not treat deletion as immediate secure
+erasure.
+
+Pass the selected adapter to Lines:
+
+```ts
+await run(job, { memory });
+```
+
+Lines imports only `@obversa/memory`. Lines does not select or create a
+storage adapter.

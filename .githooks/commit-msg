@@ -1,0 +1,5 @@
+#!/bin/sh
+set -eu
+
+node scripts/check-commit-policy.mjs --now
+node scripts/check-commit-policy.mjs --message "$1"
