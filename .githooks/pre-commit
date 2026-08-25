@@ -1,4 +1,6 @@
 #!/bin/sh
 set -eu
 
+node scripts/check-workstream-branch.mjs
+node scripts/check-agent-instructions.mjs
 node scripts/check-commit-policy.mjs --now

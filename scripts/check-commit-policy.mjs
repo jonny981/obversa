@@ -155,6 +155,13 @@ function commitsInRange(range, options = {}) {
     .filter(Boolean);
 }
 
+export function assertCommitRange(range, options = {}) {
+  const commits = commitsInRange(range, options);
+  if (!commits.length) throw new Error(`No commits found in range: ${range}`);
+  for (const commit of commits) assertCommit(commit, options);
+  return commits.length;
+}
+
 function firstSignatureBoundary(options = {}) {
   const [commit] = git([
     'log',
@@ -251,10 +258,8 @@ function main(args) {
       assertInitialHistory();
       return;
     case '--range': {
-      const commits = commitsInRange(value);
-      if (!commits.length) throw new Error(`No commits found in range: ${value}`);
-      for (const commit of commits) assertCommit(commit);
-      console.log(`Commit policy passed for ${commits.length} commit(s).`);
+      const count = assertCommitRange(value);
+      console.log(`Commit policy passed for ${count} commit(s).`);
       return;
     }
     default:

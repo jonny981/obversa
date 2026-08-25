@@ -32,6 +32,8 @@ const scanRoots = [
 ];
 const scanFiles = [
   '.gitignore',
+  'AGENTS.md',
+  'CLAUDE.md',
   'README.md',
   'SECURITY.md',
   'package.json',

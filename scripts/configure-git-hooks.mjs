@@ -1,9 +1,11 @@
 #!/usr/bin/env node
 
 import { spawnSync } from 'node:child_process';
+import { resolve } from 'node:path';
+import { fileURLToPath } from 'node:url';
 
-function git(args, expected = [0]) {
-  const result = spawnSync('git', args, { encoding: 'utf8' });
+function git(args, expected = [0], cwd = process.cwd()) {
+  const result = spawnSync('git', args, { cwd, encoding: 'utf8' });
   if (!expected.includes(result.status)) {
     throw new Error(
       (result.stderr || result.stdout || `git ${args.join(' ')} failed.`).trim(),
@@ -12,12 +14,14 @@ function git(args, expected = [0]) {
   return result;
 }
 
-const probe = git(['rev-parse', '--is-inside-work-tree'], [0, 128]);
+export function configureGitHooks(cwd = process.cwd()) {
+  const probe = git(['rev-parse', '--is-inside-work-tree'], [0, 128], cwd);
 
-if (probe.status === 0 && probe.stdout.trim() === 'true') {
-  git(['config', '--local', 'extensions.worktreeConfig', 'true']);
+  if (probe.status !== 0 || probe.stdout.trim() !== 'true') return false;
 
-  const shared = git(['config', '--local', '--get-all', 'core.hooksPath'], [0, 1]);
+  git(['config', '--local', 'extensions.worktreeConfig', 'true'], [0], cwd);
+
+  const shared = git(['config', '--local', '--get-all', 'core.hooksPath'], [0, 1], cwd);
   const sharedValues = shared.stdout.split(/\r?\n/).filter(Boolean);
   if (sharedValues.includes('.githooks')) {
     git([
@@ -27,8 +31,13 @@ if (probe.status === 0 && probe.stdout.trim() === 'true') {
       '--unset-all',
       'core.hooksPath',
       '.githooks',
-    ]);
+    ], [0], cwd);
   }
 
-  git(['config', '--worktree', 'core.hooksPath', '.githooks']);
+  git(['config', '--worktree', 'core.hooksPath', '.githooks'], [0], cwd);
+  return true;
+}
+
+if (process.argv[1] && fileURLToPath(import.meta.url) === resolve(process.argv[1])) {
+  configureGitHooks();
 }
