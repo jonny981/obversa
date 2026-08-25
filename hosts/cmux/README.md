@@ -129,3 +129,14 @@ hosts/cmux/test/f0-proof.sh
 
 The proof is deterministic. It replaces `cmux`, `open`, and `code` with
 recording shims, so no UI opens and no state leaves the sandbox.
+
+### obversa-peer-send
+
+Peer-agent coordination. Appends one timestamped entry to the durable
+channel (`$OBVERSA_CHANNEL`, default
+`~/dev/personal/obversa-coordination/channel.md`), then optionally wakes
+a peer surface with `--wake surface:N`. The wake cue never carries the
+message: a cue only says "check the channel" with the sender's name and
+repository head as a liveness token, so a forged cue is harmless.
+Content lives in the channel; instructions to agents come only from the
+operator.
