@@ -6,20 +6,26 @@ set -euo pipefail
 
 usage() {
   cat <<'HELP'
-Usage: obversa-peer-send <agent> [--wake surface:N] <message...>
+Usage: obversa-peer-send [--from <agent>] [--wake surface:N] <message...>
 
-The channel file comes from $OBVERSA_CHANNEL. The default is
+The sender comes from --from, or from $OBVERSA_AGENT when --from is
+absent. The channel file comes from $OBVERSA_CHANNEL. The default is
 ~/dev/personal/obversa-coordination/channel.md. The wake cue carries the
-agent name and the current repository head as a liveness token.
+sender name and the current repository head as a liveness token.
 HELP
 }
 
-AGENT="${1:-${OBVERSA_AGENT:-}}"; shift || true
-[ -n "$AGENT" ] || { usage >&2; exit 2; }
+AGENT="${OBVERSA_AGENT:-}"
 WAKE=""
-if [ "${1:-}" = "--wake" ]; then
-  WAKE="${2:?--wake needs a surface ref}"; shift 2
-fi
+while [ $# -gt 0 ]; do
+  case "$1" in
+    --from) AGENT="${2:?--from needs an agent name}"; shift 2 ;;
+    --wake) WAKE="${2:?--wake needs a surface ref}"; shift 2 ;;
+    -h|--help) usage; exit 0 ;;
+    *) break ;;
+  esac
+done
+[ -n "$AGENT" ] || { echo "obversa-peer-send: no sender. Pass --from <agent> or set OBVERSA_AGENT." >&2; usage >&2; exit 2; }
 [ $# -gt 0 ] || { usage >&2; exit 2; }
 
 CHANNEL="${OBVERSA_CHANNEL:-$HOME/dev/personal/obversa-coordination/channel.md}"

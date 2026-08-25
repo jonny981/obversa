@@ -21,7 +21,7 @@ test("the host adapter is tried first, then the browser, then print", async () =
 
   const viaHost = await openSurfaceUrl("http://127.0.0.1:1/x", {
     surfaceBin: host.file,
-    openBin: browser.file,
+    browserCommand: [browser.file],
   });
   assert.deepEqual(viaHost, { opened: true, via: "host" });
   assert.match(readFileSync(host.record, "utf8"), /http:\/\/127\.0\.0\.1:1\/x/);
@@ -29,14 +29,14 @@ test("the host adapter is tried first, then the browser, then print", async () =
   const failingHost = shim(directory, "failing-host", 1);
   const viaBrowser = await openSurfaceUrl("http://127.0.0.1:1/y", {
     surfaceBin: failingHost.file,
-    openBin: browser.file,
+    browserCommand: [browser.file],
   });
   assert.deepEqual(viaBrowser, { opened: true, via: "browser" });
 
   const captured = [];
   const printed = await openSurfaceUrl("http://127.0.0.1:1/z", {
     surfaceBin: path.join(directory, "missing-a"),
-    openBin: path.join(directory, "missing-b"),
+    browserCommand: [path.join(directory, "missing-b")],
     stderr: { write: (text) => captured.push(text) },
   });
   assert.deepEqual(printed, { opened: false, via: "print" });

@@ -51,3 +51,20 @@ test("a verbatim completion carries secret-shaped content unmangled", async () =
   const guarded = terminalResult("review", "completed", { payload: raw });
   assert.match(guarded.payload.annotation, /\[REDACTED\]/);
 });
+
+test("a colliding earlier frame does not hide the exact later frame", () => {
+  const a = terminalResult("pierre_review", "completed", { payload: { from: "underscore" } });
+  const b = terminalResult("pierre-review", "completed", { payload: { from: "hyphen" } });
+  const captured = frameResult(a) + frameResult(b);
+  assert.equal(parseFramedResult(captured, "pierre-review").payload.from, "hyphen");
+  assert.equal(parseFramedResult(captured, "pierre_review").payload.from, "underscore");
+});
+
+test("removeTransfer refuses directories it did not create, and retries after failure", async () => {
+  const { mkdtempSync } = await import("node:fs");
+  const os = await import("node:os");
+  const path = await import("node:path");
+  const foreign = mkdtempSync(path.join(os.tmpdir(), "not-ours-"));
+  await assert.rejects(() => removeTransfer(foreign), /only removes directories/);
+  await fs.rm(foreign, { recursive: true, force: true });
+});

@@ -12,8 +12,9 @@ export function createSurfaceClient({ heartbeatMs = 15_000 } = {}) {
   if (!token) throw new Error("This surface needs its session link, not a bare URL");
 
   async function api(endpoint, body) {
-    if (typeof endpoint !== "string" || !endpoint.startsWith("/")) {
-      throw new Error("Surface API endpoints are same-origin paths starting with /");
+    if (typeof endpoint !== "string" || !endpoint.startsWith("/")
+      || endpoint.startsWith("//") || endpoint.startsWith("/\\")) {
+      throw new Error("Surface API endpoints are same-origin paths starting with a single /");
     }
     const response = await fetch(endpoint, {
       method: body === undefined ? "GET" : "POST",

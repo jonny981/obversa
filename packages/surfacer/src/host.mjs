@@ -8,11 +8,14 @@ import { spawn } from "node:child_process";
  */
 export async function openSurfaceUrl(url, {
   surfaceBin = process.env.OBVERSA_SURFACE_BIN || "obversa-surface",
-  openBin = process.platform === "darwin" ? "open" : process.platform === "win32" ? "start" : "xdg-open",
+  browserCommand = process.platform === "darwin" ? ["open"]
+    : process.platform === "win32" ? ["cmd", "/c", "start", ""]
+    : ["xdg-open"],
   stderr = process.stderr,
 } = {}) {
   if (await runDetached(surfaceBin, [url])) return { opened: true, via: "host" };
-  if (await runDetached(openBin, [url])) return { opened: true, via: "browser" };
+  const [browserBin, ...browserArgs] = browserCommand;
+  if (await runDetached(browserBin, [...browserArgs, url])) return { opened: true, via: "browser" };
   stderr.write(`Open this surface in a browser: ${url}\n`);
   return { opened: false, via: "print" };
 }

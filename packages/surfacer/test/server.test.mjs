@@ -241,3 +241,41 @@ test("authorization, cookie, and Basic values are redacted", async () => {
   assert.equal(clean.authToken, "[REDACTED]");
   assert.match(redactText("Basic YWRtaW46cGFzc3dvcmQ="), /Basic \[REDACTED\]/);
 });
+
+test("session.run refuses work after the session closes", async () => {
+  let capturedSession;
+  const surface = await boot({
+    api: {
+      "POST /api/grab": async ({ session }) => { capturedSession = session; return { status: 200, body: { ok: true } }; },
+    },
+  });
+  try {
+    await request(surface, "/api/grab", { body: {} });
+    await request(surface, "/api/cancel", { body: {} });
+    await assert.rejects(() => capturedSession.run(async () => "work"), /session is closed/);
+  } finally {
+    await surface.stop();
+  }
+});
+
+test("a handler that completes and then throws still reports the completion", async () => {
+  const surface = await boot({
+    api: {
+      "POST /api/boom": async ({ session }) => {
+        session.complete({ fine: true });
+        throw new Error("late failure");
+      },
+    },
+  });
+  try {
+    const response = await request(surface, "/api/boom", { body: {} });
+    assert.equal(response.status, 200);
+    const body = await response.json();
+    assert.equal(body.ok, true);
+    assert.ok(body.operationId);
+    const decision = await surface.waitForDecision();
+    assert.equal(decision.status, "completed");
+  } finally {
+    await surface.stop();
+  }
+});

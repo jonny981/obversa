@@ -51,17 +51,18 @@ export function frameResult(result) {
  *  no complete frame for the app is present. */
 export function parseFramedResult(text, app) {
   const name = frameName(app);
-  const pattern = new RegExp(`<<<${name}_RESULT_V1>>>\\n([\\s\\S]*?)\\n<<<END_${name}_RESULT_V1>>>`);
-  const match = pattern.exec(String(text));
-  if (!match) return null;
-  try {
-    const parsed = JSON.parse(match[1]);
-    // Frame names collapse punctuation, so distinct app names can share a
-    // frame. The embedded app field is exact and must match.
-    return parsed?.app === String(app) ? parsed : null;
-  } catch {
-    return null;
+  const pattern = new RegExp(`<<<${name}_RESULT_V1>>>\\n([\\s\\S]*?)\\n<<<END_${name}_RESULT_V1>>>`, "g");
+  // Frame names collapse punctuation, so distinct app names can share a
+  // frame name. Scan every frame and return the first whose embedded app
+  // field matches exactly — a colliding earlier frame must not hide a
+  // valid later one.
+  for (const match of String(text).matchAll(pattern)) {
+    try {
+      const parsed = JSON.parse(match[1]);
+      if (parsed?.app === String(app)) return parsed;
+    } catch { /* not this frame */ }
   }
+  return null;
 }
 
 export { TERMINAL_STATUSES };

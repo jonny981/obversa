@@ -47,8 +47,8 @@ export async function removeTransfer(directory) {
   if (!CREATED.has(directory)) {
     throw new TypeError("removeTransfer only removes directories created by createPrivateTransfer");
   }
-  CREATED.delete(directory);
   await fs.rm(directory, { recursive: true, force: true });
+  CREATED.delete(directory);
 }
 
 function sanitizeName(value) {

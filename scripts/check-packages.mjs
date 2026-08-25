@@ -12,6 +12,7 @@ const packages = [
   { directory: 'memory-simple', name: '@obversa/memory-simple', version: '0.1.0' },
   { directory: 'memory-git', name: '@obversa/memory-git', version: '0.1.0' },
   { directory: 'lines', name: '@obversa/lines', version: '1.0.0' },
+  { directory: 'surfacer', name: '@obversa/surfacer', version: '0.1.0' },
 ];
 
 function run(command, args, options = {}) {

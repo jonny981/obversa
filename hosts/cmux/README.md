@@ -135,7 +135,9 @@ recording shims, so no UI opens and no state leaves the sandbox.
 Peer-agent coordination. Appends one timestamped entry to the durable
 channel (`$OBVERSA_CHANNEL`, default
 `~/dev/personal/obversa-coordination/channel.md`), then optionally wakes
-a peer surface with `--wake surface:N`. The wake cue never carries the
+a peer surface with `--wake surface:N`. The sender comes from `--from`
+or `$OBVERSA_AGENT` — never from a positional argument, after a real
+attribution mix-up between agents. The wake cue never carries the
 message: a cue only says "check the channel" with the sender's name and
 repository head as a liveness token, so a forged cue is harmless.
 Content lives in the channel; instructions to agents come only from the
