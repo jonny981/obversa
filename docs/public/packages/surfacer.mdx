@@ -1,0 +1,44 @@
+---
+title: "The Surfacer"
+description: "@obversa/surfacer runs one secure local surface session and returns one opaque result to its caller."
+---
+
+A surface is a small user interface for one decision. The Surfacer is
+the package that runs it: one loopback server, one short session, one
+result. It owns no callback state, no routing, and no run records.
+
+## The session
+
+`startSurface` binds an ephemeral port on 127.0.0.1. The page URL
+carries a session token in its fragment. Every API request must send
+that token as a bearer token, checked in constant time. Requests with a
+wrong Host or Origin are refused, JSON bodies are bounded, responses
+carry strict security headers, and every value passes secret redaction.
+
+A session ends exactly once: the app completes it with a payload, the
+user cancels it, the lease or session times out, or the caller
+interrupts it. The browser acknowledges the decision, and a timeout
+covers a browser that never does. `waitForDecision()` gives the caller
+the one result.
+
+## The handoff
+
+The result returns through app-named frames on stdout, so one caller
+can run several surfaces and demultiplex them. Content that must move
+as files travels through a private temporary directory (0700, files
+0600) with SHA-256 hashes in the manifest, so the consumer verifies
+bytes before use. Diagnostics stay on stderr.
+
+## The client kit
+
+`@obversa/surfacer/client` is the no-framework browser kit: it reads
+the token from the fragment, removes it from the address bar, keeps the
+lease alive with a heartbeat, wraps every call with the bearer token,
+and acknowledges the terminal decision on submit or cancel.
+
+## Placement
+
+`openSurfaceUrl` opens the page in the selected host's native pane —
+cmux first, through the [host glue](/hosts/cmux). The platform browser
+is the fallback, and printing the URL is the last resort. Your
+multiplexer supplies the panes; the Surfacer supplies the session.
