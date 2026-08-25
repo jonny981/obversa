@@ -38,6 +38,13 @@ the token from the fragment, removes it from the address bar, keeps the
 lease alive with a heartbeat, wraps every call with the bearer token,
 and acknowledges the terminal decision on submit or cancel.
 
+## The launcher
+
+`runSurface` is the one call an app makes: it starts the session,
+places the page, waits for the decision, frames it on stdout, and shuts
+down — signals interrupt cleanly. The runnable example is
+`packages/surfacer/examples/hello-surface.mjs`.
+
 ## Placement
 
 `openSurfaceUrl` opens the page in the selected host's native pane —

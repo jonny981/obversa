@@ -10,6 +10,10 @@ inventory, graph, or editing behaviour survives here.
 
 ## What the package gives
 
+- `runSurface({...})` — the one launcher: it starts the session, places
+  the page in the selected host, reports the url through `ready`, waits
+  for the single decision, frames it on stdout, and shuts down. Signals
+  interrupt cleanly. `examples/hello-surface.mjs` runs it end to end.
 - `startSurface({ app, assets, api, ... })` — one loopback server on an
   ephemeral 127.0.0.1 port. The page URL carries a fragment token. Every
   API request must send it as a bearer token, checked in constant time.
@@ -27,7 +31,8 @@ inventory, graph, or editing behaviour survives here.
 - `frameResult` / `parseFramedResult` — the framed stdout handoff with
   app-named frames, so one caller can demultiplex surfaces.
 - `createPrivateTransfer` — private temporary files (0700 directory,
-  0600 files) with SHA-256 hashes in the manifest.
+  0600 files) with SHA-256 hashes in the manifest. `removeTransfer`
+  removes only directories this module created.
 - `@obversa/surfacer/client` — the no-framework browser kit: token
   handling, authenticated fetch, heartbeat, submit and cancel with
   acknowledgement.

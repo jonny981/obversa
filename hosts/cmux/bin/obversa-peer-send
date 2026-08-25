@@ -14,7 +14,7 @@ agent name and the current repository head as a liveness token.
 HELP
 }
 
-AGENT="${1:-}"; shift || true
+AGENT="${1:-${OBVERSA_AGENT:-}}"; shift || true
 [ -n "$AGENT" ] || { usage >&2; exit 2; }
 WAKE=""
 if [ "${1:-}" = "--wake" ]; then

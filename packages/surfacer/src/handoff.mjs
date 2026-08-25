@@ -28,7 +28,7 @@ export function terminalResult(app, status, { payload = null, detail = null, ope
     status,
     operationId,
     createdAt: new Date().toISOString(),
-    payload: status === "completed" ? (verbatim ? payload : sanitizeValue(payload)) : null,
+    payload: status === "completed" ? (verbatim === true ? payload : sanitizeValue(payload)) : null,
     detail: detail ? redactText(String(detail)).slice(0, 500) : null,
   };
 }
@@ -55,7 +55,10 @@ export function parseFramedResult(text, app) {
   const match = pattern.exec(String(text));
   if (!match) return null;
   try {
-    return JSON.parse(match[1]);
+    const parsed = JSON.parse(match[1]);
+    // Frame names collapse punctuation, so distinct app names can share a
+    // frame. The embedded app field is exact and must match.
+    return parsed?.app === String(app) ? parsed : null;
   } catch {
     return null;
   }

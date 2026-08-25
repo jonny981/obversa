@@ -35,6 +35,11 @@ export async function startSurface({
     throw new TypeError("A static shell is required: an assets directory and a route map");
   }
   const staticFiles = new Map(Object.entries(assets.files));
+  for (const [route, [fileName]] of staticFiles) {
+    if (typeof fileName !== "string" || fileName.includes("/") || fileName.includes("\\") || fileName.startsWith(".")) {
+      throw new TypeError(`Static file names must be plain names inside the assets directory: ${route}`);
+    }
+  }
 
   let terminalState = "pending";
   let terminalClaim = null;
@@ -67,6 +72,9 @@ export async function startSurface({
       }
     },
     async run(operation) {
+      if (terminalState !== "pending") {
+        throw httpError("This session is closed", 409);
+      }
       const controller = new AbortController();
       activeOperations.add(controller);
       try {
@@ -141,7 +149,19 @@ export async function startSurface({
       renewLease();
       const body = request.method === "GET" ? null : await readJson(request);
       const claimBefore = terminalClaim;
-      const outcome = await handler({ body, session });
+      let outcome;
+      try {
+        outcome = await handler({ body, session });
+      } catch (error) {
+        // A handler that completed the session and then threw must not
+        // contradict the caller: the completion stands and the browser
+        // gets it, with the operationId it needs to acknowledge.
+        if (terminalClaim && terminalClaim !== claimBefore && terminalClaim.status === "completed") {
+          sendJson(response, 200, { ok: true, operationId: terminalClaim.operationId });
+          return;
+        }
+        throw error;
+      }
       if (response.headersSent || response.destroyed) return;
       // A terminal decision that arrived DURING the handler but was not this
       // handler's own completion (a lease or session timeout) must not look
@@ -154,7 +174,10 @@ export async function startSurface({
         sendJson(response, outcome.status ?? 200, { ...outcome.body, operationId: terminalClaim.operationId });
         return;
       }
-      sendJson(response, outcome?.status ?? 200, outcome?.body ?? { ok: true });
+      sendJson(response, outcome?.status ?? 200, outcome?.body
+        ?? (terminalClaim && terminalClaim !== claimBefore
+          ? { ok: true, operationId: terminalClaim.operationId }
+          : { ok: true }));
     } catch (error) {
       sendJson(response, error?.statusCode || (error?.code === "BODY_TOO_LARGE" ? 413 : 400), {
         error: safeText(error?.message || "Request failed", 300),
@@ -231,6 +254,12 @@ export async function startSurface({
       return finalizeClaim();
     },
     async stop() {
+      if (terminalState === "pending") {
+        const result = terminalResult(app, "interrupted", { detail: "The caller stopped the session" });
+        if (claimTerminal("interrupted", result, { awaitAcknowledgement: false })) finalizeClaim();
+      } else {
+        finalizeClaim();
+      }
       clearTimeout(sessionTimeout);
       clearTimeout(leaseTimeout);
       clearTimeout(ackTimeout);

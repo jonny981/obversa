@@ -12,6 +12,9 @@ export function createSurfaceClient({ heartbeatMs = 15_000 } = {}) {
   if (!token) throw new Error("This surface needs its session link, not a bare URL");
 
   async function api(endpoint, body) {
+    if (typeof endpoint !== "string" || !endpoint.startsWith("/")) {
+      throw new Error("Surface API endpoints are same-origin paths starting with /");
+    }
     const response = await fetch(endpoint, {
       method: body === undefined ? "GET" : "POST",
       headers: {
@@ -49,9 +52,14 @@ export function createSurfaceClient({ heartbeatMs = 15_000 } = {}) {
       }
     },
     async cancel() {
-      const result = await api("/api/cancel", {}).catch(() => ({}));
-      await acknowledge(result.operationId);
-      return result;
+      try {
+        const result = await api("/api/cancel", {});
+        await acknowledge(result.operationId);
+        return result;
+      } catch (error) {
+        clearInterval(heartbeat);
+        throw error;
+      }
     },
     dispose() {
       clearInterval(heartbeat);

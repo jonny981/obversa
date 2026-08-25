@@ -8,7 +8,7 @@ import { spawn } from "node:child_process";
  */
 export async function openSurfaceUrl(url, {
   surfaceBin = process.env.OBVERSA_SURFACE_BIN || "obversa-surface",
-  openBin = "open",
+  openBin = process.platform === "darwin" ? "open" : process.platform === "win32" ? "start" : "xdg-open",
   stderr = process.stderr,
 } = {}) {
   if (await runDetached(surfaceBin, [url])) return { opened: true, via: "host" };

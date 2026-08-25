@@ -3,6 +3,8 @@ import { promises as fs } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 
+const CREATED = new Set();
+
 /** Private temporary-file transfer: content moves to the caller as files in
  *  a 0700 directory with 0600 files, and the handoff carries each file's
  *  hash so the consumer can verify bytes before use. */
@@ -31,6 +33,7 @@ export async function createPrivateTransfer({ app, files }) {
         encoding: "utf-8",
       });
     }
+    CREATED.add(directory);
     return { directory, files: manifest };
   } catch (error) {
     await fs.rm(directory, { recursive: true, force: true });
@@ -39,6 +42,12 @@ export async function createPrivateTransfer({ app, files }) {
 }
 
 export async function removeTransfer(directory) {
+  // Only directories this module created can be removed: an arbitrary
+  // path here would make removeTransfer(process.cwd()) delete a checkout.
+  if (!CREATED.has(directory)) {
+    throw new TypeError("removeTransfer only removes directories created by createPrivateTransfer");
+  }
+  CREATED.delete(directory);
   await fs.rm(directory, { recursive: true, force: true });
 }
 
