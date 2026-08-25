@@ -1,0 +1,194 @@
+#!/usr/bin/env bash
+# Generate the two-root Order editor workspace file and open it in the editor.
+#
+# The binding follows an internal note:
+# the Project worktree and the Shared worktree are peer roots. Neither
+# root appears inside the other. The workspace file lives outside both
+# trees so that no worktree carries host state.
+set -euo pipefail
+
+usage() {
+  cat <<'EOF'
+Usage: obversa-order-workspace [options]
+
+Options:
+  --project <dir>   Project worktree root. Default: the Git top level of
+                    the current directory.
+  --shared <dir>    Shared worktree root. Default: $OBVERSA_SHARED_ROOT.
+  --name <slug>     Workspace file name: letters, digits, '.', '_', '-',
+                    not starting with '-', at most 200 characters. Reuse
+                    of a name overwrites that file. Default: the sanitized
+                    Project basename plus the full SHA-256 of the root
+                    pair, distinct per pair up to SHA-256 collision
+                    resistance.
+  --no-open         Generate the file only. Do not open the editor.
+  --print-path      Print the workspace file path on stdout.
+  -h, --help        Show this help.
+
+The editor comes from $OBVERSA_EDITOR_CMD: one executable name or path,
+no arguments. The default is "code".
+EOF
+}
+
+PROJECT=""
+SHARED="${OBVERSA_SHARED_ROOT:-}"
+NAME=""
+OPEN=1
+PRINT_PATH=0
+
+need_value() {
+  echo "obversa-order-workspace: $1 needs a value" >&2
+  usage >&2
+  exit 2
+}
+
+# A missing value and a following option both mean the value is absent:
+# "--project --shared" must not swallow "--shared" as a directory. A path
+# that really starts with a dash can be passed as ./-name.
+while [ $# -gt 0 ]; do
+  case "$1" in
+    --project) case "${2:-}" in "" | -*) need_value --project ;; esac; PROJECT="$2"; shift 2 ;;
+    --shared) case "${2:-}" in "" | -*) need_value --shared ;; esac; SHARED="$2"; shift 2 ;;
+    --name) case "${2:-}" in "" | -*) need_value --name ;; esac; NAME="$2"; shift 2 ;;
+    --no-open) OPEN=0; shift ;;
+    --print-path) PRINT_PATH=1; shift ;;
+    -h|--help) usage; exit 0 ;;
+    *) echo "obversa-order-workspace: unknown option: $1" >&2; usage >&2; exit 2 ;;
+  esac
+done
+
+# After argument parsing, so --help works on a machine without python3.
+if ! command -v python3 >/dev/null 2>&1; then
+  echo "obversa-order-workspace: python3 is necessary for workspace-file generation and was not found" >&2
+  exit 1
+fi
+
+if [ -z "$PROJECT" ]; then
+  if ! PROJECT="$(git rev-parse --show-toplevel 2>/dev/null)"; then
+    echo "obversa-order-workspace: no --project given and the current directory is not in a Git worktree" >&2
+    exit 2
+  fi
+fi
+
+if [ -z "$SHARED" ]; then
+  echo "obversa-order-workspace: no Shared root. Pass --shared <dir> or set OBVERSA_SHARED_ROOT." >&2
+  exit 2
+fi
+
+# Command substitution strips every trailing newline, and a newline can
+# legally end a directory name. resolve therefore prints the physical
+# path with an "x" sentinel appended, and each caller strips the
+# sentinel after its own substitution. Inside resolve, the same idiom
+# strips exactly the one newline pwd printed, keeping any newline that
+# is part of the path.
+resolve() {
+  if [ ! -d "$1" ]; then
+    echo "obversa-order-workspace: not a directory: $1" >&2
+    exit 2
+  fi
+  local out
+  out="$(cd "$1" && pwd -P && printf x)" || exit 2
+  out="${out%x}"
+  printf '%sx' "${out%$'\n'}"
+}
+
+PROJECT="$(resolve "$PROJECT")"; PROJECT="${PROJECT%x}"
+SHARED="$(resolve "$SHARED")"; SHARED="${SHARED%x}"
+
+# The roots are peers. Reject one root inside the other, and identical
+# roots. The filesystem root needs its own case: "/" plus "/" is "//",
+# which breaks the prefix pattern while "/" contains every other path.
+contains() {
+  case "$1" in
+    /) [ "$2" != "/" ] && return 0 ;;
+    *) case "$2/" in "$1"/*) return 0 ;; esac ;;
+  esac
+  return 1
+}
+if [ "$PROJECT" = "$SHARED" ] || contains "$PROJECT" "$SHARED" || contains "$SHARED" "$PROJECT"; then
+  echo "obversa-order-workspace: the roots must be peers. One contains the other:" >&2
+  echo "  Project: $PROJECT" >&2
+  echo "  Shared:  $SHARED" >&2
+  exit 2
+fi
+
+# One binding per Order: the default name carries the full SHA-256 of the
+# exact root pair. A truncated hash can collide — an eight-character prefix
+# was brute-forced in review — so the whole digest goes in. The two paths
+# join on NUL, which no path can contain, so no two distinct pairs can
+# serialize identically (a newline separator was ambiguous: newlines are
+# legal in paths). The basename is sanitized into the allowed character
+# set, prefixed when the sanitized form would start with a dash or come
+# out empty, and bounded to 100 bytes, which keeps the longest possible
+# file name well under the 255-byte filesystem limit (101 + 1 + 64 + 15).
+if [ -z "$NAME" ]; then
+  PAIR_HASH="$(printf '%s\0%s\0' "$PROJECT" "$SHARED" | shasum -a 256 | cut -c1-64)"
+  # LC_ALL=C makes tr and cut byte-wise, so the 100 bound is 100 bytes
+  # whatever the locale. The tr output is pure ASCII, so no cut can land
+  # inside a multibyte character.
+  CLEAN_BASE="$(printf '%s' "$(basename "$PROJECT")" | LC_ALL=C tr -c 'A-Za-z0-9._-' '-' | LC_ALL=C cut -c1-100)"
+  case "$CLEAN_BASE" in
+    "" | -*) CLEAN_BASE="w$CLEAN_BASE" ;;
+  esac
+  NAME="$CLEAN_BASE-$PAIR_HASH"
+fi
+
+# The name becomes one path segment, so keep it to a safe character set:
+# letters, digits, dot, underscore, and hyphen, not starting with a dash.
+# This also excludes path separators, the dot names, control characters,
+# and the empty name. Substrings such as "v1..2" stay legal.
+case "$NAME" in
+  . | .. | "" | -* | *[!A-Za-z0-9._-]*)
+    echo "obversa-order-workspace: --name must use letters, digits, '.', '_', or '-', and must not start with '-': $NAME" >&2
+    exit 2
+    ;;
+esac
+if [ "${#NAME}" -gt 200 ]; then
+  echo "obversa-order-workspace: --name is longer than 200 characters" >&2
+  exit 2
+fi
+
+STATE_DIR="${XDG_STATE_HOME:-$HOME/.local/state}/obversa/workspaces"
+mkdir -p "$STATE_DIR"
+FILE="$STATE_DIR/$NAME.code-workspace"
+if [ -d "$FILE" ]; then
+  echo "obversa-order-workspace: target is a directory, not a file: $FILE" >&2
+  exit 1
+fi
+
+# Write a temporary sibling, then rename over the target. The rename is
+# atomic, so an interruption never leaves a truncated binding, and a
+# symlink squatting on the target path is replaced as a link instead of
+# having its destination truncated through mode "w".
+TMP="$(mktemp "$STATE_DIR/.obversa-order-workspace.XXXXXX")" || exit 1
+if ! PROJECT="$PROJECT" SHARED="$SHARED" python3 - "$TMP" <<'PY'
+import json, os, sys
+project = os.environ["PROJECT"]
+shared = os.environ["SHARED"]
+doc = {
+    "folders": [
+        {"name": f"Project — {os.path.basename(project)}", "path": project},
+        {"name": f"Shared — {os.path.basename(shared)}", "path": shared},
+    ],
+    "settings": {},
+}
+with open(sys.argv[1], "w") as f:
+    json.dump(doc, f, indent=2)
+    f.write("\n")
+PY
+then
+  rm -f "$TMP"
+  exit 1
+fi
+mv -f "$TMP" "$FILE"
+
+[ "$PRINT_PATH" -eq 1 ] && echo "$FILE"
+
+if [ "$OPEN" -eq 1 ]; then
+  EDITOR_CMD="${OBVERSA_EDITOR_CMD:-code}"
+  if ! command -v "$EDITOR_CMD" >/dev/null 2>&1; then
+    echo "obversa-order-workspace: editor command not found: $EDITOR_CMD" >&2
+    exit 1
+  fi
+  exec "$EDITOR_CMD" "$FILE"
+fi

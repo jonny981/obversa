@@ -1,0 +1,156 @@
+#!/usr/bin/env bash
+# Open a URL as a browser surface beside the caller's terminal.
+#
+# Inside cmux, the URL opens as a browser pane in the caller's workspace,
+# split in the given direction. Outside cmux, the URL opens in the default
+# browser. Local webapps and Callback Gate surfaces use this same door.
+#
+# The workspace resolves at call time from the live topology. The CMUX_*
+# environment is frozen at terminal start, and `cmux identify` derives its
+# caller answer from that same environment, so both report the old
+# workspace after a move (verified on cmux 0.64.20, 2026-08-25). The
+# surface UUID is immutable, so this script finds it in `cmux tree` and
+# takes the enclosing workspace. With a surface id, the tree is the only
+# authority: any other outcome opens the default browser. The environment
+# workspace is honored only when no surface id exists at all.
+set -euo pipefail
+
+usage() {
+  cat <<'EOF'
+Usage: obversa-surface <url> [--direction left|right|up|down]
+
+The default direction is right.
+EOF
+}
+
+URL=""
+DIRECTION="right"
+
+while [ $# -gt 0 ]; do
+  case "$1" in
+    --direction)
+      case "${2:-}" in
+        "" | -*)
+          echo "obversa-surface: --direction needs a value" >&2
+          usage >&2
+          exit 2 ;;
+      esac
+      DIRECTION="$2"
+      case "$DIRECTION" in
+        left|right|up|down) ;;
+        *)
+          echo "obversa-surface: --direction must be left, right, up, or down: $DIRECTION" >&2
+          usage >&2
+          exit 2 ;;
+      esac
+      shift 2 ;;
+    -h|--help) usage; exit 0 ;;
+    -*) echo "obversa-surface: unknown option: $1" >&2; usage >&2; exit 2 ;;
+    *)
+      if [ -n "$URL" ]; then
+        echo "obversa-surface: one URL only" >&2
+        usage >&2
+        exit 2
+      fi
+      URL="$1"; shift ;;
+  esac
+done
+
+if [ -z "$URL" ]; then
+  usage >&2
+  exit 2
+fi
+
+# Run cmux with a watchdog so a wedged app never hangs the caller. The
+# watchdog escalates to a forced stop when the process ignores the first
+# signal.
+cmux_guarded() {
+  _SECONDS="$1"; shift
+  cmux "$@" &
+  _PID=$!
+  ( sleep "$_SECONDS"; kill "$_PID" 2>/dev/null; sleep 2; kill -9 "$_PID" 2>/dev/null ) &
+  _WATCHDOG=$!
+  _RC=0
+  wait "$_PID" 2>/dev/null || _RC=$?
+  kill "$_WATCHDOG" 2>/dev/null
+  wait "$_WATCHDOG" 2>/dev/null || true
+  return "$_RC"
+}
+
+if command -v cmux >/dev/null 2>&1; then
+  WORKSPACE=""
+  if [ -n "${CMUX_SURFACE_ID:-}" ]; then
+    # With a surface id, the live tree is the only authority. The frozen
+    # environment cannot distinguish a moved terminal from an unmoved one,
+    # so no tree outcome ever falls back to it: the surface is found in
+    # the topology, or the URL opens in the default browser. A wrong
+    # placement is worse than a plain browser.
+    #
+    # The tree output lands in a file, not a pipe: a killed cmux can leave
+    # an orphaned child that holds a pipe open long after the watchdog
+    # fired, and a file read returns at once either way. mktemp keeps the
+    # path unpredictable, so no other local process can pre-create it. A
+    # cancel during this window cleans up and exits — it must not go on
+    # to open anything.
+    TREE_FILE="$(mktemp "${TMPDIR:-/tmp}/obversa-surface.XXXXXX")"
+    trap 'rm -f "$TREE_FILE"; exit 130' INT TERM
+    trap 'rm -f "$TREE_FILE"' EXIT
+    TREE_RC=0
+    cmux_guarded 5 tree --all --json --id-format both >"$TREE_FILE" 2>/dev/null || TREE_RC=$?
+    TREE_OUT="$(cat "$TREE_FILE" 2>/dev/null || true)"
+    rm -f "$TREE_FILE"
+    trap - EXIT INT TERM
+    if [ "$TREE_RC" -ne 0 ]; then
+      exec open "$URL"
+    fi
+    # Structured output: match the surface id field exactly and take the
+    # enclosing workspace id. Titles are data here, so a title that
+    # contains the caller's UUID cannot select the wrong surface. The
+    # tree's own caller block is env-derived and stays unused. A document
+    # without a windows list, an empty topology, a missing surface, or a
+    # workspace with no usable id all leave WORKSPACE empty.
+    PARSE_RC=0
+    WORKSPACE="$(printf '%s\n' "$TREE_OUT" | SURFACE="$CMUX_SURFACE_ID" python3 -c '
+import json, os, sys
+
+surface = os.environ["SURFACE"]
+
+def surfaces_in(node):
+    if isinstance(node, dict):
+        for found in node.get("surfaces", []):
+            yield found
+        for key, value in node.items():
+            if key != "surfaces":
+                yield from surfaces_in(value)
+    elif isinstance(node, list):
+        for item in node:
+            yield from surfaces_in(item)
+
+doc = json.load(sys.stdin)
+windows = doc["windows"]
+if not isinstance(windows, list):
+    raise SystemExit(3)
+for window in windows:
+    for workspace in window.get("workspaces", []):
+        for s in surfaces_in(workspace.get("panes", [])):
+            if surface in (s.get("id"), s.get("ref")):
+                print(workspace.get("id") or workspace.get("ref") or "")
+                raise SystemExit(0)
+' 2>/dev/null)" || PARSE_RC=$?
+    if [ "$PARSE_RC" -ne 0 ] || [ -z "$WORKSPACE" ]; then
+      exec open "$URL"
+    fi
+  else
+    # No surface id at all: a manual or legacy invocation. An explicitly
+    # set workspace value is deliberate targeting and is honored as-is.
+    WORKSPACE="${CMUX_WORKSPACE_ID:-}"
+  fi
+  if [ -n "$WORKSPACE" ]; then
+    if cmux_guarded 10 new-pane --type browser --direction "$DIRECTION" \
+      --workspace "$WORKSPACE" --url "$URL"; then
+      exit 0
+    fi
+  fi
+fi
+
+exec open "$URL"

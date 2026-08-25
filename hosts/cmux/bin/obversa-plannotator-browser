@@ -1,0 +1,16 @@
+#!/usr/bin/env bash
+# Browser handler for Plannotator only.
+#
+# Set PLANNOTATOR_BROWSER to this script's absolute path. Plannotator then
+# invokes this script with its review-page URL as the one argument, and the
+# page opens in a cmux browser split beside the terminal. No other tool
+# reads PLANNOTATOR_BROWSER, so every other link keeps the default browser.
+set -euo pipefail
+
+if [ $# -ne 1 ]; then
+  echo "usage: obversa-plannotator-browser <url>" >&2
+  exit 2
+fi
+
+HERE="$(cd "$(dirname "$0")" && pwd -P)"
+exec "$HERE/obversa-surface" "$1"

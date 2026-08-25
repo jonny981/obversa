@@ -1,0 +1,95 @@
+---
+title: "Obversa in cmux"
+description: "Host glue for cmux: the correct editor opens on the correct worktrees, and local web surfaces open in splits beside the terminal."
+---
+
+Obversa is a guest in the host that you selected. cmux is the first host.
+The glue for cmux is setup, not a product: configuration plus small
+scripts. There is no host fork and no new UI.
+
+## What you get
+
+- One command in a workspace opens one editor window with the two Order
+  roots: the Project worktree and the Shared worktree, as peers.
+- A local web surface opens in a browser split beside the terminal.
+- The Plannotator review page opens in a split. Every other link keeps
+  your default browser.
+- Callback Gate surfaces use the same door when a router launches them.
+
+## The two-root workspace
+
+Each Order binds two worktrees. The Project worktree holds your product
+source. The Shared worktree holds the Context and Process that all
+projects share. Neither root appears inside the other.
+
+The glue generates one editor workspace file with both roots and opens
+it. The file lives outside both trees, so no worktree carries host
+state. Your editor stays your editor.
+
+## Surfaces in splits
+
+A surface is a small user interface for one decision. In cmux, a surface
+opens as a browser pane in your workspace, split beside the terminal.
+Outside cmux, the same command opens your default browser. The fallback
+keeps every script usable in a plain terminal.
+
+## One route for Plannotator
+
+Plannotator opens its review page through one environment variable.
+Point that variable at the glue script and only the review page routes
+into a cmux split. No other tool reads the variable, so no other link
+changes behavior.
+
+## Set up
+
+The glue is three scripts in `hosts/cmux/bin/` plus one Command Palette
+entry. It targets macOS today: the default-browser fallback uses `open`.
+
+Put the scripts on your PATH first, or call them by full path:
+
+```sh
+export PATH="$PATH:<checkout>/hosts/cmux/bin"
+```
+
+1. Obversa checkouts carry the palette entry in `.cmux/cmux.json`. Open a
+   cmux workspace on the repository and run **Order Workspace** from the
+   Command Palette. The first run shows the cmux trust prompt.
+2. For every other workspace, add the same entry to
+   `~/.config/cmux/cmux.json` with the script's absolute path. The
+   project-local entry overrides the global one, so the pair never
+   conflicts.
+3. Set the Shared root once: `export OBVERSA_SHARED_ROOT=<shared worktree>`.
+4. Route Plannotator: set `PLANNOTATOR_BROWSER` to the absolute path of
+   `obversa-plannotator-browser`. For the Claude Code hook flow, put it in
+   the `env` block of `~/.claude/settings.json`.
+5. Apply with `cmux reload-config`.
+
+## Use
+
+```sh
+# Open the two-root editor workspace for the current repository.
+obversa-order-workspace --shared ~/dev/personal/obversa-shared
+
+# Open a local webapp in a browser split beside this terminal.
+obversa-surface http://localhost:4400/review --direction right
+```
+
+The generator writes the workspace file to
+`~/.local/state/obversa/workspaces/` and opens it with `code` (override
+with `$OBVERSA_EDITOR_CMD`). It refuses nested or identical roots.
+
+## When something fails
+
+Every failure path lands somewhere safe. When cmux is absent, wedged, or
+returns an unusable topology, the URL opens in the default browser.
+When the Shared root is missing, the generator stops with the exact flag
+to pass. A cancel during the lookup opens nothing. Wrong placement is
+treated as worse than a plain browser, so the scripts never guess a
+workspace.
+
+## Your host stays yours
+
+The glue adds one Command Palette entry, three scripts, and nothing
+else. cmux supplies the panes, the layout, and the keybindings. Obversa
+supplies the workspace file and the surface placement. Remove the glue
+and cmux is exactly as it was.

@@ -1,0 +1,39 @@
+{
+  "$schema": "https://raw.githubusercontent.com/manaflow-ai/cmux/main/web/data/cmux.schema.json",
+  "schemaVersion": 1,
+
+  // Obversa host glue (F0). See hosts/cmux/README.md.
+  // Command Palette: type "Order Workspace". The first run asks for trust.
+  "commands": [
+    {
+      "name": "Order Workspace",
+      "keywords": ["obversa", "order", "editor", "workspace"],
+      "command": "\"$(git rev-parse --show-toplevel)/hosts/cmux/bin/obversa-order-workspace\""
+    }
+  ]
+
+  // The cmux action registry is a nightly feature today. When it reaches the
+  // release channel, uncomment every line between the two UNCOMMENT markers.
+  // The leading comma is part of the block. The result gives the same command
+  // a surface tab-bar button and a one-keystroke shortcut.
+  //
+  // --- UNCOMMENT FROM HERE ---
+  // ,
+  // "actions": {
+  //   "obversa.orderWorkspace": {
+  //     "type": "command",
+  //     "title": "Order Workspace",
+  //     "subtitle": "Open the two-root Order editor workspace",
+  //     "command": "\"$(git rev-parse --show-toplevel)/hosts/cmux/bin/obversa-order-workspace\"",
+  //     "target": "newTabInCurrentPane",
+  //     "shortcut": "ctrl+cmd+o",
+  //     "icon": { "type": "emoji", "value": "🏭" }
+  //   }
+  // },
+  // "ui": {
+  //   "surfaceTabBar": {
+  //     "buttons": ["cmux.newTerminal", "cmux.newBrowser", "cmux.splitRight", "cmux.splitDown", "obversa.orderWorkspace"]
+  //   }
+  // }
+  // --- UNCOMMENT TO HERE ---
+}
