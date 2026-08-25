@@ -18,7 +18,7 @@ function frameName(app) {
 
 /** One opaque result for the caller. `completed` carries the payload; every
  *  other status carries a short redacted detail instead. */
-export function terminalResult(app, status, { payload = null, detail = null, operationId = randomUUID() } = {}) {
+export function terminalResult(app, status, { payload = null, detail = null, operationId = randomUUID(), verbatim = false } = {}) {
   if (!TERMINAL_STATUSES.includes(status)) {
     throw new TypeError(`Unsupported terminal status: ${status}`);
   }
@@ -28,7 +28,7 @@ export function terminalResult(app, status, { payload = null, detail = null, ope
     status,
     operationId,
     createdAt: new Date().toISOString(),
-    payload: status === "completed" ? sanitizeValue(payload) : null,
+    payload: status === "completed" ? (verbatim ? payload : sanitizeValue(payload)) : null,
     detail: detail ? redactText(String(detail)).slice(0, 500) : null,
   };
 }
@@ -37,9 +37,11 @@ export function terminalResult(app, status, { payload = null, detail = null, ope
  *  demultiplex results from different surfaces. */
 export function frameResult(result) {
   const name = frameName(result.app);
+  // The payload was already sanitized (or deliberately marked verbatim) at
+  // terminalResult time; re-sanitizing here would mangle verbatim payloads.
   return [
     `<<<${name}_RESULT_V1>>>`,
-    JSON.stringify(sanitizeValue(result)),
+    JSON.stringify(result),
     `<<<END_${name}_RESULT_V1>>>`,
     "",
   ].join("\n");

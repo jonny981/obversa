@@ -51,13 +51,13 @@ export async function startSurface({
 
   const session = {
     get state() { return terminalState; },
-    complete(payload) {
+    complete(payload, { verbatim = false } = {}) {
       if (terminalState !== "pending" || completionReserved) {
         throw httpError("This session already has a terminal decision", 409);
       }
       completionReserved = true;
       try {
-        const result = terminalResult(app, "completed", { payload });
+        const result = terminalResult(app, "completed", { payload, verbatim });
         if (!claimTerminal("completed", result)) {
           throw httpError("This session already has a terminal decision", 409);
         }

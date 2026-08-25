@@ -41,3 +41,13 @@ test("a private transfer writes 0600 files with matching hashes", async () => {
   }
   await assert.rejects(() => createPrivateTransfer({ app: "x", files: [{ content: "a\0b" }] }), /NUL/);
 });
+
+test("a verbatim completion carries secret-shaped content unmangled", async () => {
+  const raw = { annotation: 'set password = "hunter2" on line 4' };
+  const result = terminalResult("review", "completed", { payload: raw, verbatim: true });
+  assert.equal(result.payload.annotation, raw.annotation);
+  const framed = frameResult(result);
+  assert.match(framed, /hunter2/);
+  const guarded = terminalResult("review", "completed", { payload: raw });
+  assert.match(guarded.payload.annotation, /\[REDACTED\]/);
+});

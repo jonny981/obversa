@@ -19,7 +19,9 @@ A session ends exactly once: the app completes it with a payload, the
 user cancels it, the lease or session times out, or the caller
 interrupts it. The browser acknowledges the decision, and a timeout
 covers a browser that never does. `waitForDecision()` gives the caller
-the one result.
+the one result. Payloads pass secret redaction unless the app completes
+with an explicit verbatim opt-in for content that must survive
+byte-exact, such as review annotations that quote code.
 
 ## The handoff
 

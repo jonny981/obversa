@@ -16,6 +16,10 @@ inventory, graph, or editing behaviour survives here.
   Requests with a wrong Host or Origin are refused. JSON bodies are
   bounded at 4 MiB. Responses carry strict security headers, and all
   values pass secret redaction.
+- Payloads pass secret redaction by default. `session.complete(payload,
+  { verbatim: true })` is the explicit opt-in for content that must
+  survive byte-exact — review annotations quoting code, for example —
+  and the caller owns what it carries.
 - One terminal decision per session: the app completes it, the user
   cancels it, the lease or session times out, or the caller interrupts.
   `waitForDecision()` resolves with one result and the browser
