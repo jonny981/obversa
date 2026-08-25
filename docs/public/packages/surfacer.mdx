@@ -4,16 +4,16 @@ description: "@obversa/surfacer runs one secure local surface session and return
 ---
 
 A surface is a small user interface for one decision. The Surfacer is
-the package that runs it: one loopback server, one short session, one
+the package that runs it: one loopback server, one single-decision session, one
 result. It owns no callback state, no routing, and no run records.
 
 ## The session
 
 `startSurface` binds an ephemeral port on 127.0.0.1. The page URL
 carries a session token in its fragment. Every API request must send
-that token as a bearer token, checked in constant time. Requests with a
-wrong Host or Origin are refused, JSON bodies are bounded, responses
-carry strict security headers, and every value passes secret redaction.
+that token as a bearer token, checked in constant time. Requests with a wrong Host — or a wrong Origin on a state-changing
+request — are refused. JSON bodies are bounded, responses carry strict
+security headers, and every value passes secret redaction.
 
 A session ends exactly once: the app completes it with a payload, the
 user cancels it, the lease or session times out, or the caller
