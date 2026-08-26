@@ -12,6 +12,7 @@
 import { afterEach, describe, it, expect } from 'vitest';
 import {
   chmodSync,
+  existsSync,
   mkdtempSync,
   readFileSync,
   rmSync,
@@ -67,6 +68,12 @@ async function expectOrphanStopped(path: string): Promise<void> {
   const deadline = Date.now() + 2_000;
   while (isProcessAlive(pid) && Date.now() < deadline) await delay(10);
   expect(isProcessAlive(pid)).toBe(false);
+}
+
+async function waitForOrphan(path: string): Promise<void> {
+  const deadline = Date.now() + 5_000;
+  while (!existsSync(path) && Date.now() < deadline) await delay(10);
+  expect(existsSync(path)).toBe(true);
 }
 
 describe.runIf(process.platform !== 'win32')('engine-owned process cleanup', () => {
@@ -137,7 +144,7 @@ setInterval(() => {}, 1000);
     const startedAt = Date.now();
     await expect(
       new CodexEngine({ cliBinary: bin }).run(
-        { prompt: 'ping', timeoutMs: 500 },
+        { prompt: 'ping', timeoutMs: 1_500 },
         () => {},
         new AbortController().signal,
       ),
@@ -153,15 +160,16 @@ setInterval(() => {}, 1000);
 `);
 
     const controller = new AbortController();
-    setTimeout(() => controller.abort(), 300);
     const startedAt = Date.now();
-    await expect(
-      new ClaudeCliEngine({ cliBinary: bin }).run(
-        { prompt: 'ping' },
-        () => {},
-        controller.signal,
-      ),
-    ).rejects.toMatchObject({ code: 'ABORTED' });
+    const running = new ClaudeCliEngine({ cliBinary: bin }).run(
+      { prompt: 'ping' },
+      () => {},
+      controller.signal,
+    );
+    const rejected = expect(running).rejects.toMatchObject({ code: 'ABORTED' });
+    await waitForOrphan(orphanPidPath);
+    controller.abort();
+    await rejected;
     expect(Date.now() - startedAt).toBeLessThan(10_000);
     await expectOrphanStopped(orphanPidPath);
   });

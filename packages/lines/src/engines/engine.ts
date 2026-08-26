@@ -94,6 +94,10 @@ export interface AgentRequest {
    * final result that arrived before this boundary and mark it `late`.
    */
   timeoutGraceMs?: number;
+  /** Maximum retained stdout/stderr bytes for a command-backed attempt. */
+  maxOutputBytes?: number;
+  /** Maximum owned process-tree resident bytes for a command-backed attempt. */
+  maxMemoryBytes?: number;
   /** Lines-owned subprocess metadata, converted to env by CLI-backed engines. */
   lines?: {
     leaf: true;

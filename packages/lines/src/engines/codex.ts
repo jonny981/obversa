@@ -188,6 +188,10 @@ export class CodexEngine implements Engine {
           ...owner,
           ...DEFAULT_OWNED_COMMAND_LIMITS,
           timeoutMs: hardTimeout ?? DEFAULT_OWNED_COMMAND_LIMITS.timeoutMs,
+          maxOutputBytes:
+            req.maxOutputBytes ?? DEFAULT_OWNED_COMMAND_LIMITS.maxOutputBytes,
+          maxMemoryBytes:
+            req.maxMemoryBytes ?? DEFAULT_OWNED_COMMAND_LIMITS.maxMemoryBytes,
         },
         signal,
       );

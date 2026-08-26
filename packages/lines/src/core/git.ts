@@ -3,6 +3,7 @@
 import { execa } from 'execa';
 import { createHash } from 'node:crypto';
 import { mkdtempSync } from 'node:fs';
+import { lstat, readFile, readlink } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join, relative, resolve } from 'node:path';
 
@@ -165,6 +166,307 @@ export async function workspaceFingerprint(
   } catch {
     return undefined;
   }
+}
+
+interface GitIndexState {
+  readonly mode: string;
+  readonly oid: string;
+}
+
+interface GitDirtyState {
+  readonly status: string;
+  readonly kind: 'file' | 'symlink' | 'missing';
+  readonly mode: number;
+  readonly digest: string | null;
+  readonly lines: readonly string[];
+}
+
+export interface GitWorkspaceFileState {
+  readonly path: string;
+  readonly index: GitIndexState | null;
+  readonly dirty: GitDirtyState | null;
+}
+
+export interface GitWorkspaceSnapshot {
+  readonly root: string;
+  readonly head: string | null;
+  readonly files: readonly GitWorkspaceFileState[];
+}
+
+export interface GitWorkspaceDelta {
+  readonly headChanged: boolean;
+  readonly changedPaths: readonly string[];
+  readonly filesChanged: number;
+  readonly linesChanged: number;
+}
+
+interface DirtyStatus {
+  readonly status: string;
+  readonly path: string;
+}
+
+function parseDirtyStatus(output: string): readonly DirtyStatus[] {
+  const records = output.split('\0');
+  const entries: DirtyStatus[] = [];
+  for (let index = 0; index < records.length; index += 1) {
+    const record = records[index];
+    if (!record) continue;
+    if (record.length < 4 || record[2] !== ' ') {
+      throw new Error('git status returned an invalid porcelain record');
+    }
+    const status = record.slice(0, 2);
+    entries.push({ status, path: record.slice(3) });
+    if (status.includes('R') || status.includes('C')) {
+      const source = records[index + 1];
+      if (!source) throw new Error('git status omitted a rename source');
+      entries.push({ status: `${status}:source`, path: source });
+      index += 1;
+    }
+  }
+  return entries;
+}
+
+function parseIndexState(output: string): Map<string, GitIndexState> {
+  const entries = new Map<string, GitIndexState>();
+  for (const record of output.split('\0')) {
+    if (!record) continue;
+    const match = /^(\d{6}) ([0-9a-f]+) (\d)\t(.+)$/u.exec(record);
+    if (!match) throw new Error('git index returned an invalid entry');
+    const [, mode, oid, stage, path] = match;
+    if (stage !== '0') {
+      throw new Error(`git index has an unresolved entry at ${path}`);
+    }
+    if (entries.has(path!)) {
+      throw new Error(`git index returned a duplicate entry at ${path}`);
+    }
+    entries.set(path!, { mode: mode!, oid: oid! });
+  }
+  return entries;
+}
+
+function lineDigests(bytes: Uint8Array): readonly string[] {
+  if (bytes.byteLength === 0) return Object.freeze([]);
+  const lines: string[] = [];
+  let start = 0;
+  for (let index = 0; index < bytes.byteLength; index += 1) {
+    if (bytes[index] !== 0x0a) continue;
+    lines.push(
+      createHash('sha256').update(bytes.subarray(start, index + 1)).digest('hex'),
+    );
+    start = index + 1;
+  }
+  if (start < bytes.byteLength) {
+    lines.push(createHash('sha256').update(bytes.subarray(start)).digest('hex'));
+  }
+  return Object.freeze(lines);
+}
+
+async function dirtyState(
+  root: string,
+  entry: DirtyStatus,
+): Promise<GitDirtyState> {
+  const path = join(root, entry.path);
+  try {
+    const stat = await lstat(path);
+    let bytes: Uint8Array;
+    let kind: GitDirtyState['kind'];
+    if (stat.isFile()) {
+      kind = 'file';
+      bytes = await readFile(path);
+    } else if (stat.isSymbolicLink()) {
+      kind = 'symlink';
+      bytes = await readlink(path, { encoding: 'buffer' });
+    } else {
+      throw new Error(
+        `git workspace contains an unsupported dirty entry at ${entry.path}`,
+      );
+    }
+    return {
+      status: entry.status,
+      kind,
+      mode: stat.mode,
+      digest: createHash('sha256').update(bytes).digest('hex'),
+      lines: lineDigests(bytes),
+    };
+  } catch (error) {
+    const code = (error as NodeJS.ErrnoException).code;
+    if (code === 'ENOENT') {
+      return {
+        status: entry.status,
+        kind: 'missing',
+        mode: 0,
+        digest: null,
+        lines: Object.freeze([]),
+      };
+    }
+    throw error;
+  }
+}
+
+/**
+ * Capture the Git-visible entry state for one attempt. Clean tracked files are
+ * represented by their index object; only already-dirty bytes are read and
+ * reduced to hashes. No workspace content is retained in the snapshot.
+ */
+export async function captureGitWorkspaceSnapshot(
+  opts: GitOpts,
+): Promise<GitWorkspaceSnapshot> {
+  const root = await gitRoot(opts);
+  if (!root) throw new Error('not a git repository');
+  const commandOpts = { ...opts, cwd: root };
+  const [head, indexResult, statusResult] = await Promise.all([
+    headSha(commandOpts),
+    git(['--literal-pathspecs', 'ls-files', '--stage', '-z'], commandOpts),
+    git(
+      ['status', '--porcelain=v1', '-z', '--untracked-files=all'],
+      commandOpts,
+    ),
+  ]);
+  if (indexResult.exitCode !== 0) throw new Error('git index inspection failed');
+  if (statusResult.exitCode !== 0) throw new Error('git status inspection failed');
+
+  const index = parseIndexState(indexResult.stdout);
+  const dirtyEntries = parseDirtyStatus(statusResult.stdout);
+  const dirty = new Map<string, GitDirtyState>();
+  for (const entry of dirtyEntries) {
+    dirty.set(entry.path, await dirtyState(root, entry));
+  }
+  const paths = [...new Set([...index.keys(), ...dirty.keys()])].sort();
+  const files = paths.map((path) => Object.freeze({
+    path,
+    index: index.get(path) ?? null,
+    dirty: dirty.get(path) ?? null,
+  }));
+  return Object.freeze({
+    root,
+    head: head ?? null,
+    files: Object.freeze(files),
+  });
+}
+
+function fileStateKey(value: GitWorkspaceFileState | undefined): string {
+  if (!value) return '[absent]';
+  return JSON.stringify({ index: value.index, dirty: value.dirty });
+}
+
+function lineEditCount(
+  before: readonly string[],
+  after: readonly string[],
+): number {
+  if (
+    before.length === after.length &&
+    before.every((line, index) => line === after[index])
+  ) {
+    return 0;
+  }
+  const maximum = before.length + after.length;
+  let frontier = new Map<number, number>([[1, 0]]);
+  for (let distance = 0; distance <= maximum; distance += 1) {
+    const next = new Map<number, number>();
+    for (let diagonal = -distance; diagonal <= distance; diagonal += 2) {
+      const down = frontier.get(diagonal + 1) ?? -1;
+      const right = (frontier.get(diagonal - 1) ?? -1) + 1;
+      let x = diagonal === -distance || (diagonal !== distance && right < down)
+        ? down
+        : right;
+      let y = x - diagonal;
+      while (
+        x < before.length &&
+        y < after.length &&
+        before[x] === after[y]
+      ) {
+        x += 1;
+        y += 1;
+      }
+      if (x >= before.length && y >= after.length) return distance;
+      next.set(diagonal, x);
+    }
+    frontier = next;
+  }
+  return maximum;
+}
+
+async function blobLines(
+  root: string,
+  oid: string | undefined,
+  cache: Map<string, readonly string[]>,
+  signal?: AbortSignal,
+): Promise<readonly string[]> {
+  if (!oid) return Object.freeze([]);
+  const cached = cache.get(oid);
+  if (cached) return cached;
+  const result = await execa('git', ['cat-file', 'blob', oid], {
+    cwd: root,
+    cancelSignal: signal,
+    reject: false,
+    stdin: 'ignore',
+    encoding: 'buffer',
+  });
+  if (result.exitCode !== 0) throw new Error(`git cannot read workspace blob ${oid}`);
+  const lines = lineDigests(result.stdout ?? new Uint8Array());
+  cache.set(oid, lines);
+  return lines;
+}
+
+async function worktreeLines(
+  root: string,
+  state: GitWorkspaceFileState | undefined,
+  cache: Map<string, readonly string[]>,
+  signal?: AbortSignal,
+): Promise<readonly string[]> {
+  if (!state) return Object.freeze([]);
+  if (state.dirty) return state.dirty.lines;
+  return await blobLines(root, state.index?.oid, cache, signal);
+}
+
+/** Compare two snapshots without treating untouched entry dirt as attempt work. */
+export async function compareGitWorkspaceSnapshots(
+  before: GitWorkspaceSnapshot,
+  after: GitWorkspaceSnapshot,
+  signal?: AbortSignal,
+): Promise<GitWorkspaceDelta> {
+  if (before.root !== after.root) {
+    throw new Error('git workspace root changed during the attempt');
+  }
+  const beforeFiles = new Map(before.files.map((file) => [file.path, file]));
+  const afterFiles = new Map(after.files.map((file) => [file.path, file]));
+  const changedPaths = [...new Set([
+    ...beforeFiles.keys(),
+    ...afterFiles.keys(),
+  ])]
+    .filter(
+      (path) =>
+        fileStateKey(beforeFiles.get(path)) !== fileStateKey(afterFiles.get(path)),
+    )
+    .sort();
+
+  const cache = new Map<string, readonly string[]>();
+  let linesChanged = 0;
+  for (const path of changedPaths) {
+    const beforeState = beforeFiles.get(path);
+    const afterState = afterFiles.get(path);
+    const [beforeWorktree, afterWorktree, beforeIndex, afterIndex] =
+      await Promise.all([
+        worktreeLines(before.root, beforeState, cache, signal),
+        worktreeLines(after.root, afterState, cache, signal),
+        blobLines(before.root, beforeState?.index?.oid, cache, signal),
+        blobLines(after.root, afterState?.index?.oid, cache, signal),
+      ]);
+    linesChanged += Math.max(
+      lineEditCount(beforeWorktree, afterWorktree),
+      lineEditCount(beforeIndex, afterIndex),
+    );
+    if (!Number.isSafeInteger(linesChanged)) {
+      throw new Error('workspace line count exceeded the safe integer range');
+    }
+  }
+
+  return Object.freeze({
+    headChanged: before.head !== after.head,
+    changedPaths: Object.freeze(changedPaths),
+    filesChanged: changedPaths.length,
+    linesChanged,
+  });
 }
 
 export interface CommitInput {
