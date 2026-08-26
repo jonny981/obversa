@@ -1,0 +1,93 @@
+#!/usr/bin/env node
+// The Pierre review composition root.
+//
+// This is the one place where @obversa/source meets @obversa/surfacer. Source
+// owns diff production and the review UI but stays free of any sibling package;
+// this root injects Surfacer's runSurface as the launch port and Surfacer's
+// client-kit source as the page's client module. Surfacer's runSurface opens
+// the surface in a cmux split through the F0 glue and writes the framed result
+// to stdout, so a pipeline reads the annotations from stdout while a human
+// reads the summary on stderr.
+//
+// Usage:
+//   obversa-review                 review the working tree (git diff)
+//   obversa-review --staged        review the staged changes (git diff --cached)
+//   obversa-review --range A..B     review a ref range (git diff A..B)
+//   obversa-review --cwd <dir>      run against another repository directory
+//   obversa-review --no-open        do not place the surface (print the URL)
+//   obversa-review --app <name>     override the surface app name
+
+import { readFile } from "node:fs/promises";
+
+import { runSurface } from "../../../packages/surfacer/src/index.mjs";
+import { reviewDiff } from "../../../packages/source/src/index.mjs";
+
+function parseArgs(argv) {
+  const options = { mode: "worktree", range: undefined, cwd: process.cwd(), open: true, app: "pierre-review" };
+  for (let index = 0; index < argv.length; index += 1) {
+    const arg = argv[index];
+    if (arg === "--staged" || arg === "--cached") options.mode = "staged";
+    else if (arg === "--worktree") options.mode = "worktree";
+    else if (arg === "--range") { options.mode = "range"; options.range = argv[++index]; }
+    else if (arg === "--cwd") options.cwd = argv[++index];
+    else if (arg === "--app") options.app = argv[++index];
+    else if (arg === "--no-open") options.open = false;
+    else if (arg === "-h" || arg === "--help") options.help = true;
+    else throw new Error(`Unknown argument: ${arg}`);
+  }
+  if (options.mode === "range" && !options.range) throw new Error("--range needs a ref range, for example main..HEAD");
+  if (!/^[A-Za-z0-9._-]+$/.test(options.app)) throw new Error("--app must be letters, digits, '.', '_' or '-'");
+  return options;
+}
+
+const HELP = `Open a git diff for inline review and return the annotations.
+
+Usage:
+  obversa-review                review the working tree
+  obversa-review --staged       review the staged changes
+  obversa-review --range A..B   review a ref range
+  obversa-review --cwd <dir>    run against another repository
+  obversa-review --no-open      print the surface URL instead of placing it
+  obversa-review --app <name>   override the surface app name
+`;
+
+async function main() {
+  let options;
+  try {
+    options = parseArgs(process.argv.slice(2));
+  } catch (error) {
+    process.stderr.write(`${error.message}\n\n${HELP}`);
+    process.exit(2);
+  }
+  if (options.help) {
+    process.stdout.write(HELP);
+    return;
+  }
+
+  const clientKitSource = await readFile(
+    new URL("../../../packages/surfacer/src/client.mjs", import.meta.url),
+    "utf8",
+  );
+
+  const { status, annotations, meta } = await reviewDiff({
+    mode: options.mode,
+    range: options.range,
+    cwd: options.cwd,
+    app: options.app,
+    open: options.open,
+    launchSurface: runSurface,
+    clientKitSource,
+  });
+
+  if (status === "completed") {
+    process.stderr.write(`Review of the ${meta.label} finished: ${annotations.length} annotation${annotations.length === 1 ? "" : "s"} returned.\n`);
+    process.exit(0);
+  }
+  process.stderr.write(`Review of the ${meta.label} ended without a decision (${status}).\n`);
+  process.exit(1);
+}
+
+main().catch((error) => {
+  process.stderr.write(`obversa-review: ${error.message}\n`);
+  process.exit(1);
+});

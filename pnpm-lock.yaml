@@ -87,6 +87,10 @@ importers:
         specifier: workspace:^
         version: link:../memory
 
+  packages/source: {}
+
+  packages/surfacer: {}
+
 packages:
 
   '@alcalzone/ansi-tokenize@0.2.5':
