@@ -45,6 +45,7 @@ export function childContext(
     runId: parent.runId,
     fingerprintExcludePaths: parent.fingerprintExcludePaths,
     emit: parent.emit,
+    params: parent.params,
     state: parent.state,
     memory: parent.memory,
     // A child inherits the parent's workspace by default; a concurrency

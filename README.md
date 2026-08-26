@@ -6,7 +6,7 @@ Status: In build. Public docs in `docs/public/`.
 
 This workspace contains four packages:
 
-- `@obversa/lines` runs nestable jobs, loop graphs, and directed acyclic graphs.
+- `@obversa/lines` provides a runtime API and a pure contract for outside graph types.
 - `@obversa/memory` defines a small memory contract.
 - `@obversa/memory-simple` stores memory in one process.
 - `@obversa/memory-git` stores memory in private Git references.
@@ -55,11 +55,34 @@ Expected result:
 }
 ```
 
+## Define an outside graph type
+
+The graph contract lets a package define a pure graph type without importing
+Lines implementation modules. It validates a graph definition, reduces
+recorded events, makes graph commands, and describes a stable plan for a host.
+
+Run the checked-in example from the workspace root:
+
+```bash
+pnpm example:graph
+```
+
+The example is `examples/packages/custom-graph.ts`. It defines a graph type,
+checks it with the public conformance kit, and prints its resolved plan bounds.
+
+`validateGraphDescription(unknown)` returns a frozen valid description or
+throws `GraphValidationError`. The conformance kit checks repeatable graph
+behavior from independent compiled instances.
+
+Read [the graph contract](docs/public/graphs/contract.mdx) and
+[plan admission](docs/public/graphs/plan-admission.mdx) before a host uses a
+graph package.
+
 ## Documentation
 
 The public documentation is in [`docs/public`](docs/public). It includes the
-first-run guide, the memory contract, the production-line bank, and
-[cmux host setup](docs/public/hosts/cmux.mdx).
+first-run guide, the memory contract, graph guides, the production-line bank,
+and [cmux host setup](docs/public/hosts/cmux.mdx).
 
 Validate the documentation from the workspace root:
 

@@ -27,6 +27,13 @@
         ]
       },
       {
+        "group": "Graphs",
+        "pages": [
+          "graphs/contract",
+          "graphs/plan-admission"
+        ]
+      },
+      {
         "group": "Production lines",
         "pages": [
           "production-lines/index",

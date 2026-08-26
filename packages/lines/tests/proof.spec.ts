@@ -65,6 +65,19 @@ describe('prove', () => {
     expect(outcome.summary).toContain('JSON-serializable');
   });
 
+  it('accepts repeated non-cyclic references in proof data', async () => {
+    const shared = { ok: true };
+    const { outcome } = await run(
+      prove('shared-data', () => ({
+        kind: 'json',
+        data: { first: shared, second: shared },
+      })),
+      options,
+    );
+
+    expect(outcome.status).toBe('pass');
+  });
+
   it('rejects a path artifact that does not exist', async () => {
     const { outcome } = await run(
       prove('missing-proof', () => ({

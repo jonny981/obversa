@@ -1,0 +1,73 @@
+---
+title: "Plan admission"
+description: "Bind a graph description to a host admission record."
+---
+
+Use `resolveGraphPlan(description, resolution)` after you compile a graph.
+It returns a frozen plan, canonical JSON, and a SHA-256 digest.
+
+The plan is data. It cannot execute code or grant a permission.
+
+## Host admission
+
+The host provides a `PlanResolution`. It contains:
+
+- The graph package source, version, and digest.
+- The same package identity in the host admission record.
+- The permissions that the host admits.
+- One effective execution target for each declared execution lane.
+
+The package identity in the resolution and admission record must match exactly.
+The graph package asks for permissions in `describe()`. Each requested
+permission must match an admitted permission by name and JSON scope. If it does
+not match, `resolveGraphPlan` throws `GraphValidationError` with
+`PERMISSION_NOT_ADMITTED`.
+
+Extra admitted permissions do not become graph permissions. The resolved plan
+keeps requested and admitted permissions as separate lists.
+
+## Resolve execution lanes
+
+Each described lane names a requested adapter, provider, model family, model,
+and tools. A graph can also declare known substitutions.
+
+The host resolves every described lane exactly once. An effective target must
+equal the requested target or one declared substitution. Unknown, missing, or
+extra lane resolutions are rejected.
+
+The resolved plan records the requested and effective target. A change to an
+adapter, provider, model family, model, tools, or allowed substitution changes
+the plan digest.
+
+## Plan snapshot
+
+Resolve the plan before a host starts work. The returned plan snapshot is
+frozen. Its package identity, permissions, lanes, policies, and bounds stay in
+the snapshot that its digest identifies.
+
+Run parameters are not part of the D2 resolved plan or its digest. D3 records
+resolved inputs as part of the frozen run.
+
+## Run parameters
+
+`run(job, { params })` accepts a JSON object. If `params` is `undefined`, the
+run uses a frozen empty object. `null`, arrays, and other invalid roots are
+rejected before work or environment setup starts.
+
+For a valid object, `run` clones and freezes `params` before work starts. The
+root job and each child job receive the same frozen object as `ctx.params`. A
+later change to the caller's `params` object cannot change `ctx.params`.
+
+## Trusted package boundary
+
+An outside graph type is trusted package code. The conformance kit checks its
+public behavior. It is not a security sandbox.
+
+The host owns package discovery, signature checks, and sandboxing. The graph
+contract only validates the package identity, admission record, and plan data
+that the host provides.
+
+## Limits
+
+Plan admission does not schedule nodes, store runs, provide built-in graph
+forms, or execute work on another machine.

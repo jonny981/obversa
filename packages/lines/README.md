@@ -1,8 +1,8 @@
 # @obversa/lines
 
-`@obversa/lines` is a standalone TypeScript graph runtime. Obversa is one
-consumer; any host can use the public package API. A job, a loop graph, and a
-directed acyclic graph use the same `Job` contract.
+`@obversa/lines` is a standalone TypeScript runtime. Obversa is one consumer;
+any host can use the public package API. The package also defines a pure graph
+contract for graph types outside this package.
 
 ## Requirements
 
@@ -63,10 +63,52 @@ adapter.
 With the Agent SDK engine, passing memory makes its one in-process memory tool
 available and automatically approved. Other tool settings do not change.
 
+## Define an outside graph type
+
+Use `GraphType` with `compileGraph` to define a pure graph type. The graph type
+validates a graph definition, reduces recorded events, returns graph commands,
+and describes a plan. The contract gives it frozen data and graph lookups, not
+file, model, process, clock, or storage services.
+
+An outside graph type is trusted package code. It can import and use effects by
+itself. The public conformance kit checks behavior. It does not stop effects.
+
+The host resolves the description with `resolveGraphPlan`. The host admission
+record must admit the package identity and every requested permission. The
+resolved plan records known bounds or an explicit unknown bound. Its frozen
+snapshot and digest identify the fixed package, permissions, lanes, policies,
+and bounds for one run.
+
+`validateGraphDescription(unknown)` validates a description without compiling
+a graph. It returns a frozen valid description or throws `GraphValidationError`.
+Each node must appear in one phase, and its `phaseId` must name that phase.
+
+The public conformance kit checks the initial state and command, then every
+event-prefix state and command. It uses separate compiled instances and
+repeated calls. It also checks the declared bounds.
+
+`run(job, { params })` accepts a JSON object. If `params` is `undefined`, it
+uses a frozen empty object. `null`, arrays, and other invalid roots fail before
+work or environment setup starts. A valid object is cloned and frozen. Every
+child job receives the same frozen object as `ctx.params`. A later caller
+change cannot change that object.
+
+Run the checked-in example from the workspace root:
+
+```bash
+pnpm example:graph
+```
+
+The example is `examples/packages/custom-graph.ts`. It uses only public exports
+and runs the public graph conformance kit.
+
+This graph contract does not schedule nodes, store runs, provide built-in
+graph forms, or execute work on another machine.
+
 ## Documentation
 
-The workspace `docs/public` directory contains the first-run guide and the
-production-line bank.
+The workspace `docs/public` directory contains the first-run guide, graph
+guides, and the production-line bank.
 
 Run the offline production line from the workspace root:
 

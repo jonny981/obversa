@@ -17,7 +17,7 @@ import {
   LoopError,
 } from '../src/api.ts';
 import type { Engine, RunOptions } from '../src/api.ts';
-import { MockEngine } from '../src/testing.ts';
+import { MockEngine, MockEnvironment } from '../src/testing.ts';
 import { cleanupRepos, tmpBareDir } from './git-helpers.ts';
 
 afterAll(cleanupRepos);
@@ -59,6 +59,109 @@ describe('run', () => {
       { ...mockOpts, state: { seedValue: 42 } },
     );
     expect(seen).toBe(42);
+  });
+
+  it('gives every run an immutable empty brief by default', async () => {
+    let seen: unknown;
+    await run(
+      fnJob('peek', async (ctx) => {
+        seen = ctx.params;
+        return { status: 'pass' };
+      }),
+      mockOpts,
+    );
+
+    expect(seen).toEqual({});
+    expect(Object.isFrozen(seen)).toBe(true);
+  });
+
+  it('snapshots the run brief and reuses it in nested jobs', async () => {
+    const source = {
+      task: { name: 'original' },
+      lanes: ['build'],
+    };
+    let rootBrief: Readonly<Record<string, unknown>> | undefined;
+    let childBrief: Readonly<Record<string, unknown>> | undefined;
+    const nested = loop({
+      name: 'nested',
+      max: 1,
+      body: fnJob('child', async (ctx) => {
+        childBrief = ctx.params;
+        return { status: 'pass' };
+      }),
+    });
+
+    const pending = run(
+      fnJob('root', async (ctx) => {
+        rootBrief = ctx.params;
+        return nested(ctx);
+      }),
+      { ...mockOpts, params: source },
+    );
+
+    source.task.name = 'changed';
+    source.lanes.push('review');
+    const { outcome } = await pending;
+
+    expect(outcome.status).toBe('pass');
+    expect(rootBrief).toEqual({ task: { name: 'original' }, lanes: ['build'] });
+    expect(rootBrief).not.toBe(source);
+    expect(childBrief).toBe(rootBrief);
+    expect(Object.isFrozen(rootBrief)).toBe(true);
+    expect(Object.isFrozen(rootBrief?.task)).toBe(true);
+    expect(Object.isFrozen(rootBrief?.lanes)).toBe(true);
+    expect(Object.isFrozen(source)).toBe(false);
+    expect(Object.isFrozen(source.task)).toBe(false);
+  });
+
+  it('rejects an invalid run brief before the job starts', async () => {
+    let ran = false;
+    const environment = new MockEnvironment();
+
+    await expect(
+      run(
+        fnJob('never', async () => {
+          ran = true;
+          return { status: 'pass' };
+        }),
+        {
+          ...mockOpts,
+          environment,
+          params: { task: { owner: undefined } } as never,
+        },
+      ),
+    ).rejects.toMatchObject({
+      name: 'JsonValueError',
+      code: 'INVALID_JSON_VALUE',
+      path: '/task/owner',
+    });
+    expect(ran).toBe(false);
+    expect(environment.upCount).toBe(0);
+  });
+
+  it.each([
+    ['null', null],
+    ['an array', []],
+    ['a string', 'brief'],
+    ['a number', 1],
+    ['a boolean', false],
+  ])('rejects %s as the run brief root before work starts', async (_label, params) => {
+    let ran = false;
+    const environment = new MockEnvironment();
+
+    await expect(run(
+      fnJob('never', async () => {
+        ran = true;
+        return { status: 'pass' };
+      }),
+      { ...mockOpts, environment, params: params as never },
+    )).rejects.toMatchObject({
+      name: 'JsonValueError',
+      code: 'INVALID_JSON_VALUE',
+      path: '',
+    });
+    expect(ran).toBe(false);
+    expect(environment.upCount).toBe(0);
   });
 
   it('uses a custom Engine instance provided via engines map', async () => {

@@ -24,6 +24,11 @@ import { jobMeta } from '../core/describe.js';
 import { currentBranch } from '../core/git.js';
 import type { Environment, EnvHandle } from '../env/environment.js';
 import type { Memory } from '@obversa/memory';
+import {
+  cloneFrozenJson,
+  JsonValueError,
+  type RunBrief,
+} from '../graph/value.js';
 import type {
   Job,
   JobContext,
@@ -60,6 +65,8 @@ export interface RunOptions {
    */
   environment?: Environment;
   onEvent?: (event: LoopEvent) => void;
+  /** Immutable run brief shared by every job. */
+  params?: RunBrief;
   /** Seed the shared, mutable run state. */
   state?: Record<string, unknown>;
   /** Memory instance available to every job in the run. */
@@ -124,6 +131,15 @@ export async function run(
   job: Job,
   options: RunOptions = {},
 ): Promise<RunResult> {
+  const paramsInput: unknown = options.params === undefined ? {} : options.params;
+  if (
+    paramsInput === null
+    || typeof paramsInput !== 'object'
+    || Array.isArray(paramsInput)
+  ) {
+    throw new JsonValueError('', 'run brief must be a JSON object');
+  }
+  const params = cloneFrozenJson(paramsInput as RunBrief);
   const defaultEngine = options.engine ?? 'agent-sdk';
   const engineOptions: EngineOptions = {
     ...(options.engineOptions ?? {}),
@@ -248,6 +264,7 @@ export async function run(
     runId,
     fingerprintExcludePaths: uniquePaths([recordPath]),
     emit,
+    params,
     state: initialState,
     memory: options.memory,
     workspace,

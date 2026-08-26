@@ -1,0 +1,273 @@
+---
+title: "Outside graph types"
+description: "Define, validate, and inspect a pure graph type."
+---
+
+`@obversa/lines` lets a package define a graph type that Lines does not provide.
+Write graph behavior as pure code. The contract gives the graph type frozen data
+and graph lookups. It does not give file, model, process, clock, or storage
+services.
+
+An outside graph type is trusted package code. It can import and use effects by
+itself. The conformance kit checks public behavior. It does not stop effects.
+
+## Start with the example
+
+The checked-in example defines a two-step graph, runs the public conformance
+kit, compiles its definition, and resolves its plan.
+
+From an Obversa checkout, run:
+
+```bash
+pnpm example:graph
+```
+
+Copy `examples/packages/custom-graph.ts` when you start a graph type. The
+example uses only `@obversa/lines` public exports.
+
+## Source
+
+```ts
+import {
+  compileGraph,
+  resolveGraphPlan,
+  type GraphDefinition,
+  type GraphEvent,
+  type GraphType,
+  type PlanResolution,
+} from '@obversa/lines';
+import {
+  runGraphTypeConformance,
+  type GraphTypeConformanceFixture,
+} from '@obversa/lines/testing';
+
+const definition: GraphDefinition = {
+  id: 'draft-review',
+  definitionVersion: 1,
+  data: {},
+  nodes: [
+    { id: 'draft', data: {} },
+    { id: 'review', data: {} },
+  ],
+  edges: [
+    { id: 'draft-to-review', source: 'draft', target: 'review', data: {} },
+  ],
+};
+
+type State = { readonly next: 'draft' | 'review' | 'done' };
+type Event = GraphEvent<
+  'node-completed',
+  { readonly nodeId: 'draft' | 'review' }
+>;
+
+const graphType: GraphType<
+  GraphDefinition,
+  State,
+  Event,
+  { readonly memory: 'unused' }
+> = {
+  kind: 'draft-review',
+  version: 1,
+  compile(value) {
+    return {
+      requirements: { memory: 'unused' },
+      initialState: () => ({ next: 'draft' }),
+      reduce: (state, event) =>
+        event.payload.nodeId === state.next
+          ? { next: state.next === 'draft' ? 'review' : 'done' }
+          : state,
+      decide: (state) =>
+        state.next === 'done'
+          ? [{ kind: 'complete', output: { approved: true } }]
+          : [{
+              kind: 'dispatch',
+              nodeId: state.next,
+              input: {},
+              position: `work/${state.next}`,
+            }],
+      describe: () => ({
+        inputContract: {},
+        outputContract: {},
+        phases: [{
+          id: 'work',
+          name: 'Draft and review',
+          nodeIds: value.nodes.map((node) => node.id),
+        }],
+        nodes: value.nodes.map((node) => ({
+          id: node.id,
+          phaseId: 'work',
+          inputContract: {},
+          outputContract: {},
+          laneId: null,
+        })),
+        policies: {
+          retry: null,
+          stop: null,
+          concurrency: null,
+          write: null,
+          budget: null,
+          action: null,
+        },
+        executionLanes: [],
+        requestedPermissions: [],
+        bounds: {
+          dispatches: {
+            min: { kind: 'known', value: 2 },
+            max: { kind: 'known', value: 2 },
+          },
+          maxConcurrency: { kind: 'known', value: 1 },
+          maxFanOut: { kind: 'known', value: 1 },
+        },
+      }),
+    };
+  },
+};
+
+const events: readonly Event[] = [
+  { type: 'node-completed', version: 1, payload: { nodeId: 'draft' } },
+  { type: 'node-completed', version: 1, payload: { nodeId: 'review' } },
+];
+const identity = {
+  source: 'npm:@example/draft-review',
+  version: '1.0.0',
+  digest: 'sha256:1111111111111111111111111111111111111111111111111111111111111111',
+} as const;
+const resolution: PlanResolution = {
+  package: identity,
+  admission: { package: identity, permissions: [] },
+  executionLanes: [],
+};
+const fixture = {
+  graphType,
+  definition,
+  events,
+  invalidDefinitions: [{
+    ...definition,
+    nodes: [...definition.nodes, { id: 'draft', data: {} }],
+  }] as const,
+  planResolution: resolution,
+  expected: {
+    states: [
+      { next: 'draft' },
+      { next: 'review' },
+      { next: 'done' },
+    ],
+    commands: [
+      [{ kind: 'dispatch', nodeId: 'draft', input: {}, position: 'work/draft' }],
+      [{ kind: 'dispatch', nodeId: 'review', input: {}, position: 'work/review' }],
+      [{ kind: 'complete', output: { approved: true } }],
+    ],
+    bounds: {
+      dispatches: {
+        min: { kind: 'known', value: 2 },
+        max: { kind: 'known', value: 2 },
+      },
+      maxConcurrency: { kind: 'known', value: 1 },
+      maxFanOut: { kind: 'known', value: 1 },
+    },
+  },
+} satisfies GraphTypeConformanceFixture<
+  GraphDefinition,
+  State,
+  Event,
+  { readonly memory: 'unused' }
+>;
+
+const conformance = runGraphTypeConformance(fixture);
+if (!conformance.ok) throw new Error(JSON.stringify(conformance.failures));
+
+const compiled = compileGraph(graphType, definition);
+const state = events.reduce(compiled.reduce, compiled.initialState());
+const plan = resolveGraphPlan(compiled.describe(), resolution);
+
+console.log(JSON.stringify({
+  conformance: conformance.ok,
+  cases: conformance.cases,
+  state: state.next,
+  decision: compiled.decide(state)[0]?.kind,
+  planDigest: plan.digest,
+  dispatches: plan.plan.bounds.dispatches,
+  maxConcurrency: plan.plan.bounds.maxConcurrency,
+  maxFanOut: plan.plan.bounds.maxFanOut,
+}, null, 2));
+```
+
+## Define the graph
+
+A `GraphDefinition` is JSON data with these fields:
+
+- A stable graph `id` and positive `definitionVersion`.
+- Graph `data`.
+- Nodes with stable `id` values and `data`.
+- Edges with stable `id`, `source`, `target`, and `data` values.
+
+`compileGraph(graphType, definition)` validates the definition before it calls
+the graph type. It returns a frozen copy with a canonical JSON value and a
+SHA-256 digest.
+
+Invalid definitions throw `GraphValidationError`. Common errors include empty
+identifiers, duplicate node or edge identifiers, and an edge that names a node
+that does not exist. No node can run from this graph layer.
+
+## Implement `GraphType`
+
+A graph type has a stable `kind`, a positive `version`, and one `compile`
+method. `compile` receives the validated, frozen definition and a
+`GraphKernel`. The kernel gives graph data and neighbor lookups. It does not
+give runtime services.
+
+`compile` returns these pure operations:
+
+| Operation | Result |
+| --- | --- |
+| `initialState()` | The state before events. |
+| `reduce(state, event)` | The next state for one recorded event. |
+| `decide(state)` | Ordered dispatch, pause, complete, or fail commands. |
+| `describe()` | The stable graph description for a host. |
+
+The input state and event are copied and frozen before `reduce` or `decide`
+receives them. These methods must return JSON data. The same definition and
+events must give the same state and commands.
+
+`GraphBindings<Requirements>` maps a precise graph requirement to a host
+binding type. A `required` memory requirement maps to a required `Memory`
+binding. An `unused` memory requirement maps to a type with no memory binding.
+This graph layer does not create, inject, or execute a binding.
+
+## Describe the graph
+
+`describe()` declares data for a host to inspect before execution. It includes
+phases, nodes, edges, input and output contracts, policies, execution lanes,
+requested permissions, and bounds.
+
+Each bound is either known or unknown. Use a known bound only when the graph
+can calculate the value. Use an unknown bound with a reason when it cannot.
+Do not invent a maximum or concurrency value.
+
+The description must name every definition node once in a phase. It must use
+the same graph identifiers and edges as the definition. Each node lane must
+exist in `executionLanes`. A node's `phaseId` must name the same phase that
+lists that node.
+
+## Validate a description
+
+Use `validateGraphDescription(unknown)` to validate a graph description that
+you received outside `compileGraph`. It returns a frozen validated description.
+Invalid data throws `GraphValidationError`.
+
+## Conformance
+
+`runGraphTypeConformance` checks a fixture without a test framework. The
+fixture declares the expected initial state and command, then the expected
+state and command after every event prefix.
+
+The kit compiles the graph type in separate instances and calls each operation
+more than once. It checks that the initial state, every event-prefix state,
+every ordered command, and the declared bounds stay the same. It also checks
+invalid definitions and preserves the caller's definition and events.
+
+## Limits
+
+This contract does not schedule nodes, store runs, provide built-in graph
+forms, or execute work on another machine. A host and later runtime layers do
+those jobs.

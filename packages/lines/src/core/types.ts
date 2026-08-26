@@ -21,6 +21,7 @@ import type { LoopError } from './errors.js';
 import type { Budget } from './budget.js';
 import type { NoProgressInput, StallReport } from './progress.js';
 import type { EnvHandle, Environment } from '../env/environment.js';
+import type { JsonValue, RunBrief } from '../graph/value.js';
 
 /** Terminal disposition of a `Job`. */
 export type OutcomeStatus =
@@ -152,6 +153,8 @@ export interface JobContext {
   /** @internal */
   readonly fingerprintExcludePaths?: string[];
   emit(event: LoopEvent): void;
+  /** Immutable run brief shared by every job in this run. */
+  readonly params: RunBrief;
   /** Shared mutable state for the whole run (e.g. accumulating notes). */
   readonly state: Record<string, unknown>;
   /** Memory available to jobs in this run, when the caller supplied it. */
@@ -401,14 +404,6 @@ export interface DagConfig {
 export type NodePhase = 'start' | 'skip' | 'done';
 
 export type ProofKind = 'html' | 'image' | 'markdown' | 'table' | 'json';
-
-export type JsonValue =
-  | null
-  | boolean
-  | number
-  | string
-  | JsonValue[]
-  | { [key: string]: JsonValue };
 
 export interface ProofArtifact {
   kind: ProofKind;

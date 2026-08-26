@@ -1,6 +1,65 @@
 /** Public programmatic API for the Lines graph runtime. */
 
 export type {
+  JsonPrimitive,
+  JsonObject,
+  JsonValue,
+  RunBrief,
+  Sha256Digest,
+  GraphValidationIssue,
+} from './graph/value.js';
+export {
+  GraphValidationError,
+  createGraphKernel,
+  type GraphId,
+  type NodeId,
+  type EdgeId,
+  type GraphNode,
+  type GraphEdge,
+  type GraphDefinition,
+  type CompiledGraphDefinition,
+  type GraphKernel,
+} from './graph/kernel.js';
+export type {
+  DispatchGraphCommand,
+  PauseGraphCommand,
+  CompleteGraphCommand,
+  FailGraphCommand,
+  GraphCommand,
+} from './graph/commands.js';
+export {
+  compileGraph,
+  type GraphEvent,
+  type GraphBindings,
+  type GraphTypeCompilation,
+  type CompiledGraphType,
+  type GraphType,
+} from './graph/type.js';
+export {
+  resolveGraphPlan,
+  validateGraphDescription,
+  type PermissionDescriptor,
+  type ExecutionTarget,
+  type ExecutionLaneDescription,
+  type GraphPhaseDescription,
+  type GraphNodeDescription,
+  type GraphEdgeDescription,
+  type PlanBound,
+  type GraphBounds,
+  type GraphPolicyDescription,
+  type GraphRequirements,
+  type GraphDescriptionInput,
+  type GraphDescription,
+  type GraphPackageIdentity,
+  type GraphPackageAdmission,
+  type ExecutionLaneResolution,
+  type PlanResolution,
+  type ResolvedExecutionLane,
+  type ResolvedPlan,
+  type ResolvedPlanSnapshot,
+} from './graph/plan.js';
+
+export type {
   Job,
   JobMeta,
   JobContext,

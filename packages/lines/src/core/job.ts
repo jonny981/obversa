@@ -28,6 +28,7 @@ import {
   revisionRequest,
 } from './feedback.js';
 import { linesRequestMeta, logEngineWarning } from './engine-meta.js';
+import { cloneFrozenJson, type JsonValue } from '../graph/value.js';
 
 export interface AgentJobConfig {
   /** Job label (for events). Defaults to the agent's name, then `'agent'`. */
@@ -540,23 +541,12 @@ function validateProofArtifact(name: string, artifact: ProofArtifact): void {
   }
 }
 
-function isJsonValue(value: unknown, seen = new WeakSet<object>()): boolean {
-  if (value === null) return true;
-  switch (typeof value) {
-    case 'string':
-    case 'boolean':
-      return true;
-    case 'number':
-      return Number.isFinite(value);
-    case 'object':
-      if (seen.has(value)) return false;
-      seen.add(value);
-      if (Array.isArray(value))
-        return value.every((item) => isJsonValue(item, seen));
-      if (Object.getPrototypeOf(value) !== Object.prototype) return false;
-      return Object.values(value).every((item) => isJsonValue(item, seen));
-    default:
-      return false;
+function isJsonValue(value: unknown): value is JsonValue {
+  try {
+    cloneFrozenJson(value as JsonValue);
+    return true;
+  } catch {
+    return false;
   }
 }
 

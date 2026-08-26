@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 
-import { mkdtemp, mkdir, readFile, rm, writeFile } from 'node:fs/promises';
+import assert from 'node:assert/strict';
+import { copyFile, mkdtemp, mkdir, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -9,6 +10,20 @@ import { spawnSync } from 'node:child_process';
 import { packWorkspacePackages } from './check-packages.mjs';
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '..');
+
+const expectedGraphReport = {
+  conformance: true,
+  cases: 6,
+  state: 'done',
+  decision: 'complete',
+  planDigest: 'sha256:0b17551b9f4274dca832c040922d71251f9bf52bbd5e9462c6ed781506cd367b',
+  dispatches: {
+    min: { kind: 'known', value: 2 },
+    max: { kind: 'known', value: 2 },
+  },
+  maxConcurrency: { kind: 'known', value: 1 },
+  maxFanOut: { kind: 'known', value: 1 },
+};
 
 function sourceFromPublicDoc(document) {
   const match = /## Source[\s\S]*?```ts\n([\s\S]*?)\n```/.exec(document);
@@ -40,10 +55,28 @@ import {
 import { runMemoryConformance } from '@obversa/memory/testing';
 import { createSimpleMemory } from '@obversa/memory-simple';
 import { openGitMemory } from '@obversa/memory-git';
-import { agentJob, run } from '@obversa/lines';
+import {
+  GraphValidationError,
+  agentJob,
+  run,
+  validateGraphDescription,
+} from '@obversa/lines';
 import { commandEnvironment } from '@obversa/lines/env/command';
 import { MockEngine } from '@obversa/lines/testing';
 import linesPackage from '@obversa/lines/package.json' with { type: 'json' };
+
+type Equal<Left, Right> =
+  (<Value>() => Value extends Left ? 1 : 2) extends
+  (<Value>() => Value extends Right ? 1 : 2)
+    ? true
+    : false;
+type Expect<Value extends true> = Value;
+type PublicValidatorTakesOneArgument = Expect<Equal<
+  Parameters<typeof validateGraphDescription>,
+  [value: unknown]
+>>;
+
+const publicValidatorTakesOneArgument: PublicValidatorTakesOneArgument = true;
 
 assert.equal(MEMORY_ROOT, '/memories');
 assert.equal(linesPackage.version, '1.0.0');
@@ -51,6 +84,69 @@ assert.equal(commandEnvironment({
   deploy: () => ({ cmd: 'true' }),
   destroy: () => ({ cmd: 'true' }),
 }).name, 'command');
+
+const parsedGraphDescription: unknown = JSON.parse(JSON.stringify({
+  schemaVersion: 1,
+  graph: {
+    id: 'packed-description',
+    definitionVersion: 1,
+    kind: 'empty',
+    typeVersion: 1,
+    definitionDigest: 'sha256:1111111111111111111111111111111111111111111111111111111111111111',
+  },
+  inputContract: {
+    type: 'object',
+    properties: { title: { type: 'string' } },
+  },
+  outputContract: { type: 'object' },
+  phases: [{ id: 'work', name: 'Work', nodeIds: [] }],
+  nodes: [],
+  edges: [],
+  policies: {
+    retry: null,
+    stop: null,
+    concurrency: null,
+    write: null,
+    budget: null,
+    action: null,
+  },
+  executionLanes: [],
+  requestedPermissions: [],
+  bounds: {
+    dispatches: {
+      min: { kind: 'known', value: 0 },
+      max: { kind: 'known', value: 0 },
+    },
+    maxConcurrency: { kind: 'known', value: 0 },
+    maxFanOut: { kind: 'known', value: 0 },
+  },
+  requirements: { memory: 'unused' },
+}));
+const validatedGraphDescription = validateGraphDescription(parsedGraphDescription);
+const inputContract = validatedGraphDescription.inputContract as {
+  readonly type: string;
+  readonly properties: {
+    readonly title: { readonly type: string };
+  };
+};
+assert.equal(validatedGraphDescription.graph.id, 'packed-description');
+assert.deepEqual(validatedGraphDescription.bounds.dispatches, {
+  min: { kind: 'known', value: 0 },
+  max: { kind: 'known', value: 0 },
+});
+assert.equal(inputContract.properties.title.type, 'string');
+assert.equal(Object.isFrozen(validatedGraphDescription), true);
+assert.equal(Object.isFrozen(validatedGraphDescription.graph), true);
+assert.equal(Object.isFrozen(inputContract), true);
+assert.equal(Object.isFrozen(inputContract.properties), true);
+assert.equal(Object.isFrozen(inputContract.properties.title), true);
+assert.equal(publicValidatorTakesOneArgument, true);
+
+const malformedGraphDescription: unknown = JSON.parse('{}');
+assert.throws(
+  () => validateGraphDescription(malformedGraphDescription),
+  (error: unknown) => error instanceof GraphValidationError,
+);
 
 const simple = createSimpleMemory({ scope: 'packed-consumer' });
 const created: MemoryResult = await simple.execute({
@@ -115,12 +211,18 @@ const tsconfig = {
     outDir: 'dist',
     types: ['node'],
   },
-  include: ['consumer.ts', 'offline-review.line.ts'],
+  include: ['consumer.ts', 'offline-review.line.ts', 'custom-graph.ts'],
 };
 
 async function main() {
   const exampleSource = await readFile(
     join(root, 'examples', 'production-lines', 'offline-review.line.ts'),
+    'utf8',
+  );
+  const graphExamplePath = join(root, 'examples', 'packages', 'custom-graph.ts');
+  const graphExampleSource = await readFile(graphExamplePath, 'utf8');
+  const graphDocument = await readFile(
+    join(root, 'docs', 'public', 'graphs', 'contract.mdx'),
     'utf8',
   );
   const publicDocument = await readFile(
@@ -129,6 +231,9 @@ async function main() {
   );
   if (sourceFromPublicDoc(publicDocument) !== exampleSource) {
     throw new Error('The offline production-line page does not match its runnable source');
+  }
+  if (sourceFromPublicDoc(graphDocument) !== graphExampleSource) {
+    throw new Error('The outside graph contract page does not match its runnable source');
   }
 
   const directory = await mkdtemp(join(tmpdir(), 'obversa-consumer-'));
@@ -166,6 +271,7 @@ async function main() {
       join(consumerDirectory, 'offline-review.line.ts'),
       exampleSource,
     );
+    await copyFile(graphExamplePath, join(consumerDirectory, 'custom-graph.ts'));
 
     run('pnpm', ['install', '--offline', '--ignore-scripts'], {
       cwd: consumerDirectory,
@@ -196,6 +302,14 @@ async function main() {
     const directProductionLine = JSON.parse(
       run('pnpm', ['exec', 'tsx', 'offline-review.line.ts'], { cwd: consumerDirectory }),
     );
+    const compiledGraph = JSON.parse(
+      run(process.execPath, ['dist/custom-graph.js'], { cwd: consumerDirectory }),
+    );
+    const directGraph = JSON.parse(
+      run('pnpm', ['exec', 'tsx', 'custom-graph.ts'], { cwd: consumerDirectory }),
+    );
+    assert.deepEqual(compiledGraph, expectedGraphReport);
+    assert.deepEqual(directGraph, expectedGraphReport);
     if (
       report.lines !== 'pass' ||
       report.memoryCases !== 17 ||
@@ -224,7 +338,7 @@ async function main() {
     if (refs.length !== 1) throw new Error(`Git memory created ${refs.length} private refs instead of one`);
 
     console.log(
-      'Clean offline consumer passed with TypeScript 6, the first production line, 17 memory cases, and both adapters.',
+      'Clean offline consumer passed with TypeScript 6, the first production line, the outside graph, 17 memory cases, and both adapters.',
     );
   } finally {
     await rm(directory, { recursive: true, force: true });
