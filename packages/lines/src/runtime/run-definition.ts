@@ -38,10 +38,10 @@ import {
 } from '../events/envelope.js';
 import {
   findKnownSecretInEvents,
-  validateStorageId,
   type EventStore,
 } from '../events/store.js';
 import { StorageError } from '../storage/error.js';
+import { validateStorageId } from '../storage/id.js';
 
 export interface StorageProviderRecord extends JsonObject {
   readonly schemaVersion: 1;

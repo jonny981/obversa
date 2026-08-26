@@ -616,7 +616,7 @@ describe('local artifact storage', () => {
     }));
   });
 
-  it('leaves a quota-rejected blob unreadable because admission happens last', async () => {
+  it('rejects a deterministic over-quota write before committing its blob', async () => {
     const directory = await root();
     const store = createLocalArtifactStore({
       root: directory,
@@ -635,7 +635,7 @@ describe('local artifact storage', () => {
 
     await expectCode(store.write(scope, writeRequest('two')), 'STORAGE_LIMIT_EXCEEDED');
     expect((await files(directory)).some((path) =>
-      path.endsWith(forged.digest.slice('sha256:'.length)))).toBe(true);
+      path.endsWith(forged.digest.slice('sha256:'.length)))).toBe(false);
     await expectCode(store.read(scope, forged), 'ARTIFACT_NOT_ADMITTED');
   });
 

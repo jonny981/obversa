@@ -5,6 +5,7 @@ import {
   type JsonValue,
 } from '../graph/value.js';
 import { StorageError } from '../storage/error.js';
+import { validateStorageId } from '../storage/id.js';
 import {
   validateNewDomainEvent,
   type DomainEventEnvelope,
@@ -37,21 +38,11 @@ export interface EventStore {
   ): Promise<StreamRevision>;
 }
 
-const SAFE_STORAGE_ID = /^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/u;
-
 function fail(message: string, path: string): never {
   throw new StorageError('INVALID_STORED_VALUE', message, { path });
 }
 
-export function validateStorageId(value: unknown, path: string): string {
-  if (typeof value !== 'string' || !SAFE_STORAGE_ID.test(value)) {
-    fail(
-      'Storage id must use 1 to 128 ASCII letters, digits, dots, underscores, or hyphens.',
-      path,
-    );
-  }
-  return value;
-}
+export { validateStorageId } from '../storage/id.js';
 
 export function validateEventStreamRef(value: unknown): EventStreamRef {
   let safe: JsonValue;

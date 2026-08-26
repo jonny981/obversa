@@ -105,8 +105,26 @@ describe('artifact storage values', () => {
     ['traversal namespace', { namespace: '../outside', runId: 'run-one' }],
     ['empty run', { namespace: 'host-one', runId: '' }],
     ['traversal run', { namespace: 'host-one', runId: 'a/../../outside' }],
+    ['identity with namespace spaces', { namespace: 'host one', runId: 'run-one' }],
+    ['identity with a non-ASCII run id', { namespace: 'host-one', runId: 'rún-one' }],
+    ['identity with a namespace over 128 characters', {
+      namespace: 'h'.repeat(129),
+      runId: 'run-one',
+    }],
   ])('rejects an %s before filesystem access', (_label, identity) => {
     expect(() => validateArtifactScope(identity)).toThrowError(StorageError);
+  });
+
+  it('accepts the shared storage-id alphabet and 128-character boundary', () => {
+    const identity = {
+      namespace: 'host.One_2-ok',
+      runId: 'r'.repeat(128),
+    };
+
+    const scope = validateArtifactScope(identity);
+
+    expect(scope).toEqual(identity);
+    expect(Object.isFrozen(scope)).toBe(true);
   });
 
   it.each([

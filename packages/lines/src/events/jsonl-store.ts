@@ -167,7 +167,7 @@ async function existingDirectory(path: string): Promise<boolean> {
 
 async function createContainedDirectory(path: string): Promise<void> {
   try {
-    await mkdir(path);
+    await mkdir(path, { mode: 0o700 });
   } catch (error) {
     if (!isNodeError(error, 'EEXIST')) throw error;
   }
@@ -181,7 +181,14 @@ async function createContainedDirectory(path: string): Promise<void> {
 }
 
 async function rootDirectory(options: ResolvedOptions): Promise<string> {
-  await mkdir(options.root, { recursive: true });
+  await mkdir(options.root, { recursive: true, mode: 0o700 });
+  if (!await existingDirectory(options.root)) {
+    throw storageError(
+      'UNSAFE_STORAGE_PATH',
+      'Event-store root disappeared during creation.',
+      { path: options.root },
+    );
+  }
   const root = await realpath(options.root);
   const item = await lstat(root);
   if (!item.isDirectory()) {
@@ -467,7 +474,6 @@ async function segmentPaths(directory: string): Promise<readonly string[]> {
   const entries = await readdir(directory, { withFileTypes: true });
   const names: string[] = [];
   for (const entry of entries) {
-    if (entry.name === '.tmp') continue;
     if (!SEGMENT_NAME.test(entry.name) || !entry.isFile()) {
       throw storageError(
         entry.isSymbolicLink()

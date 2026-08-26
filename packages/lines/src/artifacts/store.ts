@@ -1,6 +1,7 @@
 import { Buffer } from 'node:buffer';
 
 import { StorageError } from '../storage/error.js';
+import { validateStorageId } from '../storage/id.js';
 import type { JsonObject, Sha256Digest } from '../graph/value.js';
 
 export type ArtifactContentMode = 'exact' | 'state' | 'free-text';
@@ -112,19 +113,6 @@ function boundedText(
   return result;
 }
 
-function identity(value: unknown, path: string, label: string): string {
-  const result = text(value, path, label);
-  if (
-    Buffer.byteLength(result, 'utf8') > 512
-    || result === '.'
-    || result === '..'
-    || /[\\/%]/u.test(result)
-  ) {
-    fail(path, `${label} contains an unsafe path value.`);
-  }
-  return result;
-}
-
 function mediaType(value: unknown, path: string): string {
   const result = boundedText(value, path, 'Media type', 255);
   if (!MEDIA_TYPE.test(result)) fail(path, 'Media type must be a type/subtype value.');
@@ -135,8 +123,8 @@ export function validateArtifactScope(value: unknown): ArtifactScope {
   const item = record(value, '', 'Artifact scope');
   exactFields(item, ['namespace', 'runId'], [], '');
   return Object.freeze({
-    namespace: identity(item.namespace, '/namespace', 'Namespace'),
-    runId: identity(item.runId, '/runId', 'Run id'),
+    namespace: validateStorageId(item.namespace, '/namespace'),
+    runId: validateStorageId(item.runId, '/runId'),
   });
 }
 

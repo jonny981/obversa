@@ -524,6 +524,23 @@ function admissionFilename(revision: number): string {
   return `${String(revision).padStart(16, '0')}.json`;
 }
 
+async function syncDirectory(path: string): Promise<void> {
+  let handle;
+  try {
+    handle = await open(path, constants.O_RDONLY | constants.O_NOFOLLOW);
+    await handle.sync();
+  } catch (error) {
+    if (nodeCode(error) === 'ELOOP') {
+      throw storageError('UNSAFE_STORAGE_PATH', 'Managed storage directory is a symlink.', {
+        path,
+      });
+    }
+    throw error;
+  } finally {
+    await handle?.close();
+  }
+}
+
 async function commitAdmission(
   directory: string,
   entry: NewLedgerEntry,
@@ -550,6 +567,7 @@ async function commitAdmission(
     handle = undefined;
     try {
       await link(temporary, destination);
+      await syncDirectory(directory);
       return 'committed';
     } catch (error) {
       if (nodeCode(error) === 'EEXIST') return 'conflict';
@@ -620,6 +638,7 @@ async function commitBlob(
     handle = undefined;
     try {
       await link(temporary, path);
+      await syncDirectory(directory);
     } catch (error) {
       if (nodeCode(error) !== 'EEXIST') throw error;
       await readBlob(path, reference);
@@ -713,6 +732,7 @@ class LocalArtifactStore implements ArtifactStore {
     // concurrent admission can change its revision, so every retry screens its
     // newly encoded candidate again below.
     this.#assertAdmissionSafe(this.#newAdmission(reference, initialEntries.length + 1));
+    this.#assertQuota(initialEntries, reference);
 
     // Commit bytes before their admission. A crash can leave an orphan, but an
     // orphan cannot be read through this store.

@@ -5,13 +5,14 @@ import {
   readFile,
   readdir,
   rm,
+  stat,
   symlink,
   writeFile,
 } from 'node:fs/promises';
 import { spawn } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
 import { pathToFileURL } from 'node:url';
 
 import { afterEach, describe, expect, it } from 'vitest';
@@ -413,6 +414,46 @@ describe('local event store', () => {
       .toEqual(['event-1']);
   });
 
+  it('accepts an event payload at its byte limit and rejects one byte more', async () => {
+    const store = createLocalEventStore({
+      root: await temporaryRoot(),
+      maxEventPayloadBytes: 64,
+      maxAppendBatchBytes: 8_192,
+    });
+
+    await expect(store.append(stream, 0, [
+      event('payload-limit', { text: 'x'.repeat(53) }),
+    ])).resolves.toBe(1);
+    await expect(store.append(stream, 1, [
+      event('payload-over', { text: 'x'.repeat(54) }),
+    ])).rejects.toEqual(expect.objectContaining({
+      code: 'STORAGE_LIMIT_EXCEEDED',
+      details: expect.objectContaining({ byteLength: 65, maximumBytes: 64 }),
+    }));
+    expect((await collect(store.read(stream))).map((item) => item.eventId))
+      .toEqual(['payload-limit']);
+  });
+
+  it('accepts an append at its byte limit and rejects one byte more', async () => {
+    const store = createLocalEventStore({
+      root: await temporaryRoot(),
+      maxEventPayloadBytes: 64,
+      maxAppendBatchBytes: 219,
+    });
+
+    await expect(store.append(stream, 0, [
+      event('batch-a', { text: 'x' }),
+    ])).resolves.toBe(1);
+    await expect(store.append(stream, 1, [
+      event('batch-b', { text: 'xx' }),
+    ])).rejects.toEqual(expect.objectContaining({
+      code: 'STORAGE_LIMIT_EXCEEDED',
+      details: expect.objectContaining({ byteLength: 220, maximumBytes: 219 }),
+    }));
+    expect((await collect(store.read(stream))).map((item) => item.eventId))
+      .toEqual(['batch-a']);
+  });
+
   it('rejects payload, batch, and exact known-secret bytes before writing', async () => {
     const root = await temporaryRoot();
     const payloadLimited = createLocalEventStore({
@@ -504,6 +545,41 @@ describe('local event store', () => {
     expect(await readdir(outside)).toEqual([]);
   });
 
+  it('rejects a symlinked storage root without writing through it', async () => {
+    const container = await temporaryRoot();
+    const outside = await temporaryRoot('lines-event-outside-');
+    const root = join(container, 'event-root');
+    await symlink(outside, root);
+    const store = createLocalEventStore({ root });
+
+    await expect(store.preflightAppend(stream, 0, [event('preflight')]))
+      .rejects.toEqual(expect.objectContaining({ code: 'UNSAFE_STORAGE_PATH' }));
+    await expect(store.append(stream, 0, [event('append')]))
+      .rejects.toEqual(expect.objectContaining({ code: 'UNSAFE_STORAGE_PATH' }));
+    await expect(collect(store.read(stream)))
+      .rejects.toEqual(expect.objectContaining({ code: 'UNSAFE_STORAGE_PATH' }));
+    expect(await readdir(outside)).toEqual([]);
+  });
+
+  it('creates every managed directory with owner-only permissions', async () => {
+    const container = await temporaryRoot();
+    const root = join(container, 'event-root');
+    const store = createLocalEventStore({ root });
+
+    await store.append(stream, 0, [event('event-1')]);
+
+    const entries = await readdir(root, { recursive: true, withFileTypes: true });
+    const directories = [
+      root,
+      ...entries
+        .filter((entry) => entry.isDirectory())
+        .map((entry) => join(entry.parentPath, entry.name)),
+    ];
+    const modes = await Promise.all(directories.map(async (path) =>
+      (await stat(path)).mode & 0o777));
+    expect(new Set(modes)).toEqual(new Set([0o700]));
+  });
+
   it('fails closed on changed and oversized segment bytes', async () => {
     const root = await temporaryRoot();
     const store = createLocalEventStore({
@@ -514,6 +590,18 @@ describe('local event store', () => {
     const [segment] = await segmentFiles(root);
     await chmod(segment!, 0o600);
     await writeFile(segment!, Buffer.alloc(2_048, 0x78));
+
+    await expect(collect(store.read(stream))).rejects.toEqual(
+      expect.objectContaining({ code: 'CORRUPT_EVENT_STREAM' }),
+    );
+  });
+
+  it('rejects a temporary directory injected into committed segments', async () => {
+    const root = await temporaryRoot();
+    const store = createLocalEventStore({ root });
+    await store.append(stream, 0, [event('event-1')]);
+    const [segment] = await segmentFiles(root);
+    await mkdir(join(dirname(segment!), '.tmp'));
 
     await expect(collect(store.read(stream))).rejects.toEqual(
       expect.objectContaining({ code: 'CORRUPT_EVENT_STREAM' }),

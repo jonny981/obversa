@@ -193,11 +193,16 @@ record is stored with the run and checked again when the run is loaded.
 The record contains only safe JSON: namespace, provider identity, provider
 configuration digest, and resolved policy. A provider digest can bind safe
 adapter settings, but it must not contain a secret value or secret-derived
-hash.
+hash. The local provider digest binds the resolved absolute storage root and
+its numeric limits. Moving the same stored bytes to another root produces a
+different live record, so loading the run fails instead of silently reading a
+different storage address.
 
 Every event operation names a namespace and stream. Every artifact operation
 names a namespace and run. Two namespaces can share one physical provider
-without reading or changing each other's data.
+without reading or changing each other's data. Both ports use the same storage
+identity rule: 1 to 128 ASCII characters, starting with a letter or digit;
+later characters may also be dots, underscores, or hyphens.
 
 ## Keep wrappers strict and payloads opaque
 
@@ -222,6 +227,10 @@ an opaque payload must validate any nested value it uses. The example calls
 The local stores reject a value over a limit before it becomes visible. A
 second receipt for the same digest does not charge the artifact bytes again.
 Accepted artifacts stay until `deleteRun` removes that run.
+
+`ArtifactStore.deleteRun` removes only the artifacts in its scope. It leaves
+the event stream and its artifact references in history, so later reads through
+those references fail closed. D14 coordinates event and artifact cleanup.
 
 Call `preflightAppend` with the exact event batch before a run writes its
 artifacts. Call `preflightWrite` once with the complete same-run artifact batch;

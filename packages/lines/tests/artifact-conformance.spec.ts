@@ -41,6 +41,23 @@ describe('artifact-store conformance', () => {
     await expect(assertArtifactStoreConformance(factory)).resolves.toBeUndefined();
   });
 
+  it('runs concurrently without shared mutable conformance state', async () => {
+    const directory = await root();
+    const factory = (options: {
+      readonly maxArtifactBytes: number;
+      readonly maxTotalArtifactBytesPerRun: number;
+      readonly knownSecrets: readonly string[];
+    }) => createLocalArtifactStore({ root: directory, ...options });
+    const reports = await Promise.all([
+      runArtifactStoreConformance(factory),
+      runArtifactStoreConformance(factory),
+    ]);
+
+    for (const report of reports) {
+      expect(report).toEqual({ ok: true, cases: 15, failures: [] });
+    }
+  });
+
   it('reports a provider that returns forged references', async () => {
     const broken: ArtifactStore = {
       async preflightWrite() {

@@ -1,3 +1,4 @@
+import { randomUUID } from 'node:crypto';
 import { isDeepStrictEqual } from 'node:util';
 
 import { StorageError } from '../storage/error.js';
@@ -31,8 +32,10 @@ export interface ArtifactStoreConformanceReport {
 
 interface ConformanceCase {
   readonly name: string;
-  run(factory: ArtifactStoreConformanceFactory): Promise<void>;
+  run(factory: ArtifactStoreConformanceFactory, scope: ConformanceScope): Promise<void>;
 }
+
+type ConformanceScope = (name: string) => ArtifactScope;
 
 const encoder = new TextEncoder();
 const decoder = new TextDecoder();
@@ -43,11 +46,6 @@ const DEFAULT_OPTIONS: ArtifactStoreConformanceOptions = {
   maxTotalArtifactBytesPerRun: 128,
   knownSecrets: ['known-secret-value'],
 };
-let contentCaseInvocation = 0;
-
-function scope(name: string): ArtifactScope {
-  return { namespace: `conformance-${name}`, runId: 'run-one' };
-}
 
 function artifact(text: string, purpose = 'proof') {
   return {
@@ -80,10 +78,9 @@ async function expectStorageError(
 const cases: readonly ConformanceCase[] = [
   {
     name: 'content address and detached read',
-    async run(factory) {
+    async run(factory, scope) {
       const store = await factory(DEFAULT_OPTIONS);
-      contentCaseInvocation += 1;
-      const location = scope(`content-${contentCaseInvocation}`);
+      const location = scope('content');
       await expectStorageError(
         store.preflightWrite(location, [] as unknown as ArtifactBatch),
         'INVALID_STORED_VALUE',
@@ -108,7 +105,7 @@ const cases: readonly ConformanceCase[] = [
   },
   {
     name: 'fresh-provider durable read',
-    async run(factory) {
+    async run(factory, scope) {
       const location = scope('durable');
       const writer = await factory(DEFAULT_OPTIONS);
       const reference = await writer.write(location, artifact('durable'));
@@ -119,7 +116,7 @@ const cases: readonly ConformanceCase[] = [
   },
   {
     name: 'restart policy identity',
-    async run(factory) {
+    async run(factory, scope) {
       const location = scope('policy');
       const writer = await factory(DEFAULT_OPTIONS);
       const reference = await writer.write(location, artifact('durable'));
@@ -145,7 +142,7 @@ const cases: readonly ConformanceCase[] = [
   },
   {
     name: 'forged exact receipt rejection',
-    async run(factory) {
+    async run(factory, scope) {
       const store = await factory(DEFAULT_OPTIONS);
       const location = scope('forged-receipt');
       const reference = await store.write(location, artifact('private'));
@@ -157,7 +154,7 @@ const cases: readonly ConformanceCase[] = [
   },
   {
     name: 'two-provider final-capacity race',
-    async run(factory) {
+    async run(factory, scope) {
       const options = {
         ...DEFAULT_OPTIONS,
         maxArtifactBytes: 5,
@@ -185,7 +182,7 @@ const cases: readonly ConformanceCase[] = [
   },
   {
     name: 'one-byte address change',
-    async run(factory) {
+    async run(factory, scope) {
       const store = await factory(DEFAULT_OPTIONS);
       const location = scope('address');
       const first = await store.write(location, artifact('hello'));
@@ -195,7 +192,7 @@ const cases: readonly ConformanceCase[] = [
   },
   {
     name: 'namespace isolation',
-    async run(factory) {
+    async run(factory, scope) {
       const store = await factory(DEFAULT_OPTIONS);
       const reference = await store.write(scope('namespace-a'), artifact('private'));
       await expectStorageError(
@@ -206,7 +203,7 @@ const cases: readonly ConformanceCase[] = [
   },
   {
     name: 'run isolation',
-    async run(factory) {
+    async run(factory, scope) {
       const store = await factory(DEFAULT_OPTIONS);
       const location = scope('run');
       const reference = await store.write(location, artifact('private'));
@@ -218,7 +215,7 @@ const cases: readonly ConformanceCase[] = [
   },
   {
     name: 'marked sensitive rejection',
-    async run(factory) {
+    async run(factory, scope) {
       const store = await factory(DEFAULT_OPTIONS);
       await expectStorageError(
         store.write(scope('sensitive'), { ...artifact('private'), sensitive: true }),
@@ -228,7 +225,7 @@ const cases: readonly ConformanceCase[] = [
   },
   {
     name: 'known secret rejection',
-    async run(factory) {
+    async run(factory, scope) {
       const store = await factory(DEFAULT_OPTIONS);
       await expectStorageError(
         store.write(scope('secret'), artifact('token=known-secret-value')),
@@ -238,7 +235,7 @@ const cases: readonly ConformanceCase[] = [
   },
   {
     name: 'semantic secret rejection',
-    async run(factory) {
+    async run(factory, scope) {
       const metadataSecret = 'quote"token';
       const stateSecret = 'line\nbreak';
       const store = await factory({
@@ -273,7 +270,7 @@ const cases: readonly ConformanceCase[] = [
   },
   {
     name: 'free-text redaction before receipt',
-    async run(factory) {
+    async run(factory, scope) {
       const store = await factory(DEFAULT_OPTIONS);
       const location = scope('redaction');
       const reference = await store.write(location, {
@@ -287,7 +284,7 @@ const cases: readonly ConformanceCase[] = [
   },
   {
     name: 'single-artifact limit',
-    async run(factory) {
+    async run(factory, scope) {
       const store = await factory({
         ...DEFAULT_OPTIONS,
         maxArtifactBytes: 5,
@@ -301,7 +298,7 @@ const cases: readonly ConformanceCase[] = [
   },
   {
     name: 'unique-digest run quota',
-    async run(factory) {
+    async run(factory, scope) {
       const store = await factory({
         ...DEFAULT_OPTIONS,
         maxArtifactBytes: 5,
@@ -323,7 +320,7 @@ const cases: readonly ConformanceCase[] = [
   },
   {
     name: 'run deletion',
-    async run(factory) {
+    async run(factory, scope) {
       const store = await factory(DEFAULT_OPTIONS);
       const location = scope('delete');
       const reference = await store.write(location, artifact('hello'));
@@ -337,10 +334,15 @@ const cases: readonly ConformanceCase[] = [
 export async function runArtifactStoreConformance(
   factory: ArtifactStoreConformanceFactory,
 ): Promise<ArtifactStoreConformanceReport> {
+  const invocation = randomUUID();
+  const scope: ConformanceScope = (name) => ({
+    namespace: `conformance-${invocation}-${name}`,
+    runId: 'run-one',
+  });
   const failures: ArtifactStoreConformanceFailure[] = [];
   for (const testCase of cases) {
     try {
-      await testCase.run(factory);
+      await testCase.run(factory, scope);
     } catch (error) {
       failures.push({
         case: testCase.name,

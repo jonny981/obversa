@@ -8,7 +8,6 @@ import {
   createLocalEventStore,
   type LocalEventStoreOptions,
 } from '../events/jsonl-store.js';
-import { validateStorageId } from '../events/store.js';
 import {
   canonicalJson,
   digestJson,
@@ -21,6 +20,7 @@ import {
   type RunStoragePolicy,
 } from '../runtime/run-definition.js';
 import { StorageError } from './error.js';
+import { validateStorageId } from './id.js';
 
 export interface LocalRunStorageOptions {
   readonly directory: string;
