@@ -685,8 +685,11 @@ class LocalArtifactStore implements ArtifactStore {
       for (const item of prepared) {
         if (verified.has(item.reference.digest)) continue;
         verified.add(item.reference.digest);
-        if (await assertRegularFile(this.#blobPath(paths, item.reference))) {
-          await readBlob(this.#blobPath(paths, item.reference), item.reference);
+        const path = this.#blobPath(paths, item.reference);
+        const admitted = entries.some((entry) =>
+          entry.reference.digest === item.reference.digest);
+        if (admitted || await assertRegularFile(path)) {
+          await readBlob(path, item.reference);
         }
       }
     }

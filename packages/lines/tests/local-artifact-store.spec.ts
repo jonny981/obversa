@@ -414,6 +414,33 @@ describe('local artifact storage', () => {
     await expectCode(store.read(scope, firstReference), 'ARTIFACT_NOT_ADMITTED');
   });
 
+  it('rejects a missing admitted blob before a batch can admit its first item', async () => {
+    const directory = await root();
+    const store = createLocalArtifactStore({ root: directory });
+    const existing = await store.write(scope, writeRequest('saved'));
+    const existingBlob = (await files(directory)).find((path) =>
+      path.endsWith(existing.digest.slice('sha256:'.length)));
+    expect(existingBlob).toBeDefined();
+    await unlink(existingBlob!);
+
+    const batch = [writeRequest('first'), writeRequest('saved')] as const;
+    const firstBytes = batch[0].bytes;
+    const firstReference: ArtifactReference = {
+      schemaVersion: 1,
+      digest: `sha256:${createHash('sha256').update(firstBytes).digest('hex')}`,
+      byteLength: firstBytes.byteLength,
+      mediaType: batch[0].mediaType,
+      purpose: batch[0].purpose,
+    };
+    const preflightThenWrite = async () => {
+      await store.preflightWrite(scope, batch);
+      for (const request of batch) await store.write(scope, request);
+    };
+
+    await expectCode(preflightThenWrite(), 'ARTIFACT_NOT_FOUND');
+    await expectCode(store.read(scope, firstReference), 'ARTIFACT_NOT_ADMITTED');
+  });
+
   it('rejects a corrupt unadmitted crash blob during preflight', async () => {
     const directory = await root();
     const store = createLocalArtifactStore({ root: directory });
