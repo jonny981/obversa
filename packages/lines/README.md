@@ -85,13 +85,24 @@ Each node must appear in one phase, and its `phaseId` must name that phase.
 
 The public conformance kit checks the initial state and command, then every
 event-prefix state and command. It uses separate compiled instances and
-repeated calls. It also checks the declared bounds.
+repeated calls. It also checks the declared bounds. The kit counts dispatches
+across the supplied trace and the largest dispatch set in one decision. Known
+dispatch and fan-out maximums cannot be below those observed values. It does
+not infer runtime concurrency from a decision trace.
+
+A graph decision contains zero or more dispatch commands, or exactly one
+pause, complete, or fail command. Dispatches ask the executor to start new
+work. An empty decision starts no work. D5 accepts it only while a recorded
+attempt remains in flight; otherwise the executor fails instead of spinning.
+After a dispatch is recorded, the graph does not emit that request again. A
+later event can make the same node dispatchable as a new request.
 
 `run(job, { params })` accepts a JSON object. If `params` is `undefined`, it
 uses a frozen empty object. `null`, arrays, and other invalid roots fail before
 work or environment setup starts. A valid object is cloned and frozen. Every
 child job receives the same frozen object as `ctx.params`. A later caller
-change cannot change that object.
+change cannot change that object. JSON nested more than 256 levels fails with
+`JsonValueError`.
 
 Run the checked-in example from the workspace root:
 

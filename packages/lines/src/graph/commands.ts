@@ -80,10 +80,6 @@ export function validateGraphCommands(
   if (!Array.isArray(commands)) {
     throw invalid('', 'A graph decision must be an array.');
   }
-  if (commands.length === 0) {
-    throw invalid('', 'A graph decision must contain at least one command.');
-  }
-
   let frozen: readonly GraphCommand[];
   try {
     frozen = cloneFrozenJson(

@@ -55,6 +55,37 @@ function message(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
 }
 
+function assertExpectedDecisionTraceFitsBounds(
+  decisions: readonly (readonly GraphCommand[])[],
+  bounds: GraphBounds,
+): void {
+  const dispatchCounts = decisions.map(
+    (commands) => commands.filter((command) => command.kind === 'dispatch').length,
+  );
+  const totalDispatches = dispatchCounts.reduce((total, count) => total + count, 0);
+  const maxFanOut = dispatchCounts.reduce(
+    (maximum, count) => Math.max(maximum, count),
+    0,
+  );
+
+  if (
+    bounds.dispatches.max.kind === 'known'
+    && totalDispatches > bounds.dispatches.max.value
+  ) {
+    throw new Error(
+      `Expected decision trace contains ${totalDispatches} dispatch commands, above declared maximum ${bounds.dispatches.max.value}.`,
+    );
+  }
+  if (
+    bounds.maxFanOut.kind === 'known'
+    && maxFanOut > bounds.maxFanOut.value
+  ) {
+    throw new Error(
+      `Expected decision trace has fan-out ${maxFanOut}, above declared maximum ${bounds.maxFanOut.value}.`,
+    );
+  }
+}
+
 /** Run the framework-free behavioral checks for an outside graph type. */
 export function runGraphTypeConformance<
   Definition extends GraphDefinition,
@@ -193,6 +224,10 @@ export function runGraphTypeConformance<
         if (!isDeepStrictEqual(plans[0]!.plan.bounds, fixture.expected.bounds)) {
           throw new Error('Resolved plan bounds do not match the fixture.');
         }
+        assertExpectedDecisionTraceFitsBounds(
+          fixture.expected.commands,
+          plans[0]!.plan.bounds,
+        );
       },
     },
   ];

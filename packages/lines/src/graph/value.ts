@@ -10,6 +10,8 @@ export type RunBrief = JsonObject;
 
 export type Sha256Digest = `sha256:${string}`;
 
+const MAX_JSON_DEPTH = 256;
+
 export interface GraphValidationIssue {
   readonly code: string;
   readonly path: string;
@@ -75,7 +77,15 @@ function cloneValue(
   value: unknown,
   path: string,
   ancestors: WeakSet<object>,
+  depth: number,
 ): JsonValue {
+  if (depth > MAX_JSON_DEPTH) {
+    throw new JsonValueError(
+      path,
+      `nesting must not exceed ${MAX_JSON_DEPTH} levels`,
+    );
+  }
+
   if (value === null || typeof value === 'boolean') return value;
 
   if (typeof value === 'string') {
@@ -121,7 +131,7 @@ function cloneValue(
         if (!('value' in descriptor) || !descriptor.enumerable) {
           throw new JsonValueError(itemPath, 'array items must be enumerable data values');
         }
-        result.push(cloneValue(descriptor.value, itemPath, ancestors));
+        result.push(cloneValue(descriptor.value, itemPath, ancestors, depth + 1));
       }
       return Object.freeze(result);
     }
@@ -143,7 +153,7 @@ function cloneValue(
         throw new JsonValueError(keyPath, 'object properties must be enumerable data values');
       }
       Object.defineProperty(result, key, {
-        value: cloneValue(descriptor.value, keyPath, ancestors),
+        value: cloneValue(descriptor.value, keyPath, ancestors, depth + 1),
         enumerable: true,
         configurable: false,
         writable: false,
@@ -156,7 +166,7 @@ function cloneValue(
 }
 
 export function cloneFrozenJson<Value extends JsonValue>(value: Value): Value {
-  return cloneValue(value, '', new WeakSet<object>()) as Value;
+  return cloneValue(value, '', new WeakSet<object>(), 0) as Value;
 }
 
 function encodeCanonical(value: JsonValue): string {

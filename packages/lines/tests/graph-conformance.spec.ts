@@ -6,6 +6,7 @@ import {
   type GraphTypeConformanceFixture,
 } from '../src/graph/conformance.ts';
 import type {
+  GraphBounds,
   GraphDescription,
   PlanResolution,
 } from '../src/graph/plan.ts';
@@ -140,6 +141,95 @@ function fixture(
   };
 }
 
+const waveDefinition = {
+  id: 'wave',
+  definitionVersion: 1,
+  data: {},
+  nodes: ['a', 'b', 'c'].map((id) => ({ id, data: {} })),
+  edges: [],
+} as const satisfies GraphDefinition;
+
+type WaveState = { readonly wave: 0 | 1 };
+type WaveEvent = GraphEvent<'wave-recorded', { readonly wave: 0 }>;
+
+function waveFixture(
+  bounds: GraphBounds,
+): GraphTypeConformanceFixture<
+  typeof waveDefinition,
+  WaveState,
+  WaveEvent,
+  { readonly memory: 'unused' }
+> {
+  const commands = [
+    [
+      { kind: 'dispatch', nodeId: 'a', input: {}, position: 'wave/a' },
+      { kind: 'dispatch', nodeId: 'b', input: {}, position: 'wave/b' },
+      { kind: 'dispatch', nodeId: 'c', input: {}, position: 'wave/c' },
+    ],
+    [{ kind: 'dispatch', nodeId: 'a', input: {}, position: 'wave/a-again' }],
+  ] as const;
+  const graphType: GraphType<
+    typeof waveDefinition,
+    WaveState,
+    WaveEvent,
+    { readonly memory: 'unused' }
+  > = {
+    kind: 'wave',
+    version: 1,
+    compile() {
+      return {
+        requirements: { memory: 'unused' },
+        initialState: () => ({ wave: 0 }),
+        reduce: () => ({ wave: 1 }),
+        decide: (state) => commands[state.wave],
+        describe: () => ({
+          inputContract: {},
+          outputContract: {},
+          phases: [{
+            id: 'work',
+            name: 'Work',
+            nodeIds: waveDefinition.nodes.map((node) => node.id),
+          }],
+          nodes: waveDefinition.nodes.map((node) => ({
+            id: node.id,
+            phaseId: 'work',
+            inputContract: {},
+            outputContract: {},
+            laneId: null,
+          })),
+          policies: {
+            retry: null,
+            stop: null,
+            concurrency: null,
+            write: null,
+            budget: null,
+            action: null,
+          },
+          executionLanes: [],
+          requestedPermissions: [],
+          bounds,
+        }),
+      };
+    },
+  };
+
+  return {
+    graphType,
+    definition: waveDefinition,
+    events: [{ type: 'wave-recorded', version: 1, payload: { wave: 0 } }],
+    invalidDefinitions: [{
+      ...waveDefinition,
+      nodes: [...waveDefinition.nodes, { id: 'a', data: {} }],
+    }],
+    planResolution: planResolution(),
+    expected: {
+      states: [{ wave: 0 }, { wave: 1 }],
+      commands,
+      bounds,
+    },
+  };
+}
+
 describe('graph type conformance', () => {
   it('passes a small graph without Vitest-specific adapters', () => {
     const report = runGraphTypeConformance(fixture());
@@ -255,5 +345,52 @@ describe('graph type conformance', () => {
     expect(report.failures).toEqual(expect.arrayContaining([
       expect.objectContaining({ case: 'deterministic plan resolution' }),
     ]));
+  });
+
+  it('counts a new dispatch of the same node after a recorded event', () => {
+    const report = runGraphTypeConformance(waveFixture({
+      dispatches: {
+        min: { kind: 'known', value: 0 },
+        max: { kind: 'known', value: 1 },
+      },
+      maxConcurrency: { kind: 'known', value: 1 },
+      maxFanOut: { kind: 'known', value: 1 },
+    }));
+
+    expect(report.ok).toBe(false);
+    expect(report.failures).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        case: 'deterministic plan resolution',
+        message: expect.stringMatching(/4 dispatch commands.*maximum 1/i),
+      }),
+    ]));
+  });
+
+  it('checks trace fan-out without inventing runtime concurrency', () => {
+    const understatedFanOut = runGraphTypeConformance(waveFixture({
+      dispatches: {
+        min: { kind: 'known', value: 0 },
+        max: { kind: 'known', value: 4 },
+      },
+      maxConcurrency: { kind: 'known', value: 1 },
+      maxFanOut: { kind: 'known', value: 1 },
+    }));
+    const honestTraceBounds = runGraphTypeConformance(waveFixture({
+      dispatches: {
+        min: { kind: 'known', value: 0 },
+        max: { kind: 'known', value: 4 },
+      },
+      maxConcurrency: { kind: 'known', value: 1 },
+      maxFanOut: { kind: 'known', value: 3 },
+    }));
+
+    expect(understatedFanOut.ok).toBe(false);
+    expect(understatedFanOut.failures).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        case: 'deterministic plan resolution',
+        message: expect.stringMatching(/fan-out 3.*maximum 1/i),
+      }),
+    ]));
+    expect(honestTraceBounds.ok).toBe(true);
   });
 });

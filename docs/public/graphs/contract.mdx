@@ -225,8 +225,15 @@ give runtime services.
 | `decide(state)` | Ordered dispatch, pause, complete, or fail commands. |
 | `describe()` | The stable graph description for a host. |
 
-`decide` returns one or more dispatch commands, or exactly one `pause`,
-`complete`, or `fail` command. An empty decision is invalid.
+`decide` returns zero or more dispatch commands, or exactly one `pause`,
+`complete`, or `fail` command. A dispatch asks the executor to start new work.
+An empty decision means start nothing new. D5 accepts it only while a recorded
+attempt is still in flight. Without in-flight work, the executor fails instead
+of asking for the same empty decision forever.
+
+After a dispatch is recorded in the event history, `decide` must not return
+that request again. A later event can make the same node dispatchable again;
+that later occurrence is a new request.
 
 The input state and event are copied and frozen before `reduce` or `decide`
 receives them. These methods must return JSON data. The same definition and
@@ -256,7 +263,8 @@ lists that node.
 
 Use `validateGraphDescription(unknown)` to validate a graph description that
 you received outside `compileGraph`. It returns a frozen validated description.
-Invalid data throws `GraphValidationError`.
+Invalid data, including JSON nested more than 256 levels, throws
+`GraphValidationError`.
 
 ## Conformance
 
@@ -268,6 +276,12 @@ The kit compiles the graph type in separate instances and calls each operation
 more than once. It checks that the initial state, every event-prefix state,
 every ordered command, and the declared bounds stay the same. It also checks
 invalid definitions and preserves the caller's definition and events.
+
+The kit counts all dispatch commands in the supplied trace and the largest
+dispatch set in one decision. A declared dispatch maximum or fan-out maximum
+cannot be below those observed values. The trace does not show which attempts
+overlap at runtime, so the kit does not infer `maxConcurrency`. The graph must
+declare that cap from its own rules or report it as unknown.
 
 ## Limits
 

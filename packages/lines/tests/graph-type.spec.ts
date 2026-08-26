@@ -34,6 +34,10 @@ type CompletedEvent = GraphEvent<
   { readonly nodeId: 'author' | 'reviewer' }
 >;
 
+function deeplyNestedJson(depth = 10_000): unknown {
+  return JSON.parse(`${'['.repeat(depth)}null${']'.repeat(depth)}`);
+}
+
 function description(): Omit<
   GraphDescription,
   'schemaVersion' | 'graph' | 'edges' | 'requirements'
@@ -252,15 +256,25 @@ describe('compileGraph', () => {
     expect(() => mixed.decide({ next: 'author' })).toThrow(/terminal/i);
   });
 
-  it('rejects an empty decision before the runtime can spin', () => {
+  it('accepts an empty decision as no new work to start', () => {
     const empty = compileGraph(graphType(() => []), definition);
 
-    expect(() => empty.decide({ next: 'author' })).toThrowError(
+    const decision = empty.decide({ next: 'author' });
+
+    expect(decision).toEqual([]);
+    expect(Object.isFrozen(decision)).toBe(true);
+  });
+
+  it('returns GraphValidationError for an excessively deep definition', () => {
+    const deepDefinition = {
+      ...definition,
+      data: deeplyNestedJson(),
+    };
+
+    expect(() => compileGraph(graphType(), deepDefinition as never)).toThrowError(
       expect.objectContaining({
-        issues: [expect.objectContaining({
-          code: 'INVALID_GRAPH_COMMAND',
-          path: '',
-        })],
+        name: 'GraphValidationError',
+        issues: [expect.objectContaining({ code: 'INVALID_JSON_VALUE' })],
       }),
     );
   });

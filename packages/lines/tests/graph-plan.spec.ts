@@ -10,6 +10,10 @@ import {
 const definitionDigest = `sha256:${'1'.repeat(64)}` as const;
 const packageDigest = `sha256:${'2'.repeat(64)}` as const;
 
+function deeplyNestedJson(depth = 10_000): unknown {
+  return JSON.parse(`${'['.repeat(depth)}null${']'.repeat(depth)}`);
+}
+
 const description: GraphDescription = {
   schemaVersion: 1,
   graph: {
@@ -147,6 +151,25 @@ describe('resolveGraphPlan', () => {
     expect(() => validateGraphDescription({ bad: undefined } as never)).toThrow(
       /invalid json/i,
     );
+  });
+
+  it('returns GraphValidationError for excessive JSON depth at public boundaries', () => {
+    const deepDescription = {
+      ...description,
+      inputContract: deeplyNestedJson(),
+    } as GraphDescription;
+
+    for (const operation of [
+      () => validateGraphDescription(deepDescription),
+      () => resolveGraphPlan(deepDescription, resolution()),
+    ]) {
+      expect(operation).toThrowError(
+        expect.objectContaining({
+          name: 'GraphValidationError',
+          issues: [expect.objectContaining({ code: 'INVALID_JSON_VALUE' })],
+        }),
+      );
+    }
   });
 
   it('requires a node phaseId to match the phase that contains it', () => {

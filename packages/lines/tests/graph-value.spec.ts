@@ -8,6 +8,10 @@ import {
   type JsonObject,
 } from '../src/graph/value.js';
 
+function deeplyNestedJson(depth = 10_000): unknown {
+  return JSON.parse(`${'['.repeat(depth)}null${']'.repeat(depth)}`);
+}
+
 describe('graph JSON values', () => {
   it('returns a detached, deeply frozen copy', () => {
     const input: {
@@ -174,6 +178,19 @@ describe('graph JSON values', () => {
     ).toThrowError(
       expect.objectContaining({
         path: '/a~1b~0c',
+      }),
+    );
+  });
+
+  it.each([
+    ['cloneFrozenJson', (value: unknown) => cloneFrozenJson(value as never)],
+    ['canonicalJson', (value: unknown) => canonicalJson(value as never)],
+    ['digestJson', (value: unknown) => digestJson(value as never)],
+  ])('rejects excessive JSON depth through %s without overflowing', (_name, operation) => {
+    expect(() => operation(deeplyNestedJson())).toThrowError(
+      expect.objectContaining({
+        name: 'JsonValueError',
+        code: 'INVALID_JSON_VALUE',
       }),
     );
   });
