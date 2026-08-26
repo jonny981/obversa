@@ -59,6 +59,19 @@ function assertExpectedDecisionTraceFitsBounds(
   decisions: readonly (readonly GraphCommand[])[],
   bounds: GraphBounds,
 ): void {
+  const dispatchPositions = new Set<string>();
+  for (const commands of decisions) {
+    for (const command of commands) {
+      if (command.kind !== 'dispatch') continue;
+      if (dispatchPositions.has(command.position)) {
+        throw new Error(
+          `Expected decision trace reuses dispatch position "${command.position}".`,
+        );
+      }
+      dispatchPositions.add(command.position);
+    }
+  }
+
   const dispatchCounts = decisions.map(
     (commands) => commands.filter((command) => command.kind === 'dispatch').length,
   );

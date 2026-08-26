@@ -409,4 +409,36 @@ describe('compileGraph', () => {
       requirements: { memory: 'unused' },
     });
   });
+
+  it('rejects description nodes outside definition declaration order', () => {
+    const reordered: GraphType<
+      typeof definition,
+      State,
+      CompletedEvent,
+      { readonly memory: 'unused' }
+    > = {
+      ...graphType(),
+      compile(value, kernel) {
+        const compiled = graphType().compile(value, kernel);
+        const described = description();
+        return {
+          ...compiled,
+          describe: () => ({
+            ...described,
+            nodes: [...described.nodes].reverse(),
+          }),
+        };
+      },
+    };
+
+    expect(() => compileGraph(reordered, definition)).toThrowError(
+      expect.objectContaining({
+        issues: [expect.objectContaining({
+          code: 'DESCRIPTION_MISMATCH',
+          path: '/nodes',
+          message: expect.stringMatching(/node order.*definition/i),
+        })],
+      }),
+    );
+  });
 });

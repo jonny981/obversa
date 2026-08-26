@@ -258,10 +258,11 @@ Each bound is either known or unknown. Use a known bound only when the graph
 can calculate the value. Use an unknown bound with a reason when it cannot.
 Do not invent a maximum or concurrency value.
 
-The description must name every definition node once in a phase. It must use
-the same graph identifiers and edges as the definition. Each node lane must
-exist in `executionLanes`. A node's `phaseId` must name the same phase that
-lists that node.
+The description must name every definition node once in a phase. Its `nodes`
+list preserves definition node declaration order. The compiler supplies the
+`edges` list in definition edge declaration order. Each node lane must exist
+in `executionLanes`. A node's `phaseId` must name the same phase that lists
+that node.
 
 ## Validate a description
 
@@ -286,6 +287,10 @@ dispatch set in one decision. A declared dispatch maximum or fan-out maximum
 cannot be below those observed values. The trace does not show which attempts
 overlap at runtime, so the kit does not infer `maxConcurrency`. The graph must
 declare that cap from its own rules or report it as unknown.
+
+Each expected decision contains only new requests. The kit rejects a dispatch
+position that appears again in a later expected decision. D5 applies the same
+check to durable dispatch events before it starts work.
 
 When the final expected decision is exactly `complete`, the observed total must
 meet a known dispatch minimum; partial, empty, paused, and failed endings do not

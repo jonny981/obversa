@@ -362,6 +362,43 @@ describe('graph type conformance', () => {
     ]));
   });
 
+  it('rejects a dispatch position reused after an event', () => {
+    const bounds: GraphBounds = {
+      dispatches: {
+        min: { kind: 'known', value: 0 },
+        max: { kind: 'known', value: 2 },
+      },
+      maxConcurrency: { kind: 'known', value: 1 },
+      maxFanOut: { kind: 'known', value: 1 },
+    };
+    const repeated = [{
+      kind: 'dispatch',
+      nodeId: 'step',
+      input: {},
+      position: 'work/step',
+    }] as const;
+    const base = fixture(typeWith({
+      decide: () => repeated,
+      describe: () => ({ ...graphDescription(), bounds }),
+    }));
+    const report = runGraphTypeConformance({
+      ...base,
+      expected: {
+        ...base.expected,
+        commands: [repeated, repeated],
+        bounds,
+      },
+    });
+
+    expect(report.ok).toBe(false);
+    expect(report.failures).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        case: 'deterministic plan resolution',
+        message: expect.stringMatching(/reuses dispatch position.*work\/step/i),
+      }),
+    ]));
+  });
+
   it('checks trace fan-out without inventing runtime concurrency', () => {
     const understatedFanOut = runGraphTypeConformance(waveFixture({
       dispatches: {

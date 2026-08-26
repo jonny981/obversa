@@ -82,6 +82,8 @@ and bounds for one run.
 `validateGraphDescription(unknown)` validates a description without compiling
 a graph. It returns a frozen valid description or throws `GraphValidationError`.
 Each node must appear in one phase, and its `phaseId` must name that phase.
+Description nodes preserve definition node declaration order. The compiler
+supplies description edges in definition edge declaration order.
 
 The public conformance kit checks the initial state and command, then every
 event-prefix state and command. It uses separate compiled instances and
@@ -89,6 +91,9 @@ repeated calls. It also checks the declared bounds. The kit counts dispatches
 across the supplied trace and the largest dispatch set in one decision. Known
 dispatch and fan-out maximums cannot be below those observed values. It does
 not infer runtime concurrency from a decision trace.
+Each expected decision contains only new requests. The kit rejects a dispatch
+position reused in a later expected decision. D5 applies the same rule to
+durable dispatch events before execution.
 When the final expected decision is exactly `complete`, the observed total must
 meet a known dispatch minimum; partial, empty, paused, and failed endings do not
 prove a minimum.
