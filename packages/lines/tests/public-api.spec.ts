@@ -3,6 +3,7 @@ import { describe, expect, it } from 'vitest';
 import * as api from '../src/api.ts';
 import * as commandEnvironmentApi from '../src/env/command.ts';
 import * as testingApi from '../src/testing.ts';
+import type { GraphKernel } from '../src/api.ts';
 
 type Equal<Left, Right> =
   (<Value>() => Value extends Left ? 1 : 2) extends
@@ -16,12 +17,14 @@ type PublicValidatorTakesOneArgument = Expect<Equal<
 >>;
 
 const publicValidatorTakesOneArgument: PublicValidatorTakesOneArgument = true;
+const publicGraphKernelType: GraphKernel | undefined = undefined;
 
 describe('public runtime API', () => {
   it('exports only the reviewed programmatic surface', () => {
     expect(Object.keys(api).sort()).toEqual([
       'EXIT_PAUSED',
       'GraphValidationError',
+      'JsonValueError',
       'LANE_DEAD_FAILURES',
       'LoopError',
       'agentCheck',
@@ -37,7 +40,6 @@ describe('public runtime API', () => {
       'confidenceCondition',
       'confidenceFromText',
       'costReport',
-      'createGraphKernel',
       'dag',
       'defineAgent',
       'defineAgentFromMarkdown',
@@ -82,6 +84,20 @@ describe('public runtime API', () => {
       'withEnv',
       'writeScope',
     ]);
+    expect(publicGraphKernelType).toBeUndefined();
+  });
+
+  it('exports the invalid JSON error returned for bad run parameters', async () => {
+    let ran = false;
+
+    await expect(api.run(
+      api.fnJob('never', async () => {
+        ran = true;
+        return { status: 'pass' };
+      }),
+      { params: null as never },
+    )).rejects.toBeInstanceOf(api.JsonValueError);
+    expect(ran).toBe(false);
   });
 
   it('validates and freezes a parsed graph description without host resolution', () => {

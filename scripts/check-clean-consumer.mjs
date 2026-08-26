@@ -57,6 +57,7 @@ import { createSimpleMemory } from '@obversa/memory-simple';
 import { openGitMemory } from '@obversa/memory-git';
 import {
   GraphValidationError,
+  JsonValueError,
   agentJob,
   run,
   validateGraphDescription,
@@ -178,6 +179,17 @@ const engine = new MockEngine((request) => {
   receivedMemory = request.memory === simple;
   return 'ready';
 });
+await assert.rejects(
+  run(
+    agentJob({ label: 'invalid-params', engine: 'offline', prompt: 'Never runs.' }),
+    {
+      engine: 'offline',
+      engines: { offline: engine },
+      params: null as never,
+    },
+  ),
+  (error: unknown) => error instanceof JsonValueError,
+);
 const result = await run(
   agentJob({ label: 'packed-consumer', engine: 'offline', prompt: 'Return ready.' }),
   {

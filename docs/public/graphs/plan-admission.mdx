@@ -52,11 +52,13 @@ resolved inputs as part of the frozen run.
 
 `run(job, { params })` accepts a JSON object. If `params` is `undefined`, the
 run uses a frozen empty object. `null`, arrays, and other invalid roots are
-rejected before work or environment setup starts.
+rejected with `JsonValueError` before work or environment setup starts.
 
 For a valid object, `run` clones and freezes `params` before work starts. The
 root job and each child job receive the same frozen object as `ctx.params`. A
 later change to the caller's `params` object cannot change `ctx.params`.
+Non-JSON nested values also throw `JsonValueError`. Its `path` identifies the
+invalid value.
 
 ## Trusted package boundary
 

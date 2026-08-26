@@ -252,6 +252,19 @@ describe('compileGraph', () => {
     expect(() => mixed.decide({ next: 'author' })).toThrow(/terminal/i);
   });
 
+  it('rejects an empty decision before the runtime can spin', () => {
+    const empty = compileGraph(graphType(() => []), definition);
+
+    expect(() => empty.decide({ next: 'author' })).toThrowError(
+      expect.objectContaining({
+        issues: [expect.objectContaining({
+          code: 'INVALID_GRAPH_COMMAND',
+          path: '',
+        })],
+      }),
+    );
+  });
+
   it('returns one structured error for non-JSON graph state or commands', () => {
     const invalidState: GraphType<
       typeof definition,

@@ -8,9 +8,9 @@ export type {
   Sha256Digest,
   GraphValidationIssue,
 } from './graph/value.js';
+export { JsonValueError } from './graph/value.js';
 export {
   GraphValidationError,
-  createGraphKernel,
   type GraphId,
   type NodeId,
   type EdgeId,
