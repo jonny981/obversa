@@ -1,0 +1,1010 @@
+import {
+  existsSync,
+  lstatSync,
+  mkdtempSync,
+  mkdirSync,
+  readFileSync,
+  realpathSync,
+  rmSync,
+  writeFileSync,
+} from 'node:fs';
+import { tmpdir } from 'node:os';
+import { delimiter, dirname, isAbsolute, join } from 'node:path';
+
+import { LoopError } from '../core/errors.js';
+import { scrubCapture } from '../core/redact.js';
+import {
+  canonicalJson,
+  type JsonObject,
+  type JsonValue,
+} from '../graph/value.js';
+import {
+  engineSelection,
+  reportedUsage,
+  validateAgentResult,
+} from '../runtime/result-parts.js';
+import {
+  DEFAULT_OWNED_COMMAND_LIMITS,
+  ownedCommandIdentity,
+  resolveCommandExecutable,
+  runOwnedCommand,
+} from './command-runner.js';
+import {
+  requestEnv,
+  type AgentRequest,
+  type AgentResult,
+  type AgentResultPart,
+  type Engine,
+  type EngineEventSink,
+  type EngineSelectionRecord,
+  type PermissionMode,
+  type UsageReceipt,
+} from './engine.js';
+import { classifyEngineFailure, type EngineFailureKind } from './failure.js';
+
+const CONTROL_CHARACTER = /[\u0000-\u001f\u007f]/u;
+const BASE_SYSTEM_PROMPT =
+  'Execute one isolated Lines node attempt. Follow only this system prompt and the user prompt. Use only the declared tools and permissions.';
+const WEB_TOOLS = new Set(['web_search', 'web_fetch', 'websearch', 'webfetch']);
+const READ_ONLY_TOOLS = new Set([
+  'read_file',
+  'grep',
+  'glob',
+  'list_dir',
+  'web_search',
+  'web_fetch',
+]);
+const PERMISSION_RULE = /^(?:Bash|Edit|Write|Read|Grep|WebFetch|MCPTool)(?:\([^\u0000-\u001f\u007f]*\))?$/u;
+const PROJECT_EXTENSION_PATHS = [
+  'Agents.md',
+  'Claude.md',
+  'CLAUDE.md',
+  'CLAUDE.local.md',
+  'AGENT.md',
+  'AGENTS.md',
+  '.grok/config.toml',
+  '.grok/lsp.json',
+  '.grok/commands',
+  '.grok/hooks',
+  '.grok/plugins',
+  '.grok/rules',
+  '.grok/skills',
+  '.grok/agents',
+  '.grok/personas',
+  '.grok/roles',
+  '.grok/workflows',
+  '.agents/skills',
+  '.agents/commands',
+  '.claude/commands',
+  '.claude/hooks',
+  '.claude/plugins',
+  '.claude/rules',
+  '.claude/skills',
+  '.claude/settings.json',
+  '.claude/settings.local.json',
+  '.cursor/hooks.json',
+  '.cursor/commands',
+  '.cursor/mcp.json',
+  '.cursor/plugins',
+  '.cursor/rules',
+  '.cursor/skills',
+  '.mcp.json',
+] as const;
+const COMPATIBILITY_ENV = Object.freeze({
+  GROK_CLAUDE_SKILLS_ENABLED: 'false',
+  GROK_CLAUDE_RULES_ENABLED: 'false',
+  GROK_CLAUDE_AGENTS_ENABLED: 'false',
+  GROK_CLAUDE_MCPS_ENABLED: 'false',
+  GROK_CLAUDE_HOOKS_ENABLED: 'false',
+  GROK_CLAUDE_SESSIONS_ENABLED: 'false',
+  GROK_CURSOR_SKILLS_ENABLED: 'false',
+  GROK_CURSOR_RULES_ENABLED: 'false',
+  GROK_CURSOR_AGENTS_ENABLED: 'false',
+  GROK_CURSOR_MCPS_ENABLED: 'false',
+  GROK_CURSOR_HOOKS_ENABLED: 'false',
+  GROK_CURSOR_SESSIONS_ENABLED: 'false',
+});
+
+export interface GrokCliIdentity {
+  readonly provider: string | null;
+  readonly modelFamily: string | null;
+}
+
+export interface GrokCliEngineOptions {
+  readonly executable: string;
+  readonly version: string;
+  readonly identity: GrokCliIdentity;
+  readonly permissionMode?: PermissionMode;
+  /** Exact host-selected values copied into Grok's otherwise clean environment. */
+  readonly environment?: Readonly<Record<string, string>>;
+  readonly authFile?: string;
+}
+
+interface GrokAccumulator {
+  readonly parts: AgentResultPart[];
+  readonly toolNames: Map<string, string>;
+  terminal: JsonObject | null;
+  model: string | null;
+  capabilities: readonly string[] | null;
+  parseError: Error | null;
+}
+
+function nonEmptyText(value: unknown, field: string): string {
+  if (
+    typeof value !== 'string'
+    || value.length === 0
+    || value !== value.trim()
+    || CONTROL_CHARACTER.test(value)
+  ) {
+    throw new TypeError(
+      `${field} must be a non-empty trimmed string without control characters`,
+    );
+  }
+  return value;
+}
+
+function nullableText(value: unknown, field: string): string | null {
+  return value === null ? null : nonEmptyText(value, field);
+}
+
+function requestedCapabilities(request: AgentRequest): readonly string[] {
+  return engineSelection({
+    adapter: 'grok-cli',
+    capabilities: request.tools ?? [],
+  }).capabilities;
+}
+
+function hasTool(tools: readonly string[], expected: string): boolean {
+  return tools.some((tool) => tool.toLowerCase() === expected.toLowerCase());
+}
+
+function hasWebTool(tools: readonly string[]): boolean {
+  return tools.some((tool) => WEB_TOOLS.has(tool.toLowerCase()));
+}
+
+function permissionRules(request: AgentRequest): readonly string[] {
+  if (request.allowedTools === undefined) return Object.freeze([]);
+  const rules = request.allowedTools.map((rule, index) =>
+    nonEmptyText(rule, `allowedTools[${index}]`),
+  );
+  if (new Set(rules).size !== rules.length) {
+    throw new TypeError('allowedTools must be unique');
+  }
+  for (const rule of rules) {
+    if (!PERMISSION_RULE.test(rule)) {
+      throw new TypeError(`Grok cannot represent permission rule ${rule}`);
+    }
+  }
+  return Object.freeze(rules);
+}
+
+function grokPermissionMode(options: GrokCliEngineOptions): 'dontAsk' {
+  if (
+    options.permissionMode !== undefined
+    && options.permissionMode !== 'dontAsk'
+  ) {
+    throw new TypeError('Grok permissionMode must be dontAsk');
+  }
+  return 'dontAsk';
+}
+
+function sandboxProfile(request: AgentRequest): 'strict' | 'read-only' | 'workspace' {
+  const mode = request.workspaceMode ?? 'none';
+  if (mode === 'read') return 'strict';
+  if (mode === 'write') return 'workspace';
+  if (mode === 'none') return 'strict';
+  throw new TypeError('Grok workspace mode must be none, read, or write');
+}
+
+function assertReadOnlyCapabilities(
+  request: AgentRequest,
+  tools: readonly string[],
+  rules: readonly string[],
+): void {
+  if (request.workspaceMode !== 'read') return;
+  const unsafeTool = tools.find((tool) => !READ_ONLY_TOOLS.has(tool.toLowerCase()));
+  if (unsafeTool !== undefined) {
+    throw new TypeError(
+      `Grok read-only workspace cannot expose capability ${unsafeTool}`,
+    );
+  }
+  const unsafeRule = rules.find((rule) =>
+    !/^(?:Read|Grep|WebFetch)(?:\([^\u0000-\u001f\u007f]*\))?$/u.test(rule),
+  );
+  if (unsafeRule !== undefined) {
+    throw new TypeError(
+      `Grok read-only workspace cannot grant permission ${unsafeRule}`,
+    );
+  }
+}
+
+function assertNoProjectExtensions(rawDirectory: string): string {
+  const directory = realpathSync(rawDirectory);
+  let current = directory;
+  while (true) {
+    for (const relative of PROJECT_EXTENSION_PATHS) {
+      if (existsSync(join(current, relative))) {
+        throw new TypeError(
+          `Grok project extension ${relative} is not allowed in an isolated attempt`,
+        );
+      }
+    }
+    if (existsSync(join(current, '.git'))) break;
+    const parent = dirname(current);
+    if (parent === current) break;
+    current = parent;
+  }
+  return directory;
+}
+
+function trustedSystemPrompt(request: AgentRequest): string {
+  if (request.systemMode === 'replace') {
+    if (request.system === undefined) {
+      throw new TypeError('Grok system replacement requires system text');
+    }
+    return request.system;
+  }
+  return request.system === undefined
+    ? BASE_SYSTEM_PROMPT
+    : `${BASE_SYSTEM_PROMPT}\n\n${request.system}`;
+}
+
+function grokConfig(workspace: string): string {
+  return [
+    '[session]',
+    'load_envrc = false',
+    '',
+    '[skills]',
+    `ignore = [${JSON.stringify(join(workspace, '.grok', 'skills'))}]`,
+    '',
+    '[compat.claude]',
+    'skills = false',
+    'rules = false',
+    'agents = false',
+    'mcps = false',
+    'hooks = false',
+    'sessions = false',
+    '',
+    '[compat.cursor]',
+    'skills = false',
+    'rules = false',
+    'agents = false',
+    'mcps = false',
+    'hooks = false',
+    'sessions = false',
+    '',
+  ].join('\n');
+}
+
+function authRedactions(contents: string | null): Readonly<Record<string, string>> {
+  if (contents === null) return Object.freeze({});
+  const text = contents;
+  if (Buffer.byteLength(text, 'utf8') > 1024 * 1024) {
+    throw new TypeError('Grok auth file must not exceed 1 MiB');
+  }
+  let value: unknown;
+  try {
+    value = JSON.parse(text);
+  } catch {
+    throw new TypeError('Grok auth file must contain valid JSON');
+  }
+  const redactions: Record<string, string> = { GROK_AUTH_FILE: text };
+  const pending: unknown[] = [value];
+  let index = 0;
+  while (pending.length > 0) {
+    const current = pending.pop();
+    if (typeof current === 'string') {
+      redactions[`GROK_AUTH_VALUE_${index}`] = current;
+      index += 1;
+    } else if (Array.isArray(current)) {
+      pending.push(...current);
+    } else if (typeof current === 'object' && current !== null) {
+      pending.push(...Object.values(current));
+    }
+  }
+  return Object.freeze(redactions);
+}
+
+function scrubAuthValues(
+  text: string,
+  redactions: Readonly<Record<string, string>>,
+): string {
+  const values = [...new Set(Object.values(redactions))]
+    .filter((value) => value.length > 0)
+    .sort((left, right) => right.length - left.length);
+  let scrubbed = text;
+  for (const value of values) {
+    scrubbed = scrubbed.split(value).join('[redacted]');
+  }
+  return scrubbed;
+}
+
+function isolatedEnvironment(
+  directory: string,
+  executable: string,
+  request: AgentRequest,
+  capabilities: readonly string[],
+  selected: Readonly<Record<string, string>>,
+  authContents: string | null,
+): Readonly<Record<string, string>> {
+  const home = join(directory, 'home');
+  const grokHome = join(directory, 'grok-home');
+  const temporary = join(directory, 'tmp');
+  for (const path of [home, grokHome, temporary]) {
+    mkdirSync(path, { recursive: true, mode: 0o700 });
+  }
+  const lines = requestEnv({ ...request, env: undefined }) ?? {};
+  writeFileSync(join(grokHome, 'config.toml'), grokConfig(request.cwd!), {
+    encoding: 'utf8',
+    mode: 0o600,
+  });
+  if (authContents !== null) {
+    writeFileSync(join(grokHome, 'auth.json'), authContents, {
+      encoding: 'utf8',
+      mode: 0o600,
+    });
+  }
+  const path = selected.PATH ?? [
+    dirname(process.execPath),
+    dirname(executable),
+    '/usr/bin',
+    '/bin',
+    '/usr/sbin',
+    '/sbin',
+  ].filter((value, index, values) => values.indexOf(value) === index)
+    .join(delimiter);
+  return Object.freeze({
+    ...selected,
+    ...lines,
+    PATH: path,
+    HOME: home,
+    GROK_HOME: grokHome,
+    TMPDIR: temporary,
+    GROK_SUBAGENTS:
+      request.leaf === false && hasTool(capabilities, 'task') ? '1' : '0',
+    GROK_WORKFLOWS: '0',
+    GROK_MEMORY: '0',
+    GROK_MANAGED_MCPS_ENABLED: '0',
+    ...COMPATIBILITY_ENV,
+  });
+}
+
+export function buildGrokArgs(
+  request: AgentRequest,
+  options: GrokCliEngineOptions,
+  promptFile: string,
+): string[] {
+  if (!isAbsolute(promptFile)) {
+    throw new TypeError('Grok prompt file must be an absolute path');
+  }
+  if (typeof request.cwd !== 'string' || !isAbsolute(request.cwd)) {
+    throw new TypeError('Grok request cwd must be an absolute path');
+  }
+  if (request.memory !== undefined) {
+    throw new TypeError('Grok CLI does not bridge Lines memory');
+  }
+  const model = nonEmptyText(request.model, 'Grok request model');
+  const tools = requestedCapabilities(request);
+  const rules = permissionRules(request);
+  assertReadOnlyCapabilities(request, tools, rules);
+  const structured = request.jsonSchema !== undefined;
+  const subagentsAllowed = request.leaf === false && hasTool(tools, 'task');
+  const args = [
+    '--prompt-file',
+    promptFile,
+    '--output-format',
+    structured ? 'json' : 'streaming-messages-json',
+    '--cwd',
+    request.cwd,
+    '--model',
+    model,
+    '--permission-mode',
+    grokPermissionMode(options),
+    '--sandbox',
+    sandboxProfile(request),
+    '--tools',
+    tools.join(','),
+    '--verbatim',
+    '--no-auto-update',
+  ];
+  for (const rule of rules) args.push('--allow', rule);
+  const disallowedTools = [
+    ...(hasTool(tools, 'search_tool') ? [] : ['search_tool']),
+    ...(hasTool(tools, 'use_tool') ? [] : ['use_tool']),
+    ...(subagentsAllowed ? [] : ['Agent']),
+  ];
+  if (disallowedTools.length > 0) {
+    args.push('--disallowed-tools', disallowedTools.join(','));
+  }
+  if (!hasTool(tools, 'search_tool') && !hasTool(tools, 'use_tool')) {
+    args.push('--deny', 'MCPTool');
+  }
+  if (request.workspaceMode === 'read') {
+    args.push('--deny', 'Bash', '--deny', 'Edit', '--deny', 'Write');
+  }
+  args.push('--system-prompt-override', trustedSystemPrompt(request));
+  if (request.jsonSchema !== undefined) {
+    args.push('--json-schema', canonicalJson(request.jsonSchema));
+  }
+  if (!subagentsAllowed) args.push('--no-subagents');
+  if (!hasWebTool(tools)) args.push('--disable-web-search');
+  args.push('--no-memory');
+  return args;
+}
+
+function object(value: unknown, field: string): JsonObject {
+  if (typeof value !== 'object' || value === null || Array.isArray(value)) {
+    throw new TypeError(`${field} must be an object`);
+  }
+  return value as JsonObject;
+}
+
+function optionalToken(value: unknown): number | undefined {
+  return Number.isSafeInteger(value) && (value as number) >= 0
+    ? value as number
+    : undefined;
+}
+
+function usageFromTerminal(terminal: JsonObject): UsageReceipt {
+  if (terminal.usage_is_incomplete === true) return { kind: 'unknown' };
+  if (!Object.hasOwn(terminal, 'usage')) return { kind: 'unknown' };
+  const usage = object(terminal.usage, 'Grok result usage');
+  const input = optionalToken(usage.input_tokens);
+  const output = optionalToken(usage.output_tokens);
+  const cacheCreation = optionalToken(usage.cache_creation_input_tokens);
+  const cacheRead = optionalToken(usage.cache_read_input_tokens);
+  if (
+    input === undefined
+    || output === undefined
+    || (Object.hasOwn(usage, 'cache_creation_input_tokens')
+      && cacheCreation === undefined)
+    || (Object.hasOwn(usage, 'cache_read_input_tokens')
+      && cacheRead === undefined)
+  ) {
+    return { kind: 'unknown' };
+  }
+  if (
+    input === 0
+    && output === 0
+    && (cacheCreation ?? 0) === 0
+    && (cacheRead ?? 0) === 0
+  ) {
+    return { kind: 'unknown' };
+  }
+  const inputTokens = input + (cacheCreation ?? 0) + (cacheRead ?? 0);
+  if (!Number.isSafeInteger(inputTokens)) return { kind: 'unknown' };
+  return reportedUsage({
+    inputTokens,
+    outputTokens: output,
+    ...(Object.hasOwn(usage, 'cache_creation_input_tokens')
+      ? { cacheCreationInputTokens: cacheCreation! }
+      : {}),
+    ...(Object.hasOwn(usage, 'cache_read_input_tokens')
+      ? { cacheReadInputTokens: cacheRead! }
+      : {}),
+  });
+}
+
+function contentBlocks(message: JsonObject): readonly unknown[] {
+  return Array.isArray(message.content) ? message.content : [];
+}
+
+function consumeAssistant(
+  message: JsonObject,
+  accumulator: GrokAccumulator,
+  onEvent: EngineEventSink,
+  topLevel: boolean,
+): void {
+  if (
+    topLevel
+    && typeof message.model === 'string'
+    && message.model !== 'unknown'
+  ) {
+    accumulator.model = nonEmptyText(message.model, 'Grok assistant model');
+  }
+  let text = '';
+  for (const rawBlock of contentBlocks(message)) {
+    const block = object(rawBlock, 'Grok assistant content block');
+    if (block.type === 'text' && typeof block.text === 'string') {
+      text += block.text;
+      onEvent({ type: 'text', delta: block.text });
+    } else if (
+      block.type === 'thinking'
+      && typeof block.thinking === 'string'
+    ) {
+      onEvent({ type: 'thinking', delta: block.thinking });
+    } else if (
+      (block.type === 'tool_use' || block.type === 'server_tool_use')
+      && typeof block.id === 'string'
+      && typeof block.name === 'string'
+    ) {
+      const id = nonEmptyText(block.id, 'Grok tool id');
+      const name = nonEmptyText(block.name, 'Grok tool name');
+      accumulator.toolNames.set(id, name);
+      onEvent({ type: 'tool', name, phase: 'use' });
+    }
+  }
+  if (text.length > 0) {
+    accumulator.parts.push({ kind: 'assistant', text, final: false });
+  }
+}
+
+function consumeUser(
+  message: JsonObject,
+  accumulator: GrokAccumulator,
+  onEvent: EngineEventSink,
+): void {
+  for (const rawBlock of contentBlocks(message)) {
+    const block = object(rawBlock, 'Grok user content block');
+    if (block.type !== 'tool_result' || typeof block.tool_use_id !== 'string') {
+      continue;
+    }
+    const id = nonEmptyText(block.tool_use_id, 'Grok tool result id');
+    onEvent({
+      type: 'tool',
+      name: accumulator.toolNames.get(id) ?? id,
+      phase: 'result',
+    });
+  }
+}
+
+function consumeLine(
+  line: string,
+  accumulator: GrokAccumulator,
+  onEvent: EngineEventSink,
+  expectedCapabilities: readonly string[],
+): void {
+  if (line.trim().length === 0 || accumulator.parseError !== null) return;
+  try {
+    if (accumulator.terminal !== null) {
+      throw new TypeError('Grok emitted data after its terminal result');
+    }
+    const frame = object(JSON.parse(line), 'Grok stream frame');
+    if (frame.type === 'system') {
+      if (typeof frame.model === 'string' && frame.model !== 'unknown') {
+        accumulator.model = nonEmptyText(frame.model, 'Grok init model');
+      }
+      if (Array.isArray(frame.tools)) {
+        const capabilities = Object.freeze(frame.tools.map((tool, index) =>
+          nonEmptyText(tool, `Grok init tools[${index}]`),
+        ));
+        const undeclared = capabilities.find(
+          (capability) => !expectedCapabilities.includes(capability),
+        );
+        if (undeclared !== undefined) {
+          throw new TypeError(
+            `Grok init reported undeclared capability ${undeclared}`,
+          );
+        }
+        const missing = expectedCapabilities.find(
+          (capability) => !capabilities.includes(capability),
+        );
+        if (missing !== undefined) {
+          throw new TypeError(
+            `Grok init omitted declared capability ${missing}`,
+          );
+        }
+        accumulator.capabilities = capabilities;
+      }
+    } else if (frame.type === 'assistant') {
+      consumeAssistant(
+        object(frame.message, 'Grok assistant message'),
+        accumulator,
+        onEvent,
+        frame.parent_tool_use_id === null,
+      );
+    } else if (frame.type === 'user') {
+      consumeUser(
+        object(frame.message, 'Grok user message'),
+        accumulator,
+        onEvent,
+      );
+    } else if (frame.type === 'result') {
+      accumulator.terminal = frame;
+    }
+  } catch (error) {
+    accumulator.parseError = error instanceof Error
+      ? error
+      : new Error(String(error));
+  }
+}
+
+function finalParts(
+  parts: readonly AgentResultPart[],
+  terminal: JsonObject,
+): readonly AgentResultPart[] {
+  const output = [...parts];
+  if (
+    Object.hasOwn(terminal, 'structuredOutput')
+    || Object.hasOwn(terminal, 'structured_output')
+  ) {
+    output.push({
+      kind: 'structured',
+      value: (
+        Object.hasOwn(terminal, 'structuredOutput')
+          ? terminal.structuredOutput
+          : terminal.structured_output
+      ) as JsonValue,
+      final: true,
+    });
+    return output;
+  }
+  const finalText = typeof terminal.result === 'string'
+    ? terminal.result
+    : '';
+  const last = output.at(-1);
+  if (
+    finalText.length > 0
+    && last?.kind === 'assistant'
+    && last.text === finalText
+  ) {
+    output[output.length - 1] = { ...last, final: true };
+    return output;
+  }
+  if (finalText.length > 0) {
+    output.push({ kind: 'assistant', text: finalText, final: true });
+    return output;
+  }
+  if (last?.kind === 'assistant') {
+    output[output.length - 1] = { ...last, final: true };
+    return output;
+  }
+  throw new TypeError('Grok completed without a final result');
+}
+
+function observedJsonModel(
+  terminal: JsonObject,
+  requestedModel: string,
+): string | null {
+  if (!Object.hasOwn(terminal, 'modelUsage')) return null;
+  const usage = object(terminal.modelUsage, 'Grok result modelUsage');
+  const models = Object.keys(usage).map((model, index) =>
+    nonEmptyText(model, `Grok result modelUsage key ${index}`),
+  );
+  if (models.includes(requestedModel)) return requestedModel;
+  return models.length === 1 ? models[0]! : null;
+}
+
+function stopReason(terminal: JsonObject): string | undefined {
+  const value = terminal.stopReason ?? terminal.stop_reason;
+  return typeof value === 'string' ? value : undefined;
+}
+
+function sameCapabilities(
+  expected: readonly string[],
+  observed: readonly string[],
+): boolean {
+  return expected.length === observed.length
+    && expected.every((capability) => observed.includes(capability));
+}
+
+function loopError(
+  kind: EngineFailureKind,
+  message: string,
+): LoopError {
+  if (kind === 'rate-limit') {
+    return new LoopError({ code: 'RATE_LIMIT', phase: 'engine', message });
+  }
+  if (kind === 'quota') {
+    return new LoopError({ code: 'QUOTA', phase: 'engine', message });
+  }
+  if (kind === 'timeout') {
+    return new LoopError({ code: 'TIMEOUT', phase: 'engine', message });
+  }
+  if (kind === 'aborted') {
+    return new LoopError({ code: 'ABORTED', phase: 'engine', message });
+  }
+  if (kind === 'invalid-config') {
+    return new LoopError({ code: 'CONFIG', phase: 'engine', message });
+  }
+  return new LoopError({ code: 'ENGINE', phase: 'engine', message });
+}
+
+function transportFailure(
+  diagnostic: string,
+  exitCode: number | null,
+  timedOut: boolean,
+): AgentResult['transportFailure'] {
+  const kind = timedOut
+    ? 'timeout'
+    : classifyEngineFailure(new Error(diagnostic));
+  return {
+    kind,
+    message: diagnostic || 'Grok transport failed after its final result',
+    exitCode,
+  };
+}
+
+export class GrokCliEngine implements Engine {
+  readonly name = 'grok-cli';
+  readonly #executable: string;
+  readonly #version: string;
+  readonly #identity: GrokCliIdentity;
+  readonly #environment: Readonly<Record<string, string>>;
+  readonly #authFile: string | null;
+  readonly #authContents: string | null;
+  readonly #authRedactions: Readonly<Record<string, string>>;
+  readonly #options: GrokCliEngineOptions;
+
+  constructor(options: GrokCliEngineOptions) {
+    grokPermissionMode(options);
+    if (typeof options.executable !== 'string' || !isAbsolute(options.executable)) {
+      throw new TypeError('Grok executable must be an absolute path');
+    }
+    try {
+      this.#executable = resolveCommandExecutable(options.executable);
+    } catch {
+      throw new Error(`grok command not found at ${options.executable}`);
+    }
+    this.#version = nonEmptyText(options.version, 'Grok CLI version');
+    const checked = engineSelection({
+      adapter: 'grok-cli',
+      adapterVersion: this.#version,
+      provider: nullableText(options.identity.provider, 'Grok provider'),
+      modelFamily: nullableText(options.identity.modelFamily, 'Grok model family'),
+    });
+    this.#identity = Object.freeze({
+      provider: checked.provider,
+      modelFamily: checked.modelFamily,
+    });
+    const selectedEnvironment: Record<string, string> = {};
+    for (const [name, value] of Object.entries(options.environment ?? {})) {
+      if (!/^[A-Za-z_][A-Za-z0-9_]*$/u.test(name)) {
+        throw new TypeError(`Grok environment name ${name} is invalid`);
+      }
+      if (typeof value !== 'string' || value.includes('\0')) {
+        throw new TypeError(`Grok environment value ${name} must be a string without NUL`);
+      }
+      if (
+        name === 'HOME'
+        || name === 'GROK_HOME'
+        || name === 'TMPDIR'
+        || name.startsWith('GROK_')
+      ) {
+        throw new TypeError(`Grok environment cannot replace ${name}`);
+      }
+      selectedEnvironment[name] = value;
+    }
+    this.#environment = Object.freeze(selectedEnvironment);
+    if (options.authFile === undefined) {
+      this.#authFile = null;
+      this.#authContents = null;
+    } else {
+      if (!isAbsolute(options.authFile)) {
+        throw new TypeError('Grok auth file must be an absolute path');
+      }
+      const auth = lstatSync(options.authFile);
+      if (auth.isSymbolicLink() || !auth.isFile()) {
+        throw new TypeError('Grok auth file must be a regular file, not a symlink');
+      }
+      this.#authFile = realpathSync(options.authFile);
+      this.#authContents = readFileSync(this.#authFile, 'utf8');
+    }
+    this.#authRedactions = authRedactions(this.#authContents);
+    this.#options = Object.freeze({
+      executable: this.#executable,
+      version: this.#version,
+      identity: this.#identity,
+      ...(options.permissionMode === undefined
+        ? {}
+        : { permissionMode: options.permissionMode }),
+      ...(Object.keys(this.#environment).length === 0
+        ? {}
+        : { environment: this.#environment }),
+      ...(this.#authFile === null ? {} : { authFile: this.#authFile }),
+    });
+  }
+
+  async run(
+    request: AgentRequest,
+    onEvent: EngineEventSink,
+    signal: AbortSignal,
+  ): Promise<AgentResult> {
+    if (signal.aborted) {
+      throw loopError('aborted', 'Grok attempt was aborted before start');
+    }
+    if (request.env !== undefined && Object.keys(request.env).length > 0) {
+      throw new TypeError(
+        'Grok request environment is not allowed; select values in the constructor environment',
+      );
+    }
+    const model = nonEmptyText(request.model, 'Grok request model');
+    const capabilities = requestedCapabilities(request);
+    const requested = engineSelection({
+      adapter: 'grok-cli',
+      adapterVersion: this.#version,
+      provider: this.#identity.provider,
+      modelFamily: this.#identity.modelFamily,
+      model,
+      capabilities,
+    });
+    const cwd = assertNoProjectExtensions(
+      typeof request.cwd === 'string' ? request.cwd : '',
+    );
+    const normalizedRequest: AgentRequest = { ...request, cwd };
+    const directory = mkdtempSync(join(tmpdir(), 'lines-grok-'));
+    const promptFile = join(directory, 'prompt.md');
+    writeFileSync(promptFile, request.prompt, { encoding: 'utf8', mode: 0o600 });
+    const accumulator: GrokAccumulator = {
+      parts: [],
+      toolNames: new Map(),
+      terminal: null,
+      model: null,
+      capabilities: null,
+      parseError: null,
+    };
+    const decoder = new TextDecoder();
+    let buffer = '';
+    const parserAbort = new AbortController();
+    const commandSignal = AbortSignal.any([signal, parserAbort.signal]);
+    const flush = (line: string): void =>
+      consumeLine(line, accumulator, onEvent, capabilities);
+    const hardTimeout = request.timeoutMs === undefined
+      ? undefined
+      : request.timeoutMs + (request.timeoutGraceMs ?? 0);
+    const startedAt = Date.now();
+    const owner = ownedCommandIdentity({
+      adapter: 'grok-cli',
+      runId: request.lines?.runId,
+      leafId: request.lines?.leafId,
+      attemptId: request.lines?.attemptId,
+    });
+
+    try {
+      const environment = isolatedEnvironment(
+        directory,
+        this.#executable,
+        normalizedRequest,
+        capabilities,
+        this.#environment,
+        this.#authContents,
+      );
+      const structured = normalizedRequest.jsonSchema !== undefined;
+      const command = await runOwnedCommand({
+        executable: this.#executable,
+        args: buildGrokArgs(normalizedRequest, this.#options, promptFile),
+        cwd,
+        env: environment,
+        inheritParentEnv: false,
+        stdin: '',
+        ...owner,
+        ...DEFAULT_OWNED_COMMAND_LIMITS,
+        timeoutMs: hardTimeout ?? DEFAULT_OWNED_COMMAND_LIMITS.timeoutMs,
+        maxOutputBytes:
+          request.maxOutputBytes ?? DEFAULT_OWNED_COMMAND_LIMITS.maxOutputBytes,
+        maxMemoryBytes:
+          request.maxMemoryBytes ?? DEFAULT_OWNED_COMMAND_LIMITS.maxMemoryBytes,
+      }, commandSignal, {
+        onStdout(chunk) {
+          if (structured) return;
+          buffer += decoder.decode(chunk, { stream: true });
+          let newline: number;
+          while ((newline = buffer.indexOf('\n')) >= 0) {
+            flush(buffer.slice(0, newline));
+            buffer = buffer.slice(newline + 1);
+            if (accumulator.parseError !== null) {
+              parserAbort.abort();
+              return;
+            }
+          }
+        },
+      });
+      if (!structured) {
+        buffer += decoder.decode();
+        if (buffer.length > 0) flush(buffer);
+      }
+
+      if (accumulator.parseError) {
+        throw loopError(
+          'invalid-config',
+          `Grok returned an invalid JSON stream: ${accumulator.parseError.message}`,
+        );
+      }
+      if (command.aborted || signal.aborted) {
+        throw loopError('aborted', 'Grok attempt was aborted');
+      }
+
+      const stdout = new TextDecoder().decode(command.stdout);
+      const stderr = new TextDecoder().decode(command.stderr);
+      const scrubDiagnostic = (value: string): string => scrubCapture(
+        scrubAuthValues(value, this.#authRedactions),
+        { ...this.#environment },
+        700,
+      );
+      const stderrDiagnostic = scrubDiagnostic(stderr);
+      const stdoutDiagnostic = scrubDiagnostic(stdout);
+      const failed = command.timedOut || command.exitCode !== 0;
+      let terminal = accumulator.terminal;
+      if (structured && stdout.trim().length > 0) {
+        try {
+          terminal = object(JSON.parse(stdout), 'Grok JSON result');
+        } catch (error) {
+          if (!failed) {
+            throw loopError(
+              'invalid-config',
+              `Grok returned invalid JSON: ${
+                error instanceof Error ? error.message : String(error)
+              }`,
+            );
+          }
+        }
+      }
+      const succeeded = terminal !== null && (
+        structured
+          ? terminal.type !== 'error'
+            && Object.hasOwn(terminal, 'structuredOutput')
+          : terminal.subtype === 'success' && terminal.is_error !== true
+      );
+      if (!succeeded) {
+        const rawDetail = terminal && typeof terminal.message === 'string'
+          ? terminal.message
+          : terminal && Array.isArray(terminal.errors)
+            ? terminal.errors.map(String).join('; ')
+            : stderrDiagnostic || stdoutDiagnostic;
+        const detail = scrubDiagnostic(rawDetail);
+        const kind = command.timedOut
+          ? 'timeout'
+          : classifyEngineFailure(new Error(detail || 'Grok failed'));
+        throw loopError(kind, `Grok failed${detail ? `: ${detail}` : ''}`);
+      }
+      if (terminal === null) {
+        throw loopError('invalid-config', 'Grok completed without a result');
+      }
+
+      const usage = usageFromTerminal(terminal);
+      const observedCapabilities = accumulator.capabilities ?? capabilities;
+      if (!sameCapabilities(capabilities, observedCapabilities)) {
+        throw loopError(
+          'invalid-config',
+          'Grok effective capabilities did not match the prepared request',
+        );
+      }
+      const effective = engineSelection({
+        adapter: 'grok-cli',
+        adapterVersion: this.#version,
+        provider: this.#identity.provider,
+        modelFamily: this.#identity.modelFamily,
+        model: structured
+          ? observedJsonModel(terminal, model)
+          : accumulator.model,
+        capabilities: observedCapabilities,
+      });
+      onEvent({
+        type: 'usage',
+        usage,
+        model: effective.model ?? requested.model ?? 'unknown',
+      });
+      const late = request.timeoutMs !== undefined
+        && Date.now() - startedAt > request.timeoutMs;
+      return validateAgentResult({
+        parts: finalParts(accumulator.parts, terminal),
+        usage,
+        requested,
+        effective,
+        ...(stopReason(terminal) === undefined
+          ? {}
+          : { stopReason: stopReason(terminal) }),
+        ...(failed
+          ? {
+              transportFailure: transportFailure(
+                stderrDiagnostic,
+                command.exitCode,
+                command.timedOut,
+              ),
+            }
+          : late
+            ? {
+                transportFailure: {
+                  kind: 'timeout' as const,
+                  message: 'Grok result arrived after the soft timeout',
+                  exitCode: command.exitCode,
+                },
+              }
+            : {}),
+        raw: terminal,
+      });
+    } finally {
+      rmSync(directory, { recursive: true, force: true });
+    }
+  }
+}

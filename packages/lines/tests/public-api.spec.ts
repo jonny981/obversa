@@ -25,6 +25,7 @@ describe('public runtime API', () => {
     expect(Object.keys(api).sort()).toEqual([
       'EXIT_PAUSED',
       'GraphValidationError',
+      'GrokCliEngine',
       'JsonValueError',
       'LANE_DEAD_FAILURES',
       'LoopError',
@@ -36,6 +37,7 @@ describe('public runtime API', () => {
       'any',
       'assertGraph',
       'bodyPassed',
+      'buildGrokArgs',
       'classifyEngineFailure',
       'commandSucceeds',
       'compileGraph',
@@ -168,10 +170,12 @@ describe('public runtime API', () => {
       'MockEngine',
       'MockEnvironment',
       'assertArtifactStoreConformance',
+      'assertEngineConformance',
       'assertEventStoreConformance',
       'assertGraphTypeConformance',
       'mockVerdict',
       'runArtifactStoreConformance',
+      'runEngineConformance',
       'runEventStoreConformance',
       'runGraphTypeConformance',
     ]);

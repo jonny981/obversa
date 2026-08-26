@@ -1,13 +1,14 @@
 import { lstat, realpath } from 'node:fs/promises';
 import { isAbsolute } from 'node:path';
 
-import type {
-  AgentRequest,
-  AgentResultPart,
-  Engine,
-  EngineSelectionRecord,
-  EngineTransportFailure,
-  UsageReceipt,
+import {
+  SUBAGENT_TOOLS,
+  type AgentRequest,
+  type AgentResultPart,
+  type Engine,
+  type EngineSelectionRecord,
+  type EngineTransportFailure,
+  type UsageReceipt,
 } from '../engines/engine.js';
 import {
   classifyEngineFailure,
@@ -414,20 +415,27 @@ function requestFor(
   workspace: NodeWorkspacePolicy,
   scratchDirectory: string,
   grantedPermissions: readonly string[],
+  resultContract: ResultContract | null,
 ): AgentRequest {
+  const leaf = !lane.selection.capabilities.some((capability) =>
+    SUBAGENT_TOOLS.includes(capability),
+  );
   return {
     prompt,
     ...(lane.selection.model === null ? {} : { model: lane.selection.model }),
     ...(policy.callTokens === null ? {} : { maxTokens: policy.callTokens.tokens }),
+    tools: [...lane.selection.capabilities],
     allowedTools: [...grantedPermissions],
+    ...(resultContract === null ? {} : { jsonSchema: resultContract.schema }),
     cwd: workspace.directory ?? scratchDirectory,
+    workspaceMode: workspace.mode,
     timeoutMs: policy.timeoutMs,
     timeoutGraceMs: policy.teardownGraceMs,
     maxOutputBytes: policy.outputBytes,
     maxMemoryBytes: policy.memoryBytes,
-    leaf: true,
+    leaf,
     lines: {
-      leaf: true,
+      leaf,
       runId: identity.streamId,
       attemptId: identity.attemptId,
       leafId: nodeId,
@@ -677,6 +685,7 @@ export async function executeNodeAttempt(
                 workspace,
                 scratchDirectory,
                 grantedPermissions,
+                resultContract,
               ),
               () => {},
               signal,

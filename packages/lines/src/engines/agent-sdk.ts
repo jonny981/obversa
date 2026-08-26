@@ -14,7 +14,7 @@ import type { Options as SdkOptions } from '@anthropic-ai/claude-agent-sdk';
 import type { Memory, MemoryCommand } from '@obversa/memory';
 
 import {
-  SUBAGENT_TOOLS,
+  CLAUDE_SUBAGENT_TOOLS,
   modelFor,
   requestEnv,
   toolPacer,
@@ -78,7 +78,7 @@ export function agentSdkToolOptions(
     allowedTools: req.memory
       ? agentSdkMemoryAllowedTools(req.allowedTools)
       : req.allowedTools,
-    disallowedTools: req.leaf ? SUBAGENT_TOOLS : undefined,
+    disallowedTools: req.leaf ? CLAUDE_SUBAGENT_TOOLS : undefined,
   };
 }
 

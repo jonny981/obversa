@@ -18,6 +18,7 @@ export type EngineName =
   | 'agent-sdk'
   | 'claude-cli'
   | 'codex'
+  | 'grok-cli'
   | 'anthropic-api'
   | (string & {});
 
@@ -62,9 +63,9 @@ export interface EngineTransportFailure {
 
 /** Tools an agent uses to spawn sub-agents / fan out. A `leaf` request disallows
  *  these, and the markdown agent loader (`agent-md.ts`) drops them from a file's
- *  allowlist. One list, so the engine backstop and the loader filter can never
- *  disagree on what counts as a spawn tool. */
-export const SUBAGENT_TOOLS = ['Task', 'Agent'];
+ *  allowlist. Adapters select only the names their backend accepts. */
+export const SUBAGENT_TOOLS = ['Task', 'Agent', 'task'];
+export const CLAUDE_SUBAGENT_TOOLS = ['Task', 'Agent'];
 
 export interface AgentRequest {
   prompt: string;
@@ -73,15 +74,19 @@ export interface AgentRequest {
   systemMode?: 'append' | 'replace';
   model?: string;
   maxTokens?: number;
+  /** JSON Schema supplied to engines with native structured output. */
+  jsonSchema?: JsonValue;
   /** Available built-in tools. An empty list disables them where supported. */
   tools?: string[];
   /** Tool allowlist, where the backend supports tools (SDK / CLI). */
   allowedTools?: string[];
+  /** Filesystem access admitted for this one engine call. */
+  workspaceMode?: 'none' | 'read' | 'write';
   cwd?: string;
   /**
-   * Extra env vars for the engine's execution context, MERGED over the parent
-   * process env by engines that spawn subprocesses. Engines that cannot honor
-   * it ignore it (anthropic-api: no subprocess).
+   * Extra env vars for engines that admit per-call environment changes.
+   * Security-hardened adapters may reject this and require host-selected values
+   * when the engine is constructed. Engines with no subprocess ignore it.
    */
   env?: Record<string, string>;
   /**
@@ -100,7 +105,7 @@ export interface AgentRequest {
   maxMemoryBytes?: number;
   /** Lines-owned subprocess metadata, converted to env by CLI-backed engines. */
   lines?: {
-    leaf: true;
+    leaf: boolean;
     runId?: string;
     attemptId?: Sha256Digest;
     leafId: string;
@@ -174,7 +179,7 @@ export function requestEnv(req: AgentRequest): Record<string, string> | undefine
   if (!req.env && !req.lines) return undefined;
   const lines = req.lines
     ? {
-        LINES_LEAF: '1',
+        LINES_LEAF: req.lines.leaf ? '1' : '0',
         LINES_LEAF_ID: req.lines.leafId,
         LINES_LEAF_LABEL: req.lines.label,
         LINES_LEAF_PATH: req.lines.path.join('/'),

@@ -29,3 +29,11 @@ export {
   type ArtifactStoreConformanceFailure,
   type ArtifactStoreConformanceReport,
 } from './artifacts/conformance.js';
+export {
+  runEngineConformance,
+  assertEngineConformance,
+  type EngineConformanceScenario,
+  type EngineConformanceFixture,
+  type EngineConformanceFailure,
+  type EngineConformanceReport,
+} from './engines/conformance.js';

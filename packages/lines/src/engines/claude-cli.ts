@@ -5,7 +5,7 @@
  */
 
 import {
-  SUBAGENT_TOOLS,
+  CLAUDE_SUBAGENT_TOOLS,
   modelFor,
   requestEnv,
   type AgentRequest,
@@ -226,7 +226,8 @@ export function buildClaudeArgs(
   if (req.allowedTools?.length)
     args.push('--allowedTools', req.allowedTools.join(','));
   // A leaf agent may not spawn sub-agents, so disallow the spawn tool (wins over any allowlist).
-  if (req.leaf) args.push('--disallowedTools', SUBAGENT_TOOLS.join(','));
+  if (req.leaf)
+    args.push('--disallowedTools', CLAUDE_SUBAGENT_TOOLS.join(','));
   if (opts.permissionMode) args.push('--permission-mode', opts.permissionMode);
   if (opts.cliArgs?.length) args.push(...opts.cliArgs);
   return args;

@@ -62,6 +62,8 @@ export interface OwnedCommandRequest {
   readonly args: readonly string[];
   readonly cwd: string;
   readonly env: Readonly<Record<string, string>>;
+  /** Whether Execa may merge the parent process environment. Default true. */
+  readonly inheritParentEnv?: boolean;
   readonly stdin: string;
   readonly attemptId: Sha256Digest;
   readonly runId: string;
@@ -230,9 +232,19 @@ function validateRequest(request: OwnedCommandRequest): OwnedCommandRequest {
       );
     }
   }
+  if (
+    request.inheritParentEnv !== undefined
+    && typeof request.inheritParentEnv !== 'boolean'
+  ) {
+    throw new OwnedCommandError(
+      'INVALID_COMMAND',
+      'inheritParentEnv must be a boolean',
+    );
+  }
 
   return {
     ...request,
+    inheritParentEnv: request.inheritParentEnv ?? true,
     attemptId: validateAttemptId(request.attemptId),
     runId: validateStorageId(request.runId, '/runId'),
     timeoutMs: positiveSafeInteger(request.timeoutMs, 'timeoutMs'),
@@ -314,6 +326,7 @@ export async function runOwnedCommand(
       LINES_RUN_ID: request.runId,
       LINES_HEADLESS: '1',
     },
+    extendEnv: request.inheritParentEnv,
     input: request.stdin,
     cancelSignal: cancellation.signal,
     forceKillAfterDelay: false,

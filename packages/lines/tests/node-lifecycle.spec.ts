@@ -218,6 +218,7 @@ describe('node attempt lifecycle', () => {
     expect(denied.status).toBe('denied');
 
     const allowedAttempt = prepared({
+      permissions: ['Read(src/**)'],
       engineRoute: [lane(selected)],
     });
     const allowed = await executeNodeAttempt(
@@ -230,8 +231,10 @@ describe('node attempt lifecycle', () => {
       prompt: 'Answer the task.',
       model: 'model-a',
       maxTokens: 10,
-      allowedTools: ['read'],
+      tools: ['read'],
+      allowedTools: ['Read(src/**)'],
       cwd: allowedAttempt.scratchDirectory,
+      workspaceMode: 'none',
       timeoutMs: 1_000,
       timeoutGraceMs: 50,
       maxOutputBytes: 4_096,
@@ -247,6 +250,25 @@ describe('node attempt lifecycle', () => {
         iteration: 0,
       },
     });
+  });
+
+  it('derives subagent access from the prepared lane capabilities', async () => {
+    const subagentSelection = engineSelection({
+      ...primarySelection,
+      capabilities: ['task'],
+    });
+    const run = vi.fn(async (request: AgentRequest) => {
+      expect(request.leaf).toBe(false);
+      expect(request.lines?.leaf).toBe(false);
+      return success('done', subagentSelection);
+    });
+
+    const result = await executeNodeAttempt(prepared({
+      engineRoute: [lane(engine('subagent', run), subagentSelection)],
+    }), new AbortController().signal);
+
+    expect(result.status).toBe('completed');
+    expect(run).toHaveBeenCalledOnce();
   });
 
   it('copies trusted fields before policy waits and gives data jobs only scratch', async () => {
@@ -435,12 +457,15 @@ describe('node attempt lifecycle', () => {
         return { answer: value.answer };
       },
     });
-    const native = engine('native', async () => ({
-      parts: [{ kind: 'structured', value: { answer: 42 }, final: true }],
-      usage: { kind: 'unknown' },
-      requested: primarySelection,
-      effective: primarySelection,
-    }));
+    const native = engine('native', async (request) => {
+      expect(request.jsonSchema).toEqual(schema);
+      return {
+        parts: [{ kind: 'structured', value: { answer: 42 }, final: true }],
+        usage: { kind: 'unknown' },
+        requested: primarySelection,
+        effective: primarySelection,
+      };
+    });
     const nativeRecord = await executeNodeAttempt(prepared({
       engineRoute: [lane(native)],
       resultContract: contract,
