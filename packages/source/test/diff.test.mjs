@@ -150,3 +150,18 @@ test("a section heading after the closing @@ is kept in the header", () => {
   assert.equal(hunk.lines[0].oldNumber, 10);
   assert.equal(hunk.lines[1].newNumber, 11);
 });
+
+test("a git-quoted path with a tab decodes to the real filename", () => {
+  const tab = String.fromCharCode(9);
+  const { files } = parseUnifiedDiff(`diff --git "a/tab\\tname.txt" "b/tab\\tname.txt"
+--- "a/tab\\tname.txt"
++++ "b/tab\\tname.txt"
+@@ -1 +1 @@
+-x
++y
+`);
+  const [file] = files;
+  assert.equal(file.path, `tab${tab}name.txt`);
+  assert.equal(file.oldPath, `tab${tab}name.txt`);
+  assert.equal(file.newPath, `tab${tab}name.txt`);
+});

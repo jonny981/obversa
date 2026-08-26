@@ -74,6 +74,14 @@ test("reviewDiff builds the surface, returns validated annotations, and cleans u
   assert.ok(capturedDir && !existsSync(capturedDir), "the temp directory must be cleaned up");
 });
 
+test("reviewDiff forwards a ready callback to the surface port", async () => {
+  let received;
+  const marker = () => {};
+  const launchSurface = async ({ ready }) => { received = ready; return { result: { status: "cancelled" } }; };
+  await reviewDiff({ diffText: DIFF, launchSurface, clientKitSource: CLIENT_KIT, open: false, ready: marker });
+  assert.equal(received, marker);
+});
+
 test("a cancelled surface returns no annotations", async () => {
   const launchSurface = async () => ({ result: { status: "cancelled" } });
   const outcome = await reviewDiff({ diffText: DIFF, launchSurface, clientKitSource: CLIENT_KIT, open: false });

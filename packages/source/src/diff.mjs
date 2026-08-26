@@ -5,11 +5,30 @@
 // It does not handle combined merge diffs, colour codes, or word diffs — plain
 // `git diff` only.
 
+// Git wraps a path in double quotes and C-escapes it when the path contains a
+// control character, a double quote, or a backslash. With core.quotePath=false
+// (set by the caller) non-ASCII bytes stay literal, so only these C escapes
+// remain. Decode them so a filename with, say, a tab yields the real path a
+// responder can locate — not the literal quoted form.
+function unquoteGitPath(raw) {
+  if (raw.length < 2 || raw[0] !== '"' || raw[raw.length - 1] !== '"') return raw;
+  const inner = raw.slice(1, -1);
+  const escapes = { t: 9, n: 10, r: 13, f: 12, b: 8, v: 11, a: 7 };
+  let out = "";
+  for (let i = 0; i < inner.length; i += 1) {
+    if (inner[i] !== "\\") { out += inner[i]; continue; }
+    const next = inner[i + 1];
+    if (next === undefined) { out += "\\"; break; }
+    if (Object.hasOwn(escapes, next)) { out += String.fromCharCode(escapes[next]); i += 1; continue; }
+    out += next; // \" -> ", \\ -> \, any other escaped char stays literal
+    i += 1;
+  }
+  return out;
+}
+
 function stripPathPrefix(raw) {
-  let value = raw;
-  const tab = value.indexOf("\t"); // some git configs append a tab + timestamp
-  if (tab >= 0) value = value.slice(0, tab);
-  if (value.startsWith("a/") || value.startsWith("b/")) value = value.slice(2);
+  const value = unquoteGitPath(raw);
+  if (value.startsWith("a/") || value.startsWith("b/")) return value.slice(2);
   return value;
 }
 
@@ -43,10 +62,10 @@ export function parseUnifiedDiff(diffText) {
 
     if (line.startsWith("new file mode")) { file.status = "added"; continue; }
     if (line.startsWith("deleted file mode")) { file.status = "deleted"; continue; }
-    if (line.startsWith("rename from ")) { file.status = "renamed"; file.oldPath = line.slice(12); file.path = displayPath(file); continue; }
-    if (line.startsWith("rename to ")) { file.status = "renamed"; file.newPath = line.slice(10); file.path = displayPath(file); continue; }
-    if (line.startsWith("copy from ")) { file.status = "copied"; file.oldPath = line.slice(10); file.path = displayPath(file); continue; }
-    if (line.startsWith("copy to ")) { file.status = "copied"; file.newPath = line.slice(8); file.path = displayPath(file); continue; }
+    if (line.startsWith("rename from ")) { file.status = "renamed"; file.oldPath = unquoteGitPath(line.slice(12)); file.path = displayPath(file); continue; }
+    if (line.startsWith("rename to ")) { file.status = "renamed"; file.newPath = unquoteGitPath(line.slice(10)); file.path = displayPath(file); continue; }
+    if (line.startsWith("copy from ")) { file.status = "copied"; file.oldPath = unquoteGitPath(line.slice(10)); file.path = displayPath(file); continue; }
+    if (line.startsWith("copy to ")) { file.status = "copied"; file.newPath = unquoteGitPath(line.slice(8)); file.path = displayPath(file); continue; }
     if (line.startsWith("Binary files ")) { file.binary = true; continue; }
 
     if (line.startsWith("--- ")) {

@@ -32,6 +32,7 @@ export function diffArgs({ mode = "worktree", range } = {}) {
   const base = [
     "-c", "diff.noprefix=false",
     "-c", "diff.mnemonicPrefix=false",
+    "-c", "core.quotePath=false",
     "--no-pager", "diff", "--no-color", "--no-ext-diff", "--no-textconv",
   ];
   if (mode === "worktree") return base;

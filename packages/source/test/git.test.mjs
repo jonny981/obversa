@@ -24,6 +24,7 @@ test("diffArgs maps each mode to the right git arguments", () => {
   const base = [
     "-c", "diff.noprefix=false",
     "-c", "diff.mnemonicPrefix=false",
+    "-c", "core.quotePath=false",
     "--no-pager", "diff", "--no-color", "--no-ext-diff", "--no-textconv",
   ];
   assert.deepEqual(diffArgs({ mode: "worktree" }), base);

@@ -75,6 +75,9 @@ async function main() {
     cwd: options.cwd,
     app: options.app,
     open: options.open,
+    // With --no-open the surface is not placed in a pane, so the URL is the
+    // only way to reach it: print it once the session is up.
+    ready: options.open ? undefined : ({ url }) => process.stderr.write(`Open the review surface at: ${url}\n`),
     launchSurface: runSurface,
     clientKitSource,
   });
