@@ -231,9 +231,13 @@ An empty decision means start nothing new. D5 accepts it only while a recorded
 attempt is still in flight. Without in-flight work, the executor fails instead
 of asking for the same empty decision forever.
 
-After a dispatch is recorded in the event history, `decide` must not return
-that request again. A later event can make the same node dispatchable again;
-that later occurrence is a new request.
+`position` is the stable logical identity and location of one requested node
+occurrence. Positions must be unique within one decision. The same node can
+appear more than once when each occurrence has a different position.
+
+After a dispatch occurrence is recorded in the event history, `decide` must
+not return it again. A later event can make the same node dispatchable as a new
+occurrence with its own position.
 
 The input state and event are copied and frozen before `reduce` or `decide`
 receives them. These methods must return JSON data. The same definition and
@@ -282,6 +286,10 @@ dispatch set in one decision. A declared dispatch maximum or fan-out maximum
 cannot be below those observed values. The trace does not show which attempts
 overlap at runtime, so the kit does not infer `maxConcurrency`. The graph must
 declare that cap from its own rules or report it as unknown.
+
+When the final expected decision is exactly `complete`, the observed total must
+meet a known dispatch minimum; partial, empty, paused, and failed endings do not
+prove a minimum.
 
 ## Limits
 

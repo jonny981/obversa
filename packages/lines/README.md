@@ -89,13 +89,19 @@ repeated calls. It also checks the declared bounds. The kit counts dispatches
 across the supplied trace and the largest dispatch set in one decision. Known
 dispatch and fan-out maximums cannot be below those observed values. It does
 not infer runtime concurrency from a decision trace.
+When the final expected decision is exactly `complete`, the observed total must
+meet a known dispatch minimum; partial, empty, paused, and failed endings do not
+prove a minimum.
 
 A graph decision contains zero or more dispatch commands, or exactly one
 pause, complete, or fail command. Dispatches ask the executor to start new
 work. An empty decision starts no work. D5 accepts it only while a recorded
 attempt remains in flight; otherwise the executor fails instead of spinning.
-After a dispatch is recorded, the graph does not emit that request again. A
-later event can make the same node dispatchable as a new request.
+Each `position` is the stable logical identity and location of one requested
+node occurrence. Positions must be unique within one decision, so the same
+node can appear more than once at different positions. After an occurrence is
+recorded, the graph does not emit it again. A later event can make the same
+node dispatchable as a new occurrence with its own position.
 
 `run(job, { params })` accepts a JSON object. If `params` is `undefined`, it
 uses a frozen empty object. `null`, arrays, and other invalid roots fail before

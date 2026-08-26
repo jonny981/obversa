@@ -11,6 +11,7 @@ export interface DispatchGraphCommand<Input extends JsonValue = JsonValue> {
   readonly kind: 'dispatch';
   readonly nodeId: NodeId;
   readonly input: Input;
+  /** Stable logical identity and location of this requested node occurrence. */
   readonly position: string;
 }
 
@@ -102,7 +103,7 @@ export function validateGraphCommands(
     throw invalid('', 'A terminal command must be the only command in a decision.');
   }
 
-  const dispatched = new Set<NodeId>();
+  const dispatchPositions = new Set<string>();
   for (let index = 0; index < frozen.length; index += 1) {
     const command = frozen[index] as GraphCommand;
     const path = `/${index}`;
@@ -113,17 +114,17 @@ export function validateGraphCommands(
           'kind', 'nodeId', 'input', 'position',
         ], path);
         const nodeId = text(command.nodeId, `${path}/nodeId`, 'nodeId');
-        text(command.position, `${path}/position`, 'position');
+        const position = text(command.position, `${path}/position`, 'position');
         if (!kernel.node(nodeId)) {
           throw invalid(`${path}/nodeId`, `Dispatch refers to unknown node "${nodeId}".`);
         }
-        if (dispatched.has(nodeId)) {
+        if (dispatchPositions.has(position)) {
           throw invalid(
-            `${path}/nodeId`,
-            `Decision contains duplicate dispatch node "${nodeId}".`,
+            `${path}/position`,
+            `Decision contains duplicate dispatch position "${position}".`,
           );
         }
-        dispatched.add(nodeId);
+        dispatchPositions.add(position);
         break;
       }
       case 'pause':

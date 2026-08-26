@@ -67,6 +67,20 @@ function assertExpectedDecisionTraceFitsBounds(
     (maximum, count) => Math.max(maximum, count),
     0,
   );
+  const finalDecision = decisions.at(-1);
+  const completed = finalDecision?.length === 1
+    && finalDecision[0]?.kind === 'complete';
+
+  if (
+    completed
+    && bounds.dispatches.min.kind === 'known'
+    && totalDispatches < bounds.dispatches.min.value
+  ) {
+    const unit = totalDispatches === 1 ? 'dispatch command' : 'dispatch commands';
+    throw new Error(
+      `Completed trace contains ${totalDispatches} ${unit}, below declared minimum ${bounds.dispatches.min.value}.`,
+    );
+  }
 
   if (
     bounds.dispatches.max.kind === 'known'

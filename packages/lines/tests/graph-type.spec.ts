@@ -256,6 +256,41 @@ describe('compileGraph', () => {
     expect(() => mixed.decide({ next: 'author' })).toThrow(/terminal/i);
   });
 
+  it('allows separate occurrences of the same node in one decision', () => {
+    const repeatedNode = compileGraph(
+      graphType(() => [
+        { kind: 'dispatch', nodeId: 'author', input: {}, position: 'items/first' },
+        { kind: 'dispatch', nodeId: 'author', input: {}, position: 'items/second' },
+      ]),
+      definition,
+    );
+
+    expect(repeatedNode.decide({ next: 'author' })).toEqual([
+      { kind: 'dispatch', nodeId: 'author', input: {}, position: 'items/first' },
+      { kind: 'dispatch', nodeId: 'author', input: {}, position: 'items/second' },
+    ]);
+  });
+
+  it('rejects a duplicate dispatch position within one decision', () => {
+    const duplicatePosition = compileGraph(
+      graphType(() => [
+        { kind: 'dispatch', nodeId: 'author', input: {}, position: 'items/shared' },
+        { kind: 'dispatch', nodeId: 'reviewer', input: {}, position: 'items/shared' },
+      ]),
+      definition,
+    );
+
+    expect(() => duplicatePosition.decide({ next: 'author' })).toThrowError(
+      expect.objectContaining({
+        issues: [expect.objectContaining({
+          code: 'INVALID_GRAPH_COMMAND',
+          path: '/1/position',
+          message: expect.stringMatching(/duplicate dispatch position/i),
+        })],
+      }),
+    );
+  });
+
   it('accepts an empty decision as no new work to start', () => {
     const empty = compileGraph(graphType(() => []), definition);
 

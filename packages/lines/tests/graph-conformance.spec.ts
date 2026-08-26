@@ -5,6 +5,7 @@ import {
   runGraphTypeConformance,
   type GraphTypeConformanceFixture,
 } from '../src/graph/conformance.ts';
+import type { GraphCommand } from '../src/graph/commands.ts';
 import type {
   GraphBounds,
   GraphDescription,
@@ -64,12 +65,7 @@ function typeWith(
   overrides: Partial<{
     initialState: () => State;
     reduce: (state: State, event: Event) => State;
-    decide: (state: State) => readonly ({
-      readonly kind: 'dispatch';
-      readonly nodeId: string;
-      readonly input: {};
-      readonly position: string;
-    } | { readonly kind: 'complete'; readonly output: {} })[];
+    decide: (state: State) => readonly GraphCommand[];
     describe: () => ReturnType<typeof graphDescription>;
   }> = {},
 ): GraphType<typeof definition, State, Event, { readonly memory: 'unused' }> {
@@ -392,5 +388,72 @@ describe('graph type conformance', () => {
       }),
     ]));
     expect(honestTraceBounds.ok).toBe(true);
+  });
+
+  it('rejects a completed trace below its declared dispatch minimum', () => {
+    const bounds: GraphBounds = {
+      dispatches: {
+        min: { kind: 'known', value: 2 },
+        max: { kind: 'known', value: 2 },
+      },
+      maxConcurrency: { kind: 'known', value: 1 },
+      maxFanOut: { kind: 'known', value: 1 },
+    };
+    const base = fixture(typeWith({
+      describe: () => ({ ...graphDescription(), bounds }),
+    }));
+    const report = runGraphTypeConformance({
+      ...base,
+      expected: { ...base.expected, bounds },
+    });
+
+    expect(report.ok).toBe(false);
+    expect(report.failures).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        case: 'deterministic plan resolution',
+        message: expect.stringMatching(/completed trace.*1 dispatch command.*minimum 2/i),
+      }),
+    ]));
+  });
+
+  it.each([
+    ['a partial dispatch', [{
+      kind: 'dispatch',
+      nodeId: 'step',
+      input: {},
+      position: 'work/step-again',
+    }]],
+    ['an empty wait', []],
+    ['a pause', [{ kind: 'pause', reason: 'waiting' }]],
+    ['a failure', [{ kind: 'fail', code: 'STOPPED', message: 'Stopped.' }]],
+  ] as const)('does not infer a dispatch minimum from %s ending', (_label, ending) => {
+    const bounds: GraphBounds = {
+      dispatches: {
+        min: { kind: 'known', value: 3 },
+        max: { kind: 'known', value: 3 },
+      },
+      maxConcurrency: { kind: 'known', value: 1 },
+      maxFanOut: { kind: 'known', value: 1 },
+    };
+    const first = [{
+      kind: 'dispatch',
+      nodeId: 'step',
+      input: {},
+      position: 'work/step',
+    }] as const;
+    const base = fixture(typeWith({
+      decide: (state) => state.completed ? ending : first,
+      describe: () => ({ ...graphDescription(), bounds }),
+    }));
+    const report = runGraphTypeConformance({
+      ...base,
+      expected: {
+        ...base.expected,
+        commands: [first, ending],
+        bounds,
+      },
+    });
+
+    expect(report.ok).toBe(true);
   });
 });
