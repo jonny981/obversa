@@ -16,6 +16,7 @@ import { join } from 'node:path';
 
 import { CodexEngine } from '../src/engines/codex.ts';
 import { ClaudeCliEngine } from '../src/engines/claude-cli.ts';
+import { finalResultText } from '../src/runtime/result-parts.ts';
 
 /** Seconds the orphan holds the pipes — far beyond any test bound below, so a
  *  regression to stream-close waiting fails loudly rather than just slowly. */
@@ -52,8 +53,8 @@ process.exit(0);
       new AbortController().signal,
     );
 
-    expect(result.text).toBe('PONG');
-    expect(result.warning).toBeUndefined();
+    expect(finalResultText(result)).toBe('PONG');
+    expect(result.transportFailure).toBeUndefined();
     expect(Date.now() - startedAt).toBeLessThan(10_000);
   });
 
@@ -82,8 +83,12 @@ process.exit(0);
       new AbortController().signal,
     );
 
-    expect(result.text).toBe('PONG');
-    expect(result.usage).toEqual({ inputTokens: 3, outputTokens: 1 });
+    expect(finalResultText(result)).toBe('PONG');
+    expect(result.usage).toEqual({
+      kind: 'reported',
+      inputTokens: 3,
+      outputTokens: 1,
+    });
     expect(Date.now() - startedAt).toBeLessThan(10_000);
   });
 

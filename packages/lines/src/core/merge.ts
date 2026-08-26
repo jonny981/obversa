@@ -24,6 +24,7 @@ import {
   branchCommits,
 } from './git.js';
 import { LoopError } from './errors.js';
+import { requireFinalResultText } from '../runtime/result-parts.js';
 
 export interface MergeSynthesisConfig {
   /** The branch to land into the current workspace. */
@@ -76,7 +77,10 @@ export async function mergeSynthesis(
           () => {},
           ctx.signal,
         );
-        writeFileSync(join(cwd, file), stripFence(out.text));
+        writeFileSync(
+          join(cwd, file),
+          stripFence(requireFinalResultText(out)),
+        );
       }
       await stageAll({ cwd, signal: ctx.signal });
     }
@@ -126,5 +130,5 @@ async function synthesiseBody(
     () => {},
     ctx.signal,
   );
-  return out.text.trim();
+  return requireFinalResultText(out).trim();
 }

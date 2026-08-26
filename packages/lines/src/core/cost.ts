@@ -32,6 +32,8 @@ export type PriceTable = Record<string, ModelPrice>;
 export interface ModelCost {
   model: string;
   calls: number;
+  reportedCalls: number;
+  unknownUsageCalls: number;
   inputTokens: number;
   outputTokens: number;
   /** Undefined when the table cannot price this model's complete usage. */
@@ -50,6 +52,8 @@ export interface CostReport {
   savedUsd?: number;
   /** Models whose complete usage cannot be priced by the supplied table. */
   unpricedModels: string[];
+  /** Models with calls whose provider reported no usage receipt. */
+  unknownUsageModels: string[];
   models: ModelCost[];
 }
 
@@ -100,24 +104,31 @@ export function costReport(
 ): CostReport {
   const models: ModelCost[] = [];
   const unpriced: string[] = [];
+  const unknownUsage: string[] = [];
   let spent = 0;
   let allPriced = true;
   const hasAnyCachedInput = snapshot.models.some(hasCachedInput);
+  const hasAnyUnknownUsage = snapshot.models.some(
+    (model) => model.unknownUsageCalls > 0,
+  );
   for (const m of snapshot.models) {
     const price = priceFor(prices, m.model);
     const usd =
-      price && !hasCachedInput(m)
+      price && !hasCachedInput(m) && m.unknownUsageCalls === 0
         ? round(usdFor(price, m.inputTokens, m.outputTokens))
         : undefined;
+    if (m.unknownUsageCalls > 0) unknownUsage.push(m.model);
     if (usd === undefined) {
       allPriced = false;
-      unpriced.push(m.model);
+      if (!price || hasCachedInput(m)) unpriced.push(m.model);
     } else {
       spent += usd;
     }
     models.push({
       model: m.model,
       calls: m.calls,
+      reportedCalls: m.reportedCalls,
+      unknownUsageCalls: m.unknownUsageCalls,
       inputTokens: m.inputTokens,
       outputTokens: m.outputTokens,
       usd,
@@ -125,7 +136,12 @@ export function costReport(
   }
 
   let baselineUsd: number | undefined;
-  if (baselineModel && snapshot.models.length && !hasAnyCachedInput) {
+  if (
+    baselineModel &&
+    snapshot.models.length &&
+    !hasAnyCachedInput &&
+    !hasAnyUnknownUsage
+  ) {
     const baselinePrice = priceFor(prices, baselineModel);
     if (baselinePrice) {
       baselineUsd = round(
@@ -146,6 +162,7 @@ export function costReport(
         ? round(baselineUsd - spentUsd)
         : undefined,
     unpricedModels: unpriced,
+    unknownUsageModels: unknownUsage,
     models,
   };
 }
@@ -156,7 +173,13 @@ export function formatCostReport(report: CostReport): string[] {
   const lines: string[] = [];
   for (const m of report.models) {
     lines.push(
-      `${m.model}: ${m.inputTokens}/${m.outputTokens} tok over ${m.calls} call(s)${m.usd !== undefined ? ` = $${m.usd}` : ' (incomplete price coverage)'}`,
+      `${m.model}: ${m.inputTokens}/${m.outputTokens} tok over ${m.calls} call(s)${
+        m.unknownUsageCalls
+          ? ` (usage unknown for ${m.unknownUsageCalls} call(s))`
+          : m.usd !== undefined
+            ? ` = $${m.usd}`
+            : ' (incomplete price coverage)'
+      }`,
     );
   }
   if (report.spentUsd !== undefined) {
@@ -165,6 +188,11 @@ export function formatCostReport(report: CostReport): string[] {
   if (report.unpricedModels.length) {
     lines.push(
       `no total: incomplete price coverage for model(s) ${report.unpricedModels.join(', ')}`,
+    );
+  }
+  if (report.unknownUsageModels.length) {
+    lines.push(
+      `no total: usage unknown for model(s) ${report.unknownUsageModels.join(', ')}`,
     );
   }
   if (report.baselineUsd !== undefined) {

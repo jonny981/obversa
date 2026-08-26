@@ -19,6 +19,10 @@ import { mapMessage, newAccumulator } from './message-map.js';
 import { settleOnExit } from './settle.js';
 import { LoopError } from '../core/errors.js';
 import { scrubCapture } from '../core/redact.js';
+import {
+  engineSelection,
+  validateAgentResult,
+} from '../runtime/result-parts.js';
 
 /**
  * Classify a failed `claude` subprocess into a provider-limit `LoopError`, or
@@ -243,7 +247,7 @@ export class ClaudeCliEngine implements Engine {
         : req.timeoutMs;
     const startedAt = Date.now();
 
-    const acc = newAccumulator(model ?? 'claude-cli');
+    const acc = newAccumulator(model);
     // Buffered (default) so `stderr` is a string for error messages; we still
     // attach a `data` listener to stream stdout line-by-line as it arrives.
     const sub = execa(bin, args, {
@@ -297,16 +301,6 @@ export class ClaudeCliEngine implements Engine {
     const late =
       typeof req.timeoutMs === 'number' && Date.now() - startedAt > req.timeoutMs;
     if (result.failed) {
-      if (result.timedOut && req.timeoutGraceMs && acc.terminal && acc.text) {
-        onEvent({ type: 'usage', usage: acc.usage, model: acc.model });
-        return {
-          text: acc.text,
-          usage: acc.usage,
-          model: acc.model,
-          stopReason: acc.stopReason,
-          late: true,
-        };
-      }
       // The child's stderr is outside our control and may echo credentials on
       // an auth failure. `scrubCapture` redacts (env values verbatim, then
       // shape patterns, both on the FULL stream, before the cut) so nothing
@@ -315,6 +309,39 @@ export class ClaudeCliEngine implements Engine {
         typeof result.stderr === 'string'
           ? scrubCapture(result.stderr, env, 400)
           : '';
+      if (acc.terminal && acc.parts.some((part) => part.final)) {
+        const requested = engineSelection({
+          adapter: 'claude-cli',
+          provider: 'anthropic',
+          model: model ?? null,
+        });
+        const effective = engineSelection({
+          adapter: 'claude-cli',
+          provider: 'anthropic',
+          model: acc.model,
+        });
+        onEvent({
+          type: 'usage',
+          usage: acc.usage,
+          model: acc.model ?? model ?? 'claude-cli',
+        });
+        return validateAgentResult({
+          parts: acc.parts,
+          usage: acc.usage,
+          requested,
+          effective,
+          ...(acc.stopReason === undefined
+            ? {}
+            : { stopReason: acc.stopReason }),
+          transportFailure: {
+            kind: result.timedOut ? 'timeout' : 'unknown',
+            message: `claude completed but exited ${result.exitCode ?? '?'} during teardown${
+              stderr ? `: ${stderr}` : ''
+            }`,
+            exitCode: result.exitCode ?? null,
+          },
+        });
+      }
       // A rate/usage limit can land on either stream; check both (redacted)
       // before falling through to the generic exit-code error.
       if (!result.timedOut) {
@@ -332,13 +359,38 @@ export class ClaudeCliEngine implements Engine {
       });
     }
 
-    onEvent({ type: 'usage', usage: acc.usage, model: acc.model });
-    return {
-      text: acc.text,
+    onEvent({
+      type: 'usage',
       usage: acc.usage,
+      model: acc.model ?? model ?? 'claude-cli',
+    });
+    const requested = engineSelection({
+      adapter: 'claude-cli',
+      provider: 'anthropic',
+      model: model ?? null,
+    });
+    const effective = engineSelection({
+      adapter: 'claude-cli',
+      provider: 'anthropic',
       model: acc.model,
-      stopReason: acc.stopReason,
-      late,
-    };
+    });
+    return validateAgentResult({
+      parts: acc.parts,
+      usage: acc.usage,
+      requested,
+      effective,
+      ...(acc.stopReason === undefined
+        ? {}
+        : { stopReason: acc.stopReason }),
+      ...(late
+        ? {
+            transportFailure: {
+              kind: 'timeout' as const,
+              message: 'claude result arrived after the soft timeout',
+              exitCode: result.exitCode ?? null,
+            },
+          }
+        : {}),
+    });
   }
 }

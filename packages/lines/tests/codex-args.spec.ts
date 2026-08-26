@@ -13,6 +13,7 @@ import { Stats } from '../src/core/stats.ts';
 import { modelFor } from '../src/engines/engine.ts';
 import { buildCodexArgs, CodexEngine } from '../src/engines/codex.ts';
 import { preflightEngine } from '../src/engines/preflight.ts';
+import { finalResultText } from '../src/runtime/result-parts.ts';
 
 describe('buildCodexArgs', () => {
   it('defaults to a read-only ephemeral exec and writes the last message', () => {
@@ -113,7 +114,7 @@ writeFileSync(out, 'stub final');
       new AbortController().signal,
     );
 
-    expect(result.text).toBe('stub final');
+    expect(finalResultText(result)).toBe('stub final');
     expect(readFileSync(stdinFile, 'utf8')).toBe('system rules\n\n---\n\ndo the work');
   });
 
@@ -170,6 +171,7 @@ process.stdout.write(JSON.stringify({
     );
 
     expect(result.usage).toEqual({
+      kind: 'reported',
       inputTokens: 42,
       outputTokens: 7,
       cacheReadInputTokens: 30,
@@ -178,6 +180,7 @@ process.stdout.write(JSON.stringify({
       {
         type: 'usage',
         usage: {
+          kind: 'reported',
           inputTokens: 42,
           outputTokens: 7,
           cacheReadInputTokens: 30,
@@ -191,6 +194,8 @@ process.stdout.write(JSON.stringify({
       {
         model: 'codex',
         calls: 1,
+        reportedCalls: 1,
+        unknownUsageCalls: 0,
         inputTokens: 42,
         outputTokens: 7,
         cacheReadInputTokens: 30,
@@ -236,10 +241,12 @@ process.exit(1);
       new AbortController().signal,
     );
 
-    expect(result.text).toBe('completed work');
-    expect(result.warning).toContain('codex completed but exited 1 during teardown');
-    expect(result.warning).toContain('[redacted]');
-    expect(result.warning).not.toContain(secret);
+    expect(finalResultText(result)).toBe('completed work');
+    expect(result.transportFailure?.message).toContain(
+      'codex completed but exited 1 during teardown',
+    );
+    expect(result.transportFailure?.message).toContain('[redacted]');
+    expect(result.transportFailure?.message).not.toContain(secret);
     expect(events.filter((event) => event.type === 'text')).toHaveLength(1);
     expect(events.filter((event) => event.type === 'usage')).toHaveLength(1);
   });

@@ -19,18 +19,23 @@ import type {
   Engine,
   EngineEventSink,
   EngineOptions,
-  Usage,
+  UsageReceipt,
 } from './engine.js';
 import { modelFor, requestEnv } from './engine.js';
 import { settleOnExit } from './settle.js';
 import { LoopError } from '../core/errors.js';
 import { scrubCapture } from '../core/redact.js';
+import {
+  assistantResult,
+  engineSelection,
+  reportedUsage,
+} from '../runtime/result-parts.js';
 
 const DIAGNOSTIC_MAX = 700;
 const DIAGNOSTIC_HEAD = 180;
 
-function usageFromJsonl(stdout: unknown): Usage {
-  if (typeof stdout !== 'string') return { inputTokens: 0, outputTokens: 0 };
+function usageFromJsonl(stdout: unknown): UsageReceipt {
+  if (typeof stdout !== 'string') return { kind: 'unknown' };
   for (const line of stdout.trim().split('\n').reverse()) {
     try {
       const event = JSON.parse(line) as {
@@ -42,26 +47,38 @@ function usageFromJsonl(stdout: unknown): Usage {
         };
       };
       if (event.type !== 'turn.completed' || !event.usage) continue;
-      return {
-        inputTokens: tokenCount(event.usage.input_tokens),
-        outputTokens: tokenCount(event.usage.output_tokens),
+      const inputTokens = tokenCount(event.usage.input_tokens);
+      const outputTokens = tokenCount(event.usage.output_tokens);
+      const cacheReadInputTokens =
+        event.usage.cached_input_tokens === undefined
+          ? undefined
+          : tokenCount(event.usage.cached_input_tokens);
+      if (
+        inputTokens === undefined ||
+        outputTokens === undefined ||
+        (event.usage.cached_input_tokens !== undefined &&
+          cacheReadInputTokens === undefined)
+      ) {
+        return { kind: 'unknown' };
+      }
+      return reportedUsage({
+        inputTokens,
+        outputTokens,
         ...(event.usage.cached_input_tokens === undefined
           ? {}
-          : {
-              cacheReadInputTokens: tokenCount(
-                event.usage.cached_input_tokens,
-              ),
-            }),
-      };
+          : { cacheReadInputTokens: cacheReadInputTokens! }),
+      });
     } catch {
       /* ignore non-JSON output */
     }
   }
-  return { inputTokens: 0, outputTokens: 0 };
+  return { kind: 'unknown' };
 }
 
-function tokenCount(value: unknown): number {
-  return typeof value === 'number' && Number.isFinite(value) && value >= 0 ? value : 0;
+function tokenCount(value: unknown): number | undefined {
+  return typeof value === 'number' && Number.isSafeInteger(value) && value >= 0
+    ? value
+    : undefined;
 }
 
 function diagnosticCapture(
@@ -163,7 +180,7 @@ export class CodexEngine implements Engine {
         /* no final message written */
       }
       const diagnostic = diagnosticCapture(sub.stderr, sub.stdout, env);
-      let warning: string | undefined;
+      let transportFailure: AgentResult['transportFailure'];
       if (sub.failed && (sub.timedOut || !text))
         throw new LoopError({
           code: sub.timedOut ? 'TIMEOUT' : 'ENGINE',
@@ -175,9 +192,13 @@ export class CodexEngine implements Engine {
           }`,
         });
       if (sub.failed) {
-        warning = `codex completed but exited ${sub.exitCode ?? '?'} during teardown${
-          diagnostic ? `: ${diagnostic}` : ''
-        }`;
+        transportFailure = {
+          kind: sub.timedOut ? 'timeout' : 'unknown',
+          message: `codex completed but exited ${sub.exitCode ?? '?'} during teardown${
+            diagnostic ? `: ${diagnostic}` : ''
+          }`,
+          exitCode: sub.exitCode ?? null,
+        };
       }
 
       // `cached_input_tokens` is a subset of Codex `input_tokens`, so the
@@ -185,16 +206,31 @@ export class CodexEngine implements Engine {
       const usage = usageFromJsonl(sub.stdout);
       if (text) onEvent({ type: 'text', delta: text });
       onEvent({ type: 'usage', usage, model: model ?? 'codex' });
-      return {
+      const requested = engineSelection({
+        adapter: 'codex',
+        provider: 'openai',
+        model: model ?? 'codex',
+      });
+      const late =
+        typeof req.timeoutMs === 'number' &&
+        Date.now() - startedAt > req.timeoutMs;
+      return assistantResult({
         text,
         usage,
-        model: model ?? 'codex',
+        requested,
         stopReason: 'end_turn',
-        warning,
-        late:
-          (typeof req.timeoutMs === 'number' &&
-            Date.now() - startedAt > req.timeoutMs),
-      };
+        ...(transportFailure
+          ? { transportFailure }
+          : late
+            ? {
+                transportFailure: {
+                  kind: 'timeout' as const,
+                  message: 'codex result arrived after the soft timeout',
+                  exitCode: sub.exitCode ?? null,
+                },
+              }
+            : {}),
+      });
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }

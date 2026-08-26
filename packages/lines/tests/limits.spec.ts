@@ -21,6 +21,7 @@ import {
   isLimitError,
 } from '../src/core/limits.ts';
 import { classifyCliLimit, parseResetAt } from '../src/engines/claude-cli.ts';
+import { fixtureResult, fixtureUsage } from './engine-fixture.ts';
 
 /**
  * An engine that throws a given LoopError on its first `n` calls, then succeeds.
@@ -33,16 +34,13 @@ function limitThenOk(error: LoopError, throwTimes = 1): Engine {
     async run(_req, onEvent) {
       calls += 1;
       if (calls <= throwTimes) throw error;
+      const usage = fixtureUsage();
       onEvent({
         type: 'usage',
-        usage: { inputTokens: 1, outputTokens: 1 },
+        usage,
         model: 'limited',
       });
-      return {
-        text: 'done',
-        usage: { inputTokens: 1, outputTokens: 1 },
-        model: 'limited',
-      };
+      return fixtureResult('done', { model: 'limited', usage });
     },
   };
 }
@@ -147,16 +145,13 @@ describe('onLimit: budget exhaustion under auto', () => {
     const usageEngine: Engine = {
       name: 'um',
       async run(_req, onEvent) {
+        const usage = fixtureUsage(100, 100);
         onEvent({
           type: 'usage',
-          usage: { inputTokens: 100, outputTokens: 100 },
+          usage,
           model: 'um',
         });
-        return {
-          text: 'ok',
-          usage: { inputTokens: 100, outputTokens: 100 },
-          model: 'um',
-        };
+        return fixtureResult('ok', { model: 'um', usage });
       },
     };
     const events: LoopEvent[] = [];

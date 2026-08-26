@@ -19,6 +19,7 @@ import {
 import type { Engine, RunOptions } from '../src/api.ts';
 import { MockEngine, MockEnvironment } from '../src/testing.ts';
 import { cleanupRepos, tmpBareDir } from './git-helpers.ts';
+import { fixtureResult, fixtureUsage } from './engine-fixture.ts';
 
 afterAll(cleanupRepos);
 
@@ -170,16 +171,13 @@ describe('run', () => {
       name: 'spy',
       async run(req, onEvent) {
         calledWith = req.prompt;
+        const usage = fixtureUsage();
         onEvent({
           type: 'usage',
-          usage: { inputTokens: 1, outputTokens: 1 },
+          usage,
           model: 'spy',
         });
-        return {
-          text: 'ok',
-          usage: { inputTokens: 1, outputTokens: 1 },
-          model: 'spy',
-        };
+        return fixtureResult('ok', { model: 'spy', usage });
       },
     };
     const { outcome } = await run(

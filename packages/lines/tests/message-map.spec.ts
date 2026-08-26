@@ -11,7 +11,7 @@ function collect(messages: unknown[]) {
 }
 
 describe('message-map', () => {
-  it('extracts text + usage from a non-partial assistant + result', () => {
+  it('extracts ordered parts + reported usage from an assistant + result', () => {
     const { acc, events } = collect([
       {
         type: 'assistant',
@@ -27,9 +27,15 @@ describe('message-map', () => {
         usage: { input_tokens: 7, output_tokens: 3 },
       },
     ]);
-    expect(acc.text).toBe('Hello');
+    expect(acc.parts).toEqual([
+      { kind: 'assistant', text: 'Hello', final: true },
+    ]);
     expect(acc.model).toBe('m1');
-    expect(acc.usage).toEqual({ inputTokens: 7, outputTokens: 3 });
+    expect(acc.usage).toEqual({
+      kind: 'reported',
+      inputTokens: 7,
+      outputTokens: 3,
+    });
     expect(events.some((e) => e.type === 'text' && e.delta === 'Hello')).toBe(
       true,
     );
@@ -49,6 +55,7 @@ describe('message-map', () => {
       },
     };
     expect(collect([assistant]).acc.usage).toEqual({
+      kind: 'reported',
       inputTokens: 31,
       outputTokens: 3,
       cacheCreationInputTokens: 11,
@@ -69,6 +76,7 @@ describe('message-map', () => {
         },
       ]).acc.usage,
     ).toEqual({
+      kind: 'reported',
       inputTokens: 31,
       outputTokens: 3,
       cacheCreationInputTokens: 11,
@@ -101,10 +109,44 @@ describe('message-map', () => {
       .filter((e) => e.type === 'text')
       .map((e) => (e as { delta: string }).delta);
     expect(textDeltas).toEqual(['Po', 'ng']); // deltas only, block not re-emitted
-    expect(acc.text).toBe('Pong'); // accumulated from the authoritative block
+    expect(acc.parts).toEqual([
+      { kind: 'assistant', text: 'Pong', final: false },
+    ]); // the terminal result is what marks one part final
   });
 
-  it('emits tool-use events and falls back to result text', () => {
+  it('keeps assistant continuations separate and marks only the last final', () => {
+    const { acc } = collect([
+      {
+        type: 'assistant',
+        message: { content: [{ type: 'text', text: 'First' }] },
+      },
+      {
+        type: 'assistant',
+        message: { content: [{ type: 'text', text: 'Second' }] },
+      },
+      { type: 'result', subtype: 'success' },
+    ]);
+
+    expect(acc.parts).toEqual([
+      { kind: 'assistant', text: 'First', final: false },
+      { kind: 'assistant', text: 'Second', final: true },
+    ]);
+    expect(acc.usage).toEqual({ kind: 'unknown' });
+  });
+
+  it('keeps partial usage unknown instead of filling missing fields with zero', () => {
+    const { acc } = collect([
+      {
+        type: 'result',
+        result: 'done',
+        usage: { input_tokens: 4 },
+      },
+    ]);
+
+    expect(acc.usage).toEqual({ kind: 'unknown' });
+  });
+
+  it('emits tool-use events and falls back to one final result part', () => {
     const { acc, events } = collect([
       {
         type: 'assistant',
@@ -117,7 +159,9 @@ describe('message-map', () => {
         (e) => e.type === 'tool' && e.name === 'Bash' && e.phase === 'use',
       ),
     ).toBe(true);
-    expect(acc.text).toBe('final answer');
+    expect(acc.parts).toEqual([
+      { kind: 'assistant', text: 'final answer', final: true },
+    ]);
   });
 
   it('is defensive against malformed messages', () => {

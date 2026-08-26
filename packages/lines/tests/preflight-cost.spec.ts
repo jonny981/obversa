@@ -62,8 +62,8 @@ describe('cost accounting', () => {
     const report = costReport(
       {
         models: [
-          { model: 'claude-sonnet-5-20250929', calls: 10, inputTokens: 2_000_000, outputTokens: 100_000 },
-          { model: 'claude-haiku-4-5', calls: 20, inputTokens: 1_000_000, outputTokens: 50_000 },
+          { model: 'claude-sonnet-5-20250929', calls: 10, reportedCalls: 10, unknownUsageCalls: 0, inputTokens: 2_000_000, outputTokens: 100_000 },
+          { model: 'claude-haiku-4-5', calls: 20, reportedCalls: 20, unknownUsageCalls: 0, inputTokens: 1_000_000, outputTokens: 50_000 },
         ],
       },
       PRICES,
@@ -79,8 +79,8 @@ describe('cost accounting', () => {
     const report = costReport(
       {
         models: [
-          { model: 'claude-haiku-4-5', calls: 1, inputTokens: 1_000_000, outputTokens: 0 },
-          { model: 'gpt-5.2', calls: 1, inputTokens: 1_000_000, outputTokens: 0 },
+          { model: 'claude-haiku-4-5', calls: 1, reportedCalls: 1, unknownUsageCalls: 0, inputTokens: 1_000_000, outputTokens: 0 },
+          { model: 'gpt-5.2', calls: 1, reportedCalls: 1, unknownUsageCalls: 0, inputTokens: 1_000_000, outputTokens: 0 },
         ],
       },
       PRICES,
@@ -100,6 +100,7 @@ describe('cost accounting', () => {
       path: [],
       model: 'claude-sonnet-5',
       usage: {
+        kind: 'reported',
         inputTokens: 31,
         outputTokens: 3,
         cacheCreationInputTokens: 11,
@@ -112,6 +113,7 @@ describe('cost accounting', () => {
       path: [],
       model: 'claude-sonnet-5',
       usage: {
+        kind: 'reported',
         inputTokens: 17,
         outputTokens: 1,
         cacheCreationInputTokens: 2,
@@ -124,6 +126,8 @@ describe('cost accounting', () => {
       {
         model: 'claude-sonnet-5',
         calls: 2,
+        reportedCalls: 2,
+        unknownUsageCalls: 0,
         inputTokens: 48,
         outputTokens: 4,
         cacheCreationInputTokens: 13,
@@ -136,6 +140,8 @@ describe('cost accounting', () => {
       {
         model: 'claude-sonnet-5',
         calls: 2,
+        reportedCalls: 2,
+        unknownUsageCalls: 0,
         inputTokens: 48,
         outputTokens: 4,
         usd: undefined,
@@ -148,11 +154,53 @@ describe('cost accounting', () => {
     expect(formatCostReport(report).join('\n')).toContain('incomplete price coverage');
   });
 
+  it('keeps missing usage unknown and withholds every price total', () => {
+    const stats = new Stats();
+    stats.record({
+      kind: 'engine:usage',
+      ts: 1,
+      path: [],
+      model: 'claude-haiku-4-5',
+      usage: { kind: 'unknown' },
+    });
+
+    const snapshot = stats.snapshot();
+    expect(snapshot.models).toEqual([
+      {
+        model: 'claude-haiku-4-5',
+        calls: 1,
+        reportedCalls: 0,
+        unknownUsageCalls: 1,
+        inputTokens: 0,
+        outputTokens: 0,
+      },
+    ]);
+
+    const report = costReport(snapshot, PRICES, 'claude-opus-4-8');
+    expect(report.models).toEqual([
+      {
+        model: 'claude-haiku-4-5',
+        calls: 1,
+        reportedCalls: 0,
+        unknownUsageCalls: 1,
+        inputTokens: 0,
+        outputTokens: 0,
+        usd: undefined,
+      },
+    ]);
+    expect(report.spentUsd).toBeUndefined();
+    expect(report.baselineUsd).toBeUndefined();
+    expect(report.savedUsd).toBeUndefined();
+    expect(formatCostReport(report).join('\n')).toContain(
+      'usage unknown for 1 call(s)',
+    );
+  });
+
   it('reconstructs the baseline on the SAME token stream and reports savings', () => {
     const report = costReport(
       {
         models: [
-          { model: 'claude-haiku-4-5', calls: 5, inputTokens: 2_000_000, outputTokens: 200_000 },
+          { model: 'claude-haiku-4-5', calls: 5, reportedCalls: 5, unknownUsageCalls: 0, inputTokens: 2_000_000, outputTokens: 200_000 },
         ],
       },
       PRICES,
@@ -171,7 +219,7 @@ describe('cost accounting', () => {
     const report = costReport(
       {
         models: [
-          { model: 'claude-opus-4-8', calls: 1, inputTokens: 1_000_000, outputTokens: 0 },
+          { model: 'claude-opus-4-8', calls: 1, reportedCalls: 1, unknownUsageCalls: 0, inputTokens: 1_000_000, outputTokens: 0 },
         ],
       },
       PRICES,

@@ -13,10 +13,11 @@
  * the lanes). Run both before a long unattended run.
  */
 
-import type { EngineRef, EngineOptions, Usage } from './engine.js';
+import type { EngineRef, EngineOptions, UsageReceipt } from './engine.js';
 import { isEngine } from './engine.js';
 import { EngineRegistry } from './registry.js';
 import { classifyEngineFailure, type EngineFailureKind } from './failure.js';
+import { requireFinalResultText } from '../runtime/result-parts.js';
 
 export interface PreflightResult {
   engine: string;
@@ -27,7 +28,7 @@ export interface PreflightResult {
   /** One line of evidence: the reply, or the error message. */
   detail: string;
   latencyMs: number;
-  usage?: Usage;
+  usage?: UsageReceipt;
 }
 
 export interface PreflightOptions {
@@ -49,7 +50,7 @@ export async function preflightEngine(
   const registry = opts.registry ?? new EngineRegistry(opts.engineOptions ?? {});
   const name = isEngine(ref) ? ref.name : String(ref);
   const started = Date.now();
-  let usage: Usage | undefined;
+  let usage: UsageReceipt | undefined;
   try {
     const engine = registry.create(ref, name);
     const result = await engine.run(
@@ -65,10 +66,10 @@ export async function preflightEngine(
       },
       opts.signal ?? new AbortController().signal,
     );
-    const reply = result.text.trim();
+    const reply = requireFinalResultText(result).trim();
     return {
       engine: name,
-      model: opts.model ?? result.model,
+      model: opts.model ?? result.effective.model ?? undefined,
       ok: true,
       detail: reply ? `replied: ${reply.slice(0, 60)}` : 'replied (empty text)',
       latencyMs: Date.now() - started,

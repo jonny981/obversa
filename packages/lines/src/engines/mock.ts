@@ -12,6 +12,11 @@ import type {
   EngineEventSink,
   Usage,
 } from './engine.js';
+import {
+  assistantResult,
+  engineSelection,
+  reportedUsage,
+} from '../runtime/result-parts.js';
 
 export type MockResponder = (
   req: AgentRequest,
@@ -32,10 +37,18 @@ export class MockEngine implements Engine {
     const raw = this.responder(req);
     const out = typeof raw === 'string' ? { text: raw } : raw;
     const model = out.model ?? 'mock';
-    const usage = out.usage ?? { inputTokens: 10, outputTokens: 5 };
+    const usage = reportedUsage(
+      out.usage ?? { inputTokens: 10, outputTokens: 5 },
+    );
     if (out.text) onEvent({ type: 'text', delta: out.text });
     onEvent({ type: 'usage', usage, model });
-    return { text: out.text, usage, model, stopReason: 'end_turn' };
+    const selection = engineSelection({ adapter: 'mock', model });
+    return assistantResult({
+      text: out.text,
+      usage,
+      requested: selection,
+      stopReason: 'end_turn',
+    });
   }
 }
 

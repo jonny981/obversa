@@ -65,6 +65,6 @@ describe('AnthropicApiEngine', () => {
       new AbortController().signal,
     );
 
-    expect(result.late).toBe(true);
+    expect(result.transportFailure).toMatchObject({ kind: 'timeout' });
   });
 });

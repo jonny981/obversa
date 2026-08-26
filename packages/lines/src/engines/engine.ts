@@ -5,6 +5,8 @@
  */
 
 import type { Memory } from '@obversa/memory';
+import type { JsonValue } from '../graph/value.js';
+import type { EngineFailureKind } from './failure.js';
 
 /**
  * Built-in, registry-resolvable adapter names. The union is open (`& {}` trick)
@@ -25,6 +27,37 @@ export interface Usage {
   outputTokens: number;
   cacheCreationInputTokens?: number;
   cacheReadInputTokens?: number;
+}
+
+export type UsageReceipt =
+  | { readonly kind: 'unknown' }
+  | ({ readonly kind: 'reported' } & Usage);
+
+export type AgentResultPart =
+  | {
+      readonly kind: 'assistant';
+      readonly text: string;
+      readonly final: boolean;
+    }
+  | {
+      readonly kind: 'structured';
+      readonly value: JsonValue;
+      readonly final: true;
+    };
+
+export interface EngineSelectionRecord {
+  readonly adapter: string;
+  readonly adapterVersion: string | null;
+  readonly provider: string | null;
+  readonly modelFamily: string | null;
+  readonly model: string | null;
+  readonly capabilities: readonly string[];
+}
+
+export interface EngineTransportFailure {
+  readonly kind: EngineFailureKind;
+  readonly message: string;
+  readonly exitCode: number | null;
 }
 
 /** Tools an agent uses to spawn sub-agents / fan out. A `leaf` request disallows
@@ -82,17 +115,16 @@ export interface AgentRequest {
 }
 
 export interface AgentResult {
-  /** Final assistant text (concatenated across blocks). */
-  text: string;
-  usage: Usage;
-  model: string;
-  stopReason?: string;
-  /** Non-fatal backend warning emitted after a complete result was available. */
-  warning?: string;
-  /** True when the turn completed after its soft timeout but inside grace. */
-  late?: boolean;
+  /** Ordered assistant continuations with exactly one marked final part. */
+  readonly parts: readonly AgentResultPart[];
+  readonly usage: UsageReceipt;
+  readonly requested: EngineSelectionRecord;
+  readonly effective: EngineSelectionRecord;
+  readonly stopReason?: string;
+  /** A final result and a later teardown failure are separate facts. */
+  readonly transportFailure?: EngineTransportFailure;
   /** Backend-native final payload, for escape-hatch inspection. */
-  raw?: unknown;
+  readonly raw?: unknown;
 }
 
 /** Streamed during a run. The runtime re-tags these as `LoopEvent`s. */
@@ -100,7 +132,7 @@ export type EngineStreamEvent =
   | { type: 'text'; delta: string }
   | { type: 'thinking'; delta: string }
   | { type: 'tool'; name: string; phase: 'use' | 'result' }
-  | { type: 'usage'; usage: Usage; model: string };
+  | { type: 'usage'; usage: UsageReceipt; model: string };
 
 export type EngineEventSink = (event: EngineStreamEvent) => void;
 

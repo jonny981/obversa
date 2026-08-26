@@ -4,6 +4,8 @@ import { classifyEngineFailure, LANE_DEAD_FAILURES } from '../src/engines/failur
 import { fallbackEngine, type FallbackInfo } from '../src/engines/fallback.ts';
 import { LoopError } from '../src/core/errors.ts';
 import type { AgentRequest, Engine } from '../src/engines/engine.ts';
+import { finalResultText } from '../src/runtime/result-parts.ts';
+import { fixtureResult, fixtureUsage } from './engine-fixture.ts';
 
 describe('classifyEngineFailure', () => {
   it('maps typed LoopError limit codes', () => {
@@ -62,8 +64,9 @@ function engineThat(name: string, behavior: () => Promise<string>): Engine {
     name,
     async run(req: AgentRequest, onEvent) {
       const text = await behavior();
-      onEvent({ type: 'usage', usage: { inputTokens: 1, outputTokens: 1 }, model: name });
-      return { text, usage: { inputTokens: 1, outputTokens: 1 }, model: name };
+      const usage = fixtureUsage();
+      onEvent({ type: 'usage', usage, model: name });
+      return fixtureResult(text, { model: name, usage });
     },
   };
 }
@@ -85,7 +88,7 @@ describe('fallbackEngine', () => {
     })({});
 
     const first = await engine.run(req, () => {}, signal);
-    expect(first.text).toBe('from the live lane');
+    expect(finalResultText(first)).toBe('from the live lane');
     expect(reroutes).toEqual([
       expect.objectContaining({ from: 'dead', to: 'live', failure: 'auth' }),
     ]);
@@ -113,7 +116,7 @@ describe('fallbackEngine', () => {
     const live = engineThat('live', async () => 'hopped');
     const engine = fallbackEngine([outOfQuota, live], { on: ['quota'] })({});
     const result = await engine.run(req, () => {}, signal);
-    expect(result.text).toBe('hopped');
+    expect(finalResultText(result)).toBe('hopped');
   });
 
   it('fails with the last lane error when every lane is dead', async () => {

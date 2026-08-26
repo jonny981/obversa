@@ -17,6 +17,7 @@ import { agentContract, resolveSystem } from '../src/core/agent.ts';
 import { MockEngine } from '../src/testing.ts';
 import { requestEnv } from '../src/engines/engine.ts';
 import { tmpRepo, cleanupRepos } from './git-helpers.ts';
+import { fixtureResult, fixtureUsage } from './engine-fixture.ts';
 
 afterAll(cleanupRepos);
 
@@ -34,10 +35,19 @@ function warnedEngine(text: string, warning: string): Engine {
   return {
     name: 'warned',
     async run(_req, onEvent) {
-      const usage = { inputTokens: 1, outputTokens: 1 };
+      const usage = fixtureUsage();
       if (text) onEvent({ type: 'text', delta: text });
       onEvent({ type: 'usage', usage, model: 'warned' });
-      return { text, usage, model: 'warned', stopReason: 'end_turn', warning };
+      return fixtureResult(text, {
+        model: 'warned',
+        usage,
+        stopReason: 'end_turn',
+        transportFailure: {
+          kind: 'unknown',
+          message: warning,
+          exitCode: 1,
+        },
+      });
     },
   };
 }

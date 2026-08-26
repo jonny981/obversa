@@ -222,9 +222,18 @@ export type {
   EngineOptions,
   AgentRequest,
   AgentResult,
+  AgentResultPart,
+  EngineSelectionRecord,
+  EngineTransportFailure,
   EngineStreamEvent,
   Usage,
+  UsageReceipt,
 } from './engines/engine.js';
+export {
+  finalResultPart,
+  finalResultText,
+  validateAgentResult,
+} from './runtime/result-parts.js';
 export type { EngineFactory } from './engines/registry.js';
 
 export type { Environment, EnvHandle } from './env/environment.js';

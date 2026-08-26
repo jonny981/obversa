@@ -2,16 +2,13 @@ import { describe, expect, it } from 'vitest';
 
 import { agentCheck, fnJob, loop, run } from '../src/api.ts';
 import type { Engine } from '../src/api.ts';
+import { fixtureResult } from './engine-fixture.ts';
 
 function replyEngine(text: string): Engine {
   return {
     name: 'reply',
     async run() {
-      return {
-        text,
-        usage: { inputTokens: 1, outputTokens: 1 },
-        model: 'reply',
-      };
+      return fixtureResult(text, { model: 'reply' });
     },
   };
 }

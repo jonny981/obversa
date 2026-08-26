@@ -30,7 +30,11 @@ import { assertBudget } from './budget.js';
 import { resolveSystem, type AgentDef } from './agent.js';
 import { truncate } from './text.js';
 import { redactSecrets, redactEnvValues, scrubCapture } from './redact.js';
-import { linesRequestMeta, logEngineWarning } from './engine-meta.js';
+import {
+  linesRequestMeta,
+  logEngineTransportFailure,
+} from './engine-meta.js';
+import { requireFinalResultText } from '../runtime/result-parts.js';
 
 const COMMAND_FAILURE_TAIL_MAX = 3000;
 const COMMAND_FAILURE_TAIL_MARKER = '… [output truncated]\n';
@@ -719,12 +723,12 @@ export function agentCheck(config: AgentCheckConfig): Condition {
       // start/until/stopOn/review gate and cannot know which.
       throw LoopError.from(e, { code: 'ENGINE', path: ctx.path });
     }
-    logEngineWarning(ctx, result, env);
+    logEngineTransportFailure(ctx, result, env);
 
     // A judge's reply flows into `reason`/`output` (persisted records), and a
     // tool-using judge may echo the pinned vars it was handed — scrub their
     // exact values once, up front, so every downstream path is clean.
-    const text = redactEnvValues(result.text, env);
+    const text = redactEnvValues(requireFinalResultText(result), env);
 
     if (confidenceTag) {
       const parsed = parseConfidenceTag(text);

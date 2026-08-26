@@ -27,8 +27,12 @@ import {
   kickback,
   revisionRequest,
 } from './feedback.js';
-import { linesRequestMeta, logEngineWarning } from './engine-meta.js';
+import {
+  linesRequestMeta,
+  logEngineTransportFailure,
+} from './engine-meta.js';
 import { cloneFrozenJson, type JsonValue } from '../graph/value.js';
+import { requireFinalResultText } from '../runtime/result-parts.js';
 
 export interface AgentJobConfig {
   /** Job label (for events). Defaults to the agent's name, then `'agent'`. */
@@ -237,8 +241,11 @@ async function runAdvisorConsult(
     },
     ctx.signal,
   );
-  logEngineWarning(ctx, result, redactionEnv);
-  const reply = scrubCapture(result.text, redactionEnv).trim();
+  logEngineTransportFailure(ctx, result, redactionEnv);
+  const reply = scrubCapture(
+    requireFinalResultText(result),
+    redactionEnv,
+  ).trim();
   ctx.emit({
     kind: 'advisor:consult',
     ts: Date.now(),
@@ -247,9 +254,9 @@ async function runAdvisorConsult(
     call,
     question: request.question,
     reply,
-    model: result.model,
+    model: result.effective.model ?? undefined,
   });
-  return { reply, model: result.model };
+  return { reply, model: result.effective.model ?? undefined };
 }
 
 /** Run one fresh agent turn through whichever engine is selected. */
@@ -365,9 +372,12 @@ export function agentJob(config: AgentJobConfig): Job {
             },
             ctx.signal,
           );
-          logEngineWarning(ctx, result, env);
+          logEngineTransportFailure(ctx, result, env);
           const advisor = config.advisor;
-          const capturedText = scrubCapture(result.text, env);
+          const capturedText = scrubCapture(
+            requireFinalResultText(result),
+            env,
+          );
           const consult = advisor ? parseAdvisorRequest(capturedText) : undefined;
           if (!advisor || !consult) break;
           if (advisorReplies.length >= maxAdvisorCalls) {
@@ -439,12 +449,13 @@ export function agentJob(config: AgentJobConfig): Job {
 
     // The reply enters events and status records. Scrub it before any consumer
     // can persist an injected environment value.
-    const text = scrubCapture(result.text, env);
+    const text = scrubCapture(requireFinalResultText(result), env);
 
     const outcome = config.outcome
       ? await config.outcome(text, ctx)
       : TERMINAL(text);
-    const finalOutcome = result.late && outcome.late !== true
+    const finalOutcome =
+      result.transportFailure?.kind === 'timeout' && outcome.late !== true
       ? { ...outcome, late: true }
       : outcome;
     ctx.emit({

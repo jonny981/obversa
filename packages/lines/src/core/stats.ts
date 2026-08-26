@@ -17,6 +17,8 @@ export interface LoopStat {
 export interface ModelUsage {
   model: string;
   calls: number;
+  reportedCalls: number;
+  unknownUsageCalls: number;
   inputTokens: number;
   outputTokens: number;
   cacheCreationInputTokens?: number;
@@ -68,6 +70,11 @@ export class Stats {
       case 'engine:usage': {
         const m = this.modelFor(event.model);
         m.calls += 1;
+        if (event.usage.kind === 'unknown') {
+          m.unknownUsageCalls += 1;
+          break;
+        }
+        m.reportedCalls += 1;
         m.inputTokens += event.usage.inputTokens;
         m.outputTokens += event.usage.outputTokens;
         if (event.usage.cacheCreationInputTokens !== undefined)
@@ -115,7 +122,14 @@ export class Stats {
   private modelFor(model: string): ModelUsage {
     let m = this.models.get(model);
     if (!m) {
-      m = { model, calls: 0, inputTokens: 0, outputTokens: 0 };
+      m = {
+        model,
+        calls: 0,
+        reportedCalls: 0,
+        unknownUsageCalls: 0,
+        inputTokens: 0,
+        outputTokens: 0,
+      };
       this.models.set(model, m);
     }
     return m;

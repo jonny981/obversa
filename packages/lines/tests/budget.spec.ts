@@ -3,17 +3,15 @@ import { describe, expect, it } from 'vitest';
 import { agentJob, loop, run } from '../src/api.ts';
 import type { Engine } from '../src/api.ts';
 import { Budget } from '../src/core/budget.ts';
+import { fixtureResult, fixtureUsage } from './engine-fixture.ts';
 
 function usageEngine(perCall = 200): Engine {
   return {
     name: 'usage-mock',
     async run(_request, onEvent) {
-      const usage = {
-        inputTokens: perCall / 2,
-        outputTokens: perCall / 2,
-      };
+      const usage = fixtureUsage(perCall / 2, perCall / 2);
       onEvent({ type: 'usage', usage, model: 'usage-mock' });
-      return { text: 'ok', usage, model: 'usage-mock' };
+      return fixtureResult('ok', { usage, model: 'usage-mock' });
     },
   };
 }
@@ -75,5 +73,37 @@ describe('Budget', () => {
     );
 
     expect(outcome.status).toBe('exhausted');
+  });
+
+  it('stops a measured budget after an engine reports unknown usage', async () => {
+    let calls = 0;
+    const unknown: Engine = {
+      name: 'unknown-usage',
+      async run(_request, onEvent) {
+        calls += 1;
+        const usage = { kind: 'unknown' as const };
+        onEvent({ type: 'usage', usage, model: 'unknown-usage' });
+        return fixtureResult('not done', {
+          model: 'unknown-usage',
+          usage,
+        });
+      },
+    };
+
+    const { outcome } = await run(
+      loop({ name: 'bounded', body: failingAgent(), max: 3 }),
+      {
+        engine: 'unknown',
+        engines: { unknown: () => unknown },
+        budget: 100,
+      },
+    );
+
+    expect(calls).toBe(1);
+    expect(outcome).toMatchObject({
+      status: 'paused',
+      error: { code: 'BUDGET' },
+    });
+    expect(outcome.summary).toContain('usage is unknown');
   });
 });

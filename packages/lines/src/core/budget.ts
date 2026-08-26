@@ -11,6 +11,7 @@
 
 import type { JobContext } from './types.js';
 import { LoopError } from './errors.js';
+import type { UsageReceipt } from '../engines/engine.js';
 
 export interface BudgetConfig {
   /** Cap on total tokens (input + output) for the whole run. */
@@ -29,6 +30,7 @@ export class Budget {
   readonly headroom: number;
   readonly soft: boolean;
   private tokens = 0;
+  private unknownCalls = 0;
 
   constructor(config: BudgetConfig) {
     this.limit = config.limit;
@@ -39,6 +41,18 @@ export class Budget {
   /** Record consumed tokens. Non-finite or non-positive values are ignored. */
   add(tokens: number): void {
     if (Number.isFinite(tokens) && tokens > 0) this.tokens += tokens;
+  }
+
+  addUsage(usage: UsageReceipt): void {
+    if (usage.kind === 'unknown') {
+      this.unknownCalls += 1;
+      return;
+    }
+    this.add(usage.inputTokens + usage.outputTokens);
+  }
+
+  unknownUsageCalls(): number {
+    return this.unknownCalls;
   }
 
   spent(): number {
@@ -62,7 +76,22 @@ export class Budget {
  */
 export function assertBudget(ctx: JobContext): void {
   const budget = ctx.budget;
-  if (!budget || !budget.exceeded()) return;
+  if (!budget) return;
+  if (budget.unknownUsageCalls() > 0) {
+    if (budget.soft) {
+      ctx.log(
+        `token usage is unknown for ${budget.unknownUsageCalls()} call(s) — continuing (soft)`,
+        'warn',
+      );
+      return;
+    }
+    throw new LoopError({
+      code: 'BUDGET',
+      phase: 'engine',
+      message: `token budget cannot continue: usage is unknown for ${budget.unknownUsageCalls()} call(s)`,
+    });
+  }
+  if (!budget.exceeded()) return;
   if (budget.soft) {
     ctx.log(
       `token budget reached (${budget.spent()}/${budget.limit}) — continuing (soft)`,

@@ -24,6 +24,11 @@ import type {
 import { modelFor } from './engine.js';
 import { LoopError } from '../core/errors.js';
 import { retryAfterHeaderToMs } from '../core/limits.js';
+import {
+  assistantResult,
+  engineSelection,
+  reportedUsage,
+} from '../runtime/result-parts.js';
 
 /**
  * Transient backend errors that warrant p-retry's blind backoff: 5xx (incl.
@@ -222,19 +227,33 @@ export class AnthropicApiEngine implements Engine {
       .filter((b) => b.type === 'text')
       .map((b) => b.text ?? '')
       .join('');
-    const usage = {
+    const usage = reportedUsage({
       inputTokens: message.usage.input_tokens,
       outputTokens: message.usage.output_tokens,
-    };
+    });
     onEvent({ type: 'usage', usage, model });
-    return {
+    const selection = engineSelection({
+      adapter: 'anthropic-api',
+      provider: 'anthropic',
+      model,
+    });
+    const late =
+      typeof req.timeoutMs === 'number' && Date.now() - startedAt > req.timeoutMs;
+    return assistantResult({
       text,
       usage,
-      model,
+      requested: selection,
       stopReason: message.stop_reason ?? undefined,
-      late:
-        typeof req.timeoutMs === 'number' && Date.now() - startedAt > req.timeoutMs,
+      ...(late
+        ? {
+            transportFailure: {
+              kind: 'timeout' as const,
+              message: 'anthropic-api result arrived after the soft timeout',
+              exitCode: null,
+            },
+          }
+        : {}),
       raw: message,
-    };
+    });
   }
 }

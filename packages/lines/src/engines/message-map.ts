@@ -7,12 +7,17 @@
  * defensively so a minor upstream shape change doesn't crash a run.
  */
 
-import type { EngineEventSink, Usage } from './engine.js';
+import type {
+  AgentResultPart,
+  EngineEventSink,
+  Usage,
+  UsageReceipt,
+} from './engine.js';
 
 export interface Accumulator {
-  text: string;
-  usage: Usage;
-  model: string;
+  parts: AgentResultPart[];
+  usage: UsageReceipt;
+  model: string | null;
   stopReason?: string;
   /** Set once we have seen token deltas, so we don't double-emit full blocks. */
   sawDelta: boolean;
@@ -20,11 +25,11 @@ export interface Accumulator {
   terminal: boolean;
 }
 
-export function newAccumulator(model: string): Accumulator {
+export function newAccumulator(model?: string): Accumulator {
   return {
-    text: '',
-    usage: { inputTokens: 0, outputTokens: 0 },
-    model,
+    parts: [],
+    usage: { kind: 'unknown' },
+    model: model ?? null,
     sawDelta: false,
     terminal: false,
   };
@@ -48,9 +53,10 @@ export function mapMessage(
       if (typeof inner.model === 'string') acc.model = inner.model;
       if (typeof inner.stop_reason === 'string')
         acc.stopReason = inner.stop_reason;
+      let assistantText = '';
       for (const block of asArray(inner.content)) {
         if (block.type === 'text' && typeof block.text === 'string') {
-          acc.text += block.text;
+          assistantText += block.text;
           if (!acc.sawDelta) onEvent({ type: 'text', delta: block.text });
         } else if (
           block.type === 'thinking' &&
@@ -65,18 +71,36 @@ export function mapMessage(
           onEvent({ type: 'tool', name: block.name, phase: 'use' });
         }
       }
+      if (assistantText) {
+        acc.parts.push({
+          kind: 'assistant',
+          text: assistantText,
+          final: false,
+        });
+      }
       const usage = inner.usage as AnyRecord | undefined;
-      if (usage) {
-        acc.usage.inputTokens += inputTokens(usage);
-        acc.usage.outputTokens += num(usage.output_tokens);
+      const reported = usage ? usageFrom(usage) : undefined;
+      if (usage && reported) {
+        const prior = acc.usage.kind === 'reported' ? acc.usage : undefined;
         const cacheCreation = optionalNum(usage.cache_creation_input_tokens);
         const cacheRead = optionalNum(usage.cache_read_input_tokens);
-        if (cacheCreation !== undefined)
-          acc.usage.cacheCreationInputTokens =
-            (acc.usage.cacheCreationInputTokens ?? 0) + cacheCreation;
-        if (cacheRead !== undefined)
-          acc.usage.cacheReadInputTokens =
-            (acc.usage.cacheReadInputTokens ?? 0) + cacheRead;
+        acc.usage = {
+          kind: 'reported',
+          inputTokens: (prior?.inputTokens ?? 0) + reported.inputTokens,
+          outputTokens: (prior?.outputTokens ?? 0) + reported.outputTokens,
+          ...(cacheCreation === undefined
+            ? {}
+            : {
+                cacheCreationInputTokens:
+                  (prior?.cacheCreationInputTokens ?? 0) + cacheCreation,
+              }),
+          ...(cacheRead === undefined
+            ? {}
+            : {
+                cacheReadInputTokens:
+                  (prior?.cacheReadInputTokens ?? 0) + cacheRead,
+              }),
+        };
       }
       break;
     }
@@ -116,23 +140,50 @@ export function mapMessage(
       // not the model stop reason; that is the sibling `stop_reason` field.
       if (typeof msg.stop_reason === 'string') acc.stopReason = msg.stop_reason;
       const usage = msg.usage as AnyRecord | undefined;
-      if (usage) {
+      const reported = usage ? usageFrom(usage) : undefined;
+      if (usage && reported) {
         // result usage is authoritative for the turn
-        const i = inputTokens(usage);
-        const o = num(usage.output_tokens);
-        if (i) acc.usage.inputTokens = i;
-        if (o) acc.usage.outputTokens = o;
         const cacheCreation = optionalNum(usage.cache_creation_input_tokens);
         const cacheRead = optionalNum(usage.cache_read_input_tokens);
-        if (cacheCreation !== undefined)
-          acc.usage.cacheCreationInputTokens = cacheCreation;
-        if (cacheRead !== undefined)
-          acc.usage.cacheReadInputTokens = cacheRead;
+        acc.usage = {
+          ...reported,
+          ...(cacheCreation === undefined
+            ? {}
+            : { cacheCreationInputTokens: cacheCreation }),
+          ...(cacheRead === undefined
+            ? {}
+            : { cacheReadInputTokens: cacheRead }),
+        };
       }
-      if (!acc.text && typeof msg.result === 'string') acc.text = msg.result;
+      if (!acc.parts.length) {
+        acc.parts.push({
+          kind: 'assistant',
+          text: typeof msg.result === 'string' ? msg.result : '',
+          final: true,
+        });
+      } else {
+        const last = acc.parts.at(-1);
+        if (last?.kind === 'assistant') {
+          acc.parts[acc.parts.length - 1] = { ...last, final: true };
+        }
+      }
       break;
     }
   }
+}
+
+function usageFrom(usage: AnyRecord): ({ kind: 'reported' } & Usage) | undefined {
+  if (
+    optionalNum(usage.input_tokens) === undefined ||
+    optionalNum(usage.output_tokens) === undefined
+  ) {
+    return undefined;
+  }
+  return {
+    kind: 'reported',
+    inputTokens: inputTokens(usage),
+    outputTokens: num(usage.output_tokens),
+  };
 }
 
 function inputTokens(usage: AnyRecord): number {

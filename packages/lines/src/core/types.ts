@@ -15,7 +15,7 @@
  * the primitive is the loop, not a pipeline.
  */
 
-import type { Engine, EngineRef, Usage } from '../engines/engine.js';
+import type { Engine, EngineRef, UsageReceipt } from '../engines/engine.js';
 import type { Memory } from '@obversa/memory';
 import type { LoopError } from './errors.js';
 import type { Budget } from './budget.js';
@@ -587,7 +587,7 @@ export type LoopEvent =
       ts: number;
       path: string[];
       model: string;
-      usage: Usage;
+      usage: UsageReceipt;
     }
   | {
       kind: 'log';

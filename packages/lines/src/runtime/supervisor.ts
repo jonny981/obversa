@@ -70,7 +70,12 @@ export interface RunLive {
     reason: string;
   };
   lastOutcome?: { status: string; summary?: string; late?: boolean };
-  usage: { inputTokens: number; outputTokens: number; calls: number };
+  usage: {
+    inputTokens: number;
+    outputTokens: number;
+    calls: number;
+    unknownUsageCalls: number;
+  };
 }
 
 export interface RunStatus {
@@ -126,7 +131,12 @@ export function startSupervisor(input: {
     live: {
       path: [],
       iteration: 0,
-      usage: { inputTokens: 0, outputTokens: 0, calls: 0 },
+      usage: {
+        inputTokens: 0,
+        outputTokens: 0,
+        calls: 0,
+        unknownUsageCalls: 0,
+      },
     },
   };
   const active = new Map<string, CurrentWork>();
@@ -218,9 +228,13 @@ export function startSupervisor(input: {
         }
         break;
       case 'engine:usage':
-        status.live.usage.inputTokens += event.usage.inputTokens;
-        status.live.usage.outputTokens += event.usage.outputTokens;
         status.live.usage.calls += 1;
+        if (event.usage.kind === 'unknown') {
+          status.live.usage.unknownUsageCalls += 1;
+        } else {
+          status.live.usage.inputTokens += event.usage.inputTokens;
+          status.live.usage.outputTokens += event.usage.outputTokens;
+        }
         break;
       case 'proof': {
         const proof: ProofRecord = {
@@ -474,7 +488,9 @@ function renderEvent(event: LoopEvent): string {
     case 'engine:tool':
       return `${at}  tool ${event.name} ${event.phase}`;
     case 'engine:usage':
-      return `${at}  ${event.model}: ${event.usage.inputTokens}/${event.usage.outputTokens} tok`;
+      return event.usage.kind === 'unknown'
+        ? `${at}  ${event.model}: usage unknown`
+        : `${at}  ${event.model}: ${event.usage.inputTokens}/${event.usage.outputTokens} tok`;
     case 'loop:stall':
       return `${at}⏹ stalled after ${event.report.iterations.length} no-progress iterations: ${event.report.reason}`;
     case 'limit:wait':

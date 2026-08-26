@@ -205,8 +205,7 @@ export async function run(
 
   const emit = (event: LoopEvent) => {
     stats.record(event);
-    if (budget && event.kind === 'engine:usage')
-      budget.add(event.usage.inputTokens + event.usage.outputTokens);
+    if (budget && event.kind === 'engine:usage') budget.addUsage(event.usage);
     options.onEvent?.(event);
     for (const sink of sinks) sink(event);
   };

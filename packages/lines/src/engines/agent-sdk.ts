@@ -27,6 +27,11 @@ import {
 import { mapMessage, newAccumulator } from './message-map.js';
 import { LoopError } from '../core/errors.js';
 import { scrubCapture } from '../core/redact.js';
+import { classifyEngineFailure } from './failure.js';
+import {
+  engineSelection,
+  validateAgentResult,
+} from '../runtime/result-parts.js';
 
 const MEMORY_SERVER = 'lines-memory';
 const MEMORY_TOOL = 'memory';
@@ -202,7 +207,7 @@ export class AgentSdkEngine implements Engine {
     const { query } = await import('@anthropic-ai/claude-agent-sdk');
 
     const model = modelFor(req, this.opts, 'agent-sdk');
-    const acc = newAccumulator(model ?? 'unknown');
+    const acc = newAccumulator(model);
     const env = requestEnv(req);
     const abort = new AbortController();
     const onAbort = () => abort.abort();
@@ -278,15 +283,43 @@ export class AgentSdkEngine implements Engine {
           phase: 'engine',
           message: 'agent-sdk run aborted',
         });
-      if (timedOut && req.timeoutGraceMs && acc.terminal && acc.text) {
-        onEvent({ type: 'usage', usage: acc.usage, model: acc.model });
-        return {
-          text: acc.text,
-          usage: acc.usage,
+      if (acc.terminal && acc.parts.some((part) => part.final)) {
+        const requested = engineSelection({
+          adapter: 'agent-sdk',
+          provider: 'anthropic',
+          model: model ?? null,
+        });
+        const effective = engineSelection({
+          adapter: 'agent-sdk',
+          provider: 'anthropic',
           model: acc.model,
-          stopReason: acc.stopReason,
-          late: true,
-        };
+        });
+        onEvent({
+          type: 'usage',
+          usage: acc.usage,
+          model: acc.model ?? model ?? 'agent-sdk',
+        });
+        return validateAgentResult({
+          parts: acc.parts,
+          usage: acc.usage,
+          requested,
+          effective,
+          ...(acc.stopReason === undefined
+            ? {}
+            : { stopReason: acc.stopReason }),
+          transportFailure: {
+            kind: timedOut ? 'timeout' : classifyEngineFailure(e),
+            message: scrubCapture(
+              timedOut
+                ? 'agent-sdk result arrived after the soft timeout'
+                : e instanceof Error
+                  ? e.message
+                  : String(e),
+              env,
+            ),
+            exitCode: null,
+          },
+        });
       }
       const limit = classifySdkLimit(e, env);
       if (limit) throw limit;
@@ -311,14 +344,40 @@ export class AgentSdkEngine implements Engine {
       signal.removeEventListener('abort', onAbort);
     }
 
-    onEvent({ type: 'usage', usage: acc.usage, model: acc.model });
-    return {
-      text: acc.text,
+    onEvent({
+      type: 'usage',
       usage: acc.usage,
+      model: acc.model ?? model ?? 'agent-sdk',
+    });
+    const requested = engineSelection({
+      adapter: 'agent-sdk',
+      provider: 'anthropic',
+      model: model ?? null,
+    });
+    const effective = engineSelection({
+      adapter: 'agent-sdk',
+      provider: 'anthropic',
       model: acc.model,
-      stopReason: acc.stopReason,
-      late:
-        typeof req.timeoutMs === 'number' && Date.now() - startedAt > req.timeoutMs,
-    };
+    });
+    const late =
+      typeof req.timeoutMs === 'number' && Date.now() - startedAt > req.timeoutMs;
+    return validateAgentResult({
+      parts: acc.parts,
+      usage: acc.usage,
+      requested,
+      effective,
+      ...(acc.stopReason === undefined
+        ? {}
+        : { stopReason: acc.stopReason }),
+      ...(late
+        ? {
+            transportFailure: {
+              kind: 'timeout' as const,
+              message: 'agent-sdk result arrived after the soft timeout',
+              exitCode: null,
+            },
+          }
+        : {}),
+    });
   }
 }

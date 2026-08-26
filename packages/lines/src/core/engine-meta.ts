@@ -24,12 +24,12 @@ export function linesRequestMeta(
   };
 }
 
-/** Surface a completed engine turn's non-fatal backend warning through run logs. */
-export function logEngineWarning(
+/** Surface a completed result's later transport failure through run logs. */
+export function logEngineTransportFailure(
   ctx: JobContext,
-  result: Pick<AgentResult, 'warning'>,
+  result: Pick<AgentResult, 'transportFailure'>,
   env?: Record<string, string>,
 ): void {
-  if (!result.warning) return;
-  ctx.log(scrubCapture(result.warning, env, 1000), 'warn');
+  if (!result.transportFailure) return;
+  ctx.log(scrubCapture(result.transportFailure.message, env, 1000), 'warn');
 }
