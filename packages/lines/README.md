@@ -127,10 +127,30 @@ and runs the public graph conformance kit.
 This graph contract does not schedule nodes, store runs, provide built-in
 graph forms, or execute work on another machine.
 
+## Store events and artifacts
+
+Use `EventStore` for small append-only JSON events. Use `ArtifactStore` for
+larger byte content. An event can carry the returned artifact reference instead
+of copying the content into the event stream.
+
+Run the checked-in local-storage example from the workspace root:
+
+```bash
+pnpm example:storage
+```
+
+The example stores a 65 KB synthetic artifact, appends its 194-byte reference,
+reopens the same data through a fresh storage binding, folds the same state,
+and runs both public storage conformance kits. It stays offline and does not
+execute or resume graph work.
+
+Read [Events and artifacts](../../docs/public/storage/events-and-artifacts.mdx)
+for the port contracts, limits, secret rules, conflicts, and integrity checks.
+
 ## Documentation
 
 The workspace `docs/public` directory contains the first-run guide, graph
-guides, and the production-line bank.
+guides, storage guide, and the production-line bank.
 
 Run the offline production line from the workspace root:
 

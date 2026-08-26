@@ -196,6 +196,24 @@ function requireFields(
   }
 }
 
+function exactFields(
+  value: Readonly<Record<string, JsonValue>>,
+  fields: readonly string[],
+  path: string,
+): void {
+  requireFields(value, fields, path);
+  const expected = new Set(fields);
+  for (const field of Object.keys(value)) {
+    if (!expected.has(field)) {
+      fail(
+        'UNKNOWN_FIELD',
+        `${path}/${field}`,
+        `Unknown field "${field}" is not allowed.`,
+      );
+    }
+  }
+}
+
 function json(value: unknown, path: string): JsonValue {
   try {
     return cloneFrozenJson(value as JsonValue);
@@ -296,6 +314,171 @@ function packageIdentity(value: GraphPackageIdentity, path: string): void {
   text(value.source, `${path}/source`, 'package source');
   text(value.version, `${path}/version`, 'package version');
   digest(value.digest, `${path}/digest`);
+}
+
+function strictTarget(value: unknown, path: string): void {
+  const item = record(value, path, 'Execution target');
+  exactFields(item, ['adapter', 'provider', 'modelFamily', 'model', 'tools'], path);
+  target(item as unknown as ExecutionTarget, path);
+}
+
+function strictPermission(value: unknown, path: string): void {
+  const item = record(value, path, 'Permission');
+  exactFields(item, ['name', 'scope'], path);
+  permission(item as unknown as PermissionDescriptor, path);
+}
+
+function strictBound(value: unknown, path: string): void {
+  const item = record(value, path, 'Plan bound');
+  bound(item as unknown as PlanBound, path);
+  exactFields(
+    item,
+    item.kind === 'known' ? ['kind', 'value'] : ['kind', 'reason'],
+    path,
+  );
+}
+
+/** Validate and freeze a resolved plan read from storage. */
+export function validateResolvedPlan(value: unknown): ResolvedPlan {
+  const raw = json(value, '');
+  const root = record(raw, '', 'Resolved plan');
+  exactFields(root, [
+    'schemaVersion',
+    'graph',
+    'package',
+    'inputContract',
+    'outputContract',
+    'phases',
+    'nodes',
+    'edges',
+    'policies',
+    'executionLanes',
+    'permissions',
+    'bounds',
+    'requirements',
+  ], '');
+
+  const graph = record(root.graph, '/graph', 'Graph metadata');
+  exactFields(graph, [
+    'id', 'definitionVersion', 'kind', 'typeVersion', 'definitionDigest',
+  ], '/graph');
+
+  const packageValue = record(root.package, '/package', 'Package identity');
+  exactFields(packageValue, ['source', 'version', 'digest'], '/package');
+
+  const phases = list(root.phases, '/phases', 'Phases');
+  phases.forEach((phase, index) => {
+    const item = record(phase, `/phases/${index}`, 'Phase');
+    exactFields(item, ['id', 'name', 'nodeIds'], `/phases/${index}`);
+  });
+
+  const nodes = list(root.nodes, '/nodes', 'Nodes');
+  nodes.forEach((node, index) => {
+    const item = record(node, `/nodes/${index}`, 'Node description');
+    exactFields(item, [
+      'id', 'phaseId', 'inputContract', 'outputContract', 'laneId',
+    ], `/nodes/${index}`);
+  });
+
+  const edges = list(root.edges, '/edges', 'Edges');
+  edges.forEach((edge, index) => {
+    const item = record(edge, `/edges/${index}`, 'Edge description');
+    exactFields(item, ['id', 'source', 'target'], `/edges/${index}`);
+  });
+
+  const policies = record(root.policies, '/policies', 'Policies');
+  exactFields(policies, [
+    'retry', 'stop', 'concurrency', 'write', 'budget', 'action',
+  ], '/policies');
+
+  const lanes = list(root.executionLanes, '/executionLanes', 'Execution lanes');
+  lanes.forEach((lane, index) => {
+    const path = `/executionLanes/${index}`;
+    const item = record(lane, path, 'Resolved execution lane');
+    exactFields(item, [
+      'id', 'requested', 'knownSubstitutions', 'effective',
+    ], path);
+    strictTarget(item.requested, `${path}/requested`);
+    list(
+      item.knownSubstitutions,
+      `${path}/knownSubstitutions`,
+      'Known substitutions',
+    ).forEach((targetValue, targetIndex) => {
+      strictTarget(
+        targetValue,
+        `${path}/knownSubstitutions/${targetIndex}`,
+      );
+    });
+    strictTarget(item.effective, `${path}/effective`);
+  });
+
+  const permissions = record(root.permissions, '/permissions', 'Permissions');
+  exactFields(permissions, ['requested', 'admitted'], '/permissions');
+  list(permissions.requested, '/permissions/requested', 'Requested permissions')
+    .forEach((item, index) => {
+      strictPermission(item, `/permissions/requested/${index}`);
+    });
+  list(permissions.admitted, '/permissions/admitted', 'Admitted permissions')
+    .forEach((item, index) => {
+      strictPermission(item, `/permissions/admitted/${index}`);
+    });
+
+  const bounds = record(root.bounds, '/bounds', 'Bounds');
+  exactFields(bounds, [
+    'dispatches', 'maxConcurrency', 'maxFanOut',
+  ], '/bounds');
+  const dispatches = record(
+    bounds.dispatches,
+    '/bounds/dispatches',
+    'Dispatch bounds',
+  );
+  exactFields(dispatches, ['min', 'max'], '/bounds/dispatches');
+  strictBound(dispatches.min, '/bounds/dispatches/min');
+  strictBound(dispatches.max, '/bounds/dispatches/max');
+  strictBound(bounds.maxConcurrency, '/bounds/maxConcurrency');
+  strictBound(bounds.maxFanOut, '/bounds/maxFanOut');
+
+  const requirements = record(root.requirements, '/requirements', 'Requirements');
+  exactFields(requirements, ['memory'], '/requirements');
+
+  const plan = root as unknown as ResolvedPlan;
+  const description = validateGraphDescription({
+    schemaVersion: plan.schemaVersion,
+    graph: plan.graph,
+    inputContract: plan.inputContract,
+    outputContract: plan.outputContract,
+    phases: plan.phases,
+    nodes: plan.nodes,
+    edges: plan.edges,
+    policies: plan.policies,
+    executionLanes: plan.executionLanes.map((lane) => ({
+      id: lane.id,
+      requested: lane.requested,
+      knownSubstitutions: lane.knownSubstitutions,
+    })),
+    requestedPermissions: plan.permissions.requested,
+    bounds: plan.bounds,
+    requirements: plan.requirements,
+  });
+  const rebuilt = resolveGraphPlan(description, {
+    package: plan.package,
+    admission: {
+      package: plan.package,
+      permissions: plan.permissions.admitted,
+    },
+    executionLanes: plan.executionLanes.map((lane) => ({
+      id: lane.id,
+      effective: lane.effective,
+    })),
+  }).plan;
+  if (!isDeepStrictEqual(plan, rebuilt)) {
+    fail(
+      'RESOLVED_PLAN_MISMATCH',
+      '',
+      'Resolved plan does not match its graph description and host resolution.',
+    );
+  }
+  return rebuilt;
 }
 
 /** Validate and freeze the stable data returned by a graph type. */

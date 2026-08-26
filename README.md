@@ -78,11 +78,29 @@ Read [the graph contract](docs/public/graphs/contract.mdx) and
 [plan admission](docs/public/graphs/plan-admission.mdx) before a host uses a
 graph package.
 
+## Store events and artifacts
+
+The Lines storage ports keep small JSON events separate from larger byte
+content. Run the offline local-storage example from the workspace root:
+
+```bash
+pnpm example:storage
+```
+
+The example writes one large synthetic artifact, appends one small reference,
+reopens the stores through a fresh binding, folds the same state, and runs the
+event-store and artifact-store conformance kits.
+
+Read [Events and artifacts](docs/public/storage/events-and-artifacts.mdx) for
+the storage contract, limits, secret handling, conflict behavior, and integrity
+checks. This storage layer does not execute graph work or recover a stopped
+run.
+
 ## Documentation
 
 The public documentation is in [`docs/public`](docs/public). It includes the
-first-run guide, the memory contract, graph guides, the production-line bank,
-and [cmux host setup](docs/public/hosts/cmux.mdx).
+first-run guide, the memory contract, graph and storage guides, the
+production-line bank, and [cmux host setup](docs/public/hosts/cmux.mdx).
 
 Validate the documentation from the workspace root:
 

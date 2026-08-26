@@ -5,6 +5,7 @@ export default defineConfig({
     api: 'src/api.ts',
     testing: 'src/testing.ts',
     'env/command': 'src/env/command.ts',
+    'storage/local': 'src/storage/local.ts',
   },
   format: ['esm'],
   target: 'node22',

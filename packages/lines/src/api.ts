@@ -59,6 +59,54 @@ export {
   type ResolvedPlanSnapshot,
 } from './graph/plan.js';
 
+export {
+  StorageError,
+  type StorageErrorCode,
+} from './storage/error.js';
+export {
+  validateNewDomainEvent,
+  validateDomainEventEnvelope,
+  type DomainEventId,
+  type EventStreamId,
+  type StorageNamespace,
+  type StreamRevision,
+  type EventStreamRef,
+  type NewDomainEvent,
+  type DomainEventEnvelope,
+} from './events/envelope.js';
+export {
+  validateDomainEventBatch,
+  validateEventStreamRef,
+  type DomainEventBatch,
+  type EventStore,
+} from './events/store.js';
+export {
+  validateArtifactReference,
+  validateArtifactScope,
+  validateNewArtifact,
+  type ArtifactBatch,
+  type ArtifactContentMode,
+  type ArtifactScope,
+  type NewArtifact,
+  type ArtifactReference,
+  type ArtifactStore,
+} from './artifacts/store.js';
+export {
+  validateRunDefinition,
+  validateRunStartRecord,
+  validateRunStoragePolicy,
+  validateRunStorageRecord,
+  type StorageProviderRecord,
+  type SensitiveContentPolicy,
+  type RunStoragePolicy,
+  type RunStorageRecord,
+  type RunDefinition,
+  type RunStartedPayload,
+  type NewRunStartedEvent,
+  type RunStartRecord,
+  type RunStorageBinding,
+} from './runtime/run-definition.js';
+
 export type {
   Job,
   JobMeta,

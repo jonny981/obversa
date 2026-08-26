@@ -20,6 +20,10 @@
       "types": "./dist/env/command.d.ts",
       "import": "./dist/env/command.js"
     },
+    "./storage/local": {
+      "types": "./dist/storage/local.d.ts",
+      "import": "./dist/storage/local.js"
+    },
     "./package.json": "./package.json"
   },
   "files": [

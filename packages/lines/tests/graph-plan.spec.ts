@@ -3,6 +3,7 @@ import { describe, expect, it } from 'vitest';
 import {
   resolveGraphPlan,
   validateGraphDescription,
+  validateResolvedPlan,
   type GraphDescription,
   type PlanResolution,
 } from '../src/graph/plan.ts';
@@ -219,6 +220,48 @@ describe('resolveGraphPlan', () => {
     });
     expect(first.plan.permissions.requested).toHaveLength(1);
     expect(first.plan.permissions.admitted).toHaveLength(2);
+  });
+
+  it('rejects unknown fields inside runtime-owned resolved-plan records', () => {
+    const resolved = resolveGraphPlan(description, resolution());
+    const invalid = {
+      ...resolved.plan,
+      nodes: [{
+        ...resolved.plan.nodes[0]!,
+        unknownRuntimeField: true,
+      }],
+    };
+
+    expect(() => validateResolvedPlan(invalid)).toThrowError(
+      expect.objectContaining({
+        name: 'GraphValidationError',
+        issues: [expect.objectContaining({
+          code: 'UNKNOWN_FIELD',
+          path: '/nodes/0/unknownRuntimeField',
+        })],
+      }),
+    );
+  });
+
+  it('rechecks full graph semantics for a self-consistent resolved plan', () => {
+    const resolved = resolveGraphPlan(description, resolution());
+    const invalid = {
+      ...resolved.plan,
+      nodes: [{
+        ...resolved.plan.nodes[0]!,
+        phaseId: 'missing-phase',
+      }],
+    };
+
+    expect(() => validateResolvedPlan(invalid)).toThrowError(
+      expect.objectContaining({
+        name: 'GraphValidationError',
+        issues: [expect.objectContaining({
+          code: 'UNKNOWN_PHASE',
+          path: '/nodes/0/phaseId',
+        })],
+      }),
+    );
   });
 
   it.each([

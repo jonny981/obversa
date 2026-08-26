@@ -25,9 +25,23 @@ const expectedGraphReport = {
   maxFanOut: { kind: 'known', value: 1 },
 };
 
+const expectedStorageReport = {
+  storedArtifactBytes: 65_591,
+  eventPayloadBytes: 194,
+  reopenedState: {
+    eventCount: 1,
+    artifactBytes: 65_591,
+    lastArtifactDigest: 'sha256:45ccde9ad00cd4b72ab6c8aced15a85c3199c7ceab300942bf678ae1fa3d40cc',
+  },
+  conformance: {
+    events: 9,
+    artifacts: 15,
+  },
+};
+
 function sourceFromPublicDoc(document) {
   const match = /## Source[\s\S]*?```ts\n([\s\S]*?)\n```/.exec(document);
-  if (!match) throw new Error('The offline production-line page has no TypeScript source block');
+  if (!match) throw new Error('The public page has no TypeScript source block');
   return `${match[1]}\n`;
 }
 
@@ -223,7 +237,12 @@ const tsconfig = {
     outDir: 'dist',
     types: ['node'],
   },
-  include: ['consumer.ts', 'offline-review.line.ts', 'custom-graph.ts'],
+  include: [
+    'consumer.ts',
+    'offline-review.line.ts',
+    'custom-graph.ts',
+    'durable-storage.ts',
+  ],
 };
 
 async function main() {
@@ -233,6 +252,8 @@ async function main() {
   );
   const graphExamplePath = join(root, 'examples', 'packages', 'custom-graph.ts');
   const graphExampleSource = await readFile(graphExamplePath, 'utf8');
+  const storageExamplePath = join(root, 'examples', 'packages', 'durable-storage.ts');
+  const storageExampleSource = await readFile(storageExamplePath, 'utf8');
   const graphDocument = await readFile(
     join(root, 'docs', 'public', 'graphs', 'contract.mdx'),
     'utf8',
@@ -241,11 +262,18 @@ async function main() {
     join(root, 'docs', 'public', 'production-lines', 'offline-review.mdx'),
     'utf8',
   );
+  const storageDocument = await readFile(
+    join(root, 'docs', 'public', 'storage', 'events-and-artifacts.mdx'),
+    'utf8',
+  );
   if (sourceFromPublicDoc(publicDocument) !== exampleSource) {
     throw new Error('The offline production-line page does not match its runnable source');
   }
   if (sourceFromPublicDoc(graphDocument) !== graphExampleSource) {
     throw new Error('The outside graph contract page does not match its runnable source');
+  }
+  if (sourceFromPublicDoc(storageDocument) !== storageExampleSource) {
+    throw new Error('The storage page does not match its runnable source');
   }
 
   const directory = await mkdtemp(join(tmpdir(), 'obversa-consumer-'));
@@ -284,6 +312,7 @@ async function main() {
       exampleSource,
     );
     await copyFile(graphExamplePath, join(consumerDirectory, 'custom-graph.ts'));
+    await copyFile(storageExamplePath, join(consumerDirectory, 'durable-storage.ts'));
 
     run('pnpm', ['install', '--offline', '--ignore-scripts'], {
       cwd: consumerDirectory,
@@ -320,8 +349,16 @@ async function main() {
     const directGraph = JSON.parse(
       run('pnpm', ['exec', 'tsx', 'custom-graph.ts'], { cwd: consumerDirectory }),
     );
+    const compiledStorage = JSON.parse(
+      run(process.execPath, ['dist/durable-storage.js'], { cwd: consumerDirectory }),
+    );
+    const directStorage = JSON.parse(
+      run('pnpm', ['exec', 'tsx', 'durable-storage.ts'], { cwd: consumerDirectory }),
+    );
     assert.deepEqual(compiledGraph, expectedGraphReport);
     assert.deepEqual(directGraph, expectedGraphReport);
+    assert.deepEqual(compiledStorage, expectedStorageReport);
+    assert.deepEqual(directStorage, expectedStorageReport);
     if (
       report.lines !== 'pass' ||
       report.memoryCases !== 17 ||
@@ -350,7 +387,7 @@ async function main() {
     if (refs.length !== 1) throw new Error(`Git memory created ${refs.length} private refs instead of one`);
 
     console.log(
-      'Clean offline consumer passed with TypeScript 6, the first production line, the outside graph, 17 memory cases, and both adapters.',
+      'Clean offline consumer passed with TypeScript 6, the first production line, the outside graph, durable storage, 17 memory cases, and both memory adapters.',
     );
   } finally {
     await rm(directory, { recursive: true, force: true });

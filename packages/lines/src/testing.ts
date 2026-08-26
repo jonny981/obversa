@@ -14,3 +14,18 @@ export {
   type GraphTypeConformanceFailure,
   type GraphTypeConformanceReport,
 } from './graph/conformance.js';
+export {
+  runEventStoreConformance,
+  assertEventStoreConformance,
+  type EventStoreConformanceFactory,
+  type EventStoreConformanceFailure,
+  type EventStoreConformanceReport,
+} from './events/conformance.js';
+export {
+  runArtifactStoreConformance,
+  assertArtifactStoreConformance,
+  type ArtifactStoreConformanceOptions,
+  type ArtifactStoreConformanceFactory,
+  type ArtifactStoreConformanceFailure,
+  type ArtifactStoreConformanceReport,
+} from './artifacts/conformance.js';

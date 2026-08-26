@@ -5,6 +5,7 @@
       "@obversa/lines": ["./src/api.ts"],
       "@obversa/lines/testing": ["./src/testing.ts"],
       "@obversa/lines/env/command": ["./src/env/command.ts"],
+      "@obversa/lines/storage/local": ["./src/storage/local.ts"],
       "@obversa/memory": ["../memory/src/index.ts"]
     },
     "types": ["node"]

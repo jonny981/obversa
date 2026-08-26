@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 
 import * as api from '../src/api.ts';
 import * as commandEnvironmentApi from '../src/env/command.ts';
+import * as localStorageApi from '../src/storage/local.ts';
 import * as testingApi from '../src/testing.ts';
 import type { GraphKernel } from '../src/api.ts';
 
@@ -27,6 +28,7 @@ describe('public runtime API', () => {
       'JsonValueError',
       'LANE_DEAD_FAILURES',
       'LoopError',
+      'StorageError',
       'agentCheck',
       'agentJob',
       'all',
@@ -80,7 +82,18 @@ describe('public runtime API', () => {
       'sequence',
       'toCondition',
       'tournament',
+      'validateArtifactReference',
+      'validateArtifactScope',
+      'validateDomainEventBatch',
+      'validateDomainEventEnvelope',
+      'validateEventStreamRef',
       'validateGraphDescription',
+      'validateNewArtifact',
+      'validateNewDomainEvent',
+      'validateRunDefinition',
+      'validateRunStartRecord',
+      'validateRunStoragePolicy',
+      'validateRunStorageRecord',
       'withEnv',
       'writeScope',
     ]);
@@ -151,12 +164,21 @@ describe('public runtime API', () => {
     expect(Object.keys(testingApi).sort()).toEqual([
       'MockEngine',
       'MockEnvironment',
+      'assertArtifactStoreConformance',
+      'assertEventStoreConformance',
       'assertGraphTypeConformance',
       'mockVerdict',
+      'runArtifactStoreConformance',
+      'runEventStoreConformance',
       'runGraphTypeConformance',
     ]);
     expect(Object.keys(commandEnvironmentApi).sort()).toEqual([
       'commandEnvironment',
+    ]);
+    expect(Object.keys(localStorageApi).sort()).toEqual([
+      'createLocalArtifactStore',
+      'createLocalEventStore',
+      'createLocalRunStorage',
     ]);
   });
 });

@@ -45,7 +45,7 @@ export interface GraphDefinition<
 
 export interface CompiledGraphDefinition<
   Definition extends GraphDefinition = GraphDefinition,
-> {
+> extends JsonObject {
   readonly value: Definition;
   readonly canonicalJson: string;
   readonly digest: Sha256Digest;

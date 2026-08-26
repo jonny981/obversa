@@ -34,6 +34,12 @@
         ]
       },
       {
+        "group": "Storage",
+        "pages": [
+          "storage/events-and-artifacts"
+        ]
+      },
+      {
         "group": "Production lines",
         "pages": [
           "production-lines/index",
