@@ -9,35 +9,69 @@
  * fixtures reproduce the orphan deterministically (a detached `sleep` given
  * the inherited stdio) and prove each adapter resolves at exit anyway.
  */
-import { describe, it, expect } from 'vitest';
-import { chmodSync, mkdtempSync, writeFileSync } from 'node:fs';
+import { afterEach, describe, it, expect } from 'vitest';
+import {
+  chmodSync,
+  mkdtempSync,
+  readFileSync,
+  rmSync,
+  writeFileSync,
+} from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { setTimeout as delay } from 'node:timers/promises';
 
 import { CodexEngine } from '../src/engines/codex.ts';
 import { ClaudeCliEngine } from '../src/engines/claude-cli.ts';
 import { finalResultText } from '../src/runtime/result-parts.ts';
+import { isProcessAlive } from './process-fixture.ts';
 
 /** Seconds the orphan holds the pipes — far beyond any test bound below, so a
  *  regression to stream-close waiting fails loudly rather than just slowly. */
 const HOLD_SECS = 120;
+const ORPHAN_PID_PATH = '__ORPHAN_PID_PATH__';
+const directories: string[] = [];
 
-function stub(source: string): string {
+function stub(source: string): {
+  readonly bin: string;
+  readonly orphanPidPath: string;
+} {
   const dir = mkdtempSync(join(tmpdir(), 'lines-exit-settle-'));
+  directories.push(dir);
   const bin = join(dir, 'engine-stub.mjs');
-  writeFileSync(bin, source);
+  const orphanPidPath = join(dir, 'orphan.pid');
+  writeFileSync(
+    bin,
+    source.replaceAll(ORPHAN_PID_PATH, JSON.stringify(orphanPidPath)),
+  );
   chmodSync(bin, 0o755);
-  return bin;
+  return { bin, orphanPidPath };
 }
 
 const SPAWN_ORPHAN = `
 import { spawn } from 'node:child_process';
-spawn('sleep', ['${HOLD_SECS}'], { stdio: 'inherit', detached: true }).unref();
+import { writeFileSync as writeOrphanPid } from 'node:fs';
+const orphan = spawn('sleep', ['${HOLD_SECS}'], { stdio: 'inherit', detached: true });
+writeOrphanPid(${ORPHAN_PID_PATH}, String(orphan.pid));
+orphan.unref();
 `;
 
-describe('engine settle-on-exit (orphan holds the stdio pipes)', () => {
+afterEach(() => {
+  for (const directory of directories.splice(0)) {
+    rmSync(directory, { recursive: true, force: true });
+  }
+});
+
+async function expectOrphanStopped(path: string): Promise<void> {
+  const pid = Number(readFileSync(path, 'utf8'));
+  const deadline = Date.now() + 2_000;
+  while (isProcessAlive(pid) && Date.now() < deadline) await delay(10);
+  expect(isProcessAlive(pid)).toBe(false);
+}
+
+describe.runIf(process.platform !== 'win32')('engine-owned process cleanup', () => {
   it('codex resolves a completed turn at exit', async () => {
-    const bin = stub(`#!/usr/bin/env node
+    const { bin, orphanPidPath } = stub(`#!/usr/bin/env node
 import { readFileSync, writeFileSync } from 'node:fs';
 ${SPAWN_ORPHAN}
 const args = process.argv.slice(2);
@@ -56,6 +90,7 @@ process.exit(0);
     expect(finalResultText(result)).toBe('PONG');
     expect(result.transportFailure).toBeUndefined();
     expect(Date.now() - startedAt).toBeLessThan(10_000);
+    await expectOrphanStopped(orphanPidPath);
   });
 
   it('claude-cli resolves a completed stream-json turn at exit', async () => {
@@ -68,7 +103,7 @@ process.exit(0);
       result: 'PONG',
       usage: { input_tokens: 3, output_tokens: 1 },
     });
-    const bin = stub(`#!/usr/bin/env node
+    const { bin, orphanPidPath } = stub(`#!/usr/bin/env node
 import { readFileSync } from 'node:fs';
 ${SPAWN_ORPHAN}
 readFileSync(0, 'utf8');
@@ -90,10 +125,11 @@ process.exit(0);
       outputTokens: 1,
     });
     expect(Date.now() - startedAt).toBeLessThan(10_000);
+    await expectOrphanStopped(orphanPidPath);
   });
 
   it('the hard timeout still fires when the engine never exits', async () => {
-    const bin = stub(`#!/usr/bin/env node
+    const { bin, orphanPidPath } = stub(`#!/usr/bin/env node
 ${SPAWN_ORPHAN}
 setInterval(() => {}, 1000);
 `);
@@ -107,10 +143,11 @@ setInterval(() => {}, 1000);
       ),
     ).rejects.toMatchObject({ code: 'TIMEOUT' });
     expect(Date.now() - startedAt).toBeLessThan(10_000);
+    await expectOrphanStopped(orphanPidPath);
   });
 
   it('an abort settles instead of waiting for the orphan', async () => {
-    const bin = stub(`#!/usr/bin/env node
+    const { bin, orphanPidPath } = stub(`#!/usr/bin/env node
 ${SPAWN_ORPHAN}
 setInterval(() => {}, 1000);
 `);
@@ -126,5 +163,6 @@ setInterval(() => {}, 1000);
       ),
     ).rejects.toMatchObject({ code: 'ABORTED' });
     expect(Date.now() - startedAt).toBeLessThan(10_000);
+    await expectOrphanStopped(orphanPidPath);
   });
 });

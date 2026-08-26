@@ -4,7 +4,6 @@
  * same stream-json schema the Agent SDK emits, so we reuse `mapMessage`.
  */
 
-import { execa } from 'execa';
 import {
   SUBAGENT_TOOLS,
   modelFor,
@@ -16,7 +15,12 @@ import {
   type EngineOptions,
 } from './engine.js';
 import { mapMessage, newAccumulator } from './message-map.js';
-import { settleOnExit } from './settle.js';
+import {
+  DEFAULT_OWNED_COMMAND_LIMITS,
+  ownedCommandIdentity,
+  resolveCommandExecutable,
+  runOwnedCommand,
+} from './command-runner.js';
 import { LoopError } from '../core/errors.js';
 import { scrubCapture } from '../core/redact.js';
 import {
@@ -230,14 +234,26 @@ export function buildClaudeArgs(
 
 export class ClaudeCliEngine implements Engine {
   readonly name = 'claude-cli';
+  private executable: string | undefined;
   constructor(private readonly opts: EngineOptions = {}) {}
+
+  private commandExecutable(): string {
+    this.executable ??= resolveCommandExecutable(this.opts.cliBinary ?? 'claude');
+    return this.executable;
+  }
 
   async run(
     req: AgentRequest,
     onEvent: EngineEventSink,
     signal: AbortSignal,
   ): Promise<AgentResult> {
-    const bin = this.opts.cliBinary ?? 'claude';
+    if (signal.aborted)
+      throw new LoopError({
+        code: 'ABORTED',
+        phase: 'engine',
+        message: 'claude-cli run aborted',
+      });
+    const bin = this.commandExecutable();
     const model = modelFor(req, this.opts, 'claude-cli');
     const args = buildClaudeArgs(req, this.opts);
     const env = requestEnv(req);
@@ -246,25 +262,15 @@ export class ClaudeCliEngine implements Engine {
         ? req.timeoutMs + req.timeoutGraceMs
         : req.timeoutMs;
     const startedAt = Date.now();
-
-    const acc = newAccumulator(model);
-    // Buffered (default) so `stderr` is a string for error messages; we still
-    // attach a `data` listener to stream stdout line-by-line as it arrives.
-    const sub = execa(bin, args, {
-      cwd: req.cwd,
-      // execa merges this over `process.env` (`extendEnv` default); undefined
-      // is inert, so a request with no env changes nothing.
-      env,
-      input: req.prompt,
-      cancelSignal: signal,
-      // If the child ignores the SIGTERM from an abort/timeout, escalate to
-      // SIGKILL so a wedged subprocess can't make Ctrl-C hang.
-      forceKillAfterDelay: 5000,
-      reject: false,
-      timeout: hardTimeout,
-      stripFinalNewline: false,
+    const owner = ownedCommandIdentity({
+      adapter: 'claude-cli',
+      runId: req.lines?.runId,
+      leafId: req.lines?.leafId,
+      attemptId: req.lines?.attemptId,
     });
 
+    const acc = newAccumulator(model);
+    const decoder = new TextDecoder();
     let buffer = '';
     const flush = (line: string) => {
       const trimmed = line.trim();
@@ -275,24 +281,33 @@ export class ClaudeCliEngine implements Engine {
         /* ignore non-JSON banner lines */
       }
     };
-    sub.stdout?.setEncoding('utf8');
-    sub.stdout?.on('data', (chunk: string) => {
-      buffer += chunk;
-      let idx: number;
-      while ((idx = buffer.indexOf('\n')) >= 0) {
-        flush(buffer.slice(0, idx));
-        buffer = buffer.slice(idx + 1);
-      }
-    });
-
-    // Settled on process exit, not stream close: the CLI's MCP servers inherit
-    // its stdio, and an orphan holding the pipes would otherwise pin this
-    // await forever (see settle.ts). The final stream-json line lands before
-    // exit, so the bounded drain preserves it.
-    const result = await settleOnExit(sub);
+    const result = await runOwnedCommand(
+      {
+        executable: bin,
+        args,
+        cwd: req.cwd ?? process.cwd(),
+        env: env ?? {},
+        stdin: req.prompt,
+        ...owner,
+        ...DEFAULT_OWNED_COMMAND_LIMITS,
+        timeoutMs: hardTimeout ?? DEFAULT_OWNED_COMMAND_LIMITS.timeoutMs,
+      },
+      signal,
+      {
+        onStdout(chunk) {
+          buffer += decoder.decode(chunk, { stream: true });
+          let idx: number;
+          while ((idx = buffer.indexOf('\n')) >= 0) {
+            flush(buffer.slice(0, idx));
+            buffer = buffer.slice(idx + 1);
+          }
+        },
+      },
+    );
+    buffer += decoder.decode();
     if (buffer) flush(buffer);
 
-    if (signal.aborted)
+    if (result.aborted || signal.aborted)
       throw new LoopError({
         code: 'ABORTED',
         phase: 'engine',
@@ -300,15 +315,17 @@ export class ClaudeCliEngine implements Engine {
       });
     const late =
       typeof req.timeoutMs === 'number' && Date.now() - startedAt > req.timeoutMs;
-    if (result.failed) {
+    const failed = result.timedOut || result.exitCode !== 0;
+    if (failed) {
       // The child's stderr is outside our control and may echo credentials on
       // an auth failure. `scrubCapture` redacts (env values verbatim, then
       // shape patterns, both on the FULL stream, before the cut) so nothing
       // secret lands in events/logs/the summary.
-      const stderr =
-        typeof result.stderr === 'string'
-          ? scrubCapture(result.stderr, env, 400)
-          : '';
+      const stderr = scrubCapture(
+        new TextDecoder().decode(result.stderr),
+        env,
+        400,
+      );
       if (acc.terminal && acc.parts.some((part) => part.final)) {
         const requested = engineSelection({
           adapter: 'claude-cli',
@@ -345,10 +362,11 @@ export class ClaudeCliEngine implements Engine {
       // A rate/usage limit can land on either stream; check both (redacted)
       // before falling through to the generic exit-code error.
       if (!result.timedOut) {
-        const stdout =
-          typeof result.stdout === 'string'
-            ? scrubCapture(result.stdout, env, 400)
-            : '';
+        const stdout = scrubCapture(
+          new TextDecoder().decode(result.stdout),
+          env,
+          400,
+        );
         const limit = classifyCliLimit(`${stderr}\n${stdout}`);
         if (limit) throw limit;
       }

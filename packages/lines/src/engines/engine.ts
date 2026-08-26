@@ -5,7 +5,7 @@
  */
 
 import type { Memory } from '@obversa/memory';
-import type { JsonValue } from '../graph/value.js';
+import type { JsonValue, Sha256Digest } from '../graph/value.js';
 import type { EngineFailureKind } from './failure.js';
 
 /**
@@ -98,6 +98,7 @@ export interface AgentRequest {
   lines?: {
     leaf: true;
     runId?: string;
+    attemptId?: Sha256Digest;
     leafId: string;
     path: string[];
     label: string;

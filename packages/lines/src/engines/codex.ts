@@ -12,7 +12,6 @@
 import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { execa } from 'execa';
 import type {
   AgentRequest,
   AgentResult,
@@ -22,7 +21,12 @@ import type {
   UsageReceipt,
 } from './engine.js';
 import { modelFor, requestEnv } from './engine.js';
-import { settleOnExit } from './settle.js';
+import {
+  DEFAULT_OWNED_COMMAND_LIMITS,
+  ownedCommandIdentity,
+  resolveCommandExecutable,
+  runOwnedCommand,
+} from './command-runner.js';
 import { LoopError } from '../core/errors.js';
 import { scrubCapture } from '../core/redact.js';
 import {
@@ -129,7 +133,13 @@ export function buildCodexArgs(
 
 export class CodexEngine implements Engine {
   readonly name = 'codex';
+  private executable: string | undefined;
   constructor(private readonly opts: EngineOptions = {}) {}
+
+  private commandExecutable(): string {
+    this.executable ??= resolveCommandExecutable(this.opts.cliBinary ?? 'codex');
+    return this.executable;
+  }
 
   async run(
     req: AgentRequest,
@@ -142,6 +152,13 @@ export class CodexEngine implements Engine {
         phase: 'engine',
         message: 'codex cannot honor tools: []; choose an engine that supports disabling tools',
       });
+    if (signal.aborted)
+      throw new LoopError({
+        code: 'ABORTED',
+        phase: 'engine',
+        message: 'codex run aborted',
+      });
+    const executable = this.commandExecutable();
     const model = modelFor(req, this.opts, 'codex');
     const dir = mkdtempSync(join(tmpdir(), 'lines-codex-'));
     const outFile = join(dir, 'last.txt');
@@ -153,24 +170,28 @@ export class CodexEngine implements Engine {
         ? req.timeoutMs + req.timeoutGraceMs
         : req.timeoutMs;
     const startedAt = Date.now();
+    const owner = ownedCommandIdentity({
+      adapter: 'codex',
+      runId: req.lines?.runId,
+      leafId: req.lines?.leafId,
+      attemptId: req.lines?.attemptId,
+    });
 
     try {
-      // Settled on process exit, not stream close: codex spawns MCP transport
-      // workers and hook processes that inherit its stdio, and an orphan
-      // holding the pipes would otherwise pin this await forever (see settle.ts).
-      const sub = await settleOnExit(
-        execa(this.opts.cliBinary ?? 'codex', args, {
-          // execa merges this over `process.env` (`extendEnv` default); undefined
-          // is inert, so a request with no env changes nothing.
-          env,
-          input: prompt,
-          cancelSignal: signal,
-          forceKillAfterDelay: 5000,
-          reject: false,
-          timeout: hardTimeout,
-        }),
+      const sub = await runOwnedCommand(
+        {
+          executable,
+          args,
+          cwd: req.cwd ?? process.cwd(),
+          env: env ?? {},
+          stdin: prompt,
+          ...owner,
+          ...DEFAULT_OWNED_COMMAND_LIMITS,
+          timeoutMs: hardTimeout ?? DEFAULT_OWNED_COMMAND_LIMITS.timeoutMs,
+        },
+        signal,
       );
-      if (signal.aborted)
+      if (sub.aborted || signal.aborted)
         throw new LoopError({ code: 'ABORTED', phase: 'engine', message: 'codex run aborted' });
 
       let text = '';
@@ -179,9 +200,12 @@ export class CodexEngine implements Engine {
       } catch {
         /* no final message written */
       }
-      const diagnostic = diagnosticCapture(sub.stderr, sub.stdout, env);
+      const stdout = new TextDecoder().decode(sub.stdout);
+      const stderr = new TextDecoder().decode(sub.stderr);
+      const failed = sub.timedOut || sub.exitCode !== 0;
+      const diagnostic = diagnosticCapture(stderr, stdout, env);
       let transportFailure: AgentResult['transportFailure'];
-      if (sub.failed && (sub.timedOut || !text))
+      if (failed && (sub.timedOut || !text))
         throw new LoopError({
           code: sub.timedOut ? 'TIMEOUT' : 'ENGINE',
           phase: 'engine',
@@ -191,7 +215,7 @@ export class CodexEngine implements Engine {
             diagnostic ? `: ${diagnostic}` : ''
           }`,
         });
-      if (sub.failed) {
+      if (failed) {
         transportFailure = {
           kind: sub.timedOut ? 'timeout' : 'unknown',
           message: `codex completed but exited ${sub.exitCode ?? '?'} during teardown${
@@ -203,7 +227,7 @@ export class CodexEngine implements Engine {
 
       // `cached_input_tokens` is a subset of Codex `input_tokens`, so the
       // terminal total is already normalized for the run budget.
-      const usage = usageFromJsonl(sub.stdout);
+      const usage = usageFromJsonl(stdout);
       if (text) onEvent({ type: 'text', delta: text });
       onEvent({ type: 'usage', usage, model: model ?? 'codex' });
       const requested = engineSelection({
