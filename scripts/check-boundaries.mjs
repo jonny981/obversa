@@ -2,32 +2,69 @@ import { readFile, readdir } from 'node:fs/promises';
 import { dirname, extname, join, relative, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
+// The TypeScript compiler's parser (the pinned TypeScript 6 build; the
+// TypeScript 7 native build exposes no parser API). A real parser is the only
+// honest way to find imports: strings, template literals, regex literals, and
+// comments are decided by the language's grammar, so none of them can hide a
+// specifier from this fail-closed guard or fake one.
+import ts from '@typescript/typescript6';
+
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const ignoredDirectories = new Set(['dist', 'node_modules']);
 
-// Every way one module can name another workspace package: a static import or
-// re-export (`from`), a side-effect or dynamic import (`import "x"`,
-// `import("x")`), and CommonJS `require("x")`, by package name or by a
-// relative path that lands inside another package directory. Comments are
-// stripped first, so `import/*x*/("@obversa/y")` is seen. Returns package
-// names (scope + name, subpaths dropped). Exported so the spec can pin each
-// form. `file` is the importing file's absolute path and `root` the repository
-// root; without them only package-name specifiers are reported.
+const scriptKinds = new Map([
+  ['.ts', ts.ScriptKind.TS], ['.mts', ts.ScriptKind.TS], ['.cts', ts.ScriptKind.TS],
+  ['.tsx', ts.ScriptKind.TSX],
+  ['.js', ts.ScriptKind.JS], ['.mjs', ts.ScriptKind.JS], ['.cjs', ts.ScriptKind.JS],
+  ['.jsx', ts.ScriptKind.JSX],
+]);
+
+// Every module specifier a file names, in source order: static imports and
+// re-exports, side-effect and dynamic `import(...)`, CommonJS `require(...)`,
+// and `import x = require(...)`. A specifier that is not a plain string (a
+// computed expression) is reported as `null`, because a guard that cannot
+// read it must fail rather than assume. Exported so the spec can pin each form.
+export function moduleSpecifiers(text, fileName = 'module.ts') {
+  const kind = scriptKinds.get(extname(fileName)) ?? ts.ScriptKind.TS;
+  const source = ts.createSourceFile(fileName, text, ts.ScriptTarget.Latest, true, kind);
+  const specifiers = [];
+  const literal = (node) =>
+    node && (ts.isStringLiteral(node) || ts.isNoSubstitutionTemplateLiteral(node)) ? node.text : null;
+  const visit = (node) => {
+    if ((ts.isImportDeclaration(node) || ts.isExportDeclaration(node)) && node.moduleSpecifier) {
+      specifiers.push(literal(node.moduleSpecifier));
+    } else if (ts.isImportEqualsDeclaration(node) && ts.isExternalModuleReference(node.moduleReference)) {
+      specifiers.push(literal(node.moduleReference.expression));
+    } else if (ts.isCallExpression(node)) {
+      const callee = node.expression;
+      const isImport = callee.kind === ts.SyntaxKind.ImportKeyword;
+      const isRequire = ts.isIdentifier(callee) && callee.text === 'require';
+      if ((isImport || isRequire) && node.arguments.length > 0) specifiers.push(literal(node.arguments[0]));
+    }
+    ts.forEachChild(node, visit);
+  };
+  visit(source);
+  return specifiers;
+}
+
+// The workspace packages a file depends on: `@obversa/...` specifiers by name,
+// and relative paths that resolve into another `packages/<dir>/` (a path inside
+// the importing package is not a crossing). A computed specifier is reported
+// as the sentinel `@obversa/<computed>` so the caller fails closed on it.
+// `file` is the importing file's absolute path and `root` the repository root;
+// without them only package-name specifiers are reported. Package directory
+// names equal the unscoped package names today; the plugin split maps
+// directories through their manifests.
 export function extractObversaImports(text, { file, root: repoRoot } = {}) {
-  const code = text.replace(/\/\*[\s\S]*?\*\//g, ' ').replace(/(^|[^:\\])\/\/[^\n]*/g, '$1');
-  const pattern = /(?:\bfrom\s*|\bimport\s*\(?\s*|\brequire\s*\(\s*)['"]([^'"\n]+)['"]/g;
   const packageDir = (absolute) => /^packages\/([^/]+)\//.exec(relative(repoRoot, absolute).split('\\').join('/'))?.[1];
   const owner = file && repoRoot ? packageDir(file) : undefined;
   const found = [];
-  for (const match of code.matchAll(pattern)) {
-    const specifier = match[1];
-    if (specifier.startsWith('@obversa/')) {
+  for (const specifier of moduleSpecifiers(text, file ?? 'module.ts')) {
+    if (specifier === null) {
+      found.push('@obversa/<computed>');
+    } else if (specifier.startsWith('@obversa/')) {
       found.push(specifier.split('/').slice(0, 2).join('/'));
     } else if (file && repoRoot && /^\.\.?\//.test(specifier)) {
-      // A relative path that resolves into another packages/<dir>/ names that
-      // package; a path inside the importing package is not a crossing.
-      // Package directory names equal the unscoped package names today; the
-      // plugin split maps directories through their manifests.
       const dir = packageDir(resolve(dirname(file), specifier));
       if (dir && dir !== owner) found.push(`@obversa/${dir}`);
     }
@@ -302,7 +339,9 @@ for (const absolute of files) {
       ...(ownerRule?.peerDependencies ?? []),
     ]);
     for (const dependency of imports) {
-      if (!allowed.has(dependency))
+      if (dependency === '@obversa/<computed>')
+        failures.push(`${path}: a computed module specifier cannot be checked; use a plain string`);
+      else if (!allowed.has(dependency))
         failures.push(`${path}: ${ownerName} must not import ${dependency}`);
     }
   }
