@@ -66,6 +66,21 @@ test("a JSDoc import type in a JavaScript file counts as a dependency", () => {
   ]);
 });
 
+test("the JSDoc @import tag and the import phase forms count as dependencies", () => {
+  const source = `
+    /** @import { startSurface } from "@obversa/surfacer" */
+    /** @import * as mem from '@obversa/memory' */
+    const later = import.defer("@obversa/lines");
+    const wasm = import.source("@obversa/memory-git");
+  `;
+  assert.deepEqual(extractObversaImports(source, { file: "/repo/packages/source/src/b.mjs", root: "/repo" }), [
+    "@obversa/surfacer",
+    "@obversa/memory",
+    "@obversa/lines",
+    "@obversa/memory-git",
+  ]);
+});
+
 test("a subpath import resolves to its package name; a relative import inside the same package is ignored", () => {
   const file = "/repo/packages/source/src/review.mjs";
   assert.deepEqual(extractObversaImports(`import x from "@obversa/memory/testing";`, { file, root: "/repo" }), ["@obversa/memory"]);

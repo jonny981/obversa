@@ -41,9 +41,15 @@ export function moduleSpecifiers(text, fileName = 'module.ts') {
     } else if (ts.isImportTypeNode(node)) {
       const argument = ts.isLiteralTypeNode(node.argument) ? node.argument.literal : node.argument;
       specifiers.push(literal(argument));
+    } else if (ts.isJSDocImportTag?.(node) && node.moduleSpecifier) {
+      // `/** @import { X } from "x" */` — a type-only import that lives in JSDoc.
+      specifiers.push(literal(node.moduleSpecifier));
     } else if (ts.isCallExpression(node)) {
       const callee = node.expression;
-      const isImport = callee.kind === ts.SyntaxKind.ImportKeyword;
+      // `import(...)`, and the phase forms `import.defer(...)` / `import.source(...)`
+      // (a MetaProperty on the import keyword).
+      const isImport = callee.kind === ts.SyntaxKind.ImportKeyword
+        || (ts.isMetaProperty(callee) && callee.keywordToken === ts.SyntaxKind.ImportKeyword);
       const isRequire = ts.isIdentifier(callee) && callee.text === 'require';
       if ((isImport || isRequire) && node.arguments.length > 0) specifiers.push(literal(node.arguments[0]));
     }
