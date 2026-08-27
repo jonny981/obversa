@@ -87,6 +87,22 @@ export function diffArgs({ mode = "worktree", range } = {}) {
 }
 
 /**
+ * The repository's top-level directory for `cwd`, or null outside a repository.
+ * Git prints diff paths relative to this root wherever the command runs, so
+ * every read that resolves a diff path must resolve it against the root, not
+ * against the directory the command happened to start in.
+ */
+export async function repositoryRoot({ cwd = process.cwd() } = {}) {
+  try {
+    const { stdout } = await run("git", ["rev-parse", "--show-toplevel"], { cwd, windowsHide: true });
+    const root = stdout.trim();
+    return root.length > 0 ? root : null;
+  } catch {
+    return null;
+  }
+}
+
+/**
  * Run git and return the unified diff text for one of three review modes:
  * the working tree (`git diff`), the staged changes (`git diff --cached`), or
  * a ref range (`git diff <range>`). The caller parses the text with
@@ -166,11 +182,12 @@ export async function readNewFileText({ path: filePath, mode = "worktree", cwd =
 
 /**
  * List the repository's tracked files, for the tree's "All files" view. Returns
- * repo-relative paths (git's own order), or [] on any error.
+ * repository-relative paths (git's own order) whatever directory `cwd` is, so
+ * they match the diff's paths; [] on any error.
  */
 export async function listTrackedFiles({ cwd = process.cwd() } = {}) {
   try {
-    const { stdout } = await run("git", ["-c", "core.quotePath=false", "ls-files"], {
+    const { stdout } = await run("git", ["-c", "core.quotePath=false", "ls-files", "--full-name", "--", ":/"], {
       cwd,
       maxBuffer: 16 * 1024 * 1024,
       windowsHide: true,

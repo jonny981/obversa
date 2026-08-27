@@ -5,7 +5,7 @@ import os from "node:os";
 import path from "node:path";
 import test from "node:test";
 
-import { computeDiff, diffArgs, readNewFileText, listTrackedFiles, MAX_FILE_BYTES } from "../src/git.mjs";
+import { computeDiff, diffArgs, readNewFileText, listTrackedFiles, repositoryRoot, MAX_FILE_BYTES } from "../src/git.mjs";
 
 function git(cwd, ...args) {
   return execFileSync("git", args, { cwd, encoding: "utf8" });
@@ -148,7 +148,26 @@ test("listTrackedFiles returns the repo's tracked files, or [] outside a repo", 
     git(dir, "add", ".");
     git(dir, "commit", "-q", "-m", "files");
     assert.deepEqual([...(await listTrackedFiles({ cwd: dir }))].sort(), ["README.md", "src/a.js"]);
+    // From a subdirectory the paths are still repository-relative, so the
+    // tree's "All files" view matches the diff's paths.
+    assert.deepEqual([...(await listTrackedFiles({ cwd: path.join(dir, "src") }))].sort(), ["README.md", "src/a.js"]);
     assert.deepEqual(await listTrackedFiles({ cwd: empty }), []);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+    rmSync(empty, { recursive: true, force: true });
+  }
+});
+
+test("repositoryRoot finds the top level from any subdirectory, or null outside a repository", async () => {
+  const dir = makeRepo();
+  const empty = mkdtempSync(path.join(os.tmpdir(), "source-empty-"));
+  try {
+    mkdirSync(path.join(dir, "deep", "er"), { recursive: true });
+    const { realpathSync } = await import("node:fs");
+    const root = realpathSync(dir);
+    assert.equal(await repositoryRoot({ cwd: dir }), root);
+    assert.equal(await repositoryRoot({ cwd: path.join(dir, "deep", "er") }), root);
+    assert.equal(await repositoryRoot({ cwd: empty }), null);
   } finally {
     rmSync(dir, { recursive: true, force: true });
     rmSync(empty, { recursive: true, force: true });
