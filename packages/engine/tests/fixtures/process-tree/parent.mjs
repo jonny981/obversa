@@ -25,9 +25,9 @@ writeFileSync(`${barrier}.tmp`, JSON.stringify({
   pid: process.pid,
   parentPid: process.ppid,
   childPid: child.pid,
-  attemptId: process.env.LINES_ATTEMPT_ID ?? null,
-  runId: process.env.LINES_RUN_ID ?? null,
-  headless: process.env.LINES_HEADLESS ?? null,
+  attemptId: process.env.OBVERSA_ATTEMPT_ID ?? null,
+  runId: process.env.OBVERSA_RUN_ID ?? null,
+  headless: process.env.OBVERSA_HEADLESS ?? null,
 }));
 renameSync(`${barrier}.tmp`, barrier);
 

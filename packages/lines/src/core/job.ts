@@ -28,7 +28,7 @@ import {
   revisionRequest,
 } from './feedback.js';
 import {
-  linesRequestMeta,
+  attemptRequestMeta,
   logEngineTransportFailure,
 } from './engine-meta.js';
 import { cloneFrozenJson, type JsonValue } from '../graph/value.js';
@@ -216,7 +216,7 @@ async function runAdvisorConsult(
       timeoutGraceMs: config.timeoutGraceMs ?? inherited.timeoutGraceMs,
       cwd: ctx.workspace.dir,
       leaf: true,
-      lines: linesRequestMeta(ctx, `${label}:advisor`),
+      attempt: attemptRequestMeta(ctx, `${label}:advisor`),
       memory: ctx.memory,
     },
     (event) => {
@@ -338,7 +338,7 @@ export function agentJob(config: AgentJobConfig): Job {
               timeoutMs,
               timeoutGraceMs,
               env,
-              lines: linesRequestMeta(ctx, label),
+              attempt: attemptRequestMeta(ctx, label),
               memory: ctx.memory,
             },
             (e) => {

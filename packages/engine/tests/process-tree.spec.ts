@@ -3,7 +3,6 @@ import { mkdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
 
-import { createAttemptIdentity } from '../src/runtime/attempt.ts';
 import {
   capturePipeOwnerProbe,
   inspectOwnedProcessTree,
@@ -11,7 +10,7 @@ import {
   parseWindowsProcessRows,
   readAttemptMarkerProcessIds,
   stopOwnedProcessTree,
-} from '../src/runtime/process-tree.ts';
+} from '../src/command/process-tree.ts';
 import {
   cleanupFixture,
   fixtureDirectory,
@@ -22,6 +21,8 @@ import {
 } from './process-fixture.ts';
 
 const directories: string[] = [];
+const ATTEMPT_ID =
+  'sha256:2222222222222222222222222222222222222222222222222222222222222222' as const;
 
 afterEach(() => {
   for (const directory of directories.splice(0)) cleanupFixture(directory);
@@ -31,18 +32,13 @@ describe('attempt process markers', () => {
   it('matches one exact NUL-delimited attempt marker', async () => {
     const directory = fixtureDirectory();
     directories.push(directory);
-    const attemptId = createAttemptIdentity({
-      namespace: 'tenant-a',
-      streamId: 'run-1',
-      nodeId: 'review',
-      position: 'items/marker',
-    }).attemptId;
+    const attemptId = ATTEMPT_ID;
     for (const pid of ['101', '102', 'not-a-pid']) {
       mkdirSync(join(directory, pid));
     }
     writeFileSync(
       join(directory, '101', 'environ'),
-      Buffer.from(`OTHER=value\0LINES_ATTEMPT_ID=${attemptId}\0`, 'utf8'),
+      Buffer.from(`OTHER=value\0OBVERSA_ATTEMPT_ID=${attemptId}\0`, 'utf8'),
     );
     writeFileSync(
       join(directory, '102', 'environ'),
@@ -50,7 +46,7 @@ describe('attempt process markers', () => {
     );
     writeFileSync(
       join(directory, 'not-a-pid', 'environ'),
-      Buffer.from(`LINES_ATTEMPT_ID=${attemptId}\0`, 'utf8'),
+      Buffer.from(`OBVERSA_ATTEMPT_ID=${attemptId}\0`, 'utf8'),
     );
 
     await expect(
@@ -81,12 +77,7 @@ describe.runIf(process.platform !== 'win32')('owned process trees', () => {
   it('finds a detached grandchild through the direct process group', async () => {
     const directory = fixtureDirectory();
     directories.push(directory);
-    const attemptId = createAttemptIdentity({
-      namespace: 'tenant-a',
-      streamId: 'run-1',
-      nodeId: 'review',
-      position: 'items/first',
-    }).attemptId;
+    const attemptId = ATTEMPT_ID;
     const root = spawn(
       process.execPath,
       [parentFixture, 'ignore', directory],
@@ -94,9 +85,9 @@ describe.runIf(process.platform !== 'win32')('owned process trees', () => {
         detached: true,
         env: {
           ...process.env,
-          LINES_ATTEMPT_ID: attemptId,
-          LINES_RUN_ID: 'run-1',
-          LINES_HEADLESS: '1',
+          OBVERSA_ATTEMPT_ID: attemptId,
+          OBVERSA_RUN_ID: 'run-1',
+          OBVERSA_HEADLESS: '1',
         },
         stdio: 'ignore',
       },
@@ -135,15 +126,10 @@ describe.runIf(process.platform !== 'win32')('owned process trees', () => {
     const directory = fixtureDirectory();
     const unrelatedDirectory = fixtureDirectory();
     directories.push(directory, unrelatedDirectory);
-    const attemptId = createAttemptIdentity({
-      namespace: 'tenant-a',
-      streamId: 'run-1',
-      nodeId: 'review',
-      position: 'items/second',
-    }).attemptId;
+    const attemptId = ATTEMPT_ID;
     const owned = spawn(process.execPath, [parentFixture, 'ignore', directory], {
       detached: true,
-      env: { ...process.env, LINES_ATTEMPT_ID: attemptId },
+      env: { ...process.env, OBVERSA_ATTEMPT_ID: attemptId },
       stdio: 'ignore',
     });
     const unrelated = spawn(
@@ -208,14 +194,9 @@ describe.runIf(process.platform === 'win32')('Windows owned process trees', () =
   it('stops a direct child and its descendants with the platform tree operation', async () => {
     const directory = fixtureDirectory();
     directories.push(directory);
-    const attemptId = createAttemptIdentity({
-      namespace: 'tenant-a',
-      streamId: 'run-1',
-      nodeId: 'review',
-      position: 'items/windows',
-    }).attemptId;
+    const attemptId = ATTEMPT_ID;
     const root = spawn(process.execPath, [parentFixture, 'ignore', directory], {
-      env: { ...process.env, LINES_ATTEMPT_ID: attemptId },
+      env: { ...process.env, OBVERSA_ATTEMPT_ID: attemptId },
       stdio: 'ignore',
     });
     await waitForFixtureRecord(directory, 'parent');

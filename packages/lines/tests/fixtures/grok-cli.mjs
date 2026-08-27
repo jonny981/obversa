@@ -35,10 +35,10 @@ if (process.env.LINES_TEST_GROK_RECORD) {
     cwd: process.cwd(),
     promptFile,
     prompt,
-    lines: {
-      attemptId: process.env.LINES_ATTEMPT_ID ?? null,
-      runId: process.env.LINES_RUN_ID ?? null,
-      headless: process.env.LINES_HEADLESS ?? null,
+    attempt: {
+      attemptId: process.env.OBVERSA_ATTEMPT_ID ?? null,
+      runId: process.env.OBVERSA_RUN_ID ?? null,
+      headless: process.env.OBVERSA_HEADLESS ?? null,
     },
     environment: {
       home: process.env.HOME ?? '',

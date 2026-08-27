@@ -29,7 +29,7 @@ export interface FixtureRecord {
 }
 
 export function fixtureDirectory(): string {
-  return mkdtempSync(join(tmpdir(), 'lines-process-tree-'));
+  return mkdtempSync(join(tmpdir(), 'obversa-engine-process-tree-'));
 }
 
 export async function waitForFixtureRecord(

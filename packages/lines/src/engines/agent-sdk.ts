@@ -12,6 +12,15 @@ import { z } from 'zod';
 // instead of silently at runtime (the options object itself is a cast Record).
 import type { Options as SdkOptions } from '@anthropic-ai/claude-agent-sdk';
 import type { Memory, MemoryCommand } from '@obversa/memory';
+import {
+  EngineError,
+  classifyEngineFailure,
+  engineSelection,
+  mapMessage,
+  newAccumulator,
+  scrubCapture,
+  validateAgentResult,
+} from '@obversa/engine';
 
 import {
   CLAUDE_SUBAGENT_TOOLS,
@@ -24,14 +33,6 @@ import {
   type EngineEventSink,
   type EngineOptions,
 } from './engine.js';
-import { mapMessage, newAccumulator } from './message-map.js';
-import { LoopError } from '../core/errors.js';
-import { scrubCapture } from '../core/redact.js';
-import { classifyEngineFailure } from './failure.js';
-import {
-  engineSelection,
-  validateAgentResult,
-} from '../runtime/result-parts.js';
 
 const MEMORY_SERVER = 'lines-memory';
 const MEMORY_TOOL = 'memory';
@@ -120,7 +121,7 @@ async function createAgentSdkMemoryServer(memory: Memory) {
 
 /**
  * Best-effort classification of an Agent SDK error into a provider-limit
- * `LoopError`, or `undefined` to fall through to the generic ENGINE mapping.
+ * `EngineError`, or `undefined` to fall through to the generic mapping.
  * The SDK exposes limit state in a few shapes (a thrown error message, an
  * `error` field carrying an `SDKAssistantMessageError` string, and a
  * `rate_limit_info.resetsAt` epoch). We read defensively rather than depend on
@@ -132,7 +133,7 @@ async function createAgentSdkMemoryServer(memory: Memory) {
 function classifySdkLimit(
   error: unknown,
   env?: Record<string, string>,
-): LoopError | undefined {
+): EngineError | undefined {
   const err = (error ?? {}) as Record<string, unknown>;
   const tag = typeof err.error === 'string' ? err.error : '';
   // The SDK's message shapes are outside this repo's control and the request's
@@ -156,9 +157,8 @@ function classifySdkLimit(
     info.errorCode === 'credits_required' ||
     /billing|credit|usage limit|quota/.test(haystack);
   if (isUsage) {
-    return new LoopError({
-      code: 'QUOTA',
-      phase: 'engine',
+    return new EngineError({
+      kind: 'quota',
       message: `agent-sdk usage/billing limit: ${message}`,
       cause: error,
       resetAt,
@@ -169,9 +169,8 @@ function classifySdkLimit(
     tag === 'overloaded' ||
     /rate limit|rate-limit|too many requests|overloaded/.test(haystack);
   if (isRate) {
-    return new LoopError({
-      code: 'RATE_LIMIT',
-      phase: 'engine',
+    return new EngineError({
+      kind: 'rate-limit',
       message: `agent-sdk rate limited: ${message}`,
       cause: error,
       resetAt,
@@ -278,9 +277,8 @@ export class AgentSdkEngine implements Engine {
         : consume);
     } catch (e) {
       if (signal.aborted)
-        throw new LoopError({
-          code: 'ABORTED',
-          phase: 'engine',
+        throw new EngineError({
+          kind: 'aborted',
           message: 'agent-sdk run aborted',
         });
       if (acc.terminal && acc.parts.some((part) => part.final)) {
@@ -323,17 +321,15 @@ export class AgentSdkEngine implements Engine {
       }
       const limit = classifySdkLimit(e, env);
       if (limit) throw limit;
-      if (e instanceof LoopError) throw e;
+      if (e instanceof EngineError) throw e;
       if (timedOut)
-        throw new LoopError({
-          code: 'TIMEOUT',
-          phase: 'engine',
+        throw new EngineError({
+          kind: 'timeout',
           message: 'agent-sdk run timed out',
           cause: e,
         });
-      throw new LoopError({
-        code: 'ENGINE',
-        phase: 'engine',
+      throw new EngineError({
+        kind: classifyEngineFailure(e),
         message: scrubCapture(
           e instanceof Error ? e.message : String(e),
           env,

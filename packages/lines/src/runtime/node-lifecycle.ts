@@ -2,6 +2,7 @@ import { lstat, realpath } from 'node:fs/promises';
 import { isAbsolute } from 'node:path';
 
 import {
+  EngineIncompleteResultError,
   SUBAGENT_TOOLS,
   type AgentRequest,
   type AgentResultPart,
@@ -33,6 +34,7 @@ import type { ResultContract } from './result-contract.js';
 import {
   engineSelection,
   validateAgentResult,
+  validateIncompleteResultEvidence,
 } from './result-parts.js';
 import {
   captureWorkspaceEntry,
@@ -115,7 +117,10 @@ export interface PreparedNodeAttempt {
     | ((context: NodeDataContext) => Promise<JsonValue>)
     | null;
   readonly parseResult:
-    | ((part: AgentResultPart) => JsonValue)
+    | ((
+        part: AgentResultPart,
+        parts: readonly AgentResultPart[],
+      ) => JsonValue)
     | null;
   readonly tokenBudget: TokenBudget | null;
   readonly recordModelUnavailable: (
@@ -434,7 +439,7 @@ function requestFor(
     maxOutputBytes: policy.outputBytes,
     maxMemoryBytes: policy.memoryBytes,
     leaf,
-    lines: {
+    attempt: {
       leaf,
       runId: identity.streamId,
       attemptId: identity.attemptId,
@@ -474,7 +479,7 @@ function validatedResult(
   }
   const candidate = final.kind === 'structured'
     ? final.value
-    : parseResult?.(final);
+    : parseResult?.(final, parts);
   if (candidate === undefined) {
     throw new TypeError(
       'assistant text needs an explicit parser for this result contract',
@@ -691,7 +696,7 @@ export async function executeNodeAttempt(
               signal,
             ));
             facts.parts = result.parts;
-            facts.usage = index === 0 ? result.usage : EMPTY_USAGE;
+            facts.usage = result.usage;
             facts.effectiveEngine = result.effective;
             facts.transportFailure = result.transportFailure ?? null;
             facts.outputBytes = outputBytes(result.parts);
@@ -732,6 +737,47 @@ export async function executeNodeAttempt(
             }
             break;
           } catch (error) {
+            if (error instanceof EngineIncompleteResultError) {
+              let evidence;
+              try {
+                evidence = validateIncompleteResultEvidence(error.evidence);
+                facts.parts = evidence.parts;
+                facts.usage = evidence.usage;
+                facts.effectiveEngine = evidence.effective;
+                facts.transportFailure = evidence.transportFailure ?? null;
+                facts.outputBytes = outputBytes(evidence.parts);
+              } catch (evidenceError) {
+                settle(index, EMPTY_USAGE);
+                facts.failure = failure('RESULT_INVALID', evidenceError);
+                for (let unused = index + 1; unused < route.length; unused += 1) {
+                  release(unused);
+                }
+                break;
+              }
+              try {
+                settle(index, evidence.usage);
+              } catch (budgetError) {
+                facts.failure = failure('TOKEN_BUDGET', budgetError);
+              }
+              for (let unused = index + 1; unused < route.length; unused += 1) {
+                release(unused);
+              }
+              if (facts.failure !== null) break;
+              if (!sameSelection(evidence.requested, selected.selection)) {
+                facts.failure = failure(
+                  'RESULT_INVALID',
+                  'engine evidence identity does not match its prepared lane',
+                );
+              } else if (facts.outputBytes > policy.outputBytes) {
+                facts.failure = failure(
+                  'OUTPUT_LIMIT',
+                  `attempt output is ${facts.outputBytes} bytes; limit is ${policy.outputBytes}`,
+                );
+              } else {
+                facts.failure = failure('EFFECT_FAILED', error);
+              }
+              break;
+            }
             settle(index, EMPTY_USAGE);
             const failureKind = classifyEngineFailure(error);
             if (!LANE_DEAD_FAILURES.has(failureKind)) {

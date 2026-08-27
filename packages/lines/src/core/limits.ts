@@ -1,16 +1,18 @@
 /**
  * Provider-limit plumbing shared by the engines and the runner.
  *
- * Engines classify a backend throttle/allowance signal into a `RATE_LIMIT` or
- * `QUOTA` `LoopError` carrying the reset hint they could extract (`retryAfterMs`
- * or `resetAt`). The runner reads that hint back through `waitMsFor` to decide
- * whether to wait, pause, or fail (see `onLimit`).
+ * Engines report a provider-neutral `EngineError`. The runtime maps rate-limit
+ * and quota failures to a `LoopError` while preserving `retryAfterMs` and
+ * `resetAt`. The runner reads that hint through `waitMsFor` to decide whether
+ * to wait, pause, or fail (see `onLimit`).
  *
  * Keeping the reset-time math in one place means every engine and the policy
  * agree on what "a known, bounded wait" means.
  */
 
 import type { LoopError, LoopErrorCode } from './errors.js';
+
+export { retryAfterHeaderToMs } from '@obversa/engine';
 
 /** The error codes the limit policy reacts to: provider limits + the budget. */
 const LIMIT_CODES: ReadonlySet<LoopErrorCode> = new Set([
@@ -39,23 +41,5 @@ export function waitMsFor(
     return error.retryAfterMs;
   if (typeof error.resetAt === 'number')
     return Math.max(0, error.resetAt - now);
-  return undefined;
-}
-
-/**
- * Parse a `Retry-After` header value to ms. The HTTP spec allows two forms: a
- * number of seconds, or an HTTP-date. Returns `undefined` for anything we can't
- * read, so the caller falls back to other reset hints.
- */
-export function retryAfterHeaderToMs(
-  value: string | null | undefined,
-  now: number = Date.now(),
-): number | undefined {
-  if (value == null) return undefined;
-  const trimmed = value.trim();
-  if (trimmed === '') return undefined;
-  if (/^\d+$/.test(trimmed)) return Number(trimmed) * 1000;
-  const when = Date.parse(trimmed);
-  if (!Number.isNaN(when)) return Math.max(0, when - now);
   return undefined;
 }

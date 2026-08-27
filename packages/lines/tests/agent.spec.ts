@@ -215,7 +215,7 @@ describe('AgentDef', () => {
       engines: { mock: () => cap.engine },
       cwd: repo,
     });
-    expect(cap.req().lines).toMatchObject({
+    expect(cap.req().attempt).toMatchObject({
       leaf: true,
       leafId: 'leaf/0',
       path: [],
@@ -223,11 +223,11 @@ describe('AgentDef', () => {
       iteration: 0,
     });
     expect(requestEnv(cap.req())).toMatchObject({
-      LINES_LEAF: '1',
-      LINES_LEAF_ID: 'leaf/0',
-      LINES_LEAF_LABEL: 'leaf',
-      LINES_LEAF_PATH: '',
-      LINES_LEAF_ITERATION: '0',
+      OBVERSA_LEAF: '1',
+      OBVERSA_LEAF_ID: 'leaf/0',
+      OBVERSA_LEAF_LABEL: 'leaf',
+      OBVERSA_LEAF_PATH: '',
+      OBVERSA_LEAF_ITERATION: '0',
     });
   });
 
@@ -444,9 +444,9 @@ describe('AgentDef', () => {
     });
     expect(seen?.leaf).toBe(true);
     expect(requestEnv(seen!)).toMatchObject({
-      LINES_LEAF: '1',
-      LINES_LEAF_ID: 'agent-check/0',
-      LINES_LEAF_LABEL: 'agent-check',
+      OBVERSA_LEAF: '1',
+      OBVERSA_LEAF_ID: 'agent-check/0',
+      OBVERSA_LEAF_LABEL: 'agent-check',
     });
   });
 

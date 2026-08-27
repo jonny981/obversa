@@ -31,7 +31,7 @@ import { resolveSystem, type AgentDef } from './agent.js';
 import { truncate } from './text.js';
 import { redactSecrets, redactEnvValues, scrubCapture } from './redact.js';
 import {
-  linesRequestMeta,
+  attemptRequestMeta,
   logEngineTransportFailure,
 } from './engine-meta.js';
 import { requireFinalResultText } from '../runtime/result-parts.js';
@@ -703,7 +703,7 @@ export function agentCheck(config: AgentCheckConfig): Condition {
           timeoutGraceMs: ctx.timeoutGraceMs,
           env,
           leaf: true,
-          lines: linesRequestMeta(ctx, config.agent?.name ?? 'agent-check'),
+          attempt: attemptRequestMeta(ctx, config.agent?.name ?? 'agent-check'),
         },
         (e) => {
           if (e.type === 'usage') {

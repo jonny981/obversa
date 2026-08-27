@@ -348,31 +348,27 @@ describe('limit helpers', () => {
 describe('claude-cli limit classification', () => {
   it('classifies a usage limit as QUOTA, reading a reset time', () => {
     const err = classifyCliLimit('Usage limit reached. Resets at 1700000000');
-    expect(err?.code).toBe('QUOTA');
+    expect(err?.kind).toBe('quota');
     expect(err?.resetAt).toBe(1700000000 * 1000); // epoch seconds → ms
-    expect(err?.retryable).toBe(true); // a known reset makes it auto-waitable
   });
 
-  it('classifies a usage limit with no reset as a non-retryable QUOTA', () => {
+  it('classifies a usage limit with no reset as quota', () => {
     const err = classifyCliLimit('Usage limit reached for this account.');
-    expect(err?.code).toBe('QUOTA');
+    expect(err?.kind).toBe('quota');
     expect(err?.resetAt).toBeUndefined();
-    expect(err?.retryable).toBe(false);
   });
 
   it('classifies Claude session limits as reset-aware QUOTA', () => {
     const err = classifyCliLimit(
       "You've hit your session limit · resets 12am (Europe/London)",
     );
-    expect(err?.code).toBe('QUOTA');
+    expect(err?.kind).toBe('quota');
     expect(err?.resetAt).toBeGreaterThan(Date.now());
-    expect(err?.retryable).toBe(true);
   });
 
   it('classifies a plain rate limit as RATE_LIMIT', () => {
     const err = classifyCliLimit('Error: rate limit exceeded (429)');
-    expect(err?.code).toBe('RATE_LIMIT');
-    expect(err?.retryable).toBe(true);
+    expect(err?.kind).toBe('rate-limit');
   });
 
   it('returns undefined for an unrelated failure', () => {

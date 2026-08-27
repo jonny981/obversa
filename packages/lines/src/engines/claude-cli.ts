@@ -5,6 +5,15 @@
  */
 
 import {
+  EngineError,
+  engineSelection,
+  mapMessage,
+  newAccumulator,
+  scrubCapture,
+  validateAgentResult,
+} from '@obversa/engine';
+
+import {
   CLAUDE_SUBAGENT_TOOLS,
   modelFor,
   requestEnv,
@@ -14,22 +23,15 @@ import {
   type EngineEventSink,
   type EngineOptions,
 } from './engine.js';
-import { mapMessage, newAccumulator } from './message-map.js';
 import {
   DEFAULT_OWNED_COMMAND_LIMITS,
   ownedCommandIdentity,
   resolveCommandExecutable,
   runOwnedCommand,
-} from './command-runner.js';
-import { LoopError } from '../core/errors.js';
-import { scrubCapture } from '../core/redact.js';
-import {
-  engineSelection,
-  validateAgentResult,
-} from '../runtime/result-parts.js';
+} from '@obversa/engine/command';
 
 /**
- * Classify a failed `claude` subprocess into a provider-limit `LoopError`, or
+ * Classify a failed `claude` subprocess into a typed provider limit, or
  * return `undefined` to fall through to the generic ENGINE/TIMEOUT mapping. The
  * CLI has no structured limit channel on a hard failure, so we read its
  * (already-redacted) output text:
@@ -44,7 +46,7 @@ import {
  * Exported for unit testing without spawning a subprocess (mirrors
  * `buildClaudeArgs`).
  */
-export function classifyCliLimit(text: string): LoopError | undefined {
+export function classifyCliLimit(text: string): EngineError | undefined {
   const lower = text.toLowerCase();
   const isUsage =
     /usage limit|session limit|out of credits|insufficient credits|quota|billing/.test(
@@ -55,16 +57,14 @@ export function classifyCliLimit(text: string): LoopError | undefined {
 
   const resetAt = parseResetAt(text);
   if (isUsage) {
-    return new LoopError({
-      code: 'QUOTA',
-      phase: 'engine',
+    return new EngineError({
+      kind: 'quota',
       message: `claude usage limit: ${text}`,
       resetAt,
     });
   }
-  return new LoopError({
-    code: 'RATE_LIMIT',
-    phase: 'engine',
+  return new EngineError({
+    kind: 'rate-limit',
     message: `claude rate limited: ${text}`,
     resetAt,
   });
@@ -249,9 +249,8 @@ export class ClaudeCliEngine implements Engine {
     signal: AbortSignal,
   ): Promise<AgentResult> {
     if (signal.aborted)
-      throw new LoopError({
-        code: 'ABORTED',
-        phase: 'engine',
+      throw new EngineError({
+        kind: 'aborted',
         message: 'claude-cli run aborted',
       });
     const bin = this.commandExecutable();
@@ -265,9 +264,9 @@ export class ClaudeCliEngine implements Engine {
     const startedAt = Date.now();
     const owner = ownedCommandIdentity({
       adapter: 'claude-cli',
-      runId: req.lines?.runId,
-      leafId: req.lines?.leafId,
-      attemptId: req.lines?.attemptId,
+      runId: req.attempt?.runId,
+      leafId: req.attempt?.leafId,
+      attemptId: req.attempt?.attemptId,
     });
 
     const acc = newAccumulator(model);
@@ -313,9 +312,8 @@ export class ClaudeCliEngine implements Engine {
     if (buffer) flush(buffer);
 
     if (result.aborted || signal.aborted)
-      throw new LoopError({
-        code: 'ABORTED',
-        phase: 'engine',
+      throw new EngineError({
+        kind: 'aborted',
         message: 'claude-cli run aborted',
       });
     const late =
@@ -375,9 +373,8 @@ export class ClaudeCliEngine implements Engine {
         const limit = classifyCliLimit(`${stderr}\n${stdout}`);
         if (limit) throw limit;
       }
-      throw new LoopError({
-        code: result.timedOut ? 'TIMEOUT' : 'ENGINE',
-        phase: 'engine',
+      throw new EngineError({
+        kind: result.timedOut ? 'timeout' : 'unknown',
         message: `claude exited ${result.exitCode ?? '?'}${stderr ? `: ${stderr}` : ''}`,
       });
     }

@@ -83,7 +83,7 @@ function request(overrides: Partial<AgentRequest> = {}): AgentRequest {
     timeoutGraceMs: 200,
     maxOutputBytes: 64 * 1_024,
     maxMemoryBytes: 256 * 1_024 * 1_024,
-    lines: {
+    attempt: {
       leaf: true,
       runId: 'run-1',
       attemptId: identity.attemptId,
@@ -124,7 +124,7 @@ describe('Grok CLI adapter', () => {
       cwd: string;
       promptFile: string;
       prompt: string;
-      lines: { attemptId: string; runId: string; headless: string };
+      attempt: { attemptId: string; runId: string; headless: string };
       environment: {
         home: string;
         grokHome: string;
@@ -170,8 +170,8 @@ describe('Grok CLI adapter', () => {
       'Edit',
       'Write',
     ]));
-    expect(call.lines).toEqual({
-      attemptId: input.lines?.attemptId,
+    expect(call.attempt).toEqual({
+      attemptId: input.attempt?.attemptId,
       runId: 'run-1',
       headless: '1',
     });

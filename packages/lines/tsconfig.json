@@ -2,6 +2,9 @@
   "extends": "../../tsconfig.base.json",
   "compilerOptions": {
     "paths": {
+      "@obversa/engine": ["../engine/src/index.ts"],
+      "@obversa/engine/command": ["../engine/src/command/run.ts"],
+      "@obversa/engine/testing": ["../engine/src/testing.ts"],
       "@obversa/lines": ["./src/api.ts"],
       "@obversa/lines/testing": ["./src/testing.ts"],
       "@obversa/lines/env/command": ["./src/env/command.ts"],

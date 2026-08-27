@@ -2,13 +2,12 @@ import { afterEach, describe, expect, it } from 'vitest';
 import { chmodSync, realpathSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 
-import { createAttemptIdentity } from '../src/runtime/attempt.ts';
 import {
   OwnedCommandError,
   resolveCommandExecutable,
   runOwnedCommand,
   type OwnedCommandRequest,
-} from '../src/engines/command-runner.ts';
+} from '../src/command/run.ts';
 import {
   cleanupFixture,
   directDetachedFixture,
@@ -21,6 +20,8 @@ import {
 
 const directories: string[] = [];
 const decoder = new TextDecoder();
+const ATTEMPT_ID =
+  'sha256:1111111111111111111111111111111111111111111111111111111111111111' as const;
 
 afterEach(() => {
   for (const directory of directories.splice(0)) cleanupFixture(directory);
@@ -31,19 +32,13 @@ function request(
   directory: string,
   overrides: Partial<OwnedCommandRequest> = {},
 ): OwnedCommandRequest {
-  const attemptId = createAttemptIdentity({
-    namespace: 'tenant-a',
-    streamId: 'run-1',
-    nodeId: 'review',
-    position: `attempts/${mode}`,
-  }).attemptId;
   return {
     executable: process.execPath,
     args: [parentFixture, mode, directory],
     cwd: import.meta.dirname,
     env: {},
     stdin: 'INPUT',
-    attemptId,
+    attemptId: ATTEMPT_ID,
     runId: 'run-1',
     timeoutMs: 5_000,
     teardownGraceMs: 100,

@@ -24,11 +24,13 @@ describe('public runtime API', () => {
   it('exports only the reviewed programmatic surface', () => {
     expect(Object.keys(api).sort()).toEqual([
       'EXIT_PAUSED',
+      'EngineIncompleteResultError',
       'GraphValidationError',
       'GrokCliEngine',
       'JsonValueError',
       'LANE_DEAD_FAILURES',
       'LoopError',
+      'OpenCodeCliEngine',
       'StorageError',
       'agentCheck',
       'agentJob',
@@ -38,6 +40,7 @@ describe('public runtime API', () => {
       'assertGraph',
       'bodyPassed',
       'buildGrokArgs',
+      'buildOpenCodeInvocation',
       'classifyEngineFailure',
       'commandSucceeds',
       'compileGraph',

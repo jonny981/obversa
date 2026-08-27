@@ -13,6 +13,14 @@
 
 import pRetry, { AbortError } from 'p-retry';
 import pTimeout, { TimeoutError } from 'p-timeout';
+import {
+  EngineError,
+  assistantResult,
+  classifyEngineFailure,
+  engineSelection,
+  reportedUsage,
+  retryAfterHeaderToMs,
+} from '@obversa/engine';
 
 import type {
   AgentRequest,
@@ -22,13 +30,6 @@ import type {
   EngineOptions,
 } from './engine.js';
 import { modelFor } from './engine.js';
-import { LoopError } from '../core/errors.js';
-import { retryAfterHeaderToMs } from '../core/limits.js';
-import {
-  assistantResult,
-  engineSelection,
-  reportedUsage,
-} from '../runtime/result-parts.js';
 
 /**
  * Transient backend errors that warrant p-retry's blind backoff: 5xx (incl.
@@ -61,7 +62,7 @@ function headerValue(error: unknown, name: string): string | undefined {
 }
 
 /**
- * Classify an Anthropic SDK error into a provider-limit `LoopError`, or return
+ * Classify an Anthropic SDK error into a typed provider limit, or return
  * `undefined` to let the generic handling take over. The SDK throws an
  * `APIError` with `.status` (HTTP), `.headers` (web `Headers`), and `.type`
  * (the body `error.type`, e.g. `rate_limit_error` / `billing_error`).
@@ -70,24 +71,22 @@ function headerValue(error: unknown, name: string): string | undefined {
  * 529 / overloaded is deliberately not a limit: it is a transient ENGINE error
  * and stays on p-retry's backoff path.
  */
-function classifyLimit(error: unknown): LoopError | undefined {
+function classifyLimit(error: unknown): EngineError | undefined {
   const status = (error as { status?: number })?.status;
   const type = (error as { type?: string })?.type;
   const message = error instanceof Error ? error.message : String(error);
 
   if (status === 429 || type === 'rate_limit_error') {
-    return new LoopError({
-      code: 'RATE_LIMIT',
-      phase: 'engine',
+    return new EngineError({
+      kind: 'rate-limit',
       message: `anthropic-api rate limited: ${message}`,
       cause: error,
       retryAfterMs: retryAfterHeaderToMs(headerValue(error, 'retry-after')),
     });
   }
   if (type === 'billing_error') {
-    return new LoopError({
-      code: 'QUOTA',
-      phase: 'engine',
+    return new EngineError({
+      kind: 'quota',
       message: `anthropic-api usage/billing limit: ${message}`,
       cause: error,
     });
@@ -123,10 +122,8 @@ export class AnthropicApiEngine implements Engine {
       if (!apiKey) {
         // Fail fast with an actionable, non-retryable error instead of leaking
         // the SDK's internal "could not resolve authentication method" message.
-        throw new LoopError({
-          code: 'CONFIG',
-          phase: 'engine',
-          retryable: false,
+        throw new EngineError({
+          kind: 'invalid-config',
           message:
             'the anthropic-api engine needs an API key — set ANTHROPIC_API_KEY or pass --api-key (or use the agent-sdk / claude-cli engine, which use host Claude auth)',
         });
@@ -171,7 +168,7 @@ export class AnthropicApiEngine implements Engine {
       } catch (e) {
         // A provider limit is not for p-retry's blind backoff: stop retrying
         // and let the loop's onLimit policy wait the actual reset. Wrap the
-        // typed LoopError as the AbortError cause so it survives to the catch.
+        // typed engine error as the AbortError cause so it survives to the catch.
         const limit = classifyLimit(e);
         if (limit) throw new AbortError(limit);
         if (signal.aborted || !isTransient(e)) {
@@ -204,21 +201,23 @@ export class AnthropicApiEngine implements Engine {
         : pending);
     } catch (e) {
       if (signal.aborted)
-        throw new LoopError({
-          code: 'ABORTED',
-          phase: 'engine',
+        throw new EngineError({
+          kind: 'aborted',
           message: 'anthropic-api run aborted',
         });
       if (timedOut)
-        throw new LoopError({
-          code: 'TIMEOUT',
-          phase: 'engine',
+        throw new EngineError({
+          kind: 'timeout',
           message: 'anthropic-api run timed out',
           cause: e,
         });
       // p-retry unwraps AbortError to its cause; surface a typed limit as-is.
-      if (e instanceof LoopError) throw e;
-      throw LoopError.from(e, { code: 'ENGINE', phase: 'engine' });
+      if (e instanceof EngineError) throw e;
+      throw new EngineError({
+        kind: classifyEngineFailure(e),
+        message: e instanceof Error ? e.message : String(e),
+        cause: e,
+      });
     } finally {
       signal.removeEventListener('abort', onAbort);
     }

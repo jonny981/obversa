@@ -4,12 +4,12 @@ import type {
   AgentResult,
   EngineSelectionRecord,
   UsageReceipt,
-} from '../src/engines/engine.ts';
+} from '../src/index.ts';
 import {
   finalResultPart,
   finalResultText,
   validateAgentResult,
-} from '../src/runtime/result-parts.ts';
+} from '../src/result.ts';
 
 const selection: EngineSelectionRecord = {
   adapter: 'scripted',

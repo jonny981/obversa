@@ -12,6 +12,14 @@
 import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import {
+  EngineError,
+  assistantResult,
+  classifyEngineFailure,
+  engineSelection,
+  reportedUsage,
+  scrubCapture,
+} from '@obversa/engine';
 import type {
   AgentRequest,
   AgentResult,
@@ -26,14 +34,7 @@ import {
   ownedCommandIdentity,
   resolveCommandExecutable,
   runOwnedCommand,
-} from './command-runner.js';
-import { LoopError } from '../core/errors.js';
-import { scrubCapture } from '../core/redact.js';
-import {
-  assistantResult,
-  engineSelection,
-  reportedUsage,
-} from '../runtime/result-parts.js';
+} from '@obversa/engine/command';
 
 const DIAGNOSTIC_MAX = 700;
 const DIAGNOSTIC_HEAD = 180;
@@ -147,15 +148,13 @@ export class CodexEngine implements Engine {
     signal: AbortSignal,
   ): Promise<AgentResult> {
     if (req.tools?.length === 0)
-      throw new LoopError({
-        code: 'CONFIG',
-        phase: 'engine',
+      throw new EngineError({
+        kind: 'invalid-config',
         message: 'codex cannot honor tools: []; choose an engine that supports disabling tools',
       });
     if (signal.aborted)
-      throw new LoopError({
-        code: 'ABORTED',
-        phase: 'engine',
+      throw new EngineError({
+        kind: 'aborted',
         message: 'codex run aborted',
       });
     const executable = this.commandExecutable();
@@ -172,9 +171,9 @@ export class CodexEngine implements Engine {
     const startedAt = Date.now();
     const owner = ownedCommandIdentity({
       adapter: 'codex',
-      runId: req.lines?.runId,
-      leafId: req.lines?.leafId,
-      attemptId: req.lines?.attemptId,
+      runId: req.attempt?.runId,
+      leafId: req.attempt?.leafId,
+      attemptId: req.attempt?.attemptId,
     });
 
     try {
@@ -196,7 +195,7 @@ export class CodexEngine implements Engine {
         signal,
       );
       if (sub.aborted || signal.aborted)
-        throw new LoopError({ code: 'ABORTED', phase: 'engine', message: 'codex run aborted' });
+        throw new EngineError({ kind: 'aborted', message: 'codex run aborted' });
 
       let text = '';
       try {
@@ -210,9 +209,10 @@ export class CodexEngine implements Engine {
       const diagnostic = diagnosticCapture(stderr, stdout, env);
       let transportFailure: AgentResult['transportFailure'];
       if (failed && (sub.timedOut || !text))
-        throw new LoopError({
-          code: sub.timedOut ? 'TIMEOUT' : 'ENGINE',
-          phase: 'engine',
+        throw new EngineError({
+          kind: sub.timedOut
+            ? 'timeout'
+            : classifyEngineFailure(new Error(diagnostic)),
           // The combined streams are scrubbed in full before the middle cut,
           // so provider diagnostics survive without exposing a split secret.
           message: `codex exited ${sub.exitCode ?? '?'}${

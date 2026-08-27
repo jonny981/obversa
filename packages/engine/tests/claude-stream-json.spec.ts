@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest';
 
-import { mapMessage, newAccumulator } from '../src/engines/message-map.ts';
-import type { EngineStreamEvent } from '../src/engines/engine.ts';
+import { mapMessage, newAccumulator } from '../src/claude-stream-json.ts';
+import type { EngineStreamEvent } from '../src/index.ts';
 
 function collect(messages: unknown[]) {
   const acc = newAccumulator('test-model');

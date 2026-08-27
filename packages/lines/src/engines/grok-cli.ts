@@ -10,25 +10,24 @@ import {
 } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { delimiter, dirname, isAbsolute, join } from 'node:path';
-
-import { LoopError } from '../core/errors.js';
-import { scrubCapture } from '../core/redact.js';
 import {
+  EngineError,
   canonicalJson,
-  type JsonObject,
-  type JsonValue,
-} from '../graph/value.js';
-import {
+  classifyEngineFailure,
   engineSelection,
   reportedUsage,
+  scrubCapture,
+  type EngineFailureKind,
+  type JsonObject,
+  type JsonValue,
   validateAgentResult,
-} from '../runtime/result-parts.js';
+} from '@obversa/engine';
 import {
   DEFAULT_OWNED_COMMAND_LIMITS,
   ownedCommandIdentity,
   resolveCommandExecutable,
   runOwnedCommand,
-} from './command-runner.js';
+} from '@obversa/engine/command';
 import {
   requestEnv,
   type AgentRequest,
@@ -40,7 +39,6 @@ import {
   type PermissionMode,
   type UsageReceipt,
 } from './engine.js';
-import { classifyEngineFailure, type EngineFailureKind } from './failure.js';
 
 const CONTROL_CHARACTER = /[\u0000-\u001f\u007f]/u;
 const BASE_SYSTEM_PROMPT =
@@ -333,7 +331,7 @@ function isolatedEnvironment(
   for (const path of [home, grokHome, temporary]) {
     mkdirSync(path, { recursive: true, mode: 0o700 });
   }
-  const lines = requestEnv({ ...request, env: undefined }) ?? {};
+  const attempt = requestEnv({ ...request, env: undefined }) ?? {};
   writeFileSync(join(grokHome, 'config.toml'), grokConfig(request.cwd!), {
     encoding: 'utf8',
     mode: 0o600,
@@ -355,7 +353,7 @@ function isolatedEnvironment(
     .join(delimiter);
   return Object.freeze({
     ...selected,
-    ...lines,
+    ...attempt,
     PATH: path,
     HOME: home,
     GROK_HOME: grokHome,
@@ -681,23 +679,8 @@ function sameCapabilities(
 function loopError(
   kind: EngineFailureKind,
   message: string,
-): LoopError {
-  if (kind === 'rate-limit') {
-    return new LoopError({ code: 'RATE_LIMIT', phase: 'engine', message });
-  }
-  if (kind === 'quota') {
-    return new LoopError({ code: 'QUOTA', phase: 'engine', message });
-  }
-  if (kind === 'timeout') {
-    return new LoopError({ code: 'TIMEOUT', phase: 'engine', message });
-  }
-  if (kind === 'aborted') {
-    return new LoopError({ code: 'ABORTED', phase: 'engine', message });
-  }
-  if (kind === 'invalid-config') {
-    return new LoopError({ code: 'CONFIG', phase: 'engine', message });
-  }
-  return new LoopError({ code: 'ENGINE', phase: 'engine', message });
+): EngineError {
+  return new EngineError({ kind, message });
 }
 
 function transportFailure(
@@ -845,9 +828,9 @@ export class GrokCliEngine implements Engine {
     const startedAt = Date.now();
     const owner = ownedCommandIdentity({
       adapter: 'grok-cli',
-      runId: request.lines?.runId,
-      leafId: request.lines?.leafId,
-      attemptId: request.lines?.attemptId,
+      runId: request.attempt?.runId,
+      leafId: request.attempt?.leafId,
+      attemptId: request.attempt?.attemptId,
     });
 
     try {

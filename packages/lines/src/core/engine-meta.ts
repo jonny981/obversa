@@ -10,10 +10,10 @@ function leafId(ctx: JobContext, label: string): string {
   );
 }
 
-export function linesRequestMeta(
+export function attemptRequestMeta(
   ctx: JobContext,
   label: string,
-): AgentRequest['lines'] {
+): AgentRequest['attempt'] {
   return {
     leaf: true,
     runId: ctx.runId,

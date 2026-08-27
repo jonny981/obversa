@@ -1,3 +1,5 @@
+import { EngineError } from '@obversa/engine';
+
 /**
  * Structured, classified errors so the exit report can say what failed, where in
  * the loop tree, and why, instead of dumping a stack.
@@ -69,6 +71,16 @@ export class LoopError extends Error {
     fallback: Omit<LoopErrorInit, 'message' | 'cause'>,
   ): LoopError {
     if (value instanceof LoopError) return value;
+    if (value instanceof EngineError) {
+      return new LoopError({
+        ...fallback,
+        code: loopCodeForEngineFailure(value.kind, fallback.code),
+        message: value.message,
+        cause: value,
+        retryAfterMs: value.retryAfterMs,
+        resetAt: value.resetAt,
+      });
+    }
     const message = value instanceof Error ? value.message : String(value);
     return new LoopError({ ...fallback, message, cause: value });
   }
@@ -85,6 +97,26 @@ export class LoopError extends Error {
       retryAfterMs: this.retryAfterMs,
       resetAt: this.resetAt,
     };
+  }
+}
+
+function loopCodeForEngineFailure(
+  kind: EngineError['kind'],
+  fallback: LoopErrorCode,
+): LoopErrorCode {
+  switch (kind) {
+    case 'rate-limit':
+      return 'RATE_LIMIT';
+    case 'quota':
+      return 'QUOTA';
+    case 'timeout':
+      return 'TIMEOUT';
+    case 'aborted':
+      return 'ABORTED';
+    case 'invalid-config':
+      return 'CONFIG';
+    default:
+      return fallback;
   }
 }
 

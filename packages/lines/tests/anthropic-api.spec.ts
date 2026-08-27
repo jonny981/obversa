@@ -32,7 +32,7 @@ describe('AnthropicApiEngine', () => {
         () => {},
         new AbortController().signal,
       ),
-    ).rejects.toMatchObject({ code: 'RATE_LIMIT', retryAfterMs: 7_000 });
+    ).rejects.toMatchObject({ kind: 'rate-limit', retryAfterMs: 7_000 });
   });
 
   it('marks successful responses after the soft timeout as late', async () => {

@@ -25,13 +25,21 @@ import { setTimeout as delay } from 'node:timers/promises';
 import { CodexEngine } from '../src/engines/codex.ts';
 import { ClaudeCliEngine } from '../src/engines/claude-cli.ts';
 import { finalResultText } from '../src/runtime/result-parts.ts';
-import { isProcessAlive } from './process-fixture.ts';
 
 /** Seconds the orphan holds the pipes — far beyond any test bound below, so a
  *  regression to stream-close waiting fails loudly rather than just slowly. */
 const HOLD_SECS = 120;
 const ORPHAN_PID_PATH = '__ORPHAN_PID_PATH__';
 const directories: string[] = [];
+
+function isProcessAlive(pid: number): boolean {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch (error) {
+    return (error as NodeJS.ErrnoException).code === 'EPERM';
+  }
+}
 
 function stub(source: string): {
   readonly bin: string;
@@ -148,7 +156,7 @@ setInterval(() => {}, 1000);
         () => {},
         new AbortController().signal,
       ),
-    ).rejects.toMatchObject({ code: 'TIMEOUT' });
+    ).rejects.toMatchObject({ kind: 'timeout' });
     expect(Date.now() - startedAt).toBeLessThan(10_000);
     await expectOrphanStopped(orphanPidPath);
   });
@@ -166,7 +174,7 @@ setInterval(() => {}, 1000);
       () => {},
       controller.signal,
     );
-    const rejected = expect(running).rejects.toMatchObject({ code: 'ABORTED' });
+    const rejected = expect(running).rejects.toMatchObject({ kind: 'aborted' });
     await waitForOrphan(orphanPidPath);
     controller.abort();
     await rejected;

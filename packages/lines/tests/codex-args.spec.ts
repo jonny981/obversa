@@ -126,8 +126,7 @@ writeFileSync(out, 'stub final');
         new AbortController().signal,
       ),
     ).rejects.toMatchObject({
-      code: 'CONFIG',
-      phase: 'engine',
+      kind: 'invalid-config',
       message: 'codex cannot honor tools: []; choose an engine that supports disabling tools',
     });
   });
@@ -269,7 +268,7 @@ process.exit(1);
         () => {},
         new AbortController().signal,
       ),
-    ).rejects.toMatchObject({ code: 'ENGINE' });
+    ).rejects.toMatchObject({ kind: 'unknown' });
   });
 
   it('retains a trailing Codex configuration diagnostic for preflight', async () => {

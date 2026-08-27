@@ -11,11 +11,12 @@ import { join } from 'node:path';
 
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
-import type {
-  AgentRequest,
-  AgentResult,
-  Engine,
-  EngineEventSink,
+import {
+  EngineIncompleteResultError,
+  type AgentRequest,
+  type AgentResult,
+  type Engine,
+  type EngineEventSink,
 } from '../src/engines/engine.ts';
 import {
   assistantResult,
@@ -240,7 +241,7 @@ describe('node attempt lifecycle', () => {
       maxOutputBytes: 4_096,
       maxMemoryBytes: 64 * 1_024 * 1_024,
       leaf: true,
-      lines: {
+      attempt: {
         leaf: true,
         runId: 'run-1',
         attemptId: identity.attemptId,
@@ -259,7 +260,7 @@ describe('node attempt lifecycle', () => {
     });
     const run = vi.fn(async (request: AgentRequest) => {
       expect(request.leaf).toBe(false);
-      expect(request.lines?.leaf).toBe(false);
+      expect(request.attempt?.leaf).toBe(false);
       return success('done', subagentSelection);
     });
 
@@ -524,7 +525,11 @@ describe('node attempt lifecycle', () => {
     expect(record.requestedEngine).toEqual(primarySelection);
     expect(record.effectiveEngine).toEqual(fallbackSelection);
     expect(record.unavailableModels).toEqual([primarySelection]);
-    expect(record.usage).toEqual({ kind: 'unknown' });
+    expect(record.usage).toEqual({
+      kind: 'reported',
+      inputTokens: 2,
+      outputTokens: 1,
+    });
     expect(order).toEqual(['primary', 'record', 'fallback']);
     expect(budget.snapshot()).toMatchObject({
       spent: 3,
@@ -569,6 +574,73 @@ describe('node attempt lifecycle', () => {
       final: true,
     });
     expect(record.transportFailure).toMatchObject({ kind: 'timeout' });
+  });
+
+  it('keeps partial result evidence when an engine ends at its token limit', async () => {
+    const partial = {
+      ...success('partial answer'),
+      stopReason: 'length',
+    };
+    const selected = engine('primary', async () => {
+      throw new EngineIncompleteResultError(
+        'engine output ended at the token limit',
+        partial,
+      );
+    });
+    const budget = createTokenBudget(10);
+    const record = await executeNodeAttempt(prepared({
+      engineRoute: [lane(selected)],
+      tokenBudget: budget,
+    }), new AbortController().signal);
+
+    expect(record.status).toBe('failed');
+    expect(record.failure).toMatchObject({
+      code: 'EFFECT_FAILED',
+      message: expect.stringContaining('token limit'),
+    });
+    expect(record.parts).toEqual([
+      { kind: 'assistant', text: 'partial answer', final: true },
+    ]);
+    expect(record.usage).toEqual({
+      kind: 'reported',
+      inputTokens: 2,
+      outputTokens: 1,
+    });
+    expect(record.effectiveEngine).toEqual(primarySelection);
+    expect(record.outputBytes).toBe(14);
+    expect(budget.snapshot()).toMatchObject({ spent: 3, reserved: 0 });
+  });
+
+  it('keeps measured incomplete evidence when no result part was produced', async () => {
+    const selected = engine('primary', async () => {
+      throw new EngineIncompleteResultError(
+        'engine output ended at the token limit',
+        {
+          ...success('unused'),
+          parts: [],
+          stopReason: 'length',
+        },
+      );
+    });
+    const budget = createTokenBudget(10);
+    const record = await executeNodeAttempt(prepared({
+      engineRoute: [lane(selected)],
+      tokenBudget: budget,
+    }), new AbortController().signal);
+
+    expect(record.status).toBe('failed');
+    expect(record.failure).toMatchObject({
+      code: 'EFFECT_FAILED',
+      message: expect.stringContaining('token limit'),
+    });
+    expect(record.parts).toEqual([]);
+    expect(record.usage).toEqual({
+      kind: 'reported',
+      inputTokens: 2,
+      outputTokens: 1,
+    });
+    expect(record.unavailableModels).toEqual([]);
+    expect(budget.snapshot()).toMatchObject({ spent: 3, reserved: 0 });
   });
 
   it('fails on foreign writes and workspace limits without deleting them', async () => {

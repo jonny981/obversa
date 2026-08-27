@@ -223,12 +223,14 @@ export type {
   AgentRequest,
   AgentResult,
   AgentResultPart,
+  EngineIncompleteResultEvidence,
   EngineSelectionRecord,
   EngineTransportFailure,
   EngineStreamEvent,
   Usage,
   UsageReceipt,
 } from './engines/engine.js';
+export { EngineIncompleteResultError } from './engines/engine.js';
 export {
   finalResultPart,
   finalResultText,
@@ -240,6 +242,13 @@ export {
   type GrokCliIdentity,
   type GrokCliEngineOptions,
 } from './engines/grok-cli.js';
+export {
+  OpenCodeCliEngine,
+  buildOpenCodeInvocation,
+  type OpenCodeCliEngineOptions,
+  type OpenCodeCliIdentity,
+  type OpenCodeInvocation,
+} from './engines/opencode-cli.js';
 export type { EngineFactory } from './engines/registry.js';
 
 export type { Environment, EnvHandle } from './env/environment.js';
