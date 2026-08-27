@@ -21,9 +21,12 @@ const scriptKinds = new Map([
 
 // Every module specifier a file names, in source order: static imports and
 // re-exports, side-effect and dynamic `import(...)`, CommonJS `require(...)`,
-// and `import x = require(...)`. A specifier that is not a plain string (a
-// computed expression) is reported as `null`, because a guard that cannot
-// read it must fail rather than assume. Exported so the spec can pin each form.
+// `import x = require(...)`, type-position `import("x").T` / `typeof
+// import("x")` (a distinct ImportTypeNode — a type-only import is still a
+// dependency, an internal note), and the JSDoc form `@type {import("x").T}` in
+// JavaScript files. A specifier that is not a plain string (a computed
+// expression) is reported as `null`, because a guard that cannot read it must
+// fail rather than assume. Exported so the spec can pin each form.
 export function moduleSpecifiers(text, fileName = 'module.ts') {
   const kind = scriptKinds.get(extname(fileName)) ?? ts.ScriptKind.TS;
   const source = ts.createSourceFile(fileName, text, ts.ScriptTarget.Latest, true, kind);
@@ -35,12 +38,18 @@ export function moduleSpecifiers(text, fileName = 'module.ts') {
       specifiers.push(literal(node.moduleSpecifier));
     } else if (ts.isImportEqualsDeclaration(node) && ts.isExternalModuleReference(node.moduleReference)) {
       specifiers.push(literal(node.moduleReference.expression));
+    } else if (ts.isImportTypeNode(node)) {
+      const argument = ts.isLiteralTypeNode(node.argument) ? node.argument.literal : node.argument;
+      specifiers.push(literal(argument));
     } else if (ts.isCallExpression(node)) {
       const callee = node.expression;
       const isImport = callee.kind === ts.SyntaxKind.ImportKeyword;
       const isRequire = ts.isIdentifier(callee) && callee.text === 'require';
       if ((isImport || isRequire) && node.arguments.length > 0) specifiers.push(literal(node.arguments[0]));
     }
+    // JSDoc is not part of the child walk; its type expressions can carry
+    // import types too.
+    for (const doc of node.jsDoc ?? []) ts.forEachChild(doc, visit);
     ts.forEachChild(node, visit);
   };
   visit(source);

@@ -30,16 +30,39 @@ test("the import scan sees every form a module can use to name an @obversa packa
   ]);
 });
 
-test("TypeScript forms: type-only imports and import-equals count as dependencies", () => {
+test("TypeScript forms: type-only imports, import-equals, and type-position import() count as dependencies", () => {
   const source = `
     import type { Memory } from "@obversa/memory";
     import kit = require("@obversa/lines/testing");
     export type { X } from "@obversa/memory-git";
+    type S = import("@obversa/surfacer").Surface;
+    type T = typeof import("@obversa/source");
+    let u: import("@obversa/memory-simple").Store<string>;
   `;
   assert.deepEqual(extractObversaImports(source, { file: "/repo/packages/lines/src/a.ts", root: "/repo" }), [
     "@obversa/memory",
     "@obversa/lines",
     "@obversa/memory-git",
+    "@obversa/surfacer",
+    "@obversa/source",
+    "@obversa/memory-simple",
+  ]);
+});
+
+test("a JSDoc import type in a JavaScript file counts as a dependency", () => {
+  const source = `
+    /** @type {import("@obversa/memory").Memory} */
+    const memory = make();
+    /**
+     * @param {import('@obversa/surfacer').Session} session
+     * @returns {typeof import("@obversa/lines")}
+     */
+    function use(session) { return session; }
+  `;
+  assert.deepEqual(extractObversaImports(source, { file: "/repo/packages/source/src/a.mjs", root: "/repo" }), [
+    "@obversa/memory",
+    "@obversa/surfacer",
+    "@obversa/lines",
   ]);
 });
 
