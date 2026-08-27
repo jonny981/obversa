@@ -665,9 +665,7 @@ export function agentCheck(config: AgentCheckConfig): Condition {
   const dimensions =
     !confidenceTag && config.dimensions?.length ? config.dimensions : undefined;
   return setLabel(async (ctx, last) => {
-    const engine = config.engine
-      ? ctx.resolveEngine(config.engine)
-      : ctx.engine;
+    const engine = ctx.resolveEngine(config.engine);
     const contextText = await (config.context ?? defaultContext)(ctx, last);
     const closing = confidenceTag
       ? 'Write your review now, then close with `<confidence>N%</confidence>`.'

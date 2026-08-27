@@ -12,7 +12,7 @@ afterAll(cleanupRepos);
 
 const base: RunOptions = {
   engine: 'mock',
-  engines: { mock: () => new MockEngine(() => '') },
+  engines: { mock: new MockEngine(() => '') },
 };
 
 describe('dag worktree isolation (branches-as-teams)', () => {

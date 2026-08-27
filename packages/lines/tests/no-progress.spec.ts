@@ -28,7 +28,7 @@ afterAll(cleanupRepos);
 
 const mockOpts: RunOptions = {
   engine: 'mock',
-  engines: { mock: () => new MockEngine(() => '') },
+  engines: { mock: new MockEngine(() => '') },
 };
 
 /** Run opts pinned to a non-repo cwd, so the workspace channel is absent. */

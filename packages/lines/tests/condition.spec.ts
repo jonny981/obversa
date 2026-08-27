@@ -27,12 +27,12 @@ import { MockEngine, mockVerdict } from '../src/testing.ts';
 // constructing a real backend.
 const noEngine: RunOptions = {
   engine: 'mock',
-  engines: { mock: () => mockVerdict('no', 0) },
+  engines: { mock: mockVerdict('no', 0) },
 };
 
 const withVerdict = (v: 'yes' | 'no', c: number): RunOptions => ({
   engine: 'mock',
-  engines: { mock: () => mockVerdict(v, c) },
+  engines: { mock: mockVerdict(v, c) },
 });
 
 const failingBody = () =>
@@ -67,7 +67,7 @@ describe('conditions', () => {
 
   const withText = (text: string): RunOptions => ({
     engine: 'mock',
-    engines: { mock: () => new MockEngine(() => text) },
+    engines: { mock: new MockEngine(() => text) },
   });
 
   it('agentCheck (confidenceTag) opens at/above the % threshold and carries findings', async () => {

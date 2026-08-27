@@ -57,7 +57,7 @@ export async function mergeSynthesis(
   config: MergeSynthesisConfig,
 ): Promise<MergeSynthesisResult> {
   const cwd = ctx.workspace.dir;
-  const engine = config.engine ? ctx.resolveEngine(config.engine) : ctx.engine;
+  const engine = ctx.resolveEngine(config.engine);
   const merge = await mergeNoCommit(cwd, config.branch, { signal: ctx.signal });
 
   try {

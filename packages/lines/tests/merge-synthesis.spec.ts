@@ -42,7 +42,7 @@ async function landSynthesis(repo: string, branch: string) {
   let result: MergeSynthesisResult | undefined;
   const opts: RunOptions = {
     engine: 'mock',
-    engines: { mock: () => synthMock() },
+    engines: { mock: synthMock() },
     cwd: repo,
   };
   await run(

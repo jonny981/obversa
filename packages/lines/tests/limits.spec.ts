@@ -65,7 +65,7 @@ describe('onLimit: auto — wait and continue', () => {
       loop({ name: 'x', body: passOnText, max: 5 }),
       {
         engine: 'limited',
-        engines: { limited: () => limitThenOk(rateLimit, 1) },
+        engines: { limited: limitThenOk(rateLimit, 1) },
         maxWaitMs: 10_000,
         onEvent: (e) => events.push(e),
       },
@@ -89,7 +89,7 @@ describe('onLimit: auto — wait and continue', () => {
       loop({ name: 'x', body: passOnText, max: 5 }),
       {
         engine: 'limited',
-        engines: { limited: () => limitThenOk(rateLimit, 1) },
+        engines: { limited: limitThenOk(rateLimit, 1) },
         maxWaitMs: 100,
         onEvent: (e) => events.push(e),
       },
@@ -113,7 +113,7 @@ describe('onLimit: auto — quota with no reset pauses', () => {
       loop({ name: 'x', body: passOnText, max: 5 }),
       {
         engine: 'limited',
-        engines: { limited: () => limitThenOk(quota, 1) },
+        engines: { limited: limitThenOk(quota, 1) },
       },
     );
     expect(outcome.status).toBe('paused');
@@ -132,7 +132,7 @@ describe('onLimit: auto — quota with no reset pauses', () => {
       loop({ name: 'x', body: passOnText, max: 5 }),
       {
         engine: 'limited',
-        engines: { limited: () => limitThenOk(quota, 1) },
+        engines: { limited: limitThenOk(quota, 1) },
         maxWaitMs: 10_000,
       },
     );
@@ -167,7 +167,7 @@ describe('onLimit: budget exhaustion under auto', () => {
       }),
       {
         engine: 'um',
-        engines: { um: () => usageEngine },
+        engines: { um: usageEngine },
         budget: 150,
         onEvent: (e) => events.push(e),
       },
@@ -198,7 +198,7 @@ describe('onLimit: explicit policies', () => {
       }),
       {
         engine: 'limited',
-        engines: { limited: () => limitThenOk(quota, 0) },
+        engines: { limited: limitThenOk(quota, 0) },
         onLimit: 'fail',
         onEvent: (e) => events.push(e),
       },
@@ -220,7 +220,7 @@ describe('onLimit: explicit policies', () => {
       loop({ name: 'x', body: passOnText, max: 5 }),
       {
         engine: 'limited',
-        engines: { limited: () => limitThenOk(rateLimit, 1) },
+        engines: { limited: limitThenOk(rateLimit, 1) },
         onLimit: 'exit',
         maxWaitMs: 10_000,
         onEvent: (e) => events.push(e),
@@ -240,7 +240,7 @@ describe('onLimit: explicit policies', () => {
       loop({ name: 'x', body: passOnText, max: 5 }),
       {
         engine: 'limited',
-        engines: { limited: () => limitThenOk(rateLimit, 1) },
+        engines: { limited: limitThenOk(rateLimit, 1) },
         onLimit: 'wait',
         maxWaitMs: 1, // below the 5ms reset, but 'wait' ignores the ceiling
       },

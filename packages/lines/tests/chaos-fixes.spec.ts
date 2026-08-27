@@ -15,7 +15,7 @@ import { MockEngine } from '../src/testing.ts';
 
 const mockOpts: RunOptions = {
   engine: 'mock',
-  engines: { mock: () => new MockEngine(() => '') },
+  engines: { mock: new MockEngine(() => '') },
 };
 
 describe('guarded user code (concurrency HIGH)', () => {

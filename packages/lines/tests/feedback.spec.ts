@@ -42,7 +42,7 @@ function capturing(
     opts: {
       engine: 'mock',
       engines: {
-        mock: () =>
+        mock:
           new MockEngine((req) => {
             prompts.push(req.prompt);
             return responder(req);
@@ -133,7 +133,7 @@ describe('feedback protocol', () => {
           },
         },
       }),
-      { engine: 'mock', engines: { mock: () => new MockEngine(() => '') } },
+      { engine: 'mock', engines: { mock: new MockEngine(() => '') } },
     );
 
     expect(outcome.status).toBe('pass');
@@ -167,7 +167,7 @@ describe('feedback protocol', () => {
           { name: 'simplicity', review: alsoBlock },
         ],
       }),
-      { engine: 'mock', engines: { mock: () => new MockEngine(() => '') } },
+      { engine: 'mock', engines: { mock: new MockEngine(() => '') } },
     );
 
     expect(outcome.status).toBe('fail');
@@ -207,7 +207,7 @@ describe('feedback protocol', () => {
           { name: 'simplicity', review: failing },
         ],
       }),
-      { engine: 'mock', engines: { mock: () => new MockEngine(() => '') } },
+      { engine: 'mock', engines: { mock: new MockEngine(() => '') } },
     );
     expect(outcome.status).toBe('pass');
     expect(outcome.summary).toContain('2/3 reviewer(s) cleared');
@@ -247,7 +247,7 @@ describe('feedback protocol', () => {
           review: reviewer(),
         })),
       }),
-      { engine: 'mock', engines: { mock: () => new MockEngine(() => '') } },
+      { engine: 'mock', engines: { mock: new MockEngine(() => '') } },
     );
 
     expect(outcome.status).toBe('pass');
@@ -287,7 +287,7 @@ describe('feedback protocol', () => {
       });
     const opts = {
       engine: 'mock' as const,
-      engines: { mock: () => new MockEngine(() => '') },
+      engines: { mock: new MockEngine(() => '') },
       cwd: repo,
       recordTo,
       state,
@@ -329,7 +329,7 @@ describe('feedback protocol', () => {
       });
     const opts = {
       engine: 'mock' as const,
-      engines: { mock: () => new MockEngine(() => '') },
+      engines: { mock: new MockEngine(() => '') },
       cwd: repo,
       state,
     };
@@ -378,7 +378,7 @@ describe('feedback protocol', () => {
       });
     const opts = {
       engine: 'mock' as const,
-      engines: { mock: () => new MockEngine(() => '') },
+      engines: { mock: new MockEngine(() => '') },
       cwd: repo,
       state,
     };
@@ -437,7 +437,7 @@ describe('feedback protocol', () => {
       });
     const opts = {
       engine: 'mock' as const,
-      engines: { mock: () => new MockEngine(() => '') },
+      engines: { mock: new MockEngine(() => '') },
       cwd: repo,
       state,
     };
@@ -456,7 +456,7 @@ describe('feedback protocol', () => {
     let changedRuns = 0;
     const opts = {
       engine: 'mock' as const,
-      engines: { mock: () => new MockEngine(() => '') },
+      engines: { mock: new MockEngine(() => '') },
       cwd: repo,
       state,
     };
@@ -557,7 +557,7 @@ describe('feedback protocol', () => {
       });
     const opts = {
       engine: 'mock' as const,
-      engines: { mock: () => new MockEngine(() => '') },
+      engines: { mock: new MockEngine(() => '') },
       cwd: repo,
       state,
     };
@@ -622,7 +622,7 @@ describe('feedback protocol', () => {
       });
     const opts = {
       engine: 'mock' as const,
-      engines: { mock: () => new MockEngine(() => '') },
+      engines: { mock: new MockEngine(() => '') },
       cwd: repo,
       state,
     };
@@ -719,7 +719,7 @@ describe('feedback protocol', () => {
           },
         ],
       }),
-      { engine: 'mock', engines: { mock: () => new MockEngine(() => '') } },
+      { engine: 'mock', engines: { mock: new MockEngine(() => '') } },
     );
 
     expect(outcome.status).toBe('paused');
@@ -748,7 +748,7 @@ describe('feedback protocol', () => {
           },
         ],
       }),
-      { engine: 'mock', engines: { mock: () => new MockEngine(() => '') } },
+      { engine: 'mock', engines: { mock: new MockEngine(() => '') } },
     );
 
     expect(outcome.status).toBe('paused');
@@ -774,7 +774,7 @@ describe('feedback protocol', () => {
           },
         ],
       }),
-      { engine: 'mock', engines: { mock: () => new MockEngine(() => '') } },
+      { engine: 'mock', engines: { mock: new MockEngine(() => '') } },
     );
 
     expect(outcome.status).toBe('paused');
@@ -794,7 +794,7 @@ describe('feedback protocol', () => {
       reviewPanel({
         reviewers: [{ name: 'jury', review: quorum(2, yes, limit) }],
       }),
-      { engine: 'mock', engines: { mock: () => new MockEngine(() => '') } },
+      { engine: 'mock', engines: { mock: new MockEngine(() => '') } },
     );
 
     expect(outcome.status).toBe('paused');
@@ -822,7 +822,7 @@ describe('feedback protocol', () => {
           },
         ],
       }),
-      { engine: 'mock', engines: { mock: () => new MockEngine(() => '') } },
+      { engine: 'mock', engines: { mock: new MockEngine(() => '') } },
     );
 
     expect(outcome.status).toBe('pass');
@@ -855,7 +855,7 @@ describe('feedback protocol', () => {
           },
         ],
       }),
-      { engine: 'mock', engines: { mock: () => new MockEngine(() => '') } },
+      { engine: 'mock', engines: { mock: new MockEngine(() => '') } },
     );
 
     expect(outcome.status).toBe('paused');
@@ -887,7 +887,7 @@ describe('feedback protocol', () => {
       reviewPanel({
         reviewers: [{ name: 'jury', review: quorum(2, pass, fail, limit) }],
       }),
-      { engine: 'mock', engines: { mock: () => new MockEngine(() => '') } },
+      { engine: 'mock', engines: { mock: new MockEngine(() => '') } },
     );
 
     expect(outcome.status).toBe('paused');
@@ -924,7 +924,7 @@ describe('feedback protocol', () => {
           },
         ],
       }),
-      { engine: 'mock', engines: { mock: () => new MockEngine(() => '') } },
+      { engine: 'mock', engines: { mock: new MockEngine(() => '') } },
     );
 
     expect(outcome.status).toBe('paused');
@@ -956,7 +956,7 @@ describe('feedback protocol', () => {
           },
         ],
       }),
-      { engine: 'mock', engines: { mock: () => new MockEngine(() => '') } },
+      { engine: 'mock', engines: { mock: new MockEngine(() => '') } },
     );
 
     expect(outcome.status).toBe('pass');
@@ -1059,7 +1059,7 @@ describe('feedback protocol', () => {
       }),
       {
         engine: 'mock',
-        engines: { mock: () => new MockEngine(() => '') },
+      engines: { mock: new MockEngine(() => '') },
         cwd: repo,
       },
     );

@@ -8,11 +8,9 @@ import { join } from 'node:path';
 
 import type {
   Engine,
-  EngineName,
-  EngineOptions,
   EngineRef,
 } from '../engines/engine.js';
-import { EngineRegistry, type EngineFactory } from '../engines/registry.js';
+import { isEngine } from '../engines/engine.js';
 import { Stats, type StatsSnapshot } from '../core/stats.js';
 import { costReport, type CostReport, type PriceTable } from '../core/cost.js';
 import { LoopError } from '../core/errors.js';
@@ -48,11 +46,10 @@ const DEFAULT_MAX_WAIT_MS = 300_000;
 export const EXIT_PAUSED = 75;
 
 export interface RunOptions {
-  /** Default engine selected when a job/condition names none. Default agent-sdk. */
-  engine?: EngineName;
-  engineOptions?: EngineOptions;
-  /** Register custom engines (drop-in): name → factory or ready-made instance. */
-  engines?: Record<string, EngineFactory | Engine>;
+  /** Default engine selected when a job or condition names none. */
+  readonly engine?: EngineRef;
+  /** Ready-made engines available to jobs and conditions by name. */
+  readonly engines?: Readonly<Record<string, Engine>>;
   /** External abort signal. */
   signal?: AbortSignal;
   /** Root working directory the run operates in. Default: process.cwd(). */
@@ -140,16 +137,6 @@ export async function run(
     throw new JsonValueError('', 'run brief must be a JSON object');
   }
   const params = cloneFrozenJson(paramsInput as RunBrief);
-  const defaultEngine = options.engine ?? 'agent-sdk';
-  const engineOptions: EngineOptions = {
-    ...(options.engineOptions ?? {}),
-    defaultEngine,
-  };
-  const registry = new EngineRegistry(engineOptions);
-  for (const [name, value] of Object.entries(options.engines ?? {})) {
-    registry.register(name, typeof value === 'function' ? value : () => value);
-  }
-
   const stats = new Stats();
   const controller = new AbortController();
   if (options.signal) {
@@ -209,8 +196,24 @@ export async function run(
     options.onEvent?.(event);
     for (const sink of sinks) sink(event);
   };
-  const resolveEngine = (ref?: EngineRef): Engine =>
-    registry.create(ref, defaultEngine);
+  const resolveEngine = (ref?: EngineRef): Engine => {
+    const selected = ref ?? options.engine;
+    if (isEngine(selected)) return selected;
+    if (selected === undefined) {
+      throw new LoopError({
+        code: 'CONFIG',
+        message: 'an engine instance or named engine map entry is required',
+      });
+    }
+    const engine = options.engines?.[selected];
+    if (!isEngine(engine)) {
+      throw new LoopError({
+        code: 'CONFIG',
+        message: `unknown engine "${selected}"`,
+      });
+    }
+    return engine;
+  };
 
   // The root workspace is the substrate the whole run reads and writes. Branch
   // resolution is best-effort: a non-git cwd just leaves `branch` undefined.
@@ -257,7 +260,7 @@ export async function run(
   }
 
   const rootCtx: JobContext = {
-    engine: resolveEngine(defaultEngine),
+    engine: options.engine === undefined ? undefined : resolveEngine(options.engine),
     resolveEngine,
     signal: controller.signal,
     runId,

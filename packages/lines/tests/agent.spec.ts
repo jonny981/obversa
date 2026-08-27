@@ -140,7 +140,7 @@ describe('AgentDef', () => {
       skills: [defineSkill({ name: 'adversarial', instructions: 'Try to REFUTE it.' })],
     });
     const cap = capturing();
-    const opts: RunOptions = { engine: 'mock', engines: { mock: () => cap.engine }, cwd: repo };
+    const opts: RunOptions = { engine: 'mock', engines: { mock: cap.engine }, cwd: repo };
     await run(agentJob({ agent, prompt: 'review the PR' }), opts);
 
     const req = cap.req();
@@ -156,7 +156,7 @@ describe('AgentDef', () => {
     const repo = await tmpRepo();
     const agent = defineAgent({ name: 'a', system: 'agent system', model: 'haiku' });
     const cap = capturing();
-    const opts: RunOptions = { engine: 'mock', engines: { mock: () => cap.engine }, cwd: repo };
+    const opts: RunOptions = { engine: 'mock', engines: { mock: cap.engine }, cwd: repo };
     await run(
       agentJob({ agent, prompt: 'go', system: 'override system', model: 'sonnet' }),
       opts,
@@ -181,7 +181,7 @@ describe('AgentDef', () => {
       model: 'haiku',
       skills: [defineSkill({ name: 'refute', instructions: 'Try to REFUTE the claim.' })],
     });
-    const opts: RunOptions = { engine: 'mock', engines: { mock: () => engine }, cwd: repo };
+    const opts: RunOptions = { engine: 'mock', engines: { mock: engine }, cwd: repo };
     await run(gateJob('review', agentCheck({ agent: reviewer, question: 'Is it correct?' })), opts);
 
     expect(seenSystem).toContain('adversarial reviewer'); // persona
@@ -194,14 +194,14 @@ describe('AgentDef', () => {
     const repo = await tmpRepo();
     const leafAgent = defineAgent({ name: 'leafy', system: 'no fan-out', leaf: true });
     const cap = capturing();
-    const opts: RunOptions = { engine: 'mock', engines: { mock: () => cap.engine }, cwd: repo };
+    const opts: RunOptions = { engine: 'mock', engines: { mock: cap.engine }, cwd: repo };
     await run(agentJob({ agent: leafAgent, prompt: 'go' }), opts);
     expect(cap.req().leaf).toBe(true);
     // inline config can still set it directly
     const cap2 = capturing();
     await run(agentJob({ prompt: 'go', leaf: true }), {
       engine: 'mock',
-      engines: { mock: () => cap2.engine },
+      engines: { mock: cap2.engine },
       cwd: repo,
     });
     expect(cap2.req().leaf).toBe(true);
@@ -212,7 +212,7 @@ describe('AgentDef', () => {
     const cap = capturing();
     await run(agentJob({ label: 'leaf', prompt: 'go' }), {
       engine: 'mock',
-      engines: { mock: () => cap.engine },
+      engines: { mock: cap.engine },
       cwd: repo,
     });
     expect(cap.req().attempt).toMatchObject({
@@ -285,7 +285,7 @@ describe('AgentDef', () => {
       }),
       {
         engine: 'worker',
-        engines: { worker: () => worker, advisor: () => advisor },
+        engines: { worker, advisor },
         cwd: repo,
         onEvent: (event) => {
           if (event.kind === 'advisor:consult') events.push(`${event.question} -> ${event.reply}`);
@@ -366,7 +366,7 @@ describe('AgentDef', () => {
       }),
       {
         engine: 'worker',
-        engines: { worker: () => worker, advisor: () => advisor },
+        engines: { worker, advisor },
         cwd: repo,
       },
     );
@@ -409,7 +409,7 @@ describe('AgentDef', () => {
       }),
       {
         engine: 'worker',
-        engines: { worker: () => worker, advisor: () => advisor },
+        engines: { worker, advisor },
         cwd: repo,
         onEvent: (event) => {
           if (event.kind === 'advisor:consult') {
@@ -434,7 +434,7 @@ describe('AgentDef', () => {
     await run(gateJob('review', agentCheck({ question: 'Is it correct?' })), {
       engine: 'mock',
       engines: {
-        mock: () =>
+        mock:
           new MockEngine((req) => {
             seen = req;
             return JSON.stringify({ verdict: 'yes', confidence: 1, reason: 'ok' });
@@ -495,7 +495,7 @@ describe('AgentDef', () => {
       }),
       {
         engine: 'primary',
-        engines: { primary, fallback: () => fallback },
+        engines: { primary, fallback },
         cwd: repo,
       },
     );
@@ -528,7 +528,7 @@ describe('AgentDef', () => {
       }),
       {
         engine: 'primary',
-        engines: { primary, fallback: () => fallback },
+        engines: { primary, fallback },
         cwd: repo,
       },
     );
@@ -560,7 +560,7 @@ describe('AgentDef', () => {
       }),
       {
         engine: 'primary',
-        engines: { primary, fallback: () => fallback },
+        engines: { primary, fallback },
         cwd: repo,
       },
     );

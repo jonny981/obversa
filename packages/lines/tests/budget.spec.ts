@@ -51,7 +51,7 @@ describe('Budget', () => {
       loop({ name: 'bounded', body: failingAgent(), max: 10 }),
       {
         engine: 'usage',
-        engines: { usage: () => usageEngine() },
+        engines: { usage: usageEngine() },
         budget: 500,
         onLimit: 'fail',
       },
@@ -67,7 +67,7 @@ describe('Budget', () => {
       loop({ name: 'soft', body: failingAgent(), max: 3 }),
       {
         engine: 'usage',
-        engines: { usage: () => usageEngine() },
+        engines: { usage: usageEngine() },
         budget: { limit: 100, soft: true },
       },
     );
@@ -94,7 +94,7 @@ describe('Budget', () => {
       loop({ name: 'bounded', body: failingAgent(), max: 3 }),
       {
         engine: 'unknown',
-        engines: { unknown: () => unknown },
+        engines: { unknown },
         budget: 100,
       },
     );

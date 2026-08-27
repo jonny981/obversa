@@ -27,7 +27,7 @@ afterAll(cleanupRepos);
 
 const base: RunOptions = {
   engine: 'mock',
-  engines: { mock: () => new MockEngine(() => '') },
+  engines: { mock: new MockEngine(() => '') },
 };
 
 /** A loop that only converges when the sh gate sees the expected env. */
@@ -174,7 +174,7 @@ describe('agentJob request env', () => {
     });
     const { outcome } = await run(
       withEnv({ TEST_WAVE3_K: 'overlay', TEST_WAVE3_O: 'overlay' }, job),
-      { engine: 'mock', engines: { mock: () => capture }, cwd: repo, environment: envir },
+      { engine: 'mock', engines: { mock: capture }, cwd: repo, environment: envir },
     );
     expect(outcome.status).toBe('pass');
     // MockEnvironment also injects BASE_URL alongside its configured vars.
@@ -200,7 +200,7 @@ describe('agentJob request env', () => {
       ),
       {
         engine: 'mock',
-        engines: { mock: () => echo },
+        engines: { mock: echo },
         cwd: repo,
         onEvent: (e) => events.push(e),
       },
@@ -223,7 +223,7 @@ describe('agentJob request env', () => {
     });
     const { outcome } = await run(agentJob({ label: 'leaf', prompt: 'x' }), {
       engine: 'mock',
-      engines: { mock: () => capture },
+      engines: { mock: capture },
       cwd: repo,
     });
     expect(outcome.status).toBe('pass');
@@ -252,7 +252,7 @@ describe('agentCheck judge request env', () => {
     );
     const { outcome } = await run(job, {
       engine: 'mock',
-      engines: { mock: () => judge },
+      engines: { mock: judge },
       cwd: repo,
       environment: envir,
     });
@@ -340,7 +340,7 @@ describe('captured output scrubbing', () => {
       ),
       {
         engine: 'mock',
-        engines: { mock: () => judge },
+        engines: { mock: judge },
         cwd: repo,
         onEvent: (e: LoopEvent) => {
           if (e.kind === 'loop:condition' && e.which === 'until') result = e.result;
@@ -395,7 +395,7 @@ describe('withEnv construction', () => {
     ) as Record<string, string>;
     const { outcome } = await run(
       withEnv(overlay, agentJob({ label: 'leaf', prompt: 'x' })),
-      { engine: 'mock', engines: { mock: () => capture }, cwd: repo },
+      { engine: 'mock', engines: { mock: capture }, cwd: repo },
     );
     expect(outcome.status).toBe('pass');
     expect(reqs[0]?.env?.TEST_WAVE3_P).toBe('ok');

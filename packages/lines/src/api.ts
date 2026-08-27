@@ -219,7 +219,6 @@ export type {
   Engine,
   EngineRef,
   EngineName,
-  EngineOptions,
   AgentRequest,
   AgentResult,
   AgentResultPart,
@@ -249,7 +248,6 @@ export {
   type OpenCodeCliIdentity,
   type OpenCodeInvocation,
 } from './engines/opencode-cli.js';
-export type { EngineFactory } from './engines/registry.js';
 
 export type { Environment, EnvHandle } from './env/environment.js';
 export { withEnv } from './core/env-overlay.js';

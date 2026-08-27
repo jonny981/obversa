@@ -17,7 +17,7 @@ afterAll(cleanupRepos);
 
 const mockOpts: RunOptions = {
   engine: 'mock',
-  engines: { mock: () => new MockEngine(() => '') },
+  engines: { mock: new MockEngine(() => '') },
 };
 const pass = (rec: string[], name: string) =>
   fnJob(name, async () => {

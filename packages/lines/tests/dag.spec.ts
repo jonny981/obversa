@@ -14,7 +14,7 @@ import { MockEngine } from '../src/testing.ts';
 
 const runOptions: RunOptions = {
   engine: 'mock',
-  engines: { mock: () => new MockEngine(() => '') },
+  engines: { mock: new MockEngine(() => '') },
 };
 
 function pass(order: string[], name: string) {

@@ -139,11 +139,11 @@ export interface GraphPosition {
  * happens in, and the position in the loop tree (used by hosts and stats).
  */
 export interface JobContext {
-  /** Default engine for this run; overridable per-step via `resolveEngine`. */
-  readonly engine: Engine;
+  /** Default engine for this run, when the host supplied one. */
+  readonly engine?: Engine;
   /**
-   * Resolve an engine for a step. Accepts a registered name, a ready-made
-   * `Engine` (bring-your-own provider/framework), or nothing (the run default).
+   * Resolve an engine for a step. A name comes only from the host-supplied
+   * map; a ready-made `Engine` passes through; no argument uses the run default.
    */
   resolveEngine(ref?: EngineRef): Engine;
   readonly signal: AbortSignal;

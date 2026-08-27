@@ -25,7 +25,7 @@ afterAll(cleanupRepos);
 
 const mockOpts: RunOptions = {
   engine: 'mock',
-  engines: { mock: () => new MockEngine(() => '') },
+  engines: { mock: new MockEngine(() => '') },
 };
 
 describe('exitCodeFor', () => {

@@ -23,11 +23,7 @@ import type {
   AgentResult,
   Engine,
   EngineEventSink,
-  EngineOptions,
-  EngineRef,
 } from './engine.js';
-import { isEngine } from './engine.js';
-import { EngineRegistry, type EngineFactory } from './registry.js';
 import {
   classifyEngineFailure,
   LANE_DEAD_FAILURES,
@@ -51,64 +47,49 @@ export interface FallbackOptions {
 }
 
 /**
- * Build a fallback chain over `refs` (registered names and/or ready-made
- * `Engine`s, tried in order). Returns an `EngineFactory`, so it drops into a
- * run's `engines` map:
+ * Build a fallback chain over ready-made `Engine`s, tried in order.
  *
  * ```ts
- * await run(job, {
- *   engines: { worker: fallbackEngine(['claude-cli', 'codex']) },
- *   engine: 'worker',
- * });
- * ```
- *
- * or builds a standalone engine: `fallbackEngine([...])(engineOptions)`.
+ * await run(job, { engine: fallbackEngine([claude, codex]) });
  */
 export function fallbackEngine(
-  refs: readonly [EngineRef, ...EngineRef[]],
+  engines: readonly [Engine, ...Engine[]],
   options: FallbackOptions = {},
-): EngineFactory {
-  if (!refs.length) throw new RangeError('fallbackEngine needs at least one engine');
+): Engine {
+  if (!engines.length) throw new RangeError('fallbackEngine needs at least one engine');
   const triggers = new Set(options.on ?? LANE_DEAD_FAILURES);
-  return (engineOptions: EngineOptions): Engine => {
-    const registry = new EngineRegistry(engineOptions);
-    const lanes = refs.map((ref) => ({
-      ref,
-      name: isEngine(ref) ? ref.name : String(ref),
-      dead: false,
-    }));
-    const name = `fallback(${lanes.map((l) => l.name).join(' -> ')})`;
-    return {
-      name,
-      async run(
-        req: AgentRequest,
-        onEvent: EngineEventSink,
-        signal: AbortSignal,
-      ): Promise<AgentResult> {
-        let lastError: unknown;
-        for (let i = 0; i < lanes.length; i++) {
-          const lane = lanes[i]!;
-          if (lane.dead) continue;
-          try {
-            return await registry.create(lane.ref, lane.name).run(req, onEvent, signal);
-          } catch (error) {
-            lastError = error;
-            if (signal.aborted) throw error;
-            const failure = classifyEngineFailure(error);
-            if (!triggers.has(failure)) throw error;
-            lane.dead = true; // latched: a dead lane is not retried this run
-            const next = lanes.slice(i + 1).find((l) => !l.dead);
-            options.onFallback?.({
-              from: lane.name,
-              to: next?.name,
-              failure,
-              error,
-            });
-            if (!next) break;
-          }
+  const lanes = engines.map((engine) => ({ engine, dead: false }));
+  const name = `fallback(${lanes.map((lane) => lane.engine.name).join(' -> ')})`;
+  return {
+    name,
+    async run(
+      req: AgentRequest,
+      onEvent: EngineEventSink,
+      signal: AbortSignal,
+    ): Promise<AgentResult> {
+      let lastError: unknown;
+      for (let i = 0; i < lanes.length; i++) {
+        const lane = lanes[i]!;
+        if (lane.dead) continue;
+        try {
+          return await lane.engine.run(req, onEvent, signal);
+        } catch (error) {
+          lastError = error;
+          if (signal.aborted) throw error;
+          const failure = classifyEngineFailure(error);
+          if (!triggers.has(failure)) throw error;
+          lane.dead = true; // latched: a dead lane is not retried this run
+          const next = lanes.slice(i + 1).find((candidate) => !candidate.dead);
+          options.onFallback?.({
+            from: lane.engine.name,
+            to: next?.engine.name,
+            failure,
+            error,
+          });
+          if (!next) break;
         }
-        throw lastError ?? new Error(`${name}: no live engine left`);
-      },
-    };
+      }
+      throw lastError ?? new Error(`${name}: no live engine left`);
+    },
   };
 }

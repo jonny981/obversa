@@ -7,7 +7,7 @@ import { MockEngine } from '../src/testing.ts';
 
 const mockOpts: RunOptions = {
   engine: 'mock',
-  engines: { mock: () => new MockEngine(() => '') },
+  engines: { mock: new MockEngine(() => '') },
 };
 
 type KickbackEvent = Extract<LoopEvent, { kind: 'dag:kickback' }>;

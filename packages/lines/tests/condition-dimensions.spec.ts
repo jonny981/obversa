@@ -25,7 +25,7 @@ function runDimensionCheck(text: string, threshold: number) {
       }),
       max: 2,
     }),
-    { engine: 'reply', engines: { reply: () => replyEngine(text) } },
+    { engine: 'reply', engines: { reply: replyEngine(text) } },
   );
 }
 

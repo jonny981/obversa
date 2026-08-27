@@ -12,7 +12,7 @@ afterAll(cleanupRepos);
 
 const base: RunOptions = {
   engine: 'mock',
-  engines: { mock: () => new MockEngine(() => '') },
+  engines: { mock: new MockEngine(() => '') },
 };
 const node = (script: string) => ({ cmd: 'node', args: ['-e', script] });
 

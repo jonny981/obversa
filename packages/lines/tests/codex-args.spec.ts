@@ -285,9 +285,7 @@ process.exit(1);
     );
     chmodSync(bin, 0o755);
 
-    const result = await preflightEngine('codex', {
-      engineOptions: { cliBinary: bin },
-    });
+    const result = await preflightEngine(new CodexEngine({ cliBinary: bin }));
 
     expect(result.ok).toBe(false);
     expect(result.failure).toBe('invalid-config');

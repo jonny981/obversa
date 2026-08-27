@@ -13,9 +13,7 @@
  * the lanes). Run both before a long unattended run.
  */
 
-import type { EngineRef, EngineOptions, UsageReceipt } from './engine.js';
-import { isEngine } from './engine.js';
-import { EngineRegistry } from './registry.js';
+import type { Engine, UsageReceipt } from './engine.js';
 import { classifyEngineFailure, type EngineFailureKind } from './failure.js';
 import { requireFinalResultText } from '../runtime/result-parts.js';
 
@@ -35,8 +33,6 @@ export interface PreflightOptions {
   model?: string;
   /** Cap on the probe turn. Default 60s. */
   timeoutMs?: number;
-  registry?: EngineRegistry;
-  engineOptions?: EngineOptions;
   signal?: AbortSignal;
 }
 
@@ -44,15 +40,13 @@ const PROBE_PROMPT = 'Reply with the single word: ok';
 
 /** Probe one engine with a tiny live turn. Never throws — the answer is the result. */
 export async function preflightEngine(
-  ref: EngineRef,
+  engine: Engine,
   opts: PreflightOptions = {},
 ): Promise<PreflightResult> {
-  const registry = opts.registry ?? new EngineRegistry(opts.engineOptions ?? {});
-  const name = isEngine(ref) ? ref.name : String(ref);
+  const name = engine.name;
   const started = Date.now();
   let usage: UsageReceipt | undefined;
   try {
-    const engine = registry.create(ref, name);
     const result = await engine.run(
       {
         prompt: PROBE_PROMPT,
@@ -90,11 +84,10 @@ export async function preflightEngine(
 
 /** Probe several engines concurrently (they are independent lanes). */
 export async function preflight(
-  refs: readonly EngineRef[],
+  engines: readonly Engine[],
   opts: PreflightOptions = {},
 ): Promise<PreflightResult[]> {
-  const registry = opts.registry ?? new EngineRegistry(opts.engineOptions ?? {});
-  return Promise.all(refs.map((ref) => preflightEngine(ref, { ...opts, registry })));
+  return Promise.all(engines.map((engine) => preflightEngine(engine, opts)));
 }
 
 /** One line per lane, for terminals and logs. */

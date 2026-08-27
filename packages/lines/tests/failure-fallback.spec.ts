@@ -85,7 +85,7 @@ describe('fallbackEngine', () => {
     const live = engineThat('live', async () => 'from the live lane');
     const engine = fallbackEngine([dead, live], {
       onFallback: (info) => reroutes.push(info),
-    })({});
+    });
 
     const first = await engine.run(req, () => {}, signal);
     expect(finalResultText(first)).toBe('from the live lane');
@@ -103,7 +103,7 @@ describe('fallbackEngine', () => {
       throw new LoopError({ code: 'RATE_LIMIT', message: '429', retryAfterMs: 100 });
     });
     const live = engineThat('live', async () => 'never reached');
-    const engine = fallbackEngine([throttled, live])({});
+    const engine = fallbackEngine([throttled, live]);
     await expect(engine.run(req, () => {}, signal)).rejects.toMatchObject({
       code: 'RATE_LIMIT',
     });
@@ -114,7 +114,7 @@ describe('fallbackEngine', () => {
       throw new LoopError({ code: 'QUOTA', message: 'usage limit' });
     });
     const live = engineThat('live', async () => 'hopped');
-    const engine = fallbackEngine([outOfQuota, live], { on: ['quota'] })({});
+    const engine = fallbackEngine([outOfQuota, live], { on: ['quota'] });
     const result = await engine.run(req, () => {}, signal);
     expect(finalResultText(result)).toBe('hopped');
   });
@@ -126,7 +126,7 @@ describe('fallbackEngine', () => {
     const b = engineThat('b', async () => {
       throw new Error('credit balance too low');
     });
-    const engine = fallbackEngine([a, b])({});
+    const engine = fallbackEngine([a, b]);
     await expect(engine.run(req, () => {}, signal)).rejects.toThrow(
       'credit balance too low',
     );
@@ -135,7 +135,9 @@ describe('fallbackEngine', () => {
   });
 
   it('names the chain', () => {
-    const engine = fallbackEngine(['claude-cli', 'codex'])({});
+    const claude = engineThat('claude-cli', async () => 'claude');
+    const codex = engineThat('codex', async () => 'codex');
+    const engine = fallbackEngine([claude, codex]);
     expect(engine.name).toBe('fallback(claude-cli -> codex)');
   });
 });
