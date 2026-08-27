@@ -40,7 +40,8 @@
     "typecheck:ts6": "tsc6 --noEmit",
     "test": "vitest run",
     "test:watch": "vitest",
-    "prepack": "pnpm run build"
+    "prepack": "pnpm run build",
+    "prepublishOnly": "node ../../scripts/check-publish-allowlist.mjs"
   },
   "engines": {
     "node": ">=22.12.0"

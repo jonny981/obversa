@@ -33,18 +33,24 @@ test("listWorkspacePackages follows every dir/* glob in pnpm-workspace.yaml", ()
   }
 });
 
-test("the audit fails closed: an unlisted public package, a listed private one, and a listed ghost", () => {
+const HOOKED = { prepublishOnly: "node ../../scripts/check-publish-allowlist.mjs" };
+
+test("the audit fails closed: an unlisted public package, a missing hook, a listed private one, and a listed ghost", () => {
   const root = makeWorkspace({
-    "packages/pub": { name: "@x/pub" },
+    "packages/pub": { name: "@x/pub", scripts: HOOKED },
+    "packages/nohook": { name: "@x/nohook", scripts: { build: "tsup" } },
     "packages/priv": { name: "@x/priv", private: true },
-    "packages/ok": { name: "@x/ok" },
+    "packages/ok": { name: "@x/ok", scripts: HOOKED },
   });
   try {
-    const problems = audit({ root, allowlist: new Set(["@x/ok", "@x/priv", "@x/ghost"]) });
-    assert.equal(problems.length, 3);
+    const problems = audit({ root, allowlist: new Set(["@x/ok", "@x/nohook", "@x/priv", "@x/ghost"]) });
+    assert.equal(problems.length, 4);
     assert.match(problems.join("\n"), /@x\/pub .* not on the allowlist/);
+    assert.match(problems.join("\n"), /@x\/nohook .*prepublishOnly does not run check-publish-allowlist\.mjs/);
     assert.match(problems.join("\n"), /@x\/priv .* marked private/);
     assert.match(problems.join("\n"), /@x\/ghost .* not a workspace package/);
+    // A private package needs no hook.
+    assert.doesNotMatch(problems.join("\n"), /@x\/priv .* prepublishOnly/);
   } finally {
     rmSync(root, { recursive: true, force: true });
   }

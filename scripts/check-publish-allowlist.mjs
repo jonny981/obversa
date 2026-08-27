@@ -11,8 +11,10 @@
 //      package name is on scripts/publish-allowlist.json. npm and pnpm run
 //      prepublishOnly before every publish, however publish was invoked.
 //   2. `--audit`, run from the repository root: every workspace package that is
-//      not private must be on the allowlist, and every allowlisted name must be
-//      a real, non-private workspace package. This keeps the list honest.
+//      not private must be on the allowlist AND must carry the prepublishOnly
+//      hook (without it a direct `npm publish` would skip the guard), and every
+//      allowlisted name must be a real, non-private workspace package. This
+//      keeps the list honest and the hook present.
 import { readdirSync, readFileSync, existsSync } from "node:fs";
 import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -42,19 +44,33 @@ export function listWorkspacePackages(root = ROOT) {
       const manifestPath = join(base, entry.name, "package.json");
       if (!existsSync(manifestPath)) continue;
       const manifest = JSON.parse(readFileSync(manifestPath, "utf8"));
-      found.push({ name: manifest.name, private: manifest.private === true, dir: join(glob.slice(0, -2), entry.name) });
+      found.push({
+        name: manifest.name,
+        private: manifest.private === true,
+        dir: join(glob.slice(0, -2), entry.name),
+        prepublishOnly: typeof manifest.scripts?.prepublishOnly === "string" ? manifest.scripts.prepublishOnly : "",
+      });
     }
   }
   return found;
 }
+
+// The hook every publishable package must run: npm and pnpm execute
+// prepublishOnly before any publish, so this is the check a direct publish
+// cannot skip.
+export const HOOK = "check-publish-allowlist.mjs";
 
 export function audit({ root = ROOT, allowlist = readAllowlist() } = {}) {
   const problems = [];
   const packages = listWorkspacePackages(root);
   const byName = new Map(packages.map((p) => [p.name, p]));
   for (const p of packages) {
-    if (!p.private && !allowlist.has(p.name)) {
+    if (p.private) continue;
+    if (!allowlist.has(p.name)) {
       problems.push(`${p.name} (${p.dir}) is publishable but not on the allowlist: add it or set "private": true`);
+    }
+    if (!p.prepublishOnly.includes(HOOK)) {
+      problems.push(`${p.name} (${p.dir}) is publishable but its scripts.prepublishOnly does not run ${HOOK}`);
     }
   }
   for (const name of allowlist) {
