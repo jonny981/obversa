@@ -10,3 +10,5 @@ build/
 .claude/
 .Codex/
 .superpowers/
+# The marketing site and copy bank ship from their own repository.
+marketing/
