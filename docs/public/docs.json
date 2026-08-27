@@ -40,7 +40,7 @@
         ]
       },
       {
-        "group": "Production lines",
+        "group": "Processes",
         "pages": [
           "production-lines/index",
           "production-lines/offline-review"
@@ -49,7 +49,14 @@
       {
         "group": "Hosts",
         "pages": [
-          "hosts/cmux"
+          "hosts/cmux",
+          "hosts/review"
+        ]
+      },
+      {
+        "group": "Packages",
+        "pages": [
+          "packages/surfacer"
         ]
       }
     ]

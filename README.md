@@ -1,6 +1,7 @@
 # Obversa
 
-Obversa is a TypeScript workspace for reliable agent production lines.
+Obversa is a TypeScript workspace for running real-world processes with teams
+of agents.
 
 Status: In build. Public docs in `docs/public/`.
 
@@ -11,8 +12,9 @@ This workspace contains four packages:
 - `@obversa/memory-simple` stores memory in one process.
 - `@obversa/memory-git` stores memory in private Git references.
 
-Lines is the runtime. A production line is a complete program that composes
-Lines jobs, graph forms, policies, and adapters.
+`@obversa/lines` is the runtime; it is being renamed to `@obversa/runtime`. A
+process is a complete program that composes runtime jobs, graph forms,
+policies, and adapters.
 
 Two workstreams run in parallel. Workstream 1 builds `@obversa/lines` in
 `packages/lines`. Workstream 2 builds host glue in `hosts/`, then the Surfacer
@@ -36,7 +38,7 @@ pnpm build
 
 The install activates this repository's commit-policy hooks for the checkout.
 
-## Run the offline production line
+## Run the offline process
 
 The first example uses deterministic function jobs. It does not use a model or
 network service.
@@ -99,8 +101,9 @@ run.
 ## Documentation
 
 The public documentation is in [`docs/public`](docs/public). It includes the
-first-run guide, the memory contract, graph and storage guides, the
-production-line bank, and [cmux host setup](docs/public/hosts/cmux.mdx).
+first-run guide, the memory contract, graph and storage guides, the process
+bank, [cmux host setup](docs/public/hosts/cmux.mdx), and
+[reviewing a diff in a host pane](docs/public/hosts/review.mdx).
 
 Validate the documentation from the workspace root:
 
