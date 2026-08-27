@@ -3,6 +3,21 @@ import { dirname, extname, join, relative, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '..');
+const ignoredDirectories = new Set(['dist', 'node_modules']);
+
+// Every way one module can name another @obversa package: a static import or
+// re-export (`from`), a side-effect or dynamic import (`import "x"`,
+// `import("x")`), and CommonJS `require("x")`. Returns the package names
+// (scope + name, subpaths dropped). Exported so the spec can pin each form.
+export function extractObversaImports(text) {
+  const pattern = /(?:\bfrom\s*|\bimport\s*\(?\s*|\brequire\s*\(\s*)['"](@obversa\/[^'"]+)['"]/g;
+  return [...text.matchAll(pattern)].map((match) => match[1].split('/').slice(0, 2).join('/'));
+}
+
+const isMain = process.argv[1] && fileURLToPath(import.meta.url) === resolve(process.argv[1]);
+if (isMain) await main();
+
+async function main() {
 const packageRules = new Map([
   ['@obversa/lines', {
     version: '1.0.0',
@@ -56,7 +71,6 @@ const scanFiles = [
   'pnpm-workspace.yaml',
   'tsconfig.base.json',
 ];
-const ignoredDirectories = new Set(['dist', 'node_modules']);
 const textExtensions = new Set([
   '.cjs',
   '.css',
@@ -258,8 +272,7 @@ for (const absolute of files) {
   // TypeScript, the surface packages are plain ES modules.
   if (path.startsWith('packages/') && /\.(?:ts|tsx|mjs|cjs|js)$/.test(path)) {
     const owner = path.split('/')[1];
-    const imports = [...text.matchAll(/(?:from\s*|import\s*)['"](@obversa\/[^'"]+)['"]/g)]
-      .map((match) => match[1].split('/').slice(0, 2).join('/'));
+    const imports = extractObversaImports(text);
     const ownerName = `@obversa/${owner}`;
     const ownerRule = packageRules.get(ownerName);
     const allowed = new Set([
@@ -285,6 +298,7 @@ if (failures.length) {
 }
 
 console.log(`Boundary check passed for ${packageRules.size} packages and public files.`);
+}
 
 async function exists(path) {
   try {
