@@ -21,6 +21,12 @@ const packageRules = new Map([
     dependencies: ['@obversa/memory'],
     peerDependencies: [],
   }],
+  // Private workspace packages get a rule too, so a sibling import inside
+  // them is caught the same way. Surfacer must never depend on the runtime or
+  // another package; source must never import surfacer (it takes the surface
+  // port by injection from the host composition root).
+  ['@obversa/surfacer', { version: '0.1.0', private: true, dependencies: [], peerDependencies: [] }],
+  ['@obversa/source', { version: '0.1.0', private: true, dependencies: [], peerDependencies: [] }],
 ]);
 const scanRoots = [
   '.changeset',
@@ -116,14 +122,28 @@ for (const path of ['.claude/', '.Codex/', '.superpowers/']) {
   if (!gitignore.includes(path)) failures.push(`.gitignore: must ignore ${path}`);
 }
 
+// Every workspace package must have a rule: a new package that nobody listed
+// would otherwise import whatever it liked without the scan noticing.
+for (const entry of await readdir(join(root, 'packages'), { withFileTypes: true })) {
+  if (!entry.isDirectory()) continue;
+  const manifestPath = join(root, 'packages', entry.name, 'package.json');
+  if (!(await exists(manifestPath))) continue;
+  const manifest = JSON.parse(await readFile(manifestPath, 'utf8'));
+  if (!packageRules.has(manifest.name))
+    failures.push(`packages/${entry.name}: ${manifest.name} has no boundary rule; add one to packageRules`);
+}
+
 for (const [name, rule] of packageRules) {
   const directory = join(root, 'packages', name.slice('@obversa/'.length));
   const manifest = JSON.parse(await readFile(join(directory, 'package.json'), 'utf8'));
   if (manifest.name !== name) failures.push(`${name}: manifest name is ${manifest.name}`);
   if (manifest.version !== rule.version)
     failures.push(`${name}: version must be ${rule.version}`);
-  if (manifest.publishConfig?.access !== 'public')
+  if (rule.private) {
+    if (manifest.private !== true) failures.push(`${name}: must be marked private`);
+  } else if (manifest.publishConfig?.access !== 'public') {
     failures.push(`${name}: publishConfig.access must be public`);
+  }
   if (manifest.bin !== undefined) failures.push(`${name}: D1 must not expose a command`);
 
   const internal = Object.entries({
@@ -234,7 +254,9 @@ for (const absolute of files) {
     if (rule.pattern.test(text)) failures.push(`${path}: contains ${rule.name}`);
   }
 
-  if (path.startsWith('packages/') && /\.(?:ts|tsx)$/.test(path)) {
+  // Import scan covers every source form in the workspace: the runtime is
+  // TypeScript, the surface packages are plain ES modules.
+  if (path.startsWith('packages/') && /\.(?:ts|tsx|mjs|cjs|js)$/.test(path)) {
     const owner = path.split('/')[1];
     const imports = [...text.matchAll(/(?:from\s*|import\s*)['"](@obversa\/[^'"]+)['"]/g)]
       .map((match) => match[1].split('/').slice(0, 2).join('/'));
@@ -262,7 +284,7 @@ if (failures.length) {
   process.exit(1);
 }
 
-console.log('Boundary check passed for four packages and public files.');
+console.log(`Boundary check passed for ${packageRules.size} packages and public files.`);
 
 async function exists(path) {
   try {
