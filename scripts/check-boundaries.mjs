@@ -5,13 +5,34 @@ import { fileURLToPath } from 'node:url';
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const ignoredDirectories = new Set(['dist', 'node_modules']);
 
-// Every way one module can name another @obversa package: a static import or
+// Every way one module can name another workspace package: a static import or
 // re-export (`from`), a side-effect or dynamic import (`import "x"`,
-// `import("x")`), and CommonJS `require("x")`. Returns the package names
-// (scope + name, subpaths dropped). Exported so the spec can pin each form.
-export function extractObversaImports(text) {
-  const pattern = /(?:\bfrom\s*|\bimport\s*\(?\s*|\brequire\s*\(\s*)['"](@obversa\/[^'"]+)['"]/g;
-  return [...text.matchAll(pattern)].map((match) => match[1].split('/').slice(0, 2).join('/'));
+// `import("x")`), and CommonJS `require("x")`, by package name or by a
+// relative path that lands inside another package directory. Comments are
+// stripped first, so `import/*x*/("@obversa/y")` is seen. Returns package
+// names (scope + name, subpaths dropped). Exported so the spec can pin each
+// form. `file` is the importing file's absolute path and `root` the repository
+// root; without them only package-name specifiers are reported.
+export function extractObversaImports(text, { file, root: repoRoot } = {}) {
+  const code = text.replace(/\/\*[\s\S]*?\*\//g, ' ').replace(/(^|[^:\\])\/\/[^\n]*/g, '$1');
+  const pattern = /(?:\bfrom\s*|\bimport\s*\(?\s*|\brequire\s*\(\s*)['"]([^'"\n]+)['"]/g;
+  const packageDir = (absolute) => /^packages\/([^/]+)\//.exec(relative(repoRoot, absolute).split('\\').join('/'))?.[1];
+  const owner = file && repoRoot ? packageDir(file) : undefined;
+  const found = [];
+  for (const match of code.matchAll(pattern)) {
+    const specifier = match[1];
+    if (specifier.startsWith('@obversa/')) {
+      found.push(specifier.split('/').slice(0, 2).join('/'));
+    } else if (file && repoRoot && /^\.\.?\//.test(specifier)) {
+      // A relative path that resolves into another packages/<dir>/ names that
+      // package; a path inside the importing package is not a crossing.
+      // Package directory names equal the unscoped package names today; the
+      // plugin split maps directories through their manifests.
+      const dir = packageDir(resolve(dirname(file), specifier));
+      if (dir && dir !== owner) found.push(`@obversa/${dir}`);
+    }
+  }
+  return found;
 }
 
 const isMain = process.argv[1] && fileURLToPath(import.meta.url) === resolve(process.argv[1]);
@@ -272,7 +293,7 @@ for (const absolute of files) {
   // TypeScript, the surface packages are plain ES modules.
   if (path.startsWith('packages/') && /\.(?:ts|tsx|mjs|cjs|js)$/.test(path)) {
     const owner = path.split('/')[1];
-    const imports = extractObversaImports(text);
+    const imports = extractObversaImports(text, { file: absolute, root });
     const ownerName = `@obversa/${owner}`;
     const ownerRule = packageRules.get(ownerName);
     const allowed = new Set([
