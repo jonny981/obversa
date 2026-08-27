@@ -102,9 +102,15 @@ test("readNewFileText never reads outside the repository and bounds the size", a
     assert.equal(await readNewFileText({ path: "../" + path.basename(outside) + "/secret.txt", mode: "worktree", cwd: dir }), null);
     assert.equal(await readNewFileText({ path: path.join(outside, "secret.txt"), mode: "worktree", cwd: dir }), null);
     assert.equal(await readNewFileText({ path: ".", mode: "worktree", cwd: dir }), null);
-    // A symlink inside the repository that points outside is not followed.
+    // A symlink inside the repository that points outside is not followed —
+    // whether it is the file itself or a directory on the way to it.
     symlinkSync(path.join(outside, "secret.txt"), path.join(dir, "link.txt"));
     assert.equal(await readNewFileText({ path: "link.txt", mode: "worktree", cwd: dir }), null);
+    symlinkSync(outside, path.join(dir, "linked-dir"));
+    assert.equal(await readNewFileText({ path: "linked-dir/secret.txt", mode: "worktree", cwd: dir }), null);
+    // A symlink that stays inside the repository is fine.
+    symlinkSync(path.join(dir, "ok.js"), path.join(dir, "ok-link.js"));
+    assert.equal(await readNewFileText({ path: "ok-link.js", mode: "worktree", cwd: dir }), "const ok = 1;\n");
     // A directory is not a file.
     mkdirSync(path.join(dir, "sub"));
     assert.equal(await readNewFileText({ path: "sub", mode: "worktree", cwd: dir }), null);
@@ -115,6 +121,16 @@ test("readNewFileText never reads outside the repository and bounds the size", a
     assert.equal(await readNewFileText({ path: "big.js", mode: "staged", cwd: dir }), null);
     // A normal in-repo file still reads.
     assert.equal(await readNewFileText({ path: "ok.js", mode: "worktree", cwd: dir }), "const ok = 1;\n");
+
+    // Staged mode applies the same path rules, and the index entry must be a
+    // regular file: a symlink entry (mode 120000) and a tree are refused.
+    writeFileSync(path.join(dir, "sub", "inner.js"), "const inner = 2;\n");
+    git(dir, "add", "ok.js", "link.txt", "sub/inner.js");
+    assert.equal(await readNewFileText({ path: "../" + path.basename(outside) + "/secret.txt", mode: "staged", cwd: dir }), null);
+    assert.equal(await readNewFileText({ path: path.join(outside, "secret.txt"), mode: "staged", cwd: dir }), null);
+    assert.equal(await readNewFileText({ path: "link.txt", mode: "staged", cwd: dir }), null);
+    assert.equal(await readNewFileText({ path: "sub", mode: "staged", cwd: dir }), null);
+    assert.equal(await readNewFileText({ path: "sub/inner.js", mode: "staged", cwd: dir }), "const inner = 2;\n");
   } finally {
     rmSync(dir, { recursive: true, force: true });
     rmSync(outside, { recursive: true, force: true });

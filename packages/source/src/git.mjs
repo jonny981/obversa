@@ -1,6 +1,7 @@
 import { execFile } from "node:child_process";
-import { lstat, readFile } from "node:fs/promises";
-import { resolve, sep } from "node:path";
+import { constants as fsConstants } from "node:fs";
+import { open, realpath } from "node:fs/promises";
+import { isAbsolute, resolve, sep } from "node:path";
 import { promisify } from "node:util";
 
 const run = promisify(execFile);
@@ -9,6 +10,38 @@ const run = promisify(execFile);
 // and the highlighter's parse of that text; a larger file gets no expandable
 // context (the diff hunks still render).
 export const MAX_FILE_BYTES = 4 * 1024 * 1024;
+
+// A diff path is only ever read when it is relative and never climbs. Git's
+// own diffs satisfy this; the check exists for diff text supplied by a caller.
+function isSafeRelativePath(filePath) {
+  if (filePath.includes("\0") || isAbsolute(filePath) || /^[\\/]/.test(filePath)) return false;
+  return filePath.split(/[\\/]+/).every((segment) => segment !== "..");
+}
+
+// Read one regular file through a single handle, so the file that is checked
+// is the file that is read (no stat-then-read window), with the final
+// component refused if it is a symlink and the read bounded at MAX_FILE_BYTES.
+async function readBoundedFile(target) {
+  let handle;
+  try {
+    handle = await open(target, fsConstants.O_RDONLY | (fsConstants.O_NOFOLLOW ?? 0));
+    const info = await handle.stat();
+    if (!info.isFile() || info.size > MAX_FILE_BYTES) return null;
+    const buffer = Buffer.alloc(MAX_FILE_BYTES + 1);
+    let filled = 0;
+    while (filled < buffer.length) {
+      const { bytesRead } = await handle.read(buffer, filled, buffer.length - filled, filled);
+      if (bytesRead === 0) break;
+      filled += bytesRead;
+    }
+    if (filled > MAX_FILE_BYTES) return null;
+    return buffer.subarray(0, filled).toString("utf8");
+  } catch {
+    return null;
+  } finally {
+    await handle?.close();
+  }
+}
 
 // A ref range is one revision token: a single ref, `A..B`, or `A...B`. It is
 // passed to git as one argv element (no shell is involved), so the only real
@@ -79,31 +112,41 @@ export async function computeDiff({ mode = "worktree", range, cwd = process.cwd(
  * - staged: the index version, via `git show :path`.
  *
  * The path comes from the diff, and a diff can be supplied by a caller rather
- * than produced by git, so it is treated as untrusted: a worktree read must
- * resolve inside `cwd`, must be a regular file (a symlink could point outside
- * the repository), and must not exceed MAX_FILE_BYTES. Anything else yields
- * null — the diff still renders, only the expandable context is withheld.
+ * than produced by git, so it is treated as untrusted. Both modes refuse an
+ * absolute or climbing path. A worktree read resolves every symlink on the
+ * way (realpath) and requires the real file to sit inside the real repository
+ * root — a symlinked directory or a symlinked file that points outside is
+ * refused — then reads through one handle that refuses a symlink as the final
+ * component and stops at MAX_FILE_BYTES. A staged read requires the index
+ * entry to be a regular file (a symlink entry would print its link target, a
+ * tree cannot be shown) and bounds `git show`'s output the same way. Anything
+ * refused yields null — the diff still renders, only the expandable context is
+ * withheld.
  */
 export async function readNewFileText({ path: filePath, mode = "worktree", cwd = process.cwd() } = {}) {
   if (typeof filePath !== "string" || filePath.length === 0 || filePath === "/dev/null") return null;
+  if (!isSafeRelativePath(filePath)) return null;
   if (mode === "worktree") {
-    const root = resolve(cwd);
-    const target = resolve(root, filePath);
-    if (target === root || !target.startsWith(root + sep)) return null;
+    let realRoot;
+    let real;
     try {
-      const info = await lstat(target);
-      if (!info.isFile() || info.size > MAX_FILE_BYTES) return null;
-      return await readFile(target, "utf8");
+      realRoot = await realpath(cwd);
+      real = await realpath(resolve(realRoot, filePath));
     } catch {
       return null;
     }
+    if (!real.startsWith(realRoot + sep)) return null;
+    return readBoundedFile(real);
   }
   if (mode === "staged") {
     try {
-      // `:path` is the index blob; execFile passes it as one argv element and it
-      // begins with ':', so a leading dash in the path can't read as an option.
-      // The index cannot hold a path outside the repository, so containment is
-      // git's; the size bound is ours.
+      // The index entry must be a regular file: mode 100644 or 100755. `--`
+      // guards a leading dash; the pathspec is one argv element.
+      const { stdout: entry } = await run("git", ["ls-files", "--stage", "--", filePath], { cwd, windowsHide: true });
+      const indexMode = entry.split(/\s+/)[0];
+      if (!/^100(?:644|755)$/.test(indexMode)) return null;
+      // `:path` is the index blob. execFile's maxBuffer rejects output past the
+      // bound, so an oversized blob fails here and yields null.
       const { stdout } = await run("git", ["--no-pager", "show", `:${filePath}`], {
         cwd,
         maxBuffer: MAX_FILE_BYTES + 1,
