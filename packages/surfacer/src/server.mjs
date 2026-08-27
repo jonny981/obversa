@@ -43,6 +43,12 @@ export async function startSurface({
     if (typeof fileName !== "string" || fileName.includes("/") || fileName.includes("\\") || fileName.startsWith(".")) {
       throw new TypeError(`Static file names must be plain names inside the assets directory: ${route}`);
     }
+    // Static files are served before the bearer check, so nothing under /api/
+    // may ever be static: the promise that every API request needs the token
+    // must not depend on how an app fills its route map.
+    if (route === "/api" || route.startsWith("/api/")) {
+      throw new TypeError(`Static routes must not live under /api/: ${route}`);
+    }
   }
 
   let terminalState = "pending";
@@ -97,12 +103,16 @@ export async function startSurface({
         return;
       }
       const requestUrl = new URL(request.url || "/", `http://${expectedHost}`);
-      const staticFile = staticFiles.get(requestUrl.pathname);
+      const isApi = requestUrl.pathname.startsWith("/api/");
+      // The /api/ prefix is decided first: an API path never resolves to a
+      // static file, whatever the route map says (the map is also refused any
+      // /api/ key at startup).
+      const staticFile = isApi ? undefined : staticFiles.get(requestUrl.pathname);
       if (request.method === "GET" && staticFile) {
         await sendStatic(response, assets.directory, staticFile);
         return;
       }
-      if (!requestUrl.pathname.startsWith("/api/")) {
+      if (!isApi) {
         sendJson(response, 404, { error: "Not found" });
         return;
       }
