@@ -22,7 +22,9 @@ function el(tag, className, text) {
 // with clickable identifiers overlaid from the line's go-to-source hits. Every
 // value still goes in through textContent, so nothing in a diff line can execute
 // or break out. Falls back to plain text when a line carries no tokens.
-function codeEl(line) {
+// `scope` is the file section the line belongs to: a definition is looked up
+// inside it, never across files that happen to share a line number.
+function codeEl(line, scope) {
   const code = el("code", "code");
   const tokens = line.tokens;
   if (!Array.isArray(tokens) || tokens.length === 0) {
@@ -38,7 +40,7 @@ function codeEl(line) {
       span.title = seg.hit.action === "jump"
         ? `Go to definition of ${seg.hit.name} (line ${seg.hit.def.line})`
         : `${seg.hit.name} is defined at line ${seg.hit.def.line}, not shown here`;
-      const activate = () => activateNav(seg.hit);
+      const activate = () => activateNav(seg.hit, scope);
       span.addEventListener("click", activate);
       span.addEventListener("keydown", (event) => {
         if (event.key === "Enter" || event.key === " ") { event.preventDefault(); activate(); }
@@ -55,10 +57,11 @@ function codeEl(line) {
 
 // Jump to (and briefly flash) the row that defines the clicked identifier, when
 // that definition line is shown in the diff. An "indicate" hit has no on-screen
-// target; its title tooltip already names the definition line.
-function activateNav(hit) {
-  if (hit.action !== "jump" || !hit.def) return;
-  const row = document.querySelector(`.row[data-new-line="${hit.def.line}"]`);
+// target; its title tooltip already names the definition line. The lookup is
+// scoped to the identifier's own file section: line numbers repeat across files.
+function activateNav(hit, scope) {
+  if (hit.action !== "jump" || !hit.def || !scope) return;
+  const row = scope.querySelector(`.row[data-new-line="${hit.def.line}"]`);
   if (!row) return;
   row.scrollIntoView({ block: "center", behavior: reduceMotion() ? "auto" : "smooth" });
   row.classList.remove("flash");
@@ -338,7 +341,7 @@ async function main() {
           el("span", "gutter old", line.oldNumber == null ? "" : String(line.oldNumber)),
           el("span", "gutter new", line.newNumber == null ? "" : String(line.newNumber)),
           el("span", "sign", line.type === "add" ? "+" : line.type === "del" ? "-" : " "),
-          codeEl(line),
+          codeEl(line, section),
         );
         const addButton = el("button", "add-comment", "+");
         addButton.type = "button";

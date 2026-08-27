@@ -1,9 +1,14 @@
 import { execFile } from "node:child_process";
-import { readFile } from "node:fs/promises";
-import { join } from "node:path";
+import { lstat, readFile } from "node:fs/promises";
+import { resolve, sep } from "node:path";
 import { promisify } from "node:util";
 
 const run = promisify(execFile);
+
+// Upper bound on one file read for full-file context. It bounds both the read
+// and the highlighter's parse of that text; a larger file gets no expandable
+// context (the diff hunks still render).
+export const MAX_FILE_BYTES = 4 * 1024 * 1024;
 
 // A ref range is one revision token: a single ref, `A..B`, or `A...B`. It is
 // passed to git as one argv element (no shell is involved), so the only real
@@ -72,12 +77,23 @@ export async function computeDiff({ mode = "worktree", range, cwd = process.cwd(
  * range mode (a range's new side is not a single readable object in v1).
  * - worktree: the working-tree file on disk.
  * - staged: the index version, via `git show :path`.
+ *
+ * The path comes from the diff, and a diff can be supplied by a caller rather
+ * than produced by git, so it is treated as untrusted: a worktree read must
+ * resolve inside `cwd`, must be a regular file (a symlink could point outside
+ * the repository), and must not exceed MAX_FILE_BYTES. Anything else yields
+ * null — the diff still renders, only the expandable context is withheld.
  */
 export async function readNewFileText({ path: filePath, mode = "worktree", cwd = process.cwd() } = {}) {
   if (typeof filePath !== "string" || filePath.length === 0 || filePath === "/dev/null") return null;
   if (mode === "worktree") {
+    const root = resolve(cwd);
+    const target = resolve(root, filePath);
+    if (target === root || !target.startsWith(root + sep)) return null;
     try {
-      return await readFile(join(cwd, filePath), "utf8");
+      const info = await lstat(target);
+      if (!info.isFile() || info.size > MAX_FILE_BYTES) return null;
+      return await readFile(target, "utf8");
     } catch {
       return null;
     }
@@ -86,12 +102,14 @@ export async function readNewFileText({ path: filePath, mode = "worktree", cwd =
     try {
       // `:path` is the index blob; execFile passes it as one argv element and it
       // begins with ':', so a leading dash in the path can't read as an option.
+      // The index cannot hold a path outside the repository, so containment is
+      // git's; the size bound is ours.
       const { stdout } = await run("git", ["--no-pager", "show", `:${filePath}`], {
         cwd,
-        maxBuffer: 64 * 1024 * 1024,
+        maxBuffer: MAX_FILE_BYTES + 1,
         windowsHide: true,
       });
-      return stdout;
+      return Buffer.byteLength(stdout, "utf8") > MAX_FILE_BYTES ? null : stdout;
     } catch {
       return null;
     }

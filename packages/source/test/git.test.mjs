@@ -1,11 +1,11 @@
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import test from "node:test";
 
-import { computeDiff, diffArgs, readNewFileText, listTrackedFiles } from "../src/git.mjs";
+import { computeDiff, diffArgs, readNewFileText, listTrackedFiles, MAX_FILE_BYTES } from "../src/git.mjs";
 
 function git(cwd, ...args) {
   return execFileSync("git", args, { cwd, encoding: "utf8" });
@@ -88,6 +88,36 @@ test("readNewFileText reads worktree and staged content, and returns null when u
     assert.equal(await readNewFileText({ path: "code.js", mode: "range", cwd: dir }), null);
   } finally {
     rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("readNewFileText never reads outside the repository and bounds the size", async () => {
+  const dir = makeRepo();
+  const outside = mkdtempSync(path.join(os.tmpdir(), "source-outside-"));
+  try {
+    writeFileSync(path.join(outside, "secret.txt"), "outside\n");
+    writeFileSync(path.join(dir, "ok.js"), "const ok = 1;\n");
+    // A diff can be caller-supplied, so its paths are untrusted: parent
+    // traversal and absolute paths resolve outside cwd and yield null.
+    assert.equal(await readNewFileText({ path: "../" + path.basename(outside) + "/secret.txt", mode: "worktree", cwd: dir }), null);
+    assert.equal(await readNewFileText({ path: path.join(outside, "secret.txt"), mode: "worktree", cwd: dir }), null);
+    assert.equal(await readNewFileText({ path: ".", mode: "worktree", cwd: dir }), null);
+    // A symlink inside the repository that points outside is not followed.
+    symlinkSync(path.join(outside, "secret.txt"), path.join(dir, "link.txt"));
+    assert.equal(await readNewFileText({ path: "link.txt", mode: "worktree", cwd: dir }), null);
+    // A directory is not a file.
+    mkdirSync(path.join(dir, "sub"));
+    assert.equal(await readNewFileText({ path: "sub", mode: "worktree", cwd: dir }), null);
+    // An oversized file gets no context; the bound also caps the highlighter's parse.
+    writeFileSync(path.join(dir, "big.js"), Buffer.alloc(MAX_FILE_BYTES + 1, 0x20));
+    assert.equal(await readNewFileText({ path: "big.js", mode: "worktree", cwd: dir }), null);
+    git(dir, "add", "big.js");
+    assert.equal(await readNewFileText({ path: "big.js", mode: "staged", cwd: dir }), null);
+    // A normal in-repo file still reads.
+    assert.equal(await readNewFileText({ path: "ok.js", mode: "worktree", cwd: dir }), "const ok = 1;\n");
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+    rmSync(outside, { recursive: true, force: true });
   }
 });
 
