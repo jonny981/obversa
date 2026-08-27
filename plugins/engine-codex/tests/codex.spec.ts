@@ -8,12 +8,8 @@ import {
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
-import { agentJob, costReport, run } from '../src/api.ts';
-import { Stats } from '../src/core/stats.ts';
-import { modelFor } from '../src/engines/engine.ts';
-import { buildCodexArgs, CodexEngine } from '../src/engines/codex.ts';
-import { preflightEngine } from '../src/engines/preflight.ts';
-import { finalResultText } from '../src/runtime/result-parts.ts';
+import { classifyEngineFailure, finalResultText } from '@obversa/engine';
+import { buildCodexArgs, CodexEngine } from '../src/index.ts';
 
 describe('buildCodexArgs', () => {
   it('defaults to a read-only ephemeral exec and writes the last message', () => {
@@ -50,45 +46,27 @@ describe('buildCodexArgs', () => {
     expect(args).not.toContain('be careful\n\n---\n\ngo');
   });
 
-  it('does not inherit another engine default model', () => {
-    const leaf = buildCodexArgs(
+  it('uses the package default model when the request omits one', () => {
+    const args = buildCodexArgs(
       { prompt: 'review with codex' },
-      { defaultEngine: 'agent-sdk', defaultModel: 'claude-sonnet-4-5' },
+      { defaultModel: 'gpt-5.4' },
       '/tmp/out.txt',
     );
-    expect(leaf).not.toContain('-m');
-
-    const root = buildCodexArgs(
-      { prompt: 'review with codex' },
-      { defaultEngine: 'codex', defaultModel: 'gpt-5.4' },
-      '/tmp/out.txt',
-    );
-    expect(root[root.indexOf('-m') + 1]).toBe('gpt-5.4');
+    expect(args[args.indexOf('-m') + 1]).toBe('gpt-5.4');
   });
 
-  it('shares default models across Claude engines but not into Codex', () => {
-    expect(
-      modelFor(
-        { prompt: 'judge' },
-        { defaultEngine: 'agent-sdk', defaultModel: 'claude-opus-4-5' },
-        'anthropic-api',
-      ),
-    ).toBe('claude-opus-4-5');
-    expect(
-      modelFor(
-        { prompt: 'judge' },
-        { defaultEngine: 'agent-sdk', defaultModel: 'claude-opus-4-5' },
-        'codex',
-      ),
-    ).toBeUndefined();
-    expect(
-      modelFor(
-        { prompt: 'judge' },
-        { defaultEngine: 'codex', defaultModel: 'gpt-5.4' },
-        'anthropic-api',
-      ),
-    ).toBeUndefined();
-  });
+  it.each(['default', 'acceptEdits', 'plan', 'dontAsk', 'auto'] as const)(
+    'keeps %s permission mode read-only',
+    (permissionMode) => {
+      const args = buildCodexArgs(
+        { prompt: 'review' },
+        { permissionMode },
+        '/tmp/out.txt',
+      );
+      expect(args).toContain('read-only');
+      expect(args).not.toContain('--dangerously-bypass-approvals-and-sandbox');
+    },
+  );
 
   it('sends the composed prompt through stdin to the codex subprocess', async () => {
     const dir = mkdtempSync(join(tmpdir(), 'lines-codex-stub-'));
@@ -151,21 +129,9 @@ process.stdout.write(JSON.stringify({
     chmodSync(bin, 0o755);
 
     const usageEvents: Array<{ type: string; usage?: unknown; model?: string }> = [];
-    const stats = new Stats();
     const result = await new CodexEngine({ cliBinary: bin }).run(
       { prompt: 'do the work' },
-      (event) => {
-        usageEvents.push(event);
-        if (event.type === 'usage') {
-          stats.record({
-            kind: 'engine:usage',
-            ts: 0,
-            path: [],
-            model: event.model,
-            usage: event.usage,
-          });
-        }
-      },
+      (event) => usageEvents.push(event),
       new AbortController().signal,
     );
 
@@ -188,31 +154,6 @@ process.stdout.write(JSON.stringify({
       },
     ]);
 
-    const snapshot = stats.snapshot();
-    expect(snapshot.models).toEqual([
-      {
-        model: 'codex',
-        calls: 1,
-        reportedCalls: 1,
-        unknownUsageCalls: 0,
-        inputTokens: 42,
-        outputTokens: 7,
-        cacheReadInputTokens: 30,
-      },
-    ]);
-    expect(
-      costReport(
-        snapshot,
-        { codex: { inputPerMTokUsd: 1, outputPerMTokUsd: 2 } },
-        'codex',
-      ),
-    ).toMatchObject({
-      spentUsd: undefined,
-      baselineUsd: undefined,
-      savedUsd: undefined,
-      unpricedModels: ['codex'],
-      models: [{ model: 'codex', usd: undefined }],
-    });
   });
 
   it('preserves a completed result when the subprocess fails during teardown', async () => {
@@ -271,7 +212,7 @@ process.exit(1);
     ).rejects.toMatchObject({ kind: 'unknown' });
   });
 
-  it('retains a trailing Codex configuration diagnostic for preflight', async () => {
+  it('retains a trailing redacted Codex configuration diagnostic', async () => {
     const dir = mkdtempSync(join(tmpdir(), 'lines-codex-stub-'));
     const bin = join(dir, 'codex-stub.mjs');
     const secret = 'sk-proj-codex-diagnostic-secret';
@@ -285,14 +226,24 @@ process.exit(1);
     );
     chmodSync(bin, 0o755);
 
-    const result = await preflightEngine(new CodexEngine({ cliBinary: bin }));
+    let error: unknown;
+    try {
+      await new CodexEngine({ cliBinary: bin }).run(
+        { prompt: 'check configuration', env: { OPENAI_API_KEY: secret } },
+        () => {},
+        new AbortController().signal,
+      );
+    } catch (caught) {
+      error = caught;
+    }
 
-    expect(result.ok).toBe(false);
-    expect(result.failure).toBe('invalid-config');
-    expect(result.detail).toContain("Invalid value: 'max'");
-    expect(result.detail).toContain('Supported values');
-    expect(result.detail).toContain('[redacted]');
-    expect(result.detail).not.toContain(secret);
+    expect(classifyEngineFailure(error)).toBe('invalid-config');
+    expect(error).toMatchObject({
+      message: expect.stringContaining("Invalid value: 'max'"),
+    });
+    expect((error as Error).message).toContain('Supported values');
+    expect((error as Error).message).toContain('[redacted]');
+    expect((error as Error).message).not.toContain(secret);
   });
 
 });

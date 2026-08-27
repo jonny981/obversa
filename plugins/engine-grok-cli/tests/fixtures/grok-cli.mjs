@@ -15,11 +15,11 @@ function emit(message) {
 
 const promptFile = value('--prompt-file');
 const prompt = promptFile ? readFileSync(promptFile, 'utf8') : '';
-const scenario = process.env.LINES_ENGINE_CONFORMANCE_SCENARIO
-  ?? process.env.LINES_TEST_GROK_SCENARIO
+const scenario = process.env.OBVERSA_ENGINE_CONFORMANCE_SCENARIO
+  ?? process.env.OBVERSA_TEST_GROK_SCENARIO
   ?? 'ordered-parts';
 const requestedModel = value('--model') ?? null;
-const effectiveModel = process.env.LINES_TEST_GROK_EFFECTIVE_MODEL
+const effectiveModel = process.env.OBVERSA_TEST_GROK_EFFECTIVE_MODEL
   ?? 'grok-4-fixture-effective';
 const structured = scenario === 'structured'
   || scenario === 'structured-result'
@@ -29,8 +29,8 @@ const finalText = scenario === 'late-final'
   ? 'Quota advice belongs in the answer.'
   : 'answer';
 
-if (process.env.LINES_TEST_GROK_RECORD) {
-  writeFileSync(process.env.LINES_TEST_GROK_RECORD, JSON.stringify({
+if (process.env.OBVERSA_TEST_GROK_RECORD) {
+  writeFileSync(process.env.OBVERSA_TEST_GROK_RECORD, JSON.stringify({
     args,
     cwd: process.cwd(),
     promptFile,
@@ -50,9 +50,9 @@ if (process.env.LINES_TEST_GROK_RECORD) {
         && existsSync(`${process.env.GROK_HOME}/auth.json`)
         ? readFileSync(`${process.env.GROK_HOME}/auth.json`, 'utf8')
         : null,
-      selected: process.env.LINES_TEST_GROK_SELECTED ?? null,
-      requestSecret: process.env.LINES_TEST_GROK_REQUEST_SECRET ?? null,
-      parentSecret: process.env.LINES_POISONED_PARENT_SECRET ?? null,
+      selected: process.env.OBVERSA_TEST_GROK_SELECTED ?? null,
+      requestSecret: process.env.OBVERSA_TEST_GROK_REQUEST_SECRET ?? null,
+      parentSecret: process.env.OBVERSA_POISONED_PARENT_SECRET ?? null,
       subagents: process.env.GROK_SUBAGENTS ?? null,
       poisonedHookVisible: existsSync(
         `${process.env.GROK_HOME ?? ''}/hooks/poison.json`,
@@ -242,8 +242,8 @@ if (scenario === 'cancellation') {
   });
 } else if (scenario === 'extra-capability') {
   await new Promise((resolve) => setTimeout(resolve, 300));
-  if (process.env.LINES_TEST_GROK_EFFECT) {
-    writeFileSync(process.env.LINES_TEST_GROK_EFFECT, 'ran');
+  if (process.env.OBVERSA_TEST_GROK_EFFECT) {
+    writeFileSync(process.env.OBVERSA_TEST_GROK_EFFECT, 'ran');
   }
 } else {
   if (scenario !== 'late-final') {

@@ -15,15 +15,18 @@ import { fileURLToPath } from 'node:url';
 
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
-import type { AgentRequest, EngineStreamEvent } from '../src/engines/engine.ts';
-import { runEngineConformance } from '../src/engines/conformance.ts';
+import {
+  canonicalJson,
+  digestJson,
+  type AgentRequest,
+  type EngineStreamEvent,
+} from '@obversa/engine';
+import { runEngineConformance } from '@obversa/engine/testing';
 import {
   buildGrokArgs,
   GrokCliEngine,
   type GrokCliEngineOptions,
-} from '../src/engines/grok-cli.ts';
-import { canonicalJson } from '../src/graph/value.ts';
-import { createAttemptIdentity } from '../src/runtime/attempt.ts';
+} from '../src/index.ts';
 
 const roots: string[] = [];
 const fixtureSource = fileURLToPath(
@@ -64,7 +67,8 @@ function options(bin = executable()): GrokCliEngineOptions {
 }
 
 function request(overrides: Partial<AgentRequest> = {}): AgentRequest {
-  const identity = createAttemptIdentity({
+  const attemptId = digestJson({
+    schemaVersion: 1,
     namespace: 'tenant-a',
     streamId: 'run-1',
     nodeId: 'reviewer',
@@ -86,7 +90,7 @@ function request(overrides: Partial<AgentRequest> = {}): AgentRequest {
     attempt: {
       leaf: true,
       runId: 'run-1',
-      attemptId: identity.attemptId,
+      attemptId,
       leafId: 'reviewer',
       path: ['review/main'],
       label: 'reviewer',
@@ -111,8 +115,8 @@ describe('Grok CLI adapter', () => {
     const result = await new GrokCliEngine({
       ...options(),
       environment: {
-        LINES_TEST_GROK_RECORD: recordPath,
-        LINES_TEST_GROK_SCENARIO: 'invocation',
+        OBVERSA_TEST_GROK_RECORD: recordPath,
+        OBVERSA_TEST_GROK_SCENARIO: 'invocation',
       },
     }).run(
       input,
@@ -260,8 +264,8 @@ describe('Grok CLI adapter', () => {
     const result = await new GrokCliEngine({
       ...options(),
       environment: {
-        LINES_TEST_GROK_RECORD: recordPath,
-        LINES_TEST_GROK_SCENARIO: 'structured',
+        OBVERSA_TEST_GROK_RECORD: recordPath,
+        OBVERSA_TEST_GROK_SCENARIO: 'structured',
       },
     }).run(
       request({
@@ -288,8 +292,8 @@ describe('Grok CLI adapter', () => {
     const result = await new GrokCliEngine({
       ...options(),
       environment: {
-        LINES_TEST_GROK_RECORD: recordPath,
-        LINES_TEST_GROK_SCENARIO: 'structured-subagent',
+        OBVERSA_TEST_GROK_RECORD: recordPath,
+        OBVERSA_TEST_GROK_SCENARIO: 'structured-subagent',
       },
     }).run(
       request({
@@ -366,8 +370,8 @@ describe('Grok CLI adapter', () => {
     await expect(new GrokCliEngine({
       ...options(),
       environment: {
-        LINES_TEST_GROK_SCENARIO: 'extra-capability',
-        LINES_TEST_GROK_EFFECT: effectPath,
+        OBVERSA_TEST_GROK_SCENARIO: 'extra-capability',
+        OBVERSA_TEST_GROK_EFFECT: effectPath,
       },
     }).run(
       request(),
@@ -385,13 +389,13 @@ describe('Grok CLI adapter', () => {
     const recordPath = join(temporaryDirectory('lines-grok-record-'), 'call.json');
     vi.stubEnv('HOME', parentHome);
     vi.stubEnv('GROK_HOME', join(parentHome, '.grok'));
-    vi.stubEnv('LINES_POISONED_PARENT_SECRET', 'must-not-cross');
+    vi.stubEnv('OBVERSA_POISONED_PARENT_SECRET', 'must-not-cross');
 
     await new GrokCliEngine({
       ...options(),
       environment: {
-          LINES_TEST_GROK_RECORD: recordPath,
-          LINES_TEST_GROK_SCENARIO: 'invocation',
+          OBVERSA_TEST_GROK_RECORD: recordPath,
+          OBVERSA_TEST_GROK_SCENARIO: 'invocation',
       },
     }).run(
       request(),
@@ -415,14 +419,14 @@ describe('Grok CLI adapter', () => {
 
   it('passes only environment values selected when the engine is created', async () => {
     const recordPath = join(temporaryDirectory('lines-grok-record-'), 'call.json');
-    vi.stubEnv('LINES_POISONED_PARENT_SECRET', 'must-not-cross');
+    vi.stubEnv('OBVERSA_POISONED_PARENT_SECRET', 'must-not-cross');
 
     await new GrokCliEngine({
       ...options(),
       environment: {
-        LINES_TEST_GROK_RECORD: recordPath,
-        LINES_TEST_GROK_SCENARIO: 'invocation',
-        LINES_TEST_GROK_SELECTED: 'selected-by-host',
+        OBVERSA_TEST_GROK_RECORD: recordPath,
+        OBVERSA_TEST_GROK_SCENARIO: 'invocation',
+        OBVERSA_TEST_GROK_SELECTED: 'selected-by-host',
       },
     }).run(
       request(),
@@ -446,7 +450,7 @@ describe('Grok CLI adapter', () => {
 
   it('rejects per-request environment injection before spawn', async () => {
     await expect(new GrokCliEngine(options()).run(
-      request({ env: { LINES_TEST_GROK_REQUEST_SECRET: 'must-not-cross' } }),
+      request({ env: { OBVERSA_TEST_GROK_REQUEST_SECRET: 'must-not-cross' } }),
       () => {},
       new AbortController().signal,
     )).rejects.toThrow('constructor environment');
@@ -462,8 +466,8 @@ describe('Grok CLI adapter', () => {
       ...options(),
       authFile,
       environment: {
-        LINES_TEST_GROK_RECORD: recordPath,
-        LINES_TEST_GROK_SCENARIO: 'invocation',
+        OBVERSA_TEST_GROK_RECORD: recordPath,
+        OBVERSA_TEST_GROK_SCENARIO: 'invocation',
       },
     });
     writeFileSync(authFile, '{"fixture":"changed-after-selection"}');
@@ -492,7 +496,7 @@ describe('Grok CLI adapter', () => {
       await new GrokCliEngine({
         ...options(),
         authFile,
-        environment: { LINES_TEST_GROK_SCENARIO: 'auth-echo' },
+        environment: { OBVERSA_TEST_GROK_SCENARIO: 'auth-echo' },
       }).run(request(), () => {}, new AbortController().signal);
     } catch (caught) {
       error = caught;
@@ -514,7 +518,7 @@ describe('Grok CLI adapter', () => {
         ...options(),
         authFile,
         environment: {
-          LINES_TEST_GROK_SCENARIO: 'structured-error-auth-echo',
+          OBVERSA_TEST_GROK_SCENARIO: 'structured-error-auth-echo',
         },
       }).run(
         request({ jsonSchema: { type: 'object' } }),
@@ -540,8 +544,8 @@ describe('Grok CLI adapter', () => {
     await expect(new GrokCliEngine({
       ...options(),
       environment: {
-        LINES_TEST_GROK_RECORD: recordPath,
-        LINES_TEST_GROK_SCENARIO: 'invocation',
+        OBVERSA_TEST_GROK_RECORD: recordPath,
+        OBVERSA_TEST_GROK_SCENARIO: 'invocation',
       },
     }).run(
       request({
@@ -562,8 +566,8 @@ describe('Grok CLI adapter', () => {
     await expect(new GrokCliEngine({
       ...options(),
       environment: {
-        LINES_TEST_GROK_RECORD: recordPath,
-        LINES_TEST_GROK_SCENARIO: 'invocation',
+        OBVERSA_TEST_GROK_RECORD: recordPath,
+        OBVERSA_TEST_GROK_SCENARIO: 'invocation',
       },
     }).run(
       request({ cwd }),
@@ -588,8 +592,8 @@ describe('Grok CLI adapter', () => {
     await expect(new GrokCliEngine({
       ...options(),
       environment: {
-        LINES_TEST_GROK_RECORD: recordPath,
-        LINES_TEST_GROK_SCENARIO: 'invocation',
+        OBVERSA_TEST_GROK_RECORD: recordPath,
+        OBVERSA_TEST_GROK_SCENARIO: 'invocation',
       },
     }).run(
       request({ cwd }),
@@ -625,7 +629,7 @@ describe('Grok CLI adapter', () => {
   it('does not classify words in a completed answer as transport failures', async () => {
     const result = await new GrokCliEngine({
       ...options(),
-      environment: { LINES_TEST_GROK_SCENARIO: 'late-final' },
+      environment: { OBVERSA_TEST_GROK_SCENARIO: 'late-final' },
     }).run(
       request(),
       () => {},
@@ -670,7 +674,7 @@ describe('Grok CLI adapter', () => {
             : bin;
         return new GrokCliEngine({
           ...options(binForScenario),
-          environment: { LINES_ENGINE_CONFORMANCE_SCENARIO: scenario },
+          environment: { OBVERSA_ENGINE_CONFORMANCE_SCENARIO: scenario },
         });
       },
     });

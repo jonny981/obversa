@@ -19,6 +19,7 @@ import {
 import {
   EngineError,
   EngineIncompleteResultError,
+  attemptEnvironment,
   canonicalJson,
   classifyEngineFailure,
   cloneFrozenJson,
@@ -26,9 +27,16 @@ import {
   reportedUsage,
   retryAfterHeaderToMs,
   scrubCapture,
+  type AgentRequest,
+  type AgentResult,
+  type AgentResultPart,
+  type Engine,
+  type EngineEventSink,
   type EngineFailureKind,
+  type EngineSelectionRecord,
   type JsonObject,
   type JsonValue,
+  type UsageReceipt,
   validateAgentResult,
   validateIncompleteResultEvidence,
 } from '@obversa/engine';
@@ -38,16 +46,6 @@ import {
   resolveCommandExecutable,
   runOwnedCommand,
 } from '@obversa/engine/command';
-import {
-  requestEnv,
-  type AgentRequest,
-  type AgentResult,
-  type AgentResultPart,
-  type Engine,
-  type EngineEventSink,
-  type EngineSelectionRecord,
-  type UsageReceipt,
-} from './engine.js';
 
 const SUPPORTED_VERSION = '1.18.23';
 const CONTROL_CHARACTER = /[\u0000-\u001f\u007f]/u;
@@ -679,7 +677,7 @@ export function buildOpenCodeInvocation(
   const auth = authValue(options.auth);
   const config = configFor(request, selectedModel, built);
   const configContent = serializedConfig(config);
-  const attempt = requestEnv({ ...request, env: undefined }) ?? {};
+  const attempt = attemptEnvironment({ ...request, env: undefined }) ?? {};
   const path = selected.PATH ?? [
     dirname(process.execPath),
     dirname(options.executable),

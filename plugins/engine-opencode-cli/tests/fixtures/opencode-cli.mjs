@@ -63,10 +63,10 @@ function apiError(message, statusCode, isRetryable = false, extra = {}) {
 let prompt = '';
 for await (const chunk of process.stdin) prompt += chunk;
 
-const scenario = process.env.LINES_ENGINE_CONFORMANCE_SCENARIO
-  ?? process.env.LINES_TEST_OPENCODE_SCENARIO
+const scenario = process.env.OBVERSA_ENGINE_CONFORMANCE_SCENARIO
+  ?? process.env.OBVERSA_TEST_OPENCODE_SCENARIO
   ?? 'ordered-parts';
-const recordPath = process.env.LINES_TEST_OPENCODE_RECORD;
+const recordPath = process.env.OBVERSA_TEST_OPENCODE_RECORD;
 
 if (recordPath) {
   const config = process.env.OPENCODE_CONFIG_CONTENT ?? '';
@@ -89,9 +89,9 @@ if (recordPath) {
       temporary: process.env.TMPDIR ?? null,
       config,
       auth,
-      selected: process.env.LINES_TEST_OPENCODE_SELECTED ?? null,
-      requestSecret: process.env.LINES_TEST_OPENCODE_REQUEST_SECRET ?? null,
-      parentSecret: process.env.LINES_POISONED_PARENT_SECRET ?? null,
+      selected: process.env.OBVERSA_TEST_OPENCODE_SELECTED ?? null,
+      requestSecret: process.env.OBVERSA_TEST_OPENCODE_REQUEST_SECRET ?? null,
+      parentSecret: process.env.OBVERSA_POISONED_PARENT_SECRET ?? null,
       projectConfigDisabled: process.env.OPENCODE_DISABLE_PROJECT_CONFIG ?? null,
       pure: process.env.OPENCODE_PURE ?? null,
       defaultPluginsDisabled: process.env.OPENCODE_DISABLE_DEFAULT_PLUGINS ?? null,
@@ -140,7 +140,7 @@ if (scenario === 'protocol-auth-echo') {
 if (scenario === 'environment-echo') {
   emit('error', {
     error: apiError(
-      `request failed for ${process.env.LINES_TEST_OPENCODE_SELECTED}`,
+      `request failed for ${process.env.OBVERSA_TEST_OPENCODE_SELECTED}`,
       500,
       true,
     ),

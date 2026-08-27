@@ -173,6 +173,24 @@ importers:
         specifier: workspace:^
         version: link:../../packages/engine
 
+  plugins/engine-codex:
+    dependencies:
+      '@obversa/engine':
+        specifier: workspace:^
+        version: link:../../packages/engine
+
+  plugins/engine-grok-cli:
+    dependencies:
+      '@obversa/engine':
+        specifier: workspace:^
+        version: link:../../packages/engine
+
+  plugins/engine-opencode-cli:
+    dependencies:
+      '@obversa/engine':
+        specifier: workspace:^
+        version: link:../../packages/engine
+
 packages:
 
   '@alcalzone/ansi-tokenize@0.2.5':

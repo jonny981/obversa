@@ -21,8 +21,8 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { setTimeout as delay } from 'node:timers/promises';
 
-import { CodexEngine } from '../src/engines/codex.ts';
-import { finalResultText } from '../src/runtime/result-parts.ts';
+import { finalResultText } from '@obversa/engine';
+import { CodexEngine } from '../src/index.ts';
 
 /** Seconds the orphan holds the pipes — far beyond any test bound below, so a
  *  regression to stream-close waiting fails loudly rather than just slowly. */

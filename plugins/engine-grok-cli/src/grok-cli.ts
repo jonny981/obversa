@@ -12,14 +12,22 @@ import { tmpdir } from 'node:os';
 import { delimiter, dirname, isAbsolute, join } from 'node:path';
 import {
   EngineError,
+  attemptEnvironment,
   canonicalJson,
   classifyEngineFailure,
   engineSelection,
   reportedUsage,
   scrubCapture,
+  type AgentRequest,
+  type AgentResult,
+  type AgentResultPart,
+  type Engine,
+  type EngineEventSink,
   type EngineFailureKind,
+  type EngineSelectionRecord,
   type JsonObject,
   type JsonValue,
+  type UsageReceipt,
   validateAgentResult,
 } from '@obversa/engine';
 import {
@@ -28,17 +36,14 @@ import {
   resolveCommandExecutable,
   runOwnedCommand,
 } from '@obversa/engine/command';
-import {
-  requestEnv,
-  type AgentRequest,
-  type AgentResult,
-  type AgentResultPart,
-  type Engine,
-  type EngineEventSink,
-  type EngineSelectionRecord,
-  type PermissionMode,
-  type UsageReceipt,
-} from './engine.js';
+
+type PermissionMode =
+  | 'default'
+  | 'acceptEdits'
+  | 'bypassPermissions'
+  | 'plan'
+  | 'dontAsk'
+  | 'auto';
 
 const CONTROL_CHARACTER = /[\u0000-\u001f\u007f]/u;
 const BASE_SYSTEM_PROMPT =
@@ -331,7 +336,7 @@ function isolatedEnvironment(
   for (const path of [home, grokHome, temporary]) {
     mkdirSync(path, { recursive: true, mode: 0o700 });
   }
-  const attempt = requestEnv({ ...request, env: undefined }) ?? {};
+  const attempt = attemptEnvironment({ ...request, env: undefined }) ?? {};
   writeFileSync(join(grokHome, 'config.toml'), grokConfig(request.cwd!), {
     encoding: 'utf8',
     mode: 0o600,

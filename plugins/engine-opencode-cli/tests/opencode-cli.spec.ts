@@ -16,30 +16,22 @@ import { fileURLToPath } from 'node:url';
 
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
-import { fnJob, run } from '../src/api.ts';
-import { EngineError } from '@obversa/engine';
-import { LoopError } from '../src/core/errors.ts';
-import { runEngineConformance } from '../src/engines/conformance.ts';
-import type {
-  AgentRequest,
-  AgentResultPart,
-  EngineStreamEvent,
-} from '../src/engines/engine.ts';
-import { EngineIncompleteResultError } from '../src/engines/engine.ts';
-import { classifyEngineFailure } from '../src/engines/failure.ts';
+import {
+  EngineError,
+  EngineIncompleteResultError,
+  classifyEngineFailure,
+  digestJson,
+  type AgentRequest,
+  type AgentResultPart,
+  type EngineStreamEvent,
+  type JsonValue,
+} from '@obversa/engine';
+import { runEngineConformance } from '@obversa/engine/testing';
 import {
   buildOpenCodeInvocation,
   OpenCodeCliEngine,
   type OpenCodeCliEngineOptions,
-} from '../src/engines/opencode-cli.ts';
-import { digestJson, type JsonValue } from '../src/graph/value.ts';
-import { createAttemptIdentity } from '../src/runtime/attempt.ts';
-import {
-  executeNodeAttempt,
-  type ModelUnavailableFact,
-} from '../src/runtime/node-lifecycle.ts';
-import { defineResultContract } from '../src/runtime/result-contract.ts';
-import { engineSelection } from '../src/runtime/result-parts.ts';
+} from '../src/index.ts';
 
 const roots: string[] = [];
 const fixtureSource = fileURLToPath(
@@ -79,7 +71,8 @@ function options(bin = executable()): OpenCodeCliEngineOptions {
 }
 
 function request(overrides: Partial<AgentRequest> = {}): AgentRequest {
-  const identity = createAttemptIdentity({
+  const attemptId = digestJson({
+    schemaVersion: 1,
     namespace: 'tenant-a',
     streamId: 'run-1',
     nodeId: 'reviewer',
@@ -101,7 +94,7 @@ function request(overrides: Partial<AgentRequest> = {}): AgentRequest {
     attempt: {
       leaf: true,
       runId: 'run-1',
-      attemptId: identity.attemptId,
+      attemptId,
       leafId: 'reviewer',
       path: ['review/main'],
       label: 'reviewer',
@@ -233,7 +226,7 @@ describe('OpenCode CLI adapter', () => {
     vi.stubEnv('XDG_CONFIG_HOME', join(parentHome, 'config'));
     vi.stubEnv('OPENCODE_CONFIG_CONTENT', '{"plugin":["poison"]}');
     vi.stubEnv('OPENCODE_AUTH_CONTENT', '{"fixture":{"key":"poison"}}');
-    vi.stubEnv('LINES_POISONED_PARENT_SECRET', 'must-not-cross');
+    vi.stubEnv('OBVERSA_POISONED_PARENT_SECRET', 'must-not-cross');
     const auth = {
       fixture: { type: 'api', key: 'selected-auth' },
     } as const;
@@ -243,9 +236,9 @@ describe('OpenCode CLI adapter', () => {
       ...options(),
       auth,
       environment: {
-        LINES_TEST_OPENCODE_RECORD: recordPath,
-        LINES_TEST_OPENCODE_SCENARIO: 'ordered-parts',
-        LINES_TEST_OPENCODE_SELECTED: 'selected-by-host',
+        OBVERSA_TEST_OPENCODE_RECORD: recordPath,
+        OBVERSA_TEST_OPENCODE_SCENARIO: 'ordered-parts',
+        OBVERSA_TEST_OPENCODE_SELECTED: 'selected-by-host',
       },
     });
     (auth.fixture as { key: string }).key = 'changed-after-selection';
@@ -319,7 +312,7 @@ describe('OpenCode CLI adapter', () => {
 
     await expect(new OpenCodeCliEngine({
       ...options(),
-      environment: { LINES_TEST_OPENCODE_RECORD: recordPath },
+      environment: { OBVERSA_TEST_OPENCODE_RECORD: recordPath },
     }).run(request(), () => {}, new AbortController().signal)).rejects.toThrow(
       'managed OpenCode config',
     );
@@ -341,7 +334,7 @@ describe('OpenCode CLI adapter', () => {
 
       await expect(new OpenCodeCliEngine({
         ...options(),
-        environment: { LINES_TEST_OPENCODE_RECORD: recordPath },
+        environment: { OBVERSA_TEST_OPENCODE_RECORD: recordPath },
       }).run(request({
         cwd: workspace,
         tools: ['read'],
@@ -359,7 +352,7 @@ describe('OpenCode CLI adapter', () => {
 
     const result = await new OpenCodeCliEngine({
       ...options(),
-      environment: { LINES_TEST_OPENCODE_SCENARIO: 'success' },
+      environment: { OBVERSA_TEST_OPENCODE_SCENARIO: 'success' },
     }).run(request({
       cwd: workspace,
       tools: ['read'],
@@ -410,7 +403,7 @@ describe('OpenCode CLI adapter', () => {
 
     const result = await new OpenCodeCliEngine({
       ...options(),
-      environment: { LINES_TEST_OPENCODE_SCENARIO: 'success' },
+      environment: { OBVERSA_TEST_OPENCODE_SCENARIO: 'success' },
     }).run(request({
       cwd: workspace,
       tools: ['read'],
@@ -436,7 +429,7 @@ describe('OpenCode CLI adapter', () => {
 
     await expect(new OpenCodeCliEngine({
       ...options(),
-      environment: { LINES_TEST_OPENCODE_RECORD: recordPath },
+      environment: { OBVERSA_TEST_OPENCODE_RECORD: recordPath },
     }).run(request({
       cwd: workspace,
       tools: ['read'],
@@ -465,7 +458,7 @@ describe('OpenCode CLI adapter', () => {
 
     await expect(new OpenCodeCliEngine({
       ...options(),
-      environment: { LINES_TEST_OPENCODE_RECORD: recordPath },
+      environment: { OBVERSA_TEST_OPENCODE_RECORD: recordPath },
     }).run(request({
       cwd: workspace,
       tools: [tool],
@@ -489,7 +482,7 @@ describe('OpenCode CLI adapter', () => {
 
     await expect(new OpenCodeCliEngine({
       ...options(),
-      environment: { LINES_TEST_OPENCODE_RECORD: recordPath },
+      environment: { OBVERSA_TEST_OPENCODE_RECORD: recordPath },
     }).run(request({
       cwd: workspace,
       tools: ['read'],
@@ -597,7 +590,7 @@ describe('OpenCode CLI adapter', () => {
     );
     const engine = new OpenCodeCliEngine({
       ...options(),
-      environment: { LINES_TEST_OPENCODE_RECORD: recordPath },
+      environment: { OBVERSA_TEST_OPENCODE_RECORD: recordPath },
     });
 
     await expect(engine.run(
@@ -649,7 +642,7 @@ describe('OpenCode CLI adapter', () => {
     const engine = new OpenCodeCliEngine({
       ...options(),
       identity: { provider: null, modelFamily: null },
-      environment: { LINES_TEST_OPENCODE_RECORD: recordPath },
+      environment: { OBVERSA_TEST_OPENCODE_RECORD: recordPath },
     });
 
     await expect(engine.run(request({
@@ -674,7 +667,7 @@ describe('OpenCode CLI adapter', () => {
     ],
     [
       'a selected environment token',
-      { model: 'fixture-provider/{env:LINES_TEST_OPENCODE_SELECTED}' },
+      { model: 'fixture-provider/{env:OBVERSA_TEST_OPENCODE_SELECTED}' },
     ],
   ])('rejects %s in config before spawn', async (_label, overrides) => {
     const recordPath = join(
@@ -684,8 +677,8 @@ describe('OpenCode CLI adapter', () => {
     const engine = new OpenCodeCliEngine({
       ...options(),
       environment: {
-        LINES_TEST_OPENCODE_RECORD: recordPath,
-        LINES_TEST_OPENCODE_SELECTED: 'selected-secret',
+        OBVERSA_TEST_OPENCODE_RECORD: recordPath,
+        OBVERSA_TEST_OPENCODE_SELECTED: 'selected-secret',
       },
     });
 
@@ -710,7 +703,7 @@ describe('OpenCode CLI adapter', () => {
 
     const engine = new OpenCodeCliEngine(options());
     await expect(engine.run(
-      request({ env: { LINES_TEST_OPENCODE_REQUEST_SECRET: 'secret' } }),
+      request({ env: { OBVERSA_TEST_OPENCODE_REQUEST_SECRET: 'secret' } }),
       () => {},
       new AbortController().signal,
     )).rejects.toThrow('constructor environment');
@@ -759,7 +752,7 @@ describe('OpenCode CLI adapter', () => {
     const derived = await new OpenCodeCliEngine({
       ...options(),
       identity: { provider: null, modelFamily: null },
-      environment: { LINES_TEST_OPENCODE_SCENARIO: 'success' },
+      environment: { OBVERSA_TEST_OPENCODE_SCENARIO: 'success' },
     }).run(request(), () => {}, new AbortController().signal);
     expect(derived.requested.provider).toBe('fixture-provider');
     expect(derived.effective.provider).toBe('fixture-provider');
@@ -772,7 +765,7 @@ describe('OpenCode CLI adapter', () => {
     await expect(new OpenCodeCliEngine({
       ...options(),
       identity: { provider: 'other-provider', modelFamily: null },
-      environment: { LINES_TEST_OPENCODE_RECORD: recordPath },
+      environment: { OBVERSA_TEST_OPENCODE_RECORD: recordPath },
     }).run(request(), () => {}, new AbortController().signal)).rejects.toThrow(
       'provider identity',
     );
@@ -784,7 +777,7 @@ describe('OpenCode CLI adapter', () => {
       const events: EngineStreamEvent[] = [];
       const result = await new OpenCodeCliEngine({
         ...options(),
-        environment: { LINES_TEST_OPENCODE_SCENARIO: scenario },
+        environment: { OBVERSA_TEST_OPENCODE_SCENARIO: scenario },
       }).run(request(), (event) => events.push(event), new AbortController().signal);
       return { result, events };
     };
@@ -812,7 +805,7 @@ describe('OpenCode CLI adapter', () => {
   it('rejects an observed tool that was not declared', async () => {
     await expect(new OpenCodeCliEngine({
       ...options(),
-      environment: { LINES_TEST_OPENCODE_SCENARIO: 'undeclared-tool' },
+      environment: { OBVERSA_TEST_OPENCODE_SCENARIO: 'undeclared-tool' },
     }).run(
       request({ tools: ['read'], allowedTools: ['Read(src/**)'] }),
       () => {},
@@ -824,7 +817,7 @@ describe('OpenCode CLI adapter', () => {
     const events: EngineStreamEvent[] = [];
     await expect(new OpenCodeCliEngine({
       ...options(),
-      environment: { LINES_TEST_OPENCODE_SCENARIO: 'edit-tool-aliases' },
+      environment: { OBVERSA_TEST_OPENCODE_SCENARIO: 'edit-tool-aliases' },
     }).run(
       request({
         tools: ['edit'],
@@ -850,7 +843,7 @@ describe('OpenCode CLI adapter', () => {
   ])('fails closed for %s protocol input', async (scenario, message) => {
     await expect(new OpenCodeCliEngine({
       ...options(),
-      environment: { LINES_TEST_OPENCODE_SCENARIO: scenario },
+      environment: { OBVERSA_TEST_OPENCODE_SCENARIO: scenario },
     }).run(
       request(),
       () => {},
@@ -861,7 +854,7 @@ describe('OpenCode CLI adapter', () => {
   it('preserves the exact same-part structured-result marker for the job parser', async () => {
     const result = await new OpenCodeCliEngine({
       ...options(),
-      environment: { LINES_TEST_OPENCODE_SCENARIO: 'structured' },
+      environment: { OBVERSA_TEST_OPENCODE_SCENARIO: 'structured' },
     }).run(
       request({
         jsonSchema: {
@@ -885,106 +878,10 @@ describe('OpenCode CLI adapter', () => {
     ]);
   });
 
-  it.each([
-    'structured-missing-marker',
-    'structured-middle-marker',
-    'structured-two-markers',
-    'structured-fence',
-    'structured-trailing',
-    'structured-two-values',
-    'structured-malformed',
-  ])('records invalid structured output %s as RESULT_INVALID without killing the lane', async (scenario) => {
-    const schema = {
-      type: 'object',
-      properties: { answer: { type: 'number' } },
-      required: ['answer'],
-      additionalProperties: false,
-    } as const;
-    const selection = engineSelection({
-      adapter: 'opencode-cli',
-      adapterVersion: '1.18.23',
-      provider: 'fixture-provider',
-      modelFamily: 'fixture-family',
-      model: 'fixture-provider/fixture-model',
-      capabilities: [],
-    });
-    const unavailable: ModelUnavailableFact[] = [];
-    const record = await executeNodeAttempt({
-      identity: createAttemptIdentity({
-        namespace: 'tenant-a',
-        streamId: 'run-structured',
-        nodeId: 'worker',
-        position: 'review/structured',
-      }),
-      nodeId: 'worker',
-      input: { task: 'answer' },
-      prompt: 'Return structured output.',
-      scratchDirectory: temporaryDirectory('lines-opencode-structured-'),
-      workspace: { mode: 'none', directory: null, allowedPaths: [] },
-      trustedCaller: { actor: 'owner' },
-      permissions: [],
-      policy: {
-        inputBytes: 4_096,
-        outputBytes: 4_096,
-        timeoutMs: 2_000,
-        teardownGraceMs: 200,
-        memoryBytes: 256 * 1_024 * 1_024,
-        filesChanged: 0,
-        linesChanged: 0,
-        callTokens: null,
-      },
-      resultContract: defineResultContract({
-        record: {
-          name: 'answer',
-          version: 1,
-          schemaDigest: digestJson(schema),
-        },
-        schema,
-        validate(value: unknown) {
-          if (
-            typeof value !== 'object'
-            || value === null
-            || !('answer' in value)
-            || typeof value.answer !== 'number'
-          ) {
-            throw new TypeError('answer must be a number');
-          }
-          return { answer: value.answer };
-        },
-      }),
-      engineRoute: [{
-        engine: new OpenCodeCliEngine({
-          ...options(),
-          environment: {
-            LINES_TEST_OPENCODE_SCENARIO: scenario,
-          },
-        }),
-        selection,
-        hardTokenLimitEnforceable: false,
-      }],
-      runData: null,
-      parseResult: parseStructuredResult,
-      tokenBudget: null,
-      recordModelUnavailable: async (fact) => {
-        unavailable.push(fact);
-      },
-      decideAction: async () => ({ kind: 'allow' }),
-    }, new AbortController().signal);
-
-    expect(record.failure?.code).toBe('RESULT_INVALID');
-    expect(record.parts.at(-1)).toMatchObject({
-      kind: 'assistant',
-      final: true,
-    });
-    expect(record.usage.kind).toBe('reported');
-    expect(record.unavailableModels).toEqual([]);
-    expect(unavailable).toEqual([]);
-  });
-
   it('keeps malformed usage unknown and sums unique complete steps', async () => {
     const run = async (scenario: string) => await new OpenCodeCliEngine({
       ...options(),
-      environment: { LINES_TEST_OPENCODE_SCENARIO: scenario },
+      environment: { OBVERSA_TEST_OPENCODE_SCENARIO: scenario },
     }).run(request(), () => {}, new AbortController().signal);
 
     expect((await run('unknown-usage')).usage).toEqual({ kind: 'unknown' });
@@ -1005,7 +902,7 @@ describe('OpenCode CLI adapter', () => {
   it('keeps a final result separate from a later transport failure', async () => {
     const result = await new OpenCodeCliEngine({
       ...options(),
-      environment: { LINES_TEST_OPENCODE_SCENARIO: 'late-final' },
+      environment: { OBVERSA_TEST_OPENCODE_SCENARIO: 'late-final' },
     }).run(request(), () => {}, new AbortController().signal);
 
     expect(result.parts.at(-1)).toEqual({
@@ -1022,7 +919,7 @@ describe('OpenCode CLI adapter', () => {
   it('rejects partial text when transport fails after a tool-calls step', async () => {
     await expect(new OpenCodeCliEngine({
       ...options(),
-      environment: { LINES_TEST_OPENCODE_SCENARIO: 'late-partial' },
+      environment: { OBVERSA_TEST_OPENCODE_SCENARIO: 'late-partial' },
     }).run(request(), () => {}, new AbortController().signal)).rejects.toMatchObject({
       kind: 'unknown',
       message: expect.stringContaining('transport closed during tool work'),
@@ -1032,7 +929,7 @@ describe('OpenCode CLI adapter', () => {
   it('rejects a clean exit after a tool-calls step', async () => {
     await expect(new OpenCodeCliEngine({
       ...options(),
-      environment: { LINES_TEST_OPENCODE_SCENARIO: 'clean-partial' },
+      environment: { OBVERSA_TEST_OPENCODE_SCENARIO: 'clean-partial' },
     }).run(request(), () => {}, new AbortController().signal)).rejects.toMatchObject({
       kind: 'invalid-config',
       message: expect.stringContaining('without a final step'),
@@ -1042,7 +939,7 @@ describe('OpenCode CLI adapter', () => {
   it('rejects a clean exit without a step-finish event', async () => {
     await expect(new OpenCodeCliEngine({
       ...options(),
-      environment: { LINES_TEST_OPENCODE_SCENARIO: 'zero-exit-no-finish' },
+      environment: { OBVERSA_TEST_OPENCODE_SCENARIO: 'zero-exit-no-finish' },
     }).run(request(), () => {}, new AbortController().signal)).rejects.toMatchObject({
       kind: 'invalid-config',
       message: expect.stringContaining('without a final step'),
@@ -1055,7 +952,7 @@ describe('OpenCode CLI adapter', () => {
       await expect(new OpenCodeCliEngine({
         ...options(),
         environment: {
-          LINES_TEST_OPENCODE_SCENARIO: `${reason}-finish`,
+          OBVERSA_TEST_OPENCODE_SCENARIO: `${reason}-finish`,
         },
       }).run(request(), () => {}, new AbortController().signal)).rejects.toMatchObject({
         kind: 'unknown',
@@ -1070,7 +967,7 @@ describe('OpenCode CLI adapter', () => {
     try {
       await new OpenCodeCliEngine({
         ...options(),
-        environment: { LINES_TEST_OPENCODE_SCENARIO: 'length-finish' },
+        environment: { OBVERSA_TEST_OPENCODE_SCENARIO: 'length-finish' },
       }).run(request(), (event) => events.push(event), new AbortController().signal);
     } catch (caught) {
       error = caught;
@@ -1099,7 +996,7 @@ describe('OpenCode CLI adapter', () => {
     try {
       await new OpenCodeCliEngine({
         ...options(),
-        environment: { LINES_TEST_OPENCODE_SCENARIO: 'empty-length-finish' },
+        environment: { OBVERSA_TEST_OPENCODE_SCENARIO: 'empty-length-finish' },
       }).run(request(), () => {}, new AbortController().signal);
     } catch (caught) {
       error = caught;
@@ -1119,7 +1016,7 @@ describe('OpenCode CLI adapter', () => {
     try {
       await new OpenCodeCliEngine({
         ...options(),
-        environment: { LINES_TEST_OPENCODE_SCENARIO: 'empty-stop-finish' },
+        environment: { OBVERSA_TEST_OPENCODE_SCENARIO: 'empty-stop-finish' },
       }).run(request(), () => {}, new AbortController().signal);
     } catch (caught) {
       error = caught;
@@ -1139,7 +1036,7 @@ describe('OpenCode CLI adapter', () => {
     try {
       await new OpenCodeCliEngine({
         ...options(),
-        environment: { LINES_TEST_OPENCODE_SCENARIO: 'empty-stop-auth' },
+        environment: { OBVERSA_TEST_OPENCODE_SCENARIO: 'empty-stop-auth' },
       }).run(request(), () => {}, new AbortController().signal);
     } catch (caught) {
       error = caught;
@@ -1151,7 +1048,7 @@ describe('OpenCode CLI adapter', () => {
   it('rejects an invalid OpenCode step-finish reason', async () => {
     await expect(new OpenCodeCliEngine({
       ...options(),
-      environment: { LINES_TEST_OPENCODE_SCENARIO: 'late-invalid-reason' },
+      environment: { OBVERSA_TEST_OPENCODE_SCENARIO: 'late-invalid-reason' },
     }).run(request(), () => {}, new AbortController().signal)).rejects.toMatchObject({
       kind: 'invalid-config',
       message: expect.stringContaining('step reason'),
@@ -1161,7 +1058,7 @@ describe('OpenCode CLI adapter', () => {
   it('uses a malformed final tool step to reject partial output', async () => {
     await expect(new OpenCodeCliEngine({
       ...options(),
-      environment: { LINES_TEST_OPENCODE_SCENARIO: 'late-malformed-tool-step' },
+      environment: { OBVERSA_TEST_OPENCODE_SCENARIO: 'late-malformed-tool-step' },
     }).run(request(), () => {}, new AbortController().signal)).rejects.toMatchObject({
       kind: 'unknown',
       message: expect.stringContaining('transport closed during malformed tool work'),
@@ -1172,7 +1069,7 @@ describe('OpenCode CLI adapter', () => {
     const controller = new AbortController();
     const engine = new OpenCodeCliEngine({
       ...options(),
-      environment: { LINES_TEST_OPENCODE_SCENARIO: 'hang' },
+      environment: { OBVERSA_TEST_OPENCODE_SCENARIO: 'hang' },
     });
     const aborted = engine.run(
       request(),
@@ -1183,7 +1080,7 @@ describe('OpenCode CLI adapter', () => {
 
     await expect(new OpenCodeCliEngine({
       ...options(),
-      environment: { LINES_TEST_OPENCODE_SCENARIO: 'hang' },
+      environment: { OBVERSA_TEST_OPENCODE_SCENARIO: 'hang' },
     }).run(
       request({ timeoutMs: 50, timeoutGraceMs: 25 }),
       () => {},
@@ -1198,7 +1095,7 @@ describe('OpenCode CLI adapter', () => {
       await new OpenCodeCliEngine({
         ...options(),
         auth: { fixture: { type: 'api', key: token } },
-        environment: { LINES_TEST_OPENCODE_SCENARIO: 'auth-echo' },
+        environment: { OBVERSA_TEST_OPENCODE_SCENARIO: 'auth-echo' },
       }).run(request(), () => {}, new AbortController().signal);
     } catch (caught) {
       error = caught;
@@ -1216,7 +1113,7 @@ describe('OpenCode CLI adapter', () => {
       await new OpenCodeCliEngine({
         ...options(),
         auth: { fixture: { type: 'api', key: token } },
-        environment: { LINES_TEST_OPENCODE_SCENARIO: 'protocol-auth-echo' },
+        environment: { OBVERSA_TEST_OPENCODE_SCENARIO: 'protocol-auth-echo' },
       }).run(request(), () => {}, new AbortController().signal);
     } catch (caught) {
       error = caught;
@@ -1234,8 +1131,8 @@ describe('OpenCode CLI adapter', () => {
       await new OpenCodeCliEngine({
         ...options(),
         environment: {
-          LINES_TEST_OPENCODE_SCENARIO: 'environment-echo',
-          LINES_TEST_OPENCODE_SELECTED: token,
+          OBVERSA_TEST_OPENCODE_SCENARIO: 'environment-echo',
+          OBVERSA_TEST_OPENCODE_SELECTED: token,
         },
       }).run(request(), () => {}, new AbortController().signal);
     } catch (caught) {
@@ -1265,7 +1162,7 @@ describe('OpenCode CLI adapter', () => {
       try {
         await new OpenCodeCliEngine({
           ...options(),
-          environment: { LINES_TEST_OPENCODE_SCENARIO: scenario },
+          environment: { OBVERSA_TEST_OPENCODE_SCENARIO: scenario },
         }).run(request(), () => {}, new AbortController().signal);
       } catch (caught) {
         error = caught;
@@ -1279,7 +1176,7 @@ describe('OpenCode CLI adapter', () => {
     try {
       await new OpenCodeCliEngine({
         ...options(),
-        environment: { LINES_TEST_OPENCODE_SCENARIO: 'quota' },
+        environment: { OBVERSA_TEST_OPENCODE_SCENARIO: 'quota' },
       }).run(request(), () => {}, new AbortController().signal);
     } catch (caught) {
       error = caught;
@@ -1319,67 +1216,12 @@ describe('OpenCode CLI adapter', () => {
           : bin;
         return new OpenCodeCliEngine({
           ...options(binForScenario),
-          environment: { LINES_ENGINE_CONFORMANCE_SCENARIO: scenario },
+          environment: { OBVERSA_ENGINE_CONFORMANCE_SCENARIO: scenario },
         });
       },
     });
 
     expect(report).toEqual({ ok: true, cases: 16, failures: [] });
-  });
-
-  it('runs a configured adapter through the runner injection seam', async () => {
-    const input = request();
-    const engine = new OpenCodeCliEngine({
-      ...options(),
-      environment: { LINES_TEST_OPENCODE_SCENARIO: 'success' },
-    });
-    let observed: Awaited<ReturnType<typeof engine.run>> | undefined;
-
-    const result = await run(
-      fnJob('injected-opencode', async (ctx) => {
-        observed = await ctx.resolveEngine('opencode-cli').run(
-          input,
-          () => {},
-          ctx.signal,
-        );
-        return { status: 'pass' };
-      }),
-      {
-        cwd: input.cwd,
-        engine: 'opencode-cli',
-        engines: { 'opencode-cli': engine },
-      },
-    );
-
-    expect(result.outcome.status).toBe('pass');
-    expect(observed?.requested).toMatchObject({
-      adapter: 'opencode-cli',
-      adapterVersion: '1.18.23',
-      provider: 'fixture-provider',
-      modelFamily: 'fixture-family',
-    });
-    expect(observed?.effective).toMatchObject({
-      adapter: 'opencode-cli',
-      adapterVersion: '1.18.23',
-      provider: 'fixture-provider',
-      modelFamily: 'fixture-family',
-    });
-  });
-
-  it('rejects an unconfigured adapter name before the job starts', async () => {
-    let ran = false;
-
-    await expect(run(
-      fnJob('must-not-run', async () => {
-        ran = true;
-        return { status: 'pass' };
-      }),
-      { engine: 'opencode-cli' },
-    )).rejects.toMatchObject({
-      code: 'CONFIG',
-      message: expect.stringContaining('unknown engine "opencode-cli"'),
-    });
-    expect(ran).toBe(false);
   });
 
   it('uses EngineError types for adapter-owned abort and timeout failures', async () => {

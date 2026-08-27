@@ -15,20 +15,17 @@ import { join } from 'node:path';
 import {
   EngineError,
   assistantResult,
+  attemptEnvironment,
   classifyEngineFailure,
   engineSelection,
   reportedUsage,
   scrubCapture,
+  type AgentRequest,
+  type AgentResult,
+  type Engine,
+  type EngineEventSink,
+  type UsageReceipt,
 } from '@obversa/engine';
-import type {
-  AgentRequest,
-  AgentResult,
-  Engine,
-  EngineEventSink,
-  EngineOptions,
-  UsageReceipt,
-} from './engine.js';
-import { modelFor, requestEnv } from './engine.js';
 import {
   DEFAULT_OWNED_COMMAND_LIMITS,
   ownedCommandIdentity,
@@ -38,6 +35,19 @@ import {
 
 const DIAGNOSTIC_MAX = 700;
 const DIAGNOSTIC_HEAD = 180;
+
+export interface CodexEngineOptions {
+  readonly defaultModel?: string;
+  readonly cliBinary?: string;
+  readonly cliArgs?: readonly string[];
+  readonly permissionMode?:
+    | 'default'
+    | 'acceptEdits'
+    | 'bypassPermissions'
+    | 'plan'
+    | 'dontAsk'
+    | 'auto';
+}
 
 function usageFromJsonl(stdout: unknown): UsageReceipt {
   if (typeof stdout !== 'string') return { kind: 'unknown' };
@@ -106,10 +116,10 @@ function diagnosticCapture(
 
 export function buildCodexArgs(
   req: AgentRequest,
-  opts: EngineOptions,
+  opts: CodexEngineOptions,
   outFile: string,
 ): string[] {
-  const model = modelFor(req, opts, 'codex');
+  const model = req.model ?? opts.defaultModel;
   const args = [
     'exec',
     '--ephemeral',
@@ -135,7 +145,7 @@ export function buildCodexArgs(
 export class CodexEngine implements Engine {
   readonly name = 'codex';
   private executable: string | undefined;
-  constructor(private readonly opts: EngineOptions = {}) {}
+  constructor(private readonly opts: CodexEngineOptions = {}) {}
 
   private commandExecutable(): string {
     this.executable ??= resolveCommandExecutable(this.opts.cliBinary ?? 'codex');
@@ -158,11 +168,11 @@ export class CodexEngine implements Engine {
         message: 'codex run aborted',
       });
     const executable = this.commandExecutable();
-    const model = modelFor(req, this.opts, 'codex');
+    const model = req.model ?? this.opts.defaultModel;
     const dir = mkdtempSync(join(tmpdir(), 'lines-codex-'));
     const outFile = join(dir, 'last.txt');
     const args = buildCodexArgs(req, this.opts, outFile);
-    const env = requestEnv(req);
+    const env = attemptEnvironment(req);
     const prompt = req.system ? `${req.system}\n\n---\n\n${req.prompt}` : req.prompt;
     const hardTimeout =
       req.timeoutMs && req.timeoutGraceMs

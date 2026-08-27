@@ -235,19 +235,6 @@ export {
   finalResultText,
   validateAgentResult,
 } from './runtime/result-parts.js';
-export {
-  GrokCliEngine,
-  buildGrokArgs,
-  type GrokCliIdentity,
-  type GrokCliEngineOptions,
-} from './engines/grok-cli.js';
-export {
-  OpenCodeCliEngine,
-  buildOpenCodeInvocation,
-  type OpenCodeCliEngineOptions,
-  type OpenCodeCliIdentity,
-  type OpenCodeInvocation,
-} from './engines/opencode-cli.js';
 
 export type { Environment, EnvHandle } from './env/environment.js';
 export { withEnv } from './core/env-overlay.js';
