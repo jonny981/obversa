@@ -15,6 +15,9 @@
 // Shapes (see an internal note):
 //   SurfaceRequest { surfaceId, gateId, callback{address,token},
 //                    kind{family,renderer}, subject, anchors[], transport, deadline? }
+//   A surface opened directly (a person running the command, no Callback Gate)
+//   has gateId null and a callback whose address and token are null; a
+//   gate-launched surface carries the gate's id and callback. Both are valid.
 //   Anchor         { target, side?, position }
 //   Annotation     { anchor, body, author{kind,id}, createdAt, thread? }
 //   SurfaceResult  { surfaceId, gateId, decision, annotations[], edits?, meta? }
@@ -166,7 +169,9 @@ export function normalizeResult(raw, request) {
  */
 export function isSurfaceRequest(value) {
   if (!value || typeof value !== "object") return false;
-  if (typeof value.surfaceId !== "string" || typeof value.gateId !== "string") return false;
+  if (typeof value.surfaceId !== "string") return false;
+  // gateId is the gate's id, or null for a surface opened directly.
+  if (value.gateId !== null && (typeof value.gateId !== "string" || value.gateId.length === 0)) return false;
   if (!value.callback || typeof value.callback !== "object") return false;
   if (!value.kind || !FAMILIES.includes(value.kind.family)) return false;
   if (!Array.isArray(value.anchors)) return false;

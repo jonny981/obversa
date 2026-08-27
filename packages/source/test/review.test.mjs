@@ -133,12 +133,40 @@ test("outputAnchors offers every visible line and side; the request is contract-
     { target: "a.txt", side: "old", position: 3 },
     { target: "a.txt", side: "new", position: 3 },
   ]);
+  // The direct request, exactly as the live review builds it, is valid by the
+  // contract's own validator: no gate means gateId null and a null callback.
   const request = buildSurfaceRequest({ model, label: "working tree" });
   assert.equal(request.kind.family, "output");
   assert.equal(request.subject, "working tree");
   assert.equal(request.anchors.length, 6);
-  // isSurfaceRequest requires a string gateId; a gate-launched surface supplies one.
-  assert.equal(isSurfaceRequest({ ...request, gateId: "gate-1" }), true);
+  assert.equal(request.gateId, null);
+  assert.deepEqual(request.callback, { address: null, token: null });
+  assert.equal(isSurfaceRequest(request), true);
+  // A gate-launched request carries the gate's id and callback.
+  const gated = buildSurfaceRequest({ model, label: "working tree", gate: { gateId: "gate-1", callback: { address: "http://127.0.0.1:9/cb", token: "t" } } });
+  assert.equal(gated.gateId, "gate-1");
+  assert.deepEqual(gated.callback, { address: "http://127.0.0.1:9/cb", token: "t" });
+  assert.equal(isSurfaceRequest(gated), true);
+  // A malformed gate option fails before a surface opens.
+  assert.throws(() => buildSurfaceRequest({ model, label: "x", gate: { gateId: "" } }), /gateId must be a non-empty string/);
+  assert.throws(() => buildSurfaceRequest({ model, label: "x", gate: { gateId: "g" } }), /callback must be an object/);
+});
+
+test("a gate's id flows through reviewDiff onto the result", async () => {
+  const launchSurface = async ({ api }) => {
+    let payload;
+    await api["POST /api/submit"]({ body: { decision: "approved", annotations: [] }, session: { complete(value) { payload = value; } } });
+    return { result: { status: "completed", payload } };
+  };
+  const gate = { gateId: "gate-42", callback: { address: "http://127.0.0.1:9/cb", token: "secret" } };
+  const outcome = await reviewDiff({ diffText: DIFF, launchSurface, clientKitSource: CLIENT_KIT, open: false, gate });
+  assert.equal(outcome.result.gateId, "gate-42");
+  assert.equal(outcome.result.decision, "approved");
+  // The direct path carries no gate.
+  const direct = await reviewDiff({ diffText: DIFF, launchSurface, clientKitSource: CLIENT_KIT, open: false });
+  assert.equal(direct.result.gateId, null);
+  // A bad gate option is refused before anything opens.
+  await assert.rejects(() => reviewDiff({ diffText: DIFF, launchSurface, clientKitSource: CLIENT_KIT, open: false, gate: { gateId: 7 } }), /gateId must be a non-empty string/);
 });
 
 test("the submit handler bounds bodies and counts through the contract", async () => {

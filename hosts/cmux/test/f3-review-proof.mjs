@@ -173,6 +173,7 @@ test("the review surface runs on surfacer and returns annotations", { timeout: 3
     assert.equal(outcome.status, "completed");
     // The result is the SurfaceResult: routable, decided, contract anchors.
     assert.equal(typeof outcome.result.surfaceId, "string");
+    assert.equal(outcome.result.gateId, null, "a directly opened review has no gate");
     assert.equal(outcome.result.decision, "changes-requested");
     assert.equal(outcome.result.annotations.length, 1);
     assert.deepEqual(outcome.result.annotations[0].anchor, { target: anchor.path, position: anchor.line, side: anchor.side });

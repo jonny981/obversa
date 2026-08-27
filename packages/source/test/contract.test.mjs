@@ -148,6 +148,11 @@ test("normalizeResult carries edits and meta when present", () => {
 
 test("isSurfaceRequest guards the shape", () => {
   assert.equal(isSurfaceRequest(makeRequest([outputAnchor(1)])), true);
+  // A surface opened directly has no gate: gateId null and a null callback
+  // are valid; a wrong-typed or empty gateId is not.
+  assert.equal(isSurfaceRequest({ ...makeRequest([]), gateId: null, callback: { address: null, token: null } }), true);
+  assert.equal(isSurfaceRequest({ ...makeRequest([]), gateId: 5 }), false);
+  assert.equal(isSurfaceRequest({ ...makeRequest([]), gateId: "" }), false);
   assert.equal(isSurfaceRequest(null), false);
   assert.equal(isSurfaceRequest({ ...makeRequest([]), kind: { family: "bogus" } }), false);
   assert.equal(isSurfaceRequest({ ...makeRequest([]), surfaceId: 5 }), false);

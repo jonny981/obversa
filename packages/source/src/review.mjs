@@ -39,17 +39,31 @@ export function outputAnchors(model) {
   return anchors;
 }
 
+// The `gate` option a Callback Gate passes to reviewDiff: its id and the
+// callback the result should reach. Validated up front so a wrong shape fails
+// before a surface opens.
+function normalizeGate(gate) {
+  if (gate === undefined || gate === null) return { gateId: null, callback: { address: null, token: null } };
+  if (typeof gate !== "object") throw new TypeError("gate must be an object with gateId and callback");
+  if (typeof gate.gateId !== "string" || gate.gateId.length === 0) throw new TypeError("gate.gateId must be a non-empty string");
+  if (!gate.callback || typeof gate.callback !== "object") throw new TypeError("gate.callback must be an object with address and token");
+  return { gateId: gate.gateId, callback: { address: gate.callback.address ?? null, token: gate.callback.token ?? null } };
+}
+
 /**
- * The SurfaceRequest for one review (an internal note). Direct use from the
- * command line has no Callback Gate, so gateId and the callback are null; a
- * gate that launches the surface supplies its own. The result copies
- * surfaceId and gateId back, which is how a consumer routes it.
+ * The SurfaceRequest for one review (an internal note). `gate` is the option a
+ * Callback Gate passes through reviewDiff — its id and callback — and is the
+ * only route by which a gate reaches the request. Direct use from the command
+ * line passes none, so gateId is null and the callback has null address and
+ * token; the contract treats that shape as valid. The result copies surfaceId
+ * and gateId back, which is how a consumer routes it.
  */
-export function buildSurfaceRequest({ model, label, gateId = null, callback = null } = {}) {
+export function buildSurfaceRequest({ model, label, gate } = {}) {
+  const { gateId, callback } = normalizeGate(gate);
   return {
     surfaceId: randomUUID(),
     gateId,
-    callback: callback ?? { address: null, token: null },
+    callback,
     kind: { family: "output", renderer: "review" },
     subject: label,
     anchors: outputAnchors(model),
@@ -76,6 +90,8 @@ export function buildSurfaceRequest({ model, label, gateId = null, callback = nu
  * - clientKitSource: required; the surface client-kit module served to the page
  * - open: place the surface in a host pane (default true)
  * - ready: forwarded to launchSurface once the session is reachable
+ * - gate: { gateId, callback: { address, token } } when a Callback Gate opens
+ *   the review; omitted for direct use. The gateId is copied onto the result.
  *
  * Resolves to { status, result, annotations, meta, terminal }: `result` is the
  * SurfaceResult (an internal note — surfaceId, gateId, decision, annotations
@@ -93,6 +109,7 @@ export async function reviewDiff({
   clientKitSource,
   open = true,
   ready,
+  gate,
 } = {}) {
   if (typeof launchSurface !== "function") {
     throw new TypeError("reviewDiff needs a launchSurface port");
@@ -100,6 +117,7 @@ export async function reviewDiff({
   if (typeof clientKitSource !== "string" || clientKitSource.length === 0) {
     throw new TypeError("reviewDiff needs the surface client-kit source");
   }
+  normalizeGate(gate); // fail on a bad gate option before anything opens
 
   // The command may run from any directory inside the repository. Git prints
   // diff paths relative to the repository root, so every read that resolves a
@@ -126,7 +144,7 @@ export async function reviewDiff({
     // The repo's tracked files, for the tree's "All files" view.
     allFiles: await listTrackedFiles({ cwd: root }),
   };
-  const request = buildSurfaceRequest({ model, label: meta.label });
+  const request = buildSurfaceRequest({ model, label: meta.label, gate });
 
   const directory = await mkdtemp(path.join(os.tmpdir(), "obversa-review-"));
   try {
