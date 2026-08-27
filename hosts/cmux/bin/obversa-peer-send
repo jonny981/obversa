@@ -35,6 +35,25 @@ CHANNEL="${OBVERSA_CHANNEL:-$HOME/dev/personal/obversa-coordination/channel.md}"
 STAMP="$(date -u '+%Y-%m-%dT%H:%MZ')"
 { printf '\n## %s %s\n' "$STAMP" "$AGENT"; printf '%s\n' "$*"; } >> "$CHANNEL"
 
+# A bare agent name in --wake is resolved to a live surface via obversa-whereis
+# (so `--wake grok` works, not just `--wake surface:59`). A surface:N ref or a
+# UUID is already a target and passes through unchanged. If a name cannot be
+# resolved to a live session, the channel post still lands; only the wake cue is
+# skipped, with a note — a missed nudge is harmless because the channel is durable.
+if [ -n "$WAKE" ]; then
+  case "$WAKE" in
+    surface:*|[0-9A-Fa-f]*-[0-9A-Fa-f]*-[0-9A-Fa-f]*-[0-9A-Fa-f]*-[0-9A-Fa-f]*) ;;
+    *)
+      if RESOLVED="$("$(dirname "$0")/obversa-whereis" "$WAKE" 2>/dev/null)"; then
+        WAKE="$RESOLVED"
+      else
+        echo "obversa-peer-send: no live '$WAKE' surface to wake; channel post landed, wake cue skipped." >&2
+        WAKE=""
+      fi
+      ;;
+  esac
+fi
+
 if [ -n "$WAKE" ] && command -v cmux >/dev/null 2>&1; then
   HEAD="$(git rev-parse --short HEAD 2>/dev/null || echo nohead)"
   cmux send --surface "$WAKE" "${AGENT}@${HEAD} wakeup: check channel" >/dev/null 2>&1 || exit 0
