@@ -4,7 +4,7 @@ import os from "node:os";
 import path from "node:path";
 import test from "node:test";
 
-import { audit, checkHook, listWorkspacePackages } from "./check-publish-allowlist.mjs";
+import { HOOK_COMMAND, audit, checkHook, listWorkspacePackages } from "./check-publish-allowlist.mjs";
 
 function makeWorkspace(packages) {
   const root = mkdtempSync(path.join(os.tmpdir(), "publish-guard-"));
@@ -33,24 +33,31 @@ test("listWorkspacePackages follows every dir/* glob in pnpm-workspace.yaml", ()
   }
 });
 
-const HOOKED = { prepublishOnly: "node ../../scripts/check-publish-allowlist.mjs" };
+const HOOKED = { prepublishOnly: HOOK_COMMAND };
 
-test("the audit fails closed: an unlisted public package, a missing hook, a listed private one, and a listed ghost", () => {
+test("the audit fails closed: an unlisted public package, a missing or wrong hook, a listed private one, and a listed ghost", () => {
   const root = makeWorkspace({
     "packages/pub": { name: "@x/pub", scripts: HOOKED },
     "packages/nohook": { name: "@x/nohook", scripts: { build: "tsup" } },
+    // Lookalikes that mention the script but do not run the guard.
+    "packages/echo": { name: "@x/echo", scripts: { prepublishOnly: "echo check-publish-allowlist.mjs" } },
+    "packages/audit": { name: "@x/audit", scripts: { prepublishOnly: "node ../../scripts/check-publish-allowlist.mjs --audit" } },
     "packages/priv": { name: "@x/priv", private: true },
     "packages/ok": { name: "@x/ok", scripts: HOOKED },
   });
   try {
-    const problems = audit({ root, allowlist: new Set(["@x/ok", "@x/nohook", "@x/priv", "@x/ghost"]) });
-    assert.equal(problems.length, 4);
-    assert.match(problems.join("\n"), /@x\/pub .* not on the allowlist/);
-    assert.match(problems.join("\n"), /@x\/nohook .*prepublishOnly does not run check-publish-allowlist\.mjs/);
-    assert.match(problems.join("\n"), /@x\/priv .* marked private/);
-    assert.match(problems.join("\n"), /@x\/ghost .* not a workspace package/);
-    // A private package needs no hook.
-    assert.doesNotMatch(problems.join("\n"), /@x\/priv .* prepublishOnly/);
+    const problems = audit({ root, allowlist: new Set(["@x/ok", "@x/nohook", "@x/echo", "@x/audit", "@x/priv", "@x/ghost"]) });
+    const text = problems.join("\n");
+    assert.equal(problems.length, 6, text);
+    assert.match(text, /@x\/pub .* not on the allowlist/);
+    assert.match(text, /@x\/nohook .*prepublishOnly is not exactly/);
+    assert.match(text, /@x\/echo .*prepublishOnly is not exactly/);
+    assert.match(text, /@x\/audit .*prepublishOnly is not exactly/);
+    assert.match(text, /@x\/priv .* marked private/);
+    assert.match(text, /@x\/ghost .* not a workspace package/);
+    // A private package needs no hook; the exact hook raises nothing.
+    assert.doesNotMatch(text, /@x\/priv .* prepublishOnly/);
+    assert.doesNotMatch(text, /@x\/ok /);
   } finally {
     rmSync(root, { recursive: true, force: true });
   }

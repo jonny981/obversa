@@ -55,10 +55,11 @@ export function listWorkspacePackages(root = ROOT) {
   return found;
 }
 
-// The hook every publishable package must run: npm and pnpm execute
+// The exact hook every publishable package must run: npm and pnpm execute
 // prepublishOnly before any publish, so this is the check a direct publish
-// cannot skip.
-export const HOOK = "check-publish-allowlist.mjs";
+// cannot skip. Exact, not a substring: `echo check-publish-allowlist.mjs` or
+// the script with `--audit` would otherwise count as the guard.
+export const HOOK_COMMAND = "node ../../scripts/check-publish-allowlist.mjs";
 
 export function audit({ root = ROOT, allowlist = readAllowlist() } = {}) {
   const problems = [];
@@ -69,8 +70,8 @@ export function audit({ root = ROOT, allowlist = readAllowlist() } = {}) {
     if (!allowlist.has(p.name)) {
       problems.push(`${p.name} (${p.dir}) is publishable but not on the allowlist: add it or set "private": true`);
     }
-    if (!p.prepublishOnly.includes(HOOK)) {
-      problems.push(`${p.name} (${p.dir}) is publishable but its scripts.prepublishOnly does not run ${HOOK}`);
+    if (p.prepublishOnly !== HOOK_COMMAND) {
+      problems.push(`${p.name} (${p.dir}) is publishable but its scripts.prepublishOnly is not exactly "${HOOK_COMMAND}" (found "${p.prepublishOnly}")`);
     }
   }
   for (const name of allowlist) {
