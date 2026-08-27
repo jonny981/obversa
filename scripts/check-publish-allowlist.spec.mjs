@@ -1,10 +1,11 @@
 import assert from "node:assert/strict";
+import { execFileSync } from "node:child_process";
 import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import test from "node:test";
 
-import { HOOK_COMMAND, audit, checkHook, listWorkspacePackages } from "./check-publish-allowlist.mjs";
+import { HOOK_COMMAND, audit, checkHook, listWorkspacePackages, releaseTagFor } from "./check-publish-allowlist.mjs";
 
 function makeWorkspace(packages) {
   const root = mkdtempSync(path.join(os.tmpdir(), "publish-guard-"));
@@ -63,14 +64,73 @@ test("the audit fails closed: an unlisted public package, a missing or wrong hoo
   }
 });
 
+test("releaseTagFor names exactly one package and version", () => {
+  assert.equal(releaseTagFor("@obversa/lines", "1.0.0"), "obversa-lines@1.0.0");
+  assert.equal(releaseTagFor("@obversa/memory-git", "0.1.0"), "obversa-memory-git@0.1.0");
+  assert.equal(releaseTagFor("@obversa/engine-claude-cli", "0.1.0"), "obversa-engine-claude-cli@0.1.0");
+});
+
+// A git repository around one workspace package, so the hook's release-record
+// checks (branch, clean tree, annotated tag) run against the real thing.
+function makeReleaseRepo() {
+  const root = makeWorkspace({ "packages/p": { name: "@x/p", version: "1.0.0" } });
+  const git = (...args) => execFileSync("git", args, { cwd: root, encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] }).trim();
+  git("init", "-q", "-b", "main");
+  git("config", "user.email", "t@example.com");
+  git("config", "user.name", "T");
+  git("config", "commit.gpgsign", "false");
+  git("config", "tag.gpgsign", "false");
+  git("add", ".");
+  git("commit", "-q", "-m", "init");
+  return { root, cwd: path.join(root, "packages", "p"), git };
+}
+
 test("the prepublishOnly hook refuses without the release flag or the allowlist entry", () => {
-  const root = makeWorkspace({ "packages/p": { name: "@x/p" } });
-  const cwd = path.join(root, "packages", "p");
+  const { root, cwd } = makeReleaseRepo();
   try {
     const allowlist = new Set(["@x/p"]);
     assert.match(checkHook({ cwd, env: {}, allowlist }).join("\n"), /OBVERSA_RELEASE=1 is not set/);
     assert.match(checkHook({ cwd, env: { OBVERSA_RELEASE: "1" }, allowlist: new Set() }).join("\n"), /not on scripts\/publish-allowlist\.json/);
-    assert.deepEqual(checkHook({ cwd, env: { OBVERSA_RELEASE: "1" }, allowlist }), []);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("the hook requires the release record: main, a clean tree, and this package's annotated tag at HEAD", () => {
+  const { root, cwd, git } = makeReleaseRepo();
+  try {
+    const allowlist = new Set(["@x/p"]);
+    const env = { OBVERSA_RELEASE: "1" };
+    const problems = () => checkHook({ cwd, env, allowlist }).join("\n");
+    // No tag yet.
+    assert.match(problems(), /HEAD is not tagged x-p@1\.0\.0/);
+    // A lightweight tag is not a record.
+    git("tag", "x-p@1.0.0");
+    assert.match(problems(), /must be an annotated tag/);
+    git("tag", "-d", "x-p@1.0.0");
+    // A sibling's tag, or the same version on another package, does not count.
+    git("tag", "-a", "-m", "release", "x-other@1.0.0");
+    assert.match(problems(), /HEAD is not tagged x-p@1\.0\.0/);
+    // The right annotated tag on main with a clean tree: allowed.
+    git("tag", "-a", "-m", "release @x/p 1.0.0", "x-p@1.0.0");
+    assert.deepEqual(checkHook({ cwd, env, allowlist }), []);
+    // A dirty tree is refused even with the tag in place.
+    writeFileSync(path.join(cwd, "scratch.txt"), "wip\n");
+    assert.match(problems(), /working tree is not clean/);
+    rmSync(path.join(cwd, "scratch.txt"));
+    // Off main is refused even with the tag in place.
+    git("checkout", "-q", "-b", "feature");
+    assert.match(problems(), /releases publish from main \(checkout is on feature\)/);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("outside a git repository the hook refuses", () => {
+  const root = makeWorkspace({ "packages/p": { name: "@x/p", version: "1.0.0" } });
+  try {
+    const problems = checkHook({ cwd: path.join(root, "packages", "p"), env: { OBVERSA_RELEASE: "1" }, allowlist: new Set(["@x/p"]), run: () => { throw new Error("no git"); } });
+    assert.match(problems.join("\n"), /not inside a git repository/);
   } finally {
     rmSync(root, { recursive: true, force: true });
   }
