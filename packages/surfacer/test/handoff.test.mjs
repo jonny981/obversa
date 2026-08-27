@@ -6,9 +6,9 @@ import { createPrivateTransfer, removeTransfer } from "../src/transfer.mjs";
 import { promises as fs } from "node:fs";
 
 test("a framed result round-trips through caller-captured stdout", () => {
-  const result = terminalResult("pierre-review", "completed", { payload: { notes: 3 } });
+  const result = terminalResult("code-review", "completed", { payload: { notes: 3 } });
   const captured = `noise before\n${frameResult(result)}noise after\n`;
-  const parsed = parseFramedResult(captured, "pierre-review");
+  const parsed = parseFramedResult(captured, "code-review");
   assert.equal(parsed.operationId, result.operationId);
   assert.deepEqual(parsed.payload, { notes: 3 });
   assert.equal(parseFramedResult(captured, "other-app"), null);
@@ -53,11 +53,11 @@ test("a verbatim completion carries secret-shaped content unmangled", async () =
 });
 
 test("a colliding earlier frame does not hide the exact later frame", () => {
-  const a = terminalResult("pierre_review", "completed", { payload: { from: "underscore" } });
-  const b = terminalResult("pierre-review", "completed", { payload: { from: "hyphen" } });
+  const a = terminalResult("code_review", "completed", { payload: { from: "underscore" } });
+  const b = terminalResult("code-review", "completed", { payload: { from: "hyphen" } });
   const captured = frameResult(a) + frameResult(b);
-  assert.equal(parseFramedResult(captured, "pierre-review").payload.from, "hyphen");
-  assert.equal(parseFramedResult(captured, "pierre_review").payload.from, "underscore");
+  assert.equal(parseFramedResult(captured, "code-review").payload.from, "hyphen");
+  assert.equal(parseFramedResult(captured, "code_review").payload.from, "underscore");
 });
 
 test("removeTransfer refuses foreign directories and stays retryable after a failed removal", async () => {

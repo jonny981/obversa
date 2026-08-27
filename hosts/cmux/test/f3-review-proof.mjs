@@ -1,10 +1,12 @@
-// F3 composition proof: the Pierre review surface really runs on @obversa/surfacer.
+// F3 composition proof: the review surface really runs on @obversa/surfacer.
 //
 // This is the F2 completion evidence and the F3 core evidence in one place. It
 // wires source's reviewDiff to surfacer's runSurface exactly as the composition
 // root does, opens a real diff on a real loopback surface, and drives it with an
 // HTTP client that plays the browser. It proves:
 //   - the diff opens and its annotations round-trip through the framed handoff,
+//   - the diff itself is served only behind the bearer token (the static shell
+//     carries none of it; unauth GET is 401) and arrives verbatim, unredacted,
 //   - review content survives verbatim through the redacting server,
 //   - the bearer token gates the annotation mutation (unauth 401, cross-origin 403),
 //   - no server code is copied: source calls the injected runSurface port.
@@ -28,6 +30,10 @@ function git(cwd, ...args) {
   return execFileSync("git", args, { cwd, encoding: "utf8" });
 }
 
+// A secret-looking string: the server redacts these in every normal /api body,
+// so seeing it intact proves the verbatim lanes (the diff and the annotations).
+const SECRET = "token=ghp_ABC123verbatimSECRET";
+
 function makeRepoWithChange() {
   const dir = mkdtempSync(path.join(os.tmpdir(), "f3-proof-"));
   git(dir, "init", "-q");
@@ -37,7 +43,7 @@ function makeRepoWithChange() {
   writeFileSync(path.join(dir, "a.txt"), "alpha\n");
   git(dir, "add", "a.txt");
   git(dir, "commit", "-q", "-m", "first");
-  writeFileSync(path.join(dir, "a.txt"), "alpha\nbeta\n");
+  writeFileSync(path.join(dir, "a.txt"), `alpha\nbeta ${SECRET}\n`);
   return dir;
 }
 
@@ -58,11 +64,11 @@ function captureStream() {
   return { write(chunk) { text += chunk; return true; }, get text() { return text; } };
 }
 
-test("the Pierre review surface runs on surfacer and returns annotations", { timeout: 30_000 }, async () => {
+test("the review surface runs on surfacer and returns annotations", { timeout: 30_000 }, async () => {
   const repo = makeRepoWithChange();
   const { diffText } = await computeDiff({ mode: "worktree", cwd: repo });
   const anchor = firstNewAnchor(diffText);
-  const secret = "token=ghp_ABC123verbatimSECRET";
+  const secret = SECRET;
 
   const stdout = captureStream();
   let resolveReady;
@@ -90,13 +96,29 @@ test("the Pierre review surface runs on surfacer and returns annotations", { tim
     const token = url.split("#")[1];
     assert.ok(token, "the session url carries a token fragment");
 
-    // The shell and the reused client kit are served raw (no auth on statics).
+    // The shell and the reused client kit are served raw (no auth on statics),
+    // so the shell must carry none of the diff.
     const shell = await fetch(`${origin}/`);
     assert.equal(shell.status, 200);
-    assert.match(await shell.text(), /id="review-data"/);
+    const shellText = await shell.text();
+    assert.doesNotMatch(shellText, /review-data/);
+    assert.doesNotMatch(shellText, /beta/);
+    assert.doesNotMatch(shellText, /verbatimSECRET/);
     const kit = await fetch(`${origin}/surface-client.mjs`);
     assert.equal(kit.status, 200);
     assert.equal(await kit.text(), clientKitSource);
+
+    // The diff is fetched behind the bearer token and arrives verbatim.
+    const noAuthModel = await fetch(`${origin}/api/model`, { headers: { Origin: origin } });
+    assert.equal(noAuthModel.status, 401);
+    const modelResponse = await fetch(`${origin}/api/model`, {
+      headers: { Authorization: `Bearer ${token}`, Origin: origin },
+    });
+    assert.equal(modelResponse.status, 200);
+    const { model, meta } = await modelResponse.json();
+    assert.equal(meta.label, "working tree");
+    const addedTexts = model.files[0].hunks.flatMap((h) => h.lines).map((l) => l.text);
+    assert.ok(addedTexts.some((t) => t.includes(secret)), "the diff line reaches the browser unredacted");
 
     const submitBody = JSON.stringify({ annotations: [{ ...anchor, body: `looks off: ${secret}` }] });
 
@@ -139,7 +161,7 @@ test("the Pierre review surface runs on surfacer and returns annotations", { tim
     assert.match(outcome.annotations[0].body, /ghp_ABC123verbatimSECRET/);
 
     // The framed stdout carries the same verbatim payload for a pipeline consumer.
-    const framed = parseFramedResult(stdout.text, "pierre-review");
+    const framed = parseFramedResult(stdout.text, "review");
     assert.ok(framed, "a framed result is written to stdout");
     assert.equal(framed.status, "completed");
     assert.match(framed.payload.annotations[0].body, /ghp_ABC123verbatimSECRET/);

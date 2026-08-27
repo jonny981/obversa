@@ -2,7 +2,7 @@
   "name": "@obversa/source",
   "version": "0.1.0",
   "private": true,
-  "description": "The Pierre review Surface: open a git diff for inline review and return the annotations. Runs on an injected surface port; the composition root binds @obversa/surfacer.",
+  "description": "The review surface: open a git diff for inline review and return the annotations. Runs on an injected surface port; the composition root binds @obversa/surfacer.",
   "type": "module",
   "exports": {
     ".": "./src/index.mjs"
@@ -12,5 +12,9 @@
   },
   "engines": {
     "node": ">=20"
+  },
+  "dependencies": {
+    "acorn": "8.18.0",
+    "shiki": "4.4.3"
   }
 }

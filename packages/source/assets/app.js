@@ -1,23 +1,164 @@
-// The Pierre review page. It reads the diff model embedded in the shell,
-// renders it, lets the reviewer attach comments to individual lines, and
-// returns those annotations through the surface client kit. It is served under
-// script-src 'self'; there is no inline script and no innerHTML, so arbitrary
-// code inside a diff line can never execute or break out.
+// The review page. It fetches the diff model from the session API with the
+// bearer token, renders it, lets the reviewer attach comments to individual
+// lines, and returns those annotations through the surface client kit. It is
+// served under script-src 'self'; there is no inline script and no innerHTML of
+// diff content, so arbitrary code inside a diff line can never execute or
+// break out.
 import { createSurfaceClient } from "./surface-client.mjs";
+import { overlaySegments } from "./nav-segments.mjs";
+import { buildFileTree, countFiles } from "./file-tree.mjs";
+import { iconFor } from "./icons.mjs";
 
 const root = document.getElementById("app");
-
-function readReviewData() {
-  const node = document.getElementById("review-data");
-  if (!node) throw new Error("The review data block is missing");
-  return JSON.parse(node.textContent);
-}
 
 function el(tag, className, text) {
   const node = document.createElement(tag);
   if (className) node.className = className;
   if (text != null) node.textContent = text;
   return node;
+}
+
+// Build the highlighted <code> for one diff line from its server-side tokens,
+// with clickable identifiers overlaid from the line's go-to-source hits. Every
+// value still goes in through textContent, so nothing in a diff line can execute
+// or break out. Falls back to plain text when a line carries no tokens.
+function codeEl(line) {
+  const code = el("code", "code");
+  const tokens = line.tokens;
+  if (!Array.isArray(tokens) || tokens.length === 0) {
+    code.textContent = line.text;
+    return code;
+  }
+  for (const seg of overlaySegments(tokens, line.hits)) {
+    if (seg.hit) {
+      const navCls = seg.hit.action === "jump" ? "nav nav-jump" : "nav nav-indicate";
+      const span = el("span", seg.cls ? `${seg.cls} ${navCls}` : navCls, seg.text);
+      span.setAttribute("role", "link");
+      span.tabIndex = 0;
+      span.title = seg.hit.action === "jump"
+        ? `Go to definition of ${seg.hit.name} (line ${seg.hit.def.line})`
+        : `${seg.hit.name} is defined at line ${seg.hit.def.line}, not shown here`;
+      const activate = () => activateNav(seg.hit);
+      span.addEventListener("click", activate);
+      span.addEventListener("keydown", (event) => {
+        if (event.key === "Enter" || event.key === " ") { event.preventDefault(); activate(); }
+      });
+      code.append(span);
+    } else if (seg.cls) {
+      code.append(el("span", seg.cls, seg.text));
+    } else {
+      code.append(document.createTextNode(seg.text));
+    }
+  }
+  return code;
+}
+
+// Jump to (and briefly flash) the row that defines the clicked identifier, when
+// that definition line is shown in the diff. An "indicate" hit has no on-screen
+// target; its title tooltip already names the definition line.
+function activateNav(hit) {
+  if (hit.action !== "jump" || !hit.def) return;
+  const row = document.querySelector(`.row[data-new-line="${hit.def.line}"]`);
+  if (!row) return;
+  row.scrollIntoView({ block: "center", behavior: reduceMotion() ? "auto" : "smooth" });
+  row.classList.remove("flash");
+  void row.offsetWidth; // restart the flash animation
+  row.classList.add("flash");
+}
+
+function reduceMotion() {
+  return Boolean(window.matchMedia && window.matchMedia("(prefers-reduced-motion: reduce)").matches);
+}
+
+// The files navigator: a collapsible directory tree built from the diff model,
+// with a Changes view and an All-files view. The caller supplies `onOpen(path)`;
+// the review page scrolls that file's diff section into view.
+function renderFileTree(model, meta, onOpen) {
+  const nav = el("nav", "filetree");
+  nav.setAttribute("aria-label", "Files");
+  const tabs = el("div", "tree-tabs");
+  const changesTab = el("button", "tree-tab");
+  changesTab.type = "button";
+  changesTab.append(document.createTextNode("Changes "), el("span", "tab-count", String(model.files.length)));
+  const allTab = el("button", "tree-tab");
+  allTab.type = "button";
+  const hasAll = Array.isArray(meta.allFiles) && meta.allFiles.length > model.files.length;
+  allTab.append(document.createTextNode("All files "), el("span", "tab-count", String(hasAll ? meta.allFiles.length : model.files.length)));
+  const content = el("div", "tree-content");
+
+  const changesTree = () => renderTreeNodes(buildFileTree(model.files), onOpen);
+  const allTree = () => {
+    const changed = new Map(model.files.map((f) => [f.path, f]));
+    const all = (meta.allFiles || []).map((p) => changed.get(p) || { path: p, status: "unchanged" });
+    return renderTreeNodes(buildFileTree(all), onOpen);
+  };
+  const show = (which) => {
+    changesTab.classList.toggle("active", which === "changes");
+    allTab.classList.toggle("active", which === "all");
+    content.replaceChildren(which === "changes" ? changesTree() : allTree());
+  };
+  changesTab.addEventListener("click", () => show("changes"));
+  allTab.addEventListener("click", () => show("all"));
+
+  tabs.append(changesTab);
+  if (hasAll) tabs.append(allTab);
+  nav.append(tabs, content);
+  show("changes");
+  return nav;
+}
+
+function renderTreeNodes(node, onOpen) {
+  const list = el("ul", "tree-list");
+  for (const dir of node.dirs) {
+    const item = el("li", "tree-dir");
+    const toggle = el("button", "tree-toggle");
+    toggle.type = "button";
+    toggle.setAttribute("aria-expanded", "true");
+    toggle.append(el("span", "tree-caret", "▾"), iconEl(null, "folder"), el("span", "tree-name", dir.name), el("span", "tree-count", String(countFiles(dir))));
+    const children = renderTreeNodes(dir, onOpen);
+    toggle.addEventListener("click", () => {
+      const open = toggle.getAttribute("aria-expanded") === "true";
+      toggle.setAttribute("aria-expanded", String(!open));
+      toggle.firstChild.textContent = open ? "▸" : "▾";
+      children.hidden = open;
+    });
+    item.append(toggle, children);
+    list.append(item);
+  }
+  for (const file of node.files) {
+    const item = el("li", "tree-file");
+    const changed = file.status !== "unchanged";
+    const btn = el("button", `tree-file-btn status-${file.status}${changed ? "" : " unchanged"}`);
+    btn.type = "button";
+    btn.title = changed ? `${file.path} — ${file.status}` : file.path;
+    btn.append(iconEl(file.path), el("span", "tree-name", file.name));
+    if (changed) btn.append(fileStatEl(file), el("span", "tree-status", statusMark(file.status)));
+    btn.addEventListener("click", () => onOpen(file.path));
+    item.append(btn);
+    list.append(item);
+  }
+  return list;
+}
+
+function statusMark(status) {
+  return { added: "A", deleted: "D", modified: "M", renamed: "R", copied: "C" }[status] || "M";
+}
+
+function fileStatEl(file) {
+  const stat = el("span", "tree-stat");
+  if (file.added) stat.append(el("span", "stat-add", `+${file.added}`));
+  if (file.deleted) stat.append(el("span", "stat-del", `−${file.deleted}`));
+  return stat;
+}
+
+// Render a trusted, static file-type icon. The SVG comes from our fixed icon map
+// (icons.mjs), never from user content, so setting innerHTML here is safe: the
+// icons carry no script and no external references (asserted in icons.test).
+function iconEl(path, kind) {
+  const span = el("span", "tree-icon");
+  span.setAttribute("aria-hidden", "true");
+  span.innerHTML = iconFor(path, kind);
+  return span;
 }
 
 function anchorFor(line) {
@@ -30,12 +171,67 @@ function statusLabel(status) {
   return { added: "added", deleted: "deleted", modified: "modified", renamed: "renamed", copied: "copied" }[status] || status;
 }
 
-function main() {
-  const { model, meta } = readReviewData();
-  const annotations = [];
-  let annotationSeq = 0;
-  let settled = false;
+// The file path as a breadcrumb: dimmed directory segments, the filename bold.
+function renderPath(path) {
+  const wrap = el("span", "path");
+  const parts = String(path).split("/");
+  parts.forEach((part, i) => {
+    if (i > 0) wrap.append(el("span", "path-sep", "/"));
+    wrap.append(el("span", i === parts.length - 1 ? "path-file" : "path-dir", part));
+  });
+  return wrap;
+}
 
+// A collapsible "N unmodified lines" band. It expands into the surrounding
+// full-file context (highlighted, read-only); collapsed by default so the view
+// is the diff. Rows are built lazily on first expand.
+function renderContextBand(contextLines) {
+  const band = el("div", "context-band");
+  const toggle = el("button", "context-toggle");
+  toggle.type = "button";
+  toggle.setAttribute("aria-expanded", "false");
+  const n = contextLines.length;
+  toggle.append(el("span", "context-caret", "▸"), el("span", "context-label", `${n} unmodified line${n === 1 ? "" : "s"}`));
+  const rows = el("div", "context-rows");
+  rows.hidden = true;
+  let built = false;
+  toggle.addEventListener("click", () => {
+    if (!built) {
+      for (const line of contextLines) rows.append(contextRow(line));
+      built = true;
+    }
+    const open = toggle.getAttribute("aria-expanded") === "true";
+    toggle.setAttribute("aria-expanded", String(!open));
+    toggle.firstChild.textContent = open ? "▸" : "▾";
+    rows.hidden = open;
+  });
+  band.append(toggle, rows);
+  return band;
+}
+
+function contextRow(line) {
+  const row = el("div", "row row-context");
+  row.dataset.newLine = String(line.line);
+  const code = el("code", "code");
+  const tokens = line.tokens;
+  if (Array.isArray(tokens) && tokens.length > 0) {
+    for (const token of tokens) {
+      if (token && token.cls) code.append(el("span", token.cls, token.text));
+      else code.append(document.createTextNode(token ? token.text : ""));
+    }
+  } else {
+    code.textContent = line.text;
+  }
+  row.append(
+    el("span", "gutter old", ""),
+    el("span", "gutter new", String(line.line)),
+    el("span", "sign", " "),
+    code,
+  );
+  return row;
+}
+
+async function main() {
   let client;
   try {
     client = createSurfaceClient();
@@ -44,6 +240,21 @@ function main() {
     root.setAttribute("aria-busy", "false");
     return;
   }
+
+  // The diff rides the authenticated API, not the static shell.
+  let model;
+  let meta;
+  try {
+    ({ model, meta } = await client.api("/api/model"));
+  } catch (error) {
+    root.replaceChildren(el("p", "notice error", `Could not load the review: ${error.message}`));
+    root.setAttribute("aria-busy", "false");
+    return;
+  }
+
+  const annotations = [];
+  let annotationSeq = 0;
+  let settled = false;
 
   // Header with the review label and the return/cancel controls.
   const header = el("header", "review-header");
@@ -69,14 +280,30 @@ function main() {
   updateCount();
 
   const body = el("div", "files");
+  const fileSections = new Map();
   if (model.files.length === 0) {
     body.append(el("p", "notice", "No changes to review."));
   }
 
   for (const file of model.files) {
     const section = el("section", "file");
+    section.dataset.path = file.path;
+    fileSections.set(file.path, section);
     const head = el("div", "file-head");
-    head.append(el("span", `badge badge-${file.status}`, statusLabel(file.status)), el("span", "path", file.path));
+    head.append(el("span", `badge badge-${file.status}`, statusLabel(file.status)), renderPath(file.path));
+    const hasContext = file.hunks.some((h) => h.contextBefore && h.contextBefore.length) || (file.contextAfter && file.contextAfter.length);
+    if (hasContext) {
+      const expandAll = el("button", "file-expand small");
+      expandAll.type = "button";
+      expandAll.textContent = "Expand full file";
+      expandAll.addEventListener("click", () => {
+        const toggles = [...section.querySelectorAll(".context-toggle")];
+        const expand = toggles.some((t) => t.getAttribute("aria-expanded") !== "true");
+        for (const t of toggles) if ((t.getAttribute("aria-expanded") === "true") !== expand) t.click();
+        expandAll.textContent = expand ? "Collapse to diff" : "Expand full file";
+      });
+      head.append(expandAll);
+    }
     section.append(head);
 
     if (file.binary) {
@@ -92,19 +319,26 @@ function main() {
 
     const table = el("div", "hunks");
     for (const hunk of file.hunks) {
-      const hunkHead = el("div", "hunk-head", hunk.header
-        ? `@@ -${hunk.oldStart},${hunk.oldLines} +${hunk.newStart},${hunk.newLines} @@ ${hunk.header}`
-        : `@@ -${hunk.oldStart},${hunk.oldLines} +${hunk.newStart},${hunk.newLines} @@`);
-      table.append(hunkHead);
+      // The collapsible "N unmodified lines" band is the separator between hunks
+      // and expands into full-file context. Without full-file context the plain
+      // @@ header stands in; adjacent hunks (an empty gap) get no separator.
+      if (hunk.contextBefore === undefined) {
+        table.append(el("div", "hunk-head", hunk.header
+          ? `@@ -${hunk.oldStart},${hunk.oldLines} +${hunk.newStart},${hunk.newLines} @@ ${hunk.header}`
+          : `@@ -${hunk.oldStart},${hunk.oldLines} +${hunk.newStart},${hunk.newLines} @@`));
+      } else if (hunk.contextBefore.length) {
+        table.append(renderContextBand(hunk.contextBefore));
+      }
 
       for (const line of hunk.lines) {
         const anchor = anchorFor(line);
         const row = el("div", `row row-${line.type}`);
+        if (line.newNumber != null) row.dataset.newLine = String(line.newNumber);
         row.append(
           el("span", "gutter old", line.oldNumber == null ? "" : String(line.oldNumber)),
           el("span", "gutter new", line.newNumber == null ? "" : String(line.newNumber)),
           el("span", "sign", line.type === "add" ? "+" : line.type === "del" ? "-" : " "),
-          el("code", "code", line.text),
+          codeEl(line),
         );
         const addButton = el("button", "add-comment", "+");
         addButton.type = "button";
@@ -120,6 +354,7 @@ function main() {
         table.append(row, thread);
       }
     }
+    if (file.contextAfter && file.contextAfter.length) table.append(renderContextBand(file.contextAfter));
     section.append(table);
     body.append(section);
   }
@@ -211,7 +446,15 @@ function main() {
     }
   });
 
-  root.replaceChildren(header, status, body);
+  const layout = el("div", "layout");
+  if (model.files.length > 0) {
+    layout.append(renderFileTree(model, meta, (path) => {
+      const section = fileSections.get(path);
+      if (section) section.scrollIntoView({ block: "start", behavior: reduceMotion() ? "auto" : "smooth" });
+    }));
+  }
+  layout.append(body);
+  root.replaceChildren(header, status, layout);
   root.setAttribute("aria-busy", "false");
 }
 

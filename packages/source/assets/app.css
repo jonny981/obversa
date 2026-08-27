@@ -78,6 +78,9 @@ button.link { border: none; color: var(--accent); padding: 0 0.25rem; }
   border-bottom: 1px solid var(--border);
 }
 .path { font-family: var(--code); font-size: 0.85rem; }
+.path-sep { color: var(--muted); margin: 0 0.25rem; }
+.path-dir { color: var(--muted); }
+.path-file { color: var(--fg); font-weight: 600; }
 .badge {
   font-size: 0.7rem;
   text-transform: uppercase;
@@ -99,6 +102,32 @@ button.link { border: none; color: var(--accent); padding: 0 0.25rem; }
   padding: 0.25rem 0.75rem;
 }
 
+/* Collapsible full-file context: "N unmodified lines" bands expand into the
+   surrounding code, so the view is the diff by default and the whole file a
+   click away. */
+.context-band { border-top: 1px solid var(--border); }
+.context-band:first-child { border-top: none; }
+.context-toggle {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  width: 100%;
+  border: none;
+  background: color-mix(in srgb, var(--fg) 3%, transparent);
+  color: var(--muted);
+  font: inherit;
+  font-size: 0.78rem;
+  padding: 0.2rem 0.75rem;
+  cursor: pointer;
+  text-align: left;
+}
+.context-toggle:hover { background: color-mix(in srgb, var(--accent) 8%, transparent); color: var(--fg); }
+.context-toggle:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+.context-caret { width: 0.8rem; flex: none; }
+.context-rows .code { color: color-mix(in srgb, var(--fg) 82%, transparent); }
+.file-expand { margin-left: auto; color: var(--accent); border-color: transparent; background: transparent; padding: 0.15rem 0.4rem; }
+.file-expand:hover { border-color: var(--accent); }
+
 .row {
   display: grid;
   grid-template-columns: 3rem 3rem 1.25rem 1fr auto;
@@ -106,8 +135,8 @@ button.link { border: none; color: var(--accent); padding: 0 0.25rem; }
   font-family: var(--code);
   font-size: 0.85rem;
 }
-.row-add { background: var(--add-bg); }
-.row-del { background: var(--del-bg); }
+.row-add { background: var(--add-bg); box-shadow: inset 3px 0 0 color-mix(in srgb, var(--add-fg) 65%, transparent); }
+.row-del { background: var(--del-bg); box-shadow: inset 3px 0 0 color-mix(in srgb, var(--del-fg) 65%, transparent); }
 .gutter { color: var(--muted); text-align: right; padding: 0 0.4rem; user-select: none; }
 .sign { text-align: center; user-select: none; }
 .row-add .sign { color: var(--add-fg); }
@@ -144,3 +173,102 @@ button.link { border: none; color: var(--accent); padding: 0 0.25rem; }
   border-radius: 0 6px 6px 0;
 }
 .comment-body { margin: 0 0 0.25rem; white-space: pre-wrap; font-family: system-ui, sans-serif; }
+
+/* Go-to-source: identifiers whose definition the navindex resolved. A "jump"
+   identifier scrolls to its definition row; an "indicate" one names the line in
+   its tooltip because the definition is not shown in this diff. */
+.nav { text-decoration: underline dotted; text-underline-offset: 2px; cursor: pointer; }
+.nav-jump { text-decoration-color: var(--accent); }
+.nav-jump:hover,
+.nav-jump:focus-visible {
+  text-decoration-style: solid;
+  outline: none;
+  background: color-mix(in srgb, var(--accent) 14%, transparent);
+  border-radius: 3px;
+}
+.nav-indicate { text-decoration-color: var(--muted); cursor: help; }
+.nav-indicate:hover,
+.nav-indicate:focus-visible { text-decoration-style: solid; outline: none; }
+
+@keyframes nav-flash {
+  0% { background: color-mix(in srgb, var(--accent) 55%, transparent); box-shadow: inset 3px 0 0 0 var(--accent); }
+  70% { background: color-mix(in srgb, var(--accent) 22%, transparent); box-shadow: inset 3px 0 0 0 var(--accent); }
+  100% { background: transparent; box-shadow: inset 3px 0 0 0 transparent; }
+}
+.row.flash { animation: nav-flash 1.5s ease-out; }
+@media (prefers-reduced-motion: reduce) {
+  .row.flash { animation: none; }
+}
+
+/* Changed-files navigator and the two-column layout it introduces. */
+.layout { display: grid; grid-template-columns: minmax(11rem, 15rem) minmax(0, 1fr); gap: 1rem; align-items: start; }
+.filetree {
+  position: sticky;
+  top: 4.75rem;
+  align-self: start;
+  max-height: calc(100vh - 6rem);
+  overflow: auto;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 0.4rem;
+  font-size: 0.8rem;
+}
+.tree-tabs { display: flex; gap: 0.25rem; padding: 0 0.1rem 0.4rem; border-bottom: 1px solid var(--border); margin-bottom: 0.35rem; }
+.tree-tab {
+  border: none;
+  background: transparent;
+  color: var(--muted);
+  font: inherit;
+  font-size: 0.78rem;
+  padding: 0.2rem 0.5rem;
+  border-radius: 5px;
+  cursor: pointer;
+}
+.tree-tab:hover { color: var(--fg); background: color-mix(in srgb, var(--fg) 6%, transparent); }
+.tree-tab.active { color: var(--fg); background: color-mix(in srgb, var(--accent) 14%, transparent); }
+.tab-count { color: var(--muted); font-variant-numeric: tabular-nums; }
+.tree-tab.active .tab-count { color: var(--accent); }
+.tree-file-btn.unchanged,
+.tree-file-btn.unchanged .tree-name { color: var(--muted); font-weight: normal; }
+
+.tree-list { list-style: none; margin: 0; padding: 0; }
+.tree-dir > .tree-list { padding-left: 0.8rem; border-left: 1px solid var(--border); margin-left: 0.35rem; }
+.tree-toggle,
+.tree-file-btn {
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+  width: 100%;
+  border: none;
+  background: transparent;
+  color: var(--fg);
+  font: inherit;
+  padding: 0.15rem 0.3rem;
+  border-radius: 4px;
+  cursor: pointer;
+  text-align: left;
+}
+.tree-toggle:hover,
+.tree-file-btn:hover { background: color-mix(in srgb, var(--fg) 7%, transparent); }
+.tree-toggle:focus-visible,
+.tree-file-btn:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+.tree-caret { width: 0.8rem; color: var(--muted); flex: none; }
+.tree-icon { display: inline-flex; align-items: center; justify-content: center; flex: none; width: 16px; height: 16px; }
+.tree-icon svg { width: 16px; height: 16px; display: block; }
+.tree-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-family: var(--code); }
+.tree-count { color: var(--muted); font-variant-numeric: tabular-nums; }
+.tree-status { width: 1rem; text-align: center; font-family: var(--code); font-weight: 600; color: var(--muted); flex: none; }
+.tree-file-btn.status-added .tree-status { color: var(--add-fg); }
+.tree-file-btn.status-deleted .tree-status { color: var(--del-fg); }
+.tree-file-btn.status-renamed .tree-status,
+.tree-file-btn.status-copied .tree-status { color: var(--accent); }
+.tree-stat { display: flex; gap: 0.3rem; flex: none; font-variant-numeric: tabular-nums; font-size: 0.72rem; }
+.stat-add { color: var(--add-fg); }
+.stat-del { color: var(--del-fg); }
+.tree-file-btn.status-added .tree-name { color: var(--add-fg); }
+.tree-file-btn.status-deleted .tree-name { color: var(--del-fg); text-decoration: line-through; }
+
+@media (max-width: 720px) {
+  .layout { grid-template-columns: 1fr; }
+  .filetree { position: static; max-height: 18rem; }
+}

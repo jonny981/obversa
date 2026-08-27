@@ -1,4 +1,6 @@
 import { execFile } from "node:child_process";
+import { readFile } from "node:fs/promises";
+import { join } from "node:path";
 import { promisify } from "node:util";
 
 const run = promisify(execFile);
@@ -61,4 +63,55 @@ export async function computeDiff({ mode = "worktree", range, cwd = process.cwd(
     windowsHide: true,
   });
   return { diffText: stdout, mode, range: mode === "range" ? range : null };
+}
+
+/**
+ * Read the full NEW-side content of a file under review, so a full-file parser
+ * (go-to-source) can see code the diff hunks alone do not contain. Returns the
+ * text, or null when it is unavailable — a deleted path, an unreadable file, or
+ * range mode (a range's new side is not a single readable object in v1).
+ * - worktree: the working-tree file on disk.
+ * - staged: the index version, via `git show :path`.
+ */
+export async function readNewFileText({ path: filePath, mode = "worktree", cwd = process.cwd() } = {}) {
+  if (typeof filePath !== "string" || filePath.length === 0 || filePath === "/dev/null") return null;
+  if (mode === "worktree") {
+    try {
+      return await readFile(join(cwd, filePath), "utf8");
+    } catch {
+      return null;
+    }
+  }
+  if (mode === "staged") {
+    try {
+      // `:path` is the index blob; execFile passes it as one argv element and it
+      // begins with ':', so a leading dash in the path can't read as an option.
+      const { stdout } = await run("git", ["--no-pager", "show", `:${filePath}`], {
+        cwd,
+        maxBuffer: 64 * 1024 * 1024,
+        windowsHide: true,
+      });
+      return stdout;
+    } catch {
+      return null;
+    }
+  }
+  return null;
+}
+
+/**
+ * List the repository's tracked files, for the tree's "All files" view. Returns
+ * repo-relative paths (git's own order), or [] on any error.
+ */
+export async function listTrackedFiles({ cwd = process.cwd() } = {}) {
+  try {
+    const { stdout } = await run("git", ["-c", "core.quotePath=false", "ls-files"], {
+      cwd,
+      maxBuffer: 16 * 1024 * 1024,
+      windowsHide: true,
+    });
+    return stdout.split("\n").filter((line) => line.length > 0);
+  } catch {
+    return [];
+  }
 }

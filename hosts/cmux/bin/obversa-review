@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// The Pierre review composition root.
+// The review surface composition root.
 //
 // This is the one place where @obversa/source meets @obversa/surfacer. Source
 // owns diff production and the review UI but stays free of any sibling package;
@@ -23,7 +23,7 @@ import { runSurface } from "../../../packages/surfacer/src/index.mjs";
 import { reviewDiff } from "../../../packages/source/src/index.mjs";
 
 function parseArgs(argv) {
-  const options = { mode: "worktree", range: undefined, cwd: process.cwd(), open: true, app: "pierre-review" };
+  const options = { mode: "worktree", range: undefined, cwd: process.cwd(), open: true, app: "review" };
   for (let index = 0; index < argv.length; index += 1) {
     const arg = argv[index];
     if (arg === "--staged" || arg === "--cached") options.mode = "staged";

@@ -1,11 +1,11 @@
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import test from "node:test";
 
-import { computeDiff, diffArgs } from "../src/git.mjs";
+import { computeDiff, diffArgs, readNewFileText, listTrackedFiles } from "../src/git.mjs";
 
 function git(cwd, ...args) {
   return execFileSync("git", args, { cwd, encoding: "utf8" });
@@ -66,5 +66,44 @@ test("computeDiff reads the working tree, the staged changes, and a ref range", 
     assert.equal(range.range, "HEAD~1..HEAD");
   } finally {
     rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("readNewFileText reads worktree and staged content, and returns null when unavailable", async () => {
+  const dir = makeRepo();
+  try {
+    writeFileSync(path.join(dir, "code.js"), "const value = 1;\n");
+    // Worktree: the file on disk.
+    assert.equal(await readNewFileText({ path: "code.js", mode: "worktree", cwd: dir }), "const value = 1;\n");
+
+    // Staged reads the index, which can differ from the working tree.
+    git(dir, "add", "code.js");
+    writeFileSync(path.join(dir, "code.js"), "const value = 2;\n");
+    assert.equal(await readNewFileText({ path: "code.js", mode: "staged", cwd: dir }), "const value = 1;\n");
+    assert.equal(await readNewFileText({ path: "code.js", mode: "worktree", cwd: dir }), "const value = 2;\n");
+
+    // Unavailable cases all yield null: /dev/null, a missing file, and range mode.
+    assert.equal(await readNewFileText({ path: "/dev/null", mode: "worktree", cwd: dir }), null);
+    assert.equal(await readNewFileText({ path: "missing.js", mode: "worktree", cwd: dir }), null);
+    assert.equal(await readNewFileText({ path: "code.js", mode: "range", cwd: dir }), null);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("listTrackedFiles returns the repo's tracked files, or [] outside a repo", async () => {
+  const dir = makeRepo();
+  const empty = mkdtempSync(path.join(os.tmpdir(), "source-empty-"));
+  try {
+    mkdirSync(path.join(dir, "src"), { recursive: true });
+    writeFileSync(path.join(dir, "src", "a.js"), "1\n");
+    writeFileSync(path.join(dir, "README.md"), "x\n");
+    git(dir, "add", ".");
+    git(dir, "commit", "-q", "-m", "files");
+    assert.deepEqual([...(await listTrackedFiles({ cwd: dir }))].sort(), ["README.md", "src/a.js"]);
+    assert.deepEqual(await listTrackedFiles({ cwd: empty }), []);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+    rmSync(empty, { recursive: true, force: true });
   }
 });

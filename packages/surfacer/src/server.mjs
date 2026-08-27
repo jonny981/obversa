@@ -20,7 +20,11 @@ const MAX_BODY_BYTES = 4 * 1024 * 1024;
  * Built-in endpoints: POST /api/heartbeat, /api/cancel, /api/ack. The app
  * supplies its own endpoints through `api` and its static shell through
  * `assets`. App handlers receive ({ body, session }) and either return
- * { status, body } or call session.complete(payload).
+ * { status, body } or call session.complete(payload). A handler that returns
+ * { verbatim: true } sends its body byte-exact, skipping the secret redaction
+ * that every other response passes through — the read-side mirror of
+ * session.complete's verbatim option, for content the caller must not corrupt
+ * (a diff under review). The body still travels behind the bearer token.
  */
 export async function startSurface({
   app,
@@ -170,14 +174,15 @@ export async function startSurface({
         sendJson(response, 409, { error: "This session is closed" });
         return;
       }
+      const verbatim = outcome?.verbatim === true;
       if (terminalClaim && outcome?.body && typeof outcome.body === "object" && !Array.isArray(outcome.body)) {
-        sendJson(response, outcome.status ?? 200, { ...outcome.body, operationId: terminalClaim.operationId });
+        sendJson(response, outcome.status ?? 200, { ...outcome.body, operationId: terminalClaim.operationId }, { verbatim });
         return;
       }
       sendJson(response, outcome?.status ?? 200, outcome?.body
         ?? (terminalClaim && terminalClaim !== claimBefore
           ? { ok: true, operationId: terminalClaim.operationId }
-          : { ok: true }));
+          : { ok: true }), { verbatim });
     } catch (error) {
       sendJson(response, error?.statusCode || (error?.code === "BODY_TOO_LARGE" ? 413 : 400), {
         error: safeText(error?.message || "Request failed", 300),
@@ -335,9 +340,9 @@ async function sendStatic(response, directory, [fileName, contentType]) {
   response.end(content);
 }
 
-function sendJson(response, status, body) {
+function sendJson(response, status, body, { verbatim = false } = {}) {
   if (response.headersSent || response.destroyed) return;
-  const content = Buffer.from(JSON.stringify(sanitizeValue(body)));
+  const content = Buffer.from(JSON.stringify(verbatim ? body : sanitizeValue(body)));
   response.writeHead(status, {
     ...securityHeaders(),
     "Content-Type": "application/json; charset=utf-8",

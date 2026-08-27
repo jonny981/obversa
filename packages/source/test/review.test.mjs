@@ -36,13 +36,19 @@ test("reviewDiff builds the surface, returns validated annotations, and cleans u
   ];
 
   const launchSurface = async ({ app, assets, api, open }) => {
-    assert.equal(app, "pierre-review");
+    assert.equal(app, "review");
     assert.equal(open, false);
     capturedDir = assets.directory;
     // The static shell and reused client kit are all present and named plainly.
-    assert.deepEqual(Object.keys(assets.files).sort(), ["/", "/app.css", "/app.js", "/surface-client.mjs"]);
+    assert.deepEqual(Object.keys(assets.files).sort(), ["/", "/app.css", "/app.js", "/file-tree.mjs", "/highlight.css", "/icons.mjs", "/nav-segments.mjs", "/surface-client.mjs"]);
     const html = readFileSync(path.join(assets.directory, "index.html"), "utf8");
-    assert.match(html, /id="review-data"/);
+    // The diff never rides the pre-auth static shell; it is served verbatim
+    // from the authenticated model endpoint.
+    assert.doesNotMatch(html, /TWO/);
+    const modelResponse = await api["GET /api/model"]({ body: null, session: {} });
+    assert.equal(modelResponse.verbatim, true, "the diff must not pass through redaction");
+    assert.equal(modelResponse.body.model.files[0].path, "a.txt");
+    assert.equal(modelResponse.body.meta.label, "working tree");
     assert.equal(readFileSync(path.join(assets.directory, "surface-client.mjs"), "utf8"), CLIENT_KIT);
     assert.ok(existsSync(path.join(assets.directory, "app.js")));
 
@@ -58,7 +64,7 @@ test("reviewDiff builds the surface, returns validated annotations, and cleans u
 
   const outcome = await reviewDiff({
     diffText: DIFF,
-    app: "pierre-review",
+    app: "review",
     launchSurface,
     clientKitSource: CLIENT_KIT,
     open: false,
