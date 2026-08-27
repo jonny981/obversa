@@ -27,25 +27,33 @@ describe('runtime engine resolution', () => {
     expect(result.outcome.status).toBe('pass');
   });
 
-  it('rejects an unknown named engine without loading a provider', async () => {
+  it('fails the job with CONFIG for an unknown named engine', async () => {
     const result = await run(agentJob({
       label: 'work', engine: 'missing', prompt: 'work',
     }));
 
-    expect(result.outcome.error).toMatchObject({
-      code: 'CONFIG',
-      message: expect.stringContaining('unknown engine "missing"'),
+    expect(result.outcome).toMatchObject({
+      status: 'fail',
+      error: {
+        code: 'CONFIG',
+        message: expect.stringContaining('unknown engine "missing"'),
+      },
     });
   });
 
-  it('keeps rate-limit reset hints from an engine error', async () => {
+  it.each([
+    ['rate-limit', 'RATE_LIMIT'],
+    ['quota', 'QUOTA'],
+    ['timeout', 'TIMEOUT'],
+    ['aborted', 'ABORTED'],
+  ] as const)('keeps %s timing hints from an engine error', async (kind, code) => {
     const resetAt = Date.now() + 60_000;
     const engine: Engine = {
-      name: 'limited',
+      name: `${kind}-engine`,
       async run() {
         throw new EngineError({
-          kind: 'rate-limit',
-          message: 'slow down',
+          kind,
+          message: `${kind} failure`,
           retryAfterMs: 250,
           resetAt,
         });
@@ -54,10 +62,9 @@ describe('runtime engine resolution', () => {
 
     const result = await run(work(), { engine });
 
-    expect(result.outcome.error).toMatchObject({
-      code: 'RATE_LIMIT',
-      retryAfterMs: 250,
-      resetAt,
+    expect(result.outcome).toMatchObject({
+      status: 'fail',
+      error: { code, retryAfterMs: 250, resetAt },
     });
   });
 });

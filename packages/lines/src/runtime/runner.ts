@@ -1,6 +1,6 @@
 /**
  * The runner assembles a `JobContext` and executes a root `Job` (a loop, a dag,
- * or any job). It owns the engine registry, the abort controller, the shared
+ * or any job). It owns the engine resolver, the abort controller, the shared
  * state, and the stats collector. Hosts observe via `onEvent`.
  */
 
