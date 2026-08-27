@@ -102,15 +102,16 @@ test("readNewFileText never reads outside the repository and bounds the size", a
     assert.equal(await readNewFileText({ path: "../" + path.basename(outside) + "/secret.txt", mode: "worktree", cwd: dir }), null);
     assert.equal(await readNewFileText({ path: path.join(outside, "secret.txt"), mode: "worktree", cwd: dir }), null);
     assert.equal(await readNewFileText({ path: ".", mode: "worktree", cwd: dir }), null);
-    // A symlink inside the repository that points outside is not followed —
-    // whether it is the file itself or a directory on the way to it.
+    // A symlink is never read as the named file, wherever it points: git's
+    // content for a symlink is its link text, so the target's bytes would be
+    // false review content. A symlinked directory on the way to a file is
+    // refused when it leaves the repository.
     symlinkSync(path.join(outside, "secret.txt"), path.join(dir, "link.txt"));
     assert.equal(await readNewFileText({ path: "link.txt", mode: "worktree", cwd: dir }), null);
+    symlinkSync(path.join(dir, "ok.js"), path.join(dir, "ok-link.js"));
+    assert.equal(await readNewFileText({ path: "ok-link.js", mode: "worktree", cwd: dir }), null);
     symlinkSync(outside, path.join(dir, "linked-dir"));
     assert.equal(await readNewFileText({ path: "linked-dir/secret.txt", mode: "worktree", cwd: dir }), null);
-    // A symlink that stays inside the repository is fine.
-    symlinkSync(path.join(dir, "ok.js"), path.join(dir, "ok-link.js"));
-    assert.equal(await readNewFileText({ path: "ok-link.js", mode: "worktree", cwd: dir }), "const ok = 1;\n");
     // A directory is not a file.
     mkdirSync(path.join(dir, "sub"));
     assert.equal(await readNewFileText({ path: "sub", mode: "worktree", cwd: dir }), null);

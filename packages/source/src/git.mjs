@@ -1,6 +1,6 @@
 import { execFile } from "node:child_process";
 import { constants as fsConstants } from "node:fs";
-import { open, realpath } from "node:fs/promises";
+import { lstat, open, realpath } from "node:fs/promises";
 import { isAbsolute, resolve, sep } from "node:path";
 import { promisify } from "node:util";
 
@@ -113,15 +113,17 @@ export async function computeDiff({ mode = "worktree", range, cwd = process.cwd(
  *
  * The path comes from the diff, and a diff can be supplied by a caller rather
  * than produced by git, so it is treated as untrusted. Both modes refuse an
- * absolute or climbing path. A worktree read resolves every symlink on the
- * way (realpath) and requires the real file to sit inside the real repository
- * root — a symlinked directory or a symlinked file that points outside is
- * refused — then reads through one handle that refuses a symlink as the final
- * component and stops at MAX_FILE_BYTES. A staged read requires the index
- * entry to be a regular file (a symlink entry would print its link target, a
- * tree cannot be shown) and bounds `git show`'s output the same way. Anything
- * refused yields null — the diff still renders, only the expandable context is
- * withheld.
+ * absolute or climbing path. A worktree read refuses a symlink as the named
+ * file itself — git's content for a symlink is its link text, so the target's
+ * bytes would be false review content, wherever they live — then resolves
+ * every directory on the way (realpath) and requires the real file to sit
+ * inside the real repository root, so a symlinked directory that points
+ * outside is refused too, and finally reads through one handle that refuses a
+ * symlink again (O_NOFOLLOW) and stops at MAX_FILE_BYTES. A staged read
+ * requires the index entry to be a regular file (a symlink entry would print
+ * its link target, a tree cannot be shown) and bounds `git show`'s output the
+ * same way. Anything refused yields null — the diff still renders, only the
+ * expandable context is withheld.
  */
 export async function readNewFileText({ path: filePath, mode = "worktree", cwd = process.cwd() } = {}) {
   if (typeof filePath !== "string" || filePath.length === 0 || filePath === "/dev/null") return null;
@@ -131,7 +133,9 @@ export async function readNewFileText({ path: filePath, mode = "worktree", cwd =
     let real;
     try {
       realRoot = await realpath(cwd);
-      real = await realpath(resolve(realRoot, filePath));
+      const named = resolve(realRoot, filePath);
+      if ((await lstat(named)).isSymbolicLink()) return null;
+      real = await realpath(named);
     } catch {
       return null;
     }
