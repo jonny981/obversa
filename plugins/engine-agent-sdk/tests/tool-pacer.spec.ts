@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 
-import { toolPacer } from '../src/engines/engine.ts';
+import { toolPacer } from '../src/index.ts';
 
 // toolPacer backs EngineOptions.minToolIntervalMs: the agent-sdk engine awaits
 // it in a PreToolUse hook, so consecutive tool executions are at least the

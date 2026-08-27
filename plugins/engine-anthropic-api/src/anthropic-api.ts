@@ -1,5 +1,5 @@
 /**
- * Engine adapter: the raw Anthropic Messages API (`@anthropic-ai/sdk`). Lowest
+ * Engine plugin: the raw Anthropic Messages API (`@anthropic-ai/sdk`). Lowest
  * level, token-level streaming, and the cheapest path for validator models.
  * Transient 429/5xx/connection errors are retried with backoff via `p-retry`;
  * non-retryable errors abort immediately.
@@ -20,16 +20,16 @@ import {
   engineSelection,
   reportedUsage,
   retryAfterHeaderToMs,
+  type AgentRequest,
+  type AgentResult,
+  type Engine,
+  type EngineEventSink,
 } from '@obversa/engine';
 
-import type {
-  AgentRequest,
-  AgentResult,
-  Engine,
-  EngineEventSink,
-  EngineOptions,
-} from './engine.js';
-import { modelFor } from './engine.js';
+export interface AnthropicApiEngineOptions {
+  readonly defaultModel?: string;
+  readonly apiKey?: string;
+}
 
 /**
  * Transient backend errors that warrant p-retry's blind backoff: 5xx (incl.
@@ -114,7 +114,7 @@ export class AnthropicApiEngine implements Engine {
   readonly name = 'anthropic-api';
   private clientPromise?: Promise<MessagesClientLike>;
 
-  constructor(private readonly opts: EngineOptions = {}) {}
+  constructor(private readonly opts: AnthropicApiEngineOptions = {}) {}
 
   private async client(): Promise<MessagesClientLike> {
     if (!this.clientPromise) {
@@ -143,8 +143,7 @@ export class AnthropicApiEngine implements Engine {
   ): Promise<AgentResult> {
     const client = await this.client();
     const model =
-      modelFor(req, this.opts, 'anthropic-api') ??
-      'claude-haiku-4-5-20251001';
+      req.model ?? this.opts.defaultModel ?? 'claude-haiku-4-5-20251001';
     const maxTokens = req.maxTokens ?? 1024;
     const startedAt = Date.now();
     const controller = new AbortController();

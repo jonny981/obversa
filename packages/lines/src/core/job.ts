@@ -217,7 +217,6 @@ async function runAdvisorConsult(
       cwd: ctx.workspace.dir,
       leaf: true,
       attempt: attemptRequestMeta(ctx, `${label}:advisor`),
-      memory: ctx.memory,
     },
     (event) => {
       const ts = Date.now();
@@ -339,7 +338,6 @@ export function agentJob(config: AgentJobConfig): Job {
               timeoutGraceMs,
               env,
               attempt: attemptRequestMeta(ctx, label),
-              memory: ctx.memory,
             },
             (e) => {
               const ts = Date.now();

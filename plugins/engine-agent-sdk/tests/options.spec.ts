@@ -9,7 +9,7 @@ import {
   agentSdkPermissionOptions,
   agentSdkSystemPrompt,
   agentSdkToolOptions,
-} from '../src/engines/agent-sdk.ts';
+} from '../src/index.ts';
 
 describe('agentSdkSystemPrompt', () => {
   it('keeps the Claude Code preset for default and append system text', () => {

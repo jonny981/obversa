@@ -1,6 +1,7 @@
 packages:
   - packages/*
   - hosts/*
+  - plugins/*
 nodeLinker: isolated
 hoist: false
 publicHoistPattern: []

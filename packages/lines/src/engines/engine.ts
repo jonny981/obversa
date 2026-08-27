@@ -1,6 +1,5 @@
 /** Runtime-only engine selection and bundled-adapter options. */
 
-import type { Memory } from '@obversa/memory';
 import {
   CLAUDE_SUBAGENT_TOOLS,
   SUBAGENT_TOOLS,
@@ -40,10 +39,7 @@ export type EngineName =
   | 'anthropic-api'
   | (string & {});
 
-/** Runtime compatibility for the bundled Agent SDK memory bridge. */
-export interface AgentRequest extends EngineAgentRequest {
-  memory?: Memory;
-}
+export type AgentRequest = EngineAgentRequest;
 
 export interface Engine {
   readonly name: EngineName;
@@ -76,11 +72,9 @@ export interface EngineOptions {
   defaultModel?: string;
   defaultModels?: Partial<Record<EngineName, string>>;
   defaultEngine?: EngineName;
-  apiKey?: string;
   cliBinary?: string;
   cliArgs?: string[];
   permissionMode?: PermissionMode;
-  minToolIntervalMs?: number;
 }
 
 export function modelFor(
@@ -116,15 +110,4 @@ const CLAUDE_MODEL_ENGINES = new Set<EngineName>([
 
 function sameModelFamily(a: EngineName | undefined, b: EngineName): boolean {
   return !!a && CLAUDE_MODEL_ENGINES.has(a) && CLAUDE_MODEL_ENGINES.has(b);
-}
-
-/** Serial tool pacing retained with the Agent SDK adapter. */
-export function toolPacer(minIntervalMs: number): () => Promise<void> {
-  let nextAt = 0;
-  return async () => {
-    const now = Date.now();
-    const at = Math.max(now, nextAt);
-    nextAt = at + minIntervalMs;
-    if (at > now) await new Promise((resolve) => setTimeout(resolve, at - now));
-  };
 }

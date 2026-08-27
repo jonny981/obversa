@@ -242,9 +242,11 @@ describe('Grok CLI adapter', () => {
     expect(expanded).not.toContain('--disable-web-search');
     expect(expanded).not.toContain('--no-subagents');
     expect(expanded).toContain('--no-memory');
-    expect(() => buildGrokArgs(request({
-      memory: {} as never,
-    }), options('/bin/echo'), promptFile)).toThrow('does not bridge Lines memory');
+    expect(() => buildGrokArgs(
+      { ...request(), memory: {} } as AgentRequest & { memory: unknown },
+      options('/bin/echo'),
+      promptFile,
+    )).toThrow('does not bridge Lines memory');
   });
 
   it('passes a result schema and returns the native structured value', async () => {

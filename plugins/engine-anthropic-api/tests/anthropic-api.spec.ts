@@ -1,8 +1,50 @@
 import { describe, expect, it } from 'vitest';
 
-import { AnthropicApiEngine } from '../src/engines/anthropic-api.ts';
+import { AnthropicApiEngine } from '../src/index.ts';
 
 describe('AnthropicApiEngine', () => {
+  it('uses the request model before the plugin default', async () => {
+    let body: unknown;
+    const engine = new AnthropicApiEngine({
+      apiKey: 'test-key',
+      defaultModel: 'default-model',
+    });
+    (
+      engine as unknown as {
+        clientPromise: Promise<{
+          messages: {
+            stream: (request: unknown) => {
+              on: () => void;
+              finalMessage: () => Promise<unknown>;
+            };
+          };
+        }>;
+      }
+    ).clientPromise = Promise.resolve({
+      messages: {
+        stream: (request) => {
+          body = request;
+          return {
+            on: () => {},
+            finalMessage: async () => ({
+              content: [{ type: 'text', text: 'ok' }],
+              usage: { input_tokens: 1, output_tokens: 2 },
+              stop_reason: 'end_turn',
+            }),
+          };
+        },
+      },
+    });
+
+    await engine.run(
+      { prompt: 'judge', model: 'request-model' },
+      () => {},
+      new AbortController().signal,
+    );
+
+    expect(body).toMatchObject({ model: 'request-model' });
+  });
+
   it('preserves provider-limit errors when timeoutMs is configured', async () => {
     const error = Object.assign(new Error('too many requests'), {
       status: 429,

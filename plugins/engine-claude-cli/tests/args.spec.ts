@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 
-import { buildClaudeArgs } from '../src/engines/claude-cli.ts';
+import { buildClaudeArgs } from '../src/index.ts';
 
 describe('buildClaudeArgs', () => {
   it('always uses headless stream-json and keeps the prompt out of argv', () => {

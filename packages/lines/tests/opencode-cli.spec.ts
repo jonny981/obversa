@@ -715,7 +715,7 @@ describe('OpenCode CLI adapter', () => {
       new AbortController().signal,
     )).rejects.toThrow('constructor environment');
     await expect(engine.run(
-      request({ memory: {} as never }),
+      { ...request(), memory: {} } as AgentRequest & { memory: unknown },
       () => {},
       new AbortController().signal,
     )).rejects.toThrow('does not bridge Lines memory');

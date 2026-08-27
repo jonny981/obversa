@@ -80,12 +80,6 @@ importers:
 
   packages/lines:
     dependencies:
-      '@anthropic-ai/claude-agent-sdk':
-        specifier: 0.3.241
-        version: 0.3.241(@anthropic-ai/sdk@0.105.0(zod@4.4.3))(@modelcontextprotocol/sdk@1.30.0(zod@4.4.3))(zod@4.4.3)
-      '@anthropic-ai/sdk':
-        specifier: 0.105.0
-        version: 0.105.0(zod@4.4.3)
       '@obversa/engine':
         specifier: workspace:^
         version: link:../engine
@@ -95,18 +89,9 @@ importers:
       p-limit:
         specifier: ^7.3.0
         version: 7.3.1
-      p-retry:
-        specifier: ^8.0.0
-        version: 8.0.0
-      p-timeout:
-        specifier: ^7.0.1
-        version: 7.0.1
       toposort:
         specifier: ^2.0.2
         version: 2.0.2
-      zod:
-        specifier: ^4.4.3
-        version: 4.4.3
     devDependencies:
       '@obversa/memory':
         specifier: workspace:^
@@ -148,6 +133,45 @@ importers:
         version: 4.4.3
 
   packages/surfacer: {}
+
+  plugins/engine-agent-sdk:
+    dependencies:
+      '@anthropic-ai/claude-agent-sdk':
+        specifier: 0.3.241
+        version: 0.3.241(@anthropic-ai/sdk@0.105.0(zod@4.4.3))(@modelcontextprotocol/sdk@1.30.0(zod@4.4.3))(zod@4.4.3)
+      '@obversa/engine':
+        specifier: workspace:^
+        version: link:../../packages/engine
+      '@obversa/memory':
+        specifier: workspace:^
+        version: link:../../packages/memory
+      p-timeout:
+        specifier: ^7.0.1
+        version: 7.0.1
+      zod:
+        specifier: ^4.4.3
+        version: 4.4.3
+
+  plugins/engine-anthropic-api:
+    dependencies:
+      '@anthropic-ai/sdk':
+        specifier: 0.105.0
+        version: 0.105.0(zod@4.4.3)
+      '@obversa/engine':
+        specifier: workspace:^
+        version: link:../../packages/engine
+      p-retry:
+        specifier: ^8.0.0
+        version: 8.0.0
+      p-timeout:
+        specifier: ^7.0.1
+        version: 7.0.1
+
+  plugins/engine-claude-cli:
+    dependencies:
+      '@obversa/engine':
+        specifier: workspace:^
+        version: link:../../packages/engine
 
 packages:
 

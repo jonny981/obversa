@@ -378,7 +378,10 @@ export function buildGrokArgs(
   if (typeof request.cwd !== 'string' || !isAbsolute(request.cwd)) {
     throw new TypeError('Grok request cwd must be an absolute path');
   }
-  if (request.memory !== undefined) {
+  if (
+    (request as AgentRequest & { readonly memory?: unknown }).memory !==
+    undefined
+  ) {
     throw new TypeError('Grok CLI does not bridge Lines memory');
   }
   const model = nonEmptyText(request.model, 'Grok request model');

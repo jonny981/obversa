@@ -1,0 +1,9 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "paths": {
+      "@obversa/engine": ["../../packages/engine/src/index.ts"]
+    }
+  },
+  "include": ["src", "tests", "tsup.config.ts", "vitest.config.ts"]
+}

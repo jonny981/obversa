@@ -1,34 +1,52 @@
 /**
- * Engine adapter: the `claude` CLI as a subprocess. A fresh process per call =
+ * Engine plugin: the `claude` CLI as a subprocess. A fresh process per call =
  * a fresh context. Spawning, abort, and timeout via `execa`; output is the
  * same stream-json schema the Agent SDK emits, so we reuse `mapMessage`.
  */
 
 import {
+  CLAUDE_SUBAGENT_TOOLS,
   EngineError,
+  attemptEnvironment,
   engineSelection,
   mapMessage,
   newAccumulator,
   scrubCapture,
   validateAgentResult,
-} from '@obversa/engine';
-
-import {
-  CLAUDE_SUBAGENT_TOOLS,
-  modelFor,
-  requestEnv,
   type AgentRequest,
   type AgentResult,
   type Engine,
   type EngineEventSink,
-  type EngineOptions,
-} from './engine.js';
+} from '@obversa/engine';
 import {
   DEFAULT_OWNED_COMMAND_LIMITS,
   ownedCommandIdentity,
   resolveCommandExecutable,
   runOwnedCommand,
 } from '@obversa/engine/command';
+
+export interface ClaudeCliEngineOptions {
+  readonly defaultModel?: string;
+  readonly cliBinary?: string;
+  readonly cliArgs?: readonly string[];
+  readonly permissionMode?:
+    | 'default'
+    | 'acceptEdits'
+    | 'bypassPermissions'
+    | 'plan'
+    | 'dontAsk'
+    | 'auto';
+}
+
+function modelFor(
+  request: AgentRequest,
+  options: ClaudeCliEngineOptions,
+): string | undefined {
+  return (request.model ?? options.defaultModel)?.replace(
+    /\s*\[[^\]]+\]\s*$/,
+    '',
+  );
+}
 
 /**
  * Classify a failed `claude` subprocess into a typed provider limit, or
@@ -212,9 +230,9 @@ function zonedParts(
  */
 export function buildClaudeArgs(
   req: AgentRequest,
-  opts: EngineOptions,
+  opts: ClaudeCliEngineOptions,
 ): string[] {
-  const model = modelFor(req, opts, 'claude-cli');
+  const model = modelFor(req, opts);
   const args = ['-p', '--output-format', 'stream-json', '--verbose'];
   if (model) args.push('--model', model);
   if (req.system)
@@ -236,7 +254,7 @@ export function buildClaudeArgs(
 export class ClaudeCliEngine implements Engine {
   readonly name = 'claude-cli';
   private executable: string | undefined;
-  constructor(private readonly opts: EngineOptions = {}) {}
+  constructor(private readonly opts: ClaudeCliEngineOptions = {}) {}
 
   private commandExecutable(): string {
     this.executable ??= resolveCommandExecutable(this.opts.cliBinary ?? 'claude');
@@ -254,9 +272,9 @@ export class ClaudeCliEngine implements Engine {
         message: 'claude-cli run aborted',
       });
     const bin = this.commandExecutable();
-    const model = modelFor(req, this.opts, 'claude-cli');
+    const model = modelFor(req, this.opts);
     const args = buildClaudeArgs(req, this.opts);
-    const env = requestEnv(req);
+    const env = attemptEnvironment(req);
     const hardTimeout =
       req.timeoutMs && req.timeoutGraceMs
         ? req.timeoutMs + req.timeoutGraceMs

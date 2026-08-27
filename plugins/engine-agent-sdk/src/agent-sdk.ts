@@ -1,5 +1,5 @@
 /**
- * Engine adapter: the Claude Agent SDK (`@anthropic-ai/claude-agent-sdk`).
+ * Engine plugin: the Claude Agent SDK (`@anthropic-ai/claude-agent-sdk`).
  * Each `run` is a fresh `query()`, giving a clean context per loop iteration.
  * Uses the host's Claude Code auth, so it needs no API key.
  */
@@ -13,26 +13,33 @@ import { z } from 'zod';
 import type { Options as SdkOptions } from '@anthropic-ai/claude-agent-sdk';
 import type { Memory, MemoryCommand } from '@obversa/memory';
 import {
+  CLAUDE_SUBAGENT_TOOLS,
   EngineError,
+  attemptEnvironment,
   classifyEngineFailure,
   engineSelection,
   mapMessage,
   newAccumulator,
   scrubCapture,
   validateAgentResult,
-} from '@obversa/engine';
-
-import {
-  CLAUDE_SUBAGENT_TOOLS,
-  modelFor,
-  requestEnv,
-  toolPacer,
   type AgentRequest,
   type AgentResult,
   type Engine,
   type EngineEventSink,
-  type EngineOptions,
-} from './engine.js';
+} from '@obversa/engine';
+
+export interface AgentSdkEngineOptions {
+  readonly defaultModel?: string;
+  readonly permissionMode?:
+    | 'default'
+    | 'acceptEdits'
+    | 'bypassPermissions'
+    | 'plan'
+    | 'dontAsk'
+    | 'auto';
+  readonly minToolIntervalMs?: number;
+  readonly memory?: Memory;
+}
 
 const MEMORY_SERVER = 'lines-memory';
 const MEMORY_TOOL = 'memory';
@@ -72,11 +79,12 @@ export function agentSdkPermissionOptions(
 }
 
 export function agentSdkToolOptions(
-  req: Pick<AgentRequest, 'tools' | 'allowedTools' | 'leaf' | 'memory'>,
+  req: Pick<AgentRequest, 'tools' | 'allowedTools' | 'leaf'>,
+  memory?: Memory,
 ): Pick<SdkOptions, 'tools' | 'allowedTools' | 'disallowedTools'> {
   return {
     tools: req.tools,
-    allowedTools: req.memory
+    allowedTools: memory
       ? agentSdkMemoryAllowedTools(req.allowedTools)
       : req.allowedTools,
     disallowedTools: req.leaf ? CLAUDE_SUBAGENT_TOOLS : undefined,
@@ -187,12 +195,23 @@ export function agentSdkSystemPrompt(
     : { type: 'preset', preset: 'claude_code', append: req.system };
 }
 
+/** Serial tool pacing for the Agent SDK's in-process tool hooks. */
+export function toolPacer(minIntervalMs: number): () => Promise<void> {
+  let nextAt = 0;
+  return async () => {
+    const now = Date.now();
+    const at = Math.max(now, nextAt);
+    nextAt = at + minIntervalMs;
+    if (at > now) await new Promise((resolve) => setTimeout(resolve, at - now));
+  };
+}
+
 export class AgentSdkEngine implements Engine {
   readonly name = 'agent-sdk';
   /** One pacer per engine instance, so the interval spans turns, not just one. */
   private readonly pace?: () => Promise<void>;
 
-  constructor(private readonly opts: EngineOptions = {}) {
+  constructor(private readonly opts: AgentSdkEngineOptions = {}) {
     if (opts.minToolIntervalMs && opts.minToolIntervalMs > 0)
       this.pace = toolPacer(opts.minToolIntervalMs);
   }
@@ -205,9 +224,9 @@ export class AgentSdkEngine implements Engine {
     // Lazy import so installs/runs that never touch this engine don't pay for it.
     const { query } = await import('@anthropic-ai/claude-agent-sdk');
 
-    const model = modelFor(req, this.opts, 'agent-sdk');
+    const model = req.model ?? this.opts.defaultModel;
     const acc = newAccumulator(model);
-    const env = requestEnv(req);
+    const env = attemptEnvironment(req);
     const abort = new AbortController();
     const onAbort = () => abort.abort();
     if (signal.aborted) abort.abort();
@@ -232,15 +251,15 @@ export class AgentSdkEngine implements Engine {
           ],
         }
       : undefined;
-    const memoryServer = req.memory
-      ? await createAgentSdkMemoryServer(req.memory)
+    const memoryServer = this.opts.memory
+      ? await createAgentSdkMemoryServer(this.opts.memory)
       : undefined;
 
     const options = {
       model,
       systemPrompt: agentSdkSystemPrompt(req),
       cwd: req.cwd,
-      ...agentSdkToolOptions(req),
+      ...agentSdkToolOptions(req, this.opts.memory),
       mcpServers: memoryServer ? { [MEMORY_SERVER]: memoryServer } : undefined,
       // The SDK's `env` REPLACES the subprocess environment entirely, the
       // opposite of execa's merge semantics, so spread `process.env` under the

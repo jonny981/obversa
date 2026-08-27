@@ -631,7 +631,10 @@ export function buildOpenCodeInvocation(
   if (typeof request.cwd !== 'string' || !isAbsolute(request.cwd)) {
     throw new TypeError('OpenCode request cwd must be an absolute path');
   }
-  if (request.memory !== undefined) {
+  if (
+    (request as AgentRequest & { readonly memory?: unknown }).memory !==
+    undefined
+  ) {
     throw new TypeError('OpenCode CLI does not bridge Lines memory');
   }
   if (request.env !== undefined && Object.keys(request.env).length > 0) {
