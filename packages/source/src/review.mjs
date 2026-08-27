@@ -10,7 +10,7 @@ import { createHighlightRegistry, registryToCss } from "./highlight.mjs";
 import { highlightModel } from "./highlight-model.mjs";
 import { contextModel } from "./context-model.mjs";
 import { navModel } from "./nav-model.mjs";
-import { normalizeResult } from "./contract.mjs";
+import { isGateBinding, normalizeResult } from "./contract.mjs";
 
 // Human-readable name for what is under review.
 function buildLabel({ mode, range }) {
@@ -40,14 +40,23 @@ export function outputAnchors(model) {
 }
 
 // The `gate` option a Callback Gate passes to reviewDiff: its id and the
-// callback the result should reach. Validated up front so a wrong shape fails
-// before a surface opens.
+// callback the result should reach. The pair is enforced by the contract's
+// isGateBinding — a gate needs a present id, address, and token; direct use
+// has none of the three — and a wrong shape fails before a surface opens.
 function normalizeGate(gate) {
   if (gate === undefined || gate === null) return { gateId: null, callback: { address: null, token: null } };
   if (typeof gate !== "object") throw new TypeError("gate must be an object with gateId and callback");
-  if (typeof gate.gateId !== "string" || gate.gateId.length === 0) throw new TypeError("gate.gateId must be a non-empty string");
-  if (!gate.callback || typeof gate.callback !== "object") throw new TypeError("gate.callback must be an object with address and token");
-  return { gateId: gate.gateId, callback: { address: gate.callback.address ?? null, token: gate.callback.token ?? null } };
+  const gateId = gate.gateId;
+  const callback = gate.callback && typeof gate.callback === "object"
+    ? { address: gate.callback.address, token: gate.callback.token }
+    : null;
+  if (gateId === null || gateId === undefined) {
+    throw new TypeError("gate.gateId must be a non-empty string (omit the gate option for direct use)");
+  }
+  if (!isGateBinding(gateId, callback)) {
+    throw new TypeError("gate needs a non-empty string gateId and a callback with a non-empty string address and token");
+  }
+  return { gateId, callback };
 }
 
 /**

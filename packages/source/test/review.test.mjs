@@ -147,9 +147,17 @@ test("outputAnchors offers every visible line and side; the request is contract-
   assert.equal(gated.gateId, "gate-1");
   assert.deepEqual(gated.callback, { address: "http://127.0.0.1:9/cb", token: "t" });
   assert.equal(isSurfaceRequest(gated), true);
-  // A malformed gate option fails before a surface opens.
-  assert.throws(() => buildSurfaceRequest({ model, label: "x", gate: { gateId: "" } }), /gateId must be a non-empty string/);
-  assert.throws(() => buildSurfaceRequest({ model, label: "x", gate: { gateId: "g" } }), /callback must be an object/);
+  // A malformed gate option fails before a surface opens: the id and the
+  // callback come as a pair, all present and non-empty strings.
+  const bad = (gate) => assert.throws(() => buildSurfaceRequest({ model, label: "x", gate }), TypeError);
+  bad({ gateId: "" });
+  bad({ gateId: "g" });
+  bad({ gateId: "g", callback: {} });
+  bad({ gateId: "g", callback: { address: "http://127.0.0.1:9/cb" } });
+  bad({ gateId: "g", callback: { address: 8080, token: "t" } });
+  bad({ gateId: "g", callback: { address: "http://127.0.0.1:9/cb", token: { v: 1 } } });
+  bad({ gateId: null, callback: { address: "http://127.0.0.1:9/cb", token: "t" } });
+  bad("gate-1");
 });
 
 test("a gate's id flows through reviewDiff onto the result", async () => {
@@ -166,7 +174,8 @@ test("a gate's id flows through reviewDiff onto the result", async () => {
   const direct = await reviewDiff({ diffText: DIFF, launchSurface, clientKitSource: CLIENT_KIT, open: false });
   assert.equal(direct.result.gateId, null);
   // A bad gate option is refused before anything opens.
-  await assert.rejects(() => reviewDiff({ diffText: DIFF, launchSurface, clientKitSource: CLIENT_KIT, open: false, gate: { gateId: 7 } }), /gateId must be a non-empty string/);
+  await assert.rejects(() => reviewDiff({ diffText: DIFF, launchSurface, clientKitSource: CLIENT_KIT, open: false, gate: { gateId: 7 } }), /non-empty string gateId/);
+  await assert.rejects(() => reviewDiff({ diffText: DIFF, launchSurface, clientKitSource: CLIENT_KIT, open: false, gate: { gateId: "g", callback: {} } }), /non-empty string address and token/);
 });
 
 test("the submit handler bounds bodies and counts through the contract", async () => {

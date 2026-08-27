@@ -167,12 +167,30 @@ export function normalizeResult(raw, request) {
  * it catches the shape errors that would otherwise fail deep inside a renderer,
  * where the cause is harder to see.
  */
+// A non-empty string, the only acceptable form for an id, an address, or a
+// token that is present.
+function isPresent(value) {
+  return typeof value === "string" && value.length > 0;
+}
+
+/**
+ * The gate and its callback come as a pair, because the callback is what
+ * authenticates the result and binds it to one gate instance. Either the
+ * request was opened directly — gateId null, callback address and token null
+ * — or by a gate — a present gateId, address, and token. Mixed states (an id
+ * with no callback, a callback with no id, a partial callback) are invalid.
+ */
+export function isGateBinding(gateId, callback) {
+  if (!callback || typeof callback !== "object") return false;
+  const { address, token } = callback;
+  if (gateId === null) return address === null && token === null;
+  return isPresent(gateId) && isPresent(address) && isPresent(token);
+}
+
 export function isSurfaceRequest(value) {
   if (!value || typeof value !== "object") return false;
   if (typeof value.surfaceId !== "string") return false;
-  // gateId is the gate's id, or null for a surface opened directly.
-  if (value.gateId !== null && (typeof value.gateId !== "string" || value.gateId.length === 0)) return false;
-  if (!value.callback || typeof value.callback !== "object") return false;
+  if (!isGateBinding(value.gateId, value.callback)) return false;
   if (!value.kind || !FAMILIES.includes(value.kind.family)) return false;
   if (!Array.isArray(value.anchors)) return false;
   return true;

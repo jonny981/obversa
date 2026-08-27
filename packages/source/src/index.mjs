@@ -10,6 +10,7 @@ export {
   buildAnchorSet,
   validateAnnotation,
   normalizeResult,
+  isGateBinding,
   isSurfaceRequest,
 } from "./contract.mjs";
 export { computeDiff, diffArgs } from "./git.mjs";

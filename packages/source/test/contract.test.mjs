@@ -148,11 +148,20 @@ test("normalizeResult carries edits and meta when present", () => {
 
 test("isSurfaceRequest guards the shape", () => {
   assert.equal(isSurfaceRequest(makeRequest([outputAnchor(1)])), true);
-  // A surface opened directly has no gate: gateId null and a null callback
-  // are valid; a wrong-typed or empty gateId is not.
-  assert.equal(isSurfaceRequest({ ...makeRequest([]), gateId: null, callback: { address: null, token: null } }), true);
-  assert.equal(isSurfaceRequest({ ...makeRequest([]), gateId: 5 }), false);
-  assert.equal(isSurfaceRequest({ ...makeRequest([]), gateId: "" }), false);
+  // The gate and its callback are a pair. Direct: gateId null AND a null
+  // address and token. Gated: a present id, address, and token. Mixed or
+  // partial states are invalid.
+  const live = { address: "http://127.0.0.1:9/cb", token: "t" };
+  const none = { address: null, token: null };
+  assert.equal(isSurfaceRequest({ ...makeRequest([]), gateId: null, callback: none }), true);
+  assert.equal(isSurfaceRequest({ ...makeRequest([]), gateId: "gate-1", callback: live }), true);
+  assert.equal(isSurfaceRequest({ ...makeRequest([]), gateId: "gate-1", callback: none }), false, "an id with no callback");
+  assert.equal(isSurfaceRequest({ ...makeRequest([]), gateId: null, callback: live }), false, "a callback with no id");
+  assert.equal(isSurfaceRequest({ ...makeRequest([]), gateId: "gate-1", callback: { address: live.address, token: null } }), false, "a partial callback");
+  assert.equal(isSurfaceRequest({ ...makeRequest([]), gateId: "gate-1", callback: { address: 8080, token: "t" } }), false, "a non-string address");
+  assert.equal(isSurfaceRequest({ ...makeRequest([]), gateId: "gate-1", callback: {} }), false, "an empty callback");
+  assert.equal(isSurfaceRequest({ ...makeRequest([]), gateId: 5, callback: live }), false);
+  assert.equal(isSurfaceRequest({ ...makeRequest([]), gateId: "", callback: live }), false);
   assert.equal(isSurfaceRequest(null), false);
   assert.equal(isSurfaceRequest({ ...makeRequest([]), kind: { family: "bogus" } }), false);
   assert.equal(isSurfaceRequest({ ...makeRequest([]), surfaceId: 5 }), false);
