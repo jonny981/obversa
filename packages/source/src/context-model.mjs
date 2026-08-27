@@ -14,6 +14,12 @@ import { highlightInto } from "./highlight.mjs";
 import { langForPath } from "./lang.mjs";
 import { readNewFileText } from "./git.mjs";
 
+// A review-wide bound on full-file context. Each file is already capped per
+// read; this caps the sum, so a change touching many large files cannot make
+// the surface hold every file's text, tokens, and navigation at once. Files
+// past the bound simply get no expandable context — the diff still renders.
+export const MAX_CONTEXT_TOTAL_BYTES = 32 * 1024 * 1024;
+
 function sliceContext(lines, tokens, from, to) {
   const out = [];
   for (let n = Math.max(1, from); n <= to; n += 1) {
@@ -23,15 +29,19 @@ function sliceContext(lines, tokens, from, to) {
   return out;
 }
 
-export async function contextModel(model, { mode = "worktree", cwd = process.cwd(), registry, read = readNewFileText } = {}) {
+export async function contextModel(model, { mode = "worktree", cwd = process.cwd(), registry, read = readNewFileText, maxTotalBytes = MAX_CONTEXT_TOTAL_BYTES } = {}) {
   if (!model || !Array.isArray(model.files) || !registry) return;
 
+  let totalBytes = 0;
   for (const file of model.files) {
     if (file.binary || file.hunks.length === 0) continue;
+    if (totalBytes >= maxTotalBytes) break;
 
     const target = file.newPath && file.newPath !== "/dev/null" ? file.newPath : file.path;
     const code = await read({ path: target, mode, cwd });
     if (typeof code !== "string" || code.length === 0) continue;
+    totalBytes += Buffer.byteLength(code, "utf8");
+    if (totalBytes > maxTotalBytes) break;
 
     const lines = code.split("\n");
     // A trailing newline yields a final "" element that is not a real line.
