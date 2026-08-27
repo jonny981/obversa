@@ -1,0 +1,9 @@
+{
+  "note": "Exact npm names that may be published. Nothing else under @obversa/ publishes. Checked by scripts/check-publish-allowlist.mjs (a per-package prepublishOnly hook plus a root audit). The runtime/engine split replaces this list with the post-rename package set on the same commit that renames the packages.",
+  "packages": [
+    "@obversa/lines",
+    "@obversa/memory",
+    "@obversa/memory-git",
+    "@obversa/memory-simple"
+  ]
+}
