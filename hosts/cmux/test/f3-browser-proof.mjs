@@ -8,10 +8,12 @@
 // inline styles, waits for the render, exercises the tree, the context bands,
 // and go-to-source, and posts the results back.
 //
-// The go-to-source check clicks an identifier in the SECOND file, whose line
-// numbers overlap the first file's, and requires the flashed definition row to
-// be in the same file section: the regression test for the document-wide
-// lookup that once jumped between files.
+// The go-to-source check clicks `sign` in the SECOND file, whose definition is
+// on line 3, while the FIRST file's hunk also shows a line 3; it requires the
+// flashed definition row to be in the second file's section. A document-wide
+// line lookup finds the first file's row 3 first, so this fails for the bug it
+// locks down (that mutation was run to confirm it). The test also asserts its
+// own premise: line 3 is present in both sections.
 //
 // Skips when Google Chrome is not installed; the runtime proof
 // (f3-review-proof.mjs) still covers the server side without a browser.
@@ -70,8 +72,13 @@ export function verify(token, secret) {
   return mac === sign(userId, expires, secret) ? userId : null;
 }
 `;
+// The first file changes on line 3, so its hunk shows lines 1–6: line 3 is
+// visible in both sections. A second change deep in the file keeps a
+// collapsible context band between the hunks.
 const SERVER_OLD = Array.from({ length: 30 }, (_, i) => `export const line${i} = ${i};`).join("\n") + "\n";
-const SERVER_NEW = SERVER_OLD.replace("export const line15 = 15;", "export const line15 = 150; // token=ghp_ABC123verbatimSECRET");
+const SERVER_NEW = SERVER_OLD
+  .replace("export const line2 = 2;", "export const line2 = 20;")
+  .replace("export const line15 = 15;", "export const line15 = 150; // token=ghp_ABC123verbatimSECRET");
 
 const PROBE = `(() => {
   const violations = [];
@@ -83,13 +90,16 @@ const PROBE = `(() => {
     if (!rendered && Date.now() - started < 8000) return setTimeout(tick, 100);
     const sections = document.querySelectorAll(".file");
     const jumps = document.querySelectorAll(".nav-jump");
-    let flashed = false, clicked = null, sameFile = false;
-    const j = (sections[1] && sections[1].querySelector(".nav-jump")) || jumps[0];
+    let flashed = false, clicked = null, sameFile = false, defLine = null, premise = false;
+    // Click a use of sign (defined on line 3) in the second file.
+    const j = sections[1] && [...sections[1].querySelectorAll(".nav-jump")].find((s) => s.textContent === "sign");
     if (j) {
+      const m = /line (\\d+)/.exec(j.title || ""); defLine = m ? Number(m[1]) : null;
+      premise = !!sections[0].querySelector('.row[data-new-line="' + defLine + '"]') && !!sections[1].querySelector('.row[data-new-line="' + defLine + '"]');
       clicked = j.textContent; j.click();
       const flashedRow = document.querySelector(".row.flash");
       flashed = !!flashedRow;
-      sameFile = !!flashedRow && flashedRow.closest(".file") === j.closest(".file");
+      sameFile = !!flashedRow && flashedRow.closest(".file") === sections[1];
     }
     const bt = document.querySelector(".context-toggle");
     let bandExpandOk = false;
@@ -103,7 +113,7 @@ const PROBE = `(() => {
       inlineStyleAttrs: document.querySelectorAll("[style]").length,
       styleTags: document.querySelectorAll("style").length,
       tokenSpans: document.querySelectorAll("code.code span[class^='tok-']").length,
-      sections: sections.length, jumps: jumps.length, clicked, flashed, sameFile,
+      sections: sections.length, jumps: jumps.length, clicked, defLine, premise, flashed, sameFile,
       treeFiles, contextBands: document.querySelectorAll(".context-band").length, bandExpandOk,
       tabs: tabs.length, allFilesCount,
     }) });
@@ -204,8 +214,11 @@ test("the review surface renders under the exact CSP with zero violations and fi
   assert.ok(report.tokenSpans > 0, "highlight tokens");
   assert.equal(report.sections, 2, "two file sections");
   assert.ok(report.jumps > 0, "go-to-source identifiers");
+  assert.equal(report.clicked, "sign", "the probe found a use of `sign` in the second file");
+  assert.equal(report.defLine, 3, "`sign` is defined on line 3 of the second file");
+  assert.ok(report.premise, "line 3 must be visible in BOTH file sections, or this test cannot catch a document-wide lookup");
   assert.ok(report.flashed, `clicking ${report.clicked} did not flash a definition`);
-  assert.ok(report.sameFile, `clicking ${report.clicked} flashed a row in another file`);
+  assert.ok(report.sameFile, `clicking ${report.clicked} flashed a row outside the second file (document-wide lookup)`);
   assert.ok(report.treeFiles > 0, "file tree");
   assert.ok(report.contextBands > 0 && report.bandExpandOk, "context bands expand");
   assert.ok(report.tabs >= 2 && report.allFilesCount > report.treeFiles, "All files tab");
