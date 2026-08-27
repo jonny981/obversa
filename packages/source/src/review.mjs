@@ -1,17 +1,16 @@
+import { randomUUID } from "node:crypto";
 import { copyFile, mkdtemp, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 
-import { computeDiff, listTrackedFiles } from "./git.mjs";
+import { computeDiff, listTrackedFiles, repositoryRoot } from "./git.mjs";
 import { parseUnifiedDiff } from "./diff.mjs";
 import { ASSETS_DIR, buildIndexHtml } from "./page.mjs";
 import { createHighlightRegistry, registryToCss } from "./highlight.mjs";
 import { highlightModel } from "./highlight-model.mjs";
 import { contextModel } from "./context-model.mjs";
 import { navModel } from "./nav-model.mjs";
-
-const MAX_ANNOTATIONS = 500;
-const MAX_BODY = 4000;
+import { normalizeResult } from "./contract.mjs";
 
 // Human-readable name for what is under review.
 function buildLabel({ mode, range }) {
@@ -20,46 +19,42 @@ function buildLabel({ mode, range }) {
   return "working tree";
 }
 
-// Index the line numbers that actually appear in the diff, per file and side.
-// An annotation may only anchor to a line the reviewer could really see, so a
-// tampered browser cannot attach a comment to a fabricated location.
-function buildAnchorIndex(model) {
-  const index = new Map();
+/**
+ * The anchors an Output surface offers: one per diff line and side that the
+ * reviewer can actually see. A deleted line anchors on the old side, an added
+ * line on the new side, and an unchanged line on both. The contract's
+ * membership rule (validateAnnotation) then rejects any annotation pinned to a
+ * location outside this set, so a tampered browser cannot invent one.
+ */
+export function outputAnchors(model) {
+  const anchors = [];
   for (const file of model.files) {
-    const sides = { old: new Set(), new: new Set() };
     for (const hunk of file.hunks) {
       for (const line of hunk.lines) {
-        if (line.oldNumber != null) sides.old.add(line.oldNumber);
-        if (line.newNumber != null) sides.new.add(line.newNumber);
+        if (line.oldNumber != null) anchors.push({ target: file.path, side: "old", position: line.oldNumber });
+        if (line.newNumber != null) anchors.push({ target: file.path, side: "new", position: line.newNumber });
       }
     }
-    index.set(file.path, sides);
   }
-  return index;
+  return anchors;
 }
 
-// Validate and bound the annotations a browser returns. session.complete runs
-// verbatim so code quoted in a comment survives, which means this function owns
-// the bounds: it drops anything that is not anchored to a real diff line, caps
-// the body length, and caps the total count.
-export function normalizeAnnotations(raw, model) {
-  if (!Array.isArray(raw)) return [];
-  const index = buildAnchorIndex(model);
-  const clean = [];
-  for (const item of raw) {
-    if (clean.length >= MAX_ANNOTATIONS) break;
-    if (!item || typeof item !== "object") continue;
-    const { path: filePath, side, line, body } = item;
-    if (typeof filePath !== "string" || !index.has(filePath)) continue;
-    if (side !== "old" && side !== "new") continue;
-    if (!Number.isInteger(line) || line < 1) continue;
-    if (!index.get(filePath)[side].has(line)) continue;
-    if (typeof body !== "string") continue;
-    const trimmed = body.trim();
-    if (!trimmed) continue;
-    clean.push({ path: filePath, side, line, body: trimmed.slice(0, MAX_BODY) });
-  }
-  return clean;
+/**
+ * The SurfaceRequest for one review (an internal note). Direct use from the
+ * command line has no Callback Gate, so gateId and the callback are null; a
+ * gate that launches the surface supplies its own. The result copies
+ * surfaceId and gateId back, which is how a consumer routes it.
+ */
+export function buildSurfaceRequest({ model, label, gateId = null, callback = null } = {}) {
+  return {
+    surfaceId: randomUUID(),
+    gateId,
+    callback: callback ?? { address: null, token: null },
+    kind: { family: "output", renderer: "review" },
+    subject: label,
+    anchors: outputAnchors(model),
+    transport: "local",
+  };
 }
 
 /**
@@ -81,6 +76,12 @@ export function normalizeAnnotations(raw, model) {
  * - clientKitSource: required; the surface client-kit module served to the page
  * - open: place the surface in a host pane (default true)
  * - ready: forwarded to launchSurface once the session is reachable
+ *
+ * Resolves to { status, result, annotations, meta, terminal }: `result` is the
+ * SurfaceResult (an internal note — surfaceId, gateId, decision, annotations
+ * with contract anchors, meta) when the reviewer returned, else null;
+ * `annotations` is `result.annotations` or []; `terminal` is the runtime's
+ * framed terminal record.
  */
 export async function reviewDiff({
   mode = "worktree",
@@ -100,18 +101,22 @@ export async function reviewDiff({
     throw new TypeError("reviewDiff needs the surface client-kit source");
   }
 
+  // The command may run from any directory inside the repository. Git prints
+  // diff paths relative to the repository root, so every read that resolves a
+  // diff path works from the root, not from `cwd`.
+  const root = (await repositoryRoot({ cwd })) ?? cwd;
   const resolved = diffText !== undefined
     ? { diffText, mode, range: mode === "range" ? range : null }
-    : await computeDiff({ mode, range, cwd });
+    : await computeDiff({ mode, range, cwd: root });
   const model = parseUnifiedDiff(resolved.diffText);
   // Highlight the diff and the expandable full-file context into one shared
-  // stylesheet, and attach go-to-source hits. Tokens and context ride the model
-  // in the inert JSON block; the browser paints class spans, so nothing
+  // stylesheet, and attach go-to-source hits. Tokens and context ride the
+  // authenticated model response; the browser paints class spans, so nothing
   // highlights (or executes) client-side.
   const registry = createHighlightRegistry();
   await highlightModel(model, registry);
-  await contextModel(model, { mode: resolved.mode, cwd, registry });
-  await navModel(model, { mode: resolved.mode, cwd });
+  await contextModel(model, { mode: resolved.mode, cwd: root, registry });
+  await navModel(model, { mode: resolved.mode, cwd: root });
   const highlightCss = registryToCss(registry);
   const meta = {
     mode: resolved.mode,
@@ -119,8 +124,9 @@ export async function reviewDiff({
     label: buildLabel({ mode: resolved.mode, range: resolved.range }),
     fileCount: model.files.length,
     // The repo's tracked files, for the tree's "All files" view.
-    allFiles: await listTrackedFiles({ cwd }),
+    allFiles: await listTrackedFiles({ cwd: root }),
   };
+  const request = buildSurfaceRequest({ model, label: meta.label });
 
   const directory = await mkdtemp(path.join(os.tmpdir(), "obversa-review-"));
   try {
@@ -140,9 +146,13 @@ export async function reviewDiff({
       // found the port). It goes out verbatim: the server redacts every other
       // /api body, which would corrupt code under review.
       "GET /api/model": async () => ({ body: { model, meta }, verbatim: true }),
+      // The browser returns contract-shaped annotations and a decision; the
+      // contract validates every anchor against the request (membership), bounds
+      // bodies and counts, and shapes the SurfaceResult. It completes verbatim so
+      // code quoted in a comment survives the transport's redaction.
       "POST /api/submit": async ({ body, session }) => {
-        const annotations = normalizeAnnotations(body?.annotations, model);
-        session.complete({ annotations, meta }, { verbatim: true });
+        const result = normalizeResult({ annotations: body?.annotations, decision: body?.decision, meta }, request);
+        session.complete(result, { verbatim: true });
         return null;
       },
     };
@@ -161,9 +171,11 @@ export async function reviewDiff({
     };
 
     const outcome = await launchSurface({ app, assets, api, open, ready });
-    const result = outcome?.result ?? outcome;
-    const annotations = result?.status === "completed" ? result.payload?.annotations ?? [] : [];
-    return { status: result?.status ?? "unknown", annotations, meta, result };
+    const terminal = outcome?.result ?? outcome;
+    const status = terminal?.status ?? "unknown";
+    // On completion the framed payload is the SurfaceResult itself.
+    const result = status === "completed" ? terminal.payload ?? null : null;
+    return { status, result, annotations: result?.annotations ?? [], meta, terminal };
   } finally {
     await rm(directory, { recursive: true, force: true });
   }

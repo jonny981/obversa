@@ -65,6 +65,9 @@ name the markers are `<<<REVIEW_RESULT_V1>>>` and
 `<<<END_REVIEW_RESULT_V1>>>`. The marker name is the app name in upper
 case, with punctuation replaced by `_`.
 
+The payload is the surface result: the one result shape every Obversa
+review surface returns, whatever it shows.
+
 ```json
 {
   "schemaVersion": 1,
@@ -73,8 +76,16 @@ case, with punctuation replaced by `_`.
   "operationId": "…",
   "createdAt": "…",
   "payload": {
+    "surfaceId": "6f1c…",
+    "gateId": null,
+    "decision": "changes-requested",
     "annotations": [
-      { "path": "src/git.mjs", "side": "new", "line": 42, "body": "Reject an empty range here too." }
+      {
+        "anchor": { "target": "src/git.mjs", "side": "new", "position": 42 },
+        "body": "Reject an empty range here too.",
+        "author": { "kind": "human", "id": "reviewer" },
+        "createdAt": "2026-08-28T09:15:02.118Z"
+      }
     ],
     "meta": {
       "mode": "worktree",
@@ -88,12 +99,15 @@ case, with punctuation replaced by `_`.
 }
 ```
 
-Each annotation has four fields:
-
-- `path`: the repository-relative file path, as it appears in the diff.
-- `side`: `old` for a deleted line, `new` for an added or unchanged line.
-- `line`: the line number on that side.
-- `body`: the comment text, with surrounding whitespace removed.
+- `surfaceId` names this review session. `gateId` names the pipeline gate
+  that opened it, or `null` when you ran the command directly.
+- `decision` is `changes-requested` when the review carries annotations and
+  `approved` when it carries none.
+- Each annotation has an `anchor`: `target` is the repository-relative file
+  path as it appears in the diff, `side` is `old` for a deleted line or `new`
+  for an added or unchanged line, and `position` is the line number on that
+  side. `body` is the comment text with surrounding whitespace removed.
+  `author` is the reviewer, and `createdAt` is when the comment was written.
 
 The bounds are fixed. A review returns at most 500 annotations. Each body
 is cut at 4000 characters. An annotation must anchor to a line that

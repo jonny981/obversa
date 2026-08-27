@@ -3,7 +3,8 @@ import { existsSync, readFileSync } from "node:fs";
 import path from "node:path";
 import test from "node:test";
 
-import { normalizeAnnotations, reviewDiff } from "../src/review.mjs";
+import { buildSurfaceRequest, outputAnchors, reviewDiff } from "../src/review.mjs";
+import { isSurfaceRequest, MAX_ANNOTATIONS, MAX_BODY } from "../src/contract.mjs";
 import { parseUnifiedDiff } from "../src/diff.mjs";
 
 const DIFF = `diff --git a/a.txt b/a.txt
@@ -23,16 +24,18 @@ test("reviewDiff needs both injected dependencies", async () => {
   await assert.rejects(() => reviewDiff({ diffText: DIFF, launchSurface: () => {} }), /client-kit/);
 });
 
-test("reviewDiff builds the surface, returns validated annotations, and cleans up", async () => {
+test("reviewDiff builds the surface, returns a validated SurfaceResult, and cleans up", async () => {
   let capturedDir;
   let capturedVerbatim;
+  const at = (side, position) => ({ target: "a.txt", side, position });
   const submitted = [
-    { path: "a.txt", side: "new", line: 2, body: "token=abc123 keep this verbatim" }, // valid
-    { path: "a.txt", side: "old", line: 2, body: "comment on the removed line" }, // valid
-    { path: "nope.txt", side: "new", line: 1, body: "wrong file" }, // dropped
-    { path: "a.txt", side: "middle", line: 1, body: "bad side" }, // dropped
-    { path: "a.txt", side: "new", line: 99, body: "line not in diff" }, // dropped
-    { path: "a.txt", side: "new", line: 1, body: "   " }, // dropped (empty)
+    { anchor: at("new", 2), body: "token=abc123 keep this verbatim", createdAt: "2026-08-28T00:00:00Z" }, // valid
+    { anchor: at("old", 2), body: "comment on the removed line" }, // valid
+    { anchor: { target: "nope.txt", side: "new", position: 1 }, body: "wrong file" }, // dropped
+    { anchor: at("middle", 1), body: "bad side" }, // dropped
+    { anchor: at("new", 99), body: "line not in diff" }, // dropped
+    { anchor: at("new", 1), body: "   " }, // dropped (empty)
+    { path: "a.txt", side: "new", line: 1, body: "old flat shape, no anchor" }, // dropped
   ];
 
   const launchSurface = async ({ app, assets, api, open }) => {
@@ -52,12 +55,12 @@ test("reviewDiff builds the surface, returns validated annotations, and cleans u
     assert.equal(readFileSync(path.join(assets.directory, "surface-client.mjs"), "utf8"), CLIENT_KIT);
     assert.ok(existsSync(path.join(assets.directory, "app.js")));
 
-    // Simulate the browser returning annotations.
+    // Simulate the browser returning contract-shaped annotations and a decision.
     let payload;
     const session = {
       complete(value, options) { payload = value; capturedVerbatim = options?.verbatim; },
     };
-    const result = await api["POST /api/submit"]({ body: { annotations: submitted }, session });
+    const result = await api["POST /api/submit"]({ body: { decision: "changes-requested", annotations: submitted }, session });
     assert.equal(result, null);
     return { result: { status: "completed", payload } };
   };
@@ -71,13 +74,36 @@ test("reviewDiff builds the surface, returns validated annotations, and cleans u
   });
 
   assert.equal(outcome.status, "completed");
-  assert.equal(capturedVerbatim, true, "annotations must complete verbatim so quoted code survives");
-  assert.equal(outcome.annotations.length, 2);
-  assert.deepEqual(outcome.annotations[0], { path: "a.txt", side: "new", line: 2, body: "token=abc123 keep this verbatim" });
-  assert.equal(outcome.meta.label, "working tree");
+  assert.equal(capturedVerbatim, true, "the result must complete verbatim so quoted code survives");
+  // The payload is the SurfaceResult: routed by surfaceId/gateId, carrying the
+  // decision and only the annotations that pin to an offered anchor.
+  const { result } = outcome;
+  assert.equal(typeof result.surfaceId, "string");
+  assert.equal(result.gateId, null);
+  assert.equal(result.decision, "changes-requested");
+  assert.equal(result.annotations.length, 2);
+  assert.deepEqual(result.annotations[0], {
+    anchor: { target: "a.txt", position: 2, side: "new" },
+    body: "token=abc123 keep this verbatim",
+    author: { kind: "human", id: "reviewer" },
+    createdAt: "2026-08-28T00:00:00Z",
+  });
+  assert.deepEqual(result.annotations[1].anchor, { target: "a.txt", position: 2, side: "old" });
+  assert.equal(outcome.annotations, result.annotations);
+  assert.equal(result.meta.label, "working tree");
   assert.equal(outcome.meta.fileCount, 1);
   // The temp asset directory is removed after the session.
   assert.ok(capturedDir && !existsSync(capturedDir), "the temp directory must be cleaned up");
+});
+
+test("an unknown decision never becomes an approval", async () => {
+  const launchSurface = async ({ api }) => {
+    let payload;
+    await api["POST /api/submit"]({ body: { decision: "lgtm", annotations: [] }, session: { complete(value) { payload = value; } } });
+    return { result: { status: "completed", payload } };
+  };
+  const outcome = await reviewDiff({ diffText: DIFF, launchSurface, clientKitSource: CLIENT_KIT, open: false });
+  assert.equal(outcome.result.decision, "cancelled");
 });
 
 test("reviewDiff forwards a ready callback to the surface port", async () => {
@@ -95,10 +121,35 @@ test("a cancelled surface returns no annotations", async () => {
   assert.deepEqual(outcome.annotations, []);
 });
 
-test("normalizeAnnotations enforces anchors, bodies, and a count cap", () => {
+test("outputAnchors offers every visible line and side; the request is contract-shaped", () => {
   const model = parseUnifiedDiff(DIFF);
-  assert.deepEqual(normalizeAnnotations("not an array", model), []);
-  assert.equal(normalizeAnnotations([{ path: "a.txt", side: "new", line: 2, body: "x".repeat(9000) }], model)[0].body.length, 4000);
-  const many = Array.from({ length: 600 }, () => ({ path: "a.txt", side: "new", line: 1, body: "ok" }));
-  assert.equal(normalizeAnnotations(many, model).length, 500);
+  const anchors = outputAnchors(model);
+  // " one" (old 1 / new 1), "-two" (old 2), "+TWO" (new 2), " three" (old 3 / new 3).
+  assert.deepEqual(anchors, [
+    { target: "a.txt", side: "old", position: 1 },
+    { target: "a.txt", side: "new", position: 1 },
+    { target: "a.txt", side: "old", position: 2 },
+    { target: "a.txt", side: "new", position: 2 },
+    { target: "a.txt", side: "old", position: 3 },
+    { target: "a.txt", side: "new", position: 3 },
+  ]);
+  const request = buildSurfaceRequest({ model, label: "working tree" });
+  assert.equal(request.kind.family, "output");
+  assert.equal(request.subject, "working tree");
+  assert.equal(request.anchors.length, 6);
+  // isSurfaceRequest requires a string gateId; a gate-launched surface supplies one.
+  assert.equal(isSurfaceRequest({ ...request, gateId: "gate-1" }), true);
+});
+
+test("the submit handler bounds bodies and counts through the contract", async () => {
+  const launchSurface = async ({ api }) => {
+    let payload;
+    const session = { complete(value) { payload = value; } };
+    const many = Array.from({ length: MAX_ANNOTATIONS + 100 }, () => ({ anchor: { target: "a.txt", side: "new", position: 1 }, body: "x".repeat(MAX_BODY + 5000) }));
+    await api["POST /api/submit"]({ body: { decision: "changes-requested", annotations: many }, session });
+    return { result: { status: "completed", payload } };
+  };
+  const outcome = await reviewDiff({ diffText: DIFF, launchSurface, clientKitSource: CLIENT_KIT, open: false });
+  assert.equal(outcome.result.annotations.length, MAX_ANNOTATIONS);
+  assert.equal(outcome.result.annotations[0].body.length, MAX_BODY);
 });

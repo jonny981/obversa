@@ -275,10 +275,12 @@ async function main() {
   status.setAttribute("role", "status");
   status.hidden = true;
 
+  // The button names the decision the return will carry: annotations mean
+  // "changes requested"; none means "approved".
   function updateCount() {
     returnButton.textContent = annotations.length
-      ? `Return ${annotations.length} annotation${annotations.length === 1 ? "" : "s"}`
-      : "Return with no annotations";
+      ? `Return ${annotations.length} annotation${annotations.length === 1 ? "" : "s"} (request changes)`
+      : "Approve with no annotations";
   }
   updateCount();
 
@@ -425,9 +427,20 @@ async function main() {
     returnButton.disabled = true;
     cancelButton.disabled = true;
     try {
-      const payload = annotations.map(({ path, side, line, body }) => ({ path, side, line, body }));
-      await client.submit("/api/submit", { annotations: payload });
-      finish(`Returned ${payload.length} annotation${payload.length === 1 ? "" : "s"}. You can close this tab.`);
+      // The surface contract: each annotation pins to an anchor the server
+      // offered (a diff line and side); the decision follows from whether there
+      // are any.
+      const payload = {
+        decision: annotations.length ? "changes-requested" : "approved",
+        annotations: annotations.map(({ path, side, line, body }) => ({
+          anchor: { target: path, side, position: line },
+          body,
+          createdAt: new Date().toISOString(),
+        })),
+      };
+      await client.submit("/api/submit", payload);
+      const n = payload.annotations.length;
+      finish(n ? `Returned ${n} annotation${n === 1 ? "" : "s"}. You can close this tab.` : "Approved with no annotations. You can close this tab.");
     } catch (error) {
       returnButton.disabled = false;
       cancelButton.disabled = false;

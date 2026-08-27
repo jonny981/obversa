@@ -1,4 +1,17 @@
-export { reviewDiff, normalizeAnnotations } from "./review.mjs";
+export { reviewDiff, outputAnchors, buildSurfaceRequest } from "./review.mjs";
+export {
+  FAMILIES,
+  DECISIONS,
+  AUTHOR_KINDS,
+  MAX_ANNOTATIONS,
+  MAX_BODY,
+  MAX_THREAD,
+  anchorKey,
+  buildAnchorSet,
+  validateAnnotation,
+  normalizeResult,
+  isSurfaceRequest,
+} from "./contract.mjs";
 export { computeDiff, diffArgs } from "./git.mjs";
 export { parseUnifiedDiff } from "./diff.mjs";
 export { ASSETS_DIR, buildIndexHtml } from "./page.mjs";

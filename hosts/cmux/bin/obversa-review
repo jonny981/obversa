@@ -69,7 +69,7 @@ async function main() {
     "utf8",
   );
 
-  const { status, annotations, meta } = await reviewDiff({
+  const { status, result, meta } = await reviewDiff({
     mode: options.mode,
     range: options.range,
     cwd: options.cwd,
@@ -83,7 +83,8 @@ async function main() {
   });
 
   if (status === "completed") {
-    process.stderr.write(`Review of the ${meta.label} finished: ${annotations.length} annotation${annotations.length === 1 ? "" : "s"} returned.\n`);
+    const count = result.annotations.length;
+    process.stderr.write(`Review of the ${meta.label} finished: ${result.decision}, ${count} annotation${count === 1 ? "" : "s"} returned.\n`);
     process.exit(0);
   }
   process.stderr.write(`Review of the ${meta.label} ended without a decision (${status}).\n`);

@@ -12,7 +12,7 @@
 //   - no server code is copied: source calls the injected runSurface port.
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { readFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
@@ -83,9 +83,14 @@ test("the review surface runs on surfacer and returns annotations", { timeout: 3
     sessionTimeoutMs: 25_000,
   });
 
+  // Run from a subdirectory of the repository: the command is documented as
+  // working anywhere inside it, and git's diff paths are repository-relative,
+  // so full-file context and the tree must still resolve.
+  const subdirectory = path.join(repo, "sub", "dir");
+  mkdirSync(subdirectory, { recursive: true });
   const reviewPromise = reviewDiff({
     mode: "worktree",
-    cwd: repo,
+    cwd: subdirectory,
     launchSurface,
     clientKitSource,
     open: false,
@@ -119,8 +124,19 @@ test("the review surface runs on surfacer and returns annotations", { timeout: 3
     assert.equal(meta.label, "working tree");
     const addedTexts = model.files[0].hunks.flatMap((h) => h.lines).map((l) => l.text);
     assert.ok(addedTexts.some((t) => t.includes(secret)), "the diff line reaches the browser unredacted");
+    // Started from a subdirectory, the diff path is still repository-relative,
+    // the tree lists root-relative paths, and full-file context was read (an
+    // unreadable file leaves contextBefore undefined).
+    assert.equal(model.files[0].path, "a.txt");
+    assert.deepEqual(meta.allFiles, ["a.txt"]);
+    assert.ok(Array.isArray(model.files[0].hunks[0].contextBefore), "full-file context resolves from a subdirectory");
 
-    const submitBody = JSON.stringify({ annotations: [{ ...anchor, body: `looks off: ${secret}` }] });
+    // The browser returns the surface contract: a decision and annotations
+    // pinned to offered anchors.
+    const submitBody = JSON.stringify({
+      decision: "changes-requested",
+      annotations: [{ anchor: { target: anchor.path, side: anchor.side, position: anchor.line }, body: `looks off: ${secret}` }],
+    });
 
     // The mutation is gated: no token is 401, a foreign origin is 403.
     const noAuth = await fetch(`${origin}/api/submit`, {
@@ -155,15 +171,21 @@ test("the review surface runs on surfacer and returns annotations", { timeout: 3
 
     const outcome = await reviewPromise;
     assert.equal(outcome.status, "completed");
-    assert.equal(outcome.annotations.length, 1);
-    assert.equal(outcome.annotations[0].path, anchor.path);
+    // The result is the SurfaceResult: routable, decided, contract anchors.
+    assert.equal(typeof outcome.result.surfaceId, "string");
+    assert.equal(outcome.result.decision, "changes-requested");
+    assert.equal(outcome.result.annotations.length, 1);
+    assert.deepEqual(outcome.result.annotations[0].anchor, { target: anchor.path, position: anchor.line, side: anchor.side });
     // Review content survives verbatim: a normal /api body would redact this.
-    assert.match(outcome.annotations[0].body, /ghp_ABC123verbatimSECRET/);
+    assert.match(outcome.result.annotations[0].body, /ghp_ABC123verbatimSECRET/);
 
-    // The framed stdout carries the same verbatim payload for a pipeline consumer.
+    // The framed stdout carries the same SurfaceResult, verbatim, for a
+    // pipeline consumer.
     const framed = parseFramedResult(stdout.text, "review");
     assert.ok(framed, "a framed result is written to stdout");
     assert.equal(framed.status, "completed");
+    assert.equal(framed.payload.surfaceId, outcome.result.surfaceId);
+    assert.equal(framed.payload.decision, "changes-requested");
     assert.match(framed.payload.annotations[0].body, /ghp_ABC123verbatimSECRET/);
   } finally {
     await reviewPromise.catch(() => {});
