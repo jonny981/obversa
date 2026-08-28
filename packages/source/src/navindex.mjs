@@ -190,22 +190,22 @@ function registerImports(node, scope, occurrences, seenDefs) {
 // so a method body may name a member declared below it. Static and instance
 // members are kept apart; a second member of the same name in the same map
 // (a getter and a setter, a field and a method) makes that name ambiguous.
-// The name a member key defines. An identifier, a string literal, and a
-// boolean or null literal — `[true]` defines the property "true", which
-// `this.true` reaches, since a reserved word is a valid identifier name after
-// a dot — are known, plain or in brackets. A numeric or bigint literal names
-// only its own number, which no dot name can reach, so it neither collides
-// nor threatens the side (null). A computed key that is anything else is
-// dynamic and could define any name (undefined). A private key is not
-// reachable either (null).
+// The name a member key defines. Any primitive literal, plain or in brackets,
+// defines the property named by its String value: a string its text, `true`
+// or `null` that word (which `this.true` reaches, since a reserved word is a
+// valid identifier name after a dot), a number its canonical form — "1" for
+// `[1]`, which no dot name reaches and so collides with nothing, but
+// "Infinity" for `[1e999]`, which does collide with a member named Infinity.
+// A RegExp literal is an object, not a primitive, and its string form is
+// whatever RegExp.prototype.toString says, so it is dynamic (undefined), as
+// is any other computed key that is not a fixed literal. A private key is
+// not reachable (null).
 function memberName(node) {
   const { key } = node;
   if (!key) return null;
   if (key.type === "Literal") {
-    const { value } = key;
-    if (typeof value === "string") return value;
-    if (typeof value === "boolean" || value === null) return String(value);
-    return null; // number, bigint, regex: not a dot name
+    if (key.regex) return undefined;
+    return String(key.value);
   }
   // A template with no substitutions is a fixed string too; one with
   // substitutions, or an invalid escape (no cooked value), is dynamic.

@@ -223,6 +223,18 @@ test("string-keyed members count, a dynamic computed key fails its side closed, 
   assert.deepEqual(at(numeric, 1, 47).def, { line: 1, col: 10 }, "a computed numeric key leaves the side open");
   const bigint = navIndex({ code: "class H { foo() {} [1n]() {} 2() {} go() { return this.foo(); } }\n", lang: "javascript" }).occurrences;
   assert.deepEqual(at(bigint, 1, 55).def, { line: 1, col: 10 }, "a bigint or plain numeric key too");
+  // A numeric literal that overflows is the number Infinity, whose property
+  // name "Infinity" a dot does reach; a RegExp literal is an object whose
+  // string form is whatever RegExp.prototype.toString says, so it is dynamic.
+  const overflow = navIndex({ code: "class O { Infinity() { return 1; } [1e999]() { return 2; } go() { return this.Infinity(); } }\n", lang: "javascript" }).occurrences;
+  assert.equal(at(overflow, 1, 78).def, null, "[1e999] is the member Infinity: ambiguous with the plain one");
+  const overflowPlain = navIndex({ code: "class P { Infinity() {} 1e999() {} go() { return this.Infinity(); } }\n", lang: "javascript" }).occurrences;
+  assert.equal(at(overflowPlain, 1, 54).def, null, "a plain 1e999 key too");
+  const regexInstance = navIndex({ code: "class Q { foo() {} [/x/]() {} go() { return this.foo(); } }\n", lang: "javascript" }).occurrences;
+  assert.equal(at(regexInstance, 1, 49).def, null, "a RegExp key closes the instance side");
+  const regexStatic = navIndex({ code: "class R { static foo() {} static [/x/]() {} static go() { return this.foo(); } bar() {} use() { return this.bar(); } }\n", lang: "javascript" }).occurrences;
+  assert.equal(at(regexStatic, 1, 70).def, null, "a static RegExp key closes the static side");
+  assert.deepEqual(at(regexStatic, 1, 108).def, { line: 1, col: 79 }, "and leaves the instance side open");
   // A template with no substitutions is a fixed string key; one with a
   // substitution is dynamic.
   const template = navIndex({ code: "class T { foo() {} [`bar`]() {} go() { return this.foo(); } }\n", lang: "javascript" }).occurrences;
