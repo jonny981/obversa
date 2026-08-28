@@ -509,6 +509,16 @@ function walk(node, scope, occurrences, seenDefs, parent = null) {
     }
     case "ForStatement": {
       const inner = pushScope(scope);
+      // Every lexical binding the head declares binds before any of its
+      // initialisers is read: in `for (let x = y, y = 1;;)` the first `y` is
+      // the loop's own (a temporal dead zone), not an outer one. `var` stays
+      // in the function scope, registered ahead of time by hoistVars.
+      if (node.init?.type === "VariableDeclaration" && node.init.kind !== "var") {
+        for (const decl of node.init.declarations) {
+          const kind = decl.init && FUNCTION_VALUES.has(decl.init.type) ? "function" : "variable";
+          registerPattern(decl.id, inner, kind, occurrences, seenDefs);
+        }
+      }
       if (node.init) walk(node.init, inner, occurrences, seenDefs, node);
       if (node.test) walk(node.test, inner, occurrences, seenDefs, node);
       if (node.update) walk(node.update, inner, occurrences, seenDefs, node);

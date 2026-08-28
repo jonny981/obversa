@@ -123,6 +123,18 @@ test("a loop's own binding shadows the right-hand side: for (let x of x) reads t
   assert.deepEqual(at(occurrences, 5, 11).def, { line: 4, col: 4 }, "with no declaration, the right side sees the outer binding");
 });
 
+test("a classic for head binds all its lexical declarations before any initialiser runs", () => {
+  const code = "let y = 0;\nfor (let x = y, y = 1; false;) {}\nfor (const { a = b } = {}, b = 2; false;) {}\nlet q = 0;\nfor (var w = q; false;) {}\n";
+  const { occurrences } = navIndex({ code, lang: "javascript" });
+  assert.deepEqual(at(occurrences, 2, 13).def, { line: 2, col: 16 }, "the first initialiser's y is the loop's later y (a TDZ)");
+  assert.deepEqual(at(occurrences, 3, 17).def, { line: 3, col: 27 }, "a destructuring default sees a later loop binding");
+  assert.deepEqual(at(occurrences, 5, 13).def, { line: 4, col: 4 }, "a var head reads the outer binding as before");
+  // Not only a TDZ throw: an arrow in the first initialiser captures the
+  // later loop-local binding and runs fine, returning 1, not 100.
+  const arrow = navIndex({ code: "let y = 100, f;\nfor (let x = () => y, y = 1; !f;) { f = x; }\nf();\n", lang: "javascript" }).occurrences;
+  assert.deepEqual(at(arrow, 2, 19).def, { line: 2, col: 22 }, "the arrow's y is the loop's y");
+});
+
 test("a for-of or for-in over an existing variable references it; the loop head is not a new definition", () => {
   const code = "let x;\nfor (x of [1]) { x; }\nx;\nlet y;\nfor (y in { a: 1 }) { y; }\ny;\n";
   const { occurrences } = navIndex({ code, lang: "javascript" });
