@@ -1,0 +1,11 @@
+{
+  "name": "@obversa/cmux-host",
+  "version": "0.1.0",
+  "private": true,
+  "description": "The cmux host: the composition root where the review source meets the surfacer runtime.",
+  "type": "module",
+  "dependencies": {
+    "@obversa/source": "workspace:*",
+    "@obversa/surfacer": "workspace:*"
+  }
+}

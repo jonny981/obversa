@@ -3,6 +3,7 @@ import { realpathSync } from 'node:fs';
 import { readFile, readdir } from 'node:fs/promises';
 import { basename, dirname, extname, isAbsolute, join, relative, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
+// (fileURLToPath also reads `file:` specifiers, below.)
 
 // The TypeScript compiler's parser (the pinned TypeScript 6 build; the
 // TypeScript 7 native build exposes no parser API). A real parser is the only
@@ -73,7 +74,14 @@ const refusalReason = (dependency) => dependency.slice('@obversa/<'.length, -1);
 // than assume. A member of `require` or `module` that is not a loader
 // (`require.main`, `module.exports`) is not a use of one. Exported so the
 // spec can pin each form.
-export function moduleSpecifiers(text, fileName = 'module.ts') {
+// Test files are held to the arrow rules — what they import — but not to the
+// loader-hatch rules: a test may build a Proxy with Reflect or read a
+// constructor's name without shipping anything.
+export function isTestPath(path) {
+  return /(?:^|\/)(?:test|tests|__tests__)\/|\.(?:test|spec)\.[^/]+$/.test(path);
+}
+
+export function moduleSpecifiers(text, fileName = 'module.ts', { hatches = !isTestPath(fileName) } = {}) {
   const kind = scriptKinds.get(extname(fileName)) ?? ts.ScriptKind.TS;
   const source = ts.createSourceFile(fileName, text, ts.ScriptTarget.Latest, true, kind);
   const specifiers = [];
@@ -130,16 +138,69 @@ export function moduleSpecifiers(text, fileName = 'module.ts') {
     if (isImportMeta(node)) return true;
     return isAccess(node) && memberName(node) === 'process' && isRoot(ts.skipOuterExpressions(node.expression));
   };
+  // The members of each root that hold data or plain behaviour and cannot
+  // hand the root, a Module, or a loader back. Anything else on a root —
+  // `valueOf`, `constructor`, `__proto__`, a builtin factory, a binding — is
+  // refused: `process.valueOf()` is `process` again, out of the root rule.
+  const rootMembers = {
+    process: new Set([
+      'env', 'argv', 'execArgv', 'exit', 'exitCode', 'cwd', 'chdir', 'execPath', 'stdout', 'stderr', 'stdin',
+      'platform', 'arch', 'pid', 'ppid', 'version', 'versions', 'release', 'title', 'umask',
+      'on', 'once', 'off', 'emit', 'addListener', 'removeListener', 'removeAllListeners', 'listenerCount',
+      'kill', 'hrtime', 'nextTick', 'uptime', 'memoryUsage', 'cpuUsage', 'resourceUsage', 'emitWarning', 'abort',
+    ]),
+    globalThis: new Set([
+      'process', 'structuredClone', 'fetch', 'WebSocket', 'crypto', 'setTimeout', 'clearTimeout', 'setInterval',
+      'clearInterval', 'queueMicrotask', 'URL', 'TextEncoder', 'TextDecoder', 'AbortController', 'Buffer',
+      'console', 'performance', 'navigator',
+    ]),
+    module: moduleDataMembers,
+    // `resolve` is the loader and is judged as the access node itself.
+    'import.meta': new Set(['url', 'dirname', 'filename', 'resolve']),
+  };
+  const rootName = (node) => (ts.isIdentifier(node) ? node.text : isImportMeta(node) ? 'import.meta' : 'process');
+  // Listed members that hand the root back (an EventEmitter's chaining
+  // methods): their call may only stand as a statement, its result
+  // discarded, or the root travels on as a value.
+  const selfReturning = new Set(['on', 'once', 'off', 'addListener', 'removeListener', 'removeAllListeners', 'prependListener', 'prependOnceListener', 'setMaxListeners']);
+  //
+  // WHAT THIS GUARD PROMISES. A precise static-source promise, not a
+  // sandbox: every module form the parser accepts is read, and the direct
+  // ways to a loader listed here are refused. Out of its scope, and stated:
+  // a specifier built from an expression, reflection (Reflect, a computed
+  // key on anything but a root), constructor chains beyond `.constructor`
+  // itself, a root handed on through a member not listed here, and code
+  // generated at run time. The boundary tooling stage after F2 replaces
+  // this file with dependency-cruiser and ESLint rules under the same
+  // stated residual.
   const isLoader = (node) => {
-    // A root holds a loader: as the object of a literal member the member
-    // decides (below); compared for identity it loads nothing; reached by
-    // a computed key, or used as a value — destructured, assigned, passed,
-    // handed to Reflect — the loader goes with it, so the use is refused.
+    // A root holds a loader: as the object of a literal member in its list
+    // the member decides (below); compared for identity it loads nothing;
+    // reached by a computed key or an unlisted member, or used as a value —
+    // destructured, assigned, passed, handed to Reflect — the loader goes
+    // with it, so the use is refused.
     if (isRoot(node)) {
       const parent = node.parent;
-      if (isAccess(parent) && ts.skipOuterExpressions(parent.expression) === node) return memberName(parent) === null;
+      if (isAccess(parent) && ts.skipOuterExpressions(parent.expression) === node) {
+        const member = memberName(parent);
+        if (member === null || !rootMembers[rootName(node)].has(member)) return true;
+        if (selfReturning.has(member)) {
+          const call = parent.parent;
+          return !(call && ts.isCallExpression(call) && call.expression === parent && call.parent && ts.isExpressionStatement(call.parent));
+        }
+        return false;
+      }
       return !isEquality(parent);
     }
+    // `.constructor` on anything reaches the Function constructor two steps
+    // on (`({}).constructor.constructor` is Function): refused, except the
+    // one read of a class's name (`value.constructor.name`).
+    if (isAccess(node) && memberName(node) === 'constructor') {
+      const parent = node.parent;
+      return !(parent && isAccess(parent) && ts.skipOuterExpressions(parent.expression) === node && memberName(parent) === 'name');
+    }
+    // Text run as code, reflection, and the vm builtin reach every loader.
+    if (ts.isIdentifier(node) && (node.text === 'eval' || node.text === 'Function' || node.text === 'Reflect') && !isName(node)) return true;
     if (ts.isIdentifier(node)) {
       if (node.text !== 'require' || isName(node)) return false;
       // As the object of a member: `.resolve` and a computed key make the
@@ -156,12 +217,8 @@ export function moduleSpecifiers(text, fileName = 'module.ts') {
     if (!isAccess(node)) return false;
     const member = memberName(node);
     if (member === 'require' || moduleClassLoaders.has(member)) return true;
-    // `module` is read only through the members that hold data; every
-    // other one — `constructor` (the Module class and its loaders),
-    // `children`, `parent`, `paths`, a computed key — reaches a loader.
-    if (accessOn(node, named('module'))) return !moduleDataMembers.has(member);
     if (accessOn(node, isRequire)) return member === 'resolve' || member === null;
-    if (accessOn(node, isImportMeta)) return member === 'resolve' || member === null;
+    if (accessOn(node, isImportMeta)) return member === 'resolve';
     return false;
   };
   // `node:module` makes loaders: `createRequire` returns one, `register`
@@ -172,9 +229,12 @@ export function moduleSpecifiers(text, fileName = 'module.ts') {
   // import or require of it is refused. A `createRequire(...)` result may
   // be bound only as `const require`, so the loader keeps the name the scan
   // tracks.
-  const isModuleModule = (node) => ['module', 'node:module'].includes(literal(node));
+  // `node:vm` runs text as code in this context and reaches every loader:
+  // refused in every form, alongside the module builtin's unlisted names.
+  const isModuleModule = (node) => ['module', 'node:module', 'vm', 'node:vm'].includes(literal(node));
   const moduleModuleNames = new Set(['createRequire', 'builtinModules', 'isBuiltin']);
   const readsModuleModule = (node) => {
+    if (['vm', 'node:vm'].includes(literal(node.moduleSpecifier))) return false;
     const clause = node.importClause;
     if (!clause || clause.name || !clause.namedBindings || !ts.isNamedImports(clause.namedBindings)) return false;
     return clause.namedBindings.elements.every((element) => !element.propertyName && moduleModuleNames.has(element.name.text));
@@ -204,19 +264,19 @@ export function moduleSpecifiers(text, fileName = 'module.ts') {
     || ts.isMethodDeclaration(node) || ts.isConstructorDeclaration(node) || ts.isAccessor(node);
   let functionDepth = 0;
   const visit = (node, inDoc) => {
-    if (!inDoc && isLoader(node) && !handled.has(node)) specifiers.push(null);
-    if (!inDoc && isBuiltinFactory(node)) specifiers.push(null);
-    if (!inDoc && functionDepth === 0 && ts.isIdentifier(node) && node.text === 'arguments' && !isName(node)) specifiers.push(null);
+    if (hatches && !inDoc && isLoader(node) && !handled.has(node)) specifiers.push(null);
+    if (hatches && !inDoc && isBuiltinFactory(node)) specifiers.push(null);
+    if (hatches && !inDoc && functionDepth === 0 && ts.isIdentifier(node) && node.text === 'arguments' && !isName(node)) specifiers.push(null);
     if (isOwnFunction(node)) functionDepth += 1;
-    if (!inDoc && isCreateRequire(node) && !handled.has(node)) {
+    if (hatches && !inDoc && isCreateRequire(node) && !handled.has(node)) {
       // Only the callee of `const require = createRequire(...)`; the name
       // identifier under a member access is judged with the access.
       const underAccess = ts.isIdentifier(node) && node.parent && isAccess(node.parent) && node.parent.name === node;
       if (!underAccess) specifiers.push(null);
     }
-    if (ts.isImportDeclaration(node) && isModuleModule(node.moduleSpecifier) && !readsModuleModule(node)) {
+    if (hatches && ts.isImportDeclaration(node) && isModuleModule(node.moduleSpecifier) && !readsModuleModule(node)) {
       specifiers.push(null);
-    } else if (ts.isExportDeclaration(node) && node.moduleSpecifier && isModuleModule(node.moduleSpecifier)) {
+    } else if (hatches && ts.isExportDeclaration(node) && node.moduleSpecifier && isModuleModule(node.moduleSpecifier)) {
       // A re-export of node:module hands its loaders to whoever imports
       // this module: refused in every form.
       specifiers.push(null);
@@ -224,7 +284,7 @@ export function moduleSpecifiers(text, fileName = 'module.ts') {
       specifiers.push(literal(node.moduleSpecifier));
     } else if (ts.isImportEqualsDeclaration(node) && ts.isExternalModuleReference(node.moduleReference)) {
       // `import x = require("node:module")` binds the whole module.
-      specifiers.push(isModuleModule(node.moduleReference.expression) ? null : literal(node.moduleReference.expression));
+      specifiers.push(hatches && isModuleModule(node.moduleReference.expression) ? null : literal(node.moduleReference.expression));
     } else if (ts.isImportTypeNode(node)) {
       const argument = ts.isLiteralTypeNode(node.argument) ? node.argument.literal : node.argument;
       specifiers.push(literal(argument));
@@ -251,11 +311,14 @@ export function moduleSpecifiers(text, fileName = 'module.ts') {
         // of `module` and a Module-class loader are not loads the scan
         // reads; a load of the module that makes loaders is refused too.
         const member = isAccess(callee) ? memberName(callee) : undefined;
-        const unreadable = member === null || moduleClassLoaders.has(member)
-          || (accessOn(callee, named('module')) && member !== 'require') || isModuleModule(node.arguments[0]);
+        // eval, Function, and any `.constructor` (Function two steps on) run
+        // text; their argument is not a specifier the scan reads.
+        const runsText = (ts.isIdentifier(callee) && (callee.text === 'eval' || callee.text === 'Function')) || member === 'constructor';
+        const unreadable = member === null || (hatches && (runsText || moduleClassLoaders.has(member)
+          || (accessOn(callee, named('module')) && member !== 'require') || isModuleModule(node.arguments[0])));
         specifiers.push(unreadable ? null : literal(node.arguments[0]));
       } else if (isImport && node.arguments.length > 0) {
-        specifiers.push(isModuleModule(node.arguments[0]) ? null : literal(node.arguments[0]));
+        specifiers.push(hatches && isModuleModule(node.arguments[0]) ? null : literal(node.arguments[0]));
       }
     }
     // JSDoc is not part of the child walk; its type expressions can carry
@@ -521,12 +584,38 @@ export function manifestImportTargets(manifest, { file, root: repoRoot } = {}) {
   return found;
 }
 
+// A specifier as the loader reads it: a `file:` URL is the path it names, a
+// percent-encoded specifier is decoded (`./%2e%2e/` is `./../`), and any
+// other URL scheme but `node:` — `data:`, `http:`, `blob:` — is refused,
+// since what it loads is not a file the scan can place. Returns `{ text }`
+// or `{ refused }`.
+export function readSpecifier(specifier) {
+  const scheme = /^([a-zA-Z][a-zA-Z0-9+.-]*):/.exec(specifier)?.[1];
+  if (scheme !== undefined && scheme !== 'node') {
+    if (scheme === 'file') {
+      try {
+        return { text: fileURLToPath(specifier) };
+      } catch {
+        return { refused: `a file URL the loader cannot read: ${specifier}` };
+      }
+    }
+    return { refused: `a ${scheme}: URL specifier loads something the scan cannot place` };
+  }
+  if (!specifier.includes('%')) return { text: specifier };
+  try {
+    return { text: decodeURIComponent(specifier) };
+  } catch {
+    return { refused: `a percent-encoded specifier that does not decode: ${specifier}` };
+  }
+}
+
 // The package a specifier or path names when it crosses a package boundary:
-// an `@obversa/...` name by name, a relative path by the package directory it
-// resolves into, when that is not the importing file's own. Null otherwise.
+// an `@obversa/...` name by name, a relative or absolute path by the package
+// directory it resolves into, when that is not the importing file's own.
+// Null otherwise.
 function crossingPackage(specifier, { file, root: repoRoot } = {}) {
   if (specifier.startsWith('@obversa/')) return specifier.split('/').slice(0, 2).join('/');
-  if (!file || !repoRoot || !/^\.\.?\//.test(specifier)) return null;
+  if (!file || !repoRoot || !(/^\.\.?\//.test(specifier) || isAbsolute(specifier))) return null;
   const dir = packageDirOf(resolve(dirname(file), specifier), repoRoot);
   return dir && dir !== packageDirOf(file, repoRoot) ? `@obversa/${dir}` : null;
 }
@@ -590,9 +679,14 @@ function resolvedTargets(specifier, file, options, host) {
 export function extractObversaImports(text, { file, root: repoRoot, configs = [], host = ts.sys } = {}) {
   const found = [];
   const owner = file && repoRoot ? packageDirOf(file, repoRoot) : undefined;
-  for (const specifier of moduleSpecifiers(text, file ?? 'module.ts')) {
-    if (specifier === null) {
+  for (const raw of moduleSpecifiers(text, file ?? 'module.ts')) {
+    if (raw === null) {
       found.push(refusal('a computed module reference cannot be checked; use a plain string'));
+      continue;
+    }
+    const { text: specifier, refused } = readSpecifier(raw);
+    if (refused) {
+      found.push(refusal(refused));
       continue;
     }
     const named = new Set();
@@ -969,9 +1063,11 @@ for (const field of ['overrides', 'resolutions']) {
 for (const field of Object.keys(rootManifest.pnpm ?? {})) {
   if (field !== 'executionEnv') failures.push(`package.json: pnpm.${field} changes how packages install; only pnpm.executionEnv is allowed`);
 }
+// The workspace is the packages and the hosts: a host is the composition
+// root where the packages meet, and it takes them by their public names.
 const workspaceFile = await readFile(join(root, 'pnpm-workspace.yaml'), 'utf8');
-if (workspaceFile !== 'packages:\n  - packages/*\n')
-  failures.push('pnpm-workspace.yaml: must be exactly the packages glob (pinned here; review the boundary rule with any change)');
+if (workspaceFile !== 'packages:\n  - packages/*\n  - hosts/*\n')
+  failures.push('pnpm-workspace.yaml: must be exactly the packages and hosts globs (pinned here; review the boundary rule with any change)');
 // A pnpmfile hook rewrites manifests as they are read, and an .npmrc can
 // name one or change how workspace packages link; neither is read by the
 // scan, so their presence at the root or in a package is refused.

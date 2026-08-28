@@ -9,7 +9,7 @@ import path from "node:path";
 import ts from "@typescript/typescript6";
 import { validRange } from "semver";
 
-import { dependencyTarget, extractObversaImports, internalDependencies, isProjectConfig, isVersionRange, manifestImportTargets, manifestPathTargets, moduleSpecifiers, parserExtensions, projectConfig, refusal, scansImports, sourceExtensions, textExtensions, tsconfigDependencies, walkTree } from "./check-boundaries.mjs";
+import { dependencyTarget, extractObversaImports, internalDependencies, isProjectConfig, isTestPath, isVersionRange, manifestImportTargets, manifestPathTargets, moduleSpecifiers, parserExtensions, projectConfig, refusal, scansImports, sourceExtensions, textExtensions, tsconfigDependencies, walkTree } from "./check-boundaries.mjs";
 
 // A filesystem for the compiler made of a path -> text map, rooted at /repo.
 // The compiler's own directory matcher walks it, so `include` globs, package
@@ -422,6 +422,33 @@ test("the CommonJS loader and the resolvers name a module too: module.require, r
     'process.binding("fs");',
     'process.dlopen(m, "x.node");',
     'process.mainModule;',
+    // A member outside a root's list hands the root back or reaches past it,
+    // and so does a listed chaining method whose result is kept.
+    'const p = process.valueOf(); p["get" + "BuiltinModule"]("node:module");',
+    'process.on("SIGINT", f)["get" + "BuiltinModule"]("node:module");',
+    'const p = process.once("exit", f);',
+    'f(process.off("exit", g));',
+    // .constructor.constructor is Function on any object.
+    'process.stdout.constructor.constructor("return process")();',
+    '({}).constructor.constructor("return process")();',
+    'const C = x.constructor;',
+    'Reflect.get(x, "constructor");',
+    'Reflect.apply(f, null, []);',
+    'process.constructor;',
+    'process.__proto__;',
+    'globalThis.valueOf();',
+    'globalThis.eval("1");',
+    'import.meta.valueOf;',
+    'module.valueOf();',
+    // Text run as code, and the vm builtin.
+    'eval("process.getBuiltinModule");',
+    'new Function("return process")();',
+    'Function("x")();',
+    'const e = eval;',
+    'import vm from "node:vm";',
+    'import { runInThisContext } from "vm";',
+    'const vm = await import("node:vm");',
+    'require("vm");',
     // Node's CommonJS wrapper passes require and module as its arguments.
     'const loaded = arguments[1]("../../surfacer/src/sanitize.mjs");',
     'arguments[2].require("x");',
@@ -455,6 +482,7 @@ test("the CommonJS loader and the resolvers name a module too: module.require, r
     'module.exports = 1;', 'module.id;', 'module.filename;', 'module.path;', 'module.loaded;', 'import.meta.url;', 'import.meta.dirname;',
     'function f() { return arguments[0]; }', 'const o = { m() { return arguments.length; } };', 'class A { constructor() { this.n = arguments.length; } }',
     'process.env.HOME; process.cwd(); process.exit(1); process.stdout.write("x"); process.argv.slice(2); process.platform === "darwin";',
+    'process.on("SIGINT", handler); process.off("SIGINT", handler);', 'const name = value.constructor?.name; const n2 = value.constructor.name;',
     'globalThis.fetch; globalThis.process.env.X; typeof globalThis.WebSocket;', 'process === globalThis.process;',
     'const { require: r } = x;', 'o.module;', 'class A { require() {} }', 'const module = 1;', '/** @param {typeof require} r */ function f(r) {}',
     'import { createRequire } from "node:module"; const require = createRequire(import.meta.url); require("./local.cjs");',
@@ -545,6 +573,32 @@ test("a subpath import resolves to its package name; a relative import inside th
   const file = "/repo/packages/source/src/review.mjs";
   assert.deepEqual(extractObversaImports(`import x from "@obversa/memory/testing";`, { file, root: "/repo" }), ["@obversa/memory"]);
   assert.deepEqual(extractObversaImports(`import x from "../src/git.mjs"; require("./local.cjs");`, { file, root: "/repo" }), []);
+});
+
+test("a test file is held to the arrow rules but not the loader-hatch rules", () => {
+  const hatchy = 'Reflect.get(o, "k"); const c = x.constructor.constructor; eval("1"); process[k]; module.constructor; const { getBuiltinModule } = process; import vm from "node:vm";';
+  for (const file of ["/repo/packages/source/test/a.test.mjs", "/repo/packages/lines/tests/b.spec.ts", "/repo/packages/x/src/__tests__/c.mjs", "/repo/packages/x/src/d.spec.mjs"]) {
+    assert.deepEqual(extractObversaImports(hatchy, { file, root: "/repo" }), [], file);
+    assert.deepEqual(extractObversaImports('import "@obversa/surfacer"; require("@obversa/memory");', { file, root: "/repo" }), ["@obversa/surfacer", "@obversa/memory"], `${file} still crosses`);
+  }
+  assert.ok(extractObversaImports(hatchy, { file: "/repo/packages/source/src/a.mjs", root: "/repo" }).length > 0, "shipped source is held to both");
+  assert.equal(isTestPath("packages/source/src/review.mjs"), false);
+  assert.equal(isTestPath("packages/source/src/testing.ts"), false, "a testing subpath is shipped source");
+});
+
+test("a specifier is read as the loader reads it: percent-encoding decoded, a file URL as its path, other schemes refused", () => {
+  const file = "/repo/packages/source/src/review.mjs";
+  const at = { file, root: "/repo" };
+  assert.deepEqual(extractObversaImports('import "./%2e%2e/%2e%2e/surfacer/src/sanitize.mjs";', at), ["@obversa/surfacer"], "%2e%2e is ..");
+  assert.deepEqual(extractObversaImports('import "../../%73urfacer/src/index.mjs";', at), ["@obversa/surfacer"], "an encoded letter");
+  assert.deepEqual(extractObversaImports('import "file:///repo/packages/memory/src/index.ts";', at), ["@obversa/memory"], "a file URL");
+  assert.deepEqual(extractObversaImports('import "file:///repo/packages/source/src/local.mjs";', at), [], "a file URL inside the package");
+  assert.deepEqual(extractObversaImports('import "node:fs"; import "./local.mjs";', at), []);
+  assert.deepEqual(extractObversaImports('import "data:text/javascript,export default 1";', at), [refusal("a data: URL specifier loads something the scan cannot place")]);
+  assert.deepEqual(extractObversaImports('import "http://example.test/x.mjs";', at), [refusal("a http: URL specifier loads something the scan cannot place")]);
+  assert.deepEqual(extractObversaImports('import "./%E0%A4%A";', at), [refusal("a percent-encoded specifier that does not decode: ./%E0%A4%A")]);
+  assert.deepEqual(extractObversaImports('import "file://host/x";', at), [refusal("a file URL the loader cannot read: file://host/x")]);
+  assert.deepEqual(extractObversaImports('import "/repo/packages/surfacer/src/index.mjs";', at), ["@obversa/surfacer"], "an absolute path");
 });
 
 test("a relative import that lands in another package names that package", () => {
