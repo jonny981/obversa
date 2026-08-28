@@ -794,11 +794,14 @@ function crossingPackage(specifier, { file, root: repoRoot } = {}) {
   // lands, and a spelling other than the disk's own (case, a symlink) is
   // refused outright. A target that does not exist keeps its spelling: the
   // compiler's own resolution places it, or reports it.
+  // The root by its real path as well, so a root handed over through a
+  // symlink still places a real target under it.
+  const realRoot = realpathOf(repoRoot, ts.sys);
   const target = resolve(realpathOf(dirname(file), ts.sys), specifier);
   const real = realpathOf(target, ts.sys);
-  if (real !== target) return refusal(`${specifier} names ${relative(realpathOf(repoRoot, ts.sys), real).split('\\').join('/')} by another spelling; a specifier names its file as the disk does`);
-  const dir = packageDirOf(real, repoRoot);
-  return dir && dir !== packageDirOf(realpathOf(file, ts.sys), repoRoot) ? `@obversa/${dir}` : null;
+  if (real !== target) return refusal(`${specifier} names ${relative(realRoot, real).split('\\').join('/')} by another spelling; a specifier names its file as the disk does`);
+  const dir = packageDirOf(real, realRoot);
+  return dir && dir !== packageDirOf(realpathOf(file, ts.sys), realRoot) ? `@obversa/${dir}` : null;
 }
 
 // The package directory an absolute path lies in, or names outright (a bare
@@ -1139,9 +1142,14 @@ for (const entry of await readdir(join(root, 'hosts'), { withFileTypes: true }))
     }
   }
   // This walk enters dist, which the main walk skips by name, so a link or a
-  // nested manifest kept there is met here and refused here.
+  // nested manifest kept there is met here and refused here. A host is not
+  // built at all: a dist directory anywhere under it holds files the main
+  // scan never reads, a shipped command kept there included, so the
+  // directory itself is refused.
   const { files: hostFiles, symlinks: hostLinks } = await walkTree(hostDir, { ignored: new Set(['node_modules']) });
   for (const link of hostLinks) failures.push(symlinkRefusal(relative(root, link).split('\\').join('/')));
+  for (const dist of new Set([...hostFiles, ...hostLinks].map((path) => relative(root, path).split('\\').join('/')).map((path) => path.match(/^(.*\/dist)\//)?.[1]).filter(Boolean)))
+    failures.push(`${dist}: a host is not built; a dist directory under a host holds files the scan never reads`);
   for (const path of hostFiles) {
     if (basename(path) === 'package.json' && path !== join(hostDir, 'package.json'))
       failures.push(`${relative(root, path).split('\\').join('/')}: a nested manifest makes itself the package scope of the files beneath it, whatever it is named; a host has one manifest, at its root`);

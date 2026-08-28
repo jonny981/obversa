@@ -684,6 +684,15 @@ test("a relative import is placed by its real path, and a spelling other than th
     const found = (text) => extractObversaImports(text, { file, root: tree });
     assert.deepEqual(found('import { x } from "../../surfacer/src/index.mjs";'), ["@obversa/surfacer"], "the honest spelling is the crossing it is");
     assert.deepEqual(found('import { x } from "../../surfacer/src/missing.mjs";'), ["@obversa/surfacer"], "a missing target keeps its spelling and its crossing");
+    // A root and a file handed over through a symlinked spelling still place
+    // the crossing: the check reads real paths on both sides.
+    const linkedTree = path.join(os.tmpdir(), path.basename(tree) + "-link");
+    symlinkSync(tree, linkedTree);
+    try {
+      assert.deepEqual(extractObversaImports('import { x } from "../../surfacer/src/index.mjs";', { file: path.join(linkedTree, "packages", "source", "src", "a.mjs"), root: linkedTree }), ["@obversa/surfacer"]);
+    } finally {
+      rmSync(linkedTree);
+    }
     // A symlink is another spelling too.
     symlinkSync(path.join("..", "..", "surfacer", "src", "index.mjs"), path.join(tree, "packages", "source", "src", "link.mjs"));
     assert.ok(found('import { x } from "./link.mjs";').some((entry) => /by another spelling/.test(entry)));
@@ -894,6 +903,15 @@ test("the guard, run on a disposable copy of the tree, refuses a shipped host im
     const distLinked = guard();
     assert.notEqual(distLinked.status, 0);
     assert.match(distLinked.stderr, /hosts\/cmux\/dist\/obversa-escape: a symlink under packages\/ or hosts\/ is refused/);
+    rmSync(path.join(root, "hosts", "cmux", "dist"), { recursive: true });
+    // A host is not built: a regular file kept under a host's dist — a
+    // shipped command the main scan never reads — refuses the directory.
+    mkdirSync(path.join(root, "hosts", "cmux", "dist"), { recursive: true });
+    writeFileSync(path.join(root, "hosts", "cmux", "dist", "obversa-escape"), '#!/usr/bin/env node\nconsole.log(eval("40 + 2"));\n');
+    chmodSync(path.join(root, "hosts", "cmux", "dist", "obversa-escape"), 0o755);
+    const hostDist = guard();
+    assert.notEqual(hostDist.status, 0);
+    assert.match(hostDist.stderr, /hosts\/cmux\/dist: a host is not built; a dist directory under a host holds files the scan never reads/);
     rmSync(path.join(root, "hosts", "cmux", "dist"), { recursive: true });
     mkdirSync(path.join(root, "packages", "source", "dist"), { recursive: true });
     const packageDistLink = path.join(root, "packages", "source", "dist", "link.mjs");
