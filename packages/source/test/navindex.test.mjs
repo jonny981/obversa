@@ -66,6 +66,27 @@ test("nested same-name functions resolve by scope", () => {
   assert.deepEqual(topCall.def, { line: 1, col: 9 });
 });
 
+test("a block-scoped declaration shadows only inside its block", () => {
+  const code = "const value = 1;\n{\n  const value = 2;\n  value;\n}\nvalue;\n";
+  const { occurrences } = navIndex({ code, lang: "javascript" });
+  assert.deepEqual(at(occurrences, 4, 2).def, { line: 3, col: 8 }, "inside the block: the inner declaration");
+  assert.deepEqual(at(occurrences, 6, 0).def, { line: 1, col: 6 }, "after the block: the outer declaration");
+});
+
+test("var hoists out of a block; let and const do not", () => {
+  const code = "{\n  var hoisted = 1;\n  let scoped = 2;\n}\nhoisted;\nscoped;\n";
+  const { occurrences } = navIndex({ code, lang: "javascript" });
+  assert.deepEqual(at(occurrences, 5, 0).def, { line: 2, col: 6 }, "var is visible after the block");
+  assert.equal(at(occurrences, 6, 0).def, null, "let is not");
+});
+
+test("switch cases share one block scope, separate from the outer one", () => {
+  const code = "let n = 1;\nswitch (n) {\n  case 1:\n    let n2 = 2;\n    n2;\n}\nn;\n";
+  const { occurrences } = navIndex({ code, lang: "javascript" });
+  assert.deepEqual(at(occurrences, 5, 4).def, { line: 4, col: 8 });
+  assert.deepEqual(at(occurrences, 7, 0).def, { line: 1, col: 4 });
+});
+
 test("parameter is not visible outside the function", () => {
   const code = "function f(x) { return x; }\nx;\n";
   const { occurrences } = navIndex({ code, lang: "javascript" });

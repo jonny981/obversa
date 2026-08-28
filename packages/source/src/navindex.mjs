@@ -35,8 +35,18 @@ function parse(code) {
   }
 }
 
-function pushScope(parent) {
-  return { parent, defs: new Map(), methods: new Map() };
+// A scope. Function scopes (the program and every function body) are where
+// `var` lands; blocks, for statements, switches, and catch clauses hold only their
+// lexical declarations, so a `let` or `const` inside a block never shadows the
+// outer binding for code after the block.
+function pushScope(parent, { isFunction = false } = {}) {
+  return { parent, defs: new Map(), methods: new Map(), isFunction };
+}
+
+function functionScope(scope) {
+  let current = scope;
+  while (current && !current.isFunction) current = current.parent;
+  return current ?? scope;
 }
 
 function lookup(scope, name) {
@@ -161,7 +171,7 @@ function walkFunction(node, scope, occurrences, seenDefs, { namedInner = false }
   if (namedInner && node.id) {
     registerDef(scope, node.id, "function", occurrences, seenDefs);
   }
-  const inner = pushScope(scope);
+  const inner = pushScope(scope, { isFunction: true });
   for (const param of node.params ?? []) {
     registerPattern(param, inner, "parameter", occurrences, seenDefs);
   }
@@ -176,10 +186,28 @@ function walk(node, scope, occurrences, seenDefs, parent = null) {
       hoist(node.body, scope, occurrences, seenDefs);
       for (const child of node.body) walk(child, scope, occurrences, seenDefs, node);
       return;
-    case "BlockStatement":
-      hoist(node.body, scope, occurrences, seenDefs);
-      for (const child of node.body) walk(child, scope, occurrences, seenDefs, node);
+    case "BlockStatement": {
+      // A block's own lexical scope: declarations inside it are not visible
+      // after it, so a use after the block resolves to the outer binding.
+      // (A function body is walked here too, inside the function scope
+      // walkFunction pushed; its declarations then sit one level in, which
+      // is still invisible from outside the function.)
+      const inner = pushScope(scope);
+      hoist(node.body, inner, occurrences, seenDefs);
+      for (const child of node.body) walk(child, inner, occurrences, seenDefs, node);
       return;
+    }
+    case "SwitchStatement": {
+      // All cases share one block scope.
+      const inner = pushScope(scope);
+      if (node.discriminant) walk(node.discriminant, scope, occurrences, seenDefs, node);
+      hoist(node.cases.flatMap((entry) => entry.consequent), inner, occurrences, seenDefs);
+      for (const entry of node.cases) {
+        if (entry.test) walk(entry.test, inner, occurrences, seenDefs, entry);
+        for (const child of entry.consequent) walk(child, inner, occurrences, seenDefs, entry);
+      }
+      return;
+    }
     case "FunctionDeclaration":
       walkFunction(node, scope, occurrences, seenDefs);
       return;
@@ -219,7 +247,10 @@ function walk(node, scope, occurrences, seenDefs, parent = null) {
       return;
     case "VariableDeclarator": {
       const kind = node.init && FUNCTION_VALUES.has(node.init.type) ? "function" : "variable";
-      registerPattern(node.id, scope, kind, occurrences, seenDefs);
+      // `var` belongs to the enclosing function scope wherever it is written;
+      // `let` and `const` belong to the block they are written in.
+      const target = parent?.kind === "var" ? functionScope(scope) : scope;
+      registerPattern(node.id, target, kind, occurrences, seenDefs);
       if (node.init) walk(node.init, scope, occurrences, seenDefs, node);
       return;
     }
@@ -307,6 +338,6 @@ export function navIndex({ code, lang }) {
   if (!tree) return { occurrences: [] };
 
   const occurrences = [];
-  walk(tree, pushScope(null), occurrences, new Set());
+  walk(tree, pushScope(null, { isFunction: true }), occurrences, new Set());
   return { occurrences };
 }

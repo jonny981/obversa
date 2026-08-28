@@ -166,6 +166,42 @@ test("a git-quoted path with a tab decodes to the real filename", () => {
   assert.equal(file.newPath, `tab${tab}name.txt`);
 });
 
+test("a quoted binary path is read from the diff --git header, which is all a binary diff has", () => {
+  const tab = String.fromCharCode(9);
+  const { files } = parseUnifiedDiff(`diff --git "a/image\\tone.png" "b/image\\tone.png"
+new file mode 100644
+index 0000000..e69de29
+Binary files /dev/null and "b/image\\tone.png" differ
+`);
+  const [file] = files;
+  assert.equal(file.binary, true);
+  assert.equal(file.status, "added");
+  assert.equal(file.path, `image${tab}one.png`);
+  assert.equal(file.oldPath, `image${tab}one.png`);
+  assert.equal(file.newPath, `image${tab}one.png`);
+});
+
+test("a diff --git header with one quoted side, or spaces in an unquoted path, still names both files", () => {
+  const tab = String.fromCharCode(9);
+  const mixed = parseUnifiedDiff(`diff --git a/plain.png "b/tab\\tname.png"
+similarity index 100%
+rename from plain.png
+rename to "tab\\tname.png"
+`).files[0];
+  assert.equal(mixed.oldPath, "plain.png");
+  assert.equal(mixed.newPath, `tab${tab}name.png`);
+  assert.equal(mixed.status, "renamed");
+  const spaced = parseUnifiedDiff(`diff --git a/my file.png b/my file.png
+Binary files a/my file.png and b/my file.png differ
+`).files[0];
+  assert.equal(spaced.path, "my file.png");
+  assert.equal(spaced.binary, true);
+  const escapedQuote = parseUnifiedDiff(`diff --git "a/say \\"hi\\".bin" "b/say \\"hi\\".bin"
+Binary files a/say "hi".bin and b/say "hi".bin differ
+`).files[0];
+  assert.equal(escapedQuote.path, 'say "hi".bin');
+});
+
 test("a hunk line that starts with --- or +++ is content, not a file header", () => {
   // Deleting a SQL comment "-- drop leftover" arrives as "--- drop leftover";
   // adding a C statement "++ i;" arrives as "+++ i;". Both are hunk lines.

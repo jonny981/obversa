@@ -32,6 +32,39 @@ function stripPathPrefix(raw) {
   return value;
 }
 
+// The two paths of a `diff --git` header. Git quotes either side when it holds
+// a control character, a double quote, or a backslash, and a binary diff has
+// no ---/+++ lines to restore the decoded path from, so the header must be
+// read exactly: a quoted token runs to its closing quote (backslash escapes
+// honoured); an unquoted pair separates at the last " b/", since an unquoted
+// path may itself contain spaces.
+function parseGitHeader(rest) {
+  const closingQuote = (from) => {
+    for (let i = from + 1; i < rest.length; i += 1) {
+      if (rest[i] === "\\") i += 1;
+      else if (rest[i] === '"') return i;
+    }
+    return -1;
+  };
+  let oldRaw;
+  let newRaw;
+  if (rest.startsWith('"')) {
+    const end = closingQuote(0);
+    if (end < 0) return ["", ""];
+    oldRaw = rest.slice(0, end + 1);
+    newRaw = rest.slice(end + 2);
+  } else if (rest.includes(' "b/')) {
+    const at = rest.indexOf(' "b/');
+    oldRaw = rest.slice(0, at);
+    newRaw = rest.slice(at + 1);
+  } else {
+    const match = rest.match(/^(a\/.*) (b\/.*)$/);
+    if (!match) return ["", ""];
+    [, oldRaw, newRaw] = match;
+  }
+  return [stripPathPrefix(oldRaw), stripPathPrefix(newRaw)];
+}
+
 function displayPath(file) {
   return file.newPath && file.newPath !== "/dev/null" ? file.newPath : file.oldPath;
 }
@@ -92,8 +125,7 @@ export function parseUnifiedDiff(diffText) {
     }
 
     if (line.startsWith("diff --git ")) {
-      const match = line.match(/^diff --git a\/(.*) b\/(.*)$/);
-      startFile(match ? match[1] : "", match ? match[2] : "");
+      startFile(...parseGitHeader(line.slice("diff --git ".length)));
       continue;
     }
     if (!file) continue; // ignore any preamble before the first file header
