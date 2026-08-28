@@ -381,6 +381,17 @@ test("the CommonJS loader and the resolvers name a module too: module.require, r
     'import { registerHooks } from "node:module";',
     'import { createRequire, register } from "node:module";',
     'import { findSourceMap } from "node:module";',
+    // process.getBuiltinModule hands out node:module and its hooks without
+    // an import: every reference to that name is an untracked factory.
+    'process.getBuiltinModule("node:module").registerHooks({ resolve });',
+    'process["getBuiltinModule"]("node:module");',
+    'process.getBuiltinModule.call(process, "node:module");',
+    'process.getBuiltinModule.bind(process)("module");',
+    'const { getBuiltinModule } = process;',
+    'const { getBuiltinModule: g } = process;',
+    'globalThis.process.getBuiltinModule("fs");',
+    'const p = process; p.getBuiltinModule(name);',
+    'const f = process.getBuiltinModule;',
     // Every Module object carries the loader, whatever it is reached as.
     'require.main;',
     'require.cache;',

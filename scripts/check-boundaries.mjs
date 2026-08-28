@@ -165,8 +165,16 @@ export function moduleSpecifiers(text, fileName = 'module.ts') {
       && ts.isIdentifier(declaration.name) && declaration.name.text === 'require'
       && !!declaration.parent && (declaration.parent.flags & ts.NodeFlags.Const) !== 0;
   };
+  // `process.getBuiltinModule(...)` hands out any builtin — `node:module`
+  // and its hooks included — without an import the scan could read, so any
+  // reference to that name, as a member of anything or as a bare name, is
+  // refused as an untracked module factory.
+  const isBuiltinFactory = (node) =>
+    (ts.isIdentifier(node) && node.text === 'getBuiltinModule' && !(node.parent && isAccess(node.parent) && node.parent.name === node))
+    || (isAccess(node) && memberName(node) === 'getBuiltinModule');
   const visit = (node, inDoc) => {
     if (!inDoc && isLoader(node) && !handled.has(node)) specifiers.push(null);
+    if (!inDoc && isBuiltinFactory(node)) specifiers.push(null);
     if (!inDoc && isCreateRequire(node) && !handled.has(node)) {
       // Only the callee of `const require = createRequire(...)`; the name
       // identifier under a member access is judged with the access.
