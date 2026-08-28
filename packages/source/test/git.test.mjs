@@ -17,7 +17,6 @@ test("rangeEnd asks git: a range ends at its first positive revision (the right 
     git(dir, "add", "second.txt");
     git(dir, "commit", "-q", "-m", "fix..bug");
     const head = git(dir, "rev-parse", "HEAD").trim();
-    const first = git(dir, "rev-parse", "HEAD~1").trim();
     // Staged only: in the index, not in HEAD.
     writeFileSync(path.join(dir, "staged-only.txt"), "3\n");
     git(dir, "add", "staged-only.txt");
@@ -32,7 +31,6 @@ test("rangeEnd asks git: a range ends at its first positive revision (the right 
     assert.equal(await rangeEnd({ cwd: dir, range: ":/fix..bug" }), undefined, "a search text with two dots is one commit");
     assert.equal(await rangeEnd({ cwd: dir, range: "HEAD^{/fix..bug}" }), undefined, "a search suffix with two dots is one commit");
     assert.equal(git(dir, "rev-parse", ":/fix..bug").trim(), head, "git itself reads it as one commit");
-    assert.equal(first.length, 40);
     await assert.rejects(() => rangeEnd({ cwd: dir, range: "HEAD~1..nope" }), /could not be resolved/, "an unresolvable token is an error, not the index");
 
     // What a range review lists: the end tree, never the live index.
