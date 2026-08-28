@@ -22,6 +22,18 @@ function lineByNew(model, n) {
   return model.files[0].hunks[0].lines.find((line) => line.newNumber === n);
 }
 
+test("stops indexing once the review-wide byte bound is spent", async () => {
+  const one = parseUnifiedDiff(DIFF).files[0];
+  const two = { ...parseUnifiedDiff(DIFF.replace(/x\.js/g, "y.js")).files[0] };
+  const three = { ...parseUnifiedDiff(DIFF.replace(/x\.js/g, "z.js")).files[0] };
+  const model = { files: [one, two, three] };
+  // Each file reads as CONTENT (42 bytes); a bound of 100 admits two files (84), not three (126).
+  await navModel(model, { read: async () => CONTENT, maxTotalBytes: 100 });
+  assert.ok(lineByNew({ files: [one] }, 4).hits, "first file indexed");
+  assert.ok(lineByNew({ files: [two] }, 4).hits, "second file indexed");
+  assert.equal(lineByNew({ files: [three] }, 4).hits, undefined, "third file skipped");
+});
+
 test("attaches jump hits when an identifier and its def are both shown", async () => {
   const model = parseUnifiedDiff(DIFF);
   await navModel(model, { read: async () => CONTENT });

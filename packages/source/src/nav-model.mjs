@@ -15,19 +15,27 @@ import { navIndex } from "./navindex.mjs";
 import { navOverlay, visibleNewLines } from "./navoverlay.mjs";
 import { langForPath } from "./lang.mjs";
 import { readNewFileText } from "./git.mjs";
+import { MAX_CONTEXT_TOTAL_BYTES } from "./context-model.mjs";
 
 const NAV_LANGS = new Set(["javascript", "js", "cjs", "mjs", "jsx"]);
 
-export async function navModel(model, { mode = "worktree", cwd = process.cwd(), read = readNewFileText } = {}) {
+// Go-to-source shares the review-wide byte bound with full-file context: each
+// file is read at most once for indexing and the sum is capped, so a change
+// touching many large files cannot hold all of their text for the parser.
+export async function navModel(model, { mode = "worktree", cwd = process.cwd(), read = readNewFileText, maxTotalBytes = MAX_CONTEXT_TOTAL_BYTES } = {}) {
   if (!model || !Array.isArray(model.files)) return;
 
+  let totalBytes = 0;
   for (const file of model.files) {
     if (file.binary || file.hunks.length === 0) continue;
     if (!NAV_LANGS.has(langForPath(file.path))) continue;
+    if (totalBytes >= maxTotalBytes) break;
 
     const target = file.newPath && file.newPath !== "/dev/null" ? file.newPath : file.path;
     const code = await read({ path: target, mode, cwd });
     if (typeof code !== "string" || code.length === 0) continue;
+    totalBytes += Buffer.byteLength(code, "utf8");
+    if (totalBytes > maxTotalBytes) break;
 
     const { occurrences } = navIndex({ code, lang: "javascript" });
     if (occurrences.length === 0) continue;

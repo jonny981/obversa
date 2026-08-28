@@ -39,6 +39,17 @@ test("no gap above a hunk that starts at line 1", async () => {
   assert.deepEqual(nums(m.files[0].contextAfter), [3]);
 });
 
+test("stops attaching context once the review-wide byte bound is spent", async () => {
+  const file = (path) => ({ path, binary: false, hunks: [{ newStart: 2, newLines: 1, lines: [{ type: "add", newNumber: 2, text: "b" }] }] });
+  const m = { files: [file("one.js"), file("two.js"), file("three.js")] };
+  // Each file reads as 6 bytes; a 15-byte bound admits two files, not three.
+  await contextModel(m, { read: async () => "a\nb\nc\n", registry: createHighlightRegistry(), maxTotalBytes: 15 });
+  assert.deepEqual(nums(m.files[0].hunks[0].contextBefore), [1]);
+  assert.deepEqual(nums(m.files[1].hunks[0].contextBefore), [1]);
+  assert.equal(m.files[2].hunks[0].contextBefore, undefined, "the third file gets no context");
+  assert.equal(m.files[2].contextAfter, undefined);
+});
+
 test("degrades to no context without a registry, unreadable content, or binary", async () => {
   const a = model();
   await contextModel(a, { read: async () => CONTENT }); // no registry
