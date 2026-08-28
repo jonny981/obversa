@@ -472,12 +472,20 @@ function checkSurfaceRequest(value) {
   if (!kind || typeof kind !== "object") return false;
   const { family, renderer } = kind;
   if (!FAMILIES.includes(family) || !isPresent(renderer)) return false;
-  // The subject is a ref plus either an inline payload or a fetch URL; a host
-  // cannot render a request that names neither.
+  // The subject is a ref plus either an inline payload or a fetch URL, one
+  // and not both; a host cannot render a request that names neither, and one
+  // that names both does not say which content is under review.
   if (!subject || typeof subject !== "object") return false;
   const { ref, payload, fetch } = subject;
   if (!isPresent(ref)) return false;
-  if (payload === undefined && !isPresent(fetch)) return false;
+  // Exactly one of the two fields is present — a subject carrying both would
+  // let two renderers choose different reviewed content for the same
+  // request, whatever the fetch field holds — and a present fetch must be a
+  // usable URL.
+  const hasPayload = payload !== undefined;
+  const hasFetch = fetch !== undefined;
+  if (hasPayload === hasFetch) return false;
+  if (hasFetch && !isPresent(fetch)) return false;
   if (!isTransport(transport)) return false;
   // Every offered anchor is a real location — a target and a position — or the
   // membership rule the result is checked against would be built on nothing.

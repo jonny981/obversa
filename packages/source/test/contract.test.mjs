@@ -440,6 +440,12 @@ test("isSurfaceRequest guards the shape", () => {
   assert.equal(isSurfaceRequest({ ...makeRequest([]), subject: { ref: "worktree" } }), false, "a subject needs a payload or a fetch URL");
   assert.equal(isSurfaceRequest({ ...makeRequest([]), subject: { fetch: "/api/model" } }), false, "a subject needs a ref");
   assert.equal(isSurfaceRequest({ ...makeRequest([]), subject: { ref: "worktree", payload: { files: [] } } }), true);
+  assert.equal(isSurfaceRequest({ ...makeRequest([]), subject: { ref: "worktree", payload: { files: [] }, fetch: "/api/model" } }), false, "a subject names one content source, not both");
+  // A present but unusable fetch beside a payload is still two fields, not one.
+  for (const fetch of ["", "   ", null, 42]) {
+    assert.equal(isSurfaceRequest({ ...makeRequest([]), subject: { ref: "worktree", payload: { files: [] }, fetch } }), false, `payload plus fetch ${JSON.stringify(fetch)}`);
+    assert.equal(isSurfaceRequest({ ...makeRequest([]), subject: { ref: "worktree", fetch } }), false, `fetch ${JSON.stringify(fetch)} alone is not a URL`);
+  }
   assert.equal(isSurfaceRequest({ ...makeRequest([]), transport: "local" }), false);
   assert.equal(isSurfaceRequest({ ...makeRequest([]), transport: "browser" }), true);
   assert.equal(isSurfaceRequest({ ...makeRequest([]), transport: "third-party:linear" }), true);

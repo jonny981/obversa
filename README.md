@@ -5,12 +5,14 @@ of agents.
 
 Status: In build. Public docs in `docs/public/`.
 
-This workspace contains four packages:
+This workspace contains six packages:
 
 - `@obversa/lines` provides a runtime API and a pure contract for outside graph types.
 - `@obversa/memory` defines a small memory contract.
 - `@obversa/memory-simple` stores memory in one process.
 - `@obversa/memory-git` stores memory in private Git references.
+- `@obversa/surfacer` runs one secure local surface session: one loopback server, one opaque result, host-native placement.
+- `@obversa/source` is the review surface: it opens a git diff for inline review and returns the annotations.
 
 `@obversa/lines` is the runtime; it is being renamed to `@obversa/runtime`. A
 process is a complete program that composes runtime jobs, graph forms,
