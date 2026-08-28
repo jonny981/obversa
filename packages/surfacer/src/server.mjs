@@ -410,22 +410,23 @@ function authorized(request, expectedToken) {
   return received.length === expected.length && timingSafeEqual(received, expected);
 }
 
-// Whether an object is plain data: a plain object (Object prototype or none)
-// or an array, not a Proxy, and holding no internal state JSON cannot see. A
-// prototype check alone cannot tell: a Map with its prototype removed still
-// holds its entries and serialises as {}, and a Proxy can answer one thing to
-// a check and another to the serialiser. Node's brand checks see through
-// both.
-const INTERNAL_STATE = [
-  types.isProxy, types.isMap, types.isSet, types.isWeakMap, types.isWeakSet, types.isDate, types.isRegExp,
-  types.isPromise, types.isAnyArrayBuffer, types.isArrayBufferView, types.isBoxedPrimitive, types.isNativeError,
-  types.isModuleNamespaceObject, types.isGeneratorObject, types.isMapIterator, types.isSetIterator,
-  types.isArgumentsObject, types.isExternal, types.isKeyObject, types.isCryptoKey,
-].filter((check) => typeof check === "function");
+// The data contract: a payload is its OBSERVABLE OWN DATA — the values of its
+// own enumerable string-keyed properties and indexed items as one JSON
+// serialisation reads them (a getter's answer or a toJSON result included),
+// recursively — and that is exactly what gets framed. (A review location in
+// @obversa/source is stricter: own data properties only, for a stable key.)
+// Hidden internal state
+// (a Map's entries, a URL's address) is not data: it is neither carried nor
+// promised, and no finite list of brand checks could promise otherwise. What
+// is refused is what would make the observable data lossy or unstable: a
+// Proxy (Node can tell, and it may answer the serialiser differently from a
+// check), and an object whose prototype is not Object's or none, whose
+// meaning is not in its own data — a Map, a RegExp, an Error, a class
+// instance. An object with its prototype removed is its observable data.
 function isPlainData(item) {
+  if (types.isProxy(item)) return false;
   const proto = Object.getPrototypeOf(item);
-  if (!Array.isArray(item) && proto !== Object.prototype && proto !== null) return false;
-  return !INTERNAL_STATE.some((check) => check(item));
+  return Array.isArray(item) || proto === Object.prototype || proto === null;
 }
 
 // The plain-data snapshot of one JSON serialisation of `value`, or a throw when
@@ -452,11 +453,10 @@ function losslessSnapshot(value) {
       return null;
     }
     if (item && typeof item === "object") {
-      // Only plain data survives JSON whole. Anything else — a Map, a Set, a
-      // RegExp, an Error, a Promise, an ArrayBuffer, a typed array, a class
-      // instance, a Proxy, or any of those with its prototype removed — comes
-      // out as {} or a fragment. (A value with its own toJSON was already
-      // replaced by what toJSON returned.)
+      // Only plain data is carried (see the data contract at isPlainData). A
+      // Map, a RegExp, an Error, a class instance, a Proxy — their meaning is
+      // not in their own data, and JSON would write {} or a fragment. (A value
+      // with its own toJSON was already replaced by what toJSON returned.)
       if (!isPlainData(item)) {
         lost ??= `${Object.prototype.toString.call(item)} at ${where}`;
         return undefined;

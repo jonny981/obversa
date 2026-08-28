@@ -284,12 +284,7 @@ test("a completion the frame cannot carry is refused and the session stays open"
     hiddenprop: Object.defineProperty({ x: 1 }, "hidden", { value: 2, enumerable: false }),
     nestedhiddenprop: { a: Object.defineProperty({ x: 1 }, "hidden", { value: 2, enumerable: false }) },
     hiddensymbol: Object.defineProperty({ x: 1 }, Symbol("hidden"), { value: 2, enumerable: false }),
-    // Internal state a prototype check cannot see, and proxies.
-    nullprotomap: Object.setPrototypeOf(new Map([["k", 1]]), null),
-    nullprotoset: { s: Object.setPrototypeOf(new Set([1]), null) },
-    nullprotodate: Object.setPrototypeOf(new Date(0), null),
-    nullprototyped: Object.setPrototypeOf(new Uint8Array(2), null),
-    nullprotoboxed: Object.setPrototypeOf(Object(1), null),
+    // A Proxy may answer the serialiser differently from a check.
     proxy: new Proxy({ x: 1 }, {}),
     nestedproxy: { a: new Proxy({ x: 1 }, {}) },
     proxyarray: new Proxy([1], {}),
@@ -392,6 +387,35 @@ test("what is claimed is a snapshot: a payload that serialises differently later
   }
 });
 
+test("hidden state is not data: an object with its prototype removed is carried as its observable own data", async () => {
+  // The contract is observable own data. A URL or a Map with its prototype
+  // removed keeps its address or entries inside, but that is not data: what
+  // is framed is exactly the own enumerable data properties, and the page
+  // says so.
+  const surface = await startSurface({
+    app: "observable",
+    assets: { directory: assetsDir, files: { "/": ["index.html", "text/html; charset=utf-8"] } },
+    api: {
+      "POST /api/url": async ({ session }) => {
+        session.complete({ a: Object.setPrototypeOf(Object.assign(new URL("https://a.example/one"), { visible: 1 }), null), m: Object.setPrototypeOf(new Map([["k", 1]]), null) }, { verbatim: true });
+        return null;
+      },
+    },
+    sessionTimeoutMs: 10_000,
+    leaseTimeoutMs: 10_000,
+  });
+  try {
+    const completed = await post(surface, "/api/url", {});
+    assert.equal(completed.status, 200);
+    const { operationId } = await completed.json();
+    await post(surface, "/api/ack", { operationId });
+    const decision = await surface.waitForDecision();
+    assert.deepEqual(decision.payload, { a: { visible: 1 }, m: {} });
+  } finally {
+    await surface.stop();
+  }
+});
+
 test("plain data of any shape is carried, including null-prototype objects and toJSON values", async () => {
   const surface = await startSurface({
     app: "plain",
@@ -450,7 +474,6 @@ test("an outcome payload the frame cannot carry whole becomes null, and the endi
     regexp: () => /x/,
     error: () => ({ failed: new Error("e") }),
     hiddensymbol: () => Object.defineProperty({ x: 1 }, Symbol("hidden"), { value: 2, enumerable: false }),
-    nullprotomap: () => Object.setPrototypeOf(new Map([["k", 1]]), null),
     proxy: () => new Proxy({ x: 1 }, {}),
   };
   for (const [name, terminalPayload] of Object.entries(hooks)) {

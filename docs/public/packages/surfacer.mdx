@@ -22,7 +22,15 @@ covers a browser that never does. `waitForDecision()` gives the caller
 the one result. Payloads pass secret redaction unless the app completes
 with an explicit verbatim opt-in for content that must not be redacted,
 such as review annotations that quote code (the review still trims and
-caps them before completing). When two
+caps them before completing). A payload is its observable own data: the
+values of its own enumerable string-keyed properties and array items as one
+JSON serialisation reads them — a getter's answer or a `toJSON` result
+included — recursively, and that is exactly what the caller receives.
+Hidden internal state — a Map's entries, a URL's address — is not data and
+is neither carried nor promised; an object with its prototype removed is
+carried as its observable data. (A review location is stricter: the
+contract keys an anchor by own data properties only, so an accessor or a
+`toJSON` there is no location.) When two
 authenticated requests race to complete, exactly one succeeds; the other
 receives a conflict. A request whose body is still arriving when the
 session closes is refused before its handler runs. A completion is
@@ -30,10 +38,10 @@ serialised exactly once when it is claimed, and the plain snapshot of that
 serialisation is what the caller receives: a payload JSON cannot carry
 whole — a cycle, a BigInt, a function, a symbol, an undefined value, a
 non-finite number, negative zero, a non-enumerable or symbol-keyed
-property, a hole or extra property in an array, a Proxy, or any object that
-is not a plain object or an array, such as a Map, a RegExp, an Error, or a
-class instance, whatever its prototype says — is refused with an error and
-the session stays open. One
+property, a hole or extra property in an array, a Proxy, or an object whose
+prototype is neither Object's nor none, such as a Map, a RegExp, an Error,
+or a class instance, whose meaning is not in its own data — is refused with
+an error and the session stays open. One
 exception is deliberate: a value with its own `toJSON` method, such as a
 Date, is carried as whatever `toJSON` returns, and that return value is
 checked by the same rule. The browser is never told a session completed
