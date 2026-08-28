@@ -105,6 +105,10 @@ export function moduleSpecifiers(text, fileName = 'module.ts') {
   // `require.main`, an entry of `require.cache`), `require.resolve`,
   // `import.meta.resolve`, and a computed member on any of `module`,
   // `require`, `import.meta`.
+  // The Module class's own loaders, reached through `module.constructor`
+  // or any Module object: refused as a member of anything.
+  const moduleClassLoaders = new Set(['registerHooks', '_load', '_resolveFilename', 'runMain', '_extensions', '_cache', '_pathCache', '_initPaths', '_nodeModulePaths']);
+  const moduleDataMembers = new Set(['exports', 'id', 'filename', 'path', 'loaded']);
   const isEquality = (parent) => ts.isBinaryExpression(parent) && [
     ts.SyntaxKind.EqualsEqualsEqualsToken, ts.SyntaxKind.ExclamationEqualsEqualsToken,
     ts.SyntaxKind.EqualsEqualsToken, ts.SyntaxKind.ExclamationEqualsToken,
@@ -134,8 +138,11 @@ export function moduleSpecifiers(text, fileName = 'module.ts') {
     }
     if (!isAccess(node)) return false;
     const member = memberName(node);
-    if (member === 'require') return true;
-    if (accessOn(node, named('module'))) return member === null;
+    if (member === 'require' || moduleClassLoaders.has(member)) return true;
+    // `module` is read only through the members that hold data; every
+    // other one — `constructor` (the Module class and its loaders),
+    // `children`, `parent`, `paths`, a computed key — reaches a loader.
+    if (accessOn(node, named('module'))) return !moduleDataMembers.has(member);
     if (accessOn(node, isRequire)) return member === 'resolve' || member === null;
     if (accessOn(node, isImportMeta)) return member === 'resolve' || member === null;
     return false;
@@ -172,9 +179,18 @@ export function moduleSpecifiers(text, fileName = 'module.ts') {
   const isBuiltinFactory = (node) =>
     (ts.isIdentifier(node) && node.text === 'getBuiltinModule' && !(node.parent && isAccess(node.parent) && node.parent.name === node))
     || (isAccess(node) && memberName(node) === 'getBuiltinModule');
+  // A CommonJS module body runs inside Node's wrapper function, whose
+  // `arguments` hold `require` and `module`: a top-level `arguments`
+  // reference — one not inside a function of the file's own (an arrow does
+  // not bind its own) — is refused, whatever it indexes.
+  const isOwnFunction = (node) => ts.isFunctionDeclaration(node) || ts.isFunctionExpression(node)
+    || ts.isMethodDeclaration(node) || ts.isConstructorDeclaration(node) || ts.isAccessor(node);
+  let functionDepth = 0;
   const visit = (node, inDoc) => {
     if (!inDoc && isLoader(node) && !handled.has(node)) specifiers.push(null);
     if (!inDoc && isBuiltinFactory(node)) specifiers.push(null);
+    if (!inDoc && functionDepth === 0 && ts.isIdentifier(node) && node.text === 'arguments' && !isName(node)) specifiers.push(null);
+    if (isOwnFunction(node)) functionDepth += 1;
     if (!inDoc && isCreateRequire(node) && !handled.has(node)) {
       // Only the callee of `const require = createRequire(...)`; the name
       // identifier under a member access is judged with the access.
@@ -183,10 +199,15 @@ export function moduleSpecifiers(text, fileName = 'module.ts') {
     }
     if (ts.isImportDeclaration(node) && isModuleModule(node.moduleSpecifier) && !readsModuleModule(node)) {
       specifiers.push(null);
+    } else if (ts.isExportDeclaration(node) && node.moduleSpecifier && isModuleModule(node.moduleSpecifier)) {
+      // A re-export of node:module hands its loaders to whoever imports
+      // this module: refused in every form.
+      specifiers.push(null);
     } else if ((ts.isImportDeclaration(node) || ts.isExportDeclaration(node)) && node.moduleSpecifier) {
       specifiers.push(literal(node.moduleSpecifier));
     } else if (ts.isImportEqualsDeclaration(node) && ts.isExternalModuleReference(node.moduleReference)) {
-      specifiers.push(literal(node.moduleReference.expression));
+      // `import x = require("node:module")` binds the whole module.
+      specifiers.push(isModuleModule(node.moduleReference.expression) ? null : literal(node.moduleReference.expression));
     } else if (ts.isImportTypeNode(node)) {
       const argument = ts.isLiteralTypeNode(node.argument) ? node.argument.literal : node.argument;
       specifiers.push(literal(argument));
@@ -209,10 +230,13 @@ export function moduleSpecifiers(text, fileName = 'module.ts') {
       } else if (isLoader(callee)) {
         handled.add(callee);
         if (isAccess(callee)) handled.add(ts.skipOuterExpressions(callee.expression));
-        // A computed member may or may not be the loader: unreadable, as is
-        // a load of the module that makes loaders.
-        if ((isAccess(callee) && memberName(callee) === null) || isModuleModule(node.arguments[0])) specifiers.push(null);
-        else specifiers.push(literal(node.arguments[0]));
+        // A computed member may or may not be the loader; an unlisted member
+        // of `module` and a Module-class loader are not loads the scan
+        // reads; a load of the module that makes loaders is refused too.
+        const member = isAccess(callee) ? memberName(callee) : undefined;
+        const unreadable = member === null || moduleClassLoaders.has(member)
+          || (accessOn(callee, named('module')) && member !== 'require') || isModuleModule(node.arguments[0]);
+        specifiers.push(unreadable ? null : literal(node.arguments[0]));
       } else if (isImport && node.arguments.length > 0) {
         specifiers.push(isModuleModule(node.arguments[0]) ? null : literal(node.arguments[0]));
       }
@@ -221,6 +245,7 @@ export function moduleSpecifiers(text, fileName = 'module.ts') {
     // import types too.
     for (const doc of node.jsDoc ?? []) ts.forEachChild(doc, (child) => visit(child, true));
     ts.forEachChild(node, (child) => visit(child, inDoc));
+    if (isOwnFunction(node)) functionDepth -= 1;
   };
   visit(source, false);
   // TypeScript keeps several dependency forms outside the node tree: the
@@ -339,12 +364,14 @@ export function tsconfigDependencies(text, at) {
   return projectConfig(text, at).dependencies;
 }
 
-// A registry version range as pnpm reads one: pnpm hands a selector to
-// node-semver's validRange in loose mode and treats a null answer as a
-// tag, so the same call, on the same pinned semver, decides here. An empty
-// selector is refused outright — validRange reads it as `*`, pnpm as
-// nothing. A tag, a URL, a Git spec, a path, or anything else the registry
-// does not answer with a versioned package is not a range.
+// A registry version range: pnpm hands a selector to node-semver's
+// validRange in loose mode and treats a null answer as a tag, so the same
+// call decides here, on semver 7.7.2 — the version pnpm 10.15.1 bundles,
+// pinned directly, because other versions answer differently in both
+// directions (7.8.5 accepts `0+a` and refuses `1.x.3`; 7.7.2 the reverse).
+// An empty selector is refused outright — validRange reads it as `*`, pnpm
+// as nothing. A tag, a URL, a Git spec, a path, or anything else the
+// registry does not answer with a versioned package is not a range.
 export function isVersionRange(value) {
   return value.trim().length > 0 && validRange(value, { loose: true }) !== null;
 }
@@ -360,8 +387,15 @@ export function isVersionRange(value) {
 // `file` is the manifest's absolute path and `root` the repository root.
 export function dependencyTarget(key, spec, { file, root: repoRoot } = {}) {
   const value = String(spec);
-  const alias = /^(?:npm|workspace):(@obversa\/[^@/]+)(?:@.*)?$/.exec(value);
-  if (alias) return { name: alias[1] };
+  // An alias of a workspace package carries an explicit selector: a range
+  // for `npm:`, a range or `^` / `~` / `*` for `workspace:`; `@latest` or
+  // no selector is a tag.
+  const alias = /^(npm|workspace):(@obversa\/[^@/]+)(?:@(.*))?$/.exec(value);
+  if (alias) {
+    const [, protocol, name, selector] = alias;
+    const ok = selector !== undefined && (isVersionRange(selector) || (protocol === 'workspace' && ['^', '~', '*'].includes(selector)));
+    return ok ? { name } : { refused: `${key} is ${value}, whose selector is not a version range` };
+  }
   const linked = /^workspace:(\.{1,2}\/.*|\/.*)$/.exec(value);
   if (linked) {
     const dir = file && repoRoot ? packageDirOf(realpathOf(resolve(dirname(file), linked[1]), ts.sys), repoRoot) : undefined;
@@ -457,6 +491,12 @@ export function manifestImportTargets(manifest, { file, root: repoRoot } = {}) {
   };
   const found = [];
   for (const leaf of leaves(manifest?.imports ?? {})) {
+    // An alias of the module builtin hands out its loaders under a name
+    // the source scan does not know: refused.
+    if (leaf === 'module' || leaf === 'node:module') {
+      found.push(refusal(`package imports alias the module builtin (${leaf}), which makes loaders`));
+      continue;
+    }
     // `*` is the map's only wildcard; `?` is an ordinary character.
     const crossing = crossingPackage(leaf.split('*')[0], { file, root: repoRoot });
     if (crossing) found.push(crossing);
@@ -831,7 +871,8 @@ for (const [name, rule] of packageRules) {
   // as a source import may; a self devDependency stays refused above.
   const allowedImportTargets = new Set([name, ...allowedArrows]);
   for (const target of manifestImportTargets(manifest, { file: join(directory, 'package.json'), root })) {
-    if (!allowedImportTargets.has(target)) failures.push(`${name}: package imports must not map to ${target}`);
+    if (isRefusal(target)) failures.push(`${name}: ${refusalReason(target)}`);
+    else if (!allowedImportTargets.has(target)) failures.push(`${name}: package imports must not map to ${target}`);
   }
   for (const [dependency, expectedVersion] of Object.entries(
     rule.peerDependencyVersions ?? {},
@@ -876,30 +917,40 @@ for (const entry of await readdir(root)) {
 const rootManifest = JSON.parse(await readFile(join(root, 'package.json'), 'utf8'));
 const rootPins = {
   packageManager: 'pnpm@10.15.1',
-  devDependencies: { tsup: '8.5.1', vitest: '4.1.11', '@typescript/typescript6': '6.0.2', typescript: '7.0.2', semver: '7.8.5' },
+  devDependencies: { tsup: '8.5.1', vitest: '4.1.11', '@typescript/typescript6': '6.0.2', typescript: '7.0.2', semver: '7.7.2' },
 };
 if (rootManifest.packageManager !== rootPins.packageManager)
   failures.push(`package.json: packageManager must be ${rootPins.packageManager}; found ${rootManifest.packageManager ?? 'absent'}`);
 for (const [tool, version] of Object.entries(rootPins.devDependencies)) {
   if (rootManifest.devDependencies?.[tool] !== version)
     failures.push(`package.json: devDependencies ${tool} must be exactly ${version}; found ${rootManifest.devDependencies?.[tool] ?? 'absent'}. Tool versions are pinned in rootPins; review the boundary rule with any change`);
+  // The version installed is the version pinned: the lockfile, not the
+  // manifest, decides what runs.
+  let installed;
+  try {
+    installed = JSON.parse(await readFile(join(root, 'node_modules', tool, 'package.json'), 'utf8')).version;
+  } catch {
+    installed = undefined;
+  }
+  if (installed !== version)
+    failures.push(`node_modules/${tool}: installed version must be ${version}; found ${installed ?? 'absent'}`);
 }
 
-// The root manifest can rewrite what any package installs: an override or
-// a resolution that names a workspace package, or a path, would route a
-// dependency into a sibling behind every rule above, so each must be a
-// registry range or a registry alias. pnpm reads the same settings
-// (`overrides`, `catalog`, `catalogs`, `packageExtensions`,
-// `patchedDependencies`) from pnpm-workspace.yaml too, and the scan does
-// not read YAML, so that file is pinned verbatim, as the scripts are.
+// The root manifest can rewrite what any package installs — a pinned tool
+// included — through an override or a resolution, so none is allowed.
+// pnpm reads the same settings (`overrides`, `catalog`, `catalogs`,
+// `packageExtensions`, `patchedDependencies`) from pnpm-workspace.yaml
+// too, and the scan does not read YAML, so that file is pinned verbatim,
+// as the scripts are.
 for (const field of ['overrides', 'resolutions']) {
-  for (const [key, spec] of Object.entries({ ...rootManifest[field], ...rootManifest.pnpm?.[field] })) {
-    const target = dependencyTarget(key, spec, { file: join(root, 'package.json'), root });
-    if (!target.external) failures.push(`package.json: ${field} ${key} is ${spec}; an override must be a registry version`);
-  }
+  if (rootManifest[field] !== undefined) failures.push(`package.json: ${field} rewrites what packages install; none is allowed`);
 }
-for (const field of ['packageExtensions', 'patchedDependencies']) {
-  if (rootManifest.pnpm?.[field] !== undefined) failures.push(`package.json: pnpm.${field} rewrites what packages install, which the scan does not read`);
+// The root `pnpm` settings reach every install: overrides, patches,
+// package extensions, and `configDependencies` — plugins whose pnpmfile is
+// prepended to the hooks the local refusal covers. Only the execution
+// environment is allowed.
+for (const field of Object.keys(rootManifest.pnpm ?? {})) {
+  if (field !== 'executionEnv') failures.push(`package.json: pnpm.${field} changes how packages install; only pnpm.executionEnv is allowed`);
 }
 const workspaceFile = await readFile(join(root, 'pnpm-workspace.yaml'), 'utf8');
 if (workspaceFile !== 'packages:\n  - packages/*\n')

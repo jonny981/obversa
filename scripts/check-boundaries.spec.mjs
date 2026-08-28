@@ -59,6 +59,9 @@ test("a package.json imports alias, a workspace devDependency, and an alias that
     "every string leaf: a conditional object, an array, a subpath, a relative path into a sibling",
   );
   assert.deepEqual(manifestImportTargets({ imports: { "#local": "./src/x.mjs", "#dep": "some-external" } }, at), [], "own paths and external packages are not crossings");
+  const builtinAlias = (leaf) => refusal(`package imports alias the module builtin (${leaf}), which makes loaders`);
+  assert.deepEqual(manifestImportTargets({ imports: { "#module": "module" } }, at), [builtinAlias("module")], "an alias of the module builtin hides its loaders");
+  assert.deepEqual(manifestImportTargets({ imports: { "#m": { node: "node:module", default: ["node:module", "./x.mjs"] } } }, at), [builtinAlias("node:module"), builtinAlias("node:module")], "through conditions and arrays");
   assert.deepEqual(manifestImportTargets({}, at), []);
   assert.deepEqual(manifestImportTargets({ imports: { "#self": "@obversa/source" } }, at), ["@obversa/source"], "a self-alias is reported by name; the scan allows the owner's own name for imports");
   assert.deepEqual(internalDependencies({ devDependencies: { "@obversa/surfacer": "workspace:^", vitest: "1" } }, "devDependencies"), ["@obversa/surfacer"]);
@@ -70,7 +73,8 @@ test("a package.json imports alias, a workspace devDependency, and an alias that
     ["@obversa/lines", "@obversa/memory", "@obversa/surfacer"],
     "npm: and workspace: aliases by value, keys by name, externals ignored",
   );
-  assert.deepEqual(internalDependencies({ peerDependencies: { mem: "npm:@obversa/memory" } }, "peerDependencies"), ["@obversa/memory"], "a peer alias counts too");
+  assert.deepEqual(internalDependencies({ peerDependencies: { mem: "npm:@obversa/memory@^0.1.0" } }, "peerDependencies"), ["@obversa/memory"], "a peer alias counts too");
+  assert.deepEqual(internalDependencies({ peerDependencies: { mem: "npm:@obversa/memory" } }, "peerDependencies"), [refusal("peerDependencies mem is npm:@obversa/memory, whose selector is not a version range")], "an alias without a selector is a tag");
   // pnpm links a relative workspace spec to the package at that path.
   assert.deepEqual(internalDependencies({ dependencies: { hidden: "workspace:../surfacer" } }, "dependencies", at), ["@obversa/surfacer"], "a relative workspace alias is placed by its directory");
   assert.deepEqual(internalDependencies({ dependencies: { self: "workspace:./" } }, "dependencies", at), ["@obversa/source"], "the owner's own directory names the owner");
@@ -84,13 +88,16 @@ test("a dependency value is a registry range, a registry alias, a workspace pack
   for (const range of ["1.2.3", "^1.2.3", "~0.1.0", ">=0.1.0 <0.2.0", ">= 1.0.0", ">= 0.1.0 < 0.2.0", "1.x", "*", "1.2.3 - 2.0.0", "^1.0.0 || ^2.0.0", "4.4.3", "0.3.241", "1.0.0-beta.1", "1.0.0-rc-1+build.7"]) assert.equal(isVersionRange(range), true, range);
   // node-semver's grammar, as pnpm reads it: an identifier is [0-9A-Za-z-];
   // anything it returns null for falls through to a tag.
-  for (const range of ["1", "1.2", "1.x", "1.X", "1.*", "1.2.x", "1.x.x", "x", "X", "x.x.x", "*.*"]) assert.equal(isVersionRange(range), true, `${range} is an x-range`);
+  // x-ranges as semver 7.7.2 reads them in loose mode (a number after an x
+  // is allowed there; 7.8.5 refuses it — which is why the exact bundled
+  // version is pinned).
+  for (const range of ["1", "1.2", "1.x", "1.X", "1.*", "1.2.x", "1.x.x", "x", "X", "x.x.x", "*.*", "1.x.3", "x.1", "1.*.3", "x.1.2"]) assert.equal(isVersionRange(range), true, `${range} is an x-range`);
   // What pnpm treats as a tag: validRange(..., { loose: true }) is null.
-  const tags = ["1.x.3", "x.1", "1.*.3", "1.2-foo", "1.x-foo", "x.1.2", "1.2.3.4", "9007199254740992.0.0", `1.2.3-${"a".repeat(300)}`, "latest", "1.0.0-foo_bar", "1.0.0+a_b", "../surfacer", "github:obversa/surfacer", "obversa/surfacer", "git+ssh://git@github.com/o/s.git", "https://example.test/s.tgz", "file:../surfacer", "link:../surfacer", "catalog:"];
+  const tags = ["1.2-foo", "1.x-foo", "1.2.3.4", "9007199254740992.0.0", `1.2.3-${"a".repeat(300)}`, "0+a", "latest", "1.0.0-foo_bar", "1.0.0+a_b", "../surfacer", "github:obversa/surfacer", "obversa/surfacer", "git+ssh://git@github.com/o/s.git", "https://example.test/s.tgz", "file:../surfacer", "link:../surfacer", "catalog:"];
   for (const other of tags) assert.equal(isVersionRange(other), false, `${other} is a tag to pnpm`);
   assert.equal(isVersionRange(""), false, "an empty selector is nothing to pnpm, though validRange reads it as *");
-  // The premise, on the pinned semver pnpm bundles: every answer above is
-  // validRange's own.
+  // The premise, on the pinned semver 7.7.2 that pnpm 10.15.1 bundles:
+  // every answer above is validRange's own.
   for (const value of [...tags, "1.2.3", "^1.2.3", ">= 1.0.0", "1.x", "*", "1.2.3 - 2.0.0", "^1.0.0 || ^2.0.0"]) {
     assert.equal(isVersionRange(value), validRange(value, { loose: true }) !== null, `${value}: the guard answers as validRange does`);
   }
@@ -102,6 +109,13 @@ test("a dependency value is a registry range, a registry alias, a workspace pack
   assert.deepEqual(dependencyTarget("@obversa/memory", "workspace:^", at), { name: "@obversa/memory" });
   assert.deepEqual(dependencyTarget("@obversa/memory", ">=0.1.0 <0.2.0", at), { name: "@obversa/memory" }, "a peer by range");
   assert.deepEqual(dependencyTarget("hidden", "npm:@obversa/surfacer@0.1.0", at), { name: "@obversa/surfacer" });
+  assert.deepEqual(dependencyTarget("hidden", "workspace:@obversa/surfacer@^", at), { name: "@obversa/surfacer" });
+  assert.deepEqual(dependencyTarget("hidden", "workspace:@obversa/surfacer@>=0.1.0", at), { name: "@obversa/surfacer" });
+  // An internal alias needs a real selector too: a tag or none installs
+  // whatever the tag points at.
+  assert.deepEqual(dependencyTarget("hidden", "npm:@obversa/memory@latest", at), { refused: "hidden is npm:@obversa/memory@latest, whose selector is not a version range" });
+  assert.deepEqual(dependencyTarget("hidden", "npm:@obversa/memory", at), { refused: "hidden is npm:@obversa/memory, whose selector is not a version range" });
+  assert.deepEqual(dependencyTarget("hidden", "workspace:@obversa/memory@latest", at), { refused: "hidden is workspace:@obversa/memory@latest, whose selector is not a version range" });
   assert.deepEqual(dependencyTarget("hidden", "workspace:../surfacer", at), { name: "@obversa/surfacer" });
   assert.deepEqual(dependencyTarget("hidden", "../surfacer", at), { refused: "hidden is ../surfacer, which is not a registry version the scan can read" }, "a bare path is a local install");
   assert.deepEqual(dependencyTarget("hidden", "github:obversa/surfacer", at), { refused: "hidden is github:obversa/surfacer, which is not a registry version the scan can read" });
@@ -329,7 +343,7 @@ test("the CommonJS loader and the resolvers name a module too: module.require, r
     other.require("@obversa/memory-simple");
   `;
   assert.deepEqual(extractObversaImports(source, { file: "/repo/packages/source/src/a.cjs", root: "/repo" }), ["@obversa/surfacer", "@obversa/memory", "@obversa/lines", "@obversa/memory-git", "@obversa/memory-simple"], "a .require call on any object is a load: every Module object carries the loader");
-  assert.deepEqual(moduleSpecifiers('module[key]("x"); require[key]("y"); import.meta[key]("w"); module.other("z");', "a.cjs"), [null, null, null], "a computed member may be the loader, so it is unreadable; another member is not a load");
+  assert.deepEqual(moduleSpecifiers('module[key]("x"); require[key]("y"); import.meta[key]("w"); module.other("z");', "a.cjs"), [null, null, null, null], "a computed member may be the loader, and an unlisted member of module reaches one: both unreadable");
   // A wrapper that changes nothing at runtime does not hide the loader.
   const wrapped = `
     (module.require)("@obversa/surfacer");
@@ -379,6 +393,10 @@ test("the CommonJS loader and the resolvers name a module too: module.require, r
     'const m = require("module");',
     'mod.createRequire(import.meta.url)("../../surfacer/x.cjs");',
     'import { registerHooks } from "node:module";',
+    'export { registerHooks } from "node:module";',
+    'export * from "node:module";',
+    'export * as m from "module";',
+    'import Module = require("node:module");',
     'import { createRequire, register } from "node:module";',
     'import { findSourceMap } from "node:module";',
     // process.getBuiltinModule hands out node:module and its hooks without
@@ -392,6 +410,24 @@ test("the CommonJS loader and the resolvers name a module too: module.require, r
     'globalThis.process.getBuiltinModule("fs");',
     'const p = process; p.getBuiltinModule(name);',
     'const f = process.getBuiltinModule;',
+    // Node's CommonJS wrapper passes require and module as its arguments.
+    'const loaded = arguments[1]("../../surfacer/src/sanitize.mjs");',
+    'arguments[2].require("x");',
+    'const [, load] = arguments;',
+    'const a = arguments;',
+    'f(arguments);',
+    'const load = (() => arguments[1])();',
+    // module.constructor is the Module class: its hooks and loaders take
+    // no Module argument, so the class itself is the route.
+    'module.constructor.registerHooks({ resolve });',
+    'module.constructor._load("../../surfacer/src/sanitize.mjs", undefined, false);',
+    'module.constructor;',
+    'module.children;',
+    'module.parent;',
+    'module.paths;',
+    'Module.registerHooks({ resolve });',
+    'anything._load("x");',
+    'anything._resolveFilename("x");',
     // Every Module object carries the loader, whatever it is reached as.
     'require.main;',
     'require.cache;',
@@ -404,7 +440,8 @@ test("the CommonJS loader and the resolvers name a module too: module.require, r
   // A member that is not a loader is not a use of one; a declaration or a
   // property named require is a name, not a reference.
   for (const fine of [
-    'module.exports = 1;', 'module.id;', 'import.meta.url;', 'import.meta.dirname;',
+    'module.exports = 1;', 'module.id;', 'module.filename;', 'module.path;', 'module.loaded;', 'import.meta.url;', 'import.meta.dirname;',
+    'function f() { return arguments[0]; }', 'const o = { m() { return arguments.length; } };', 'class A { constructor() { this.n = arguments.length; } }',
     'const { require: r } = x;', 'o.module;', 'class A { require() {} }', 'const module = 1;', '/** @param {typeof require} r */ function f(r) {}',
     'import { createRequire } from "node:module"; const require = createRequire(import.meta.url); require("./local.cjs");',
     'import { createRequire, builtinModules, isBuiltin } from "node:module"; const require = createRequire(import.meta.url);',
