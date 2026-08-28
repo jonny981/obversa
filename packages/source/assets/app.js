@@ -264,8 +264,23 @@ async function main() {
     // say so rather than sit on "Loading review…" forever.
     applyHighlightCss(highlightCss);
   } catch (error) {
-    root.replaceChildren(el("p", "notice error", `Could not load the review: ${error.message}`));
+    const notice = el("p", "notice error", `Could not load the review: ${error.message}`);
+    root.replaceChildren(notice);
     root.setAttribute("aria-busy", "false");
+    // Nothing can be returned from here, so end the session. The heartbeat
+    // stops first — a cancel that hangs must not keep renewing the lease —
+    // then the cancel gives the caller a cancelled result; the client can
+    // still send and acknowledge it after dispose. If the cancel request
+    // fails, the page cannot know whether the server applied it before the
+    // response was lost, so it says only what it can verify: the heartbeat
+    // has stopped and the session will lapse.
+    client.dispose();
+    try {
+      await client.cancel();
+      notice.textContent = `Could not load the review: ${error.message}. The session has been cancelled.`;
+    } catch {
+      notice.textContent = `Could not load the review: ${error.message}. Cancellation could not be confirmed; the heartbeat has stopped and the session will lapse.`;
+    }
     return;
   }
 

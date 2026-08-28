@@ -233,3 +233,61 @@ test("the review surface renders under the exact CSP with zero violations and fi
   assert.ok(report.contextBands > 0 && report.bandExpandOk, "context bands expand");
   assert.ok(report.tabs >= 2 && report.allFilesCount > report.treeFiles, "All files tab");
 });
+
+test("a page that cannot load its review cancels the session instead of holding the lease", { skip: CHROME ? false : "Google Chrome is not installed", timeout: 60_000 }, async () => {
+  // The model endpoint fails. The page must end the session — cancel, then
+  // acknowledge — so the caller receives a cancelled result, rather than sit
+  // on an error while the heartbeat keeps the lease alive for hours.
+  const token = randomBytes(16).toString("hex");
+  const clientKit = await readFile(CLIENT_KIT, "utf8");
+  const shell = buildIndexHtml();
+  const assets = {
+    "/app.js": ["app.js", "text/javascript; charset=utf-8"],
+    "/app.css": ["app.css", "text/css; charset=utf-8"],
+    "/nav-segments.mjs": ["nav-segments.mjs", "text/javascript; charset=utf-8"],
+    "/file-tree.mjs": ["file-tree.mjs", "text/javascript; charset=utf-8"],
+    "/icons.mjs": ["icons.mjs", "text/javascript; charset=utf-8"],
+  };
+  const seen = [];
+  const acked = Promise.withResolvers();
+  const server = createServer((req, res) => {
+    for (const [k, v] of Object.entries(HEADERS)) res.setHeader(k, v);
+    const url = new URL(req.url, "http://127.0.0.1");
+    const send = (status, type, body) => { res.writeHead(status, { "content-type": type }); res.end(body); };
+    if (url.pathname.startsWith("/api/")) {
+      if (req.headers.authorization !== `Bearer ${token}`) return send(401, "application/json", JSON.stringify({ error: "Authentication required" }));
+      seen.push(`${req.method} ${url.pathname}`);
+      if (url.pathname === "/api/model") return send(500, "application/json", JSON.stringify({ error: "the model is unavailable" }));
+      if (url.pathname === "/api/cancel") return send(200, "application/json", JSON.stringify({ ok: true, status: "cancelled", operationId: "op-cancel" }));
+      if (url.pathname === "/api/ack") {
+        const chunks = []; req.on("data", (d) => chunks.push(d));
+        req.on("end", () => { send(200, "application/json", JSON.stringify({ ok: true, status: "cancelled" })); acked.resolve(JSON.parse(Buffer.concat(chunks).toString())); });
+        return;
+      }
+      if (url.pathname === "/api/heartbeat") return send(200, "application/json", JSON.stringify({ ok: true }));
+      return send(404, "application/json", JSON.stringify({ error: "Not found" }));
+    }
+    if (url.pathname === "/") return send(200, "text/html; charset=utf-8", shell);
+    if (url.pathname === "/surface-client.mjs") return send(200, "text/javascript; charset=utf-8", clientKit);
+    const asset = assets[url.pathname];
+    if (asset) return send(200, asset[1], readFileSync(path.join(ASSETS_DIR, asset[0]), "utf8"));
+    send(404, "text/plain", "not found");
+  });
+  await new Promise((r) => server.listen(0, "127.0.0.1", r));
+  const origin = `http://127.0.0.1:${server.address().port}`;
+  const profile = mkdtempSync(path.join(os.tmpdir(), "browser-proof-cancel-"));
+  let chrome;
+  let ack;
+  try {
+    chrome = spawn(CHROME, ["--headless=new", "--disable-gpu", "--no-first-run", `--user-data-dir=${profile}`, `${origin}/#${token}`], { stdio: "ignore" });
+    const timeout = setTimeout(() => acked.reject(new Error(`the page never acknowledged a cancel; requests seen: ${seen.join(", ")}`)), 30_000);
+    try { ack = await acked.promise; } finally { clearTimeout(timeout); }
+  } finally {
+    chrome?.kill("SIGKILL");
+    if (chrome) await new Promise((r) => { chrome.once("exit", r); setTimeout(r, 1500); });
+    server.close();
+    rmSync(profile, { recursive: true, force: true, maxRetries: 5 });
+  }
+  assert.deepEqual(ack, { operationId: "op-cancel" }, "the cancel's operation id is acknowledged");
+  assert.deepEqual(seen.filter((r) => r !== "POST /api/heartbeat"), ["GET /api/model", "POST /api/cancel", "POST /api/ack"], "model failure, then cancel, then ack, in order");
+});
