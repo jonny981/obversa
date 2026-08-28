@@ -48,27 +48,20 @@ export function createSurfaceClient({ heartbeatMs = 15_000 } = {}) {
     clearInterval(heartbeat);
   }
 
+  // A failed submit or cancel is recoverable — the page lets the reviewer try
+  // again — so the heartbeat keeps the session alive through it. It stops only
+  // once a terminal decision is acknowledged, or on dispose.
   return {
     api,
     async submit(endpoint, body) {
-      try {
-        const result = await api(endpoint, body);
-        await acknowledge(result.operationId);
-        return result;
-      } catch (error) {
-        clearInterval(heartbeat);
-        throw error;
-      }
+      const result = await api(endpoint, body);
+      await acknowledge(result.operationId);
+      return result;
     },
     async cancel() {
-      try {
-        const result = await api("/api/cancel", {});
-        await acknowledge(result.operationId);
-        return result;
-      } catch (error) {
-        clearInterval(heartbeat);
-        throw error;
-      }
+      const result = await api("/api/cancel", {});
+      await acknowledge(result.operationId);
+      return result;
     },
     dispose() {
       clearInterval(heartbeat);

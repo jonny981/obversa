@@ -28,7 +28,10 @@ export function terminalResult(app, status, { payload = null, detail = null, ope
     status,
     operationId,
     createdAt: new Date().toISOString(),
-    payload: status === "completed" ? (verbatim === true ? payload : sanitizeValue(payload)) : null,
+    // A completed session carries the app's result; another terminal status
+    // carries whatever the app supplied for it (an outcome a consumer can
+    // route), or null. Verbatim skips redaction only when the app asked.
+    payload: payload === null || payload === undefined ? null : (verbatim === true ? payload : sanitizeValue(payload)),
     detail: detail ? redactText(String(detail)).slice(0, 500) : null,
   };
 }

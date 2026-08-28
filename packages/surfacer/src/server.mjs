@@ -30,11 +30,27 @@ export async function startSurface({
   app,
   assets,
   api = {},
+  terminalPayload,
   sessionTimeoutMs = 14_400_000,
   leaseTimeoutMs = 300_000,
   ackTimeoutMs = 30_000,
 } = {}) {
   if (!app) throw new TypeError("An app name is required");
+  if (terminalPayload !== undefined && typeof terminalPayload !== "function") {
+    throw new TypeError("terminalPayload must be a function of the terminal status");
+  }
+  // The payload for a session that ends without the browser's completion —
+  // cancelled, timed out, interrupted. An app supplies it so a consumer can
+  // still route the outcome (for a review: the surface and gate ids and a
+  // "cancelled" decision). It goes through the normal redaction.
+  const outcomePayload = (status) => {
+    if (!terminalPayload) return null;
+    try {
+      return terminalPayload(status) ?? null;
+    } catch {
+      return null;
+    }
+  };
   if (!assets?.directory || !assets?.files || Object.keys(assets.files).length === 0) {
     throw new TypeError("A static shell is required: an assets directory and a route map");
   }
@@ -134,7 +150,7 @@ export async function startSurface({
       }
       if (request.method === "POST" && requestUrl.pathname === "/api/cancel") {
         assertExactKeys(await readJson(request), []);
-        const result = terminalResult(app, "cancelled", { detail: "The user cancelled the surface" });
+        const result = terminalResult(app, "cancelled", { detail: "The user cancelled the surface", payload: outcomePayload("cancelled") });
         if (!claimTerminal("cancelled", result)) {
           sendJson(response, 409, { error: "This session already has a terminal decision" });
           return;
@@ -163,14 +179,29 @@ export async function startSurface({
       renewLease();
       const body = request.method === "GET" ? null : await readJson(request);
       const claimBefore = terminalClaim;
+      // Two authenticated handlers can race to complete. Only the request
+      // whose own complete() won may report success; the loser's 409 must
+      // reach its client, or two clients report success while only one
+      // result was framed. So this request's completion is tracked here, not
+      // inferred from "a completion happened during the handler".
+      let completedHere = false;
+      const scoped = Object.create(session, {
+        complete: {
+          value: (payload, options) => {
+            const result = session.complete(payload, options);
+            completedHere = true;
+            return result;
+          },
+        },
+      });
       let outcome;
       try {
-        outcome = await handler({ body, session });
+        outcome = await handler({ body, session: scoped });
       } catch (error) {
         // A handler that completed the session and then threw must not
         // contradict the caller: the completion stands and the browser
         // gets it, with the operationId it needs to acknowledge.
-        if (terminalClaim && terminalClaim !== claimBefore && terminalClaim.status === "completed") {
+        if (completedHere && terminalClaim && terminalClaim.status === "completed") {
           sendJson(response, 200, { ok: true, operationId: terminalClaim.operationId });
           return;
         }
@@ -215,7 +246,7 @@ export async function startSurface({
   const origin = `http://127.0.0.1:${port}`;
 
   sessionTimeout = setTimeout(() => {
-    const result = terminalResult(app, "timed_out", { detail: "The surface session timed out" });
+    const result = terminalResult(app, "timed_out", { detail: "The surface session timed out", payload: outcomePayload("timed_out") });
     if (claimTerminal("timed_out", result, { awaitAcknowledgement: false })) finalizeClaim();
   }, sessionTimeoutMs);
   sessionTimeout.unref?.();
@@ -239,7 +270,7 @@ export async function startSurface({
     clearTimeout(leaseTimeout);
     if (terminalState !== "pending") return;
     leaseTimeout = setTimeout(() => {
-      const result = terminalResult(app, "timed_out", { detail: "The surface disconnected" });
+      const result = terminalResult(app, "timed_out", { detail: "The surface disconnected", payload: outcomePayload("timed_out") });
       if (claimTerminal("timed_out", result, { awaitAcknowledgement: false })) finalizeClaim();
     }, leaseTimeoutMs);
     leaseTimeout.unref?.();
@@ -264,13 +295,13 @@ export async function startSurface({
     waitForDecision: () => decision,
     interrupt(signal = "signal") {
       if (terminalState !== "pending") return finalizeClaim();
-      const result = terminalResult(app, "interrupted", { detail: `Interrupted by ${signal}` });
+      const result = terminalResult(app, "interrupted", { detail: `Interrupted by ${signal}`, payload: outcomePayload("interrupted") });
       if (!claimTerminal("interrupted", result, { awaitAcknowledgement: false })) return false;
       return finalizeClaim();
     },
     async stop() {
       if (terminalState === "pending") {
-        const result = terminalResult(app, "interrupted", { detail: "The caller stopped the session" });
+        const result = terminalResult(app, "interrupted", { detail: "The caller stopped the session", payload: outcomePayload("interrupted") });
         if (claimTerminal("interrupted", result, { awaitAcknowledgement: false })) finalizeClaim();
       } else {
         finalizeClaim();

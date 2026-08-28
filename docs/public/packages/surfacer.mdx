@@ -21,7 +21,13 @@ interrupts it. The browser acknowledges the decision, and a timeout
 covers a browser that never does. `waitForDecision()` gives the caller
 the one result. Payloads pass secret redaction unless the app completes
 with an explicit verbatim opt-in for content that must survive
-byte-exact, such as review annotations that quote code.
+byte-exact, such as review annotations that quote code. When two
+authenticated requests race to complete, exactly one succeeds; the other
+receives a conflict. An app can pass `terminalPayload(status)` to
+`startSurface` so a session that ends without the app's completion —
+cancelled, timed out, or interrupted — still carries an outcome payload the
+caller can route; it passes redaction. Without it, those statuses carry a
+null payload.
 
 ## The handoff
 
