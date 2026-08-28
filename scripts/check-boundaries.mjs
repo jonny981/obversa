@@ -1,6 +1,7 @@
 import { createHash } from 'node:crypto';
 import { realpathSync } from 'node:fs';
 import { readFile, readdir } from 'node:fs/promises';
+import { isBuiltin } from 'node:module';
 import { basename, dirname, extname, isAbsolute, join, relative, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 // (fileURLToPath also reads `file:` specifiers, below.)
@@ -64,7 +65,11 @@ export function hostEdgeFailures(edges, scanned) {
   }
   return failures;
 }
-export function hostImportFindings(text, { file, root: repoRoot, edges = [], selfName } = {}) {
+// `dependencies` is what the host's manifest declares: each name to the set
+// of subpaths its exports map lists (a workspace package), or null (a
+// registry package). Nothing declared is the default, so a shipped bare
+// specifier fails closed when the caller has no manifest to hand over.
+export function hostImportFindings(text, { file, root: repoRoot, edges = [], selfName, dependencies = new Map() } = {}) {
   const findings = [];
   const parsedAs = sourcePattern.test(file) ? file : `${file}.mjs`;
   // A host's proofs reach a package's internals by path today (the browser
@@ -93,6 +98,29 @@ export function hostImportFindings(text, { file, root: repoRoot, edges = [], sel
     }
     if (shipped && selfName && (specifier === selfName || specifier.startsWith(`${selfName}/`))) {
       findings.push(`a host imports itself by package name (${specifier}); hosts carry no exports map and import their own files by path`);
+      continue;
+    }
+    // A bare specifier is a builtin under its node: prefix or a dependency
+    // the host's manifest declares, and a subpath into a dependency only
+    // one its exports map lists: without that entry Node serves any file
+    // under the package, scanned or not.
+    if (shipped && !/^\.\.?\//.test(specifier) && !isAbsolute(specifier)) {
+      if (specifier.startsWith('node:')) {
+        if (!isBuiltin(specifier)) findings.push(`a host imports ${specifier}, which is not a Node builtin`);
+        continue;
+      }
+      if (isBuiltin(specifier)) {
+        findings.push(`a host imports the builtin ${specifier} without its node: prefix; name it node:${specifier}`);
+        continue;
+      }
+      const parts = /^((?:@[^/]+\/)?[^/]+)(?:\/(.*))?$/.exec(specifier);
+      const name = parts?.[1];
+      if (!name || !dependencies.has(name)) {
+        findings.push(`a host imports ${specifier}, which its manifest does not declare; a host takes only the dependencies its manifest declares`);
+        continue;
+      }
+      if (parts[2] !== undefined && !dependencies.get(name)?.has(`./${parts[2]}`))
+        findings.push(`a host imports ${specifier}, a subpath its dependency's exports map does not list; without that entry Node serves any file under the package`);
       continue;
     }
     if (shipped && (/^\.\.?\//.test(specifier) || isAbsolute(specifier))) {
@@ -756,8 +784,17 @@ export function readSpecifier(specifier) {
 function crossingPackage(specifier, { file, root: repoRoot } = {}) {
   if (specifier.startsWith('@obversa/')) return specifier.split('/').slice(0, 2).join('/');
   if (!file || !repoRoot || !(/^\.\.?\//.test(specifier) || isAbsolute(specifier))) return null;
-  const dir = packageDirOf(resolve(dirname(file), specifier), repoRoot);
-  return dir && dir !== packageDirOf(file, repoRoot) ? `@obversa/${dir}` : null;
+  // Where the loader lands, by real path from the importing file's real
+  // directory: on a case-insensitive disk `../PACKAGES/SURFACER/x` opens
+  // packages/surfacer/x, so the crossing is judged where the path really
+  // lands, and a spelling other than the disk's own (case, a symlink) is
+  // refused outright. A target that does not exist keeps its spelling: the
+  // compiler's own resolution places it, or reports it.
+  const target = resolve(realpathOf(dirname(file), ts.sys), specifier);
+  const real = realpathOf(target, ts.sys);
+  if (real !== target) return refusal(`${specifier} names ${relative(realpathOf(repoRoot, ts.sys), real).split('\\').join('/')} by another spelling; a specifier names its file as the disk does`);
+  const dir = packageDirOf(real, repoRoot);
+  return dir && dir !== packageDirOf(realpathOf(file, ts.sys), repoRoot) ? `@obversa/${dir}` : null;
 }
 
 // The package directory an absolute path lies in, or names outright (a bare
@@ -1029,33 +1066,78 @@ const forbidden = [
 
 const failures = [];
 
-// Host manifests, pinned to a shape with no indirection: no imports map, no
-// exports map, no entry field, no bin, and dependencies that are plain
-// registry or workspace ranges (an alias would let a name stand for a path
-// the edge set never saw). Read before the walk so a host script knows its
-// own package name.
+// Host manifests, pinned to a shape with no indirection: a readable JSON
+// object at hosts/<name>/package.json and none beneath it (a nested manifest
+// makes itself the package scope of the files under it, whatever it is
+// named), no imports map, no exports map, no entry field, no bin, scripts
+// pinned verbatim (a script runs whatever it says, and can preload a
+// package's internals without naming an import the scan reads), and
+// dependencies that are registry ranges or workspace ranges on the ruled
+// packages under packages/ (another host, an alias, a path, or a link would
+// let a name stand for files the edge set never saw). Read before the walk
+// so a host script knows its own name and what it may import by name.
+const hostRules = new Map([
+  ['cmux', { scripts: { test: 'node --test test/*.test.mjs' } }],
+]);
 const hostManifests = new Map();
 for (const entry of await readdir(join(root, 'hosts'), { withFileTypes: true })) {
   if (!entry.isDirectory()) continue;
-  const manifestPath = join(root, 'hosts', entry.name, 'package.json');
+  const hostDir = join(root, 'hosts', entry.name);
+  const relativeManifest = `hosts/${entry.name}/package.json`;
   let manifest;
   try {
-    manifest = JSON.parse(await readFile(manifestPath, 'utf8'));
-  } catch {
+    manifest = JSON.parse(await readFile(join(hostDir, 'package.json'), 'utf8'));
+  } catch (error) {
+    failures.push(`${relativeManifest}: ${error?.code === 'ENOENT' ? 'is missing' : 'cannot be read as JSON'}; every directory under hosts/ is a host with a readable root manifest, or the files under it take the root manifest as their package scope`);
     continue;
   }
-  hostManifests.set(`hosts/${entry.name}/`, manifest);
-  const relativeManifest = `hosts/${entry.name}/package.json`;
+  if (manifest === null || typeof manifest !== 'object' || Array.isArray(manifest)) {
+    failures.push(`${relativeManifest}: is not a JSON object`);
+    continue;
+  }
+  const rule = hostRules.get(entry.name);
+  if (!rule) failures.push(`hosts/${entry.name}: has no host rule; add one to hostRules`);
   for (const field of ['imports', 'exports', 'main', 'module', 'browser', 'bin', 'types', 'typesVersions', 'publishConfig']) {
     if (manifest[field] !== undefined) failures.push(`${relativeManifest}: a host manifest carries no ${field}; a host has no package indirection and is never published`);
   }
   if (manifest.private !== true) failures.push(`${relativeManifest}: a host manifest is private`);
+  const scripts = manifest.scripts ?? {};
+  const pinnedScripts = rule?.scripts ?? {};
+  for (const scriptName of new Set([...Object.keys(scripts), ...Object.keys(pinnedScripts)])) {
+    if (scripts[scriptName] !== pinnedScripts[scriptName])
+      failures.push(`${relativeManifest}: script ${scriptName} must be ${JSON.stringify(pinnedScripts[scriptName]) ?? 'absent'}; found ${JSON.stringify(scripts[scriptName]) ?? 'absent'}. A host's scripts are pinned in hostRules; review the boundary rule with any change`);
+  }
+  const dependencies = new Map();
   for (const field of ['dependencies', 'devDependencies', 'optionalDependencies', 'peerDependencies']) {
     for (const [name, range] of Object.entries(manifest[field] ?? {})) {
-      const plain = typeof range === 'string' && (isVersionRange(range) || /^workspace:(\*|\^|~|[\d.]+|[<>=^~ \d.|-]+)$/.test(range));
-      if (!plain) failures.push(`${relativeManifest}: ${field} ${name} is "${range}"; a host dependency is a plain registry range or a workspace range, never an alias, a path, or a link`);
+      if (typeof range === 'string' && /^workspace:(\*|\^|~|[\d.]+|[<>=^~ \d.|-]+)$/.test(range)) {
+        if (!packageRules.has(name)) {
+          failures.push(`${relativeManifest}: ${field} ${name} is "${range}", a workspace range on something other than a ruled package under packages/; a host takes only the ruled packages by workspace range`);
+          continue;
+        }
+        // The subpaths the dependency's exports map lists; a string form
+        // exports only its root, a conditions object at the top likewise.
+        let exported;
+        try {
+          exported = JSON.parse(await readFile(join(root, 'packages', name.slice('@obversa/'.length), 'package.json'), 'utf8')).exports;
+        } catch {
+          exported = undefined;
+        }
+        const keys = typeof exported === 'string' ? ['.'] : exported && typeof exported === 'object' && !Array.isArray(exported) ? Object.keys(exported) : [];
+        dependencies.set(name, new Set(keys.some((key) => key.startsWith('.')) ? keys.filter((key) => key.startsWith('.')) : keys.length ? ['.'] : []));
+      } else if (typeof range === 'string' && isVersionRange(range)) {
+        dependencies.set(name, null);
+      } else {
+        failures.push(`${relativeManifest}: ${field} ${name} is "${range}"; a host dependency is a plain registry range or a workspace range on a ruled package, never an alias, a path, or a link`);
+      }
     }
   }
+  const { files: hostFiles } = await walkTree(hostDir, { ignored: new Set(['node_modules']) });
+  for (const path of hostFiles) {
+    if (basename(path) === 'package.json' && path !== join(hostDir, 'package.json'))
+      failures.push(`${relative(root, path).split('\\').join('/')}: a nested manifest makes itself the package scope of the files beneath it, whatever it is named; a host has one manifest, at its root`);
+  }
+  hostManifests.set(`hosts/${entry.name}/`, { manifest, dependencies });
 }
 
 // The arrows a package may draw: itself, its dependencies, its peers. A
@@ -1094,6 +1176,14 @@ for (const entry of await readdir(join(root, 'packages'), { withFileTypes: true 
     continue;
   }
   const manifest = JSON.parse(await readFile(manifestPath, 'utf8'));
+  // One manifest per package, at its root: a nested one makes itself the
+  // package scope of the files beneath it, whatever it is named, and Node
+  // would serve its exports to them under that name.
+  const { files: packageFiles } = await walkTree(join(root, 'packages', entry.name), { ignored: new Set(['node_modules']) });
+  for (const nested of packageFiles) {
+    if (basename(nested) === 'package.json' && nested !== manifestPath)
+      failures.push(`${relative(root, nested).split('\\').join('/')}: a nested manifest makes itself the package scope of the files beneath it, whatever it is named; a package has one manifest, at its root`);
+  }
   if (manifest.name !== `@obversa/${entry.name}`)
     failures.push(`packages/${entry.name}: is named ${manifest.name}; a package is named @obversa/<its directory>`);
   else if (!packageRules.has(manifest.name))
@@ -1252,6 +1342,13 @@ for (const [tool, version] of Object.entries(rootPins.devDependencies)) {
 for (const field of ['overrides', 'resolutions']) {
   if (rootManifest[field] !== undefined) failures.push(`package.json: ${field} rewrites what packages install; none is allowed`);
 }
+// The root is the package scope of every file outside packages/ and hosts/,
+// and of a host directory that lost its manifest; an exports or imports map,
+// an entry field, or a bin there would make those files importable by the
+// root's name, so none is allowed.
+for (const field of ['exports', 'imports', 'main', 'module', 'browser', 'bin']) {
+  if (rootManifest[field] !== undefined) failures.push(`package.json: ${field} makes the root importable by name; the root is private and is never a package anything imports`);
+}
 // The root `pnpm` settings reach every install: overrides, patches,
 // package extensions, and `configDependencies` — plugins whose pnpmfile is
 // prepended to the hooks the local refusal covers. Only the execution
@@ -1267,7 +1364,7 @@ if (!isPinnedWorkspaceFile(workspaceFile))
 // A pnpmfile hook rewrites manifests as they are read, and an .npmrc can
 // name one or change how workspace packages link; neither is read by the
 // scan, so their presence at the root or in a package is refused.
-for (const dir of ['.', ...[...packageRules.keys()].map((name) => join('packages', name.slice('@obversa/'.length)))]) {
+for (const dir of ['.', ...[...packageRules.keys()].map((name) => join('packages', name.slice('@obversa/'.length))), ...[...hostRules.keys()].map((name) => join('hosts', name))]) {
   for (const hook of ['.pnpmfile.cjs', 'pnpmfile.cjs', '.pnpmfile.mjs', '.pnpmfile.js', '.npmrc', '.yarnrc', '.yarnrc.yml']) {
     if (await exists(join(root, dir, hook))) failures.push(`${join(dir, hook)}: rewrites what packages install or how they link, which the scan does not read`);
   }
@@ -1338,8 +1435,8 @@ for (const absolute of files) {
   if (isHostScript(path, text)) {
     importScannedHostFiles.add(path);
     const edges = [];
-    const selfName = hostManifests.get(hostRootOf(absolute, root))?.name;
-    for (const finding of hostImportFindings(text, { file: absolute, root, edges, selfName })) failures.push(`${path}: ${finding}`);
+    const host = hostManifests.get(hostRootOf(absolute, root));
+    for (const finding of hostImportFindings(text, { file: absolute, root, edges, selfName: host?.manifest.name, dependencies: host?.dependencies })) failures.push(`${path}: ${finding}`);
     for (const edge of edges) hostEdges.push({ from: path, ...edge });
   }
 }

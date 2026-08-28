@@ -3,7 +3,7 @@ import { execFileSync, spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import test, { after, before } from "node:test";
 
-import { cpSync, mkdtempSync, mkdirSync, readFileSync, realpathSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import { chmodSync, copyFileSync, existsSync, lstatSync, mkdtempSync, mkdirSync, readFileSync, readlinkSync, realpathSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import ts from "@typescript/typescript6";
@@ -296,9 +296,13 @@ test("a symlink under packages/ is reported by the tree walk, never followed as 
     const rel = (p) => path.relative(dir, p).split(path.sep).join("/");
     assert.deepEqual(files.map(rel).sort(), ["packages/source/src/real.mjs", "packages/surfacer/src/index.mjs"], "regular files only; node_modules ignored");
     assert.deepEqual(symlinks.map(rel), ["packages/source/src/bridge.mjs"], "the symlink is reported, not resolved");
-    // The import that names the link looks local to the lexical extractor —
-    // which is exactly why the scan must fail closed on the link itself.
-    assert.deepEqual(extractObversaImports('import "./bridge.mjs";', { file: path.join(dir, "packages/source/src/real.mjs"), root: dir }), []);
+    // The import that names the link looks local, but the file the loader
+    // opens is the sibling package's: the scan judges the crossing by real
+    // path, refuses the link as another spelling, and the walk fails closed
+    // on the link itself as well.
+    const found = extractObversaImports('import "./bridge.mjs";', { file: path.join(dir, "packages/source/src/real.mjs"), root: dir });
+    assert.equal(found.length, 1, JSON.stringify(found));
+    assert.match(found[0], /\.\/bridge\.mjs names packages\/surfacer\/src\/index\.mjs by another spelling/);
   }).finally(() => rmSync(dir, { recursive: true, force: true }));
 });
 
@@ -591,7 +595,7 @@ test("host JavaScript is import-scanned: public package names pass, a path into 
   assert.equal(isHostScript("hosts/cmux/bin/obversa-surface", "#!/usr/bin/env bash\necho"), false, "a bash script is not JavaScript");
   assert.equal(isHostScript("packages/source/src/a.mjs", ""), false, "packages are scanned by the package rules");
   const file = "/repo/hosts/cmux/bin/obversa-review";
-  assert.deepEqual(hostImportFindings('import { runSurface } from "@obversa/surfacer"; import { reviewDiff } from "@obversa/source"; const kit = import.meta.resolve("@obversa/surfacer/client"); import { HELP } from "../lib/review-args.mjs";', { file, root: "/repo" }), [], "public names and the host's own files");
+  assert.deepEqual(hostImportFindings('import { runSurface } from "@obversa/surfacer"; import { reviewDiff } from "@obversa/source"; const kit = import.meta.resolve("@obversa/surfacer/client"); import { HELP } from "../lib/review-args.mjs";', { file, root: "/repo", dependencies: HOST_DEPENDENCIES }), [], "public names and the host's own files");
   for (const text of [
     'import { reviewDiff } from "../../../packages/source/src/review.mjs";',
     'const kit = import.meta.resolve("../../../packages/surfacer/src/client.mjs");',
@@ -605,7 +609,7 @@ test("host JavaScript is import-scanned: public package names pass, a path into 
   assert.ok(hostImportFindings('import { e } from "#escape";', { file, root: "/repo" }).some((entry) => /package-imports alias/.test(entry)));
   assert.ok(hostImportFindings('import { e } from "@obversa/cmux-host/escape";', { file, root: "/repo", selfName: "@obversa/cmux-host" }).some((entry) => /imports itself by package name/.test(entry)));
   assert.ok(hostImportFindings('import { e } from "@obversa/cmux-host";', { file, root: "/repo", selfName: "@obversa/cmux-host" }).some((entry) => /imports itself by package name/.test(entry)));
-  assert.deepEqual(hostImportFindings('import { e } from "@obversa/cmux-host-other";', { file, root: "/repo", selfName: "@obversa/cmux-host" }), [], "a different package name is a public name");
+  assert.deepEqual(hostImportFindings('import { e } from "@obversa/cmux-host-other";', { file, root: "/repo", selfName: "@obversa/cmux-host", dependencies: new Map([["@obversa/cmux-host-other", null]]) }), [], "a different, declared package name is a public name");
   assert.ok(hostImportFindings('const m = process.getBuiltinModule("node:module");', { file, root: "/repo" }).length > 0, "loader hatches are refused in a host too");
   assert.ok(hostImportFindings('const name = "@obversa/" + pick; import(name);', { file, root: "/repo" }).some((entry) => /computed module reference/.test(entry)));
   // Shipped host code may not reach a test path (exempt from the hatch rules)
@@ -650,9 +654,54 @@ test("a recorded host edge passes only when its target is in the set the walk im
   }
 });
 
+// What hosts/cmux/package.json declares, as the guard hands it over.
+const HOST_DEPENDENCIES = new Map([["@obversa/surfacer", new Set([".", "./client"])], ["@obversa/source", new Set(["."])]]);
+
+test("a shipped host bare specifier is a node: builtin or a declared dependency, and a subpath only one the dependency exports", () => {
+  const file = "/repo/hosts/cmux/bin/obversa-review";
+  const dependencies = new Map([...HOST_DEPENDENCIES, ["semver", null]]);
+  const findings = (text) => hostImportFindings(text, { file, root: "/repo", dependencies });
+  assert.deepEqual(findings('import { readFile } from "node:fs/promises"; import semver from "semver"; import { runSurface } from "@obversa/surfacer"; const kit = import.meta.resolve("@obversa/surfacer/client");'), []);
+  assert.ok(findings('import { e } from "payload/dist/escape.mjs";').some((entry) => /which its manifest does not declare/.test(entry)));
+  assert.ok(findings('import { e } from "payload";').some((entry) => /which its manifest does not declare/.test(entry)));
+  assert.ok(findings('import { e } from "obversa/escape";').some((entry) => /which its manifest does not declare/.test(entry)), "the root's name is not a dependency");
+  assert.ok(findings('import { e } from "@obversa/source/dist/escape.mjs";').some((entry) => /a subpath its dependency's exports map does not list/.test(entry)));
+  assert.ok(findings('import { e } from "semver/internal/re.js";').some((entry) => /a subpath its dependency's exports map does not list/.test(entry)), "a registry dependency exports no subpath the scan knows");
+  assert.ok(findings('import { readFile } from "fs/promises";').some((entry) => /without its node: prefix/.test(entry)));
+  assert.ok(findings('import { x } from "node:nonesuch";').some((entry) => /not a Node builtin/.test(entry)));
+  assert.equal(hostImportFindings('import { e } from "payload/dist/escape.mjs";', { file, root: "/repo" }).length, 1, "nothing declared is the default");
+  assert.deepEqual(hostImportFindings('import { e } from "payload/dist/escape.mjs";', { file: "/repo/hosts/cmux/test/x.test.mjs", root: "/repo" }), [], "a test file is not shipped");
+});
+
+test("a relative import is placed by its real path, and a spelling other than the disk's own is refused", (t) => {
+  const tree = realpathSync(mkdtempSync(path.join(os.tmpdir(), "boundaries-case-")));
+  try {
+    mkdirSync(path.join(tree, "packages", "surfacer", "src"), { recursive: true });
+    mkdirSync(path.join(tree, "packages", "source", "src"), { recursive: true });
+    writeFileSync(path.join(tree, "packages", "surfacer", "src", "index.mjs"), "export const x = 1;\n");
+    const file = path.join(tree, "packages", "source", "src", "a.mjs");
+    writeFileSync(file, "");
+    const found = (text) => extractObversaImports(text, { file, root: tree });
+    assert.deepEqual(found('import { x } from "../../surfacer/src/index.mjs";'), ["@obversa/surfacer"], "the honest spelling is the crossing it is");
+    assert.deepEqual(found('import { x } from "../../surfacer/src/missing.mjs";'), ["@obversa/surfacer"], "a missing target keeps its spelling and its crossing");
+    // A symlink is another spelling too.
+    symlinkSync(path.join("..", "..", "surfacer", "src", "index.mjs"), path.join(tree, "packages", "source", "src", "link.mjs"));
+    assert.ok(found('import { x } from "./link.mjs";').some((entry) => /by another spelling/.test(entry)));
+    if (!existsSync(path.join(tree, "PACKAGES", "SURFACER", "src", "index.mjs"))) {
+      t.diagnostic("case-sensitive disk: another case opens nothing, so there is nothing to refuse");
+      return;
+    }
+    const other = found('import { x } from "../../SURFACER/src/index.mjs";');
+    assert.ok(other.some((entry) => /by another spelling/.test(entry)), JSON.stringify(other));
+    assert.ok(found('import { x } from "../../../PACKAGES/surfacer/src/index.mjs";').some((entry) => /by another spelling/.test(entry)));
+  } finally {
+    rmSync(tree, { recursive: true, force: true });
+  }
+});
+
 // The live full-check mutants: the real guard, run as a child on a
-// disposable copy of the current tree (everything but .git and node_modules,
-// with the root node_modules symlinked to the real one),
+// disposable copy of the current tree (git's file list, with the root
+// node_modules symlinked to the real one),
 // with one shipped host import added and the file it names created, must
 // fail with the resolved target named. The guard finds its root from its
 // own file, so the copied guard checks the copied tree; the shared worktree
@@ -660,17 +709,32 @@ test("a recorded host edge passes only when its target is in the set the walk im
 // false tree. The copy is removed in finally.
 function copyTree(root) {
   const copy = mkdtempSync(path.join(os.tmpdir(), "boundaries-tree-"));
-  cpSync(root, copy, {
-    recursive: true,
-    filter: (source) => {
-      const parts = path.relative(root, source).split(path.sep);
-      return parts[0] !== ".git" && parts.at(-1) !== "node_modules";
-    },
-  });
+  // The checker's input: every tracked file and every untracked file git
+  // does not ignore, as each stands in the working tree (a deleted tracked
+  // file is absent; a symlink stays a symlink; the mode is kept). Ignored
+  // state — build output, session files — is not copied, so the copy is
+  // small, deterministic, and never races whatever writes those.
+  const listed = execFileSync("git", ["ls-files", "-z", "--cached", "--others", "--exclude-standard"], { cwd: root, encoding: "utf8" }).split("\0").filter(Boolean);
+  for (const relative of new Set(listed)) {
+    const source = path.join(root, relative);
+    let stat;
+    try {
+      stat = lstatSync(source);
+    } catch {
+      continue;
+    }
+    const target = path.join(copy, relative);
+    mkdirSync(path.dirname(target), { recursive: true });
+    if (stat.isSymbolicLink()) symlinkSync(readlinkSync(source), target);
+    else {
+      copyFileSync(source, target);
+      chmodSync(target, stat.mode);
+    }
+  }
   // The guard reads its pinned tools from the root node_modules; a package's
   // own node_modules is never walked and never resolved through.
   symlinkSync(path.join(root, "node_modules"), path.join(copy, "node_modules"));
-  return copy;
+  return realpathSync(copy);
 }
 
 test("the guard, run on a disposable copy of the tree, refuses a shipped host import of a file the walk never scans", { timeout: 300_000 }, () => {
@@ -735,6 +799,82 @@ test("the guard, run on a disposable copy of the tree, refuses a shipped host im
     assert.notEqual(linked.status, 0);
     assert.match(linked.stderr, /packages\/source\/src\/link\.mjs: a symlink under packages\/ is refused/);
     assert.doesNotMatch(linked.stderr, /ReferenceError/);
+    rmSync(link);
+    // A host script is pinned verbatim: one that preloads a package's
+    // internals names no import the scan reads.
+    writeFileSync(manifestPath, JSON.stringify({ ...manifest, scripts: { test: "node --import ../../packages/surfacer/src/index.mjs --test test/*.test.mjs" } }));
+    const script = guard();
+    assert.notEqual(script.status, 0);
+    assert.match(script.stderr, /hosts\/cmux\/package\.json: script test must be "node --test test\/\*\.test\.mjs"/);
+    writeFileSync(manifestPath, JSON.stringify(manifest));
+    // A nested manifest, under a host or a package, is refused whatever it
+    // names itself.
+    const nestedHost = path.join(root, "hosts", "cmux", "lib", "package.json");
+    writeFileSync(nestedHost, JSON.stringify({ name: "@obversa/source", exports: { "./escape": "./dist/escape.mjs" } }));
+    const nestedHostRun = guard();
+    assert.notEqual(nestedHostRun.status, 0);
+    assert.match(nestedHostRun.stderr, /hosts\/cmux\/lib\/package\.json: a nested manifest makes itself the package scope/);
+    rmSync(nestedHost);
+    const nestedPackage = path.join(root, "packages", "source", "src", "package.json");
+    writeFileSync(nestedPackage, JSON.stringify({ name: "@obversa/surfacer", exports: { "./escape": "./escape.mjs" } }));
+    const nestedPackageRun = guard();
+    assert.notEqual(nestedPackageRun.status, 0);
+    assert.match(nestedPackageRun.stderr, /packages\/source\/src\/package\.json: a nested manifest makes itself the package scope/);
+    rmSync(nestedPackage);
+    // Another spelling of a sibling package's path, on a disk that opens it.
+    if (existsSync(path.join(root, "PACKAGES", "SURFACER", "src", "index.mjs"))) {
+      const probe = path.join(root, "packages", "source", "src", "case-probe.mjs");
+      writeFileSync(probe, 'import "../../SURFACER/src/index.mjs";\n');
+      const spelled = guard();
+      assert.notEqual(spelled.status, 0);
+      assert.match(spelled.stderr, /case-probe\.mjs: .*by another spelling/);
+      rmSync(probe);
+    }
+    // A workspace dependency on another host, with no exports map, would let
+    // a bare subpath reach that host's unscanned dist.
+    mkdirSync(path.join(root, "hosts", "payload", "dist"), { recursive: true });
+    writeFileSync(path.join(root, "hosts", "payload", "package.json"), JSON.stringify({ name: "payload", private: true }));
+    writeFileSync(path.join(root, "hosts", "payload", "dist", "escape.mjs"), "export const e = eval;\n");
+    writeFileSync(manifestPath, JSON.stringify({ ...manifest, dependencies: { ...manifest.dependencies, payload: "workspace:*" } }));
+    writeFileSync(command, `${original}\nimport { e } from "payload/dist/escape.mjs";\n`);
+    const payload = guard();
+    assert.notEqual(payload.status, 0);
+    assert.match(payload.stderr, /hosts\/cmux\/package\.json: dependencies payload is "workspace:\*", a workspace range on something other than a ruled package/);
+    assert.match(payload.stderr, /obversa-review: a host imports payload\/dist\/escape\.mjs, which its manifest does not declare/);
+    assert.match(payload.stderr, /hosts\/payload: has no host rule/);
+    rmSync(path.join(root, "hosts", "payload"), { recursive: true });
+    writeFileSync(manifestPath, JSON.stringify(manifest));
+    writeFileSync(command, original);
+    // A host directory with no manifest takes the root as its package scope;
+    // a root exports map would then serve any file under the repository.
+    mkdirSync(path.join(root, "hosts", "rogue"));
+    writeFileSync(path.join(root, "hosts", "rogue", "run.mjs"), 'import { e } from "obversa/escape";\nconsole.log(e("42"));\n');
+    writeFileSync(path.join(root, "scripts", "escape.mjs"), "export const e = eval;\n");
+    const rootManifestPath = path.join(root, "package.json");
+    const rootManifestText = readFileSync(rootManifestPath, "utf8");
+    writeFileSync(rootManifestPath, JSON.stringify({ ...JSON.parse(rootManifestText), exports: { "./escape": "./scripts/escape.mjs" } }));
+    const rogue = guard();
+    assert.notEqual(rogue.status, 0);
+    assert.match(rogue.stderr, /hosts\/rogue\/package\.json: is missing/);
+    assert.match(rogue.stderr, /package\.json: exports makes the root importable by name/);
+    assert.match(rogue.stderr, /hosts\/rogue\/run\.mjs: a host imports obversa\/escape, which its manifest does not declare/);
+    rmSync(path.join(root, "hosts", "rogue"), { recursive: true });
+    rmSync(path.join(root, "scripts", "escape.mjs"));
+    writeFileSync(rootManifestPath, rootManifestText);
+    // Package-manager configuration in a host, and an unreadable host
+    // manifest, are refused rather than skipped.
+    writeFileSync(path.join(root, "hosts", "cmux", ".npmrc"), "registry=http://127.0.0.1:9/\n");
+    const npmrc = guard();
+    assert.notEqual(npmrc.status, 0);
+    assert.match(npmrc.stderr, /hosts\/cmux\/\.npmrc: rewrites what packages install/);
+    rmSync(path.join(root, "hosts", "cmux", ".npmrc"));
+    writeFileSync(manifestPath, "\uFEFF{");
+    const unreadable = guard();
+    assert.notEqual(unreadable.status, 0);
+    assert.match(unreadable.stderr, /hosts\/cmux\/package\.json: cannot be read as JSON/);
+    writeFileSync(manifestPath, JSON.stringify(manifest));
+    // Every mutation above was undone: the copy passes again.
+    assert.equal(guard().status, 0, "the restored copy passes");
   } finally {
     rmSync(root, { recursive: true, force: true });
   }
