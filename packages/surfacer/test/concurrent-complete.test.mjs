@@ -54,6 +54,54 @@ test("of two racing completions exactly one reports success; the other gets 409"
   }
 });
 
+test("a bystander in flight during the winner's completion, and a loser that swallows its 409, both get 409", async () => {
+  const surface = await startSurface({
+    app: "race2",
+    assets: { directory: assetsDir, files: { "/": ["index.html", "text/html; charset=utf-8"] } },
+    api: {
+      "POST /api/answer": async ({ session }) => {
+        await new Promise((resolve) => setTimeout(resolve, 20));
+        session.complete({ from: "winner" });
+        return null;
+      },
+      // Never completes; merely overlaps the winner.
+      "POST /api/bystander": async () => {
+        await new Promise((resolve) => setTimeout(resolve, 60));
+        return null;
+      },
+      // Tries to complete after the winner, hides its own 409, returns normally.
+      "POST /api/swallow": async ({ session }) => {
+        await new Promise((resolve) => setTimeout(resolve, 60));
+        try { session.complete({ from: "loser" }); } catch { /* swallowed on purpose */ }
+        return null;
+      },
+    },
+    sessionTimeoutMs: 10_000,
+    leaseTimeoutMs: 10_000,
+  });
+  try {
+    const [winner, bystander, swallow] = await Promise.all([
+      post(surface, "/api/answer", {}),
+      post(surface, "/api/bystander", {}),
+      post(surface, "/api/swallow", {}),
+    ]);
+    assert.equal(winner.status, 200);
+    const { operationId } = await winner.json();
+    assert.ok(operationId);
+    assert.equal(bystander.status, 409, "a request that completed nothing must not report success");
+    assert.equal(swallow.status, 409, "a loser that hid its 409 must not report success");
+    for (const r of [bystander, swallow]) {
+      const body = await r.json();
+      assert.equal(body.operationId, undefined, "the winner's operation id never reaches another client");
+    }
+    await post(surface, "/api/ack", { operationId });
+    const decision = await surface.waitForDecision();
+    assert.deepEqual(decision.payload, { from: "winner" });
+  } finally {
+    await surface.stop();
+  }
+});
+
 test("a cancelled session carries the app's outcome payload, not null", async () => {
   const surface = await startSurface({
     app: "outcome",
@@ -72,6 +120,33 @@ test("a cancelled session carries the app's outcome payload, not null", async ()
     assert.deepEqual(decision.payload, { routed: true, status: "cancelled" });
   } finally {
     await surface.stop();
+  }
+});
+
+test("an outcome payload is redacted by default and exact with the verbatim opt-in", async () => {
+  // A gate id can look like a token to the redactor; a review must be able to
+  // keep it exact on every ending, while a generic app keeps the safe default.
+  const tokenLike = "ghp_ABCDEFGHIJKLMNOPQRST";
+  for (const [verbatim, expected] of [[false, false], [true, true]]) {
+    const surface = await startSurface({
+      app: "ids",
+      assets: { directory: assetsDir, files: { "/": ["index.html", "text/html; charset=utf-8"] } },
+      terminalPayload: (status) => ({ gateId: tokenLike, status }),
+      terminalPayloadVerbatim: verbatim,
+      sessionTimeoutMs: 10_000,
+      leaseTimeoutMs: 10_000,
+    });
+    try {
+      const cancel = await post(surface, "/api/cancel", {});
+      const { operationId } = await cancel.json();
+      await post(surface, "/api/ack", { operationId });
+      const decision = await surface.waitForDecision();
+      assert.equal(decision.status, "cancelled");
+      assert.equal(decision.payload.gateId === tokenLike, expected, `verbatim=${verbatim}: gateId ${decision.payload.gateId}`);
+      if (!expected) assert.notEqual(decision.payload.gateId, tokenLike, "the default redacts a token-shaped value");
+    } finally {
+      await surface.stop();
+    }
   }
 });
 
