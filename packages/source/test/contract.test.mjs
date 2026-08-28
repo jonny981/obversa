@@ -198,6 +198,42 @@ test("anchorKey is total: it never throws, and an anchor that points nowhere is 
   assert.equal(validateAnnotation({ anchor: { target: "a", position: cyclic }, body: "x" }, buildAnchorSet([outputAnchor(1)])), null);
 });
 
+test("validateAnnotation reads every raw field once: a stateful getter cannot put a non-string into the clean shape", () => {
+  const set = buildAnchorSet([outputAnchor(1)]);
+  // Each getter answers a string to the first read and an object to the next.
+  const flip = (first, then) => { let reads = 0; return () => (++reads === 1 ? first : then); };
+  const bodyReads = flip("looks off", { not: "a string" });
+  const createdReads = flip("2026-08-28T09:00:00Z", { not: "a timestamp" });
+  const entryBodyReads = flip("reply", { not: "a string" });
+  const entry = { author: { kind: "human", id: "r" }, get body() { return entryBodyReads(); } };
+  const threadReads = flip([entry], "not an array");
+  const raw = {
+    anchor: outputAnchor(1),
+    get body() { return bodyReads(); },
+    get createdAt() { return createdReads(); },
+    get thread() { return threadReads(); },
+  };
+  const clean = validateAnnotation(raw, set);
+  assert.equal(typeof clean.body, "string");
+  assert.equal(clean.body, "looks off");
+  assert.equal(typeof clean.createdAt, "string");
+  assert.equal(clean.createdAt, "2026-08-28T09:00:00Z");
+  assert.equal(clean.thread.length, 1);
+  assert.equal(typeof clean.thread[0].body, "string");
+  assert.equal(clean.thread[0].body, "reply");
+  // A field that answers a non-string on its one read is simply invalid.
+  assert.equal(validateAnnotation({ anchor: outputAnchor(1), get body() { return { not: "a string" }; } }, set), null);
+  assert.equal(validateAnnotation({ anchor: outputAnchor(1), body: "x", createdAt: Number.NaN }, set).createdAt, null, "a non-finite number is no timestamp");
+  assert.equal(validateAnnotation({ anchor: outputAnchor(1), body: "x", createdAt: Number.POSITIVE_INFINITY }, set).createdAt, null);
+  assert.equal(validateAnnotation({ anchor: outputAnchor(1), body: "x", createdAt: Number.NEGATIVE_INFINITY }, set).createdAt, null);
+  assert.equal(validateAnnotation({ anchor: outputAnchor(1), body: "x", createdAt: 1756371600000 }, set).createdAt, 1756371600000, "a finite number is kept");
+  assert.equal(validateAnnotation({ anchor: outputAnchor(1), body: "x", thread: [{ author: { kind: "human", id: "r" }, get body() { return { not: "a string" }; } }] }, set).thread, undefined);
+  // The author is read once too.
+  const kindReads = flip("agent", "robot");
+  const withAuthor = validateAnnotation({ anchor: outputAnchor(1), body: "x", author: { get kind() { return kindReads(); }, id: "grok" } }, set);
+  assert.deepEqual(withAuthor.author, { kind: "agent", id: "grok" });
+});
+
 test("every public guard is total: a throwing proxy is invalid, never an exception", () => {
   const hostile = () => new Proxy({}, { get() { throw new Error("boom"); }, has() { throw new Error("boom"); }, ownKeys() { throw new Error("boom"); } });
   const hostileArray = new Proxy([], { get() { throw new Error("boom"); } });

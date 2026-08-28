@@ -249,10 +249,12 @@ function normalizeAuthor(author) {
 // Validate one thread entry -> { author, body } or null.
 function normalizeThreadEntry(entry) {
   if (!entry || typeof entry !== "object") return null;
-  const author = normalizeAuthor(entry.author);
+  // Each field is read exactly once; the checks and the result use the locals.
+  const { author: rawAuthor, body: rawBody } = entry;
+  const author = normalizeAuthor(rawAuthor);
   if (!author) return null;
-  if (typeof entry.body !== "string") return null;
-  const body = entry.body.trim();
+  if (typeof rawBody !== "string") return null;
+  const body = rawBody.trim();
   if (!body) return null;
   return { author, body: body.slice(0, MAX_BODY) };
 }
@@ -283,10 +285,15 @@ function snapshotAnchor(anchor) {
 
 function cleanAnnotation(raw, anchorSet) {
   if (!raw || typeof raw !== "object") return null;
+  // Every raw field is read exactly once, here; the checks below and the
+  // annotation returned use these locals only. A getter that answered a
+  // string to the type check and an object afterwards would otherwise put a
+  // non-string body, timestamp, or thread entry into the "clean" annotation.
+  const { anchor: rawAnchor, body: rawBody, author: rawAuthor, createdAt: rawCreatedAt, thread: rawThread } = raw;
   // The anchor is read exactly once. An accessor that answered one location
   // to the membership check and another afterwards would otherwise let the
   // normalised annotation point where the check never looked.
-  const anchor = snapshotAnchor(raw.anchor);
+  const anchor = snapshotAnchor(rawAnchor);
   // The key and the owned copy of the position come from one canonicalisation
   // (keyOf reads every property once), so the location that passed the
   // membership check is the location returned, and nothing the sender does to
@@ -295,23 +302,24 @@ function cleanAnnotation(raw, anchorSet) {
   const key = keyOf(anchor, owned);
   if (key === null || !anchorSet.has(key)) return null;
   anchor.position = owned.position;
-  if (typeof raw.body !== "string") return null;
-  const body = raw.body.trim();
+  if (typeof rawBody !== "string") return null;
+  const body = rawBody.trim();
   if (!body) return null;
 
   const annotation = {
     anchor: normalizeAnchor(anchor),
     body: body.slice(0, MAX_BODY),
-    author: normalizeAuthor(raw.author) ?? { kind: "human", id: "reviewer" },
+    author: normalizeAuthor(rawAuthor) ?? { kind: "human", id: "reviewer" },
     createdAt:
-      typeof raw.createdAt === "string" || typeof raw.createdAt === "number"
-        ? raw.createdAt
+      typeof rawCreatedAt === "string" || (typeof rawCreatedAt === "number" && Number.isFinite(rawCreatedAt))
+        ? rawCreatedAt
         : null,
   };
 
-  if (Array.isArray(raw.thread) && raw.thread.length > 0) {
+  if (Array.isArray(rawThread)) {
+    // One read per entry, in order, bounded.
     const thread = [];
-    for (const entry of raw.thread) {
+    for (const entry of rawThread) {
       if (thread.length >= MAX_THREAD) break;
       const clean = normalizeThreadEntry(entry);
       if (clean) thread.push(clean);
