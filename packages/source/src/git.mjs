@@ -233,9 +233,13 @@ export async function listTrackedFiles({ cwd = process.cwd(), ref } = {}) {
  * one `^`-excluded one (`A..B` → B ^A; `A...B` → B A ^merge-base; an omitted
  * right side stands for HEAD), and a single object into one line with no
  * exclusion. A range ends at its first positive revision — the right side in
- * both forms — returned as the exact object id; a single revision diffs
- * against the worktree and ends there (undefined). A token git cannot
- * resolve is an error, never a silent fall-through to the index.
+ * both forms — returned as the exact object id. Exactly one positive line
+ * and no exclusion is a single revision: it diffs against the worktree and
+ * ends there (undefined). Several positive lines with no exclusion is a
+ * revision set that is not a range (`HEAD^@`, a merge's parents, which git
+ * diffs against each other): the review does not support it and refuses it
+ * before opening, rather than guessing an end. No positive line, or a token
+ * git cannot resolve, is an error, never a silent fall-through to the index.
  * @param {{ cwd?: string, range: string }} options
  * @returns {Promise<string | undefined>}
  */
@@ -249,6 +253,10 @@ export async function rangeEnd({ cwd = process.cwd(), range } = {}) {
   }
   const lines = stdout.split("\n").filter((line) => line.length > 0);
   const positives = lines.filter((line) => !line.startsWith("^"));
-  if (lines.length === positives.length) return undefined;
+  if (positives.length === 0) throw new Error(`The range names no revision: ${range}`);
+  if (positives.length === lines.length) {
+    if (positives.length === 1) return undefined;
+    throw new Error(`The range is a revision set the review does not support: ${range}`);
+  }
   return positives[0];
 }

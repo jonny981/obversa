@@ -61,6 +61,18 @@ test("rangeEnd asks git: a range ends at its first positive revision (the right 
     // The staged-only file was in the index when `side` was committed, so it
     // is part of the side tree; second.txt (HEAD's second commit) is not.
     assert.deepEqual([...(await listTrackedFiles({ cwd: dir, ref: await rangeEnd({ cwd: dir, range: "HEAD...side" }) }))].sort(), ["committed.txt", "side.txt", "staged-only.txt"], "the side tree is listed for HEAD...side");
+
+    // A merge's parents, `HEAD^@`: one token, several positive revisions, no
+    // exclusion. git diffs the parents against each other, so it is neither
+    // a single revision nor a range the review knows the end of; it must be
+    // refused before the review opens, never listed from the index.
+    git(dir, "merge", "-q", "--no-ff", "--no-edit", "side");
+    const parents = git(dir, "rev-parse", "--revs-only", "HEAD^@", "--").trim().split("\n");
+    assert.equal(parents.length, 2, "the merge has two parents and git prints both as positives");
+    assert.ok(parents.every((line) => !line.startsWith("^")), "with no exclusion");
+    await assert.rejects(() => rangeEnd({ cwd: dir, range: "HEAD^@" }), /revision set the review does not support/, "a merge's parents are refused, not read as one object");
+    await assert.rejects(() => rangeEnd({ cwd: dir, range: "^HEAD" }), /names no revision|could not be resolved/, "a bare exclusion names nothing to review");
+    assert.equal(await rangeEnd({ cwd: dir, range: "HEAD^1..HEAD^2" }), git(dir, "rev-parse", "HEAD^2").trim(), "the explicit parent range still ends at its right side");
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
