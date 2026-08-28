@@ -3,7 +3,7 @@ import { copyFile, mkdtemp, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 
-import { computeDiff, listTrackedFiles, repositoryRoot } from "./git.mjs";
+import { computeDiff, listTrackedFiles, rangeEnd, repositoryRoot } from "./git.mjs";
 import { parseUnifiedDiff } from "./diff.mjs";
 import { ASSETS_DIR, buildIndexHtml } from "./page.mjs";
 import { createHighlightRegistry, registryToCss } from "./highlight.mjs";
@@ -89,6 +89,56 @@ function decisionFor(status) {
   return status === "timed_out" ? "timed-out" : "cancelled";
 }
 
+// Highlight a diff model into a fresh registry: the tokens ride the
+// authenticated model response, and the browser paints class spans, so
+// nothing highlights (or executes) client-side.
+async function highlighted(diffText) {
+  const model = parseUnifiedDiff(diffText);
+  const registry = createHighlightRegistry();
+  await highlightModel(model, registry);
+  return { model, registry };
+}
+
+// A diff handed in by the caller: reviewed exactly as given, with no
+// context bands, no go-to-source, and no file tree beyond the diff, since
+// those read the repository and a read now need not be the state the diff
+// came from. Nothing here touches the repository — not even to find it.
+async function captureSupplied({ diffText, mode, range }) {
+  const resolved = { diffText, mode, range: mode === "range" ? range : null };
+  return { resolved, allFiles: [], ...(await highlighted(diffText)) };
+}
+
+// One review from one repository state. The diff is computed, the context
+// bands and go-to-source hits are read beside it — one bounded reader serves
+// both, so a file is read once and the review-wide byte bound is one bound
+// across the two passes — the tracked-file list is taken (from the range's
+// end commit for a range review, else the index), and then the diff is
+// computed again: if the repository moved under any of those reads, the
+// hunks and anchors would sit beside content from a later state, so the
+// capture is retried from the top, and refused when the repository will not
+// hold still. `git` is the port for the root, the diff, and the tracked-file
+// list; the file reads themselves go through the bounded reader.
+const CAPTURE_ATTEMPTS = 3;
+async function capture({ mode, range, cwd, git, read: makeReader = boundedReader }) {
+  for (let attempt = 1; ; attempt += 1) {
+    const resolved = await git.computeDiff({ mode, range, cwd });
+    const { model, registry } = await highlighted(resolved.diffText);
+    const read = makeReader();
+    await contextModel(model, { mode: resolved.mode, cwd, registry, read });
+    await navModel(model, { mode: resolved.mode, cwd, read });
+    const allFiles = await git.listTrackedFiles({ cwd, ref: resolved.mode === "range" ? rangeEnd(resolved.range) : undefined });
+    const again = await git.computeDiff({ mode, range, cwd });
+    if (again.diffText === resolved.diffText) return { resolved, model, registry, allFiles };
+    if (attempt >= CAPTURE_ATTEMPTS) {
+      throw new Error("The repository changed while the review was being captured; retry when it is quiet");
+    }
+  }
+}
+
+// The repository reads a review makes, as one replaceable port (the tests
+// hand in spies).
+const gitPort = { repositoryRoot, computeDiff, listTrackedFiles };
+
 /**
  * Open a git diff for inline review and return the reviewer's annotations.
  *
@@ -118,6 +168,20 @@ function decisionFor(status) {
  * ended otherwise; null only if the session never produced a terminal
  * record. `annotations` is `result.annotations` or []; `terminal` is the
  * runtime's framed terminal record.
+ *
+ * @param {{
+ *   mode?: "worktree" | "staged" | "range",
+ *   range?: string,
+ *   cwd?: string,
+ *   diffText?: string,
+ *   app?: string,
+ *   launchSurface?: Function,
+ *   clientKitSource?: string,
+ *   open?: boolean,
+ *   ready?: Function,
+ *   gate?: { gateId?: unknown, callback?: { address?: unknown, token?: unknown } } | null,
+ *   git?: { repositoryRoot: Function, computeDiff: Function, listTrackedFiles: Function },
+ * }} [options]
  */
 export async function reviewDiff({
   mode = "worktree",
@@ -130,6 +194,7 @@ export async function reviewDiff({
   open = true,
   ready,
   gate,
+  git = gitPort,
 } = {}) {
   if (typeof launchSurface !== "function") {
     throw new TypeError("reviewDiff needs a launchSurface port");
@@ -142,31 +207,22 @@ export async function reviewDiff({
   // The command may run from any directory inside the repository. Git prints
   // diff paths relative to the repository root, so every read that resolves a
   // diff path works from the root, not from `cwd`.
-  const root = (await repositoryRoot({ cwd })) ?? cwd;
-  const resolved = diffText !== undefined
-    ? { diffText, mode, range: mode === "range" ? range : null }
-    : await computeDiff({ mode, range, cwd: root });
-  const model = parseUnifiedDiff(resolved.diffText);
-  // Highlight the diff and the expandable full-file context into one shared
-  // stylesheet, and attach go-to-source hits. Tokens and context ride the
-  // authenticated model response; the browser paints class spans, so nothing
-  // highlights (or executes) client-side.
-  const registry = createHighlightRegistry();
-  await highlightModel(model, registry);
-  // Context and go-to-source both read each file's new side. One bounded
-  // reader serves both, so a file is read once and the review-wide byte bound
-  // is one bound across the two passes, not one per pass.
-  const read = boundedReader();
-  await contextModel(model, { mode: resolved.mode, cwd: root, registry, read });
-  await navModel(model, { mode: resolved.mode, cwd: root, read });
+  // A diff handed in is reviewed as it is: nothing is read from the
+  // repository for it — not even its root — because a read now may not be
+  // the state that diff was taken from. A diff computed here is captured
+  // together with the file content and the tracked-file list beside it,
+  // from one repository state (see capture).
+  const { resolved, model, registry, allFiles } = diffText !== undefined
+    ? await captureSupplied({ diffText, mode, range })
+    : await capture({ mode, range, cwd: (await git.repositoryRoot({ cwd })) ?? cwd, git });
   const highlightCss = registryToCss(registry);
   const meta = {
     mode: resolved.mode,
     range: resolved.range,
     label: buildLabel({ mode: resolved.mode, range: resolved.range }),
     fileCount: model.files.length,
-    // The repo's tracked files, for the tree's "All files" view.
-    allFiles: await listTrackedFiles({ cwd: root }),
+    // The tracked files of the reviewed state, for the tree's "All files" view.
+    allFiles,
   };
   const request = buildSurfaceRequest({ model, meta, gate });
 
@@ -196,6 +252,12 @@ export async function reviewDiff({
       // code quoted in a comment survives the transport's redaction.
       "POST /api/submit": async ({ body, session }) => {
         const result = normalizeResult({ annotations: body?.annotations, decision: body?.decision, meta }, request);
+        // A submission whose decision and annotations disagree — or that
+        // names an ending only the runtime may — is refused, and the session
+        // stays open for a submission that agrees.
+        if (result === null) {
+          return { status: 400, body: { error: "A review is approved with no annotations, or requests changes with at least one" } };
+        }
         session.complete(result, { verbatim: true });
         return null;
       },
@@ -219,7 +281,7 @@ export async function reviewDiff({
     // the outcome.
     // The outcome carries identity fields (a gate id can look like a token to
     // the redactor), so it opts in to verbatim like the completed result.
-    const terminalPayload = (status) => normalizeResult({ decision: decisionFor(status), annotations: [], meta }, request);
+    const terminalPayload = (status) => normalizeResult({ decision: decisionFor(status), annotations: [], meta }, request, { terminal: true });
     const outcome = await launchSurface({ app, assets, api, open, ready, terminalPayload, terminalPayloadVerbatim: true });
     const terminal = outcome?.result ?? outcome;
     const status = terminal?.status ?? "unknown";

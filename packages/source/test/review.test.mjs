@@ -100,14 +100,26 @@ test("reviewDiff builds the surface, returns a validated SurfaceResult, and clea
   assert.ok(capturedDir && !existsSync(capturedDir), "the temp directory must be cleaned up");
 });
 
-test("an unknown decision never becomes an approval", async () => {
+test("an unknown, contradictory, or runtime-only decision is refused by the submit route, never coerced, and the session stays open", async () => {
   const launchSurface = async ({ api }) => {
-    let payload;
-    await api["POST /api/submit"]({ body: { decision: "lgtm", annotations: [] }, session: { complete(value) { payload = value; } } });
-    return { result: { status: "completed", payload } };
+    let completed = false;
+    const session = { complete() { completed = true; } };
+    for (const body of [
+      { decision: "lgtm", annotations: [] },
+      { decision: "cancelled", annotations: [] },
+      { decision: "timed-out", annotations: [] },
+      { decision: "changes-requested", annotations: [] },
+      { decision: "approved", annotations: [{ anchor: { target: "a.txt", side: "new", position: 1 }, body: "fix" }] },
+    ]) {
+      const answer = await api["POST /api/submit"]({ body, session });
+      assert.equal(answer?.status, 400, JSON.stringify(body));
+    }
+    assert.equal(completed, false, "no refused submission completes the session");
+    return { result: { status: "cancelled" } };
   };
   const outcome = await reviewDiff({ diffText: DIFF, launchSurface, clientKitSource: CLIENT_KIT, open: false });
-  assert.equal(outcome.result.decision, "cancelled");
+  assert.equal(outcome.status, "cancelled");
+  assert.deepEqual(outcome.annotations, []);
 });
 
 test("reviewDiff forwards a ready callback to the surface port", async () => {
@@ -233,4 +245,47 @@ test("the submit handler bounds bodies and counts through the contract", async (
   const outcome = await reviewDiff({ diffText: DIFF, launchSurface, clientKitSource: CLIENT_KIT, open: false });
   assert.equal(outcome.result.annotations.length, MAX_ANNOTATIONS);
   assert.equal(outcome.result.annotations[0].body.length, MAX_BODY);
+});
+
+test("a supplied diff reads nothing from the repository — not the root, not the diff, not the tracked files — and gets an empty tree list", async () => {
+  const calls = [];
+  const git = {
+    repositoryRoot: async () => { calls.push("repositoryRoot"); return "/nowhere"; },
+    computeDiff: async () => { calls.push("computeDiff"); return { diffText: DIFF, mode: "worktree", range: null }; },
+    listTrackedFiles: async () => { calls.push("listTrackedFiles"); return ["a.js"]; },
+  };
+  const launchSurface = async ({ api }) => {
+    const { body } = await api["GET /api/model"]();
+    return { status: "completed", result: { decision: "approved", annotations: [] }, meta: body.meta };
+  };
+  const outcome = await reviewDiff({ diffText: DIFF, launchSurface, clientKitSource: CLIENT_KIT, open: false, git });
+  assert.deepEqual(calls, [], "no repository read for a supplied diff");
+  assert.deepEqual(outcome.meta.allFiles, [], "the tree lists only the diff");
+});
+
+test("a computed review takes its tracked-file list inside the capture window, from the range's end for a range", async () => {
+  const calls = [];
+  const git = {
+    repositoryRoot: async () => "/repo",
+    computeDiff: async () => { calls.push("computeDiff"); return { diffText: DIFF, mode: "range", range: "a..b" }; },
+    listTrackedFiles: async ({ ref }) => { calls.push(`listTrackedFiles:${ref}`); return ["listed.js"]; },
+  };
+  const launchSurface = async ({ api }) => ({ status: "completed", result: { decision: "approved", annotations: [] }, meta: (await api["GET /api/model"]()).body.meta });
+  const outcome = await reviewDiff({ mode: "range", range: "a..b", cwd: "/repo", launchSurface, clientKitSource: CLIENT_KIT, open: false, git });
+  assert.deepEqual(calls, ["computeDiff", "listTrackedFiles:b", "computeDiff"], "the list is read between the diff and its recheck, at the range's end");
+  assert.deepEqual(outcome.meta.allFiles, ["listed.js"]);
+});
+
+test("a repository that keeps changing under the capture is refused after three attempts", async () => {
+  let n = 0;
+  const git = {
+    repositoryRoot: async () => "/repo",
+    computeDiff: async () => ({ diffText: `${DIFF}\n// state ${n += 1}\n`, mode: "worktree", range: null }),
+    listTrackedFiles: async () => [],
+  };
+  await assert.rejects(
+    () => reviewDiff({ cwd: "/repo", launchSurface: async () => ({ status: "completed" }), clientKitSource: CLIENT_KIT, open: false, git }),
+    /changed while the review was being captured/,
+  );
+  assert.equal(n, 6, "three attempts, two diffs each");
 });

@@ -154,6 +154,20 @@ async function buildModel() {
   }
 }
 
+// Chrome's helper processes can outlive a killed browser for a moment and
+// keep writing into the profile; removing it is best effort, retried, and a
+// leftover temporary directory is not a failed proof.
+async function removeProfile(profile) {
+  for (let attempt = 0; attempt < 40; attempt += 1) {
+    try {
+      rmSync(profile, { recursive: true, force: true });
+      return;
+    } catch {
+      await new Promise((r) => setTimeout(r, 250));
+    }
+  }
+}
+
 // A DevTools session on the review page, so the proof can press real keys:
 // a Tab dispatched through the browser's input pipeline moves focus by the
 // document's tab order, and an Enter activates whatever holds focus the way
@@ -332,7 +346,7 @@ test("the review surface renders under the exact CSP with zero violations and fi
     chrome?.kill("SIGKILL");
     if (chrome) await new Promise((r) => { chrome.once("exit", r); setTimeout(r, 1500); });
     server.close();
-    rmSync(profile, { recursive: true, force: true, maxRetries: 5 });
+    await removeProfile(profile);
   }
 
   assert.ok(report.rendered, `did not render: ${report.appText}`);
@@ -443,7 +457,7 @@ test("a page that cannot load its review cancels the session instead of holding 
     chrome?.kill("SIGKILL");
     if (chrome) await new Promise((r) => { chrome.once("exit", r); setTimeout(r, 1500); });
     server.close();
-    rmSync(profile, { recursive: true, force: true, maxRetries: 5 });
+    await removeProfile(profile);
   }
   assert.deepEqual(ack, { operationId: "op-cancel" }, "the cancel's operation id is acknowledged");
   assert.deepEqual(seen.filter((r) => r !== "POST /api/heartbeat"), ["GET /api/model", "POST /api/cancel", "POST /api/ack"], "model failure, then cancel, then ack, in order");

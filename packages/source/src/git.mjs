@@ -199,13 +199,22 @@ export async function readNewFileText({ path: filePath, mode = "worktree", cwd =
 }
 
 /**
- * List the repository's tracked files, for the tree's "All files" view. Returns
- * repository-relative paths (git's own order) whatever directory `cwd` is, so
- * they match the diff's paths; [] on any error.
+ * The tracked files of one repository state, for the tree's "All files" view:
+ * the index by default, or the tree of one commit when `ref` is given.
+ * Returns repository-relative paths (git's own order) whatever directory
+ * `cwd` is, so they match the diff's paths; [] on any error.
+ * @param {{ cwd?: string, ref?: string }} [options]
+ * @returns {Promise<string[]>}
  */
-export async function listTrackedFiles({ cwd = process.cwd() } = {}) {
+export async function listTrackedFiles({ cwd = process.cwd(), ref } = {}) {
+  // The index (what the worktree and staged reviews are against), or the
+  // tree of one commit (what a range review ends at) — never one for the
+  // other, so the list belongs to the state the diff describes.
+  const args = ref === undefined
+    ? ["ls-files", "--full-name", "--", ":/"]
+    : ["ls-tree", "-r", "--name-only", "--full-tree", ref, "--"];
   try {
-    const { stdout } = await run("git", ["-c", "core.quotePath=false", "ls-files", "--full-name", "--", ":/"], {
+    const { stdout } = await run("git", ["-c", "core.quotePath=false", ...args], {
       cwd,
       maxBuffer: 16 * 1024 * 1024,
       windowsHide: true,
@@ -214,4 +223,14 @@ export async function listTrackedFiles({ cwd = process.cwd() } = {}) {
   } catch {
     return [];
   }
+}
+
+/**
+ * The revision a range review ends at: `A..B` and `A...B` end at B; a single
+ * revision diffs against the worktree and ends there (undefined).
+ * @param {string | null | undefined} range
+ * @returns {string | undefined}
+ */
+export function rangeEnd(range) {
+  return /\.\.\.?(.+)$/.exec(String(range ?? ""))?.[1];
 }
