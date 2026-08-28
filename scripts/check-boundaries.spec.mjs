@@ -599,6 +599,13 @@ test("host JavaScript is import-scanned: public package names pass, a path into 
   assert.ok(hostImportFindings('import { helper } from "../lib/helper";', { file, root: "/repo" }).some((entry) => /the scan would not read/.test(entry)));
   assert.ok(hostImportFindings('const h = await import("../bin/other-command");', { file, root: "/repo" }).some((entry) => /the scan would not read/.test(entry)));
   assert.deepEqual(hostImportFindings('import { helper } from "../lib/helper.mjs";', { file, root: "/repo" }), [], "a local module with a source extension inside the host root is scanned on its own");
+  // Every resolved shipped edge is recorded, so the walk can prove its
+  // target was actually import-scanned; a shape that passes the early checks
+  // (a dist file under the host root) is still only an edge until then.
+  const edges = [];
+  hostImportFindings('import { helper } from "../lib/helper.mjs"; import { built } from "../dist/escape.mjs";', { file, root: "/repo", edges });
+  assert.deepEqual(edges.map((edge) => edge.target), ["hosts/cmux/lib/helper.mjs", "hosts/cmux/dist/escape.mjs"]);
+  assert.deepEqual([], (() => { const e = []; hostImportFindings('import "@obversa/source";', { file, root: "/repo", edges: e }); return e; })(), "a public name is not a local edge");
   // A suffix proves nothing: the target must sit inside the importing
   // file's own hosts/<name>/ root, or it is a file the walk never scans.
   for (const text of [

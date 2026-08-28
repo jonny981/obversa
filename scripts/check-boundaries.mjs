@@ -53,7 +53,7 @@ function hostRootOf(absolute, repoRoot) {
   const match = /^hosts\/([^/]+)(?:\/|$)/.exec(relative(repoRoot, absolute).split('\\').join('/'));
   return match ? `hosts/${match[1]}/` : undefined;
 }
-export function hostImportFindings(text, { file, root: repoRoot }) {
+export function hostImportFindings(text, { file, root: repoRoot, edges = [] }) {
   const findings = [];
   const parsedAs = sourcePattern.test(file) ? file : `${file}.mjs`;
   // A host's proofs reach a package's internals by path today (the browser
@@ -89,6 +89,11 @@ export function hostImportFindings(text, { file, root: repoRoot }) {
       const targetRoot = hostRootOf(real, repoRoot);
       if (!hostRoot || targetRoot !== hostRoot) findings.push(`a host imports a local module outside its own host root (${specifier}); a host's local modules live under ${hostRoot ?? 'hosts/<name>/'}`);
       else if (!sourcePattern.test(real)) findings.push(`a host imports a local module the scan would not read (${specifier}); a local module carries a source extension`);
+      // The early reasons above are clear but not the proof: the walk skips
+      // dist and node_modules, so a shape that passes them can still name a
+      // file no scan read. Every resolved edge is recorded, and after the
+      // walk each target must be a file that was actually import-scanned.
+      edges.push({ specifier, target: relative(repoRoot, real).split('\\').join('/') });
     }
   }
   return findings;
@@ -943,6 +948,7 @@ const requiredImportScannedHostFiles = [
   'hosts/cmux/lib/review-args.mjs',
 ];
 const importScannedHostFiles = new Set();
+const hostEdges = [];
 const requiredScannedFiles = [
   'hosts/cmux/bin/obversa-order-workspace',
   'hosts/cmux/bin/obversa-plannotator-browser',
@@ -1279,7 +1285,9 @@ for (const absolute of files) {
   // packages/, and the loader-hatch rules of shipped source.
   if (isHostScript(path, text)) {
     importScannedHostFiles.add(path);
-    for (const finding of hostImportFindings(text, { file: absolute, root })) failures.push(`${path}: ${finding}`);
+    const edges = [];
+    for (const finding of hostImportFindings(text, { file: absolute, root, edges })) failures.push(`${path}: ${finding}`);
+    for (const edge of edges) hostEdges.push({ from: path, ...edge });
   }
 }
 
@@ -1288,6 +1296,12 @@ for (const path of requiredScannedFiles) {
 }
 for (const path of requiredImportScannedHostFiles) {
   if (!importScannedHostFiles.has(path)) failures.push(`${path}: host script is not import-scanned`);
+}
+// The final proof for every shipped host edge: its resolved target is a file
+// this very walk import-scanned. A target the walk skipped (dist,
+// node_modules, a missing or unresolvable file) fails closed.
+for (const { from, specifier, target } of hostEdges) {
+  if (!importScannedHostFiles.has(target)) failures.push(`${from}: imports ${specifier}, which resolves to ${target}, a file this scan did not import-scan`);
 }
 
 if (failures.length) {
