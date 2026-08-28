@@ -26,8 +26,9 @@
 //                  null) or old | new
 //   Annotation     { anchor, body, author{kind,id}, createdAt, thread? }
 //   SurfaceResult  { surfaceId, gateId, decision, annotations[], edits?, meta? }
-//   deadline, when present, is an RFC 3339 date-time (the ISO-8601 profile
-//   with a date, a time, and a zone).
+//   deadline, when present, is an RFC 3339 date-time with seconds, an
+//   optional fraction of up to nine digits, and Z or a numeric offset (no
+//   leap second, no -00:00).
 
 export const FAMILIES = Object.freeze(["intent", "output", "outcome"]);
 // Transport hints (an internal note): the named hosts, or a third-party tool as
@@ -46,15 +47,18 @@ export const DECISIONS = Object.freeze([
 export const AUTHOR_KINDS = Object.freeze(["human", "agent"]);
 // The sides of an Output anchor (an internal note): the old or the new text.
 export const SIDES = Object.freeze(["old", "new"]);
-// A deadline names one instant every host reads the same way: an RFC 3339
-// date-time — date, time, and zone. The shape is checked and then every
+// A deadline names one instant every host reads the same way. The accepted
+// form is exactly: an RFC 3339 date-time with seconds, an optional fraction
+// of up to nine digits, and Z or a numeric offset — no leap second (:60),
+// which Date.parse cannot place, and no -00:00, which RFC 3339 reserves for
+// "offset unknown". The shape is checked and then every
 // calendar component, because Date.parse would quietly roll 2026-02-30
 // forward to March 2 and call it valid.
-const ISO_TIMESTAMP = /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})(?::(\d{2})(?:\.\d{1,9})?)?(?:Z|[+-](\d{2}):(\d{2}))$/;
+const ISO_TIMESTAMP = /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2}):(\d{2})(?:\.\d{1,9})?(?:Z|[+-](\d{2}):(\d{2}))$/;
 function isIsoInstant(text) {
   const match = typeof text === "string" ? ISO_TIMESTAMP.exec(text) : null;
   if (!match) return false;
-  const [, year, month, day, hour, minute, second = "0", offsetHours = "0", offsetMinutes = "0"] = match;
+  const [, year, month, day, hour, minute, second, offsetHours = "0", offsetMinutes = "0"] = match;
   const y = Number(year);
   const m = Number(month);
   const leap = (y % 4 === 0 && y % 100 !== 0) || y % 400 === 0;
@@ -63,6 +67,9 @@ function isIsoInstant(text) {
   if (Number(day) < 1 || Number(day) > daysInMonth[m - 1]) return false;
   if (Number(hour) > 23 || Number(minute) > 59 || Number(second) > 59) return false;
   if (Number(offsetHours) > 23 || Number(offsetMinutes) > 59) return false;
+  // RFC 3339 gives -00:00 the meaning "the local offset is unknown", which
+  // is not one instant; Date.parse would quietly read it as UTC.
+  if (text.endsWith("-00:00")) return false;
   return Number.isFinite(Date.parse(text));
 }
 
@@ -172,7 +179,11 @@ export function anchorKey(anchor) {
   }
 }
 
-function keyOf(anchor) {
+// The key, and — when `owned` is given — the owned copy of the position made
+// from the very same canonical text, so every property is read exactly once:
+// a value that would answer differently on a second read (a non-throwing
+// proxy, an accessor) has no second read to answer.
+function keyOf(anchor, owned) {
   if (!anchor || typeof anchor !== "object") return null;
   const { target, side, position } = anchor;
   if (!isPresent(target) || hasNul(target)) return null;
@@ -181,13 +192,16 @@ function keyOf(anchor) {
   if (typeof position === "number") {
     if (!Number.isFinite(position) || Object.is(position, -0)) return null;
     pos = `n:${position}`;
+    if (owned) owned.position = position;
   } else if (typeof position === "string") {
     if (!isPresent(position) || hasNul(position)) return null;
     pos = `s:${position}`;
+    if (owned) owned.position = position;
   } else if (position && typeof position === "object") {
     const text = canonicalJson(position);
     if (text === null || text === "{}" || text === "[]") return null;
     pos = `j:${text}`;
+    if (owned) owned.position = JSON.parse(text);
   } else {
     return null;
   }
@@ -273,12 +287,14 @@ function cleanAnnotation(raw, anchorSet) {
   // to the membership check and another afterwards would otherwise let the
   // normalised annotation point where the check never looked.
   const anchor = snapshotAnchor(raw.anchor);
-  const key = anchorKey(anchor);
+  // The key and the owned copy of the position come from one canonicalisation
+  // (keyOf reads every property once), so the location that passed the
+  // membership check is the location returned, and nothing the sender does to
+  // its object afterwards moves the annotation.
+  const owned = {};
+  const key = keyOf(anchor, owned);
   if (key === null || !anchorSet.has(key)) return null;
-  // The annotation owns its location: an object position is copied through
-  // its canonical text, so nothing the sender does to its object afterwards
-  // moves the annotation.
-  if (anchor.position && typeof anchor.position === "object") anchor.position = JSON.parse(canonicalJson(anchor.position));
+  anchor.position = owned.position;
   if (typeof raw.body !== "string") return null;
   const body = raw.body.trim();
   if (!body) return null;
@@ -402,9 +418,9 @@ function checkSurfaceRequest(value) {
   // Every offered anchor is a real location — a target and a position — or the
   // membership rule the result is checked against would be built on nothing.
   if (!Array.isArray(value.anchors) || !value.anchors.every((anchor) => anchorKey(anchor) !== null)) return false;
-  // A deadline is optional; when present it is an RFC 3339 date-time with a
-  // zone, so every host enforces the same instant. A bare date, a loose date,
-  // or a number is refused.
+  // A deadline is optional; when present it is an RFC 3339 date-time with
+  // seconds and a zone (see isIsoInstant), so every host enforces the same
+  // instant. A bare date, a loose date, or a number is refused.
   if (value.deadline !== undefined && value.deadline !== null && !isIsoInstant(value.deadline)) return false;
   return true;
 }

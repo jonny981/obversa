@@ -174,6 +174,13 @@ test("anchorKey is total: it never throws, and an anchor that points nowhere is 
   sent.anchor.target = "elsewhere";
   assert.deepEqual(owned.anchor, { target: "shot", position: { x: 1, y: 2 } });
   assert.notEqual(owned.anchor.position, sent.anchor.position, "a copy, not the sent reference");
+  // One canonicalisation: a non-throwing proxy that answers differently on a
+  // second read gets no second read, so the checked location is the returned one.
+  let proxyReads = 0;
+  const proxied = new Proxy({ x: 1 }, { get(t, k, r) { if (k === "x") return ++proxyReads === 1 ? 1 : 999; return Reflect.get(t, k, r); } });
+  const viaProxy = validateAnnotation({ anchor: { target: "shot", position: proxied }, body: "x" }, buildAnchorSet([{ target: "shot", position: { x: 1 } }]));
+  assert.deepEqual(viaProxy.anchor.position, { x: 1 }, "the checked location is the returned location");
+  assert.equal(proxyReads, 1, "x was read exactly once");
   // A symbol key is skipped by JSON whether or not it is enumerable.
   assert.equal(anchorKey({ target: "a", position: Object.defineProperty({ x: 1 }, Symbol("hidden"), { value: 2, enumerable: false }) }), null, "a non-enumerable symbol key");
   let flips = 0;
@@ -370,12 +377,18 @@ test("isSurfaceRequest guards the shape", () => {
   assert.equal(isSurfaceRequest(makeRequest([{ position: 1 }])), false, "an anchor with no target");
   assert.equal(isSurfaceRequest(makeRequest([outputAnchor(1), "x"])), false, "a non-object among valid anchors");
   assert.equal(isSurfaceRequest(makeRequest([{ target: "shot.png", position: { x: 1, y: 2 } }])), true, "a region anchor");
-  // A deadline is optional; when present it is an RFC 3339 date-time with a
-  // zone.
+  // A deadline is optional; when present it is an RFC 3339 date-time with
+  // seconds, an optional fraction of up to nine digits, and Z or a numeric
+  // offset; no leap second.
   assert.equal(isSurfaceRequest({ ...ok, deadline: null }), true);
   assert.equal(isSurfaceRequest({ ...ok, deadline: "2026-08-28T09:00:00Z" }), true);
   assert.equal(isSurfaceRequest({ ...ok, deadline: "2026-08-28T09:00:00.250+01:00" }), true, "a zone offset and fraction");
-  assert.equal(isSurfaceRequest({ ...ok, deadline: "2026-08-28T09:00Z" }), true, "minutes precision");
+  assert.equal(isSurfaceRequest({ ...ok, deadline: "2026-08-28T09:00:00.123456789Z" }), true, "a nine-digit fraction");
+  assert.equal(isSurfaceRequest({ ...ok, deadline: "2026-08-28T09:00:00.1234567890Z" }), false, "a ten-digit fraction");
+  assert.equal(isSurfaceRequest({ ...ok, deadline: "2026-08-28T09:00Z" }), false, "seconds are required");
+  assert.equal(isSurfaceRequest({ ...ok, deadline: "2026-06-30T23:59:60Z" }), false, "no leap second");
+  assert.equal(isSurfaceRequest({ ...ok, deadline: "2026-08-28T09:00:00-00:00" }), false, "-00:00 means the offset is unknown, not one instant");
+  assert.equal(isSurfaceRequest({ ...ok, deadline: "2026-08-28T09:00:00+00:00" }), true, "+00:00 is UTC");
   assert.equal(isSurfaceRequest({ ...ok, deadline: { bad: true } }), false, "an object deadline");
   assert.equal(isSurfaceRequest({ ...ok, deadline: "soon" }), false, "an unparseable deadline");
   assert.equal(isSurfaceRequest({ ...ok, deadline: "" }), false, "an empty deadline");
