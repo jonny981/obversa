@@ -61,6 +61,7 @@ test("rangeEnd asks git: a range ends at its first positive revision (the right 
     // The staged-only file was in the index when `side` was committed, so it
     // is part of the side tree; second.txt (HEAD's second commit) is not.
     assert.deepEqual([...(await listTrackedFiles({ cwd: dir, ref: await rangeEnd({ cwd: dir, range: "HEAD...side" }) }))].sort(), ["committed.txt", "side.txt", "staged-only.txt"], "the side tree is listed for HEAD...side");
+    assert.deepEqual([...(await listTrackedFiles({ cwd: dir, ref: await rangeEnd({ cwd: dir, range: "side...HEAD" }) }))].sort(), committed, "the HEAD tree is listed for side...HEAD: the two directions list two distinct trees");
 
     // A merge's parents, `HEAD^@`: one token, several positive revisions, no
     // exclusion. git diffs the parents against each other, so it is neither
