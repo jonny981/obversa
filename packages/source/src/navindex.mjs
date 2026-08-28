@@ -128,6 +128,11 @@ function unwrapExport(node) {
   return [node];
 }
 
+// Register every declaration a scope owns before any of its statements is
+// walked. Functions and classes are hoisted, and so — for identity — are
+// let and const: a use earlier in the block, or a closure created before the
+// declaration, binds to the block's own declaration (a temporal dead zone at
+// run time, but the same binding), not to an outer one of the same name.
 function hoist(body, scope, occurrences, seenDefs) {
   for (const stmt of body) {
     for (const child of unwrapExport(stmt)) {
@@ -137,7 +142,45 @@ function hoist(body, scope, occurrences, seenDefs) {
       if (child.type === "ClassDeclaration" && child.id) {
         registerDef(scope, child.id, "class", occurrences, seenDefs);
       }
+      if (child.type === "VariableDeclaration" && child.kind !== "var") {
+        for (const decl of child.declarations) {
+          const kind = decl.init && FUNCTION_VALUES.has(decl.init.type) ? "function" : "variable";
+          registerPattern(decl.id, scope, kind, occurrences, seenDefs);
+        }
+      }
     }
+  }
+}
+
+// `var` declarations belong to the whole function: a use earlier in the
+// function than the declaration binds to it. Scan the function body for var
+// declarations at any depth, stopping at nested functions and classes, which
+// own their own.
+function hoistVars(node, scope, occurrences, seenDefs) {
+  if (!node || typeof node !== "object" || !node.type) return;
+  switch (node.type) {
+    case "FunctionDeclaration":
+    case "FunctionExpression":
+    case "ArrowFunctionExpression":
+    case "ClassDeclaration":
+    case "ClassExpression":
+      return;
+    case "VariableDeclaration":
+      if (node.kind === "var") {
+        for (const decl of node.declarations) {
+          const kind = decl.init && FUNCTION_VALUES.has(decl.init.type) ? "function" : "variable";
+          registerPattern(decl.id, scope, kind, occurrences, seenDefs);
+        }
+      }
+      return;
+    default:
+      for (const value of Object.values(node)) {
+        if (Array.isArray(value)) {
+          for (const item of value) hoistVars(item, scope, occurrences, seenDefs);
+        } else if (value && typeof value === "object" && value.type) {
+          hoistVars(value, scope, occurrences, seenDefs);
+        }
+      }
   }
 }
 
@@ -175,6 +218,7 @@ function walkFunction(node, scope, occurrences, seenDefs, { namedInner = false }
   for (const param of node.params ?? []) {
     registerPattern(param, inner, "parameter", occurrences, seenDefs);
   }
+  hoistVars(node.body, inner, occurrences, seenDefs);
   if (node.body) walk(node.body, inner, occurrences, seenDefs, node);
 }
 
@@ -183,9 +227,18 @@ function walk(node, scope, occurrences, seenDefs, parent = null) {
 
   switch (node.type) {
     case "Program":
+      hoistVars(node, scope, occurrences, seenDefs);
       hoist(node.body, scope, occurrences, seenDefs);
       for (const child of node.body) walk(child, scope, occurrences, seenDefs, node);
       return;
+    case "StaticBlock": {
+      // A class static block owns its `var` like a function does.
+      const inner = pushScope(scope, { isFunction: true });
+      hoistVars(node, inner, occurrences, seenDefs);
+      hoist(node.body, inner, occurrences, seenDefs);
+      for (const child of node.body) walk(child, inner, occurrences, seenDefs, node);
+      return;
+    }
     case "BlockStatement": {
       // A block's own lexical scope: declarations inside it are not visible
       // after it, so a use after the block resolves to the outer binding.
@@ -276,8 +329,12 @@ function walk(node, scope, occurrences, seenDefs, parent = null) {
       const inner = pushScope(scope);
       if (node.right) walk(node.right, scope, occurrences, seenDefs, node);
       if (node.left?.type === "VariableDeclaration") {
+        // The same rule as any declaration: `var` belongs to the nearest
+        // function scope and stays visible after the loop; `let` and `const`
+        // belong to the loop.
+        const target = node.left.kind === "var" ? functionScope(inner) : inner;
         for (const decl of node.left.declarations) {
-          registerPattern(decl.id, inner, "variable", occurrences, seenDefs);
+          registerPattern(decl.id, target, "variable", occurrences, seenDefs);
         }
       } else {
         registerPattern(node.left, inner, "variable", occurrences, seenDefs);

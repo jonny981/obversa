@@ -6,24 +6,37 @@
 // `git diff` only.
 
 // Git wraps a path in double quotes and C-escapes it when the path contains a
-// control character, a double quote, or a backslash. With core.quotePath=false
-// (set by the caller) non-ASCII bytes stay literal, so only these C escapes
-// remain. Decode them so a filename with, say, a tab yields the real path a
-// responder can locate — not the literal quoted form.
+// control character, a double quote, or a backslash: the named escapes for
+// the usual control characters, and a 1–3 digit octal escape for any other
+// byte (a control byte with no name, or — with core.quotePath on — a non-ASCII
+// byte). With core.quotePath=false (set by the caller) non-ASCII bytes stay
+// literal. Decode at the byte level, so an octal escape yields the real byte
+// and a UTF-8 sequence spelled out in octal still decodes to its character.
 function unquoteGitPath(raw) {
   if (raw.length < 2 || raw[0] !== '"' || raw[raw.length - 1] !== '"') return raw;
   const inner = raw.slice(1, -1);
   const escapes = { t: 9, n: 10, r: 13, f: 12, b: 8, v: 11, a: 7 };
-  let out = "";
+  const bytes = [];
   for (let i = 0; i < inner.length; i += 1) {
-    if (inner[i] !== "\\") { out += inner[i]; continue; }
+    if (inner[i] !== "\\") { bytes.push(...Buffer.from(inner[i], "utf8")); continue; }
     const next = inner[i + 1];
-    if (next === undefined) { out += "\\"; break; }
-    if (Object.hasOwn(escapes, next)) { out += String.fromCharCode(escapes[next]); i += 1; continue; }
-    out += next; // \" -> ", \\ -> \, any other escaped char stays literal
+    if (next === undefined) { bytes.push(0x5c); break; }
+    if (Object.hasOwn(escapes, next)) { bytes.push(escapes[next]); i += 1; continue; }
+    const octal = inner.slice(i + 1, i + 4).match(/^[0-7]{1,3}/);
+    if (octal) { bytes.push(parseInt(octal[0], 8) & 0xff); i += octal[0].length; continue; }
+    bytes.push(...Buffer.from(next, "utf8")); // \" -> ", \\ -> \, any other escaped char stays literal
     i += 1;
   }
-  return out;
+  return Buffer.from(bytes).toString("utf8");
+}
+
+// A `---`/`+++` header path. When an unquoted path contains a space, git
+// terminates it with a tab (the header's path terminator); that tab is not
+// part of the name. A name that really ends in a tab is always quoted, so
+// only an unquoted value loses its trailing tab.
+function headerPath(raw) {
+  const value = raw.startsWith('"') ? raw : raw.replace(/\t$/, "");
+  return value === "/dev/null" ? "/dev/null" : stripPathPrefix(value);
 }
 
 function stripPathPrefix(raw) {
@@ -36,8 +49,11 @@ function stripPathPrefix(raw) {
 // a control character, a double quote, or a backslash, and a binary diff has
 // no ---/+++ lines to restore the decoded path from, so the header must be
 // read exactly: a quoted token runs to its closing quote (backslash escapes
-// honoured); an unquoted pair separates at the last " b/", since an unquoted
-// path may itself contain spaces.
+// honoured). An unquoted pair is ambiguous when a name itself contains
+// " b/", so the same-name form (the only one a binary diff cannot repair
+// from later lines) is recognised by its symmetry — `a/P b/P` — before
+// falling back to the last " b/" for a rename or copy, whose "rename from"
+// and "rename to" lines then set both paths exactly.
 function parseGitHeader(rest) {
   const closingQuote = (from) => {
     for (let i = from + 1; i < rest.length; i += 1) {
@@ -58,6 +74,13 @@ function parseGitHeader(rest) {
     oldRaw = rest.slice(0, at);
     newRaw = rest.slice(at + 1);
   } else {
+    if (!rest.startsWith("a/")) return ["", ""];
+    const body = rest.slice(2); // P b/P for a same-name diff
+    const half = (body.length - 3) / 2;
+    if (Number.isInteger(half) && half > 0 && body.slice(half, half + 3) === " b/" && body.slice(0, half) === body.slice(half + 3)) {
+      const same = body.slice(0, half);
+      return [same, same];
+    }
     const match = rest.match(/^(a\/.*) (b\/.*)$/);
     if (!match) return ["", ""];
     [, oldRaw, newRaw] = match;
@@ -139,15 +162,13 @@ export function parseUnifiedDiff(diffText) {
     if (line.startsWith("Binary files ")) { file.binary = true; continue; }
 
     if (line.startsWith("--- ")) {
-      const value = line.slice(4);
-      file.oldPath = value === "/dev/null" ? "/dev/null" : stripPathPrefix(value);
+      file.oldPath = headerPath(line.slice(4));
       if (file.newPath === "/dev/null" && file.status === "modified") file.status = "deleted";
       file.path = displayPath(file);
       continue;
     }
     if (line.startsWith("+++ ")) {
-      const value = line.slice(4);
-      file.newPath = value === "/dev/null" ? "/dev/null" : stripPathPrefix(value);
+      file.newPath = headerPath(line.slice(4));
       if (file.oldPath === "/dev/null" && file.status === "modified") file.status = "added";
       file.path = displayPath(file);
       continue;

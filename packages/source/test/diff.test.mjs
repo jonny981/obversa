@@ -202,6 +202,77 @@ Binary files a/say "hi".bin and b/say "hi".bin differ
   assert.equal(escapedQuote.path, 'say "hi".bin');
 });
 
+test("the tab git appends after an unquoted path with spaces in --- and +++ is not part of the name", () => {
+  const tab = String.fromCharCode(9);
+  const { files } = parseUnifiedDiff(`diff --git a/my file.txt b/my file.txt
+--- a/my file.txt${tab}
++++ b/my file.txt${tab}
+@@ -1 +1 @@
+-x
++y
+`);
+  const [file] = files;
+  assert.equal(file.path, "my file.txt");
+  assert.equal(file.oldPath, "my file.txt");
+  assert.equal(file.newPath, "my file.txt");
+  // A name that really ends in a tab arrives quoted and keeps it.
+  const quoted = parseUnifiedDiff(`diff --git "a/ends\\t" "b/ends\\t"
+--- "a/ends\\t"
++++ "b/ends\\t"
+@@ -1 +1 @@
+-x
++y
+`).files[0];
+  assert.equal(quoted.path, `ends${tab}`);
+});
+
+test("git's octal escapes decode to the real bytes, one control byte or a whole UTF-8 sequence", () => {
+  const control = String.fromCharCode(1);
+  const one = parseUnifiedDiff(`diff --git "a/control\\001name.bin" "b/control\\001name.bin"
+Binary files a/control\\001name.bin and "b/control\\001name.bin" differ
+`).files[0];
+  assert.equal(one.path, `control${control}name.bin`);
+  assert.equal(one.oldPath, `control${control}name.bin`);
+  // With core.quotePath on, git spells non-ASCII bytes in octal too: two
+  // bytes make one character.
+  const accented = parseUnifiedDiff(`diff --git "a/caf\\303\\251.txt" "b/caf\\303\\251.txt"
+--- "a/caf\\303\\251.txt"
++++ "b/caf\\303\\251.txt"
+@@ -1 +1 @@
+-x
++y
+`).files[0];
+  assert.equal(accented.path, "café.txt");
+  // A one-digit escape followed by a digit that is not part of it.
+  const short = parseUnifiedDiff(`diff --git "a/x\\18.bin" "b/x\\18.bin"
+Binary files a/x\\18.bin and "b/x\\18.bin" differ
+`).files[0];
+  assert.equal(short.path, `x${control}8.bin`);
+});
+
+test("an unquoted binary name that itself contains ' b/' is read by the header's symmetry", () => {
+  // Exactly what git emits for a binary file named "foo b/bar": no quoting,
+  // and no ---/+++ lines to repair the split from.
+  const same = parseUnifiedDiff(`diff --git a/foo b/bar b/foo b/bar
+new file mode 100644
+index 0000000..e69de29
+Binary files /dev/null and b/foo b/bar differ
+`).files[0];
+  assert.equal(same.oldPath, "foo b/bar");
+  assert.equal(same.newPath, "foo b/bar");
+  assert.equal(same.path, "foo b/bar");
+  assert.equal(same.binary, true);
+  // A rename with such names is set exactly by its rename lines.
+  const renamed = parseUnifiedDiff(`diff --git a/x b/y b/x b/z
+similarity index 100%
+rename from x b/y
+rename to x b/z
+`).files[0];
+  assert.equal(renamed.oldPath, "x b/y");
+  assert.equal(renamed.newPath, "x b/z");
+  assert.equal(renamed.status, "renamed");
+});
+
 test("a hunk line that starts with --- or +++ is content, not a file header", () => {
   // Deleting a SQL comment "-- drop leftover" arrives as "--- drop leftover";
   // adding a C statement "++ i;" arrives as "+++ i;". Both are hunk lines.

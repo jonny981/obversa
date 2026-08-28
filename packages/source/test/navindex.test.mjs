@@ -80,6 +80,41 @@ test("var hoists out of a block; let and const do not", () => {
   assert.equal(at(occurrences, 6, 0).def, null, "let is not");
 });
 
+test("a var declared by a for-of, for-in, or for loop is visible after the loop; let is not", () => {
+  const code = "for (var x of [1]) {}\nx;\nfor (var y in { a: 1 }) {}\ny;\nfor (var i = 0; i < 1; i += 1) {}\ni;\nfor (const z of [1]) {}\nz;\n";
+  const { occurrences } = navIndex({ code, lang: "javascript" });
+  assert.deepEqual(at(occurrences, 2, 0).def, { line: 1, col: 9 }, "for-of var");
+  assert.deepEqual(at(occurrences, 4, 0).def, { line: 3, col: 9 }, "for-in var");
+  assert.deepEqual(at(occurrences, 6, 0).def, { line: 5, col: 9 }, "for var");
+  assert.equal(at(occurrences, 8, 0).def, null, "for-of const stays in the loop");
+});
+
+test("a block's let and const bind for the whole block: an early use or a closure belongs to the inner declaration", () => {
+  const code = "let x = 0;\n{\n  x;\n  const read = () => x;\n  let x = 1;\n  x;\n}\nx;\n";
+  const { occurrences } = navIndex({ code, lang: "javascript" });
+  assert.deepEqual(at(occurrences, 3, 2).def, { line: 5, col: 6 }, "a use before the inner declaration is the inner binding (a TDZ at run time)");
+  assert.deepEqual(at(occurrences, 4, 21).def, { line: 5, col: 6 }, "a closure created before the declaration binds to it");
+  assert.deepEqual(at(occurrences, 6, 2).def, { line: 5, col: 6 });
+  assert.deepEqual(at(occurrences, 8, 0).def, { line: 1, col: 4 }, "after the block: the outer binding");
+  // Destructured and switch-wide declarations hoist the same way.
+  const more = "let a = 0;\n{\n  a;\n  const { a } = { a: 1 };\n}\nswitch (a) {\n  case 0:\n    a;\n    let a = 2;\n}\n";
+  const second = navIndex({ code: more, lang: "javascript" }).occurrences;
+  assert.deepEqual(at(second, 3, 2).def, { line: 4, col: 10 }, "a destructured const binds for the whole block");
+  assert.deepEqual(at(second, 8, 4).def, { line: 9, col: 8 }, "a switch-wide let binds for every case");
+});
+
+test("var binds for the whole function, even before its declaration; a class static block owns its var", () => {
+  const code = "function f() {\n  x;\n  if (true) { var x = 1; }\n  return x;\n}\nx;\nclass C {\n  static {\n    var hidden = 1;\n  }\n}\nhidden;\n";
+  const { occurrences } = navIndex({ code, lang: "javascript" });
+  assert.deepEqual(at(occurrences, 2, 2).def, { line: 3, col: 18 }, "a use before the var binds to it");
+  assert.deepEqual(at(occurrences, 4, 9).def, { line: 3, col: 18 });
+  assert.equal(at(occurrences, 6, 0).def, null, "not visible outside the function");
+  assert.equal(at(occurrences, 12, 0).def, null, "a static block's var is not visible outside it");
+  const inCase = "let x = 0;\nswitch (1) {\n  case 1:\n    x;\n    break;\n  case 2:\n    let x = 2;\n}\n";
+  const cases = navIndex({ code: inCase, lang: "javascript" }).occurrences;
+  assert.deepEqual(at(cases, 4, 4).def, { line: 7, col: 8 }, "an earlier case sees the switch-wide let");
+});
+
 test("switch cases share one block scope, separate from the outer one", () => {
   const code = "let n = 1;\nswitch (n) {\n  case 1:\n    let n2 = 2;\n    n2;\n}\nn;\n";
   const { occurrences } = navIndex({ code, lang: "javascript" });
