@@ -386,7 +386,7 @@ async function main() {
         row.append(addButton);
 
         const thread = el("div", "thread");
-        addButton.addEventListener("click", () => openEditor(thread, file.path, anchor));
+        addButton.addEventListener("click", () => openEditor(thread, file.path, anchor, addButton));
 
         table.append(row, thread);
       }
@@ -396,7 +396,10 @@ async function main() {
     body.append(section);
   }
 
-  function openEditor(thread, filePath, anchor) {
+  // `opener` is the control that opened the editor; when the editor closes,
+  // by Save or by Discard, focus returns to it, so a keyboard user keeps
+  // their place instead of being dropped at the top of the document.
+  function openEditor(thread, filePath, anchor, opener) {
     if (thread.querySelector(".editor")) return; // one editor at a time per line
     const editor = el("div", "editor");
     const textarea = el("textarea");
@@ -412,7 +415,11 @@ async function main() {
     thread.prepend(editor);
     textarea.focus();
 
-    discard.addEventListener("click", () => editor.remove());
+    const close = () => {
+      editor.remove();
+      opener?.focus();
+    };
+    discard.addEventListener("click", close);
     save.addEventListener("click", () => {
       const text = textarea.value.trim();
       if (!text) {
@@ -422,7 +429,7 @@ async function main() {
       const entry = { key: ++annotationSeq, path: filePath, side: anchor.side, line: anchor.line, body: text };
       annotations.push(entry);
       renderComment(thread, entry);
-      editor.remove();
+      close();
       updateCount();
     });
   }

@@ -104,24 +104,6 @@ const PROBE = `(() => {
     const bt = document.querySelector(".context-toggle");
     let bandExpandOk = false;
     if (bt) { bt.click(); bandExpandOk = document.querySelectorAll(".context-rows .row-context").length > 0; }
-    // A keyboard user must be able to reach an add-comment button, see it
-    // once focused, and open the editor from it: it has to be in the tab
-    // order (tabIndex >= 0; a hidden control is not focusable), painted while
-    // it holds focus, and activating it must open the comment editor with the
-    // labelled textarea holding focus — which is what Enter on a focused
-    // button does natively.
-    const keyboardAnnotate = (() => {
-      const button = document.querySelector(".add-comment");
-      if (!button) return null;
-      const tabbable = button.tabIndex >= 0;
-      button.focus();
-      const style = getComputedStyle(button);
-      const focused = document.activeElement === button;
-      const visible = style.visibility !== "hidden" && style.opacity === "1";
-      button.click();
-      const textarea = document.querySelector('textarea[aria-label="Comment text"]');
-      return { tabbable, focused, visible, editorOpened: !!textarea, editorFocused: !!textarea && document.activeElement === textarea };
-    })();
     const tabs = document.querySelectorAll(".tree-tab");
     const treeFiles = document.querySelectorAll(".tree-file-btn").length;
     let allFilesCount = 0;
@@ -141,7 +123,7 @@ const PROBE = `(() => {
       })(),
       sections: sections.length, jumps: jumps.length, clicked, defLine, premise, flashed, sameFile,
       treeFiles, contextBands: document.querySelectorAll(".context-band").length, bandExpandOk,
-      tabs: tabs.length, allFilesCount, keyboardAnnotate,
+      tabs: tabs.length, allFilesCount,
     }) });
   };
   window.addEventListener("load", () => setTimeout(tick, 200));
@@ -170,6 +152,107 @@ async function buildModel() {
   } finally {
     rmSync(cwd, { recursive: true, force: true });
   }
+}
+
+// A DevTools session on the review page, so the proof can press real keys:
+// a Tab dispatched through the browser's input pipeline moves focus by the
+// document's tab order, and an Enter activates whatever holds focus the way
+// the browser activates it — a native button opens the editor, a div with a
+// click handler does not. Chrome writes its debugging port to the profile
+// once it listens.
+async function devtools(profile, origin) {
+  const portFile = path.join(profile, "DevToolsActivePort");
+  const started = Date.now();
+  while (!existsSync(portFile)) {
+    if (Date.now() - started > 15_000) throw new Error("Chrome did not open a DevTools port");
+    await new Promise((r) => setTimeout(r, 100));
+  }
+  const port = Number(readFileSync(portFile, "utf8").split("\n")[0]);
+  let page;
+  for (let i = 0; i < 100 && !page; i += 1) {
+    const targets = await (await fetch(`http://127.0.0.1:${port}/json/list`)).json();
+    page = targets.find((t) => t.type === "page" && t.url.startsWith(origin));
+    if (!page) await new Promise((r) => setTimeout(r, 100));
+  }
+  if (!page) throw new Error("the review page is not a DevTools target");
+  const ws = new WebSocket(page.webSocketDebuggerUrl);
+  await new Promise((resolve, reject) => {
+    ws.addEventListener("open", resolve, { once: true });
+    ws.addEventListener("error", () => reject(new Error("DevTools socket failed")), { once: true });
+  });
+  let seq = 0;
+  const pending = new Map();
+  ws.addEventListener("message", (event) => {
+    const message = JSON.parse(event.data);
+    const waiter = message.id && pending.get(message.id);
+    if (!waiter) return;
+    pending.delete(message.id);
+    if (message.error) waiter.reject(new Error(message.error.message));
+    else waiter.resolve(message.result);
+  });
+  const send = (method, params = {}) => new Promise((resolve, reject) => {
+    const id = ++seq;
+    pending.set(id, { resolve, reject });
+    ws.send(JSON.stringify({ id, method, params }));
+  });
+  const evaluate = async (expression) => {
+    const { result, exceptionDetails } = await send("Runtime.evaluate", { expression, returnByValue: true });
+    if (exceptionDetails) throw new Error(`${exceptionDetails.text}: ${exceptionDetails.exception?.description ?? ""}`);
+    return result.value;
+  };
+  // A key press as the browser sees one: the down event carries the
+  // character for keys that produce one (Enter), so the page receives the
+  // keypress a native control activates on.
+  const press = async (key, keyCode, text) => {
+    const base = { key, code: key, windowsVirtualKeyCode: keyCode, nativeVirtualKeyCode: keyCode };
+    await send("Input.dispatchKeyEvent", { type: text ? "keyDown" : "rawKeyDown", ...base, ...(text ? { text, unmodifiedText: text } : {}) });
+    await send("Input.dispatchKeyEvent", { type: "keyUp", ...base });
+  };
+  return {
+    send,
+    evaluate,
+    tab: () => press("Tab", 9),
+    enter: () => press("Enter", 13, "\r"),
+    type: (text) => send("Input.insertText", { text }),
+    close: () => ws.close(),
+  };
+}
+
+// The keyboard route to a comment, pressed for real: Tab from the document
+// until an add-comment button holds focus (it must be painted then), Enter
+// to open the editor (the textarea takes focus), Tab to Discard and Enter
+// (the editor closes, focus returns to the button that opened it), Enter
+// again, text, Tab to Save and Enter (the comment renders, focus returns to
+// that button). Every state is read from the live document.
+async function keyboardRoute(dt) {
+  await dt.send("Emulation.setFocusEmulationEnabled", { enabled: true });
+  const active = (expression) => dt.evaluate(`(() => { const a = document.activeElement; ${expression} })()`);
+  let tabs = 0;
+  let reached = null;
+  while (tabs < 400 && !reached) {
+    await dt.tab();
+    tabs += 1;
+    // The opener's row names the line it annotates and the thread the
+    // comment must land in (the element after the row); its label names
+    // the side, the line, and the file.
+    reached = await active(`if (!a || !a.classList.contains("add-comment")) return null; const s = getComputedStyle(a); window.__opener = a; window.__thread = a.closest(".row").nextElementSibling; return { visible: s.visibility !== "hidden" && s.opacity === "1", label: a.getAttribute("aria-label"), rowLine: a.closest(".row").dataset.newLine, threadIsNext: window.__thread.classList.contains("thread") };`);
+  }
+  if (!reached) return { tabs, reached: false };
+  await dt.enter();
+  const opened = await active(`const t = window.__thread.querySelector('textarea[aria-label="Comment text"]'); return { editorOpened: !!t, editorFocused: !!t && a === t };`);
+  await dt.tab(); // Save
+  await dt.tab(); // Discard
+  const discardTarget = await active(`return a && a.textContent;`);
+  await dt.enter();
+  const discarded = await active(`return { discardClosed: !document.querySelector(".editor"), discardReturned: a === window.__opener };`);
+  await dt.enter(); // the opener holds focus again: reopen
+  await dt.type("Looks wrong");
+  await dt.tab(); // Save
+  const saveTarget = await active(`return a && a.textContent;`);
+  await dt.enter();
+  // The one comment in the document is in the opener's own thread.
+  const saved = await active(`const all = document.querySelectorAll(".comment-body"); const c = window.__thread.querySelector(".comment-body"); return { saved: c && c.textContent, commentsInDocument: all.length, saveClosed: !document.querySelector(".editor"), saveReturned: a === window.__opener };`);
+  return { tabs, reached: true, ...reached, ...opened, discardTarget, ...discarded, saveTarget, ...saved };
 }
 
 test("the runtime's CSP in this proof is the one surfacer serves", async () => {
@@ -216,6 +299,7 @@ test("the review surface renders under the exact CSP with zero violations and fi
   const profile = mkdtempSync(path.join(os.tmpdir(), "browser-proof-profile-"));
   let chrome;
   let report;
+  let keys;
   try {
     // The static shell carries no diff; the model is gated.
     const shellText = await (await fetch(`${origin}/`)).text();
@@ -224,9 +308,11 @@ test("the review surface renders under the exact CSP with zero violations and fi
     // The highlight rules depend on the review's tokens, so no pre-auth route serves them.
     assert.equal((await fetch(`${origin}/highlight.css`)).status, 404);
 
-    chrome = spawn(CHROME, ["--headless=new", "--disable-gpu", "--no-first-run", `--user-data-dir=${profile}`, `${origin}/#${token}`], { stdio: "ignore" });
+    chrome = spawn(CHROME, ["--headless=new", "--disable-gpu", "--no-first-run", "--remote-debugging-port=0", `--user-data-dir=${profile}`, `${origin}/#${token}`], { stdio: "ignore" });
     const timeout = setTimeout(() => results.reject(new Error("the page posted no results within 30s")), 30_000);
     try { report = await results.promise; } finally { clearTimeout(timeout); }
+    const dt = await devtools(profile, origin);
+    try { keys = await keyboardRoute(dt); } finally { dt.close(); }
   } finally {
     chrome?.kill("SIGKILL");
     if (chrome) await new Promise((r) => { chrome.once("exit", r); setTimeout(r, 1500); });
@@ -250,12 +336,21 @@ test("the review surface renders under the exact CSP with zero violations and fi
   assert.ok(report.treeFiles > 0, "file tree");
   assert.ok(report.contextBands > 0 && report.bandExpandOk, "context bands expand");
   assert.ok(report.tabs >= 2 && report.allFilesCount > report.treeFiles, "All files tab");
-  assert.ok(report.keyboardAnnotate, "an add-comment button exists");
-  assert.equal(report.keyboardAnnotate.tabbable, true, "an add-comment button is in the tab order");
-  assert.equal(report.keyboardAnnotate.focused, true, "an add-comment button takes keyboard focus");
-  assert.equal(report.keyboardAnnotate.visible, true, "and is painted while it holds focus");
-  assert.equal(report.keyboardAnnotate.editorOpened, true, "activating it opens the comment editor");
-  assert.equal(report.keyboardAnnotate.editorFocused, true, "and the editor's textarea takes focus");
+  assert.ok(keys.reached, `Tab never reached an add-comment button in ${keys.tabs} presses`);
+  assert.equal(keys.visible, true, "an add-comment button is painted while it holds keyboard focus");
+  assert.equal(keys.threadIsNext, true, "the button's row is followed by its thread");
+  assert.match(keys.label, /^Add a comment on the new side at line (\d+) of src\//, "the button names its side, line, and file");
+  assert.equal(/line (\d+)/.exec(keys.label)[1], keys.rowLine, "and the line it names is the row's own");
+  assert.equal(keys.editorOpened, true, "Enter on the focused button opens the comment editor (a div with a click handler would not)");
+  assert.equal(keys.editorFocused, true, "and the editor's textarea takes focus");
+  assert.equal(keys.discardTarget, "Discard", "Tab reaches Discard from the textarea");
+  assert.equal(keys.discardClosed, true, "Enter on Discard closes the editor");
+  assert.equal(keys.discardReturned, true, "and focus returns to the button that opened it");
+  assert.equal(keys.saveTarget, "Save comment", "Tab reaches Save from the text");
+  assert.equal(keys.saved, "Looks wrong", "Enter on Save renders the comment in the thread of the row that opened it");
+  assert.equal(keys.commentsInDocument, 1, "and nowhere else");
+  assert.equal(keys.saveClosed, true, "and closes the editor");
+  assert.equal(keys.saveReturned, true, "and focus returns to the button that opened it");
 });
 
 test("a page that cannot load its review cancels the session instead of holding the lease", { skip: CHROME ? false : "Google Chrome is not installed", timeout: 60_000 }, async () => {
