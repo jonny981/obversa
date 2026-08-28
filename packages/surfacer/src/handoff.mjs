@@ -57,7 +57,9 @@ export function frameResult(result) {
 /** Pull one framed result out of caller-captured stdout. Returns null when
  *  no complete frame for the app is present. */
 export function parseFramedResult(text, app) {
-  const name = frameName(app);
+  // The app name is read once and used for both the marker and the match.
+  const appName = String(app);
+  const name = frameName(appName);
   const pattern = new RegExp(`<<<${name}_RESULT_V1>>>\\n([\\s\\S]*?)\\n<<<END_${name}_RESULT_V1>>>`, "g");
   // Frame names collapse punctuation, so distinct app names can share a
   // frame name. Scan every frame and return the first whose embedded app
@@ -66,7 +68,7 @@ export function parseFramedResult(text, app) {
   for (const match of String(text).matchAll(pattern)) {
     try {
       const parsed = JSON.parse(match[1]);
-      if (parsed?.app === String(app)) return parsed;
+      if (parsed?.app === appName) return parsed;
     } catch { /* not this frame */ }
   }
   return null;

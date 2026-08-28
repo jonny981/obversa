@@ -264,6 +264,26 @@ test("a completion the frame cannot carry is refused and the session stays open"
     set: { s: new Set([1]) },
     symbolkey: Object.assign({ keep: 1 }, { [Symbol.for("hidden")]: 2 }),
     nestedsymbolkey: { a: Object.assign({ keep: 1 }, { [Symbol.for("hidden")]: 2 }) },
+    // Not plain: JSON turns each of these into {} or a fragment.
+    regexp: /x/,
+    error: new Error("e"),
+    weakmap: new WeakMap(),
+    promise: Promise.resolve(1),
+    arraybuffer: new ArrayBuffer(4),
+    typedarray: new Uint8Array(2),
+    instance: new (class Point { constructor() { this.x = 1; } })(),
+    nestedregexp: { keep: 1, exotic: /x/ },
+    arrayextra: Object.assign([1], { extra: 2 }),
+    hole: [1, , 3],
+    nestedhole: { list: [1, , 3] },
+    // No payload at all is not a payload; an app that means "nothing" passes null.
+    rootundefined: undefined,
+    // JSON writes -0 as 0 and skips a non-enumerable property.
+    negzero: { n: -0 },
+    rootnegzero: -0,
+    hiddenprop: Object.defineProperty({ x: 1 }, "hidden", { value: 2, enumerable: false }),
+    nestedhiddenprop: { a: Object.defineProperty({ x: 1 }, "hidden", { value: 2, enumerable: false }) },
+    hiddensymbol: Object.defineProperty({ x: 1 }, Symbol("hidden"), { value: 2, enumerable: false }),
   };
   const surface = await startSurface({
     app: "frame",
@@ -363,6 +383,31 @@ test("what is claimed is a snapshot: a payload that serialises differently later
   }
 });
 
+test("plain data of any shape is carried, including null-prototype objects and toJSON values", async () => {
+  const surface = await startSurface({
+    app: "plain",
+    assets: { directory: assetsDir, files: { "/": ["index.html", "text/html; charset=utf-8"] } },
+    api: {
+      "POST /api/answer": async ({ session }) => {
+        session.complete(Object.assign(Object.create(null), { when: new Date(0), list: [1, "two", null, { deep: true }], text: "ok" }), { verbatim: true });
+        return null;
+      },
+    },
+    sessionTimeoutMs: 10_000,
+    leaseTimeoutMs: 10_000,
+  });
+  try {
+    const completed = await post(surface, "/api/answer", {});
+    assert.equal(completed.status, 200);
+    const { operationId } = await completed.json();
+    await post(surface, "/api/ack", { operationId });
+    const decision = await surface.waitForDecision();
+    assert.deepEqual(decision.payload, { when: "1970-01-01T00:00:00.000Z", list: [1, "two", null, { deep: true }], text: "ok" });
+  } finally {
+    await surface.stop();
+  }
+});
+
 test("an outcome payload is a snapshot too: the ending frames what the hook first answered", async () => {
   const surface = await startSurface({
     app: "outcome-snapshot",
@@ -393,6 +438,9 @@ test("an outcome payload the frame cannot carry whole becomes null, and the endi
     undef: () => ({ x: undefined }),
     map: () => new Map([["k", 1]]),
     symbolkey: () => Object.assign({ keep: 1 }, { [Symbol.for("hidden")]: 2 }),
+    regexp: () => /x/,
+    error: () => ({ failed: new Error("e") }),
+    hiddensymbol: () => Object.defineProperty({ x: 1 }, Symbol("hidden"), { value: 2, enumerable: false }),
   };
   for (const [name, terminalPayload] of Object.entries(hooks)) {
     for (const verbatim of [false, true]) {
@@ -522,6 +570,65 @@ test("nothing that can fail runs after the claim: a failing copy leaves the sess
     globalThis.structuredClone = original;
     await surface.stop();
   }
+});
+
+test("once a handler has completed, its response is the fixed acknowledgement whatever it returns", async () => {
+  // A body returned after completing is ordinary app output; serialising it
+  // could fail after the claim and leave the browser unable to acknowledge.
+  const surface = await startSurface({
+    app: "ackonly",
+    assets: { directory: assetsDir, files: { "/": ["index.html", "text/html; charset=utf-8"] } },
+    api: {
+      "POST /api/bigint-body": async ({ session }) => { session.complete({ delivered: true }); return { body: { cannotSerialize: 1n } }; },
+      "POST /api/shaped-body": async ({ session }) => { session.complete({ delivered: true }); return { status: 418, body: { extra: 1 } }; },
+    },
+    sessionTimeoutMs: 10_000,
+    leaseTimeoutMs: 10_000,
+  });
+  try {
+    const completed = await post(surface, "/api/bigint-body", {});
+    assert.equal(completed.status, 200, "the claim stands and the browser can acknowledge it");
+    const body = await completed.json();
+    assert.ok(body.operationId);
+    assert.deepEqual(Object.keys(body).sort(), ["ok", "operationId"]);
+    await post(surface, "/api/ack", { operationId: body.operationId });
+    const decision = await surface.waitForDecision();
+    assert.deepEqual(decision.payload, { delivered: true });
+  } finally {
+    await surface.stop();
+  }
+  const second = await startSurface({
+    app: "ackonly2",
+    assets: { directory: assetsDir, files: { "/": ["index.html", "text/html; charset=utf-8"] } },
+    api: { "POST /api/shaped-body": async ({ session }) => { session.complete({ delivered: true }); return { status: 418, body: { extra: 1 } }; } },
+    sessionTimeoutMs: 10_000,
+    leaseTimeoutMs: 10_000,
+  });
+  try {
+    const completed = await post(second, "/api/shaped-body", {});
+    assert.equal(completed.status, 200, "a status the handler returned after completing is not used");
+    const body = await completed.json();
+    assert.equal(body.extra, undefined, "a body the handler returned after completing is not merged");
+    assert.ok(body.operationId);
+    await post(second, "/api/ack", { operationId: body.operationId });
+    await second.waitForDecision();
+  } finally {
+    await second.stop();
+  }
+});
+
+test("timer inputs are validated at start, never inside a claim", async () => {
+  const assets = { directory: assetsDir, files: { "/": ["index.html", "text/html; charset=utf-8"] } };
+  await assert.rejects(() => startSurface({ app: "t", assets, ackTimeoutMs: 1n }), /ackTimeoutMs must be a positive integer/);
+  await assert.rejects(() => startSurface({ app: "t", assets, ackTimeoutMs: Symbol("s") }), /ackTimeoutMs must be a positive integer/);
+  await assert.rejects(() => startSurface({ app: "t", assets, sessionTimeoutMs: -1 }), /sessionTimeoutMs must be a positive integer/);
+  await assert.rejects(() => startSurface({ app: "t", assets, leaseTimeoutMs: "soon" }), /leaseTimeoutMs must be a positive integer/);
+  await assert.rejects(() => startSurface({ app: "t", assets, sessionTimeoutMs: Number.NaN }), /sessionTimeoutMs must be a positive integer/);
+  // Node clamps a delay above 2^31 - 1 to 1 ms and truncates a fraction.
+  await assert.rejects(() => startSurface({ app: "t", assets, sessionTimeoutMs: 2_147_483_648 }), /sessionTimeoutMs must be a positive integer/);
+  await assert.rejects(() => startSurface({ app: "t", assets, leaseTimeoutMs: 1.5 }), /leaseTimeoutMs must be a positive integer/);
+  const edge = await startSurface({ app: "t", assets, sessionTimeoutMs: 2_147_483_647, leaseTimeoutMs: 1, ackTimeoutMs: 1 });
+  await edge.stop();
 });
 
 test("terminalPayload must be a function, and a throwing one yields null", async () => {

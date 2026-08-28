@@ -7,6 +7,8 @@ import { frameName, frameResult, terminalResult } from "./handoff.mjs";
 import { safeText, sanitizeValue } from "./sanitize.mjs";
 
 const MAX_BODY_BYTES = 4 * 1024 * 1024;
+// The largest delay Node's setTimeout honours; a larger one is clamped to 1 ms.
+const MAX_TIMER_MS = 2_147_483_647;
 
 /**
  * Start one secure local surface session.
@@ -43,6 +45,14 @@ export async function startSurface({
   // been told the session completed. The frame marker is proved on it too.
   const appName = String(app);
   frameName(appName);
+  // A timer that setTimeout refuses would throw inside the claim, after the
+  // state had changed, and one above 2^31 - 1 milliseconds is clamped to 1 ms
+  // and fires at once; refuse both here instead.
+  for (const [name, value] of Object.entries({ sessionTimeoutMs, leaseTimeoutMs, ackTimeoutMs })) {
+    if (!Number.isSafeInteger(value) || value <= 0 || value > MAX_TIMER_MS) {
+      throw new TypeError(`${name} must be a positive integer of milliseconds up to ${MAX_TIMER_MS}`);
+    }
+  }
   if (terminalPayload !== undefined && typeof terminalPayload !== "function") {
     throw new TypeError("terminalPayload must be a function of the terminal status");
   }
@@ -116,7 +126,7 @@ export async function startSurface({
         // cannot change the frame, because nothing serialises it again.
         let snapshot;
         try {
-          snapshot = payload === undefined ? null : losslessSnapshot(payload);
+          snapshot = losslessSnapshot(payload);
         } catch (error) {
           throw httpError(`The completion payload cannot be framed: ${error?.message ?? error}`, 500);
         }
@@ -267,13 +277,17 @@ export async function startSurface({
         sendJson(response, 409, { error: terminalClaim.status === "completed" ? "This session already has a terminal decision" : "This session is closed" });
         return;
       }
-      const verbatim = outcome?.verbatim === true;
-      if (completedHere && outcome?.body && typeof outcome.body === "object" && !Array.isArray(outcome.body)) {
-        sendJson(response, outcome.status ?? 200, { ...outcome.body, operationId: terminalClaim.operationId }, { verbatim });
+      if (completedHere) {
+        // Once this request has claimed the session, its response is the
+        // fixed acknowledgement and nothing else: a body the handler returned
+        // after completing is ordinary app output that could fail to
+        // serialise, and nothing fallible may run after the claim, or the
+        // browser is left with a completed session it cannot acknowledge.
+        sendJson(response, 200, { ok: true, operationId: terminalClaim.operationId });
         return;
       }
-      sendJson(response, outcome?.status ?? 200, outcome?.body
-        ?? (completedHere ? { ok: true, operationId: terminalClaim.operationId } : { ok: true }), { verbatim });
+      const verbatim = outcome?.verbatim === true;
+      sendJson(response, outcome?.status ?? 200, outcome?.body ?? { ok: true }, { verbatim });
     } catch (error) {
       sendJson(response, error?.statusCode || (error?.code === "BODY_TOO_LARGE" ? 413 : 400), {
         error: safeText(error?.message || "Request failed", 300),
@@ -398,13 +412,14 @@ function authorized(request, expectedToken) {
 // The plain-data snapshot of one JSON serialisation of `value`, or a throw when
 // JSON could not carry it whole. JSON.stringify throws on a cycle or a BigInt
 // but silently drops a function, a symbol, an undefined value, or a
-// symbol-keyed property, and turns a non-finite number into null, and a Map or
-// Set into {} — each a payload framed as something other than what the app
-// handed over. The replacer sees every value once, after any toJSON, so the
+// symbol-keyed property, turns a non-finite number into null, and turns any
+// object that is not a plain object or an array (a Map, a RegExp, an Error, a
+// Promise, an ArrayBuffer, a class instance) into {} or a fragment — each a
+// payload framed as something other than what the app handed over. The replacer sees every value once, after any toJSON, so the
 // check and the snapshot are one pass: a getter or toJSON is consulted exactly
-// once, and what it answered is what gets framed. Symbol-keyed properties are
-// skipped before the replacer ever sees them, so each object is checked for
-// them directly.
+// once, and what it answered is what gets framed. Symbol-keyed and
+// non-enumerable properties are skipped before the replacer ever sees them,
+// so each object is checked for them directly.
 function losslessSnapshot(value) {
   let lost = null;
   const text = JSON.stringify(value, function replacer(key, item) {
@@ -413,17 +428,39 @@ function losslessSnapshot(value) {
       lost ??= `${item === undefined ? "an undefined value" : `a ${typeof item}`} at ${where}`;
       return undefined;
     }
-    if (typeof item === "number" && !Number.isFinite(item)) {
-      lost ??= `a non-finite number at ${where}`;
+    if (typeof item === "number" && (!Number.isFinite(item) || Object.is(item, -0))) {
+      lost ??= `${Object.is(item, -0) ? "negative zero" : "a non-finite number"} at ${where}`;
       return null;
     }
-    if (item instanceof Map || item instanceof Set) {
-      lost ??= `a ${item instanceof Map ? "Map" : "Set"} at ${where}`;
-      return undefined;
-    }
-    if (item && typeof item === "object" && Object.getOwnPropertySymbols(item).some((symbol) => Object.prototype.propertyIsEnumerable.call(item, symbol))) {
-      lost ??= `a symbol-keyed property at ${where}`;
-      return undefined;
+    if (item && typeof item === "object") {
+      // Only a plain object or an array survives JSON whole. Anything else —
+      // a Map, a Set, a RegExp, an Error, a Promise, an ArrayBuffer, a typed
+      // array, a class instance — comes out as {} or a fragment. (A value
+      // with its own toJSON was already replaced by what toJSON returned.)
+      const proto = Object.getPrototypeOf(item);
+      if (!Array.isArray(item) && proto !== Object.prototype && proto !== null) {
+        lost ??= `${Object.prototype.toString.call(item)} at ${where}`;
+        return undefined;
+      }
+      // An array is its indexed items and nothing else: JSON drops an extra
+      // property and fills a hole with null.
+      if (Array.isArray(item)) {
+        const keys = Object.keys(item);
+        if (keys.length !== item.length || keys.some((key, index) => key !== String(index))) {
+          lost ??= `an array with extra properties or holes at ${where}`;
+          return undefined;
+        }
+      }
+      if (Object.getOwnPropertySymbols(item).length > 0) {
+        lost ??= `a symbol-keyed property at ${where}`;
+        return undefined;
+      }
+      // JSON skips a non-enumerable property too (an array's own length aside).
+      const owned = Object.getOwnPropertyNames(item).filter((name) => !(Array.isArray(item) && name === "length")).length;
+      if (owned !== Object.keys(item).length) {
+        lost ??= `a non-enumerable property at ${where}`;
+        return undefined;
+      }
     }
     return item;
   });

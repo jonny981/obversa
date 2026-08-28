@@ -29,10 +29,17 @@ session closes is refused before its handler runs. A completion is
 serialised exactly once when it is claimed, and the plain snapshot of that
 serialisation is what the caller receives: a payload JSON cannot carry
 whole — a cycle, a BigInt, a function, a symbol, an undefined value, a
-non-finite number, a Map or Set — is refused with an error and the session
-stays open, so the browser is never told a session completed that the
-caller will never receive, and a value that would serialise differently
-later cannot change the frame. An app can pass `terminalPayload(status)` to
+non-finite number, negative zero, a non-enumerable or symbol-keyed
+property, a hole or extra property in an array, or any object that is not a
+plain object or an array, such as a Map, a RegExp, an Error, or a class
+instance — is refused with an error and the session stays open. One
+exception is deliberate: a value with its own `toJSON` method, such as a
+Date, is carried as whatever `toJSON` returns, and that return value is
+checked by the same rule. The browser is never told a session completed
+that the caller will never receive, and a value that would serialise
+differently later cannot change the frame. Once a handler has completed the session,
+its response is the fixed acknowledgement — `ok` and the operation id — and
+a body or status it returns after completing is not used. An app can pass `terminalPayload(status)` to
 `startSurface` so a session that ends without the app's completion —
 cancelled, timed out, or interrupted — still carries an outcome payload the
 caller can route. It passes redaction unless the app also sets
