@@ -7,17 +7,7 @@ import test from "node:test";
 
 import { computeDiff, diffArgs, readNewFileText, listTrackedFiles, rangeEnd, repositoryRoot, MAX_FILE_BYTES } from "../src/git.mjs";
 
-test("rangeEnd reads a range the way git does: an omitted right side is HEAD, three dots before two", () => {
-  assert.equal(rangeEnd("A..B"), "B");
-  assert.equal(rangeEnd("A...B"), "B");
-  assert.equal(rangeEnd("..B"), "B");
-  assert.equal(rangeEnd("HEAD~1.."), "HEAD");
-  assert.equal(rangeEnd("HEAD~1..."), "HEAD");
-  assert.equal(rangeEnd("HEAD"), undefined, "a single revision ends at the worktree");
-  assert.equal(rangeEnd(null), undefined);
-});
-
-test("an omitted-end range lists the HEAD tree, never the live index", async () => {
+test("rangeEnd asks git: a range ends at its first positive revision (the right side), a single revision (even one whose text holds two dots) ends at the worktree", async () => {
   const dir = makeRepo();
   try {
     writeFileSync(path.join(dir, "committed.txt"), "1\n");
@@ -25,15 +15,52 @@ test("an omitted-end range lists the HEAD tree, never the live index", async () 
     git(dir, "commit", "-q", "-m", "one");
     writeFileSync(path.join(dir, "second.txt"), "2\n");
     git(dir, "add", "second.txt");
-    git(dir, "commit", "-q", "-m", "two");
+    git(dir, "commit", "-q", "-m", "fix..bug");
+    const head = git(dir, "rev-parse", "HEAD").trim();
+    const first = git(dir, "rev-parse", "HEAD~1").trim();
     // Staged only: in the index, not in HEAD.
     writeFileSync(path.join(dir, "staged-only.txt"), "3\n");
     git(dir, "add", "staged-only.txt");
-    const head = ["committed.txt", "second.txt"];
-    assert.deepEqual([...(await listTrackedFiles({ cwd: dir, ref: rangeEnd("HEAD~1..HEAD") }))].sort(), head);
-    assert.deepEqual([...(await listTrackedFiles({ cwd: dir, ref: rangeEnd("HEAD~1..") }))].sort(), head, "HEAD~1.. ends at HEAD");
-    assert.deepEqual([...(await listTrackedFiles({ cwd: dir, ref: rangeEnd("HEAD~1...") }))].sort(), head, "HEAD~1... ends at HEAD");
-    assert.deepEqual([...(await listTrackedFiles({ cwd: dir }))].sort(), [...head, "staged-only.txt"], "the index view is what a worktree or staged review lists");
+
+    assert.equal(await rangeEnd({ cwd: dir, range: "HEAD~1..HEAD" }), head);
+    assert.equal(await rangeEnd({ cwd: dir, range: "HEAD~1...HEAD" }), head, "a symmetric range ends at its right side");
+    assert.equal(await rangeEnd({ cwd: dir, range: "..HEAD" }), head);
+    assert.equal(await rangeEnd({ cwd: dir, range: "HEAD~1.." }), head, "an omitted right side is HEAD");
+    assert.equal(await rangeEnd({ cwd: dir, range: "HEAD~1..." }), head, "an omitted right side is HEAD in the three-dot form too");
+    assert.equal(await rangeEnd({ cwd: dir, range: "HEAD.." }), head);
+    assert.equal(await rangeEnd({ cwd: dir, range: "HEAD~1" }), undefined, "a single revision ends at the worktree");
+    assert.equal(await rangeEnd({ cwd: dir, range: ":/fix..bug" }), undefined, "a search text with two dots is one commit");
+    assert.equal(await rangeEnd({ cwd: dir, range: "HEAD^{/fix..bug}" }), undefined, "a search suffix with two dots is one commit");
+    assert.equal(git(dir, "rev-parse", ":/fix..bug").trim(), head, "git itself reads it as one commit");
+    assert.equal(first.length, 40);
+    await assert.rejects(() => rangeEnd({ cwd: dir, range: "HEAD~1..nope" }), /could not be resolved/, "an unresolvable token is an error, not the index");
+
+    // What a range review lists: the end tree, never the live index.
+    const committed = ["committed.txt", "second.txt"];
+    for (const range of ["HEAD~1..HEAD", "HEAD~1..", "HEAD~1...", "HEAD~1...HEAD"]) {
+      assert.deepEqual([...(await listTrackedFiles({ cwd: dir, ref: await rangeEnd({ cwd: dir, range }) }))].sort(), committed, `${range} lists the HEAD tree`);
+    }
+    // What a single-revision review lists: the index, staged-only file included.
+    for (const range of ["HEAD~1", ":/fix..bug", "HEAD^{/fix..bug}"]) {
+      assert.deepEqual([...(await listTrackedFiles({ cwd: dir, ref: await rangeEnd({ cwd: dir, range }) }))].sort(), [...committed, "staged-only.txt"], `${range} lists the index`);
+    }
+
+    // A non-linear three-dot range, last because it moves the index: `side`
+    // forks from HEAD~1, so the merge base is neither endpoint; git prints
+    // right, left, ^base, and the end is the right side whichever way round
+    // the range is written.
+    git(dir, "branch", "side", "HEAD~1");
+    git(dir, "checkout", "-q", "side");
+    writeFileSync(path.join(dir, "side.txt"), "s\n");
+    git(dir, "add", "side.txt");
+    git(dir, "commit", "-q", "-m", "side");
+    const side = git(dir, "rev-parse", "side").trim();
+    git(dir, "checkout", "-q", "-");
+    assert.equal(await rangeEnd({ cwd: dir, range: "side...HEAD" }), head, "side...HEAD ends at HEAD");
+    assert.equal(await rangeEnd({ cwd: dir, range: "HEAD...side" }), side, "HEAD...side ends at side");
+    // The staged-only file was in the index when `side` was committed, so it
+    // is part of the side tree; second.txt (HEAD's second commit) is not.
+    assert.deepEqual([...(await listTrackedFiles({ cwd: dir, ref: await rangeEnd({ cwd: dir, range: "HEAD...side" }) }))].sort(), ["committed.txt", "side.txt", "staged-only.txt"], "the side tree is listed for HEAD...side");
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }

@@ -129,7 +129,8 @@ async function captureOnce({ mode, range, cwd, git, readFile }) {
   });
   await contextModel(model, { mode: resolved.mode, cwd, registry, read });
   await navModel(model, { mode: resolved.mode, cwd, read });
-  const allFiles = await git.listTrackedFiles({ cwd, ref: resolved.mode === "range" ? rangeEnd(resolved.range) : undefined });
+  const ref = resolved.mode === "range" ? await git.rangeEnd({ cwd, range: resolved.range }) : undefined;
+  const allFiles = await git.listTrackedFiles({ cwd, ref });
   const fingerprint = JSON.stringify([resolved.diffText, allFiles, reads]);
   return { resolved, model, registry, allFiles, fingerprint };
 }
@@ -161,7 +162,7 @@ async function capture({ mode, range, cwd, git, readFile = readNewFileText }) {
 
 // The repository reads a review makes, as one replaceable port (the tests
 // hand in spies).
-const gitPort = { repositoryRoot, computeDiff, listTrackedFiles };
+const gitPort = { repositoryRoot, computeDiff, listTrackedFiles, rangeEnd };
 
 /**
  * Open a git diff for inline review and return the reviewer's annotations.

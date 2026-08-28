@@ -271,11 +271,12 @@ test("a computed review takes its tracked-file list inside the capture window, f
   const git = {
     repositoryRoot: async () => "/repo",
     computeDiff: async () => { calls.push("computeDiff"); return { diffText: DIFF, mode: "range", range: "a..b" }; },
+    rangeEnd: async ({ range }) => { calls.push(`rangeEnd:${range}`); return "b"; },
     listTrackedFiles: async ({ ref }) => { calls.push(`listTrackedFiles:${ref}`); return ["listed.js"]; },
   };
   const launchSurface = async ({ api }) => ({ status: "completed", result: { decision: "approved", annotations: [] }, meta: (await api["GET /api/model"]()).body.meta });
   const outcome = await reviewDiff({ mode: "range", range: "a..b", cwd: "/repo", launchSurface, clientKitSource: CLIENT_KIT, open: false, git });
-  assert.deepEqual(calls, ["computeDiff", "listTrackedFiles:b", "computeDiff", "listTrackedFiles:b"], "the list is read inside each of the two passes, at the range's end");
+  assert.deepEqual(calls, ["computeDiff", "rangeEnd:a..b", "listTrackedFiles:b", "computeDiff", "rangeEnd:a..b", "listTrackedFiles:b"], "the range's end is resolved and the list read inside each of the two passes");
   assert.deepEqual(outcome.meta.allFiles, ["listed.js"]);
 });
 

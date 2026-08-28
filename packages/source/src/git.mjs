@@ -226,16 +226,29 @@ export async function listTrackedFiles({ cwd = process.cwd(), ref } = {}) {
 }
 
 /**
- * The revision a range review ends at: `A..B` and `A...B` end at B; `A..`
- * and `A...` end at HEAD, as git reads an omitted right side; a single
- * revision diffs against the worktree and ends there (undefined). The
- * three-dot form is matched before the two-dot form, so `A...` is not read
- * as `A..` ending at `.`.
- * @param {string | null | undefined} range
- * @returns {string | undefined}
+ * The revision a range review ends at, asked of git rather than parsed: a
+ * revision's own text can hold two dots (`:/fix..bug` and `HEAD^{/fix..bug}`
+ * are single commits), so no regex over the token is right. `git rev-parse
+ * --revs-only` expands a real range into positive revisions plus at least
+ * one `^`-excluded one (`A..B` → B ^A; `A...B` → B A ^merge-base; an omitted
+ * right side stands for HEAD), and a single object into one line with no
+ * exclusion. A range ends at its first positive revision — the right side in
+ * both forms — returned as the exact object id; a single revision diffs
+ * against the worktree and ends there (undefined). A token git cannot
+ * resolve is an error, never a silent fall-through to the index.
+ * @param {{ cwd?: string, range: string }} options
+ * @returns {Promise<string | undefined>}
  */
-export function rangeEnd(range) {
-  const match = /^.*?(?:\.\.\.|\.\.)(.*)$/.exec(String(range ?? ""));
-  if (!match) return undefined;
-  return match[1].length > 0 ? match[1] : "HEAD";
+export async function rangeEnd({ cwd = process.cwd(), range } = {}) {
+  assertSafeRange(range);
+  let stdout;
+  try {
+    ({ stdout } = await run("git", ["rev-parse", "--revs-only", range, "--"], { cwd, windowsHide: true }));
+  } catch (error) {
+    throw new Error(`The range could not be resolved: ${range} (${error?.stderr?.trim?.() || error?.message || error})`);
+  }
+  const lines = stdout.split("\n").filter((line) => line.length > 0);
+  const positives = lines.filter((line) => !line.startsWith("^"));
+  if (lines.length === positives.length) return undefined;
+  return positives[0];
 }
