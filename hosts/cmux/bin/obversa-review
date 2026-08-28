@@ -18,7 +18,7 @@
 //   obversa-review --app <name>     override the surface app name
 
 import { readFile } from "node:fs/promises";
-import { createRequire } from "node:module";
+import { fileURLToPath } from "node:url";
 
 // The packages by their public names and exports only: this host is a
 // workspace package that depends on both, so a move of either's files
@@ -27,9 +27,10 @@ import { runSurface } from "@obversa/surfacer";
 import { reviewDiff } from "@obversa/source";
 import { HELP, parseArgs } from "../lib/review-args.mjs";
 
-const require = createRequire(import.meta.url);
-// The client kit the page loads, as the surfacer exports it.
-const CLIENT_KIT = require.resolve("@obversa/surfacer/client");
+// The client kit the page loads, as the surfacer exports it — resolved under
+// the `import` condition, the one the browser's module import matches, not
+// the `require` condition a createRequire lookup would follow.
+const CLIENT_KIT = fileURLToPath(import.meta.resolve("@obversa/surfacer/client"));
 
 // Exit codes are set through process.exitCode, never process.exit(): stdout
 // and stderr are asynchronous on a pipe, and exiting right after a write can

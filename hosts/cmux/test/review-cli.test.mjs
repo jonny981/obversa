@@ -4,7 +4,7 @@
 // value must not fall through to reviewing the current directory.
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { mkdtempSync, rmSync, symlinkSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -62,6 +62,59 @@ test("the command exits 0 on --help and prints usage on stdout", () => {
   const run = spawnSync(process.execPath, [COMMAND, "--help"], { encoding: "utf8", timeout: 5000 });
   assert.equal(run.status, 0);
   assert.match(run.stdout, /Usage:/);
+});
+
+// A disposable consumer: the command and its argument parser copied beside a
+// node_modules holding stub @obversa packages, so what the command resolves
+// is decided by those stubs' exports maps alone.
+function consumer(clientExports) {
+  const dir = mkdtempSync(path.join(os.tmpdir(), "review-cli-consumer-"));
+  const write = (relative, text) => {
+    const file = path.join(dir, relative);
+    mkdirSync(path.dirname(file), { recursive: true });
+    writeFileSync(file, text);
+  };
+  write("package.json", JSON.stringify({ name: "consumer", type: "module", private: true }));
+  write("bin/obversa-review", readFileSync(COMMAND, "utf8"));
+  write("lib/review-args.mjs", readFileSync(fileURLToPath(new URL("../lib/review-args.mjs", import.meta.url)), "utf8"));
+  write("node_modules/@obversa/surfacer/package.json", JSON.stringify({ name: "@obversa/surfacer", type: "module", exports: { ".": "./index.mjs", "./client": clientExports } }));
+  write("node_modules/@obversa/surfacer/index.mjs", "export async function runSurface() { throw new Error('not used by this test'); }\n");
+  write("node_modules/@obversa/surfacer/client.mjs", "export const kit = 'esm';\n");
+  write("node_modules/@obversa/surfacer/client.cjs", "module.exports = { kit: 'cjs' };\n");
+  write("node_modules/@obversa/source/package.json", JSON.stringify({ name: "@obversa/source", type: "module", exports: { ".": "./index.mjs" } }));
+  write("node_modules/@obversa/source/index.mjs", [
+    "export async function reviewDiff({ clientKitSource }) {",
+    "  process.stdout.write('KIT:' + clientKitSource);",
+    "  return { status: 'completed', result: { decision: 'approved', annotations: [] }, meta: { label: 'stub' } };",
+    "}",
+    "",
+  ].join("\n"));
+  return dir;
+}
+
+test("the client kit is resolved under the import condition, the one the browser's module import matches", () => {
+  // Distinct import/require targets: the page must get the ESM file. A
+  // createRequire lookup would follow the require condition and hand the
+  // browser CommonJS.
+  const split = consumer({ import: "./client.mjs", require: "./client.cjs" });
+  try {
+    const run = spawnSync(process.execPath, [path.join(split, "bin", "obversa-review"), "--no-open"], { encoding: "utf8", timeout: 5000, cwd: split });
+    assert.equal(run.status, 0, run.stderr);
+    assert.match(run.stdout, /KIT:export const kit = 'esm';/, "the ESM client kit reached the review");
+    assert.doesNotMatch(run.stdout, /cjs/);
+  } finally {
+    rmSync(split, { recursive: true, force: true });
+  }
+  // An import-only export: the command must still load, so --help works. A
+  // require-condition lookup has nothing to resolve and fails before main.
+  const importOnly = consumer({ import: "./client.mjs" });
+  try {
+    const help = spawnSync(process.execPath, [path.join(importOnly, "bin", "obversa-review"), "--help"], { encoding: "utf8", timeout: 5000, cwd: importOnly });
+    assert.equal(help.status, 0, help.stderr);
+    assert.match(help.stdout, /Usage:/);
+  } finally {
+    rmSync(importOnly, { recursive: true, force: true });
+  }
 });
 
 test("the command behaves the same when run through a symlink, as a bin install does", () => {
