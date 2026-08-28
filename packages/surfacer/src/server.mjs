@@ -3,7 +3,7 @@ import { promises as fs } from "node:fs";
 import http from "node:http";
 import path from "node:path";
 
-import { terminalResult } from "./handoff.mjs";
+import { frameName, frameResult, terminalResult } from "./handoff.mjs";
 import { safeText, sanitizeValue } from "./sanitize.mjs";
 
 const MAX_BODY_BYTES = 4 * 1024 * 1024;
@@ -37,6 +37,12 @@ export async function startSurface({
   ackTimeoutMs = 30_000,
 } = {}) {
   if (!app) throw new TypeError("An app name is required");
+  // The app name is read exactly once, here, and every result and frame uses
+  // that one string: an object whose string value is empty, or would change
+  // after start, must not pass now and fail at the end, after the browser had
+  // been told the session completed. The frame marker is proved on it too.
+  const appName = String(app);
+  frameName(appName);
   if (terminalPayload !== undefined && typeof terminalPayload !== "function") {
     throw new TypeError("terminalPayload must be a function of the terminal status");
   }
@@ -49,11 +55,14 @@ export async function startSurface({
   const outcomePayload = (status) => {
     if (!terminalPayload) return null;
     try {
-      const payload = terminalPayload(status) ?? null;
-      // An outcome the frame cannot carry (a BigInt, a cycle) is no outcome:
-      // the ending must still reach the caller, with a null payload.
-      JSON.stringify(payload);
-      return payload;
+      const payload = terminalPayload(status);
+      // An outcome the frame cannot carry whole (a BigInt, a cycle, a
+      // function, a symbol, an undefined value, a non-finite number, a Map or
+      // Set) is no outcome: the ending must still reach the caller, with a
+      // null payload. What is kept is the plain-data snapshot of one
+      // serialisation, not the live object, so a value that would serialise
+      // differently later cannot change the frame the caller is waiting for.
+      return payload === undefined || payload === null ? null : losslessSnapshot(payload);
     } catch {
       return null;
     }
@@ -96,20 +105,39 @@ export async function startSurface({
       }
       completionReserved = true;
       try {
-        const result = terminalResult(app, "completed", { payload, verbatim });
-        // A claim is a promise to frame this result on stdout. A payload JSON
-        // cannot carry (a BigInt, a cycle) would break that promise after the
-        // browser had already been told the session completed, so prove the
-        // frame here, before claiming; the session stays open on failure.
+        // A claim is a promise to frame this result on stdout. The app's data
+        // is serialised exactly once, here, and what is claimed is the plain
+        // snapshot of that serialisation. A payload JSON cannot carry (a
+        // BigInt, a cycle) or would carry with loss (a function, a symbol, an
+        // undefined value, a non-finite number, a Map or Set) is refused and
+        // the session stays open, so the browser is never told a session
+        // completed that the caller will never receive; and a payload whose
+        // toJSON or getter would answer differently on a later serialisation
+        // cannot change the frame, because nothing serialises it again.
+        let snapshot;
         try {
-          JSON.stringify(result);
+          snapshot = payload === undefined ? null : losslessSnapshot(payload);
         } catch (error) {
           throw httpError(`The completion payload cannot be framed: ${error?.message ?? error}`, 500);
+        }
+        const result = terminalResult(appName, "completed", { payload: snapshot, verbatim });
+        // The exact frame is proved now, not when the launcher writes it, and
+        // the handler's copy is made now too: nothing that can fail runs
+        // after the claim, so a failure here leaves the session unclaimed and
+        // open rather than claimed with no operation id to acknowledge.
+        let copy;
+        try {
+          frameResult(result);
+          copy = structuredClone(result);
+        } catch (error) {
+          throw httpError(`The completion cannot be framed: ${error?.message ?? error}`, 500);
         }
         if (!claimTerminal("completed", result)) {
           throw httpError("This session already has a terminal decision", 409);
         }
-        return result;
+        // The claim owns its data. A handler gets the copy, so nothing it does
+        // to what it got back can change the frame the caller receives.
+        return copy;
       } finally {
         completionReserved = false;
       }
@@ -168,7 +196,7 @@ export async function startSurface({
       }
       if (request.method === "POST" && requestUrl.pathname === "/api/cancel") {
         assertExactKeys(await readJson(request), []);
-        const result = terminalResult(app, "cancelled", endingFor("cancelled","The user cancelled the surface"));
+        const result = terminalResult(appName, "cancelled", endingFor("cancelled","The user cancelled the surface"));
         if (!claimTerminal("cancelled", result)) {
           sendJson(response, 409, { error: "This session already has a terminal decision" });
           return;
@@ -268,7 +296,7 @@ export async function startSurface({
   const origin = `http://127.0.0.1:${port}`;
 
   sessionTimeout = setTimeout(() => {
-    const result = terminalResult(app, "timed_out", endingFor("timed_out","The surface session timed out"));
+    const result = terminalResult(appName, "timed_out", endingFor("timed_out","The surface session timed out"));
     if (claimTerminal("timed_out", result, { awaitAcknowledgement: false })) finalizeClaim();
   }, sessionTimeoutMs);
   sessionTimeout.unref?.();
@@ -292,7 +320,7 @@ export async function startSurface({
     clearTimeout(leaseTimeout);
     if (terminalState !== "pending") return;
     leaseTimeout = setTimeout(() => {
-      const result = terminalResult(app, "timed_out", endingFor("timed_out","The surface disconnected"));
+      const result = terminalResult(appName, "timed_out", endingFor("timed_out","The surface disconnected"));
       if (claimTerminal("timed_out", result, { awaitAcknowledgement: false })) finalizeClaim();
     }, leaseTimeoutMs);
     leaseTimeout.unref?.();
@@ -317,13 +345,13 @@ export async function startSurface({
     waitForDecision: () => decision,
     interrupt(signal = "signal") {
       if (terminalState !== "pending") return finalizeClaim();
-      const result = terminalResult(app, "interrupted", endingFor("interrupted",`Interrupted by ${signal}`));
+      const result = terminalResult(appName, "interrupted", endingFor("interrupted",`Interrupted by ${signal}`));
       if (!claimTerminal("interrupted", result, { awaitAcknowledgement: false })) return false;
       return finalizeClaim();
     },
     async stop() {
       if (terminalState === "pending") {
-        const result = terminalResult(app, "interrupted", endingFor("interrupted","The caller stopped the session"));
+        const result = terminalResult(appName, "interrupted", endingFor("interrupted","The caller stopped the session"));
         if (claimTerminal("interrupted", result, { awaitAcknowledgement: false })) finalizeClaim();
       } else {
         finalizeClaim();
@@ -365,6 +393,43 @@ function authorized(request, expectedToken) {
   const received = Buffer.from(value.slice(7));
   const expected = Buffer.from(expectedToken);
   return received.length === expected.length && timingSafeEqual(received, expected);
+}
+
+// The plain-data snapshot of one JSON serialisation of `value`, or a throw when
+// JSON could not carry it whole. JSON.stringify throws on a cycle or a BigInt
+// but silently drops a function, a symbol, an undefined value, or a
+// symbol-keyed property, and turns a non-finite number into null, and a Map or
+// Set into {} — each a payload framed as something other than what the app
+// handed over. The replacer sees every value once, after any toJSON, so the
+// check and the snapshot are one pass: a getter or toJSON is consulted exactly
+// once, and what it answered is what gets framed. Symbol-keyed properties are
+// skipped before the replacer ever sees them, so each object is checked for
+// them directly.
+function losslessSnapshot(value) {
+  let lost = null;
+  const text = JSON.stringify(value, function replacer(key, item) {
+    const where = key === "" ? "the payload" : `"${key}"`;
+    if (item === undefined || typeof item === "function" || typeof item === "symbol") {
+      lost ??= `${item === undefined ? "an undefined value" : `a ${typeof item}`} at ${where}`;
+      return undefined;
+    }
+    if (typeof item === "number" && !Number.isFinite(item)) {
+      lost ??= `a non-finite number at ${where}`;
+      return null;
+    }
+    if (item instanceof Map || item instanceof Set) {
+      lost ??= `a ${item instanceof Map ? "Map" : "Set"} at ${where}`;
+      return undefined;
+    }
+    if (item && typeof item === "object" && Object.getOwnPropertySymbols(item).some((symbol) => Object.prototype.propertyIsEnumerable.call(item, symbol))) {
+      lost ??= `a symbol-keyed property at ${where}`;
+      return undefined;
+    }
+    return item;
+  });
+  if (lost !== null) throw new TypeError(`JSON cannot carry ${lost}`);
+  if (text === undefined) throw new TypeError("JSON cannot carry the payload");
+  return JSON.parse(text);
 }
 
 async function readJson(request) {

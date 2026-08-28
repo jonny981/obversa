@@ -10,7 +10,10 @@ const TERMINAL_STATUSES = Object.freeze([
   "error",
 ]);
 
-function frameName(app) {
+/** The frame marker name for an app: upper case, punctuation collapsed to
+ *  `_`. Throws on an empty name, so a session can refuse it at start rather
+ *  than fail to frame its result at the end. */
+export function frameName(app) {
   const cleaned = String(app).toUpperCase().replace(/[^A-Z0-9]+/g, "_");
   if (!cleaned) throw new TypeError("An app name is required");
   return cleaned;
