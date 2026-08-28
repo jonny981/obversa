@@ -174,13 +174,23 @@ test("anchorKey is total: it never throws, and an anchor that points nowhere is 
   sent.anchor.target = "elsewhere";
   assert.deepEqual(owned.anchor, { target: "shot", position: { x: 1, y: 2 } });
   assert.notEqual(owned.anchor.position, sent.anchor.position, "a copy, not the sent reference");
-  // One canonicalisation: a non-throwing proxy that answers differently on a
-  // second read gets no second read, so the checked location is the returned one.
+  // A Proxy cannot be made stable by reading it once — it may answer the
+  // serialiser differently from the check — so it is no location at all.
   let proxyReads = 0;
   const proxied = new Proxy({ x: 1 }, { get(t, k, r) { if (k === "x") return ++proxyReads === 1 ? 1 : 999; return Reflect.get(t, k, r); } });
-  const viaProxy = validateAnnotation({ anchor: { target: "shot", position: proxied }, body: "x" }, buildAnchorSet([{ target: "shot", position: { x: 1 } }]));
-  assert.deepEqual(viaProxy.anchor.position, { x: 1 }, "the checked location is the returned location");
-  assert.equal(proxyReads, 1, "x was read exactly once");
+  assert.equal(validateAnnotation({ anchor: { target: "shot", position: proxied }, body: "x" }, buildAnchorSet([{ target: "shot", position: { x: 1 } }])), null, "a proxied position is no location");
+  assert.equal(anchorKey({ target: "shot", position: new Proxy({ x: 1 }, {}) }), null, "even a transparent proxy");
+  assert.equal(anchorKey({ target: "shot", position: { x: 1, p: new Proxy({ y: 2 }, {}) } }), null, "a proxy nested");
+  assert.equal(anchorKey({ target: "shot", position: new Proxy([1], {}) }), null, "a proxied array");
+  // Internal state a prototype check cannot see is no location either.
+  assert.equal(anchorKey({ target: "shot", position: Object.setPrototypeOf(new Map([["k", 1]]), null) }), null, "a Map with its prototype removed");
+  assert.equal(anchorKey({ target: "shot", position: { x: 1, m: Object.setPrototypeOf(new Set([1]), null) } }), null, "a Set with its prototype removed, nested");
+  assert.equal(anchorKey({ target: "shot", position: Object.setPrototypeOf(new Date(0), null) }), null, "a Date with its prototype removed");
+  assert.equal(anchorKey({ target: "shot", position: Object.setPrototypeOf(Object(1), null) }), null, "a boxed number with its prototype removed");
+  assert.equal(anchorKey({ target: "shot", position: Object.setPrototypeOf(new Uint8Array(2), null) }), null, "a typed array with its prototype removed");
+  // A proxied anchor list offers nothing and is no request.
+  assert.equal(buildAnchorSet(new Proxy([outputAnchor(1)], {})).size, 0);
+  assert.equal(isSurfaceRequest({ ...request, anchors: new Proxy([outputAnchor(1)], {}) }), false);
   // A symbol key is skipped by JSON whether or not it is enumerable.
   assert.equal(anchorKey({ target: "a", position: Object.defineProperty({ x: 1 }, Symbol("hidden"), { value: 2, enumerable: false }) }), null, "a non-enumerable symbol key");
   let flips = 0;
@@ -234,6 +244,44 @@ test("validateAnnotation reads every raw field once: a stateful getter cannot pu
   assert.deepEqual(withAuthor.author, { kind: "agent", id: "grok" });
 });
 
+test("arrays are read by own index: an inherited iterator or an own method cannot split what the key, the set, and the guard see", () => {
+  // An array whose prototype chain supplies its own iterator: for..of would
+  // see 999, the own indexed items say 1.
+  const withIterator = (real, yielded) => {
+    const proto = Object.create(Array.prototype);
+    proto[Symbol.iterator] = function* iterate() { yield* yielded; };
+    Object.setPrototypeOf(real, proto);
+    return real;
+  };
+  const one = withIterator([1], [999]);
+  assert.equal(anchorKey({ target: "a", position: one }), anchorKey({ target: "a", position: [1] }), "keyed by own items");
+  assert.notEqual(anchorKey({ target: "a", position: one }), anchorKey({ target: "a", position: [999] }));
+  const anchors = withIterator([{ target: "a", position: 1 }], [{ target: "a", position: 999 }]);
+  const request = { ...makeRequest([]), anchors };
+  assert.equal(isSurfaceRequest(request), true, "a valid request by its own items");
+  const set = buildAnchorSet(anchors);
+  assert.equal(set.size, 1);
+  assert.ok(set.has(anchorKey({ target: "a", position: 1 })), "the set holds the own item");
+  assert.equal(validateAnnotation({ anchor: { target: "a", position: 999 }, body: "x" }, set), null, "the iterated item was never offered");
+  assert.ok(validateAnnotation({ anchor: { target: "a", position: 1 }, body: "x" }, set));
+  assert.equal(normalizeResult({ decision: "approved", annotations: withIterator([{ anchor: { target: "a", position: 1 }, body: "own" }], [{ anchor: { target: "a", position: 1 }, body: "iterated" }]) }, request).annotations[0].body, "own");
+  const thread = withIterator([{ author: { kind: "human", id: "r" }, body: "own" }], [{ author: { kind: "human", id: "r" }, body: "iterated" }]);
+  assert.equal(validateAnnotation({ anchor: { target: "a", position: 1 }, body: "x", thread }, set).thread[0].body, "own");
+  // Guard false positives through Array.prototype.every: a hole, an own every.
+  assert.equal(isSurfaceRequest({ ...makeRequest([]), anchors: new Array(1) }), false, "a hole is not an anchor");
+  assert.equal(isSurfaceRequest({ ...makeRequest([]), anchors: Object.assign([null], { every: () => true }) }), false, "an own every is not consulted");
+  assert.equal(buildAnchorSet(new Array(1)).size, 0);
+  assert.equal(buildAnchorSet(Object.assign([outputAnchor(1)], { length: 2 })).size, 0, "a length past the own items is a hole");
+  // Request fields are read once: a getter cannot satisfy three checks with three shapes.
+  let kindReads = 0;
+  const shiftingKind = { ...makeRequest([outputAnchor(1)]), get kind() { kindReads += 1; return kindReads === 1 ? {} : kindReads === 2 ? { family: "output" } : { renderer: "diff" }; } };
+  assert.equal(isSurfaceRequest(shiftingKind), false);
+  let anchorsReads = 0;
+  const shiftingAnchors = { ...makeRequest([]), get anchors() { anchorsReads += 1; return anchorsReads === 1 ? [null] : []; } };
+  assert.equal(isSurfaceRequest(shiftingAnchors), false);
+  assert.equal(anchorsReads, 1, "anchors read once");
+});
+
 test("every public guard is total: a throwing proxy is invalid, never an exception", () => {
   const hostile = () => new Proxy({}, { get() { throw new Error("boom"); }, has() { throw new Error("boom"); }, ownKeys() { throw new Error("boom"); } });
   const hostileArray = new Proxy([], { get() { throw new Error("boom"); } });
@@ -243,7 +291,8 @@ test("every public guard is total: a throwing proxy is invalid, never an excepti
   assert.equal(buildAnchorSet([outputAnchor(1), hostile()]).size, 1, "a hostile entry is skipped, a real one kept");
   assert.equal(validateAnnotation(hostile(), buildAnchorSet([outputAnchor(1)])), null);
   assert.equal(validateAnnotation({ anchor: outputAnchor(1), body: "x", get author() { throw new Error("boom"); } }, buildAnchorSet([outputAnchor(1)])), null);
-  assert.equal(validateAnnotation({ anchor: outputAnchor(1), body: "x", thread: hostileArray }, buildAnchorSet([outputAnchor(1)])), null);
+  // A hostile thread is an absent thread; the annotation it hangs off still stands.
+  assert.equal(validateAnnotation({ anchor: outputAnchor(1), body: "x", thread: hostileArray }, buildAnchorSet([outputAnchor(1)])).thread, undefined);
   const base = makeRequest([outputAnchor(1)]);
   assert.equal(isSurfaceRequest({ ...base, callback: hostile() }), false);
   assert.equal(isSurfaceRequest({ ...base, anchors: hostileArray }), false);

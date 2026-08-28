@@ -4,7 +4,9 @@
 // is what lets one agent consume any human review the same way, and it is the
 // spine of an internal note
 //
-// This module is family-agnostic and dependency-free. It owns the shapes and
+// This module is family-agnostic and depends on nothing but Node's own
+// brand checks (node:util types, for seeing through a Proxy or an object with
+// hidden internal state). It owns the shapes and
 // the one security-critical rule: an annotation may only pin to a location the
 // request actually offered (buildAnchorSet + validateAnnotation). Every
 // exported guard and normaliser is total: handed a throwing getter or proxy,
@@ -29,6 +31,8 @@
 //   deadline, when present, is an RFC 3339 date-time with seconds, an
 //   optional fraction of up to nine digits, and Z or a numeric offset (no
 //   leap second, no -00:00).
+
+import { types } from "node:util";
 
 export const FAMILIES = Object.freeze(["intent", "output", "outcome"]);
 // Transport hints (an internal note): the named hosts, or a third-party tool as
@@ -73,11 +77,38 @@ function isIsoInstant(text) {
   return Number.isFinite(Date.parse(text));
 }
 
+// Brand checks for a Proxy and for every built-in that holds state JSON cannot
+// see, whatever its prototype says.
+const INTERNAL_STATE = [
+  types.isProxy, types.isMap, types.isSet, types.isWeakMap, types.isWeakSet, types.isDate, types.isRegExp,
+  types.isPromise, types.isAnyArrayBuffer, types.isArrayBufferView, types.isBoxedPrimitive, types.isNativeError,
+  types.isModuleNamespaceObject, types.isGeneratorObject, types.isMapIterator, types.isSetIterator,
+  types.isArgumentsObject, types.isExternal, types.isKeyObject, types.isCryptoKey,
+].filter((check) => typeof check === "function");
+
 // The key separator. A scalar key component must never contain it, or two
 // distinct anchors could share a key (a target ending in the separator plus a
 // side, against a bare target plus a position starting with it).
 const NUL = String.fromCharCode(0);
 const hasNul = (text) => text.includes(NUL);
+
+// The own indexed items of an array, read once each by index — never through
+// an iterator or a method the array could override or inherit, which could
+// yield one list to the key and another to the membership set — or null when
+// the length is not a safe count or any index is a hole or not an own data
+// property.
+function ownItems(value) {
+  if (types.isProxy(value)) return null;
+  const { length } = value;
+  if (!Number.isSafeInteger(length) || length < 0) return null;
+  const items = [];
+  for (let index = 0; index < length; index += 1) {
+    const descriptor = Object.getOwnPropertyDescriptor(value, String(index));
+    if (!descriptor || !("value" in descriptor)) return null;
+    items.push(descriptor.value);
+  }
+  return items;
+}
 
 // Canonical JSON text for an object or array location, or null; never throws.
 // Object keys are sorted at every level, so the same coordinates match after
@@ -93,11 +124,14 @@ function canonicalJson(value, seen = new Set()) {
   // JSON writes negative zero as 0, so it is not carried whole.
   if (typeof value === "number") return Number.isFinite(value) && !Object.is(value, -0) ? JSON.stringify(value) : null;
   if (typeof value !== "object") return null;
-  // Only a plain object or an array is a location. Anything else — a RegExp,
-  // an Error, a Map, a Promise, an ArrayBuffer, a class instance — JSON
-  // erases to {} or a fragment, so two different values would share a key.
+  // Only plain data is a location. Anything else — a RegExp, an Error, a
+  // Map, a Promise, an ArrayBuffer, a class instance, a Proxy, or any of
+  // those with its prototype removed — JSON erases to {} or a fragment, so
+  // two different values would share a key. A prototype check alone cannot
+  // see hidden internal state or a Proxy; Node's brand checks can.
   const proto = Object.getPrototypeOf(value);
   if (!Array.isArray(value) && proto !== Object.prototype && proto !== null) return null;
+  if (INTERNAL_STATE.some((check) => check(value))) return null;
   // A value with its own toJSON means something other than its properties.
   if (Object.prototype.hasOwnProperty.call(value, "toJSON")) return null;
   // JSON skips a symbol-keyed property without a trace, enumerable or not; a
@@ -119,11 +153,12 @@ function canonicalJson(value, seen = new Set()) {
     // hole is something JSON would drop or fill, so two arrays that differ
     // there would share a key.
     const keys = Object.keys(value);
-    if (keys.length !== value.length || keys.some((key, index) => key !== String(index))) {
+    const items = ownItems(value);
+    if (items === null || keys.length !== items.length || keys.some((key, index) => key !== String(index))) {
       seen.delete(value);
       return null;
     }
-    for (const item of value) {
+    for (const item of items) {
       const text = canonicalJson(item, seen);
       if (text === null) {
         seen.delete(value);
@@ -217,7 +252,10 @@ export function buildAnchorSet(anchors) {
   const set = new Set();
   try {
     if (!Array.isArray(anchors)) return set;
-    for (const anchor of anchors) {
+    // By own index, never through an iterator the list could override.
+    const items = ownItems(anchors);
+    if (items === null) return set;
+    for (const anchor of items) {
       const key = anchorKey(anchor);
       if (key !== null) set.add(key);
     }
@@ -316,10 +354,11 @@ function cleanAnnotation(raw, anchorSet) {
         : null,
   };
 
-  if (Array.isArray(rawThread)) {
-    // One read per entry, in order, bounded.
+  const entries = Array.isArray(rawThread) ? ownItems(rawThread) : null;
+  if (entries !== null) {
+    // One read per entry, by own index, in order, bounded.
     const thread = [];
-    for (const entry of rawThread) {
+    for (const entry of entries) {
       if (thread.length >= MAX_THREAD) break;
       const clean = normalizeThreadEntry(entry);
       if (clean) thread.push(clean);
@@ -347,7 +386,10 @@ export function normalizeResult(raw, request) {
   };
   const anchorSet = buildAnchorSet(read(() => request?.anchors, []));
   const annotations = [];
-  const rawAnnotations = read(() => (Array.isArray(raw?.annotations) ? raw.annotations : []), []);
+  const rawAnnotations = read(() => {
+    const list = raw?.annotations;
+    return Array.isArray(list) ? ownItems(list) ?? [] : [];
+  }, []);
   try {
     for (const item of rawAnnotations) {
       if (annotations.length >= MAX_ANNOTATIONS) break;
@@ -414,21 +456,36 @@ export function isSurfaceRequest(value) {
 
 function checkSurfaceRequest(value) {
   if (!value || typeof value !== "object") return false;
-  if (!isPresent(value.surfaceId)) return false;
-  if (!isGateBinding(value.gateId, value.callback)) return false;
-  if (!value.kind || !FAMILIES.includes(value.kind.family) || !isPresent(value.kind.renderer)) return false;
+  // Every field is read exactly once, here, and the checks use the locals: a
+  // getter that answered one shape to one check and another to the next
+  // would otherwise pass a request no single read of it satisfies.
+  const { surfaceId, gateId, callback, kind, subject, anchors, transport, deadline } = value;
+  if (!isPresent(surfaceId)) return false;
+  if (!isGateBinding(gateId, callback)) return false;
+  if (!kind || typeof kind !== "object") return false;
+  const { family, renderer } = kind;
+  if (!FAMILIES.includes(family) || !isPresent(renderer)) return false;
   // The subject is a ref plus either an inline payload or a fetch URL; a host
   // cannot render a request that names neither.
-  const subject = value.subject;
-  if (!subject || typeof subject !== "object" || !isPresent(subject.ref)) return false;
-  if (subject.payload === undefined && !isPresent(subject.fetch)) return false;
-  if (!isTransport(value.transport)) return false;
+  if (!subject || typeof subject !== "object") return false;
+  const { ref, payload, fetch } = subject;
+  if (!isPresent(ref)) return false;
+  if (payload === undefined && !isPresent(fetch)) return false;
+  if (!isTransport(transport)) return false;
   // Every offered anchor is a real location — a target and a position — or the
   // membership rule the result is checked against would be built on nothing.
-  if (!Array.isArray(value.anchors) || !value.anchors.every((anchor) => anchorKey(anchor) !== null)) return false;
+  // The list is read by its own indexed data properties, never through a
+  // method or iterator it could override: what this guard sees is exactly
+  // what buildAnchorSet will see.
+  if (!Array.isArray(anchors)) return false;
+  const items = ownItems(anchors);
+  if (items === null) return false;
+  for (const anchor of items) {
+    if (anchorKey(anchor) === null) return false;
+  }
   // A deadline is optional; when present it is an RFC 3339 date-time with
   // seconds and a zone (see isIsoInstant), so every host enforces the same
   // instant. A bare date, a loose date, or a number is refused.
-  if (value.deadline !== undefined && value.deadline !== null && !isIsoInstant(value.deadline)) return false;
+  if (deadline !== undefined && deadline !== null && !isIsoInstant(deadline)) return false;
   return true;
 }
