@@ -182,12 +182,18 @@ test("anchorKey is total: it never throws, and an anchor that points nowhere is 
   assert.equal(anchorKey({ target: "shot", position: new Proxy({ x: 1 }, {}) }), null, "even a transparent proxy");
   assert.equal(anchorKey({ target: "shot", position: { x: 1, p: new Proxy({ y: 2 }, {}) } }), null, "a proxy nested");
   assert.equal(anchorKey({ target: "shot", position: new Proxy([1], {}) }), null, "a proxied array");
-  // Internal state a prototype check cannot see is no location either.
-  assert.equal(anchorKey({ target: "shot", position: Object.setPrototypeOf(new Map([["k", 1]]), null) }), null, "a Map with its prototype removed");
-  assert.equal(anchorKey({ target: "shot", position: { x: 1, m: Object.setPrototypeOf(new Set([1]), null) } }), null, "a Set with its prototype removed, nested");
-  assert.equal(anchorKey({ target: "shot", position: Object.setPrototypeOf(new Date(0), null) }), null, "a Date with its prototype removed");
-  assert.equal(anchorKey({ target: "shot", position: Object.setPrototypeOf(Object(1), null) }), null, "a boxed number with its prototype removed");
-  assert.equal(anchorKey({ target: "shot", position: Object.setPrototypeOf(new Uint8Array(2), null) }), null, "a typed array with its prototype removed");
+  // The contract is observable own data. Hidden internal state is not data:
+  // it is neither carried nor promised, so an object with its prototype
+  // removed is exactly its own enumerable data properties, and two such
+  // objects with the same observable data are the same location.
+  const u1 = Object.setPrototypeOf(Object.assign(new URL("https://a.example/one"), { visible: 1 }), null);
+  const u2 = Object.setPrototypeOf(Object.assign(new URL("https://b.example/two"), { visible: 1 }), null);
+  assert.equal(anchorKey({ target: "x", position: u1 }), anchorKey({ target: "x", position: { visible: 1 } }), "a URL with its prototype removed is its observable data");
+  assert.equal(anchorKey({ target: "x", position: u1 }), anchorKey({ target: "x", position: u2 }), "the same observable data is the same location, whatever is hidden");
+  assert.equal(anchorKey({ target: "shot", position: Object.setPrototypeOf(new Map([["k", 1]]), null) }), null, "a Map with its prototype removed has no observable data: an empty location");
+  assert.equal(anchorKey({ target: "shot", position: { x: 1, m: Object.setPrototypeOf(new Set([1]), null) } }), anchorKey({ target: "shot", position: { x: 1, m: {} } }), "nested, its observable data is {}");
+  assert.equal(anchorKey({ target: "shot", position: Object.setPrototypeOf(new Date(0), null) }), null, "a Date with its prototype removed: empty");
+  assert.equal(anchorKey({ target: "shot", position: Object.setPrototypeOf(new Uint8Array(2), null) }), anchorKey({ target: "shot", position: { 0: 0, 1: 0 } }), "a typed array with its prototype removed is its indexed data");
   // A proxied anchor list offers nothing and is no request.
   assert.equal(buildAnchorSet(new Proxy([outputAnchor(1)], {})).size, 0);
   assert.equal(isSurfaceRequest({ ...request, anchors: new Proxy([outputAnchor(1)], {}) }), false);

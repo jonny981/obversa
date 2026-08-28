@@ -5,8 +5,7 @@
 // spine of an internal note
 //
 // This module is family-agnostic and depends on nothing but Node's own
-// brand checks (node:util types, for seeing through a Proxy or an object with
-// hidden internal state). It owns the shapes and
+// Proxy check (node:util types.isProxy). It owns the shapes and
 // the one security-critical rule: an annotation may only pin to a location the
 // request actually offered (buildAnchorSet + validateAnnotation). Every
 // exported guard and normaliser is total: handed a throwing getter or proxy,
@@ -77,14 +76,21 @@ function isIsoInstant(text) {
   return Number.isFinite(Date.parse(text));
 }
 
-// Brand checks for a Proxy and for every built-in that holds state JSON cannot
-// see, whatever its prototype says.
-const INTERNAL_STATE = [
-  types.isProxy, types.isMap, types.isSet, types.isWeakMap, types.isWeakSet, types.isDate, types.isRegExp,
-  types.isPromise, types.isAnyArrayBuffer, types.isArrayBufferView, types.isBoxedPrimitive, types.isNativeError,
-  types.isModuleNamespaceObject, types.isGeneratorObject, types.isMapIterator, types.isSetIterator,
-  types.isArgumentsObject, types.isExternal, types.isKeyObject, types.isCryptoKey,
-].filter((check) => typeof check === "function");
+// The data contract. A location is its OBSERVABLE OWN DATA: its own
+// enumerable string-keyed data properties and its indexed items, read exactly
+// once, recursively. (The runtime's payload rule in @obversa/surfacer is the
+// looser cousin: the values one JSON serialisation reads, getters and toJSON
+// included; a location needs a stable key, so it takes data properties
+// only.) Hidden internal state —
+// a Map's entries, a URL's address, a WeakRef's target — is not data: it is
+// neither carried nor promised, and no finite list of brand checks could
+// promise otherwise. Two values with the same observable data are the same
+// location. What is refused is what would make the observable data itself
+// unstable or lossy: a Proxy (Node can tell, and it may answer a later read
+// differently), an object whose prototype is not Object's or none (its
+// meaning is not in its own data), an own toJSON, an accessor, a symbol key,
+// a non-enumerable property, a hole or extra property in an array, and any
+// value JSON cannot write back exactly.
 
 // The key separator. A scalar key component must never contain it, or two
 // distinct anchors could share a key (a target ending in the separator plus a
@@ -124,27 +130,27 @@ function canonicalJson(value, seen = new Set()) {
   // JSON writes negative zero as 0, so it is not carried whole.
   if (typeof value === "number") return Number.isFinite(value) && !Object.is(value, -0) ? JSON.stringify(value) : null;
   if (typeof value !== "object") return null;
-  // Only plain data is a location. Anything else — a RegExp, an Error, a
-  // Map, a Promise, an ArrayBuffer, a class instance, a Proxy, or any of
-  // those with its prototype removed — JSON erases to {} or a fragment, so
-  // two different values would share a key. A prototype check alone cannot
-  // see hidden internal state or a Proxy; Node's brand checks can.
+  // A Proxy may answer a later read differently, and an object whose
+  // prototype is not Object's (or none) carries meaning outside its own data
+  // — a RegExp, an Error, a Map, a class instance. Neither is a location. An
+  // object with its prototype removed is exactly its observable own data;
+  // whatever state it hides is not data (see the data contract above).
+  if (types.isProxy(value)) return null;
   const proto = Object.getPrototypeOf(value);
   if (!Array.isArray(value) && proto !== Object.prototype && proto !== null) return null;
-  if (INTERNAL_STATE.some((check) => check(value))) return null;
   // A value with its own toJSON means something other than its properties.
   if (Object.prototype.hasOwnProperty.call(value, "toJSON")) return null;
   // JSON skips a symbol-keyed property without a trace, enumerable or not; a
   // location with one would be keyed as something smaller than it is.
   if (Object.getOwnPropertySymbols(value).length > 0) return null;
-  // A location is own data properties only: an accessor could answer
-  // differently each time it is read, so the same anchor would not key the
-  // same way twice.
-  if (Object.keys(value).some((key) => !("value" in Object.getOwnPropertyDescriptor(value, key)))) return null;
-  // JSON skips a non-enumerable property too (an array's own length aside).
-  const visible = Object.keys(value).length;
+  // Every own string-keyed property is read exactly once, as a descriptor: an
+  // accessor is no data (it could answer differently each time), and a
+  // non-enumerable property is skipped by JSON (an array's own length aside).
+  const keys = Object.keys(value);
+  const descriptors = keys.map((key) => [key, Object.getOwnPropertyDescriptor(value, key)]);
+  if (descriptors.some(([, descriptor]) => !descriptor || !("value" in descriptor))) return null;
   const owned = Object.getOwnPropertyNames(value).filter((name) => !(Array.isArray(value) && name === "length")).length;
-  if (owned !== visible) return null;
+  if (owned !== keys.length) return null;
   if (seen.has(value)) return null;
   seen.add(value);
   const parts = [];
@@ -152,7 +158,6 @@ function canonicalJson(value, seen = new Set()) {
     // An array is its indexed items and nothing else: an extra property or a
     // hole is something JSON would drop or fill, so two arrays that differ
     // there would share a key.
-    const keys = Object.keys(value);
     const items = ownItems(value);
     if (items === null || keys.length !== items.length || keys.some((key, index) => key !== String(index))) {
       seen.delete(value);
@@ -169,8 +174,10 @@ function canonicalJson(value, seen = new Set()) {
     seen.delete(value);
     return `[${parts.join(",")}]`;
   }
-  for (const key of Object.keys(value).sort()) {
-    const text = canonicalJson(value[key], seen);
+  // Sorted keys, values taken from the descriptors already read: one read.
+  descriptors.sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0));
+  for (const [key, descriptor] of descriptors) {
+    const text = canonicalJson(descriptor.value, seen);
     if (text === null) {
       seen.delete(value);
       return null;
