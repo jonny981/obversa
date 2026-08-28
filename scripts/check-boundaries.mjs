@@ -51,8 +51,22 @@ export function isHostScript(path, text) {
 }
 // The `hosts/<name>` root an absolute path lies in, or undefined.
 function hostRootOf(absolute, repoRoot) {
-  const match = /^hosts\/([^/]+)(?:\/|$)/.exec(relative(repoRoot, absolute).split('\\').join('/'));
+  const match = /^hosts\/([^/]+)(?:\/|$)/.exec(placedUnder(absolute, repoRoot));
   return match ? `hosts/${match[1]}/` : undefined;
+}
+// A path relative to the root with both read by real path, so a root or a
+// file handed over through a symlink places the same as its real spelling.
+// A path whose last component does not exist keeps that component and
+// takes its parent's real path, so a missing target still places under
+// the package its parent lies in.
+function placedUnder(absolute, repoRoot) {
+  return relative(realPathOf(repoRoot), realPathOf(absolute)).split('\\').join('/');
+}
+// A path by its real spelling; a last component that does not exist is
+// kept under its parent's real path.
+function realPathOf(path) {
+  const real = realpathOf(path, ts.sys);
+  return real === path ? join(realpathOf(dirname(path), ts.sys), basename(path)) : real;
 }
 // The one refusal for a symlink met under packages/ or hosts/, by the main
 // walk or by the per-package and per-host walks that enter dist. Declared
@@ -529,7 +543,9 @@ export function parseProjectConfig(text, { file, host = ts.sys } = {}) {
 // or lies under it; a path that is `packages/` itself or above it reaches
 // every package at once.
 function reachesEveryPackage(absolute, repoRoot) {
-  const rel = relative(absolute, join(repoRoot, 'packages'));
+  // Both by real path, so a root handed over through a symlink answers as
+  // its real spelling does.
+  const rel = relative(realPathOf(absolute), realPathOf(join(repoRoot, 'packages')));
   return rel === '' || (!rel.startsWith('..') && !isAbsolute(rel));
 }
 
@@ -712,7 +728,7 @@ export function manifestPathTargets(manifest, { file, root: repoRoot, host = ts.
 function placement(named, { file, root: repoRoot, host = ts.sys, what }) {
   const absolute = realpathOf(named, host);
   if (reachesEveryPackage(absolute, repoRoot))
-    return refusal(`${what} reaches ${relative(repoRoot, absolute) || '.'}, which holds every package`);
+    return refusal(`${what} reaches ${placedUnder(absolute, repoRoot) || '.'}, which holds every package`);
   const dir = packageDirOf(absolute, repoRoot);
   return dir !== undefined && dir !== packageDirOf(file, repoRoot) ? `@obversa/${dir}` : undefined;
 }
@@ -807,7 +823,7 @@ function crossingPackage(specifier, { file, root: repoRoot } = {}) {
 // The package directory an absolute path lies in, or names outright (a bare
 // `packages/memory`, as a project reference does), else undefined.
 function packageDirOf(absolute, repoRoot) {
-  return /^packages\/([^/]+)(?:\/|$)/.exec(relative(repoRoot, absolute).split('\\').join('/'))?.[1];
+  return /^packages\/([^/]+)(?:\/|$)/.exec(placedUnder(absolute, repoRoot))?.[1];
 }
 
 // Every regular file under a directory, and every symlink met on the way. A
@@ -819,17 +835,21 @@ function packageDirOf(absolute, repoRoot) {
 export async function walkTree(directory, { ignored = ignoredDirectories } = {}) {
   const files = [];
   const symlinks = [];
+  // Every directory met, the ignored ones included though not entered, so
+  // a caller can refuse a directory by name whether or not it holds a file.
+  const directories = [];
   const visit = async (current) => {
     for (const entry of await readdir(current, { withFileTypes: true })) {
       const path = join(current, entry.name);
       if (entry.isSymbolicLink()) symlinks.push(path);
       else if (entry.isDirectory()) {
+        directories.push(path);
         if (!ignored.has(entry.name)) await visit(path);
       } else if (entry.isFile()) files.push(path);
     }
   };
   await visit(directory);
-  return { files, symlinks };
+  return { files, symlinks, directories };
 }
 
 // Where the compiler lands a specifier from a file under one set of options:
@@ -1143,13 +1163,18 @@ for (const entry of await readdir(join(root, 'hosts'), { withFileTypes: true }))
   }
   // This walk enters dist, which the main walk skips by name, so a link or a
   // nested manifest kept there is met here and refused here. A host is not
-  // built at all: a dist directory anywhere under it holds files the main
-  // scan never reads, a shipped command kept there included, so the
-  // directory itself is refused.
-  const { files: hostFiles, symlinks: hostLinks } = await walkTree(hostDir, { ignored: new Set(['node_modules']) });
+  // built at all: a dist directory anywhere under it, empty or not, is a
+  // place the main scan never reads, so it is refused by name on sight. So
+  // is a node_modules directory anywhere but the host root — the root one
+  // is install output; a nested one is a place to keep a file the scan
+  // never reads.
+  const { files: hostFiles, symlinks: hostLinks, directories: hostDirectories } = await walkTree(hostDir, { ignored: new Set(['node_modules']) });
   for (const link of hostLinks) failures.push(symlinkRefusal(relative(root, link).split('\\').join('/')));
-  for (const dist of new Set([...hostFiles, ...hostLinks].map((path) => relative(root, path).split('\\').join('/')).map((path) => path.match(/^(.*\/dist)\//)?.[1]).filter(Boolean)))
-    failures.push(`${dist}: a host is not built; a dist directory under a host holds files the scan never reads`);
+  for (const directory of hostDirectories) {
+    const path = relative(root, directory).split('\\').join('/');
+    if (basename(directory) === 'dist') failures.push(`${path}: a host is not built; a dist directory under a host is a place the scan never reads`);
+    else if (basename(directory) === 'node_modules' && directory !== join(hostDir, 'node_modules')) failures.push(`${path}: a node_modules directory below a host's root is not install output; it is a place the scan never reads`);
+  }
   for (const path of hostFiles) {
     if (basename(path) === 'package.json' && path !== join(hostDir, 'package.json'))
       failures.push(`${relative(root, path).split('\\').join('/')}: a nested manifest makes itself the package scope of the files beneath it, whatever it is named; a host has one manifest, at its root`);
@@ -1472,9 +1497,12 @@ for (const path of requiredImportScannedHostFiles) {
 // node_modules, a missing or unresolvable file) fails closed.
 failures.push(...hostEdgeFailures(hostEdges, importScannedHostFiles));
 
-if (failures.length) {
-  console.error(`Boundary check failed (${failures.length}):`);
-  for (const failure of failures) console.error(`- ${failure}`);
+// Two walks can meet the same link (the main walk and a per-host walk both
+// enter hosts/); one refusal is printed once.
+const distinctFailures = [...new Set(failures)];
+if (distinctFailures.length) {
+  console.error(`Boundary check failed (${distinctFailures.length}):`);
+  for (const failure of distinctFailures) console.error(`- ${failure}`);
   process.exit(1);
 }
 

@@ -690,6 +690,22 @@ test("a relative import is placed by its real path, and a spelling other than th
     symlinkSync(tree, linkedTree);
     try {
       assert.deepEqual(extractObversaImports('import { x } from "../../surfacer/src/index.mjs";', { file: path.join(linkedTree, "packages", "source", "src", "a.mjs"), root: linkedTree }), ["@obversa/surfacer"]);
+      // Every placement path reads the root the same way: an alias the
+      // compiler resolves, a manifest entry field, and a tsconfig files
+      // entry each place the same crossing under the real root and the
+      // linked one.
+      writeFileSync(path.join(tree, "packages", "surfacer", "src", "index.ts"), "export const x = 1;\n");
+      for (const root of [tree, linkedTree]) {
+        const source = path.join(root, "packages", "source");
+        assert.deepEqual(
+          extractObversaImports('import x from "#surf/index";', { file: path.join(source, "src", "a.ts"), root, configs: [{ baseUrl: root, paths: { "#surf/*": ["packages/surfacer/src/*"] } }] }),
+          ["@obversa/surfacer"],
+          `an alias under ${root === tree ? "the real" : "the linked"} root`,
+        );
+        assert.deepEqual(manifestPathTargets({ main: "../surfacer/src/index.ts" }, { file: path.join(source, "package.json"), root }), ["@obversa/surfacer"], `a manifest entry under ${root === tree ? "the real" : "the linked"} root`);
+        assert.deepEqual(tsconfigDependencies('{ "files": ["../../packages/surfacer/src/index.ts"] }', { file: path.join(source, "tsconfig.json"), root }), ["@obversa/surfacer"], `a tsconfig files entry under ${root === tree ? "the real" : "the linked"} root`);
+        assert.deepEqual(manifestPathTargets({ main: "../../" }, { file: path.join(source, "package.json"), root }), [refusal("main reaches ., which holds every package")], `a value that reaches every package under ${root === tree ? "the real" : "the linked"} root`);
+      }
     } finally {
       rmSync(linkedTree);
     }
@@ -911,8 +927,25 @@ test("the guard, run on a disposable copy of the tree, refuses a shipped host im
     chmodSync(path.join(root, "hosts", "cmux", "dist", "obversa-escape"), 0o755);
     const hostDist = guard();
     assert.notEqual(hostDist.status, 0);
-    assert.match(hostDist.stderr, /hosts\/cmux\/dist: a host is not built; a dist directory under a host holds files the scan never reads/);
+    assert.match(hostDist.stderr, /hosts\/cmux\/dist: a host is not built; a dist directory under a host is a place the scan never reads/);
     rmSync(path.join(root, "hosts", "cmux", "dist"), { recursive: true });
+    // The directory is refused by name, whatever it holds: empty, a bare
+    // subdirectory, or a file under a node_modules the walk does not enter.
+    for (const shape of [[], ["bin"], ["node_modules"]]) {
+      const inner = path.join(root, "hosts", "cmux", "dist", ...shape);
+      mkdirSync(inner, { recursive: true });
+      if (shape[0] === "node_modules") writeFileSync(path.join(inner, "obversa-escape"), '#!/usr/bin/env node\nconsole.log(eval("40 + 2"));\n');
+      const shaped = guard();
+      assert.notEqual(shaped.status, 0, shape.join("/") || "empty dist");
+      assert.match(shaped.stderr, /hosts\/cmux\/dist: a host is not built; a dist directory under a host is a place the scan never reads/, shape.join("/") || "empty dist");
+      rmSync(path.join(root, "hosts", "cmux", "dist"), { recursive: true });
+    }
+    // A node_modules below the host root is not install output.
+    mkdirSync(path.join(root, "hosts", "cmux", "lib", "node_modules"), { recursive: true });
+    const nestedModules = guard();
+    assert.notEqual(nestedModules.status, 0);
+    assert.match(nestedModules.stderr, /hosts\/cmux\/lib\/node_modules: a node_modules directory below a host's root is not install output/);
+    rmSync(path.join(root, "hosts", "cmux", "lib", "node_modules"), { recursive: true });
     mkdirSync(path.join(root, "packages", "source", "dist"), { recursive: true });
     const packageDistLink = path.join(root, "packages", "source", "dist", "link.mjs");
     symlinkSync(path.join("..", "..", "..", "scripts", "escape.mjs"), packageDistLink);
