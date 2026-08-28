@@ -16,6 +16,7 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { readFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
+import { Writable } from "node:stream";
 import test from "node:test";
 
 import { parseFramedResult, runSurface } from "../../../packages/surfacer/src/index.mjs";
@@ -59,9 +60,21 @@ function firstNewAnchor(diffText) {
   throw new Error("no anchor found in the diff");
 }
 
+// A stdout that behaves like a pipe under back-pressure: tiny buffer, deferred
+// writes. The framed result must be complete when reviewDiff resolves, however
+// large it is, or a caller that exits on resolution would cut it mid-JSON.
+class SlowPipe extends Writable {
+  constructor() {
+    super({ highWaterMark: 1024 });
+    this.text = "";
+  }
+  _write(chunk, _encoding, callback) {
+    setImmediate(() => { this.text += chunk.toString("utf8"); callback(); });
+  }
+}
+
 function captureStream() {
-  let text = "";
-  return { write(chunk) { text += chunk; return true; }, get text() { return text; } };
+  return new SlowPipe();
 }
 
 test("the review surface runs on surfacer and returns annotations", { timeout: 30_000 }, async () => {
@@ -132,11 +145,15 @@ test("the review surface runs on surfacer and returns annotations", { timeout: 3
     assert.ok(Array.isArray(model.files[0].hunks[0].contextBefore), "full-file context resolves from a subdirectory");
 
     // The browser returns the surface contract: a decision and annotations
-    // pinned to offered anchors.
-    const submitBody = JSON.stringify({
-      decision: "changes-requested",
-      annotations: [{ anchor: { target: anchor.path, side: anchor.side, position: anchor.line }, body: `looks off: ${secret}` }],
-    });
+    // pinned to offered anchors. This is the largest result the contract
+    // allows — 500 annotations at the 4000-character body cap, over 2 MB —
+    // so the framed handoff is proven at full size through the slow stream.
+    const maxBody = `looks off: ${secret} ` + "y".repeat(4000);
+    const annotations = Array.from({ length: 500 }, () => ({
+      anchor: { target: anchor.path, side: anchor.side, position: anchor.line },
+      body: maxBody,
+    }));
+    const submitBody = JSON.stringify({ decision: "changes-requested", annotations });
 
     // The mutation is gated: no token is 401, a foreign origin is 403.
     const noAuth = await fetch(`${origin}/api/submit`, {
@@ -175,19 +192,23 @@ test("the review surface runs on surfacer and returns annotations", { timeout: 3
     assert.equal(typeof outcome.result.surfaceId, "string");
     assert.equal(outcome.result.gateId, null, "a directly opened review has no gate");
     assert.equal(outcome.result.decision, "changes-requested");
-    assert.equal(outcome.result.annotations.length, 1);
+    assert.equal(outcome.result.annotations.length, 500, "the contract's count bound");
     assert.deepEqual(outcome.result.annotations[0].anchor, { target: anchor.path, position: anchor.line, side: anchor.side });
+    assert.equal(outcome.result.annotations[0].body.length, 4000, "the contract's body bound");
     // Review content survives verbatim: a normal /api body would redact this.
     assert.match(outcome.result.annotations[0].body, /ghp_ABC123verbatimSECRET/);
 
-    // The framed stdout carries the same SurfaceResult, verbatim, for a
-    // pipeline consumer.
+    // The framed stdout carries the same SurfaceResult, verbatim and COMPLETE
+    // — over 2 MB through a slow pipe-like stream — at the moment reviewDiff
+    // resolved, so a caller that exits on resolution loses nothing.
+    assert.ok(stdout.text.length > 2_000_000, `the frame is large (${stdout.text.length} bytes)`);
     const framed = parseFramedResult(stdout.text, "review");
-    assert.ok(framed, "a framed result is written to stdout");
+    assert.ok(framed, "a complete framed result is on stdout when reviewDiff resolves");
     assert.equal(framed.status, "completed");
     assert.equal(framed.payload.surfaceId, outcome.result.surfaceId);
     assert.equal(framed.payload.decision, "changes-requested");
-    assert.match(framed.payload.annotations[0].body, /ghp_ABC123verbatimSECRET/);
+    assert.equal(framed.payload.annotations.length, 500);
+    assert.match(framed.payload.annotations[499].body, /ghp_ABC123verbatimSECRET/);
   } finally {
     await reviewPromise.catch(() => {});
     rmSync(repo, { recursive: true, force: true });
