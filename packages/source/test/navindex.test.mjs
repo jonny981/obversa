@@ -115,6 +115,14 @@ test("var binds for the whole function, even before its declaration; a class sta
   assert.deepEqual(at(cases, 4, 4).def, { line: 7, col: 8 }, "an earlier case sees the switch-wide let");
 });
 
+test("a loop's own binding shadows the right-hand side: for (let x of x) reads the loop's x (a TDZ), not the outer one", () => {
+  const code = "let x = [1];\nfor (let x of x) {}\nfor (const y in y) {}\nlet z = 1;\nfor (z of [z]) {}\n";
+  const { occurrences } = navIndex({ code, lang: "javascript" });
+  assert.deepEqual(at(occurrences, 2, 14).def, { line: 2, col: 9 }, "the right-hand x is the loop binding");
+  assert.deepEqual(at(occurrences, 3, 16).def, { line: 3, col: 11 }, "for-in the same");
+  assert.deepEqual(at(occurrences, 5, 11).def, { line: 4, col: 4 }, "with no declaration, the right side sees the outer binding");
+});
+
 test("a for-of or for-in over an existing variable references it; the loop head is not a new definition", () => {
   const code = "let x;\nfor (x of [1]) { x; }\nx;\nlet y;\nfor (y in { a: 1 }) { y; }\ny;\n";
   const { occurrences } = navIndex({ code, lang: "javascript" });

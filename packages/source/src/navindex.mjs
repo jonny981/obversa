@@ -482,7 +482,11 @@ function walk(node, scope, occurrences, seenDefs, parent = null) {
     case "ForInStatement":
     case "ForOfStatement": {
       const inner = pushScope(scope);
-      if (node.right) walk(node.right, scope, occurrences, seenDefs, node);
+      // The loop's own declarations bind before the right-hand side is
+      // evaluated: in `let x = [1]; for (let x of x) {}` the right-hand `x`
+      // is the loop's `x` in its temporal dead zone, not the outer one — so
+      // the bindings are registered first and the right side walked in the
+      // loop scope.
       if (node.left?.type === "VariableDeclaration") {
         // The same rule as any declaration: `var` belongs to the nearest
         // function scope and stays visible after the loop; `let` and `const`
@@ -499,6 +503,7 @@ function walk(node, scope, occurrences, seenDefs, parent = null) {
         // reference to it, not a new definition.
         walk(node.left, inner, occurrences, seenDefs, node);
       }
+      if (node.right) walk(node.right, inner, occurrences, seenDefs, node);
       if (node.body) walk(node.body, inner, occurrences, seenDefs, node);
       return;
     }
