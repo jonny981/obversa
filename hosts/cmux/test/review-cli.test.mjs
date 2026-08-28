@@ -4,10 +4,13 @@
 // value must not fall through to reviewing the current directory.
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
+import { mkdtempSync, rmSync, symlinkSync } from "node:fs";
+import os from "node:os";
+import path from "node:path";
 import { fileURLToPath } from "node:url";
 import test from "node:test";
 
-import { parseArgs } from "../bin/obversa-review";
+import { parseArgs } from "../lib/review-args.mjs";
 
 const COMMAND = fileURLToPath(new URL("../bin/obversa-review", import.meta.url));
 
@@ -59,4 +62,23 @@ test("the command exits 0 on --help and prints usage on stdout", () => {
   const run = spawnSync(process.execPath, [COMMAND, "--help"], { encoding: "utf8", timeout: 5000 });
   assert.equal(run.status, 0);
   assert.match(run.stdout, /Usage:/);
+});
+
+test("the command behaves the same when run through a symlink, as a bin install does", () => {
+  // Node resolves the real path for import.meta but keeps the symlink in
+  // process.argv, which is how a "am I main" guard once skipped main silently.
+  const dir = mkdtempSync(path.join(os.tmpdir(), "review-cli-link-"));
+  const link = path.join(dir, "obversa-review");
+  symlinkSync(COMMAND, link);
+  try {
+    const help = spawnSync(process.execPath, [link, "--help"], { encoding: "utf8", timeout: 5000 });
+    assert.equal(help.status, 0);
+    assert.match(help.stdout, /Usage:/, "help must print through a symlink");
+    const bad = spawnSync(process.execPath, [link, "--cwd"], { encoding: "utf8", timeout: 5000 });
+    assert.equal(bad.status, 2);
+    assert.match(bad.stderr, /--cwd needs a value/);
+    assert.equal(bad.stdout, "");
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
 });
