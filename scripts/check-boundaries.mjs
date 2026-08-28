@@ -53,7 +53,18 @@ function hostRootOf(absolute, repoRoot) {
   const match = /^hosts\/([^/]+)(?:\/|$)/.exec(relative(repoRoot, absolute).split('\\').join('/'));
   return match ? `hosts/${match[1]}/` : undefined;
 }
-export function hostImportFindings(text, { file, root: repoRoot, edges = [] }) {
+// The membership proof over recorded host edges: each target must be in
+// the set of files the walk import-scanned. Exported so the spec holds it to
+// that directly, beside the live full-check mutant.
+export function hostEdgeFailures(edges, scanned) {
+  const failures = [];
+
+  for (const { from, specifier, target } of edges) {
+    if (!scanned.has(target)) failures.push(`${from}: imports ${specifier}, which resolves to ${target}, a file this scan did not import-scan`);
+  }
+  return failures;
+}
+export function hostImportFindings(text, { file, root: repoRoot, edges = [], selfName } = {}) {
   const findings = [];
   const parsedAs = sourcePattern.test(file) ? file : `${file}.mjs`;
   // A host's proofs reach a package's internals by path today (the browser
@@ -70,6 +81,18 @@ export function hostImportFindings(text, { file, root: repoRoot, edges = [] }) {
     const { text: specifier, refused } = readSpecifier(raw);
     if (refused) {
       findings.push(refused);
+      continue;
+    }
+    // Package indirection is not a path the scan can follow: a `#alias` goes
+    // through the host manifest's imports map, and the host's own name (or a
+    // subpath of it) through its exports map. Neither exists in a host, and
+    // both are refused so no module can reach a file the edge set never saw.
+    if (shipped && specifier.startsWith('#')) {
+      findings.push(`a host imports through a package-imports alias (${specifier}); hosts carry no imports map and import by path or public name only`);
+      continue;
+    }
+    if (shipped && selfName && (specifier === selfName || specifier.startsWith(`${selfName}/`))) {
+      findings.push(`a host imports itself by package name (${specifier}); hosts carry no exports map and import their own files by path`);
       continue;
     }
     if (shipped && (/^\.\.?\//.test(specifier) || isAbsolute(specifier))) {
@@ -1006,6 +1029,35 @@ const forbidden = [
 
 const failures = [];
 
+// Host manifests, pinned to a shape with no indirection: no imports map, no
+// exports map, no entry field, no bin, and dependencies that are plain
+// registry or workspace ranges (an alias would let a name stand for a path
+// the edge set never saw). Read before the walk so a host script knows its
+// own package name.
+const hostManifests = new Map();
+for (const entry of await readdir(join(root, 'hosts'), { withFileTypes: true })) {
+  if (!entry.isDirectory()) continue;
+  const manifestPath = join(root, 'hosts', entry.name, 'package.json');
+  let manifest;
+  try {
+    manifest = JSON.parse(await readFile(manifestPath, 'utf8'));
+  } catch {
+    continue;
+  }
+  hostManifests.set(`hosts/${entry.name}/`, manifest);
+  const relativeManifest = `hosts/${entry.name}/package.json`;
+  for (const field of ['imports', 'exports', 'main', 'module', 'browser', 'bin', 'types', 'typesVersions', 'publishConfig']) {
+    if (manifest[field] !== undefined) failures.push(`${relativeManifest}: a host manifest carries no ${field}; a host has no package indirection and is never published`);
+  }
+  if (manifest.private !== true) failures.push(`${relativeManifest}: a host manifest is private`);
+  for (const field of ['dependencies', 'devDependencies', 'optionalDependencies', 'peerDependencies']) {
+    for (const [name, range] of Object.entries(manifest[field] ?? {})) {
+      const plain = typeof range === 'string' && (isVersionRange(range) || /^workspace:(\*|\^|~|[\d.]+|[<>=^~ \d.|-]+)$/.test(range));
+      if (!plain) failures.push(`${relativeManifest}: ${field} ${name} is "${range}"; a host dependency is a plain registry range or a workspace range, never an alias, a path, or a link`);
+    }
+  }
+}
+
 // The arrows a package may draw: itself, its dependencies, its peers. A
 // dependency list from any scan goes through this; a refusal is printed as
 // its reason.
@@ -1052,7 +1104,7 @@ const files = [];
 const scannedTextFiles = new Set();
 for (const path of scanRoots) {
   const absolute = join(root, path);
-  if (await exists(absolute)) await walk(absolute, files);
+  if (await exists(absolute)) await walk(absolute, files, failures);
 }
 for (const path of scanFiles) {
   const absolute = join(root, path);
@@ -1286,7 +1338,8 @@ for (const absolute of files) {
   if (isHostScript(path, text)) {
     importScannedHostFiles.add(path);
     const edges = [];
-    for (const finding of hostImportFindings(text, { file: absolute, root, edges })) failures.push(`${path}: ${finding}`);
+    const selfName = hostManifests.get(hostRootOf(absolute, root))?.name;
+    for (const finding of hostImportFindings(text, { file: absolute, root, edges, selfName })) failures.push(`${path}: ${finding}`);
     for (const edge of edges) hostEdges.push({ from: path, ...edge });
   }
 }
@@ -1300,9 +1353,7 @@ for (const path of requiredImportScannedHostFiles) {
 // The final proof for every shipped host edge: its resolved target is a file
 // this very walk import-scanned. A target the walk skipped (dist,
 // node_modules, a missing or unresolvable file) fails closed.
-for (const { from, specifier, target } of hostEdges) {
-  if (!importScannedHostFiles.has(target)) failures.push(`${from}: imports ${specifier}, which resolves to ${target}, a file this scan did not import-scan`);
-}
+failures.push(...hostEdgeFailures(hostEdges, importScannedHostFiles));
 
 if (failures.length) {
   console.error(`Boundary check failed (${failures.length}):`);
@@ -1323,7 +1374,9 @@ async function exists(path) {
   }
 }
 
-async function walk(directory, output) {
+// `failures` is the check's list, passed in: this function sits outside the
+// check's scope, and a refusal it cannot record would surface as a crash.
+async function walk(directory, output, failures) {
   const { files, symlinks } = await walkTree(directory);
   output.push(...files);
   for (const link of symlinks) {

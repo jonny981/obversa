@@ -1,15 +1,25 @@
 import assert from "node:assert/strict";
-import { execFileSync } from "node:child_process";
+import { execFileSync, spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
-import test from "node:test";
+import test, { after, before } from "node:test";
 
-import { mkdtempSync, mkdirSync, realpathSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import { cpSync, mkdtempSync, mkdirSync, readFileSync, realpathSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import ts from "@typescript/typescript6";
 import { validRange } from "semver";
 
-import { dependencyTarget, extractObversaImports, hostImportFindings, internalDependencies, isHostScript, isPinnedWorkspaceFile, isProjectConfig, isTestPath, isVersionRange, manifestImportTargets, manifestPathTargets, moduleSpecifiers, parserExtensions, PINNED_WORKSPACE_FILE, projectConfig, refusal, scansImports, sourceExtensions, textExtensions, tsconfigDependencies, walkTree } from "./check-boundaries.mjs";
+import { dependencyTarget, extractObversaImports, hostEdgeFailures, hostImportFindings, internalDependencies, isHostScript, isPinnedWorkspaceFile, isProjectConfig, isTestPath, isVersionRange, manifestImportTargets, manifestPathTargets, moduleSpecifiers, parserExtensions, PINNED_WORKSPACE_FILE, projectConfig, refusal, scansImports, sourceExtensions, textExtensions, tsconfigDependencies, walkTree } from "./check-boundaries.mjs";
+
+// No test in this file writes to the shared worktree: its status and every
+// tracked file's content relative to HEAD are captured before the first test
+// and must be identical after the last. A dirty tree is fine; a changed one
+// is a test that wrote where it must not.
+const worktree = new URL("..", import.meta.url).pathname;
+const worktreeState = () => execFileSync("git", ["status", "--porcelain", "--untracked-files=all"], { cwd: worktree, encoding: "utf8" }) + execFileSync("git", ["diff", "HEAD", "--no-color", "--no-ext-diff"], { cwd: worktree, encoding: "utf8" });
+let worktreeBefore;
+before(() => { worktreeBefore = worktreeState(); });
+after(() => { assert.equal(worktreeState(), worktreeBefore, "the shared worktree is exactly as it was before this file's tests"); });
 
 // A filesystem for the compiler made of a path -> text map, rooted at /repo.
 // The compiler's own directory matcher walks it, so `include` globs, package
@@ -590,6 +600,12 @@ test("host JavaScript is import-scanned: public package names pass, a path into 
     const found = hostImportFindings(text, { file, root: "/repo" });
     assert.ok(found.some((entry) => /by path/.test(entry)), text);
   }
+  // Package indirection: a `#alias` (the manifest's imports map) and the
+  // host's own name (its exports map) are refused outright in shipped code.
+  assert.ok(hostImportFindings('import { e } from "#escape";', { file, root: "/repo" }).some((entry) => /package-imports alias/.test(entry)));
+  assert.ok(hostImportFindings('import { e } from "@obversa/cmux-host/escape";', { file, root: "/repo", selfName: "@obversa/cmux-host" }).some((entry) => /imports itself by package name/.test(entry)));
+  assert.ok(hostImportFindings('import { e } from "@obversa/cmux-host";', { file, root: "/repo", selfName: "@obversa/cmux-host" }).some((entry) => /imports itself by package name/.test(entry)));
+  assert.deepEqual(hostImportFindings('import { e } from "@obversa/cmux-host-other";', { file, root: "/repo", selfName: "@obversa/cmux-host" }), [], "a different package name is a public name");
   assert.ok(hostImportFindings('const m = process.getBuiltinModule("node:module");', { file, root: "/repo" }).length > 0, "loader hatches are refused in a host too");
   assert.ok(hostImportFindings('const name = "@obversa/" + pick; import(name);', { file, root: "/repo" }).some((entry) => /computed module reference/.test(entry)));
   // Shipped host code may not reach a test path (exempt from the hatch rules)
@@ -621,6 +637,107 @@ test("host JavaScript is import-scanned: public package names pass, a path into 
   const proof = "/repo/hosts/cmux/test/f3-browser-proof.mjs";
   assert.deepEqual(hostImportFindings('import { highlightModel } from "../../../packages/source/src/highlight-model.mjs";', { file: proof, root: "/repo" }), []);
   assert.ok(hostImportFindings('import(pick);', { file: proof, root: "/repo" }).length > 0);
+});
+
+test("a recorded host edge passes only when its target is in the set the walk import-scanned", () => {
+  const scanned = new Set(["hosts/cmux/bin/obversa-review", "hosts/cmux/lib/review-args.mjs"]);
+  const edge = (specifier, target) => ({ from: "hosts/cmux/bin/obversa-review", specifier, target });
+  assert.deepEqual(hostEdgeFailures([edge("../lib/review-args.mjs", "hosts/cmux/lib/review-args.mjs")], scanned), []);
+  for (const [specifier, target] of [["../dist/escape.mjs", "hosts/cmux/dist/escape.mjs"], ["../lib/missing.mjs", "hosts/cmux/lib/missing.mjs"], ["../../../escape.mjs", "escape.mjs"]]) {
+    const failures = hostEdgeFailures([edge(specifier, target)], scanned);
+    assert.equal(failures.length, 1, specifier);
+    assert.match(failures[0], /did not import-scan/);
+  }
+});
+
+// The live full-check mutants: the real guard, run as a child on a
+// disposable copy of the current tree (everything but .git and node_modules,
+// with the root node_modules symlinked to the real one),
+// with one shipped host import added and the file it names created, must
+// fail with the resolved target named. The guard finds its root from its
+// own file, so the copied guard checks the copied tree; the shared worktree
+// is never written, so a crash, a kill, or a concurrent reader cannot see a
+// false tree. The copy is removed in finally.
+function copyTree(root) {
+  const copy = mkdtempSync(path.join(os.tmpdir(), "boundaries-tree-"));
+  cpSync(root, copy, {
+    recursive: true,
+    filter: (source) => {
+      const parts = path.relative(root, source).split(path.sep);
+      return parts[0] !== ".git" && parts.at(-1) !== "node_modules";
+    },
+  });
+  // The guard reads its pinned tools from the root node_modules; a package's
+  // own node_modules is never walked and never resolved through.
+  symlinkSync(path.join(root, "node_modules"), path.join(copy, "node_modules"));
+  return copy;
+}
+
+test("the guard, run on a disposable copy of the tree, refuses a shipped host import of a file the walk never scans", { timeout: 300_000 }, () => {
+  const real = new URL("..", import.meta.url).pathname;
+  const root = copyTree(real);
+  try {
+    const command = path.join(root, "hosts", "cmux", "bin", "obversa-review");
+    const original = readFileSync(command, "utf8");
+    const guard = () => spawnSync(process.execPath, [path.join(root, "scripts", "check-boundaries.mjs")], { cwd: root, encoding: "utf8" });
+    assert.equal(guard().status, 0, `the copy passes before any mutation:\n${guard().stderr}`);
+    const mutants = [
+      { name: "a tracked dist file under the host root", file: path.join(root, "hosts", "cmux", "dist", "escape.mjs"), specifier: "../dist/escape.mjs" },
+      { name: "a file at the repository root", file: path.join(root, "escape.mjs"), specifier: "../../../escape.mjs" },
+      { name: "a file under scripts", file: path.join(root, "scripts", "escape.mjs"), specifier: "../../../scripts/escape.mjs" },
+    ];
+    for (const mutant of mutants) {
+      mkdirSync(path.dirname(mutant.file), { recursive: true });
+      writeFileSync(mutant.file, "export const e = eval;\n");
+      writeFileSync(command, `${original}\nimport { e } from "${mutant.specifier}";\n`);
+      const run = guard();
+      assert.notEqual(run.status, 0, `${mutant.name}: the guard must fail`);
+      assert.match(run.stderr, /obversa-review: (imports .* a file this scan did not import-scan|a host imports a local module outside its own host root)/, `${mutant.name}:\n${run.stderr}`);
+      writeFileSync(command, original);
+      rmSync(mutant.file, { force: true });
+    }
+    writeFileSync(command, `${original}\nimport { e } from "../lib/missing.mjs";\n`);
+    const missing = guard();
+    assert.notEqual(missing.status, 0);
+    assert.match(missing.stderr, /hosts\/cmux\/lib\/missing\.mjs, a file this scan did not import-scan/);
+    writeFileSync(command, original);
+    // Package indirection through the host manifest: an imports alias, a
+    // self export, and an aliased dependency are each refused at the
+    // manifest, and the alias specifiers are refused in the shipped script.
+    const manifestPath = path.join(root, "hosts", "cmux", "package.json");
+    const manifest = JSON.parse(readFileSync(manifestPath, "utf8"));
+    const escape = path.join(root, "hosts", "cmux", "dist", "escape.mjs");
+    mkdirSync(path.dirname(escape), { recursive: true });
+    writeFileSync(escape, "export const e = eval;\n");
+    writeFileSync(manifestPath, JSON.stringify({ ...manifest, imports: { "#escape": "./dist/escape.mjs" } }));
+    writeFileSync(command, `${original}\nimport { e } from "#escape";\n`);
+    const aliased = guard();
+    assert.notEqual(aliased.status, 0);
+    assert.match(aliased.stderr, /hosts\/cmux\/package\.json: a host manifest carries no imports/);
+    assert.match(aliased.stderr, /obversa-review: a host imports through a package-imports alias \(#escape\)/);
+    writeFileSync(manifestPath, JSON.stringify({ ...manifest, exports: { "./escape": "./dist/escape.mjs" } }));
+    writeFileSync(command, `${original}\nimport { e } from "@obversa/cmux-host/escape";\n`);
+    const selfExport = guard();
+    assert.notEqual(selfExport.status, 0);
+    assert.match(selfExport.stderr, /hosts\/cmux\/package\.json: a host manifest carries no exports/);
+    assert.match(selfExport.stderr, /obversa-review: a host imports itself by package name/);
+    writeFileSync(manifestPath, JSON.stringify({ ...manifest, dependencies: { ...manifest.dependencies, escape: "file:./dist" } }));
+    writeFileSync(command, original);
+    const aliasDep = guard();
+    assert.notEqual(aliasDep.status, 0);
+    assert.match(aliasDep.stderr, /hosts\/cmux\/package\.json: dependencies escape is "file:\.\/dist"/);
+    writeFileSync(manifestPath, JSON.stringify(manifest));
+    // A symlink under packages/ is a recorded refusal, not a crash: the walk
+    // sits outside the check's scope and is handed its failure list.
+    const link = path.join(root, "packages", "source", "src", "link.mjs");
+    symlinkSync(path.join("..", "..", "surfacer", "src", "host.mjs"), link);
+    const linked = guard();
+    assert.notEqual(linked.status, 0);
+    assert.match(linked.stderr, /packages\/source\/src\/link\.mjs: a symlink under packages\/ is refused/);
+    assert.doesNotMatch(linked.stderr, /ReferenceError/);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
 });
 
 test("global is the same guarded root as globalThis: its evaluators and unlisted members are refused", () => {
