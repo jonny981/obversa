@@ -1,3 +1,4 @@
+import { realpathSync } from 'node:fs';
 import { readFile, readdir } from 'node:fs/promises';
 import { dirname, extname, join, relative, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -87,7 +88,9 @@ export function extractObversaImports(text, { file, root: repoRoot } = {}) {
   return found;
 }
 
-const isMain = process.argv[1] && fileURLToPath(import.meta.url) === resolve(process.argv[1]);
+// Compare real paths: Node resolves symlinks for import.meta but keeps the
+// invoked path in argv, so a symlinked invocation must still count as main.
+const isMain = process.argv[1] && realpathSync(fileURLToPath(import.meta.url)) === realpathSync(resolve(process.argv[1]));
 if (isMain) await main();
 
 async function main() {

@@ -27,7 +27,7 @@
 // guard. No hook can prevent that; it is a deliberate act, not the accidental
 // publish this guard exists to stop.
 import { execFileSync } from "node:child_process";
-import { readdirSync, readFileSync, existsSync } from "node:fs";
+import { readdirSync, readFileSync, existsSync, realpathSync } from "node:fs";
 import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -140,7 +140,9 @@ export function checkHook({ cwd = process.cwd(), env = process.env, allowlist = 
   return problems;
 }
 
-const isMain = process.argv[1] && fileURLToPath(import.meta.url) === process.argv[1];
+// Compare real paths: Node resolves symlinks for import.meta but keeps the
+// invoked path in argv, so a symlinked invocation must still count as main.
+const isMain = process.argv[1] && realpathSync(fileURLToPath(import.meta.url)) === realpathSync(process.argv[1]);
 if (isMain) {
   const problems = process.argv.includes("--audit") ? audit() : checkHook();
   if (problems.length) {
