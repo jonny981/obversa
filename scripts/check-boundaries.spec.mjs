@@ -80,10 +80,14 @@ test("a package.json imports alias, a workspace devDependency, and an alias that
 
 test("a dependency value is a registry range, a registry alias, a workspace package, or refused", () => {
   const at = { file: "/repo/packages/source/package.json", root: "/repo" };
-  for (const range of ["1.2.3", "^1.2.3", "~0.1.0", ">=0.1.0 <0.2.0", "1.x", "*", "1.2.3 - 2.0.0", "^1.0.0 || ^2.0.0", "4.4.3", "0.3.241", "1.0.0-beta.1"]) assert.equal(isVersionRange(range), true, range);
-  for (const other of ["latest", "../surfacer", "github:obversa/surfacer", "obversa/surfacer", "git+ssh://git@github.com/o/s.git", "https://example.test/s.tgz", "file:../surfacer", "link:../surfacer", "catalog:", ""]) assert.equal(isVersionRange(other), false, other);
+  for (const range of ["1.2.3", "^1.2.3", "~0.1.0", ">=0.1.0 <0.2.0", ">= 1.0.0", ">= 0.1.0 < 0.2.0", "1.x", "*", "1.2.3 - 2.0.0", "^1.0.0 || ^2.0.0", "4.4.3", "0.3.241", "1.0.0-beta.1", "1.0.0-rc-1+build.7"]) assert.equal(isVersionRange(range), true, range);
+  // node-semver's grammar, as pnpm reads it: an identifier is [0-9A-Za-z-];
+  // anything it returns null for falls through to a tag.
+  for (const other of ["latest", "1.0.0-foo_bar", "1.0.0+a_b", "../surfacer", "github:obversa/surfacer", "obversa/surfacer", "git+ssh://git@github.com/o/s.git", "https://example.test/s.tgz", "file:../surfacer", "link:../surfacer", "catalog:", ""]) assert.equal(isVersionRange(other), false, other);
   assert.deepEqual(dependencyTarget("zod", "^4.4.3", at), { external: true });
   assert.deepEqual(dependencyTarget("lod", "npm:lodash@^4", at), { external: true }, "an alias of a registry package");
+  assert.deepEqual(dependencyTarget("lod", "npm:lodash", at), { refused: "lod is npm:lodash, which is not a registry version the scan can read" }, "an alias without a version installs latest, a tag");
+  assert.deepEqual(dependencyTarget("x", "1.0.0-foo_bar", at), { refused: "x is 1.0.0-foo_bar, which is not a registry version the scan can read" });
   assert.deepEqual(dependencyTarget("@obversa/memory", "workspace:^", at), { name: "@obversa/memory" });
   assert.deepEqual(dependencyTarget("@obversa/memory", ">=0.1.0 <0.2.0", at), { name: "@obversa/memory" }, "a peer by range");
   assert.deepEqual(dependencyTarget("hidden", "npm:@obversa/surfacer@0.1.0", at), { name: "@obversa/surfacer" });

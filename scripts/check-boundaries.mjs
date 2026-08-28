@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto';
 import { realpathSync } from 'node:fs';
 import { readFile, readdir } from 'node:fs/promises';
 import { basename, dirname, extname, isAbsolute, join, relative, resolve } from 'node:path';
@@ -327,13 +328,20 @@ export function tsconfigDependencies(text, at) {
   return projectConfig(text, at).dependencies;
 }
 
-// A registry version range as pnpm reads one: comparator sets joined by
-// `||`, each a run of comparators (`^1.2.3`, `>=0.1.0 <0.2.0`, `1.x`, `*`)
-// or a hyphen range. A tag, a URL, a Git spec, a path, or anything else the
-// registry does not answer with a versioned package is not one.
-const comparator = /^(?:[<>]=?|=|\^|~)?v?(?:\d+|x|X|\*)(?:\.(?:\d+|x|X|\*)){0,2}(?:-[\w.-]+)?(?:\+[\w.-]+)?$/;
+// A registry version range as pnpm reads one through node-semver: comparator
+// sets joined by `||`, each a run of comparators (`^1.2.3`, `>= 0.1.0
+// <0.2.0` — space allowed after an operator, `1.x`, `*`) or a hyphen range;
+// a prerelease or build identifier is `[0-9A-Za-z-]+` and nothing else, so
+// `1.0.0-foo_bar` is not a version (node-semver returns null and pnpm
+// falls through to a tag). A tag, a URL, a Git spec, a path, or anything
+// else the registry does not answer with a versioned package is not one.
+const identifier = '[0-9A-Za-z-]+';
+const part = '(?:\\d+|x|X|\\*)';
+const comparator = new RegExp(`^(?:[<>]=?|=|\\^|~)?v?${part}(?:\\.${part}){0,2}(?:-${identifier}(?:\\.${identifier})*)?(?:\\+${identifier}(?:\\.${identifier})*)?$`);
 export function isVersionRange(value) {
-  return value.trim().split(/\s*\|\|\s*/).every((set) => {
+  const normalised = value.trim().replace(/([<>]=?|=|\^|~)\s+/g, '$1');
+  if (normalised.length === 0) return false;
+  return normalised.split(/\s*\|\|\s*/).every((set) => {
     const tokens = set.trim().split(/\s+/);
     if (tokens.length === 3 && tokens[1] === '-') return comparator.test(tokens[0]) && comparator.test(tokens[2]);
     return tokens.every((token) => comparator.test(token));
@@ -365,8 +373,9 @@ export function dependencyTarget(key, spec, { file, root: repoRoot } = {}) {
     return { refused: `${key} is ${value}, which is not a workspace range the scan can read` };
   }
   if (isVersionRange(value)) return { external: true };
-  const npmAlias = /^npm:((?:@[^@/]+\/)?[^@/]+)(?:@(.+))?$/.exec(value);
-  if (npmAlias && !npmAlias[1].startsWith('@obversa/') && (npmAlias[2] === undefined || isVersionRange(npmAlias[2]))) return { external: true };
+  // An alias without a version installs `latest`, a tag: refused.
+  const npmAlias = /^npm:((?:@[^@/]+\/)?[^@/]+)@(.+)$/.exec(value);
+  if (npmAlias && !npmAlias[1].startsWith('@obversa/') && isVersionRange(npmAlias[2])) return { external: true };
   return { refused: `${key} is ${value}, which is not a registry version the scan can read` };
 }
 
@@ -569,6 +578,14 @@ const runtimeScripts = {
   prepack: 'pnpm run build',
   prepublishOnly: 'node ../../scripts/check-publish-allowlist.mjs',
 };
+// The configuration files those scripts read — tsup's entries and vitest's
+// includes and aliases decide what is compiled and what a specifier maps
+// to — are pinned by the SHA-256 of their content, for the same reason:
+// a change to one is a change to the boundary rule. The vitest aliases in
+// memory-git and memory-simple map @obversa/memory to its source, the
+// arrow those packages are allowed.
+const sharedVitestConfig = '47f97f641e5f61ceac97871e6920106d3589156d8a8c5082af7fa43f77f3af75';
+const smallTsupConfig = '04bcd9ecce6085ba1fdb9793308e534aa8deca99bebd9556484e5caf13d3347f';
 const packageRules = new Map([
   ['@obversa/lines', {
     version: '1.0.0',
@@ -584,27 +601,52 @@ const packageRules = new Map([
       prepack: 'pnpm run build',
       prepublishOnly: 'node ../../scripts/check-publish-allowlist.mjs',
     },
+    configFiles: {
+      'tsup.config.ts': '4ad5acaefe92ed656068f2fc80e4ab7706fbf7bc5244e6823b836308aa92b7a0',
+      'vitest.config.ts': sharedVitestConfig,
+    },
   }],
-  ['@obversa/memory', { version: '0.1.0', dependencies: [], peerDependencies: [], scripts: runtimeScripts }],
+  ['@obversa/memory', {
+    version: '0.1.0',
+    dependencies: [],
+    peerDependencies: [],
+    scripts: runtimeScripts,
+    configFiles: {
+      'tsup.config.ts': '492827498350f6fb7446c21bb116257fab839810b3957610c8698be6acaea4f7',
+      'vitest.config.ts': sharedVitestConfig,
+    },
+  }],
   ['@obversa/memory-simple', {
     version: '0.1.0',
     dependencies: ['@obversa/memory'],
     peerDependencies: [],
     scripts: runtimeScripts,
+    configFiles: {
+      'tsup.config.ts': smallTsupConfig,
+      'vitest.config.ts': '3c0fa3b9d4f29b00827685e48a9e21c7fb76406dc7d109d4a1eaffb8a479c493',
+    },
   }],
   ['@obversa/memory-git', {
     version: '0.1.0',
     dependencies: ['@obversa/memory'],
     peerDependencies: [],
     scripts: runtimeScripts,
+    configFiles: {
+      'tsup.config.ts': smallTsupConfig,
+      'vitest.config.ts': '1852703a25309cfea3a288634a46ea383873091b76f8ab9c1629f57163d451ad',
+    },
   }],
   // Private workspace packages get a rule too, so a sibling import inside
   // them is caught the same way. Surfacer must never depend on the runtime or
   // another package; source must never import surfacer (it takes the surface
   // port by injection from the host composition root).
-  ['@obversa/surfacer', { version: '0.1.0', private: true, dependencies: [], peerDependencies: [], scripts: { test: 'node --test test/*.test.mjs' } }],
-  ['@obversa/source', { version: '0.1.0', private: true, dependencies: [], peerDependencies: [], scripts: { test: 'node --test test/*.test.mjs' } }],
+  ['@obversa/surfacer', { version: '0.1.0', private: true, dependencies: [], peerDependencies: [], scripts: { test: 'node --test test/*.test.mjs' }, configFiles: {} }],
+  ['@obversa/source', { version: '0.1.0', private: true, dependencies: [], peerDependencies: [], scripts: { test: 'node --test test/*.test.mjs' }, configFiles: {} }],
 ]);
+// The names a build or test tool reads its configuration from, wherever
+// it runs: any such file that is not pinned is refused, in a package or
+// at the root (vitest reads a workspace file there).
+const toolConfigName = /^(?:tsup|vitest|vite)\.(?:config|workspace)\.[^/]+$|^tsup\.json$/;
 const scanRoots = [
   '.changeset',
   'packages',
@@ -811,6 +853,21 @@ for (const [name, rule] of packageRules) {
     if (scripts[scriptName] !== rule.scripts[scriptName])
       failures.push(`${name}: script ${scriptName} must be ${JSON.stringify(rule.scripts[scriptName]) ?? 'absent'}; found ${JSON.stringify(scripts[scriptName]) ?? 'absent'}. Scripts are pinned in packageRules; review the boundary rule with any change`);
   }
+  // And the configuration files those scripts read are exactly the pinned
+  // ones, by content; a tool key in the manifest is another such file.
+  const present = (await readdir(directory)).filter((entry) => toolConfigName.test(entry));
+  for (const entry of new Set([...present, ...Object.keys(rule.configFiles)])) {
+    const pinned = rule.configFiles[entry];
+    const actual = present.includes(entry) ? createHash('sha256').update(await readFile(join(directory, entry))).digest('hex') : undefined;
+    if (actual !== pinned)
+      failures.push(`packages/${owner}/${entry}: content sha256 must be ${pinned ?? 'absent'}; found ${actual ?? 'absent'}. Build and test configuration is pinned in packageRules; review the boundary rule with any change`);
+  }
+  for (const key of ['tsup', 'vitest', 'vite']) {
+    if (manifest[key] !== undefined) failures.push(`${name}: manifest key ${key} configures a tool the scan pins by file; move it to a pinned file`);
+  }
+}
+for (const entry of await readdir(root)) {
+  if (toolConfigName.test(entry)) failures.push(`${entry}: a root build or test configuration is read by every package's tools and is not pinned`);
 }
 
 // The root manifest can rewrite what any package installs: an override or
