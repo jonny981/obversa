@@ -252,7 +252,9 @@ async function keyboardRoute(dt) {
   await dt.enter();
   // The one comment in the document is in the opener's own thread.
   const saved = await active(`const all = document.querySelectorAll(".comment-body"); const c = window.__thread.querySelector(".comment-body"); return { saved: c && c.textContent, commentsInDocument: all.length, saveClosed: !document.querySelector(".editor"), saveReturned: a === window.__opener };`);
-  return { tabs, reached: true, ...reached, ...opened, discardTarget, ...discarded, saveTarget, ...saved };
+  // Return the review: what the page sends is what the reviewer gets.
+  const returned = await dt.evaluate(`(() => { const b = [...document.querySelectorAll("button")].find((x) => /^Return 1 annotation/.test(x.textContent)); if (!b) return null; b.click(); return b.textContent; })()`);
+  return { tabs, reached: true, ...reached, ...opened, discardTarget, ...discarded, saveTarget, ...saved, returned };
 }
 
 test("the runtime's CSP in this proof is the one surfacer serves", async () => {
@@ -273,18 +275,29 @@ test("the review surface renders under the exact CSP with zero violations and fi
     "/icons.mjs": ["icons.mjs", "text/javascript; charset=utf-8"],
   };
   const results = Promise.withResolvers();
+  // The review's return, as the surfacer would receive it: the submit body,
+  // and the acknowledgement of the operation id the reply carried.
+  const submitted = Promise.withResolvers();
+  const acked = Promise.withResolvers();
   const server = createServer((req, res) => {
     for (const [k, v] of Object.entries(HEADERS)) res.setHeader(k, v);
     const url = new URL(req.url, "http://127.0.0.1");
     const send = (status, type, body) => { res.writeHead(status, { "content-type": type }); res.end(body); };
+    const json = (handler) => { const chunks = []; req.on("data", (d) => chunks.push(d)); req.on("end", () => handler(JSON.parse(Buffer.concat(chunks).toString() || "{}"))); };
     if (url.pathname === "/results" && req.method === "POST") {
-      const chunks = []; req.on("data", (d) => chunks.push(d)); req.on("end", () => { res.writeHead(204); res.end(); results.resolve(JSON.parse(Buffer.concat(chunks).toString())); });
+      json((body) => { res.writeHead(204); res.end(); results.resolve(body); });
       return;
     }
     if (url.pathname.startsWith("/api/")) {
       if (req.headers.authorization !== `Bearer ${token}`) return send(401, "application/json", JSON.stringify({ error: "Authentication required" }));
       if (url.pathname === "/api/model" && req.method === "GET") return send(200, "application/json", JSON.stringify({ model, meta, highlightCss }));
       if (url.pathname === "/api/heartbeat") return send(200, "application/json", JSON.stringify({ ok: true }));
+      if (url.pathname === "/api/submit" && req.method === "POST") {
+        return json((body) => { submitted.resolve(body); send(200, "application/json", JSON.stringify({ ok: true, status: "completed", operationId: "op-submit" })); });
+      }
+      if (url.pathname === "/api/ack" && req.method === "POST") {
+        return json((body) => { acked.resolve(body); send(200, "application/json", JSON.stringify({ ok: true, status: "completed" })); });
+      }
       return send(404, "application/json", JSON.stringify({ error: "Not found" }));
     }
     if (url.pathname === "/") return send(200, "text/html; charset=utf-8", shell);
@@ -313,6 +326,8 @@ test("the review surface renders under the exact CSP with zero violations and fi
     try { report = await results.promise; } finally { clearTimeout(timeout); }
     const dt = await devtools(profile, origin);
     try { keys = await keyboardRoute(dt); } finally { dt.close(); }
+    const late = setTimeout(() => { submitted.reject(new Error("the page never returned the review")); acked.reject(new Error("the page never acknowledged the return")); }, 10_000);
+    try { keys.payload = await submitted.promise; keys.ack = await acked.promise; } finally { clearTimeout(late); }
   } finally {
     chrome?.kill("SIGKILL");
     if (chrome) await new Promise((r) => { chrome.once("exit", r); setTimeout(r, 1500); });
@@ -351,6 +366,17 @@ test("the review surface renders under the exact CSP with zero violations and fi
   assert.equal(keys.commentsInDocument, 1, "and nowhere else");
   assert.equal(keys.saveClosed, true, "and closes the editor");
   assert.equal(keys.saveReturned, true, "and focus returns to the button that opened it");
+  // The returned review names the comment where the reviewer put it: the
+  // file and side the button's label names, the line of the row it sits
+  // on — not merely where the comment was painted.
+  assert.match(keys.returned, /^Return 1 annotation/, "the return button counts the one comment");
+  const [, side, line, file] = /^Add a comment on the (\w+) side at line (\d+) of (.+)$/.exec(keys.label);
+  assert.equal(keys.payload.decision, "changes-requested");
+  assert.equal(keys.payload.annotations.length, 1, "one annotation returned");
+  assert.deepEqual(keys.payload.annotations[0].anchor, { target: file, side, position: Number(line) }, "the annotation's anchor is the opener's file, side, and line");
+  assert.equal(keys.payload.annotations[0].body, "Looks wrong");
+  assert.match(keys.payload.annotations[0].createdAt, /^\d{4}-\d{2}-\d{2}T/, "stamped");
+  assert.deepEqual(keys.ack, { operationId: "op-submit" }, "the completion's operation id is acknowledged");
 });
 
 test("a page that cannot load its review cancels the session instead of holding the lease", { skip: CHROME ? false : "Google Chrome is not installed", timeout: 60_000 }, async () => {
