@@ -81,7 +81,12 @@ function canonicalJson(value, seen = new Set()) {
   if (typeof value === "string") return JSON.stringify(value);
   if (typeof value === "number") return Number.isFinite(value) ? JSON.stringify(value) : null;
   if (typeof value !== "object") return null;
-  if (value instanceof Map || value instanceof Set || typeof value.toJSON === "function") return null;
+  // Only a plain object or an array is a location. Anything else — a RegExp,
+  // an Error, a Map, a Promise, an ArrayBuffer, a class instance — JSON
+  // erases to {} or a fragment, so two different values would share a key.
+  const proto = Object.getPrototypeOf(value);
+  if (!Array.isArray(value) && proto !== Object.prototype && proto !== null) return null;
+  if (typeof value.toJSON === "function") return null;
   // JSON skips a symbol-keyed property without a trace; a location with one
   // would be keyed as something smaller than it is.
   if (Object.getOwnPropertySymbols(value).some((symbol) => Object.prototype.propertyIsEnumerable.call(value, symbol))) return null;
@@ -183,10 +188,11 @@ export function buildAnchorSet(anchors) {
 }
 
 // Keep only the contract fields of an anchor, in a stable order. Runs after the
-// anchor has already passed the membership check.
+// anchor has already passed the membership check. A null side is no side: it
+// keys as omitted, so it is normalised as omitted too.
 function normalizeAnchor(anchor) {
   const clean = { target: anchor.target, position: anchor.position };
-  if (anchor.side !== undefined) clean.side = anchor.side;
+  if (anchor.side !== undefined && anchor.side !== null) clean.side = anchor.side;
   return clean;
 }
 
@@ -302,6 +308,16 @@ export function isGateBinding(gateId, callback) {
 }
 
 export function isSurfaceRequest(value) {
+  // A boolean guard never throws: a throwing getter or proxy anywhere in the
+  // request is simply not a request.
+  try {
+    return checkSurfaceRequest(value);
+  } catch {
+    return false;
+  }
+}
+
+function checkSurfaceRequest(value) {
   if (!value || typeof value !== "object") return false;
   if (!isPresent(value.surfaceId)) return false;
   if (!isGateBinding(value.gateId, value.callback)) return false;

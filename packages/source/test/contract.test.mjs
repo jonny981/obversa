@@ -125,6 +125,27 @@ test("anchorKey is total: it never throws, and an anchor that points nowhere is 
   assert.equal(isSurfaceRequest({ ...request, anchors: [throwingPosition] }), false);
   assert.equal(validateAnnotation({ anchor: throwingPosition, body: "x" }, buildAnchorSet([outputAnchor(1)])), null);
   assert.equal(anchorKey({ target: "a", position: Object.assign({ x: 1 }, { [Symbol("s")]: 2 }) }), null, "a symbol-keyed property");
+  // Only a plain object or an array is a location: JSON erases anything else
+  // to {} or a fragment, so two different values would share a key.
+  const offeredExotic = { target: "shot", position: { x: 1, exotic: /x/ } };
+  assert.equal(anchorKey(offeredExotic), null, "a RegExp inside a position");
+  assert.equal(validateAnnotation({ anchor: { target: "shot", position: { x: 1, exotic: /y/ } }, body: "x" }, buildAnchorSet([offeredExotic])), null, "the RegExp forgery never meets");
+  assert.equal(isSurfaceRequest({ ...request, anchors: [offeredExotic] }), false);
+  class Point { constructor() { this.x = 1; } }
+  for (const exotic of [new Error("e"), new WeakMap(), Promise.resolve(1), new ArrayBuffer(4), new Point(), /x/, new Date(0), new Uint8Array(2)]) {
+    assert.equal(anchorKey({ target: "shot", position: exotic }), null, `${Object.prototype.toString.call(exotic)} as a position`);
+    assert.equal(anchorKey({ target: "shot", position: { x: 1, exotic } }), null, `${Object.prototype.toString.call(exotic)} inside a position`);
+  }
+  assert.equal(typeof anchorKey({ target: "shot", position: Object.assign(Object.create(null), { x: 1 }) }), "string", "a null-prototype object is plain");
+  assert.equal(typeof anchorKey({ target: "shot", position: [{ x: 1 }, [2]] }), "string", "nested plain shapes");
+  // A null side is no side: it keys and normalises as omitted.
+  assert.equal(anchorKey({ target: "a", position: 1, side: null }), anchorKey({ target: "a", position: 1 }));
+  const nullSide = validateAnnotation({ anchor: { target: "src/app.js", position: 12, side: null }, body: "x" }, buildAnchorSet([{ target: "src/app.js", position: 12 }]));
+  assert.deepEqual(nullSide.anchor, { target: "src/app.js", position: 12 });
+  // The root guard never throws either.
+  assert.equal(isSurfaceRequest(new Proxy({}, { get() { throw new Error("boom"); } })), false, "a proxy request");
+  assert.equal(isSurfaceRequest({ get surfaceId() { throw new Error("boom"); } }), false, "a throwing root getter");
+  assert.equal(isSurfaceRequest({ ...request, anchors: [outputAnchor(1)], get transport() { throw new Error("boom"); } }), false, "a throwing getter deeper in");
   assert.equal(buildAnchorSet([{ target: "a", position: cyclic }, { target: "a", position: 1 }]).size, 1);
   assert.equal(validateAnnotation({ anchor: { target: "a", position: cyclic }, body: "x" }, buildAnchorSet([outputAnchor(1)])), null);
 });
