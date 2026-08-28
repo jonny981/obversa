@@ -104,6 +104,16 @@ const PROBE = `(() => {
     const bt = document.querySelector(".context-toggle");
     let bandExpandOk = false;
     if (bt) { bt.click(); bandExpandOk = document.querySelectorAll(".context-rows .row-context").length > 0; }
+    // A keyboard user must be able to reach an add-comment button and see it
+    // once focused: it has to be in the tab order (a hidden control is not)
+    // and painted when it holds focus.
+    const keyboardAnnotate = (() => {
+      const button = document.querySelector(".add-comment");
+      if (!button) return null;
+      button.focus();
+      const style = getComputedStyle(button);
+      return { focused: document.activeElement === button, visible: style.visibility !== "hidden" && style.opacity === "1" };
+    })();
     const tabs = document.querySelectorAll(".tree-tab");
     const treeFiles = document.querySelectorAll(".tree-file-btn").length;
     let allFilesCount = 0;
@@ -123,7 +133,7 @@ const PROBE = `(() => {
       })(),
       sections: sections.length, jumps: jumps.length, clicked, defLine, premise, flashed, sameFile,
       treeFiles, contextBands: document.querySelectorAll(".context-band").length, bandExpandOk,
-      tabs: tabs.length, allFilesCount,
+      tabs: tabs.length, allFilesCount, keyboardAnnotate,
     }) });
   };
   window.addEventListener("load", () => setTimeout(tick, 200));
@@ -232,6 +242,9 @@ test("the review surface renders under the exact CSP with zero violations and fi
   assert.ok(report.treeFiles > 0, "file tree");
   assert.ok(report.contextBands > 0 && report.bandExpandOk, "context bands expand");
   assert.ok(report.tabs >= 2 && report.allFilesCount > report.treeFiles, "All files tab");
+  assert.ok(report.keyboardAnnotate, "an add-comment button exists");
+  assert.equal(report.keyboardAnnotate.focused, true, "an add-comment button takes keyboard focus");
+  assert.equal(report.keyboardAnnotate.visible, true, "and is painted while it holds focus");
 });
 
 test("a page that cannot load its review cancels the session instead of holding the lease", { skip: CHROME ? false : "Google Chrome is not installed", timeout: 60_000 }, async () => {

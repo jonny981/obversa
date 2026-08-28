@@ -143,13 +143,19 @@ button.link { border: none; color: var(--accent); padding: 0 0.25rem; }
 .row-del .sign { color: var(--del-fg); }
 .code { white-space: pre-wrap; word-break: break-word; padding-right: 0.5rem; }
 
+/* The add-comment button stays in the tab order at all times — opacity, not
+   visibility, so a keyboard user can reach it — and shows itself on hover,
+   on focus, or when anything in its row has focus. */
 .add-comment {
-  visibility: hidden;
+  opacity: 0;
   align-self: center;
   padding: 0 0.4rem;
   line-height: 1.2;
 }
-.row:hover .add-comment { visibility: visible; }
+.row:hover .add-comment,
+.row:focus-within .add-comment,
+.add-comment:focus-visible { opacity: 1; }
+.add-comment:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
 
 .thread { padding: 0 0.75rem; }
 .thread:empty { padding: 0; }
