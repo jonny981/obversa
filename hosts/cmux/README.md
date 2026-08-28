@@ -3,7 +3,7 @@
 This directory holds the F0 host glue for cmux. It is setup, not a product:
 configuration plus small scripts. No host fork, no new UI.
 
-The glue removes app switching from the factory flow. The correct editor
+The glue removes app switching from the process flow. The correct editor
 opens on the correct worktrees. Local web surfaces open in splits beside
 the terminal. Outside cmux, each script falls back to the default browser
 or fails with a clear message.

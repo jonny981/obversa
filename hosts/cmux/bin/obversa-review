@@ -18,10 +18,18 @@
 //   obversa-review --app <name>     override the surface app name
 
 import { readFile } from "node:fs/promises";
+import { createRequire } from "node:module";
 
-import { runSurface } from "../../../packages/surfacer/src/index.mjs";
-import { reviewDiff } from "../../../packages/source/src/index.mjs";
+// The packages by their public names and exports only: this host is a
+// workspace package that depends on both, so a move of either's files
+// behind its exports map changes nothing here.
+import { runSurface } from "@obversa/surfacer";
+import { reviewDiff } from "@obversa/source";
 import { HELP, parseArgs } from "../lib/review-args.mjs";
+
+const require = createRequire(import.meta.url);
+// The client kit the page loads, as the surfacer exports it.
+const CLIENT_KIT = require.resolve("@obversa/surfacer/client");
 
 // Exit codes are set through process.exitCode, never process.exit(): stdout
 // and stderr are asynchronous on a pipe, and exiting right after a write can
@@ -41,7 +49,7 @@ async function main() {
   }
 
   const clientKitSource = await readFile(
-    new URL("../../../packages/surfacer/src/client.mjs", import.meta.url),
+    CLIENT_KIT,
     "utf8",
   );
 
