@@ -48,6 +48,11 @@ export function isHostScript(path, text) {
   if (sourcePattern.test(path)) return true;
   return extname(path) === '' && /^#!.*\bnode\b/.test(text.split('\n')[0] ?? '');
 }
+// The `hosts/<name>` root an absolute path lies in, or undefined.
+function hostRootOf(absolute, repoRoot) {
+  const match = /^hosts\/([^/]+)(?:\/|$)/.exec(relative(repoRoot, absolute).split('\\').join('/'));
+  return match ? `hosts/${match[1]}/` : undefined;
+}
 export function hostImportFindings(text, { file, root: repoRoot }) {
   const findings = [];
   const parsedAs = sourcePattern.test(file) ? file : `${file}.mjs`;
@@ -69,14 +74,21 @@ export function hostImportFindings(text, { file, root: repoRoot }) {
     }
     if (shipped && (/^\.\.?\//.test(specifier) || isAbsolute(specifier))) {
       const target = resolve(dirname(file), specifier);
-      const dir = packageDirOf(realpathOf(target, ts.sys), repoRoot) ?? packageDirOf(target, repoRoot);
+      const real = realpathOf(target, ts.sys);
+      const dir = packageDirOf(real, repoRoot) ?? packageDirOf(target, repoRoot);
       if (dir !== undefined) findings.push(`a host reaches packages/${dir} by path (${specifier}); hosts import packages by their public names only`);
       // A test path is exempt from the loader-hatch rules, so shipped host
       // code may not reach one — the same edge the package scan refuses.
-      if (namesTestPath(specifier, file)) findings.push(`shipped host code imports a test path, which is exempt from the loader-hatch rules: ${specifier}`);
-      // A local module is scanned only when it carries a source extension;
-      // an extensionless target would be loaded without ever being read.
-      if (!sourcePattern.test(target)) findings.push(`a host imports a local module the scan would not read (${specifier}); a local module carries a source extension`);
+      if (namesTestPath(specifier, file) || namesTestPath(real, file)) findings.push(`shipped host code imports a test path, which is exempt from the loader-hatch rules: ${specifier}`);
+      // A shipped host's local module must be a file the walk import-scans:
+      // inside the importing file's own hosts/<name>/ root by real path (not
+      // the repository root, not scripts/, not another host) and carrying a
+      // source extension. Membership is proved by position, never inferred
+      // from a suffix alone.
+      const hostRoot = hostRootOf(file, repoRoot);
+      const targetRoot = hostRootOf(real, repoRoot);
+      if (!hostRoot || targetRoot !== hostRoot) findings.push(`a host imports a local module outside its own host root (${specifier}); a host's local modules live under ${hostRoot ?? 'hosts/<name>/'}`);
+      else if (!sourcePattern.test(real)) findings.push(`a host imports a local module the scan would not read (${specifier}); a local module carries a source extension`);
     }
   }
   return findings;

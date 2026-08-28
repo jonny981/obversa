@@ -598,7 +598,17 @@ test("host JavaScript is import-scanned: public package names pass, a path into 
   assert.ok(hostImportFindings('import { probe } from "../lib/escape.test.mjs";', { file, root: "/repo" }).some((entry) => /imports a test path/.test(entry)));
   assert.ok(hostImportFindings('import { helper } from "../lib/helper";', { file, root: "/repo" }).some((entry) => /the scan would not read/.test(entry)));
   assert.ok(hostImportFindings('const h = await import("../bin/other-command");', { file, root: "/repo" }).some((entry) => /the scan would not read/.test(entry)));
-  assert.deepEqual(hostImportFindings('import { helper } from "../lib/helper.mjs";', { file, root: "/repo" }), [], "a local module with a source extension is scanned on its own");
+  assert.deepEqual(hostImportFindings('import { helper } from "../lib/helper.mjs";', { file, root: "/repo" }), [], "a local module with a source extension inside the host root is scanned on its own");
+  // A suffix proves nothing: the target must sit inside the importing
+  // file's own hosts/<name>/ root, or it is a file the walk never scans.
+  for (const text of [
+    'import { e } from "../../../escape.mjs";',
+    'import { e } from "../../../scripts/release.mjs";',
+    'import { e } from "../../other-host/lib/helper.mjs";',
+    'import { e } from "/repo/escape.mjs";',
+  ]) {
+    assert.ok(hostImportFindings(text, { file, root: "/repo" }).some((entry) => /outside its own host root/.test(entry)), text);
+  }
   // A host proof may reach a package's internals by path until F2b gives it a
   // public testing subpath; it is still refused a computed or schemed specifier.
   const proof = "/repo/hosts/cmux/test/f3-browser-proof.mjs";
