@@ -14,15 +14,18 @@
 // and a UTF-8 sequence spelled out in octal still decodes to its character.
 function unquoteGitPath(raw) {
   if (raw.length < 2 || raw[0] !== '"' || raw[raw.length - 1] !== '"') return raw;
-  const inner = raw.slice(1, -1);
+  // Walk code points, not UTF-16 units: a character outside the BMP (an
+  // emoji) is one code point but two units, and encoding each unit alone
+  // would turn it into two replacement characters.
+  const chars = Array.from(raw.slice(1, -1));
   const escapes = { t: 9, n: 10, r: 13, f: 12, b: 8, v: 11, a: 7 };
   const bytes = [];
-  for (let i = 0; i < inner.length; i += 1) {
-    if (inner[i] !== "\\") { bytes.push(...Buffer.from(inner[i], "utf8")); continue; }
-    const next = inner[i + 1];
+  for (let i = 0; i < chars.length; i += 1) {
+    if (chars[i] !== "\\") { bytes.push(...Buffer.from(chars[i], "utf8")); continue; }
+    const next = chars[i + 1];
     if (next === undefined) { bytes.push(0x5c); break; }
     if (Object.hasOwn(escapes, next)) { bytes.push(escapes[next]); i += 1; continue; }
-    const octal = inner.slice(i + 1, i + 4).match(/^[0-7]{1,3}/);
+    const octal = chars.slice(i + 1, i + 4).join("").match(/^[0-7]{1,3}/);
     if (octal) { bytes.push(parseInt(octal[0], 8) & 0xff); i += octal[0].length; continue; }
     bytes.push(...Buffer.from(next, "utf8")); // \" -> ", \\ -> \, any other escaped char stays literal
     i += 1;

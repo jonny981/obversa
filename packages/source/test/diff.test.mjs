@@ -226,6 +226,26 @@ test("the tab git appends after an unquoted path with spaces in --- and +++ is n
   assert.equal(quoted.path, `ends${tab}`);
 });
 
+test("a character outside the BMP inside a quoted path survives whole", () => {
+  // With core.quotePath=false git leaves the emoji literal and quotes the
+  // name only for the tab; the emoji is one code point but two UTF-16 units.
+  const tab = String.fromCharCode(9);
+  const face = String.fromCodePoint(0x1f600);
+  const { files } = parseUnifiedDiff(`diff --git "a/face${face}\\tname.bin" "b/face${face}\\tname.bin"
+Binary files a/face${face}\\tname.bin and "b/face${face}\\tname.bin" differ
+`);
+  const [file] = files;
+  assert.equal(file.path, `face${face}${tab}name.bin`);
+  assert.equal(file.oldPath, `face${face}${tab}name.bin`);
+  assert.equal(file.newPath, `face${face}${tab}name.bin`);
+  assert.doesNotMatch(file.path, /�/, "no replacement characters");
+  // A surrogate pair before an octal escape, and one escaped itself, decode the same way.
+  const mixed = parseUnifiedDiff(`diff --git "a/${face}\\001x" "b/${face}\\001x"
+Binary files a/x and b/x differ
+`).files[0];
+  assert.equal(mixed.path, `${face}${String.fromCharCode(1)}x`);
+});
+
 test("git's octal escapes decode to the real bytes, one control byte or a whole UTF-8 sequence", () => {
   const control = String.fromCharCode(1);
   const one = parseUnifiedDiff(`diff --git "a/control\\001name.bin" "b/control\\001name.bin"
