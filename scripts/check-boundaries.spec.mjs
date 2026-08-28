@@ -575,6 +575,40 @@ test("a subpath import resolves to its package name; a relative import inside th
   assert.deepEqual(extractObversaImports(`import x from "../src/git.mjs"; require("./local.cjs");`, { file, root: "/repo" }), []);
 });
 
+test("a shipped entry cannot reach a test file, so the test file's loader-hatch exemption never ships", () => {
+  // The probe: a test-named file inside src/ uses a loader hatch to reach a
+  // sibling package; the file itself is exempt, and the shipped index imports
+  // it by a same-package relative path. The finding lands on the shipped
+  // edge, so the hatch has no route into the shipped graph.
+  const escape = 'process.getBuiltinModule("node:module").createRequire(import.meta.url)("../../surfacer/src/index.mjs");';
+  assert.equal(isTestPath("/repo/packages/source/src/escape.test.mjs"), true);
+  assert.deepEqual(extractObversaImports(escape, { file: "/repo/packages/source/src/escape.test.mjs", root: "/repo" }), [], "the test-named file is exempt on its own");
+  const shipped = extractObversaImports('import "./escape.test.mjs";', { file: "/repo/packages/source/src/index.mjs", root: "/repo" });
+  assert.equal(shipped.length, 1);
+  assert.match(shipped[0], /imports a test path/, "the shipped import of the test-named file is the finding");
+  // Every static form of the edge: extensionless, a test directory, a
+  // sibling package's test file by name, and a dynamic import string.
+  for (const [file, text] of [
+    ["/repo/packages/source/src/a.ts", 'import x from "./escape.test";'],
+    ["/repo/packages/source/src/a.mjs", 'import "../test/helper.mjs";'],
+    ["/repo/packages/source/src/a.mjs", 'import "../src/__tests__/c.mjs";'],
+    ["/repo/packages/source/src/a.mjs", 'import "@obversa/memory/test/fixture.mjs";'],
+    ["/repo/packages/source/src/a.mjs", 'await import("./escape.spec.mjs");'],
+  ]) {
+    const found = extractObversaImports(text, { file, root: "/repo" });
+    assert.ok(found.some((entry) => /test path/.test(entry)), `${file}: ${text}`);
+  }
+  // A test importing another test is fine; a shipped testing subpath is not a test path.
+  assert.deepEqual(extractObversaImports('import "./helper.test.mjs";', { file: "/repo/packages/source/test/a.test.mjs", root: "/repo" }), []);
+  assert.deepEqual(extractObversaImports('import "./testing.js";', { file: "/repo/packages/source/src/a.mjs", root: "/repo" }), []);
+  // Manifest entries are shipped entries too.
+  const file = "/repo/packages/source/package.json";
+  assert.ok(manifestPathTargets({ exports: { "./x": "./test/x.test.mjs" } }, { file, root: "/repo", host: fakeHost({}) }).some((entry) => /exports points at a test path/.test(entry)));
+  assert.ok(manifestPathTargets({ main: "./src/index.spec.mjs" }, { file, root: "/repo", host: fakeHost({}) }).some((entry) => /main points at a test path/.test(entry)));
+  assert.ok(manifestImportTargets({ imports: { "#h": "./test/h.mjs" } }, { file, root: "/repo" }).some((entry) => /alias a test path/.test(entry)));
+  assert.deepEqual(manifestPathTargets({ main: "./src/index.mjs" }, { file, root: "/repo", host: fakeHost({}) }), []);
+});
+
 test("a test file is held to the arrow rules but not the loader-hatch rules", () => {
   const hatchy = 'Reflect.get(o, "k"); const c = x.constructor.constructor; eval("1"); process[k]; module.constructor; const { getBuiltinModule } = process; import vm from "node:vm";';
   for (const file of ["/repo/packages/source/test/a.test.mjs", "/repo/packages/lines/tests/b.spec.ts", "/repo/packages/x/src/__tests__/c.mjs", "/repo/packages/x/src/d.spec.mjs"]) {
@@ -607,8 +641,10 @@ test("a relative import that lands in another package names that package", () =>
     import { runSurface } from "../../surfacer/src/index.mjs";
     const kit = require("../../surfacer/src/client.mjs");
     const lazy = () => import("../../memory/dist/index.js");
-    import ok from "../test/helper.mjs";
+    import ok from "../lib/helper.mjs";
   `;
+  // The same-package import names nothing; a same-package import of a test
+  // path is a different case, refused, and covered above.
   assert.deepEqual(extractObversaImports(source, { file, root: "/repo" }), ["@obversa/surfacer", "@obversa/surfacer", "@obversa/memory"]);
 });
 

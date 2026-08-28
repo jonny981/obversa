@@ -76,9 +76,22 @@ const refusalReason = (dependency) => dependency.slice('@obversa/<'.length, -1);
 // spec can pin each form.
 // Test files are held to the arrow rules — what they import — but not to the
 // loader-hatch rules: a test may build a Proxy with Reflect or read a
-// constructor's name without shipping anything.
+// constructor's name without shipping anything. That exemption is sound only
+// while no shipped entry can reach a test file, so a shipped file that
+// imports a test path, and a manifest entry that points at one, are refused
+// (namesTestPath, below): the hatch inside a test-named file then has no
+// route into the shipped graph.
 export function isTestPath(path) {
   return /(?:^|\/)(?:test|tests|__tests__)\/|\.(?:test|spec)\.[^/]+$/.test(path);
+}
+
+// Whether a specifier or manifest path, read from `file`, names a test path:
+// a relative or absolute one by where it resolves (with or without an
+// extension, so `./a.test` counts as `./a.test.mjs` does), a bare one by its
+// own text.
+function namesTestPath(specifier, file) {
+  const target = file && (/^\.\.?\//.test(specifier) || isAbsolute(specifier)) ? resolve(dirname(file), specifier) : specifier;
+  return isTestPath(target) || /\.(?:test|spec)$/.test(target);
 }
 
 export function moduleSpecifiers(text, fileName = 'module.ts', { hatches = !isTestPath(fileName) } = {}) {
@@ -539,6 +552,12 @@ export function manifestPathTargets(manifest, { file, root: repoRoot, host = ts.
     // and `*` are ordinary characters in an entry path, so a plain field
     // is placed whole.
     const literal = field === 'exports' || field === 'typesVersions' ? value.split('*')[0] : value;
+    // A manifest entry is a shipped entry; one that names a test file would
+    // ship the loader-hatch exemption.
+    if (namesTestPath(literal, file)) {
+      found.push(refusal(`${field} points at a test path, which is exempt from the loader-hatch rules: ${value}`));
+      continue;
+    }
     const placed = placement(resolve(dirname(file), literal), { file, root: repoRoot, host, what: field });
     if (placed) found.push(placed);
   }
@@ -578,7 +597,12 @@ export function manifestImportTargets(manifest, { file, root: repoRoot } = {}) {
       continue;
     }
     // `*` is the map's only wildcard; `?` is an ordinary character.
-    const crossing = crossingPackage(leaf.split('*')[0], { file, root: repoRoot });
+    const literal = leaf.split('*')[0];
+    if (namesTestPath(literal, file)) {
+      found.push(refusal(`package imports alias a test path, which is exempt from the loader-hatch rules: ${leaf}`));
+      continue;
+    }
+    const crossing = crossingPackage(literal, { file, root: repoRoot });
     if (crossing) found.push(crossing);
   }
   return found;
@@ -687,6 +711,12 @@ export function extractObversaImports(text, { file, root: repoRoot, configs = []
     const { text: specifier, refused } = readSpecifier(raw);
     if (refused) {
       found.push(refusal(refused));
+      continue;
+    }
+    // The shipped edge into a test file is refused here, so the loader-hatch
+    // exemption a test file enjoys can never be reached from shipped source.
+    if (!isTestPath(file ?? '') && namesTestPath(specifier, file)) {
+      found.push(refusal(`shipped source imports a test path, which is exempt from the loader-hatch rules: ${specifier}`));
       continue;
     }
     const named = new Set();
