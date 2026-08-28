@@ -190,19 +190,25 @@ function registerImports(node, scope, occurrences, seenDefs) {
 // so a method body may name a member declared below it. Static and instance
 // members are kept apart; a second member of the same name in the same map
 // (a getter and a setter, a field and a method) makes that name ambiguous.
-// The name a member key defines: an identifier or a string literal, plain or
-// in brackets, is known; a computed key that is anything else is dynamic and
-// could define any name (undefined here); a private or numeric key is not a
-// name `this.name` can reach (null).
+// The name a member key defines. An identifier, a string literal, and a
+// boolean or null literal — `[true]` defines the property "true", which
+// `this.true` reaches, since a reserved word is a valid identifier name after
+// a dot — are known, plain or in brackets. A numeric or bigint literal names
+// only its own number, which no dot name can reach, so it neither collides
+// nor threatens the side (null). A computed key that is anything else is
+// dynamic and could define any name (undefined). A private key is not
+// reachable either (null).
 function memberName(node) {
   const { key } = node;
   if (!key) return null;
-  if (!node.computed) {
-    if (key.type === "Identifier") return key.name;
-    if (key.type === "Literal" && typeof key.value === "string") return key.value;
-    return null;
+  if (key.type === "Literal") {
+    const { value } = key;
+    if (typeof value === "string") return value;
+    if (typeof value === "boolean" || value === null) return String(value);
+    return null; // number, bigint, regex: not a dot name
   }
-  return key.type === "Literal" && typeof key.value === "string" ? key.value : undefined;
+  if (!node.computed) return key.type === "Identifier" ? key.name : null;
+  return undefined;
 }
 
 function registerMember(node, members, occurrences, seenDefs) {

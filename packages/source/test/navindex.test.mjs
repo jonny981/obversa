@@ -217,6 +217,17 @@ test("string-keyed members count, a dynamic computed key fails its side closed, 
   assert.deepEqual(at(literal, 1, 44).def, { line: 1, col: 11 }, "a bracketed string key is a known member");
   const quoted = navIndex({ code: 'class F { "q"() {} go() { return this.q(); } }\n', lang: "javascript" }).occurrences;
   assert.deepEqual(at(quoted, 1, 38).def, { line: 1, col: 10 }, "a quoted key is a known member");
+  // A numeric key, plain or in brackets, names only its own number: it cannot
+  // replace a dot name, so it neither collides nor closes the side.
+  const numeric = navIndex({ code: "class B { foo() {} [1]() {} go() { return this.foo(); } }\n", lang: "javascript" }).occurrences;
+  assert.deepEqual(at(numeric, 1, 47).def, { line: 1, col: 10 }, "a computed numeric key leaves the side open");
+  const bigint = navIndex({ code: "class H { foo() {} [1n]() {} 2() {} go() { return this.foo(); } }\n", lang: "javascript" }).occurrences;
+  assert.deepEqual(at(bigint, 1, 55).def, { line: 1, col: 10 }, "a bigint or plain numeric key too");
+  // A boolean or null literal in brackets defines a dot-reachable name.
+  const bool = navIndex({ code: "class I { true() {} [true]() {} go() { return this.true(); } }\n", lang: "javascript" }).occurrences;
+  assert.equal(at(bool, 1, 51).def, null, "[true] replaces the plain true at run time: ambiguous");
+  const nul = navIndex({ code: "class J { [null]() {} go() { return this.null(); } }\n", lang: "javascript" }).occurrences;
+  assert.deepEqual(at(nul, 1, 41).def, { line: 1, col: 11 }, "[null] alone is the member this.null reaches");
   const dynamic = navIndex({ code: "class E { [key]() {} x() {} go() { return this.x(); } static s() {} static gs() { return this.s(); } }\n", lang: "javascript" }).occurrences;
   assert.equal(at(dynamic, 1, 47).def, null, "a dynamic computed key on the instance side: no instance name is known unique");
   assert.deepEqual(at(dynamic, 1, 94).def, { line: 1, col: 61 }, "the static side is untouched");
