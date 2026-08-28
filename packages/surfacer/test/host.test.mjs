@@ -43,6 +43,21 @@ test("the host adapter is tried first, then the browser, then print", async () =
   assert.match(captured.join(""), /http:\/\/127\.0\.0\.1:1\/z/);
 });
 
+test("the public placement path waits the full five seconds before assuming a lingering command opened the surface", async () => {
+  // The default is what ships: through openSurfaceUrl, not the helper, a
+  // command that lingers is reported as opened only once five seconds have
+  // passed — no sooner, and without waiting for it to exit.
+  const directory = mkdtempSync(path.join(os.tmpdir(), "surfacer-host-"));
+  const lingering = path.join(directory, "lingering");
+  writeFileSync(lingering, "#!/bin/sh\nsleep 8\n");
+  chmodSync(lingering, 0o755);
+  const started = Date.now();
+  const result = await openSurfaceUrl("http://127.0.0.1:1/x", { surfaceBin: lingering, browserCommand: null });
+  const elapsed = Date.now() - started;
+  assert.deepEqual(result, { opened: true, via: "host" });
+  assert.ok(elapsed >= 4_900 && elapsed < 7_500, `reported after the five-second settle, not at the command's exit (${elapsed}ms)`);
+});
+
 test("a placement command still alive after the settle is assumed to have opened the surface", async () => {
   // A browser that keeps the tab's process never exits; the session must not
   // wait for it. After settleMs the placement is reported as opened — an

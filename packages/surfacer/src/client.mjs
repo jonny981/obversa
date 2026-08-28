@@ -24,7 +24,10 @@ export function createSurfaceClient({ heartbeatMs = 15_000 } = {}) {
     if (resolved.origin !== location.origin) {
       throw new Error("Surface API endpoints must stay on the session origin");
     }
-    const response = await fetch(endpoint, {
+    // Fetch the string that was validated, never the original value: a value
+    // whose string form changes between reads could pass the check as one
+    // path and be fetched as another.
+    const response = await fetch(resolved.href, {
       method: body === undefined ? "GET" : "POST",
       headers: {
         Authorization: `Bearer ${token}`,

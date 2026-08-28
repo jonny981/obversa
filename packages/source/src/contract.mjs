@@ -26,7 +26,7 @@
 //   Anchor         { target, side?, position }   side is absent (undefined or
 //                  null) or old | new
 //   Annotation     { anchor, body, author{kind,id}, createdAt, thread? }
-//   SurfaceResult  { surfaceId, gateId, decision, annotations[], edits?, meta? }
+//   SurfaceResult  { surfaceId, gateId, decision, annotations[], meta? }
 //   deadline, when present, is an RFC 3339 date-time with seconds, an
 //   optional fraction of up to nine digits, and Z or a numeric offset (no
 //   leap second, no -00:00).
@@ -455,8 +455,9 @@ export function normalizeResult(raw, request, { terminal = false } = {}) {
     decision,
     annotations,
   };
-  const edits = read(() => raw?.edits, undefined);
-  if (edits !== undefined) result.edits = edits;
+  // No edit path exists in this surface (editing is excluded), so a raw
+  // `edits` field is not carried: an unchecked copy would be the one part of
+  // the result the guard never read.
   const meta = read(() => raw?.meta, undefined);
   if (meta !== undefined) result.meta = meta;
   return result;
@@ -481,7 +482,11 @@ const SESSION_ORIGIN = "http://127.0.0.1";
 function isFetchUrl(value) {
   if (!isPresent(value)) return false;
   if (value.startsWith("/")) {
-    if (/[\\\u0000-\u001f\u007f ]/.test(value) || !URL.canParse(value, SESSION_ORIGIN)) return false;
+    // A session path is one leading slash: `//host/x` is protocol-relative and
+    // names another host even when that host happens to match the fixed base;
+    // any whitespace, Unicode spaces included, and any control character is
+    // refused before parsing.
+    if (value.startsWith("//") || /[\\\u0000-\u001f\u007f]|\s/u.test(value) || !URL.canParse(value, SESSION_ORIGIN)) return false;
     return new URL(value, SESSION_ORIGIN).origin === SESSION_ORIGIN;
   }
   if (!URL.canParse(value)) return false;

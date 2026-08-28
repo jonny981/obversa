@@ -423,13 +423,13 @@ test("normalizeResult caps the annotation count", () => {
   assert.equal(result.annotations.length, MAX_ANNOTATIONS);
 });
 
-test("normalizeResult carries edits and meta when present", () => {
+test("normalizeResult carries meta when present and never a raw edits field", () => {
   const request = makeRequest([outputAnchor(1)]);
   const result = normalizeResult(
     { decision: "approved", annotations: [], edits: [{ path: "a" }], meta: { n: 1 } },
     request,
   );
-  assert.deepEqual(result.edits, [{ path: "a" }]);
+  assert.equal("edits" in result, false, "there is no edit path in this surface, so nothing unchecked is carried");
   assert.deepEqual(result.meta, { n: 1 });
 });
 
@@ -546,6 +546,21 @@ test("an anchor is plain data: an accessor, a proxy, a hidden or extra property,
   assert.equal(anchorKey(new Anchor()), null, "a class instance");
   assert.equal(anchorKey(Object.assign(Object.create(null), outputAnchor(1))), anchorKey(outputAnchor(1)), "a null-prototype object is its own data");
   assert.equal(anchorKey({ target: "src/app.js", position: 1 }), anchorKey({ position: 1, target: "src/app.js" }), "field order is not identity");
+});
+
+test("a session path is one leading slash with no whitespace of any kind: protocol-relative paths and Unicode spaces are refused", () => {
+  const withFetch = (fetch) => isSurfaceRequest({ ...makeRequest([]), subject: { ref: "worktree", fetch } });
+  assert.equal(withFetch("/api/model"), true);
+  // Protocol-relative: names a host, even one whose origin matches the base.
+  assert.equal(withFetch("//127.0.0.1/x"), false);
+  assert.equal(withFetch("//127.0.0.1:80/x"), false);
+  assert.equal(withFetch("//evil.invalid/x"), false);
+  // Whitespace the ASCII check missed: no-break space, em space, ideographic space.
+  assert.equal(withFetch("/api/ model"), false);
+  assert.equal(withFetch("/api/ model"), false);
+  assert.equal(withFetch("/api/　model"), false);
+  assert.equal(withFetch("/api/model "), false);
+  assert.equal(withFetch("/api/\tmodel"), false);
 });
 
 test("a subject's fetch is a URL the host can fetch: absolute http(s) or a path on the session origin", () => {

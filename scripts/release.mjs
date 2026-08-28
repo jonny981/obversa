@@ -37,6 +37,13 @@ const ROOT = join(dirname(fileURLToPath(import.meta.url)), "..");
 // npm's registry rules from the same copy.
 export const NPM_DIR = dirname(createRequire(import.meta.url).resolve("npm/package.json"));
 export const NPM_CLI = join(NPM_DIR, "bin", "npm-cli.js");
+// The pnpm that packs: pinned the same way, resolved the same way, run under
+// the current node — a substituted pnpm on PATH cannot produce the tarball
+// npm publishes.
+// pnpm's exports map exposes only its package.json, so the bare name resolves
+// to that file and the directory is its parent.
+export const PNPM_DIR = dirname(createRequire(import.meta.url).resolve("pnpm"));
+export const PNPM_CLI = join(PNPM_DIR, "bin", "pnpm.cjs");
 
 // The plan for one release, or a thrown reason: the target must be, by real
 // path, the directory of exactly one non-private workspace package (never a
@@ -62,7 +69,7 @@ export function releasePlan({ target, flags = [], root = ROOT, packages = listWo
   return {
     name: match.name,
     cwd,
-    pack: { command: "pnpm", args: ["pack", "--pack-destination"] },
+    pack: { command: process.execPath, args: [PNPM_CLI, "pack", "--pack-destination"] },
     publishArgs: (tarball) => publishArgs(tarball, flags),
   };
 }

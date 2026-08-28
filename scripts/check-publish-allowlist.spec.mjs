@@ -8,7 +8,7 @@ import path from "node:path";
 import test from "node:test";
 
 import { HOOK_COMMAND, PUBLISH_REGISTRY_SENTINEL, SCOPE_REGISTRY_KEY, audit, checkHook, listWorkspacePackages, releaseTagFor } from "./check-publish-allowlist.mjs";
-import { NPM_CLI, NPM_DIR, publishArgs, release, releasePlan, runChild } from "./release.mjs";
+import { NPM_CLI, NPM_DIR, PNPM_CLI, PNPM_DIR, publishArgs, release, releasePlan, runChild } from "./release.mjs";
 
 // Both registry keys npm consults for a scoped name, pinned to the sentinel.
 const SENTINELS = { registry: PUBLISH_REGISTRY_SENTINEL, [SCOPE_REGISTRY_KEY]: PUBLISH_REGISTRY_SENTINEL };
@@ -200,7 +200,7 @@ test("the release plan publishes exactly one listed public package directory, af
     const check = ({ cwd }) => { calls.push(cwd); return []; };
     const plan = releasePlan({ target: "packages/pub", root, packages, check });
     assert.equal(plan.name, "@x/pub");
-    assert.deepEqual(plan.pack, { command: "pnpm", args: ["pack", "--pack-destination"] }, "pnpm packs, so workspace versions are rewritten");
+    assert.deepEqual(plan.pack, { command: process.execPath, args: [PNPM_CLI, "pack", "--pack-destination"] }, "the pinned pnpm packs under the current node, so workspace versions are rewritten and PATH plays no part");
     assert.deepEqual(plan.publishArgs("/tmp/x.tgz"), ["publish", "/tmp/x.tgz", "--registry", "https://registry.npmjs.org/", `--${SCOPE_REGISTRY_KEY}=https://registry.npmjs.org/`, "--access", "public"], "npm publishes the tarball with both registry keys overridden as flags");
     assert.deepEqual(calls, [plan.cwd], "the guard ran on that directory first");
     assert.deepEqual(releasePlan({ target: "packages/pub", flags: ["--dry-run"], root, packages, check }).publishArgs("/tmp/x.tgz").at(-1), "--dry-run");
@@ -273,6 +273,26 @@ test("the release's npm is the pinned root devDependency, resolved by the module
     assert.equal(swapped.status, 99, "PATH now hands out the fake npm");
     const probe = execFileSync(process.execPath, ["--input-type=module", "-e", "import { NPM_DIR, NPM_CLI } from './scripts/release.mjs'; console.log(JSON.stringify({ NPM_DIR, NPM_CLI }));"], { cwd: new URL("..", import.meta.url).pathname, env, encoding: "utf8" });
     assert.deepEqual(JSON.parse(probe), { NPM_DIR, NPM_CLI }, "the release still resolves the same pinned copy");
+  } finally {
+    rmSync(fakeBin, { recursive: true, force: true });
+  }
+});
+
+test("the release's pnpm is the pinned root devDependency too, resolved by the module resolver, whatever pnpm is first on PATH", () => {
+  const pinned = ROOT_MANIFEST.devDependencies.pnpm;
+  assert.match(pinned, /^\d+\.\d+\.\d+$/, "pnpm is pinned exactly");
+  assert.equal(ROOT_MANIFEST.packageManager, `pnpm@${pinned}`, "the same version the workspace itself runs");
+  assert.equal(JSON.parse(readFileSync(path.join(PNPM_DIR, "package.json"), "utf8")).version, pinned);
+  assert.equal(PNPM_DIR, realpathSync(new URL("../node_modules/pnpm", import.meta.url)));
+  assert.ok(existsSync(PNPM_CLI));
+  const fakeBin = mkdtempSync(path.join(os.tmpdir(), "fake-pnpm-"));
+  writeFileSync(path.join(fakeBin, "pnpm"), "#!/bin/sh\nexit 98\n");
+  execFileSync("chmod", ["755", path.join(fakeBin, "pnpm")]);
+  const env = { ...process.env, PATH: `${fakeBin}:${process.env.PATH}` };
+  try {
+    assert.equal(spawnSync("pnpm", ["--version"], { env, encoding: "utf8" }).status, 98, "PATH now hands out the fake pnpm");
+    const probe = execFileSync(process.execPath, ["--input-type=module", "-e", "import { PNPM_DIR, PNPM_CLI } from './scripts/release.mjs'; console.log(JSON.stringify({ PNPM_DIR, PNPM_CLI }));"], { cwd: new URL("..", import.meta.url).pathname, env, encoding: "utf8" });
+    assert.deepEqual(JSON.parse(probe), { PNPM_DIR, PNPM_CLI }, "the release still resolves the same pinned copy");
   } finally {
     rmSync(fakeBin, { recursive: true, force: true });
   }

@@ -37,6 +37,44 @@ const sourcePattern = new RegExp(`(?:${sourceExtensions.map((ext) => ext.replace
 export function scansImports(path) {
   return path.startsWith('packages/') && sourcePattern.test(path);
 }
+
+// A host is a composition root: it may import any workspace package by its
+// public name, and nothing by a path into packages/. Host JavaScript — a
+// source file by extension, or an extensionless command whose first line is
+// a node shebang — is held to that, with the loader-hatch rules of shipped
+// source. Returns the failures for one file.
+export function isHostScript(path, text) {
+  if (!path.startsWith('hosts/')) return false;
+  if (sourcePattern.test(path)) return true;
+  return extname(path) === '' && /^#!.*\bnode\b/.test(text.split('\n')[0] ?? '');
+}
+export function hostImportFindings(text, { file, root: repoRoot }) {
+  const findings = [];
+  const parsedAs = sourcePattern.test(file) ? file : `${file}.mjs`;
+  // A host's proofs reach a package's internals by path today (the browser
+  // proof drives the highlighter and the models directly); the public-name
+  // rule binds shipped host code, and the proofs move to a public testing
+  // subpath in F2b. A test file is still refused a computed or schemed
+  // specifier.
+  const shipped = !isTestPath(file);
+  for (const raw of moduleSpecifiers(text, parsedAs)) {
+    if (raw === null) {
+      findings.push('a computed module reference cannot be checked; use a plain string');
+      continue;
+    }
+    const { text: specifier, refused } = readSpecifier(raw);
+    if (refused) {
+      findings.push(refused);
+      continue;
+    }
+    if (shipped && (/^\.\.?\//.test(specifier) || isAbsolute(specifier))) {
+      const target = resolve(dirname(file), specifier);
+      const dir = packageDirOf(realpathOf(target, ts.sys), repoRoot) ?? packageDirOf(target, repoRoot);
+      if (dir !== undefined) findings.push(`a host reaches packages/${dir} by path (${specifier}); hosts import packages by their public names only`);
+    }
+  }
+  return findings;
+}
 export const textExtensions = new Set([
   ...sourceExtensions,
   '.css',
@@ -880,10 +918,19 @@ const scanRoots = [
   '.githooks',
 ];
 const requiredScanRoots = ['hosts'];
+// The host JavaScript that must be import-scanned, by name, so a rename or a
+// scan gap cannot leave the composition root unchecked.
+const requiredImportScannedHostFiles = [
+  'hosts/cmux/bin/obversa-review',
+  'hosts/cmux/lib/review-args.mjs',
+];
+const importScannedHostFiles = new Set();
 const requiredScannedFiles = [
   'hosts/cmux/bin/obversa-order-workspace',
   'hosts/cmux/bin/obversa-plannotator-browser',
   'hosts/cmux/bin/obversa-surface',
+  'hosts/cmux/bin/obversa-review',
+  'hosts/cmux/lib/review-args.mjs',
   'hosts/cmux/test/f0-proof.sh',
 ];
 const scanFiles = [
@@ -1101,7 +1148,7 @@ const rootPins = {
   // npm is pinned because the release command publishes through it and the
   // publish guard's spec reads its registry rules from it: both resolve this
   // installed copy, never whichever npm is first on PATH.
-  devDependencies: { tsup: '8.5.1', vitest: '4.1.11', '@typescript/typescript6': '6.0.2', typescript: '7.0.2', semver: '7.7.2', npm: '10.9.2' },
+  devDependencies: { tsup: '8.5.1', vitest: '4.1.11', '@typescript/typescript6': '6.0.2', typescript: '7.0.2', semver: '7.7.2', npm: '10.9.2', pnpm: '10.15.1' },
 };
 if (rootManifest.packageManager !== rootPins.packageManager)
   failures.push(`package.json: packageManager must be ${rootPins.packageManager}; found ${rootManifest.packageManager ?? 'absent'}`);
@@ -1210,10 +1257,19 @@ for (const absolute of files) {
     const configs = (projectConfigs.get(owner) ?? []).map((config) => config.options);
     checkArrows(path, owner, extractObversaImports(text, { file: absolute, root, configs }));
   }
+  // Host JavaScript is scanned too: public package names only, no path into
+  // packages/, and the loader-hatch rules of shipped source.
+  if (isHostScript(path, text)) {
+    importScannedHostFiles.add(path);
+    for (const finding of hostImportFindings(text, { file: absolute, root })) failures.push(`${path}: ${finding}`);
+  }
 }
 
 for (const path of requiredScannedFiles) {
   if (!scannedTextFiles.has(path)) failures.push(`${path}: public host file is not scanned`);
+}
+for (const path of requiredImportScannedHostFiles) {
+  if (!importScannedHostFiles.has(path)) failures.push(`${path}: host script is not import-scanned`);
 }
 
 if (failures.length) {

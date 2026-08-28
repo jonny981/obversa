@@ -9,7 +9,7 @@ import path from "node:path";
 import ts from "@typescript/typescript6";
 import { validRange } from "semver";
 
-import { dependencyTarget, extractObversaImports, internalDependencies, isPinnedWorkspaceFile, isProjectConfig, isTestPath, isVersionRange, manifestImportTargets, manifestPathTargets, moduleSpecifiers, parserExtensions, PINNED_WORKSPACE_FILE, projectConfig, refusal, scansImports, sourceExtensions, textExtensions, tsconfigDependencies, walkTree } from "./check-boundaries.mjs";
+import { dependencyTarget, extractObversaImports, hostImportFindings, internalDependencies, isHostScript, isPinnedWorkspaceFile, isProjectConfig, isTestPath, isVersionRange, manifestImportTargets, manifestPathTargets, moduleSpecifiers, parserExtensions, PINNED_WORKSPACE_FILE, projectConfig, refusal, scansImports, sourceExtensions, textExtensions, tsconfigDependencies, walkTree } from "./check-boundaries.mjs";
 
 // A filesystem for the compiler made of a path -> text map, rooted at /repo.
 // The compiler's own directory matcher walks it, so `include` globs, package
@@ -573,6 +573,30 @@ test("a subpath import resolves to its package name; a relative import inside th
   const file = "/repo/packages/source/src/review.mjs";
   assert.deepEqual(extractObversaImports(`import x from "@obversa/memory/testing";`, { file, root: "/repo" }), ["@obversa/memory"]);
   assert.deepEqual(extractObversaImports(`import x from "../src/git.mjs"; require("./local.cjs");`, { file, root: "/repo" }), []);
+});
+
+test("host JavaScript is import-scanned: public package names pass, a path into packages/ or a loader hatch is refused", () => {
+  assert.equal(isHostScript("hosts/cmux/lib/review-args.mjs", "export const x = 1;"), true);
+  assert.equal(isHostScript("hosts/cmux/bin/obversa-review", "#!/usr/bin/env node\nimport x from 'y';"), true, "an extensionless node command");
+  assert.equal(isHostScript("hosts/cmux/bin/obversa-surface", "#!/usr/bin/env bash\necho"), false, "a bash script is not JavaScript");
+  assert.equal(isHostScript("packages/source/src/a.mjs", ""), false, "packages are scanned by the package rules");
+  const file = "/repo/hosts/cmux/bin/obversa-review";
+  assert.deepEqual(hostImportFindings('import { runSurface } from "@obversa/surfacer"; import { reviewDiff } from "@obversa/source"; const kit = import.meta.resolve("@obversa/surfacer/client"); import { HELP } from "../lib/review-args.mjs";', { file, root: "/repo" }), [], "public names and the host's own files");
+  for (const text of [
+    'import { reviewDiff } from "../../../packages/source/src/review.mjs";',
+    'const kit = import.meta.resolve("../../../packages/surfacer/src/client.mjs");',
+    'const { runSurface } = await import("/repo/packages/surfacer/src/index.mjs");',
+  ]) {
+    const found = hostImportFindings(text, { file, root: "/repo" });
+    assert.ok(found.some((entry) => /by path/.test(entry)), text);
+  }
+  assert.ok(hostImportFindings('const m = process.getBuiltinModule("node:module");', { file, root: "/repo" }).length > 0, "loader hatches are refused in a host too");
+  assert.ok(hostImportFindings('const name = "@obversa/" + pick; import(name);', { file, root: "/repo" }).some((entry) => /computed module reference/.test(entry)));
+  // A host proof may reach a package's internals by path until F2b gives it a
+  // public testing subpath; it is still refused a computed or schemed specifier.
+  const proof = "/repo/hosts/cmux/test/f3-browser-proof.mjs";
+  assert.deepEqual(hostImportFindings('import { highlightModel } from "../../../packages/source/src/highlight-model.mjs";', { file: proof, root: "/repo" }), []);
+  assert.ok(hostImportFindings('import(pick);', { file: proof, root: "/repo" }).length > 0);
 });
 
 test("global is the same guarded root as globalThis: its evaluators and unlisted members are refused", () => {
