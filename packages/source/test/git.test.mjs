@@ -24,6 +24,7 @@ test("diffArgs maps each mode to the right git arguments", () => {
   const base = [
     "-c", "diff.noprefix=false",
     "-c", "diff.mnemonicPrefix=false",
+    "-c", "diff.suppressBlankEmpty=false",
     "-c", "core.quotePath=false",
     "--no-pager", "diff", "--no-color", "--no-ext-diff", "--no-textconv",
   ];
@@ -64,6 +65,28 @@ test("computeDiff reads the working tree, the staged changes, and a ref range", 
     const range = await computeDiff({ mode: "range", range: "HEAD~1..HEAD", cwd: dir });
     assert.match(range.diffText, /\+four/);
     assert.equal(range.range, "HEAD~1..HEAD");
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("computeDiff neutralises diff.suppressBlankEmpty so a blank context line cannot end a hunk early", async () => {
+  const dir = makeRepo();
+  try {
+    git(dir, "config", "diff.suppressBlankEmpty", "true");
+    writeFileSync(path.join(dir, "a.txt"), "one\n\ntwo\nthree\n");
+    git(dir, "add", "a.txt");
+    git(dir, "commit", "-q", "-m", "first");
+    // Change a line after the blank one: with the setting honoured, the blank
+    // context line would be empty, the parser would end the hunk, and the
+    // change below it would vanish from the review.
+    writeFileSync(path.join(dir, "a.txt"), "one\n\ntwo\nTHREE\n");
+    const { diffText } = await computeDiff({ mode: "worktree", cwd: dir });
+    assert.match(diffText, /\n \n/, "the blank context line is emitted as a single space");
+    const { parseUnifiedDiff } = await import("../src/diff.mjs");
+    const model = parseUnifiedDiff(diffText);
+    const types = model.files[0].hunks.flatMap((h) => h.lines).map((l) => `${l.type}:${l.text}`);
+    assert.ok(types.includes("add:THREE"), `the change after the blank line is in the model: ${types.join(", ")}`);
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }

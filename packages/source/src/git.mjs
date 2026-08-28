@@ -67,11 +67,15 @@ function assertSafeRange(range) {
 // cannot substitute arbitrary program output for the real hunks, and the two
 // prefix settings so the `a/` and `b/` path prefixes the parser keys on are
 // always present (a repo with diff.noprefix or diff.mnemonicPrefix would
-// otherwise yield empty paths and lose every anchor).
+// otherwise yield empty paths and lose every anchor), and
+// `diff.suppressBlankEmpty=false` so a blank context line is always emitted as
+// a single space (with it on, a blank context line is an empty line, which
+// once ended the hunk early and hid every later changed line).
 export function diffArgs({ mode = "worktree", range } = {}) {
   const base = [
     "-c", "diff.noprefix=false",
     "-c", "diff.mnemonicPrefix=false",
+    "-c", "diff.suppressBlankEmpty=false",
     "-c", "core.quotePath=false",
     "--no-pager", "diff", "--no-color", "--no-ext-diff", "--no-textconv",
   ];
