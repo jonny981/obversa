@@ -5,9 +5,12 @@ import test from "node:test";
 
 import { ASSETS_DIR, buildIndexHtml } from "../src/page.mjs";
 
-test("the shell links the static assets and carries no diff content", () => {
-  const html = buildIndexHtml({ meta: { label: "working tree", fileCount: 0, mode: "worktree", range: null } });
-  assert.match(html, /<title>Review: working tree<\/title>/);
+test("the shell links the static assets and carries nothing about the review", () => {
+  const html = buildIndexHtml();
+  // The shell is served before the bearer check, so it names neither the diff
+  // nor the ref under review; the title is a constant and the label arrives
+  // with the authenticated model.
+  assert.match(html, /<title>Review<\/title>/);
   assert.match(html, /<link rel="stylesheet" href="\/app\.css">/);
   assert.match(html, /<link rel="stylesheet" href="\/highlight\.css">/);
   assert.match(html, /<script type="module" src="\/app\.js"><\/script>/);
@@ -15,12 +18,8 @@ test("the shell links the static assets and carries no diff content", () => {
   // bearer token, never embedded where a pre-auth static read could see it.
   assert.equal((html.match(/<script/g) || []).length, 1);
   assert.doesNotMatch(html, /review-data/);
-});
-
-test("a hostile review label cannot break out of the title", () => {
-  const html = buildIndexHtml({ meta: { label: "</title><script>alert(1)</script>" } });
-  assert.equal((html.match(/<script/g) || []).length, 1);
-  assert.match(html, /&lt;\/title&gt;&lt;script&gt;/);
+  // The shell is the same for every review: nothing a caller passes reaches it.
+  assert.equal(buildIndexHtml({ meta: { label: "customer-secret..HEAD" } }), html);
 });
 
 test("ASSETS_DIR holds the served browser files", () => {

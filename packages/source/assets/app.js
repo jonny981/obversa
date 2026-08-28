@@ -262,6 +262,9 @@ async function main() {
   // Header with the review label and the return/cancel controls.
   const header = el("header", "review-header");
   const heading = el("h1", null, `Review: ${meta.label}`);
+  // The static shell names nothing under review; the title arrives with the
+  // authenticated model.
+  document.title = `Review: ${meta.label}`;
   const summary = el("p", "summary", `${meta.fileCount} file${meta.fileCount === 1 ? "" : "s"} changed`);
   const actions = el("div", "actions");
   const returnButton = el("button", "primary");

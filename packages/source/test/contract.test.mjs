@@ -193,6 +193,19 @@ test("isSurfaceRequest guards the shape", () => {
   const noAnchors = makeRequest([]);
   delete noAnchors.anchors;
   assert.equal(isSurfaceRequest(noAnchors), false);
+  // Every offered anchor must be a real location: a target and a position.
+  assert.equal(isSurfaceRequest(makeRequest([null])), false, "a null anchor");
+  assert.equal(isSurfaceRequest(makeRequest([{ target: "a" }])), false, "an anchor with no position");
+  assert.equal(isSurfaceRequest(makeRequest([{ position: 1 }])), false, "an anchor with no target");
+  assert.equal(isSurfaceRequest(makeRequest([outputAnchor(1), "x"])), false, "a non-object among valid anchors");
+  assert.equal(isSurfaceRequest(makeRequest([{ target: "shot.png", position: { x: 1, y: 2 } }])), true, "a region anchor");
+  // A deadline is optional; when present it is a parseable timestamp.
+  assert.equal(isSurfaceRequest({ ...ok, deadline: null }), true);
+  assert.equal(isSurfaceRequest({ ...ok, deadline: "2026-08-28T09:00:00Z" }), true);
+  assert.equal(isSurfaceRequest({ ...ok, deadline: { bad: true } }), false, "an object deadline");
+  assert.equal(isSurfaceRequest({ ...ok, deadline: "soon" }), false, "an unparseable deadline");
+  assert.equal(isSurfaceRequest({ ...ok, deadline: "" }), false, "an empty deadline");
+  assert.equal(isSurfaceRequest({ ...ok, deadline: 1756371600000 }), false, "a numeric deadline");
 });
 
 test("FAMILIES and DECISIONS are the contract's closed vocabularies", () => {

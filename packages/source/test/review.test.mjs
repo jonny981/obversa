@@ -121,6 +121,22 @@ test("a cancelled surface returns no annotations", async () => {
   assert.deepEqual(outcome.annotations, []);
 });
 
+test("the static shell names nothing under review; the ref is behind the token", async () => {
+  // Static files are served before the bearer check. The ref under review is
+  // part of the token-gated subject, so it must not ride the shell's title.
+  let html;
+  let modelResponse;
+  const launchSurface = async ({ assets, api }) => {
+    html = readFileSync(path.join(assets.directory, "index.html"), "utf8");
+    modelResponse = await api["GET /api/model"]({ body: null, session: {} });
+    return { result: { status: "cancelled" } };
+  };
+  await reviewDiff({ diffText: DIFF, mode: "range", range: "customer-secret..HEAD", launchSurface, clientKitSource: CLIENT_KIT, open: false });
+  assert.doesNotMatch(html, /customer-secret/, "the shell must not name the ref");
+  assert.match(html, /<title>Review<\/title>/);
+  assert.equal(modelResponse.body.meta.label, "range customer-secret..HEAD", "the label rides the authenticated model");
+});
+
 test("outputAnchors offers every visible line and side; the request is contract-shaped", () => {
   const model = parseUnifiedDiff(DIFF);
   const anchors = outputAnchors(model);

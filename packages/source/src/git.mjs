@@ -20,21 +20,21 @@ function isSafeRelativePath(filePath) {
 
 // Read one regular file through a single handle, so the file that is checked
 // is the file that is read (no stat-then-read window), with the final
-// component refused if it is a symlink and the read bounded at MAX_FILE_BYTES.
-async function readBoundedFile(target) {
+// component refused if it is a symlink and the read bounded at `limit` bytes.
+async function readBoundedFile(target, limit = MAX_FILE_BYTES) {
   let handle;
   try {
     handle = await open(target, fsConstants.O_RDONLY | (fsConstants.O_NOFOLLOW ?? 0));
     const info = await handle.stat();
-    if (!info.isFile() || info.size > MAX_FILE_BYTES) return null;
-    const buffer = Buffer.alloc(MAX_FILE_BYTES + 1);
+    if (!info.isFile() || info.size > limit) return null;
+    const buffer = Buffer.alloc(limit + 1);
     let filled = 0;
     while (filled < buffer.length) {
       const { bytesRead } = await handle.read(buffer, filled, buffer.length - filled, filled);
       if (bytesRead === 0) break;
       filled += bytesRead;
     }
-    if (filled > MAX_FILE_BYTES) return null;
+    if (filled > limit) return null;
     return buffer.subarray(0, filled).toString("utf8");
   } catch {
     return null;
@@ -139,15 +139,19 @@ export async function computeDiff({ mode = "worktree", range, cwd = process.cwd(
  * every directory on the way (realpath) and requires the real file to sit
  * inside the real repository root, so a symlinked directory that points
  * outside is refused too, and finally reads through one handle that refuses a
- * symlink again (O_NOFOLLOW) and stops at MAX_FILE_BYTES. A staged read
- * requires the index entry to be a regular file (a symlink entry would print
- * its link target, a tree cannot be shown) and bounds `git show`'s output the
- * same way. Anything refused yields null — the diff still renders, only the
- * expandable context is withheld.
+ * symlink again (O_NOFOLLOW) and stops at the byte limit. A staged read
+ * requires the index to hold exactly this path at stage 0 as a regular file
+ * (a symlink entry would print its link target, a tree cannot be shown) and
+ * reads the blob by its hash, bounded the same way. Anything refused yields
+ * null — the diff still renders, only the expandable context is withheld.
+ *
+ * `maxBytes` lowers the limit for one read (never above MAX_FILE_BYTES), so a
+ * caller holding a budget across many reads can bound the sum exactly.
  */
-export async function readNewFileText({ path: filePath, mode = "worktree", cwd = process.cwd() } = {}) {
+export async function readNewFileText({ path: filePath, mode = "worktree", cwd = process.cwd(), maxBytes = MAX_FILE_BYTES } = {}) {
   if (typeof filePath !== "string" || filePath.length === 0 || filePath === "/dev/null") return null;
   if (!isSafeRelativePath(filePath)) return null;
+  const limit = Number.isFinite(maxBytes) && maxBytes < MAX_FILE_BYTES ? Math.max(0, Math.floor(maxBytes)) : MAX_FILE_BYTES;
   if (mode === "worktree") {
     let realRoot;
     let real;
@@ -160,23 +164,33 @@ export async function readNewFileText({ path: filePath, mode = "worktree", cwd =
       return null;
     }
     if (!real.startsWith(realRoot + sep)) return null;
-    return readBoundedFile(real);
+    return readBoundedFile(real, limit);
   }
   if (mode === "staged") {
     try {
-      // The index entry must be a regular file: mode 100644 or 100755. `--`
-      // guards a leading dash; the pathspec is one argv element.
-      const { stdout: entry } = await run("git", ["ls-files", "--stage", "--", filePath], { cwd, windowsHide: true });
-      const indexMode = entry.split(/\s+/)[0];
-      if (!/^100(?:644|755)$/.test(indexMode)) return null;
-      // `:path` is the index blob. execFile's maxBuffer rejects output past the
-      // bound, so an oversized blob fails here and yields null.
-      const { stdout } = await run("git", ["--no-pager", "show", `:${filePath}`], {
+      // The index entry must be exactly this path, at stage 0, as a regular
+      // file (mode 100644 or 100755). `--literal-pathspecs` stops git reading
+      // the path as a glob or as pathspec magic, `-z` stops it quoting an
+      // unusual name, and `--` guards a leading dash.
+      const { stdout: listing } = await run("git", ["--literal-pathspecs", "ls-files", "--stage", "-z", "--", filePath], { cwd, windowsHide: true });
+      const entry = listing.split("\0").map((line) => {
+        const tab = line.indexOf("\t");
+        const [entryMode, hash, stage] = line.slice(0, tab).split(" ");
+        return { entryMode, hash, stage, entryPath: line.slice(tab + 1) };
+      }).find((candidate) => candidate.entryPath === filePath && candidate.stage === "0");
+      if (!entry || !/^100(?:644|755)$/.test(entry.entryMode) || !/^[0-9a-f]{40,64}$/.test(entry.hash)) return null;
+      // Read the blob by the hash the index just gave for this exact path.
+      // `git show :<path>` would read a colon inside the path as stage syntax
+      // (`:0:secret.js` is stage 0 of secret.js), so a repository holding both
+      // `secret.js` and `0:secret.js` would show the wrong file. execFile's
+      // maxBuffer rejects output past the bound, so an oversized blob fails
+      // here and yields null.
+      const { stdout } = await run("git", ["--no-pager", "cat-file", "blob", entry.hash], {
         cwd,
-        maxBuffer: MAX_FILE_BYTES + 1,
+        maxBuffer: limit + 1,
         windowsHide: true,
       });
-      return Buffer.byteLength(stdout, "utf8") > MAX_FILE_BYTES ? null : stdout;
+      return Buffer.byteLength(stdout, "utf8") > limit ? null : stdout;
     } catch {
       return null;
     }

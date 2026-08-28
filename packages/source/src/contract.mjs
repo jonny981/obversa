@@ -208,6 +208,13 @@ export function isSurfaceRequest(value) {
   if (!subject || typeof subject !== "object" || !isPresent(subject.ref)) return false;
   if (subject.payload === undefined && !isPresent(subject.fetch)) return false;
   if (!isTransport(value.transport)) return false;
-  if (!Array.isArray(value.anchors)) return false;
+  // Every offered anchor is a real location — a target and a position — or the
+  // membership rule the result is checked against would be built on nothing.
+  if (!Array.isArray(value.anchors) || !value.anchors.every((anchor) => anchorKey(anchor) !== null)) return false;
+  // A deadline is optional; when present it is a timestamp a host can parse,
+  // or nothing could enforce it.
+  if (value.deadline !== undefined && value.deadline !== null) {
+    if (!isPresent(value.deadline) || !Number.isFinite(Date.parse(value.deadline))) return false;
+  }
   return true;
 }

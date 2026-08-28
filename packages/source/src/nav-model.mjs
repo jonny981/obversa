@@ -19,9 +19,9 @@ import { MAX_CONTEXT_TOTAL_BYTES } from "./context-model.mjs";
 
 const NAV_LANGS = new Set(["javascript", "js", "cjs", "mjs", "jsx"]);
 
-// Go-to-source shares the review-wide byte bound with full-file context: each
-// file is read at most once for indexing and the sum is capped, so a change
-// touching many large files cannot hold all of their text for the parser.
+// Go-to-source is bounded like full-file context: this pass caps the sum of
+// what it reads, and the review hands both passes one boundedReader, so a file
+// is read once for both and the two passes share one bound, not one each.
 export async function navModel(model, { mode = "worktree", cwd = process.cwd(), read = readNewFileText, maxTotalBytes = MAX_CONTEXT_TOTAL_BYTES } = {}) {
   if (!model || !Array.isArray(model.files)) return;
 

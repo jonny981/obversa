@@ -8,7 +8,7 @@ import { parseUnifiedDiff } from "./diff.mjs";
 import { ASSETS_DIR, buildIndexHtml } from "./page.mjs";
 import { createHighlightRegistry, registryToCss } from "./highlight.mjs";
 import { highlightModel } from "./highlight-model.mjs";
-import { contextModel } from "./context-model.mjs";
+import { boundedReader, contextModel } from "./context-model.mjs";
 import { navModel } from "./nav-model.mjs";
 import { isGateBinding, normalizeResult } from "./contract.mjs";
 
@@ -153,8 +153,12 @@ export async function reviewDiff({
   // highlights (or executes) client-side.
   const registry = createHighlightRegistry();
   await highlightModel(model, registry);
-  await contextModel(model, { mode: resolved.mode, cwd: root, registry });
-  await navModel(model, { mode: resolved.mode, cwd: root });
+  // Context and go-to-source both read each file's new side. One bounded
+  // reader serves both, so a file is read once and the review-wide byte bound
+  // is one bound across the two passes, not one per pass.
+  const read = boundedReader();
+  await contextModel(model, { mode: resolved.mode, cwd: root, registry, read });
+  await navModel(model, { mode: resolved.mode, cwd: root, read });
   const highlightCss = registryToCss(registry);
   const meta = {
     mode: resolved.mode,
@@ -168,7 +172,7 @@ export async function reviewDiff({
 
   const directory = await mkdtemp(path.join(os.tmpdir(), "obversa-review-"));
   try {
-    await writeFile(path.join(directory, "index.html"), buildIndexHtml({ meta }), "utf8");
+    await writeFile(path.join(directory, "index.html"), buildIndexHtml(), "utf8");
     await copyFile(path.join(ASSETS_DIR, "app.js"), path.join(directory, "app.js"));
     await copyFile(path.join(ASSETS_DIR, "app.css"), path.join(directory, "app.css"));
     await copyFile(path.join(ASSETS_DIR, "nav-segments.mjs"), path.join(directory, "nav-segments.mjs"));

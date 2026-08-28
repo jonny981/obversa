@@ -2,7 +2,8 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 
 import { createHighlightRegistry } from "../src/highlight.mjs";
-import { contextModel } from "../src/context-model.mjs";
+import { boundedReader, contextModel } from "../src/context-model.mjs";
+import { navModel } from "../src/nav-model.mjs";
 
 const CONTENT = ["a1", "a2", "a3", "a4", "a5", "a6", "a7", "a8", "a9", "a10", ""].join("\n");
 
@@ -48,6 +49,36 @@ test("stops attaching context once the review-wide byte bound is spent", async (
   assert.deepEqual(nums(m.files[1].hunks[0].contextBefore), [1]);
   assert.equal(m.files[2].hunks[0].contextBefore, undefined, "the third file gets no context");
   assert.equal(m.files[2].contextAfter, undefined);
+});
+
+test("one bounded reader serves context and go-to-source under one bound, reading each file once", async () => {
+  // Two 6-byte JavaScript files under a 10-byte bound. Two separate passes
+  // each starting from zero would read four times for 24 bytes; one reader
+  // reads each file once and lets 6 bytes through in total.
+  const file = (path) => ({ path, binary: false, hunks: [{ newStart: 2, newLines: 1, lines: [{ type: "add", newNumber: 2, text: "b" }] }] });
+  const m = { files: [file("one.js"), file("two.js")] };
+  const rawCalls = [];
+  const raw = async ({ path, maxBytes }) => { rawCalls.push({ path, maxBytes }); return "a\nb\nc\n"; };
+  const read = boundedReader({ read: raw, maxTotalBytes: 10 });
+  await contextModel(m, { read, registry: createHighlightRegistry() });
+  await navModel(m, { read });
+  assert.deepEqual(rawCalls.map((c) => c.path), ["one.js", "two.js"], "each file is read once across both passes");
+  // Each read is asked for at most what is left of the bound.
+  assert.deepEqual(rawCalls.map((c) => c.maxBytes), [10, 4]);
+  assert.deepEqual(nums(m.files[0].hunks[0].contextBefore), [1], "the first file got context");
+  assert.equal(m.files[1].hunks[0].contextBefore, undefined, "the second file would cross the bound");
+  // A refused file stays refused without another read; a new file may still
+  // be tried, but only for what is left of the bound.
+  assert.equal(await read({ path: "two.js", mode: "worktree" }), null);
+  assert.equal(rawCalls.length, 2, "a refused file is not re-read");
+  assert.equal(await read({ path: "three.js", mode: "worktree" }), null);
+  assert.deepEqual(rawCalls[2], { path: "three.js", maxBytes: 4 });
+  // Once the bound is spent nothing is read at all.
+  const spent = boundedReader({ read: raw, maxTotalBytes: 6 });
+  assert.equal(await spent({ path: "one.js", mode: "worktree" }), "a\nb\nc\n");
+  const before = rawCalls.length;
+  assert.equal(await spent({ path: "two.js", mode: "worktree" }), null);
+  assert.equal(rawCalls.length, before, "a spent budget reads nothing");
 });
 
 test("degrades to no context without a registry, unreadable content, or binary", async () => {

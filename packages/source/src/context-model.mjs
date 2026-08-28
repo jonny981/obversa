@@ -14,11 +14,43 @@ import { highlightInto } from "./highlight.mjs";
 import { langForPath } from "./lang.mjs";
 import { readNewFileText } from "./git.mjs";
 
-// A review-wide bound on full-file context. Each file is already capped per
+// A review-wide bound on full-file content. Each file is already capped per
 // read; this caps the sum, so a change touching many large files cannot make
 // the surface hold every file's text, tokens, and navigation at once. Files
 // past the bound simply get no expandable context — the diff still renders.
+// The pass below counts its own reads; the review shares one bound between
+// this pass and go-to-source by handing both the same boundedReader.
 export const MAX_CONTEXT_TOTAL_BYTES = 32 * 1024 * 1024;
+
+/**
+ * One reader for a whole review. Full-file context and go-to-source both read
+ * a file's new side; through this reader a file is read at most once whoever
+ * asks, and the bytes read are summed under one bound across both. Each read
+ * is capped at what is left of the bound, so the sum never passes it, not even
+ * for the read that would cross it. Past the bound every read yields null.
+ */
+export function boundedReader({ read = readNewFileText, maxTotalBytes = MAX_CONTEXT_TOTAL_BYTES } = {}) {
+  const cache = new Map();
+  let used = 0;
+  return async function boundedRead({ path, mode, cwd } = {}) {
+    const key = `${mode}\0${path}`;
+    if (cache.has(key)) return cache.get(key);
+    let text = null;
+    const remaining = maxTotalBytes - used;
+    if (remaining > 0) {
+      const code = await read({ path, mode, cwd, maxBytes: remaining });
+      if (typeof code === "string") {
+        const bytes = Buffer.byteLength(code, "utf8");
+        if (bytes <= remaining) {
+          used += bytes;
+          text = code;
+        }
+      }
+    }
+    cache.set(key, text);
+    return text;
+  };
+}
 
 function sliceContext(lines, tokens, from, to) {
   const out = [];

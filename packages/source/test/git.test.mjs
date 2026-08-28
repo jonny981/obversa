@@ -181,6 +181,43 @@ test("listTrackedFiles returns the repo's tracked files, or [] outside a repo", 
   }
 });
 
+test("a staged read returns the blob of exactly the named path, even when the name looks like stage syntax", async () => {
+  // `git show :0:secret.js` means stage 0 of secret.js, not a file named
+  // `0:secret.js`. The index holds both here; each path must read as itself.
+  const dir = makeRepo();
+  try {
+    writeFileSync(path.join(dir, "secret.js"), "FROM_SECRET_JS\n");
+    writeFileSync(path.join(dir, "0:secret.js"), "FROM_ZERO_COLON_FILE\n");
+    git(dir, "add", "--", "secret.js", "0:secret.js");
+    assert.equal(await readNewFileText({ path: "0:secret.js", mode: "staged", cwd: dir }), "FROM_ZERO_COLON_FILE\n");
+    assert.equal(await readNewFileText({ path: "secret.js", mode: "staged", cwd: dir }), "FROM_SECRET_JS\n");
+    // A glob-looking name is read literally, never expanded.
+    writeFileSync(path.join(dir, "s*.js"), "FROM_GLOB_NAME\n");
+    git(dir, "add", "--", "s*.js");
+    assert.equal(await readNewFileText({ path: "s*.js", mode: "staged", cwd: dir }), "FROM_GLOB_NAME\n");
+    assert.equal(await readNewFileText({ path: "s?cret.js", mode: "staged", cwd: dir }), null, "a pattern that is not itself an index path");
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("readNewFileText honours a lower per-read byte limit in both modes", async () => {
+  const dir = makeRepo();
+  try {
+    writeFileSync(path.join(dir, "code.js"), "const value = 1;\n"); // 17 bytes
+    git(dir, "add", "code.js");
+    for (const mode of ["worktree", "staged"]) {
+      assert.equal(await readNewFileText({ path: "code.js", mode, cwd: dir, maxBytes: 17 }), "const value = 1;\n", `${mode}: exactly the limit reads`);
+      assert.equal(await readNewFileText({ path: "code.js", mode, cwd: dir, maxBytes: 16 }), null, `${mode}: one byte over the limit is refused`);
+      assert.equal(await readNewFileText({ path: "code.js", mode, cwd: dir, maxBytes: 0 }), null, `${mode}: a spent budget reads nothing`);
+      // The limit never rises above the per-file bound.
+      assert.equal(await readNewFileText({ path: "code.js", mode, cwd: dir, maxBytes: MAX_FILE_BYTES * 10 }), "const value = 1;\n");
+    }
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
 test("repositoryRoot finds the top level from any subdirectory, or null outside a repository", async () => {
   const dir = makeRepo();
   const empty = mkdtempSync(path.join(os.tmpdir(), "source-empty-"));

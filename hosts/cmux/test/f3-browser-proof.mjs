@@ -155,7 +155,7 @@ test("the review surface renders under the exact CSP with zero violations and fi
   const { model, meta, highlightCss } = await buildModel();
   const token = randomBytes(16).toString("hex");
   const clientKit = await readFile(CLIENT_KIT, "utf8");
-  const shell = buildIndexHtml({ meta }).replace('<script type="module" src="/app.js"></script>', '<script src="/probe.js"></script>\n<script type="module" src="/app.js"></script>');
+  const shell = buildIndexHtml().replace('<script type="module" src="/app.js"></script>', '<script src="/probe.js"></script>\n<script type="module" src="/app.js"></script>');
   const assets = {
     "/app.js": ["app.js", "text/javascript; charset=utf-8"],
     "/app.css": ["app.css", "text/css; charset=utf-8"],
