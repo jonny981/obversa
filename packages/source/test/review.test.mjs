@@ -134,22 +134,27 @@ test("outputAnchors offers every visible line and side; the request is contract-
     { target: "a.txt", side: "new", position: 3 },
   ]);
   // The direct request, exactly as the live review builds it, is valid by the
-  // contract's own validator: no gate means gateId null and a null callback.
-  const request = buildSurfaceRequest({ model, label: "working tree" });
-  assert.equal(request.kind.family, "output");
-  assert.equal(request.subject, "working tree");
+  // contract's own validator: no gate means gateId null and a null callback;
+  // the subject is the reviewed ref plus the URL the page fetches the diff
+  // from; the transport is the browser pane.
+  const meta = { mode: "worktree", range: null, label: "working tree" };
+  const request = buildSurfaceRequest({ model, meta });
+  assert.deepEqual(request.kind, { family: "output", renderer: "review" });
+  assert.deepEqual(request.subject, { ref: "worktree", fetch: "/api/model" });
+  assert.equal(request.transport, "browser");
   assert.equal(request.anchors.length, 6);
   assert.equal(request.gateId, null);
   assert.deepEqual(request.callback, { address: null, token: null });
   assert.equal(isSurfaceRequest(request), true);
+  assert.deepEqual(buildSurfaceRequest({ model, meta: { mode: "range", range: "main..HEAD", label: "range main..HEAD" } }).subject, { ref: "main..HEAD", fetch: "/api/model" });
   // A gate-launched request carries the gate's id and callback.
-  const gated = buildSurfaceRequest({ model, label: "working tree", gate: { gateId: "gate-1", callback: { address: "http://127.0.0.1:9/cb", token: "t" } } });
+  const gated = buildSurfaceRequest({ model, meta, gate: { gateId: "gate-1", callback: { address: "http://127.0.0.1:9/cb", token: "t" } } });
   assert.equal(gated.gateId, "gate-1");
   assert.deepEqual(gated.callback, { address: "http://127.0.0.1:9/cb", token: "t" });
   assert.equal(isSurfaceRequest(gated), true);
   // A malformed gate option fails before a surface opens: the id and the
   // callback come as a pair, all present and non-empty strings.
-  const bad = (gate) => assert.throws(() => buildSurfaceRequest({ model, label: "x", gate }), TypeError);
+  const bad = (gate) => assert.throws(() => buildSurfaceRequest({ model, meta, gate }), TypeError);
   bad({ gateId: "" });
   bad({ gateId: "g" });
   bad({ gateId: "g", callback: {} });
@@ -158,6 +163,23 @@ test("outputAnchors offers every visible line and side; the request is contract-
   bad({ gateId: "g", callback: { address: "http://127.0.0.1:9/cb", token: { v: 1 } } });
   bad({ gateId: null, callback: { address: "http://127.0.0.1:9/cb", token: "t" } });
   bad("gate-1");
+});
+
+test("a session that ends without the reviewer returning still yields a routable SurfaceResult", async () => {
+  // The runtime hands the app's terminalPayload back as the framed payload
+  // for a cancelled or timed-out session; reviewDiff must supply one that
+  // keeps the surface and gate ids and states the decision.
+  for (const [status, decision] of [["cancelled", "cancelled"], ["timed_out", "timed-out"], ["interrupted", "cancelled"]]) {
+    const launchSurface = async ({ terminalPayload }) => ({ result: { status, payload: terminalPayload(status) } });
+    const gate = { gateId: "gate-9", callback: { address: "http://127.0.0.1:9/cb", token: "t" } };
+    const outcome = await reviewDiff({ diffText: DIFF, launchSurface, clientKitSource: CLIENT_KIT, open: false, gate });
+    assert.equal(outcome.status, status);
+    assert.equal(typeof outcome.result.surfaceId, "string");
+    assert.equal(outcome.result.gateId, "gate-9");
+    assert.equal(outcome.result.decision, decision);
+    assert.deepEqual(outcome.result.annotations, []);
+    assert.equal(outcome.result.meta.label, "working tree");
+  }
 });
 
 test("a gate's id flows through reviewDiff onto the result", async () => {

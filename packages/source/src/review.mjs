@@ -64,20 +64,29 @@ function normalizeGate(gate) {
  * Callback Gate passes through reviewDiff — its id and callback — and is the
  * only route by which a gate reaches the request. Direct use from the command
  * line passes none, so gateId is null and the callback has null address and
- * token; the contract treats that shape as valid. The result copies surfaceId
- * and gateId back, which is how a consumer routes it.
+ * token; the contract treats that shape as valid. The subject is the reviewed
+ * ref (the working tree, the index, or the ref range) plus the URL the page
+ * fetches the diff from; the transport is the browser pane the host opens.
+ * The result copies surfaceId and gateId back, which is how a consumer routes
+ * it.
  */
-export function buildSurfaceRequest({ model, label, gate } = {}) {
+export function buildSurfaceRequest({ model, meta, gate } = {}) {
   const { gateId, callback } = normalizeGate(gate);
+  const ref = meta?.mode === "range" ? String(meta.range) : String(meta?.mode ?? "worktree");
   return {
     surfaceId: randomUUID(),
     gateId,
     callback,
     kind: { family: "output", renderer: "review" },
-    subject: label,
+    subject: { ref, fetch: "/api/model" },
     anchors: outputAnchors(model),
-    transport: "local",
+    transport: "browser",
   };
+}
+
+// The decision a session that ends without the browser's completion carries.
+function decisionFor(status) {
+  return status === "timed_out" ? "timed-out" : "cancelled";
 }
 
 /**
@@ -104,9 +113,11 @@ export function buildSurfaceRequest({ model, label, gate } = {}) {
  *
  * Resolves to { status, result, annotations, meta, terminal }: `result` is the
  * SurfaceResult (an internal note — surfaceId, gateId, decision, annotations
- * with contract anchors, meta) when the reviewer returned, else null;
- * `annotations` is `result.annotations` or []; `terminal` is the runtime's
- * framed terminal record.
+ * with contract anchors, meta): the reviewer's on completion, or one with a
+ * "cancelled" / "timed-out" decision and no annotations when the session
+ * ended otherwise; null only if the session never produced a terminal
+ * record. `annotations` is `result.annotations` or []; `terminal` is the
+ * runtime's framed terminal record.
  */
 export async function reviewDiff({
   mode = "worktree",
@@ -153,7 +164,7 @@ export async function reviewDiff({
     // The repo's tracked files, for the tree's "All files" view.
     allFiles: await listTrackedFiles({ cwd: root }),
   };
-  const request = buildSurfaceRequest({ model, label: meta.label, gate });
+  const request = buildSurfaceRequest({ model, meta, gate });
 
   const directory = await mkdtemp(path.join(os.tmpdir(), "obversa-review-"));
   try {
@@ -197,11 +208,16 @@ export async function reviewDiff({
       },
     };
 
-    const outcome = await launchSurface({ app, assets, api, open, ready });
+    // A session that ends without the browser's completion — cancelled, timed
+    // out, interrupted — still frames a SurfaceResult carrying the surface and
+    // gate ids and a "cancelled" / "timed-out" decision, so a gate can route
+    // the outcome.
+    const terminalPayload = (status) => normalizeResult({ decision: decisionFor(status), annotations: [], meta }, request);
+    const outcome = await launchSurface({ app, assets, api, open, ready, terminalPayload });
     const terminal = outcome?.result ?? outcome;
     const status = terminal?.status ?? "unknown";
-    // On completion the framed payload is the SurfaceResult itself.
-    const result = status === "completed" ? terminal.payload ?? null : null;
+    // The framed payload is the SurfaceResult itself, whatever the status.
+    const result = terminal?.payload ?? null;
     return { status, result, annotations: result?.annotations ?? [], meta, terminal };
   } finally {
     await rm(directory, { recursive: true, force: true });

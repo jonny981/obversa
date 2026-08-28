@@ -231,3 +231,39 @@ test("the review surface runs on surfacer and returns annotations", { timeout: 3
     rmSync(repo, { recursive: true, force: true });
   }
 });
+
+test("a cancelled review still frames the surface and gate ids with a cancelled decision", { timeout: 30_000 }, async () => {
+  const repo = makeRepoWithChange();
+  const stdout = captureStream();
+  stdout.release(); // the frame is small; no back-pressure to model here
+  let resolveReady;
+  const ready = new Promise((resolve) => { resolveReady = resolve; });
+  const launchSurface = (options) => runSurface({ ...options, stdout, ready: (info) => resolveReady(info), leaseTimeoutMs: 15_000, sessionTimeoutMs: 25_000 });
+  const gate = { gateId: "gate-42", callback: { address: "http://127.0.0.1:9/cb", token: "t" } };
+  const reviewPromise = reviewDiff({ mode: "worktree", cwd: repo, launchSurface, clientKitSource, open: false, gate });
+  try {
+    const { origin, url } = await ready;
+    const token = url.split("#")[1];
+    const headers = { "Content-Type": "application/json", Authorization: `Bearer ${token}`, Origin: origin };
+    const cancel = await fetch(`${origin}/api/cancel`, { method: "POST", headers, body: "{}" });
+    assert.equal(cancel.status, 200);
+    const { operationId } = await cancel.json();
+    assert.equal((await fetch(`${origin}/api/ack`, { method: "POST", headers, body: JSON.stringify({ operationId }) })).status, 200);
+
+    const outcome = await reviewPromise;
+    assert.equal(outcome.status, "cancelled");
+    assert.equal(typeof outcome.result.surfaceId, "string");
+    assert.equal(outcome.result.gateId, "gate-42", "the gate binding survives cancellation");
+    assert.equal(outcome.result.decision, "cancelled");
+    assert.deepEqual(outcome.result.annotations, []);
+    // The framed record carries the same routable outcome for a pipeline consumer.
+    const framed = parseFramedResult(stdout.text, "review");
+    assert.equal(framed.status, "cancelled");
+    assert.equal(framed.payload.gateId, "gate-42");
+    assert.equal(framed.payload.decision, "cancelled");
+    assert.equal(framed.payload.surfaceId, outcome.result.surfaceId);
+  } finally {
+    await reviewPromise.catch(() => {});
+    rmSync(repo, { recursive: true, force: true });
+  }
+});

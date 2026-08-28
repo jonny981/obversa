@@ -22,7 +22,7 @@ function makeRequest(anchors) {
     gateId: "g1",
     callback: { address: "cb://x", token: "t" },
     kind: { family: "output", renderer: "diff" },
-    subject: { ref: "worktree" },
+    subject: { ref: "worktree", fetch: "/api/model" },
     anchors,
     transport: "terminal",
   };
@@ -163,6 +163,21 @@ test("isSurfaceRequest guards the shape", () => {
   assert.equal(isSurfaceRequest({ ...makeRequest([]), gateId: 5, callback: live }), false);
   assert.equal(isSurfaceRequest({ ...makeRequest([]), gateId: "", callback: live }), false);
   assert.equal(isSurfaceRequest(null), false);
+  // Every field a host needs to render must be present: a non-empty surface
+  // id, the renderer, a subject with a ref and a payload or fetch URL, and a
+  // known transport (or a named third-party tool).
+  assert.equal(isSurfaceRequest({ ...makeRequest([]), surfaceId: "" }), false);
+  assert.equal(isSurfaceRequest({ ...makeRequest([]), kind: { family: "output" } }), false);
+  assert.equal(isSurfaceRequest({ ...makeRequest([]), subject: { ref: "worktree" } }), false, "a subject needs a payload or a fetch URL");
+  assert.equal(isSurfaceRequest({ ...makeRequest([]), subject: { fetch: "/api/model" } }), false, "a subject needs a ref");
+  assert.equal(isSurfaceRequest({ ...makeRequest([]), subject: { ref: "worktree", payload: { files: [] } } }), true);
+  assert.equal(isSurfaceRequest({ ...makeRequest([]), transport: "local" }), false);
+  assert.equal(isSurfaceRequest({ ...makeRequest([]), transport: "browser" }), true);
+  assert.equal(isSurfaceRequest({ ...makeRequest([]), transport: "third-party:linear" }), true);
+  assert.equal(isSurfaceRequest({ ...makeRequest([]), transport: "third-party:" }), false);
+  const noSubject = makeRequest([]);
+  delete noSubject.subject;
+  assert.equal(isSurfaceRequest(noSubject), false);
   assert.equal(isSurfaceRequest({ ...makeRequest([]), kind: { family: "bogus" } }), false);
   assert.equal(isSurfaceRequest({ ...makeRequest([]), surfaceId: 5 }), false);
   const noAnchors = makeRequest([]);

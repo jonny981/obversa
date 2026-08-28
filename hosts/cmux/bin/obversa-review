@@ -64,7 +64,8 @@ async function main() {
     process.exitCode = 0;
     return;
   }
-  process.stderr.write(`Review of the ${meta.label} ended without a decision (${status}).\n`);
+  const outcome = result ? `${result.decision}` : "no result";
+  process.stderr.write(`Review of the ${meta.label} ended without the reviewer returning (${status}: ${outcome}).\n`);
   process.exitCode = 1;
 }
 

@@ -113,10 +113,11 @@ The bounds are fixed. A review returns at most 500 annotations. Each body
 is cut at 4000 characters. An annotation must anchor to a line that
 appears in the diff; the server drops any other.
 
-`status` is `completed` when the reviewer returns. `cancelled`,
-`timed_out`, `interrupted`, and `error` carry a short `detail` and no
-payload. The exit code is 0 for `completed`, 1 for every other status,
-and 2 for a bad argument.
+`status` is `completed` when the reviewer returns. `cancelled`, `timed_out`,
+and `interrupted` carry a short `detail` and a payload with the same
+`surfaceId` and `gateId`, `decision` set to `cancelled` or `timed-out`, and
+no annotations, so a gate can still route the outcome. The exit code is 0
+for `completed`, 1 for every other status, and 2 for a bad argument.
 
 ## Security
 
@@ -128,5 +129,6 @@ diff line can execute. The page has no inline script, a strict Content
 Security Policy allows scripts and styles from the session origin only,
 and every line is rendered as text. The returned annotations are checked
 on the server, and one that does not anchor to a real diff line is
-dropped. Annotations return byte-exact. Secret redaction does not apply to
-them, because a comment can quote code.
+dropped. Comment bodies are trimmed and cut at 4000 characters, and are
+otherwise returned as written: the secret redaction the runtime applies to
+other responses does not apply to them, because a comment can quote code.

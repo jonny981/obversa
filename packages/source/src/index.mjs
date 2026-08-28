@@ -1,6 +1,8 @@
 export { reviewDiff, outputAnchors, buildSurfaceRequest } from "./review.mjs";
 export {
   FAMILIES,
+  TRANSPORTS,
+  isTransport,
   DECISIONS,
   AUTHOR_KINDS,
   MAX_ANNOTATIONS,

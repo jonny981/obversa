@@ -14,7 +14,9 @@
 //
 // Shapes (see an internal note):
 //   SurfaceRequest { surfaceId, gateId, callback{address,token},
-//                    kind{family,renderer}, subject, anchors[], transport, deadline? }
+//                    kind{family,renderer}, subject{ref, payload | fetch},
+//                    anchors[], transport, deadline? }
+//   transport is one of TRANSPORTS or `third-party:<tool>`.
 //   A surface opened directly (a person running the command, no Callback Gate)
 //   has gateId null and a callback whose address and token are null; a
 //   gate-launched surface carries the gate's id and callback. Both are valid.
@@ -23,6 +25,13 @@
 //   SurfaceResult  { surfaceId, gateId, decision, annotations[], edits?, meta? }
 
 export const FAMILIES = Object.freeze(["intent", "output", "outcome"]);
+// Transport hints (an internal note): the named hosts, or a third-party tool as
+// `third-party:<tool>`.
+export const TRANSPORTS = Object.freeze(["terminal", "browser", "remote", "webhook"]);
+const THIRD_PARTY = /^third-party:[A-Za-z0-9._-]+$/;
+export function isTransport(value) {
+  return typeof value === "string" && (TRANSPORTS.includes(value) || THIRD_PARTY.test(value));
+}
 export const DECISIONS = Object.freeze([
   "approved",
   "changes-requested",
@@ -189,9 +198,15 @@ export function isGateBinding(gateId, callback) {
 
 export function isSurfaceRequest(value) {
   if (!value || typeof value !== "object") return false;
-  if (typeof value.surfaceId !== "string") return false;
+  if (!isPresent(value.surfaceId)) return false;
   if (!isGateBinding(value.gateId, value.callback)) return false;
-  if (!value.kind || !FAMILIES.includes(value.kind.family)) return false;
+  if (!value.kind || !FAMILIES.includes(value.kind.family) || !isPresent(value.kind.renderer)) return false;
+  // The subject is a ref plus either an inline payload or a fetch URL; a host
+  // cannot render a request that names neither.
+  const subject = value.subject;
+  if (!subject || typeof subject !== "object" || !isPresent(subject.ref)) return false;
+  if (subject.payload === undefined && !isPresent(subject.fetch)) return false;
+  if (!isTransport(value.transport)) return false;
   if (!Array.isArray(value.anchors)) return false;
   return true;
 }
