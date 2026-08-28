@@ -1,19 +1,22 @@
 // Server-side syntax highlighter for the review surface, derived from grok's
 // CSP-verified shiki highlighter (scratch: grok-highlight, proven in headless
 // Chrome under script-src 'self'; style-src 'self': zero inline styles, colours
-// from a static class sheet). This variant returns TOKENS per line instead of
-// HTML strings, so the browser builds each line with createElement + textContent
+// from class rules). This variant returns TOKENS per line instead of HTML
+// strings, so the browser builds each line with createElement + textContent
 // and never uses innerHTML. That keeps the original renderer's guarantee — code
 // under review can never execute or break out — while adding highlighting.
 //
 // A whole review is highlighted in many small snippets (one per hunk side), so
-// the class ids must stay consistent across every snippet to share one served
-// stylesheet. A registry threads that shared (colour -> class) map: highlight
-// each snippet with `highlightInto(registry, ...)`, then emit the sheet once
-// with `registryToCss(registry)`.
+// the class ids must stay consistent across every snippet to share one set of
+// rules. A registry threads that shared (colour -> class) map: highlight each
+// snippet with `highlightInto(registry, ...)`, then emit the rules once with
+// `registryToCss(registry)`. Those rules are built from the review's own
+// tokens, so they ride the authenticated model response — never a pre-auth
+// static file — and the page applies them as a constructed stylesheet, which
+// style-src does not govern.
 //
-// Shiki tokenizes on the server; the browser only paints class spans + the
-// static stylesheet. The JavaScript regex engine is required: the default
+// Shiki tokenizes on the server; the browser only paints class spans under the
+// rules it was handed. The JavaScript regex engine is required: the default
 // Oniguruma engine loads WASM, which script-src 'self' would block.
 
 import { createRequire } from "node:module";
@@ -145,8 +148,9 @@ export async function highlightInto(registry, { code, lang, theme = DEFAULT_THEM
 }
 
 /**
- * Emit the stylesheet for everything highlighted into the registry. The rules
- * are class-based, so they serve under style-src 'self' with no inline styles.
+ * Emit the rules for everything highlighted into the registry. They are
+ * class-based — no inline styles — and reach the page inside the authenticated
+ * model, where a constructed stylesheet applies them under style-src 'self'.
  */
 export function registryToCss(registry) {
   return [

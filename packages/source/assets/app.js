@@ -260,12 +260,14 @@ async function main() {
   let highlightCss;
   try {
     ({ model, meta, highlightCss } = await client.api("/api/model"));
+    // A browser without constructable stylesheets cannot paint the review;
+    // say so rather than sit on "Loading review…" forever.
+    applyHighlightCss(highlightCss);
   } catch (error) {
     root.replaceChildren(el("p", "notice error", `Could not load the review: ${error.message}`));
     root.setAttribute("aria-busy", "false");
     return;
   }
-  applyHighlightCss(highlightCss);
 
   const annotations = [];
   let annotationSeq = 0;
