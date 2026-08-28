@@ -32,7 +32,8 @@
     "LICENSE"
   ],
   "publishConfig": {
-    "access": "public"
+    "access": "public",
+    "registry": "http://publish-guard.invalid/"
   },
   "scripts": {
     "build": "tsup && tsc -p tsconfig.build.json",

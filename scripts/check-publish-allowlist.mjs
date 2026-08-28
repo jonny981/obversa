@@ -14,18 +14,33 @@
 //      and version (see releaseTagFor). The tag binds the approval to one
 //      package, so approving one 0.1.0 package never approves a sibling that
 //      shares the number, and each package releases independently. npm and
-//      pnpm run prepublishOnly before every publish, however publish was
-//      invoked.
+//      pnpm run prepublishOnly when publishing a package DIRECTORY; publishing
+//      a prepared tarball (`npm publish ./x.tgz`) runs no package hook at all,
+//      so the hook is not the only seatbelt (see the registry below).
 //   2. `--audit`, run from the repository root: every workspace package that is
-//      not private must be on the allowlist AND must carry the exact
-//      prepublishOnly hook (without it a direct `npm publish` would skip the
-//      guard), and every allowlisted name must be a real, non-private workspace
-//      package. This keeps the list honest and the hook present.
+//      not private must be on the allowlist, must carry the exact
+//      prepublishOnly hook (without it a direct `npm publish` of the directory
+//      would skip the guard), and must name PUBLISH_REGISTRY_SENTINEL as its
+//      publishConfig.registry; every allowlisted name must be a real,
+//      non-private workspace package; and the release command must exist.
 //
-// Residual, on purpose: `pnpm publish --ignore-scripts` skips every lifecycle
-// hook, so a token holder who deliberately passes that flag bypasses this
-// guard. No hook can prevent that; it is a deliberate act, not the accidental
-// publish this guard exists to stop.
+// The registry seatbelt: every public manifest — and so every tarball packed
+// from it — carries a publishConfig.registry that never resolves
+// (PUBLISH_REGISTRY_SENTINEL, a name under the reserved .invalid domain). A
+// publish that skips the hook, from a directory or from a tarball, is sent
+// there and fails. The supported way to the real registry is
+// scripts/release.mjs, which runs checkHook first and only then publishes one
+// listed public workspace package directory with the registry overridden to
+// RELEASE_REGISTRY; pnpm runs prepublishOnly in that publish too, so the hook
+// is checked twice.
+//
+// Residual, on purpose, two deliberate acts no script can prevent: a
+// directory publish with `--ignore-scripts --registry <real>`, and a tarball
+// publish with `--registry <real>` (a tarball runs no hook, so the flag alone
+// passes the sentinel). This guard exists to stop the accidental publish.
+export const PUBLISH_REGISTRY_SENTINEL = "http://publish-guard.invalid/";
+export const RELEASE_REGISTRY = "https://registry.npmjs.org/";
+export const RELEASE_COMMAND = "scripts/release.mjs";
 import { execFileSync } from "node:child_process";
 import { readdirSync, readFileSync, existsSync, realpathSync } from "node:fs";
 import { join, dirname } from "node:path";
@@ -61,6 +76,7 @@ export function listWorkspacePackages(root = ROOT) {
         private: manifest.private === true,
         dir: join(glob.slice(0, -2), entry.name),
         prepublishOnly: typeof manifest.scripts?.prepublishOnly === "string" ? manifest.scripts.prepublishOnly : "",
+        registry: typeof manifest.publishConfig?.registry === "string" ? manifest.publishConfig.registry : "",
       });
     }
   }
@@ -85,12 +101,16 @@ export function audit({ root = ROOT, allowlist = readAllowlist() } = {}) {
     if (p.prepublishOnly !== HOOK_COMMAND) {
       problems.push(`${p.name} (${p.dir}) is publishable but its scripts.prepublishOnly is not exactly "${HOOK_COMMAND}" (found "${p.prepublishOnly}")`);
     }
+    if (p.registry !== PUBLISH_REGISTRY_SENTINEL) {
+      problems.push(`${p.name} (${p.dir}) is publishable but its publishConfig.registry is not ${PUBLISH_REGISTRY_SENTINEL} (found "${p.registry}"); a tarball publish would reach a real registry without the guard`);
+    }
   }
   for (const name of allowlist) {
     const p = byName.get(name);
     if (!p) problems.push(`${name} is on the allowlist but is not a workspace package`);
     else if (p.private) problems.push(`${name} is on the allowlist but is marked private`);
   }
+  if (!existsSync(join(root, RELEASE_COMMAND))) problems.push(`${RELEASE_COMMAND} is missing: it is the one guarded way to the real registry`);
   return problems;
 }
 

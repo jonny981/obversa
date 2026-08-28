@@ -1,11 +1,12 @@
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
-import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdtempSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import test from "node:test";
 
-import { HOOK_COMMAND, audit, checkHook, listWorkspacePackages, releaseTagFor } from "./check-publish-allowlist.mjs";
+import { HOOK_COMMAND, PUBLISH_REGISTRY_SENTINEL, audit, checkHook, listWorkspacePackages, releaseTagFor } from "./check-publish-allowlist.mjs";
+import { releasePlan } from "./release.mjs";
 
 function makeWorkspace(packages) {
   const root = mkdtempSync(path.join(os.tmpdir(), "publish-guard-"));
@@ -37,19 +38,22 @@ test("listWorkspacePackages follows every dir/* glob in pnpm-workspace.yaml", ()
 const HOOKED = { prepublishOnly: HOOK_COMMAND };
 
 test("the audit fails closed: an unlisted public package, a missing or wrong hook, a listed private one, and a listed ghost", () => {
+  const guarded = { publishConfig: { registry: PUBLISH_REGISTRY_SENTINEL } };
   const root = makeWorkspace({
-    "packages/pub": { name: "@x/pub", scripts: HOOKED },
-    "packages/nohook": { name: "@x/nohook", scripts: { build: "tsup" } },
+    "packages/pub": { name: "@x/pub", scripts: HOOKED, ...guarded },
+    "packages/nohook": { name: "@x/nohook", scripts: { build: "tsup" }, ...guarded },
     // Lookalikes that mention the script but do not run the guard.
-    "packages/echo": { name: "@x/echo", scripts: { prepublishOnly: "echo check-publish-allowlist.mjs" } },
-    "packages/audit": { name: "@x/audit", scripts: { prepublishOnly: "node ../../scripts/check-publish-allowlist.mjs --audit" } },
+    "packages/echo": { name: "@x/echo", scripts: { prepublishOnly: "echo check-publish-allowlist.mjs" }, ...guarded },
+    "packages/audit": { name: "@x/audit", scripts: { prepublishOnly: "node ../../scripts/check-publish-allowlist.mjs --audit" }, ...guarded },
     "packages/priv": { name: "@x/priv", private: true },
-    "packages/ok": { name: "@x/ok", scripts: HOOKED },
+    "packages/ok": { name: "@x/ok", scripts: HOOKED, ...guarded },
   });
   try {
     const problems = audit({ root, allowlist: new Set(["@x/ok", "@x/nohook", "@x/echo", "@x/audit", "@x/priv", "@x/ghost"]) });
     const text = problems.join("\n");
-    assert.equal(problems.length, 6, text);
+    // Six package problems, and the fixture has no release command.
+    assert.equal(problems.length, 7, text);
+    assert.match(text, /release\.mjs is missing/);
     assert.match(text, /@x\/pub .* not on the allowlist/);
     assert.match(text, /@x\/nohook .*prepublishOnly is not exactly/);
     assert.match(text, /@x\/echo .*prepublishOnly is not exactly/);
@@ -131,6 +135,84 @@ test("outside a git repository the hook refuses", () => {
   try {
     const problems = checkHook({ cwd: path.join(root, "packages", "p"), env: { OBVERSA_RELEASE: "1" }, allowlist: new Set(["@x/p"]), run: () => { throw new Error("no git"); } });
     assert.match(problems.join("\n"), /not inside a git repository/);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("the audit requires every public package to name the never-resolving registry, and the release command to exist", () => {
+  const good = { name: "@obversa/pub", version: "1.0.0", scripts: { prepublishOnly: HOOK_COMMAND }, publishConfig: { access: "public", registry: PUBLISH_REGISTRY_SENTINEL } };
+  const root = makeWorkspace({
+    "packages/pub": good,
+    "packages/real": { ...good, name: "@obversa/real", publishConfig: { access: "public", registry: "https://registry.npmjs.org/" } },
+    "packages/bare": { ...good, name: "@obversa/bare", publishConfig: { access: "public" } },
+    "packages/priv": { name: "@obversa/priv", private: true, publishConfig: { access: "public" } },
+  });
+  try {
+    const problems = audit({ root, allowlist: new Set(["@obversa/pub", "@obversa/real", "@obversa/bare"]) });
+    assert.ok(problems.some((p) => p.startsWith("@obversa/real ") && p.includes("publishConfig.registry")), "a real registry in a manifest is refused");
+    assert.ok(problems.some((p) => p.startsWith("@obversa/bare ") && p.includes("publishConfig.registry")), "no registry means the default, the real one");
+    assert.ok(!problems.some((p) => p.startsWith("@obversa/pub ")), "the sentinel passes");
+    assert.ok(!problems.some((p) => p.startsWith("@obversa/priv ")), "a private package is not held to it");
+    assert.ok(problems.some((p) => p.includes("release.mjs is missing")), "the fixture has no release command");
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("the release plan publishes exactly one listed public package directory, after the guard", () => {
+  const root = makeWorkspace({
+    "packages/pub": { name: "@x/pub", version: "1.0.0", scripts: HOOKED, publishConfig: { access: "public", registry: PUBLISH_REGISTRY_SENTINEL } },
+    "packages/priv": { name: "@x/priv", private: true },
+  });
+  try {
+    const packages = listWorkspacePackages(root);
+    const calls = [];
+    const check = ({ cwd }) => { calls.push(cwd); return []; };
+    const plan = releasePlan({ target: "packages/pub", root, packages, check });
+    assert.equal(plan.name, "@x/pub");
+    assert.deepEqual(plan.args, ["publish", "--registry", "https://registry.npmjs.org/", "--access", "public"]);
+    assert.deepEqual(calls, [plan.cwd], "the guard ran on that directory first");
+    assert.deepEqual(releasePlan({ target: "packages/pub", flags: ["--dry-run"], root, packages, check }).args.at(-1), "--dry-run");
+    for (const bad of ["packages/priv", "packages/nothere", "packages/pub/..", "..", "/tmp", "hosts/cmux", "packages/pub/src"]) {
+      assert.throws(() => releasePlan({ target: bad, root, packages, check }), /not the directory of a public workspace package/, bad);
+    }
+    assert.throws(() => releasePlan({ target: "packages/pub", flags: ["--force"], root, packages, check }), /unknown flag --force/);
+    assert.throws(() => releasePlan({ target: "packages/pub", root, packages, check: () => ["no tag"] }), /release: no tag/, "the guard's refusal is the plan's refusal");
+    assert.throws(() => releasePlan({ target: "", root, packages, check }), /usage/);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("a packed tarball carries the never-resolving registry, so publishing it — which runs no hook — goes nowhere", { timeout: 120_000 }, () => {
+  // The seatbelt as it travels: the manifest inside the tarball names the
+  // sentinel registry, which is what `npm publish x.tgz` would use, and no
+  // hook runs at pack time either. No form of `npm publish` is invoked here
+  // — even a dry run does registry work — since a tarball publish skipping
+  // prepublishOnly is npm's documented behaviour, confirmed once against a
+  // loopback registry, not something this suite re-proves.
+  const root = mkdtempSync(path.join(os.tmpdir(), "publish-tarball-"));
+  try {
+    const pkg = path.join(root, "pkg");
+    mkdirSync(pkg);
+    writeFileSync(path.join(pkg, "index.js"), "module.exports = 1;\n");
+    writeFileSync(path.join(pkg, "package.json"), JSON.stringify({
+      name: "@obversa-test/tarball-guard",
+      version: "0.0.1",
+      main: "index.js",
+      scripts: { prepublishOnly: "node -e \"require('fs').writeFileSync('HOOK_RAN', '')\"" },
+      publishConfig: { access: "public", registry: PUBLISH_REGISTRY_SENTINEL },
+    }));
+    const env = { ...process.env, npm_config_update_notifier: "false" };
+    execFileSync("npm", ["pack", "--ignore-scripts", "--pack-destination", root], { cwd: pkg, env, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] });
+    const tarball = path.join(root, "obversa-test-tarball-guard-0.0.1.tgz");
+    rmSync(path.join(pkg, "HOOK_RAN"), { force: true });
+    const packed = JSON.parse(execFileSync("tar", ["-xOzf", tarball, "package/package.json"], { encoding: "utf8" }));
+    assert.equal(packed.publishConfig?.registry, PUBLISH_REGISTRY_SENTINEL, "the registry inside the tarball is the sentinel");
+    assert.doesNotMatch(JSON.stringify(packed), /registry\.npmjs\.org/, "the real registry appears nowhere in it");
+    assert.equal(existsSync(path.join(pkg, "HOOK_RAN")), false, "no hook ran at pack time");
+    assert.equal(existsSync(path.join(root, "HOOK_RAN")), false);
   } finally {
     rmSync(root, { recursive: true, force: true });
   }

@@ -7,7 +7,8 @@
   "license": "MIT",
   "sideEffects": false,
   "publishConfig": {
-    "access": "public"
+    "access": "public",
+    "registry": "http://publish-guard.invalid/"
   },
   "engines": {
     "node": ">=22.12.0"
