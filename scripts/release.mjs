@@ -5,17 +5,22 @@
 // npm consults for a scoped name (`registry` and `@obversa:registry`), so a
 // publish that skips the guard — a directory publish with scripts ignored, a
 // prepared tarball, which runs no hook — goes nowhere unless both keys are
-// overridden on purpose. This command runs the guard first (checkHook:
+// overridden on purpose. This command runs the guard (checkHook:
 // OBVERSA_RELEASE=1, the allowlist, main, a clean tree, the annotated release
 // tag) on exactly one listed public workspace package directory, packs it
-// with pnpm (which rewrites workspace versions into the tarball), and then
+// with pnpm (which rewrites workspace versions into the tarball), runs the
+// guard AGAIN on the packed state — a pack step that changed a tracked file
+// leaves a dirty tree and is refused before npm is ever started — and then
 // publishes that tarball with npm, overriding both registry keys on the
-// command line — the one place npm lets a flag beat the manifest's
-// publishConfig. A dry run (`--dry-run`) packs and reports the registry npm
-// would publish to, without publishing.
+// command line, the one place npm lets a flag beat the manifest's
+// publishConfig. A dry run (`--dry-run`) does all of that and lets npm report
+// the registry it would publish to without publishing.
+//
+// SIGINT and SIGTERM are forwarded to whichever child is running, the child's
+// exit is awaited, and the temporary pack directory is removed on every path.
 //
 // Usage: OBVERSA_RELEASE=1 node scripts/release.mjs packages/<name> [--dry-run]
-import { spawnSync } from "node:child_process";
+import { spawn } from "node:child_process";
 import { mkdtempSync, readdirSync, realpathSync, rmSync } from "node:fs";
 import os from "node:os";
 import { dirname, join, resolve } from "node:path";
@@ -61,6 +66,57 @@ export function publishArgs(tarball, flags = [], registry = RELEASE_REGISTRY) {
   return ["publish", tarball, "--registry", registry, `--${SCOPE_REGISTRY_KEY}=${registry}`, "--access", "public", ...flags];
 }
 
+/**
+ * Run one child to completion, forwarding SIGINT and SIGTERM from `signals`
+ * (the process by default) and awaiting its exit. Resolves { code, signal };
+ * rejects when the child cannot be started, so the failure is visible.
+ */
+export function runChild(command, args, { cwd, signals = process, stdio = "inherit", spawnImpl = spawn } = {}) {
+  return new Promise((resolvePromise, reject) => {
+    const child = spawnImpl(command, args, { cwd, stdio });
+    const forward = (signal) => () => { try { child.kill(signal); } catch { /* already gone */ } };
+    const onInt = forward("SIGINT");
+    const onTerm = forward("SIGTERM");
+    signals.on("SIGINT", onInt);
+    signals.on("SIGTERM", onTerm);
+    const done = () => {
+      signals.off("SIGINT", onInt);
+      signals.off("SIGTERM", onTerm);
+    };
+    child.once("error", (error) => { done(); reject(error); });
+    child.once("exit", (code, signal) => { done(); resolvePromise({ code, signal }); });
+  });
+}
+
+/**
+ * The release: pack under a temporary directory, run the guard again on the
+ * packed state, publish, and remove the directory whatever happened.
+ * Returns the exit code. `run`, `check`, and `mkdtemp` are injectable so the
+ * spec can drive every path without a real pnpm or npm.
+ */
+export async function release(plan, { run = runChild, check = checkHook, mkdtemp = () => mkdtempSync(join(os.tmpdir(), "obversa-release-")), log = console.error, signals = process } = {}) {
+  const destination = mkdtemp();
+  try {
+    const packed = await run(plan.pack.command, [...plan.pack.args, destination], { cwd: plan.cwd, signals });
+    if (packed.signal) { log(`release: pnpm pack was stopped by ${packed.signal}`); return 1; }
+    const tarball = readdirSync(destination).find((name) => name.endsWith(".tgz"));
+    if (packed.code !== 0 || !tarball) { log(`release: pnpm pack failed for ${plan.name}`); return packed.code || 1; }
+    // The pack step ran scripts (prepack, prepare). If it changed a tracked
+    // file, the tree is no longer the tagged, clean state the guard passed:
+    // refuse before npm is started.
+    const problems = check({ cwd: plan.cwd });
+    if (problems.length) { for (const problem of problems) log(`release: after pack, ${problem}`); return 1; }
+    const published = await run("npm", plan.publishArgs(join(destination, tarball)), { cwd: plan.cwd, signals });
+    if (published.signal) { log(`release: npm publish was stopped by ${published.signal}`); return 1; }
+    return published.code ?? 1;
+  } catch (error) {
+    log(`release: ${error?.message ?? error}`);
+    return 1;
+  } finally {
+    rmSync(destination, { recursive: true, force: true });
+  }
+}
+
 const isMain = process.argv[1] && realpathSync(fileURLToPath(import.meta.url)) === realpathSync(process.argv[1]);
 if (isMain) {
   const [target, ...flags] = process.argv.slice(2);
@@ -75,20 +131,5 @@ if (isMain) {
     console.error(error.message);
     process.exitCode = 1;
   }
-  if (plan) {
-    const destination = mkdtempSync(join(os.tmpdir(), "obversa-release-"));
-    try {
-      const packed = spawnSync(plan.pack.command, [...plan.pack.args, destination], { cwd: plan.cwd, stdio: "inherit" });
-      const tarball = readdirSync(destination).find((name) => name.endsWith(".tgz"));
-      if (packed.status !== 0 || !tarball) {
-        console.error(`release: pnpm pack failed for ${plan.name}`);
-        process.exitCode = packed.status || 1;
-      } else {
-        const published = spawnSync("npm", plan.publishArgs(join(destination, tarball)), { cwd: plan.cwd, stdio: "inherit" });
-        process.exitCode = published.status ?? 1;
-      }
-    } finally {
-      rmSync(destination, { recursive: true, force: true });
-    }
-  }
+  if (plan) process.exitCode = await release(plan);
 }

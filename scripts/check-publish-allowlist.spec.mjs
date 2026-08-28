@@ -1,12 +1,14 @@
 import assert from "node:assert/strict";
-import { execFileSync, spawnSync } from "node:child_process";
-import { existsSync, mkdtempSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
+import { execFileSync } from "node:child_process";
+import { EventEmitter } from "node:events";
+import { existsSync, mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { createRequire } from "node:module";
 import os from "node:os";
 import path from "node:path";
 import test from "node:test";
 
 import { HOOK_COMMAND, PUBLISH_REGISTRY_SENTINEL, SCOPE_REGISTRY_KEY, audit, checkHook, listWorkspacePackages, releaseTagFor } from "./check-publish-allowlist.mjs";
-import { publishArgs, releasePlan } from "./release.mjs";
+import { publishArgs, release, releasePlan, runChild } from "./release.mjs";
 
 // Both registry keys npm consults for a scoped name, pinned to the sentinel.
 const SENTINELS = { registry: PUBLISH_REGISTRY_SENTINEL, [SCOPE_REGISTRY_KEY]: PUBLISH_REGISTRY_SENTINEL };
@@ -246,34 +248,114 @@ test("a packed tarball carries the never-resolving registry, so publishing it �
   }
 });
 
-test("npm's effective registry for a scoped tarball: the manifest's scope sentinel beats --registry alone; the release's scoped flag beats the manifest", { timeout: 120_000 }, () => {
-  // Dry runs of `npm publish <tarball>` print the registry npm would publish
-  // to and publish nothing. A closed loopback port stands in for the real
-  // registry so nothing leaves the machine; the sentinel host is refused
-  // before any lookup by the fetch bounds below.
-  const root = mkdtempSync(path.join(os.tmpdir(), "publish-effective-"));
+// The npm this machine publishes with, by its own location: its bundled
+// registry picker and its publish command are the rules the seatbelt is
+// built on, read in-process — no publish subcommand, no socket.
+const NPM_DIR = path.join(execFileSync("npm", ["prefix", "-g"], { encoding: "utf8" }).trim(), "lib", "node_modules", "npm");
+
+test("npm's registry precedence, from npm's own code: the scope key beats registry, and the publish command lets a CLI flag beat publishConfig", async () => {
+  const npmVersion = JSON.parse(readFileSync(path.join(NPM_DIR, "package.json"), "utf8")).version;
+  assert.match(npmVersion, /^10\./, `the rules below were read from npm ${npmVersion}`);
+  const { pickRegistry } = createRequire(import.meta.url)(path.join(NPM_DIR, "node_modules", "npm-registry-fetch"));
+  const loopback = "http://127.0.0.1:9/";
+  // A manifest's two sentinels with a plain override: the scope key wins,
+  // so the publish would go to the sentinel and fail.
+  assert.equal(pickRegistry("@obversa/x", { registry: loopback, [SCOPE_REGISTRY_KEY]: PUBLISH_REGISTRY_SENTINEL }), PUBLISH_REGISTRY_SENTINEL);
+  // Only the plain sentinel, with a scoped real registry beside it (a manifest
+  // or a standing user config): the real one wins — the route the audit
+  // closes by requiring the scope key too.
+  assert.equal(pickRegistry("@obversa/x", { registry: PUBLISH_REGISTRY_SENTINEL, [SCOPE_REGISTRY_KEY]: loopback }), loopback);
+  // Both keys overridden, as the release's flags do: the flagged registry.
+  assert.equal(pickRegistry("@obversa/x", { registry: loopback, [SCOPE_REGISTRY_KEY]: loopback }), loopback);
+  // An unscoped name has no scope key to consult.
+  assert.equal(pickRegistry("x", { registry: loopback, [SCOPE_REGISTRY_KEY]: PUBLISH_REGISTRY_SENTINEL }), loopback);
+  // The publish command applies a manifest's publishConfig over the config
+  // EXCEPT for keys given as CLI flags — the rule the release relies on when
+  // it passes both registry keys as flags. Pinned by npm's own source.
+  const publishCommand = readFileSync(path.join(NPM_DIR, "lib", "commands", "publish.js"), "utf8");
+  assert.match(publishCommand, /Filter out properties set in CLI flags to prioritize them over[\s\S]{0,80}publishConfig/, "npm's publish command prefers CLI flags over publishConfig");
+  assert.match(publishCommand, /Object\.entries\(manifest\.publishConfig\)\.filter\(\(\[key\]\) => !\(key in cliFlags\)\)/, "the filter is keyed by the flag names, so --registry and --@obversa:registry each displace their publishConfig key");
+  // The release names exactly those two keys as flags.
+  const args = publishArgs("/tmp/x.tgz", [], loopback);
+  assert.ok(args.includes("--registry") && args.includes(`--${SCOPE_REGISTRY_KEY}=${loopback}`));
+});
+
+// A fake child for the release orchestrator: pending until told to exit,
+// recording every signal it is sent.
+function fakeRun(script) {
+  const calls = [];
+  const run = (command, args, { signals }) => {
+    calls.push({ command, args });
+    return new Promise((resolvePromise, reject) => script({ command, args, signals, resolve: resolvePromise, reject, calls }));
+  };
+  return { run, calls };
+}
+
+test("the release runs the guard again after pack, so a pack step that changed a tracked file never reaches npm", async () => {
+  const { root, cwd, git } = makeReleaseRepo();
+  const allowlist = new Set(["@x/p"]);
+  const env = { OBVERSA_RELEASE: "1" };
+  git("tag", "-a", "-m", "release @x/p 1.0.0", "x-p@1.0.0");
+  const check = ({ cwd: dir }) => checkHook({ cwd: dir, env, allowlist });
+  const plan = { name: "@x/p", cwd, pack: { command: "pnpm", args: ["pack", "--pack-destination"] }, publishArgs: (tarball) => publishArgs(tarball) };
+  const logged = [];
+  const dirs = [];
+  const mkdtemp = () => { const dir = mkdtempSync(path.join(os.tmpdir(), "release-fake-")); dirs.push(dir); return dir; };
   try {
-    const pkg = path.join(root, "pkg");
-    mkdirSync(pkg);
-    writeFileSync(path.join(pkg, "index.js"), "module.exports = 1;\n");
-    writeFileSync(path.join(pkg, "package.json"), JSON.stringify({ name: "@obversa/effective-guard", version: "0.0.1", main: "index.js", publishConfig: { access: "public", ...SENTINELS } }));
-    const env = { ...process.env, npm_config_update_notifier: "false", npm_config_fetch_retries: "0", npm_config_fetch_timeout: "3000", npm_config_fetch_retry_mintimeout: "0", npm_config_fetch_retry_maxtimeout: "0" };
-    execFileSync("npm", ["pack", "--ignore-scripts", "--pack-destination", root], { cwd: pkg, env, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] });
-    const tarball = path.join(root, "obversa-effective-guard-0.0.1.tgz");
-    const loopback = "http://127.0.0.1:9/";
-    const dryRun = (args) => {
-      const run = spawnSync("npm", ["publish", tarball, "--dry-run", ...args], { cwd: root, env, encoding: "utf8" });
-      return `${run.stdout}\n${run.stderr}`;
-    };
-    // --registry alone: npm picks the scope key from the manifest, the sentinel.
-    const plainOverride = dryRun(["--registry", loopback]);
-    assert.match(plainOverride, /Publishing to http:\/\/publish-guard\.invalid\//, `the scoped sentinel in the manifest wins over --registry alone:\n${plainOverride}`);
-    // The release's command line overrides both keys as flags: npm publishes
-    // to the flagged registry, not the manifest's.
-    const bothOverridden = dryRun(publishArgs(tarball, ["--dry-run"], loopback).slice(2).filter((arg) => arg !== "--dry-run"));
-    assert.match(bothOverridden, /Publishing to http:\/\/127\.0\.0\.1:9\//, `both flags step over the manifest:\n${bothOverridden}`);
-    assert.doesNotMatch(bothOverridden, /Publishing to http:\/\/publish-guard/);
+    // A pack that writes the tarball and also touches a tracked file.
+    const mutating = fakeRun(({ command, args, resolve }) => {
+      if (command === "pnpm") {
+        writeFileSync(path.join(args.at(-1), "x-p-1.0.0.tgz"), "tar");
+        writeFileSync(path.join(cwd, "package.json"), JSON.stringify({ name: "@x/p", version: "1.0.0", touched: true }));
+      }
+      resolve({ code: 0, signal: null });
+    });
+    assert.equal(await release(plan, { run: mutating.run, check, mkdtemp, log: (line) => logged.push(line) }), 1);
+    assert.deepEqual(mutating.calls.map((c) => c.command), ["pnpm"], "npm was never started");
+    assert.match(logged.join("\n"), /after pack, refusing to publish @x\/p: the working tree is not clean/);
+    git("checkout", "--", "packages/p/package.json");
+    // A clean pack: the guard passes again and npm runs with the tarball.
+    const clean = fakeRun(({ command, args, resolve }) => {
+      if (command === "pnpm") writeFileSync(path.join(args.at(-1), "x-p-1.0.0.tgz"), "tar");
+      resolve({ code: 0, signal: null });
+    });
+    assert.equal(await release(plan, { run: clean.run, check, mkdtemp, log: (line) => logged.push(line) }), 0);
+    assert.deepEqual(clean.calls.map((c) => c.command), ["pnpm", "npm"]);
+    assert.match(clean.calls[1].args[1], /x-p-1\.0\.0\.tgz$/, "npm publishes the packed tarball");
+    assert.ok(dirs.every((dir) => !existsSync(dir)), "the temporary pack directory is removed on every path");
   } finally {
     rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("the release forwards SIGINT and SIGTERM to the running child, awaits it, reports a stop or a spawn error, and removes the temporary directory", async () => {
+  const cwd = mkdtempSync(path.join(os.tmpdir(), "release-cancel-"));
+  const plan = { name: "@x/p", cwd, pack: { command: "pnpm", args: ["pack", "--pack-destination"] }, publishArgs: (tarball) => publishArgs(tarball) };
+  const dirs = [];
+  const mkdtemp = () => { const dir = mkdtempSync(path.join(os.tmpdir(), "release-fake-")); dirs.push(dir); return dir; };
+  const logged = [];
+  try {
+    // Cancellation: a real child that would run for a long time, a fake
+    // signal source; SIGINT reaches the child and the release reports it.
+    const signals = new EventEmitter();
+    const pending = runChild(process.execPath, ["-e", "setTimeout(() => {}, 30000)"], { cwd, signals, stdio: "ignore" });
+    await new Promise((resolvePromise) => setTimeout(resolvePromise, 300));
+    signals.emit("SIGINT");
+    const stopped = await pending;
+    assert.equal(stopped.signal, "SIGINT", "the child was stopped by the forwarded signal");
+    assert.equal(signals.listenerCount("SIGINT"), 0, "the forwarders are removed once the child has exited");
+    // A visible spawn error.
+    await assert.rejects(() => runChild(path.join(cwd, "no-such-command"), [], { cwd, signals, stdio: "ignore" }), /ENOENT/);
+    // Through the release: a stopped pack and a failed spawn both return 1,
+    // say why, and leave no temporary directory behind.
+    const stoppedPack = fakeRun(({ resolve }) => resolve({ code: null, signal: "SIGTERM" }));
+    assert.equal(await release(plan, { run: stoppedPack.run, check: () => [], mkdtemp, log: (line) => logged.push(line) }), 1);
+    assert.match(logged.join("\n"), /pnpm pack was stopped by SIGTERM/);
+    const failedSpawn = fakeRun(({ reject }) => reject(new Error("spawn pnpm ENOENT")));
+    assert.equal(await release(plan, { run: failedSpawn.run, check: () => [], mkdtemp, log: (line) => logged.push(line) }), 1);
+    assert.match(logged.join("\n"), /release: spawn pnpm ENOENT/);
+    assert.ok(dirs.every((dir) => !existsSync(dir)));
+  } finally {
+    rmSync(cwd, { recursive: true, force: true });
   }
 });
