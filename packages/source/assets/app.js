@@ -271,15 +271,15 @@ async function main() {
     // stops first — a cancel that hangs must not keep renewing the lease —
     // then the cancel gives the caller a cancelled result; the client can
     // still send and acknowledge it after dispose. If the cancel request
-    // fails, the page cannot know whether the server applied it before the
-    // response was lost, so it says only what it can verify: the heartbeat
-    // has stopped and the session will lapse.
+    // fails, the page cannot know whether the server applied it, or whether
+    // the session had already ended, so it says only what is always true:
+    // the heartbeat has stopped, so this page will not keep the session alive.
     client.dispose();
     try {
       await client.cancel();
       notice.textContent = `Could not load the review: ${error.message}. The session has been cancelled.`;
     } catch {
-      notice.textContent = `Could not load the review: ${error.message}. Cancellation could not be confirmed; the heartbeat has stopped and the session will lapse.`;
+      notice.textContent = `Could not load the review: ${error.message}. Cancellation could not be confirmed; the heartbeat has stopped, so this page will not keep the session alive.`;
     }
     return;
   }

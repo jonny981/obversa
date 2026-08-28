@@ -235,11 +235,16 @@ test("the review surface renders under the exact CSP with zero violations and fi
 });
 
 test("a page that cannot load its review cancels the session instead of holding the lease", { skip: CHROME ? false : "Google Chrome is not installed", timeout: 60_000 }, async () => {
-  // The model endpoint fails. The page must end the session — cancel, then
-  // acknowledge — so the caller receives a cancelled result, rather than sit
-  // on an error while the heartbeat keeps the lease alive for hours.
+  // The model endpoint fails. The page must end the session — stop its
+  // heartbeat, cancel, then acknowledge — so the caller receives a cancelled
+  // result, rather than sit on an error while the heartbeat keeps the lease
+  // alive for hours. The kit served here beats every 200 ms and the cancel
+  // response is held for a second: a page that cancelled before stopping its
+  // heartbeat would send several beats in that window, and the proof demands
+  // none after the cancel request (a mutation that drops the dispose fails).
   const token = randomBytes(16).toString("hex");
-  const clientKit = await readFile(CLIENT_KIT, "utf8");
+  const clientKit = (await readFile(CLIENT_KIT, "utf8")).replace("heartbeatMs = 15_000", "heartbeatMs = 200");
+  assert.match(clientKit, /heartbeatMs = 200/, "the test-only kit must carry the short heartbeat");
   const shell = buildIndexHtml();
   const assets = {
     "/app.js": ["app.js", "text/javascript; charset=utf-8"],
@@ -249,6 +254,8 @@ test("a page that cannot load its review cancels the session instead of holding 
     "/icons.mjs": ["icons.mjs", "text/javascript; charset=utf-8"],
   };
   const seen = [];
+  let cancelSeen = false;
+  let heartbeatsAfterCancel = 0;
   const acked = Promise.withResolvers();
   const server = createServer((req, res) => {
     for (const [k, v] of Object.entries(HEADERS)) res.setHeader(k, v);
@@ -258,7 +265,12 @@ test("a page that cannot load its review cancels the session instead of holding 
       if (req.headers.authorization !== `Bearer ${token}`) return send(401, "application/json", JSON.stringify({ error: "Authentication required" }));
       seen.push(`${req.method} ${url.pathname}`);
       if (url.pathname === "/api/model") return send(500, "application/json", JSON.stringify({ error: "the model is unavailable" }));
-      if (url.pathname === "/api/cancel") return send(200, "application/json", JSON.stringify({ ok: true, status: "cancelled", operationId: "op-cancel" }));
+      if (url.pathname === "/api/cancel") {
+        cancelSeen = true;
+        setTimeout(() => send(200, "application/json", JSON.stringify({ ok: true, status: "cancelled", operationId: "op-cancel" })), 1000);
+        return;
+      }
+      if (url.pathname === "/api/heartbeat" && cancelSeen) heartbeatsAfterCancel += 1;
       if (url.pathname === "/api/ack") {
         const chunks = []; req.on("data", (d) => chunks.push(d));
         req.on("end", () => { send(200, "application/json", JSON.stringify({ ok: true, status: "cancelled" })); acked.resolve(JSON.parse(Buffer.concat(chunks).toString())); });
@@ -290,4 +302,5 @@ test("a page that cannot load its review cancels the session instead of holding 
   }
   assert.deepEqual(ack, { operationId: "op-cancel" }, "the cancel's operation id is acknowledged");
   assert.deepEqual(seen.filter((r) => r !== "POST /api/heartbeat"), ["GET /api/model", "POST /api/cancel", "POST /api/ack"], "model failure, then cancel, then ack, in order");
+  assert.equal(heartbeatsAfterCancel, 0, "the heartbeat stopped before the cancel was sent, so a slow cancel cannot keep the lease alive");
 });
