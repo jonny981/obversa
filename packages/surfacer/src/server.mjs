@@ -2,6 +2,7 @@ import { randomBytes, timingSafeEqual } from "node:crypto";
 import { promises as fs } from "node:fs";
 import http from "node:http";
 import path from "node:path";
+import { types } from "node:util";
 
 import { frameName, frameResult, terminalResult } from "./handoff.mjs";
 import { safeText, sanitizeValue } from "./sanitize.mjs";
@@ -409,6 +410,24 @@ function authorized(request, expectedToken) {
   return received.length === expected.length && timingSafeEqual(received, expected);
 }
 
+// Whether an object is plain data: a plain object (Object prototype or none)
+// or an array, not a Proxy, and holding no internal state JSON cannot see. A
+// prototype check alone cannot tell: a Map with its prototype removed still
+// holds its entries and serialises as {}, and a Proxy can answer one thing to
+// a check and another to the serialiser. Node's brand checks see through
+// both.
+const INTERNAL_STATE = [
+  types.isProxy, types.isMap, types.isSet, types.isWeakMap, types.isWeakSet, types.isDate, types.isRegExp,
+  types.isPromise, types.isAnyArrayBuffer, types.isArrayBufferView, types.isBoxedPrimitive, types.isNativeError,
+  types.isModuleNamespaceObject, types.isGeneratorObject, types.isMapIterator, types.isSetIterator,
+  types.isArgumentsObject, types.isExternal, types.isKeyObject, types.isCryptoKey,
+].filter((check) => typeof check === "function");
+function isPlainData(item) {
+  const proto = Object.getPrototypeOf(item);
+  if (!Array.isArray(item) && proto !== Object.prototype && proto !== null) return false;
+  return !INTERNAL_STATE.some((check) => check(item));
+}
+
 // The plain-data snapshot of one JSON serialisation of `value`, or a throw when
 // JSON could not carry it whole. JSON.stringify throws on a cycle or a BigInt
 // but silently drops a function, a symbol, an undefined value, or a
@@ -433,12 +452,12 @@ function losslessSnapshot(value) {
       return null;
     }
     if (item && typeof item === "object") {
-      // Only a plain object or an array survives JSON whole. Anything else —
-      // a Map, a Set, a RegExp, an Error, a Promise, an ArrayBuffer, a typed
-      // array, a class instance — comes out as {} or a fragment. (A value
-      // with its own toJSON was already replaced by what toJSON returned.)
-      const proto = Object.getPrototypeOf(item);
-      if (!Array.isArray(item) && proto !== Object.prototype && proto !== null) {
+      // Only plain data survives JSON whole. Anything else — a Map, a Set, a
+      // RegExp, an Error, a Promise, an ArrayBuffer, a typed array, a class
+      // instance, a Proxy, or any of those with its prototype removed — comes
+      // out as {} or a fragment. (A value with its own toJSON was already
+      // replaced by what toJSON returned.)
+      if (!isPlainData(item)) {
         lost ??= `${Object.prototype.toString.call(item)} at ${where}`;
         return undefined;
       }

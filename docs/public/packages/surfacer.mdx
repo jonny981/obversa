@@ -30,9 +30,10 @@ serialised exactly once when it is claimed, and the plain snapshot of that
 serialisation is what the caller receives: a payload JSON cannot carry
 whole — a cycle, a BigInt, a function, a symbol, an undefined value, a
 non-finite number, negative zero, a non-enumerable or symbol-keyed
-property, a hole or extra property in an array, or any object that is not a
-plain object or an array, such as a Map, a RegExp, an Error, or a class
-instance — is refused with an error and the session stays open. One
+property, a hole or extra property in an array, a Proxy, or any object that
+is not a plain object or an array, such as a Map, a RegExp, an Error, or a
+class instance, whatever its prototype says — is refused with an error and
+the session stays open. One
 exception is deliberate: a value with its own `toJSON` method, such as a
 Date, is carried as whatever `toJSON` returns, and that return value is
 checked by the same rule. The browser is never told a session completed

@@ -284,6 +284,15 @@ test("a completion the frame cannot carry is refused and the session stays open"
     hiddenprop: Object.defineProperty({ x: 1 }, "hidden", { value: 2, enumerable: false }),
     nestedhiddenprop: { a: Object.defineProperty({ x: 1 }, "hidden", { value: 2, enumerable: false }) },
     hiddensymbol: Object.defineProperty({ x: 1 }, Symbol("hidden"), { value: 2, enumerable: false }),
+    // Internal state a prototype check cannot see, and proxies.
+    nullprotomap: Object.setPrototypeOf(new Map([["k", 1]]), null),
+    nullprotoset: { s: Object.setPrototypeOf(new Set([1]), null) },
+    nullprotodate: Object.setPrototypeOf(new Date(0), null),
+    nullprototyped: Object.setPrototypeOf(new Uint8Array(2), null),
+    nullprotoboxed: Object.setPrototypeOf(Object(1), null),
+    proxy: new Proxy({ x: 1 }, {}),
+    nestedproxy: { a: new Proxy({ x: 1 }, {}) },
+    proxyarray: new Proxy([1], {}),
   };
   const surface = await startSurface({
     app: "frame",
@@ -441,6 +450,8 @@ test("an outcome payload the frame cannot carry whole becomes null, and the endi
     regexp: () => /x/,
     error: () => ({ failed: new Error("e") }),
     hiddensymbol: () => Object.defineProperty({ x: 1 }, Symbol("hidden"), { value: 2, enumerable: false }),
+    nullprotomap: () => Object.setPrototypeOf(new Map([["k", 1]]), null),
+    proxy: () => new Proxy({ x: 1 }, {}),
   };
   for (const [name, terminalPayload] of Object.entries(hooks)) {
     for (const verbatim of [false, true]) {
