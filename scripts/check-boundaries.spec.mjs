@@ -3,7 +3,110 @@ import { execFileSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import test from "node:test";
 
-import { extractObversaImports, moduleSpecifiers, parserExtensions, scansImports, sourceExtensions, textExtensions } from "./check-boundaries.mjs";
+import { mkdtempSync, mkdirSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import os from "node:os";
+import path from "node:path";
+import ts from "@typescript/typescript6";
+
+import { extractObversaImports, moduleSpecifiers, parserExtensions, scansImports, scansTsconfig, sourceExtensions, textExtensions, tsconfigDependencies, walkTree } from "./check-boundaries.mjs";
+
+test("a tsconfig inherits its dependencies through extends, at any depth, with a cycle guard; an unreadable base fails closed", () => {
+  const root = "/repo";
+  const file = "/repo/packages/source/tsconfig.json";
+  const texts = {
+    "/repo/packages/source/base.json": '{ "extends": "./deeper.json", "compilerOptions": { "jsxImportSource": "@obversa/surfacer" } }',
+    "/repo/packages/source/deeper.json": '{ "extends": "./tsconfig.json", "compilerOptions": { "paths": { "#m/*": ["../memory/src/*"] } } }',
+  };
+  const read = (absolute) => texts[absolute] ?? null;
+  assert.deepEqual(
+    tsconfigDependencies('{ "extends": "./base.json" }', { file, root, read }),
+    ["@obversa/surfacer", "@obversa/memory"],
+    "a same-package base carries the dependency, and its own base too; the cycle back to tsconfig.json stops",
+  );
+  assert.deepEqual(tsconfigDependencies('{ "extends": "./missing.json" }', { file, root, read }), ["@obversa/<unreadable-extends>"], "an unreadable base is reported, not skipped");
+  assert.deepEqual(tsconfigDependencies('{ "extends": "@tsconfig/node22/tsconfig.json" }', { file, root, read }), [], "an external base is not a crossing and is not read");
+  // Every tsconfig under a package, however nested, carries dependency fields.
+  assert.equal(scansTsconfig("packages/source/tsconfig.json"), true);
+  assert.equal(scansTsconfig("packages/source/config/tsconfig.build.json"), true, "a nested tsconfig");
+  assert.equal(scansTsconfig("packages/source/src/tsconfig.notes.md"), false);
+  assert.equal(scansTsconfig("hosts/cmux/tsconfig.json"), false, "only packages carry boundary rules");
+  // The remaining resolver fields.
+  const at = { file, root, read };
+  assert.deepEqual(tsconfigDependencies('{ "compilerOptions": { "typeRoots": ["./types", "../surfacer/types"] } }', at), ["@obversa/surfacer"], "typeRoots");
+  assert.deepEqual(tsconfigDependencies('{ "compilerOptions": { "baseUrl": "../surfacer" } }', at), ["@obversa/surfacer"], "baseUrl");
+  assert.deepEqual(tsconfigDependencies('{ "compilerOptions": { "rootDirs": ["./src", "../memory/src"] } }', at), ["@obversa/memory"], "rootDirs");
+  assert.deepEqual(tsconfigDependencies('{ "compilerOptions": { "plugins": [{ "name": "@obversa/surfacer" }] } }', at), ["@obversa/surfacer"], "a plugin by name");
+  assert.deepEqual(tsconfigDependencies('{ "typeAcquisition": { "include": ["@obversa/memory"] } }', at), ["@obversa/memory"], "typeAcquisition.include");
+  // paths targets resolve against baseUrl, as the compiler resolves them; a
+  // bare relative target and an absolute one count too.
+  const viaBaseUrl = '{ "compilerOptions": { "baseUrl": "../..", "paths": { "#surf/*": ["packages/surfacer/src/*"] } } }';
+  assert.deepEqual(tsconfigDependencies(viaBaseUrl, at), ["@obversa/surfacer"], "a paths target relative to baseUrl");
+  assert.deepEqual(tsconfigDependencies('{ "compilerOptions": { "baseUrl": "/repo/packages/surfacer" } }', at), ["@obversa/surfacer"], "an absolute baseUrl");
+  assert.deepEqual(tsconfigDependencies('{ "files": ["/repo/packages/memory/src/index.ts"] }', at), ["@obversa/memory"], "an absolute file");
+  assert.deepEqual(tsconfigDependencies('{ "include": ["src/**/*"], "compilerOptions": { "baseUrl": ".", "paths": { "#local/*": ["src/*"] } } }', at), [], "bare own paths are not crossings");
+  // The premise: the compiler resolves that alias into the sibling package.
+  const host = { fileExists: (p) => p === "/repo/packages/surfacer/src/index.ts", readFile: () => "", directoryExists: () => true, getCurrentDirectory: () => "/repo", getDirectories: () => [], realpath: (p) => p };
+  const resolved = ts.resolveModuleName("#surf/index", "/repo/packages/source/src/a.ts", { baseUrl: "/repo", paths: { "#surf/*": ["packages/surfacer/src/*"] }, moduleResolution: ts.ModuleResolutionKind.Bundler }, host).resolvedModule;
+  assert.equal(resolved?.resolvedFileName, "/repo/packages/surfacer/src/index.ts", "TypeScript resolves the alias into the sibling package");
+});
+
+test("a package tsconfig names a dependency through every field that can reach a sibling: jsxImportSource, types, paths, references, extends, include, files", () => {
+  // The repository's shared base is inherited by every package; here it is
+  // what the real one is, a types list with no package in it.
+  const read = (absolute) => (absolute === "/repo/tsconfig.base.json" ? '{ "compilerOptions": { "types": ["node"] } }' : null);
+  const at = { file: "/repo/packages/source/tsconfig.json", root: "/repo", read };
+  assert.deepEqual(tsconfigDependencies('{\n  // comments and trailing commas are fine\n  "compilerOptions": { "jsx": "react-jsx", "jsxImportSource": "@obversa/surfacer", },\n}\n', at), ["@obversa/surfacer"]);
+  assert.deepEqual(tsconfigDependencies('{ "compilerOptions": { "jsx": "react-jsx" } }', at), []);
+  assert.deepEqual(tsconfigDependencies('{ "compilerOptions": { "types": ["node", "@obversa/surfacer"] } }', at), ["@obversa/surfacer"], "types");
+  assert.deepEqual(tsconfigDependencies('{ "compilerOptions": { "paths": { "#kit/*": ["../surfacer/src/*"] } } }', at), ["@obversa/surfacer"], "a paths alias into a sibling");
+  assert.deepEqual(tsconfigDependencies('{ "references": [{ "path": "../memory" }] }', at), ["@obversa/memory"], "a project reference");
+  assert.deepEqual(tsconfigDependencies('{ "extends": "../surfacer/tsconfig.json" }', at), ["@obversa/surfacer"], "extends");
+  assert.deepEqual(tsconfigDependencies('{ "include": ["src/**/*", "../surfacer/src/**/*"] }', at), ["@obversa/surfacer"], "include with a glob into a sibling");
+  assert.deepEqual(tsconfigDependencies('{ "files": ["../memory/src/index.ts"] }', at), ["@obversa/memory"], "files");
+  assert.deepEqual(tsconfigDependencies('{ "extends": "../../tsconfig.base.json", "include": ["src"], "compilerOptions": { "paths": { "#local/*": ["./src/*"] } } }', at), [], "the repository base, own sources, and own aliases are not crossings");
+  // The premise: with that option and no pragma, the compiler emits the import.
+  const emitted = ts.transpileModule("export const view = <Panel />;", { compilerOptions: { jsx: ts.JsxEmit.ReactJSX, jsxImportSource: "@obversa/surfacer", module: ts.ModuleKind.ESNext }, fileName: "view.jsx" }).outputText;
+  assert.match(emitted, /@obversa\/surfacer\/jsx-runtime/);
+});
+
+test("dependencies TypeScript keeps outside the node tree are found: jsxImportSource, triple-slash references, amd-dependency, module augmentation", () => {
+  const root = "/repo";
+  const under = (name) => ({ file: `/repo/packages/source/src/${name}`, root });
+  const jsx = '/** @jsxImportSource @obversa/surfacer */\nexport const el = <div />;\n';
+  assert.deepEqual(extractObversaImports(jsx, under("view.jsx")), ["@obversa/surfacer"], "the jsxImportSource pragma");
+  // The premise: the compiler really emits an import from that source.
+  const emitted = ts.transpileModule(jsx, { compilerOptions: { jsx: ts.JsxEmit.ReactJSX, module: ts.ModuleKind.ESNext }, fileName: "view.jsx" }).outputText;
+  assert.match(emitted, /@obversa\/surfacer\/jsx-runtime/, "TypeScript emits an import of <source>/jsx-runtime for the pragma");
+  assert.deepEqual(extractObversaImports('/// <reference path="../../surfacer/src/index.d.ts" />\nexport {};\n', under("types.mts")), ["@obversa/surfacer"], "a reference path into a sibling package");
+  assert.deepEqual(extractObversaImports('/// <reference types="@obversa/surfacer" />\nexport {};\n', under("types.ts")), ["@obversa/surfacer"], "a reference types directive");
+  assert.deepEqual(extractObversaImports('/// <amd-dependency path="@obversa/surfacer" />\nexport {};\n', under("legacy.cts")), ["@obversa/surfacer"], "an amd-dependency");
+  assert.deepEqual(extractObversaImports('declare module "@obversa/surfacer" { export const extra: number; }\n', under("augment.ts")), ["@obversa/surfacer"], "an external module augmentation");
+  assert.deepEqual(extractObversaImports('/// <reference path="./local.d.ts" />\ndeclare module "./local" {}\n', under("same.ts")), [], "references inside the same package are not crossings");
+});
+
+test("a symlink under packages/ is reported by the tree walk, never followed as if it were local", () => {
+  const dir = mkdtempSync(path.join(os.tmpdir(), "boundary-walk-"));
+  try {
+    mkdirSync(path.join(dir, "packages/source/src"), { recursive: true });
+    mkdirSync(path.join(dir, "packages/surfacer/src"), { recursive: true });
+    writeFileSync(path.join(dir, "packages/surfacer/src/index.mjs"), "export const x = 1;\n");
+    writeFileSync(path.join(dir, "packages/source/src/real.mjs"), 'import "./bridge.mjs";\n');
+    symlinkSync("../../surfacer/src/index.mjs", path.join(dir, "packages/source/src/bridge.mjs"));
+    mkdirSync(path.join(dir, "packages/source/node_modules/dep"), { recursive: true });
+    writeFileSync(path.join(dir, "packages/source/node_modules/dep/index.mjs"), "");
+  } catch (error) {
+    rmSync(dir, { recursive: true, force: true });
+    throw error;
+  }
+  return walkTree(path.join(dir, "packages")).then(({ files, symlinks }) => {
+    const rel = (p) => path.relative(dir, p).split(path.sep).join("/");
+    assert.deepEqual(files.map(rel).sort(), ["packages/source/src/real.mjs", "packages/surfacer/src/index.mjs"], "regular files only; node_modules ignored");
+    assert.deepEqual(symlinks.map(rel), ["packages/source/src/bridge.mjs"], "the symlink is reported, not resolved");
+    // The import that names the link looks local to the lexical extractor —
+    // which is exactly why the scan must fail closed on the link itself.
+    assert.deepEqual(extractObversaImports('import "./bridge.mjs";', { file: path.join(dir, "packages/source/src/real.mjs"), root: dir }), []);
+  }).finally(() => rmSync(dir, { recursive: true, force: true }));
+});
 
 test("every module form the parser accepts is scanned for imports — .mts, .cts, and .jsx included", () => {
   // A form the parser could read but the scan skipped would let a forbidden

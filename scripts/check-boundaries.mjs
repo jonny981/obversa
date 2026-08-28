@@ -1,4 +1,4 @@
-import { realpathSync } from 'node:fs';
+import { readFileSync, realpathSync } from 'node:fs';
 import { readFile, readdir } from 'node:fs/promises';
 import { dirname, extname, join, relative, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -68,6 +68,9 @@ export function moduleSpecifiers(text, fileName = 'module.ts') {
     } else if (ts.isJSDocImportTag?.(node) && node.moduleSpecifier) {
       // `/** @import { X } from "x" */` — a type-only import that lives in JSDoc.
       specifiers.push(literal(node.moduleSpecifier));
+    } else if (ts.isModuleDeclaration(node) && ts.isStringLiteral(node.name)) {
+      // `declare module "x" { … }` augments that module: a dependency on it.
+      specifiers.push(node.name.text);
     } else if (ts.isCallExpression(node)) {
       const callee = node.expression;
       // `import(...)`, and the phase forms `import.defer(...)` / `import.source(...)`
@@ -83,7 +86,151 @@ export function moduleSpecifiers(text, fileName = 'module.ts') {
     ts.forEachChild(node, visit);
   };
   visit(source);
+  // TypeScript keeps several dependency forms outside the node tree: the
+  // triple-slash directives `/// <reference path="…" />`, `/// <reference
+  // types="…" />`, and `/// <amd-dependency path="…" />`, and the
+  // `@jsxImportSource x` pragma, from which the compiler emits an import of
+  // `x/jsx-runtime`. Each names a module this file depends on.
+  for (const ref of source.referencedFiles ?? []) specifiers.push(ref.fileName);
+  for (const ref of source.typeReferenceDirectives ?? []) specifiers.push(ref.fileName);
+  for (const dep of source.amdDependencies ?? []) specifiers.push(dep.path);
+  const jsxPragmas = source.pragmas?.get('jsximportsource');
+  for (const pragma of [].concat(jsxPragmas ?? [])) {
+    const factory = pragma?.arguments?.factory;
+    const value = typeof factory === 'string' ? factory : factory?.value;
+    if (typeof value === 'string' && value.length > 0) specifiers.push(value);
+  }
   return specifiers;
+}
+
+// Every tsconfig under a package, at any depth, carries dependency fields.
+export function scansTsconfig(path) {
+  return /^packages\/[^/]+\/(?:.*\/)?tsconfig[^/]*\.json$/.test(path);
+}
+
+// The fields of a tsconfig that can name a module or a path, and so a
+// dependency: `compilerOptions.jsxImportSource` (the compiler emits an import
+// of `<source>/jsx-runtime` into every JSX file with no pragma of its own),
+// `types`, `typeRoots`, `paths` targets, `baseUrl`, `rootDirs`, and
+// `plugins[].name`; `typeAcquisition.include`; project `references[].path`;
+// `extends`; and `include`/`files`. This list is the claim: a field outside
+// it is not a resolver field the scan knows about.
+// Each candidate carries the directory a relative value resolves against:
+// `paths` targets resolve against `baseUrl` when it is set (that is how the
+// compiler resolves them), everything else against the config's directory.
+function tsconfigCandidates(config, configDir) {
+  const options = config?.compilerOptions ?? {};
+  const pathsBase = options.baseUrl && configDir ? resolve(configDir, options.baseUrl) : configDir;
+  const from = (base, values) =>
+    [].concat(values ?? []).filter((value) => typeof value === 'string' && value.length > 0).map((value) => ({ value, base }));
+  return [
+    ...from(configDir, options.jsxImportSource),
+    ...from(configDir, options.types),
+    ...from(configDir, options.typeRoots),
+    ...from(pathsBase, Object.values(options.paths ?? {}).flat()),
+    ...from(configDir, options.baseUrl),
+    ...from(configDir, options.rootDirs),
+    ...from(configDir, [].concat(options.plugins ?? []).map((plugin) => plugin?.name)),
+    ...from(configDir, config?.typeAcquisition?.include),
+    ...from(configDir, [].concat(config?.references ?? []).map((ref) => ref?.path)),
+    ...from(configDir, config?.extends),
+    ...from(configDir, config?.include),
+    ...from(configDir, config?.files),
+  ];
+}
+
+const readConfigText = (absolute) => {
+  try {
+    return readFileSync(absolute, 'utf8');
+  } catch {
+    return null;
+  }
+};
+
+// The packages a tsconfig makes its package depend on, through every field
+// in tsconfigCandidates, and through every config it extends: a same-package
+// base can carry the field, so a relative `extends` is read and its own
+// dependencies added, recursively, with a cycle guard. A `@obversa/...` name
+// counts by name; a relative path counts when it resolves into another
+// package's directory (a glob by its literal prefix). A base that cannot be
+// read is reported as the sentinel `@obversa/<unreadable-extends>`, so the
+// scan fails closed on it. Read with the compiler's own reader, so comments
+// and trailing commas parse. `file` is the tsconfig's absolute path and
+// `root` the repository root; without them only names are reported. `read`
+// is how an extended config is loaded (the spec injects one).
+export function tsconfigDependencies(text, { file, root: repoRoot, read = readConfigText, seen = new Set() } = {}) {
+  const { config } = ts.readConfigFile(file ?? 'tsconfig.json', () => text);
+  const found = [];
+  const configDir = file ? dirname(file) : undefined;
+  for (const { value, base } of tsconfigCandidates(config, configDir)) {
+    if (value.startsWith('@obversa/')) {
+      found.push(value.split('/').slice(0, 2).join('/'));
+      continue;
+    }
+    // Any other value is a path — relative to its base, or absolute — whose
+    // literal prefix (before any glob) may land in another package.
+    if (!file || !repoRoot || !base) continue;
+    const target = resolve(base, value.split(/[*?]/)[0]);
+    const dir = packageDirOf(target, repoRoot);
+    if (dir && dir !== packageDirOf(file, repoRoot)) found.push(`@obversa/${dir}`);
+  }
+  if (file) {
+    seen.add(file);
+    for (const parent of [].concat(config?.extends ?? [])) {
+      if (typeof parent !== 'string' || !/^\.\.?\//.test(parent)) continue;
+      const absolute = resolve(dirname(file), parent);
+      // A base in another package is a crossing in itself, reported above;
+      // only a base of this package, or one outside every package (the
+      // repository's shared base), is inherited and read.
+      const baseDir = repoRoot ? packageDirOf(absolute, repoRoot) : undefined;
+      if (baseDir && baseDir !== packageDirOf(file, repoRoot)) continue;
+      if (seen.has(absolute)) continue;
+      seen.add(absolute);
+      const parentText = read(absolute);
+      if (parentText === null) {
+        found.push('@obversa/<unreadable-extends>');
+        continue;
+      }
+      found.push(...tsconfigDependencies(parentText, { file: absolute, root: repoRoot, read, seen }));
+    }
+  }
+  return found;
+}
+
+// The package a specifier or path names when it crosses a package boundary:
+// an `@obversa/...` name by name, a relative path by the package directory it
+// resolves into, when that is not the importing file's own. Null otherwise.
+function crossingPackage(specifier, { file, root: repoRoot } = {}) {
+  if (specifier.startsWith('@obversa/')) return specifier.split('/').slice(0, 2).join('/');
+  if (!file || !repoRoot || !/^\.\.?\//.test(specifier)) return null;
+  const dir = packageDirOf(resolve(dirname(file), specifier), repoRoot);
+  return dir && dir !== packageDirOf(file, repoRoot) ? `@obversa/${dir}` : null;
+}
+
+// The package directory an absolute path lies in, or names outright (a bare
+// `packages/memory`, as a project reference does), else undefined.
+function packageDirOf(absolute, repoRoot) {
+  return /^packages\/([^/]+)(?:\/|$)/.exec(relative(repoRoot, absolute).split('\\').join('/'))?.[1];
+}
+
+// Every regular file under a directory, and every symlink met on the way. A
+// symlink is reported rather than followed: under packages/ one can reach a
+// sibling package's code while the import that names it looks local, so the
+// boundary scan fails closed on it.
+export async function walkTree(directory, { ignored = ignoredDirectories } = {}) {
+  const files = [];
+  const symlinks = [];
+  const visit = async (current) => {
+    for (const entry of await readdir(current, { withFileTypes: true })) {
+      const path = join(current, entry.name);
+      if (entry.isSymbolicLink()) symlinks.push(path);
+      else if (entry.isDirectory()) {
+        if (!ignored.has(entry.name)) await visit(path);
+      } else if (entry.isFile()) files.push(path);
+    }
+  };
+  await visit(directory);
+  return { files, symlinks };
 }
 
 // The workspace packages a file depends on: `@obversa/...` specifiers by name,
@@ -95,18 +242,14 @@ export function moduleSpecifiers(text, fileName = 'module.ts') {
 // names equal the unscoped package names today; the plugin split maps
 // directories through their manifests.
 export function extractObversaImports(text, { file, root: repoRoot } = {}) {
-  const packageDir = (absolute) => /^packages\/([^/]+)\//.exec(relative(repoRoot, absolute).split('\\').join('/'))?.[1];
-  const owner = file && repoRoot ? packageDir(file) : undefined;
   const found = [];
   for (const specifier of moduleSpecifiers(text, file ?? 'module.ts')) {
     if (specifier === null) {
       found.push('@obversa/<computed>');
-    } else if (specifier.startsWith('@obversa/')) {
-      found.push(specifier.split('/').slice(0, 2).join('/'));
-    } else if (file && repoRoot && /^\.\.?\//.test(specifier)) {
-      const dir = packageDir(resolve(dirname(file), specifier));
-      if (dir && dir !== owner) found.push(`@obversa/${dir}`);
+      continue;
     }
+    const crossing = crossingPackage(specifier, { file, root: repoRoot });
+    if (crossing) found.push(crossing);
   }
   return found;
 }
@@ -353,9 +496,11 @@ for (const absolute of files) {
 
   // Import scan covers every source form in the workspace: the runtime is
   // TypeScript, the surface packages are plain ES modules.
-  if (scansImports(path)) {
+  // A package tsconfig can name a dependency for every file at once.
+  const tsconfigDeps = scansTsconfig(path) ? tsconfigDependencies(text, { file: absolute, root }) : [];
+  if (scansImports(path) || tsconfigDeps.length > 0) {
     const owner = path.split('/')[1];
-    const imports = extractObversaImports(text, { file: absolute, root });
+    const imports = scansImports(path) ? extractObversaImports(text, { file: absolute, root }) : tsconfigDeps;
     const ownerName = `@obversa/${owner}`;
     const ownerRule = packageRules.get(ownerName);
     const allowed = new Set([
@@ -366,6 +511,8 @@ for (const absolute of files) {
     for (const dependency of imports) {
       if (dependency === '@obversa/<computed>')
         failures.push(`${path}: a computed module specifier cannot be checked; use a plain string`);
+      else if (dependency === '@obversa/<unreadable-extends>')
+        failures.push(`${path}: a config it extends could not be read, so its dependencies cannot be checked`);
       else if (!allowed.has(dependency))
         failures.push(`${path}: ${ownerName} must not import ${dependency}`);
     }
@@ -396,11 +543,12 @@ async function exists(path) {
 }
 
 async function walk(directory, output) {
-  for (const entry of await readdir(directory, { withFileTypes: true })) {
-    if (entry.isDirectory() && ignoredDirectories.has(entry.name)) continue;
-    const path = join(directory, entry.name);
-    if (entry.isDirectory()) await walk(path, output);
-    else if (entry.isFile()) output.push(path);
+  const { files, symlinks } = await walkTree(directory);
+  output.push(...files);
+  for (const link of symlinks) {
+    const path = relative(root, link).split('\\').join('/');
+    if (path.startsWith('packages/'))
+      failures.push(`${path}: a symlink under packages/ is refused; it can reach another package while an import that names it looks local`);
   }
 }
 
