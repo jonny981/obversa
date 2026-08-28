@@ -1,6 +1,6 @@
 import { readFileSync, realpathSync } from 'node:fs';
 import { readFile, readdir } from 'node:fs/promises';
-import { dirname, extname, join, relative, resolve } from 'node:path';
+import { dirname, extname, isAbsolute, join, relative, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 // The TypeScript compiler's parser (the pinned TypeScript 6 build; the
@@ -177,22 +177,56 @@ export function tsconfigDependencies(text, { file, root: repoRoot, read = readCo
   if (file) {
     seen.add(file);
     for (const parent of [].concat(config?.extends ?? [])) {
-      if (typeof parent !== 'string' || !/^\.\.?\//.test(parent)) continue;
-      const absolute = resolve(dirname(file), parent);
+      // A relative or an absolute parent is a file to inherit from; a bare
+      // name is an installed package and is not read.
+      if (typeof parent !== 'string' || !(/^\.\.?\//.test(parent) || isAbsolute(parent))) continue;
+      const named = resolve(dirname(file), parent);
       // A base in another package is a crossing in itself, reported above;
       // only a base of this package, or one outside every package (the
       // repository's shared base), is inherited and read.
-      const baseDir = repoRoot ? packageDirOf(absolute, repoRoot) : undefined;
+      const baseDir = repoRoot ? packageDirOf(named, repoRoot) : undefined;
       if (baseDir && baseDir !== packageDirOf(file, repoRoot)) continue;
+      // The compiler probes the name as written, then with `.json` appended.
+      let absolute = named;
+      let parentText = read(absolute);
+      if (parentText === null && !named.endsWith('.json')) {
+        absolute = `${named}.json`;
+        parentText = read(absolute);
+      }
       if (seen.has(absolute)) continue;
       seen.add(absolute);
-      const parentText = read(absolute);
       if (parentText === null) {
         found.push('@obversa/<unreadable-extends>');
         continue;
       }
       found.push(...tsconfigDependencies(parentText, { file: absolute, root: repoRoot, read, seen }));
     }
+  }
+  return found;
+}
+
+// The sibling packages a manifest's devDependencies name. A workspace
+// devDependency installs a sibling invisibly, so it goes through the allowed
+// set like any other arrow.
+export function internalDevDependencies(manifest) {
+  return Object.keys(manifest?.devDependencies ?? {}).filter((name) => name.startsWith('@obversa/')).sort();
+}
+
+// The packages a manifest's `imports` map (`#alias`) can reach. Node resolves
+// such an alias to an external package or to a path, through nested
+// conditional objects and arrays, so every string leaf counts — by name, or
+// by a relative path into another package (a glob by its literal prefix).
+export function manifestImportTargets(manifest, { file, root: repoRoot } = {}) {
+  const leaves = (value) => {
+    if (typeof value === 'string') return [value];
+    if (Array.isArray(value)) return value.flatMap(leaves);
+    if (value && typeof value === 'object') return Object.values(value).flatMap(leaves);
+    return [];
+  };
+  const found = [];
+  for (const leaf of leaves(manifest?.imports ?? {})) {
+    const crossing = crossingPackage(leaf.split(/[*?]/)[0], { file, root: repoRoot });
+    if (crossing) found.push(crossing);
   }
   return found;
 }
@@ -408,6 +442,18 @@ for (const [name, rule] of packageRules) {
     failures.push(
       `${name}: internal peers must be ${expectedPeers.join(', ') || 'none'}; found ${peers.join(', ') || 'none'}`,
     );
+  }
+  // A workspace devDependency and a package `imports` alias are arrows too:
+  // both go through the same allowed set as an import in source.
+  const allowedArrows = new Set([...rule.dependencies, ...rule.peerDependencies]);
+  for (const dependency of internalDevDependencies(manifest)) {
+    if (!allowedArrows.has(dependency)) failures.push(`${name}: devDependencies must not name ${dependency}`);
+  }
+  // An `imports` alias may point at the package itself (a self-reference),
+  // as a source import may; a self devDependency stays refused above.
+  const allowedImportTargets = new Set([name, ...allowedArrows]);
+  for (const target of manifestImportTargets(manifest, { file: join(directory, 'package.json'), root })) {
+    if (!allowedImportTargets.has(target)) failures.push(`${name}: package imports must not map to ${target}`);
   }
   for (const [dependency, expectedVersion] of Object.entries(
     rule.peerDependencyVersions ?? {},

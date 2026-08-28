@@ -8,7 +8,22 @@ import os from "node:os";
 import path from "node:path";
 import ts from "@typescript/typescript6";
 
-import { extractObversaImports, moduleSpecifiers, parserExtensions, scansImports, scansTsconfig, sourceExtensions, textExtensions, tsconfigDependencies, walkTree } from "./check-boundaries.mjs";
+import { extractObversaImports, internalDevDependencies, manifestImportTargets, moduleSpecifiers, parserExtensions, scansImports, scansTsconfig, sourceExtensions, textExtensions, tsconfigDependencies, walkTree } from "./check-boundaries.mjs";
+
+test("a package.json imports alias, through conditions and arrays, and a workspace devDependency are arrows the rules must allow", () => {
+  const at = { file: "/repo/packages/source/package.json", root: "/repo" };
+  assert.deepEqual(manifestImportTargets({ imports: { "#surface": "@obversa/surfacer" } }, at), ["@obversa/surfacer"], "an alias to a sibling by name");
+  assert.deepEqual(
+    manifestImportTargets({ imports: { "#kit": { node: "@obversa/surfacer/client", default: "./src/local.mjs" }, "#mem/*": ["../memory/src/*", "./fallback.mjs"] } }, at),
+    ["@obversa/surfacer", "@obversa/memory"],
+    "every string leaf: a conditional object, an array, a subpath, a relative path into a sibling",
+  );
+  assert.deepEqual(manifestImportTargets({ imports: { "#local": "./src/x.mjs", "#dep": "some-external" } }, at), [], "own paths and external packages are not crossings");
+  assert.deepEqual(manifestImportTargets({}, at), []);
+  assert.deepEqual(manifestImportTargets({ imports: { "#self": "@obversa/source" } }, at), ["@obversa/source"], "a self-alias is reported by name; the scan allows the owner's own name for imports");
+  assert.deepEqual(internalDevDependencies({ devDependencies: { "@obversa/surfacer": "workspace:^", vitest: "1" } }), ["@obversa/surfacer"]);
+  assert.deepEqual(internalDevDependencies({}), []);
+});
 
 test("a tsconfig inherits its dependencies through extends, at any depth, with a cycle guard; an unreadable base fails closed", () => {
   const root = "/repo";
@@ -25,6 +40,8 @@ test("a tsconfig inherits its dependencies through extends, at any depth, with a
   );
   assert.deepEqual(tsconfigDependencies('{ "extends": "./missing.json" }', { file, root, read }), ["@obversa/<unreadable-extends>"], "an unreadable base is reported, not skipped");
   assert.deepEqual(tsconfigDependencies('{ "extends": "@tsconfig/node22/tsconfig.json" }', { file, root, read }), [], "an external base is not a crossing and is not read");
+  assert.deepEqual(tsconfigDependencies('{ "extends": "/repo/packages/source/base.json" }', { file, root, read }), ["@obversa/surfacer", "@obversa/memory"], "an absolute parent is inherited too");
+  assert.deepEqual(tsconfigDependencies('{ "extends": "./base" }', { file, root, read }), ["@obversa/surfacer", "@obversa/memory"], "an extensionless parent is probed with .json, as the compiler does");
   // Every tsconfig under a package, however nested, carries dependency fields.
   assert.equal(scansTsconfig("packages/source/tsconfig.json"), true);
   assert.equal(scansTsconfig("packages/source/config/tsconfig.build.json"), true, "a nested tsconfig");
