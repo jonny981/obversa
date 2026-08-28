@@ -1478,8 +1478,11 @@ async function walk(directory, output, failures) {
   output.push(...files);
   for (const link of symlinks) {
     const path = relative(root, link).split('\\').join('/');
-    if (path.startsWith('packages/'))
-      failures.push(`${path}: a symlink under packages/ is refused; it can reach another package while an import that names it looks local`);
+    // Under packages/ a link can reach another package while the import
+    // that names it looks local; under hosts/ it can also stand as a shipped
+    // command whose code the scan never read. Both are refused on sight.
+    if (path.startsWith('packages/') || path.startsWith('hosts/'))
+      failures.push(`${path}: a symlink under packages/ or hosts/ is refused; it can reach a file the scan never read while the path that names it looks local, or stand as an entry the scan never read`);
   }
 }
 

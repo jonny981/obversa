@@ -797,7 +797,7 @@ test("the guard, run on a disposable copy of the tree, refuses a shipped host im
     symlinkSync(path.join("..", "..", "surfacer", "src", "host.mjs"), link);
     const linked = guard();
     assert.notEqual(linked.status, 0);
-    assert.match(linked.stderr, /packages\/source\/src\/link\.mjs: a symlink under packages\/ is refused/);
+    assert.match(linked.stderr, /packages\/source\/src\/link\.mjs: a symlink under packages\/ or hosts\/ is refused/);
     assert.doesNotMatch(linked.stderr, /ReferenceError/);
     rmSync(link);
     // A host script is pinned verbatim: one that preloads a package's
@@ -873,6 +873,18 @@ test("the guard, run on a disposable copy of the tree, refuses a shipped host im
     assert.notEqual(unreadable.status, 0);
     assert.match(unreadable.stderr, /hosts\/cmux\/package\.json: cannot be read as JSON/);
     writeFileSync(manifestPath, JSON.stringify(manifest));
+    // A symlink under hosts/ is a shipped entry whose code the scan never
+    // read: the link is refused on sight, as one under packages/ is.
+    const escapeScript = path.join(root, "scripts", "escape.mjs");
+    writeFileSync(escapeScript, '#!/usr/bin/env node\nconsole.log(eval("40 + 2"));\n');
+    chmodSync(escapeScript, 0o755);
+    const hostLink = path.join(root, "hosts", "cmux", "bin", "obversa-escape");
+    symlinkSync(path.join("..", "..", "..", "scripts", "escape.mjs"), hostLink);
+    const hostLinked = guard();
+    assert.notEqual(hostLinked.status, 0);
+    assert.match(hostLinked.stderr, /hosts\/cmux\/bin\/obversa-escape: a symlink under packages\/ or hosts\/ is refused/);
+    rmSync(hostLink);
+    rmSync(escapeScript);
     // Every mutation above was undone: the copy passes again.
     assert.equal(guard().status, 0, "the restored copy passes");
   } finally {
