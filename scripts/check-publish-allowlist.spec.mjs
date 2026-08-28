@@ -1,14 +1,14 @@
 import assert from "node:assert/strict";
-import { execFileSync } from "node:child_process";
+import { execFileSync, spawnSync } from "node:child_process";
 import { EventEmitter } from "node:events";
-import { existsSync, mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdtempSync, mkdirSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { createRequire } from "node:module";
 import os from "node:os";
 import path from "node:path";
 import test from "node:test";
 
 import { HOOK_COMMAND, PUBLISH_REGISTRY_SENTINEL, SCOPE_REGISTRY_KEY, audit, checkHook, listWorkspacePackages, releaseTagFor } from "./check-publish-allowlist.mjs";
-import { publishArgs, release, releasePlan, runChild } from "./release.mjs";
+import { NPM_CLI, NPM_DIR, publishArgs, release, releasePlan, runChild } from "./release.mjs";
 
 // Both registry keys npm consults for a scoped name, pinned to the sentinel.
 const SENTINELS = { registry: PUBLISH_REGISTRY_SENTINEL, [SCOPE_REGISTRY_KEY]: PUBLISH_REGISTRY_SENTINEL };
@@ -248,14 +248,39 @@ test("a packed tarball carries the never-resolving registry, so publishing it �
   }
 });
 
-// The npm this machine publishes with, by its own location: its bundled
-// registry picker and its publish command are the rules the seatbelt is
-// built on, read in-process — no publish subcommand, no socket.
-const NPM_DIR = path.join(execFileSync("npm", ["prefix", "-g"], { encoding: "utf8" }).trim(), "lib", "node_modules", "npm");
+// The npm the release publishes with — the copy pinned as a root
+// devDependency, the same one release.mjs resolves — and its bundled
+// registry picker and publish command: the rules the seatbelt is built on,
+// read in-process. No publish subcommand, no socket, and PATH plays no part.
+const ROOT_MANIFEST = JSON.parse(readFileSync(new URL("../package.json", import.meta.url), "utf8"));
 
-test("npm's registry precedence, from npm's own code: the scope key beats registry, and the publish command lets a CLI flag beat publishConfig", async () => {
+test("the release's npm is the pinned root devDependency, resolved by the module resolver, whatever npm is first on PATH", () => {
+  const pinned = ROOT_MANIFEST.devDependencies.npm;
+  assert.match(pinned, /^\d+\.\d+\.\d+$/, "npm is pinned exactly");
+  assert.equal(JSON.parse(readFileSync(path.join(NPM_DIR, "package.json"), "utf8")).version, pinned, "the resolved copy is the pinned version");
+  // pnpm links node_modules/npm into its store; the resolver answers the real
+  // path, so compare real paths.
+  assert.equal(NPM_DIR, realpathSync(new URL("../node_modules/npm", import.meta.url)), "resolved to the repository's own installed copy");
+  assert.ok(existsSync(NPM_CLI), "the CLI entry the release spawns exists");
+  // A fake npm first on PATH changes nothing: resolution never consults PATH,
+  // and the release spawns the pinned entry under the current node.
+  const fakeBin = mkdtempSync(path.join(os.tmpdir(), "fake-npm-"));
+  writeFileSync(path.join(fakeBin, "npm"), "#!/bin/sh\nexit 99\n");
+  execFileSync("chmod", ["755", path.join(fakeBin, "npm")]);
+  const env = { ...process.env, PATH: `${fakeBin}:${process.env.PATH}` };
+  try {
+    const swapped = spawnSync("npm", ["--version"], { env, encoding: "utf8" });
+    assert.equal(swapped.status, 99, "PATH now hands out the fake npm");
+    const probe = execFileSync(process.execPath, ["--input-type=module", "-e", "import { NPM_DIR, NPM_CLI } from './scripts/release.mjs'; console.log(JSON.stringify({ NPM_DIR, NPM_CLI }));"], { cwd: new URL("..", import.meta.url).pathname, env, encoding: "utf8" });
+    assert.deepEqual(JSON.parse(probe), { NPM_DIR, NPM_CLI }, "the release still resolves the same pinned copy");
+  } finally {
+    rmSync(fakeBin, { recursive: true, force: true });
+  }
+});
+
+test("npm's registry precedence, from the pinned npm's own code: the scope key beats registry, and the publish command lets a CLI flag beat publishConfig", async () => {
   const npmVersion = JSON.parse(readFileSync(path.join(NPM_DIR, "package.json"), "utf8")).version;
-  assert.match(npmVersion, /^10\./, `the rules below were read from npm ${npmVersion}`);
+  assert.equal(npmVersion, ROOT_MANIFEST.devDependencies.npm, `the rules below were read from the pinned npm ${npmVersion}`);
   const { pickRegistry } = createRequire(import.meta.url)(path.join(NPM_DIR, "node_modules", "npm-registry-fetch"));
   const loopback = "http://127.0.0.1:9/";
   // A manifest's two sentinels with a plain override: the scope key wins,
@@ -320,8 +345,9 @@ test("the release runs the guard again after pack, so a pack step that changed a
       resolve({ code: 0, signal: null });
     });
     assert.equal(await release(plan, { run: clean.run, check, mkdtemp, log: (line) => logged.push(line) }), 0);
-    assert.deepEqual(clean.calls.map((c) => c.command), ["pnpm", "npm"]);
-    assert.match(clean.calls[1].args[1], /x-p-1\.0\.0\.tgz$/, "npm publishes the packed tarball");
+    assert.deepEqual(clean.calls.map((c) => c.command), ["pnpm", process.execPath], "npm runs as the pinned CLI under the current node, not by name");
+    assert.equal(clean.calls[1].args[0], NPM_CLI);
+    assert.match(clean.calls[1].args[2], /x-p-1\.0\.0\.tgz$/, "npm publishes the packed tarball");
     assert.ok(dirs.every((dir) => !existsSync(dir)), "the temporary pack directory is removed on every path");
   } finally {
     rmSync(root, { recursive: true, force: true });

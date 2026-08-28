@@ -22,6 +22,7 @@
 // Usage: OBVERSA_RELEASE=1 node scripts/release.mjs packages/<name> [--dry-run]
 import { spawn } from "node:child_process";
 import { mkdtempSync, readdirSync, realpathSync, rmSync } from "node:fs";
+import { createRequire } from "node:module";
 import os from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -29,6 +30,13 @@ import { fileURLToPath } from "node:url";
 import { RELEASE_REGISTRY, SCOPE_REGISTRY_KEY, checkHook, listWorkspacePackages } from "./check-publish-allowlist.mjs";
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), "..");
+
+// The npm that publishes: the copy pinned as a root devDependency, resolved
+// through the module resolver from this file — never whichever npm is first
+// on PATH — and run under the current node. The publish guard's spec reads
+// npm's registry rules from the same copy.
+export const NPM_DIR = dirname(createRequire(import.meta.url).resolve("npm/package.json"));
+export const NPM_CLI = join(NPM_DIR, "bin", "npm-cli.js");
 
 // The plan for one release, or a thrown reason: the target must be, by real
 // path, the directory of exactly one non-private workspace package (never a
@@ -106,7 +114,7 @@ export async function release(plan, { run = runChild, check = checkHook, mkdtemp
     // refuse before npm is started.
     const problems = check({ cwd: plan.cwd });
     if (problems.length) { for (const problem of problems) log(`release: after pack, ${problem}`); return 1; }
-    const published = await run("npm", plan.publishArgs(join(destination, tarball)), { cwd: plan.cwd, signals });
+    const published = await run(process.execPath, [NPM_CLI, ...plan.publishArgs(join(destination, tarball))], { cwd: plan.cwd, signals });
     if (published.signal) { log(`release: npm publish was stopped by ${published.signal}`); return 1; }
     return published.code ?? 1;
   } catch (error) {
