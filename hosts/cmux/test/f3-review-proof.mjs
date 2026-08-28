@@ -60,22 +60,35 @@ function firstNewAnchor(diffText) {
   throw new Error("no anchor found in the diff");
 }
 
-// A stdout that behaves like a pipe under back-pressure: tiny buffer, deferred
-// writes. The framed result must be complete when reviewDiff resolves, however
-// large it is, or a caller that exits on resolution would cut it mid-JSON.
-class SlowPipe extends Writable {
+// A stdout that models a pipe whose reader has not drained it yet: it holds
+// each write's callback until the test releases it. reviewDiff must not
+// resolve while the frame is held — a caller that exits on resolution would
+// otherwise cut a large result at the pipe buffer — and once released, the
+// frame must be complete.
+class GatedPipe extends Writable {
   constructor() {
     super({ highWaterMark: 1024 });
     this.text = "";
+    this.released = false;
+    this.held = [];
   }
   _write(chunk, _encoding, callback) {
-    setImmediate(() => { this.text += chunk.toString("utf8"); callback(); });
+    this.text += chunk.toString("utf8");
+    if (this.released) callback();
+    else this.held.push(callback);
+  }
+  release() {
+    this.released = true;
+    for (const callback of this.held.splice(0)) callback();
   }
 }
 
 function captureStream() {
-  return new SlowPipe();
+  return new GatedPipe();
 }
+
+const settledWithin = (promise, ms) =>
+  Promise.race([promise.then(() => "settled", () => "settled"), new Promise((resolve) => setTimeout(() => resolve("pending"), ms))]);
 
 test("the review surface runs on surfacer and returns annotations", { timeout: 30_000 }, async () => {
   const repo = makeRepoWithChange();
@@ -186,6 +199,10 @@ test("the review surface runs on surfacer and returns annotations", { timeout: 3
     });
     assert.equal(ack.status, 200);
 
+    // The session is decided, but the pipe has not drained the frame: the
+    // review must still be pending. Release it, then it resolves.
+    assert.equal(await settledWithin(reviewPromise, 500), "pending", "reviewDiff must not resolve before stdout has taken the frame");
+    stdout.release();
     const outcome = await reviewPromise;
     assert.equal(outcome.status, "completed");
     // The result is the SurfaceResult: routable, decided, contract anchors.
