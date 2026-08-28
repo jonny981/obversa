@@ -123,9 +123,11 @@ for `completed`, 1 for every other status, and 2 for a bad argument.
 
 The page runs on [the Surfacer](/packages/surfacer): one loopback server,
 one session token, one result. The static page names nothing under review:
-not the diff, not the ref. The page fetches the diff and its label from the
-session API with the bearer token, so a local process that finds the port
-sees an empty shell. Nothing in a
+not the diff, not the ref, not even the highlight rules, which are built
+from the tokens the diff contains. The page fetches the diff, its label, and
+those rules from the session API with the bearer token, so a local process
+that finds the port sees a shell that is the same for every review. Nothing
+in a
 diff line can execute. The page has no inline script, a strict Content
 Security Policy allows scripts and styles from the session origin only,
 and every line is rendered as text. The returned annotations are checked

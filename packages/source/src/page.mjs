@@ -3,7 +3,9 @@ import { fileURLToPath } from "node:url";
 
 // The browser assets (app.js, app.css, and the modules they import) are static
 // files served verbatim, and index.html is the same for every review: it
-// carries nothing about the review — not the diff, not the ref under review.
+// carries nothing about the review — not the diff, not the ref under review,
+// not the highlight rules (those are built from the review's own tokens, so
+// they ride the authenticated model, never a static file).
 // Static files are served before the auth check, so anything embedded in the
 // shell would be readable by any local process that found the loopback port;
 // the page fetches the diff model and its label from GET /api/model behind the
@@ -25,7 +27,6 @@ export function buildIndexHtml() {
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Review</title>
 <link rel="stylesheet" href="/app.css">
-<link rel="stylesheet" href="/highlight.css">
 </head>
 <body>
 <main id="app" aria-busy="true">Loading review…</main>

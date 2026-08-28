@@ -234,6 +234,16 @@ function contextRow(line) {
   return row;
 }
 
+// The highlight rules arrive with the authenticated model, not as a pre-auth
+// static file: what the shell serves before the token is checked must not
+// vary with the content under review. A constructed stylesheet is CSSOM, which
+// style-src does not govern, so the CSP stays 'self' with no inline style.
+function applyHighlightCss(css) {
+  const sheet = new CSSStyleSheet();
+  sheet.replaceSync(typeof css === "string" ? css : "");
+  document.adoptedStyleSheets = [...document.adoptedStyleSheets, sheet];
+}
+
 async function main() {
   let client;
   try {
@@ -247,13 +257,15 @@ async function main() {
   // The diff rides the authenticated API, not the static shell.
   let model;
   let meta;
+  let highlightCss;
   try {
-    ({ model, meta } = await client.api("/api/model"));
+    ({ model, meta, highlightCss } = await client.api("/api/model"));
   } catch (error) {
     root.replaceChildren(el("p", "notice error", `Could not load the review: ${error.message}`));
     root.setAttribute("aria-busy", "false");
     return;
   }
+  applyHighlightCss(highlightCss);
 
   const annotations = [];
   let annotationSeq = 0;

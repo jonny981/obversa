@@ -178,7 +178,6 @@ export async function reviewDiff({
     await copyFile(path.join(ASSETS_DIR, "nav-segments.mjs"), path.join(directory, "nav-segments.mjs"));
     await copyFile(path.join(ASSETS_DIR, "file-tree.mjs"), path.join(directory, "file-tree.mjs"));
     await copyFile(path.join(ASSETS_DIR, "icons.mjs"), path.join(directory, "icons.mjs"));
-    await writeFile(path.join(directory, "highlight.css"), highlightCss, "utf8");
     await writeFile(path.join(directory, "surface-client.mjs"), clientKitSource, "utf8");
 
     const api = {
@@ -186,8 +185,11 @@ export async function reviewDiff({
       // embedded in the static shell (static files are served before the auth
       // check, so an embedded diff would be readable by any local process that
       // found the port). It goes out verbatim: the server redacts every other
-      // /api body, which would corrupt code under review.
-      "GET /api/model": async () => ({ body: { model, meta }, verbatim: true }),
+      // /api body, which would corrupt code under review. The highlight rules
+      // ride with it for the same reason: they are built from the tokens this
+      // review contains, so as a static file they would change with the
+      // content under review and tell a pre-auth reader something about it.
+      "GET /api/model": async () => ({ body: { model, meta, highlightCss }, verbatim: true }),
       // The browser returns contract-shaped annotations and a decision; the
       // contract validates every anchor against the request (membership), bounds
       // bodies and counts, and shapes the SurfaceResult. It completes verbatim so
@@ -207,7 +209,6 @@ export async function reviewDiff({
         "/nav-segments.mjs": ["nav-segments.mjs", "text/javascript; charset=utf-8"],
         "/file-tree.mjs": ["file-tree.mjs", "text/javascript; charset=utf-8"],
         "/icons.mjs": ["icons.mjs", "text/javascript; charset=utf-8"],
-        "/highlight.css": ["highlight.css", "text/css; charset=utf-8"],
         "/surface-client.mjs": ["surface-client.mjs", "text/javascript; charset=utf-8"],
       },
     };

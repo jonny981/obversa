@@ -113,6 +113,14 @@ const PROBE = `(() => {
       inlineStyleAttrs: document.querySelectorAll("[style]").length,
       styleTags: document.querySelectorAll("style").length,
       tokenSpans: document.querySelectorAll("code.code span[class^='tok-']").length,
+      // The highlight rules came with the model and were applied as a
+      // constructed stylesheet; a token must paint in a colour of its own.
+      tokenPainted: (() => {
+        const span = document.querySelector("code.code span[class^='tok-']");
+        if (!span) return false;
+        const own = getComputedStyle(span).color;
+        return !!own && own !== getComputedStyle(span.parentElement).color;
+      })(),
       sections: sections.length, jumps: jumps.length, clicked, defLine, premise, flashed, sameFile,
       treeFiles, contextBands: document.querySelectorAll(".context-band").length, bandExpandOk,
       tabs: tabs.length, allFilesCount,
@@ -174,14 +182,13 @@ test("the review surface renders under the exact CSP with zero violations and fi
     }
     if (url.pathname.startsWith("/api/")) {
       if (req.headers.authorization !== `Bearer ${token}`) return send(401, "application/json", JSON.stringify({ error: "Authentication required" }));
-      if (url.pathname === "/api/model" && req.method === "GET") return send(200, "application/json", JSON.stringify({ model, meta }));
+      if (url.pathname === "/api/model" && req.method === "GET") return send(200, "application/json", JSON.stringify({ model, meta, highlightCss }));
       if (url.pathname === "/api/heartbeat") return send(200, "application/json", JSON.stringify({ ok: true }));
       return send(404, "application/json", JSON.stringify({ error: "Not found" }));
     }
     if (url.pathname === "/") return send(200, "text/html; charset=utf-8", shell);
     if (url.pathname === "/probe.js") return send(200, "text/javascript; charset=utf-8", PROBE);
     if (url.pathname === "/surface-client.mjs") return send(200, "text/javascript; charset=utf-8", clientKit);
-    if (url.pathname === "/highlight.css") return send(200, "text/css; charset=utf-8", highlightCss);
     const asset = assets[url.pathname];
     if (asset) return send(200, asset[1], readFileSync(path.join(ASSETS_DIR, asset[0]), "utf8"));
     send(404, "text/plain", "not found");
@@ -194,8 +201,10 @@ test("the review surface renders under the exact CSP with zero violations and fi
   try {
     // The static shell carries no diff; the model is gated.
     const shellText = await (await fetch(`${origin}/`)).text();
-    assert.doesNotMatch(shellText, /verbatimSECRET|review-data|line15/);
+    assert.doesNotMatch(shellText, /verbatimSECRET|review-data|line15|highlight\.css/);
     assert.equal((await fetch(`${origin}/api/model`)).status, 401);
+    // The highlight rules depend on the review's tokens, so no pre-auth route serves them.
+    assert.equal((await fetch(`${origin}/highlight.css`)).status, 404);
 
     chrome = spawn(CHROME, ["--headless=new", "--disable-gpu", "--no-first-run", `--user-data-dir=${profile}`, `${origin}/#${token}`], { stdio: "ignore" });
     const timeout = setTimeout(() => results.reject(new Error("the page posted no results within 30s")), 30_000);
@@ -212,6 +221,7 @@ test("the review surface renders under the exact CSP with zero violations and fi
   assert.equal(report.inlineStyleAttrs, 0, "inline style attributes");
   assert.equal(report.styleTags, 0, "<style> tags");
   assert.ok(report.tokenSpans > 0, "highlight tokens");
+  assert.ok(report.tokenPainted, "the highlight rules from the authenticated model paint the tokens under style-src 'self'");
   assert.equal(report.sections, 2, "two file sections");
   assert.ok(report.jumps > 0, "go-to-source identifiers");
   assert.equal(report.clicked, "sign", "the probe found a use of `sign` in the second file");

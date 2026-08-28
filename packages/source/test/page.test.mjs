@@ -12,7 +12,9 @@ test("the shell links the static assets and carries nothing about the review", (
   // with the authenticated model.
   assert.match(html, /<title>Review<\/title>/);
   assert.match(html, /<link rel="stylesheet" href="\/app\.css">/);
-  assert.match(html, /<link rel="stylesheet" href="\/highlight\.css">/);
+  // The highlight rules are built from the review's own tokens, so they ride
+  // the authenticated model, never a pre-auth static file.
+  assert.doesNotMatch(html, /highlight\.css/);
   assert.match(html, /<script type="module" src="\/app\.js"><\/script>/);
   // The only script tag is the app module; the model is fetched behind the
   // bearer token, never embedded where a pre-auth static read could see it.

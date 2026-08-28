@@ -43,7 +43,10 @@ test("reviewDiff builds the surface, returns a validated SurfaceResult, and clea
     assert.equal(open, false);
     capturedDir = assets.directory;
     // The static shell and reused client kit are all present and named plainly.
-    assert.deepEqual(Object.keys(assets.files).sort(), ["/", "/app.css", "/app.js", "/file-tree.mjs", "/highlight.css", "/icons.mjs", "/nav-segments.mjs", "/surface-client.mjs"]);
+    // Every static file is the same for every review: the highlight rules,
+    // which depend on the review's tokens, are not among them.
+    assert.deepEqual(Object.keys(assets.files).sort(), ["/", "/app.css", "/app.js", "/file-tree.mjs", "/icons.mjs", "/nav-segments.mjs", "/surface-client.mjs"]);
+    assert.ok(!existsSync(path.join(assets.directory, "highlight.css")), "no highlight.css on disk in the served directory");
     const html = readFileSync(path.join(assets.directory, "index.html"), "utf8");
     // The diff never rides the pre-auth static shell; it is served verbatim
     // from the authenticated model endpoint.
@@ -52,6 +55,7 @@ test("reviewDiff builds the surface, returns a validated SurfaceResult, and clea
     assert.equal(modelResponse.verbatim, true, "the diff must not pass through redaction");
     assert.equal(modelResponse.body.model.files[0].path, "a.txt");
     assert.equal(modelResponse.body.meta.label, "working tree");
+    assert.match(modelResponse.body.highlightCss, /^\/\* shiki /, "the highlight rules ride the authenticated model");
     assert.equal(readFileSync(path.join(assets.directory, "surface-client.mjs"), "utf8"), CLIENT_KIT);
     assert.ok(existsSync(path.join(assets.directory, "app.js")));
 
