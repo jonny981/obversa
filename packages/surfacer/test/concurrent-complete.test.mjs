@@ -241,6 +241,63 @@ test("an outcome payload is redacted by default and exact with the verbatim opt-
   }
 });
 
+test("a completion the frame cannot carry is refused and the session stays open", async () => {
+  // The claim is a promise to frame the result on stdout. A payload JSON
+  // cannot serialise must fail here, before the browser is told the session
+  // completed, or the caller waits for a frame that never comes.
+  const circular = { self: null };
+  circular.self = circular;
+  const surface = await startSurface({
+    app: "frame",
+    assets: { directory: assetsDir, files: { "/": ["index.html", "text/html; charset=utf-8"] } },
+    api: {
+      "POST /api/bigint": async ({ session }) => { session.complete({ x: 1n }); return null; },
+      "POST /api/cycle": async ({ session }) => { session.complete(circular, { verbatim: true }); return null; },
+      "POST /api/good": async ({ session }) => { session.complete({ ok: 1 }); return null; },
+    },
+    sessionTimeoutMs: 10_000,
+    leaseTimeoutMs: 10_000,
+  });
+  try {
+    for (const route of ["/api/bigint", "/api/cycle"]) {
+      const refused = await post(surface, route, {});
+      assert.equal(refused.status, 500, `${route}: an unframeable completion is an error, not a success`);
+      const body = await refused.json();
+      assert.equal(body.operationId, undefined);
+      assert.match(body.error, /cannot be framed/);
+    }
+    // Nothing was claimed: a frameable completion still succeeds afterwards.
+    const good = await post(surface, "/api/good", {});
+    assert.equal(good.status, 200, "the session stayed open");
+    const { operationId } = await good.json();
+    await post(surface, "/api/ack", { operationId });
+    const decision = await surface.waitForDecision();
+    assert.equal(decision.status, "completed");
+    assert.deepEqual(decision.payload, { ok: 1 });
+  } finally {
+    await surface.stop();
+  }
+});
+
+test("an outcome payload the frame cannot carry becomes null, and the ending still arrives", async () => {
+  const surface = await startSurface({
+    app: "outcome-bigint",
+    assets: { directory: assetsDir, files: { "/": ["index.html", "text/html; charset=utf-8"] } },
+    terminalPayload: () => ({ x: 1n }),
+    sessionTimeoutMs: 10_000,
+    leaseTimeoutMs: 10_000,
+  });
+  try {
+    const decision = surface.waitForDecision();
+    surface.interrupt("test");
+    const ending = await decision;
+    assert.equal(ending.status, "interrupted");
+    assert.equal(ending.payload, null);
+  } finally {
+    await surface.stop();
+  }
+});
+
 test("terminalPayload must be a function, and a throwing one yields null", async () => {
   await assert.rejects(() => startSurface({
     app: "bad",

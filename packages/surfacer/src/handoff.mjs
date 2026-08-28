@@ -16,8 +16,9 @@ function frameName(app) {
   return cleaned;
 }
 
-/** One opaque result for the caller. `completed` carries the payload; every
- *  other status carries a short redacted detail instead. */
+/** One opaque result for the caller. `completed` carries the app's result;
+ *  every other status carries the outcome payload the app supplied for it, or
+ *  null, plus a short redacted detail. */
 export function terminalResult(app, status, { payload = null, detail = null, operationId = randomUUID(), verbatim = false } = {}) {
   if (!TERMINAL_STATUSES.includes(status)) {
     throw new TypeError(`Unsupported terminal status: ${status}`);

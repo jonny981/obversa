@@ -25,7 +25,10 @@ such as review annotations that quote code (the review still trims and
 caps them before completing). When two
 authenticated requests race to complete, exactly one succeeds; the other
 receives a conflict. A request whose body is still arriving when the
-session closes is refused before its handler runs. An app can pass `terminalPayload(status)` to
+session closes is refused before its handler runs. A completion whose
+payload cannot be framed as JSON is refused with an error and the session
+stays open, so the browser is never told a session completed that the
+caller will never receive. An app can pass `terminalPayload(status)` to
 `startSurface` so a session that ends without the app's completion —
 cancelled, timed out, or interrupted — still carries an outcome payload the
 caller can route. It passes redaction unless the app also sets

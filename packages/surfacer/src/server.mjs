@@ -49,7 +49,11 @@ export async function startSurface({
   const outcomePayload = (status) => {
     if (!terminalPayload) return null;
     try {
-      return terminalPayload(status) ?? null;
+      const payload = terminalPayload(status) ?? null;
+      // An outcome the frame cannot carry (a BigInt, a cycle) is no outcome:
+      // the ending must still reach the caller, with a null payload.
+      JSON.stringify(payload);
+      return payload;
     } catch {
       return null;
     }
@@ -93,6 +97,15 @@ export async function startSurface({
       completionReserved = true;
       try {
         const result = terminalResult(app, "completed", { payload, verbatim });
+        // A claim is a promise to frame this result on stdout. A payload JSON
+        // cannot carry (a BigInt, a cycle) would break that promise after the
+        // browser had already been told the session completed, so prove the
+        // frame here, before claiming; the session stays open on failure.
+        try {
+          JSON.stringify(result);
+        } catch (error) {
+          throw httpError(`The completion payload cannot be framed: ${error?.message ?? error}`, 500);
+        }
         if (!claimTerminal("completed", result)) {
           throw httpError("This session already has a terminal decision", 409);
         }
