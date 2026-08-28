@@ -592,6 +592,13 @@ test("host JavaScript is import-scanned: public package names pass, a path into 
   }
   assert.ok(hostImportFindings('const m = process.getBuiltinModule("node:module");', { file, root: "/repo" }).length > 0, "loader hatches are refused in a host too");
   assert.ok(hostImportFindings('const name = "@obversa/" + pick; import(name);', { file, root: "/repo" }).some((entry) => /computed module reference/.test(entry)));
+  // Shipped host code may not reach a test path (exempt from the hatch rules)
+  // or a local module without a source extension (never scanned).
+  assert.ok(hostImportFindings('import { probe } from "../test/escape.mjs";', { file, root: "/repo" }).some((entry) => /imports a test path/.test(entry)));
+  assert.ok(hostImportFindings('import { probe } from "../lib/escape.test.mjs";', { file, root: "/repo" }).some((entry) => /imports a test path/.test(entry)));
+  assert.ok(hostImportFindings('import { helper } from "../lib/helper";', { file, root: "/repo" }).some((entry) => /the scan would not read/.test(entry)));
+  assert.ok(hostImportFindings('const h = await import("../bin/other-command");', { file, root: "/repo" }).some((entry) => /the scan would not read/.test(entry)));
+  assert.deepEqual(hostImportFindings('import { helper } from "../lib/helper.mjs";', { file, root: "/repo" }), [], "a local module with a source extension is scanned on its own");
   // A host proof may reach a package's internals by path until F2b gives it a
   // public testing subpath; it is still refused a computed or schemed specifier.
   const proof = "/repo/hosts/cmux/test/f3-browser-proof.mjs";

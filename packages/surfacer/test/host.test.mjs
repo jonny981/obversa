@@ -43,19 +43,27 @@ test("the host adapter is tried first, then the browser, then print", async () =
   assert.match(captured.join(""), /http:\/\/127\.0\.0\.1:1\/z/);
 });
 
-test("the public placement path waits the full five seconds before assuming a lingering command opened the surface", async () => {
-  // The default is what ships: through openSurfaceUrl, not the helper, a
-  // command that lingers is reported as opened only once five seconds have
-  // passed — no sooner, and without waiting for it to exit.
+test("the public placement path assumes a lingering command opened the surface at exactly five seconds", async (t) => {
+  // The default is what ships: through openSurfaceUrl, not the helper. The
+  // clock is mocked, so the test is exact and instant: one millisecond short
+  // of five seconds the placement is still pending; at five seconds it is
+  // reported as opened, without waiting for the command to exit.
+  t.mock.timers.enable({ apis: ["setTimeout"] });
   const directory = mkdtempSync(path.join(os.tmpdir(), "surfacer-host-"));
   const lingering = path.join(directory, "lingering");
-  writeFileSync(lingering, "#!/bin/sh\nsleep 8\n");
+  // The public boundary spawns a real command; it lingers a few seconds and
+  // is never waited for. The clock is what is mocked.
+  writeFileSync(lingering, "#!/bin/sh\nsleep 6\n");
   chmodSync(lingering, 0o755);
-  const started = Date.now();
-  const result = await openSurfaceUrl("http://127.0.0.1:1/x", { surfaceBin: lingering, browserCommand: null });
-  const elapsed = Date.now() - started;
-  assert.deepEqual(result, { opened: true, via: "host" });
-  assert.ok(elapsed >= 4_900 && elapsed < 7_500, `reported after the five-second settle, not at the command's exit (${elapsed}ms)`);
+  let settled = null;
+  const pending = openSurfaceUrl("http://127.0.0.1:1/x", { surfaceBin: lingering, browserCommand: null }).then((result) => { settled = result; return result; });
+  // Let the spawn happen and the settle timer be armed.
+  await new Promise((resolve) => setImmediate(resolve));
+  t.mock.timers.tick(4_999);
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(settled, null, "one millisecond short of five seconds, still pending");
+  t.mock.timers.tick(1);
+  assert.deepEqual(await pending, { opened: true, via: "host" });
 });
 
 test("a placement command still alive after the settle is assumed to have opened the surface", async () => {

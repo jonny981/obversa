@@ -71,6 +71,12 @@ export function hostImportFindings(text, { file, root: repoRoot }) {
       const target = resolve(dirname(file), specifier);
       const dir = packageDirOf(realpathOf(target, ts.sys), repoRoot) ?? packageDirOf(target, repoRoot);
       if (dir !== undefined) findings.push(`a host reaches packages/${dir} by path (${specifier}); hosts import packages by their public names only`);
+      // A test path is exempt from the loader-hatch rules, so shipped host
+      // code may not reach one — the same edge the package scan refuses.
+      if (namesTestPath(specifier, file)) findings.push(`shipped host code imports a test path, which is exempt from the loader-hatch rules: ${specifier}`);
+      // A local module is scanned only when it carries a source extension;
+      // an extensionless target would be loaded without ever being read.
+      if (!sourcePattern.test(target)) findings.push(`a host imports a local module the scan would not read (${specifier}); a local module carries a source extension`);
     }
   }
   return findings;
