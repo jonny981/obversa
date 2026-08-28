@@ -1,13 +1,15 @@
-import { readFileSync, realpathSync } from 'node:fs';
+import { realpathSync } from 'node:fs';
 import { readFile, readdir } from 'node:fs/promises';
-import { dirname, extname, isAbsolute, join, relative, resolve } from 'node:path';
+import { basename, dirname, extname, isAbsolute, join, relative, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 // The TypeScript compiler's parser (the pinned TypeScript 6 build; the
 // TypeScript 7 native build exposes no parser API). A real parser is the only
 // honest way to find imports: strings, template literals, regex literals, and
 // comments are decided by the language's grammar, so none of them can hide a
-// specifier from this fail-closed guard or fake one.
+// specifier from this fail-closed guard or fake one. The same build's config
+// reader and module resolver answer what a project config means and where a
+// specifier lands, so the scan never recreates the compiler's path rules.
 import ts from '@typescript/typescript6';
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '..');
@@ -43,22 +45,126 @@ export const textExtensions = new Set([
   '.yml',
 ]);
 
+// A guard that cannot read something must fail rather than assume. Such a
+// finding is reported in the dependency list as `@obversa/<reason>` — never a
+// package name — and the scan prints the reason as a failure.
+export const refusal = (reason) => `@obversa/<${reason}>`;
+export const isRefusal = (dependency) => dependency.startsWith('@obversa/<');
+const refusalReason = (dependency) => dependency.slice('@obversa/<'.length, -1);
+
 // Every module specifier a file names, in source order: static imports and
-// re-exports, side-effect and dynamic `import(...)`, CommonJS `require(...)`,
-// `import x = require(...)`, type-position `import("x").T` / `typeof
-// import("x")` (a distinct ImportTypeNode — a type-only import is still a
-// dependency, an internal note), and the JSDoc form `@type {import("x").T}` in
-// JavaScript files. A specifier that is not a plain string (a computed
-// expression) is reported as `null`, because a guard that cannot read it must
-// fail rather than assume. Exported so the spec can pin each form.
+// re-exports, side-effect and dynamic `import(...)`, the phase forms
+// `import.defer(...)` / `import.source(...)`, CommonJS `require(...)` and
+// `module.require(...)`, the resolvers `require.resolve(...)` and
+// `import.meta.resolve(...)`, `import x = require(...)`, type-position
+// `import("x").T` / `typeof import("x")` (a distinct ImportTypeNode — a
+// type-only import is still a dependency, an internal note), the JSDoc forms
+// `@type {import("x").T}` and `@import`, and a `declare module "x"`
+// augmentation. A loader — `require`, `module.require`, `require.resolve`,
+// `import.meta.resolve` — is read only as the direct callee of a call
+// (wrappers that change nothing at runtime stripped); used any other way —
+// passed as a value, called through `.call` / `.apply` / `.bind`, reached by
+// a computed key — it is reported as `null`, as is a specifier that is not
+// a plain string, because a guard that cannot follow it must fail rather
+// than assume. A member of `require` or `module` that is not a loader
+// (`require.main`, `module.exports`) is not a use of one. Exported so the
+// spec can pin each form.
 export function moduleSpecifiers(text, fileName = 'module.ts') {
   const kind = scriptKinds.get(extname(fileName)) ?? ts.ScriptKind.TS;
   const source = ts.createSourceFile(fileName, text, ts.ScriptTarget.Latest, true, kind);
   const specifiers = [];
   const literal = (node) =>
     node && (ts.isStringLiteral(node) || ts.isNoSubstitutionTemplateLiteral(node)) ? node.text : null;
-  const visit = (node) => {
-    if ((ts.isImportDeclaration(node) || ts.isExportDeclaration(node)) && node.moduleSpecifier) {
+  // Loader references handled as a callee, so their later visit is not a
+  // stray use.
+  const handled = new Set();
+  const isImportMeta = (expression) => ts.isMetaProperty(expression) && expression.keywordToken === ts.SyntaxKind.ImportKeyword;
+  // An identifier that names something (a declaration, a property, a label,
+  // a type) rather than referring to a value.
+  const isName = (node) => {
+    const parent = node.parent;
+    if (!parent) return false;
+    if (ts.isShorthandPropertyAssignment(parent)) return false;
+    return parent.name === node || parent.propertyName === node || parent.label === node
+      || ts.isQualifiedName(parent) || ts.isTypeReferenceNode(parent) || ts.isTypeQueryNode(parent);
+  };
+  // The member name a property or element access reads: a string, or null
+  // when the key is computed.
+  const memberName = (node) => (ts.isPropertyAccessExpression(node) ? node.name.text : literal(node.argumentExpression));
+  const isAccess = (node) => ts.isPropertyAccessExpression(node) || ts.isElementAccessExpression(node);
+  const accessOn = (node, matches) => isAccess(node) && matches(ts.skipOuterExpressions(node.expression));
+  const named = (name) => (expression) => ts.isIdentifier(expression) && expression.text === name;
+  const isRequire = named('require');
+  // A loader reference: the identifier `require` (as a value, except as the
+  // object of a plain member that is not a loader), `module.require`,
+  // `require.resolve`, `import.meta.resolve`, and a computed member on any
+  // of `module`, `require`, `import.meta`.
+  const isEquality = (parent) => ts.isBinaryExpression(parent) && [
+    ts.SyntaxKind.EqualsEqualsEqualsToken, ts.SyntaxKind.ExclamationEqualsEqualsToken,
+    ts.SyntaxKind.EqualsEqualsToken, ts.SyntaxKind.ExclamationEqualsToken,
+  ].includes(parent.operatorToken.kind);
+  const isLoader = (node) => {
+    // `module` and `import.meta` hold a loader: as the object of a literal
+    // member the member decides (below); compared for identity they load
+    // nothing; used as a value — destructured, assigned, passed — the
+    // loader goes with them, so the use is refused.
+    if ((ts.isIdentifier(node) && node.text === 'module' && !isName(node)) || isImportMeta(node)) {
+      const parent = node.parent;
+      if (isAccess(parent) && ts.skipOuterExpressions(parent.expression) === node) return false;
+      return !isEquality(parent);
+    }
+    if (ts.isIdentifier(node)) {
+      if (node.text !== 'require' || isName(node)) return false;
+      // As the object of a member: `.call` / `.apply` / `.bind` send the
+      // loader elsewhere; `.resolve` and a computed key make the access
+      // itself the loader reference; any other member is not a load.
+      const parent = node.parent;
+      if (isAccess(parent) && ts.skipOuterExpressions(parent.expression) === node) {
+        const member = memberName(parent);
+        return member === 'call' || member === 'apply' || member === 'bind';
+      }
+      return true;
+    }
+    if (!isAccess(node)) return false;
+    const member = memberName(node);
+    if (accessOn(node, named('module'))) return member === 'require' || member === null;
+    if (accessOn(node, isRequire)) return member === 'resolve' || member === null;
+    if (accessOn(node, isImportMeta)) return member === 'resolve' || member === null;
+    return false;
+  };
+  // `node:module` makes loaders: `createRequire` returns one and `register`
+  // installs a hook. The module may be imported only by name, unrenamed,
+  // never `register`, and never as a namespace or default (a binding the
+  // scan does not follow); a dynamic import or require of it is refused.
+  // A `createRequire(...)` result may be bound only as `const require`, so
+  // the loader keeps the name the scan tracks.
+  const isModuleModule = (node) => ['module', 'node:module'].includes(literal(node));
+  const readsModuleModule = (node) => {
+    const clause = node.importClause;
+    if (!clause || clause.name || !clause.namedBindings || !ts.isNamedImports(clause.namedBindings)) return false;
+    return clause.namedBindings.elements.every((element) => !element.propertyName && element.name.text !== 'register');
+  };
+  const isCreateRequire = (node) =>
+    (ts.isIdentifier(node) && node.text === 'createRequire' && !(node.parent && ts.isImportSpecifier(node.parent) && node.parent.name === node && !node.parent.propertyName))
+    || (isAccess(node) && memberName(node) === 'createRequire');
+  const bindsRequire = (call) => {
+    const holder = call.parent && ts.skipOuterExpressions(call.parent) === call ? call.parent : call;
+    const declaration = holder.parent;
+    return !!declaration && ts.isVariableDeclaration(declaration) && declaration.initializer === holder
+      && ts.isIdentifier(declaration.name) && declaration.name.text === 'require'
+      && !!declaration.parent && (declaration.parent.flags & ts.NodeFlags.Const) !== 0;
+  };
+  const visit = (node, inDoc) => {
+    if (!inDoc && isLoader(node) && !handled.has(node)) specifiers.push(null);
+    if (!inDoc && isCreateRequire(node) && !handled.has(node)) {
+      // Only the callee of `const require = createRequire(...)`; the name
+      // identifier under a member access is judged with the access.
+      const underAccess = ts.isIdentifier(node) && node.parent && isAccess(node.parent) && node.parent.name === node;
+      if (!underAccess) specifiers.push(null);
+    }
+    if (ts.isImportDeclaration(node) && isModuleModule(node.moduleSpecifier) && !readsModuleModule(node)) {
+      specifiers.push(null);
+    } else if ((ts.isImportDeclaration(node) || ts.isExportDeclaration(node)) && node.moduleSpecifier) {
       specifiers.push(literal(node.moduleSpecifier));
     } else if (ts.isImportEqualsDeclaration(node) && ts.isExternalModuleReference(node.moduleReference)) {
       specifiers.push(literal(node.moduleReference.expression));
@@ -72,20 +178,32 @@ export function moduleSpecifiers(text, fileName = 'module.ts') {
       // `declare module "x" { … }` augments that module: a dependency on it.
       specifiers.push(node.name.text);
     } else if (ts.isCallExpression(node)) {
-      const callee = node.expression;
+      // A wrapper that changes nothing at runtime — parentheses, a type
+      // assertion, `as`, `satisfies`, a non-null `!` — is stripped from the
+      // callee.
+      const callee = ts.skipOuterExpressions(node.expression);
       // `import(...)`, and the phase forms `import.defer(...)` / `import.source(...)`
       // (a MetaProperty on the import keyword).
-      const isImport = callee.kind === ts.SyntaxKind.ImportKeyword
-        || (ts.isMetaProperty(callee) && callee.keywordToken === ts.SyntaxKind.ImportKeyword);
-      const isRequire = ts.isIdentifier(callee) && callee.text === 'require';
-      if ((isImport || isRequire) && node.arguments.length > 0) specifiers.push(literal(node.arguments[0]));
+      const isImport = callee.kind === ts.SyntaxKind.ImportKeyword || isImportMeta(callee);
+      if (isCreateRequire(callee) && bindsRequire(node)) {
+        handled.add(callee);
+      } else if (isLoader(callee)) {
+        handled.add(callee);
+        if (isAccess(callee)) handled.add(ts.skipOuterExpressions(callee.expression));
+        // A computed member may or may not be the loader: unreadable, as is
+        // a load of the module that makes loaders.
+        if ((isAccess(callee) && memberName(callee) === null) || isModuleModule(node.arguments[0])) specifiers.push(null);
+        else specifiers.push(literal(node.arguments[0]));
+      } else if (isImport && node.arguments.length > 0) {
+        specifiers.push(isModuleModule(node.arguments[0]) ? null : literal(node.arguments[0]));
+      }
     }
     // JSDoc is not part of the child walk; its type expressions can carry
     // import types too.
-    for (const doc of node.jsDoc ?? []) ts.forEachChild(doc, visit);
-    ts.forEachChild(node, visit);
+    for (const doc of node.jsDoc ?? []) ts.forEachChild(doc, (child) => visit(child, true));
+    ts.forEachChild(node, (child) => visit(child, inDoc));
   };
-  visit(source);
+  visit(source, false);
   // TypeScript keeps several dependency forms outside the node tree: the
   // triple-slash directives `/// <reference path="…" />`, `/// <reference
   // types="…" />`, and `/// <amd-dependency path="…" />`, and the
@@ -103,113 +221,201 @@ export function moduleSpecifiers(text, fileName = 'module.ts') {
   return specifiers;
 }
 
-// Every tsconfig under a package, at any depth, carries dependency fields.
-export function scansTsconfig(path) {
-  return /^packages\/[^/]+\/(?:.*\/)?tsconfig[^/]*\.json$/.test(path);
+// The JSON files under a package the compiler would read as a project: a
+// tsconfig*.json or jsconfig*.json by name, and any other JSON whose object
+// carries a project field — `tsc -p config/build.json` accepts any name, so
+// the name alone cannot decide. The manifest is read separately.
+const projectFields = ['compilerOptions', 'extends', 'references', 'files', 'include', 'typeAcquisition'];
+export function isProjectConfig(path, text) {
+  if (!/^packages\/[^/]+\/.+\.json$/.test(path) || basename(path) === 'package.json') return false;
+  if (/^(?:tsconfig|jsconfig)[^/]*\.json$/.test(basename(path))) return true;
+  const { config } = ts.readConfigFile(path, () => text);
+  return !!config && typeof config === 'object' && !Array.isArray(config)
+    && projectFields.some((field) => field in config);
 }
 
-// The fields of a tsconfig that can name a module or a path, and so a
-// dependency: `compilerOptions.jsxImportSource` (the compiler emits an import
-// of `<source>/jsx-runtime` into every JSX file with no pragma of its own),
-// `types`, `typeRoots`, `paths` targets, `baseUrl`, `rootDirs`, and
-// `plugins[].name`; `typeAcquisition.include`; project `references[].path`;
-// `extends`; and `include`/`files`. This list is the claim: a field outside
-// it is not a resolver field the scan knows about.
-// Each candidate carries the directory a relative value resolves against:
-// `paths` targets resolve against `baseUrl` when it is set (that is how the
-// compiler resolves them), everything else against the config's directory.
-function tsconfigCandidates(config, configDir) {
-  const options = config?.compilerOptions ?? {};
-  const pathsBase = options.baseUrl && configDir ? resolve(configDir, options.baseUrl) : configDir;
-  const from = (base, values) =>
-    [].concat(values ?? []).filter((value) => typeof value === 'string' && value.length > 0).map((value) => ({ value, base }));
-  return [
-    ...from(configDir, options.jsxImportSource),
-    ...from(configDir, options.types),
-    ...from(configDir, options.typeRoots),
-    ...from(pathsBase, Object.values(options.paths ?? {}).flat()),
-    ...from(configDir, options.baseUrl),
-    ...from(configDir, options.rootDirs),
-    ...from(configDir, [].concat(options.plugins ?? []).map((plugin) => plugin?.name)),
-    ...from(configDir, config?.typeAcquisition?.include),
-    ...from(configDir, [].concat(config?.references ?? []).map((ref) => ref?.path)),
-    ...from(configDir, config?.extends),
-    ...from(configDir, config?.include),
-    ...from(configDir, config?.files),
-  ];
+const realpathOf = (path, host) => (typeof host.realpath === 'function' ? host.realpath(path) : path);
+
+// A project config as the compiler reads it: the effective options after
+// every `extends` is resolved the way the compiler resolves one (relative,
+// absolute, extensionless, a package name through its exports, a `#alias`
+// through the owner's imports, the owner's own name) and every `${configDir}`
+// is expanded, with path options made absolute; the list of every inherited
+// config, real paths; and the diagnostics. The only diagnostic ignored is
+// "no inputs were found" (TS18003): a project that compiles nothing depends
+// on nothing through its inputs. `host` is the filesystem the compiler reads
+// (the real one; the spec injects a fake).
+export function parseProjectConfig(text, { file, host = ts.sys } = {}) {
+  const source = ts.parseJsonText(file, text);
+  const parsed = ts.parseJsonSourceFileConfigFileContent(source, host, dirname(file), undefined, file);
+  const message = (d) => `TS${d.code} ${ts.flattenDiagnosticMessageText(d.messageText, ' ')}`;
+  const diagnostics = [...source.parseDiagnostics, ...parsed.errors.filter((d) => d.code !== 18003)].map(message);
+  const extended = (source.extendedSourceFiles ?? []).map((path) => realpathOf(path, host));
+  return { parsed, diagnostics, extended };
 }
 
-const readConfigText = (absolute) => {
-  try {
-    return readFileSync(absolute, 'utf8');
-  } catch {
-    return null;
+// A package directory is "reached" by a path when the path is that directory
+// or lies under it; a path that is `packages/` itself or above it reaches
+// every package at once.
+function reachesEveryPackage(absolute, repoRoot) {
+  const rel = relative(absolute, join(repoRoot, 'packages'));
+  return rel === '' || (!rel.startsWith('..') && !isAbsolute(rel));
+}
+
+// The packages a project config makes its package depend on, and the
+// effective compiler options for resolving that package's imports. Every
+// inherited base is a dependency when it lies in a sibling package. Names
+// (`jsxImportSource`, `types`, `plugins[].name`, `typeAcquisition.include`)
+// count by `@obversa/...` name or as a path; each `types` entry is also
+// placed under every explicit `typeRoots` directory, as the compiler looks it
+// up. `baseUrl`, each `paths` target (its literal prefix before the
+// wildcard, from the directory the compiler substitutes it in), each
+// `rootDirs` and `typeRoots` directory, each project reference, each input
+// file, and each directory an `include` pattern walks are placed — by their
+// real path, so a symlink outside every package that points into one is
+// seen where it lands — by the package directory they lie in: the owner is
+// nothing, a sibling is an arrow, and `packages/` or above is refused — such
+// a value lets a bare specifier, a wildcard substitution, or a glob land in
+// any package. A config with a diagnostic is refused whole.
+export function projectConfig(text, { file, root: repoRoot, host = ts.sys } = {}) {
+  const { parsed, diagnostics, extended } = parseProjectConfig(text, { file, host });
+  if (diagnostics.length > 0)
+    return { dependencies: [refusal(`the config cannot be read as the compiler reads it: ${diagnostics.join('; ')}`)], options: parsed.options };
+  const configDir = dirname(file);
+  const dependencies = [];
+  const place = (named, what) => {
+    const placed = placement(named, { file, root: repoRoot, host, what });
+    if (placed) dependencies.push(placed);
+  };
+  const byName = (value, what) => {
+    if (typeof value !== 'string' || value.length === 0) return;
+    if (value.startsWith('@obversa/')) dependencies.push(value.split('/').slice(0, 2).join('/'));
+    else if (/^\.\.?\//.test(value) || isAbsolute(value)) place(resolve(configDir, value), what);
+  };
+  const { options } = parsed;
+  for (const base of extended) place(base, 'extends');
+  byName(options.jsxImportSource, 'jsxImportSource');
+  for (const name of options.types ?? []) {
+    byName(name, 'types');
+    for (const typeRoot of options.typeRoots ?? []) place(join(typeRoot, name), 'types');
   }
-};
+  for (const plugin of options.plugins ?? []) byName(plugin?.name, 'plugins');
+  for (const name of parsed.typeAcquisition?.include ?? []) byName(name, 'typeAcquisition.include');
+  if (options.baseUrl) place(options.baseUrl, 'baseUrl');
+  // The compiler substitutes a `paths` target against `baseUrl` when it is
+  // set, else against the directory of the config that declared `paths`.
+  const pathsBase = options.baseUrl ?? options.pathsBasePath ?? configDir;
+  for (const [alias, targets] of Object.entries(options.paths ?? {})) {
+    for (const target of targets) place(resolve(pathsBase, target.split('*')[0]), `paths target ${target} for ${alias}`);
+  }
+  for (const dir of options.rootDirs ?? []) place(dir, 'rootDirs');
+  for (const dir of options.typeRoots ?? []) place(dir, 'typeRoots');
+  for (const ref of parsed.projectReferences ?? []) place(ref.path, 'references');
+  for (const name of parsed.fileNames) place(name, 'files');
+  for (const dir of Object.keys(parsed.wildcardDirectories ?? {})) place(dir, 'include');
+  return { dependencies, options };
+}
 
-// The packages a tsconfig makes its package depend on, through every field
-// in tsconfigCandidates, and through every config it extends: a same-package
-// base can carry the field, so a relative `extends` is read and its own
-// dependencies added, recursively, with a cycle guard. A `@obversa/...` name
-// counts by name; a relative path counts when it resolves into another
-// package's directory (a glob by its literal prefix). A base that cannot be
-// read is reported as the sentinel `@obversa/<unreadable-extends>`, so the
-// scan fails closed on it. Read with the compiler's own reader, so comments
-// and trailing commas parse. `file` is the tsconfig's absolute path and
-// `root` the repository root; without them only names are reported. `read`
-// is how an extended config is loaded (the spec injects one).
-export function tsconfigDependencies(text, { file, root: repoRoot, read = readConfigText, seen = new Set() } = {}) {
-  const { config } = ts.readConfigFile(file ?? 'tsconfig.json', () => text);
+export function tsconfigDependencies(text, at) {
+  return projectConfig(text, at).dependencies;
+}
+
+// A registry version range as pnpm reads one: comparator sets joined by
+// `||`, each a run of comparators (`^1.2.3`, `>=0.1.0 <0.2.0`, `1.x`, `*`)
+// or a hyphen range. A tag, a URL, a Git spec, a path, or anything else the
+// registry does not answer with a versioned package is not one.
+const comparator = /^(?:[<>]=?|=|\^|~)?v?(?:\d+|x|X|\*)(?:\.(?:\d+|x|X|\*)){0,2}(?:-[\w.-]+)?(?:\+[\w.-]+)?$/;
+export function isVersionRange(value) {
+  return value.trim().split(/\s*\|\|\s*/).every((set) => {
+    const tokens = set.trim().split(/\s+/);
+    if (tokens.length === 3 && tokens[1] === '-') return comparator.test(tokens[0]) && comparator.test(tokens[2]);
+    return tokens.every((token) => comparator.test(token));
+  });
+}
+
+// What a dependency value installs. `name`: a workspace package, by key
+// (`@obversa/x`) or by an alias whose value installs one under another name
+// — `npm:@obversa/x@…`, `workspace:@obversa/x@…`, or `workspace:<path>`,
+// which pnpm links to the workspace package at that path, placed by the
+// package directory it lands in. `external`: a registry range, an
+// `npm:<name>@<range>` alias of a registry package, or a `workspace:` range
+// for the key's own name. Anything else — a path, a URL, a Git spec, a
+// tag, a catalog entry — is a refusal: the scan cannot say what it installs.
+// `file` is the manifest's absolute path and `root` the repository root.
+export function dependencyTarget(key, spec, { file, root: repoRoot } = {}) {
+  const value = String(spec);
+  const alias = /^(?:npm|workspace):(@obversa\/[^@/]+)(?:@.*)?$/.exec(value);
+  if (alias) return { name: alias[1] };
+  const linked = /^workspace:(\.{1,2}\/.*|\/.*)$/.exec(value);
+  if (linked) {
+    const dir = file && repoRoot ? packageDirOf(realpathOf(resolve(dirname(file), linked[1]), ts.sys), repoRoot) : undefined;
+    return dir !== undefined ? { name: `@obversa/${dir}` } : { refused: `${key} links ${linked[1]}, which is not a workspace package the scan can place` };
+  }
+  if (key.startsWith('@obversa/')) {
+    if (/^workspace:(?:[\^~*]|.+)$/.test(value) && (value === 'workspace:^' || value === 'workspace:~' || value === 'workspace:*' || isVersionRange(value.slice('workspace:'.length))))
+      return { name: key };
+    if (isVersionRange(value)) return { name: key };
+    return { refused: `${key} is ${value}, which is not a workspace range the scan can read` };
+  }
+  if (isVersionRange(value)) return { external: true };
+  const npmAlias = /^npm:((?:@[^@/]+\/)?[^@/]+)(?:@(.+))?$/.exec(value);
+  if (npmAlias && !npmAlias[1].startsWith('@obversa/') && (npmAlias[2] === undefined || isVersionRange(npmAlias[2]))) return { external: true };
+  return { refused: `${key} is ${value}, which is not a registry version the scan can read` };
+}
+
+// The workspace packages a manifest field names, sorted and unique; a value
+// the scan cannot read is a refusal entry.
+export function internalDependencies(manifest, field, at = {}) {
+  const found = new Set();
+  for (const [key, spec] of Object.entries(manifest?.[field] ?? {})) {
+    const target = dependencyTarget(key, spec, at);
+    if (target.name) found.add(target.name);
+    else if (target.refused) found.add(refusal(`${field} ${target.refused}`));
+  }
+  return [...found].sort();
+}
+
+// Every path a manifest's own entry fields name: `main`, `module`,
+// `browser` (a string or a map), `types` / `typings`, `typesVersions`
+// (ranges of patterns of paths), `exports` leaves, `directories`, and
+// `publishConfig.directory` — a loader, the compiler, or a bundler follows
+// each, so each is placed by the package directory its real path lies in;
+// a sibling is an arrow, and `packages/` or above is refused.
+export function manifestPathTargets(manifest, { file, root: repoRoot, host = ts.sys } = {}) {
+  const leaves = (value) => {
+    if (typeof value === 'string') return [value];
+    if (Array.isArray(value)) return value.flatMap(leaves);
+    if (value && typeof value === 'object') return Object.values(value).flatMap(leaves);
+    return [];
+  };
+  const fields = ['main', 'module', 'browser', 'types', 'typings', 'typesVersions', 'exports', 'directories'];
+  const values = fields.flatMap((field) => leaves(manifest?.[field]).map((value) => [field, value]));
+  if (typeof manifest?.publishConfig?.directory === 'string') values.push(['publishConfig.directory', manifest.publishConfig.directory]);
   const found = [];
-  const configDir = file ? dirname(file) : undefined;
-  for (const { value, base } of tsconfigCandidates(config, configDir)) {
+  for (const [field, value] of values) {
     if (value.startsWith('@obversa/')) {
       found.push(value.split('/').slice(0, 2).join('/'));
       continue;
     }
-    // Any other value is a path — relative to its base, or absolute — whose
-    // literal prefix (before any glob) may land in another package.
-    if (!file || !repoRoot || !base) continue;
-    const target = resolve(base, value.split(/[*?]/)[0]);
-    const dir = packageDirOf(target, repoRoot);
-    if (dir && dir !== packageDirOf(file, repoRoot)) found.push(`@obversa/${dir}`);
-  }
-  if (file) {
-    seen.add(file);
-    for (const parent of [].concat(config?.extends ?? [])) {
-      // A relative or an absolute parent is a file to inherit from; a bare
-      // name is an installed package and is not read.
-      if (typeof parent !== 'string' || !(/^\.\.?\//.test(parent) || isAbsolute(parent))) continue;
-      const named = resolve(dirname(file), parent);
-      // A base in another package is a crossing in itself, reported above;
-      // only a base of this package, or one outside every package (the
-      // repository's shared base), is inherited and read.
-      const baseDir = repoRoot ? packageDirOf(named, repoRoot) : undefined;
-      if (baseDir && baseDir !== packageDirOf(file, repoRoot)) continue;
-      // The compiler probes the name as written, then with `.json` appended.
-      let absolute = named;
-      let parentText = read(absolute);
-      if (parentText === null && !named.endsWith('.json')) {
-        absolute = `${named}.json`;
-        parentText = read(absolute);
-      }
-      if (seen.has(absolute)) continue;
-      seen.add(absolute);
-      if (parentText === null) {
-        found.push('@obversa/<unreadable-extends>');
-        continue;
-      }
-      found.push(...tsconfigDependencies(parentText, { file: absolute, root: repoRoot, read, seen }));
-    }
+    // A bare package name (`browser: { fs: "browserify-fs" }`) is not a path.
+    if (!/^(?:\.|\/|~)/.test(value) && !value.includes('/')) continue;
+    const placed = placement(resolve(dirname(file), value.split(/[*?]/)[0]), { file, root: repoRoot, host, what: field });
+    if (placed) found.push(placed);
   }
   return found;
 }
 
-// The sibling packages a manifest's devDependencies name. A workspace
-// devDependency installs a sibling invisibly, so it goes through the allowed
-// set like any other arrow.
-export function internalDevDependencies(manifest) {
-  return Object.keys(manifest?.devDependencies ?? {}).filter((name) => name.startsWith('@obversa/')).sort();
+// Where an absolute path lies, relative to the package that owns `file`:
+// undefined for the owner (or for a place that is no package at all), the
+// sibling's name for a sibling, and a refusal for `packages/` or above —
+// a place that holds every package. Real paths are compared, so a symlink
+// outside every package that points into one is seen where it lands.
+function placement(named, { file, root: repoRoot, host = ts.sys, what }) {
+  const absolute = realpathOf(named, host);
+  if (reachesEveryPackage(absolute, repoRoot))
+    return refusal(`${what} reaches ${relative(repoRoot, absolute) || '.'}, which holds every package`);
+  const dir = packageDirOf(absolute, repoRoot);
+  return dir !== undefined && dir !== packageDirOf(file, repoRoot) ? `@obversa/${dir}` : undefined;
 }
 
 // The packages a manifest's `imports` map (`#alias`) can reach. Node resolves
@@ -267,23 +473,61 @@ export async function walkTree(directory, { ignored = ignoredDirectories } = {})
   return { files, symlinks };
 }
 
+// Where the compiler lands a specifier from a file under one set of options:
+// as a module and as a type reference directive, and under both module
+// formats when the resolution kind tells them apart (Node16 / NodeNext).
+function resolvedTargets(specifier, file, options, host) {
+  const byFormat = options.moduleResolution === ts.ModuleResolutionKind.Node16
+    || options.moduleResolution === ts.ModuleResolutionKind.NodeNext;
+  const modes = byFormat ? [ts.ModuleKind.ESNext, ts.ModuleKind.CommonJS] : [undefined];
+  const targets = [];
+  for (const mode of modes) {
+    const module = ts.resolveModuleName(specifier, file, options, host, undefined, undefined, mode).resolvedModule;
+    if (module) targets.push(module.resolvedFileName);
+    const directive = ts.resolveTypeReferenceDirective(specifier, file, options, host, undefined, undefined, mode).resolvedTypeReferenceDirective;
+    if (directive?.resolvedFileName) targets.push(directive.resolvedFileName);
+  }
+  return targets;
+}
+
 // The workspace packages a file depends on: `@obversa/...` specifiers by name,
-// and relative paths that resolve into another `packages/<dir>/` (a path inside
-// the importing package is not a crossing). A computed specifier is reported
-// as the sentinel `@obversa/<computed>` so the caller fails closed on it.
-// `file` is the importing file's absolute path and `root` the repository root;
-// without them only package-name specifiers are reported. Package directory
-// names equal the unscoped package names today; the plugin split maps
-// directories through their manifests.
-export function extractObversaImports(text, { file, root: repoRoot } = {}) {
+// relative paths that resolve into another `packages/<dir>/` (a path inside
+// the importing package is not a crossing), and — under each project config
+// the package carries (`configs`, their effective compiler options) — the
+// file the compiler itself resolves the specifier to, by the package
+// directory its real path lies in. That last answer is what closes every
+// alias route: a `paths` wildcard whose substitution walks out of the
+// package, a `baseUrl` that lands elsewhere, a mapping inherited from a base.
+// A computed specifier is reported as a refusal so the caller fails closed.
+// `file` is the importing file's absolute path and `root` the repository
+// root; without them only package-name specifiers are reported. Package
+// directory names equal the unscoped package names today; the plugin split
+// maps directories through their manifests.
+export function extractObversaImports(text, { file, root: repoRoot, configs = [], host = ts.sys } = {}) {
   const found = [];
+  const owner = file && repoRoot ? packageDirOf(file, repoRoot) : undefined;
   for (const specifier of moduleSpecifiers(text, file ?? 'module.ts')) {
     if (specifier === null) {
-      found.push('@obversa/<computed>');
+      found.push(refusal('a computed module reference cannot be checked; use a plain string'));
       continue;
     }
+    const named = new Set();
     const crossing = crossingPackage(specifier, { file, root: repoRoot });
-    if (crossing) found.push(crossing);
+    if (crossing) {
+      found.push(crossing);
+      named.add(crossing);
+    }
+    if (!file || !repoRoot) continue;
+    for (const options of configs) {
+      for (const target of resolvedTargets(specifier, file, options, host)) {
+        const dir = packageDirOf(realpathOf(target, host), repoRoot);
+        if (dir === undefined || dir === owner) continue;
+        const name = `@obversa/${dir}`;
+        if (named.has(name)) continue;
+        named.add(name);
+        found.push(name);
+      }
+    }
   }
   return found;
 }
@@ -294,30 +538,55 @@ const isMain = process.argv[1] && realpathSync(fileURLToPath(import.meta.url)) =
 if (isMain) await main();
 
 async function main() {
+// A package's scripts run whatever they say, from the package directory: a
+// script can compile, load, or preload a sibling's files through the shell,
+// the compiler, or Node without naming an import anywhere the scan reads.
+// Rather than read the shell, each package's scripts are pinned here
+// verbatim, and any change — a new script, a changed one, a removed one —
+// fails until this rule is reviewed with it.
+const runtimeScripts = {
+  build: 'tsup && tsc -p tsconfig.build.json',
+  test: 'vitest run',
+  typecheck: 'tsc --noEmit -p tsconfig.json',
+  'typecheck:ts6': 'tsc6 --noEmit -p tsconfig.json',
+  prepack: 'pnpm run build',
+  prepublishOnly: 'node ../../scripts/check-publish-allowlist.mjs',
+};
 const packageRules = new Map([
   ['@obversa/lines', {
     version: '1.0.0',
     dependencies: [],
     peerDependencies: ['@obversa/memory'],
     peerDependencyVersions: { '@obversa/memory': '>=0.1.0 <0.2.0' },
+    scripts: {
+      build: 'tsup && tsc -p tsconfig.build.json',
+      typecheck: 'tsc --noEmit',
+      'typecheck:ts6': 'tsc6 --noEmit',
+      test: 'vitest run',
+      'test:watch': 'vitest',
+      prepack: 'pnpm run build',
+      prepublishOnly: 'node ../../scripts/check-publish-allowlist.mjs',
+    },
   }],
-  ['@obversa/memory', { version: '0.1.0', dependencies: [], peerDependencies: [] }],
+  ['@obversa/memory', { version: '0.1.0', dependencies: [], peerDependencies: [], scripts: runtimeScripts }],
   ['@obversa/memory-simple', {
     version: '0.1.0',
     dependencies: ['@obversa/memory'],
     peerDependencies: [],
+    scripts: runtimeScripts,
   }],
   ['@obversa/memory-git', {
     version: '0.1.0',
     dependencies: ['@obversa/memory'],
     peerDependencies: [],
+    scripts: runtimeScripts,
   }],
   // Private workspace packages get a rule too, so a sibling import inside
   // them is caught the same way. Surfacer must never depend on the runtime or
   // another package; source must never import surfacer (it takes the surface
   // port by injection from the host composition root).
-  ['@obversa/surfacer', { version: '0.1.0', private: true, dependencies: [], peerDependencies: [] }],
-  ['@obversa/source', { version: '0.1.0', private: true, dependencies: [], peerDependencies: [] }],
+  ['@obversa/surfacer', { version: '0.1.0', private: true, dependencies: [], peerDependencies: [], scripts: { test: 'node --test test/*.test.mjs' } }],
+  ['@obversa/source', { version: '0.1.0', private: true, dependencies: [], peerDependencies: [], scripts: { test: 'node --test test/*.test.mjs' } }],
 ]);
 const scanRoots = [
   '.changeset',
@@ -385,6 +654,19 @@ const forbidden = [
 
 const failures = [];
 
+// The arrows a package may draw: itself, its dependencies, its peers. A
+// dependency list from any scan goes through this; a refusal is printed as
+// its reason.
+const checkArrows = (path, owner, dependencies) => {
+  const ownerName = `@obversa/${owner}`;
+  const rule = packageRules.get(ownerName);
+  const allowed = new Set([ownerName, ...(rule?.dependencies ?? []), ...(rule?.peerDependencies ?? [])]);
+  for (const dependency of dependencies) {
+    if (isRefusal(dependency)) failures.push(`${path}: ${refusalReason(dependency)}`);
+    else if (!allowed.has(dependency)) failures.push(`${path}: ${ownerName} must not import ${dependency}`);
+  }
+};
+
 for (const path of requiredScanRoots) {
   if (!scanRoots.includes(path)) failures.push(`boundary scan must include ${path}/`);
 }
@@ -396,19 +678,54 @@ for (const path of ['.claude/', '.Codex/', '.superpowers/']) {
   if (!gitignore.includes(path)) failures.push(`.gitignore: must ignore ${path}`);
 }
 
-// Every workspace package must have a rule: a new package that nobody listed
-// would otherwise import whatever it liked without the scan noticing.
+// Every directory under packages/ is a workspace package with a rule of its
+// own, named for its directory: a package nobody listed would otherwise
+// import whatever it liked, and a directory claiming a listed name would
+// be taken for the package the rules read at packages/<unscoped name>.
 for (const entry of await readdir(join(root, 'packages'), { withFileTypes: true })) {
   if (!entry.isDirectory()) continue;
   const manifestPath = join(root, 'packages', entry.name, 'package.json');
-  if (!(await exists(manifestPath))) continue;
+  if (!(await exists(manifestPath))) {
+    failures.push(`packages/${entry.name}: has no package.json; every directory under packages/ is a ruled workspace package`);
+    continue;
+  }
   const manifest = JSON.parse(await readFile(manifestPath, 'utf8'));
-  if (!packageRules.has(manifest.name))
+  if (manifest.name !== `@obversa/${entry.name}`)
+    failures.push(`packages/${entry.name}: is named ${manifest.name}; a package is named @obversa/<its directory>`);
+  else if (!packageRules.has(manifest.name))
     failures.push(`packages/${entry.name}: ${manifest.name} has no boundary rule; add one to packageRules`);
 }
 
+const files = [];
+const scannedTextFiles = new Set();
+for (const path of scanRoots) {
+  const absolute = join(root, path);
+  if (await exists(absolute)) await walk(absolute, files);
+}
+for (const path of scanFiles) {
+  const absolute = join(root, path);
+  if (await exists(absolute)) files.push(absolute);
+}
+
+// Every project config under a package, read as the compiler reads it: its
+// dependencies are checked here, and its effective options resolve that
+// package's imports below.
+const projectConfigs = new Map(); // package dir -> [{ absolute, options }]
+for (const absolute of files) {
+  const path = relative(root, absolute).split('\\').join('/');
+  if (extname(absolute) !== '.json') continue;
+  const text = await readFile(absolute, 'utf8');
+  if (!isProjectConfig(path, text)) continue;
+  const owner = path.split('/')[1];
+  const { dependencies, options } = projectConfig(text, { file: absolute, root });
+  checkArrows(path, owner, dependencies);
+  if (!projectConfigs.has(owner)) projectConfigs.set(owner, []);
+  projectConfigs.get(owner).push({ absolute, options });
+}
+
 for (const [name, rule] of packageRules) {
-  const directory = join(root, 'packages', name.slice('@obversa/'.length));
+  const owner = name.slice('@obversa/'.length);
+  const directory = join(root, 'packages', owner);
   const manifest = JSON.parse(await readFile(join(directory, 'package.json'), 'utf8'));
   if (manifest.name !== name) failures.push(`${name}: manifest name is ${manifest.name}`);
   if (manifest.version !== rule.version)
@@ -420,13 +737,16 @@ for (const [name, rule] of packageRules) {
   }
   if (manifest.bin !== undefined) failures.push(`${name}: D1 must not expose a command`);
 
-  const internal = Object.entries({
-    ...manifest.dependencies,
-    ...manifest.optionalDependencies,
-  })
-    .filter(([dependency]) => dependency.startsWith('@obversa/'))
-    .map(([dependency]) => dependency)
-    .sort();
+  // A sibling is named by key, or installed under an alias by value
+  // (`npm:@obversa/x`, `workspace:@obversa/x`, `workspace:../x`); both are
+  // the same arrow. A refusal is a value the scan could not read: a path, a
+  // URL, a Git spec, a tag, a catalog entry.
+  const manifestAt = { file: join(directory, 'package.json'), root };
+  const named = (field) => internalDependencies(manifest, field, manifestAt).filter((dependency) => {
+    if (isRefusal(dependency)) failures.push(`${name}: ${refusalReason(dependency)}`);
+    return !isRefusal(dependency);
+  });
+  const internal = [...new Set([...named('dependencies'), ...named('optionalDependencies')])].sort();
   const expected = [...rule.dependencies].sort();
   if (JSON.stringify(internal) !== JSON.stringify(expected)) {
     failures.push(
@@ -434,9 +754,7 @@ for (const [name, rule] of packageRules) {
     );
   }
 
-  const peers = Object.keys(manifest.peerDependencies ?? {})
-    .filter((dependency) => dependency.startsWith('@obversa/'))
-    .sort();
+  const peers = named('peerDependencies');
   const expectedPeers = [...rule.peerDependencies].sort();
   if (JSON.stringify(peers) !== JSON.stringify(expectedPeers)) {
     failures.push(
@@ -446,7 +764,7 @@ for (const [name, rule] of packageRules) {
   // A workspace devDependency and a package `imports` alias are arrows too:
   // both go through the same allowed set as an import in source.
   const allowedArrows = new Set([...rule.dependencies, ...rule.peerDependencies]);
-  for (const dependency of internalDevDependencies(manifest)) {
+  for (const dependency of named('devDependencies')) {
     if (!allowedArrows.has(dependency)) failures.push(`${name}: devDependencies must not name ${dependency}`);
   }
   // An `imports` alias may point at the package itself (a self-reference),
@@ -466,16 +784,38 @@ for (const [name, rule] of packageRules) {
     }
   }
 
-  for (const value of Object.values({
-    ...manifest.dependencies,
-    ...manifest.devDependencies,
-    ...manifest.peerDependencies,
-    ...manifest.optionalDependencies,
-  })) {
-    if (/^(?:file|link|git|https?):/i.test(String(value)))
-      failures.push(`${name}: dependency ${value} is not registry-safe`);
+  // The manifest's own entry fields are followed by a loader, the compiler,
+  // or a bundler: each is placed like an import.
+  checkArrows(`packages/${owner}/package.json`, owner, manifestPathTargets(manifest, manifestAt));
+
+  // The scripts are exactly the pinned ones.
+  const scripts = manifest.scripts ?? {};
+  for (const scriptName of new Set([...Object.keys(scripts), ...Object.keys(rule.scripts)])) {
+    if (scripts[scriptName] !== rule.scripts[scriptName])
+      failures.push(`${name}: script ${scriptName} must be ${JSON.stringify(rule.scripts[scriptName]) ?? 'absent'}; found ${JSON.stringify(scripts[scriptName]) ?? 'absent'}. Scripts are pinned in packageRules; review the boundary rule with any change`);
   }
 }
+
+// The root manifest can rewrite what any package installs: an override or
+// a resolution that names a workspace package, or a path, would route a
+// dependency into a sibling behind every rule above, so each must be a
+// registry range or a registry alias. pnpm reads the same settings
+// (`overrides`, `catalog`, `catalogs`, `packageExtensions`,
+// `patchedDependencies`) from pnpm-workspace.yaml too, and the scan does
+// not read YAML, so that file is pinned verbatim, as the scripts are.
+const rootManifest = JSON.parse(await readFile(join(root, 'package.json'), 'utf8'));
+for (const field of ['overrides', 'resolutions']) {
+  for (const [key, spec] of Object.entries({ ...rootManifest[field], ...rootManifest.pnpm?.[field] })) {
+    const target = dependencyTarget(key, spec, { file: join(root, 'package.json'), root });
+    if (!target.external) failures.push(`package.json: ${field} ${key} is ${spec}; an override must be a registry version`);
+  }
+}
+for (const field of ['packageExtensions', 'patchedDependencies']) {
+  if (rootManifest.pnpm?.[field] !== undefined) failures.push(`package.json: pnpm.${field} rewrites what packages install, which the scan does not read`);
+}
+const workspaceFile = await readFile(join(root, 'pnpm-workspace.yaml'), 'utf8');
+if (workspaceFile !== 'packages:\n  - packages/*\n')
+  failures.push('pnpm-workspace.yaml: must be exactly the packages glob (pinned here; review the boundary rule with any change)');
 
 for (const path of [
   'packages/lines/src/cli.ts',
@@ -505,17 +845,6 @@ for (const path of [
   if (await containsFile(absolute)) failures.push(`${path}: retired D1 surface remains`);
 }
 
-const files = [];
-const scannedTextFiles = new Set();
-for (const path of scanRoots) {
-  const absolute = join(root, path);
-  if (await exists(absolute)) await walk(absolute, files);
-}
-for (const path of scanFiles) {
-  const absolute = join(root, path);
-  if (await exists(absolute)) files.push(absolute);
-}
-
 for (const absolute of files) {
   const path = relative(root, absolute);
   if (
@@ -541,27 +870,12 @@ for (const absolute of files) {
   }
 
   // Import scan covers every source form in the workspace: the runtime is
-  // TypeScript, the surface packages are plain ES modules.
-  // A package tsconfig can name a dependency for every file at once.
-  const tsconfigDeps = scansTsconfig(path) ? tsconfigDependencies(text, { file: absolute, root }) : [];
-  if (scansImports(path) || tsconfigDeps.length > 0) {
+  // TypeScript, the surface packages are plain ES modules. Each specifier is
+  // also resolved under every project config its package carries.
+  if (scansImports(path)) {
     const owner = path.split('/')[1];
-    const imports = scansImports(path) ? extractObversaImports(text, { file: absolute, root }) : tsconfigDeps;
-    const ownerName = `@obversa/${owner}`;
-    const ownerRule = packageRules.get(ownerName);
-    const allowed = new Set([
-      ownerName,
-      ...(ownerRule?.dependencies ?? []),
-      ...(ownerRule?.peerDependencies ?? []),
-    ]);
-    for (const dependency of imports) {
-      if (dependency === '@obversa/<computed>')
-        failures.push(`${path}: a computed module specifier cannot be checked; use a plain string`);
-      else if (dependency === '@obversa/<unreadable-extends>')
-        failures.push(`${path}: a config it extends could not be read, so its dependencies cannot be checked`);
-      else if (!allowed.has(dependency))
-        failures.push(`${path}: ${ownerName} must not import ${dependency}`);
-    }
+    const configs = (projectConfigs.get(owner) ?? []).map((config) => config.options);
+    checkArrows(path, owner, extractObversaImports(text, { file: absolute, root, configs }));
   }
 }
 
