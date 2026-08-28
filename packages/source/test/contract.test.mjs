@@ -178,6 +178,16 @@ test("isSurfaceRequest guards the shape", () => {
   const noSubject = makeRequest([]);
   delete noSubject.subject;
   assert.equal(isSurfaceRequest(noSubject), false);
+  // Whitespace-only values are absent: they can neither route nor render.
+  const ok = makeRequest([]);
+  assert.equal(isSurfaceRequest(ok), true);
+  assert.equal(isSurfaceRequest({ ...ok, surfaceId: "   " }), false);
+  assert.equal(isSurfaceRequest({ ...ok, gateId: " ", callback: live }), false);
+  assert.equal(isSurfaceRequest({ ...ok, callback: { address: "  ", token: "t" } }), false);
+  assert.equal(isSurfaceRequest({ ...ok, callback: { address: live.address, token: "\t" } }), false);
+  assert.equal(isSurfaceRequest({ ...ok, kind: { family: "output", renderer: " " } }), false);
+  assert.equal(isSurfaceRequest({ ...ok, subject: { ref: " ", fetch: "/api/model" } }), false);
+  assert.equal(isSurfaceRequest({ ...ok, subject: { ref: "worktree", fetch: "   " } }), false);
   assert.equal(isSurfaceRequest({ ...makeRequest([]), kind: { family: "bogus" } }), false);
   assert.equal(isSurfaceRequest({ ...makeRequest([]), surfaceId: 5 }), false);
   const noAnchors = makeRequest([]);

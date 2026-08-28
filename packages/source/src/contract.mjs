@@ -176,10 +176,11 @@ export function normalizeResult(raw, request) {
  * it catches the shape errors that would otherwise fail deep inside a renderer,
  * where the cause is harder to see.
  */
-// A non-empty string, the only acceptable form for an id, an address, or a
-// token that is present.
+// A string with visible content, the only acceptable form for an id, an
+// address, a token, a renderer, a ref, or a fetch URL that is present. A
+// whitespace-only value could neither route nor render, so it is absent.
 function isPresent(value) {
-  return typeof value === "string" && value.length > 0;
+  return typeof value === "string" && value.trim().length > 0;
 }
 
 /**

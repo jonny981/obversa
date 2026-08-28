@@ -212,8 +212,10 @@ export async function reviewDiff({
     // out, interrupted — still frames a SurfaceResult carrying the surface and
     // gate ids and a "cancelled" / "timed-out" decision, so a gate can route
     // the outcome.
+    // The outcome carries identity fields (a gate id can look like a token to
+    // the redactor), so it opts in to verbatim like the completed result.
     const terminalPayload = (status) => normalizeResult({ decision: decisionFor(status), annotations: [], meta }, request);
-    const outcome = await launchSurface({ app, assets, api, open, ready, terminalPayload });
+    const outcome = await launchSurface({ app, assets, api, open, ready, terminalPayload, terminalPayloadVerbatim: true });
     const terminal = outcome?.result ?? outcome;
     const status = terminal?.status ?? "unknown";
     // The framed payload is the SurfaceResult itself, whatever the status.

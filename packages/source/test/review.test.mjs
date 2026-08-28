@@ -162,6 +162,8 @@ test("outputAnchors offers every visible line and side; the request is contract-
   bad({ gateId: "g", callback: { address: 8080, token: "t" } });
   bad({ gateId: "g", callback: { address: "http://127.0.0.1:9/cb", token: { v: 1 } } });
   bad({ gateId: null, callback: { address: "http://127.0.0.1:9/cb", token: "t" } });
+  bad({ gateId: "   ", callback: { address: "http://127.0.0.1:9/cb", token: "t" } });
+  bad({ gateId: "g", callback: { address: " ", token: "t" } });
   bad("gate-1");
 });
 

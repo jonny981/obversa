@@ -232,14 +232,18 @@ test("the review surface runs on surfacer and returns annotations", { timeout: 3
   }
 });
 
-test("a cancelled review still frames the surface and gate ids with a cancelled decision", { timeout: 30_000 }, async () => {
+// A gate id shaped like a token: the runtime's redaction would rewrite it, so
+// keeping it exact on every ending proves the review's verbatim opt-in.
+const TOKEN_LIKE_GATE = "ghp_ABCDEFGHIJKLMNOPQRST";
+
+test("a cancelled review still frames the exact surface and gate ids with a cancelled decision", { timeout: 30_000 }, async () => {
   const repo = makeRepoWithChange();
   const stdout = captureStream();
   stdout.release(); // the frame is small; no back-pressure to model here
   let resolveReady;
   const ready = new Promise((resolve) => { resolveReady = resolve; });
   const launchSurface = (options) => runSurface({ ...options, stdout, ready: (info) => resolveReady(info), leaseTimeoutMs: 15_000, sessionTimeoutMs: 25_000 });
-  const gate = { gateId: "gate-42", callback: { address: "http://127.0.0.1:9/cb", token: "t" } };
+  const gate = { gateId: TOKEN_LIKE_GATE, callback: { address: "http://127.0.0.1:9/cb", token: "t" } };
   const reviewPromise = reviewDiff({ mode: "worktree", cwd: repo, launchSurface, clientKitSource, open: false, gate });
   try {
     const { origin, url } = await ready;
@@ -253,15 +257,42 @@ test("a cancelled review still frames the surface and gate ids with a cancelled 
     const outcome = await reviewPromise;
     assert.equal(outcome.status, "cancelled");
     assert.equal(typeof outcome.result.surfaceId, "string");
-    assert.equal(outcome.result.gateId, "gate-42", "the gate binding survives cancellation");
+    assert.equal(outcome.result.gateId, TOKEN_LIKE_GATE, "the exact gate binding survives cancellation, even a token-shaped id");
     assert.equal(outcome.result.decision, "cancelled");
     assert.deepEqual(outcome.result.annotations, []);
     // The framed record carries the same routable outcome for a pipeline consumer.
     const framed = parseFramedResult(stdout.text, "review");
     assert.equal(framed.status, "cancelled");
-    assert.equal(framed.payload.gateId, "gate-42");
+    assert.equal(framed.payload.gateId, TOKEN_LIKE_GATE);
     assert.equal(framed.payload.decision, "cancelled");
     assert.equal(framed.payload.surfaceId, outcome.result.surfaceId);
+  } finally {
+    await reviewPromise.catch(() => {});
+    rmSync(repo, { recursive: true, force: true });
+  }
+});
+
+test("a timed-out review frames the exact gate binding with a timed-out decision", { timeout: 30_000 }, async () => {
+  const repo = makeRepoWithChange();
+  const stdout = captureStream();
+  stdout.release();
+  let resolveReady;
+  const ready = new Promise((resolve) => { resolveReady = resolve; });
+  // A short lease with no heartbeat: the session times out on its own.
+  const launchSurface = (options) => runSurface({ ...options, stdout, ready: (info) => resolveReady(info), leaseTimeoutMs: 400, sessionTimeoutMs: 25_000 });
+  const gate = { gateId: TOKEN_LIKE_GATE, callback: { address: "http://127.0.0.1:9/cb", token: "t" } };
+  const reviewPromise = reviewDiff({ mode: "worktree", cwd: repo, launchSurface, clientKitSource, open: false, gate });
+  try {
+    await ready;
+    const outcome = await reviewPromise;
+    assert.equal(outcome.status, "timed_out");
+    assert.equal(outcome.result.gateId, TOKEN_LIKE_GATE, "the exact gate binding survives a timeout");
+    assert.equal(outcome.result.decision, "timed-out");
+    assert.deepEqual(outcome.result.annotations, []);
+    const framed = parseFramedResult(stdout.text, "review");
+    assert.equal(framed.status, "timed_out");
+    assert.equal(framed.payload.gateId, TOKEN_LIKE_GATE);
+    assert.equal(framed.payload.decision, "timed-out");
   } finally {
     await reviewPromise.catch(() => {});
     rmSync(repo, { recursive: true, force: true });
