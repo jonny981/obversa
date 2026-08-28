@@ -33,7 +33,8 @@
   ],
   "publishConfig": {
     "access": "public",
-    "registry": "http://publish-guard.invalid/"
+    "registry": "http://publish-guard.invalid/",
+    "@obversa:registry": "http://publish-guard.invalid/"
   },
   "scripts": {
     "build": "tsup && tsc -p tsconfig.build.json",

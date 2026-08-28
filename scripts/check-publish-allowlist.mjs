@@ -20,25 +20,37 @@
 //   2. `--audit`, run from the repository root: every workspace package that is
 //      not private must be on the allowlist, must carry the exact
 //      prepublishOnly hook (without it a direct `npm publish` of the directory
-//      would skip the guard), and must name PUBLISH_REGISTRY_SENTINEL as its
-//      publishConfig.registry; every allowlisted name must be a real,
-//      non-private workspace package; and the release command must exist.
+//      would skip the guard), must name PUBLISH_REGISTRY_SENTINEL as both its
+//      publishConfig.registry and its publishConfig["@obversa:registry"] (see
+//      below), may carry no other registry key and no publishConfig.directory;
+//      every allowlisted name must be a real, non-private workspace package;
+//      the workspace root must stay private; and the release command must
+//      exist.
 //
 // The registry seatbelt: every public manifest — and so every tarball packed
-// from it — carries a publishConfig.registry that never resolves
-// (PUBLISH_REGISTRY_SENTINEL, a name under the reserved .invalid domain). A
-// publish that skips the hook, from a directory or from a tarball, is sent
-// there and fails. The supported way to the real registry is
-// scripts/release.mjs, which runs checkHook first and only then publishes one
-// listed public workspace package directory with the registry overridden to
-// RELEASE_REGISTRY; pnpm runs prepublishOnly in that publish too, so the hook
-// is checked twice.
+// from it — names a registry that never resolves (PUBLISH_REGISTRY_SENTINEL,
+// a name under the reserved .invalid domain). npm, pnpm, and changesets pick
+// the registry for a scoped name from the scope key first
+// (`@obversa:registry`) and only then from `registry`, and a manifest's
+// publishConfig beats a user's config for both keys, so a plain sentinel
+// alone would be stepped over by a scoped real registry in the manifest or in
+// a standing user config; the audit therefore requires the sentinel under
+// BOTH keys and refuses any other registry key. publishConfig.directory is
+// refused too: pnpm packs the manifest inside that directory, which the
+// audit never reads. A publish that skips the hook, from a directory or from
+// a tarball, is sent to the sentinel and fails. The supported way to the real
+// registry is scripts/release.mjs: it runs checkHook first, packs the one
+// listed public workspace package with pnpm (which rewrites workspace
+// versions), and publishes that tarball with npm, overriding both registry
+// keys on the command line — the one place npm lets a flag beat
+// publishConfig.
 //
 // Residual, on purpose, two deliberate acts no script can prevent: a
-// directory publish with `--ignore-scripts --registry <real>`, and a tarball
-// publish with `--registry <real>` (a tarball runs no hook, so the flag alone
-// passes the sentinel). This guard exists to stop the accidental publish.
+// directory publish with `--ignore-scripts` and both registry keys
+// overridden, and a tarball publish with both keys overridden (a tarball
+// runs no hook). This guard exists to stop the accidental publish.
 export const PUBLISH_REGISTRY_SENTINEL = "http://publish-guard.invalid/";
+export const SCOPE_REGISTRY_KEY = "@obversa:registry";
 export const RELEASE_REGISTRY = "https://registry.npmjs.org/";
 export const RELEASE_COMMAND = "scripts/release.mjs";
 import { execFileSync } from "node:child_process";
@@ -77,6 +89,7 @@ export function listWorkspacePackages(root = ROOT) {
         dir: join(glob.slice(0, -2), entry.name),
         prepublishOnly: typeof manifest.scripts?.prepublishOnly === "string" ? manifest.scripts.prepublishOnly : "",
         registry: typeof manifest.publishConfig?.registry === "string" ? manifest.publishConfig.registry : "",
+        publishConfig: manifest.publishConfig && typeof manifest.publishConfig === "object" ? manifest.publishConfig : {},
       });
     }
   }
@@ -104,11 +117,31 @@ export function audit({ root = ROOT, allowlist = readAllowlist() } = {}) {
     if (p.registry !== PUBLISH_REGISTRY_SENTINEL) {
       problems.push(`${p.name} (${p.dir}) is publishable but its publishConfig.registry is not ${PUBLISH_REGISTRY_SENTINEL} (found "${p.registry}"); a tarball publish would reach a real registry without the guard`);
     }
+    if (p.publishConfig[SCOPE_REGISTRY_KEY] !== PUBLISH_REGISTRY_SENTINEL) {
+      problems.push(`${p.name} (${p.dir}) is publishable but its publishConfig["${SCOPE_REGISTRY_KEY}"] is not ${PUBLISH_REGISTRY_SENTINEL} (found "${p.publishConfig[SCOPE_REGISTRY_KEY] ?? ""}"); the scope key is picked before registry, so a scoped real registry in a manifest or a user config would step over the plain sentinel`);
+    }
+    for (const key of Object.keys(p.publishConfig)) {
+      if (/:registry$/.test(key) && key !== SCOPE_REGISTRY_KEY) {
+        problems.push(`${p.name} (${p.dir}) names another registry route in publishConfig["${key}"]; only registry and ${SCOPE_REGISTRY_KEY} are allowed, both set to the sentinel`);
+      }
+    }
+    if (p.publishConfig.directory !== undefined) {
+      problems.push(`${p.name} (${p.dir}) sets publishConfig.directory; pnpm would publish the manifest inside that directory, which this audit does not read`);
+    }
   }
   for (const name of allowlist) {
     const p = byName.get(name);
     if (!p) problems.push(`${name} is on the allowlist but is not a workspace package`);
     else if (p.private) problems.push(`${name} is on the allowlist but is marked private`);
+  }
+  // The workspace root is not a package anyone publishes: it stays private,
+  // or a version on it would make it one more publishable manifest the
+  // package walk above never sees.
+  const rootManifestPath = join(root, "package.json");
+  if (!existsSync(rootManifestPath)) {
+    problems.push("the workspace root has no package.json");
+  } else if (JSON.parse(readFileSync(rootManifestPath, "utf8")).private !== true) {
+    problems.push('the workspace root package.json must be "private": true');
   }
   if (!existsSync(join(root, RELEASE_COMMAND))) problems.push(`${RELEASE_COMMAND} is missing: it is the one guarded way to the real registry`);
   return problems;
