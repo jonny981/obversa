@@ -223,6 +223,14 @@ test("string-keyed members count, a dynamic computed key fails its side closed, 
   assert.deepEqual(at(numeric, 1, 47).def, { line: 1, col: 10 }, "a computed numeric key leaves the side open");
   const bigint = navIndex({ code: "class H { foo() {} [1n]() {} 2() {} go() { return this.foo(); } }\n", lang: "javascript" }).occurrences;
   assert.deepEqual(at(bigint, 1, 55).def, { line: 1, col: 10 }, "a bigint or plain numeric key too");
+  // A template with no substitutions is a fixed string key; one with a
+  // substitution is dynamic.
+  const template = navIndex({ code: "class T { foo() {} [`bar`]() {} go() { return this.foo(); } }\n", lang: "javascript" }).occurrences;
+  assert.deepEqual(at(template, 1, 51).def, { line: 1, col: 10 }, "a fixed template key leaves the side open");
+  const templateDup = navIndex({ code: "class U { foo() {} [`foo`]() {} go() { return this.foo(); } }\n", lang: "javascript" }).occurrences;
+  assert.equal(at(templateDup, 1, 51).def, null, "a fixed template key that duplicates a name is ambiguous");
+  const templateExpr = navIndex({ code: "class V { foo() {} [`${x}`]() {} go() { return this.foo(); } }\n", lang: "javascript" }).occurrences;
+  assert.equal(at(templateExpr, 1, 52).def, null, "a template with a substitution is dynamic");
   // A boolean or null literal in brackets defines a dot-reachable name.
   const bool = navIndex({ code: "class I { true() {} [true]() {} go() { return this.true(); } }\n", lang: "javascript" }).occurrences;
   assert.equal(at(bool, 1, 51).def, null, "[true] replaces the plain true at run time: ambiguous");

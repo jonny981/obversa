@@ -207,6 +207,12 @@ function memberName(node) {
     if (typeof value === "boolean" || value === null) return String(value);
     return null; // number, bigint, regex: not a dot name
   }
+  // A template with no substitutions is a fixed string too; one with
+  // substitutions, or an invalid escape (no cooked value), is dynamic.
+  if (key.type === "TemplateLiteral" && key.expressions.length === 0) {
+    const cooked = key.quasis[0]?.value.cooked;
+    return typeof cooked === "string" ? cooked : undefined;
+  }
   if (!node.computed) return key.type === "Identifier" ? key.name : null;
   return undefined;
 }
