@@ -5,6 +5,7 @@ export {
   isTransport,
   DECISIONS,
   AUTHOR_KINDS,
+  SIDES,
   MAX_ANNOTATIONS,
   MAX_BODY,
   MAX_THREAD,

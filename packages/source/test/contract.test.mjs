@@ -7,6 +7,7 @@ import {
   validateAnnotation,
   normalizeResult,
   isSurfaceRequest,
+  isGateBinding,
   FAMILIES,
   DECISIONS,
   MAX_ANNOTATIONS,
@@ -138,6 +139,46 @@ test("anchorKey is total: it never throws, and an anchor that points nowhere is 
   }
   assert.equal(typeof anchorKey({ target: "shot", position: Object.assign(Object.create(null), { x: 1 }) }), "string", "a null-prototype object is plain");
   assert.equal(typeof anchorKey({ target: "shot", position: [{ x: 1 }, [2]] }), "string", "nested plain shapes");
+  // An array is its indexed items and nothing else.
+  assert.equal(anchorKey({ target: "a", position: Object.assign([1], { extra: 2 }) }), null, "an array with an extra property");
+  assert.equal(validateAnnotation({ anchor: { target: "a", position: [1] }, body: "x" }, buildAnchorSet([{ target: "a", position: Object.assign([1], { extra: 2 }) }])), null, "the extra-property forgery never meets");
+  assert.equal(anchorKey({ target: "a", position: [1, , 3] }), null, "a hole");
+  assert.equal(anchorKey({ target: "a", position: { p: Object.assign([1], { extra: 2 }) } }), null, "an array with an extra property, nested");
+  // A location is own data properties only: an accessor could answer
+  // differently each time it is read, so the same anchor would not be stable.
+  let reads = 0;
+  assert.equal(anchorKey({ target: "a", position: { get x() { return ++reads; } } }), null, "an accessor-backed position");
+  assert.equal(anchorKey({ target: "a", position: { x: 1, get y() { return 2; } } }), null, "an accessor among data");
+  assert.equal(anchorKey({ target: "a", position: { x: 1, deep: { get y() { return 2; } } } }), null, "an accessor nested");
+  assert.equal(anchorKey({ target: "a", position: Object.defineProperty([1], "1", { get() { return 2; }, enumerable: true }) }), null, "an accessor index");
+  assert.equal(anchorKey({ target: "a", position: { x: 1, get toJSON() { return 5; } } }), null, "an accessor named toJSON");
+  assert.equal(anchorKey({ target: "a", position: Object.defineProperty({ x: 1 }, "toJSON", { value: 5 }) }), null, "a non-enumerable own toJSON");
+  // JSON writes -0 as 0 and skips a non-enumerable property: neither is carried whole.
+  assert.equal(anchorKey({ target: "a", position: -0 }), null, "negative zero");
+  assert.equal(anchorKey({ target: "a", position: { x: -0 } }), null, "negative zero nested");
+  assert.equal(anchorKey({ target: "a", position: Object.defineProperty({ x: 1 }, "hidden", { value: 2, enumerable: false }) }), null, "a non-enumerable data property");
+  assert.equal(typeof anchorKey({ target: "a", position: [1, 2] }), "string", "an array's own length is the one non-enumerable exception");
+  // The anchor itself is read once: the location that is checked is the
+  // location that is returned, whatever an accessor answers later.
+  let anchorReads = 0;
+  const shifting = { target: "a", get position() { anchorReads += 1; return anchorReads < 3 ? 1 : 999; } };
+  const offeredOnce = buildAnchorSet([shifting]); // read 1 -> 1
+  const kept = validateAnnotation({ anchor: shifting, body: "x" }, offeredOnce); // read 2 -> 1, then no re-read
+  assert.equal(kept.anchor.position, 1, "the position that passed the check is the position returned");
+  assert.equal(anchorReads, 2, "the anchor was read exactly once by the validator");
+  // The returned annotation owns its location: mutating what the browser
+  // sent afterwards moves nothing.
+  const sent = { anchor: { target: "shot", position: { x: 1, y: 2 } }, body: "x" };
+  const owned = validateAnnotation(sent, buildAnchorSet([{ target: "shot", position: { x: 1, y: 2 } }]));
+  sent.anchor.position.x = 999;
+  sent.anchor.target = "elsewhere";
+  assert.deepEqual(owned.anchor, { target: "shot", position: { x: 1, y: 2 } });
+  assert.notEqual(owned.anchor.position, sent.anchor.position, "a copy, not the sent reference");
+  // A symbol key is skipped by JSON whether or not it is enumerable.
+  assert.equal(anchorKey({ target: "a", position: Object.defineProperty({ x: 1 }, Symbol("hidden"), { value: 2, enumerable: false }) }), null, "a non-enumerable symbol key");
+  let flips = 0;
+  const flipping = { target: "a", get position() { flips += 1; return flips < 2 ? 1 : 999; } };
+  assert.equal(validateAnnotation({ anchor: flipping, body: "x" }, buildAnchorSet([flipping])), null, "a position that changed before the check is simply not offered");
   // A null side is no side: it keys and normalises as omitted.
   assert.equal(anchorKey({ target: "a", position: 1, side: null }), anchorKey({ target: "a", position: 1 }));
   const nullSide = validateAnnotation({ anchor: { target: "src/app.js", position: 12, side: null }, body: "x" }, buildAnchorSet([{ target: "src/app.js", position: 12 }]));
@@ -148,6 +189,29 @@ test("anchorKey is total: it never throws, and an anchor that points nowhere is 
   assert.equal(isSurfaceRequest({ ...request, anchors: [outputAnchor(1)], get transport() { throw new Error("boom"); } }), false, "a throwing getter deeper in");
   assert.equal(buildAnchorSet([{ target: "a", position: cyclic }, { target: "a", position: 1 }]).size, 1);
   assert.equal(validateAnnotation({ anchor: { target: "a", position: cyclic }, body: "x" }, buildAnchorSet([outputAnchor(1)])), null);
+});
+
+test("every public guard is total: a throwing proxy is invalid, never an exception", () => {
+  const hostile = () => new Proxy({}, { get() { throw new Error("boom"); }, has() { throw new Error("boom"); }, ownKeys() { throw new Error("boom"); } });
+  const hostileArray = new Proxy([], { get() { throw new Error("boom"); } });
+  assert.equal(isGateBinding("g", hostile()), false);
+  assert.equal(isGateBinding(null, hostile()), false);
+  assert.equal(buildAnchorSet(hostileArray).size, 0);
+  assert.equal(buildAnchorSet([outputAnchor(1), hostile()]).size, 1, "a hostile entry is skipped, a real one kept");
+  assert.equal(validateAnnotation(hostile(), buildAnchorSet([outputAnchor(1)])), null);
+  assert.equal(validateAnnotation({ anchor: outputAnchor(1), body: "x", get author() { throw new Error("boom"); } }, buildAnchorSet([outputAnchor(1)])), null);
+  assert.equal(validateAnnotation({ anchor: outputAnchor(1), body: "x", thread: hostileArray }, buildAnchorSet([outputAnchor(1)])), null);
+  const base = makeRequest([outputAnchor(1)]);
+  assert.equal(isSurfaceRequest({ ...base, callback: hostile() }), false);
+  assert.equal(isSurfaceRequest({ ...base, anchors: hostileArray }), false);
+  assert.equal(isSurfaceRequest({ ...base, get deadline() { throw new Error("boom"); } }), false);
+  assert.equal(isSurfaceRequest({ ...base, kind: hostile() }), false);
+  assert.equal(isSurfaceRequest({ ...base, subject: hostile() }), false);
+  // The normaliser is total too: a field that throws when read is absent.
+  assert.deepEqual(normalizeResult(hostile(), base), { surfaceId: "s1", gateId: "g1", decision: "cancelled", annotations: [] });
+  assert.deepEqual(normalizeResult({ decision: "approved", annotations: [] }, hostile()), { surfaceId: null, gateId: null, decision: "approved", annotations: [] });
+  assert.deepEqual(normalizeResult({ decision: "approved", annotations: hostileArray }, base).annotations, []);
+  assert.deepEqual(normalizeResult({ decision: "approved", get meta() { throw new Error("boom"); } }, base), { surfaceId: "s1", gateId: "g1", decision: "approved", annotations: [] });
 });
 
 test("buildAnchorSet collects valid keys and skips invalid ones", () => {
@@ -306,8 +370,8 @@ test("isSurfaceRequest guards the shape", () => {
   assert.equal(isSurfaceRequest(makeRequest([{ position: 1 }])), false, "an anchor with no target");
   assert.equal(isSurfaceRequest(makeRequest([outputAnchor(1), "x"])), false, "a non-object among valid anchors");
   assert.equal(isSurfaceRequest(makeRequest([{ target: "shot.png", position: { x: 1, y: 2 } }])), true, "a region anchor");
-  // A deadline is optional; when present it is an ISO-8601 timestamp with a
-  // time and a zone.
+  // A deadline is optional; when present it is an RFC 3339 date-time with a
+  // zone.
   assert.equal(isSurfaceRequest({ ...ok, deadline: null }), true);
   assert.equal(isSurfaceRequest({ ...ok, deadline: "2026-08-28T09:00:00Z" }), true);
   assert.equal(isSurfaceRequest({ ...ok, deadline: "2026-08-28T09:00:00.250+01:00" }), true, "a zone offset and fraction");

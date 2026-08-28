@@ -6,7 +6,9 @@
 //
 // This module is family-agnostic and dependency-free. It owns the shapes and
 // the one security-critical rule: an annotation may only pin to a location the
-// request actually offered (buildAnchorSet + validateAnnotation). A family
+// request actually offered (buildAnchorSet + validateAnnotation). Every
+// exported guard and normaliser is total: handed a throwing getter or proxy,
+// it answers "invalid" (false, null, or an empty set) and never throws. A family
 // renderer supplies the concrete anchors — for Output, every real diff line —
 // and the core here enforces membership, so a tampered client cannot invent a
 // location that was never shown. When a second family lands, this module lifts
@@ -20,10 +22,12 @@
 //   A surface opened directly (a person running the command, no Callback Gate)
 //   has gateId null and a callback whose address and token are null; a
 //   gate-launched surface carries the gate's id and callback. Both are valid.
-//   Anchor         { target, side?, position }   side, when present, is old | new
+//   Anchor         { target, side?, position }   side is absent (undefined or
+//                  null) or old | new
 //   Annotation     { anchor, body, author{kind,id}, createdAt, thread? }
 //   SurfaceResult  { surfaceId, gateId, decision, annotations[], edits?, meta? }
-//   deadline, when present, is an ISO-8601 timestamp with a time and a zone.
+//   deadline, when present, is an RFC 3339 date-time (the ISO-8601 profile
+//   with a date, a time, and a zone).
 
 export const FAMILIES = Object.freeze(["intent", "output", "outcome"]);
 // Transport hints (an internal note): the named hosts, or a third-party tool as
@@ -42,10 +46,10 @@ export const DECISIONS = Object.freeze([
 export const AUTHOR_KINDS = Object.freeze(["human", "agent"]);
 // The sides of an Output anchor (an internal note): the old or the new text.
 export const SIDES = Object.freeze(["old", "new"]);
-// A deadline names one instant every host reads the same way: an ISO-8601
-// date, time, and zone. The shape is checked and then every calendar
-// component, because Date.parse would quietly roll 2026-02-30 forward to
-// March 2 and call it valid.
+// A deadline names one instant every host reads the same way: an RFC 3339
+// date-time — date, time, and zone. The shape is checked and then every
+// calendar component, because Date.parse would quietly roll 2026-02-30
+// forward to March 2 and call it valid.
 const ISO_TIMESTAMP = /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})(?::(\d{2})(?:\.\d{1,9})?)?(?:Z|[+-](\d{2}):(\d{2}))$/;
 function isIsoInstant(text) {
   const match = typeof text === "string" ? ISO_TIMESTAMP.exec(text) : null;
@@ -79,21 +83,39 @@ const hasNul = (text) => text.includes(NUL);
 function canonicalJson(value, seen = new Set()) {
   if (value === null || typeof value === "boolean") return String(value);
   if (typeof value === "string") return JSON.stringify(value);
-  if (typeof value === "number") return Number.isFinite(value) ? JSON.stringify(value) : null;
+  // JSON writes negative zero as 0, so it is not carried whole.
+  if (typeof value === "number") return Number.isFinite(value) && !Object.is(value, -0) ? JSON.stringify(value) : null;
   if (typeof value !== "object") return null;
   // Only a plain object or an array is a location. Anything else — a RegExp,
   // an Error, a Map, a Promise, an ArrayBuffer, a class instance — JSON
   // erases to {} or a fragment, so two different values would share a key.
   const proto = Object.getPrototypeOf(value);
   if (!Array.isArray(value) && proto !== Object.prototype && proto !== null) return null;
-  if (typeof value.toJSON === "function") return null;
-  // JSON skips a symbol-keyed property without a trace; a location with one
-  // would be keyed as something smaller than it is.
-  if (Object.getOwnPropertySymbols(value).some((symbol) => Object.prototype.propertyIsEnumerable.call(value, symbol))) return null;
+  // A value with its own toJSON means something other than its properties.
+  if (Object.prototype.hasOwnProperty.call(value, "toJSON")) return null;
+  // JSON skips a symbol-keyed property without a trace, enumerable or not; a
+  // location with one would be keyed as something smaller than it is.
+  if (Object.getOwnPropertySymbols(value).length > 0) return null;
+  // A location is own data properties only: an accessor could answer
+  // differently each time it is read, so the same anchor would not key the
+  // same way twice.
+  if (Object.keys(value).some((key) => !("value" in Object.getOwnPropertyDescriptor(value, key)))) return null;
+  // JSON skips a non-enumerable property too (an array's own length aside).
+  const visible = Object.keys(value).length;
+  const owned = Object.getOwnPropertyNames(value).filter((name) => !(Array.isArray(value) && name === "length")).length;
+  if (owned !== visible) return null;
   if (seen.has(value)) return null;
   seen.add(value);
   const parts = [];
   if (Array.isArray(value)) {
+    // An array is its indexed items and nothing else: an extra property or a
+    // hole is something JSON would drop or fill, so two arrays that differ
+    // there would share a key.
+    const keys = Object.keys(value);
+    if (keys.length !== value.length || keys.some((key, index) => key !== String(index))) {
+      seen.delete(value);
+      return null;
+    }
     for (const item of value) {
       const text = canonicalJson(item, seen);
       if (text === null) {
@@ -157,7 +179,7 @@ function keyOf(anchor) {
   if (side !== undefined && side !== null && !SIDES.includes(side)) return null;
   let pos;
   if (typeof position === "number") {
-    if (!Number.isFinite(position)) return null;
+    if (!Number.isFinite(position) || Object.is(position, -0)) return null;
     pos = `n:${position}`;
   } else if (typeof position === "string") {
     if (!isPresent(position) || hasNul(position)) return null;
@@ -179,12 +201,17 @@ function keyOf(anchor) {
  */
 export function buildAnchorSet(anchors) {
   const set = new Set();
-  if (!Array.isArray(anchors)) return set;
-  for (const anchor of anchors) {
-    const key = anchorKey(anchor);
-    if (key !== null) set.add(key);
+  try {
+    if (!Array.isArray(anchors)) return set;
+    for (const anchor of anchors) {
+      const key = anchorKey(anchor);
+      if (key !== null) set.add(key);
+    }
+    return set;
+  } catch {
+    // A list that throws while being read offered nothing.
+    return new Set();
   }
-  return set;
 }
 
 // Keep only the contract fields of an anchor, in a stable order. Runs after the
@@ -225,15 +252,39 @@ function normalizeThreadEntry(entry) {
  * every family reuses.
  */
 export function validateAnnotation(raw, anchorSet) {
+  try {
+    return cleanAnnotation(raw, anchorSet);
+  } catch {
+    return null;
+  }
+}
+
+// One read of each anchor field, into a plain object, so the location that
+// is checked is the location that is returned.
+function snapshotAnchor(anchor) {
+  if (!anchor || typeof anchor !== "object") return null;
+  const { target, side, position } = anchor;
+  return { target, side, position };
+}
+
+function cleanAnnotation(raw, anchorSet) {
   if (!raw || typeof raw !== "object") return null;
-  const key = anchorKey(raw.anchor);
+  // The anchor is read exactly once. An accessor that answered one location
+  // to the membership check and another afterwards would otherwise let the
+  // normalised annotation point where the check never looked.
+  const anchor = snapshotAnchor(raw.anchor);
+  const key = anchorKey(anchor);
   if (key === null || !anchorSet.has(key)) return null;
+  // The annotation owns its location: an object position is copied through
+  // its canonical text, so nothing the sender does to its object afterwards
+  // moves the annotation.
+  if (anchor.position && typeof anchor.position === "object") anchor.position = JSON.parse(canonicalJson(anchor.position));
   if (typeof raw.body !== "string") return null;
   const body = raw.body.trim();
   if (!body) return null;
 
   const annotation = {
-    anchor: normalizeAnchor(raw.anchor),
+    anchor: normalizeAnchor(anchor),
     body: body.slice(0, MAX_BODY),
     author: normalizeAuthor(raw.author) ?? { kind: "human", id: "reviewer" },
     createdAt:
@@ -262,22 +313,38 @@ export function validateAnnotation(raw, anchorSet) {
  * the request so the callback routes the result to the exact gate instance.
  */
 export function normalizeResult(raw, request) {
-  const anchorSet = buildAnchorSet(request?.anchors);
+  // Total like every other export: a field that throws when read is absent.
+  const read = (get, fallback) => {
+    try {
+      return get();
+    } catch {
+      return fallback;
+    }
+  };
+  const anchorSet = buildAnchorSet(read(() => request?.anchors, []));
   const annotations = [];
-  const rawAnnotations = Array.isArray(raw?.annotations) ? raw.annotations : [];
-  for (const item of rawAnnotations) {
-    if (annotations.length >= MAX_ANNOTATIONS) break;
-    const clean = validateAnnotation(item, anchorSet);
-    if (clean) annotations.push(clean);
+  const rawAnnotations = read(() => (Array.isArray(raw?.annotations) ? raw.annotations : []), []);
+  try {
+    for (const item of rawAnnotations) {
+      if (annotations.length >= MAX_ANNOTATIONS) break;
+      const clean = validateAnnotation(item, anchorSet);
+      if (clean) annotations.push(clean);
+    }
+  } catch {
+    // A list that throws while being read carries no annotations.
+    annotations.length = 0;
   }
+  const decision = read(() => raw?.decision, undefined);
   const result = {
-    surfaceId: request?.surfaceId ?? null,
-    gateId: request?.gateId ?? null,
-    decision: DECISIONS.includes(raw?.decision) ? raw.decision : "cancelled",
+    surfaceId: read(() => request?.surfaceId ?? null, null),
+    gateId: read(() => request?.gateId ?? null, null),
+    decision: DECISIONS.includes(decision) ? decision : "cancelled",
     annotations,
   };
-  if (raw?.edits !== undefined) result.edits = raw.edits;
-  if (raw?.meta !== undefined) result.meta = raw.meta;
+  const edits = read(() => raw?.edits, undefined);
+  if (edits !== undefined) result.edits = edits;
+  const meta = read(() => raw?.meta, undefined);
+  if (meta !== undefined) result.meta = meta;
   return result;
 }
 
@@ -301,10 +368,14 @@ function isPresent(value) {
  * with no callback, a callback with no id, a partial callback) are invalid.
  */
 export function isGateBinding(gateId, callback) {
-  if (!callback || typeof callback !== "object") return false;
-  const { address, token } = callback;
-  if (gateId === null) return address === null && token === null;
-  return isPresent(gateId) && isPresent(address) && isPresent(token);
+  try {
+    if (!callback || typeof callback !== "object") return false;
+    const { address, token } = callback;
+    if (gateId === null) return address === null && token === null;
+    return isPresent(gateId) && isPresent(address) && isPresent(token);
+  } catch {
+    return false;
+  }
 }
 
 export function isSurfaceRequest(value) {
@@ -331,9 +402,9 @@ function checkSurfaceRequest(value) {
   // Every offered anchor is a real location — a target and a position — or the
   // membership rule the result is checked against would be built on nothing.
   if (!Array.isArray(value.anchors) || !value.anchors.every((anchor) => anchorKey(anchor) !== null)) return false;
-  // A deadline is optional; when present it is an ISO-8601 timestamp with a
-  // time and a zone, so every host enforces the same instant. A bare date, a
-  // loose date, or a number is refused.
+  // A deadline is optional; when present it is an RFC 3339 date-time with a
+  // zone, so every host enforces the same instant. A bare date, a loose date,
+  // or a number is refused.
   if (value.deadline !== undefined && value.deadline !== null && !isIsoInstant(value.deadline)) return false;
   return true;
 }
