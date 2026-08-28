@@ -20,9 +20,10 @@
 //   A surface opened directly (a person running the command, no Callback Gate)
 //   has gateId null and a callback whose address and token are null; a
 //   gate-launched surface carries the gate's id and callback. Both are valid.
-//   Anchor         { target, side?, position }
+//   Anchor         { target, side?, position }   side, when present, is old | new
 //   Annotation     { anchor, body, author{kind,id}, createdAt, thread? }
 //   SurfaceResult  { surfaceId, gateId, decision, annotations[], edits?, meta? }
+//   deadline, when present, is an ISO-8601 timestamp with a time and a zone.
 
 export const FAMILIES = Object.freeze(["intent", "output", "outcome"]);
 // Transport hints (an internal note): the named hosts, or a third-party tool as
@@ -39,6 +40,77 @@ export const DECISIONS = Object.freeze([
   "timed-out",
 ]);
 export const AUTHOR_KINDS = Object.freeze(["human", "agent"]);
+// The sides of an Output anchor (an internal note): the old or the new text.
+export const SIDES = Object.freeze(["old", "new"]);
+// A deadline names one instant every host reads the same way: an ISO-8601
+// date, time, and zone. The shape is checked and then every calendar
+// component, because Date.parse would quietly roll 2026-02-30 forward to
+// March 2 and call it valid.
+const ISO_TIMESTAMP = /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})(?::(\d{2})(?:\.\d{1,9})?)?(?:Z|[+-](\d{2}):(\d{2}))$/;
+function isIsoInstant(text) {
+  const match = typeof text === "string" ? ISO_TIMESTAMP.exec(text) : null;
+  if (!match) return false;
+  const [, year, month, day, hour, minute, second = "0", offsetHours = "0", offsetMinutes = "0"] = match;
+  const y = Number(year);
+  const m = Number(month);
+  const leap = (y % 4 === 0 && y % 100 !== 0) || y % 400 === 0;
+  const daysInMonth = [31, leap ? 29 : 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31];
+  if (m < 1 || m > 12) return false;
+  if (Number(day) < 1 || Number(day) > daysInMonth[m - 1]) return false;
+  if (Number(hour) > 23 || Number(minute) > 59 || Number(second) > 59) return false;
+  if (Number(offsetHours) > 23 || Number(offsetMinutes) > 59) return false;
+  return Number.isFinite(Date.parse(text));
+}
+
+// The key separator. A scalar key component must never contain it, or two
+// distinct anchors could share a key (a target ending in the separator plus a
+// side, against a bare target plus a position starting with it).
+const NUL = String.fromCharCode(0);
+const hasNul = (text) => text.includes(NUL);
+
+// Canonical JSON text for an object or array location, or null; never throws.
+// Object keys are sorted at every level, so the same coordinates match after
+// crossing a transport that reorders them; array order is part of the
+// location. Null for anything JSON could not carry whole — a cycle, a BigInt,
+// a function, a symbol, an undefined value, a non-finite number, a Map or Set
+// — and for any value with its own toJSON, whose text would depend on the
+// serialiser rather than on the location. JSON escapes a NUL inside a string,
+// so the text never contains the separator.
+function canonicalJson(value, seen = new Set()) {
+  if (value === null || typeof value === "boolean") return String(value);
+  if (typeof value === "string") return JSON.stringify(value);
+  if (typeof value === "number") return Number.isFinite(value) ? JSON.stringify(value) : null;
+  if (typeof value !== "object") return null;
+  if (value instanceof Map || value instanceof Set || typeof value.toJSON === "function") return null;
+  // JSON skips a symbol-keyed property without a trace; a location with one
+  // would be keyed as something smaller than it is.
+  if (Object.getOwnPropertySymbols(value).some((symbol) => Object.prototype.propertyIsEnumerable.call(value, symbol))) return null;
+  if (seen.has(value)) return null;
+  seen.add(value);
+  const parts = [];
+  if (Array.isArray(value)) {
+    for (const item of value) {
+      const text = canonicalJson(item, seen);
+      if (text === null) {
+        seen.delete(value);
+        return null;
+      }
+      parts.push(text);
+    }
+    seen.delete(value);
+    return `[${parts.join(",")}]`;
+  }
+  for (const key of Object.keys(value).sort()) {
+    const text = canonicalJson(value[key], seen);
+    if (text === null) {
+      seen.delete(value);
+      return null;
+    }
+    parts.push(`${JSON.stringify(key)}:${text}`);
+  }
+  seen.delete(value);
+  return `{${parts.join(",")}}`;
+}
 
 // Bounds. A result may be handed back verbatim (so quoted code survives the
 // transport's redaction), which means these caps live here, in the contract,
@@ -52,14 +124,46 @@ export const MAX_THREAD = 100;
  * polymorphic position — a line number for Output, coordinates for a screenshot
  * region, a node id for a diagram — by serialising a non-scalar position. The
  * NUL separator cannot occur in a path or an id, so two distinct anchors never
- * collide on their key. Returns null for a structurally invalid anchor.
+ * collide on their key. Returns null for a structurally invalid anchor and
+ * never throws, whatever it is handed: the target must be a visible string,
+ * the side (when given) old or new, and the position a location the frame can
+ * carry whole — a finite number, a visible string, or a non-empty object or
+ * array that JSON carries without loss, in canonical key order (see
+ * canonicalJson). A cycle, a BigInt, a boolean, an empty value, or a nested
+ * value JSON would drop is no location. No scalar component may contain the
+ * separator, and the position is tagged by type, so a number, the string of
+ * that number, an object, and the JSON text of that object are four
+ * different locations: an annotation can only match the location that was
+ * offered, exactly as it was offered. A throwing getter or proxy is no
+ * location either: the guards built on this are booleans and never throw.
  */
 export function anchorKey(anchor) {
+  try {
+    return keyOf(anchor);
+  } catch {
+    return null;
+  }
+}
+
+function keyOf(anchor) {
   if (!anchor || typeof anchor !== "object") return null;
   const { target, side, position } = anchor;
-  if (typeof target !== "string") return null;
-  if (position === undefined || position === null) return null;
-  const pos = typeof position === "object" ? JSON.stringify(position) : String(position);
+  if (!isPresent(target) || hasNul(target)) return null;
+  if (side !== undefined && side !== null && !SIDES.includes(side)) return null;
+  let pos;
+  if (typeof position === "number") {
+    if (!Number.isFinite(position)) return null;
+    pos = `n:${position}`;
+  } else if (typeof position === "string") {
+    if (!isPresent(position) || hasNul(position)) return null;
+    pos = `s:${position}`;
+  } else if (position && typeof position === "object") {
+    const text = canonicalJson(position);
+    if (text === null || text === "{}" || text === "[]") return null;
+    pos = `j:${text}`;
+  } else {
+    return null;
+  }
   return `${target}\u0000${side ?? ""}\u0000${pos}`;
 }
 
@@ -211,10 +315,9 @@ export function isSurfaceRequest(value) {
   // Every offered anchor is a real location — a target and a position — or the
   // membership rule the result is checked against would be built on nothing.
   if (!Array.isArray(value.anchors) || !value.anchors.every((anchor) => anchorKey(anchor) !== null)) return false;
-  // A deadline is optional; when present it is a timestamp a host can parse,
-  // or nothing could enforce it.
-  if (value.deadline !== undefined && value.deadline !== null) {
-    if (!isPresent(value.deadline) || !Number.isFinite(Date.parse(value.deadline))) return false;
-  }
+  // A deadline is optional; when present it is an ISO-8601 timestamp with a
+  // time and a zone, so every host enforces the same instant. A bare date, a
+  // loose date, or a number is refused.
+  if (value.deadline !== undefined && value.deadline !== null && !isIsoInstant(value.deadline)) return false;
   return true;
 }

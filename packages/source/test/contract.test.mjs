@@ -43,6 +43,92 @@ test("anchorKey handles a non-scalar position and rejects invalid anchors", () =
   assert.equal(anchorKey({ target: "a" }), null);
 });
 
+test("anchorKey is total: it never throws, and an anchor that points nowhere is null", () => {
+  const cyclic = { self: null };
+  cyclic.self = cyclic;
+  // Positions the frame cannot carry.
+  assert.equal(anchorKey({ target: "a", position: cyclic }), null, "a cyclic position");
+  assert.equal(anchorKey({ target: "a", position: 1n }), null, "a BigInt position");
+  assert.equal(anchorKey({ target: "a", position: true }), null, "a boolean position");
+  assert.equal(anchorKey({ target: "a", position: Number.NaN }), null);
+  assert.equal(anchorKey({ target: "a", position: Number.POSITIVE_INFINITY }), null);
+  assert.equal(anchorKey({ target: "a", position: () => 1 }), null, "a function position");
+  // Empty locations.
+  assert.equal(anchorKey({ target: "", position: "" }), null, "an empty target and position");
+  assert.equal(anchorKey({ target: "  ", position: 1 }), null, "a whitespace target");
+  assert.equal(anchorKey({ target: "a", position: "   " }), null, "a whitespace position");
+  assert.equal(anchorKey({ target: "a", position: {} }), null, "an empty object position");
+  assert.equal(anchorKey({ target: "a", position: [] }), null, "an empty array position");
+  assert.equal(anchorKey({ target: "a", position: 1, side: 7 }), null, "a non-string side");
+  // A side, when present, is old or new (an internal note).
+  assert.equal(anchorKey({ target: "a", position: 1, side: "" }), null, "an empty side");
+  assert.equal(anchorKey({ target: "a", position: 1, side: "   " }), null, "a whitespace side");
+  assert.equal(anchorKey({ target: "a", position: 1, side: "middle" }), null, "an unknown side");
+  assert.equal(typeof anchorKey({ target: "a", position: 1, side: "old" }), "string");
+  assert.equal(typeof anchorKey({ target: "a", position: 1, side: "new" }), "string");
+  assert.equal(typeof anchorKey({ target: "a", position: 1, side: null }), "string", "no side");
+  // An object position is carried whole or not at all.
+  assert.equal(anchorKey({ target: "a", position: { x: 1, fn() {} } }), null, "a nested function");
+  assert.equal(anchorKey({ target: "a", position: { x: 1, s: Symbol("s") } }), null, "a nested symbol");
+  assert.equal(anchorKey({ target: "a", position: { x: 1, u: undefined } }), null, "a nested undefined");
+  assert.equal(anchorKey({ target: "a", position: [1, () => {}] }), null, "a function in an array");
+  assert.equal(anchorKey({ target: "a", position: { x: Number.NaN } }), null, "a nested non-finite number");
+  assert.equal(anchorKey({ target: "a", position: { m: new Map() } }), null, "a nested Map");
+  const whole = anchorKey({ target: "a", position: { x: 1, y: [2, "z"] } });
+  assert.equal(typeof whole, "string", "a plain location is keyed");
+  assert.equal(whole, anchorKey({ target: "a", position: { x: 1, y: [2, "z"] } }), "keyed whole and stably");
+  assert.notEqual(whole, anchorKey({ target: "a", position: { x: 1, y: [2, "q"] } }), "a nested difference is a different location");
+  assert.equal(anchorKey({ target: "a", position: new Date(0) }), null, "a value with its own toJSON is not a location");
+  // The separator is refused in every scalar component, so a key cannot be
+  // forged by moving it into a value.
+  const NUL = String.fromCharCode(0);
+  assert.equal(anchorKey({ target: `a${NUL}old`, position: "p" }), null, "a NUL in the target");
+  assert.equal(anchorKey({ target: "a", side: "old", position: `${NUL}p` }), null, "a NUL in the position");
+  assert.equal(anchorKey({ target: "a", position: `p${NUL}` }), null);
+  assert.equal(validateAnnotation({ anchor: { target: "a", side: "old", position: `${NUL}p` }, body: "x" }, buildAnchorSet([{ target: `a${NUL}old`, position: "p" }])), null, "the forged pair never meets");
+  // The position is tagged by type: an annotation matches only the location
+  // that was offered, exactly as it was offered.
+  assert.notEqual(anchorKey({ target: "a", position: 1 }), anchorKey({ target: "a", position: "1" }), "a number and its string");
+  assert.notEqual(anchorKey({ target: "shot", position: { x: 1 } }), anchorKey({ target: "shot", position: '{"x":1}' }), "an object and its JSON text");
+  const offered = buildAnchorSet([{ target: "a", position: 1 }, { target: "shot", position: { x: 1 } }]);
+  assert.equal(validateAnnotation({ anchor: { target: "a", position: "1" }, body: "x" }, offered), null, "a string where a number was offered");
+  assert.equal(validateAnnotation({ anchor: { target: "shot", position: '{"x":1}' }, body: "x" }, offered), null, "a string where an object was offered");
+  assert.ok(validateAnnotation({ anchor: { target: "a", position: 1 }, body: "x" }, offered));
+  // The same coordinates match after crossing a transport that reorders keys.
+  assert.equal(anchorKey({ target: "shot", position: { x: 1, y: 2 } }), anchorKey({ target: "shot", position: { y: 2, x: 1 } }));
+  assert.equal(
+    anchorKey({ target: "shot", position: { a: { c: 1, b: [1, { z: 0, y: 1 }] } } }),
+    anchorKey({ target: "shot", position: { a: { b: [1, { y: 1, z: 0 }], c: 1 } } }),
+    "nested keys are canonical too",
+  );
+  assert.notEqual(anchorKey({ target: "shot", position: [1, 2] }), anchorKey({ target: "shot", position: [2, 1] }), "array order is part of the location");
+  assert.ok(validateAnnotation({ anchor: { target: "shot", position: { y: 2, x: 1 } }, body: "x" }, buildAnchorSet([{ target: "shot", position: { x: 1, y: 2 } }])), "reordered keys still match the offered location");
+  // Real locations of every family.
+  assert.equal(typeof anchorKey({ target: "src/app.js", side: "new", position: 12 }), "string");
+  assert.equal(typeof anchorKey({ target: "diagram", position: "node-3" }), "string");
+  assert.equal(typeof anchorKey({ target: "shot.png", position: { x: 0, y: 0 } }), "string");
+  assert.equal(typeof anchorKey({ target: "plan.md", position: 0 }), "string", "zero is a coordinate");
+  // The boolean guards built on it never throw either.
+  const request = {
+    surfaceId: "s1", gateId: null, callback: { address: null, token: null },
+    kind: { family: "output", renderer: "diff" }, subject: { ref: "worktree", fetch: "/api/model" },
+    anchors: [{ target: "a", position: cyclic }], transport: "browser",
+  };
+  assert.equal(isSurfaceRequest(request), false);
+  assert.equal(isSurfaceRequest({ ...request, anchors: [{ target: "", position: "" }] }), false);
+  assert.equal(isSurfaceRequest({ ...request, anchors: [{ target: "a", position: 1n }] }), false);
+  // A throwing getter or proxy is no location, and the guards stay boolean.
+  const throwingPosition = { target: "a", position: { get x() { throw new Error("boom"); } } };
+  assert.equal(anchorKey(throwingPosition), null, "a position whose getter throws");
+  assert.equal(anchorKey({ get target() { throw new Error("boom"); }, position: 1 }), null, "a target whose getter throws");
+  assert.equal(anchorKey(new Proxy({}, { get() { throw new Error("boom"); } })), null, "a proxy that throws");
+  assert.equal(isSurfaceRequest({ ...request, anchors: [throwingPosition] }), false);
+  assert.equal(validateAnnotation({ anchor: throwingPosition, body: "x" }, buildAnchorSet([outputAnchor(1)])), null);
+  assert.equal(anchorKey({ target: "a", position: Object.assign({ x: 1 }, { [Symbol("s")]: 2 }) }), null, "a symbol-keyed property");
+  assert.equal(buildAnchorSet([{ target: "a", position: cyclic }, { target: "a", position: 1 }]).size, 1);
+  assert.equal(validateAnnotation({ anchor: { target: "a", position: cyclic }, body: "x" }, buildAnchorSet([outputAnchor(1)])), null);
+});
+
 test("buildAnchorSet collects valid keys and skips invalid ones", () => {
   const set = buildAnchorSet([outputAnchor(1), outputAnchor(2), { bad: true }, null]);
   assert.equal(set.size, 2);
@@ -199,13 +285,29 @@ test("isSurfaceRequest guards the shape", () => {
   assert.equal(isSurfaceRequest(makeRequest([{ position: 1 }])), false, "an anchor with no target");
   assert.equal(isSurfaceRequest(makeRequest([outputAnchor(1), "x"])), false, "a non-object among valid anchors");
   assert.equal(isSurfaceRequest(makeRequest([{ target: "shot.png", position: { x: 1, y: 2 } }])), true, "a region anchor");
-  // A deadline is optional; when present it is a parseable timestamp.
+  // A deadline is optional; when present it is an ISO-8601 timestamp with a
+  // time and a zone.
   assert.equal(isSurfaceRequest({ ...ok, deadline: null }), true);
   assert.equal(isSurfaceRequest({ ...ok, deadline: "2026-08-28T09:00:00Z" }), true);
+  assert.equal(isSurfaceRequest({ ...ok, deadline: "2026-08-28T09:00:00.250+01:00" }), true, "a zone offset and fraction");
+  assert.equal(isSurfaceRequest({ ...ok, deadline: "2026-08-28T09:00Z" }), true, "minutes precision");
   assert.equal(isSurfaceRequest({ ...ok, deadline: { bad: true } }), false, "an object deadline");
   assert.equal(isSurfaceRequest({ ...ok, deadline: "soon" }), false, "an unparseable deadline");
   assert.equal(isSurfaceRequest({ ...ok, deadline: "" }), false, "an empty deadline");
   assert.equal(isSurfaceRequest({ ...ok, deadline: 1756371600000 }), false, "a numeric deadline");
+  assert.equal(isSurfaceRequest({ ...ok, deadline: "2026-08-28" }), false, "a bare date has no instant");
+  assert.equal(isSurfaceRequest({ ...ok, deadline: "2026-08-28T09:00:00" }), false, "no zone");
+  assert.equal(isSurfaceRequest({ ...ok, deadline: "Aug 28 2026 09:00 GMT" }), false, "a loose date Date.parse would accept");
+  assert.equal(isSurfaceRequest({ ...ok, deadline: "2026-13-45T00:00:00Z" }), false, "a shaped but impossible date");
+  assert.equal(isSurfaceRequest({ ...ok, deadline: "2026-02-30T00:00:00Z" }), false, "a day the month does not have");
+  assert.equal(isSurfaceRequest({ ...ok, deadline: "2023-02-29T00:00:00Z" }), false, "not a leap year");
+  assert.equal(isSurfaceRequest({ ...ok, deadline: "2024-02-29T00:00:00Z" }), true, "a leap day");
+  assert.equal(isSurfaceRequest({ ...ok, deadline: "2000-02-29T00:00:00Z" }), true, "a century leap day");
+  assert.equal(isSurfaceRequest({ ...ok, deadline: "1900-02-29T00:00:00Z" }), false, "a century that is not a leap year");
+  assert.equal(isSurfaceRequest({ ...ok, deadline: "2026-08-28T24:00:00Z" }), false, "hour 24");
+  assert.equal(isSurfaceRequest({ ...ok, deadline: "2026-08-28T09:60:00Z" }), false, "minute 60");
+  assert.equal(isSurfaceRequest({ ...ok, deadline: "2026-08-28T09:00:60Z" }), false, "second 60");
+  assert.equal(isSurfaceRequest({ ...ok, deadline: "2026-08-28T09:00:00+25:00" }), false, "an impossible offset");
 });
 
 test("FAMILIES and DECISIONS are the contract's closed vocabularies", () => {

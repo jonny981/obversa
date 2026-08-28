@@ -129,7 +129,7 @@ export async function computeDiff({ mode = "worktree", range, cwd = process.cwd(
  * text, or null when it is unavailable — a deleted path, an unreadable file, or
  * range mode (a range's new side is not a single readable object in v1).
  * - worktree: the working-tree file on disk.
- * - staged: the index version, via `git show :path`.
+ * - staged: the index version, read as the blob the index names for the path.
  *
  * The path comes from the diff, and a diff can be supplied by a caller rather
  * than produced by git, so it is treated as untrusted. Both modes refuse an
