@@ -337,7 +337,9 @@ function walk(node, scope, occurrences, seenDefs, parent = null) {
           registerPattern(decl.id, target, "variable", occurrences, seenDefs);
         }
       } else {
-        registerPattern(node.left, inner, "variable", occurrences, seenDefs);
+        // `for (x of …)` assigns to an existing binding: the loop head is a
+        // reference to it, not a new definition.
+        walk(node.left, inner, occurrences, seenDefs, node);
       }
       if (node.body) walk(node.body, inner, occurrences, seenDefs, node);
       return;

@@ -115,6 +115,19 @@ test("var binds for the whole function, even before its declaration; a class sta
   assert.deepEqual(at(cases, 4, 4).def, { line: 7, col: 8 }, "an earlier case sees the switch-wide let");
 });
 
+test("a for-of or for-in over an existing variable references it; the loop head is not a new definition", () => {
+  const code = "let x;\nfor (x of [1]) { x; }\nx;\nlet y;\nfor (y in { a: 1 }) { y; }\ny;\n";
+  const { occurrences } = navIndex({ code, lang: "javascript" });
+  const head = at(occurrences, 2, 5);
+  assert.equal(head.isDef, false, "the loop head assigns to the existing binding");
+  assert.deepEqual(head.def, { line: 1, col: 4 });
+  assert.deepEqual(at(occurrences, 2, 17).def, { line: 1, col: 4 }, "the body reads the same binding");
+  assert.deepEqual(at(occurrences, 3, 0).def, { line: 1, col: 4 });
+  assert.equal(at(occurrences, 5, 5).isDef, false);
+  assert.deepEqual(at(occurrences, 5, 5).def, { line: 4, col: 4 });
+  assert.deepEqual(at(occurrences, 6, 0).def, { line: 4, col: 4 });
+});
+
 test("switch cases share one block scope, separate from the outer one", () => {
   const code = "let n = 1;\nswitch (n) {\n  case 1:\n    let n2 = 2;\n    n2;\n}\nn;\n";
   const { occurrences } = navIndex({ code, lang: "javascript" });
