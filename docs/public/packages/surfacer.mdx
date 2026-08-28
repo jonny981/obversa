@@ -54,13 +54,14 @@ that the caller will never receive, and a value that would serialise
 differently later cannot change the frame. Once a handler has completed the session,
 its response is the fixed acknowledgement — `ok` and the operation id — and
 a body or status it returns after completing is not used. That answer is
-sent the moment the completion is claimed, so the browser holds its
-operation id before the caller can learn of the completion, even when the
-handler keeps running or never returns. The acknowledgement timeout starts
-when that answer has gone out, or at once when the browser's connection
-has already closed, so the caller is never told of a completion the
-browser has not received and never waits without a bound. A cancel is
-answered the same way before the caller learns of it. An app can pass `terminalPayload(status)` to
+sent the moment the completion is claimed, so a connected browser holds
+its operation id before the caller can learn of the completion, even when
+the handler keeps running or never returns. The acknowledgement timeout
+starts when that answer has gone out. If the browser's connection closes
+before the answer arrives, the timeout starts at the disconnect instead,
+and when it elapses the caller learns of a completion that browser never
+received — the session never waits without a bound. A cancel is answered
+the same way before the caller learns of it. An app can pass `terminalPayload(status)` to
 `startSurface` so a session that ends without the app's completion —
 cancelled, timed out, or interrupted — still carries an outcome payload the
 caller can route. It passes redaction unless the app also sets

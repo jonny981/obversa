@@ -147,6 +147,8 @@ export async function computeDiff({ mode = "worktree", range, cwd = process.cwd(
  *
  * `maxBytes` lowers the limit for one read (never above MAX_FILE_BYTES), so a
  * caller holding a budget across many reads can bound the sum exactly.
+ * @param {{ path?: string, mode?: string, cwd?: string, maxBytes?: number }} [options]
+ * @returns {Promise<string | null>}
  */
 export async function readNewFileText({ path: filePath, mode = "worktree", cwd = process.cwd(), maxBytes = MAX_FILE_BYTES } = {}) {
   if (typeof filePath !== "string" || filePath.length === 0 || filePath === "/dev/null") return null;
@@ -243,7 +245,7 @@ export async function listTrackedFiles({ cwd = process.cwd(), ref } = {}) {
  * @param {{ cwd?: string, range: string }} options
  * @returns {Promise<string | undefined>}
  */
-export async function rangeEnd({ cwd = process.cwd(), range } = {}) {
+export async function rangeEnd({ cwd = process.cwd(), range }) {
   assertSafeRange(range);
   let stdout;
   try {
