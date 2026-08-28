@@ -107,20 +107,37 @@ export function moduleSpecifiers(text, fileName = 'module.ts') {
   // `require`, `import.meta`.
   // The Module class's own loaders, reached through `module.constructor`
   // or any Module object: refused as a member of anything.
-  const moduleClassLoaders = new Set(['registerHooks', '_load', '_resolveFilename', 'runMain', '_extensions', '_cache', '_pathCache', '_initPaths', '_nodeModulePaths']);
+  // (`register` is not in the set: it is an ordinary name in this
+  // workspace, and every route to Module.register — the builtin factory,
+  // a node:module import, module.constructor, process as a value — is
+  // refused at its root.)
+  const moduleClassLoaders = new Set([
+    'registerHooks', '_load', '_resolveFilename', 'runMain', '_extensions', '_cache', '_pathCache', '_initPaths', '_nodeModulePaths',
+    // and process's own ways to a module: the builtin factory, native
+    // bindings, and the main Module.
+    'getBuiltinModule', 'binding', '_linkedBinding', 'dlopen', 'mainModule',
+  ]);
   const moduleDataMembers = new Set(['exports', 'id', 'filename', 'path', 'loaded']);
   const isEquality = (parent) => ts.isBinaryExpression(parent) && [
     ts.SyntaxKind.EqualsEqualsEqualsToken, ts.SyntaxKind.ExclamationEqualsEqualsToken,
     ts.SyntaxKind.EqualsEqualsToken, ts.SyntaxKind.ExclamationEqualsToken,
   ].includes(parent.operatorToken.kind);
+  // The roots a loader can be acquired from: `module`, `import.meta`,
+  // `process` (its builtin factory), `globalThis` (which holds `process`),
+  // and `globalThis.process` itself.
+  const isRoot = (node) => {
+    if (ts.isIdentifier(node)) return ['module', 'process', 'globalThis'].includes(node.text) && !isName(node);
+    if (isImportMeta(node)) return true;
+    return isAccess(node) && memberName(node) === 'process' && isRoot(ts.skipOuterExpressions(node.expression));
+  };
   const isLoader = (node) => {
-    // `module` and `import.meta` hold a loader: as the object of a literal
-    // member the member decides (below); compared for identity they load
-    // nothing; used as a value — destructured, assigned, passed — the
-    // loader goes with them, so the use is refused.
-    if ((ts.isIdentifier(node) && node.text === 'module' && !isName(node)) || isImportMeta(node)) {
+    // A root holds a loader: as the object of a literal member the member
+    // decides (below); compared for identity it loads nothing; reached by
+    // a computed key, or used as a value — destructured, assigned, passed,
+    // handed to Reflect — the loader goes with it, so the use is refused.
+    if (isRoot(node)) {
       const parent = node.parent;
-      if (isAccess(parent) && ts.skipOuterExpressions(parent.expression) === node) return false;
+      if (isAccess(parent) && ts.skipOuterExpressions(parent.expression) === node) return memberName(parent) === null;
       return !isEquality(parent);
     }
     if (ts.isIdentifier(node)) {
