@@ -24,6 +24,11 @@ export async function openSurfaceUrl(url, {
   return { opened: false, via: "print" };
 }
 
+// A placement command that exits reports whether it succeeded; one that
+// stays alive — a browser that keeps the tab's process — is taken as having
+// opened the surface once it has run this long, so a live placement never
+// holds the session back from waiting for its decision.
+const PLACEMENT_SETTLE_MS = 5_000;
 function runDetached(command, args) {
   return new Promise((resolve) => {
     let child;
@@ -33,7 +38,12 @@ function runDetached(command, args) {
       resolve(false);
       return;
     }
-    child.once("error", () => resolve(false));
-    child.once("exit", (code) => resolve(code === 0));
+    const settled = setTimeout(() => {
+      child.unref?.();
+      resolve(true);
+    }, PLACEMENT_SETTLE_MS);
+    settled.unref?.();
+    child.once("error", () => { clearTimeout(settled); resolve(false); });
+    child.once("exit", (code) => { clearTimeout(settled); resolve(code === 0); });
   });
 }

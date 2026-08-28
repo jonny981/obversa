@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { mkdtempSync, writeFileSync } from "node:fs";
+import { ServerResponse } from "node:http";
 import os from "node:os";
 import path from "node:path";
 import test from "node:test";
@@ -276,6 +277,82 @@ test("a handler that completes and then throws still reports the completion", as
     const decision = await surface.waitForDecision();
     assert.equal(decision.status, "completed");
   } finally {
+    await surface.stop();
+  }
+});
+
+// Hold the end of every response to one route for a while: a barrier that
+// makes "the response has not gone out yet" a fact the test controls, so an
+// acknowledgement clock that started at the claim (wrong) settles the
+// decision while the response is still held, and one that starts when the
+// response goes out (right) cannot.
+function holdResponseEnd(pathname, ms) {
+  const original = ServerResponse.prototype.end;
+  ServerResponse.prototype.end = function held(...args) {
+    if (this.req?.url === pathname) {
+      setTimeout(() => original.apply(this, args), ms);
+      return this;
+    }
+    return original.apply(this, args);
+  };
+  return () => { ServerResponse.prototype.end = original; };
+}
+
+test("the caller learns of a completion only after the winning request has been answered", async () => {
+  // The route completes, then keeps the browser waiting longer than the
+  // acknowledgement timeout before it returns, and its answer is held a
+  // while longer still. The clock must not start until that answer has gone
+  // out: when the browser finally has its 200 and the operation id, the
+  // decision has not settled; the acknowledgement settles it.
+  const surface = await boot({
+    ackTimeoutMs: 50,
+    api: {
+      "POST /api/slow": async ({ session }) => {
+        session.complete({ value: 1 });
+        await new Promise((resolve) => setTimeout(resolve, 150));
+        return null;
+      },
+    },
+  });
+  const release = holdResponseEnd("/api/slow", 250);
+  try {
+    let settled = false;
+    const decided = surface.waitForDecision().then((decision) => { settled = true; return decision; });
+    const answered = await request(surface, "/api/slow", { body: {} });
+    assert.equal(answered.status, 200);
+    const { operationId } = await answered.json();
+    assert.equal(typeof operationId, "string", "the browser gets the operation id to acknowledge");
+    assert.equal(settled, false, "the decision had not settled when the browser was answered: the clock starts after the answer, not at the claim");
+    const ack = await request(surface, "/api/ack", { body: { operationId } });
+    assert.equal(ack.status, 200, "the acknowledgement is accepted");
+    const decision = await decided;
+    assert.equal(decision.status, "completed");
+  } finally {
+    release();
+    await surface.stop();
+  }
+});
+
+test("a cancel is answered before the caller learns of it, and its acknowledgement is accepted", async () => {
+  // The cancel route claims the session; the clock that would settle the
+  // decision without an acknowledgement must not start before the cancel
+  // response, which carries the operation id, has gone out.
+  const surface = await boot({ ackTimeoutMs: 50 });
+  const release = holdResponseEnd("/api/cancel", 250);
+  try {
+    let settled = false;
+    const decided = surface.waitForDecision().then((decision) => { settled = true; return decision; });
+    const answered = await request(surface, "/api/cancel", { body: {} });
+    assert.equal(answered.status, 200);
+    const { operationId } = await answered.json();
+    assert.equal(typeof operationId, "string");
+    assert.equal(settled, false, "the decision had not settled when the cancel was answered");
+    const ack = await request(surface, "/api/ack", { body: { operationId } });
+    assert.equal(ack.status, 200, "the acknowledgement is accepted");
+    const decision = await decided;
+    assert.equal(decision.status, "cancelled");
+  } finally {
+    release();
     await surface.stop();
   }
 });

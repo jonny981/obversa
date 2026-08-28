@@ -143,7 +143,10 @@ export async function startSurface({
         } catch (error) {
           throw httpError(`The completion cannot be framed: ${error?.message ?? error}`, 500);
         }
-        if (!claimTerminal("completed", result)) {
+        // The acknowledgement clock starts when the completing request has
+        // been answered, not here: the browser must receive its 200 before
+        // the caller can be told the session completed and stop the server.
+        if (!claimTerminal("completed", result, { awaitAcknowledgement: "deferred" })) {
           throw httpError("This session already has a terminal decision", 409);
         }
         // The claim owns its data. A handler gets the copy, so nothing it does
@@ -208,10 +211,13 @@ export async function startSurface({
       if (request.method === "POST" && requestUrl.pathname === "/api/cancel") {
         assertExactKeys(await readJson(request), []);
         const result = terminalResult(appName, "cancelled", endingFor("cancelled","The user cancelled the surface"));
-        if (!claimTerminal("cancelled", result)) {
+        // As for a completion: the acknowledgement clock starts once this
+        // answer — the one carrying the operation id — has gone out.
+        if (!claimTerminal("cancelled", result, { awaitAcknowledgement: "deferred" })) {
           sendJson(response, 409, { error: "This session already has a terminal decision" });
           return;
         }
+        armWhenAnswered(response);
         sendJson(response, 200, { ok: true, status: terminalState, operationId: result.operationId });
         return;
       }
@@ -264,12 +270,18 @@ export async function startSurface({
         // contradict the caller: the completion stands and the browser
         // gets it, with the operationId it needs to acknowledge.
         if (completedHere && terminalClaim && terminalClaim.status === "completed") {
+          armWhenAnswered(response);
           sendJson(response, 200, { ok: true, operationId: terminalClaim.operationId });
           return;
         }
         throw error;
       }
-      if (response.headersSent || response.destroyed) return;
+      if (response.headersSent || response.destroyed) {
+        // A handler that answered on its own after completing: the clock
+        // starts from that answer.
+        if (completedHere) armWhenAnswered(response);
+        return;
+      }
       // A terminal decision that arrived DURING the handler but was not this
       // request's own completion — a timeout, or another request's completion
       // that this handler stood by or swallowed the 409 of — must not look
@@ -284,6 +296,8 @@ export async function startSurface({
         // after completing is ordinary app output that could fail to
         // serialise, and nothing fallible may run after the claim, or the
         // browser is left with a completed session it cannot acknowledge.
+        // The acknowledgement clock starts once this answer has gone out.
+        armWhenAnswered(response);
         sendJson(response, 200, { ok: true, operationId: terminalClaim.operationId });
         return;
       }
@@ -317,6 +331,12 @@ export async function startSurface({
   sessionTimeout.unref?.();
   renewLease();
 
+  /**
+   * Claim the session's one terminal decision.
+   * @param {string} status
+   * @param {object} result
+   * @param {{ awaitAcknowledgement?: true | false | "deferred" }} [options]
+   */
   function claimTerminal(status, result, { awaitAcknowledgement = true } = {}) {
     if (terminalState !== "pending") return false;
     terminalState = status;
@@ -324,11 +344,30 @@ export async function startSurface({
     clearTimeout(sessionTimeout);
     clearTimeout(leaseTimeout);
     for (const controller of activeOperations) controller.abort();
-    if (awaitAcknowledgement) {
-      ackTimeout = setTimeout(finalizeClaim, ackTimeoutMs);
-      ackTimeout.unref?.();
-    }
+    // `true`: the acknowledgement clock starts now. `"deferred"`: it starts
+    // when the completing request's response has gone out (armAcknowledgement,
+    // called by the route that sent it). `false`: no acknowledgement is
+    // awaited at all.
+    if (awaitAcknowledgement === true) armAcknowledgement();
     return true;
+  }
+
+  function armAcknowledgement() {
+    if (ackTimeout || decisionSettled || !terminalClaim) return;
+    ackTimeout = setTimeout(finalizeClaim, ackTimeoutMs);
+    ackTimeout.unref?.();
+  }
+
+  // Start the acknowledgement clock once this response has been written or
+  // its connection has gone — whichever comes first — so a browser request
+  // that is still being answered is never cut off by the caller's completion.
+  function armWhenAnswered(response) {
+    if (response.writableFinished || response.destroyed) {
+      armAcknowledgement();
+      return;
+    }
+    response.once("finish", armAcknowledgement);
+    response.once("close", armAcknowledgement);
   }
 
   function renewLease() {
