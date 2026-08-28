@@ -10,11 +10,15 @@ or fails with a clear message.
 
 ## Scripts
 
-All scripts live in `bin/` and run on bash, on macOS (the default-browser
-fallback uses `open`). Put `bin/` on your PATH or call the scripts by full
-path. Workspace-file generation and cmux-context parsing use `python3`
-for correct JSON. The generator checks for `python3` before any work and
-fails with a clear message without it; `--help` works either way.
+All commands live in `bin/`, on macOS (the default-browser fallback uses
+`open`). The glue scripts — `obversa-order-workspace`, `obversa-surface`,
+`obversa-plannotator-browser`, `obversa-peer-send`, `obversa-whereis` — run
+on bash; `obversa-review` is a Node command that runs on the packages this
+host depends on. Put `bin/` on your PATH or call the commands by full path.
+Workspace-file generation and cmux-context parsing use `python3` for
+correct JSON. The generator checks for `python3` before any work and fails
+with a clear message without it; `--help` works either way. The host's own
+tests run with `pnpm test` here or at the repository root.
 
 ### obversa-order-workspace
 
@@ -80,6 +84,32 @@ The browser handler for Plannotator only. Plannotator invokes the value of
 that variable at this script and the review page opens in a cmux split.
 No other tool reads `PLANNOTATOR_BROWSER`, so every other link keeps the
 default browser.
+
+### obversa-review
+
+Opens a git diff for inline review in a browser pane beside the terminal
+and returns the annotations to the caller. It is the composition root where
+`@obversa/source` (the review page and the diff) meets `@obversa/surfacer`
+(the session), both reached by their public package names.
+
+```sh
+obversa-review                    # the working tree (git diff)
+obversa-review --staged           # the staged changes (git diff --cached)
+obversa-review --range main..HEAD # a ref range (git diff main..HEAD)
+```
+
+- `--cwd <dir>` runs against another repository directory; the review is
+  captured from that repository's root whatever directory you start in.
+- `--no-open` does not place the pane; the page URL is printed on stderr
+  for you to open.
+- `--app <name>` sets the surface app name, and with it the frame markers.
+
+The result is one framed JSON object on stdout (`<<<REVIEW_RESULT_V1>>>` …
+`<<<END_REVIEW_RESULT_V1>>>` for the default app name) with the decision and
+the annotations; a one-line summary goes to stderr. The exit code is 0 when
+the reviewer returned, 1 when the session ended any other way, and 2 for a
+bad argument. The full page and result contract is in the public docs page
+for the review surface.
 
 ## Setup
 
