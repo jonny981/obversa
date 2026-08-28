@@ -34,6 +34,15 @@ Other flags:
 
 The working tree diff is `git diff`, so untracked files do not appear.
 
+The diff, the code around each hunk, and the file list are captured
+twice, and the review is accepted only when both captures agree on every
+line, every file read, and the file list. If the repository changes
+between them, the command tries the pair again — three attempts in all —
+and then stops with `The repository changed while the review was being
+captured; retry when it is quiet`. A change that is made and undone the
+same way during both captures is not detected; the command takes no lock
+on the repository.
+
 In cmux the page opens in a split beside the terminal. Outside cmux it
 opens in your default browser. [How placement works](/hosts/cmux).
 
@@ -101,13 +110,18 @@ review surface returns, whatever it shows.
 
 - `surfaceId` names this review session. `gateId` names the pipeline gate
   that opened it, or `null` when you ran the command directly.
-- `decision` is `changes-requested` when the review carries annotations and
-  `approved` when it carries none.
+- `decision` agrees with the annotations: `changes-requested` carries at
+  least one, and `approved` carries none. A submission that says otherwise
+  is refused and the page stays open, so a decision is never rewritten on
+  the reviewer's behalf. `cancelled` and `timed-out` are set only by the
+  session's own ending, never by a submission.
 - Each annotation has an `anchor`: `target` is the repository-relative file
   path as it appears in the diff, `side` is `old` for a deleted line or `new`
   for an added or unchanged line, and `position` is the line number on that
-  side. `body` is the comment text with surrounding whitespace removed.
-  `author` is the reviewer, and `createdAt` is when the comment was written.
+  side. An anchor is those three plain values and nothing else; one with an
+  extra, hidden, or computed field is refused. `body` is the comment text
+  with surrounding whitespace removed. `author` is the reviewer, and
+  `createdAt` is when the comment was written.
 
 The bounds are fixed. A review returns at most 500 annotations. Each body
 is cut at 4000 characters. An annotation must anchor to a line that
@@ -126,12 +140,14 @@ one session token, one result. The static page names nothing under review:
 not the diff, not the ref, not even the highlight rules, which are built
 from the tokens the diff contains. The page fetches the diff, its label, and
 those rules from the session API with the bearer token, so a local process
-that finds the port sees a shell that is the same for every review. Nothing
-in a
-diff line can execute. The page has no inline script, a strict Content
-Security Policy allows scripts and styles from the session origin only,
-and every line is rendered as text. The returned annotations are checked
-on the server, and one that does not anchor to a real diff line is
-dropped. Comment bodies are trimmed and cut at 4000 characters, and are
-otherwise returned as written: the secret redaction the runtime applies to
-other responses does not apply to them, because a comment can quote code.
+that finds the port sees a shell that is the same for every review. The
+address the page fetches from is a path on the session's own origin or an
+absolute `http` or `https` URL; a path that would leave the origin once
+parsed is refused. Nothing in a diff line can execute. The page has no
+inline script, a strict Content Security Policy allows scripts and styles
+from the session origin only, and every line is rendered as text. The
+returned annotations are checked on the server, and one that does not
+anchor to a real diff line is dropped. Comment bodies are trimmed and cut at
+4000 characters, and are otherwise returned as written: the secret
+redaction the runtime applies to other responses does not apply to them,
+because a comment can quote code.
