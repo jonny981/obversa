@@ -95,10 +95,12 @@ export function moduleSpecifiers(text, fileName = 'module.ts') {
   const accessOn = (node, matches) => isAccess(node) && matches(ts.skipOuterExpressions(node.expression));
   const named = (name) => (expression) => ts.isIdentifier(expression) && expression.text === name;
   const isRequire = named('require');
-  // A loader reference: the identifier `require` (as a value, except as the
-  // object of a plain member that is not a loader), `module.require`,
-  // `require.resolve`, `import.meta.resolve`, and a computed member on any
-  // of `module`, `require`, `import.meta`.
+  // A loader reference: the identifier `require` (as a value, or as the
+  // object of any member but `.resolve`), a `.require` member on ANY
+  // object (every Module object carries the loader: `module`,
+  // `require.main`, an entry of `require.cache`), `require.resolve`,
+  // `import.meta.resolve`, and a computed member on any of `module`,
+  // `require`, `import.meta`.
   const isEquality = (parent) => ts.isBinaryExpression(parent) && [
     ts.SyntaxKind.EqualsEqualsEqualsToken, ts.SyntaxKind.ExclamationEqualsEqualsToken,
     ts.SyntaxKind.EqualsEqualsToken, ts.SyntaxKind.ExclamationEqualsToken,
@@ -115,34 +117,39 @@ export function moduleSpecifiers(text, fileName = 'module.ts') {
     }
     if (ts.isIdentifier(node)) {
       if (node.text !== 'require' || isName(node)) return false;
-      // As the object of a member: `.call` / `.apply` / `.bind` send the
-      // loader elsewhere; `.resolve` and a computed key make the access
-      // itself the loader reference; any other member is not a load.
+      // As the object of a member: `.resolve` and a computed key make the
+      // access itself the loader reference; any other member (`.main`,
+      // `.cache`, `.call`, `.bind`) reaches the loader or another Module
+      // through it, so the identifier is the loader use.
       const parent = node.parent;
       if (isAccess(parent) && ts.skipOuterExpressions(parent.expression) === node) {
         const member = memberName(parent);
-        return member === 'call' || member === 'apply' || member === 'bind';
+        return member !== 'resolve' && member !== null;
       }
       return true;
     }
     if (!isAccess(node)) return false;
     const member = memberName(node);
-    if (accessOn(node, named('module'))) return member === 'require' || member === null;
+    if (member === 'require') return true;
+    if (accessOn(node, named('module'))) return member === null;
     if (accessOn(node, isRequire)) return member === 'resolve' || member === null;
     if (accessOn(node, isImportMeta)) return member === 'resolve' || member === null;
     return false;
   };
-  // `node:module` makes loaders: `createRequire` returns one and `register`
-  // installs a hook. The module may be imported only by name, unrenamed,
-  // never `register`, and never as a namespace or default (a binding the
-  // scan does not follow); a dynamic import or require of it is refused.
-  // A `createRequire(...)` result may be bound only as `const require`, so
-  // the loader keeps the name the scan tracks.
+  // `node:module` makes loaders: `createRequire` returns one, `register`
+  // and `registerHooks` install resolution hooks, and the rest of it is
+  // not followed. The module may be imported only by the unrenamed names
+  // `createRequire`, `builtinModules`, and `isBuiltin`, never as a
+  // namespace or default (a binding the scan does not follow); a dynamic
+  // import or require of it is refused. A `createRequire(...)` result may
+  // be bound only as `const require`, so the loader keeps the name the scan
+  // tracks.
   const isModuleModule = (node) => ['module', 'node:module'].includes(literal(node));
+  const moduleModuleNames = new Set(['createRequire', 'builtinModules', 'isBuiltin']);
   const readsModuleModule = (node) => {
     const clause = node.importClause;
     if (!clause || clause.name || !clause.namedBindings || !ts.isNamedImports(clause.namedBindings)) return false;
-    return clause.namedBindings.elements.every((element) => !element.propertyName && element.name.text !== 'register');
+    return clause.namedBindings.elements.every((element) => !element.propertyName && moduleModuleNames.has(element.name.text));
   };
   const isCreateRequire = (node) =>
     (ts.isIdentifier(node) && node.text === 'createRequire' && !(node.parent && ts.isImportSpecifier(node.parent) && node.parent.name === node && !node.parent.propertyName))
@@ -392,6 +399,11 @@ export function manifestPathTargets(manifest, { file, root: repoRoot, host = ts.
   const values = fields.flatMap((field) => leaves(manifest?.[field]).map((value) => [field, value]));
   if (typeof manifest?.publishConfig?.directory === 'string') values.push(['publishConfig.directory', manifest.publishConfig.directory]);
   const found = [];
+  // A typesVersions wildcard substitutes a consumer's subpath — `..`
+  // segments included, the compiler does not refuse them there — so a
+  // pattern with a wildcard can land anywhere; it is refused.
+  const patterns = Object.values(manifest?.typesVersions ?? {}).flatMap((byRange) => [...Object.keys(byRange ?? {}), ...leaves(byRange)]);
+  if (patterns.some((pattern) => pattern.includes('*'))) found.push(refusal('typesVersions uses a wildcard, which substitutes a consumer subpath the scan cannot bound'));
   for (const [field, value] of values) {
     if (value.startsWith('@obversa/')) {
       found.push(value.split('/').slice(0, 2).join('/'));
@@ -399,7 +411,11 @@ export function manifestPathTargets(manifest, { file, root: repoRoot, host = ts.
     }
     // A bare package name (`browser: { fs: "browserify-fs" }`) is not a path.
     if (!/^(?:\.|\/|~)/.test(value) && !value.includes('/')) continue;
-    const placed = placement(resolve(dirname(file), value.split(/[*?]/)[0]), { file, root: repoRoot, host, what: field });
+    // Only the pattern fields carry a wildcard, and only `*` is one; `?`
+    // and `*` are ordinary characters in an entry path, so a plain field
+    // is placed whole.
+    const literal = field === 'exports' || field === 'typesVersions' ? value.split('*')[0] : value;
+    const placed = placement(resolve(dirname(file), literal), { file, root: repoRoot, host, what: field });
     if (placed) found.push(placed);
   }
   return found;
@@ -431,7 +447,8 @@ export function manifestImportTargets(manifest, { file, root: repoRoot } = {}) {
   };
   const found = [];
   for (const leaf of leaves(manifest?.imports ?? {})) {
-    const crossing = crossingPackage(leaf.split(/[*?]/)[0], { file, root: repoRoot });
+    // `*` is the map's only wildcard; `?` is an ordinary character.
+    const crossing = crossingPackage(leaf.split('*')[0], { file, root: repoRoot });
     if (crossing) found.push(crossing);
   }
   return found;
@@ -816,6 +833,14 @@ for (const field of ['packageExtensions', 'patchedDependencies']) {
 const workspaceFile = await readFile(join(root, 'pnpm-workspace.yaml'), 'utf8');
 if (workspaceFile !== 'packages:\n  - packages/*\n')
   failures.push('pnpm-workspace.yaml: must be exactly the packages glob (pinned here; review the boundary rule with any change)');
+// A pnpmfile hook rewrites manifests as they are read, and an .npmrc can
+// name one or change how workspace packages link; neither is read by the
+// scan, so their presence at the root or in a package is refused.
+for (const dir of ['.', ...[...packageRules.keys()].map((name) => join('packages', name.slice('@obversa/'.length)))]) {
+  for (const hook of ['.pnpmfile.cjs', 'pnpmfile.cjs', '.pnpmfile.mjs', '.pnpmfile.js', '.npmrc', '.yarnrc', '.yarnrc.yml']) {
+    if (await exists(join(root, dir, hook))) failures.push(`${join(dir, hook)}: rewrites what packages install or how they link, which the scan does not read`);
+  }
+}
 
 for (const path of [
   'packages/lines/src/cli.ts',

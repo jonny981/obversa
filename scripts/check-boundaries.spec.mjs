@@ -105,12 +105,19 @@ test("a manifest's entry fields are placed by the package their real path lies i
   assert.deepEqual(manifestPathTargets({ module: "../memory/src/index.ts", browser: { "./x.js": "../surfacer/src/client.mjs", fs: "browserify-fs" } }, at), ["@obversa/memory", "@obversa/surfacer"], "module and a browser map; a bare package name is not a path");
   assert.deepEqual(manifestPathTargets({ types: "../surfacer/types/index.d.ts" }, at), ["@obversa/surfacer"], "types");
   assert.deepEqual(manifestPathTargets({ typings: "../surfacer/types/index.d.ts" }, at), ["@obversa/surfacer"], "typings");
-  assert.deepEqual(manifestPathTargets({ typesVersions: { "*": { "*": ["../memory/dist/*"] } } }, at), ["@obversa/memory"], "typesVersions patterns by their literal prefix");
+  assert.deepEqual(manifestPathTargets({ typesVersions: { ">=4": { "testing": ["../memory/dist/testing.d.ts"] } } }, at), ["@obversa/memory"], "an exact typesVersions mapping by its path");
+  assert.deepEqual(manifestPathTargets({ typesVersions: { "*": { "*": ["types/*"] } } }, at), [refusal("typesVersions uses a wildcard, which substitutes a consumer subpath the scan cannot bound")], "a wildcard mapping lets @obversa/source/../../surfacer/index resolve into the sibling under the compiler");
+  assert.deepEqual(manifestPathTargets({ typesVersions: { "*": { "*": ["../memory/dist/*"] } } }, at), [refusal("typesVersions uses a wildcard, which substitutes a consumer subpath the scan cannot bound"), "@obversa/memory"]);
   assert.deepEqual(manifestPathTargets({ exports: { "./deep": "../surfacer/src/index.mjs" } }, at), ["@obversa/surfacer"], "an exports leaf");
   assert.deepEqual(manifestPathTargets({ directories: { lib: "../surfacer/src" } }, at), ["@obversa/surfacer"]);
   assert.deepEqual(manifestPathTargets({ publishConfig: { access: "public", directory: "../surfacer" } }, at), ["@obversa/surfacer"], "publishing another directory");
   assert.deepEqual(manifestPathTargets({ main: "../../" }, at), [refusal("main reaches ., which holds every package")]);
   assert.deepEqual(manifestPathTargets({ main: "@obversa/surfacer/src/index.mjs" }, at), ["@obversa/surfacer"], "by name");
+  // `?` and `*` are ordinary characters in an entry path; Node loads the
+  // file they name, `..` and all.
+  assert.deepEqual(manifestPathTargets({ main: "./x?/../../surfacer/index.cjs" }, at), ["@obversa/surfacer"], "a question mark does not end the path");
+  assert.deepEqual(manifestPathTargets({ module: "./x*/../../memory/index.js", types: "./t?/../../surfacer/index.d.ts" }, at), ["@obversa/memory", "@obversa/surfacer"]);
+  assert.deepEqual(manifestImportTargets({ imports: { "#x": "./x?/../../surfacer/src/index.mjs" } }, { file: "/repo/packages/source/package.json", root: "/repo" }), ["@obversa/surfacer"], "an imports leaf too");
 });
 
 test("a project config is read as the compiler reads it: every extends form, ${configDir}, and the options a base carries", () => {
@@ -304,9 +311,9 @@ test("the CommonJS loader and the resolvers name a module too: module.require, r
     module["require"]("@obversa/memory");
     require.resolve("@obversa/lines");
     import.meta.resolve("@obversa/memory-git");
-    other.require("@obversa/not-a-loader");
+    other.require("@obversa/memory-simple");
   `;
-  assert.deepEqual(extractObversaImports(source, { file: "/repo/packages/source/src/a.cjs", root: "/repo" }), ["@obversa/surfacer", "@obversa/memory", "@obversa/lines", "@obversa/memory-git"]);
+  assert.deepEqual(extractObversaImports(source, { file: "/repo/packages/source/src/a.cjs", root: "/repo" }), ["@obversa/surfacer", "@obversa/memory", "@obversa/lines", "@obversa/memory-git", "@obversa/memory-simple"], "a .require call on any object is a load: every Module object carries the loader");
   assert.deepEqual(moduleSpecifiers('module[key]("x"); require[key]("y"); import.meta[key]("w"); module.other("z");', "a.cjs"), [null, null, null], "a computed member may be the loader, so it is unreadable; another member is not a load");
   // A wrapper that changes nothing at runtime does not hide the loader.
   const wrapped = `
@@ -356,6 +363,14 @@ test("the CommonJS loader and the resolvers name a module too: module.require, r
     'const { createRequire } = await import("node:module");',
     'const m = require("module");',
     'mod.createRequire(import.meta.url)("../../surfacer/x.cjs");',
+    'import { registerHooks } from "node:module";',
+    'import { createRequire, register } from "node:module";',
+    'import { findSourceMap } from "node:module";',
+    // Every Module object carries the loader, whatever it is reached as.
+    'require.main;',
+    'require.cache;',
+    'const r = require.main.require;',
+    'o.require;',
   ]) {
     const found = extractObversaImports(use, { file: "/repo/packages/source/src/u.cjs", root: "/repo" });
     assert.ok(found.length >= 1 && found.every((entry) => entry === computed), `${use} -> ${JSON.stringify(found)}`);
@@ -363,14 +378,21 @@ test("the CommonJS loader and the resolvers name a module too: module.require, r
   // A member that is not a loader is not a use of one; a declaration or a
   // property named require is a name, not a reference.
   for (const fine of [
-    'require.main === module;', 'module !== require.main;', 'require.cache;', 'module.exports = 1;', 'module.id;', 'import.meta.url;', 'import.meta.dirname;',
-    'const { require: r } = x;', 'o.require;', 'o.module;', 'class A { require() {} }', 'const module = 1;', '/** @param {typeof require} r */ function f(r) {}',
+    'module.exports = 1;', 'module.id;', 'import.meta.url;', 'import.meta.dirname;',
+    'const { require: r } = x;', 'o.module;', 'class A { require() {} }', 'const module = 1;', '/** @param {typeof require} r */ function f(r) {}',
     'import { createRequire } from "node:module"; const require = createRequire(import.meta.url); require("./local.cjs");',
-    'import { createRequire, builtinModules } from "node:module"; const require = createRequire(import.meta.url);',
+    'import { createRequire, builtinModules, isBuiltin } from "node:module"; const require = createRequire(import.meta.url);',
     'import mod from "node:mod"; const require = mod.createRequire(import.meta.url);',
   ]) {
     assert.deepEqual(extractObversaImports(fine, { file: "/repo/packages/source/src/f.mjs", root: "/repo" }), [], fine);
   }
+  // A `.require(...)` call on any object loads: the main module, a cache
+  // entry, a Module reached however — the load is read, and reaching the
+  // Module through `require.main` / `require.cache` is itself refused.
+  assert.deepEqual(
+    extractObversaImports('require.main.require("@obversa/surfacer"); require.cache[k].require("../../memory/src/index.cjs"); anything.require("@obversa/lines");', { file: "/repo/packages/source/src/m.cjs", root: "/repo" }),
+    ["@obversa/surfacer", computed, "@obversa/memory", computed, "@obversa/lines"],
+  );
 });
 
 test("an input reached through a symlink outside every package is placed where it really is", () => {
