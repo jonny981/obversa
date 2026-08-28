@@ -54,9 +54,9 @@ test("a package.json imports alias, a workspace devDependency, and an alias that
   const at = { file: "/repo/packages/source/package.json", root: "/repo" };
   assert.deepEqual(manifestImportTargets({ imports: { "#surface": "@obversa/surfacer" } }, at), ["@obversa/surfacer"], "an alias to a sibling by name");
   assert.deepEqual(
-    manifestImportTargets({ imports: { "#kit": { node: "@obversa/surfacer/client", default: "./src/local.mjs" }, "#mem/*": ["../memory/src/*", "./fallback.mjs"] } }, at),
+    manifestImportTargets({ imports: { "#kit": { node: "@obversa/surfacer/client", default: "./src/local.mjs" }, "#mem": ["../memory/src/index.ts", "./fallback.mjs"] } }, at),
     ["@obversa/surfacer", "@obversa/memory"],
-    "every string leaf: a conditional object, an array, a subpath, a relative path into a sibling",
+    "every string leaf: a conditional object, an array, a subpath, a relative path into a sibling (a pattern leaf is refused outright; see the vm-alias test)",
   );
   assert.deepEqual(manifestImportTargets({ imports: { "#local": "./src/x.mjs", "#dep": "some-external" } }, at), [], "own paths and external packages are not crossings");
   const builtinAlias = (leaf) => refusal(`package imports alias the ${leaf} builtin, which the source rules refuse in every form`);
@@ -603,6 +603,16 @@ test("a package-imports alias of vm is refused, which closes a source import of 
   assert.deepEqual(extractObversaImports('import vm from "#vm";', { file: "/repo/packages/source/src/a.mjs", root: "/repo" }), []);
   assert.equal(manifestImportTargets({ imports: { "#vm": "node:vm" } }, { file, root: "/repo" }).length, 1);
   assert.deepEqual(manifestImportTargets({ imports: { "#h": "./src/helper.mjs" } }, { file, root: "/repo" }), []);
+  // An imports pattern substitutes the importer's text: `#escape` through
+  // "#*": "./src/*.test.mjs" loads src/escape.test.mjs, and `#escape.test`
+  // through "#*": "./src/*.mjs" does the same, with no test text at the
+  // shipped edge. The pattern shape is refused whatever its suffix.
+  assert.deepEqual(extractObversaImports('import { probe } from "#escape";', { file: "/repo/packages/source/src/a.mjs", root: "/repo" }), [], "the shipped import shows no test text");
+  for (const pattern of ["./src/*.test.mjs", "./src/*.mjs", "./*", "./test/*"]) {
+    const found = manifestImportTargets({ imports: { "#*": pattern } }, { file, root: "/repo" });
+    assert.equal(found.length, 1, pattern);
+    assert.match(found[0], /imports pattern .* list the aliases explicitly/, pattern);
+  }
 });
 
 test("the workspace file pin refuses a missing or an extra glob, not only accepts the exact text", () => {

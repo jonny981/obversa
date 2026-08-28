@@ -621,13 +621,20 @@ export function manifestImportTargets(manifest, { file, root: repoRoot } = {}) {
       found.push(refusal(`package imports alias the ${leaf} builtin, which the source rules refuse in every form`));
       continue;
     }
-    // `*` is the map's only wildcard; `?` is an ordinary character.
-    const literal = leaf.split('*')[0];
-    if (namesTestPath(literal, file)) {
+    // `*` is the map's only wildcard; `?` is an ordinary character. A
+    // pattern substitutes whatever the importer wrote after the alias, so
+    // `"#*": "./src/*.mjs"` reaches src/escape.test.mjs from a shipped
+    // import that shows no test text at its edge; the pattern shape is
+    // refused, as an exports pattern is.
+    if (leaf.includes('*')) {
+      found.push(refusal(`package imports pattern ${leaf} substitutes an importer's text into a path, test files included; list the aliases explicitly`));
+      continue;
+    }
+    if (namesTestPath(leaf, file)) {
       found.push(refusal(`package imports alias a test path, which is exempt from the loader-hatch rules: ${leaf}`));
       continue;
     }
-    const crossing = crossingPackage(literal, { file, root: repoRoot });
+    const crossing = crossingPackage(leaf, { file, root: repoRoot });
     if (crossing) found.push(crossing);
   }
   return found;
