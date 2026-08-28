@@ -12,6 +12,9 @@ import { fileURLToPath } from 'node:url';
 // reader and module resolver answer what a project config means and where a
 // specifier lands, so the scan never recreates the compiler's path rules.
 import ts from '@typescript/typescript6';
+// The range parser pnpm uses, at the pinned version, so a dependency value
+// is a range exactly when pnpm would install a version rather than a tag.
+import { validRange } from 'semver';
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const ignoredDirectories = new Set(['dist', 'node_modules']);
@@ -328,24 +331,14 @@ export function tsconfigDependencies(text, at) {
   return projectConfig(text, at).dependencies;
 }
 
-// A registry version range as pnpm reads one through node-semver: comparator
-// sets joined by `||`, each a run of comparators (`^1.2.3`, `>= 0.1.0
-// <0.2.0` — space allowed after an operator, `1.x`, `*`) or a hyphen range;
-// a prerelease or build identifier is `[0-9A-Za-z-]+` and nothing else, so
-// `1.0.0-foo_bar` is not a version (node-semver returns null and pnpm
-// falls through to a tag). A tag, a URL, a Git spec, a path, or anything
-// else the registry does not answer with a versioned package is not one.
-const identifier = '[0-9A-Za-z-]+';
-const part = '(?:\\d+|x|X|\\*)';
-const comparator = new RegExp(`^(?:[<>]=?|=|\\^|~)?v?${part}(?:\\.${part}){0,2}(?:-${identifier}(?:\\.${identifier})*)?(?:\\+${identifier}(?:\\.${identifier})*)?$`);
+// A registry version range as pnpm reads one: pnpm hands a selector to
+// node-semver's validRange in loose mode and treats a null answer as a
+// tag, so the same call, on the same pinned semver, decides here. An empty
+// selector is refused outright — validRange reads it as `*`, pnpm as
+// nothing. A tag, a URL, a Git spec, a path, or anything else the registry
+// does not answer with a versioned package is not a range.
 export function isVersionRange(value) {
-  const normalised = value.trim().replace(/([<>]=?|=|\^|~)\s+/g, '$1');
-  if (normalised.length === 0) return false;
-  return normalised.split(/\s*\|\|\s*/).every((set) => {
-    const tokens = set.trim().split(/\s+/);
-    if (tokens.length === 3 && tokens[1] === '-') return comparator.test(tokens[0]) && comparator.test(tokens[2]);
-    return tokens.every((token) => comparator.test(token));
-  });
+  return value.trim().length > 0 && validRange(value, { loose: true }) !== null;
 }
 
 // What a dependency value installs. `name`: a workspace package, by key

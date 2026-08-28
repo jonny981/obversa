@@ -20,6 +20,9 @@ importers:
       mint:
         specifier: 4.2.820
         version: 4.2.820(@base-ui/react@1.7.0(@types/react@19.2.18)(react-dom@19.2.8(react@19.2.3))(react@19.2.3))(@types/node@22.12.0)(@types/react@19.2.18)(react-dom@19.2.8(react@19.2.3))(typescript@7.0.2)
+      semver:
+        specifier: 7.8.5
+        version: 7.8.5
       tsup:
         specifier: 8.5.1
         version: 8.5.1(jiti@1.21.7)(postcss@8.5.26)(tsx@4.22.4)(typescript@7.0.2)(yaml@2.9.0)

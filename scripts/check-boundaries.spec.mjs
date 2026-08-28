@@ -7,6 +7,7 @@ import { mkdtempSync, mkdirSync, realpathSync, rmSync, symlinkSync, writeFileSyn
 import os from "node:os";
 import path from "node:path";
 import ts from "@typescript/typescript6";
+import { validRange } from "semver";
 
 import { dependencyTarget, extractObversaImports, internalDependencies, isProjectConfig, isVersionRange, manifestImportTargets, manifestPathTargets, moduleSpecifiers, parserExtensions, projectConfig, refusal, scansImports, sourceExtensions, textExtensions, tsconfigDependencies, walkTree } from "./check-boundaries.mjs";
 
@@ -83,7 +84,17 @@ test("a dependency value is a registry range, a registry alias, a workspace pack
   for (const range of ["1.2.3", "^1.2.3", "~0.1.0", ">=0.1.0 <0.2.0", ">= 1.0.0", ">= 0.1.0 < 0.2.0", "1.x", "*", "1.2.3 - 2.0.0", "^1.0.0 || ^2.0.0", "4.4.3", "0.3.241", "1.0.0-beta.1", "1.0.0-rc-1+build.7"]) assert.equal(isVersionRange(range), true, range);
   // node-semver's grammar, as pnpm reads it: an identifier is [0-9A-Za-z-];
   // anything it returns null for falls through to a tag.
-  for (const other of ["latest", "1.0.0-foo_bar", "1.0.0+a_b", "../surfacer", "github:obversa/surfacer", "obversa/surfacer", "git+ssh://git@github.com/o/s.git", "https://example.test/s.tgz", "file:../surfacer", "link:../surfacer", "catalog:", ""]) assert.equal(isVersionRange(other), false, other);
+  for (const range of ["1", "1.2", "1.x", "1.X", "1.*", "1.2.x", "1.x.x", "x", "X", "x.x.x", "*.*"]) assert.equal(isVersionRange(range), true, `${range} is an x-range`);
+  // What pnpm treats as a tag: validRange(..., { loose: true }) is null.
+  const tags = ["1.x.3", "x.1", "1.*.3", "1.2-foo", "1.x-foo", "x.1.2", "1.2.3.4", "9007199254740992.0.0", `1.2.3-${"a".repeat(300)}`, "latest", "1.0.0-foo_bar", "1.0.0+a_b", "../surfacer", "github:obversa/surfacer", "obversa/surfacer", "git+ssh://git@github.com/o/s.git", "https://example.test/s.tgz", "file:../surfacer", "link:../surfacer", "catalog:"];
+  for (const other of tags) assert.equal(isVersionRange(other), false, `${other} is a tag to pnpm`);
+  assert.equal(isVersionRange(""), false, "an empty selector is nothing to pnpm, though validRange reads it as *");
+  // The premise, on the pinned semver pnpm bundles: every answer above is
+  // validRange's own.
+  for (const value of [...tags, "1.2.3", "^1.2.3", ">= 1.0.0", "1.x", "*", "1.2.3 - 2.0.0", "^1.0.0 || ^2.0.0"]) {
+    assert.equal(isVersionRange(value), validRange(value, { loose: true }) !== null, `${value}: the guard answers as validRange does`);
+  }
+  assert.equal(validRange("", { loose: true }), "*", "validRange alone would accept an empty selector");
   assert.deepEqual(dependencyTarget("zod", "^4.4.3", at), { external: true });
   assert.deepEqual(dependencyTarget("lod", "npm:lodash@^4", at), { external: true }, "an alias of a registry package");
   assert.deepEqual(dependencyTarget("lod", "npm:lodash", at), { refused: "lod is npm:lodash, which is not a registry version the scan can read" }, "an alias without a version installs latest, a tag");
