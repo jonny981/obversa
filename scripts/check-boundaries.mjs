@@ -85,6 +85,26 @@ export function isTestPath(path) {
   return /(?:^|\/)(?:test|tests|__tests__)\/|\.(?:test|spec)\.[^/]+$/.test(path);
 }
 
+// The members of the global object (`globalThis`, and `global`, the same
+// object under Node's other name) that hold data or plain behaviour and
+// cannot hand a root, a loader, or an evaluator back. `eval` and `Function`
+// are not here: `global.eval("...")` runs generated code exactly as bare
+// `eval` does.
+const globalDataMembers = new Set([
+  'process', 'structuredClone', 'fetch', 'WebSocket', 'crypto', 'setTimeout', 'clearTimeout', 'setInterval',
+  'clearInterval', 'queueMicrotask', 'URL', 'TextEncoder', 'TextDecoder', 'AbortController', 'Buffer',
+  'console', 'performance', 'navigator',
+]);
+
+// The workspace file is pinned verbatim: the workspace is the packages and
+// the hosts, and any other glob would bring code under the arrow rules that
+// the package table does not know. Exported so the spec proves the pin
+// refuses a missing or an extra glob, not only accepts the exact text.
+export const PINNED_WORKSPACE_FILE = 'packages:\n  - packages/*\n  - hosts/*\n';
+export function isPinnedWorkspaceFile(text) {
+  return text === PINNED_WORKSPACE_FILE;
+}
+
 // Whether a specifier or manifest path, read from `file`, names a test path:
 // a relative or absolute one by where it resolves (with or without an
 // extension, so `./a.test` counts as `./a.test.mjs` does), a bare one by its
@@ -144,10 +164,11 @@ export function moduleSpecifiers(text, fileName = 'module.ts', { hatches = !isTe
     ts.SyntaxKind.EqualsEqualsToken, ts.SyntaxKind.ExclamationEqualsToken,
   ].includes(parent.operatorToken.kind);
   // The roots a loader can be acquired from: `module`, `import.meta`,
-  // `process` (its builtin factory), `globalThis` (which holds `process`),
-  // and `globalThis.process` itself.
+  // `process` (its builtin factory), `globalThis` and `global` (the same
+  // object under two names; it holds `process`, `eval` and `Function`), and
+  // `globalThis.process` itself.
   const isRoot = (node) => {
-    if (ts.isIdentifier(node)) return ['module', 'process', 'globalThis'].includes(node.text) && !isName(node);
+    if (ts.isIdentifier(node)) return ['module', 'process', 'globalThis', 'global'].includes(node.text) && !isName(node);
     if (isImportMeta(node)) return true;
     return isAccess(node) && memberName(node) === 'process' && isRoot(ts.skipOuterExpressions(node.expression));
   };
@@ -162,11 +183,8 @@ export function moduleSpecifiers(text, fileName = 'module.ts', { hatches = !isTe
       'on', 'once', 'off', 'emit', 'addListener', 'removeListener', 'removeAllListeners', 'listenerCount',
       'kill', 'hrtime', 'nextTick', 'uptime', 'memoryUsage', 'cpuUsage', 'resourceUsage', 'emitWarning', 'abort',
     ]),
-    globalThis: new Set([
-      'process', 'structuredClone', 'fetch', 'WebSocket', 'crypto', 'setTimeout', 'clearTimeout', 'setInterval',
-      'clearInterval', 'queueMicrotask', 'URL', 'TextEncoder', 'TextDecoder', 'AbortController', 'Buffer',
-      'console', 'performance', 'navigator',
-    ]),
+    globalThis: globalDataMembers,
+    global: globalDataMembers,
     module: moduleDataMembers,
     // `resolve` is the loader and is judged as the access node itself.
     'import.meta': new Set(['url', 'dirname', 'filename', 'resolve']),
@@ -550,8 +568,14 @@ export function manifestPathTargets(manifest, { file, root: repoRoot, host = ts.
     if (!/^(?:\.|\/|~)/.test(value) && !value.includes('/')) continue;
     // Only the pattern fields carry a wildcard, and only `*` is one; `?`
     // and `*` are ordinary characters in an entry path, so a plain field
-    // is placed whole.
-    const literal = field === 'exports' || field === 'typesVersions' ? value.split('*')[0] : value;
+    // is placed whole. An exports pattern exposes every file under its
+    // prefix to any consumer — a test file included, with no shipped source
+    // edge to catch — so it is refused: subpaths are listed explicitly.
+    if (field === 'exports' && value.includes('*')) {
+      found.push(refusal(`exports pattern ${value} exposes every file under its prefix, test files included; list the subpaths explicitly`));
+      continue;
+    }
+    const literal = field === 'typesVersions' ? value.split('*')[0] : value;
     // A manifest entry is a shipped entry; one that names a test file would
     // ship the loader-hatch exemption.
     if (namesTestPath(literal, file)) {
@@ -591,9 +615,10 @@ export function manifestImportTargets(manifest, { file, root: repoRoot } = {}) {
   const found = [];
   for (const leaf of leaves(manifest?.imports ?? {})) {
     // An alias of the module builtin hands out its loaders under a name
-    // the source scan does not know: refused.
-    if (leaf === 'module' || leaf === 'node:module') {
-      found.push(refusal(`package imports alias the module builtin (${leaf}), which makes loaders`));
+    // the source scan does not know, and an alias of vm runs generated code
+    // the same way: both refused, as the source scan refuses them by name.
+    if (leaf === 'module' || leaf === 'node:module' || leaf === 'vm' || leaf === 'node:vm') {
+      found.push(refusal(`package imports alias the ${leaf} builtin, which the source rules refuse in every form`));
       continue;
     }
     // `*` is the map's only wildcard; `?` is an ordinary character.
@@ -728,7 +753,15 @@ export function extractObversaImports(text, { file, root: repoRoot, configs = []
     if (!file || !repoRoot) continue;
     for (const options of configs) {
       for (const target of resolvedTargets(specifier, file, options, host)) {
-        const dir = packageDirOf(realpathOf(target, host), repoRoot);
+        const real = realpathOf(target, host);
+        // An alias (`paths`, `baseUrl`) can land a shipped import on a test
+        // file inside its own package; that is the same shipped edge, refused
+        // before the same-package skip below.
+        if (!isTestPath(file) && isTestPath(real)) {
+          found.push(refusal(`shipped source resolves to a test path, which is exempt from the loader-hatch rules: ${specifier} -> ${relative(repoRoot, real)}`));
+          continue;
+        }
+        const dir = packageDirOf(real, repoRoot);
         if (dir === undefined || dir === owner) continue;
         const name = `@obversa/${dir}`;
         if (named.has(name)) continue;
@@ -1096,8 +1129,8 @@ for (const field of Object.keys(rootManifest.pnpm ?? {})) {
 // The workspace is the packages and the hosts: a host is the composition
 // root where the packages meet, and it takes them by their public names.
 const workspaceFile = await readFile(join(root, 'pnpm-workspace.yaml'), 'utf8');
-if (workspaceFile !== 'packages:\n  - packages/*\n  - hosts/*\n')
-  failures.push('pnpm-workspace.yaml: must be exactly the packages and hosts globs (pinned here; review the boundary rule with any change)');
+if (!isPinnedWorkspaceFile(workspaceFile))
+  failures.push('pnpm-workspace.yaml: must be exactly the packages and hosts globs (pinned in isPinnedWorkspaceFile; review the boundary rule with any change)');
 // A pnpmfile hook rewrites manifests as they are read, and an .npmrc can
 // name one or change how workspace packages link; neither is read by the
 // scan, so their presence at the root or in a package is refused.

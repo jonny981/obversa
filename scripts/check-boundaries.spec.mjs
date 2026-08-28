@@ -9,7 +9,7 @@ import path from "node:path";
 import ts from "@typescript/typescript6";
 import { validRange } from "semver";
 
-import { dependencyTarget, extractObversaImports, internalDependencies, isProjectConfig, isTestPath, isVersionRange, manifestImportTargets, manifestPathTargets, moduleSpecifiers, parserExtensions, projectConfig, refusal, scansImports, sourceExtensions, textExtensions, tsconfigDependencies, walkTree } from "./check-boundaries.mjs";
+import { dependencyTarget, extractObversaImports, internalDependencies, isPinnedWorkspaceFile, isProjectConfig, isTestPath, isVersionRange, manifestImportTargets, manifestPathTargets, moduleSpecifiers, parserExtensions, PINNED_WORKSPACE_FILE, projectConfig, refusal, scansImports, sourceExtensions, textExtensions, tsconfigDependencies, walkTree } from "./check-boundaries.mjs";
 
 // A filesystem for the compiler made of a path -> text map, rooted at /repo.
 // The compiler's own directory matcher walks it, so `include` globs, package
@@ -59,7 +59,7 @@ test("a package.json imports alias, a workspace devDependency, and an alias that
     "every string leaf: a conditional object, an array, a subpath, a relative path into a sibling",
   );
   assert.deepEqual(manifestImportTargets({ imports: { "#local": "./src/x.mjs", "#dep": "some-external" } }, at), [], "own paths and external packages are not crossings");
-  const builtinAlias = (leaf) => refusal(`package imports alias the module builtin (${leaf}), which makes loaders`);
+  const builtinAlias = (leaf) => refusal(`package imports alias the ${leaf} builtin, which the source rules refuse in every form`);
   assert.deepEqual(manifestImportTargets({ imports: { "#module": "module" } }, at), [builtinAlias("module")], "an alias of the module builtin hides its loaders");
   assert.deepEqual(manifestImportTargets({ imports: { "#m": { node: "node:module", default: ["node:module", "./x.mjs"] } } }, at), [builtinAlias("node:module"), builtinAlias("node:module")], "through conditions and arrays");
   assert.deepEqual(manifestImportTargets({}, at), []);
@@ -573,6 +573,74 @@ test("a subpath import resolves to its package name; a relative import inside th
   const file = "/repo/packages/source/src/review.mjs";
   assert.deepEqual(extractObversaImports(`import x from "@obversa/memory/testing";`, { file, root: "/repo" }), ["@obversa/memory"]);
   assert.deepEqual(extractObversaImports(`import x from "../src/git.mjs"; require("./local.cjs");`, { file, root: "/repo" }), []);
+});
+
+test("global is the same guarded root as globalThis: its evaluators and unlisted members are refused", () => {
+  const file = "/repo/packages/source/src/a.mjs";
+  for (const text of [
+    'global.eval("process.getBuiltinModule");',
+    'global.Function("return process")();',
+    'const p = global.process.binding("fs");',
+    'const g = global; g.eval("1");',
+    'globalThis.eval("1");',
+  ]) {
+    assert.ok(extractObversaImports(text, { file, root: "/repo" }).length > 0, text);
+  }
+  // Listed data members stay usable through either name.
+  assert.deepEqual(extractObversaImports('global.setTimeout(() => {}, 1); const e = global.process.env.X; globalThis.console.log(1);', { file, root: "/repo" }), []);
+});
+
+test("a package-imports alias of vm is refused, which closes a source import of the alias", () => {
+  const file = "/repo/packages/source/package.json";
+  for (const target of ["vm", "node:vm", "module", "node:module"]) {
+    const found = manifestImportTargets({ imports: { "#x": target } }, { file, root: "/repo" });
+    assert.equal(found.length, 1, target);
+    assert.match(found[0], /alias the .* builtin/);
+  }
+  // The source side sees only the alias name; the manifest refusal is what
+  // stops it, so the two are proved together: the import names nothing on
+  // its own, and the manifest that would give it meaning is refused.
+  assert.deepEqual(extractObversaImports('import vm from "#vm";', { file: "/repo/packages/source/src/a.mjs", root: "/repo" }), []);
+  assert.equal(manifestImportTargets({ imports: { "#vm": "node:vm" } }, { file, root: "/repo" }).length, 1);
+  assert.deepEqual(manifestImportTargets({ imports: { "#h": "./src/helper.mjs" } }, { file, root: "/repo" }), []);
+});
+
+test("the workspace file pin refuses a missing or an extra glob, not only accepts the exact text", () => {
+  assert.equal(isPinnedWorkspaceFile(PINNED_WORKSPACE_FILE), true);
+  assert.equal(isPinnedWorkspaceFile("packages:\n  - packages/*\n  - hosts/*\n"), true);
+  for (const text of [
+    "packages:\n  - packages/*\n",
+    "packages:\n  - packages/*\n  - hosts/*\n  - tools/*\n",
+    "packages:\n  - hosts/*\n  - packages/*\n",
+    "packages:\n  - packages/*\n  - hosts/*",
+    "packages:\n  - packages/**\n  - hosts/*\n",
+    "",
+  ]) {
+    assert.equal(isPinnedWorkspaceFile(text), false, JSON.stringify(text));
+  }
+});
+
+test("a shipped import that an alias resolves to a test file, and an exports pattern that could expose one, are refused", () => {
+  // A `paths` alias lands a shipped import on the package's own test file:
+  // the compiler's resolution is the edge, refused before the same-package
+  // skip.
+  const file = "/repo/packages/source/src/a.ts";
+  const host = fakeHost(tree({
+    "/repo/packages/source/test/review.test.ts": "export const probe = process.getBuiltinModule('node:module');",
+    "/repo/packages/source/test/review.test.mjs": "export const probe = process.getBuiltinModule('node:module');",
+  }));
+  const { options } = projectConfig('{ "compilerOptions": { "allowJs": true, "paths": { "#escape": ["test/review.test.ts"], "#escape-js": ["test/review.test.mjs"] } } }', { file: SOURCE, root: "/repo", host });
+  for (const specifier of ["#escape", "#escape-js"]) {
+    const found = extractObversaImports(`import { probe } from "${specifier}";`, { file, root: "/repo", configs: [options], host });
+    assert.ok(found.some((entry) => /resolves to a test path/.test(entry)), `${specifier}: ${JSON.stringify(found)}`);
+  }
+  assert.deepEqual(extractObversaImports('import { probe } from "#escape";', { file: "/repo/packages/source/test/other.test.ts", root: "/repo", configs: [options], host }), [], "a test may reach a test");
+  // An exports pattern would expose src/escape.test.mjs to any consumer with
+  // no shipped source edge at all; the pattern shape is refused.
+  const manifestFile = "/repo/packages/source/package.json";
+  const withPattern = manifestPathTargets({ exports: { "./*": "./src/*.mjs" } }, { file: manifestFile, root: "/repo", host: fakeHost(tree({ "/repo/packages/source/src/escape.test.mjs": "" })) });
+  assert.ok(withPattern.some((entry) => /exports pattern .* list the subpaths explicitly/.test(entry)), JSON.stringify(withPattern));
+  assert.deepEqual(manifestPathTargets({ exports: { "./client": "./src/client.mjs" } }, { file: manifestFile, root: "/repo", host: fakeHost(tree({})) }), [], "an explicit subpath is placed as before");
 });
 
 test("a shipped entry cannot reach a test file, so the test file's loader-hatch exemption never ships", () => {
