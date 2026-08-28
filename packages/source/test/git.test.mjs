@@ -5,7 +5,39 @@ import os from "node:os";
 import path from "node:path";
 import test from "node:test";
 
-import { computeDiff, diffArgs, readNewFileText, listTrackedFiles, repositoryRoot, MAX_FILE_BYTES } from "../src/git.mjs";
+import { computeDiff, diffArgs, readNewFileText, listTrackedFiles, rangeEnd, repositoryRoot, MAX_FILE_BYTES } from "../src/git.mjs";
+
+test("rangeEnd reads a range the way git does: an omitted right side is HEAD, three dots before two", () => {
+  assert.equal(rangeEnd("A..B"), "B");
+  assert.equal(rangeEnd("A...B"), "B");
+  assert.equal(rangeEnd("..B"), "B");
+  assert.equal(rangeEnd("HEAD~1.."), "HEAD");
+  assert.equal(rangeEnd("HEAD~1..."), "HEAD");
+  assert.equal(rangeEnd("HEAD"), undefined, "a single revision ends at the worktree");
+  assert.equal(rangeEnd(null), undefined);
+});
+
+test("an omitted-end range lists the HEAD tree, never the live index", async () => {
+  const dir = makeRepo();
+  try {
+    writeFileSync(path.join(dir, "committed.txt"), "1\n");
+    git(dir, "add", "committed.txt");
+    git(dir, "commit", "-q", "-m", "one");
+    writeFileSync(path.join(dir, "second.txt"), "2\n");
+    git(dir, "add", "second.txt");
+    git(dir, "commit", "-q", "-m", "two");
+    // Staged only: in the index, not in HEAD.
+    writeFileSync(path.join(dir, "staged-only.txt"), "3\n");
+    git(dir, "add", "staged-only.txt");
+    const head = ["committed.txt", "second.txt"];
+    assert.deepEqual([...(await listTrackedFiles({ cwd: dir, ref: rangeEnd("HEAD~1..HEAD") }))].sort(), head);
+    assert.deepEqual([...(await listTrackedFiles({ cwd: dir, ref: rangeEnd("HEAD~1..") }))].sort(), head, "HEAD~1.. ends at HEAD");
+    assert.deepEqual([...(await listTrackedFiles({ cwd: dir, ref: rangeEnd("HEAD~1...") }))].sort(), head, "HEAD~1... ends at HEAD");
+    assert.deepEqual([...(await listTrackedFiles({ cwd: dir }))].sort(), [...head, "staged-only.txt"], "the index view is what a worktree or staged review lists");
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
 
 function git(cwd, ...args) {
   return execFileSync("git", args, { cwd, encoding: "utf8" });

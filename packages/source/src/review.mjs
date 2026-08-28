@@ -3,7 +3,7 @@ import { copyFile, mkdtemp, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 
-import { computeDiff, listTrackedFiles, rangeEnd, repositoryRoot } from "./git.mjs";
+import { computeDiff, listTrackedFiles, rangeEnd, readNewFileText, repositoryRoot } from "./git.mjs";
 import { parseUnifiedDiff } from "./diff.mjs";
 import { ASSETS_DIR, buildIndexHtml } from "./page.mjs";
 import { createHighlightRegistry, registryToCss } from "./highlight.mjs";
@@ -108,27 +108,51 @@ async function captureSupplied({ diffText, mode, range }) {
   return { resolved, allFiles: [], ...(await highlighted(diffText)) };
 }
 
-// One review from one repository state. The diff is computed, the context
-// bands and go-to-source hits are read beside it — one bounded reader serves
-// both, so a file is read once and the review-wide byte bound is one bound
-// across the two passes — the tracked-file list is taken (from the range's
-// end commit for a range review, else the index), and then the diff is
-// computed again: if the repository moved under any of those reads, the
-// hunks and anchors would sit beside content from a later state, so the
-// capture is retried from the top, and refused when the repository will not
-// hold still. `git` is the port for the root, the diff, and the tracked-file
-// list; the file reads themselves go through the bounded reader.
+// One pass over the repository: the diff, then the context bands and
+// go-to-source hits read beside it — one bounded reader serves both, so a
+// file is read once and the review-wide byte bound is one bound across the
+// two passes — then the tracked-file list (from the range's end commit for a
+// range review, else the index). Every byte the repository answered with is
+// folded into one fingerprint: the diff text, each file read's path, mode and
+// text, and the file list. `git` is the port for the diff and the list;
+// `readFile` is the port for the file reads.
+async function captureOnce({ mode, range, cwd, git, readFile }) {
+  const resolved = await git.computeDiff({ mode, range, cwd });
+  const { model, registry } = await highlighted(resolved.diffText);
+  const reads = [];
+  const read = boundedReader({
+    read: async (args) => {
+      const text = await readFile(args);
+      reads.push([args.path, args.mode, text]);
+      return text;
+    },
+  });
+  await contextModel(model, { mode: resolved.mode, cwd, registry, read });
+  await navModel(model, { mode: resolved.mode, cwd, read });
+  const allFiles = await git.listTrackedFiles({ cwd, ref: resolved.mode === "range" ? rangeEnd(resolved.range) : undefined });
+  const fingerprint = JSON.stringify([resolved.diffText, allFiles, reads]);
+  return { resolved, model, registry, allFiles, fingerprint };
+}
+
+// One review from one repository state, as far as reads without a lock can
+// tell: the whole capture is taken twice and accepted only when both passes
+// answered identically — every diff line, every file read, the file list. A
+// repository that moved under either pass shows up as a mismatch (a change
+// made after the first diff and undone before the second one included, since
+// the reads of the two passes then differ), so the capture is retried from
+// the top, and refused when the repository will not hold still. What this
+// cannot see is a change made and undone the same way inside both passes;
+// binding each read to the blob the diff names would close that and is not
+// done here.
 const CAPTURE_ATTEMPTS = 3;
-async function capture({ mode, range, cwd, git, read: makeReader = boundedReader }) {
+async function capture({ mode, range, cwd, git, readFile = readNewFileText }) {
   for (let attempt = 1; ; attempt += 1) {
-    const resolved = await git.computeDiff({ mode, range, cwd });
-    const { model, registry } = await highlighted(resolved.diffText);
-    const read = makeReader();
-    await contextModel(model, { mode: resolved.mode, cwd, registry, read });
-    await navModel(model, { mode: resolved.mode, cwd, read });
-    const allFiles = await git.listTrackedFiles({ cwd, ref: resolved.mode === "range" ? rangeEnd(resolved.range) : undefined });
-    const again = await git.computeDiff({ mode, range, cwd });
-    if (again.diffText === resolved.diffText) return { resolved, model, registry, allFiles };
+    const first = await captureOnce({ mode, range, cwd, git, readFile });
+    const second = await captureOnce({ mode, range, cwd, git, readFile });
+    if (second.fingerprint === first.fingerprint) {
+      const { resolved, model, registry, allFiles } = second;
+      return { resolved, model, registry, allFiles };
+    }
     if (attempt >= CAPTURE_ATTEMPTS) {
       throw new Error("The repository changed while the review was being captured; retry when it is quiet");
     }

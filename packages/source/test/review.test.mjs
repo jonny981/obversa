@@ -1,8 +1,11 @@
 import assert from "node:assert/strict";
-import { existsSync, readFileSync } from "node:fs";
+import { execFileSync } from "node:child_process";
+import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import os from "node:os";
 import path from "node:path";
 import test from "node:test";
 
+import { computeDiff } from "../src/git.mjs";
 import { buildSurfaceRequest, outputAnchors, reviewDiff } from "../src/review.mjs";
 import { isSurfaceRequest, MAX_ANNOTATIONS, MAX_BODY } from "../src/contract.mjs";
 import { parseUnifiedDiff } from "../src/diff.mjs";
@@ -272,8 +275,59 @@ test("a computed review takes its tracked-file list inside the capture window, f
   };
   const launchSurface = async ({ api }) => ({ status: "completed", result: { decision: "approved", annotations: [] }, meta: (await api["GET /api/model"]()).body.meta });
   const outcome = await reviewDiff({ mode: "range", range: "a..b", cwd: "/repo", launchSurface, clientKitSource: CLIENT_KIT, open: false, git });
-  assert.deepEqual(calls, ["computeDiff", "listTrackedFiles:b", "computeDiff"], "the list is read between the diff and its recheck, at the range's end");
+  assert.deepEqual(calls, ["computeDiff", "listTrackedFiles:b", "computeDiff", "listTrackedFiles:b"], "the list is read inside each of the two passes, at the range's end");
   assert.deepEqual(outcome.meta.allFiles, ["listed.js"]);
+});
+
+test("a change made after the first diff and undone before the second is caught by the file reads, and the review carries the settled content", async () => {
+  // Codex's probe: the diff is taken at state A, the file changes to B before
+  // the context is read, and A is restored before the diff is taken again.
+  // The two diffs agree, so a diff-only recheck accepted a review whose
+  // context came from B. The whole capture is now taken twice: the first
+  // pass read B, the second reads A, the fingerprints differ, and the capture
+  // is retried until two passes agree — on A.
+  const dir = mkdtempSync(path.join(os.tmpdir(), "source-aba-"));
+  const git = (...args) => execFileSync("git", args, { cwd: dir, encoding: "utf8" });
+  const lines = (last) => ["one", "two", "three", "four", "five", "six", "seven", "eight", "nine", last].join("\n") + "\n";
+  const committed = lines("ten");
+  const stateA = committed.replace("two", "TWO");
+  const stateB = stateA.replace("ten", "B-MARK");
+  try {
+    git("init", "-q");
+    git("config", "user.email", "test@example.com");
+    git("config", "user.name", "Test");
+    git("config", "commit.gpgsign", "false");
+    writeFileSync(path.join(dir, "a.txt"), committed);
+    git("add", "a.txt");
+    git("commit", "-q", "-m", "base");
+    writeFileSync(path.join(dir, "a.txt"), stateA);
+    let diffs = 0;
+    const port = {
+      repositoryRoot: async () => dir,
+      computeDiff: async (options) => {
+        diffs += 1;
+        // The first diff sees A, then the file flips to B for the reads; the
+        // second diff sees A again. Later passes see A throughout.
+        writeFileSync(path.join(dir, "a.txt"), stateA);
+        const result = await computeDiff(options);
+        if (diffs === 1) writeFileSync(path.join(dir, "a.txt"), stateB);
+        return result;
+      },
+      listTrackedFiles: async () => ["a.txt"],
+    };
+    let model;
+    const launchSurface = async ({ api }) => {
+      model = (await api["GET /api/model"]()).body.model;
+      return { status: "completed", result: { decision: "approved", annotations: [] } };
+    };
+    await reviewDiff({ cwd: dir, launchSurface, clientKitSource: CLIENT_KIT, open: false, git: port });
+    const after = model.files[0].contextAfter.map((entry) => entry.text);
+    assert.ok(after.includes("ten"), "the context carries the state both passes agreed on");
+    assert.ok(!after.includes("B-MARK"), "the context from the undone change never reaches the review");
+    assert.equal(diffs, 4, "the first pair of passes disagreed; the second pair agreed");
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
 });
 
 test("a repository that keeps changing under the capture is refused after three attempts", async () => {

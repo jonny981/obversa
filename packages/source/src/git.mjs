@@ -226,11 +226,16 @@ export async function listTrackedFiles({ cwd = process.cwd(), ref } = {}) {
 }
 
 /**
- * The revision a range review ends at: `A..B` and `A...B` end at B; a single
- * revision diffs against the worktree and ends there (undefined).
+ * The revision a range review ends at: `A..B` and `A...B` end at B; `A..`
+ * and `A...` end at HEAD, as git reads an omitted right side; a single
+ * revision diffs against the worktree and ends there (undefined). The
+ * three-dot form is matched before the two-dot form, so `A...` is not read
+ * as `A..` ending at `.`.
  * @param {string | null | undefined} range
  * @returns {string | undefined}
  */
 export function rangeEnd(range) {
-  return /\.\.\.?(.+)$/.exec(String(range ?? ""))?.[1];
+  const match = /^.*?(?:\.\.\.|\.\.)(.*)$/.exec(String(range ?? ""));
+  if (!match) return undefined;
+  return match[1].length > 0 ? match[1] : "HEAD";
 }
