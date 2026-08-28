@@ -885,6 +885,24 @@ test("the guard, run on a disposable copy of the tree, refuses a shipped host im
     assert.match(hostLinked.stderr, /hosts\/cmux\/bin\/obversa-escape: a symlink under packages\/ or hosts\/ is refused/);
     rmSync(hostLink);
     rmSync(escapeScript);
+    // The main walk skips dist by name; a link kept there, under a host or a
+    // package, is met by the per-host and per-package walks and refused.
+    writeFileSync(escapeScript, '#!/usr/bin/env node\nconsole.log(eval("40 + 2"));\n');
+    mkdirSync(path.join(root, "hosts", "cmux", "dist"), { recursive: true });
+    const distLink = path.join(root, "hosts", "cmux", "dist", "obversa-escape");
+    symlinkSync(path.join("..", "..", "..", "scripts", "escape.mjs"), distLink);
+    const distLinked = guard();
+    assert.notEqual(distLinked.status, 0);
+    assert.match(distLinked.stderr, /hosts\/cmux\/dist\/obversa-escape: a symlink under packages\/ or hosts\/ is refused/);
+    rmSync(path.join(root, "hosts", "cmux", "dist"), { recursive: true });
+    mkdirSync(path.join(root, "packages", "source", "dist"), { recursive: true });
+    const packageDistLink = path.join(root, "packages", "source", "dist", "link.mjs");
+    symlinkSync(path.join("..", "..", "..", "scripts", "escape.mjs"), packageDistLink);
+    const packageDistLinked = guard();
+    assert.notEqual(packageDistLinked.status, 0);
+    assert.match(packageDistLinked.stderr, /packages\/source\/dist\/link\.mjs: a symlink under packages\/ or hosts\/ is refused/);
+    rmSync(path.join(root, "packages", "source", "dist"), { recursive: true });
+    rmSync(escapeScript);
     // Every mutation above was undone: the copy passes again.
     assert.equal(guard().status, 0, "the restored copy passes");
   } finally {

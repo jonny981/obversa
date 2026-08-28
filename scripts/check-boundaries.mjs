@@ -54,6 +54,10 @@ function hostRootOf(absolute, repoRoot) {
   const match = /^hosts\/([^/]+)(?:\/|$)/.exec(relative(repoRoot, absolute).split('\\').join('/'));
   return match ? `hosts/${match[1]}/` : undefined;
 }
+// The one refusal for a symlink met under packages/ or hosts/, by the main
+// walk or by the per-package and per-host walks that enter dist. Declared
+// before the check runs, which any function the check calls must be.
+const symlinkRefusal = (path) => `${path}: a symlink under packages/ or hosts/ is refused; it can reach a file the scan never read while the path that names it looks local, or stand as an entry the scan never read`;
 // The membership proof over recorded host edges: each target must be in
 // the set of files the walk import-scanned. Exported so the spec holds it to
 // that directly, beside the live full-check mutant.
@@ -804,9 +808,11 @@ function packageDirOf(absolute, repoRoot) {
 }
 
 // Every regular file under a directory, and every symlink met on the way. A
-// symlink is reported rather than followed: under packages/ one can reach a
-// sibling package's code while the import that names it looks local, so the
-// boundary scan fails closed on it.
+// symlink is reported rather than followed, and the callers under packages/
+// and hosts/ refuse every one reported: under packages/ a link can reach a
+// sibling package's code while the import that names it looks local, and
+// under hosts/ it can also stand as a shipped command whose code the scan
+// never opened. The list is every link met, wherever the walk ran.
 export async function walkTree(directory, { ignored = ignoredDirectories } = {}) {
   const files = [];
   const symlinks = [];
@@ -1132,7 +1138,10 @@ for (const entry of await readdir(join(root, 'hosts'), { withFileTypes: true }))
       }
     }
   }
-  const { files: hostFiles } = await walkTree(hostDir, { ignored: new Set(['node_modules']) });
+  // This walk enters dist, which the main walk skips by name, so a link or a
+  // nested manifest kept there is met here and refused here.
+  const { files: hostFiles, symlinks: hostLinks } = await walkTree(hostDir, { ignored: new Set(['node_modules']) });
+  for (const link of hostLinks) failures.push(symlinkRefusal(relative(root, link).split('\\').join('/')));
   for (const path of hostFiles) {
     if (basename(path) === 'package.json' && path !== join(hostDir, 'package.json'))
       failures.push(`${relative(root, path).split('\\').join('/')}: a nested manifest makes itself the package scope of the files beneath it, whatever it is named; a host has one manifest, at its root`);
@@ -1179,7 +1188,10 @@ for (const entry of await readdir(join(root, 'packages'), { withFileTypes: true 
   // One manifest per package, at its root: a nested one makes itself the
   // package scope of the files beneath it, whatever it is named, and Node
   // would serve its exports to them under that name.
-  const { files: packageFiles } = await walkTree(join(root, 'packages', entry.name), { ignored: new Set(['node_modules']) });
+  // This walk enters dist, which the main walk skips by name, so a link or a
+  // nested manifest kept there is met here and refused here.
+  const { files: packageFiles, symlinks: packageLinks } = await walkTree(join(root, 'packages', entry.name), { ignored: new Set(['node_modules']) });
+  for (const link of packageLinks) failures.push(symlinkRefusal(relative(root, link).split('\\').join('/')));
   for (const nested of packageFiles) {
     if (basename(nested) === 'package.json' && nested !== manifestPath)
       failures.push(`${relative(root, nested).split('\\').join('/')}: a nested manifest makes itself the package scope of the files beneath it, whatever it is named; a package has one manifest, at its root`);
@@ -1480,9 +1492,10 @@ async function walk(directory, output, failures) {
     const path = relative(root, link).split('\\').join('/');
     // Under packages/ a link can reach another package while the import
     // that names it looks local; under hosts/ it can also stand as a shipped
-    // command whose code the scan never read. Both are refused on sight.
-    if (path.startsWith('packages/') || path.startsWith('hosts/'))
-      failures.push(`${path}: a symlink under packages/ or hosts/ is refused; it can reach a file the scan never read while the path that names it looks local, or stand as an entry the scan never read`);
+    // command whose code the scan never read. Both are refused on sight;
+    // the per-package and per-host walks, which enter dist, refuse the same
+    // way with the same words.
+    if (path.startsWith('packages/') || path.startsWith('hosts/')) failures.push(symlinkRefusal(path));
   }
 }
 
