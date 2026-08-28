@@ -862,6 +862,20 @@ for (const [name, rule] of packageRules) {
 for (const entry of await readdir(root)) {
   if (toolConfigName.test(entry)) failures.push(`${entry}: a root build or test configuration is read by every package's tools and is not pinned`);
 }
+// The tools that interpret the pinned configurations, and the guard's own
+// parsers, are pinned to exact versions at the root: a content hash only
+// means what the reviewed tool made of it.
+const rootManifest = JSON.parse(await readFile(join(root, 'package.json'), 'utf8'));
+const rootPins = {
+  packageManager: 'pnpm@10.15.1',
+  devDependencies: { tsup: '8.5.1', vitest: '4.1.11', '@typescript/typescript6': '6.0.2', typescript: '7.0.2', semver: '7.8.5' },
+};
+if (rootManifest.packageManager !== rootPins.packageManager)
+  failures.push(`package.json: packageManager must be ${rootPins.packageManager}; found ${rootManifest.packageManager ?? 'absent'}`);
+for (const [tool, version] of Object.entries(rootPins.devDependencies)) {
+  if (rootManifest.devDependencies?.[tool] !== version)
+    failures.push(`package.json: devDependencies ${tool} must be exactly ${version}; found ${rootManifest.devDependencies?.[tool] ?? 'absent'}. Tool versions are pinned in rootPins; review the boundary rule with any change`);
+}
 
 // The root manifest can rewrite what any package installs: an override or
 // a resolution that names a workspace package, or a path, would route a
@@ -870,7 +884,6 @@ for (const entry of await readdir(root)) {
 // (`overrides`, `catalog`, `catalogs`, `packageExtensions`,
 // `patchedDependencies`) from pnpm-workspace.yaml too, and the scan does
 // not read YAML, so that file is pinned verbatim, as the scripts are.
-const rootManifest = JSON.parse(await readFile(join(root, 'package.json'), 'utf8'));
 for (const field of ['overrides', 'resolutions']) {
   for (const [key, spec] of Object.entries({ ...rootManifest[field], ...rootManifest.pnpm?.[field] })) {
     const target = dependencyTarget(key, spec, { file: join(root, 'package.json'), root });
