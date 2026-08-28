@@ -165,3 +165,70 @@ test("a git-quoted path with a tab decodes to the real filename", () => {
   assert.equal(file.oldPath, `tab${tab}name.txt`);
   assert.equal(file.newPath, `tab${tab}name.txt`);
 });
+
+test("a hunk line that starts with --- or +++ is content, not a file header", () => {
+  // Deleting a SQL comment "-- drop leftover" arrives as "--- drop leftover";
+  // adding a C statement "++ i;" arrives as "+++ i;". Both are hunk lines.
+  const { files } = parseUnifiedDiff(`diff --git a/q.sql b/q.sql
+--- a/q.sql
++++ b/q.sql
+@@ -1,3 +1,3 @@
+ select 1;
+--- drop leftover
++++ i;
+ select 2;
+`);
+  assert.equal(files.length, 1);
+  const [file] = files;
+  assert.equal(file.path, "q.sql");
+  assert.equal(file.oldPath, "q.sql");
+  assert.equal(file.newPath, "q.sql");
+  const lines = file.hunks[0].lines.map((l) => [l.type, l.text, l.oldNumber, l.newNumber]);
+  assert.deepEqual(lines, [
+    ["context", "select 1;", 1, 1],
+    ["del", "-- drop leftover", 2, null],
+    ["add", "++ i;", null, 2],
+    ["context", "select 2;", 3, 3],
+  ]);
+});
+
+test("an empty line inside a hunk is a blank context line, and the hunk continues", () => {
+  // git's diff.suppressBlankEmpty writes a blank context line as an empty
+  // line rather than a single space; the change after it must still parse.
+  const { files } = parseUnifiedDiff(`diff --git a/a.txt b/a.txt
+--- a/a.txt
++++ b/a.txt
+@@ -1,4 +1,4 @@
+ one
+
+ two
+-three
++THREE
+`);
+  const lines = files[0].hunks[0].lines.map((l) => [l.type, l.text, l.oldNumber, l.newNumber]);
+  assert.deepEqual(lines, [
+    ["context", "one", 1, 1],
+    ["context", "", 2, 2],
+    ["context", "two", 3, 3],
+    ["del", "three", 4, null],
+    ["add", "THREE", null, 4],
+  ]);
+});
+
+test("a second file header after a spent hunk still starts a new file", () => {
+  const { files } = parseUnifiedDiff(`diff --git a/x.txt b/x.txt
+--- a/x.txt
++++ b/x.txt
+@@ -1 +1 @@
+-a
++b
+diff --git a/y.txt b/y.txt
+--- a/y.txt
++++ b/y.txt
+@@ -1 +1 @@
+-c
++d
+`);
+  assert.deepEqual(files.map((f) => f.path), ["x.txt", "y.txt"]);
+  assert.equal(files[1].hunks[0].lines[1].text, "d");
+});

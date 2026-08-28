@@ -45,14 +45,52 @@ export function parseUnifiedDiff(diffText) {
   let hunk = null;
   let oldNumber = 0;
   let newNumber = 0;
+  // Lines still owed by the current hunk on each side, from its header. While
+  // either is positive, every line is hunk content whatever it starts with.
+  let remainingOld = 0;
+  let remainingNew = 0;
 
   const startFile = (oldPath, newPath) => {
     file = { oldPath, newPath, path: newPath || oldPath, status: "modified", binary: false, hunks: [] };
     files.push(file);
     hunk = null;
+    remainingOld = 0;
+    remainingNew = 0;
   };
 
   for (const line of lines) {
+    if (hunk !== null && (remainingOld > 0 || remainingNew > 0)) {
+      // Inside a hunk the header checks below must not run: a deleted
+      // "-- comment" arrives as "--- comment" and an added "++ i;" as "+++ i;",
+      // and treating either as a file header would drop the line, rewrite the
+      // path, and shift every later anchor. Only the leading marker counts.
+      if (line.startsWith("\\")) continue; // "\ No newline at end of file"
+      const marker = line[0];
+      if (marker === "+") {
+        hunk.lines.push({ type: "add", oldNumber: null, newNumber, text: line.slice(1) });
+        newNumber += 1;
+        remainingNew -= 1;
+      } else if (marker === "-") {
+        hunk.lines.push({ type: "del", oldNumber, newNumber: null, text: line.slice(1) });
+        oldNumber += 1;
+        remainingOld -= 1;
+      } else if (marker === " " || line === "") {
+        // A blank context line is a single space; git's suppressBlankEmpty
+        // emits an empty line instead, which means the same thing.
+        hunk.lines.push({ type: "context", oldNumber, newNumber, text: line.slice(1) });
+        oldNumber += 1;
+        newNumber += 1;
+        remainingOld -= 1;
+        remainingNew -= 1;
+      } else {
+        // Not a diff line: the hunk is malformed; stop reading it.
+        hunk = null;
+        remainingOld = 0;
+        remainingNew = 0;
+      }
+      continue;
+    }
+
     if (line.startsWith("diff --git ")) {
       const match = line.match(/^diff --git a\/(.*) b\/(.*)$/);
       startFile(match ? match[1] : "", match ? match[2] : "");
@@ -96,28 +134,15 @@ export function parseUnifiedDiff(diffText) {
       file.hunks.push(hunk);
       oldNumber = hunk.oldStart;
       newNumber = hunk.newStart;
+      remainingOld = hunk.oldLines;
+      remainingNew = hunk.newLines;
       continue;
     }
 
-    if (!hunk) continue; // index/mode lines between the file header and the first hunk
-    if (line.startsWith("\\")) continue; // "\ No newline at end of file": not a content line
-
-    const marker = line[0];
-    if (marker === "+") {
-      hunk.lines.push({ type: "add", oldNumber: null, newNumber, text: line.slice(1) });
-      newNumber += 1;
-    } else if (marker === "-") {
-      hunk.lines.push({ type: "del", oldNumber, newNumber: null, text: line.slice(1) });
-      oldNumber += 1;
-    } else if (marker === " ") {
-      hunk.lines.push({ type: "context", oldNumber, newNumber, text: line.slice(1) });
-      oldNumber += 1;
-      newNumber += 1;
-    } else {
-      // A blank line (the trailing split element at EOF) or any non-diff line
-      // ends the current hunk region without adding content.
-      hunk = null;
-    }
+    if (line.startsWith("\\")) continue; // "\ No newline at end of file" after a spent hunk
+    // Anything else after a hunk's counts are spent (the trailing empty split
+    // element at EOF, index/mode lines) ends the hunk region without content.
+    hunk = null;
   }
 
   return { files };
