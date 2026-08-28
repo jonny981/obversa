@@ -39,8 +39,18 @@ function parse(code) {
 // `var` lands; blocks, for statements, switches, and catch clauses hold only their
 // lexical declarations, so a `let` or `const` inside a block never shadows the
 // outer binding for code after the block.
-function pushScope(parent, { isFunction = false } = {}) {
-  return { parent, defs: new Map(), methods: new Map(), isFunction };
+// `thisClass` is what `this` means here: null when unknown, or the enclosing
+// class's member maps plus whether the context is static. A scope inherits
+// its parent's unless told otherwise: an arrow inherits, a normal function
+// clears it, a class member or static block sets its own class, and a nested
+// class therefore replaces the outer one.
+function pushScope(parent, { isFunction = false, thisClass } = {}) {
+  return {
+    parent,
+    defs: new Map(),
+    isFunction,
+    thisClass: thisClass !== undefined ? thisClass : (parent?.thisClass ?? null),
+  };
 }
 
 function functionScope(scope) {
@@ -57,12 +67,14 @@ function lookup(scope, name) {
   return null;
 }
 
-function lookupMethod(scope, name) {
-  for (let current = scope; current; current = current.parent) {
-    const found = current.methods.get(name);
-    if (found) return found;
-  }
-  return null;
+// `this.name` resolves only under a known class context, in that class's
+// static or instance members as the context says, and only when the name is
+// unique there: a duplicate, a getter/setter pair, or a field and a method of
+// the same name is ambiguous and fails closed.
+function lookupMember(thisClass, name) {
+  if (!thisClass) return null;
+  const entry = (thisClass.isStatic ? thisClass.members.static : thisClass.members.instance).get(name);
+  return entry && !entry.ambiguous ? entry : null;
 }
 
 function occurrence(id, kind, def) {
@@ -148,8 +160,41 @@ function hoist(body, scope, occurrences, seenDefs) {
           registerPattern(decl.id, scope, kind, occurrences, seenDefs);
         }
       }
+      // An import is a module binding from instantiation, whatever line it
+      // sits on: a use above the import statement still binds to it.
+      if (child.type === "ImportDeclaration") {
+        registerImports(child, scope, occurrences, seenDefs);
+      }
     }
   }
+}
+
+function registerImports(node, scope, occurrences, seenDefs) {
+  for (const spec of node.specifiers) {
+    if (
+      spec.type === "ImportSpecifier"
+      || spec.type === "ImportDefaultSpecifier"
+      || spec.type === "ImportNamespaceSpecifier"
+    ) {
+      registerDef(scope, spec.local, "import", occurrences, seenDefs);
+    }
+  }
+}
+
+// A class member exists whatever its position in the body: register every
+// non-computed method and property key before any member value is walked,
+// so a method body may name a member declared below it. Static and instance
+// members are kept apart; a second member of the same name in the same map
+// (a getter and a setter, a field and a method) makes that name ambiguous.
+function registerMember(node, members, occurrences, seenDefs) {
+  if (node.key?.type !== "Identifier" || node.computed || seenDefs.has(node.key.start)) return;
+  const def = { line: node.key.loc.start.line, col: node.key.loc.start.column };
+  seenDefs.add(node.key.start);
+  const bucket = node.static ? members.static : members.instance;
+  const existing = bucket.get(node.key.name);
+  if (existing) existing.ambiguous = true;
+  else bucket.set(node.key.name, { ...def, kind: "method", ambiguous: false });
+  occurrences.push(occurrence(node.key, "method", def));
 }
 
 // `var` declarations belong to the whole function: a use earlier in the
@@ -201,8 +246,12 @@ function emitRef(id, parent, scope, occurrences, seenDefs) {
   ));
 }
 
-function emitProperty(id, scope, occurrences) {
-  const found = lookupMethod(scope, id.name);
+// A property access. Only `this.name` can be linked to a class member — a
+// member definition says nothing about an arbitrary receiver's `name`, and
+// `super.name` names the parent's — so any other receiver leaves the
+// property unresolved.
+function emitProperty(id, thisClass, occurrences) {
+  const found = lookupMember(thisClass, id.name);
   occurrences.push(occurrence(
     id,
     "property",
@@ -210,16 +259,60 @@ function emitProperty(id, scope, occurrences) {
   ));
 }
 
-function walkFunction(node, scope, occurrences, seenDefs, { namedInner = false } = {}) {
+function walkFunction(node, scope, occurrences, seenDefs, { namedInner = false, thisClass } = {}) {
+  // An arrow keeps the `this` around it; a normal function has its own,
+  // unknown here unless it is a class member, whose class the caller names.
+  const inner = pushScope(scope, {
+    isFunction: true,
+    thisClass: node.type === "ArrowFunctionExpression" ? undefined : (thisClass ?? null),
+  });
+  // A named function expression's name is visible only inside itself.
   if (namedInner && node.id) {
-    registerDef(scope, node.id, "function", occurrences, seenDefs);
+    registerDef(inner, node.id, "function", occurrences, seenDefs);
   }
-  const inner = pushScope(scope, { isFunction: true });
+  // Every parameter binding first, then the expressions inside the
+  // parameters (defaults, computed keys), which see every parameter.
   for (const param of node.params ?? []) {
     registerPattern(param, inner, "parameter", occurrences, seenDefs);
   }
+  for (const param of node.params ?? []) {
+    walkPatternExpressions(param, inner, occurrences, seenDefs);
+  }
   hoistVars(node.body, inner, occurrences, seenDefs);
   if (node.body) walk(node.body, inner, occurrences, seenDefs, node);
+}
+
+// The expressions a binding pattern contains — a default value, a computed
+// key — are uses like any other and must be indexed. Walked after the
+// pattern's bindings are registered, in the scope those bindings live in.
+function walkPatternExpressions(node, scope, occurrences, seenDefs) {
+  if (!node) return;
+  switch (node.type) {
+    case "ObjectPattern":
+      for (const prop of node.properties) {
+        if (prop.type === "RestElement") {
+          walkPatternExpressions(prop.argument, scope, occurrences, seenDefs);
+        } else if (prop.type === "Property") {
+          if (prop.computed) walk(prop.key, scope, occurrences, seenDefs, prop);
+          walkPatternExpressions(prop.value, scope, occurrences, seenDefs);
+        }
+      }
+      return;
+    case "ArrayPattern":
+      for (const element of node.elements) {
+        walkPatternExpressions(element, scope, occurrences, seenDefs);
+      }
+      return;
+    case "AssignmentPattern":
+      walkPatternExpressions(node.left, scope, occurrences, seenDefs);
+      walk(node.right, scope, occurrences, seenDefs, node);
+      return;
+    case "RestElement":
+      walkPatternExpressions(node.argument, scope, occurrences, seenDefs);
+      return;
+    default:
+      return;
+  }
 }
 
 function walk(node, scope, occurrences, seenDefs, parent = null) {
@@ -232,8 +325,9 @@ function walk(node, scope, occurrences, seenDefs, parent = null) {
       for (const child of node.body) walk(child, scope, occurrences, seenDefs, node);
       return;
     case "StaticBlock": {
-      // A class static block owns its `var` like a function does.
-      const inner = pushScope(scope, { isFunction: true });
+      // A class static block owns its `var` like a function does, and its
+      // `this` is the class.
+      const inner = pushScope(scope, { isFunction: true, thisClass: { members: scope.members, isStatic: true } });
       hoistVars(node, inner, occurrences, seenDefs);
       hoist(node.body, inner, occurrences, seenDefs);
       for (const child of node.body) walk(child, inner, occurrences, seenDefs, node);
@@ -272,27 +366,41 @@ function walk(node, scope, occurrences, seenDefs, parent = null) {
       return;
     case "ClassDeclaration":
     case "ClassExpression": {
+      // The class scope keeps the surrounding `this` (heritage and computed
+      // keys evaluate there); members set their own below.
       const inner = pushScope(scope);
+      inner.members = { static: new Map(), instance: new Map() };
       if (node.type === "ClassExpression" && node.id) {
         registerDef(inner, node.id, "class", occurrences, seenDefs);
       }
+      // `extends Base` is a use. A declaration's heritage sees the surrounding
+      // scope (where its own hoisted name already is); a named expression's
+      // heritage sees its private name too (in a temporal dead zone at run
+      // time, but the same binding).
+      if (node.superClass) walk(node.superClass, inner, occurrences, seenDefs, node);
       if (node.body) walk(node.body, inner, occurrences, seenDefs, node);
       return;
     }
     case "ClassBody":
+      for (const child of node.body) {
+        if (child.type === "MethodDefinition" || child.type === "PropertyDefinition") {
+          registerMember(child, scope.members, occurrences, seenDefs);
+        }
+      }
       for (const child of node.body) walk(child, scope, occurrences, seenDefs, node);
       return;
     case "MethodDefinition":
     case "PropertyDefinition": {
-      if (node.key?.type === "Identifier" && !node.computed) {
-        const def = { line: node.key.loc.start.line, col: node.key.loc.start.column };
-        seenDefs.add(node.key.start);
-        scope.methods.set(node.key.name, { ...def, kind: "method" });
-        occurrences.push(occurrence(node.key, "method", def));
-      } else if (node.key) {
-        walk(node.key, scope, occurrences, seenDefs, node);
+      // A computed key evaluates in the surrounding context, not the class's.
+      if (node.computed && node.key) walk(node.key, scope, occurrences, seenDefs, node);
+      const thisClass = { members: scope.members, isStatic: Boolean(node.static) };
+      if (!node.value) return;
+      if (node.type === "MethodDefinition") {
+        walkFunction(node.value, scope, occurrences, seenDefs, { thisClass });
+      } else {
+        // A field initialiser runs with `this` as the instance (or the class).
+        walk(node.value, pushScope(scope, { thisClass }), occurrences, seenDefs, node);
       }
-      if (node.value) walk(node.value, scope, occurrences, seenDefs, node);
       return;
     }
     case "VariableDeclaration":
@@ -304,23 +412,17 @@ function walk(node, scope, occurrences, seenDefs, parent = null) {
       // `let` and `const` belong to the block they are written in.
       const target = parent?.kind === "var" ? functionScope(scope) : scope;
       registerPattern(node.id, target, kind, occurrences, seenDefs);
+      walkPatternExpressions(node.id, scope, occurrences, seenDefs);
       if (node.init) walk(node.init, scope, occurrences, seenDefs, node);
       return;
     }
     case "ImportDeclaration":
-      for (const spec of node.specifiers) {
-        if (
-          spec.type === "ImportSpecifier"
-          || spec.type === "ImportDefaultSpecifier"
-          || spec.type === "ImportNamespaceSpecifier"
-        ) {
-          registerDef(scope, spec.local, "import", occurrences, seenDefs);
-        }
-      }
+      registerImports(node, scope, occurrences, seenDefs); // already registered by hoist; a no-op
       return;
     case "CatchClause": {
       const inner = pushScope(scope);
       registerPattern(node.param, inner, "parameter", occurrences, seenDefs);
+      walkPatternExpressions(node.param, inner, occurrences, seenDefs);
       if (node.body) walk(node.body, inner, occurrences, seenDefs, node);
       return;
     }
@@ -335,6 +437,9 @@ function walk(node, scope, occurrences, seenDefs, parent = null) {
         const target = node.left.kind === "var" ? functionScope(inner) : inner;
         for (const decl of node.left.declarations) {
           registerPattern(decl.id, target, "variable", occurrences, seenDefs);
+        }
+        for (const decl of node.left.declarations) {
+          walkPatternExpressions(decl.id, inner, occurrences, seenDefs);
         }
       } else {
         // `for (x of …)` assigns to an existing binding: the loop head is a
@@ -358,7 +463,7 @@ function walk(node, scope, occurrences, seenDefs, parent = null) {
     case "MemberExpression":
       walk(node.object, scope, occurrences, seenDefs, node);
       if (!node.computed && node.property?.type === "Identifier") {
-        emitProperty(node.property, scope, occurrences);
+        emitProperty(node.property, node.object?.type === "ThisExpression" ? scope.thisClass : null, occurrences);
       } else {
         walk(node.property, scope, occurrences, seenDefs, node);
       }

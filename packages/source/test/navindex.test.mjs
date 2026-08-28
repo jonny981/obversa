@@ -128,6 +128,94 @@ test("a for-of or for-in over an existing variable references it; the loop head 
   assert.deepEqual(at(occurrences, 6, 0).def, { line: 4, col: 4 });
 });
 
+test("a named function expression's name is visible only inside itself", () => {
+  const code = "const f = function inner() { return inner; };\ninner;\n";
+  const { occurrences } = navIndex({ code, lang: "javascript" });
+  assert.deepEqual(at(occurrences, 1, 36).def, { line: 1, col: 19 }, "the body sees the name");
+  assert.equal(at(occurrences, 2, 0).def, null, "the outer use does not");
+});
+
+test("expressions inside patterns are indexed: parameter defaults, computed keys, binding defaults, catch and loop patterns", () => {
+  const code = "const base = 1;\nfunction f(arg = base) {}\nconst { [base]: value = base } = {};\ntry {} catch ({ message = base }) {}\nfor (const [item = base] of []) {}\n";
+  const { occurrences } = navIndex({ code, lang: "javascript" });
+  const def = { line: 1, col: 6 };
+  assert.deepEqual(at(occurrences, 2, 17).def, def, "a parameter default");
+  assert.deepEqual(at(occurrences, 3, 9).def, def, "a computed destructuring key");
+  assert.deepEqual(at(occurrences, 3, 24).def, def, "a binding default");
+  assert.deepEqual(at(occurrences, 4, 26).def, def, "a catch pattern default");
+  assert.deepEqual(at(occurrences, 5, 19).def, def, "a loop pattern default");
+  // A parameter default sees an earlier parameter.
+  const params = navIndex({ code: "function g(a, b = a) {}\n", lang: "javascript" }).occurrences;
+  assert.deepEqual(at(params, 1, 18).def, { line: 1, col: 11 });
+});
+
+test("an import binds for the whole module, whatever line it sits on", () => {
+  const code = "foo();\nimport { foo } from \"./dep.js\";\nfoo();\nbar();\nimport bar from \"./b.js\";\nns.x;\nimport * as ns from \"./n.js\";\n";
+  const { occurrences } = navIndex({ code, lang: "javascript" });
+  assert.deepEqual(at(occurrences, 1, 0).def, { line: 2, col: 9 }, "a named import used above it");
+  assert.deepEqual(at(occurrences, 3, 0).def, { line: 2, col: 9 });
+  assert.deepEqual(at(occurrences, 4, 0).def, { line: 5, col: 7 }, "a default import used above it");
+  assert.deepEqual(at(occurrences, 6, 0).def, { line: 7, col: 12 }, "a namespace import used above it");
+  assert.equal(occurrences.filter((o) => o.name === "foo" && o.isDef).length, 1, "one definition occurrence");
+});
+
+test("a class member exists whatever its position: a method may call one declared below it", () => {
+  const code = "class C {\n  first() { return this.second(); }\n  second() { return 2; }\n  static third = this.fourth;\n  static fourth = 4;\n}\n";
+  const { occurrences } = navIndex({ code, lang: "javascript" });
+  assert.deepEqual(at(occurrences, 2, 24).def, { line: 3, col: 2 }, "this.second() before second is declared");
+  assert.deepEqual(at(occurrences, 4, 22).def, { line: 5, col: 9 }, "a static field read before it is declared");
+  assert.equal(occurrences.filter((o) => o.name === "second" && o.isDef).length, 1, "one definition occurrence");
+  assert.equal(occurrences.filter((o) => o.name === "fourth" && o.isDef).length, 1);
+});
+
+test("only this.member links to a class member; another receiver, or this inside a nested function, stays unresolved", () => {
+  const code = "class C {\n  method() {}\n  run(other) { return other.method(); }\n  go() { return this.method(); }\n}\n";
+  const { occurrences } = navIndex({ code, lang: "javascript" });
+  assert.equal(at(occurrences, 3, 28).def, null, "other.method is not C.method");
+  assert.deepEqual(at(occurrences, 4, 21).def, { line: 2, col: 2 }, "this.method is");
+  const nested = "class D {\n  m() {}\n  n() {\n    function f() { return this.m(); }\n    return () => this.m();\n  }\n}\n";
+  const inner = navIndex({ code: nested, lang: "javascript" }).occurrences;
+  assert.equal(at(inner, 4, 31).def, null, "a nested function rebinds this");
+  assert.deepEqual(at(inner, 5, 22).def, { line: 2, col: 2 }, "an arrow keeps it");
+});
+
+test("class members resolve by context: static or instance, unique only, super and computed keys never", () => {
+  const code = [
+    "class A {",
+    "  static foo() {}",
+    "  foo() {}",
+    "  bar() { return this.foo(); }",
+    "  static baz() { return this.foo(); }",
+    "  get pair() { return 1; }",
+    "  set pair(v) {}",
+    "  use() { return this.pair; }",
+    "  sup() { return super.foo(); }",
+    "  nest() { class B { inner() {} go() { return this.inner(); } } return this.inner; }",
+    "  [this.foo]() {}",
+    "  field = this.foo;",
+    "  static sfield = this.foo;",
+    "}",
+    "",
+  ].join("\n");
+  const { occurrences } = navIndex({ code, lang: "javascript" });
+  assert.deepEqual(at(occurrences, 4, 22).def, { line: 3, col: 2 }, "instance this.foo is the instance member");
+  assert.deepEqual(at(occurrences, 5, 29).def, { line: 2, col: 9 }, "static this.foo is the static member");
+  assert.equal(at(occurrences, 8, 22).def, null, "a getter/setter pair is ambiguous");
+  assert.equal(at(occurrences, 9, 23).def, null, "super.foo is the parent's");
+  assert.deepEqual(at(occurrences, 10, 51).def, { line: 10, col: 21 }, "a nested class's this is its own");
+  assert.equal(at(occurrences, 10, 76).def, null, "the outer class has no inner");
+  assert.equal(at(occurrences, 11, 8).def, null, "a computed key evaluates outside the class");
+  assert.deepEqual(at(occurrences, 12, 15).def, { line: 3, col: 2 }, "an instance field initialiser sees the instance");
+  assert.deepEqual(at(occurrences, 13, 23).def, { line: 2, col: 9 }, "a static field initialiser sees the class");
+});
+
+test("a class's heritage is a use: extends Base is indexed in the right scope", () => {
+  const code = "class Base {}\nclass Child extends Base {}\nconst E = class Inner extends Base {};\n";
+  const { occurrences } = navIndex({ code, lang: "javascript" });
+  assert.deepEqual(at(occurrences, 2, 20).def, { line: 1, col: 6 }, "a declaration's heritage");
+  assert.deepEqual(at(occurrences, 3, 30).def, { line: 1, col: 6 }, "a named expression's heritage");
+});
+
 test("switch cases share one block scope, separate from the outer one", () => {
   const code = "let n = 1;\nswitch (n) {\n  case 1:\n    let n2 = 2;\n    n2;\n}\nn;\n";
   const { occurrences } = navIndex({ code, lang: "javascript" });
