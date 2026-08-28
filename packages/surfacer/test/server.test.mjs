@@ -333,6 +333,79 @@ test("the caller learns of a completion only after the winning request has been 
   }
 });
 
+test("a handler that completes and then never returns cannot hold the decision open", async () => {
+  // Once the claim wins, the session and lease clocks are gone. A handler that
+  // never returns never sends its answer, so the hook on the response cannot
+  // fire; the delivery bound must start the acknowledgement clock instead,
+  // and the caller must learn of the completion within two windows.
+  const surface = await boot({
+    sessionTimeoutMs: 60,
+    leaseTimeoutMs: 60,
+    ackTimeoutMs: 40,
+    api: {
+      "POST /api/hang": async ({ session }) => {
+        session.complete({ value: 1 });
+        await new Promise(() => {});
+      },
+    },
+  });
+  try {
+    // The request never gets its answer; stop() closes the server under it.
+    request(surface, "/api/hang", { body: {} }).catch(() => null);
+    const decision = await Promise.race([
+      surface.waitForDecision(),
+      new Promise((_, reject) => setTimeout(() => reject(new Error("the decision stayed pending: nothing bounded the unanswered completion")), 400)),
+    ]);
+    assert.equal(decision.status, "completed");
+  } finally {
+    await surface.stop();
+  }
+});
+
+test("a client that vanishes while its completion answer is in flight starts the acknowledgement clock at the disconnect", async () => {
+  // The answer sent at the claim is held on the way out and the browser's
+  // connection goes away meanwhile; the handler never returns. The hook
+  // attached at the claim sees the response close and starts the clock
+  // then, so the decision settles one acknowledgement window after the
+  // disconnect — before the held answer would ever have finished.
+  const ackTimeoutMs = 200;
+  let claimed;
+  const claimedPromise = new Promise((resolve) => { claimed = resolve; });
+  const surface = await boot({
+    ackTimeoutMs,
+    api: {
+      "POST /api/hang": async ({ session }) => {
+        session.complete({ value: 1 });
+        claimed();
+        await new Promise(() => {});
+      },
+    },
+  });
+  const release = holdResponseEnd("/api/hang", 1_000);
+  const controller = new AbortController();
+  try {
+    fetch(`${surface.origin}/api/hang`, {
+      method: "POST",
+      headers: { Authorization: `Bearer ${tokenOf(surface)}`, "Content-Type": "application/json", Origin: surface.origin },
+      body: "{}",
+      signal: controller.signal,
+    }).catch(() => null);
+    await claimedPromise;
+    const disconnectedAt = Date.now();
+    controller.abort();
+    const decision = await Promise.race([
+      surface.waitForDecision(),
+      new Promise((_, reject) => setTimeout(() => reject(new Error("the decision stayed pending after the client vanished")), 3_000)),
+    ]);
+    const elapsed = Date.now() - disconnectedAt;
+    assert.equal(decision.status, "completed");
+    assert.ok(elapsed < 1_000, `the clock started at the disconnect, not when the held answer finished (settled after ${elapsed}ms)`);
+  } finally {
+    release();
+    await surface.stop();
+  }
+});
+
 test("a cancel is answered before the caller learns of it, and its acknowledgement is accepted", async () => {
   // The cancel route claims the session; the clock that would settle the
   // decision without an acknowledgement must not start before the cancel

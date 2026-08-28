@@ -14,22 +14,25 @@ export async function openSurfaceUrl(url, {
     : process.platform === "linux" ? ["xdg-open"]
     : null,
   stderr = process.stderr,
+  settleMs = PLACEMENT_SETTLE_MS,
 } = {}) {
-  if (await runDetached(surfaceBin, [url])) return { opened: true, via: "host" };
+  if (await runDetached(surfaceBin, [url], settleMs)) return { opened: true, via: "host" };
   if (browserCommand) {
     const [browserBin, ...browserArgs] = browserCommand;
-    if (await runDetached(browserBin, [...browserArgs, url])) return { opened: true, via: "browser" };
+    if (await runDetached(browserBin, [...browserArgs, url], settleMs)) return { opened: true, via: "browser" };
   }
   stderr.write(`Open this surface in a browser: ${url}\n`);
   return { opened: false, via: "print" };
 }
 
-// A placement command that exits reports whether it succeeded; one that
-// stays alive — a browser that keeps the tab's process — is taken as having
-// opened the surface once it has run this long, so a live placement never
-// holds the session back from waiting for its decision.
+// A placement command that exits reports whether it succeeded. One that is
+// still alive after `settleMs` — a browser that keeps the tab's process — is
+// ASSUMED to have opened the surface: that is an assumption made so a live
+// placement never holds the session back from waiting for its decision, not
+// an observed success, and a command that fails after the settle is reported
+// as opened all the same.
 const PLACEMENT_SETTLE_MS = 5_000;
-function runDetached(command, args) {
+function runDetached(command, args, settleMs) {
   return new Promise((resolve) => {
     let child;
     try {
@@ -41,7 +44,7 @@ function runDetached(command, args) {
     const settled = setTimeout(() => {
       child.unref?.();
       resolve(true);
-    }, PLACEMENT_SETTLE_MS);
+    }, settleMs);
     settled.unref?.();
     child.once("error", () => { clearTimeout(settled); resolve(false); });
     child.once("exit", (code) => { clearTimeout(settled); resolve(code === 0); });

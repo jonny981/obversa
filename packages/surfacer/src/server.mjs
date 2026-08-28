@@ -258,6 +258,17 @@ export async function startSurface({
           value: (payload, options) => {
             const result = session.complete(payload, options);
             completedHere = true;
+            // The claim has won and cleared the session's live timers, so the
+            // acknowledgement clock is the only bound left, and it starts
+            // when this response has gone out. Answer now, not when the
+            // handler returns: the fixed 200 with the operation id is the
+            // only reply this request may get, so nothing is lost by sending
+            // it at once, and a handler that never returns can no longer
+            // leave the browser unanswered and the caller waiting. A client
+            // that has already gone closes the response, which starts the
+            // clock the same way.
+            armWhenAnswered(response);
+            sendJson(response, 200, { ok: true, operationId: terminalClaim.operationId });
             return result;
           },
         },
@@ -267,38 +278,21 @@ export async function startSurface({
         outcome = await handler({ body, session: scoped });
       } catch (error) {
         // A handler that completed the session and then threw must not
-        // contradict the caller: the completion stands and the browser
-        // gets it, with the operationId it needs to acknowledge.
-        if (completedHere && terminalClaim && terminalClaim.status === "completed") {
-          armWhenAnswered(response);
-          sendJson(response, 200, { ok: true, operationId: terminalClaim.operationId });
-          return;
-        }
+        // contradict the caller: the completion stands, and the browser
+        // already has its 200 with the operationId from the claim.
+        if (completedHere) return;
         throw error;
       }
-      if (response.headersSent || response.destroyed) {
-        // A handler that answered on its own after completing: the clock
-        // starts from that answer.
-        if (completedHere) armWhenAnswered(response);
-        return;
-      }
+      // The claiming request was answered at the claim; a handler that wrote
+      // its own answer before completing is left alone too. Either way there
+      // is nothing more to send.
+      if (response.headersSent || response.destroyed) return;
       // A terminal decision that arrived DURING the handler but was not this
       // request's own completion — a timeout, or another request's completion
       // that this handler stood by or swallowed the 409 of — must not look
       // like success, and its operationId must never reach this client.
       if (terminalClaim && terminalClaim !== claimBefore && !completedHere) {
         sendJson(response, 409, { error: terminalClaim.status === "completed" ? "This session already has a terminal decision" : "This session is closed" });
-        return;
-      }
-      if (completedHere) {
-        // Once this request has claimed the session, its response is the
-        // fixed acknowledgement and nothing else: a body the handler returned
-        // after completing is ordinary app output that could fail to
-        // serialise, and nothing fallible may run after the claim, or the
-        // browser is left with a completed session it cannot acknowledge.
-        // The acknowledgement clock starts once this answer has gone out.
-        armWhenAnswered(response);
-        sendJson(response, 200, { ok: true, operationId: terminalClaim.operationId });
         return;
       }
       const verbatim = outcome?.verbatim === true;
@@ -345,9 +339,10 @@ export async function startSurface({
     clearTimeout(leaseTimeout);
     for (const controller of activeOperations) controller.abort();
     // `true`: the acknowledgement clock starts now. `"deferred"`: it starts
-    // when the completing request's response has gone out (armAcknowledgement,
-    // called by the route that sent it). `false`: no acknowledgement is
-    // awaited at all.
+    // when the claiming request's response has gone out or its connection
+    // has closed (armWhenAnswered on that response, attached and answered at
+    // the claim itself, so a claimed session is never left with no live
+    // bound). `false`: no acknowledgement is awaited at all.
     if (awaitAcknowledgement === true) armAcknowledgement();
     return true;
   }

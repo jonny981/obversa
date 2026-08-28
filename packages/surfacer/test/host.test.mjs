@@ -42,3 +42,32 @@ test("the host adapter is tried first, then the browser, then print", async () =
   assert.deepEqual(printed, { opened: false, via: "print" });
   assert.match(captured.join(""), /http:\/\/127\.0\.0\.1:1\/z/);
 });
+
+test("a placement command still alive after the settle is assumed to have opened the surface", async () => {
+  // A browser that keeps the tab's process never exits; the session must not
+  // wait for it. After settleMs the placement is reported as opened — an
+  // assumption, so a command that fails only after the settle is reported as
+  // opened too. Both facts are pinned here.
+  const directory = mkdtempSync(path.join(os.tmpdir(), "surfacer-host-"));
+  const lingering = path.join(directory, "lingering");
+  writeFileSync(lingering, "#!/bin/sh\nsleep 2\n");
+  chmodSync(lingering, 0o755);
+  const started = Date.now();
+  const viaHost = await openSurfaceUrl("http://127.0.0.1:1/x", {
+    surfaceBin: lingering,
+    browserCommand: null,
+    settleMs: 100,
+  });
+  assert.deepEqual(viaHost, { opened: true, via: "host" });
+  assert.ok(Date.now() - started < 1_500, "reported at the settle, not at the command's exit");
+
+  const lateFailure = path.join(directory, "late-failure");
+  writeFileSync(lateFailure, "#!/bin/sh\nsleep 0.5\nexit 1\n");
+  chmodSync(lateFailure, 0o755);
+  const assumed = await openSurfaceUrl("http://127.0.0.1:1/y", {
+    surfaceBin: lateFailure,
+    browserCommand: null,
+    settleMs: 100,
+  });
+  assert.deepEqual(assumed, { opened: true, via: "host" }, "a failure after the settle is not observed: the placement was already assumed opened");
+});
