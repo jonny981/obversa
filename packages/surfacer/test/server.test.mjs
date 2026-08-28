@@ -353,12 +353,13 @@ test("a handler that completes and then never returns is answered at the claim, 
     },
   });
   try {
-    const answered = await Promise.race([
-      request(surface, "/api/hang", { body: {} }),
+    // The race bounds the whole answer — headers and body — so a regression
+    // that writes headers and never ends the body fails here too.
+    const { status, operationId } = await Promise.race([
+      request(surface, "/api/hang", { body: {} }).then(async (response) => ({ status: response.status, ...(await response.json()) })),
       new Promise((_, reject) => setTimeout(() => reject(new Error("the browser was not answered at the claim")), 1_000)),
     ]);
-    assert.equal(answered.status, 200, "the browser is answered at the claim, long after the session and lease clocks would have fired");
-    const { operationId } = await answered.json();
+    assert.equal(status, 200, "the browser is answered at the claim while the handler remains pending");
     assert.equal(typeof operationId, "string");
     const ack = await request(surface, "/api/ack", { body: { operationId } });
     assert.equal(ack.status, 200, "the acknowledgement is accepted");
