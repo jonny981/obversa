@@ -148,6 +148,7 @@ export async function startSurface({
       if (request.method === "POST" && requestUrl.pathname === "/api/heartbeat") {
         requireOpenSession();
         assertExactKeys(await readJson(request), []);
+        requireOpenSession();
         renewLease();
         sendJson(response, 200, { ok: true });
         return;
@@ -182,6 +183,11 @@ export async function startSurface({
       requireOpenSession();
       renewLease();
       const body = request.method === "GET" ? null : await readJson(request);
+      // The check above ran when the headers arrived; the body can take
+      // longer, and the session can close while it is still on the wire. Check
+      // again before any app code runs, and snapshot the claim only then, so a
+      // closure during the read is refused rather than compared against itself.
+      requireOpenSession();
       const claimBefore = terminalClaim;
       // Two authenticated handlers can race to complete. Only the request
       // whose own complete() won may report success; the loser's 409 must
