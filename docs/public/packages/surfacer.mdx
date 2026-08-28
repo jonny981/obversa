@@ -24,8 +24,9 @@ with an explicit verbatim opt-in for content that must not be redacted,
 such as review annotations that quote code (the review still trims and
 caps them before completing). A payload is its observable own data: the
 values of its own enumerable string-keyed properties and array items as one
-JSON serialisation reads them — a getter's answer or a `toJSON` result
-included — recursively, and that is exactly what the caller receives.
+JSON serialisation reads them — a getter's answer or the result of a
+callable `toJSON` included — recursively, and that is exactly what the
+caller receives.
 Hidden internal state — a Map's entries, a URL's address — is not data and
 is neither carried nor promised; an object with its prototype removed is
 carried as its observable data. (A review location is stricter: the
@@ -41,10 +42,14 @@ non-finite number, negative zero, a non-enumerable or symbol-keyed
 property, a hole or extra property in an array, a Proxy, or an object whose
 prototype is neither Object's nor none, such as a Map, a RegExp, an Error,
 or a class instance, whose meaning is not in its own data — is refused with
-an error and the session stays open. One
-exception is deliberate: a value with its own `toJSON` method, such as a
-Date, is carried as whatever `toJSON` returns, and that return value is
-checked by the same rule. The browser is never told a session completed
+an error and the session stays open. One exception is deliberate and takes
+precedence: a value whose `toJSON` property is callable — own or
+inherited, a Date for instance — is replaced by whatever `toJSON` returns
+before anything else looks at it, and that return value is what is checked
+and carried. This holds even when the holder is a Proxy or has a foreign
+prototype: only what `toJSON` returned is traversed, and it must pass the
+same rule. The browser is never told a
+session completed
 that the caller will never receive, and a value that would serialise
 differently later cannot change the frame. Once a handler has completed the session,
 its response is the fixed acknowledgement — `ok` and the operation id — and

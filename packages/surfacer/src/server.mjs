@@ -423,6 +423,11 @@ function authorized(request, expectedToken) {
 // check), and an object whose prototype is not Object's or none, whose
 // meaning is not in its own data — a Map, a RegExp, an Error, a class
 // instance. An object with its prototype removed is its observable data.
+// One exception takes precedence: JSON does Get(value, "toJSON") and, when
+// that is callable — own or inherited, or answered by a Proxy trap — the
+// value is replaced by what it returns before the replacer sees it, whatever
+// the holder was: a Date, a class instance, even a Proxy. The return value
+// is what is checked and carried; only it is traversed.
 function isPlainData(item) {
   if (types.isProxy(item)) return false;
   const proto = Object.getPrototypeOf(item);
@@ -456,7 +461,7 @@ function losslessSnapshot(value) {
       // Only plain data is carried (see the data contract at isPlainData). A
       // Map, a RegExp, an Error, a class instance, a Proxy — their meaning is
       // not in their own data, and JSON would write {} or a fragment. (A value
-      // with its own toJSON was already replaced by what toJSON returned.)
+      // with a callable toJSON was already replaced by what it returned.)
       if (!isPlainData(item)) {
         lost ??= `${Object.prototype.toString.call(item)} at ${where}`;
         return undefined;

@@ -416,6 +416,54 @@ test("hidden state is not data: an object with its prototype removed is carried 
   }
 });
 
+test("a callable toJSON takes precedence: the holder — even a Proxy answering it through a trap — is carried as what toJSON returns, and that return is checked", async () => {
+  // JSON does Get(value, "toJSON"); this Proxy has no own toJSON at all and
+  // answers the get through its trap. What it returns is what is traversed.
+  const proxied = (returned) => new Proxy({ hidden: 1 }, { get(t, k, r) { return k === "toJSON" ? () => returned : Reflect.get(t, k, r); } });
+  const surface = await startSurface({
+    app: "tojson-wins",
+    assets: { directory: assetsDir, files: { "/": ["index.html", "text/html; charset=utf-8"] } },
+    api: {
+      "POST /api/bad": async ({ session }) => { session.complete(proxied({ later: 1n })); return null; },
+      "POST /api/bad-nested": async ({ session }) => { session.complete({ a: proxied(() => {}) }, { verbatim: true }); return null; },
+      "POST /api/good": async ({ session }) => { session.complete({ root: proxied({ visible: 1 }), nested: { p: proxied([1, "two"]) } }, { verbatim: true }); return null; },
+    },
+    sessionTimeoutMs: 10_000,
+    leaseTimeoutMs: 10_000,
+  });
+  try {
+    for (const route of ["/api/bad", "/api/bad-nested"]) {
+      const refused = await post(surface, route, {});
+      assert.equal(refused.status, 500, `${route}: what toJSON returned is checked by the same rule`);
+      assert.equal((await refused.json()).operationId, undefined);
+    }
+    const completed = await post(surface, "/api/good", {});
+    assert.equal(completed.status, 200, "a Proxy holder with toJSON is replaced by what toJSON returned");
+    const { operationId } = await completed.json();
+    await post(surface, "/api/ack", { operationId });
+    const decision = await surface.waitForDecision();
+    assert.deepEqual(decision.payload, { root: { visible: 1 }, nested: { p: [1, "two"] } });
+  } finally {
+    await surface.stop();
+  }
+  // The outcome hook follows the same precedence.
+  const outcome = await startSurface({
+    app: "tojson-outcome",
+    assets: { directory: assetsDir, files: { "/": ["index.html", "text/html; charset=utf-8"] } },
+    terminalPayload: () => proxied({ visible: 1 }),
+    terminalPayloadVerbatim: true,
+    sessionTimeoutMs: 10_000,
+    leaseTimeoutMs: 10_000,
+  });
+  try {
+    const decision = outcome.waitForDecision();
+    outcome.interrupt("test");
+    assert.deepEqual((await decision).payload, { visible: 1 });
+  } finally {
+    await outcome.stop();
+  }
+});
+
 test("plain data of any shape is carried, including null-prototype objects and toJSON values", async () => {
   const surface = await startSurface({
     app: "plain",
