@@ -50,6 +50,8 @@ export const DECISIONS = Object.freeze([
 export const AUTHOR_KINDS = Object.freeze(["human", "agent"]);
 // The sides of an Output anchor (an internal note): the old or the new text.
 export const SIDES = Object.freeze(["old", "new"]);
+// The fields a location has, and the only own properties an anchor may carry.
+const ANCHOR_FIELDS = Object.freeze(["target", "side", "position"]);
 // A deadline names one instant every host reads the same way. The accepted
 // form is exactly: an RFC 3339 date-time with seconds, an optional fraction
 // of up to nine digits, and Z or a numeric offset — no leap second (:60),
@@ -225,9 +227,33 @@ export function anchorKey(anchor) {
 // from the very same canonical text, so every property is read exactly once:
 // a value that would answer differently on a second read (a non-throwing
 // proxy, an accessor) has no second read to answer.
+// An anchor's three fields, read from its own data descriptors, or null. The
+// anchor is plain data under the same rule as its position: not a Proxy, no
+// prototype but Object's or none, no symbol-keyed or hidden property, and
+// only the three fields a location has, each an enumerable data property. An
+// accessor could answer one position to the check and another to whoever
+// reads the result — on a request offered to the guard, or on an annotation
+// the browser sent — so it is no location, and is never invoked.
+function plainAnchor(anchor) {
+  if (!anchor || typeof anchor !== "object" || types.isProxy(anchor)) return null;
+  const proto = Object.getPrototypeOf(anchor);
+  if (proto !== Object.prototype && proto !== null) return null;
+  if (Object.getOwnPropertySymbols(anchor).length > 0) return null;
+  const names = Object.getOwnPropertyNames(anchor);
+  if (names.some((name) => !ANCHOR_FIELDS.includes(name))) return null;
+  const read = {};
+  for (const name of names) {
+    const descriptor = Object.getOwnPropertyDescriptor(anchor, name);
+    if (!descriptor || !descriptor.enumerable || !("value" in descriptor)) return null;
+    read[name] = descriptor.value;
+  }
+  return { target: read.target, side: read.side, position: read.position };
+}
+
 function keyOf(anchor, owned) {
-  if (!anchor || typeof anchor !== "object") return null;
-  const { target, side, position } = anchor;
+  const plain = plainAnchor(anchor);
+  if (plain === null) return null;
+  const { target, side, position } = plain;
   if (!isPresent(target) || hasNul(target)) return null;
   if (side !== undefined && side !== null && !SIDES.includes(side)) return null;
   let pos;
@@ -320,12 +346,12 @@ export function validateAnnotation(raw, anchorSet) {
   }
 }
 
-// One read of each anchor field, into a plain object, so the location that
-// is checked is the location that is returned.
+// The annotation's anchor as plain data (see plainAnchor): one read of each
+// field from its descriptor, so the location that is checked is the location
+// that is returned, and an accessor, a proxy, or a hidden or extra field is
+// refused rather than read.
 function snapshotAnchor(anchor) {
-  if (!anchor || typeof anchor !== "object") return null;
-  const { target, side, position } = anchor;
-  return { target, side, position };
+  return plainAnchor(anchor);
 }
 
 function cleanAnnotation(raw, anchorSet) {
@@ -377,12 +403,16 @@ function cleanAnnotation(raw, anchorSet) {
 
 /**
  * Normalise a raw browser/agent result into a clean SurfaceResult bound to the
- * request. Every annotation is validated against the request's anchors; the
- * decision must be one of DECISIONS (an unknown or missing decision is treated
- * as "cancelled", never as an approval); surfaceId and gateId are copied from
- * the request so the callback routes the result to the exact gate instance.
+ * request, or refuse it (null). Every annotation is validated against the
+ * request's anchors. The decision must agree with the annotations that
+ * survived: "approved" with none, or "changes-requested" with at least one —
+ * any other pair, an unknown or missing decision, and a browser naming the
+ * runtime's own endings are refused, never coerced. With `terminal` set, the
+ * runtime's own ending is normalised instead: "cancelled" or "timed-out",
+ * with no annotations. surfaceId and gateId are copied from the request so
+ * the callback routes the result to the exact gate instance.
  */
-export function normalizeResult(raw, request) {
+export function normalizeResult(raw, request, { terminal = false } = {}) {
   // Total like every other export: a field that throws when read is absent.
   const read = (get, fallback) => {
     try {
@@ -408,10 +438,21 @@ export function normalizeResult(raw, request) {
     annotations.length = 0;
   }
   const decision = read(() => raw?.decision, undefined);
+  // The decision and the annotations agree, or there is no result: a
+  // contradictory submission is refused, never coerced. A reviewer's
+  // submission is "approved" with no annotations — an annotation is review
+  // work a gate must not proceed past — or "changes-requested" with at least
+  // one that survived validation. "cancelled" and "timed-out" belong to the
+  // runtime's own ending (`terminal`), always without annotations; a browser
+  // cannot submit them.
+  const valid = terminal
+    ? (decision === "cancelled" || decision === "timed-out") && annotations.length === 0
+    : (decision === "approved" && annotations.length === 0) || (decision === "changes-requested" && annotations.length > 0);
+  if (!valid) return null;
   const result = {
     surfaceId: read(() => request?.surfaceId ?? null, null),
     gateId: read(() => request?.gateId ?? null, null),
-    decision: DECISIONS.includes(decision) ? decision : "cancelled",
+    decision,
     annotations,
   };
   const edits = read(() => raw?.edits, undefined);
@@ -429,6 +470,25 @@ export function normalizeResult(raw, request) {
 // A string with visible content, the only acceptable form for an id, an
 // address, a token, a renderer, a ref, or a fetch URL that is present. A
 // whitespace-only value could neither route nor render, so it is absent.
+// A fetch URL a host can actually fetch: an absolute http or https URL, or a
+// path on the session's own origin (`/api/model`). A session path is held to
+// the session: no backslash, control, or whitespace character (the URL
+// parser reads `\` as `/` and strips a newline, so `/\evil.test` would
+// resolve to another host), and once parsed against the session origin it
+// must still be on that origin. "not a URL", "%", and "http://[" are strings,
+// not URLs.
+const SESSION_ORIGIN = "http://127.0.0.1";
+function isFetchUrl(value) {
+  if (!isPresent(value)) return false;
+  if (value.startsWith("/")) {
+    if (/[\\\u0000-\u001f\u007f ]/.test(value) || !URL.canParse(value, SESSION_ORIGIN)) return false;
+    return new URL(value, SESSION_ORIGIN).origin === SESSION_ORIGIN;
+  }
+  if (!URL.canParse(value)) return false;
+  const { protocol } = new URL(value);
+  return protocol === "http:" || protocol === "https:";
+}
+
 function isPresent(value) {
   return typeof value === "string" && value.trim().length > 0;
 }
@@ -485,7 +545,7 @@ function checkSurfaceRequest(value) {
   const hasPayload = payload !== undefined;
   const hasFetch = fetch !== undefined;
   if (hasPayload === hasFetch) return false;
-  if (hasFetch && !isPresent(fetch)) return false;
+  if (hasFetch && !isFetchUrl(fetch)) return false;
   if (!isTransport(transport)) return false;
   // Every offered anchor is a real location — a target and a position — or the
   // membership rule the result is checked against would be built on nothing.

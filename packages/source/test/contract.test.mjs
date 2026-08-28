@@ -158,14 +158,24 @@ test("anchorKey is total: it never throws, and an anchor that points nowhere is 
   assert.equal(anchorKey({ target: "a", position: { x: -0 } }), null, "negative zero nested");
   assert.equal(anchorKey({ target: "a", position: Object.defineProperty({ x: 1 }, "hidden", { value: 2, enumerable: false }) }), null, "a non-enumerable data property");
   assert.equal(typeof anchorKey({ target: "a", position: [1, 2] }), "string", "an array's own length is the one non-enumerable exception");
-  // The anchor itself is read once: the location that is checked is the
-  // location that is returned, whatever an accessor answers later.
+  // An accessor is no location on either side: it could answer one position
+  // to the check and another to whoever reads the result. A request anchor
+  // and an annotation's anchor are both read from their own data
+  // descriptors, so the accessor is refused and never invoked.
   let anchorReads = 0;
   const shifting = { target: "a", get position() { anchorReads += 1; return anchorReads < 3 ? 1 : 999; } };
-  const offeredOnce = buildAnchorSet([shifting]); // read 1 -> 1
-  const kept = validateAnnotation({ anchor: shifting, body: "x" }, offeredOnce); // read 2 -> 1, then no re-read
-  assert.equal(kept.anchor.position, 1, "the position that passed the check is the position returned");
-  assert.equal(anchorReads, 2, "the anchor was read exactly once by the validator");
+  assert.equal(buildAnchorSet([shifting]).size, 0, "an accessor anchor offers no location");
+  assert.equal(validateAnnotation({ anchor: shifting, body: "x" }, buildAnchorSet([{ target: "a", position: 1 }])), null, "an accessor anchor matches no location");
+  assert.equal(anchorReads, 0, "the accessor was never invoked, on either side");
+  const kept = validateAnnotation({ anchor: { target: "a", position: 1 }, body: "x" }, buildAnchorSet([{ target: "a", position: 1 }]));
+  assert.equal(kept.anchor.position, 1);
+  // Hidden, inherited, or extra fields on an annotation's anchor are refused
+  // before anything is read from them.
+  const hidden = { target: "a", position: 1 };
+  Object.defineProperty(hidden, "side", { value: "new", enumerable: false });
+  assert.equal(validateAnnotation({ anchor: hidden, body: "x" }, buildAnchorSet([{ target: "a", position: 1 }])), null, "a hidden field");
+  assert.equal(validateAnnotation({ anchor: Object.assign(Object.create({ side: "new" }), { target: "a", position: 1 }), body: "x" }, buildAnchorSet([{ target: "a", position: 1 }])), null, "an inherited field on a foreign prototype");
+  assert.equal(validateAnnotation({ anchor: { target: "a", position: 1, extra: 1 }, body: "x" }, buildAnchorSet([{ target: "a", position: 1 }])), null, "an extra field");
   // The returned annotation owns its location: mutating what the browser
   // sent afterwards moves nothing.
   const sent = { anchor: { target: "shot", position: { x: 1, y: 2 } }, body: "x" };
@@ -270,7 +280,7 @@ test("arrays are read by own index: an inherited iterator or an own method canno
   assert.ok(set.has(anchorKey({ target: "a", position: 1 })), "the set holds the own item");
   assert.equal(validateAnnotation({ anchor: { target: "a", position: 999 }, body: "x" }, set), null, "the iterated item was never offered");
   assert.ok(validateAnnotation({ anchor: { target: "a", position: 1 }, body: "x" }, set));
-  assert.equal(normalizeResult({ decision: "approved", annotations: withIterator([{ anchor: { target: "a", position: 1 }, body: "own" }], [{ anchor: { target: "a", position: 1 }, body: "iterated" }]) }, request).annotations[0].body, "own");
+  assert.equal(normalizeResult({ decision: "changes-requested", annotations: withIterator([{ anchor: { target: "a", position: 1 }, body: "own" }], [{ anchor: { target: "a", position: 1 }, body: "iterated" }]) }, request).annotations[0].body, "own");
   const thread = withIterator([{ author: { kind: "human", id: "r" }, body: "own" }], [{ author: { kind: "human", id: "r" }, body: "iterated" }]);
   assert.equal(validateAnnotation({ anchor: { target: "a", position: 1 }, body: "x", thread }, set).thread[0].body, "own");
   // Guard false positives through Array.prototype.every: a hole, an own every.
@@ -305,8 +315,9 @@ test("every public guard is total: a throwing proxy is invalid, never an excepti
   assert.equal(isSurfaceRequest({ ...base, get deadline() { throw new Error("boom"); } }), false);
   assert.equal(isSurfaceRequest({ ...base, kind: hostile() }), false);
   assert.equal(isSurfaceRequest({ ...base, subject: hostile() }), false);
-  // The normaliser is total too: a field that throws when read is absent.
-  assert.deepEqual(normalizeResult(hostile(), base), { surfaceId: "s1", gateId: "g1", decision: "cancelled", annotations: [] });
+  // The normaliser is total too: a field that throws when read is absent, and
+  // a payload with no readable decision is no result — null, not a throw.
+  assert.equal(normalizeResult(hostile(), base), null);
   assert.deepEqual(normalizeResult({ decision: "approved", annotations: [] }, hostile()), { surfaceId: null, gateId: null, decision: "approved", annotations: [] });
   assert.deepEqual(normalizeResult({ decision: "approved", annotations: hostileArray }, base).annotations, []);
   assert.deepEqual(normalizeResult({ decision: "approved", get meta() { throw new Error("boom"); } }, base), { surfaceId: "s1", gateId: "g1", decision: "approved", annotations: [] });
@@ -390,18 +401,25 @@ test("normalizeResult validates every annotation against the request anchors", (
   assert.equal(result.gateId, "g1");
 });
 
-test("normalizeResult treats an unknown or missing decision as cancelled, never approved", () => {
+test("normalizeResult refuses an unknown, missing, or runtime-only decision from a submission, never coercing it", () => {
   const request = makeRequest([outputAnchor(1)]);
-  assert.equal(normalizeResult({ decision: "yolo", annotations: [] }, request).decision, "cancelled");
-  assert.equal(normalizeResult({ annotations: [] }, request).decision, "cancelled");
+  assert.equal(normalizeResult({ decision: "yolo", annotations: [] }, request), null);
+  assert.equal(normalizeResult({ annotations: [] }, request), null);
+  assert.equal(normalizeResult({ decision: "cancelled", annotations: [] }, request), null, "a browser cannot submit the runtime's endings");
+  assert.equal(normalizeResult({ decision: "timed-out", annotations: [] }, request), null);
   assert.equal(normalizeResult({ decision: "approved", annotations: [] }, request).decision, "approved");
+  // The runtime's own endings carry no annotations and nothing else.
+  assert.equal(normalizeResult({ decision: "cancelled", annotations: [] }, request, { terminal: true }).decision, "cancelled");
+  assert.equal(normalizeResult({ decision: "timed-out", annotations: [] }, request, { terminal: true }).decision, "timed-out");
+  assert.equal(normalizeResult({ decision: "approved", annotations: [] }, request, { terminal: true }), null, "a terminal ending is never an approval");
+  assert.equal(normalizeResult({ decision: "cancelled", annotations: [{ anchor: outputAnchor(1), body: "x" }] }, request, { terminal: true }), null, "nor does it carry annotations");
 });
 
 test("normalizeResult caps the annotation count", () => {
   const anchors = Array.from({ length: MAX_ANNOTATIONS + 20 }, (_, i) => outputAnchor(i + 1));
   const request = makeRequest(anchors);
   const annotations = anchors.map((a) => ({ anchor: a, body: "x" }));
-  const result = normalizeResult({ decision: "approved", annotations }, request);
+  const result = normalizeResult({ decision: "changes-requested", annotations }, request);
   assert.equal(result.annotations.length, MAX_ANNOTATIONS);
 });
 
@@ -508,4 +526,51 @@ test("isSurfaceRequest guards the shape", () => {
 test("FAMILIES and DECISIONS are the contract's closed vocabularies", () => {
   assert.deepEqual([...FAMILIES], ["intent", "output", "outcome"]);
   assert.deepEqual([...DECISIONS], ["approved", "changes-requested", "cancelled", "timed-out"]);
+});
+
+test("an anchor is plain data: an accessor, a proxy, a hidden or extra property, a symbol key, or a class instance is no location", () => {
+  // A getter could answer one position to the guard that validated the
+  // request and another to the set the result is checked against.
+  let calls = 0;
+  const getter = { target: "src/app.js", side: "new" };
+  Object.defineProperty(getter, "position", { get: () => (calls += 1), enumerable: true });
+  assert.equal(anchorKey(getter), null, "an accessor position");
+  assert.equal(isSurfaceRequest(makeRequest([getter])), false, "a request offering it is refused");
+  assert.equal(anchorKey(new Proxy(outputAnchor(1), {})), null, "a proxy");
+  const hidden = outputAnchor(1);
+  Object.defineProperty(hidden, "position", { value: 1, enumerable: false });
+  assert.equal(anchorKey(hidden), null, "a non-enumerable field");
+  assert.equal(anchorKey({ ...outputAnchor(1), extra: true }), null, "a property no location has");
+  assert.equal(anchorKey({ ...outputAnchor(1), [Symbol("s")]: 1 }), null, "a symbol key");
+  class Anchor { constructor() { Object.assign(this, outputAnchor(1)); } }
+  assert.equal(anchorKey(new Anchor()), null, "a class instance");
+  assert.equal(anchorKey(Object.assign(Object.create(null), outputAnchor(1))), anchorKey(outputAnchor(1)), "a null-prototype object is its own data");
+  assert.equal(anchorKey({ target: "src/app.js", position: 1 }), anchorKey({ position: 1, target: "src/app.js" }), "field order is not identity");
+});
+
+test("a subject's fetch is a URL the host can fetch: absolute http(s) or a path on the session origin", () => {
+  const withFetch = (fetch) => isSurfaceRequest({ ...makeRequest([outputAnchor(1)]), subject: { ref: "worktree", fetch } });
+  for (const ok of ["/api/model", "/api/model?x=1", "http://127.0.0.1:8080/api/model", "https://example.test/review"]) assert.equal(withFetch(ok), true, ok);
+  for (const bad of ["http://[", "%", "not a URL", "", " ", "//evil.test/x", "/\\evil.test/x", "/\\\\evil.test", "/api\nevil.test", "/api\tmodel", "/\u0000", "ftp://x/y", "javascript:alert(1)", "api/model", "data:text/plain,x"]) assert.equal(withFetch(bad), false, JSON.stringify(bad));
+  // The premise: the URL parser reads a backslash as a slash and drops a
+  // newline, so those forms would otherwise leave the session origin.
+  assert.equal(new URL("/\\evil.test/x", "http://127.0.0.1").origin, "http://evil.test");
+});
+
+test("a decision agrees with its annotations or there is no result: approved with none, changes-requested with at least one", () => {
+  const request = makeRequest([outputAnchor(3)]);
+  assert.equal(normalizeResult({ decision: "approved", annotations: [{ anchor: outputAnchor(3), body: "fix this" }] }, request), null, "an approval beside review work is refused, not coerced");
+  assert.equal(normalizeResult({ decision: "approved", annotations: [] }, request).decision, "approved");
+  // An annotation the request never offered is dropped; the approval then
+  // stands on what is valid, which is nothing.
+  const forged = normalizeResult({ decision: "approved", annotations: [{ anchor: outputAnchor(99), body: "not shown" }] }, request);
+  assert.equal(forged.decision, "approved");
+  assert.equal(forged.annotations.length, 0);
+  // A request for changes names at least one: none sent, or every one
+  // forged, is refused.
+  assert.equal(normalizeResult({ decision: "changes-requested", annotations: [] }, request), null);
+  assert.equal(normalizeResult({ decision: "changes-requested", annotations: [{ anchor: outputAnchor(99), body: "forged" }] }, request), null, "every annotation forged");
+  const real = normalizeResult({ decision: "changes-requested", annotations: [{ anchor: outputAnchor(3), body: "real" }] }, request);
+  assert.equal(real.decision, "changes-requested");
+  assert.equal(real.annotations.length, 1);
 });
