@@ -73,7 +73,11 @@ function lookup(scope, name) {
 // the same name is ambiguous and fails closed.
 function lookupMember(thisClass, name) {
   if (!thisClass) return null;
-  const entry = (thisClass.isStatic ? thisClass.members.static : thisClass.members.instance).get(name);
+  const side = thisClass.isStatic ? "static" : "instance";
+  // A computed key nobody can read statically may define any name on its
+  // side, so no name on that side is known to be unique.
+  if (thisClass.members.dynamic[side]) return null;
+  const entry = thisClass.members[side].get(name);
   return entry && !entry.ambiguous ? entry : null;
 }
 
@@ -186,15 +190,37 @@ function registerImports(node, scope, occurrences, seenDefs) {
 // so a method body may name a member declared below it. Static and instance
 // members are kept apart; a second member of the same name in the same map
 // (a getter and a setter, a field and a method) makes that name ambiguous.
+// The name a member key defines: an identifier or a string literal, plain or
+// in brackets, is known; a computed key that is anything else is dynamic and
+// could define any name (undefined here); a private or numeric key is not a
+// name `this.name` can reach (null).
+function memberName(node) {
+  const { key } = node;
+  if (!key) return null;
+  if (!node.computed) {
+    if (key.type === "Identifier") return key.name;
+    if (key.type === "Literal" && typeof key.value === "string") return key.value;
+    return null;
+  }
+  return key.type === "Literal" && typeof key.value === "string" ? key.value : undefined;
+}
+
 function registerMember(node, members, occurrences, seenDefs) {
-  if (node.key?.type !== "Identifier" || node.computed || seenDefs.has(node.key.start)) return;
+  const side = node.static ? "static" : "instance";
+  const name = memberName(node);
+  if (name === undefined) {
+    // `[key]() {}` may replace any member on this side at run time.
+    members.dynamic[side] = true;
+    return;
+  }
+  if (name === null || seenDefs.has(node.key.start)) return;
   const def = { line: node.key.loc.start.line, col: node.key.loc.start.column };
   seenDefs.add(node.key.start);
-  const bucket = node.static ? members.static : members.instance;
-  const existing = bucket.get(node.key.name);
+  const bucket = members[side];
+  const existing = bucket.get(name);
   if (existing) existing.ambiguous = true;
-  else bucket.set(node.key.name, { ...def, kind: "method", ambiguous: false });
-  occurrences.push(occurrence(node.key, "method", def));
+  else bucket.set(name, { ...def, kind: "method", ambiguous: false });
+  if (node.key.type === "Identifier") occurrences.push(occurrence(node.key, "method", def));
 }
 
 // `var` declarations belong to the whole function: a use earlier in the
@@ -369,7 +395,7 @@ function walk(node, scope, occurrences, seenDefs, parent = null) {
       // The class scope keeps the surrounding `this` (heritage and computed
       // keys evaluate there); members set their own below.
       const inner = pushScope(scope);
-      inner.members = { static: new Map(), instance: new Map() };
+      inner.members = { static: new Map(), instance: new Map(), dynamic: { static: false, instance: false } };
       if (node.type === "ClassExpression" && node.id) {
         registerDef(inner, node.id, "class", occurrences, seenDefs);
       }
@@ -418,6 +444,21 @@ function walk(node, scope, occurrences, seenDefs, parent = null) {
     }
     case "ImportDeclaration":
       registerImports(node, scope, occurrences, seenDefs); // already registered by hoist; a no-op
+      return;
+    case "ExportNamedDeclaration":
+      if (node.declaration) {
+        walk(node.declaration, scope, occurrences, seenDefs, node);
+        return;
+      }
+      // `export { a as b } from "./dep.js"` names another module's bindings;
+      // nothing in it is local. `export { foo }` is one use of the local foo —
+      // its exported name is the same identifier, not a second use.
+      if (node.source) return;
+      for (const spec of node.specifiers) {
+        if (spec.local?.type === "Identifier") emitRef(spec.local, spec, scope, occurrences, seenDefs);
+      }
+      return;
+    case "ExportAllDeclaration":
       return;
     case "CatchClause": {
       const inner = pushScope(scope);

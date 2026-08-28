@@ -191,7 +191,6 @@ test("class members resolve by context: static or instance, unique only, super a
     "  use() { return this.pair; }",
     "  sup() { return super.foo(); }",
     "  nest() { class B { inner() {} go() { return this.inner(); } } return this.inner; }",
-    "  [this.foo]() {}",
     "  field = this.foo;",
     "  static sfield = this.foo;",
     "}",
@@ -204,9 +203,33 @@ test("class members resolve by context: static or instance, unique only, super a
   assert.equal(at(occurrences, 9, 23).def, null, "super.foo is the parent's");
   assert.deepEqual(at(occurrences, 10, 51).def, { line: 10, col: 21 }, "a nested class's this is its own");
   assert.equal(at(occurrences, 10, 76).def, null, "the outer class has no inner");
-  assert.equal(at(occurrences, 11, 8).def, null, "a computed key evaluates outside the class");
-  assert.deepEqual(at(occurrences, 12, 15).def, { line: 3, col: 2 }, "an instance field initialiser sees the instance");
-  assert.deepEqual(at(occurrences, 13, 23).def, { line: 2, col: 9 }, "a static field initialiser sees the class");
+  assert.deepEqual(at(occurrences, 11, 15).def, { line: 3, col: 2 }, "an instance field initialiser sees the instance");
+  assert.deepEqual(at(occurrences, 12, 23).def, { line: 2, col: 9 }, "a static field initialiser sees the class");
+  // A computed key evaluates outside the class: at the top level, this is unknown.
+  const computed = navIndex({ code: "class G {\n  [this.foo]() {}\n}\n", lang: "javascript" }).occurrences;
+  assert.equal(at(computed, 2, 8).def, null, "a computed key evaluates outside the class");
+});
+
+test("string-keyed members count, a dynamic computed key fails its side closed, and a computed duplicate is ambiguous", () => {
+  const ambiguous = navIndex({ code: 'class C { foo() {} ["foo"]() {} call() { return this.foo(); } }\n', lang: "javascript" }).occurrences;
+  assert.equal(at(ambiguous, 1, 53).def, null, "a later computed foo replaces the first at run time: ambiguous");
+  const literal = navIndex({ code: 'class D { ["bar"]() {} call() { return this.bar(); } }\n', lang: "javascript" }).occurrences;
+  assert.deepEqual(at(literal, 1, 44).def, { line: 1, col: 11 }, "a bracketed string key is a known member");
+  const quoted = navIndex({ code: 'class F { "q"() {} go() { return this.q(); } }\n', lang: "javascript" }).occurrences;
+  assert.deepEqual(at(quoted, 1, 38).def, { line: 1, col: 10 }, "a quoted key is a known member");
+  const dynamic = navIndex({ code: "class E { [key]() {} x() {} go() { return this.x(); } static s() {} static gs() { return this.s(); } }\n", lang: "javascript" }).occurrences;
+  assert.equal(at(dynamic, 1, 47).def, null, "a dynamic computed key on the instance side: no instance name is known unique");
+  assert.deepEqual(at(dynamic, 1, 94).def, { line: 1, col: 61 }, "the static side is untouched");
+});
+
+test("a re-export from another module names nothing local, and export { foo } is one use", () => {
+  const code = "const foo = 1;\nexport { foo as bar } from \"./dep.js\";\nexport { foo };\nexport * from \"./all.js\";\n";
+  const { occurrences } = navIndex({ code, lang: "javascript" });
+  assert.equal(at(occurrences, 2, 9), undefined, "the re-exported name is not the local foo");
+  const uses = occurrences.filter((o) => o.name === "foo" && !o.isDef);
+  assert.equal(uses.length, 1, "export { foo } is exactly one use");
+  assert.deepEqual(uses[0].def, { line: 1, col: 6 });
+  assert.deepEqual([uses[0].line, uses[0].col], [3, 9]);
 });
 
 test("a class's heritage is a use: extends Base is indexed in the right scope", () => {
