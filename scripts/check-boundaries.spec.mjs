@@ -3,7 +3,24 @@ import { execFileSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import test from "node:test";
 
-import { extractObversaImports, moduleSpecifiers } from "./check-boundaries.mjs";
+import { extractObversaImports, moduleSpecifiers, parserExtensions, scansImports, sourceExtensions, textExtensions } from "./check-boundaries.mjs";
+
+test("every module form the parser accepts is scanned for imports — .mts, .cts, and .jsx included", () => {
+  // A form the parser could read but the scan skipped would let a forbidden
+  // sibling import in packages/<name>/src/leak.mts pass the fail-closed check.
+  assert.deepEqual([...sourceExtensions].sort(), [...parserExtensions].sort(), "the scan set is exactly the parser map");
+  for (const ext of parserExtensions) {
+    assert.ok(textExtensions.has(ext), `${ext} is read as text`);
+    assert.equal(scansImports(`packages/source/src/leak${ext}`), true, `${ext} under a package is scanned for imports`);
+  }
+  assert.equal(scansImports("hosts/cmux/bin/tool.mts"), false, "only package files carry boundary rules");
+  assert.equal(scansImports("packages/source/README.md"), false);
+  assert.deepEqual(
+    extractObversaImports('import { x } from "@obversa/surfacer";', { file: "/repo/packages/source/src/leak.mts", root: "/repo" }),
+    ["@obversa/surfacer"],
+    "the extractor reads a .mts file",
+  );
+});
 
 test("the import scan sees every form a module can use to name an @obversa package", () => {
   const source = `

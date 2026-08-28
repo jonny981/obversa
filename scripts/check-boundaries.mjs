@@ -19,6 +19,29 @@ const scriptKinds = new Map([
   ['.js', ts.ScriptKind.JS], ['.mjs', ts.ScriptKind.JS], ['.cjs', ts.ScriptKind.JS],
   ['.jsx', ts.ScriptKind.JSX],
 ]);
+export const parserExtensions = [...scriptKinds.keys()];
+
+// Every module form the parser map accepts is scanned for imports; this set
+// and the predicate are exported so the spec can hold them to that. A form
+// the parser accepts but the scan skipped would let a forbidden import
+// through unchecked.
+export const sourceExtensions = ['.ts', '.tsx', '.mts', '.cts', '.js', '.jsx', '.mjs', '.cjs'];
+const sourcePattern = new RegExp(`(?:${sourceExtensions.map((ext) => ext.replace('.', '\\.')).join('|')})$`);
+export function scansImports(path) {
+  return path.startsWith('packages/') && sourcePattern.test(path);
+}
+export const textExtensions = new Set([
+  ...sourceExtensions,
+  '.css',
+  '.html',
+  '.json',
+  '.jsonl',
+  '.md',
+  '.mdx',
+  '.sh',
+  '.yaml',
+  '.yml',
+]);
 
 // Every module specifier a file names, in source order: static imports and
 // re-exports, side-effect and dynamic `import(...)`, CommonJS `require(...)`,
@@ -147,22 +170,6 @@ const scanFiles = [
   'pnpm-workspace.yaml',
   'tsconfig.base.json',
 ];
-const textExtensions = new Set([
-  '.cjs',
-  '.css',
-  '.html',
-  '.js',
-  '.json',
-  '.jsonl',
-  '.md',
-  '.mdx',
-  '.mjs',
-  '.sh',
-  '.ts',
-  '.tsx',
-  '.yaml',
-  '.yml',
-]);
 const forbidden = [
   {
     name: 'retired package name',
@@ -346,7 +353,7 @@ for (const absolute of files) {
 
   // Import scan covers every source form in the workspace: the runtime is
   // TypeScript, the surface packages are plain ES modules.
-  if (path.startsWith('packages/') && /\.(?:ts|tsx|mjs|cjs|js)$/.test(path)) {
+  if (scansImports(path)) {
     const owner = path.split('/')[1];
     const imports = extractObversaImports(text, { file: absolute, root });
     const ownerName = `@obversa/${owner}`;
