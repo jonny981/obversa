@@ -4,7 +4,7 @@ import os from "node:os";
 import path from "node:path";
 import test from "node:test";
 
-import { openSurfaceUrl } from "../src/host.mjs";
+import { openSurfaceUrl, runDetached } from "../src/host.mjs";
 
 function shim(directory, name, exitCode = 0) {
   const record = path.join(directory, `${name}.calls`);
@@ -52,22 +52,14 @@ test("a placement command still alive after the settle is assumed to have opened
   const lingering = path.join(directory, "lingering");
   writeFileSync(lingering, "#!/bin/sh\nsleep 2\n");
   chmodSync(lingering, 0o755);
+  // The settle is fixed at five seconds in the public path; the internal
+  // helper takes it as an argument so this test does not pay the five seconds.
   const started = Date.now();
-  const viaHost = await openSurfaceUrl("http://127.0.0.1:1/x", {
-    surfaceBin: lingering,
-    browserCommand: null,
-    settleMs: 100,
-  });
-  assert.deepEqual(viaHost, { opened: true, via: "host" });
+  assert.equal(await runDetached(lingering, ["http://127.0.0.1:1/x"], 100), true);
   assert.ok(Date.now() - started < 1_500, "reported at the settle, not at the command's exit");
 
   const lateFailure = path.join(directory, "late-failure");
   writeFileSync(lateFailure, "#!/bin/sh\nsleep 0.5\nexit 1\n");
   chmodSync(lateFailure, 0o755);
-  const assumed = await openSurfaceUrl("http://127.0.0.1:1/y", {
-    surfaceBin: lateFailure,
-    browserCommand: null,
-    settleMs: 100,
-  });
-  assert.deepEqual(assumed, { opened: true, via: "host" }, "a failure after the settle is not observed: the placement was already assumed opened");
+  assert.equal(await runDetached(lateFailure, ["http://127.0.0.1:1/y"], 100), true, "a failure after the settle is not observed: the placement was already assumed opened");
 });

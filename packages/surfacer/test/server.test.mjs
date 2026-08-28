@@ -333,30 +333,41 @@ test("the caller learns of a completion only after the winning request has been 
   }
 });
 
-test("a handler that completes and then never returns cannot hold the decision open", async () => {
-  // Once the claim wins, the session and lease clocks are gone. A handler that
-  // never returns never sends its answer, so the hook on the response cannot
-  // fire; the delivery bound must start the acknowledgement clock instead,
-  // and the caller must learn of the completion within two windows.
+test("a handler that completes and then never returns is answered at the claim, and the caller learns of the completion", async () => {
+  // Once the claim wins, the session and lease clocks are gone. The fixed
+  // answer goes out at the claim itself, so the browser holds its 200 and the
+  // operation id while the handler is still pending, its acknowledgement is
+  // accepted, and the caller learns of the completion. The handler never
+  // returning changes nothing.
+  let handlerReturned = false;
   const surface = await boot({
     sessionTimeoutMs: 60,
     leaseTimeoutMs: 60,
-    ackTimeoutMs: 40,
+    ackTimeoutMs: 1_000,
     api: {
       "POST /api/hang": async ({ session }) => {
         session.complete({ value: 1 });
         await new Promise(() => {});
+        handlerReturned = true;
       },
     },
   });
   try {
-    // The request never gets its answer; stop() closes the server under it.
-    request(surface, "/api/hang", { body: {} }).catch(() => null);
+    const answered = await Promise.race([
+      request(surface, "/api/hang", { body: {} }),
+      new Promise((_, reject) => setTimeout(() => reject(new Error("the browser was not answered at the claim")), 1_000)),
+    ]);
+    assert.equal(answered.status, 200, "the browser is answered at the claim, long after the session and lease clocks would have fired");
+    const { operationId } = await answered.json();
+    assert.equal(typeof operationId, "string");
+    const ack = await request(surface, "/api/ack", { body: { operationId } });
+    assert.equal(ack.status, 200, "the acknowledgement is accepted");
     const decision = await Promise.race([
       surface.waitForDecision(),
-      new Promise((_, reject) => setTimeout(() => reject(new Error("the decision stayed pending: nothing bounded the unanswered completion")), 400)),
+      new Promise((_, reject) => setTimeout(() => reject(new Error("the decision stayed pending after the acknowledgement")), 400)),
     ]);
     assert.equal(decision.status, "completed");
+    assert.equal(handlerReturned, false, "the handler is still pending when the caller has the completion");
   } finally {
     await surface.stop();
   }

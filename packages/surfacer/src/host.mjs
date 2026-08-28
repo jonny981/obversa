@@ -14,12 +14,11 @@ export async function openSurfaceUrl(url, {
     : process.platform === "linux" ? ["xdg-open"]
     : null,
   stderr = process.stderr,
-  settleMs = PLACEMENT_SETTLE_MS,
 } = {}) {
-  if (await runDetached(surfaceBin, [url], settleMs)) return { opened: true, via: "host" };
+  if (await runDetached(surfaceBin, [url])) return { opened: true, via: "host" };
   if (browserCommand) {
     const [browserBin, ...browserArgs] = browserCommand;
-    if (await runDetached(browserBin, [...browserArgs, url], settleMs)) return { opened: true, via: "browser" };
+    if (await runDetached(browserBin, [...browserArgs, url])) return { opened: true, via: "browser" };
   }
   stderr.write(`Open this surface in a browser: ${url}\n`);
   return { opened: false, via: "print" };
@@ -30,9 +29,10 @@ export async function openSurfaceUrl(url, {
 // ASSUMED to have opened the surface: that is an assumption made so a live
 // placement never holds the session back from waiting for its decision, not
 // an observed success, and a command that fails after the settle is reported
-// as opened all the same.
+// as opened all the same. The settle is fixed; `settleMs` exists for this
+// module's own test and is not part of the package's public surface.
 const PLACEMENT_SETTLE_MS = 5_000;
-function runDetached(command, args, settleMs) {
+export function runDetached(command, args, settleMs = PLACEMENT_SETTLE_MS) {
   return new Promise((resolve) => {
     let child;
     try {
