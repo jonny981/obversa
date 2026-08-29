@@ -62,11 +62,21 @@ function hostRootOf(absolute, repoRoot) {
 function placedUnder(absolute, repoRoot) {
   return relative(realPathOf(repoRoot), realPathOf(absolute)).split('\\').join('/');
 }
-// A path by its real spelling; a last component that does not exist is
-// kept under its parent's real path.
+// A path by its real spelling. The components that do not exist — one, or
+// a whole missing tail such as generated/nested/entry.mjs — are kept as
+// spelled under the real path of the deepest ancestor that does exist, so a
+// path into a sibling package still places there when the file is yet to
+// be built. A path with no existing ancestor at all keeps its spelling.
 function realPathOf(path) {
-  const real = realpathOf(path, ts.sys);
-  return real === path ? join(realpathOf(dirname(path), ts.sys), basename(path)) : real;
+  const missing = [];
+  let current = path;
+  while (!ts.sys.fileExists(current) && !ts.sys.directoryExists(current)) {
+    const parent = dirname(current);
+    if (parent === current) return path;
+    missing.unshift(basename(current));
+    current = parent;
+  }
+  return join(realpathOf(current, ts.sys), ...missing);
 }
 // The one refusal for a symlink met under packages/ or hosts/, by the main
 // walk or by the per-package and per-host walks that enter dist. Declared

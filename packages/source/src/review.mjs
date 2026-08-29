@@ -40,9 +40,13 @@ export function outputAnchors(model) {
 }
 
 // The `gate` option a Callback Gate passes to reviewDiff: its id and the
-// callback the result should reach. The pair is enforced by the contract's
-// isGateBinding — a gate needs a present id, address, and token; direct use
-// has none of the three — and a wrong shape fails before a surface opens.
+// callback that gate expects its result at. reviewDiff validates the pair
+// and carries it in the request; it does not send anything to the
+// callback. The result comes back to the caller through the launcher's
+// framed handoff only, and delivery to the gate is the gate's own work.
+// The pair is enforced by the contract's isGateBinding — a gate needs a
+// present id, address, and token; direct use has none of the three — and a
+// wrong shape fails before a surface opens.
 function normalizeGate(gate) {
   if (gate === undefined || gate === null) return { gateId: null, callback: { address: null, token: null } };
   if (typeof gate !== "object") throw new TypeError("gate must be an object with gateId and callback");

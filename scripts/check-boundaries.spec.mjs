@@ -705,6 +705,10 @@ test("a relative import is placed by its real path, and a spelling other than th
         assert.deepEqual(manifestPathTargets({ main: "../surfacer/src/index.ts" }, { file: path.join(source, "package.json"), root }), ["@obversa/surfacer"], `a manifest entry under ${root === tree ? "the real" : "the linked"} root`);
         assert.deepEqual(tsconfigDependencies('{ "files": ["../../packages/surfacer/src/index.ts"] }', { file: path.join(source, "tsconfig.json"), root }), ["@obversa/surfacer"], `a tsconfig files entry under ${root === tree ? "the real" : "the linked"} root`);
         assert.deepEqual(manifestPathTargets({ main: "../../" }, { file: path.join(source, "package.json"), root }), [refusal("main reaches ., which holds every package")], `a value that reaches every package under ${root === tree ? "the real" : "the linked"} root`);
+        // A path whose tail does not exist yet — generated output, several
+        // segments deep — still places under the sibling it names.
+        assert.deepEqual(manifestPathTargets({ main: "../surfacer/generated/nested/entry.mjs" }, { file: path.join(source, "package.json"), root }), ["@obversa/surfacer"], `a missing nested path under ${root === tree ? "the real" : "the linked"} root`);
+        assert.deepEqual(extractObversaImports('import { x } from "../../surfacer/generated/nested/entry.mjs";', { file: path.join(source, "src", "a.mjs"), root }), ["@obversa/surfacer"], `a missing nested import under ${root === tree ? "the real" : "the linked"} root`);
       }
     } finally {
       rmSync(linkedTree);

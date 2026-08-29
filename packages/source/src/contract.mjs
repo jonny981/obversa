@@ -507,7 +507,9 @@ function isPresent(value) {
  */
 export function isGateBinding(gateId, callback) {
   try {
-    if (!callback || typeof callback !== "object") return false;
+    // A Proxy may answer a later read differently from this one, so it is
+    // not a binding, transparent or not.
+    if (!callback || typeof callback !== "object" || types.isProxy(callback)) return false;
     const { address, token } = callback;
     if (gateId === null) return address === null && token === null;
     return isPresent(gateId) && isPresent(address) && isPresent(token);
@@ -527,20 +529,23 @@ export function isSurfaceRequest(value) {
 }
 
 function checkSurfaceRequest(value) {
-  if (!value || typeof value !== "object") return false;
+  // A Proxy — the request itself, or any object it carries — may answer a
+  // later read differently from the one made here, so none is a request,
+  // transparent or not; this is the rule the module states at its head.
+  if (!value || typeof value !== "object" || types.isProxy(value)) return false;
   // Every field is read exactly once, here, and the checks use the locals: a
   // getter that answered one shape to one check and another to the next
   // would otherwise pass a request no single read of it satisfies.
   const { surfaceId, gateId, callback, kind, subject, anchors, transport, deadline } = value;
   if (!isPresent(surfaceId)) return false;
   if (!isGateBinding(gateId, callback)) return false;
-  if (!kind || typeof kind !== "object") return false;
+  if (!kind || typeof kind !== "object" || types.isProxy(kind)) return false;
   const { family, renderer } = kind;
   if (!FAMILIES.includes(family) || !isPresent(renderer)) return false;
   // The subject is a ref plus either an inline payload or a fetch URL, one
   // and not both; a host cannot render a request that names neither, and one
   // that names both does not say which content is under review.
-  if (!subject || typeof subject !== "object") return false;
+  if (!subject || typeof subject !== "object" || types.isProxy(subject)) return false;
   const { ref, payload, fetch } = subject;
   if (!isPresent(ref)) return false;
   // Exactly one of the two fields is present — a subject carrying both would
