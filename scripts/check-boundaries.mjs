@@ -846,6 +846,14 @@ function crossingPackage(specifier, { file, root: repoRoot } = {}) {
   // Build output is skipped by the walk, so what a file under dist imports
   // is never read: shipped source may not import into a dist directory.
   if (!isTestPath(file) && /(^|\/)dist\//.test(placed)) return refusal(`${specifier} imports build output under dist, which the scan does not read; import a source file`);
+  // A module the loader would open must be one the scan reads: a file that
+  // exists at the target with no source extension (an extensionless module,
+  // which Node loads all the same) is never import-scanned, and what it
+  // imports is never seen. A target that does not exist as spelled is the
+  // compiler's to place (`./x` for x.ts); data files JSON can carry are not
+  // modules that import.
+  if (!isTestPath(file) && ts.sys.fileExists(real) && !sourcePattern.test(real) && !/\.(json|css|html|txt|md|wasm)$/.test(real))
+    return refusal(`${specifier} names ${placed}, a file with no source extension, which the scan never import-scans; a module carries a source extension`);
   const owner = packageDirOf(realpathOf(file, ts.sys), realRoot);
   // A package imports nothing from outside packages/: a host is the
   // composition root that takes packages by public name, and scripts/ and
@@ -963,6 +971,11 @@ export function extractObversaImports(text, { file, root: repoRoot, configs = []
         const placed = placedUnder(real, repoRoot);
         if (!isTestPath(file) && !specifier.startsWith('@obversa/') && /(^|\/)dist\//.test(placed) && !/(^|\/)node_modules\//.test(placed)) {
           found.push(refusal(`shipped source resolves to build output under dist, which the scan does not read: ${specifier} -> ${placed}`));
+          continue;
+        }
+        // An alias can land on an extensionless module the scan never reads.
+        if (!isTestPath(file) && !specifier.startsWith('@obversa/') && host.fileExists?.(real) && !sourcePattern.test(real) && !/\.(json|css|html|txt|md|wasm|d\.ts)$/.test(real) && !/(^|\/)node_modules\//.test(placed)) {
+          found.push(refusal(`shipped source resolves to ${placed}, a file with no source extension, which the scan never import-scans: ${specifier}`));
           continue;
         }
         // An alias can land outside packages/ too — on a host, on scripts/,

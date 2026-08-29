@@ -5,7 +5,7 @@ import path from "node:path";
 import { Writable } from "node:stream";
 import test from "node:test";
 
-import { claimFrames } from "../src/claim-frames.mjs";
+import { frameOf } from "../src/claim-frames.mjs";
 import { runSurface } from "../src/launcher.mjs";
 import { parseFramedResult } from "../src/handoff.mjs";
 
@@ -190,7 +190,7 @@ test("the frame written is the frame claimed: a toJSON injected after the comple
     const reply = await fetch(`${session.origin}/api/answer`, { method: "POST", headers, body: JSON.stringify({ value: 7 }) }).then((r) => r.json());
     await fetch(`${session.origin}/api/ack`, { method: "POST", headers, body: JSON.stringify({ operationId: reply.operationId }) });
     const { result } = await pending;
-    const frame = claimFrames.get(result);
+    const frame = frameOf(result);
     assert.equal(typeof frame, "string");
     assert.equal(Reflect.ownKeys(result).includes("frame"), false, "the public decision carries no hidden field; the frame lives in the surfacer's private record");
     assert.deepEqual(Object.keys(await pending).sort(), ["placement", "result", "url"], "runSurface's return is unchanged: no public export hands the frame out");
@@ -240,7 +240,7 @@ test("a toJSON present on Object.prototype before the claim defines the completi
     const reply = await fetch(`${session.origin}/api/answer`, { method: "POST", headers, body: '{"value":7}' }).then((r) => r.json());
     await fetch(`${session.origin}/api/ack`, { method: "POST", headers, body: `{"operationId":${JSON.stringify(reply.operationId)}}` });
     const { result } = await pending;
-    const frame = claimFrames.get(result);
+    const frame = frameOf(result);
     assert.deepEqual(result.payload, { forged: true }, "the hook answered the payload, once, as the documented semantics say");
     assert.equal(captured, frame);
     const parsed = parseFramedResult(captured, "launcher-test");
@@ -269,7 +269,7 @@ test("a toJSON present on Object.prototype before an interrupt defines the endin
       terminalPayload: (status) => ({ outcome: status }),
     });
     const { result } = await pending;
-    const frame = claimFrames.get(result);
+    const frame = frameOf(result);
     assert.equal(result.status, "interrupted");
     assert.deepEqual(result.payload, { forged: true }, "the ending payload's one serialisation applied the hook");
     assert.equal(captured, frame);
@@ -310,5 +310,51 @@ test("with a toJSON on Object.prototype before the claim, the protocol replies s
       assert.ok(Date.now() - started < 2_000, `${route}: the explicit acknowledgement settled the session, not the 20 s clock`);
       assert.equal(result.status, route === "answer" ? "completed" : "cancelled");
     });
+  }
+});
+
+// The frame store's methods are captured at module load: app code that
+// replaces WeakMap.prototype.get after the claim, or .set before it, changes
+// neither what is recorded nor what is written.
+test("replacing WeakMap.prototype.get after the completion, or .set before it, cannot change the frame that reaches stdout", async () => {
+  const directory = mkdtempSync(path.join(os.tmpdir(), "launcher-assets-"));
+  writeFileSync(path.join(directory, "index.html"), "<!doctype html><title>x</title>");
+  const realGet = WeakMap.prototype.get;
+  const realSet = WeakMap.prototype.set;
+  try {
+    for (const tamper of ["get-after", "set-before"]) {
+      let captured = "";
+      let session;
+      if (tamper === "set-before") WeakMap.prototype.set = function () { return this; }; // a store that keeps nothing
+      const pending = runSurface({
+        app: "launcher-test",
+        open: false,
+        stdout: { write: (text) => { captured += text; } },
+        ready: (info) => { session = info; },
+        assets: { directory, files: { "/": ["index.html", "text/html; charset=utf-8"] } },
+        api: {
+          "POST /api/answer": async ({ session: s }) => {
+            s.complete({ real: true });
+            if (tamper === "get-after") WeakMap.prototype.get = function () { return "FORGED\n"; };
+            return null;
+          },
+        },
+      });
+      await new Promise((resolve) => setTimeout(resolve, 100));
+      const token = session.url.split("#")[1];
+      const headers = { Authorization: `Bearer ${token}`, "Content-Type": "application/json", Origin: session.origin };
+      const reply = await fetch(`${session.origin}/api/answer`, { method: "POST", headers, body: "{}" }).then((r) => r.json());
+      await fetch(`${session.origin}/api/ack`, { method: "POST", headers, body: `{"operationId":${JSON.stringify(reply.operationId)}}` });
+      const { result } = await pending;
+      WeakMap.prototype.get = realGet;
+      WeakMap.prototype.set = realSet;
+      assert.equal(result.status, "completed", tamper);
+      assert.doesNotMatch(captured, /FORGED/, tamper);
+      assert.deepEqual(parseFramedResult(captured, "launcher-test").payload, { real: true }, `${tamper}: the claimed frame reached stdout`);
+      assert.equal(captured, frameOf(result), tamper);
+    }
+  } finally {
+    WeakMap.prototype.get = realGet;
+    WeakMap.prototype.set = realSet;
   }
 });

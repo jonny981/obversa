@@ -99,3 +99,30 @@ test("an app handler's outcome is read exactly once: a body getter cannot hand t
     await surface.stop();
   }
 });
+
+test("a handler that returns body null gets the JSON null it asked for; one that returns no body gets { ok: true }", async () => {
+  const surface = await startSurface({
+    app: "guard",
+    assets: { directory: assetsDir, files: { "/": ["index.html", "text/html; charset=utf-8"] } },
+    api: {
+      "GET /api/nothing": async () => ({ status: 200, body: null }),
+      "GET /api/unsaid": async () => ({ status: 202 }),
+    },
+    sessionTimeoutMs: 10_000,
+    leaseTimeoutMs: 10_000,
+  });
+  try {
+    const token = surface.url.split("#")[1];
+    const headers = { Authorization: `Bearer ${token}`, Origin: surface.origin };
+    const nothing = await fetch(`${surface.origin}/api/nothing`, { headers });
+    assert.equal(nothing.status, 200);
+    assert.equal(await nothing.text(), "null");
+    const unsaid = await fetch(`${surface.origin}/api/unsaid`, { headers });
+    assert.equal(unsaid.status, 202);
+    assert.deepEqual(await unsaid.json(), { ok: true });
+  } finally {
+    surface.interrupt();
+    await surface.waitForDecision();
+    await surface.stop();
+  }
+});

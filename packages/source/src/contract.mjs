@@ -468,8 +468,15 @@ export function normalizeResult(raw, request, { terminal = false } = {}) {
   // No edit path exists in this surface (editing is excluded), so a raw
   // `edits` field is not carried: an unchecked copy would be the one part of
   // the result the guard never read.
+  // A present meta is carried as an owned plain-data snapshot, under the
+  // same rule as everything else the result holds; one that is not plain
+  // data (a Proxy, a Map, an accessor) makes the submission no result.
   const meta = read(() => raw?.meta, undefined);
-  if (meta !== undefined) result.meta = meta;
+  if (meta !== undefined) {
+    const metaText = read(() => canonicalJson(meta), null);
+    if (metaText === null) return null;
+    result.meta = JSON.parse(metaText);
+  }
   return result;
 }
 

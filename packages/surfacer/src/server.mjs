@@ -4,7 +4,7 @@ import http from "node:http";
 import path from "node:path";
 import { types } from "node:util";
 
-import { claimFrames } from "./claim-frames.mjs";
+import { recordFrame } from "./claim-frames.mjs";
 import { dataJson, frameName, frameResult, terminalResult } from "./handoff.mjs";
 import { safeText, sanitizeValue } from "./sanitize.mjs";
 
@@ -309,7 +309,9 @@ export async function startSurface({
       // supplied" question would otherwise turn a refused value into an
       // empty reply.
       const { status: outcomeStatus, body: outcomeBody, verbatim: outcomeVerbatim } = outcome ?? {};
-      sendJson(response, outcomeStatus ?? 200, outcomeBody ?? { ok: true }, { verbatim: outcomeVerbatim === true, appData: outcomeBody !== undefined });
+      // A handler that supplied no body gets the fixed { ok: true }; one that
+      // supplied null asked for the JSON null and gets exactly that.
+      sendJson(response, outcomeStatus ?? 200, outcomeBody === undefined ? { ok: true } : outcomeBody, { verbatim: outcomeVerbatim === true, appData: outcomeBody !== undefined });
     } catch (error) {
       sendJson(response, error?.statusCode || (error?.code === "BODY_TOO_LARGE" ? 413 : 400), {
         error: safeText(error?.message || "Request failed", 300),
@@ -365,7 +367,7 @@ export async function startSurface({
     }
     terminalState = status;
     terminalClaim = result;
-    claimFrames.set(result, text);
+    recordFrame(result, text);
     clearTimeout(sessionTimeout);
     clearTimeout(leaseTimeout);
     for (const controller of activeOperations) controller.abort();

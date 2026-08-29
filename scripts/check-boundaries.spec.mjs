@@ -776,6 +776,25 @@ test("only hosts/<name>/test/ is a host test: a test-shaped name under bin/ or l
   assert.deepEqual(hostImportFindings('import { x } from "../../../packages/surfacer/src/index.mjs";', { file: "/repo/hosts/cmux/test/x.test.mjs", root: "/repo", dependencies }), [], "the host's own test/ is the exemption");
 });
 
+test("a relative import that names an existing file with no source extension is refused: Node loads it, the scan never reads it", () => {
+  const tree = realpathSync(mkdtempSync(path.join(os.tmpdir(), "boundaries-extless-")));
+  try {
+    mkdirSync(path.join(tree, "packages", "source", "src"), { recursive: true });
+    writeFileSync(path.join(tree, "packages", "source", "escape"), 'import "../surfacer/src/index.mjs";\n');
+    writeFileSync(path.join(tree, "packages", "source", "data.json"), "{}\n");
+    const file = path.join(tree, "packages", "source", "src", "a.mjs");
+    writeFileSync(file, "");
+    const found = (text) => extractObversaImports(text, { file, root: tree });
+    const escaped = found('import { e } from "../escape";');
+    assert.equal(escaped.length, 1, JSON.stringify(escaped));
+    assert.match(escaped[0], /packages\/source\/escape, a file with no source extension, which the scan never import-scans/);
+    assert.deepEqual(found('import data from "../data.json";'), [], "a data file is not a module that imports");
+    assert.deepEqual(found('import { x } from "./missing";'), [], "a target that does not exist as spelled is the compiler's to place");
+  } finally {
+    rmSync(tree, { recursive: true, force: true });
+  }
+});
+
 // The live full-check mutants: the real guard, run as a child on a
 // disposable copy of the current tree (git's file list, with the root
 // node_modules symlinked to the real one),

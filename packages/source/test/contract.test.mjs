@@ -640,3 +640,15 @@ test("normalizeResult checks annotations against one snapshot of the request, so
   assert.equal(normalizeResult(honest, makeRequest([outputAnchor(1)]))?.annotations.length, 1);
   assert.equal(normalizeResult(honest, { ...makeRequest([outputAnchor(1)]), subject: { ref: "r", fetch: "/api/model", toJSON() { return {}; } } }), null, "a request that is not plain data offers nothing");
 });
+
+test("a result's meta is an owned plain-data snapshot, or the submission is no result", () => {
+  const request = makeRequest([outputAnchor(1)]);
+  const meta = { mode: "worktree", files: ["a"] };
+  const result = normalizeResult({ decision: "approved", annotations: [], meta }, request);
+  assert.deepEqual(result.meta, { mode: "worktree", files: ["a"] });
+  meta.files.push("b");
+  assert.deepEqual(result.meta.files, ["a"], "the caller's later change does not reach the result");
+  assert.equal(normalizeResult({ decision: "approved", annotations: [], meta: new Map() }, request), null, "a Map is not plain data");
+  assert.equal(normalizeResult({ decision: "approved", annotations: [], meta: new Proxy({ a: 1 }, {}) }, request), null, "a Proxy is not plain data");
+  assert.equal(normalizeResult({ decision: "approved", annotations: [], meta: { get x() { return 1; } } }, request), null, "an accessor is not plain data");
+});
