@@ -141,8 +141,9 @@ export async function startSurface({
         // after the claim, so a failure here leaves the session unclaimed and
         // open rather than claimed with no operation id to acknowledge.
         let copy;
+        let frame;
         try {
-          frameResult(result);
+          frame = frameResult(result);
           copy = structuredClone(result);
         } catch (error) {
           throw httpError(`The completion cannot be framed: ${error?.message ?? error}`, 500);
@@ -150,7 +151,10 @@ export async function startSurface({
         // The acknowledgement clock starts when the completing request has
         // been answered, not here: the browser must receive its 200 before
         // the caller can be told the session completed and stop the server.
-        if (!claimTerminal("completed", result, { awaitAcknowledgement: "deferred" })) {
+        // The frame text proved here is the frame the caller receives: it is
+        // claimed with the result and written verbatim, never serialised
+        // again, so nothing that runs after the claim can change it.
+        if (!claimTerminal("completed", result, { awaitAcknowledgement: "deferred", frame })) {
           throw httpError("This session already has a terminal decision", 409);
         }
         // The claim owns its data. A handler gets the copy, so nothing it does
@@ -335,10 +339,26 @@ export async function startSurface({
    * @param {object} result
    * @param {{ awaitAcknowledgement?: true | false | "deferred" }} [options]
    */
-  function claimTerminal(status, result, { awaitAcknowledgement = true } = {}) {
+  function claimTerminal(status, result, { awaitAcknowledgement = true, frame } = {}) {
     if (terminalState !== "pending") return false;
+    // The frame is produced exactly once, here at the claim (or just before
+    // it, for a completion, where it is proved before the claim is made),
+    // and rides with the claim as a non-enumerable property: the launcher
+    // writes it verbatim, and no later serialisation — none happens — could
+    // differ from it. An ending whose frame cannot be produced (a toJSON
+    // injected on Object.prototype after the payload was snapshotted) is
+    // claimed with no frame, and the launcher reports that rather than
+    // write something else.
+    let text = frame;
+    if (text === undefined) {
+      try {
+        text = frameResult(result);
+      } catch {
+        text = null;
+      }
+    }
     terminalState = status;
-    terminalClaim = result;
+    terminalClaim = Object.defineProperty(result, "frame", { value: text, enumerable: false, configurable: false, writable: false });
     clearTimeout(sessionTimeout);
     clearTimeout(leaseTimeout);
     for (const controller of activeOperations) controller.abort();

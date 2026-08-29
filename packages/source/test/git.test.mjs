@@ -5,7 +5,7 @@ import os from "node:os";
 import path from "node:path";
 import test from "node:test";
 
-import { computeDiff, diffArgs, readBoundedFile, readNewFileText, listTrackedFiles, rangeEnd, repositoryRoot, MAX_FILE_BYTES } from "../src/git.mjs";
+import { computeDiff, diffArgs, readBoundedFile, readerPorts, readNewFileText, listTrackedFiles, rangeEnd, repositoryRoot, MAX_FILE_BYTES } from "../src/git.mjs";
 
 test("rangeEnd asks git: a range ends at its first positive revision (the right side), a single revision (even one whose text holds two dots) ends at the worktree", async () => {
   const dir = makeRepo();
@@ -334,6 +334,27 @@ test("the bounded reader reads only the file whose identity was checked: a diffe
     const swapped = statSync(other);
     assert.equal(await readBoundedFile(file, 1024, { dev: swapped.dev, ino: swapped.ino }), null, "another file's identity is refused");
     assert.equal(await readBoundedFile(file, 1024), "checked\n", "with no identity to hold to, the read is bounded only");
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("readNewFileText holds the worktree read to the file it checked: an open that lands on another file is refused", async () => {
+  const dir = makeRepo();
+  try {
+    writeFileSync(path.join(dir, "a.txt"), "checked\n");
+    writeFileSync(path.join(dir, "b.txt"), "swapped in\n");
+    assert.equal(await readNewFileText({ path: "a.txt", cwd: dir }), "checked\n");
+    // Between the check and the open a parent is swapped: the open lands on
+    // another file. Modelled by an open port that opens b.txt for a.txt.
+    const realOpen = readerPorts.open;
+    readerPorts.open = (target, flags) => realOpen(target.endsWith("a.txt") ? path.join(dir, "b.txt") : target, flags);
+    try {
+      assert.equal(await readNewFileText({ path: "a.txt", cwd: dir }), null, "a different file at open time is refused");
+    } finally {
+      readerPorts.open = realOpen;
+    }
+    assert.equal(await readNewFileText({ path: "a.txt", cwd: dir }), "checked\n", "the real open reads again");
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }

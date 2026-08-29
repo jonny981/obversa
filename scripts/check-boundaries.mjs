@@ -49,6 +49,13 @@ export function isHostScript(path, text) {
   if (sourcePattern.test(path)) return true;
   return extname(path) === '' && /^#!.*\bnode\b/.test(text.split('\n')[0] ?? '');
 }
+// A host's test file is one under hosts/<name>/test/ and nowhere else: a
+// test-shaped name under bin/ or lib/ (helper.test.py, a test/ folder
+// there) is shipped and held to every host rule. Paths are repository-
+// relative with forward slashes.
+export function isHostTestFile(path) {
+  return /^hosts\/[^/]+\/test\//.test(path);
+}
 // The `hosts/<name>` root an absolute path lies in, or undefined.
 function hostRootOf(absolute, repoRoot) {
   const match = /^hosts\/([^/]+)(?:\/|$)/.exec(placedUnder(absolute, repoRoot));
@@ -103,8 +110,9 @@ export function hostImportFindings(text, { file, root: repoRoot, edges = [], sel
   // proof drives the highlighter and the models directly); the public-name
   // rule binds shipped host code, and the proofs move to a public testing
   // subpath in F2b. A test file is still refused a computed or schemed
-  // specifier.
-  const shipped = !isTestPath(file);
+  // specifier. Only the host's own test/ directory is a test: a test-shaped
+  // name under bin/ or lib/ (x.test.mjs, a test/ folder there) ships.
+  const shipped = !isHostTestFile(relative(repoRoot ?? '/', file).split('\\').join('/'));
   for (const raw of moduleSpecifiers(text, parsedAs)) {
     if (raw === null) {
       findings.push('a computed module reference cannot be checked; use a plain string');
@@ -1163,14 +1171,19 @@ const hostRules = new Map([
       'bin/obversa-order-workspace': '4a8821485b2c1c67041ffd248075a42042674bddb3aebfb4f6915b007e7299f8',
       'bin/obversa-peer-send': '15e38b2a7d4d232122a1653df6dc2ca17085d03e78ad7d687192daa95ac78da8',
       'bin/obversa-plannotator-browser': 'ef180a43d479ad9c9ae2242bb7f24b74ab58f85781465ffd6eace1c45b9ef34a',
-      'bin/obversa-surface': 'cb1d37f92787995b1d3ff892e0ee98d8ec273ce5a068def91da21a65f49dd4b4',
+      'bin/obversa-surface': 'd2e704106aaf9c6d07a8e6057ce1a09ca504471fc2cacacedb7e0eb95b5ab552',
       'bin/obversa-whereis': 'e29448c5f6626b177b72b64d00fae4f9b5512f66049d1db31e7b4a4e5a2a8aa3',
     },
   }],
 ]);
 const hostManifests = new Map();
 for (const entry of await readdir(join(root, 'hosts'), { withFileTypes: true })) {
-  if (!entry.isDirectory()) continue;
+  // Nothing but host directories lives directly under hosts/: a file there
+  // belongs to no host, so no host rule could hold it.
+  if (!entry.isDirectory()) {
+    failures.push(`hosts/${entry.name}: a file directly under hosts/ belongs to no host; every host file lives under hosts/<name>/`);
+    continue;
+  }
   const hostDir = join(root, 'hosts', entry.name);
   const relativeManifest = `hosts/${entry.name}/package.json`;
   let manifest;
@@ -1561,7 +1574,7 @@ for (const absolute of files) {
     const host = hostManifests.get(hostRootOf(absolute, root));
     for (const finding of hostImportFindings(text, { file: absolute, root, edges, selfName: host?.manifest.name, dependencies: host?.dependencies })) failures.push(`${path}: ${finding}`);
     for (const edge of edges) hostEdges.push({ from: path, ...edge });
-  } else if (path.startsWith('hosts/') && !isTestPath(path) && (/^hosts\/[^/]+\/(bin|lib)\//.test(path) || text.startsWith('#!'))) {
+  } else if (path.startsWith('hosts/') && !isHostTestFile(path) && (/^hosts\/[^/]+\/(bin|lib)\//.test(path) || text.startsWith('#!'))) {
     // A shipped host file that is not JavaScript — a shell command, under
     // bin/ or lib/ or carrying a shebang anywhere under the host — runs
     // whatever it says, so it may not name a package directory or an
@@ -1573,8 +1586,14 @@ for (const absolute of files) {
     // other extension there is refused, whatever it holds.
     if (/^hosts\/[^/]+\/(bin|lib)\//.test(path) && extname(path) !== '')
       failures.push(`${path}: a file under a host's bin/ or lib/ is an extensionless command or JavaScript source; ${extname(path)} is neither`);
-    // The closure: the command's content is exactly the pinned one.
-    const hostName = /^hosts\/([^/]+)\//.exec(path)[1];
+    // The closure: the command's content is exactly the pinned one. A file
+    // directly under hosts/ belongs to no host and is refused as such, as a
+    // listed failure rather than a crash.
+    const hostName = /^hosts\/([^/]+)\//.exec(path)?.[1];
+    if (hostName === undefined) {
+      failures.push(`${path}: a file directly under hosts/ belongs to no host; every host file lives under hosts/<name>/`);
+      continue;
+    }
     const pinned = hostRules.get(hostName)?.shell?.[path.slice(`hosts/${hostName}/`.length)];
     const actual = createHash('sha256').update(text).digest('hex');
     if (pinned === undefined) failures.push(`${path}: a shell host command is pinned by content in hostRules; this one is not pinned. Review it, then pin its sha256 (${actual})`);

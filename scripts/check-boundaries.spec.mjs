@@ -9,7 +9,7 @@ import path from "node:path";
 import ts from "@typescript/typescript6";
 import { validRange } from "semver";
 
-import { dependencyTarget, extractObversaImports, hostEdgeFailures, hostImportFindings, internalDependencies, isHostScript, isPinnedWorkspaceFile, isProjectConfig, isTestPath, isVersionRange, manifestImportTargets, manifestPathTargets, moduleSpecifiers, parserExtensions, PINNED_WORKSPACE_FILE, projectConfig, refusal, scansImports, sourceExtensions, textExtensions, tsconfigDependencies, walkTree } from "./check-boundaries.mjs";
+import { dependencyTarget, extractObversaImports, hostEdgeFailures, hostImportFindings, internalDependencies, isHostScript, isHostTestFile, isPinnedWorkspaceFile, isProjectConfig, isTestPath, isVersionRange, manifestImportTargets, manifestPathTargets, moduleSpecifiers, parserExtensions, PINNED_WORKSPACE_FILE, projectConfig, refusal, scansImports, sourceExtensions, textExtensions, tsconfigDependencies, walkTree } from "./check-boundaries.mjs";
 
 // No test in this file writes to the shared worktree: its status and every
 // tracked file's content relative to HEAD are captured before the first test
@@ -767,6 +767,15 @@ test("a package imports nothing from outside packages/: a host, scripts/, or the
   assert.deepEqual(extractObversaImports('import x from "../../surfacer/src/index.mjs";', { file, root: "/repo" }), ["@obversa/surfacer"], "a sibling is still the arrow it is");
 });
 
+test("only hosts/<name>/test/ is a host test: a test-shaped name under bin/ or lib/ ships and is held to the shipped rules", () => {
+  assert.equal(isHostTestFile("hosts/cmux/test/f3-browser-proof.mjs"), true);
+  assert.equal(isHostTestFile("hosts/cmux/test/nested/x.test.mjs"), true);
+  for (const path of ["hosts/cmux/bin/x.test.mjs", "hosts/cmux/lib/helper.test.py", "hosts/cmux/bin/test/x", "hosts/cmux/lib/__tests__/y.mjs", "hosts/cmux/tests/z.mjs"]) assert.equal(isHostTestFile(path), false, path);
+  const dependencies = new Map([["@obversa/surfacer", new Set(["."])]]);
+  assert.ok(hostImportFindings('import { x } from "../../../packages/surfacer/src/index.mjs";', { file: "/repo/hosts/cmux/bin/x.test.mjs", root: "/repo", dependencies }).some((entry) => /by path/.test(entry)), "a test-shaped name under bin/ is shipped");
+  assert.deepEqual(hostImportFindings('import { x } from "../../../packages/surfacer/src/index.mjs";', { file: "/repo/hosts/cmux/test/x.test.mjs", root: "/repo", dependencies }), [], "the host's own test/ is the exemption");
+});
+
 // The live full-check mutants: the real guard, run as a child on a
 // disposable copy of the current tree (git's file list, with the root
 // node_modules symlinked to the real one),
@@ -1109,6 +1118,30 @@ test("the guard, run on a disposable copy of the tree, refuses a shipped host im
       if (name.endsWith(".bash")) assert.match(oddRun.stderr, /obversa-new\.bash: a shell host command names packages\//, "the shell checks ran on it too");
       rmSync(odd);
     }
+    // A test-shaped name under bin/ or lib/ is not a test: it ships, and it
+    // meets the extension rule, the pin, and the path rule like any other.
+    for (const [name, body, expect] of [
+      ["lib/helper.test.py", "#!/usr/bin/env python3\nprint(1)\n", /lib\/helper\.test\.py: a file under a host's bin\/ or lib\/ is an extensionless command or JavaScript source/],
+      ["bin/obversa-new.test.bash", "#!/bin/bash\nnode ../../../packages/surfacer/src/index.mjs\n", /obversa-new\.test\.bash: a shell host command names packages\//],
+      ["bin/test/obversa-x", "#!/bin/bash\nnode ../../../packages/surfacer/src/index.mjs\n", /bin\/test\/obversa-x: a shell host command is pinned by content in hostRules; this one is not pinned/],
+    ]) {
+      const shaped = path.join(root, "hosts", "cmux", ...name.split("/"));
+      mkdirSync(path.dirname(shaped), { recursive: true });
+      writeFileSync(shaped, body);
+      const shapedRun = guard();
+      assert.notEqual(shapedRun.status, 0, name);
+      assert.match(shapedRun.stderr, expect, name);
+      rmSync(shaped);
+    }
+    rmSync(path.join(root, "hosts", "cmux", "bin", "test"), { recursive: true, force: true });
+    // A shebang file directly under hosts/ belongs to no host: a listed
+    // refusal, never a crash.
+    writeFileSync(path.join(root, "hosts", "run.bash"), "#!/bin/bash\necho hi\n");
+    const stray = guard();
+    assert.notEqual(stray.status, 0);
+    assert.match(stray.stderr, /hosts\/run\.bash: a file directly under hosts\/ belongs to no host/);
+    assert.doesNotMatch(stray.stderr, /TypeError|at main/);
+    rmSync(path.join(root, "hosts", "run.bash"));
     // Every mutation above was undone: the copy passes again.
     assert.equal(guard().status, 0, "the restored copy passes");
   } finally {

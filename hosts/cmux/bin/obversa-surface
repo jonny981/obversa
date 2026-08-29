@@ -15,12 +15,9 @@
 # workspace is honored only when no surface id exists at all.
 set -euo pipefail
 
+# printf is a builtin: even the usage text runs no command by name.
 usage() {
-  cat <<'EOF'
-Usage: obversa-surface <url> [--direction left|right|up|down]
-
-The default direction is right.
-EOF
+  printf '%s\n' 'Usage: obversa-surface <url> [--direction left|right|up|down]' '' 'The default direction is right.'
 }
 
 URL=""

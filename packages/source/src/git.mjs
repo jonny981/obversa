@@ -25,10 +25,13 @@ function isSafeRelativePath(filePath) {
 // path: O_NOFOLLOW guards the final component only, so a parent swapped for a
 // symlink between that check and this open would open another file — one
 // whose identity differs, and which is then refused.
+// The open the reader uses, as a port so a test can make an open land on a
+// file other than the one checked, the way a swapped parent would.
+export const readerPorts = { open };
 export async function readBoundedFile(target, limit = MAX_FILE_BYTES, identity) {
   let handle;
   try {
-    handle = await open(target, fsConstants.O_RDONLY | (fsConstants.O_NOFOLLOW ?? 0));
+    handle = await readerPorts.open(target, fsConstants.O_RDONLY | (fsConstants.O_NOFOLLOW ?? 0));
     const info = await handle.stat();
     if (!info.isFile() || info.size > limit) return null;
     if (identity && (info.dev !== identity.dev || info.ino !== identity.ino)) return null;

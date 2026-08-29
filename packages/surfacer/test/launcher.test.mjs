@@ -160,3 +160,41 @@ test("once the session is decided the signal handlers are gone, before the frame
   assert.deepEqual(duringWrite, baseline, "and gone before the frame is written");
   assert.equal(parseFramedResult(captured, "launcher-test").status, "completed");
 });
+
+test("the frame written is the frame claimed: a toJSON injected after the completion returns cannot change it", async () => {
+  const directory = mkdtempSync(path.join(os.tmpdir(), "launcher-assets-"));
+  writeFileSync(path.join(directory, "index.html"), "<!doctype html><title>x</title>");
+  let captured = "";
+  let session;
+  const pending = runSurface({
+    app: "launcher-test",
+    open: false,
+    stdout: { write: (text) => { captured += text; } },
+    ready: (info) => { session = info; },
+    assets: { directory, files: { "/": ["index.html", "text/html; charset=utf-8"] } },
+    api: {
+      "POST /api/answer": async ({ body, session: s }) => {
+        s.complete({ got: body.value });
+        // App code after the claim: a serialiser hook on every object. A
+        // second JSON.stringify of the result would now write {"forged":true}.
+        Object.defineProperty(Object.prototype, "toJSON", { value() { return { forged: true }; }, configurable: true, writable: true, enumerable: false });
+        return null;
+      },
+    },
+  });
+  try {
+    await new Promise((resolve) => setTimeout(resolve, 100));
+    const token = session.url.split("#")[1];
+    const headers = { Authorization: `Bearer ${token}`, "Content-Type": "application/json", Origin: session.origin };
+    const reply = await fetch(`${session.origin}/api/answer`, { method: "POST", headers, body: JSON.stringify({ value: 7 }) }).then((r) => r.json());
+    await fetch(`${session.origin}/api/ack`, { method: "POST", headers, body: JSON.stringify({ operationId: reply.operationId }) });
+    const { result } = await pending;
+    assert.equal(typeof result.frame, "string");
+    assert.equal(Object.keys(result).includes("frame"), false, "the frame rides with the claim without being part of the result's data");
+    assert.equal(captured, result.frame, "written verbatim");
+    assert.match(captured, /"payload":\{"got":7\}/, "the claimed payload, not the hook's answer");
+    assert.doesNotMatch(captured, /forged/);
+  } finally {
+    delete Object.prototype.toJSON;
+  }
+});
