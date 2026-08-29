@@ -5,6 +5,7 @@ import path from "node:path";
 import { Writable } from "node:stream";
 import test from "node:test";
 
+import { claimFrames } from "../src/claim-frames.mjs";
 import { runSurface } from "../src/launcher.mjs";
 import { parseFramedResult } from "../src/handoff.mjs";
 
@@ -188,9 +189,11 @@ test("the frame written is the frame claimed: a toJSON injected after the comple
     const headers = { Authorization: `Bearer ${token}`, "Content-Type": "application/json", Origin: session.origin };
     const reply = await fetch(`${session.origin}/api/answer`, { method: "POST", headers, body: JSON.stringify({ value: 7 }) }).then((r) => r.json());
     await fetch(`${session.origin}/api/ack`, { method: "POST", headers, body: JSON.stringify({ operationId: reply.operationId }) });
-    const { result, frame } = await pending;
+    const { result } = await pending;
+    const frame = claimFrames.get(result);
     assert.equal(typeof frame, "string");
-    assert.equal(Reflect.ownKeys(result).includes("frame"), false, "the public decision carries no hidden field; the frame is handed back beside it");
+    assert.equal(Reflect.ownKeys(result).includes("frame"), false, "the public decision carries no hidden field; the frame lives in the surfacer's private record");
+    assert.deepEqual(Object.keys(await pending).sort(), ["placement", "result", "url"], "runSurface's return is unchanged: no public export hands the frame out");
     assert.equal(captured, frame, "written verbatim");
     assert.match(captured, /"payload":\{"got":7\}/, "the claimed payload, not the hook's answer");
     assert.doesNotMatch(captured, /forged/);
@@ -236,7 +239,8 @@ test("a toJSON present on Object.prototype before the claim defines the completi
     const before = calls();
     const reply = await fetch(`${session.origin}/api/answer`, { method: "POST", headers, body: '{"value":7}' }).then((r) => r.json());
     await fetch(`${session.origin}/api/ack`, { method: "POST", headers, body: `{"operationId":${JSON.stringify(reply.operationId)}}` });
-    const { result, frame } = await pending;
+    const { result } = await pending;
+    const frame = claimFrames.get(result);
     assert.deepEqual(result.payload, { forged: true }, "the hook answered the payload, once, as the documented semantics say");
     assert.equal(captured, frame);
     const parsed = parseFramedResult(captured, "launcher-test");
@@ -264,7 +268,8 @@ test("a toJSON present on Object.prototype before an interrupt defines the endin
       assets: { directory, files: { "/": ["index.html", "text/html; charset=utf-8"] } },
       terminalPayload: (status) => ({ outcome: status }),
     });
-    const { result, frame } = await pending;
+    const { result } = await pending;
+    const frame = claimFrames.get(result);
     assert.equal(result.status, "interrupted");
     assert.deepEqual(result.payload, { forged: true }, "the ending payload's one serialisation applied the hook");
     assert.equal(captured, frame);

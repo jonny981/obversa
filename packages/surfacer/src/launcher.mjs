@@ -1,5 +1,6 @@
 import { Writable } from "node:stream";
 
+import { claimFrames } from "./claim-frames.mjs";
 import { openSurfaceUrl } from "./host.mjs";
 import { startSurface } from "./server.mjs";
 
@@ -49,10 +50,10 @@ export async function runSurface({ open = true, stdout = process.stdout, ready, 
     // A claim with no frame (its ending could not be framed) is an error
     // here, never a frame serialised afresh from whatever the result has
     // since become.
-    const frame = surface.frame();
+    const frame = claimFrames.get(result);
     if (typeof frame !== "string") throw new Error("The session's result was claimed without a frame and cannot be handed off");
     await writeFrame(stdout, frame);
-    return { result, placement, url: surface.url, frame };
+    return { result, placement, url: surface.url };
   } finally {
     release();
     await surface.stop();

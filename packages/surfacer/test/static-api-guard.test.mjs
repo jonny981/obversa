@@ -70,3 +70,32 @@ test("the static route map and directory are copied at startup: mutating the cal
     await surface.stop();
   }
 });
+
+test("an app handler's outcome is read exactly once: a body getter cannot hand the snapshot one value and the reply another", async () => {
+  let reads = 0;
+  const surface = await startSurface({
+    app: "guard",
+    assets: { directory: assetsDir, files: { "/": ["index.html", "text/html; charset=utf-8"] } },
+    api: {
+      "GET /api/flip": async () => ({ status: 200, get body() { reads += 1; return reads === 1 ? new Map([["k", 1]]) : undefined; } }),
+      "GET /api/plain": async () => ({ status: 200, body: { fine: true, list: [1, "two"] } }),
+    },
+    sessionTimeoutMs: 10_000,
+    leaseTimeoutMs: 10_000,
+  });
+  try {
+    const token = surface.url.split("#")[1];
+    const headers = { Authorization: `Bearer ${token}`, Origin: surface.origin };
+    const flipped = await fetch(`${surface.origin}/api/flip`, { headers });
+    assert.equal(reads, 1, "the body was read once");
+    assert.equal(flipped.status, 400, "a Map is not a reply the transport can carry: refused, not written as {}");
+    assert.match((await flipped.json()).error, /JSON cannot carry \[object Map\]/);
+    const plain = await fetch(`${surface.origin}/api/plain`, { headers });
+    assert.equal(plain.status, 200);
+    assert.deepEqual(await plain.json(), { fine: true, list: [1, "two"] });
+  } finally {
+    surface.interrupt();
+    await surface.waitForDecision();
+    await surface.stop();
+  }
+});

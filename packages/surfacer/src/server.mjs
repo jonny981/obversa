@@ -4,6 +4,7 @@ import http from "node:http";
 import path from "node:path";
 import { types } from "node:util";
 
+import { claimFrames } from "./claim-frames.mjs";
 import { dataJson, frameName, frameResult, terminalResult } from "./handoff.mjs";
 import { safeText, sanitizeValue } from "./sanitize.mjs";
 
@@ -101,7 +102,6 @@ export async function startSurface({
 
   let terminalState = "pending";
   let terminalClaim = null;
-  let terminalFrame = null;
   let decisionSettled = false;
   let completionReserved = false;
   let port;
@@ -304,8 +304,12 @@ export async function startSurface({
         sendJson(response, 409, { error: terminalClaim.status === "completed" ? "This session already has a terminal decision" : "This session is closed" });
         return;
       }
-      const verbatim = outcome?.verbatim === true;
-      sendJson(response, outcome?.status ?? 200, outcome?.body ?? { ok: true }, { verbatim, appData: outcome?.body !== undefined });
+      // The outcome's fields are read exactly once, here: a getter that
+      // answered one body to the snapshot and none to the "was a body
+      // supplied" question would otherwise turn a refused value into an
+      // empty reply.
+      const { status: outcomeStatus, body: outcomeBody, verbatim: outcomeVerbatim } = outcome ?? {};
+      sendJson(response, outcomeStatus ?? 200, outcomeBody ?? { ok: true }, { verbatim: outcomeVerbatim === true, appData: outcomeBody !== undefined });
     } catch (error) {
       sendJson(response, error?.statusCode || (error?.code === "BODY_TOO_LARGE" ? 413 : 400), {
         error: safeText(error?.message || "Request failed", 300),
@@ -344,10 +348,11 @@ export async function startSurface({
     if (terminalState !== "pending") return false;
     // The frame is produced exactly once, here at the claim (or just before
     // it, for a completion, where it is proved before the claim is made),
-    // and is kept in a private record beside the claim: the public decision
-    // carries no hidden field, the launcher reads the frame through
-    // `frame()` and writes it verbatim, and no later serialisation — none
-    // happens — could differ from it. An ending whose frame cannot be
+    // and is kept in a module-private record keyed by the claim (see
+    // claim-frames.mjs): the public decision carries no hidden field and no
+    // public export hands the frame out; the launcher reads it there and
+    // writes it verbatim, and no later serialisation — none happens — could
+    // differ from it. An ending whose frame cannot be
     // produced is claimed with no frame, and the launcher reports that
     // rather than write something else.
     let text = frame;
@@ -360,7 +365,7 @@ export async function startSurface({
     }
     terminalState = status;
     terminalClaim = result;
-    terminalFrame = text;
+    claimFrames.set(result, text);
     clearTimeout(sessionTimeout);
     clearTimeout(leaseTimeout);
     for (const controller of activeOperations) controller.abort();
@@ -418,9 +423,6 @@ export async function startSurface({
     url: `${origin}/#${token}`,
     port,
     waitForDecision: () => decision,
-    // The exact frame text claimed with the decision, or null before a claim
-    // (or for a claim whose ending could not be framed).
-    frame: () => terminalFrame,
     interrupt(signal = "signal") {
       if (terminalState !== "pending") return finalizeClaim();
       const result = terminalResult(appName, "interrupted", endingFor("interrupted",`Interrupted by ${signal}`));
