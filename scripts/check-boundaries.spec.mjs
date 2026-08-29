@@ -814,6 +814,13 @@ test("a relative import that names an existing file with no source extension is 
     assert.equal(aliased.length, 1, JSON.stringify(aliased));
     assert.match(aliased[0], /package imports alias \.\/escape, a file with no source extension, which the scan never import-scans/);
     assert.deepEqual(manifestImportTargets({ imports: { "#a": "./src/a.mjs", "#data": "./data.json" } }, manifestAt), [], "a source alias and a data alias place as their own");
+    // A WebAssembly module's import section can name any module, and Node
+    // loads what it names: .wasm is a module the scan cannot read, refused
+    // wherever a module is named.
+    writeFileSync(path.join(tree, "packages", "source", "escape.wasm"), Buffer.from([0, 0x61, 0x73, 0x6d, 1, 0, 0, 0]));
+    assert.match(found('import { e } from "../escape.wasm";')[0] ?? "", /packages\/source\/escape\.wasm, a file with no source extension, which the scan never import-scans/);
+    assert.match(manifestPathTargets({ exports: { "./escape": "./escape.wasm" } }, manifestAt)[0] ?? "", /names packages\/source\/escape\.wasm, a file with no source extension/);
+    assert.match(manifestImportTargets({ imports: { "#wasm": "./escape.wasm" } }, manifestAt)[0] ?? "", /package imports alias \.\/escape\.wasm, a file with no source extension/);
   } finally {
     rmSync(tree, { recursive: true, force: true });
   }

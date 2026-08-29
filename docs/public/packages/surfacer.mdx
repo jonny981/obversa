@@ -13,7 +13,9 @@ result. It owns no callback state, no routing, and no run records.
 carries a session token in its fragment. Every API request must send
 that token as a bearer token, checked in constant time. Requests with a wrong Host — or a wrong Origin on a state-changing
 request — are refused. JSON bodies are bounded, responses carry strict
-security headers, and every value passes secret redaction.
+security headers, and response values pass secret redaction by default;
+a handler that returns `{ verbatim: true }`, like a completion with the
+verbatim option, sends its content byte-exact.
 
 A session ends exactly once: the app completes it with a payload, the
 user cancels it, the lease or session times out, or the caller

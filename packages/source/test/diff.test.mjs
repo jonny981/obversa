@@ -408,3 +408,15 @@ ${firstHunkBody}diff --git a/b.js b/b.js
   const blankInside = parseUnifiedDiff("diff --git a/a.js b/a.js\n--- a/a.js\n+++ b/a.js\n@@ -1,2 +1,2 @@\n\n-x\n+y\n");
   assert.deepEqual(blankInside.files[0].hunks[0].lines.map((l) => l.type), ["context", "del", "add"]);
 });
+
+test("file metadata after hunk content is a malformed diff, refused whole: a binary marker or fresh headers cannot relabel what was reviewed", () => {
+  const hunk = "diff --git a/visible.js b/visible.js\n--- a/visible.js\n+++ b/visible.js\n@@ -1 +1 @@\n-safe\n+dangerous()\n";
+  assert.throws(() => parseUnifiedDiff(`${hunk}Binary files a/visible.js and b/visible.js differ\n`), /file metadata "Binary files a\/visible\.js and b\/visible\.js differ" arrives after hunk content in visible\.js/);
+  assert.throws(() => parseUnifiedDiff(`${hunk}--- a/other.js\n+++ b/other.js\n@@ -1 +1 @@\n-a\n+b\n`), /file metadata "--- a\/other\.js" arrives after hunk content/);
+  assert.throws(() => parseUnifiedDiff(`${hunk}new file mode 100644\n`), /file metadata "new file mode 100644" arrives after hunk content/);
+  assert.throws(() => parseUnifiedDiff(`${hunk}index 1111111..2222222 100644\n@@ -3 +3 @@\n-c\n+d\n`), /file metadata "index 1111111\.\.2222222 100644" arrives after hunk content/);
+  // A second hunk for the same file is content, not metadata.
+  const two = parseUnifiedDiff(`${hunk}@@ -3 +3 @@\n-c\n+d\n`);
+  assert.equal(two.files[0].hunks.length, 2);
+  assert.equal(two.files[0].binary, false);
+});

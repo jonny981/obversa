@@ -427,9 +427,7 @@ export function normalizeResult(raw, request, { terminal = false } = {}) {
   // carries come from that snapshot, so a getter cannot offer one location
   // to the guard and another here. A request that is not plain data offers
   // nothing, and there is no result.
-  const snapshotText = read(() => canonicalJson(request), null);
-  if (snapshotText === null) return null;
-  const owned = JSON.parse(snapshotText);
+  const owned = read(() => ownSnapshot(request), null);
   if (owned === null || typeof owned !== "object" || Array.isArray(owned)) return null;
   const anchorSet = buildAnchorSet(owned.anchors ?? []);
   const annotations = [];
@@ -522,12 +520,26 @@ function isPresent(value) {
  * — or by a gate — a present gateId, address, and token. Mixed states (an id
  * with no callback, a callback with no id, a partial callback) are invalid.
  */
+// The owned plain-data snapshot of a value, or null when it is not plain
+// data (canonicalJson's rule at every depth). Every object in the copy has
+// no prototype at all, so a read of a field on it is a read of the value's
+// own data: a required field a polluted Object.prototype would otherwise
+// supply is absent here.
+function ownSnapshot(value) {
+  const text = canonicalJson(value);
+  if (text === null) return null;
+  return JSON.parse(text, (key, item) => (item && typeof item === "object" && !Array.isArray(item) ? Object.assign(Object.create(null), item) : item));
+}
+
 export function isGateBinding(gateId, callback) {
   try {
-    // A Proxy may answer a later read differently from this one, so it is
-    // not a binding, transparent or not.
-    if (!callback || typeof callback !== "object" || types.isProxy(callback)) return false;
-    const { address, token } = callback;
+    // The callback is read as its own plain data: a Proxy may answer a later
+    // read differently, and an address or token inherited from a polluted
+    // Object.prototype is not the binding's own.
+    if (!callback || typeof callback !== "object") return false;
+    const owned = ownSnapshot(callback);
+    if (owned === null) return false;
+    const { address = null, token = null } = owned;
     if (gateId === null) return address === null && token === null;
     return isPresent(gateId) && isPresent(address) && isPresent(token);
   } catch {
@@ -550,18 +562,20 @@ function checkSurfaceRequest(value) {
   // later read differently from the one made here, so none is a request,
   // transparent or not; this is the rule the module states at its head.
   if (!value || typeof value !== "object" || types.isProxy(value)) return false;
-  // Every field is read exactly once, here, and the checks use the locals: a
-  // getter that answered one shape to one check and another to the next
-  // would otherwise pass a request no single read of it satisfies.
-  const { surfaceId, gateId, callback, kind, subject, anchors, transport, deadline } = value;
+  // The request is read exactly once, as one plain-data snapshot of its own
+  // data, and every check below reads that snapshot: a getter that answered
+  // one shape to one check and another to the next, or a required field
+  // supplied by a polluted Object.prototype rather than by the request
+  // itself, would otherwise pass a request that no clean transport carries.
+  // The snapshot rule is the location rule at every depth — a toJSON on the
+  // subject would replace the reviewed source in transit, a BigInt beside
+  // it would fail the serialiser after validation passed.
+  const owned = ownSnapshot(value);
+  if (owned === null) return false;
+  const { surfaceId, gateId, callback, kind, subject, anchors, transport, deadline } = owned;
   if (!isPresent(surfaceId)) return false;
   if (!isGateBinding(gateId, callback)) return false;
-  // The containers the request carries are plain data at every depth, under
-  // the same rule as a location: a toJSON on the subject would replace the
-  // reviewed source in transit, a BigInt beside it would fail the
-  // serialiser after validation passed, and either would make the request
-  // one thing here and another after a transport.
-  if (canonicalJson(callback) === null || canonicalJson(kind) === null || canonicalJson(subject) === null) return false;
+  if (!kind || typeof kind !== "object") return false;
   const { family, renderer } = kind;
   if (!FAMILIES.includes(family) || !isPresent(renderer)) return false;
   // The subject is a ref plus either an inline payload or a fetch URL, one

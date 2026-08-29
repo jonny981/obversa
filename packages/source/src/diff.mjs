@@ -176,6 +176,15 @@ export function parseUnifiedDiff(diffText) {
     }
     if (!file) continue; // ignore any preamble before the first file header
 
+    // A file's metadata — its mode, rename, copy, binary marker, and its
+    // `---`/`+++` headers — comes before its hunks. Any of it arriving after
+    // hunk content would relabel what was reviewed: a `Binary files` line
+    // would hide the hunk behind "no line content", fresh headers would
+    // file it under another name. A new file starts with `diff --git`;
+    // anything else is a malformed diff and is refused whole.
+    if (file.hunks.length > 0 && /^(?:new file mode|deleted file mode|rename from |rename to |copy from |copy to |Binary files |--- |\+\+\+ |old mode|new mode|similarity index|dissimilarity index|index )/.test(line)) {
+      throw new Error(`The diff is malformed: file metadata ${JSON.stringify(line.slice(0, 60))} arrives after hunk content in ${file.path}; a file's metadata comes before its hunks and a new file starts with diff --git`);
+    }
     if (line.startsWith("new file mode")) { file.status = "added"; continue; }
     if (line.startsWith("deleted file mode")) { file.status = "deleted"; continue; }
     if (line.startsWith("rename from ")) { file.status = "renamed"; file.oldPath = unquoteGitPath(line.slice(12)); file.path = displayPath(file); continue; }

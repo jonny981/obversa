@@ -753,7 +753,7 @@ export function manifestPathTargets(manifest, { file, root: repoRoot, host = ts.
     // directory (`directories`) is placed as a place, not opened.
     const named = resolve(dirname(file), literal);
     const real = realpathOf(named, host);
-    if (host.fileExists?.(real) && !sourcePattern.test(real) && !/\.(json|css|html|txt|md|wasm|d\.ts|d\.mts|d\.cts)$/.test(real)) {
+    if (host.fileExists?.(real) && !sourcePattern.test(real) && !/\.(json|css|html|txt|md|d\.ts|d\.mts|d\.cts)$/.test(real)) {
       found.push(refusal(`${field} names ${placedUnder(real, repoRoot)}, a file with no source extension, which the scan never import-scans; a module carries a source extension`));
       continue;
     }
@@ -814,7 +814,7 @@ export function manifestImportTargets(manifest, { file, root: repoRoot } = {}) {
     // imports is never seen — refused, as a manifest entry field is.
     if (file && /^\.\.?\//.test(leaf)) {
       const real = realpathOf(resolve(dirname(file), leaf), ts.sys);
-      if (ts.sys.fileExists(real) && !sourcePattern.test(real) && !/\.(json|css|html|txt|md|wasm|d\.ts|d\.mts|d\.cts)$/.test(real)) {
+      if (ts.sys.fileExists(real) && !sourcePattern.test(real) && !/\.(json|css|html|txt|md|d\.ts|d\.mts|d\.cts)$/.test(real)) {
         found.push(refusal(`package imports alias ${leaf}, a file with no source extension, which the scan never import-scans; a module carries a source extension`));
         continue;
       }
@@ -879,7 +879,7 @@ function crossingPackage(specifier, { file, root: repoRoot } = {}) {
   // imports is never seen. A target that does not exist as spelled is the
   // compiler's to place (`./x` for x.ts); data files JSON can carry are not
   // modules that import.
-  if (!isTestPath(file) && ts.sys.fileExists(real) && !sourcePattern.test(real) && !/\.(json|css|html|txt|md|wasm)$/.test(real))
+  if (!isTestPath(file) && ts.sys.fileExists(real) && !sourcePattern.test(real) && !/\.(json|css|html|txt|md)$/.test(real))
     return refusal(`${specifier} names ${placed}, a file with no source extension, which the scan never import-scans; a module carries a source extension`);
   const owner = packageDirOf(realpathOf(file, ts.sys), realRoot);
   // A package imports nothing from outside packages/: a host is the
@@ -1011,7 +1011,7 @@ export function extractObversaImports(text, { file, root: repoRoot, configs = []
           continue;
         }
         // An alias can land on an extensionless module the scan never reads.
-        if (!isTestPath(file) && !specifier.startsWith('@obversa/') && host.fileExists?.(real) && !sourcePattern.test(real) && !/\.(json|css|html|txt|md|wasm|d\.ts)$/.test(real) && !/(^|\/)node_modules\//.test(placed)) {
+        if (!isTestPath(file) && !specifier.startsWith('@obversa/') && host.fileExists?.(real) && !sourcePattern.test(real) && !/\.(json|css|html|txt|md|d\.ts)$/.test(real) && !/(^|\/)node_modules\//.test(placed)) {
           found.push(refusal(`shipped source resolves to ${placed}, a file with no source extension, which the scan never import-scans: ${specifier}`));
           continue;
         }

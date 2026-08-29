@@ -320,7 +320,10 @@ test("arrays are read by own index: an inherited iterator or an own method canno
   let anchorsReads = 0;
   const shiftingAnchors = { ...makeRequest([]), get anchors() { anchorsReads += 1; return anchorsReads === 1 ? [null] : []; } };
   assert.equal(isSurfaceRequest(shiftingAnchors), false);
-  assert.equal(anchorsReads, 1, "anchors read once");
+  // An accessor is not the request's own data: the guard refuses the request
+  // without reading it, so the getter is consulted at most once and never
+  // twice.
+  assert.ok(anchorsReads <= 1, `anchors read at most once (${anchorsReads})`);
 });
 
 test("every public guard is total: a throwing proxy is invalid, never an exception", () => {
@@ -633,7 +636,9 @@ test("normalizeResult checks annotations against one snapshot of the request, so
     ...makeRequest([]),
     get anchors() { reads += 1; return reads === 1 ? [outputAnchor(1)] : [outputAnchor(999)]; },
   };
-  assert.equal(isSurfaceRequest(flipping), true, "the guard sees line 1");
+  // A getter is not the request's own data, so the guard refuses the request
+  // outright; and were it to reach normalization, one snapshot still binds.
+  assert.equal(isSurfaceRequest(flipping), false, "a getter is no request: the guard reads own data only");
   const submitted = { decision: "changes-requested", annotations: [{ anchor: outputAnchor(999), body: "unseen" }] };
   assert.equal(normalizeResult(submitted, flipping), null, "line 999 was never offered to the same read the result is checked against");
   const honest = { decision: "changes-requested", annotations: [{ anchor: outputAnchor(1), body: "seen" }] };
@@ -651,4 +656,17 @@ test("a result's meta is an owned plain-data snapshot, or the submission is no r
   assert.equal(normalizeResult({ decision: "approved", annotations: [], meta: new Map() }, request), null, "a Map is not plain data");
   assert.equal(normalizeResult({ decision: "approved", annotations: [], meta: new Proxy({ a: 1 }, {}) }, request), null, "a Proxy is not plain data");
   assert.equal(normalizeResult({ decision: "approved", annotations: [], meta: { get x() { return 1; } } }, request), null, "an accessor is not plain data");
+});
+
+test("the request guard reads the request's own data only: a required field supplied by a polluted Object.prototype is not the request's", () => {
+  const polluted = { surfaceId: "s1", address: "cb://x", token: "t", family: "output", renderer: "diff", ref: "worktree", fetch: "/api/model", transport: "browser" };
+  for (const [key, value] of Object.entries(polluted)) Object.defineProperty(Object.prototype, key, { value, configurable: true, writable: true, enumerable: false });
+  try {
+    assert.equal(isSurfaceRequest({ gateId: "g1", callback: {}, kind: {}, subject: {}, anchors: [] }), false, "nothing the request carries itself satisfies the guard");
+    assert.equal(isGateBinding("g1", {}), false, "an inherited address and token are not the binding's own");
+    assert.equal(isSurfaceRequest(makeRequest([outputAnchor(1)])), true, "a request carrying its own data still passes");
+  } finally {
+    for (const key of Object.keys(polluted)) delete Object.prototype[key];
+  }
+  assert.equal(isSurfaceRequest({ gateId: "g1", callback: {}, kind: {}, subject: {}, anchors: [] }), false);
 });
