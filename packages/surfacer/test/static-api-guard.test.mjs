@@ -49,3 +49,24 @@ test("an /api/ request never resolves to a static file, and an unknown /api/ pat
     await surface.stop();
   }
 });
+
+test("the static route map and directory are copied at startup: mutating the caller's objects afterwards changes nothing served", async () => {
+  const files = { "/": ["index.html", "text/html; charset=utf-8"], "/leak.json": ["leak.json", "application/json"] };
+  const assets = { directory: assetsDir, files };
+  const surface = await startSurface({ app: "guard", assets, sessionTimeoutMs: 10_000, leaseTimeoutMs: 10_000 });
+  try {
+    assert.equal((await fetch(`${surface.origin}/leak.json`)).status, 200);
+    // The caller rewrites its tuple to a path outside the directory, and the
+    // directory itself to the repository root: the validated copies serve.
+    files["/leak.json"][0] = "../package.json";
+    files["/"][0] = "../../package.json";
+    assets.directory = path.join(assetsDir, "..", "..");
+    const leak = await fetch(`${surface.origin}/leak.json`);
+    assert.equal(leak.status, 200);
+    assert.equal(await leak.text(), '{"secret":"do-not-serve"}', "the file validated at startup, not the rewritten tuple");
+    const root = await fetch(`${surface.origin}/`);
+    assert.match(await root.text(), /<title>t<\/title>/, "the root route still serves the validated index");
+  } finally {
+    await surface.stop();
+  }
+});

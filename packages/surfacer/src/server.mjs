@@ -82,7 +82,11 @@ export async function startSurface({
   if (!assets?.directory || !assets?.files || Object.keys(assets.files).length === 0) {
     throw new TypeError("A static shell is required: an assets directory and a route map");
   }
-  const staticFiles = new Map(Object.entries(assets.files));
+  // The route map and the directory are copied at startup: what was
+  // validated here is what is served, whatever the caller does to its own
+  // objects afterwards.
+  const assetsDirectory = String(assets.directory);
+  const staticFiles = new Map(Object.entries(assets.files).map(([route, entry]) => [route, Array.isArray(entry) ? [...entry] : entry]));
   for (const [route, [fileName]] of staticFiles) {
     if (typeof fileName !== "string" || fileName.includes("/") || fileName.includes("\\") || fileName.startsWith(".")) {
       throw new TypeError(`Static file names must be plain names inside the assets directory: ${route}`);
@@ -184,7 +188,7 @@ export async function startSurface({
       // /api/ key at startup).
       const staticFile = isApi ? undefined : staticFiles.get(requestUrl.pathname);
       if (request.method === "GET" && staticFile) {
-        await sendStatic(response, assets.directory, staticFile);
+        await sendStatic(response, assetsDirectory, staticFile);
         return;
       }
       if (!isApi) {

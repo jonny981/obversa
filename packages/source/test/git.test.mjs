@@ -303,3 +303,20 @@ test("repositoryRoot finds the top level from any subdirectory, or null outside 
     rmSync(empty, { recursive: true, force: true });
   }
 });
+
+test("listTrackedFiles returns names raw, so a name git would quote — a quote, a backslash, a tab — matches the diff's decoded path", async () => {
+  const dir = makeRepo();
+  try {
+    const odd = 'odd "name"\\with\ttab.txt';
+    writeFileSync(path.join(dir, odd), "1\n");
+    writeFileSync(path.join(dir, "plain.txt"), "2\n");
+    git(dir, "add", "-A");
+    git(dir, "commit", "-q", "-m", "odd names");
+    assert.deepEqual([...(await listTrackedFiles({ cwd: dir }))].sort(), [odd, "plain.txt"], "the index, raw");
+    assert.deepEqual([...(await listTrackedFiles({ cwd: dir, ref: "HEAD" }))].sort(), [odd, "plain.txt"], "a tree, raw");
+    // Git itself would quote that name without -z.
+    assert.match(git(dir, "ls-files"), /^"odd \\"name\\"\\\\with\\ttab\.txt"$/m);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});

@@ -34,16 +34,22 @@ export async function runSurface({ open = true, stdout = process.stdout, ready, 
     process.on(signal, handler);
     return [signal, handler];
   });
+  const release = () => { for (const [signal, handler] of handlers.splice(0)) process.off(signal, handler); };
   try {
     const placement = open
       ? await openSurfaceUrl(surface.url)
       : { opened: false, via: "disabled" };
     ready?.({ url: surface.url, origin: surface.origin, port: surface.port });
     const result = await surface.waitForDecision();
+    // The session is decided: from here the process is a plain writer, and
+    // a signal ends it the default way. Keeping the handlers would swallow
+    // every signal while a large frame waits on a reader that has stopped
+    // taking it, and a session that is over cannot be interrupted anyway.
+    release();
     await writeFrame(stdout, frameResult(result));
     return { result, placement, url: surface.url };
   } finally {
-    for (const [signal, handler] of handlers) process.off(signal, handler);
+    release();
     await surface.stop();
   }
 }

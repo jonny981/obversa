@@ -24,6 +24,14 @@ obversa-review --staged
 obversa-review --range main..HEAD
 ```
 
+The three are one choice: naming two modes on one command line (`--range
+main..HEAD --staged`) is a usage error, whatever their order.
+
+A diff that holds an unresolved merge conflict is refused whole with a
+message naming the conflicted path. Git describes such a path as a
+combined diff, which a review could only show as a missing file, so the
+command never opens a page that looks clean over a conflicted tree.
+
 Other flags:
 
 - `--cwd <dir>` runs against another repository directory.

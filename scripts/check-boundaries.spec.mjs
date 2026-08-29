@@ -706,7 +706,10 @@ test("a relative import is placed by its real path, and a spelling other than th
         assert.deepEqual(tsconfigDependencies('{ "files": ["../../packages/surfacer/src/index.ts"] }', { file: path.join(source, "tsconfig.json"), root }), ["@obversa/surfacer"], `a tsconfig files entry under ${root === tree ? "the real" : "the linked"} root`);
         assert.deepEqual(manifestPathTargets({ main: "../../" }, { file: path.join(source, "package.json"), root }), [refusal("main reaches ., which holds every package")], `a value that reaches every package under ${root === tree ? "the real" : "the linked"} root`);
         // A path whose tail does not exist yet — generated output, several
-        // segments deep — still places under the sibling it names.
+        // segments deep — still places under the sibling it names. The
+        // manifest case is the one that exercises the walk up to the deepest
+        // existing ancestor; the import's own directory is read by real path
+        // before its target is, so it places either way.
         assert.deepEqual(manifestPathTargets({ main: "../surfacer/generated/nested/entry.mjs" }, { file: path.join(source, "package.json"), root }), ["@obversa/surfacer"], `a missing nested path under ${root === tree ? "the real" : "the linked"} root`);
         assert.deepEqual(extractObversaImports('import { x } from "../../surfacer/generated/nested/entry.mjs";', { file: path.join(source, "src", "a.mjs"), root }), ["@obversa/surfacer"], `a missing nested import under ${root === tree ? "the real" : "the linked"} root`);
       }
@@ -723,6 +726,32 @@ test("a relative import is placed by its real path, and a spelling other than th
     const other = found('import { x } from "../../SURFACER/src/index.mjs";');
     assert.ok(other.some((entry) => /by another spelling/.test(entry)), JSON.stringify(other));
     assert.ok(found('import { x } from "../../../PACKAGES/surfacer/src/index.mjs";').some((entry) => /by another spelling/.test(entry)));
+  } finally {
+    rmSync(tree, { recursive: true, force: true });
+  }
+});
+
+test("createRequire is a loader only from this file's own URL; any other base moves every later resolution unseen", () => {
+  const file = "/repo/packages/source/src/a.mjs";
+  const found = (text) => extractObversaImports(`import { createRequire } from "node:module"; ${text}`, { file, root: "/repo" });
+  assert.deepEqual(found('const require = createRequire(import.meta.url); const x = require.resolve("./x.mjs");'), [], "the documented form");
+  for (const base of ['new URL("../../surfacer/package.json", import.meta.url)', '"/repo/packages/surfacer/package.json"', 'import.meta.resolve("@obversa/surfacer")', 'someUrl']) {
+    assert.ok(found(`const require = createRequire(${base}); const x = require.resolve("./src/index.mjs");`).length > 0, base);
+  }
+});
+
+test("shipped source may not import into build output: dist is never read by the scan", () => {
+  const tree = realpathSync(mkdtempSync(path.join(os.tmpdir(), "boundaries-dist-")));
+  try {
+    mkdirSync(path.join(tree, "packages", "source", "src"), { recursive: true });
+    mkdirSync(path.join(tree, "packages", "source", "dist"), { recursive: true });
+    writeFileSync(path.join(tree, "packages", "source", "dist", "escape.mjs"), 'import "../../surfacer/src/index.mjs";\n');
+    const file = path.join(tree, "packages", "source", "src", "a.mjs");
+    writeFileSync(file, "");
+    const found = extractObversaImports('import { e } from "../dist/escape.mjs";', { file, root: tree });
+    assert.equal(found.length, 1, JSON.stringify(found));
+    assert.match(found[0], /imports build output under dist, which the scan does not read/);
+    assert.deepEqual(extractObversaImports('import { e } from "../dist/escape.mjs";', { file: path.join(tree, "packages", "source", "test", "a.test.mjs"), root: tree }), [], "a test may read its package's build output");
   } finally {
     rmSync(tree, { recursive: true, force: true });
   }
@@ -826,7 +855,7 @@ test("the guard, run on a disposable copy of the tree, refuses a shipped host im
     symlinkSync(path.join("..", "..", "surfacer", "src", "host.mjs"), link);
     const linked = guard();
     assert.notEqual(linked.status, 0);
-    assert.match(linked.stderr, /packages\/source\/src\/link\.mjs: a symlink under packages\/ or hosts\/ is refused/);
+    assert.match(linked.stderr, /packages\/source\/src\/link\.mjs: a symlink is refused wherever the scan walks/);
     assert.doesNotMatch(linked.stderr, /ReferenceError/);
     rmSync(link);
     // A host script is pinned verbatim: one that preloads a package's
@@ -911,7 +940,7 @@ test("the guard, run on a disposable copy of the tree, refuses a shipped host im
     symlinkSync(path.join("..", "..", "..", "scripts", "escape.mjs"), hostLink);
     const hostLinked = guard();
     assert.notEqual(hostLinked.status, 0);
-    assert.match(hostLinked.stderr, /hosts\/cmux\/bin\/obversa-escape: a symlink under packages\/ or hosts\/ is refused/);
+    assert.match(hostLinked.stderr, /hosts\/cmux\/bin\/obversa-escape: a symlink is refused wherever the scan walks/);
     rmSync(hostLink);
     rmSync(escapeScript);
     // The main walk skips dist by name; a link kept there, under a host or a
@@ -922,7 +951,7 @@ test("the guard, run on a disposable copy of the tree, refuses a shipped host im
     symlinkSync(path.join("..", "..", "..", "scripts", "escape.mjs"), distLink);
     const distLinked = guard();
     assert.notEqual(distLinked.status, 0);
-    assert.match(distLinked.stderr, /hosts\/cmux\/dist\/obversa-escape: a symlink under packages\/ or hosts\/ is refused/);
+    assert.match(distLinked.stderr, /hosts\/cmux\/dist\/obversa-escape: a symlink is refused wherever the scan walks/);
     rmSync(path.join(root, "hosts", "cmux", "dist"), { recursive: true });
     // A host is not built: a regular file kept under a host's dist — a
     // shipped command the main scan never reads — refuses the directory.
@@ -955,9 +984,41 @@ test("the guard, run on a disposable copy of the tree, refuses a shipped host im
     symlinkSync(path.join("..", "..", "..", "scripts", "escape.mjs"), packageDistLink);
     const packageDistLinked = guard();
     assert.notEqual(packageDistLinked.status, 0);
-    assert.match(packageDistLinked.stderr, /packages\/source\/dist\/link\.mjs: a symlink under packages\/ or hosts\/ is refused/);
+    assert.match(packageDistLinked.stderr, /packages\/source\/dist\/link\.mjs: a symlink is refused wherever the scan walks/);
     rmSync(path.join(root, "packages", "source", "dist"), { recursive: true });
     rmSync(escapeScript);
+    // A shell host command that names a package path runs it with no import
+    // to scan.
+    const shellCommand = path.join(root, "hosts", "cmux", "bin", "obversa-surface");
+    const shellOriginal = readFileSync(shellCommand, "utf8");
+    writeFileSync(shellCommand, `${shellOriginal}\nnode ../../../packages/surfacer/src/index.mjs "$@"\n`);
+    const shell = guard();
+    assert.notEqual(shell.status, 0);
+    assert.match(shell.stderr, /hosts\/cmux\/bin\/obversa-surface: a shell host command names packages\//);
+    writeFileSync(shellCommand, shellOriginal);
+    // A publishConfig field pnpm promotes at pack time is refused on a
+    // public package.
+    const memoryManifestPath = path.join(root, "packages", "memory", "package.json");
+    const memoryManifestText = readFileSync(memoryManifestPath, "utf8");
+    const memoryManifest = JSON.parse(memoryManifestText);
+    writeFileSync(memoryManifestPath, JSON.stringify({ ...memoryManifest, publishConfig: { ...memoryManifest.publishConfig, bin: { escape: "./dist/escape.js" } } }));
+    const promoted = guard();
+    assert.notEqual(promoted.status, 0);
+    assert.match(promoted.stderr, /@obversa\/memory: publishConfig\.bin is promoted into the packed manifest by pnpm/);
+    writeFileSync(memoryManifestPath, memoryManifestText);
+    // A symlink outside packages/ and hosts/ — a release command that lives
+    // elsewhere — is refused wherever the walk meets it.
+    const releaseScript = path.join(root, "scripts", "release.mjs");
+    const releaseText = readFileSync(releaseScript, "utf8");
+    rmSync(releaseScript);
+    writeFileSync(path.join(root, "scripts", "escape.mjs"), releaseText);
+    symlinkSync("escape.mjs", releaseScript);
+    const linkedRelease = guard();
+    assert.notEqual(linkedRelease.status, 0);
+    assert.match(linkedRelease.stderr, /scripts\/release\.mjs: a symlink is refused wherever the scan walks/);
+    rmSync(releaseScript);
+    rmSync(path.join(root, "scripts", "escape.mjs"));
+    writeFileSync(releaseScript, releaseText);
     // Every mutation above was undone: the copy passes again.
     assert.equal(guard().status, 0, "the restored copy passes");
   } finally {
@@ -1112,8 +1173,9 @@ test("a relative import that lands in another package names that package", () =>
     import ok from "../lib/helper.mjs";
   `;
   // The same-package import names nothing; a same-package import of a test
-  // path is a different case, refused, and covered above.
-  assert.deepEqual(extractObversaImports(source, { file, root: "/repo" }), ["@obversa/surfacer", "@obversa/surfacer", "@obversa/memory"]);
+  // path is a different case, refused, and covered above. A path into a
+  // sibling's dist is build output the scan never reads: refused, not named.
+  assert.deepEqual(extractObversaImports(source, { file, root: "/repo" }), ["@obversa/surfacer", "@obversa/surfacer", refusal("../../memory/dist/index.js imports build output under dist, which the scan does not read; import a source file")]);
 });
 
 test("a comment between the keyword and the specifier does not hide an import", () => {

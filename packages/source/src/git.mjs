@@ -212,16 +212,20 @@ export async function listTrackedFiles({ cwd = process.cwd(), ref } = {}) {
   // The index (what the worktree and staged reviews are against), or the
   // tree of one commit (what a range review ends at) — never one for the
   // other, so the list belongs to the state the diff describes.
+  // -z: each name ends in NUL and is written raw. Without it git quotes a
+  // name holding a backslash, a tab, a quote, or a control character (and
+  // a newline would split one name into several), so the names could not
+  // match the diff's decoded paths.
   const args = ref === undefined
-    ? ["ls-files", "--full-name", "--", ":/"]
-    : ["ls-tree", "-r", "--name-only", "--full-tree", ref, "--"];
+    ? ["ls-files", "-z", "--full-name", "--", ":/"]
+    : ["ls-tree", "-r", "-z", "--name-only", "--full-tree", ref, "--"];
   try {
-    const { stdout } = await run("git", ["-c", "core.quotePath=false", ...args], {
+    const { stdout } = await run("git", args, {
       cwd,
       maxBuffer: 16 * 1024 * 1024,
       windowsHide: true,
     });
-    return stdout.split("\n").filter((line) => line.length > 0);
+    return stdout.split("\0").filter((name) => name.length > 0);
   } catch {
     return [];
   }

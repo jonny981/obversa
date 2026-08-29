@@ -54,11 +54,10 @@ function hostRootOf(absolute, repoRoot) {
   const match = /^hosts\/([^/]+)(?:\/|$)/.exec(placedUnder(absolute, repoRoot));
   return match ? `hosts/${match[1]}/` : undefined;
 }
-// A path relative to the root with both read by real path, so a root or a
-// file handed over through a symlink places the same as its real spelling.
-// A path whose last component does not exist keeps that component and
-// takes its parent's real path, so a missing target still places under
-// the package its parent lies in.
+// A path relative to the root with both read by real path (realPathOf), so
+// a root or a file handed over through a symlink places the same as its
+// real spelling, and a path whose tail does not exist yet places under the
+// real path of its deepest existing ancestor.
 function placedUnder(absolute, repoRoot) {
   return relative(realPathOf(repoRoot), realPathOf(absolute)).split('\\').join('/');
 }
@@ -81,7 +80,7 @@ function realPathOf(path) {
 // The one refusal for a symlink met under packages/ or hosts/, by the main
 // walk or by the per-package and per-host walks that enter dist. Declared
 // before the check runs, which any function the check calls must be.
-const symlinkRefusal = (path) => `${path}: a symlink under packages/ or hosts/ is refused; it can reach a file the scan never read while the path that names it looks local, or stand as an entry the scan never read`;
+const symlinkRefusal = (path) => `${path}: a symlink is refused wherever the scan walks; it can reach a file the scan never read while the path that names it looks local, or stand as an entry or a command the scan never read`;
 // The membership proof over recorded host edges: each target must be in
 // the set of files the walk import-scanned. Exported so the spec holds it to
 // that directly, beside the live full-check mutant.
@@ -473,7 +472,16 @@ export function moduleSpecifiers(text, fileName = 'module.ts', { hatches = !isTe
       // `import(...)`, and the phase forms `import.defer(...)` / `import.source(...)`
       // (a MetaProperty on the import keyword).
       const isImport = callee.kind === ts.SyntaxKind.ImportKeyword || isImportMeta(callee);
-      if (isCreateRequire(callee) && bindsRequire(node)) {
+      // `const require = createRequire(import.meta.url)` and nothing else:
+      // a `require` made from another base resolves its strings from that
+      // base, not from this file, so `require.resolve('./src/x')` would be
+      // placed against the wrong directory — a base inside a sibling
+      // package moves every later resolution there unseen. Any other
+      // argument leaves createRequire unhandled, and it is refused below as
+      // a loader the scan does not follow.
+      const fromOwnUrl = node.arguments.length === 1 && isAccess(node.arguments[0]) && memberName(node.arguments[0]) === 'url'
+        && isImportMeta(ts.skipOuterExpressions(node.arguments[0].expression));
+      if (isCreateRequire(callee) && bindsRequire(node) && fromOwnUrl) {
         handled.add(callee);
       } else if (isLoader(callee)) {
         handled.add(callee);
@@ -826,6 +834,9 @@ function crossingPackage(specifier, { file, root: repoRoot } = {}) {
   const target = resolve(realpathOf(dirname(file), ts.sys), specifier);
   const real = realpathOf(target, ts.sys);
   if (real !== target) return refusal(`${specifier} names ${relative(realRoot, real).split('\\').join('/')} by another spelling; a specifier names its file as the disk does`);
+  // Build output is skipped by the walk, so what a file under dist imports
+  // is never read: shipped source may not import into a dist directory.
+  if (!isTestPath(file) && /(^|\/)dist\//.test(placedUnder(real, realRoot))) return refusal(`${specifier} imports build output under dist, which the scan does not read; import a source file`);
   const dir = packageDirOf(real, realRoot);
   return dir && dir !== packageDirOf(realpathOf(file, ts.sys), realRoot) ? `@obversa/${dir}` : null;
 }
@@ -926,6 +937,17 @@ export function extractObversaImports(text, { file, root: repoRoot, configs = []
         // before the same-package skip below.
         if (!isTestPath(file) && isTestPath(real)) {
           found.push(refusal(`shipped source resolves to a test path, which is exempt from the loader-hatch rules: ${specifier} -> ${relative(repoRoot, real)}`));
+          continue;
+        }
+        // An alias can land on build output the same way; dist is never
+        // read by the scan, so a path-form edge into a workspace package's
+        // dist is refused wherever it lands. A public name is the arrow
+        // itself — the compiler lands it on the sibling's built types, and
+        // that sibling's own scan covers its sources — and an installed
+        // package under node_modules is not part of the tree at all.
+        const placed = placedUnder(real, repoRoot);
+        if (!isTestPath(file) && !specifier.startsWith('@obversa/') && /(^|\/)dist\//.test(placed) && !/(^|\/)node_modules\//.test(placed)) {
+          found.push(refusal(`shipped source resolves to build output under dist, which the scan does not read: ${specifier} -> ${placed}`));
           continue;
         }
         const dir = packageDirOf(real, repoRoot);
@@ -1285,6 +1307,14 @@ for (const [name, rule] of packageRules) {
     failures.push(`${name}: publishConfig.access must be public`);
   }
   if (manifest.bin !== undefined) failures.push(`${name}: D1 must not expose a command`);
+  // pnpm promotes publishConfig fields into the packed manifest, so a
+  // publishConfig.bin, .exports, .main, .imports, or .types would give the
+  // tarball a command or an entry point the checks above never saw. Only
+  // the registry sentinels and access may appear there.
+  for (const key of Object.keys(manifest.publishConfig ?? {})) {
+    if (!['registry', '@obversa:registry', 'access'].includes(key))
+      failures.push(`${name}: publishConfig.${key} is promoted into the packed manifest by pnpm, past the checks on ${key}; only registry, @obversa:registry, and access are allowed in publishConfig`);
+  }
 
   // A sibling is named by key, or installed under an alias by value
   // (`npm:@obversa/x`, `workspace:@obversa/x`, `workspace:../x`); both are
@@ -1493,6 +1523,15 @@ for (const absolute of files) {
     const host = hostManifests.get(hostRootOf(absolute, root));
     for (const finding of hostImportFindings(text, { file: absolute, root, edges, selfName: host?.manifest.name, dependencies: host?.dependencies })) failures.push(`${path}: ${finding}`);
     for (const edge of edges) hostEdges.push({ from: path, ...edge });
+  } else if (/^hosts\/[^/]+\/(bin|lib)\//.test(path) && !isTestPath(path)) {
+    // A shipped host file that is not JavaScript — a shell command — runs
+    // whatever it says, so it may not name a package directory or an
+    // install directory at all: `node ../../../packages/x/src/y.mjs` is the
+    // same edge a JavaScript import by path would be, with no import to
+    // scan. Only host JavaScript reaches a package, by public name.
+    for (const named of ['packages/', 'node_modules']) {
+      if (text.includes(named)) failures.push(`${path}: a shell host command names ${named}; only host JavaScript reaches a package, by its public name`);
+    }
   }
 }
 
@@ -1534,15 +1573,15 @@ async function exists(path) {
 async function walk(directory, output, failures) {
   const { files, symlinks } = await walkTree(directory);
   output.push(...files);
-  for (const link of symlinks) {
-    const path = relative(root, link).split('\\').join('/');
-    // Under packages/ a link can reach another package while the import
-    // that names it looks local; under hosts/ it can also stand as a shipped
-    // command whose code the scan never read. Both are refused on sight;
-    // the per-package and per-host walks, which enter dist, refuse the same
-    // way with the same words.
-    if (path.startsWith('packages/') || path.startsWith('hosts/')) failures.push(symlinkRefusal(path));
-  }
+  // Every link the walk meets, under any scan root, is refused: under
+  // packages/ a link can reach another package while the import that names
+  // it looks local; under hosts/ it can stand as a shipped command whose
+  // code the scan never read; anywhere else (scripts/, .githooks/) it can
+  // stand as a guard or a release command whose code lives outside the
+  // tree, so the tagged tree stays clean while what runs changes. The
+  // per-package and per-host walks, which enter dist, refuse the same way
+  // with the same words.
+  for (const link of symlinks) failures.push(symlinkRefusal(relative(root, link).split('\\').join('/')));
 }
 
 async function containsFile(path) {

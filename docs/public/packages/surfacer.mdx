@@ -96,7 +96,13 @@ down — signals interrupt cleanly. The runnable example is
 `openSurfaceUrl` opens the page in the selected host's native pane —
 cmux first, through the [host glue](/hosts/cmux). The platform browser
 is the fallback, and printing the URL is the last resort. Your
-multiplexer supplies the panes; the Surfacer supplies the session. A
+multiplexer supplies the panes; the Surfacer supplies the session. The
+host's placement command is the one the host injected as
+`OBVERSA_SURFACE_BIN`, and it runs only when that value is an absolute
+path: the URL it receives carries the session's bearer token, so a bare
+name looked up on `PATH` would hand the token to whatever executable sat
+first on it. A relative or bare value is reported on stderr and skipped,
+and an unset value skips host placement altogether. A
 placement command that exits reports whether it succeeded. One that is
 still running five seconds after launch — a browser that keeps the tab's
 process — is taken to have opened the page; that is an assumption, so a

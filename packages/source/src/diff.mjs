@@ -150,6 +150,14 @@ export function parseUnifiedDiff(diffText) {
       continue;
     }
 
+    // A combined diff (`diff --cc`, `diff --combined`, `@@@` hunks) is what
+    // git emits for a path with an unresolved merge conflict. Its files
+    // start with no `diff --git` header, so reading past them would show a
+    // review with those files missing — an apparently clean review of a
+    // conflicted tree. Refused whole instead.
+    if (line.startsWith("diff --cc ") || line.startsWith("diff --combined ")) {
+      throw new Error(`The diff holds an unresolved merge conflict (${line.slice(line.indexOf(" ", 5) + 1)}); resolve it before review`);
+    }
     if (line.startsWith("diff --git ")) {
       startFile(...parseGitHeader(line.slice("diff --git ".length)));
       continue;

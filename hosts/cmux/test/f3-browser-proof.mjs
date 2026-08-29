@@ -265,10 +265,23 @@ async function keyboardRoute(dt) {
   const saveTarget = await active(`return a && a.textContent;`);
   await dt.enter();
   // The one comment in the document is in the opener's own thread.
+  const firstSave = await active(`const all = document.querySelectorAll(".comment-body"); const c = window.__thread.querySelector(".comment-body"); return { saved: c && c.textContent, commentsInDocument: all.length, saveClosed: !document.querySelector(".editor"), saveReturned: a === window.__opener };`);
+  // Remove the comment from the keyboard: Tab from the opener reaches the
+  // comment's Remove button (the thread follows the row), Enter removes it,
+  // and focus returns to the opener rather than being dropped.
+  await dt.tab();
+  const removeTarget = await active(`return a && a.textContent;`);
+  await dt.enter();
+  const removed = await active(`return { removed: !window.__thread.querySelector(".comment"), removeReturned: a === window.__opener };`);
+  // Put the comment back the same way, so the return below carries one.
+  await dt.enter();
+  await dt.type("Looks wrong");
+  await dt.tab(); // Save
+  await dt.enter();
   const saved = await active(`const all = document.querySelectorAll(".comment-body"); const c = window.__thread.querySelector(".comment-body"); return { saved: c && c.textContent, commentsInDocument: all.length, saveClosed: !document.querySelector(".editor"), saveReturned: a === window.__opener };`);
   // Return the review: what the page sends is what the reviewer gets.
   const returned = await dt.evaluate(`(() => { const b = [...document.querySelectorAll("button")].find((x) => /^Return 1 annotation/.test(x.textContent)); if (!b) return null; b.click(); return b.textContent; })()`);
-  return { tabs, reached: true, ...reached, ...opened, discardTarget, ...discarded, saveTarget, ...saved, returned };
+  return { tabs, reached: true, ...reached, ...opened, discardTarget, ...discarded, saveTarget, firstSaveReturned: firstSave.saveReturned, removeTarget, ...removed, ...saved, returned };
 }
 
 test("the runtime's CSP in this proof is the one surfacer serves", async () => {
@@ -376,6 +389,10 @@ test("the review surface renders under the exact CSP with zero violations and fi
   assert.equal(keys.discardClosed, true, "Enter on Discard closes the editor");
   assert.equal(keys.discardReturned, true, "and focus returns to the button that opened it");
   assert.equal(keys.saveTarget, "Save comment", "Tab reaches Save from the text");
+  assert.equal(keys.firstSaveReturned, true, "Enter on Save returns focus to the button that opened the editor");
+  assert.equal(keys.removeTarget, "Remove", "Tab from the opener reaches the comment's Remove button");
+  assert.equal(keys.removed, true, "Enter on Remove removes the comment");
+  assert.equal(keys.removeReturned, true, "and focus returns to the line's add-comment button, not the document");
   assert.equal(keys.saved, "Looks wrong", "Enter on Save renders the comment in the thread of the row that opened it");
   assert.equal(keys.commentsInDocument, 1, "and nowhere else");
   assert.equal(keys.saveClosed, true, "and closes the editor");

@@ -98,6 +98,10 @@ obversa-review --staged           # the staged changes (git diff --cached)
 obversa-review --range main..HEAD # a ref range (git diff main..HEAD)
 ```
 
+The three modes are one choice: two of them on one command line is a
+usage error, whatever their order. A diff holding an unresolved merge
+conflict is refused whole, naming the conflicted path.
+
 - `--cwd <dir>` runs against another repository directory; the review is
   captured from that repository's root whatever directory you start in.
 - `--no-open` does not place the pane; the page URL is printed on stderr

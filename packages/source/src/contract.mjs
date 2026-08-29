@@ -555,6 +555,9 @@ function checkSurfaceRequest(value) {
   const hasPayload = payload !== undefined;
   const hasFetch = fetch !== undefined;
   if (hasPayload === hasFetch) return false;
+  // The payload is an object the renderer reads later; a Proxy there is
+  // refused for the same reason as one anywhere else in the request.
+  if (hasPayload && payload !== null && typeof payload === "object" && types.isProxy(payload)) return false;
   if (hasFetch && !isFetchUrl(fetch)) return false;
   if (!isTransport(transport)) return false;
   // Every offered anchor is a real location — a target and a position — or the

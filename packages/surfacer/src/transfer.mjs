@@ -19,17 +19,22 @@ export async function createPrivateTransfer({ app, files }) {
   try {
     let index = 0;
     for (const file of files) {
-      if (typeof file?.content !== "string" || file.content.includes("\0")) {
+      // The content is read exactly once: the bytes validated, written,
+      // hashed, and counted are the same bytes, whatever a getter or a
+      // later mutation would answer to a second read.
+      const content = file?.content;
+      if (typeof content !== "string" || content.includes("\0")) {
         throw new TypeError("Transfer content must be UTF-8 text without NUL bytes");
       }
       index += 1;
       const name = `${String(index).padStart(3, "0")}-${sanitizeName(file.name) || "content"}`;
       const filePath = path.join(directory, name);
-      await fs.writeFile(filePath, file.content, { encoding: "utf8", flag: "wx", mode: 0o600 });
+      const bytes = Buffer.from(content, "utf8");
+      await fs.writeFile(filePath, bytes, { flag: "wx", mode: 0o600 });
       manifest.push({
         path: filePath,
-        hash: createHash("sha256").update(file.content).digest("hex"),
-        bytes: Buffer.byteLength(file.content),
+        hash: createHash("sha256").update(bytes).digest("hex"),
+        bytes: bytes.length,
         encoding: "utf-8",
       });
     }

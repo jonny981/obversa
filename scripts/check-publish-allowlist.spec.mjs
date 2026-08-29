@@ -390,6 +390,19 @@ test("the release forwards SIGINT and SIGTERM to the running child, awaits it, r
     const stopped = await pending;
     assert.equal(stopped.signal, "SIGINT", "the child was stopped by the forwarded signal");
     assert.equal(signals.listenerCount("SIGINT"), 0, "the forwarders are removed once the child has exited");
+    // A child that ignores the forwarded signal is killed after killAfterMs;
+    // a second signal kills it at once.
+    const ignoring = () => runChild(process.execPath, ["-e", "process.on('SIGINT', () => {}); process.on('SIGTERM', () => {}); setInterval(() => {}, 1000)"], { cwd, signals, stdio: "ignore", killAfterMs: 300 });
+    const timed = ignoring();
+    await new Promise((resolvePromise) => setTimeout(resolvePromise, 400));
+    signals.emit("SIGTERM");
+    assert.equal((await timed).signal, "SIGKILL", "escalated after killAfterMs");
+    const pressed = ignoring();
+    await new Promise((resolvePromise) => setTimeout(resolvePromise, 400));
+    signals.emit("SIGINT");
+    signals.emit("SIGINT");
+    assert.equal((await pressed).signal, "SIGKILL", "a second signal escalates at once");
+    assert.equal(signals.listenerCount("SIGTERM"), 0);
     // A visible spawn error.
     await assert.rejects(() => runChild(path.join(cwd, "no-such-command"), [], { cwd, signals, stdio: "ignore" }), /ENOENT/);
     // Through the release: a stopped pack and a failed spawn both return 1,

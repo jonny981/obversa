@@ -359,3 +359,20 @@ diff --git a/y.txt b/y.txt
   assert.deepEqual(files.map((f) => f.path), ["x.txt", "y.txt"]);
   assert.equal(files[1].hunks[0].lines[1].text, "d");
 });
+
+test("a combined diff — what git emits for an unresolved merge conflict — is refused whole, never read as an empty review", () => {
+  const combined = `diff --cc conflicted.txt
+index 1111111,2222222..0000000
+--- a/conflicted.txt
++++ b/conflicted.txt
+@@@ -1,1 -1,1 +1,5 @@@
+++<<<<<<< HEAD
+ +ours
+++=======
++ theirs
+++>>>>>>> branch
+`;
+  assert.throws(() => parseUnifiedDiff(combined), /unresolved merge conflict \(conflicted\.txt\)/);
+  assert.throws(() => parseUnifiedDiff(`diff --git a/a.txt b/a.txt\n--- a/a.txt\n+++ b/a.txt\n@@ -1 +1 @@\n-x\n+y\n${combined}`), /unresolved merge conflict/, "a conflict after a clean file is refused too");
+  assert.throws(() => parseUnifiedDiff(combined.replace("diff --cc", "diff --combined")), /unresolved merge conflict/);
+});

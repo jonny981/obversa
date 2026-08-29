@@ -220,12 +220,17 @@ test("anchorKey is total: it never throws, and an anchor that points nowhere is 
   assert.equal(isSurfaceRequest(new Proxy({}, { get() { throw new Error("boom"); } })), false, "a proxy request");
   // A transparent Proxy answers this read like a plain object and may answer
   // the next one differently: refused at the request, its kind, its subject,
-  // and its callback, as the module's head states.
-  assert.equal(isSurfaceRequest(new Proxy({ ...request }, {})), false, "a transparent proxy request");
-  assert.equal(isSurfaceRequest({ ...request, kind: new Proxy({ ...request.kind }, {}) }), false, "a transparent proxy kind");
-  assert.equal(isSurfaceRequest({ ...request, subject: new Proxy({ ...request.subject }, {}) }), false, "a transparent proxy subject");
-  assert.equal(isSurfaceRequest({ ...request, callback: new Proxy({ ...request.callback }, {}) }), false, "a transparent proxy callback");
+  // its callback, and its payload, as the module's head states. The base
+  // here is a sound request, so each refusal is the Proxy's alone.
+  const sound = { ...request, anchors: [outputAnchor(1)] };
+  assert.equal(isSurfaceRequest(sound), true, "the base is a request");
+  assert.equal(isSurfaceRequest(new Proxy({ ...sound }, {})), false, "a transparent proxy request");
+  assert.equal(isSurfaceRequest({ ...sound, kind: new Proxy({ ...sound.kind }, {}) }), false, "a transparent proxy kind");
+  assert.equal(isSurfaceRequest({ ...sound, subject: new Proxy({ ...sound.subject }, {}) }), false, "a transparent proxy subject");
+  assert.equal(isSurfaceRequest({ ...sound, callback: new Proxy({ ...sound.callback }, {}) }), false, "a transparent proxy callback");
   assert.equal(isGateBinding("gate-1", new Proxy({ address: "https://gate.example/cb", token: "t" }, {})), false, "a transparent proxy binding");
+  assert.equal(isSurfaceRequest({ ...sound, subject: { ref: "r", payload: { files: [] } } }), true, "a plain payload is a request");
+  assert.equal(isSurfaceRequest({ ...sound, subject: { ref: "r", payload: new Proxy({ files: [] }, {}) } }), false, "a transparent proxy payload");
   assert.equal(isSurfaceRequest({ get surfaceId() { throw new Error("boom"); } }), false, "a throwing root getter");
   assert.equal(isSurfaceRequest({ ...request, anchors: [outputAnchor(1)], get transport() { throw new Error("boom"); } }), false, "a throwing getter deeper in");
   assert.equal(buildAnchorSet([{ target: "a", position: cyclic }, { target: "a", position: 1 }]).size, 1);

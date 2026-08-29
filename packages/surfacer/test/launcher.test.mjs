@@ -124,3 +124,39 @@ test("runSurface resolves only after the stream has taken a large verbatim frame
   assert.equal(parsed.payload.big.length, big.length);
   assert.equal(parsed.payload.big, result.payload.big);
 });
+
+test("once the session is decided the signal handlers are gone, before the frame is written: a signal during a blocked write ends the process the default way", async () => {
+  const directory = mkdtempSync(path.join(os.tmpdir(), "launcher-assets-"));
+  writeFileSync(path.join(directory, "index.html"), "<!doctype html><title>x</title>");
+  const baseline = { SIGINT: process.listenerCount("SIGINT"), SIGTERM: process.listenerCount("SIGTERM") };
+  let duringWrite = null;
+  let captured = "";
+  // A stream whose write completes only later: what the process's signal
+  // handlers look like while the frame is still being taken is what counts.
+  const stdout = new Writable({
+    write(chunk, _encoding, callback) {
+      captured += chunk;
+      duringWrite = { SIGINT: process.listenerCount("SIGINT"), SIGTERM: process.listenerCount("SIGTERM") };
+      setTimeout(callback, 50);
+    },
+  });
+  let session;
+  let installed = null;
+  const pending = runSurface({
+    app: "launcher-test",
+    open: false,
+    stdout,
+    ready: (info) => { session = info; installed = { SIGINT: process.listenerCount("SIGINT"), SIGTERM: process.listenerCount("SIGTERM") }; },
+    assets: { directory, files: { "/": ["index.html", "text/html; charset=utf-8"] } },
+    api: { "POST /api/answer": async ({ body, session: s }) => { s.complete({ got: body.value }); return null; } },
+  });
+  await new Promise((resolve) => setTimeout(resolve, 100));
+  const token = session.url.split("#")[1];
+  const headers = { Authorization: `Bearer ${token}`, "Content-Type": "application/json", Origin: session.origin };
+  const reply = await fetch(`${session.origin}/api/answer`, { method: "POST", headers, body: JSON.stringify({ value: 1 }) }).then((r) => r.json());
+  await fetch(`${session.origin}/api/ack`, { method: "POST", headers, body: JSON.stringify({ operationId: reply.operationId }) });
+  await pending;
+  assert.deepEqual(installed, { SIGINT: baseline.SIGINT + 1, SIGTERM: baseline.SIGTERM + 1 }, "the handlers are installed while the session runs");
+  assert.deepEqual(duringWrite, baseline, "and gone before the frame is written");
+  assert.equal(parseFramedResult(captured, "launcher-test").status, "completed");
+});

@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdtempSync, writeFileSync, chmodSync, readFileSync } from "node:fs";
+import { existsSync, mkdtempSync, writeFileSync, chmodSync, readFileSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import test from "node:test";
@@ -85,4 +85,29 @@ test("a placement command still alive after the settle is assumed to have opened
   writeFileSync(lateFailure, "#!/bin/sh\nsleep 0.5\nexit 1\n");
   chmodSync(lateFailure, 0o755);
   assert.equal(await runDetached(lateFailure, ["http://127.0.0.1:1/y"], 100), true, "a failure after the settle is not observed: the placement was already assumed opened");
+});
+
+test("a placement command that is not an absolute path is not run: a bare name would be looked up on PATH with the token URL as its argument", async () => {
+  const directory = mkdtempSync(path.join(os.tmpdir(), "surfacer-host-"));
+  const onPath = shim(directory, "obversa-surface");
+  const browser = shim(directory, "browser-bin");
+  const captured = [];
+  const previousPath = process.env.PATH;
+  process.env.PATH = `${directory}${path.delimiter}${previousPath}`;
+  try {
+    const result = await openSurfaceUrl("http://127.0.0.1:1/x#token", {
+      surfaceBin: "obversa-surface",
+      browserCommand: [browser.file],
+      stderr: { write: (text) => captured.push(text) },
+    });
+    assert.deepEqual(result, { opened: true, via: "browser" }, "placement falls through to the browser");
+    assert.equal(existsSync(onPath.record), false, "the executable on PATH was never run");
+    assert.match(captured.join(""), /OBVERSA_SURFACE_BIN is not an absolute path and is not run: obversa-surface/);
+    // Unset: no host placement is attempted at all.
+    const unset = await openSurfaceUrl("http://127.0.0.1:1/y", { surfaceBin: undefined, browserCommand: [browser.file], stderr: { write: () => {} } });
+    assert.deepEqual(unset, { opened: true, via: "browser" });
+    assert.equal(existsSync(onPath.record), false);
+  } finally {
+    process.env.PATH = previousPath;
+  }
 });

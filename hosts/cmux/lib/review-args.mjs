@@ -26,11 +26,19 @@ function valueFor(argv, index, flag) {
 
 export function parseArgs(argv, { cwd = process.cwd() } = {}) {
   const options = { mode: "worktree", range: undefined, cwd, open: true, app: "review" };
+  // The three modes are one choice: naming two is a usage error, not a
+  // question of which came last.
+  let chosen;
+  const choose = (mode, flag) => {
+    if (chosen && chosen.mode !== mode) throw new Error(`${flag} and ${chosen.flag} name different review modes; use one of --worktree, --staged, --range`);
+    chosen = { mode, flag };
+    options.mode = mode;
+  };
   for (let index = 0; index < argv.length; index += 1) {
     const arg = argv[index];
-    if (arg === "--staged" || arg === "--cached") options.mode = "staged";
-    else if (arg === "--worktree") options.mode = "worktree";
-    else if (arg === "--range") { options.mode = "range"; options.range = valueFor(argv, index, arg); index += 1; }
+    if (arg === "--staged" || arg === "--cached") choose("staged", arg);
+    else if (arg === "--worktree") choose("worktree", arg);
+    else if (arg === "--range") { choose("range", arg); options.range = valueFor(argv, index, arg); index += 1; }
     else if (arg === "--cwd") { options.cwd = valueFor(argv, index, arg); index += 1; }
     else if (arg === "--app") { options.app = valueFor(argv, index, arg); index += 1; }
     else if (arg === "--no-open") options.open = false;

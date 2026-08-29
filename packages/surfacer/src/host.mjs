@@ -1,4 +1,5 @@
 import { spawn } from "node:child_process";
+import { isAbsolute } from "node:path";
 
 /**
  * Open a surface URL in the selected host's native pane. cmux is the first
@@ -7,7 +8,12 @@ import { spawn } from "node:child_process";
  * Diagnostics stay on stderr; stdout belongs to the framed result.
  */
 export async function openSurfaceUrl(url, {
-  surfaceBin = process.env.OBVERSA_SURFACE_BIN || "obversa-surface",
+  // The host placement command is the one the host injected, by absolute
+  // path (OBVERSA_SURFACE_BIN). A bare name would be looked up on PATH, and
+  // the URL it receives carries the session's bearer token, so an
+  // executable placed earlier on PATH could take the token and forge the
+  // result; a name that is not an absolute path is not run.
+  surfaceBin = process.env.OBVERSA_SURFACE_BIN,
   // No win32 command lane: appending a URL to cmd /c start is a shell
   // injection vector. Windows prints the URL until a safe launcher lands.
   browserCommand = process.platform === "darwin" ? ["open"]
@@ -15,7 +21,10 @@ export async function openSurfaceUrl(url, {
     : null,
   stderr = process.stderr,
 } = {}) {
-  if (await runDetached(surfaceBin, [url])) return { opened: true, via: "host" };
+  if (typeof surfaceBin === "string" && surfaceBin.length > 0) {
+    if (!isAbsolute(surfaceBin)) stderr.write(`OBVERSA_SURFACE_BIN is not an absolute path and is not run: ${surfaceBin}\n`);
+    else if (await runDetached(surfaceBin, [url])) return { opened: true, via: "host" };
+  }
   if (browserCommand) {
     const [browserBin, ...browserArgs] = browserCommand;
     if (await runDetached(browserBin, [...browserArgs, url])) return { opened: true, via: "browser" };

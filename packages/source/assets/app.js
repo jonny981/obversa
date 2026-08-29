@@ -85,7 +85,11 @@ function renderFileTree(model, meta, onOpen) {
   changesTab.append(document.createTextNode("Changes "), el("span", "tab-count", String(model.files.length)));
   const allTab = el("button", "tree-tab");
   allTab.type = "button";
-  const hasAll = Array.isArray(meta.allFiles) && meta.allFiles.length > model.files.length;
+  // The All-files view exists whenever the tracked list holds a file the
+  // diff does not: counts can match while the lists differ (a deleted file
+  // is in the diff and not the tree; an unchanged one the other way).
+  const changedPaths = new Set(model.files.map((f) => f.path));
+  const hasAll = Array.isArray(meta.allFiles) && meta.allFiles.some((p) => !changedPaths.has(p));
   allTab.append(document.createTextNode("All files "), el("span", "tab-count", String(hasAll ? meta.allFiles.length : model.files.length)));
   const content = el("div", "tree-content");
 
@@ -442,8 +446,13 @@ async function main() {
     remove.addEventListener("click", () => {
       const index = annotations.indexOf(entry);
       if (index >= 0) annotations.splice(index, 1);
+      // The thread follows its line's row; focus returns to that line's
+      // add-comment button, as it does when the editor closes, so a
+      // keyboard user keeps their place when the focused button is removed.
+      const opener = thread.previousElementSibling?.querySelector(".add-comment");
       comment.remove();
       updateCount();
+      opener?.focus();
     });
     comment.append(remove);
     thread.append(comment);

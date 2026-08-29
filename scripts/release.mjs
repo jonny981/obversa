@@ -86,15 +86,29 @@ export function publishArgs(tarball, flags = [], registry = RELEASE_REGISTRY) {
  * (the process by default) and awaiting its exit. Resolves { code, signal };
  * rejects when the child cannot be started, so the failure is visible.
  */
-export function runChild(command, args, { cwd, signals = process, stdio = "inherit", spawnImpl = spawn } = {}) {
+export function runChild(command, args, { cwd, signals = process, stdio = "inherit", spawnImpl = spawn, killAfterMs = 5_000 } = {}) {
   return new Promise((resolvePromise, reject) => {
     const child = spawnImpl(command, args, { cwd, stdio });
-    const forward = (signal) => () => { try { child.kill(signal); } catch { /* already gone */ } };
+    // The first signal is forwarded as itself. A child that has not exited
+    // `killAfterMs` later, or a second signal, gets SIGKILL: a child that
+    // ignores the forwarded signal cannot hold the release open, and the
+    // caller's second press is never swallowed.
+    let escalation;
+    let forwarded = false;
+    const kill = (signal) => { try { child.kill(signal); } catch { /* already gone */ } };
+    const forward = (signal) => () => {
+      if (forwarded) { kill("SIGKILL"); return; }
+      forwarded = true;
+      kill(signal);
+      escalation = setTimeout(() => kill("SIGKILL"), killAfterMs);
+      escalation.unref?.();
+    };
     const onInt = forward("SIGINT");
     const onTerm = forward("SIGTERM");
     signals.on("SIGINT", onInt);
     signals.on("SIGTERM", onTerm);
     const done = () => {
+      clearTimeout(escalation);
       signals.off("SIGINT", onInt);
       signals.off("SIGTERM", onTerm);
     };

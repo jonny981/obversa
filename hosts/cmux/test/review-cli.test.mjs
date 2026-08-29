@@ -135,3 +135,11 @@ test("the command behaves the same when run through a symlink, as a bin install 
     rmSync(dir, { recursive: true, force: true });
   }
 });
+
+test("two review modes on one command line are a usage error, whatever their order", () => {
+  assert.throws(() => parseArgs(["--range", "main..HEAD", "--staged"]), /--staged and --range name different review modes/);
+  assert.throws(() => parseArgs(["--staged", "--range", "main..HEAD"]), /--range and --staged name different review modes/);
+  assert.throws(() => parseArgs(["--worktree", "--cached"]), /--cached and --worktree name different review modes/);
+  assert.equal(parseArgs(["--staged", "--cached"]).mode, "staged", "the same mode named twice is one choice");
+  assert.equal(parseArgs(["--worktree", "--worktree"]).mode, "worktree");
+});
