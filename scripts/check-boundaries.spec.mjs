@@ -1096,6 +1096,19 @@ test("the guard, run on a disposable copy of the tree, refuses a shipped host im
     assert.notEqual(unpinnedRun.status, 0);
     assert.match(unpinnedRun.stderr, /hosts\/cmux\/bin\/obversa-new: a shell host command is pinned by content in hostRules; this one is not pinned/);
     rmSync(unpinned);
+    // A file under bin/ or lib/ with any extension the scan does not know
+    // is read all the same and refused: an extension is not a way past the
+    // host checks.
+    for (const [name, body] of [["bin/obversa-new.bash", "#!/bin/bash\nnode ../../../packages/surfacer/src/index.mjs\n"], ["lib/helper.py", "#!/usr/bin/env python3\nprint(1)\n"], ["bin/obversa-new.zsh", "echo hi\n"]]) {
+      const odd = path.join(root, "hosts", "cmux", ...name.split("/"));
+      writeFileSync(odd, body);
+      const oddRun = guard();
+      assert.notEqual(oddRun.status, 0, name);
+      const escaped = name.replace(/[./]/g, (c) => "\\" + c);
+      assert.match(oddRun.stderr, new RegExp(`hosts/cmux/${escaped}: a file under a host's bin/ or lib/ is an extensionless command or JavaScript source`), name);
+      if (name.endsWith(".bash")) assert.match(oddRun.stderr, /obversa-new\.bash: a shell host command names packages\//, "the shell checks ran on it too");
+      rmSync(odd);
+    }
     // Every mutation above was undone: the copy passes again.
     assert.equal(guard().status, 0, "the restored copy passes");
   } finally {

@@ -1521,8 +1521,11 @@ for (const absolute of files) {
     failures.push(`${path}: generated build output must not be stored under src`);
   }
   const extension = extname(absolute);
-  const extensionlessHostFile = path.startsWith('hosts/') && extension.length === 0;
-  if (!textExtensions.has(extension) && !absolute.endsWith('LICENSE') && !extensionlessHostFile)
+  // Every file under a host is read whatever its extension: a shell command
+  // saved as .bash or .py would otherwise be skipped here before any host
+  // check — pin, shebang, path, assembly — ever saw it.
+  const hostFile = path.startsWith('hosts/');
+  if (!textExtensions.has(extension) && !absolute.endsWith('LICENSE') && !hostFile)
     continue;
   scannedTextFiles.add(path);
   const buffer = await readFile(absolute);
@@ -1565,6 +1568,11 @@ for (const absolute of files) {
     // install directory at all: `node ../../../packages/x/src/y.mjs` is the
     // same edge a JavaScript import by path would be, with no import to
     // scan. Only host JavaScript reaches a package, by public name.
+    // Under bin/ or lib/ a file is an extensionless command (a node command
+    // above, a pinned shell command here) or JavaScript source (above); any
+    // other extension there is refused, whatever it holds.
+    if (/^hosts\/[^/]+\/(bin|lib)\//.test(path) && extname(path) !== '')
+      failures.push(`${path}: a file under a host's bin/ or lib/ is an extensionless command or JavaScript source; ${extname(path)} is neither`);
     // The closure: the command's content is exactly the pinned one.
     const hostName = /^hosts\/([^/]+)\//.exec(path)[1];
     const pinned = hostRules.get(hostName)?.shell?.[path.slice(`hosts/${hostName}/`.length)];

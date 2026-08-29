@@ -5,7 +5,7 @@ import os from "node:os";
 import path from "node:path";
 import test from "node:test";
 
-import { computeDiff, diffArgs, readNewFileText, listTrackedFiles, rangeEnd, repositoryRoot, MAX_FILE_BYTES } from "../src/git.mjs";
+import { computeDiff, diffArgs, readBoundedFile, readNewFileText, listTrackedFiles, rangeEnd, repositoryRoot, MAX_FILE_BYTES } from "../src/git.mjs";
 
 test("rangeEnd asks git: a range ends at its first positive revision (the right side), a single revision (even one whose text holds two dots) ends at the worktree", async () => {
   const dir = makeRepo();
@@ -316,6 +316,24 @@ test("listTrackedFiles returns names raw, so a name git would quote — a quote,
     assert.deepEqual([...(await listTrackedFiles({ cwd: dir, ref: "HEAD" }))].sort(), [odd, "plain.txt"], "a tree, raw");
     // Git itself would quote that name without -z.
     assert.match(git(dir, "ls-files"), /^"odd \\"name\\"\\\\with\\ttab\.txt"$/m);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("the bounded reader reads only the file whose identity was checked: a different device or inode at open time is refused", async () => {
+  const dir = mkdtempSync(path.join(os.tmpdir(), "reader-identity-"));
+  try {
+    const file = path.join(dir, "a.txt");
+    writeFileSync(file, "checked\n");
+    const other = path.join(dir, "b.txt");
+    writeFileSync(other, "swapped in\n");
+    const { statSync } = await import("node:fs");
+    const checked = statSync(file);
+    assert.equal(await readBoundedFile(file, 1024, { dev: checked.dev, ino: checked.ino }), "checked\n", "the same file reads");
+    const swapped = statSync(other);
+    assert.equal(await readBoundedFile(file, 1024, { dev: swapped.dev, ino: swapped.ino }), null, "another file's identity is refused");
+    assert.equal(await readBoundedFile(file, 1024), "checked\n", "with no identity to hold to, the read is bounded only");
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }

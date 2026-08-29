@@ -21,12 +21,17 @@ function isSafeRelativePath(filePath) {
 // Read one regular file through a single handle, so the file that is checked
 // is the file that is read (no stat-then-read window), with the final
 // component refused if it is a symlink and the read bounded at `limit` bytes.
-async function readBoundedFile(target, limit = MAX_FILE_BYTES) {
+// `identity` is the device and inode the caller checked before resolving the
+// path: O_NOFOLLOW guards the final component only, so a parent swapped for a
+// symlink between that check and this open would open another file — one
+// whose identity differs, and which is then refused.
+export async function readBoundedFile(target, limit = MAX_FILE_BYTES, identity) {
   let handle;
   try {
     handle = await open(target, fsConstants.O_RDONLY | (fsConstants.O_NOFOLLOW ?? 0));
     const info = await handle.stat();
     if (!info.isFile() || info.size > limit) return null;
+    if (identity && (info.dev !== identity.dev || info.ino !== identity.ino)) return null;
     const buffer = Buffer.alloc(limit + 1);
     let filled = 0;
     while (filled < buffer.length) {
@@ -157,16 +162,21 @@ export async function readNewFileText({ path: filePath, mode = "worktree", cwd =
   if (mode === "worktree") {
     let realRoot;
     let real;
+    let checked;
     try {
       realRoot = await realpath(cwd);
       const named = resolve(realRoot, filePath);
-      if ((await lstat(named)).isSymbolicLink()) return null;
+      checked = await lstat(named);
+      if (checked.isSymbolicLink()) return null;
       real = await realpath(named);
     } catch {
       return null;
     }
     if (!real.startsWith(realRoot + sep)) return null;
-    return readBoundedFile(real, limit);
+    // The handle that is read must be the file that was checked: same
+    // device, same inode. A parent component swapped for a symlink after
+    // the check opens a different file, and that read is refused.
+    return readBoundedFile(real, limit, { dev: checked.dev, ino: checked.ino });
   }
   if (mode === "staged") {
     try {
