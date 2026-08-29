@@ -150,9 +150,22 @@ export function parseUnifiedDiff(diffText) {
   let remainingOld = 0;
   let remainingNew = 0;
 
+  // A `diff --git` line is a file header only once what git always writes
+  // after one has arrived — an index, mode, rename, copy, similarity, or
+  // binary line, a path header, or a hunk header. A line shaped like the
+  // header inside commit prose is followed by none of those; when the next
+  // header starts, or the text ends, such an unproven file is dropped rather
+  // than reviewed as an empty file. (A commit message that itself carries a
+  // well-formed diff fragment is read as a diff: that is the stated limit.)
+  const dropUnproven = () => {
+    if (file !== null && !proven) files.pop();
+  };
+  let proven = false;
   const startFile = (oldPath, newPath) => {
+    dropUnproven();
     file = { oldPath, newPath, path: newPath || oldPath, status: "modified", binary: false, hunks: [] };
     files.push(file);
+    proven = false;
     hunk = null;
     remainingOld = 0;
     remainingNew = 0;
@@ -222,6 +235,7 @@ export function parseUnifiedDiff(diffText) {
       continue;
     }
 
+    if (isHeader(line)) proven = true;
     // A file's metadata — its mode, rename, copy, binary marker, and its
     // `---`/`+++` headers — comes before its hunks. Any of it arriving after
     // hunk content would relabel what was reviewed: a `Binary files` line
@@ -274,13 +288,16 @@ export function parseUnifiedDiff(diffText) {
     // A content line after a hunk's counts are spent is more than the header
     // declared: the diff is malformed, and the extra lines would be dropped
     // from the review without a trace. Refused.
-    if (/^[+\- ]/.test(line) && !line.startsWith("+++ ") && !line.startsWith("--- ")) {
+    // (Only for a proven file: under an unproven header the line is commit
+    // prose, and the header is dropped with it.)
+    if (proven && /^[+\- ]/.test(line) && !line.startsWith("+++ ") && !line.startsWith("--- ")) {
       throw new Error(`The diff has content outside a hunk in ${file.path}: ${JSON.stringify(line.slice(0, 60))} exceeds the hunk header's counts`);
     }
     // Anything else after a hunk's counts are spent (the trailing empty split
     // element at EOF, index/mode lines) ends the hunk region without content.
     hunk = null;
   }
+  dropUnproven();
   // A hunk-shaped line with no file header anywhere is a diff of hunks
   // without a file, not preamble: refused rather than read as no files.
   if (files.length === 0 && hunkShapedPreamble !== null) {

@@ -466,3 +466,16 @@ test("every header line counts for the line-ending rule; a hunk header without a
   assert.equal(hunkInMessage.files.length, 1);
   assert.deepEqual(hunkInMessage.files[0].hunks[0].lines.map((l) => l.text), ["x", "y"]);
 });
+
+test("a diff --git line in commit prose is not a file: a header is proven by the metadata or hunk git always writes after it", () => {
+  const prose = parseUnifiedDiff("commit abc\n\n    see diff --git a/not-real b/not-real for the idea\ndiff --git a/not-real b/not-real\n    more prose\n\ndiff --git a/x.js b/x.js\n--- a/x.js\n+++ b/x.js\n@@ -1 +1 @@\n-x\n+y\n");
+  assert.deepEqual(prose.files.map((f) => f.path), ["x.js"], "the prose header is dropped, the real file stays");
+  assert.equal(Object.hasOwn(prose.files[0], "proven"), false, "the model carries no parser bookkeeping");
+  // A header at the very end with nothing after it is prose too.
+  assert.deepEqual(parseUnifiedDiff("diff --git a/x.js b/x.js\n--- a/x.js\n+++ b/x.js\n@@ -1 +1 @@\n-x\n+y\ndiff --git a/trailing b/trailing\n").files.map((f) => f.path), ["x.js"]);
+  // What git always writes after a header proves it: a mode change, a
+  // rename, a binary marker, each with no hunk.
+  assert.equal(parseUnifiedDiff("diff --git a/run.sh b/run.sh\nold mode 100644\nnew mode 100755\n").files.length, 1, "a pure mode change");
+  assert.equal(parseUnifiedDiff("diff --git a/a b/b\nsimilarity index 100%\nrename from a\nrename to b\n").files.length, 1, "a pure rename");
+  assert.equal(parseUnifiedDiff("diff --git a/i.png b/i.png\nindex 1111111..2222222 100644\nBinary files a/i.png and b/i.png differ\n").files.length, 1, "a binary change");
+});
