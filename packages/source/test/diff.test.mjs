@@ -456,4 +456,8 @@ test("every header line counts for the line-ending rule; a hunk header without a
   // Preamble without a hunk header is still skipped.
   const withPreamble = parseUnifiedDiff("commit abc\nAuthor: x\n\n    message\n\ndiff --git a/x.js b/x.js\n--- a/x.js\n+++ b/x.js\n@@ -1 +1 @@\n-x\n+y\n");
   assert.equal(withPreamble.files.length, 1);
+  // A preamble line that merely starts with @@ is prose, not a hunk header.
+  const prose = parseUnifiedDiff("commit abc\n\n@@ this is prose about hunks\n@@@ and more\n\ndiff --git a/x.js b/x.js\n--- a/x.js\n+++ b/x.js\n@@ -1 +1 @@\n-x\n+y\n");
+  assert.equal(prose.files.length, 1);
+  assert.equal(prose.files[0].hunks.length, 1);
 });

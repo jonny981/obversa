@@ -214,7 +214,9 @@ export function parseUnifiedDiff(diffText) {
       // Preamble before the first file header (a commit message from `git
       // log -p`) is skipped; a hunk header there belongs to no file, and a
       // diff that starts with one would otherwise read as no files at all.
-      if (line.startsWith("@@ ")) throw new Error(`The diff has a hunk header before any file header: ${JSON.stringify(line.slice(0, 60))}`);
+      // Only a real hunk header counts (`@@ -n[,m] +n[,m] @@`); a preamble
+      // line that merely starts with `@@` is prose.
+      if (/^@@ -\d+(?:,\d+)? \+\d+(?:,\d+)? @@/.test(line)) throw new Error(`The diff has a hunk header before any file header: ${JSON.stringify(line.slice(0, 60))}`);
       continue;
     }
 
