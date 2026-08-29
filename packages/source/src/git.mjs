@@ -85,6 +85,12 @@ export function diffArgs({ mode = "worktree", range } = {}) {
     "-c", "diff.mnemonicPrefix=false",
     "-c", "diff.suppressBlankEmpty=false",
     "-c", "core.quotePath=false",
+    // A user's diff.submodule=log or =diff would replace a changed
+    // submodule's `diff --git` with "Submodule <path> a..b" lines, which
+    // the parser reads as preamble: the change would vanish from the
+    // review. Short form, always: a submodule is a file whose content is
+    // its commit.
+    "-c", "diff.submodule=short",
     "--no-pager", "diff", "--no-color", "--no-ext-diff", "--no-textconv",
   ];
   if (mode === "worktree") return base;

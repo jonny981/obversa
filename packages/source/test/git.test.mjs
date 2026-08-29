@@ -96,6 +96,7 @@ test("diffArgs maps each mode to the right git arguments", () => {
     "-c", "diff.mnemonicPrefix=false",
     "-c", "diff.suppressBlankEmpty=false",
     "-c", "core.quotePath=false",
+    "-c", "diff.submodule=short",
     "--no-pager", "diff", "--no-color", "--no-ext-diff", "--no-textconv",
   ];
   assert.deepEqual(diffArgs({ mode: "worktree" }), base);
@@ -358,5 +359,13 @@ test("readNewFileText holds the worktree read to the file it checked: an open th
     assert.equal(await readNewFileText({ path: "a.txt", cwd: dir }), "checked\n", "the real open reads again");
   } finally {
     rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("the diff command pins the submodule format to short, so a user's diff.submodule=log cannot hide a changed submodule from the review", () => {
+  for (const mode of ["worktree", "staged", "range"]) {
+    const args = diffArgs({ mode, range: mode === "range" ? "main..HEAD" : undefined });
+    const pins = args.filter((_, i) => i > 0 && args[i - 1] === "-c");
+    assert.ok(pins.includes("diff.submodule=short"), `${mode}: ${pins.join(" ")}`);
   }
 });
