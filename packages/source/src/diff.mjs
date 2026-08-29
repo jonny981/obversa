@@ -142,6 +142,7 @@ export function parseUnifiedDiff(diffText) {
   }
   let file = null;
   let hunk = null;
+  let hunkShapedPreamble = null;
   let oldNumber = 0;
   let newNumber = 0;
   // Lines still owed by the current hunk on each side, from its header. While
@@ -211,12 +212,13 @@ export function parseUnifiedDiff(diffText) {
       continue;
     }
     if (!file) {
-      // Preamble before the first file header (a commit message from `git
-      // log -p`) is skipped; a hunk header there belongs to no file, and a
-      // diff that starts with one would otherwise read as no files at all.
-      // Only a real hunk header counts (`@@ -n[,m] +n[,m] @@`); a preamble
-      // line that merely starts with `@@` is prose.
-      if (/^@@ -\d+(?:,\d+)? \+\d+(?:,\d+)? @@/.test(line)) throw new Error(`The diff has a hunk header before any file header: ${JSON.stringify(line.slice(0, 60))}`);
+      // Everything before the first file header is preamble (a commit
+      // message from `git log -p`) and is skipped, a line shaped like a hunk
+      // header included: a commit message may legally hold one. What is
+      // refused is a text that holds such a line and never a file header at
+      // all — a stream of hunks with no file — which would otherwise read as
+      // no files, an approvable empty review; that is decided at the end.
+      if (/^@@ -\d+(?:,\d+)? \+\d+(?:,\d+)? @@/.test(line)) hunkShapedPreamble ??= line;
       continue;
     }
 
@@ -278,6 +280,11 @@ export function parseUnifiedDiff(diffText) {
     // Anything else after a hunk's counts are spent (the trailing empty split
     // element at EOF, index/mode lines) ends the hunk region without content.
     hunk = null;
+  }
+  // A hunk-shaped line with no file header anywhere is a diff of hunks
+  // without a file, not preamble: refused rather than read as no files.
+  if (files.length === 0 && hunkShapedPreamble !== null) {
+    throw new Error(`The diff has a hunk header and no file header: ${JSON.stringify(hunkShapedPreamble.slice(0, 60))}`);
   }
   // A diff that ends while a hunk still owes lines is truncated: what the
   // header promised never arrived, and the review would be of a fragment.

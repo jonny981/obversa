@@ -449,8 +449,8 @@ test("every header line counts for the line-ending rule; a hunk header without a
   assert.throws(() => parseUnifiedDiff("diff --git a/x.js b/x.js\n--- a/x.js\r\n+++ b/x.js\n@@ -1 +1 @@\n-x\n+y\n"), /mixes line endings: 1 of 4 header lines end in a carriage return/);
   assert.throws(() => parseUnifiedDiff("diff --git a/x.js b/x.js\nindex 1111111..2222222 100644\r\n--- a/x.js\n+++ b/x.js\n@@ -1 +1 @@\n-x\n+y\n"), /mixes line endings: 1 of 5 header lines/);
   // A hunk header before any file header is not a diff of nothing.
-  assert.throws(() => parseUnifiedDiff("@@ -1 +1 @@\r\n-x\r\n+y\r\n"), /hunk header before any file header: "@@ -1 \+1 @@"/);
-  assert.throws(() => parseUnifiedDiff("@@ -1 +1 @@\n-x\n+y\n"), /hunk header before any file header/);
+  assert.throws(() => parseUnifiedDiff("@@ -1 +1 @@\r\n-x\r\n+y\r\n"), /hunk header and no file header: "@@ -1 \+1 @@"/);
+  assert.throws(() => parseUnifiedDiff("@@ -1 +1 @@\n-x\n+y\n"), /hunk header and no file header/);
   // Two carriage returns before each line feed: one conversion adds one.
   assert.throws(() => parseUnifiedDiff("diff --git a/x.js b/x.js\r\r\n--- a/x.js\r\r\n+++ b/x.js\r\r\n@@ -1 +1 @@\r\r\n-x\r\r\n+y\r\r\n"), /repeated carriage returns before a line feed/);
   // Preamble without a hunk header is still skipped.
@@ -460,4 +460,9 @@ test("every header line counts for the line-ending rule; a hunk header without a
   const prose = parseUnifiedDiff("commit abc\n\n@@ this is prose about hunks\n@@@ and more\n\ndiff --git a/x.js b/x.js\n--- a/x.js\n+++ b/x.js\n@@ -1 +1 @@\n-x\n+y\n");
   assert.equal(prose.files.length, 1);
   assert.equal(prose.files[0].hunks.length, 1);
+  // A commit message may legally hold an exact hunk header: before the
+  // first file header it is preamble like any other line.
+  const hunkInMessage = parseUnifiedDiff("commit abc\n\n    fixes the parser on\n    @@ -1 +1 @@\n    lines like that\n\n@@ -1 +1 @@\n\ndiff --git a/x.js b/x.js\n--- a/x.js\n+++ b/x.js\n@@ -1 +1 @@\n-x\n+y\n");
+  assert.equal(hunkInMessage.files.length, 1);
+  assert.deepEqual(hunkInMessage.files[0].hunks[0].lines.map((l) => l.text), ["x", "y"]);
 });
