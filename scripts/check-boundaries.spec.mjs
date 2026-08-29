@@ -798,6 +798,17 @@ test("a relative import that names an existing file with no source extension is 
       assert.match(withUrl[0], /carries a query or fragment; a module is named by its path alone/, specifier);
     }
     assert.ok(hostImportFindings('import { e } from "../lib/review-args.mjs?x";', { file: "/repo/hosts/cmux/bin/obversa-review", root: "/repo" }).some((entry) => /carries a query or fragment/.test(entry)), "a host import likewise");
+    // A manifest entry field is the same door: main, module, or an exports
+    // leaf naming the extensionless module exposes it to every consumer.
+    const manifestAt = { file: path.join(tree, "packages", "source", "package.json"), root: tree };
+    mkdirSync(path.join(tree, "packages", "source", "lib"), { recursive: true });
+    writeFileSync(path.join(tree, "packages", "source", "index.d.ts"), "export {};\n");
+    for (const manifest of [{ main: "./escape" }, { module: "./escape" }, { exports: { ".": "./escape" } }, { exports: { ".": { import: "./src/a.mjs", default: "./escape" } } }]) {
+      const placed = manifestPathTargets(manifest, manifestAt);
+      assert.equal(placed.length, 1, JSON.stringify(manifest));
+      assert.match(placed[0], /names packages\/source\/escape, a file with no source extension, which the scan never import-scans/, JSON.stringify(manifest));
+    }
+    assert.deepEqual(manifestPathTargets({ main: "./src/a.mjs", types: "./index.d.ts", exports: { ".": "./src/a.mjs", "./data": "./data.json" }, directories: { lib: "./lib" } }, manifestAt), [], "source, types, data, and a directory place as their own");
   } finally {
     rmSync(tree, { recursive: true, force: true });
   }

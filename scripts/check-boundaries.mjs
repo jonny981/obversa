@@ -746,7 +746,18 @@ export function manifestPathTargets(manifest, { file, root: repoRoot, host = ts.
       found.push(refusal(`${field} points at a test path, which is exempt from the loader-hatch rules: ${value}`));
       continue;
     }
-    const placed = placement(resolve(dirname(file), literal), { file, root: repoRoot, host, what: field });
+    // A manifest entry is a module a consumer loads: one that exists with no
+    // source extension (an extensionless file Node loads all the same) is
+    // never import-scanned, and what it imports is never seen, so it is
+    // refused. Data and type files are not modules that import, and a
+    // directory (`directories`) is placed as a place, not opened.
+    const named = resolve(dirname(file), literal);
+    const real = realpathOf(named, host);
+    if (host.fileExists?.(real) && !sourcePattern.test(real) && !/\.(json|css|html|txt|md|wasm|d\.ts|d\.mts|d\.cts)$/.test(real)) {
+      found.push(refusal(`${field} names ${placedUnder(real, repoRoot)}, a file with no source extension, which the scan never import-scans; a module carries a source extension`));
+      continue;
+    }
+    const placed = placement(named, { file, root: repoRoot, host, what: field });
     if (placed) found.push(placed);
   }
   return found;

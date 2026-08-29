@@ -17,8 +17,9 @@ inventory, graph, or editing behaviour survives here.
 - `startSurface({ app, assets, api, ... })` — one loopback server on an
   ephemeral 127.0.0.1 port. The page URL carries a fragment token. Every
   API request must send it as a bearer token, checked in constant time.
-  Requests with a wrong Host or Origin are refused. JSON bodies are
-  bounded at 4 MiB. Responses carry strict security headers, and all
+  Requests with a wrong Host are refused, and state-changing requests
+  with a wrong Origin are refused (a GET carries no Origin to check).
+  JSON bodies are bounded at 4 MiB. Responses carry strict security headers, and all
   values pass secret redaction.
 - Payloads pass secret redaction by default. `session.complete(payload,
   { verbatim: true })` is the explicit opt-in for content that must
