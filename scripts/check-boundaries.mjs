@@ -159,6 +159,12 @@ export function hostImportFindings(text, { file, root: repoRoot, edges = [], sel
       continue;
     }
     if (shipped && (/^\.\.?\//.test(specifier) || isAbsolute(specifier))) {
+      // A query or fragment is URL syntax to the loader, which opens the
+      // file without it; the scan would resolve the punctuation as a name.
+      if (/[?#]/.test(specifier)) {
+        findings.push(`a host imports ${specifier}, which carries a query or fragment; a module is named by its path alone`);
+        continue;
+      }
       const target = resolve(dirname(file), specifier);
       const real = realpathOf(target, ts.sys);
       const dir = packageDirOf(real, repoRoot) ?? packageDirOf(target, repoRoot);
@@ -943,6 +949,16 @@ export function extractObversaImports(text, { file, root: repoRoot, configs = []
     // exemption a test file enjoys can never be reached from shipped source.
     if (!isTestPath(file ?? '') && namesTestPath(specifier, file)) {
       found.push(refusal(`shipped source imports a test path, which is exempt from the loader-hatch rules: ${specifier}`));
+      continue;
+    }
+    // Node reads a `?query` or `#fragment` on a relative import as URL
+    // syntax and loads the file without it, while a path resolver would look
+    // for a file with that punctuation in its name and find nothing. A
+    // module is named by its path alone: either is refused before anything
+    // resolves. (A manifest entry field is a file path, where `?` is a
+    // character; that lane does not come through here.)
+    if ((/^\.\.?\//.test(specifier) || isAbsolute(specifier)) && /[?#]/.test(specifier)) {
+      found.push(refusal(`${specifier} carries a query or fragment; a module is named by its path alone, since the loader would open the file without it`));
       continue;
     }
     const named = new Set();

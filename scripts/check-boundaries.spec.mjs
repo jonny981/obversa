@@ -790,6 +790,14 @@ test("a relative import that names an existing file with no source extension is 
     assert.match(escaped[0], /packages\/source\/escape, a file with no source extension, which the scan never import-scans/);
     assert.deepEqual(found('import data from "../data.json";'), [], "a data file is not a module that imports");
     assert.deepEqual(found('import { x } from "./missing";'), [], "a target that does not exist as spelled is the compiler's to place");
+    // Node reads ?query and #fragment as URL syntax and opens the file
+    // without them; a resolver would look for the punctuation in a name.
+    for (const specifier of ["../escape?x=1", "../escape#part", "../src/b.mjs?cache=1"]) {
+      const withUrl = found(`import { e } from "${specifier}";`);
+      assert.equal(withUrl.length, 1, specifier);
+      assert.match(withUrl[0], /carries a query or fragment; a module is named by its path alone/, specifier);
+    }
+    assert.ok(hostImportFindings('import { e } from "../lib/review-args.mjs?x";', { file: "/repo/hosts/cmux/bin/obversa-review", root: "/repo" }).some((entry) => /carries a query or fragment/.test(entry)), "a host import likewise");
   } finally {
     rmSync(tree, { recursive: true, force: true });
   }
