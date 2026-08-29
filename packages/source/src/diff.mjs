@@ -173,12 +173,14 @@ export function parseUnifiedDiff(diffText) {
   // header starts, or the text ends, such an unproven file is dropped rather
   // than reviewed as an empty file. (A commit message that itself carries a
   // well-formed diff fragment is read as a diff: that is the stated limit.)
+  let droppedHeader = null;
   const dropUnproven = () => {
     if (file === null || proven) return;
     // Before any file was proven, the header is commit prose. Once a real
     // diff has begun, a bare header can be a truncated later file, and a
     // smaller review must not pass for whole: refused.
     if (provenCount > 0) throw new Error(`The diff is truncated: the file header for ${file.path} is followed by none of what git writes after one (an index, mode, rename, or binary line, a path header, or a hunk)`);
+    droppedHeader ??= file.path;
     files.pop();
   };
   let proven = false;
@@ -333,6 +335,27 @@ export function parseUnifiedDiff(diffText) {
   // without a file, not preamble: refused rather than read as no files.
   if (files.length === 0 && hunkShapedPreamble !== null) {
     throw new Error(`The diff has a hunk header and no file header: ${JSON.stringify(hunkShapedPreamble.slice(0, 60))}`);
+  }
+  // A file header with nothing proving it, and no proven file anywhere,
+  // is a truncated first file, not prose: a shortened diff must not read
+  // as "no changes to review".
+  if (files.length === 0 && droppedHeader !== null) {
+    throw new Error(`The diff is truncated: the file header for ${droppedHeader} is followed by none of what git writes after one, and no file was reviewed`);
+  }
+  // Every path a file names is repository-relative: the review's anchors
+  // carry these paths to a consumer, which reads or writes at them. A path
+  // that is absolute, climbs out with a parent segment, is empty (a header
+  // the parser could not read), or holds a NUL is refused whole.
+  for (const entry of files) {
+    for (const candidate of [entry.oldPath, entry.newPath]) {
+      if (candidate === "/dev/null") continue;
+      // A path still starting with a quote is a quoted header the parser
+      // could not close: git quotes a name that holds a quote and escapes
+      // it, so no real path begins with one.
+      if (typeof candidate !== "string" || candidate.length === 0 || candidate.startsWith('"') || candidate.includes("\0") || candidate.startsWith("/") || /^[A-Za-z]:[\\/]/.test(candidate) || candidate.split(/[\\/]+/).some((segment) => segment === "..")) {
+        throw new Error(`The diff names a path the review cannot anchor to: ${JSON.stringify(String(candidate).slice(0, 80))}; a path is repository-relative, with no parent segment`);
+      }
+    }
   }
   // A diff that ends while a hunk still owes lines is truncated: what the
   // header promised never arrived, and the review would be of a fragment.

@@ -490,3 +490,18 @@ test("a header is proven only by git's own grammar: prose after a prose header p
   assert.deepEqual(parseUnifiedDiff("commit abc\n\ndiff --git a/not-real b/not-real\nrename from the old handbook\n\n" + real).files.map((f) => f.path), ["x.js"], "a rename line with no similarity line before it proves nothing");
   assert.deepEqual(parseUnifiedDiff("diff --git a/i.png b/i.png\nindex 0123456..89abcde 100644\nBinary files a/i.png and b/i.png differ\n").files.map((f) => f.binary), [true]);
 });
+
+test("a diff naming a path outside the repository, an empty path, or a truncated first file is refused rather than reviewed", () => {
+  const hunk = "@@ -1 +1 @@\n-x\n+y\n";
+  assert.throws(() => parseUnifiedDiff(`diff --git a/../../victim.txt b/../../victim.txt\n--- a/../../victim.txt\n+++ b/../../victim.txt\n${hunk}`), /names a path the review cannot anchor to: "\.\.\/\.\.\/victim\.txt"/);
+  assert.throws(() => parseUnifiedDiff(`diff --git a//etc/passwd b//etc/passwd\n--- a//etc/passwd\n+++ b//etc/passwd\n${hunk}`), /cannot anchor to: "\/etc\/passwd"/);
+  assert.throws(() => parseUnifiedDiff(`diff --git "a/x b/x\n--- "a/x\n+++ "b/x\n${hunk}`), /names a path the review cannot anchor to/, "an unterminated quote is not a path");
+  assert.throws(() => parseUnifiedDiff("diff --git a/critical.js b/critical.js\n"), /truncated: the file header for critical\.js is followed by none of what git writes after one, and no file was reviewed/);
+  // A rename to a path outside the repository is refused too.
+  assert.throws(() => parseUnifiedDiff("diff --git a/a b/../b\nsimilarity index 100%\nrename from a\nrename to ../b\n"), /cannot anchor to: "\.\.\/b"/);
+  // Ordinary paths, /dev/null, a nested path, and a dot-named file are fine.
+  const fine = parseUnifiedDiff(`diff --git a/src/.env.example b/src/.env.example\n--- /dev/null\n+++ b/src/.env.example\n@@ -0,0 +1 @@\n+KEY=\n`);
+  assert.equal(fine.files[0].path, "src/.env.example");
+  // Prose alone, with no header at all, is still no files.
+  assert.deepEqual(parseUnifiedDiff("commit abc\n\n    just a message\n").files, []);
+});
