@@ -434,11 +434,26 @@ test("a diff whose whole stream was CRLF-converted parses with its headers match
 test("a stream whose headers disagree on a carriage return is refused as mixed, a lone-CR text is refused outright, and an escaped CR in a quoted path stays text", () => {
   const crlfFile = "diff --git a/a.js b/a.js\r\n--- a/a.js\r\n+++ b/a.js\r\n@@ -1 +1 @@\r\n-x\r\n+y\r\n";
   const lfFile = "diff --git a/b.js b/b.js\n--- a/b.js\n+++ b/b.js\n@@ -1 +1 @@\n-old\r\n+new\r\n";
-  assert.throws(() => parseUnifiedDiff(crlfFile + lfFile), /mixes line endings: 2 of 4 header lines end in a carriage return/);
+  assert.throws(() => parseUnifiedDiff(crlfFile + lfFile), /mixes line endings: 4 of 8 header lines end in a carriage return/);
   assert.throws(() => parseUnifiedDiff("diff --git a/a.js b/a.js\r--- a/a.js\r+++ b/a.js\r@@ -1 +1 @@\r-x\r+y\r"), /carriage-return line endings with no line feed/);
   // Git writes a CR inside a path as the escape \r within quotes: that is
   // text, not a line ending, converted stream or not.
   const quoted = parseUnifiedDiff('diff --git "a/odd\\rname.js" "b/odd\\rname.js"\r\n--- "a/odd\\rname.js"\r\n+++ "b/odd\\rname.js"\r\n@@ -1 +1 @@\r\n-x\r\n+y\r\n');
   assert.equal(quoted.files[0].path, "odd\rname.js", "the escaped CR is decoded as part of the name");
   assert.deepEqual(quoted.files[0].hunks[0].lines.map((l) => l.text), ["x", "y"]);
+});
+
+test("every header line counts for the line-ending rule; a hunk header without a file, and a doubled carriage return, are refused", () => {
+  // A converted path header among LF headers: mixed, refused — never a path
+  // with a carriage return hidden inside it.
+  assert.throws(() => parseUnifiedDiff("diff --git a/x.js b/x.js\n--- a/x.js\r\n+++ b/x.js\n@@ -1 +1 @@\n-x\n+y\n"), /mixes line endings: 1 of 4 header lines end in a carriage return/);
+  assert.throws(() => parseUnifiedDiff("diff --git a/x.js b/x.js\nindex 1111111..2222222 100644\r\n--- a/x.js\n+++ b/x.js\n@@ -1 +1 @@\n-x\n+y\n"), /mixes line endings: 1 of 5 header lines/);
+  // A hunk header before any file header is not a diff of nothing.
+  assert.throws(() => parseUnifiedDiff("@@ -1 +1 @@\r\n-x\r\n+y\r\n"), /hunk header before any file header: "@@ -1 \+1 @@"/);
+  assert.throws(() => parseUnifiedDiff("@@ -1 +1 @@\n-x\n+y\n"), /hunk header before any file header/);
+  // Two carriage returns before each line feed: one conversion adds one.
+  assert.throws(() => parseUnifiedDiff("diff --git a/x.js b/x.js\r\r\n--- a/x.js\r\r\n+++ b/x.js\r\r\n@@ -1 +1 @@\r\r\n-x\r\r\n+y\r\r\n"), /repeated carriage returns before a line feed/);
+  // Preamble without a hunk header is still skipped.
+  const withPreamble = parseUnifiedDiff("commit abc\nAuthor: x\n\n    message\n\ndiff --git a/x.js b/x.js\n--- a/x.js\n+++ b/x.js\n@@ -1 +1 @@\n-x\n+y\n");
+  assert.equal(withPreamble.files.length, 1);
 });

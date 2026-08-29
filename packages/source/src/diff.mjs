@@ -117,17 +117,27 @@ export function parseUnifiedDiff(diffText) {
   if (lines.length === 1 && diffText.includes("\r")) {
     throw new Error("The diff uses carriage-return line endings with no line feed; a diff is read by line feed, with or without a carriage return before each");
   }
-  const structural = lines.filter((line) => /^(?:diff --git |@@ )/.test(line) || /^(?:diff --git |@@ ).*\r$/.test(line));
+  // Every header line git writes counts as structural — the file header,
+  // the path headers, the hunk header, index, modes, rename, copy,
+  // similarity, the binary marker — none of which git ends in a carriage
+  // return. All of them ending in one means a converted stream; none means
+  // an LF diff; some but not all is refused as mixed, since a file's
+  // content carriage returns could not be told from the conversion's.
+  const isHeader = (line) => /^(?:diff --git |--- |\+\+\+ |@@ |index |old mode|new mode|new file mode|deleted file mode|rename from |rename to |copy from |copy to |similarity index|dissimilarity index|Binary files )/.test(line);
+  const structural = lines.filter(isHeader);
   const withCr = structural.filter((line) => line.endsWith("\r")).length;
   if (withCr > 0 && withCr < structural.length) {
-    // Some headers converted and some not: a file's content carriage
-    // returns could not be told from the conversion's, so nothing is
-    // rewritten and the diff is refused as mixed.
     throw new Error(`The diff mixes line endings: ${withCr} of ${structural.length} header lines end in a carriage return; a diff is all one line ending`);
   }
   if (withCr > 0) {
     for (let index = 0; index < lines.length; index += 1) {
       if (lines[index].endsWith("\r")) lines[index] = lines[index].slice(0, -1);
+    }
+    // One conversion adds one carriage return; a header still ending in one
+    // after the strip carries a second, and the diff is refused rather than
+    // read through it.
+    if (lines.some((line) => isHeader(line) && line.endsWith("\r"))) {
+      throw new Error("The diff has repeated carriage returns before a line feed; a converted stream carries exactly one per line");
     }
   }
   let file = null;
@@ -200,7 +210,13 @@ export function parseUnifiedDiff(diffText) {
       startFile(...parseGitHeader(line.slice("diff --git ".length)));
       continue;
     }
-    if (!file) continue; // ignore any preamble before the first file header
+    if (!file) {
+      // Preamble before the first file header (a commit message from `git
+      // log -p`) is skipped; a hunk header there belongs to no file, and a
+      // diff that starts with one would otherwise read as no files at all.
+      if (line.startsWith("@@ ")) throw new Error(`The diff has a hunk header before any file header: ${JSON.stringify(line.slice(0, 60))}`);
+      continue;
+    }
 
     // A file's metadata — its mode, rename, copy, binary marker, and its
     // `---`/`+++` headers — comes before its hunks. Any of it arriving after
