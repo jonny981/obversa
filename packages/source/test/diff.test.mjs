@@ -376,3 +376,35 @@ index 1111111,2222222..0000000
   assert.throws(() => parseUnifiedDiff(`diff --git a/a.txt b/a.txt\n--- a/a.txt\n+++ b/a.txt\n@@ -1 +1 @@\n-x\n+y\n${combined}`), /unresolved merge conflict/, "a conflict after a clean file is refused too");
   assert.throws(() => parseUnifiedDiff(combined.replace("diff --cc", "diff --combined")), /unresolved merge conflict/);
 });
+
+test("a truncated or malformed hunk is refused whole, never read as a smaller review", () => {
+  const twoFiles = (firstHunkBody) => `diff --git a/a.js b/a.js
+--- a/a.js
++++ b/a.js
+@@ -1,2 +1,2 @@
+${firstHunkBody}diff --git a/b.js b/b.js
+--- a/b.js
++++ b/b.js
+@@ -1 +1 @@
+-x
++y
+`;
+  const whole = parseUnifiedDiff(twoFiles("-one\n+ONE\n-two\n+TWO\n"));
+  assert.deepEqual(whole.files.map((f) => f.path), ["a.js", "b.js"], "a whole diff parses both files");
+  // The first hunk claims two lines a side and supplies one: the next file's
+  // header arrives while lines are still owed.
+  assert.throws(() => parseUnifiedDiff(twoFiles("-one\n+ONE\n")), /truncated: the hunk at -1,2 \+1,2 in a\.js still owes 1 old and 1 new lines when "diff --git a\/b\.js b\/b\.js" arrived/);
+  // The diff ends while lines are still owed.
+  assert.throws(() => parseUnifiedDiff("diff --git a/a.js b/a.js\n--- a/a.js\n+++ b/a.js\n@@ -1,2 +1,2 @@\n-one\n+ONE\n"), /still owes 1 old and 1 new lines at the end of the diff/);
+  // More content than the header declared.
+  assert.throws(() => parseUnifiedDiff("diff --git a/a.js b/a.js\n--- a/a.js\n+++ b/a.js\n@@ -1 +1 @@\n-x\n+y\n+extra\n"), /content outside a hunk in a\.js: "\+extra" exceeds the hunk header's counts/);
+  // A marker for a side already spent: the old side declared one line and a
+  // second deletion arrives.
+  assert.throws(() => parseUnifiedDiff("diff --git a/a.js b/a.js\n--- a/a.js\n+++ b/a.js\n@@ -1 +1,2 @@\n-x\n+y\n-z\n+w\n"), /malformed: the hunk at -1,1 \+1,2 in a\.js has no old lines left when "-z" arrived/);
+  // The text's final newline is not a line: a hunk owing one context line
+  // at the end of the text is truncated, not satisfied by the split artifact.
+  assert.throws(() => parseUnifiedDiff("diff --git a/a.js b/a.js\n--- a/a.js\n+++ b/a.js\n@@ -1,2 +1,2 @@\n-x\n+y\n"), /still owes 1 old and 1 new lines at the end of the diff/);
+  // A genuine blank context line (suppressBlankEmpty) in the middle still counts.
+  const blankInside = parseUnifiedDiff("diff --git a/a.js b/a.js\n--- a/a.js\n+++ b/a.js\n@@ -1,2 +1,2 @@\n\n-x\n+y\n");
+  assert.deepEqual(blankInside.files[0].hunks[0].lines.map((l) => l.type), ["context", "del", "add"]);
+});

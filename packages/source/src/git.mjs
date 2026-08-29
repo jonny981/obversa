@@ -217,7 +217,10 @@ export async function readNewFileText({ path: filePath, mode = "worktree", cwd =
  * The tracked files of one repository state, for the tree's "All files" view:
  * the index by default, or the tree of one commit when `ref` is given.
  * Returns repository-relative paths (git's own order) whatever directory
- * `cwd` is, so they match the diff's paths; [] on any error.
+ * `cwd` is, so they match the diff's paths. A listing that fails — no
+ * repository, a ref git cannot show, a git that is not there — throws: an
+ * empty list would look like a repository with no tracked files and a
+ * review would open with its "All files" view silently missing.
  * @param {{ cwd?: string, ref?: string }} [options]
  * @returns {Promise<string[]>}
  */
@@ -239,8 +242,8 @@ export async function listTrackedFiles({ cwd = process.cwd(), ref } = {}) {
       windowsHide: true,
     });
     return stdout.split("\0").filter((name) => name.length > 0);
-  } catch {
-    return [];
+  } catch (error) {
+    throw new Error(`The tracked files could not be listed: ${error?.message ?? error}`);
   }
 }
 

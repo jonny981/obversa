@@ -19,8 +19,10 @@ inventory, graph, or editing behaviour survives here.
   API request must send it as a bearer token, checked in constant time.
   Requests with a wrong Host are refused, and state-changing requests
   with a wrong Origin are refused (a GET carries no Origin to check).
-  JSON bodies are bounded at 4 MiB. Responses carry strict security headers, and all
-  values pass secret redaction.
+  JSON bodies are bounded at 4 MiB. Responses carry strict security headers, and
+  response values pass secret redaction by default; a handler that returns
+  `{ verbatim: true }` sends its body byte-exact, as `session.complete`
+  does with its verbatim option (below).
 - Payloads pass secret redaction by default. `session.complete(payload,
   { verbatim: true })` is the explicit opt-in for content that must
   survive byte-exact — review annotations quoting code, for example —

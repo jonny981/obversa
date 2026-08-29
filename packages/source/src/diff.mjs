@@ -100,6 +100,10 @@ export function parseUnifiedDiff(diffText) {
   if (typeof diffText !== "string" || diffText.length === 0) return { files };
 
   const lines = diffText.split("\n");
+  // The text's final newline splits into an empty last element. It is an
+  // artifact of the split, not a line: left in, it would pass as a blank
+  // context line and let a truncated hunk look whole by one line.
+  if (lines.at(-1) === "") lines.pop();
   let file = null;
   let hunk = null;
   let oldNumber = 0;
@@ -125,6 +129,13 @@ export function parseUnifiedDiff(diffText) {
       // path, and shift every later anchor. Only the leading marker counts.
       if (line.startsWith("\\")) continue; // "\ No newline at end of file"
       const marker = line[0];
+      // A marker for a side the header has already spent is malformed
+      // content: the counts would go negative and the review would carry
+      // lines the header never declared.
+      const side = marker === "-" ? "old" : marker === "+" ? "new" : (marker === " " || line === "") ? "both" : null;
+      if ((side === "old" && remainingOld === 0) || (side === "new" && remainingNew === 0) || (side === "both" && (remainingOld === 0 || remainingNew === 0))) {
+        throw new Error(`The diff is malformed: the hunk at -${hunk.oldStart},${hunk.oldLines} +${hunk.newStart},${hunk.newLines} in ${file.path} has no ${side === "both" ? "old or new" : side} lines left when ${JSON.stringify(line.slice(0, 60))} arrived`);
+      }
       if (marker === "+") {
         hunk.lines.push({ type: "add", oldNumber: null, newNumber, text: line.slice(1) });
         newNumber += 1;
@@ -142,10 +153,11 @@ export function parseUnifiedDiff(diffText) {
         remainingOld -= 1;
         remainingNew -= 1;
       } else {
-        // Not a diff line: the hunk is malformed; stop reading it.
-        hunk = null;
-        remainingOld = 0;
-        remainingNew = 0;
+        // Not a diff line while the hunk still owes lines: the diff is
+        // truncated or malformed. Reading on would swallow this line — a
+        // `diff --git` header for the next file included — and present an
+        // incomplete review as whole. Refused, naming what is owed.
+        throw new Error(`The diff is truncated: the hunk at -${hunk.oldStart},${hunk.oldLines} +${hunk.newStart},${hunk.newLines} in ${file.path} still owes ${remainingOld} old and ${remainingNew} new lines when ${JSON.stringify(line.slice(0, 60))} arrived`);
       }
       continue;
     }
@@ -204,9 +216,20 @@ export function parseUnifiedDiff(diffText) {
     }
 
     if (line.startsWith("\\")) continue; // "\ No newline at end of file" after a spent hunk
+    // A content line after a hunk's counts are spent is more than the header
+    // declared: the diff is malformed, and the extra lines would be dropped
+    // from the review without a trace. Refused.
+    if (/^[+\- ]/.test(line) && !line.startsWith("+++ ") && !line.startsWith("--- ")) {
+      throw new Error(`The diff has content outside a hunk in ${file.path}: ${JSON.stringify(line.slice(0, 60))} exceeds the hunk header's counts`);
+    }
     // Anything else after a hunk's counts are spent (the trailing empty split
     // element at EOF, index/mode lines) ends the hunk region without content.
     hunk = null;
+  }
+  // A diff that ends while a hunk still owes lines is truncated: what the
+  // header promised never arrived, and the review would be of a fragment.
+  if (hunk !== null && (remainingOld > 0 || remainingNew > 0)) {
+    throw new Error(`The diff is truncated: the hunk at -${hunk.oldStart},${hunk.oldLines} +${hunk.newStart},${hunk.newLines} in ${file.path} still owes ${remainingOld} old and ${remainingNew} new lines at the end of the diff`);
   }
 
   return { files };

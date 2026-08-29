@@ -809,6 +809,16 @@ export function manifestImportTargets(manifest, { file, root: repoRoot } = {}) {
       found.push(refusal(`package imports alias a test path, which is exempt from the loader-hatch rules: ${leaf}`));
       continue;
     }
+    // An alias is a module a consumer loads by the alias: one whose target
+    // exists with no source extension is never import-scanned, and what it
+    // imports is never seen — refused, as a manifest entry field is.
+    if (file && /^\.\.?\//.test(leaf)) {
+      const real = realpathOf(resolve(dirname(file), leaf), ts.sys);
+      if (ts.sys.fileExists(real) && !sourcePattern.test(real) && !/\.(json|css|html|txt|md|wasm|d\.ts|d\.mts|d\.cts)$/.test(real)) {
+        found.push(refusal(`package imports alias ${leaf}, a file with no source extension, which the scan never import-scans; a module carries a source extension`));
+        continue;
+      }
+    }
     const crossing = crossingPackage(leaf, { file, root: repoRoot });
     if (crossing) found.push(crossing);
   }

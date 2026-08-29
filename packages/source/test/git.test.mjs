@@ -231,7 +231,7 @@ test("readNewFileText never reads outside the repository and bounds the size", a
   }
 });
 
-test("listTrackedFiles returns the repo's tracked files, or [] outside a repo", async () => {
+test("listTrackedFiles returns the repo's tracked files, and fails outside a repo rather than answering an empty list", async () => {
   const dir = makeRepo();
   const empty = mkdtempSync(path.join(os.tmpdir(), "source-empty-"));
   try {
@@ -244,7 +244,8 @@ test("listTrackedFiles returns the repo's tracked files, or [] outside a repo", 
     // From a subdirectory the paths are still repository-relative, so the
     // tree's "All files" view matches the diff's paths.
     assert.deepEqual([...(await listTrackedFiles({ cwd: path.join(dir, "src") }))].sort(), ["README.md", "src/a.js"]);
-    assert.deepEqual(await listTrackedFiles({ cwd: empty }), []);
+    await assert.rejects(() => listTrackedFiles({ cwd: empty }), /The tracked files could not be listed/, "a failed listing is an error, not a repository with no files");
+    await assert.rejects(() => listTrackedFiles({ cwd: dir, ref: "no-such-ref" }), /The tracked files could not be listed/);
   } finally {
     rmSync(dir, { recursive: true, force: true });
     rmSync(empty, { recursive: true, force: true });

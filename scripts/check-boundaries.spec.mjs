@@ -809,6 +809,11 @@ test("a relative import that names an existing file with no source extension is 
       assert.match(placed[0], /names packages\/source\/escape, a file with no source extension, which the scan never import-scans/, JSON.stringify(manifest));
     }
     assert.deepEqual(manifestPathTargets({ main: "./src/a.mjs", types: "./index.d.ts", exports: { ".": "./src/a.mjs", "./data": "./data.json" }, directories: { lib: "./lib" } }, manifestAt), [], "source, types, data, and a directory place as their own");
+    // An imports-map alias is the same door again.
+    const aliased = manifestImportTargets({ imports: { "#escape": "./escape" } }, manifestAt);
+    assert.equal(aliased.length, 1, JSON.stringify(aliased));
+    assert.match(aliased[0], /package imports alias \.\/escape, a file with no source extension, which the scan never import-scans/);
+    assert.deepEqual(manifestImportTargets({ imports: { "#a": "./src/a.mjs", "#data": "./data.json" } }, manifestAt), [], "a source alias and a data alias place as their own");
   } finally {
     rmSync(tree, { recursive: true, force: true });
   }
