@@ -420,3 +420,13 @@ test("file metadata after hunk content is a malformed diff, refused whole: a bin
   assert.equal(two.files[0].hunks.length, 2);
   assert.equal(two.files[0].binary, false);
 });
+
+test("a diff whose whole stream was CRLF-converted parses with its headers matched and no carriage return in a path or a line; a diff of a CRLF file keeps the CR as content", () => {
+  const converted = parseUnifiedDiff("diff --git a/x.js b/x.js\r\n--- a/x.js\r\n+++ b/x.js\r\n@@ -1 +1 @@\r\n-x\r\n+y\r\n");
+  assert.equal(converted.files.length, 1);
+  assert.equal(converted.files[0].path, "x.js");
+  assert.deepEqual(converted.files[0].hunks[0].lines.map((l) => [l.type, l.text]), [["del", "x"], ["add", "y"]]);
+  // Headers in LF, content in CRLF: the file under review has CRLF endings.
+  const crlfFile = parseUnifiedDiff("diff --git a/x.js b/x.js\n--- a/x.js\n+++ b/x.js\n@@ -1 +1 @@\n-x\r\n+y\r\n");
+  assert.deepEqual(crlfFile.files[0].hunks[0].lines.map((l) => l.text), ["x\r", "y\r"], "the file's own carriage returns are reviewed as content");
+});

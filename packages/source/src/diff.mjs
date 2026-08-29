@@ -104,6 +104,18 @@ export function parseUnifiedDiff(diffText) {
   // artifact of the split, not a line: left in, it would pass as a blank
   // context line and let a truncated hunk look whole by one line.
   if (lines.at(-1) === "") lines.pop();
+  // A diff that passed through a CRLF conversion ends every line, git's own
+  // header lines included, in a carriage return. Git never writes one on a
+  // header, so a header ending in CR means the whole stream was converted:
+  // the CR is stripped from every line, so the headers match and no path or
+  // content carries it. A diff of a CRLF file is the other case — its
+  // headers end in LF and only its content lines carry the CR — and that CR
+  // is the file's own content, kept as reviewed.
+  if (lines.some((line) => /^(?:diff --git |@@ )/.test(line) && line.endsWith("\r"))) {
+    for (let index = 0; index < lines.length; index += 1) {
+      if (lines[index].endsWith("\r")) lines[index] = lines[index].slice(0, -1);
+    }
+  }
   let file = null;
   let hunk = null;
   let oldNumber = 0;
