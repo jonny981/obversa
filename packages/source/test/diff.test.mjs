@@ -505,3 +505,13 @@ test("a diff naming a path outside the repository, an empty path, or a truncated
   // Prose alone, with no header at all, is still no files.
   assert.deepEqual(parseUnifiedDiff("commit abc\n\n    just a message\n").files, []);
 });
+
+test("a repository name that begins with a quote is reviewed; /dev/null on both sides, a Windows-rooted path, and a drive-relative path are refused", () => {
+  const hunk = "@@ -1 +1 @@\n-x\n+y\n";
+  // Git writes a name beginning with a quote as "\"lead.txt": it closes, and decodes.
+  const lead = parseUnifiedDiff(`diff --git "a/\\"lead.txt" "b/\\"lead.txt"\n--- "a/\\"lead.txt"\n+++ "b/\\"lead.txt"\n${hunk}`);
+  assert.equal(lead.files[0].path, '"lead.txt');
+  assert.throws(() => parseUnifiedDiff(`diff --git a/x b/x\n--- /dev/null\n+++ /dev/null\n${hunk}`), /names \/dev\/null on both sides/);
+  assert.throws(() => parseUnifiedDiff(`diff --git a/\\victim.txt b/\\victim.txt\n--- a/\\victim.txt\n+++ b/\\victim.txt\n${hunk}`), /cannot anchor to: "\\\\victim\.txt"/);
+  assert.throws(() => parseUnifiedDiff(`diff --git a/C:victim.txt b/C:victim.txt\n--- a/C:victim.txt\n+++ b/C:victim.txt\n${hunk}`), /cannot anchor to: "C:victim\.txt"/);
+});

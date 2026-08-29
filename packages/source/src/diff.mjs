@@ -13,7 +13,11 @@
 // literal. Decode at the byte level, so an octal escape yields the real byte
 // and a UTF-8 sequence spelled out in octal still decodes to its character.
 function unquoteGitPath(raw) {
-  if (raw.length < 2 || raw[0] !== '"' || raw[raw.length - 1] !== '"') return raw;
+  // A value that opens a quote and never closes it is a header the parser
+  // cannot read: no path, rather than the raw text with its quote. (Git
+  // writes a name that begins with a quote as `"\"name"`, which closes.)
+  if (raw.startsWith('"') && (raw.length < 2 || raw[raw.length - 1] !== '"')) return "";
+  if (raw[0] !== '"') return raw;
   // Walk code points, not UTF-16 units: a character outside the BMP (an
   // emoji) is one code point but two units, and encoding each unit alone
   // would turn it into two replacement characters.
@@ -349,13 +353,16 @@ export function parseUnifiedDiff(diffText) {
   for (const entry of files) {
     for (const candidate of [entry.oldPath, entry.newPath]) {
       if (candidate === "/dev/null") continue;
-      // A path still starting with a quote is a quoted header the parser
-      // could not close: git quotes a name that holds a quote and escapes
-      // it, so no real path begins with one.
-      if (typeof candidate !== "string" || candidate.length === 0 || candidate.startsWith('"') || candidate.includes("\0") || candidate.startsWith("/") || /^[A-Za-z]:[\\/]/.test(candidate) || candidate.split(/[\\/]+/).some((segment) => segment === "..")) {
+      // Not absolute on any platform (a leading slash or backslash, a drive
+      // prefix with or without a separator), no parent segment, not empty
+      // (a header the parser could not read), no NUL.
+      if (typeof candidate !== "string" || candidate.length === 0 || candidate.includes("\0") || /^[\\/]/.test(candidate) || /^[A-Za-z]:/.test(candidate) || candidate.split(/[\\/]+/).some((segment) => segment === "..")) {
         throw new Error(`The diff names a path the review cannot anchor to: ${JSON.stringify(String(candidate).slice(0, 80))}; a path is repository-relative, with no parent segment`);
       }
     }
+    // /dev/null stands for one absent side; a file whose display path is
+    // /dev/null has no side in the repository and cannot be anchored.
+    if (entry.path === "/dev/null") throw new Error("The diff names /dev/null on both sides of a file; a file has a repository path on at least one side");
   }
   // A diff that ends while a hunk still owes lines is truncated: what the
   // header promised never arrived, and the review would be of a fragment.
