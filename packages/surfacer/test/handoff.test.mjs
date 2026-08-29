@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { frameResult, parseFramedResult, terminalResult } from "../src/handoff.mjs";
+import { frameResult, parseFramedResult, terminalResult, dataJson } from "../src/handoff.mjs";
 import { createPrivateTransfer, removeTransfer } from "../src/transfer.mjs";
 import { promises as fs } from "node:fs";
 
@@ -80,5 +80,30 @@ test("removeTransfer refuses foreign directories and stays retryable after a fai
     await removeTransfer(t.directory); // authorization survived the failure
   } else {
     await removeTransfer(t.directory).catch(() => {});
+  }
+});
+
+test("the data walker writes plain data without consulting toJSON, and refuses what JSON could not carry whole", () => {
+  assert.equal(dataJson({ a: 1, b: "x", c: [true, null, { d: -1.5 }] }), '{"a":1,"b":"x","c":[true,null,{"d":-1.5}]}');
+  assert.equal(dataJson("s"), '"s"');
+  // An own toJSON is a function-valued property: not data.
+  assert.throws(() => dataJson({ toJSON() { return {}; } }), /a function/);
+  // An inherited toJSON, Object.prototype's included, is never consulted.
+  let calls = 0;
+  Object.defineProperty(Object.prototype, "toJSON", { value() { calls += 1; return { forged: true }; }, configurable: true, writable: true, enumerable: false });
+  try {
+    assert.equal(dataJson({ a: 1 }), '{"a":1}');
+    assert.equal(calls, 0, "the walker never consulted the hook");
+    assert.equal(dataJson([1, "two"]), '[1,"two"]');
+    assert.equal(JSON.stringify({ a: 1 }), '{"forged":true}', "JSON.stringify itself would be fooled");
+    assert.match(frameResult(terminalResult("probe", "interrupted", { detail: "x" })), /"status":"interrupted"/);
+    const before = calls;
+    assert.doesNotMatch(frameResult(terminalResult("probe", "interrupted", { detail: "x" })), /forged/);
+    assert.equal(calls, before, "framing an envelope consulted it zero times");
+  } finally {
+    delete Object.prototype.toJSON;
+  }
+  for (const [name, value] of [["a cycle", (() => { const o = {}; o.self = o; return o; })()], ["a BigInt", { n: 1n }], ["an undefined value", { u: undefined }], ["a non-finite number", { n: Infinity }], ["negative zero", { n: -0 }], ["Map", new Map()], ["Date", new Date(0)], ["a Proxy", new Proxy({}, {})], ["an accessor", { get x() { return 1; } }], ["a symbol-keyed property", { [Symbol("k")]: 1 }], ["an array with extra properties or holes", Object.assign([1], { extra: 2 })]]) {
+    assert.throws(() => dataJson(value), new RegExp(name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")), name);
   }
 });

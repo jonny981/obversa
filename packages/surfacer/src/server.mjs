@@ -4,7 +4,7 @@ import http from "node:http";
 import path from "node:path";
 import { types } from "node:util";
 
-import { frameName, frameResult, terminalResult } from "./handoff.mjs";
+import { dataJson, frameName, frameResult, terminalResult } from "./handoff.mjs";
 import { safeText, sanitizeValue } from "./sanitize.mjs";
 
 const MAX_BODY_BYTES = 4 * 1024 * 1024;
@@ -101,6 +101,7 @@ export async function startSurface({
 
   let terminalState = "pending";
   let terminalClaim = null;
+  let terminalFrame = null;
   let decisionSettled = false;
   let completionReserved = false;
   let port;
@@ -304,7 +305,7 @@ export async function startSurface({
         return;
       }
       const verbatim = outcome?.verbatim === true;
-      sendJson(response, outcome?.status ?? 200, outcome?.body ?? { ok: true }, { verbatim });
+      sendJson(response, outcome?.status ?? 200, outcome?.body ?? { ok: true }, { verbatim, appData: outcome?.body !== undefined });
     } catch (error) {
       sendJson(response, error?.statusCode || (error?.code === "BODY_TOO_LARGE" ? 413 : 400), {
         error: safeText(error?.message || "Request failed", 300),
@@ -343,12 +344,12 @@ export async function startSurface({
     if (terminalState !== "pending") return false;
     // The frame is produced exactly once, here at the claim (or just before
     // it, for a completion, where it is proved before the claim is made),
-    // and rides with the claim as a non-enumerable property: the launcher
-    // writes it verbatim, and no later serialisation — none happens — could
-    // differ from it. An ending whose frame cannot be produced (a toJSON
-    // injected on Object.prototype after the payload was snapshotted) is
-    // claimed with no frame, and the launcher reports that rather than
-    // write something else.
+    // and is kept in a private record beside the claim: the public decision
+    // carries no hidden field, the launcher reads the frame through
+    // `frame()` and writes it verbatim, and no later serialisation — none
+    // happens — could differ from it. An ending whose frame cannot be
+    // produced is claimed with no frame, and the launcher reports that
+    // rather than write something else.
     let text = frame;
     if (text === undefined) {
       try {
@@ -358,7 +359,8 @@ export async function startSurface({
       }
     }
     terminalState = status;
-    terminalClaim = Object.defineProperty(result, "frame", { value: text, enumerable: false, configurable: false, writable: false });
+    terminalClaim = result;
+    terminalFrame = text;
     clearTimeout(sessionTimeout);
     clearTimeout(leaseTimeout);
     for (const controller of activeOperations) controller.abort();
@@ -416,6 +418,9 @@ export async function startSurface({
     url: `${origin}/#${token}`,
     port,
     waitForDecision: () => decision,
+    // The exact frame text claimed with the decision, or null before a claim
+    // (or for a claim whose ending could not be framed).
+    frame: () => terminalFrame,
     interrupt(signal = "signal") {
       if (terminalState !== "pending") return finalizeClaim();
       const result = terminalResult(appName, "interrupted", endingFor("interrupted",`Interrupted by ${signal}`));
@@ -503,6 +508,10 @@ function isPlainData(item) {
 // once, and what it answered is what gets framed. Symbol-keyed and
 // non-enumerable properties are skipped before the replacer ever sees them,
 // so each object is checked for them directly.
+// The snapshot is the payload's one serialisation, toJSON semantics included;
+// the frame around it (the fixed envelope, this owned snapshot inside it) is
+// then written by the handoff's data walker, which never consults toJSON, so
+// a hook can define the payload's answer exactly once and nothing more.
 function losslessSnapshot(value) {
   let lost = null;
   const text = JSON.stringify(value, function replacer(key, item) {
@@ -587,9 +596,17 @@ async function sendStatic(response, directory, [fileName, contentType]) {
   response.end(content);
 }
 
-function sendJson(response, status, body, { verbatim = false } = {}) {
+// Every reply body is written by the handoff's data walker, never by
+// JSON.stringify: a toJSON installed on Object.prototype by app code would
+// otherwise replace a protocol reply — the 200 that carries the operation
+// id the browser must acknowledge — with whatever it returned. A fixed
+// protocol reply is plain data by construction. An app handler's body is
+// app data: it takes the documented one serialisation (a toJSON applied
+// once, an uncarriable value refused) before the walker writes it.
+function sendJson(response, status, body, { verbatim = false, appData = false } = {}) {
   if (response.headersSent || response.destroyed) return;
-  const content = Buffer.from(JSON.stringify(verbatim ? body : sanitizeValue(body)));
+  const plain = appData ? losslessSnapshot(body) : body;
+  const content = Buffer.from(dataJson(verbatim ? plain : sanitizeValue(plain), "the reply"));
   response.writeHead(status, {
     ...securityHeaders(),
     "Content-Type": "application/json; charset=utf-8",

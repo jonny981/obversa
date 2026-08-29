@@ -49,9 +49,10 @@ export async function runSurface({ open = true, stdout = process.stdout, ready, 
     // A claim with no frame (its ending could not be framed) is an error
     // here, never a frame serialised afresh from whatever the result has
     // since become.
-    if (typeof result.frame !== "string") throw new Error("The session's result was claimed without a frame and cannot be handed off");
-    await writeFrame(stdout, result.frame);
-    return { result, placement, url: surface.url };
+    const frame = surface.frame();
+    if (typeof frame !== "string") throw new Error("The session's result was claimed without a frame and cannot be handed off");
+    await writeFrame(stdout, frame);
+    return { result, placement, url: surface.url, frame };
   } finally {
     release();
     await surface.stop();
