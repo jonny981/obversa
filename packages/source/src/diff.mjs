@@ -111,7 +111,21 @@ export function parseUnifiedDiff(diffText) {
   // content carries it. A diff of a CRLF file is the other case — its
   // headers end in LF and only its content lines carry the CR — and that CR
   // is the file's own content, kept as reviewed.
-  if (lines.some((line) => /^(?:diff --git |@@ )/.test(line) && line.endsWith("\r"))) {
+  // A text with carriage returns and no line feed at all (lone-CR endings)
+  // is not a diff this reader takes apart: one "line" holding everything
+  // would read as no files, an approvable empty review. Refused explicitly.
+  if (lines.length === 1 && diffText.includes("\r")) {
+    throw new Error("The diff uses carriage-return line endings with no line feed; a diff is read by line feed, with or without a carriage return before each");
+  }
+  const structural = lines.filter((line) => /^(?:diff --git |@@ )/.test(line) || /^(?:diff --git |@@ ).*\r$/.test(line));
+  const withCr = structural.filter((line) => line.endsWith("\r")).length;
+  if (withCr > 0 && withCr < structural.length) {
+    // Some headers converted and some not: a file's content carriage
+    // returns could not be told from the conversion's, so nothing is
+    // rewritten and the diff is refused as mixed.
+    throw new Error(`The diff mixes line endings: ${withCr} of ${structural.length} header lines end in a carriage return; a diff is all one line ending`);
+  }
+  if (withCr > 0) {
     for (let index = 0; index < lines.length; index += 1) {
       if (lines[index].endsWith("\r")) lines[index] = lines[index].slice(0, -1);
     }

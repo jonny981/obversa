@@ -430,3 +430,15 @@ test("a diff whose whole stream was CRLF-converted parses with its headers match
   const crlfFile = parseUnifiedDiff("diff --git a/x.js b/x.js\n--- a/x.js\n+++ b/x.js\n@@ -1 +1 @@\n-x\r\n+y\r\n");
   assert.deepEqual(crlfFile.files[0].hunks[0].lines.map((l) => l.text), ["x\r", "y\r"], "the file's own carriage returns are reviewed as content");
 });
+
+test("a stream whose headers disagree on a carriage return is refused as mixed, a lone-CR text is refused outright, and an escaped CR in a quoted path stays text", () => {
+  const crlfFile = "diff --git a/a.js b/a.js\r\n--- a/a.js\r\n+++ b/a.js\r\n@@ -1 +1 @@\r\n-x\r\n+y\r\n";
+  const lfFile = "diff --git a/b.js b/b.js\n--- a/b.js\n+++ b/b.js\n@@ -1 +1 @@\n-old\r\n+new\r\n";
+  assert.throws(() => parseUnifiedDiff(crlfFile + lfFile), /mixes line endings: 2 of 4 header lines end in a carriage return/);
+  assert.throws(() => parseUnifiedDiff("diff --git a/a.js b/a.js\r--- a/a.js\r+++ b/a.js\r@@ -1 +1 @@\r-x\r+y\r"), /carriage-return line endings with no line feed/);
+  // Git writes a CR inside a path as the escape \r within quotes: that is
+  // text, not a line ending, converted stream or not.
+  const quoted = parseUnifiedDiff('diff --git "a/odd\\rname.js" "b/odd\\rname.js"\r\n--- "a/odd\\rname.js"\r\n+++ "b/odd\\rname.js"\r\n@@ -1 +1 @@\r\n-x\r\n+y\r\n');
+  assert.equal(quoted.files[0].path, "odd\rname.js", "the escaped CR is decoded as part of the name");
+  assert.deepEqual(quoted.files[0].hunks[0].lines.map((l) => l.text), ["x", "y"]);
+});
