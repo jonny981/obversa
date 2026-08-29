@@ -1150,8 +1150,23 @@ const failures = [];
 // packages under packages/ (another host, an alias, a path, or a link would
 // let a name stand for files the edge set never saw). Read before the walk
 // so a host script knows its own name and what it may import by name.
+// A shell host command runs whatever it says, and no text rule over shell
+// closes: paths are assembled from expansions, globs, and cd. So each one is
+// pinned here by the SHA-256 of its content, as the build and test
+// configuration is: an unpinned shell command, or one whose content
+// changed, fails until this rule is reviewed with it. The text rules on
+// them are defence in depth, not the closure.
 const hostRules = new Map([
-  ['cmux', { scripts: { test: 'node --test test/*.test.mjs' } }],
+  ['cmux', {
+    scripts: { test: 'node --test test/*.test.mjs' },
+    shell: {
+      'bin/obversa-order-workspace': '4a8821485b2c1c67041ffd248075a42042674bddb3aebfb4f6915b007e7299f8',
+      'bin/obversa-peer-send': '15e38b2a7d4d232122a1653df6dc2ca17085d03e78ad7d687192daa95ac78da8',
+      'bin/obversa-plannotator-browser': 'ef180a43d479ad9c9ae2242bb7f24b74ab58f85781465ffd6eace1c45b9ef34a',
+      'bin/obversa-surface': 'cb1d37f92787995b1d3ff892e0ee98d8ec273ce5a068def91da21a65f49dd4b4',
+      'bin/obversa-whereis': 'e29448c5f6626b177b72b64d00fae4f9b5512f66049d1db31e7b4a4e5a2a8aa3',
+    },
+  }],
 ]);
 const hostManifests = new Map();
 for (const entry of await readdir(join(root, 'hosts'), { withFileTypes: true })) {
@@ -1550,9 +1565,34 @@ for (const absolute of files) {
     // install directory at all: `node ../../../packages/x/src/y.mjs` is the
     // same edge a JavaScript import by path would be, with no import to
     // scan. Only host JavaScript reaches a package, by public name.
+    // The closure: the command's content is exactly the pinned one.
+    const hostName = /^hosts\/([^/]+)\//.exec(path)[1];
+    const pinned = hostRules.get(hostName)?.shell?.[path.slice(`hosts/${hostName}/`.length)];
+    const actual = createHash('sha256').update(text).digest('hex');
+    if (pinned === undefined) failures.push(`${path}: a shell host command is pinned by content in hostRules; this one is not pinned. Review it, then pin its sha256 (${actual})`);
+    else if (actual !== pinned) failures.push(`${path}: content sha256 must be ${pinned}; found ${actual}. Shell host commands are pinned in hostRules; review the boundary rule with any change`);
     for (const named of ['packages/', 'node_modules']) {
       if (text.includes(named)) failures.push(`${path}: a shell host command names ${named}; only host JavaScript reaches a package, by its public name`);
     }
+    if (/(^|[^A-Za-z0-9_./-])packages([^A-Za-z0-9_/-]|$)/.test(text)) failures.push(`${path}: a shell host command names the word packages; a path is assembled from pieces, and this is the piece`);
+    // A word is never assembled across an expansion: `${P}ages`, `"$N"ode`,
+    // `$A$B`, and `pack$X` each touch an expansion to a word character or
+    // to another expansion, and are refused whatever they would spell.
+    // A bare `$NAME` takes every word character after it into the name, so
+    // the shapes are: a braced or parenthesised expansion followed by a word
+    // character, any expansion followed by a quote and a word character or
+    // by another expansion, and a word character followed by a braced or
+    // parenthesised expansion.
+    const bare = String.raw`\$[A-Za-z_][A-Za-z0-9_]*`;
+    const wrapped = String.raw`(?:\$\{[^}]*\}|\$\([^)]*\))`;
+    const assembled = [
+      new RegExp(`${wrapped}["']?[A-Za-z0-9_]`),
+      new RegExp(`(?:${bare}|${wrapped})["']?\\$`),
+      new RegExp(`${bare}["'][A-Za-z0-9_]`),
+      new RegExp(`[A-Za-z0-9_]["']?${wrapped}`),
+    ];
+    if (assembled.some((shape) => shape.test(text)))
+      failures.push(`${path}: a shell host command touches an expansion to a word character or to another expansion; a path or a command name is never assembled from pieces`);
     // Text can be assembled (`${P}ages/`), so the geometry is held too: from
     // a host's bin/ or lib/, a package is reached only through a parent
     // segment or an absolute path, and a shell host command has neither — no

@@ -62,6 +62,13 @@ fixed list of system directories (`/usr/bin`, `/bin`, `/usr/local/bin`,
 may name other directories in `OBVERSA_SYSTEM_BIN_DIRS` (colon-separated);
 with no opener found, the URL is printed on stderr and nothing runs.
 
+Every shell command under `bin/` is pinned by the SHA-256 of its content
+in the boundary guard (`hostRules` in `scripts/check-boundaries.mjs`). A
+change to one — any byte — fails the guard until the pin is reviewed and
+updated with it: no text rule over shell closes, so the pin is the
+closure, and the guard's text rules on these scripts are defence in
+depth.
+
 The target workspace resolves at call time from the live topology. The
 `CMUX_*` environment is frozen at terminal start, and `cmux identify`
 derives its caller answer from that same environment, so both name the

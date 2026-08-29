@@ -1068,6 +1068,34 @@ test("the guard, run on a disposable copy of the tree, refuses a shipped host im
     assert.notEqual(helperRun.status, 0);
     assert.match(helperRun.stderr, /hosts\/cmux\/tools\/helper\.sh: a shell host command names packages\//);
     rmSync(path.dirname(helper), { recursive: true });
+    // The closure over shell is the pin: any byte changed, however benign,
+    // fails until the rule is reviewed; a path rooted in an expansion the
+    // text rules cannot place fails the same way.
+    writeFileSync(shellCommand, `${shellOriginal}# a note\n`);
+    const changedShell = guard();
+    assert.notEqual(changedShell.status, 0);
+    assert.match(changedShell.stderr, /obversa-surface: content sha256 must be [0-9a-f]{64}; found [0-9a-f]{64}\. Shell host commands are pinned in hostRules/);
+    for (const rooted of ['node "${HOME}/x.mjs" "$URL"', 'node "$(pwd)/x.mjs" "$URL"']) {
+      writeFileSync(shellCommand, `${shellOriginal}\n${rooted}\n`);
+      const rootedRun = guard();
+      assert.notEqual(rootedRun.status, 0, rooted);
+      assert.match(rootedRun.stderr, /obversa-surface: content sha256 must be/, rooted);
+    }
+    // And a word assembled across an expansion is refused on its own terms.
+    for (const assembled of ['P=pack\nnode "$HOME/x/${P}ages/y.mjs"', 'N=n\n"$N"ode x.mjs', 'A=pack\nB=ages\nnode "$A$B/x.mjs"', 'X=ages\nnode "pack${X}/x.mjs"']) {
+      writeFileSync(shellCommand, `${shellOriginal}\n${assembled}\n`);
+      const assembledRun = guard();
+      assert.notEqual(assembledRun.status, 0, assembled);
+      assert.match(assembledRun.stderr, /obversa-surface: a shell host command touches an expansion to a word character or to another expansion/, assembled);
+    }
+    writeFileSync(shellCommand, shellOriginal);
+    // An unpinned shell command under bin/ is refused until reviewed and pinned.
+    const unpinned = path.join(root, "hosts", "cmux", "bin", "obversa-new");
+    writeFileSync(unpinned, "#!/bin/bash\necho hi\n");
+    const unpinnedRun = guard();
+    assert.notEqual(unpinnedRun.status, 0);
+    assert.match(unpinnedRun.stderr, /hosts\/cmux\/bin\/obversa-new: a shell host command is pinned by content in hostRules; this one is not pinned/);
+    rmSync(unpinned);
     // Every mutation above was undone: the copy passes again.
     assert.equal(guard().status, 0, "the restored copy passes");
   } finally {
