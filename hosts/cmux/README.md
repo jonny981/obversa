@@ -54,8 +54,10 @@ Outside cmux it opens the default browser — that fallback is the intended
 behavior, not an error. This is the one door for local webapps, and the
 glue point for Callback Gate surfaces launched by a router.
 
-The URL carries the session's bearer token, so every command the glue
-runs (`cmux`, macOS's `open`, the `python3` that reads the cmux tree,
+The URL the glue receives is a one-time launch URL that opens the session
+(single use, valid for a minute; the page URL with its token never enters
+a process argument), and it is still the one door, so every command the
+glue runs (`cmux`, macOS's `open`, the `python3` that reads the cmux tree,
 and the coreutils the cmux route needs) runs by absolute path from a
 fixed list of system directories (`/usr/bin`, `/bin`, `/usr/local/bin`,
 `/opt/homebrew/bin`), never by a bare name looked up on `PATH`. A host

@@ -10,12 +10,13 @@ import { isAbsolute } from "node:path";
 export async function openSurfaceUrl(url, {
   // The host placement command is the one the host injected, by absolute
   // path (OBVERSA_SURFACE_BIN). A bare name would be looked up on PATH, and
-  // the URL it receives carries the session's bearer token, so an
-  // executable placed earlier on PATH could take the token and forge the
-  // result; a name that is not an absolute path is not run.
+  // the URL it receives opens the session — a one-time launch URL, never
+  // the token itself, but still the one door — so an executable placed
+  // earlier on PATH could take the page in the browser's place; a name that
+  // is not an absolute path is not run.
   surfaceBin = process.env.OBVERSA_SURFACE_BIN,
   // The platform opener by its system path, never a bare name: the same
-  // token-bearing URL goes to it. macOS only: xdg-open runs its own helpers
+  // launch URL goes to it. macOS only: xdg-open runs its own helpers
   // (gio and friends) by bare name, so on Linux the URL is printed until a
   // safe opener lands, as on Windows, where appending a URL to cmd /c start
   // is a shell injection vector.

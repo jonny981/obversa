@@ -310,6 +310,10 @@ function normalizeAnchor(anchor) {
 }
 
 // Validate one author descriptor -> { kind, id } or null.
+// The author and the timestamp an annotation carries are the client's own
+// claims — the review page fills them in — and the contract keeps them as
+// data, not as verified identity. A remote transport that presents them as
+// provenance must supply and verify them itself.
 function normalizeAuthor(author) {
   if (!author || typeof author !== "object") return null;
   const { kind, id } = author;
@@ -413,8 +417,10 @@ function cleanAnnotation(raw, anchorSet) {
  * with no annotations. surfaceId and gateId are copied from the request so
  * the callback routes the result to the exact gate instance.
  */
-export function normalizeResult(raw, request, { terminal = false } = {}) {
-  // Total like every other export: a field that throws when read is absent.
+export function normalizeResult(raw, request, options) {
+  // Total like every other export: a field that throws when read is absent,
+  // and the options are read the same way — a null, or a Proxy whose trap
+  // throws, is no options.
   const read = (get, fallback) => {
     try {
       return get();
@@ -422,6 +428,7 @@ export function normalizeResult(raw, request, { terminal = false } = {}) {
       return fallback;
     }
   };
+  const terminal = read(() => options?.terminal === true, false);
   // The request is read exactly once, as one plain-data snapshot: the
   // anchors the annotations are checked against and the ids the result
   // carries come from that snapshot, so a getter cannot offer one location
@@ -435,9 +442,12 @@ export function normalizeResult(raw, request, { terminal = false } = {}) {
     const list = raw?.annotations;
     return Array.isArray(list) ? ownItems(list) ?? [] : [];
   }, []);
+  // More annotations than the result carries is a refused submission, never
+  // a silently shortened one: the reviewer is told what was returned, and
+  // that must be what the caller receives.
+  if (rawAnnotations.length > MAX_ANNOTATIONS) return null;
   try {
     for (const item of rawAnnotations) {
-      if (annotations.length >= MAX_ANNOTATIONS) break;
       const clean = validateAnnotation(item, anchorSet);
       if (clean) annotations.push(clean);
     }

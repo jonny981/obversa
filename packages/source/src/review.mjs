@@ -10,7 +10,7 @@ import { createHighlightRegistry, registryToCss } from "./highlight.mjs";
 import { highlightModel } from "./highlight-model.mjs";
 import { boundedReader, contextModel } from "./context-model.mjs";
 import { navModel } from "./nav-model.mjs";
-import { isGateBinding, normalizeResult } from "./contract.mjs";
+import { isGateBinding, isSurfaceRequest, normalizeResult } from "./contract.mjs";
 
 // The most diff a review takes, supplied or computed: the git lane's own
 // output bound (computeDiff's maxBuffer), so a supplied diff is held to
@@ -250,7 +250,7 @@ export async function reviewDiff({
   // would otherwise reach the page's completion payload as a value the
   // surfacer's data contract refuses, after a page had opened.
   if (!["worktree", "staged", "range"].includes(mode)) throw new TypeError(`reviewDiff mode must be worktree, staged, or range; got ${String(mode)}`);
-  if (mode === "range" && (typeof range !== "string" || range.length === 0)) throw new TypeError("reviewDiff in range mode needs a ref range");
+  if (mode === "range" && (typeof range !== "string" || range.trim().length === 0)) throw new TypeError("reviewDiff in range mode needs a ref range");
   // A supplied diff is text, and no larger than the git lane would return:
   // anything else (null, a Buffer, an object) is a caller error, not an
   // empty review, and an unbounded one is not split, highlighted, or
@@ -281,6 +281,10 @@ export async function reviewDiff({
     allFiles,
   };
   const request = buildSurfaceRequest({ model, meta, binding: gateBinding });
+  // The request this review opens is held to the contract it will check
+  // results against, before any page opens: a request the guard would
+  // refuse cannot be the one a reviewer answers.
+  if (!isSurfaceRequest(request)) throw new TypeError(`reviewDiff built a request its own contract refuses (ref ${JSON.stringify(request.subject.ref)})`);
 
   const directory = await mkdtemp(path.join(os.tmpdir(), "obversa-review-"));
   try {

@@ -105,9 +105,12 @@ everywhere. Your
 multiplexer supplies the panes; the Surfacer supplies the session. The
 host's placement command is the one the host injected as
 `OBVERSA_SURFACE_BIN`, and it runs only when that value is an absolute
-path: the URL it receives carries the session's bearer token, so a bare
-name looked up on `PATH` would hand the token to whatever executable sat
-first on it. A relative or bare value is reported on stderr and skipped,
+path. What it receives is a one-time launch URL — single use, valid for
+a minute, answering with one redirect to the page — never the page URL
+with the session's token in it, since a process argument is readable by
+any local process; a bare name looked up on `PATH` would still hand that
+one door to whatever executable sat first on it. A relative or bare
+value is reported on stderr and skipped,
 and an unset value skips host placement altogether. A
 placement command that exits reports whether it succeeded. One that is
 still running five seconds after launch — a browser that keeps the tab's

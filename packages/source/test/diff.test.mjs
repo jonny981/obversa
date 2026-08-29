@@ -471,11 +471,22 @@ test("a diff --git line in commit prose is not a file: a header is proven by the
   const prose = parseUnifiedDiff("commit abc\n\n    see diff --git a/not-real b/not-real for the idea\ndiff --git a/not-real b/not-real\n    more prose\n\ndiff --git a/x.js b/x.js\n--- a/x.js\n+++ b/x.js\n@@ -1 +1 @@\n-x\n+y\n");
   assert.deepEqual(prose.files.map((f) => f.path), ["x.js"], "the prose header is dropped, the real file stays");
   assert.equal(Object.hasOwn(prose.files[0], "proven"), false, "the model carries no parser bookkeeping");
-  // A header at the very end with nothing after it is prose too.
-  assert.deepEqual(parseUnifiedDiff("diff --git a/x.js b/x.js\n--- a/x.js\n+++ b/x.js\n@@ -1 +1 @@\n-x\n+y\ndiff --git a/trailing b/trailing\n").files.map((f) => f.path), ["x.js"]);
+  // A bare header after a real diff has begun is not prose: it can be a
+  // truncated later file, and is refused rather than dropped.
+  assert.throws(() => parseUnifiedDiff("diff --git a/x.js b/x.js\n--- a/x.js\n+++ b/x.js\n@@ -1 +1 @@\n-x\n+y\ndiff --git a/trailing b/trailing\n"), /truncated: the file header for trailing/);
   // What git always writes after a header proves it: a mode change, a
   // rename, a binary marker, each with no hunk.
   assert.equal(parseUnifiedDiff("diff --git a/run.sh b/run.sh\nold mode 100644\nnew mode 100755\n").files.length, 1, "a pure mode change");
   assert.equal(parseUnifiedDiff("diff --git a/a b/b\nsimilarity index 100%\nrename from a\nrename to b\n").files.length, 1, "a pure rename");
   assert.equal(parseUnifiedDiff("diff --git a/i.png b/i.png\nindex 1111111..2222222 100644\nBinary files a/i.png and b/i.png differ\n").files.length, 1, "a binary change");
+});
+
+test("a header is proven only by git's own grammar: prose after a prose header proves nothing, a bare header after a real diff is truncated, a rename proves after its similarity line", () => {
+  const real = "diff --git a/x.js b/x.js\n--- a/x.js\n+++ b/x.js\n@@ -1 +1 @@\n-x\n+y\n";
+  assert.deepEqual(parseUnifiedDiff(`commit abc\n\ndiff --git a/not-real b/not-real\nindex this section in the handbook\n--- a paragraph that starts with dashes\nBinary files are not reviewed here\n\n${real}`).files.map((f) => f.path), ["x.js"], "prose shaped like metadata proves nothing");
+  assert.throws(() => parseUnifiedDiff(`${real}diff --git a/security.js b/security.js\n`), /truncated: the file header for security\.js is followed by none of what git writes after one/);
+  assert.throws(() => parseUnifiedDiff(`${real}diff --git a/security.js b/security.js\ndiff --git a/z.js b/z.js\n--- a/z.js\n+++ b/z.js\n@@ -1 +1 @@\n-a\n+b\n`), /truncated: the file header for security\.js/);
+  assert.deepEqual(parseUnifiedDiff("diff --git a/a b/b\nsimilarity index 100%\nrename from a\nrename to b\n").files.map((f) => f.path), ["b"], "a rename after its similarity line");
+  assert.deepEqual(parseUnifiedDiff("commit abc\n\ndiff --git a/not-real b/not-real\nrename from the old handbook\n\n" + real).files.map((f) => f.path), ["x.js"], "a rename line with no similarity line before it proves nothing");
+  assert.deepEqual(parseUnifiedDiff("diff --git a/i.png b/i.png\nindex 0123456..89abcde 100644\nBinary files a/i.png and b/i.png differ\n").files.map((f) => f.binary), [true]);
 });

@@ -257,11 +257,15 @@ test("the submit handler bounds bodies and counts through the contract", async (
     let payload;
     const session = { complete(value) { payload = value; } };
     const many = Array.from({ length: MAX_ANNOTATIONS + 100 }, () => ({ anchor: { target: "a.txt", side: "new", position: 1 }, body: "x".repeat(MAX_BODY + 5000) }));
-    await api["POST /api/submit"]({ body: { decision: "changes-requested", annotations: many }, session });
+    const refused = await api["POST /api/submit"]({ body: { decision: "changes-requested", annotations: many }, session });
+    assert.equal(refused.status, 400, "more annotations than the result carries is refused, never shortened");
+    assert.equal(payload, undefined, "the session was not completed by it");
+    const some = Array.from({ length: 3 }, () => ({ anchor: { target: "a.txt", side: "new", position: 1 }, body: "x".repeat(MAX_BODY + 5000) }));
+    await api["POST /api/submit"]({ body: { decision: "changes-requested", annotations: some }, session });
     return { result: { status: "completed", payload } };
   };
   const outcome = await reviewDiff({ diffText: DIFF, launchSurface, clientKitSource: CLIENT_KIT, open: false });
-  assert.equal(outcome.result.annotations.length, MAX_ANNOTATIONS);
+  assert.equal(outcome.result.annotations.length, 3);
   assert.equal(outcome.result.annotations[0].body.length, MAX_BODY);
 });
 
@@ -358,4 +362,10 @@ test("a repository that keeps changing under the capture is refused after three 
     /changed while the review was being captured/,
   );
   assert.equal(n, 6, "three attempts, two diffs each");
+});
+
+test("a whitespace-only range is refused, and the review's own request is held to the contract before a page opens", async () => {
+  const launchSurface = () => { throw new Error("must not launch"); };
+  await assert.rejects(() => reviewDiff({ diffText: DIFF, mode: "range", range: "   ", launchSurface, clientKitSource: CLIENT_KIT }), /range mode needs a ref range/);
+  await assert.rejects(() => reviewDiff({ diffText: DIFF, mode: "range", range: "\t\n", launchSurface, clientKitSource: CLIENT_KIT }), /range mode needs a ref range/);
 });

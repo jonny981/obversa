@@ -123,7 +123,23 @@ export function parseUnifiedDiff(diffText) {
   // return. All of them ending in one means a converted stream; none means
   // an LF diff; some but not all is refused as mixed, since a file's
   // content carriage returns could not be told from the conversion's.
-  const isHeader = (line) => /^(?:diff --git |--- |\+\+\+ |@@ |index |old mode|new mode|new file mode|deleted file mode|rename from |rename to |copy from |copy to |similarity index|dissimilarity index|Binary files )/.test(line);
+  // Each by git's own grammar, not by prefix: "index this section" or
+  // "--- a paragraph" in commit prose must not count, for the line-ending
+  // rule or as proof of a file header. A rename or copy line carries a free
+  // path and is preceded by a similarity line in git's output; on its own
+  // it proves nothing (see `proven` below).
+  const HEADER_GRAMMAR = [
+    /^diff --git /,
+    /^--- (?:a\/|"|\/dev\/null$)/,
+    /^\+\+\+ (?:b\/|"|\/dev\/null$)/,
+    /^@@ -\d+(?:,\d+)? \+\d+(?:,\d+)? @@/,
+    /^index [0-9a-f]{7,64}\.\.[0-9a-f]{7,64}(?: [0-7]{6})?\r?$/,
+    /^(?:old|new|new file|deleted file) mode [0-7]{6}\r?$/,
+    /^(?:similarity|dissimilarity) index \d{1,3}%\r?$/,
+    /^Binary files .+ and .+ differ\r?$/,
+  ];
+  const RENAME_GRAMMAR = /^(?:rename from |rename to |copy from |copy to )/;
+  const isHeader = (line) => HEADER_GRAMMAR.some((grammar) => grammar.test(line)) || RENAME_GRAMMAR.test(line);
   const structural = lines.filter(isHeader);
   const withCr = structural.filter((line) => line.endsWith("\r")).length;
   if (withCr > 0 && withCr < structural.length) {
@@ -158,14 +174,22 @@ export function parseUnifiedDiff(diffText) {
   // than reviewed as an empty file. (A commit message that itself carries a
   // well-formed diff fragment is read as a diff: that is the stated limit.)
   const dropUnproven = () => {
-    if (file !== null && !proven) files.pop();
+    if (file === null || proven) return;
+    // Before any file was proven, the header is commit prose. Once a real
+    // diff has begun, a bare header can be a truncated later file, and a
+    // smaller review must not pass for whole: refused.
+    if (provenCount > 0) throw new Error(`The diff is truncated: the file header for ${file.path} is followed by none of what git writes after one (an index, mode, rename, or binary line, a path header, or a hunk)`);
+    files.pop();
   };
   let proven = false;
+  let provenCount = 0;
+  let similarity = false;
   const startFile = (oldPath, newPath) => {
     dropUnproven();
     file = { oldPath, newPath, path: newPath || oldPath, status: "modified", binary: false, hunks: [] };
     files.push(file);
     proven = false;
+    similarity = false;
     hunk = null;
     remainingOld = 0;
     remainingNew = 0;
@@ -235,7 +259,14 @@ export function parseUnifiedDiff(diffText) {
       continue;
     }
 
-    if (isHeader(line)) proven = true;
+    // Proof of the header: git's own metadata by exact grammar, a path
+    // header, or a hunk header. A rename or copy line proves it only after
+    // the similarity line git writes first.
+    if (/^(?:similarity|dissimilarity) index \d{1,3}%$/.test(line)) similarity = true;
+    if (!proven && ((isHeader(line) && !RENAME_GRAMMAR.test(line)) || (RENAME_GRAMMAR.test(line) && similarity))) {
+      proven = true;
+      provenCount += 1;
+    }
     // A file's metadata — its mode, rename, copy, binary marker, and its
     // `---`/`+++` headers — comes before its hunks. Any of it arriving after
     // hunk content would relabel what was reviewed: a `Binary files` line

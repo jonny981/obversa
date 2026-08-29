@@ -445,12 +445,21 @@ test("normalizeResult refuses an unknown, missing, or runtime-only decision from
   assert.equal(normalizeResult({ decision: "cancelled", annotations: [{ anchor: outputAnchor(1), body: "x" }] }, request, { terminal: true }), null, "nor does it carry annotations");
 });
 
-test("normalizeResult caps the annotation count", () => {
+test("normalizeResult refuses more annotations than the result carries, never a silently shortened list", () => {
   const anchors = Array.from({ length: MAX_ANNOTATIONS + 20 }, (_, i) => outputAnchor(i + 1));
   const request = makeRequest(anchors);
   const annotations = anchors.map((a) => ({ anchor: a, body: "x" }));
-  const result = normalizeResult({ decision: "changes-requested", annotations }, request);
-  assert.equal(result.annotations.length, MAX_ANNOTATIONS);
+  assert.equal(normalizeResult({ decision: "changes-requested", annotations }, request), null, "more than the cap is refused whole");
+  const exactly = normalizeResult({ decision: "changes-requested", annotations: annotations.slice(0, MAX_ANNOTATIONS) }, request);
+  assert.equal(exactly.annotations.length, MAX_ANNOTATIONS, "the cap itself is carried whole");
+});
+
+test("normalizeResult is total in its options too: a null or a throwing Proxy is no options", () => {
+  const request = makeRequest([outputAnchor(1)]);
+  const raw = { decision: "approved", annotations: [] };
+  assert.equal(normalizeResult(raw, request, null)?.decision, "approved");
+  assert.equal(normalizeResult(raw, request, new Proxy({}, { get() { throw new Error("boom"); } }))?.decision, "approved");
+  assert.equal(normalizeResult({ decision: "cancelled", annotations: [] }, request, { get terminal() { throw new Error("boom"); } }), null, "a throwing terminal reads as not terminal, so a runtime-only decision is refused");
 });
 
 test("normalizeResult carries meta when present and never a raw edits field", () => {

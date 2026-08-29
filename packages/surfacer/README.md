@@ -41,8 +41,9 @@ inventory, graph, or editing behaviour survives here.
   acknowledgement.
 - `openSurfaceUrl` — host placement: the command the host injected as
   `$OBVERSA_SURFACE_BIN` first, run only when it is an absolute path
-  (the URL carries the session token, so nothing is looked up on PATH;
-  the cmux review command sets it to the glue beside itself), the
+  (it receives a one-time launch URL that redirects to the page — the
+  token never enters a process argument — and nothing is looked up on
+  PATH; the cmux review command sets it to the glue beside itself), the
   platform browser by its system path second, a printed URL last. Diagnostics
   stay on stderr; stdout belongs to the framed result.
 

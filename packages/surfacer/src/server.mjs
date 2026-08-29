@@ -111,6 +111,19 @@ export async function startSurface({
   let resolveDecision;
   const activeOperations = new Set();
   const token = randomBytes(32).toString("base64url");
+  // The one-time launch code: what a placement command receives instead of
+  // the token-bearing page URL. A process argument is readable by any local
+  // process; the code is single-use and short-lived, and its only answer is
+  // a redirect to the page URL, served over the loopback to whoever opened
+  // it first — the browser, in the ordinary case, within milliseconds.
+  const launchCode = randomBytes(32).toString("base64url");
+  const launchExpiresAt = Date.now() + 60_000;
+  let launchUsed = false;
+  // A completion's answer to the browser is in flight until its response
+  // has finished or closed; an interrupt that arrives in that window waits
+  // for it rather than releasing the decision first.
+  let answerPending = false;
+  let finalizeAfterAnswer = false;
   const decision = new Promise((resolve) => { resolveDecision = resolve; });
 
   const session = {
@@ -187,6 +200,16 @@ export async function startSurface({
         return;
       }
       const requestUrl = new URL(request.url || "/", `http://${expectedHost}`);
+      if (request.method === "GET" && requestUrl.pathname === `/launch/${launchCode}`) {
+        if (launchUsed || Date.now() > launchExpiresAt) {
+          sendJson(response, 404, { error: "Not found" });
+          return;
+        }
+        launchUsed = true;
+        response.writeHead(302, { ...securityHeaders(), Location: `/#${token}`, "Cache-Control": "no-store" });
+        response.end();
+        return;
+      }
       const isApi = requestUrl.pathname.startsWith("/api/");
       // The /api/ prefix is decided first: an API path never resolves to a
       // static file, whatever the route map says (the map is also refused any
@@ -377,10 +400,15 @@ export async function startSurface({
     // the claim itself, so a claimed session is never left with no live
     // bound). `false`: no acknowledgement is awaited at all.
     if (awaitAcknowledgement === true) armAcknowledgement();
+    if (awaitAcknowledgement === "deferred") answerPending = true;
     return true;
   }
 
   function armAcknowledgement() {
+    answerPending = false;
+    // An interrupt that arrived while the completion's answer was in flight
+    // releases the decision now, after the browser has its answer.
+    if (finalizeAfterAnswer) { finalizeClaim(); return; }
     if (ackTimeout || decisionSettled || !terminalClaim) return;
     ackTimeout = setTimeout(finalizeClaim, ackTimeoutMs);
     ackTimeout.unref?.();
@@ -423,10 +451,18 @@ export async function startSurface({
   return {
     origin,
     url: `${origin}/#${token}`,
+    // The URL a placement command is handed: no token, one use, one minute.
+    launchUrl: `${origin}/launch/${launchCode}`,
     port,
     waitForDecision: () => decision,
     interrupt(signal = "signal") {
-      if (terminalState !== "pending") return finalizeClaim();
+      if (terminalState !== "pending") {
+        // A claimed completion whose answer has not reached the browser yet
+        // is released once it has, so the browser keeps the operation id it
+        // must acknowledge; the decision is not released before that.
+        if (answerPending) { finalizeAfterAnswer = true; return false; }
+        return finalizeClaim();
+      }
       const result = terminalResult(appName, "interrupted", endingFor("interrupted",`Interrupted by ${signal}`));
       if (!claimTerminal("interrupted", result, { awaitAcknowledgement: false })) return false;
       return finalizeClaim();

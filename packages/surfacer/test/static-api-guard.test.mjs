@@ -126,3 +126,24 @@ test("a handler that returns body null gets the JSON null it asked for; one that
     await surface.stop();
   }
 });
+
+test("the launch URL redirects once to the page URL and carries no token itself; a second use, and an unknown code, are 404", async () => {
+  const surface = await startSurface({ app: "guard", assets: { directory: assetsDir, files: { "/": ["index.html", "text/html; charset=utf-8"] } }, sessionTimeoutMs: 10_000, leaseTimeoutMs: 10_000 });
+  try {
+    const token = surface.url.split("#")[1];
+    assert.doesNotMatch(surface.launchUrl, new RegExp(token), "the launch URL carries no token");
+    assert.match(surface.launchUrl, /^http:\/\/127\.0\.0\.1:\d+\/launch\/[A-Za-z0-9_-]{40,}$/);
+    const first = await fetch(surface.launchUrl, { redirect: "manual" });
+    assert.equal(first.status, 302);
+    assert.equal(first.headers.get("location"), `/#${token}`, "one redirect to the page URL, fragment and all");
+    assert.equal(first.headers.get("cache-control"), "no-store");
+    const second = await fetch(surface.launchUrl, { redirect: "manual" });
+    assert.equal(second.status, 404, "single use");
+    const unknown = await fetch(`${surface.origin}/launch/${"x".repeat(43)}`, { redirect: "manual" });
+    assert.equal(unknown.status, 404);
+  } finally {
+    surface.interrupt();
+    await surface.waitForDecision();
+    await surface.stop();
+  }
+});

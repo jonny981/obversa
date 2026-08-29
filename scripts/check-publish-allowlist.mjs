@@ -117,6 +117,14 @@ export const HOOK_COMMAND = "node ../../scripts/check-publish-allowlist.mjs";
 export function audit({ root = ROOT, allowlist = readAllowlist() } = {}) {
   const problems = [];
   const packages = listWorkspacePackages(root);
+  // Two directories claiming one name would let the later one stand in for
+  // the earlier in every check keyed by name; this guard controls outward
+  // publishing, so it fails closed on its own.
+  const seen = new Map();
+  for (const p of packages) {
+    if (seen.has(p.name)) problems.push(`${p.name} is claimed by two workspace packages (${seen.get(p.name)} and ${p.dir}); a name belongs to one directory`);
+    else seen.set(p.name, p.dir);
+  }
   const byName = new Map(packages.map((p) => [p.name, p]));
   for (const p of packages) {
     if (p.private) continue;

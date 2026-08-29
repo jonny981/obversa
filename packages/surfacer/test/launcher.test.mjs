@@ -358,3 +358,68 @@ test("replacing WeakMap.prototype.get after the completion, or .set before it, c
     WeakMap.prototype.set = realSet;
   }
 });
+
+test("the placement command receives the one-time launch URL, never the token-bearing page URL", async () => {
+  const directory = mkdtempSync(path.join(os.tmpdir(), "launcher-assets-"));
+  writeFileSync(path.join(directory, "index.html"), "<!doctype html><title>x</title>");
+  const record = path.join(directory, "placement.calls");
+  const placement = path.join(directory, "placement");
+  writeFileSync(placement, `#!/bin/sh\nprintf '%s\\n' "$*" >> "${record}"\nexit 0\n`);
+  const { chmodSync, readFileSync } = await import("node:fs");
+  chmodSync(placement, 0o755);
+  const previous = process.env.OBVERSA_SURFACE_BIN;
+  process.env.OBVERSA_SURFACE_BIN = placement;
+  let session;
+  try {
+    // The placement command runs before the session is reported ready, so
+    // the test waits for the ready callback itself rather than a delay.
+    let reportReady;
+    const isReady = new Promise((resolve) => { reportReady = resolve; });
+    const pending = runSurface({
+      app: "launcher-test",
+      stdout: { write: () => {} },
+      ready: (info) => { session = info; reportReady(); },
+      assets: { directory, files: { "/": ["index.html", "text/html; charset=utf-8"] } },
+      api: { "POST /api/answer": async ({ session: s }) => { s.complete({ ok: 1 }); return null; } },
+    });
+    await isReady;
+    const token = session.url.split("#")[1];
+    const headers = { Authorization: `Bearer ${token}`, "Content-Type": "application/json", Origin: session.origin };
+    const reply = await fetch(`${session.origin}/api/answer`, { method: "POST", headers, body: "{}" }).then((r) => r.json());
+    await fetch(`${session.origin}/api/ack`, { method: "POST", headers, body: `{"operationId":${JSON.stringify(reply.operationId)}}` });
+    const { placement: placed } = await pending;
+    assert.deepEqual(placed, { opened: true, via: "host" });
+    const calls = readFileSync(record, "utf8");
+    assert.match(calls, /\/launch\/[A-Za-z0-9_-]+/, "the command got the launch URL");
+    assert.doesNotMatch(calls, new RegExp(token), "and never the token");
+  } finally {
+    if (previous === undefined) delete process.env.OBVERSA_SURFACE_BIN; else process.env.OBVERSA_SURFACE_BIN = previous;
+  }
+});
+
+test("an interrupt that arrives while a completion's answer is in flight releases the decision only after the browser has its answer", async () => {
+  const directory = mkdtempSync(path.join(os.tmpdir(), "launcher-assets-"));
+  writeFileSync(path.join(directory, "index.html"), "<!doctype html><title>x</title>");
+  const { startSurface } = await import("../src/server.mjs");
+  let surface;
+  surface = await startSurface({
+    app: "launcher-test",
+    assets: { directory, files: { "/": ["index.html", "text/html; charset=utf-8"] } },
+    api: { "POST /api/answer": async ({ session: s }) => { s.complete({ ok: 1 }); surface.interrupt("test"); return null; } },
+    ackTimeoutMs: 20_000,
+  });
+  try {
+    const token = surface.url.split("#")[1];
+    const headers = { Authorization: `Bearer ${token}`, "Content-Type": "application/json", Origin: surface.origin };
+    const response = await fetch(`${surface.origin}/api/answer`, { method: "POST", headers, body: "{}" });
+    assert.equal(response.status, 200, "the browser still gets its answer");
+    const reply = await response.json();
+    assert.match(String(reply.operationId), /^[0-9a-f-]{36}$/, "with the operation id it must acknowledge");
+    const started = Date.now();
+    const result = await surface.waitForDecision();
+    assert.equal(result.status, "completed");
+    assert.ok(Date.now() - started < 2_000, "released once the answer had gone, not by the acknowledgement clock");
+  } finally {
+    await surface.stop();
+  }
+});

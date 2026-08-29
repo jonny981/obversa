@@ -36,8 +36,11 @@ export async function runSurface({ open = true, stdout = process.stdout, ready, 
   });
   const release = () => { for (const [signal, handler] of handlers.splice(0)) process.off(signal, handler); };
   try {
+    // The placement command receives the one-time launch URL, never the
+    // token-bearing page URL: a process argument is readable by any local
+    // process, and the launch code is single-use and short-lived.
     const placement = open
-      ? await openSurfaceUrl(surface.url)
+      ? await openSurfaceUrl(surface.launchUrl)
       : { opened: false, via: "disabled" };
     ready?.({ url: surface.url, origin: surface.origin, port: surface.port });
     const result = await surface.waitForDecision();

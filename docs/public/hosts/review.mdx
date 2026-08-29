@@ -35,8 +35,9 @@ command never opens a page that looks clean over a conflicted tree.
 The page is placed through the `obversa-surface` glue beside the command
 (a cmux pane inside cmux, the default browser outside), by absolute path.
 A host that injects `OBVERSA_SURFACE_BIN` as another absolute path
-replaces that; nothing is looked up on `PATH`, because the page URL
-carries the session's token.
+replaces that; nothing is looked up on `PATH`. The command receives a
+one-time launch URL (single use, valid for a minute) that redirects to
+the page; the page URL with its token never enters a process argument.
 
 Other flags:
 

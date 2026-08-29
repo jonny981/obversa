@@ -436,3 +436,18 @@ test("the publish guard asks a git from the system directories, whatever git is 
   assert.equal(child.stdout.trim(), direct, "the same answer with the fake git first on PATH");
   assert.ok(direct.includes("main") || direct.includes("tag") || direct.includes("clean") || direct === "[]", "the real git answered about this checkout");
 });
+
+test("the publish audit fails closed on a package name claimed by two workspace directories", () => {
+  const root = mkdtempSync(path.join(os.tmpdir(), "publish-dup-"));
+  try {
+    writeFileSync(path.join(root, "pnpm-workspace.yaml"), "packages:\n  - packages/*\n");
+    for (const dir of ["one", "two"]) {
+      mkdirSync(path.join(root, "packages", dir), { recursive: true });
+      writeFileSync(path.join(root, "packages", dir, "package.json"), JSON.stringify({ name: "@obversa/twice", version: "0.0.0", private: true }));
+    }
+    const problems = audit({ root, allowlist: new Set() });
+    assert.ok(problems.some((p) => /@obversa\/twice is claimed by two workspace packages \(packages\/one and packages\/two\)/.test(p)), problems.join("\n"));
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
