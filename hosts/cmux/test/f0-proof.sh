@@ -47,9 +47,10 @@ for t in python3 git shasum; do
   case ":$PATH:" in *":$d:"*) ;; *) PATH="$PATH:$d" ;; esac
 done
 export PATH
-# The glue resolves the commands that receive a URL from fixed system
-# directories; the proof points that list at its shims.
-export OBVERSA_SYSTEM_BIN_DIRS="$SHIMS"
+# The glue resolves every command it runs from fixed system directories;
+# the proof puts its shims first on that list (cmux, open, code are
+# shimmed) and keeps the system python3 behind them.
+export OBVERSA_SYSTEM_BIN_DIRS="$SHIMS:/usr/bin:/bin"
 export XDG_STATE_HOME="$SANDBOX/state"
 unset OBVERSA_SHARED_ROOT OBVERSA_EDITOR_CMD 2>/dev/null
 unset CMUX_WORKSPACE_ID CMUX_SURFACE_ID CMUX_TAB_ID CMUX_PANEL_ID 2>/dev/null

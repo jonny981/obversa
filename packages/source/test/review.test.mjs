@@ -27,6 +27,13 @@ test("reviewDiff needs both injected dependencies", async () => {
   await assert.rejects(() => reviewDiff({ diffText: DIFF, launchSurface: () => {} }), /client-kit/);
 });
 
+test("reviewDiff checks the mode and its range before reading anything, a supplied diff included", async () => {
+  const launchSurface = () => { throw new Error("must not launch"); };
+  await assert.rejects(() => reviewDiff({ diffText: DIFF, mode: "bogus", launchSurface, clientKitSource: CLIENT_KIT }), /mode must be worktree, staged, or range; got bogus/);
+  await assert.rejects(() => reviewDiff({ diffText: DIFF, mode: "range", launchSurface, clientKitSource: CLIENT_KIT }), /range mode needs a ref range/);
+  await assert.rejects(() => reviewDiff({ diffText: DIFF, mode: "range", range: "", launchSurface, clientKitSource: CLIENT_KIT }), /range mode needs a ref range/);
+});
+
 test("reviewDiff builds the surface, returns a validated SurfaceResult, and cleans up", async () => {
   let capturedDir;
   let capturedVerbatim;

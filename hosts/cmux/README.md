@@ -54,8 +54,9 @@ Outside cmux it opens the default browser — that fallback is the intended
 behavior, not an error. This is the one door for local webapps, and the
 glue point for Callback Gate surfaces launched by a router.
 
-The URL carries the session's bearer token, so every command that
-receives it (`cmux`, `open`, `xdg-open`) runs by absolute path from a
+The URL carries the session's bearer token, so every command the glue
+runs (`cmux`, `open`, `xdg-open`, and the `python3` that reads the cmux
+tree) runs by absolute path from a
 fixed list of system directories (`/usr/bin`, `/bin`, `/usr/local/bin`,
 `/opt/homebrew/bin`), never by a bare name looked up on `PATH`. A host
 may name other directories in `OBVERSA_SYSTEM_BIN_DIRS` (colon-separated);
@@ -108,6 +109,10 @@ obversa-review --range main..HEAD # a ref range (git diff main..HEAD)
 The three modes are one choice: two of them on one command line is a
 usage error, whatever their order. A diff holding an unresolved merge
 conflict is refused whole, naming the conflicted path.
+
+The page is placed through the `obversa-surface` beside this command, by
+absolute path, unless the host injected another absolute path as
+`OBVERSA_SURFACE_BIN`; nothing is looked up on `PATH`.
 
 - `--cwd <dir>` runs against another repository directory; the review is
   captured from that repository's root whatever directory you start in.

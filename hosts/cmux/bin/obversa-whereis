@@ -1,4 +1,4 @@
-#!/usr/bin/env bash
+#!/bin/bash
 # Resolve a live teammate's cmux surface by agent name, so nobody has to grep
 # `cmux sessions` by hand. Prints the surface UUID of the agent's most recently
 # active live session whose working directory is within the scope (default

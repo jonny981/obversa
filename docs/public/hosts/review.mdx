@@ -32,6 +32,12 @@ message naming the conflicted path. Git describes such a path as a
 combined diff, which a review could only show as a missing file, so the
 command never opens a page that looks clean over a conflicted tree.
 
+The page is placed through the `obversa-surface` glue beside the command
+(a cmux pane inside cmux, the default browser outside), by absolute path.
+A host that injects `OBVERSA_SURFACE_BIN` as another absolute path
+replaces that; nothing is looked up on `PATH`, because the page URL
+carries the session's token.
+
 Other flags:
 
 - `--cwd <dir>` runs against another repository directory.

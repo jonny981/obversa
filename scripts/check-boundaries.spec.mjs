@@ -1028,6 +1028,15 @@ test("the guard, run on a disposable copy of the tree, refuses a shipped host im
       assert.match(bad.stderr, /obversa-review: a host command's shebang is exactly #!\/usr\/bin\/env node/, shebang);
     }
     writeFileSync(command, original);
+    // A shell host command names its interpreter by absolute path; env
+    // would look it up on PATH.
+    for (const shebang of ["#!/usr/bin/env bash", "#!/usr/bin/env -S bash -x", "#!/opt/homebrew/bin/bash", "#!/bin/bash\r"]) {
+      writeFileSync(shellCommand, `${shebang}\n${shellOriginal.split("\n").slice(1).join("\n")}`);
+      const badShell = guard();
+      assert.notEqual(badShell.status, 0, shebang);
+      assert.match(badShell.stderr, /obversa-surface: a shell host command's shebang is #!\/bin\/bash or #!\/bin\/sh/, shebang);
+    }
+    writeFileSync(shellCommand, shellOriginal);
     // Every mutation above was undone: the copy passes again.
     assert.equal(guard().status, 0, "the restored copy passes");
   } finally {

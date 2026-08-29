@@ -555,11 +555,14 @@ function checkSurfaceRequest(value) {
   const hasPayload = payload !== undefined;
   const hasFetch = fetch !== undefined;
   if (hasPayload === hasFetch) return false;
-  // An inline payload is data a transport can carry: an object (a Proxy
-  // refused for the same reason as one anywhere else in the request) or a
-  // string. A function, a symbol, a BigInt, a number, a boolean, or null is
-  // not a payload the cross-transport contract can carry as content.
-  if (hasPayload && !((payload !== null && typeof payload === "object" && !types.isProxy(payload)) || typeof payload === "string")) return false;
+  // An inline payload is content a transport can carry whole: a string, or
+  // plain data at every depth under the same rule as a location (own
+  // enumerable data of an Object-or-null-prototype object or an array; no
+  // Proxy, Map, Date, class instance, accessor, toJSON, cycle, BigInt, or
+  // symbol key anywhere) — what the session's own completion check would
+  // refuse later is refused here, before a page opens. A function, a
+  // symbol, a BigInt, a number, a boolean, or null is not content.
+  if (hasPayload && !(typeof payload === "string" || (payload !== null && typeof payload === "object" && canonicalJson(payload) !== null))) return false;
   if (hasFetch && !isFetchUrl(fetch)) return false;
   if (!isTransport(transport)) return false;
   // Every offered anchor is a real location — a target and a position — or the

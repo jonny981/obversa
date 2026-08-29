@@ -10,7 +10,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import test from "node:test";
 
-import { parseArgs } from "../lib/review-args.mjs";
+import { parseArgs, placementBin } from "../lib/review-args.mjs";
 
 const COMMAND = fileURLToPath(new URL("../bin/obversa-review", import.meta.url));
 
@@ -142,4 +142,12 @@ test("two review modes on one command line are a usage error, whatever their ord
   assert.throws(() => parseArgs(["--worktree", "--cached"]), /--cached and --worktree name different review modes/);
   assert.equal(parseArgs(["--staged", "--cached"]).mode, "staged", "the same mode named twice is one choice");
   assert.equal(parseArgs(["--worktree", "--worktree"]).mode, "worktree");
+});
+
+test("placement defaults to the obversa-surface beside the command, by absolute path, unless the host injected one", () => {
+  const sibling = path.join(path.dirname(COMMAND), "obversa-surface");
+  assert.equal(placementBin({}, new URL("../bin/obversa-review", import.meta.url).href), sibling);
+  assert.ok(path.isAbsolute(sibling));
+  assert.equal(placementBin({ OBVERSA_SURFACE_BIN: "/opt/host/place" }, new URL("../bin/obversa-review", import.meta.url).href), "/opt/host/place", "an injected value wins");
+  assert.equal(placementBin({ OBVERSA_SURFACE_BIN: "" }, new URL("../bin/obversa-review", import.meta.url).href), sibling, "an empty value is unset");
 });

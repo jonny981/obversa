@@ -36,9 +36,11 @@ inventory, graph, or editing behaviour survives here.
 - `@obversa/surfacer/client` — the no-framework browser kit: token
   handling, authenticated fetch, heartbeat, submit and cancel with
   acknowledgement.
-- `openSurfaceUrl` — host placement: the cmux adapter through the F0
-  glue script first (`$OBVERSA_SURFACE_BIN` or `obversa-surface` on
-  PATH), the platform browser second, a printed URL last. Diagnostics
+- `openSurfaceUrl` — host placement: the command the host injected as
+  `$OBVERSA_SURFACE_BIN` first, run only when it is an absolute path
+  (the URL carries the session token, so nothing is looked up on PATH;
+  the cmux review command sets it to the glue beside itself), the
+  platform browser by its system path second, a printed URL last. Diagnostics
   stay on stderr; stdout belongs to the framed result.
 
 ## Test

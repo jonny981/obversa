@@ -1,4 +1,4 @@
-#!/usr/bin/env bash
+#!/bin/bash
 # Generate the two-root Order editor workspace file and open it in the editor.
 #
 # The binding follows an internal note:

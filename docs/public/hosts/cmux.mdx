@@ -33,9 +33,10 @@ opens as a browser pane in your workspace, split beside the terminal.
 Outside cmux, the same command opens your default browser. The fallback
 keeps every script usable in a plain terminal.
 
-The URL a surface opens carries the session's bearer token, so the
-commands that receive it (`cmux`, `open`, `xdg-open`) run by absolute
-path from a fixed list of system directories (`/usr/bin`, `/bin`,
+The URL a surface opens carries the session's bearer token, so every
+command the glue runs (`cmux`, `open`, `xdg-open`, and the `python3`
+that reads the cmux tree) runs by absolute path from a fixed list of
+system directories (`/usr/bin`, `/bin`,
 `/usr/local/bin`, `/opt/homebrew/bin`), never by a bare name looked up on
 `PATH`. A host may name other directories in `OBVERSA_SYSTEM_BIN_DIRS`
 (colon-separated). With no opener found, the URL is printed on stderr

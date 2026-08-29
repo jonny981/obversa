@@ -25,7 +25,13 @@ import { fileURLToPath } from "node:url";
 // behind its exports map changes nothing here.
 import { runSurface } from "@obversa/surfacer";
 import { reviewDiff } from "@obversa/source";
-import { HELP, parseArgs } from "../lib/review-args.mjs";
+import { HELP, parseArgs, placementBin } from "../lib/review-args.mjs";
+
+// This host is the composition root, so placement is its own default: the
+// obversa-surface glue beside this command, by absolute path, unless the
+// host injected another absolute path as OBVERSA_SURFACE_BIN. The surfacer
+// runs only an absolute path there, never a name looked up on PATH.
+process.env.OBVERSA_SURFACE_BIN = placementBin(process.env, import.meta.url);
 
 // The client kit the page loads, as the surfacer exports it — resolved under
 // the `import` condition, the one the browser's module import matches, not

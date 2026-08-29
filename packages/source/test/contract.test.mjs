@@ -236,6 +236,13 @@ test("anchorKey is total: it never throws, and an anchor that points nowhere is 
   for (const payload of [() => {}, Symbol("p"), 1n, 42, true, null]) {
     assert.equal(isSurfaceRequest({ ...sound, subject: { ref: "r", payload } }), false, `a ${typeof payload} payload is not content`);
   }
+  // Plain data at every depth; what the session could not frame is refused
+  // here, before a page opens.
+  assert.equal(isSurfaceRequest({ ...sound, subject: { ref: "r", payload: { files: [{ path: "a", lines: [1, 2] }], nested: { deep: null } } } }), true, "nested plain data");
+  class Model {}
+  for (const [name, payload] of [["a Map", new Map()], ["a Date", new Date(0)], ["a class instance", new Model()], ["a nested Map", { files: new Map() }], ["a nested Proxy", { files: new Proxy([], {}) }], ["a toJSON", { toJSON() { return {}; } }], ["a cycle", (() => { const o = {}; o.self = o; return o; })()], ["a BigInt inside", { n: 1n }]]) {
+    assert.equal(isSurfaceRequest({ ...sound, subject: { ref: "r", payload } }), false, `${name} is not content the session can frame`);
+  }
   assert.equal(isSurfaceRequest({ get surfaceId() { throw new Error("boom"); } }), false, "a throwing root getter");
   assert.equal(isSurfaceRequest({ ...request, anchors: [outputAnchor(1)], get transport() { throw new Error("boom"); } }), false, "a throwing getter deeper in");
   assert.equal(buildAnchorSet([{ target: "a", position: cyclic }, { target: "a", position: 1 }]).size, 1);

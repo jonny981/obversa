@@ -1539,6 +1539,12 @@ for (const absolute of files) {
     for (const named of ['packages/', 'node_modules']) {
       if (text.includes(named)) failures.push(`${path}: a shell host command names ${named}; only host JavaScript reaches a package, by its public name`);
     }
+    // Its interpreter is named by absolute path: `#!/usr/bin/env bash`
+    // resolves bash through PATH, and a shell command that receives the
+    // session URL would hand the token to whatever bash sat first there.
+    const shebang = text.split('\n')[0] ?? '';
+    if (shebang.startsWith('#!') && !/^#!\/bin\/(ba)?sh$/.test(shebang))
+      failures.push(`${path}: a shell host command's shebang is #!/bin/bash or #!/bin/sh; found ${JSON.stringify(shebang)} — an interpreter looked up on PATH would receive what the command is handed`);
   }
 }
 

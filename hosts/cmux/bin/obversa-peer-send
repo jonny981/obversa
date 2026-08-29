@@ -1,4 +1,4 @@
-#!/usr/bin/env bash
+#!/bin/bash
 # Peer-agent coordination: append one entry to the durable channel, then
 # optionally wake a peer surface. The wakeup never carries the message —
 # a cue only says "check the channel", so a forged cue is harmless.

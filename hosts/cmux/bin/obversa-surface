@@ -1,4 +1,4 @@
-#!/usr/bin/env bash
+#!/bin/bash
 # Open a URL as a browser surface beside the caller's terminal.
 #
 # Inside cmux, the URL opens as a browser pane in the caller's workspace,
@@ -85,7 +85,17 @@ system_bin() {
   return 1
 }
 CMUX_BIN="$(system_bin cmux || true)"
-OPEN_BIN="$(system_bin open || system_bin xdg-open || true)"
+# The platform's own opener, chosen by platform: `open` on macOS,
+# `xdg-open` elsewhere — an `open` found on Linux is some other program
+# and must not receive the URL.
+case "$(uname -s 2>/dev/null || true)" in
+  Darwin) OPEN_BIN="$(system_bin open || true)" ;;
+  *) OPEN_BIN="$(system_bin xdg-open || true)" ;;
+esac
+# The tree parser too: it never sees the URL, but a PATH-selected python3
+# could answer any workspace it liked, and one rule for every command is
+# simpler than an exception.
+PYTHON_BIN="$(system_bin python3 || true)"
 
 # The default browser, by the system opener's absolute path; with none
 # found, the URL is printed for the user and nothing else receives it.
@@ -145,8 +155,11 @@ if [ -n "$CMUX_BIN" ]; then
     # tree's own caller block is env-derived and stays unused. A document
     # without a windows list, an empty topology, a missing surface, or a
     # workspace with no usable id all leave WORKSPACE empty.
+    if [ -z "$PYTHON_BIN" ]; then
+      open_browser
+    fi
     PARSE_RC=0
-    WORKSPACE="$(printf '%s\n' "$TREE_OUT" | SURFACE="$CMUX_SURFACE_ID" python3 -c '
+    WORKSPACE="$(printf '%s\n' "$TREE_OUT" | SURFACE="$CMUX_SURFACE_ID" "$PYTHON_BIN" -c '
 import json, os, sys
 
 surface = os.environ["SURFACE"]

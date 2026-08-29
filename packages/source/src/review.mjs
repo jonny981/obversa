@@ -232,6 +232,12 @@ export async function reviewDiff({
     throw new TypeError("reviewDiff needs the surface client-kit source");
   }
   normalizeGate(gate); // fail on a bad gate option before anything opens
+  // The mode and its range are checked before anything is read or reviewed,
+  // a supplied diff included: an unknown mode, or range mode with no range,
+  // would otherwise reach the page's completion payload as a value the
+  // surfacer's data contract refuses, after a page had opened.
+  if (!["worktree", "staged", "range"].includes(mode)) throw new TypeError(`reviewDiff mode must be worktree, staged, or range; got ${String(mode)}`);
+  if (mode === "range" && (typeof range !== "string" || range.length === 0)) throw new TypeError("reviewDiff in range mode needs a ref range");
 
   // The command may run from any directory inside the repository. Git prints
   // diff paths relative to the repository root, so every read that resolves a

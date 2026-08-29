@@ -1,4 +1,4 @@
-#!/usr/bin/env bash
+#!/bin/bash
 # Browser handler for Plannotator only.
 #
 # Set PLANNOTATOR_BROWSER to this script's absolute path. Plannotator then
