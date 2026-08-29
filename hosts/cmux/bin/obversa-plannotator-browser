@@ -12,5 +12,8 @@ if [ $# -ne 1 ]; then
   exit 2
 fi
 
-HERE="$(cd "$(dirname "$0")" && pwd -P)"
+# This script's own directory, found with the shell's builtins alone (cd,
+# pwd -P): the obversa-surface beside it receives a URL that carries a
+# session token, so no command looked up on PATH may choose that directory.
+HERE="$(cd "${BASH_SOURCE[0]%/*}" && pwd -P)"
 exec "$HERE/obversa-surface" "$1"

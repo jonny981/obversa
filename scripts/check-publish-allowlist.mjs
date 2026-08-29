@@ -61,6 +61,18 @@ import { fileURLToPath } from "node:url";
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), "..");
 const ALLOWLIST_PATH = join(ROOT, "scripts", "publish-allowlist.json");
 
+// The git the guard asks — for the branch, the clean tree, the release tag
+// and its type — by absolute path from the system directories, never the
+// first git on PATH: a fake git there could answer "main", "clean", and
+// "tag" for a dirty, untagged checkout and let a real-registry publish
+// through with both registry keys overridden.
+export const GIT_DIRS = ["/usr/bin", "/usr/local/bin", "/opt/homebrew/bin", "/bin"];
+export function gitBin() {
+  const found = GIT_DIRS.map((dir) => join(dir, "git")).find((candidate) => existsSync(candidate));
+  if (!found) throw new Error(`publish guard: no git under ${GIT_DIRS.join(":")}`);
+  return found;
+}
+
 export function readAllowlist(path = ALLOWLIST_PATH) {
   const parsed = JSON.parse(readFileSync(path, "utf8"));
   if (!Array.isArray(parsed.packages) || parsed.packages.some((n) => typeof n !== "string")) {
@@ -156,7 +168,7 @@ export function releaseTagFor(name, version) {
 }
 
 function git(cwd, ...args) {
-  return execFileSync("git", args, { cwd, encoding: "utf8", stdio: ["ignore", "pipe", "ignore"], windowsHide: true }).trim();
+  return execFileSync(gitBin(), args, { cwd, encoding: "utf8", stdio: ["ignore", "pipe", "ignore"], windowsHide: true }).trim();
 }
 
 export function checkHook({ cwd = process.cwd(), env = process.env, allowlist = readAllowlist(), run = git } = {}) {

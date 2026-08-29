@@ -12,6 +12,11 @@ import { boundedReader, contextModel } from "./context-model.mjs";
 import { navModel } from "./nav-model.mjs";
 import { isGateBinding, normalizeResult } from "./contract.mjs";
 
+// The most diff a review takes, supplied or computed: the git lane's own
+// output bound (computeDiff's maxBuffer), so a supplied diff is held to
+// what git could have returned.
+export const MAX_DIFF_BYTES = 64 * 1024 * 1024;
+
 // Human-readable name for what is under review.
 function buildLabel({ mode, range }) {
   if (mode === "staged") return "staged changes";
@@ -50,9 +55,11 @@ export function outputAnchors(model) {
 function normalizeGate(gate) {
   if (gate === undefined || gate === null) return { gateId: null, callback: { address: null, token: null } };
   if (typeof gate !== "object") throw new TypeError("gate must be an object with gateId and callback");
-  const gateId = gate.gateId;
-  const callback = gate.callback && typeof gate.callback === "object"
-    ? { address: gate.callback.address, token: gate.callback.token }
+  // Each field is read exactly once, so a getter cannot assemble an address
+  // and a token that never existed together as one callback value.
+  const { gateId, callback: rawCallback } = gate;
+  const callback = rawCallback && typeof rawCallback === "object"
+    ? (({ address, token }) => ({ address, token }))(rawCallback)
     : null;
   if (gateId === null || gateId === undefined) {
     throw new TypeError("gate.gateId must be a non-empty string (omit the gate option for direct use)");
@@ -74,8 +81,10 @@ function normalizeGate(gate) {
  * The result copies surfaceId and gateId back, which is how a consumer routes
  * it.
  */
-export function buildSurfaceRequest({ model, meta, gate } = {}) {
-  const { gateId, callback } = normalizeGate(gate);
+export function buildSurfaceRequest({ model, meta, gate, binding } = {}) {
+  // reviewDiff hands over the binding it already read once; a direct caller
+  // passes the gate option and it is read here, once.
+  const { gateId, callback } = binding ?? normalizeGate(gate);
   const ref = meta?.mode === "range" ? String(meta.range) : String(meta?.mode ?? "worktree");
   return {
     surfaceId: randomUUID(),
@@ -90,6 +99,10 @@ export function buildSurfaceRequest({ model, meta, gate } = {}) {
 
 // The decision a session that ends without the browser's completion carries.
 function decisionFor(status) {
+  // An error ending is an error, not a review outcome: no SurfaceResult
+  // says "cancelled" for it. The launcher keeps a null payload for the
+  // status it reports, and the caller sees status "error" with no result.
+  if (status === "error") throw new Error("the surface session ended in error; there is no review outcome");
   return status === "timed_out" ? "timed-out" : "cancelled";
 }
 
@@ -231,13 +244,21 @@ export async function reviewDiff({
   if (typeof clientKitSource !== "string" || clientKitSource.length === 0) {
     throw new TypeError("reviewDiff needs the surface client-kit source");
   }
-  normalizeGate(gate); // fail on a bad gate option before anything opens
+  const gateBinding = normalizeGate(gate); // fail on a bad gate option before anything opens; read once
   // The mode and its range are checked before anything is read or reviewed,
   // a supplied diff included: an unknown mode, or range mode with no range,
   // would otherwise reach the page's completion payload as a value the
   // surfacer's data contract refuses, after a page had opened.
   if (!["worktree", "staged", "range"].includes(mode)) throw new TypeError(`reviewDiff mode must be worktree, staged, or range; got ${String(mode)}`);
   if (mode === "range" && (typeof range !== "string" || range.length === 0)) throw new TypeError("reviewDiff in range mode needs a ref range");
+  // A supplied diff is text, and no larger than the git lane would return:
+  // anything else (null, a Buffer, an object) is a caller error, not an
+  // empty review, and an unbounded one is not split, highlighted, or
+  // anchored.
+  if (diffText !== undefined) {
+    if (typeof diffText !== "string") throw new TypeError("diffText must be a string");
+    if (Buffer.byteLength(diffText, "utf8") > MAX_DIFF_BYTES) throw new RangeError(`diffText is larger than ${MAX_DIFF_BYTES} bytes`);
+  }
 
   // The command may run from any directory inside the repository. Git prints
   // diff paths relative to the repository root, so every read that resolves a
@@ -259,7 +280,7 @@ export async function reviewDiff({
     // The tracked files of the reviewed state, for the tree's "All files" view.
     allFiles,
   };
-  const request = buildSurfaceRequest({ model, meta, gate });
+  const request = buildSurfaceRequest({ model, meta, binding: gateBinding });
 
   const directory = await mkdtemp(path.join(os.tmpdir(), "obversa-review-"));
   try {

@@ -343,7 +343,9 @@ test("every public guard is total: a throwing proxy is invalid, never an excepti
   // The normaliser is total too: a field that throws when read is absent, and
   // a payload with no readable decision is no result — null, not a throw.
   assert.equal(normalizeResult(hostile(), base), null);
-  assert.deepEqual(normalizeResult({ decision: "approved", annotations: [] }, hostile()), { surfaceId: null, gateId: null, decision: "approved", annotations: [] });
+  // A request that cannot be read as plain data offers nothing and carries no
+  // ids to route by: there is no result, and still no throw.
+  assert.equal(normalizeResult({ decision: "approved", annotations: [] }, hostile()), null);
   assert.deepEqual(normalizeResult({ decision: "approved", annotations: hostileArray }, base).annotations, []);
   assert.deepEqual(normalizeResult({ decision: "approved", get meta() { throw new Error("boom"); } }, base), { surfaceId: "s1", gateId: "g1", decision: "approved", annotations: [] });
 });
@@ -613,4 +615,28 @@ test("a decision agrees with its annotations or there is no result: approved wit
   const real = normalizeResult({ decision: "changes-requested", annotations: [{ anchor: outputAnchor(3), body: "real" }] }, request);
   assert.equal(real.decision, "changes-requested");
   assert.equal(real.annotations.length, 1);
+});
+
+test("the request's containers are plain data at every depth, so a request is one thing here and after a transport", () => {
+  const sound = makeRequest([outputAnchor(1)]);
+  assert.equal(isSurfaceRequest(sound), true);
+  assert.equal(isSurfaceRequest({ ...sound, subject: { ...sound.subject, toJSON() { return { ref: "other", fetch: "/api/other" }; } } }), false, "a subject toJSON would replace the reviewed source in transit");
+  assert.equal(isSurfaceRequest({ ...sound, subject: { ...sound.subject, extra: 1n } }), false, "a BigInt beside the subject would fail the serialiser after validation");
+  assert.equal(isSurfaceRequest({ ...sound, kind: { ...sound.kind, toJSON() { return {}; } } }), false, "a kind toJSON");
+  assert.equal(isSurfaceRequest({ ...sound, callback: { address: null, token: null, extra: () => {} } }), false, "a function beside the callback");
+  assert.equal(isSurfaceRequest({ ...sound, subject: { ...sound.subject, note: { deep: [1, "two", null] } } }), true, "plain data beside the subject is fine");
+});
+
+test("normalizeResult checks annotations against one snapshot of the request, so a getter cannot offer one location to the guard and another to the result", () => {
+  let reads = 0;
+  const flipping = {
+    ...makeRequest([]),
+    get anchors() { reads += 1; return reads === 1 ? [outputAnchor(1)] : [outputAnchor(999)]; },
+  };
+  assert.equal(isSurfaceRequest(flipping), true, "the guard sees line 1");
+  const submitted = { decision: "changes-requested", annotations: [{ anchor: outputAnchor(999), body: "unseen" }] };
+  assert.equal(normalizeResult(submitted, flipping), null, "line 999 was never offered to the same read the result is checked against");
+  const honest = { decision: "changes-requested", annotations: [{ anchor: outputAnchor(1), body: "seen" }] };
+  assert.equal(normalizeResult(honest, makeRequest([outputAnchor(1)]))?.annotations.length, 1);
+  assert.equal(normalizeResult(honest, { ...makeRequest([outputAnchor(1)]), subject: { ref: "r", fetch: "/api/model", toJSON() { return {}; } } }), null, "a request that is not plain data offers nothing");
 });

@@ -85,17 +85,22 @@ system_bin() {
   return 1
 }
 CMUX_BIN="$(system_bin cmux || true)"
-# The platform's own opener, chosen by platform: `open` on macOS,
-# `xdg-open` elsewhere — an `open` found on Linux is some other program
-# and must not receive the URL.
-case "$(uname -s 2>/dev/null || true)" in
-  Darwin) OPEN_BIN="$(system_bin open || true)" ;;
-  *) OPEN_BIN="$(system_bin xdg-open || true)" ;;
+# The platform's own opener, on macOS only, chosen by the shell's own
+# OSTYPE rather than a uname command: xdg-open runs its helpers by bare
+# name, so elsewhere the URL is printed until a safe opener lands.
+OPEN_BIN=""
+case "$OSTYPE" in
+  darwin*) OPEN_BIN="$(system_bin open || true)" ;;
 esac
-# The tree parser too: it never sees the URL, but a PATH-selected python3
-# could answer any workspace it liked, and one rule for every command is
-# simpler than an exception.
+# Every other command this script runs, the same way — the tree parser,
+# and the coreutils the cmux route needs. None sees the URL, but one rule
+# for every command is simpler than an exception, and a PATH-selected
+# python3 could answer any workspace it liked. With any of them missing,
+# the cmux route is not taken.
 PYTHON_BIN="$(system_bin python3 || true)"
+MKTEMP_BIN="$(system_bin mktemp || true)"
+RM_BIN="$(system_bin rm || true)"
+SLEEP_BIN="$(system_bin sleep || true)"
 
 # The default browser, by the system opener's absolute path; with none
 # found, the URL is printed for the user and nothing else receives it.
@@ -114,7 +119,7 @@ cmux_guarded() {
   _SECONDS="$1"; shift
   "$CMUX_BIN" "$@" &
   _PID=$!
-  ( sleep "$_SECONDS"; kill "$_PID" 2>/dev/null; sleep 2; kill -9 "$_PID" 2>/dev/null ) &
+  ( "$SLEEP_BIN" "$_SECONDS"; kill "$_PID" 2>/dev/null; "$SLEEP_BIN" 2; kill -9 "$_PID" 2>/dev/null ) &
   _WATCHDOG=$!
   _RC=0
   wait "$_PID" 2>/dev/null || _RC=$?
@@ -123,7 +128,7 @@ cmux_guarded() {
   return "$_RC"
 }
 
-if [ -n "$CMUX_BIN" ]; then
+if [ -n "$CMUX_BIN" ] && [ -n "$MKTEMP_BIN" ] && [ -n "$RM_BIN" ] && [ -n "$SLEEP_BIN" ]; then
   WORKSPACE=""
   if [ -n "${CMUX_SURFACE_ID:-}" ]; then
     # With a surface id, the live tree is the only authority. The frozen
@@ -138,13 +143,13 @@ if [ -n "$CMUX_BIN" ]; then
     # path unpredictable, so no other local process can pre-create it. A
     # cancel during this window cleans up and exits — it must not go on
     # to open anything.
-    TREE_FILE="$(mktemp "${TMPDIR:-/tmp}/obversa-surface.XXXXXX")"
-    trap 'rm -f "$TREE_FILE"; exit 130' INT TERM
-    trap 'rm -f "$TREE_FILE"' EXIT
+    TREE_FILE="$("$MKTEMP_BIN" "${TMPDIR:-/tmp}/obversa-surface.XXXXXX")"
+    trap '"$RM_BIN" -f "$TREE_FILE"; exit 130' INT TERM
+    trap '"$RM_BIN" -f "$TREE_FILE"' EXIT
     TREE_RC=0
     cmux_guarded 5 tree --all --json --id-format both >"$TREE_FILE" 2>/dev/null || TREE_RC=$?
-    TREE_OUT="$(cat "$TREE_FILE" 2>/dev/null || true)"
-    rm -f "$TREE_FILE"
+    TREE_OUT="$(<"$TREE_FILE")" 2>/dev/null || TREE_OUT=""
+    "$RM_BIN" -f "$TREE_FILE"
     trap - EXIT INT TERM
     if [ "$TREE_RC" -ne 0 ]; then
       open_browser

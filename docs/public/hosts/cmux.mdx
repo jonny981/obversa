@@ -34,13 +34,15 @@ Outside cmux, the same command opens your default browser. The fallback
 keeps every script usable in a plain terminal.
 
 The URL a surface opens carries the session's bearer token, so every
-command the glue runs (`cmux`, `open`, `xdg-open`, and the `python3`
-that reads the cmux tree) runs by absolute path from a fixed list of
-system directories (`/usr/bin`, `/bin`,
-`/usr/local/bin`, `/opt/homebrew/bin`), never by a bare name looked up on
-`PATH`. A host may name other directories in `OBVERSA_SYSTEM_BIN_DIRS`
-(colon-separated). With no opener found, the URL is printed on stderr
-for you to open, and nothing else receives it.
+command the glue runs (`cmux`, macOS's `open`, the `python3` that reads
+the cmux tree, and the few coreutils the cmux route needs) runs by
+absolute path from a fixed list of system directories (`/usr/bin`,
+`/bin`, `/usr/local/bin`, `/opt/homebrew/bin`), never by a bare name
+looked up on `PATH`. A host may name other directories in
+`OBVERSA_SYSTEM_BIN_DIRS` (colon-separated). On Linux the glue does not
+run `xdg-open`, which runs its own helpers by bare name: the URL is
+printed on stderr for you to open, as it is on any platform with no
+opener found, and nothing else receives it.
 
 ## One route for Plannotator
 

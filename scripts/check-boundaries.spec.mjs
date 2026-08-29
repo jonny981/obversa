@@ -757,6 +757,16 @@ test("shipped source may not import into build output: dist is never read by the
   }
 });
 
+test("a package imports nothing from outside packages/: a host, scripts/, or the root is a refused crossing", () => {
+  const file = "/repo/packages/source/src/a.mjs";
+  for (const specifier of ["../../../hosts/cmux/lib/review-args.mjs", "../../../scripts/release.mjs", "../../../package.json", "/repo/hosts/cmux/lib/review-args.mjs"]) {
+    const found = extractObversaImports(`import x from "${specifier}";`, { file, root: "/repo" });
+    assert.equal(found.length, 1, specifier);
+    assert.match(found[0], /outside packages\/; a package imports nothing from hosts, scripts, or the repository root/, specifier);
+  }
+  assert.deepEqual(extractObversaImports('import x from "../../surfacer/src/index.mjs";', { file, root: "/repo" }), ["@obversa/surfacer"], "a sibling is still the arrow it is");
+});
+
 // The live full-check mutants: the real guard, run as a child on a
 // disposable copy of the current tree (git's file list, with the root
 // node_modules symlinked to the real one),
@@ -1037,6 +1047,27 @@ test("the guard, run on a disposable copy of the tree, refuses a shipped host im
       assert.match(badShell.stderr, /obversa-surface: a shell host command's shebang is #!\/bin\/bash or #!\/bin\/sh/, shebang);
     }
     writeFileSync(shellCommand, shellOriginal);
+    // Text can be assembled; the geometry cannot: a parent segment or an
+    // absolute path outside the system directories is refused whatever
+    // spells the rest.
+    writeFileSync(shellCommand, `${shellOriginal}\nP=pack\nnode "../../../${"$"}{P}ages/surfacer/src/index.mjs" "$URL"\n`);
+    const assembled = guard();
+    assert.notEqual(assembled.status, 0);
+    assert.match(assembled.stderr, /obversa-surface: a shell host command holds a parent-directory segment/);
+    writeFileSync(shellCommand, `${shellOriginal}\nnode /Users/someone/obversa/packages/surfacer/src/index.mjs "$URL"\n`);
+    const absoluteLiteral = guard();
+    assert.notEqual(absoluteLiteral.status, 0);
+    assert.match(absoluteLiteral.stderr, /obversa-surface: a shell host command names the absolute path \/Users\/someone\/obversa\/packages\/surfacer\/src\/index\.mjs/);
+    writeFileSync(shellCommand, shellOriginal);
+    // A shell helper with a shebang anywhere under the host is held to the
+    // same rules.
+    const helper = path.join(root, "hosts", "cmux", "tools", "helper.sh");
+    mkdirSync(path.dirname(helper), { recursive: true });
+    writeFileSync(helper, '#!/bin/bash\nnode ../../../packages/surfacer/src/index.mjs\n');
+    const helperRun = guard();
+    assert.notEqual(helperRun.status, 0);
+    assert.match(helperRun.stderr, /hosts\/cmux\/tools\/helper\.sh: a shell host command names packages\//);
+    rmSync(path.dirname(helper), { recursive: true });
     // Every mutation above was undone: the copy passes again.
     assert.equal(guard().status, 0, "the restored copy passes");
   } finally {

@@ -55,8 +55,8 @@ behavior, not an error. This is the one door for local webapps, and the
 glue point for Callback Gate surfaces launched by a router.
 
 The URL carries the session's bearer token, so every command the glue
-runs (`cmux`, `open`, `xdg-open`, and the `python3` that reads the cmux
-tree) runs by absolute path from a
+runs (`cmux`, macOS's `open`, the `python3` that reads the cmux tree,
+and the coreutils the cmux route needs) runs by absolute path from a
 fixed list of system directories (`/usr/bin`, `/bin`, `/usr/local/bin`,
 `/opt/homebrew/bin`), never by a bare name looked up on `PATH`. A host
 may name other directories in `OBVERSA_SYSTEM_BIN_DIRS` (colon-separated);

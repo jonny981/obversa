@@ -15,12 +15,11 @@ export async function openSurfaceUrl(url, {
   // result; a name that is not an absolute path is not run.
   surfaceBin = process.env.OBVERSA_SURFACE_BIN,
   // The platform opener by its system path, never a bare name: the same
-  // token-bearing URL goes to it. No win32 command lane: appending a URL
-  // to cmd /c start is a shell injection vector. Windows prints the URL
-  // until a safe launcher lands.
-  browserCommand = process.platform === "darwin" ? ["/usr/bin/open"]
-    : process.platform === "linux" ? ["/usr/bin/xdg-open"]
-    : null,
+  // token-bearing URL goes to it. macOS only: xdg-open runs its own helpers
+  // (gio and friends) by bare name, so on Linux the URL is printed until a
+  // safe opener lands, as on Windows, where appending a URL to cmd /c start
+  // is a shell injection vector.
+  browserCommand = process.platform === "darwin" ? ["/usr/bin/open"] : null,
   stderr = process.stderr,
 } = {}) {
   if (typeof surfaceBin === "string" && surfaceBin.length > 0) {

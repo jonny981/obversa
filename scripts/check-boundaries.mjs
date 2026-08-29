@@ -834,11 +834,18 @@ function crossingPackage(specifier, { file, root: repoRoot } = {}) {
   const target = resolve(realpathOf(dirname(file), ts.sys), specifier);
   const real = realpathOf(target, ts.sys);
   if (real !== target) return refusal(`${specifier} names ${relative(realRoot, real).split('\\').join('/')} by another spelling; a specifier names its file as the disk does`);
+  const placed = placedUnder(real, realRoot);
   // Build output is skipped by the walk, so what a file under dist imports
   // is never read: shipped source may not import into a dist directory.
-  if (!isTestPath(file) && /(^|\/)dist\//.test(placedUnder(real, realRoot))) return refusal(`${specifier} imports build output under dist, which the scan does not read; import a source file`);
+  if (!isTestPath(file) && /(^|\/)dist\//.test(placed)) return refusal(`${specifier} imports build output under dist, which the scan does not read; import a source file`);
+  const owner = packageDirOf(realpathOf(file, ts.sys), realRoot);
+  // A package imports nothing from outside packages/: a host is the
+  // composition root that takes packages by public name, and scripts/ and
+  // the repository root are the guard's own ground. A package that bundled
+  // any of them would reverse that direction unseen.
+  if (owner !== undefined && !isTestPath(file) && !/^packages\//.test(placed)) return refusal(`${specifier} reaches ${placed || '.'}, outside packages/; a package imports nothing from hosts, scripts, or the repository root`);
   const dir = packageDirOf(real, realRoot);
-  return dir && dir !== packageDirOf(realpathOf(file, ts.sys), realRoot) ? `@obversa/${dir}` : null;
+  return dir && dir !== owner ? `@obversa/${dir}` : null;
 }
 
 // The package directory an absolute path lies in, or names outright (a bare
@@ -948,6 +955,12 @@ export function extractObversaImports(text, { file, root: repoRoot, configs = []
         const placed = placedUnder(real, repoRoot);
         if (!isTestPath(file) && !specifier.startsWith('@obversa/') && /(^|\/)dist\//.test(placed) && !/(^|\/)node_modules\//.test(placed)) {
           found.push(refusal(`shipped source resolves to build output under dist, which the scan does not read: ${specifier} -> ${placed}`));
+          continue;
+        }
+        // An alias can land outside packages/ too — on a host, on scripts/,
+        // on the root — and a package imports nothing from there.
+        if (!isTestPath(file) && !specifier.startsWith('@obversa/') && !/^packages\//.test(placed) && !/(^|\/)node_modules\//.test(placed) && !placed.startsWith('..')) {
+          found.push(refusal(`shipped source resolves outside packages/: ${specifier} -> ${placed}; a package imports nothing from hosts, scripts, or the repository root`));
           continue;
         }
         const dir = packageDirOf(real, repoRoot);
@@ -1530,14 +1543,29 @@ for (const absolute of files) {
     const host = hostManifests.get(hostRootOf(absolute, root));
     for (const finding of hostImportFindings(text, { file: absolute, root, edges, selfName: host?.manifest.name, dependencies: host?.dependencies })) failures.push(`${path}: ${finding}`);
     for (const edge of edges) hostEdges.push({ from: path, ...edge });
-  } else if (/^hosts\/[^/]+\/(bin|lib)\//.test(path) && !isTestPath(path)) {
-    // A shipped host file that is not JavaScript — a shell command — runs
+  } else if (path.startsWith('hosts/') && !isTestPath(path) && (/^hosts\/[^/]+\/(bin|lib)\//.test(path) || text.startsWith('#!'))) {
+    // A shipped host file that is not JavaScript — a shell command, under
+    // bin/ or lib/ or carrying a shebang anywhere under the host — runs
     // whatever it says, so it may not name a package directory or an
     // install directory at all: `node ../../../packages/x/src/y.mjs` is the
     // same edge a JavaScript import by path would be, with no import to
     // scan. Only host JavaScript reaches a package, by public name.
     for (const named of ['packages/', 'node_modules']) {
       if (text.includes(named)) failures.push(`${path}: a shell host command names ${named}; only host JavaScript reaches a package, by its public name`);
+    }
+    // Text can be assembled (`${P}ages/`), so the geometry is held too: from
+    // a host's bin/ or lib/, a package is reached only through a parent
+    // segment or an absolute path, and a shell host command has neither — no
+    // `../` or `/..`, and no absolute path outside the system directories
+    // the glue may run commands from, /tmp, and /dev.
+    if (/\.\.\/|\/\.\./.test(text)) failures.push(`${path}: a shell host command holds a parent-directory segment; a host command reaches nothing above its own directory`);
+    const allowedAbsolute = ['/usr/bin', '/bin', '/usr/local/bin', '/opt/homebrew/bin', '/usr/sbin', '/sbin', '/tmp', '/dev'];
+    // A literal that continues an expansion (`${HOME}/x`, `$(...)/x`) is a
+    // relative tail, not an absolute path; one after any other character is.
+    for (const match of text.matchAll(/(?<![A-Za-z0-9_.\/})-])\/[A-Za-z0-9_.-]+(?:\/[A-Za-z0-9_.-]+)*/g)) {
+      const literal = match[0];
+      if (!allowedAbsolute.some((prefix) => literal === prefix || literal.startsWith(`${prefix}/`)))
+        failures.push(`${path}: a shell host command names the absolute path ${literal}; only the system directories, /tmp, and /dev may be named`);
     }
     // Its interpreter is named by absolute path: `#!/usr/bin/env bash`
     // resolves bash through PATH, and a shell command that receives the

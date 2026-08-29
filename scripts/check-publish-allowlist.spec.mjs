@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { execFileSync, spawnSync } from "node:child_process";
 import { EventEmitter } from "node:events";
-import { existsSync, mkdtempSync, mkdirSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, mkdtempSync, mkdirSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { createRequire } from "node:module";
 import os from "node:os";
 import path from "node:path";
@@ -9,6 +9,7 @@ import test from "node:test";
 
 import { HOOK_COMMAND, PUBLISH_REGISTRY_SENTINEL, SCOPE_REGISTRY_KEY, audit, checkHook, listWorkspacePackages, releaseTagFor } from "./check-publish-allowlist.mjs";
 import { NPM_CLI, NPM_DIR, PNPM_CLI, PNPM_DIR, publishArgs, release, releasePlan, runChild } from "./release.mjs";
+import { GIT_DIRS, gitBin } from "./check-publish-allowlist.mjs";
 
 // Both registry keys npm consults for a scoped name, pinned to the sentinel.
 const SENTINELS = { registry: PUBLISH_REGISTRY_SENTINEL, [SCOPE_REGISTRY_KEY]: PUBLISH_REGISTRY_SENTINEL };
@@ -417,4 +418,21 @@ test("the release forwards SIGINT and SIGTERM to the running child, awaits it, r
   } finally {
     rmSync(cwd, { recursive: true, force: true });
   }
+});
+
+test("the publish guard asks a git from the system directories, whatever git is first on PATH", () => {
+  const bin = gitBin();
+  assert.ok(GIT_DIRS.some((dir) => bin === path.join(dir, "git")), bin);
+  // A fake git first on PATH that answers "main", "clean", and "tag" for
+  // everything changes nothing: the guard never consults PATH.
+  const fakeBin = mkdtempSync(path.join(os.tmpdir(), "fake-git-"));
+  writeFileSync(path.join(fakeBin, "git"), "#!/bin/sh\ncase \"$*\" in *rev-parse*) echo main;; *cat-file*) echo tag;; *) echo;; esac\n");
+  chmodSync(path.join(fakeBin, "git"), 0o755);
+  const repoRoot = new URL("..", import.meta.url).pathname;
+  const target = path.join(repoRoot, "packages", "memory");
+  const direct = JSON.stringify(checkHook({ cwd: target }));
+  const child = spawnSync(process.execPath, ["-e", "import('./scripts/check-publish-allowlist.mjs').then((m) => console.log(JSON.stringify(m.checkHook({ cwd: process.argv[1] }))))", target], { cwd: repoRoot, encoding: "utf8", env: { ...process.env, PATH: `${fakeBin}${path.delimiter}${process.env.PATH}` } });
+  assert.equal(child.status, 0, child.stderr);
+  assert.equal(child.stdout.trim(), direct, "the same answer with the fake git first on PATH");
+  assert.ok(direct.includes("main") || direct.includes("tag") || direct.includes("clean") || direct === "[]", "the real git answered about this checkout");
 });

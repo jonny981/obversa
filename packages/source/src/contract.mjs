@@ -140,8 +140,9 @@ function canonicalJson(value, seen = new Set()) {
   if (types.isProxy(value)) return null;
   const proto = Object.getPrototypeOf(value);
   if (!Array.isArray(value) && proto !== Object.prototype && proto !== null) return null;
-  // A value with its own toJSON means something other than its properties.
-  if (Object.prototype.hasOwnProperty.call(value, "toJSON")) return null;
+  // A value with a toJSON, own or inherited, means something other than its
+  // properties: the serialiser would write what it returns, not the data.
+  if ("toJSON" in value) return null;
   // JSON skips a symbol-keyed property without a trace, enumerable or not; a
   // location with one would be keyed as something smaller than it is.
   if (Object.getOwnPropertySymbols(value).length > 0) return null;
@@ -421,7 +422,16 @@ export function normalizeResult(raw, request, { terminal = false } = {}) {
       return fallback;
     }
   };
-  const anchorSet = buildAnchorSet(read(() => request?.anchors, []));
+  // The request is read exactly once, as one plain-data snapshot: the
+  // anchors the annotations are checked against and the ids the result
+  // carries come from that snapshot, so a getter cannot offer one location
+  // to the guard and another here. A request that is not plain data offers
+  // nothing, and there is no result.
+  const snapshotText = read(() => canonicalJson(request), null);
+  if (snapshotText === null) return null;
+  const owned = JSON.parse(snapshotText);
+  if (owned === null || typeof owned !== "object" || Array.isArray(owned)) return null;
+  const anchorSet = buildAnchorSet(owned.anchors ?? []);
   const annotations = [];
   const rawAnnotations = read(() => {
     const list = raw?.annotations;
@@ -450,8 +460,8 @@ export function normalizeResult(raw, request, { terminal = false } = {}) {
     : (decision === "approved" && annotations.length === 0) || (decision === "changes-requested" && annotations.length > 0);
   if (!valid) return null;
   const result = {
-    surfaceId: read(() => request?.surfaceId ?? null, null),
-    gateId: read(() => request?.gateId ?? null, null),
+    surfaceId: owned.surfaceId ?? null,
+    gateId: owned.gateId ?? null,
     decision,
     annotations,
   };
@@ -539,13 +549,18 @@ function checkSurfaceRequest(value) {
   const { surfaceId, gateId, callback, kind, subject, anchors, transport, deadline } = value;
   if (!isPresent(surfaceId)) return false;
   if (!isGateBinding(gateId, callback)) return false;
-  if (!kind || typeof kind !== "object" || types.isProxy(kind)) return false;
+  // The containers the request carries are plain data at every depth, under
+  // the same rule as a location: a toJSON on the subject would replace the
+  // reviewed source in transit, a BigInt beside it would fail the
+  // serialiser after validation passed, and either would make the request
+  // one thing here and another after a transport.
+  if (canonicalJson(callback) === null || canonicalJson(kind) === null || canonicalJson(subject) === null) return false;
   const { family, renderer } = kind;
   if (!FAMILIES.includes(family) || !isPresent(renderer)) return false;
   // The subject is a ref plus either an inline payload or a fetch URL, one
   // and not both; a host cannot render a request that names neither, and one
   // that names both does not say which content is under review.
-  if (!subject || typeof subject !== "object" || types.isProxy(subject)) return false;
+  if (!subject || typeof subject !== "object") return false;
   const { ref, payload, fetch } = subject;
   if (!isPresent(ref)) return false;
   // Exactly one of the two fields is present — a subject carrying both would
