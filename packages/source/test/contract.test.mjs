@@ -231,6 +231,11 @@ test("anchorKey is total: it never throws, and an anchor that points nowhere is 
   assert.equal(isGateBinding("gate-1", new Proxy({ address: "https://gate.example/cb", token: "t" }, {})), false, "a transparent proxy binding");
   assert.equal(isSurfaceRequest({ ...sound, subject: { ref: "r", payload: { files: [] } } }), true, "a plain payload is a request");
   assert.equal(isSurfaceRequest({ ...sound, subject: { ref: "r", payload: new Proxy({ files: [] }, {}) } }), false, "a transparent proxy payload");
+  // A payload is content a transport can carry: an object or a string.
+  assert.equal(isSurfaceRequest({ ...sound, subject: { ref: "r", payload: "diff --git a/x b/x" } }), true, "a string payload");
+  for (const payload of [() => {}, Symbol("p"), 1n, 42, true, null]) {
+    assert.equal(isSurfaceRequest({ ...sound, subject: { ref: "r", payload } }), false, `a ${typeof payload} payload is not content`);
+  }
   assert.equal(isSurfaceRequest({ get surfaceId() { throw new Error("boom"); } }), false, "a throwing root getter");
   assert.equal(isSurfaceRequest({ ...request, anchors: [outputAnchor(1)], get transport() { throw new Error("boom"); } }), false, "a throwing getter deeper in");
   assert.equal(buildAnchorSet([{ target: "a", position: cyclic }, { target: "a", position: 1 }]).size, 1);

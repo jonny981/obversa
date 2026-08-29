@@ -1019,6 +1019,15 @@ test("the guard, run on a disposable copy of the tree, refuses a shipped host im
     rmSync(releaseScript);
     rmSync(path.join(root, "scripts", "escape.mjs"));
     writeFileSync(releaseScript, releaseText);
+    // A node shebang carrying options loads code before any import: the
+    // shebang of a host command is exactly #!/usr/bin/env node.
+    for (const shebang of ["#!/usr/bin/env -S node --import=./packages/surfacer/src/index.mjs", "#!/usr/local/bin/node", "#!/usr/bin/env node --experimental-loader=./x.mjs", "#!/usr/bin/env node\r"]) {
+      writeFileSync(command, `${shebang}\n${original.split("\n").slice(1).join("\n")}`);
+      const bad = guard();
+      assert.notEqual(bad.status, 0, shebang);
+      assert.match(bad.stderr, /obversa-review: a host command's shebang is exactly #!\/usr\/bin\/env node/, shebang);
+    }
+    writeFileSync(command, original);
     // Every mutation above was undone: the copy passes again.
     assert.equal(guard().status, 0, "the restored copy passes");
   } finally {

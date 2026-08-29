@@ -111,3 +111,20 @@ test("a placement command that is not an absolute path is not run: a bare name w
     process.env.PATH = previousPath;
   }
 });
+
+test("a browser command that is not an absolute path is not run either; the URL is printed instead", async () => {
+  const directory = mkdtempSync(path.join(os.tmpdir(), "surfacer-host-"));
+  const onPath = shim(directory, "open");
+  const captured = [];
+  const previousPath = process.env.PATH;
+  process.env.PATH = `${directory}${path.delimiter}${previousPath}`;
+  try {
+    const result = await openSurfaceUrl("http://127.0.0.1:1/x#token", { surfaceBin: undefined, browserCommand: ["open"], stderr: { write: (text) => captured.push(text) } });
+    assert.deepEqual(result, { opened: false, via: "print" });
+    assert.equal(existsSync(onPath.record), false, "the open on PATH was never run");
+    assert.match(captured.join(""), /The browser command is not an absolute path and is not run: open/);
+    assert.match(captured.join(""), /Open this surface in a browser: http:\/\/127\.0\.0\.1:1\/x#token/);
+  } finally {
+    process.env.PATH = previousPath;
+  }
+});

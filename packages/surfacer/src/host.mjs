@@ -14,10 +14,12 @@ export async function openSurfaceUrl(url, {
   // executable placed earlier on PATH could take the token and forge the
   // result; a name that is not an absolute path is not run.
   surfaceBin = process.env.OBVERSA_SURFACE_BIN,
-  // No win32 command lane: appending a URL to cmd /c start is a shell
-  // injection vector. Windows prints the URL until a safe launcher lands.
-  browserCommand = process.platform === "darwin" ? ["open"]
-    : process.platform === "linux" ? ["xdg-open"]
+  // The platform opener by its system path, never a bare name: the same
+  // token-bearing URL goes to it. No win32 command lane: appending a URL
+  // to cmd /c start is a shell injection vector. Windows prints the URL
+  // until a safe launcher lands.
+  browserCommand = process.platform === "darwin" ? ["/usr/bin/open"]
+    : process.platform === "linux" ? ["/usr/bin/xdg-open"]
     : null,
   stderr = process.stderr,
 } = {}) {
@@ -27,7 +29,8 @@ export async function openSurfaceUrl(url, {
   }
   if (browserCommand) {
     const [browserBin, ...browserArgs] = browserCommand;
-    if (await runDetached(browserBin, [...browserArgs, url])) return { opened: true, via: "browser" };
+    if (typeof browserBin !== "string" || !isAbsolute(browserBin)) stderr.write(`The browser command is not an absolute path and is not run: ${browserBin}\n`);
+    else if (await runDetached(browserBin, [...browserArgs, url])) return { opened: true, via: "browser" };
   }
   stderr.write(`Open this surface in a browser: ${url}\n`);
   return { opened: false, via: "print" };

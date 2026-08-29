@@ -54,6 +54,13 @@ Outside cmux it opens the default browser — that fallback is the intended
 behavior, not an error. This is the one door for local webapps, and the
 glue point for Callback Gate surfaces launched by a router.
 
+The URL carries the session's bearer token, so every command that
+receives it (`cmux`, `open`, `xdg-open`) runs by absolute path from a
+fixed list of system directories (`/usr/bin`, `/bin`, `/usr/local/bin`,
+`/opt/homebrew/bin`), never by a bare name looked up on `PATH`. A host
+may name other directories in `OBVERSA_SYSTEM_BIN_DIRS` (colon-separated);
+with no opener found, the URL is printed on stderr and nothing runs.
+
 The target workspace resolves at call time from the live topology. The
 `CMUX_*` environment is frozen at terminal start, and `cmux identify`
 derives its caller answer from that same environment, so both name the

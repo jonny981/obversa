@@ -95,7 +95,9 @@ down — signals interrupt cleanly. The runnable example is
 
 `openSurfaceUrl` opens the page in the selected host's native pane —
 cmux first, through the [host glue](/hosts/cmux). The platform browser
-is the fallback, and printing the URL is the last resort. Your
+is the fallback, run by its system path (`/usr/bin/open`,
+`/usr/bin/xdg-open`) and never by a bare name, and printing the URL is
+the last resort. Your
 multiplexer supplies the panes; the Surfacer supplies the session. The
 host's placement command is the one the host injected as
 `OBVERSA_SURFACE_BIN`, and it runs only when that value is an absolute

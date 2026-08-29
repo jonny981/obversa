@@ -61,12 +61,48 @@ if [ -z "$URL" ]; then
   exit 2
 fi
 
+# Every command that receives the URL runs by absolute path from a system
+# directory, never by a bare name looked up on PATH: the URL carries the
+# session's bearer token, and an executable placed earlier on PATH (a
+# repository-local bin, an installed package's bin) would receive it and
+# could cancel or forge the review. The directories are fixed here; a host may
+# name others in OBVERSA_SYSTEM_BIN_DIRS (colon-separated), which is a
+# host-injected value like OBVERSA_SURFACE_BIN, and the proofs point it at
+# their recording shims.
+SYSTEM_BIN_DIRS="${OBVERSA_SYSTEM_BIN_DIRS:-/usr/bin:/bin:/usr/local/bin:/opt/homebrew/bin}"
+system_bin() {
+  _NAME="$1"
+  _OLD_IFS="$IFS"; IFS=:
+  for _DIR in $SYSTEM_BIN_DIRS; do
+    case "$_DIR" in /*) ;; *) continue ;; esac
+    if [ -x "$_DIR/$_NAME" ] && [ ! -d "$_DIR/$_NAME" ]; then
+      IFS="$_OLD_IFS"
+      printf '%s\n' "$_DIR/$_NAME"
+      return 0
+    fi
+  done
+  IFS="$_OLD_IFS"
+  return 1
+}
+CMUX_BIN="$(system_bin cmux || true)"
+OPEN_BIN="$(system_bin open || system_bin xdg-open || true)"
+
+# The default browser, by the system opener's absolute path; with none
+# found, the URL is printed for the user and nothing else receives it.
+open_browser() {
+  if [ -n "$OPEN_BIN" ]; then
+    exec "$OPEN_BIN" "$URL"
+  fi
+  echo "obversa-surface: no system opener (open, xdg-open) found under $SYSTEM_BIN_DIRS; open this URL yourself: $URL" >&2
+  exit 1
+}
+
 # Run cmux with a watchdog so a wedged app never hangs the caller. The
 # watchdog escalates to a forced stop when the process ignores the first
 # signal.
 cmux_guarded() {
   _SECONDS="$1"; shift
-  cmux "$@" &
+  "$CMUX_BIN" "$@" &
   _PID=$!
   ( sleep "$_SECONDS"; kill "$_PID" 2>/dev/null; sleep 2; kill -9 "$_PID" 2>/dev/null ) &
   _WATCHDOG=$!
@@ -77,7 +113,7 @@ cmux_guarded() {
   return "$_RC"
 }
 
-if command -v cmux >/dev/null 2>&1; then
+if [ -n "$CMUX_BIN" ]; then
   WORKSPACE=""
   if [ -n "${CMUX_SURFACE_ID:-}" ]; then
     # With a surface id, the live tree is the only authority. The frozen
@@ -101,7 +137,7 @@ if command -v cmux >/dev/null 2>&1; then
     rm -f "$TREE_FILE"
     trap - EXIT INT TERM
     if [ "$TREE_RC" -ne 0 ]; then
-      exec open "$URL"
+      open_browser
     fi
     # Structured output: match the surface id field exactly and take the
     # enclosing workspace id. Titles are data here, so a title that
@@ -138,7 +174,7 @@ for window in windows:
                 raise SystemExit(0)
 ' 2>/dev/null)" || PARSE_RC=$?
     if [ "$PARSE_RC" -ne 0 ] || [ -z "$WORKSPACE" ]; then
-      exec open "$URL"
+      open_browser
     fi
   else
     # No surface id at all: a manual or legacy invocation. An explicitly
@@ -153,4 +189,4 @@ for window in windows:
   fi
 fi
 
-exec open "$URL"
+open_browser

@@ -1519,6 +1519,13 @@ for (const absolute of files) {
   // packages/, and the loader-hatch rules of shipped source.
   if (isHostScript(path, text)) {
     importScannedHostFiles.add(path);
+    // A shebang carries options to node before any import runs:
+    // `#!/usr/bin/env -S node --import=./packages/x/src/y.mjs` loads a
+    // package path with no specifier the scan reads. A host command's
+    // shebang is exactly `#!/usr/bin/env node`, nothing more.
+    const shebang = text.split('\n')[0] ?? '';
+    if (shebang.startsWith('#!') && shebang !== '#!/usr/bin/env node')
+      failures.push(`${path}: a host command's shebang is exactly #!/usr/bin/env node; found ${JSON.stringify(shebang)} — options there load code before any import the scan reads`);
     const edges = [];
     const host = hostManifests.get(hostRootOf(absolute, root));
     for (const finding of hostImportFindings(text, { file: absolute, root, edges, selfName: host?.manifest.name, dependencies: host?.dependencies })) failures.push(`${path}: ${finding}`);
