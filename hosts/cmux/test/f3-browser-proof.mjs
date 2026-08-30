@@ -27,13 +27,15 @@ import os from "node:os";
 import path from "node:path";
 import test from "node:test";
 
-import { parseUnifiedDiff } from "../../../packages/source/src/diff.mjs";
-import { computeDiff, listTrackedFiles } from "../../../packages/source/src/git.mjs";
-import { createHighlightRegistry, registryToCss } from "../../../packages/source/src/highlight.mjs";
-import { highlightModel } from "../../../packages/source/src/highlight-model.mjs";
-import { contextModel } from "../../../packages/source/src/context-model.mjs";
-import { navModel } from "../../../packages/source/src/nav-model.mjs";
-import { buildIndexHtml, ASSETS_DIR } from "../../../packages/source/src/page.mjs";
+import { ASSETS_DIR, buildIndexHtml, computeDiff, parseUnifiedDiff } from "@obversa/source";
+import {
+  contextModel,
+  createHighlightRegistry,
+  highlightModel,
+  listTrackedFiles,
+  navModel,
+  registryToCss,
+} from "@obversa/source/testing";
 
 const CHROME_CANDIDATES = [
   process.env.OBVERSA_CHROME,

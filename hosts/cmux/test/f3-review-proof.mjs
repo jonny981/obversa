@@ -19,8 +19,8 @@ import path from "node:path";
 import { Writable } from "node:stream";
 import test from "node:test";
 
-import { parseFramedResult, runSurface } from "../../../packages/surfacer/src/index.mjs";
-import { computeDiff, parseUnifiedDiff, reviewDiff } from "../../../packages/source/src/index.mjs";
+import { parseFramedResult, runSurface } from "@obversa/surfacer";
+import { computeDiff, parseUnifiedDiff, reviewDiff } from "@obversa/source";
 
 const clientKitSource = await readFile(
   new URL("../../../packages/surfacer/src/client.mjs", import.meta.url),

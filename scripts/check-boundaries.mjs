@@ -1490,7 +1490,7 @@ const rootPins = {
   // npm is pinned because the release command publishes through it and the
   // publish guard's spec reads its registry rules from it: both resolve this
   // installed copy, never whichever npm is first on PATH.
-  devDependencies: { tsup: '8.5.1', vitest: '4.1.11', '@typescript/typescript6': '6.0.2', typescript: '7.0.2', semver: '7.7.2', npm: '10.9.2', pnpm: '10.15.1' },
+  devDependencies: { tsup: '8.5.1', vitest: '4.1.11', '@typescript/typescript6': '6.0.2', typescript: '7.0.2', semver: '7.7.2', npm: '10.9.2', pnpm: '10.15.1', 'dependency-cruiser': '18.2.0' },
 };
 if (rootManifest.packageManager !== rootPins.packageManager)
   failures.push(`package.json: packageManager must be ${rootPins.packageManager}; found ${rootManifest.packageManager ?? 'absent'}`);
@@ -1528,9 +1528,18 @@ for (const field of ['exports', 'imports', 'main', 'module', 'browser', 'bin']) 
 // The root `pnpm` settings reach every install: overrides, patches,
 // package extensions, and `configDependencies` — plugins whose pnpmfile is
 // prepended to the hooks the local refusal covers. Only the execution
-// environment is allowed.
+// environment is allowed, plus one exact package extension: dependency-cruiser
+// needs a `typescript` in its supported range to parse TypeScript sources, the
+// root pins typescript 7 for the compilers, and the extension hands the
+// cruiser the already-pinned TS6 wrapper by its alias. Anything else that
+// rewrites what a package installs is refused.
+const allowedPackageExtensions = JSON.stringify({
+  'dependency-cruiser': { dependencies: { typescript: 'npm:@typescript/typescript6@6.0.2' } },
+});
 for (const field of Object.keys(rootManifest.pnpm ?? {})) {
-  if (field !== 'executionEnv') failures.push(`package.json: pnpm.${field} changes how packages install; only pnpm.executionEnv is allowed`);
+  if (field === 'executionEnv') continue;
+  if (field === 'packageExtensions' && JSON.stringify(rootManifest.pnpm.packageExtensions) === allowedPackageExtensions) continue;
+  failures.push(`package.json: pnpm.${field} changes how packages install; only pnpm.executionEnv and the exact dependency-cruiser typescript extension are allowed`);
 }
 // The workspace is the packages and the hosts: a host is the composition
 // root where the packages meet, and it takes them by their public names.

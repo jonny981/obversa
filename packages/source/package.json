@@ -5,7 +5,8 @@
   "description": "The review surface: open a git diff for inline review and return the annotations. Runs on an injected surface port; the composition root binds @obversa/surfacer.",
   "type": "module",
   "exports": {
-    ".": "./src/index.mjs"
+    ".": "./src/index.mjs",
+    "./testing": "./src/testing.mjs"
   },
   "scripts": {
     "test": "node --test test/*.test.mjs"
