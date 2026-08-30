@@ -6,12 +6,14 @@
 // same-name path without proving who installed it; the preflight is the
 // difference.
 //
-// Ownership means all three of: a lock entry whose source is the Obversa
-// repository handed to this command; a canonical copy whose directory hash
-// equals that entry's skillFolderHash (the CLI's own algorithm: sha256 over
-// relativePath then content, files sorted, .git and node_modules skipped);
-// and a Claude Code path that is exactly a symlink to that canonical copy.
-// A source string alone proves nothing.
+// Ownership means all three of: a lock entry whose source names the Obversa
+// repository handed to this command (the CLI normalizes a GitHub source to
+// owner/repo, so the URL forms that normalize the same match); a canonical
+// copy that carries the entry's content — for a local install the CLI's own
+// sha256 directory hash, recomputed here, and for a GitHub install (a git
+// tree hash no local walk can recompute) the copy's presence with its
+// SKILL.md; and a Claude Code path that is exactly a symlink to that
+// canonical copy. A source string alone proves nothing.
 
 import { createHash } from 'node:crypto';
 import { existsSync, lstatSync, readdirSync, readFileSync, readlinkSync } from 'node:fs';
@@ -63,7 +65,26 @@ export function folderHash(directory) {
   return hash.digest('hex');
 }
 
-// Why ownership does not hold, or null when it holds in full.
+// The CLI records a GitHub source as its normalized owner/repo; this
+// comparison accepts the URL forms that normalize to the same repository.
+export function sameSource(recorded, given) {
+  if (recorded === given) return true;
+  const normalize = (value) =>
+    String(value)
+      .replace(/^git@github\.com:/i, '')
+      .replace(/^https?:\/\/github\.com\//i, '')
+      .replace(/\.git$/i, '')
+      .replace(/\/$/, '')
+      .toLowerCase();
+  return normalize(recorded) === normalize(given);
+}
+
+// Why ownership does not hold, or null when it holds in full. The content
+// check depends on what the CLI recorded: a local install carries the
+// sha256 directory hash this module recomputes; a GitHub install carries a
+// git tree hash no local walk can recompute, so ownership there rests on
+// the matching entry, the canonical copy's presence with its SKILL.md, and
+// the exact Claude Code link.
 export function ownershipFailure(source, { canonical, claude, lock } = paths()) {
   let entry;
   try {
@@ -72,10 +93,14 @@ export function ownershipFailure(source, { canonical, claude, lock } = paths()) 
     entry = undefined;
   }
   if (!entry) return `${lock}: no lock entry for ${SKILL}`;
-  if (entry.source !== source) return `${lock}: the ${SKILL} entry's source is ${JSON.stringify(entry.source)}, not this repository`;
+  if (!sameSource(entry.source, source)) return `${lock}: the ${SKILL} entry's source is ${JSON.stringify(entry.source)}, not this repository`;
   if (!existsSync(canonical)) return `${canonical}: the canonical copy is missing`;
-  const hash = folderHash(canonical);
-  if (hash !== entry.skillFolderHash) return `${canonical}: directory hash ${hash} does not equal the lock entry's ${entry.skillFolderHash}`;
+  if (/^[0-9a-f]{64}$/.test(entry.skillFolderHash ?? '')) {
+    const hash = folderHash(canonical);
+    if (hash !== entry.skillFolderHash) return `${canonical}: directory hash ${hash} does not equal the lock entry's ${entry.skillFolderHash}`;
+  } else if (!existsSync(join(canonical, 'SKILL.md'))) {
+    return `${canonical}: the canonical copy holds no SKILL.md`;
+  }
   let stat;
   try {
     stat = lstatSync(claude);

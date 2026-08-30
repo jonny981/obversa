@@ -51,6 +51,8 @@ const banned = [
   ["src/i-nodevm.mjs", "import 'node:vm';\n", "no-restricted-imports"],
   ["src/j-missing.mjs", "import './missing.mjs';\n", "import-x/no-unresolved"],
   ["src/k-deep.mjs", "import 'fake-pkg/src/private.mjs';\n", "import-x/no-unresolved"],
+  ["src/l-dynvm.mjs", "export const p = import('node:vm');\n", "no-restricted-syntax"],
+  ["src/m-reqvm.cjs", "module.exports = require('vm');\n", "no-restricted-syntax"],
 ];
 for (const [path, content] of banned) file(path, content);
 file("src/clean.mjs", "import { ok } from 'fake-pkg';\nimport './local.mjs';\nexport const c = ok;\n");
@@ -82,6 +84,20 @@ test("every banned form is reported under the rule that bans it", () => {
 test("the clean file reports nothing", () => {
   assert.deepEqual(byFile.get("src/clean.mjs") ?? [], []);
   assert.equal(run.status, 1, "banned forms must fail the lint run");
+});
+
+test("the browser page is linted in full, not ignored", () => {
+  // The page once sat on the ignore list for its served-at-runtime import;
+  // the declaration beside it resolves that import now, so every ban
+  // applies to the page like any other file.
+  const page = spawnSync(
+    process.execPath,
+    [eslintBin, "--format", "json", join(repoRoot, "packages", "source", "assets", "app.js")],
+    { cwd: repoRoot, encoding: "utf8", maxBuffer: 64 * 1024 * 1024 },
+  );
+  assert.equal(page.status, 0, page.stderr);
+  const results = JSON.parse(page.stdout);
+  assert.equal(results.length, 1, "the page produced a lint result, not an ignored-file error");
 });
 
 test("only one import plugin is installed", () => {

@@ -49,15 +49,17 @@ opener found, and nothing else receives it.
 
 ## One route for Plannotator
 
-Plannotator opens its review page through one environment variable.
-Point that variable at the glue script and only the review page routes
-into a cmux split. No other tool reads the variable, so no other link
+Plannotator opens its review page through one environment variable,
+`PLANNOTATOR_BROWSER`, and the workspace launcher below binds it to the
+glue script for the workspaces it creates. Only the review page routes
+into a cmux split; no other tool reads the variable, so no other link
 changes behavior.
 
 ## Set up
 
-The glue is three scripts in `hosts/cmux/bin/` plus one Command Palette
-entry. It targets macOS today: the default-browser fallback uses `open`.
+The glue is a handful of scripts in `hosts/cmux/bin/` plus one Command
+Palette entry. It targets macOS today: the default-browser fallback uses
+`open`.
 
 Put the scripts on your PATH first, or call them by full path:
 
@@ -73,9 +75,23 @@ export PATH="$PATH:<checkout>/hosts/cmux/bin"
    project-local entry overrides the global one, so the pair never
    conflicts.
 3. Set the Shared root once: `export OBVERSA_SHARED_ROOT=<shared worktree>`.
-4. Route Plannotator: set `PLANNOTATOR_BROWSER` to the absolute path of
-   `obversa-plannotator-browser`. For the Claude Code hook flow, put it in
-   the `env` block of `~/.claude/settings.json`.
+4. Create workspaces through the host's launcher, which binds both
+   placement variables — `OBVERSA_SURFACE_BIN` for Obversa surfaces and
+   `PLANNOTATOR_BROWSER` for Plannotator — to this checkout's scripts for
+   every terminal and agent in the workspace:
+
+   ```sh
+   obversa-cmux-workspace <repository-directory>
+   ```
+
+   The binding is per launch host, never global: do not put either
+   variable in a shell profile or an agent client's settings, and remove
+   an old global `PLANNOTATOR_BROWSER` entry from `~/.claude/settings.json`
+   if one is there — a global binding sends every launch to one host, so a
+   review started in another host would land in this one instead of where
+   it started. In a workspace opened without the launcher, export
+   `OBVERSA_SURFACE_BIN` as the absolute path of `obversa-surface` in that
+   workspace; outside cmux, surfaces open in the default browser.
 5. Apply with `cmux reload-config`.
 
 ## Use

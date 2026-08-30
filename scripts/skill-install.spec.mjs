@@ -8,7 +8,7 @@ import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import test from "node:test";
 
-import { cliArguments, folderHash, ownershipFailure, paths, preflight, runHelper, SKILL } from "./skill-install.mjs";
+import { cliArguments, folderHash, ownershipFailure, paths, preflight, runHelper, sameSource, SKILL } from "./skill-install.mjs";
 
 const SOURCE = "https://github.com/example/obversa.git";
 
@@ -82,6 +82,33 @@ test("remove requires full ownership; with it, the exact remove command runs", (
     rmSync(fixture.directory, { recursive: true, force: true });
     rmSync(bare.directory, { recursive: true, force: true });
   }
+});
+
+test("a GitHub-recorded install owns: normalized source, tree-hash entry, structural copy", () => {
+  // skills 1.5.17 records a GitHub add as normalized owner/repo with a git
+  // tree hash (40 hex) no local walk can recompute; the preflight must
+  // accept exactly the records the pinned CLI writes.
+  const fixture = home();
+  try {
+    mkdirSync(fixture.at.canonical, { recursive: true });
+    writeFileSync(join(fixture.at.canonical, "SKILL.md"), "---\nname: review-diff\n---\n");
+    mkdirSync(dirname(fixture.at.claude), { recursive: true });
+    symlinkSync(join("..", "..", ".agents", "skills", SKILL), fixture.at.claude);
+    writeFileSync(fixture.at.lock, JSON.stringify({ skills: { [SKILL]: { source: "example/obversa", sourceType: "github", skillFolderHash: "a".repeat(40) } } }));
+    assert.equal(ownershipFailure("https://github.com/example/obversa.git", fixture.at), null, "the URL form matches the normalized record");
+    assert.equal(ownershipFailure("git@github.com:Example/Obversa", fixture.at), null, "the ssh form and case match too");
+    assert.match(ownershipFailure("https://github.com/other/repo", fixture.at), /source is/);
+    rmSync(join(fixture.at.canonical, "SKILL.md"));
+    assert.match(ownershipFailure("example/obversa", fixture.at), /no SKILL\.md/, "a tree-hash entry still needs the copy's content");
+  } finally {
+    rmSync(fixture.directory, { recursive: true, force: true });
+  }
+});
+
+test("source forms normalize like the CLI's record", () => {
+  assert.equal(sameSource("example/obversa", "https://github.com/example/obversa.git"), true);
+  assert.equal(sameSource("/some/local/checkout", "/some/local/checkout"), true);
+  assert.equal(sameSource("/some/local/checkout", "/other/checkout"), false);
 });
 
 test("the add and update argv is the one pinned command line", () => {

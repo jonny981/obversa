@@ -12,8 +12,6 @@ Usage:
   obversa-review --no-open      print the surface URL instead of placing it
   obversa-review --app <name>   override the surface app name
 `;
-import path from "node:path";
-import { fileURLToPath } from "node:url";
 
 // The value that must follow a value-taking option. A missing value, or one
 // shaped like another flag, is a usage error: a bare `--cwd` must never fall
@@ -50,16 +48,4 @@ export function parseArgs(argv, { cwd = process.cwd() } = {}) {
   if (options.mode === "range" && !options.range) throw new Error("--range needs a ref range, for example main..HEAD");
   if (!/^[A-Za-z0-9._-]+$/.test(options.app)) throw new Error("--app must be letters, digits, '.', '_' or '-'");
   return options;
-}
-
-/**
- * The placement command the review runs: the absolute OBVERSA_SURFACE_BIN
- * the host injected, else the obversa-surface glue beside the command that
- * asks (`commandUrl` is that command's import.meta.url, which Node resolves
- * through any symlink it was invoked by). Never a bare name.
- */
-export function placementBin(env, commandUrl) {
-  const injected = env.OBVERSA_SURFACE_BIN;
-  if (typeof injected === "string" && injected.length > 0) return injected;
-  return path.join(path.dirname(fileURLToPath(commandUrl)), "obversa-surface");
 }

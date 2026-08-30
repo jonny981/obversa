@@ -71,17 +71,6 @@ function normalizeGate(gate) {
   return { gateId, callback };
 }
 
-/**
- * The SurfaceRequest for one review (an internal note). `gate` is the option a
- * Callback Gate passes through reviewDiff — its id and callback — and is the
- * only route by which a gate reaches the request. Direct use from the command
- * line passes none, so gateId is null and the callback has null address and
- * token; the contract treats that shape as valid. The subject is the reviewed
- * ref (the working tree, the index, or the ref range) plus the URL the page
- * fetches the diff from; the transport is the browser pane the host opens.
- * The result copies surfaceId and gateId back, which is how a consumer routes
- * it.
- */
 // The identity every framed result carries: this package's name and the
 // version that actually answered, read once from its own manifest.
 let cachedIdentity;
@@ -93,6 +82,17 @@ function surfaceIdentity() {
   return cachedIdentity;
 }
 
+/**
+ * The SurfaceRequest for one review (an internal note). `gate` is the option a
+ * Callback Gate passes through reviewDiff — its id and callback — and is the
+ * only route by which a gate reaches the request. Direct use from the command
+ * line passes none, so gateId is null and the callback has null address and
+ * token; the contract treats that shape as valid. The subject is the reviewed
+ * ref (the working tree, the index, or the ref range) plus the URL the page
+ * fetches the diff from; the transport is the browser pane the host opens.
+ * The result copies surfaceId and gateId back, which is how a consumer routes
+ * it.
+ */
 export function buildSurfaceRequest(/** @type {{ model?: any, meta?: any, gate?: any, binding?: any }} */ { model, meta, gate, binding } = {}) {
   // reviewDiff hands over the binding it already read once; a direct caller
   // passes the gate option and it is read here, once.
@@ -198,9 +198,9 @@ const gitPort = { repositoryRoot, computeDiff, listTrackedFiles, rangeEnd };
  *
  * `reviewDiff` owns diff production and the review UI but not the surface
  * runtime: the caller injects a `launchSurface` port (the same shape as
- * @obversa/surfacer's runSurface) and the surface client-kit source. This keeps
- * @obversa/source free of any sibling-package dependency; the composition root
- * binds Surfacer.
+ * @obversa/surfacer's runSurface) and the surface client-kit source. The
+ * package's own command binds @obversa/surfacer to that port; the injection
+ * seam stays so a test or another runtime can bind its own.
  *
  * Options:
  * - mode: "worktree" | "staged" | "range" (default "worktree")

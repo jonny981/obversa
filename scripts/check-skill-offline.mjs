@@ -99,6 +99,12 @@ async function startRegistry(packages) {
     response.writeHead(200, { 'content-type': 'application/json' });
     response.end(JSON.stringify(document));
   });
+  // npm reuses sockets aggressively and backs off for tens of seconds when a
+  // reused socket dies; node's default 5s keep-alive turnover made the
+  // install look deadlocked at the quiet log levels (chattier levels shifted
+  // the timing off the closure window). The stand-in outlives the run.
+  server.keepAliveTimeout = 180_000;
+  server.headersTimeout = 185_000;
   await new Promise((resolveListen) => server.listen(0, '127.0.0.1', () => resolveListen()));
   return server;
 }
@@ -189,10 +195,14 @@ async function main() {
       npm_config_audit: 'false',
       npm_config_fund: 'false',
       npm_config_update_notifier: 'false',
-      // The pinned npm's exec hangs mid-install at the quiet log levels when
-      // driven over pipes (observed on npm 10.9.2: notice and error deadlock,
-      // info and silly complete); info keeps the run deterministic and the
-      // frame regexes do not care about the extra stderr.
+      // Against this registry stand-in, the pinned npm's exec hangs
+      // mid-install at the quiet log levels (npm 10.9.2: notice and error
+      // deadlock; info and silly complete; stdin open or closed makes no
+      // difference, nor does the stand-in's keep-alive). The same npx
+      // invocation against the real registry completes at the default level
+      // over the same pipes with stdin closed, so the hang is a stand-in
+      // interaction, not the skill's real-world behaviour; info keeps this
+      // proof deterministic, and the skill's command line sets nothing.
       npm_config_loglevel: 'info',
     };
     delete environment.OBVERSA_SURFACE_BIN;

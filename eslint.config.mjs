@@ -22,15 +22,11 @@ import { flatConfigs as importX } from 'eslint-plugin-import-x';
 const require = createRequire(import.meta.url);
 
 export default [
+  // The browser page's import of ./surface-client.mjs — served over HTTP at
+  // runtime — resolves through the declaration file beside the page, so the
+  // page is linted in full: every ban applies to it like any other file.
   {
-    ignores: [
-      '**/node_modules/**',
-      '**/dist/**',
-      'docs/**',
-      // The browser page imports ./surface-client.mjs as a URL the surfacer
-      // serves at runtime; no file exists beside the page source.
-      'packages/source/assets/app.js',
-    ],
+    ignores: ['**/node_modules/**', '**/dist/**', 'docs/**'],
   },
   {
     files: ['**/*.mjs', '**/*.cjs', '**/*.js'],
@@ -53,6 +49,19 @@ export default [
             { name: 'vm', message: 'runs generated code' },
             { name: 'node:vm', message: 'runs generated code' },
           ],
+        },
+      ],
+      // no-restricted-imports sees only static imports; the dynamic and
+      // CommonJS spellings of the vm modules are banned by syntax.
+      'no-restricted-syntax': [
+        'error',
+        {
+          selector: "ImportExpression > Literal[value='vm'], ImportExpression > Literal[value='node:vm']",
+          message: 'runs generated code',
+        },
+        {
+          selector: "CallExpression[callee.name='require'] > Literal[value='vm'], CallExpression[callee.name='require'] > Literal[value='node:vm']",
+          message: 'runs generated code',
         },
       ],
       'import-x/no-unresolved': ['error', { commonjs: true }],

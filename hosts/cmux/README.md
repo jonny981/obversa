@@ -171,10 +171,11 @@ for the review surface.
    `PLANNOTATOR_BROWSER` in the `env` block of `~/.claude/settings.json`,
    remove that entry once workspaces are created through this command: a
    global variable binds every launch to one host, so a skill launched in
-   another host would land here instead of where it started. A workspace
-   opened by hand still places correctly when `hosts/cmux/bin` is on that
-   workspace's `PATH`, and outside cmux the surface opens the default
-   browser.
+   another host would land here instead of where it started. For a workspace
+   opened by hand, export `OBVERSA_SURFACE_BIN` as the absolute path of this
+   host's `obversa-surface` in that workspace — the surfacer reads the
+   variable only, never `PATH` — and outside cmux the surface opens the
+   default browser.
 
 5. Apply config changes with `cmux reload-config`.
 
