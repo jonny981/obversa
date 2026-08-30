@@ -222,6 +222,8 @@ test("the review surface runs on surfacer and returns annotations", { timeout: 3
     const framed = parseFramedResult(stdout.text, "review");
     assert.ok(framed, "a complete framed result is on stdout when reviewDiff resolves");
     assert.equal(framed.status, "completed");
+    const ownManifest = JSON.parse(await readFile(new URL("../package.json", import.meta.url), "utf8"));
+    assert.deepEqual(framed.surface, { package: "@obversa/source", version: ownManifest.version }, "the frame names the surface package and its resolved version");
     assert.equal(framed.payload.surfaceId, outcome.result.surfaceId);
     assert.equal(framed.payload.decision, "changes-requested");
     assert.equal(framed.payload.annotations.length, 500);

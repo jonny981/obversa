@@ -35,6 +35,7 @@ const MAX_TIMER_MS = 2_147_483_647;
  *   assets?: { directory: string | URL, files: Record<string, string[]> },
  *   api?: Record<string, (context: { body: any, session: any }) => any>,
  *   terminalPayload?: (status: string) => unknown,
+ *   surface?: { package: string, version: string },
  *   terminalPayloadVerbatim?: boolean,
  *   sessionTimeoutMs?: number,
  *   leaseTimeoutMs?: number,
@@ -45,6 +46,7 @@ export async function startSurface({
   app,
   assets,
   api = {},
+  surface,
   terminalPayload,
   terminalPayloadVerbatim = false,
   sessionTimeoutMs = 14_400_000,
@@ -58,6 +60,12 @@ export async function startSurface({
   // been told the session completed. The frame marker is proved on it too.
   const appName = String(app);
   frameName(appName);
+  // The identity travels on every terminal result; a bad shape is refused
+  // here, at start, by the same rule that will build the results.
+  const surfaceIdentity = surface === undefined || surface === null ? null : (() => {
+    const probe = terminalResult(appName, "error", { surface });
+    return probe.surface;
+  })();
   // A timer that setTimeout refuses would throw inside the claim, after the
   // state had changed, and one above 2^31 - 1 milliseconds is clamped to 1 ms
   // and fires at once; refuse both here instead.
@@ -160,7 +168,7 @@ export async function startSurface({
         } catch (error) {
           throw httpError(`The completion payload cannot be framed: ${error?.message ?? error}`, 500);
         }
-        const result = terminalResult(appName, "completed", { payload: snapshot, verbatim });
+        const result = terminalResult(appName, "completed", { payload: snapshot, verbatim, surface: surfaceIdentity });
         // The exact frame is proved now, not when the launcher writes it, and
         // the handler's copy is made now too: nothing that can fail runs
         // after the claim, so a failure here leaves the session unclaimed and
@@ -253,7 +261,7 @@ export async function startSurface({
       }
       if (request.method === "POST" && requestUrl.pathname === "/api/cancel") {
         assertExactKeys(await readJson(request), []);
-        const result = terminalResult(appName, "cancelled", endingFor("cancelled","The user cancelled the surface"));
+        const result = terminalResult(appName, "cancelled", { ...endingFor("cancelled","The user cancelled the surface"), surface: surfaceIdentity });
         // As for a completion: the acknowledgement clock starts once this
         // answer — the one carrying the operation id — has gone out.
         if (!claimTerminal("cancelled", result, { awaitAcknowledgement: "deferred" })) {
@@ -369,7 +377,7 @@ export async function startSurface({
   const origin = `http://127.0.0.1:${port}`;
 
   sessionTimeout = setTimeout(() => {
-    const result = terminalResult(appName, "timed_out", endingFor("timed_out","The surface session timed out"));
+    const result = terminalResult(appName, "timed_out", { ...endingFor("timed_out","The surface session timed out"), surface: surfaceIdentity });
     if (claimTerminal("timed_out", result, { awaitAcknowledgement: false })) finalizeClaim();
   }, sessionTimeoutMs);
   sessionTimeout.unref?.();
@@ -442,7 +450,7 @@ export async function startSurface({
     clearTimeout(leaseTimeout);
     if (terminalState !== "pending") return;
     leaseTimeout = setTimeout(() => {
-      const result = terminalResult(appName, "timed_out", endingFor("timed_out","The surface disconnected"));
+      const result = terminalResult(appName, "timed_out", { ...endingFor("timed_out","The surface disconnected"), surface: surfaceIdentity });
       if (claimTerminal("timed_out", result, { awaitAcknowledgement: false })) finalizeClaim();
     }, leaseTimeoutMs);
     leaseTimeout.unref?.();
@@ -475,13 +483,13 @@ export async function startSurface({
         if (answerPending) { finalizeAfterAnswer = true; return false; }
         return finalizeClaim();
       }
-      const result = terminalResult(appName, "interrupted", endingFor("interrupted",`Interrupted by ${signal}`));
+      const result = terminalResult(appName, "interrupted", { ...endingFor("interrupted",`Interrupted by ${signal}`), surface: surfaceIdentity });
       if (!claimTerminal("interrupted", result, { awaitAcknowledgement: false })) return false;
       return finalizeClaim();
     },
     async stop() {
       if (terminalState === "pending") {
-        const result = terminalResult(appName, "interrupted", endingFor("interrupted","The caller stopped the session"));
+        const result = terminalResult(appName, "interrupted", { ...endingFor("interrupted","The caller stopped the session"), surface: surfaceIdentity });
         if (claimTerminal("interrupted", result, { awaitAcknowledgement: false })) finalizeClaim();
       } else {
         finalizeClaim();

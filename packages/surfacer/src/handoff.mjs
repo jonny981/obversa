@@ -72,14 +72,27 @@ export function frameName(app) {
 
 /** One opaque result for the caller. `completed` carries the app's result;
  *  every other status carries the outcome payload the app supplied for it, or
- *  null, plus a short redacted detail. */
-export function terminalResult(app, status, { payload = null, detail = null, operationId = randomUUID(), verbatim = false } = {}) {
+ *  null, plus a short redacted detail. `surface` is the identity of the
+ *  package that answered — { package, version }, read from that package's own
+ *  manifest — and rides every status, so a consumer can always say which
+ *  package and version produced the frame. */
+export function terminalResult(app, status, { payload = null, detail = null, operationId = randomUUID(), verbatim = false, surface = null } = {}) {
   if (!TERMINAL_STATUSES.includes(status)) {
     throw new TypeError(`Unsupported terminal status: ${status}`);
+  }
+  let identity = null;
+  if (surface !== null && surface !== undefined) {
+    const name = surface.package;
+    const version = surface.version;
+    if (typeof name !== "string" || name.length === 0 || typeof version !== "string" || version.length === 0) {
+      throw new TypeError("surface identity must be { package, version }, both non-empty strings");
+    }
+    identity = { package: name, version };
   }
   return {
     schemaVersion: 1,
     app: String(app),
+    surface: identity,
     status,
     operationId,
     createdAt: new Date().toISOString(),

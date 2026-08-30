@@ -1,4 +1,5 @@
 import { randomUUID } from "node:crypto";
+import { readFileSync } from "node:fs";
 import { copyFile, mkdtemp, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
@@ -81,6 +82,17 @@ function normalizeGate(gate) {
  * The result copies surfaceId and gateId back, which is how a consumer routes
  * it.
  */
+// The identity every framed result carries: this package's name and the
+// version that actually answered, read once from its own manifest.
+let cachedIdentity;
+function surfaceIdentity() {
+  if (cachedIdentity === undefined) {
+    const manifest = JSON.parse(readFileSync(new URL("../package.json", import.meta.url), "utf8"));
+    cachedIdentity = { package: manifest.name, version: manifest.version };
+  }
+  return cachedIdentity;
+}
+
 export function buildSurfaceRequest(/** @type {{ model?: any, meta?: any, gate?: any, binding?: any }} */ { model, meta, gate, binding } = {}) {
   // reviewDiff hands over the binding it already read once; a direct caller
   // passes the gate option and it is read here, once.
@@ -196,7 +208,9 @@ const gitPort = { repositoryRoot, computeDiff, listTrackedFiles, rangeEnd };
  * - cwd: the repository directory (default process.cwd())
  * - diffText: supply the unified diff directly and skip git (for tests/callers)
  * - app: the surface app name (default "review")
- * - launchSurface: required port; called with { app, assets, api, open, ready }
+ * - launchSurface: required port; called with { app, assets, api, open, ready,
+ *   surface } — surface is this package's own identity, { package, version }
+ *   from its manifest, and rides every framed result
  * - clientKitSource: required; the surface client-kit module served to the page
  * - open: place the surface in a host pane (default true)
  * - ready: forwarded to launchSurface once the session is reachable
@@ -342,7 +356,7 @@ export async function reviewDiff({
     // The outcome carries identity fields (a gate id can look like a token to
     // the redactor), so it opts in to verbatim like the completed result.
     const terminalPayload = (status) => normalizeResult({ decision: decisionFor(status), annotations: [], meta }, request, { terminal: true });
-    const outcome = await launchSurface({ app, assets, api, open, ready, terminalPayload, terminalPayloadVerbatim: true });
+    const outcome = await launchSurface({ app, assets, api, open, ready, terminalPayload, terminalPayloadVerbatim: true, surface: surfaceIdentity() });
     const terminal = outcome?.result ?? outcome;
     const status = terminal?.status ?? "unknown";
     // The framed payload is the SurfaceResult itself, whatever the status.

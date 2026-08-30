@@ -90,12 +90,15 @@ name the markers are `<<<REVIEW_RESULT_V1>>>` and
 case, with punctuation replaced by `_`.
 
 The payload is the surface result: the one result shape every Obversa
-review surface returns, whatever it shows.
+review surface returns, whatever it shows. The `surface` field names the
+package that answered and the version that was resolved, on every status,
+so a consumer can always say which surface produced the frame.
 
 ```json
 {
   "schemaVersion": 1,
   "app": "review",
+  "surface": { "package": "@obversa/source", "version": "0.1.0" },
   "status": "completed",
   "operationId": "…",
   "createdAt": "…",

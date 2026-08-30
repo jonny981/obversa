@@ -14,6 +14,17 @@ test("a framed result round-trips through caller-captured stdout", () => {
   assert.equal(parseFramedResult(captured, "other-app"), null);
 });
 
+test("every terminal status carries the surface identity, and a bad shape is refused", () => {
+  const surface = { package: "@obversa/source", version: "0.1.0" };
+  for (const status of ["completed", "cancelled", "timed_out", "interrupted", "error"]) {
+    assert.deepEqual(terminalResult("review", status, { surface }).surface, surface, status);
+    assert.equal(terminalResult("review", status).surface, null, status + " without identity");
+  }
+  for (const bad of [{}, { package: "@obversa/source" }, { version: "1" }, { package: "", version: "1" }, { package: 1, version: "1" }]) {
+    assert.throws(() => terminalResult("review", "completed", { surface: bad }), /surface identity must be/, JSON.stringify(bad));
+  }
+});
+
 test("terminal results redact secrets and cap detail", () => {
   const result = terminalResult("x", "error", { detail: `token=abc123 ${"y".repeat(600)}` });
   assert.match(result.detail, /\[REDACTED\]/);
