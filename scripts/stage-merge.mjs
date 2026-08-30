@@ -18,8 +18,8 @@ export function manageStage(args, options = {}) {
   if (args.length !== 2 || !['claim', 'finish', 'release'].includes(args[0])) {
     throw new Error('usage: pnpm stage:<claim|finish|release> <D1|F0>');
   }
-  if (!/^[DF]\d+[A-Z]?$/.test(args[1])) {
-    throw new Error('stage must look like D1, D11A, or F0');
+  if (!/^[DF]\d+[A-Za-z]?$/.test(args[1])) {
+    throw new Error('stage must look like D1, D11A, F0, or F2b');
   }
 
   const [command, stage] = args;
