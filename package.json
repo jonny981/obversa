@@ -59,7 +59,9 @@
     "test:lint": "node --test scripts/check-lint.spec.mjs",
     "check:tarballs": "node scripts/check-tarballs.mjs",
     "test:tarballs": "node --test scripts/check-tarballs.spec.mjs",
-    "check:surface-consumer": "node scripts/check-surface-consumer.mjs"
+    "check:surface-consumer": "node scripts/check-surface-consumer.mjs",
+    "check:skill-offline": "node scripts/check-skill-offline.mjs",
+    "test:skill-install": "node --test scripts/skill-install.spec.mjs"
   },
   "devDependencies": {
     "@arethetypeswrong/cli": "0.18.5",

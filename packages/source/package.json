@@ -29,6 +29,7 @@
     "src",
     "bin",
     "assets",
+    "skills",
     "README.md",
     "LICENSE"
   ],
@@ -36,5 +37,10 @@
     "access": "public",
     "registry": "http://publish-guard.invalid/",
     "@obversa:registry": "http://publish-guard.invalid/"
+  },
+  "obversa": {
+    "skills": [
+      "review-diff"
+    ]
   }
 }
