@@ -1,0 +1,27 @@
+{
+  "compilerOptions": {
+    "noEmit": true,
+    "allowJs": true,
+    "checkJs": true,
+    "module": "nodenext",
+    "moduleResolution": "nodenext",
+    "target": "es2024",
+    "lib": [
+      "es2024"
+    ],
+    "types": [
+      "node"
+    ],
+    "strict": false,
+    "skipLibCheck": true
+  },
+  "include": [
+    "src/**/*",
+    "test/**/*",
+    "examples/**/*"
+  ],
+  "exclude": [
+    "src/client.mjs",
+    "test/client.test.mjs"
+  ]
+}

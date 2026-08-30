@@ -343,8 +343,10 @@ test("lines are 1-indexed", () => {
 
 test("does not instantiate WebAssembly", () => {
   let wasmCalls = 0;
-  const instantiate = WebAssembly.instantiate.bind(WebAssembly);
-  WebAssembly.instantiate = (...args) => {
+  // The runtime global; @types/node 22 does not declare the namespace.
+  const WA = /** @type {any} */ (globalThis).WebAssembly;
+  const instantiate = WA.instantiate.bind(WA);
+  WA.instantiate = (...args) => {
     wasmCalls += 1;
     return instantiate(...args);
   };
@@ -352,7 +354,7 @@ test("does not instantiate WebAssembly", () => {
     navIndex({ code: "function read() { return 1; }", lang: "javascript" });
     assert.equal(wasmCalls, 0);
   } finally {
-    WebAssembly.instantiate = instantiate;
+    WA.instantiate = instantiate;
   }
 });
 

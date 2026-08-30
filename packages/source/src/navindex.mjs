@@ -15,7 +15,7 @@ const FUNCTION_VALUES = new Set([
 ]);
 
 const PARSE_OPTIONS = {
-  ecmaVersion: "latest",
+  ecmaVersion: /** @type {"latest"} */ ("latest"),
   locations: true,
   ranges: true,
   allowHashBang: true,
@@ -44,7 +44,7 @@ function parse(code) {
 // its parent's unless told otherwise: an arrow inherits, a normal function
 // clears it, a class member or static block sets its own class, and a nested
 // class therefore replaces the outer one.
-function pushScope(parent, { isFunction = false, thisClass } = {}) {
+function pushScope(parent, /** @type {{ isFunction?: boolean, thisClass?: any }} */ { isFunction = false, thisClass } = {}) {
   return {
     parent,
     defs: new Map(),
@@ -297,7 +297,7 @@ function emitProperty(id, thisClass, occurrences) {
   ));
 }
 
-function walkFunction(node, scope, occurrences, seenDefs, { namedInner = false, thisClass } = {}) {
+function walkFunction(node, scope, occurrences, seenDefs, /** @type {{ namedInner?: boolean, thisClass?: any }} */ { namedInner = false, thisClass } = {}) {
   // An arrow keeps the `this` around it; a normal function has its own,
   // unknown here unless it is a class member, whose class the caller names.
   const inner = pushScope(scope, {

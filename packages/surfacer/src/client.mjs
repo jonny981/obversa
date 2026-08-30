@@ -37,7 +37,9 @@ export function createSurfaceClient({ heartbeatMs = 15_000 } = {}) {
     });
     const data = await response.json().catch(() => ({}));
     if (!response.ok) {
-      const error = new Error(data.error || `Request failed (${response.status})`);
+      const error = /** @type {Error & { status?: number }} */ (
+        new Error(data.error || `Request failed (${response.status})`)
+      );
       error.status = response.status;
       throw error;
     }

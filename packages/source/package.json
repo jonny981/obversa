@@ -9,7 +9,8 @@
     "./testing": "./src/testing.mjs"
   },
   "scripts": {
-    "test": "node --test test/*.test.mjs"
+    "test": "node --test test/*.test.mjs",
+    "typecheck": "tsc -p tsconfig.json && tsc -p assets/tsconfig.json"
   },
   "engines": {
     "node": ">=20"

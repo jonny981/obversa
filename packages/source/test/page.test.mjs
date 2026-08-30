@@ -21,7 +21,7 @@ test("the shell links the static assets and carries nothing about the review", (
   assert.equal((html.match(/<script/g) || []).length, 1);
   assert.doesNotMatch(html, /review-data/);
   // The shell is the same for every review: nothing a caller passes reaches it.
-  assert.equal(buildIndexHtml({ meta: { label: "customer-secret..HEAD" } }), html);
+  assert.equal(/** @type {any} */ (buildIndexHtml)({ meta: { label: "customer-secret..HEAD" } }), html);
 });
 
 test("ASSETS_DIR holds the served browser files", () => {

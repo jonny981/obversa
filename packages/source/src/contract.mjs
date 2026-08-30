@@ -150,7 +150,7 @@ function canonicalJson(value, seen = new Set()) {
   // accessor is no data (it could answer differently each time), and a
   // non-enumerable property is skipped by JSON (an array's own length aside).
   const keys = Object.keys(value);
-  const descriptors = keys.map((key) => [key, Object.getOwnPropertyDescriptor(value, key)]);
+  const descriptors = keys.map((key) => /** @type {[string, PropertyDescriptor | undefined]} */ ([key, Object.getOwnPropertyDescriptor(value, key)]));
   if (descriptors.some(([, descriptor]) => !descriptor || !("value" in descriptor))) return null;
   const owned = Object.getOwnPropertyNames(value).filter((name) => !(Array.isArray(value) && name === "length")).length;
   if (owned !== keys.length) return null;

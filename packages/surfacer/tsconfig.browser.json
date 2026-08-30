@@ -1,0 +1,23 @@
+{
+  "compilerOptions": {
+    "noEmit": true,
+    "allowJs": true,
+    "checkJs": true,
+    "module": "esnext",
+    "moduleResolution": "bundler",
+    "target": "es2024",
+    "lib": [
+      "es2024",
+      "dom"
+    ],
+    "types": [
+      "node"
+    ],
+    "strict": false,
+    "skipLibCheck": true
+  },
+  "include": [
+    "src/client.mjs",
+    "test/client.test.mjs"
+  ]
+}

@@ -43,7 +43,7 @@ test("of two racing completions exactly one reports success; the other gets 409"
     const statuses = [first.status, second.status].sort();
     assert.deepEqual(statuses, [200, 409], "one winner, one loser");
     const winner = first.status === 200 ? first : second;
-    const { operationId } = await winner.json();
+    const { operationId } = await /** @type {any} */ (winner.json());
     assert.ok(operationId, "the winner receives the operation id to acknowledge");
     const ack = await post(surface, "/api/ack", { operationId });
     assert.equal(ack.status, 200);
@@ -88,12 +88,12 @@ test("a bystander in flight during the winner's completion, and a loser that swa
       post(surface, "/api/swallow", {}),
     ]);
     assert.equal(winner.status, 200);
-    const { operationId } = await winner.json();
+    const { operationId } = await /** @type {any} */ (winner.json());
     assert.ok(operationId);
     assert.equal(bystander.status, 409, "a request that completed nothing must not report success");
     assert.equal(swallow.status, 409, "a loser that hid its 409 must not report success");
     for (const r of [bystander, swallow]) {
-      const body = await r.json();
+      const body = await /** @type {any} */ (r.json());
       assert.equal(body.operationId, undefined, "the winner's operation id never reaches another client");
     }
     await post(surface, "/api/ack", { operationId });
@@ -151,7 +151,7 @@ test("a request whose body is still arriving when the winner completes is refuse
     await new Promise((resolve) => setTimeout(resolve, 50));
     const winner = await post(surface, "/api/answer", {});
     assert.equal(winner.status, 200);
-    const { operationId } = await winner.json();
+    const { operationId } = await /** @type {any} */ (winner.json());
     assert.ok(operationId);
     stalled.release();
     const late = await stalled.done;
@@ -181,7 +181,7 @@ test("a heartbeat whose body lands after the session closed is refused, not rene
     await new Promise((resolve) => setTimeout(resolve, 50));
     const cancel = await post(surface, "/api/cancel", {});
     assert.equal(cancel.status, 200);
-    const { operationId } = await cancel.json();
+    const { operationId } = await /** @type {any} */ (cancel.json());
     stalled.release();
     const late = await stalled.done;
     assert.equal(late.status, 409, "a heartbeat cannot succeed on a closed session");
@@ -205,7 +205,7 @@ test("a cancelled session carries the app's outcome payload, not null", async ()
   try {
     const cancel = await post(surface, "/api/cancel", {});
     assert.equal(cancel.status, 200);
-    const { operationId } = await cancel.json();
+    const { operationId } = await /** @type {any} */ (cancel.json());
     await post(surface, "/api/ack", { operationId });
     const decision = await surface.waitForDecision();
     assert.equal(decision.status, "cancelled");
@@ -230,7 +230,7 @@ test("an outcome payload is redacted by default and exact with the verbatim opt-
     });
     try {
       const cancel = await post(surface, "/api/cancel", {});
-      const { operationId } = await cancel.json();
+      const { operationId } = await /** @type {any} */ (cancel.json());
       await post(surface, "/api/ack", { operationId });
       const decision = await surface.waitForDecision();
       assert.equal(decision.status, "cancelled");
@@ -307,7 +307,7 @@ test("a completion the frame cannot carry is refused and the session stays open"
       for (const route of [`/api/${name}`, `/api/${name}-verbatim`]) {
         const refused = await post(surface, route, {});
         assert.equal(refused.status, 500, `${route}: a completion the frame cannot carry whole is an error, not a success`);
-        const body = await refused.json();
+        const body = await /** @type {any} */ (refused.json());
         assert.equal(body.operationId, undefined);
         assert.match(body.error, /cannot be framed/);
       }
@@ -315,7 +315,7 @@ test("a completion the frame cannot carry is refused and the session stays open"
     // Nothing was claimed: a frameable completion still succeeds afterwards.
     const good = await post(surface, "/api/good", {});
     assert.equal(good.status, 200, "the session stayed open");
-    const { operationId } = await good.json();
+    const { operationId } = await /** @type {any} */ (good.json());
     await post(surface, "/api/ack", { operationId });
     const decision = await surface.waitForDecision();
     assert.equal(decision.status, "completed");
@@ -354,7 +354,7 @@ test("what is claimed is a snapshot: a payload that serialises differently later
   try {
     const completed = await post(surface, "/api/tojson", {});
     assert.equal(completed.status, 200);
-    const { operationId } = await completed.json();
+    const { operationId } = await /** @type {any} */ (completed.json());
     await post(surface, "/api/ack", { operationId });
     const decision = await surface.waitForDecision();
     // The caller frames exactly what was proven, however the live object
@@ -377,7 +377,7 @@ test("what is claimed is a snapshot: a payload that serialises differently later
   try {
     const completed = await post(second, "/api/getter", {});
     assert.equal(completed.status, 200);
-    const { operationId } = await completed.json();
+    const { operationId } = await /** @type {any} */ (completed.json());
     await post(second, "/api/ack", { operationId });
     const decision = await second.waitForDecision();
     assert.deepEqual(decision.payload, { value: "first" });
@@ -407,7 +407,7 @@ test("hidden state is not data: an object with its prototype removed is carried 
   try {
     const completed = await post(surface, "/api/url", {});
     assert.equal(completed.status, 200);
-    const { operationId } = await completed.json();
+    const { operationId } = await /** @type {any} */ (completed.json());
     await post(surface, "/api/ack", { operationId });
     const decision = await surface.waitForDecision();
     assert.deepEqual(decision.payload, { a: { visible: 1 }, m: {} });
@@ -435,11 +435,11 @@ test("a callable toJSON takes precedence: the holder — even a Proxy answering 
     for (const route of ["/api/bad", "/api/bad-nested"]) {
       const refused = await post(surface, route, {});
       assert.equal(refused.status, 500, `${route}: what toJSON returned is checked by the same rule`);
-      assert.equal((await refused.json()).operationId, undefined);
+      assert.equal((await /** @type {any} */ (refused.json())).operationId, undefined);
     }
     const completed = await post(surface, "/api/good", {});
     assert.equal(completed.status, 200, "a Proxy holder with toJSON is replaced by what toJSON returned");
-    const { operationId } = await completed.json();
+    const { operationId } = await /** @type {any} */ (completed.json());
     await post(surface, "/api/ack", { operationId });
     const decision = await surface.waitForDecision();
     assert.deepEqual(decision.payload, { root: { visible: 1 }, nested: { p: [1, "two"] } });
@@ -480,7 +480,7 @@ test("plain data of any shape is carried, including null-prototype objects and t
   try {
     const completed = await post(surface, "/api/answer", {});
     assert.equal(completed.status, 200);
-    const { operationId } = await completed.json();
+    const { operationId } = await /** @type {any} */ (completed.json());
     await post(surface, "/api/ack", { operationId });
     const decision = await surface.waitForDecision();
     assert.deepEqual(decision.payload, { when: "1970-01-01T00:00:00.000Z", list: [1, "two", null, { deep: true }], text: "ok" });
@@ -554,7 +554,7 @@ test("the app name is read once at start: an empty one is refused, a changing on
   // value is empty has no marker, and must fail before any session exists;
   // punctuation-only names keep the existing rule and collapse to `_`.
   const assets = { directory: assetsDir, files: { "/": ["index.html", "text/html; charset=utf-8"] } };
-  await assert.rejects(() => startSurface({ app: { toString() { return ""; } }, assets }), /app name/);
+  await assert.rejects(() => startSurface({ app: /** @type {any} */ ({ toString() { return ""; } }), assets }), /app name/);
   for (const app of ["---", "   ", "my-app.v2"]) {
     const fine = await startSurface({ app, assets, sessionTimeoutMs: 10_000, leaseTimeoutMs: 10_000 });
     await fine.stop();
@@ -564,7 +564,7 @@ test("the app name is read once at start: an empty one is refused, a changing on
   let asked = 0;
   const shifty = { toString() { asked += 1; return asked === 1 ? "first" : ""; } };
   const surface = await startSurface({
-    app: shifty,
+    app: /** @type {any} */ (shifty),
     assets,
     api: { "POST /api/answer": async ({ session }) => { session.complete({ ok: 1 }); return null; } },
     sessionTimeoutMs: 10_000,
@@ -573,7 +573,7 @@ test("the app name is read once at start: an empty one is refused, a changing on
   try {
     const completed = await post(surface, "/api/answer", {});
     assert.equal(completed.status, 200);
-    const { operationId } = await completed.json();
+    const { operationId } = await /** @type {any} */ (completed.json());
     await post(surface, "/api/ack", { operationId });
     const decision = await surface.waitForDecision();
     assert.equal(decision.app, "first");
@@ -604,7 +604,7 @@ test("the claim owns its data: what complete() returns can be mutated without to
   try {
     const completed = await post(surface, "/api/answer", {});
     assert.equal(completed.status, 200);
-    const { operationId } = await completed.json();
+    const { operationId } = await /** @type {any} */ (completed.json());
     await post(surface, "/api/ack", { operationId });
     const decision = await surface.waitForDecision();
     assert.deepEqual(decision.payload, { ok: 1, list: [1] });
@@ -641,10 +641,10 @@ test("nothing that can fail runs after the claim: a failing copy leaves the sess
   try {
     const refused = await post(surface, "/api/answer", {});
     assert.equal(refused.status, 500);
-    assert.equal((await refused.json()).operationId, undefined);
+    assert.equal((await /** @type {any} */ (refused.json())).operationId, undefined);
     const good = await post(surface, "/api/good", {});
     assert.equal(good.status, 200, "the session was never claimed");
-    const { operationId } = await good.json();
+    const { operationId } = await /** @type {any} */ (good.json());
     await post(surface, "/api/ack", { operationId });
     const decision = await surface.waitForDecision();
     assert.deepEqual(decision.payload, { ok: 2 });
@@ -670,7 +670,7 @@ test("once a handler has completed, its response is the fixed acknowledgement wh
   try {
     const completed = await post(surface, "/api/bigint-body", {});
     assert.equal(completed.status, 200, "the claim stands and the browser can acknowledge it");
-    const body = await completed.json();
+    const body = await /** @type {any} */ (completed.json());
     assert.ok(body.operationId);
     assert.deepEqual(Object.keys(body).sort(), ["ok", "operationId"]);
     await post(surface, "/api/ack", { operationId: body.operationId });
@@ -689,7 +689,7 @@ test("once a handler has completed, its response is the fixed acknowledgement wh
   try {
     const completed = await post(second, "/api/shaped-body", {});
     assert.equal(completed.status, 200, "a status the handler returned after completing is not used");
-    const body = await completed.json();
+    const body = await /** @type {any} */ (completed.json());
     assert.equal(body.extra, undefined, "a body the handler returned after completing is not merged");
     assert.ok(body.operationId);
     await post(second, "/api/ack", { operationId: body.operationId });
@@ -701,10 +701,10 @@ test("once a handler has completed, its response is the fixed acknowledgement wh
 
 test("timer inputs are validated at start, never inside a claim", async () => {
   const assets = { directory: assetsDir, files: { "/": ["index.html", "text/html; charset=utf-8"] } };
-  await assert.rejects(() => startSurface({ app: "t", assets, ackTimeoutMs: 1n }), /ackTimeoutMs must be a positive integer/);
-  await assert.rejects(() => startSurface({ app: "t", assets, ackTimeoutMs: Symbol("s") }), /ackTimeoutMs must be a positive integer/);
+  await assert.rejects(() => startSurface({ app: "t", assets, ackTimeoutMs: /** @type {any} */ (1n) }), /ackTimeoutMs must be a positive integer/);
+  await assert.rejects(() => startSurface({ app: "t", assets, ackTimeoutMs: /** @type {any} */ (Symbol("s")) }), /ackTimeoutMs must be a positive integer/);
   await assert.rejects(() => startSurface({ app: "t", assets, sessionTimeoutMs: -1 }), /sessionTimeoutMs must be a positive integer/);
-  await assert.rejects(() => startSurface({ app: "t", assets, leaseTimeoutMs: "soon" }), /leaseTimeoutMs must be a positive integer/);
+  await assert.rejects(() => startSurface({ app: "t", assets, leaseTimeoutMs: /** @type {any} */ ("soon") }), /leaseTimeoutMs must be a positive integer/);
   await assert.rejects(() => startSurface({ app: "t", assets, sessionTimeoutMs: Number.NaN }), /sessionTimeoutMs must be a positive integer/);
   // Node clamps a delay above 2^31 - 1 to 1 ms and truncates a fraction.
   await assert.rejects(() => startSurface({ app: "t", assets, sessionTimeoutMs: 2_147_483_648 }), /sessionTimeoutMs must be a positive integer/);
@@ -717,7 +717,7 @@ test("terminalPayload must be a function, and a throwing one yields null", async
   await assert.rejects(() => startSurface({
     app: "bad",
     assets: { directory: assetsDir, files: { "/": ["index.html", "text/html; charset=utf-8"] } },
-    terminalPayload: "nope",
+    terminalPayload: /** @type {any} */ ("nope"),
   }), TypeError);
   const surface = await startSurface({
     app: "throws",

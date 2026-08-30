@@ -101,9 +101,9 @@ test("the data walker writes plain data without consulting toJSON, and refuses w
     assert.doesNotMatch(frameResult(terminalResult("probe", "interrupted", { detail: "x" })), /forged/);
     assert.equal(calls, before, "framing an envelope consulted it zero times");
   } finally {
-    delete Object.prototype.toJSON;
+    delete (/** @type {any} */ (Object.prototype)).toJSON;
   }
-  for (const [name, value] of [["a cycle", (() => { const o = {}; o.self = o; return o; })()], ["a BigInt", { n: 1n }], ["an undefined value", { u: undefined }], ["a non-finite number", { n: Infinity }], ["negative zero", { n: -0 }], ["Map", new Map()], ["Date", new Date(0)], ["a Proxy", new Proxy({}, {})], ["an accessor", { get x() { return 1; } }], ["a symbol-keyed property", { [Symbol("k")]: 1 }], ["an array with extra properties or holes", Object.assign([1], { extra: 2 })]]) {
+  for (const [name, value] of /** @type {[string, any][]} */ ([["a cycle", (() => { const o = {}; o.self = o; return o; })()], ["a BigInt", { n: 1n }], ["an undefined value", { u: undefined }], ["a non-finite number", { n: Infinity }], ["negative zero", { n: -0 }], ["Map", new Map()], ["Date", new Date(0)], ["a Proxy", new Proxy({}, {})], ["an accessor", { get x() { return 1; } }], ["a symbol-keyed property", { [Symbol("k")]: 1 }], ["an array with extra properties or holes", Object.assign([1], { extra: 2 })]])) {
     assert.throws(() => dataJson(value), new RegExp(name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")), name);
   }
 });

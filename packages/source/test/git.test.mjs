@@ -350,7 +350,7 @@ test("readNewFileText holds the worktree read to the file it checked: an open th
     // Between the check and the open a parent is swapped: the open lands on
     // another file. Modelled by an open port that opens b.txt for a.txt.
     const realOpen = readerPorts.open;
-    readerPorts.open = (target, flags) => realOpen(target.endsWith("a.txt") ? path.join(dir, "b.txt") : target, flags);
+    readerPorts.open = (target, flags) => realOpen(/** @type {string} */ (target).endsWith("a.txt") ? path.join(dir, "b.txt") : target, flags);
     try {
       assert.equal(await readNewFileText({ path: "a.txt", cwd: dir }), null, "a different file at open time is refused");
     } finally {

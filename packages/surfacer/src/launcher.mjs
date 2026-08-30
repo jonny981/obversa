@@ -14,9 +14,9 @@ function writeFrame(stdout, text) {
     stdout.write(text);
     return Promise.resolve();
   }
-  return new Promise((resolve, reject) => {
+  return /** @type {Promise<void>} */ (new Promise((resolve, reject) => {
     stdout.write(text, (error) => (error ? reject(error) : resolve()));
-  });
+  }));
 }
 
 /**
@@ -26,13 +26,19 @@ function writeFrame(stdout, text) {
  * stream. Signals interrupt the session cleanly. `ready` receives the
  * session url once the page is reachable. F3 and later surfaces call
  * this instead of rebuilding the lifecycle.
+ *
+ * @param {{
+ *   open?: boolean,
+ *   stdout?: import("node:stream").Writable | { write(text: string): unknown },
+ *   ready?: (info: { url: string, origin: string, port: number }) => void,
+ * } & Record<string, any>} options
  */
 export async function runSurface({ open = true, stdout = process.stdout, ready, ...surfaceOptions }) {
   const surface = await startSurface(surfaceOptions);
   const handlers = ["SIGINT", "SIGTERM"].map((signal) => {
     const handler = () => surface.interrupt(signal);
     process.on(signal, handler);
-    return [signal, handler];
+    return /** @type {[NodeJS.Signals, () => void]} */ ([signal, handler]);
   });
   const release = () => { for (const [signal, handler] of handlers.splice(0)) process.off(signal, handler); };
   try {

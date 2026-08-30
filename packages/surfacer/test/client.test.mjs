@@ -9,12 +9,12 @@ import { createSurfaceClient } from "../src/client.mjs";
 async function withBrowser(origin, run) {
   const saved = { location: globalThis.location, history: globalThis.history, fetch: globalThis.fetch };
   const fetched = [];
-  globalThis.location = { origin, hash: "#session-secret", pathname: "/" };
-  globalThis.history = { replaceState() {} };
-  globalThis.fetch = async (url, init) => {
+  globalThis.location = /** @type {any} */ ({ origin, hash: "#session-secret", pathname: "/" });
+  globalThis.history = /** @type {any} */ ({ replaceState() {} });
+  globalThis.fetch = /** @type {any} */ (async (url, init) => {
     fetched.push({ url, init });
     return { ok: true, json: async () => ({ ok: true }) };
-  };
+  });
   try {
     return await run(fetched);
   } finally {

@@ -146,7 +146,7 @@ test("the review surface runs on surfacer and returns annotations", { timeout: 3
       headers: { Authorization: `Bearer ${token}`, Origin: origin },
     });
     assert.equal(modelResponse.status, 200);
-    const { model, meta } = await modelResponse.json();
+    const { model, meta } = await /** @type {any} */ (modelResponse.json());
     assert.equal(meta.label, "working tree");
     const addedTexts = model.files[0].hunks.flatMap((h) => h.lines).map((l) => l.text);
     assert.ok(addedTexts.some((t) => t.includes(secret)), "the diff line reaches the browser unredacted");
@@ -189,7 +189,7 @@ test("the review surface runs on surfacer and returns annotations", { timeout: 3
       body: submitBody,
     });
     assert.equal(submit.status, 200);
-    const { operationId } = await submit.json();
+    const { operationId } = await /** @type {any} */ (submit.json());
     assert.ok(operationId, "the completion returns an operation id to acknowledge");
 
     const ack = await fetch(`${origin}/api/ack`, {
@@ -251,7 +251,7 @@ test("a cancelled review still frames the exact surface and gate ids with a canc
     const headers = { "Content-Type": "application/json", Authorization: `Bearer ${token}`, Origin: origin };
     const cancel = await fetch(`${origin}/api/cancel`, { method: "POST", headers, body: "{}" });
     assert.equal(cancel.status, 200);
-    const { operationId } = await cancel.json();
+    const { operationId } = await /** @type {any} */ (cancel.json());
     assert.equal((await fetch(`${origin}/api/ack`, { method: "POST", headers, body: JSON.stringify({ operationId }) })).status, 200);
 
     const outcome = await reviewPromise;

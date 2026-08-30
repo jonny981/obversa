@@ -64,7 +64,7 @@ test("runSurface runs one session end to end and frames the result", async () =>
     method: "POST",
     headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json", Origin: session.origin },
     body: JSON.stringify({ value: 7 }),
-  }).then((r) => r.json());
+  }).then((r) => /** @type {any} */ (r.json()));
   await fetch(`${session.origin}/api/ack`, {
     method: "POST",
     headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json", Origin: session.origin },
@@ -105,7 +105,7 @@ test("runSurface resolves only after the stream has taken a large verbatim frame
     method: "POST",
     headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json", Origin: session.origin },
     body: JSON.stringify({}),
-  }).then((r) => r.json());
+  }).then((r) => /** @type {any} */ (r.json()));
   await fetch(`${session.origin}/api/ack`, {
     method: "POST",
     headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json", Origin: session.origin },
@@ -154,7 +154,7 @@ test("once the session is decided the signal handlers are gone, before the frame
   await new Promise((resolve) => setTimeout(resolve, 100));
   const token = session.url.split("#")[1];
   const headers = { Authorization: `Bearer ${token}`, "Content-Type": "application/json", Origin: session.origin };
-  const reply = await fetch(`${session.origin}/api/answer`, { method: "POST", headers, body: JSON.stringify({ value: 1 }) }).then((r) => r.json());
+  const reply = await fetch(`${session.origin}/api/answer`, { method: "POST", headers, body: JSON.stringify({ value: 1 }) }).then((r) => /** @type {any} */ (r.json()));
   await fetch(`${session.origin}/api/ack`, { method: "POST", headers, body: JSON.stringify({ operationId: reply.operationId }) });
   await pending;
   assert.deepEqual(installed, { SIGINT: baseline.SIGINT + 1, SIGTERM: baseline.SIGTERM + 1 }, "the handlers are installed while the session runs");
@@ -187,7 +187,7 @@ test("the frame written is the frame claimed: a toJSON injected after the comple
     await new Promise((resolve) => setTimeout(resolve, 100));
     const token = session.url.split("#")[1];
     const headers = { Authorization: `Bearer ${token}`, "Content-Type": "application/json", Origin: session.origin };
-    const reply = await fetch(`${session.origin}/api/answer`, { method: "POST", headers, body: JSON.stringify({ value: 7 }) }).then((r) => r.json());
+    const reply = await fetch(`${session.origin}/api/answer`, { method: "POST", headers, body: JSON.stringify({ value: 7 }) }).then((r) => /** @type {any} */ (r.json()));
     await fetch(`${session.origin}/api/ack`, { method: "POST", headers, body: JSON.stringify({ operationId: reply.operationId }) });
     const { result } = await pending;
     const frame = frameOf(result);
@@ -198,7 +198,7 @@ test("the frame written is the frame claimed: a toJSON injected after the comple
     assert.match(captured, /"payload":\{"got":7\}/, "the claimed payload, not the hook's answer");
     assert.doesNotMatch(captured, /forged/);
   } finally {
-    delete Object.prototype.toJSON;
+    delete (/** @type {any} */ (Object.prototype)).toJSON;
   }
 });
 
@@ -215,7 +215,7 @@ async function withHook(run) {
   try {
     return await run(() => calls);
   } finally {
-    delete Object.prototype.toJSON;
+    delete (/** @type {any} */ (Object.prototype)).toJSON;
   }
 }
 
@@ -237,7 +237,7 @@ test("a toJSON present on Object.prototype before the claim defines the completi
     const token = session.url.split("#")[1];
     const headers = { Authorization: `Bearer ${token}`, "Content-Type": "application/json", Origin: session.origin };
     const before = calls();
-    const reply = await fetch(`${session.origin}/api/answer`, { method: "POST", headers, body: '{"value":7}' }).then((r) => r.json());
+    const reply = await fetch(`${session.origin}/api/answer`, { method: "POST", headers, body: '{"value":7}' }).then((r) => /** @type {any} */ (r.json()));
     await fetch(`${session.origin}/api/ack`, { method: "POST", headers, body: `{"operationId":${JSON.stringify(reply.operationId)}}` });
     const { result } = await pending;
     const frame = frameOf(result);
@@ -300,7 +300,7 @@ test("with a toJSON on Object.prototype before the claim, the protocol replies s
       const headers = { Authorization: `Bearer ${token}`, "Content-Type": "application/json", Origin: session.origin };
       const response = await fetch(`${session.origin}/api/${route}`, { method: "POST", headers, body: "{}" });
       assert.equal(response.status, 200, `${route}: ${await response.clone().text()}`);
-      const reply = await response.json();
+      const reply = await /** @type {any} */ (response.json());
       assert.match(String(reply.operationId), /^[0-9a-f-]{36}$/, `${route}: the reply carries the real operation id, not the hook's answer`);
       assert.equal(reply.forged, undefined, `${route}: the protocol reply is not the hook's`);
       const acked = await fetch(`${session.origin}/api/ack`, { method: "POST", headers, body: `{"operationId":${JSON.stringify(reply.operationId)}}` });
@@ -343,7 +343,7 @@ test("replacing WeakMap.prototype.get after the completion, or .set before it, c
       await new Promise((resolve) => setTimeout(resolve, 100));
       const token = session.url.split("#")[1];
       const headers = { Authorization: `Bearer ${token}`, "Content-Type": "application/json", Origin: session.origin };
-      const reply = await fetch(`${session.origin}/api/answer`, { method: "POST", headers, body: "{}" }).then((r) => r.json());
+      const reply = await fetch(`${session.origin}/api/answer`, { method: "POST", headers, body: "{}" }).then((r) => /** @type {any} */ (r.json()));
       await fetch(`${session.origin}/api/ack`, { method: "POST", headers, body: `{"operationId":${JSON.stringify(reply.operationId)}}` });
       const { result } = await pending;
       WeakMap.prototype.get = realGet;
@@ -385,7 +385,7 @@ test("the placement command receives the one-time launch URL, never the token-be
     await isReady;
     const token = session.url.split("#")[1];
     const headers = { Authorization: `Bearer ${token}`, "Content-Type": "application/json", Origin: session.origin };
-    const reply = await fetch(`${session.origin}/api/answer`, { method: "POST", headers, body: "{}" }).then((r) => r.json());
+    const reply = await fetch(`${session.origin}/api/answer`, { method: "POST", headers, body: "{}" }).then((r) => /** @type {any} */ (r.json()));
     await fetch(`${session.origin}/api/ack`, { method: "POST", headers, body: `{"operationId":${JSON.stringify(reply.operationId)}}` });
     const { placement: placed } = await pending;
     assert.deepEqual(placed, { opened: true, via: "host" });
@@ -413,7 +413,7 @@ test("an interrupt that arrives while a completion's answer is in flight release
     const headers = { Authorization: `Bearer ${token}`, "Content-Type": "application/json", Origin: surface.origin };
     const response = await fetch(`${surface.origin}/api/answer`, { method: "POST", headers, body: "{}" });
     assert.equal(response.status, 200, "the browser still gets its answer");
-    const reply = await response.json();
+    const reply = await /** @type {any} */ (response.json());
     assert.match(String(reply.operationId), /^[0-9a-f-]{36}$/, "with the operation id it must acknowledge");
     const started = Date.now();
     const result = await surface.waitForDecision();

@@ -29,7 +29,7 @@ test("reviewDiff needs both injected dependencies", async () => {
 
 test("reviewDiff checks the mode and its range before reading anything, a supplied diff included", async () => {
   const launchSurface = () => { throw new Error("must not launch"); };
-  await assert.rejects(() => reviewDiff({ diffText: DIFF, mode: "bogus", launchSurface, clientKitSource: CLIENT_KIT }), /mode must be worktree, staged, or range; got bogus/);
+  await assert.rejects(() => reviewDiff({ diffText: DIFF, mode: /** @type {any} */ ("bogus"), launchSurface, clientKitSource: CLIENT_KIT }), /mode must be worktree, staged, or range; got bogus/);
   await assert.rejects(() => reviewDiff({ diffText: DIFF, mode: "range", launchSurface, clientKitSource: CLIENT_KIT }), /range mode needs a ref range/);
   await assert.rejects(() => reviewDiff({ diffText: DIFF, mode: "range", range: "", launchSurface, clientKitSource: CLIENT_KIT }), /range mode needs a ref range/);
 });
@@ -37,7 +37,7 @@ test("reviewDiff checks the mode and its range before reading anything, a suppli
 test("a supplied diff is a string within the git lane's bound; anything else is a caller error, never an empty review", async () => {
   const launchSurface = () => { throw new Error("must not launch"); };
   for (const diffText of [null, Buffer.from(DIFF), { text: DIFF }, 42]) {
-    await assert.rejects(() => reviewDiff({ diffText, launchSurface, clientKitSource: CLIENT_KIT }), /diffText must be a string/, String(diffText));
+    await assert.rejects(() => reviewDiff({ diffText: /** @type {any} */ (diffText), launchSurface, clientKitSource: CLIENT_KIT }), /diffText must be a string/, String(diffText));
   }
   await assert.rejects(() => reviewDiff({ diffText: "x".repeat(MAX_DIFF_BYTES + 1), launchSurface, clientKitSource: CLIENT_KIT }), /larger than/);
 });

@@ -79,7 +79,7 @@ function assertSafeRange(range) {
 // `diff.suppressBlankEmpty=false` so a blank context line is always emitted as
 // a single space (with it on, a blank context line is an empty line, which
 // once ended the hunk early and hid every later changed line).
-export function diffArgs({ mode = "worktree", range } = {}) {
+export function diffArgs(/** @type {{ mode?: string, range?: string }} */ { mode = "worktree", range } = {}) {
   const base = [
     "-c", "diff.noprefix=false",
     "-c", "diff.mnemonicPrefix=false",
@@ -126,7 +126,7 @@ export async function repositoryRoot({ cwd = process.cwd() } = {}) {
  * a ref range (`git diff <range>`). The caller parses the text with
  * parseUnifiedDiff.
  */
-export async function computeDiff({ mode = "worktree", range, cwd = process.cwd() } = {}) {
+export async function computeDiff(/** @type {{ mode?: string, range?: string, cwd?: string }} */ { mode = "worktree", range, cwd = process.cwd() } = {}) {
   const args = diffArgs({ mode, range });
   const { stdout } = await run("git", args, {
     cwd,

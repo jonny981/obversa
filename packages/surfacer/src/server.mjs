@@ -29,6 +29,17 @@ const MAX_TIMER_MS = 2_147_483_647;
  * that every other response passes through — the read-side mirror of
  * session.complete's verbatim option, for content the caller must not corrupt
  * (a diff under review). The body still travels behind the bearer token.
+ *
+ * @param {{
+ *   app?: string,
+ *   assets?: { directory: string | URL, files: Record<string, string[]> },
+ *   api?: Record<string, (context: { body: any, session: any }) => any>,
+ *   terminalPayload?: (status: string) => unknown,
+ *   terminalPayloadVerbatim?: boolean,
+ *   sessionTimeoutMs?: number,
+ *   leaseTimeoutMs?: number,
+ *   ackTimeoutMs?: number,
+ * }} options
  */
 export async function startSurface({
   app,
@@ -87,7 +98,7 @@ export async function startSurface({
   // validated here is what is served, whatever the caller does to its own
   // objects afterwards.
   const assetsDirectory = String(assets.directory);
-  const staticFiles = new Map(Object.entries(assets.files).map(([route, entry]) => [route, Array.isArray(entry) ? [...entry] : entry]));
+  const staticFiles = new Map(Object.entries(assets.files).map(([route, entry]) => /** @type {[string, string[]]} */ ([route, Array.isArray(entry) ? [...entry] : entry])));
   for (const [route, [fileName]] of staticFiles) {
     if (typeof fileName !== "string" || fileName.includes("/") || fileName.includes("\\") || fileName.startsWith(".")) {
       throw new TypeError(`Static file names must be plain names inside the assets directory: ${route}`);
@@ -346,14 +357,15 @@ export async function startSurface({
     socket.end("HTTP/1.1 400 Bad Request\r\nConnection: close\r\n\r\n");
   });
 
-  await new Promise((resolve, reject) => {
+  await /** @type {Promise<void>} */ (new Promise((resolve, reject) => {
     const onError = (error) => { server.off("listening", onListening); reject(error); };
     const onListening = () => { server.off("error", onError); resolve(); };
     server.once("error", onError);
     server.once("listening", onListening);
     server.listen(0, "127.0.0.1");
-  });
-  port = server.address().port;
+  }));
+  // listen() with a numeric port always yields an AddressInfo.
+  port = /** @type {import("node:net").AddressInfo} */ (server.address()).port;
   const origin = `http://127.0.0.1:${port}`;
 
   sessionTimeout = setTimeout(() => {
@@ -367,7 +379,7 @@ export async function startSurface({
    * Claim the session's one terminal decision.
    * @param {string} status
    * @param {object} result
-   * @param {{ awaitAcknowledgement?: true | false | "deferred" }} [options]
+   * @param {{ awaitAcknowledgement?: true | false | "deferred", frame?: string }} [options]
    */
   function claimTerminal(status, result, { awaitAcknowledgement = true, frame } = {}) {
     if (terminalState !== "pending") return false;
@@ -500,7 +512,7 @@ export function assertExactKeys(value, allowedKeys) {
 }
 
 export function httpError(message, statusCode) {
-  const error = new Error(message);
+  const error = /** @type {Error & { statusCode?: number }} */ (new Error(message));
   error.statusCode = statusCode;
   return error;
 }
@@ -609,14 +621,14 @@ async function readJson(request) {
   let size = 0;
   const declaredLength = Number(request.headers["content-length"] || 0);
   if (Number.isFinite(declaredLength) && declaredLength > MAX_BODY_BYTES) {
-    const error = new Error("Request body is too large");
+    const error = /** @type {Error & { code?: string }} */ (new Error("Request body is too large"));
     error.code = "BODY_TOO_LARGE";
     throw error;
   }
   for await (const chunk of request) {
     size += chunk.length;
     if (size > MAX_BODY_BYTES) {
-      const error = new Error("Request body is too large");
+      const error = /** @type {Error & { code?: string }} */ (new Error("Request body is too large"));
       error.code = "BODY_TOO_LARGE";
       throw error;
     }
@@ -626,6 +638,7 @@ async function readJson(request) {
   return text ? JSON.parse(text) : {};
 }
 
+/** @param {import("node:http").ServerResponse} response @param {string} directory @param {string[]} entry */
 async function sendStatic(response, directory, [fileName, contentType]) {
   const content = await fs.readFile(path.join(directory, fileName));
   response.writeHead(200, {

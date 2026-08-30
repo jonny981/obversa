@@ -61,7 +61,7 @@ test("unknown lang falls back to plaintext without throwing", async () => {
 });
 
 test("rejects a non-string code and an empty lang", async () => {
-  await assert.rejects(() => highlightToTokens({ code: 123, lang: "javascript" }), TypeError);
+  await assert.rejects(() => highlightToTokens({ code: /** @type {any} */ (123), lang: "javascript" }), TypeError);
   await assert.rejects(() => highlightToTokens({ code: "x", lang: "" }), TypeError);
 });
 

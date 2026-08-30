@@ -186,7 +186,7 @@ async function devtools(profile, origin) {
   const port = Number(readFileSync(portFile, "utf8").split("\n")[0]);
   let page;
   for (let i = 0; i < 100 && !page; i += 1) {
-    const targets = await (await fetch(`http://127.0.0.1:${port}/json/list`)).json();
+    const targets = /** @type {any} */ (await (await fetch(`http://127.0.0.1:${port}/json/list`)).json());
     page = targets.find((t) => t.type === "page" && t.url.startsWith(origin));
     if (!page) await new Promise((r) => setTimeout(r, 100));
   }
@@ -336,8 +336,8 @@ test("the review surface renders under the exact CSP with zero violations and fi
     if (asset) return send(200, asset[1], readFileSync(path.join(ASSETS_DIR, asset[0]), "utf8"));
     send(404, "text/plain", "not found");
   });
-  await new Promise((r) => server.listen(0, "127.0.0.1", r));
-  const origin = `http://127.0.0.1:${server.address().port}`;
+  await /** @type {Promise<void>} */ (new Promise((r) => server.listen(0, "127.0.0.1", () => r())));
+  const origin = `http://127.0.0.1:${/** @type {import("node:net").AddressInfo} */ (server.address()).port}`;
   const profile = mkdtempSync(path.join(os.tmpdir(), "browser-proof-profile-"));
   let chrome;
   let report;
@@ -463,8 +463,8 @@ test("a page that cannot load its review cancels the session instead of holding 
     if (asset) return send(200, asset[1], readFileSync(path.join(ASSETS_DIR, asset[0]), "utf8"));
     send(404, "text/plain", "not found");
   });
-  await new Promise((r) => server.listen(0, "127.0.0.1", r));
-  const origin = `http://127.0.0.1:${server.address().port}`;
+  await /** @type {Promise<void>} */ (new Promise((r) => server.listen(0, "127.0.0.1", () => r())));
+  const origin = `http://127.0.0.1:${/** @type {import("node:net").AddressInfo} */ (server.address()).port}`;
   const profile = mkdtempSync(path.join(os.tmpdir(), "browser-proof-cancel-"));
   let chrome;
   let ack;

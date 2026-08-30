@@ -89,10 +89,10 @@ test("an app handler's outcome is read exactly once: a body getter cannot hand t
     const flipped = await fetch(`${surface.origin}/api/flip`, { headers });
     assert.equal(reads, 1, "the body was read once");
     assert.equal(flipped.status, 400, "a Map is not a reply the transport can carry: refused, not written as {}");
-    assert.match((await flipped.json()).error, /JSON cannot carry \[object Map\]/);
+    assert.match((await /** @type {any} */ (flipped.json())).error, /JSON cannot carry \[object Map\]/);
     const plain = await fetch(`${surface.origin}/api/plain`, { headers });
     assert.equal(plain.status, 200);
-    assert.deepEqual(await plain.json(), { fine: true, list: [1, "two"] });
+    assert.deepEqual(await /** @type {any} */ (plain.json()), { fine: true, list: [1, "two"] });
   } finally {
     surface.interrupt();
     await surface.waitForDecision();
@@ -119,7 +119,7 @@ test("a handler that returns body null gets the JSON null it asked for; one that
     assert.equal(await nothing.text(), "null");
     const unsaid = await fetch(`${surface.origin}/api/unsaid`, { headers });
     assert.equal(unsaid.status, 202);
-    assert.deepEqual(await unsaid.json(), { ok: true });
+    assert.deepEqual(await /** @type {any} */ (unsaid.json()), { ok: true });
   } finally {
     surface.interrupt();
     await surface.waitForDecision();

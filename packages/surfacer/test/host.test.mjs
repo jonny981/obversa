@@ -37,7 +37,7 @@ test("the host adapter is tried first, then the browser, then print", async () =
   const printed = await openSurfaceUrl("http://127.0.0.1:1/z", {
     surfaceBin: path.join(directory, "missing-a"),
     browserCommand: [path.join(directory, "missing-b")],
-    stderr: { write: (text) => captured.push(text) },
+    stderr: /** @type {any} */ ({ write: (text) => captured.push(text) }),
   });
   assert.deepEqual(printed, { opened: false, via: "print" });
   assert.match(captured.join(""), /http:\/\/127\.0\.0\.1:1\/z/);
@@ -98,13 +98,13 @@ test("a placement command that is not an absolute path is not run: a bare name w
     const result = await openSurfaceUrl("http://127.0.0.1:1/x#token", {
       surfaceBin: "obversa-surface",
       browserCommand: [browser.file],
-      stderr: { write: (text) => captured.push(text) },
+      stderr: /** @type {any} */ ({ write: (text) => captured.push(text) }),
     });
     assert.deepEqual(result, { opened: true, via: "browser" }, "placement falls through to the browser");
     assert.equal(existsSync(onPath.record), false, "the executable on PATH was never run");
     assert.match(captured.join(""), /OBVERSA_SURFACE_BIN is not an absolute path and is not run: obversa-surface/);
     // Unset: no host placement is attempted at all.
-    const unset = await openSurfaceUrl("http://127.0.0.1:1/y", { surfaceBin: undefined, browserCommand: [browser.file], stderr: { write: () => {} } });
+    const unset = await openSurfaceUrl("http://127.0.0.1:1/y", { surfaceBin: undefined, browserCommand: [browser.file], stderr: /** @type {any} */ ({ write: () => {} }) });
     assert.deepEqual(unset, { opened: true, via: "browser" });
     assert.equal(existsSync(onPath.record), false);
   } finally {
@@ -119,7 +119,7 @@ test("a browser command that is not an absolute path is not run either; the URL 
   const previousPath = process.env.PATH;
   process.env.PATH = `${directory}${path.delimiter}${previousPath}`;
   try {
-    const result = await openSurfaceUrl("http://127.0.0.1:1/x#token", { surfaceBin: undefined, browserCommand: ["open"], stderr: { write: (text) => captured.push(text) } });
+    const result = await openSurfaceUrl("http://127.0.0.1:1/x#token", { surfaceBin: undefined, browserCommand: ["open"], stderr: /** @type {any} */ ({ write: (text) => captured.push(text) }) });
     assert.deepEqual(result, { opened: false, via: "print" });
     assert.equal(existsSync(onPath.record), false, "the open on PATH was never run");
     assert.match(captured.join(""), /The browser command is not an absolute path and is not run: open/);

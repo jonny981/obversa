@@ -81,7 +81,7 @@ function normalizeGate(gate) {
  * The result copies surfaceId and gateId back, which is how a consumer routes
  * it.
  */
-export function buildSurfaceRequest({ model, meta, gate, binding } = {}) {
+export function buildSurfaceRequest(/** @type {{ model?: any, meta?: any, gate?: any, binding?: any }} */ { model, meta, gate, binding } = {}) {
   // reviewDiff hands over the binding it already read once; a direct caller
   // passes the gate option and it is read here, once.
   const { gateId, callback } = binding ?? normalizeGate(gate);

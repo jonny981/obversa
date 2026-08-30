@@ -111,7 +111,7 @@ test("app handler completes the session and the decision resolves after ack", as
   try {
     const response = await request(surface, "/api/answer", { body: { value: 42 } });
     assert.equal(response.status, 200);
-    const submitted = await response.json();
+    const submitted = await /** @type {any} */ (response.json());
     assert.equal(submitted.ok, true);
     assert.ok(submitted.operationId, "the reply carries the operation id for ack");
     const ack = await request(surface, "/api/ack", { body: { operationId: submitted.operationId } });
@@ -130,7 +130,7 @@ test("cancel settles the decision and closes the session", async () => {
   try {
     const cancelled = await request(surface, "/api/cancel", { body: {} });
     assert.equal(cancelled.status, 200);
-    const { operationId } = await cancelled.json();
+    const { operationId } = await /** @type {any} */ (cancelled.json());
     await request(surface, "/api/ack", { body: { operationId } });
     const decision = await surface.waitForDecision();
     assert.equal(decision.status, "cancelled");
@@ -271,7 +271,7 @@ test("a handler that completes and then throws still reports the completion", as
   try {
     const response = await request(surface, "/api/boom", { body: {} });
     assert.equal(response.status, 200);
-    const body = await response.json();
+    const body = await /** @type {any} */ (response.json());
     assert.equal(body.ok, true);
     assert.ok(body.operationId);
     const decision = await surface.waitForDecision();
@@ -320,7 +320,7 @@ test("the caller learns of a completion only after the winning request has been 
     const decided = surface.waitForDecision().then((decision) => { settled = true; return decision; });
     const answered = await request(surface, "/api/slow", { body: {} });
     assert.equal(answered.status, 200);
-    const { operationId } = await answered.json();
+    const { operationId } = await /** @type {any} */ (answered.json());
     assert.equal(typeof operationId, "string", "the browser gets the operation id to acknowledge");
     assert.equal(settled, false, "the decision had not settled when the browser was answered: the clock starts after the answer, not at the claim");
     const ack = await request(surface, "/api/ack", { body: { operationId } });
@@ -356,7 +356,7 @@ test("a handler that completes and then never returns is answered at the claim, 
     // The race bounds the whole answer — headers and body — so a regression
     // that writes headers and never ends the body fails here too.
     const { status, operationId } = await Promise.race([
-      request(surface, "/api/hang", { body: {} }).then(async (response) => ({ status: response.status, ...(await response.json()) })),
+      request(surface, "/api/hang", { body: {} }).then(async (response) => ({ status: response.status, ...(await /** @type {any} */ (response.json())) })),
       new Promise((_, reject) => setTimeout(() => reject(new Error("the browser was not answered at the claim")), 1_000)),
     ]);
     assert.equal(status, 200, "the browser is answered at the claim while the handler remains pending");
@@ -429,7 +429,7 @@ test("a cancel is answered before the caller learns of it, and its acknowledgeme
     const decided = surface.waitForDecision().then((decision) => { settled = true; return decision; });
     const answered = await request(surface, "/api/cancel", { body: {} });
     assert.equal(answered.status, 200);
-    const { operationId } = await answered.json();
+    const { operationId } = await /** @type {any} */ (answered.json());
     assert.equal(typeof operationId, "string");
     assert.equal(settled, false, "the decision had not settled when the cancel was answered");
     const ack = await request(surface, "/api/ack", { body: { operationId } });

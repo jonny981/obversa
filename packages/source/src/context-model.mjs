@@ -32,7 +32,7 @@ export const MAX_CONTEXT_TOTAL_BYTES = 32 * 1024 * 1024;
 export function boundedReader({ read = readNewFileText, maxTotalBytes = MAX_CONTEXT_TOTAL_BYTES } = {}) {
   const cache = new Map();
   let used = 0;
-  return async function boundedRead({ path, mode, cwd } = {}) {
+  return async function boundedRead(/** @type {{ path?: string, mode?: string, cwd?: string }} */ { path, mode, cwd } = {}) {
     const key = `${mode}\0${path}`;
     if (cache.has(key)) return cache.get(key);
     let text = null;
@@ -61,7 +61,7 @@ function sliceContext(lines, tokens, from, to) {
   return out;
 }
 
-export async function contextModel(model, { mode = "worktree", cwd = process.cwd(), registry, read = readNewFileText, maxTotalBytes = MAX_CONTEXT_TOTAL_BYTES } = {}) {
+export async function contextModel(model, /** @type {{ mode?: string, cwd?: string, registry?: any, read?: (target: any) => Promise<string | null>, maxTotalBytes?: number }} */ { mode = "worktree", cwd = process.cwd(), registry, read = readNewFileText, maxTotalBytes = MAX_CONTEXT_TOTAL_BYTES } = {}) {
   if (!model || !Array.isArray(model.files) || !registry) return;
 
   let totalBytes = 0;
