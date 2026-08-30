@@ -1,0 +1,37 @@
+#!/bin/bash
+# Create a cmux workspace whose terminals and agents place Obversa surfaces
+# back into this host. The workspace carries two environment variables, each
+# the absolute path of a placement script beside this command: the surfacer
+# reads OBVERSA_SURFACE_BIN, Plannotator reads PLANNOTATOR_BROWSER. The
+# binding is per launch host, never global: nothing here writes a profile,
+# a settings file, or anything under the home directory.
+set -euo pipefail
+
+usage() {
+  echo "usage: obversa-cmux-workspace <repository-directory>" >&2
+}
+
+if [ $# -ne 1 ]; then
+  usage
+  exit 2
+fi
+if [ "$1" = "-h" ] || [ "$1" = "--help" ]; then
+  usage
+  exit 0
+fi
+if [ ! -d "$1" ]; then
+  echo "obversa-cmux-workspace: not a directory: $1" >&2
+  exit 2
+fi
+
+# This script's own directory, found with the shell's builtins alone (cd,
+# pwd -P): the placement scripts beside it receive session URLs, so no
+# command looked up on PATH may choose that directory.
+HERE="$(cd "${BASH_SOURCE[0]%/*}" && pwd -P)"
+
+# cmux itself is the one command taken from PATH here, as the other glue
+# takes the platform opener: placement is optional glue, and a workspace
+# host without cmux has nothing to create.
+exec cmux workspace create --cwd "$1" \
+  --env "OBVERSA_SURFACE_BIN=$HERE/obversa-surface" \
+  --env "PLANNOTATOR_BROWSER=$HERE/obversa-plannotator-browser"

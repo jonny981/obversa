@@ -832,10 +832,12 @@ const requiredScanRoots = ['hosts'];
 // The host JavaScript that must be import-scanned, by name, so a rename or a
 // scan gap cannot leave the composition root unchecked.
 const requiredScannedFiles = [
+  'hosts/cmux/bin/obversa-cmux-workspace',
   'hosts/cmux/bin/obversa-order-workspace',
   'hosts/cmux/bin/obversa-plannotator-browser',
   'hosts/cmux/bin/obversa-surface',
   'hosts/cmux/test/f0-proof.sh',
+  'hosts/cmux/test/f2b-placement-proof.sh',
 ];
 const scanFiles = [
   '.gitignore',
@@ -906,6 +908,7 @@ const hostRules = new Map([
   ['cmux', {
     scripts: {},
     shell: {
+      'bin/obversa-cmux-workspace': '797bff9eef5818c7e3296dbc8aa01644b6d10c2082a921bc21f1dce678e5ef37',
       'bin/obversa-order-workspace': '4a8821485b2c1c67041ffd248075a42042674bddb3aebfb4f6915b007e7299f8',
       'bin/obversa-peer-send': '15e38b2a7d4d232122a1653df6dc2ca17085d03e78ad7d687192daa95ac78da8',
       'bin/obversa-plannotator-browser': 'ef180a43d479ad9c9ae2242bb7f24b74ab58f85781465ffd6eace1c45b9ef34a',

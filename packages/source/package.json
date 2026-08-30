@@ -6,7 +6,7 @@
   "exports": {
     ".": "./src/index.mjs",
     "./testing": "./src/testing.mjs",
-    "./bin": "./src/review-cli.mjs"
+    "./bin": "./bin/obversa-review.mjs"
   },
   "scripts": {
     "test": "node --test test/*.test.mjs",

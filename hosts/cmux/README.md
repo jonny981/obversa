@@ -159,14 +159,22 @@ for the review surface.
    ```
 3. Set the Shared root once per shell or workspace:
    `export OBVERSA_SHARED_ROOT=~/dev/personal/obversa-shared`.
-4. Route Plannotator into a split. Plannotator runs as a Claude Code hook,
-   so put the variable in the `env` block of `~/.claude/settings.json`:
+4. Create workspaces through the host's own launcher, which binds both
+   placement variables to this checkout's scripts for every terminal and
+   agent in the workspace:
 
-   ```json
-   "env": {
-     "PLANNOTATOR_BROWSER": "/absolute/path/to/hosts/cmux/bin/obversa-plannotator-browser"
-   }
+   ```sh
+   hosts/cmux/bin/obversa-cmux-workspace <repository-directory>
    ```
+
+   The binding is per launch host, never global. If an earlier setup put
+   `PLANNOTATOR_BROWSER` in the `env` block of `~/.claude/settings.json`,
+   remove that entry once workspaces are created through this command: a
+   global variable binds every launch to one host, so a skill launched in
+   another host would land here instead of where it started. A workspace
+   opened by hand still places correctly when `hosts/cmux/bin` is on that
+   workspace's `PATH`, and outside cmux the surface opens the default
+   browser.
 
 5. Apply config changes with `cmux reload-config`.
 
@@ -182,6 +190,7 @@ session). The proof validates that the uncommented form parses.
 
 ```sh
 hosts/cmux/test/f0-proof.sh
+hosts/cmux/test/f2b-placement-proof.sh
 ```
 
 The proof is deterministic. It replaces `cmux`, `open`, and `code` with
