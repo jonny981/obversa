@@ -1,18 +1,18 @@
 import { createHash } from 'node:crypto';
 import { realpathSync } from 'node:fs';
 import { readFile, readdir } from 'node:fs/promises';
-import { isBuiltin } from 'node:module';
 import { basename, dirname, extname, isAbsolute, join, relative, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 // (fileURLToPath also reads `file:` specifiers, below.)
 
 // The TypeScript compiler's parser (the pinned TypeScript 6 build; the
-// TypeScript 7 native build exposes no parser API). A real parser is the only
-// honest way to find imports: strings, template literals, regex literals, and
-// comments are decided by the language's grammar, so none of them can hide a
-// specifier from this fail-closed guard or fake one. The same build's config
-// reader and module resolver answer what a project config means and where a
-// specifier lands, so the scan never recreates the compiler's path rules.
+// TypeScript 7 native build exposes no parser API). The standard tools own
+// the package arrows now — dependency-cruiser proves them, ESLint bans the
+// JavaScript loader hatches, pnpm's isolated linker closes the hidden hoist
+// — so the parser here serves what no standard tool covers yet: the
+// loader-hatch refusal on the TypeScript sources (typescript-eslint refuses
+// the TS 7 pin) and the project-config reading that waits on workstream 1's
+// references migration.
 import ts from '@typescript/typescript6';
 // The range parser pnpm uses, at the pinned version, so a dependency value
 // is a range exactly when pnpm would install a version rather than a tag.
@@ -29,37 +29,23 @@ const scriptKinds = new Map([
 ]);
 export const parserExtensions = [...scriptKinds.keys()];
 
-// Every module form the parser map accepts is scanned for imports; this set
-// and the predicate are exported so the spec can hold them to that. A form
-// the parser accepts but the scan skipped would let a forbidden import
-// through unchecked.
+// Every module form the parser map accepts; the predicate scopes the
+// TypeScript hatch scan to package sources. Both are exported so the spec
+// holds them to that.
 export const sourceExtensions = ['.ts', '.tsx', '.mts', '.cts', '.js', '.jsx', '.mjs', '.cjs'];
 const sourcePattern = new RegExp(`(?:${sourceExtensions.map((ext) => ext.replace('.', '\\.')).join('|')})$`);
 export function scansImports(path) {
   return path.startsWith('packages/') && sourcePattern.test(path);
 }
 
-// A host is a composition root: it may import any workspace package by its
-// public name, and nothing by a path into packages/. Host JavaScript — a
-// source file by extension, or an extensionless command whose first line is
-// a node shebang — is held to that, with the loader-hatch rules of shipped
-// source. Returns the failures for one file.
+// A host carries placement glue only: bash commands pinned by content, and
+// no JavaScript at all. This predicate finds host JavaScript — a source
+// file by extension, or an extensionless command whose first line is a node
+// shebang — so the scan can refuse it on sight.
 export function isHostScript(path, text) {
   if (!path.startsWith('hosts/')) return false;
   if (sourcePattern.test(path)) return true;
   return extname(path) === '' && /^#!.*\bnode\b/.test(text.split('\n')[0] ?? '');
-}
-// A host's test file is one under hosts/<name>/test/ and nowhere else: a
-// test-shaped name under bin/ or lib/ (helper.test.py, a test/ folder
-// there) is shipped and held to every host rule. Paths are repository-
-// relative with forward slashes.
-export function isHostTestFile(path) {
-  return /^hosts\/[^/]+\/test\//.test(path);
-}
-// The `hosts/<name>` root an absolute path lies in, or undefined.
-function hostRootOf(absolute, repoRoot) {
-  const match = /^hosts\/([^/]+)(?:\/|$)/.exec(placedUnder(absolute, repoRoot));
-  return match ? `hosts/${match[1]}/` : undefined;
 }
 // A path relative to the root with both read by real path (realPathOf), so
 // a root or a file handed over through a symlink places the same as its
@@ -88,108 +74,6 @@ function realPathOf(path) {
 // walk or by the per-package and per-host walks that enter dist. Declared
 // before the check runs, which any function the check calls must be.
 const symlinkRefusal = (path) => `${path}: a symlink is refused wherever the scan walks; it can reach a file the scan never read while the path that names it looks local, or stand as an entry or a command the scan never read`;
-// The membership proof over recorded host edges: each target must be in
-// the set of files the walk import-scanned. Exported so the spec holds it to
-// that directly, beside the live full-check mutant.
-export function hostEdgeFailures(edges, scanned) {
-  const failures = [];
-
-  for (const { from, specifier, target } of edges) {
-    if (!scanned.has(target)) failures.push(`${from}: imports ${specifier}, which resolves to ${target}, a file this scan did not import-scan`);
-  }
-  return failures;
-}
-// `dependencies` is what the host's manifest declares: each name to the set
-// of subpaths its exports map lists (a workspace package), or null (a
-// registry package). Nothing declared is the default, so a shipped bare
-// specifier fails closed when the caller has no manifest to hand over.
-export function hostImportFindings(text, { file, root: repoRoot, edges = [], selfName, dependencies = new Map() } = {}) {
-  const findings = [];
-  const parsedAs = sourcePattern.test(file) ? file : `${file}.mjs`;
-  // A host's proofs reach a package's internals by path today (the browser
-  // proof drives the highlighter and the models directly); the public-name
-  // rule binds shipped host code, and the proofs move to a public testing
-  // subpath in F2b. A test file is still refused a computed or schemed
-  // specifier. Only the host's own test/ directory is a test: a test-shaped
-  // name under bin/ or lib/ (x.test.mjs, a test/ folder there) ships.
-  const shipped = !isHostTestFile(relative(repoRoot ?? '/', file).split('\\').join('/'));
-  for (const raw of moduleSpecifiers(text, parsedAs)) {
-    if (raw === null) {
-      findings.push('a computed module reference cannot be checked; use a plain string');
-      continue;
-    }
-    const { text: specifier, refused } = readSpecifier(raw);
-    if (refused) {
-      findings.push(refused);
-      continue;
-    }
-    // Package indirection is not a path the scan can follow: a `#alias` goes
-    // through the host manifest's imports map, and the host's own name (or a
-    // subpath of it) through its exports map. Neither exists in a host, and
-    // both are refused so no module can reach a file the edge set never saw.
-    if (shipped && specifier.startsWith('#')) {
-      findings.push(`a host imports through a package-imports alias (${specifier}); hosts carry no imports map and import by path or public name only`);
-      continue;
-    }
-    if (shipped && selfName && (specifier === selfName || specifier.startsWith(`${selfName}/`))) {
-      findings.push(`a host imports itself by package name (${specifier}); hosts carry no exports map and import their own files by path`);
-      continue;
-    }
-    // A bare specifier is a builtin under its node: prefix or a dependency
-    // the host's manifest declares, and a subpath into a dependency only
-    // one its exports map lists: without that entry Node serves any file
-    // under the package, scanned or not.
-    if (shipped && !/^\.\.?\//.test(specifier) && !isAbsolute(specifier)) {
-      if (specifier.startsWith('node:')) {
-        if (!isBuiltin(specifier)) findings.push(`a host imports ${specifier}, which is not a Node builtin`);
-        continue;
-      }
-      if (isBuiltin(specifier)) {
-        findings.push(`a host imports the builtin ${specifier} without its node: prefix; name it node:${specifier}`);
-        continue;
-      }
-      const parts = /^((?:@[^/]+\/)?[^/]+)(?:\/(.*))?$/.exec(specifier);
-      const name = parts?.[1];
-      if (!name || !dependencies.has(name)) {
-        findings.push(`a host imports ${specifier}, which its manifest does not declare; a host takes only the dependencies its manifest declares`);
-        continue;
-      }
-      if (parts[2] !== undefined && !dependencies.get(name)?.has(`./${parts[2]}`))
-        findings.push(`a host imports ${specifier}, a subpath its dependency's exports map does not list; without that entry Node serves any file under the package`);
-      continue;
-    }
-    if (shipped && (/^\.\.?\//.test(specifier) || isAbsolute(specifier))) {
-      // A query or fragment is URL syntax to the loader, which opens the
-      // file without it; the scan would resolve the punctuation as a name.
-      if (/[?#]/.test(specifier)) {
-        findings.push(`a host imports ${specifier}, which carries a query or fragment; a module is named by its path alone`);
-        continue;
-      }
-      const target = resolve(dirname(file), specifier);
-      const real = realpathOf(target, ts.sys);
-      const dir = packageDirOf(real, repoRoot) ?? packageDirOf(target, repoRoot);
-      if (dir !== undefined) findings.push(`a host reaches packages/${dir} by path (${specifier}); hosts import packages by their public names only`);
-      // A test path is exempt from the loader-hatch rules, so shipped host
-      // code may not reach one — the same edge the package scan refuses.
-      if (namesTestPath(specifier, file) || namesTestPath(real, file)) findings.push(`shipped host code imports a test path, which is exempt from the loader-hatch rules: ${specifier}`);
-      // A shipped host's local module must be a file the walk import-scans:
-      // inside the importing file's own hosts/<name>/ root by real path (not
-      // the repository root, not scripts/, not another host) and carrying a
-      // source extension. Membership is proved by position, never inferred
-      // from a suffix alone.
-      const hostRoot = hostRootOf(file, repoRoot);
-      const targetRoot = hostRootOf(real, repoRoot);
-      if (!hostRoot || targetRoot !== hostRoot) findings.push(`a host imports a local module outside its own host root (${specifier}); a host's local modules live under ${hostRoot ?? 'hosts/<name>/'}`);
-      else if (!sourcePattern.test(real)) findings.push(`a host imports a local module the scan would not read (${specifier}); a local module carries a source extension`);
-      // The early reasons above are clear but not the proof: the walk skips
-      // dist and node_modules, so a shape that passes them can still name a
-      // file no scan read. Every resolved edge is recorded, and after the
-      // walk each target must be a file that was actually import-scanned.
-      edges.push({ specifier, target: relative(repoRoot, real).split('\\').join('/') });
-    }
-  }
-  return findings;
-}
 export const textExtensions = new Set([
   ...sourceExtensions,
   '.css',
@@ -825,31 +709,6 @@ export function manifestImportTargets(manifest, { file, root: repoRoot } = {}) {
   return found;
 }
 
-// A specifier as the loader reads it: a `file:` URL is the path it names, a
-// percent-encoded specifier is decoded (`./%2e%2e/` is `./../`), and any
-// other URL scheme but `node:` — `data:`, `http:`, `blob:` — is refused,
-// since what it loads is not a file the scan can place. Returns `{ text }`
-// or `{ refused }`.
-export function readSpecifier(specifier) {
-  const scheme = /^([a-zA-Z][a-zA-Z0-9+.-]*):/.exec(specifier)?.[1];
-  if (scheme !== undefined && scheme !== 'node') {
-    if (scheme === 'file') {
-      try {
-        return { text: fileURLToPath(specifier) };
-      } catch {
-        return { refused: `a file URL the loader cannot read: ${specifier}` };
-      }
-    }
-    return { refused: `a ${scheme}: URL specifier loads something the scan cannot place` };
-  }
-  if (!specifier.includes('%')) return { text: specifier };
-  try {
-    return { text: decodeURIComponent(specifier) };
-  } catch {
-    return { refused: `a percent-encoded specifier that does not decode: ${specifier}` };
-  }
-}
-
 // The package a specifier or path names when it crosses a package boundary:
 // an `@obversa/...` name by name, a relative or absolute path by the package
 // directory it resolves into, when that is not the importing file's own.
@@ -924,205 +783,41 @@ export async function walkTree(directory, { ignored = ignoredDirectories } = {})
 }
 
 // Where the compiler lands a specifier from a file under one set of options:
-// as a module and as a type reference directive, and under both module
-// formats when the resolution kind tells them apart (Node16 / NodeNext).
-function resolvedTargets(specifier, file, options, host) {
-  const byFormat = options.moduleResolution === ts.ModuleResolutionKind.Node16
-    || options.moduleResolution === ts.ModuleResolutionKind.NodeNext;
-  const modes = byFormat ? [ts.ModuleKind.ESNext, ts.ModuleKind.CommonJS] : [undefined];
-  const targets = [];
-  for (const mode of modes) {
-    const module = ts.resolveModuleName(specifier, file, options, host, undefined, undefined, mode).resolvedModule;
-    if (module) targets.push(module.resolvedFileName);
-    const directive = ts.resolveTypeReferenceDirective(specifier, file, options, host, undefined, undefined, mode).resolvedTypeReferenceDirective;
-    if (directive?.resolvedFileName) targets.push(directive.resolvedFileName);
-  }
-  return targets;
-}
-
-// The workspace packages a file depends on: `@obversa/...` specifiers by name,
-// relative paths that resolve into another `packages/<dir>/` (a path inside
-// the importing package is not a crossing), and — under each project config
-// the package carries (`configs`, their effective compiler options) — the
-// file the compiler itself resolves the specifier to, by the package
-// directory its real path lies in. That last answer is what closes every
-// alias route: a `paths` wildcard whose substitution walks out of the
-// package, a `baseUrl` that lands elsewhere, a mapping inherited from a base.
-// A computed specifier is reported as a refusal so the caller fails closed.
-// `file` is the importing file's absolute path and `root` the repository
-// root; without them only package-name specifiers are reported. Package
-// directory names equal the unscoped package names today; the plugin split
-// maps directories through their manifests.
-export function extractObversaImports(text, { file, root: repoRoot, configs = [], host = ts.sys } = {}) {
-  const found = [];
-  const owner = file && repoRoot ? packageDirOf(file, repoRoot) : undefined;
-  for (const raw of moduleSpecifiers(text, file ?? 'module.ts')) {
-    if (raw === null) {
-      found.push(refusal('a computed module reference cannot be checked; use a plain string'));
-      continue;
-    }
-    const { text: specifier, refused } = readSpecifier(raw);
-    if (refused) {
-      found.push(refusal(refused));
-      continue;
-    }
-    // The shipped edge into a test file is refused here, so the loader-hatch
-    // exemption a test file enjoys can never be reached from shipped source.
-    if (!isTestPath(file ?? '') && namesTestPath(specifier, file)) {
-      found.push(refusal(`shipped source imports a test path, which is exempt from the loader-hatch rules: ${specifier}`));
-      continue;
-    }
-    // Node reads a `?query` or `#fragment` on a relative import as URL
-    // syntax and loads the file without it, while a path resolver would look
-    // for a file with that punctuation in its name and find nothing. A
-    // module is named by its path alone: either is refused before anything
-    // resolves. (A manifest entry field is a file path, where `?` is a
-    // character; that lane does not come through here.)
-    if ((/^\.\.?\//.test(specifier) || isAbsolute(specifier)) && /[?#]/.test(specifier)) {
-      found.push(refusal(`${specifier} carries a query or fragment; a module is named by its path alone, since the loader would open the file without it`));
-      continue;
-    }
-    const named = new Set();
-    const crossing = crossingPackage(specifier, { file, root: repoRoot });
-    if (crossing) {
-      found.push(crossing);
-      named.add(crossing);
-    }
-    if (!file || !repoRoot) continue;
-    for (const options of configs) {
-      for (const target of resolvedTargets(specifier, file, options, host)) {
-        const real = realpathOf(target, host);
-        // An alias (`paths`, `baseUrl`) can land a shipped import on a test
-        // file inside its own package; that is the same shipped edge, refused
-        // before the same-package skip below.
-        if (!isTestPath(file) && isTestPath(real)) {
-          found.push(refusal(`shipped source resolves to a test path, which is exempt from the loader-hatch rules: ${specifier} -> ${relative(repoRoot, real)}`));
-          continue;
-        }
-        // An alias can land on build output the same way; dist is never
-        // read by the scan, so a path-form edge into a workspace package's
-        // dist is refused wherever it lands. A public name is the arrow
-        // itself — the compiler lands it on the sibling's built types, and
-        // that sibling's own scan covers its sources — and an installed
-        // package under node_modules is not part of the tree at all.
-        const placed = placedUnder(real, repoRoot);
-        if (!isTestPath(file) && !specifier.startsWith('@obversa/') && /(^|\/)dist\//.test(placed) && !/(^|\/)node_modules\//.test(placed)) {
-          found.push(refusal(`shipped source resolves to build output under dist, which the scan does not read: ${specifier} -> ${placed}`));
-          continue;
-        }
-        // An alias can land on an extensionless module the scan never reads.
-        if (!isTestPath(file) && !specifier.startsWith('@obversa/') && host.fileExists?.(real) && !sourcePattern.test(real) && !/\.(json|css|html|txt|md|d\.ts)$/.test(real) && !/(^|\/)node_modules\//.test(placed)) {
-          found.push(refusal(`shipped source resolves to ${placed}, a file with no source extension, which the scan never import-scans: ${specifier}`));
-          continue;
-        }
-        // An alias can land outside packages/ too — on a host, on scripts/,
-        // on the root — and a package imports nothing from there.
-        if (!isTestPath(file) && !specifier.startsWith('@obversa/') && !/^packages\//.test(placed) && !/(^|\/)node_modules\//.test(placed) && !placed.startsWith('..')) {
-          found.push(refusal(`shipped source resolves outside packages/: ${specifier} -> ${placed}; a package imports nothing from hosts, scripts, or the repository root`));
-          continue;
-        }
-        const dir = packageDirOf(real, repoRoot);
-        if (dir === undefined || dir === owner) continue;
-        const name = `@obversa/${dir}`;
-        if (named.has(name)) continue;
-        named.add(name);
-        found.push(name);
-      }
-    }
-  }
-  return found;
-}
-
 // Compare real paths: Node resolves symlinks for import.meta but keeps the
 // invoked path in argv, so a symlinked invocation must still count as main.
 const isMain = process.argv[1] && realpathSync(fileURLToPath(import.meta.url)) === realpathSync(resolve(process.argv[1]));
 if (isMain) await main();
 
 async function main() {
-// A package's scripts run whatever they say, from the package directory: a
-// script can compile, load, or preload a sibling's files through the shell,
-// the compiler, or Node without naming an import anywhere the scan reads.
-// Rather than read the shell, each package's scripts are pinned here
-// verbatim, and any change — a new script, a changed one, a removed one —
-// fails until this rule is reviewed with it.
-const runtimeScripts = {
-  build: 'tsup && tsc -p tsconfig.build.json',
-  test: 'vitest run',
-  typecheck: 'tsc --noEmit -p tsconfig.json',
-  'typecheck:ts6': 'tsc6 --noEmit -p tsconfig.json',
-  prepack: 'pnpm run build',
-  prepublishOnly: 'node ../../scripts/check-publish-allowlist.mjs',
-};
-// The configuration files those scripts read — tsup's entries and vitest's
-// includes and aliases decide what is compiled and what a specifier maps
-// to — are pinned by the SHA-256 of their content, for the same reason:
-// a change to one is a change to the boundary rule. The vitest aliases in
-// memory-git and memory-simple map @obversa/memory to its source, the
-// arrow those packages are allowed.
-const sharedVitestConfig = '47f97f641e5f61ceac97871e6920106d3589156d8a8c5082af7fa43f77f3af75';
-const smallTsupConfig = '04bcd9ecce6085ba1fdb9793308e534aa8deca99bebd9556484e5caf13d3347f';
 const packageRules = new Map([
   ['@obversa/lines', {
     version: '1.0.0',
     dependencies: [],
     peerDependencies: ['@obversa/memory'],
-    peerDependencyVersions: { '@obversa/memory': '>=0.1.0 <0.2.0' },
-    scripts: {
-      build: 'tsup && tsc -p tsconfig.build.json',
-      typecheck: 'tsc --noEmit',
-      'typecheck:ts6': 'tsc6 --noEmit',
-      test: 'vitest run',
-      'test:watch': 'vitest',
-      prepack: 'pnpm run build',
-      prepublishOnly: 'node ../../scripts/check-publish-allowlist.mjs',
-    },
-    configFiles: {
-      'tsup.config.ts': '4ad5acaefe92ed656068f2fc80e4ab7706fbf7bc5244e6823b836308aa92b7a0',
-      'vitest.config.ts': sharedVitestConfig,
-    },
-  }],
+    peerDependencyVersions: { '@obversa/memory': '>=0.1.0 <0.2.0' } }],
   ['@obversa/memory', {
     version: '0.1.0',
     dependencies: [],
     peerDependencies: [],
-    scripts: runtimeScripts,
-    configFiles: {
-      'tsup.config.ts': '492827498350f6fb7446c21bb116257fab839810b3957610c8698be6acaea4f7',
-      'vitest.config.ts': sharedVitestConfig,
-    },
   }],
   ['@obversa/memory-simple', {
     version: '0.1.0',
     dependencies: ['@obversa/memory'],
     peerDependencies: [],
-    scripts: runtimeScripts,
-    configFiles: {
-      'tsup.config.ts': smallTsupConfig,
-      'vitest.config.ts': '3c0fa3b9d4f29b00827685e48a9e21c7fb76406dc7d109d4a1eaffb8a479c493',
-    },
   }],
   ['@obversa/memory-git', {
     version: '0.1.0',
     dependencies: ['@obversa/memory'],
     peerDependencies: [],
-    scripts: runtimeScripts,
-    configFiles: {
-      'tsup.config.ts': smallTsupConfig,
-      'vitest.config.ts': '1852703a25309cfea3a288634a46ea383873091b76f8ab9c1629f57163d451ad',
-    },
   }],
   // Private workspace packages get a rule too, so a sibling import inside
   // them is caught the same way. Surfacer must never depend on the runtime or
   // another package. Source depends on surfacer — the flipped arrow: the
   // review command lives in source and injects surfacer's launch port itself,
   // so a host keeps placement glue only.
-  ['@obversa/surfacer', { version: '0.1.0', private: true, dependencies: [], peerDependencies: [], scripts: { test: 'node --test test/*.test.mjs', typecheck: 'tsc -p tsconfig.json && tsc -p tsconfig.browser.json' }, configFiles: {} }],
-  ['@obversa/source', { version: '0.1.0', private: true, dependencies: ['@obversa/surfacer'], peerDependencies: [], scripts: { test: 'node --test test/*.test.mjs', typecheck: 'tsc -p tsconfig.json && tsc -p assets/tsconfig.json' }, configFiles: {} }],
+  ['@obversa/surfacer', { version: '0.1.0', private: true, dependencies: [], peerDependencies: [] }],
+  ['@obversa/source', { version: '0.1.0', private: true, dependencies: ['@obversa/surfacer'], peerDependencies: [] }],
 ]);
-// The names a build or test tool reads its configuration from, wherever
-// it runs: any such file that is not pinned is refused, in a package or
-// at the root (vitest reads a workspace file there).
-const toolConfigName = /^(?:tsup|vitest|vite)\.(?:config|workspace)\.[^/]+$|^tsup\.json$/;
 const scanRoots = [
   '.changeset',
   'packages',
@@ -1136,9 +831,6 @@ const scanRoots = [
 const requiredScanRoots = ['hosts'];
 // The host JavaScript that must be import-scanned, by name, so a rename or a
 // scan gap cannot leave the composition root unchecked.
-const requiredImportScannedHostFiles = [];
-const importScannedHostFiles = new Set();
-const hostEdges = [];
 const requiredScannedFiles = [
   'hosts/cmux/bin/obversa-order-workspace',
   'hosts/cmux/bin/obversa-plannotator-browser',
@@ -1222,7 +914,6 @@ const hostRules = new Map([
     },
   }],
 ]);
-const hostManifests = new Map();
 for (const entry of await readdir(join(root, 'hosts'), { withFileTypes: true })) {
   // Nothing but host directories lives directly under hosts/: a file there
   // belongs to no host, so no host rule could hold it.
@@ -1298,7 +989,6 @@ for (const entry of await readdir(join(root, 'hosts'), { withFileTypes: true }))
     if (basename(path) === 'package.json' && path !== join(hostDir, 'package.json'))
       failures.push(`${relative(root, path).split('\\').join('/')}: a nested manifest makes itself the package scope of the files beneath it, whatever it is named; a host has one manifest, at its root`);
   }
-  hostManifests.set(`hosts/${entry.name}/`, { manifest, dependencies });
 }
 
 // The arrows a package may draw: itself, its dependencies, its peers. A
@@ -1459,27 +1149,6 @@ for (const [name, rule] of packageRules) {
   // or a bundler: each is placed like an import.
   checkArrows(`packages/${owner}/package.json`, owner, manifestPathTargets(manifest, manifestAt));
 
-  // The scripts are exactly the pinned ones.
-  const scripts = manifest.scripts ?? {};
-  for (const scriptName of new Set([...Object.keys(scripts), ...Object.keys(rule.scripts)])) {
-    if (scripts[scriptName] !== rule.scripts[scriptName])
-      failures.push(`${name}: script ${scriptName} must be ${JSON.stringify(rule.scripts[scriptName]) ?? 'absent'}; found ${JSON.stringify(scripts[scriptName]) ?? 'absent'}. Scripts are pinned in packageRules; review the boundary rule with any change`);
-  }
-  // And the configuration files those scripts read are exactly the pinned
-  // ones, by content; a tool key in the manifest is another such file.
-  const present = (await readdir(directory)).filter((entry) => toolConfigName.test(entry));
-  for (const entry of new Set([...present, ...Object.keys(rule.configFiles)])) {
-    const pinned = rule.configFiles[entry];
-    const actual = present.includes(entry) ? createHash('sha256').update(await readFile(join(directory, entry))).digest('hex') : undefined;
-    if (actual !== pinned)
-      failures.push(`packages/${owner}/${entry}: content sha256 must be ${pinned ?? 'absent'}; found ${actual ?? 'absent'}. Build and test configuration is pinned in packageRules; review the boundary rule with any change`);
-  }
-  for (const key of ['tsup', 'vitest', 'vite']) {
-    if (manifest[key] !== undefined) failures.push(`${name}: manifest key ${key} configures a tool the scan pins by file; move it to a pinned file`);
-  }
-}
-for (const entry of await readdir(root)) {
-  if (toolConfigName.test(entry)) failures.push(`${entry}: a root build or test configuration is read by every package's tools and is not pinned`);
 }
 // The tools that interpret the pinned configurations, and the guard's own
 // parsers, are pinned to exact versions at the root: a content hash only
@@ -1610,30 +1279,28 @@ for (const absolute of files) {
     if (rule.pattern.test(text)) failures.push(`${path}: contains ${rule.name}`);
   }
 
-  // Import scan covers every source form in the workspace: the runtime is
-  // TypeScript, the surface packages are plain ES modules. Each specifier is
-  // also resolved under every project config its package carries.
-  if (scansImports(path)) {
-    const owner = path.split('/')[1];
-    const configs = (projectConfigs.get(owner) ?? []).map((config) => config.options);
-    checkArrows(path, owner, extractObversaImports(text, { file: absolute, root, configs }));
+  // Package arrows are dependency-cruiser's job now (check:arrows and its
+  // fixture matrix); the compiler-resolution import scan is deleted with
+  // that replacement in place. What stays here for source files is the
+  // loader-hatch refusal on the TypeScript packages alone: the ESLint
+  // config bans the same forms in JavaScript, and typescript-eslint refuses
+  // the root's TS 7 pin, so this one narrowed rule holds the line until
+  // workstream 1's migration lands a TypeScript parser story.
+  if (/\.(ts|tsx|mts|cts)$/.test(path) && scansImports(path)) {
+    // The parser reports a hatch as a null entry among the specifiers.
+    if (moduleSpecifiers(text, path).includes(null)) {
+      failures.push(`${path}: a loader hatch (eval, Function, a vm or module loader, a computed or unreadable specifier) is refused in TypeScript sources; the ESLint bans cover the JavaScript files`);
+    }
   }
-  // Host JavaScript is scanned too: public package names only, no path into
-  // packages/, and the loader-hatch rules of shipped source.
+  // A host carries placement glue only: the review command lives in
+  // @obversa/source, so host JavaScript — a .mjs/.cjs/.js file, or an
+  // extensionless command with a node shebang — is refused on sight rather
+  // than import-scanned. dependency-cruiser cannot read an extensionless
+  // script, so the refusal is what keeps a node command from reappearing
+  // under a host unseen.
   if (isHostScript(path, text)) {
-    importScannedHostFiles.add(path);
-    // A shebang carries options to node before any import runs:
-    // `#!/usr/bin/env -S node --import=./packages/x/src/y.mjs` loads a
-    // package path with no specifier the scan reads. A host command's
-    // shebang is exactly `#!/usr/bin/env node`, nothing more.
-    const shebang = text.split('\n')[0] ?? '';
-    if (shebang.startsWith('#!') && shebang !== '#!/usr/bin/env node')
-      failures.push(`${path}: a host command's shebang is exactly #!/usr/bin/env node; found ${JSON.stringify(shebang)} — options there load code before any import the scan reads`);
-    const edges = [];
-    const host = hostManifests.get(hostRootOf(absolute, root));
-    for (const finding of hostImportFindings(text, { file: absolute, root, edges, selfName: host?.manifest.name, dependencies: host?.dependencies })) failures.push(`${path}: ${finding}`);
-    for (const edge of edges) hostEdges.push({ from: path, ...edge });
-  } else if (path.startsWith('hosts/') && !isHostTestFile(path) && (/^hosts\/[^/]+\/(bin|lib)\//.test(path) || text.startsWith('#!'))) {
+    failures.push(`${path}: a host carries placement glue only; host JavaScript moved into the packages, and a node command here would run outside every arrow check`);
+  } else if (path.startsWith('hosts/') && !/^hosts\/[^/]+\/test\//.test(path) && (/^hosts\/[^/]+\/(bin|lib)\//.test(path) || text.startsWith('#!'))) {
     // A shipped host file that is not JavaScript — a shell command, under
     // bin/ or lib/ or carrying a shebang anywhere under the host — runs
     // whatever it says, so it may not name a package directory or an
@@ -1705,14 +1372,6 @@ for (const absolute of files) {
 for (const path of requiredScannedFiles) {
   if (!scannedTextFiles.has(path)) failures.push(`${path}: public host file is not scanned`);
 }
-for (const path of requiredImportScannedHostFiles) {
-  if (!importScannedHostFiles.has(path)) failures.push(`${path}: host script is not import-scanned`);
-}
-// The final proof for every shipped host edge: its resolved target is a file
-// this very walk import-scanned. A target the walk skipped (dist,
-// node_modules, a missing or unresolvable file) fails closed.
-failures.push(...hostEdgeFailures(hostEdges, importScannedHostFiles));
-
 // Two walks can meet the same link (the main walk and a per-host walk both
 // enter hosts/); one refusal is printed once.
 const distinctFailures = [...new Set(failures)];

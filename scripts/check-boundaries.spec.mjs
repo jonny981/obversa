@@ -9,7 +9,7 @@ import path from "node:path";
 import ts from "@typescript/typescript6";
 import { validRange } from "semver";
 
-import { dependencyTarget, extractObversaImports, hostEdgeFailures, hostImportFindings, internalDependencies, isHostScript, isHostTestFile, isPinnedWorkspaceFile, isProjectConfig, isTestPath, isVersionRange, manifestImportTargets, manifestPathTargets, moduleSpecifiers, parserExtensions, PINNED_WORKSPACE_FILE, projectConfig, refusal, scansImports, sourceExtensions, textExtensions, tsconfigDependencies, walkTree } from "./check-boundaries.mjs";
+import { dependencyTarget, internalDependencies, isHostScript, isPinnedWorkspaceFile, isProjectConfig, isTestPath, isVersionRange, manifestImportTargets, manifestPathTargets, moduleSpecifiers, parserExtensions, PINNED_WORKSPACE_FILE, projectConfig, refusal, scansImports, sourceExtensions, textExtensions, tsconfigDependencies, walkTree } from "./check-boundaries.mjs";
 
 // No test in this file writes to the shared worktree: its status and every
 // tracked file's content relative to HEAD are captured before the first test
@@ -228,30 +228,6 @@ test("every effective option that can reach a sibling is placed by the package i
   assert.match(emitted, /@obversa\/surfacer\/jsx-runtime/, "with that option and no pragma, the compiler emits the import");
 });
 
-test("a specifier is placed where the compiler resolves it under the package's own config, so an alias cannot walk out of the package unseen", () => {
-  const file = "/repo/packages/source/src/a.ts";
-  const under = (text, extra) => {
-    const host = fakeHost(tree(extra));
-    const { options } = projectConfig(text, { file: SOURCE, root: "/repo", host });
-    return (source) => extractObversaImports(source, { file, root: "/repo", configs: [options], host });
-  };
-  const local = under('{ "compilerOptions": { "paths": { "#local/*": ["src/*"] } } }');
-  assert.deepEqual(local('import x from "#local/../../surfacer/src/index";'), ["@obversa/surfacer"], "the substitution escapes through the safe prefix; the compiler's answer catches it");
-  assert.deepEqual(local('import x from "#local/a";'), [], "an alias that stays home");
-  assert.deepEqual(local('import x from "node:fs"; import y from "vitest";'), [], "externals and built-ins");
-  const pick = under('{ "compilerOptions": { "paths": { "#pick/*": ["../*/src/index.ts"] } } }');
-  assert.deepEqual(pick('import x from "#pick/surfacer";'), ["@obversa/surfacer"], "a wildcard over siblings");
-  const viaBaseUrl = under('{ "compilerOptions": { "baseUrl": "../surfacer" } }');
-  assert.deepEqual(viaBaseUrl('import x from "src/index";'), ["@obversa/surfacer"], "a bare specifier under a baseUrl in a sibling");
-  const config = under('{ "extends": "#config" }', { "/repo/packages/source/package.json": '{ "name": "@obversa/source", "imports": { "#config": "./base.json" } }', "/repo/packages/source/base.json": '{ "compilerOptions": { "paths": { "#m": ["../memory/src/index.ts"] } } }' });
-  assert.deepEqual(config('import m from "#m";'), ["@obversa/memory"], "a mapping inherited through the manifest's imports map");
-  assert.deepEqual(extractObversaImports('import x from "#local/../../surfacer/src/index";', { file, root: "/repo" }), [], "without a config there is nothing to resolve under (the lexical rules still apply)");
-  // The premise: the compiler resolves the escape into the sibling.
-  const host = fakeHost(tree());
-  const escaped = ts.resolveModuleName("#local/../../surfacer/src/index", file, { paths: { "#local/*": ["src/*"] }, pathsBasePath: "/repo/packages/source" }, host).resolvedModule?.resolvedFileName;
-  assert.equal(escaped, "/repo/packages/surfacer/src/index.ts");
-});
-
 test("a config the compiler cannot read is refused whole; a project with no inputs is not", () => {
   const only = (list) => (assert.equal(list.length, 1, list.join()), list[0]);
   assert.match(only(deps("{")), /^@obversa\/<the config cannot be read as the compiler reads it: TS1005 /, "malformed JSON");
@@ -261,257 +237,6 @@ test("a config the compiler cannot read is refused whole; a project with no inpu
   assert.match(only(deps(circular, { [SOURCE]: circular })), /TS18000 Circularity detected/, "a config extending itself (on disk, so the compiler reaches the cycle)");
   assert.match(only(deps('{ "compilerOptions": { "bogus": 1 } }')), /TS5023 Unknown compiler option 'bogus'/, "an option the pinned compiler does not know");
   assert.deepEqual(deps('{ "include": ["nothing/**/*"] }'), [], "no inputs (TS18003) is not a refusal");
-});
-
-test("dependencies TypeScript keeps outside the node tree are found: jsxImportSource, triple-slash references, amd-dependency, module augmentation", () => {
-  const root = "/repo";
-  const under = (name) => ({ file: `/repo/packages/source/src/${name}`, root });
-  const jsx = '/** @jsxImportSource @obversa/surfacer */\nexport const el = <div />;\n';
-  assert.deepEqual(extractObversaImports(jsx, under("view.jsx")), ["@obversa/surfacer"], "the jsxImportSource pragma");
-  // The premise: the compiler really emits an import from that source.
-  const emitted = ts.transpileModule(jsx, { compilerOptions: { jsx: ts.JsxEmit.ReactJSX, module: ts.ModuleKind.ESNext }, fileName: "view.jsx" }).outputText;
-  assert.match(emitted, /@obversa\/surfacer\/jsx-runtime/, "TypeScript emits an import of <source>/jsx-runtime for the pragma");
-  assert.deepEqual(extractObversaImports('/// <reference path="../../surfacer/src/index.d.ts" />\nexport {};\n', under("types.mts")), ["@obversa/surfacer"], "a reference path into a sibling package");
-  assert.deepEqual(extractObversaImports('/// <reference types="@obversa/surfacer" />\nexport {};\n', under("types.ts")), ["@obversa/surfacer"], "a reference types directive");
-  assert.deepEqual(extractObversaImports('/// <amd-dependency path="@obversa/surfacer" />\nexport {};\n', under("legacy.cts")), ["@obversa/surfacer"], "an amd-dependency");
-  assert.deepEqual(extractObversaImports('declare module "@obversa/surfacer" { export const extra: number; }\n', under("augment.ts")), ["@obversa/surfacer"], "an external module augmentation");
-  assert.deepEqual(extractObversaImports('/// <reference path="./local.d.ts" />\ndeclare module "./local" {}\n', under("same.ts")), [], "references inside the same package are not crossings");
-});
-
-test("a symlink under packages/ is reported by the tree walk, never followed as if it were local", () => {
-  const dir = mkdtempSync(path.join(os.tmpdir(), "boundary-walk-"));
-  try {
-    mkdirSync(path.join(dir, "packages/source/src"), { recursive: true });
-    mkdirSync(path.join(dir, "packages/surfacer/src"), { recursive: true });
-    writeFileSync(path.join(dir, "packages/surfacer/src/index.mjs"), "export const x = 1;\n");
-    writeFileSync(path.join(dir, "packages/source/src/real.mjs"), 'import "./bridge.mjs";\n');
-    symlinkSync("../../surfacer/src/index.mjs", path.join(dir, "packages/source/src/bridge.mjs"));
-    mkdirSync(path.join(dir, "packages/source/node_modules/dep"), { recursive: true });
-    writeFileSync(path.join(dir, "packages/source/node_modules/dep/index.mjs"), "");
-  } catch (error) {
-    rmSync(dir, { recursive: true, force: true });
-    throw error;
-  }
-  return walkTree(path.join(dir, "packages")).then(({ files, symlinks }) => {
-    const rel = (p) => path.relative(dir, p).split(path.sep).join("/");
-    assert.deepEqual(files.map(rel).sort(), ["packages/source/src/real.mjs", "packages/surfacer/src/index.mjs"], "regular files only; node_modules ignored");
-    assert.deepEqual(symlinks.map(rel), ["packages/source/src/bridge.mjs"], "the symlink is reported, not resolved");
-    // The import that names the link looks local, but the file the loader
-    // opens is the sibling package's: the scan judges the crossing by real
-    // path, refuses the link as another spelling, and the walk fails closed
-    // on the link itself as well.
-    const found = extractObversaImports('import "./bridge.mjs";', { file: path.join(dir, "packages/source/src/real.mjs"), root: dir });
-    assert.equal(found.length, 1, JSON.stringify(found));
-    assert.match(found[0], /\.\/bridge\.mjs names packages\/surfacer\/src\/index\.mjs by another spelling/);
-  }).finally(() => rmSync(dir, { recursive: true, force: true }));
-});
-
-test("every module form the parser accepts is scanned for imports — .mts, .cts, and .jsx included", () => {
-  // A form the parser could read but the scan skipped would let a forbidden
-  // sibling import in packages/<name>/src/leak.mts pass the fail-closed check.
-  assert.deepEqual([...sourceExtensions].sort(), [...parserExtensions].sort(), "the scan set is exactly the parser map");
-  for (const ext of parserExtensions) {
-    assert.ok(textExtensions.has(ext), `${ext} is read as text`);
-    assert.equal(scansImports(`packages/source/src/leak${ext}`), true, `${ext} under a package is scanned for imports`);
-  }
-  assert.equal(scansImports("hosts/cmux/bin/tool.mts"), false, "only package files carry boundary rules");
-  assert.equal(scansImports("packages/source/README.md"), false);
-  assert.deepEqual(
-    extractObversaImports('import { x } from "@obversa/surfacer";', { file: "/repo/packages/source/src/leak.mts", root: "/repo" }),
-    ["@obversa/surfacer"],
-    "the extractor reads a .mts file",
-  );
-});
-
-test("the import scan sees every form a module can use to name an @obversa package", () => {
-  const source = `
-    import { a } from "@obversa/memory";
-    import "@obversa/lines/testing";
-    export { b } from '@obversa/memory-git';
-    export * from "@obversa/memory-simple";
-    const dyn = await import("@obversa/surfacer/client");
-    const cjs = require('@obversa/source');
-    const lazy = () => import(
-      "@obversa/lines"
-    );
-    // not imports: a string that merely mentions a package name
-    const note = "see @obversa/memory for the contract";
-  `;
-  assert.deepEqual(extractObversaImports(source, { file: "/repo/x.mjs", root: "/repo" }), [
-    "@obversa/memory",
-    "@obversa/lines",
-    "@obversa/memory-git",
-    "@obversa/memory-simple",
-    "@obversa/surfacer",
-    "@obversa/source",
-    "@obversa/lines",
-  ]);
-});
-
-test("the CommonJS loader and the resolvers name a module too: module.require, require.resolve, import.meta.resolve; a computed member of module or require is refused", () => {
-  const source = `
-    module.require("../../surfacer/src/index.cjs");
-    module["require"]("@obversa/memory");
-    require.resolve("@obversa/lines");
-    import.meta.resolve("@obversa/memory-git");
-    other.require("@obversa/memory-simple");
-  `;
-  assert.deepEqual(extractObversaImports(source, { file: "/repo/packages/source/src/a.cjs", root: "/repo" }), ["@obversa/surfacer", "@obversa/memory", "@obversa/lines", "@obversa/memory-git", "@obversa/memory-simple"], "a .require call on any object is a load: every Module object carries the loader");
-  assert.deepEqual(moduleSpecifiers('module[key]("x"); require[key]("y"); import.meta[key]("w"); module.other("z");', "a.cjs"), [null, null, null, null], "a computed member may be the loader, and an unlisted member of module reaches one: both unreadable");
-  // A wrapper that changes nothing at runtime does not hide the loader.
-  const wrapped = `
-    (module.require)("@obversa/surfacer");
-    (module).require("@obversa/memory");
-    import.meta["resolve"]("@obversa/lines");
-    (import.meta.resolve)("@obversa/memory-git");
-    (require as any)("@obversa/memory-simple");
-    require!("@obversa/source");
-    (require satisfies unknown)("@obversa/surfacer");
-  `;
-  assert.deepEqual(extractObversaImports(wrapped, { file: "/repo/packages/lines/src/w.ts", root: "/repo" }), ["@obversa/surfacer", "@obversa/memory", "@obversa/lines", "@obversa/memory-git", "@obversa/memory-simple", "@obversa/source", "@obversa/surfacer"]);
-  // A loader used any other way — bound, applied, passed as a value — goes
-  // somewhere the scan cannot follow, so the use itself is refused.
-  const computed = refusal("a computed module reference cannot be checked; use a plain string");
-  for (const use of [
-    'module.require.call(module, "../../surfacer/x.cjs");',
-    'require.call(null, "@obversa/surfacer");',
-    'require.apply(null, ["@obversa/surfacer"]);',
-    'import.meta.resolve.call(import.meta, "@obversa/surfacer");',
-    'module.require.bind(module)("../../surfacer/x.cjs");',
-    'const r = require; r("@obversa/surfacer");',
-    'const r = module.require;',
-    'const r = import.meta.resolve;',
-    'load(require, "@obversa/surfacer");',
-    'const o = { require };',
-    'typeof require;',
-    'module[k];',
-    'require[k];',
-    'import.meta[k];',
-    'const { require: load } = module; load("../../surfacer/x.cjs");',
-    'const { require } = module;',
-    'const { resolve } = import.meta;',
-    'const m = module;',
-    'f(module);',
-    'const meta = import.meta;',
-    // node:module makes loaders: its factory must be bound as `require`,
-    // and the module itself may be imported only by name, unrenamed.
-    'import { createRequire } from "node:module"; const load = createRequire(import.meta.url); load("../../surfacer/x.cjs");',
-    'import { createRequire as cr } from "node:module";',
-    'import * as mod from "node:module";',
-    'import mod from "module";',
-    'import { register } from "node:module";',
-    'import { createRequire } from "node:module"; let require = createRequire(import.meta.url);',
-    'import { createRequire } from "node:module"; const { createRequire: cr } = x;',
-    'import { createRequire } from "node:module"; f(createRequire);',
-    'const { createRequire } = await import("node:module");',
-    'const m = require("module");',
-    'mod.createRequire(import.meta.url)("../../surfacer/x.cjs");',
-    'import { registerHooks } from "node:module";',
-    'export { registerHooks } from "node:module";',
-    'export * from "node:module";',
-    'export * as m from "module";',
-    'import Module = require("node:module");',
-    'import { createRequire, register } from "node:module";',
-    'import { findSourceMap } from "node:module";',
-    // process.getBuiltinModule hands out node:module and its hooks without
-    // an import: every reference to that name is an untracked factory.
-    'process.getBuiltinModule("node:module").registerHooks({ resolve });',
-    'process["getBuiltinModule"]("node:module");',
-    'process.getBuiltinModule.call(process, "node:module");',
-    'process.getBuiltinModule.bind(process)("module");',
-    'const { getBuiltinModule } = process;',
-    'const { getBuiltinModule: g } = process;',
-    'globalThis.process.getBuiltinModule("fs");',
-    'const p = process; p.getBuiltinModule(name);',
-    'const f = process.getBuiltinModule;',
-    'Reflect.get(process, "getBuiltinModule")("node:module").register("./hook.mjs", import.meta.url);',
-    'process["get" + "BuiltinModule"]("node:module");',
-    'process[k];',
-    'globalThis[k];',
-    'Reflect.get(globalThis, "process");',
-    'const p = process;',
-    'const g = globalThis;',
-    'globalThis.process[k];',
-    'f(globalThis);',
-    'process.binding("fs");',
-    'process.dlopen(m, "x.node");',
-    'process.mainModule;',
-    // A member outside a root's list hands the root back or reaches past it,
-    // and so does a listed chaining method whose result is kept.
-    'const p = process.valueOf(); p["get" + "BuiltinModule"]("node:module");',
-    'process.on("SIGINT", f)["get" + "BuiltinModule"]("node:module");',
-    'const p = process.once("exit", f);',
-    'f(process.off("exit", g));',
-    // .constructor.constructor is Function on any object.
-    'process.stdout.constructor.constructor("return process")();',
-    '({}).constructor.constructor("return process")();',
-    'const C = x.constructor;',
-    'Reflect.get(x, "constructor");',
-    'Reflect.apply(f, null, []);',
-    'process.constructor;',
-    'process.__proto__;',
-    'globalThis.valueOf();',
-    'globalThis.eval("1");',
-    'import.meta.valueOf;',
-    'module.valueOf();',
-    // Text run as code, and the vm builtin.
-    'eval("process.getBuiltinModule");',
-    'new Function("return process")();',
-    'Function("x")();',
-    'const e = eval;',
-    'import vm from "node:vm";',
-    'import { runInThisContext } from "vm";',
-    'const vm = await import("node:vm");',
-    'require("vm");',
-    // Node's CommonJS wrapper passes require and module as its arguments.
-    'const loaded = arguments[1]("../../surfacer/src/sanitize.mjs");',
-    'arguments[2].require("x");',
-    'const [, load] = arguments;',
-    'const a = arguments;',
-    'f(arguments);',
-    'const load = (() => arguments[1])();',
-    // module.constructor is the Module class: its hooks and loaders take
-    // no Module argument, so the class itself is the route.
-    'module.constructor.registerHooks({ resolve });',
-    'module.constructor._load("../../surfacer/src/sanitize.mjs", undefined, false);',
-    'module.constructor;',
-    'module.children;',
-    'module.parent;',
-    'module.paths;',
-    'Module.registerHooks({ resolve });',
-    'anything._load("x");',
-    'anything._resolveFilename("x");',
-    // Every Module object carries the loader, whatever it is reached as.
-    'require.main;',
-    'require.cache;',
-    'const r = require.main.require;',
-    'o.require;',
-  ]) {
-    const found = extractObversaImports(use, { file: "/repo/packages/source/src/u.cjs", root: "/repo" });
-    assert.ok(found.length >= 1 && found.every((entry) => entry === computed), `${use} -> ${JSON.stringify(found)}`);
-  }
-  // A member that is not a loader is not a use of one; a declaration or a
-  // property named require is a name, not a reference.
-  for (const fine of [
-    'module.exports = 1;', 'module.id;', 'module.filename;', 'module.path;', 'module.loaded;', 'import.meta.url;', 'import.meta.dirname;',
-    'function f() { return arguments[0]; }', 'const o = { m() { return arguments.length; } };', 'class A { constructor() { this.n = arguments.length; } }',
-    'process.env.HOME; process.cwd(); process.exit(1); process.stdout.write("x"); process.argv.slice(2); process.platform === "darwin";',
-    'process.on("SIGINT", handler); process.off("SIGINT", handler);', 'const name = value.constructor?.name; const n2 = value.constructor.name;',
-    'globalThis.fetch; globalThis.process.env.X; typeof globalThis.WebSocket;', 'process === globalThis.process;',
-    'const { require: r } = x;', 'o.module;', 'class A { require() {} }', 'const module = 1;', '/** @param {typeof require} r */ function f(r) {}',
-    'import { createRequire } from "node:module"; const require = createRequire(import.meta.url); require("./local.cjs");',
-    'import { createRequire, builtinModules, isBuiltin } from "node:module"; const require = createRequire(import.meta.url);',
-    'import mod from "node:mod"; const require = mod.createRequire(import.meta.url);',
-  ]) {
-    assert.deepEqual(extractObversaImports(fine, { file: "/repo/packages/source/src/f.mjs", root: "/repo" }), [], fine);
-  }
-  // A `.require(...)` call on any object loads: the main module, a cache
-  // entry, a Module reached however — the load is read, and reaching the
-  // Module through `require.main` / `require.cache` is itself refused.
-  assert.deepEqual(
-    extractObversaImports('require.main.require("@obversa/surfacer"); require.cache[k].require("../../memory/src/index.cjs"); anything.require("@obversa/lines");', { file: "/repo/packages/source/src/m.cjs", root: "/repo" }),
-    ["@obversa/surfacer", computed, "@obversa/memory", computed, "@obversa/lines"],
-  );
 });
 
 test("an input reached through a symlink outside every package is placed where it really is", () => {
@@ -532,308 +257,6 @@ test("an input reached through a symlink outside every package is placed where i
   }
 });
 
-test("TypeScript forms: type-only imports, import-equals, and type-position import() count as dependencies", () => {
-  const source = `
-    import type { Memory } from "@obversa/memory";
-    import kit = require("@obversa/lines/testing");
-    export type { X } from "@obversa/memory-git";
-    type S = import("@obversa/surfacer").Surface;
-    type T = typeof import("@obversa/source");
-    let u: import("@obversa/memory-simple").Store<string>;
-  `;
-  assert.deepEqual(extractObversaImports(source, { file: "/repo/packages/lines/src/a.ts", root: "/repo" }), [
-    "@obversa/memory",
-    "@obversa/lines",
-    "@obversa/memory-git",
-    "@obversa/surfacer",
-    "@obversa/source",
-    "@obversa/memory-simple",
-  ]);
-});
-
-test("a JSDoc import type in a JavaScript file counts as a dependency", () => {
-  const source = `
-    /** @type {import("@obversa/memory").Memory} */
-    const memory = make();
-    /**
-     * @param {import('@obversa/surfacer').Session} session
-     * @returns {typeof import("@obversa/lines")}
-     */
-    function use(session) { return session; }
-  `;
-  assert.deepEqual(extractObversaImports(source, { file: "/repo/packages/source/src/a.mjs", root: "/repo" }), [
-    "@obversa/memory",
-    "@obversa/surfacer",
-    "@obversa/lines",
-  ]);
-});
-
-test("the JSDoc @import tag and the import phase forms count as dependencies", () => {
-  const source = `
-    /** @import { startSurface } from "@obversa/surfacer" */
-    /** @import * as mem from '@obversa/memory' */
-    const later = import.defer("@obversa/lines");
-    const wasm = import.source("@obversa/memory-git");
-  `;
-  assert.deepEqual(extractObversaImports(source, { file: "/repo/packages/source/src/b.mjs", root: "/repo" }), [
-    "@obversa/surfacer",
-    "@obversa/memory",
-    "@obversa/lines",
-    "@obversa/memory-git",
-  ]);
-});
-
-test("a subpath import resolves to its package name; a relative import inside the same package is ignored", () => {
-  const file = "/repo/packages/source/src/review.mjs";
-  assert.deepEqual(extractObversaImports(`import x from "@obversa/memory/testing";`, { file, root: "/repo" }), ["@obversa/memory"]);
-  assert.deepEqual(extractObversaImports(`import x from "../src/git.mjs"; require("./local.cjs");`, { file, root: "/repo" }), []);
-});
-
-test("host JavaScript is import-scanned: public package names pass, a path into packages/ or a loader hatch is refused", () => {
-  assert.equal(isHostScript("hosts/cmux/lib/review-args.mjs", "export const x = 1;"), true);
-  assert.equal(isHostScript("hosts/cmux/bin/obversa-review", "#!/usr/bin/env node\nimport x from 'y';"), true, "an extensionless node command");
-  assert.equal(isHostScript("hosts/cmux/bin/obversa-surface", "#!/usr/bin/env bash\necho"), false, "a bash script is not JavaScript");
-  assert.equal(isHostScript("packages/source/src/a.mjs", ""), false, "packages are scanned by the package rules");
-  const file = "/repo/hosts/cmux/bin/obversa-review";
-  assert.deepEqual(hostImportFindings('import { runSurface } from "@obversa/surfacer"; import { reviewDiff } from "@obversa/source"; const kit = import.meta.resolve("@obversa/surfacer/client"); import { HELP } from "../lib/review-args.mjs";', { file, root: "/repo", dependencies: HOST_DEPENDENCIES }), [], "public names and the host's own files");
-  for (const text of [
-    'import { reviewDiff } from "../../../packages/source/src/review.mjs";',
-    'const kit = import.meta.resolve("../../../packages/surfacer/src/client.mjs");',
-    'const { runSurface } = await import("/repo/packages/surfacer/src/index.mjs");',
-  ]) {
-    const found = hostImportFindings(text, { file, root: "/repo" });
-    assert.ok(found.some((entry) => /by path/.test(entry)), text);
-  }
-  // Package indirection: a `#alias` (the manifest's imports map) and the
-  // host's own name (its exports map) are refused outright in shipped code.
-  assert.ok(hostImportFindings('import { e } from "#escape";', { file, root: "/repo" }).some((entry) => /package-imports alias/.test(entry)));
-  assert.ok(hostImportFindings('import { e } from "@obversa/cmux-host/escape";', { file, root: "/repo", selfName: "@obversa/cmux-host" }).some((entry) => /imports itself by package name/.test(entry)));
-  assert.ok(hostImportFindings('import { e } from "@obversa/cmux-host";', { file, root: "/repo", selfName: "@obversa/cmux-host" }).some((entry) => /imports itself by package name/.test(entry)));
-  assert.deepEqual(hostImportFindings('import { e } from "@obversa/cmux-host-other";', { file, root: "/repo", selfName: "@obversa/cmux-host", dependencies: new Map([["@obversa/cmux-host-other", null]]) }), [], "a different, declared package name is a public name");
-  assert.ok(hostImportFindings('const m = process.getBuiltinModule("node:module");', { file, root: "/repo" }).length > 0, "loader hatches are refused in a host too");
-  assert.ok(hostImportFindings('const name = "@obversa/" + pick; import(name);', { file, root: "/repo" }).some((entry) => /computed module reference/.test(entry)));
-  // Shipped host code may not reach a test path (exempt from the hatch rules)
-  // or a local module without a source extension (never scanned).
-  assert.ok(hostImportFindings('import { probe } from "../test/escape.mjs";', { file, root: "/repo" }).some((entry) => /imports a test path/.test(entry)));
-  assert.ok(hostImportFindings('import { probe } from "../lib/escape.test.mjs";', { file, root: "/repo" }).some((entry) => /imports a test path/.test(entry)));
-  assert.ok(hostImportFindings('import { helper } from "../lib/helper";', { file, root: "/repo" }).some((entry) => /the scan would not read/.test(entry)));
-  assert.ok(hostImportFindings('const h = await import("../bin/other-command");', { file, root: "/repo" }).some((entry) => /the scan would not read/.test(entry)));
-  assert.deepEqual(hostImportFindings('import { helper } from "../lib/helper.mjs";', { file, root: "/repo" }), [], "a local module with a source extension inside the host root is scanned on its own");
-  // Every resolved shipped edge is recorded, so the walk can prove its
-  // target was actually import-scanned; a shape that passes the early checks
-  // (a dist file under the host root) is still only an edge until then.
-  const edges = [];
-  hostImportFindings('import { helper } from "../lib/helper.mjs"; import { built } from "../dist/escape.mjs";', { file, root: "/repo", edges });
-  assert.deepEqual(edges.map((edge) => edge.target), ["hosts/cmux/lib/helper.mjs", "hosts/cmux/dist/escape.mjs"]);
-  assert.deepEqual([], (() => { const e = []; hostImportFindings('import "@obversa/source";', { file, root: "/repo", edges: e }); return e; })(), "a public name is not a local edge");
-  // A suffix proves nothing: the target must sit inside the importing
-  // file's own hosts/<name>/ root, or it is a file the walk never scans.
-  for (const text of [
-    'import { e } from "../../../escape.mjs";',
-    'import { e } from "../../../scripts/release.mjs";',
-    'import { e } from "../../other-host/lib/helper.mjs";',
-    'import { e } from "/repo/escape.mjs";',
-  ]) {
-    assert.ok(hostImportFindings(text, { file, root: "/repo" }).some((entry) => /outside its own host root/.test(entry)), text);
-  }
-  // A host proof may reach a package's internals by path until F2b gives it a
-  // public testing subpath; it is still refused a computed or schemed specifier.
-  const proof = "/repo/hosts/cmux/test/f3-browser-proof.mjs";
-  assert.deepEqual(hostImportFindings('import { highlightModel } from "../../../packages/source/src/highlight-model.mjs";', { file: proof, root: "/repo" }), []);
-  assert.ok(hostImportFindings('import(pick);', { file: proof, root: "/repo" }).length > 0);
-});
-
-test("a recorded host edge passes only when its target is in the set the walk import-scanned", () => {
-  const scanned = new Set(["hosts/cmux/bin/obversa-review", "hosts/cmux/lib/review-args.mjs"]);
-  const edge = (specifier, target) => ({ from: "hosts/cmux/bin/obversa-review", specifier, target });
-  assert.deepEqual(hostEdgeFailures([edge("../lib/review-args.mjs", "hosts/cmux/lib/review-args.mjs")], scanned), []);
-  for (const [specifier, target] of [["../dist/escape.mjs", "hosts/cmux/dist/escape.mjs"], ["../lib/missing.mjs", "hosts/cmux/lib/missing.mjs"], ["../../../escape.mjs", "escape.mjs"]]) {
-    const failures = hostEdgeFailures([edge(specifier, target)], scanned);
-    assert.equal(failures.length, 1, specifier);
-    assert.match(failures[0], /did not import-scan/);
-  }
-});
-
-// What hosts/cmux/package.json declares, as the guard hands it over.
-const HOST_DEPENDENCIES = new Map([["@obversa/surfacer", new Set([".", "./client"])], ["@obversa/source", new Set(["."])]]);
-
-test("a shipped host bare specifier is a node: builtin or a declared dependency, and a subpath only one the dependency exports", () => {
-  const file = "/repo/hosts/cmux/bin/obversa-review";
-  const dependencies = new Map([...HOST_DEPENDENCIES, ["semver", null]]);
-  const findings = (text) => hostImportFindings(text, { file, root: "/repo", dependencies });
-  assert.deepEqual(findings('import { readFile } from "node:fs/promises"; import semver from "semver"; import { runSurface } from "@obversa/surfacer"; const kit = import.meta.resolve("@obversa/surfacer/client");'), []);
-  assert.ok(findings('import { e } from "payload/dist/escape.mjs";').some((entry) => /which its manifest does not declare/.test(entry)));
-  assert.ok(findings('import { e } from "payload";').some((entry) => /which its manifest does not declare/.test(entry)));
-  assert.ok(findings('import { e } from "obversa/escape";').some((entry) => /which its manifest does not declare/.test(entry)), "the root's name is not a dependency");
-  assert.ok(findings('import { e } from "@obversa/source/dist/escape.mjs";').some((entry) => /a subpath its dependency's exports map does not list/.test(entry)));
-  assert.ok(findings('import { e } from "semver/internal/re.js";').some((entry) => /a subpath its dependency's exports map does not list/.test(entry)), "a registry dependency exports no subpath the scan knows");
-  assert.ok(findings('import { readFile } from "fs/promises";').some((entry) => /without its node: prefix/.test(entry)));
-  assert.ok(findings('import { x } from "node:nonesuch";').some((entry) => /not a Node builtin/.test(entry)));
-  assert.equal(hostImportFindings('import { e } from "payload/dist/escape.mjs";', { file, root: "/repo" }).length, 1, "nothing declared is the default");
-  assert.deepEqual(hostImportFindings('import { e } from "payload/dist/escape.mjs";', { file: "/repo/hosts/cmux/test/x.test.mjs", root: "/repo" }), [], "a test file is not shipped");
-});
-
-test("a relative import is placed by its real path, and a spelling other than the disk's own is refused", (t) => {
-  const tree = realpathSync(mkdtempSync(path.join(os.tmpdir(), "boundaries-case-")));
-  try {
-    mkdirSync(path.join(tree, "packages", "surfacer", "src"), { recursive: true });
-    mkdirSync(path.join(tree, "packages", "source", "src"), { recursive: true });
-    writeFileSync(path.join(tree, "packages", "surfacer", "src", "index.mjs"), "export const x = 1;\n");
-    const file = path.join(tree, "packages", "source", "src", "a.mjs");
-    writeFileSync(file, "");
-    const found = (text) => extractObversaImports(text, { file, root: tree });
-    assert.deepEqual(found('import { x } from "../../surfacer/src/index.mjs";'), ["@obversa/surfacer"], "the honest spelling is the crossing it is");
-    assert.deepEqual(found('import { x } from "../../surfacer/src/missing.mjs";'), ["@obversa/surfacer"], "a missing target keeps its spelling and its crossing");
-    // A root and a file handed over through a symlinked spelling still place
-    // the crossing: the check reads real paths on both sides.
-    const linkedTree = path.join(os.tmpdir(), path.basename(tree) + "-link");
-    symlinkSync(tree, linkedTree);
-    try {
-      assert.deepEqual(extractObversaImports('import { x } from "../../surfacer/src/index.mjs";', { file: path.join(linkedTree, "packages", "source", "src", "a.mjs"), root: linkedTree }), ["@obversa/surfacer"]);
-      // Every placement path reads the root the same way: an alias the
-      // compiler resolves, a manifest entry field, and a tsconfig files
-      // entry each place the same crossing under the real root and the
-      // linked one.
-      writeFileSync(path.join(tree, "packages", "surfacer", "src", "index.ts"), "export const x = 1;\n");
-      for (const root of [tree, linkedTree]) {
-        const source = path.join(root, "packages", "source");
-        assert.deepEqual(
-          extractObversaImports('import x from "#surf/index";', { file: path.join(source, "src", "a.ts"), root, configs: [{ baseUrl: root, paths: { "#surf/*": ["packages/surfacer/src/*"] } }] }),
-          ["@obversa/surfacer"],
-          `an alias under ${root === tree ? "the real" : "the linked"} root`,
-        );
-        assert.deepEqual(manifestPathTargets({ main: "../surfacer/src/index.ts" }, { file: path.join(source, "package.json"), root }), ["@obversa/surfacer"], `a manifest entry under ${root === tree ? "the real" : "the linked"} root`);
-        assert.deepEqual(tsconfigDependencies('{ "files": ["../../packages/surfacer/src/index.ts"] }', { file: path.join(source, "tsconfig.json"), root }), ["@obversa/surfacer"], `a tsconfig files entry under ${root === tree ? "the real" : "the linked"} root`);
-        assert.deepEqual(manifestPathTargets({ main: "../../" }, { file: path.join(source, "package.json"), root }), [refusal("main reaches ., which holds every package")], `a value that reaches every package under ${root === tree ? "the real" : "the linked"} root`);
-        // A path whose tail does not exist yet — generated output, several
-        // segments deep — still places under the sibling it names. The
-        // manifest case is the one that exercises the walk up to the deepest
-        // existing ancestor; the import's own directory is read by real path
-        // before its target is, so it places either way.
-        assert.deepEqual(manifestPathTargets({ main: "../surfacer/generated/nested/entry.mjs" }, { file: path.join(source, "package.json"), root }), ["@obversa/surfacer"], `a missing nested path under ${root === tree ? "the real" : "the linked"} root`);
-        assert.deepEqual(extractObversaImports('import { x } from "../../surfacer/generated/nested/entry.mjs";', { file: path.join(source, "src", "a.mjs"), root }), ["@obversa/surfacer"], `a missing nested import under ${root === tree ? "the real" : "the linked"} root`);
-      }
-    } finally {
-      rmSync(linkedTree);
-    }
-    // A symlink is another spelling too.
-    symlinkSync(path.join("..", "..", "surfacer", "src", "index.mjs"), path.join(tree, "packages", "source", "src", "link.mjs"));
-    assert.ok(found('import { x } from "./link.mjs";').some((entry) => /by another spelling/.test(entry)));
-    if (!existsSync(path.join(tree, "PACKAGES", "SURFACER", "src", "index.mjs"))) {
-      t.diagnostic("case-sensitive disk: another case opens nothing, so there is nothing to refuse");
-      return;
-    }
-    const other = found('import { x } from "../../SURFACER/src/index.mjs";');
-    assert.ok(other.some((entry) => /by another spelling/.test(entry)), JSON.stringify(other));
-    assert.ok(found('import { x } from "../../../PACKAGES/surfacer/src/index.mjs";').some((entry) => /by another spelling/.test(entry)));
-  } finally {
-    rmSync(tree, { recursive: true, force: true });
-  }
-});
-
-test("createRequire is a loader only from this file's own URL; any other base moves every later resolution unseen", () => {
-  const file = "/repo/packages/source/src/a.mjs";
-  const found = (text) => extractObversaImports(`import { createRequire } from "node:module"; ${text}`, { file, root: "/repo" });
-  assert.deepEqual(found('const require = createRequire(import.meta.url); const x = require.resolve("./x.mjs");'), [], "the documented form");
-  for (const base of ['new URL("../../surfacer/package.json", import.meta.url)', '"/repo/packages/surfacer/package.json"', 'import.meta.resolve("@obversa/surfacer")', 'someUrl']) {
-    assert.ok(found(`const require = createRequire(${base}); const x = require.resolve("./src/index.mjs");`).length > 0, base);
-  }
-});
-
-test("shipped source may not import into build output: dist is never read by the scan", () => {
-  const tree = realpathSync(mkdtempSync(path.join(os.tmpdir(), "boundaries-dist-")));
-  try {
-    mkdirSync(path.join(tree, "packages", "source", "src"), { recursive: true });
-    mkdirSync(path.join(tree, "packages", "source", "dist"), { recursive: true });
-    writeFileSync(path.join(tree, "packages", "source", "dist", "escape.mjs"), 'import "../../surfacer/src/index.mjs";\n');
-    const file = path.join(tree, "packages", "source", "src", "a.mjs");
-    writeFileSync(file, "");
-    const found = extractObversaImports('import { e } from "../dist/escape.mjs";', { file, root: tree });
-    assert.equal(found.length, 1, JSON.stringify(found));
-    assert.match(found[0], /imports build output under dist, which the scan does not read/);
-    assert.deepEqual(extractObversaImports('import { e } from "../dist/escape.mjs";', { file: path.join(tree, "packages", "source", "test", "a.test.mjs"), root: tree }), [], "a test may read its package's build output");
-  } finally {
-    rmSync(tree, { recursive: true, force: true });
-  }
-});
-
-test("a package imports nothing from outside packages/: a host, scripts/, or the root is a refused crossing", () => {
-  const file = "/repo/packages/source/src/a.mjs";
-  for (const specifier of ["../../../hosts/cmux/lib/review-args.mjs", "../../../scripts/release.mjs", "../../../package.json", "/repo/hosts/cmux/lib/review-args.mjs"]) {
-    const found = extractObversaImports(`import x from "${specifier}";`, { file, root: "/repo" });
-    assert.equal(found.length, 1, specifier);
-    assert.match(found[0], /outside packages\/; a package imports nothing from hosts, scripts, or the repository root/, specifier);
-  }
-  assert.deepEqual(extractObversaImports('import x from "../../surfacer/src/index.mjs";', { file, root: "/repo" }), ["@obversa/surfacer"], "a sibling is still the arrow it is");
-});
-
-test("only hosts/<name>/test/ is a host test: a test-shaped name under bin/ or lib/ ships and is held to the shipped rules", () => {
-  assert.equal(isHostTestFile("hosts/cmux/test/f3-browser-proof.mjs"), true);
-  assert.equal(isHostTestFile("hosts/cmux/test/nested/x.test.mjs"), true);
-  for (const path of ["hosts/cmux/bin/x.test.mjs", "hosts/cmux/lib/helper.test.py", "hosts/cmux/bin/test/x", "hosts/cmux/lib/__tests__/y.mjs", "hosts/cmux/tests/z.mjs"]) assert.equal(isHostTestFile(path), false, path);
-  const dependencies = new Map([["@obversa/surfacer", new Set(["."])]]);
-  assert.ok(hostImportFindings('import { x } from "../../../packages/surfacer/src/index.mjs";', { file: "/repo/hosts/cmux/bin/x.test.mjs", root: "/repo", dependencies }).some((entry) => /by path/.test(entry)), "a test-shaped name under bin/ is shipped");
-  assert.deepEqual(hostImportFindings('import { x } from "../../../packages/surfacer/src/index.mjs";', { file: "/repo/hosts/cmux/test/x.test.mjs", root: "/repo", dependencies }), [], "the host's own test/ is the exemption");
-});
-
-test("a relative import that names an existing file with no source extension is refused: Node loads it, the scan never reads it", () => {
-  const tree = realpathSync(mkdtempSync(path.join(os.tmpdir(), "boundaries-extless-")));
-  try {
-    mkdirSync(path.join(tree, "packages", "source", "src"), { recursive: true });
-    writeFileSync(path.join(tree, "packages", "source", "escape"), 'import "../surfacer/src/index.mjs";\n');
-    writeFileSync(path.join(tree, "packages", "source", "data.json"), "{}\n");
-    const file = path.join(tree, "packages", "source", "src", "a.mjs");
-    writeFileSync(file, "");
-    const found = (text) => extractObversaImports(text, { file, root: tree });
-    const escaped = found('import { e } from "../escape";');
-    assert.equal(escaped.length, 1, JSON.stringify(escaped));
-    assert.match(escaped[0], /packages\/source\/escape, a file with no source extension, which the scan never import-scans/);
-    assert.deepEqual(found('import data from "../data.json";'), [], "a data file is not a module that imports");
-    assert.deepEqual(found('import { x } from "./missing";'), [], "a target that does not exist as spelled is the compiler's to place");
-    // Node reads ?query and #fragment as URL syntax and opens the file
-    // without them; a resolver would look for the punctuation in a name.
-    for (const specifier of ["../escape?x=1", "../escape#part", "../src/b.mjs?cache=1"]) {
-      const withUrl = found(`import { e } from "${specifier}";`);
-      assert.equal(withUrl.length, 1, specifier);
-      assert.match(withUrl[0], /carries a query or fragment; a module is named by its path alone/, specifier);
-    }
-    assert.ok(hostImportFindings('import { e } from "../lib/review-args.mjs?x";', { file: "/repo/hosts/cmux/bin/obversa-review", root: "/repo" }).some((entry) => /carries a query or fragment/.test(entry)), "a host import likewise");
-    // A manifest entry field is the same door: main, module, or an exports
-    // leaf naming the extensionless module exposes it to every consumer.
-    const manifestAt = { file: path.join(tree, "packages", "source", "package.json"), root: tree };
-    mkdirSync(path.join(tree, "packages", "source", "lib"), { recursive: true });
-    writeFileSync(path.join(tree, "packages", "source", "index.d.ts"), "export {};\n");
-    for (const manifest of [{ main: "./escape" }, { module: "./escape" }, { exports: { ".": "./escape" } }, { exports: { ".": { import: "./src/a.mjs", default: "./escape" } } }]) {
-      const placed = manifestPathTargets(manifest, manifestAt);
-      assert.equal(placed.length, 1, JSON.stringify(manifest));
-      assert.match(placed[0], /names packages\/source\/escape, a file with no source extension, which the scan never import-scans/, JSON.stringify(manifest));
-    }
-    assert.deepEqual(manifestPathTargets({ main: "./src/a.mjs", types: "./index.d.ts", exports: { ".": "./src/a.mjs", "./data": "./data.json" }, directories: { lib: "./lib" } }, manifestAt), [], "source, types, data, and a directory place as their own");
-    // An imports-map alias is the same door again.
-    const aliased = manifestImportTargets({ imports: { "#escape": "./escape" } }, manifestAt);
-    assert.equal(aliased.length, 1, JSON.stringify(aliased));
-    assert.match(aliased[0], /package imports alias \.\/escape, a file with no source extension, which the scan never import-scans/);
-    assert.deepEqual(manifestImportTargets({ imports: { "#a": "./src/a.mjs", "#data": "./data.json" } }, manifestAt), [], "a source alias and a data alias place as their own");
-    // A WebAssembly module's import section can name any module, and Node
-    // loads what it names: .wasm is a module the scan cannot read, refused
-    // wherever a module is named.
-    writeFileSync(path.join(tree, "packages", "source", "escape.wasm"), Buffer.from([0, 0x61, 0x73, 0x6d, 1, 0, 0, 0]));
-    assert.match(found('import { e } from "../escape.wasm";')[0] ?? "", /packages\/source\/escape\.wasm, a file with no source extension, which the scan never import-scans/);
-    assert.match(manifestPathTargets({ exports: { "./escape": "./escape.wasm" } }, manifestAt)[0] ?? "", /names packages\/source\/escape\.wasm, a file with no source extension/);
-    assert.match(manifestImportTargets({ imports: { "#wasm": "./escape.wasm" } }, manifestAt)[0] ?? "", /package imports alias \.\/escape\.wasm, a file with no source extension/);
-  } finally {
-    rmSync(tree, { recursive: true, force: true });
-  }
-});
-
-// The live full-check mutants: the real guard, run as a child on a
-// disposable copy of the current tree (git's file list, with the root
-// node_modules symlinked to the real one),
-// with one shipped host import added and the file it names created, must
-// fail with the resolved target named. The guard finds its root from its
-// own file, so the copied guard checks the copied tree; the shared worktree
-// is never written, so a crash, a kill, or a concurrent reader cannot see a
-// false tree. The copy is removed in finally.
 function copyTree(root) {
   const copy = mkdtempSync(path.join(os.tmpdir(), "boundaries-tree-"));
   // The checker's input: every tracked file and every untracked file git
@@ -868,56 +291,48 @@ test("the guard, run on a disposable copy of the tree, refuses a shipped host im
   const real = new URL("..", import.meta.url).pathname;
   const root = copyTree(real);
   try {
-    // The host ships no node script any more — the review command moved into
-    // @obversa/source — so the probe subject is created in the copy: a node
-    // shebang makes the scan import-scan it like any host JavaScript.
-    const command = path.join(root, "hosts", "cmux", "bin", "probe-review");
-    const original = "#!/usr/bin/env node\nexport {};\n";
-    writeFileSync(command, original);
     const guard = () => spawnSync(process.execPath, [path.join(root, "scripts", "check-boundaries.mjs")], { cwd: root, encoding: "utf8" });
     assert.equal(guard().status, 0, `the copy passes before any mutation:\n${guard().stderr}`);
-    const mutants = [
-      { name: "a tracked dist file under the host root", file: path.join(root, "hosts", "cmux", "dist", "escape.mjs"), specifier: "../dist/escape.mjs" },
-      { name: "a file at the repository root", file: path.join(root, "escape.mjs"), specifier: "../../../escape.mjs" },
-      { name: "a file under scripts", file: path.join(root, "scripts", "escape.mjs"), specifier: "../../../scripts/escape.mjs" },
-    ];
-    for (const mutant of mutants) {
-      mkdirSync(path.dirname(mutant.file), { recursive: true });
-      writeFileSync(mutant.file, "export const e = eval;\n");
-      writeFileSync(command, `${original}\nimport { e } from "${mutant.specifier}";\n`);
+    // A host carries placement glue only: host JavaScript — an extensionless
+    // command with any node shebang, or a source file by extension — is
+    // refused on sight, whatever it holds. dependency-cruiser cannot read an
+    // extensionless script, so this refusal is the arrow check for hosts.
+    const command = path.join(root, "hosts", "cmux", "bin", "probe-review");
+    for (const content of [
+      "#!/usr/bin/env node\nexport {};\n",
+      '#!/usr/bin/env node\nimport { e } from "../../../packages/surfacer/src/index.mjs";\ne;\n',
+      "#!/usr/bin/env -S node --import=./packages/surfacer/src/index.mjs\nexport {};\n",
+      "#!/usr/local/bin/node\nexport {};\n",
+    ]) {
+      writeFileSync(command, content);
       const run = guard();
-      assert.notEqual(run.status, 0, `${mutant.name}: the guard must fail`);
-      assert.match(run.stderr, /probe-review: (imports .* a file this scan did not import-scan|a host imports a local module outside its own host root)/, `${mutant.name}:\n${run.stderr}`);
-      writeFileSync(command, original);
-      rmSync(mutant.file, { force: true });
+      assert.notEqual(run.status, 0, JSON.stringify(content.split("\n")[0]));
+      assert.match(run.stderr, /probe-review: a host carries placement glue only/, JSON.stringify(content.split("\n")[0]));
+      rmSync(command);
     }
-    writeFileSync(command, `${original}\nimport { e } from "../lib/missing.mjs";\n`);
-    const missing = guard();
-    assert.notEqual(missing.status, 0);
-    assert.match(missing.stderr, /hosts\/cmux\/lib\/missing\.mjs, a file this scan did not import-scan/);
-    writeFileSync(command, original);
+    const probeSource = path.join(root, "hosts", "cmux", "bin", "probe.mjs");
+    writeFileSync(probeSource, "export {};\n");
+    const asSource = guard();
+    assert.notEqual(asSource.status, 0);
+    assert.match(asSource.stderr, /probe\.mjs: a host carries placement glue only/);
+    rmSync(probeSource);
     // Package indirection through the host manifest: an imports alias, a
     // self export, and an aliased dependency are each refused at the
-    // manifest, and the alias specifiers are refused in the shipped script.
+    // manifest.
     const manifestPath = path.join(root, "hosts", "cmux", "package.json");
     const manifest = JSON.parse(readFileSync(manifestPath, "utf8"));
     const escape = path.join(root, "hosts", "cmux", "dist", "escape.mjs");
     mkdirSync(path.dirname(escape), { recursive: true });
     writeFileSync(escape, "export const e = eval;\n");
     writeFileSync(manifestPath, JSON.stringify({ ...manifest, imports: { "#escape": "./dist/escape.mjs" } }));
-    writeFileSync(command, `${original}\nimport { e } from "#escape";\n`);
     const aliased = guard();
     assert.notEqual(aliased.status, 0);
     assert.match(aliased.stderr, /hosts\/cmux\/package\.json: a host manifest carries no imports/);
-    assert.match(aliased.stderr, /probe-review: a host imports through a package-imports alias \(#escape\)/);
     writeFileSync(manifestPath, JSON.stringify({ ...manifest, exports: { "./escape": "./dist/escape.mjs" } }));
-    writeFileSync(command, `${original}\nimport { e } from "@obversa/cmux-host/escape";\n`);
     const selfExport = guard();
     assert.notEqual(selfExport.status, 0);
     assert.match(selfExport.stderr, /hosts\/cmux\/package\.json: a host manifest carries no exports/);
-    assert.match(selfExport.stderr, /probe-review: a host imports itself by package name/);
     writeFileSync(manifestPath, JSON.stringify({ ...manifest, dependencies: { ...manifest.dependencies, escape: "file:./dist" } }));
-    writeFileSync(command, original);
     const aliasDep = guard();
     assert.notEqual(aliasDep.status, 0);
     assert.match(aliasDep.stderr, /hosts\/cmux\/package\.json: dependencies escape is "file:\.\/dist"/);
@@ -953,30 +368,18 @@ test("the guard, run on a disposable copy of the tree, refuses a shipped host im
     assert.notEqual(nestedPackageRun.status, 0);
     assert.match(nestedPackageRun.stderr, /packages\/source\/src\/package\.json: a nested manifest makes itself the package scope/);
     rmSync(nestedPackage);
-    // Another spelling of a sibling package's path, on a disk that opens it.
-    if (existsSync(path.join(root, "PACKAGES", "SURFACER", "src", "index.mjs"))) {
-      const probe = path.join(root, "packages", "source", "src", "case-probe.mjs");
-      writeFileSync(probe, 'import "../../SURFACER/src/index.mjs";\n');
-      const spelled = guard();
-      assert.notEqual(spelled.status, 0);
-      assert.match(spelled.stderr, /case-probe\.mjs: .*by another spelling/);
-      rmSync(probe);
-    }
     // A workspace dependency on another host, with no exports map, would let
     // a bare subpath reach that host's unscanned dist.
     mkdirSync(path.join(root, "hosts", "payload", "dist"), { recursive: true });
     writeFileSync(path.join(root, "hosts", "payload", "package.json"), JSON.stringify({ name: "payload", private: true }));
     writeFileSync(path.join(root, "hosts", "payload", "dist", "escape.mjs"), "export const e = eval;\n");
     writeFileSync(manifestPath, JSON.stringify({ ...manifest, dependencies: { ...manifest.dependencies, payload: "workspace:*" } }));
-    writeFileSync(command, `${original}\nimport { e } from "payload/dist/escape.mjs";\n`);
     const payload = guard();
     assert.notEqual(payload.status, 0);
     assert.match(payload.stderr, /hosts\/cmux\/package\.json: dependencies payload is "workspace:\*", a workspace range on something other than a ruled package/);
-    assert.match(payload.stderr, /probe-review: a host imports payload\/dist\/escape\.mjs, which its manifest does not declare/);
     assert.match(payload.stderr, /hosts\/payload: has no host rule/);
     rmSync(path.join(root, "hosts", "payload"), { recursive: true });
     writeFileSync(manifestPath, JSON.stringify(manifest));
-    writeFileSync(command, original);
     // A host directory with no manifest takes the root as its package scope;
     // a root exports map would then serve any file under the repository.
     mkdirSync(path.join(root, "hosts", "rogue"));
@@ -989,7 +392,7 @@ test("the guard, run on a disposable copy of the tree, refuses a shipped host im
     assert.notEqual(rogue.status, 0);
     assert.match(rogue.stderr, /hosts\/rogue\/package\.json: is missing/);
     assert.match(rogue.stderr, /package\.json: exports makes the root importable by name/);
-    assert.match(rogue.stderr, /hosts\/rogue\/run\.mjs: a host imports obversa\/escape, which its manifest does not declare/);
+    assert.match(rogue.stderr, /hosts\/rogue\/run\.mjs: a host carries placement glue only/);
     rmSync(path.join(root, "hosts", "rogue"), { recursive: true });
     rmSync(path.join(root, "scripts", "escape.mjs"));
     writeFileSync(rootManifestPath, rootManifestText);
@@ -1093,15 +496,6 @@ test("the guard, run on a disposable copy of the tree, refuses a shipped host im
     rmSync(releaseScript);
     rmSync(path.join(root, "scripts", "escape.mjs"));
     writeFileSync(releaseScript, releaseText);
-    // A node shebang carrying options loads code before any import: the
-    // shebang of a host command is exactly #!/usr/bin/env node.
-    for (const shebang of ["#!/usr/bin/env -S node --import=./packages/surfacer/src/index.mjs", "#!/usr/local/bin/node", "#!/usr/bin/env node --experimental-loader=./x.mjs", "#!/usr/bin/env node\r"]) {
-      writeFileSync(command, `${shebang}\n${original.split("\n").slice(1).join("\n")}`);
-      const bad = guard();
-      assert.notEqual(bad.status, 0, shebang);
-      assert.match(bad.stderr, /probe-review: a host command's shebang is exactly #!\/usr\/bin\/env node/, shebang);
-    }
-    writeFileSync(command, original);
     // A shell host command names its interpreter by absolute path; env
     // would look it up on PATH.
     for (const shebang of ["#!/usr/bin/env bash", "#!/usr/bin/env -S bash -x", "#!/opt/homebrew/bin/bash", "#!/bin/bash\r"]) {
@@ -1165,6 +559,7 @@ test("the guard, run on a disposable copy of the tree, refuses a shipped host im
     // host checks.
     for (const [name, body] of [["bin/obversa-new.bash", "#!/bin/bash\nnode ../../../packages/surfacer/src/index.mjs\n"], ["lib/helper.py", "#!/usr/bin/env python3\nprint(1)\n"], ["bin/obversa-new.zsh", "echo hi\n"]]) {
       const odd = path.join(root, "hosts", "cmux", ...name.split("/"));
+      mkdirSync(path.dirname(odd), { recursive: true });
       writeFileSync(odd, body);
       const oddRun = guard();
       assert.notEqual(oddRun.status, 0, name);
@@ -1189,6 +584,7 @@ test("the guard, run on a disposable copy of the tree, refuses a shipped host im
       rmSync(shaped);
     }
     rmSync(path.join(root, "hosts", "cmux", "bin", "test"), { recursive: true, force: true });
+    rmSync(path.join(root, "hosts", "cmux", "lib"), { recursive: true, force: true });
     // A shebang file directly under hosts/ belongs to no host: a listed
     // refusal, never a crash.
     writeFileSync(path.join(root, "hosts", "run.bash"), "#!/bin/bash\necho hi\n");
@@ -1204,43 +600,39 @@ test("the guard, run on a disposable copy of the tree, refuses a shipped host im
   }
 });
 
-test("global is the same guarded root as globalThis: its evaluators and unlisted members are refused", () => {
-  const file = "/repo/packages/source/src/a.mjs";
+test("the TypeScript hatch scan refuses the loader hatches and exempts test files", () => {
+  // A hatch is a null entry among the specifiers; the guard reports any.
+  const hatches = (text, file = "packages/lines/src/a.ts") => moduleSpecifiers(text, file).includes(null);
   for (const text of [
-    'global.eval("process.getBuiltinModule");',
-    'global.Function("return process")();',
-    'const p = global.process.binding("fs");',
-    'const g = global; g.eval("1");',
+    'eval("1");',
+    'new Function("return process")();',
+    'process.getBuiltinModule("fs");',
+    'global.eval("1");',
     'globalThis.eval("1");',
+    'import("./" + name);',
+    'const r = require;',
   ]) {
-    assert.ok(extractObversaImports(text, { file, root: "/repo" }).length > 0, text);
+    assert.equal(hatches(text), true, text);
   }
-  // Listed data members stay usable through either name.
-  assert.deepEqual(extractObversaImports('global.setTimeout(() => {}, 1); const e = global.process.env.X; globalThis.console.log(1);', { file, root: "/repo" }), []);
+  assert.equal(hatches('globalThis.setTimeout(() => {}, 1); const e = process.env.X;'), false, "listed data members stay usable");
+  assert.equal(hatches('import { x } from "./ok.js";'), false, "a plain import is no hatch");
+  assert.equal(hatches('eval("1");', "packages/lines/tests/a.spec.ts"), false, "a test file is exempt from the hatch rules");
 });
 
-test("a package-imports alias of vm is refused, which closes a source import of the alias", () => {
-  const file = "/repo/packages/source/package.json";
-  for (const target of ["vm", "node:vm", "module", "node:module"]) {
-    const found = manifestImportTargets({ imports: { "#x": target } }, { file, root: "/repo" });
-    assert.equal(found.length, 1, target);
-    assert.match(found[0], /alias the .* builtin/);
-  }
-  // The source side sees only the alias name; the manifest refusal is what
-  // stops it, so the two are proved together: the import names nothing on
-  // its own, and the manifest that would give it meaning is refused.
-  assert.deepEqual(extractObversaImports('import vm from "#vm";', { file: "/repo/packages/source/src/a.mjs", root: "/repo" }), []);
-  assert.equal(manifestImportTargets({ imports: { "#vm": "node:vm" } }, { file, root: "/repo" }).length, 1);
-  assert.deepEqual(manifestImportTargets({ imports: { "#h": "./src/helper.mjs" } }, { file, root: "/repo" }), []);
-  // An imports pattern substitutes the importer's text: `#escape` through
-  // "#*": "./src/*.test.mjs" loads src/escape.test.mjs, and `#escape.test`
-  // through "#*": "./src/*.mjs" does the same, with no test text at the
-  // shipped edge. The pattern shape is refused whatever its suffix.
-  assert.deepEqual(extractObversaImports('import { probe } from "#escape";', { file: "/repo/packages/source/src/a.mjs", root: "/repo" }), [], "the shipped import shows no test text");
-  for (const pattern of ["./src/*.test.mjs", "./src/*.mjs", "./*", "./test/*"]) {
-    const found = manifestImportTargets({ imports: { "#*": pattern } }, { file, root: "/repo" });
-    assert.equal(found.length, 1, pattern);
-    assert.match(found[0], /imports pattern .* list the aliases explicitly/, pattern);
+test("a TypeScript source with a loader hatch fails the live guard on a disposable copy", { timeout: 300_000 }, () => {
+  const real = new URL("..", import.meta.url).pathname;
+  const root = copyTree(real);
+  try {
+    const guard = () => spawnSync(process.execPath, [path.join(root, "scripts", "check-boundaries.mjs")], { cwd: root, encoding: "utf8" });
+    const probe = path.join(root, "packages", "lines", "src", "hatch-probe.ts");
+    writeFileSync(probe, 'export const e = eval("1");\n');
+    const run = guard();
+    assert.notEqual(run.status, 0, "the hatch must fail the guard");
+    assert.match(run.stderr, /packages\/lines\/src\/hatch-probe\.ts: a loader hatch/);
+    rmSync(probe);
+    assert.equal(guard().status, 0, "the restored copy passes");
+  } finally {
+    rmSync(root, { recursive: true, force: true });
   }
 });
 
@@ -1260,141 +652,6 @@ test("the workspace file pin refuses a missing or an extra glob, not only accept
   ]) {
     assert.equal(isPinnedWorkspaceFile(text), false, JSON.stringify(text));
   }
-});
-
-test("a shipped import that an alias resolves to a test file, and an exports pattern that could expose one, are refused", () => {
-  // A `paths` alias lands a shipped import on the package's own test file:
-  // the compiler's resolution is the edge, refused before the same-package
-  // skip.
-  const file = "/repo/packages/source/src/a.ts";
-  const host = fakeHost(tree({
-    "/repo/packages/source/test/review.test.ts": "export const probe = process.getBuiltinModule('node:module');",
-    "/repo/packages/source/test/review.test.mjs": "export const probe = process.getBuiltinModule('node:module');",
-  }));
-  const { options } = projectConfig('{ "compilerOptions": { "allowJs": true, "paths": { "#escape": ["test/review.test.ts"], "#escape-js": ["test/review.test.mjs"] } } }', { file: SOURCE, root: "/repo", host });
-  for (const specifier of ["#escape", "#escape-js"]) {
-    const found = extractObversaImports(`import { probe } from "${specifier}";`, { file, root: "/repo", configs: [options], host });
-    assert.ok(found.some((entry) => /resolves to a test path/.test(entry)), `${specifier}: ${JSON.stringify(found)}`);
-  }
-  assert.deepEqual(extractObversaImports('import { probe } from "#escape";', { file: "/repo/packages/source/test/other.test.ts", root: "/repo", configs: [options], host }), [], "a test may reach a test");
-  // An exports pattern would expose src/escape.test.mjs to any consumer with
-  // no shipped source edge at all; the pattern shape is refused.
-  const manifestFile = "/repo/packages/source/package.json";
-  const withPattern = manifestPathTargets({ exports: { "./*": "./src/*.mjs" } }, { file: manifestFile, root: "/repo", host: fakeHost(tree({ "/repo/packages/source/src/escape.test.mjs": "" })) });
-  assert.ok(withPattern.some((entry) => /exports pattern .* list the subpaths explicitly/.test(entry)), JSON.stringify(withPattern));
-  assert.deepEqual(manifestPathTargets({ exports: { "./client": "./src/client.mjs" } }, { file: manifestFile, root: "/repo", host: fakeHost(tree({})) }), [], "an explicit subpath is placed as before");
-});
-
-test("a shipped entry cannot reach a test file, so the test file's loader-hatch exemption never ships", () => {
-  // The probe: a test-named file inside src/ uses a loader hatch to reach a
-  // sibling package; the file itself is exempt, and the shipped index imports
-  // it by a same-package relative path. The finding lands on the shipped
-  // edge, so the hatch has no route into the shipped graph.
-  const escape = 'process.getBuiltinModule("node:module").createRequire(import.meta.url)("../../surfacer/src/index.mjs");';
-  assert.equal(isTestPath("/repo/packages/source/src/escape.test.mjs"), true);
-  assert.deepEqual(extractObversaImports(escape, { file: "/repo/packages/source/src/escape.test.mjs", root: "/repo" }), [], "the test-named file is exempt on its own");
-  const shipped = extractObversaImports('import "./escape.test.mjs";', { file: "/repo/packages/source/src/index.mjs", root: "/repo" });
-  assert.equal(shipped.length, 1);
-  assert.match(shipped[0], /imports a test path/, "the shipped import of the test-named file is the finding");
-  // Every static form of the edge: extensionless, a test directory, a
-  // sibling package's test file by name, and a dynamic import string.
-  for (const [file, text] of [
-    ["/repo/packages/source/src/a.ts", 'import x from "./escape.test";'],
-    ["/repo/packages/source/src/a.mjs", 'import "../test/helper.mjs";'],
-    ["/repo/packages/source/src/a.mjs", 'import "../src/__tests__/c.mjs";'],
-    ["/repo/packages/source/src/a.mjs", 'import "@obversa/memory/test/fixture.mjs";'],
-    ["/repo/packages/source/src/a.mjs", 'await import("./escape.spec.mjs");'],
-  ]) {
-    const found = extractObversaImports(text, { file, root: "/repo" });
-    assert.ok(found.some((entry) => /test path/.test(entry)), `${file}: ${text}`);
-  }
-  // A test importing another test is fine; a shipped testing subpath is not a test path.
-  assert.deepEqual(extractObversaImports('import "./helper.test.mjs";', { file: "/repo/packages/source/test/a.test.mjs", root: "/repo" }), []);
-  assert.deepEqual(extractObversaImports('import "./testing.js";', { file: "/repo/packages/source/src/a.mjs", root: "/repo" }), []);
-  // Manifest entries are shipped entries too.
-  const file = "/repo/packages/source/package.json";
-  assert.ok(manifestPathTargets({ exports: { "./x": "./test/x.test.mjs" } }, { file, root: "/repo", host: fakeHost({}) }).some((entry) => /exports points at a test path/.test(entry)));
-  assert.ok(manifestPathTargets({ main: "./src/index.spec.mjs" }, { file, root: "/repo", host: fakeHost({}) }).some((entry) => /main points at a test path/.test(entry)));
-  assert.ok(manifestImportTargets({ imports: { "#h": "./test/h.mjs" } }, { file, root: "/repo" }).some((entry) => /alias a test path/.test(entry)));
-  assert.deepEqual(manifestPathTargets({ main: "./src/index.mjs" }, { file, root: "/repo", host: fakeHost({}) }), []);
-});
-
-test("a test file is held to the arrow rules but not the loader-hatch rules", () => {
-  const hatchy = 'Reflect.get(o, "k"); const c = x.constructor.constructor; eval("1"); process[k]; module.constructor; const { getBuiltinModule } = process; import vm from "node:vm";';
-  for (const file of ["/repo/packages/source/test/a.test.mjs", "/repo/packages/lines/tests/b.spec.ts", "/repo/packages/x/src/__tests__/c.mjs", "/repo/packages/x/src/d.spec.mjs"]) {
-    assert.deepEqual(extractObversaImports(hatchy, { file, root: "/repo" }), [], file);
-    assert.deepEqual(extractObversaImports('import "@obversa/surfacer"; require("@obversa/memory");', { file, root: "/repo" }), ["@obversa/surfacer", "@obversa/memory"], `${file} still crosses`);
-  }
-  assert.ok(extractObversaImports(hatchy, { file: "/repo/packages/source/src/a.mjs", root: "/repo" }).length > 0, "shipped source is held to both");
-  assert.equal(isTestPath("packages/source/src/review.mjs"), false);
-  assert.equal(isTestPath("packages/source/src/testing.ts"), false, "a testing subpath is shipped source");
-});
-
-test("a specifier is read as the loader reads it: percent-encoding decoded, a file URL as its path, other schemes refused", () => {
-  const file = "/repo/packages/source/src/review.mjs";
-  const at = { file, root: "/repo" };
-  assert.deepEqual(extractObversaImports('import "./%2e%2e/%2e%2e/surfacer/src/sanitize.mjs";', at), ["@obversa/surfacer"], "%2e%2e is ..");
-  assert.deepEqual(extractObversaImports('import "../../%73urfacer/src/index.mjs";', at), ["@obversa/surfacer"], "an encoded letter");
-  assert.deepEqual(extractObversaImports('import "file:///repo/packages/memory/src/index.ts";', at), ["@obversa/memory"], "a file URL");
-  assert.deepEqual(extractObversaImports('import "file:///repo/packages/source/src/local.mjs";', at), [], "a file URL inside the package");
-  assert.deepEqual(extractObversaImports('import "node:fs"; import "./local.mjs";', at), []);
-  assert.deepEqual(extractObversaImports('import "data:text/javascript,export default 1";', at), [refusal("a data: URL specifier loads something the scan cannot place")]);
-  assert.deepEqual(extractObversaImports('import "http://example.test/x.mjs";', at), [refusal("a http: URL specifier loads something the scan cannot place")]);
-  assert.deepEqual(extractObversaImports('import "./%E0%A4%A";', at), [refusal("a percent-encoded specifier that does not decode: ./%E0%A4%A")]);
-  assert.deepEqual(extractObversaImports('import "file://host/x";', at), [refusal("a file URL the loader cannot read: file://host/x")]);
-  assert.deepEqual(extractObversaImports('import "/repo/packages/surfacer/src/index.mjs";', at), ["@obversa/surfacer"], "an absolute path");
-});
-
-test("a relative import that lands in another package names that package", () => {
-  const file = "/repo/packages/source/src/review.mjs";
-  const source = `
-    import { runSurface } from "../../surfacer/src/index.mjs";
-    const kit = require("../../surfacer/src/client.mjs");
-    const lazy = () => import("../../memory/dist/index.js");
-    import ok from "../lib/helper.mjs";
-  `;
-  // The same-package import names nothing; a same-package import of a test
-  // path is a different case, refused, and covered above. A path into a
-  // sibling's dist is build output the scan never reads: refused, not named.
-  assert.deepEqual(extractObversaImports(source, { file, root: "/repo" }), ["@obversa/surfacer", "@obversa/surfacer", refusal("../../memory/dist/index.js imports build output under dist, which the scan does not read; import a source file")]);
-});
-
-test("a comment between the keyword and the specifier does not hide an import", () => {
-  const source = `
-    const a = import/*boundary*/("@obversa/surfacer");
-    const b = require /* why */ ( '@obversa/memory' );
-    import /* c */ "@obversa/lines";
-    // import "@obversa/not-really" — a commented-out import is not an import
-    /* import "@obversa/nor-this" */
-    const url = "http://example.test/not-an-import"; // trailing comments stay harmless
-  `;
-  assert.deepEqual(extractObversaImports(source), ["@obversa/surfacer", "@obversa/memory", "@obversa/lines"]);
-});
-
-test("comment markers inside strings, templates, and regex literals cannot hide a later import", () => {
-  const cases = [
-    `const marker = "plain//text"; import("@obversa/surfacer");`,
-    `const left = "/*"; import("@obversa/surfacer"); const right = "*/";`,
-    `const re = /\\/\\//; import("@obversa/surfacer");`,
-    `const re2 = /\\/\\*/; import("@obversa/surfacer"); const re3 = /\\*\\//;`,
-    "const tpl = `a // b /* c`; import(\"@obversa/surfacer\"); const tpl2 = `*/`;",
-    `const s = 'it\\'s // not a comment'; import("@obversa/surfacer");`,
-  ];
-  for (const source of cases) {
-    assert.deepEqual(extractObversaImports(source, { file: "/repo/packages/source/src/x.mjs", root: "/repo" }), ["@obversa/surfacer"], source);
-  }
-});
-
-test("a computed specifier is refused, never silently dropped", () => {
-  const source = `
-    const name = "surfacer";
-    const a = import("@obversa/" + name);
-    const b = require(\`@obversa/\${name}\`);
-    import c from "@obversa/memory";
-  `;
-  const computed = refusal("a computed module reference cannot be checked; use a plain string");
-  assert.deepEqual(extractObversaImports(source), [computed, computed, "@obversa/memory"]);
-  assert.deepEqual(moduleSpecifiers(`import("x" + y); require("z");`, "a.mjs"), [null, "z"]);
 });
 
 test("the live tree passes the boundary check", () => {
