@@ -56,9 +56,12 @@
     "check:arrows": "depcruise --config .dependency-cruiser.cjs --ignore-known .dependency-cruiser-known-violations.json packages/lines/src packages/lines/tests packages/memory/src packages/memory/tests packages/memory-git/src packages/memory-git/tests packages/memory-simple/src packages/memory-simple/tests packages/source/src packages/source/test packages/source/assets packages/surfacer/src packages/surfacer/test packages/surfacer/examples hosts/cmux/lib hosts/cmux/test scripts examples",
     "test:arrows": "node --test scripts/check-arrows.spec.mjs",
     "check:lint": "eslint .",
-    "test:lint": "node --test scripts/check-lint.spec.mjs"
+    "test:lint": "node --test scripts/check-lint.spec.mjs",
+    "check:tarballs": "node scripts/check-tarballs.mjs",
+    "test:tarballs": "node --test scripts/check-tarballs.spec.mjs"
   },
   "devDependencies": {
+    "@arethetypeswrong/cli": "0.18.5",
     "@changesets/cli": "2.29.7",
     "@types/node": "22.12.0",
     "@typescript/typescript6": "6.0.2",
@@ -69,6 +72,7 @@
     "mint": "4.2.820",
     "npm": "10.9.2",
     "pnpm": "10.15.1",
+    "publint": "0.3.24",
     "semver": "7.7.2",
     "tsup": "8.5.1",
     "tsx": "4.22.4",
