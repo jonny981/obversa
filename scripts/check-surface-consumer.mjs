@@ -126,6 +126,15 @@ async function main() {
     const token = url.split('#')[1];
     assert.ok(token, 'the session url carries the token fragment');
     const origin = new URL(url).origin;
+    // The page itself comes from the packed tarball: the static shell links
+    // the app script, and the script the tarball shipped is what serves.
+    const shell = await fetch(`${origin}/`);
+    assert.equal(shell.status, 200, 'the packed shell serves');
+    const shellText = await shell.text();
+    assert.match(shellText, /app\.js/, 'the shell links the packed app script');
+    const app = await fetch(`${origin}/app.js`);
+    assert.equal(app.status, 200, 'the packed app script serves');
+    assert.match(await app.text(), /createSurfaceClient/, 'the served script is the packed page code');
     const headers = { Authorization: `Bearer ${token}`, Origin: origin, 'Content-Type': 'application/json' };
     const model = await (await fetch(`${origin}/api/model`, { headers })).json();
     assert.equal(model.meta.label, 'working tree');

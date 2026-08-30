@@ -95,7 +95,11 @@ export function ownershipFailure(source, { canonical, claude, lock } = paths()) 
   if (!entry) return `${lock}: no lock entry for ${SKILL}`;
   if (!sameSource(entry.source, source)) return `${lock}: the ${SKILL} entry's source is ${JSON.stringify(entry.source)}, not this repository`;
   if (!existsSync(canonical)) return `${canonical}: the canonical copy is missing`;
-  if (/^[0-9a-f]{64}$/.test(entry.skillFolderHash ?? '')) {
+  const recordedHash = entry.skillFolderHash ?? '';
+  if (recordedHash !== '' && !/^[0-9a-f]{40}$/.test(recordedHash) && !/^[0-9a-f]{64}$/.test(recordedHash)) {
+    return `${lock}: the ${SKILL} entry's skillFolderHash is neither the CLI's sha256 nor a git tree hash: ${JSON.stringify(recordedHash)}`;
+  }
+  if (/^[0-9a-f]{64}$/.test(recordedHash)) {
     const hash = folderHash(canonical);
     if (hash !== entry.skillFolderHash) return `${canonical}: directory hash ${hash} does not equal the lock entry's ${entry.skillFolderHash}`;
   } else if (!existsSync(join(canonical, 'SKILL.md'))) {

@@ -105,6 +105,17 @@ test("a GitHub-recorded install owns: normalized source, tree-hash entry, struct
   }
 });
 
+test("a malformed hash record is refused, not treated as structural", () => {
+  const fixture = owned(home());
+  try {
+    const lockBody = { skills: { [SKILL]: { source: SOURCE, skillFolderHash: "zz-not-a-hash" } } };
+    writeFileSync(fixture.at.lock, JSON.stringify(lockBody));
+    assert.match(ownershipFailure(SOURCE, fixture.at), /neither the CLI's sha256 nor a git tree hash/);
+  } finally {
+    rmSync(fixture.directory, { recursive: true, force: true });
+  }
+});
+
 test("source forms normalize like the CLI's record", () => {
   assert.equal(sameSource("example/obversa", "https://github.com/example/obversa.git"), true);
   assert.equal(sameSource("/some/local/checkout", "/some/local/checkout"), true);

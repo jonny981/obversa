@@ -26,7 +26,7 @@ module.exports = {
     {
       name: 'no-unresolvable',
       comment:
-        'every static dependency must resolve; a name that does not resolve is a missing declaration, a deep import past an exports map, or a package-import alias no manifest defines. examples resolve relative to the package that runs them, so they are exempt here and governed by the internal-path and public-name rules instead',
+        'every static dependency must resolve; a name that does not resolve is a missing declaration, a deep import past an exports map, or a package-import alias no manifest defines',
       severity: 'error',
       from: { pathNot: '^examples/' },
       to: {
@@ -35,6 +35,17 @@ module.exports = {
         // surfacer serves that module over HTTP at runtime, so it has no
         // file beside the page source. This exact specifier only.
         pathNot: '^\\./surface-client\\.mjs$',
+      },
+    },
+    {
+      name: 'no-unresolvable-example',
+      comment:
+        'examples resolve at run time relative to the workspace package that runs them, so the real package roots are unresolvable from here statically — those exact names and their subpaths only. A misspelt or unknown name is an error like anywhere else',
+      severity: 'error',
+      from: { path: '^examples/' },
+      to: {
+        couldNotResolve: true,
+        pathNot: '^@obversa/(lines|memory|memory-git|memory-simple|source|surfacer)(/|$)',
       },
     },
     {

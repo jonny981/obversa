@@ -32,12 +32,13 @@ message naming the conflicted path. Git describes such a path as a
 combined diff, which a review could only show as a missing file, so the
 command never opens a page that looks clean over a conflicted tree.
 
-The page is placed through the `obversa-surface` glue beside the command
-(a cmux pane inside cmux, the default browser outside), by absolute path.
-A host that injects `OBVERSA_SURFACE_BIN` as another absolute path
-replaces that; nothing is looked up on `PATH`. The command receives a
-one-time launch URL (single use, valid for a minute) that redirects to
-the page; the page URL with its token never enters a process argument.
+The page is placed through the absolute path a host injects as
+`OBVERSA_SURFACE_BIN` — the cmux host's workspace launcher binds it to its
+`obversa-surface` glue for every terminal and agent in a workspace — and
+with the variable unset the default browser opens the page; nothing is
+looked up on `PATH`. The placement command receives a one-time launch URL
+(single use, valid for a minute) that redirects to the page; the page URL
+with its token never enters a process argument.
 
 Other flags:
 

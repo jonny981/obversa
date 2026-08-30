@@ -44,6 +44,18 @@ test("types that disagree with the runtime module fail attw", () => {
   assert.ok(!failures.some((line) => line.includes("publint")), `publint must stay silent: ${JSON.stringify(failures)}`);
 });
 
+test("an extra file beyond the pinned list fails, named", () => {
+  const directory = pkg(
+    "extra-file",
+    { exports: { ".": { types: "./dist/index.d.ts", default: "./dist/index.js" } } },
+    { "dist/index.js": "export const a = 1;\n", "dist/index.d.ts": "export declare const a: number;\n", "dist/stray.js": "export const s = 1;\n" },
+  );
+  const failures = checkTarball(directory, {
+    expectedFiles: ["package/package.json", "package/dist/index.js", "package/dist/index.d.ts"],
+  });
+  assert.ok(failures.some((line) => line.includes("not exactly the pinned file list") && line.includes("dist/stray.js")), `the extra file must be named: ${JSON.stringify(failures)}`);
+});
+
 test("a truthful package passes both tools", () => {
   const directory = pkg(
     "good",

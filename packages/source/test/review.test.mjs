@@ -22,6 +22,20 @@ const DIFF = `diff --git a/a.txt b/a.txt
 
 const CLIENT_KIT = "export function createSurfaceClient(){return{};}\n";
 
+test("reviewDiff hands the launch port its own package identity", async () => {
+  // The frame names the package and the version that answered; the identity
+  // enters at the launch call, read from this package's own manifest, so a
+  // launcher stub sees exactly what a real session would carry.
+  let seen;
+  const launchSurface = async (options) => {
+    seen = options.surface;
+    return { result: { status: "cancelled", payload: null } };
+  };
+  await reviewDiff({ diffText: DIFF, launchSurface, clientKitSource: CLIENT_KIT, open: false });
+  const manifest = JSON.parse(readFileSync(new URL("../package.json", import.meta.url), "utf8"));
+  assert.deepEqual(seen, { package: manifest.name, version: manifest.version });
+});
+
 test("reviewDiff needs both injected dependencies", async () => {
   await assert.rejects(() => reviewDiff({ diffText: DIFF, clientKitSource: CLIENT_KIT }), /launchSurface/);
   await assert.rejects(() => reviewDiff({ diffText: DIFF, launchSurface: () => {} }), /client-kit/);

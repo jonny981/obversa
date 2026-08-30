@@ -34,9 +34,61 @@ function run(args, options = {}) {
   return spawnSync(process.execPath, args, { encoding: "utf8", maxBuffer: 64 * 1024 * 1024, ...options });
 }
 
+// The exact contents of each surface tarball. publint proves the manifest's
+// paths exist and attw proves the types resolve, but neither refuses an
+// extra file; a tarball is exactly this list or the check fails, so a file
+// that slips beneath an allowed directory is met here, reviewed, and pinned.
+// The runtime packages carry the same rule in scripts/check-packages.mjs.
+export const EXPECTED_FILES = {
+  '@obversa/source': [
+    'package/LICENSE',
+    'package/README.md',
+    'package/assets/app.css',
+    'package/assets/app.js',
+    'package/assets/file-tree.mjs',
+    'package/assets/icons.mjs',
+    'package/assets/nav-segments.mjs',
+    'package/assets/surface-client.d.mts',
+    'package/assets/tsconfig.json',
+    'package/bin/obversa-review.mjs',
+    'package/package.json',
+    'package/skills/review-diff/SKILL.md',
+    'package/src/context-model.mjs',
+    'package/src/contract.mjs',
+    'package/src/diff.mjs',
+    'package/src/git.mjs',
+    'package/src/highlight-model.mjs',
+    'package/src/highlight.mjs',
+    'package/src/index.mjs',
+    'package/src/lang.mjs',
+    'package/src/nav-model.mjs',
+    'package/src/navindex.mjs',
+    'package/src/navoverlay.mjs',
+    'package/src/page.mjs',
+    'package/src/review-args.mjs',
+    'package/src/review-cli.mjs',
+    'package/src/review.mjs',
+    'package/src/testing.mjs',
+  ],
+  '@obversa/surfacer': [
+    'package/LICENSE',
+    'package/README.md',
+    'package/package.json',
+    'package/src/claim-frames.mjs',
+    'package/src/client.mjs',
+    'package/src/handoff.mjs',
+    'package/src/host.mjs',
+    'package/src/index.mjs',
+    'package/src/launcher.mjs',
+    'package/src/sanitize.mjs',
+    'package/src/server.mjs',
+    'package/src/transfer.mjs',
+  ],
+};
+
 // Pack one package directory and prove the tarball with both tools.
 // Returns the failures, each a one-line reason; an empty array is a pass.
-export function checkTarball(packageDir) {
+export function checkTarball(packageDir, { expectedFiles } = {}) {
   const failures = [];
   const destination = mkdtempSync(join(tmpdir(), "obversa-tarball-"));
   try {
@@ -51,6 +103,16 @@ export function checkTarball(packageDir) {
       return failures;
     }
     const tarball = join(destination, tarballs[0]);
+    if (expectedFiles) {
+      const entries = spawnSync("tar", ["-tzf", tarball], { encoding: "utf8", maxBuffer: 64 * 1024 * 1024 });
+      const actual = entries.stdout.split("\n").filter(Boolean).sort();
+      const expected = [...expectedFiles].sort();
+      if (JSON.stringify(actual) !== JSON.stringify(expected)) {
+        const extra = actual.filter((entry) => !expected.includes(entry));
+        const missing = expected.filter((entry) => !actual.includes(entry));
+        failures.push(`${packageDir}: the tarball is not exactly the pinned file list${extra.length ? `; extra: ${extra.join(", ")}` : ""}${missing.length ? `; missing: ${missing.join(", ")}` : ""}`);
+      }
+    }
     const lint = run([PUBLINT_CLI, tarball]);
     if (lint.status !== 0) {
       failures.push(`${packageDir}: publint: ${(lint.stdout || lint.stderr || "").trim()}`);
@@ -83,8 +145,9 @@ const isMain = process.argv[1] && realpathSync(fileURLToPath(import.meta.url)) =
 if (isMain) {
   const failures = [];
   const directories = allowlistedDirectories();
-  for (const directory of directories) {
-    failures.push(...checkTarball(directory));
+  const allowlist = JSON.parse(readFileSync(join(ROOT, 'scripts', 'publish-allowlist.json'), 'utf8'));
+  for (const [index, directory] of directories.entries()) {
+    failures.push(...checkTarball(directory, { expectedFiles: EXPECTED_FILES[allowlist.packages[index]] }));
   }
   if (failures.length > 0) {
     for (const failure of failures) console.error(failure);

@@ -11,7 +11,7 @@
 
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import test from "node:test";
@@ -106,6 +106,8 @@ const forbidden = [
   ["packages/memory/src/r1.mjs", "import './r2.mjs';\nexport const r1 = 1;\n", "no-circular"],
   ["packages/memory/src/r2.mjs", "import './r1.mjs';\nexport const r2 = 1;\n", null],
   ["packages/source/src/s.mjs", "import './missing.mjs';\n", "no-unresolvable"],
+  ["examples/bad7.mjs", "import '@obversa/does-not-resolve';\n", "no-unresolvable-example"],
+  ["packages/memory-simple/src/f2.mjs", "import '@obversa/lines';\n", "memory-simple-reaches-memory-only"],
 ];
 for (const [path, content] of forbidden) if (content !== null) file(path, content);
 
@@ -118,7 +120,11 @@ const allowed = [
   ["hosts/cmux/test/ok4.test.mjs", "import 'node:test';\n"],
   ["examples/ok5.mjs", "import '@obversa/lines';\n"],
   ["scripts/ok6.mjs", "import 'node:fs';\n"],
-  ["examples/ok7.mjs", "import '@obversa/does-not-resolve';\n"],
+  // The exemption covers exactly the real package names, which resolve at
+  // run time relative to the package that runs the example; the fixture
+  // root has no symlink for memory-git, so the name is unresolvable here
+  // and must still raise nothing.
+  ["examples/ok7.mjs", "import '@obversa/memory-git';\n"],
 ];
 for (const [path, content] of allowed) file(path, content);
 
@@ -148,6 +154,27 @@ test("no rule fires outside the forbidden files", () => {
   const forbiddenPaths = new Set(forbidden.map(([path]) => path));
   const stray = violations.filter((violation) => !forbiddenPaths.has(violation.from));
   assert.deepEqual(stray, [], "only the forbidden fixtures may raise violations");
+});
+
+test("the live cruise roots cover every workspace package", () => {
+  // The check:arrows command lists its roots by hand; a package added to the
+  // workspace without a root here would silently escape the cruiser. The
+  // list must name a directory inside every package and host that carries
+  // source, and the rules file must name every package in its matrix.
+  const rootManifest = JSON.parse(readFileSync(join(repoRoot, "package.json"), "utf8"));
+  const roots = rootManifest.scripts["check:arrows"].split(" ").filter((part) => /^(packages|hosts)\//.test(part));
+  const members = [
+    ...readdirSync(join(repoRoot, "packages"), { withFileTypes: true }).filter((entry) => entry.isDirectory()).map((entry) => `packages/${entry.name}`),
+    ...readdirSync(join(repoRoot, "hosts"), { withFileTypes: true }).filter((entry) => entry.isDirectory()).map((entry) => `hosts/${entry.name}`),
+  ];
+  const rules = readFileSync(join(repoRoot, ".dependency-cruiser.cjs"), "utf8");
+  for (const member of members) {
+    assert.ok(roots.some((root) => root.startsWith(`${member}/`)), `${member} has no cruise root in check:arrows`);
+    if (member.startsWith("packages/")) {
+      const name = member.slice("packages/".length);
+      assert.ok(new RegExp(`\\^packages/${name}/`).test(rules) || rules.includes(`|${name}|`) || rules.includes(`(${name}|`) || rules.includes(`|${name})`), `${member} is not named by any arrow-matrix rule`);
+    }
+  }
 });
 
 test("the cruise walked the whole fixture", () => {
