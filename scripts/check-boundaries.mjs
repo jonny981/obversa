@@ -1490,7 +1490,7 @@ const rootPins = {
   // npm is pinned because the release command publishes through it and the
   // publish guard's spec reads its registry rules from it: both resolve this
   // installed copy, never whichever npm is first on PATH.
-  devDependencies: { tsup: '8.5.1', vitest: '4.1.11', '@typescript/typescript6': '6.0.2', typescript: '7.0.2', semver: '7.7.2', npm: '10.9.2', pnpm: '10.15.1', 'dependency-cruiser': '18.2.0' },
+  devDependencies: { tsup: '8.5.1', vitest: '4.1.11', '@typescript/typescript6': '6.0.2', typescript: '7.0.2', semver: '7.7.2', npm: '10.9.2', pnpm: '10.15.1', 'dependency-cruiser': '18.2.0', eslint: '10.9.1', 'eslint-plugin-import-x': '4.17.1', 'eslint-import-resolver-typescript': '4.4.5' },
 };
 if (rootManifest.packageManager !== rootPins.packageManager)
   failures.push(`package.json: packageManager must be ${rootPins.packageManager}; found ${rootManifest.packageManager ?? 'absent'}`);
