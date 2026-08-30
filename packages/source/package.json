@@ -6,7 +6,8 @@
   "type": "module",
   "exports": {
     ".": "./src/index.mjs",
-    "./testing": "./src/testing.mjs"
+    "./testing": "./src/testing.mjs",
+    "./bin": "./src/review-cli.mjs"
   },
   "scripts": {
     "test": "node --test test/*.test.mjs",
@@ -17,6 +18,10 @@
   },
   "dependencies": {
     "acorn": "8.18.0",
-    "shiki": "4.4.3"
+    "shiki": "4.4.3",
+    "@obversa/surfacer": "workspace:*"
+  },
+  "bin": {
+    "obversa-review": "./bin/obversa-review.mjs"
   }
 }

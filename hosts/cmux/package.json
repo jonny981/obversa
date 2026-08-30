@@ -4,12 +4,7 @@
   "private": true,
   "description": "The cmux host: the composition root where the review source meets the surfacer runtime.",
   "type": "module",
-  "scripts": {
-    "test": "node --test test/*.test.mjs",
-    "typecheck": "tsc -p tsconfig.json"
-  },
   "dependencies": {
-    "@obversa/source": "workspace:*",
-    "@obversa/surfacer": "workspace:*"
+    "@obversa/source": "workspace:*"
   }
 }

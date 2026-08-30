@@ -45,8 +45,8 @@ const CHROME_CANDIDATES = [
 ].filter(Boolean);
 const CHROME = CHROME_CANDIDATES.find((p) => existsSync(p));
 
-const SURFACER_SERVER = new URL("../../../packages/surfacer/src/server.mjs", import.meta.url);
-const CLIENT_KIT = new URL("../../../packages/surfacer/src/client.mjs", import.meta.url);
+const SURFACER_SERVER = new URL("../../surfacer/src/server.mjs", import.meta.url);
+const CLIENT_KIT = new URL("../../surfacer/src/client.mjs", import.meta.url);
 // The runtime's headers, verbatim. The CSP is asserted against server.mjs.
 const CSP = "default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; connect-src 'self'; object-src 'none'; base-uri 'none'; frame-ancestors 'none'; form-action 'none'";
 const HEADERS = {

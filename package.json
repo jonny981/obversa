@@ -53,7 +53,7 @@
     "verify:d3": "pnpm verify:d2 && pnpm example:storage",
     "changeset": "changeset",
     "version-packages": "changeset version",
-    "check:arrows": "depcruise --config .dependency-cruiser.cjs --ignore-known .dependency-cruiser-known-violations.json packages/lines/src packages/lines/tests packages/memory/src packages/memory/tests packages/memory-git/src packages/memory-git/tests packages/memory-simple/src packages/memory-simple/tests packages/source/src packages/source/test packages/source/assets packages/surfacer/src packages/surfacer/test packages/surfacer/examples hosts/cmux/lib hosts/cmux/test scripts examples",
+    "check:arrows": "depcruise --config .dependency-cruiser.cjs --ignore-known .dependency-cruiser-known-violations.json packages/lines/src packages/lines/tests packages/memory/src packages/memory/tests packages/memory-git/src packages/memory-git/tests packages/memory-simple/src packages/memory-simple/tests packages/source/src packages/source/bin packages/source/test packages/source/assets packages/surfacer/src packages/surfacer/test packages/surfacer/examples hosts/cmux/test scripts examples",
     "test:arrows": "node --test scripts/check-arrows.spec.mjs",
     "check:lint": "eslint .",
     "test:lint": "node --test scripts/check-lint.spec.mjs",

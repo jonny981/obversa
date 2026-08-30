@@ -10,9 +10,9 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import test from "node:test";
 
-import { parseArgs, placementBin } from "../lib/review-args.mjs";
+import { parseArgs } from "../src/review-args.mjs";
 
-const COMMAND = fileURLToPath(new URL("../bin/obversa-review", import.meta.url));
+const COMMAND = fileURLToPath(new URL("../bin/obversa-review.mjs", import.meta.url));
 
 test("parseArgs accepts the documented shapes", () => {
   assert.equal(parseArgs([]).mode, "worktree");
@@ -75,8 +75,9 @@ function consumer(clientExports) {
     writeFileSync(file, text);
   };
   write("package.json", JSON.stringify({ name: "consumer", type: "module", private: true }));
-  write("bin/obversa-review", readFileSync(COMMAND, "utf8"));
-  write("lib/review-args.mjs", readFileSync(fileURLToPath(new URL("../lib/review-args.mjs", import.meta.url)), "utf8"));
+  write("bin/obversa-review.mjs", readFileSync(COMMAND, "utf8"));
+  write("src/review-cli.mjs", readFileSync(fileURLToPath(new URL("../src/review-cli.mjs", import.meta.url)), "utf8"));
+  write("src/review-args.mjs", readFileSync(fileURLToPath(new URL("../src/review-args.mjs", import.meta.url)), "utf8"));
   write("node_modules/@obversa/surfacer/package.json", JSON.stringify({ name: "@obversa/surfacer", type: "module", exports: { ".": "./index.mjs", "./client": clientExports } }));
   write("node_modules/@obversa/surfacer/index.mjs", "export async function runSurface() { throw new Error('not used by this test'); }\n");
   write("node_modules/@obversa/surfacer/client.mjs", "export const kit = 'esm';\n");
@@ -98,7 +99,7 @@ test("the client kit is resolved under the import condition, the one the browser
   // browser CommonJS.
   const split = consumer({ import: "./client.mjs", require: "./client.cjs" });
   try {
-    const run = spawnSync(process.execPath, [path.join(split, "bin", "obversa-review"), "--no-open"], { encoding: "utf8", timeout: 5000, cwd: split });
+    const run = spawnSync(process.execPath, [path.join(split, "bin", "obversa-review.mjs"), "--no-open"], { encoding: "utf8", timeout: 5000, cwd: split });
     assert.equal(run.status, 0, run.stderr);
     assert.match(run.stdout, /KIT:export const kit = 'esm';/, "the ESM client kit reached the review");
     assert.doesNotMatch(run.stdout, /cjs/);
@@ -109,7 +110,7 @@ test("the client kit is resolved under the import condition, the one the browser
   // require-condition lookup has nothing to resolve and fails before main.
   const importOnly = consumer({ import: "./client.mjs" });
   try {
-    const help = spawnSync(process.execPath, [path.join(importOnly, "bin", "obversa-review"), "--help"], { encoding: "utf8", timeout: 5000, cwd: importOnly });
+    const help = spawnSync(process.execPath, [path.join(importOnly, "bin", "obversa-review.mjs"), "--help"], { encoding: "utf8", timeout: 5000, cwd: importOnly });
     assert.equal(help.status, 0, help.stderr);
     assert.match(help.stdout, /Usage:/);
   } finally {
@@ -142,12 +143,4 @@ test("two review modes on one command line are a usage error, whatever their ord
   assert.throws(() => parseArgs(["--worktree", "--cached"]), /--cached and --worktree name different review modes/);
   assert.equal(parseArgs(["--staged", "--cached"]).mode, "staged", "the same mode named twice is one choice");
   assert.equal(parseArgs(["--worktree", "--worktree"]).mode, "worktree");
-});
-
-test("placement defaults to the obversa-surface beside the command, by absolute path, unless the host injected one", () => {
-  const sibling = path.join(path.dirname(COMMAND), "obversa-surface");
-  assert.equal(placementBin({}, new URL("../bin/obversa-review", import.meta.url).href), sibling);
-  assert.ok(path.isAbsolute(sibling));
-  assert.equal(placementBin({ OBVERSA_SURFACE_BIN: "/opt/host/place" }, new URL("../bin/obversa-review", import.meta.url).href), "/opt/host/place", "an injected value wins");
-  assert.equal(placementBin({ OBVERSA_SURFACE_BIN: "" }, new URL("../bin/obversa-review", import.meta.url).href), sibling, "an empty value is unset");
 });

@@ -120,12 +120,12 @@ module.exports = {
       to: { path: '^packages/', pathNot: '^packages/surfacer/' },
     },
     {
-      name: 'source-reaches-no-package',
+      name: 'source-reaches-surfacer-only',
       comment:
-        '@obversa/source reaches no other package yet; the review command move (an internal note) adds the one arrow to @obversa/surfacer when it lands',
+        '@obversa/source carries the review command, which injects the surfacer launch port itself: the one flipped arrow. It reaches nothing else',
       severity: 'error',
       from: { path: '^packages/source/' },
-      to: { path: '^packages/', pathNot: '^packages/source/' },
+      to: { path: '^packages/', pathNot: '^packages/(source|surfacer)/' },
     },
     {
       name: 'lines-reaches-memory-only',
@@ -149,12 +149,12 @@ module.exports = {
       to: { path: '^packages/', pathNot: '^packages/(memory-simple|memory)/' },
     },
     {
-      name: 'host-reaches-surface-packages-only',
+      name: 'host-reaches-no-package',
       comment:
-        'hosts/cmux carries the review command today, so it reaches @obversa/source and @obversa/surfacer; the review command move (an internal note) removes both arrows and tightens this rule to none',
+        'a host keeps placement glue only: no host module imports any @obversa package. A host manifest may still depend on a package to take its bin by public name',
       severity: 'error',
       from: { path: '^hosts/' },
-      to: { path: '^packages/', pathNot: '^packages/(source|surfacer)/' },
+      to: { path: '^packages/' },
     },
   ],
 };

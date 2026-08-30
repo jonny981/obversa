@@ -868,8 +868,12 @@ test("the guard, run on a disposable copy of the tree, refuses a shipped host im
   const real = new URL("..", import.meta.url).pathname;
   const root = copyTree(real);
   try {
-    const command = path.join(root, "hosts", "cmux", "bin", "obversa-review");
-    const original = readFileSync(command, "utf8");
+    // The host ships no node script any more — the review command moved into
+    // @obversa/source — so the probe subject is created in the copy: a node
+    // shebang makes the scan import-scan it like any host JavaScript.
+    const command = path.join(root, "hosts", "cmux", "bin", "probe-review");
+    const original = "#!/usr/bin/env node\nexport {};\n";
+    writeFileSync(command, original);
     const guard = () => spawnSync(process.execPath, [path.join(root, "scripts", "check-boundaries.mjs")], { cwd: root, encoding: "utf8" });
     assert.equal(guard().status, 0, `the copy passes before any mutation:\n${guard().stderr}`);
     const mutants = [
@@ -883,7 +887,7 @@ test("the guard, run on a disposable copy of the tree, refuses a shipped host im
       writeFileSync(command, `${original}\nimport { e } from "${mutant.specifier}";\n`);
       const run = guard();
       assert.notEqual(run.status, 0, `${mutant.name}: the guard must fail`);
-      assert.match(run.stderr, /obversa-review: (imports .* a file this scan did not import-scan|a host imports a local module outside its own host root)/, `${mutant.name}:\n${run.stderr}`);
+      assert.match(run.stderr, /probe-review: (imports .* a file this scan did not import-scan|a host imports a local module outside its own host root)/, `${mutant.name}:\n${run.stderr}`);
       writeFileSync(command, original);
       rmSync(mutant.file, { force: true });
     }
@@ -905,13 +909,13 @@ test("the guard, run on a disposable copy of the tree, refuses a shipped host im
     const aliased = guard();
     assert.notEqual(aliased.status, 0);
     assert.match(aliased.stderr, /hosts\/cmux\/package\.json: a host manifest carries no imports/);
-    assert.match(aliased.stderr, /obversa-review: a host imports through a package-imports alias \(#escape\)/);
+    assert.match(aliased.stderr, /probe-review: a host imports through a package-imports alias \(#escape\)/);
     writeFileSync(manifestPath, JSON.stringify({ ...manifest, exports: { "./escape": "./dist/escape.mjs" } }));
     writeFileSync(command, `${original}\nimport { e } from "@obversa/cmux-host/escape";\n`);
     const selfExport = guard();
     assert.notEqual(selfExport.status, 0);
     assert.match(selfExport.stderr, /hosts\/cmux\/package\.json: a host manifest carries no exports/);
-    assert.match(selfExport.stderr, /obversa-review: a host imports itself by package name/);
+    assert.match(selfExport.stderr, /probe-review: a host imports itself by package name/);
     writeFileSync(manifestPath, JSON.stringify({ ...manifest, dependencies: { ...manifest.dependencies, escape: "file:./dist" } }));
     writeFileSync(command, original);
     const aliasDep = guard();
@@ -932,11 +936,12 @@ test("the guard, run on a disposable copy of the tree, refuses a shipped host im
     writeFileSync(manifestPath, JSON.stringify({ ...manifest, scripts: { test: "node --import ../../packages/surfacer/src/index.mjs --test test/*.test.mjs" } }));
     const script = guard();
     assert.notEqual(script.status, 0);
-    assert.match(script.stderr, /hosts\/cmux\/package\.json: script test must be "node --test test\/\*\.test\.mjs"/);
+    assert.match(script.stderr, /hosts\/cmux\/package\.json: script test must be absent/);
     writeFileSync(manifestPath, JSON.stringify(manifest));
     // A nested manifest, under a host or a package, is refused whatever it
     // names itself.
     const nestedHost = path.join(root, "hosts", "cmux", "lib", "package.json");
+    mkdirSync(path.dirname(nestedHost), { recursive: true });
     writeFileSync(nestedHost, JSON.stringify({ name: "@obversa/source", exports: { "./escape": "./dist/escape.mjs" } }));
     const nestedHostRun = guard();
     assert.notEqual(nestedHostRun.status, 0);
@@ -967,7 +972,7 @@ test("the guard, run on a disposable copy of the tree, refuses a shipped host im
     const payload = guard();
     assert.notEqual(payload.status, 0);
     assert.match(payload.stderr, /hosts\/cmux\/package\.json: dependencies payload is "workspace:\*", a workspace range on something other than a ruled package/);
-    assert.match(payload.stderr, /obversa-review: a host imports payload\/dist\/escape\.mjs, which its manifest does not declare/);
+    assert.match(payload.stderr, /probe-review: a host imports payload\/dist\/escape\.mjs, which its manifest does not declare/);
     assert.match(payload.stderr, /hosts\/payload: has no host rule/);
     rmSync(path.join(root, "hosts", "payload"), { recursive: true });
     writeFileSync(manifestPath, JSON.stringify(manifest));
@@ -1094,7 +1099,7 @@ test("the guard, run on a disposable copy of the tree, refuses a shipped host im
       writeFileSync(command, `${shebang}\n${original.split("\n").slice(1).join("\n")}`);
       const bad = guard();
       assert.notEqual(bad.status, 0, shebang);
-      assert.match(bad.stderr, /obversa-review: a host command's shebang is exactly #!\/usr\/bin\/env node/, shebang);
+      assert.match(bad.stderr, /probe-review: a host command's shebang is exactly #!\/usr\/bin\/env node/, shebang);
     }
     writeFileSync(command, original);
     // A shell host command names its interpreter by absolute path; env

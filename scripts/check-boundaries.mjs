@@ -1113,10 +1113,11 @@ const packageRules = new Map([
   }],
   // Private workspace packages get a rule too, so a sibling import inside
   // them is caught the same way. Surfacer must never depend on the runtime or
-  // another package; source must never import surfacer (it takes the surface
-  // port by injection from the host composition root).
+  // another package. Source depends on surfacer — the flipped arrow: the
+  // review command lives in source and injects surfacer's launch port itself,
+  // so a host keeps placement glue only.
   ['@obversa/surfacer', { version: '0.1.0', private: true, dependencies: [], peerDependencies: [], scripts: { test: 'node --test test/*.test.mjs', typecheck: 'tsc -p tsconfig.json && tsc -p tsconfig.browser.json' }, configFiles: {} }],
-  ['@obversa/source', { version: '0.1.0', private: true, dependencies: [], peerDependencies: [], scripts: { test: 'node --test test/*.test.mjs', typecheck: 'tsc -p tsconfig.json && tsc -p assets/tsconfig.json' }, configFiles: {} }],
+  ['@obversa/source', { version: '0.1.0', private: true, dependencies: ['@obversa/surfacer'], peerDependencies: [], scripts: { test: 'node --test test/*.test.mjs', typecheck: 'tsc -p tsconfig.json && tsc -p assets/tsconfig.json' }, configFiles: {} }],
 ]);
 // The names a build or test tool reads its configuration from, wherever
 // it runs: any such file that is not pinned is refused, in a package or
@@ -1135,18 +1136,13 @@ const scanRoots = [
 const requiredScanRoots = ['hosts'];
 // The host JavaScript that must be import-scanned, by name, so a rename or a
 // scan gap cannot leave the composition root unchecked.
-const requiredImportScannedHostFiles = [
-  'hosts/cmux/bin/obversa-review',
-  'hosts/cmux/lib/review-args.mjs',
-];
+const requiredImportScannedHostFiles = [];
 const importScannedHostFiles = new Set();
 const hostEdges = [];
 const requiredScannedFiles = [
   'hosts/cmux/bin/obversa-order-workspace',
   'hosts/cmux/bin/obversa-plannotator-browser',
   'hosts/cmux/bin/obversa-surface',
-  'hosts/cmux/bin/obversa-review',
-  'hosts/cmux/lib/review-args.mjs',
   'hosts/cmux/test/f0-proof.sh',
 ];
 const scanFiles = [
@@ -1216,7 +1212,7 @@ const failures = [];
 // them are defence in depth, not the closure.
 const hostRules = new Map([
   ['cmux', {
-    scripts: { test: 'node --test test/*.test.mjs', typecheck: 'tsc -p tsconfig.json' },
+    scripts: {},
     shell: {
       'bin/obversa-order-workspace': '4a8821485b2c1c67041ffd248075a42042674bddb3aebfb4f6915b007e7299f8',
       'bin/obversa-peer-send': '15e38b2a7d4d232122a1653df6dc2ca17085d03e78ad7d687192daa95ac78da8',
@@ -1397,7 +1393,11 @@ for (const [name, rule] of packageRules) {
   } else if (manifest.publishConfig?.access !== 'public') {
     failures.push(`${name}: publishConfig.access must be public`);
   }
-  if (manifest.bin !== undefined) failures.push(`${name}: D1 must not expose a command`);
+  // The review command is @obversa/source's one bin (an internal note);
+  // no other package exposes a command.
+  const allowedBins = name === '@obversa/source' ? { 'obversa-review': './bin/obversa-review.mjs' } : undefined;
+  if (JSON.stringify(manifest.bin) !== JSON.stringify(allowedBins))
+    failures.push(`${name}: bin must be ${JSON.stringify(allowedBins) ?? 'absent'}; found ${JSON.stringify(manifest.bin) ?? 'absent'}`);
   // pnpm promotes publishConfig fields into the packed manifest, so a
   // publishConfig.bin, .exports, .main, .imports, or .types would give the
   // tarball a command or an entry point the checks above never saw. Only

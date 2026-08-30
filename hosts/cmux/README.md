@@ -11,14 +11,14 @@ or fails with a clear message.
 ## Scripts
 
 All commands live in `bin/`, on macOS (the default-browser fallback uses
-`open`). The glue scripts — `obversa-order-workspace`, `obversa-surface`,
-`obversa-plannotator-browser`, `obversa-peer-send`, `obversa-whereis` — run
-on bash; `obversa-review` is a Node command that runs on the packages this
-host depends on. Put `bin/` on your PATH or call the commands by full path.
+`open`). Every one is placement glue on bash: `obversa-order-workspace`,
+`obversa-surface`, `obversa-plannotator-browser`, `obversa-peer-send`,
+`obversa-whereis`. The review command itself is `@obversa/source`'s bin —
+this host only depends on that package so `node_modules/.bin/obversa-review`
+exists here. Put `bin/` on your PATH or call the commands by full path.
 Workspace-file generation and cmux-context parsing use `python3` for
 correct JSON. The generator checks for `python3` before any work and fails
-with a clear message without it; `--help` works either way. The host's own
-tests run with `pnpm test` here or at the repository root.
+with a clear message without it; `--help` works either way.
 
 ### obversa-order-workspace
 
@@ -102,26 +102,28 @@ that variable at this script and the review page opens in a cmux split.
 No other tool reads `PLANNOTATOR_BROWSER`, so every other link keeps the
 default browser.
 
-### obversa-review
+### obversa-review (the source package's command)
 
 Opens a git diff for inline review in a browser pane beside the terminal
-and returns the annotations to the caller. It is the composition root where
-`@obversa/source` (the review page and the diff) meets `@obversa/surfacer`
-(the session), both reached by their public package names.
+and returns the annotations to the caller. The command is `@obversa/source`'s
+bin — the package injects `@obversa/surfacer`'s session itself — and this
+host takes it by public name: `pnpm exec obversa-review` from this
+directory, or `node_modules/.bin/obversa-review` by path.
 
 ```sh
-obversa-review                    # the working tree (git diff)
-obversa-review --staged           # the staged changes (git diff --cached)
-obversa-review --range main..HEAD # a ref range (git diff main..HEAD)
+pnpm exec obversa-review                    # the working tree (git diff)
+pnpm exec obversa-review -- --staged        # the staged changes
+pnpm exec obversa-review -- --range main..HEAD # a ref range
 ```
 
 The three modes are one choice: two of them on one command line is a
 usage error, whatever their order. A diff holding an unresolved merge
 conflict is refused whole, naming the conflicted path.
 
-The page is placed through the `obversa-surface` beside this command, by
-absolute path, unless the host injected another absolute path as
-`OBVERSA_SURFACE_BIN`; nothing is looked up on `PATH`.
+The page is placed through the absolute path in `OBVERSA_SURFACE_BIN` —
+point it at this host's `obversa-surface` glue for a cmux split; nothing is
+looked up on `PATH`, and with the variable unset the default browser opens
+the page instead.
 
 - `--cwd <dir>` runs against another repository directory; the review is
   captured from that repository's root whatever directory you start in.

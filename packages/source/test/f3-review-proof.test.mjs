@@ -23,7 +23,7 @@ import { parseFramedResult, runSurface } from "@obversa/surfacer";
 import { computeDiff, parseUnifiedDiff, reviewDiff } from "@obversa/source";
 
 const clientKitSource = await readFile(
-  new URL("../../../packages/surfacer/src/client.mjs", import.meta.url),
+  new URL("../../surfacer/src/client.mjs", import.meta.url),
   "utf8",
 );
 

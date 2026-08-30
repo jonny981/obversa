@@ -67,9 +67,6 @@ importers:
       '@obversa/source':
         specifier: workspace:*
         version: link:../../packages/source
-      '@obversa/surfacer':
-        specifier: workspace:*
-        version: link:../../packages/surfacer
 
   packages/lines:
     dependencies:
@@ -127,6 +124,9 @@ importers:
 
   packages/source:
     dependencies:
+      '@obversa/surfacer':
+        specifier: workspace:*
+        version: link:../surfacer
       acorn:
         specifier: 8.18.0
         version: 8.18.0

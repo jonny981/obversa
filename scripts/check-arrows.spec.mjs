@@ -89,7 +89,7 @@ file("hosts/cmux/lib/l.mjs", "export const glue = 1;\n");
 const forbidden = [
   ["packages/surfacer/src/bad-a.mjs", "import '../../memory/src/index.mjs';\n", "no-cross-package-internal-path"],
   ["packages/surfacer/src/bad-a.mjs", null, "surfacer-reaches-no-package"],
-  ["packages/source/src/a.mjs", "export * from '../../surfacer/src/index.mjs';\n", "source-reaches-no-package"],
+  ["packages/source/src/a.mjs", "export * from '../../lines/src/index.mjs';\n", "source-reaches-surfacer-only"],
   ["packages/memory/src/b.mjs", "export const p = import('../../lines/src/index.mjs');\n", "memory-reaches-no-package"],
   ["packages/memory-git/src/c.cjs", "module.exports = require('@obversa/lines');\n", "memory-git-reaches-memory-only"],
   ["packages/lines/src/d.ts", "import type { X } from '@obversa/source';\nexport const d: X | number = 1;\n", "lines-reaches-memory-only"],
@@ -99,7 +99,7 @@ const forbidden = [
   ["packages/surfacer/test/i.test.mjs", "import '../../source/test/j.test.mjs';\n", "no-cross-package-test-import"],
   ["packages/source/src/k.mjs", "import '../../../hosts/cmux/lib/l.mjs';\n", "no-package-to-host"],
   ["hosts/cmux/lib/m.mjs", "import '../../../packages/surfacer/src/index.mjs';\n", "no-host-internal-path"],
-  ["hosts/cmux/lib/n.mjs", "import '@obversa/memory';\n", "host-reaches-surface-packages-only"],
+  ["hosts/cmux/lib/n.mjs", "import '@obversa/memory';\n", "host-reaches-no-package"],
   ["scripts/o.mjs", "import '../packages/source/src/index.mjs';\n", "no-script-internal-path"],
   ["packages/surfacer/src/p.mjs", "import 'left-pad';\n", "no-undeclared-external"],
   ["packages/memory/src/q.mjs", "import 'devtool';\n", "no-dev-dep-from-prod"],
@@ -112,9 +112,10 @@ for (const [path, content] of forbidden) if (content !== null) file(path, conten
 // The allowed forms: the same arrows done properly raise nothing.
 const allowed = [
   ["packages/memory-git/src/ok1.mjs", "import '@obversa/memory';\n"],
+  ["packages/source/src/ok8.mjs", "import '@obversa/surfacer';\n"],
   ["packages/source/test/ok2.test.mjs", "import '../src/index.mjs';\n"],
   ["packages/memory-git/tests/ok3.test.mjs", "import '@obversa/memory/testing';\n"],
-  ["hosts/cmux/test/ok4.test.mjs", "import '@obversa/source';\nimport '@obversa/surfacer';\n"],
+  ["hosts/cmux/test/ok4.test.mjs", "import 'node:test';\n"],
   ["examples/ok5.mjs", "import '@obversa/lines';\n"],
   ["scripts/ok6.mjs", "import 'node:fs';\n"],
   ["examples/ok7.mjs", "import '@obversa/does-not-resolve';\n"],
