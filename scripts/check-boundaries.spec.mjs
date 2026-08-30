@@ -1241,10 +1241,13 @@ test("a package-imports alias of vm is refused, which closes a source import of 
 
 test("the workspace file pin refuses a missing or an extra glob, not only accepts the exact text", () => {
   assert.equal(isPinnedWorkspaceFile(PINNED_WORKSPACE_FILE), true);
-  assert.equal(isPinnedWorkspaceFile("packages:\n  - packages/*\n  - hosts/*\n"), true);
+  assert.equal(isPinnedWorkspaceFile("packages:\n  - packages/*\n  - hosts/*\nnodeLinker: isolated\nhoist: false\npublicHoistPattern: []\n"), true);
   for (const text of [
     "packages:\n  - packages/*\n",
     "packages:\n  - packages/*\n  - hosts/*\n  - tools/*\n",
+    "packages:\n  - packages/*\n  - hosts/*\n",
+    "packages:\n  - packages/*\n  - hosts/*\nnodeLinker: isolated\nhoist: true\npublicHoistPattern: []\n",
+    "packages:\n  - packages/*\n  - hosts/*\nnodeLinker: hoisted\nhoist: false\npublicHoistPattern: []\n",
     "packages:\n  - hosts/*\n  - packages/*\n",
     "packages:\n  - packages/*\n  - hosts/*",
     "packages:\n  - packages/**\n  - hosts/*\n",

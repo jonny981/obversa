@@ -1,3 +1,6 @@
 packages:
   - packages/*
   - hosts/*
+nodeLinker: isolated
+hoist: false
+publicHoistPattern: []

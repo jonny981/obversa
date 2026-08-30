@@ -253,7 +253,7 @@ const globalDataMembers = new Set([
 // the hosts, and any other glob would bring code under the arrow rules that
 // the package table does not know. Exported so the spec proves the pin
 // refuses a missing or an extra glob, not only accepts the exact text.
-export const PINNED_WORKSPACE_FILE = 'packages:\n  - packages/*\n  - hosts/*\n';
+export const PINNED_WORKSPACE_FILE = 'packages:\n  - packages/*\n  - hosts/*\nnodeLinker: isolated\nhoist: false\npublicHoistPattern: []\n';
 export function isPinnedWorkspaceFile(text) {
   return text === PINNED_WORKSPACE_FILE;
 }
