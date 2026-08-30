@@ -1,8 +1,7 @@
 {
   "name": "@obversa/source",
   "version": "0.1.0",
-  "private": true,
-  "description": "The review surface: open a git diff for inline review and return the annotations. Runs on an injected surface port; the composition root binds @obversa/surfacer.",
+  "description": "The review surface: open a git diff for inline review and return the annotations. Binds @obversa/surfacer for the session and ships the review command as its bin.",
   "type": "module",
   "exports": {
     ".": "./src/index.mjs",
@@ -11,7 +10,8 @@
   },
   "scripts": {
     "test": "node --test test/*.test.mjs",
-    "typecheck": "tsc -p tsconfig.json && tsc -p assets/tsconfig.json"
+    "typecheck": "tsc -p tsconfig.json && tsc -p assets/tsconfig.json",
+    "prepublishOnly": "node ../../scripts/check-publish-allowlist.mjs"
   },
   "engines": {
     "node": ">=20"
@@ -23,5 +23,18 @@
   },
   "bin": {
     "obversa-review": "./bin/obversa-review.mjs"
+  },
+  "license": "MIT",
+  "files": [
+    "src",
+    "bin",
+    "assets",
+    "README.md",
+    "LICENSE"
+  ],
+  "publishConfig": {
+    "access": "public",
+    "registry": "http://publish-guard.invalid/",
+    "@obversa:registry": "http://publish-guard.invalid/"
   }
 }

@@ -815,8 +815,8 @@ const packageRules = new Map([
   // another package. Source depends on surfacer — the flipped arrow: the
   // review command lives in source and injects surfacer's launch port itself,
   // so a host keeps placement glue only.
-  ['@obversa/surfacer', { version: '0.1.0', private: true, dependencies: [], peerDependencies: [] }],
-  ['@obversa/source', { version: '0.1.0', private: true, dependencies: ['@obversa/surfacer'], peerDependencies: [] }],
+  ['@obversa/surfacer', { version: '0.1.0', dependencies: [], peerDependencies: [] }],
+  ['@obversa/source', { version: '0.1.0', dependencies: ['@obversa/surfacer'], peerDependencies: [] }],
 ]);
 const scanRoots = [
   '.changeset',

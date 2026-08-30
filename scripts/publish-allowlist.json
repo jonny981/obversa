@@ -4,6 +4,8 @@
     "@obversa/lines",
     "@obversa/memory",
     "@obversa/memory-git",
-    "@obversa/memory-simple"
+    "@obversa/memory-simple",
+    "@obversa/source",
+    "@obversa/surfacer"
   ]
 }

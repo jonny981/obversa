@@ -1,7 +1,6 @@
 {
   "name": "@obversa/surfacer",
   "version": "0.1.0",
-  "private": true,
   "description": "Secure local surface sessions: one loopback server, one opaque result, host-native placement.",
   "type": "module",
   "exports": {
@@ -10,9 +9,21 @@
   },
   "scripts": {
     "test": "node --test test/*.test.mjs",
-    "typecheck": "tsc -p tsconfig.json && tsc -p tsconfig.browser.json"
+    "typecheck": "tsc -p tsconfig.json && tsc -p tsconfig.browser.json",
+    "prepublishOnly": "node ../../scripts/check-publish-allowlist.mjs"
   },
   "engines": {
     "node": ">=20"
+  },
+  "license": "MIT",
+  "files": [
+    "src",
+    "README.md",
+    "LICENSE"
+  ],
+  "publishConfig": {
+    "access": "public",
+    "registry": "http://publish-guard.invalid/",
+    "@obversa:registry": "http://publish-guard.invalid/"
   }
 }

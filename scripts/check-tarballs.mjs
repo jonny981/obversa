@@ -58,8 +58,13 @@ export function checkTarball(packageDir) {
     // The workspace packages are ESM-only by design: no require condition,
     // no node10 main fallback for subpaths. The esm-only profile holds them
     // to the modes they actually serve — ESM node16 and bundlers — instead
-    // of failing them for CJS consumers they never claim.
-    const types = run([ATTW_CLI, "--format", "ascii", "--profile", "esm-only", tarball]);
+    // of failing them for CJS consumers they never claim. The surface
+    // packages ship plain JavaScript with no declaration files yet, which
+    // is a fact, not a wrong type: untyped resolution is ignored until a
+    // declaration build ships types for them.
+    // The tarball comes first: --ignore-rules is variadic and would swallow
+    // a trailing path.
+    const types = run([ATTW_CLI, tarball, "--format", "ascii", "--profile", "esm-only", "--ignore-rules", "untyped-resolution"]);
     if (types.status !== 0) {
       failures.push(`${packageDir}: attw: ${(types.stdout || types.stderr || "").trim()}`);
     }
