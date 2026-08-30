@@ -1115,8 +1115,8 @@ const packageRules = new Map([
   // them is caught the same way. Surfacer must never depend on the runtime or
   // another package; source must never import surfacer (it takes the surface
   // port by injection from the host composition root).
-  ['@obversa/surfacer', { version: '0.1.0', private: true, dependencies: [], peerDependencies: [], scripts: { test: 'node --test test/*.test.mjs' }, configFiles: {} }],
-  ['@obversa/source', { version: '0.1.0', private: true, dependencies: [], peerDependencies: [], scripts: { test: 'node --test test/*.test.mjs' }, configFiles: {} }],
+  ['@obversa/surfacer', { version: '0.1.0', private: true, dependencies: [], peerDependencies: [], scripts: { test: 'node --test test/*.test.mjs', typecheck: 'tsc -p tsconfig.json && tsc -p tsconfig.browser.json' }, configFiles: {} }],
+  ['@obversa/source', { version: '0.1.0', private: true, dependencies: [], peerDependencies: [], scripts: { test: 'node --test test/*.test.mjs', typecheck: 'tsc -p tsconfig.json && tsc -p assets/tsconfig.json' }, configFiles: {} }],
 ]);
 // The names a build or test tool reads its configuration from, wherever
 // it runs: any such file that is not pinned is refused, in a package or
@@ -1216,7 +1216,7 @@ const failures = [];
 // them are defence in depth, not the closure.
 const hostRules = new Map([
   ['cmux', {
-    scripts: { test: 'node --test test/*.test.mjs' },
+    scripts: { test: 'node --test test/*.test.mjs', typecheck: 'tsc -p tsconfig.json' },
     shell: {
       'bin/obversa-order-workspace': '4a8821485b2c1c67041ffd248075a42042674bddb3aebfb4f6915b007e7299f8',
       'bin/obversa-peer-send': '15e38b2a7d4d232122a1653df6dc2ca17085d03e78ad7d687192daa95ac78da8',
