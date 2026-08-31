@@ -13,7 +13,7 @@
     "prepublishOnly": "node ../../scripts/check-publish-allowlist.mjs"
   },
   "engines": {
-    "node": ">=20"
+    "node": ">=22"
   },
   "license": "MIT",
   "files": [

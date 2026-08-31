@@ -27,7 +27,8 @@ browser opens the page.
 
 `@obversa/source` exports the diff production and page model
 (`computeDiff`, `parseUnifiedDiff`, `reviewDiff`, the surface contract);
-`@obversa/source/bin` exports the importable command a router calls;
+`@obversa/source/bin` resolves the runnable command file a router spawns
+under its own Node, shell-free;
 `@obversa/source/testing` exports the internals the proofs exercise, with
 no stability promise. The surface session itself is `@obversa/surfacer`,
 which this package depends on and binds.

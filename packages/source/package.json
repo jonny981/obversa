@@ -14,7 +14,7 @@
     "prepublishOnly": "node ../../scripts/check-publish-allowlist.mjs"
   },
   "engines": {
-    "node": ">=20"
+    "node": ">=22"
   },
   "dependencies": {
     "acorn": "8.18.0",
