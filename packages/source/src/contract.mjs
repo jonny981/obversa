@@ -336,6 +336,29 @@ function normalizeThreadEntry(entry) {
 }
 
 /**
+ * Append one entry to an annotation's thread and return a new annotation;
+ * the input is never mutated. The responder is typically an agent answering
+ * a reviewer's note: the entry is shaped and bounded exactly as a submitted
+ * thread entry is (author { kind, id }, non-empty body, both capped), and a
+ * full thread refuses the append rather than dropping an entry silently.
+ */
+export function appendToThread(annotation, entry) {
+  if (!annotation || typeof annotation !== "object") {
+    throw new TypeError("appendToThread needs an annotation");
+  }
+  const clean = normalizeThreadEntry(entry);
+  if (!clean) {
+    throw new TypeError("a thread entry needs an author { kind, id } and a non-empty string body");
+  }
+  const thread = Array.isArray(annotation.thread) ? ownItems(annotation.thread).map(normalizeThreadEntry).filter(Boolean) : [];
+  if (thread.length >= MAX_THREAD) {
+    throw new Error(`a thread carries at most ${MAX_THREAD} entries`);
+  }
+  thread.push(clean);
+  return { ...annotation, thread };
+}
+
+/**
  * Validate and normalise one annotation against the request's anchor set.
  * Returns a clean Annotation or null. The anchor must be a location the request
  * offered; the body must be non-empty; author, createdAt and thread are shaped

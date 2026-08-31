@@ -112,7 +112,10 @@ so a consumer can always say which surface produced the frame.
         "anchor": { "target": "src/git.mjs", "side": "new", "position": 42 },
         "body": "Reject an empty range here too.",
         "author": { "kind": "human", "id": "reviewer" },
-        "createdAt": "2026-08-28T09:15:02.118Z"
+        "createdAt": "2026-08-28T09:15:02.118Z",
+        "thread": [
+          { "author": { "kind": "agent", "id": "fixer" }, "body": "Done: the empty range is refused with its own message." }
+        ]
       }
     ],
     "meta": {
@@ -126,6 +129,14 @@ so a consumer can always say which surface produced the frame.
   "detail": null
 }
 ```
+
+An annotation may carry a `thread`: an ordered list of replies, each an
+author and a body, shaped and bounded like the annotation itself. A
+responder agent appends to it with `appendToThread(annotation, entry)` from
+`@obversa/source` — the call returns a new annotation and never mutates the
+input — and a thread submitted with the review rides the framed result
+intact, so the next round sees the conversation so far.
+
 
 - `surfaceId` names this review session. `gateId` names the pipeline gate
   that opened it, or `null` when you ran the command directly.

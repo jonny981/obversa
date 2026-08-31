@@ -166,6 +166,13 @@ test("the review surface runs on surfacer and returns annotations", { timeout: 3
       anchor: { target: anchor.path, side: anchor.side, position: anchor.line },
       body: maxBody,
     }));
+    // One annotation carries a thread: the reviewer's note already answered
+    // by an agent. The framed handoff must return it intact, because the
+    // thread is what a responder agent appends to on the next round.
+    annotations[0] = /** @type {any} */ ({
+      ...annotations[0],
+      thread: [{ author: { kind: "agent", id: "fixer" }, body: "applied in the follow-up commit" }],
+    });
     const submitBody = JSON.stringify({ decision: "changes-requested", annotations });
 
     // The mutation is gated: no token is 401, a foreign origin is 403.
@@ -228,6 +235,11 @@ test("the review surface runs on surfacer and returns annotations", { timeout: 3
     assert.equal(framed.payload.decision, "changes-requested");
     assert.equal(framed.payload.annotations.length, 500);
     assert.match(framed.payload.annotations[499].body, /ghp_ABC123verbatimSECRET/);
+    assert.deepEqual(
+      framed.payload.annotations[0].thread,
+      [{ author: { kind: "agent", id: "fixer" }, body: "applied in the follow-up commit" }],
+      "a thread rides the framed handoff intact",
+    );
   } finally {
     await reviewPromise.catch(() => {});
     rmSync(repo, { recursive: true, force: true });

@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 
 import {
   anchorKey,
+  appendToThread,
   buildAnchorSet,
   validateAnnotation,
   normalizeResult,
@@ -678,4 +679,28 @@ test("the request guard reads the request's own data only: a required field supp
     for (const key of Object.keys(polluted)) delete Object.prototype[key];
   }
   assert.equal(isSurfaceRequest({ gateId: "g1", callback: {}, kind: {}, subject: {}, anchors: [] }), false);
+});
+
+test("appendToThread lets a responder agent grow a thread without touching the original", () => {
+  const annotation = { anchor: { target: "a.txt", side: "new", position: 1 }, body: "why?", author: { kind: "human", id: "reviewer" }, createdAt: null };
+  const grown = appendToThread(annotation, { author: { kind: "agent", id: "fixer" }, body: "  because the range is empty  " });
+  assert.equal(grown.thread.length, 1);
+  assert.deepEqual(grown.thread[0], { author: { kind: "agent", id: "fixer" }, body: "because the range is empty" });
+  assert.equal(annotation.thread, undefined, "the input annotation is untouched");
+  const twice = appendToThread(grown, { author: { kind: "human", id: "reviewer" }, body: "agreed" });
+  assert.equal(twice.thread.length, 2);
+  assert.equal(grown.thread.length, 1, "each append returns a new annotation");
+  assert.equal(twice.thread[1].body, "agreed");
+});
+
+test("appendToThread shapes, bounds, and refuses like a submitted entry", () => {
+  const annotation = { anchor: { target: "a.txt", side: "new", position: 1 }, body: "note" };
+  for (const bad of [null, {}, { author: { kind: "robot", id: "x" }, body: "hi" }, { author: { kind: "agent", id: "" }, body: "hi" }, { author: { kind: "agent", id: "fixer" }, body: "   " }, { author: { kind: "agent", id: "fixer" }, body: 7 }]) {
+    assert.throws(() => appendToThread(annotation, bad), TypeError, JSON.stringify(bad));
+  }
+  assert.throws(() => appendToThread(null, { author: { kind: "agent", id: "f" }, body: "x" }), TypeError);
+  const long = appendToThread(annotation, { author: { kind: "agent", id: "fixer" }, body: "y".repeat(MAX_BODY + 50) });
+  assert.equal(long.thread[0].body.length, MAX_BODY, "the body is capped like a submitted entry");
+  const full = { ...annotation, thread: Array.from({ length: MAX_THREAD }, () => ({ author: { kind: "agent", id: "fixer" }, body: "r" })) };
+  assert.throws(() => appendToThread(full, { author: { kind: "agent", id: "fixer" }, body: "one more" }), /at most/);
 });

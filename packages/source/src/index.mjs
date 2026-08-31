@@ -10,6 +10,7 @@ export {
   MAX_BODY,
   MAX_THREAD,
   anchorKey,
+  appendToThread,
   buildAnchorSet,
   validateAnnotation,
   normalizeResult,
