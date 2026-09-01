@@ -26,7 +26,7 @@ function run(command, args, cwd, expectedStatus = 0, env = {}) {
   return result.stdout.trim();
 }
 
-function createSignedHistory() {
+function createSignedHistory({ unsignedBetweenLinesAndRuntime = false } = {}) {
   const directory = mkdtempSync(join(tmpdir(), 'obversa-commit-policy-'));
   const repository = join(directory, 'repository');
   const signingKey = join(directory, 'signing-key');
@@ -56,16 +56,42 @@ function createSignedHistory() {
     legacyEnvironment,
   );
 
-  mkdirSync(join(repository, 'packages', 'runtime'), { recursive: true });
-  writeFileSync(join(repository, 'packages', 'runtime', 'package.json'), '{"name":"@obversa/runtime"}\n');
-  run('git', ['add', 'packages/runtime/package.json'], repository);
+  mkdirSync(join(repository, 'packages', 'lines'), { recursive: true });
+  const legacyRuntimeName = `@obversa/${'li' + 'nes'}`;
+  writeFileSync(
+    join(repository, 'packages', 'lines', 'package.json'),
+    `${JSON.stringify({ name: legacyRuntimeName })}\n`,
+  );
+  run('git', ['add', 'packages/lines/package.json'], repository);
   const boundaryEnvironment = {
     GIT_AUTHOR_DATE: '2026-08-24T23:00:00+01:00',
     GIT_COMMITTER_DATE: '2026-08-24T23:00:00+01:00',
   };
   run(
     'git',
-    ['commit', '--quiet', '-m', 'feat(runtime): add the graph runtime'],
+    ['commit', '--quiet', '-m', 'feat(lines): add the graph runtime'],
+    repository,
+    0,
+    boundaryEnvironment,
+  );
+
+  if (unsignedBetweenLinesAndRuntime) {
+    run(
+      'git',
+      ['commit', '--allow-empty', '--quiet', '--no-gpg-sign', '-m', 'fix(lines): expose skipped history'],
+      repository,
+      0,
+      boundaryEnvironment,
+    );
+  }
+
+  mkdirSync(join(repository, 'packages', 'runtime'), { recursive: true });
+  run('git', ['mv', 'packages/lines/package.json', 'packages/runtime/package.json'], repository);
+  writeFileSync(join(repository, 'packages', 'runtime', 'package.json'), '{"name":"@obversa/runtime"}\n');
+  run('git', ['add', 'packages/runtime/package.json'], repository);
+  run(
+    'git',
+    ['commit', '--quiet', '-m', 'refactor(runtime)!: rename the graph runtime'],
     repository,
     0,
     boundaryEnvironment,
@@ -155,6 +181,22 @@ test('initial history rejects an unsigned commit after Lines', () => {
       fixture.laterEnvironment,
     );
     assert.equal(typeof commitPolicy.assertInitialHistory, 'function');
+    assert.throws(
+      () =>
+        commitPolicy.assertInitialHistory({
+          cwd: fixture.repository,
+          expectedKey: fixture.publicKey,
+        }),
+      /does not contain an SSH signature/,
+    );
+  } finally {
+    rmSync(fixture.directory, { recursive: true, force: true });
+  }
+});
+
+test('initial history follows the Lines package through its runtime rename', () => {
+  const fixture = createSignedHistory({ unsignedBetweenLinesAndRuntime: true });
+  try {
     assert.throws(
       () =>
         commitPolicy.assertInitialHistory({

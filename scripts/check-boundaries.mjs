@@ -437,6 +437,64 @@ export function isProjectConfig(path, text) {
 
 const realpathOf = (path, host) => (typeof host.realpath === 'function' ? host.realpath(path) : path);
 
+const packageRules = new Map([
+  ['@obversa/runtime', {
+    directory: 'packages/runtime',
+    kind: 'runtime',
+    version: '1.0.0',
+    dependencies: [],
+    peerDependencies: ['@obversa/engine', '@obversa/memory'],
+    peerDependencyVersions: {
+      '@obversa/engine': '>=0.1.0 <0.2.0',
+      '@obversa/memory': '>=0.1.0 <0.2.0',
+    },
+  }],
+  ['@obversa/engine', {
+    directory: 'packages/engine',
+    kind: 'interface',
+    version: '0.1.0',
+    dependencies: [],
+    peerDependencies: [],
+  }],
+  ['@obversa/memory', {
+    directory: 'packages/memory',
+    kind: 'interface',
+    version: '0.1.0',
+    dependencies: [],
+    peerDependencies: [],
+  }],
+  ['@obversa/memory-simple', {
+    directory: 'plugins/memory-simple',
+    kind: 'plugin',
+    version: '0.1.0',
+    dependencies: ['@obversa/memory'],
+    peerDependencies: [],
+  }],
+  ['@obversa/memory-git', {
+    directory: 'plugins/memory-git',
+    kind: 'plugin',
+    version: '0.1.0',
+    dependencies: ['@obversa/memory'],
+    peerDependencies: [],
+  }],
+  // Private workspace packages get a rule too, so a sibling import inside
+  // them is caught the same way. Surfacer must never depend on the runtime or
+  // another package. Source depends on surfacer — the flipped arrow: the
+  // review command lives in source and injects surfacer's launch port itself,
+  // so a host keeps placement glue only.
+  ['@obversa/surfacer', { directory: 'packages/surfacer', kind: 'surface', version: '0.1.0', dependencies: [], peerDependencies: [] }],
+  ['@obversa/source', { directory: 'packages/source', kind: 'surface', version: '0.1.0', dependencies: ['@obversa/surfacer'], peerDependencies: [] }],
+  ['@obversa/engine-agent-sdk', { directory: 'plugins/engine-agent-sdk', kind: 'plugin', version: '0.1.0', dependencies: ['@obversa/engine', '@obversa/memory'], peerDependencies: [] }],
+  ['@obversa/engine-anthropic-api', { directory: 'plugins/engine-anthropic-api', kind: 'plugin', version: '0.1.0', dependencies: ['@obversa/engine'], peerDependencies: [] }],
+  ['@obversa/engine-claude-cli', { directory: 'plugins/engine-claude-cli', kind: 'plugin', version: '0.1.0', dependencies: ['@obversa/engine'], peerDependencies: [] }],
+  ['@obversa/engine-codex', { directory: 'plugins/engine-codex', kind: 'plugin', version: '0.1.0', dependencies: ['@obversa/engine'], peerDependencies: [] }],
+  ['@obversa/engine-grok-cli', { directory: 'plugins/engine-grok-cli', kind: 'plugin', version: '0.1.0', dependencies: ['@obversa/engine'], peerDependencies: [] }],
+  ['@obversa/engine-opencode-cli', { directory: 'plugins/engine-opencode-cli', kind: 'plugin', version: '0.1.0', dependencies: ['@obversa/engine'], peerDependencies: [] }],
+]);
+const packageNamesByDirectory = new Map(
+  [...packageRules].map(([name, rule]) => [rule.directory, name]),
+);
+
 // A project config as the compiler reads it: the effective options after
 // every `extends` is resolved the way the compiler resolves one (relative,
 // absolute, extensionless, a package name through its exports, a `#alias`
@@ -482,14 +540,19 @@ function reachesEveryPackage(absolute, repoRoot) {
 // nothing, a sibling is an arrow, and `packages/` or above is refused — such
 // a value lets a bare specifier, a wildcard substitution, or a glob land in
 // any package. A config with a diagnostic is refused whole.
-export function projectConfig(text, { file, root: repoRoot, host = ts.sys } = {}) {
+export function projectConfig(text, {
+  file,
+  root: repoRoot,
+  host = ts.sys,
+  packageNames = packageNamesByDirectory,
+} = {}) {
   const { parsed, diagnostics, extended } = parseProjectConfig(text, { file, host });
   if (diagnostics.length > 0)
     return { dependencies: [refusal(`the config cannot be read as the compiler reads it: ${diagnostics.join('; ')}`)], options: parsed.options };
   const configDir = dirname(file);
   const dependencies = [];
   const place = (named, what) => {
-    const placed = placement(named, { file, root: repoRoot, host, what });
+    const placed = placement(named, { file, root: repoRoot, host, what, packageNames });
     if (placed) dependencies.push(placed);
   };
   const byName = (value, what) => {
@@ -546,7 +609,11 @@ export function isVersionRange(value) {
 // for the key's own name. Anything else — a path, a URL, a Git spec, a
 // tag, a catalog entry — is a refusal: the scan cannot say what it installs.
 // `file` is the manifest's absolute path and `root` the repository root.
-export function dependencyTarget(key, spec, { file, root: repoRoot } = {}) {
+export function dependencyTarget(
+  key,
+  spec,
+  { file, root: repoRoot, packageNames = packageNamesByDirectory } = {},
+) {
   const value = String(spec);
   // An alias of a workspace package carries an explicit selector: a range
   // for `npm:`, a range or `^` / `~` / `*` for `workspace:`; `@latest` or
@@ -559,8 +626,12 @@ export function dependencyTarget(key, spec, { file, root: repoRoot } = {}) {
   }
   const linked = /^workspace:(\.{1,2}\/.*|\/.*)$/.exec(value);
   if (linked) {
-    const dir = file && repoRoot ? packageDirOf(realpathOf(resolve(dirname(file), linked[1]), ts.sys), repoRoot) : undefined;
-    return dir !== undefined ? { name: `@obversa/${dir}` } : { refused: `${key} links ${linked[1]}, which is not a workspace package the scan can place` };
+    const name = file && repoRoot
+      ? packageNameOf(realpathOf(resolve(dirname(file), linked[1]), ts.sys), repoRoot, packageNames)
+      : undefined;
+    return name !== undefined
+      ? { name }
+      : { refused: `${key} links ${linked[1]}, which is not a workspace package the scan can place` };
   }
   if (key.startsWith('@obversa/')) {
     if (/^workspace:(?:[\^~*]|.+)$/.test(value) && (value === 'workspace:^' || value === 'workspace:~' || value === 'workspace:*' || isVersionRange(value.slice('workspace:'.length))))
@@ -593,7 +664,12 @@ export function internalDependencies(manifest, field, at = {}) {
 // `publishConfig.directory` — a loader, the compiler, or a bundler follows
 // each, so each is placed by the package directory its real path lies in;
 // a sibling is an arrow, and `packages/` or above is refused.
-export function manifestPathTargets(manifest, { file, root: repoRoot, host = ts.sys } = {}) {
+export function manifestPathTargets(manifest, {
+  file,
+  root: repoRoot,
+  host = ts.sys,
+  packageNames = packageNamesByDirectory,
+} = {}) {
   const leaves = (value) => {
     if (typeof value === 'string') return [value];
     if (Array.isArray(value)) return value.flatMap(leaves);
@@ -643,7 +719,7 @@ export function manifestPathTargets(manifest, { file, root: repoRoot, host = ts.
       found.push(refusal(`${field} names ${placedUnder(real, repoRoot)}, a file with no source extension, which the scan never import-scans; a module carries a source extension`));
       continue;
     }
-    const placed = placement(named, { file, root: repoRoot, host, what: field });
+    const placed = placement(named, { file, root: repoRoot, host, what: field, packageNames });
     if (placed) found.push(placed);
   }
   return found;
@@ -654,19 +730,30 @@ export function manifestPathTargets(manifest, { file, root: repoRoot, host = ts.
 // sibling's name for a sibling, and a refusal for `packages/` or above —
 // a place that holds every package. Real paths are compared, so a symlink
 // outside every package that points into one is seen where it lands.
-function placement(named, { file, root: repoRoot, host = ts.sys, what }) {
+function placement(named, {
+  file,
+  root: repoRoot,
+  host = ts.sys,
+  what,
+  packageNames = packageNamesByDirectory,
+}) {
   const absolute = realpathOf(named, host);
   if (reachesEveryPackage(absolute, repoRoot))
     return refusal(`${what} reaches ${placedUnder(absolute, repoRoot) || '.'}, which holds every package`);
-  const dir = packageDirOf(absolute, repoRoot);
-  return dir !== undefined && dir !== packageDirOf(file, repoRoot) ? `@obversa/${dir}` : undefined;
+  const name = packageNameOf(absolute, repoRoot, packageNames);
+  return name !== undefined && name !== packageNameOf(file, repoRoot, packageNames)
+    ? name
+    : undefined;
 }
 
 // The packages a manifest's `imports` map (`#alias`) can reach. Node resolves
 // such an alias to an external package or to a path, through nested
 // conditional objects and arrays, so every string leaf counts — by name, or
 // by a relative path into another package (a glob by its literal prefix).
-export function manifestImportTargets(manifest, { file, root: repoRoot } = {}) {
+export function manifestImportTargets(
+  manifest,
+  { file, root: repoRoot, packageNames = packageNamesByDirectory } = {},
+) {
   const leaves = (value) => {
     if (typeof value === 'string') return [value];
     if (Array.isArray(value)) return value.flatMap(leaves);
@@ -705,7 +792,7 @@ export function manifestImportTargets(manifest, { file, root: repoRoot } = {}) {
         continue;
       }
     }
-    const crossing = crossingPackage(leaf, { file, root: repoRoot });
+    const crossing = crossingPackage(leaf, { file, root: repoRoot, packageNames });
     if (crossing) found.push(crossing);
   }
   return found;
@@ -715,7 +802,10 @@ export function manifestImportTargets(manifest, { file, root: repoRoot } = {}) {
 // an `@obversa/...` name by name, a relative or absolute path by the package
 // directory it resolves into, when that is not the importing file's own.
 // Null otherwise.
-function crossingPackage(specifier, { file, root: repoRoot } = {}) {
+function crossingPackage(
+  specifier,
+  { file, root: repoRoot, packageNames = packageNamesByDirectory } = {},
+) {
   if (specifier.startsWith('@obversa/')) return specifier.split('/').slice(0, 2).join('/');
   if (!file || !repoRoot || !(/^\.\.?\//.test(specifier) || isAbsolute(specifier))) return null;
   // Where the loader lands, by real path from the importing file's real
@@ -742,19 +832,28 @@ function crossingPackage(specifier, { file, root: repoRoot } = {}) {
   // modules that import.
   if (!isTestPath(file) && ts.sys.fileExists(real) && !sourcePattern.test(real) && !/\.(json|css|html|txt|md)$/.test(real))
     return refusal(`${specifier} names ${placed}, a file with no source extension, which the scan never import-scans; a module carries a source extension`);
-  const owner = packageDirOf(realpathOf(file, ts.sys), realRoot);
+  const owner = packageNameOf(realpathOf(file, ts.sys), realRoot, packageNames);
   // A package or plugin imports nothing from outside the two code roots: a
   // host is the composition root, and scripts/ plus the repository root are
   // the guard's own ground.
   if (owner !== undefined && !isTestPath(file) && !/^(?:packages|plugins)\//.test(placed)) return refusal(`${specifier} reaches ${placed || '.'}, outside packages/ and plugins/; a package imports nothing from hosts, scripts, or the repository root`);
-  const dir = packageDirOf(real, realRoot);
-  return dir && dir !== owner ? `@obversa/${dir}` : null;
+  const name = packageNameOf(real, realRoot, packageNames);
+  return name && name !== owner ? name : null;
 }
 
-// The package directory an absolute path lies in, or names outright (a bare
-// `packages/memory`, as a project reference does), else undefined.
-function packageDirOf(absolute, repoRoot) {
-  return /^(?:packages|plugins)\/([^/]+)(?:\/|$)/.exec(placedUnder(absolute, repoRoot))?.[1];
+// The explicit package identity whose ruled directory contains an absolute
+// path, or which the path names outright (as a project reference does).
+// Directory spelling is never rebuilt into a public package name.
+export function packageNameOf(
+  absolute,
+  repoRoot,
+  packageNames = packageNamesByDirectory,
+) {
+  const placed = placedUnder(absolute, repoRoot);
+  for (const [directory, name] of packageNames) {
+    if (placed === directory || placed.startsWith(`${directory}/`)) return name;
+  }
+  return undefined;
 }
 
 // Every regular file under a directory, and every symlink met on the way. A
@@ -790,60 +889,6 @@ const isMain = process.argv[1] && realpathSync(fileURLToPath(import.meta.url)) =
 if (isMain) await main();
 
 async function main() {
-const packageRules = new Map([
-  ['@obversa/runtime', {
-    directory: 'packages/runtime',
-    kind: 'runtime',
-    version: '1.0.0',
-    dependencies: [],
-    peerDependencies: ['@obversa/engine', '@obversa/memory'],
-    peerDependencyVersions: {
-      '@obversa/engine': '>=0.1.0 <0.2.0',
-      '@obversa/memory': '>=0.1.0 <0.2.0',
-    },
-  }],
-  ['@obversa/engine', {
-    directory: 'packages/engine',
-    kind: 'interface',
-    version: '0.1.0',
-    dependencies: [],
-    peerDependencies: [],
-  }],
-  ['@obversa/memory', {
-    directory: 'packages/memory',
-    kind: 'interface',
-    version: '0.1.0',
-    dependencies: [],
-    peerDependencies: [],
-  }],
-  ['@obversa/memory-simple', {
-    directory: 'plugins/memory-simple',
-    kind: 'plugin',
-    version: '0.1.0',
-    dependencies: ['@obversa/memory'],
-    peerDependencies: [],
-  }],
-  ['@obversa/memory-git', {
-    directory: 'plugins/memory-git',
-    kind: 'plugin',
-    version: '0.1.0',
-    dependencies: ['@obversa/memory'],
-    peerDependencies: [],
-  }],
-  // Private workspace packages get a rule too, so a sibling import inside
-  // them is caught the same way. Surfacer must never depend on the runtime or
-  // another package. Source depends on surfacer — the flipped arrow: the
-  // review command lives in source and injects surfacer's launch port itself,
-  // so a host keeps placement glue only.
-  ['@obversa/surfacer', { directory: 'packages/surfacer', kind: 'surface', version: '0.1.0', dependencies: [], peerDependencies: [] }],
-  ['@obversa/source', { directory: 'packages/source', kind: 'surface', version: '0.1.0', dependencies: ['@obversa/surfacer'], peerDependencies: [] }],
-  ['@obversa/engine-agent-sdk', { directory: 'plugins/engine-agent-sdk', kind: 'plugin', version: '0.1.0', dependencies: ['@obversa/engine', '@obversa/memory'], peerDependencies: [] }],
-  ['@obversa/engine-anthropic-api', { directory: 'plugins/engine-anthropic-api', kind: 'plugin', version: '0.1.0', dependencies: ['@obversa/engine'], peerDependencies: [] }],
-  ['@obversa/engine-claude-cli', { directory: 'plugins/engine-claude-cli', kind: 'plugin', version: '0.1.0', dependencies: ['@obversa/engine'], peerDependencies: [] }],
-  ['@obversa/engine-codex', { directory: 'plugins/engine-codex', kind: 'plugin', version: '0.1.0', dependencies: ['@obversa/engine'], peerDependencies: [] }],
-  ['@obversa/engine-grok-cli', { directory: 'plugins/engine-grok-cli', kind: 'plugin', version: '0.1.0', dependencies: ['@obversa/engine'], peerDependencies: [] }],
-  ['@obversa/engine-opencode-cli', { directory: 'plugins/engine-opencode-cli', kind: 'plugin', version: '0.1.0', dependencies: ['@obversa/engine'], peerDependencies: [] }],
-]);
 const scanRoots = [
   '.changeset',
   'packages',
@@ -1037,12 +1082,11 @@ for (const entry of await readdir(join(root, 'hosts'), { withFileTypes: true }))
 // dependency list from any scan goes through this; a refusal is printed as
 // its reason.
 const checkArrows = (path, owner, dependencies) => {
-  const ownerName = `@obversa/${owner}`;
-  const rule = packageRules.get(ownerName);
-  const allowed = new Set([ownerName, ...(rule?.dependencies ?? []), ...(rule?.peerDependencies ?? [])]);
+  const rule = packageRules.get(owner);
+  const allowed = new Set([owner, ...(rule?.dependencies ?? []), ...(rule?.peerDependencies ?? [])]);
   for (const dependency of dependencies) {
     if (isRefusal(dependency)) failures.push(`${path}: ${refusalReason(dependency)}`);
-    else if (!allowed.has(dependency)) failures.push(`${path}: ${ownerName} must not import ${dependency}`);
+    else if (!allowed.has(dependency)) failures.push(`${path}: ${owner} must not import ${dependency}`);
   }
 };
 
@@ -1059,8 +1103,7 @@ for (const path of ['.claude/', '.Codex/', '.superpowers/']) {
 
 // Every package and plugin directory is claimed by one explicit rule. The
 // manifest owns the public name; directory spelling is not an identity rule.
-const rulesByDirectory = new Map([...packageRules.entries()].map(([name, rule]) => [rule.directory, name]));
-if (rulesByDirectory.size !== packageRules.size) failures.push('packageRules: every package name must own a distinct directory');
+if (packageNamesByDirectory.size !== packageRules.size) failures.push('packageRules: every package name must own a distinct directory');
 for (const workspaceRoot of ['packages', 'plugins']) {
   for (const entry of await readdir(join(root, workspaceRoot), { withFileTypes: true })) {
     if (!entry.isDirectory()) continue;
@@ -1077,7 +1120,7 @@ for (const workspaceRoot of ['packages', 'plugins']) {
       if (basename(nested) === 'package.json' && nested !== manifestPath)
         failures.push(`${relative(root, nested).split('\\').join('/')}: a nested manifest makes itself the package scope of the files beneath it, whatever it is named; a package has one manifest, at its root`);
     }
-    const expectedName = rulesByDirectory.get(ruledDirectory);
+    const expectedName = packageNamesByDirectory.get(ruledDirectory);
     if (!expectedName) failures.push(`${ruledDirectory}: ${manifest.name} has no boundary rule with this directory`);
     else if (manifest.name !== expectedName) failures.push(`${ruledDirectory}: is named ${manifest.name}; its boundary rule names ${expectedName}`);
   }
@@ -1097,13 +1140,17 @@ for (const path of scanFiles) {
 // Every project config under a package, read as the compiler reads it: its
 // dependencies are checked here, and its effective options resolve that
 // package's imports below.
-const projectConfigs = new Map(); // package dir -> [{ absolute, options }]
+const projectConfigs = new Map(); // package name -> [{ absolute, options }]
 for (const absolute of files) {
   const path = relative(root, absolute).split('\\').join('/');
   if (extname(absolute) !== '.json') continue;
   const text = await readFile(absolute, 'utf8');
   if (!isProjectConfig(path, text)) continue;
-  const owner = path.split('/')[1];
+  const owner = packageNameOf(absolute, root);
+  if (!owner) {
+    failures.push(`${path}: project config has no package boundary rule`);
+    continue;
+  }
   const { dependencies, options } = projectConfig(text, { file: absolute, root });
   checkArrows(path, owner, dependencies);
   if (!projectConfigs.has(owner)) projectConfigs.set(owner, []);
@@ -1113,7 +1160,6 @@ for (const absolute of files) {
 for (const [name, rule] of packageRules) {
   if (!['interface', 'runtime', 'plugin', 'surface'].includes(rule.kind))
     failures.push(`${name}: boundary kind must be interface, runtime, plugin, or surface; found ${rule.kind ?? 'absent'}`);
-  const owner = name.slice('@obversa/'.length);
   const directory = join(root, rule.directory);
   if (rule.kind === 'runtime' || rule.kind === 'plugin') {
     for (const dependency of [...rule.dependencies, ...rule.peerDependencies]) {
@@ -1194,7 +1240,7 @@ for (const [name, rule] of packageRules) {
 
   // The manifest's own entry fields are followed by a loader, the compiler,
   // or a bundler: each is placed like an import.
-  checkArrows(`${rule.directory}/package.json`, owner, manifestPathTargets(manifest, manifestAt));
+  checkArrows(`${rule.directory}/package.json`, name, manifestPathTargets(manifest, manifestAt));
 
 }
 // The tools that interpret the pinned configurations, and the guard's own

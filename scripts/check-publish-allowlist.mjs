@@ -170,7 +170,7 @@ export function audit({ root = ROOT, allowlist = readAllowlist() } = {}) {
 // The release record for one package version: an annotated git tag named for
 // the package and the version. Encoding (filesystem- and refname-safe): drop
 // the scope's "@", turn "/" into "-", then append "@<version>":
-//   @obversa/runtime 1.0.0  ->  obversa-lines@1.0.0
+//   @obversa/runtime 1.0.0  ->  obversa-runtime@1.0.0
 export function releaseTagFor(name, version) {
   return `${String(name).replace(/^@/, "").replace(/\//g, "-")}@${version}`;
 }

@@ -137,6 +137,30 @@ test("a dependency value is a registry range, a registry alias, a workspace pack
   assert.deepEqual(dependencyTarget("@obversa/memory", "link:../memory", at), { refused: "@obversa/memory is link:../memory, which is not a workspace range the scan can read" });
 });
 
+test("path ownership comes from the explicit package map when directory and package names differ", () => {
+  const packageNames = new Map([
+    ["packages/runtime-folder", "@obversa/runtime-name"],
+    ["plugins/provider-folder", "@obversa/provider-name"],
+  ]);
+  const file = "/repo/packages/runtime-folder/tsconfig.json";
+  const host = fakeHost(tree({
+    "/repo/packages/runtime-folder/src/index.ts": "",
+    "/repo/plugins/provider-folder/src/index.ts": "",
+  }));
+  const at = { file, root: "/repo", host, packageNames };
+
+  assert.deepEqual(
+    dependencyTarget("provider", "workspace:../../plugins/provider-folder", at),
+    { name: "@obversa/provider-name" },
+    "a workspace path resolves to the manifest identity, not @obversa/provider-folder",
+  );
+  assert.deepEqual(
+    tsconfigDependencies('{ "files": ["../../plugins/provider-folder/src/index.ts"] }', at),
+    ["@obversa/provider-name"],
+    "a project-config crossing resolves to the manifest identity too",
+  );
+});
+
 test("a manifest's entry fields are placed by the package their real path lies in", () => {
   const at = { file: "/repo/packages/source/package.json", root: "/repo", host: fakeHost(tree()) };
   assert.deepEqual(manifestPathTargets({ main: "./dist/index.js", types: "./dist/index.d.ts", exports: { ".": { types: "./dist/index.d.ts", import: "./dist/index.js" }, "./package.json": "./package.json" } }, at), [], "own paths");
