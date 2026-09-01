@@ -93,6 +93,7 @@ writeFileSync(out, 'stub final');
     );
 
     expect(finalResultText(result)).toBe('stub final');
+    expect(result.requested.executable).toBe(bin);
     expect(readFileSync(stdinFile, 'utf8')).toBe('system rules\n\n---\n\ndo the work');
   });
 

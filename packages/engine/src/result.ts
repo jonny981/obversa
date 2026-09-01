@@ -1,3 +1,5 @@
+import { isAbsolute } from 'node:path';
+
 import type {
   AgentResult,
   AgentResultPart,
@@ -33,6 +35,15 @@ function nonEmptyText(value: unknown, field: string): string {
 function nullableText(value: unknown, field: string): string | null {
   if (value === null) return null;
   return nonEmptyText(value, field);
+}
+
+function nullableExecutable(value: unknown, field: string): string | null {
+  if (value === null || value === undefined) return null;
+  const path = nonEmptyText(value, field);
+  if (!isAbsolute(path)) {
+    throw new TypeError(`${field} must be an absolute path or null`);
+  }
+  return path;
 }
 
 function tokenCount(value: unknown, field: string): number {
@@ -90,6 +101,7 @@ function validateSelection(
     provider: nullableText(value.provider, `${field}.provider`),
     modelFamily: nullableText(value.modelFamily, `${field}.modelFamily`),
     model: nullableText(value.model, `${field}.model`),
+    executable: nullableExecutable(value.executable, `${field}.executable`),
     capabilities: Object.freeze(capabilities),
   });
 }
@@ -167,6 +179,7 @@ export function engineSelection(input: {
   provider?: string | null;
   modelFamily?: string | null;
   model?: string | null;
+  executable?: string | null;
   capabilities?: readonly string[];
 }): EngineSelectionRecord {
   return validateSelection({
@@ -175,6 +188,7 @@ export function engineSelection(input: {
     provider: input.provider ?? null,
     modelFamily: input.modelFamily ?? null,
     model: input.model ?? null,
+    executable: input.executable ?? null,
     capabilities: input.capabilities ?? [],
   }, 'selection');
 }

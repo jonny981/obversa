@@ -226,6 +226,11 @@ export class AgentSdkEngine implements Engine {
 
     const model = req.model ?? this.opts.defaultModel;
     const acc = newAccumulator(model);
+    const effectiveSelection = () => engineSelection({
+      adapter: 'agent-sdk',
+      provider: 'anthropic',
+      model: acc.model,
+    });
     const env = attemptEnvironment(req);
     const abort = new AbortController();
     const onAbort = () => abort.abort();
@@ -340,20 +345,34 @@ export class AgentSdkEngine implements Engine {
       }
       const limit = classifySdkLimit(e, env);
       if (limit) throw limit;
-      if (e instanceof EngineError) throw e;
+      if (e instanceof EngineError) {
+        if (e.kind !== 'model-unavailable' || e.effective !== undefined) throw e;
+        throw new EngineError({
+          kind: e.kind,
+          message: e.message,
+          cause: e.cause,
+          retryAfterMs: e.retryAfterMs,
+          resetAt: e.resetAt,
+          effective: effectiveSelection(),
+        });
+      }
       if (timedOut)
         throw new EngineError({
           kind: 'timeout',
           message: 'agent-sdk run timed out',
           cause: e,
         });
+      const kind = classifyEngineFailure(e);
       throw new EngineError({
-        kind: classifyEngineFailure(e),
+        kind,
         message: scrubCapture(
           e instanceof Error ? e.message : String(e),
           env,
         ),
         cause: e,
+        ...(kind === 'model-unavailable'
+          ? { effective: effectiveSelection() }
+          : {}),
       });
     } finally {
       signal.removeEventListener('abort', onAbort);

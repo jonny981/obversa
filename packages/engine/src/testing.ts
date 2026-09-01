@@ -45,17 +45,26 @@ export class MockEngine implements Engine {
     }
     const raw = this.responder(req);
     const out = typeof raw === 'string' ? { text: raw } : raw;
-    const model = out.model ?? 'mock';
+    const requestedModel = req.model ?? 'mock';
+    const effectiveModel = out.model ?? requestedModel;
     const usage = reportedUsage(
       out.usage ?? { inputTokens: 10, outputTokens: 5 },
     );
     if (out.text) onEvent({ type: 'text', delta: out.text });
-    onEvent({ type: 'usage', usage, model });
-    const selection = engineSelection({ adapter: 'mock', model });
+    onEvent({ type: 'usage', usage, model: effectiveModel });
+    const requested = engineSelection({
+      adapter: 'mock',
+      model: requestedModel,
+    });
+    const effective = engineSelection({
+      adapter: 'mock',
+      model: effectiveModel,
+    });
     return assistantResult({
       text: out.text,
       usage,
-      requested: selection,
+      requested,
+      effective,
       stopReason: 'end_turn',
     });
   }

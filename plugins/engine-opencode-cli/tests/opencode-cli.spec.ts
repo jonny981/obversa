@@ -231,9 +231,10 @@ describe('OpenCode CLI adapter', () => {
       fixture: { type: 'api', key: 'selected-auth' },
     } as const;
     const input = request();
+    const selectedOptions = options();
 
     const engine = new OpenCodeCliEngine({
-      ...options(),
+      ...selectedOptions,
       auth,
       environment: {
         OBVERSA_TEST_OPENCODE_RECORD: recordPath,
@@ -299,6 +300,8 @@ describe('OpenCode CLI adapter', () => {
       { kind: 'assistant', text: 'draft', final: false },
       { kind: 'assistant', text: 'answer', final: true },
     ]);
+    expect(result.requested.executable).toBe(selectedOptions.executable);
+    expect(result.effective.executable).toBe(selectedOptions.executable);
   });
 
   it('refuses machine-managed config before spawn', async () => {
@@ -1088,6 +1091,23 @@ describe('OpenCode CLI adapter', () => {
     )).rejects.toMatchObject({ kind: 'timeout' });
   });
 
+  it('starts cleanup at the work deadline and keeps a completed result', async () => {
+    const result = await new OpenCodeCliEngine({
+      ...options(),
+      environment: { OBVERSA_TEST_OPENCODE_SCENARIO: 'timeout-final' },
+    }).run(
+      request({ timeoutMs: 250, timeoutGraceMs: 500 }),
+      () => {},
+      new AbortController().signal,
+    );
+
+    expect(result.parts.at(-1)).toMatchObject({ text: 'answer', final: true });
+    expect(result.transportFailure).toMatchObject({
+      kind: 'timeout',
+      exitCode: null,
+    });
+  });
+
   it('scrubs explicit auth values from typed failures', async () => {
     const token = 'short6';
     let error: unknown;
@@ -1199,6 +1219,7 @@ describe('OpenCode CLI adapter', () => {
         provider: 'fixture-provider',
         modelFamily: 'fixture-family',
         model: 'fixture-provider/fixture-model',
+        executable: bin,
         capabilities: ['read'],
       },
       effective: {
@@ -1207,6 +1228,7 @@ describe('OpenCode CLI adapter', () => {
         provider: 'fixture-provider',
         modelFamily: 'fixture-family',
         model: 'fixture-provider/fixture-model',
+        executable: bin,
         capabilities: ['read'],
       },
       parseStructuredResult,

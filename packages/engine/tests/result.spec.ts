@@ -6,6 +6,7 @@ import type {
   UsageReceipt,
 } from '../src/index.ts';
 import {
+  engineSelection,
   finalResultPart,
   finalResultText,
   validateAgentResult,
@@ -17,6 +18,7 @@ const selection: EngineSelectionRecord = {
   provider: null,
   modelFamily: null,
   model: 'fixture-model',
+  executable: null,
   capabilities: ['read'],
 };
 
@@ -33,6 +35,18 @@ function result(
 }
 
 describe('engine result records', () => {
+  it('records an absolute selected executable and rejects a relative path', () => {
+    expect(engineSelection({
+      adapter: 'scripted',
+      executable: '/opt/obversa/bin/engine-wrapper',
+    }).executable).toBe('/opt/obversa/bin/engine-wrapper');
+    expect(engineSelection({ adapter: 'api' }).executable).toBeNull();
+    expect(() => engineSelection({
+      adapter: 'scripted',
+      executable: 'engine-wrapper',
+    })).toThrow('selection.executable must be an absolute path or null');
+  });
+
   it('preserves ordered assistant continuations and one marked final part', () => {
     const validated = validateAgentResult(result([
       { kind: 'assistant', text: 'first', final: false },

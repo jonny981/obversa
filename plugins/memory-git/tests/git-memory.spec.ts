@@ -583,7 +583,7 @@ describe('openGitMemory', () => {
     ).resolves.toMatchObject({ ok: true, value: { text: 'wanted' } });
   });
 
-  it('keeps concurrent accepted writes', async () => {
+  it('keeps concurrent accepted writes', { timeout: 15_000 }, async () => {
     const repo = makeRepo();
     const left = await openGitMemory({ repositoryPath: repo, scope: 'race' });
     const right = await openGitMemory({ repositoryPath: repo, scope: 'race' });

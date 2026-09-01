@@ -1,4 +1,5 @@
-import { execFileSync } from 'node:child_process';
+import { execFileSync, spawn } from 'node:child_process';
+import { once } from 'node:events';
 import {
   mkdtempSync,
   mkdirSync,
@@ -12,12 +13,14 @@ import { join } from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import {
+  EngineError,
   EngineIncompleteResultError,
   type AgentRequest,
   type AgentResult,
   type Engine,
   type EngineEventSink,
 } from '../src/engines/engine.ts';
+import { MockEngine } from '../src/testing.ts';
 import {
   assistantResult,
   engineSelection,
@@ -37,8 +40,17 @@ import {
 import { defineResultContract } from '../src/runtime/result-contract.ts';
 
 const roots: string[] = [];
+const childPids: number[] = [];
 
 afterEach(() => {
+  vi.useRealTimers();
+  for (const pid of childPids.splice(0)) {
+    try {
+      process.kill(pid, 'SIGKILL');
+    } catch {
+      // The child normally exits before cleanup.
+    }
+  }
   for (const root of roots.splice(0)) {
     rmSync(root, { recursive: true, force: true });
   }
@@ -496,6 +508,26 @@ describe('node attempt lifecycle', () => {
     ]);
   });
 
+  it('records a visible model substitution from the scripted engine', async () => {
+    const requested = engineSelection({
+      adapter: 'mock',
+      model: 'declared-model',
+    });
+    const result = await executeNodeAttempt(prepared({
+      engineRoute: [lane(
+        new MockEngine(() => ({
+          text: 'done',
+          model: 'effective-model',
+        })),
+        requested,
+      )],
+    }), new AbortController().signal);
+
+    expect(result.status).toBe('completed');
+    expect(result.requestedEngine?.model).toBe('declared-model');
+    expect(result.effectiveEngine?.model).toBe('effective-model');
+  });
+
   it('records a dead model before starting exactly one declared fallback', async () => {
     const order: string[] = [];
     const primary = engine('primary', async () => {
@@ -536,6 +568,339 @@ describe('node attempt lifecycle', () => {
       reserved: 0,
       unknownUsageCalls: 1,
     });
+  });
+
+  it('does not reset the attempt deadline for a fallback lane', async () => {
+    vi.useFakeTimers();
+    let started!: () => void;
+    const didStart = new Promise<void>((resolve) => {
+      started = resolve;
+    });
+    const primary = engine('primary', async () => {
+      started();
+      await new Promise<void>((resolve) => setTimeout(resolve, 15));
+      throw new EngineError({
+        kind: 'model-unavailable',
+        message: 'primary disappeared',
+      });
+    });
+    const fallback = engine('fallback', async () =>
+      await new Promise<AgentResult>((resolve) => {
+        setTimeout(() => resolve(success('too late', fallbackSelection)), 20);
+      }));
+    const running = executeNodeAttempt(prepared({
+      engineRoute: [
+        lane(primary),
+        lane(fallback, fallbackSelection),
+      ],
+      policy: {
+        ...defaultPolicy,
+        timeoutMs: 20,
+        teardownGraceMs: 10,
+      },
+    }), new AbortController().signal);
+
+    await didStart;
+    await vi.advanceTimersByTimeAsync(35);
+    const record = await running;
+
+    expect(record.status).toBe('failed');
+    expect(record.failure).toMatchObject({ code: 'TIMEOUT' });
+  });
+
+  it('records the effective model that became unavailable beside its lane', async () => {
+    const effective = engineSelection({
+      ...primarySelection,
+      model: 'runtime-substitution',
+    });
+    const unavailable = vi.fn(async () => {});
+    const selected = engine('primary', async () => {
+      throw new EngineError({
+        kind: 'model-unavailable',
+        message: 'runtime substitution disappeared',
+        effective,
+      });
+    });
+
+    const record = await executeNodeAttempt(prepared({
+      engineRoute: [lane(selected)],
+      recordModelUnavailable: unavailable,
+    }), new AbortController().signal);
+
+    expect(record.status).toBe('failed');
+    expect(record.unavailableModels).toEqual([effective]);
+    expect(unavailable).toHaveBeenCalledWith(expect.objectContaining({
+      selection: primarySelection,
+      effective,
+      failure: 'model-unavailable',
+    }));
+  });
+
+  it('bounds an engine that ignores both its timeout and abort signal', async () => {
+    vi.useFakeTimers();
+    let started!: () => void;
+    const didStart = new Promise<void>((resolve) => {
+      started = resolve;
+    });
+    let aborted = false;
+    const selected = engine('stuck', async (_request, _onEvent, signal) => {
+      started();
+      signal.addEventListener('abort', () => {
+        aborted = true;
+      }, { once: true });
+      return await new Promise<AgentResult>(() => {});
+    });
+    const running = executeNodeAttempt(prepared({
+      engineRoute: [lane(selected)],
+      policy: {
+        ...defaultPolicy,
+        timeoutMs: 20,
+        teardownGraceMs: 10,
+      },
+    }), new AbortController().signal);
+
+    await didStart;
+    await vi.runAllTimersAsync();
+    const record = await running;
+
+    expect(aborted).toBe(true);
+    expect(record.status).toBe('failed');
+    expect(record.failure).toMatchObject({ code: 'TIMEOUT' });
+  });
+
+  it('keeps a final result returned during timeout cleanup', async () => {
+    vi.useFakeTimers();
+    let started!: () => void;
+    const didStart = new Promise<void>((resolve) => {
+      started = resolve;
+    });
+    const selected = engine('late', async () => {
+      started();
+      return await new Promise<AgentResult>((resolve) => {
+        setTimeout(() => resolve(success('late answer')), 25);
+      });
+    });
+    const running = executeNodeAttempt(prepared({
+      engineRoute: [lane(selected)],
+      policy: {
+        ...defaultPolicy,
+        timeoutMs: 20,
+        teardownGraceMs: 10,
+      },
+    }), new AbortController().signal);
+
+    await didStart;
+    await vi.advanceTimersByTimeAsync(25);
+    const record = await running;
+
+    expect(record.status).toBe('completed');
+    expect(record.parts.at(-1)).toMatchObject({ text: 'late answer' });
+    expect(record.transportFailure).toMatchObject({ kind: 'timeout' });
+  });
+
+  it('rejects an unmarked result returned after the final-result deadline', async () => {
+    vi.useFakeTimers();
+    let started!: () => void;
+    const didStart = new Promise<void>((resolve) => {
+      started = resolve;
+    });
+    const selected = engine('too-late', async () => {
+      started();
+      return await new Promise<AgentResult>((resolve) => {
+        setTimeout(() => resolve(success('too late')), 31);
+      });
+    });
+    const running = executeNodeAttempt(prepared({
+      engineRoute: [lane(selected)],
+      policy: {
+        ...defaultPolicy,
+        timeoutMs: 20,
+        teardownGraceMs: 10,
+      },
+    }), new AbortController().signal);
+
+    await didStart;
+    await vi.advanceTimersByTimeAsync(31);
+    const record = await running;
+
+    expect(record.status).toBe('failed');
+    expect(record.failure).toMatchObject({ code: 'TIMEOUT' });
+  });
+
+  it('rejects a timeout-marked result returned after the final-result deadline', async () => {
+    vi.useFakeTimers();
+    let started!: () => void;
+    const didStart = new Promise<void>((resolve) => {
+      started = resolve;
+    });
+    const selected = engine('too-late', async () => {
+      started();
+      return await new Promise<AgentResult>((resolve) => {
+        setTimeout(() => resolve({
+          ...success('too late'),
+          transportFailure: {
+            kind: 'timeout',
+            message: 'reported after the deadline',
+            exitCode: null,
+          },
+        }), 31);
+      });
+    });
+    const running = executeNodeAttempt(prepared({
+      engineRoute: [lane(selected)],
+      policy: {
+        ...defaultPolicy,
+        timeoutMs: 20,
+        teardownGraceMs: 10,
+      },
+    }), new AbortController().signal);
+
+    await didStart;
+    await vi.advanceTimersByTimeAsync(31);
+    const record = await running;
+
+    expect(record.status).toBe('failed');
+    expect(record.failure).toMatchObject({ code: 'TIMEOUT' });
+  });
+
+  it('rejects a result after the final deadline even when the engine blocks timers', async () => {
+    const selected = engine('blocking', async () => {
+      Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 25);
+      return success('too late');
+    });
+    const record = await executeNodeAttempt(prepared({
+      engineRoute: [lane(selected)],
+      policy: {
+        ...defaultPolicy,
+        timeoutMs: 5,
+        teardownGraceMs: 5,
+      },
+    }), new AbortController().signal);
+
+    expect(record.status).toBe('failed');
+    expect(record.failure).toMatchObject({ code: 'TIMEOUT' });
+    expect(record.result).toBeNull();
+  });
+
+  it('keeps incomplete evidence but fails as timeout after the final deadline', async () => {
+    vi.useFakeTimers();
+    let started!: () => void;
+    const didStart = new Promise<void>((resolve) => {
+      started = resolve;
+    });
+    const selected = engine('incomplete-too-late', async () => {
+      started();
+      return await new Promise<AgentResult>((_resolve, reject) => {
+        setTimeout(() => reject(new EngineIncompleteResultError(
+          'partial result arrived too late',
+          success('partial answer'),
+        )), 31);
+      });
+    });
+    const running = executeNodeAttempt(prepared({
+      engineRoute: [lane(selected)],
+      policy: {
+        ...defaultPolicy,
+        timeoutMs: 20,
+        teardownGraceMs: 10,
+      },
+    }), new AbortController().signal);
+
+    await didStart;
+    await vi.advanceTimersByTimeAsync(31);
+    const record = await running;
+
+    expect(record.status).toBe('failed');
+    expect(record.failure).toMatchObject({
+      code: 'TIMEOUT',
+      message: 'partial result arrived too late',
+    });
+    expect(record.parts).toEqual([
+      { kind: 'assistant', text: 'partial answer', final: true },
+    ]);
+    expect(record.transportFailure).toMatchObject({ kind: 'timeout' });
+  });
+
+  it('keeps a parent abort distinct after the soft timeout', async () => {
+    vi.useFakeTimers();
+    let started!: () => void;
+    const didStart = new Promise<void>((resolve) => {
+      started = resolve;
+    });
+    const selected = engine('aborted', async (_request, _onEvent, signal) => {
+      started();
+      return await new Promise<AgentResult>((resolve) => {
+        signal.addEventListener(
+          'abort',
+          () => resolve(success('discarded')),
+          { once: true },
+        );
+      });
+    });
+    const controller = new AbortController();
+    const running = executeNodeAttempt(prepared({
+      engineRoute: [lane(selected)],
+      policy: {
+        ...defaultPolicy,
+        timeoutMs: 20,
+        teardownGraceMs: 10,
+      },
+    }), controller.signal);
+
+    await didStart;
+    await vi.advanceTimersByTimeAsync(20);
+    controller.abort();
+    const record = await running;
+
+    expect(record.status).toBe('failed');
+    expect(record.failure).toMatchObject({ code: 'ABORTED' });
+    expect(record.result).toBeNull();
+  });
+
+  it('waits for process cleanup before keeping a final result during grace', async () => {
+    let childPid: number | undefined;
+    const selected = engine('process-backed', async (request) => {
+      const child = spawn(
+        process.execPath,
+        ['-e', "process.send?.('ready'); setInterval(() => {}, 1000)"],
+        { stdio: ['ignore', 'ignore', 'ignore', 'ipc'] },
+      );
+      childPid = child.pid;
+      if (childPid !== undefined) childPids.push(childPid);
+      const ready = once(child, 'message');
+      const deadline = new Promise<void>((resolve) => {
+        setTimeout(
+          resolve,
+          request.timeoutMs ?? 0,
+        );
+      });
+      await ready;
+      await deadline;
+      child.kill('SIGTERM');
+      await once(child, 'exit');
+      return {
+        ...success('late answer'),
+        transportFailure: {
+          kind: 'timeout',
+          message: 'process cleanup followed the final result',
+          exitCode: null,
+        },
+      };
+    });
+    const record = await executeNodeAttempt(prepared({
+      engineRoute: [lane(selected)],
+      policy: {
+        ...defaultPolicy,
+        timeoutMs: 500,
+        teardownGraceMs: 100,
+      },
+    }), new AbortController().signal);
+
+    expect(record.status).toBe('completed');
+    expect(record.parts.at(-1)).toMatchObject({ text: 'late answer' });
+    expect(record.transportFailure).toMatchObject({ kind: 'timeout' });
+    expect(childPid).toBeTypeOf('number');
+    expect(() => process.kill(childPid!, 0)).toThrow();
   });
 
   it('fails typed after the last unavailable model and never invents a lane', async () => {

@@ -1,4 +1,4 @@
-import { accessSync, constants, realpathSync, statSync } from 'node:fs';
+import { accessSync, constants, statSync } from 'node:fs';
 import {
   basename,
   delimiter,
@@ -27,6 +27,7 @@ import { redactEnvValues, redactSecrets, scrubCapture } from './scrub.js';
 const SHA256_DIGEST = /^sha256:[0-9a-f]{64}$/u;
 const SAFE_COMMAND_MARKER = /^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/u;
 const PROCESS_SAMPLE_MS = process.platform === 'win32' ? 250 : 20;
+const MAX_TIMER_MS = 2_147_483_647;
 
 export const DEFAULT_OWNED_COMMAND_LIMITS = Object.freeze({
   timeoutMs: 10 * 60 * 1_000,
@@ -162,7 +163,7 @@ function executablePath(path: string): string | undefined {
   try {
     if (!statSync(path).isFile()) return undefined;
     accessSync(path, constants.X_OK);
-    return realpathSync(path);
+    return path;
   } catch {
     return undefined;
   }
@@ -255,16 +256,31 @@ function validateRequest(request: OwnedCommandRequest): OwnedCommandRequest {
     );
   }
 
+  const timeoutMs = positiveSafeInteger(request.timeoutMs, 'timeoutMs');
+  const teardownGraceMs = nonNegativeSafeInteger(
+    request.teardownGraceMs,
+    'teardownGraceMs',
+  );
+  if (timeoutMs > MAX_TIMER_MS) {
+    throw new OwnedCommandError(
+      'INVALID_COMMAND',
+      `timeoutMs must be at most ${MAX_TIMER_MS}`,
+    );
+  }
+  if (teardownGraceMs > MAX_TIMER_MS - timeoutMs) {
+    throw new OwnedCommandError(
+      'INVALID_COMMAND',
+      `timeoutMs + teardownGraceMs must be at most ${MAX_TIMER_MS}`,
+    );
+  }
+
   return {
     ...request,
     inheritParentEnv: request.inheritParentEnv ?? true,
     attemptId: validateAttemptId(request.attemptId),
     runId: validateCommandMarker(request.runId, 'runId'),
-    timeoutMs: positiveSafeInteger(request.timeoutMs, 'timeoutMs'),
-    teardownGraceMs: nonNegativeSafeInteger(
-      request.teardownGraceMs,
-      'teardownGraceMs',
-    ),
+    timeoutMs,
+    teardownGraceMs,
     maxOutputBytes: nonNegativeSafeInteger(
       request.maxOutputBytes,
       'maxOutputBytes',
@@ -490,14 +506,47 @@ export async function runOwnedCommand(
       inspectionFailure = error;
     }
 
-    const remainingProcesses = await cleanupPromise!;
-    monitorStopped = true;
-    await monitorPromise;
-    clearTimeout(timeout);
-    signal.removeEventListener('abort', onAbort);
-    subprocess.stdout?.destroy();
-    subprocess.stderr?.destroy();
-    await subprocess;
+    let remainingProcesses: readonly ProcessIdentity[] = Object.freeze([]);
+    let firstFailure: { readonly error: unknown } | undefined;
+    let cleanupFailed = false;
+    const rememberFailure = (error: unknown): void => {
+      firstFailure ??= { error };
+    };
+    try {
+      remainingProcesses = await cleanupPromise!;
+    } catch (error) {
+      cleanupFailed = true;
+      rememberFailure(error);
+    } finally {
+      monitorStopped = true;
+      clearTimeout(timeout);
+      signal.removeEventListener('abort', onAbort);
+      subprocess.stdout?.destroy();
+      subprocess.stderr?.destroy();
+      try {
+        await monitorPromise;
+      } catch (error) {
+        rememberFailure(error);
+      }
+      if (cleanupFailed) {
+        cancellation.abort();
+        try {
+          remainingProcesses = await stopOwnedProcessTree({
+            ...treeRequest,
+            observed,
+            graceMs: request.teardownGraceMs,
+          });
+        } catch (error) {
+          inspectionFailure ??= error;
+        }
+      }
+      try {
+        await subprocess;
+      } catch (error) {
+        rememberFailure(error);
+      }
+    }
+    if (firstFailure !== undefined) throw firstFailure.error;
 
     if (remainingProcesses.length > 0) {
       throw new OwnedCommandError(

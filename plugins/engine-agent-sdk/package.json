@@ -38,8 +38,13 @@
   "dependencies": {
     "@anthropic-ai/claude-agent-sdk": "0.3.241",
     "@obversa/engine": "workspace:^",
-    "@obversa/memory": "workspace:^",
     "p-timeout": "^7.0.1",
     "zod": "^4.4.3"
+  },
+  "peerDependencies": {
+    "@obversa/memory": ">=0.1.0 <0.2.0"
+  },
+  "devDependencies": {
+    "@obversa/memory": "workspace:^"
   }
 }

@@ -5,7 +5,7 @@ description: "Run one bounded engine turn with explicit identity, results, usage
 
 An engine-backed node attempt is one fresh engine call doing one piece of work.
 Command adapters use one fresh CLI process; data-only attempts use no engine
-process. Lines records what was requested, what actually ran, what came back,
+process. The runtime records what was requested, what actually ran, what came back,
 and whether token usage was reported or unknown.
 
 This guide stays at the attempt layer. D5 connects attempts to graph dispatch.
@@ -21,8 +21,10 @@ pnpm example:attempt
 
 The example uses local scripted executables. It does not call a model or the
 network. Grok returns a native structured result. OpenCode returns one marked
-text part, which the job-owned parser validates. OpenCode deliberately omits a
-valid usage receipt, so Lines keeps its usage as `unknown` instead of zero.
+text part, which the job-owned parser reads. Both adapter results pass through
+the public result validator before their final parts are used. OpenCode
+deliberately omits a valid usage receipt, so the runtime keeps its usage as
+`unknown` instead of zero.
 
 ## Source
 
@@ -35,6 +37,7 @@ import { join } from 'node:path';
 
 import {
   finalResultPart,
+  validateAgentResult,
   type AgentRequest,
   type AgentResultPart,
   type JsonValue,
@@ -148,7 +151,7 @@ try {
   await chmod(grokExecutable, 0o700);
   await chmod(openCodeExecutable, 0o700);
 
-  const grok = await new GrokCliEngine({
+  const grok = validateAgentResult(await new GrokCliEngine({
     executable: grokExecutable,
     version: '1.0.5',
     identity: { provider: 'xai', modelFamily: 'grok-4' },
@@ -157,9 +160,9 @@ try {
     request(directory, 'grok-4-example', RESULT_SCHEMA),
     () => {},
     new AbortController().signal,
-  );
+  ));
 
-  const opencode = await new OpenCodeCliEngine({
+  const opencode = validateAgentResult(await new OpenCodeCliEngine({
     executable: openCodeExecutable,
     version: '1.18.23',
     identity: { provider: 'opencode', modelFamily: null },
@@ -167,7 +170,7 @@ try {
     request(directory, 'opencode/x-preview-f-free', RESULT_SCHEMA),
     () => {},
     new AbortController().signal,
-  );
+  ));
 
   const grokFinal = nativeValue(finalResultPart(grok));
   const openCodeFinal = parsedValue(finalResultPart(opencode));
@@ -205,6 +208,18 @@ different model, the two records stay separate instead of hiding the change.
 `temporaryDirectoryRemoved` covers only this example's fixture files. The
 package test suite separately checks child-process cleanup on handled exits.
 
+## Headless process markers
+
+Command adapters set three environment variables before they start a process:
+
+- **`OBVERSA_HEADLESS=1`** tells hooks and child tools that the attempt is
+  unattended, so they must not open interactive or desktop prompts.
+- **`OBVERSA_RUN_ID`** identifies the run that owns the process.
+- **`OBVERSA_ATTEMPT_ID`** identifies the exact node attempt and lets cleanup
+  find descendants that detach from their parent process.
+
+Child processes inherit these values unless they replace their environment.
+
 ## Keep results and usage honest
 
 A successful result has ordered parts and exactly one final part. A stopped or
@@ -217,8 +232,8 @@ Usage has two states. `reported` means the engine supplied a valid receipt.
 ## Declare access before the process starts
 
 `tools` lists the built-in capabilities the CLI may expose. `allowedTools`
-holds the narrower permission rules approved by the host. Lines rejects a rule
-the chosen adapter cannot express before it starts the process.
+holds the narrower permission rules approved by the host. The selected adapter
+rejects a rule it cannot express before it starts the process.
 
 The example uses `workspaceMode: 'none'` and exposes no tools. An evidence-only
 job can use `workspaceMode: 'read'` with declared read tools. A writing job must
@@ -233,6 +248,7 @@ One attempt can use one declared fallback after a model becomes unavailable.
 The failed model stays in the attempt record. D5 uses durable events to keep
 later graph work away from that model.
 
-Lines cleans up the process tree on normal completion, timeout, abort, and
-other handled exits. D14 owns the separate case where the whole runner dies,
+The command-adapter kit cleans its process tree on normal completion, timeout,
+abort, and other handled exits. The runtime waits for that cleanup before it
+records the attempt. D14 owns the separate case where the whole runner dies,
 plus live checks against installed CLIs.

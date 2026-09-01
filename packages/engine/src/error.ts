@@ -13,7 +13,12 @@
  * leaves them alone by default.
  */
 
-import type { EngineFailureKind, EngineIncompleteResultEvidence } from './contracts.js';
+import type {
+  EngineFailureKind,
+  EngineIncompleteResultEvidence,
+  EngineSelectionRecord,
+} from './contracts.js';
+import { engineSelection } from './result.js';
 export type { EngineFailureKind } from './contracts.js';
 
 export interface EngineErrorInit {
@@ -22,6 +27,7 @@ export interface EngineErrorInit {
   readonly cause?: unknown;
   readonly retryAfterMs?: number;
   readonly resetAt?: number;
+  readonly effective?: EngineSelectionRecord;
 }
 
 /** A provider or adapter failure with no runtime policy attached. */
@@ -29,6 +35,7 @@ export class EngineError extends Error {
   readonly kind: EngineFailureKind;
   readonly retryAfterMs?: number;
   readonly resetAt?: number;
+  readonly effective?: EngineSelectionRecord;
 
   constructor(init: EngineErrorInit) {
     super(
@@ -39,6 +46,9 @@ export class EngineError extends Error {
     this.kind = init.kind;
     this.retryAfterMs = init.retryAfterMs;
     this.resetAt = init.resetAt;
+    this.effective = init.effective === undefined
+      ? undefined
+      : engineSelection(init.effective);
   }
 }
 

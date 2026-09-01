@@ -148,4 +148,28 @@ describe('attempt token budgets', () => {
       callTokens: null,
     });
   });
+
+  it('rejects time policies that Node timers would shorten', () => {
+    const maximumTimerMs = 2_147_483_647;
+    const policy = {
+      inputBytes: 0,
+      outputBytes: 0,
+      timeoutMs: maximumTimerMs,
+      teardownGraceMs: 0,
+      memoryBytes: 1,
+      filesChanged: 0,
+      linesChanged: 0,
+      callTokens: null,
+    } as const;
+
+    expect(validateAttemptBudgetPolicy(policy).timeoutMs).toBe(maximumTimerMs);
+    expect(() => validateAttemptBudgetPolicy({
+      ...policy,
+      timeoutMs: maximumTimerMs + 1,
+    })).toThrow('timeoutMs');
+    expect(() => validateAttemptBudgetPolicy({
+      ...policy,
+      teardownGraceMs: 1,
+    })).toThrow('timeoutMs + teardownGraceMs');
+  });
 });

@@ -535,3 +535,6 @@ if (scenario === 'late-final') {
   process.stderr.write('transport closed after final result\n');
   process.exit(7);
 }
+if (scenario === 'timeout-final') {
+  await new Promise((resolve) => setTimeout(resolve, 500));
+}

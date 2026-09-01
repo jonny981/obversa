@@ -1139,6 +1139,7 @@ export class OpenCodeCliEngine implements Engine {
       provider: selectedProvider,
       modelFamily: this.#identity.modelFamily,
       model: selectedModel.value,
+      executable: this.#executable,
       capabilities,
     });
     if (typeof request.cwd !== 'string' || !isAbsolute(request.cwd)) {
@@ -1182,9 +1183,6 @@ export class OpenCodeCliEngine implements Engine {
       leafId: request.attempt?.leafId,
       attemptId: request.attempt?.attemptId,
     });
-    const hardTimeout = request.timeoutMs === undefined
-      ? undefined
-      : request.timeoutMs + (request.timeoutGraceMs ?? 0);
     const startedAt = Date.now();
 
     try {
@@ -1203,7 +1201,10 @@ export class OpenCodeCliEngine implements Engine {
         stdin: invocation.stdin,
         ...owner,
         ...DEFAULT_OWNED_COMMAND_LIMITS,
-        timeoutMs: hardTimeout ?? DEFAULT_OWNED_COMMAND_LIMITS.timeoutMs,
+        timeoutMs:
+          request.timeoutMs ?? DEFAULT_OWNED_COMMAND_LIMITS.timeoutMs,
+        teardownGraceMs:
+          request.timeoutGraceMs ?? DEFAULT_OWNED_COMMAND_LIMITS.teardownGraceMs,
         maxOutputBytes:
           request.maxOutputBytes ?? DEFAULT_OWNED_COMMAND_LIMITS.maxOutputBytes,
         maxMemoryBytes:

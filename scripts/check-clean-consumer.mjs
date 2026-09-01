@@ -3,7 +3,7 @@
 import assert from 'node:assert/strict';
 import { copyFile, mkdtemp, mkdir, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
-import { dirname, join, resolve } from 'node:path';
+import { basename, dirname, isAbsolute, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { spawnSync } from 'node:child_process';
 
@@ -82,6 +82,50 @@ const expectedAttemptReport = {
   },
   temporaryDirectoryRemoved: true,
 };
+
+function withoutExecutablePath(selection, filename) {
+  assert.equal(typeof selection.executable, 'string');
+  assert.equal(isAbsolute(selection.executable), true);
+  assert.equal(basename(selection.executable), filename);
+  const { executable: _, ...rest } = selection;
+  return rest;
+}
+
+function checkedAttemptReport(report) {
+  assert.equal(
+    report.grok.requested.executable,
+    report.grok.effective.executable,
+  );
+  assert.equal(
+    report.opencode.requested.executable,
+    report.opencode.effective.executable,
+  );
+  return {
+    ...report,
+    grok: {
+      ...report.grok,
+      requested: withoutExecutablePath(
+        report.grok.requested,
+        'grok-fixture.mjs',
+      ),
+      effective: withoutExecutablePath(
+        report.grok.effective,
+        'grok-fixture.mjs',
+      ),
+    },
+    opencode: {
+      ...report.opencode,
+      requested: withoutExecutablePath(
+        report.opencode.requested,
+        'opencode-fixture.mjs',
+      ),
+      effective: withoutExecutablePath(
+        report.opencode.effective,
+        'opencode-fixture.mjs',
+      ),
+    },
+  };
+}
 
 function sourceFromPublicDoc(document) {
   const match = /## Source[\s\S]*?```ts\n([\s\S]*?)\n```/.exec(document);
@@ -439,8 +483,8 @@ async function main() {
     assert.deepEqual(directGraph, expectedGraphReport);
     assert.deepEqual(compiledStorage, expectedStorageReport);
     assert.deepEqual(directStorage, expectedStorageReport);
-    assert.deepEqual(compiledAttempt, expectedAttemptReport);
-    assert.deepEqual(directAttempt, expectedAttemptReport);
+    assert.deepEqual(checkedAttemptReport(compiledAttempt), expectedAttemptReport);
+    assert.deepEqual(checkedAttemptReport(directAttempt), expectedAttemptReport);
     if (
       report.runtime !== 'pass' ||
       report.memoryCases !== 17 ||

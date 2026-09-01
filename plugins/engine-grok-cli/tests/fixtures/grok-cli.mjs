@@ -169,6 +169,11 @@ emit({
   uuid: 'fixture-init',
 });
 
+if (scenario === 'model-unavailable-after-init') {
+  process.stderr.write(`unknown model ${effectiveModel}\n`);
+  process.exit(1);
+}
+
 if (scenario === 'cancellation') {
   emit({
     type: 'assistant',
@@ -311,4 +316,7 @@ emit(result);
 if (scenario === 'late-final') {
   process.stderr.write('transport closed after final result\n');
   process.exit(7);
+}
+if (scenario === 'timeout-final') {
+  await new Promise((resolve) => setTimeout(resolve, 500));
 }

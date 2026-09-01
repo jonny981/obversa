@@ -174,10 +174,6 @@ export class CodexEngine implements Engine {
     const args = buildCodexArgs(req, this.opts, outFile);
     const env = attemptEnvironment(req);
     const prompt = req.system ? `${req.system}\n\n---\n\n${req.prompt}` : req.prompt;
-    const hardTimeout =
-      req.timeoutMs && req.timeoutGraceMs
-        ? req.timeoutMs + req.timeoutGraceMs
-        : req.timeoutMs;
     const startedAt = Date.now();
     const owner = ownedCommandIdentity({
       adapter: 'codex',
@@ -196,7 +192,9 @@ export class CodexEngine implements Engine {
           stdin: prompt,
           ...owner,
           ...DEFAULT_OWNED_COMMAND_LIMITS,
-          timeoutMs: hardTimeout ?? DEFAULT_OWNED_COMMAND_LIMITS.timeoutMs,
+          timeoutMs: req.timeoutMs ?? DEFAULT_OWNED_COMMAND_LIMITS.timeoutMs,
+          teardownGraceMs:
+            req.timeoutGraceMs ?? DEFAULT_OWNED_COMMAND_LIMITS.teardownGraceMs,
           maxOutputBytes:
             req.maxOutputBytes ?? DEFAULT_OWNED_COMMAND_LIMITS.maxOutputBytes,
           maxMemoryBytes:
@@ -218,7 +216,7 @@ export class CodexEngine implements Engine {
       const failed = sub.timedOut || sub.exitCode !== 0;
       const diagnostic = diagnosticCapture(stderr, stdout, env);
       let transportFailure: AgentResult['transportFailure'];
-      if (failed && (sub.timedOut || !text))
+      if (failed && !text)
         throw new EngineError({
           kind: sub.timedOut
             ? 'timeout'
@@ -248,6 +246,7 @@ export class CodexEngine implements Engine {
         adapter: 'codex',
         provider: 'openai',
         model: model ?? 'codex',
+        executable,
       });
       const late =
         typeof req.timeoutMs === 'number' &&

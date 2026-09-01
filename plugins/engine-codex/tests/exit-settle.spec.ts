@@ -100,6 +100,29 @@ process.exit(0);
     await expectOrphanStopped(orphanPidPath);
   });
 
+  it('starts cleanup at the work deadline and keeps a completed result', async () => {
+    const { bin } = stub(`#!/usr/bin/env node
+import { readFileSync, writeFileSync } from 'node:fs';
+const args = process.argv.slice(2);
+readFileSync(0, 'utf8');
+writeFileSync(args[args.indexOf('-o') + 1], 'PONG');
+await new Promise((resolve) => setTimeout(resolve, 1500));
+`);
+
+    const result = await new CodexEngine({ cliBinary: bin }).run(
+      { prompt: 'ping', timeoutMs: 1_000, timeoutGraceMs: 1_000 },
+      () => {},
+      new AbortController().signal,
+    );
+
+    expect(finalResultText(result)).toBe('PONG');
+    expect(result.transportFailure).toMatchObject({
+      kind: 'timeout',
+      message: expect.stringContaining('during teardown'),
+      exitCode: null,
+    });
+  });
+
   it('the hard timeout still fires when the engine never exits', async () => {
     const { bin, orphanPidPath } = stub(`#!/usr/bin/env node
 ${SPAWN_ORPHAN}

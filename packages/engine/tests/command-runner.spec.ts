@@ -1,5 +1,6 @@
-import { afterEach, describe, expect, it } from 'vitest';
-import { chmodSync, realpathSync, writeFileSync } from 'node:fs';
+import { afterEach, describe, expect, it, vi } from 'vitest';
+import { getEventListeners } from 'node:events';
+import { chmodSync, symlinkSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 
 import {
@@ -60,12 +61,23 @@ describe('command resolution', () => {
     writeFileSync(executable, '#!/bin/sh\nexit 0\n');
     chmodSync(executable, 0o755);
 
-    const resolved = realpathSync(executable);
-    expect(resolveCommandExecutable('engine-stub', directory)).toBe(resolved);
-    expect(resolveCommandExecutable(executable, '')).toBe(resolved);
+    expect(resolveCommandExecutable('engine-stub', directory)).toBe(executable);
+    expect(resolveCommandExecutable(executable, '')).toBe(executable);
     expect(() => resolveCommandExecutable('missing-stub', directory)).toThrow(
       expect.objectContaining({ code: 'INVALID_EXECUTABLE' }),
     );
+  });
+
+  it('keeps an explicitly selected wrapper path instead of its real target', () => {
+    const directory = fixtureDirectory();
+    directories.push(directory);
+    const target = join(directory, 'engine-target');
+    const wrapper = join(directory, 'engine-wrapper');
+    writeFileSync(target, '#!/bin/sh\nexit 0\n');
+    chmodSync(target, 0o755);
+    symlinkSync(target, wrapper);
+
+    expect(resolveCommandExecutable(wrapper, '')).toBe(wrapper);
   });
 });
 
@@ -150,6 +162,44 @@ describe.runIf(process.platform !== 'win32')('owned command runner', () => {
     expectFixtureStopped(directory);
   });
 
+  it('still cleans the process tree when the first cleanup attempt fails', async () => {
+    const directory = fixtureDirectory();
+    directories.push(directory);
+    const controller = new AbortController();
+    const failure = Object.assign(new Error('forced process-tree cleanup failure'), {
+      code: 'EACCES',
+    });
+    const nativeKill = process.kill.bind(process);
+    let forced = false;
+    const kill = vi.spyOn(process, 'kill').mockImplementation(((
+      pid: number,
+      signal?: NodeJS.Signals | number,
+    ) => {
+      if (!forced && signal === 'SIGTERM') {
+        forced = true;
+        throw failure;
+      }
+      return nativeKill(pid, signal);
+    }) as typeof process.kill);
+
+    let caught: unknown;
+    try {
+      await runOwnedCommand(
+        request('complete', directory, { timeoutMs: 54_321 }),
+        controller.signal,
+      );
+    } catch (error) {
+      caught = error;
+    } finally {
+      kill.mockRestore();
+    }
+
+    expect(forced).toBe(true);
+    expect(caught).toBe(failure);
+    expect(getEventListeners(controller.signal, 'abort')).toEqual([]);
+    expectFixtureStopped(directory);
+  });
+
   it('fails typed before retaining output beyond its cap', async () => {
     const directory = fixtureDirectory();
     directories.push(directory);
@@ -188,6 +238,25 @@ describe.runIf(process.platform !== 'win32')('owned command runner', () => {
     )).rejects.toMatchObject({
       code: 'INVALID_EXECUTABLE',
     } satisfies Partial<OwnedCommandError>);
+    expect(fixturePids(directory)).toEqual([]);
+  });
+
+  it('rejects time policies that Node timers would shorten', async () => {
+    const directory = fixtureDirectory();
+    directories.push(directory);
+    const maximumTimerMs = 2_147_483_647;
+
+    await expect(runOwnedCommand(
+      request('complete', directory, { timeoutMs: maximumTimerMs + 1 }),
+      new AbortController().signal,
+    )).rejects.toMatchObject({ code: 'INVALID_COMMAND' });
+    await expect(runOwnedCommand(
+      request('complete', directory, {
+        timeoutMs: maximumTimerMs,
+        teardownGraceMs: 1,
+      }),
+      new AbortController().signal,
+    )).rejects.toMatchObject({ code: 'INVALID_COMMAND' });
     expect(fixturePids(directory)).toEqual([]);
   });
 });

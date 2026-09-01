@@ -6,6 +6,7 @@ import { join } from 'node:path';
 
 import {
   finalResultPart,
+  validateAgentResult,
   type AgentRequest,
   type AgentResultPart,
   type JsonValue,
@@ -119,7 +120,7 @@ try {
   await chmod(grokExecutable, 0o700);
   await chmod(openCodeExecutable, 0o700);
 
-  const grok = await new GrokCliEngine({
+  const grok = validateAgentResult(await new GrokCliEngine({
     executable: grokExecutable,
     version: '1.0.5',
     identity: { provider: 'xai', modelFamily: 'grok-4' },
@@ -128,9 +129,9 @@ try {
     request(directory, 'grok-4-example', RESULT_SCHEMA),
     () => {},
     new AbortController().signal,
-  );
+  ));
 
-  const opencode = await new OpenCodeCliEngine({
+  const opencode = validateAgentResult(await new OpenCodeCliEngine({
     executable: openCodeExecutable,
     version: '1.18.23',
     identity: { provider: 'opencode', modelFamily: null },
@@ -138,7 +139,7 @@ try {
     request(directory, 'opencode/x-preview-f-free', RESULT_SCHEMA),
     () => {},
     new AbortController().signal,
-  );
+  ));
 
   const grokFinal = nativeValue(finalResultPart(grok));
   const openCodeFinal = parsedValue(finalResultPart(opencode));

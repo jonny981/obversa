@@ -694,8 +694,9 @@ function sameCapabilities(
 function loopError(
   kind: EngineFailureKind,
   message: string,
+  effective?: EngineSelectionRecord,
 ): EngineError {
-  return new EngineError({ kind, message });
+  return new EngineError({ kind, message, effective });
 }
 
 function transportFailure(
@@ -814,6 +815,7 @@ export class GrokCliEngine implements Engine {
       provider: this.#identity.provider,
       modelFamily: this.#identity.modelFamily,
       model,
+      executable: this.#executable,
       capabilities,
     });
     const cwd = assertNoProjectExtensions(
@@ -837,9 +839,6 @@ export class GrokCliEngine implements Engine {
     const commandSignal = AbortSignal.any([signal, parserAbort.signal]);
     const flush = (line: string): void =>
       consumeLine(line, accumulator, onEvent, capabilities);
-    const hardTimeout = request.timeoutMs === undefined
-      ? undefined
-      : request.timeoutMs + (request.timeoutGraceMs ?? 0);
     const startedAt = Date.now();
     const owner = ownedCommandIdentity({
       adapter: 'grok-cli',
@@ -867,7 +866,10 @@ export class GrokCliEngine implements Engine {
         stdin: '',
         ...owner,
         ...DEFAULT_OWNED_COMMAND_LIMITS,
-        timeoutMs: hardTimeout ?? DEFAULT_OWNED_COMMAND_LIMITS.timeoutMs,
+        timeoutMs:
+          request.timeoutMs ?? DEFAULT_OWNED_COMMAND_LIMITS.timeoutMs,
+        teardownGraceMs:
+          request.timeoutGraceMs ?? DEFAULT_OWNED_COMMAND_LIMITS.teardownGraceMs,
         maxOutputBytes:
           request.maxOutputBytes ?? DEFAULT_OWNED_COMMAND_LIMITS.maxOutputBytes,
         maxMemoryBytes:
@@ -927,6 +929,18 @@ export class GrokCliEngine implements Engine {
           }
         }
       }
+      const observedCapabilities = accumulator.capabilities ?? capabilities;
+      const effective = engineSelection({
+        adapter: 'grok-cli',
+        adapterVersion: this.#version,
+        provider: this.#identity.provider,
+        modelFamily: this.#identity.modelFamily,
+        model: structured && terminal !== null
+          ? observedJsonModel(terminal, model)
+          : accumulator.model,
+        executable: this.#executable,
+        capabilities: observedCapabilities,
+      });
       const succeeded = terminal !== null && (
         structured
           ? terminal.type !== 'error'
@@ -943,30 +957,23 @@ export class GrokCliEngine implements Engine {
         const kind = command.timedOut
           ? 'timeout'
           : classifyEngineFailure(new Error(detail || 'Grok failed'));
-        throw loopError(kind, `Grok failed${detail ? `: ${detail}` : ''}`);
+        throw loopError(
+          kind,
+          `Grok failed${detail ? `: ${detail}` : ''}`,
+          effective,
+        );
       }
       if (terminal === null) {
         throw loopError('invalid-config', 'Grok completed without a result');
       }
 
       const usage = usageFromTerminal(terminal);
-      const observedCapabilities = accumulator.capabilities ?? capabilities;
       if (!sameCapabilities(capabilities, observedCapabilities)) {
         throw loopError(
           'invalid-config',
           'Grok effective capabilities did not match the prepared request',
         );
       }
-      const effective = engineSelection({
-        adapter: 'grok-cli',
-        adapterVersion: this.#version,
-        provider: this.#identity.provider,
-        modelFamily: this.#identity.modelFamily,
-        model: structured
-          ? observedJsonModel(terminal, model)
-          : accumulator.model,
-        capabilities: observedCapabilities,
-      });
       onEvent({
         type: 'usage',
         usage,

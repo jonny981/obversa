@@ -111,9 +111,10 @@ describe('Grok CLI adapter', () => {
     const recordPath = join(temporaryDirectory('lines-grok-record-'), 'call.json');
     const events: EngineStreamEvent[] = [];
     const input = request();
+    const selectedOptions = options();
 
     const result = await new GrokCliEngine({
-      ...options(),
+      ...selectedOptions,
       environment: {
         OBVERSA_TEST_GROK_RECORD: recordPath,
         OBVERSA_TEST_GROK_SCENARIO: 'invocation',
@@ -212,10 +213,12 @@ describe('Grok CLI adapter', () => {
       provider: 'xai',
       modelFamily: 'grok-4',
       model: 'grok-4-fixture',
+      executable: selectedOptions.executable,
       capabilities: ['read_file', 'grep'],
     });
     expect(result.effective).toMatchObject({
       model: 'grok-4-fixture-effective',
+      executable: selectedOptions.executable,
     });
     expect(events).toEqual([
       { type: 'thinking', delta: 'considering' },
@@ -307,6 +310,29 @@ describe('Grok CLI adapter', () => {
       expect(result.effective.model).toBeNull();
     },
   );
+
+  it('keeps an observed model substitution on a model-unavailable error', async () => {
+    const selectedOptions = options();
+
+    await expect(new GrokCliEngine({
+      ...selectedOptions,
+      environment: {
+        OBVERSA_TEST_GROK_EFFECTIVE_MODEL: 'runtime-substitution',
+        OBVERSA_TEST_GROK_SCENARIO: 'model-unavailable-after-init',
+      },
+    }).run(
+      request(),
+      () => {},
+      new AbortController().signal,
+    )).rejects.toMatchObject({
+      kind: 'model-unavailable',
+      effective: {
+        adapter: 'grok-cli',
+        model: 'runtime-substitution',
+        executable: selectedOptions.executable,
+      },
+    });
+  });
 
   it('enables declared subagents without guessing their parent model', async () => {
     const recordPath = join(temporaryDirectory('lines-grok-record-'), 'call.json');
@@ -665,6 +691,23 @@ describe('Grok CLI adapter', () => {
     expect(result.transportFailure?.kind).toBe('unknown');
   });
 
+  it('starts cleanup at the work deadline and keeps a completed result', async () => {
+    const result = await new GrokCliEngine({
+      ...options(),
+      environment: { OBVERSA_TEST_GROK_SCENARIO: 'timeout-final' },
+    }).run(
+      request({ timeoutMs: 250, timeoutGraceMs: 500 }),
+      () => {},
+      new AbortController().signal,
+    );
+
+    expect(result.parts.at(-1)).toMatchObject({ text: 'answer', final: true });
+    expect(result.transportFailure).toMatchObject({
+      kind: 'timeout',
+      exitCode: null,
+    });
+  });
+
   it('passes the public engine conformance kit through the real process adapter', async () => {
     const bin = executable();
     const report = await runEngineConformance({
@@ -679,6 +722,7 @@ describe('Grok CLI adapter', () => {
         provider: 'xai',
         modelFamily: 'grok-4',
         model: 'grok-4-fixture',
+        executable: bin,
         capabilities: ['read_file'],
       },
       effective: {
@@ -687,6 +731,7 @@ describe('Grok CLI adapter', () => {
         provider: 'xai',
         modelFamily: 'grok-4',
         model: 'grok-4-fixture-effective',
+        executable: bin,
         capabilities: ['read_file'],
       },
       open(scenario) {

@@ -2,9 +2,11 @@ import { lstat, realpath } from 'node:fs/promises';
 import { isAbsolute } from 'node:path';
 
 import {
+  EngineError,
   EngineIncompleteResultError,
   SUBAGENT_TOOLS,
   type AgentRequest,
+  type AgentResult,
   type AgentResultPart,
   type Engine,
   type EngineSelectionRecord,
@@ -46,6 +48,9 @@ import {
 
 const CONTROL_CHARACTER = /[\u0000-\u001f\u007f]/u;
 const EMPTY_USAGE = Object.freeze({ kind: 'unknown' as const });
+// This wait does not extend the final-result deadline. It only lets an engine
+// finish cleanup after the runtime aborts it at that deadline.
+const ENGINE_SETTLE_MS = 7_000;
 const EMPTY_WORKSPACE = cloneFrozenJson({
   entryHead: null,
   exitHead: null,
@@ -95,6 +100,7 @@ export interface ModelUnavailableFact {
   readonly schemaVersion: 1;
   readonly identity: AttemptIdentity;
   readonly selection: EngineSelectionRecord;
+  readonly effective: EngineSelectionRecord;
   readonly failure: EngineFailureKind;
 }
 
@@ -135,6 +141,7 @@ export type NodeAttemptFailureCode =
   | 'INPUT_LIMIT'
   | 'ACTION_POLICY'
   | 'TOKEN_BUDGET'
+  | 'TIMEOUT'
   | 'EFFECT_FAILED'
   | 'ENGINE_UNAVAILABLE'
   | 'MODEL_UNAVAILABLE_RECORD'
@@ -190,6 +197,160 @@ interface MutableAttemptFacts {
   workspace: WorkspaceAttemptEvidence;
 }
 
+class AttemptStopError extends Error {
+  readonly kind: 'aborted' | 'timeout';
+
+  constructor(kind: 'aborted' | 'timeout', cause?: unknown) {
+    super(
+      kind === 'timeout'
+        ? 'node attempt exceeded its time limit'
+        : 'node attempt was aborted',
+      cause === undefined ? undefined : { cause },
+    );
+    this.name = 'AttemptStopError';
+    this.kind = kind;
+  }
+}
+
+class TimedOutIncompleteResultError extends EngineIncompleteResultError {}
+
+interface AttemptDeadline {
+  readonly soft: number;
+  readonly hard: number;
+}
+
+function attemptDeadline(policy: AttemptBudgetPolicy): AttemptDeadline {
+  const startedAt = performance.now();
+  return Object.freeze({
+    soft: startedAt + policy.timeoutMs,
+    hard: startedAt + policy.timeoutMs + policy.teardownGraceMs,
+  });
+}
+
+function timerDelay(deadline: number): number {
+  return Math.max(0, Math.ceil(deadline - performance.now()));
+}
+
+async function runWithTimePolicy<T>(
+  signal: AbortSignal,
+  time: AttemptDeadline,
+  run: (signal: AbortSignal) => Promise<T>,
+  options: {
+    readonly abortAtSoftTimeout: boolean;
+  },
+): Promise<{ readonly value: T; readonly timedOut: boolean }> {
+  if (signal.aborted) throw new AttemptStopError('aborted');
+
+  const controller = new AbortController();
+  let timedOut = false;
+  let stop: AttemptStopError['kind'] | null = null;
+  let abortTimer: ReturnType<typeof setTimeout> | undefined;
+  let finishDeadline!: () => void;
+  const deadline = new Promise<void>((resolve) => {
+    finishDeadline = resolve;
+  });
+  const waitAfterAbort = (): void => {
+    controller.abort();
+    abortTimer = setTimeout(finishDeadline, ENGINE_SETTLE_MS);
+  };
+  const onAbort = (): void => {
+    if (stop !== null) return;
+    stop = 'aborted';
+    waitAfterAbort();
+  };
+  signal.addEventListener('abort', onAbort, { once: true });
+
+  const softTimer = setTimeout(() => {
+    if (stop !== null) return;
+    timedOut = true;
+    if (options.abortAtSoftTimeout) controller.abort();
+  }, timerDelay(time.soft));
+  const hardTimer = setTimeout(() => {
+    if (stop !== null) return;
+    timedOut = true;
+    stop = 'timeout';
+    if (options.abortAtSoftTimeout) {
+      finishDeadline();
+      return;
+    }
+    waitAfterAbort();
+  }, timerDelay(time.hard));
+
+  let pending: Promise<T>;
+  try {
+    pending = Promise.resolve(run(controller.signal));
+  } catch (error) {
+    pending = Promise.reject(error);
+  }
+  const operation = pending.then(
+    (value) => ({ kind: 'value' as const, value }),
+    (error: unknown) => ({ kind: 'error' as const, error }),
+  );
+  try {
+    const outcome = await Promise.race([
+      operation,
+      deadline.then(() => ({ kind: 'deadline' as const })),
+    ]);
+    if (outcome.kind === 'deadline') {
+      throw new AttemptStopError(stop ?? 'timeout');
+    }
+    if (stop === 'aborted') throw new AttemptStopError('aborted');
+    const hardDeadlinePassed = stop === 'timeout' || performance.now() >= time.hard;
+    const softDeadlinePassed = timedOut || performance.now() >= time.soft;
+    if (hardDeadlinePassed) {
+      if (
+        outcome.kind === 'error'
+        && outcome.error instanceof EngineIncompleteResultError
+      ) {
+        throw new TimedOutIncompleteResultError(
+          outcome.error.message,
+          outcome.error.evidence.transportFailure === undefined
+            ? {
+                ...outcome.error.evidence,
+                transportFailure: timeoutTransportFailure(),
+              }
+            : outcome.error.evidence,
+        );
+      }
+      throw new AttemptStopError(
+        'timeout',
+        outcome.kind === 'error' ? outcome.error : undefined,
+      );
+    }
+    if (outcome.kind === 'error') {
+      if (softDeadlinePassed && options.abortAtSoftTimeout) {
+        if (outcome.error instanceof EngineIncompleteResultError) {
+          throw new TimedOutIncompleteResultError(
+            outcome.error.message,
+            outcome.error.evidence.transportFailure === undefined
+              ? {
+                  ...outcome.error.evidence,
+                  transportFailure: timeoutTransportFailure(),
+                }
+              : outcome.error.evidence,
+          );
+        }
+        throw new AttemptStopError('timeout', outcome.error);
+      }
+      throw outcome.error;
+    }
+    return Object.freeze({ value: outcome.value, timedOut: softDeadlinePassed });
+  } finally {
+    clearTimeout(softTimer);
+    clearTimeout(hardTimer);
+    if (abortTimer !== undefined) clearTimeout(abortTimer);
+    signal.removeEventListener('abort', onAbort);
+  }
+}
+
+function timeoutTransportFailure(): EngineTransportFailure {
+  return Object.freeze({
+    kind: 'timeout',
+    message: 'attempt result arrived during timeout cleanup',
+    exitCode: null,
+  });
+}
+
 function failure(
   code: NodeAttemptFailureCode,
   error: unknown,
@@ -228,14 +389,7 @@ function permissions(value: readonly string[]): readonly string[] {
 }
 
 function selection(value: EngineSelectionRecord): EngineSelectionRecord {
-  return engineSelection({
-    adapter: value.adapter,
-    adapterVersion: value.adapterVersion,
-    provider: value.provider,
-    modelFamily: value.modelFamily,
-    model: value.model,
-    capabilities: value.capabilities,
-  });
+  return engineSelection(value);
 }
 
 function sameSelection(
@@ -455,12 +609,14 @@ async function unavailable(
   identity: AttemptIdentity,
   recordModelUnavailable: PreparedNodeAttempt['recordModelUnavailable'],
   lane: PreparedEngineLane,
+  effective: EngineSelectionRecord,
   failureKind: EngineFailureKind,
 ): Promise<ModelUnavailableFact> {
   const fact = cloneFrozenJson({
     schemaVersion: 1,
     identity,
     selection: lane.selection,
+    effective,
     failure: failureKind,
   } as unknown as JsonValue) as unknown as ModelUnavailableFact;
   await recordModelUnavailable(fact);
@@ -534,8 +690,10 @@ export async function executeNodeAttempt(
     const input = cloneFrozenJson(prepared.input);
     trustedCaller = cloneFrozenJson(prepared.trustedCaller);
     grantedPermissions = permissions(prepared.permissions);
-    policy = validateAttemptBudgetPolicy(prepared.policy);
-    workspace = validateWorkspacePolicy(prepared.workspace);
+    const attemptPolicy = validateAttemptBudgetPolicy(prepared.policy);
+    policy = attemptPolicy;
+    let attemptWorkspace = validateWorkspacePolicy(prepared.workspace);
+    workspace = attemptWorkspace;
     const route = prepared.engineRoute?.map(validateLane) ?? null;
     const runData = prepared.runData;
     const resultContract = prepared.resultContract;
@@ -579,10 +737,10 @@ export async function executeNodeAttempt(
       (prompt === null
         ? 0
         : Buffer.byteLength(prompt, 'utf8'));
-    if (inputBytes > policy.inputBytes) {
+    if (inputBytes > attemptPolicy.inputBytes) {
       facts.failure = failure(
         'INPUT_LIMIT',
-        `attempt input is ${inputBytes} bytes; limit is ${policy.inputBytes}`,
+        `attempt input is ${inputBytes} bytes; limit is ${attemptPolicy.inputBytes}`,
       );
       return record(identity, trustedCaller, grantedPermissions, inputBytes, facts);
     }
@@ -593,8 +751,9 @@ export async function executeNodeAttempt(
     const scratchDirectory = await validateScratchDirectory(scratchPath);
 
     try {
-      workspaceEntry = await captureWorkspaceEntry(workspace, signal);
-      workspace = workspaceEntry.policy;
+      workspaceEntry = await captureWorkspaceEntry(attemptWorkspace, signal);
+      attemptWorkspace = workspaceEntry.policy;
+      workspace = attemptWorkspace;
     } catch (error) {
       facts.failure = failure('WORKSPACE_INSPECTION', error);
     }
@@ -619,16 +778,27 @@ export async function executeNodeAttempt(
     } else if (route === null) {
       let effectResult: JsonValue | undefined;
       try {
-        effectResult = cloneFrozenJson(await runData!({
-          input,
-          scratchDirectory,
-          workspaceDirectory: workspace.directory,
-          trustedCaller,
-          permissions: grantedPermissions,
+        const completed = await runWithTimePolicy(
           signal,
-        }));
+          attemptDeadline(attemptPolicy),
+          async (effectSignal) => await runData!({
+            input,
+            scratchDirectory,
+            workspaceDirectory: attemptWorkspace.directory,
+            trustedCaller,
+            permissions: grantedPermissions,
+            signal: effectSignal,
+          }),
+          { abortAtSoftTimeout: true },
+        );
+        effectResult = cloneFrozenJson(completed.value);
+        if (completed.timedOut) {
+          facts.transportFailure = timeoutTransportFailure();
+        }
       } catch (error) {
-        facts.failure = failure('EFFECT_FAILED', error);
+        facts.failure = error instanceof AttemptStopError
+          ? failure(error.kind === 'timeout' ? 'TIMEOUT' : 'ABORTED', error)
+          : failure('EFFECT_FAILED', error);
       }
       if (effectResult !== undefined) {
         const result = effectResult;
@@ -636,10 +806,10 @@ export async function executeNodeAttempt(
           Object.freeze({ kind: 'structured', value: result, final: true }),
         ]);
         facts.outputBytes = outputBytes(facts.parts);
-        if (facts.outputBytes > policy.outputBytes) {
+        if (facts.outputBytes > attemptPolicy.outputBytes) {
           facts.failure = failure(
             'OUTPUT_LIMIT',
-            `attempt output is ${facts.outputBytes} bytes; limit is ${policy.outputBytes}`,
+            `attempt output is ${facts.outputBytes} bytes; limit is ${attemptPolicy.outputBytes}`,
           );
         } else {
           try {
@@ -670,31 +840,69 @@ export async function executeNodeAttempt(
         settled.add(index);
       };
       try {
-        reservations = reserveCalls(route, policy, tokenBudget);
+        reservations = reserveCalls(route, attemptPolicy, tokenBudget);
       } catch (error) {
         facts.failure = failure('TOKEN_BUDGET', error);
       }
 
       if (facts.failure === null) {
         let successful = false;
+        const time = attemptDeadline(attemptPolicy);
         for (let index = 0; index < route.length; index += 1) {
           const selected = route[index]!;
+          const now = performance.now();
+          const remainingTimeoutMs = Math.ceil(time.soft - now);
+          if (remainingTimeoutMs < 1) {
+            facts.failure = failure(
+              'TIMEOUT',
+              'node attempt exceeded its time limit',
+            );
+            for (let unused = index; unused < route.length; unused += 1) {
+              release(unused);
+            }
+            break;
+          }
+          const remainingHardMs = Math.max(
+            remainingTimeoutMs,
+            Math.ceil(time.hard - now),
+          );
+          const lanePolicy = Object.freeze({
+            ...attemptPolicy,
+            timeoutMs: remainingTimeoutMs,
+            teardownGraceMs: remainingHardMs - remainingTimeoutMs,
+          });
           try {
-            const result = validateAgentResult(await selected.engine.run(
-              requestFor(
-                identity,
-                nodeId,
-                prompt!,
-                selected,
-                policy,
-                workspace,
-                scratchDirectory,
-                grantedPermissions,
-                resultContract,
-              ),
-              () => {},
+            const completed = await runWithTimePolicy(
               signal,
-            ));
+              time,
+              async (engineSignal): Promise<AgentResult> =>
+                await selected.engine.run(
+                  requestFor(
+                    identity,
+                    nodeId,
+                    prompt!,
+                    selected,
+                    lanePolicy,
+                    attemptWorkspace,
+                    scratchDirectory,
+                    grantedPermissions,
+                    resultContract,
+                  ),
+                  () => {},
+                  engineSignal,
+                ),
+              {
+                abortAtSoftTimeout: false,
+              },
+            );
+            const result = validateAgentResult(
+              completed.timedOut && completed.value.transportFailure === undefined
+                ? {
+                    ...completed.value,
+                    transportFailure: timeoutTransportFailure(),
+                  }
+                : completed.value,
+            );
             facts.parts = result.parts;
             facts.usage = result.usage;
             facts.effectiveEngine = result.effective;
@@ -717,10 +925,10 @@ export async function executeNodeAttempt(
                 'RESULT_INVALID',
                 'engine requested identity does not match its prepared lane',
               );
-            } else if (facts.outputBytes > policy.outputBytes) {
+            } else if (facts.outputBytes > attemptPolicy.outputBytes) {
               facts.failure = failure(
                 'OUTPUT_LIMIT',
-                `attempt output is ${facts.outputBytes} bytes; limit is ${policy.outputBytes}`,
+                `attempt output is ${facts.outputBytes} bytes; limit is ${attemptPolicy.outputBytes}`,
               );
             } else {
               try {
@@ -768,18 +976,47 @@ export async function executeNodeAttempt(
                   'RESULT_INVALID',
                   'engine evidence identity does not match its prepared lane',
                 );
-              } else if (facts.outputBytes > policy.outputBytes) {
+              } else if (facts.outputBytes > attemptPolicy.outputBytes) {
                 facts.failure = failure(
                   'OUTPUT_LIMIT',
-                  `attempt output is ${facts.outputBytes} bytes; limit is ${policy.outputBytes}`,
+                  `attempt output is ${facts.outputBytes} bytes; limit is ${attemptPolicy.outputBytes}`,
                 );
               } else {
-                facts.failure = failure('EFFECT_FAILED', error);
+                facts.failure = failure(
+                  error instanceof TimedOutIncompleteResultError
+                    ? 'TIMEOUT'
+                    : 'EFFECT_FAILED',
+                  error,
+                );
               }
               break;
             }
             settle(index, EMPTY_USAGE);
+            if (error instanceof AttemptStopError) {
+              facts.failure = failure(
+                error.kind === 'timeout' ? 'TIMEOUT' : 'ABORTED',
+                error,
+              );
+              for (let unused = index + 1; unused < route.length; unused += 1) {
+                release(unused);
+              }
+              break;
+            }
             const failureKind = classifyEngineFailure(error);
+            if (failureKind === 'timeout') {
+              facts.failure = failure('TIMEOUT', error);
+              for (let unused = index + 1; unused < route.length; unused += 1) {
+                release(unused);
+              }
+              break;
+            }
+            if (failureKind === 'aborted') {
+              facts.failure = failure('ABORTED', error);
+              for (let unused = index + 1; unused < route.length; unused += 1) {
+                release(unused);
+              }
+              break;
+            }
             if (!LANE_DEAD_FAILURES.has(failureKind)) {
               facts.failure = failure('EFFECT_FAILED', error);
               for (let unused = index + 1; unused < route.length; unused += 1) {
@@ -787,12 +1024,16 @@ export async function executeNodeAttempt(
               }
               break;
             }
-            facts.unavailableModels.push(selected.selection);
+            const effective = error instanceof EngineError && error.effective !== undefined
+              ? selection(error.effective)
+              : selected.selection;
+            facts.unavailableModels.push(effective);
             try {
               await unavailable(
                 identity,
                 recordModelUnavailable,
                 selected,
+                effective,
                 failureKind,
               );
             } catch (recordError) {

@@ -484,7 +484,16 @@ const packageRules = new Map([
   // so a host keeps placement glue only.
   ['@obversa/surfacer', { directory: 'packages/surfacer', kind: 'surface', version: '0.1.0', dependencies: [], peerDependencies: [] }],
   ['@obversa/source', { directory: 'packages/source', kind: 'surface', version: '0.1.0', dependencies: ['@obversa/surfacer'], peerDependencies: [] }],
-  ['@obversa/engine-agent-sdk', { directory: 'plugins/engine-agent-sdk', kind: 'plugin', version: '0.1.0', dependencies: ['@obversa/engine', '@obversa/memory'], peerDependencies: [] }],
+  ['@obversa/engine-agent-sdk', {
+    directory: 'plugins/engine-agent-sdk',
+    kind: 'plugin',
+    version: '0.1.0',
+    dependencies: ['@obversa/engine'],
+    peerDependencies: ['@obversa/memory'],
+    peerDependencyVersions: {
+      '@obversa/memory': '>=0.1.0 <0.2.0',
+    },
+  }],
   ['@obversa/engine-anthropic-api', { directory: 'plugins/engine-anthropic-api', kind: 'plugin', version: '0.1.0', dependencies: ['@obversa/engine'], peerDependencies: [] }],
   ['@obversa/engine-claude-cli', { directory: 'plugins/engine-claude-cli', kind: 'plugin', version: '0.1.0', dependencies: ['@obversa/engine'], peerDependencies: [] }],
   ['@obversa/engine-codex', { directory: 'plugins/engine-codex', kind: 'plugin', version: '0.1.0', dependencies: ['@obversa/engine'], peerDependencies: [] }],

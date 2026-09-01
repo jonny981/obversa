@@ -55,6 +55,7 @@ export interface EngineSelectionRecord {
   readonly provider: string | null;
   readonly modelFamily: string | null;
   readonly model: string | null;
+  readonly executable: string | null;
   readonly capabilities: readonly string[];
 }
 

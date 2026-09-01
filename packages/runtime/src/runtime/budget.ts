@@ -8,6 +8,8 @@ import {
 
 export type TokenLimitMode = 'hard' | 'observed';
 
+const MAX_TIMER_MS = 2_147_483_647;
+
 export interface TokenAllowance extends JsonObject {
   readonly mode: TokenLimitMode;
   readonly tokens: number;
@@ -246,14 +248,24 @@ export function createTokenBudget(limit: number): TokenBudget {
 export function validateAttemptBudgetPolicy(
   value: AttemptBudgetPolicy,
 ): AttemptBudgetPolicy {
+  const timeoutMs = positiveSafeInteger(value.timeoutMs, 'timeoutMs');
+  const teardownGraceMs = nonNegativeSafeInteger(
+    value.teardownGraceMs,
+    'teardownGraceMs',
+  );
+  if (timeoutMs > MAX_TIMER_MS) {
+    throw new TypeError(`timeoutMs must be at most ${MAX_TIMER_MS}`);
+  }
+  if (teardownGraceMs > MAX_TIMER_MS - timeoutMs) {
+    throw new TypeError(
+      `timeoutMs + teardownGraceMs must be at most ${MAX_TIMER_MS}`,
+    );
+  }
   return cloneFrozenJson({
     inputBytes: nonNegativeSafeInteger(value.inputBytes, 'inputBytes'),
     outputBytes: nonNegativeSafeInteger(value.outputBytes, 'outputBytes'),
-    timeoutMs: positiveSafeInteger(value.timeoutMs, 'timeoutMs'),
-    teardownGraceMs: nonNegativeSafeInteger(
-      value.teardownGraceMs,
-      'teardownGraceMs',
-    ),
+    timeoutMs,
+    teardownGraceMs,
     memoryBytes: positiveSafeInteger(value.memoryBytes, 'memoryBytes'),
     filesChanged: nonNegativeSafeInteger(value.filesChanged, 'filesChanged'),
     linesChanged: nonNegativeSafeInteger(value.linesChanged, 'linesChanged'),

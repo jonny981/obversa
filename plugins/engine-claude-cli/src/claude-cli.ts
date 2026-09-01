@@ -275,10 +275,6 @@ export class ClaudeCliEngine implements Engine {
     const model = modelFor(req, this.opts);
     const args = buildClaudeArgs(req, this.opts);
     const env = attemptEnvironment(req);
-    const hardTimeout =
-      req.timeoutMs && req.timeoutGraceMs
-        ? req.timeoutMs + req.timeoutGraceMs
-        : req.timeoutMs;
     const startedAt = Date.now();
     const owner = ownedCommandIdentity({
       adapter: 'claude-cli',
@@ -308,7 +304,9 @@ export class ClaudeCliEngine implements Engine {
         stdin: req.prompt,
         ...owner,
         ...DEFAULT_OWNED_COMMAND_LIMITS,
-        timeoutMs: hardTimeout ?? DEFAULT_OWNED_COMMAND_LIMITS.timeoutMs,
+        timeoutMs: req.timeoutMs ?? DEFAULT_OWNED_COMMAND_LIMITS.timeoutMs,
+        teardownGraceMs:
+          req.timeoutGraceMs ?? DEFAULT_OWNED_COMMAND_LIMITS.teardownGraceMs,
         maxOutputBytes:
           req.maxOutputBytes ?? DEFAULT_OWNED_COMMAND_LIMITS.maxOutputBytes,
         maxMemoryBytes:
@@ -352,11 +350,13 @@ export class ClaudeCliEngine implements Engine {
           adapter: 'claude-cli',
           provider: 'anthropic',
           model: model ?? null,
+          executable: bin,
         });
         const effective = engineSelection({
           adapter: 'claude-cli',
           provider: 'anthropic',
           model: acc.model,
+          executable: bin,
         });
         onEvent({
           type: 'usage',
@@ -406,11 +406,13 @@ export class ClaudeCliEngine implements Engine {
       adapter: 'claude-cli',
       provider: 'anthropic',
       model: model ?? null,
+      executable: bin,
     });
     const effective = engineSelection({
       adapter: 'claude-cli',
       provider: 'anthropic',
       model: acc.model,
+      executable: bin,
     });
     return validateAgentResult({
       parts: acc.parts,

@@ -65,4 +65,30 @@ describe('@obversa/engine-agent-sdk', () => {
       }),
     );
   });
+
+  it('keeps an observed model substitution on a model-unavailable error', async () => {
+    sdk.query.mockImplementationOnce(() =>
+      (async function* () {
+        yield {
+          type: 'assistant',
+          message: {
+            model: 'runtime-substitution',
+            content: [],
+          },
+        };
+        throw new Error('unknown model runtime-substitution');
+      })() as never);
+
+    await expect(new AgentSdkEngine().run(
+      { prompt: 'test', model: 'declared-model' },
+      () => {},
+      new AbortController().signal,
+    )).rejects.toMatchObject({
+      kind: 'model-unavailable',
+      effective: {
+        adapter: 'agent-sdk',
+        model: 'runtime-substitution',
+      },
+    });
+  });
 });
