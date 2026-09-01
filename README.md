@@ -99,6 +99,20 @@ the storage contract, limits, secret handling, conflict behavior, and integrity
 checks. This storage layer does not execute graph work or recover a stopped
 run.
 
+## Run safe node attempts
+
+The Lines adapters run one fresh CLI process for one bounded node attempt. The
+offline example uses scripted Grok and OpenCode executables, validates both
+structured results, keeps missing usage as `unknown`, and removes its temporary
+fixture files.
+
+```bash
+pnpm example:attempt
+```
+
+Read [Safe node attempts](docs/public/runtime/node-attempts.mdx) for result
+parts, declared capabilities, workspace access, fallback, and cleanup limits.
+
 ## Documentation
 
 The public documentation is in [`docs/public`](docs/public). It includes the

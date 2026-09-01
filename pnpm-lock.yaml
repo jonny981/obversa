@@ -16,6 +16,12 @@ importers:
       '@changesets/cli':
         specifier: 2.29.7
         version: 2.29.7(@types/node@22.12.0)
+      '@obversa/engine-grok-cli':
+        specifier: workspace:^
+        version: link:plugins/engine-grok-cli
+      '@obversa/engine-opencode-cli':
+        specifier: workspace:^
+        version: link:plugins/engine-opencode-cli
       '@types/node':
         specifier: 22.12.0
         version: 22.12.0

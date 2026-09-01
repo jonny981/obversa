@@ -40,6 +40,12 @@
         ]
       },
       {
+        "group": "Runtime",
+        "pages": [
+          "runtime/node-attempts"
+        ]
+      },
+      {
         "group": "Processes",
         "pages": [
           "production-lines/index",

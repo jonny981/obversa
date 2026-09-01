@@ -39,6 +39,50 @@ const expectedStorageReport = {
   },
 };
 
+const expectedAttemptReport = {
+  grok: {
+    requested: {
+      adapter: 'grok-cli',
+      adapterVersion: '1.0.5',
+      provider: 'xai',
+      modelFamily: 'grok-4',
+      model: 'grok-4-example',
+      capabilities: [],
+    },
+    effective: {
+      adapter: 'grok-cli',
+      adapterVersion: '1.0.5',
+      provider: 'xai',
+      modelFamily: 'grok-4',
+      model: 'grok-4-example',
+      capabilities: [],
+    },
+    final: { answer: 42 },
+    usage: 'reported',
+  },
+  opencode: {
+    requested: {
+      adapter: 'opencode-cli',
+      adapterVersion: '1.18.23',
+      provider: 'opencode',
+      modelFamily: null,
+      model: 'opencode/x-preview-f-free',
+      capabilities: [],
+    },
+    effective: {
+      adapter: 'opencode-cli',
+      adapterVersion: '1.18.23',
+      provider: 'opencode',
+      modelFamily: null,
+      model: 'opencode/x-preview-f-free',
+      capabilities: [],
+    },
+    final: { answer: 42 },
+    usage: 'unknown',
+  },
+  temporaryDirectoryRemoved: true,
+};
+
 function sourceFromPublicDoc(document) {
   const match = /## Source[\s\S]*?```ts\n([\s\S]*?)\n```/.exec(document);
   if (!match) throw new Error('The public page has no TypeScript source block');
@@ -261,6 +305,7 @@ const tsconfig = {
     'offline-review.line.ts',
     'custom-graph.ts',
     'durable-storage.ts',
+    'safe-node-attempt.ts',
   ],
 };
 
@@ -273,6 +318,8 @@ async function main() {
   const graphExampleSource = await readFile(graphExamplePath, 'utf8');
   const storageExamplePath = join(root, 'examples', 'packages', 'durable-storage.ts');
   const storageExampleSource = await readFile(storageExamplePath, 'utf8');
+  const attemptExamplePath = join(root, 'examples', 'packages', 'safe-node-attempt.ts');
+  const attemptExampleSource = await readFile(attemptExamplePath, 'utf8');
   const graphDocument = await readFile(
     join(root, 'docs', 'public', 'graphs', 'contract.mdx'),
     'utf8',
@@ -285,6 +332,10 @@ async function main() {
     join(root, 'docs', 'public', 'storage', 'events-and-artifacts.mdx'),
     'utf8',
   );
+  const attemptDocument = await readFile(
+    join(root, 'docs', 'public', 'runtime', 'node-attempts.mdx'),
+    'utf8',
+  );
   if (sourceFromPublicDoc(publicDocument) !== exampleSource) {
     throw new Error('The offline production-line page does not match its runnable source');
   }
@@ -293,6 +344,9 @@ async function main() {
   }
   if (sourceFromPublicDoc(storageDocument) !== storageExampleSource) {
     throw new Error('The storage page does not match its runnable source');
+  }
+  if (sourceFromPublicDoc(attemptDocument) !== attemptExampleSource) {
+    throw new Error('The node-attempt page does not match its runnable source');
   }
 
   const directory = await mkdtemp(join(tmpdir(), 'obversa-consumer-'));
@@ -330,6 +384,7 @@ async function main() {
     );
     await copyFile(graphExamplePath, join(consumerDirectory, 'custom-graph.ts'));
     await copyFile(storageExamplePath, join(consumerDirectory, 'durable-storage.ts'));
+    await copyFile(attemptExamplePath, join(consumerDirectory, 'safe-node-attempt.ts'));
 
     run('pnpm', ['install', '--offline', '--ignore-scripts'], {
       cwd: consumerDirectory,
@@ -345,6 +400,8 @@ async function main() {
       }
     }
 
+    const tsc7 = join(root, 'node_modules', 'typescript', 'bin', 'tsc');
+    run(process.execPath, [tsc7, '-p', 'tsconfig.json'], { cwd: consumerDirectory });
     const tsc6 = join(root, 'node_modules', '@typescript', 'typescript6', 'bin', 'tsc6');
     run(process.execPath, [tsc6, '-p', 'tsconfig.json'], { cwd: consumerDirectory });
 
@@ -372,10 +429,18 @@ async function main() {
     const directStorage = JSON.parse(
       run('pnpm', ['exec', 'tsx', 'durable-storage.ts'], { cwd: consumerDirectory }),
     );
+    const compiledAttempt = JSON.parse(
+      run(process.execPath, ['dist/safe-node-attempt.js'], { cwd: consumerDirectory }),
+    );
+    const directAttempt = JSON.parse(
+      run('pnpm', ['exec', 'tsx', 'safe-node-attempt.ts'], { cwd: consumerDirectory }),
+    );
     assert.deepEqual(compiledGraph, expectedGraphReport);
     assert.deepEqual(directGraph, expectedGraphReport);
     assert.deepEqual(compiledStorage, expectedStorageReport);
     assert.deepEqual(directStorage, expectedStorageReport);
+    assert.deepEqual(compiledAttempt, expectedAttemptReport);
+    assert.deepEqual(directAttempt, expectedAttemptReport);
     if (
       report.runtime !== 'pass' ||
       report.memoryCases !== 17 ||
@@ -404,7 +469,7 @@ async function main() {
     if (refs.length !== 1) throw new Error(`Git memory created ${refs.length} private refs instead of one`);
 
     console.log(
-      'Clean offline consumer passed with TypeScript 6, the first production line, the outside graph, durable storage, 17 memory cases, and both memory adapters.',
+      'Clean offline consumer passed with TypeScript 7 and 6, the first production line, the outside graph, durable storage, safe node attempts, 17 memory cases, and both memory adapters.',
     );
   } finally {
     await rm(directory, { recursive: true, force: true });

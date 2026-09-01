@@ -147,6 +147,22 @@ execute or resume graph work.
 Read [Events and artifacts](../../docs/public/storage/events-and-artifacts.mdx)
 for the port contracts, limits, secret rules, conflicts, and integrity checks.
 
+## Run safe node attempts
+
+`GrokCliEngine` and `OpenCodeCliEngine` each run one fresh CLI process for one
+bounded attempt. The checked-in example uses local scripted executables, so it
+does not call a model or the network.
+
+```bash
+pnpm example:attempt
+```
+
+The example validates a native Grok structured result and an OpenCode result
+parsed by the job. It also proves that missing usage remains `unknown`.
+
+Read [Safe node attempts](../../docs/public/runtime/node-attempts.mdx) for the
+public adapter contract and the D5 and D14 boundaries.
+
 ## Documentation
 
 The workspace `docs/public` directory contains the first-run guide, graph

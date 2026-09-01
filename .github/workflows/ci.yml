@@ -13,7 +13,7 @@ concurrency:
 
 jobs:
   verify:
-    name: Verify D3
+    name: Verify D4
     runs-on: ubuntu-latest
     timeout-minutes: 30
 
@@ -53,4 +53,4 @@ jobs:
           fi
 
       - name: Verify packages, runtime, docs, and consumer
-        run: pnpm verify:d3
+        run: pnpm verify:d4
