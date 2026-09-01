@@ -505,6 +505,7 @@ function consumeAssistant(
     topLevel
     && typeof message.model === 'string'
     && message.model !== 'unknown'
+    && message.model !== 'Grok Build'
   ) {
     accumulator.model = nonEmptyText(message.model, 'Grok assistant model');
   }
@@ -567,7 +568,11 @@ function consumeLine(
     }
     const frame = object(JSON.parse(line), 'Grok stream frame');
     if (frame.type === 'system') {
-      if (typeof frame.model === 'string' && frame.model !== 'unknown') {
+      if (
+        typeof frame.model === 'string'
+        && frame.model !== 'unknown'
+        && frame.model !== 'Grok Build'
+      ) {
         accumulator.model = nonEmptyText(frame.model, 'Grok init model');
       }
       if (Array.isArray(frame.tools)) {
@@ -664,9 +669,11 @@ function observedJsonModel(
 ): string | null {
   if (!Object.hasOwn(terminal, 'modelUsage')) return null;
   const usage = object(terminal.modelUsage, 'Grok result modelUsage');
-  const models = Object.keys(usage).map((model, index) =>
-    nonEmptyText(model, `Grok result modelUsage key ${index}`),
-  );
+  const models = Object.keys(usage)
+    .map((model, index) =>
+      nonEmptyText(model, `Grok result modelUsage key ${index}`),
+    )
+    .filter((model) => model !== 'Grok Build');
   if (models.includes(requestedModel)) return requestedModel;
   return models.length === 1 ? models[0]! : null;
 }

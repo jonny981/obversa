@@ -287,6 +287,27 @@ describe('Grok CLI adapter', () => {
     ]);
   });
 
+  it.each(['invocation', 'structured'] as const)(
+    'does not record the Grok Build label from %s output as a model',
+    async (scenario) => {
+      const result = await new GrokCliEngine({
+        ...options(),
+        environment: {
+          OBVERSA_TEST_GROK_EFFECTIVE_MODEL: 'Grok Build',
+          OBVERSA_TEST_GROK_SCENARIO: scenario,
+        },
+      }).run(
+        request(scenario === 'structured'
+          ? { jsonSchema: { type: 'object' } }
+          : {}),
+        () => {},
+        new AbortController().signal,
+      );
+
+      expect(result.effective.model).toBeNull();
+    },
+  );
+
   it('enables declared subagents without guessing their parent model', async () => {
     const recordPath = join(temporaryDirectory('lines-grok-record-'), 'call.json');
     const result = await new GrokCliEngine({
