@@ -551,16 +551,6 @@ sys.exit(0)
 PY
 check $? "uncommenting the marked block produces valid configuration"
 
-# --- peer-send: durable entry, wakeup carries no content ---------------------
-PCH="$SANDBOX/channel.md"
-: >"$SANDBOX/calls-cmux"
-OBVERSA_CHANNEL="$PCH" "$HERE/../bin/obversa-peer-send" --from tester --wake surface:9 "the actual content" >/dev/null 2>&1
-grep -q "## .* tester" "$PCH" && grep -q "the actual content" "$PCH"
-check $? "peer-send appends a titled entry to the channel"
-grep -q "wakeup: check channel" "$SANDBOX/calls-cmux" && \
-  ! grep -q "the actual content" "$SANDBOX/calls-cmux"
-check $? "the wake cue never carries the message content"
-
 echo
 echo "$PASS passed, $FAIL failed"
 [ "$FAIL" -eq 0 ]

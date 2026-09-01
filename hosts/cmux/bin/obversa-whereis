@@ -4,8 +4,8 @@
 # active live session whose working directory is within the scope (default
 # "obversa"), or exits non-zero if the agent has no live session in scope.
 #
-# Part of the team-coordination kit (the agent-neutral wakeup/discovery half).
-# `obversa-peer-send --wake <agent>` uses it to turn a name into a surface.
+# Part of the team-coordination kit (the agent-neutral wakeup/discovery half):
+# it turns a teammate's name into a surface a wake cue can be sent to.
 set -euo pipefail
 
 usage() { echo "usage: obversa-whereis <agent> [scope-substr]" >&2; }

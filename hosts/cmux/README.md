@@ -12,8 +12,7 @@ or fails with a clear message.
 
 All commands live in `bin/`, on macOS (the default-browser fallback uses
 `open`). Every one is placement glue on bash: `obversa-order-workspace`,
-`obversa-surface`, `obversa-plannotator-browser`, `obversa-peer-send`,
-`obversa-whereis`. The review command itself is `@obversa/source`'s bin —
+`obversa-surface`, `obversa-plannotator-browser`, `obversa-whereis`. The review command itself is `@obversa/source`'s bin —
 this host only depends on that package so `node_modules/.bin/obversa-review`
 exists here. Put `bin/` on your PATH or call the commands by full path.
 Workspace-file generation and cmux-context parsing use `python3` for
@@ -197,15 +196,6 @@ hosts/cmux/test/f2b-placement-proof.sh
 The proof is deterministic. It replaces `cmux`, `open`, and `code` with
 recording shims, so no UI opens and no state leaves the sandbox.
 
-### obversa-peer-send
-
-Peer-agent coordination. Appends one timestamped entry to the durable
-channel (`$OBVERSA_CHANNEL`, default
-`~/dev/personal/obversa-coordination/channel.md`), then optionally wakes
-a peer surface with `--wake surface:N`. The sender comes from `--from`
-or `$OBVERSA_AGENT` — never from a positional argument, after a real
-attribution mix-up between agents. The wake cue never carries the
-message: a cue only says "check the channel" with the sender's name and
-repository head as a liveness token, so a forged cue is harmless.
-Content lives in the channel; instructions to agents come only from the
-operator.
+Peer-agent chat is not a host command. The build team's rooms and their
+sender live in the coordination workspace beside the checkouts, outside
+this repository.

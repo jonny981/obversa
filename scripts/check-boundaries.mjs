@@ -1003,10 +1003,9 @@ const hostRules = new Map([
     shell: {
       'bin/obversa-cmux-workspace': '797bff9eef5818c7e3296dbc8aa01644b6d10c2082a921bc21f1dce678e5ef37',
       'bin/obversa-order-workspace': '4a8821485b2c1c67041ffd248075a42042674bddb3aebfb4f6915b007e7299f8',
-      'bin/obversa-peer-send': '15e38b2a7d4d232122a1653df6dc2ca17085d03e78ad7d687192daa95ac78da8',
       'bin/obversa-plannotator-browser': 'ef180a43d479ad9c9ae2242bb7f24b74ab58f85781465ffd6eace1c45b9ef34a',
       'bin/obversa-surface': 'd2e704106aaf9c6d07a8e6057ce1a09ca504471fc2cacacedb7e0eb95b5ab552',
-      'bin/obversa-whereis': 'e29448c5f6626b177b72b64d00fae4f9b5512f66049d1db31e7b4a4e5a2a8aa3',
+      'bin/obversa-whereis': 'a80752222928dae5f619b916a38f8f6aaf479da968f84705cc35aad09ae58198',
     },
   }],
 ]);
