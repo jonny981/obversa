@@ -5,7 +5,7 @@ import {
   predicate,
   revisionRequest,
   run,
-} from '@obversa/lines';
+} from '@obversa/runtime';
 
 let attempts = 0;
 

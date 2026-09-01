@@ -5,10 +5,10 @@
       "@obversa/engine": ["../engine/src/index.ts"],
       "@obversa/engine/command": ["../engine/src/command/run.ts"],
       "@obversa/engine/testing": ["../engine/src/testing.ts"],
-      "@obversa/lines": ["./src/api.ts"],
-      "@obversa/lines/testing": ["./src/testing.ts"],
-      "@obversa/lines/env/command": ["./src/env/command.ts"],
-      "@obversa/lines/storage/local": ["./src/storage/local.ts"],
+      "@obversa/runtime": ["./src/api.ts"],
+      "@obversa/runtime/testing": ["./src/testing.ts"],
+      "@obversa/runtime/env/command": ["./src/env/command.ts"],
+      "@obversa/runtime/storage/local": ["./src/storage/local.ts"],
       "@obversa/memory": ["../memory/src/index.ts"]
     },
     "types": ["node"]

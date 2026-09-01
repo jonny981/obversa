@@ -59,7 +59,7 @@ describe('@obversa/engine-agent-sdk', () => {
         options: expect.objectContaining({
           model: 'claude-request-model',
           mcpServers: expect.objectContaining({
-            'lines-memory': expect.anything(),
+            'obversa-memory': expect.anything(),
           }),
         }),
       }),

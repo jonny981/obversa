@@ -22,14 +22,14 @@ let previousHome: string | undefined;
 let testHome: string;
 
 beforeEach(() => {
-  previousHome = process.env.LINES_HOME;
+  previousHome = process.env.OBVERSA_HOME;
   testHome = mkdtempSync(join(tmpdir(), 'lines-supervisor-'));
-  process.env.LINES_HOME = testHome;
+  process.env.OBVERSA_HOME = testHome;
 });
 
 afterEach(() => {
-  if (previousHome === undefined) delete process.env.LINES_HOME;
-  else process.env.LINES_HOME = previousHome;
+  if (previousHome === undefined) delete process.env.OBVERSA_HOME;
+  else process.env.OBVERSA_HOME = previousHome;
   rmSync(testHome, { recursive: true, force: true });
 });
 

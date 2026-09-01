@@ -5,7 +5,7 @@ import type {
   EngineSelectionRecord,
   EngineTransportFailure,
   UsageReceipt,
-} from './index.js';
+} from './contracts.js';
 import { cloneFrozenJson, type JsonValue } from './json.js';
 
 const ENGINE_FAILURE_KINDS = new Set<EngineTransportFailure['kind']>([

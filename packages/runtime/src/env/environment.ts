@@ -25,7 +25,10 @@
  *   };
  */
 
-import type { Workspace } from '../core/types.js';
+export interface EnvironmentWorkspace {
+  readonly dir: string;
+  readonly branch?: string;
+}
 
 /** A running environment for one workspace. Returned by `Environment.up`. */
 export interface EnvHandle {
@@ -49,7 +52,7 @@ export interface EnvHandle {
 /** Brings a workspace's code up so the gate can test the running thing. */
 export interface Environment {
   readonly name: string;
-  up(workspace: Workspace, signal: AbortSignal): Promise<EnvHandle>;
+  up(workspace: EnvironmentWorkspace, signal: AbortSignal): Promise<EnvHandle>;
 }
 
 /** Duck-type guard: a ready-made `Environment` rather than something else. */

@@ -421,8 +421,8 @@ export async function measureOwnedProcessMemory(
 ): Promise<number> {
   validateRequest(request);
   const owned = ownedFromTable(await processTable(), request);
-  return owned.reduce((total, process) => {
-    const next = total + process.residentBytes;
+  return owned.reduce((total, ownedProcess) => {
+    const next = total + ownedProcess.residentBytes;
     if (!Number.isSafeInteger(next)) {
       throw new TypeError('owned process memory must remain a safe integer');
     }

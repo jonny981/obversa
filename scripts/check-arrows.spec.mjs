@@ -43,27 +43,41 @@ manifest("packages/memory", {
   exports: { ".": "./src/index.mjs", "./testing": "./src/testing.mjs" },
   devDependencies: { devtool: "1.0.0" },
 });
-manifest("packages/lines", { name: "@obversa/lines", type: "module", exports: { ".": "./src/index.mjs" } });
+manifest("packages/engine", { name: "@obversa/engine", type: "module", exports: { ".": "./src/index.mjs", "./testing": "./src/testing.mjs" } });
+manifest("packages/runtime", {
+  name: "@obversa/runtime",
+  type: "module",
+  exports: { ".": "./src/index.mjs" },
+  dependencies: { "@obversa/engine": "workspace:*", "@obversa/memory": "workspace:*" },
+});
 manifest("packages/source", { name: "@obversa/source", type: "module", exports: { ".": "./src/index.mjs" } });
 manifest("packages/surfacer", { name: "@obversa/surfacer", type: "module", exports: { ".": "./src/index.mjs" } });
-manifest("packages/memory-git", {
+manifest("plugins/memory-git", {
   name: "@obversa/memory-git",
   type: "module",
   exports: { ".": "./src/index.mjs" },
-  dependencies: { "@obversa/memory": "workspace:*", "@obversa/lines": "workspace:*" },
+  dependencies: { "@obversa/memory": "workspace:*", "@obversa/runtime": "workspace:*" },
 });
-manifest("packages/memory-simple", {
+manifest("plugins/memory-simple", {
   name: "@obversa/memory-simple",
   type: "module",
   exports: { ".": "./src/index.mjs" },
   imports: { "#sneak": "../surfacer/src/index.mjs" },
 });
+for (const name of ["engine-agent-sdk", "engine-anthropic-api", "engine-claude-cli", "engine-codex", "engine-grok-cli", "engine-opencode-cli"]) {
+  manifest(`plugins/${name}`, {
+    name: `@obversa/${name}`,
+    type: "module",
+    exports: { ".": "./src/index.mjs" },
+    dependencies: { "@obversa/engine": "workspace:*" },
+  });
+}
 manifest("hosts/cmux", {
   name: "@obversa/cmux-host",
   type: "module",
   dependencies: { "@obversa/source": "workspace:*", "@obversa/surfacer": "workspace:*" },
 });
-for (const name of ["memory", "lines", "source", "surfacer"]) {
+for (const name of ["engine", "memory", "runtime", "source", "surfacer"]) {
   mkdirSync(join(fixture, "node_modules", "@obversa"), { recursive: true });
   symlinkSync(join("..", "..", "packages", name), join(fixture, "node_modules", "@obversa", name));
 }
@@ -75,12 +89,17 @@ file("node_modules/devtool/index.js", "module.exports = 1;\n");
 // Clean targets.
 file("packages/memory/src/index.mjs", "export const memory = 1;\n");
 file("packages/memory/src/testing.mjs", "export const probe = 1;\n");
-file("packages/lines/src/index.mjs", "export const lines = 1;\n");
+file("packages/engine/src/index.mjs", "export const engine = 1;\n");
+file("packages/engine/src/testing.mjs", "export const mockEngine = 1;\n");
+file("packages/runtime/src/index.mjs", "export const runtime = 1;\n");
 file("packages/source/src/index.mjs", "export const source = 1;\n");
 file("packages/source/src/private.mjs", "export const priv = 1;\n");
 file("packages/surfacer/src/index.mjs", "export const surfacer = 1;\n");
-file("packages/memory-git/src/index.mjs", "export const gitMemory = 1;\n");
-file("packages/memory-simple/src/index.mjs", "export const simple = 1;\n");
+file("plugins/memory-git/src/index.mjs", "export const gitMemory = 1;\n");
+file("plugins/memory-simple/src/index.mjs", "export const simple = 1;\n");
+for (const name of ["engine-agent-sdk", "engine-anthropic-api", "engine-claude-cli", "engine-codex", "engine-grok-cli", "engine-opencode-cli"]) {
+  file(`plugins/${name}/src/index.mjs`, `export const name = ${JSON.stringify(name)};\n`);
+}
 file("packages/source/src/h.test.mjs", "export const t = 1;\n");
 file("packages/source/test/j.test.mjs", "export const t = 1;\n");
 file("hosts/cmux/lib/l.mjs", "export const glue = 1;\n");
@@ -89,11 +108,11 @@ file("hosts/cmux/lib/l.mjs", "export const glue = 1;\n");
 const forbidden = [
   ["packages/surfacer/src/bad-a.mjs", "import '../../memory/src/index.mjs';\n", "no-cross-package-internal-path"],
   ["packages/surfacer/src/bad-a.mjs", null, "surfacer-reaches-no-package"],
-  ["packages/source/src/a.mjs", "export * from '../../lines/src/index.mjs';\n", "source-reaches-surfacer-only"],
-  ["packages/memory/src/b.mjs", "export const p = import('../../lines/src/index.mjs');\n", "memory-reaches-no-package"],
-  ["packages/memory-git/src/c.cjs", "module.exports = require('@obversa/lines');\n", "memory-git-reaches-memory-only"],
-  ["packages/lines/src/d.ts", "import type { X } from '@obversa/source';\nexport const d: X | number = 1;\n", "lines-reaches-memory-only"],
-  ["packages/memory-simple/src/e.mjs", "import '#sneak';\n", "no-unresolvable"],
+  ["packages/source/src/a.mjs", "export * from '../../runtime/src/index.mjs';\n", "source-reaches-surfacer-only"],
+  ["packages/memory/src/b.mjs", "export const p = import('../../runtime/src/index.mjs');\n", "memory-reaches-no-package"],
+  ["plugins/memory-git/src/c.cjs", "module.exports = require('@obversa/runtime');\n", "memory-plugin-reaches-memory-only"],
+  ["packages/runtime/src/d.ts", "import type { X } from '@obversa/source';\nexport const d: X | number = 1;\n", "runtime-reaches-interfaces-only"],
+  ["plugins/memory-simple/src/e.mjs", "import '#sneak';\n", "no-unresolvable"],
   ["hosts/cmux/lib/f.mjs", "import '@obversa/source/src/private.mjs';\n", "no-unresolvable"],
   ["packages/source/src/g.mjs", "import './h.test.mjs';\n", "no-test-from-prod"],
   ["packages/surfacer/test/i.test.mjs", "import '../../source/test/j.test.mjs';\n", "no-cross-package-test-import"],
@@ -107,18 +126,23 @@ const forbidden = [
   ["packages/memory/src/r2.mjs", "import './r1.mjs';\nexport const r2 = 1;\n", null],
   ["packages/source/src/s.mjs", "import './missing.mjs';\n", "no-unresolvable"],
   ["examples/bad7.mjs", "import '@obversa/does-not-resolve';\n", "no-unresolvable-example"],
-  ["packages/memory-simple/src/f2.mjs", "import '@obversa/lines';\n", "memory-simple-reaches-memory-only"],
+  ["plugins/memory-simple/src/f2.mjs", "import '@obversa/runtime';\n", "memory-plugin-reaches-memory-only"],
+  ["plugins/engine-codex/src/f3.mjs", "import '@obversa/memory';\n", "engine-plugin-reaches-engine-only"],
+  ["plugins/engine-agent-sdk/src/f4.mjs", "import '@obversa/runtime';\n", "agent-sdk-plugin-reaches-interfaces-only"],
 ];
 for (const [path, content] of forbidden) if (content !== null) file(path, content);
 
 // The allowed forms: the same arrows done properly raise nothing.
 const allowed = [
-  ["packages/memory-git/src/ok1.mjs", "import '@obversa/memory';\n"],
+  ["plugins/memory-git/src/ok1.mjs", "import '@obversa/memory';\n"],
+  ["packages/runtime/src/ok9.mjs", "import '@obversa/engine';\nimport '@obversa/memory';\n"],
+  ["plugins/engine-codex/src/ok10.mjs", "import '@obversa/engine';\n"],
+  ["plugins/engine-agent-sdk/src/ok11.mjs", "import '@obversa/engine';\nimport '@obversa/memory';\n"],
   ["packages/source/src/ok8.mjs", "import '@obversa/surfacer';\n"],
   ["packages/source/test/ok2.test.mjs", "import '../src/index.mjs';\n"],
-  ["packages/memory-git/tests/ok3.test.mjs", "import '@obversa/memory/testing';\n"],
+  ["plugins/memory-git/tests/ok3.test.mjs", "import '@obversa/memory/testing';\n"],
   ["hosts/cmux/test/ok4.test.mjs", "import 'node:test';\n"],
-  ["examples/ok5.mjs", "import '@obversa/lines';\n"],
+  ["examples/ok5.mjs", "import '@obversa/runtime';\n"],
   ["scripts/ok6.mjs", "import 'node:fs';\n"],
   // The exemption covers exactly the real package names, which resolve at
   // run time relative to the package that runs the example; the fixture
@@ -130,7 +154,7 @@ for (const [path, content] of allowed) file(path, content);
 
 const run = spawnSync(
   process.execPath,
-  [cruiserBin, "--config", rulesFile, "--output-type", "json", "packages", "hosts", "scripts", "examples"],
+  [cruiserBin, "--config", rulesFile, "--output-type", "json", "packages", "plugins", "hosts", "scripts", "examples"],
   { cwd: fixture, encoding: "utf8", maxBuffer: 64 * 1024 * 1024 },
 );
 const report = JSON.parse(run.stdout);
@@ -162,17 +186,18 @@ test("the live cruise roots cover every workspace package", () => {
   // list must name a directory inside every package and host that carries
   // source, and the rules file must name every package in its matrix.
   const rootManifest = JSON.parse(readFileSync(join(repoRoot, "package.json"), "utf8"));
-  const roots = rootManifest.scripts["check:arrows"].split(" ").filter((part) => /^(packages|hosts)\//.test(part));
+  const roots = rootManifest.scripts["check:arrows"].split(" ").filter((part) => /^(packages|plugins|hosts)\//.test(part));
   const members = [
     ...readdirSync(join(repoRoot, "packages"), { withFileTypes: true }).filter((entry) => entry.isDirectory()).map((entry) => `packages/${entry.name}`),
+    ...readdirSync(join(repoRoot, "plugins"), { withFileTypes: true }).filter((entry) => entry.isDirectory()).map((entry) => `plugins/${entry.name}`),
     ...readdirSync(join(repoRoot, "hosts"), { withFileTypes: true }).filter((entry) => entry.isDirectory()).map((entry) => `hosts/${entry.name}`),
   ];
   const rules = readFileSync(join(repoRoot, ".dependency-cruiser.cjs"), "utf8");
   for (const member of members) {
     assert.ok(roots.some((root) => root.startsWith(`${member}/`)), `${member} has no cruise root in check:arrows`);
-    if (member.startsWith("packages/")) {
-      const name = member.slice("packages/".length);
-      assert.ok(new RegExp(`\\^packages/${name}/`).test(rules) || rules.includes(`|${name}|`) || rules.includes(`(${name}|`) || rules.includes(`|${name})`), `${member} is not named by any arrow-matrix rule`);
+    if (!member.startsWith("hosts/")) {
+      const [, name] = member.split("/");
+      assert.ok(new RegExp(`\\^(?:packages|plugins)/${name}/|\\^${member}/`).test(rules) || rules.includes(`|${name}|`) || rules.includes(`(${name}|`) || rules.includes(`|${name})`), `${member} is not named by any arrow-matrix rule`);
     }
   }
 });
@@ -185,7 +210,7 @@ test("the cruise walked the whole fixture", () => {
 test("error-severity violations fail the command the proof chain runs", () => {
   // The JSON reporter above always exits 0; the gate runs the default
   // reporter, whose exit code is the error count.
-  const gate = spawnSync(process.execPath, [cruiserBin, "--config", rulesFile, "packages", "hosts", "scripts", "examples"], {
+  const gate = spawnSync(process.execPath, [cruiserBin, "--config", rulesFile, "packages", "plugins", "hosts", "scripts", "examples"], {
     cwd: fixture,
     encoding: "utf8",
     maxBuffer: 64 * 1024 * 1024,

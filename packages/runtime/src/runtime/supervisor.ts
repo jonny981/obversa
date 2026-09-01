@@ -31,7 +31,7 @@ const PROGRESS_TAIL = 200;
 const PROGRESS_TAIL_BYTES = 256 * 1024;
 
 export function runsHome(): string {
-  return join(process.env.LINES_HOME ?? join(homedir(), '.lines'), 'runs');
+  return join(process.env.OBVERSA_HOME ?? join(homedir(), '.obversa'), 'runs');
 }
 
 function slug(value: string): string {

@@ -7,8 +7,8 @@ This program runs one agent job through a scripted engine. The scripted engine
 does not make a network call.
 
 ```ts
-import { agentJob, run } from '@obversa/lines';
-import { MockEngine } from '@obversa/lines/testing';
+import { agentJob, run } from '@obversa/runtime';
+import { MockEngine } from '@obversa/runtime/testing';
 
 const engine = new MockEngine(() => 'ready');
 

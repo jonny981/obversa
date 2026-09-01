@@ -16,6 +16,7 @@ import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { realpathSync } from "node:fs";
+import { listWorkspacePackages } from "./check-publish-allowlist.mjs";
 
 const here = dirname(fileURLToPath(import.meta.url));
 const ROOT = resolve(here, "..");
@@ -138,7 +139,8 @@ export function checkTarball(packageDir, { expectedFiles } = {}) {
 
 export function allowlistedDirectories(root = ROOT) {
   const allowlist = JSON.parse(readFileSync(join(root, "scripts", "publish-allowlist.json"), "utf8"));
-  return allowlist.packages.map((name) => join(root, "packages", name.slice("@obversa/".length)));
+  const byName = new Map(listWorkspacePackages(root).map(({ name, dir }) => [name, dir]));
+  return allowlist.packages.map((name) => join(root, byName.get(name)));
 }
 
 const isMain = process.argv[1] && realpathSync(fileURLToPath(import.meta.url)) === realpathSync(resolve(process.argv[1]));

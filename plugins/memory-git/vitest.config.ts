@@ -6,11 +6,11 @@ export default defineConfig({
     alias: [
       {
         find: '@obversa/memory/testing',
-        replacement: fileURLToPath(new URL('../memory/src/testing.ts', import.meta.url)),
+        replacement: fileURLToPath(new URL('../../packages/memory/src/testing.ts', import.meta.url)),
       },
       {
         find: '@obversa/memory',
-        replacement: fileURLToPath(new URL('../memory/src/index.ts', import.meta.url)),
+        replacement: fileURLToPath(new URL('../../packages/memory/src/index.ts', import.meta.url)),
       },
     ],
   },

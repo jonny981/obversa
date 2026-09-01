@@ -12,7 +12,7 @@ import type {
   EngineEventSink,
   Usage,
   UsageReceipt,
-} from './index.js';
+} from './contracts.js';
 
 export interface Accumulator {
   parts: AgentResultPart[];

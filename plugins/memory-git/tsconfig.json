@@ -3,8 +3,8 @@
   "compilerOptions": {
     "paths": {
       "@obversa/memory-git": ["./src/index.ts"],
-      "@obversa/memory": ["../memory/src/index.ts"],
-      "@obversa/memory/testing": ["../memory/src/testing.ts"]
+      "@obversa/memory": ["../../packages/memory/src/index.ts"],
+      "@obversa/memory/testing": ["../../packages/memory/src/testing.ts"]
     }
   },
   "include": ["src", "tests"]

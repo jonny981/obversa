@@ -3,7 +3,7 @@ title: "Outside graph types"
 description: "Define, validate, and inspect a pure graph type."
 ---
 
-`@obversa/lines` lets a package define a graph type that Lines does not provide.
+`@obversa/runtime` lets a package define a graph type that Lines does not provide.
 Write graph behavior as pure code. The contract gives the graph type frozen data
 and graph lookups. It does not give file, model, process, clock, or storage
 services.
@@ -23,7 +23,7 @@ pnpm example:graph
 ```
 
 Copy `examples/packages/custom-graph.ts` when you start a graph type. The
-example uses only `@obversa/lines` public exports.
+example uses only `@obversa/runtime` public exports.
 
 ## Source
 
@@ -35,11 +35,11 @@ import {
   type GraphEvent,
   type GraphType,
   type PlanResolution,
-} from '@obversa/lines';
+} from '@obversa/runtime';
 import {
   runGraphTypeConformance,
   type GraphTypeConformanceFixture,
-} from '@obversa/lines/testing';
+} from '@obversa/runtime/testing';
 
 const definition: GraphDefinition = {
   id: 'draft-review',

@@ -79,8 +79,8 @@ test("a package.json imports alias, a workspace devDependency, and an alias that
   // The value installs the sibling whatever the key says: `import "hidden"`
   // then loads @obversa/surfacer, so the alias is the arrow.
   assert.deepEqual(
-    internalDependencies({ dependencies: { hidden: "npm:@obversa/surfacer@0.1.0", other: "workspace:@obversa/memory@*", "@obversa/lines": "workspace:^", ext: "npm:lodash@4", plain: "^1.0.0" } }, "dependencies"),
-    ["@obversa/lines", "@obversa/memory", "@obversa/surfacer"],
+    internalDependencies({ dependencies: { hidden: "npm:@obversa/surfacer@0.1.0", other: "workspace:@obversa/memory@*", "@obversa/runtime": "workspace:^", ext: "npm:lodash@4", plain: "^1.0.0" } }, "dependencies"),
+    ["@obversa/memory", "@obversa/runtime", "@obversa/surfacer"],
     "npm: and workspace: aliases by value, keys by name, externals ignored",
   );
   assert.deepEqual(internalDependencies({ peerDependencies: { mem: "npm:@obversa/memory@^0.1.0" } }, "peerDependencies"), ["@obversa/memory"], "a peer alias counts too");
@@ -602,7 +602,7 @@ test("the guard, run on a disposable copy of the tree, refuses a shipped host im
 
 test("the TypeScript hatch scan refuses the loader hatches and exempts test files", () => {
   // A hatch is a null entry among the specifiers; the guard reports any.
-  const hatches = (text, file = "packages/lines/src/a.ts") => moduleSpecifiers(text, file).includes(null);
+  const hatches = (text, file = "packages/runtime/src/a.ts") => moduleSpecifiers(text, file).includes(null);
   for (const text of [
     'eval("1");',
     'new Function("return process")();',
@@ -616,7 +616,7 @@ test("the TypeScript hatch scan refuses the loader hatches and exempts test file
   }
   assert.equal(hatches('globalThis.setTimeout(() => {}, 1); const e = process.env.X;'), false, "listed data members stay usable");
   assert.equal(hatches('import { x } from "./ok.js";'), false, "a plain import is no hatch");
-  assert.equal(hatches('eval("1");', "packages/lines/tests/a.spec.ts"), false, "a test file is exempt from the hatch rules");
+  assert.equal(hatches('eval("1");', "packages/runtime/tests/a.spec.ts"), false, "a test file is exempt from the hatch rules");
 });
 
 test("a TypeScript source with a loader hatch fails the live guard on a disposable copy", { timeout: 300_000 }, () => {
@@ -624,11 +624,11 @@ test("a TypeScript source with a loader hatch fails the live guard on a disposab
   const root = copyTree(real);
   try {
     const guard = () => spawnSync(process.execPath, [path.join(root, "scripts", "check-boundaries.mjs")], { cwd: root, encoding: "utf8" });
-    const probe = path.join(root, "packages", "lines", "src", "hatch-probe.ts");
+    const probe = path.join(root, "packages", "runtime", "src", "hatch-probe.ts");
     writeFileSync(probe, 'export const e = eval("1");\n');
     const run = guard();
     assert.notEqual(run.status, 0, "the hatch must fail the guard");
-    assert.match(run.stderr, /packages\/lines\/src\/hatch-probe\.ts: a loader hatch/);
+    assert.match(run.stderr, /packages\/runtime\/src\/hatch-probe\.ts: a loader hatch/);
     rmSync(probe);
     assert.equal(guard().status, 0, "the restored copy passes");
   } finally {
@@ -636,11 +636,12 @@ test("a TypeScript source with a loader hatch fails the live guard on a disposab
   }
 });
 
-test("the workspace file pin refuses a missing or an extra glob, not only accepts the exact text", () => {
+test("the workspace file pin keeps packages, plugins, and hosts in the boundary", () => {
   assert.equal(isPinnedWorkspaceFile(PINNED_WORKSPACE_FILE), true);
-  assert.equal(isPinnedWorkspaceFile("packages:\n  - packages/*\n  - hosts/*\nnodeLinker: isolated\nhoist: false\npublicHoistPattern: []\n"), true);
+  assert.equal(isPinnedWorkspaceFile("packages:\n  - packages/*\n  - hosts/*\n  - plugins/*\nnodeLinker: isolated\nhoist: false\npublicHoistPattern: []\n"), true);
   for (const text of [
     "packages:\n  - packages/*\n",
+    "packages:\n  - packages/*\n  - hosts/*\nnodeLinker: isolated\nhoist: false\npublicHoistPattern: []\n",
     "packages:\n  - packages/*\n  - hosts/*\n  - tools/*\n",
     "packages:\n  - packages/*\n  - hosts/*\n",
     "packages:\n  - packages/*\n  - hosts/*\nnodeLinker: isolated\nhoist: true\npublicHoistPattern: []\n",
@@ -652,6 +653,12 @@ test("the workspace file pin refuses a missing or an extra glob, not only accept
   ]) {
     assert.equal(isPinnedWorkspaceFile(text), false, JSON.stringify(text));
   }
+});
+
+test("the loader-hatch scan covers package and plugin TypeScript", () => {
+  assert.equal(scansImports("packages/runtime/src/api.ts"), true);
+  assert.equal(scansImports("plugins/engine-codex/src/index.ts"), true);
+  assert.equal(scansImports("hosts/cmux/src/index.ts"), false);
 });
 
 test("the live tree passes the boundary check", () => {

@@ -36,16 +36,16 @@ import {
   type JsonValue,
   type RunStorageBinding,
   type RunStoragePolicy,
-} from '@obversa/lines';
+} from '@obversa/runtime';
 import {
   runArtifactStoreConformance,
   runEventStoreConformance,
-} from '@obversa/lines/testing';
+} from '@obversa/runtime/testing';
 import {
   createLocalArtifactStore,
   createLocalEventStore,
   createLocalRunStorage,
-} from '@obversa/lines/storage/local';
+} from '@obversa/runtime/storage/local';
 
 const encoder = new TextEncoder();
 const policy = {

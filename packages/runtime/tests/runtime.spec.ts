@@ -208,25 +208,25 @@ describe('run', () => {
     );
 
     expect(result.runId).toBeTruthy();
-    expect(result.recordPath).toBe(`${dir}/.lines/records/${result.runId}.jsonl`);
+    expect(result.recordPath).toBe(`${dir}/.obversa/records/${result.runId}.jsonl`);
     expect(existsSync(result.recordPath!)).toBe(true);
     const record = readFileSync(result.recordPath!, 'utf8');
     expect(record).toContain('"kind":"job:end"');
     expect(record).not.toContain('private payload');
-    expect(readFileSync(`${dir}/.lines/.gitignore`, 'utf8')).toBe('*\n');
+    expect(readFileSync(`${dir}/.obversa/.gitignore`, 'utf8')).toBe('*\n');
   });
 
   it('rejects Lines-managed paths that escape through a symlink', async () => {
     const dir = tmpBareDir();
     const target = mkdtempSync(join(tmpdir(), 'lines-escape-target-'));
-    symlinkSync(target, join(dir, '.lines'));
+    symlinkSync(target, join(dir, '.obversa'));
     try {
       await expect(
         run(fnJob('done', async () => ({ status: 'pass' })), {
           cwd: dir,
           recordTo: 'auto',
         }),
-      ).rejects.toThrow(/unsafe \.lines/);
+      ).rejects.toThrow(/unsafe \.obversa/);
     } finally {
       rmSync(target, { recursive: true, force: true });
     }

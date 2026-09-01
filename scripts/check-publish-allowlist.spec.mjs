@@ -76,7 +76,7 @@ test("the audit fails closed: an unlisted public package, a missing or wrong hoo
 });
 
 test("releaseTagFor names exactly one package and version", () => {
-  assert.equal(releaseTagFor("@obversa/lines", "1.0.0"), "obversa-lines@1.0.0");
+  assert.equal(releaseTagFor("@obversa/runtime", "1.0.0"), "obversa-runtime@1.0.0");
   assert.equal(releaseTagFor("@obversa/memory-git", "0.1.0"), "obversa-memory-git@0.1.0");
   assert.equal(releaseTagFor("@obversa/engine-claude-cli", "0.1.0"), "obversa-engine-claude-cli@0.1.0");
 });

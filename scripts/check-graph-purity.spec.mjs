@@ -31,19 +31,21 @@ function runFixture(files) {
   });
 }
 
-test('allows pure local modules, approved Node utilities, and the memory port type', () => {
+test('allows pure local modules and the reviewed interface-package imports', () => {
   const result = runFixture({
     'graph.ts': `
       import { createHash } from 'node:crypto';
       import { isDeepStrictEqual } from 'node:util';
       import type { Memory } from '@obversa/memory';
       import { type MemoryCommand } from '@obversa/memory';
+      import type { JsonObject } from '@obversa/engine';
+      export { canonicalJson, type JsonValue } from '@obversa/engine';
       import { local } from './nested/local.js';
       export { local } from './nested/local.js';
       export const value = createHash('sha256').update(String(local)).digest('hex');
       export const equal = isDeepStrictEqual(value, value);
       export const maximum = Math.max(1, 2);
-      export type Port = Memory | MemoryCommand;
+      export type Port = Memory | MemoryCommand | JsonObject;
     `,
     'nested/local.tsx': 'export const local = 1;',
     'more.mts': "export type { Port } from './graph.js';",
@@ -71,6 +73,7 @@ test('rejects forbidden dependencies through static imports and export-from', ()
     '@obversa/memory-git',
     '@obversa/memory/testing',
     '@obversa/memory',
+    '@obversa/engine',
     'execa',
     '../core/job.js',
     '../shared/helpers.js',
@@ -92,6 +95,7 @@ test('rejects forbidden dependencies through static imports and export-from', ()
       import { openGitMemory } from '@obversa/memory-git';
       import type { MemoryConformanceReport } from '@obversa/memory/testing';
       import { MEMORY_ROOT } from '@obversa/memory';
+      import { MockEngine } from '@obversa/engine';
       import { execa } from 'execa';
       import { agentJob } from '../core/job.js';
       import { helper } from '../shared/helpers.js';

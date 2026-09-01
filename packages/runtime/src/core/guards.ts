@@ -45,7 +45,7 @@ export interface RatchetOptions {
   /** Which way is better: `down` (default; the value must not rise — lint
    *  errors, bundle bytes, TODO count) or `up` (must not fall — coverage). */
   direction?: 'down' | 'up';
-  /** Where baselines live. Default `<LINES_HOME|~/.lines>/ratchets` — outside
+  /** Where baselines live. Default `<OBVERSA_HOME|~/.obversa>/ratchets` — outside
    *  the workspace, so the baseline is never edited or committed by the loop
    *  it constrains. */
   baselineDir?: string;
@@ -62,7 +62,7 @@ interface Baseline {
 function baselineHome(opts: RatchetOptions): string {
   return (
     opts.baselineDir ??
-    join(process.env.LINES_HOME ?? join(homedir(), '.lines'), 'ratchets')
+    join(process.env.OBVERSA_HOME ?? join(homedir(), '.obversa'), 'ratchets')
   );
 }
 

@@ -9,9 +9,13 @@
  * and continues (soft mode, for exploratory runs).
  */
 
-import type { JobContext } from './types.js';
 import { LoopError } from './errors.js';
 import type { UsageReceipt } from '../engines/engine.js';
+
+interface BudgetContext {
+  readonly budget?: Budget;
+  log(message: string, level?: 'debug' | 'info' | 'warn' | 'error'): void;
+}
 
 export interface BudgetConfig {
   /** Cap on total tokens (input + output) for the whole run. */
@@ -74,7 +78,7 @@ export class Budget {
  * the cap is not yet reached. In `soft` mode a breach warns and continues; in
  * hard mode it throws a non-retryable BUDGET error that terminates the run.
  */
-export function assertBudget(ctx: JobContext): void {
+export function assertBudget(ctx: BudgetContext): void {
   const budget = ctx.budget;
   if (!budget) return;
   if (budget.unknownUsageCalls() > 0) {

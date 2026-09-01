@@ -7,7 +7,9 @@
   "license": "MIT",
   "sideEffects": false,
   "publishConfig": {
-    "access": "public"
+    "access": "public",
+    "registry": "http://publish-guard.invalid/",
+    "@obversa:registry": "http://publish-guard.invalid/"
   },
   "engines": {
     "node": ">=22.12.0"
@@ -30,7 +32,8 @@
     "test": "vitest run",
     "typecheck": "tsc --noEmit -p tsconfig.json",
     "typecheck:ts6": "tsc6 --noEmit -p tsconfig.json",
-    "prepack": "pnpm run build"
+    "prepack": "pnpm run build",
+    "prepublishOnly": "node ../../scripts/check-publish-allowlist.mjs"
   },
   "dependencies": {
     "@obversa/engine": "workspace:^"

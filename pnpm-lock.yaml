@@ -78,11 +78,10 @@ importers:
         specifier: 22.12.0
         version: 22.12.0
 
-  packages/lines:
+  packages/memory: {}
+
+  packages/runtime:
     dependencies:
-      '@obversa/engine':
-        specifier: workspace:^
-        version: link:../engine
       execa:
         specifier: ^9.6.1
         version: 9.6.1
@@ -93,6 +92,9 @@ importers:
         specifier: ^2.0.2
         version: 2.0.2
     devDependencies:
+      '@obversa/engine':
+        specifier: workspace:^
+        version: link:../engine
       '@obversa/memory':
         specifier: workspace:^
         version: link:../memory
@@ -102,23 +104,6 @@ importers:
       '@types/toposort':
         specifier: ^2.0.7
         version: 2.0.7
-
-  packages/memory: {}
-
-  packages/memory-git:
-    dependencies:
-      '@obversa/memory':
-        specifier: workspace:^
-        version: link:../memory
-      execa:
-        specifier: ^9.6.1
-        version: 9.6.1
-
-  packages/memory-simple:
-    dependencies:
-      '@obversa/memory':
-        specifier: workspace:^
-        version: link:../memory
 
   packages/source:
     dependencies:
@@ -190,6 +175,21 @@ importers:
       '@obversa/engine':
         specifier: workspace:^
         version: link:../../packages/engine
+
+  plugins/memory-git:
+    dependencies:
+      '@obversa/memory':
+        specifier: workspace:^
+        version: link:../../packages/memory
+      execa:
+        specifier: ^9.6.1
+        version: 9.6.1
+
+  plugins/memory-simple:
+    dependencies:
+      '@obversa/memory':
+        specifier: workspace:^
+        version: link:../../packages/memory
 
 packages:
 

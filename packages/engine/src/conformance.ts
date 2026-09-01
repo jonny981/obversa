@@ -8,7 +8,7 @@ import type {
   Engine,
   EngineSelectionRecord,
   EngineStreamEvent,
-} from './index.js';
+} from './contracts.js';
 import type { JsonValue } from './json.js';
 import { validateAgentResult } from './result.js';
 

@@ -41,7 +41,7 @@ export interface AgentSdkEngineOptions {
   readonly memory?: Memory;
 }
 
-const MEMORY_SERVER = 'lines-memory';
+const MEMORY_SERVER = 'obversa-memory';
 const MEMORY_TOOL = 'memory';
 const MEMORY_TOOL_ID = `mcp__${MEMORY_SERVER}__${MEMORY_TOOL}`;
 

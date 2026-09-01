@@ -10,7 +10,7 @@ const EXPECTED_NAME = 'Jonny Neill';
 const EXPECTED_EMAIL = 'jonnyneill@hotmail.com';
 const EXPECTED_KEY =
   'ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAICFRtiuaPtCSNS9gSKWPxHna590mlLMOQ+eGh7XCh6Xg';
-const SIGNATURE_BOUNDARY_PATH = 'packages/lines/package.json';
+const SIGNATURE_BOUNDARY_PATH = 'packages/runtime/package.json';
 const LONDON = 'Europe/London';
 const WORKDAYS = new Set(['Mon', 'Tue', 'Wed', 'Thu', 'Fri']);
 const HEADER = /^(?:feat|fix|docs|style|refactor|perf|test|build|ci|chore|revert)(?:\([a-z0-9][a-z0-9._/-]*\))?!?: [a-z0-9](?:[^\r\n]*[^.\s\r\n])?$/;

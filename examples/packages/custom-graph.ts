@@ -5,11 +5,11 @@ import {
   type GraphEvent,
   type GraphType,
   type PlanResolution,
-} from '@obversa/lines';
+} from '@obversa/runtime';
 import {
   runGraphTypeConformance,
   type GraphTypeConformanceFixture,
-} from '@obversa/lines/testing';
+} from '@obversa/runtime/testing';
 
 const definition: GraphDefinition = {
   id: 'draft-review',

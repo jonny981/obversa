@@ -31,58 +31,8 @@
 
 import { createHash } from 'node:crypto';
 
-import type { JobContext, Outcome } from './types.js';
-
-export interface NoProgressConfig {
-  /** Consecutive no-progress iterations before the loop stalls out. Default 3. */
-  window?: number;
-  /**
-   * How far the gate confidence must beat its previous best to count as
-   * progress (the high-water mark). Default 0.02.
-   */
-  minConfidenceDelta?: number;
-  /**
-   * A caller-supplied progress fingerprint for state the workspace cannot see
-   * (a queue length, a passing-test count, an external resource). Returning a
-   * value this run has already produced counts as no progress; `undefined`
-   * leaves the channel out of this iteration's evidence. A throw is a bug in
-   * the definition and fails the loop, like any other guarded user code.
-   */
-  signal?: (
-    ctx: JobContext,
-    last: Outcome | undefined,
-  ) => string | number | undefined | Promise<string | number | undefined>;
-  /**
-   * Read the workspace fingerprint each iteration (a few git subprocesses).
-   * Default true; set false when a custom `signal` is the only channel.
-   */
-  workspace?: boolean;
-  /**
-   * Fingerprint the failing until-gate's diagnostic `output` — the same failure
-   * signature repeating is stall evidence. For deterministic gates
-   * (`commandSucceeds`) whose output is stable across identical failures; a
-   * judge's prose varies between identical verdicts, so this stays off for
-   * agent gates. Requires an explicit `until`: without one there is no gate
-   * verdict to fingerprint and this channel never produces evidence. Default
-   * false.
-   */
-  gate?: boolean;
-}
-
-/** What `LoopConfig.noProgress` accepts: a bare window, or the full config. */
-export type NoProgressInput = number | NoProgressConfig;
-
-/** The evidence a stalled loop carries out — on the outcome and the event. */
-export interface StallReport {
-  /** The configured window that was filled. */
-  window: number;
-  /** The consecutive no-progress iterations, in order. */
-  iterations: number[];
-  /** The last gate/review reason observed — what kept failing. */
-  reason: string;
-  /** Per-channel assessment of the tripping iteration. */
-  evidence: string[];
-}
+import type { NoProgressConfig, NoProgressInput, StallReport } from './types.js';
+export type { NoProgressConfig, NoProgressInput, StallReport } from './types.js';
 
 /** One completed, non-converged iteration as the tracker sees it. */
 export interface ProgressSample {

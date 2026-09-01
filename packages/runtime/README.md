@@ -1,6 +1,6 @@
-# @obversa/lines
+# @obversa/runtime
 
-`@obversa/lines` is a standalone TypeScript runtime. Obversa is one consumer;
+`@obversa/runtime` is a standalone TypeScript runtime. Obversa is one consumer;
 any host can use the public package API. The package also defines a pure graph
 contract for graph types outside this package.
 
@@ -15,14 +15,14 @@ From the workspace root, run:
 ```bash
 corepack enable
 pnpm install --frozen-lockfile
-pnpm --filter @obversa/lines build
+pnpm --filter @obversa/runtime build
 ```
 
 ## Usage
 
 ```ts
-import { agentJob, run } from '@obversa/lines';
-import { MockEngine } from '@obversa/lines/testing';
+import { agentJob, run } from '@obversa/runtime';
+import { MockEngine } from '@obversa/runtime/testing';
 
 const engine = new MockEngine(() => 'ready');
 

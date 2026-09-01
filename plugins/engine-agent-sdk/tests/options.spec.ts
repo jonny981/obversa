@@ -108,18 +108,18 @@ describe('Agent SDK memory tool', () => {
 
   it('auto-allows the injected memory tool for headless runs', () => {
     expect(agentSdkMemoryAllowedTools(undefined)).toEqual([
-      'mcp__lines-memory__memory',
+      'mcp__obversa-memory__memory',
     ]);
     expect(agentSdkMemoryAllowedTools([])).toEqual([
-      'mcp__lines-memory__memory',
+      'mcp__obversa-memory__memory',
     ]);
     expect(agentSdkMemoryAllowedTools(['Read'])).toEqual([
       'Read',
-      'mcp__lines-memory__memory',
+      'mcp__obversa-memory__memory',
     ]);
     expect(
-      agentSdkMemoryAllowedTools(['mcp__lines-memory__memory']),
-    ).toEqual(['mcp__lines-memory__memory']);
+      agentSdkMemoryAllowedTools(['mcp__obversa-memory__memory']),
+    ).toEqual(['mcp__obversa-memory__memory']);
   });
 
   it('tells the model that memory is untrusted data', () => {

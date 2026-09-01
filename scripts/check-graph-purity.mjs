@@ -9,6 +9,16 @@ const allowedNodeImports = new Map([
   ['node:crypto', 'createHash'],
   ['node:util', 'isDeepStrictEqual'],
 ]);
+const allowedEngineImports = new Map([
+  ['JsonObject', 'type'],
+  ['JsonPrimitive', 'type'],
+  ['JsonValue', 'type'],
+  ['Sha256Digest', 'type'],
+  ['JsonValueError', 'value'],
+  ['canonicalJson', 'value'],
+  ['cloneFrozenJson', 'value'],
+  ['digestJson', 'value'],
+]);
 const allowedMathMembers = new Set([
   'E',
   'LN10',
@@ -87,7 +97,7 @@ const effectfulGlobals = new Map([
 ]);
 
 const repositoryRoot = resolve(dirname(fileURLToPath(import.meta.url)), '..');
-const scanRoot = resolve(process.argv[2] ?? resolve(repositoryRoot, 'packages/lines/src/graph'));
+const scanRoot = resolve(process.argv[2] ?? resolve(repositoryRoot, 'packages/runtime/src/graph'));
 
 const violations = [];
 const files = await sourceFiles(scanRoot);
@@ -145,7 +155,11 @@ function visit(node, sourceFile) {
   if (ts.isImportDeclaration(node)) {
     checkImportDeclaration(node, sourceFile);
   } else if (ts.isExportDeclaration(node) && node.moduleSpecifier) {
-    checkSpecifier(node.moduleSpecifier, sourceFile, false);
+    if (ts.isStringLiteralLike(node.moduleSpecifier) && node.moduleSpecifier.text === '@obversa/engine') {
+      checkEngineExport(node, sourceFile);
+    } else {
+      checkSpecifier(node.moduleSpecifier, sourceFile, false);
+    }
   } else if (
     ts.isImportEqualsDeclaration(node)
     && ts.isExternalModuleReference(node.moduleReference)
@@ -219,7 +233,62 @@ function checkImportDeclaration(declaration, sourceFile) {
     return;
   }
 
+  if (node.text === '@obversa/engine') {
+    const clause = declaration.importClause;
+    const elements = clause?.namedBindings && ts.isNamedImports(clause.namedBindings)
+      ? clause.namedBindings.elements
+      : [];
+    if (!clause || clause.name || elements.length === 0) {
+      report(
+        sourceFile,
+        node.getStart(sourceFile),
+        "'@obversa/engine': only reviewed named JSON imports are allowed",
+      );
+      return;
+    }
+    checkEngineElements(elements, clause.isTypeOnly, node, sourceFile);
+    return;
+  }
+
   checkSpecifier(node, sourceFile, isTypeOnlyMemoryImport(declaration));
+}
+
+function checkEngineExport(declaration, sourceFile) {
+  const node = declaration.moduleSpecifier;
+  const elements = declaration.exportClause && ts.isNamedExports(declaration.exportClause)
+    ? declaration.exportClause.elements
+    : [];
+  if (elements.length === 0) {
+    report(
+      sourceFile,
+      node.getStart(sourceFile),
+      "'@obversa/engine': only reviewed named JSON exports are allowed",
+    );
+    return;
+  }
+  checkEngineElements(elements, declaration.isTypeOnly, node, sourceFile);
+}
+
+function checkEngineElements(elements, declarationIsTypeOnly, node, sourceFile) {
+  for (const element of elements) {
+    const importedName = element.propertyName?.text ?? element.name.text;
+    const kind = allowedEngineImports.get(importedName);
+    if (!kind) {
+      report(
+        sourceFile,
+        node.getStart(sourceFile),
+        `'@obversa/engine': ${importedName} is not a reviewed graph JSON import`,
+      );
+      continue;
+    }
+    if (kind === 'type' && !declarationIsTypeOnly && !element.isTypeOnly) {
+      report(
+        sourceFile,
+        node.getStart(sourceFile),
+        `'@obversa/engine': ${importedName} must be imported or exported as a type`,
+      );
+    }
+  }
 }
 
 function checkCallSpecifier(call, sourceFile, label) {
@@ -266,6 +335,9 @@ function isTypeOnlyMemoryImport(declaration) {
 }
 
 function forbiddenReason(specifier, sourceFile, allowMemoryPortType) {
+  if (specifier === '@obversa/engine') {
+    return 'only reviewed named JSON imports are allowed';
+  }
   if (specifier === '@obversa/memory') {
     return allowMemoryPortType ? undefined : 'only type imports from the memory port are allowed';
   }

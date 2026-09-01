@@ -74,10 +74,10 @@ export interface RunOptions {
    * Engine call sites refuse to spend past it (see `Budget`).
    */
   budget?: number | BudgetConfig;
-  /** Append every structured event as JSONL here, or auto-name one under `.lines/records`. */
+  /** Append every structured event as JSONL here, or auto-name one under `.obversa/records`. */
   recordTo?: string | 'auto';
   /**
-   * Register this run in the global registry (`~/.lines/runs/<runId>`) and write
+   * Register this run in the global registry (`~/.obversa/runs/<runId>`) and write
    * its live state there, so another process can inspect it. Off by default;
    * opt in to make a run observable from outside.
    */
@@ -177,7 +177,7 @@ export async function run(
   if (recordPath) {
     sinks.push(makeRecorder(recordPath, { thin: options.recordTo === 'auto' }));
   }
-  // A supervised run registers itself in the global registry (~/.lines/runs) and
+  // A supervised run registers itself in the global registry (~/.obversa/runs) and
   // writes its live state there, so another process can list/status/tail it.
   let supervisor: Supervisor | undefined;
   if (options.supervise) {

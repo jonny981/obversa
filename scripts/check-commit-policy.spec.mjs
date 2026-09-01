@@ -56,30 +56,30 @@ function createSignedHistory() {
     legacyEnvironment,
   );
 
-  mkdirSync(join(repository, 'packages', 'lines'), { recursive: true });
-  writeFileSync(join(repository, 'packages', 'lines', 'package.json'), '{"name":"@obversa/lines"}\n');
-  run('git', ['add', 'packages/lines/package.json'], repository);
+  mkdirSync(join(repository, 'packages', 'runtime'), { recursive: true });
+  writeFileSync(join(repository, 'packages', 'runtime', 'package.json'), '{"name":"@obversa/runtime"}\n');
+  run('git', ['add', 'packages/runtime/package.json'], repository);
   const boundaryEnvironment = {
     GIT_AUTHOR_DATE: '2026-08-24T23:00:00+01:00',
     GIT_COMMITTER_DATE: '2026-08-24T23:00:00+01:00',
   };
   run(
     'git',
-    ['commit', '--quiet', '-m', 'feat(lines): add the graph runtime'],
+    ['commit', '--quiet', '-m', 'feat(runtime): add the graph runtime'],
     repository,
     0,
     boundaryEnvironment,
   );
 
-  writeFileSync(join(repository, 'packages', 'lines', 'README.md'), '# Lines\n');
-  run('git', ['add', 'packages/lines/README.md'], repository);
+  writeFileSync(join(repository, 'packages', 'runtime', 'README.md'), '# Runtime\n');
+  run('git', ['add', 'packages/runtime/README.md'], repository);
   const laterEnvironment = {
     GIT_AUTHOR_DATE: '2026-08-25T23:15:00+01:00',
     GIT_COMMITTER_DATE: '2026-08-25T23:15:00+01:00',
   };
   run(
     'git',
-    ['commit', '--quiet', '-m', 'docs(lines): explain the runtime'],
+    ['commit', '--quiet', '-m', 'docs(runtime): explain the runtime'],
     repository,
     0,
     laterEnvironment,

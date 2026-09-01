@@ -35,7 +35,7 @@ export const parserExtensions = [...scriptKinds.keys()];
 export const sourceExtensions = ['.ts', '.tsx', '.mts', '.cts', '.js', '.jsx', '.mjs', '.cjs'];
 const sourcePattern = new RegExp(`(?:${sourceExtensions.map((ext) => ext.replace('.', '\\.')).join('|')})$`);
 export function scansImports(path) {
-  return path.startsWith('packages/') && sourcePattern.test(path);
+  return /^(?:packages|plugins)\//.test(path) && sourcePattern.test(path);
 }
 
 // A host carries placement glue only: bash commands pinned by content, and
@@ -137,7 +137,7 @@ const globalDataMembers = new Set([
 // the hosts, and any other glob would bring code under the arrow rules that
 // the package table does not know. Exported so the spec proves the pin
 // refuses a missing or an extra glob, not only accepts the exact text.
-export const PINNED_WORKSPACE_FILE = 'packages:\n  - packages/*\n  - hosts/*\nnodeLinker: isolated\nhoist: false\npublicHoistPattern: []\n';
+export const PINNED_WORKSPACE_FILE = 'packages:\n  - packages/*\n  - hosts/*\n  - plugins/*\nnodeLinker: isolated\nhoist: false\npublicHoistPattern: []\n';
 export function isPinnedWorkspaceFile(text) {
   return text === PINNED_WORKSPACE_FILE;
 }
@@ -428,7 +428,7 @@ export function moduleSpecifiers(text, fileName = 'module.ts', { hatches = !isTe
 // the name alone cannot decide. The manifest is read separately.
 const projectFields = ['compilerOptions', 'extends', 'references', 'files', 'include', 'typeAcquisition'];
 export function isProjectConfig(path, text) {
-  if (!/^packages\/[^/]+\/.+\.json$/.test(path) || basename(path) === 'package.json') return false;
+  if (!/^(?:packages|plugins)\/[^/]+\/.+\.json$/.test(path) || basename(path) === 'package.json') return false;
   if (/^(?:tsconfig|jsconfig)[^/]*\.json$/.test(basename(path))) return true;
   const { config } = ts.readConfigFile(path, () => text);
   return !!config && typeof config === 'object' && !Array.isArray(config)
@@ -460,9 +460,11 @@ export function parseProjectConfig(text, { file, host = ts.sys } = {}) {
 // every package at once.
 function reachesEveryPackage(absolute, repoRoot) {
   // Both by real path, so a root handed over through a symlink answers as
-  // its real spelling does.
-  const rel = relative(realPathOf(absolute), realPathOf(join(repoRoot, 'packages')));
-  return rel === '' || (!rel.startsWith('..') && !isAbsolute(rel));
+  // its real spelling does. Either workspace root can reach several units.
+  return ['packages', 'plugins'].some((workspaceRoot) => {
+    const rel = relative(realPathOf(absolute), realPathOf(join(repoRoot, workspaceRoot)));
+    return rel === '' || (!rel.startsWith('..') && !isAbsolute(rel));
+  });
 }
 
 // The packages a project config makes its package depend on, and the
@@ -741,11 +743,10 @@ function crossingPackage(specifier, { file, root: repoRoot } = {}) {
   if (!isTestPath(file) && ts.sys.fileExists(real) && !sourcePattern.test(real) && !/\.(json|css|html|txt|md)$/.test(real))
     return refusal(`${specifier} names ${placed}, a file with no source extension, which the scan never import-scans; a module carries a source extension`);
   const owner = packageDirOf(realpathOf(file, ts.sys), realRoot);
-  // A package imports nothing from outside packages/: a host is the
-  // composition root that takes packages by public name, and scripts/ and
-  // the repository root are the guard's own ground. A package that bundled
-  // any of them would reverse that direction unseen.
-  if (owner !== undefined && !isTestPath(file) && !/^packages\//.test(placed)) return refusal(`${specifier} reaches ${placed || '.'}, outside packages/; a package imports nothing from hosts, scripts, or the repository root`);
+  // A package or plugin imports nothing from outside the two code roots: a
+  // host is the composition root, and scripts/ plus the repository root are
+  // the guard's own ground.
+  if (owner !== undefined && !isTestPath(file) && !/^(?:packages|plugins)\//.test(placed)) return refusal(`${specifier} reaches ${placed || '.'}, outside packages/ and plugins/; a package imports nothing from hosts, scripts, or the repository root`);
   const dir = packageDirOf(real, realRoot);
   return dir && dir !== owner ? `@obversa/${dir}` : null;
 }
@@ -753,7 +754,7 @@ function crossingPackage(specifier, { file, root: repoRoot } = {}) {
 // The package directory an absolute path lies in, or names outright (a bare
 // `packages/memory`, as a project reference does), else undefined.
 function packageDirOf(absolute, repoRoot) {
-  return /^packages\/([^/]+)(?:\/|$)/.exec(placedUnder(absolute, repoRoot))?.[1];
+  return /^(?:packages|plugins)\/([^/]+)(?:\/|$)/.exec(placedUnder(absolute, repoRoot))?.[1];
 }
 
 // Every regular file under a directory, and every symlink met on the way. A
@@ -790,22 +791,41 @@ if (isMain) await main();
 
 async function main() {
 const packageRules = new Map([
-  ['@obversa/lines', {
+  ['@obversa/runtime', {
+    directory: 'packages/runtime',
+    kind: 'runtime',
     version: '1.0.0',
     dependencies: [],
-    peerDependencies: ['@obversa/memory'],
-    peerDependencyVersions: { '@obversa/memory': '>=0.1.0 <0.2.0' } }],
+    peerDependencies: ['@obversa/engine', '@obversa/memory'],
+    peerDependencyVersions: {
+      '@obversa/engine': '>=0.1.0 <0.2.0',
+      '@obversa/memory': '>=0.1.0 <0.2.0',
+    },
+  }],
+  ['@obversa/engine', {
+    directory: 'packages/engine',
+    kind: 'interface',
+    version: '0.1.0',
+    dependencies: [],
+    peerDependencies: [],
+  }],
   ['@obversa/memory', {
+    directory: 'packages/memory',
+    kind: 'interface',
     version: '0.1.0',
     dependencies: [],
     peerDependencies: [],
   }],
   ['@obversa/memory-simple', {
+    directory: 'plugins/memory-simple',
+    kind: 'plugin',
     version: '0.1.0',
     dependencies: ['@obversa/memory'],
     peerDependencies: [],
   }],
   ['@obversa/memory-git', {
+    directory: 'plugins/memory-git',
+    kind: 'plugin',
     version: '0.1.0',
     dependencies: ['@obversa/memory'],
     peerDependencies: [],
@@ -815,12 +835,19 @@ const packageRules = new Map([
   // another package. Source depends on surfacer — the flipped arrow: the
   // review command lives in source and injects surfacer's launch port itself,
   // so a host keeps placement glue only.
-  ['@obversa/surfacer', { version: '0.1.0', dependencies: [], peerDependencies: [] }],
-  ['@obversa/source', { version: '0.1.0', dependencies: ['@obversa/surfacer'], peerDependencies: [] }],
+  ['@obversa/surfacer', { directory: 'packages/surfacer', kind: 'surface', version: '0.1.0', dependencies: [], peerDependencies: [] }],
+  ['@obversa/source', { directory: 'packages/source', kind: 'surface', version: '0.1.0', dependencies: ['@obversa/surfacer'], peerDependencies: [] }],
+  ['@obversa/engine-agent-sdk', { directory: 'plugins/engine-agent-sdk', kind: 'plugin', version: '0.1.0', dependencies: ['@obversa/engine', '@obversa/memory'], peerDependencies: [] }],
+  ['@obversa/engine-anthropic-api', { directory: 'plugins/engine-anthropic-api', kind: 'plugin', version: '0.1.0', dependencies: ['@obversa/engine'], peerDependencies: [] }],
+  ['@obversa/engine-claude-cli', { directory: 'plugins/engine-claude-cli', kind: 'plugin', version: '0.1.0', dependencies: ['@obversa/engine'], peerDependencies: [] }],
+  ['@obversa/engine-codex', { directory: 'plugins/engine-codex', kind: 'plugin', version: '0.1.0', dependencies: ['@obversa/engine'], peerDependencies: [] }],
+  ['@obversa/engine-grok-cli', { directory: 'plugins/engine-grok-cli', kind: 'plugin', version: '0.1.0', dependencies: ['@obversa/engine'], peerDependencies: [] }],
+  ['@obversa/engine-opencode-cli', { directory: 'plugins/engine-opencode-cli', kind: 'plugin', version: '0.1.0', dependencies: ['@obversa/engine'], peerDependencies: [] }],
 ]);
 const scanRoots = [
   '.changeset',
   'packages',
+  'plugins',
   'hosts',
   'docs/public',
   'examples',
@@ -828,7 +855,7 @@ const scanRoots = [
   '.github',
   '.githooks',
 ];
-const requiredScanRoots = ['hosts'];
+const requiredScanRoots = ['hosts', 'plugins'];
 // The host JavaScript that must be import-scanned, by name, so a rename or a
 // scan gap cannot leave the composition root unchecked.
 const requiredScannedFiles = [
@@ -866,6 +893,18 @@ const forbidden = [
   {
     name: 'retired state directory',
     pattern: new RegExp(`\\.${'loo' + 'ps'}(?:/|\\b)`, 'i'),
+  },
+  {
+    name: 'retired runtime package name',
+    pattern: new RegExp(`@obversa/${'lin' + 'es'}`, 'i'),
+  },
+  {
+    name: 'retired runtime environment prefix',
+    pattern: new RegExp(`${'LIN' + 'ES'}_`),
+  },
+  {
+    name: 'retired runtime state directory',
+    pattern: new RegExp(`\\.${'lin' + 'es'}(?:/|["'\\x60])`, 'i'),
   },
   {
     name: 'private company term',
@@ -961,7 +1000,7 @@ for (const entry of await readdir(join(root, 'hosts'), { withFileTypes: true }))
         // exports only its root, a conditions object at the top likewise.
         let exported;
         try {
-          exported = JSON.parse(await readFile(join(root, 'packages', name.slice('@obversa/'.length), 'package.json'), 'utf8')).exports;
+          exported = JSON.parse(await readFile(join(root, packageRules.get(name).directory, 'package.json'), 'utf8')).exports;
         } catch {
           exported = undefined;
         }
@@ -1018,33 +1057,30 @@ for (const path of ['.claude/', '.Codex/', '.superpowers/']) {
   if (!gitignore.includes(path)) failures.push(`.gitignore: must ignore ${path}`);
 }
 
-// Every directory under packages/ is a workspace package with a rule of its
-// own, named for its directory: a package nobody listed would otherwise
-// import whatever it liked, and a directory claiming a listed name would
-// be taken for the package the rules read at packages/<unscoped name>.
-for (const entry of await readdir(join(root, 'packages'), { withFileTypes: true })) {
-  if (!entry.isDirectory()) continue;
-  const manifestPath = join(root, 'packages', entry.name, 'package.json');
-  if (!(await exists(manifestPath))) {
-    failures.push(`packages/${entry.name}: has no package.json; every directory under packages/ is a ruled workspace package`);
-    continue;
+// Every package and plugin directory is claimed by one explicit rule. The
+// manifest owns the public name; directory spelling is not an identity rule.
+const rulesByDirectory = new Map([...packageRules.entries()].map(([name, rule]) => [rule.directory, name]));
+if (rulesByDirectory.size !== packageRules.size) failures.push('packageRules: every package name must own a distinct directory');
+for (const workspaceRoot of ['packages', 'plugins']) {
+  for (const entry of await readdir(join(root, workspaceRoot), { withFileTypes: true })) {
+    if (!entry.isDirectory()) continue;
+    const ruledDirectory = `${workspaceRoot}/${entry.name}`;
+    const manifestPath = join(root, ruledDirectory, 'package.json');
+    if (!(await exists(manifestPath))) {
+      failures.push(`${ruledDirectory}: has no package.json; every workspace directory is a ruled package or plugin`);
+      continue;
+    }
+    const manifest = JSON.parse(await readFile(manifestPath, 'utf8'));
+    const { files: packageFiles, symlinks: packageLinks } = await walkTree(join(root, ruledDirectory), { ignored: new Set(['node_modules']) });
+    for (const link of packageLinks) failures.push(symlinkRefusal(relative(root, link).split('\\').join('/')));
+    for (const nested of packageFiles) {
+      if (basename(nested) === 'package.json' && nested !== manifestPath)
+        failures.push(`${relative(root, nested).split('\\').join('/')}: a nested manifest makes itself the package scope of the files beneath it, whatever it is named; a package has one manifest, at its root`);
+    }
+    const expectedName = rulesByDirectory.get(ruledDirectory);
+    if (!expectedName) failures.push(`${ruledDirectory}: ${manifest.name} has no boundary rule with this directory`);
+    else if (manifest.name !== expectedName) failures.push(`${ruledDirectory}: is named ${manifest.name}; its boundary rule names ${expectedName}`);
   }
-  const manifest = JSON.parse(await readFile(manifestPath, 'utf8'));
-  // One manifest per package, at its root: a nested one makes itself the
-  // package scope of the files beneath it, whatever it is named, and Node
-  // would serve its exports to them under that name.
-  // This walk enters dist, which the main walk skips by name, so a link or a
-  // nested manifest kept there is met here and refused here.
-  const { files: packageFiles, symlinks: packageLinks } = await walkTree(join(root, 'packages', entry.name), { ignored: new Set(['node_modules']) });
-  for (const link of packageLinks) failures.push(symlinkRefusal(relative(root, link).split('\\').join('/')));
-  for (const nested of packageFiles) {
-    if (basename(nested) === 'package.json' && nested !== manifestPath)
-      failures.push(`${relative(root, nested).split('\\').join('/')}: a nested manifest makes itself the package scope of the files beneath it, whatever it is named; a package has one manifest, at its root`);
-  }
-  if (manifest.name !== `@obversa/${entry.name}`)
-    failures.push(`packages/${entry.name}: is named ${manifest.name}; a package is named @obversa/<its directory>`);
-  else if (!packageRules.has(manifest.name))
-    failures.push(`packages/${entry.name}: ${manifest.name} has no boundary rule; add one to packageRules`);
 }
 
 const files = [];
@@ -1075,8 +1111,16 @@ for (const absolute of files) {
 }
 
 for (const [name, rule] of packageRules) {
+  if (!['interface', 'runtime', 'plugin', 'surface'].includes(rule.kind))
+    failures.push(`${name}: boundary kind must be interface, runtime, plugin, or surface; found ${rule.kind ?? 'absent'}`);
   const owner = name.slice('@obversa/'.length);
-  const directory = join(root, 'packages', owner);
+  const directory = join(root, rule.directory);
+  if (rule.kind === 'runtime' || rule.kind === 'plugin') {
+    for (const dependency of [...rule.dependencies, ...rule.peerDependencies]) {
+      if (packageRules.get(dependency)?.kind !== 'interface')
+        failures.push(`${name}: a ${rule.kind} may depend only on interface packages; ${dependency} is ${packageRules.get(dependency)?.kind ?? 'unruled'}`);
+    }
+  }
   const manifest = JSON.parse(await readFile(join(directory, 'package.json'), 'utf8'));
   if (manifest.name !== name) failures.push(`${name}: manifest name is ${manifest.name}`);
   if (manifest.version !== rule.version)
@@ -1150,7 +1194,7 @@ for (const [name, rule] of packageRules) {
 
   // The manifest's own entry fields are followed by a loader, the compiler,
   // or a bundler: each is placed like an import.
-  checkArrows(`packages/${owner}/package.json`, owner, manifestPathTargets(manifest, manifestAt));
+  checkArrows(`${rule.directory}/package.json`, owner, manifestPathTargets(manifest, manifestAt));
 
 }
 // The tools that interpret the pinned configurations, and the guard's own
@@ -1213,43 +1257,43 @@ for (const field of Object.keys(rootManifest.pnpm ?? {})) {
   if (field === 'packageExtensions' && JSON.stringify(rootManifest.pnpm.packageExtensions) === allowedPackageExtensions) continue;
   failures.push(`package.json: pnpm.${field} changes how packages install; only pnpm.executionEnv and the exact dependency-cruiser typescript extension are allowed`);
 }
-// The workspace is the packages and the hosts: a host is the composition
-// root where the packages meet, and it takes them by their public names.
+// The workspace is the packages, plugins, and hosts. A host is the
+// composition root where the packages meet, and it takes them by name.
 const workspaceFile = await readFile(join(root, 'pnpm-workspace.yaml'), 'utf8');
 if (!isPinnedWorkspaceFile(workspaceFile))
-  failures.push('pnpm-workspace.yaml: must be exactly the packages and hosts globs (pinned in isPinnedWorkspaceFile; review the boundary rule with any change)');
+  failures.push('pnpm-workspace.yaml: must be exactly the packages, hosts, and plugins globs (pinned in isPinnedWorkspaceFile; review the boundary rule with any change)');
 // A pnpmfile hook rewrites manifests as they are read, and an .npmrc can
 // name one or change how workspace packages link; neither is read by the
 // scan, so their presence at the root or in a package is refused.
-for (const dir of ['.', ...[...packageRules.keys()].map((name) => join('packages', name.slice('@obversa/'.length))), ...[...hostRules.keys()].map((name) => join('hosts', name))]) {
+for (const dir of ['.', ...[...packageRules.values()].map((rule) => rule.directory), ...[...hostRules.keys()].map((name) => join('hosts', name))]) {
   for (const hook of ['.pnpmfile.cjs', 'pnpmfile.cjs', '.pnpmfile.mjs', '.pnpmfile.js', '.npmrc', '.yarnrc', '.yarnrc.yml']) {
     if (await exists(join(root, dir, hook))) failures.push(`${join(dir, hook)}: rewrites what packages install or how they link, which the scan does not read`);
   }
 }
 
 for (const path of [
-  'packages/lines/src/cli.ts',
-  'packages/lines/src/cli.tsx',
-  'packages/lines/src/index.ts',
-  'packages/lines/src/reporters.ts',
-  'packages/lines/src/tui',
-  'packages/lines/src/helm',
-  'packages/lines/bin',
-  'packages/lines/src/core/forge.ts',
-  'packages/lines/src/core/pr.ts',
-  'packages/lines/src/core/human.ts',
-  'packages/lines/src/core/config-file.ts',
-  'packages/lines/src/core/consolidate.ts',
-  'packages/lines/src/core/curate.ts',
-  'packages/lines/src/core/ground.ts',
-  'packages/lines/src/core/params.ts',
-  'packages/lines/src/core/prompt-bank.ts',
-  'packages/lines/src/runtime/hub.ts',
-  'packages/lines/src/runtime/signals.ts',
-  'packages/lines/src/runtime/semantic.ts',
-  'packages/lines/src/runtime/semantic-schema.ts',
-  'packages/lines/src/env/docker.ts',
-  'packages/lines/src/env/sst.ts',
+  'packages/runtime/src/cli.ts',
+  'packages/runtime/src/cli.tsx',
+  'packages/runtime/src/index.ts',
+  'packages/runtime/src/reporters.ts',
+  'packages/runtime/src/tui',
+  'packages/runtime/src/helm',
+  'packages/runtime/bin',
+  'packages/runtime/src/core/forge.ts',
+  'packages/runtime/src/core/pr.ts',
+  'packages/runtime/src/core/human.ts',
+  'packages/runtime/src/core/config-file.ts',
+  'packages/runtime/src/core/consolidate.ts',
+  'packages/runtime/src/core/curate.ts',
+  'packages/runtime/src/core/ground.ts',
+  'packages/runtime/src/core/params.ts',
+  'packages/runtime/src/core/prompt-bank.ts',
+  'packages/runtime/src/runtime/hub.ts',
+  'packages/runtime/src/runtime/signals.ts',
+  'packages/runtime/src/runtime/semantic.ts',
+  'packages/runtime/src/runtime/semantic-schema.ts',
+  'packages/runtime/src/env/docker.ts',
+  'packages/runtime/src/env/sst.ts',
 ]) {
   const absolute = join(root, path);
   if (await containsFile(absolute)) failures.push(`${path}: retired D1 surface remains`);
@@ -1258,7 +1302,7 @@ for (const path of [
 for (const absolute of files) {
   const path = relative(root, absolute);
   if (
-    path.startsWith('packages/')
+    /^(?:packages|plugins)\//.test(path)
     && path.includes('/src/')
     && /(?:\.d\.ts(?:\.map)?|\.js(?:\.map)?)$/.test(path)
   ) {

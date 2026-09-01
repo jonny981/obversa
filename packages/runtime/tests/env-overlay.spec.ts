@@ -139,14 +139,14 @@ describe('subtree reach', () => {
       environment: envir,
       nodes: {
         api: fnJob('api', async (ctx) => {
-          seenOverlay = ctx.envOverlay?.LINES_WAVE3;
+          seenOverlay = ctx.envOverlay?.OBVERSA_WAVE3;
           seenUrl = ctx.environment?.url;
           write(ctx.workspace.dir, 'api.ts', 'x\n');
           return { status: 'pass' };
         }),
       },
     });
-    const { outcome } = await run(withEnv({ LINES_WAVE3: 'pinned' }, graph), {
+    const { outcome } = await run(withEnv({ OBVERSA_WAVE3: 'pinned' }, graph), {
       ...base,
       cwd: repo,
     });

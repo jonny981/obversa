@@ -19,7 +19,6 @@ import type { Engine, EngineRef, UsageReceipt } from '../engines/engine.js';
 import type { Memory } from '@obversa/memory';
 import type { LoopError } from './errors.js';
 import type { Budget } from './budget.js';
-import type { NoProgressInput, StallReport } from './progress.js';
 import type { EnvHandle, Environment } from '../env/environment.js';
 import type { JsonValue, RunBrief } from '../graph/value.js';
 
@@ -202,6 +201,31 @@ export interface JobContext {
   /** Cap on an interruptible limit-wait under `auto`/`wait`. */
   readonly maxWaitMs: number;
   log(message: string, level?: LogLevel): void;
+}
+
+export interface NoProgressConfig {
+  /** Consecutive no-progress iterations before the loop stalls out. Default 3. */
+  window?: number;
+  /** Confidence improvement required to count as progress. Default 0.02. */
+  minConfidenceDelta?: number;
+  /** Optional progress state outside the workspace. */
+  signal?: (
+    ctx: JobContext,
+    last: Outcome | undefined,
+  ) => string | number | undefined | Promise<string | number | undefined>;
+  /** Read the workspace fingerprint each iteration. Default true. */
+  workspace?: boolean;
+  /** Fingerprint a failing deterministic gate's output. Default false. */
+  gate?: boolean;
+}
+
+export type NoProgressInput = number | NoProgressConfig;
+
+export interface StallReport {
+  readonly window: number;
+  readonly iterations: number[];
+  readonly reason: string;
+  readonly evidence: string[];
 }
 
 export type Job = (ctx: JobContext) => Promise<Outcome>;

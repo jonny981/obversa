@@ -1,7 +1,7 @@
 import { existsSync, lstatSync, mkdirSync, realpathSync, writeFileSync } from 'node:fs';
 import { join, relative, resolve, sep } from 'node:path';
 
-const RUN_DIR = '.lines';
+const RUN_DIR = '.obversa';
 
 /** Create one safe runtime-owned directory under the workspace. */
 export function ensureRunSubdir(workspaceDir: string, name: string): string {

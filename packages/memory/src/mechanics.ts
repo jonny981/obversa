@@ -8,7 +8,7 @@ import {
   type MemoryPath,
   type MemoryResult,
   type MemoryView,
-} from './index.js';
+} from './types.js';
 
 type Awaitable<T> = T | Promise<T>;
 

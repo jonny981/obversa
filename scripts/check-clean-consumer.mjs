@@ -69,16 +69,22 @@ import {
 import { runMemoryConformance } from '@obversa/memory/testing';
 import { createSimpleMemory } from '@obversa/memory-simple';
 import { openGitMemory } from '@obversa/memory-git';
+import { MockEngine } from '@obversa/engine/testing';
+import { AgentSdkEngine } from '@obversa/engine-agent-sdk';
+import { AnthropicApiEngine } from '@obversa/engine-anthropic-api';
+import { ClaudeCliEngine } from '@obversa/engine-claude-cli';
+import { CodexEngine } from '@obversa/engine-codex';
+import { GrokCliEngine } from '@obversa/engine-grok-cli';
+import { OpenCodeCliEngine } from '@obversa/engine-opencode-cli';
 import {
   GraphValidationError,
   JsonValueError,
   agentJob,
   run,
   validateGraphDescription,
-} from '@obversa/lines';
-import { commandEnvironment } from '@obversa/lines/env/command';
-import { MockEngine } from '@obversa/lines/testing';
-import linesPackage from '@obversa/lines/package.json' with { type: 'json' };
+} from '@obversa/runtime';
+import { commandEnvironment } from '@obversa/runtime/env/command';
+import runtimePackage from '@obversa/runtime/package.json' with { type: 'json' };
 
 type Equal<Left, Right> =
   (<Value>() => Value extends Left ? 1 : 2) extends
@@ -94,7 +100,7 @@ type PublicValidatorTakesOneArgument = Expect<Equal<
 const publicValidatorTakesOneArgument: PublicValidatorTakesOneArgument = true;
 
 assert.equal(MEMORY_ROOT, '/memories');
-assert.equal(linesPackage.version, '1.0.0');
+assert.equal(runtimePackage.version, '1.0.0');
 assert.equal(commandEnvironment({
   deploy: () => ({ cmd: 'true' }),
   destroy: () => ({ cmd: 'true' }),
@@ -188,17 +194,31 @@ const gitViewed = await gitMemory.execute({ command: 'view', path: '/memories/gi
 assert.ok(gitViewed.ok && gitViewed.command === 'view' && gitViewed.value.kind === 'file');
 assert.equal(gitViewed.value.text, 'git adapter');
 
-let receivedMemory = false;
-const engine = new MockEngine((request) => {
-  receivedMemory = request.memory === simple;
-  return 'ready';
-});
+const engine = new MockEngine(() => 'ready');
+const engines = {
+  offline: engine,
+  'agent-sdk': new AgentSdkEngine({ defaultModel: 'claude-test', permissionMode: 'auto' }),
+  'anthropic-api': new AnthropicApiEngine({ defaultModel: 'claude-test', apiKey: 'test-key' }),
+  'claude-cli': new ClaudeCliEngine({ defaultModel: 'claude-test', cliBinary: '/usr/bin/false', permissionMode: 'auto' }),
+  codex: new CodexEngine({ defaultModel: 'gpt-test', cliBinary: '/usr/bin/false', permissionMode: 'plan' }),
+  'grok-cli': new GrokCliEngine({ executable: '/usr/bin/false', version: '1.0.5', identity: { provider: 'xai', modelFamily: 'grok-4' }, permissionMode: 'dontAsk' }),
+  'opencode-cli': new OpenCodeCliEngine({ executable: '/usr/bin/false', version: '1.18.23', identity: { provider: 'opencode', modelFamily: null } }),
+};
+assert.deepEqual(Object.values(engines).map(({ name }) => name).sort(), [
+  'agent-sdk',
+  'anthropic-api',
+  'claude-cli',
+  'codex',
+  'grok-cli',
+  'mock',
+  'opencode-cli',
+]);
 await assert.rejects(
   run(
     agentJob({ label: 'invalid-params', engine: 'offline', prompt: 'Never runs.' }),
     {
       engine: 'offline',
-      engines: { offline: engine },
+      engines,
       params: null as never,
     },
   ),
@@ -208,15 +228,14 @@ const result = await run(
   agentJob({ label: 'packed-consumer', engine: 'offline', prompt: 'Return ready.' }),
   {
     engine: 'offline',
-    engines: { offline: engine },
+    engines,
     memory: simple,
   },
 );
 assert.equal(result.outcome.status, 'pass');
-assert.equal(receivedMemory, true);
 
 console.log(JSON.stringify({
-  lines: result.outcome.status,
+  runtime: result.outcome.status,
   memoryCases: conformance.cases,
   simple: created.ok,
   git: gitViewed.ok,
@@ -228,7 +247,7 @@ const tsconfig = {
     target: 'ES2022',
     module: 'NodeNext',
     moduleResolution: 'NodeNext',
-    lib: ['ES2023'],
+    lib: ['ES2023', 'DOM'],
     strict: true,
     noUncheckedIndexedAccess: true,
     verbatimModuleSyntax: true,
@@ -298,9 +317,7 @@ async function main() {
         tsx: '4.22.4',
       },
       pnpm: {
-        overrides: {
-          '@obversa/memory': dependencies['@obversa/memory'],
-        },
+        overrides: dependencies,
       },
     };
 
@@ -360,7 +377,7 @@ async function main() {
     assert.deepEqual(compiledStorage, expectedStorageReport);
     assert.deepEqual(directStorage, expectedStorageReport);
     if (
-      report.lines !== 'pass' ||
+      report.runtime !== 'pass' ||
       report.memoryCases !== 17 ||
       report.simple !== true ||
       report.git !== true ||

@@ -13,20 +13,8 @@
  * leaves them alone by default.
  */
 
-import type { EngineIncompleteResultEvidence } from './index.js';
-
-export type EngineFailureKind =
-  | 'auth' // not authenticated / invalid or expired key
-  | 'billing' // credit balance, payment required
-  | 'missing-cli' // the engine's binary is not installed / not on PATH
-  | 'model-unavailable' // unknown or inaccessible model id
-  | 'invalid-config' // local or request configuration was rejected
-  | 'rate-limit' // provider throttle (resets on its own)
-  | 'quota' // usage allowance hit (may reset on a schedule)
-  | 'transient' // provider 5xx failure that may heal on retry
-  | 'timeout'
-  | 'aborted'
-  | 'unknown';
+import type { EngineFailureKind, EngineIncompleteResultEvidence } from './contracts.js';
+export type { EngineFailureKind } from './contracts.js';
 
 export interface EngineErrorInit {
   readonly kind: EngineFailureKind;

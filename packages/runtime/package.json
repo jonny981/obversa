@@ -1,5 +1,5 @@
 {
-  "name": "@obversa/lines",
+  "name": "@obversa/runtime",
   "version": "1.0.0",
   "description": "A standalone TypeScript runtime for reliable, nestable agent graphs.",
   "license": "MIT",
@@ -49,15 +49,16 @@
     "node": ">=22.12.0"
   },
   "dependencies": {
-    "@obversa/engine": "workspace:^",
     "execa": "^9.6.1",
     "p-limit": "^7.3.0",
     "toposort": "^2.0.2"
   },
   "peerDependencies": {
+    "@obversa/engine": ">=0.1.0 <0.2.0",
     "@obversa/memory": ">=0.1.0 <0.2.0"
   },
   "devDependencies": {
+    "@obversa/engine": "workspace:^",
     "@obversa/memory": "workspace:^",
     "@types/node": "22.12.0",
     "@types/toposort": "^2.0.7"

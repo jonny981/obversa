@@ -113,7 +113,7 @@ function startStoreChild(input: ChildInput): {
     import { setTimeout as delay } from 'node:timers/promises';
     import { createLocalEventStore } from ${JSON.stringify(storeUrl)};
 
-    const input = JSON.parse(process.env.LINES_EVENT_CHILD_INPUT);
+    const input = JSON.parse(process.env.OBVERSA_EVENT_CHILD_INPUT);
     console.log('READY');
     if (input.barrier) {
       for (;;) {
@@ -179,7 +179,7 @@ function startStoreChild(input: ChildInput): {
     cwd: process.cwd(),
     env: {
       ...process.env,
-      LINES_EVENT_CHILD_INPUT: JSON.stringify(input),
+      OBVERSA_EVENT_CHILD_INPUT: JSON.stringify(input),
     },
     stdio: ['ignore', 'pipe', 'pipe'],
   });

@@ -5,13 +5,23 @@ import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { spawnSync } from 'node:child_process';
+import { EXPECTED_FILES } from './check-tarballs.mjs';
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const packages = [
-  { directory: 'memory', name: '@obversa/memory', version: '0.1.0' },
-  { directory: 'memory-simple', name: '@obversa/memory-simple', version: '0.1.0' },
-  { directory: 'memory-git', name: '@obversa/memory-git', version: '0.1.0' },
-  { directory: 'lines', name: '@obversa/lines', version: '1.0.0' },
+  { root: 'packages', directory: 'engine', name: '@obversa/engine', version: '0.1.0' },
+  { root: 'packages', directory: 'memory', name: '@obversa/memory', version: '0.1.0' },
+  { root: 'packages', directory: 'runtime', name: '@obversa/runtime', version: '1.0.0' },
+  { root: 'packages', directory: 'source', name: '@obversa/source', version: '0.1.0' },
+  { root: 'packages', directory: 'surfacer', name: '@obversa/surfacer', version: '0.1.0' },
+  { root: 'plugins', directory: 'engine-agent-sdk', name: '@obversa/engine-agent-sdk', version: '0.1.0' },
+  { root: 'plugins', directory: 'engine-anthropic-api', name: '@obversa/engine-anthropic-api', version: '0.1.0' },
+  { root: 'plugins', directory: 'engine-claude-cli', name: '@obversa/engine-claude-cli', version: '0.1.0' },
+  { root: 'plugins', directory: 'engine-codex', name: '@obversa/engine-codex', version: '0.1.0' },
+  { root: 'plugins', directory: 'engine-grok-cli', name: '@obversa/engine-grok-cli', version: '0.1.0' },
+  { root: 'plugins', directory: 'engine-opencode-cli', name: '@obversa/engine-opencode-cli', version: '0.1.0' },
+  { root: 'plugins', directory: 'memory-git', name: '@obversa/memory-git', version: '0.1.0' },
+  { root: 'plugins', directory: 'memory-simple', name: '@obversa/memory-simple', version: '0.1.0' },
 ];
 
 function run(command, args, options = {}) {
@@ -55,20 +65,30 @@ function assertPackedPackage(definition, tarball) {
   const entries = archiveEntries(tarball);
   const required = ['package/LICENSE', 'package/README.md', 'package/package.json'];
   const failures = [];
+  const pinnedFiles = EXPECTED_FILES[definition.name];
 
   for (const path of required) {
     if (!entries.includes(path)) failures.push(`missing ${path.slice('package/'.length)}`);
   }
-  for (const path of entries) {
-    if (!required.includes(path) && !path.startsWith('package/dist/')) {
+  if (pinnedFiles) {
+    for (const path of entries.filter((path) => !pinnedFiles.includes(path))) {
       failures.push(`unexpected archive path ${path}`);
     }
-  }
-  if (!entries.some((path) => path.startsWith('package/dist/') && path.endsWith('.js'))) {
-    failures.push('missing built JavaScript');
-  }
-  if (!entries.some((path) => path.startsWith('package/dist/') && path.endsWith('.d.ts'))) {
-    failures.push('missing TypeScript declarations');
+    for (const path of pinnedFiles.filter((path) => !entries.includes(path))) {
+      failures.push(`missing ${path.slice('package/'.length)}`);
+    }
+  } else {
+    for (const path of entries) {
+      if (!required.includes(path) && !path.startsWith('package/dist/')) {
+        failures.push(`unexpected archive path ${path}`);
+      }
+    }
+    if (!entries.some((path) => path.startsWith('package/dist/') && path.endsWith('.js'))) {
+      failures.push('missing built JavaScript');
+    }
+    if (!entries.some((path) => path.startsWith('package/dist/') && path.endsWith('.d.ts'))) {
+      failures.push('missing TypeScript declarations');
+    }
   }
 
   const manifest = JSON.parse(archiveText(tarball, 'package/package.json'));
@@ -118,7 +138,7 @@ export async function packWorkspacePackages(destination) {
     const before = new Set(await readdir(destination));
     run('pnpm', [
       '--dir',
-      join(root, 'packages', definition.directory),
+      join(root, definition.root, definition.directory),
       'pack',
       '--pack-destination',
       destination,

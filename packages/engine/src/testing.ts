@@ -11,7 +11,7 @@ import type {
   Engine,
   EngineEventSink,
   Usage,
-} from './index.js';
+} from './contracts.js';
 import {
   assistantResult,
   engineSelection,

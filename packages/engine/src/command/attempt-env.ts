@@ -1,4 +1,4 @@
-import type { AgentRequest } from '../index.js';
+import type { AgentRequest } from '../contracts.js';
 
 /** Merge caller env with the stable Obversa attempt markers. */
 export function attemptEnvironment(
