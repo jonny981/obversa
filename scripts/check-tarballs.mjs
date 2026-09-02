@@ -155,6 +155,7 @@ export const EXPECTED_FILES = {
     'package/dist/graph/plan.d.ts',
     'package/dist/graph/type.d.ts',
     'package/dist/graph/value.d.ts',
+    'package/dist/graph-types/dag.d.ts',
     'package/dist/runtime/attempt.d.ts',
     'package/dist/runtime/budget.d.ts',
     'package/dist/runtime/graph-executor.d.ts',

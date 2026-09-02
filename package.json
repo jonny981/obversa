@@ -56,6 +56,7 @@
     "verify:d3": "pnpm verify:d2 && pnpm example:storage",
     "verify:d4": "pnpm verify:d3 && pnpm example:attempt",
     "verify:d5": "pnpm verify:d4 && pnpm --filter @obversa/runtime exec vitest run tests/graph-executor.spec.ts && pnpm example:turn-taking",
+    "verify:d6": "pnpm verify:d5 && pnpm --filter @obversa/runtime exec vitest run tests/graph-types-dag.spec.ts && pnpm example:pipeline",
     "changeset": "changeset",
     "version-packages": "changeset version",
     "check:arrows": "depcruise --config .dependency-cruiser.cjs --ignore-known .dependency-cruiser-known-violations.json packages/engine/src packages/engine/tests packages/memory/src packages/memory/tests packages/runtime/src packages/runtime/tests packages/source/src packages/source/bin packages/source/test packages/source/assets packages/surfacer/src packages/surfacer/test packages/surfacer/examples plugins/engine-agent-sdk/src plugins/engine-agent-sdk/tests plugins/engine-anthropic-api/src plugins/engine-anthropic-api/tests plugins/engine-claude-cli/src plugins/engine-claude-cli/tests plugins/engine-codex/src plugins/engine-codex/tests plugins/engine-grok-cli/src plugins/engine-grok-cli/tests plugins/engine-opencode-cli/src plugins/engine-opencode-cli/tests plugins/memory-git/src plugins/memory-git/tests plugins/memory-simple/src plugins/memory-simple/tests hosts/cmux/test scripts examples",
