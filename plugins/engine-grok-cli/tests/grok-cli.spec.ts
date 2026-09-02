@@ -691,17 +691,26 @@ describe('Grok CLI adapter', () => {
     expect(result.transportFailure?.kind).toBe('unknown');
   });
 
-  it('starts cleanup at the work deadline and keeps a completed result', async () => {
+  it.each(['invocation', 'structured'] as const)('starts cleanup at the work deadline and keeps a completed result (%s)', async (mode) => {
     const result = await new GrokCliEngine({
       ...options(),
-      environment: { OBVERSA_TEST_GROK_SCENARIO: 'timeout-final' },
+      environment: { OBVERSA_TEST_GROK_SCENARIO: mode === 'structured' ? 'timeout-final-structured' : 'timeout-final' },
     }).run(
-      request({ timeoutMs: 250, timeoutGraceMs: 500 }),
+      request({
+        timeoutMs: 250,
+        timeoutGraceMs: 500,
+        ...(mode === 'structured'
+          ? { jsonSchema: { type: 'object', properties: { answer: { type: 'number' } }, required: ['answer'], additionalProperties: false } }
+          : {}),
+      }),
       () => {},
       new AbortController().signal,
     );
 
-    expect(result.parts.at(-1)).toMatchObject({ text: 'answer', final: true });
+    expect(result.parts.at(-1)).toMatchObject(mode === 'structured'
+      ? { kind: 'structured', value: { answer: 42 }, final: true }
+      : { text: 'answer', final: true });
+    expect(result.usage).toBeDefined();
     expect(result.transportFailure).toMatchObject({
       kind: 'timeout',
       exitCode: null,

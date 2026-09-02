@@ -1,0 +1,32 @@
+---
+title: "Graph executor"
+description: "Run outside graph types through durable decisions and node attempts."
+---
+
+The graph executor turns a graph's durable event stream into its next command.
+It keeps graph code pure while the runtime performs the work.
+
+## How a dispatch runs
+
+1. The executor folds events into graph state.
+2. The graph returns a command, or an empty decision while work is in flight.
+3. A node binding, keyed by node id, prepares the attempt.
+4. The exact execution target is selected from that node's declared lanes.
+5. Model-unavailable events remove dead targets for later attempts.
+
+An empty decision is valid only when an attempt is already in flight. A dispatch
+position already present in the event stream is rejected, so a restart cannot
+run the same position twice.
+
+## Turn-taking example
+
+The outside example alternates a writer and critic until its deterministic gate
+passes. It declares a primary critic lane and a fallback lane. The runtime reads
+model-unavailable events and prepares the critic on the fallback after a primary
+loss. The example imports only public package entry points:
+
+```bash
+pnpm example:turn-taking
+```
+
+The command reports six bounded dispatches and a complete result.

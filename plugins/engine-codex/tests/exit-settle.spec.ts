@@ -109,10 +109,11 @@ writeFileSync(args[args.indexOf('-o') + 1], 'PONG');
 await new Promise((resolve) => setTimeout(resolve, 1500));
 `);
 
+    const controller = new AbortController();
     const result = await new CodexEngine({ cliBinary: bin }).run(
       { prompt: 'ping', timeoutMs: 1_000, timeoutGraceMs: 1_000 },
-      () => {},
-      new AbortController().signal,
+      (event) => { if ((event as { type?: string }).type === 'result') controller.abort(); },
+      controller.signal,
     );
 
     expect(finalResultText(result)).toBe('PONG');

@@ -36,6 +36,17 @@ export {
   type GraphType,
 } from './graph/type.js';
 export {
+  graphDecision,
+  executeGraphDispatch,
+  unavailableTargets,
+  selectAvailableTargets,
+  runWithFallback,
+  executeWithFallback,
+  type ExecutorBinding,
+  type GraphExecutorSnapshot,
+  type ModelUnavailableEvent,
+} from './executor.js';
+export {
   resolveGraphPlan,
   validateGraphDescription,
   type PermissionDescriptor,

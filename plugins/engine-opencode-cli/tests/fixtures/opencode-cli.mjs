@@ -66,6 +66,7 @@ for await (const chunk of process.stdin) prompt += chunk;
 const scenario = process.env.OBVERSA_ENGINE_CONFORMANCE_SCENARIO
   ?? process.env.OBVERSA_TEST_OPENCODE_SCENARIO
   ?? 'ordered-parts';
+if (scenario === 'timeout-final' || scenario === 'timeout-final-structured') process.on('SIGTERM', () => {});
 const recordPath = process.env.OBVERSA_TEST_OPENCODE_RECORD;
 
 if (recordPath) {
@@ -293,6 +294,7 @@ const structuredScenarios = new Map([
   ['structured-trailing', 'OBVERSA_STRUCTURED_RESULT_V1\n{"answer":42} trailing'],
   ['structured-two-values', 'OBVERSA_STRUCTURED_RESULT_V1\n{"answer":42}\n{"answer":43}'],
   ['structured-malformed', 'OBVERSA_STRUCTURED_RESULT_V1\n{"answer":'],
+  ['timeout-final-structured', 'OBVERSA_STRUCTURED_RESULT_V1\n{"answer":42}'],
 ]);
 
 if (structuredScenarios.has(scenario)) {
@@ -303,7 +305,9 @@ if (structuredScenarios.has(scenario)) {
     part: textPart('fixture-structured', structuredScenarios.get(scenario)),
   });
   emit('step_finish', { part: finishPart('fixture-step-finish') });
-  process.exit(0);
+  if (scenario !== 'timeout-final-structured') process.exit(0);
+  await new Promise((resolve) => setTimeout(resolve, 500));
+  await new Promise(() => {});
 }
 if (scenario === 'structured-two-markers') {
   emit('text', {
@@ -537,4 +541,5 @@ if (scenario === 'late-final') {
 }
 if (scenario === 'timeout-final') {
   await new Promise((resolve) => setTimeout(resolve, 500));
+  await new Promise(() => {});
 }

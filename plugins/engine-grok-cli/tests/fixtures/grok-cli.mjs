@@ -18,13 +18,15 @@ const prompt = promptFile ? readFileSync(promptFile, 'utf8') : '';
 const scenario = process.env.OBVERSA_ENGINE_CONFORMANCE_SCENARIO
   ?? process.env.OBVERSA_TEST_GROK_SCENARIO
   ?? 'ordered-parts';
+if (scenario === 'timeout-final' || scenario === 'timeout-final-structured') process.on('SIGTERM', () => {});
 const requestedModel = value('--model') ?? null;
 const effectiveModel = process.env.OBVERSA_TEST_GROK_EFFECTIVE_MODEL
   ?? 'grok-4-fixture-effective';
 const structured = scenario === 'structured'
   || scenario === 'structured-result'
   || scenario === 'structured-subagent'
-  || scenario === 'structured-error-auth-echo';
+  || scenario === 'structured-error-auth-echo'
+  || scenario === 'timeout-final-structured';
 const finalText = scenario === 'late-final'
   ? 'Quota advice belongs in the answer.'
   : 'answer';
@@ -152,7 +154,11 @@ if (structured) {
     modelUsage,
     structuredOutput: { answer: 42 },
   }, null, 2)}\n`);
-  process.exit(0);
+  if (scenario === 'timeout-final' || scenario === 'timeout-final-structured') {
+    await new Promise((resolve) => setTimeout(resolve, 500));
+    setInterval(() => {}, 1_000);
+    await new Promise(() => {});
+  } else process.exit(0);
 }
 
 emit({
@@ -317,6 +323,7 @@ if (scenario === 'late-final') {
   process.stderr.write('transport closed after final result\n');
   process.exit(7);
 }
-if (scenario === 'timeout-final') {
+if (scenario === 'timeout-final' || scenario === 'timeout-final-structured') {
   await new Promise((resolve) => setTimeout(resolve, 500));
+  setInterval(() => {}, 1_000);
 }

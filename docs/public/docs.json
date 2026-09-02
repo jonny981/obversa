@@ -30,7 +30,8 @@
         "group": "Graphs",
         "pages": [
           "graphs/contract",
-          "graphs/plan-admission"
+          "graphs/plan-admission",
+          "graphs/executor"
         ]
       },
       {

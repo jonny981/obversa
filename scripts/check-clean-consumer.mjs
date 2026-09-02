@@ -350,6 +350,7 @@ const tsconfig = {
     'custom-graph.ts',
     'durable-storage.ts',
     'safe-node-attempt.ts',
+    'turn-taking.ts',
   ],
 };
 
@@ -364,6 +365,8 @@ async function main() {
   const storageExampleSource = await readFile(storageExamplePath, 'utf8');
   const attemptExamplePath = join(root, 'examples', 'packages', 'safe-node-attempt.ts');
   const attemptExampleSource = await readFile(attemptExamplePath, 'utf8');
+  const turnTakingExamplePath = join(root, 'examples', 'packages', 'turn-taking.ts');
+  const turnTakingExampleSource = await readFile(turnTakingExamplePath, 'utf8');
   const graphDocument = await readFile(
     join(root, 'docs', 'public', 'graphs', 'contract.mdx'),
     'utf8',
@@ -429,6 +432,7 @@ async function main() {
     await copyFile(graphExamplePath, join(consumerDirectory, 'custom-graph.ts'));
     await copyFile(storageExamplePath, join(consumerDirectory, 'durable-storage.ts'));
     await copyFile(attemptExamplePath, join(consumerDirectory, 'safe-node-attempt.ts'));
+    await copyFile(turnTakingExamplePath, join(consumerDirectory, 'turn-taking.ts'));
 
     run('pnpm', ['install', '--offline', '--ignore-scripts'], {
       cwd: consumerDirectory,
@@ -479,6 +483,14 @@ async function main() {
     const directAttempt = JSON.parse(
       run('pnpm', ['exec', 'tsx', 'safe-node-attempt.ts'], { cwd: consumerDirectory }),
     );
+    const compiledTurnTaking = JSON.parse(
+      run(process.execPath, ['dist/turn-taking.js'], { cwd: consumerDirectory }),
+    );
+    const directTurnTaking = JSON.parse(
+      run('pnpm', ['exec', 'tsx', 'turn-taking.ts'], { cwd: consumerDirectory }),
+    );
+    assert.equal(compiledTurnTaking.conformance, true);
+    assert.equal(directTurnTaking.conformance, true);
     assert.deepEqual(compiledGraph, expectedGraphReport);
     assert.deepEqual(directGraph, expectedGraphReport);
     assert.deepEqual(compiledStorage, expectedStorageReport);
