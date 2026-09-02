@@ -64,11 +64,14 @@ type TestEvent = GraphEvent<
 > | GraphEvent<
   'node-failed',
   DispatchedPayload & { readonly code: string }
+> | GraphEvent<
+  'node-paused',
+  DispatchedPayload & { readonly reason: string; readonly request: JsonValue }
 >;
 
 interface TestState extends JsonObject {
   readonly attempts: number;
-  readonly status: 'ready' | 'in-flight' | 'complete' | 'failed';
+  readonly status: 'ready' | 'in-flight' | 'complete' | 'failed' | 'paused';
 }
 
 const PRIMARY_TARGET: ExecutionTarget = {
@@ -129,6 +132,9 @@ function graphType(): GraphType<TestDefinition, TestState, TestEvent, GraphRequi
               status: attempts >= definition.data.failAfter ? 'failed' : 'ready',
             };
           }
+          if (event.type === 'node-paused' && state.status === 'in-flight') {
+            return { ...state, status: 'paused' };
+          }
           return state;
         },
         decide(state) {
@@ -143,6 +149,9 @@ function graphType(): GraphType<TestDefinition, TestState, TestEvent, GraphRequi
           }
           if (state.status === 'failed') {
             return [{ kind: 'fail', code: 'TEST_FAILED', message: 'The test node failed.' }];
+          }
+          if (state.status === 'paused') {
+            return [{ kind: 'pause', reason: 'The test node paused.' }];
           }
           if (definition.data.parallel) {
             return definition.nodes.map((node) => ({
@@ -280,8 +289,9 @@ async function storedRun(input: TestDefinition): Promise<{
 }
 
 function nodeBinding(root: string, input: {
-  readonly prompt?: string;
+  readonly prompt?: GraphNodeBinding['prompt'];
   readonly runData?: GraphNodeBinding['runData'];
+  readonly decideAction?: GraphNodeBinding['decideAction'];
 } = {}): GraphNodeBinding {
   return {
     prompt: input.prompt ?? null,
@@ -303,7 +313,7 @@ function nodeBinding(root: string, input: {
     runData: input.runData ?? null,
     parseResult: null,
     tokenBudget: null,
-    decideAction: async () => ({ kind: 'allow' }),
+    decideAction: input.decideAction ?? (async () => ({ kind: 'allow' })),
   };
 }
 
@@ -318,6 +328,7 @@ function engineBinding(
 class SelectedEngine implements Engine {
   readonly name = 'selected';
   calls = 0;
+  readonly prompts: string[] = [];
 
   constructor(
     private readonly selection: EngineSelectionRecord,
@@ -325,11 +336,12 @@ class SelectedEngine implements Engine {
   ) {}
 
   async run(
-    _request: AgentRequest,
+    request: AgentRequest,
     _onEvent: EngineEventSink,
     _signal: AbortSignal,
   ): Promise<AgentResult> {
     this.calls += 1;
+    this.prompts.push(request.prompt);
     return {
       parts: [{ kind: 'structured', value: this.value, final: true }],
       usage: { kind: 'reported', inputTokens: 1, outputTokens: 1 },
@@ -382,6 +394,39 @@ const validMemory: Memory = {
 };
 
 describe('createGraphExecutor', () => {
+  it('builds each engine prompt from that dispatch input', async () => {
+    const run = await storedRun(definition({ completeAfter: 2 }));
+    const prompts: string[] = [];
+    const mockPrimary = {
+      ...PRIMARY_SELECTION,
+      adapterVersion: null,
+      provider: null,
+      modelFamily: null,
+    };
+    const mockFallback = { ...mockPrimary, model: 'fallback' };
+    const engine = new MockEngine((request) => {
+      prompts.push(request.prompt);
+      return 'accepted';
+    });
+    const executor = await createGraphExecutor({
+      ...run,
+      nodes: {
+        worker: nodeBinding(run.root, {
+          prompt: (input) => `Do attempt ${(input as { readonly attempt: number }).attempt}.`,
+        }),
+      },
+      engines: [
+        engineBinding(PRIMARY_TARGET, mockPrimary, engine),
+        engineBinding(FALLBACK_TARGET, mockFallback, new MockEngine(() => 'unused')),
+      ],
+    });
+
+    await expect(executor.run(new AbortController().signal)).resolves.toMatchObject({
+      kind: 'complete',
+    });
+    expect(prompts).toEqual(['Do attempt 1.', 'Do attempt 2.']);
+  });
+
   it('records an auth-dead primary once, then skips it on the next dispatch', async () => {
     const run = await storedRun(definition({ completeAfter: 2 }));
     let primaryCalls = 0;
@@ -392,7 +437,7 @@ describe('createGraphExecutor', () => {
     const fallback = new SelectedEngine(FALLBACK_SELECTION);
     const executor = await createGraphExecutor({
       ...run,
-      nodes: { worker: nodeBinding(run.root, { prompt: 'Do the work.' }) },
+      nodes: { worker: nodeBinding(run.root, { prompt: () => 'Do the work.' }) },
       engines: [
         engineBinding(PRIMARY_TARGET, PRIMARY_SELECTION, primary),
         engineBinding(FALLBACK_TARGET, FALLBACK_SELECTION, fallback),
@@ -427,7 +472,7 @@ describe('createGraphExecutor', () => {
     const fallback = new SelectedEngine(FALLBACK_SELECTION);
     const executor = await createGraphExecutor({
       ...run,
-      nodes: { worker: nodeBinding(run.root, { prompt: 'Do the work.' }) },
+      nodes: { worker: nodeBinding(run.root, { prompt: () => 'Do the work.' }) },
       engines: [
         engineBinding(PRIMARY_TARGET, PRIMARY_SELECTION, primary),
         engineBinding(FALLBACK_TARGET, FALLBACK_SELECTION, fallback),
@@ -456,7 +501,7 @@ describe('createGraphExecutor', () => {
     });
     const executor = await createGraphExecutor({
       ...run,
-      nodes: { worker: nodeBinding(run.root, { prompt: 'Do the work.' }) },
+      nodes: { worker: nodeBinding(run.root, { prompt: () => 'Do the work.' }) },
       engines: [
         engineBinding(PRIMARY_TARGET, PRIMARY_SELECTION, primary),
         engineBinding(FALLBACK_TARGET, FALLBACK_SELECTION, fallback),
@@ -480,7 +525,7 @@ describe('createGraphExecutor', () => {
 
     const fresh = await createGraphExecutor({
       ...run,
-      nodes: { worker: nodeBinding(run.root, { prompt: 'Do the work.' }) },
+      nodes: { worker: nodeBinding(run.root, { prompt: () => 'Do the work.' }) },
       engines: [
         engineBinding(PRIMARY_TARGET, PRIMARY_SELECTION, primary),
         engineBinding(FALLBACK_TARGET, FALLBACK_SELECTION, fallback),
@@ -628,9 +673,17 @@ describe('createGraphExecutor', () => {
 
   it('requires a live Memory object when the stored graph requires memory', async () => {
     const run = await storedRun(definition({ engineBacked: false, memory: 'required' }));
+    let receivedMemory: Memory | null | undefined;
     const options = {
       ...run,
-      nodes: { worker: nodeBinding(run.root, { runData: async () => ({ ok: true }) }) },
+      nodes: {
+        worker: nodeBinding(run.root, {
+          runData: async (context) => {
+            receivedMemory = context.memory;
+            return { ok: true };
+          },
+        }),
+      },
       engines: [],
     };
     await expect(createGraphExecutor(options)).rejects.toMatchObject({
@@ -646,6 +699,113 @@ describe('createGraphExecutor', () => {
 
     const executor = await createGraphExecutor({ ...options, bindings: { memory: validMemory } });
     await expect(executor.run(new AbortController().signal)).resolves.toMatchObject({ kind: 'complete' });
+    expect(receivedMemory).toBe(validMemory);
+  });
+
+  it('records wait, deny, and abort as distinct graph results', async () => {
+    const waiting = await storedRun(definition());
+    const waitingEngine = new SelectedEngine(PRIMARY_SELECTION);
+    const waitingExecutor = await createGraphExecutor({
+      ...waiting,
+      nodes: {
+        worker: nodeBinding(waiting.root, {
+          prompt: () => 'Do the work.',
+          decideAction: async () => ({
+            kind: 'wait',
+            reason: 'owner approval required',
+            request: { interaction: 'approve-write' },
+          }),
+        }),
+      },
+      engines: [
+        engineBinding(PRIMARY_TARGET, PRIMARY_SELECTION, waitingEngine),
+        engineBinding(FALLBACK_TARGET, FALLBACK_SELECTION, new SelectedEngine(FALLBACK_SELECTION)),
+      ],
+    });
+
+    await expect(waitingExecutor.run(new AbortController().signal)).resolves.toEqual({
+      kind: 'pause',
+      reason: 'The test node paused.',
+    });
+    expect(waitingEngine.calls).toBe(0);
+    expect((await events(waiting.storage, waiting.runId)).find(
+      (event) => event.type === 'graph:node-paused',
+    )?.payload).toEqual({
+      nodeId: 'worker',
+      position: 'turns/1',
+      reason: 'owner approval required',
+      request: { interaction: 'approve-write' },
+    });
+
+    const denied = await storedRun(definition());
+    const deniedEngine = new SelectedEngine(PRIMARY_SELECTION);
+    const deniedExecutor = await createGraphExecutor({
+      ...denied,
+      nodes: {
+        worker: nodeBinding(denied.root, {
+          prompt: () => 'Do the work.',
+          decideAction: async () => ({ kind: 'deny', reason: 'not admitted' }),
+        }),
+      },
+      engines: [
+        engineBinding(PRIMARY_TARGET, PRIMARY_SELECTION, deniedEngine),
+        engineBinding(FALLBACK_TARGET, FALLBACK_SELECTION, new SelectedEngine(FALLBACK_SELECTION)),
+      ],
+    });
+
+    await expect(deniedExecutor.run(new AbortController().signal)).resolves.toMatchObject({
+      kind: 'fail',
+    });
+    expect(deniedEngine.calls).toBe(0);
+    expect((await events(denied.storage, denied.runId)).find(
+      (event) => event.type === 'graph:node-failed',
+    )?.payload).toMatchObject({ code: 'DENIED' });
+
+    const policyError = await storedRun(definition());
+    const policyExecutor = await createGraphExecutor({
+      ...policyError,
+      nodes: {
+        worker: nodeBinding(policyError.root, {
+          prompt: () => 'Do the work.',
+          decideAction: async () => {
+            throw new Error('policy unavailable');
+          },
+        }),
+      },
+      engines: [
+        engineBinding(PRIMARY_TARGET, PRIMARY_SELECTION, new SelectedEngine(PRIMARY_SELECTION)),
+        engineBinding(FALLBACK_TARGET, FALLBACK_SELECTION, new SelectedEngine(FALLBACK_SELECTION)),
+      ],
+    });
+
+    await expect(policyExecutor.run(new AbortController().signal)).resolves.toMatchObject({
+      kind: 'fail',
+    });
+    expect((await events(policyError.storage, policyError.runId)).find(
+      (event) => event.type === 'graph:node-failed',
+    )?.payload).toMatchObject({ code: 'ACTION_POLICY' });
+
+    const aborted = await storedRun(definition());
+    const abortedEngine = new MockEngine(() => {
+      throw new EngineError({ kind: 'aborted', message: 'stopped by owner' });
+    });
+    const abortFallback = new SelectedEngine(FALLBACK_SELECTION);
+    const abortedExecutor = await createGraphExecutor({
+      ...aborted,
+      nodes: { worker: nodeBinding(aborted.root, { prompt: () => 'Do the work.' }) },
+      engines: [
+        engineBinding(PRIMARY_TARGET, PRIMARY_SELECTION, abortedEngine),
+        engineBinding(FALLBACK_TARGET, FALLBACK_SELECTION, abortFallback),
+      ],
+    });
+
+    await expect(abortedExecutor.run(new AbortController().signal)).resolves.toMatchObject({
+      kind: 'fail',
+    });
+    expect((await events(aborted.storage, aborted.runId)).find(
+      (event) => event.type === 'graph:node-failed',
+    )?.payload).toMatchObject({ code: 'ABORTED' });
+    expect(abortFallback.calls).toBe(0);
   });
 
   it('rejects a malformed model-unavailable event before deciding', async () => {
@@ -657,7 +817,7 @@ describe('createGraphExecutor', () => {
     });
     const executor = await createGraphExecutor({
       ...run,
-      nodes: { worker: nodeBinding(run.root, { prompt: 'Do the work.' }) },
+      nodes: { worker: nodeBinding(run.root, { prompt: () => 'Do the work.' }) },
       engines: [
         engineBinding(PRIMARY_TARGET, PRIMARY_SELECTION, new SelectedEngine(PRIMARY_SELECTION)),
         engineBinding(FALLBACK_TARGET, FALLBACK_SELECTION, new SelectedEngine(FALLBACK_SELECTION)),
@@ -690,7 +850,7 @@ describe('createGraphExecutor', () => {
     });
     const executor = await createGraphExecutor({
       ...run,
-      nodes: { worker: nodeBinding(run.root, { prompt: 'Do the work.' }) },
+      nodes: { worker: nodeBinding(run.root, { prompt: () => 'Do the work.' }) },
       engines: [
         engineBinding(PRIMARY_TARGET, PRIMARY_SELECTION, new SelectedEngine(PRIMARY_SELECTION)),
         engineBinding(FALLBACK_TARGET, FALLBACK_SELECTION, new SelectedEngine(FALLBACK_SELECTION)),
@@ -701,6 +861,47 @@ describe('createGraphExecutor', () => {
       name: 'GraphExecutionError',
       code: 'INVALID_EVENT',
     });
+  });
+
+  it('uses the same provider and model identity to validate and skip a dead lane', async () => {
+    const run = await storedRun(definition());
+    const recordedPrimary = {
+      ...PRIMARY_SELECTION,
+      adapterVersion: '9.9.9',
+      executable: '/different/mock',
+    };
+    await appendGraphEvent(run.storage, run.runId, {
+      type: 'model-unavailable',
+      version: 1,
+      payload: cloneFrozenJson({
+        schemaVersion: 1,
+        identity: createAttemptIdentity({
+          namespace: run.storage.record.namespace,
+          streamId: run.runId,
+          nodeId: 'worker',
+          position: 'turns/recorded',
+        }),
+        selection: recordedPrimary,
+        effective: recordedPrimary,
+        failure: 'auth',
+      } as unknown as JsonValue),
+    });
+    const primary = new SelectedEngine(PRIMARY_SELECTION);
+    const fallback = new SelectedEngine(FALLBACK_SELECTION);
+    const executor = await createGraphExecutor({
+      ...run,
+      nodes: { worker: nodeBinding(run.root, { prompt: () => 'Do the work.' }) },
+      engines: [
+        engineBinding(PRIMARY_TARGET, PRIMARY_SELECTION, primary),
+        engineBinding(FALLBACK_TARGET, FALLBACK_SELECTION, fallback),
+      ],
+    });
+
+    await expect(executor.run(new AbortController().signal)).resolves.toMatchObject({
+      kind: 'complete',
+    });
+    expect(primary.calls).toBe(0);
+    expect(fallback.calls).toBe(1);
   });
 
   it('keeps the result append queue usable after a fact append fails', async () => {
@@ -726,7 +927,7 @@ describe('createGraphExecutor', () => {
     const executor = await createGraphExecutor({
       ...run,
       storage: { ...run.storage, eventStore },
-      nodes: { worker: nodeBinding(run.root, { prompt: 'Do the work.' }) },
+      nodes: { worker: nodeBinding(run.root, { prompt: () => 'Do the work.' }) },
       engines: [
         engineBinding(PRIMARY_TARGET, PRIMARY_SELECTION, primary),
         engineBinding(FALLBACK_TARGET, FALLBACK_SELECTION, fallback),

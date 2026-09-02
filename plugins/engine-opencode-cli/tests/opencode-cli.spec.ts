@@ -1129,7 +1129,7 @@ describe('OpenCode CLI adapter', () => {
     expect(result.usage).toBeDefined();
     expect(result.transportFailure).toMatchObject({
       kind: 'aborted',
-      exitCode: expect.any(Number),
+      exitCode: null,
     });
   });
 

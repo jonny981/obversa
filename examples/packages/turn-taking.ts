@@ -416,7 +416,8 @@ try {
         runData: async ({ input }) => ({ draft: input }),
       }),
       critic: nodeBinding(temporaryRoot, {
-        prompt: 'Review the current draft.',
+        prompt: (input) =>
+          `Review the current draft for ${(input as { readonly positionSummary: string }).positionSummary}.`,
         runData: null,
       }),
     },

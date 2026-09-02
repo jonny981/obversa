@@ -63,7 +63,7 @@ export class GraphExecutionError extends Error {
 }
 
 export interface GraphNodeBinding {
-  readonly prompt: string | null;
+  readonly prompt: ((input: JsonValue) => string) | null;
   readonly scratchDirectory: string;
   readonly workspace: NodeWorkspacePolicy;
   readonly trustedCaller: JsonObject;
@@ -114,6 +114,7 @@ interface FoldedRun {
 interface PreparedDispatch {
   readonly command: Extract<GraphCommand, { readonly kind: 'dispatch' }>;
   readonly binding: GraphNodeBinding;
+  readonly prompt: string | null;
   readonly route: readonly [PreparedEngineLane] | readonly [PreparedEngineLane, PreparedEngineLane] | null;
   readonly allEnginesUnavailable: boolean;
 }
@@ -169,14 +170,8 @@ function targetKey(target: ExecutionTarget): string {
   return canonicalJson(target as unknown as JsonValue);
 }
 
-function selectionKey(selection: EngineSelectionRecord): string {
-  return canonicalJson(selection as unknown as JsonValue);
-}
-
 function availabilityKey(selection: EngineSelectionRecord): string {
-  return selection.provider === null
-    ? canonicalJson({ adapter: selection.adapter, model: selection.model })
-    : canonicalJson({ provider: selection.provider, model: selection.model });
+  return canonicalJson({ provider: selection.provider, model: selection.model });
 }
 
 function assertTargetSelection(
@@ -211,7 +206,7 @@ function validateFact(
   envelope: DomainEventEnvelope,
   runId: string,
   namespace: string,
-  bindingsBySelection: ReadonlyMap<string, GraphEngineBinding>,
+  bindingsByAvailability: ReadonlyMap<string, GraphEngineBinding>,
 ): ModelUnavailableFact {
   if (envelope.version !== 1) {
     fail('INVALID_EVENT', 'A model-unavailable event must use version 1.');
@@ -247,7 +242,7 @@ function validateFact(
   } catch (error) {
     fail('INVALID_EVENT', 'A model-unavailable engine identity is invalid.', error);
   }
-  if (!bindingsBySelection.has(selectionKey(selected))) {
+  if (!bindingsByAvailability.has(availabilityKey(selected))) {
     fail('INVALID_EVENT', 'A model-unavailable event selected an engine outside the stored plan.');
   }
   if (
@@ -278,6 +273,13 @@ function validateStandardEvent(
     exactFields(payload, ['nodeId', 'position'], `${envelope.type} payload`);
   } else if (type === 'node-completed') {
     exactFields(payload, ['nodeId', 'position', 'result'], `${envelope.type} payload`);
+  } else if (type === 'node-paused') {
+    exactFields(
+      payload,
+      ['nodeId', 'position', 'reason', 'request'],
+      `${envelope.type} payload`,
+    );
+    text(payload.reason, `${envelope.type}.reason`);
   } else {
     exactFields(payload, ['nodeId', 'position', 'code'], `${envelope.type} payload`);
     text(payload.code, `${envelope.type}.code`);
@@ -325,6 +327,9 @@ export async function createGraphExecutor(
   ) {
     fail('MISSING_MEMORY', 'This stored graph requires a live Memory binding.');
   }
+  const memory = loaded.resolvedPlan.plan.requirements.memory === 'required'
+    ? options.bindings!.memory!
+    : null;
 
   const nodeIds = new Set(loaded.resolvedPlan.plan.nodes.map((node) => node.id));
   const nodesById = new Map(loaded.resolvedPlan.plan.nodes.map((node) => [node.id, node]));
@@ -337,7 +342,7 @@ export async function createGraphExecutor(
   }
 
   const enginesByTarget = new Map<string, GraphEngineBinding>();
-  const bindingsBySelection = new Map<string, GraphEngineBinding>();
+  const bindingsByAvailability = new Map<string, GraphEngineBinding>();
   for (const rawBinding of options.engines) {
     let selection: EngineSelectionRecord;
     try {
@@ -352,7 +357,7 @@ export async function createGraphExecutor(
     }
     if (
       enginesByTarget.has(key)
-      || bindingsBySelection.has(selectionKey(selection))
+      || bindingsByAvailability.has(availabilityKey(selection))
       || typeof rawBinding.engine?.run !== 'function'
       || typeof rawBinding.hardTokenLimitEnforceable !== 'boolean'
     ) {
@@ -360,7 +365,7 @@ export async function createGraphExecutor(
     }
     const binding = Object.freeze({ ...rawBinding, selection });
     enginesByTarget.set(key, binding);
-    bindingsBySelection.set(selectionKey(selection), binding);
+    bindingsByAvailability.set(availabilityKey(selection), binding);
   }
   for (const target of plannedTargets) {
     if (!enginesByTarget.has(target)) {
@@ -392,7 +397,7 @@ export async function createGraphExecutor(
           envelope,
           options.runId,
           stream.namespace,
-          bindingsBySelection,
+          bindingsByAvailability,
         );
         unavailable.add(availabilityKey(fact.selection));
         unavailable.add(availabilityKey(fact.effective));
@@ -403,6 +408,7 @@ export async function createGraphExecutor(
         type === 'node-dispatched'
         || type === 'node-completed'
         || type === 'node-failed'
+        || type === 'node-paused'
       ) {
         graphEvent = validateStandardEvent(envelope, type, nodeIds);
         const position = (graphEvent.payload as JsonObject).position as string;
@@ -476,22 +482,23 @@ export async function createGraphExecutor(
     if (!node || !binding) {
       fail('MISSING_NODE_BINDING', `No node behaviour is bound for "${command.nodeId}".`);
     }
+    const prompt = binding.prompt?.(command.input) ?? null;
     if (node.laneId === null) {
-      return { command, binding, route: null, allEnginesUnavailable: false };
+      return { command, binding, prompt, route: null, allEnginesUnavailable: false };
     }
     const lane = lanesById.get(node.laneId);
     if (!lane) {
       fail('STORED_GRAPH_MISMATCH', `The stored lane for "${command.nodeId}" is missing.`);
     }
     const route = routeFor(lane, unavailable);
-    return { command, binding, route, allEnginesUnavailable: route === null };
+    return { command, binding, prompt, route, allEnginesUnavailable: route === null };
   };
 
   const appendOutcome = async (
     prepared: PreparedDispatch,
     signal: AbortSignal,
   ): Promise<void> => {
-    const { command, binding, route } = prepared;
+    const { command, binding, prompt, route } = prepared;
     if (prepared.allEnginesUnavailable) {
       await enqueueAppend(newEvent(options.runId, 'node-failed', {
         nodeId: command.nodeId,
@@ -510,7 +517,8 @@ export async function createGraphExecutor(
       identity,
       nodeId: command.nodeId,
       input: command.input,
-      prompt: binding.prompt,
+      memory,
+      prompt,
       scratchDirectory: binding.scratchDirectory,
       workspace: binding.workspace,
       trustedCaller: binding.trustedCaller,
@@ -538,10 +546,21 @@ export async function createGraphExecutor(
       }));
       return;
     }
+    if (result.status === 'paused' && result.decision?.kind === 'wait') {
+      await enqueueAppend(newEvent(options.runId, 'node-paused', {
+        nodeId: command.nodeId,
+        position: command.position,
+        reason: result.decision.reason,
+        request: result.decision.request,
+      }));
+      return;
+    }
     await enqueueAppend(newEvent(options.runId, 'node-failed', {
       nodeId: command.nodeId,
       position: command.position,
-      code: result.failure?.code ?? 'ACTION_POLICY',
+      code: result.status === 'denied'
+        ? 'DENIED'
+        : result.failure?.code ?? 'ACTION_POLICY',
     }));
   };
 

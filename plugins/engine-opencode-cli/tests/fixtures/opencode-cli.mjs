@@ -314,7 +314,8 @@ if (structuredScenarios.has(scenario)) {
   emit('step_finish', { part: finishPart('fixture-step-finish') });
   markFinalWritten();
   if (scenario !== 'timeout-final-structured') process.exit(0);
-  await new Promise((resolve) => setTimeout(resolve, 500));
+  setInterval(() => {}, 1_000);
+  await new Promise((resolve) => setTimeout(resolve, 2_000));
   await new Promise(() => {});
 }
 if (scenario === 'structured-two-markers') {
@@ -549,6 +550,7 @@ if (scenario === 'late-final') {
   process.exit(7);
 }
 if (scenario === 'timeout-final') {
-  await new Promise((resolve) => setTimeout(resolve, 500));
+  setInterval(() => {}, 1_000);
+  await new Promise((resolve) => setTimeout(resolve, 2_000));
   await new Promise(() => {});
 }

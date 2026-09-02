@@ -139,6 +139,7 @@ function prepared(
     identity,
     nodeId: 'worker',
     input: { task: 'answer' },
+    memory: null,
     prompt: 'Answer the task.',
     scratchDirectory,
     workspace: { mode: 'none', directory: null, allowedPaths: [] },

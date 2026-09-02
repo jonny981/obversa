@@ -14,12 +14,15 @@ the decisions. The runtime records what happened and runs each node safely.
 4. The graph returns its next command.
 5. The executor records the whole dispatch decision before any node starts.
 6. It runs each node through the safe node-attempt lifecycle.
-7. It records `node-completed` or `node-failed`, then asks the graph again.
+7. It records `node-completed`, `node-paused`, or `node-failed`, then asks the
+   graph again.
 
 Node behaviour is keyed by node id. A data-only node gets a data function. An
-engine-backed node gets a prompt and uses the lane in the stored plan. Engine
-bindings join that exact plan target to the full engine identity, including its
-adapter version and executable path when present.
+engine-backed node gets a prompt builder. The builder receives that dispatch's
+typed input, so two positions can produce different prompts. The node then uses
+the lane in the stored plan. Engine bindings join that exact plan target to the
+full engine identity, including its adapter version and executable path when
+present.
 
 The host chooses the order once. The executor tries the effective target and at
 most one live fallback from that order. Only a failure that means the lane is
@@ -27,9 +30,15 @@ dead, such as bad credentials or a missing model, can move to the fallback. A
 rate limit, timeout, policy pause, or denied action does not run again elsewhere.
 
 Each dead-lane event records both the selected identity and the identity the
-engine reported. Later dispatches skip either identity. If every declared
-target is dead, no engine runs. The executor records `ENGINE_UNAVAILABLE` as a
-normal node failure so the graph can retry, fail, or recover in its usual way.
+engine reported. Stored facts and later routing use the same provider and model
+key. Later dispatches skip either identity. If every declared target is dead,
+no engine runs. The executor records `ENGINE_UNAVAILABLE` as a normal node
+failure so the graph can retry, fail, or recover in its usual way.
+
+An action-policy wait records `node-paused` with its reason and request. A
+denied action records `node-failed` with `DENIED`. An aborted attempt records
+`node-failed` with `ABORTED`. These events stay distinct when the graph folds
+the stream.
 
 An empty decision is valid only when an attempt is already in flight. A dispatch
 position already present in the event stream is rejected, so a restart cannot
@@ -37,17 +46,20 @@ run the same position twice. A fresh executor that finds recorded work with no
 result returns a typed waiting result for a later recovery step.
 
 If the graph declares memory as required, `createGraphExecutor` also requires a
-live `Memory` object. This check covers TypeScript and plain JavaScript callers.
+live `Memory` object. The executor passes that same object into the node attempt,
+and a data-only node receives it in its context. The runtime check covers
+TypeScript and plain JavaScript callers.
 
 A data-only node can call another executor and return the child result. This is
 how parent and child graphs compose without adding a second execution system.
 
 ## Turn-taking example
 
-The outside example alternates a writer and critic for three rounds. It stores
-the run, starts the public executor, and uses a real dead-primary path through
-two `MockEngine` instances. The first critic attempt records the primary as
-dead. The next two critic attempts go straight to the fallback.
+The outside example alternates a writer and critic for three rounds. Each critic
+prompt includes that dispatch's position summary. The example stores the run,
+starts the public executor, and uses a real dead-primary path through two
+`MockEngine` instances. The first critic attempt records the primary as dead.
+The next two critic attempts go straight to the fallback.
 
 ```bash
 pnpm example:turn-taking

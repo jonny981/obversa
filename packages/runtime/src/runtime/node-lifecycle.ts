@@ -1,6 +1,8 @@
 import { lstat, realpath } from 'node:fs/promises';
 import { isAbsolute } from 'node:path';
 
+import type { Memory } from '@obversa/memory';
+
 import {
   EngineError,
   EngineIncompleteResultError,
@@ -89,6 +91,7 @@ export interface PreparedEngineLane {
 
 export interface NodeDataContext {
   readonly input: JsonValue;
+  readonly memory: Memory | null;
   readonly scratchDirectory: string;
   readonly workspaceDirectory: string | null;
   readonly trustedCaller: JsonObject;
@@ -108,6 +111,7 @@ export interface PreparedNodeAttempt {
   readonly identity: AttemptIdentity;
   readonly nodeId: string;
   readonly input: JsonValue;
+  readonly memory: Memory | null;
   readonly prompt: string | null;
   readonly scratchDirectory: string;
   readonly workspace: NodeWorkspacePolicy;
@@ -703,6 +707,7 @@ export async function executeNodeAttempt(
       throw new TypeError('nodeId must match identity.nodeId');
     }
     const input = cloneFrozenJson(prepared.input);
+    const memory = prepared.memory;
     trustedCaller = cloneFrozenJson(prepared.trustedCaller);
     grantedPermissions = permissions(prepared.permissions);
     const attemptPolicy = validateAttemptBudgetPolicy(prepared.policy);
@@ -798,6 +803,7 @@ export async function executeNodeAttempt(
           attemptDeadline(attemptPolicy),
           async (effectSignal) => await runData!({
             input,
+            memory,
             scratchDirectory,
             workspaceDirectory: attemptWorkspace.directory,
             trustedCaller,
