@@ -1,7 +1,7 @@
 {
   "name": "@obversa/memory-simple",
   "version": "0.1.0",
-  "description": "Small in-process memory adapter for Obversa runtimes",
+  "description": "In-process memory for tests and short runs.",
   "author": "Jonny Neill <jonnyneill@hotmail.com>",
   "type": "module",
   "license": "MIT",
@@ -37,5 +37,20 @@
   },
   "dependencies": {
     "@obversa/memory": "workspace:^"
+  },
+  "keywords": [
+    "agent",
+    "graph",
+    "workflow",
+    "runtime",
+    "obversa"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/jonnyneill/obversa.git"
+  },
+  "homepage": "https://docs.obversa.ai",
+  "bugs": {
+    "url": "https://github.com/jonnyneill/obversa/issues"
   }
 }

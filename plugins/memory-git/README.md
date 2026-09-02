@@ -3,6 +3,12 @@
 `@obversa/memory-git` stores memory in private Git references. The adapter
 does not change the current branch, the index, or the worktree.
 
+
+## Install
+
+```bash
+pnpm add @obversa/memory-git
+```
 ## Requirements
 
 - Node.js 22.12 or later

@@ -1,7 +1,7 @@
 {
   "name": "@obversa/engine-claude-cli",
   "version": "0.1.0",
-  "description": "Claude CLI engine plugin for Obversa runtimes",
+  "description": "Run engine requests through a fresh Claude CLI process.",
   "author": "Jonny Neill <jonnyneill@hotmail.com>",
   "type": "module",
   "license": "MIT",
@@ -37,5 +37,20 @@
   },
   "dependencies": {
     "@obversa/engine": "workspace:^"
+  },
+  "keywords": [
+    "agent",
+    "graph",
+    "workflow",
+    "runtime",
+    "obversa"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/jonnyneill/obversa.git"
+  },
+  "homepage": "https://docs.obversa.ai",
+  "bugs": {
+    "url": "https://github.com/jonnyneill/obversa/issues"
   }
 }

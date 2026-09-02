@@ -8,6 +8,12 @@ Claude CLI process.
 - Node.js 22.12 or later
 - A Claude CLI installation with host authentication
 
+## Install
+
+```bash
+pnpm add @obversa/engine-claude-cli
+```
+
 ## Use
 
 ```ts

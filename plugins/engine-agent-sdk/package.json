@@ -1,7 +1,7 @@
 {
   "name": "@obversa/engine-agent-sdk",
   "version": "0.1.0",
-  "description": "Claude Agent SDK engine plugin for Obversa runtimes",
+  "description": "Run engine requests through the Claude Agent SDK.",
   "author": "Jonny Neill <jonnyneill@hotmail.com>",
   "type": "module",
   "license": "MIT",
@@ -46,5 +46,20 @@
   },
   "devDependencies": {
     "@obversa/memory": "workspace:^"
+  },
+  "keywords": [
+    "agent",
+    "graph",
+    "workflow",
+    "runtime",
+    "obversa"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/jonnyneill/obversa.git"
+  },
+  "homepage": "https://docs.obversa.ai",
+  "bugs": {
+    "url": "https://github.com/jonnyneill/obversa/issues"
   }
 }

@@ -1,7 +1,7 @@
 {
   "name": "@obversa/engine-anthropic-api",
   "version": "0.1.0",
-  "description": "Anthropic Messages API engine plugin for Obversa runtimes",
+  "description": "Run engine requests through the Anthropic Messages API.",
   "author": "Jonny Neill <jonnyneill@hotmail.com>",
   "type": "module",
   "license": "MIT",
@@ -40,5 +40,20 @@
     "@obversa/engine": "workspace:^",
     "p-retry": "^8.0.0",
     "p-timeout": "^7.0.1"
+  },
+  "keywords": [
+    "agent",
+    "graph",
+    "workflow",
+    "runtime",
+    "obversa"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/jonnyneill/obversa.git"
+  },
+  "homepage": "https://docs.obversa.ai",
+  "bugs": {
+    "url": "https://github.com/jonnyneill/obversa/issues"
   }
 }

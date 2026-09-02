@@ -7,6 +7,12 @@ Agent SDK. It uses the host's Claude Code authentication.
 
 - Node.js 22.12 or later
 
+## Install
+
+```bash
+pnpm add @obversa/engine-agent-sdk
+```
+
 ## Use
 
 ```ts

@@ -1,0 +1,121 @@
+name: Release
+
+# Publishing is keyed to a v* tag push. The publish job runs inside a
+# protected GitHub environment named "release" that requires a manual
+# approval from Jonny. No path publishes without that gate.
+#
+# Cut a release:
+#   1. Update CHANGELOG.md: retitle Unreleased to the new version.
+#   2. Set the per-package versions in each package.json.
+#   3. Tag the repository: git tag v1.0.0 && git push origin v1.0.0
+#   4. GitHub asks Jonny to approve the release environment.
+#   5. The workflow builds, packs, publishes all 13 packages with
+#      provenance, and creates the GitHub Release from the changelog.
+#
+# The guard registry in each package.json stays for local proofs: it
+# prevents a hand publish from this checkout. The release workflow
+# overrides it with --registry because it publishes from a clean
+# runner, not from a local checkout.
+
+on:
+  push:
+    tags: ['v*']
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release
+  cancel-in-progress: false
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: corepack enable
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm typecheck
+      - run: pnpm typecheck:ts6
+      - run: pnpm build
+      - run: pnpm test
+      - run: pnpm check:boundaries
+      - run: pnpm check:graph-purity
+      - run: pnpm check:tarballs
+      - run: pnpm check:packages
+      - run: pnpm check:publish -- --audit
+      - run: pnpm check:consumer
+      - run: pnpm docs:validate
+      - name: Changelog gate
+        run: node scripts/changelog-gate.mjs
+
+  publish:
+    needs: verify
+    runs-on: ubuntu-latest
+    # The "release" environment is protected in the repository settings:
+    # it requires a manual approval from Jonny before any step runs.
+    environment: release
+    permissions:
+      contents: write
+      id-token: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: corepack enable
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm build
+      - name: Pack all allowlisted packages
+        run: |
+          mkdir -p /tmp/tarballs
+          for pkg in \
+            packages/runtime \
+            packages/engine \
+            packages/memory \
+            packages/source \
+            packages/surfacer \
+            plugins/engine-agent-sdk \
+            plugins/engine-anthropic-api \
+            plugins/engine-claude-cli \
+            plugins/engine-codex \
+            plugins/engine-grok-cli \
+            plugins/engine-opencode-cli \
+            plugins/memory-git \
+            plugins/memory-simple
+          do
+            (cd "$pkg" && pnpm pack --pack-destination /tmp/tarballs)
+          done
+          ls -la /tmp/tarballs/
+      # OIDC publish needs npm >= 11.5.1. The Node 22 runner bundles a
+      # compatible npm, but the pin keeps it explicit.
+      - name: Pin npm for provenance
+        run: npm install -g npm@11
+      - name: Publish each package
+        run: |
+          for tgz in /tmp/tarballs/*.tgz; do
+            name=$(tar -xOzf "$tgz" package/package.json | node -p "JSON.parse(require('fs').readFileSync(0,'utf8')).name")
+            version=$(tar -xOzf "$tgz" package/package.json | node -p "JSON.parse(require('fs').readFileSync(0,'utf8')).version")
+            if npm view "$name@$version" version >/dev/null 2>&1; then
+              echo "$name@$version is already on npm — skipping"
+            else
+              npm publish "$tgz" --provenance --access public --registry https://registry.npmjs.org
+            fi
+          done
+      - name: Create the GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          VERSION="${GITHUB_REF_NAME#v}"
+          if gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1; then
+            echo "GitHub Release $GITHUB_REF_NAME already exists"
+          else
+            node scripts/changelog-section.mjs "$VERSION" > /tmp/release-notes.md
+            gh release create "$GITHUB_REF_NAME" --verify-tag \
+              --title "$GITHUB_REF_NAME" --notes-file /tmp/release-notes.md
+          fi

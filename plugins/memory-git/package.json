@@ -1,7 +1,7 @@
 {
   "name": "@obversa/memory-git",
   "version": "0.1.0",
-  "description": "Git-backed memory adapter for Obversa runtimes",
+  "description": "Memory stored in private Git references.",
   "author": "Jonny Neill <jonnyneill@hotmail.com>",
   "type": "module",
   "license": "MIT",
@@ -38,5 +38,20 @@
   "dependencies": {
     "@obversa/memory": "workspace:^",
     "execa": "^9.6.1"
+  },
+  "keywords": [
+    "agent",
+    "graph",
+    "workflow",
+    "runtime",
+    "obversa"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/jonnyneill/obversa.git"
+  },
+  "homepage": "https://docs.obversa.ai",
+  "bugs": {
+    "url": "https://github.com/jonnyneill/obversa/issues"
   }
 }

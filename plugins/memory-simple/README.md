@@ -3,6 +3,12 @@
 `@obversa/memory-simple` stores memory in one process. Use it for tests, short
 runs, and examples without durable storage.
 
+
+## Install
+
+```bash
+pnpm add @obversa/memory-simple
+```
 ## Requirements
 
 - Node.js 22.12 or later

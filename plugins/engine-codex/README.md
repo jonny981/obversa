@@ -8,6 +8,12 @@ process.
 - Node.js 22.12 or later
 - A Codex CLI installation with host authentication
 
+## Install
+
+```bash
+pnpm add @obversa/engine-codex
+```
+
 ## Use
 
 ```ts

@@ -1,7 +1,7 @@
 {
   "name": "@obversa/memory",
   "version": "0.1.0",
-  "description": "Memory contracts and conformance checks for Obversa runtimes",
+  "description": "The memory port for agent context.",
   "author": "Jonny Neill <jonnyneill@hotmail.com>",
   "type": "module",
   "license": "MIT",
@@ -38,5 +38,20 @@
     "typecheck:ts6": "tsc6 --noEmit -p tsconfig.json",
     "prepack": "pnpm run build",
     "prepublishOnly": "node ../../scripts/check-publish-allowlist.mjs"
+  },
+  "keywords": [
+    "agent",
+    "graph",
+    "workflow",
+    "runtime",
+    "obversa"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/jonnyneill/obversa.git"
+  },
+  "homepage": "https://docs.obversa.ai",
+  "bugs": {
+    "url": "https://github.com/jonnyneill/obversa/issues"
   }
 }

@@ -9,6 +9,12 @@ a fresh OpenCode CLI process.
 - OpenCode CLI 1.18.23
 - Host-selected authentication
 
+## Install
+
+```bash
+pnpm add @obversa/engine-opencode-cli
+```
+
 ## Use
 
 ```ts

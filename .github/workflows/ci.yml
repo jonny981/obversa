@@ -1,56 +1,63 @@
 name: CI
 
 on:
-  pull_request:
   push:
+    branches: [main]
+  pull_request:
 
 permissions:
   contents: read
 
 concurrency:
-  group: ci-${{ github.workflow }}-${{ github.ref }}
+  group: ci-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:
   verify:
-    name: Verify D4
     runs-on: ubuntu-latest
-    timeout-minutes: 30
-
     steps:
-      - name: Check out the exact source commit
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
         with:
-          fetch-depth: 0
-          persist-credentials: false
-          ref: ${{ github.event.pull_request.head.sha || github.sha }}
-
-      - name: Install pnpm
-        uses: pnpm/action-setup@0977fd99725f1db4007ccb2928dbb4e90d06cc86 # v6
-        with:
-          version: 10.15.1
-
-      - name: Install Node.js
-        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7
-        with:
-          node-version: 22.12.0
-          cache: pnpm
-          cache-dependency-path: pnpm-lock.yaml
-          package-manager-cache: false
-
-      - name: Install frozen dependencies
+          node-version: 22
+      - name: Enable Corepack (pinned pnpm)
+        run: corepack enable
+      - name: Install (frozen, offline-capable)
         run: pnpm install --frozen-lockfile
+      - name: Typecheck (tsc)
+        run: pnpm typecheck
+      - name: Typecheck (tsc6)
+        run: pnpm typecheck:ts6
+      - name: Build every package
+        run: pnpm build
+      - name: Unit tests
+        run: pnpm test
 
-      - name: Check new commit policy
-        env:
-          BASE_SHA: ${{ github.event.pull_request.base.sha || github.event.before }}
-          HEAD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
-        run: |
-          if [ "$BASE_SHA" = "0000000000000000000000000000000000000000" ]; then
-            node scripts/check-commit-policy.mjs --initial-history
-          else
-            node scripts/check-commit-policy.mjs --range "$BASE_SHA..$HEAD_SHA"
-          fi
-
-      - name: Verify packages, runtime, docs, and consumer
-        run: pnpm verify:d4
+  checks:
+    runs-on: ubuntu-latest
+    needs: verify
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Enable Corepack (pinned pnpm)
+        run: corepack enable
+      - name: Install (frozen)
+        run: pnpm install --frozen-lockfile
+      - name: Build every package
+        run: pnpm build
+      - name: Package boundaries and dependency direction
+        run: pnpm check:boundaries
+      - name: Graph kernel purity
+        run: pnpm check:graph-purity
+      - name: Packed files match the expected list
+        run: pnpm check:tarballs
+      - name: Package manifests
+        run: pnpm check:packages
+      - name: Publish allowlist audit
+        run: pnpm check:publish
+      - name: Clean consumer
+        run: pnpm check:consumer
+      - name: Documentation build
+        run: pnpm docs:validate

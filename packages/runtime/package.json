@@ -1,7 +1,7 @@
 {
   "name": "@obversa/runtime",
   "version": "1.0.0",
-  "description": "A standalone TypeScript runtime for reliable, nestable agent graphs.",
+  "description": "Build and run reliable agent graphs.",
   "license": "MIT",
   "author": "Jonny Neill <jonnyneill@hotmail.com>",
   "type": "module",
@@ -62,5 +62,20 @@
     "@obversa/memory": "workspace:^",
     "@types/node": "22.12.0",
     "@types/toposort": "^2.0.7"
+  },
+  "keywords": [
+    "agent",
+    "graph",
+    "workflow",
+    "runtime",
+    "obversa"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/jonnyneill/obversa.git"
+  },
+  "homepage": "https://docs.obversa.ai",
+  "bugs": {
+    "url": "https://github.com/jonnyneill/obversa/issues"
   }
 }

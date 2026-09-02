@@ -1,7 +1,7 @@
 {
   "name": "@obversa/source",
   "version": "0.1.0",
-  "description": "The review surface: open a git diff for inline review and return the annotations. Binds @obversa/surfacer for the session and ships the review command as its bin.",
+  "description": "Open a git diff for inline review.",
   "type": "module",
   "exports": {
     ".": "./src/index.mjs",
@@ -14,7 +14,7 @@
     "prepublishOnly": "node ../../scripts/check-publish-allowlist.mjs"
   },
   "engines": {
-    "node": ">=22"
+    "node": ">=22.12.0"
   },
   "dependencies": {
     "acorn": "8.18.0",
@@ -42,5 +42,20 @@
     "skills": [
       "review-diff"
     ]
+  },
+  "keywords": [
+    "agent",
+    "graph",
+    "workflow",
+    "runtime",
+    "obversa"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/jonnyneill/obversa.git"
+  },
+  "homepage": "https://docs.obversa.ai",
+  "bugs": {
+    "url": "https://github.com/jonnyneill/obversa/issues"
   }
 }

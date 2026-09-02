@@ -1,7 +1,7 @@
 {
   "name": "@obversa/surfacer",
   "version": "0.1.0",
-  "description": "Secure local surface sessions: one loopback server, one opaque result, host-native placement.",
+  "description": "One secure local surface session.",
   "type": "module",
   "exports": {
     ".": "./src/index.mjs",
@@ -13,7 +13,7 @@
     "prepublishOnly": "node ../../scripts/check-publish-allowlist.mjs"
   },
   "engines": {
-    "node": ">=22"
+    "node": ">=22.12.0"
   },
   "license": "MIT",
   "files": [
@@ -25,5 +25,20 @@
     "access": "public",
     "registry": "http://publish-guard.invalid/",
     "@obversa:registry": "http://publish-guard.invalid/"
+  },
+  "keywords": [
+    "agent",
+    "graph",
+    "workflow",
+    "runtime",
+    "obversa"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/jonnyneill/obversa.git"
+  },
+  "homepage": "https://docs.obversa.ai",
+  "bugs": {
+    "url": "https://github.com/jonnyneill/obversa/issues"
   }
 }

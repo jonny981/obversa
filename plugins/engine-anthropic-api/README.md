@@ -8,6 +8,12 @@ Anthropic Messages API.
 - Node.js 22.12 or later
 - An Anthropic API key
 
+## Install
+
+```bash
+pnpm add @obversa/engine-anthropic-api
+```
+
 ## Use
 
 ```ts

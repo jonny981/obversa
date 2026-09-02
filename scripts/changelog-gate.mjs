@@ -1,0 +1,78 @@
+#!/usr/bin/env node
+/**
+ * The changelog gate: refuse to publish a version the changelog does not
+ * describe. Runs in the Release workflow (fast-fail, before install) and in
+ * `prepublishOnly` (so a hand publish is held to the same bar).
+ *
+ * Checks, all against the version `package.json` carries:
+ *   1. CHANGELOG.md has a `## [<version>]` heading;
+ *   2. the section under it has substance (at least one non-empty line);
+ *   3. when running on a version tag (GITHUB_REF_NAME=v*), the tag matches
+ *      the package version — a mismatched tag would publish one version and
+ *      document another.
+ *
+ * No dependencies, exits 1 with a fix-oriented message.
+ */
+
+import { readFileSync } from 'node:fs';
+
+const cwd = process.cwd();
+
+function fail(message) {
+  console.error(`changelog gate: ${message}`);
+  process.exit(1);
+}
+
+let version;
+try {
+  version = JSON.parse(readFileSync(`${cwd}/packages/runtime/package.json`, 'utf8')).version;
+} catch (e) {
+  fail(`could not read packages/runtime/package.json: ${e.message}`);
+}
+if (!version) fail('packages/runtime/package.json carries no version');
+
+const tag = process.env.GITHUB_REF_NAME;
+if (tag && /^v\d/.test(tag) && tag !== `v${version}`) {
+  fail(
+    `tag ${tag} does not match package.json version ${version} — ` +
+      `retag (git tag -d ${tag}; npm version) or fix package.json before publishing`,
+  );
+}
+
+let changelog;
+try {
+  changelog = readFileSync(`${cwd}/CHANGELOG.md`, 'utf8');
+} catch {
+  fail('CHANGELOG.md is missing — every published version needs an entry');
+}
+
+const lines = changelog.split('\n');
+const headingAt = lines.findIndex((line) =>
+  line.startsWith(`## [${version}]`),
+);
+if (headingAt === -1) {
+  fail(
+    `no "## [${version}]" heading in CHANGELOG.md — retitle the Unreleased ` +
+      `section to "## [${version}] — <date>" (and refresh the compare links) ` +
+      `before tagging`,
+  );
+}
+
+const section = [];
+for (const line of lines.slice(headingAt + 1)) {
+  if (line.startsWith('## ')) break;
+  section.push(line);
+}
+const substance = section.filter(
+  (line) => line.trim() && !line.startsWith('### '),
+);
+if (!substance.length) {
+  fail(
+    `the "## [${version}]" section is empty — a version heading with no ` +
+      `entries documents nothing; write what changed`,
+  );
+}
+
+console.log(
+  `changelog gate: ok — ${version} is documented (${substance.length} line(s))`,
+);

@@ -9,6 +9,12 @@ fresh Grok CLI process.
 - Grok CLI 1.0.5
 - Host-selected authentication
 
+## Install
+
+```bash
+pnpm add @obversa/engine-grok-cli
+```
+
 ## Use
 
 ```ts

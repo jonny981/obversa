@@ -4,6 +4,12 @@ The review surface: open a git diff for inline review in a browser and get
 the reviewer's decision and line-anchored annotations back as one framed
 JSON object on stdout.
 
+
+## Install
+
+```bash
+pnpm add @obversa/source
+```
 ## The command
 
 ```sh

@@ -8,6 +8,12 @@ routing, and no run records.
 Extracted from the skills-manager donor. Nothing of that product's
 inventory, graph, or editing behaviour survives here.
 
+
+## Install
+
+```bash
+pnpm add @obversa/surfacer
+```
 ## What the package gives
 
 - `runSurface({...})` — the one launcher: it starts the session, places
