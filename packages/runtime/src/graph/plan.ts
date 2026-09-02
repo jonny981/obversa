@@ -8,6 +8,7 @@ import {
   GraphValidationError,
   JsonValueError,
   type GraphValidationIssue,
+  type JsonObject,
   type JsonValue,
   type Sha256Digest,
 } from './value.js';
@@ -17,7 +18,7 @@ export interface PermissionDescriptor {
   readonly scope: JsonValue;
 }
 
-export interface ExecutionTarget {
+export interface ExecutionTarget extends JsonObject {
   readonly adapter: string;
   readonly provider: string;
   readonly modelFamily: string;
@@ -25,7 +26,7 @@ export interface ExecutionTarget {
   readonly tools: readonly string[];
 }
 
-export interface ExecutionLaneDescription {
+export interface ExecutionLaneDescription extends JsonObject {
   readonly id: string;
   readonly requested: ExecutionTarget;
   readonly knownSubstitutions: readonly ExecutionTarget[];

@@ -29,9 +29,9 @@ const expectedPipelineReport = {
   executor: 'complete',
   output: {
     nodes: {
-      draft: 'passed',
-      review: 'passed',
-      publish: 'passed',
+      draft: { article: 'ready' },
+      review: { approved: true },
+      publish: { published: true },
     },
   },
   dispatches: 3,

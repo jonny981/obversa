@@ -38,7 +38,7 @@
     "check:agent-instructions": "node scripts/check-agent-instructions.mjs",
     "check:workstream-branch": "node scripts/check-workstream-branch.mjs",
     "check:boundaries": "node scripts/check-boundaries.mjs && pnpm check:arrows",
-    "check:graph-purity": "node scripts/check-graph-purity.mjs",
+    "check:graph-purity": "node scripts/check-graph-purity.mjs packages/runtime/src/graph packages/runtime/src/graph-types",
     "check:packages": "node scripts/check-packages.mjs",
     "check:consumer": "node scripts/check-clean-consumer.mjs",
     "check:commit": "node scripts/check-commit-policy.mjs",

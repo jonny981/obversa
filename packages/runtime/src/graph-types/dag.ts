@@ -43,27 +43,31 @@
  * any node is paused the decision is a pause command, and nothing else is
  * dispatched. A resumed node continues the same attempt.
  *
- * Each decision dispatches every ready node that fits the free global and
- * keyed slots, in declaration order. Positions stay unique across the run;
- * the form never re-emits a dispatch for an attempt already recorded in the
- * folded event history.
+ * Each decision waits for every recorded attempt to settle, then dispatches
+ * one ready batch that fits the global and keyed limits in declaration order.
+ * Positions stay unique across the run; the form never re-emits a dispatch
+ * for an attempt already recorded in the folded event history. Each dispatch
+ * carries the named results of its direct predecessors. Completion returns
+ * every completed node result by node name.
  */
 
 import toposort from 'toposort';
 
 import type { GraphCommand } from '../graph/commands.js';
 import type { GraphDefinition, NodeId } from '../graph/kernel.js';
-import type { GraphDescriptionInput } from '../graph/plan.js';
+import type { ExecutionLaneDescription, GraphDescriptionInput } from '../graph/plan.js';
 import type { GraphEvent, GraphType } from '../graph/type.js';
 import { GraphValidationError, type GraphValidationIssue, type JsonObject, type JsonValue } from '../graph/value.js';
 
 export type DagNodeKind = 'required' | 'optional' | 'finalizer';
 
-export interface DagNodeData extends JsonObject {
+export type DagNodeData = JsonObject & {
   readonly kind: DagNodeKind;
   /** Concurrency key; nodes sharing a key share its declared limit. */
   readonly key: string | null;
-}
+  /** Engine lane for this node; omit it for a data-only node. */
+  readonly lane?: ExecutionLaneDescription;
+};
 
 export interface DagEdgeData extends JsonObject {}
 
@@ -130,6 +134,8 @@ export interface DagNodeState extends JsonObject {
   readonly inFlight: string | null;
   /** The reason supplied by a paused attempt, or null. */
   readonly pauseReason: string | null;
+  /** The completed payload, or null before a successful completion. */
+  readonly result: JsonValue;
 }
 
 export interface DagStatus extends JsonObject {
@@ -275,12 +281,6 @@ export const dag: GraphType<DagDefinition, DagStatus, DagEvent, DagRequirements>
     const inFlightCount = (state: DagStatus): number =>
       Object.values(state.nodes).filter((node) => node.status === 'in-flight').length;
 
-    const inFlightByKey = (state: DagStatus, key: string): number =>
-      Object.entries(state.nodes)
-        .filter(([id, node]) => node.status === 'in-flight' && definition.nodes
-          .find((candidate) => candidate.id === id)!.data.key === key)
-        .length;
-
     const claimable = (
       state: DagStatus,
       nodeId: NodeId,
@@ -309,7 +309,7 @@ export const dag: GraphType<DagDefinition, DagStatus, DagEvent, DagRequirements>
       initialState: () => ({
         nodes: Object.fromEntries(definition.nodes.map((node) => [
           node.id,
-          { status: 'pending', attempts: 0, inFlight: null, pauseReason: null },
+          { status: 'pending', attempts: 0, inFlight: null, pauseReason: null, result: null },
         ])),
       }),
       reduce(state, event) {
@@ -330,6 +330,7 @@ export const dag: GraphType<DagDefinition, DagStatus, DagEvent, DagRequirements>
                   attempts: node.attempts + 1,
                   inFlight: event.payload.position,
                   pauseReason: null,
+                  result: null,
                 },
               },
             };
@@ -347,6 +348,7 @@ export const dag: GraphType<DagDefinition, DagStatus, DagEvent, DagRequirements>
                   attempts: node.attempts,
                   inFlight: null,
                   pauseReason: null,
+                  result: event.payload.result,
                 },
               },
             };
@@ -364,6 +366,7 @@ export const dag: GraphType<DagDefinition, DagStatus, DagEvent, DagRequirements>
                   attempts: node.attempts,
                   inFlight: null,
                   pauseReason: null,
+                  result: null,
                 },
               },
             };
@@ -403,13 +406,22 @@ export const dag: GraphType<DagDefinition, DagStatus, DagEvent, DagRequirements>
         }
       },
       decide(state) {
+        const resultsFor = (nodeIds: readonly NodeId[]): JsonObject =>
+          Object.fromEntries(nodeIds.flatMap((nodeId) => {
+            const node = state.nodes[nodeId]!;
+            return node.status === 'passed' || node.status === 'skipped'
+              ? [[nodeId, node.result]]
+              : [];
+          }));
         const dispatch = (nodeId: NodeId): GraphCommand => {
           const node = state.nodes[nodeId]!;
+          const results = resultsFor(predecessors.get(nodeId)!);
           return {
             kind: 'dispatch',
             nodeId,
             input: {
               positionSummary: `node ${nodeId}, attempt ${node.attempts + 1}`,
+              ...(Object.keys(results).length === 0 ? {} : { results }),
             },
             position: `dag/${nodeId}/${node.attempts + 1}`,
           };
@@ -433,12 +445,9 @@ export const dag: GraphType<DagDefinition, DagStatus, DagEvent, DagRequirements>
           stopOnFailure: boolean,
         ): GraphCommand[] => {
           const commands: GraphCommand[] = [];
-          let freeGlobal = definition.data.globalConcurrency - inFlightCount(state);
+          let freeGlobal = definition.data.globalConcurrency;
           const keyFree = new Map<string, number>(
-            Object.entries(definition.data.keyedConcurrency).map(([key, limit]) => [
-              key,
-              limit - inFlightByKey(state, key),
-            ]),
+            Object.entries(definition.data.keyedConcurrency),
           );
           for (const candidate of candidates) {
             if (freeGlobal <= 0) break;
@@ -452,10 +461,10 @@ export const dag: GraphType<DagDefinition, DagStatus, DagEvent, DagRequirements>
           return commands;
         };
 
+        if (anyInFlight(state)) return [];
+
         const workerCommands = collect(workers, true);
         if (workerCommands.length > 0) return workerCommands;
-
-        if (anyInFlight(state)) return [];
 
         const finalizerCommands = collect(finalizers, false);
         if (finalizerCommands.length > 0) return finalizerCommands;
@@ -471,12 +480,20 @@ export const dag: GraphType<DagDefinition, DagStatus, DagEvent, DagRequirements>
             message: `Failed required nodes: ${failedRequired.map((node) => node.id).join(', ')}.`,
           }];
         }
+        const failedFinalizers = finalizers.filter(
+          (finalizer) => state.nodes[finalizer.id]!.status === 'failed',
+        );
+        if (failedFinalizers.length > 0) {
+          return [{
+            kind: 'fail',
+            code: 'DAG_NODE_FAILED',
+            message: `Failed finalizer nodes: ${failedFinalizers.map((node) => node.id).join(', ')}.`,
+          }];
+        }
         return [{
           kind: 'complete',
           output: {
-            nodes: Object.fromEntries(definition.nodes.map(
-              (node) => [node.id, state.nodes[node.id]!.status],
-            )),
+            nodes: resultsFor(definition.nodes.map((node) => node.id)),
           },
         }];
       },
@@ -494,7 +511,7 @@ export const dag: GraphType<DagDefinition, DagStatus, DagEvent, DagRequirements>
             phaseId: 'graph',
             inputContract: { brief: 'json' },
             outputContract: { result: 'json', skipped: 'boolean?' },
-            laneId: null,
+            laneId: node.data.lane?.id ?? null,
           })),
           policies: {
             retry: null,
@@ -507,7 +524,8 @@ export const dag: GraphType<DagDefinition, DagStatus, DagEvent, DagRequirements>
             budget: null,
             action: null,
           },
-          executionLanes: [],
+          executionLanes: definition.nodes.flatMap((node) =>
+            node.data.lane === undefined ? [] : [node.data.lane]),
           requestedPermissions: [],
           bounds: {
             dispatches: {

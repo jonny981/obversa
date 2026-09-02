@@ -16,7 +16,7 @@ test.after(() => {
   }
 });
 
-function runFixture(files) {
+function runFixture(files, roots = ['.']) {
   const directory = mkdtempSync(join(tmpdir(), 'obversa-graph-purity-'));
   temporaryDirectories.push(directory);
 
@@ -26,10 +26,36 @@ function runFixture(files) {
     writeFileSync(absolute, source);
   }
 
-  return spawnSync(process.execPath, [checker, directory], {
+  return spawnSync(process.execPath, [
+    checker,
+    ...roots.map((root) => join(directory, root)),
+  ], {
     encoding: 'utf8',
   });
 }
+
+test('scans every configured graph source root', () => {
+  const result = runFixture({
+    'graph/pure.ts': 'export const value = 1;',
+    'graph-types/impure.ts': 'export const cwd = process.cwd();',
+  }, ['graph', 'graph-types']);
+
+  assert.equal(result.status, 1, result.stdout);
+  assert.match(result.stderr, /graph-types\/impure\.ts:.*process/);
+});
+
+test('allows graph types to use the pinned topological sorter', () => {
+  const result = runFixture({
+    'graph/kernel.ts': 'export type NodeId = string;',
+    'graph-types/dag.ts': `
+      import toposort from 'toposort';
+      import type { NodeId } from '../graph/kernel.js';
+      export const order = (edges: [NodeId, NodeId][]) => toposort(edges);
+    `,
+  }, ['graph', 'graph-types']);
+
+  assert.equal(result.status, 0, result.stderr);
+});
 
 test('allows pure local modules and the reviewed interface-package imports', () => {
   const result = runFixture({

@@ -110,21 +110,29 @@ try {
     hostBinding: null,
   });
 
-  const stage = (name: string): GraphNodeBinding => nodeBinding(
-    temporaryRoot,
-    async () => {
-      order.push(name);
-      return { stage: name };
-    },
-  );
   const executor = await createGraphExecutor({
     runId: 'release-pipeline-run',
     graph,
     storage,
     nodes: {
-      draft: stage('draft'),
-      review: stage('review'),
-      publish: stage('publish'),
+      draft: nodeBinding(temporaryRoot, async () => {
+        order.push('draft');
+        return { article: 'ready' };
+      }),
+      review: nodeBinding(temporaryRoot, async ({ input }) => {
+        order.push('review');
+        const draft = (input as {
+          readonly results: { readonly draft: { readonly article: string } };
+        }).results.draft;
+        return { approved: draft.article === 'ready' };
+      }),
+      publish: nodeBinding(temporaryRoot, async ({ input }) => {
+        order.push('publish');
+        const review = (input as {
+          readonly results: { readonly review: { readonly approved: boolean } };
+        }).results.review;
+        return { published: review.approved };
+      }),
     },
     engines: [],
   });

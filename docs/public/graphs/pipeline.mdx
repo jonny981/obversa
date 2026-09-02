@@ -23,7 +23,7 @@ The command stores and runs a three-stage pipeline through the public executor.
 It prints one JSON report:
 
 ```json
-{"executor":"complete","output":{"nodes":{"draft":"passed","review":"passed","publish":"passed"}},"dispatches":3,"order":["draft","review","publish"],"planDigest":"sha256:0d720b1e51681fe8f6071b243d431a671f6acf381869b4639bd1a610025249d5","bounds":{"dispatches":{"min":{"kind":"known","value":3},"max":{"kind":"known","value":3}},"maxConcurrency":{"kind":"known","value":1},"maxFanOut":{"kind":"known","value":1}}}
+{"executor":"complete","output":{"nodes":{"draft":{"article":"ready"},"review":{"approved":true},"publish":{"published":true}}},"dispatches":3,"order":["draft","review","publish"],"planDigest":"sha256:0d720b1e51681fe8f6071b243d431a671f6acf381869b4639bd1a610025249d5","bounds":{"dispatches":{"min":{"kind":"known","value":3},"max":{"kind":"known","value":3}},"maxConcurrency":{"kind":"known","value":1},"maxFanOut":{"kind":"known","value":1}}}
 ```
 
 The clean-consumer check compiles and runs the same source from the packed
@@ -63,8 +63,9 @@ const definition: DagDefinition = defineGraphDefinition({
 const graph = compileGraph(dagGraphType, definition);
 ```
 
-The example stores `graph.definition` with its resolved plan. It then gives the
-executor one data function for each node and calls `executor.run(signal)`.
+The example stores `graph.definition` with its resolved plan. It gives the
+executor one data function for each node. The review function reads the draft
+result, and the publish function reads the review result.
 
 ## Node behaviour
 
@@ -76,6 +77,9 @@ executor one data function for each node and calls `executor.run(signal)`.
 - **Finalizer nodes** have no edges and run after the other nodes settle.
 - **Paused nodes** stop new dispatches and keep the recorded pause reason.
 
+A node with a `lane` object uses the engine route stored in the plan. A node
+without one uses its data function and is data-only.
+
 `stopOnError: true` stops new work after a required failure. Set it to `false`
 when independent branches and declared retries must continue.
 
@@ -84,6 +88,8 @@ when independent branches and declared retries must continue.
 `globalConcurrency` caps all running nodes. A node with a non-null `key` also
 uses the matching cap in `keyedConcurrency`.
 
-Each dispatch receives a stable position such as `dag/review/1`. The final
-output maps each node name to `passed`, `skipped`, or `failed`. The example's
-plan declares exactly three dispatches and a maximum concurrency of one.
+Each dispatch receives a stable position such as `dag/review/1`. Its input has
+the completed results of its direct predecessors, keyed by node name. The final
+output maps every completed node name to its returned payload. A failed optional
+node is omitted because it has no completed payload. The example's plan declares
+exactly three dispatches and a maximum concurrency of one.

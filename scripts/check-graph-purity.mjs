@@ -1,5 +1,5 @@
 import { readdir, readFile } from 'node:fs/promises';
-import { dirname, extname, isAbsolute, relative, resolve, sep } from 'node:path';
+import { basename, dirname, extname, isAbsolute, relative, resolve, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 import ts from '@typescript/typescript6';
@@ -97,10 +97,13 @@ const effectfulGlobals = new Map([
 ]);
 
 const repositoryRoot = resolve(dirname(fileURLToPath(import.meta.url)), '..');
-const scanRoot = resolve(process.argv[2] ?? resolve(repositoryRoot, 'packages/runtime/src/graph'));
+const scanRoots = (process.argv.length > 2
+  ? process.argv.slice(2)
+  : [resolve(repositoryRoot, 'packages/runtime/src/graph')])
+  .map((root) => resolve(root));
 
 const violations = [];
-const files = await sourceFiles(scanRoot);
+const files = (await Promise.all(scanRoots.map((root) => sourceFiles(root)))).flat();
 const scannedFiles = new Set(files.map((file) => resolve(file)));
 
 for (const file of files) {
@@ -335,6 +338,7 @@ function isTypeOnlyMemoryImport(declaration) {
 }
 
 function forbiddenReason(specifier, sourceFile, allowMemoryPortType) {
+  if (specifier === 'toposort') return undefined;
   if (specifier === '@obversa/engine') {
     return 'only reviewed named JSON imports are allowed';
   }
@@ -359,12 +363,7 @@ function forbiddenReason(specifier, sourceFile, allowMemoryPortType) {
 
   if (specifier.startsWith('.')) {
     const target = resolve(dirname(sourceFile.fileName), specifier);
-    const pathFromRoot = relative(scanRoot, target);
-    if (
-      pathFromRoot === '..'
-      || pathFromRoot.startsWith(`..${sep}`)
-      || isAbsolute(pathFromRoot)
-    ) {
+    if (!scanRoots.some((root) => isInside(root, target))) {
       return 'local imports must stay inside the graph root';
     }
     if (!localSourceCandidates(target).some((candidate) => scannedFiles.has(candidate))) {
@@ -374,6 +373,13 @@ function forbiddenReason(specifier, sourceFile, allowMemoryPortType) {
   }
 
   return 'runtime imports must be local graph modules';
+}
+
+function isInside(root, target) {
+  const pathFromRoot = relative(root, target);
+  return pathFromRoot !== '..'
+    && !pathFromRoot.startsWith(`..${sep}`)
+    && !isAbsolute(pathFromRoot);
 }
 
 function localSourceCandidates(target) {
@@ -454,6 +460,9 @@ function isReferenceIdentifier(node) {
 
 function report(sourceFile, position, message) {
   const location = sourceFile.getLineAndCharacterOfPosition(position);
-  const path = relative(scanRoot, sourceFile.fileName).split(sep).join('/');
+  const root = scanRoots.find((candidate) => isInside(candidate, sourceFile.fileName));
+  const path = `${scanRoots.length === 1 ? '' : `${basename(root)}/`}${relative(root, sourceFile.fileName)}`
+    .split(sep)
+    .join('/');
   violations.push(`${path}:${location.line + 1}:${location.character + 1}: ${message}`);
 }

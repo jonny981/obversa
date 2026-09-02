@@ -1,15 +1,35 @@
-import { describe, expect, it } from 'vitest';
+import { randomUUID } from 'node:crypto';
+import { mkdtemp, realpath, rm } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+
+import type { EngineSelectionRecord } from '@obversa/engine';
+import { MockEngine } from '@obversa/engine/testing';
+import { afterEach, describe, expect, it } from 'vitest';
 
 import type { GraphCommand } from '../src/graph/commands.ts';
 import type { NodeId } from '../src/graph/kernel.ts';
-import type { PlanResolution } from '../src/graph/plan.ts';
+import {
+  resolveGraphPlan,
+  type ExecutionTarget,
+  type PlanResolution,
+} from '../src/graph/plan.ts';
 import {
   assertGraphTypeConformance,
   runGraphTypeConformance,
   type GraphTypeConformanceFixture,
 } from '../src/graph/conformance.ts';
 import { compileGraph } from '../src/graph/type.ts';
-import { GraphValidationError, type JsonObject } from '../src/graph/value.ts';
+import { GraphValidationError, type JsonObject, type JsonValue } from '../src/graph/value.ts';
+import { validateNewDomainEvent } from '../src/events/envelope.ts';
+import { validateDomainEventBatch } from '../src/events/store.ts';
+import {
+  createGraphExecutor,
+  type GraphEngineBinding,
+  type GraphNodeBinding,
+} from '../src/runtime/graph-executor.ts';
+import { persistRunDefinition, type RunStorageBinding } from '../src/runtime/run-definition.ts';
+import { createLocalRunStorage } from '../src/storage/local.ts';
 import {
   dag,
   type DagDefinition,
@@ -24,7 +44,17 @@ function nodeState(
   attempts = 0,
   inFlight: string | null = null,
 ): DagNodeState {
-  return { status, attempts, inFlight, pauseReason: null };
+  return {
+    status,
+    attempts,
+    inFlight,
+    pauseReason: null,
+    result: status === 'passed'
+      ? {}
+      : status === 'skipped'
+        ? { skipped: true }
+        : null,
+  };
 }
 
 function graph(overrides: Partial<DagDefinition['data']> = {}): DagDefinition {
@@ -134,6 +164,138 @@ function expectIssue(definition: DagDefinition, code: string): void {
   expect(issues.some((item) => item.code === code)).toBe(true);
 }
 
+const target: ExecutionTarget = {
+  adapter: 'mock',
+  provider: 'provider',
+  modelFamily: 'family',
+  model: 'dag-model',
+  tools: [],
+};
+const selection: EngineSelectionRecord = {
+  adapter: 'mock',
+  adapterVersion: null,
+  provider: null,
+  modelFamily: null,
+  model: 'dag-model',
+  executable: null,
+  capabilities: [],
+};
+const packageIdentity = {
+  source: 'npm:@example/dag-test',
+  version: '1.0.0',
+  digest: `sha256:${'d'.repeat(64)}` as const,
+};
+const storagePolicy = {
+  schemaVersion: 1,
+  maxEventPayloadBytes: 64_000,
+  maxAppendBatchBytes: 128_000,
+  maxArtifactBytes: 1_000_000,
+  maxTotalArtifactBytesPerRun: 4_000_000,
+  retention: 'until-run-delete',
+  sensitiveContent: {
+    marked: 'reject',
+    exact: 'reject',
+    freeText: 'redact-before-hash',
+  },
+} as const;
+const roots: string[] = [];
+let sequence = 0;
+
+afterEach(async () => {
+  await Promise.all(roots.splice(0).map((root) => rm(root, { recursive: true, force: true })));
+});
+
+async function storedDagRun(definition: DagDefinition): Promise<{
+  readonly graph: ReturnType<typeof compileGraph<DagDefinition, DagStatus, DagEvent, DagRequirements>>;
+  readonly root: string;
+  readonly runId: string;
+  readonly storage: RunStorageBinding;
+}> {
+  const root = await realpath(await mkdtemp(join(tmpdir(), 'obversa-dag-')));
+  roots.push(root);
+  const runId = `dag-${sequence += 1}`;
+  const graph = compileGraph(dag, definition);
+  const description = graph.describe();
+  const resolvedPlan = resolveGraphPlan(description, {
+    package: packageIdentity,
+    admission: { package: packageIdentity, permissions: [] },
+    executionLanes: description.executionLanes.map((lane) => ({
+      id: lane.id,
+      effective: lane.requested,
+      fallbacks: lane.knownSubstitutions,
+    })),
+  });
+  const storage = createLocalRunStorage({
+    directory: join(root, 'storage'),
+    namespace: 'dag-tests',
+    policy: storagePolicy,
+  });
+  await persistRunDefinition(storage, {
+    runId,
+    eventId: randomUUID(),
+    timestamp: new Date().toISOString(),
+    graphDefinition: graph.definition,
+    resolvedPlan,
+    resolvedInputs: {},
+    workspaceBinding: null,
+    hostBinding: null,
+  });
+  return { graph, root, runId, storage };
+}
+
+function nodeBinding(root: string, input: {
+  readonly prompt?: GraphNodeBinding['prompt'];
+  readonly runData?: GraphNodeBinding['runData'];
+} = {}): GraphNodeBinding {
+  return {
+    prompt: input.prompt ?? null,
+    scratchDirectory: root,
+    workspace: { mode: 'none', directory: null, allowedPaths: [] },
+    trustedCaller: {},
+    permissions: [],
+    policy: {
+      inputBytes: 100_000,
+      outputBytes: 100_000,
+      timeoutMs: 5_000,
+      teardownGraceMs: 100,
+      memoryBytes: 100_000_000,
+      filesChanged: 0,
+      linesChanged: 0,
+      callTokens: null,
+    },
+    resultContract: null,
+    runData: input.runData ?? null,
+    parseResult: null,
+    tokenBudget: null,
+    decideAction: async () => ({ kind: 'allow' }),
+  };
+}
+
+async function appendDagEvents(
+  storage: RunStorageBinding,
+  runId: string,
+  events: readonly DagEvent[],
+): Promise<void> {
+  let revision = 0;
+  for await (const event of storage.eventStore.read({
+    namespace: storage.record.namespace,
+    streamId: runId,
+  })) revision = event.revision;
+  await storage.eventStore.append(
+    { namespace: storage.record.namespace, streamId: runId },
+    revision,
+    validateDomainEventBatch(events.map((event) => validateNewDomainEvent({
+      eventId: randomUUID(),
+      type: `graph:${event.type}`,
+      version: event.version,
+      timestamp: new Date().toISOString(),
+      correlationId: runId,
+      causationId: null,
+      payload: event.payload,
+    }))),
+  );
+}
+
 describe('dag graph type', () => {
   it('passes the graph type conformance kit', () => {
     const fixture: GraphTypeConformanceFixture<
@@ -236,11 +398,11 @@ describe('dag graph type', () => {
         commands: [
           [{ kind: 'dispatch', nodeId: 'plan', input: { positionSummary: 'node plan, attempt 1' }, position: 'dag/plan/1' }],
           [],
-          [{ kind: 'dispatch', nodeId: 'build-a', input: { positionSummary: 'node build-a, attempt 1' }, position: 'dag/build-a/1' }],
+          [{ kind: 'dispatch', nodeId: 'build-a', input: { positionSummary: 'node build-a, attempt 1', results: { plan: {} } }, position: 'dag/build-a/1' }],
           [],
-          [{ kind: 'dispatch', nodeId: 'build-b', input: { positionSummary: 'node build-b, attempt 1' }, position: 'dag/build-b/1' }],
+          [{ kind: 'dispatch', nodeId: 'build-b', input: { positionSummary: 'node build-b, attempt 1', results: { plan: {} } }, position: 'dag/build-b/1' }],
           [],
-          [{ kind: 'dispatch', nodeId: 'report', input: { positionSummary: 'node report, attempt 1' }, position: 'dag/report/1' }],
+          [{ kind: 'dispatch', nodeId: 'report', input: { positionSummary: 'node report, attempt 1', results: { 'build-a': {}, 'build-b': {} } }, position: 'dag/report/1' }],
           [],
           [{ kind: 'dispatch', nodeId: 'probe', input: { positionSummary: 'node probe, attempt 1' }, position: 'dag/probe/1' }],
           [],
@@ -250,8 +412,8 @@ describe('dag graph type', () => {
             kind: 'complete',
             output: {
               nodes: {
-                plan: 'passed', 'build-a': 'passed', 'build-b': 'passed',
-                report: 'passed', probe: 'skipped', cleanup: 'passed',
+                plan: {}, 'build-a': {}, 'build-b': {},
+                report: {}, probe: { skipped: true }, cleanup: {},
               },
             },
           }],
@@ -281,6 +443,144 @@ describe('dag graph type', () => {
     expect(description.bounds.dispatches.min).toEqual({ kind: 'known', value: 6 });
     expect(description.bounds.dispatches.max).toEqual({ kind: 'known', value: 6 });
     expect(description.bounds.maxFanOut).toEqual({ kind: 'known', value: 1 });
+  });
+
+  it('returns waiting when a fresh executor finds recorded DAG work in flight', async () => {
+    const definition: DagDefinition = {
+      ...graph({ globalConcurrency: 2 }),
+      nodes: [
+        { id: 'plan', data: { kind: 'required', key: null } },
+        { id: 'probe', data: { kind: 'required', key: null } },
+        { id: 'build', data: { kind: 'required', key: null } },
+      ],
+      edges: [{ id: 'plan-to-build', source: 'plan', target: 'build', data: {} }],
+    };
+    const run = await storedDagRun(definition);
+    await appendDagEvents(run.storage, run.runId, [
+      dispatched('plan'),
+      dispatched('probe'),
+      completed('plan', { plan: 'ready' }),
+    ]);
+    const executor = await createGraphExecutor({
+      ...run,
+      nodes: {
+        plan: nodeBinding(run.root, { runData: async () => ({ plan: 'ready' }) }),
+        probe: nodeBinding(run.root, { runData: async () => ({ probe: 'ready' }) }),
+        build: nodeBinding(run.root, { runData: async () => ({ build: 'ready' }) }),
+      },
+      engines: [],
+    });
+
+    await expect(executor.run(new AbortController().signal)).resolves.toEqual({
+      kind: 'waiting',
+      positions: ['dag/probe/1'],
+    });
+  });
+
+  it('runs a DAG node on its declared engine lane with a prompt from dispatch input', async () => {
+    const definition: DagDefinition = {
+      ...graph(),
+      nodes: [{
+        id: 'writer',
+        data: {
+          kind: 'required',
+          key: null,
+          lane: { id: 'writer-lane', requested: target, knownSubstitutions: [] },
+        },
+      }],
+      edges: [],
+    };
+    const run = await storedDagRun(definition);
+    const prompts: string[] = [];
+    const engine = new MockEngine((request) => {
+      prompts.push(request.prompt);
+      return 'written';
+    });
+    const engines: readonly GraphEngineBinding[] = [{
+      target,
+      selection,
+      engine,
+      hardTokenLimitEnforceable: false,
+    }];
+    const executor = await createGraphExecutor({
+      ...run,
+      nodes: {
+        writer: nodeBinding(run.root, {
+          prompt: (input) => `Run ${(input as JsonObject).positionSummary}.`,
+        }),
+      },
+      engines,
+    });
+
+    await expect(executor.run(new AbortController().signal)).resolves.toMatchObject({
+      kind: 'complete',
+    });
+    expect(prompts).toEqual(['Run node writer, attempt 1.']);
+  });
+
+  it('fails when a finalizer fails after its worker passed', () => {
+    const definition: DagDefinition = {
+      ...graph(),
+      nodes: [
+        { id: 'worker', data: { kind: 'required', key: null } },
+        { id: 'cleanup', data: { kind: 'finalizer', key: null } },
+      ],
+      edges: [],
+    };
+
+    expect(decideAt([
+      dispatched('worker'),
+      completed('worker', { worked: true }),
+      dispatched('cleanup'),
+      failed('cleanup', 'CLEANUP_FAILED'),
+    ], definition)).toEqual([{
+      kind: 'fail',
+      code: 'DAG_NODE_FAILED',
+      message: 'Failed finalizer nodes: cleanup.',
+    }]);
+  });
+
+  it('passes named predecessor results to the next node and returns named results', async () => {
+    const definition: DagDefinition = {
+      ...graph(),
+      nodes: [
+        { id: 'draft', data: { kind: 'required', key: null } },
+        { id: 'review', data: { kind: 'required', key: null } },
+      ],
+      edges: [{ id: 'draft-to-review', source: 'draft', target: 'review', data: {} }],
+    };
+    const run = await storedDagRun(definition);
+    let reviewInput: JsonValue = null;
+    const executor = await createGraphExecutor({
+      ...run,
+      nodes: {
+        draft: nodeBinding(run.root, { runData: async () => ({ article: 'ready' }) }),
+        review: nodeBinding(run.root, {
+          runData: async (context) => {
+            reviewInput = context.input;
+            const input = context.input as {
+              readonly results: { readonly draft: { readonly article: string } };
+            };
+            return { reviewed: input.results.draft.article };
+          },
+        }),
+      },
+      engines: [],
+    });
+
+    await expect(executor.run(new AbortController().signal)).resolves.toEqual({
+      kind: 'complete',
+      output: {
+        nodes: {
+          draft: { article: 'ready' },
+          review: { reviewed: 'ready' },
+        },
+      },
+    });
+    expect(reviewInput).toEqual({
+      positionSummary: 'node review, attempt 1',
+      results: { draft: { article: 'ready' } },
+    });
   });
 
   it('rejects a dependency cycle', () => {
@@ -388,7 +688,7 @@ describe('dag graph type', () => {
     ], definition);
     expect(verdict).toEqual([{
       kind: 'complete',
-      output: { nodes: { opt: 'failed', downstream: 'passed' } },
+      output: { nodes: { downstream: {} } },
     }]);
   });
 
@@ -405,7 +705,7 @@ describe('dag graph type', () => {
     expect(commands).toEqual([{
       kind: 'dispatch',
       nodeId: 'body',
-      input: { positionSummary: 'node body, attempt 1' },
+      input: { positionSummary: 'node body, attempt 1', results: { gate: { skipped: true } } },
       position: 'dag/body/1',
     }]);
   });
@@ -414,8 +714,8 @@ describe('dag graph type', () => {
     const definition = graph({ globalConcurrency: 3 });
     const commands = decideAt([dispatched('plan'), completed('plan')], definition);
     expect(commands).toEqual([
-      { kind: 'dispatch', nodeId: 'build-a', input: { positionSummary: 'node build-a, attempt 1' }, position: 'dag/build-a/1' },
-      { kind: 'dispatch', nodeId: 'build-b', input: { positionSummary: 'node build-b, attempt 1' }, position: 'dag/build-b/1' },
+      { kind: 'dispatch', nodeId: 'build-a', input: { positionSummary: 'node build-a, attempt 1', results: { plan: {} } }, position: 'dag/build-a/1' },
+      { kind: 'dispatch', nodeId: 'build-b', input: { positionSummary: 'node build-b, attempt 1', results: { plan: {} } }, position: 'dag/build-b/1' },
       { kind: 'dispatch', nodeId: 'probe', input: { positionSummary: 'node probe, attempt 1' }, position: 'dag/probe/1' },
     ]);
     expect(compileGraph(dag, definition).describe().bounds.maxFanOut)
@@ -465,7 +765,7 @@ describe('dag graph type', () => {
     expect(state.nodes.solo!.status).toBe('passed');
     expect(compiled.decide(state)).toEqual([{
       kind: 'complete',
-      output: { nodes: { solo: 'passed' } },
+      output: { nodes: { solo: {} } },
     }]);
   });
 
@@ -498,7 +798,7 @@ describe('dag graph type', () => {
     expect(recovered.nodes.solo!.status).toBe('passed');
     expect(compiled.decide(recovered)).toEqual([{
       kind: 'complete',
-      output: { nodes: { solo: 'passed' } },
+      output: { nodes: { solo: {} } },
     }]);
 
     state = compiled.reduce(state, failed('solo', 'ENGINE_UNAVAILABLE', 2));
