@@ -5,14 +5,17 @@ of agents.
 
 Status: In build. Public docs in `docs/public/`.
 
-This workspace contains six packages:
+This workspace contains seven packages, plus engine plugins:
 
 - `@obversa/runtime` provides a runtime API and a pure contract for outside graph types.
 - `@obversa/memory` defines a small memory contract.
 - `@obversa/memory-simple` stores memory in one process.
 - `@obversa/memory-git` stores memory in private Git references.
 - `@obversa/surfacer` runs one secure local surface session: one loopback server, one opaque result, host-native placement.
+- `@obversa/engine` defines the engine contract: one bounded call, typed failures, and structured results.
 - `@obversa/source` is the review surface: it opens a git diff for inline review and returns the annotations.
+
+The `plugins/` directory holds the engine adapters (Claude CLI, Codex, Grok CLI, Anthropic API, Agent SDK, OpenCode CLI) and the memory adapters (in-process and Git).
 
 `@obversa/runtime` is the runtime. A process is a complete program that
 composes runtime jobs, graph forms, policies, and adapters.
@@ -37,12 +40,19 @@ pnpm install --frozen-lockfile
 pnpm build
 ```
 
-The install activates this repository's commit-policy hooks for the checkout.
+The install activates this repository's commit hooks for the checkout. See
+[AGENTS.md](AGENTS.md) for what the hooks need before your first commit.
 
 ## Run the offline process
 
 The first example uses deterministic function jobs. It does not use a model or
 network service.
+
+```bash
+pnpm example:offline
+```
+
+The full form, if the shortcut is not available:
 
 ```bash
 pnpm --filter @obversa/runtime exec tsx ../../examples/production-lines/offline-review.line.ts
@@ -61,7 +71,7 @@ Expected result:
 ## Define an outside graph type
 
 The graph contract lets a package define a pure graph type without importing
-Lines implementation modules. It validates a graph definition, reduces
+runtime implementation modules. It validates a graph definition, reduces
 recorded events, makes graph commands, and describes a stable plan for a host.
 
 Run the checked-in example from the workspace root:
@@ -83,7 +93,7 @@ graph package.
 
 ## Store events and artifacts
 
-The Lines storage ports keep small JSON events separate from larger byte
+The runtime storage ports keep small JSON events separate from larger byte
 content. Run the offline local-storage example from the workspace root:
 
 ```bash
@@ -101,7 +111,7 @@ run.
 
 ## Run safe node attempts
 
-The Lines adapters run one fresh CLI process for one bounded node attempt. The
+The runtime adapters run one fresh CLI process for one bounded node attempt. The
 offline example uses scripted Grok and OpenCode executables, validates both
 structured results, keeps missing usage as `unknown`, and removes its temporary
 fixture files.
