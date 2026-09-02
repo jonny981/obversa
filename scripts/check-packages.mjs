@@ -5,7 +5,7 @@ import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { spawnSync } from 'node:child_process';
-import { EXPECTED_FILES } from './check-tarballs.mjs';
+import { EXPECTED_FILES, withoutChunkHash } from './check-tarballs.mjs';
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const packages = [
@@ -62,7 +62,7 @@ function exportTargets(value, output = []) {
 }
 
 function assertPackedPackage(definition, tarball) {
-  const entries = archiveEntries(tarball);
+  const entries = archiveEntries(tarball).map(withoutChunkHash);
   const required = ['package/LICENSE', 'package/README.md', 'package/package.json'];
   const failures = [];
   const pinnedFiles = EXPECTED_FILES[definition.name];
