@@ -1,21 +1,33 @@
 #!/usr/bin/env node
 
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
-import { tmpdir } from 'node:os';
+import { mkdtempSync, readFileSync, rmSync, writeFileSync, existsSync } from 'node:fs';
+import { homedir, tmpdir } from 'node:os';
 import { basename, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { spawnSync } from 'node:child_process';
 
-const EXPECTED_NAME = 'Jonny Neill';
-const EXPECTED_EMAIL = 'jonnyneill@hotmail.com';
-const EXPECTED_KEY =
-  'ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAICFRtiuaPtCSNS9gSKWPxHna590mlLMOQ+eGh7XCh6Xg';
+// Identity and signing requirements are team practice and come from the same
+// local policy file as the time window: { identity: { name, email },
+// signingKey, requireSignedCommits }. Without a policy only the public rules
+// apply: a conventional message and no AI attribution.
 const SIGNATURE_BOUNDARY_PATHS = [
   'packages/lines/package.json',
   'packages/runtime/package.json',
 ];
-const LONDON = 'Europe/London';
-const WORKDAYS = new Set(['Mon', 'Tue', 'Wed', 'Thu', 'Fri']);
+// The commit time policy is private working practice and lives outside the
+// repository: ~/.obversa/commit-policy.json (or the file OBVERSA_COMMIT_POLICY
+// names) with { timeZone, blockedWeekdays, blockedFromHour, blockedToHour }.
+// Without a file no time window is enforced, so a checkout elsewhere is
+// never bound by a policy it cannot see.
+const POLICY_FILE = process.env.OBVERSA_COMMIT_POLICY ?? join(homedir(), '.obversa', 'commit-policy.json');
+export function loadCommitPolicy(file = POLICY_FILE) {
+  if (!existsSync(file)) return null;
+  const policy = JSON.parse(readFileSync(file, 'utf8'));
+  for (const key of ['timeZone', 'blockedWeekdays', 'blockedFromHour', 'blockedToHour']) {
+    if (!(key in policy)) throw new Error(`${file}: commit policy is missing ${key}`);
+  }
+  return policy;
+}
 const HEADER = /^(?:feat|fix|docs|style|refactor|perf|test|build|ci|chore|revert)(?:\([a-z0-9][a-z0-9._/-]*\))?!?: [a-z0-9](?:[^\r\n]*[^.\s\r\n])?$/;
 const ATTRIBUTION = new RegExp(
   `(?:${'gene' + 'rated'} (?:with|by) (?:claude|codex)|` +
@@ -24,13 +36,22 @@ const ATTRIBUTION = new RegExp(
   'i',
 );
 
-export function isAllowedCommitTime(value) {
+
+function policyIdentity(policy = loadCommitPolicy()) {
+  return policy?.identity ?? null;
+}
+function policyKey(policy = loadCommitPolicy()) {
+  return policy?.signingKey ? normalisePublicKey(policy.signingKey) : null;
+}
+
+export function isAllowedCommitTime(value, policy = loadCommitPolicy()) {
   const date = value instanceof Date ? value : new Date(value);
   if (Number.isNaN(date.getTime())) throw new Error(`Invalid commit time: ${value}`);
+  if (policy === null) return true;
 
   const parts = Object.fromEntries(
     new Intl.DateTimeFormat('en-GB', {
-      timeZone: LONDON,
+      timeZone: policy.timeZone,
       weekday: 'short',
       hour: '2-digit',
       hourCycle: 'h23',
@@ -40,7 +61,7 @@ export function isAllowedCommitTime(value) {
       .map((part) => [part.type, part.value]),
   );
   const hour = Number(parts.hour);
-  return !WORKDAYS.has(parts.weekday) || hour < 8 || hour >= 18;
+  return !policy.blockedWeekdays.includes(parts.weekday) || hour < policy.blockedFromHour || hour >= policy.blockedToHour;
 }
 
 export function assertConventionalMessage(message) {
@@ -85,13 +106,19 @@ function configuredPublicKey() {
 
 function assertCurrentPolicy() {
   const failures = [];
-  if (gitConfig('user.name') !== EXPECTED_NAME) failures.push(`user.name must be ${EXPECTED_NAME}`);
-  if (gitConfig('user.email') !== EXPECTED_EMAIL) failures.push(`user.email must be ${EXPECTED_EMAIL}`);
-  if (gitConfig('gpg.format') !== 'ssh') failures.push('gpg.format must be ssh');
-  if (gitConfig('commit.gpgsign') !== 'true') failures.push('commit.gpgsign must be true');
-  if (configuredPublicKey() !== EXPECTED_KEY) failures.push('user.signingkey is not the trusted key');
+  const identity = policyIdentity();
+  if (identity) {
+    if (gitConfig('user.name') !== identity.name) failures.push('user.name does not match the local commit policy');
+    if (gitConfig('user.email') !== identity.email) failures.push('user.email does not match the local commit policy');
+  }
+  if (loadCommitPolicy()?.requireSignedCommits) {
+    if (gitConfig('gpg.format') !== 'ssh') failures.push('gpg.format must be ssh');
+    if (gitConfig('commit.gpgsign') !== 'true') failures.push('commit.gpgsign must be true');
+    const key = policyKey();
+    if (key && configuredPublicKey() !== key) failures.push('user.signingkey is not the key the local commit policy names');
+  }
   if (!isAllowedCommitTime(new Date())) {
-    failures.push('commits are blocked during the hours the local commit policy names on the policy weekdays');
+    failures.push('commits are blocked by the local commit policy at this time');
   }
   if (failures.length) throw new Error(failures.join('\n'));
 }
@@ -109,7 +136,8 @@ function commitDetails(commit, options = {}) {
 }
 
 function assertGoodSshSignature(commit, options = {}) {
-  const expectedKey = options.expectedKey ?? EXPECTED_KEY;
+  const expectedKey = options.expectedKey ?? policyKey();
+  if (!expectedKey) return { verified: false, reason: 'no signing key in the local commit policy; signature verification skipped' };
   const object = git(['cat-file', 'commit', commit], options);
   if (!object.includes('gpgsig -----BEGIN SSH SIGNATURE-----')) {
     throw new Error(`${commit} does not contain an SSH signature`);
@@ -118,7 +146,7 @@ function assertGoodSshSignature(commit, options = {}) {
   const directory = mkdtempSync(join(tmpdir(), 'obversa-signature-'));
   const allowed = join(directory, 'allowed_signers');
   try {
-    writeFileSync(allowed, `${EXPECTED_EMAIL} ${expectedKey}\n`, { mode: 0o600 });
+    writeFileSync(allowed, `${policyIdentity()?.email ?? 'signer'} ${expectedKey}\n`, { mode: 0o600 });
     git([
       '-c',
       `gpg.ssh.allowedSignersFile=${allowed}`,
@@ -135,14 +163,17 @@ function assertGoodSshSignature(commit, options = {}) {
 function assertCommit(commit, options = {}) {
   const details = commitDetails(commit, options);
   const failures = [];
-  if (details.authorName !== EXPECTED_NAME || details.committerName !== EXPECTED_NAME) {
-    failures.push('author and committer names must be Jonny Neill');
-  }
-  if (details.authorEmail !== EXPECTED_EMAIL || details.committerEmail !== EXPECTED_EMAIL) {
-    failures.push('author and committer emails must be jonnyneill@hotmail.com');
+  const requiredIdentity = policyIdentity();
+  if (requiredIdentity) {
+    if (details.authorName !== requiredIdentity.name || details.committerName !== requiredIdentity.name) {
+      failures.push('author and committer names do not match the local commit policy');
+    }
+    if (details.authorEmail !== requiredIdentity.email || details.committerEmail !== requiredIdentity.email) {
+      failures.push('author and committer emails do not match the local commit policy');
+    }
   }
   if (!isAllowedCommitTime(details.authorTime) || !isAllowedCommitTime(details.committerTime)) {
-    failures.push('author and committer times must be outside the hours the local commit policy names');
+    failures.push('author and committer times are blocked by the local commit policy');
   }
   if (failures.length) throw new Error(`${details.hash}: ${failures.join('; ')}`);
 

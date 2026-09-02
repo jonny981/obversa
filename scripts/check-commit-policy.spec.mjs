@@ -114,18 +114,26 @@ function createSignedHistory({ unsignedBetweenLinesAndRuntime = false } = {}) {
   return { directory, repository, publicKey, laterEnvironment };
 }
 
-test('blocks the London working window on weekdays', () => {
-  assert.equal(isAllowedCommitTime('2026-08-24T07:00:00Z'), false);
-  assert.equal(isAllowedCommitTime('2026-08-24T16:59:59Z'), false);
+// The real policy is private and lives outside the repository; the mechanism
+// is proved with a fixture policy that blocks 02:00 to 04:00 UTC on Wednesdays.
+const fixturePolicy = { timeZone: 'UTC', blockedWeekdays: ['Wed'], blockedFromHour: 2, blockedToHour: 4 };
+
+test('blocks the policy window on a blocked weekday', () => {
+  assert.equal(isAllowedCommitTime('2026-08-26T02:00:00Z', fixturePolicy), false);
+  assert.equal(isAllowedCommitTime('2026-08-26T03:59:59Z', fixturePolicy), false);
 });
 
-test('allows the London window boundaries outside working hours', () => {
-  assert.equal(isAllowedCommitTime('2026-08-24T06:59:59Z'), true);
-  assert.equal(isAllowedCommitTime('2026-08-24T17:00:00Z'), true);
+test('allows the window boundaries outside the blocked hours', () => {
+  assert.equal(isAllowedCommitTime('2026-08-26T01:59:59Z', fixturePolicy), true);
+  assert.equal(isAllowedCommitTime('2026-08-26T04:00:00Z', fixturePolicy), true);
 });
 
-test('allows every hour at the weekend', () => {
-  assert.equal(isAllowedCommitTime('2026-08-23T11:00:00Z'), true);
+test('allows the blocked hours on a day the policy does not name', () => {
+  assert.equal(isAllowedCommitTime('2026-08-27T03:00:00Z', fixturePolicy), true);
+});
+
+test('enforces nothing when no local policy exists', () => {
+  assert.equal(isAllowedCommitTime('2026-08-26T03:00:00Z', null), true);
 });
 
 test('accepts conventional public commit messages', () => {

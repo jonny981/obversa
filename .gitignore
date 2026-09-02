@@ -12,3 +12,11 @@ build/
 .superpowers/
 # The marketing site and copy bank ship from their own repository.
 marketing/
+
+# Local working material, ignored here on purpose.
+# These paths are not part of this repository.
+.agents
+design
+roadmap
+the internal notes
+the internal notes

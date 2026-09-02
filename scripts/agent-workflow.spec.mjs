@@ -106,10 +106,10 @@ test('finishing refuses a commit that fails the public commit policy', () => {
   const before = branchHeads(repository);
   assert.equal(runStage('claim', 'D1', repository.feature).status, 0);
 
-  const result = runStageCli('finish', 'D1', repository.feature);
+  const result = runStageCli('finish', 'D1', repository.feature, publicRulesOnlyPolicy());
 
   assert.notEqual(result.status, 0);
-  assert.match(result.stderr, /author and committer names must be Jonny Neill/);
+  assert.match(result.stderr, /Commit header must use Conventional Commits/);
   assert.deepEqual(branchHeads(repository), before);
 });
 
@@ -522,10 +522,11 @@ function git(cwd, ...args) {
   return result;
 }
 
-function runNode(script, args, cwd) {
+function runNode(script, args, cwd, env = {}) {
   return spawnSync(process.execPath, [script, ...args], {
     cwd,
     encoding: 'utf8',
+    env: { ...process.env, ...env },
   });
 }
 
@@ -546,8 +547,16 @@ function runStage(command, stage, cwd, options = {}) {
   }
 }
 
-function runStageCli(command, stage, cwd) {
-  return runNode(stageMerge, [command, stage], cwd);
+function runStageCli(command, stage, cwd, env = {}) {
+  return runNode(stageMerge, [command, stage], cwd, env);
+}
+
+// A local commit policy that blocks nothing and names nobody, so a test sees
+// only the public rules whichever machine runs it.
+function publicRulesOnlyPolicy() {
+  const file = join(mkdtempSync(join(tmpdir(), 'obversa-commit-policy-')), 'commit-policy.json');
+  writeFileSync(file, JSON.stringify({ timeZone: 'UTC', blockedWeekdays: [], blockedFromHour: 0, blockedToHour: 0 }));
+  return { OBVERSA_COMMIT_POLICY: file };
 }
 
 function runStageAsync(command, stage, cwd) {

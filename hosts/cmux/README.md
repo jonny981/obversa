@@ -27,7 +27,7 @@ Project worktree and the Shared worktree are peer roots, and neither root
 appears inside the other. The script rejects nested or identical roots.
 
 ```sh
-obversa-order-workspace --shared ~/dev/personal/obversa-shared
+obversa-order-workspace --shared ~/src/obversa-shared
 ```
 
 - `--project <dir>` defaults to the Git top level of the current directory.
@@ -157,7 +157,7 @@ for the review surface.
    ]
    ```
 3. Set the Shared root once per shell or workspace:
-   `export OBVERSA_SHARED_ROOT=~/dev/personal/obversa-shared`.
+   `export OBVERSA_SHARED_ROOT=~/src/obversa-shared`.
 4. Create workspaces through the host's own launcher, which binds both
    placement variables to this checkout's scripts for every terminal and
    agent in the workspace:
