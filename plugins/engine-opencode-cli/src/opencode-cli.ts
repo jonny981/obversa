@@ -1240,7 +1240,7 @@ export class OpenCodeCliEngine implements Engine {
           `OpenCode returned an invalid JSON protocol: ${scrub(accumulator.protocolError.message)}`,
         );
       }
-      if (command.aborted || signal.aborted) {
+      if ((command.aborted || signal.aborted) && !(command.timedOut && accumulator.stopReason === 'stop')) {
         throw loopError('aborted', 'OpenCode attempt was aborted');
       }
 

@@ -900,7 +900,7 @@ export class GrokCliEngine implements Engine {
           `Grok returned an invalid JSON stream: ${accumulator.parseError.message}`,
         );
       }
-      if (command.aborted || signal.aborted) {
+      if ((command.aborted || signal.aborted) && !command.timedOut) {
         throw loopError('aborted', 'Grok attempt was aborted');
       }
 

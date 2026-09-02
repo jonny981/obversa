@@ -327,7 +327,7 @@ export class ClaudeCliEngine implements Engine {
     buffer += decoder.decode();
     if (buffer) flush(buffer);
 
-    if (result.aborted || signal.aborted)
+    if ((result.aborted || signal.aborted) && !(result.timedOut && acc.terminal && acc.parts.some((part) => part.final)))
       throw new EngineError({
         kind: 'aborted',
         message: 'claude-cli run aborted',

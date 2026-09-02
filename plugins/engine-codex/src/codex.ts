@@ -202,15 +202,14 @@ export class CodexEngine implements Engine {
         },
         signal,
       );
-      if (sub.aborted || signal.aborted)
-        throw new EngineError({ kind: 'aborted', message: 'codex run aborted' });
-
       let text = '';
       try {
         text = readFileSync(outFile, 'utf8').trim();
       } catch {
         /* no final message written */
       }
+      if ((sub.aborted || signal.aborted) && !(sub.timedOut && text))
+        throw new EngineError({ kind: 'aborted', message: 'codex run aborted' });
       const stdout = new TextDecoder().decode(sub.stdout);
       const stderr = new TextDecoder().decode(sub.stderr);
       const failed = sub.timedOut || sub.exitCode !== 0;
