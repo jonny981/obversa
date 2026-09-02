@@ -205,6 +205,12 @@ console.log(JSON.stringify({
 
 The output records both requested and effective identities. If a CLI reports a
 different model, the two records stay separate instead of hiding the change.
+Each identity records the adapter, adapter version, provider, model family,
+model, capabilities, and `executable`. Command adapters record the absolute
+path they selected. An engine with no child executable uses `null`. The path
+identifies the selected wrapper, not its resolved target or file digest. When
+no Claude or Codex binary is configured, those plugins search the inherited
+`PATH` once and record the absolute path they select.
 `temporaryDirectoryRemoved` covers only this example's fixture files. The
 package test suite separately checks child-process cleanup on handled exits.
 
@@ -245,8 +251,22 @@ and `deny` records a refusal without running it.
 ## Keep fallback and cleanup visible
 
 One attempt can use one declared fallback after a model becomes unavailable.
-The failed model stays in the attempt record. D5 uses durable events to keep
-later graph work away from that model.
+The failed model stays in the attempt record. Both lanes share one clock, so a
+fallback receives only the time left by the first lane. D5 uses durable events
+to keep later graph work away from that model.
+
+`timeoutMs` is the work deadline. At that point a command adapter starts
+stopping its process tree. `timeoutGraceMs` is teardown time: the adapter asks
+the processes to stop, waits for that grace, then force-stops any that remain.
+The grace does not start more model work.
+
+A marked final result returned inside the final-result deadline stays separate
+from a later transport failure. If process cleanup makes the adapter return
+after that deadline, the attempt fails with `TIMEOUT` and its parsed `result`
+stays `null`. The record still keeps the returned parts, reported usage,
+effective engine, and transport failure as evidence. After the deadline, the
+runtime waits up to seven more seconds for that cleanup evidence. This fixed
+wait cannot turn the attempt into a success.
 
 The command-adapter kit cleans its process tree on normal completion, timeout,
 abort, and other handled exits. The runtime waits for that cleanup before it
