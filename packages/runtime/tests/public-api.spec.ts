@@ -4,7 +4,7 @@ import * as api from '../src/api.ts';
 import * as commandEnvironmentApi from '../src/env/command.ts';
 import * as localStorageApi from '../src/storage/local.ts';
 import * as testingApi from '../src/testing.ts';
-import type { GraphKernel } from '../src/api.ts';
+import type { GraphDefinition, GraphEvent, GraphKernel } from '../src/api.ts';
 
 type Equal<Left, Right> =
   (<Value>() => Value extends Left ? 1 : 2) extends
@@ -24,7 +24,9 @@ describe('public runtime API', () => {
   it('exports only the reviewed programmatic surface', () => {
     expect(Object.keys(api).sort()).toEqual([
       'EXIT_PAUSED',
+      'EngineError',
       'EngineIncompleteResultError',
+      'GraphExecutionError',
       'GraphValidationError',
       'JsonValueError',
       'LANE_DEAD_FAILURES',
@@ -43,14 +45,13 @@ describe('public runtime API', () => {
       'confidenceCondition',
       'confidenceFromText',
       'costReport',
+      'createGraphExecutor',
       'dag',
       'defineAgent',
       'defineAgentFromMarkdown',
       'defineJob',
       'defineSkill',
       'describeConditions',
-      'executeGraphDispatch',
-      'executeWithFallback',
       'exitCodeFor',
       'fallbackEngine',
       'finalResultPart',
@@ -60,17 +61,18 @@ describe('public runtime API', () => {
       'formatPreflight',
       'fromFile',
       'gateJob',
-      'graphDecision',
       'isolated',
       'jobMeta',
       'kickback',
       'lastDecisionLine',
       'lastGateBrief',
+      'loadRunDefinition',
       'loop',
       'minConfidence',
       'never',
       'not',
       'parallel',
+      'persistRunDefinition',
       'pipeline',
       'predicate',
       'preflight',
@@ -84,13 +86,10 @@ describe('public runtime API', () => {
       'reviewPanel',
       'revisionRequest',
       'run',
-      'runWithFallback',
       'sampled',
-      'selectAvailableTargets',
       'sequence',
       'toCondition',
       'tournament',
-      'unavailableTargets',
       'validateAgentResult',
       'validateArtifactReference',
       'validateArtifactScope',
@@ -178,6 +177,8 @@ describe('public runtime API', () => {
       'assertEngineConformance',
       'assertEventStoreConformance',
       'assertGraphTypeConformance',
+      'createGraphEventTrace',
+      'defineGraphDefinition',
       'mockVerdict',
       'runArtifactStoreConformance',
       'runEngineConformance',
@@ -192,5 +193,52 @@ describe('public runtime API', () => {
       'createLocalEventStore',
       'createLocalRunStorage',
     ]);
+  });
+
+  it('provides frozen graph definitions and ordered event traces for package authors', () => {
+    const source = {
+      id: 'testing-helper',
+      definitionVersion: 1,
+      data: { label: 'original' },
+      nodes: [{ id: 'worker', data: {} }],
+      edges: [],
+    } satisfies GraphDefinition;
+    const graph = testingApi.defineGraphDefinition(source);
+    source.data.label = 'changed';
+    expect(graph.data).toEqual({ label: 'original' });
+    expect(Object.isFrozen(graph)).toBe(true);
+    expect(Object.isFrozen(graph.nodes)).toBe(true);
+    expect(() => testingApi.defineGraphDefinition({
+      ...source,
+      nodes: [...source.nodes, { id: 'worker', data: {} }],
+    })).toThrow(api.GraphValidationError);
+
+    const eventPayload = { value: 1 };
+    const first: GraphEvent<'first', { readonly value: number }> = {
+      type: 'first',
+      version: 1,
+      payload: eventPayload,
+    };
+    const trace = testingApi.createGraphEventTrace<GraphEvent>([first]);
+    eventPayload.value = 9;
+    const second = trace.record({
+      type: 'second',
+      version: 1,
+      payload: { value: 2 },
+    });
+    expect(trace.events).toEqual([{
+      type: 'first',
+      version: 1,
+      payload: { value: 1 },
+    }, second]);
+    expect(Object.isFrozen(trace)).toBe(true);
+    expect(Object.isFrozen(trace.events)).toBe(true);
+    expect(Object.isFrozen(trace.events[0]?.payload)).toBe(true);
+    expect(trace.events[0]?.payload).toEqual({ value: 1 });
+    expect(() => testingApi.createGraphEventTrace([{
+      type: '',
+      version: 0,
+      payload: {},
+    }])).toThrow(api.GraphValidationError);
   });
 });

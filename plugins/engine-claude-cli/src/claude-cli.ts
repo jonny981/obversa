@@ -327,14 +327,16 @@ export class ClaudeCliEngine implements Engine {
     buffer += decoder.decode();
     if (buffer) flush(buffer);
 
-    if ((result.aborted || signal.aborted) && !(result.timedOut && acc.terminal && acc.parts.some((part) => part.final)))
+    const aborted = result.aborted || signal.aborted;
+    const completed = acc.terminal && acc.parts.some((part) => part.final);
+    if (aborted && !completed)
       throw new EngineError({
         kind: 'aborted',
         message: 'claude-cli run aborted',
       });
     const late =
       typeof req.timeoutMs === 'number' && Date.now() - startedAt > req.timeoutMs;
-    const failed = result.timedOut || result.exitCode !== 0;
+    const failed = aborted || result.timedOut || result.exitCode !== 0;
     if (failed) {
       // The child's stderr is outside our control and may echo credentials on
       // an auth failure. `scrubCapture` redacts (env values verbatim, then
@@ -372,7 +374,7 @@ export class ClaudeCliEngine implements Engine {
             ? {}
             : { stopReason: acc.stopReason }),
           transportFailure: {
-            kind: result.timedOut ? 'timeout' : 'unknown',
+            kind: aborted ? 'aborted' : result.timedOut ? 'timeout' : 'unknown',
             message: `claude completed but exited ${result.exitCode ?? '?'} during teardown${
               stderr ? `: ${stderr}` : ''
             }`,

@@ -18,6 +18,12 @@ function emit(type, payload = {}) {
   })}\n`);
 }
 
+function markFinalWritten() {
+  if (process.env.OBVERSA_TEST_OPENCODE_FINAL_MARKER) {
+    writeFileSync(process.env.OBVERSA_TEST_OPENCODE_FINAL_MARKER, 'written');
+  }
+}
+
 function textPart(id, text, overrides = {}) {
   return {
     id,
@@ -214,7 +220,7 @@ if (scenario === 'invalid-config') {
   process.stdout.write('{"type":"text","truncated":');
   process.exit(1);
 }
-if (scenario === 'hang') {
+if (scenario === 'hang' || scenario === 'cancellation') {
   emit('text', { part: textPart('fixture-ready', 'fixture-ready') });
   setInterval(() => {}, 1_000);
   await new Promise(() => {});
@@ -281,6 +287,7 @@ if (scenario === 'empty-length-finish' || scenario === 'empty-stop-finish') {
 }
 if (scenario === 'empty-stop-auth') {
   emit('step_finish', { part: finishPart('fixture-step-finish') });
+  markFinalWritten();
   emit('error', { error: apiError('unauthorized', 401) });
   process.exit(1);
 }
@@ -305,6 +312,7 @@ if (structuredScenarios.has(scenario)) {
     part: textPart('fixture-structured', structuredScenarios.get(scenario)),
   });
   emit('step_finish', { part: finishPart('fixture-step-finish') });
+  markFinalWritten();
   if (scenario !== 'timeout-final-structured') process.exit(0);
   await new Promise((resolve) => setTimeout(resolve, 500));
   await new Promise(() => {});
@@ -534,6 +542,7 @@ if (scenario === 'identical-duplicate') {
 }
 emit('text', { part: textPart('fixture-answer', 'answer') });
 emit('step_finish', { part: finishPart('fixture-step-finish') });
+markFinalWritten();
 
 if (scenario === 'late-final') {
   process.stderr.write('transport closed after final result\n');

@@ -115,6 +115,7 @@ export interface GraphPackageAdmission {
 export interface ExecutionLaneResolution {
   readonly id: string;
   readonly effective: ExecutionTarget;
+  readonly fallbacks: readonly ExecutionTarget[];
 }
 
 export interface PlanResolution {
@@ -125,6 +126,7 @@ export interface PlanResolution {
 
 export interface ResolvedExecutionLane extends ExecutionLaneDescription {
   readonly effective: ExecutionTarget;
+  readonly fallbacks: readonly ExecutionTarget[];
 }
 
 export interface ResolvedPlan {
@@ -396,7 +398,7 @@ export function validateResolvedPlan(value: unknown): ResolvedPlan {
     const path = `/executionLanes/${index}`;
     const item = record(lane, path, 'Resolved execution lane');
     exactFields(item, [
-      'id', 'requested', 'knownSubstitutions', 'effective',
+      'id', 'requested', 'knownSubstitutions', 'effective', 'fallbacks',
     ], path);
     strictTarget(item.requested, `${path}/requested`);
     list(
@@ -410,6 +412,10 @@ export function validateResolvedPlan(value: unknown): ResolvedPlan {
       );
     });
     strictTarget(item.effective, `${path}/effective`);
+    list(item.fallbacks, `${path}/fallbacks`, 'Fallbacks')
+      .forEach((targetValue, targetIndex) => {
+        strictTarget(targetValue, `${path}/fallbacks/${targetIndex}`);
+      });
   });
 
   const permissions = record(root.permissions, '/permissions', 'Permissions');
@@ -469,6 +475,7 @@ export function validateResolvedPlan(value: unknown): ResolvedPlan {
     executionLanes: plan.executionLanes.map((lane) => ({
       id: lane.id,
       effective: lane.effective,
+      fallbacks: lane.fallbacks,
     })),
   }).plan;
   if (!isDeepStrictEqual(plan, rebuilt)) {
@@ -700,7 +707,12 @@ export function resolveGraphPlan(
   list(root.executionLanes, '/executionLanes', 'Lane resolutions')
     .forEach((item, index) => {
       const lane = record(item, `/executionLanes/${index}`, 'Lane resolution');
-      requireFields(lane, ['id', 'effective'], `/executionLanes/${index}`);
+      requireFields(lane, ['id', 'effective', 'fallbacks'], `/executionLanes/${index}`);
+      list(
+        lane.fallbacks,
+        `/executionLanes/${index}/fallbacks`,
+        'Fallbacks',
+      );
     });
   const resolution = root as unknown as PlanResolution;
   packageIdentity(resolution.package, '/package');
@@ -726,7 +738,28 @@ export function resolveGraphPlan(
     if (!allowed.some((candidate) => isDeepStrictEqual(candidate, resolved.effective))) {
       fail('UNKNOWN_SUBSTITUTION', `/executionLanes/${index}/effective`, `Lane "${lane.id}" uses an undeclared substitution.`);
     }
-    resolvedLanes.push({ ...lane, effective: resolved.effective });
+    const fallbackKeys = new Set<string>();
+    for (let fallbackIndex = 0; fallbackIndex < resolved.fallbacks.length; fallbackIndex += 1) {
+      const fallback = resolved.fallbacks[fallbackIndex]!;
+      const path = `/executionLanes/${index}/fallbacks/${fallbackIndex}`;
+      target(fallback, path);
+      if (!allowed.some((candidate) => isDeepStrictEqual(candidate, fallback))) {
+        fail('UNKNOWN_SUBSTITUTION', path, `Lane "${lane.id}" uses an undeclared fallback.`);
+      }
+      if (isDeepStrictEqual(fallback, resolved.effective)) {
+        fail('DUPLICATE_SUBSTITUTION', path, 'A fallback cannot repeat the effective target.');
+      }
+      const key = canonicalJson(fallback as unknown as JsonValue);
+      if (fallbackKeys.has(key)) {
+        fail('DUPLICATE_SUBSTITUTION', path, 'Execution fallback is duplicated.');
+      }
+      fallbackKeys.add(key);
+    }
+    resolvedLanes.push({
+      ...lane,
+      effective: resolved.effective,
+      fallbacks: resolved.fallbacks,
+    });
     resolutions.delete(lane.id);
   }
   if (resolutions.size > 0) {

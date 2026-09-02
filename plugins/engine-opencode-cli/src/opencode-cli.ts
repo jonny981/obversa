@@ -1240,7 +1240,8 @@ export class OpenCodeCliEngine implements Engine {
           `OpenCode returned an invalid JSON protocol: ${scrub(accumulator.protocolError.message)}`,
         );
       }
-      if ((command.aborted || signal.aborted) && !(command.timedOut && accumulator.stopReason === 'stop')) {
+      const aborted = command.aborted || signal.aborted;
+      if (aborted && accumulator.stopReason !== 'stop') {
         throw loopError('aborted', 'OpenCode attempt was aborted');
       }
 
@@ -1251,7 +1252,8 @@ export class OpenCodeCliEngine implements Engine {
       const nativeMessage = accumulator.terminalError === null
         ? ''
         : scrub(errorMessage(accumulator.terminalError));
-      const failed = command.timedOut
+      const failed = aborted
+        || command.timedOut
         || command.exitCode !== 0
         || accumulator.terminalError !== null;
       const parts = resultParts(accumulator);
@@ -1359,9 +1361,11 @@ export class OpenCodeCliEngine implements Engine {
       });
       const late = request.timeoutMs !== undefined
         && Date.now() - startedAt > request.timeoutMs;
-      const failureKind = command.timedOut
-        ? 'timeout'
-        : nativeKind ?? classifyEngineFailure(new Error(stderr));
+      const failureKind = aborted
+        ? 'aborted'
+        : command.timedOut
+          ? 'timeout'
+          : nativeKind ?? classifyEngineFailure(new Error(stderr));
       const transportMessage = nativeMessage
         || stderr
         || 'OpenCode transport failed after its final result';

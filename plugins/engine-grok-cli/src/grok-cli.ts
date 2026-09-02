@@ -703,8 +703,11 @@ function transportFailure(
   diagnostic: string,
   exitCode: number | null,
   timedOut: boolean,
+  aborted: boolean,
 ): AgentResult['transportFailure'] {
-  const kind = timedOut
+  const kind = aborted
+    ? 'aborted'
+    : timedOut
     ? 'timeout'
     : classifyEngineFailure(new Error(diagnostic));
   return {
@@ -900,10 +903,6 @@ export class GrokCliEngine implements Engine {
           `Grok returned an invalid JSON stream: ${accumulator.parseError.message}`,
         );
       }
-      if ((command.aborted || signal.aborted) && !command.timedOut) {
-        throw loopError('aborted', 'Grok attempt was aborted');
-      }
-
       const stdout = new TextDecoder().decode(command.stdout);
       const stderr = new TextDecoder().decode(command.stderr);
       const scrubDiagnostic = (value: string): string => scrubCapture(
@@ -913,7 +912,8 @@ export class GrokCliEngine implements Engine {
       );
       const stderrDiagnostic = scrubDiagnostic(stderr);
       const stdoutDiagnostic = scrubDiagnostic(stdout);
-      const failed = command.timedOut || command.exitCode !== 0;
+      const aborted = command.aborted || signal.aborted;
+      const failed = aborted || command.timedOut || command.exitCode !== 0;
       let terminal = accumulator.terminal;
       if (structured && stdout.trim().length > 0) {
         try {
@@ -947,6 +947,9 @@ export class GrokCliEngine implements Engine {
             && Object.hasOwn(terminal, 'structuredOutput')
           : terminal.subtype === 'success' && terminal.is_error !== true
       );
+      if (aborted && !succeeded) {
+        throw loopError('aborted', 'Grok attempt was aborted');
+      }
       if (!succeeded) {
         const rawDetail = terminal && typeof terminal.message === 'string'
           ? terminal.message
@@ -995,6 +998,7 @@ export class GrokCliEngine implements Engine {
                 stderrDiagnostic,
                 command.exitCode,
                 command.timedOut,
+                aborted,
               ),
             }
           : late

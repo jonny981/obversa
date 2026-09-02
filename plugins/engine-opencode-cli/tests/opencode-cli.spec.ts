@@ -13,6 +13,7 @@ import {
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { setTimeout as delay } from 'node:timers/promises';
 
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
@@ -102,6 +103,12 @@ function request(overrides: Partial<AgentRequest> = {}): AgentRequest {
     },
     ...overrides,
   };
+}
+
+async function waitForFile(path: string): Promise<void> {
+  const deadline = Date.now() + 5_000;
+  while (!existsSync(path) && Date.now() < deadline) await delay(10);
+  expect(existsSync(path)).toBe(true);
 }
 
 function invocationConfig(value: ReturnType<typeof buildOpenCodeInvocation>) {
@@ -1092,25 +1099,36 @@ describe('OpenCode CLI adapter', () => {
   });
 
   it.each(['invocation', 'structured'] as const)('starts cleanup at the work deadline and keeps a completed result (%s)', async (mode) => {
-    const result = await new OpenCodeCliEngine({
+    const marker = join(temporaryDirectory('lines-opencode-final-'), 'written');
+    const controller = new AbortController();
+    let abortFired = false;
+    const running = new OpenCodeCliEngine({
       ...options(),
-      environment: { OBVERSA_TEST_OPENCODE_SCENARIO: mode === 'structured' ? 'timeout-final-structured' : 'timeout-final' },
+      environment: {
+        OBVERSA_TEST_OPENCODE_FINAL_MARKER: marker,
+        OBVERSA_TEST_OPENCODE_SCENARIO: mode === 'structured' ? 'timeout-final-structured' : 'timeout-final',
+      },
     }).run(
       request({
-        timeoutMs: 250,
+        timeoutMs: 5_000,
         timeoutGraceMs: 500,
         ...(mode === 'structured' ? { jsonSchema: { type: 'object', properties: { answer: { type: 'number' } }, required: ['answer'], additionalProperties: false } } : {}),
       }),
       () => {},
-      new AbortController().signal,
+      controller.signal,
     );
+    await waitForFile(marker);
+    abortFired = true;
+    controller.abort();
+    const result = await running;
 
+    expect(abortFired).toBe(true);
     expect(result.parts.at(-1)).toMatchObject(mode === 'structured'
       ? { kind: 'assistant', text: 'OBVERSA_STRUCTURED_RESULT_V1\n{"answer":42}', final: true }
       : { text: 'answer', final: true });
     expect(result.usage).toBeDefined();
     expect(result.transportFailure).toMatchObject({
-      kind: 'timeout',
+      kind: 'aborted',
       exitCode: expect.any(Number),
     });
   });

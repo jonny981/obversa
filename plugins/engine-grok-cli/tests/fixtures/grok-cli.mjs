@@ -13,6 +13,12 @@ function emit(message) {
   process.stdout.write(`${JSON.stringify(message)}\n`);
 }
 
+function markFinalWritten() {
+  if (process.env.OBVERSA_TEST_GROK_FINAL_MARKER) {
+    writeFileSync(process.env.OBVERSA_TEST_GROK_FINAL_MARKER, 'written');
+  }
+}
+
 const promptFile = value('--prompt-file');
 const prompt = promptFile ? readFileSync(promptFile, 'utf8') : '';
 const scenario = process.env.OBVERSA_ENGINE_CONFORMANCE_SCENARIO
@@ -154,6 +160,7 @@ if (structured) {
     modelUsage,
     structuredOutput: { answer: 42 },
   }, null, 2)}\n`);
+  markFinalWritten();
   if (scenario === 'timeout-final' || scenario === 'timeout-final-structured') {
     await new Promise((resolve) => setTimeout(resolve, 500));
     setInterval(() => {}, 1_000);
@@ -197,6 +204,7 @@ if (scenario === 'cancellation') {
     uuid: 'fixture-ready-line',
   });
   setInterval(() => {}, 1_000);
+  await new Promise(() => {});
 } else if (scenario === 'tool-events') {
   emit({
     type: 'assistant',
@@ -318,6 +326,7 @@ const result = {
   ...(usage ? { usage } : {}),
 };
 emit(result);
+markFinalWritten();
 
 if (scenario === 'late-final') {
   process.stderr.write('transport closed after final result\n');

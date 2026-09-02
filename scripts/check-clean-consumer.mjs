@@ -25,6 +25,28 @@ const expectedGraphReport = {
   maxFanOut: { kind: 'known', value: 1 },
 };
 
+const expectedTurnTakingReport = {
+  conformance: true,
+  cases: 6,
+  state: 'done',
+  decision: 'complete',
+  executor: 'complete',
+  executorOutput: { rounds: 3 },
+  executorDispatches: 6,
+  primaryCalls: 1,
+  fallbackCalls: 3,
+  planDigest: 'sha256:e8e9ba7fd2e6e9c454a2cb61684b4d8ef809cc9ebed8c5245f2e47daa9f9dbb4',
+  criticLane: 'mock-primary',
+  fallbackResolves: 'mock-fallback',
+  writerLane: null,
+  dispatches: {
+    min: { kind: 'known', value: 6 },
+    max: { kind: 'known', value: 6 },
+  },
+  maxConcurrency: { kind: 'known', value: 1 },
+  maxFanOut: { kind: 'known', value: 1 },
+};
+
 const expectedStorageReport = {
   storedArtifactBytes: 65_591,
   eventPayloadBytes: 194,
@@ -489,8 +511,8 @@ async function main() {
     const directTurnTaking = JSON.parse(
       run('pnpm', ['exec', 'tsx', 'turn-taking.ts'], { cwd: consumerDirectory }),
     );
-    assert.equal(compiledTurnTaking.conformance, true);
-    assert.equal(directTurnTaking.conformance, true);
+    assert.deepEqual(compiledTurnTaking, expectedTurnTakingReport);
+    assert.deepEqual(directTurnTaking, expectedTurnTakingReport);
     assert.deepEqual(compiledGraph, expectedGraphReport);
     assert.deepEqual(directGraph, expectedGraphReport);
     assert.deepEqual(compiledStorage, expectedStorageReport);
@@ -525,7 +547,7 @@ async function main() {
     if (refs.length !== 1) throw new Error(`Git memory created ${refs.length} private refs instead of one`);
 
     console.log(
-      'Clean offline consumer passed with TypeScript 7 and 6, the first production line, the outside graph, durable storage, safe node attempts, 17 memory cases, and both memory adapters.',
+      'Clean offline consumer passed with TypeScript 7 and 6, the first production line, the outside graph, the turn-taking executor example, durable storage, safe node attempts, 17 memory cases, and both memory adapters.',
     );
   } finally {
     await rm(directory, { recursive: true, force: true });

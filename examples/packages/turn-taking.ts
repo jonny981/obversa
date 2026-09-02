@@ -1,17 +1,31 @@
+import { mkdtemp, realpath, rm } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+
 import {
   compileGraph,
+  createGraphExecutor,
+  EngineError,
   GraphValidationError,
+  persistRunDefinition,
   resolveGraphPlan,
+  type EngineSelectionRecord,
   type GraphEvent,
+  type GraphNodeBinding,
   type GraphType,
   type GraphDefinition,
   type JsonObject,
   type PlanResolution,
+  type RunStoragePolicy,
 } from '@obversa/runtime';
 import {
+  createGraphEventTrace,
+  defineGraphDefinition,
+  MockEngine,
   runGraphTypeConformance,
   type GraphTypeConformanceFixture,
 } from '@obversa/runtime/testing';
+import { createLocalRunStorage } from '@obversa/runtime/storage/local';
 
 /**
  * The turn-taking example graph type (roadmap D5): two named roles alternate
@@ -72,7 +86,7 @@ const REQUESTED_TARGET = {
 };
 const FALLBACK_TARGET = { ...REQUESTED_TARGET, model: 'mock-fallback' };
 
-const definition: TurnTakingDefinition = {
+const definition: TurnTakingDefinition = defineGraphDefinition({
   id: 'turn-taking',
   definitionVersion: 1,
   data: { maxRounds: 3 },
@@ -84,7 +98,7 @@ const definition: TurnTakingDefinition = {
     { id: 'writer-to-critic', source: 'writer', target: 'critic', data: {} },
     { id: 'critic-to-writer', source: 'critic', target: 'writer', data: {} },
   ],
-};
+});
 
 const graphType: GraphType<
   TurnTakingDefinition,
@@ -202,7 +216,7 @@ const graphType: GraphType<
   },
 };
 
-const events: readonly TurnTakingEvent[] = [
+const events: readonly TurnTakingEvent[] = createGraphEventTrace<TurnTakingEvent>([
   { type: 'node-dispatched', version: 1, payload: { nodeId: 'writer', position: 'turns/1-writer' } },
   { type: 'node-completed', version: 1, payload: { nodeId: 'writer', position: 'turns/1-writer', result: {} } },
   { type: 'node-dispatched', version: 1, payload: { nodeId: 'critic', position: 'turns/1-critic' } },
@@ -215,7 +229,7 @@ const events: readonly TurnTakingEvent[] = [
   { type: 'node-completed', version: 1, payload: { nodeId: 'writer', position: 'turns/3-writer', result: {} } },
   { type: 'node-dispatched', version: 1, payload: { nodeId: 'critic', position: 'turns/3-critic' } },
   { type: 'node-completed', version: 1, payload: { nodeId: 'critic', position: 'turns/3-critic', result: {} } },
-];
+]).events;
 
 const identity = {
   source: 'npm:@example/turn-taking',
@@ -225,7 +239,11 @@ const identity = {
 const resolution: PlanResolution = {
   package: identity,
   admission: { package: identity, permissions: [] },
-  executionLanes: [{ id: CRITIC_LANE, effective: REQUESTED_TARGET }],
+  executionLanes: [{
+    id: CRITIC_LANE,
+    effective: REQUESTED_TARGET,
+    fallbacks: [FALLBACK_TARGET],
+  }],
 };
 
 const fixture = {
@@ -298,22 +316,150 @@ const plan = resolveGraphPlan(compiled.describe(), resolution);
 // attempt to the fallback is exactly what the executor will do.
 const fallbackPlan = resolveGraphPlan(compiled.describe(), {
   ...resolution,
-  executionLanes: [{ id: CRITIC_LANE, effective: FALLBACK_TARGET }],
+  executionLanes: [{
+    id: CRITIC_LANE,
+    effective: FALLBACK_TARGET,
+    fallbacks: [REQUESTED_TARGET],
+  }],
 });
 if (fallbackPlan.plan.executionLanes[0]?.effective.model !== 'mock-fallback') {
   throw new Error('The declared fallback substitution did not resolve.');
 }
 
-console.log(JSON.stringify({
-  conformance: conformance.ok,
-  cases: conformance.cases,
-  state: state.next,
-  decision: compiled.decide(state)[0]?.kind,
-  planDigest: plan.digest,
-  criticLane: plan.plan.executionLanes[0]?.effective.model,
-  fallbackResolves: fallbackPlan.plan.executionLanes[0]?.effective.model,
-  writerLane: plan.plan.nodes.find((node) => node.id === 'writer')?.laneId,
-  dispatches: plan.plan.bounds.dispatches,
-  maxConcurrency: plan.plan.bounds.maxConcurrency,
-  maxFanOut: plan.plan.bounds.maxFanOut,
-}, null, 2));
+const storagePolicy = {
+  schemaVersion: 1,
+  maxEventPayloadBytes: 64_000,
+  maxAppendBatchBytes: 128_000,
+  maxArtifactBytes: 1_000_000,
+  maxTotalArtifactBytesPerRun: 4_000_000,
+  retention: 'until-run-delete',
+  sensitiveContent: {
+    marked: 'reject',
+    exact: 'reject',
+    freeText: 'redact-before-hash',
+  },
+} as const satisfies RunStoragePolicy;
+
+function nodeBinding(
+  root: string,
+  input: Pick<GraphNodeBinding, 'prompt' | 'runData'>,
+): GraphNodeBinding {
+  return {
+    ...input,
+    scratchDirectory: root,
+    workspace: { mode: 'none', directory: null, allowedPaths: [] },
+    trustedCaller: {},
+    permissions: [],
+    policy: {
+      inputBytes: 100_000,
+      outputBytes: 100_000,
+      timeoutMs: 5_000,
+      teardownGraceMs: 100,
+      memoryBytes: 100_000_000,
+      filesChanged: 0,
+      linesChanged: 0,
+      callTokens: null,
+    },
+    resultContract: null,
+    parseResult: null,
+    tokenBudget: null,
+    decideAction: async () => ({ kind: 'allow' }),
+  };
+}
+
+function mockSelection(model: string): EngineSelectionRecord {
+  return {
+    adapter: 'mock',
+    adapterVersion: null,
+    provider: null,
+    modelFamily: null,
+    model,
+    executable: null,
+    capabilities: [],
+  };
+}
+
+const temporaryRoot = await realpath(await mkdtemp(join(tmpdir(), 'obversa-turn-taking-')));
+let primaryCalls = 0;
+let fallbackCalls = 0;
+try {
+  const storage = createLocalRunStorage({
+    directory: join(temporaryRoot, 'storage'),
+    namespace: 'turn-taking-example',
+    policy: storagePolicy,
+  });
+  await persistRunDefinition(storage, {
+    runId: 'turn-taking-run',
+    eventId: 'turn-taking-started',
+    timestamp: '2026-01-01T00:00:00.000Z',
+    graphDefinition: compiled.definition,
+    resolvedPlan: plan,
+    resolvedInputs: {},
+    workspaceBinding: null,
+    hostBinding: null,
+  });
+  const primary = new MockEngine(() => {
+    primaryCalls += 1;
+    throw new EngineError({ kind: 'auth', message: 'The example primary is unavailable.' });
+  });
+  const fallback = new MockEngine(() => {
+    fallbackCalls += 1;
+    return 'accepted';
+  });
+  const executor = await createGraphExecutor({
+    runId: 'turn-taking-run',
+    graph: compiled,
+    storage,
+    nodes: {
+      writer: nodeBinding(temporaryRoot, {
+        prompt: null,
+        runData: async ({ input }) => ({ draft: input }),
+      }),
+      critic: nodeBinding(temporaryRoot, {
+        prompt: 'Review the current draft.',
+        runData: null,
+      }),
+    },
+    engines: [
+      {
+        target: REQUESTED_TARGET,
+        selection: mockSelection('mock-primary'),
+        engine: primary,
+        hardTokenLimitEnforceable: false,
+      },
+      {
+        target: FALLBACK_TARGET,
+        selection: mockSelection('mock-fallback'),
+        engine: fallback,
+        hardTokenLimitEnforceable: false,
+      },
+    ],
+  });
+  const executorResult = await executor.run(new AbortController().signal);
+  const storedEvents = [];
+  for await (const event of storage.eventStore.read({
+    namespace: storage.record.namespace,
+    streamId: 'turn-taking-run',
+  })) storedEvents.push(event);
+
+  console.log(JSON.stringify({
+    conformance: conformance.ok,
+    cases: conformance.cases,
+    state: state.next,
+    decision: compiled.decide(state)[0]?.kind,
+    executor: executorResult.kind,
+    executorOutput: executorResult.kind === 'complete' ? executorResult.output : null,
+    executorDispatches: storedEvents.filter((event) => event.type === 'graph:node-dispatched').length,
+    primaryCalls,
+    fallbackCalls,
+    planDigest: plan.digest,
+    criticLane: plan.plan.executionLanes[0]?.effective.model,
+    fallbackResolves: fallbackPlan.plan.executionLanes[0]?.effective.model,
+    writerLane: plan.plan.nodes.find((node) => node.id === 'writer')?.laneId,
+    dispatches: plan.plan.bounds.dispatches,
+    maxConcurrency: plan.plan.bounds.maxConcurrency,
+    maxFanOut: plan.plan.bounds.maxFanOut,
+  }, null, 2));
+} finally {
+  await rm(temporaryRoot, { recursive: true, force: true });
+}

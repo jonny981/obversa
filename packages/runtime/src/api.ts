@@ -36,16 +36,14 @@ export {
   type GraphType,
 } from './graph/type.js';
 export {
-  graphDecision,
-  executeGraphDispatch,
-  unavailableTargets,
-  selectAvailableTargets,
-  runWithFallback,
-  executeWithFallback,
-  type ExecutorBinding,
-  type GraphExecutorSnapshot,
-  type ModelUnavailableEvent,
-} from './executor.js';
+  createGraphExecutor,
+  GraphExecutionError,
+  type GraphExecutionErrorCode,
+  type GraphNodeBinding,
+  type GraphEngineBinding,
+  type GraphExecutorOptions,
+  type GraphExecutorResult,
+} from './runtime/graph-executor.js';
 export {
   resolveGraphPlan,
   validateGraphDescription,
@@ -103,6 +101,8 @@ export {
   type ArtifactStore,
 } from './artifacts/store.js';
 export {
+  loadRunDefinition,
+  persistRunDefinition,
   validateRunDefinition,
   validateRunStartRecord,
   validateRunStoragePolicy,
@@ -117,6 +117,19 @@ export {
   type RunStartRecord,
   type RunStorageBinding,
 } from './runtime/run-definition.js';
+export type {
+  AttemptBudgetPolicy,
+  TokenBudget,
+} from './runtime/budget.js';
+export type {
+  ActionDecision,
+  AllowActionDecision,
+  WaitActionDecision,
+  DenyActionDecision,
+  NodeDataContext,
+} from './runtime/node-lifecycle.js';
+export type { ResultContract } from './runtime/result-contract.js';
+export type { NodeWorkspacePolicy } from './runtime/workspace-policy.js';
 
 export type {
   Job,
@@ -240,7 +253,7 @@ export type {
   Usage,
   UsageReceipt,
 } from './engines/engine.js';
-export { EngineIncompleteResultError } from './engines/engine.js';
+export { EngineError, EngineIncompleteResultError } from './engines/engine.js';
 export {
   finalResultPart,
   finalResultText,

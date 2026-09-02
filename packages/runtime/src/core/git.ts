@@ -536,8 +536,6 @@ export interface WorktreeHandle {
   branch: string;
 }
 
-let worktreeAddTail: Promise<void> = Promise.resolve();
-
 /**
  * Fork an isolated worktree on a new branch from `base` (default HEAD). Each
  * concurrent writer gets its own working dir and branch, so siblings never
@@ -548,19 +546,10 @@ export async function addWorktree(
   opts: { branch: string; base?: string; signal?: AbortSignal },
 ): Promise<WorktreeHandle> {
   const dir = mkdtempSync(join(tmpdir(), 'lines-wt-'));
-  const previous = worktreeAddTail;
-  let release!: () => void;
-  worktreeAddTail = new Promise<void>((resolve) => { release = resolve; });
-  await previous;
-  let r: { stdout: string; exitCode: number };
-  try {
-    r = await git(
-      ['worktree', 'add', '-b', opts.branch, dir, opts.base ?? 'HEAD'],
-      { cwd: repoDir, signal: opts.signal },
-    );
-  } finally {
-    release();
-  }
+  const r = await git(
+    ['worktree', 'add', '-b', opts.branch, dir, opts.base ?? 'HEAD'],
+    { cwd: repoDir, signal: opts.signal },
+  );
   if (r.exitCode !== 0)
     throw new Error(
       `git worktree add failed (exit ${r.exitCode}): ${r.stdout}`.trim(),

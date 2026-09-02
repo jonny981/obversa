@@ -90,6 +90,7 @@ function resolution(): PlanResolution {
     executionLanes: [{
       id: 'author-lane',
       effective: description.executionLanes[0]!.requested,
+      fallbacks: description.executionLanes[0]!.knownSubstitutions,
     }],
   };
 }
@@ -220,6 +221,9 @@ describe('resolveGraphPlan', () => {
     });
     expect(first.plan.permissions.requested).toHaveLength(1);
     expect(first.plan.permissions.admitted).toHaveLength(2);
+    expect(first.plan.executionLanes[0]!.fallbacks).toEqual(
+      description.executionLanes[0]!.knownSubstitutions,
+    );
   });
 
   it('rejects unknown fields inside runtime-owned resolved-plan records', () => {
@@ -287,6 +291,7 @@ describe('resolveGraphPlan', () => {
       executionLanes: [{
       id: 'author-lane',
         effective: requested,
+        fallbacks: description.executionLanes[0]!.knownSubstitutions,
       }],
     };
 
@@ -305,7 +310,11 @@ describe('resolveGraphPlan', () => {
     };
     const changedResolution: PlanResolution = {
       ...resolution(),
-      executionLanes: [{ id: 'author-lane', effective: requested }],
+      executionLanes: [{
+        id: 'author-lane',
+        effective: requested,
+        fallbacks: description.executionLanes[0]!.knownSubstitutions,
+      }],
     };
     expect(resolveGraphPlan(changedTools, changedResolution).digest).not.toBe(base.digest);
 
@@ -320,7 +329,14 @@ describe('resolveGraphPlan', () => {
         knownSubstitutions: [substitution],
       }],
     };
-    expect(resolveGraphPlan(changedSubstitution, resolution()).digest).not.toBe(base.digest);
+    expect(resolveGraphPlan(changedSubstitution, {
+      ...resolution(),
+      executionLanes: [{
+        id: 'author-lane',
+        effective: description.executionLanes[0]!.requested,
+        fallbacks: [substitution],
+      }],
+    }).digest).not.toBe(base.digest);
   });
 
   it.each(['source', 'version', 'digest'] as const)(
@@ -370,8 +386,36 @@ describe('resolveGraphPlan', () => {
           model: 'other',
           tools: [],
         },
+        fallbacks: [],
       }],
     };
     expect(() => resolveGraphPlan(description, changed)).toThrow(/substitution/i);
+  });
+
+  it('freezes the host-selected fallback order without repeating the effective target', () => {
+    const requested = description.executionLanes[0]!.requested;
+    const fallback = description.executionLanes[0]!.knownSubstitutions[0]!;
+    const resolved = resolveGraphPlan(description, {
+      ...resolution(),
+      executionLanes: [{
+        id: 'author-lane',
+        effective: fallback,
+        fallbacks: [requested],
+      }],
+    });
+
+    expect(resolved.plan.executionLanes[0]).toMatchObject({
+      effective: fallback,
+      fallbacks: [requested],
+    });
+    expect(Object.isFrozen(resolved.plan.executionLanes[0]!.fallbacks)).toBe(true);
+    expect(() => resolveGraphPlan(description, {
+      ...resolution(),
+      executionLanes: [{
+        id: 'author-lane',
+        effective: fallback,
+        fallbacks: [fallback],
+      }],
+    })).toThrow(/fallback/i);
   });
 });

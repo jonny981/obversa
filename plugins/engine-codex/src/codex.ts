@@ -208,11 +208,12 @@ export class CodexEngine implements Engine {
       } catch {
         /* no final message written */
       }
-      if ((sub.aborted || signal.aborted) && !(sub.timedOut && text))
+      const aborted = sub.aborted || signal.aborted;
+      if (aborted && !text)
         throw new EngineError({ kind: 'aborted', message: 'codex run aborted' });
       const stdout = new TextDecoder().decode(sub.stdout);
       const stderr = new TextDecoder().decode(sub.stderr);
-      const failed = sub.timedOut || sub.exitCode !== 0;
+      const failed = aborted || sub.timedOut || sub.exitCode !== 0;
       const diagnostic = diagnosticCapture(stderr, stdout, env);
       let transportFailure: AgentResult['transportFailure'];
       if (failed && !text)
@@ -228,7 +229,7 @@ export class CodexEngine implements Engine {
         });
       if (failed) {
         transportFailure = {
-          kind: sub.timedOut ? 'timeout' : 'unknown',
+          kind: aborted ? 'aborted' : sub.timedOut ? 'timeout' : 'unknown',
           message: `codex completed but exited ${sub.exitCode ?? '?'} during teardown${
             diagnostic ? `: ${diagnostic}` : ''
           }`,

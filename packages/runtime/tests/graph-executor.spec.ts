@@ -1,205 +1,791 @@
-import { describe, expect, it } from 'vitest';
-import { readFileSync } from 'node:fs';
-import { resolve } from 'node:path';
+import { randomUUID } from 'node:crypto';
+import { mkdtemp, realpath, rm } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 
-import { executeGraphDispatch, executeWithFallback, graphDecision, runWithFallback, selectAvailableTargets, unavailableTargets, type ModelUnavailableEvent } from '../src/executor.js';
-import { createAttemptIdentity } from '../src/runtime/attempt.js';
+import type { Memory } from '@obversa/memory';
+import {
+  EngineError,
+  type AgentRequest,
+  type AgentResult,
+  type Engine,
+  type EngineEventSink,
+  type EngineSelectionRecord,
+} from '@obversa/engine';
+import { MockEngine } from '@obversa/engine/testing';
+import { afterEach, describe, expect, it } from 'vitest';
+
 import { compileGraph, type GraphEvent, type GraphType } from '../src/graph/type.js';
 import type { GraphDefinition } from '../src/graph/kernel.js';
-import type { EngineSelectionRecord } from '../src/engines/engine.js';
+import {
+  resolveGraphPlan,
+  type ExecutionTarget,
+  type GraphRequirements,
+  type PlanResolution,
+} from '../src/graph/plan.js';
+import { cloneFrozenJson, type JsonObject, type JsonValue } from '../src/graph/value.js';
+import { validateNewDomainEvent, type DomainEventEnvelope } from '../src/events/envelope.js';
+import type { EventStore } from '../src/events/store.js';
+import { createLocalRunStorage } from '../src/storage/local.js';
+import { StorageError } from '../src/storage/error.js';
+import { createAttemptIdentity } from '../src/runtime/attempt.js';
+import { persistRunDefinition, type RunStorageBinding } from '../src/runtime/run-definition.js';
+import {
+  createGraphExecutor,
+  GraphExecutionError,
+  type GraphEngineBinding,
+  type GraphNodeBinding,
+} from '../src/runtime/graph-executor.js';
 
-type Definition = GraphDefinition<{}, {}, {}>;
-type State = { readonly next: 'writer' | 'critic'; readonly inFlight: string | null };
-type Event = GraphEvent<'node-dispatched' | 'node-completed', { readonly nodeId: string; readonly position: string }>;
+interface TestData extends JsonObject {
+  readonly completeAfter: number;
+  readonly failAfter: number;
+  readonly idle: boolean;
+  readonly reusePosition: boolean;
+  readonly engineBacked: boolean;
+  readonly memory: 'required' | 'unused';
+  readonly parallel: boolean;
+  readonly terminalWhileInFlight: boolean;
+}
 
-const definition: Definition = {
-  id: 'executor-test', definitionVersion: 1, data: {},
-  nodes: [{ id: 'writer', data: {} }, { id: 'critic', data: {} }], edges: [],
+type TestDefinition = GraphDefinition<JsonObject, JsonObject, TestData>;
+
+interface DispatchedPayload extends JsonObject {
+  readonly nodeId: string;
+  readonly position: string;
+}
+
+type TestEvent = GraphEvent<
+  'node-dispatched',
+  DispatchedPayload
+> | GraphEvent<
+  'node-completed',
+  DispatchedPayload & { readonly result: JsonValue }
+> | GraphEvent<
+  'node-failed',
+  DispatchedPayload & { readonly code: string }
+>;
+
+interface TestState extends JsonObject {
+  readonly attempts: number;
+  readonly status: 'ready' | 'in-flight' | 'complete' | 'failed';
+}
+
+const PRIMARY_TARGET: ExecutionTarget = {
+  adapter: 'mock',
+  provider: 'provider',
+  modelFamily: 'family',
+  model: 'primary',
+  tools: [],
+};
+const FALLBACK_TARGET: ExecutionTarget = {
+  ...PRIMARY_TARGET,
+  model: 'fallback',
+};
+const PRIMARY_SELECTION: EngineSelectionRecord = {
+  adapter: 'mock',
+  adapterVersion: '1.0.0',
+  provider: 'provider',
+  modelFamily: 'family',
+  model: 'primary',
+  executable: null,
+  capabilities: [],
+};
+const FALLBACK_SELECTION: EngineSelectionRecord = {
+  ...PRIMARY_SELECTION,
+  model: 'fallback',
 };
 
-const graphType: GraphType<Definition, State, Event, { readonly memory: 'unused' }> = {
-  kind: 'executor-test', version: 1,
-  compile(value) {
+const roots: string[] = [];
+let sequence = 0;
+
+afterEach(async () => {
+  await Promise.all(roots.splice(0).map((root) => rm(root, { recursive: true, force: true })));
+});
+
+function graphType(): GraphType<TestDefinition, TestState, TestEvent, GraphRequirements> {
+  return {
+    kind: 'executor-test',
+    version: 1,
+    compile(definition) {
+      return {
+        requirements: { memory: definition.data.memory },
+        initialState: () => ({ attempts: 0, status: 'ready' }),
+        reduce(state, event) {
+          if (event.type === 'node-dispatched' && state.status === 'ready') {
+            return { ...state, status: 'in-flight' };
+          }
+          if (event.type === 'node-completed' && state.status === 'in-flight') {
+            const attempts = state.attempts + 1;
+            return {
+              attempts,
+              status: attempts >= definition.data.completeAfter ? 'complete' : 'ready',
+            };
+          }
+          if (event.type === 'node-failed' && state.status === 'in-flight') {
+            const attempts = state.attempts + 1;
+            return {
+              attempts,
+              status: attempts >= definition.data.failAfter ? 'failed' : 'ready',
+            };
+          }
+          return state;
+        },
+        decide(state) {
+          if (definition.data.idle) return [];
+          if (state.status === 'in-flight') {
+            return definition.data.terminalWhileInFlight
+              ? [{ kind: 'complete', output: { attempts: state.attempts } }]
+              : [];
+          }
+          if (state.status === 'complete') {
+            return [{ kind: 'complete', output: { attempts: state.attempts } }];
+          }
+          if (state.status === 'failed') {
+            return [{ kind: 'fail', code: 'TEST_FAILED', message: 'The test node failed.' }];
+          }
+          if (definition.data.parallel) {
+            return definition.nodes.map((node) => ({
+              kind: 'dispatch' as const,
+              nodeId: node.id,
+              input: { attempt: state.attempts + 1 },
+              position: `turns/${state.attempts + 1}-${node.id}`,
+            }));
+          }
+          return [{
+            kind: 'dispatch',
+            nodeId: 'worker',
+            input: { attempt: state.attempts + 1 },
+            position: `turns/${definition.data.reusePosition ? 1 : state.attempts + 1}`,
+          }];
+        },
+        describe() {
+          return {
+            inputContract: {},
+            outputContract: {},
+            phases: [{ id: 'work', name: 'Work', nodeIds: definition.nodes.map((node) => node.id) }],
+            nodes: definition.nodes.map((node) => ({
+              id: node.id,
+              phaseId: 'work',
+              inputContract: {},
+              outputContract: {},
+              laneId: definition.data.engineBacked && node.id === 'worker' ? 'worker-lane' : null,
+            })),
+            policies: {
+              retry: null,
+              stop: null,
+              concurrency: { global: 1 },
+              write: null,
+              budget: null,
+              action: null,
+            },
+            executionLanes: definition.data.engineBacked ? [{
+              id: 'worker-lane',
+              requested: PRIMARY_TARGET,
+              knownSubstitutions: [FALLBACK_TARGET],
+            }] : [],
+            requestedPermissions: [],
+            bounds: {
+              dispatches: {
+                min: { kind: 'unknown', reason: 'test' },
+                max: { kind: 'unknown', reason: 'test' },
+              },
+              maxConcurrency: { kind: 'known', value: 1 },
+              maxFanOut: { kind: 'known', value: 1 },
+            },
+          };
+        },
+      };
+    },
+  };
+}
+
+function definition(overrides: Partial<TestData> = {}): TestDefinition {
+  const data: TestData = {
+    completeAfter: 1,
+    failAfter: 1,
+    idle: false,
+    reusePosition: false,
+    engineBacked: true,
+    memory: 'unused',
+    parallel: false,
+    terminalWhileInFlight: false,
+    ...overrides,
+  };
+  return {
+    id: 'executor-test',
+    definitionVersion: 1,
+    data,
+    nodes: data.parallel
+      ? [{ id: 'worker', data: {} }, { id: 'reviewer', data: {} }]
+      : [{ id: 'worker', data: {} }],
+    edges: [],
+  };
+}
+
+const packageIdentity = {
+  source: 'npm:@example/executor-test',
+  version: '1.0.0',
+  digest: `sha256:${'4'.repeat(64)}` as const,
+};
+
+const policy = {
+  schemaVersion: 1,
+  maxEventPayloadBytes: 64_000,
+  maxAppendBatchBytes: 128_000,
+  maxArtifactBytes: 1_000_000,
+  maxTotalArtifactBytesPerRun: 4_000_000,
+  retention: 'until-run-delete',
+  sensitiveContent: {
+    marked: 'reject',
+    exact: 'reject',
+    freeText: 'redact-before-hash',
+  },
+} as const;
+
+async function storedRun(input: TestDefinition): Promise<{
+  readonly graph: ReturnType<typeof compileGraph<TestDefinition, TestState, TestEvent, GraphRequirements>>;
+  readonly runId: string;
+  readonly storage: RunStorageBinding;
+  readonly root: string;
+}> {
+  const root = await realpath(await mkdtemp(join(tmpdir(), 'obversa-graph-executor-')));
+  roots.push(root);
+  const runId = `executor-${sequence += 1}`;
+  const graph = compileGraph(graphType(), input);
+  const executionLanes: PlanResolution['executionLanes'] = input.data.engineBacked
+    ? [{ id: 'worker-lane', effective: PRIMARY_TARGET, fallbacks: [FALLBACK_TARGET] }]
+    : [];
+  const plan = resolveGraphPlan(graph.describe(), {
+    package: packageIdentity,
+    admission: { package: packageIdentity, permissions: [] },
+    executionLanes,
+  });
+  const storage = createLocalRunStorage({
+    directory: join(root, 'storage'),
+    namespace: 'executor-tests',
+    policy,
+  });
+  await persistRunDefinition(storage, {
+    runId,
+    eventId: randomUUID(),
+    timestamp: new Date().toISOString(),
+    graphDefinition: graph.definition,
+    resolvedPlan: plan,
+    resolvedInputs: {},
+    workspaceBinding: null,
+    hostBinding: null,
+  });
+  return { graph, runId, storage, root };
+}
+
+function nodeBinding(root: string, input: {
+  readonly prompt?: string;
+  readonly runData?: GraphNodeBinding['runData'];
+} = {}): GraphNodeBinding {
+  return {
+    prompt: input.prompt ?? null,
+    scratchDirectory: root,
+    workspace: { mode: 'none', directory: null, allowedPaths: [] },
+    trustedCaller: {},
+    permissions: [],
+    policy: {
+      inputBytes: 100_000,
+      outputBytes: 100_000,
+      timeoutMs: 5_000,
+      teardownGraceMs: 100,
+      memoryBytes: 100_000_000,
+      filesChanged: 0,
+      linesChanged: 0,
+      callTokens: null,
+    },
+    resultContract: null,
+    runData: input.runData ?? null,
+    parseResult: null,
+    tokenBudget: null,
+    decideAction: async () => ({ kind: 'allow' }),
+  };
+}
+
+function engineBinding(
+  target: ExecutionTarget,
+  selection: EngineSelectionRecord,
+  engine: Engine,
+): GraphEngineBinding {
+  return { target, selection, engine, hardTokenLimitEnforceable: false };
+}
+
+class SelectedEngine implements Engine {
+  readonly name = 'selected';
+  calls = 0;
+
+  constructor(
+    private readonly selection: EngineSelectionRecord,
+    private readonly value: JsonValue = { ok: true },
+  ) {}
+
+  async run(
+    _request: AgentRequest,
+    _onEvent: EngineEventSink,
+    _signal: AbortSignal,
+  ): Promise<AgentResult> {
+    this.calls += 1;
     return {
-      requirements: { memory: 'unused' },
-      initialState: () => ({ next: 'writer', inFlight: null }),
-      reduce(state, event) {
-        if (event.type === 'node-dispatched' && state.inFlight === null && event.payload.nodeId === state.next)
-          return { ...state, inFlight: event.payload.position };
-        if (event.type === 'node-completed' && event.payload.position === state.inFlight)
-          return { next: state.next === 'writer' ? 'critic' : 'writer', inFlight: null };
-        return state;
-      },
-      decide(state) {
-        if (state.inFlight !== null) return [];
-        return [{ kind: 'dispatch', nodeId: state.next, input: {}, position: `turns/${state.next}` }];
-      },
-      describe: () => ({
-        inputContract: {}, outputContract: {}, phases: [{ id: 'main', name: 'Main', nodeIds: ['writer', 'critic'] }],
-        nodes: ['writer', 'critic'].map((id) => ({ id, phaseId: 'main', inputContract: {}, outputContract: {}, laneId: null })),
-        policies: { retry: null, stop: null, concurrency: { global: 1 }, write: null, budget: null, action: null },
-        executionLanes: [], requestedPermissions: [],
-        bounds: { dispatches: { min: { kind: 'unknown', reason: 'test' }, max: { kind: 'unknown', reason: 'test' } }, maxConcurrency: { kind: 'known', value: 1 }, maxFanOut: { kind: 'known', value: 1 } },
-      }),
+      parts: [{ kind: 'structured', value: this.value, final: true }],
+      usage: { kind: 'reported', inputTokens: 1, outputTokens: 1 },
+      requested: this.selection,
+      effective: this.selection,
+      stopReason: 'end_turn',
+    };
+  }
+}
+
+async function events(storage: RunStorageBinding, runId: string): Promise<readonly DomainEventEnvelope[]> {
+  const result: DomainEventEnvelope[] = [];
+  for await (const event of storage.eventStore.read({
+    namespace: storage.record.namespace,
+    streamId: runId,
+  })) result.push(event);
+  return result;
+}
+
+async function appendGraphEvent(
+  storage: RunStorageBinding,
+  runId: string,
+  event: { readonly type: string; readonly version: number; readonly payload: JsonValue },
+): Promise<void> {
+  const current = await events(storage, runId);
+  await storage.eventStore.append(
+    { namespace: storage.record.namespace, streamId: runId },
+    current.at(-1)?.revision ?? 0,
+    [validateNewDomainEvent({
+      eventId: randomUUID(),
+      type: `graph:${event.type}`,
+      version: event.version,
+      timestamp: new Date().toISOString(),
+      correlationId: runId,
+      causationId: null,
+      payload: event.payload,
+    })],
+  );
+}
+
+const validMemory: Memory = {
+  scope: 'executor-test',
+  async execute(command) {
+    return {
+      ok: false,
+      command: command.command,
+      error: { code: 'STORAGE_ERROR', message: 'Not used by this test.' },
     };
   },
 };
 
-describe('graphDecision', () => {
-  const compiled = compileGraph(graphType, definition);
+describe('createGraphExecutor', () => {
+  it('records an auth-dead primary once, then skips it on the next dispatch', async () => {
+    const run = await storedRun(definition({ completeAfter: 2 }));
+    let primaryCalls = 0;
+    const primary = new MockEngine(() => {
+      primaryCalls += 1;
+      throw new EngineError({ kind: 'auth', message: 'bad primary credentials' });
+    });
+    const fallback = new SelectedEngine(FALLBACK_SELECTION);
+    const executor = await createGraphExecutor({
+      ...run,
+      nodes: { worker: nodeBinding(run.root, { prompt: 'Do the work.' }) },
+      engines: [
+        engineBinding(PRIMARY_TARGET, PRIMARY_SELECTION, primary),
+        engineBinding(FALLBACK_TARGET, FALLBACK_SELECTION, fallback),
+      ],
+    });
 
-  it('folds durable events and returns the next dispatch', () => {
-    const snapshot = graphDecision(compiled, [
-      { type: 'node-dispatched', version: 1, payload: { nodeId: 'writer', position: 'turns/writer' } },
-      { type: 'node-completed', version: 1, payload: { nodeId: 'writer', position: 'turns/writer' } },
+    await expect(executor.run(new AbortController().signal)).resolves.toEqual({
+      kind: 'complete',
+      output: { attempts: 2 },
+    });
+    expect(primaryCalls).toBe(1);
+    expect(fallback.calls).toBe(2);
+
+    const durableTypes = (await events(run.storage, run.runId)).map((event) => event.type);
+    expect(durableTypes).toEqual([
+      'graph:run-started',
+      'graph:node-dispatched',
+      'graph:model-unavailable',
+      'graph:node-completed',
+      'graph:node-dispatched',
+      'graph:node-completed',
     ]);
-    expect(snapshot.state).toEqual({ next: 'critic', inFlight: null });
-    expect(snapshot.commands[0]).toMatchObject({ kind: 'dispatch', nodeId: 'critic' });
   });
 
-  it('accepts an empty decision while work is in flight', () => {
-    const snapshot = graphDecision(compiled, [
-      { type: 'node-dispatched', version: 1, payload: { nodeId: 'writer', position: 'turns/writer' } },
-    ]);
-    expect(snapshot.commands).toEqual([]);
+  it('does not call the fallback for a rate limit', async () => {
+    const run = await storedRun(definition());
+    let primaryCalls = 0;
+    const primary = new MockEngine(() => {
+      primaryCalls += 1;
+      throw new EngineError({ kind: 'rate-limit', message: 'try later' });
+    });
+    const fallback = new SelectedEngine(FALLBACK_SELECTION);
+    const executor = await createGraphExecutor({
+      ...run,
+      nodes: { worker: nodeBinding(run.root, { prompt: 'Do the work.' }) },
+      engines: [
+        engineBinding(PRIMARY_TARGET, PRIMARY_SELECTION, primary),
+        engineBinding(FALLBACK_TARGET, FALLBACK_SELECTION, fallback),
+      ],
+    });
+
+    await expect(executor.run(new AbortController().signal)).resolves.toMatchObject({
+      kind: 'fail',
+      code: 'TEST_FAILED',
+    });
+    expect(primaryCalls).toBe(1);
+    expect(fallback.calls).toBe(0);
   });
 
-  it('rejects a dispatch position already present in durable events', () => {
-    expect(() => graphDecision(compiled, [
-      { type: 'node-dispatched', version: 1, payload: { nodeId: 'critic', position: 'turns/writer' } },
-    ])).toThrow('Dispatch position already exists: turns/writer');
-  });
-
-  it('prepares the critic lane before starting its attempt', async () => {
-    let preparedNode: string | null = null;
-    const command = { kind: 'dispatch' as const, nodeId: 'critic', input: {}, position: 'turns/critic' };
-    const record = await executeGraphDispatch(command, {
-      critic: {
-        prepare(value) {
-          preparedNode = value.nodeId;
-          return {
-            nodeId: value.nodeId,
-            identity: { runId: 'run', nodeId: value.nodeId, position: value.position },
-            input: value.input, prompt: null,
-            scratchDirectory: '/tmp', workspace: { mode: 'none', directory: null, allowedPaths: [] },
-            trustedCaller: {}, permissions: [], policy: { timeoutMs: 1000, teardownGraceMs: 1000, inputBytes: 1000, outputBytes: 1000, memoryBytes: 1000, filesChanged: 0, linesChanged: 0 },
-            resultContract: null, engineRoute: null, runData: async () => ({ ok: true }), parseResult: null,
-            tokenBudget: null, recordModelUnavailable: async () => {}, decideAction: async () => ({ kind: 'allow' }),
-          } as never;
-        },
-      },
-    }, new AbortController().signal);
-    expect(preparedNode).toBe('critic');
-    expect(record.identity.nodeId).toBe('critic');
-  });
-
-  it('rebuilds a unique dead-model list from durable events', () => {
-    const effective = { adapter: 'mock', adapterVersion: '1', provider: 'mock', modelFamily: 'family', model: 'primary', executable: null, capabilities: [] };
-    expect(unavailableTargets([
-      { type: 'model-unavailable', version: 1, payload: { effective } },
-      { type: 'model-unavailable', version: 1, payload: { effective } },
-    ])).toEqual([effective]);
-  });
-
-  it('selects the declared fallback and reports exhaustion when all targets are dead', () => {
-    const primary = { adapter: 'mock', adapterVersion: '1', provider: 'mock', modelFamily: 'family', model: 'primary', executable: null, capabilities: [] };
-    const fallback = { ...primary, model: 'fallback' };
-    expect(selectAvailableTargets([primary, fallback], [primary])).toEqual([fallback]);
-    expect(selectAvailableTargets([primary, fallback], [primary, fallback])).toEqual([]);
-  });
-
-  it('routes a failed primary attempt to the declared fallback', async () => {
-    const primary = { adapter: 'mock', adapterVersion: '1', provider: 'mock', modelFamily: 'family', model: 'primary', executable: null, capabilities: [] };
-    const fallback = { ...primary, model: 'fallback' };
-    const result = await runWithFallback([primary, fallback], [], async (target) =>
-      target.model === 'primary' ? { unavailable: true } : { unavailable: false, value: 'completed' });
-    expect(result).toEqual({ target: fallback, value: 'completed' });
-  });
-
-  it('does not call a dead primary again when every declared lane is exhausted', async () => {
-    const primary = { adapter: 'mock', adapterVersion: '1', provider: 'mock', modelFamily: 'family', model: 'primary', executable: null, capabilities: [] };
-    const fallback = { ...primary, model: 'fallback' };
-    let calls = 0;
-    const result = await runWithFallback([primary, fallback], [primary, fallback], async () => {
-      calls += 1;
-      return { unavailable: true };
-    }) as never;
-    expect(result).toEqual({ status: 'failed', code: 'ENGINE_UNAVAILABLE' });
-    expect(calls).toBe(0);
-  });
-
-  it('exhausts both lanes after EngineError auth failures', async () => {
-    const primary = { adapter: 'mock', adapterVersion: '1', provider: 'mock', modelFamily: 'family', model: 'primary', executable: null, capabilities: [] };
-    const fallback = { ...primary, model: 'fallback' };
-    let calls = 0;
-    const result = await runWithFallback([primary, fallback], [], async () => {
-      calls += 1;
-      return { unavailable: true };
-    }) as never;
-    expect(result).toEqual({ status: 'failed', code: 'ENGINE_UNAVAILABLE' });
-    expect(calls).toBe(2);
-  });
-
-  it('rebuilds the same critic dispatch after a writer crash', () => {
-    const events: Event[] = [
-      { type: 'node-dispatched', version: 1, payload: { nodeId: 'writer', position: 'turns/writer' } },
-      { type: 'node-completed', version: 1, payload: { nodeId: 'writer', position: 'turns/writer' } },
-    ];
-    const first = graphDecision(compiled, events);
-    const resumed = graphDecision(compiled, [...events]);
-    expect(resumed.commands).toEqual(first.commands);
-    expect(resumed.commands[0]).toMatchObject({ nodeId: 'critic', position: 'turns/critic' });
-  });
-
-  it('rebuilds the same state after critic round one is replayed', () => {
-    const events: Event[] = [
-      { type: 'node-dispatched', version: 1, payload: { nodeId: 'writer', position: 'turns/writer' } },
-      { type: 'node-completed', version: 1, payload: { nodeId: 'writer', position: 'turns/writer' } },
-      { type: 'node-dispatched', version: 1, payload: { nodeId: 'critic', position: 'turns/critic' } },
-    ];
-    expect(graphDecision(compiled, events).state).toEqual(graphDecision(compiled, [...events]).state);
-  });
-
-  it('rebuilds dead-lane availability from the stream after a crash', () => {
-    const dead = { adapter: 'mock', adapterVersion: '1', provider: 'mock', modelFamily: 'family', model: 'primary', executable: null, capabilities: [] };
-    const events: ModelUnavailableEvent[] = [{ type: 'model-unavailable', version: 1, payload: { effective: dead } }];
-    expect(unavailableTargets(events)).toEqual(unavailableTargets([...events]));
-    expect(selectAvailableTargets([dead, { ...dead, model: 'fallback' }], unavailableTargets(events))[0]?.model).toBe('fallback');
-  });
-
-  it('keeps the outside example on documented package entry points', () => {
-    const source = readFileSync(resolve(process.cwd(), '../../examples/packages/turn-taking.ts'), 'utf8');
-    const imports = [...source.matchAll(/from\s+['"]([^'"]+)['"]/g)].map((match) => match[1]);
-    expect(imports.every((specifier) => specifier === '@obversa/runtime' || specifier === '@obversa/runtime/testing')).toBe(true);
-  });
-
-
-  it('runs a primary-dead turn through executeNodeAttempt and completes on fallback', async () => {
-    const primary = { adapter: 'mock', adapterVersion: '1', provider: 'mock', modelFamily: 'family', model: 'primary', executable: null, capabilities: [] };
-    const fallback = { ...primary, model: 'fallback' };
-    let selected: string | null = null;
+  it('records ENGINE_UNAVAILABLE and retries without another engine call', async () => {
+    const run = await storedRun(definition({ failAfter: 2 }));
     let primaryCalls = 0;
     let fallbackCalls = 0;
-    const prepare: (target: EngineSelectionRecord) => any = (target) => ({
-      ...(() => { selected = target.model; return {}; })(),
-      ...(() => { if (target.model === 'primary') primaryCalls += 1; else fallbackCalls += 1; return {}; })(),
-      identity: createAttemptIdentity({ namespace: 'test', streamId: 'turn-taking', nodeId: 'critic', position: `turns/${target.model}` }),
-      nodeId: 'critic', input: {}, prompt: null, scratchDirectory: process.cwd(),
-      workspace: { mode: 'none', directory: null, allowedPaths: [] }, trustedCaller: {}, permissions: [],
-      policy: { timeoutMs: 1000, teardownGraceMs: 1000, inputBytes: 1000, outputBytes: 1000, memoryBytes: 1000, filesChanged: 0, linesChanged: 0, callTokens: null },
-      resultContract: null, engineRoute: null, runData: async () => {
-        if (target.model === 'primary') throw new Error('auth');
-        return { target: target.model };
-      }, parseResult: null,
-      tokenBudget: null, recordModelUnavailable: async () => {}, decideAction: async () => ({ kind: 'allow' }),
+    const primary = new MockEngine(() => {
+      primaryCalls += 1;
+      throw new EngineError({ kind: 'auth', message: 'primary is dead' });
     });
-    const result = await executeWithFallback([primary, fallback], [], prepare, new AbortController().signal);
-    await executeWithFallback([primary, fallback], [primary], prepare, new AbortController().signal);
-    await executeWithFallback([primary, fallback], [primary], prepare, new AbortController().signal);
-    expect(selected).toBe('fallback');
-    expect(result && 'target' in result ? result.target.model : null).toBe('fallback');
-    expect(result && 'record' in result ? result.record.status : null).toBe('completed');
+    const fallback = new MockEngine(() => {
+      fallbackCalls += 1;
+      throw new EngineError({ kind: 'auth', message: 'fallback is dead' });
+    });
+    const executor = await createGraphExecutor({
+      ...run,
+      nodes: { worker: nodeBinding(run.root, { prompt: 'Do the work.' }) },
+      engines: [
+        engineBinding(PRIMARY_TARGET, PRIMARY_SELECTION, primary),
+        engineBinding(FALLBACK_TARGET, FALLBACK_SELECTION, fallback),
+      ],
+    });
+
+    await expect(executor.run(new AbortController().signal)).resolves.toEqual({
+      kind: 'fail',
+      code: 'TEST_FAILED',
+      message: 'The test node failed.',
+    });
     expect(primaryCalls).toBe(1);
-    expect(fallbackCalls).toBe(3);
+    expect(fallbackCalls).toBe(1);
+
+    const durable = await events(run.storage, run.runId);
+    expect(durable.filter((event) => event.type === 'graph:node-failed').map((event) => event.payload))
+      .toEqual([
+        { nodeId: 'worker', position: 'turns/1', code: 'ENGINE_UNAVAILABLE' },
+        { nodeId: 'worker', position: 'turns/2', code: 'ENGINE_UNAVAILABLE' },
+      ]);
+
+    const fresh = await createGraphExecutor({
+      ...run,
+      nodes: { worker: nodeBinding(run.root, { prompt: 'Do the work.' }) },
+      engines: [
+        engineBinding(PRIMARY_TARGET, PRIMARY_SELECTION, primary),
+        engineBinding(FALLBACK_TARGET, FALLBACK_SELECTION, fallback),
+      ],
+    });
+    await expect(fresh.run(new AbortController().signal)).resolves.toMatchObject({ kind: 'fail' });
+    expect(primaryCalls).toBe(1);
+    expect(fallbackCalls).toBe(1);
+  });
+
+  it('rejects an idle empty decision but returns waiting for recorded in-flight work', async () => {
+    const idle = await storedRun(definition({ idle: true, engineBacked: false }));
+    const idleExecutor = await createGraphExecutor({
+      ...idle,
+      nodes: { worker: nodeBinding(idle.root, { runData: async () => ({ ok: true }) }) },
+      engines: [],
+    });
+    await expect(idleExecutor.run(new AbortController().signal)).rejects.toMatchObject({
+      name: 'GraphExecutionError',
+      code: 'EMPTY_DECISION',
+    });
+
+    const inFlight = await storedRun(definition({ engineBacked: false }));
+    await appendGraphEvent(inFlight.storage, inFlight.runId, {
+      type: 'node-dispatched',
+      version: 1,
+      payload: { nodeId: 'worker', position: 'turns/1' },
+    });
+    const resumed = await createGraphExecutor({
+      ...inFlight,
+      nodes: { worker: nodeBinding(inFlight.root, { runData: async () => ({ ok: true }) }) },
+      engines: [],
+    });
+    await expect(resumed.run(new AbortController().signal)).resolves.toEqual({
+      kind: 'waiting',
+      positions: ['turns/1'],
+    });
+  });
+
+  it('rejects a terminal decision while durable work is still in flight', async () => {
+    const run = await storedRun(definition({
+      engineBacked: false,
+      terminalWhileInFlight: true,
+    }));
+    await appendGraphEvent(run.storage, run.runId, {
+      type: 'node-dispatched',
+      version: 1,
+      payload: { nodeId: 'worker', position: 'turns/1' },
+    });
+    const executor = await createGraphExecutor({
+      ...run,
+      nodes: { worker: nodeBinding(run.root, { runData: async () => ({ ok: true }) }) },
+      engines: [],
+    });
+
+    await expect(executor.run(new AbortController().signal)).rejects.toMatchObject({
+      name: 'GraphExecutionError',
+      code: 'PROTOCOL',
+    });
+  });
+
+  it('refuses a durable position before another attempt starts', async () => {
+    const run = await storedRun(definition({ completeAfter: 2, reusePosition: true, engineBacked: false }));
+    let calls = 0;
+    const executor = await createGraphExecutor({
+      ...run,
+      nodes: {
+        worker: nodeBinding(run.root, {
+          runData: async () => {
+            calls += 1;
+            return { ok: true };
+          },
+        }),
+      },
+      engines: [],
+    });
+
+    await expect(executor.run(new AbortController().signal)).rejects.toMatchObject({
+      name: 'GraphExecutionError',
+      code: 'DUPLICATE_POSITION',
+    });
+    expect(calls).toBe(1);
+  });
+
+  it('records the whole dispatch decision before either data node starts', async () => {
+    const run = await storedRun(definition({ engineBacked: false, parallel: true }));
+    const observedDispatchCounts: number[] = [];
+    const runData: GraphNodeBinding['runData'] = async () => {
+      observedDispatchCounts.push(
+        (await events(run.storage, run.runId))
+          .filter((event) => event.type === 'graph:node-dispatched').length,
+      );
+      return { ok: true };
+    };
+    const executor = await createGraphExecutor({
+      ...run,
+      nodes: {
+        worker: nodeBinding(run.root, { runData }),
+        reviewer: nodeBinding(run.root, { runData }),
+      },
+      engines: [],
+    });
+
+    await expect(executor.run(new AbortController().signal)).resolves.toMatchObject({ kind: 'complete' });
+    expect(observedDispatchCounts).toEqual([2, 2]);
+  });
+
+  it('re-folds and re-decides after a dispatch revision conflict', async () => {
+    const run = await storedRun(definition({ engineBacked: false }));
+    let rejectedFirstDispatch = false;
+    let dispatchAppendCalls = 0;
+    const eventStore: EventStore = {
+      preflightAppend: (...args) => run.storage.eventStore.preflightAppend(...args),
+      read: (...args) => run.storage.eventStore.read(...args),
+      async append(stream, revision, batch) {
+        if (batch.some((event) => event.type === 'graph:node-dispatched')) {
+          dispatchAppendCalls += 1;
+          if (!rejectedFirstDispatch) {
+            rejectedFirstDispatch = true;
+            throw new StorageError('REVISION_CONFLICT', 'fixture conflict');
+          }
+        }
+        return await run.storage.eventStore.append(stream, revision, batch);
+      },
+    };
+    let calls = 0;
+    const executor = await createGraphExecutor({
+      ...run,
+      storage: { ...run.storage, eventStore },
+      nodes: {
+        worker: nodeBinding(run.root, {
+          runData: async () => {
+            calls += 1;
+            return { ok: true };
+          },
+        }),
+      },
+      engines: [],
+    });
+
+    await expect(executor.run(new AbortController().signal)).resolves.toMatchObject({ kind: 'complete' });
+    expect(dispatchAppendCalls).toBe(2);
+    expect(calls).toBe(1);
+  });
+
+  it('requires a live Memory object when the stored graph requires memory', async () => {
+    const run = await storedRun(definition({ engineBacked: false, memory: 'required' }));
+    const options = {
+      ...run,
+      nodes: { worker: nodeBinding(run.root, { runData: async () => ({ ok: true }) }) },
+      engines: [],
+    };
+    await expect(createGraphExecutor(options)).rejects.toMatchObject({
+      name: 'GraphExecutionError',
+      code: 'MISSING_MEMORY',
+    });
+
+    const fromPlainJavaScript = (value: unknown) => Reflect.apply(createGraphExecutor, undefined, [value]);
+    await expect(fromPlainJavaScript({
+      ...options,
+      bindings: { memory: { scope: 'broken', execute: 'not a function' } },
+    })).rejects.toMatchObject({ code: 'MISSING_MEMORY' });
+
+    const executor = await createGraphExecutor({ ...options, bindings: { memory: validMemory } });
+    await expect(executor.run(new AbortController().signal)).resolves.toMatchObject({ kind: 'complete' });
+  });
+
+  it('rejects a malformed model-unavailable event before deciding', async () => {
+    const run = await storedRun(definition());
+    await appendGraphEvent(run.storage, run.runId, {
+      type: 'model-unavailable',
+      version: 2,
+      payload: { effective: PRIMARY_SELECTION } as unknown as JsonValue,
+    });
+    const executor = await createGraphExecutor({
+      ...run,
+      nodes: { worker: nodeBinding(run.root, { prompt: 'Do the work.' }) },
+      engines: [
+        engineBinding(PRIMARY_TARGET, PRIMARY_SELECTION, new SelectedEngine(PRIMARY_SELECTION)),
+        engineBinding(FALLBACK_TARGET, FALLBACK_SELECTION, new SelectedEngine(FALLBACK_SELECTION)),
+      ],
+    });
+    await expect(executor.run(new AbortController().signal)).rejects.toMatchObject({
+      name: 'GraphExecutionError',
+      code: 'INVALID_EVENT',
+    });
+  });
+
+  it('rejects a model-unavailable identity outside the stored plan', async () => {
+    const run = await storedRun(definition());
+    const outside = { ...PRIMARY_SELECTION, model: 'outside' };
+    await appendGraphEvent(run.storage, run.runId, {
+      type: 'model-unavailable',
+      version: 1,
+      payload: cloneFrozenJson({
+        schemaVersion: 1,
+        identity: createAttemptIdentity({
+          namespace: run.storage.record.namespace,
+          streamId: run.runId,
+          nodeId: 'worker',
+          position: 'turns/1',
+        }),
+        selection: outside,
+        effective: outside,
+        failure: 'auth',
+      } as unknown as JsonValue),
+    });
+    const executor = await createGraphExecutor({
+      ...run,
+      nodes: { worker: nodeBinding(run.root, { prompt: 'Do the work.' }) },
+      engines: [
+        engineBinding(PRIMARY_TARGET, PRIMARY_SELECTION, new SelectedEngine(PRIMARY_SELECTION)),
+        engineBinding(FALLBACK_TARGET, FALLBACK_SELECTION, new SelectedEngine(FALLBACK_SELECTION)),
+      ],
+    });
+
+    await expect(executor.run(new AbortController().signal)).rejects.toMatchObject({
+      name: 'GraphExecutionError',
+      code: 'INVALID_EVENT',
+    });
+  });
+
+  it('keeps the result append queue usable after a fact append fails', async () => {
+    const run = await storedRun(definition());
+    let rejectedFact = false;
+    const eventStore: EventStore = {
+      preflightAppend: (...args) => run.storage.eventStore.preflightAppend(...args),
+      read: (...args) => run.storage.eventStore.read(...args),
+      async append(stream, revision, batch) {
+        if (!rejectedFact && batch.some((event) => event.type === 'graph:model-unavailable')) {
+          rejectedFact = true;
+          throw new Error('fixture fact append failed');
+        }
+        return await run.storage.eventStore.append(stream, revision, batch);
+      },
+    };
+    let primaryCalls = 0;
+    const primary = new MockEngine(() => {
+      primaryCalls += 1;
+      throw new EngineError({ kind: 'auth', message: 'primary is dead' });
+    });
+    const fallback = new SelectedEngine(FALLBACK_SELECTION);
+    const executor = await createGraphExecutor({
+      ...run,
+      storage: { ...run.storage, eventStore },
+      nodes: { worker: nodeBinding(run.root, { prompt: 'Do the work.' }) },
+      engines: [
+        engineBinding(PRIMARY_TARGET, PRIMARY_SELECTION, primary),
+        engineBinding(FALLBACK_TARGET, FALLBACK_SELECTION, fallback),
+      ],
+    });
+
+    await expect(executor.run(new AbortController().signal)).resolves.toMatchObject({ kind: 'fail' });
+    expect(primaryCalls).toBe(1);
+    expect(fallback.calls).toBe(0);
+    expect((await events(run.storage, run.runId)).find((event) => event.type === 'graph:node-failed')?.payload)
+      .toMatchObject({ code: 'MODEL_UNAVAILABLE_RECORD' });
+  });
+
+  it('refuses a compiled graph that does not match the stored run definition', async () => {
+    const run = await storedRun(definition({ engineBacked: false }));
+    const other = compileGraph(graphType(), {
+      ...definition({ engineBacked: false }),
+      id: 'other-graph',
+    });
+    await expect(createGraphExecutor({
+      ...run,
+      graph: other,
+      nodes: { worker: nodeBinding(run.root, { runData: async () => ({ ok: true }) }) },
+      engines: [],
+    })).rejects.toMatchObject({
+      name: 'GraphExecutionError',
+      code: 'STORED_GRAPH_MISMATCH',
+    });
+  });
+
+  it('lets a parent data node return a child executor result', async () => {
+    const child = await storedRun(definition({ engineBacked: false }));
+    const childExecutor = await createGraphExecutor({
+      ...child,
+      nodes: { worker: nodeBinding(child.root, { runData: async () => ({ child: true }) }) },
+      engines: [],
+    });
+    const parent = await storedRun(definition({ engineBacked: false }));
+    const parentExecutor = await createGraphExecutor({
+      ...parent,
+      nodes: {
+        worker: nodeBinding(parent.root, {
+          runData: async (context) => {
+            const childResult = await childExecutor.run(context.signal);
+            return { child: cloneFrozenJson(childResult as unknown as JsonValue) };
+          },
+        }),
+      },
+      engines: [],
+    });
+
+    await expect(parentExecutor.run(new AbortController().signal)).resolves.toEqual({
+      kind: 'complete',
+      output: { attempts: 1 },
+    });
+    const parentCompleted = (await events(parent.storage, parent.runId))
+      .find((event) => event.type === 'graph:node-completed');
+    expect(parentCompleted?.payload).toMatchObject({
+      result: { child: { kind: 'complete', output: { attempts: 1 } } },
+    });
   });
 });

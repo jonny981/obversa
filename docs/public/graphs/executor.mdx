@@ -3,30 +3,56 @@ title: "Graph executor"
 description: "Run outside graph types through durable decisions and node attempts."
 ---
 
-The graph executor turns a graph's durable event stream into its next command.
-It keeps graph code pure while the runtime performs the work.
+The graph executor turns a stored run into useful work. Your graph still makes
+the decisions. The runtime records what happened and runs each node safely.
 
 ## How a dispatch runs
 
-1. The executor folds events into graph state.
-2. The graph returns a command, or an empty decision while work is in flight.
-3. A node binding, keyed by node id, prepares the attempt.
-4. The exact execution target is selected from that node's declared lanes.
-5. Model-unavailable events remove dead targets for later attempts.
+1. The executor loads the run definition and frozen plan from storage.
+2. It checks that the supplied graph matches the stored definition.
+3. It folds the run's `graph:` events into graph state.
+4. The graph returns its next command.
+5. The executor records the whole dispatch decision before any node starts.
+6. It runs each node through the safe node-attempt lifecycle.
+7. It records `node-completed` or `node-failed`, then asks the graph again.
+
+Node behaviour is keyed by node id. A data-only node gets a data function. An
+engine-backed node gets a prompt and uses the lane in the stored plan. Engine
+bindings join that exact plan target to the full engine identity, including its
+adapter version and executable path when present.
+
+The host chooses the order once. The executor tries the effective target and at
+most one live fallback from that order. Only a failure that means the lane is
+dead, such as bad credentials or a missing model, can move to the fallback. A
+rate limit, timeout, policy pause, or denied action does not run again elsewhere.
+
+Each dead-lane event records both the selected identity and the identity the
+engine reported. Later dispatches skip either identity. If every declared
+target is dead, no engine runs. The executor records `ENGINE_UNAVAILABLE` as a
+normal node failure so the graph can retry, fail, or recover in its usual way.
 
 An empty decision is valid only when an attempt is already in flight. A dispatch
 position already present in the event stream is rejected, so a restart cannot
-run the same position twice.
+run the same position twice. A fresh executor that finds recorded work with no
+result returns a typed waiting result for a later recovery step.
+
+If the graph declares memory as required, `createGraphExecutor` also requires a
+live `Memory` object. This check covers TypeScript and plain JavaScript callers.
+
+A data-only node can call another executor and return the child result. This is
+how parent and child graphs compose without adding a second execution system.
 
 ## Turn-taking example
 
-The outside example alternates a writer and critic until its deterministic gate
-passes. It declares a primary critic lane and a fallback lane. The runtime reads
-model-unavailable events and prepares the critic on the fallback after a primary
-loss. The example imports only public package entry points:
+The outside example alternates a writer and critic for three rounds. It stores
+the run, starts the public executor, and uses a real dead-primary path through
+two `MockEngine` instances. The first critic attempt records the primary as
+dead. The next two critic attempts go straight to the fallback.
 
 ```bash
 pnpm example:turn-taking
 ```
 
-The command reports six bounded dispatches and a complete result.
+The command reports six dispatches, one primary call, three fallback calls, and
+the final result. The same source compiles and runs from the packed package with
+TypeScript 6 and TypeScript 7.
