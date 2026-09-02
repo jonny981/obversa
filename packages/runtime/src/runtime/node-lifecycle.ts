@@ -49,7 +49,7 @@ import {
 const CONTROL_CHARACTER = /[\u0000-\u001f\u007f]/u;
 const EMPTY_USAGE = Object.freeze({ kind: 'unknown' as const });
 // This wait does not extend the final-result deadline. It only lets an engine
-// finish cleanup after the runtime aborts it at that deadline.
+// finish cleanup and return captured evidence after the runtime aborts it.
 const ENGINE_SETTLE_MS = 7_000;
 const EMPTY_WORKSPACE = cloneFrozenJson({
   entryHead: null,
@@ -238,7 +238,11 @@ async function runWithTimePolicy<T>(
   options: {
     readonly abortAtSoftTimeout: boolean;
   },
-): Promise<{ readonly value: T; readonly timedOut: boolean }> {
+): Promise<{
+  readonly value: T;
+  readonly timedOut: boolean;
+  readonly finalDeadlineExceeded: boolean;
+}> {
   if (signal.aborted) throw new AttemptStopError('aborted');
 
   const controller = new AbortController();
@@ -312,9 +316,16 @@ async function runWithTimePolicy<T>(
             : outcome.error.evidence,
         );
       }
+      if (outcome.kind === 'value') {
+        return Object.freeze({
+          value: outcome.value,
+          timedOut: true,
+          finalDeadlineExceeded: true,
+        });
+      }
       throw new AttemptStopError(
         'timeout',
-        outcome.kind === 'error' ? outcome.error : undefined,
+        outcome.error,
       );
     }
     if (outcome.kind === 'error') {
@@ -334,7 +345,11 @@ async function runWithTimePolicy<T>(
       }
       throw outcome.error;
     }
-    return Object.freeze({ value: outcome.value, timedOut: softDeadlinePassed });
+    return Object.freeze({
+      value: outcome.value,
+      timedOut: softDeadlinePassed,
+      finalDeadlineExceeded: false,
+    });
   } finally {
     clearTimeout(softTimer);
     clearTimeout(hardTimer);
@@ -791,6 +806,9 @@ export async function executeNodeAttempt(
           }),
           { abortAtSoftTimeout: true },
         );
+        if (completed.finalDeadlineExceeded) {
+          throw new AttemptStopError('timeout');
+        }
         effectResult = cloneFrozenJson(completed.value);
         if (completed.timedOut) {
           facts.transportFailure = timeoutTransportFailure();
@@ -929,6 +947,11 @@ export async function executeNodeAttempt(
               facts.failure = failure(
                 'OUTPUT_LIMIT',
                 `attempt output is ${facts.outputBytes} bytes; limit is ${attemptPolicy.outputBytes}`,
+              );
+            } else if (completed.finalDeadlineExceeded) {
+              facts.failure = failure(
+                'TIMEOUT',
+                'node attempt exceeded its time limit',
               );
             } else {
               try {

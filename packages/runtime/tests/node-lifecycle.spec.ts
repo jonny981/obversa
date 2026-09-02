@@ -20,6 +20,7 @@ import {
   type Engine,
   type EngineEventSink,
 } from '../src/engines/engine.ts';
+import { runOwnedCommand } from '../src/engines/command-runner.ts';
 import { MockEngine } from '../src/testing.ts';
 import {
   assistantResult,
@@ -902,6 +903,79 @@ describe('node attempt lifecycle', () => {
     expect(childPid).toBeTypeOf('number');
     expect(() => process.kill(childPid!, 0)).toThrow();
   });
+
+  it.runIf(process.platform !== 'win32')(
+    'keeps final evidence captured before a SIGTERM-ignoring command times out',
+    async () => {
+      const budget = createTokenBudget(20);
+      const selected = engine('process-backed', async (request, _onEvent, signal) => {
+        let captured: AgentResult | undefined;
+        const command = await runOwnedCommand({
+          executable: process.execPath,
+          args: [
+            '-e',
+            "process.on('SIGTERM', () => {}); process.stdout.write('FINAL'); setInterval(() => {}, 1000)",
+          ],
+          cwd: request.cwd!,
+          env: {},
+          stdin: '',
+          attemptId: identity.attemptId,
+          runId: identity.streamId,
+          timeoutMs: request.timeoutMs!,
+          teardownGraceMs: request.timeoutGraceMs!,
+          maxOutputBytes: request.maxOutputBytes!,
+          maxMemoryBytes: request.maxMemoryBytes!,
+        }, signal, {
+          onStdout: () => {
+            captured ??= assistantResult({
+              text: 'captured answer',
+              usage: reportedUsage({ inputTokens: 7, outputTokens: 3 }),
+              requested: primarySelection,
+              effective: primarySelection,
+            });
+          },
+        });
+        if (captured === undefined) throw new Error('final output was not captured');
+        return {
+          ...captured,
+          transportFailure: {
+            kind: 'timeout',
+            message: 'command timed out after producing its final result',
+            exitCode: command.exitCode,
+          },
+        };
+      });
+
+      const record = await executeNodeAttempt(prepared({
+        engineRoute: [lane(selected)],
+        tokenBudget: budget,
+        policy: {
+          ...defaultPolicy,
+          timeoutMs: 300,
+          teardownGraceMs: 100,
+        },
+      }), new AbortController().signal);
+
+      expect(record.status).toBe('failed');
+      expect(record.failure).toMatchObject({ code: 'TIMEOUT' });
+      expect(record.result).toBeNull();
+      expect(record.parts).toEqual([
+        { kind: 'assistant', text: 'captured answer', final: true },
+      ]);
+      expect(record.usage).toEqual({
+        kind: 'reported',
+        inputTokens: 7,
+        outputTokens: 3,
+      });
+      expect(record.effectiveEngine).toEqual(primarySelection);
+      expect(record.transportFailure).toMatchObject({ kind: 'timeout' });
+      expect(budget.snapshot()).toMatchObject({
+        spent: 10,
+        reserved: 0,
+        unknownUsageCalls: 0,
+      });
+    },
+  );
 
   it('fails typed after the last unavailable model and never invents a lane', async () => {
     const primary = engine('primary', async () => {
