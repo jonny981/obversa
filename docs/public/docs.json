@@ -4,10 +4,16 @@
   "name": "Obversa",
   "description": "Public documentation for the Obversa packages",
   "colors": {
-    "primary": "#2F6F5E",
-    "light": "#3F8C76",
-    "dark": "#235247"
+    "primary": "#1C7C54",
+    "light": "#F4F8F0",
+    "dark": "#1B512D"
   },
+  "logo": {
+    "light": "/logo-light.svg",
+    "dark": "/logo-dark.svg",
+    "href": "https://obversa.ai"
+  },
+  "favicon": "/favicon.svg",
   "navigation": {
     "groups": [
       {

@@ -3,7 +3,7 @@ title: "Events and artifacts"
 description: "Store small events and large content, then reopen and fold the same state."
 ---
 
-Lines keeps durable history in two ports. An `EventStore` appends small JSON
+The runtime keeps durable history in two ports. An `EventStore` appends small JSON
 events. An `ArtifactStore` saves larger byte content and returns a small
 reference for an event to carry.
 
@@ -206,11 +206,11 @@ later characters may also be dots, underscores, or hyphens.
 
 ## Keep wrappers strict and payloads opaque
 
-Lines rejects unknown fields in wrappers it owns. These wrappers include event
+The runtime rejects unknown fields in wrappers it owns. These wrappers include event
 envelopes, artifact references, receipts, run-start records, and stored storage
 records.
 
-Graph, host, and workspace payloads are opaque. Opaque means Lines preserves
+Graph, host, and workspace payloads are opaque. Opaque means the runtime preserves
 their JSON or bytes without assigning meaning to their fields. Code that owns
 an opaque payload must validate any nested value it uses. The example calls
 `validateArtifactReference` before it reads the reference inside its event.

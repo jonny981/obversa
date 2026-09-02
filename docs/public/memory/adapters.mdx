@@ -3,7 +3,7 @@ title: "Memory adapters"
 description: "Select in-process memory or memory stored in private Git references."
 ---
 
-Lines accepts the `Memory` port. Your program selects and creates the adapter.
+The runtime accepts the `Memory` port. Your program selects and creates the adapter.
 
 ## In-process adapter
 
@@ -63,11 +63,11 @@ reference and its plain-text contents. Backups can also retain it. Do not treat
 the reference as local-only, and do not treat deletion as immediate secure
 erasure.
 
-Pass the selected adapter to Lines:
+Pass the selected adapter to the runtime:
 
 ```ts
 await run(job, { memory });
 ```
 
-Lines imports only `@obversa/memory`. Lines does not select or create a
+The runtime imports only `@obversa/memory`. The runtime does not select or create a
 storage adapter.
