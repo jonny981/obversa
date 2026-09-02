@@ -97,12 +97,12 @@ export const EXPECTED_FILES = {
     'package/dist/artifacts/conformance.d.ts',
     'package/dist/artifacts/file-store.d.ts',
     'package/dist/artifacts/store.d.ts',
-    'package/dist/chunk-FJYV2TYS.js',
-    'package/dist/chunk-FJYV2TYS.js.map',
-    'package/dist/chunk-FKFQH6E5.js',
-    'package/dist/chunk-FKFQH6E5.js.map',
-    'package/dist/chunk-R2MRINSR.js',
-    'package/dist/chunk-R2MRINSR.js.map',
+    'package/dist/chunk-*.js',
+    'package/dist/chunk-*.js.map',
+    'package/dist/chunk-*.js',
+    'package/dist/chunk-*.js.map',
+    'package/dist/chunk-*.js',
+    'package/dist/chunk-*.js.map',
     'package/dist/core/agent-md.d.ts',
     'package/dist/core/agent.d.ts',
     'package/dist/core/assert-graph.d.ts',
@@ -157,6 +157,7 @@ export const EXPECTED_FILES = {
     'package/dist/graph/value.d.ts',
     'package/dist/runtime/attempt.d.ts',
     'package/dist/runtime/budget.d.ts',
+    'package/dist/runtime/graph-executor.d.ts',
     'package/dist/runtime/node-lifecycle.d.ts',
     'package/dist/runtime/paths.d.ts',
     'package/dist/runtime/persist.d.ts',
@@ -180,12 +181,12 @@ export const EXPECTED_FILES = {
   '@obversa/engine': [
     'package/LICENSE',
     'package/README.md',
-    'package/dist/chunk-6HL5MQBF.js',
-    'package/dist/chunk-6HL5MQBF.js.map',
-    'package/dist/chunk-KNOMSNIX.js',
-    'package/dist/chunk-KNOMSNIX.js.map',
-    'package/dist/chunk-TS3IXYNA.js',
-    'package/dist/chunk-TS3IXYNA.js.map',
+    'package/dist/chunk-*.js',
+    'package/dist/chunk-*.js.map',
+    'package/dist/chunk-*.js',
+    'package/dist/chunk-*.js.map',
+    'package/dist/chunk-*.js',
+    'package/dist/chunk-*.js.map',
     'package/dist/claude-stream-json.d.ts',
     'package/dist/command.js',
     'package/dist/command.js.map',
@@ -295,6 +296,14 @@ export const EXPECTED_FILES = {
 
 // Pack one package directory and prove the tarball with both tools.
 // Returns the failures, each a one-line reason; an empty array is a pass.
+// tsup names shared chunks by content hash, so the hash changes with every
+// edit to the code. The pinned lists name those files chunk-*.js and the
+// comparison strips the hash from the packed names, so the number of chunks
+// and their maps stay pinned while their hashes do not.
+export function withoutChunkHash(entry) {
+  return entry.replace(/chunk-[A-Z0-9]{8}\.js/, "chunk-*.js");
+}
+
 export function checkTarball(packageDir, { expectedFiles } = {}) {
   const failures = [];
   const destination = mkdtempSync(join(tmpdir(), "obversa-tarball-"));
@@ -312,8 +321,8 @@ export function checkTarball(packageDir, { expectedFiles } = {}) {
     const tarball = join(destination, tarballs[0]);
     if (expectedFiles) {
       const entries = spawnSync("tar", ["-tzf", tarball], { encoding: "utf8", maxBuffer: 64 * 1024 * 1024 });
-      const actual = entries.stdout.split("\n").filter(Boolean).sort();
-      const expected = [...expectedFiles].sort();
+      const actual = entries.stdout.split("\n").filter(Boolean).map(withoutChunkHash).sort();
+      const expected = [...expectedFiles].map(withoutChunkHash).sort();
       if (JSON.stringify(actual) !== JSON.stringify(expected)) {
         const extra = actual.filter((entry) => !expected.includes(entry));
         const missing = expected.filter((entry) => !actual.includes(entry));

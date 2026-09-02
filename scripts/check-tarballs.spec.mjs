@@ -64,3 +64,15 @@ test("a truthful package passes both tools", () => {
   );
   assert.deepEqual(checkTarball(directory), []);
 });
+
+test("a build-hashed chunk matches its chunk-* pin, and a missing chunk still fails", () => {
+  const directory = pkg(
+    "hashed-chunk",
+    { exports: { ".": { types: "./dist/index.d.ts", default: "./dist/index.js" } } },
+    { "dist/index.js": "export const a = 1;\n", "dist/index.d.ts": "export declare const a: number;\n", "dist/chunk-Q7ZK2M4P.js": "export const c = 1;\n" },
+  );
+  const pinned = ["package/package.json", "package/dist/index.js", "package/dist/index.d.ts", "package/dist/chunk-*.js"];
+  assert.deepEqual(checkTarball(directory, { expectedFiles: pinned }), [], "the hashed chunk name must satisfy the chunk-* pin");
+  const failures = checkTarball(directory, { expectedFiles: [...pinned, "package/dist/chunk-*.js.map"] });
+  assert.ok(failures.some((line) => line.includes("missing") && line.includes("chunk-*.js.map")), `a pinned chunk that is not packed must be named: ${JSON.stringify(failures)}`);
+});
