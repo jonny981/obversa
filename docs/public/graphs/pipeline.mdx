@@ -1,0 +1,89 @@
+---
+title: "Built-in pipeline"
+description: "Run ordered stages through the durable graph executor."
+---
+
+`dagGraphType` is the built-in dependency-graph form. A pipeline is one use of
+that form: each stage is a node, and each edge says which stage must finish
+before another can start.
+
+The graph form only works with frozen data. It folds recorded events into state
+and decides what runs next. `createGraphExecutor` stores each dispatch before it
+runs the matching stage.
+
+## Run the example
+
+From an Obversa checkout, run:
+
+```bash
+pnpm example:pipeline
+```
+
+The command stores and runs a three-stage pipeline through the public executor.
+It prints one JSON report:
+
+```json
+{"executor":"complete","output":{"nodes":{"draft":"passed","review":"passed","publish":"passed"}},"dispatches":3,"order":["draft","review","publish"],"planDigest":"sha256:0d720b1e51681fe8f6071b243d431a671f6acf381869b4639bd1a610025249d5","bounds":{"dispatches":{"min":{"kind":"known","value":3},"max":{"kind":"known","value":3}},"maxConcurrency":{"kind":"known","value":1},"maxFanOut":{"kind":"known","value":1}}}
+```
+
+The clean-consumer check compiles and runs the same source from the packed
+package with TypeScript 6 and TypeScript 7. Its source is
+`examples/packages/pipeline.ts`.
+
+## Define a pipeline
+
+```ts
+import {
+  compileGraph,
+  dagGraphType,
+  type DagDefinition,
+} from '@obversa/runtime';
+import { defineGraphDefinition } from '@obversa/runtime/testing';
+
+const definition: DagDefinition = defineGraphDefinition({
+  id: 'release-pipeline',
+  definitionVersion: 1,
+  data: {
+    globalConcurrency: 1,
+    keyedConcurrency: {},
+    stopOnError: true,
+    retryCapPerNode: 0,
+  },
+  nodes: [
+    { id: 'draft', data: { kind: 'required', key: null } },
+    { id: 'review', data: { kind: 'required', key: null } },
+    { id: 'publish', data: { kind: 'required', key: null } },
+  ],
+  edges: [
+    { id: 'draft-to-review', source: 'draft', target: 'review', data: {} },
+    { id: 'review-to-publish', source: 'review', target: 'publish', data: {} },
+  ],
+});
+
+const graph = compileGraph(dagGraphType, definition);
+```
+
+The example stores `graph.definition` with its resolved plan. It then gives the
+executor one data function for each node and calls `executor.run(signal)`.
+
+## Node behaviour
+
+- **Required nodes** block their dependants after failure and fail the pipeline
+  after finalizers run.
+- **Optional nodes** can fail without blocking their dependants.
+- **Expected skips** use a completed result with `skipped: true` and do not
+  block dependants.
+- **Finalizer nodes** have no edges and run after the other nodes settle.
+- **Paused nodes** stop new dispatches and keep the recorded pause reason.
+
+`stopOnError: true` stops new work after a required failure. Set it to `false`
+when independent branches and declared retries must continue.
+
+## Limits and output
+
+`globalConcurrency` caps all running nodes. A node with a non-null `key` also
+uses the matching cap in `keyedConcurrency`.
+
+Each dispatch receives a stable position such as `dag/review/1`. The final
+output maps each node name to `passed`, `skipped`, or `failed`. The example's
+plan declares exactly three dispatches and a maximum concurrency of one.

@@ -36,6 +36,10 @@ export {
   type GraphType,
 } from './graph/type.js';
 export {
+  dag as dagGraphType,
+  type DagDefinition,
+} from './graph-types/dag.js';
+export {
   createGraphExecutor,
   GraphExecutionError,
   type GraphExecutionErrorCode,

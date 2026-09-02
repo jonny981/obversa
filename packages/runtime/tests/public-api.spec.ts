@@ -47,6 +47,7 @@ describe('public runtime API', () => {
       'costReport',
       'createGraphExecutor',
       'dag',
+      'dagGraphType',
       'defineAgent',
       'defineAgentFromMarkdown',
       'defineJob',

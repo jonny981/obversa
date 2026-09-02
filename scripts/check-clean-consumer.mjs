@@ -25,6 +25,28 @@ const expectedGraphReport = {
   maxFanOut: { kind: 'known', value: 1 },
 };
 
+const expectedPipelineReport = {
+  executor: 'complete',
+  output: {
+    nodes: {
+      draft: 'passed',
+      review: 'passed',
+      publish: 'passed',
+    },
+  },
+  dispatches: 3,
+  order: ['draft', 'review', 'publish'],
+  planDigest: 'sha256:0d720b1e51681fe8f6071b243d431a671f6acf381869b4639bd1a610025249d5',
+  bounds: {
+    dispatches: {
+      min: { kind: 'known', value: 3 },
+      max: { kind: 'known', value: 3 },
+    },
+    maxConcurrency: { kind: 'known', value: 1 },
+    maxFanOut: { kind: 'known', value: 1 },
+  },
+};
+
 const expectedTurnTakingReport = {
   conformance: true,
   cases: 6,
@@ -370,6 +392,7 @@ const tsconfig = {
     'consumer.ts',
     'offline-review.line.ts',
     'custom-graph.ts',
+    'pipeline.ts',
     'durable-storage.ts',
     'safe-node-attempt.ts',
     'turn-taking.ts',
@@ -383,6 +406,7 @@ async function main() {
   );
   const graphExamplePath = join(root, 'examples', 'packages', 'custom-graph.ts');
   const graphExampleSource = await readFile(graphExamplePath, 'utf8');
+  const pipelineExamplePath = join(root, 'examples', 'packages', 'pipeline.ts');
   const storageExamplePath = join(root, 'examples', 'packages', 'durable-storage.ts');
   const storageExampleSource = await readFile(storageExamplePath, 'utf8');
   const attemptExamplePath = join(root, 'examples', 'packages', 'safe-node-attempt.ts');
@@ -452,6 +476,7 @@ async function main() {
       exampleSource,
     );
     await copyFile(graphExamplePath, join(consumerDirectory, 'custom-graph.ts'));
+    await copyFile(pipelineExamplePath, join(consumerDirectory, 'pipeline.ts'));
     await copyFile(storageExamplePath, join(consumerDirectory, 'durable-storage.ts'));
     await copyFile(attemptExamplePath, join(consumerDirectory, 'safe-node-attempt.ts'));
     await copyFile(turnTakingExamplePath, join(consumerDirectory, 'turn-taking.ts'));
@@ -493,6 +518,12 @@ async function main() {
     const directGraph = JSON.parse(
       run('pnpm', ['exec', 'tsx', 'custom-graph.ts'], { cwd: consumerDirectory }),
     );
+    const compiledPipeline = JSON.parse(
+      run(process.execPath, ['dist/pipeline.js'], { cwd: consumerDirectory }),
+    );
+    const directPipeline = JSON.parse(
+      run('pnpm', ['exec', 'tsx', 'pipeline.ts'], { cwd: consumerDirectory }),
+    );
     const compiledStorage = JSON.parse(
       run(process.execPath, ['dist/durable-storage.js'], { cwd: consumerDirectory }),
     );
@@ -515,6 +546,8 @@ async function main() {
     assert.deepEqual(directTurnTaking, expectedTurnTakingReport);
     assert.deepEqual(compiledGraph, expectedGraphReport);
     assert.deepEqual(directGraph, expectedGraphReport);
+    assert.deepEqual(compiledPipeline, expectedPipelineReport);
+    assert.deepEqual(directPipeline, expectedPipelineReport);
     assert.deepEqual(compiledStorage, expectedStorageReport);
     assert.deepEqual(directStorage, expectedStorageReport);
     assert.deepEqual(checkedAttemptReport(compiledAttempt), expectedAttemptReport);
@@ -547,7 +580,7 @@ async function main() {
     if (refs.length !== 1) throw new Error(`Git memory created ${refs.length} private refs instead of one`);
 
     console.log(
-      'Clean offline consumer passed with TypeScript 7 and 6, the first production line, the outside graph, the turn-taking executor example, durable storage, safe node attempts, 17 memory cases, and both memory adapters.',
+      'Clean offline consumer passed with TypeScript 7 and 6, the first production line, the outside graph, the pipeline executor example, the turn-taking executor example, durable storage, safe node attempts, 17 memory cases, and both memory adapters.',
     );
   } finally {
     await rm(directory, { recursive: true, force: true });

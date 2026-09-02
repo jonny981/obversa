@@ -36,6 +36,7 @@
         "group": "Graphs",
         "pages": [
           "graphs/contract",
+          "graphs/pipeline",
           "graphs/plan-admission",
           "graphs/executor"
         ]
