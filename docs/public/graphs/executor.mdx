@@ -38,7 +38,9 @@ failure so the graph can retry, fail, or recover in its usual way.
 An action-policy wait records `node-paused` with its reason and request. A
 denied action records `node-failed` with `DENIED`. An aborted attempt records
 `node-failed` with `ABORTED`. These events stay distinct when the graph folds
-the stream.
+the stream. If a result or pause request is too large for the event stream, the
+executor records a small `node-failed` event with `RESULT_TOO_LARGE` so the
+dispatch does not stay in flight.
 
 An empty decision is valid only when an attempt is already in flight. A dispatch
 position already present in the event stream is rejected, so a restart cannot

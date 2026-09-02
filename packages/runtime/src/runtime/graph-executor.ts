@@ -206,7 +206,7 @@ function validateFact(
   envelope: DomainEventEnvelope,
   runId: string,
   namespace: string,
-  bindingsByAvailability: ReadonlyMap<string, GraphEngineBinding>,
+  plannedAvailability: ReadonlySet<string>,
 ): ModelUnavailableFact {
   if (envelope.version !== 1) {
     fail('INVALID_EVENT', 'A model-unavailable event must use version 1.');
@@ -242,7 +242,7 @@ function validateFact(
   } catch (error) {
     fail('INVALID_EVENT', 'A model-unavailable engine identity is invalid.', error);
   }
-  if (!bindingsByAvailability.has(availabilityKey(selected))) {
+  if (!plannedAvailability.has(availabilityKey(selected))) {
     fail('INVALID_EVENT', 'A model-unavailable event selected an engine outside the stored plan.');
   }
   if (
@@ -342,7 +342,7 @@ export async function createGraphExecutor(
   }
 
   const enginesByTarget = new Map<string, GraphEngineBinding>();
-  const bindingsByAvailability = new Map<string, GraphEngineBinding>();
+  const plannedAvailability = new Set<string>();
   for (const rawBinding of options.engines) {
     let selection: EngineSelectionRecord;
     try {
@@ -357,7 +357,6 @@ export async function createGraphExecutor(
     }
     if (
       enginesByTarget.has(key)
-      || bindingsByAvailability.has(availabilityKey(selection))
       || typeof rawBinding.engine?.run !== 'function'
       || typeof rawBinding.hardTokenLimitEnforceable !== 'boolean'
     ) {
@@ -365,7 +364,7 @@ export async function createGraphExecutor(
     }
     const binding = Object.freeze({ ...rawBinding, selection });
     enginesByTarget.set(key, binding);
-    bindingsByAvailability.set(availabilityKey(selection), binding);
+    plannedAvailability.add(availabilityKey(selection));
   }
   for (const target of plannedTargets) {
     if (!enginesByTarget.has(target)) {
@@ -397,7 +396,7 @@ export async function createGraphExecutor(
           envelope,
           options.runId,
           stream.namespace,
-          bindingsByAvailability,
+          plannedAvailability,
         );
         unavailable.add(availabilityKey(fact.selection));
         unavailable.add(availabilityKey(fact.effective));
@@ -499,8 +498,22 @@ export async function createGraphExecutor(
     signal: AbortSignal,
   ): Promise<void> => {
     const { command, binding, prompt, route } = prepared;
+    const appendResult = async (event: NewDomainEvent): Promise<void> => {
+      try {
+        await enqueueAppend(event);
+      } catch (error) {
+        if (!(error instanceof StorageError) || error.code !== 'STORAGE_LIMIT_EXCEEDED') {
+          throw error;
+        }
+        await enqueueAppend(newEvent(options.runId, 'node-failed', {
+          nodeId: command.nodeId,
+          position: command.position,
+          code: 'RESULT_TOO_LARGE',
+        }));
+      }
+    };
     if (prepared.allEnginesUnavailable) {
-      await enqueueAppend(newEvent(options.runId, 'node-failed', {
+      await appendResult(newEvent(options.runId, 'node-failed', {
         nodeId: command.nodeId,
         position: command.position,
         code: 'ENGINE_UNAVAILABLE',
@@ -539,7 +552,7 @@ export async function createGraphExecutor(
       decideAction: binding.decideAction,
     }, signal);
     if (result.status === 'completed') {
-      await enqueueAppend(newEvent(options.runId, 'node-completed', {
+      await appendResult(newEvent(options.runId, 'node-completed', {
         nodeId: command.nodeId,
         position: command.position,
         result: result.result,
@@ -547,7 +560,7 @@ export async function createGraphExecutor(
       return;
     }
     if (result.status === 'paused' && result.decision?.kind === 'wait') {
-      await enqueueAppend(newEvent(options.runId, 'node-paused', {
+      await appendResult(newEvent(options.runId, 'node-paused', {
         nodeId: command.nodeId,
         position: command.position,
         reason: result.decision.reason,
@@ -555,7 +568,7 @@ export async function createGraphExecutor(
       }));
       return;
     }
-    await enqueueAppend(newEvent(options.runId, 'node-failed', {
+    await appendResult(newEvent(options.runId, 'node-failed', {
       nodeId: command.nodeId,
       position: command.position,
       code: result.status === 'denied'

@@ -85,6 +85,14 @@ const FALLBACK_TARGET: ExecutionTarget = {
   ...PRIMARY_TARGET,
   model: 'fallback',
 };
+const REVIEWER_TARGET: ExecutionTarget = {
+  ...PRIMARY_TARGET,
+  tools: ['Read'],
+};
+const SAME_MODEL_FALLBACK_TARGET: ExecutionTarget = {
+  ...PRIMARY_TARGET,
+  adapter: 'mock-fallback',
+};
 const PRIMARY_SELECTION: EngineSelectionRecord = {
   adapter: 'mock',
   adapterVersion: '1.0.0',
@@ -97,6 +105,14 @@ const PRIMARY_SELECTION: EngineSelectionRecord = {
 const FALLBACK_SELECTION: EngineSelectionRecord = {
   ...PRIMARY_SELECTION,
   model: 'fallback',
+};
+const REVIEWER_SELECTION: EngineSelectionRecord = {
+  ...PRIMARY_SELECTION,
+  capabilities: ['Read'],
+};
+const SAME_MODEL_FALLBACK_SELECTION: EngineSelectionRecord = {
+  ...PRIMARY_SELECTION,
+  adapter: 'mock-fallback',
 };
 
 const roots: string[] = [];
@@ -178,7 +194,7 @@ function graphType(): GraphType<TestDefinition, TestState, TestEvent, GraphRequi
               phaseId: 'work',
               inputContract: {},
               outputContract: {},
-              laneId: definition.data.engineBacked && node.id === 'worker' ? 'worker-lane' : null,
+              laneId: definition.data.engineBacked ? `${node.id}-lane` : null,
             })),
             policies: {
               retry: null,
@@ -188,11 +204,19 @@ function graphType(): GraphType<TestDefinition, TestState, TestEvent, GraphRequi
               budget: null,
               action: null,
             },
-            executionLanes: definition.data.engineBacked ? [{
-              id: 'worker-lane',
-              requested: PRIMARY_TARGET,
-              knownSubstitutions: [FALLBACK_TARGET],
-            }] : [],
+            executionLanes: definition.data.engineBacked
+              ? definition.nodes.map((node) => node.id === 'worker'
+                ? {
+                    id: 'worker-lane',
+                    requested: PRIMARY_TARGET,
+                    knownSubstitutions: [FALLBACK_TARGET, SAME_MODEL_FALLBACK_TARGET],
+                  }
+                : {
+                    id: `${node.id}-lane`,
+                    requested: REVIEWER_TARGET,
+                    knownSubstitutions: [],
+                  })
+              : [],
             requestedPermissions: [],
             bounds: {
               dispatches: {
@@ -252,7 +276,10 @@ const policy = {
   },
 } as const;
 
-async function storedRun(input: TestDefinition): Promise<{
+async function storedRun(
+  input: TestDefinition,
+  options: { readonly workerFallbacks?: readonly ExecutionTarget[] } = {},
+): Promise<{
   readonly graph: ReturnType<typeof compileGraph<TestDefinition, TestState, TestEvent, GraphRequirements>>;
   readonly runId: string;
   readonly storage: RunStorageBinding;
@@ -262,9 +289,13 @@ async function storedRun(input: TestDefinition): Promise<{
   roots.push(root);
   const runId = `executor-${sequence += 1}`;
   const graph = compileGraph(graphType(), input);
-  const executionLanes: PlanResolution['executionLanes'] = input.data.engineBacked
-    ? [{ id: 'worker-lane', effective: PRIMARY_TARGET, fallbacks: [FALLBACK_TARGET] }]
-    : [];
+  const executionLanes: PlanResolution['executionLanes'] = graph.describe().executionLanes.map((lane) => ({
+    id: lane.id,
+    effective: lane.requested,
+    fallbacks: lane.id === 'worker-lane'
+      ? options.workerFallbacks ?? [FALLBACK_TARGET]
+      : [],
+  }));
   const plan = resolveGraphPlan(graph.describe(), {
     package: packageIdentity,
     admission: { package: packageIdentity, permissions: [] },
@@ -702,6 +733,46 @@ describe('createGraphExecutor', () => {
     expect(receivedMemory).toBe(validMemory);
   });
 
+  it('settles an oversized result as a small node failure', async () => {
+    const run = await storedRun(definition({ engineBacked: false }));
+    let calls = 0;
+    const binding = nodeBinding(run.root, {
+      runData: async () => {
+        calls += 1;
+        return { text: 'x'.repeat(70_000) };
+      },
+    });
+    const executor = await createGraphExecutor({
+      ...run,
+      nodes: { worker: binding },
+      engines: [],
+    });
+
+    await expect(executor.run(new AbortController().signal)).resolves.toMatchObject({
+      kind: 'fail',
+    });
+    expect((await events(run.storage, run.runId)).filter(
+      (event) => event.type === 'graph:node-failed',
+    )).toHaveLength(1);
+    expect((await events(run.storage, run.runId)).find(
+      (event) => event.type === 'graph:node-failed',
+    )?.payload).toEqual({
+      nodeId: 'worker',
+      position: 'turns/1',
+      code: 'RESULT_TOO_LARGE',
+    });
+
+    const fresh = await createGraphExecutor({
+      ...run,
+      nodes: { worker: binding },
+      engines: [],
+    });
+    await expect(fresh.run(new AbortController().signal)).resolves.toMatchObject({
+      kind: 'fail',
+    });
+    expect(calls).toBe(1);
+  });
+
   it('records wait, deny, and abort as distinct graph results', async () => {
     const waiting = await storedRun(definition());
     const waitingEngine = new SelectedEngine(PRIMARY_SELECTION);
@@ -901,6 +972,53 @@ describe('createGraphExecutor', () => {
       kind: 'complete',
     });
     expect(primary.calls).toBe(0);
+    expect(fallback.calls).toBe(1);
+  });
+
+  it('binds two planned nodes that share a provider and model', async () => {
+    const run = await storedRun(definition({ parallel: true }));
+    const worker = new SelectedEngine(PRIMARY_SELECTION);
+    const reviewer = new SelectedEngine(REVIEWER_SELECTION);
+    const executor = await createGraphExecutor({
+      ...run,
+      nodes: {
+        worker: nodeBinding(run.root, { prompt: () => 'Write.' }),
+        reviewer: nodeBinding(run.root, { prompt: () => 'Review.' }),
+      },
+      engines: [
+        engineBinding(PRIMARY_TARGET, PRIMARY_SELECTION, worker),
+        engineBinding(FALLBACK_TARGET, FALLBACK_SELECTION, new SelectedEngine(FALLBACK_SELECTION)),
+        engineBinding(REVIEWER_TARGET, REVIEWER_SELECTION, reviewer),
+      ],
+    });
+
+    await expect(executor.run(new AbortController().signal)).resolves.toMatchObject({
+      kind: 'complete',
+    });
+    expect(worker.calls).toBe(1);
+    expect(reviewer.calls).toBe(1);
+  });
+
+  it('allows a same-model adapter fallback after a missing CLI', async () => {
+    const run = await storedRun(definition(), {
+      workerFallbacks: [SAME_MODEL_FALLBACK_TARGET],
+    });
+    const primary = new MockEngine(() => {
+      throw new EngineError({ kind: 'missing-cli', message: 'primary CLI is unavailable' });
+    });
+    const fallback = new SelectedEngine(SAME_MODEL_FALLBACK_SELECTION);
+    const executor = await createGraphExecutor({
+      ...run,
+      nodes: { worker: nodeBinding(run.root, { prompt: () => 'Do the work.' }) },
+      engines: [
+        engineBinding(PRIMARY_TARGET, PRIMARY_SELECTION, primary),
+        engineBinding(SAME_MODEL_FALLBACK_TARGET, SAME_MODEL_FALLBACK_SELECTION, fallback),
+      ],
+    });
+
+    await expect(executor.run(new AbortController().signal)).resolves.toMatchObject({
+      kind: 'complete',
+    });
     expect(fallback.calls).toBe(1);
   });
 

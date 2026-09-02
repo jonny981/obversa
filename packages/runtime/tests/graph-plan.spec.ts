@@ -226,6 +226,20 @@ describe('resolveGraphPlan', () => {
     );
   });
 
+  it('defaults an omitted fallback list to empty', () => {
+    const base = resolution();
+    const resolved = resolveGraphPlan(description, {
+      ...base,
+      executionLanes: [{
+        id: 'author-lane',
+        effective: description.executionLanes[0]!.requested,
+      }],
+    });
+
+    expect(resolved.plan.executionLanes[0]!.fallbacks).toEqual([]);
+    expect(Object.isFrozen(resolved.plan.executionLanes[0]!.fallbacks)).toBe(true);
+  });
+
   it('rejects unknown fields inside runtime-owned resolved-plan records', () => {
     const resolved = resolveGraphPlan(description, resolution());
     const invalid = {

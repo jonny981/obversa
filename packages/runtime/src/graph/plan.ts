@@ -115,7 +115,7 @@ export interface GraphPackageAdmission {
 export interface ExecutionLaneResolution {
   readonly id: string;
   readonly effective: ExecutionTarget;
-  readonly fallbacks: readonly ExecutionTarget[];
+  readonly fallbacks?: readonly ExecutionTarget[];
 }
 
 export interface PlanResolution {
@@ -707,9 +707,9 @@ export function resolveGraphPlan(
   list(root.executionLanes, '/executionLanes', 'Lane resolutions')
     .forEach((item, index) => {
       const lane = record(item, `/executionLanes/${index}`, 'Lane resolution');
-      requireFields(lane, ['id', 'effective', 'fallbacks'], `/executionLanes/${index}`);
+      requireFields(lane, ['id', 'effective'], `/executionLanes/${index}`);
       list(
-        lane.fallbacks,
+        lane.fallbacks ?? [],
         `/executionLanes/${index}/fallbacks`,
         'Fallbacks',
       );
@@ -738,9 +738,10 @@ export function resolveGraphPlan(
     if (!allowed.some((candidate) => isDeepStrictEqual(candidate, resolved.effective))) {
       fail('UNKNOWN_SUBSTITUTION', `/executionLanes/${index}/effective`, `Lane "${lane.id}" uses an undeclared substitution.`);
     }
+    const fallbacks = resolved.fallbacks ?? [];
     const fallbackKeys = new Set<string>();
-    for (let fallbackIndex = 0; fallbackIndex < resolved.fallbacks.length; fallbackIndex += 1) {
-      const fallback = resolved.fallbacks[fallbackIndex]!;
+    for (let fallbackIndex = 0; fallbackIndex < fallbacks.length; fallbackIndex += 1) {
+      const fallback = fallbacks[fallbackIndex]!;
       const path = `/executionLanes/${index}/fallbacks/${fallbackIndex}`;
       target(fallback, path);
       if (!allowed.some((candidate) => isDeepStrictEqual(candidate, fallback))) {
@@ -758,7 +759,7 @@ export function resolveGraphPlan(
     resolvedLanes.push({
       ...lane,
       effective: resolved.effective,
-      fallbacks: resolved.fallbacks,
+      fallbacks,
     });
     resolutions.delete(lane.id);
   }

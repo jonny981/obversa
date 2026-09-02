@@ -16,6 +16,8 @@ The host provides a `PlanResolution`. It contains:
 - The same package identity in the host admission record.
 - The permissions that the host admits.
 - One effective execution target for each declared execution lane.
+- An optional ordered fallback list for each lane. An omitted list means no
+  fallback.
 
 The package identity in the resolution and admission record must match exactly.
 The graph package asks for permissions in `describe()`. Each requested
@@ -35,9 +37,9 @@ The host resolves every described lane exactly once. An effective target must
 equal the requested target or one declared substitution. Unknown, missing, or
 extra lane resolutions are rejected.
 
-The resolved plan records the requested and effective target. A change to an
-adapter, provider, model family, model, tools, or allowed substitution changes
-the plan digest.
+The resolved plan records the requested target, effective target, and fallback
+order. A change to an adapter, provider, model family, model, tools, allowed
+substitution, or fallback order changes the plan digest.
 
 ## Plan snapshot
 
