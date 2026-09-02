@@ -39,9 +39,9 @@
  * scheduling, and the DAG fails a node only once its cap is exhausted. A
  * late result for a superseded attempt is ignored.
  *
- * A paused node pauses the whole DAG, as the legacy scheduler does: while
- * any node is paused the decision is a pause command, and nothing else is
- * dispatched. A resumed node continues the same attempt.
+ * A paused node pauses the whole DAG, as the legacy scheduler does. The form
+ * first waits for every other attempt in the recorded batch to settle, then
+ * returns the pause command. A resumed node continues the same attempt.
  *
  * Each decision waits for every recorded attempt to settle, then dispatches
  * one ready batch that fits the global and keyed limits in declaration order.
@@ -51,22 +51,38 @@
  * every completed node result by node name.
  */
 
+import { isDeepStrictEqual } from 'node:util';
+
 import toposort from 'toposort';
 
 import type { GraphCommand } from '../graph/commands.js';
 import type { GraphDefinition, NodeId } from '../graph/kernel.js';
-import type { ExecutionLaneDescription, GraphDescriptionInput } from '../graph/plan.js';
+import type { GraphDescriptionInput } from '../graph/plan.js';
 import type { GraphEvent, GraphType } from '../graph/type.js';
 import { GraphValidationError, type GraphValidationIssue, type JsonObject, type JsonValue } from '../graph/value.js';
 
 export type DagNodeKind = 'required' | 'optional' | 'finalizer';
+
+type DagExecutionTargetData = {
+  readonly adapter: string;
+  readonly provider: string;
+  readonly modelFamily: string;
+  readonly model: string;
+  readonly tools: readonly string[];
+};
+
+type DagExecutionLaneData = {
+  readonly id: string;
+  readonly requested: DagExecutionTargetData;
+  readonly knownSubstitutions: readonly DagExecutionTargetData[];
+};
 
 export type DagNodeData = JsonObject & {
   readonly kind: DagNodeKind;
   /** Concurrency key; nodes sharing a key share its declared limit. */
   readonly key: string | null;
   /** Engine lane for this node; omit it for a data-only node. */
-  readonly lane?: ExecutionLaneDescription;
+  readonly lane?: DagExecutionLaneData;
 };
 
 export interface DagEdgeData extends JsonObject {}
@@ -105,6 +121,7 @@ export interface NodePausedPayload extends JsonObject {
   readonly nodeId: NodeId;
   readonly position: string;
   readonly reason: string;
+  readonly request: JsonValue;
 }
 
 export interface NodeResumedPayload extends JsonObject {
@@ -155,6 +172,7 @@ function validateDag(definition: DagDefinition): void {
   const issues: GraphValidationIssue[] = [];
   const finalizers = new Set<NodeId>();
   const keys = new Set<string>();
+  const lanes = new Map<string, DagExecutionLaneData>();
 
   for (const node of definition.nodes) {
     if (!NODE_KINDS.has(node.data.kind)) {
@@ -166,6 +184,19 @@ function validateDag(definition: DagDefinition): void {
     }
     if (node.data.kind === 'finalizer') finalizers.add(node.id);
     if (node.data.key !== null) keys.add(node.data.key);
+    const lane = node.data.lane;
+    if (lane !== undefined) {
+      const declared = lanes.get(lane.id);
+      if (declared !== undefined && !isDeepStrictEqual(declared, lane)) {
+        issues.push(issue(
+          'CONFLICTING_LANE',
+          `/nodes/${node.id}/data/lane`,
+          `Lane "${lane.id}" must have the same declaration on every node that uses it.`,
+        ));
+      } else {
+        lanes.set(lane.id, lane);
+      }
+    }
   }
 
   if (
@@ -272,6 +303,10 @@ export const dag: GraphType<DagDefinition, DagStatus, DagEvent, DagRequirements>
     const kindOf = new Map(definition.nodes.map((node) => [node.id, node.data.kind]));
     const finalizers = definition.nodes.filter((node) => node.data.kind === 'finalizer');
     const workers = definition.nodes.filter((node) => node.data.kind !== 'finalizer');
+    const executionLanes = new Map<string, DagExecutionLaneData>();
+    for (const node of definition.nodes) {
+      if (node.data.lane !== undefined) executionLanes.set(node.data.lane.id, node.data.lane);
+    }
     const predecessors = new Map<NodeId, readonly NodeId[]>(
       definition.nodes.map((node) => [node.id, definition.edges
         .filter((edge) => edge.target === node.id)
@@ -406,6 +441,8 @@ export const dag: GraphType<DagDefinition, DagStatus, DagEvent, DagRequirements>
         }
       },
       decide(state) {
+        if (anyInFlight(state)) return [];
+
         const resultsFor = (nodeIds: readonly NodeId[]): JsonObject =>
           Object.fromEntries(nodeIds.flatMap((nodeId) => {
             const node = state.nodes[nodeId]!;
@@ -461,8 +498,6 @@ export const dag: GraphType<DagDefinition, DagStatus, DagEvent, DagRequirements>
           return commands;
         };
 
-        if (anyInFlight(state)) return [];
-
         const workerCommands = collect(workers, true);
         if (workerCommands.length > 0) return workerCommands;
 
@@ -510,7 +545,7 @@ export const dag: GraphType<DagDefinition, DagStatus, DagEvent, DagRequirements>
             id: node.id,
             phaseId: 'graph',
             inputContract: { brief: 'json' },
-            outputContract: { result: 'json', skipped: 'boolean?' },
+            outputContract: 'json',
             laneId: node.data.lane?.id ?? null,
           })),
           policies: {
@@ -524,8 +559,7 @@ export const dag: GraphType<DagDefinition, DagStatus, DagEvent, DagRequirements>
             budget: null,
             action: null,
           },
-          executionLanes: definition.nodes.flatMap((node) =>
-            node.data.lane === undefined ? [] : [node.data.lane]),
+          executionLanes: [...executionLanes.values()],
           requestedPermissions: [],
           bounds: {
             dispatches: {

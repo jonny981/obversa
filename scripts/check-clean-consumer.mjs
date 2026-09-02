@@ -36,7 +36,7 @@ const expectedPipelineReport = {
   },
   dispatches: 3,
   order: ['draft', 'review', 'publish'],
-  planDigest: 'sha256:0d720b1e51681fe8f6071b243d431a671f6acf381869b4639bd1a610025249d5',
+  planDigest: 'sha256:ebbf122994643028c5222a0afaf8d7a99a257716e00f0e255b15f315e4b862ed',
   bounds: {
     dispatches: {
       min: { kind: 'known', value: 3 },

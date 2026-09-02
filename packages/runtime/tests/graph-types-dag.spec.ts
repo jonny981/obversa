@@ -3,7 +3,7 @@ import { mkdtemp, realpath, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
-import type { EngineSelectionRecord } from '@obversa/engine';
+import { EngineError, type EngineSelectionRecord } from '@obversa/engine';
 import { MockEngine } from '@obversa/engine/testing';
 import { afterEach, describe, expect, it } from 'vitest';
 
@@ -113,7 +113,7 @@ function pausedNode(nodeId: NodeId, reason: string, attempt = 1): DagEvent {
   return {
     type: 'node-paused',
     version: 1,
-    payload: { nodeId, position: `dag/${nodeId}/${attempt}`, reason },
+    payload: { nodeId, position: `dag/${nodeId}/${attempt}`, reason, request: null },
   };
 }
 
@@ -164,13 +164,17 @@ function expectIssue(definition: DagDefinition, code: string): void {
   expect(issues.some((item) => item.code === code)).toBe(true);
 }
 
-const target: ExecutionTarget = {
+const target = {
   adapter: 'mock',
   provider: 'provider',
   modelFamily: 'family',
   model: 'dag-model',
   tools: [],
-};
+} satisfies ExecutionTarget;
+const fallbackTarget = {
+  ...target,
+  model: 'dag-fallback',
+} satisfies ExecutionTarget;
 const selection: EngineSelectionRecord = {
   adapter: 'mock',
   adapterVersion: null,
@@ -179,6 +183,10 @@ const selection: EngineSelectionRecord = {
   model: 'dag-model',
   executable: null,
   capabilities: [],
+};
+const fallbackSelection: EngineSelectionRecord = {
+  ...selection,
+  model: 'dag-fallback',
 };
 const packageIdentity = {
   source: 'npm:@example/dag-test',
@@ -440,6 +448,8 @@ describe('dag graph type', () => {
     expect(description.nodes.map((node) => node.id)).toEqual(
       ['plan', 'build-a', 'build-b', 'report', 'probe', 'cleanup'],
     );
+    expect(description.nodes.map((node) => node.outputContract))
+      .toEqual(Array.from({ length: 6 }, () => 'json'));
     expect(description.bounds.dispatches.min).toEqual({ kind: 'known', value: 6 });
     expect(description.bounds.dispatches.max).toEqual({ kind: 'known', value: 6 });
     expect(description.bounds.maxFanOut).toEqual({ kind: 'known', value: 1 });
@@ -474,6 +484,36 @@ describe('dag graph type', () => {
     await expect(executor.run(new AbortController().signal)).resolves.toEqual({
       kind: 'waiting',
       positions: ['dag/probe/1'],
+    });
+  });
+
+  it('returns waiting when a fresh executor finds one paused node and an in-flight sibling', async () => {
+    const definition: DagDefinition = {
+      ...graph({ globalConcurrency: 2 }),
+      nodes: [
+        { id: 'approve', data: { kind: 'required', key: null } },
+        { id: 'build', data: { kind: 'required', key: null } },
+      ],
+      edges: [],
+    };
+    const run = await storedDagRun(definition);
+    await appendDagEvents(run.storage, run.runId, [
+      dispatched('approve'),
+      dispatched('build'),
+      pausedNode('approve', 'waiting for approval'),
+    ]);
+    const executor = await createGraphExecutor({
+      ...run,
+      nodes: {
+        approve: nodeBinding(run.root, { runData: async () => ({ approved: true }) }),
+        build: nodeBinding(run.root, { runData: async () => ({ built: true }) }),
+      },
+      engines: [],
+    });
+
+    await expect(executor.run(new AbortController().signal)).resolves.toEqual({
+      kind: 'waiting',
+      positions: ['dag/build/1'],
     });
   });
 
@@ -516,6 +556,129 @@ describe('dag graph type', () => {
       kind: 'complete',
     });
     expect(prompts).toEqual(['Run node writer, attempt 1.']);
+  });
+
+  it('lets two DAG nodes share one engine lane', async () => {
+    const lane = { id: 'claude', requested: target, knownSubstitutions: [] };
+    const definition: DagDefinition = {
+      ...graph(),
+      nodes: [
+        { id: 'draft', data: { kind: 'required', key: null, lane } },
+        { id: 'review', data: { kind: 'required', key: null, lane } },
+      ],
+      edges: [{ id: 'draft-to-review', source: 'draft', target: 'review', data: {} }],
+    };
+    const run = await storedDagRun(definition);
+    const prompts: string[] = [];
+    const engine = new MockEngine((request) => {
+      prompts.push(request.prompt);
+      return 'complete';
+    });
+    const executor = await createGraphExecutor({
+      ...run,
+      nodes: {
+        draft: nodeBinding(run.root, { prompt: () => 'Draft.' }),
+        review: nodeBinding(run.root, { prompt: () => 'Review.' }),
+      },
+      engines: [{ target, selection, engine, hardTokenLimitEnforceable: false }],
+    });
+
+    await expect(executor.run(new AbortController().signal)).resolves.toMatchObject({
+      kind: 'complete',
+    });
+    expect(run.graph.describe().executionLanes).toEqual([lane]);
+    expect(prompts).toEqual(['Draft.', 'Review.']);
+  });
+
+  it('rejects conflicting declarations for one engine lane id', () => {
+    const definition: DagDefinition = {
+      ...graph(),
+      nodes: [
+        {
+          id: 'draft',
+          data: {
+            kind: 'required',
+            key: null,
+            lane: { id: 'claude', requested: target, knownSubstitutions: [] },
+          },
+        },
+        {
+          id: 'review',
+          data: {
+            kind: 'required',
+            key: null,
+            lane: {
+              id: 'claude',
+              requested: { ...target, model: 'different-model' },
+              knownSubstitutions: [],
+            },
+          },
+        },
+      ],
+      edges: [],
+    };
+
+    let caught: unknown;
+    try {
+      compileGraph(dag, definition);
+    } catch (error) {
+      caught = error;
+    }
+    expect(caught).toBeInstanceOf(GraphValidationError);
+    expect((caught as GraphValidationError).issues).toContainEqual({
+      code: 'CONFLICTING_LANE',
+      path: '/nodes/review/data/lane',
+      message: 'Lane "claude" must have the same declaration on every node that uses it.',
+    });
+  });
+
+  it('uses the fallback lane for a later DAG node after the primary model is dead', async () => {
+    const lane = {
+      id: 'claude',
+      requested: target,
+      knownSubstitutions: [fallbackTarget],
+    };
+    const definition: DagDefinition = {
+      ...graph(),
+      nodes: [
+        { id: 'draft', data: { kind: 'required', key: null, lane } },
+        { id: 'review', data: { kind: 'required', key: null, lane } },
+      ],
+      edges: [{ id: 'draft-to-review', source: 'draft', target: 'review', data: {} }],
+    };
+    const run = await storedDagRun(definition);
+    let primaryCalls = 0;
+    let fallbackCalls = 0;
+    const primary = new MockEngine(() => {
+      primaryCalls += 1;
+      throw new EngineError({ kind: 'auth', message: 'primary is dead' });
+    });
+    const fallback = new MockEngine(() => {
+      fallbackCalls += 1;
+      return 'complete';
+    });
+    const executor = await createGraphExecutor({
+      ...run,
+      nodes: {
+        draft: nodeBinding(run.root, { prompt: () => 'Draft.' }),
+        review: nodeBinding(run.root, { prompt: () => 'Review.' }),
+      },
+      engines: [
+        { target, selection, engine: primary, hardTokenLimitEnforceable: false },
+        {
+          target: fallbackTarget,
+          selection: fallbackSelection,
+          engine: fallback,
+          hardTokenLimitEnforceable: false,
+        },
+      ],
+    });
+
+    await expect(executor.run(new AbortController().signal)).resolves.toMatchObject({
+      kind: 'complete',
+    });
+    expect(primaryCalls).toBe(1);
+    expect(fallbackCalls).toBe(2);
   });
 
   it('fails when a finalizer fails after its worker passed', () => {
