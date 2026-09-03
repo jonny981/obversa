@@ -1,0 +1,21 @@
+---
+title: "Verified workspaces"
+description: "Capture, verify, and fork one Git workspace through the public contract."
+---
+
+`WorkspaceProvider` is the public contract for a workspace that a run can
+capture, verify, and fork. The shipped default is a single-repository Git
+provider.
+
+```ts
+import { createGitWorktreeProvider } from '@obversa/runtime';
+
+const workspace = createGitWorktreeProvider({ repositoryPath: process.cwd() });
+const anchor = await workspace.capture();
+const verified = await workspace.verify(anchor);
+if (!verified.ok) throw new Error('Workspace changed before use.');
+```
+
+Capture records the repository revision and file state. Verify reads the
+repository again and reports changed revisions or paths. Fork requires a lease
+for the same anchor before it creates a child worktree.

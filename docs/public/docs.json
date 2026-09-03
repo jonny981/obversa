@@ -41,6 +41,7 @@
           "graphs/executor",
           "graphs/review-loop",
           "graphs/callback-gate"
+          ,"graphs/workspace"
         ]
       },
       {

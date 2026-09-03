@@ -32,6 +32,7 @@
     "example:packages": "pnpm --filter @obversa/memory exec tsx ../../examples/packages/memory.ts && pnpm --filter @obversa/memory-simple exec tsx ../../examples/packages/memory-simple.ts && pnpm --filter @obversa/memory-git exec tsx ../../examples/packages/memory-git.ts",
     "example:graph": "pnpm --filter @obversa/runtime exec tsx ../../examples/packages/custom-graph.ts",
     "example:pipeline": "pnpm --filter @obversa/runtime exec tsx ../../examples/packages/pipeline.ts",
+    "example:workspace": "pnpm --filter @obversa/runtime exec tsx ../../examples/packages/workspace.ts",
     "example:review-loop": "pnpm --filter @obversa/runtime exec tsx ../../examples/packages/review-loop.ts",
     "example:callback-gate": "pnpm --filter @obversa/runtime exec tsx ../../examples/packages/callback-gate.ts",
     "example:turn-taking": "pnpm --filter @obversa/runtime exec tsx ../../examples/packages/turn-taking.ts",
