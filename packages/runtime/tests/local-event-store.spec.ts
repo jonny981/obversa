@@ -264,6 +264,53 @@ describe('local event store', () => {
       .toEqual(['event-1', 'event-2']);
   });
 
+  it('returns the committed revision when the exact append is retried', async () => {
+    const root = await temporaryRoot();
+    const batch = [
+      event('event-1', { value: 'same' }),
+      event('event-2'),
+    ] as const;
+    const first = createLocalEventStore({ root });
+    await expect(first.append(stream, 0, batch)).resolves.toBe(2);
+    await first.append(stream, 2, [event('event-3')]);
+
+    const reopened = createLocalEventStore({ root });
+    await expect(reopened.append(stream, 0, batch)).resolves.toBe(2);
+
+    expect(await segmentFiles(root)).toHaveLength(2);
+    expect((await collect(reopened.read(stream))).map((item) => item.eventId))
+      .toEqual(['event-1', 'event-2', 'event-3']);
+  });
+
+  it('rejects a retry whose event bytes changed', async () => {
+    const root = await temporaryRoot();
+    const first = createLocalEventStore({ root });
+    await first.append(stream, 0, [event('event-1', { value: 'original' })]);
+
+    const reopened = createLocalEventStore({ root });
+    await expect(reopened.append(stream, 0, [
+      event('event-1', { value: 'changed' }),
+    ])).rejects.toEqual(expect.objectContaining({
+      code: 'REVISION_CONFLICT',
+      details: { expectedRevision: 0, actualRevision: 1 },
+    }));
+  });
+
+  it('does not join separate commits into one successful retry', async () => {
+    const root = await temporaryRoot();
+    const firstEvent = event('event-1');
+    const secondEvent = event('event-2');
+    const store = createLocalEventStore({ root });
+    await store.append(stream, 0, [firstEvent]);
+    await store.append(stream, 1, [secondEvent]);
+
+    await expect(store.append(stream, 0, [firstEvent, secondEvent]))
+      .rejects.toEqual(expect.objectContaining({
+        code: 'REVISION_CONFLICT',
+        details: { expectedRevision: 0, actualRevision: 2 },
+      }));
+  });
+
   it('reads through one finite head when a later append commits', async () => {
     const store = createLocalEventStore({ root: await temporaryRoot() });
     await store.append(stream, 0, [event('event-1'), event('event-2')]);

@@ -58,6 +58,7 @@ interface StreamDirectories {
 interface StreamState {
   readonly events: readonly DomainEventEnvelope[];
   readonly revision: number;
+  readonly segments: ReadonlyMap<number, Buffer>;
 }
 
 interface SerializedSegment {
@@ -70,6 +71,7 @@ interface PreparedAppend {
   readonly expectedRevision: number;
   readonly events: DomainEventBatch;
   readonly segment: SerializedSegment;
+  readonly alreadyCommitted: boolean;
 }
 
 interface SegmentChecksum {
@@ -497,6 +499,7 @@ async function readStreamStateFromDirectory(
   const paths = await segmentPaths(directory);
   const events: DomainEventEnvelope[] = [];
   const eventIds = new Set<string>();
+  const segments = new Map<number, Buffer>();
   let nextRevision = 1;
   for (const path of paths) {
     const filename = basename(path);
@@ -514,6 +517,7 @@ async function readStreamStateFromDirectory(
       options.maxAppendBatchBytes + CHECKSUM_RECORD_ALLOWANCE,
     );
     const segment = parseSegment(options, bytes, path, stream, nextRevision);
+    segments.set(namedStart, bytes);
     for (const event of segment) {
       if (eventIds.has(event.eventId)) {
         throw storageError(
@@ -530,6 +534,7 @@ async function readStreamStateFromDirectory(
   return Object.freeze({
     events: Object.freeze(events),
     revision: nextRevision - 1,
+    segments,
   });
 }
 
@@ -538,7 +543,9 @@ async function readStreamState(
   stream: EventStreamRef,
 ): Promise<StreamState> {
   const directory = await findStreamSegments(options, stream);
-  if (directory === null) return { events: [], revision: 0 };
+  if (directory === null) {
+    return { events: [], revision: 0, segments: new Map() };
+  }
   return readStreamStateFromDirectory(options, stream, directory);
 }
 
@@ -615,11 +622,23 @@ function validateLimitsAndSecrets(
   }
 }
 
+function hasExactCommittedAppend(
+  state: StreamState,
+  expectedRevision: number,
+  segment: SerializedSegment,
+  eventCount: number,
+): boolean {
+  if (state.revision < expectedRevision + eventCount) return false;
+  return state.segments.get(expectedRevision + 1)?.equals(segment.bytes)
+    ?? false;
+}
+
 async function prepareAppend(
   options: ResolvedOptions,
   unsafeStream: EventStreamRef,
   unsafeExpectedRevision: number,
   unsafeEvents: DomainEventBatch,
+  allowCommittedRetry = false,
 ): Promise<PreparedAppend> {
   const stream = validateEventStreamRef(unsafeStream);
   const expectedRevision = validateStreamRevision(
@@ -635,8 +654,36 @@ async function prepareAppend(
     );
   }
 
+  const envelopes = Object.freeze(events.map((event, index) => (
+    validateDomainEventEnvelope({
+      ...event,
+      envelopeVersion: 1,
+      streamId: stream.streamId,
+      revision: expectedRevision + index + 1,
+    })
+  )));
+  const segment = serializedSegment(options, envelopes);
+  validateLimitsAndSecrets(options, events, segment);
+
   const state = await readStreamState(options, stream);
   if (state.revision !== expectedRevision) {
+    if (
+      allowCommittedRetry
+      && hasExactCommittedAppend(
+        state,
+        expectedRevision,
+        segment,
+        events.length,
+      )
+    ) {
+      return {
+        stream,
+        expectedRevision,
+        events,
+        segment,
+        alreadyCommitted: true,
+      };
+    }
     throw storageError(
       'REVISION_CONFLICT',
       'Event stream revision does not match the append expectation.',
@@ -655,17 +702,13 @@ async function prepareAppend(
     eventIds.add(event.eventId);
   }
 
-  const envelopes = Object.freeze(events.map((event, index) => (
-    validateDomainEventEnvelope({
-      ...event,
-      envelopeVersion: 1,
-      streamId: stream.streamId,
-      revision: expectedRevision + index + 1,
-    })
-  )));
-  const segment = serializedSegment(options, envelopes);
-  validateLimitsAndSecrets(options, events, segment);
-  return { stream, expectedRevision, events, segment };
+  return {
+    stream,
+    expectedRevision,
+    events,
+    segment,
+    alreadyCommitted: false,
+  };
 }
 
 async function syncDirectory(path: string): Promise<void> {
@@ -746,7 +789,11 @@ class LocalEventStore implements EventStore {
       unsafeStream,
       unsafeExpectedRevision,
       unsafeEvents,
+      true,
     );
+    if (prepared.alreadyCommitted) {
+      return prepared.expectedRevision + prepared.events.length;
+    }
     const directories = await ensureStreamDirectories(
       this.#options,
       prepared.stream,
@@ -760,6 +807,14 @@ class LocalEventStore implements EventStore {
     }
 
     const actual = await readStreamState(this.#options, prepared.stream);
+    if (hasExactCommittedAppend(
+      actual,
+      prepared.expectedRevision,
+      prepared.segment,
+      prepared.events.length,
+    )) {
+      return prepared.expectedRevision + prepared.events.length;
+    }
     throw storageError(
       'REVISION_CONFLICT',
       'Another writer committed the expected stream revision first.',

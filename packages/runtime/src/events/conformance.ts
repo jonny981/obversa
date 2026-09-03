@@ -206,6 +206,32 @@ export async function runEventStoreConformance(
       },
     },
     {
+      name: 'exact append retry',
+      async run() {
+        const target = stream('retry');
+        const source = event(conformanceId('event'), { value: 'same' });
+        const first = await fixture.open();
+        await first.append(target, 0, [source]);
+
+        const reopened = await fixture.open();
+        const revision = await reopened.append(target, 0, [source]);
+        assert(
+          revision === 1,
+          `Exact append retry returned revision ${revision} instead of 1.`,
+        );
+        assert(
+          (await collect(reopened.read(target))).length === 1,
+          'Exact append retry committed the event twice.',
+        );
+        await expectStorageError(
+          () => reopened.append(target, 0, [event(source.eventId, {
+            value: 'changed',
+          })]),
+          'REVISION_CONFLICT',
+        );
+      },
+    },
+    {
       name: 'restart policy identity',
       async run() {
         const target = stream('policy');
