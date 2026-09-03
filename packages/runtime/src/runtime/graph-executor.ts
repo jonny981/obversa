@@ -75,6 +75,8 @@ export interface GraphNodeBinding {
     | ((part: AgentResultPart, parts: readonly AgentResultPart[]) => JsonValue)
     | null;
   readonly tokenBudget: TokenBudget | null;
+  /** Whether node code may run again after a crash leaves its outcome unknown. */
+  readonly retrySafe?: boolean;
   decideAction(): Promise<ActionDecision>;
 }
 
@@ -103,12 +105,27 @@ export type GraphExecutorResult =
       readonly positions: readonly string[];
     };
 
+export interface GraphExecutor {
+  run(signal: AbortSignal): Promise<GraphExecutorResult>;
+  resume(position: string, signal: AbortSignal): Promise<GraphExecutorResult>;
+}
+
+interface FoldedAttempt {
+  readonly command: Extract<GraphCommand, { readonly kind: 'dispatch' }>;
+  readonly started: Readonly<{
+    readonly identity: AttemptIdentity;
+    readonly retrySafe: boolean;
+  }> | null;
+  readonly status: 'in-flight' | 'paused' | 'settled';
+}
+
 interface FoldedRun {
   readonly revision: number;
   readonly state: JsonValue;
   readonly dispatched: ReadonlySet<string>;
   readonly inFlight: readonly string[];
   readonly unavailable: ReadonlySet<string>;
+  readonly attempts: ReadonlyMap<string, FoldedAttempt>;
 }
 
 interface PreparedDispatch {
@@ -202,6 +219,29 @@ function validMemory(value: unknown): value is Memory {
   );
 }
 
+function validateAttemptIdentity(
+  value: unknown,
+  label: string,
+  runId: string,
+  namespace: string,
+): AttemptIdentity {
+  const identityRecord = record(value, label);
+  const identity = createAttemptIdentity({
+    namespace: text(identityRecord.namespace, `${label}.namespace`),
+    streamId: text(identityRecord.streamId, `${label}.streamId`),
+    nodeId: text(identityRecord.nodeId, `${label}.nodeId`),
+    position: text(identityRecord.position, `${label}.position`),
+  });
+  if (
+    canonicalJson(identity) !== canonicalJson(identityRecord)
+    || identity.namespace !== namespace
+    || identity.streamId !== runId
+  ) {
+    fail('INVALID_EVENT', `${label} must belong to this stored run.`);
+  }
+  return identity;
+}
+
 function validateFact(
   envelope: DomainEventEnvelope,
   runId: string,
@@ -220,20 +260,12 @@ function validateFact(
   if (payload.schemaVersion !== 1) {
     fail('INVALID_EVENT', 'A model-unavailable payload must use schemaVersion 1.');
   }
-  const identityRecord = record(payload.identity, 'A model-unavailable identity');
-  const identity = createAttemptIdentity({
-    namespace: text(identityRecord.namespace, 'identity.namespace'),
-    streamId: text(identityRecord.streamId, 'identity.streamId'),
-    nodeId: text(identityRecord.nodeId, 'identity.nodeId'),
-    position: text(identityRecord.position, 'identity.position'),
-  });
-  if (
-    canonicalJson(identity) !== canonicalJson(identityRecord)
-    || identity.namespace !== namespace
-    || identity.streamId !== runId
-  ) {
-    fail('INVALID_EVENT', 'A model-unavailable identity must belong to this stored run.');
-  }
+  const identity = validateAttemptIdentity(
+    payload.identity,
+    'A model-unavailable identity',
+    runId,
+    namespace,
+  );
   let selected: EngineSelectionRecord;
   let effective: EngineSelectionRecord;
   try {
@@ -269,7 +301,7 @@ function validateStandardEvent(
     fail('INVALID_EVENT', `${envelope.type} must use version 1.`);
   }
   const payload = record(envelope.payload, `${envelope.type} payload`);
-  if (type === 'node-dispatched') {
+  if (type === 'node-dispatched' || type === 'node-resumed') {
     exactFields(payload, ['nodeId', 'position'], `${envelope.type} payload`);
   } else if (type === 'node-completed') {
     exactFields(payload, ['nodeId', 'position', 'result'], `${envelope.type} payload`);
@@ -292,6 +324,36 @@ function validateStandardEvent(
   return Object.freeze({ type, version: 1, payload });
 }
 
+function validateAttemptStarted(
+  envelope: DomainEventEnvelope,
+  runId: string,
+  namespace: string,
+  nodeIds: ReadonlySet<string>,
+): Readonly<{ readonly identity: AttemptIdentity; readonly retrySafe: boolean }> {
+  if (envelope.version !== 1) {
+    fail('INVALID_EVENT', 'graph:node-attempt-started must use version 1.');
+  }
+  const payload = record(envelope.payload, 'graph:node-attempt-started payload');
+  exactFields(
+    payload,
+    ['identity', 'retrySafe'],
+    'graph:node-attempt-started payload',
+  );
+  const identity = validateAttemptIdentity(
+    payload.identity,
+    'A node-attempt-started identity',
+    runId,
+    namespace,
+  );
+  if (!nodeIds.has(identity.nodeId)) {
+    fail('INVALID_EVENT', 'A node-attempt-started identity refers to an unknown node.');
+  }
+  if (typeof payload.retrySafe !== 'boolean') {
+    fail('INVALID_EVENT', 'graph:node-attempt-started.retrySafe must be a boolean.');
+  }
+  return Object.freeze({ identity, retrySafe: payload.retrySafe });
+}
+
 function newEvent(
   runId: string,
   type: string,
@@ -311,7 +373,7 @@ function newEvent(
 /** Build one executor from the stored definition and frozen execution plan. */
 export async function createGraphExecutor(
   options: GraphExecutorOptions,
-): Promise<Readonly<{ run(signal: AbortSignal): Promise<GraphExecutorResult> }>> {
+): Promise<Readonly<GraphExecutor>> {
   const loaded = await loadRunDefinition(options.storage, options.runId);
   const storedDefinition = loaded.record.payload.definition.graphDefinition;
   if (
@@ -383,8 +445,11 @@ export async function createGraphExecutor(
   const readFolded = async (): Promise<FoldedRun> => {
     let state = options.graph.initialState();
     let revision = 0;
-    const dispatched = new Set<string>();
-    const settled = new Set<string>();
+    const attempts = new Map<string, FoldedAttempt>();
+    const pendingDispatches = new Map<
+      string,
+      Extract<GraphCommand, { readonly kind: 'dispatch' }>
+    >();
     const unavailable = new Set<string>();
     for await (const envelope of options.storage.eventStore.read(stream)) {
       revision = envelope.revision;
@@ -392,6 +457,7 @@ export async function createGraphExecutor(
       const type = envelope.type.slice(GRAPH_PREFIX.length);
       if (type === 'run-started') continue;
       if (type === 'model-unavailable') {
+        pendingDispatches.clear();
         const fact = validateFact(
           envelope,
           options.runId,
@@ -402,27 +468,103 @@ export async function createGraphExecutor(
         unavailable.add(availabilityKey(fact.effective));
         continue;
       }
+      if (type === 'node-attempt-started') {
+        pendingDispatches.clear();
+        const started = validateAttemptStarted(
+          envelope,
+          options.runId,
+          stream.namespace,
+          nodeIds,
+        );
+        const attempt = attempts.get(started.identity.position);
+        if (
+          !attempt
+          || attempt.command.nodeId !== started.identity.nodeId
+          || attempt.status !== 'in-flight'
+          || attempt.started !== null
+        ) {
+          fail(
+            'INVALID_EVENT',
+            `The start for position "${started.identity.position}" has no single unfinished dispatch.`,
+          );
+        }
+        attempts.set(started.identity.position, Object.freeze({
+          ...attempt,
+          started,
+        }));
+        continue;
+      }
       let graphEvent: GraphEvent;
       if (
         type === 'node-dispatched'
         || type === 'node-completed'
         || type === 'node-failed'
         || type === 'node-paused'
+        || type === 'node-resumed'
       ) {
         graphEvent = validateStandardEvent(envelope, type, nodeIds);
         const position = (graphEvent.payload as JsonObject).position as string;
         if (type === 'node-dispatched') {
-          if (dispatched.has(position)) {
+          if (attempts.has(position)) {
             fail('INVALID_EVENT', `Dispatch position "${position}" is recorded more than once.`);
           }
-          dispatched.add(position);
+          if (pendingDispatches.size === 0) {
+            const decision = options.graph.decide(state);
+            if (decision.some((command) => command.kind !== 'dispatch')) {
+              fail('INVALID_EVENT', 'A recorded dispatch does not match the graph decision at its event prefix.');
+            }
+            for (const command of decision as readonly Extract<
+              GraphCommand,
+              { readonly kind: 'dispatch' }
+            >[]) {
+              pendingDispatches.set(command.position, command);
+            }
+          }
+          const command = pendingDispatches.get(position);
+          if (
+            !command
+            || command.nodeId !== (graphEvent.payload as JsonObject).nodeId
+          ) {
+            fail('INVALID_EVENT', `Dispatch position "${position}" does not match the graph decision at its event prefix.`);
+          }
+          pendingDispatches.delete(position);
+          attempts.set(position, Object.freeze({
+            command,
+            started: null,
+            status: 'in-flight',
+          }));
+        } else if (type === 'node-resumed') {
+          pendingDispatches.clear();
+          const attempt = attempts.get(position);
+          if (
+            !attempt
+            || attempt.command.nodeId !== (graphEvent.payload as JsonObject).nodeId
+            || attempt.status === 'settled'
+            || (attempt.status === 'in-flight' && attempt.started === null)
+          ) {
+            fail('INVALID_EVENT', `Resume position "${position}" has no matching unfinished attempt.`);
+          }
+          attempts.set(position, Object.freeze({
+            ...attempt,
+            status: 'in-flight',
+          }));
         } else {
-          if (!dispatched.has(position) || settled.has(position)) {
+          pendingDispatches.clear();
+          const attempt = attempts.get(position);
+          if (
+            !attempt
+            || attempt.command.nodeId !== (graphEvent.payload as JsonObject).nodeId
+            || attempt.status !== 'in-flight'
+          ) {
             fail('INVALID_EVENT', `The result for position "${position}" has no single recorded dispatch.`);
           }
-          settled.add(position);
+          attempts.set(position, Object.freeze({
+            ...attempt,
+            status: type === 'node-paused' ? 'paused' : 'settled',
+          }));
         }
       } else {
+        pendingDispatches.clear();
         graphEvent = Object.freeze({
           type,
           version: envelope.version,
@@ -431,9 +573,19 @@ export async function createGraphExecutor(
       }
       state = options.graph.reduce(state, graphEvent);
     }
-    const inFlight = [...dispatched].filter((position) => !settled.has(position));
+    const dispatched = new Set(attempts.keys());
+    const inFlight = [...attempts]
+      .filter(([, attempt]) => attempt.status === 'in-flight')
+      .map(([position]) => position);
     appendRevision = revision;
-    return Object.freeze({ revision, state, dispatched, inFlight, unavailable });
+    return Object.freeze({
+      revision,
+      state,
+      dispatched,
+      inFlight: Object.freeze(inFlight),
+      unavailable,
+      attempts,
+    });
   };
 
   const appendBatch = async (
@@ -481,6 +633,9 @@ export async function createGraphExecutor(
     if (!node || !binding) {
       fail('MISSING_NODE_BINDING', `No node behaviour is bound for "${command.nodeId}".`);
     }
+    if (binding.retrySafe !== undefined && typeof binding.retrySafe !== 'boolean') {
+      fail('MISSING_NODE_BINDING', `Node "${command.nodeId}" has an invalid retrySafe policy.`);
+    }
     const prompt = binding.prompt?.(command.input) ?? null;
     if (node.laneId === null) {
       return { command, binding, prompt, route: null, allEnginesUnavailable: false };
@@ -496,8 +651,21 @@ export async function createGraphExecutor(
   const appendOutcome = async (
     prepared: PreparedDispatch,
     signal: AbortSignal,
+    alreadyStarted = false,
   ): Promise<void> => {
     const { command, binding, prompt, route } = prepared;
+    const identity: AttemptIdentity = createAttemptIdentity({
+      namespace: stream.namespace,
+      streamId: stream.streamId,
+      nodeId: command.nodeId,
+      position: command.position,
+    });
+    if (!alreadyStarted) {
+      await enqueueAppend(newEvent(options.runId, 'node-attempt-started', {
+        identity,
+        retrySafe: binding.retrySafe ?? false,
+      }));
+    }
     const appendResult = async (event: NewDomainEvent): Promise<void> => {
       try {
         await enqueueAppend(event);
@@ -520,12 +688,6 @@ export async function createGraphExecutor(
       }));
       return;
     }
-    const identity: AttemptIdentity = createAttemptIdentity({
-      namespace: stream.namespace,
-      streamId: stream.streamId,
-      nodeId: command.nodeId,
-      position: command.position,
-    });
     const result = await executeNodeAttempt({
       identity,
       nodeId: command.nodeId,
@@ -577,57 +739,106 @@ export async function createGraphExecutor(
     }));
   };
 
-  const run = async (signal: AbortSignal): Promise<GraphExecutorResult> => {
+  const drive = async (signal: AbortSignal): Promise<GraphExecutorResult> => {
+    for (;;) {
+      if (signal.aborted) fail('ABORTED', 'The graph run was aborted.');
+      const folded = await readFolded();
+      const commands = options.graph.decide(folded.state);
+      if (commands.length === 0) {
+        if (folded.inFlight.length === 0) {
+          fail('EMPTY_DECISION', 'The graph returned an empty decision with no recorded attempt in flight.');
+        }
+        return Object.freeze({ kind: 'waiting', positions: Object.freeze([...folded.inFlight]) });
+      }
+      const terminal = commands.find((command) => command.kind !== 'dispatch');
+      if (terminal) {
+        if (folded.inFlight.length > 0) {
+          fail('PROTOCOL', 'The graph returned a terminal result while recorded work is still in flight.');
+        }
+        return terminal;
+      }
+      if (folded.inFlight.length > 0) {
+        fail('PROTOCOL', 'The graph dispatched more work while recorded work is still in flight.');
+      }
+      const dispatches = commands as readonly Extract<GraphCommand, { readonly kind: 'dispatch' }>[];
+      for (const command of dispatches) {
+        if (folded.dispatched.has(command.position)) {
+          fail('DUPLICATE_POSITION', `Dispatch position "${command.position}" is already recorded.`);
+        }
+      }
+      const prepared = dispatches.map((command) => prepareDispatch(command, folded.unavailable));
+      try {
+        await appendBatch(
+          folded.revision,
+          dispatches.map((command) => newEvent(options.runId, 'node-dispatched', {
+            nodeId: command.nodeId,
+            position: command.position,
+          })),
+        );
+      } catch (error) {
+        if (error instanceof StorageError && error.code === 'REVISION_CONFLICT') {
+          continue;
+        }
+        throw error;
+      }
+      await Promise.all(prepared.map(async (attempt) => appendOutcome(attempt, signal)));
+    }
+  };
+
+  const resumePosition = async (
+    position: string,
+    signal: AbortSignal,
+  ): Promise<GraphExecutorResult> => {
+    if (signal.aborted) fail('ABORTED', 'The graph run was aborted.');
+    const folded = await readFolded();
+    const attempt = folded.attempts.get(position);
+    if (!attempt || attempt.status === 'settled') {
+      fail('PROTOCOL', `Position "${position}" is not an unfinished attempt.`);
+    }
+    if (
+      attempt.status === 'in-flight'
+      && attempt.started !== null
+      && !attempt.started.retrySafe
+    ) {
+      await appendBatch(folded.revision, [newEvent(options.runId, 'node-paused', {
+        nodeId: attempt.command.nodeId,
+        position,
+        reason: 'The previous process stopped after node code started, so its outcome is uncertain.',
+        request: {
+          kind: 'reconcile-attempt',
+          attemptId: attempt.started.identity.attemptId,
+        },
+      })]);
+      return drive(signal);
+    }
+
+    const prepared = prepareDispatch(attempt.command, folded.unavailable);
+    if (attempt.status === 'paused' || attempt.started !== null) {
+      await appendBatch(folded.revision, [newEvent(options.runId, 'node-resumed', {
+        nodeId: attempt.command.nodeId,
+        position,
+      })]);
+    }
+    await appendOutcome(prepared, signal, attempt.started !== null);
+    return drive(signal);
+  };
+
+  const exclusively = async (
+    operation: () => Promise<GraphExecutorResult>,
+  ): Promise<GraphExecutorResult> => {
     if (running) fail('PROTOCOL', 'This graph executor is already running.');
     running = true;
     try {
-      for (;;) {
-        if (signal.aborted) fail('ABORTED', 'The graph run was aborted.');
-        const folded = await readFolded();
-        const commands = options.graph.decide(folded.state);
-        if (commands.length === 0) {
-          if (folded.inFlight.length === 0) {
-            fail('EMPTY_DECISION', 'The graph returned an empty decision with no recorded attempt in flight.');
-          }
-          return Object.freeze({ kind: 'waiting', positions: Object.freeze([...folded.inFlight]) });
-        }
-        const terminal = commands.find((command) => command.kind !== 'dispatch');
-        if (terminal) {
-          if (folded.inFlight.length > 0) {
-            fail('PROTOCOL', 'The graph returned a terminal result while recorded work is still in flight.');
-          }
-          return terminal;
-        }
-        if (folded.inFlight.length > 0) {
-          fail('PROTOCOL', 'The graph dispatched more work while recorded work is still in flight.');
-        }
-        const dispatches = commands as readonly Extract<GraphCommand, { readonly kind: 'dispatch' }>[];
-        for (const command of dispatches) {
-          if (folded.dispatched.has(command.position)) {
-            fail('DUPLICATE_POSITION', `Dispatch position "${command.position}" is already recorded.`);
-          }
-        }
-        const prepared = dispatches.map((command) => prepareDispatch(command, folded.unavailable));
-        try {
-          await appendBatch(
-            folded.revision,
-            dispatches.map((command) => newEvent(options.runId, 'node-dispatched', {
-              nodeId: command.nodeId,
-              position: command.position,
-            })),
-          );
-        } catch (error) {
-          if (error instanceof StorageError && error.code === 'REVISION_CONFLICT') {
-            continue;
-          }
-          throw error;
-        }
-        await Promise.all(prepared.map(async (attempt) => appendOutcome(attempt, signal)));
-      }
+      return await operation();
     } finally {
       running = false;
     }
   };
 
-  return Object.freeze({ run });
+  return Object.freeze({
+    run: (signal: AbortSignal) => exclusively(() => drive(signal)),
+    resume: (position: string, signal: AbortSignal) => exclusively(
+      () => resumePosition(position, signal),
+    ),
+  });
 }

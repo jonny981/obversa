@@ -122,6 +122,10 @@ function failedNode(nodeId: NodeId, position: string, code: string): Convergence
   return { type: 'node-failed', version: 1, payload: { nodeId, position, code } };
 }
 
+function resumedNode(nodeId: NodeId, position: string): ConvergenceEvent {
+  return { type: 'node-resumed', version: 1, payload: { nodeId, position } };
+}
+
 function seatInvalidated(seatId: NodeId): ConvergenceEvent {
   return { type: 'seat-invalidated', version: 1, payload: { seatId, reason: 'watched path changed' } };
 }
@@ -229,7 +233,10 @@ async function storedConvergenceRun(definition: ConvergenceDefinition): Promise<
 
 function executorNodeBinding(
   root: string,
-  input: Partial<Pick<GraphNodeBinding, 'prompt' | 'resultContract' | 'runData' | 'parseResult'>>,
+  input: Partial<Pick<
+    GraphNodeBinding,
+    'prompt' | 'resultContract' | 'runData' | 'parseResult' | 'decideAction'
+  >>,
 ): GraphNodeBinding {
   return {
     prompt: input.prompt ?? null,
@@ -251,7 +258,7 @@ function executorNodeBinding(
     runData: input.runData ?? null,
     parseResult: input.parseResult ?? null,
     tokenBudget: null,
-    decideAction: async () => ({ kind: 'allow' }),
+    decideAction: input.decideAction ?? (async () => ({ kind: 'allow' })),
   };
 }
 
@@ -1319,6 +1326,14 @@ describe('convergence graph type', () => {
       kind: 'pause',
       reason: 'Node "generator" is paused; the run waits.',
     }]);
+    expect(compiled.reduce(
+      state,
+      resumedNode('generator', 'convergence/2/generator/1'),
+    )).toEqual(state);
+    expect(compiled.reduce(
+      state,
+      resumedNode('generator', 'convergence/1/generator/1'),
+    ).nodes.generator!.status).toBe('in-flight');
   });
 
   it('waits for an in-flight review before returning a sibling pause', () => {
@@ -1434,6 +1449,97 @@ describe('convergence graph type', () => {
     }]);
   });
 
+  it('resumes a paused convergence node at its exact position after restart', async () => {
+    const base = panel({ seatConcurrency: 2 });
+    const definition: ConvergenceDefinition = {
+      ...base,
+      nodes: base.nodes.map((node) => node.id === 'seat-a'
+        ? { ...node, data: { ...node.data, lane: reviewLane('seat-a', 'anthropic', 'claude') } }
+        : node.id === 'seat-b'
+          ? { ...node, data: { ...node.data, lane: reviewLane('seat-b', 'openai', 'gpt') } }
+          : node),
+    };
+    const run = await storedConvergenceRun(definition);
+    const parseReviewResult: GraphNodeBinding['parseResult'] = (part) => {
+      if (part.kind !== 'assistant') throw new TypeError('review result must be assistant text');
+      return JSON.parse(part.text) as JsonValue;
+    };
+    const bindings = (generator: GraphNodeBinding): Readonly<Record<string, GraphNodeBinding>> => ({
+      generator,
+      evaluator: executorNodeBinding(run.root, {
+        runData: async () => ({ gateMet: true, ...REVIEW_EVIDENCE }),
+      }),
+      'seat-a': executorNodeBinding(run.root, {
+        prompt: () => 'Review as seat A.',
+        resultContract: reviewResultContract,
+        parseResult: parseReviewResult,
+      }),
+      'seat-b': executorNodeBinding(run.root, {
+        prompt: () => 'Review as seat B.',
+        resultContract: reviewResultContract,
+        parseResult: parseReviewResult,
+      }),
+      repair: executorNodeBinding(run.root, {
+        runData: async () => ({ repaired: true }),
+      }),
+    });
+    const engines = () => [
+      reviewEngineBinding(definition, 'seat-a', PASS_ANTHROPIC, []),
+      reviewEngineBinding(definition, 'seat-b', PASS_OPENAI, []),
+    ];
+    const first = await createGraphExecutor({
+      ...run,
+      nodes: bindings(executorNodeBinding(run.root, {
+        runData: async () => ({ draft: 'ready' }),
+        decideAction: async () => ({
+          kind: 'wait',
+          reason: 'waiting for source',
+          request: { action: 'supply-source' },
+        }),
+      })),
+      engines: engines(),
+    });
+    await expect(first.run(new AbortController().signal)).resolves.toEqual({
+      kind: 'pause',
+      reason: 'Node "generator" is paused; the run waits.',
+    });
+
+    let calls = 0;
+    const fresh = await createGraphExecutor({
+      ...run,
+      nodes: bindings(executorNodeBinding(run.root, {
+        runData: async () => {
+          calls += 1;
+          return { draft: 'ready' };
+        },
+      })),
+      engines: engines(),
+    });
+    await expect(fresh.resume(
+      'convergence/1/generator/1',
+      new AbortController().signal,
+    )).resolves.toMatchObject({ kind: 'complete' });
+    expect(calls).toBe(1);
+
+    let dispatches = 0;
+    const resumedPayloads: JsonValue[] = [];
+    for await (const event of run.storage.eventStore.read({
+      namespace: run.storage.record.namespace,
+      streamId: run.runId,
+    })) {
+      if (
+        event.type === 'graph:node-dispatched'
+        && (event.payload as JsonObject).nodeId === 'generator'
+      ) dispatches += 1;
+      if (event.type === 'graph:node-resumed') resumedPayloads.push(event.payload);
+    }
+    expect(dispatches).toBe(1);
+    expect(resumedPayloads).toContainEqual({
+      nodeId: 'generator',
+      position: 'convergence/1/generator/1',
+    });
+  });
+
   it('runs a full review round through the graph executor and engine-backed seats', async () => {
     const base = panel({ seatConcurrency: 2 });
     const definition: ConvergenceDefinition = {
@@ -1531,11 +1637,15 @@ describe('convergence graph type', () => {
     expect(graphEventTypes).toEqual([
       'graph:run-started',
       'graph:node-dispatched',
+      'graph:node-attempt-started',
       'graph:node-completed',
       'graph:node-dispatched',
+      'graph:node-attempt-started',
       'graph:node-completed',
       'graph:node-dispatched',
       'graph:node-dispatched',
+      'graph:node-attempt-started',
+      'graph:node-attempt-started',
       'graph:node-completed',
       'graph:node-completed',
     ]);

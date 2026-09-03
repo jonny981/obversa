@@ -21,7 +21,7 @@ import {
 } from '../src/graph/conformance.ts';
 import { compileGraph } from '../src/graph/type.ts';
 import { GraphValidationError, type JsonObject, type JsonValue } from '../src/graph/value.ts';
-import { validateNewDomainEvent } from '../src/events/envelope.ts';
+import { validateNewDomainEvent, type DomainEventEnvelope } from '../src/events/envelope.ts';
 import { validateDomainEventBatch } from '../src/events/store.ts';
 import {
   createGraphExecutor,
@@ -117,8 +117,12 @@ function pausedNode(nodeId: NodeId, reason: string, attempt = 1): DagEvent {
   };
 }
 
-function resumedNode(nodeId: NodeId): DagEvent {
-  return { type: 'node-resumed', version: 1, payload: { nodeId } };
+function resumedNode(nodeId: NodeId, attempt = 1): DagEvent {
+  return {
+    type: 'node-resumed',
+    version: 1,
+    payload: { nodeId, position: `dag/${nodeId}/${attempt}` },
+  };
 }
 
 function planResolution(): PlanResolution {
@@ -254,6 +258,7 @@ async function storedDagRun(definition: DagDefinition): Promise<{
 function nodeBinding(root: string, input: {
   readonly prompt?: GraphNodeBinding['prompt'];
   readonly runData?: GraphNodeBinding['runData'];
+  readonly decideAction?: GraphNodeBinding['decideAction'];
 } = {}): GraphNodeBinding {
   return {
     prompt: input.prompt ?? null,
@@ -275,7 +280,7 @@ function nodeBinding(root: string, input: {
     runData: input.runData ?? null,
     parseResult: null,
     tokenBudget: null,
-    decideAction: async () => ({ kind: 'allow' }),
+    decideAction: input.decideAction ?? (async () => ({ kind: 'allow' })),
   };
 }
 
@@ -515,6 +520,65 @@ describe('dag graph type', () => {
       kind: 'waiting',
       positions: ['dag/build/1'],
     });
+  });
+
+  it('resumes a paused DAG node at its exact recorded position after restart', async () => {
+    const definition: DagDefinition = {
+      ...graph(),
+      nodes: [{ id: 'approve', data: { kind: 'required', key: null } }],
+      edges: [],
+    };
+    const run = await storedDagRun(definition);
+    const first = await createGraphExecutor({
+      ...run,
+      nodes: {
+        approve: nodeBinding(run.root, {
+          runData: async () => ({ approved: true }),
+          decideAction: async () => ({
+            kind: 'wait',
+            reason: 'waiting for approval',
+            request: { action: 'approve' },
+          }),
+        }),
+      },
+      engines: [],
+    });
+    await expect(first.run(new AbortController().signal)).resolves.toEqual({
+      kind: 'pause',
+      reason: 'waiting for approval',
+    });
+
+    let calls = 0;
+    const fresh = await createGraphExecutor({
+      ...run,
+      nodes: {
+        approve: nodeBinding(run.root, {
+          runData: async () => {
+            calls += 1;
+            return { approved: true };
+          },
+        }),
+      },
+      engines: [],
+    });
+    await expect(fresh.resume('dag/approve/2', new AbortController().signal))
+      .rejects.toMatchObject({ code: 'PROTOCOL' });
+    await expect(fresh.resume('dag/approve/1', new AbortController().signal))
+      .resolves.toEqual({
+        kind: 'complete',
+        output: { nodes: { approve: { approved: true } } },
+      });
+    expect(calls).toBe(1);
+
+    const durable: DomainEventEnvelope[] = [];
+    for await (const event of run.storage.eventStore.read({
+      namespace: run.storage.record.namespace,
+      streamId: run.runId,
+    })) durable.push(event);
+    expect(durable.filter((event) => event.type === 'graph:node-dispatched'))
+      .toHaveLength(1);
+    expect(durable.find((event) => event.type === 'graph:node-resumed')?.payload)
+      .toEqual({ nodeId: 'approve', position: 'dag/approve/1' });
   });
 
   it('runs a DAG node on its declared engine lane with a prompt from dispatch input', async () => {
@@ -919,6 +983,8 @@ describe('dag graph type', () => {
 
     const lateWhilePaused = compiled.reduce(state, completed('solo'));
     expect(lateWhilePaused).toEqual(state);
+
+    expect(compiled.reduce(state, resumedNode('solo', 2))).toEqual(state);
 
     state = compiled.reduce(state, resumedNode('solo'));
     expect(state.nodes.solo!.status).toBe('in-flight');

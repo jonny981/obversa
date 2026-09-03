@@ -176,7 +176,7 @@ The result is:
     "lastArtifactDigest": "sha256:45ccde9ad00cd4b72ab6c8aced15a85c3199c7ceab300942bf678ae1fa3d40cc"
   },
   "conformance": {
-    "events": 9,
+    "events": 10,
     "artifacts": 15
   }
 }
@@ -269,8 +269,11 @@ later writes.
 
 An event append supplies the expected stream revision. If another writer wins,
 the losing append receives `REVISION_CONFLICT` and no part of its batch becomes
-visible. A fresh local event store checks immutable segment order, revisions,
-and checksums when it reads.
+visible. A retry with the same event bytes returns the revision of its earlier
+commit. A retry with different bytes receives `REVISION_CONFLICT`.
+
+A fresh local event store checks immutable segment order, revisions, and
+checksums when it reads.
 
 An artifact write returns a receipt with its digest, byte size, media type, and
 purpose. A read checks that the exact receipt was admitted for the run, then
@@ -285,6 +288,6 @@ provider instances to `runEventStoreConformance` and
 revision conflicts, namespace and run isolation, size limits, secret handling,
 content addressing, provider preflight, policy identity, and read integrity.
 
-The storage ports record and reopen data. D5 adds the executor that consumes a
-stored run definition. D10 adds full recovery after a process stops. Neither
-behavior belongs in a storage provider.
+The storage ports record and reopen data. The executor consumes a stored run
+definition and explicitly resumes an unfinished node. This behavior does not
+belong in a storage provider.

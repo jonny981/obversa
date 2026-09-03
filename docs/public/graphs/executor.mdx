@@ -13,8 +13,9 @@ the decisions. The runtime records what happened and runs each node safely.
 3. It folds the run's `graph:` events into graph state.
 4. The graph returns its next command.
 5. The executor records the whole dispatch decision before any node starts.
-6. It runs each node through the safe node-attempt lifecycle.
-7. It records `node-completed`, `node-paused`, or `node-failed`, then asks the
+6. It records `node-attempt-started` immediately before each node starts.
+7. It runs each node through the safe node-attempt lifecycle.
+8. It records `node-completed`, `node-paused`, or `node-failed`, then asks the
    graph again.
 
 Node behaviour is keyed by node id. A data-only node gets a data function. An
@@ -42,10 +43,44 @@ the stream. If a result or pause request is too large for the event stream, the
 executor records a small `node-failed` event with `RESULT_TOO_LARGE` so the
 dispatch does not stay in flight.
 
-An empty decision is valid only when an attempt is already in flight. A dispatch
-position already present in the event stream is rejected, so a restart cannot
-run the same position twice. A fresh executor that finds recorded work with no
-result returns a typed waiting result for a later recovery step.
+An empty decision is valid only when an attempt is already in flight. The
+executor rejects a second dispatch record for the same position.
+
+## Resume after a process stops
+
+A fresh executor returns `waiting` when a dispatch has no result. Call
+`resume` with one exact position from that result:
+
+```ts
+const pending = await freshExecutor.run(signal);
+
+if (pending.kind === 'waiting') {
+  const position = pending.positions[0];
+  if (position === undefined) throw new Error('The waiting result has no position.');
+  await freshExecutor.resume(position, signal);
+}
+```
+
+Call `resume` only after the earlier executor process stops. The executor does
+not lock the run between processes.
+
+Resume rebuilds the dispatch input from its event prefix and the graph
+decision. It does not add a second dispatch event.
+
+- **Node code did not start.** If no start record exists, the executor runs
+  the attempt at its recorded position.
+- **A retry is safe.** Set `retrySafe: true` in the node binding. The start
+  record saves this rule before node code starts.
+- **The result is not known.** If the saved rule is false, resume records a
+  typed pause and does not call node code.
+- **The node is paused.** Resume records `node-resumed` for the exact position
+  and offers the same attempt again.
+
+The saved `retrySafe` value controls crash recovery. A changed value in the
+live binding does not change an earlier start record.
+
+At this stage, the executor checks the stored graph definition and plan. It
+does not check general code or node-body fingerprints.
 
 If the graph declares memory as required, `createGraphExecutor` also requires a
 live `Memory` object. The executor passes that same object into the node attempt,
@@ -61,7 +96,8 @@ The outside example alternates a writer and critic for three rounds. Each critic
 prompt includes that dispatch's position summary. The example stores the run,
 starts the public executor, and uses a real dead-primary path through two
 `MockEngine` instances. The first critic attempt records the primary as dead.
-The next two critic attempts go straight to the fallback.
+The next two critic attempts go straight to the fallback. The critic permits a
+crash retry.
 
 ```bash
 pnpm example:turn-taking

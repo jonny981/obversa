@@ -163,6 +163,19 @@ parsed by the job. It also proves that missing usage remains `unknown`.
 Read [Safe node attempts](../../docs/public/runtime/node-attempts.mdx) for the
 public adapter contract and the D5 and D14 boundaries.
 
+## Resume graph attempts
+
+The graph executor records a start marker immediately before node code runs.
+A fresh executor returns `waiting` for a dispatch that has no result.
+
+Call `resume(position, signal)` after the earlier executor process stops. An
+unstarted attempt runs at the same position without a second dispatch event.
+A started attempt runs again only when its saved `retrySafe` rule permits it.
+The executor records a typed pause for all other started attempts.
+
+Read [Graph executor](../../docs/public/graphs/executor.mdx) for the public
+resume contract and the process-lock boundary.
+
 ## Documentation
 
 The workspace `docs/public` directory contains the first-run guide, graph

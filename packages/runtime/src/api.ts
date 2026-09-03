@@ -67,6 +67,7 @@ export {
   type GraphExecutionErrorCode,
   type GraphNodeBinding,
   type GraphEngineBinding,
+  type GraphExecutor,
   type GraphExecutorOptions,
   type GraphExecutorResult,
 } from './runtime/graph-executor.js';

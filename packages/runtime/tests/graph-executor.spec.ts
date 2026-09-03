@@ -67,6 +67,9 @@ type TestEvent = GraphEvent<
 > | GraphEvent<
   'node-paused',
   DispatchedPayload & { readonly reason: string; readonly request: JsonValue }
+> | GraphEvent<
+  'node-resumed',
+  DispatchedPayload
 >;
 
 interface TestState extends JsonObject {
@@ -150,6 +153,9 @@ function graphType(): GraphType<TestDefinition, TestState, TestEvent, GraphRequi
           }
           if (event.type === 'node-paused' && state.status === 'in-flight') {
             return { ...state, status: 'paused' };
+          }
+          if (event.type === 'node-resumed' && state.status === 'paused') {
+            return { ...state, status: 'in-flight' };
           }
           return state;
         },
@@ -323,6 +329,7 @@ function nodeBinding(root: string, input: {
   readonly prompt?: GraphNodeBinding['prompt'];
   readonly runData?: GraphNodeBinding['runData'];
   readonly decideAction?: GraphNodeBinding['decideAction'];
+  readonly retrySafe?: boolean;
 } = {}): GraphNodeBinding {
   return {
     prompt: input.prompt ?? null,
@@ -344,6 +351,7 @@ function nodeBinding(root: string, input: {
     runData: input.runData ?? null,
     parseResult: null,
     tokenBudget: null,
+    retrySafe: input.retrySafe,
     decideAction: input.decideAction ?? (async () => ({ kind: 'allow' })),
   };
 }
@@ -360,6 +368,7 @@ class SelectedEngine implements Engine {
   readonly name = 'selected';
   calls = 0;
   readonly prompts: string[] = [];
+  readonly attemptIds: (string | undefined)[] = [];
 
   constructor(
     private readonly selection: EngineSelectionRecord,
@@ -373,6 +382,7 @@ class SelectedEngine implements Engine {
   ): Promise<AgentResult> {
     this.calls += 1;
     this.prompts.push(request.prompt);
+    this.attemptIds.push(request.attempt?.attemptId);
     return {
       parts: [{ kind: 'structured', value: this.value, final: true }],
       usage: { kind: 'reported', inputTokens: 1, outputTokens: 1 },
@@ -486,9 +496,11 @@ describe('createGraphExecutor', () => {
     expect(durableTypes).toEqual([
       'graph:run-started',
       'graph:node-dispatched',
+      'graph:node-attempt-started',
       'graph:model-unavailable',
       'graph:node-completed',
       'graph:node-dispatched',
+      'graph:node-attempt-started',
       'graph:node-completed',
     ]);
   });
@@ -596,6 +608,137 @@ describe('createGraphExecutor', () => {
     });
   });
 
+  it('resumes a dispatch that stopped before node code without a second dispatch', async () => {
+    const run = await storedRun(definition({ engineBacked: false }));
+    await appendGraphEvent(run.storage, run.runId, {
+      type: 'node-dispatched',
+      version: 1,
+      payload: { nodeId: 'worker', position: 'turns/1' },
+    });
+    let calls = 0;
+    let receivedInput: JsonValue = null;
+    const executor = await createGraphExecutor({
+      ...run,
+      nodes: {
+        worker: nodeBinding(run.root, {
+          runData: async (context) => {
+            calls += 1;
+            receivedInput = context.input;
+            return { ok: true };
+          },
+        }),
+      },
+      engines: [],
+    });
+
+    await expect(executor.resume('turns/1', new AbortController().signal))
+      .resolves.toMatchObject({ kind: 'complete' });
+    expect(calls).toBe(1);
+    expect(receivedInput).toEqual({ attempt: 1 });
+    const durable = await events(run.storage, run.runId);
+    expect(durable.filter((event) => event.type === 'graph:node-dispatched'))
+      .toHaveLength(1);
+    expect(durable.find((event) => event.type === 'graph:node-attempt-started')?.payload)
+      .toEqual({
+        identity: createAttemptIdentity({
+          namespace: run.storage.record.namespace,
+          streamId: run.runId,
+          nodeId: 'worker',
+          position: 'turns/1',
+        }),
+        retrySafe: false,
+      });
+  });
+
+  it('pauses an uncertain attempt unless its saved policy permits retry', async () => {
+    const run = await storedRun(definition({ engineBacked: false }));
+    const identity = createAttemptIdentity({
+      namespace: run.storage.record.namespace,
+      streamId: run.runId,
+      nodeId: 'worker',
+      position: 'turns/1',
+    });
+    await appendGraphEvent(run.storage, run.runId, {
+      type: 'node-dispatched',
+      version: 1,
+      payload: { nodeId: 'worker', position: 'turns/1' },
+    });
+    await appendGraphEvent(run.storage, run.runId, {
+      type: 'node-attempt-started',
+      version: 1,
+      payload: { identity, retrySafe: false },
+    });
+    let calls = 0;
+    const executor = await createGraphExecutor({
+      ...run,
+      nodes: {
+        worker: nodeBinding(run.root, {
+          retrySafe: true,
+          runData: async () => {
+            calls += 1;
+            return { ok: true };
+          },
+        }),
+      },
+      engines: [],
+    });
+
+    await expect(executor.resume('turns/1', new AbortController().signal))
+      .resolves.toEqual({ kind: 'pause', reason: 'The test node paused.' });
+    expect(calls).toBe(0);
+    expect((await events(run.storage, run.runId)).find(
+      (event) => event.type === 'graph:node-paused',
+    )?.payload).toEqual({
+      nodeId: 'worker',
+      position: 'turns/1',
+      reason: 'The previous process stopped after node code started, so its outcome is uncertain.',
+      request: { kind: 'reconcile-attempt', attemptId: identity.attemptId },
+    });
+  });
+
+  it('retries an uncertain attempt when its saved policy permits it', async () => {
+    const run = await storedRun(definition());
+    const identity = createAttemptIdentity({
+      namespace: run.storage.record.namespace,
+      streamId: run.runId,
+      nodeId: 'worker',
+      position: 'turns/1',
+    });
+    await appendGraphEvent(run.storage, run.runId, {
+      type: 'node-dispatched',
+      version: 1,
+      payload: { nodeId: 'worker', position: 'turns/1' },
+    });
+    await appendGraphEvent(run.storage, run.runId, {
+      type: 'node-attempt-started',
+      version: 1,
+      payload: { identity, retrySafe: true },
+    });
+    const primary = new SelectedEngine(PRIMARY_SELECTION);
+    const executor = await createGraphExecutor({
+      ...run,
+      nodes: {
+        worker: nodeBinding(run.root, {
+          prompt: () => 'Retry the work.',
+        }),
+      },
+      engines: [
+        engineBinding(PRIMARY_TARGET, PRIMARY_SELECTION, primary),
+        engineBinding(FALLBACK_TARGET, FALLBACK_SELECTION, new SelectedEngine(FALLBACK_SELECTION)),
+      ],
+    });
+
+    await expect(executor.resume('turns/1', new AbortController().signal))
+      .resolves.toMatchObject({ kind: 'complete' });
+    expect(primary.calls).toBe(1);
+    expect(primary.attemptIds).toEqual([identity.attemptId]);
+    const durable = await events(run.storage, run.runId);
+    expect(durable.filter((event) => event.type === 'graph:node-dispatched'))
+      .toHaveLength(1);
+    expect(durable.find((event) => event.type === 'graph:node-resumed')?.payload)
+      .toEqual({ nodeId: 'worker', position: 'turns/1' });
+  });
+
   it('rejects a terminal decision while durable work is still in flight', async () => {
     const run = await storedRun(definition({
       engineBacked: false,
@@ -644,24 +787,31 @@ describe('createGraphExecutor', () => {
   it('records the whole dispatch decision before either data node starts', async () => {
     const run = await storedRun(definition({ engineBacked: false, parallel: true }));
     const observedDispatchCounts: number[] = [];
-    const runData: GraphNodeBinding['runData'] = async () => {
-      observedDispatchCounts.push(
-        (await events(run.storage, run.runId))
-          .filter((event) => event.type === 'graph:node-dispatched').length,
-      );
+    const observedOwnStarts: boolean[] = [];
+    const runData = (position: string): GraphNodeBinding['runData'] => async () => {
+      const durable = await events(run.storage, run.runId);
+      observedDispatchCounts.push(durable.filter(
+        (event) => event.type === 'graph:node-dispatched',
+      ).length);
+      observedOwnStarts.push(durable.some((event) => (
+        event.type === 'graph:node-attempt-started'
+        && (event.payload as { readonly identity?: { readonly position?: string } })
+          .identity?.position === position
+      )));
       return { ok: true };
     };
     const executor = await createGraphExecutor({
       ...run,
       nodes: {
-        worker: nodeBinding(run.root, { runData }),
-        reviewer: nodeBinding(run.root, { runData }),
+        worker: nodeBinding(run.root, { runData: runData('turns/1-worker') }),
+        reviewer: nodeBinding(run.root, { runData: runData('turns/1-reviewer') }),
       },
       engines: [],
     });
 
     await expect(executor.run(new AbortController().signal)).resolves.toMatchObject({ kind: 'complete' });
     expect(observedDispatchCounts).toEqual([2, 2]);
+    expect(observedOwnStarts).toEqual([true, true]);
   });
 
   it('re-folds and re-decides after a dispatch revision conflict', async () => {

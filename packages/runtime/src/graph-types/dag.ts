@@ -126,6 +126,7 @@ export interface NodePausedPayload extends JsonObject {
 
 export interface NodeResumedPayload extends JsonObject {
   readonly nodeId: NodeId;
+  readonly position: string;
 }
 
 export type DagEvent =
@@ -423,7 +424,9 @@ export const dag: GraphType<DagDefinition, DagStatus, DagEvent, DagRequirements>
             };
           }
           case 'node-resumed': {
-            if (node.status !== 'paused') return state;
+            if (node.status !== 'paused' || node.inFlight !== event.payload.position) {
+              return state;
+            }
             return {
               ...state,
               nodes: {

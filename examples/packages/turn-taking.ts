@@ -342,7 +342,8 @@ const storagePolicy = {
 
 function nodeBinding(
   root: string,
-  input: Pick<GraphNodeBinding, 'prompt' | 'runData'>,
+  input: Pick<GraphNodeBinding, 'prompt' | 'runData'>
+    & Partial<Pick<GraphNodeBinding, 'retrySafe'>>,
 ): GraphNodeBinding {
   return {
     ...input,
@@ -419,6 +420,7 @@ try {
         prompt: (input) =>
           `Review the current draft for ${(input as { readonly positionSummary: string }).positionSummary}.`,
         runData: null,
+        retrySafe: true,
       }),
     },
     engines: [

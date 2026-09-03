@@ -139,6 +139,7 @@ export interface NodePausedPayload extends JsonObject {
 
 export interface NodeResumedPayload extends JsonObject {
   readonly nodeId: NodeId;
+  readonly position: string;
 }
 
 export interface LimitPausedPayload extends JsonObject {
@@ -768,7 +769,13 @@ export const convergence: GraphType<
             };
           }
           case 'node-resumed': {
-            if (node === undefined || node.status !== 'paused') return state;
+            if (
+              node === undefined
+              || node.status !== 'paused'
+              || node.inFlight !== event.payload.position
+            ) {
+              return state;
+            }
             return {
               ...state,
               nodes: {
