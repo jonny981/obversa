@@ -121,7 +121,7 @@ const expectedStorageReport = {
     lastArtifactDigest: 'sha256:45ccde9ad00cd4b72ab6c8aced15a85c3199c7ceab300942bf678ae1fa3d40cc',
   },
   conformance: {
-    events: 9,
+    events: 10,
     artifacts: 15,
   },
 };
