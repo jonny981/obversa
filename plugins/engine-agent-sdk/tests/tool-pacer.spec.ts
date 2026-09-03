@@ -26,6 +26,17 @@ describe('toolPacer', () => {
     expect(Date.now() - t).toBeGreaterThanOrEqual(45);
   });
 
+  it('waits the full interval after a delayed slot', async () => {
+    const pace = toolPacer(100);
+    await pace();
+    const delayed = pace();
+    Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 150);
+    await delayed;
+    const t = Date.now();
+    await pace();
+    expect(Date.now() - t).toBeGreaterThanOrEqual(90);
+  });
+
   it('serializes concurrent callers into strictly spaced slots', async () => {
     // The SDK awaits parallel-safe tools' PreToolUse hooks concurrently, so a
     // burst of tool calls means concurrent pace() calls: each must claim its

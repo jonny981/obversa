@@ -197,12 +197,17 @@ export function agentSdkSystemPrompt(
 
 /** Serial tool pacing for the Agent SDK's in-process tool hooks. */
 export function toolPacer(minIntervalMs: number): () => Promise<void> {
-  let nextAt = 0;
-  return async () => {
-    const now = Date.now();
-    const at = Math.max(now, nextAt);
-    nextAt = at + minIntervalMs;
-    if (at > now) await new Promise((resolve) => setTimeout(resolve, at - now));
+  let previous = Promise.resolve();
+  let previousAt = 0;
+  return () => {
+    const turn = previous.then(async () => {
+      const now = Date.now();
+      const at = Math.max(now, previousAt + minIntervalMs);
+      if (at > now) await new Promise((resolve) => setTimeout(resolve, at - now));
+      previousAt = Date.now();
+    });
+    previous = turn;
+    return turn;
   };
 }
 
