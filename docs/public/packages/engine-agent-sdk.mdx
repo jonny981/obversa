@@ -1,0 +1,54 @@
+---
+title: "Agent SDK Engine"
+description: "@obversa/engine-agent-sdk runs engine requests through the Claude Agent SDK."
+---
+
+`@obversa/engine-agent-sdk` is an engine plugin that runs requests through the Claude Agent SDK. Each request runs as a clean query call, using existing host Claude Code authentication.
+
+## Requirements
+
+- Node.js 22.12 or later
+- Host Claude Code authentication
+
+## Install
+
+```bash
+pnpm add @obversa/engine-agent-sdk
+```
+
+## Identity
+
+The plugin serves the Anthropic provider. It reports `provider: 'anthropic'`, with the model passed in the request or configured in options.
+
+## Usage
+
+```ts
+import { AgentSdkEngine } from '@obversa/engine-agent-sdk';
+
+const engine = new AgentSdkEngine({
+  defaultModel: 'claude-sonnet-4-5',
+});
+```
+
+To enable memory access, pass an `@obversa/memory` instance in the constructor:
+
+```ts
+import { AgentSdkEngine } from '@obversa/engine-agent-sdk';
+import { openGitMemory } from '@obversa/memory-git';
+
+const memory = await openGitMemory({
+  repositoryPath: process.cwd(),
+  scope: 'run-1',
+});
+
+const engine = new AgentSdkEngine({
+  defaultModel: 'claude-sonnet-4-5',
+  memory,
+});
+```
+
+## Limits
+
+- Requires local Claude Code host authentication; it does not accept raw API keys.
+- Each call runs in-process via SDK query sessions rather than separate OS child processes.
+- Memory integration attaches an MCP memory tool into the query context.

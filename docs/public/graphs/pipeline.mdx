@@ -67,6 +67,22 @@ The example stores `graph.definition` with its resolved plan. It gives the
 executor one data function for each node. The review function reads the draft
 result, and the publish function reads the review result.
 
+## Restart and resume
+
+If the executor process stops after it records a stage dispatch and before that
+stage completes, a new executor over the same store returns `waiting` with that
+stage's position. Call `resume` with that position after the old process has
+stopped.
+
+Resume does not write a second dispatch event. Completed earlier stages stay
+complete. The pipeline then continues from that stage.
+
+The executor does not lock the run. Do not call `resume` while the previous
+executor still runs.
+
+This example pipeline sets `globalConcurrency` to 1, so at most one stage is in
+flight and `waiting.positions` has one entry.
+
 ## Node behaviour
 
 - **Required nodes** block their dependants after failure and fail the pipeline

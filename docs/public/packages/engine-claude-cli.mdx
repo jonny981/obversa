@@ -1,0 +1,39 @@
+---
+title: "Claude CLI Engine"
+description: "@obversa/engine-claude-cli runs engine requests through a fresh Claude CLI process."
+---
+
+`@obversa/engine-claude-cli` is an engine plugin that runs engine requests through the `claude` command-line tool. Each attempt runs in a fresh subprocess, which gives each step a clean context.
+
+## Requirements
+
+- Node.js 22.12 or later
+- A local Claude CLI installation with existing authentication
+
+## Install
+
+```bash
+pnpm add @obversa/engine-claude-cli
+```
+
+## Identity
+
+The plugin serves the Anthropic provider. It reports `provider: 'anthropic'`, with models such as `claude-sonnet-4-5` or the model configured by the caller.
+
+## Usage
+
+```ts
+import { ClaudeCliEngine } from '@obversa/engine-claude-cli';
+
+const engine = new ClaudeCliEngine({
+  defaultModel: 'claude-sonnet-4-5',
+});
+```
+
+Pass the engine instance into the Obversa runtime.
+
+## Limits
+
+- Subprocess execution requires a working Claude binary in `PATH` or an explicit `cliBinary` path.
+- The engine depends on local host credentials; it does not take raw API keys in options.
+- The plugin classifies usage limits and rate limits from standard error text.

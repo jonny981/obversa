@@ -1,0 +1,39 @@
+---
+title: "Codex Engine"
+description: "@obversa/engine-codex runs engine requests through a fresh Codex CLI process."
+---
+
+`@obversa/engine-codex` is an engine plugin that runs requests through the `codex` command-line interface. It provides an OpenAI-backed engine for verification and review seats.
+
+## Requirements
+
+- Node.js 22.12 or later
+- A local Codex CLI installation with existing authentication
+
+## Install
+
+```bash
+pnpm add @obversa/engine-codex
+```
+
+## Identity
+
+The plugin serves the OpenAI provider. It reports `provider: 'openai'` and uses `request.model` or `options.defaultModel`. When neither is set, the CLI runs without an explicit model flag.
+
+## Usage
+
+```ts
+import { CodexEngine } from '@obversa/engine-codex';
+
+const engine = new CodexEngine({
+  defaultModel: 'gpt-5.4',
+});
+```
+
+Pass the engine instance into the Obversa runtime.
+
+## Limits
+
+- The engine runs in a read-only sandbox by default; write permissions require `permissionMode: 'bypassPermissions'`.
+- Subprocess execution requires a working Codex binary in `PATH` or an explicit `cliBinary` path.
+- Large prompts pass through standard input, and final output is read from a temporary file.

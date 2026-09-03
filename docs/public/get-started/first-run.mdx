@@ -1,7 +1,37 @@
 ---
 title: "First run"
-description: "Run one job with the programmatic runtime API and a scripted engine."
+description: "Run one offline process from a local checkout, then one programmatic job."
 ---
+
+From an Obversa checkout, after you install and build, run:
+
+```bash
+pnpm example:offline
+```
+
+That command runs `examples/production-lines/offline-review.line.ts`. It does
+not use a model or a network service.
+
+The result is:
+
+```json
+{
+  "status": "pass",
+  "attempts": 2,
+  "summary": "config is complete"
+}
+```
+
+The pipeline form, the review loop, and the callback gate have their own
+commands:
+
+```bash
+pnpm example:pipeline
+pnpm example:review-loop
+pnpm example:callback-gate
+```
+
+## Programmatic API
 
 This program runs one agent job through a scripted engine. The scripted engine
 does not make a network call.
@@ -35,4 +65,5 @@ pass
 `agentJob` creates one unit of work. `run` supplies the run context and starts
 the job. `MockEngine` follows the public engine contract with fixed responses.
 
-This package does not expose a `lines` command. Use the programmatic API.
+The runtime package does not expose a command. Use the programmatic API or the
+workspace example scripts above.

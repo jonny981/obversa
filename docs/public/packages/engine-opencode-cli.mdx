@@ -1,0 +1,40 @@
+---
+title: "OpenCode CLI Engine"
+description: "@obversa/engine-opencode-cli runs isolated engine attempts through a fresh OpenCode CLI process."
+---
+
+`@obversa/engine-opencode-cli` is an engine plugin that runs one isolated engine attempt through the `opencode` command-line tool. It manages permissions, tools, and structured results for the attempt.
+
+## Requirements
+
+- Node.js 22.12 or later
+- OpenCode CLI 1.18.23
+- Host-selected authentication
+
+## Install
+
+```bash
+pnpm add @obversa/engine-opencode-cli
+```
+
+## Identity
+
+The plugin serves the configured provider and model family. For example, it can report `provider: 'anthropic'` and model family `claude`, or another provider configured by the caller.
+
+## Usage
+
+```ts
+import { OpenCodeCliEngine } from '@obversa/engine-opencode-cli';
+
+const engine = new OpenCodeCliEngine({
+  executable: '/absolute/path/to/opencode',
+  version: '1.18.23',
+  identity: { provider: 'anthropic', modelFamily: 'claude' },
+});
+```
+
+## Limits
+
+- The plugin requires an absolute path to the OpenCode executable.
+- The executable must match supported version `1.18.23`.
+- Structured outputs require the model to emit the expected result marker format.

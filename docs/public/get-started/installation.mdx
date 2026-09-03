@@ -8,6 +8,9 @@ description: "Install and build the Obversa workspace from a local checkout."
 - Node.js 22.12 or later
 - pnpm 10.15.1
 
+The workspace `packageManager` field pins pnpm 10.15.1. The `engines` field
+requires Node.js 22.12 or later.
+
 ## Install the workspace
 
 From an Obversa checkout, run:
@@ -19,7 +22,8 @@ pnpm build
 ```
 
 The build creates JavaScript and TypeScript declaration files for each
-package.
+package. Run the build before you run an example. The examples import the
+built packages.
 
 ## Do the package checks
 
@@ -30,4 +34,9 @@ pnpm test
 ```
 
 The first type check uses TypeScript 7. The second type check uses TypeScript
-6. All unit tests run offline.
+6. The test script runs each package test target. Those tests do not call a
+live model.
+
+## Run an example
+
+After the build, go to [First run](/get-started/first-run).

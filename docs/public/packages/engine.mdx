@@ -1,0 +1,51 @@
+---
+title: "@obversa/engine"
+description: "The provider-neutral contract for one bounded engine attempt."
+---
+
+`@obversa/engine` is the engine port. An engine runs one fresh agent attempt and
+returns a structured result or a typed failure. Runtime code and engine plugins
+share this contract.
+
+## Install
+
+```bash
+pnpm add @obversa/engine
+```
+
+Node.js 22.12 or later is required.
+
+## Public entry points
+
+From `@obversa/engine` (`packages/engine/src/index.ts`):
+
+- `Engine`: the run contract (one prompt, one attempt, one abort signal).
+- `EngineError`: typed engine failures.
+- `canonicalJson`, `digestJson`, `cloneFrozenJson`: JSON helpers the contract
+  uses.
+- `attemptEnvironment`: environment for a command-backed attempt.
+- `retryAfterHeaderToMs`, `scrubCapture`, `redactEnvValues`, `redactSecrets`:
+  command-adapter helpers.
+
+Subpaths:
+
+- `@obversa/engine/testing`: the conformance kit and `MockEngine`.
+- `@obversa/engine/command`: owned-process execution with time, output, and
+  memory bounds.
+
+## Runnable example
+
+```ts
+import type { Engine } from '@obversa/engine';
+
+declare const engine: Engine;
+
+const result = await engine.run(
+  { prompt: 'Review this change.' },
+  () => {},
+  new AbortController().signal,
+);
+```
+
+This fragment is from `packages/engine/README.md`. The workspace mock is
+`MockEngine` from `@obversa/engine/testing`.

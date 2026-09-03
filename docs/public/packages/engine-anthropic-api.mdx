@@ -1,0 +1,38 @@
+---
+title: "Anthropic API Engine"
+description: "@obversa/engine-anthropic-api runs engine requests directly through the Anthropic Messages API."
+---
+
+`@obversa/engine-anthropic-api` is an engine plugin that connects directly to the Anthropic Messages API. It provides token-level streaming and direct API communication without spawning a command-line subprocess.
+
+## Requirements
+
+- Node.js 22.12 or later
+- An Anthropic API key (`ANTHROPIC_API_KEY` environment variable or `apiKey` option)
+
+## Install
+
+```bash
+pnpm add @obversa/engine-anthropic-api
+```
+
+## Identity
+
+The plugin serves the Anthropic provider. It reports `provider: 'anthropic'`, defaulting to `claude-haiku-4-5-20251001` unless another model is requested.
+
+## Usage
+
+```ts
+import { AnthropicApiEngine } from '@obversa/engine-anthropic-api';
+
+const engine = new AnthropicApiEngine({
+  defaultModel: 'claude-haiku-4-5-20251001',
+  apiKey: process.env.ANTHROPIC_API_KEY,
+});
+```
+
+## Limits
+
+- This engine makes direct network API calls and does not spawn local worker tools or execute bash commands directly.
+- It ignores `AgentRequest.env` because no subprocess is spawned.
+- Transient server errors (HTTP 5xx, timeouts) are retried automatically, while rate limits (HTTP 429) return typed limit errors with reset timings.

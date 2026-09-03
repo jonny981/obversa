@@ -1,0 +1,41 @@
+---
+title: "Grok CLI Engine"
+description: "@obversa/engine-grok-cli runs isolated engine attempts through a fresh Grok CLI process."
+---
+
+`@obversa/engine-grok-cli` is an engine plugin that runs one isolated engine attempt through the `grok` command-line tool. It records the explicit provider and model family declared in options.
+
+## Requirements
+
+- Node.js 22.12 or later
+- Grok CLI 1.0.5
+- Host-selected authentication
+
+## Install
+
+```bash
+pnpm add @obversa/engine-grok-cli
+```
+
+## Identity
+
+The plugin requires an explicit `identity` option naming the provider and model family, such as `{ provider: 'xai', modelFamily: 'grok-4' }`.
+
+## Usage
+
+```ts
+import { GrokCliEngine } from '@obversa/engine-grok-cli';
+
+const engine = new GrokCliEngine({
+  executable: '/absolute/path/to/grok',
+  version: '1.0.5',
+  identity: { provider: 'xai', modelFamily: 'grok-4' },
+  permissionMode: 'dontAsk',
+});
+```
+
+## Limits
+
+- The plugin requires an absolute path to the Grok executable.
+- The constructor stores the version string provided in options; it does not probe the binary.
+- Each attempt runs in an isolated directory with declared tool permissions.

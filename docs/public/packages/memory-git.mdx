@@ -1,0 +1,55 @@
+---
+title: "Git Memory"
+description: "@obversa/memory-git stores scoped run memory in private Git references without touching branches."
+---
+
+`@obversa/memory-git` is a memory adapter that stores key documents in private Git references. It isolates memories by scope digest under `refs/obversa/memory/v1`, without modifying the working tree, index, or active branch.
+
+## Requirements
+
+- Node.js 22.12 or later
+- Git
+
+## Install
+
+```bash
+pnpm add @obversa/memory-git
+```
+
+## Usage
+
+```ts
+import { openGitMemory } from '@obversa/memory-git';
+
+const memory = await openGitMemory({
+  repositoryPath: process.cwd(),
+  scope: 'example-run',
+});
+
+await memory.execute({
+  command: 'create',
+  path: '/memories/notes.md',
+  text: 'Keep the result small.\n',
+});
+
+const view = await memory.execute({
+  command: 'view',
+  path: '/memories/notes.md',
+});
+```
+
+## Commands
+
+The adapter supports six memory operations:
+- `create`: Write a new file at a path.
+- `view`: Read file content, with optional line range.
+- `str_replace`: Replace unique text inside a file.
+- `insert`: Insert text at a zero-based line index.
+- `delete`: Remove a file from memory.
+- `rename`: Move a file to a new path within the memory root.
+
+## Limits
+
+- Default limits: 64 KB per file, 1 MB total memory per scope, and at most 256 files.
+- Allowed file extensions: `.txt`, `.md`, `.json`, `.py`, `.yaml`, `.yml`.
+- Paths must be relative to the memory root `/memories/` and cannot escape root boundaries.

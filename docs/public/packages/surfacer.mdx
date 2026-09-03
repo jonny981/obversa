@@ -11,8 +11,8 @@ result. It owns no callback state, no routing, and no run records.
 
 `startSurface` binds an ephemeral port on 127.0.0.1. The page URL
 carries a session token in its fragment. Every API request must send
-that token as a bearer token, checked in constant time. Requests with a wrong Host — or a wrong Origin on a state-changing
-request — are refused. JSON bodies are bounded, responses carry strict
+that token as a bearer token, checked in constant time. Requests with a wrong Host, or a wrong Origin on a state-changing
+request, are refused. JSON bodies are bounded, responses carry strict
 security headers, and response values pass secret redaction by default;
 a handler that returns `{ verbatim: true }`, like a completion with the
 verbatim option, sends its content byte-exact.
@@ -26,10 +26,10 @@ with an explicit verbatim opt-in for content that must not be redacted,
 such as review annotations that quote code (the review still trims and
 caps them before completing). A payload is its observable own data: the
 values of its own enumerable string-keyed properties and array items as one
-JSON serialisation reads them — a getter's answer or the result of a
-callable `toJSON` included — recursively, and that is exactly what the
+JSON serialisation reads them (a getter's answer or the result of a
+callable `toJSON` included) recursively, and that is exactly what the
 caller receives.
-Hidden internal state — a Map's entries, a URL's address — is not data and
+Hidden internal state (a Map's entries, a URL's address) is not data and
 is neither carried nor promised; an object with its prototype removed is
 carried as its observable data. (A review location is stricter: the
 contract keys an anchor by own data properties only, so an accessor or a
@@ -39,14 +39,14 @@ receives a conflict. A request whose body is still arriving when the
 session closes is refused before its handler runs. A completion is
 serialised exactly once when it is claimed, and the plain snapshot of that
 serialisation is what the caller receives: a payload JSON cannot carry
-whole — a cycle, a BigInt, a function, a symbol, an undefined value, a
+whole (a cycle, a BigInt, a function, a symbol, an undefined value, a
 non-finite number, negative zero, a non-enumerable or symbol-keyed
 property, a hole or extra property in an array, a Proxy, or an object whose
 prototype is neither Object's nor none, such as a Map, a RegExp, an Error,
-or a class instance, whose meaning is not in its own data — is refused with
+or a class instance, whose meaning is not in its own data) is refused with
 an error and the session stays open. One exception is deliberate and takes
-precedence: a value whose `toJSON` property is callable — own or
-inherited, a Date for instance — is replaced by whatever `toJSON` returns
+precedence: a value whose `toJSON` property is callable (own or
+inherited, a Date for instance) is replaced by whatever `toJSON` returns
 before anything else looks at it, and that return value is what is checked
 and carried. This holds even when the holder is a Proxy or has a foreign
 prototype: only what `toJSON` returned is traversed, and it must pass the
@@ -54,7 +54,7 @@ same rule. The browser is never told a
 session completed
 that the caller will never receive, and a value that would serialise
 differently later cannot change the frame. Once a handler has completed the session,
-its response is the fixed acknowledgement — `ok` and the operation id — and
+its response is the fixed acknowledgement (`ok` and the operation id) and
 a body or status it returns after completing is not used. That answer is
 sent the moment the completion is claimed, so a connected browser holds
 its operation id before the caller can learn of the completion, even when
@@ -62,10 +62,10 @@ the handler keeps running or never returns. The acknowledgement timeout
 starts when that answer has gone out. If the browser's connection closes
 before the answer arrives, the timeout starts at the disconnect instead,
 and when it elapses the caller learns of a completion that browser never
-received — the session never waits without a bound. A cancel is answered
+received. The session never waits without a bound. A cancel is answered
 the same way before the caller learns of it. An app can pass `terminalPayload(status)` to
-`startSurface` so a session that ends without the app's completion —
-cancelled, timed out, or interrupted — still carries an outcome payload the
+`startSurface` so a session that ends without the app's completion
+(cancelled, timed out, or interrupted) still carries an outcome payload the
 caller can route. It passes redaction unless the app also sets
 `terminalPayloadVerbatim`, which an app needs when the payload carries
 identity fields that redaction would rewrite. Without a hook, those statuses
@@ -90,13 +90,13 @@ and acknowledges the terminal decision on submit or cancel.
 
 `runSurface` is the one call an app makes: it starts the session,
 places the page, waits for the decision, frames it on stdout, and shuts
-down — signals interrupt cleanly. The runnable example is
+down. Signals interrupt cleanly. The runnable example is
 `packages/surfacer/examples/hello-surface.mjs`.
 
 ## Placement
 
-`openSurfaceUrl` opens the page in the selected host's native pane —
-cmux first, through the [host glue](/hosts/cmux). The platform browser
+`openSurfaceUrl` opens the page in the selected host's native pane.
+It tries cmux first, through the [host glue](/hosts/cmux). The platform browser
 is the fallback on macOS, run by its system path (`/usr/bin/open`) and
 never by a bare name; on Linux and Windows the URL is printed instead
 (`xdg-open` runs its own helpers by bare name, and `cmd /c start` would
@@ -105,15 +105,15 @@ everywhere. Your
 multiplexer supplies the panes; the Surfacer supplies the session. The
 host's placement command is the one the host injected as
 `OBVERSA_SURFACE_BIN`, and it runs only when that value is an absolute
-path. What it receives is a one-time launch URL — single use, valid for
-a minute, answering with one redirect to the page — never the page URL
+path. What it receives is a one-time launch URL (single use, valid for
+a minute, answering with one redirect to the page), never the page URL
 with the session's token in it, since a process argument is readable by
 any local process; a bare name looked up on `PATH` would still hand that
 one door to whatever executable sat first on it. A relative or bare
 value is reported on stderr and skipped,
 and an unset value skips host placement altogether. A
 placement command that exits reports whether it succeeded. One that is
-still running five seconds after launch — a browser that keeps the tab's
-process — is taken to have opened the page; that is an assumption, so a
+still running five seconds after launch (a browser that keeps the tab's
+process) is taken to have opened the page; that is an assumption, so a
 command that fails only after those five seconds is not reported as a
 failure.

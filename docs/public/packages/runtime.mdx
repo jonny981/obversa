@@ -1,0 +1,43 @@
+---
+title: "@obversa/runtime"
+description: "Build and run durable agent graphs from a stored event log."
+---
+
+`@obversa/runtime` compiles graph definitions, records each step as an event,
+and runs one bounded node attempt at a time. A host can restart a run from that
+log. The package is the public Lines runtime.
+
+## Install
+
+```bash
+pnpm add @obversa/runtime
+```
+
+Node.js 22.12 or later is required.
+
+## Public entry points
+
+From `@obversa/runtime` (`packages/runtime/src/api.ts`):
+
+- `compileGraph`: compile a graph type and a definition.
+- `dagGraphType`: the built-in dependency-graph form.
+- `convergence`: the built-in review-loop form.
+- `createGraphExecutor`: run and resume a stored graph.
+- `createCallbackGate`, `createCallbackClient`, `replayCallbackClient`,
+  `directRouter`: the callback request and in-process client.
+- `resolveGraphPlan`: freeze a plan admission record.
+- `persistRunDefinition`: store the run definition.
+- `run`, `loop`, `pipeline`, `dag`, `sequence`: older job helpers.
+
+Subpaths:
+
+- `@obversa/runtime/testing`: graph definition helpers and mocks.
+- `@obversa/runtime/storage/local`: `createLocalRunStorage`.
+
+## Runnable example
+
+From an Obversa checkout, run `pnpm example:pipeline`. The source is
+`examples/packages/pipeline.ts`. It stores a three-stage pipeline and runs it
+through `createGraphExecutor`.
+
+See [Built-in pipeline](/graphs/pipeline) for the report that command prints.

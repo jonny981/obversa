@@ -72,7 +72,18 @@
       {
         "group": "Packages",
         "pages": [
-          "packages/surfacer"
+          "packages/runtime",
+          "packages/engine",
+          "packages/memory",
+          "packages/surfacer",
+          "packages/engine-claude-cli",
+          "packages/engine-codex",
+          "packages/engine-grok-cli",
+          "packages/engine-opencode-cli",
+          "packages/engine-anthropic-api",
+          "packages/engine-agent-sdk",
+          "packages/memory-git",
+          "packages/memory-simple"
         ]
       }
     ]

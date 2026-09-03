@@ -1,0 +1,61 @@
+---
+title: "@obversa/memory"
+description: "The storage-neutral memory port and three memory mechanics."
+---
+
+`@obversa/memory` is the memory port. An adapter has one scope and one
+`execute` method. Paths start with `/memories`. The package also exports
+`ground`, `curate`, and `consolidate`.
+
+## Install
+
+```bash
+pnpm add @obversa/memory
+```
+
+Node.js 22.12 or later is required.
+
+## Public entry points
+
+From `@obversa/memory` (`packages/memory/src/index.ts`):
+
+- `Memory`: `scope` plus `execute(command)`.
+- `MEMORY_ROOT`: `/memories`.
+- Commands: `view`, `create`, `str_replace`, `insert`, `delete`, `rename`.
+- `ground`: read declared sources into one bounded prompt.
+- `curate`: select grounded sources with one supplied function.
+- `consolidate`: write one validated result with one supplied function.
+
+Subpath `@obversa/memory/testing` is the adapter conformance kit.
+
+## Runnable example
+
+From an Obversa checkout, run `pnpm example:packages`. The first program in that
+script is `examples/packages/memory.ts`:
+
+```ts
+import { curate, type GroundedMemory } from '@obversa/memory';
+
+const grounded: GroundedMemory = {
+  documents: [
+    {
+      path: '/memories/project.md',
+      text: 'Keep the public API small.',
+      truncated: false,
+    },
+  ],
+  missing: [],
+  prompt: '',
+};
+
+const result = await curate(grounded, {
+  intent: 'Prepare the next task.',
+  decide: async () => ({
+    brief: 'Use the project constraint.',
+    sources: ['/memories/project.md'],
+  }),
+});
+
+if (result.mode !== 'curated') throw new Error('Memory curation did not complete.');
+console.log(JSON.stringify({ mode: result.mode, sources: result.sources }, null, 2));
+```

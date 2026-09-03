@@ -1,22 +1,38 @@
 ---
 title: "Obversa"
-description: "Build reliable agent processes from small TypeScript packages."
+description: "Build and run durable agent graphs from small TypeScript packages."
 ---
 
-Obversa supplies small TypeScript packages for agent processes.
+Obversa is a TypeScript workspace for agent processes.
 
-`@obversa/runtime` runs jobs and graph forms. The memory packages give each run
-one explicit memory port and two storage choices.
+`@obversa/runtime` compiles graph definitions and runs them through a durable
+executor. The memory packages give each run one memory port and two storage
+choices.
+
+## What ships today
+
+- Pipeline: ordered stages on the durable graph executor. See
+  [Built-in pipeline](/graphs/pipeline).
+- Review loop: independent seats on separate model families. A seat cannot
+  share the generator lane. See [Review loop](/graphs/review-loop).
+- Callback gate: one structured answer through a replaceable router. See
+  [Callback gate](/graphs/callback-gate).
+- Crash-safe resume: a fresh executor resumes the exact interrupted position
+  from the record. See [Graph executor](/graphs/executor).
 
 ## Packages
 
 | Package | Purpose | Version |
 | --- | --- | --- |
-| `@obversa/runtime` | Runs nestable jobs, loop graphs, and directed acyclic graphs | `1.0.0` |
+| `@obversa/runtime` | Compiles and runs pipeline, review-loop, and DAG graph forms | `1.0.0` |
+| `@obversa/engine` | Defines the contract for one bounded engine attempt | `0.1.0` |
 | `@obversa/memory` | Defines the memory command contract | `0.1.0` |
 | `@obversa/memory-simple` | Stores memory in one process | `0.1.0` |
 | `@obversa/memory-git` | Stores memory in private Git references | `0.1.0` |
+| `@obversa/surfacer` | Runs one local surface session | `0.1.0` |
+| `@obversa/source` | Opens a git diff for inline review | `0.1.0` |
 
+The six engine plugins have their own pages in the Packages group.
 These are unreleased workspace seed versions. The public contract is locked at
 the version-1 release.
 

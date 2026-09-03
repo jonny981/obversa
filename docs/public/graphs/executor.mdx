@@ -43,6 +43,21 @@ the stream. If a result or pause request is too large for the event stream, the
 executor records a small `node-failed` event with `RESULT_TOO_LARGE` so the
 dispatch does not stay in flight.
 
+If a process stops after `node-attempt-started` and the start record has
+`retrySafe: false`, `resume` does not run node code. It records `node-paused`
+with this request shape:
+
+```ts
+{
+  kind: 'reconcile-attempt',
+  attemptId: started.identity.attemptId,
+}
+```
+
+`attemptId` is the attempt identity from that start record. The pause reason is
+that the previous process stopped after node code started, so the outcome is
+uncertain.
+
 An empty decision is valid only when an attempt is already in flight. The
 executor rejects a second dispatch record for the same position.
 
@@ -68,16 +83,47 @@ Resume rebuilds the dispatch input from its event prefix and the graph
 decision. It does not add a second dispatch event.
 
 - **Node code did not start.** If no start record exists, the executor runs
-  the attempt at its recorded position.
+  the attempt at its recorded position. It does not write `node-resumed`.
 - **A retry is safe.** Set `retrySafe: true` in the node binding. The start
-  record saves this rule before node code starts.
+  record saves this rule before node code starts. Resume records `node-resumed`
+  for that in-flight position, then runs the same attempt again.
 - **The result is not known.** If the saved rule is false, resume records a
-  typed pause and does not call node code.
+  typed pause with a `reconcile-attempt` request and does not call node code.
 - **The node is paused.** Resume records `node-resumed` for the exact position
   and offers the same attempt again.
 
+`node-resumed` is recorded for a paused node and for an in-flight attempt that
+already has a start record with `retrySafe: true`.
+
 The saved `retrySafe` value controls crash recovery. A changed value in the
 live binding does not change an earlier start record.
+
+### Two nodes in flight
+
+A graph can dispatch more than one node at a time. If the process stops with
+two dispatches still open, a fresh executor returns `waiting` with both
+positions. `resume` takes one position. After that attempt settles, if the
+sibling is still unfinished, the result is `waiting` again with the sibling's
+position:
+
+```ts
+const first = await freshExecutor.run(signal);
+if (first.kind !== 'waiting') {
+  throw new Error('The run has no in-flight dispatch.');
+}
+const firstPosition = first.positions[0];
+if (firstPosition === undefined) {
+  throw new Error('The waiting result has no position.');
+}
+const next = await freshExecutor.resume(firstPosition, signal);
+if (next.kind === 'waiting') {
+  const sibling = next.positions[0];
+  if (sibling === undefined) {
+    throw new Error('The waiting result has no position.');
+  }
+  await freshExecutor.resume(sibling, signal);
+}
+```
 
 At this stage, the executor checks the stored graph definition and plan. It
 does not check general code or node-body fingerprints.
