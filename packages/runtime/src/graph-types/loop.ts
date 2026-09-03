@@ -280,6 +280,20 @@ function validateConvergence(definition: ConvergenceDefinition): Readonly<{
     issues.push(issue('ROLE_COUNT', '/nodes', 'At least one seat node is required.'));
   }
 
+  const writers = definition.nodes.filter((node) =>
+    node.data.role === 'generator' || node.data.role === 'repair');
+  for (const seat of definition.nodes.filter((node) => node.data.role === 'seat')) {
+    const writer = writers.find((node) => seat.data.lane !== undefined
+      && node.data.lane?.id === seat.data.lane.id);
+    if (writer !== undefined) {
+      issues.push(issue(
+        'SELF_REVIEW_LANE',
+        `/nodes/${seat.id}/data/lane`,
+        `Review seat "${seat.id}" cannot use the ${writer.data.role} lane "${seat.data.lane!.id}".`,
+      ));
+    }
+  }
+
   for (const [field, minimum] of [
     ['maxIterations', 1],
     ['maxReviewRestarts', 0],

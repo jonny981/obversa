@@ -627,6 +627,29 @@ describe('convergence graph type', () => {
     }]);
   });
 
+  it('rejects a review seat on either writer lane and accepts a separate lane', () => {
+    for (const writerId of ['generator', 'repair'] as const) {
+      const base = panel();
+      const sharedLane = reviewLane('writer-and-review');
+      expectIssue({
+        ...base,
+        nodes: base.nodes.map((node) => node.id === writerId
+          ? { ...node, data: { ...node.data, lane: sharedLane } }
+          : node.id === 'seat-a'
+            ? { ...node, data: { ...node.data, lane: sharedLane } }
+            : node),
+      }, 'SELF_REVIEW_LANE');
+    }
+
+    const separate = panel();
+    expect(() => compileGraph(convergence, {
+      ...separate,
+      nodes: separate.nodes.map((node) => node.id === 'generator'
+        ? { ...node, data: { ...node.data, lane: reviewLane('writer') } }
+        : node),
+    })).not.toThrow();
+  });
+
   it('rejects conflicting declarations for one engine lane id', () => {
     const base = panel();
     expectIssue({

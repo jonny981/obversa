@@ -43,15 +43,23 @@ export {
   convergence,
   type ConvergenceDefinition,
   type ConvergenceEvent,
+  type ConvergenceStatus,
 } from './graph-types/loop.js';
 export {
   createCallbackGate,
   type CallbackGateDefinition,
+  type CallbackRequest,
 } from './callback/gate.js';
 export {
   createCallbackClient,
   replayCallbackClient,
   directRouter,
+  type CallbackClient,
+  type CallbackEvent,
+  type ClaimResult,
+  type SubmitResult,
+  type ReleaseResult,
+  type Responder,
 } from './callback/client.js';
 export {
   createGraphExecutor,
