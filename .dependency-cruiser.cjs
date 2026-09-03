@@ -1,8 +1,8 @@
-// The package-arrow authority (an internal note).
+// The package-arrow authority.
 // dependency-cruiser proves every static arrow between packages: static import,
 // re-export, static dynamic import, require, package-import alias, public
 // subpath. Expression imports, reflection, and generated code are out of its
-// scope and stated as residuals in Every rule is an error, never a
+// scope and stated as residuals. Every rule is an error, never a
 // warning. The pass/fail fixture matrix lives in scripts/check-arrows.spec.mjs
 // and proves each rule fires on the form it names.
 //

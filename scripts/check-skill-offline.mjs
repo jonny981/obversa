@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// The offline skill proof (an internal note, the file-gated steps): the
+// The offline skill proof: the
 // packed @obversa/source archive carries the review-diff skill and the one
 // bin with a matching major; and the skill's exact command line — npx with
 // the pinned major — resolves the packed bin from a local registry stand-in,
@@ -11,7 +11,7 @@
 // Nothing reaches a public registry: the stand-in serves the two packed
 // surface tarballs, and every external dependency in the closure is
 // re-archived from the workspace's own installed copies. The live-client
-// discovery checks ( step 3) are recorded by hand at gate time, not here.
+// discovery checks (step 3) are recorded by hand at gate time, not here.
 
 import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';

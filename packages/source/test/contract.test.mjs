@@ -62,7 +62,7 @@ test("anchorKey is total: it never throws, and an anchor that points nowhere is 
   assert.equal(anchorKey({ target: "a", position: {} }), null, "an empty object position");
   assert.equal(anchorKey({ target: "a", position: [] }), null, "an empty array position");
   assert.equal(anchorKey({ target: "a", position: 1, side: 7 }), null, "a non-string side");
-  // A side, when present, is old or new (an internal note).
+  // A side, when present, is old or new.
   assert.equal(anchorKey({ target: "a", position: 1, side: "" }), null, "an empty side");
   assert.equal(anchorKey({ target: "a", position: 1, side: "   " }), null, "a whitespace side");
   assert.equal(anchorKey({ target: "a", position: 1, side: "middle" }), null, "an unknown side");

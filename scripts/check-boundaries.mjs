@@ -100,7 +100,7 @@ const refusalReason = (dependency) => dependency.slice('@obversa/<'.length, -1);
 // `module.require(...)`, the resolvers `require.resolve(...)` and
 // `import.meta.resolve(...)`, `import x = require(...)`, type-position
 // `import("x").T` / `typeof import("x")` (a distinct ImportTypeNode — a
-// type-only import is still a dependency, an internal note), the JSDoc forms
+// type-only import is still a dependency), the JSDoc forms
 // `@type {import("x").T}` and `@import`, and a `declare module "x"`
 // augmentation. A loader — `require`, `module.require`, `require.resolve`,
 // `import.meta.resolve` — is read only as the direct callee of a call
@@ -1002,7 +1002,7 @@ const hostRules = new Map([
     scripts: {},
     shell: {
       'bin/obversa-cmux-workspace': '797bff9eef5818c7e3296dbc8aa01644b6d10c2082a921bc21f1dce678e5ef37',
-      'bin/obversa-order-workspace': '4a8821485b2c1c67041ffd248075a42042674bddb3aebfb4f6915b007e7299f8',
+      'bin/obversa-order-workspace': '12f8ef9cd1fe24d4d0db04efacf304ab86e6cd1bb3ae8281d4e77377417cee7c',
       'bin/obversa-plannotator-browser': 'ef180a43d479ad9c9ae2242bb7f24b74ab58f85781465ffd6eace1c45b9ef34a',
       'bin/obversa-surface': 'd2e704106aaf9c6d07a8e6057ce1a09ca504471fc2cacacedb7e0eb95b5ab552',
       'bin/obversa-whereis': 'a80752222928dae5f619b916a38f8f6aaf479da968f84705cc35aad09ae58198',
@@ -1184,7 +1184,7 @@ for (const [name, rule] of packageRules) {
   } else if (manifest.publishConfig?.access !== 'public') {
     failures.push(`${name}: publishConfig.access must be public`);
   }
-  // The review command is @obversa/source's one bin (an internal note);
+  // The review command is @obversa/source's one bin;
   // no other package exposes a command.
   const allowedBins = name === '@obversa/source' ? { 'obversa-review': './bin/obversa-review.mjs' } : undefined;
   if (JSON.stringify(manifest.bin) !== JSON.stringify(allowedBins))

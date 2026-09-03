@@ -1,7 +1,7 @@
 #!/bin/bash
 # Generate the two-root Order editor workspace file and open it in the editor.
 #
-# The binding follows an internal note:
+# The binding:
 # the Project worktree and the Shared worktree are peer roots. Neither
 # root appears inside the other. The workspace file lives outside both
 # trees so that no worktree carries host state.

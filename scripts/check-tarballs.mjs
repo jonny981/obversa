@@ -1,5 +1,4 @@
-// publint and @arethetypeswrong/cli on every packed public tarball
-// (an internal note).
+// publint and @arethetypeswrong/cli on every packed public tarball.
 //
 // Each package the publish allowlist names is packed with the pinned pnpm,
 // then both tools read the tarball itself — the artifact a registry would

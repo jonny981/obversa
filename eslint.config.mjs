@@ -1,12 +1,11 @@
-// The direct-loader-form bans and name resolution through exports maps
-// (an internal note).
+// The direct-loader-form bans and name resolution through exports maps.
 //
 // dependency-cruiser owns the package-arrow rules; ESLint bans the forms that
 // reach the module loader or the process without an import statement, and
 // proves every named import resolves through the TypeScript resolver, which
 // reads exports maps. Expression-built forms — aliases through variables,
-// reflection, indirect eval — stay out of scope and are stated as residuals
-// in The fixture matrix in scripts/check-lint.spec.mjs asserts each
+// reflection, indirect eval — stay out of scope and are stated as residuals.
+// The fixture matrix in scripts/check-lint.spec.mjs asserts each
 // banned form is reported.
 //
 // Scope: the JavaScript files. The TypeScript packages keep the boundary

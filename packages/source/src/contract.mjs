@@ -2,7 +2,7 @@
 // identical across every renderer family (Intent, Output, Outcome) and every
 // transport (terminal, browser, remote, webhook, third-party). That invariant
 // is what lets one agent consume any human review the same way, and it is the
-// spine of an internal note
+// spine of the surface contract.
 //
 // This module is family-agnostic and depends on nothing but Node's own
 // Proxy check (node:util types.isProxy). It owns the shapes and
@@ -15,7 +15,7 @@
 // location that was never shown. When a second family lands, this module lifts
 // into a shared package unchanged.
 //
-// Shapes (see an internal note):
+// Shapes:
 //   SurfaceRequest { surfaceId, gateId, callback{address,token},
 //                    kind{family,renderer}, subject{ref, payload | fetch},
 //                    anchors[], transport, deadline? }
@@ -34,7 +34,7 @@
 import { types } from "node:util";
 
 export const FAMILIES = Object.freeze(["intent", "output", "outcome"]);
-// Transport hints (an internal note): the named hosts, or a third-party tool as
+// Transport hints: the named hosts, or a third-party tool as
 // `third-party:<tool>`.
 export const TRANSPORTS = Object.freeze(["terminal", "browser", "remote", "webhook"]);
 const THIRD_PARTY = /^third-party:[A-Za-z0-9._-]+$/;
@@ -48,7 +48,7 @@ export const DECISIONS = Object.freeze([
   "timed-out",
 ]);
 export const AUTHOR_KINDS = Object.freeze(["human", "agent"]);
-// The sides of an Output anchor (an internal note): the old or the new text.
+// The sides of an Output anchor: the old or the new text.
 export const SIDES = Object.freeze(["old", "new"]);
 // The fields a location has, and the only own properties an anchor may carry.
 const ANCHOR_FIELDS = Object.freeze(["target", "side", "position"]);

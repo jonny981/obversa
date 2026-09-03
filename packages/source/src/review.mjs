@@ -83,7 +83,7 @@ function surfaceIdentity() {
 }
 
 /**
- * The SurfaceRequest for one review (an internal note). `gate` is the option a
+ * The SurfaceRequest for one review. `gate` is the option a
  * Callback Gate passes through reviewDiff — its id and callback — and is the
  * only route by which a gate reaches the request. Direct use from the command
  * line passes none, so gateId is null and the callback has null address and
@@ -218,8 +218,7 @@ const gitPort = { repositoryRoot, computeDiff, listTrackedFiles, rangeEnd };
  *   the review; omitted for direct use. The gateId is copied onto the result.
  *
  * Resolves to { status, result, annotations, meta, terminal }: `result` is the
- * SurfaceResult (an internal note — surfaceId, gateId, decision, annotations
- * with contract anchors, meta): the reviewer's on completion, or one with a
+ * SurfaceResult: the reviewer's on completion, or one with a
  * "cancelled" / "timed-out" decision and no annotations when the session
  * ended otherwise; null only if the session never produced a terminal
  * record. `annotations` is `result.annotations` or []; `terminal` is the

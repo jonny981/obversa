@@ -1,5 +1,4 @@
-// The pass/fail fixture matrix for the dependency-cruiser ruleset
-// (an internal note).
+// The pass/fail fixture matrix for the dependency-cruiser ruleset.
 //
 // One disposable workspace is built with a file per forbidden form — static
 // import, re-export, static dynamic import, require, package-import alias,

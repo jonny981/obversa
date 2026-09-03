@@ -126,14 +126,6 @@ and the built-in pipeline form is the worked example.
 Your form must pass the graph conformance kit. The built-in forms use the
 same kit.
 
-## About the `.agents` directory
-
-The repository has a `.agents/` directory, with `.claude` and `.codex`
-symlinked to it. If your machine has a file at `the team's internal notes`, that
-file is the team's internal notes. It is private, it is not part of the
-repository, and it does not replace this public guide. If the file is
-absent on your machine, that is correct and expected.
-
 ## Opening a pull request
 
 1. Fork, then branch from `main` with a short, descriptive name.

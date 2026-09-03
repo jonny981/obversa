@@ -1,8 +1,8 @@
-// The unattended path (an internal note): a router plugin resolves this
+// The unattended path: a router plugin resolves this
 // package's public bin subpath — an exports entry naming the same file the
 // bin field names — and spawns process.execPath with it, shell-free. The
-// no-PATH promise is about finding and loading the bin, nothing wider
-// (an internal note): a live review still takes git from the caller's
+// no-PATH promise is about finding and loading the bin, nothing wider:
+// a live review still takes git from the caller's
 // environment, and the test below pins exactly where an empty-PATH launch
 // stops — past resolution and loading, at the git spawn.
 

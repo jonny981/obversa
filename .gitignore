@@ -13,12 +13,7 @@ build/
 # The marketing site and copy bank ship from their own repository.
 marketing/
 
-# Local working material, ignored here on purpose.
-# These paths are not part of this repository.
+# Agent tool directories are machine-local.
 .agents
-design
-roadmap
-the internal notes
-the internal notes
 .claude
 .codex

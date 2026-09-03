@@ -1,5 +1,4 @@
-// The pass/fail fixture matrix for the ESLint loader-form bans
-// (an internal note).
+// The pass/fail fixture matrix for the ESLint loader-form bans.
 //
 // One disposable tree gets a file per banned form; the real root config lints
 // it, and the spec asserts each file is reported under the rule that bans its

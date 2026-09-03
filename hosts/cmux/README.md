@@ -22,7 +22,7 @@ with a clear message without it; `--help` works either way.
 ### obversa-order-workspace
 
 Generates the two-root Order editor workspace and opens it in the editor.
-The binding follows `an internal note`: the
+The binding: the
 Project worktree and the Shared worktree are peer roots, and neither root
 appears inside the other. The script rejects nested or identical roots.
 
@@ -34,7 +34,7 @@ obversa-order-workspace --shared ~/src/obversa-shared
 - `--shared <dir>` defaults to `$OBVERSA_SHARED_ROOT`.
 - The workspace file lands in `~/.local/state/obversa/workspaces/` so that
   no worktree carries host state. Where portable workspace bindings live
-  long term is an open question in `an internal note`.
+  long term is an open question.
 - The default file name is the sanitized, length-bounded Project basename
   plus the full SHA-256 of the root pair (NUL-joined, so no two distinct
   pairs serialize alike). With default names, distinct Orders get

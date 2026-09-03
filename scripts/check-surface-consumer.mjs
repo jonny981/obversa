@@ -1,6 +1,5 @@
 #!/usr/bin/env node
-// The standalone surface-consumer proof (an internal note; the F2b
-// complete-when): a clean consumer with nothing but the packed
+// The standalone surface-consumer proof: a clean consumer with nothing but the packed
 // @obversa/source tarball and its declared dependencies opens a review with
 // --no-open, completes it over HTTP the way the browser would, and reads
 // the framed result carrying the surface identity.
