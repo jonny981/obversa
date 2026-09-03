@@ -45,7 +45,7 @@ async function runFixture(path, environment) {
 const temporary = await mkdtemp(join(tmpdir(), 'obversa-d10-crash-'));
 const fixtureDirectory = await mkdtemp(join(
   repository,
-  'examples/packages/.d10-crash-',
+  'packages/runtime/.d10-crash-',
 ));
 try {
   const baselineDirectory = join(temporary, 'baseline');
