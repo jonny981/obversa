@@ -10,9 +10,7 @@ Capture records the repository revision and file state. Verify reads the
 repository again and reports changed revisions or paths. A foreign write
 pauses the run and names the changed paths.
 
-The branch stream links to its source event and workspace anchor. The safe
-order is capture, verify, then start the branch. At resume, a changed graph
-definition digest is refused with a typed result.
+The safe order is capture, verify, then start the branch.
 
 ```ts
 import { createGitWorktreeProvider } from '@obversa/runtime';
