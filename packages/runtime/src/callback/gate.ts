@@ -1,5 +1,5 @@
 /**
- * The Callback Gate (roadmap D8): a question the run asks and waits for,
+ * The Callback Gate (roadmap D7): a question the run asks and waits for,
  * answered through a replaceable router. The runtime stores the durable
  * request and its assignment; an external router claims the request,
  * submits a structured response, and the runtime validates and records it.
@@ -50,8 +50,6 @@ function digestOf(definition: CallbackGateDefinition): string {
   } as JsonValue)).digest('hex');
 }
 
-let requestCounter = 0;
-
 /** Create the gate's request. Same definition bytes, same digest. */
 export function createCallbackGate(
   definition: CallbackGateDefinition,
@@ -65,12 +63,12 @@ export function createCallbackGate(
   if (typeof definition.decisionText !== 'string' || definition.decisionText.length === 0) {
     throw new Error('a callback gate needs decision text');
   }
-  requestCounter += 1;
+  const digest = digestOf(definition);
   return Object.freeze({
-    requestId: `${definition.gateId}#${definition.gateVersion}#${requestCounter}`,
+    requestId: `${definition.gateId}#${definition.gateVersion}#${digest}`,
     gateId: definition.gateId,
     gateVersion: definition.gateVersion,
-    digest: digestOf(definition),
+    digest,
     decisionText: definition.decisionText,
     responseSchema: definition.responseSchema,
     input: definition.input,

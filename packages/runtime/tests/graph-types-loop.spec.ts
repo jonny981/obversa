@@ -1,15 +1,30 @@
-import { describe, expect, it } from 'vitest';
+import { randomUUID } from 'node:crypto';
+import { mkdtemp, realpath, rm } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+
+import type { EngineSelectionRecord } from '@obversa/engine';
+import { MockEngine } from '@obversa/engine/testing';
+import { afterEach, describe, expect, it } from 'vitest';
 
 import type { GraphCommand } from '../src/graph/commands.ts';
 import type { NodeId } from '../src/graph/kernel.ts';
-import type { PlanResolution } from '../src/graph/plan.ts';
+import { resolveGraphPlan, type PlanResolution } from '../src/graph/plan.ts';
 import {
   assertGraphTypeConformance,
   runGraphTypeConformance,
   type GraphTypeConformanceFixture,
 } from '../src/graph/conformance.ts';
 import { compileGraph } from '../src/graph/type.ts';
-import { GraphValidationError, type JsonObject } from '../src/graph/value.ts';
+import { digestJson, GraphValidationError, type JsonObject, type JsonValue } from '../src/graph/value.ts';
+import {
+  createGraphExecutor,
+  type GraphEngineBinding,
+  type GraphNodeBinding,
+} from '../src/runtime/graph-executor.ts';
+import { persistRunDefinition, type RunStorageBinding } from '../src/runtime/run-definition.ts';
+import { defineResultContract } from '../src/runtime/result-contract.ts';
+import { createLocalRunStorage } from '../src/storage/local.ts';
 import {
   convergence,
   type ConvergenceDefinition,
@@ -29,7 +44,17 @@ function nodeState(
 }
 
 function seatRecord(outcome: SeatRecord['outcome']): SeatRecord {
-  return { outcome, verdict: null, confidence: null, provider: null, modelFamily: null, findings: [], stale: false };
+  return {
+    outcome,
+    verdict: null,
+    confidence: null,
+    provider: null,
+    modelFamily: null,
+    inputHashes: null,
+    workspaceFingerprint: null,
+    findings: [],
+    stale: false,
+  };
 }
 
 function panel(overrides: Partial<ConvergenceDefinition['data']> = {}): ConvergenceDefinition {
@@ -77,11 +102,11 @@ function seatDispatched(nodeId: NodeId, round: number, attempt = 1): Convergence
   };
 }
 
-function repairDispatched(round: number): ConvergenceEvent {
+function repairDispatched(round: number, attempt = 1): ConvergenceEvent {
   return {
     type: 'node-dispatched',
     version: 1,
-    payload: { nodeId: 'repair', position: `convergence/repair/${round}` },
+    payload: { nodeId: 'repair', position: `convergence/repair/${round}/${attempt}` },
   };
 }
 
@@ -101,13 +126,22 @@ function seatInvalidated(seatId: NodeId): ConvergenceEvent {
   return { type: 'seat-invalidated', version: 1, payload: { seatId, reason: 'watched path changed' } };
 }
 
-function seatSkip(seatId: NodeId): ConvergenceEvent {
-  return { type: 'seat-skip', version: 1, payload: { seatId, reason: 'exhausted credit' } };
-}
-
-const PASS_ANTHROPIC = { verdict: 'pass', confidence: 0.9, provider: 'anthropic', modelFamily: 'claude' } as const;
-const PASS_OPENAI = { verdict: 'pass', confidence: 0.85, provider: 'openai', modelFamily: 'gpt' } as const;
-const PASS_XAI = { verdict: 'pass', confidence: 0.8, provider: 'xai', modelFamily: 'grok' } as const;
+const REVIEW_EVIDENCE = {
+  inputHashes: { draft: 'sha256:draft' },
+  workspaceFingerprint: 'sha256:workspace',
+} as const;
+const PASS_ANTHROPIC = {
+  verdict: 'pass', confidence: 0.9, provider: 'anthropic', modelFamily: 'claude',
+  ...REVIEW_EVIDENCE,
+} as const;
+const PASS_OPENAI = {
+  verdict: 'pass', confidence: 0.85, provider: 'openai', modelFamily: 'gpt',
+  ...REVIEW_EVIDENCE,
+} as const;
+const PASS_XAI = {
+  verdict: 'pass', confidence: 0.8, provider: 'xai', modelFamily: 'grok',
+  ...REVIEW_EVIDENCE,
+} as const;
 
 function reviewLane(
   id: string,
@@ -133,15 +167,145 @@ function planResolution(definition: ConvergenceDefinition): PlanResolution {
     package: identity,
     admission: { package: identity, permissions: [] },
     executionLanes: seats.map((seat) => ({
-      id: seat.id,
-      effective: {
-        adapter: 'mock',
-        provider: 'mock',
-        modelFamily: 'mock-family',
-        model: `mock-${seat.id}`,
-        tools: [] as readonly string[],
-      },
+      id: seat.data.lane!.id,
+      effective: seat.data.lane!.requested,
+      fallbacks: seat.data.lane!.knownSubstitutions,
     })),
+  };
+}
+
+const executorRoots: string[] = [];
+let executorSequence = 0;
+
+afterEach(async () => {
+  await Promise.all(executorRoots.splice(0).map((root) =>
+    rm(root, { recursive: true, force: true })));
+});
+
+async function storedConvergenceRun(definition: ConvergenceDefinition): Promise<{
+  readonly graph: ReturnType<typeof compileGraph<
+    ConvergenceDefinition,
+    ConvergenceStatus,
+    ConvergenceEvent,
+    ConvergenceRequirements
+  >>;
+  readonly root: string;
+  readonly runId: string;
+  readonly storage: RunStorageBinding;
+}> {
+  const root = await realpath(await mkdtemp(join(tmpdir(), 'obversa-convergence-')));
+  executorRoots.push(root);
+  const runId = `convergence-${executorSequence += 1}`;
+  const graph = compileGraph(convergence, definition);
+  const storage = createLocalRunStorage({
+    directory: join(root, 'storage'),
+    namespace: 'convergence-tests',
+    policy: {
+      schemaVersion: 1,
+      maxEventPayloadBytes: 64_000,
+      maxAppendBatchBytes: 128_000,
+      maxArtifactBytes: 1_000_000,
+      maxTotalArtifactBytesPerRun: 4_000_000,
+      retention: 'until-run-delete',
+      sensitiveContent: {
+        marked: 'reject',
+        exact: 'reject',
+        freeText: 'redact-before-hash',
+      },
+    },
+  });
+  await persistRunDefinition(storage, {
+    runId,
+    eventId: randomUUID(),
+    timestamp: new Date().toISOString(),
+    graphDefinition: graph.definition,
+    resolvedPlan: resolveGraphPlan(graph.describe(), planResolution(definition)),
+    resolvedInputs: {},
+    workspaceBinding: null,
+    hostBinding: null,
+  });
+  return { graph, root, runId, storage };
+}
+
+function executorNodeBinding(
+  root: string,
+  input: Partial<Pick<GraphNodeBinding, 'prompt' | 'resultContract' | 'runData' | 'parseResult'>>,
+): GraphNodeBinding {
+  return {
+    prompt: input.prompt ?? null,
+    scratchDirectory: root,
+    workspace: { mode: 'none', directory: null, allowedPaths: [] },
+    trustedCaller: {},
+    permissions: [],
+    policy: {
+      inputBytes: 100_000,
+      outputBytes: 100_000,
+      timeoutMs: 5_000,
+      teardownGraceMs: 100,
+      memoryBytes: 100_000_000,
+      filesChanged: 0,
+      linesChanged: 0,
+      callTokens: null,
+    },
+    resultContract: input.resultContract ?? null,
+    runData: input.runData ?? null,
+    parseResult: input.parseResult ?? null,
+    tokenBudget: null,
+    decideAction: async () => ({ kind: 'allow' }),
+  };
+}
+
+const reviewResultSchema = {
+  type: 'object',
+  required: [
+    'verdict',
+    'confidence',
+    'provider',
+    'modelFamily',
+    'inputHashes',
+    'workspaceFingerprint',
+  ],
+} as const;
+const reviewResultContract = defineResultContract({
+  record: {
+    name: 'convergence-review',
+    version: 1,
+    schemaDigest: digestJson(reviewResultSchema),
+  },
+  schema: reviewResultSchema,
+  validate(value: unknown): JsonObject {
+    if (value === null || typeof value !== 'object' || Array.isArray(value)) {
+      throw new TypeError('review result must be an object');
+    }
+    return value as JsonObject;
+  },
+});
+
+function reviewEngineBinding(
+  definition: ConvergenceDefinition,
+  seatId: NodeId,
+  response: JsonObject,
+  prompts: string[],
+): GraphEngineBinding {
+  const node = definition.nodes.find((candidate) => candidate.id === seatId)!;
+  const target = node.data.lane!.requested;
+  const selection: EngineSelectionRecord = {
+    adapter: target.adapter,
+    adapterVersion: null,
+    provider: null,
+    modelFamily: null,
+    model: target.model,
+    executable: null,
+    capabilities: [],
+  };
+  return {
+    target,
+    selection,
+    engine: new MockEngine((request) => {
+      prompts.push(`${seatId}: ${request.prompt}`);
+      return JSON.stringify(response);
+    }),
+    hardTokenLimitEnforceable: false,
   };
 }
 
@@ -190,7 +354,7 @@ describe('convergence graph type', () => {
         convDispatched('generator', 1),
         completed('generator', 'convergence/1/generator/1', { summary: 'draft one' }),
         convDispatched('evaluator', 1),
-        completed('evaluator', 'convergence/1/evaluator/1', { gateMet: true }),
+        completed('evaluator', 'convergence/1/evaluator/1', { gateMet: true, ...REVIEW_EVIDENCE }),
         seatDispatched('seat-a', 1),
         completed('seat-a', 'review/1/seat-a/1', PASS_ANTHROPIC),
         seatDispatched('seat-b', 1),
@@ -218,7 +382,7 @@ describe('convergence graph type', () => {
               'seat-a': nodeState('pending'), 'seat-b': nodeState('pending'), repair: nodeState('pending'),
             },
             seats: { 'seat-a': seatRecord(null), 'seat-b': seatRecord(null) },
-            findingRounds: {}, pauseReason: null,
+            reviewEvidence: null, findingRounds: {}, pauseReason: null,
           },
           {
             phase: 'body', iteration: 1, restarts: 0,
@@ -228,7 +392,7 @@ describe('convergence graph type', () => {
               'seat-a': nodeState('pending'), 'seat-b': nodeState('pending'), repair: nodeState('pending'),
             },
             seats: { 'seat-a': seatRecord(null), 'seat-b': seatRecord(null) },
-            findingRounds: {}, pauseReason: null,
+            reviewEvidence: null, findingRounds: {}, pauseReason: null,
           },
           {
             phase: 'body', iteration: 1, restarts: 0,
@@ -237,7 +401,7 @@ describe('convergence graph type', () => {
               'seat-a': nodeState('pending'), 'seat-b': nodeState('pending'), repair: nodeState('pending'),
             },
             seats: { 'seat-a': seatRecord(null), 'seat-b': seatRecord(null) },
-            findingRounds: {}, pauseReason: null,
+            reviewEvidence: null, findingRounds: {}, pauseReason: null,
           },
           {
             phase: 'body', iteration: 1, restarts: 0,
@@ -247,7 +411,7 @@ describe('convergence graph type', () => {
               'seat-a': nodeState('pending'), 'seat-b': nodeState('pending'), repair: nodeState('pending'),
             },
             seats: { 'seat-a': seatRecord(null), 'seat-b': seatRecord(null) },
-            findingRounds: {}, pauseReason: null,
+            reviewEvidence: null, findingRounds: {}, pauseReason: null,
           },
           {
             phase: 'review', iteration: 1, restarts: 0,
@@ -256,7 +420,7 @@ describe('convergence graph type', () => {
               'seat-a': nodeState('pending'), 'seat-b': nodeState('pending'), repair: nodeState('pending'),
             },
             seats: { 'seat-a': seatRecord(null), 'seat-b': seatRecord(null) },
-            findingRounds: {}, pauseReason: null,
+            reviewEvidence: REVIEW_EVIDENCE, findingRounds: {}, pauseReason: null,
           },
           {
             phase: 'review', iteration: 1, restarts: 0,
@@ -266,7 +430,7 @@ describe('convergence graph type', () => {
               'seat-b': nodeState('pending'), repair: nodeState('pending'),
             },
             seats: { 'seat-a': seatRecord(null), 'seat-b': seatRecord(null) },
-            findingRounds: {}, pauseReason: null,
+            reviewEvidence: REVIEW_EVIDENCE, findingRounds: {}, pauseReason: null,
           },
           {
             phase: 'review', iteration: 1, restarts: 0,
@@ -275,10 +439,16 @@ describe('convergence graph type', () => {
               'seat-a': nodeState('passed', 1), 'seat-b': nodeState('pending'), repair: nodeState('pending'),
             },
             seats: {
-              'seat-a': { outcome: 'valid', verdict: 'pass', confidence: 0.9, provider: 'anthropic', modelFamily: 'claude', findings: [], stale: false },
+              'seat-a': {
+                outcome: 'valid', verdict: 'pass', confidence: 0.9,
+                provider: 'anthropic', modelFamily: 'claude',
+                inputHashes: REVIEW_EVIDENCE.inputHashes,
+                workspaceFingerprint: REVIEW_EVIDENCE.workspaceFingerprint,
+                findings: [], stale: false,
+              },
               'seat-b': seatRecord(null),
             },
-            findingRounds: {}, pauseReason: null,
+            reviewEvidence: REVIEW_EVIDENCE, findingRounds: {}, pauseReason: null,
           },
           {
             phase: 'review', iteration: 1, restarts: 0,
@@ -289,10 +459,16 @@ describe('convergence graph type', () => {
               repair: nodeState('pending'),
             },
             seats: {
-              'seat-a': { outcome: 'valid', verdict: 'pass', confidence: 0.9, provider: 'anthropic', modelFamily: 'claude', findings: [], stale: false },
+              'seat-a': {
+                outcome: 'valid', verdict: 'pass', confidence: 0.9,
+                provider: 'anthropic', modelFamily: 'claude',
+                inputHashes: REVIEW_EVIDENCE.inputHashes,
+                workspaceFingerprint: REVIEW_EVIDENCE.workspaceFingerprint,
+                findings: [], stale: false,
+              },
               'seat-b': seatRecord(null),
             },
-            findingRounds: {}, pauseReason: null,
+            reviewEvidence: REVIEW_EVIDENCE, findingRounds: {}, pauseReason: null,
           },
           {
             phase: 'review', iteration: 1, restarts: 0,
@@ -301,10 +477,22 @@ describe('convergence graph type', () => {
               'seat-a': nodeState('passed', 1), 'seat-b': nodeState('passed', 1), repair: nodeState('pending'),
             },
             seats: {
-              'seat-a': { outcome: 'valid', verdict: 'pass', confidence: 0.9, provider: 'anthropic', modelFamily: 'claude', findings: [], stale: false },
-              'seat-b': { outcome: 'valid', verdict: 'pass', confidence: 0.85, provider: 'openai', modelFamily: 'gpt', findings: [], stale: false },
+              'seat-a': {
+                outcome: 'valid', verdict: 'pass', confidence: 0.9,
+                provider: 'anthropic', modelFamily: 'claude',
+                inputHashes: REVIEW_EVIDENCE.inputHashes,
+                workspaceFingerprint: REVIEW_EVIDENCE.workspaceFingerprint,
+                findings: [], stale: false,
+              },
+              'seat-b': {
+                outcome: 'valid', verdict: 'pass', confidence: 0.85,
+                provider: 'openai', modelFamily: 'gpt',
+                inputHashes: REVIEW_EVIDENCE.inputHashes,
+                workspaceFingerprint: REVIEW_EVIDENCE.workspaceFingerprint,
+                findings: [], stale: false,
+              },
             },
-            findingRounds: {}, pauseReason: null,
+            reviewEvidence: REVIEW_EVIDENCE, findingRounds: {}, pauseReason: null,
           },
         ],
         commands: [
@@ -326,7 +514,7 @@ describe('convergence graph type', () => {
           }],
         ],
         bounds: {
-          dispatches: { min: { kind: 'known', value: 4 }, max: { kind: 'known', value: 9 } },
+          dispatches: { min: { kind: 'known', value: 4 }, max: { kind: 'known', value: 11 } },
           maxConcurrency: { kind: 'known', value: 1 },
           maxFanOut: { kind: 'known', value: 1 },
         },
@@ -347,7 +535,55 @@ describe('convergence graph type', () => {
     expect(description.nodes.filter((node) => node.laneId !== null).map((node) => node.id))
       .toEqual(['seat-a', 'seat-b']);
     expect(description.bounds.dispatches.min).toEqual({ kind: 'known', value: 4 });
-    expect(description.bounds.dispatches.max).toEqual({ kind: 'known', value: 9 });
+    expect(description.bounds.dispatches.max).toEqual({ kind: 'known', value: 11 });
+  });
+
+  it('bounds body re-entry and seat reruns across every repair round', () => {
+    const definition: ConvergenceDefinition = {
+      ...panel({ maxIterations: 1, maxReviewRestarts: 2, quorum: 1, requireDiversity: false }),
+      nodes: [
+        { id: 'generator', data: { role: 'generator' } },
+        { id: 'evaluator', data: { role: 'evaluator' } },
+        { id: 'seat-a', data: { role: 'seat', lane: reviewLane('seat-a') } },
+        { id: 'repair', data: { role: 'repair' } },
+      ],
+      edges: [],
+    };
+    const events: ConvergenceEvent[] = [];
+    for (let round = 1; round <= 3; round += 1) {
+      const finding = { id: `f${round}`, kind: 'patch' as const, evidence: `round ${round}` };
+      events.push(
+        convDispatched('generator', 1, round),
+        completed('generator', `convergence/1/generator/${round}`, {}),
+        convDispatched('evaluator', 1, round),
+        completed('evaluator', `convergence/1/evaluator/${round}`, {
+          gateMet: true,
+          ...REVIEW_EVIDENCE,
+        }),
+        seatDispatched('seat-a', 1, round),
+        completed('seat-a', `review/1/seat-a/${round}`, {
+          verdict: 'findings', confidence: 0.8, provider: 'anthropic', modelFamily: 'claude',
+          findings: [finding],
+          ...REVIEW_EVIDENCE,
+        }),
+      );
+      if (round < 3) {
+        events.push(
+          repairDispatched(round, round),
+          completed('repair', `convergence/repair/${round}/${round}`, { fixed: true }),
+        );
+      }
+    }
+
+    const compiled = compileGraph(convergence, definition);
+    const dispatches = events.filter((event) => event.type === 'node-dispatched').length;
+    expect(dispatches).toBe(11);
+    expect(compiled.describe().bounds.dispatches.max).toEqual({ kind: 'known', value: 11 });
+    expect(compiled.decide(events.reduce(compiled.reduce, compiled.initialState()))).toEqual([{
+      kind: 'fail',
+      code: 'CONVERGENCE_EXHAUSTED',
+      message: 'Exhausted after 1 iterations and 2 repair rounds.',
+    }]);
   });
 
   it('merges identical engine lanes by id', () => {
@@ -414,7 +650,7 @@ describe('convergence graph type', () => {
       convDispatched('generator', 1),
       completed('generator', 'convergence/1/generator/1', {}),
       convDispatched('evaluator', 1),
-      completed('evaluator', 'convergence/1/evaluator/1', { gateMet: true }),
+      completed('evaluator', 'convergence/1/evaluator/1', { gateMet: true, ...REVIEW_EVIDENCE }),
       seatDispatched('seat-claude', 1),
       completed('seat-claude', 'review/1/seat-claude/1', PASS_ANTHROPIC),
       seatDispatched('seat-codex', 1),
@@ -433,13 +669,13 @@ describe('convergence graph type', () => {
       kind: 'dispatch',
       nodeId: 'repair',
       input: { positionSummary: 'repair round 1', findings: [finding] },
-      position: 'convergence/repair/1',
+      position: 'convergence/repair/1/1',
     }]);
 
     const afterRepair = [
       ...roundOne,
       repairDispatched(1),
-      completed('repair', 'convergence/repair/1', { fixed: true }),
+      completed('repair', 'convergence/repair/1/1', { fixed: true }),
     ];
     const body = decideAt(afterRepair, definition);
     expect(body).toEqual([{
@@ -454,7 +690,7 @@ describe('convergence graph type', () => {
       convDispatched('generator', 2, 2),
       completed('generator', 'convergence/2/generator/2', {}),
       convDispatched('evaluator', 2, 2),
-      completed('evaluator', 'convergence/2/evaluator/2', { gateMet: true }),
+      completed('evaluator', 'convergence/2/evaluator/2', { gateMet: true, ...REVIEW_EVIDENCE }),
     ];
     const reruns = decideAt(backToReview, definition);
     expect(reruns).toEqual([{
@@ -490,7 +726,7 @@ describe('convergence graph type', () => {
       convDispatched('generator', 1),
       completed('generator', 'convergence/1/generator/1', {}),
       convDispatched('evaluator', 1),
-      completed('evaluator', 'convergence/1/evaluator/1', { gateMet: true }),
+      completed('evaluator', 'convergence/1/evaluator/1', { gateMet: true, ...REVIEW_EVIDENCE }),
       seatDispatched('seat-a', 1),
       completed('seat-a', 'review/1/seat-a/1', PASS_ANTHROPIC),
       seatDispatched('seat-b', 1),
@@ -516,17 +752,16 @@ describe('convergence graph type', () => {
     expect(verdict[0]!.kind).toBe('complete');
   });
 
-  it('skips a skippable seat for exhausted credit and rechecks the quorum', () => {
+  it('skips an unavailable skippable seat and rechecks the quorum', () => {
     const events = [
       convDispatched('generator', 1),
       completed('generator', 'convergence/1/generator/1', {}),
       convDispatched('evaluator', 1),
-      completed('evaluator', 'convergence/1/evaluator/1', { gateMet: true }),
+      completed('evaluator', 'convergence/1/evaluator/1', { gateMet: true, ...REVIEW_EVIDENCE }),
       seatDispatched('seat-a', 1),
       completed('seat-a', 'review/1/seat-a/1', PASS_ANTHROPIC),
       seatDispatched('seat-b', 1),
-      failedNode('seat-b', 'review/1/seat-b/1', 'billing'),
-      seatSkip('seat-b'),
+      failedNode('seat-b', 'review/1/seat-b/1', 'ENGINE_UNAVAILABLE'),
     ];
     const commands = decideAt(events, panel({ skippableSeats: ['seat-b'], quorum: 1 }));
     expect(commands).toEqual([{
@@ -542,31 +777,118 @@ describe('convergence graph type', () => {
     }]);
   });
 
-  it('pauses typed on exhausted credit for a non-skippable seat and on rate limits', () => {
+  it('opens when a diverse quorum exists beside a duplicate-provider pass', () => {
+    const definition: ConvergenceDefinition = {
+      ...panel({ seatConcurrency: 3 }),
+      nodes: [
+        { id: 'generator', data: { role: 'generator' } },
+        { id: 'evaluator', data: { role: 'evaluator' } },
+        { id: 'seat-a', data: { role: 'seat', lane: reviewLane('seat-a') } },
+        { id: 'seat-b', data: { role: 'seat', lane: reviewLane('seat-b') } },
+        { id: 'seat-c', data: { role: 'seat', lane: reviewLane('seat-c') } },
+        { id: 'repair', data: { role: 'repair' } },
+      ],
+      edges: [],
+    };
+    const events = [
+      convDispatched('generator', 1),
+      completed('generator', 'convergence/1/generator/1', {}),
+      convDispatched('evaluator', 1),
+      completed('evaluator', 'convergence/1/evaluator/1', { gateMet: true, ...REVIEW_EVIDENCE }),
+      seatDispatched('seat-a', 1),
+      completed('seat-a', 'review/1/seat-a/1', PASS_ANTHROPIC),
+      seatDispatched('seat-b', 1),
+      completed('seat-b', 'review/1/seat-b/1', PASS_OPENAI),
+      seatDispatched('seat-c', 1),
+      completed('seat-c', 'review/1/seat-c/1', PASS_OPENAI),
+    ];
+
+    expect(decideAt(events, definition)).toEqual([{
+      kind: 'complete',
+      output: {
+        iterations: 1,
+        restarts: 0,
+        seats: { 'seat-a': 'accepted', 'seat-b': 'accepted', 'seat-c': 'accepted' },
+      },
+    }]);
+  });
+
+  it('does not mistake separate provider and family counts for a diverse quorum', () => {
+    const definition: ConvergenceDefinition = {
+      ...panel({ quorum: 3, seatConcurrency: 4 }),
+      nodes: [
+        { id: 'generator', data: { role: 'generator' } },
+        { id: 'evaluator', data: { role: 'evaluator' } },
+        { id: 'seat-a', data: { role: 'seat', lane: reviewLane('seat-a') } },
+        { id: 'seat-b', data: { role: 'seat', lane: reviewLane('seat-b') } },
+        { id: 'seat-c', data: { role: 'seat', lane: reviewLane('seat-c') } },
+        { id: 'seat-d', data: { role: 'seat', lane: reviewLane('seat-d') } },
+        { id: 'repair', data: { role: 'repair' } },
+      ],
+      edges: [],
+    };
+    const pass = (provider: string, modelFamily: string) => ({
+      verdict: 'pass' as const,
+      confidence: 0.9,
+      provider,
+      modelFamily,
+      ...REVIEW_EVIDENCE,
+    });
+    const events = [
+      convDispatched('generator', 1),
+      completed('generator', 'convergence/1/generator/1', {}),
+      convDispatched('evaluator', 1),
+      completed('evaluator', 'convergence/1/evaluator/1', { gateMet: true, ...REVIEW_EVIDENCE }),
+      seatDispatched('seat-a', 1),
+      completed('seat-a', 'review/1/seat-a/1', pass('p1', 'f1')),
+      seatDispatched('seat-b', 1),
+      completed('seat-b', 'review/1/seat-b/1', pass('p2', 'f1')),
+      seatDispatched('seat-c', 1),
+      completed('seat-c', 'review/1/seat-c/1', pass('p3', 'f2')),
+      seatDispatched('seat-d', 1),
+      completed('seat-d', 'review/1/seat-d/1', pass('p3', 'f3')),
+    ];
+
+    expect(decideAt(events, definition)).toEqual([{
+      kind: 'fail',
+      code: 'QUORUM_UNREACHABLE',
+      message: 'Only 4 accepted passes; quorum is 3.',
+    }]);
+  });
+
+  it('pauses when a required review seat has no available engine', () => {
     const base = [
       convDispatched('generator', 1),
       completed('generator', 'convergence/1/generator/1', {}),
       convDispatched('evaluator', 1),
-      completed('evaluator', 'convergence/1/evaluator/1', { gateMet: true }),
+      completed('evaluator', 'convergence/1/evaluator/1', { gateMet: true, ...REVIEW_EVIDENCE }),
       seatDispatched('seat-b', 1),
     ];
-    const credit = decideAt([
+    const unavailable = decideAt([
       ...base,
-      failedNode('seat-b', 'review/1/seat-b/1', 'billing'),
+      failedNode('seat-b', 'review/1/seat-b/1', 'ENGINE_UNAVAILABLE'),
     ]);
-    expect(credit).toEqual([{
+    expect(unavailable).toEqual([{
       kind: 'pause',
-      reason: 'Seat "seat-b" ran out of credit.',
+      reason: 'Seat "seat-b" has no available engine; the run pauses.',
+    }]);
+  });
+
+  it('clears a recorded pause when the next dispatch starts', () => {
+    const compiled = compileGraph(convergence, panel({ retryCapPerNode: 1 }));
+    let state = fold([
+      convDispatched('generator', 1),
+      failedNode('generator', 'convergence/1/generator/1', 'ABORTED'),
+    ]);
+
+    expect(compiled.decide(state)).toEqual([{
+      kind: 'pause',
+      reason: 'Node "generator" was aborted; the run pauses.',
     }]);
 
-    const rate = decideAt([
-      ...base,
-      failedNode('seat-b', 'review/1/seat-b/1', 'rate-limit'),
-    ]);
-    expect(rate).toEqual([{
-      kind: 'pause',
-      reason: 'Seat "seat-b" hit a rate limit; the run pauses.',
-    }]);
+    state = compiled.reduce(state, convDispatched('generator', 1, 2));
+    expect(compiled.decide(state)).toEqual([]);
+    expect(state.pauseReason).toBeNull();
   });
 
   it('fails typed when iterations or repair rounds are exhausted', () => {
@@ -609,7 +931,7 @@ describe('convergence graph type', () => {
         convDispatched('generator', round, round),
         completed('generator', `convergence/${round}/generator/${round}`, {}),
         convDispatched('evaluator', round, round),
-        completed('evaluator', `convergence/${round}/evaluator/${round}`, { gateMet: true }),
+        completed('evaluator', `convergence/${round}/evaluator/${round}`, { gateMet: true, ...REVIEW_EVIDENCE }),
       );
       if (round === 1) {
         events.push(
@@ -626,8 +948,8 @@ describe('convergence graph type', () => {
       );
       if (round < 3) {
         events.push(
-          repairDispatched(round),
-          completed('repair', `convergence/repair/${round}`, { fixed: true }),
+          repairDispatched(round, round),
+          completed('repair', `convergence/repair/${round}/${round}`, { fixed: true }),
         );
       }
     }
@@ -644,7 +966,7 @@ describe('convergence graph type', () => {
       convDispatched('generator', 1),
       completed('generator', 'convergence/1/generator/1', {}),
       convDispatched('evaluator', 1),
-      completed('evaluator', 'convergence/1/evaluator/1', { gateMet: true }),
+      completed('evaluator', 'convergence/1/evaluator/1', { gateMet: true, ...REVIEW_EVIDENCE }),
       seatDispatched('seat-a', 1),
       completed('seat-a', 'review/1/seat-a/1', PASS_ANTHROPIC),
       seatInvalidated('seat-a'),
@@ -658,9 +980,56 @@ describe('convergence graph type', () => {
     }]);
   });
 
+  it('reruns an accepted seat when the recorded review bytes change', () => {
+    const evidenceA = {
+      inputHashes: { draft: 'sha256:draft-a' },
+      workspaceFingerprint: 'sha256:workspace-a',
+    };
+    const evidenceB = {
+      inputHashes: { draft: 'sha256:draft-b' },
+      workspaceFingerprint: 'sha256:workspace-b',
+    };
+    const finding = { id: 'f1', kind: 'patch' as const, evidence: 'fix the draft' };
+    const events: ConvergenceEvent[] = [
+      convDispatched('generator', 1),
+      completed('generator', 'convergence/1/generator/1', {}),
+      convDispatched('evaluator', 1),
+      completed('evaluator', 'convergence/1/evaluator/1', { gateMet: true, ...evidenceA }),
+      seatDispatched('seat-a', 1),
+      completed('seat-a', 'review/1/seat-a/1', { ...PASS_ANTHROPIC, ...evidenceA }),
+      seatDispatched('seat-b', 1),
+      completed('seat-b', 'review/1/seat-b/1', {
+        verdict: 'findings', confidence: 0.8, provider: 'openai', modelFamily: 'gpt',
+        findings: [finding],
+        ...evidenceA,
+      }),
+      repairDispatched(1),
+      completed('repair', 'convergence/repair/1/1', { fixed: true }),
+      convDispatched('generator', 2, 2),
+      completed('generator', 'convergence/2/generator/2', {}),
+      convDispatched('evaluator', 2, 2),
+      completed('evaluator', 'convergence/2/evaluator/2', { gateMet: true, ...evidenceB }),
+    ];
+
+    expect(decideAt(events, panel({ retryCapPerNode: 1 }))).toEqual([{
+      kind: 'dispatch',
+      nodeId: 'seat-a',
+      input: { positionSummary: 'review/2, node seat-a, attempt 2' },
+      position: 'review/2/seat-a/2',
+    }]);
+  });
+
   it('ignores a stale completion for an earlier attempt', () => {
     const compiled = compileGraph(convergence, panel({ retryCapPerNode: 1 }));
     let state = compiled.initialState();
+    state = compiled.reduce(state, convDispatched('generator', 1));
+    state = compiled.reduce(state, completed('generator', 'convergence/1/generator/1', {}));
+    state = compiled.reduce(state, convDispatched('evaluator', 1));
+    state = compiled.reduce(state, completed(
+      'evaluator',
+      'convergence/1/evaluator/1',
+      { gateMet: true, ...REVIEW_EVIDENCE },
+    ));
     state = compiled.reduce(state, seatDispatched('seat-a', 1));
     state = compiled.reduce(state, failedNode('seat-a', 'review/1/seat-a/1', 'auth'));
     state = compiled.reduce(state, seatDispatched('seat-a', 1, 2));
@@ -700,10 +1069,56 @@ describe('convergence graph type', () => {
     }]);
   });
 
+  it('retries a failed repair with a fresh attempt position', () => {
+    const finding = { id: 'f1', kind: 'patch' as const, evidence: 'fix the output' };
+    const beforeRepair: ConvergenceEvent[] = [
+      convDispatched('generator', 1),
+      completed('generator', 'convergence/1/generator/1', {}),
+      convDispatched('evaluator', 1),
+      completed('evaluator', 'convergence/1/evaluator/1', { gateMet: true, ...REVIEW_EVIDENCE }),
+      seatDispatched('seat-a', 1),
+      completed('seat-a', 'review/1/seat-a/1', {
+        verdict: 'findings', confidence: 0.8, provider: 'anthropic', modelFamily: 'claude',
+        findings: [finding],
+      }),
+      seatDispatched('seat-b', 1),
+      completed('seat-b', 'review/1/seat-b/1', {
+        verdict: 'low-confidence', confidence: 0.2, provider: 'openai', modelFamily: 'gpt',
+      }),
+      {
+        type: 'node-dispatched', version: 1,
+        payload: { nodeId: 'repair', position: 'convergence/repair/1/1' },
+      },
+      failedNode('repair', 'convergence/repair/1/1', 'EFFECT_FAILED'),
+    ];
+    const definition = panel({ quorum: 1, retryCapPerNode: 1 });
+
+    expect(decideAt(beforeRepair, definition)).toEqual([{
+      kind: 'dispatch',
+      nodeId: 'repair',
+      input: { positionSummary: 'repair round 1', findings: [finding] },
+      position: 'convergence/repair/1/2',
+    }]);
+
+    expect(decideAt([
+      ...beforeRepair,
+      {
+        type: 'node-dispatched', version: 1,
+        payload: { nodeId: 'repair', position: 'convergence/repair/1/2' },
+      },
+      completed('repair', 'convergence/repair/1/2', { fixed: true }),
+    ], definition)).toEqual([{
+      kind: 'dispatch',
+      nodeId: 'generator',
+      input: { positionSummary: 'convergence/2, node generator, attempt 2' },
+      position: 'convergence/2/generator/2',
+    }]);
+  });
+
   it('pauses typed on an abort and while any node is paused', () => {
     const aborted = decideAt([
       convDispatched('generator', 1),
-      failedNode('generator', 'convergence/1/generator/1', 'aborted'),
+      failedNode('generator', 'convergence/1/generator/1', 'ABORTED'),
     ]);
     expect(aborted).toEqual([{
       kind: 'pause',
@@ -715,7 +1130,12 @@ describe('convergence graph type', () => {
     state = compiled.reduce(state, convDispatched('generator', 1));
     state = compiled.reduce(state, {
       type: 'node-paused', version: 1,
-      payload: { nodeId: 'generator', position: 'convergence/1/generator/1', reason: 'waiting' },
+      payload: {
+        nodeId: 'generator',
+        position: 'convergence/1/generator/1',
+        reason: 'waiting',
+        request: null,
+      },
     });
     expect(compiled.decide(state)).toEqual([{
       kind: 'pause',
@@ -730,13 +1150,18 @@ describe('convergence graph type', () => {
       convDispatched('generator', 1),
       completed('generator', 'convergence/1/generator/1', {}),
       convDispatched('evaluator', 1),
-      completed('evaluator', 'convergence/1/evaluator/1', { gateMet: true }),
+      completed('evaluator', 'convergence/1/evaluator/1', { gateMet: true, ...REVIEW_EVIDENCE }),
       seatDispatched('seat-a', 1),
       seatDispatched('seat-b', 1),
     ], definition);
     state = compiled.reduce(state, {
       type: 'node-paused', version: 1,
-      payload: { nodeId: 'seat-a', position: 'review/1/seat-a/1', reason: 'waiting' },
+      payload: {
+        nodeId: 'seat-a',
+        position: 'review/1/seat-a/1',
+        reason: 'waiting',
+        request: null,
+      },
     });
 
     expect(state.nodes['seat-b']!.status).toBe('in-flight');
@@ -746,6 +1171,14 @@ describe('convergence graph type', () => {
   it('discards a late verdict for a seat invalidated while in flight', () => {
     const compiled = compileGraph(convergence, panel());
     let state = compiled.initialState();
+    state = compiled.reduce(state, convDispatched('generator', 1));
+    state = compiled.reduce(state, completed('generator', 'convergence/1/generator/1', {}));
+    state = compiled.reduce(state, convDispatched('evaluator', 1));
+    state = compiled.reduce(state, completed(
+      'evaluator',
+      'convergence/1/evaluator/1',
+      { gateMet: true, ...REVIEW_EVIDENCE },
+    ));
     state = compiled.reduce(state, seatDispatched('seat-a', 1));
     state = compiled.reduce(state, seatInvalidated('seat-a'));
     expect(state.seats['seat-a']!.stale).toBe(true);
@@ -757,6 +1190,12 @@ describe('convergence graph type', () => {
     expect(late.seats['seat-a']!.outcome).toBe('invalid');
     expect(late.seats['seat-a']!.verdict).toBeNull();
     expect(late.seats['seat-a']!.stale).toBe(false);
+    expect(compiled.decide(late)).toEqual([{
+      kind: 'dispatch',
+      nodeId: 'seat-a',
+      input: { positionSummary: 'review/1, node seat-a, attempt 2' },
+      position: 'review/1/seat-a/2',
+    }]);
   });
 
   it('does not trust a pass with missing confidence', () => {
@@ -764,10 +1203,11 @@ describe('convergence graph type', () => {
       convDispatched('generator', 1),
       completed('generator', 'convergence/1/generator/1', {}),
       convDispatched('evaluator', 1),
-      completed('evaluator', 'convergence/1/evaluator/1', { gateMet: true }),
+      completed('evaluator', 'convergence/1/evaluator/1', { gateMet: true, ...REVIEW_EVIDENCE }),
       seatDispatched('seat-a', 1),
       completed('seat-a', 'review/1/seat-a/1', {
         verdict: 'pass', provider: 'anthropic', modelFamily: 'claude',
+        ...REVIEW_EVIDENCE,
       }),
     ];
     const state = fold(events);
@@ -776,9 +1216,9 @@ describe('convergence graph type', () => {
     const commands = decideAt(events);
     expect(commands).toEqual([{
       kind: 'dispatch',
-      nodeId: 'seat-b',
-      input: { positionSummary: 'review/1, node seat-b, attempt 1' },
-      position: 'review/1/seat-b/1',
+      nodeId: 'seat-a',
+      input: { positionSummary: 'review/1, node seat-a, attempt 2' },
+      position: 'review/1/seat-a/2',
     }]);
   });
 
@@ -793,5 +1233,111 @@ describe('convergence graph type', () => {
       kind: 'pause',
       reason: 'No progress for three iterations; the run pauses.',
     }]);
+  });
+
+  it('runs a full review round through the graph executor and engine-backed seats', async () => {
+    const base = panel({ seatConcurrency: 2 });
+    const definition: ConvergenceDefinition = {
+      ...base,
+      nodes: base.nodes.map((node) => node.id === 'seat-a'
+        ? { ...node, data: { ...node.data, lane: reviewLane('seat-a', 'anthropic', 'claude') } }
+        : node.id === 'seat-b'
+          ? { ...node, data: { ...node.data, lane: reviewLane('seat-b', 'openai', 'gpt') } }
+          : node),
+    };
+    const run = await storedConvergenceRun(definition);
+    const prompts: string[] = [];
+    const parseReviewResult: GraphNodeBinding['parseResult'] = (part) => {
+      if (part.kind !== 'assistant') throw new TypeError('review result must be assistant text');
+      return JSON.parse(part.text) as JsonValue;
+    };
+    const executor = await createGraphExecutor({
+      ...run,
+      nodes: {
+        generator: executorNodeBinding(run.root, {
+          runData: async () => ({ draft: 'ready' }),
+        }),
+        evaluator: executorNodeBinding(run.root, {
+          runData: async () => ({ gateMet: true, ...REVIEW_EVIDENCE }),
+        }),
+        'seat-a': executorNodeBinding(run.root, {
+          prompt: (input) => `Review ${(input as JsonObject).positionSummary}.`,
+          resultContract: reviewResultContract,
+          parseResult: parseReviewResult,
+        }),
+        'seat-b': executorNodeBinding(run.root, {
+          prompt: (input) => `Review ${(input as JsonObject).positionSummary}.`,
+          resultContract: reviewResultContract,
+          parseResult: parseReviewResult,
+        }),
+        repair: executorNodeBinding(run.root, {
+          runData: async () => ({ repaired: true }),
+        }),
+      },
+      engines: [
+        reviewEngineBinding(definition, 'seat-a', PASS_ANTHROPIC, prompts),
+        reviewEngineBinding(definition, 'seat-b', PASS_OPENAI, prompts),
+      ],
+    });
+
+    const outcome = await executor.run(new AbortController().signal);
+    const graphEvents = [];
+    for await (const event of run.storage.eventStore.read({
+      namespace: run.storage.record.namespace,
+      streamId: run.runId,
+    })) {
+      if (event.type.startsWith('graph:')) graphEvents.push(event);
+    }
+    expect(graphEvents
+      .filter((event) => event.type === 'graph:node-failed')
+      .map((event) => event.payload)).toEqual([]);
+    const completedPayloads = graphEvents
+      .filter((event) => event.type === 'graph:node-completed')
+      .map((event) => event.payload);
+    expect(completedPayloads).toHaveLength(4);
+    expect(completedPayloads).toEqual(expect.arrayContaining([
+        { nodeId: 'generator', position: 'convergence/1/generator/1', result: { draft: 'ready' } },
+        {
+          nodeId: 'evaluator',
+          position: 'convergence/1/evaluator/1',
+          result: { gateMet: true, ...REVIEW_EVIDENCE },
+        },
+        {
+          nodeId: 'seat-a',
+          position: 'review/1/seat-a/1',
+          result: PASS_ANTHROPIC,
+        },
+        {
+          nodeId: 'seat-b',
+          position: 'review/1/seat-b/1',
+          result: PASS_OPENAI,
+        },
+      ]));
+    expect(outcome).toEqual({
+      kind: 'complete',
+      output: {
+        iterations: 1,
+        restarts: 0,
+        seats: { 'seat-a': 'accepted', 'seat-b': 'accepted' },
+      },
+    });
+    expect(prompts).toHaveLength(2);
+    expect(prompts).toEqual(expect.arrayContaining([
+      'seat-a: Review review/1, node seat-a, attempt 1.',
+      'seat-b: Review review/1, node seat-b, attempt 1.',
+    ]));
+
+    const graphEventTypes = graphEvents.map((event) => event.type);
+    expect(graphEventTypes).toEqual([
+      'graph:run-started',
+      'graph:node-dispatched',
+      'graph:node-completed',
+      'graph:node-dispatched',
+      'graph:node-completed',
+      'graph:node-dispatched',
+      'graph:node-dispatched',
+      'graph:node-completed',
+      'graph:node-completed',
+    ]);
   });
 });

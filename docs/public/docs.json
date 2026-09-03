@@ -40,8 +40,7 @@
           "graphs/plan-admission",
           "graphs/executor",
           "graphs/review-loop",
-          "graphs/state-machine",
-          "graphs/worklist"
+          "graphs/callback-gate"
         ]
       },
       {

@@ -1,5 +1,5 @@
 /**
- * The callback client (roadmap D8): the router-facing side of the Callback
+ * The callback client (roadmap D7): the router-facing side of the Callback
  * Gate. Pending requests are observable without starting any effect; a
  * router claims a request through atomic assignment — two racing routers,
  * exactly one winner — submits a structured response validated against
@@ -320,7 +320,13 @@ export async function directRouter(
       reason: `the request could not be claimed: ${claim.kind}`,
     };
   }
-  const response = await responder(request);
+  let response: JsonObject;
+  try {
+    response = await responder(request);
+  } catch (error) {
+    client.release(request.requestId, claim.claimToken);
+    throw error;
+  }
   return client.submit(
     request.requestId,
     claim.claimToken,

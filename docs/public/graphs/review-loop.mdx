@@ -21,7 +21,7 @@ The example records two valid passes from separate providers and model
 families. It prints this JSON report:
 
 ```json
-{"decision":{"kind":"complete","output":{"iterations":1,"restarts":0,"seats":{"claude-review":"accepted","codex-review":"accepted"}}},"events":8,"planDigest":"sha256:28040fffb9e1a02a4767624d9ade3c990bc4d1f615701bbf5f0c2a7fd6310980","bounds":{"dispatches":{"min":{"kind":"known","value":4},"max":{"kind":"known","value":9}},"maxConcurrency":{"kind":"known","value":2},"maxFanOut":{"kind":"known","value":2}}}
+{"decision":{"kind":"complete","output":{"iterations":1,"restarts":0,"seats":{"claude-review":"accepted","codex-review":"accepted"}}},"events":8,"planDigest":"sha256:c97cb4a4d178c7cbf2bdbc5ee0693e9fec571233a94f3bf266a6c75bf88b36cc","bounds":{"dispatches":{"min":{"kind":"known","value":4},"max":{"kind":"known","value":11}},"maxConcurrency":{"kind":"known","value":2},"maxFanOut":{"kind":"known","value":2}}}
 ```
 
 The clean-consumer check compiles and runs the same source from the packed
@@ -66,15 +66,19 @@ const graph = compileGraph(convergence, definition);
 
 - **Node records:** The form accepts dispatch, completion, failure, pause, and
   resume records for each node attempt.
-- **Review records:** A seat pass includes its confidence, provider, and model
-  family. The form checks the declared quorum and diversity rule.
+- **Review records:** A seat pass includes its confidence, provider, model
+  family, input hashes, and workspace fingerprint. The pass counts only while
+  those bytes match the evaluator's current evidence. The form checks whether
+  a pairwise-distinct provider and model-family subset meets the quorum.
 - **Repair records:** Findings can send the form to its repair node. A later
   cycle keeps valid seat passes and reruns invalid seats.
 - **Policy records:** A producer can add seat invalidation, seat skip, or limit
   pause records. The form does not create those records.
 
-The form checks lower-case policy codes in its own failure events. The graph
-executor uses separate upper-case node failure codes.
+The form consumes the graph executor's upper-case failure codes. `ABORTED`
+pauses the run. `ENGINE_UNAVAILABLE` skips a declared skippable seat and pauses
+for a required seat. Other node failures use the declared retry cap before the
+run fails.
 
 ## Limits and output
 

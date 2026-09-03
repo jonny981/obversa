@@ -46,18 +46,6 @@ export {
   type ConvergenceStatus,
 } from './graph-types/loop.js';
 export {
-  directedState,
-  type DirectedStateDefinition,
-  type DirectedStateEvent,
-  type DirectedStateStatus,
-} from './graph-types/state.js';
-export {
-  boundedItem,
-  type BoundedItemDefinition,
-  type BoundedItemEvent,
-  type BoundedItemStatus,
-} from './graph-types/items.js';
-export {
   createCallbackGate,
   callbackRequestDigest,
   validateCallbackResponse,

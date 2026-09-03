@@ -9,18 +9,12 @@ import {
   createCallbackClient,
   directRouter,
   replayCallbackClient,
-  type CallbackClient,
 } from '../src/callback/client.js';
 import type { JsonObject } from '../src/graph/value.js';
 import { compileGraph } from '../src/graph/type.ts';
 import type { GraphCommand } from '../src/graph/commands.js';
 import { dag } from '../src/graph-types/dag.js';
 import type { DagDefinition, DagEvent } from '../src/graph-types/dag.js';
-import { directedState } from '../src/graph-types/state.js';
-import type {
-  DirectedStateDefinition,
-  DirectedStateEvent,
-} from '../src/graph-types/state.js';
 
 const GATE: CallbackGateDefinition = {
   gateId: 'release-approval',
@@ -92,7 +86,7 @@ describe('callback gate', () => {
 
     // A newer request from the same gate supersedes the older, unanswered
     // ones on its own; the answered request above keeps its evidence.
-    const pending = createCallbackGate(GATE);
+    const pending = createCallbackGate({ ...GATE, input: { revision: 'pending123' } });
     client.post(pending);
     const pendingClaim = client.claim(pending.requestId, 'router-c');
     expect(pendingClaim.ok).toBe(true);
@@ -133,79 +127,22 @@ describe('callback gate', () => {
     ]);
   });
 
-  it('drives the state machine and the DAG from the client: held on invalid, advanced on valid', async () => {
-    const machine: DirectedStateDefinition = {
-      id: 'approval-flow',
-      definitionVersion: 1,
-      data: { initial: 'draft', fallbackRoute: 'hold' },
-      nodes: [
-        { id: 'draft', data: { terminal: null } },
-        { id: 'await-approval', data: { terminal: null } },
-        { id: 'approved', data: { terminal: 'complete' } },
-      ],
-      edges: [
-        { id: 'draft-done', source: 'draft', target: 'await-approval', data: { route: 'done' } },
-        { id: 'draft-hold', source: 'draft', target: 'draft', data: { route: 'hold' } },
-        { id: 'approval-yes', source: 'await-approval', target: 'approved', data: { route: 'approved' } },
-        { id: 'approval-hold', source: 'await-approval', target: 'await-approval', data: { route: 'hold' } },
-      ],
-    };
-    const stateMachine = compileGraph(directedState, machine);
-
+  it('holds a DAG node on invalid and stale answers, then advances on a valid answer', async () => {
     const client = createCallbackClient();
     const request = createCallbackGate(GATE);
-
-    // The machine reaches its waiting state; the client posts the request.
-    const machineEvents = (state: DirectedStateEvent[]): DirectedStateEvent[] => state;
-    let state = stateMachine.initialState();
-    const feed = (events: readonly DirectedStateEvent[]): void => {
-      for (const event of events) state = stateMachine.reduce(state, event);
-    };
-    feed([
-      { type: 'node-dispatched', version: 1, payload: { nodeId: 'draft', position: 'states/draft/1' } },
-      { type: 'node-completed', version: 1, payload: { nodeId: 'draft', position: 'states/draft/1', route: 'done' } },
-      { type: 'node-dispatched', version: 1, payload: { nodeId: 'await-approval', position: 'states/await-approval/1' } },
-    ]);
     client.post(request);
-    feed([{
-      type: 'callback-requested', version: 1,
-      payload: { state: 'await-approval', digest: request.digest },
-    }]);
-    expect(stateMachine.decide(state)).toEqual([]);
-
-    // An invalid answer never reaches the machine: no submitted event, so
-    // the flow stays held.
     const claim = client.claim(request.requestId, 'router-a');
     const token = claim.ok === true ? claim.claimToken : '';
     const invalid = client.submit(request.requestId, token, 'router-a', request.digest, { approved: 'yes' });
     expect(invalid.ok).toBe(false);
     expect(client.history(request.requestId).some((event) => event.kind === 'callback-submitted')).toBe(false);
-    expect(stateMachine.decide(state)).toEqual([]);
-
-    // A stale digest is refused the same way.
     const stale = client.submit(request.requestId, token, 'router-a', 'not-the-digest', { approved: true });
     expect(stale.ok).toBe(false);
     expect(stale.ok === false && stale.kind).toBe('stale');
-    expect(stateMachine.decide(state)).toEqual([]);
-
-    // The valid answer is the only thing that advances the flow.
     expect(client.release(request.requestId, token)).toEqual({ ok: true });
     const accepted = await directRouter(client, request, 'router-b', () => ({ approved: true }));
     expect(accepted.ok).toBe(true);
-    feed([{
-      type: 'node-completed', version: 1,
-      payload: { nodeId: 'await-approval', position: 'states/await-approval/1', route: 'approved' },
-    }]);
-    feed([
-      { type: 'node-dispatched', version: 1, payload: { nodeId: 'approved', position: 'states/approved/1' } },
-      { type: 'node-completed', version: 1, payload: { nodeId: 'approved', position: 'states/approved/1', route: null } },
-    ]);
-    expect(stateMachine.decide(state)).toEqual([
-      { kind: 'complete', output: { terminal: 'approved' } },
-    ]);
 
-    // The same client events hold and advance the DAG identically: the
-    // gate is one required node whose result is the validated response.
     const build: DagDefinition = {
       id: 'release-graph',
       definitionVersion: 1,
@@ -246,71 +183,12 @@ describe('callback gate', () => {
     ]);
     const verdict = pipeline.decide(dagState) as readonly GraphCommand[];
     expect(verdict[0]!.kind).toBe('complete');
-    expect(machineEvents.length).toBeGreaterThanOrEqual(0);
-  });
-
-  it('refuses a stale answer at the gate so the machine never advances on it', async () => {
-    const client: CallbackClient = createCallbackClient();
-    const request = createCallbackGate(GATE);
-    client.post(request);
-
-    const machine: DirectedStateDefinition = {
-      id: 'approval-flow',
-      definitionVersion: 1,
-      data: { initial: 'draft', fallbackRoute: 'hold' },
-      nodes: [
-        { id: 'draft', data: { terminal: null } },
-        { id: 'await-approval', data: { terminal: null } },
-        { id: 'approved', data: { terminal: 'complete' } },
-      ],
-      edges: [
-        { id: 'draft-done', source: 'draft', target: 'await-approval', data: { route: 'done' } },
-        { id: 'draft-hold', source: 'draft', target: 'draft', data: { route: 'hold' } },
-        { id: 'approval-yes', source: 'await-approval', target: 'approved', data: { route: 'approved' } },
-        { id: 'approval-hold', source: 'await-approval', target: 'await-approval', data: { route: 'hold' } },
-      ],
-    };
-    const stateMachine = compileGraph(directedState, machine);
-    let state = stateMachine.initialState();
-    state = stateMachine.reduce(state, {
-      type: 'node-dispatched', version: 1,
-      payload: { nodeId: 'draft', position: 'states/draft/1' },
-    });
-    state = stateMachine.reduce(state, {
-      type: 'node-completed', version: 1,
-      payload: { nodeId: 'draft', position: 'states/draft/1', route: 'done' },
-    });
-    state = stateMachine.reduce(state, {
-      type: 'node-dispatched', version: 1,
-      payload: { nodeId: 'await-approval', position: 'states/await-approval/1' },
-    });
-    state = stateMachine.reduce(state, {
-      type: 'callback-requested', version: 1,
-      payload: { state: 'await-approval', digest: request.digest },
-    });
-    expect(state.pending).toEqual({ state: 'await-approval', digest: request.digest });
-    expect(stateMachine.decide(state)).toEqual([]);
-
-    // The gate is re-asked with new input: the old request is superseded
-    // and its answer is refused, so the machine's pending digest moves.
-    const newer = createCallbackGate({ ...GATE, input: { revision: 'def456' } });
-    client.post(newer);
-    client.supersede(request.requestId, newer.requestId);
-    const stale = await directRouter(client, request, 'late-router', () => ({ approved: true }));
-    expect(stale.ok).toBe(false);
-    expect(stale.ok === false && stale.kind).toBe('not-claimed');
-
-    state = stateMachine.reduce(state, {
-      type: 'callback-requested', version: 1,
-      payload: { state: 'await-approval', digest: newer.digest },
-    });
-    expect(state.pending).toEqual({ state: 'await-approval', digest: newer.digest });
   });
 
   it('replays its history into the same state, superseded included', async () => {
     const client = createCallbackClient();
     const first = createCallbackGate(GATE);
-    const second = createCallbackGate(GATE);
+    const second = createCallbackGate({ ...GATE, input: { revision: 'def456' } });
     client.post(first);
     client.post(second);
     await directRouter(client, second, 'router-a', () => ({ approved: true }));
@@ -352,5 +230,42 @@ describe('callback gate', () => {
     const answer = await directRouter(client, request, 'router-a', countingResponder);
     expect(answer.ok).toBe(true);
     expect(responderCalls).toBe(1);
+  });
+
+  it('keeps the same request id after replay and changes it when the question bytes change', async () => {
+    const client = createCallbackClient();
+    const first = createCallbackGate(GATE);
+    client.post(first);
+    await directRouter(client, first, 'router-a', () => ({ approved: true }));
+
+    const replayed = replayCallbackClient(client.history());
+    const sameQuestion = createCallbackGate(GATE);
+    expect(sameQuestion.requestId).toBe(first.requestId);
+
+    const changedQuestion = createCallbackGate({
+      ...GATE,
+      input: { revision: 'def456' },
+    });
+    expect(changedQuestion.requestId).not.toBe(first.requestId);
+    replayed.post(changedQuestion);
+    expect(replayed.listPending().map((request) => request.requestId))
+      .toEqual([changedQuestion.requestId]);
+  });
+
+  it('releases the claim when a direct responder throws', async () => {
+    const client = createCallbackClient();
+    const request = createCallbackGate(GATE);
+    client.post(request);
+
+    await expect(directRouter(client, request, 'router-a', () => {
+      throw new Error('responder failed');
+    })).rejects.toThrow('responder failed');
+
+    expect(client.history(request.requestId).map((event) => event.kind)).toEqual([
+      'callback-requested',
+      'callback-claimed',
+      'callback-released',
+    ]);
+    expect(client.claim(request.requestId, 'router-b').ok).toBe(true);
   });
 });

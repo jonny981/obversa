@@ -29,6 +29,11 @@ const definition: ConvergenceDefinition = {
   edges: [],
 };
 
+const reviewEvidence = {
+  inputHashes: { draft: 'sha256:release-draft' },
+  workspaceFingerprint: 'sha256:release-workspace',
+} as const;
+
 const events: readonly ConvergenceEvent[] = [
   {
     type: 'node-dispatched',
@@ -55,7 +60,7 @@ const events: readonly ConvergenceEvent[] = [
     payload: {
       nodeId: 'done-check',
       position: 'convergence/1/done-check/1',
-      result: { gateMet: true },
+      result: { gateMet: true, ...reviewEvidence },
     },
   },
   {
@@ -79,6 +84,7 @@ const events: readonly ConvergenceEvent[] = [
         confidence: 0.91,
         provider: 'anthropic',
         modelFamily: 'claude',
+        ...reviewEvidence,
         findings: [],
       },
     },
@@ -94,6 +100,7 @@ const events: readonly ConvergenceEvent[] = [
         confidence: 0.9,
         provider: 'openai',
         modelFamily: 'gpt',
+        ...reviewEvidence,
         findings: [],
       },
     },
