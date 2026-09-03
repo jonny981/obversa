@@ -47,6 +47,76 @@ const expectedPipelineReport = {
   },
 };
 
+const expectedReviewLoopReport = {
+  decision: {
+    kind: 'complete',
+    output: {
+      iterations: 1,
+      restarts: 0,
+      seats: {
+        'claude-review': 'accepted',
+        'codex-review': 'accepted',
+      },
+    },
+  },
+  events: 8,
+  planDigest: 'sha256:28040fffb9e1a02a4767624d9ade3c990bc4d1f615701bbf5f0c2a7fd6310980',
+  bounds: {
+    dispatches: {
+      min: { kind: 'known', value: 4 },
+      max: { kind: 'known', value: 9 },
+    },
+    maxConcurrency: { kind: 'known', value: 2 },
+    maxFanOut: { kind: 'known', value: 2 },
+  },
+};
+
+const expectedStateMachineReport = {
+  callback: 'accepted',
+  callbackEvents: [
+    'callback-requested',
+    'callback-claimed',
+    'callback-submitted',
+  ],
+  decision: {
+    kind: 'complete',
+    output: { terminal: 'approved' },
+  },
+  events: 7,
+  planDigest: 'sha256:6898d3a3bfa4e3fa58fcbade326e7726b631f193db9035b78c539addb77dcccb',
+  bounds: {
+    dispatches: {
+      min: { kind: 'known', value: 1 },
+      max: {
+        kind: 'unknown',
+        reason: 'a state machine may cycle without a declared bound',
+      },
+    },
+    maxConcurrency: { kind: 'known', value: 1 },
+    maxFanOut: { kind: 'known', value: 1 },
+  },
+};
+
+const expectedWorklistReport = {
+  decision: {
+    kind: 'complete',
+    output: {
+      items: { 'doc-1': 'done', 'doc-2': 'done' },
+      aggregate: { passed: 2 },
+    },
+  },
+  events: 11,
+  planDigest: 'sha256:0eda540c17f5161115076aad8952b0e2e81f421688f35d6c6f8904c158e08c81',
+  bounds: {
+    dispatches: {
+      min: { kind: 'known', value: 3 },
+      max: { kind: 'known', value: 5 },
+    },
+    maxConcurrency: { kind: 'known', value: 2 },
+    maxFanOut: { kind: 'known', value: 2 },
+  },
+};
+
 const expectedTurnTakingReport = {
   conformance: true,
   cases: 6,
@@ -393,6 +463,9 @@ const tsconfig = {
     'offline-review.line.ts',
     'custom-graph.ts',
     'pipeline.ts',
+    'review-loop.ts',
+    'state-machine.ts',
+    'worklist.ts',
     'durable-storage.ts',
     'safe-node-attempt.ts',
     'turn-taking.ts',
@@ -407,6 +480,9 @@ async function main() {
   const graphExamplePath = join(root, 'examples', 'packages', 'custom-graph.ts');
   const graphExampleSource = await readFile(graphExamplePath, 'utf8');
   const pipelineExamplePath = join(root, 'examples', 'packages', 'pipeline.ts');
+  const reviewLoopExamplePath = join(root, 'examples', 'packages', 'review-loop.ts');
+  const stateMachineExamplePath = join(root, 'examples', 'packages', 'state-machine.ts');
+  const worklistExamplePath = join(root, 'examples', 'packages', 'worklist.ts');
   const storageExamplePath = join(root, 'examples', 'packages', 'durable-storage.ts');
   const storageExampleSource = await readFile(storageExamplePath, 'utf8');
   const attemptExamplePath = join(root, 'examples', 'packages', 'safe-node-attempt.ts');
@@ -477,6 +553,9 @@ async function main() {
     );
     await copyFile(graphExamplePath, join(consumerDirectory, 'custom-graph.ts'));
     await copyFile(pipelineExamplePath, join(consumerDirectory, 'pipeline.ts'));
+    await copyFile(reviewLoopExamplePath, join(consumerDirectory, 'review-loop.ts'));
+    await copyFile(stateMachineExamplePath, join(consumerDirectory, 'state-machine.ts'));
+    await copyFile(worklistExamplePath, join(consumerDirectory, 'worklist.ts'));
     await copyFile(storageExamplePath, join(consumerDirectory, 'durable-storage.ts'));
     await copyFile(attemptExamplePath, join(consumerDirectory, 'safe-node-attempt.ts'));
     await copyFile(turnTakingExamplePath, join(consumerDirectory, 'turn-taking.ts'));
@@ -524,6 +603,24 @@ async function main() {
     const directPipeline = JSON.parse(
       run('pnpm', ['exec', 'tsx', 'pipeline.ts'], { cwd: consumerDirectory }),
     );
+    const compiledReviewLoop = JSON.parse(
+      run(process.execPath, ['dist/review-loop.js'], { cwd: consumerDirectory }),
+    );
+    const directReviewLoop = JSON.parse(
+      run('pnpm', ['exec', 'tsx', 'review-loop.ts'], { cwd: consumerDirectory }),
+    );
+    const compiledStateMachine = JSON.parse(
+      run(process.execPath, ['dist/state-machine.js'], { cwd: consumerDirectory }),
+    );
+    const directStateMachine = JSON.parse(
+      run('pnpm', ['exec', 'tsx', 'state-machine.ts'], { cwd: consumerDirectory }),
+    );
+    const compiledWorklist = JSON.parse(
+      run(process.execPath, ['dist/worklist.js'], { cwd: consumerDirectory }),
+    );
+    const directWorklist = JSON.parse(
+      run('pnpm', ['exec', 'tsx', 'worklist.ts'], { cwd: consumerDirectory }),
+    );
     const compiledStorage = JSON.parse(
       run(process.execPath, ['dist/durable-storage.js'], { cwd: consumerDirectory }),
     );
@@ -548,6 +645,12 @@ async function main() {
     assert.deepEqual(directGraph, expectedGraphReport);
     assert.deepEqual(compiledPipeline, expectedPipelineReport);
     assert.deepEqual(directPipeline, expectedPipelineReport);
+    assert.deepEqual(compiledReviewLoop, expectedReviewLoopReport);
+    assert.deepEqual(directReviewLoop, expectedReviewLoopReport);
+    assert.deepEqual(compiledStateMachine, expectedStateMachineReport);
+    assert.deepEqual(directStateMachine, expectedStateMachineReport);
+    assert.deepEqual(compiledWorklist, expectedWorklistReport);
+    assert.deepEqual(directWorklist, expectedWorklistReport);
     assert.deepEqual(compiledStorage, expectedStorageReport);
     assert.deepEqual(directStorage, expectedStorageReport);
     assert.deepEqual(checkedAttemptReport(compiledAttempt), expectedAttemptReport);
@@ -580,7 +683,7 @@ async function main() {
     if (refs.length !== 1) throw new Error(`Git memory created ${refs.length} private refs instead of one`);
 
     console.log(
-      'Clean offline consumer passed with TypeScript 7 and 6, the first production line, the outside graph, the pipeline executor example, the turn-taking executor example, durable storage, safe node attempts, 17 memory cases, and both memory adapters.',
+      'Clean offline consumer passed with TypeScript 7 and 6, the first production line, the outside graph, the pipeline executor example, the review loop, the state machine, the worklist, the turn-taking executor example, durable storage, safe node attempts, 17 memory cases, and both memory adapters.',
     );
   } finally {
     await rm(directory, { recursive: true, force: true });

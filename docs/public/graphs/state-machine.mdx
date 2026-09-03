@@ -1,0 +1,82 @@
+---
+title: "State machine"
+description: "Move through named states with explicit routes and terminals."
+---
+
+`directedState` is a pure graph form. A completion record names a route, and
+the matching edge selects the next state.
+
+An unknown route uses the declared fallback route. The graph can contain
+cycles and complete, fail, or pause terminal states.
+
+## Run the example
+
+From an Obversa checkout, run:
+
+```bash
+pnpm example:state-machine
+```
+
+The example uses the in-process callback client for one approval. Example code
+maps the accepted response to the `approved` completion route.
+
+```json
+{"callback":"accepted","callbackEvents":["callback-requested","callback-claimed","callback-submitted"],"decision":{"kind":"complete","output":{"terminal":"approved"}},"events":7,"planDigest":"sha256:6898d3a3bfa4e3fa58fcbade326e7726b631f193db9035b78c539addb77dcccb","bounds":{"dispatches":{"min":{"kind":"known","value":1},"max":{"kind":"unknown","reason":"a state machine may cycle without a declared bound"}},"maxConcurrency":{"kind":"known","value":1},"maxFanOut":{"kind":"known","value":1}}}
+```
+
+The clean-consumer check compiles and runs the same source from the packed
+package with TypeScript 6 and TypeScript 7. Its source is
+`examples/packages/state-machine.ts`.
+
+## Define a state machine
+
+```ts
+import {
+  compileGraph,
+  directedState,
+  type DirectedStateDefinition,
+} from '@obversa/runtime';
+
+const definition: DirectedStateDefinition = {
+  id: 'release-approval',
+  definitionVersion: 1,
+  data: { initial: 'draft', fallbackRoute: 'hold' },
+  nodes: [
+    { id: 'draft', data: { terminal: null } },
+    { id: 'await-approval', data: { terminal: null } },
+    { id: 'approved', data: { terminal: 'complete' } },
+  ],
+  edges: [
+    { id: 'draft-ready', source: 'draft', target: 'await-approval', data: { route: 'ready' } },
+    { id: 'draft-hold', source: 'draft', target: 'draft', data: { route: 'hold' } },
+    { id: 'approval-yes', source: 'await-approval', target: 'approved', data: { route: 'approved' } },
+    { id: 'approval-hold', source: 'await-approval', target: 'await-approval', data: { route: 'hold' } },
+  ],
+};
+
+const graph = compileGraph(directedState, definition);
+```
+
+## Recorded behaviour
+
+- **State attempts:** Each dispatch position includes the state name and its
+  visit count.
+- **Routes:** A matching route takes its edge. Any other route takes the
+  required fallback edge.
+- **Callbacks:** A callback request holds the active state until example code
+  supplies its completion record.
+- **Terminals:** A completed terminal returns complete, fail, or pause from its
+  declared terminal kind.
+
+The callback client keeps its event history in one process. An external
+adapter must store that history when a run needs durable callback state.
+
+The graph executor records a node result, not a directed-state route. A host
+must record `DirectedStateEvent` values until that mapping exists.
+
+## Limits and output
+
+The form runs one state at a time. Its maximum dispatch count is unknown
+because a route can return to an earlier state.
+
+The complete output names the terminal state.

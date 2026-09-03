@@ -38,7 +38,10 @@
           "graphs/contract",
           "graphs/pipeline",
           "graphs/plan-admission",
-          "graphs/executor"
+          "graphs/executor",
+          "graphs/review-loop",
+          "graphs/state-machine",
+          "graphs/worklist"
         ]
       },
       {

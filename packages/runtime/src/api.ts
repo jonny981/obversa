@@ -40,6 +40,42 @@ export {
   type DagDefinition,
 } from './graph-types/dag.js';
 export {
+  convergence,
+  type ConvergenceDefinition,
+  type ConvergenceEvent,
+  type ConvergenceStatus,
+} from './graph-types/loop.js';
+export {
+  directedState,
+  type DirectedStateDefinition,
+  type DirectedStateEvent,
+  type DirectedStateStatus,
+} from './graph-types/state.js';
+export {
+  boundedItem,
+  type BoundedItemDefinition,
+  type BoundedItemEvent,
+  type BoundedItemStatus,
+} from './graph-types/items.js';
+export {
+  createCallbackGate,
+  callbackRequestDigest,
+  validateCallbackResponse,
+  type CallbackGateDefinition,
+  type CallbackRequest,
+} from './callback/gate.js';
+export {
+  createCallbackClient,
+  replayCallbackClient,
+  directRouter,
+  type CallbackClient,
+  type CallbackEvent,
+  type ClaimResult,
+  type SubmitResult,
+  type ReleaseResult,
+  type Responder,
+} from './callback/client.js';
+export {
   createGraphExecutor,
   GraphExecutionError,
   type GraphExecutionErrorCode,
