@@ -33,6 +33,12 @@
         ]
       },
       {
+        "group": "Workspace",
+        "pages": [
+          "workspace/contract"
+        ]
+      },
+      {
         "group": "Graphs",
         "pages": [
           "graphs/contract",
@@ -41,7 +47,6 @@
           "graphs/executor",
           "graphs/review-loop",
           "graphs/callback-gate"
-          ,"graphs/workspace"
         ]
       },
       {
