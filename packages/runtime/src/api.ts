@@ -47,6 +47,8 @@ export {
 } from './graph-types/loop.js';
 export {
   createCallbackGate,
+  callbackRequestDigest,
+  validateCallbackResponse,
   type CallbackGateDefinition,
   type CallbackRequest,
 } from './callback/gate.js';
@@ -58,7 +60,6 @@ export {
   type CallbackEvent,
   type ClaimResult,
   type SubmitResult,
-  type ReleaseResult,
   type Responder,
 } from './callback/client.js';
 export {
@@ -99,6 +100,29 @@ export {
   StorageError,
   type StorageErrorCode,
 } from './storage/error.js';
+export {
+  createGitWorktreeProvider,
+} from './workspace/git-provider.js';
+export type {
+  WorkspaceProvider,
+  WorkspaceAnchor,
+  WorkspaceHeadDrift,
+  WorkspaceFilesDrift,
+  WorkspaceDrift,
+  VerifyResult,
+  ForkOk,
+  ForkChangedAnchor,
+  ForkExists,
+  ForkIncomplete,
+  ForkUnleased,
+  ForkResult,
+  LeaseClaimed,
+  LeaseHeld,
+  LeaseIncomplete,
+  AcquireResult,
+  ReleaseResult,
+  RecoverResult,
+} from './workspace/provider.js';
 export {
   validateNewDomainEvent,
   validateDomainEventEnvelope,
