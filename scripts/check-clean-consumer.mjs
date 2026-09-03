@@ -441,6 +441,7 @@ const tsconfig = {
     'durable-storage.ts',
     'safe-node-attempt.ts',
     'turn-taking.ts',
+    'workspace.ts',
   ],
 };
 
@@ -460,6 +461,7 @@ async function main() {
   const attemptExamplePath = join(root, 'examples', 'packages', 'safe-node-attempt.ts');
   const attemptExampleSource = await readFile(attemptExamplePath, 'utf8');
   const turnTakingExamplePath = join(root, 'examples', 'packages', 'turn-taking.ts');
+  const workspaceExamplePath = join(root, 'examples', 'packages', 'workspace.ts');
   const turnTakingExampleSource = await readFile(turnTakingExamplePath, 'utf8');
   const graphDocument = await readFile(
     join(root, 'docs', 'public', 'graphs', 'contract.mdx'),
@@ -537,6 +539,7 @@ async function main() {
     await copyFile(storageExamplePath, join(consumerDirectory, 'durable-storage.ts'));
     await copyFile(attemptExamplePath, join(consumerDirectory, 'safe-node-attempt.ts'));
     await copyFile(turnTakingExamplePath, join(consumerDirectory, 'turn-taking.ts'));
+    await copyFile(workspaceExamplePath, join(consumerDirectory, 'workspace.ts'));
 
     run('pnpm', ['install', '--offline', '--ignore-scripts'], {
       cwd: consumerDirectory,
@@ -611,8 +614,16 @@ async function main() {
     const directTurnTaking = JSON.parse(
       run('pnpm', ['exec', 'tsx', 'turn-taking.ts'], { cwd: consumerDirectory }),
     );
+    const compiledWorkspace = JSON.parse(run(process.execPath, ['dist/workspace.js'], { cwd: consumerDirectory }));
+    const directWorkspace = JSON.parse(run('pnpm', ['exec', 'tsx', 'workspace.ts'], { cwd: consumerDirectory }));
     assert.deepEqual(compiledTurnTaking, expectedTurnTakingReport);
     assert.deepEqual(directTurnTaking, expectedTurnTakingReport);
+    for (const report of [compiledWorkspace, directWorkspace]) {
+      assert.deepEqual(Object.keys(report).sort(), ['anchor', 'branch', 'revision']);
+      assert.match(report.revision, /^[0-9a-f]{40}$/);
+      assert.match(report.anchor, /^[0-9a-f]{64}$/);
+      assert.equal(report.branch, 'refs/heads/obversa/example-child');
+    }
     assert.deepEqual(compiledGraph, expectedGraphReport);
     assert.deepEqual(directGraph, expectedGraphReport);
     assert.deepEqual(compiledPipeline, expectedPipelineReport);
