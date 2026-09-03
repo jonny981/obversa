@@ -9,7 +9,8 @@ name: Release
 #   2. Set the per-package versions in each package.json.
 #   3. Tag the repository: git tag v1.0.0 && git push origin v1.0.0
 #   4. GitHub asks Jonny to approve the release environment.
-#   5. The workflow builds, packs, publishes all 13 packages with
+#   5. The workflow runs pnpm verify:d2, pnpm check:tarballs, and the
+#      changelog gate, then packs and publishes all 13 packages with
 #      provenance, and creates the GitHub Release from the changelog.
 #
 # The guard registry in each package.json stays for local proofs: it
@@ -40,17 +41,8 @@ jobs:
           node-version: 22
       - run: corepack enable
       - run: pnpm install --frozen-lockfile
-      - run: pnpm typecheck
-      - run: pnpm typecheck:ts6
-      - run: pnpm build
-      - run: pnpm test
-      - run: pnpm check:boundaries
-      - run: pnpm check:graph-purity
+      - run: pnpm verify:d2
       - run: pnpm check:tarballs
-      - run: pnpm check:packages
-      - run: pnpm check:publish -- --audit
-      - run: pnpm check:consumer
-      - run: pnpm docs:validate
       - name: Changelog gate
         run: node scripts/changelog-gate.mjs
 

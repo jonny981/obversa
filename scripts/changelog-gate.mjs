@@ -1,8 +1,10 @@
 #!/usr/bin/env node
 /**
  * The changelog gate: refuse to publish a version the changelog does not
- * describe. Runs in the Release workflow (fast-fail, before install) and in
- * `prepublishOnly` (so a hand publish is held to the same bar).
+ * describe. The Release workflow runs this after pnpm verify:d2 and
+ * pnpm check:tarballs. This script is not a prepublishOnly hook. That hook
+ * is the publish allowlist, and the allowlist requires an exact command.
+ * A tarball publish also skips package hooks, so the workflow is the seat.
  *
  * Checks, all against the version `package.json` carries:
  *   1. CHANGELOG.md has a `## [<version>]` heading;

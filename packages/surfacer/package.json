@@ -35,10 +35,10 @@
   ],
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/jonnyneill/obversa.git"
+    "url": "git+https://github.com/jonny981/obversa.git"
   },
   "homepage": "https://docs.obversa.ai",
   "bugs": {
-    "url": "https://github.com/jonnyneill/obversa/issues"
+    "url": "https://github.com/jonny981/obversa/issues"
   }
 }

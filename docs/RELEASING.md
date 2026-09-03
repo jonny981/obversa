@@ -57,9 +57,9 @@ in its own `package.json`.
 
 6. **The workflow runs.** The Release workflow:
 
-   - Verifies the full chain: both typechecks, build, tests, boundaries,
-     graph purity, tarballs, package manifests, publish audit, clean
-     consumer, and the documentation build.
+   - Runs `pnpm verify:d2` (agent-instructions, commit-policy, examples,
+     and the rest of the local proof chain).
+   - Runs `pnpm check:tarballs` (packed file list; not part of verify:d2).
    - Runs the changelog gate.
    - Packs all 13 allowlisted packages.
    - Publishes each package to npm with provenance.
