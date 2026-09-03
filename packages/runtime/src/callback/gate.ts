@@ -83,6 +83,19 @@ export function callbackRequestDigest(
   return digestOf({ ...definition, presentation: {} } as CallbackGateDefinition);
 }
 
+function hasJsonType(value: unknown, type: unknown): boolean {
+  switch (type) {
+    case 'array': return Array.isArray(value);
+    case 'object': return typeof value === 'object' && value !== null && !Array.isArray(value);
+    case 'null': return value === null;
+    case 'integer': return typeof value === 'number' && Number.isInteger(value);
+    case 'number': return typeof value === 'number';
+    case 'string': return typeof value === 'string';
+    case 'boolean': return typeof value === 'boolean';
+    default: return false;
+  }
+}
+
 /** Validate a response object against a response schema's plain shape. */
 export function validateCallbackResponse(
   response: JsonValue,
@@ -103,7 +116,7 @@ export function validateCallbackResponse(
       return { ok: false, reason: 'the response schema required list must be an array' };
     }
     for (const key of required) {
-      if (typeof key !== 'string' || !(key in record)) {
+      if (typeof key !== 'string' || !Object.hasOwn(record, key)) {
         return { ok: false, reason: `the response is missing the required field "${String(key)}"` };
       }
     }
@@ -118,8 +131,8 @@ export function validateCallbackResponse(
       }
       const expected = (declared as { type?: unknown }).type;
       if (expected === undefined) continue;
-      const actual = Array.isArray(field) ? 'array' : typeof field;
-      if (actual !== expected) {
+      const allowed = Array.isArray(expected) ? expected : [expected];
+      if (!allowed.some((type) => hasJsonType(field, type))) {
         return { ok: false, reason: `the response field "${key}" must be ${String(expected)}` };
       }
     }

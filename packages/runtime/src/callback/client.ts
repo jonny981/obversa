@@ -327,11 +327,15 @@ export async function directRouter(
     client.release(request.requestId, claim.claimToken);
     throw error;
   }
-  return client.submit(
+  const submitted = client.submit(
     request.requestId,
     claim.claimToken,
     routerId,
     request.digest,
     response,
   );
+  if (!submitted.ok && submitted.kind === 'invalid') {
+    client.release(request.requestId, claim.claimToken);
+  }
+  return submitted;
 }

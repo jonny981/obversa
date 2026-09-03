@@ -3,6 +3,7 @@ import { describe, expect, it } from 'vitest';
 import {
   createCallbackGate,
   callbackRequestDigest,
+  validateCallbackResponse,
   type CallbackGateDefinition,
 } from '../src/callback/gate.js';
 import {
@@ -29,6 +30,29 @@ const GATE: CallbackGateDefinition = {
 };
 
 describe('callback gate', () => {
+  it('requires top-level fields to be the response own properties', () => {
+    expect(validateCallbackResponse({}, { required: ['constructor'] })).toEqual({
+      ok: false,
+      reason: 'the response is missing the required field "constructor"',
+    });
+  });
+
+  it('accepts JSON Schema integer, null, and union type spellings', () => {
+    const schema = {
+      properties: {
+        count: { type: 'integer' },
+        note: { type: ['string', 'null'] },
+      },
+      required: ['count', 'note'],
+    };
+
+    expect(validateCallbackResponse({ count: 2, note: null }, schema)).toEqual({ ok: true });
+    expect(validateCallbackResponse({ count: 2.5, note: null }, schema)).toEqual({
+      ok: false,
+      reason: 'the response field "count" must be integer',
+    });
+  });
+
   it('digests what is asked, not how it is displayed', () => {
     const base = callbackRequestDigest(GATE);
     expect(callbackRequestDigest(GATE)).toBe(base);
@@ -139,10 +163,6 @@ describe('callback gate', () => {
     const stale = client.submit(request.requestId, token, 'router-a', 'not-the-digest', { approved: true });
     expect(stale.ok).toBe(false);
     expect(stale.ok === false && stale.kind).toBe('stale');
-    expect(client.release(request.requestId, token)).toEqual({ ok: true });
-    const accepted = await directRouter(client, request, 'router-b', () => ({ approved: true }));
-    expect(accepted.ok).toBe(true);
-
     const build: DagDefinition = {
       id: 'release-graph',
       definitionVersion: 1,
@@ -158,24 +178,37 @@ describe('callback gate', () => {
     const dagFeed = (events: readonly DagEvent[]): void => {
       for (const event of events) dagState = pipeline.reduce(dagState, event);
     };
+    const applySubmittedAnswer = (): void => {
+      const submitted = client.history(request.requestId)
+        .find((event) => event.kind === 'callback-submitted');
+      if (submitted?.kind !== 'callback-submitted') return;
+      dagFeed([{
+        type: 'node-completed', version: 1,
+        payload: {
+          nodeId: 'ask-approval',
+          position: 'dag/ask-approval/1',
+          result: submitted.response,
+        },
+      }]);
+    };
     dagFeed([
       { type: 'node-dispatched', version: 1, payload: { nodeId: 'ask-approval', position: 'dag/ask-approval/1' } },
     ]);
-    // While the gate waits and while answers are invalid or stale, the
-    // DAG holds: no completion for the gate node.
+    applySubmittedAnswer();
     expect(pipeline.decide(dagState)).toEqual([]);
-    const submitted = client.history(request.requestId)
-      .find((event) => event.kind === 'callback-submitted');
-    expect(submitted).toBeDefined();
-    dagFeed([{
-      type: 'node-completed', version: 1,
-      payload: {
-        nodeId: 'ask-approval',
-        position: 'dag/ask-approval/1',
-        result: submitted !== undefined && submitted.kind === 'callback-submitted'
-          ? submitted.response
-          : {},
+
+    expect(client.release(request.requestId, token)).toEqual({ ok: true });
+    const accepted = await directRouter(client, request, 'router-b', () => ({ approved: true }));
+    expect(accepted.ok).toBe(true);
+    applySubmittedAnswer();
+    expect(pipeline.decide(dagState)).toEqual([{
+      kind: 'dispatch',
+      nodeId: 'ship',
+      input: {
+        positionSummary: 'node ship, attempt 1',
+        results: { 'ask-approval': { approved: true } },
       },
+      position: 'dag/ship/1',
     }]);
     dagFeed([
       { type: 'node-dispatched', version: 1, payload: { nodeId: 'ship', position: 'dag/ship/1' } },
@@ -264,6 +297,23 @@ describe('callback gate', () => {
     expect(client.history(request.requestId).map((event) => event.kind)).toEqual([
       'callback-requested',
       'callback-claimed',
+      'callback-released',
+    ]);
+    expect(client.claim(request.requestId, 'router-b').ok).toBe(true);
+  });
+
+  it('releases the claim when a direct responder returns an invalid answer', async () => {
+    const client = createCallbackClient();
+    const request = createCallbackGate(GATE);
+    client.post(request);
+
+    const result = await directRouter(client, request, 'router-a', () => ({ approved: 'yes' }));
+
+    expect(result).toMatchObject({ ok: false, kind: 'invalid' });
+    expect(client.history(request.requestId).map((event) => event.kind)).toEqual([
+      'callback-requested',
+      'callback-claimed',
+      'callback-rejected',
       'callback-released',
     ]);
     expect(client.claim(request.requestId, 'router-b').ok).toBe(true);

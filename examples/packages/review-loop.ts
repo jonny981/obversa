@@ -7,6 +7,21 @@ import {
   type PlanResolution,
 } from '@obversa/runtime';
 
+const claudeLane = {
+  id: 'claude-review',
+  requested: {
+    adapter: 'mock', provider: 'anthropic', modelFamily: 'claude', model: 'mock-claude', tools: [],
+  },
+  knownSubstitutions: [],
+} as const;
+const codexLane = {
+  id: 'codex-review',
+  requested: {
+    adapter: 'mock', provider: 'openai', modelFamily: 'gpt', model: 'mock-gpt', tools: [],
+  },
+  knownSubstitutions: [],
+} as const;
+
 const definition: ConvergenceDefinition = {
   id: 'release-review',
   definitionVersion: 1,
@@ -22,8 +37,14 @@ const definition: ConvergenceDefinition = {
   nodes: [
     { id: 'draft', data: { role: 'generator' } },
     { id: 'done-check', data: { role: 'evaluator' } },
-    { id: 'claude-review', data: { role: 'seat' } },
-    { id: 'codex-review', data: { role: 'seat' } },
+    {
+      id: 'claude-review',
+      data: { role: 'seat', lane: claudeLane, evidencePaths: ['draft'] },
+    },
+    {
+      id: 'codex-review',
+      data: { role: 'seat', lane: codexLane, evidencePaths: ['draft'] },
+    },
     { id: 'repair', data: { role: 'repair' } },
   ],
   edges: [],
@@ -82,8 +103,6 @@ const events: readonly ConvergenceEvent[] = [
       result: {
         verdict: 'pass',
         confidence: 0.91,
-        provider: 'anthropic',
-        modelFamily: 'claude',
         ...reviewEvidence,
         findings: [],
       },
@@ -98,8 +117,6 @@ const events: readonly ConvergenceEvent[] = [
       result: {
         verdict: 'pass',
         confidence: 0.9,
-        provider: 'openai',
-        modelFamily: 'gpt',
         ...reviewEvidence,
         findings: [],
       },
@@ -115,7 +132,10 @@ const identity = {
 const resolution: PlanResolution = {
   package: identity,
   admission: { package: identity, permissions: [] },
-  executionLanes: [],
+  executionLanes: [
+    { id: claudeLane.id, effective: claudeLane.requested, fallbacks: [] },
+    { id: codexLane.id, effective: codexLane.requested, fallbacks: [] },
+  ],
 };
 const graph = compileGraph(convergence, definition);
 const state = events.reduce(graph.reduce, graph.initialState());

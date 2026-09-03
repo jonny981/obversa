@@ -57,10 +57,11 @@ const expectedReviewLoopReport = {
         'claude-review': 'accepted',
         'codex-review': 'accepted',
       },
+      findings: [],
     },
   },
   events: 8,
-  planDigest: 'sha256:c97cb4a4d178c7cbf2bdbc5ee0693e9fec571233a94f3bf266a6c75bf88b36cc',
+  planDigest: 'sha256:8791906f0b35cd3fed03aa343b2002d11e0f5af88bf55e0058310b8c2d7d7812',
   bounds: {
     dispatches: {
       min: { kind: 'known', value: 4 },

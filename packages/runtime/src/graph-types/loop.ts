@@ -13,14 +13,13 @@
  * with a typed exhaustion code; `ABORTED` → `pause` with a reason; and
  * `ENGINE_UNAVAILABLE` skips a declared skippable seat or pauses a required
  * seat. Other executor failures are not review verdicts: a seat that fails
- * consumes no repair attempt and reruns within the declared retry cap. A
- * recorded `limit-paused` event pauses rate- or credit-limited work until a
- * later dispatch succeeds. A skipped seat never weakens the remaining
- * quorum and provider-diversity rules.
+ * consumes no repair attempt, reruns within the declared retry cap, then
+ * pauses as unresolved. A skipped seat never weakens the remaining quorum
+ * and provider-diversity rules.
  *
  * This is the pure form only: definition validation, state reduction,
  * decisions, bounds, and the plan description. Panel policy helpers,
- * watched-path invalidation sources, and review acceptance records are
+ * review acceptance records, and the source of evaluator fingerprints are
  * the runtime owner's.
  *
  * Event vocabulary (all JSON, recorded into the durable `graph:`
@@ -28,15 +27,13 @@
  * - `node-dispatched` / `node-completed` / `node-failed` /
  *   `node-paused` / `node-resumed` — the standard node events; a seat's
  *   completed result carries the verdict record: verdict (`pass` |
- *   `findings` | `low-confidence`), confidence, the effective provider
- *   and model family, the reviewed input hashes, the workspace fingerprint,
- *   and any findings; the evaluator's completed result carries `gateMet`
- *   with the same evidence identity; the generator's and repair's results
- *   carry the work summaries.
+ *   `findings` | `low-confidence`), confidence, the reviewed input hashes,
+ *   the workspace fingerprint, and any findings; provider and model-family
+ *   diversity comes from the trusted lane declaration. The evaluator's
+ *   completed result carries `gateMet` with the same evidence identity; the
+ *   generator's and repair's results carry the work summaries.
  * - `seat-invalidated` — a seat's recorded verdict is no longer current
  *   (watched paths or fingerprints changed): the seat reruns.
- * - `seat-skip` — a skippable seat is recorded skipped for exhausted
- *   credit.
  *
  * A dispatch, completion, or failure counts only for the node's attempt
  * currently in flight at that exact position; a stale event from an
@@ -45,7 +42,7 @@
  * `review/${round}/${seat}` for seats, so a retry or a rerun always takes
  * a fresh position. Retry is graph policy, declared as a per-node cap:
  * decide offers a fresh dispatch for a failed node while the cap allows,
- * and the run fails the node only once its cap is exhausted.
+ * then a failed body node ends the run while an unresolved seat pauses it.
  *
  * Each review decision dispatches every seat that is pending or invalid
  * and fits the declared seat concurrency, in declaration order. Seats
@@ -81,6 +78,8 @@ export type ConvergenceNodeData = JsonObject & {
   readonly role: 'generator' | 'evaluator' | 'repair' | 'seat';
   /** Engine lane for this node; omit it for a data-only node. */
   readonly lane?: ConvergenceExecutionLaneData;
+  /** Input-hash keys reviewed by this seat; omit to review every key. */
+  readonly evidencePaths?: readonly string[];
 };
 
 export interface ConvergenceEdgeData extends JsonObject {}
@@ -104,7 +103,7 @@ export interface ConvergenceData extends JsonObject {
   readonly skippableSeats: readonly string[];
   /** Review seats dispatchable at once. */
   readonly seatConcurrency: number;
-  /** Retries offered per failed node before the run fails it. */
+  /** Retries offered per failed node before a body failure or unresolved-seat pause. */
   readonly retryCapPerNode: number;
 }
 
@@ -151,11 +150,6 @@ export interface SeatInvalidatedPayload extends JsonObject {
   readonly reason: string;
 }
 
-export interface SeatSkipPayload extends JsonObject {
-  readonly seatId: NodeId;
-  readonly reason: string;
-}
-
 export type ConvergenceEvent =
   | GraphEvent<'node-dispatched', NodeDispatchedPayload>
   | GraphEvent<'node-completed', NodeCompletedPayload>
@@ -163,7 +157,6 @@ export type ConvergenceEvent =
   | GraphEvent<'node-paused', NodePausedPayload>
   | GraphEvent<'node-resumed', NodeResumedPayload>
   | GraphEvent<'seat-invalidated', SeatInvalidatedPayload>
-  | GraphEvent<'seat-skip', SeatSkipPayload>
   | GraphEvent<'limit-paused', LimitPausedPayload>;
 
 export type LoopNodeStatus =
@@ -256,6 +249,20 @@ function validateConvergence(definition: ConvergenceDefinition): Readonly<{
       } else {
         executionLanes.set(lane.id, lane);
       }
+    }
+    const evidencePaths = node.data.evidencePaths;
+    if (evidencePaths !== undefined && (
+      node.data.role !== 'seat'
+      || !Array.isArray(evidencePaths)
+      || evidencePaths.length === 0
+      || evidencePaths.some((path) => typeof path !== 'string' || path.trim().length === 0)
+      || new Set(evidencePaths).size !== evidencePaths.length
+    )) {
+      issues.push(issue(
+        'INVALID_EVIDENCE_PATHS',
+        `/nodes/${node.id}/data/evidencePaths`,
+        'evidencePaths must be a non-empty list of unique input-hash keys on a review seat.',
+      ));
     }
   }
 
@@ -355,6 +362,12 @@ export const convergence: GraphType<
     const evaluator = definition.nodes.find((node) => node.data.role === 'evaluator')!.id;
     const repair = definition.nodes.find((node) => node.data.role === 'repair')!.id;
     const skippable = new Set(definition.data.skippableSeats);
+    const seatTargets = new Map(definition.nodes
+      .filter((node) => node.data.role === 'seat')
+      .map((node) => [node.id, node.data.lane?.requested] as const));
+    const seatEvidencePaths = new Map<NodeId, readonly string[] | null>(definition.nodes
+      .filter((node) => node.data.role === 'seat')
+      .map((node) => [node.id, node.data.evidencePaths ?? null] as const));
 
     const initialNodes = (): Record<NodeId, LoopNodeState> =>
       Object.fromEntries(definition.nodes.map((node) => [
@@ -404,12 +417,29 @@ export const convergence: GraphType<
       right: ConvergenceReviewEvidence | null,
     ): boolean => left !== null && right !== null && isDeepStrictEqual(left, right);
 
+    const reviewEvidenceForSeat = (
+      seatId: NodeId,
+      evidence: ConvergenceReviewEvidence | null,
+    ): ConvergenceReviewEvidence | null => {
+      if (evidence === null) return null;
+      const paths = seatEvidencePaths.get(seatId) ?? null;
+      if (paths === null) return evidence;
+      if (paths.some((path) => typeof evidence.inputHashes[path] !== 'string')) return null;
+      return {
+        inputHashes: Object.fromEntries(paths.map((path) => [path, evidence.inputHashes[path]!])),
+        workspaceFingerprint: evidence.workspaceFingerprint,
+      };
+    };
+
     const readVerdict = (
+      seatId: NodeId,
       result: JsonValue,
       currentEvidence: ConvergenceReviewEvidence | null,
     ): SeatRecord => {
       const record = asRecord(result) ?? {};
-      const evidence = readReviewEvidence(result);
+      const evidence = reviewEvidenceForSeat(seatId, readReviewEvidence(result));
+      const expectedEvidence = reviewEvidenceForSeat(seatId, currentEvidence);
+      const target = seatTargets.get(seatId);
       const verdict = record.verdict === 'pass' || record.verdict === 'findings'
         || record.verdict === 'low-confidence'
         ? record.verdict
@@ -429,13 +459,13 @@ export const convergence: GraphType<
       // reported the finding.
       const trusted = verdict === 'pass'
         && typeof record.confidence === 'number'
-        && sameReviewEvidence(evidence, currentEvidence);
+        && sameReviewEvidence(evidence, expectedEvidence);
       return {
         outcome: trusted ? 'valid' : verdict === null ? null : 'invalid',
         verdict,
         confidence: typeof record.confidence === 'number' ? record.confidence : null,
-        provider: typeof record.provider === 'string' ? record.provider : null,
-        modelFamily: typeof record.modelFamily === 'string' ? record.modelFamily : null,
+        provider: target?.provider ?? null,
+        modelFamily: target?.modelFamily ?? null,
         inputHashes: evidence?.inputHashes ?? null,
         workspaceFingerprint: evidence?.workspaceFingerprint ?? null,
         findings,
@@ -559,14 +589,20 @@ export const convergence: GraphType<
                     findings: [] as readonly ConvergenceFinding[],
                     stale: false,
                   }
-                : readVerdict(event.payload.result, state.reviewEvidence);
+                : readVerdict(event.payload.nodeId, event.payload.result, state.reviewEvidence);
+              const untrustedPass = verdict.verdict === 'pass' && verdict.outcome !== 'valid';
+              const exhaustedUntrustedPass = untrustedPass
+                && node.attempts > definition.data.retryCapPerNode;
+              const recordedVerdict: SeatRecord = exhaustedUntrustedPass
+                ? { ...verdict, outcome: 'non-verdict' }
+                : verdict;
               const findingRounds = { ...state.findingRounds };
-              for (const finding of verdict.findings) {
+              for (const finding of recordedVerdict.findings) {
                 findingRounds[finding.id] = (findingRounds[finding.id] ?? 0) + 1;
               }
               return {
                 ...state,
-                nodes: current.stale || (verdict.verdict === 'pass' && verdict.outcome !== 'valid')
+                nodes: current.stale || (untrustedPass && !exhaustedUntrustedPass)
                   ? {
                       ...nodes,
                       [event.payload.nodeId]: nodeState('pending', node.attempts, null),
@@ -574,7 +610,7 @@ export const convergence: GraphType<
                   : nodes,
                 seats: {
                   ...state.seats,
-                  [event.payload.nodeId]: verdict,
+                  [event.payload.nodeId]: recordedVerdict,
                 },
                 findingRounds,
               };
@@ -593,8 +629,14 @@ export const convergence: GraphType<
                         inputHashes: seat.inputHashes,
                         workspaceFingerprint: seat.workspaceFingerprint,
                       };
+                  const currentEvidence = reviewEvidenceForSeat(id, reviewEvidence);
                   if (seat.outcome === 'valid'
-                    && !sameReviewEvidence(recordedEvidence, reviewEvidence)) {
+                    && (recordedEvidence === null
+                      || currentEvidence === null
+                      || !isDeepStrictEqual(
+                        recordedEvidence.inputHashes,
+                        currentEvidence.inputHashes,
+                      ))) {
                     nextNodes[id] = nodeState('pending', nextNodes[id]!.attempts, null);
                     nextSeats[id] = {
                       ...seat,
@@ -755,25 +797,6 @@ export const convergence: GraphType<
               },
             };
           }
-          case 'seat-skip': {
-            const seat = state.seats[event.payload.seatId];
-            if (seat === undefined || !skippable.has(event.payload.seatId)) return state;
-            return {
-              ...state,
-              nodes: {
-                ...state.nodes,
-                [event.payload.seatId]: nodeState(
-                  'failed',
-                  state.nodes[event.payload.seatId]!.attempts,
-                  null,
-                ),
-              },
-              seats: {
-                ...state.seats,
-                [event.payload.seatId]: { ...seat, outcome: 'skipped', verdict: null, findings: [] },
-              },
-            };
-          }
           case 'limit-paused': {
             return { ...state, pauseReason: event.payload.reason };
           }
@@ -887,6 +910,7 @@ export const convergence: GraphType<
                     ? 'accepted'
                     : state.seats[id]!.outcome ?? 'pending',
                 ])),
+                findings: blockingFindings(state),
               },
             }];
           }
@@ -921,7 +945,10 @@ export const convergence: GraphType<
               }];
             }
           }
-          const unresolved = seats.filter((id) => state.seats[id]!.outcome === null);
+          const unresolved = seats.filter((id) => {
+            const outcome = state.seats[id]!.outcome;
+            return outcome === null || outcome === 'non-verdict';
+          });
           if (unresolved.length > 0) {
             return [{
               kind: 'pause',
@@ -940,7 +967,7 @@ export const convergence: GraphType<
       describe(): GraphDescriptionInput {
         return {
           inputContract: { brief: 'json' },
-          outputContract: { iterations: 'number', seats: 'object' },
+          outputContract: { iterations: 'number', seats: 'object', findings: 'array' },
           phases: [{
             id: 'convergence',
             name: 'Convergence',
@@ -956,8 +983,6 @@ export const convergence: GraphType<
               ? {
                 verdict: 'string',
                 confidence: 'number',
-                provider: 'string',
-                modelFamily: 'string',
                 inputHashes: 'object',
                 workspaceFingerprint: 'string',
                 findings: 'array?',

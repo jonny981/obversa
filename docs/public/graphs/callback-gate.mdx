@@ -98,12 +98,13 @@ question bytes produce a new ID. Presentation hints do not change either value.
 ## Claim, submit, and release
 
 1. **Post:** `post` records the request as pending.
-2. **Claim:** `claim` assigns it to exactly one router and returns a private
-   claim token.
+2. **Claim:** `claim` assigns it to exactly one router and returns a claim
+   token. The token is recorded in the replayable event history.
 3. **Submit:** `submit` accepts an answer only from that router with that token
    and the posted digest.
 4. **Release:** `release` returns a claimed request to the pending list. The
-   `directRouter` helper also releases the claim if its responder throws.
+   `directRouter` helper also releases the claim if its responder throws or
+   submits an invalid response.
 
 Claim refusals report `missing`, `claimed`, `answered`, or `superseded`.
 Submission refusals report `missing`, `not-claimed`, `not-owner`, `stale`, or
@@ -111,10 +112,10 @@ Submission refusals report `missing`, `not-claimed`, `not-owner`, `stale`, or
 
 ## Validation and storage limit
 
-The built-in validator checks the plain response shape: required top-level
-fields and the declared top-level field types. It is not a full JSON Schema
-validator. A host that needs nested constraints must validate them before it
-submits the answer.
+The built-in validator checks required top-level fields and the standard JSON
+types declared for top-level fields. It accepts a single type or a type union.
+It is not a full JSON Schema validator. A host that needs nested constraints
+must validate them before it submits the answer.
 
 `createCallbackClient` keeps its event history in memory. Replay proves the
 history contains all callback state, but the host must store that history when
