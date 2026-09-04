@@ -60,6 +60,7 @@ export {
   type CallbackEvent,
   type ClaimResult,
   type SubmitResult,
+  type ReleaseResult,
   type Responder,
 } from './callback/client.js';
 export {
@@ -108,6 +109,7 @@ export type {
   WorkspaceAnchor,
   WorkspaceHeadDrift,
   WorkspaceFilesDrift,
+  WorkspaceRepositoryDrift,
   WorkspaceDrift,
   VerifyResult,
   ForkOk,
@@ -115,12 +117,14 @@ export type {
   ForkExists,
   ForkIncomplete,
   ForkUnleased,
+  ForkNoRevision,
+  ForkInvalidChild,
   ForkResult,
   LeaseClaimed,
   LeaseHeld,
   LeaseIncomplete,
   AcquireResult,
-  ReleaseResult,
+  WorkspaceReleaseResult,
   RecoverResult,
 } from './workspace/provider.js';
 export {

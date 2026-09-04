@@ -314,11 +314,19 @@ export async function captureGitWorkspaceSnapshot(
   const root = await gitRoot(opts);
   if (!root) throw new Error('not a git repository');
   const commandOpts = { ...opts, cwd: root };
+  const included = [...new Set(opts.includePaths ?? [])]
+    .map((path) => path.trim())
+    .filter(Boolean)
+    .sort();
+  const pathspec = included.length > 0 ? ['--', ...included] : [];
   const [head, indexResult, statusResult] = await Promise.all([
     headSha(commandOpts),
-    git(['--literal-pathspecs', 'ls-files', '--stage', '-z'], commandOpts),
+    git([
+      ...(pathspec.length === 0 ? ['--literal-pathspecs'] : []),
+      'ls-files', '--stage', '-z', ...pathspec,
+    ], commandOpts),
     git(
-      ['status', '--porcelain=v1', '-z', '--untracked-files=all'],
+      ['status', '--porcelain=v1', '-z', '--untracked-files=all', ...pathspec],
       commandOpts,
     ),
   ]);

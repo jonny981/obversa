@@ -22,7 +22,9 @@ try {
   const fork = await workspace.fork(anchor, 'example-child', lease.token);
   await workspace.releaseLease(lease.token);
   if (!fork.ok) throw new Error(`fork failed: ${fork.kind}`);
-  console.log(JSON.stringify({ revision: anchor.head, anchor: anchor.fingerprint, branch: fork.branchRef }));
+  const report = { revision: anchor.head, anchor: lease.anchorDigest, branch: fork.branchRef };
+  if (report.anchor !== lease.anchorDigest) throw new Error('report did not use the acquired lease anchor');
+  console.log(JSON.stringify(report));
   await rm(fork.worktreePath, { recursive: true, force: true });
 } finally {
   await rm(directory, { recursive: true, force: true });

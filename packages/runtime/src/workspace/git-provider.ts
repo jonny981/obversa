@@ -13,17 +13,15 @@
  * can remove or retry; a second fork of the same child id fails at the
  * existing ref or path instead of duplicating anything.
  *
- * The lease lives in a JSON file inside the repository's metadata. The
- * acquisition is two-phase: the file is created with the full record
- * marked incomplete, then completed by an atomic rename. A kill between
- * the phases leaves an incomplete claim — visible, typed, and clearable
- * only through the explicit recovery call, which never touches a live
- * lease.
+ * The lease lives in private Git refs. Its complete JSON record is a Git blob.
+ * Git's expected-object-id update makes publication, release, and recovery
+ * change only the exact record they checked. Acquisition creates the one ref
+ * with a complete blob, so a kill cannot publish a partial valid owner.
  */
 
 import { execa } from 'execa';
 import { createHash, randomUUID } from 'node:crypto';
-import { open, readFile, rename, rm, writeFile } from 'node:fs/promises';
+import { realpath } from 'node:fs/promises';
 import { basename, dirname, isAbsolute, join } from 'node:path';
 
 import {
@@ -36,7 +34,7 @@ import {
   type AcquireResult,
   type ForkResult,
   type RecoverResult,
-  type ReleaseResult,
+  type WorkspaceReleaseResult,
   type VerifyResult,
   type WorkspaceAnchor,
   type WorkspaceDrift,
@@ -48,18 +46,124 @@ interface LeaseFile {
   readonly scope: string;
   readonly anchorDigest: string;
   readonly token: string;
+  readonly createdAtMs: number;
   readonly complete: boolean;
 }
 
-async function git(cwd: string, args: readonly string[]): Promise<{ stdout: string; exitCode: number }> {
-  const result = await execa('git', args, { cwd, reject: false });
-  return { stdout: result.stdout ?? '', exitCode: result.exitCode ?? 1 };
+interface StoredLease {
+  readonly oid: string;
+  readonly record: LeaseFile | 'corrupt';
+}
+
+type LeaseRead = StoredLease | 'missing';
+
+const MAX_INCOMPLETE_LEASE_AGE_MS = 30_000;
+const ACTIVE_LEASE_REF = 'refs/obversa/workspace-lease/v1/active';
+
+async function git(
+  cwd: string,
+  args: readonly string[],
+  input?: string,
+): Promise<{ stdout: string; stderr: string; exitCode: number }> {
+  const result = await execa('git', args, {
+    cwd,
+    reject: false,
+    ...(input === undefined ? {} : { input }),
+  });
+  return {
+    stdout: result.stdout ?? '',
+    stderr: result.stderr ?? '',
+    exitCode: result.exitCode ?? 1,
+  };
 }
 
 function anchorDigest(anchor: WorkspaceAnchor): string {
   return createHash('sha256')
-    .update(`${anchor.root}\0${anchor.head}\0${anchor.fingerprint}\0${JSON.stringify(anchor.files)}`)
+    .update(`${anchor.repositoryId}\0${anchor.root}\0${anchor.head}\0${anchor.fingerprint}\0${JSON.stringify(anchor.files)}`)
     .digest('hex');
+}
+
+async function repositoryIdentity(root: string): Promise<string> {
+  const common = await git(root, ['rev-parse', '--git-common-dir']);
+  if (common.exitCode !== 0) throw new Error('git common dir unavailable');
+  const path = common.stdout.trim();
+  return realpath(isAbsolute(path) ? path : join(root, path));
+}
+
+function parseLease(text: string): LeaseFile | 'corrupt' {
+  try {
+    const parsed: unknown = JSON.parse(text);
+    if (typeof parsed !== 'object' || parsed === null) return 'corrupt';
+    const record = parsed as Record<string, unknown>;
+    if (
+      typeof record.owner !== 'string'
+      || typeof record.scope !== 'string'
+      || typeof record.anchorDigest !== 'string'
+      || typeof record.token !== 'string'
+      || typeof record.createdAtMs !== 'number'
+      || !Number.isFinite(record.createdAtMs)
+      || (record.complete !== true && record.complete !== false)
+    ) {
+      return 'corrupt';
+    }
+    return parsed as LeaseFile;
+  } catch {
+    return 'corrupt';
+  }
+}
+
+async function readLease(root: string): Promise<LeaseRead> {
+  const resolved = await git(root, ['rev-parse', '--verify', '--quiet', ACTIVE_LEASE_REF]);
+  if (resolved.exitCode === 1) return 'missing';
+  if (resolved.exitCode !== 0) {
+    throw new Error(`Git could not read the workspace lease ref: ${resolved.stderr.trim()}`);
+  }
+  const oid = resolved.stdout.trim();
+  const blob = await git(root, ['cat-file', 'blob', oid]);
+  return {
+    oid,
+    record: blob.exitCode === 0 ? parseLease(blob.stdout) : 'corrupt',
+  };
+}
+
+async function writeLeaseBlob(root: string, record: LeaseFile): Promise<string> {
+  const stored = await git(
+    root,
+    ['hash-object', '-w', '--no-filters', '--stdin'],
+    `${JSON.stringify(record)}\n`,
+  );
+  const oid = stored.stdout.trim();
+  if (stored.exitCode !== 0 || !/^(?:[0-9a-f]{40}|[0-9a-f]{64})$/u.test(oid)) {
+    throw new Error(`Git could not store the workspace lease: ${stored.stderr.trim()}`);
+  }
+  return oid;
+}
+
+async function createLeaseRef(root: string, oid: string): Promise<boolean> {
+  const updated = await git(root, [
+    'update-ref',
+    '--no-deref',
+    ACTIVE_LEASE_REF,
+    oid,
+    '0'.repeat(oid.length),
+  ]);
+  if (updated.exitCode === 0) return true;
+  const current = await readLease(root);
+  return current !== 'missing' && current.oid === oid;
+}
+
+async function deleteLeaseRef(root: string, expectedOid: string): Promise<boolean> {
+  const updated = await git(root, [
+    'update-ref',
+    '--no-deref',
+    '-d',
+    ACTIVE_LEASE_REF,
+    expectedOid,
+  ]);
+  if (updated.exitCode === 0) return true;
+  const current = await readLease(root);
+  if (current === 'missing' || current.oid !== expectedOid) return false;
+  throw new Error(`Git could not remove the workspace lease ref: ${updated.stderr.trim()}`);
 }
 
 function filesDrift(
@@ -106,6 +210,7 @@ export function createGitWorktreeProvider(
     return Object.freeze({
       schemaVersion: 1 as const,
       root: snapshot.root,
+      repositoryId: await repositoryIdentity(root),
       head: snapshot.head ?? '',
       fingerprint,
       scope: scope === undefined ? null : [...scope],
@@ -118,6 +223,9 @@ export function createGitWorktreeProvider(
   const verify = async (anchor: WorkspaceAnchor): Promise<VerifyResult> => {
     const current = await capture(anchor.scope ?? undefined);
     const drift: WorkspaceDrift[] = [];
+    if (current.repositoryId !== anchor.repositoryId) {
+      drift.push({ kind: 'repository', currentRepositoryId: current.repositoryId });
+    }
     if (current.head !== anchor.head) {
       drift.push({ kind: 'head', currentHead: current.head });
     }
@@ -137,15 +245,27 @@ export function createGitWorktreeProvider(
     childId: string,
     leaseToken: string,
   ): Promise<ForkResult> => {
-    const leaseFile = await readLease(await leasePath());
-    if (leaseFile === null || leaseFile === 'unparseable' || !leaseFile.complete) {
+    if (childId.length > 128 || !/^[A-Za-z0-9][A-Za-z0-9_-]*$/u.test(childId)) {
+      return { ok: false, kind: 'invalid-child' };
+    }
+    const root = await gitRoot({ cwd: repositoryPath });
+    if (!root) throw new Error(`"${repositoryPath}" is not a git repository`);
+    const storedLease = await readLease(root);
+    if (
+      storedLease === 'missing'
+      || storedLease.record === 'corrupt'
+      || storedLease.record.complete !== true
+    ) {
       return {
         ok: false,
         kind: 'unleased',
         reason: 'fork requires a lease held for this anchor',
       };
     }
-    if (leaseFile.token !== leaseToken || leaseFile.anchorDigest !== anchorDigest(anchor)) {
+    if (
+      storedLease.record.token !== leaseToken
+      || storedLease.record.anchorDigest !== anchorDigest(anchor)
+    ) {
       return {
         ok: false,
         kind: 'unleased',
@@ -160,21 +280,22 @@ export function createGitWorktreeProvider(
         drift: verification.drift,
       };
     }
+    if (anchor.head === '') return { ok: false, kind: 'no-revision' };
     const branchRef = `refs/heads/obversa/${childId}`;
-    const worktreePath = join(worktreeParent(anchor.root), childId);
+    const worktreePath = join(worktreeParent(root), childId);
 
-    const branch = await git(anchor.root, ['branch', branchRef, anchor.head]);
+    const branch = await git(root, ['branch', branchRef, anchor.head]);
     if (branch.exitCode !== 0) {
       // A bare ref from an earlier incomplete fork at the same anchored
       // revision is finished by this retry; anything else is a collision.
-      const existing = await git(anchor.root, ['rev-parse', '--verify', `${branchRef}^{commit}`]);
+      const existing = await git(root, ['rev-parse', '--verify', `${branchRef}^{commit}`]);
       if (existing.exitCode !== 0 || existing.stdout.trim() !== anchor.head) {
         return { ok: false, kind: 'exists', branchRef, worktreePath };
       }
     }
-    const added = await git(anchor.root, ['worktree', 'add', worktreePath, branchRef]);
+    const added = await git(root, ['worktree', 'add', worktreePath, branchRef]);
     if (added.exitCode !== 0) {
-      const worktreeExists = await git(anchor.root, ['worktree', 'list', '--porcelain']);
+      const worktreeExists = await git(root, ['worktree', 'list', '--porcelain']);
       if (worktreeExists.stdout.includes(worktreePath)) {
         return { ok: false, kind: 'exists', branchRef, worktreePath };
       }
@@ -191,34 +312,10 @@ export function createGitWorktreeProvider(
     return { ok: true, branchRef, worktreePath, anchor: child };
   };
 
-  const leasePath = async (): Promise<string> => {
+  const leaseRoot = async (): Promise<string> => {
     const root = await gitRoot({ cwd: repositoryPath });
     if (!root) throw new Error(`"${repositoryPath}" is not a git repository`);
-    // The common dir is shared by every linked worktree, so one lease
-    // covers the repository — one writer per workspace.
-    const commonDir = await git(root, ['rev-parse', '--git-common-dir']);
-    if (commonDir.exitCode !== 0) throw new Error('git common dir unavailable');
-    const dir = commonDir.stdout.trim();
-    // At the repository top level git reports a relative ".git"; resolve
-    // it against the worktree root before joining.
-    const resolved = isAbsolute(dir) ? dir : join(root, dir);
-    return join(resolved, 'obversa-workspace-lease.json');
-  };
-
-  const readLease = async (path: string): Promise<LeaseFile | null | 'unparseable'> => {
-    try {
-      const text = await readFile(path, 'utf8');
-      const parsed: unknown = JSON.parse(text);
-      if (typeof parsed !== 'object' || parsed === null) return 'unparseable';
-      const record = parsed as Record<string, unknown>;
-      if (typeof record.owner !== 'string' || typeof record.token !== 'string'
-        || typeof record.complete !== 'boolean') {
-        return 'unparseable';
-      }
-      return parsed as LeaseFile;
-    } catch {
-      return null;
-    }
+    return root;
   };
 
   const acquireLease = async (
@@ -226,24 +323,25 @@ export function createGitWorktreeProvider(
     scope: string,
     anchor: WorkspaceAnchor,
   ): Promise<AcquireResult> => {
-    const path = await leasePath();
-    const existing = await readLease(path);
-    if (existing === 'unparseable') {
-      return {
-        ok: false,
-        kind: 'incomplete',
-        reason: 'the lease file is not a readable record; run recoverIncompleteLease',
-      };
-    }
-    if (existing !== null) {
-      if (!existing.complete) {
+    const root = await leaseRoot();
+    const existing = await readLease(root);
+    if (existing !== 'missing') {
+      const record = existing.record;
+      if (record === 'corrupt') {
         return {
           ok: false,
           kind: 'incomplete',
-          reason: 'the previous acquisition did not finish; run recoverIncompleteLease',
+          reason: 'the lease ref does not contain a readable record; run recoverIncompleteLease',
         };
       }
-      return { ok: false, kind: 'held', owner: existing.owner };
+      if (record.complete !== true) {
+        return {
+          ok: false,
+          kind: 'incomplete',
+          reason: 'the previous acquisition did not finish; run recoverIncompleteLease after its age bound',
+        };
+      }
+      return { ok: false, kind: 'held', owner: record.owner };
     }
     const token = randomUUID();
     const record: LeaseFile = {
@@ -251,60 +349,62 @@ export function createGitWorktreeProvider(
       scope,
       anchorDigest: anchorDigest(anchor),
       token,
-      complete: false,
+      createdAtMs: Date.now(),
+      complete: true,
     };
-    let file;
-    try {
-      file = await open(path, 'wx', 0o600);
-    } catch (error) {
-      // A racing acquisition won the create: classify instead of throwing.
-      if ((error as NodeJS.ErrnoException).code === 'EEXIST') {
-        const winner = await readLease(path);
-        if (winner !== null && winner !== 'unparseable' && winner.complete) {
-          return { ok: false, kind: 'held', owner: winner.owner };
-        }
-        return {
-          ok: false,
-          kind: 'incomplete',
-          reason: 'a concurrent acquisition is in flight; run recoverIncompleteLease',
-        };
+    const oid = await writeLeaseBlob(root, record);
+    if (!(await createLeaseRef(root, oid))) {
+      const winner = await readLease(root);
+      if (winner !== 'missing' && winner.record !== 'corrupt' && winner.record.complete) {
+        return { ok: false, kind: 'held', owner: winner.record.owner };
       }
-      throw error;
+      return {
+        ok: false,
+        kind: 'incomplete',
+        reason: winner === 'missing'
+          ? 'another acquisition took and released the lease; retry acquisition'
+          : 'another acquisition left an incomplete lease; run recoverIncompleteLease',
+      };
     }
-    try {
-      await file.writeFile(`${JSON.stringify(record)}\n`);
-    } finally {
-      await file.close();
-    }
-    const completed: LeaseFile = { ...record, complete: true };
-    // Same-directory temporary plus rename: the completion is atomic and
-    // a kill leaves either the incomplete record or the live lease.
-    const temporary = `${path}.${randomUUID()}.tmp`;
-    await writeFile(temporary, `${JSON.stringify(completed)}\n`, { encoding: 'utf8', mode: 0o600 });
-    await rename(temporary, path);
     return { ok: true, token, owner, scope, anchorDigest: record.anchorDigest };
   };
 
-  const releaseLease = async (token: string): Promise<ReleaseResult> => {
-    const path = await leasePath();
-    const existing = await readLease(path);
-    if (existing === null) return { ok: false, kind: 'unknown-token' };
-    if (existing === 'unparseable') return { ok: false, kind: 'incomplete' };
-    if (!existing.complete) return { ok: false, kind: 'incomplete' };
-    if (existing.token !== token) return { ok: false, kind: 'not-owner' };
-    await rm(path, { force: true });
-    return { ok: true };
+  const releaseLease = async (token: string): Promise<WorkspaceReleaseResult> => {
+    const root = await leaseRoot();
+    const existing = await readLease(root);
+    if (existing === 'missing') return { ok: false, kind: 'unknown-token' };
+    if (existing.record === 'corrupt' || !existing.record.complete) {
+      return { ok: false, kind: 'incomplete' };
+    }
+    if (existing.record.token !== token) return { ok: false, kind: 'not-owner' };
+    if (await deleteLeaseRef(root, existing.oid)) return { ok: true };
+
+    const winner = await readLease(root);
+    if (winner === 'missing') return { ok: false, kind: 'unknown-token' };
+    if (winner.record === 'corrupt' || !winner.record.complete) {
+      return { ok: false, kind: 'incomplete' };
+    }
+    return { ok: false, kind: 'not-owner' };
   };
 
   const recoverIncompleteLease = async (): Promise<RecoverResult> => {
-    const path = await leasePath();
-    const existing = await readLease(path);
-    if (existing === null) return { ok: false, kind: 'none' };
-    if (existing !== 'unparseable' && existing.complete) {
+    const root = await leaseRoot();
+    const existing = await readLease(root);
+    if (existing === 'missing') return { ok: false, kind: 'none' };
+    if (
+      existing.record !== 'corrupt'
+      && (
+        existing.record.complete
+        || Date.now() - existing.record.createdAtMs < MAX_INCOMPLETE_LEASE_AGE_MS
+      )
+    ) {
       return { ok: false, kind: 'live' };
     }
-    await rm(path, { force: true });
-    return { ok: true };
+    if (await deleteLeaseRef(root, existing.oid)) return { ok: true };
+
+    const winner = await readLease(root);
+    if (winner === 'missing') return { ok: false, kind: 'none' };
+    return { ok: false, kind: 'live' };
   };
 
   return Object.freeze({

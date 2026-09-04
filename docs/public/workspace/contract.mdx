@@ -6,11 +6,14 @@ description: "Capture, verify, and fork one Git workspace through the public con
 `WorkspaceProvider` is the public contract for capturing, verifying, and
 forking a workspace. The single-repository Git provider is the default.
 
+## Capture and verify
+
 Capture records the repository revision and file state. Verify reads the
 repository again and reports changed revisions or paths. A caller can pause a
 run when verification names paths changed by a foreign write.
 
-The safe order is capture, verify, then start the branch.
+The safe order is capture, verify, acquire the lease, let the caller record the
+planned child branch, then fork it.
 
 ```ts
 import { createGitWorktreeProvider } from '@obversa/runtime';
@@ -19,5 +22,61 @@ const workspace = createGitWorktreeProvider({ repositoryPath: process.cwd() });
 const anchor = await workspace.capture();
 const verified = await workspace.verify(anchor);
 if (!verified.ok) throw new Error('Workspace changed before use.');
-console.log(anchor.head);
+
+const lease = await workspace.acquireLease('example-runner', 'repository', anchor);
+if (!lease.ok) throw new Error(`Lease unavailable: ${lease.kind}`);
+
+try {
+  const child = await workspace.fork(anchor, 'example-child', lease.token);
+  if (!child.ok) throw new Error(`Fork failed: ${child.kind}`);
+  console.log(child.branchRef, child.worktreePath);
+} finally {
+  await workspace.releaseLease(lease.token);
+}
 ```
+
+## Leases
+
+A lease allows one writer for one repository. It records the owner, scope, a
+digest of the workspace anchor, and the acquisition token. Fork accepts only
+the token for the exact anchor being forked.
+
+The Git provider stores the complete record in Git itself. One private Git
+name points to that record. Acquisition creates the name only when it does not
+exist. Release requires the token, then removes the name only if it still
+points to the same record. A delayed release or recovery cannot remove a later
+owner's record.
+
+Recovery removes an empty or unreadable stored record. It can also remove a readable
+incomplete record after its age limit. It never clears a completed lease or a
+new incomplete record.
+
+## Fork failure kinds
+
+| Kind | Meaning |
+| --- | --- |
+| `unleased` | No valid lease covers this anchor. |
+| `anchor-changed` | The repository or captured files no longer match the anchor. |
+| `no-revision` | The repository has no commit to fork. |
+| `invalid-child` | The child identifier is not a safe Git branch and directory name. |
+| `exists` | The child branch or worktree already exists. |
+| `incomplete` | The branch exists, but its worktree was not created. A retry can finish it. |
+
+## Child worktree location
+
+The Git provider creates child worktrees beside the repository, outside its
+working tree. For `/work/project`, child `review-1` is created at
+`/work/project.obversa-worktrees/review-1`. The location is fixed in version 1.
+
+## Limits
+
+- **One repository.** The built-in provider captures one Git repository. A
+  multi-repository provider is not included.
+- **Caller-owned run control.** Verify reports drift. The caller decides when
+  to pause a run and records any branch or merge events.
+- **No automatic executor binding.** The graph executor does not capture,
+  verify, or lease a workspace for the caller.
+- **No forced lease takeover.** A completed lease remains held until its owner
+  releases it.
+- **No orphan cleanup.** The provider can retry an incomplete fork, but it does
+  not remove abandoned child refs or worktrees.

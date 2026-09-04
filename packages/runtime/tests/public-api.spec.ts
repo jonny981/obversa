@@ -4,7 +4,13 @@ import * as api from '../src/api.ts';
 import * as commandEnvironmentApi from '../src/env/command.ts';
 import * as localStorageApi from '../src/storage/local.ts';
 import * as testingApi from '../src/testing.ts';
-import type { GraphDefinition, GraphEvent, GraphKernel } from '../src/api.ts';
+import type {
+  GraphDefinition,
+  GraphEvent,
+  GraphKernel,
+  ReleaseResult,
+  WorkspaceReleaseResult,
+} from '../src/api.ts';
 
 type Equal<Left, Right> =
   (<Value>() => Value extends Left ? 1 : 2) extends
@@ -16,9 +22,16 @@ type PublicValidatorTakesOneArgument = Expect<Equal<
   Parameters<typeof api.validateGraphDescription>,
   [value: unknown]
 >>;
+type PublicReleaseResultsStayDistinct = Expect<Equal<
+  Equal<ReleaseResult, WorkspaceReleaseResult>,
+  false
+>>;
 
 const publicValidatorTakesOneArgument: PublicValidatorTakesOneArgument = true;
 const publicGraphKernelType: GraphKernel | undefined = undefined;
+const publicReleaseResultsStayDistinct: PublicReleaseResultsStayDistinct = true;
+const callbackReleaseResult: ReleaseResult = { ok: false, kind: 'missing' };
+const workspaceReleaseResult: WorkspaceReleaseResult = { ok: false, kind: 'unknown-token' };
 
 describe('public runtime API', () => {
   it('exports only the reviewed programmatic surface', () => {
@@ -116,6 +129,9 @@ describe('public runtime API', () => {
       'writeScope',
     ]);
     expect(publicGraphKernelType).toBeUndefined();
+    expect(publicReleaseResultsStayDistinct).toBe(true);
+    expect(callbackReleaseResult.kind).toBe('missing');
+    expect(workspaceReleaseResult.kind).toBe('unknown-token');
   });
 
   it('exports the invalid JSON error returned for bad run parameters', async () => {

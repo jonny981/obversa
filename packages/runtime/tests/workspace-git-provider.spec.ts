@@ -2,7 +2,7 @@ import { afterEach, describe, expect, it } from 'vitest';
 import { execa } from 'execa';
 import { mkdir, mkdtemp, readFile, realpath, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
-import { dirname, isAbsolute, join } from 'node:path';
+import { basename, dirname, join } from 'node:path';
 
 import { runWorkspaceProviderConformance } from '../src/workspace/conformance.js';
 import { createGitWorktreeProvider } from '../src/workspace/git-provider.js';
@@ -50,11 +50,9 @@ async function statusOf(dir: string): Promise<string> {
   return result.stdout;
 }
 
-let sha256Supported = true;
-
 afterEach(async () => {
   for (const dir of roots.splice(0)) {
-    const worktrees = join(dir, `${dir.split('/').pop()}.obversa-worktrees`);
+    const worktrees = join(dirname(dir), `${basename(dir)}.obversa-worktrees`);
     await rm(worktrees, { recursive: true, force: true }).catch(() => {});
     await rm(dir, { recursive: true, force: true }).catch(() => {});
   }
@@ -195,21 +193,23 @@ describe('git worktree provider', () => {
     expect(unknown.ok === false && unknown.kind).toBe('not-owner');
   });
 
-  it('types an incomplete acquisition and recovers it without stealing a live lease', async () => {
+  it('types a corrupt final record and recovers it without stealing a live lease', async () => {
     const dir = await makeRepo('sha1');
     const provider = createGitWorktreeProvider({ repositoryPath: dir });
     const anchor = await provider.capture();
 
-    // Simulate a kill between the two acquisition phases: the lease file
-    // exists but was never completed.
-    const commonDir = (await execa(
-      'git', ['rev-parse', '--git-common-dir'], { cwd: dir },
+    // A partial blob is corrupt and cannot become a valid owner.
+    const corrupt = (await execa(
+      'git', ['hash-object', '-w', '--no-filters', '--stdin'],
+      { cwd: dir, input: '{"owner":"dead-runner"' },
     )).stdout.trim();
-    const resolvedCommon = isAbsolute(commonDir) ? commonDir : join(dir, commonDir);
-    const leasePath = join(resolvedCommon, 'obversa-workspace-lease.json');
-    await writeFile(leasePath, `${JSON.stringify({
-      owner: 'dead-runner', scope: 'run-0', anchorDigest: 'x', token: 't', complete: false,
-    })}\n`, 'utf8');
+    await execa('git', [
+      'update-ref',
+      '--no-deref',
+      'refs/obversa/workspace-lease/v1/active',
+      corrupt,
+      '0'.repeat(corrupt.length),
+    ], { cwd: dir });
 
     const claim = await provider.acquireLease('runner-b', 'run-1', anchor);
     expect(claim.ok).toBe(false);
@@ -248,15 +248,9 @@ describe('git worktree provider', () => {
   });
 
   it('runs capture, verify, and fork under the sha256 object format', async () => {
-    let dir: string;
-    try {
-      dir = await makeRepo('sha256');
-    } catch {
-      sha256Supported = false;
-    }
-    if (!sha256Supported) return;
+    const dir = await makeRepo('sha256');
 
-    const provider = createGitWorktreeProvider({ repositoryPath: dir! });
+    const provider = createGitWorktreeProvider({ repositoryPath: dir });
     const anchor = await provider.capture();
     expect(await provider.verify(anchor)).toEqual({ ok: true });
     const lease = await provider.acquireLease('runner-a', 'run-1', anchor);
@@ -274,6 +268,70 @@ describe('git worktree provider', () => {
     const round: WorkspaceAnchor = JSON.parse(JSON.stringify(anchor));
     expect(await provider.verify(round)).toEqual({ ok: true });
     expect((await readFile(join(dir, 'README.md'), 'utf8')).startsWith('# one')).toBe(true);
+  });
+
+  it('refuses an anchor captured from another repository', async () => {
+    const first = await makeRepo('sha1');
+    const second = await makeRepo('sha1');
+    const firstProvider = createGitWorktreeProvider({ repositoryPath: first });
+    const secondProvider = createGitWorktreeProvider({ repositoryPath: second });
+    const foreignAnchor = await firstProvider.capture();
+
+    const verified = await secondProvider.verify(foreignAnchor);
+    expect(verified.ok).toBe(false);
+    if (!verified.ok) {
+      expect(verified.drift.some((item) => item.kind === 'repository')).toBe(true);
+    }
+
+    const lease = await secondProvider.acquireLease('runner-a', 'run-1', foreignAnchor);
+    expect(lease.ok).toBe(true);
+    const forked = await secondProvider.fork(
+      foreignAnchor,
+      'foreign-anchor',
+      lease.ok ? lease.token : '',
+    );
+    expect(forked.ok).toBe(false);
+    expect(forked.ok ? '' : forked.kind).toBe('anchor-changed');
+  });
+
+  it('uses the provider repository instead of the anchor root when forking', async () => {
+    const dir = await makeRepo('sha1');
+    const provider = createGitWorktreeProvider({ repositoryPath: dir });
+    const captured = await provider.capture();
+    const anchor: WorkspaceAnchor = Object.freeze({
+      ...captured,
+      root: join(dir, 'not-a-repository'),
+    });
+    const lease = await provider.acquireLease('runner-a', 'run-1', anchor);
+    expect(lease.ok).toBe(true);
+
+    const forked = await provider.fork(anchor, 'provider-root', lease.ok ? lease.token : '');
+    expect(forked.ok).toBe(true);
+    if (!forked.ok) throw new Error(`fork failed: ${forked.kind}`);
+    const resolvedDir = await realpath(dir);
+    expect(forked.worktreePath).toBe(join(
+      dirname(resolvedDir),
+      `${basename(resolvedDir)}.obversa-worktrees`,
+      'provider-root',
+    ));
+    expect(await readFile(join(forked.worktreePath, 'README.md'), 'utf8')).toBe('# one\n');
+  });
+
+  it('types a fork without a revision and rejects unsafe child ids', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'obversa-d12-empty-'));
+    roots.push(dir);
+    await execa('git', ['init', '.'], { cwd: dir });
+    const provider = createGitWorktreeProvider({ repositoryPath: dir });
+    const anchor = await provider.capture();
+    const lease = await provider.acquireLease('runner-a', 'run-1', anchor);
+    expect(lease.ok).toBe(true);
+
+    const noRevision = await provider.fork(anchor, 'a'.repeat(128), lease.ok ? lease.token : '');
+    expect(noRevision).toEqual({ ok: false, kind: 'no-revision' });
+    const unsafe = await provider.fork(anchor, '../escape', lease.ok ? lease.token : '');
+    expect(unsafe).toEqual({ ok: false, kind: 'invalid-child' });
+    const tooLong = await provider.fork(anchor, 'a'.repeat(129), lease.ok ? lease.token : '');
+    expect(tooLong).toEqual({ ok: false, kind: 'invalid-child' });
   });
 
   it('refuses to fork without a lease held for the exact anchor', async () => {

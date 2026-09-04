@@ -12,10 +12,10 @@
  * metadata — the user's checkout, index, and dirty files stay untouched.
  *
  * A lease records its owner, scope, workspace anchor digest, and
- * acquisition token. Acquisition never exposes an incomplete record as a
- * valid owner: an owner that dies mid-acquisition leaves an incomplete
- * claim that the next caller sees as a typed result and clears through an
- * explicit recovery call. Nothing silently clears or steals a live lease.
+ * acquisition token. The Git provider publishes one complete blob with a
+ * create-if-absent ref update. A kill before that update leaves no owner; a
+ * kill after it leaves a completed lease held. Recovery can clear corrupt
+ * records and old readable incomplete records, but never a completed lease.
  */
 
 import type { GitWorkspaceSnapshot } from '../core/git.js';
@@ -24,6 +24,8 @@ import type { JsonObject } from '../graph/value.js';
 export interface WorkspaceAnchor extends JsonObject {
   readonly schemaVersion: 1;
   readonly root: string;
+  /** Resolved Git common directory. Distinguishes repositories and linked worktrees. */
+  readonly repositoryId: string;
   readonly head: string;
   readonly fingerprint: string;
   /** The capture scope: watched paths, or null for the whole worktree. */
@@ -41,7 +43,15 @@ export interface WorkspaceFilesDrift extends JsonObject {
   readonly changedPaths: readonly string[];
 }
 
-export type WorkspaceDrift = WorkspaceHeadDrift | WorkspaceFilesDrift;
+export interface WorkspaceRepositoryDrift extends JsonObject {
+  readonly kind: 'repository';
+  readonly currentRepositoryId: string;
+}
+
+export type WorkspaceDrift =
+  | WorkspaceHeadDrift
+  | WorkspaceFilesDrift
+  | WorkspaceRepositoryDrift;
 
 export type VerifyResult =
   | { readonly ok: true }
@@ -82,12 +92,24 @@ export interface ForkUnleased extends JsonObject {
   readonly reason: string;
 }
 
+export interface ForkNoRevision extends JsonObject {
+  readonly ok: false;
+  readonly kind: 'no-revision';
+}
+
+export interface ForkInvalidChild extends JsonObject {
+  readonly ok: false;
+  readonly kind: 'invalid-child';
+}
+
 export type ForkResult =
   | ForkOk
   | ForkChangedAnchor
   | ForkExists
   | ForkIncomplete
-  | ForkUnleased;
+  | ForkUnleased
+  | ForkNoRevision
+  | ForkInvalidChild;
 
 export interface LeaseClaimed extends JsonObject {
   readonly ok: true;
@@ -111,7 +133,7 @@ export interface LeaseIncomplete extends JsonObject {
 
 export type AcquireResult = LeaseClaimed | LeaseHeld | LeaseIncomplete;
 
-export type ReleaseResult =
+export type WorkspaceReleaseResult =
   | { readonly ok: true }
   | { readonly ok: false; readonly kind: 'unknown-token' | 'not-owner' | 'incomplete' };
 
@@ -133,7 +155,7 @@ export interface WorkspaceProvider {
     leaseToken: string,
   ): Promise<ForkResult>;
   acquireLease(owner: string, scope: string, anchor: WorkspaceAnchor): Promise<AcquireResult>;
-  releaseLease(token: string): Promise<ReleaseResult>;
+  releaseLease(token: string): Promise<WorkspaceReleaseResult>;
   recoverIncompleteLease(): Promise<RecoverResult>;
 }
 
