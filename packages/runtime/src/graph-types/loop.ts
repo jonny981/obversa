@@ -378,7 +378,7 @@ export const convergence: GraphType<
   ConvergenceRequirements
 > = {
   kind: 'convergence',
-  version: 1,
+  version: 2,
   compile(definition) {
     const { seats, executionLanes } = validateConvergence(definition);
     const seatSet = new Set(seats);
@@ -473,7 +473,7 @@ export const convergence: GraphType<
         || record.verdict === 'low-confidence'
         ? record.verdict
         : null;
-      const findings = Array.isArray(record.findings)
+      const findings = sameReviewEvidence(evidence, expectedEvidence) && Array.isArray(record.findings)
         ? record.findings.filter((finding): finding is ConvergenceFinding => {
           const candidate = asRecord(finding);
           return candidate !== null
@@ -928,8 +928,9 @@ export const convergence: GraphType<
         if (state.phase === 'review') {
           if (state.reviewEvidence === null) {
             return [{
-              kind: 'pause',
-              reason: 'Review evidence is incomplete; the run waits.',
+              kind: 'fail',
+              code: 'CONVERGENCE_REVIEW_EVIDENCE_INVALID',
+              message: 'The evaluator completed without valid review evidence.',
             }];
           }
           const fitting = seats.filter((id) => {

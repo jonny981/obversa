@@ -61,7 +61,7 @@ const expectedReviewLoopReport = {
     },
   },
   events: 8,
-  planDigest: 'sha256:b6a6fab0333c87a17016b8b1953ef7b77762d930e4fde327addf5e237ae5ae75',
+  planDigest: 'sha256:eb9d0cf0279a1e8a735c69b20e3786042c942e8f7fa69b9431d4b89760e8ae54',
   bounds: {
     dispatches: {
       min: { kind: 'known', value: 4 },

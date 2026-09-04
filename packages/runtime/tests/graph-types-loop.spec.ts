@@ -189,7 +189,10 @@ afterEach(async () => {
     rm(root, { recursive: true, force: true })));
 });
 
-async function storedConvergenceRun(definition: ConvergenceDefinition): Promise<{
+async function storedConvergenceRun(
+  definition: ConvergenceDefinition,
+  typeVersion = convergence.version,
+): Promise<{
   readonly graph: ReturnType<typeof compileGraph<
     ConvergenceDefinition,
     ConvergenceStatus,
@@ -203,7 +206,7 @@ async function storedConvergenceRun(definition: ConvergenceDefinition): Promise<
   const root = await realpath(await mkdtemp(join(tmpdir(), 'obversa-convergence-')));
   executorRoots.push(root);
   const runId = `convergence-${executorSequence += 1}`;
-  const graph = compileGraph(convergence, definition);
+  const graph = compileGraph({ ...convergence, version: typeVersion }, definition);
   const storage = createLocalRunStorage({
     directory: join(root, 'storage'),
     namespace: 'convergence-tests',
@@ -350,6 +353,30 @@ function expectIssue(definition: ConvergenceDefinition, code: string): void {
 }
 
 describe('convergence graph type', () => {
+  it('refuses a stored version-1 plan before executing the required proof-digest contract', async () => {
+    const definition = panel();
+    const run = await storedConvergenceRun(definition, 1);
+
+    await expect(createGraphExecutor({
+      ...run,
+      graph: compileGraph(convergence, definition),
+      nodes: {},
+      engines: [
+        reviewEngineBinding(definition, 'seat-a', PASS_ANTHROPIC, []),
+        reviewEngineBinding(definition, 'seat-b', PASS_OPENAI, []),
+      ],
+    })).rejects.toMatchObject({
+      name: 'GraphExecutionError',
+      code: 'STORED_GRAPH_MISMATCH',
+    });
+    const eventTypes: string[] = [];
+    for await (const event of run.storage.eventStore.read({
+      namespace: run.storage.record.namespace,
+      streamId: run.runId,
+    })) eventTypes.push(event.type);
+    expect(eventTypes).toEqual(['graph:run-started']);
+  });
+
   it('passes the graph type conformance kit', () => {
     const definition = panel();
     const fixture: GraphTypeConformanceFixture<
@@ -546,7 +573,7 @@ describe('convergence graph type', () => {
     const compiled = compileGraph(convergence, panel());
     const description = compiled.describe();
     expect(description.graph.kind).toBe('convergence');
-    expect(description.graph.typeVersion).toBe(1);
+    expect(description.graph.typeVersion).toBe(2);
     expect(description.nodes.filter((node) => node.laneId !== null).map((node) => node.id))
       .toEqual(['seat-a', 'seat-b']);
     expect(description.bounds.dispatches.min).toEqual({ kind: 'known', value: 4 });
@@ -731,6 +758,7 @@ describe('convergence graph type', () => {
       completed('seat-codex', 'review/1/seat-codex/1', {
         verdict: 'findings', confidence: 0.7, provider: 'openai', modelFamily: 'gpt',
         findings: [finding],
+        ...REVIEW_EVIDENCE,
       }),
       seatDispatched('seat-grok', 1),
       completed('seat-grok', 'review/1/seat-grok/1', {
@@ -1071,6 +1099,7 @@ describe('convergence graph type', () => {
         completed('seat-b', `review/${round}/seat-b/${round}`, {
           verdict: 'findings', confidence: 0.7, provider: 'openai', modelFamily: 'gpt',
           findings: [finding],
+          ...REVIEW_EVIDENCE,
         }),
       );
       if (round < 3) {
@@ -1151,6 +1180,42 @@ describe('convergence graph type', () => {
         proofArtifactDigest: PROOF_ARTIFACT_DIGEST,
       },
       position: 'review/2/seat-a/2',
+    }]);
+  });
+
+  it.each([
+    ['missing', {}],
+    ['malformed', { proofArtifactDigest: 'sha256:invalid' }],
+    ['different', { proofArtifactDigest: `sha256:${'b'.repeat(64)}` }],
+  ] as const)('excludes findings with a %s proof digest from state and repair input', (_label, proof) => {
+    const invalidFinding = { id: 'untrusted', kind: 'patch' as const, evidence: 'wrong proof' };
+    const validFinding = { id: 'trusted', kind: 'patch' as const, evidence: 'current proof' };
+    const events = [
+      convDispatched('generator', 1),
+      completed('generator', 'convergence/1/generator/1', {}),
+      convDispatched('evaluator', 1),
+      completed('evaluator', 'convergence/1/evaluator/1', { gateMet: true, ...REVIEW_EVIDENCE }),
+      seatDispatched('seat-a', 1),
+      completed('seat-a', 'review/1/seat-a/1', {
+        verdict: 'findings', confidence: 0.8, findings: [invalidFinding],
+        inputHashes: REVIEW_EVIDENCE.inputHashes,
+        workspaceFingerprint: REVIEW_EVIDENCE.workspaceFingerprint,
+        ...proof,
+      }),
+      seatDispatched('seat-b', 1),
+      completed('seat-b', 'review/1/seat-b/1', {
+        verdict: 'findings', confidence: 0.8, findings: [validFinding], ...REVIEW_EVIDENCE,
+      }),
+    ];
+
+    const state = fold(events);
+    expect(state.findingRounds).toEqual({ trusted: 1 });
+    expect(state.seats['seat-a']!.findings).toEqual([]);
+    expect(decideAt(events)).toEqual([{
+      kind: 'dispatch',
+      nodeId: 'repair',
+      input: { positionSummary: 'repair round 1', findings: [validFinding] },
+      position: 'convergence/repair/1/1',
     }]);
   });
 
@@ -1331,6 +1396,7 @@ describe('convergence graph type', () => {
       completed('seat-a', 'review/1/seat-a/1', {
         verdict: 'findings', confidence: 0.8, provider: 'anthropic', modelFamily: 'claude',
         findings: [finding],
+        ...REVIEW_EVIDENCE,
       }),
       seatDispatched('seat-b', 1),
       completed('seat-b', 'review/1/seat-b/1', {
@@ -1610,6 +1676,63 @@ describe('convergence graph type', () => {
       nodeId: 'generator',
       position: 'convergence/1/generator/1',
     });
+  });
+
+  it.each([
+    ['missing', {}],
+    ['malformed', { proofArtifactDigest: 'sha256:invalid' }],
+  ] as const)('returns a typed terminal without redispatch when evaluator proof is %s', async (_label, proof) => {
+    const definition = panel();
+    const run = await storedConvergenceRun(definition);
+    const calls: string[] = [];
+    const options = {
+      ...run,
+      nodes: {
+        generator: executorNodeBinding(run.root, {
+          runData: async () => {
+            calls.push('generator');
+            return { draft: 'ready' };
+          },
+        }),
+        evaluator: executorNodeBinding(run.root, {
+          runData: async () => {
+            calls.push('evaluator');
+            return {
+              gateMet: true,
+              inputHashes: REVIEW_EVIDENCE.inputHashes,
+              workspaceFingerprint: REVIEW_EVIDENCE.workspaceFingerprint,
+              ...proof,
+            };
+          },
+        }),
+      },
+      engines: [
+        reviewEngineBinding(definition, 'seat-a', PASS_ANTHROPIC, []),
+        reviewEngineBinding(definition, 'seat-b', PASS_OPENAI, []),
+      ],
+    };
+    const terminal = {
+      kind: 'fail',
+      code: 'CONVERGENCE_REVIEW_EVIDENCE_INVALID',
+      message: 'The evaluator completed without valid review evidence.',
+    };
+
+    const executor = await createGraphExecutor(options);
+    await expect(executor.run(new AbortController().signal)).resolves.toEqual(terminal);
+    const reopened = await createGraphExecutor(options);
+    await expect(reopened.run(new AbortController().signal)).resolves.toEqual(terminal);
+    expect(calls).toEqual(['generator', 'evaluator']);
+    const dispatched: JsonValue[] = [];
+    for await (const event of run.storage.eventStore.read({
+      namespace: run.storage.record.namespace,
+      streamId: run.runId,
+    })) {
+      if (event.type === 'graph:node-dispatched') dispatched.push(event.payload);
+    }
+    expect(dispatched).toEqual([
+      { nodeId: 'generator', position: 'convergence/1/generator/1' },
+      { nodeId: 'evaluator', position: 'convergence/1/evaluator/1' },
+    ]);
   });
 
   it('runs a full review round through the graph executor and engine-backed seats', async () => {
