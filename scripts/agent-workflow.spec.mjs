@@ -71,9 +71,53 @@ test('a workstream cannot claim the other workstream stage family', () => {
   const result = runStage('claim', 'D2', repository.feature);
 
   assert.notEqual(result.status, 0);
-  assert.match(result.stderr, /D stages belong to feat\/lines-v1/);
+  assert.match(result.stderr, /D2 belongs to feat\/lines-v1/);
   assert.equal(existsSync(stageLock(repository)), false);
 });
+
+for (const [stage, branch] of [
+  ['D14', 'feat/unattended-runner'],
+  ['D15', 'feat/release-v1'],
+  ['D13', 'feat/lines-v1'],
+  ['D11A', 'feat/lines-v1'],
+  ['F0', 'feat/factory-v1'],
+  ['F2b', 'feat/factory-v1'],
+]) {
+  test(`${stage} lands from its assigned branch ${branch}`, () => {
+    const repository = createRepository({ feature: true, branch });
+    commitFile(repository.feature, 'stage.txt', `${stage}\n`, `finish ${stage}`);
+    const featureHead = git(repository.feature, 'rev-parse', 'HEAD').stdout.trim();
+
+    const claimed = runStage('claim', stage, repository.feature);
+    assert.equal(claimed.status, 0, claimed.stderr);
+    assert.equal(readStageLease(repository).owner.branch, branch);
+    const finished = runStage('finish', stage, repository.feature);
+
+    assert.equal(finished.status, 0, finished.stderr);
+    assert.equal(git(repository.main, 'rev-parse', 'HEAD').stdout.trim(), featureHead);
+    assert.equal(readFileSync(join(repository.main, 'stage.txt'), 'utf8'), `${stage}\n`);
+    assert.equal(stageClaimExists(repository), false);
+  });
+}
+
+for (const [stage, branch] of [
+  ['D14', 'feat/lines-v1'],
+  ['D14', 'feat/release-v1'],
+  ['D15', 'feat/lines-v1'],
+  ['D15', 'feat/unattended-runner'],
+]) {
+  test(`${stage} refuses the wrong branch ${branch}`, () => {
+    const repository = createRepository({ feature: true, branch });
+    const before = branchHeads(repository);
+
+    const result = runStage('claim', stage, repository.feature);
+
+    assert.notEqual(result.status, 0);
+    assert.match(result.stderr, /cannot claim/);
+    assert.equal(stageClaimExists(repository), false);
+    assert.deepEqual(branchHeads(repository), before);
+  });
+}
 
 test('finishing a stage fast-forwards main to the clean feature branch', () => {
   const repository = createRepository({ feature: true });

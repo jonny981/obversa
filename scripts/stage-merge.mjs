@@ -13,6 +13,10 @@ import { assertCommitRange } from './check-commit-policy.mjs';
 import { configureGitHooks } from './configure-git-hooks.mjs';
 
 const leaseRef = 'refs/obversa/stage-merge';
+const stageBranches = {
+  D14: 'feat/unattended-runner',
+  D15: 'feat/release-v1',
+};
 
 export function manageStage(args, options = {}) {
   if (args.length !== 2 || !['claim', 'finish', 'release'].includes(args[0])) {
@@ -169,10 +173,11 @@ function featureContext(stage, cwd) {
   if (branch.length === 0 || branch === 'main' || branch === 'master') {
     throw new Error('manage a stage from its named feature branch, not main');
   }
-  const expectedBranch = stage.startsWith('D') ? 'feat/lines-v1' : 'feat/factory-v1';
+  const expectedBranch = stageBranches[stage]
+    ?? (stage.startsWith('D') ? 'feat/lines-v1' : 'feat/factory-v1');
   if (branch !== expectedBranch) {
     throw new Error(
-      `${stage[0]} stages belong to ${expectedBranch}; ${branch} cannot claim ${stage}`,
+      `${stage} belongs to ${expectedBranch}; ${branch} cannot claim ${stage}`,
     );
   }
   const commonDirectory = git(
