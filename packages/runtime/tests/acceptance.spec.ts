@@ -24,6 +24,7 @@ import {
   createStoredRunFixture,
   raceFirstTwoEventAppends,
   recordFixtureDispatches,
+  recordFixtureCompletions,
   rejectEventAppends,
   type StoredRunFixture,
 } from './stored-run-fixture.js';
@@ -120,9 +121,83 @@ async function appendAcceptedRecord(
   }]);
 }
 
+async function recordCompletedReviews(
+  reviewA: JsonValue = { verdict: 'pass' },
+  reviewB: JsonValue = { verdict: 'pass' },
+) {
+  const positions = await recordFixtureDispatches(run);
+  await recordFixtureCompletions(run, { reviewA, reviewB });
+  return positions;
+}
+
+async function appendNodeEvent(
+  type: string,
+  payload: Record<string, JsonValue>,
+  version = 1,
+): Promise<void> {
+  let revision = 0;
+  const stream = { namespace: run.storage.record.namespace, streamId: run.runId };
+  for await (const event of run.storage.eventStore.read(stream)) revision = event.revision;
+  await run.storage.eventStore.append(stream, revision, [{
+    eventId: randomUUID(), type, version,
+    timestamp: new Date().toISOString(), correlationId: run.runId, causationId: null,
+    payload,
+  }]);
+}
+
 describe('accepted result', () => {
+  it.each(
+    ['in-flight', 'failed', 'wrong-result', 'wrong-node', 'wrong-version', 'extra-field', 'duplicate', 'before-dispatch']
+      .flatMap((state) => ['create', 'resolve'].map((operation) => [state, operation])),
+  )(
+    'a %s completion cannot %s an accepted result',
+    async (state, operation) => {
+      const position = 'dag/review-a/1';
+      const completed = { nodeId: 'review-a', position, result: { verdict: 'pass' } };
+      if (state === 'before-dispatch') await appendNodeEvent('graph:node-completed', completed);
+      await recordFixtureDispatches(run);
+      if (state === 'failed') {
+        await appendNodeEvent('graph:node-failed', { nodeId: 'review-a', position, code: 'DENIED' });
+      } else if (state !== 'in-flight' && state !== 'before-dispatch') {
+        await appendNodeEvent('graph:node-completed', {
+          ...completed,
+          ...(state === 'wrong-result' ? { result: { verdict: 'deny' } } : {}),
+          ...(state === 'wrong-node' ? { nodeId: 'review-b' } : {}),
+          ...(state === 'extra-field' ? { extra: true } : {}),
+        }, state === 'wrong-version' ? 2 : 1);
+        if (state === 'duplicate') await appendNodeEvent('graph:node-completed', completed);
+      }
+      if (operation === 'create') {
+        await expect(createAcceptedResultRecord(run.storage, run.runId, position, {
+          result: { verdict: 'pass' }, ...binding,
+        })).rejects.toMatchObject({ code: 'INVALID_STORED_VALUE' });
+      } else {
+        await appendAcceptedRecord(position, acceptedRecordFor(binding, { verdict: 'pass' }));
+        await expect(resolveAcceptedResult(run.reopen(), run.runId, position, binding))
+          .resolves.toMatchObject({ kind: 'wait' });
+      }
+    },
+  );
+
+  it.each(['reviewer', 'inputs'])(
+    'a changed %s invalidates an otherwise matching completed result',
+    async (changed) => {
+      const { reviewA: position } = await recordCompletedReviews();
+      await createAcceptedResultRecord(run.storage, run.runId, position, {
+        result: { verdict: 'pass' }, ...binding,
+      });
+      await expect(resolveAcceptedResult(run.reopen(), run.runId, position, binding))
+        .resolves.toMatchObject({ kind: 'accepted' });
+      const current = changed === 'reviewer'
+        ? { ...binding, reviewerIdentity: { ...binding.reviewerIdentity, model: 'fixture-2' } }
+        : { ...binding, inputHashes: { draft: hash('8') } };
+      await expect(resolveAcceptedResult(run.reopen(), run.runId, position, current))
+        .resolves.toMatchObject({ kind: 'wait' });
+    },
+  );
+
   it('an accepted result at a position this run never dispatched is refused', async () => {
-    const { reviewA: sourcePosition } = await recordFixtureDispatches(run);
+    const { reviewA: sourcePosition } = await recordCompletedReviews();
     const missingPosition = 'dag/missing/1';
     const record = await createAcceptedResultRecord(
       run.storage,
@@ -163,7 +238,7 @@ describe('accepted result', () => {
   });
 
   it('an accepted result whose graph digest differs from the stored plan is refused', async () => {
-    const { reviewA: position } = await recordFixtureDispatches(run);
+    const { reviewA: position } = await recordCompletedReviews();
     const wrong = {
       ...binding,
       graph: { ...binding.graph, definitionDigest: hash('9') },
@@ -189,7 +264,7 @@ describe('accepted result', () => {
   });
 
   it('an accepted result whose graph type version differs from the stored plan is refused', async () => {
-    const { reviewA: position } = await recordFixtureDispatches(run);
+    const { reviewA: position } = await recordCompletedReviews();
     const wrong = {
       ...binding,
       graph: { ...binding.graph, typeVersion: binding.graph.typeVersion + 1 },
@@ -215,7 +290,7 @@ describe('accepted result', () => {
     const {
       reviewA: position,
       reviewB: sourcePosition,
-    } = await recordFixtureDispatches(run);
+    } = await recordCompletedReviews();
     let revision = 0;
     for await (const event of run.storage.eventStore.read({
       namespace: run.storage.record.namespace,
@@ -282,8 +357,8 @@ describe('accepted result', () => {
     )).rejects.toThrow('position');
   });
 
-  it('two differing accepted results at one position: the second is refused', async () => {
-    const { reviewA: position } = await recordFixtureDispatches(run);
+  it('two differently bound accepted records at one position: the second is refused', async () => {
+    const { reviewA: position } = await recordCompletedReviews();
     const race = raceFirstTwoEventAppends(run.storage);
     const first = createAcceptedResultRecord(race.storage, run.runId, position, {
       result: { verdict: 'pass' },
@@ -291,8 +366,9 @@ describe('accepted result', () => {
     });
     await race.firstAppendReached;
     const second = createAcceptedResultRecord(race.storage, run.runId, position, {
-      result: { verdict: 'deny' },
+      result: { verdict: 'pass' },
       ...binding,
+      reviewerIdentity: { ...binding.reviewerIdentity, model: 'fixture-2' },
     });
 
     await expect(first).resolves.toMatchObject({ result: { verdict: 'pass' } });
@@ -309,7 +385,7 @@ describe('accepted result', () => {
   });
 
   it('a repeated identical accepted result at one position is idempotent', async () => {
-    const { reviewA: position } = await recordFixtureDispatches(run);
+    const { reviewA: position } = await recordCompletedReviews();
     const race = raceFirstTwoEventAppends(run.storage);
     const first = createAcceptedResultRecord(race.storage, run.runId, position, {
       result: { verdict: 'pass' },
@@ -336,7 +412,7 @@ describe('accepted result', () => {
     const {
       reviewA: position,
       reviewB: replacementPosition,
-    } = await recordFixtureDispatches(run);
+    } = await recordCompletedReviews({ verdict: 'pass' }, { verdict: 'deny' });
     await createAcceptedResultRecord(run.storage, run.runId, position, {
       result: { verdict: 'pass' },
       ...binding,
@@ -374,7 +450,7 @@ describe('accepted result', () => {
   });
 
   it('the accepted-result record refuses reuse when the workspace anchor changed', async () => {
-    const { reviewA: position } = await recordFixtureDispatches(run);
+    const { reviewA: position } = await recordCompletedReviews({ verdict: 'pass', confidence: 0.9 });
     await createAcceptedResultRecord(run.storage, run.runId, position, {
       result: { verdict: 'pass', confidence: 0.9 },
       ...binding,
@@ -393,7 +469,7 @@ describe('accepted result', () => {
   });
 
   it('checks the accepted-result bytes captured before storage is read', async () => {
-    const { reviewA: position } = await recordFixtureDispatches(run);
+    const { reviewA: position } = await recordCompletedReviews();
     await createAcceptedResultRecord(run.storage, run.runId, position, {
       result: { verdict: 'pass' },
       ...binding,
@@ -430,7 +506,7 @@ describe('accepted result', () => {
     const {
       reviewA: position,
       reviewB: otherPosition,
-    } = await recordFixtureDispatches(run);
+    } = await recordCompletedReviews({ verdict: 'pass' }, { verdict: 'pass', confidence: 0.9 });
     const record = await createAcceptedResultRecord(run.storage, run.runId, otherPosition, {
       result: { verdict: 'pass', confidence: 0.9 },
       ...binding,
@@ -473,7 +549,7 @@ describe('accepted result', () => {
   });
 
   it('does not return an accepted result when its event append fails', async () => {
-    const { reviewA: position } = await recordFixtureDispatches(run);
+    const { reviewA: position } = await recordCompletedReviews();
     const failingStorage = rejectEventAppends(
       run.storage,
       new StorageError('STORAGE_LIMIT_EXCEEDED', 'fixture append failed'),

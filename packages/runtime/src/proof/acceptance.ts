@@ -176,10 +176,11 @@ function acceptedPayloadAt(
   return payload;
 }
 
-function hasOneStoredDispatch(
+function matchesStoredCompletion(
   events: readonly DomainEventEnvelope[],
   position: string,
   nodeIds: ReadonlySet<string>,
+  resultDigest: Sha256Digest,
 ): boolean {
   const matching = events.filter((event) => (
     event.type === 'graph:node-dispatched'
@@ -189,11 +190,27 @@ function hasOneStoredDispatch(
   if (matching.length !== 1) return false;
   const [event] = matching;
   const payload = event?.payload;
-  return event?.version === 1
+  if (!(event?.version === 1
     && isObject(payload)
     && hasExactFields(payload, ['nodeId', 'position'])
     && typeof payload.nodeId === 'string'
-    && nodeIds.has(payload.nodeId);
+    && nodeIds.has(payload.nodeId))) return false;
+  const terminals = events.filter((candidate) => (
+    (candidate.type === 'graph:node-completed' || candidate.type === 'graph:node-failed')
+      && isObject(candidate.payload)
+      && candidate.payload.position === position
+  ));
+  if (terminals.length !== 1) return false;
+  const [completed] = terminals;
+  const result = completed?.payload;
+  return completed?.type === 'graph:node-completed'
+    && completed.version === 1
+    && completed.revision > event.revision
+    && isObject(result)
+    && hasExactFields(result, ['nodeId', 'position', 'result'])
+    && result.nodeId === payload.nodeId
+    && result.result !== undefined
+    && digestJson(result.result) === resultDigest;
 }
 
 export async function createAcceptedResultRecord(
@@ -239,10 +256,10 @@ export async function createAcceptedResultRecord(
     payload: { position, record },
   };
   await appendRunEvent(storage, runId, event, (events) => {
-    if (!hasOneStoredDispatch(events, position, nodeIds)) {
+    if (!matchesStoredCompletion(events, position, nodeIds, record.resultDigest)) {
       throw new StorageError(
         'INVALID_STORED_VALUE',
-        `Accepted result position "${position}" needs exactly one stored node dispatch.`,
+        `Accepted result position "${position}" needs one stored dispatch and a matching completed result.`,
         { position },
       );
     }
@@ -299,13 +316,18 @@ export async function resolveAcceptedResult(
   const payload = acceptedPayloadAt(loaded.events, position);
   if (currentBinding.graph.definitionDigest === storedGraph.definitionDigest
     && currentBinding.graph.typeVersion === storedGraph.typeVersion
-    && hasOneStoredDispatch(loaded.events, position, nodeIds)
     && payload !== undefined
     && payload !== null
     && hasExactFields(payload, ['position', 'record'])
     && acceptedResultMatchesBinding(
       payload.record as AcceptedResultRecord,
       currentBinding,
+    )
+    && matchesStoredCompletion(
+      loaded.events,
+      position,
+      nodeIds,
+      (payload.record as AcceptedResultRecord).resultDigest,
     )) {
     return Object.freeze({
       kind: 'accepted',

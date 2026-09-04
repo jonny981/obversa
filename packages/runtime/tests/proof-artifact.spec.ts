@@ -8,6 +8,7 @@ import type { WorkspaceAnchor } from '../src/workspace/provider.js';
 import {
   createStoredRunFixture,
   recordFixtureDispatches,
+  recordFixtureCompletions,
   type StoredRunFixture,
 } from './stored-run-fixture.js';
 
@@ -56,6 +57,7 @@ describe('proof artifact', () => {
       reviewA: firstPosition,
       reviewB: secondPosition,
     } = await recordFixtureDispatches(run);
+    await recordFixtureCompletions(run, { reviewA: common.result, reviewB: common.result });
     const first = await createAcceptedResultRecord(run.storage, run.runId, firstPosition, {
       ...common,
       reviewerIdentity: { provider: 'anthropic', model: 'claude' },

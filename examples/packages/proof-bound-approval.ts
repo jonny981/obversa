@@ -1,4 +1,4 @@
-import { mkdtemp, rm } from 'node:fs/promises';
+import { mkdtemp, realpath, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
@@ -7,6 +7,7 @@ import {
   createAcceptedResultRecord,
   createApprovalCallbackGate,
   createStoredCallbackClient,
+  createGraphExecutor,
   dagGraphType,
   persistRunDefinition,
   resolveAcceptedResult,
@@ -79,7 +80,7 @@ const proofScope = { kind: 'change', paths: ['packages/runtime'] } as const;
 const inputHashes = { proposal: digest('1') };
 const runId = 'proof-bound-approval-run';
 
-const directory = await mkdtemp(join(tmpdir(), 'obversa-proof-approval-'));
+const directory = await realpath(await mkdtemp(join(tmpdir(), 'obversa-proof-approval-')));
 try {
   const openStorage = () => createLocalRunStorage({
     directory: join(directory, 'storage'),
@@ -87,7 +88,7 @@ try {
     policy: storagePolicy,
   });
   const storage = openStorage();
-  const started = await persistRunDefinition(storage, {
+  await persistRunDefinition(storage, {
     runId,
     eventId: 'proof-bound-approval-started',
     timestamp: '2026-01-01T00:00:00.000Z',
@@ -107,32 +108,37 @@ try {
   if (architectureReview?.kind !== 'dispatch' || correctnessReview?.kind !== 'dispatch') {
     throw new Error('The review graph did not dispatch both review nodes.');
   }
-  await storage.eventStore.append({
-    namespace: storage.record.namespace,
-    streamId: runId,
-  }, started.revision, [{
-    eventId: 'proof-bound-architecture-dispatched',
-    type: 'graph:node-dispatched',
-    version: 1,
-    timestamp: '2026-01-01T00:00:01.000Z',
-    correlationId: runId,
-    causationId: null,
-    payload: {
-      nodeId: architectureReview.nodeId,
-      position: architectureReview.position,
+  const reviewNode = {
+    prompt: null,
+    scratchDirectory: directory,
+    workspace: { mode: 'none', directory: null, allowedPaths: [] },
+    trustedCaller: {},
+    permissions: [],
+    policy: {
+      inputBytes: 100_000,
+      outputBytes: 100_000,
+      timeoutMs: 5_000,
+      teardownGraceMs: 100,
+      memoryBytes: 100_000_000,
+      filesChanged: 0,
+      linesChanged: 0,
+      callTokens: null,
     },
-  }, {
-    eventId: 'proof-bound-correctness-dispatched',
-    type: 'graph:node-dispatched',
-    version: 1,
-    timestamp: '2026-01-01T00:00:01.000Z',
-    correlationId: runId,
-    causationId: null,
-    payload: {
-      nodeId: correctnessReview.nodeId,
-      position: correctnessReview.position,
-    },
-  }]);
+    resultContract: null,
+    runData: async () => ({ verdict: 'pass' }),
+    parseResult: null,
+    tokenBudget: null,
+    decideAction: async () => ({ kind: 'allow' } as const),
+  } as const;
+  const executor = await createGraphExecutor({
+    runId,
+    graph,
+    storage,
+    nodes: { architecture: reviewNode, correctness: reviewNode },
+    engines: [],
+  });
+  const completed = await executor.run(new AbortController().signal);
+  if (completed.kind !== 'complete') throw new Error('The review nodes did not complete.');
 
   const proofArtifact = await writeProofArtifact(
     storage.artifactStore,

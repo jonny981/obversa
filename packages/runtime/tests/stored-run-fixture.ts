@@ -6,6 +6,7 @@ import { join } from 'node:path';
 import { resolveGraphPlan, type PermissionDescriptor } from '../src/graph/plan.js';
 import { compileGraph } from '../src/graph/type.js';
 import { dag } from '../src/graph-types/dag.js';
+import type { JsonValue } from '../src/graph/value.js';
 import {
   persistRunDefinition,
   type RunStorageBinding,
@@ -118,6 +119,37 @@ export async function recordFixtureDispatches(
     payload: { nodeId: 'review-b', position: reviewB },
   }]);
   return Object.freeze({ reviewA, reviewB });
+}
+
+export async function recordFixtureCompletions(
+  run: StoredRunFixture,
+  results: Readonly<{ reviewA: JsonValue; reviewB: JsonValue }>,
+): Promise<void> {
+  let revision = 0;
+  for await (const event of run.storage.eventStore.read({
+    namespace: run.storage.record.namespace,
+    streamId: run.runId,
+  })) revision = event.revision;
+  await run.storage.eventStore.append({
+    namespace: run.storage.record.namespace,
+    streamId: run.runId,
+  }, revision, [{
+    eventId: randomUUID(),
+    type: 'graph:node-completed',
+    version: 1,
+    timestamp: new Date().toISOString(),
+    correlationId: run.runId,
+    causationId: null,
+    payload: { nodeId: 'review-a', position: 'dag/review-a/1', result: results.reviewA },
+  }, {
+    eventId: randomUUID(),
+    type: 'graph:node-completed',
+    version: 1,
+    timestamp: new Date().toISOString(),
+    correlationId: run.runId,
+    causationId: null,
+    payload: { nodeId: 'review-b', position: 'dag/review-b/1', result: results.reviewB },
+  }]);
 }
 
 export function rejectEventAppends(
