@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// The one skill-install helper (an internal note): wrap the pinned skills
+// The one skill-install helper: wrap the pinned skills
 // CLI's add, update, and remove for the review-diff skill with an ownership
 // preflight, and nothing else. With --yes the bare CLI silently replaces a
 // foreign skill that happens to share the name, and remove deletes a
