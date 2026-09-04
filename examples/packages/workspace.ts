@@ -1,4 +1,4 @@
-import { mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { execFile } from 'node:child_process';
@@ -7,8 +7,10 @@ import { createGitWorktreeProvider } from '@obversa/runtime';
 
 const runGit = promisify(execFile);
 
-const directory = await mkdtemp(join(tmpdir(), 'obversa-workspace-example-'));
+const root = await mkdtemp(join(tmpdir(), 'obversa-workspace-example-'));
+const directory = join(root, 'repository');
 try {
+  await mkdir(directory);
   await runGit('git', ['init', '-q', '-b', 'main'], { cwd: directory });
   await writeFile(join(directory, 'README.md'), '# workspace\n');
   await runGit('git', ['add', 'README.md'], { cwd: directory });
@@ -22,10 +24,13 @@ try {
   const fork = await workspace.fork(anchor, 'example-child', lease.token);
   await workspace.releaseLease(lease.token);
   if (!fork.ok) throw new Error(`fork failed: ${fork.kind}`);
-  const report = { revision: anchor.head, anchor: lease.anchorDigest, branch: fork.branchRef };
-  if (report.anchor !== lease.anchorDigest) throw new Error('report did not use the acquired lease anchor');
+  const childHead = (await runGit('git', ['rev-parse', 'HEAD'], { cwd: fork.worktreePath })).stdout.trim();
+  if (childHead !== anchor.head) throw new Error('child worktree has the wrong revision');
+  if (await readFile(join(fork.worktreePath, 'README.md'), 'utf8') !== '# workspace\n') {
+    throw new Error('child worktree has the wrong contents');
+  }
+  const report = { revision: childHead, anchor: lease.anchorDigest, branch: fork.branchRef };
   console.log(JSON.stringify(report));
-  await rm(fork.worktreePath, { recursive: true, force: true });
 } finally {
-  await rm(directory, { recursive: true, force: true });
+  await rm(root, { recursive: true, force: true });
 }

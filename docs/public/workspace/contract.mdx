@@ -15,6 +15,11 @@ run when verification names paths changed by a foreign write.
 The safe order is capture, verify, acquire the lease, let the caller record the
 planned child branch, then fork it.
 
+Capture reads file states and the content fingerprint concurrently. A write
+between those reads can mix evidence from two moments. Keep the workspace
+stable during capture. Dirty-file states retain one digest per line, so a
+large dirty file can produce a large anchor.
+
 ```ts
 import { createGitWorktreeProvider } from '@obversa/runtime';
 
@@ -35,6 +40,21 @@ try {
 }
 ```
 
+## Scoped capture
+
+Pass Git path selectors, called pathspecs, to `capture(scope)` to limit the
+file states stored in the anchor. The anchor stores the scope. `verify` uses
+the same pathspecs.
+
+The provider does not check that a pathspec matches a file. A scope with no
+matches can therefore store no file states. The scope does not limit
+`HEAD`. A commit outside the scope still invalidates the anchor.
+
+`verify` compares the repository identity, `HEAD`, and stored file states. It
+does not compare the anchor fingerprint. Explicitly selected ignored files
+can affect that fingerprint without appearing in the stored file states, so
+verification can miss changes to them.
+
 ## Leases
 
 A lease allows one writer for one repository. It records the owner, scope, a
@@ -47,9 +67,13 @@ exist. Release requires the token, then removes the name only if it still
 points to the same record. A delayed release or recovery cannot remove a later
 owner's record.
 
-Recovery removes an empty or unreadable stored record. It can also remove a readable
-incomplete record after its age limit. It never clears a completed lease or a
-new incomplete record.
+Recovery can remove an unreadable stored record. A failed Git blob read marks
+the record as corrupt, so recovery can remove its ref. This can happen even
+when the unread record contains a completed lease.
+
+Recovery does not remove a completed lease that it can read. It can remove a
+readable incomplete record after its age limit. Acquisition writes a complete
+record before it publishes the ref.
 
 ## Fork failure kinds
 
@@ -68,6 +92,9 @@ The Git provider creates child worktrees beside the repository, outside its
 working tree. For `/work/project`, child `review-1` is created at
 `/work/project.obversa-worktrees/review-1`. The location is fixed in version 1.
 
+A successful fork returns a full capture of the child worktree. Its anchor has
+`scope: null`, even when the parent anchor had a scope.
+
 ## Limits
 
 - **One repository.** The built-in provider captures one Git repository. A
@@ -76,7 +103,10 @@ working tree. For `/work/project`, child `review-1` is created at
   to pause a run and records any branch or merge events.
 - **No automatic executor binding.** The graph executor does not capture,
   verify, or lease a workspace for the caller.
-- **No forced lease takeover.** A completed lease remains held until its owner
-  releases it.
+- **No forced lease takeover.** A readable completed lease remains held until
+  its owner releases it.
 - **No orphan cleanup.** The provider can retry an incomplete fork, but it does
   not remove abandoned child refs or worktrees.
+
+The provider passes its cancellation signal to snapshot helpers. Its own Git
+calls for leases, refs, and worktrees do not use that signal.

@@ -131,6 +131,16 @@ The stored client uses the event stream revision when it changes state. Two
 routers that race for one request therefore produce one winning claim. A
 storage failure does not leave an in-memory answer that was never recorded.
 
+Stored replay accepts only the exact fields for each callback event. A
+`callback-submitted` event contains `kind`, `requestId`, `requestDigest`,
+`routerId`, and `response`. The request digest must be 64 lowercase
+hexadecimal characters and match the posted request. A submission without
+`requestDigest`, or with an extra field, does not replay.
+The runtime does not convert that stored history.
+
+The stored client records the answer. The host must turn that answer into a
+graph node result. The graph executor does not do this.
+
 ## Bind approval to exact bytes
 
 `createApprovalCallbackGate(definition, subject)` adds the subject digest to
@@ -151,6 +161,16 @@ The stored client refuses a missing or different subject with
 submission also needs caller-supplied actor data and an action decision of
 `allow`, `wait`, or `deny`. The client validates the response, then writes the
 callback submission and approval record in one event batch.
+
+A repeated plain submission after the request is answered returns the typed
+`not-claimed` result. For a subject-backed request, a missing actor or invalid
+action decision returns the typed `invalid` result.
+
+After a valid subject-backed answer, the same submission from the claim owner
+returns success and adds no event. A different valid decision or actor from
+that owner throws `StorageError` with `REVISION_CONFLICT`. A wrong claim owner
+returns the typed `not-owner` result. A changed request digest from the claim
+owner returns the typed `stale` result.
 
 `resolveApproval(storage, runId, { request, ...subject })` returns the stored
 decision only while the request, run plan, graph, proof, inputs, proposed

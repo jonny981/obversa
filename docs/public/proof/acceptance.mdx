@@ -340,7 +340,12 @@ completed node result, and all bound values still match. Otherwise it returns
 `wait`.
 
 Accepted-result storage is called by the host. The graph executor does not
-store these records by itself.
+store these records by itself. Any accepted-result cache also belongs to the
+host. The runtime does not provide one.
+
+The host must limit cached work to declared read-only inputs. Before reuse,
+it must call `resolveAcceptedResult` with the current binding and require an
+`accepted` result.
 
 ## Approval
 
@@ -354,6 +359,20 @@ proposed output bytes, effective permissions, and a workspace anchor or
 `null`. The record also binds the stored run plan, graph, caller-supplied
 actor, router path, and action decision.
 
+Each effective permission in the subject must match one permission admitted
+by the stored run plan. Its name and JSON scope must match exactly. Object key
+order does not matter. The subject may use a subset of the admitted
+permissions.
+
+`post` throws `ApprovalSubjectError` with `SUBJECT_MISMATCH` for a permission
+outside the stored plan. `submit` returns the typed `invalid` result if its
+stored subject is outside that plan. `resolveApproval` returns `wait` in the
+same case.
+
 `resolveApproval` returns the stored decision only while the current request
 and subject match the record. It returns `wait` after any covered byte
-changes. It does not apply the proposed output.
+changes.
+
+The host owns every effect after approval. These approval APIs do not make a
+backup, apply output, read the effect back, reconcile an uncertain effect, or
+merge files.

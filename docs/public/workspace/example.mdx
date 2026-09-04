@@ -1,0 +1,37 @@
+---
+title: "Workspace example"
+description: "Capture, verify, lease, and fork a temporary Git repository."
+---
+
+Use this example to check the Git workspace provider without changing your
+checkout. It creates its own temporary repository and child worktree.
+
+## Run the example
+
+From an Obversa checkout, run:
+
+```bash
+pnpm example:workspace
+```
+
+The source is `examples/packages/workspace.ts`. See the
+[workspace contract](/workspace/contract) for the API and its limits.
+
+## What the example checks
+
+1. **Repository:** It creates a Git repository with a committed `README.md`.
+2. **Anchor:** It captures the repository and verifies the anchor before use.
+3. **Lease and fork:** It acquires one writer lease and creates a child
+   worktree from the captured revision.
+4. **Child state:** It reads the child `HEAD` and `README.md`. The command fails
+   if the revision or file contents differ from the captured repository.
+5. **Cleanup:** A `finally` block removes the temporary root. That root contains
+   both the repository and its sibling worktree directory.
+
+## Report
+
+The command prints one JSON object with three fields:
+
+- **`revision`:** The revision read from the child worktree.
+- **`anchor`:** The captured-anchor digest returned by the acquired lease.
+- **`branch`:** The Git ref for the child branch.
