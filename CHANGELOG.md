@@ -13,17 +13,15 @@ engine and memory packages track their own versions independently.
 
 ### Added
 
-- `@obversa/runtime` 1.0.0: the graph contract, durable events and
-  artifacts, the safe node attempt, and the public conformance kits.
-- `@obversa/engine` 0.1.0: the engine contract, typed failures, and
-  structured results.
-- `@obversa/memory` 0.1.0: the memory port.
-- `@obversa/memory-simple` 0.1.0: in-process memory.
-- `@obversa/memory-git` 0.1.0: memory in private Git references.
-- `@obversa/surfacer` 0.1.0: one secure local surface session.
-- `@obversa/source` 0.1.0: the diff review surface.
-- Engine plugins 0.1.0: Claude CLI, Codex, Grok CLI, Anthropic API,
-  Agent SDK, OpenCode CLI.
-- Public documentation: the graph contract guide, the plan admission
-  guide, the memory contract and adapter guides, the storage guide, the
-  first-run guide, and the host guides.
+- `@obversa/runtime` 1.0.0: stored graph plans, bounded node attempts,
+  durable events and artifacts, restartable execution, workspace checks,
+  Callback Gates, and proof-bound decisions.
+- `@obversa/engine` 0.1.0 and six engine plugins at 0.1.0: typed engine
+  results through Agent SDK, Claude, Codex, Grok, OpenCode, and Anthropic adapters.
+- `@obversa/memory` 0.1.0 with `@obversa/memory-simple` and
+  `@obversa/memory-git` at 0.1.0: replaceable memory with conformance tests.
+- `@obversa/source` 0.1.0 and `@obversa/surfacer` 0.1.0: local review
+  surfaces over public package contracts.
+- Public guides and runnable examples for installation, graphs, storage,
+  memory, workspaces, callbacks, proof-bound approval, hosts, and offline
+  review.

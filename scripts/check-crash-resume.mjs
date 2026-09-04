@@ -61,7 +61,13 @@ try {
   source = replaceOnce(
     source,
     '  await persistRunDefinition(storage, {',
-    '  if (!process.env.OBVERSA_RESUME_POSITION) await persistRunDefinition(storage, {',
+    '  if (!process.env.OBVERSA_RESUME_POSITION && !process.env.OBVERSA_REPLAY) await persistRunDefinition(storage, {',
+  );
+  source = replaceOnce(source, 'let fallbackCalls = 0;', 'let fallbackCalls = 0;\nlet writerCalls = 0;');
+  source = replaceOnce(
+    source,
+    '        runData: async ({ input }) => ({ draft: input }),',
+    '        runData: async ({ input }) => { writerCalls += 1; return { draft: input }; },',
   );
   source = replaceOnce(
     source,
@@ -76,7 +82,7 @@ try {
   source = replaceOnce(
     source,
     "  })) storedEvents.push(event);\n\n  console.log(JSON.stringify({",
-    "  })) storedEvents.push(event);\n  if (process.env.OBVERSA_EVENT_EXPORT) {\n    const { writeFile: writeEventExport } = await import('node:fs/promises');\n    await writeEventExport(process.env.OBVERSA_EVENT_EXPORT, JSON.stringify({\n      executor: executorResult,\n      primaryCalls,\n      fallbackCalls,\n      events: storedEvents,\n    }));\n  }\n\n  console.log(JSON.stringify({",
+    "  })) storedEvents.push(event);\n  if (process.env.OBVERSA_EVENT_EXPORT) {\n    const { writeFile: writeEventExport } = await import('node:fs/promises');\n    await writeEventExport(process.env.OBVERSA_EVENT_EXPORT, JSON.stringify({\n      executor: executorResult,\n      primaryCalls,\n      fallbackCalls,\n      writerCalls,\n      events: storedEvents,\n    }));\n  }\n\n  console.log(JSON.stringify({",
   );
   source = replaceOnce(
     source,
@@ -128,6 +134,23 @@ try {
     graphEvents(resumed, 'node-resumed').map((event) => event.payload),
     [{ nodeId: 'critic', position: 'turns/2-critic' }],
   );
+  assert.equal(baseline.primaryCalls, 1);
+  assert.equal(baseline.fallbackCalls, 3);
+  assert.equal(baseline.writerCalls, 3);
+
+  const replayPath = join(temporary, 'replayed.json');
+  const replayRun = await runFixture(fixturePath, {
+    OBVERSA_RUN_DIRECTORY: crashDirectory,
+    OBVERSA_REPLAY: '1',
+    OBVERSA_EVENT_EXPORT: replayPath,
+  });
+  assert.equal(replayRun.code, 0, replayRun.stderr || replayRun.stdout);
+  const replayed = JSON.parse(await readFile(replayPath, 'utf8'));
+  assert.deepEqual(replayed.executor, resumed.executor, 'resume: replay preserves the completed result');
+  assert.equal(replayed.primaryCalls, 0, 'resume: replay makes no primary engine calls');
+  assert.equal(replayed.fallbackCalls, 0, 'resume: replay makes no fallback engine calls');
+  assert.equal(replayed.writerCalls, 0, 'resume: replay makes no data-node calls');
+  assert.deepEqual(replayed.events, resumed.events, 'resume: replay leaves stored events unchanged');
 
   process.stdout.write(`${JSON.stringify({
     ok: true,
@@ -136,6 +159,12 @@ try {
     resumedPosition: 'turns/2-critic',
     uniquePositions: new Set(resumedPositions).size,
     outcome: resumed.executor.kind,
+    replay: {
+      name: 'resume: zero-effect replay',
+      engineCalls: replayed.primaryCalls + replayed.fallbackCalls,
+      dataNodeCalls: replayed.writerCalls,
+      addedEvents: replayed.events.length - resumed.events.length,
+    },
   })}\n`);
 } finally {
   await Promise.all([

@@ -539,7 +539,7 @@ describe('stored run definitions', () => {
     expect(loaded.record.payload.definition.resolvedInputs).toEqual({ attempt: 1 });
   });
 
-  it('keeps two namespaces isolated over the same physical providers', async () => {
+  it('namespace isolation: persists and reopens the same run id independently over shared providers', async () => {
     const root = await temporaryRoot();
     const first = binding(root, 'intent-one');
     const second = binding(root, 'intent-two');
@@ -550,14 +550,32 @@ describe('stored run definitions', () => {
       timestamp: '2026-08-26T04:00:00.000Z',
       graphDefinition: graph.definition,
       resolvedPlan: plan,
-      resolvedInputs: {},
+      resolvedInputs: { owner: 'first' },
       workspaceBinding: null,
-      hostBinding: null,
+      hostBinding: { bytes: new TextEncoder().encode('first host'), mediaType: 'text/plain' },
     });
 
     await expect(loadRunDefinition(second, 'same-run')).rejects.toMatchObject({
       code: 'INVALID_STORED_VALUE',
     });
+
+    await persistRunDefinition(second, {
+      runId: 'same-run',
+      eventId: 'same-run:start',
+      timestamp: '2026-08-26T04:00:00.000Z',
+      graphDefinition: graph.definition,
+      resolvedPlan: plan,
+      resolvedInputs: { owner: 'second' },
+      workspaceBinding: null,
+      hostBinding: { bytes: new TextEncoder().encode('second host'), mediaType: 'text/plain' },
+    });
+
+    const reopenedFirst = await loadRunDefinition(binding(root, 'intent-one'), 'same-run');
+    const reopenedSecond = await loadRunDefinition(binding(root, 'intent-two'), 'same-run');
+    expect(reopenedFirst.record.payload.definition.resolvedInputs).toEqual({ owner: 'first' });
+    expect(reopenedSecond.record.payload.definition.resolvedInputs).toEqual({ owner: 'second' });
+    expect(reopenedFirst.hostBindingBytes).toEqual(new TextEncoder().encode('first host'));
+    expect(reopenedSecond.hostBindingBytes).toEqual(new TextEncoder().encode('second host'));
   });
 
   it('rejects a live binding record that differs from the stored record', async () => {
