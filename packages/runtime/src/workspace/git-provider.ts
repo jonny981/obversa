@@ -281,7 +281,8 @@ export function createGitWorktreeProvider(
       };
     }
     if (anchor.head === '') return { ok: false, kind: 'no-revision' };
-    const branchRef = `refs/heads/obversa/${childId}`;
+    const branchName = `obversa/${childId}`;
+    const branchRef = `refs/heads/${branchName}`;
     const worktreePath = join(worktreeParent(root), childId);
 
     const branch = await git(root, [
@@ -302,7 +303,7 @@ export function createGitWorktreeProvider(
         return { ok: false, kind: 'exists', branchRef, worktreePath };
       }
     }
-    const added = await git(root, ['worktree', 'add', worktreePath, branchRef]);
+    const added = await git(root, ['worktree', 'add', worktreePath, branchName]);
     if (added.exitCode !== 0) {
       const worktreeExists = await git(root, ['worktree', 'list', '--porcelain']);
       if (worktreeExists.stdout.includes(worktreePath)) {

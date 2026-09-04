@@ -130,6 +130,14 @@ describe('git worktree provider', () => {
     expect(forked.branchRef).toBe('refs/heads/obversa/child-1');
     expect(await headOf(forked.worktreePath)).toBe(anchor.head);
     expect(forked.anchor.head).toBe(anchor.head);
+    const symbolicHead = await execa('git', ['symbolic-ref', '--quiet', 'HEAD'], {
+      cwd: forked.worktreePath,
+      reject: false,
+    });
+    expect.soft({ exitCode: symbolicHead.exitCode, ref: symbolicHead.stdout.trim() }).toEqual({
+      exitCode: 0,
+      ref: forked.branchRef,
+    });
 
     // The user's checkout, index, and dirty files are untouched.
     expect(await statusOf(dir)).toBe(statusBefore);
@@ -142,6 +150,17 @@ describe('git worktree provider', () => {
     expect({ exitCode: ref.exitCode, oid: ref.stdout.trim() }).toEqual({
       exitCode: 0,
       oid: anchor.head,
+    });
+
+    // Work committed in the child advances the branch returned to the caller.
+    await commitFile(forked.worktreePath, 'child.txt', 'child\n', 'advance child');
+    const childHead = await headOf(forked.worktreePath);
+    const advancedRef = await execa(
+      'git', ['show-ref', '--verify', '--hash', forked.branchRef], { cwd: dir },
+    );
+    expect.soft({ childHead, refHead: advancedRef.stdout.trim() }).toEqual({
+      childHead: expect.not.stringMatching(`^${anchor.head}$`),
+      refHead: childHead,
     });
 
     // A second fork of the same child id fails instead of duplicating.
