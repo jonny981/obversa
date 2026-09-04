@@ -151,10 +151,24 @@ function namesTestPath(specifier, file) {
   return isTestPath(target) || /\.(?:test|spec)$/.test(target);
 }
 
+// A host-role worker loads the caller's module, not an adapter discovered by
+// the runtime. Permit only this checked sequence at this entry. Any extra
+// computed import, changed target, or removed digest check is still a hatch.
+const checkedHostImport = `const modulePath = resolveHostModule(input.runRoot, host.module);
+  if (await hostModuleDigest(modulePath) !== host.digest) {
+    throw new SupervisedRunError('HOST_MODULE_CHANGED', 'The host module differs from its stored digest.');
+  }
+  const hostModule = await import(pathToFileURL(modulePath).href);
+  if (await hostModuleDigest(modulePath) !== host.digest) {
+    throw new SupervisedRunError('HOST_MODULE_CHANGED', 'The host module changed while it was loaded.');
+  }`;
+
 export function moduleSpecifiers(text, fileName = 'module.ts', { hatches = !isTestPath(fileName) } = {}) {
   const kind = scriptKinds.get(extname(fileName)) ?? ts.ScriptKind.TS;
   const source = ts.createSourceFile(fileName, text, ts.ScriptTarget.Latest, true, kind);
   const specifiers = [];
+  const checkedStart = fileName === 'packages/runner/src/supervised-worker.ts' ? text.indexOf(checkedHostImport) : -1;
+  const checkedImportStart = checkedStart < 0 ? -1 : checkedStart + checkedHostImport.indexOf('import(');
   const literal = (node) =>
     node && (ts.isStringLiteral(node) || ts.isNoSubstitutionTemplateLiteral(node)) ? node.text : null;
   // Loader references handled as a callee, so their later visit is not a
@@ -396,7 +410,9 @@ export function moduleSpecifiers(text, fileName = 'module.ts', { hatches = !isTe
           || (accessOn(callee, named('module')) && member !== 'require') || isModuleModule(node.arguments[0])));
         specifiers.push(unreadable ? null : literal(node.arguments[0]));
       } else if (isImport && node.arguments.length > 0) {
-        specifiers.push(hatches && isModuleModule(node.arguments[0]) ? null : literal(node.arguments[0]));
+        if (node.getStart(source) !== checkedImportStart) {
+          specifiers.push(hatches && isModuleModule(node.arguments[0]) ? null : literal(node.arguments[0]));
+        }
       }
     }
     // JSDoc is not part of the child walk; its type expressions can carry
@@ -1167,8 +1183,8 @@ for (const absolute of files) {
 }
 
 for (const [name, rule] of packageRules) {
-  if (!['interface', 'runtime', 'plugin', 'surface'].includes(rule.kind))
-    failures.push(`${name}: boundary kind must be interface, runtime, plugin, or surface; found ${rule.kind ?? 'absent'}`);
+  if (!['interface', 'runtime', 'plugin', 'surface', 'host'].includes(rule.kind))
+    failures.push(`${name}: boundary kind must be interface, runtime, plugin, surface, or host; found ${rule.kind ?? 'absent'}`);
   const directory = join(root, rule.directory);
   if (rule.kind === 'runtime' || rule.kind === 'plugin') {
     for (const dependency of [...rule.dependencies, ...rule.peerDependencies]) {

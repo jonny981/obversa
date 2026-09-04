@@ -646,6 +646,31 @@ test("the TypeScript hatch scan refuses the loader hatches and exempts test file
   assert.equal(hatches('eval("1");', "packages/runtime/tests/a.spec.ts"), false, "a test file is exempt from the hatch rules");
 });
 
+test("only the runner worker's single digest-checked host import is permitted", () => {
+  const worker = "packages/runner/src/supervised-worker.ts";
+  const source = `const modulePath = resolveHostModule(input.runRoot, host.module);
+  if (await hostModuleDigest(modulePath) !== host.digest) {
+    throw new SupervisedRunError('HOST_MODULE_CHANGED', 'The host module differs from its stored digest.');
+  }
+  const hostModule = await import(pathToFileURL(modulePath).href);
+  if (await hostModuleDigest(modulePath) !== host.digest) {
+    throw new SupervisedRunError('HOST_MODULE_CHANGED', 'The host module changed while it was loaded.');
+  }`;
+  const hatches = (text, file = worker) => moduleSpecifiers(text, file).includes(null);
+  assert.equal(hatches(source), false, "the checked host-role import is permitted");
+  assert.equal(hatches(source, "packages/runner/src/other-worker.ts"), true, "another runner file has no loader allowance");
+  assert.equal(hatches(source, "packages/runtime/src/runtime/supervised-worker.ts"), true, "runtime cannot import host code");
+  assert.equal(hatches(`${source}\nawait import(pathToFileURL(modulePath).href);\n`), true, "a second computed import is refused");
+  assert.equal(hatches(source.replace(
+    "if (await hostModuleDigest(modulePath) !== host.digest)", "if (false)")), true, "the preceding digest check is required");
+  const afterImport = source.indexOf('const hostModule');
+  assert.equal(hatches(source.slice(0, afterImport) + source.slice(afterImport).replace(
+    "if (await hostModuleDigest(modulePath) !== host.digest)", "if (false)")), true, "the following digest check is required");
+  assert.equal(hatches(source.replace(
+    "import(pathToFileURL(modulePath).href)", "import(pathToFileURL(otherPath).href)")), true, "the imported path must be the checked path");
+  assert.equal(hatches(`${source}\neval('1');\n`), true, "all other loader hatches remain refused in the worker");
+});
+
 test("a TypeScript source with a loader hatch fails the live guard on a disposable copy", { timeout: 300_000 }, () => {
   const real = new URL("..", import.meta.url).pathname;
   const root = copyTree(real);
