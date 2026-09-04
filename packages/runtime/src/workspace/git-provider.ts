@@ -284,11 +284,20 @@ export function createGitWorktreeProvider(
     const branchRef = `refs/heads/obversa/${childId}`;
     const worktreePath = join(worktreeParent(root), childId);
 
-    const branch = await git(root, ['branch', branchRef, anchor.head]);
+    const branch = await git(root, [
+      'update-ref',
+      '--no-deref',
+      branchRef,
+      anchor.head,
+      '0'.repeat(anchor.head.length),
+    ]);
     if (branch.exitCode !== 0) {
       // A bare ref from an earlier incomplete fork at the same anchored
       // revision is finished by this retry; anything else is a collision.
-      const existing = await git(root, ['rev-parse', '--verify', `${branchRef}^{commit}`]);
+      const exact = await git(root, ['show-ref', '--verify', '--quiet', branchRef]);
+      const existing = exact.exitCode === 0
+        ? await git(root, ['show-ref', '--verify', '--hash', branchRef])
+        : exact;
       if (existing.exitCode !== 0 || existing.stdout.trim() !== anchor.head) {
         return { ok: false, kind: 'exists', branchRef, worktreePath };
       }

@@ -137,14 +137,35 @@ describe('git worktree provider', () => {
 
     // The new ref points at the anchored revision.
     const ref = await execa(
-      'git', ['rev-parse', 'refs/heads/obversa/child-1'], { cwd: dir },
+      'git', ['show-ref', '--verify', '--hash', forked.branchRef], { cwd: dir, reject: false },
     );
-    expect(ref.stdout.trim()).toBe(anchor.head);
+    expect({ exitCode: ref.exitCode, oid: ref.stdout.trim() }).toEqual({
+      exitCode: 0,
+      oid: anchor.head,
+    });
 
     // A second fork of the same child id fails instead of duplicating.
     const second = await provider.fork(anchor, 'child-1', lease.ok === true ? lease.token : '');
     expect(second.ok).toBe(false);
     expect(second.ok === false && second.kind).toBe('exists');
+  });
+
+  it('refuses a pre-existing user branch with the child name', async () => {
+    const dir = await makeRepo('sha1');
+    await execa('git', ['branch', 'obversa/child-1', 'HEAD'], { cwd: dir });
+    await commitFile(dir, 'later.txt', 'later\n', 'later');
+    const provider = createGitWorktreeProvider({ repositoryPath: dir });
+    const anchor = await provider.capture();
+    const lease = await provider.acquireLease('runner-a', 'run-1', anchor);
+
+    const forked = await provider.fork(
+      anchor,
+      'child-1',
+      lease.ok === true ? lease.token : '',
+    );
+
+    expect(forked.ok).toBe(false);
+    expect(forked.ok === false && forked.kind).toBe('exists');
   });
 
   it('refuses to fork a changed anchor before creating anything', async () => {
@@ -379,7 +400,7 @@ describe('git worktree provider', () => {
     const token = lease.ok === true ? lease.token : '';
 
     // A bare ref from an earlier interrupted fork: the retry finishes it.
-    await execa('git', ['branch', 'refs/heads/obversa/child-1', anchor.head], { cwd: dir });
+    await execa('git', ['branch', 'obversa/child-1', anchor.head], { cwd: dir });
     const finished = await provider.fork(anchor, 'child-1', token);
     expect(finished.ok).toBe(true);
     if (finished.ok === true) {
