@@ -32,6 +32,8 @@ export interface OwnedProcessTreeRequest {
 
 export interface StopOwnedProcessTreeRequest extends OwnedProcessTreeRequest {
   readonly graceMs: number;
+  /** Only the outer command request may sweep an inherited owner. */
+  readonly ownerId?: Sha256Digest;
 }
 
 export interface PipeOwnerProbe {
@@ -289,7 +291,14 @@ export async function readAttemptMarkerProcessIds(
   procRoot = '/proc',
 ): Promise<readonly number[]> {
   const attemptId = validateAttemptId(rawAttemptId);
-  const marker = Buffer.from(`OBVERSA_ATTEMPT_ID=${attemptId}`, 'utf8');
+  return await readMarkerProcessIds(`OBVERSA_ATTEMPT_ID=${attemptId}`, procRoot);
+}
+
+async function readMarkerProcessIds(
+  value: string,
+  procRoot = '/proc',
+): Promise<readonly number[]> {
+  const marker = Buffer.from(value, 'utf8');
   const entries = await readdir(procRoot, { withFileTypes: true });
   const found: number[] = [];
 
@@ -318,6 +327,28 @@ export async function readAttemptMarkerProcessIds(
   }
 
   return Object.freeze(found.sort((left, right) => left - right));
+}
+
+/**
+ * Discover an inherited command owner through exact Linux environment entries.
+ * Other platforms retain process-tree cleanup without owner-marker discovery.
+ */
+export async function inspectOwnerMarkedProcesses(
+  ownerId: Sha256Digest,
+): Promise<readonly ProcessIdentity[]> {
+  if (typeof ownerId !== 'string' || !SHA256_DIGEST.test(ownerId)) {
+    throw new TypeError('ownerId must be a lowercase SHA-256 digest');
+  }
+  if (process.platform !== 'linux') {
+    return Object.freeze([]);
+  }
+  const before = await processTable();
+  const marker = `OBVERSA_RUN_OWNER=${ownerId}`;
+  const markedPids = new Set(await readMarkerProcessIds(marker));
+  const previous = new Set(before.map(({ identity }) => identityKey(identity)));
+  return Object.freeze((await processTable())
+    .filter(({ identity }) => markedPids.has(identity.pid) && previous.has(identityKey(identity)))
+    .map(({ identity }) => identity));
 }
 
 /**
@@ -462,7 +493,14 @@ export async function stopOwnedProcessTree(
 ): Promise<readonly ProcessIdentity[]> {
   validateRequest(request);
   const graceMs = nonNegativeDuration(request.graceMs, 'graceMs');
+  const ownerId = process.platform === 'linux' ? request.ownerId : undefined;
   let observed = request.observed ?? [];
+  const discoverOwner = async (): Promise<void> => {
+    if (ownerId !== undefined) {
+      observed = mergeObserved(observed, await inspectOwnerMarkedProcesses(ownerId));
+    }
+  };
+  await discoverOwner();
   if (process.platform === 'win32') {
     await terminateWindowsTree(request.rootPid, false);
     observed = mergeObserved(
@@ -478,24 +516,31 @@ export async function stopOwnedProcessTree(
 
   const gracefulDeadline = Date.now() + graceMs;
   while (Date.now() < gracefulDeadline) {
+    await discoverOwner();
     const remaining = await inspectOwnedProcessTree({ ...request, observed });
-    if (remaining.length === 0) return Object.freeze([]);
+    if (remaining.length === 0 && ownerId === undefined) return Object.freeze([]);
     observed = mergeObserved(observed, remaining);
     await delay(Math.min(POLL_MS, Math.max(1, gracefulDeadline - Date.now())));
   }
 
   await terminateWindowsTree(request.rootPid, true);
+  await discoverOwner();
   observed = mergeObserved(
     observed,
     await signalMatching({ ...request, observed }, 'SIGKILL'),
   );
   const forceDeadline = Date.now() + FORCE_KILL_WAIT_MS;
   while (Date.now() < forceDeadline) {
+    await discoverOwner();
     const remaining = await inspectOwnedProcessTree({ ...request, observed });
     if (remaining.length === 0) return Object.freeze([]);
     observed = mergeObserved(observed, remaining);
+    if (ownerId !== undefined) {
+      await signalMatching({ ...request, observed }, 'SIGKILL');
+    }
     await delay(POLL_MS);
   }
 
+  await discoverOwner();
   return await inspectOwnedProcessTree({ ...request, observed });
 }

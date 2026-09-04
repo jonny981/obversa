@@ -36,6 +36,17 @@ export const DEFAULT_OWNED_COMMAND_LIMITS = Object.freeze({
   maxMemoryBytes: 4 * 1_024 * 1_024 * 1_024,
 });
 
+export type CommandCleanupCapability = 'inherited-owner' | 'observed-processes';
+
+/**
+ * Linux can discover exact inherited owner markers. Other platforms clean
+ * observed processes (and retained pipes on macOS). On macOS a helper that
+ * moves into a new session before the watchdog samples it is not swept.
+ */
+export function commandCleanupCapability(): CommandCleanupCapability {
+  return process.platform === 'linux' ? 'inherited-owner' : 'observed-processes';
+}
+
 export type OwnedCommandErrorCode =
   | 'INVALID_EXECUTABLE'
   | 'INVALID_COMMAND'
@@ -70,6 +81,8 @@ export interface OwnedCommandRequest {
   readonly inheritParentEnv?: boolean;
   readonly stdin: string;
   readonly attemptId: Sha256Digest;
+  /** Fresh outer command owner; nested commands preserve an inherited owner. */
+  readonly ownerId?: Sha256Digest;
   readonly runId: string;
   readonly timeoutMs: number;
   readonly teardownGraceMs: number;
@@ -257,6 +270,11 @@ function validateRequest(request: OwnedCommandRequest): OwnedCommandRequest {
   }
 
   const timeoutMs = positiveSafeInteger(request.timeoutMs, 'timeoutMs');
+  if (request.ownerId !== undefined && (
+    typeof request.ownerId !== 'string' || !SHA256_DIGEST.test(request.ownerId)
+  )) {
+    throw new OwnedCommandError('INVALID_COMMAND', 'ownerId must be a lowercase SHA-256 digest');
+  }
   const teardownGraceMs = nonNegativeSafeInteger(
     request.teardownGraceMs,
     'teardownGraceMs',
@@ -346,11 +364,19 @@ export async function runOwnedCommand(
   const request = validateRequest(rawRequest);
   if (signal.aborted) return emptyResult(true);
 
+  const parentOwner = process.env.OBVERSA_RUN_OWNER;
+  const inheritedOwner = parentOwner !== undefined && SHA256_DIGEST.test(parentOwner)
+    ? parentOwner as Sha256Digest
+    : undefined;
+  const ownerId = inheritedOwner ?? request.ownerId;
+  const ownsOwner = inheritedOwner === undefined && request.ownerId !== undefined;
+
   const cancellation = new AbortController();
   const subprocess = execa(request.executable, [...request.args], {
     cwd: request.cwd,
     env: {
       ...request.env,
+      ...(ownerId === undefined ? {} : { OBVERSA_RUN_OWNER: ownerId }),
       OBVERSA_ATTEMPT_ID: request.attemptId,
       OBVERSA_RUN_ID: request.runId,
       OBVERSA_HEADLESS: '1',
@@ -379,6 +405,7 @@ export async function runOwnedCommand(
   ].filter((descriptor): descriptor is number => descriptor !== undefined);
   const treeRequest = {
     attemptId: request.attemptId,
+    ...(ownsOwner ? { ownerId } : {}),
     rootPid,
     rootProcessGroupId,
   } as const;
@@ -605,6 +632,7 @@ export { redactEnvValues, redactSecrets, scrubCapture };
 export {
   capturePipeOwnerProbe,
   inspectAttemptMarkedProcesses,
+  inspectOwnerMarkedProcesses,
   inspectOwnedProcessTree,
   inspectPipeHoldingProcesses,
   measureOwnedProcessMemory,
