@@ -192,8 +192,9 @@ export function moduleSpecifiers(text, fileName = 'module.ts', { hatches = !isTe
   const moduleClassLoaders = new Set([
     'registerHooks', '_load', '_resolveFilename', 'runMain', '_extensions', '_cache', '_pathCache', '_initPaths', '_nodeModulePaths',
     // and process's own ways to a module: the builtin factory, native
-    // bindings, and the main Module.
-    'getBuiltinModule', 'binding', '_linkedBinding', 'dlopen', 'mainModule',
+    // bindings, and the main Module. `process.binding` is already caught
+    // by the process-root rule; an ordinary `.binding` property is data.
+    'getBuiltinModule', '_linkedBinding', 'dlopen', 'mainModule',
   ]);
   const moduleDataMembers = new Set(['exports', 'id', 'filename', 'path', 'loaded']);
   const isEquality = (parent) => ts.isBinaryExpression(parent) && [

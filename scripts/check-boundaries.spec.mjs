@@ -639,6 +639,9 @@ test("the TypeScript hatch scan refuses the loader hatches and exempts test file
     assert.equal(hatches(text), true, text);
   }
   assert.equal(hatches('globalThis.setTimeout(() => {}, 1); const e = process.env.X;'), false, "listed data members stay usable");
+  assert.equal(hatches('const id = record.binding.requestId;'), false, "an ordinary binding property is data");
+  assert.equal(hatches('process.binding("fs");'), true, "process.binding is a loader hatch");
+  assert.equal(hatches('process["binding"]("fs");'), true, "bracket access to process.binding is a loader hatch");
   assert.equal(hatches('import { x } from "./ok.js";'), false, "a plain import is no hatch");
   assert.equal(hatches('eval("1");', "packages/runtime/tests/a.spec.ts"), false, "a test file is exempt from the hatch rules");
 });
