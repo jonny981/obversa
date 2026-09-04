@@ -22,6 +22,7 @@ import {
 import { StorageError } from '../storage/error.js';
 import {
   ApprovalSubjectError,
+  assertApprovalPermissionsAdmitted,
   prepareApprovalRecord,
   snapshotApprovalSubject,
   validateApprovalRecord,
@@ -286,6 +287,7 @@ export async function createStoredCallbackClient(
       }
       if (approvalSubject !== undefined) {
         assertSubjectMatchesRequest(storedRequest, approvalSubject);
+        assertApprovalPermissionsAdmitted(approvalSubject, run.resolvedPlan.plan.permissions.admitted);
       }
       await change((state) => {
         const existing = state.client.history(storedRequest.requestId).some((event) => (
@@ -328,6 +330,7 @@ export async function createStoredCallbackClient(
         }
         if (subject !== undefined) {
           try {
+            assertApprovalPermissionsAdmitted(subject, run.resolvedPlan.plan.permissions.admitted);
             validateActionDecision(storedResponse as ActionDecision);
           } catch (error) {
             return {

@@ -4,7 +4,9 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
 import {
   createApprovalCallbackGate,
+  prepareApprovalRecord,
   resolveApproval,
+  snapshotApprovalSubject,
   validateApprovalRecord,
   type ApprovalRecord,
   type ApprovalSubjectInput,
@@ -14,6 +16,8 @@ import type { CallbackGateDefinition, CallbackRequest } from '../src/callback/ga
 import type { DomainEventEnvelope } from '../src/events/envelope.js';
 import { digestJson, type JsonObject, type Sha256Digest } from '../src/graph/value.js';
 import type { WorkspaceAnchor } from '../src/workspace/provider.js';
+import { loadRunDefinition } from '../src/runtime/run-definition.js';
+import { appendRunEvent } from '../src/runtime/run-event.js';
 import {
   createStoredRunFixture,
   type StoredRunFixture,
@@ -78,7 +82,10 @@ function approvalRequest(
 let run: StoredRunFixture;
 
 beforeEach(async () => {
-  run = await createStoredRunFixture('approval');
+  run = await createStoredRunFixture('approval', [
+    { name: 'workspace.write', scope: { paths: ['packages/runtime'] } },
+    { name: 'workspace.read', scope: { paths: ['packages/runtime'], recursive: true } },
+  ]);
 });
 
 afterEach(async () => {
@@ -116,7 +123,104 @@ async function approvalEvents(): Promise<readonly DomainEventEnvelope[]> {
   return events;
 }
 
+async function storeApprovalRequest(subject: ApprovalSubjectInput) {
+  const request = approvalRequest(subject);
+  // Replay a request written before permission checks were enforced.
+  await appendRunEvent(run.storage, run.runId, {
+    eventId: randomUUID(),
+    type: 'callback:history-recorded',
+    version: 1,
+    timestamp: new Date().toISOString(),
+    correlationId: run.runId,
+    causationId: null,
+    payload: {
+      event: { kind: 'callback-requested', request },
+      approvalSubject: snapshotApprovalSubject(subject),
+    },
+  });
+  return request;
+}
+
 describe('callback approval', () => {
+  it.each([
+    { name: 'network.connect', scope: { paths: ['packages/runtime'] } },
+    { name: 'workspace.write', scope: { paths: ['packages'] } },
+    { name: 'workspace.write', scope: { paths: ['packages/runtime/src'] } },
+  ])('rejects posting a permission outside the admitted grants: %j', async (permission) => {
+    const subject = approvalSubject({ effectivePermissions: [permission] });
+    const client = await createStoredCallbackClient(run.storage, run.runId);
+
+    await expect(client.post(approvalRequest(subject), subject))
+      .rejects.toMatchObject({ code: 'SUBJECT_MISMATCH' });
+    expect(await client.history()).toEqual([]);
+    expect(await approvalEvents()).toEqual([]);
+  });
+
+  it('cannot approve a write when the stored plan admits no permissions', async () => {
+    await run.close();
+    run = await createStoredRunFixture('approval-no-permissions');
+    const subject = approvalSubject();
+    const request = await storeApprovalRequest(subject);
+    const client = await createStoredCallbackClient(run.reopen(), run.runId);
+    const claim = await client.claim(request.requestId, 'router-a');
+    if (!claim.ok) throw new Error('fixture claim failed');
+
+    await expect(client.submit(
+      request.requestId,
+      claim.claimToken,
+      'router-a',
+      request.digest,
+      { kind: 'allow' },
+      { id: 'owner', kind: 'human' },
+    )).resolves.toMatchObject({ ok: false, kind: 'invalid' });
+    expect((await client.history()).some((event) => (
+      event.kind === 'callback-submitted'
+    ))).toBe(false);
+    expect(await approvalEvents()).toEqual([]);
+  });
+
+  it('a stored allow outside admission resolves to wait', async () => {
+    const subject = approvalSubject({
+      effectivePermissions: [{ name: 'workspace.write', scope: { paths: ['packages'] } }],
+    });
+    const request = await storeApprovalRequest(subject);
+    const stored = await loadRunDefinition(run.storage, run.runId);
+    const prepared = prepareApprovalRecord(run.runId, {
+      request,
+      planDigest: stored.resolvedPlan.digest,
+      graph: {
+        definitionDigest: stored.resolvedPlan.plan.graph.definitionDigest,
+        typeVersion: stored.resolvedPlan.plan.graph.typeVersion,
+      },
+      subject: snapshotApprovalSubject(subject),
+      actor: { id: 'owner', kind: 'human' },
+      responsePath: 'router-a',
+      submission: {
+        kind: 'callback-submitted',
+        requestId: request.requestId,
+        requestDigest: request.digest,
+        routerId: 'router-a',
+        response: { kind: 'allow' },
+      },
+    });
+    await appendRunEvent(run.storage, run.runId, prepared.event);
+
+    await expect(resolveApproval(run.reopen(), run.runId, { request, ...subject }))
+      .resolves.toMatchObject({ kind: 'wait' });
+  });
+
+  it.each([
+    { permissions: [] },
+    { permissions: [{ name: 'workspace.read', scope: { recursive: true, paths: ['packages/runtime'] } }] },
+  ])('allows a subset of admitted grants with reordered JSON keys: %j', async ({ permissions }) => {
+    const subject = approvalSubject({ effectivePermissions: permissions });
+    const { request, submitted } = await submitApproval(subject);
+
+    expect(submitted).toMatchObject({ ok: true });
+    await expect(resolveApproval(run.reopen(), run.runId, { request, ...subject }))
+      .resolves.toEqual({ kind: 'allow' });
+  });
+
   it('changing one approved byte invalidates approval', async () => {
     const subject = approvalSubject();
     const request = approvalRequest(subject);

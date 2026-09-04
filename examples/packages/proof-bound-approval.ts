@@ -60,7 +60,10 @@ const packageIdentity = {
 } as const;
 const plan = resolveGraphPlan(graph.describe(), {
   package: packageIdentity,
-  admission: { package: packageIdentity, permissions: [] },
+  admission: {
+    package: packageIdentity,
+    permissions: [{ name: 'workspace.write', scope: { paths: ['packages/runtime'] } }],
+  },
   executionLanes: [],
 });
 const workspaceAnchor: WorkspaceAnchor = {

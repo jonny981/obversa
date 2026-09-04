@@ -7,6 +7,7 @@ import type {
 } from '../events/envelope.js';
 import type { PermissionDescriptor } from '../graph/plan.js';
 import {
+  canonicalJson,
   cloneFrozenJson,
   digestJson,
   type JsonObject,
@@ -208,6 +209,22 @@ export function validateApprovalSubject(value: unknown): ApprovalSubject {
   return subject as ApprovalSubject;
 }
 
+export function assertApprovalPermissionsAdmitted(
+  subject: ApprovalSubject,
+  admitted: readonly PermissionDescriptor[],
+): void {
+  for (const permission of subject.effectivePermissions) {
+    if (!admitted.some((grant) => (
+      grant.name === permission.name
+      && canonicalJson(grant.scope) === canonicalJson(permission.scope as JsonValue)
+    ))) {
+      throw new ApprovalSubjectError(
+        `Approval permission "${permission.name}" is outside the stored plan admission.`,
+      );
+    }
+  }
+}
+
 interface StoredApprovalBindingInput {
   readonly request: CallbackRequest;
   readonly planDigest: Sha256Digest;
@@ -407,6 +424,11 @@ export async function resolveApproval(
   const request = validateCallbackRequest(current.request);
   const subject = snapshotApprovalSubject(current);
   const run = await loadRunDefinition(storage, runId);
+  try {
+    assertApprovalPermissionsAdmitted(subject, run.resolvedPlan.plan.permissions.admitted);
+  } catch {
+    return staleApproval(request);
+  }
   const loaded = await readRunEvents(storage, runId);
   const payload = approvalPayloadFor(loaded.events, request.requestId);
   if (payload === undefined

@@ -3,7 +3,7 @@ import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
-import { resolveGraphPlan } from '../src/graph/plan.js';
+import { resolveGraphPlan, type PermissionDescriptor } from '../src/graph/plan.js';
 import { compileGraph } from '../src/graph/type.js';
 import { dag } from '../src/graph-types/dag.js';
 import {
@@ -19,7 +19,10 @@ export interface StoredRunFixture {
   close(): Promise<void>;
 }
 
-export async function createStoredRunFixture(name: string): Promise<StoredRunFixture> {
+export async function createStoredRunFixture(
+  name: string,
+  permissions: readonly PermissionDescriptor[] = [],
+): Promise<StoredRunFixture> {
   const root = await mkdtemp(join(tmpdir(), `obversa-${name}-`));
   const directory = join(root, 'storage');
   const namespace = `${name}-tests`;
@@ -69,7 +72,7 @@ export async function createStoredRunFixture(name: string): Promise<StoredRunFix
     graphDefinition: graph.definition,
     resolvedPlan: resolveGraphPlan(graph.describe(), {
       package: packageIdentity,
-      admission: { package: packageIdentity, permissions: [] },
+      admission: { package: packageIdentity, permissions },
       executionLanes: [],
     }),
     resolvedInputs: {},
