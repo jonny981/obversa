@@ -120,3 +120,41 @@ must validate them before it submits the answer.
 `createCallbackClient` keeps its event history in memory. Replay proves the
 history contains all callback state, but the host must store that history when
 requests must survive a process exit.
+
+## Store callbacks with a run
+
+`createStoredCallbackClient(storage, runId)` writes callback history into the
+run's event stream. Opening a new client on the same run rebuilds pending,
+claimed, released, submitted, and superseded state from those events.
+
+The stored client uses the event stream revision when it changes state. Two
+routers that race for one request therefore produce one winning claim. A
+storage failure does not leave an in-memory answer that was never recorded.
+
+## Bind approval to exact bytes
+
+`createApprovalCallbackGate(definition, subject)` adds the subject digest to
+the request input before it creates the request ID. The subject names the input
+artifact hashes, proof scope and artifact, proposed output bytes, effective
+permissions, and a workspace anchor or `null` when no workspace is bound.
+Changed subject bytes therefore create a different request.
+
+Post that request with the same subject:
+
+```ts
+const request = createApprovalCallbackGate(definition, subject);
+await callbacks.post(request, subject);
+```
+
+The stored client refuses a missing or different subject with
+`ApprovalSubjectError`, whose code is `SUBJECT_MISMATCH`. A subject-backed
+submission also needs caller-supplied actor data and an action decision of
+`allow`, `wait`, or `deny`. The client validates the response, then writes the
+callback submission and approval record in one event batch.
+
+`resolveApproval(storage, runId, { request, ...subject })` returns the stored
+decision only while the request, run plan, graph, proof, inputs, proposed
+output, permissions, and workspace anchor still match. Otherwise it returns a
+`wait` decision. The actor data records what the caller supplied; this API does
+not authenticate that actor. An approval record does not apply the proposed
+change.

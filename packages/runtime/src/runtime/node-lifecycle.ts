@@ -439,7 +439,7 @@ function validateLane(value: PreparedEngineLane, index: number): PreparedEngineL
   });
 }
 
-function validateDecision(value: ActionDecision): ActionDecision {
+export function validateActionDecision(value: ActionDecision): ActionDecision {
   if (typeof value !== 'object' || value === null || Array.isArray(value)) {
     throw new TypeError('action decision must be an object');
   }
@@ -780,7 +780,7 @@ export async function executeNodeAttempt(
     let decision: ActionDecision | null = null;
     if (facts.failure === null) {
       try {
-        decision = validateDecision(await decideAction());
+        decision = validateActionDecision(await decideAction());
       } catch (error) {
         facts.failure = failure('ACTION_POLICY', error);
       }

@@ -14,7 +14,12 @@
 
 import { createHash } from 'node:crypto';
 
-import { canonicalJson, type JsonObject, type JsonValue } from '../graph/value.js';
+import {
+  canonicalJson,
+  cloneFrozenJson,
+  type JsonObject,
+  type JsonValue,
+} from '../graph/value.js';
 
 export interface CallbackGateDefinition {
   readonly gateId: string;
@@ -40,6 +45,17 @@ export interface CallbackRequest extends JsonObject {
   readonly presentation: JsonObject;
 }
 
+const REQUEST_FIELDS = [
+  'decisionText',
+  'digest',
+  'gateId',
+  'gateVersion',
+  'input',
+  'presentation',
+  'requestId',
+  'responseSchema',
+] as const;
+
 function digestOf(definition: CallbackGateDefinition): string {
   return createHash('sha256').update(canonicalJson({
     gateId: definition.gateId,
@@ -63,17 +79,25 @@ export function createCallbackGate(
   if (typeof definition.decisionText !== 'string' || definition.decisionText.length === 0) {
     throw new Error('a callback gate needs decision text');
   }
-  const digest = digestOf(definition);
-  return Object.freeze({
-    requestId: `${definition.gateId}#${definition.gateVersion}#${digest}`,
+  const fixed = cloneFrozenJson({
     gateId: definition.gateId,
     gateVersion: definition.gateVersion,
-    digest,
     decisionText: definition.decisionText,
     responseSchema: definition.responseSchema,
     input: definition.input,
     presentation: definition.presentation ?? {},
-  });
+  }) as unknown as CallbackGateDefinition;
+  const digest = digestOf(fixed);
+  return cloneFrozenJson({
+    requestId: `${fixed.gateId}#${fixed.gateVersion}#${digest}`,
+    gateId: fixed.gateId,
+    gateVersion: fixed.gateVersion,
+    digest,
+    decisionText: fixed.decisionText,
+    responseSchema: fixed.responseSchema,
+    input: fixed.input,
+    presentation: fixed.presentation ?? {},
+  }) as CallbackRequest;
 }
 
 /** The digest a gate definition produces, without creating a request. */
@@ -81,6 +105,43 @@ export function callbackRequestDigest(
   definition: Omit<CallbackGateDefinition, 'presentation'>,
 ): string {
   return digestOf({ ...definition, presentation: {} } as CallbackGateDefinition);
+}
+
+/** Validate stored request bytes and their content-derived identity. */
+export function validateCallbackRequest(value: unknown): CallbackRequest {
+  const stored = cloneFrozenJson(value as JsonValue);
+  if (stored === null || typeof stored !== 'object' || Array.isArray(stored)) {
+    throw new TypeError('a stored callback request must be an object');
+  }
+  const record = stored as JsonObject;
+  const fields = Object.keys(record).sort();
+  if (fields.length !== REQUEST_FIELDS.length
+    || fields.some((field, index) => field !== REQUEST_FIELDS[index])) {
+    throw new TypeError('a stored callback request has missing or unknown fields');
+  }
+  if (typeof record.gateId !== 'string'
+    || typeof record.gateVersion !== 'number'
+    || typeof record.decisionText !== 'string'
+    || record.responseSchema === null
+    || typeof record.responseSchema !== 'object'
+    || Array.isArray(record.responseSchema)
+    || record.presentation === null
+    || typeof record.presentation !== 'object'
+    || Array.isArray(record.presentation)) {
+    throw new TypeError('a stored callback request has invalid fields');
+  }
+  const rebuilt = createCallbackGate({
+    gateId: record.gateId,
+    gateVersion: record.gateVersion,
+    decisionText: record.decisionText,
+    responseSchema: record.responseSchema as JsonObject,
+    input: record.input as JsonValue,
+    presentation: record.presentation as JsonObject,
+  });
+  if (canonicalJson(stored) !== canonicalJson(rebuilt)) {
+    throw new TypeError('stored callback request bytes do not match its identity');
+  }
+  return stored as CallbackRequest;
 }
 
 function hasJsonType(value: unknown, type: unknown): boolean {

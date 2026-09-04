@@ -57,7 +57,13 @@ import type { GraphCommand } from '../graph/commands.js';
 import type { GraphDefinition, NodeId } from '../graph/kernel.js';
 import type { ExecutionLaneDescription, GraphDescriptionInput } from '../graph/plan.js';
 import type { GraphEvent, GraphType } from '../graph/type.js';
-import { GraphValidationError, type GraphValidationIssue, type JsonObject, type JsonValue } from '../graph/value.js';
+import {
+  GraphValidationError,
+  type GraphValidationIssue,
+  type JsonObject,
+  type JsonValue,
+  type Sha256Digest,
+} from '../graph/value.js';
 
 type ConvergenceExecutionTargetData = {
   readonly adapter: string;
@@ -188,6 +194,7 @@ export interface SeatRecord extends JsonObject {
   readonly modelFamily: string | null;
   readonly inputHashes: JsonObject | null;
   readonly workspaceFingerprint: string | null;
+  readonly proofArtifactDigest: Sha256Digest | null;
   readonly findings: readonly ConvergenceFinding[];
   /** Set when the seat was invalidated while its attempt was in flight; the late verdict is discarded. */
   readonly stale: boolean;
@@ -209,11 +216,13 @@ export interface ConvergenceStatus extends JsonObject {
 export interface ConvergenceReviewEvidence extends JsonObject {
   readonly inputHashes: JsonObject;
   readonly workspaceFingerprint: string;
+  readonly proofArtifactDigest: Sha256Digest;
 }
 
 export type ConvergenceRequirements = { readonly memory: 'unused' };
 
 const ROLES = new Set(['generator', 'evaluator', 'repair', 'seat']);
+const SHA256_DIGEST = /^sha256:[0-9a-f]{64}$/u;
 
 function issue(code: string, path: string, message: string): GraphValidationIssue {
   return { code, path, message };
@@ -400,6 +409,7 @@ export const convergence: GraphType<
           modelFamily: null,
           inputHashes: null,
           workspaceFingerprint: null,
+          proofArtifactDigest: null,
           findings: [],
           stale: false,
         },
@@ -420,10 +430,13 @@ export const convergence: GraphType<
         inputHashes === null
         || Object.values(inputHashes).some((value) => typeof value !== 'string')
         || typeof record?.workspaceFingerprint !== 'string'
+        || typeof record.proofArtifactDigest !== 'string'
+        || !SHA256_DIGEST.test(record.proofArtifactDigest)
       ) return null;
       return {
         inputHashes: inputHashes as JsonObject,
         workspaceFingerprint: record.workspaceFingerprint,
+        proofArtifactDigest: record.proofArtifactDigest as Sha256Digest,
       };
     };
 
@@ -443,6 +456,7 @@ export const convergence: GraphType<
       return {
         inputHashes: Object.fromEntries(paths.map((path) => [path, evidence.inputHashes[path]!])),
         workspaceFingerprint: evidence.workspaceFingerprint,
+        proofArtifactDigest: evidence.proofArtifactDigest,
       };
     };
 
@@ -483,6 +497,7 @@ export const convergence: GraphType<
         modelFamily: target?.modelFamily ?? null,
         inputHashes: evidence?.inputHashes ?? null,
         workspaceFingerprint: evidence?.workspaceFingerprint ?? null,
+        proofArtifactDigest: evidence?.proofArtifactDigest ?? null,
         findings,
         stale: false,
       };
@@ -601,6 +616,7 @@ export const convergence: GraphType<
                     modelFamily: null,
                     inputHashes: null,
                     workspaceFingerprint: null,
+                    proofArtifactDigest: null,
                     findings: [] as readonly ConvergenceFinding[],
                     stale: false,
                   }
@@ -639,10 +655,12 @@ export const convergence: GraphType<
                   const seat = state.seats[id]!;
                   const recordedEvidence = seat.inputHashes === null
                     || seat.workspaceFingerprint === null
+                    || seat.proofArtifactDigest === null
                     ? null
                     : {
                         inputHashes: seat.inputHashes,
                         workspaceFingerprint: seat.workspaceFingerprint,
+                        proofArtifactDigest: seat.proofArtifactDigest,
                       };
                   const currentEvidence = reviewEvidenceForSeat(id, reviewEvidence);
                   if (seat.outcome === 'valid'
@@ -651,7 +669,9 @@ export const convergence: GraphType<
                       || !isDeepStrictEqual(
                         recordedEvidence.inputHashes,
                         currentEvidence.inputHashes,
-                      ))) {
+                      )
+                      || recordedEvidence.proofArtifactDigest
+                        !== currentEvidence.proofArtifactDigest)) {
                     nextNodes[id] = nodeState('pending', nextNodes[id]!.attempts, null);
                     nextSeats[id] = {
                       ...seat,
@@ -660,6 +680,7 @@ export const convergence: GraphType<
                       confidence: null,
                       inputHashes: null,
                       workspaceFingerprint: null,
+                      proofArtifactDigest: null,
                       findings: [],
                     };
                   }
@@ -813,6 +834,7 @@ export const convergence: GraphType<
                   confidence: null,
                   inputHashes: null,
                   workspaceFingerprint: null,
+                  proofArtifactDigest: null,
                   findings: [],
                 },
               },
@@ -850,13 +872,18 @@ export const convergence: GraphType<
           }];
         }
 
-        const dispatch = (nodeId: NodeId, prefix: string): GraphCommand => {
+        const dispatch = (
+          nodeId: NodeId,
+          prefix: string,
+          extraInput: JsonObject = {},
+        ): GraphCommand => {
           const node = state.nodes[nodeId]!;
           return {
             kind: 'dispatch',
             nodeId,
             input: {
               positionSummary: `${prefix}, node ${nodeId}, attempt ${node.attempts + 1}`,
+              ...extraInput,
             },
             position: `${prefix}/${nodeId}/${node.attempts + 1}`,
           };
@@ -899,6 +926,12 @@ export const convergence: GraphType<
         }
 
         if (state.phase === 'review') {
+          if (state.reviewEvidence === null) {
+            return [{
+              kind: 'pause',
+              reason: 'Review evidence is incomplete; the run waits.',
+            }];
+          }
           const fitting = seats.filter((id) => {
             const nodeState = state.nodes[id]!;
             if (nodeState.status !== 'pending' && nodeState.status !== 'failed') return false;
@@ -914,7 +947,9 @@ export const convergence: GraphType<
             const commands: GraphCommand[] = [];
             for (const id of fitting) {
               if (free <= 0) break;
-              commands.push(dispatch(id, `review/${state.iteration}`));
+              commands.push(dispatch(id, `review/${state.iteration}`, {
+                proofArtifactDigest: state.reviewEvidence.proofArtifactDigest,
+              }));
               free -= 1;
             }
             if (commands.length > 0) return commands;
@@ -996,7 +1031,7 @@ export const convergence: GraphType<
           }],
           nodes: definition.nodes.map((node) => {
             const inputContract: JsonObject = node.data.role === 'seat'
-              ? { draft: 'json' }
+              ? { draft: 'json', proofArtifactDigest: 'string' }
               : node.data.role === 'evaluator'
                 ? { gate: 'json' }
                 : { brief: 'json', critique: 'json?' };
@@ -1006,6 +1041,7 @@ export const convergence: GraphType<
                 confidence: 'number',
                 inputHashes: 'object',
                 workspaceFingerprint: 'string',
+                proofArtifactDigest: 'string',
                 findings: 'array?',
               }
               : { result: 'json' };

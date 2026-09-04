@@ -50,6 +50,12 @@
         ]
       },
       {
+        "group": "Proof",
+        "pages": [
+          "proof/acceptance"
+        ]
+      },
+      {
         "group": "Storage",
         "pages": [
           "storage/events-and-artifacts"

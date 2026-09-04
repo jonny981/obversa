@@ -53,6 +53,7 @@ const definition: ConvergenceDefinition = {
 const reviewEvidence = {
   inputHashes: { draft: 'sha256:release-draft' },
   workspaceFingerprint: 'sha256:release-workspace',
+  proofArtifactDigest: 'sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
 } as const;
 
 const events: readonly ConvergenceEvent[] = [

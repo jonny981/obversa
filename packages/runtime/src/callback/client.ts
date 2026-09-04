@@ -21,15 +21,15 @@
 
 import { randomUUID } from 'node:crypto';
 
-import { validateCallbackResponse } from './gate.js';
+import { validateCallbackRequest, validateCallbackResponse } from './gate.js';
 import type { CallbackRequest } from './gate.js';
-import type { JsonObject, JsonValue } from '../graph/value.js';
+import { cloneFrozenJson, type JsonObject, type JsonValue } from '../graph/value.js';
 
 export type CallbackEvent =
   | { readonly kind: 'callback-requested'; readonly request: CallbackRequest }
   | { readonly kind: 'callback-claimed'; readonly requestId: string; readonly routerId: string; readonly claimToken: string }
   | { readonly kind: 'callback-released'; readonly requestId: string; readonly routerId: string }
-  | { readonly kind: 'callback-submitted'; readonly requestId: string; readonly routerId: string; readonly response: JsonValue }
+  | { readonly kind: 'callback-submitted'; readonly requestId: string; readonly requestDigest: string; readonly routerId: string; readonly response: JsonValue }
   | { readonly kind: 'callback-rejected'; readonly requestId: string; readonly routerId: string; readonly reason: string }
   | { readonly kind: 'callback-superseded'; readonly requestId: string; readonly supersededBy: string };
 
@@ -38,6 +38,76 @@ interface RequestState {
   status: 'pending' | 'claimed' | 'answered' | 'superseded';
   routerId: string | null;
   claimToken: string | null;
+}
+
+const CALLBACK_DIGEST = /^[0-9a-f]{64}$/u;
+
+function callbackObject(value: unknown): JsonObject {
+  const stored = cloneFrozenJson(value as JsonValue);
+  if (stored === null || typeof stored !== 'object' || Array.isArray(stored)) {
+    throw new TypeError('a stored callback event must be an object');
+  }
+  return stored as JsonObject;
+}
+
+function exactFields(value: JsonObject, fields: readonly string[]): void {
+  const actual = Object.keys(value).sort();
+  const expected = [...fields].sort();
+  if (actual.length !== expected.length
+    || actual.some((field, index) => field !== expected[index])) {
+    throw new TypeError('a stored callback event has missing or unknown fields');
+  }
+}
+
+function callbackText(value: JsonValue | undefined, field: string): string {
+  if (typeof value !== 'string' || value.length === 0) {
+    throw new TypeError(`a stored callback event needs ${field}`);
+  }
+  return value;
+}
+
+/** Validate one callback event before it can affect replayed state. */
+export function validateCallbackEvent(value: unknown): CallbackEvent {
+  const event = callbackObject(value);
+  switch (event.kind) {
+    case 'callback-requested':
+      exactFields(event, ['kind', 'request']);
+      validateCallbackRequest(event.request);
+      break;
+    case 'callback-claimed':
+      exactFields(event, ['kind', 'requestId', 'routerId', 'claimToken']);
+      callbackText(event.requestId, 'requestId');
+      callbackText(event.routerId, 'routerId');
+      callbackText(event.claimToken, 'claimToken');
+      break;
+    case 'callback-released':
+      exactFields(event, ['kind', 'requestId', 'routerId']);
+      callbackText(event.requestId, 'requestId');
+      callbackText(event.routerId, 'routerId');
+      break;
+    case 'callback-submitted':
+      exactFields(event, ['kind', 'requestId', 'requestDigest', 'routerId', 'response']);
+      callbackText(event.requestId, 'requestId');
+      callbackText(event.routerId, 'routerId');
+      if (typeof event.requestDigest !== 'string' || !CALLBACK_DIGEST.test(event.requestDigest)) {
+        throw new TypeError('a stored callback submission has an invalid requestDigest');
+      }
+      break;
+    case 'callback-rejected':
+      exactFields(event, ['kind', 'requestId', 'routerId', 'reason']);
+      callbackText(event.requestId, 'requestId');
+      callbackText(event.routerId, 'routerId');
+      callbackText(event.reason, 'reason');
+      break;
+    case 'callback-superseded':
+      exactFields(event, ['kind', 'requestId', 'supersededBy']);
+      callbackText(event.requestId, 'requestId');
+      callbackText(event.supersededBy, 'supersededBy');
+      break;
+    default:
+      throw new TypeError('a stored callback event has an unknown kind');
+  }
+  return event as unknown as CallbackEvent;
 }
 
 export interface ClaimOk {
@@ -112,7 +182,7 @@ function applyEvent(
   switch (event.kind) {
     case 'callback-requested': {
       const existing = states.get(event.request.requestId);
-      if (existing !== undefined) return;
+      if (existing !== undefined) throw new TypeError('callback request is recorded more than once');
       states.set(event.request.requestId, {
         request: event.request,
         status: 'pending',
@@ -123,7 +193,9 @@ function applyEvent(
     }
     case 'callback-claimed': {
       const state = states.get(event.requestId);
-      if (state === undefined || state.status !== 'pending') return;
+      if (state === undefined || state.status !== 'pending') {
+        throw new TypeError('callback claim has no pending request');
+      }
       state.status = 'claimed';
       state.routerId = event.routerId;
       state.claimToken = event.claimToken;
@@ -131,7 +203,9 @@ function applyEvent(
     }
     case 'callback-released': {
       const state = states.get(event.requestId);
-      if (state === undefined || state.status !== 'claimed') return;
+      if (state === undefined || state.status !== 'claimed' || state.routerId !== event.routerId) {
+        throw new TypeError('callback release has no matching claimed request');
+      }
       state.status = 'pending';
       state.routerId = null;
       state.claimToken = null;
@@ -139,7 +213,15 @@ function applyEvent(
     }
     case 'callback-submitted': {
       const state = states.get(event.requestId);
-      if (state === undefined || state.status !== 'claimed') return;
+      if (state === undefined || state.status !== 'claimed') {
+        throw new TypeError('callback submission has no claimed request');
+      }
+      if (state.routerId !== event.routerId || state.request.digest !== event.requestDigest) {
+        throw new TypeError('callback submission does not match its claimed request');
+      }
+      if (!validateCallbackResponse(event.response, state.request.responseSchema).ok) {
+        throw new TypeError('callback submission does not match its response schema');
+      }
       state.status = 'answered';
       state.routerId = null;
       state.claimToken = null;
@@ -147,14 +229,21 @@ function applyEvent(
     }
     case 'callback-superseded': {
       const state = states.get(event.requestId);
-      if (state === undefined || state.status === 'answered') return;
+      if (state === undefined || state.status === 'answered' || state.status === 'superseded') {
+        throw new TypeError('callback supersession has no live request');
+      }
       state.status = 'superseded';
       state.routerId = null;
       state.claimToken = null;
       return;
     }
-    case 'callback-rejected':
+    case 'callback-rejected': {
+      const state = states.get(event.requestId);
+      if (state === undefined || state.status !== 'claimed' || state.routerId !== event.routerId) {
+        throw new TypeError('callback rejection has no matching claimed request');
+      }
       return;
+    }
   }
 }
 
@@ -171,31 +260,34 @@ export function replayCallbackClient(events: readonly CallbackEvent[]): Callback
 export function createCallbackClient(seed?: readonly CallbackEvent[]): CallbackClient {
   const states = new Map<string, RequestState>();
   const log: CallbackEvent[] = [];
-  for (const event of seed ?? []) {
-    log.push(Object.freeze(event));
-    applyEvent(states, event);
-  }
 
   const record = (event: CallbackEvent): void => {
-    log.push(Object.freeze(event));
-    applyEvent(states, event);
+    const stored = validateCallbackEvent(event);
+    log.push(stored);
+    applyEvent(states, stored);
   };
+  for (const event of seed ?? []) record(event);
 
   const client: CallbackClient = {
     post(request) {
+      const storedRequest = validateCallbackRequest(request);
       // A newer request from the same gate supersedes the older,
       // unanswered ones with a recorded event, so a stale question can
       // never be answered and the history can rebuild the state.
       for (const [id, state] of states) {
-        if (state.request.gateId === request.gateId
-          && state.request.requestId !== request.requestId
+        if (state.request.gateId === storedRequest.gateId
+          && state.request.requestId !== storedRequest.requestId
           && state.status !== 'answered'
           && state.status !== 'superseded') {
-          record({ kind: 'callback-superseded', requestId: id, supersededBy: request.requestId });
+          record({
+            kind: 'callback-superseded',
+            requestId: id,
+            supersededBy: storedRequest.requestId,
+          });
         }
       }
-      if (!states.has(request.requestId)) {
-        record({ kind: 'callback-requested', request });
+      if (!states.has(storedRequest.requestId)) {
+        record({ kind: 'callback-requested', request: storedRequest });
       }
     },
     listPending() {
@@ -263,7 +355,7 @@ export function createCallbackClient(seed?: readonly CallbackEvent[]): CallbackC
         const invalid: SubmitRefused = { ok: false, kind: 'invalid', reason: validated.reason };
         return invalid;
       }
-      record({ kind: 'callback-submitted', requestId, routerId, response });
+      record({ kind: 'callback-submitted', requestId, requestDigest, routerId, response });
       const accepted: SubmitOk = { ok: true, response };
       return accepted;
     },

@@ -19,20 +19,31 @@ Node.js 22.12 or later is required.
 
 From `@obversa/runtime` (`packages/runtime/src/api.ts`):
 
-- `compileGraph`: compile a graph type and a definition.
-- `dagGraphType`: the built-in dependency-graph form.
-- `convergence`: the built-in review-loop form.
-- `createGraphExecutor`: run and resume a stored graph.
-- `createCallbackGate`, `createCallbackClient`, `replayCallbackClient`,
-  `directRouter`: the callback request and in-process client.
-- `resolveGraphPlan`: freeze a plan admission record.
-- `persistRunDefinition`: store the run definition.
-- `run`, `loop`, `pipeline`, `dag`, `sequence`: older job helpers.
+- **Graph definitions:** `compileGraph`, `dagGraphType`, and `convergence`
+  define dependency graphs and repeated reviews.
+- **Graph runs:** `createGraphExecutor`, `resolveGraphPlan`, and
+  `persistRunDefinition` run and resume a stored graph.
+- **In-process callbacks:** `createCallbackGate`, `createCallbackClient`,
+  `replayCallbackClient`, and `directRouter` manage replayable questions.
+- **Stored callbacks:** `createStoredCallbackClient` stores callback history in
+  the run event stream.
+- **Proof artifacts:** `writeProofArtifact` stores one stable JSON proof packet
+  and returns its content digest.
+- **Accepted results:** `createAcceptedResultRecord`, `resolveAcceptedResult`,
+  and `acceptedResultMatches` bind a result to its reviewed inputs, proof,
+  graph, workspace, and caller-supplied reviewer identity.
+- **Approval:** `createApprovalCallbackGate`, `approvalSubjectDigest`, and
+  `resolveApproval` bind a stored decision to the exact subject bytes. The
+  stored client writes the callback submission and approval together.
+- **Job helpers:** `run`, `loop`, `pipeline`, `dag`, and `sequence` are the
+  older job API.
 
 Subpaths:
 
-- `@obversa/runtime/testing`: graph definition helpers and mocks.
-- `@obversa/runtime/storage/local`: `createLocalRunStorage`.
+- **Testing:** `@obversa/runtime/testing` provides graph definition helpers and
+  mocks.
+- **Local storage:** `@obversa/runtime/storage/local` provides
+  `createLocalRunStorage`.
 
 ## Runnable example
 

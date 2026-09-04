@@ -61,7 +61,7 @@ const expectedReviewLoopReport = {
     },
   },
   events: 8,
-  planDigest: 'sha256:8791906f0b35cd3fed03aa343b2002d11e0f5af88bf55e0058310b8c2d7d7812',
+  planDigest: 'sha256:b6a6fab0333c87a17016b8b1953ef7b77762d930e4fde327addf5e237ae5ae75',
   bounds: {
     dispatches: {
       min: { kind: 'known', value: 4 },
@@ -88,6 +88,26 @@ const expectedCallbackGateReport = {
     'callback-submitted',
   ],
   replayedPending: 0,
+};
+
+const expectedProofBoundApprovalReport = {
+  proof: {
+    digest: 'sha256:db5b2a0eb5743b52617a78335dbc003a9a10619dc6cab05f6099f81c9b7fb329',
+    byteLength: 133,
+    recordsShareDigest: true,
+  },
+  callback: {
+    responseSurvivedReopen: true,
+    changedRequest: true,
+  },
+  acceptedResult: {
+    unchanged: 'accepted',
+    changedAnchor: 'wait',
+  },
+  approval: {
+    unchanged: 'allow',
+    changedOutput: 'wait',
+  },
 };
 
 const expectedTurnTakingReport = {
@@ -438,6 +458,7 @@ const tsconfig = {
     'pipeline.ts',
     'review-loop.ts',
     'callback-gate.ts',
+    'proof-bound-approval.ts',
     'durable-storage.ts',
     'safe-node-attempt.ts',
     'turn-taking.ts',
@@ -456,6 +477,16 @@ async function main() {
   const reviewLoopExamplePath = join(root, 'examples', 'packages', 'review-loop.ts');
   const callbackGateExamplePath = join(root, 'examples', 'packages', 'callback-gate.ts');
   const callbackGateExampleSource = await readFile(callbackGateExamplePath, 'utf8');
+  const proofBoundApprovalExamplePath = join(
+    root,
+    'examples',
+    'packages',
+    'proof-bound-approval.ts',
+  );
+  const proofBoundApprovalExampleSource = await readFile(
+    proofBoundApprovalExamplePath,
+    'utf8',
+  );
   const storageExamplePath = join(root, 'examples', 'packages', 'durable-storage.ts');
   const storageExampleSource = await readFile(storageExamplePath, 'utf8');
   const attemptExamplePath = join(root, 'examples', 'packages', 'safe-node-attempt.ts');
@@ -483,6 +514,10 @@ async function main() {
     join(root, 'docs', 'public', 'graphs', 'callback-gate.mdx'),
     'utf8',
   );
+  const proofAcceptanceDocument = await readFile(
+    join(root, 'docs', 'public', 'proof', 'acceptance.mdx'),
+    'utf8',
+  );
   if (sourceFromPublicDoc(publicDocument) !== exampleSource) {
     throw new Error('The offline production-line page does not match its runnable source');
   }
@@ -497,6 +532,9 @@ async function main() {
   }
   if (sourceFromPublicDoc(callbackGateDocument) !== callbackGateExampleSource) {
     throw new Error('The callback-gate page does not match its runnable source');
+  }
+  if (sourceFromPublicDoc(proofAcceptanceDocument) !== proofBoundApprovalExampleSource) {
+    throw new Error('The proof-acceptance page does not match its runnable source');
   }
 
   const directory = await mkdtemp(join(tmpdir(), 'obversa-consumer-'));
@@ -536,6 +574,10 @@ async function main() {
     await copyFile(pipelineExamplePath, join(consumerDirectory, 'pipeline.ts'));
     await copyFile(reviewLoopExamplePath, join(consumerDirectory, 'review-loop.ts'));
     await copyFile(callbackGateExamplePath, join(consumerDirectory, 'callback-gate.ts'));
+    await copyFile(
+      proofBoundApprovalExamplePath,
+      join(consumerDirectory, 'proof-bound-approval.ts'),
+    );
     await copyFile(storageExamplePath, join(consumerDirectory, 'durable-storage.ts'));
     await copyFile(attemptExamplePath, join(consumerDirectory, 'safe-node-attempt.ts'));
     await copyFile(turnTakingExamplePath, join(consumerDirectory, 'turn-taking.ts'));
@@ -596,6 +638,12 @@ async function main() {
     const directCallbackGate = JSON.parse(
       run('pnpm', ['exec', 'tsx', 'callback-gate.ts'], { cwd: consumerDirectory }),
     );
+    const compiledProofBoundApproval = JSON.parse(
+      run(process.execPath, ['dist/proof-bound-approval.js'], { cwd: consumerDirectory }),
+    );
+    const directProofBoundApproval = JSON.parse(
+      run('pnpm', ['exec', 'tsx', 'proof-bound-approval.ts'], { cwd: consumerDirectory }),
+    );
     const compiledStorage = JSON.parse(
       run(process.execPath, ['dist/durable-storage.js'], { cwd: consumerDirectory }),
     );
@@ -632,6 +680,8 @@ async function main() {
     assert.deepEqual(directReviewLoop, expectedReviewLoopReport);
     assert.deepEqual(compiledCallbackGate, expectedCallbackGateReport);
     assert.deepEqual(directCallbackGate, expectedCallbackGateReport);
+    assert.deepEqual(compiledProofBoundApproval, expectedProofBoundApprovalReport);
+    assert.deepEqual(directProofBoundApproval, expectedProofBoundApprovalReport);
     assert.deepEqual(compiledStorage, expectedStorageReport);
     assert.deepEqual(directStorage, expectedStorageReport);
     assert.deepEqual(checkedAttemptReport(compiledAttempt), expectedAttemptReport);
@@ -664,7 +714,7 @@ async function main() {
     if (refs.length !== 1) throw new Error(`Git memory created ${refs.length} private refs instead of one`);
 
     console.log(
-      'Clean offline consumer passed with TypeScript 7 and 6, the first production line, the outside graph, the pipeline executor example, the review loop, the callback gate, the turn-taking executor example, durable storage, safe node attempts, 17 memory cases, and both memory adapters.',
+      'Clean offline consumer passed with TypeScript 7 and 6, the first production line, the outside graph, the pipeline executor example, the review loop, the callback gate, proof-bound approval, the turn-taking executor example, durable storage, safe node attempts, 17 memory cases, and both memory adapters.',
     );
   } finally {
     await rm(directory, { recursive: true, force: true });

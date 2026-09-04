@@ -48,6 +48,7 @@ export {
 export {
   createCallbackGate,
   callbackRequestDigest,
+  validateCallbackRequest,
   validateCallbackResponse,
   type CallbackGateDefinition,
   type CallbackRequest,
@@ -56,6 +57,7 @@ export {
   createCallbackClient,
   replayCallbackClient,
   directRouter,
+  validateCallbackEvent,
   type CallbackClient,
   type CallbackEvent,
   type ClaimResult,
@@ -63,6 +65,43 @@ export {
   type ReleaseResult,
   type Responder,
 } from './callback/client.js';
+export {
+  createStoredCallbackClient,
+  type NewCallbackHistoryEvent,
+  type StoredCallbackClient,
+} from './callback/stored-client.js';
+export {
+  ApprovalSubjectError,
+  approvalSubjectDigest,
+  createApprovalCallbackGate,
+  resolveApproval,
+  validateApprovalRecord,
+  type ApprovalBinding,
+  type ApprovalEventPayload,
+  type ApprovalRecord,
+  type ApprovalResolutionInput,
+  type ApprovalSubject,
+  type ApprovalSubjectInput,
+  type NewApprovalEvent,
+} from './callback/approval.js';
+export {
+  acceptedResultMatches,
+  createAcceptedResultRecord,
+  resolveAcceptedResult,
+  validateAcceptedResultRecord,
+  type AcceptedResultBinding,
+  type AcceptedResultBindingInput,
+  type AcceptedResultEventPayload,
+  type AcceptedResultGraph,
+  type AcceptedResultRecord,
+  type AcceptedResultResolution,
+  type CreateAcceptedResultRecordInput,
+  type NewAcceptedResultEvent,
+} from './proof/acceptance.js';
+export {
+  writeProofArtifact,
+  type ProofArtifactReference,
+} from './proof/artifact.js';
 export {
   createGraphExecutor,
   GraphExecutionError,

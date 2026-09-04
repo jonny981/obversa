@@ -21,7 +21,7 @@ The example records two valid passes from separate providers and model
 families. It prints this JSON report:
 
 ```json
-{"decision":{"kind":"complete","output":{"iterations":1,"restarts":0,"seats":{"claude-review":"accepted","codex-review":"accepted"},"findings":[]}},"events":8,"planDigest":"sha256:8791906f0b35cd3fed03aa343b2002d11e0f5af88bf55e0058310b8c2d7d7812","bounds":{"dispatches":{"min":{"kind":"known","value":4},"max":{"kind":"known","value":11}},"maxConcurrency":{"kind":"known","value":2},"maxFanOut":{"kind":"known","value":2}}}
+{"decision":{"kind":"complete","output":{"iterations":1,"restarts":0,"seats":{"claude-review":"accepted","codex-review":"accepted"},"findings":[]}},"events":8,"planDigest":"sha256:b6a6fab0333c87a17016b8b1953ef7b77762d930e4fde327addf5e237ae5ae75","bounds":{"dispatches":{"min":{"kind":"known","value":4},"max":{"kind":"known","value":11}},"maxConcurrency":{"kind":"known","value":2},"maxFanOut":{"kind":"known","value":2}}}
 ```
 
 The clean-consumer check compiles and runs the same source from the packed
@@ -90,10 +90,14 @@ const graph = compileGraph(convergence, definition);
 - **Node records:** The form accepts dispatch, completion, failure, pause, and
   resume records for each node attempt.
 - **Review records:** A seat pass includes its confidence, input hashes, and
-  workspace fingerprint. The seat's lane declares the provider and model family.
-  `evidencePaths` names the input hashes that can invalidate that seat; omitting
-  it makes every input hash relevant. The form checks whether a pairwise-distinct
-  provider and model-family subset meets the quorum.
+  workspace fingerprint. Evaluator evidence also names one proof artifact
+  digest. Every seat dispatch receives that digest, and every seat result must
+  echo it. A missing or changed digest makes that result invalid and dispatches
+  the seat again while its retry limit permits. The seat's lane declares the
+  provider and model family. `evidencePaths` names the input hashes that can
+  invalidate that seat; omitting it makes every input hash relevant. The form
+  checks whether a pairwise-distinct provider and model-family subset meets the
+  quorum.
 - **Repair records:** Findings can send the form to its repair node. A later
   cycle keeps valid seat passes and reruns invalid seats.
 - **Policy records:** New evaluator evidence invalidates each seat whose named

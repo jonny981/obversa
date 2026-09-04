@@ -1,0 +1,272 @@
+import { mkdtemp, rm } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+
+import {
+  compileGraph,
+  createAcceptedResultRecord,
+  createApprovalCallbackGate,
+  createStoredCallbackClient,
+  dagGraphType,
+  persistRunDefinition,
+  resolveAcceptedResult,
+  resolveApproval,
+  resolveGraphPlan,
+  writeProofArtifact,
+  type ApprovalSubjectInput,
+  type CallbackGateDefinition,
+  type Sha256Digest,
+  type WorkspaceAnchor,
+} from '@obversa/runtime';
+import { createLocalRunStorage } from '@obversa/runtime/storage/local';
+
+const digest = (digit: string): Sha256Digest => (
+  `sha256:${digit.repeat(64)}` as Sha256Digest
+);
+
+const storagePolicy = {
+  schemaVersion: 1,
+  maxEventPayloadBytes: 64_000,
+  maxAppendBatchBytes: 128_000,
+  maxArtifactBytes: 1_000_000,
+  maxTotalArtifactBytesPerRun: 4_000_000,
+  retention: 'until-run-delete',
+  sensitiveContent: {
+    marked: 'reject',
+    exact: 'reject',
+    freeText: 'redact-before-hash',
+  },
+} as const;
+
+const graph = compileGraph(dagGraphType, {
+  id: 'proof-bound-approval',
+  definitionVersion: 1,
+  data: {
+    globalConcurrency: 2,
+    keyedConcurrency: {},
+    stopOnError: true,
+    retryCapPerNode: 0,
+  },
+  nodes: [
+    { id: 'architecture', data: { kind: 'required', key: null } },
+    { id: 'correctness', data: { kind: 'required', key: null } },
+  ],
+  edges: [],
+});
+const packageIdentity = {
+  source: 'npm:@example/proof-bound-approval',
+  version: '1.0.0',
+  digest: digest('7'),
+} as const;
+const plan = resolveGraphPlan(graph.describe(), {
+  package: packageIdentity,
+  admission: { package: packageIdentity, permissions: [] },
+  executionLanes: [],
+});
+const workspaceAnchor: WorkspaceAnchor = {
+  schemaVersion: 1,
+  root: '/workspace',
+  repositoryId: '/workspace/.git',
+  head: 'a'.repeat(40),
+  fingerprint: 'b'.repeat(64),
+  scope: null,
+  files: [],
+};
+const proofScope = { kind: 'change', paths: ['packages/runtime'] } as const;
+const inputHashes = { proposal: digest('1') };
+const runId = 'proof-bound-approval-run';
+
+const directory = await mkdtemp(join(tmpdir(), 'obversa-proof-approval-'));
+try {
+  const openStorage = () => createLocalRunStorage({
+    directory: join(directory, 'storage'),
+    namespace: 'proof-approval-example',
+    policy: storagePolicy,
+  });
+  const storage = openStorage();
+  const started = await persistRunDefinition(storage, {
+    runId,
+    eventId: 'proof-bound-approval-started',
+    timestamp: '2026-01-01T00:00:00.000Z',
+    graphDefinition: graph.definition,
+    resolvedPlan: plan,
+    resolvedInputs: {},
+    workspaceBinding: null,
+    hostBinding: null,
+  });
+  const initialCommands = graph.decide(graph.initialState());
+  const architectureReview = initialCommands.find((command) => (
+    command.kind === 'dispatch' && command.nodeId === 'architecture'
+  ));
+  const correctnessReview = initialCommands.find((command) => (
+    command.kind === 'dispatch' && command.nodeId === 'correctness'
+  ));
+  if (architectureReview?.kind !== 'dispatch' || correctnessReview?.kind !== 'dispatch') {
+    throw new Error('The review graph did not dispatch both review nodes.');
+  }
+  await storage.eventStore.append({
+    namespace: storage.record.namespace,
+    streamId: runId,
+  }, started.revision, [{
+    eventId: 'proof-bound-architecture-dispatched',
+    type: 'graph:node-dispatched',
+    version: 1,
+    timestamp: '2026-01-01T00:00:01.000Z',
+    correlationId: runId,
+    causationId: null,
+    payload: {
+      nodeId: architectureReview.nodeId,
+      position: architectureReview.position,
+    },
+  }, {
+    eventId: 'proof-bound-correctness-dispatched',
+    type: 'graph:node-dispatched',
+    version: 1,
+    timestamp: '2026-01-01T00:00:01.000Z',
+    correlationId: runId,
+    causationId: null,
+    payload: {
+      nodeId: correctnessReview.nodeId,
+      position: correctnessReview.position,
+    },
+  }]);
+
+  const proofArtifact = await writeProofArtifact(
+    storage.artifactStore,
+    { namespace: storage.record.namespace, runId },
+    {
+      inputs: { proposal: digest('1') },
+      result: { passed: true, tests: 21 },
+    },
+  );
+  const acceptedBinding = {
+    inputHashes,
+    proofScope,
+    proofArtifact,
+    graph: {
+      definitionDigest: plan.plan.graph.definitionDigest,
+      typeVersion: plan.plan.graph.typeVersion,
+    },
+    workspaceAnchor,
+  } as const;
+  const firstReview = await createAcceptedResultRecord(
+    storage,
+    runId,
+    architectureReview.position,
+    {
+      ...acceptedBinding,
+      result: { verdict: 'pass' },
+      reviewerIdentity: { provider: 'anthropic', model: 'reviewer-a' },
+    },
+  );
+  const secondReview = await createAcceptedResultRecord(
+    storage,
+    runId,
+    correctnessReview.position,
+    {
+      ...acceptedBinding,
+      result: { verdict: 'pass' },
+      reviewerIdentity: { provider: 'openai', model: 'reviewer-b' },
+    },
+  );
+
+  const proposedOutput = new TextEncoder().encode('approved output');
+  const approvalSubject: ApprovalSubjectInput = {
+    workspaceAnchor,
+    inputArtifactHashes: inputHashes,
+    proofScope,
+    proofArtifact,
+    proposedOutput,
+    effectivePermissions: [{
+      name: 'workspace.write',
+      scope: { paths: ['packages/runtime'] },
+    }],
+  };
+  const approvalDefinition: CallbackGateDefinition = {
+    gateId: 'apply-reviewed-output',
+    gateVersion: 1,
+    decisionText: 'Apply these exact reviewed bytes?',
+    responseSchema: {
+      type: 'object',
+      properties: { kind: { type: 'string' } },
+      required: ['kind'],
+    },
+    input: { change: 'runtime-update' },
+  };
+  const request = createApprovalCallbackGate(approvalDefinition, approvalSubject);
+  const callbacks = await createStoredCallbackClient(storage, runId);
+  await callbacks.post(request, approvalSubject);
+  const claim = await callbacks.claim(request.requestId, 'human-review');
+  if (!claim.ok) throw new Error('The approval request was not claimed.');
+  const submitted = await callbacks.submit(
+    request.requestId,
+    claim.claimToken,
+    'human-review',
+    request.digest,
+    { kind: 'allow' },
+    { id: 'release-owner', kind: 'human' },
+  );
+  if (!submitted.ok) throw new Error(`The approval was refused: ${submitted.reason}`);
+
+  const reopenedStorage = openStorage();
+  const reopenedCallbacks = await createStoredCallbackClient(reopenedStorage, runId);
+  const changedSubject: ApprovalSubjectInput = {
+    ...approvalSubject,
+    proposedOutput: new TextEncoder().encode('changed output'),
+  };
+  const changedRequest = createApprovalCallbackGate(approvalDefinition, changedSubject);
+  await reopenedCallbacks.post(changedRequest, changedSubject);
+  const unchangedAccepted = await resolveAcceptedResult(
+    reopenedStorage,
+    runId,
+    architectureReview.position,
+    { ...acceptedBinding, reviewerIdentity: { provider: 'anthropic', model: 'reviewer-a' } },
+  );
+  const changedAnchor = await resolveAcceptedResult(
+    reopenedStorage,
+    runId,
+    architectureReview.position,
+    {
+      ...acceptedBinding,
+      workspaceAnchor: { ...workspaceAnchor, fingerprint: 'c'.repeat(64) },
+      reviewerIdentity: { provider: 'anthropic', model: 'reviewer-a' },
+    },
+  );
+  const unchangedApproval = await resolveApproval(
+    reopenedStorage,
+    runId,
+    { request, ...approvalSubject },
+  );
+  const changedApproval = await resolveApproval(
+    reopenedStorage,
+    runId,
+    { request, ...changedSubject },
+  );
+
+  console.log(JSON.stringify({
+    proof: {
+      digest: proofArtifact.digest,
+      byteLength: proofArtifact.byteLength,
+      recordsShareDigest: firstReview.binding.proofArtifact.digest
+        === secondReview.binding.proofArtifact.digest,
+    },
+    callback: {
+      responseSurvivedReopen: (await reopenedCallbacks.history(request.requestId)).some((event) => (
+        event.kind === 'callback-submitted'
+      )),
+      changedRequest: (await reopenedCallbacks.listPending()).some((pending) => (
+        pending.requestId === changedRequest.requestId
+      )),
+    },
+    acceptedResult: {
+      unchanged: unchangedAccepted.kind,
+      changedAnchor: changedAnchor.kind,
+    },
+    approval: {
+      unchanged: unchangedApproval.kind,
+      changedOutput: changedApproval.kind,
+    },
+  }));
+} finally {
+  await rm(directory, { recursive: true, force: true });
+}

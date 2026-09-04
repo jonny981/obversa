@@ -52,6 +52,7 @@ function seatRecord(outcome: SeatRecord['outcome']): SeatRecord {
     modelFamily: null,
     inputHashes: null,
     workspaceFingerprint: null,
+    proofArtifactDigest: null,
     findings: [],
     stale: false,
   };
@@ -130,9 +131,11 @@ function seatInvalidated(seatId: NodeId): ConvergenceEvent {
   return { type: 'seat-invalidated', version: 1, payload: { seatId, reason: 'watched path changed' } };
 }
 
+const PROOF_ARTIFACT_DIGEST = `sha256:${'a'.repeat(64)}` as const;
 const REVIEW_EVIDENCE = {
   inputHashes: { draft: 'sha256:draft' },
   workspaceFingerprint: 'sha256:workspace',
+  proofArtifactDigest: PROOF_ARTIFACT_DIGEST,
 } as const;
 const PASS_ANTHROPIC = {
   verdict: 'pass', confidence: 0.9, provider: 'anthropic', modelFamily: 'claude',
@@ -269,6 +272,7 @@ const reviewResultSchema = {
     'confidence',
     'inputHashes',
     'workspaceFingerprint',
+    'proofArtifactDigest',
   ],
 } as const;
 const reviewResultContract = defineResultContract({
@@ -450,6 +454,7 @@ describe('convergence graph type', () => {
                 provider: 'anthropic', modelFamily: 'claude',
                 inputHashes: REVIEW_EVIDENCE.inputHashes,
                 workspaceFingerprint: REVIEW_EVIDENCE.workspaceFingerprint,
+                proofArtifactDigest: REVIEW_EVIDENCE.proofArtifactDigest,
                 findings: [], stale: false,
               },
               'seat-b': seatRecord(null),
@@ -470,6 +475,7 @@ describe('convergence graph type', () => {
                 provider: 'anthropic', modelFamily: 'claude',
                 inputHashes: REVIEW_EVIDENCE.inputHashes,
                 workspaceFingerprint: REVIEW_EVIDENCE.workspaceFingerprint,
+                proofArtifactDigest: REVIEW_EVIDENCE.proofArtifactDigest,
                 findings: [], stale: false,
               },
               'seat-b': seatRecord(null),
@@ -488,6 +494,7 @@ describe('convergence graph type', () => {
                 provider: 'anthropic', modelFamily: 'claude',
                 inputHashes: REVIEW_EVIDENCE.inputHashes,
                 workspaceFingerprint: REVIEW_EVIDENCE.workspaceFingerprint,
+                proofArtifactDigest: REVIEW_EVIDENCE.proofArtifactDigest,
                 findings: [], stale: false,
               },
               'seat-b': {
@@ -495,6 +502,7 @@ describe('convergence graph type', () => {
                 provider: 'openai', modelFamily: 'gpt',
                 inputHashes: REVIEW_EVIDENCE.inputHashes,
                 workspaceFingerprint: REVIEW_EVIDENCE.workspaceFingerprint,
+                proofArtifactDigest: REVIEW_EVIDENCE.proofArtifactDigest,
                 findings: [], stale: false,
               },
             },
@@ -506,9 +514,9 @@ describe('convergence graph type', () => {
           [],
           [{ kind: 'dispatch', nodeId: 'evaluator', input: { positionSummary: 'convergence/1, node evaluator, attempt 1' }, position: 'convergence/1/evaluator/1' }],
           [],
-          [{ kind: 'dispatch', nodeId: 'seat-a', input: { positionSummary: 'review/1, node seat-a, attempt 1' }, position: 'review/1/seat-a/1' }],
+          [{ kind: 'dispatch', nodeId: 'seat-a', input: { positionSummary: 'review/1, node seat-a, attempt 1', proofArtifactDigest: PROOF_ARTIFACT_DIGEST }, position: 'review/1/seat-a/1' }],
           [],
-          [{ kind: 'dispatch', nodeId: 'seat-b', input: { positionSummary: 'review/1, node seat-b, attempt 1' }, position: 'review/1/seat-b/1' }],
+          [{ kind: 'dispatch', nodeId: 'seat-b', input: { positionSummary: 'review/1, node seat-b, attempt 1', proofArtifactDigest: PROOF_ARTIFACT_DIGEST }, position: 'review/1/seat-b/1' }],
           [],
           [{
             kind: 'complete',
@@ -762,7 +770,10 @@ describe('convergence graph type', () => {
     expect(reruns).toEqual([{
       kind: 'dispatch',
       nodeId: 'seat-codex',
-      input: { positionSummary: 'review/2, node seat-codex, attempt 2' },
+      input: {
+        positionSummary: 'review/2, node seat-codex, attempt 2',
+        proofArtifactDigest: PROOF_ARTIFACT_DIGEST,
+      },
       position: 'review/2/seat-codex/2',
     }]);
     const positions = reruns
@@ -803,7 +814,10 @@ describe('convergence graph type', () => {
     expect(retry).toEqual([{
       kind: 'dispatch',
       nodeId: 'seat-b',
-      input: { positionSummary: 'review/1, node seat-b, attempt 2' },
+      input: {
+        positionSummary: 'review/1, node seat-b, attempt 2',
+        proofArtifactDigest: PROOF_ARTIFACT_DIGEST,
+      },
       position: 'review/1/seat-b/2',
     }]);
 
@@ -1088,7 +1102,10 @@ describe('convergence graph type', () => {
     expect(commands).toEqual([{
       kind: 'dispatch',
       nodeId: 'seat-a',
-      input: { positionSummary: 'review/1, node seat-a, attempt 2' },
+      input: {
+        positionSummary: 'review/1, node seat-a, attempt 2',
+        proofArtifactDigest: PROOF_ARTIFACT_DIGEST,
+      },
       position: 'review/1/seat-a/2',
     }]);
   });
@@ -1097,10 +1114,12 @@ describe('convergence graph type', () => {
     const evidenceA = {
       inputHashes: { draft: 'sha256:draft-a' },
       workspaceFingerprint: 'sha256:workspace-a',
+      proofArtifactDigest: PROOF_ARTIFACT_DIGEST,
     };
     const evidenceB = {
       inputHashes: { draft: 'sha256:draft-b' },
       workspaceFingerprint: 'sha256:workspace-b',
+      proofArtifactDigest: PROOF_ARTIFACT_DIGEST,
     };
     const finding = { id: 'f1', kind: 'patch' as const, evidence: 'fix the draft' };
     const events: ConvergenceEvent[] = [
@@ -1127,8 +1146,53 @@ describe('convergence graph type', () => {
     expect(decideAt(events, panel({ retryCapPerNode: 1 }))).toEqual([{
       kind: 'dispatch',
       nodeId: 'seat-a',
-      input: { positionSummary: 'review/2, node seat-a, attempt 2' },
+      input: {
+        positionSummary: 'review/2, node seat-a, attempt 2',
+        proofArtifactDigest: PROOF_ARTIFACT_DIGEST,
+      },
       position: 'review/2/seat-a/2',
+    }]);
+  });
+
+  it('a seat result whose echoed digest does not match its dispatch is refused and the gate returns to wait', () => {
+    const proofArtifactDigest = `sha256:${'a'.repeat(64)}`;
+    const evidence = { ...REVIEW_EVIDENCE, proofArtifactDigest };
+    const events: ConvergenceEvent[] = [
+      convDispatched('generator', 1),
+      completed('generator', 'convergence/1/generator/1', {}),
+      convDispatched('evaluator', 1),
+      completed('evaluator', 'convergence/1/evaluator/1', { gateMet: true, ...evidence }),
+    ];
+
+    expect(decideAt(events, panel({ quorum: 1, retryCapPerNode: 1 }))).toEqual([{
+      kind: 'dispatch',
+      nodeId: 'seat-a',
+      input: {
+        positionSummary: 'review/1, node seat-a, attempt 1',
+        proofArtifactDigest,
+      },
+      position: 'review/1/seat-a/1',
+    }]);
+
+    const mismatched = [
+      ...events,
+      seatDispatched('seat-a', 1),
+      completed('seat-a', 'review/1/seat-a/1', {
+        ...PASS_ANTHROPIC,
+        proofArtifactDigest: `sha256:${'b'.repeat(64)}`,
+      }),
+    ];
+    const state = fold(mismatched, panel({ quorum: 1, retryCapPerNode: 1 }));
+
+    expect(state.seats['seat-a']!.outcome).toBe('invalid');
+    expect(decideAt(mismatched, panel({ quorum: 1, retryCapPerNode: 1 }))).toEqual([{
+      kind: 'dispatch',
+      nodeId: 'seat-a',
+      input: {
+        positionSummary: 'review/1, node seat-a, attempt 2',
+        proofArtifactDigest,
+      },
+      position: 'review/1/seat-a/2',
     }]);
   });
 
@@ -1136,10 +1200,12 @@ describe('convergence graph type', () => {
     const evidenceA = {
       inputHashes: { draft: 'sha256:draft-a', tests: 'sha256:tests-a' },
       workspaceFingerprint: 'sha256:workspace-a',
+      proofArtifactDigest: PROOF_ARTIFACT_DIGEST,
     };
     const evidenceB = {
       inputHashes: { draft: 'sha256:draft-b', tests: 'sha256:tests-a' },
       workspaceFingerprint: 'sha256:workspace-b',
+      proofArtifactDigest: PROOF_ARTIFACT_DIGEST,
     };
     const definition: ConvergenceDefinition = {
       ...panel({ quorum: 3, seatConcurrency: 3, retryCapPerNode: 1 }),
@@ -1386,7 +1452,10 @@ describe('convergence graph type', () => {
     expect(compiled.decide(late)).toEqual([{
       kind: 'dispatch',
       nodeId: 'seat-a',
-      input: { positionSummary: 'review/1, node seat-a, attempt 2' },
+      input: {
+        positionSummary: 'review/1, node seat-a, attempt 2',
+        proofArtifactDigest: PROOF_ARTIFACT_DIGEST,
+      },
       position: 'review/1/seat-a/2',
     }]);
   });
@@ -1411,7 +1480,10 @@ describe('convergence graph type', () => {
     expect(commands).toEqual([{
       kind: 'dispatch',
       nodeId: 'seat-a',
-      input: { positionSummary: 'review/1, node seat-a, attempt 2' },
+      input: {
+        positionSummary: 'review/1, node seat-a, attempt 2',
+        proofArtifactDigest: PROOF_ARTIFACT_DIGEST,
+      },
       position: 'review/1/seat-a/2',
     }]);
 

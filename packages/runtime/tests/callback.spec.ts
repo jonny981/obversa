@@ -30,6 +30,17 @@ const GATE: CallbackGateDefinition = {
 };
 
 describe('callback gate', () => {
+  it('a request without an approval subject has a byte-identical identity to before', () => {
+    const request = createCallbackGate(GATE);
+
+    expect(request.digest).toBe(
+      '21eae64ad9e3e68256a5d8259282e479976b0498e267ff3eff927cf99cc7a24c',
+    );
+    expect(request.requestId).toBe(
+      'release-approval#1#21eae64ad9e3e68256a5d8259282e479976b0498e267ff3eff927cf99cc7a24c',
+    );
+  });
+
   it('requires top-level fields to be the response own properties', () => {
     expect(validateCallbackResponse({}, { required: ['constructor'] })).toEqual({
       ok: false,
@@ -67,6 +78,48 @@ describe('callback gate', () => {
     const request = createCallbackGate(GATE);
     const again = createCallbackGate({ ...GATE, presentation: { theme: 'dark' } });
     expect(again.digest).toBe(request.digest);
+  });
+
+  it('keeps the request bytes fixed after the caller mutates its objects', () => {
+    const responseSchema = {
+      type: 'object',
+      properties: { approved: { type: 'boolean' } },
+      required: ['approved'],
+    };
+    const input = { revision: 'abc123' };
+    const presentation = { theme: 'light', routing: { queue: 'release' } };
+    const request = createCallbackGate({
+      ...GATE,
+      responseSchema,
+      input,
+      presentation,
+    });
+
+    input.revision = 'changed';
+    responseSchema.required.push('note');
+    presentation.theme = 'dark';
+    presentation.routing.queue = 'other';
+
+    expect(request).toMatchObject({
+      input: { revision: 'abc123' },
+      responseSchema: { required: ['approved'] },
+      presentation: { theme: 'light', routing: { queue: 'release' } },
+    });
+  });
+
+  it('does not supersede a live request before a replacement is validated', () => {
+    const client = createCallbackClient();
+    const current = createCallbackGate(GATE);
+    client.post(current);
+    const replacement = {
+      ...createCallbackGate({ ...GATE, gateVersion: 2 }),
+      digest: '0'.repeat(64),
+    } as ReturnType<typeof createCallbackGate>;
+
+    expect(() => client.post(replacement)).toThrow('identity');
+    expect(client.listPending()).toEqual([current]);
+    expect(client.history(current.requestId).map((event) => event.kind))
+      .toEqual(['callback-requested']);
   });
 
   it('claims atomically: two racing routers, exactly one winner', async () => {
@@ -123,6 +176,35 @@ describe('callback gate', () => {
     const rejected = client.history(request.requestId)
       .filter((event) => event.kind === 'callback-rejected');
     expect(rejected).toHaveLength(1);
+  });
+
+  it('keeps submitted response bytes fixed after the caller mutates them', () => {
+    const client = createCallbackClient();
+    const request = createCallbackGate({
+      ...GATE,
+      responseSchema: {
+        type: 'object',
+        properties: { answer: { type: 'object' } },
+        required: ['answer'],
+      },
+    });
+    client.post(request);
+    const claim = client.claim(request.requestId, 'router-a');
+    if (!claim.ok) throw new Error('fixture claim failed');
+    const response = { answer: { approved: true } };
+
+    expect(client.submit(
+      request.requestId,
+      claim.claimToken,
+      'router-a',
+      request.digest,
+      response,
+    ).ok).toBe(true);
+    response.answer.approved = false;
+
+    expect(client.history(request.requestId).find((event) => (
+      event.kind === 'callback-submitted'
+    ))).toMatchObject({ response: { answer: { approved: true } } });
   });
 
   it('releases for reassignment and replays its history', async () => {
@@ -237,6 +319,16 @@ describe('callback gate', () => {
 
     const kinds = client.history(first.requestId).map((event) => event.kind);
     expect(kinds).toContain('callback-superseded');
+  });
+
+  it('rejects an impossible submitted event in stored history', () => {
+    expect(() => replayCallbackClient([{
+      kind: 'callback-submitted',
+      requestId: 'missing',
+      requestDigest: '0'.repeat(64),
+      routerId: 'router-a',
+      response: { approved: true },
+    }])).toThrow('no claimed request');
   });
 
   it('plays back without claiming a request or calling a responder', async () => {
