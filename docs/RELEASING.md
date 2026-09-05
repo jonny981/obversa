@@ -21,7 +21,7 @@ check and release script read that same list.
 3. **Verify the exact commit.** Run the newest stage chain, then pack checks:
 
    ```bash
-   pnpm verify:d14
+   pnpm verify:d15
    pnpm check:tarballs
    node scripts/changelog-gate.mjs
    ```
@@ -55,9 +55,9 @@ check and release script read that same list.
 ## The publish guard
 
 Each public manifest carries a never-resolving registry under both `registry`
-and `@obversa:registry`. A directory or tarball publish therefore fails closed
-unless the caller uses the explicit release script. The script is the only
-publisher and supplies both matching registry overrides.
+and `@obversa:registry`. A directory or tarball publish targets that guard
+unless the caller explicitly overrides both registry keys. The release
+script supplies both matching overrides.
 
 ## What happens if verification fails
 
