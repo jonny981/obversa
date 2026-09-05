@@ -202,6 +202,35 @@ describe('supervised local runs', () => {
     expect(await readdir(join(options.storage.directory, 'runner-locks/runner-tests'))).toEqual([]);
   });
 
+  it('a 200 KB engine success under a 128000 event policy completes the node', async () => {
+    const { options } = await fixture(true);
+    const handle = await startFixture({
+      ...options, definition: { ...options.definition, resolvedInputs: { enginePartBytes: 200_000, resultBytes: 70_000 } },
+    });
+    const result = await handle.done;
+    expect(result.kind, JSON.stringify(result.kind === 'fail' ? result : { kind: result.kind })).toBe('complete');
+    expect(result).toEqual({ kind: 'complete', output: { nodes: {
+      first: { node: 'first', value: 'z'.repeat(70_000) },
+      last: { node: 'last', value: 'z'.repeat(70_000) },
+    } } });
+    expect(Buffer.byteLength(JSON.stringify(result))).toBeGreaterThan(128_000);
+    const storage = createLocalRunStorage(options.storage);
+    const events = [];
+    for await (const event of storage.eventStore.read({ namespace: 'runner-tests', streamId: 'fixture' })) events.push(event);
+    expect(events.filter((event) => event.type === 'graph:node-completed')).toHaveLength(2);
+    const supervision = await readSupervision(storage, 'fixture');
+    expect([...events, ...supervision].every((event) => Buffer.byteLength(JSON.stringify(event.payload)) <= 128_000)).toBe(true);
+    const engineEvents = supervision.filter((event) => event.type === 'runner:engine-completed');
+    expect(engineEvents).toHaveLength(2);
+    for (const event of engineEvents) {
+      expect(event.payload).not.toHaveProperty('parts');
+      const reference = runtime.validateArtifactReference((event.payload as runtime.JsonObject).partsArtifact);
+      const bytes = await storage.artifactStore.read({ namespace: 'runner-tests', runId: 'fixture' }, reference);
+      expect(JSON.parse(Buffer.from(bytes).toString('utf8'))).toEqual([{ kind: 'assistant', text: 'z'.repeat(200_000), final: true }]);
+    }
+    expect((await handle.status()).phase).toBe('completed');
+  });
+
   it('stop kills the worker, records the stop, and releases the workspace', async () => {
     const { options } = await fixture();
     const handle = await startFixture({
@@ -468,12 +497,20 @@ describe('supervised local runs', () => {
         { nodeId: 'first', usage: { kind: 'reported', inputTokens: 7, outputTokens: 3 } },
         { nodeId: 'last', usage: engineFail ? { kind: 'unknown' } : { kind: 'reported', inputTokens: 7, outputTokens: 3 } },
       ]);
-      const records = await readSupervision(createLocalRunStorage(options.storage), 'fixture');
-      if (engineFail) expect(records.find((event) => event.type === 'runner:engine-failed')?.payload).toMatchObject({
-        parts: [{ kind: 'assistant', text: 'partial', final: false }],
-        usage: { kind: 'reported', inputTokens: 7, outputTokens: 3 },
-        effective: { model: 'fixture' }, transportFailure: { kind: 'timeout', exitCode: 9 },
-      });
+      const storage = createLocalRunStorage(options.storage);
+      const records = await readSupervision(storage, 'fixture');
+      if (engineFail) {
+        const payload = records.find((event) => event.type === 'runner:engine-failed')!.payload as runtime.JsonObject;
+        expect(payload).toMatchObject({
+          usage: { kind: 'reported', inputTokens: 7, outputTokens: 3 },
+          effective: { model: 'fixture' }, transportFailure: { kind: 'timeout', exitCode: 9 },
+        });
+        expect(payload).not.toHaveProperty('parts');
+        const bytes = await storage.artifactStore.read(
+          { namespace: 'runner-tests', runId: 'fixture' }, runtime.validateArtifactReference(payload.partsArtifact),
+        );
+        expect(JSON.parse(Buffer.from(bytes).toString('utf8'))).toEqual([{ kind: 'assistant', text: 'partial', final: false }]);
+      }
     }
   });
 

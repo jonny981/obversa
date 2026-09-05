@@ -75,7 +75,7 @@ try {
     },
   }]));
   const executor = await createGraphExecutor({
-    ...bindings, nodes, engines: superviseEngines(bindings.engines, append),
+    ...bindings, nodes, engines: superviseEngines(bindings.engines, append, storage, input.runId),
     storage: { ...storage, eventStore }, runId: input.runId,
   });
   const signal = new AbortController().signal;
