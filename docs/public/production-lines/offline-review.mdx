@@ -9,11 +9,11 @@ changes the work, and passes the second review.
 
 ## Graph
 
-1. The `author` job writes a base configuration.
+1. The `author` job creates a configuration in memory.
 2. A deterministic gate confirms that a draft exists.
-3. The `review` job rejects the first draft because it has no timeout.
+3. The `review` job checks `timeoutMs` and rejects the first draft because it has no timeout.
 4. The loop gives that reason to the next `author` attempt.
-5. The second review passes the corrected configuration.
+5. The author adds a positive timeout, which lets the second review pass.
 
 ## Contract
 
@@ -42,6 +42,7 @@ import {
 } from '@obversa/runtime';
 
 let attempts = 0;
+let config: { timeoutMs?: number } | undefined;
 
 const productionLine = defineJob(
   loop({
@@ -50,14 +51,16 @@ const productionLine = defineJob(
     body: fnJob('author', async (ctx) => {
       attempts += 1;
       const fix = ctx.lastReview?.revision?.reason;
+      config = {};
+      if (fix) config.timeoutMs = 1_000;
       return {
         status: 'pass',
         summary: fix ? `added a timeout after: ${fix}` : 'wrote the base config',
       };
     }),
-    until: predicate(() => true, 'a draft exists'),
+    until: predicate(() => config !== undefined, 'a draft exists'),
     review: fnJob('review', async () =>
-      attempts > 1
+      (config?.timeoutMs ?? 0) > 0
         ? { status: 'pass', summary: 'config is complete' }
         : revisionRequest({
             reason: 'Missing a request timeout.',

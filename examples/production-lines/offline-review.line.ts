@@ -8,6 +8,7 @@ import {
 } from '@obversa/runtime';
 
 let attempts = 0;
+let config: { timeoutMs?: number } | undefined;
 
 const productionLine = defineJob(
   loop({
@@ -16,14 +17,16 @@ const productionLine = defineJob(
     body: fnJob('author', async (ctx) => {
       attempts += 1;
       const fix = ctx.lastReview?.revision?.reason;
+      config = {};
+      if (fix) config.timeoutMs = 1_000;
       return {
         status: 'pass',
         summary: fix ? `added a timeout after: ${fix}` : 'wrote the base config',
       };
     }),
-    until: predicate(() => true, 'a draft exists'),
+    until: predicate(() => config !== undefined, 'a draft exists'),
     review: fnJob('review', async () =>
-      attempts > 1
+      (config?.timeoutMs ?? 0) > 0
         ? { status: 'pass', summary: 'config is complete' }
         : revisionRequest({
             reason: 'Missing a request timeout.',
