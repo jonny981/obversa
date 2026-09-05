@@ -216,6 +216,21 @@ pause rejects with `RUN_NOT_PAUSED`. A position that is not paused rejects with
 - **Cleanup grace:** `teardownGraceMs` allows processes to stop before forceful
   termination.
 
+Each worker launch has a fixed 1 MB (1,000,000 bytes) limit across its combined
+stdout and stderr. When excess output triggers this limit, the watchdog stops
+the worker without restarting it. After successful process cleanup,
+`handle.done` resolves to `kind: 'fail'` with `code: 'OUTPUT_LIMIT'`, and status
+reports `phase: 'failed'`. If cleanup reports surviving processes, `handle.done`
+instead resolves to `kind: 'fail'` with `code: 'TEARDOWN_INCOMPLETE'`, and the
+watchdog retains its workspace lease and process lock.
+
+This limit applies to worker console output. Engine response parts and graph
+completion output use the separate artifact size and quota limits described
+above. `SupervisedRunOptions` exposes no setting for the worker output cap or
+a worker memory ceiling. The watchdog passes `Number.MAX_SAFE_INTEGER` as its
+worker memory limit; it does not enforce a practical memory budget for the
+worker.
+
 Token budgets apply per worker process and do not enforce a shared token cap
 across worker restarts.
 
@@ -245,6 +260,20 @@ can be rebuilt from graph events. The executor always makes its decisions from
 the events, never from a status checkpoint.
 
 ## Process cleanup and workspace ownership
+
+The watchdog uses the public `@obversa/engine/command` API. Command and cleanup
+requests accept an optional `ownerId`, a SHA-256 digest used to track the outer
+command's processes. The command passes it to child processes as
+`OBVERSA_RUN_OWNER`. Nested commands keep a valid inherited marker instead of
+replacing it with their own
+`ownerId`. During Linux cleanup, only the outer command uses that marker to
+discover processes to stop.
+
+`commandCleanupCapability()` returns the `CommandCleanupCapability` type:
+`'inherited-owner'` on Linux or `'observed-processes'` elsewhere.
+`inspectOwnerMarkedProcesses(ownerId)` returns matching process identities on
+Linux and an empty list elsewhere. An empty list on another platform does not
+prove that the owner's processes have stopped.
 
 `cleanupCapability` states the cleanup scope:
 

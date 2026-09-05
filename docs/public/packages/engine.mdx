@@ -33,6 +33,57 @@ Subpaths:
 - `@obversa/engine/command`: owned-process execution with time, output, and
   memory bounds.
 
+## Command ownership and cleanup
+
+The `@obversa/engine/command` entry point exports `runOwnedCommand` for bounded
+command execution and `stopOwnedProcessTree` for process cleanup.
+
+Both accept an optional `ownerId`: a string beginning with `sha256:` followed by
+64 lowercase hexadecimal characters. Use a separate owner ID for each outer
+command whose descendants should be cleaned up together.
+
+`runOwnedCommand` passes `OBVERSA_RUN_OWNER` to the child. A valid marker in the
+calling process takes priority over `ownerId`, which in turn overrides
+`env.OBVERSA_RUN_OWNER`. The inherited marker is kept even when `inheritParentEnv`
+is `false`. Without an inherited marker or `ownerId`, no owner ID is created.
+An environment-only marker is passed through but does not make this call an
+outer owner for cleanup. Descendants that keep the environment keep the marker,
+including processes that start a separate session.
+
+Only the command that supplies an owner ID without inheriting one sweeps that
+owner's marked processes during automatic cleanup. Nested commands still clean
+up their observed process trees; they do not sweep the inherited owner's other
+processes. When calling `stopOwnedProcessTree` directly, pass `ownerId` only from
+the outer owner, not from a nested command.
+
+### Platform capability
+
+`commandCleanupCapability()` returns the exported `CommandCleanupCapability`
+type. It reports the platform's cleanup method, not a permissions check or a
+guarantee that every descendant can be found.
+
+| Platform | Return value | Cleanup method |
+| --- | --- | --- |
+| Linux | `inherited-owner` | Observed processes plus owner markers read from `/proc`. |
+| Other platforms | `observed-processes` | Processes discovered through the observed process tree. |
+
+On platforms without owner-marker inspection, a helper that starts a separate
+session before it is observed can escape cleanup. Owner markers coordinate
+cleanup; they are not a security boundary.
+
+### Inspect marked processes
+
+`inspectOwnerMarkedProcesses(ownerId)` returns a promise of a read-only list of
+`ProcessIdentity` values: `pid`, `parentPid`, `processGroupId`, and `startedAt`.
+It inspects processes without stopping them.
+
+On Linux, it matches the complete `OBVERSA_RUN_OWNER` environment entry and
+returns processes whose identity is unchanged across the scan. Missing
+environment files and access-denied errors are skipped; other read errors
+reject the promise. On other platforms it returns an empty list, which does not
+prove that no owned processes remain. An invalid owner ID rejects the promise
+with a `TypeError`.
+
 ## Runnable example
 
 ```ts

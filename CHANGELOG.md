@@ -18,6 +18,14 @@ engine and memory packages track their own versions independently.
   Callback Gates, and proof-bound decisions.
 - `@obversa/engine` 0.1.0 and six engine plugins at 0.1.0: typed engine
   results through Agent SDK, Claude, Codex, Grok, OpenCode, and Anthropic adapters.
+- `@obversa/runner` 0.1.0: local worker supervision with stored run inputs,
+  bounded restart, workspace leases, status, and process cleanup within the
+  reported platform capability. Worker stdout and stderr share a fixed
+  1,000,000-byte cap; excess output can fail the run with `OUTPUT_LIMIT`.
+- `@obversa/engine/command`: optional `ownerId` on command and cleanup requests,
+  inherited `OBVERSA_RUN_OWNER` markers, `commandCleanupCapability`,
+  `CommandCleanupCapability`, and `inspectOwnerMarkedProcesses` for process
+  ownership and cleanup inspection.
 - `@obversa/memory` 0.1.0 with `@obversa/memory-simple` and
   `@obversa/memory-git` at 0.1.0: replaceable memory with conformance tests.
 - `@obversa/source` 0.1.0 and `@obversa/surfacer` 0.1.0: local review

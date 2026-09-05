@@ -5,9 +5,10 @@ agents.
 
 Status: In build. Public docs in `docs/public/`.
 
-This workspace contains seven packages, plus engine plugins:
+This workspace contains fourteen publishable packages, including six engine plugins:
 
 - `@obversa/runtime` provides a runtime API and a pure contract for outside graph types.
+- `@obversa/runner` supervises stored graph runs in bounded workers.
 - `@obversa/memory` defines a small memory contract.
 - `@obversa/memory-simple` stores memory in one process.
 - `@obversa/memory-git` stores memory in private Git references.
