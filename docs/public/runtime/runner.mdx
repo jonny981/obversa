@@ -189,6 +189,11 @@ does not accept replacements. It writes no second run-start event and does not
 repeat completed occurrences. Status shows a resumed worker as active rather
 than reporting the earlier pause as its terminal result.
 
+A resume is bound to one pause event. If a replacement worker finds a different
+pause event at the same position, `handle.done` resolves to `kind: 'fail'` with
+`code: 'RESUME_EVENT_MISMATCH'`. The message names the expected and found pause
+event IDs.
+
 The elapsed budget freezes at the settled runner pause and resumes at the next
 stored worker launch. Resume preflight, including workspace checks, does not
 spend that budget. Earlier execution and restart backoff remain spent across

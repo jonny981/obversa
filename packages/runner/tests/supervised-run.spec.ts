@@ -895,7 +895,20 @@ describe('supervised local runs', () => {
       const events = [];
       for await (const event of createLocalRunStorage(options.storage).eventStore.read({ namespace: 'runner-tests', streamId: 'fixture' })) events.push(event);
       const needsReconciliation = ['after-resume', 'before-completed', 'after-reconcile'].includes(boundary);
-      expect(result, JSON.stringify(result)).toMatchObject({ kind: needsReconciliation ? 'pause' : 'complete' });
+      const humanPause = events.find((event) => event.type === 'graph:node-paused'
+        && ((event.payload as runtime.JsonObject).request as runtime.JsonObject | undefined)?.kind === 'human');
+      const reconciliationPause = events.findLast((event) => event.type === 'graph:node-paused'
+        && ((event.payload as runtime.JsonObject).request as runtime.JsonObject | undefined)?.kind === 'reconcile-attempt');
+      expect(humanPause).toBeDefined();
+      if (boundary === 'after-reconcile') {
+        expect(reconciliationPause).toBeDefined();
+        expect(result).toEqual({
+          kind: 'fail', code: 'RESUME_EVENT_MISMATCH',
+          message: `Resume expected pause event "${humanPause!.eventId}" but found "${reconciliationPause!.eventId}".`,
+        });
+      } else {
+        expect(result, JSON.stringify(result)).toMatchObject({ kind: needsReconciliation ? 'pause' : 'complete' });
+      }
       expect((await resumed.status()).restartCount).toBe(boundary === 'after-reconcile' ? 2 : 1);
       const crash = JSON.parse(await readFile(join(options.directory, 'scratch/resume-crash.json'), 'utf8'));
       expect(crash.boundary).toBe(boundary);

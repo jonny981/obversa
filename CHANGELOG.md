@@ -11,6 +11,9 @@ engine and memory packages track their own versions independently.
 
 ### Fixed
 
+- **Stale pause-event resumes:** Bind each resume to one pause event. A
+  replacement worker that finds a different pause at the same position returns
+  `RESUME_EVENT_MISMATCH` and names the expected and found event IDs.
 - **Pause-anchor storage failures:** Report pause snapshot artifact or event
   write failures with `code: 'WORKSPACE_ANCHOR_WRITE'` after cleanup. Failed
   persistence does not write a resumable runner pause.
