@@ -1,7 +1,6 @@
 # Obversa
 
-Obversa is a TypeScript workspace for running real-world processes with
-agents.
+A process runtime for software teams.
 
 Status: In build. Public docs in `docs/public/`.
 

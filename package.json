@@ -1,7 +1,7 @@
 {
   "name": "obversa",
   "private": true,
-  "description": "A TypeScript workspace for gating real-world processes with review surfaces.",
+  "description": "A process runtime for software teams.",
   "license": "MIT",
   "author": "Jonny Neill <jonnyneill@hotmail.com>",
   "type": "module",
