@@ -46,7 +46,7 @@ export interface SupervisedRunOptions {
 }
 
 export type SupervisedRunResult = Exclude<GraphExecutorResult, { readonly kind: 'waiting' | 'pause' }>
-  | { readonly kind: 'pause'; readonly reason: string; readonly code?: 'WORKSPACE_DRIFT' | 'WORKSPACE_ANCHOR_MISSING' | 'WORKSPACE_ANCHOR_INVALID' | 'RESUME_EVENT_MISMATCH' };
+  | { readonly kind: 'pause'; readonly reason: string; readonly code?: 'WORKSPACE_DRIFT' | 'WORKSPACE_ANCHOR_MISSING' | 'WORKSPACE_ANCHOR_INVALID' | 'WORKSPACE_ANCHOR_WRITE' | 'RUN_STORAGE' | 'RESUME_EVENT_MISMATCH' };
 
 export interface ResumeSupervisedRunOptions extends Omit<SupervisedRunOptions, 'definition' | 'module' | 'limits'> {
   readonly runId: string;
@@ -156,6 +156,9 @@ async function superviseRun(options: SupervisedRunOptions, resume?: {
     let resumeInput: SupervisedWorkerInput['resume'];
     let resumeRefusal: Extract<SupervisedRunResult, { kind: 'pause' }> | undefined;
     let pauseAnchorArtifact: ArtifactReference | undefined;
+    let pendingAnchor: { readonly digest: string; readonly scope: readonly string[] | null } | undefined;
+    const pauseEvidence = (): JsonObject => pauseAnchorArtifact !== undefined ? { anchorArtifact: pauseAnchorArtifact }
+      : pendingAnchor !== undefined ? { pendingAnchor } : {};
     let restartCount = 0;
     if (resume !== undefined) {
       const records = await readSupervision(storage, runId);
@@ -172,16 +175,30 @@ async function superviseRun(options: SupervisedRunOptions, resume?: {
       const launch = records.findLast((event) => event.type === 'runner:worker-launching');
       restartCount = launch === undefined ? 0 : Number((launch.payload as JsonObject).restartCount);
       const saved = (paused.payload as JsonObject).anchorArtifact;
-      if (saved === undefined) {
+      const pending = (paused.payload as JsonObject).pendingAnchor;
+      if (saved === undefined && pending === undefined) {
         resumeRefusal = { kind: 'pause', code: 'WORKSPACE_ANCHOR_MISSING', reason: 'The pause has no saved workspace anchor.' };
       } else {
         try {
-          pauseAnchorArtifact = validateArtifactReference(saved);
-          if (pauseAnchorArtifact.purpose !== 'runner-pause-anchor' || pauseAnchorArtifact.mediaType !== 'application/json') {
-            throw new Error('The saved reference is not a pause workspace anchor.');
+          if (saved !== undefined) {
+            pauseAnchorArtifact = validateArtifactReference(saved);
+            if (pauseAnchorArtifact.purpose !== 'runner-pause-anchor' || pauseAnchorArtifact.mediaType !== 'application/json') {
+              throw new Error('The saved reference is not a pause workspace anchor.');
+            }
+            const bytes = await storage.artifactStore.read({ namespace: storage.record.namespace, runId }, pauseAnchorArtifact);
+            anchor = JSON.parse(Buffer.from(bytes).toString('utf8')) as WorkspaceAnchor;
+          } else {
+            if (pending === null || typeof pending !== 'object' || Array.isArray(pending)) {
+              throw new Error('The pending pause workspace anchor has an invalid digest or scope.');
+            }
+            const metadata = pending as JsonObject;
+            if (typeof metadata.digest !== 'string' || !/^sha256:[0-9a-f]{64}$/u.test(metadata.digest)
+              || !(metadata.scope === null || Array.isArray(metadata.scope) && metadata.scope.every((path) => typeof path === 'string'))) {
+              throw new Error('The pending pause workspace anchor has an invalid digest or scope.');
+            }
+            pendingAnchor = { digest: metadata.digest, scope: metadata.scope as readonly string[] | null };
+            anchor = await options.workspace.capture(pendingAnchor.scope ?? undefined);
           }
-          const bytes = await storage.artifactStore.read({ namespace: storage.record.namespace, runId }, pauseAnchorArtifact);
-          anchor = JSON.parse(Buffer.from(bytes).toString('utf8')) as WorkspaceAnchor;
           if (anchor === null || Array.isArray(anchor) || anchor.schemaVersion !== 1
             || typeof anchor.root !== 'string' || typeof anchor.repositoryId !== 'string'
             || typeof anchor.head !== 'string' || typeof anchor.fingerprint !== 'string'
@@ -189,6 +206,10 @@ async function superviseRun(options: SupervisedRunOptions, resume?: {
             || !Array.isArray(anchor.files) || !anchor.files.every((file) => file !== null && typeof file === 'object' && !Array.isArray(file))
             || await realpath(anchor.root) !== runRoot) {
             throw new Error('The saved workspace anchor has an invalid shape or worker root.');
+          }
+          if (pendingAnchor !== undefined && digestJson(anchor) !== pendingAnchor.digest) {
+            anchor = undefined;
+            resumeRefusal = { kind: 'pause', code: 'WORKSPACE_DRIFT', reason: 'The workspace changed after the captured pause.' };
           }
         } catch {
           anchor = undefined;
@@ -230,13 +251,21 @@ async function superviseRun(options: SupervisedRunOptions, resume?: {
       } catch (error) { leaseReleaseFailed = true; throw error; }
     };
     const savePauseAnchor = async (snapshot?: WorkspaceAnchor): Promise<ArtifactReference> => {
+      pauseAnchorArtifact = undefined;
+      pendingAnchor = undefined;
       try {
         snapshot ??= await options.workspace.capture();
-        const anchorArtifact = await storage.artifactStore.write({ namespace: storage.record.namespace, runId }, {
+      } catch (cause) {
+        throw new SupervisedRunError('WORKSPACE_ANCHOR_WRITE', 'The pause workspace anchor could not be captured.', { cause });
+      }
+      pendingAnchor = { digest: digestJson(snapshot), scope: snapshot.scope };
+      try {
+        pauseAnchorArtifact = await storage.artifactStore.write({ namespace: storage.record.namespace, runId }, {
           bytes: Buffer.from(JSON.stringify(snapshot)), mediaType: 'application/json', purpose: 'runner-pause-anchor', contentMode: 'state',
         });
-        await append('pause-anchor', { anchorArtifact });
-        return anchorArtifact;
+        await append('pause-anchor', { anchorArtifact: pauseAnchorArtifact });
+        pendingAnchor = undefined;
+        return pauseAnchorArtifact;
       } catch (cause) {
         throw new SupervisedRunError('WORKSPACE_ANCHOR_WRITE', 'The pause workspace anchor could not be stored.', { cause });
       }
@@ -264,8 +293,9 @@ async function superviseRun(options: SupervisedRunOptions, resume?: {
       try {
         if (resumeRefusal !== undefined) {
           await release();
-          return await finish(resumeRefusal, pauseAnchorArtifact === undefined ? {} : { anchorArtifact: pauseAnchorArtifact });
+          return await finish(resumeRefusal, pauseEvidence());
         }
+        if (pendingAnchor !== undefined) await savePauseAnchor(anchor!);
         const input: SupervisedWorkerInput = {
           runId, runRoot, scratchDirectory, storage: storageOptions,
           ...(resumeInput === undefined ? {} : { resume: resumeInput }),
@@ -283,13 +313,20 @@ async function superviseRun(options: SupervisedRunOptions, resume?: {
           }
           const attemptId = digestJson({ worker: randomUUID() });
           const ownerId = digestJson({ owner: randomUUID() });
-          await append('worker-launching', { attemptId, ownerId, restartCount, ...(resumeInput === undefined ? {} : { resume: resumeInput }) });
+          try {
+            await append('worker-launching', { attemptId, ownerId, restartCount, ...(resumeInput === undefined ? {} : { resume: resumeInput }) });
+          } catch (cause) {
+            if (resume === undefined || pauseAnchorArtifact === undefined) throw cause;
+            throw new SupervisedRunError('RUN_STORAGE', 'The resume worker launch could not be recorded.', { cause });
+          }
           const launch = (await readSupervision(storage, runId)).at(-1)!;
           const revision = launch.revision;
           // Set this once: replacement workers spend the same resumed interval.
           deadline ??= Date.parse(launch.timestamp) + carriedRemaining;
           const launchRemaining = deadline - Date.now();
           if (launchRemaining <= 0 || cancellation.signal.aborted) continue;
+          pauseAnchorArtifact = undefined;
+          pendingAnchor = undefined;
           cleanupSafe = false;
           const command = await runOwnedCommand({
             executable: process.execPath,
@@ -347,6 +384,13 @@ async function superviseRun(options: SupervisedRunOptions, resume?: {
         }
         if (cleanupSafe && !leaseReleaseFailed) {
           try { await release(); } catch { /* Keep the first failure and record the retained lease below. */ }
+        }
+        if (cleanupSafe && !leaseReleaseFailed && error instanceof SupervisedRunError
+          && (error.code === 'WORKSPACE_ANCHOR_WRITE' || error.code === 'RUN_STORAGE')
+          && (pauseAnchorArtifact !== undefined || pendingAnchor !== undefined)) {
+          return await finish({ kind: 'pause', code: error.code, reason: error.message }, {
+            ...pauseEvidence(), cleanupSafe, leaseRetained: false,
+          });
         }
         return await finish({
           kind: 'fail', code: error instanceof SupervisedRunError || error instanceof OwnedCommandError ? error.code : 'WATCHDOG_ERROR',

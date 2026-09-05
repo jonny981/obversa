@@ -7,7 +7,8 @@ import { setTimeout as delay } from 'node:timers/promises';
 import { fileURLToPath } from 'node:url';
 
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { inspectOwnedProcessTree } from '@obversa/engine/command';
+import { digestJson } from '@obversa/engine';
+import { inspectOwnedProcessTree, stopOwnedProcessTree } from '@obversa/engine/command';
 
 import * as runtime from '@obversa/runtime';
 import * as runner from '../src/index.js';
@@ -123,20 +124,22 @@ async function nodeStarted(directory: string, node = 'first') {
   return pid;
 }
 
-async function expectPauseAnchorFailureCleanup(
+async function expectPauseAnchorCleanup(
   options: runner.SupervisedRunOptions,
   handle: runner.SupervisedRunHandle,
+  expected: 'fail' | 'pause',
 ) {
   const pids = (await readFile(join(options.directory, 'scratch/first.started'), 'utf8')).trim().split('\n').map(Number);
   for (const pid of pids) expect(() => process.kill(pid, 0)).toThrow();
   expect(await handle.status()).toMatchObject({
-    phase: 'failed', workerAlive: false, cleanupVerified: true, leaseRetained: false,
+    phase: expected === 'fail' ? 'failed' : 'paused', workerAlive: false, cleanupVerified: true, leaseRetained: false,
   });
   const records = await readSupervision(createLocalRunStorage(options.storage), 'fixture');
   expect(records.some((event) => event.type === 'runner:pause-anchor')).toBe(false);
-  expect(records.some((event) => event.type === 'runner:paused')).toBe(false);
+  expect(records.some((event) => event.type === (expected === 'fail' ? 'runner:paused' : 'runner:failed'))).toBe(false);
   expect(records.at(-1)).toMatchObject({
-    type: 'runner:failed', payload: { kind: 'fail', code: 'WORKSPACE_ANCHOR_WRITE' },
+    type: expected === 'fail' ? 'runner:failed' : 'runner:paused',
+    payload: { kind: expected, code: 'WORKSPACE_ANCHOR_WRITE' },
   });
   const lease = await options.workspace.acquireLease('after-anchor-failure', 'fixture', await options.workspace.capture());
   expect(lease.ok).toBe(true);
@@ -601,49 +604,166 @@ describe('supervised local runs', () => {
     } finally {
       failCapture = false;
     }
-    await expectPauseAnchorFailureCleanup(options, handle!);
+    await expectPauseAnchorCleanup(options, handle!, 'fail');
   });
 
-  it.each(['worker pause', 'workspace drift'] as const)(
-    'a pause anchor artifact write failure during %s is typed and leaves no resumable pause', async (pause) => {
+  it.each(['unchanged files', 'edited files', 'fresh process', 'storage still failing', 'scoped files'] as const)(
+    'storage recovery after a pause anchor artifact write failure with %s', async (recovery) => {
       const { options } = await fixture();
+      const approvalFile = join(options.directory, 'approval');
       const storage = createLocalRunStorage(options.storage);
       const artifactPrototype = Object.getPrototypeOf(storage.artifactStore) as typeof storage.artifactStore;
       const write = artifactPrototype.write;
+      let snapshot: runtime.WorkspaceAnchor | undefined;
       const artifactSpy = vi.spyOn(artifactPrototype, 'write').mockImplementation(async function (
         this: typeof storage.artifactStore, scope, artifact,
       ) {
-        if (artifact.purpose === 'runner-pause-anchor') throw new Error('Injected pause anchor artifact write failure.');
+        if (artifact.purpose === 'runner-pause-anchor') {
+          snapshot = JSON.parse(Buffer.from(artifact.bytes).toString('utf8')) as runtime.WorkspaceAnchor;
+          throw new Error('Injected pause anchor artifact write failure.');
+        }
         return await write.call(this, scope, artifact);
       });
-      let handle: runner.SupervisedRunHandle;
-      try {
-        if (pause === 'worker pause') {
-          handle = await startFixture({
-            ...options,
-            definition: { ...options.definition, resolvedInputs: {
-              wait: true, waitNode: 'last', approvalFile: join(options.directory, 'approval'),
-            } },
-          });
-        } else {
-          handle = await startFixture({
-            ...options,
-            definition: { ...options.definition, resolvedInputs: { delayMs: 200 } },
-            restart: { ...options.restart, initialBackoffMs: 800, maxBackoffMs: 800 },
-          });
-          process.kill(await nodeStarted(options.directory), 'SIGKILL');
-          await expect.poll(async () => (await handle.status()).phase).toBe('backoff');
-          await writeFile(join(options.runRoot, 'outside-edit.txt'), 'someone else changed this');
-        }
-        await expect(handle.done).resolves.toMatchObject({ kind: 'fail', code: 'WORKSPACE_ANCHOR_WRITE' });
-      } finally {
-        artifactSpy.mockRestore();
+      const handle = await startFixture({
+        ...options,
+        ...(recovery === 'scoped files' ? { workspace: {
+          ...options.workspace, capture: async () => await options.workspace.capture(['host.mjs']),
+        } } : {}),
+        definition: { ...options.definition, resolvedInputs: { wait: true, waitNode: 'last', approvalFile } },
+      });
+      await expect(handle.done).resolves.toMatchObject({ kind: 'pause', code: 'WORKSPACE_ANCHOR_WRITE' });
+      await expectPauseAnchorCleanup(options, handle, 'pause');
+      expect(snapshot).toBeDefined();
+      const before = await readSupervision(storage, 'fixture');
+      const payload = before.at(-1)!.payload as runtime.JsonObject;
+      const pending = payload.pendingAnchor;
+      expect(pending).toEqual({ digest: digestJson(snapshot!), scope: snapshot!.scope });
+      expect(payload).not.toHaveProperty('anchorArtifact');
+      expect(payload).not.toHaveProperty('anchor');
+      expect(payload).not.toHaveProperty('files');
+      if (recovery === 'storage still failing') {
+        const retry = await resumeFixture(options);
+        await expect(retry.done).resolves.toMatchObject({ kind: 'pause', code: 'WORKSPACE_ANCHOR_WRITE' });
+        await expectPauseAnchorCleanup(options, retry, 'pause');
+        const retried = await readSupervision(storage, 'fixture');
+        expect((retried.at(-1)!.payload as runtime.JsonObject).pendingAnchor).toEqual(pending);
+        expect(retried.filter((event) => event.type === 'runner:worker-launching')).toHaveLength(1);
       }
-      await expectPauseAnchorFailureCleanup(options, handle!);
-    },
+      artifactSpy.mockRestore();
+      await writeFile(approvalFile, 'allow');
+      if (recovery === 'scoped files') {
+        expect(snapshot!.scope).toEqual(['host.mjs']);
+        await writeFile(join(options.runRoot, 'outside-scope'), 'keep');
+      }
+      if (recovery === 'edited files') {
+        await writeFile(join(options.runRoot, 'foreign-edit'), 'keep');
+        const workspace = { ...options.workspace, acquireLease: async () => {
+          throw new Error('Changed pending anchor reached lease acquisition.');
+        } };
+        for (let refusal = 0; refusal < 2; refusal += 1) {
+          await expect((await resumeFixture({ ...options, workspace })).done)
+            .resolves.toMatchObject({ kind: 'pause', code: 'WORKSPACE_DRIFT' });
+          await expect(readFile(join(options.directory, 'scratch/last.started'))).rejects.toMatchObject({ code: 'ENOENT' });
+          const after = await readSupervision(storage, 'fixture');
+          expect((after.at(-1)!.payload as runtime.JsonObject).pendingAnchor).toEqual(pending);
+          expect(after.filter((event) => event.type === 'runner:worker-launching')).toHaveLength(1);
+          expect(await readFile(join(options.runRoot, 'foreign-edit'), 'utf8')).toBe('keep');
+        }
+        return;
+      }
+      if (recovery === 'fresh process') {
+        const childSource = `
+import { resumeSupervisedRun } from ${JSON.stringify(import.meta.resolve('@obversa/runner'))};
+import { createGitWorktreeProvider } from ${JSON.stringify(import.meta.resolve('@obversa/runtime'))};
+const chunks = [];
+for await (const chunk of process.stdin) chunks.push(chunk);
+const options = JSON.parse(Buffer.concat(chunks).toString('utf8'));
+let handle;
+let stopping = false;
+process.on('SIGTERM', () => {
+  stopping = true;
+  if (handle !== undefined) void handle.stop().catch(() => {});
+});
+handle = await resumeSupervisedRun({
+  ...options, workspace: createGitWorktreeProvider({ repositoryPath: options.runRoot }),
+});
+if (stopping) await handle.stop();
+process.stdout.write(JSON.stringify(await handle.done));
+`;
+        const child = spawn(process.execPath, ['--input-type=module', '--eval', childSource], { detached: true, stdio: 'pipe' });
+        let stdout = '';
+        let stderr = '';
+        child.stdout.setEncoding('utf8').on('data', (chunk: string) => { stdout += chunk; });
+        child.stderr.setEncoding('utf8').on('data', (chunk: string) => { stderr += chunk; });
+        const closed = new Promise<{ exitCode: number | null; signal: NodeJS.Signals | null }>((resolve, reject) => {
+          child.once('error', reject);
+          child.once('close', (exitCode, signal) => resolve({ exitCode, signal }));
+          child.stdin.once('error', reject);
+        });
+        let timeout: ReturnType<typeof setTimeout> | undefined;
+        try {
+          child.stdin.end(JSON.stringify({
+            directory: options.directory, runRoot: options.runRoot, storage: options.storage,
+            restart: options.restart, teardownGraceMs: options.teardownGraceMs,
+            runId: 'fixture', position: 'dag/last/1',
+          }));
+          const exit = await Promise.race([closed, new Promise<never>((_, reject) => {
+            timeout = setTimeout(() => reject(new Error(`Fresh resume timed out: ${JSON.stringify({ pid: child.pid, stdout, stderr })}`)), 25_000);
+          })]);
+          const evidence = { ...exit, stdout, stderr };
+          console.info('Fresh-process storage recovery:', JSON.stringify(evidence));
+          expect(evidence, JSON.stringify(evidence)).toMatchObject({ exitCode: 0, signal: null, stderr: '' });
+          expect(JSON.parse(stdout)).toMatchObject({ kind: 'complete' });
+        } finally {
+          clearTimeout(timeout);
+          if (child.pid !== undefined && child.exitCode === null && child.signalCode === null) {
+            const owned = { attemptId: digestJson({ watchdog: child.pid }), rootPid: child.pid, rootProcessGroupId: child.pid };
+            const observed = await inspectOwnedProcessTree(owned);
+            child.kill('SIGTERM');
+            await Promise.race([closed.catch(() => undefined), delay(3_000)]);
+            const remaining = await stopOwnedProcessTree({ ...owned, observed, graceMs: 100 });
+            expect(remaining, JSON.stringify({ watchdog: child.pid, remaining, stdout, stderr })).toEqual([]);
+          }
+        }
+      } else {
+        await expect((await resumeFixture(options)).done).resolves.toMatchObject({ kind: 'complete' });
+      }
+      expect((await readFile(join(options.directory, 'scratch/first.started'), 'utf8')).trim().split('\n')).toHaveLength(1);
+      expect((await readFile(join(options.directory, 'scratch/last.started'), 'utf8')).trim().split('\n')).toHaveLength(1);
+    }, 40_000,
   );
 
-  it('a pause anchor event write failure is typed and preserves the stored artifact', async () => {
+  it('storage recovery preserves the pre-edit anchor after a restart drift artifact write failure', async () => {
+    const { options } = await fixture();
+    const storage = createLocalRunStorage(options.storage);
+    const prototype = Object.getPrototypeOf(storage.artifactStore) as typeof storage.artifactStore;
+    const write = prototype.write;
+    let snapshot: runtime.WorkspaceAnchor | undefined;
+    vi.spyOn(prototype, 'write').mockImplementation(async function (this: typeof storage.artifactStore, scope, artifact) {
+      if (artifact.purpose === 'runner-pause-anchor') {
+        snapshot = JSON.parse(Buffer.from(artifact.bytes).toString('utf8')) as runtime.WorkspaceAnchor;
+        throw new Error('Injected pause anchor artifact write failure.');
+      }
+      return await write.call(this, scope, artifact);
+    });
+    const handle = await startFixture({
+      ...options, definition: { ...options.definition, resolvedInputs: { delayMs: 200 } },
+      restart: { ...options.restart, initialBackoffMs: 800, maxBackoffMs: 800 },
+    });
+    process.kill(await nodeStarted(options.directory), 'SIGKILL');
+    await expect.poll(async () => (await handle.status()).phase).toBe('backoff');
+    await writeFile(join(options.runRoot, 'outside-edit.txt'), 'someone else changed this');
+    await expect(handle.done).resolves.toMatchObject({ kind: 'pause', code: 'WORKSPACE_ANCHOR_WRITE' });
+    await expectPauseAnchorCleanup(options, handle, 'pause');
+    expect(snapshot).toBeDefined();
+    expect(await options.workspace.verify(snapshot!)).toMatchObject({ ok: false });
+    const records = await readSupervision(storage, 'fixture');
+    expect((records.at(-1)!.payload as runtime.JsonObject).pendingAnchor)
+      .toEqual({ digest: digestJson(snapshot!), scope: snapshot!.scope });
+    expect(await readFile(join(options.runRoot, 'outside-edit.txt'), 'utf8')).toBe('someone else changed this');
+  });
+
+  it('storage recovery after a pause anchor event write failure uses the stored artifact', async () => {
     const { options } = await fixture();
     const storage = createLocalRunStorage(options.storage);
     const scope = { namespace: 'runner-tests', runId: 'fixture' };
@@ -679,7 +799,7 @@ describe('supervised local runs', () => {
           wait: true, waitNode: 'last', approvalFile: join(options.directory, 'approval'),
         } },
       });
-      await expect(handle.done).resolves.toMatchObject({ kind: 'fail', code: 'WORKSPACE_ANCHOR_WRITE' });
+      await expect(handle.done).resolves.toMatchObject({ kind: 'pause', code: 'WORKSPACE_ANCHOR_WRITE' });
     } finally {
       artifactSpy.mockRestore();
       eventSpy.mockRestore();
@@ -687,7 +807,20 @@ describe('supervised local runs', () => {
     expect(anchorArtifact).toBeDefined();
     expect(anchorBytes).toBeDefined();
     await expect(storage.artifactStore.read(scope, anchorArtifact!)).resolves.toEqual(anchorBytes!);
-    await expectPauseAnchorFailureCleanup(options, handle!);
+    await expectPauseAnchorCleanup(options, handle!, 'pause');
+    const records = await readSupervision(storage, 'fixture');
+    expect((records.at(-1)!.payload as runtime.JsonObject).anchorArtifact).toEqual(anchorArtifact);
+    await supervisionWriter(storage, 'fixture')('paused', {
+      ...records.at(-1)!.payload as runtime.JsonObject,
+      pendingAnchor: { digest: 'invalid', scope: 'invalid' },
+    });
+    await writeFile(join(options.directory, 'approval'), 'allow');
+    const workspace = { ...options.workspace, capture: async () => {
+      throw new Error('Resume recaptured despite a readable stored artifact.');
+    } };
+    await expect((await resumeFixture({ ...options, workspace })).done).resolves.toMatchObject({ kind: 'complete' });
+    expect((await readFile(join(options.directory, 'scratch/first.started'), 'utf8')).trim().split('\n')).toHaveLength(1);
+    expect((await readFile(join(options.directory, 'scratch/last.started'), 'utf8')).trim().split('\n')).toHaveLength(1);
   });
 
   it('resume rejects wrong and completed positions without launching a worker', async () => {
@@ -725,7 +858,7 @@ describe('supervised local runs', () => {
     expect((await readFile(join(options.directory, 'scratch/last.started'), 'utf8')).trim().split('\n')).toHaveLength(1);
   });
 
-  it.each(['before', 'after'])('a resume launch write failure %s storage charges only a stored launch', async (boundary) => {
+  it.each(['before', 'after'])('storage recovery after a resume launch write failure %s storage charges only a stored launch', async (boundary) => {
     const { options, approvalFile } = await pausedFixture();
     await writeFile(approvalFile, 'allow');
     const store = createLocalRunStorage(options.storage);
@@ -743,8 +876,8 @@ describe('supervised local runs', () => {
       return await append.apply(this, args);
     });
     const handle = await resumeFixture(options);
-    await expect(handle.done).resolves.toMatchObject({ kind: 'fail', code: 'WATCHDOG_ERROR' });
-    expect(await handle.status()).toMatchObject({ phase: 'failed', workerAlive: false, leaseRetained: false });
+    await expect(handle.done).resolves.toMatchObject({ kind: 'pause', code: 'RUN_STORAGE' });
+    expect(await handle.status()).toMatchObject({ phase: 'paused', workerAlive: false, leaseRetained: false });
     const records = await readSupervision(store, 'fixture');
     expect(records.filter((event) => event.type === 'runner:worker-launching')).toHaveLength(boundary === 'after' ? 2 : 1);
     const launch = records.findLast((event) => event.type === 'runner:worker-launching')!;
@@ -753,6 +886,53 @@ describe('supervised local runs', () => {
       elapsedMs: before.elapsedMs + charged, remainingTimeoutMs: before.remainingTimeoutMs - charged,
     });
     await expect(readFile(join(options.directory, 'scratch/last.started'))).rejects.toMatchObject({ code: 'ENOENT' });
+    expect(await readdir(join(options.storage.directory, 'runner-locks/runner-tests'))).toEqual([]);
+    await expect((await resumeFixture(options)).done).resolves.toMatchObject({ kind: 'complete' });
+    expect((await readFile(join(options.directory, 'scratch/first.started'), 'utf8')).trim().split('\n')).toHaveLength(1);
+    expect((await readFile(join(options.directory, 'scratch/last.started'), 'utf8')).trim().split('\n')).toHaveLength(1);
+  });
+
+  it('storage recovery keeps a replacement launch write failure terminal after a resumed worker crashes', async () => {
+    const { options } = await fixture();
+    const approvalFile = join(options.directory, 'approval');
+    const paused = {
+      ...options,
+      definition: { ...options.definition, resolvedInputs: {
+        wait: true, waitNode: 'last', approvalFile, resumeCrash: 'before-resume', storage: options.storage,
+      } },
+    };
+    await expect((await startFixture(paused)).done).resolves.toMatchObject({ kind: 'pause' });
+    await writeFile(approvalFile, 'allow');
+    const storage = createLocalRunStorage(options.storage);
+    const prototype = Object.getPrototypeOf(storage.eventStore) as typeof storage.eventStore;
+    const append = prototype.append;
+    vi.spyOn(prototype, 'append').mockImplementation(async function (this: typeof storage.eventStore, ...args) {
+      if (args[2].some((event) => event.type === 'runner:worker-launching'
+        && (event.payload as runtime.JsonObject).restartCount === 1)) {
+        throw new Error('Injected replacement launch append failure.');
+      }
+      return await append.apply(this, args);
+    });
+    const handle = await resumeFixture(paused);
+    await expect(handle.done).resolves.toMatchObject({ kind: 'fail', code: 'WATCHDOG_ERROR' });
+    expect(await handle.status()).toMatchObject({
+      phase: 'failed', workerAlive: false, cleanupVerified: true, leaseRetained: false,
+    });
+    const records = await readSupervision(storage, 'fixture');
+    expect(records.filter((event) => event.type === 'runner:worker-launching')).toHaveLength(2);
+    expect(records.filter((event) => event.type === 'runner:worker-crashed')).toHaveLength(1);
+    expect(records.at(-1)).toMatchObject({ type: 'runner:failed', payload: { kind: 'fail', code: 'WATCHDOG_ERROR' } });
+    expect(records.at(-1)!.payload).not.toHaveProperty('anchorArtifact');
+    expect(records.at(-1)!.payload).not.toHaveProperty('pendingAnchor');
+    for (const event of records.filter((event) => event.type === 'runner:worker-started')) {
+      const pid = Number(((event.payload as runtime.JsonObject).process as runtime.JsonObject).pid);
+      expect(() => process.kill(pid, 0)).toThrow();
+    }
+    expect((await readFile(join(options.directory, 'scratch/first.started'), 'utf8')).trim().split('\n')).toHaveLength(1);
+    await expect(readFile(join(options.directory, 'scratch/last.started'))).rejects.toMatchObject({ code: 'ENOENT' });
+    const lease = await options.workspace.acquireLease('after-replacement-failure', 'fixture', await options.workspace.capture());
+    expect(lease.ok).toBe(true);
+    if (lease.ok) await options.workspace.releaseLease(lease.token);
     expect(await readdir(join(options.storage.directory, 'runner-locks/runner-tests'))).toEqual([]);
   });
 
@@ -805,6 +985,42 @@ describe('supervised local runs', () => {
         .resolves.toMatchObject({ kind: 'pause', code: 'WORKSPACE_ANCHOR_INVALID' });
       expect(await runner.readSupervisedRunStatus({ storage: options.storage, runId: 'fixture' }))
         .toMatchObject({ elapsedMs: before.elapsedMs, remainingTimeoutMs: before.remainingTimeoutMs });
+      expect(await readdir(join(options.storage.directory, 'runner-locks/runner-tests'))).toEqual([]);
+    }
+    await expect(readFile(join(options.directory, 'scratch/last.started'))).rejects.toMatchObject({ code: 'ENOENT' });
+  });
+
+  it('storage recovery refuses malformed pending pause anchors before capture or lease acquisition', async () => {
+    const { options } = await pausedFixture();
+    const storage = createLocalRunStorage(options.storage);
+    const digest = digestJson(await options.workspace.capture());
+    const before = await runner.readSupervisedRunStatus({ storage: options.storage, runId: 'fixture' });
+    const invalidAnchors: runtime.JsonValue[] = [
+      null, [], { digest: 'invalid', scope: null }, { digest, scope: 'host.mjs' },
+      { digest, scope: [17] }, { digest }, { scope: null },
+    ];
+    for (const pendingAnchor of invalidAnchors) {
+      await supervisionWriter(storage, 'fixture')('paused', {
+        kind: 'pause', phase: 'paused', reason: 'Pause with invalid pending evidence.', pendingAnchor,
+      });
+      let captures = 0;
+      const workspace = {
+        ...options.workspace,
+        capture: async (...args: Parameters<typeof options.workspace.capture>) => {
+          captures += 1;
+          return await options.workspace.capture(...args);
+        },
+        acquireLease: async () => { throw new Error('Invalid pending anchor reached lease acquisition.'); },
+      };
+      const handle = await resumeFixture({ ...options, workspace });
+      await expect(handle.done).resolves.toMatchObject({ kind: 'pause', code: 'WORKSPACE_ANCHOR_INVALID' });
+      expect(captures).toBe(0);
+      expect(await handle.status()).toMatchObject({
+        phase: 'paused', workerAlive: false, leaseRetained: false,
+        elapsedMs: before.elapsedMs, remainingTimeoutMs: before.remainingTimeoutMs,
+      });
+      const records = await readSupervision(storage, 'fixture');
+      expect(records.filter((event) => event.type === 'runner:worker-launching')).toHaveLength(1);
       expect(await readdir(join(options.storage.directory, 'runner-locks/runner-tests'))).toEqual([]);
     }
     await expect(readFile(join(options.directory, 'scratch/last.started'))).rejects.toMatchObject({ code: 'ENOENT' });
