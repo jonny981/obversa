@@ -181,8 +181,8 @@ export function checkHook({ cwd = process.cwd(), env = process.env, allowlist = 
   if (env.OBVERSA_RELEASE !== "1") problems.push(`refusing to publish ${name}: OBVERSA_RELEASE=1 is not set (the explicit release act)`);
   if (!allowlist.has(name)) problems.push(`refusing to publish ${name}: not on scripts/publish-allowlist.json`);
 
-  // The release record: main, a clean tree, and this package's own annotated
-  // tag at HEAD.
+  // The release record: main, a clean tree, and the runtime version's annotated
+  // repository tag at HEAD, shared by every package.
   let branch;
   let dirty;
   let tags;
@@ -201,6 +201,10 @@ export function checkHook({ cwd = process.cwd(), env = process.env, allowlist = 
     problems.push(`refusing to publish ${name}: HEAD must carry exactly one annotated repository release tag (found ${releaseTags.join(", ") || "none"})`);
   } else {
     const tag = releaseTags[0];
+    const root = run(cwd, "rev-parse", "--show-toplevel");
+    const { version } = JSON.parse(readFileSync(join(root, "packages", "runtime", "package.json"), "utf8"));
+    const expectedTag = releaseTagFor(version);
+    if (tag !== expectedTag) problems.push(`refusing to publish ${name}: repository release tag must be ${expectedTag} (found ${tag})`);
     let type = "";
     try { type = run(cwd, "cat-file", "-t", tag); } catch { type = ""; }
     if (type !== "tag") problems.push(`refusing to publish ${name}: ${tag} must be an annotated tag, not a lightweight one`);

@@ -83,7 +83,10 @@ test("releaseTagFor names the one repository release tag", () => {
 // A git repository around one workspace package, so the hook's release-record
 // checks (branch, clean tree, annotated tag) run against the real thing.
 function makeReleaseRepo() {
-  const root = makeWorkspace({ "packages/p": { name: "@x/p", version: "1.0.0" } });
+  const root = makeWorkspace({
+    "packages/p": { name: "@x/p", version: "0.1.0" },
+    "packages/runtime": { name: "@obversa/runtime", version: "1.0.0" },
+  });
   const git = (...args) => execFileSync("git", args, { cwd: root, encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] }).trim();
   git("init", "-q", "-b", "main");
   git("config", "user.email", "t@example.com");
@@ -136,6 +139,25 @@ test("outside a git repository the hook refuses", () => {
   try {
     const problems = checkHook({ cwd: path.join(root, "packages", "p"), env: { OBVERSA_RELEASE: "1" }, allowlist: new Set(["@x/p"]), run: () => { throw new Error("no git"); } });
     assert.match(problems.join("\n"), /not inside a git repository/);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("the hook binds every package's repository tag to the runtime version", () => {
+  const { root, cwd, git } = makeReleaseRepo();
+  try {
+    const options = { cwd, env: { OBVERSA_RELEASE: "1" }, allowlist: new Set(["@x/p"]) };
+    git("tag", "-a", "-m", "wrong release", "v0.1.0");
+    assert.match(checkHook(options).join("\n"), /repository release tag must be v1\.0\.0/);
+    git("tag", "-d", "v0.1.0");
+    git("tag", "-a", "-m", "runtime release", "v1.0.0");
+    assert.deepEqual(checkHook(options), []);
+    writeFileSync(path.join(root, "packages/runtime/package.json"), JSON.stringify({ name: "@obversa/runtime", version: "1.0.1" }));
+    git("add", ".");
+    git("commit", "-q", "-m", "bump runtime");
+    git("tag", "-f", "-a", "-m", "stale release", "v1.0.0");
+    assert.match(checkHook(options).join("\n"), /repository release tag must be v1\.0\.1/);
   } finally {
     rmSync(root, { recursive: true, force: true });
   }
