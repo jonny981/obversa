@@ -315,6 +315,33 @@ describe('stored callback client', () => {
     })).resolves.toMatchObject({ kind: 'wait' });
   });
 
+  it('refuses a repeated plain submission after an answer with not-claimed', async () => {
+    const { runId, storage } = await storedRun();
+    const request = gate('abc123');
+    const client = await createStoredCallbackClient(storage, runId);
+    await client.post(request);
+    const claim = await client.claim(request.requestId, 'router-a');
+    if (!claim.ok) throw new Error('fixture claim failed');
+    await expect(client.submit(
+      request.requestId,
+      claim.claimToken,
+      'router-a',
+      request.digest,
+      { approved: true },
+    )).resolves.toEqual({ ok: true, response: { approved: true } });
+    const before = await runEvents(storage, runId);
+
+    const restarted = await createStoredCallbackClient(storage, runId);
+    await expect(restarted.submit(
+      request.requestId,
+      claim.claimToken,
+      'router-a',
+      request.digest,
+      { approved: true },
+    )).resolves.toMatchObject({ ok: false, kind: 'not-claimed' });
+    expect(await runEvents(storage, runId)).toEqual(before);
+  });
+
   it('a repeated identical subject-backed submit is idempotent', async () => {
     const { runId, storage } = await storedRun();
     const subject = approvalSubject();
