@@ -76,7 +76,7 @@ test("the tarball command refuses an allowlisted package with no pinned file lis
   mkdirSync(join(root, "scripts"));
   writeFileSync(join(root, "pnpm-workspace.yaml"), "packages:\n  - packages/*\n");
   writeFileSync(join(root, "scripts/publish-allowlist.json"), JSON.stringify({ packages: ["@fixture/unpinned"] }));
-  for (const name of ["check-tarballs.mjs", "check-publish-allowlist.mjs"]) {
+  for (const name of ["check-tarballs.mjs", "check-publish-allowlist.mjs", "repository-version.mjs"]) {
     copyFileSync(new URL(name, import.meta.url), join(root, "scripts", name));
   }
   symlinkSync(new URL("../node_modules", import.meta.url), join(root, "node_modules"), "dir");

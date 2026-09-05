@@ -163,6 +163,27 @@ test("the hook binds every package's repository tag to the runtime version", () 
   }
 });
 
+test("the changelog command uses the runtime version from its checkout", () => {
+  const root = makeWorkspace({ "packages/runtime": { name: "@obversa/runtime", version: "2.3.4" } }, {
+    rootManifest: { name: "workspace", private: true, version: "9.9.9" },
+  });
+  try {
+    writeFileSync(path.join(root, "CHANGELOG.md"), "# Changelog\n\n## [2.3.4]\n\nA release entry.\n");
+    const run = () => spawnSync(process.execPath, [new URL("./changelog-gate.mjs", import.meta.url).pathname], {
+      cwd: root, encoding: "utf8", env: { ...process.env, GITHUB_REF_NAME: "v2.3.4" },
+    });
+    const accepted = run();
+    assert.equal(accepted.status, 0, accepted.stderr);
+    assert.match(accepted.stdout, /2\.3\.4 is documented/);
+    writeFileSync(path.join(root, "packages/runtime/package.json"), JSON.stringify({ name: "@obversa/runtime", version: "2.3.5" }));
+    const refused = run();
+    assert.equal(refused.status, 1, refused.stdout);
+    assert.match(refused.stderr, /tag v2\.3\.4 does not match package\.json version 2\.3\.5/);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
 test("the hook refuses with a message when the runtime manifest is absent", () => {
   const { root, cwd, git } = makeReleaseRepo();
   try {

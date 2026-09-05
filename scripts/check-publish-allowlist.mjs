@@ -54,6 +54,7 @@ import { execFileSync } from "node:child_process";
 import { readdirSync, readFileSync, existsSync, realpathSync } from "node:fs";
 import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
+import { repositoryVersion } from "./repository-version.mjs";
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), "..");
 const ALLOWLIST_PATH = join(ROOT, "scripts", "publish-allowlist.json");
@@ -202,12 +203,14 @@ export function checkHook({ cwd = process.cwd(), env = process.env, allowlist = 
   } else {
     const tag = releaseTags[0];
     const root = run(cwd, "rev-parse", "--show-toplevel");
-    const runtimeManifest = join(root, "packages", "runtime", "package.json");
-    if (!existsSync(runtimeManifest)) {
+    let version;
+    try {
+      version = repositoryVersion(root);
+    } catch (error) {
+      if (error.code !== "ENOENT") throw error;
       problems.push(`refusing to publish ${name}: packages/runtime/package.json is missing`);
       return problems;
     }
-    const { version } = JSON.parse(readFileSync(runtimeManifest, "utf8"));
     const expectedTag = releaseTagFor(version);
     if (tag !== expectedTag) problems.push(`refusing to publish ${name}: repository release tag must be ${expectedTag} (found ${tag})`);
     let type = "";

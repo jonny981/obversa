@@ -18,6 +18,7 @@
  */
 
 import { readFileSync } from 'node:fs';
+import { repositoryVersion } from './repository-version.mjs';
 
 const cwd = process.cwd();
 
@@ -28,7 +29,7 @@ function fail(message) {
 
 let version;
 try {
-  version = JSON.parse(readFileSync(`${cwd}/packages/runtime/package.json`, 'utf8')).version;
+  version = repositoryVersion(cwd);
 } catch (e) {
   fail(`could not read packages/runtime/package.json: ${e.message}`);
 }
