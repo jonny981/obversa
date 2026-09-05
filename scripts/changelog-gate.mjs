@@ -33,7 +33,6 @@ try {
 } catch (e) {
   fail(`could not read packages/runtime/package.json: ${e.message}`);
 }
-if (!version) fail('packages/runtime/package.json carries no version');
 
 const tag = process.env.GITHUB_REF_NAME;
 if (tag && /^v\d/.test(tag) && tag !== `v${version}`) {

@@ -177,7 +177,15 @@ function git(cwd, ...args) {
 export function checkHook({ cwd = process.cwd(), env = process.env, allowlist = readAllowlist(), run = git } = {}) {
   const manifestPath = join(cwd, "package.json");
   if (!existsSync(manifestPath)) return [`no package.json in ${cwd}`];
-  const { name } = JSON.parse(readFileSync(manifestPath, "utf8"));
+  let manifest;
+  try {
+    manifest = JSON.parse(readFileSync(manifestPath, "utf8"));
+  } catch (error) {
+    const reason = error instanceof SyntaxError ? "is not valid JSON" : `could not be read: ${error.message}`;
+    return [`refusing to publish: ${manifestPath} ${reason}`];
+  }
+  const name = manifest?.name;
+  if (typeof name !== "string" || !name.trim()) return [`refusing to publish: ${manifestPath} must contain a non-empty package name`];
   const problems = [];
   if (env.OBVERSA_RELEASE !== "1") problems.push(`refusing to publish ${name}: OBVERSA_RELEASE=1 is not set (the explicit release act)`);
   if (!allowlist.has(name)) problems.push(`refusing to publish ${name}: not on scripts/publish-allowlist.json`);
@@ -207,8 +215,8 @@ export function checkHook({ cwd = process.cwd(), env = process.env, allowlist = 
     try {
       version = repositoryVersion(root);
     } catch (error) {
-      if (error.code !== "ENOENT") throw error;
-      problems.push(`refusing to publish ${name}: packages/runtime/package.json is missing`);
+      const reason = error.code === "ENOENT" ? "packages/runtime/package.json is missing" : error.message;
+      problems.push(`refusing to publish ${name}: ${reason}`);
       return problems;
     }
     const expectedTag = releaseTagFor(version);

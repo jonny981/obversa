@@ -198,6 +198,59 @@ test("the hook refuses with a message when the runtime manifest is absent", () =
   }
 });
 
+for (const [label, contents, reason] of [
+  ["malformed JSON", "{", "is not valid JSON"],
+  ["null contents", "null", "must contain a non-empty package name"],
+]) {
+  test(`the runtime package hook refuses its own manifest with ${label}`, () => {
+    const { root, git } = makeReleaseRepo();
+    const cwd = path.join(root, "packages/runtime");
+    try {
+      writeFileSync(path.join(cwd, "package.json"), contents);
+      git("add", ".");
+      git("commit", "-q", "-m", "invalid runtime manifest");
+      git("tag", "-a", "-m", "release", "v1.0.0");
+      assert.deepEqual(checkHook({ cwd, env: { OBVERSA_RELEASE: "1" }, allowlist: new Set(["@obversa/runtime"]) }), [
+        `refusing to publish: ${path.join(cwd, "package.json")} ${reason}`,
+      ]);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+}
+
+for (const [label, contents, reason] of [
+  ["malformed JSON", "{", "packages/runtime/package.json is not valid JSON"],
+  ["missing version", '{"name":"@obversa/runtime"}', "packages/runtime/package.json must contain a non-empty version string"],
+  ["blank version", '{"name":"@obversa/runtime","version":"  "}', "packages/runtime/package.json must contain a non-empty version string"],
+  ["non-string version", '{"name":"@obversa/runtime","version":1}', "packages/runtime/package.json must contain a non-empty version string"],
+]) {
+  test(`the hook refuses a runtime manifest with ${label}`, () => {
+    const { root, cwd, git } = makeReleaseRepo();
+    try {
+      writeFileSync(path.join(root, "packages/runtime/package.json"), contents);
+      git("add", ".");
+      git("commit", "-q", "-m", "invalid runtime manifest");
+      git("tag", "-a", "-m", "release", "v1.0.0");
+      assert.deepEqual(checkHook({ cwd, env: { OBVERSA_RELEASE: "1" }, allowlist: new Set(["@x/p"]) }), [
+        `refusing to publish @x/p: ${reason}`,
+      ]);
+      if (label !== "malformed JSON") {
+        assert.deepEqual(checkHook({ cwd: path.join(root, "packages/runtime"), env: { OBVERSA_RELEASE: "1" }, allowlist: new Set(["@obversa/runtime"]) }), [
+          `refusing to publish @obversa/runtime: ${reason}`,
+        ]);
+      }
+      const changelog = spawnSync(process.execPath, [new URL("./changelog-gate.mjs", import.meta.url).pathname], {
+        cwd: root, encoding: "utf8",
+      });
+      assert.equal(changelog.status, 1, changelog.stdout);
+      assert.ok(changelog.stderr.includes(reason), changelog.stderr);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+}
+
 test("the audit requires every public package to name the never-resolving registry under both keys, no other registry route, no publish directory, and the release command to exist", () => {
   const good = { name: "@obversa/pub", version: "1.0.0", scripts: { prepublishOnly: HOOK_COMMAND }, publishConfig: { access: "public", ...SENTINELS } };
   const root = makeWorkspace({
