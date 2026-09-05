@@ -6,7 +6,7 @@ import {
 
 import { loadRunDefinition, type DomainEventEnvelope, type UsageReceipt, type JsonObject, type Sha256Digest } from '@obversa/runtime';
 import { createLocalRunStorage, type LocalRunStorageOptions } from '@obversa/runtime/storage/local';
-import { readSupervision, type SupervisedHostRecord } from './supervised-record.js';
+import { readSupervision, SupervisedRunError, type SupervisedHostRecord } from './supervised-record.js';
 import { localSupervisedCheckpoint } from './supervised-checkpoint.js';
 
 export interface SupervisedRunStatus {
@@ -42,7 +42,10 @@ export interface ReadSupervisedRunStatusOptions {
 export async function readSupervisedRunStatus(options: ReadSupervisedRunStatusOptions): Promise<SupervisedRunStatus> {
   const storage = createLocalRunStorage(options.storage);
   const loaded = await loadRunDefinition(storage, options.runId);
-  const host = JSON.parse(Buffer.from(loaded.hostBindingBytes!).toString('utf8')) as SupervisedHostRecord;
+  if (loaded.hostBindingBytes === null) {
+    throw new SupervisedRunError('HOST_MODULE', 'The run has no stored host module.');
+  }
+  const host = JSON.parse(Buffer.from(loaded.hostBindingBytes).toString('utf8')) as SupervisedHostRecord;
   const records = await readSupervision(storage, options.runId);
   const usageTotals = new Map<string, { pending: number; unknown: boolean; calls: number; input: number; output: number }>();
   for (const record of records) {

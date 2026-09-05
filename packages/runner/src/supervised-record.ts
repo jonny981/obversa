@@ -1,6 +1,7 @@
 import { createHash, randomUUID } from 'node:crypto';
+import { realpathSync } from 'node:fs';
 import { readFile } from 'node:fs/promises';
-import { isAbsolute, resolve } from 'node:path';
+import { isAbsolute, relative, resolve, sep } from 'node:path';
 
 import type { CommandCleanupCapability } from '@obversa/engine/command';
 
@@ -61,7 +62,19 @@ export function resolveHostModule(runRoot: string, specifier: string): string {
   if (isAbsolute(specifier) || !/^\.\.?\//u.test(specifier)) {
     throw new SupervisedRunError('HOST_MODULE', 'The host module must be a relative file specifier.');
   }
-  return resolve(runRoot, specifier);
+  const lexicalRoot = resolve(runRoot);
+  const lexicalModule = resolve(lexicalRoot, specifier);
+  const lexicalRelative = relative(lexicalRoot, lexicalModule);
+  if (lexicalRelative === '..' || lexicalRelative.startsWith(`..${sep}`) || isAbsolute(lexicalRelative)) {
+    throw new SupervisedRunError('HOST_MODULE', 'The host module must be inside the run root.');
+  }
+  const realRoot = realpathSync(lexicalRoot);
+  const realModule = realpathSync(lexicalModule);
+  const realRelative = relative(realRoot, realModule);
+  if (realRelative === '..' || realRelative.startsWith(`..${sep}`) || isAbsolute(realRelative)) {
+    throw new SupervisedRunError('HOST_MODULE', 'The host module must be inside the run root.');
+  }
+  return realModule;
 }
 
 export async function hostModuleDigest(path: string): Promise<Sha256Digest> {

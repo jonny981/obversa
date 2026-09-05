@@ -9,7 +9,7 @@ import { commandCleanupCapability, OwnedCommandError, runOwnedCommand } from '@o
 import { digestJson } from '@obversa/engine';
 import { createLocalRunStorage, type LocalRunStorageOptions } from '@obversa/runtime/storage/local';
 import {
-  persistRunDefinition, validateEventStreamRef, type JsonObject, type WorkspaceProvider,
+  persistRunDefinition, validateEventStreamRef, type ArtifactReference, type JsonObject, type WorkspaceProvider,
   type GraphExecutorOptions, type GraphExecutorResult, type RunDefinition,
 } from '@obversa/runtime';
 import {
@@ -45,6 +45,9 @@ export interface SupervisedRunOptions {
 
 export type SupervisedRunResult = Exclude<GraphExecutorResult, { readonly kind: 'waiting' | 'pause' }>
   | { readonly kind: 'pause'; readonly reason: string; readonly code?: 'WORKSPACE_DRIFT' };
+
+type SupervisedTerminalRecord = Exclude<SupervisedRunResult, { readonly kind: 'complete' }>
+  | { readonly kind: 'complete'; readonly outputArtifact: ArtifactReference };
 
 export interface SupervisedWorkerInput {
   readonly runId: string;
@@ -134,14 +137,23 @@ export async function startSupervisedRun(options: SupervisedRunOptions): Promise
         leaseToken = undefined;
       } catch (error) { leaseReleaseFailed = true; throw error; }
     };
-    const finish = async (outcome: SupervisedRunResult, details: JsonObject = {}) => {
+    const finish = async (outcome: SupervisedTerminalRecord, details: JsonObject = {}): Promise<SupervisedRunResult> => {
+      let result: SupervisedRunResult;
+      if (outcome.kind === 'complete') {
+        try {
+          const bytes = await storage.artifactStore.read({ namespace: storage.record.namespace, runId }, outcome.outputArtifact);
+          result = { kind: 'complete', output: JSON.parse(Buffer.from(bytes).toString('utf8')) };
+        } catch (cause) {
+          throw new SupervisedRunError('TERMINAL_ARTIFACT', 'The terminal output artifact could not be verified.', { cause });
+        }
+      } else result = outcome;
       const phase = outcome.kind === 'complete' ? 'completed' : outcome.kind === 'pause' ? 'paused'
         : outcome.code === 'STOPPED' ? 'stopped' : 'failed';
       const type = outcome.kind === 'complete' ? 'completed' : outcome.kind === 'pause' ? 'paused'
         : outcome.code === 'STOPPED' ? 'stopped' : outcome.code === 'TIMEOUT' ? 'timeout'
           : outcome.code === 'BUDGET_STOP' ? 'budget-stop' : 'failed';
       await append(type, { ...outcome, phase, ...details });
-      return outcome;
+      return result;
     };
     const done = (async (): Promise<SupervisedRunResult> => {
       let cleanupSafe = true;
@@ -174,7 +186,7 @@ export async function startSupervisedRun(options: SupervisedRunOptions): Promise
           if (!cleanupSafe) throw new SupervisedRunError('TEARDOWN_INCOMPLETE', 'Owned processes remain; the lease is retained.');
           const events = await readSupervision(storage, runId);
           const record = events.findLast((event) => event.revision > revision && event.type === 'runner:worker-result');
-          const result = record?.payload as SupervisedRunResult | undefined;
+          const result = record?.payload as SupervisedTerminalRecord | undefined;
           await append('worker-exited', { exitCode: command.exitCode, restartCount });
           if (cancellation.signal.aborted || command.timedOut) {
             await release();

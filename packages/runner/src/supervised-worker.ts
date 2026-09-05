@@ -85,7 +85,13 @@ try {
     if (position === undefined) throw new SupervisedRunError('WORKER_PROTOCOL', 'The executor is waiting without an unfinished position.');
     result = await executor.resume(position, signal);
   }
-  await append('worker-result', { ...result });
+  await append('worker-result', result.kind === 'complete' ? {
+    kind: 'complete',
+    outputArtifact: await storage.artifactStore.write({ namespace: storage.record.namespace, runId: input.runId }, {
+      bytes: Buffer.from(JSON.stringify(result.output)), mediaType: 'application/json',
+      purpose: 'runner-output', contentMode: 'state',
+    }),
+  } : { ...result });
 } catch (error) {
   await append('worker-result', {
     kind: 'fail',

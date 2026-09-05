@@ -1,5 +1,5 @@
 import { spawn } from 'node:child_process';
-import { mkdtemp, mkdir, readFile, readdir, realpath, rm, symlink, writeFile } from 'node:fs/promises';
+import { chmod, mkdtemp, mkdir, readFile, readdir, realpath, rm, symlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { setTimeout as delay } from 'node:timers/promises';
@@ -26,7 +26,7 @@ const policy = {
   sensitiveContent: { marked: 'reject', exact: 'reject', freeText: 'redact-before-hash' },
 } as const;
 
-async function fixture(withEngine = false) {
+async function fixture(withEngine = false, nodeCount = 2) {
   const root = await realpath(await mkdtemp(join(tmpdir(), 'obversa-supervised-')));
   roots.push(root);
   const runRoot = await realpath(await tmpRepo());
@@ -39,11 +39,9 @@ async function fixture(withEngine = false) {
   const graph = runtime.compileGraph(runtime.dagGraphType, {
     id: 'runner-fixture', definitionVersion: 1,
     data: { globalConcurrency: 1, keyedConcurrency: {}, stopOnError: true, retryCapPerNode: 0 },
-    nodes: [
-      { id: 'first', data: { kind: 'required', key: null, ...(withEngine ? { lane } : {}) } },
-      { id: 'last', data: { kind: 'required', key: null, ...(withEngine ? { lane } : {}) } },
-    ],
-    edges: [{ id: 'next', source: 'first', target: 'last', data: {} }],
+    nodes: (nodeCount === 2 ? ['first', 'last'] : Array.from({ length: nodeCount }, (_, index) => `node-${index}`))
+      .map((id) => ({ id, data: { kind: 'required' as const, key: null, ...(withEngine ? { lane } : {}) } })),
+    edges: nodeCount === 2 ? [{ id: 'next', source: 'first', target: 'last', data: {} }] : [],
   });
   const identity = { source: 'file:host.mjs', version: '1.0.0', digest: `sha256:${'1'.repeat(64)}` } as const;
   const resolvedPlan = runtime.resolveGraphPlan(graph.describe(), {
@@ -133,6 +131,75 @@ describe('supervised local runs', () => {
     await expect(runner.startSupervisedRun({ ...slow, directory: `${options.directory}-other` }))
       .rejects.toMatchObject({ code: 'PROCESS_LOCKED' });
     await expect(handle.done).resolves.toMatchObject({ kind: 'complete' });
+  });
+
+  it('a completed DAG whose aggregate results exceed the event payload limit completes', async () => {
+    const { options } = await fixture(false, 10);
+    const handle = await startFixture({
+      ...options, definition: { ...options.definition, resolvedInputs: { resultBytes: 15_000 } },
+    });
+    const result = await handle.done;
+    const storage = createLocalRunStorage(options.storage);
+    const completed = [];
+    for await (const event of storage.eventStore.read({ namespace: 'runner-tests', streamId: 'fixture' })) {
+      if (event.type === 'graph:node-completed') completed.push(event);
+    }
+    expect(completed).toHaveLength(10);
+    expect(completed.every((event) => Buffer.byteLength(JSON.stringify(event.payload)) < 128_000)).toBe(true);
+    const output = { nodes: Object.fromEntries(Array.from({ length: 10 }, (_, index) => [
+      `node-${index}`, { node: `node-${index}`, value: 'x'.repeat(15_000) },
+    ])) };
+    expect(Buffer.byteLength(JSON.stringify(output))).toBeGreaterThan(128_000);
+    expect(result.kind, JSON.stringify(result.kind === 'fail' ? result : { kind: result.kind })).toBe('complete');
+    expect(result).toEqual({ kind: 'complete', output });
+    expect((await handle.status()).phase).toBe('completed');
+    const terminal = (await readSupervision(storage, 'fixture'))
+      .filter((event) => ['runner:worker-result', 'runner:completed'].includes(event.type));
+    expect(terminal).toHaveLength(2);
+    expect(terminal.every((event) => Buffer.byteLength(JSON.stringify(event.payload)) < 128_000)).toBe(true);
+    const references = terminal.map((event) => runtime.validateArtifactReference((event.payload as runtime.JsonObject).outputArtifact));
+    expect(references[0]).toEqual(references[1]);
+    const bytes = await storage.artifactStore.read(
+      { namespace: 'runner-tests', runId: 'fixture' }, references[0]!,
+    );
+    expect(JSON.parse(Buffer.from(bytes).toString('utf8'))).toEqual(output);
+  });
+
+  it('a terminal artifact whose digest does not match is a typed failure, not a silent result', async () => {
+    const { options } = await fixture();
+    const storage = createLocalRunStorage(options.storage);
+    const artifactPrototype = Object.getPrototypeOf(storage.artifactStore) as typeof storage.artifactStore;
+    const read = artifactPrototype.read;
+    let corrupted = false;
+    vi.spyOn(artifactPrototype, 'read').mockImplementation(async function (this: typeof storage.artifactStore, scope, reference) {
+      if (reference.purpose === 'runner-output') {
+        const artifactRoot = join(options.storage.directory, 'artifacts');
+        const files = await readdir(artifactRoot, { recursive: true });
+        const blob = files.find((file) => file.endsWith(`/blobs/${reference.digest.slice('sha256:'.length)}`));
+        if (blob === undefined) throw new Error('The terminal artifact was not written.');
+        const path = join(artifactRoot, blob);
+        const bytes = await readFile(path);
+        const valueOffset = bytes.indexOf('original');
+        expect(valueOffset).toBeGreaterThanOrEqual(0);
+        bytes[valueOffset] = 't'.charCodeAt(0);
+        expect(() => JSON.parse(bytes.toString('utf8'))).not.toThrow();
+        await chmod(path, 0o600);
+        await writeFile(path, bytes);
+        corrupted = true;
+      }
+      return await read.call(this, scope, reference);
+    });
+    const handle = await startFixture(options);
+    await expect(handle.done).resolves.toMatchObject({ kind: 'fail', code: 'TERMINAL_ARTIFACT' });
+    expect(corrupted).toBe(true);
+    expect((await handle.status()).phase).toBe('failed');
+    const events = await readSupervision(storage, 'fixture');
+    expect(events.some((event) => event.type === 'runner:completed')).toBe(false);
+    expect(events.at(-1)?.payload).toMatchObject({ kind: 'fail', code: 'TERMINAL_ARTIFACT' });
+    const lease = await options.workspace.acquireLease('after-corruption', 'fixture', await options.workspace.capture());
+    expect(lease.ok).toBe(true);
+    if (lease.ok) await options.workspace.releaseLease(lease.token);
+    expect(await readdir(join(options.storage.directory, 'runner-locks/runner-tests'))).toEqual([]);
   });
 
   it('stop kills the worker, records the stop, and releases the workspace', async () => {

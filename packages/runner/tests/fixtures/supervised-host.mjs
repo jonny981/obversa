@@ -39,7 +39,7 @@ export async function bindRun({ definition, scratchDirectory }) {
       trustedCaller: { actor: 'fixture', provenance: 'local-test' },
       permissions: [],
       policy: {
-        inputBytes: 10_000, outputBytes: 10_000, timeoutMs: input.nodeTimeoutMs ?? 5_000,
+        inputBytes: 10_000, outputBytes: input.resultBytes ? input.resultBytes + 100 : 10_000, timeoutMs: input.nodeTimeoutMs ?? 5_000,
         teardownGraceMs: 100, memoryBytes: 10_000_000,
         filesChanged: 0, linesChanged: 0, callTokens: null,
       },
@@ -57,7 +57,7 @@ export async function bindRun({ definition, scratchDirectory }) {
         }
         if (input.crash) process.kill(process.pid, 'SIGKILL');
         if (input.delayMs) await delay(input.delayMs, undefined, { signal });
-        return { node: id, value: input.value ?? value };
+        return { node: id, value: input.resultBytes ? 'x'.repeat(input.resultBytes) : input.value ?? value };
       },
       parseResult: null, tokenBudget: null, retrySafe: true,
       decideAction: async () => input.wait

@@ -52,9 +52,17 @@ A clean stop returns `kind: 'fail'` and `code: 'STOPPED'`. Calling it after comp
 returns the settled result. `handle.done` resolves to a graph result:
 `complete`, `pause`, or `fail`. Infrastructure errors can reject the promise.
 
+Completion output is stored once as an artifact, subject to the storage policy's
+artifact size and quota limits. Worker and watchdog completion events carry the
+same artifact reference, not the output bytes. The watchdog verifies the stored
+bytes against that reference before returning `done.output`. An unreadable or
+corrupt output artifact returns `kind: 'fail'` with `code: 'TERMINAL_ARTIFACT'`.
+
 The status reader can run in another process with the same storage settings.
 It reads recorded progress and inspects the worker's process identity. It does
 not take ownership of the run or stop another process's watchdog.
+A stored run without a host binding rejects with `SupervisedRunError` and
+`code: 'HOST_MODULE'`.
 
 ## Supply a host module
 
@@ -62,7 +70,9 @@ The runner loads host modules and supervises processes. The runtime receives
 bound graph, node, and engine instances; it does not load host modules.
 
 Set `runRoot` to the working directory and `module` to a relative file specifier,
-such as `./host.mjs`. The module must export:
+such as `./host.mjs`. The file must remain inside `runRoot` after resolving
+symlinks; a path outside it is refused with `code: 'HOST_MODULE'`.
+The module must export:
 
 ```js
 export async function bindRun({ definition, scratchDirectory }) {
