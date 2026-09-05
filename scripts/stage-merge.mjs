@@ -16,6 +16,7 @@ const leaseRef = 'refs/obversa/stage-merge';
 const stageBranches = {
   D14: 'feat/unattended-runner',
   D15: 'feat/release-v1',
+  F4: 'feat/release-readiness',
 };
 
 export function manageStage(args, options = {}) {
