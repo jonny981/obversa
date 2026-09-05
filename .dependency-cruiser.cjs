@@ -45,7 +45,7 @@ module.exports = {
       from: { path: '^examples/' },
       to: {
         couldNotResolve: true,
-        pathNot: '^@obversa/(engine|engine-agent-sdk|engine-anthropic-api|engine-claude-cli|engine-codex|engine-grok-cli|engine-opencode-cli|memory|memory-git|memory-simple|runtime|source|surfacer)(/|$)',
+        pathNot: '^@obversa/(engine|engine-agent-sdk|engine-anthropic-api|engine-claude-cli|engine-codex|engine-grok-cli|engine-opencode-cli|memory|memory-git|memory-simple|runner|runtime|source|surfacer)(/|$)',
       },
     },
     {
@@ -159,6 +159,13 @@ module.exports = {
       severity: 'error',
       from: { path: '^packages/runtime/' },
       to: { path: '^(packages|plugins)/', pathNot: '^packages/(runtime|engine|memory)/' },
+    },
+    {
+      name: 'runner-reaches-runtime-and-engine-only',
+      comment: 'the runner supervises through public runtime and engine APIs; it never reaches an adapter or another package',
+      severity: 'error',
+      from: { path: '^packages/runner/' },
+      to: { path: '^(packages|plugins)/', pathNot: '^packages/(runner|runtime|engine)/' },
     },
     {
       name: 'memory-plugin-reaches-memory-only',

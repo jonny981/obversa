@@ -463,6 +463,7 @@ const tsconfig = {
     'safe-node-attempt.ts',
     'turn-taking.ts',
     'workspace.ts',
+    'supervised-run.ts',
   ],
 };
 
@@ -493,6 +494,8 @@ async function main() {
   const attemptExampleSource = await readFile(attemptExamplePath, 'utf8');
   const turnTakingExamplePath = join(root, 'examples', 'packages', 'turn-taking.ts');
   const workspaceExamplePath = join(root, 'examples', 'packages', 'workspace.ts');
+  const runnerExamplePath = join(root, 'examples', 'packages', 'supervised-run.ts');
+  const runnerHostPath = join(root, 'examples', 'packages', 'supervised-host.mjs');
   const turnTakingExampleSource = await readFile(turnTakingExamplePath, 'utf8');
   const graphDocument = await readFile(
     join(root, 'docs', 'public', 'graphs', 'contract.mdx'),
@@ -582,6 +585,8 @@ async function main() {
     await copyFile(attemptExamplePath, join(consumerDirectory, 'safe-node-attempt.ts'));
     await copyFile(turnTakingExamplePath, join(consumerDirectory, 'turn-taking.ts'));
     await copyFile(workspaceExamplePath, join(consumerDirectory, 'workspace.ts'));
+    await copyFile(runnerExamplePath, join(consumerDirectory, 'supervised-run.ts'));
+    await copyFile(runnerHostPath, join(consumerDirectory, 'supervised-host.mjs'));
 
     run('pnpm', ['install', '--offline', '--ignore-scripts'], {
       cwd: consumerDirectory,
@@ -601,6 +606,7 @@ async function main() {
     run(process.execPath, [tsc7, '-p', 'tsconfig.json'], { cwd: consumerDirectory });
     const tsc6 = join(root, 'node_modules', '@typescript', 'typescript6', 'bin', 'tsc6');
     run(process.execPath, [tsc6, '-p', 'tsconfig.json'], { cwd: consumerDirectory });
+    await copyFile(runnerHostPath, join(consumerDirectory, 'dist', 'supervised-host.mjs'));
 
     run('git', ['init', '--quiet', gitRepository]);
     const output = run(process.execPath, ['dist/consumer.js'], {
@@ -664,6 +670,21 @@ async function main() {
     );
     const compiledWorkspace = JSON.parse(run(process.execPath, ['dist/workspace.js'], { cwd: consumerDirectory }));
     const directWorkspace = JSON.parse(run('pnpm', ['exec', 'tsx', 'workspace.ts'], { cwd: consumerDirectory }));
+    for (const command of [
+      [process.execPath, ['dist/supervised-run.js']],
+      ['pnpm', ['exec', 'tsx', 'supervised-run.ts']],
+    ]) {
+      const runner = JSON.parse(run(command[0], command[1], { cwd: consumerDirectory }));
+      assert.deepEqual(runner, {
+        phase: 'completed',
+        cleanupCapability: process.platform === 'linux' ? 'inherited-owner' : 'observed-processes',
+        results: [
+          { nodeId: 'draft', position: 'dag/draft/1', result: { node: 'draft', message: 'An offline supervised run.' } },
+          { nodeId: 'review', position: 'dag/review/1', result: { node: 'review', message: 'An offline supervised run.' } },
+        ],
+        temporaryDirectoryRemoved: true,
+      });
+    }
     assert.deepEqual(compiledTurnTaking, expectedTurnTakingReport);
     assert.deepEqual(directTurnTaking, expectedTurnTakingReport);
     for (const report of [compiledWorkspace, directWorkspace]) {
@@ -714,7 +735,7 @@ async function main() {
     if (refs.length !== 1) throw new Error(`Git memory created ${refs.length} private refs instead of one`);
 
     console.log(
-      'Clean offline consumer passed with TypeScript 7 and 6, the first production line, the outside graph, the pipeline executor example, the review loop, the callback gate, proof-bound approval, the turn-taking executor example, durable storage, safe node attempts, 17 memory cases, and both memory adapters.',
+      'Clean offline consumer passed with TypeScript 7 and 6, the first production line, the outside graph, the pipeline executor example, the review loop, the callback gate, proof-bound approval, the turn-taking executor example, durable storage, safe node attempts, the supervised runner, 17 memory cases, and both memory adapters.',
     );
   } finally {
     await rm(directory, { recursive: true, force: true });

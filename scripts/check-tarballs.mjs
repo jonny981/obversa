@@ -43,6 +43,24 @@ function run(args, options = {}) {
 // plugins, and the memory interface and plugins. Source maps and the public
 // testing entry points ship on purpose.
 export const EXPECTED_FILES = {
+  '@obversa/runner': [
+    'package/LICENSE',
+    'package/README.md',
+    'package/dist/chunk-*.js',
+    'package/dist/chunk-*.js.map',
+    'package/dist/index.d.ts',
+    'package/dist/index.js',
+    'package/dist/index.js.map',
+    'package/dist/supervised-checkpoint.d.ts',
+    'package/dist/supervised-engines.d.ts',
+    'package/dist/supervised-record.d.ts',
+    'package/dist/supervised-run.d.ts',
+    'package/dist/supervised-status.d.ts',
+    'package/dist/supervised-worker.d.ts',
+    'package/dist/supervised-worker.js',
+    'package/dist/supervised-worker.js.map',
+    'package/package.json',
+  ],
   '@obversa/source': [
     'package/LICENSE',
     'package/README.md',

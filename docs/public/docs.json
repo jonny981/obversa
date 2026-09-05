@@ -64,7 +64,8 @@
       {
         "group": "Runtime",
         "pages": [
-          "runtime/node-attempts"
+          "runtime/node-attempts",
+          "runtime/runner"
         ]
       },
       {
@@ -85,6 +86,7 @@
         "group": "Packages",
         "pages": [
           "packages/runtime",
+          "packages/runner",
           "packages/engine",
           "packages/memory",
           "packages/surfacer",

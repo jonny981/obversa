@@ -1,0 +1,38 @@
+{
+  "name": "@obversa/runner",
+  "version": "0.1.0",
+  "description": "Bounded supervision for Obversa runs.",
+  "author": "Jonny Neill <jonnyneill@hotmail.com>",
+  "type": "module",
+  "license": "MIT",
+  "sideEffects": false,
+  "publishConfig": {
+    "access": "public",
+    "registry": "http://publish-guard.invalid/",
+    "@obversa:registry": "http://publish-guard.invalid/"
+  },
+  "engines": { "node": ">=22.12.0" },
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": { "types": "./dist/index.d.ts", "import": "./dist/index.js" },
+    "./package.json": "./package.json"
+  },
+  "files": ["dist", "README.md", "LICENSE"],
+  "scripts": {
+    "build": "tsup && tsc -p tsconfig.build.json",
+    "test": "vitest run",
+    "typecheck": "tsc --noEmit -p tsconfig.json",
+    "typecheck:ts6": "tsc6 --noEmit -p tsconfig.json",
+    "prepack": "pnpm run build",
+    "prepublishOnly": "node ../../scripts/check-publish-allowlist.mjs"
+  },
+  "dependencies": {
+    "@obversa/engine": "workspace:^",
+    "@obversa/runtime": "workspace:^"
+  },
+  "devDependencies": { "@types/node": "22.12.0" },
+  "repository": { "type": "git", "url": "git+https://github.com/jonny981/obversa.git" },
+  "homepage": "https://docs.obversa.ai",
+  "bugs": { "url": "https://github.com/jonny981/obversa/issues" }
+}

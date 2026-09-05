@@ -455,6 +455,13 @@ export function isProjectConfig(path, text) {
 const realpathOf = (path, host) => (typeof host.realpath === 'function' ? host.realpath(path) : path);
 
 const packageRules = new Map([
+  ['@obversa/runner', {
+    directory: 'packages/runner',
+    kind: 'host',
+    version: '0.1.0',
+    dependencies: ['@obversa/engine', '@obversa/runtime'],
+    peerDependencies: [],
+  }],
   ['@obversa/runtime', {
     directory: 'packages/runtime',
     kind: 'runtime',

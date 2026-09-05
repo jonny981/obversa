@@ -11,6 +11,7 @@
     "@obversa/memory",
     "@obversa/memory-git",
     "@obversa/memory-simple",
+    "@obversa/runner",
     "@obversa/runtime",
     "@obversa/source",
     "@obversa/surfacer"

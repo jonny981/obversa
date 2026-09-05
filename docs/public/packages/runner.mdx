@@ -1,0 +1,47 @@
+---
+title: "@obversa/runner"
+description: "Supervise local graph workers and recover safely after a worker crash."
+---
+
+`@obversa/runner` starts a graph in a worker process. The calling process watches
+the worker, cleans up discoverable child processes, and restarts work within
+declared limits. It loads a host module that supplies graph and engine bindings.
+`@obversa/runtime` executes those bindings and records graph events.
+
+## Install
+
+```bash
+pnpm add @obversa/runner
+```
+
+Node.js 22.12 or later is required. The package depends on the public
+`@obversa/runtime` and `@obversa/engine` APIs.
+
+## Public entry points
+
+From `@obversa/runner`:
+
+- **`startSupervisedRun`:** start a stored graph with a watchdog in the calling process.
+- **`readSupervisedRunStatus`:** read recorded progress and inspect worker liveness.
+- **`SupervisedRunError`:** report a runner failure with a typed code.
+- **Run types:** `SupervisedRunOptions` describes the stored run, host module, workspace, and limits. `SupervisedRunStatus` describes progress, cleanup scope, and retained workspace ownership.
+- **`SupervisedRunHandle`:** exposes `done`, `status()`, and `stop()` for the supervised run.
+
+Worker-crash recovery requires a live watchdog. A new watchdog does not take over
+a dead watchdog's lock or held workspace lease. Token budgets apply per worker
+process and do not enforce a shared token cap across worker restarts.
+
+## Runnable example
+
+From a built Obversa checkout, run:
+
+```bash
+pnpm --filter @obversa/runner exec tsx ../../examples/packages/supervised-run.ts
+```
+
+The example creates a disposable Git repository, runs two data nodes without an
+engine or network access, checks their saved results, and removes its temporary
+directory after cleanup succeeds.
+
+See [Supervised local runs](/runtime/runner) for the host module contract,
+crash recovery boundaries, and process-cleanup limits.

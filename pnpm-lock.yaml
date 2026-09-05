@@ -22,6 +22,12 @@ importers:
       '@obversa/engine-opencode-cli':
         specifier: workspace:^
         version: link:plugins/engine-opencode-cli
+      '@obversa/runner':
+        specifier: workspace:^
+        version: link:packages/runner
+      '@obversa/runtime':
+        specifier: workspace:^
+        version: link:packages/runtime
       '@types/node':
         specifier: 22.12.0
         version: 22.12.0
@@ -91,6 +97,19 @@ importers:
         version: 22.12.0
 
   packages/memory: {}
+
+  packages/runner:
+    dependencies:
+      '@obversa/engine':
+        specifier: workspace:^
+        version: link:../engine
+      '@obversa/runtime':
+        specifier: workspace:^
+        version: link:../runtime
+    devDependencies:
+      '@types/node':
+        specifier: 22.12.0
+        version: 22.12.0
 
   packages/runtime:
     dependencies:

@@ -10,7 +10,7 @@ name: Release
 #   3. Tag the repository: git tag v1.0.0 && git push origin v1.0.0
 #   4. GitHub asks Jonny to approve the release environment.
 #   5. The workflow runs pnpm verify:d2, pnpm check:tarballs, and the
-#      changelog gate, then packs and publishes all 13 packages with
+#      changelog gate, then packs and publishes all 14 packages with
 #      provenance, and creates the GitHub Release from the changelog.
 #
 # The guard registry in each package.json stays for local proofs: it
@@ -68,6 +68,7 @@ jobs:
           mkdir -p /tmp/tarballs
           for pkg in \
             packages/runtime \
+            packages/runner \
             packages/engine \
             packages/memory \
             packages/source \

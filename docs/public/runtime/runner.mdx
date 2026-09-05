@@ -1,0 +1,186 @@
+---
+title: "Supervised local runs"
+description: "Run a graph in a worker process, inspect its progress, and recover safely after a worker crash."
+---
+
+`startSupervisedRun` from `@obversa/runner` starts a graph in a separate worker process. The calling
+process acts as its watchdog: it waits for the worker, stops discoverable child
+processes, and restarts work within declared time and restart limits.
+
+## Run the offline example
+
+From a built Obversa checkout, run:
+
+```bash
+pnpm --filter @obversa/runner exec tsx ../../examples/packages/supervised-run.ts
+```
+
+The example creates a disposable Git repository and runs two data nodes without
+an engine or network access. It checks their files and saved results, prints a
+JSON report, and removes its temporary directory after teardown succeeds.
+`examples/packages/supervised-host.mjs` supplies the worker's node bindings.
+
+## Start, inspect, and stop
+
+```ts
+import {
+  readSupervisedRunStatus,
+  startSupervisedRun,
+  type SupervisedRunOptions,
+} from '@obversa/runner';
+
+async function run(options: SupervisedRunOptions) {
+  const handle = await startSupervisedRun(options);
+  try {
+    console.log(await handle.status());
+    return await handle.done;
+  } finally {
+    await handle.stop();
+  }
+}
+
+async function inspect(options: SupervisedRunOptions) {
+  return await readSupervisedRunStatus({
+    storage: options.storage,
+    runId: options.definition.runId,
+  });
+}
+```
+
+Call `handle.stop()` while work is running to request a stop and await cleanup.
+A clean stop returns `kind: 'fail'` and `code: 'STOPPED'`. Calling it after completion
+returns the settled result. `handle.done` resolves to a graph result:
+`complete`, `pause`, or `fail`. Infrastructure errors can reject the promise.
+
+The status reader can run in another process with the same storage settings.
+It reads recorded progress and inspects the worker's process identity. It does
+not take ownership of the run or stop another process's watchdog.
+
+## Supply a host module
+
+The runner loads host modules and supervises processes. The runtime receives
+bound graph, node, and engine instances; it does not load host modules.
+
+Set `runRoot` to the working directory and `module` to a relative file specifier,
+such as `./host.mjs`. The module must export:
+
+```js
+export async function bindRun({ definition, scratchDirectory }) {
+  // Compile definition.graphDefinition.value with its graph form.
+  // Return { graph, nodes, engines }, plus memory if the form requires it.
+}
+```
+
+The runner stores the host module's path and byte digest. Each worker checks the
+digest before import and again after import. Changed module bytes produce a
+`HOST_MODULE_CHANGED` failure. Each worker imports the module once and calls
+`bindRun` with the stored definition and scratch directory.
+
+The digest covers the selected module file only. Transitive imports are not
+pinned. An edit after a worker has imported the module does not replace that
+worker's loaded bindings.
+
+The stored graph definition, resolved plan, and resolved inputs supply the
+execution contract. The worker loads them from storage. Its bindings must match
+that contract; it does not reconstruct the run from mutable command-line inputs.
+
+The workspace provider must capture the same root as `runRoot`. Capture and
+storage preflight failures start no worker and write no run. If storage fails
+during publication, startup returns `RUN_STORAGE` and starts no worker. Artifacts
+or a start event that were published before the error remain available. The
+runner never deletes that evidence or promises a transaction across both stores.
+
+## Recover after a worker crash
+
+The watchdog waits for worker exit and cleanup before starting a replacement.
+The replacement loads the stored run and folds its graph events to decide what
+remains.
+
+| Crash boundary | Recovery |
+| --- | --- |
+| Before a dispatch is recorded | Decide and dispatch the work. |
+| After dispatch, before node code starts | Start the recorded occurrence. |
+| After node code starts, before its result is recorded | Pause for reconciliation unless the binding explicitly declares `retrySafe: true`. |
+| After the result is recorded | Continue without repeating the completed occurrence. |
+
+Set `retrySafe: true` only when repeating the node is acceptable after an unknown
+outcome. A saved start without a saved result does not prove whether an outward
+effect happened. For an unsafe repeat, the executor records a pause with a
+`reconcile-attempt` request.
+
+Unattended action decisions must return `allow` before node effects run. A host
+decision to wait or deny is recorded as an unattended denial; the worker does
+not open a prompt.
+
+## Bound the run
+
+- **Elapsed time:** `limits.timeoutMs` covers worker execution and restart
+  backoff. Teardown can continue beyond that work deadline.
+- **Logical dispatches:** `limits.maxDispatches` counts recorded graph
+  dispatches across workers. Resuming one recorded occurrence does not create
+  another dispatch.
+- **Restarts:** `restart.maxRestarts` caps replacement workers. Backoff grows
+  from `initialBackoffMs` up to `maxBackoffMs`.
+- **Cleanup grace:** `teardownGraceMs` allows processes to stop before forceful
+  termination.
+
+Token budgets apply per worker process and do not enforce a shared token cap
+across worker restarts.
+
+## Read progress
+
+Status includes the run phase, worker liveness, inspected processes, restart
+count, backoff, elapsed time, remaining timeout, and pause reasons.
+
+`cleanupVerified` is `null` before a terminal result, `true` when cleanup was
+verified within the reported capability, and `false` when cleanup could not be
+verified. `leaseRetained` reports a lease held after terminal failure. A dead
+worker or an empty process list does not prove cleanup succeeded; inspect these
+fields before treating the workspace as released.
+
+`active` contains all recorded active node occurrences while the worker is
+alive. Each entry has its node ID, unchanged position, plan phase, start time,
+elapsed time, remaining node timeout, and usage state. Unknown usage is not zero.
+The top-level `usage` list keeps recorded totals by node after completion.
+An unreported or unfinished engine call makes that node's total unknown.
+
+Graph phases group nodes for display. They do not define execution parents.
+Position strings identify occurrences; the status reader does not split them
+into a parent chain or choose a supposed deepest node.
+
+Checkpoints cache display state only. Missing, stale, or malformed checkpoints
+can be rebuilt from graph events. The executor always makes its decisions from
+the events, never from a status checkpoint.
+
+## Process cleanup and workspace ownership
+
+`cleanupCapability` states the cleanup scope:
+
+- **`inherited-owner` on Linux:** cleanup also searches for processes carrying
+  the worker's inherited owner marker. Commands that remove or forge markers
+  are outside this bookkeeping guarantee.
+- **`observed-processes` on other platforms:** cleanup follows observed process
+  identities and the platform's process-tree mechanisms.
+
+On macOS, a helper that moves into a new session before the watchdog samples it is not swept.
+
+The watchdog holds the workspace lease token while the worker runs and while
+cleanup executes. After a crash that permits restart, it captures and records a
+fresh workspace snapshot while still holding the lease. It then releases the
+lease for backoff. A replacement must acquire a lease and verify that snapshot
+before starting. Changes during the released interval produce a pause with
+`code: 'WORKSPACE_DRIFT'`.
+
+This restart snapshot includes workspace changes left by the stopped worker;
+it does not replace the stored graph plan or inputs. A terminal result releases
+the lease after successful cleanup. Incomplete cleanup or failed lease release
+retains the process lock instead of starting another worker.
+
+The process lock is scoped to the storage directory, namespace, and run ID.
+A second watchdog for that stored run receives `PROCESS_LOCKED`, even if it
+uses another scratch directory.
+
+Worker-crash recovery requires a live watchdog. If the watchdog dies, its lock
+and any held lease remain. A new watchdog does not force takeover or infer that
+the workspace is safe from a missing PID. This API has no automatic recovery
+for watchdog death.

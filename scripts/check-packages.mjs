@@ -12,6 +12,7 @@ const packages = [
   { root: 'packages', directory: 'engine', name: '@obversa/engine', version: '0.1.0' },
   { root: 'packages', directory: 'memory', name: '@obversa/memory', version: '0.1.0' },
   { root: 'packages', directory: 'runtime', name: '@obversa/runtime', version: '1.0.0' },
+  { root: 'packages', directory: 'runner', name: '@obversa/runner', version: '0.1.0' },
   { root: 'packages', directory: 'source', name: '@obversa/source', version: '0.1.0' },
   { root: 'packages', directory: 'surfacer', name: '@obversa/surfacer', version: '0.1.0' },
   { root: 'plugins', directory: 'engine-agent-sdk', name: '@obversa/engine-agent-sdk', version: '0.1.0' },
