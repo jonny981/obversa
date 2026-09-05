@@ -243,6 +243,38 @@ describe('stored callback client', () => {
     expect(events.some((event) => event.type === 'callback:approval-recorded')).toBe(false);
   });
 
+  it('refuses stored replay of a callback submission without requestDigest', async () => {
+    const { runId, storage } = await storedRun();
+    const request = gate('abc123');
+    const client = await createStoredCallbackClient(storage, runId);
+    await client.post(request);
+    const claim = await client.claim(request.requestId, 'router-a');
+    if (!claim.ok) throw new Error('fixture claim failed');
+    const before = await runEvents(storage, runId);
+    await storage.eventStore.append({
+      namespace: storage.record.namespace,
+      streamId: runId,
+    }, before.at(-1)?.revision ?? 0, [{
+      eventId: randomUUID(),
+      type: 'callback:history-recorded',
+      version: 1,
+      timestamp: new Date().toISOString(),
+      correlationId: runId,
+      causationId: null,
+      payload: {
+        event: {
+          kind: 'callback-submitted',
+          requestId: request.requestId,
+          routerId: 'router-a',
+          response: { approved: true },
+        },
+      },
+    }]);
+
+    const restarted = await createStoredCallbackClient(storage, runId);
+    await expect(restarted.history(request.requestId)).rejects.toThrow(TypeError);
+  });
+
   it('submits a subject-backed callback and approval in one batch, then resolves only matching bytes after reopen', async () => {
     const { runId, storage } = await storedRun();
     const subject = approvalSubject();
