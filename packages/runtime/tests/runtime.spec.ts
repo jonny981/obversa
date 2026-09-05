@@ -14,6 +14,7 @@ import {
   exitCodeFor,
   fnJob,
   loop,
+  dag,
   LoopError,
 } from '../src/api.ts';
 import type { Engine, RunOptions } from '../src/api.ts';
@@ -60,6 +61,31 @@ describe('run', () => {
       { ...mockOpts, state: { seedValue: 42 } },
     );
     expect(seen).toBe(42);
+  });
+
+  it('reads shared state at the root after a DAG node inside a loop changes it', async () => {
+    let leafSeed: unknown;
+    const nested = loop({
+      name: 'nested',
+      max: 1,
+      body: dag({
+        name: 'steps',
+        nodes: {
+          increment: fnJob('increment', async (ctx) => {
+            leafSeed = ctx.state.count;
+            ctx.state.count = Number(ctx.state.count) + 1;
+            return { status: 'pass' };
+          }),
+        },
+      }),
+    });
+    const { outcome } = await run(fnJob('root', async (ctx) => {
+      const result = await nested(ctx);
+      return { ...result, data: { rootCount: ctx.state.count } };
+    }), { ...mockOpts, state: { count: 41 } });
+
+    expect(leafSeed).toBe(41);
+    expect(outcome).toMatchObject({ status: 'pass', data: { rootCount: 42 } });
   });
 
   it('gives every run an immutable empty brief by default', async () => {
