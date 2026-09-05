@@ -56,6 +56,71 @@ async function landSynthesis(repo: string, branch: string) {
 }
 
 describe('mergeSynthesis', () => {
+  it.each([
+    ['the original conflict', null, 7],
+    ['a configured 32-character conflict', null, 32],
+    ['the opening marker', '<<<<<<< HEAD\n', 7],
+    ['the base marker', '||||||| base\n', 7],
+    ['the separator marker', '=======\n', 7],
+    ['the closing marker', '>>>>>>> cand\n', 7],
+    ['inline marker text', 'const markers = "<<<<<<< ||||||| ======= >>>>>>>";\n', 7],
+  ] as const)('checks %s before staging or committing the resolution', async (label, resolved, markerSize) => {
+    const repo = await tmpRepo();
+    write(repo, 'shared.ts', 'base\n');
+    if (markerSize === 32) {
+      write(repo, '.gitattributes', 'shared.ts conflict-marker-size=32\n');
+      await execa('git', ['config', 'merge.conflictStyle', 'diff3'], { cwd: repo });
+    }
+    await stageAll({ cwd: repo });
+    await commit({ subject: 'chore: base' }, { cwd: repo });
+    await execa('git', ['checkout', '-b', 'cand'], { cwd: repo });
+    write(repo, 'shared.ts', 'CAND VERSION\n');
+    await stageAll({ cwd: repo });
+    await commit({ subject: 'feat: candidate' }, { cwd: repo });
+    await execa('git', ['checkout', 'main'], { cwd: repo });
+    write(repo, 'shared.ts', 'MAIN VERSION\n');
+    await stageAll({ cwd: repo });
+    await commit({ subject: 'feat: main' }, { cwd: repo });
+    const before = (await execa('git', ['rev-parse', 'HEAD'], { cwd: repo })).stdout;
+    let bodyCalls = 0;
+    let conflicted = '';
+    const resolution = new MockEngine((request) => {
+      if (/Resolve this git merge conflict/.test(request.prompt)) {
+        conflicted = readFileSync(join(repo, 'shared.ts'), 'utf8');
+        return resolved ?? conflicted;
+      }
+      bodyCalls += 1;
+      return 'Merged the resolved file.';
+    });
+
+    const { outcome } = await run(fnJob('land', async (ctx) => {
+      await mergeSynthesis(ctx, { branch: 'cand' });
+      return { status: 'pass' };
+    }), { cwd: repo, engine: 'mock', engines: { mock: resolution } });
+
+    if (markerSize === 32) {
+      const lines = conflicted.split('\n');
+      for (const marker of ['<', '|', '=', '>']) {
+        expect(lines.some((line) => line.startsWith(marker.repeat(32)))).toBe(true);
+      }
+    }
+    if (label === 'inline marker text') {
+      expect(outcome.status).toBe('pass');
+      expect(readFileSync(join(repo, 'shared.ts'), 'utf8')).toBe(resolved);
+      expect(bodyCalls).toBe(1);
+    } else {
+      expect.soft(outcome.status).toBe('fail');
+      expect.soft(outcome.error).toMatchObject({
+        name: 'LoopError', code: 'BODY', message: expect.stringContaining('shared.ts'),
+      });
+      expect.soft((await execa('git', ['rev-parse', 'HEAD'], { cwd: repo })).stdout).toBe(before);
+      expect.soft(readFileSync(join(repo, 'shared.ts'), 'utf8')).toBe('MAIN VERSION\n');
+      expect.soft(bodyCalls).toBe(0);
+    }
+    expect((await execa('git', ['status', '--porcelain'], { cwd: repo })).stdout).toBe('');
+    expect((await execa('git', ['rev-parse', '--verify', 'MERGE_HEAD'], { cwd: repo, reject: false })).exitCode).not.toBe(0);
+  });
+
   it('resolves a real conflict and writes a synthesised body', async () => {
     const repo = await tmpRepo();
     write(repo, 'shared.ts', 'base\n');

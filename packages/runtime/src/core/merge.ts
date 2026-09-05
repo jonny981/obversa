@@ -77,10 +77,15 @@ export async function mergeSynthesis(
           () => {},
           ctx.signal,
         );
-        writeFileSync(
-          join(cwd, file),
-          stripFence(requireFinalResultText(out)),
-        );
+        const resolved = stripFence(requireFinalResultText(out));
+        if (/^(?:<{7,}|\|{7,}|={7,}|>{7,})(?:\s|$)/m.test(resolved)) {
+          throw new LoopError({
+            code: 'BODY',
+            message: `Merge resolution for "${file}" still contains conflict markers.`,
+            path: ctx.path,
+          });
+        }
+        writeFileSync(join(cwd, file), resolved);
       }
       await stageAll({ cwd, signal: ctx.signal });
     }
