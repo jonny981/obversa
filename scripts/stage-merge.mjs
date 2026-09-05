@@ -18,6 +18,7 @@ const stageBranches = {
   D15: 'feat/release-v1',
   F4: 'feat/release-readiness',
   F5: 'feat/release-wording',
+  F7: 'feat/residual-sweep',
 };
 
 export function manageStage(args, options = {}) {
