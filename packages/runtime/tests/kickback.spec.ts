@@ -15,6 +15,46 @@ const kbEvents = (es: LoopEvent[]): KickbackEvent[] =>
   es.filter((e): e is KickbackEvent => e.kind === 'dag:kickback');
 
 describe('dag kickback (cross-stage feedback)', () => {
+  it('keeps an optional node skipped and green when a kickback reruns its dependencies', async () => {
+    let optionalCalls = 0;
+    let whenCalls = 0;
+    let reviewCalls = 0;
+    const ran: string[] = [];
+    const events: LoopEvent[] = [];
+    const { outcome } = await run(dag({
+      name: 'skip-and-retry',
+      maxKickbacks: 1,
+      nodes: {
+        a: fnJob('a', async () => { ran.push('a'); return { status: 'pass' }; }),
+        optional: {
+          needs: ['a'],
+          optional: true,
+          when: () => { whenCalls += 1; return false; },
+          job: fnJob('optional', async () => { optionalCalls += 1; return { status: 'pass' }; }),
+        },
+        review: {
+          needs: ['optional'],
+          job: fnJob('review', async () => {
+            ran.push('review');
+            reviewCalls += 1;
+            return reviewCalls === 1 ? kickback('a', 'revise the input') : { status: 'pass' };
+          }),
+        },
+      },
+    }), { ...mockOpts, onEvent: (event) => events.push(event) });
+
+    expect(outcome).toMatchObject({ status: 'pass', data: { optional: { status: 'pass', data: { skipped: true } } } });
+    expect(ran).toEqual(['a', 'review', 'a', 'review']);
+    expect(whenCalls).toBe(2);
+    expect(optionalCalls).toBe(0);
+    expect(kbEvents(events)).toMatchObject([{ from: 'review', to: 'a', accepted: true }]);
+    expect(events.filter((event) => event.kind === 'dag:node' && event.node === 'optional'))
+      .toMatchObject([
+        { phase: 'skip', attempt: 1, outcome: { status: 'pass', data: { skipped: true } } },
+        { phase: 'skip', attempt: 2, outcome: { status: 'pass', data: { skipped: true } } },
+      ]);
+  });
+
   it('honours a kickback: re-runs the target and its dependents, threading the reason', async () => {
     const ran: string[] = [];
     let aSawReason: string | undefined;
