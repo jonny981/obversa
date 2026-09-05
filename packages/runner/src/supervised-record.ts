@@ -38,6 +38,27 @@ export async function readSupervision(
   return events;
 }
 
+/** Settled pauses freeze the execution budget until a stored worker launch. */
+export function supervisedElapsedMs(
+  startedAt: string,
+  records: readonly Pick<DomainEventEnvelope, 'type' | 'timestamp'>[],
+  end: number,
+): number {
+  let runningSince: number | undefined = Date.parse(startedAt);
+  let elapsed = 0;
+  for (const record of records) {
+    if (record.type === 'runner:worker-launching' && runningSince === undefined) {
+      runningSince = Date.parse(record.timestamp);
+    } else if (runningSince !== undefined && [
+      'runner:paused', 'runner:completed', 'runner:failed', 'runner:stopped', 'runner:timeout', 'runner:budget-stop',
+    ].includes(record.type)) {
+      elapsed += Math.max(0, Date.parse(record.timestamp) - runningSince);
+      runningSince = undefined;
+    }
+  }
+  return elapsed + (runningSince === undefined ? 0 : Math.max(0, end - runningSince));
+}
+
 /** Read lifecycle state without treating proof or callback evidence as a transition. */
 export async function readGraphPosition(storage: RunStorageBinding, runId: string, position: string) {
   let last: DomainEventEnvelope | undefined;

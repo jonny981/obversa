@@ -566,36 +566,47 @@ describe('supervised local runs', () => {
     expect((await readFile(join(options.directory, 'scratch/last.started'), 'utf8')).trim().split('\n')).toHaveLength(1);
   });
 
-  it('a resume launch write failure records a truthful terminal failure without a worker', async () => {
+  it.each(['before', 'after'])('a resume launch write failure %s storage charges only a stored launch', async (boundary) => {
     const { options, approvalFile } = await pausedFixture();
     await writeFile(approvalFile, 'allow');
     const store = createLocalRunStorage(options.storage);
+    const before = await runner.readSupervisedRunStatus({ storage: options.storage, runId: 'fixture' });
     const prototype = Object.getPrototypeOf(store.eventStore) as typeof store.eventStore;
     const append = prototype.append;
     let failed = false;
     vi.spyOn(prototype, 'append').mockImplementation(async function (this: typeof store.eventStore, ...args) {
-      const result = await append.apply(this, args);
-      if (!failed && args[2].some((event) => event.type.startsWith('runner:'))) {
+      if (!failed && args[2].some((event) => event.type === 'runner:worker-launching')) {
         failed = true;
-        throw new Error('Injected failure after the launch event was stored.');
+        if (boundary === 'after') await append.apply(this, args);
+        await delay(100);
+        throw new Error(`Injected failure ${boundary} the launch event was stored.`);
       }
-      return result;
+      return await append.apply(this, args);
     });
     const handle = await resumeFixture(options);
     await expect(handle.done).resolves.toMatchObject({ kind: 'fail', code: 'WATCHDOG_ERROR' });
     expect(await handle.status()).toMatchObject({ phase: 'failed', workerAlive: false, leaseRetained: false });
+    const records = await readSupervision(store, 'fixture');
+    expect(records.filter((event) => event.type === 'runner:worker-launching')).toHaveLength(boundary === 'after' ? 2 : 1);
+    const launch = records.findLast((event) => event.type === 'runner:worker-launching')!;
+    const charged = boundary === 'after' ? Date.parse(records.at(-1)!.timestamp) - Date.parse(launch.timestamp) : 0;
+    expect(await handle.status()).toMatchObject({
+      elapsedMs: before.elapsedMs + charged, remainingTimeoutMs: before.remainingTimeoutMs - charged,
+    });
     await expect(readFile(join(options.directory, 'scratch/last.started'))).rejects.toMatchObject({ code: 'ENOENT' });
     expect(await readdir(join(options.storage.directory, 'runner-locks/runner-tests'))).toEqual([]);
   });
 
   it('resume refuses workspace drift with a typed pause and releases its lease', async () => {
     const { options, approvalFile } = await pausedFixture();
+    const before = await runner.readSupervisedRunStatus({ storage: options.storage, runId: 'fixture' });
     await writeFile(approvalFile, 'allow');
     const evaluations = await readFile(join(options.runRoot, 'module-evaluations.log'), 'utf8');
     await writeFile(join(options.runRoot, 'foreign-edit'), 'keep');
     const handle = await resumeFixture(options);
     await expect(handle.done).resolves.toMatchObject({ kind: 'pause', code: 'WORKSPACE_DRIFT' });
     expect(await handle.status()).toMatchObject({ phase: 'paused', workerAlive: false, leaseRetained: false });
+    expect(await handle.status()).toMatchObject({ elapsedMs: before.elapsedMs, remainingTimeoutMs: before.remainingTimeoutMs });
     expect(await readFile(join(options.runRoot, 'module-evaluations.log'), 'utf8')).toBe(evaluations);
     expect(await readFile(join(options.runRoot, 'foreign-edit'), 'utf8')).toBe('keep');
     const lease = await options.workspace.acquireLease('after-refusal', 'fixture', await options.workspace.capture());
@@ -606,15 +617,18 @@ describe('supervised local runs', () => {
 
   it('resume refuses a pause without a saved workspace anchor instead of capturing edited files', async () => {
     const { options } = await pausedFixture();
+    const before = await runner.readSupervisedRunStatus({ storage: options.storage, runId: 'fixture' });
     const storage = createLocalRunStorage(options.storage);
     await supervisionWriter(storage, 'fixture')('paused', { kind: 'pause', phase: 'paused', reason: 'A saved pause without an anchor.' });
     const handle = await resumeFixture(options);
     await expect(handle.done).resolves.toMatchObject({ kind: 'pause', code: 'WORKSPACE_ANCHOR_MISSING' });
+    expect(await handle.status()).toMatchObject({ elapsedMs: before.elapsedMs, remainingTimeoutMs: before.remainingTimeoutMs });
     await expect(readFile(join(options.directory, 'scratch/last.started'))).rejects.toMatchObject({ code: 'ENOENT' });
   });
 
   it('resume refuses malformed or wrong-purpose pause anchors before acquiring a lease', async () => {
     const { options } = await pausedFixture();
+    const before = await runner.readSupervisedRunStatus({ storage: options.storage, runId: 'fixture' });
     const storage = createLocalRunStorage(options.storage);
     const snapshot = await options.workspace.capture();
     for (const [anchor, purpose, mediaType] of [
@@ -630,6 +644,8 @@ describe('supervised local runs', () => {
       const workspace = { ...options.workspace, acquireLease: async () => { throw new Error('Invalid anchor reached lease acquisition.'); } };
       await expect((await resumeFixture({ ...options, workspace })).done)
         .resolves.toMatchObject({ kind: 'pause', code: 'WORKSPACE_ANCHOR_INVALID' });
+      expect(await runner.readSupervisedRunStatus({ storage: options.storage, runId: 'fixture' }))
+        .toMatchObject({ elapsedMs: before.elapsedMs, remainingTimeoutMs: before.remainingTimeoutMs });
       expect(await readdir(join(options.storage.directory, 'runner-locks/runner-tests'))).toEqual([]);
     }
     await expect(readFile(join(options.directory, 'scratch/last.started'))).rejects.toMatchObject({ code: 'ENOENT' });
@@ -652,19 +668,99 @@ describe('supervised local runs', () => {
     await expect(resumeFixture(options)).rejects.toMatchObject({ code: 'RUN_NOT_PAUSED' });
   });
 
-  it('resume keeps the original deadline and counts time spent paused', async () => {
-    const { options, approvalFile } = await pausedFixture();
+  it('elapsed budget freezes through a settled pause and resume preflight longer than the timeout', async () => {
+    const { options } = await fixture();
+    const approvalFile = join(options.directory, 'approval');
+    const paused = { ...options, limits: { ...options.limits, timeoutMs: 3_000 },
+      definition: { ...options.definition, resolvedInputs: { wait: true, waitNode: 'last', approvalFile } } };
+    const handle = await startFixture(paused);
+    await expect(handle.done).resolves.toMatchObject({ kind: 'pause' });
+    const before = await handle.status();
+    expect(before.remainingTimeoutMs).toBeGreaterThan(1_000);
+    await delay(3_100);
+    expect(await handle.status()).toMatchObject({ elapsedMs: before.elapsedMs, remainingTimeoutMs: before.remainingTimeoutMs });
     await writeFile(approvalFile, 'allow');
-    const storage = createLocalRunStorage(options.storage);
-    const loaded = await runtime.loadRunDefinition(storage, 'fixture');
-    const evaluations = await readFile(join(options.runRoot, 'module-evaluations.log'), 'utf8');
-    vi.spyOn(Date, 'now').mockReturnValue(Date.parse(loaded.record.timestamp) + options.limits.timeoutMs + 1);
-    expect(await runner.readSupervisedRunStatus({ storage: options.storage, runId: 'fixture' }))
-      .toMatchObject({ phase: 'paused', remainingTimeoutMs: 0 });
-    const handle = await resumeFixture(options);
-    await expect(handle.done).resolves.toMatchObject({ kind: 'fail', code: 'TIMEOUT' });
-    expect(await readFile(join(options.runRoot, 'module-evaluations.log'), 'utf8')).toBe(evaluations);
-  });
+    const workspace = { ...options.workspace, verify: async (...args: Parameters<typeof options.workspace.verify>) => {
+      await delay(3_100);
+      expect(await handle.status()).toMatchObject({ elapsedMs: before.elapsedMs, remainingTimeoutMs: before.remainingTimeoutMs });
+      return await options.workspace.verify(...args);
+    } };
+    const resumed = await resumeFixture({ ...paused, workspace });
+    await expect(resumed.done).resolves.toMatchObject({ kind: 'complete' });
+    const records = await readSupervision(createLocalRunStorage(options.storage), 'fixture');
+    const launch = records.findLast((event) => event.type === 'runner:worker-launching')!;
+    const charged = Date.parse(records.at(-1)!.timestamp) - Date.parse(launch.timestamp);
+    expect(await resumed.status()).toMatchObject({
+      elapsedMs: before.elapsedMs + charged, remainingTimeoutMs: before.remainingTimeoutMs - charged,
+    });
+    for (const node of ['first', 'last']) {
+      expect((await readFile(join(options.directory, `scratch/${node}.started`), 'utf8')).trim().split('\n')).toHaveLength(1);
+    }
+  }, 15_000);
+
+  it('elapsed budget exhausted before a settled pause refuses resume without another worker launch', async () => {
+    const { options } = await fixture();
+    const approvalFile = join(options.directory, 'approval');
+    const paused = { ...options, limits: { ...options.limits, timeoutMs: 3_000 },
+      definition: { ...options.definition, resolvedInputs: { wait: true, waitNode: 'last', approvalFile } } };
+    const workspace = { ...options.workspace, releaseLease: async (token: string) => {
+      await delay(3_100);
+      return await options.workspace.releaseLease(token);
+    } };
+    const handle = await startFixture({ ...paused, workspace });
+    await expect(handle.done).resolves.toMatchObject({ kind: 'pause' });
+    const before = await handle.status();
+    expect(before.remainingTimeoutMs).toBe(0);
+    await writeFile(approvalFile, 'allow');
+    const resumed = await resumeFixture(paused);
+    await expect(resumed.done).resolves.toMatchObject({ kind: 'fail', code: 'TIMEOUT' });
+    expect(await resumed.status()).toMatchObject({ elapsedMs: before.elapsedMs, remainingTimeoutMs: 0 });
+    const records = await readSupervision(createLocalRunStorage(options.storage), 'fixture');
+    expect(records.filter((event) => event.type === 'runner:worker-launching')).toHaveLength(1);
+    await expect(readFile(join(options.directory, 'scratch/last.started'))).rejects.toMatchObject({ code: 'ENOENT' });
+  }, 10_000);
+
+  it('elapsed budget keeps execution spent across repeated genuine paused resumes', async () => {
+    const { options } = await fixture();
+    const approvalFile = join(options.directory, 'approval');
+    const paused = { ...options, limits: { ...options.limits, timeoutMs: 9_000 },
+      definition: { ...options.definition, resolvedInputs: { wait: true, waitNode: 'last', approvalFile, delayMs: 3_500 } } };
+    await expect((await startFixture(paused)).done).resolves.toMatchObject({ kind: 'pause' });
+    const workspace = { ...options.workspace, releaseLease: async (token: string) => {
+      await delay(1_000);
+      return await options.workspace.releaseLease(token);
+    } };
+    for (let count = 0; count < 2; count += 1) {
+      await expect((await resumeFixture({ ...paused, workspace })).done).resolves.toMatchObject({ kind: 'pause' });
+    }
+    const before = await runner.readSupervisedRunStatus({ storage: options.storage, runId: 'fixture' });
+    expect(before.remainingTimeoutMs).toBeGreaterThan(800);
+    expect(before.remainingTimeoutMs).toBeLessThan(3_500);
+    await writeFile(approvalFile, 'allow');
+    const resumed = await resumeFixture(paused);
+    await nodeStarted(options.directory, 'last');
+    await expect(resumed.done).resolves.toMatchObject({ kind: 'fail', code: 'TIMEOUT' });
+    expect(await resumed.status()).toMatchObject({ remainingTimeoutMs: 0 });
+  }, 20_000);
+
+  it('elapsed budget includes resumed crash backoff and replacement without a refill', async () => {
+    const { options } = await fixture();
+    const approvalFile = join(options.directory, 'approval');
+    const paused = { ...options, limits: { ...options.limits, timeoutMs: 9_000 },
+      restart: { ...options.restart, initialBackoffMs: 1_800, maxBackoffMs: 1_800 },
+      definition: { ...options.definition, resolvedInputs: {
+        wait: true, waitNode: 'last', approvalFile, delayMs: 3_500, resumeCrash: 'before-resume', storage: options.storage,
+      } } };
+    await expect((await startFixture(paused)).done).resolves.toMatchObject({ kind: 'pause' });
+    await writeFile(approvalFile, 'allow');
+    const resumed = await resumeFixture(paused);
+    await expect(resumed.done).resolves.toMatchObject({ kind: 'fail', code: 'TIMEOUT' });
+    expect(await resumed.status()).toMatchObject({ remainingTimeoutMs: 0, restartCount: 1 });
+    const records = await readSupervision(createLocalRunStorage(options.storage), 'fixture');
+    expect(records.filter((event) => event.type === 'runner:worker-launching')).toHaveLength(3);
+    expect(records.filter((event) => event.type === 'runner:backoff')).toHaveLength(1);
+    expect((await readFile(join(options.directory, 'scratch/last.started'), 'utf8')).trim().split('\n')).toHaveLength(1);
+  }, 15_000);
 
   it('resume keeps dispatches spent before the pause', async () => {
     const { options, approvalFile } = await pausedFixture({ waitNode: 'first' }, 1);

@@ -4,8 +4,38 @@ import { join } from 'node:path';
 import { expect, it } from 'vitest';
 
 import type { EventStore } from '@obversa/runtime';
-import { readSupervision, supervisionWriter } from '../src/supervised-record.js';
+import { readSupervision, supervisionWriter, supervisedElapsedMs } from '../src/supervised-record.js';
 import { createLocalRunStorage } from '@obversa/runtime/storage/local';
+
+const timestamp = (ms: number) => new Date(ms).toISOString();
+const timed = (type: string, ms: number) => ({ type: `runner:${type}`, timestamp: timestamp(ms) });
+
+it('sums execution across pauses without refilling on crash, backoff, or replacement', () => {
+  const records = [
+    timed('worker-launching', 10), timed('paused', 100),
+    timed('worker-launching', 1_000), timed('worker-crashed', 1_050),
+    timed('backoff', 1_060), timed('worker-launching', 1_100), timed('paused', 1_200),
+    timed('paused', 2_000), timed('worker-launching', 3_000), timed('completed', 3_050),
+  ];
+  expect(supervisedElapsedMs(timestamp(0), records, 4_000)).toBe(350);
+  expect(supervisedElapsedMs(timestamp(0), records.slice(0, 8), 2_900)).toBe(300);
+  expect(supervisedElapsedMs(timestamp(0), records.slice(0, 9), 3_025)).toBe(325);
+});
+
+it.each(['completed', 'failed', 'stopped', 'timeout', 'budget-stop'])(
+  'closes elapsed time at %s after a stored resumed launch', (terminal) => {
+    expect(supervisedElapsedMs(timestamp(0), [
+      timed('paused', 100), timed('worker-launching', 1_000), timed(terminal, 1_050),
+    ], 4_000)).toBe(150);
+  },
+);
+
+it('keeps failed resumes frozen when no worker launch was stored', () => {
+  expect(supervisedElapsedMs(timestamp(0), [
+    timed('paused', 100), timed('paused', 1_000), timed('failed', 3_000),
+  ], 4_000)).toBe(100);
+  expect(supervisedElapsedMs(timestamp(0), [], 50)).toBe(50);
+});
 
 it('persists a queued terminal record after an earlier append rejects', async () => {
   const directory = await mkdtemp(join(tmpdir(), 'obversa-supervision-record-'));

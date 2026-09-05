@@ -15,7 +15,7 @@ import {
 } from '@obversa/runtime';
 import {
   hostModuleDigest, readGraphPosition, readSupervision, resolveHostModule, SupervisedRunError,
-  supervisionWriter, type SupervisedHostRecord,
+  supervisionWriter, supervisedElapsedMs, type SupervisedHostRecord,
 } from './supervised-record.js';
 import { readSupervisedRunStatus, type SupervisedRunStatus } from './supervised-status.js';
 
@@ -212,7 +212,9 @@ async function superviseRun(options: SupervisedRunOptions, resume?: {
     });
     const append = supervisionWriter(storage, runId);
     const cancellation = new AbortController();
-    const deadline = Date.parse(started.timestamp) + options.limits.timeoutMs;
+    const carriedRemaining = options.limits.timeoutMs
+      - supervisedElapsedMs(started.timestamp, await readSupervision(storage, runId), Date.now());
+    let deadline = resume === undefined ? Date.parse(started.timestamp) + options.limits.timeoutMs : undefined;
     let leaseReleaseFailed = false;
     const release = async () => {
       if (leaseToken === undefined) return;
@@ -264,7 +266,7 @@ async function superviseRun(options: SupervisedRunOptions, resume?: {
           if (value !== undefined) workerEnvironment[name] = value;
         }
         for (;;) {
-          const remaining = deadline - Date.now();
+          const remaining = deadline === undefined ? carriedRemaining : deadline - Date.now();
           if (cancellation.signal.aborted || remaining <= 0) {
             await release();
             return await finish({ kind: 'fail', code: cancellation.signal.aborted ? 'STOPPED' : 'TIMEOUT', message: 'The watchdog stopped the run.' });
@@ -272,7 +274,10 @@ async function superviseRun(options: SupervisedRunOptions, resume?: {
           const attemptId = digestJson({ worker: randomUUID() });
           const ownerId = digestJson({ owner: randomUUID() });
           await append('worker-launching', { attemptId, ownerId, restartCount, ...(resumeInput === undefined ? {} : { resume: resumeInput }) });
-          const revision = (await readSupervision(storage, runId)).at(-1)?.revision ?? 0;
+          const launch = (await readSupervision(storage, runId)).at(-1)!;
+          const revision = launch.revision;
+          // Set this once: replacement workers spend the same resumed interval.
+          deadline ??= Date.parse(launch.timestamp) + carriedRemaining;
           const launchRemaining = deadline - Date.now();
           if (launchRemaining <= 0 || cancellation.signal.aborted) continue;
           cleanupSafe = false;

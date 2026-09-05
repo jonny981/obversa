@@ -6,7 +6,7 @@ import {
 
 import { loadRunDefinition, type DomainEventEnvelope, type UsageReceipt, type JsonObject, type Sha256Digest } from '@obversa/runtime';
 import { createLocalRunStorage, type LocalRunStorageOptions } from '@obversa/runtime/storage/local';
-import { readSupervision, SupervisedRunError, type SupervisedHostRecord } from './supervised-record.js';
+import { readSupervision, SupervisedRunError, supervisedElapsedMs, type SupervisedHostRecord } from './supervised-record.js';
 import { localSupervisedCheckpoint } from './supervised-checkpoint.js';
 
 export type SupervisedRunUsage = UsageReceipt | {
@@ -86,7 +86,6 @@ export async function readSupervisedRunStatus(options: ReadSupervisedRunStatusOp
         : { kind: 'reported', inputTokens: total.input, outputTokens: total.output };
     return { nodeId: node.id, usage: receipt };
   });
-  const started = records.find((event) => event.type === 'runner:started');
   const launch = records.findLast((event) => event.type === 'runner:worker-launching');
   const worker = records.findLast((event) => event.type === 'runner:worker-started');
   const exited = records.findLast((event) => event.type === 'runner:worker-exited');
@@ -119,9 +118,7 @@ export async function readSupervisedRunStatus(options: ReadSupervisedRunStatusOp
     if (workerAlive) processes = inspected;
   }
   const now = Date.now();
-  const end = terminal === undefined || terminal.type === 'runner:paused' ? now : Date.parse(terminal.timestamp);
-  const startedAt = started?.timestamp ?? loaded.record.timestamp;
-  const elapsedMs = Math.max(0, end - Date.parse(startedAt));
+  const elapsedMs = supervisedElapsedMs(loaded.record.timestamp, records, now);
   const backoff = terminal === undefined && backedOff !== undefined && backedOff.revision > (launch?.revision ?? 0)
     ? { until: String((backedOff.payload as JsonObject).until), remainingMs: Math.max(0, Date.parse(String((backedOff.payload as JsonObject).until)) - now) }
     : null;

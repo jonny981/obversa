@@ -11,6 +11,9 @@ engine and memory packages track their own versions independently.
 
 ### Fixed
 
+- **Paused runner budgets:** Freeze elapsed time at a settled pause until the
+  next stored worker launch. Resume preflight spends no time; earlier execution
+  and restart backoff remain spent across resumes and worker replacements.
 - **Usage after worker crashes:** Preserve measured node totals as partial
   usage when calls lack receipts. Token totals are measured lower bounds,
   and `unknownCalls` keeps crash gaps visible after successful retries.

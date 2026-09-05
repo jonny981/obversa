@@ -189,9 +189,12 @@ does not accept replacements. It writes no second run-start event and does not
 repeat completed occurrences. Status shows a resumed worker as active rather
 than reporting the earlier pause as its terminal result.
 
-The original wall-clock deadline includes time spent paused. Logical dispatches
-and recorded worker restarts also keep their counts. A pause does not restore
-spent budgets; resuming after the deadline returns `TIMEOUT` without a worker.
+The elapsed budget freezes at the settled runner pause and resumes at the next
+stored worker launch. Resume preflight, including workspace checks, does not
+spend that budget. Earlier execution and restart backoff remain spent across
+repeated pauses and worker replacements. Logical dispatches and recorded
+worker restarts also keep their counts. An exhausted elapsed budget returns
+`TIMEOUT` without starting a worker.
 
 The host's action policy runs again. Record approval in the system that policy
 reads before calling resume. A repeated `wait` pauses again with its request;
@@ -222,7 +225,9 @@ pause rejects with `RUN_NOT_PAUSED`. A position that is not paused rejects with
 ## Bound the run
 
 - **Elapsed time:** `limits.timeoutMs` covers worker execution and restart
-  backoff. Teardown can continue beyond that work deadline.
+  backoff across pauses and resumes. Counting starts at the stored run timestamp,
+  freezes at each settled runner pause, and resumes at the next stored worker
+  launch. Teardown can continue beyond that work deadline.
 - **Logical dispatches:** `limits.maxDispatches` counts recorded graph
   dispatches across workers. Resuming one recorded occurrence does not create
   another dispatch.
@@ -252,7 +257,9 @@ across worker restarts.
 ## Read progress
 
 Status includes the run phase, worker liveness, inspected processes, restart
-count, backoff, elapsed time, remaining timeout, and pause reasons.
+count, backoff, elapsed execution time, remaining timeout, and pause reasons.
+Run-level elapsed time and remaining timeout stay fixed during settled pauses
+and resume preflight. They use the same execution budget as the watchdog.
 
 `cleanupVerified` is `null` before a terminal result, `true` when cleanup was
 verified within the reported capability, and `false` when cleanup could not be
