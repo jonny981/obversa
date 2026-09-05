@@ -464,18 +464,26 @@ describe('supervised local runs', () => {
     expect(await readdir(join(options.storage.directory, 'runner-locks/runner-tests'))).toEqual([]);
   });
 
-  it('resume preserves a paused position after its accepted-result evidence is stored', async () => {
+  it('resume preserves a paused position after acceptance and host evidence are stored', async () => {
     const { options, approvalFile } = await pausedFixture();
     const storage = createLocalRunStorage(options.storage);
     const proof = await storage.artifactStore.write({ namespace: 'runner-tests', runId: 'fixture' }, {
       bytes: Buffer.from('{"passed":true}'), mediaType: 'application/json', purpose: 'proof-packet', contentMode: 'state',
     });
     const graph = options.definition.resolvedPlan.plan.graph;
-    await runtime.createAcceptedResultRecord(storage, 'fixture', 'dag/last/1', {
-      result: { approved: true }, inputHashes: {}, proofScope: {}, proofArtifact: { ...proof, purpose: 'proof-packet' },
+    await runtime.createAcceptedResultRecord(storage, 'fixture', 'dag/first/1', {
+      result: { node: 'first', value: 'original' }, inputHashes: {}, proofScope: {}, proofArtifact: { ...proof, purpose: 'proof-packet' },
       graph: { definitionDigest: graph.definitionDigest, typeVersion: graph.typeVersion },
       workspaceAnchor: await options.workspace.capture(), reviewerIdentity: { actor: 'test-reviewer' },
     });
+    const stream = { namespace: 'runner-tests', streamId: 'fixture' };
+    let revision = 0;
+    for await (const event of storage.eventStore.read(stream)) revision = event.revision;
+    await storage.eventStore.append(stream, revision, [{
+      eventId: 'host-approval', type: 'host:approval-recorded', version: 1,
+      timestamp: '2026-01-01T00:00:00.000Z', correlationId: 'fixture', causationId: null,
+      payload: { position: 'dag/last/1', approved: true },
+    }]);
     await writeFile(approvalFile, 'allow');
     await expect((await resumeFixture(options)).done).resolves.toMatchObject({ kind: 'complete' });
     expect((await readFile(join(options.directory, 'scratch/last.started'), 'utf8')).trim().split('\n')).toHaveLength(1);
