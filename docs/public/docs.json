@@ -25,6 +25,17 @@
         ]
       },
       {
+        "group": "Concepts",
+        "pages": [
+          "concepts/index",
+          "concepts/orders",
+          "concepts/workflows",
+          "concepts/callback-gates",
+          "concepts/surfaces",
+          "concepts/runtime"
+        ]
+      },
+      {
         "group": "Memory",
         "pages": [
           "memory/index",

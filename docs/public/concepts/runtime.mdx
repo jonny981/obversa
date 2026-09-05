@@ -1,0 +1,68 @@
+---
+title: "The runtime"
+description: "The runtime runs graphs, records events, and stores the outputs and decisions your workflow needs."
+---
+
+The runtime is the package that runs your workflows: `@obversa/runtime`.
+Any tool can use it through its public APIs.
+
+## Bring your own graph
+
+Keep one runtime while choosing the shape of the work.
+
+A graph type defines what a connection means and when a node can run.
+The built-in forms cover dependency graphs, including pipelines, and
+review loops. Your own graph types use the same public contract.
+
+Graph decisions use frozen data. The same graph definition and recorded
+events must produce the same next decision. Model calls happen in the
+nodes that the graph dispatches.
+
+## What the runtime provides
+
+- **Graphs and runs:** Definitions, stored plans, execution, pause, and
+  explicit resume.
+- **Events and artifacts:** A durable history and stored outputs identified
+  by their content hashes.
+- **Engine contracts:** A common way to call the agents that do the work;
+  engine plugins are supplied by your application.
+- **Workspace contracts:** Operations to capture, verify, lease, and fork
+  a workspace, called by your application.
+- **Callback gates and proof:** Stored questions, claims, answers, proof
+  artifacts, and decisions bound to the evidence they cover.
+
+## The application around it
+
+Your application defines Orders and connects their context, workflows,
+outputs, and evidence. It chooses the editor, terminal host, and surfaces.
+
+The runtime imports no engine or memory adapter. Your application supplies
+those instances. It also connects callback answers to run resumption and
+decides what action to take after an approval.
+
+This keeps the same runtime useful under different tools and processes.
+
+## Frozen plans
+
+A run stores its graph definition and resolved plan, including the chosen
+engines, permissions, and contracts. Editing another definition does not
+rewrite that stored plan.
+
+A fresh executor checks that the graph supplied by the host matches the
+stored definition and plan before it runs work. This check does not freeze
+arbitrary node code; your application must supply the intended code when
+it resumes a run.
+
+## Events hold the state
+
+The executor rebuilds graph state from the stored events. Folding those
+events through the graph's pure functions does not run an agent or repeat
+completed work.
+
+After a process stops, the executor can identify an unfinished node from
+the record. The host resumes that exact position after the earlier process
+has stopped. If node code started and the saved policy does not permit a
+safe retry, the executor pauses for the host to resolve the uncertain result.
+
+See the [graph executor](/graphs/executor) for recovery rules and the
+[runtime package](/packages/runtime) for its public APIs.

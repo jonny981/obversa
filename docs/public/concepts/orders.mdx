@@ -1,0 +1,62 @@
+---
+title: "Orders"
+description: "An Order is the change you want, with the context and evidence needed to finish it."
+---
+
+An Order is the change that you want. It might be a landing page redesign,
+a passkey feature, or a check of conversion data.
+
+## You set the scope
+
+You decide what one Order contains. It can be a small fix or a feature that
+touches several repositories. Order is the name for that piece of work;
+your application decides how to store it and connect it to runtime runs.
+
+Keep the change small enough to follow from request to result. One Order
+can move through its workflow without waiting for a batch of other changes.
+That gives you a short path to feedback and less unfinished work to track.
+
+## The life of an Order
+
+1. **Describe the change.** Supply requirements, designs, and constraints.
+2. **Run the workflow.** Its nodes implement and check the work.
+3. **Answer at gates.** A callback gate can hold work for a decision.
+4. **Keep the evidence.** Save the checks, outputs, and review decisions.
+5. **Close the Order.** Confirm that the result meets the requirements.
+
+These are the responsibilities of the process you build. The runtime
+supplies the graph execution and records that process can use.
+
+## An Order's route
+
+A route is the list of workflows an Order must pass through. For a payment
+feature, that might be implementation, security review, and release.
+
+The route tells you what must happen. Dependencies tell you the order.
+Your application can express those dependencies in a graph and start the
+workflows through its nodes. Independent nodes can run together within the
+graph's concurrency limits.
+
+You decide when the required workflows and their evidence are enough to
+close the Order.
+
+## What travels with an Order
+
+- **Context:** The requirements, designs, and constraints for the work.
+- **Workflow:** The definition of the steps that carry it out.
+- **Output:** The files and artifacts made or changed.
+- **Evidence:** The checks and decisions used to accept the output.
+
+Keep these records linked in your application so someone can understand
+the result without reading an agent's conversation.
+
+## The workspace
+
+The [cmux setup](/hosts/cmux) can open one editor workspace with two roots:
+a Project worktree for the source and a Shared worktree for reusable context
+and workflows. You supply both roots; the command opens them together.
+
+For code that needs to create an isolated worktree, the runtime's
+[workspace provider](/workspace/contract) can capture, verify, lease, and
+fork one Git repository. Your application connects those operations to the
+Order and its runs.

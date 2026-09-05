@@ -1,0 +1,52 @@
+---
+title: "Workflows"
+description: "A workflow takes an Order through the steps that make and check the result."
+---
+
+A workflow is the process that works on an Order. You describe its steps
+and dependencies as a graph. Each node is a step that runs an agent,
+executes code, or applies a check.
+
+A callback gate asks for a decision. The code driving the workflow records
+the answer and decides whether work can continue.
+
+## One change at a time
+
+You can carry one Order from request to result without waiting for a batch.
+Its workflow can be as small as draft, review, and finish.
+
+The graph defines when each node can run. A pipeline puts steps in order.
+A dependency graph can run independent steps together. A review loop sends
+work back for corrections within the limits you set.
+
+## Workflows that share a home
+
+Workflows for one team can share a repository, context, and reusable
+definitions. The factory term for that grouping is a plant: workflows that
+share a domain. It is a way to describe the team's work, with no separate
+runtime object to configure.
+
+## Joining the outputs
+
+One workflow can use the results of others. A release workflow might bring
+together three components. An integration workflow might combine frontend
+and backend changes.
+
+This is the assembly pattern from a factory: earlier work supplies the
+inputs for the next process. Your code makes the connection. A node can
+run a child graph through the public executor and return its result.
+
+For larger outputs, your code can store an artifact and pass its reference.
+The reference includes a content hash, which identifies the stored bytes.
+The artifact store checks those bytes when it reads them. Your application
+starts the receiving workflow and supplies its inputs.
+
+## Where definitions live
+
+A workflow definition is source code. It can live in your repository, a
+shared repository, or a package. You can edit it, version it, review it,
+and share it.
+
+Start with the [workflow bank](/production-lines/index) for a complete
+program, or the [pipeline example](/graphs/pipeline) for a small graph.
+Copy the example and change it to fit your work.

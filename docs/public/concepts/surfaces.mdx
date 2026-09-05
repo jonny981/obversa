@@ -1,0 +1,50 @@
+---
+title: "Surfaces"
+description: "A surface is a small local user interface for one decision."
+---
+
+A surface is a small user interface for one decision. A diff review with
+inline comments is a surface. A form or a visual approval can use the same
+session contract.
+
+Your workflow opens a surface when it needs your input. The session ends
+after the decision, cancellation, interruption, or timeout. The caller gets
+one structured result it can use to continue the work.
+
+## Surfacer
+
+Surfacer is the package that runs surfaces. It does three things:
+
+- **Runs the session:** A local server serves one surface.
+- **Places the page:** Host scripts can open it in a pane beside your
+  terminal. cmux has an adapter for this.
+- **Returns the result:** The caller receives the outcome and the data
+  supplied by the surface.
+
+The caller owns the gate state, routing, and run records. Surfacer handles
+the interface and the result's return.
+
+## Your host stays yours
+
+Your terminal host supplies the panes, layout, and keybindings. Surfacer
+uses a placement command supplied by the host to open the page there.
+
+Without host placement, the macOS default browser is the fallback. On Linux
+and Windows, Surfacer prints the URL for you to open. It also prints the URL
+when no opener succeeds.
+
+The [diff review command](/hosts/review) is a complete surface you can use.
+It shows a Git diff, collects comments on lines, and returns them to its
+caller. The [cmux guide](/hosts/cmux) explains how to open it beside your
+terminal.
+
+## Security
+
+A surface server listens only on the local computer. Each session has its
+own token, and every API request must carry it. Request sizes are bounded.
+
+The host receives a one-time launch URL. The page's session token stays out
+of the placement command's arguments. The launcher shuts the server down
+after the session ends.
+
+See [Surfacer](/packages/surfacer) for the session and launcher APIs.
