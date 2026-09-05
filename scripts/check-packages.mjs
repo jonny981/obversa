@@ -1,29 +1,17 @@
 #!/usr/bin/env node
 
-import { mkdtemp, readdir, rm } from 'node:fs/promises';
+import { mkdtemp, readdir, readFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { spawnSync } from 'node:child_process';
-import { EXPECTED_FILES, withoutChunkHash } from './check-tarballs.mjs';
+import { allowlistedDirectories, EXPECTED_FILES, withoutChunkHash } from './check-tarballs.mjs';
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '..');
-const packages = [
-  { root: 'packages', directory: 'engine', name: '@obversa/engine', version: '0.1.0' },
-  { root: 'packages', directory: 'memory', name: '@obversa/memory', version: '0.1.0' },
-  { root: 'packages', directory: 'runtime', name: '@obversa/runtime', version: '1.0.0' },
-  { root: 'packages', directory: 'runner', name: '@obversa/runner', version: '0.1.0' },
-  { root: 'packages', directory: 'source', name: '@obversa/source', version: '0.1.0' },
-  { root: 'packages', directory: 'surfacer', name: '@obversa/surfacer', version: '0.1.0' },
-  { root: 'plugins', directory: 'engine-agent-sdk', name: '@obversa/engine-agent-sdk', version: '0.1.0' },
-  { root: 'plugins', directory: 'engine-anthropic-api', name: '@obversa/engine-anthropic-api', version: '0.1.0' },
-  { root: 'plugins', directory: 'engine-claude-cli', name: '@obversa/engine-claude-cli', version: '0.1.0' },
-  { root: 'plugins', directory: 'engine-codex', name: '@obversa/engine-codex', version: '0.1.0' },
-  { root: 'plugins', directory: 'engine-grok-cli', name: '@obversa/engine-grok-cli', version: '0.1.0' },
-  { root: 'plugins', directory: 'engine-opencode-cli', name: '@obversa/engine-opencode-cli', version: '0.1.0' },
-  { root: 'plugins', directory: 'memory-git', name: '@obversa/memory-git', version: '0.1.0' },
-  { root: 'plugins', directory: 'memory-simple', name: '@obversa/memory-simple', version: '0.1.0' },
-];
+const packages = await Promise.all(allowlistedDirectories(root).map(async (directory) => {
+  const { name, version } = JSON.parse(await readFile(join(directory, 'package.json'), 'utf8'));
+  return { directory, name, version };
+}));
 
 function run(command, args, options = {}) {
   const result = spawnSync(command, args, {
@@ -64,15 +52,11 @@ function exportTargets(value, output = []) {
 
 export function assertPackedPackage(definition, tarball) {
   const entries = archiveEntries(tarball).map(withoutChunkHash);
-  const required = ['package/LICENSE', 'package/README.md', 'package/package.json'];
   const failures = [];
   const pinnedFiles = EXPECTED_FILES[definition.name];
 
   if (!pinnedFiles) throw new Error(`${definition.name}: missing pinned file list`);
 
-  for (const path of required) {
-    if (!entries.includes(path)) failures.push(`missing ${path.slice('package/'.length)}`);
-  }
   for (const path of entries.filter((path) => !pinnedFiles.includes(path))) {
     failures.push(`unexpected archive path ${path}`);
   }
@@ -127,7 +111,7 @@ export async function packWorkspacePackages(destination) {
     const before = new Set(await readdir(destination));
     run('pnpm', [
       '--dir',
-      join(root, definition.root, definition.directory),
+      definition.directory,
       'pack',
       '--pack-destination',
       destination,

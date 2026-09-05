@@ -5,7 +5,7 @@
 
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { copyFileSync, mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import { copyFileSync, cpSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import test from "node:test";
@@ -13,7 +13,7 @@ import test from "node:test";
 import { checkTarball } from "./check-tarballs.mjs";
 import { assertPackedPackage } from "./check-packages.mjs";
 
-const fixture = mkdtempSync(join(tmpdir(), "obversa-tarball-spec-"));
+const fixture = realpathSync(mkdtempSync(join(tmpdir(), "obversa-tarball-spec-")));
 test.after(() => rmSync(fixture, { recursive: true, force: true }));
 
 function pkg(name, manifest, files) {
@@ -112,5 +112,63 @@ test("the packed archive checker refuses a package with no pinned file list", ()
   assert.throws(
     () => assertPackedPackage({ name: "@fixture/unpinned-archive", version: "1.0.0" }, join(fixture, "fixture-unpinned-archive-1.0.0.tgz")),
     /@fixture\/unpinned-archive: missing pinned file list/,
+  );
+});
+
+function packageWorkspace(name) {
+  const root = pkg(name, { private: true }, {});
+  cpSync(new URL(".", import.meta.url), join(root, "scripts"), { recursive: true });
+  symlinkSync(new URL("../node_modules", import.meta.url), join(root, "node_modules"), "dir");
+  writeFileSync(join(root, "pnpm-workspace.yaml"), "packages:\n  - packages/*\n");
+  writeFileSync(join(root, "scripts/publish-allowlist.json"), JSON.stringify({ packages: ["@obversa/memory-simple"] }));
+  const directory = pkg(`${name}/packages/relocated-memory`, {
+    name: "@obversa/memory-simple",
+    version: "0.1.0",
+    publishConfig: { access: "public", registry: "http://publish-guard.invalid/", "@obversa:registry": "http://publish-guard.invalid/" },
+    exports: { ".": { types: "./dist/index.d.ts", default: "./dist/index.js" } },
+  }, {
+    "LICENSE": "MIT\n",
+    "README.md": "Fixture package.\n",
+    "dist/index.js": "export const a = 1;\n",
+    "dist/index.d.ts": "export declare const a: number;\n",
+    "dist/index.js.map": "{}\n",
+  });
+  return { root, directory };
+}
+
+test("the package command follows the allowlist and refuses an added unpinned package", () => {
+  const { root } = packageWorkspace("package-allowlist");
+  pkg("package-allowlist/packages/new", { name: "@fixture/unpinned" }, {});
+  const check = () => spawnSync(process.execPath, [join(root, "scripts/check-packages.mjs")], { cwd: root, encoding: "utf8" });
+  const allowed = check();
+  assert.equal(allowed.status, 0, `${allowed.stdout}\n${allowed.stderr}`);
+  assert.match(allowed.stdout, /@obversa\/memory-simple@0\.1\.0 \(6 files\)/);
+  assert.doesNotMatch(allowed.stdout, /@fixture\/unpinned/);
+
+  writeFileSync(join(root, "scripts/publish-allowlist.json"), JSON.stringify({ packages: ["@obversa/memory-simple", "@fixture/unpinned"] }));
+  const added = check();
+  assert.equal(added.status, 1, `${added.stdout}\n${added.stderr}`);
+  assert.match(added.stderr, /@fixture\/unpinned: missing pinned file list/);
+});
+
+test("the package command checks the version from the workspace manifest", () => {
+  const { root, directory } = packageWorkspace("package-version");
+  const manifestPath = join(directory, "package.json");
+  const manifest = JSON.parse(readFileSync(manifestPath, "utf8"));
+  writeFileSync(manifestPath, JSON.stringify({ ...manifest, version: "0.2.3" }));
+
+  const result = spawnSync(process.execPath, [join(root, "scripts/check-packages.mjs")], { cwd: root, encoding: "utf8" });
+  assert.equal(result.status, 0, `${result.stdout}\n${result.stderr}`);
+  assert.match(result.stdout, /@obversa\/memory-simple@0\.2\.3 \(6 files\)/);
+});
+
+test("the packed archive checker reports a missing LICENSE once", () => {
+  const { root, directory } = packageWorkspace("package-license");
+  rmSync(join(directory, "LICENSE"));
+  const packed = spawnSync("pnpm", ["--dir", directory, "pack", "--pack-destination", root], { encoding: "utf8" });
+  assert.equal(packed.status, 0, `${packed.stdout}\n${packed.stderr}`);
+  assert.throws(
+    () => assertPackedPackage({ name: "@obversa/memory-simple", version: "0.1.0" }, join(root, "obversa-memory-simple-0.1.0.tgz")),
+    { message: "@obversa/memory-simple archive is invalid:\n- missing LICENSE" },
   );
 });
