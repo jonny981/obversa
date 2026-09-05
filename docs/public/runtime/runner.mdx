@@ -48,9 +48,16 @@ async function inspect(options: SupervisedRunOptions) {
 ```
 
 Call `handle.stop()` while work is running to request a stop and await cleanup.
-A clean stop returns `kind: 'fail'` and `code: 'STOPPED'`. Calling it after completion
-returns the settled result. `handle.done` resolves to a graph result:
+A clean stop without a recorded worker result returns `kind: 'fail'` and
+`code: 'STOPPED'`. Calling it after completion returns the settled result.
+`handle.done` resolves to a graph result:
 `complete`, `pause`, or `fail`. Infrastructure errors can reject the promise.
+
+After verified process cleanup and workspace lease release, the watchdog returns
+the current worker's durably recorded result even if a stop request or timeout
+arrives before worker exit. Without a recorded result, stop and timeout return
+`STOPPED` and `TIMEOUT`. Cleanup or lease-release failures take precedence over
+the recorded result.
 
 Completion output is stored once as an artifact, subject to the storage policy's
 artifact size and quota limits. Worker and watchdog completion events carry the

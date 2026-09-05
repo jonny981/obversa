@@ -9,6 +9,12 @@ engine and memory packages track their own versions independently.
 
 ## [Unreleased]
 
+### Fixed
+
+- **Recorded runner results:** Preserve a durably recorded worker result when
+  stop or timeout occurs before worker exit, after verified cleanup and lease
+  release. Cleanup failures still take precedence.
+
 ## [1.0.0] - 2026-09-05
 
 ### Added

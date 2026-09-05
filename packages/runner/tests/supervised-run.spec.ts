@@ -298,6 +298,32 @@ describe('supervised local runs', () => {
     if (lease.ok) await options.workspace.releaseLease(lease.token);
   });
 
+  it.each(['stop', 'timeout'])('preserves recorded completion when %s occurs before worker exit', async (shutdown) => {
+    const { options } = await fixture();
+    const handle = await startFixture({
+      ...options,
+      definition: { ...options.definition, resolvedInputs: { holdWorkerResult: true, storage: options.storage } },
+      limits: { ...options.limits, timeoutMs: shutdown === 'timeout' ? 3_000 : options.limits.timeoutMs },
+    });
+    const marker = join(options.directory, 'scratch/worker-result-held');
+    await expect.poll(() => readFile(marker, 'utf8').catch(() => ''), { timeout: 5_000 }).not.toBe('');
+    const pid = Number(await readFile(marker, 'utf8'));
+    expect(() => process.kill(pid, 0)).not.toThrow();
+    if (shutdown === 'stop') await handle.stop();
+    await expect(handle.done).resolves.toEqual({
+      kind: 'complete', output: { nodes: {
+        first: { node: 'first', value: 'original' },
+        last: { node: 'last', value: 'original' },
+      } },
+    });
+    expect(await handle.status()).toMatchObject({
+      phase: 'completed', workerAlive: false, cleanupVerified: true, leaseRetained: false,
+    });
+    const records = await readSupervision(createLocalRunStorage(options.storage), 'fixture');
+    expect(records.at(-1)?.type).toBe('runner:completed');
+    expect(() => process.kill(pid, 0)).toThrow();
+  }, 10_000);
+
   it('a long fixture survives runner restart and continues from events', async () => {
     const { options } = await fixture();
     const handle = await startFixture({

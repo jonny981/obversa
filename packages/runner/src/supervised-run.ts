@@ -285,15 +285,15 @@ async function superviseRun(options: SupervisedRunOptions, resume?: {
           const record = events.findLast((event) => event.revision > revision && event.type === 'runner:worker-result');
           const result = record?.payload as SupervisedTerminalRecord | undefined;
           await append('worker-exited', { exitCode: command.exitCode, restartCount });
-          if (cancellation.signal.aborted || command.timedOut) {
-            await release();
-            return await finish({ kind: 'fail', code: cancellation.signal.aborted ? 'STOPPED' : 'TIMEOUT', message: 'The watchdog stopped the run.' });
-          }
           if (result !== undefined) {
             const details: JsonObject = result.kind === 'pause'
               ? { anchorArtifact: await savePauseAnchor(await options.workspace.capture()) } : {};
             await release();
             return await finish(result, details);
+          }
+          if (cancellation.signal.aborted || command.timedOut) {
+            await release();
+            return await finish({ kind: 'fail', code: cancellation.signal.aborted ? 'STOPPED' : 'TIMEOUT', message: 'The watchdog stopped the run.' });
           }
           await append('worker-crashed', { exitCode: command.exitCode, restartCount });
           if (restartCount >= options.restart.maxRestarts) {

@@ -13,6 +13,19 @@ await appendFile(new URL('./module-evaluations.log', import.meta.url), `${proces
 export async function bindRun({ definition, scratchDirectory }) {
   const input = definition.resolvedInputs;
   const graph = compileGraph(dagGraphType, definition.graphDefinition.value);
+  if (input.holdWorkerResult) {
+    const store = createLocalRunStorage(input.storage).eventStore;
+    const prototype = Object.getPrototypeOf(store);
+    const append = prototype.append;
+    prototype.append = async function (stream, revision, batch) {
+      const result = await append.call(this, stream, revision, batch);
+      if (batch.some((event) => event.type === 'runner:worker-result')) {
+        await writeFile(join(scratchDirectory, 'worker-result-held'), String(process.pid));
+        await new Promise(() => { setInterval(() => {}, 1_000); });
+      }
+      return result;
+    };
+  }
   if (input.resumeCrash) {
     const store = createLocalRunStorage(input.storage).eventStore;
     const prototype = Object.getPrototypeOf(store);
