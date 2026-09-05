@@ -1,4 +1,4 @@
-import { spawn } from 'node:child_process';
+import { execFileSync, spawn } from 'node:child_process';
 import { existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import { join } from 'node:path';
@@ -76,12 +76,18 @@ describe.runIf(process.platform === 'darwin' || process.platform === 'linux')('c
       stdio: 'inherit',
     });
     try {
-      await record(directory, 'worker');
+      const worker = await record(directory, 'worker');
       process.kill(watchdog.pid!, 'SIGSTOP');
       await delay(50);
       writeFileSync(join(directory, 'go'), '');
       const helper = await record(directory, 'helper');
-      await delay(50);
+      const workerExitDeadline = Date.now() + 5_000;
+      while (isProcessAlive(worker.pid as number)) {
+        const state = execFileSync('/bin/ps', ['-o', 'stat=', '-p', String(worker.pid)], { encoding: 'utf8' });
+        if (state.trimStart().startsWith('Z')) break;
+        if (Date.now() >= workerExitDeadline) throw new Error('Worker did not exit before watchdog resume');
+        await delay(10);
+      }
       process.kill(watchdog.pid!, 'SIGCONT');
       const result = await record(directory, 'result');
       expect(result.remaining).toEqual([]);
