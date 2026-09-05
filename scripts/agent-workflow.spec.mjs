@@ -78,6 +78,7 @@ test('a workstream cannot claim the other workstream stage family', () => {
 for (const [stage, branch] of [
   ['D14', 'feat/unattended-runner'],
   ['D15', 'feat/release-v1'],
+  ['D16', 'feat/runner-hardening'],
   ['F4', 'feat/release-readiness'],
   ['F5', 'feat/release-wording'],
   ['F7', 'feat/residual-sweep'],
@@ -108,6 +109,7 @@ for (const [stage, branch] of [
   ['D14', 'feat/release-v1'],
   ['D15', 'feat/lines-v1'],
   ['D15', 'feat/unattended-runner'],
+  ['D16', 'feat/lines-v1'],
   ['F4', 'feat/factory-v1'],
   ['F5', 'feat/factory-v1'],
   ['F7', 'feat/factory-v1'],
