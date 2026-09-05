@@ -175,6 +175,29 @@ describe('openGitMemory', () => {
     expect(git(repo, ['cat-file', '-t', refFor('durable')])).toBe('tree');
   });
 
+  it('reads scoped memory from a mirror clone through the adapter', async () => {
+    const repo = makeRepo();
+    const scope = 'mirror-scope';
+    const path = '/memories/notes/plan.md';
+    const text = 'memory carried by the private ref\n';
+    const memory = await openGitMemory({ repositoryPath: repo, scope });
+    await expect(memory.execute({ command: 'create', path, text })).resolves.toMatchObject({ ok: true });
+    const oid = git(repo, ['rev-parse', refFor(scope)]);
+    const mirror = join(makeTemporaryDirectory('obversa-memory-mirror-'), 'mirror.git');
+    git(repo, ['clone', '--mirror', '--no-hardlinks', repo, mirror]);
+
+    expect(git(mirror, ['rev-parse', '--is-bare-repository'])).toBe('true');
+    expect(git(mirror, ['rev-parse', refFor(scope)])).toBe(oid);
+    const cloned = await openGitMemory({ repositoryPath: mirror, scope });
+    await expect(cloned.execute({ command: 'view', path })).resolves.toMatchObject({
+      ok: true, command: 'view', value: { kind: 'file', path, text },
+    });
+    const other = await openGitMemory({ repositoryPath: mirror, scope: 'other-scope' });
+    await expect(other.execute({ command: 'view', path })).resolves.toMatchObject({
+      ok: false, error: { code: 'NOT_FOUND' },
+    });
+  });
+
   it('clears inherited Git repository variables', async () => {
     const repo = makeRepo();
     const poison = makeRepo();
