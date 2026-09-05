@@ -178,7 +178,22 @@ test("the changelog command uses the runtime version from its checkout", () => {
     writeFileSync(path.join(root, "packages/runtime/package.json"), JSON.stringify({ name: "@obversa/runtime", version: "2.3.5" }));
     const refused = run();
     assert.equal(refused.status, 1, refused.stdout);
-    assert.match(refused.stderr, /tag v2\.3\.4 does not match package\.json version 2\.3\.5/);
+    assert.match(refused.stderr, /tag v2\.3\.4 does not match packages\/runtime\/package\.json version 2\.3\.5/);
+    assert.match(refused.stderr, /docs\/RELEASING\.md/);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("the changelog command names the required heading format without assuming an Unreleased section", () => {
+  const root = makeWorkspace({ "packages/runtime": { name: "@obversa/runtime", version: "2.3.4" } });
+  try {
+    writeFileSync(path.join(root, "CHANGELOG.md"), "# Changelog\n\n## [2.3.3] - 2026-09-05\n\nA release entry.\n");
+    const result = spawnSync(process.execPath, [new URL("./changelog-gate.mjs", import.meta.url).pathname], {
+      cwd: root, encoding: "utf8", env: { ...process.env, GITHUB_REF_NAME: "main" },
+    });
+    assert.equal(result.status, 1, result.stdout);
+    assert.equal(result.stderr.trim(), 'changelog gate: no "## [2.3.4]" heading in CHANGELOG.md — add "## [2.3.4] - <date>" and describe the changes before tagging');
   } finally {
     rmSync(root, { recursive: true, force: true });
   }
@@ -244,7 +259,7 @@ for (const [label, contents, reason] of [
         cwd: root, encoding: "utf8",
       });
       assert.equal(changelog.status, 1, changelog.stdout);
-      assert.ok(changelog.stderr.includes(reason), changelog.stderr);
+      assert.equal(changelog.stderr.trim(), `changelog gate: ${reason}`);
     } finally {
       rmSync(root, { recursive: true, force: true });
     }

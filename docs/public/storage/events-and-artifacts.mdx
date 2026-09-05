@@ -230,7 +230,7 @@ Accepted artifacts stay until `deleteRun` removes that run.
 
 `ArtifactStore.deleteRun` removes only the artifacts in its scope. It leaves
 the event stream and its artifact references in history, so later reads through
-those references fail closed. D14 coordinates event and artifact cleanup.
+those references fail closed. Hosts must coordinate event and artifact cleanup.
 
 Call `preflightAppend` with the exact event batch before a run writes its
 artifacts. Call `preflightWrite` once with the complete same-run artifact batch;
@@ -241,8 +241,9 @@ the real append or write checks again and can still lose a later race.
 A provider-internal crash before artifact admission can leave temporary or
 blob bytes. They are not readable and do not count against the run quota. A
 process crash or competing run start after admission can leave a verified,
-quota-charged artifact without an event reference. D14 adds cleanup and
-reconciliation; D3 does not claim a transaction across two independent ports.
+quota-charged artifact without an event reference. Hosts must handle cleanup
+and reconciliation. The storage contract does not promise a transaction across
+two independent ports.
 
 ## Handle secrets by content mode
 

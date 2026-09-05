@@ -10,7 +10,7 @@ import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import test from "node:test";
 
-import { checkTarball } from "./check-tarballs.mjs";
+import { allowlistedDirectories, checkTarball } from "./check-tarballs.mjs";
 import { assertPackedPackage } from "./check-packages.mjs";
 
 const fixture = realpathSync(mkdtempSync(join(tmpdir(), "obversa-tarball-spec-")));
@@ -134,6 +134,28 @@ function packageWorkspace(name) {
     "dist/index.js.map": "{}\n",
   });
   return { root, directory };
+}
+
+test("the allowlisted directory helper names a missing workspace package", () => {
+  const { root, directory } = packageWorkspace("missing-package-helper");
+  assert.deepEqual(allowlistedDirectories(root), [directory]);
+  rmSync(directory, { recursive: true, force: true });
+
+  assert.throws(() => allowlistedDirectories(root), {
+    message: "@obversa/memory-simple is on the allowlist but is not a workspace package",
+  });
+});
+
+for (const script of ["check-tarballs.mjs", "check-packages.mjs"]) {
+  test(`${script} names a missing allowlisted workspace package`, () => {
+    const { root, directory } = packageWorkspace(`missing-package-${script}`);
+    rmSync(directory, { recursive: true, force: true });
+
+    const result = spawnSync(process.execPath, [join(root, "scripts", script)], { cwd: root, encoding: "utf8" });
+
+    assert.equal(result.status, 1, `${result.stdout}\n${result.stderr}`);
+    assert.match(result.stderr, /@obversa\/memory-simple is on the allowlist but is not a workspace package/);
+  });
 }
 
 test("the package command follows the allowlist and refuses an added unpinned package", () => {

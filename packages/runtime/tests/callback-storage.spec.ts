@@ -243,13 +243,36 @@ describe('stored callback client', () => {
     expect(events.some((event) => event.type === 'callback:approval-recorded')).toBe(false);
   });
 
-  it('refuses stored replay of a callback submission without requestDigest', async () => {
+  it.each([
+    {
+      defect: 'omitted requestDigest',
+      corrupt: ({ requestDigest: _digest, ...event }: JsonObject) => event,
+      message: 'a stored callback submission has an invalid requestDigest',
+    },
+    {
+      defect: 'malformed requestDigest',
+      corrupt: (event: JsonObject) => ({ ...event, requestDigest: 'not-a-digest' }),
+      message: 'a stored callback submission has an invalid requestDigest',
+    },
+    {
+      defect: 'an extra field',
+      corrupt: (event: JsonObject) => ({ ...event, unexpected: true }),
+      message: 'a stored callback event has missing or unknown fields',
+    },
+  ])('refuses stored replay with $defect', async ({ corrupt, message }) => {
     const { runId, storage } = await storedRun();
     const request = gate('abc123');
     const client = await createStoredCallbackClient(storage, runId);
     await client.post(request);
     const claim = await client.claim(request.requestId, 'router-a');
     if (!claim.ok) throw new Error('fixture claim failed');
+    const submission: JsonObject = {
+      kind: 'callback-submitted',
+      requestId: request.requestId,
+      requestDigest: request.digest,
+      routerId: 'router-a',
+      response: { approved: true },
+    };
     const before = await runEvents(storage, runId);
     await storage.eventStore.append({
       namespace: storage.record.namespace,
@@ -261,18 +284,14 @@ describe('stored callback client', () => {
       timestamp: new Date().toISOString(),
       correlationId: runId,
       causationId: null,
-      payload: {
-        event: {
-          kind: 'callback-submitted',
-          requestId: request.requestId,
-          routerId: 'router-a',
-          response: { approved: true },
-        },
-      },
+      payload: { event: corrupt(submission) },
     }]);
 
     const restarted = await createStoredCallbackClient(storage, runId);
-    await expect(restarted.history(request.requestId)).rejects.toThrow(TypeError);
+    await expect(restarted.history(request.requestId)).rejects.toMatchObject({
+      name: 'TypeError',
+      message,
+    });
   });
 
   it('submits a subject-backed callback and approval in one batch, then resolves only matching bytes after reopen', async () => {

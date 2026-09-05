@@ -8,8 +8,8 @@ Command adapters use one fresh CLI process; data-only attempts use no engine
 process. The runtime records what was requested, what actually ran, what came back,
 and whether token usage was reported or unknown.
 
-This guide stays at the attempt layer. D5 connects attempts to graph dispatch.
-D14 adds live engine checks and cleanup after the whole runner is killed.
+The graph executor connects attempts to graph dispatch. Hosts coordinate
+checks against installed CLIs and process cleanup after runner death.
 
 ## Run the example
 
@@ -259,8 +259,8 @@ and `deny` records a refusal without running it.
 
 One attempt can use one declared fallback after a model becomes unavailable.
 The failed model stays in the attempt record. Both lanes share one clock, so a
-fallback receives only the time left by the first lane. D5 uses durable events
-to keep later graph work away from that model.
+fallback receives only the time left by the first lane. The graph executor uses
+durable events to keep later graph work away from that model.
 
 `timeoutMs` is the work deadline. At that point a command adapter starts
 stopping its process tree. `timeoutGraceMs` is teardown time: the adapter asks
@@ -277,5 +277,5 @@ wait cannot turn the attempt into a success.
 
 The command-adapter kit cleans its process tree on normal completion, timeout,
 abort, and other handled exits. The runtime waits for that cleanup before it
-records the attempt. D14 owns the separate case where the whole runner dies,
-plus live checks against installed CLIs.
+records the attempt. Recovery after the supervising process dies, and checks
+against installed CLIs, are separate host responsibilities.

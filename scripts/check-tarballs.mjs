@@ -384,7 +384,11 @@ export function checkTarball(packageDir, { expectedFiles } = {}) {
 export function allowlistedDirectories(root = ROOT) {
   const allowlist = JSON.parse(readFileSync(join(root, "scripts", "publish-allowlist.json"), "utf8"));
   const byName = new Map(listWorkspacePackages(root).map(({ name, dir }) => [name, dir]));
-  return allowlist.packages.map((name) => join(root, byName.get(name)));
+  return allowlist.packages.map((name) => {
+    const directory = byName.get(name);
+    if (directory === undefined) throw new Error(`${name} is on the allowlist but is not a workspace package`);
+    return join(root, directory);
+  });
 }
 
 const isMain = process.argv[1] && realpathSync(fileURLToPath(import.meta.url)) === realpathSync(resolve(process.argv[1]));

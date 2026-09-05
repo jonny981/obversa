@@ -86,12 +86,12 @@ export function validateCallbackEvent(value: unknown): CallbackEvent {
       callbackText(event.routerId, 'routerId');
       break;
     case 'callback-submitted':
-      exactFields(event, ['kind', 'requestId', 'requestDigest', 'routerId', 'response']);
-      callbackText(event.requestId, 'requestId');
-      callbackText(event.routerId, 'routerId');
       if (typeof event.requestDigest !== 'string' || !CALLBACK_DIGEST.test(event.requestDigest)) {
         throw new TypeError('a stored callback submission has an invalid requestDigest');
       }
+      exactFields(event, ['kind', 'requestId', 'requestDigest', 'routerId', 'response']);
+      callbackText(event.requestId, 'requestId');
+      callbackText(event.routerId, 'routerId');
       break;
     case 'callback-rejected':
       exactFields(event, ['kind', 'requestId', 'routerId', 'reason']);

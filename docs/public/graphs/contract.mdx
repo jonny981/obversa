@@ -227,7 +227,7 @@ give runtime services.
 
 `decide` returns zero or more dispatch commands, or exactly one `pause`,
 `complete`, or `fail` command. A dispatch asks the executor to start new work.
-An empty decision means start nothing new. D5 accepts it only while a recorded
+An empty decision means start nothing new. The executor accepts it only while a recorded
 attempt is still in flight. Without in-flight work, the executor fails instead
 of asking for the same empty decision forever.
 
@@ -289,7 +289,7 @@ overlap at runtime, so the kit does not infer `maxConcurrency`. The graph must
 declare that cap from its own rules or report it as unknown.
 
 Each expected decision contains only new requests. The kit rejects a dispatch
-position that appears again in a later expected decision. D5 applies the same
+position that appears again in a later expected decision. The executor applies the same
 check to durable dispatch events before it starts work.
 
 When the final expected decision is exactly `complete`, the observed total must

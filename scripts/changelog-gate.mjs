@@ -7,7 +7,7 @@
  * A tarball publish also skips package hooks, so scripts/release.mjs is the
  * only publishing path.
  *
- * Checks, all against the version `package.json` carries:
+ * Checks, all against the version `packages/runtime/package.json` carries:
  *   1. CHANGELOG.md has a `## [<version>]` heading;
  *   2. the section under it has substance (at least one non-empty line);
  *   3. when running on a version tag (GITHUB_REF_NAME=v*), the tag matches
@@ -31,14 +31,14 @@ let version;
 try {
   version = repositoryVersion(cwd);
 } catch (e) {
-  fail(`could not read packages/runtime/package.json: ${e.message}`);
+  fail(e.message);
 }
 
 const tag = process.env.GITHUB_REF_NAME;
 if (tag && /^v\d/.test(tag) && tag !== `v${version}`) {
   fail(
-    `tag ${tag} does not match package.json version ${version} — ` +
-      `retag (git tag -d ${tag}; npm version) or fix package.json before publishing`,
+    `tag ${tag} does not match packages/runtime/package.json version ${version} — ` +
+      `follow docs/RELEASING.md to set the runtime version and tag the verified commit`,
   );
 }
 
@@ -55,9 +55,8 @@ const headingAt = lines.findIndex((line) =>
 );
 if (headingAt === -1) {
   fail(
-    `no "## [${version}]" heading in CHANGELOG.md — retitle the Unreleased ` +
-      `section to "## [${version}] — <date>" (and refresh the compare links) ` +
-      `before tagging`,
+    `no "## [${version}]" heading in CHANGELOG.md — ` +
+      `add "## [${version}] - <date>" and describe the changes before tagging`,
   );
 }
 
