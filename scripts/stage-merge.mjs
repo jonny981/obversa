@@ -17,6 +17,7 @@ const stageBranches = {
   D14: 'feat/unattended-runner',
   D15: 'feat/release-v1',
   D16: 'feat/runner-hardening',
+  D19: 'feat/writer-exclusion',
   F4: 'feat/release-readiness',
   F5: 'feat/release-wording',
   F7: 'feat/residual-sweep',
