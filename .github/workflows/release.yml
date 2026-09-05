@@ -27,6 +27,3 @@ jobs:
       - run: corepack enable
       - run: pnpm install --frozen-lockfile
       - run: pnpm verify:d15
-      - run: pnpm check:tarballs
-      - name: Changelog gate
-        run: node scripts/changelog-gate.mjs

@@ -19,7 +19,7 @@
 // SIGINT and SIGTERM are forwarded to whichever child is running, the child's
 // exit is awaited, and the temporary pack directory is removed on every path.
 //
-// Usage: OBVERSA_RELEASE=1 node scripts/release.mjs packages/<name> [--dry-run]
+// Usage: OBVERSA_RELEASE=1 node scripts/release.mjs (packages/<name>|plugins/<name>) [--dry-run]
 import { spawn } from "node:child_process";
 import { mkdtempSync, readdirSync, realpathSync, rmSync } from "node:fs";
 import { createRequire } from "node:module";
@@ -52,7 +52,7 @@ export const PNPM_CLI = join(PNPM_DIR, "bin", "pnpm.cjs");
 // the spec can hold it to that. `publishArgs(tarball)` is the exact npm
 // command line for the packed archive.
 export function releasePlan({ target, flags = [], root = ROOT, packages, check = checkHook } = {}) {
-  if (typeof target !== "string" || target.length === 0) throw new Error("usage: OBVERSA_RELEASE=1 node scripts/release.mjs packages/<name> [--dry-run]");
+  if (typeof target !== "string" || target.length === 0) throw new Error("usage: OBVERSA_RELEASE=1 node scripts/release.mjs (packages/<name>|plugins/<name>) [--dry-run]");
   if (flags.some((flag) => flag !== "--dry-run")) throw new Error(`release: unknown flag ${flags.find((flag) => flag !== "--dry-run")}`);
   packages ??= listWorkspacePackages(root).filter((p) => readAllowlist(join(root, "scripts", "publish-allowlist.json")).has(p.name));
   const real = (path) => {
@@ -151,7 +151,7 @@ const isMain = process.argv[1] && realpathSync(fileURLToPath(import.meta.url)) =
 if (isMain) {
   const [target, ...flags] = process.argv.slice(2);
   if (target === "--help" || target === "-h") {
-    console.log("Usage: OBVERSA_RELEASE=1 node scripts/release.mjs packages/<name> [--dry-run]");
+    console.log("Usage: OBVERSA_RELEASE=1 node scripts/release.mjs (packages/<name>|plugins/<name>) [--dry-run]");
     process.exit(0);
   }
   let plan;

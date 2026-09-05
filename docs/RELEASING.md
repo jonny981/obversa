@@ -41,10 +41,12 @@ check and release script read that same list.
 
 7. **Publish through the guarded script.** Run the script once for each name
    in `scripts/publish-allowlist.json` from a clean `main` checkout at the
-   repository tag:
+   repository tag. Six public packages use `packages/<name>`; eight plugin
+   packages use `plugins/<name>` (six engine adapters and two memory adapters):
 
    ```bash
    OBVERSA_RELEASE=1 node scripts/release.mjs packages/runtime
+   OBVERSA_RELEASE=1 node scripts/release.mjs plugins/engine-codex
    ```
 
    The script checks the repository tag and clean tree, packs one allowlisted
