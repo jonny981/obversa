@@ -124,6 +124,13 @@ The stored graph definition, resolved plan, and resolved inputs supply the
 execution contract. The worker loads them from storage. Its bindings must match
 that contract; it does not reconstruct the run from mutable command-line inputs.
 
+The only values copied from the watchdog environment into the worker are the
+present values of `PATH`, `HOME`, `TMPDIR`, `TMP`, `TEMP`, `SystemRoot`,
+`USERPROFILE`, and `PATHEXT`. Arbitrary parent variables, including API keys and
+`NODE_OPTIONS`, are not inherited. The owned-command layer separately sets
+`OBVERSA_ATTEMPT_ID`, `OBVERSA_RUN_ID`, `OBVERSA_HEADLESS`, and
+`OBVERSA_RUN_OWNER` for runner identity and process cleanup.
+
 The workspace provider must capture the same root as `runRoot`. Capture and
 storage preflight failures start no worker and write no run. If storage fails
 during publication, startup returns `RUN_STORAGE` and starts no worker. Artifacts

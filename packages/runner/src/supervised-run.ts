@@ -258,6 +258,11 @@ async function superviseRun(options: SupervisedRunOptions, resume?: {
           runId, runRoot, scratchDirectory, storage: storageOptions,
           ...(resumeInput === undefined ? {} : { resume: resumeInput }),
         };
+        const workerEnvironment: Record<string, string> = {};
+        for (const name of ['PATH', 'HOME', 'TMPDIR', 'TMP', 'TEMP', 'SystemRoot', 'USERPROFILE', 'PATHEXT'] as const) {
+          const value = process.env[name];
+          if (value !== undefined) workerEnvironment[name] = value;
+        }
         for (;;) {
           const remaining = deadline - Date.now();
           if (cancellation.signal.aborted || remaining <= 0) {
@@ -274,7 +279,7 @@ async function superviseRun(options: SupervisedRunOptions, resume?: {
           const command = await runOwnedCommand({
             executable: process.execPath,
             args: [fileURLToPath(new URL('./dist/supervised-worker.js', import.meta.resolve('@obversa/runner/package.json')))],
-            cwd: runRoot, env: {}, stdin: JSON.stringify(input), runId,
+            cwd: runRoot, env: workerEnvironment, inheritParentEnv: false, stdin: JSON.stringify(input), runId,
             ownerId, attemptId,
             timeoutMs: launchRemaining, teardownGraceMs: options.teardownGraceMs,
             maxOutputBytes: 1_000_000, maxMemoryBytes: Number.MAX_SAFE_INTEGER,

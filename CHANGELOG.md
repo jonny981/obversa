@@ -14,6 +14,10 @@ engine and memory packages track their own versions independently.
 - **Recorded runner results:** Preserve a durably recorded worker result when
   stop or timeout occurs before worker exit, after verified cleanup and lease
   release. Cleanup failures still take precedence.
+- **Worker environment:** Copy only `PATH`, `HOME`, `TMPDIR`, `TMP`, `TEMP`,
+  `SystemRoot`, `USERPROFILE`, and `PATHEXT` from the watchdog into runner
+  workers. Arbitrary parent variables such as API keys and `NODE_OPTIONS` are
+  not inherited; runner identity and ownership markers are injected separately.
 
 ## [1.0.0] - 2026-09-05
 

@@ -112,6 +112,16 @@ export async function bindRun({ definition, scratchDirectory }) {
           process.kill(process.pid, 'SIGKILL');
         }
         if (input.delayMs) await delay(input.delayMs, undefined, { signal });
+        if (input.reportWorkerEnvironment) {
+          return { node: id, value: {
+            parentSecret: process.env.OBVERSA_TEST_PARENT_SECRET ?? null,
+            nodeOptions: process.env.NODE_OPTIONS ?? null,
+            path: process.env.PATH ?? null,
+            home: process.env.HOME ?? null,
+            attemptId: process.env.OBVERSA_ATTEMPT_ID ?? null,
+            runOwner: process.env.OBVERSA_RUN_OWNER ?? null,
+          } };
+        }
         return { node: id, value: input.resultBytes ? 'x'.repeat(input.resultBytes) : input.value ?? value };
       },
       parseResult: input.enginePartBytes ? (part) => ({ node: id, value: part.text.slice(0, input.resultBytes) }) : null,

@@ -324,6 +324,37 @@ describe('supervised local runs', () => {
     expect(() => process.kill(pid, 0)).toThrow();
   }, 10_000);
 
+  it('worker environment omits parent secrets while retaining required paths and ownership markers', async () => {
+    const { options } = await fixture();
+    const originalSecret = process.env.OBVERSA_TEST_PARENT_SECRET;
+    const originalNodeOptions = process.env.NODE_OPTIONS;
+    const parentPath = process.env.PATH;
+    const parentHome = process.env.HOME;
+    process.env.OBVERSA_TEST_PARENT_SECRET = 'harmless-parent-secret-sentinel';
+    process.env.NODE_OPTIONS = '--no-warnings';
+    try {
+      const handle = await startFixture({
+        ...options,
+        definition: { ...options.definition, resolvedInputs: { reportWorkerEnvironment: true } },
+      });
+      await expect(handle.done).resolves.toMatchObject({
+        kind: 'complete', output: { nodes: { first: { node: 'first', value: {
+          parentSecret: null,
+          nodeOptions: null,
+          path: parentPath ?? null,
+          home: parentHome ?? null,
+          attemptId: expect.stringMatching(/^sha256:[0-9a-f]{64}$/u),
+          runOwner: expect.stringMatching(/^sha256:[0-9a-f]{64}$/u),
+        } } } },
+      });
+    } finally {
+      if (originalSecret === undefined) delete process.env.OBVERSA_TEST_PARENT_SECRET;
+      else process.env.OBVERSA_TEST_PARENT_SECRET = originalSecret;
+      if (originalNodeOptions === undefined) delete process.env.NODE_OPTIONS;
+      else process.env.NODE_OPTIONS = originalNodeOptions;
+    }
+  });
+
   it('a long fixture survives runner restart and continues from events', async () => {
     const { options } = await fixture();
     const handle = await startFixture({
