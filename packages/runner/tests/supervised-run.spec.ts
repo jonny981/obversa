@@ -94,6 +94,7 @@ async function resumeFixture(options: runner.SupervisedRunOptions, position = 'd
   const handle: runner.SupervisedRunHandle = await resume({
     directory: options.directory, runRoot: options.runRoot, storage: options.storage, workspace: options.workspace,
     restart: options.restart, teardownGraceMs: options.teardownGraceMs, runId: options.definition.runId, position,
+    environmentVariables: options.environmentVariables,
   });
   handles.push(handle);
   return handle;
@@ -365,22 +366,40 @@ describe('supervised local runs', () => {
     expect(() => process.kill(pid, 0)).toThrow();
   }, 10_000);
 
-  it('worker environment omits parent secrets while retaining required paths and ownership markers', async () => {
+  it.each(['default', 'start', 'resume'] as const)('worker environment forwards only selected names during %s', async (mode) => {
     const { options } = await fixture();
     const originalSecret = process.env.OBVERSA_TEST_PARENT_SECRET;
     const originalNodeOptions = process.env.NODE_OPTIONS;
+    const originalSelected = process.env.OBVERSA_TEST_SELECTED_SECRET;
     const parentPath = process.env.PATH;
     const parentHome = process.env.HOME;
     process.env.OBVERSA_TEST_PARENT_SECRET = 'harmless-parent-secret-sentinel';
     process.env.NODE_OPTIONS = '--no-warnings';
+    process.env.OBVERSA_TEST_SELECTED_SECRET = 'harmless-selected-secret-sentinel';
     try {
-      const handle = await startFixture({
+      const approvalFile = join(options.directory, 'approval');
+      const selected = {
         ...options,
-        definition: { ...options.definition, resolvedInputs: { reportWorkerEnvironment: true } },
-      });
+        environmentVariables: mode === 'default' ? [] : ['OBVERSA_TEST_SELECTED_SECRET'],
+        definition: { ...options.definition, resolvedInputs: {
+          reportWorkerEnvironment: true, ...(mode === 'resume' ? { wait: true, waitNode: 'first', approvalFile } : {}),
+        } },
+      };
+      const starting = startFixture(selected);
+      selected.environmentVariables.push('OBVERSA_TEST_PARENT_SECRET');
+      let handle = await starting;
+      if (mode === 'resume') {
+        await expect(handle.done).resolves.toMatchObject({ kind: 'pause' });
+        await writeFile(approvalFile, 'allow');
+        selected.environmentVariables = ['OBVERSA_TEST_SELECTED_SECRET'];
+        const resuming = resumeFixture(selected, 'dag/first/1');
+        selected.environmentVariables.push('OBVERSA_TEST_PARENT_SECRET');
+        handle = await resuming;
+      }
       await expect(handle.done).resolves.toMatchObject({
         kind: 'complete', output: { nodes: { first: { node: 'first', value: {
           parentSecret: null,
+          selectedSecret: mode !== 'default',
           nodeOptions: null,
           path: parentPath ?? null,
           home: parentHome ?? null,
@@ -388,7 +407,12 @@ describe('supervised local runs', () => {
           runOwner: expect.stringMatching(/^sha256:[0-9a-f]{64}$/u),
         } } } },
       });
+      const loaded = await runtime.loadRunDefinition(createLocalRunStorage(options.storage), 'fixture');
+      expect(JSON.stringify(loaded.record)).not.toContain('harmless-selected-secret-sentinel');
+      expect(Buffer.from(loaded.hostBindingBytes!).toString('utf8')).not.toContain('harmless-selected-secret-sentinel');
     } finally {
+      if (originalSelected === undefined) delete process.env.OBVERSA_TEST_SELECTED_SECRET;
+      else process.env.OBVERSA_TEST_SELECTED_SECRET = originalSelected;
       if (originalSecret === undefined) delete process.env.OBVERSA_TEST_PARENT_SECRET;
       else process.env.OBVERSA_TEST_PARENT_SECRET = originalSecret;
       if (originalNodeOptions === undefined) delete process.env.NODE_OPTIONS;
@@ -550,6 +574,29 @@ describe('supervised local runs', () => {
     for (const node of ['first', 'last']) {
       expect((await readFile(join(options.directory, `scratch/${node}.started`), 'utf8')).trim().split('\n')).toHaveLength(1);
     }
+  });
+
+  it('a pause-time capture failure is typed and leaves no resumable pause', async () => {
+    const { options } = await fixture();
+    const capture = options.workspace.capture.bind(options.workspace);
+    let captures = 0;
+    let failCapture = true;
+    const workspace = { ...options.workspace, capture: async () => {
+      captures += 1;
+      if (failCapture && captures === 2) throw new Error('Injected pause-time capture failure.');
+      return await capture();
+    } };
+    let handle: runner.SupervisedRunHandle;
+    try {
+      handle = await startFixture({
+        ...options, workspace, definition: { ...options.definition, resolvedInputs: { wait: true, waitNode: 'last' } },
+      });
+      await expect(handle.done).resolves.toMatchObject({ kind: 'fail', code: 'WORKSPACE_ANCHOR_WRITE' });
+      expect(captures).toBe(2);
+    } finally {
+      failCapture = false;
+    }
+    await expectPauseAnchorFailureCleanup(options, handle!);
   });
 
   it.each(['worker pause', 'workspace drift'] as const)(
@@ -903,8 +950,8 @@ describe('supervised local runs', () => {
       if (boundary === 'after-reconcile') {
         expect(reconciliationPause).toBeDefined();
         expect(result).toEqual({
-          kind: 'fail', code: 'RESUME_EVENT_MISMATCH',
-          message: `Resume expected pause event "${humanPause!.eventId}" but found "${reconciliationPause!.eventId}".`,
+          kind: 'pause', code: 'RESUME_EVENT_MISMATCH',
+          reason: `Resume expected pause event "${humanPause!.eventId}" but found "${reconciliationPause!.eventId}".`,
         });
       } else {
         expect(result, JSON.stringify(result)).toMatchObject({ kind: needsReconciliation ? 'pause' : 'complete' });
@@ -931,6 +978,40 @@ describe('supervised local runs', () => {
           .toMatchObject({ position: 'dag/last/1', request: { kind: 'reconcile-attempt' } });
         expect(events.filter((event) => event.type === 'graph:node-completed')).toHaveLength(1);
       } else expect(events.filter((event) => event.type === 'graph:node-completed')).toHaveLength(2);
+      if (boundary === 'after-reconcile') {
+        expect(events.slice(events.indexOf(reconciliationPause!) + 1).some((event) =>
+          ['graph:node-resumed', 'graph:node-dispatched', 'graph:node-completed'].includes(event.type))).toBe(false);
+        expect(await resumed.status()).toMatchObject({
+          phase: 'paused', workerAlive: false, cleanupVerified: true, leaseRetained: false,
+        });
+        const storage = createLocalRunStorage(options.storage);
+        const records = await readSupervision(storage, 'fixture');
+        expect(records.some((event) => event.type === 'runner:failed')).toBe(false);
+        expect(records.at(-1)).toMatchObject({ type: 'runner:paused', payload: result });
+        const reference = runtime.validateArtifactReference((records.at(-1)!.payload as runtime.JsonObject).anchorArtifact);
+        expect(reference.purpose).toBe('runner-pause-anchor');
+        const anchor = JSON.parse(Buffer.from(await storage.artifactStore.read(
+          { namespace: 'runner-tests', runId: 'fixture' }, reference,
+        )).toString('utf8')) as runtime.WorkspaceAnchor;
+        expect(await options.workspace.verify(anchor)).toMatchObject({ ok: true });
+        const lease = await options.workspace.acquireLease('after-mismatch', 'fixture', anchor);
+        expect(lease.ok).toBe(true);
+        if (lease.ok) await options.workspace.releaseLease(lease.token);
+        expect(await readdir(join(options.storage.directory, 'runner-locks/runner-tests'))).toEqual([]);
+        for (const event of records.filter((event) => event.type === 'runner:worker-started')) {
+          const pid = Number(((event.payload as runtime.JsonObject).process as runtime.JsonObject).pid);
+          expect(() => process.kill(pid, 0)).toThrow();
+        }
+        const explicitResume = await resumeFixture(paused);
+        await expect(explicitResume.done).resolves.toMatchObject({ kind: 'complete' });
+        expect((await readFile(join(options.directory, 'scratch/first.started'), 'utf8')).trim().split('\n')).toHaveLength(1);
+        expect((await readFile(join(options.directory, 'scratch/last.started'), 'utf8')).trim().split('\n')).toHaveLength(2);
+        const finalEvents = [];
+        for await (const event of storage.eventStore.read({ namespace: 'runner-tests', streamId: 'fixture' })) finalEvents.push(event);
+        expect(finalEvents.filter((event) => event.type === 'graph:run-started')).toHaveLength(1);
+        expect(finalEvents.filter((event) => event.type === 'graph:node-dispatched')).toHaveLength(2);
+        expect(finalEvents.filter((event) => event.type === 'graph:node-completed')).toHaveLength(2);
+      }
     },
   );
 

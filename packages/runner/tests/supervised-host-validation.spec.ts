@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto';
-import { mkdtemp, mkdir, rm, symlink, writeFile } from 'node:fs/promises';
+import { chmod, mkdtemp, mkdir, rm, symlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
@@ -48,10 +48,40 @@ it('reports a missing host module as a supervised run error', async () => {
     expect.objectContaining({
       name: 'SupervisedRunError',
       code: 'HOST_MODULE',
-      message: 'The host module does not exist.',
+      message: 'The host module path could not be resolved.',
       cause: expect.objectContaining({ code: 'ENOENT' }),
     }),
   );
+});
+
+it.each(['ENOTDIR', 'ELOOP', 'EACCES'] as const)('reports host entry resolution %s with its original cause', async (code) => {
+  const root = await mkdtemp(join(tmpdir(), 'obversa-host-resolution-'));
+  roots.push(root);
+  const entry = join(root, 'entry');
+  if (code === 'ENOTDIR') await writeFile(entry, 'not a directory');
+  else if (code === 'ELOOP') await symlink('entry', entry);
+  else {
+    await mkdir(entry);
+    await writeFile(join(entry, 'host.mjs'), 'export const bindRun = () => ({});\n');
+    await chmod(entry, 0o000);
+  }
+  try {
+    expect(() => resolveHostModule(root, './entry/host.mjs')).toThrowError(expect.objectContaining({
+      name: 'SupervisedRunError', code: 'HOST_MODULE',
+      message: 'The host module path could not be resolved.',
+      cause: expect.objectContaining({ code }),
+    }));
+  } finally {
+    if (code === 'EACCES') await chmod(entry, 0o700);
+  }
+});
+
+it('keeps run-root resolution errors outside the host-entry error boundary', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'obversa-host-root-error-'));
+  roots.push(root);
+  expect(() => resolveHostModule(join(root, 'missing-root'), './host.mjs')).toThrowError(expect.objectContaining({
+    code: 'ENOENT',
+  }));
 });
 
 it('reports a stored run without a host binding as a supervised run error', async () => {

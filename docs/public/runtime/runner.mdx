@@ -102,7 +102,10 @@ bound graph, node, and engine instances; it does not load host modules.
 Set `runRoot` to the working directory and `module` to a relative file specifier,
 such as `./host.mjs`. The file must remain inside `runRoot` after resolving
 symlinks; a path outside it is refused with `code: 'HOST_MODULE'`.
-A missing entry module is rejected with `code: 'HOST_MODULE'`.
+Every filesystem error while resolving the selected entry path is rejected with
+`code: 'HOST_MODULE'` and the original error as its cause. This includes a missing
+file, an unreadable directory, a non-directory path component, or a symlink loop.
+This error boundary does not cover resolving `runRoot` itself.
 The module must export:
 
 ```js
@@ -125,12 +128,27 @@ The stored graph definition, resolved plan, and resolved inputs supply the
 execution contract. The worker loads them from storage. Its bindings must match
 that contract; it does not reconstruct the run from mutable command-line inputs.
 
-The only values copied from the watchdog environment into the worker are the
+By default, the values copied from the watchdog environment into the worker are the
 present values of `PATH`, `HOME`, `TMPDIR`, `TMP`, `TEMP`, `SystemRoot`,
 `USERPROFILE`, and `PATHEXT`. Arbitrary parent variables, including API keys and
 `NODE_OPTIONS`, are not inherited. The owned-command layer separately sets
 `OBVERSA_ATTEMPT_ID`, `OBVERSA_RUN_ID`, `OBVERSA_HEADLESS`, and
 `OBVERSA_RUN_OWNER` for runner identity and process cleanup.
+
+To supply engine credentials, list the required environment variable names in
+`environmentVariables` on `startSupervisedRun` or `resumeSupervisedRun`:
+
+```ts
+const handle = await startSupervisedRun({
+  ...options,
+  environmentVariables: ['ANTHROPIC_API_KEY'],
+});
+```
+
+The runner copies each listed variable only when it is present in the watchdog
+environment. It snapshots the list at each start or resume call. Supply the list
+again when resuming; credentials are not stored in run inputs or host records.
+`resolvedInputs` is durable storage. Do not put secrets in it.
 
 The workspace provider must capture the same root as `runRoot`. Capture and
 storage preflight failures start no worker and write no run. If storage fails
@@ -190,9 +208,13 @@ repeat completed occurrences. Status shows a resumed worker as active rather
 than reporting the earlier pause as its terminal result.
 
 A resume is bound to one pause event. If a replacement worker finds a different
-pause event at the same position, `handle.done` resolves to `kind: 'fail'` with
-`code: 'RESUME_EVENT_MISMATCH'`. The message names the expected and found pause
-event IDs.
+pause event at the same position, `handle.done` resolves to `kind: 'pause'` with
+`code: 'RESUME_EVENT_MISMATCH'`. Its `reason` preserves the exact message:
+`Resume expected pause event "<expected>" but found "<found>".`
+Both placeholders contain the recorded event IDs. After worker cleanup, the
+watchdog saves the workspace anchor and records `runner:paused`. A later explicit
+`resumeSupervisedRun` call can reopen that pause. The replacement does not resume
+the newer pause or approve reconciliation automatically.
 
 The elapsed budget freezes at the settled runner pause and resumes at the next
 stored worker launch. Resume preflight, including workspace checks, does not
@@ -204,17 +226,22 @@ worker restarts also keep their counts. An exhausted elapsed budget returns
 The host's action policy runs again. Record approval in the system that policy
 reads before calling resume. A repeated `wait` pauses again with its request;
 calling resume is not an approval flag. For a `reconcile-attempt` pause, the
-caller must decide whether offering the uncertain work again is safe. A worker
+caller must decide whether offering the uncertain work again is safe. An explicit
+resume may repeat an effect whose completion was not recorded; completed
+occurrences are not repeated. A worker
 replacement does not automatically approve a new reconciliation pause.
 
 Before releasing ownership after a pause, the watchdog cleans up the worker and
 saves a workspace snapshot as a `runner-pause-anchor` artifact. Resume acquires
 the process lock and workspace lease, then checks that saved snapshot before
 starting a worker. It never adopts edits made while paused. The snapshot shares
-the run's artifact size, quota, and sensitive-content rules. If the artifact
-write or its `runner:pause-anchor` event append fails, `handle.done` returns
+the run's artifact size, quota, and sensitive-content rules. If pause-time capture,
+the artifact write, or its `runner:pause-anchor` event append fails, `handle.done` returns
 `kind: 'fail'` with `code: 'WORKSPACE_ANCHOR_WRITE'`. A stored artifact remains
 available when the event append fails, but no resumable runner pause is written.
+This failure is terminal; the runner has no anchor-persistence retry path.
+Initial workspace capture failures remain `WORKSPACE_CAPTURE`. A workspace-drift
+pause saves the earlier anchor, without capturing the changed workspace.
 
 Workspace evidence failures resolve `handle.done` to `kind: 'pause'`:
 

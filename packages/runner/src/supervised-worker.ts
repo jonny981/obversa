@@ -81,12 +81,13 @@ try {
   const signal = new AbortController().signal;
   const requestedPause = input.resume === undefined ? undefined
     : await readGraphPosition(storage, input.runId, input.resume.position);
-  if (input.resume !== undefined && requestedPause?.type === 'graph:node-paused'
-    && requestedPause.eventId !== input.resume.pauseEventId) {
-    throw new SupervisedRunError('RESUME_EVENT_MISMATCH',
-      `Resume expected pause event "${input.resume.pauseEventId}" but found "${requestedPause.eventId}".`);
-  }
   let result = input.resume !== undefined && requestedPause?.type === 'graph:node-paused'
+    && requestedPause.eventId !== input.resume.pauseEventId
+    ? {
+      kind: 'pause' as const, code: 'RESUME_EVENT_MISMATCH' as const,
+      reason: `Resume expected pause event "${input.resume.pauseEventId}" but found "${requestedPause.eventId}".`,
+    }
+    : input.resume !== undefined && requestedPause?.type === 'graph:node-paused'
     && requestedPause.eventId === input.resume.pauseEventId
     ? await executor.resume(input.resume.position, signal) : await executor.run(signal);
   while (result.kind === 'waiting') {

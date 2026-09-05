@@ -124,6 +124,7 @@ export async function bindRun({ definition, scratchDirectory }) {
         if (input.reportWorkerEnvironment) {
           return { node: id, value: {
             parentSecret: process.env.OBVERSA_TEST_PARENT_SECRET ?? null,
+            selectedSecret: process.env.OBVERSA_TEST_SELECTED_SECRET === 'harmless-selected-secret-sentinel',
             nodeOptions: process.env.NODE_OPTIONS ?? null,
             path: process.env.PATH ?? null,
             home: process.env.HOME ?? null,

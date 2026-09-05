@@ -42,10 +42,11 @@ export interface SupervisedRunOptions {
     readonly maxBackoffMs: number;
   };
   readonly teardownGraceMs: number;
+  readonly environmentVariables?: readonly string[];
 }
 
 export type SupervisedRunResult = Exclude<GraphExecutorResult, { readonly kind: 'waiting' | 'pause' }>
-  | { readonly kind: 'pause'; readonly reason: string; readonly code?: 'WORKSPACE_DRIFT' | 'WORKSPACE_ANCHOR_MISSING' | 'WORKSPACE_ANCHOR_INVALID' };
+  | { readonly kind: 'pause'; readonly reason: string; readonly code?: 'WORKSPACE_DRIFT' | 'WORKSPACE_ANCHOR_MISSING' | 'WORKSPACE_ANCHOR_INVALID' | 'RESUME_EVENT_MISMATCH' };
 
 export interface ResumeSupervisedRunOptions extends Omit<SupervisedRunOptions, 'definition' | 'module' | 'limits'> {
   readonly runId: string;
@@ -76,7 +77,10 @@ export async function startSupervisedRun(options: SupervisedRunOptions): Promise
 
 /** Reopen one recorded pause without replacing its definition or run bounds. */
 export async function resumeSupervisedRun(options: ResumeSupervisedRunOptions): Promise<SupervisedRunHandle> {
-  options = { ...options, storage: structuredClone(options.storage), restart: { ...options.restart } };
+  options = {
+    ...options, storage: structuredClone(options.storage), restart: { ...options.restart },
+    environmentVariables: [...options.environmentVariables ?? []],
+  };
   const storage = createLocalRunStorage(options.storage);
   const storageOptions = { ...options.storage, directory: resolve(options.storage.directory) };
   const loaded = await loadRunDefinition(storage, options.runId);
@@ -102,6 +106,7 @@ async function superviseRun(options: SupervisedRunOptions, resume?: {
     storage: structuredClone(options.storage),
     limits: Object.freeze({ ...options.limits }),
     restart: Object.freeze({ ...options.restart }),
+    environmentVariables: [...options.environmentVariables ?? []],
   };
   for (const [field, value] of Object.entries({ ...options.limits, ...options.restart, teardownGraceMs: options.teardownGraceMs })) {
     if (!Number.isSafeInteger(value) || value < 0 || value > 2_147_483_647) {
@@ -224,8 +229,9 @@ async function superviseRun(options: SupervisedRunOptions, resume?: {
         leaseToken = undefined;
       } catch (error) { leaseReleaseFailed = true; throw error; }
     };
-    const savePauseAnchor = async (snapshot: WorkspaceAnchor): Promise<ArtifactReference> => {
+    const savePauseAnchor = async (snapshot?: WorkspaceAnchor): Promise<ArtifactReference> => {
       try {
+        snapshot ??= await options.workspace.capture();
         const anchorArtifact = await storage.artifactStore.write({ namespace: storage.record.namespace, runId }, {
           bytes: Buffer.from(JSON.stringify(snapshot)), mediaType: 'application/json', purpose: 'runner-pause-anchor', contentMode: 'state',
         });
@@ -265,7 +271,7 @@ async function superviseRun(options: SupervisedRunOptions, resume?: {
           ...(resumeInput === undefined ? {} : { resume: resumeInput }),
         };
         const workerEnvironment: Record<string, string> = {};
-        for (const name of ['PATH', 'HOME', 'TMPDIR', 'TMP', 'TEMP', 'SystemRoot', 'USERPROFILE', 'PATHEXT'] as const) {
+        for (const name of ['PATH', 'HOME', 'TMPDIR', 'TMP', 'TEMP', 'SystemRoot', 'USERPROFILE', 'PATHEXT', ...options.environmentVariables ?? []]) {
           const value = process.env[name];
           if (value !== undefined) workerEnvironment[name] = value;
         }
@@ -301,7 +307,7 @@ async function superviseRun(options: SupervisedRunOptions, resume?: {
           await append('worker-exited', { exitCode: command.exitCode, restartCount });
           if (result !== undefined) {
             const details: JsonObject = result.kind === 'pause'
-              ? { anchorArtifact: await savePauseAnchor(await options.workspace.capture()) } : {};
+              ? { anchorArtifact: await savePauseAnchor() } : {};
             await release();
             return await finish(result, details);
           }

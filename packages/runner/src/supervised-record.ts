@@ -104,10 +104,7 @@ export function resolveHostModule(runRoot: string, specifier: string): string {
   try {
     realModule = realpathSync(lexicalModule);
   } catch (cause) {
-    if (cause instanceof Error && 'code' in cause && cause.code === 'ENOENT') {
-      throw new SupervisedRunError('HOST_MODULE', 'The host module does not exist.', { cause });
-    }
-    throw cause;
+    throw new SupervisedRunError('HOST_MODULE', 'The host module path could not be resolved.', { cause });
   }
   const realRelative = relative(realRoot, realModule);
   if (realRelative === '..' || realRelative.startsWith(`..${sep}`) || isAbsolute(realRelative)) {
