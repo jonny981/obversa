@@ -73,6 +73,17 @@ function emitter(value: number): { command: string; args: string[] } {
 }
 
 describe('ratchet', () => {
+  it('reads the metric after two prose lines before the JSON', async () => {
+    const result = await ratchet(
+      process.execPath,
+      ['-e', "console.log('Scanning files'); console.log('Analysis complete'); console.log(JSON.stringify({ metrics: { errors: 17 } }))"],
+      { metric: 'errors', baselineDir },
+    )(ctx(), undefined);
+
+    expect(result.met).toBe(true);
+    expect(result.reason).toContain('seeded at 17');
+  });
+
   it('seeds the baseline, then blocks a regression and accepts an improvement', async () => {
     const opts = { metric: 'errors', baselineDir } as const;
 
