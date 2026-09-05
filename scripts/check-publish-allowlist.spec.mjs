@@ -75,10 +75,9 @@ test("the audit fails closed: an unlisted public package, a missing or wrong hoo
   }
 });
 
-test("releaseTagFor names exactly one package and version", () => {
-  assert.equal(releaseTagFor("@obversa/runtime", "1.0.0"), "obversa-runtime@1.0.0");
-  assert.equal(releaseTagFor("@obversa/memory-git", "0.1.0"), "obversa-memory-git@0.1.0");
-  assert.equal(releaseTagFor("@obversa/engine-claude-cli", "0.1.0"), "obversa-engine-claude-cli@0.1.0");
+test("releaseTagFor names the one repository release tag", () => {
+  assert.equal(releaseTagFor("1.0.0"), "v1.0.0");
+  assert.equal(releaseTagFor("0.1.0"), "v0.1.0");
 });
 
 // A git repository around one workspace package, so the hook's release-record
@@ -107,31 +106,26 @@ test("the prepublishOnly hook refuses without the release flag or the allowlist 
   }
 });
 
-test("the hook requires the release record: main, a clean tree, and this package's annotated tag at HEAD", () => {
+test("the hook requires the repository release record: main, clean tree, and one annotated v tag at HEAD", () => {
   const { root, cwd, git } = makeReleaseRepo();
   try {
     const allowlist = new Set(["@x/p"]);
     const env = { OBVERSA_RELEASE: "1" };
     const problems = () => checkHook({ cwd, env, allowlist }).join("\n");
-    // No tag yet.
-    assert.match(problems(), /HEAD is not tagged x-p@1\.0\.0/);
-    // A lightweight tag is not a record.
-    git("tag", "x-p@1.0.0");
+    assert.match(problems(), /exactly one annotated repository release tag/);
+    git("tag", "v1.0.0");
     assert.match(problems(), /must be an annotated tag/);
-    git("tag", "-d", "x-p@1.0.0");
-    // A sibling's tag, or the same version on another package, does not count.
-    git("tag", "-a", "-m", "release", "x-other@1.0.0");
-    assert.match(problems(), /HEAD is not tagged x-p@1\.0\.0/);
-    // The right annotated tag on main with a clean tree: allowed.
-    git("tag", "-a", "-m", "release @x/p 1.0.0", "x-p@1.0.0");
+    git("tag", "-d", "v1.0.0");
+    git("tag", "-a", "-m", "release", "v1.0.0");
     assert.deepEqual(checkHook({ cwd, env, allowlist }), []);
-    // A dirty tree is refused even with the tag in place.
+    git("tag", "-a", "-m", "release", "v0.1.0");
+    assert.match(problems(), /exactly one annotated repository release tag/);
+    git("tag", "-d", "v0.1.0");
     writeFileSync(path.join(cwd, "scratch.txt"), "wip\n");
     assert.match(problems(), /working tree is not clean/);
     rmSync(path.join(cwd, "scratch.txt"));
-    // Off main is refused even with the tag in place.
     git("checkout", "-q", "-b", "feature");
-    assert.match(problems(), /releases publish from main \(checkout is on feature\)/);
+    assert.match(problems(), /releases publish from main/);
   } finally {
     rmSync(root, { recursive: true, force: true });
   }
@@ -341,7 +335,7 @@ test("the release runs the guard again after pack, so a pack step that changed a
   const { root, cwd, git } = makeReleaseRepo();
   const allowlist = new Set(["@x/p"]);
   const env = { OBVERSA_RELEASE: "1" };
-  git("tag", "-a", "-m", "release @x/p 1.0.0", "x-p@1.0.0");
+  git("tag", "-a", "-m", "release v1.0.0", "v1.0.0");
   const check = ({ cwd: dir }) => checkHook({ cwd: dir, env, allowlist });
   const plan = { name: "@x/p", cwd, pack: { command: "pnpm", args: ["pack", "--pack-destination"] }, publishArgs: (tarball) => publishArgs(tarball) };
   const logged = [];

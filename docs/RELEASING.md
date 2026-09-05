@@ -1,86 +1,65 @@
 # Releasing
 
-This guide describes how a version of the Obversa packages is cut, who
-approves it, and what the automation does.
-
-## Who can release
-
-Only Jonny approves a release. The publish job in the Release workflow
-runs inside a protected GitHub environment named `release`. That
-environment requires a manual approval from Jonny before any step runs.
-No code path publishes without that approval.
-
-Set up the environment before the first tag: in the repository settings,
-create an environment named `release`, add Jonny as a required reviewer,
-and restrict the environment to `v*` tags. GitHub creates a missing
-environment with no reviewers, so the setup must happen first.
+This guide describes how Jonny verifies and publishes a version of the
+Obversa packages.
 
 ## The version numbers
 
-| Package | Version at v1.0.0 |
-|---------|-------------------|
-| `@obversa/runtime` | 1.0.0 |
-| `@obversa/engine` | 0.1.0 |
-| `@obversa/memory` | 0.1.0 |
-| `@obversa/memory-simple` | 0.1.0 |
-| `@obversa/memory-git` | 0.1.0 |
-| `@obversa/surfacer` | 0.1.0 |
-| `@obversa/source` | 0.1.0 |
-| Engine plugins (six) | 0.1.0 each |
-
-The repository carries one tag for the release: `v1.0.0`. The tag name
-matches the runtime version. Every other package tracks its own version
-in its own `package.json`.
+The release has one repository tag, `v1.0.0`. The runtime package uses that
+version. Every other public package keeps its own version in its manifest.
+The package list comes from `scripts/publish-allowlist.json`; the tarball
+check and release script read that same list.
 
 ## The steps
 
-1. **Update the changelog.** Open `CHANGELOG.md`. Retitle the
-   `Unreleased` section to the new version with a date. The changelog
-   gate refuses to publish a version the changelog does not describe.
+1. **Update the changelog.** Add the release heading and entries to
+   `CHANGELOG.md`. The changelog gate refuses a release without them.
 
-2. **Set the versions.** Set each package's `version` field in its
-   `package.json`. The root `package.json` stays at `0.0.0` because the
-   root is a workspace, not a package.
+2. **Set package versions.** Update each allowlisted package manifest. The
+   workspace root remains private and is never published.
 
-3. **Verify the tree.** Run `pnpm verify:d2` (or the chain closest to
-   what changed). Every check must pass before a release is cut.
-
-4. **Tag the repository.** Create the tag and push it:
+3. **Verify the exact commit.** Run the newest stage chain, then pack checks:
 
    ```bash
-   git tag v1.0.0
+   pnpm verify:d14
+   pnpm check:tarballs
+   node scripts/changelog-gate.mjs
+   ```
+
+4. **Create one repository tag.** Tag the gate-passed commit and push it:
+
+   ```bash
+   git tag -a v1.0.0 -m 'release v1.0.0'
    git push origin v1.0.0
    ```
 
-5. **Approve the release.** GitHub sends a request to the `release`
-   environment. Jonny approves it in the GitHub interface.
+5. **Read the workflow record.** The `Release` workflow runs the stage chain,
+   tarball check, and changelog gate. It never publishes packages.
 
-6. **The workflow runs.** The Release workflow:
+6. **Approve the destination.** Jonny names the real npm registry before
+   publishing. No publish command runs without that approval.
 
-   - Runs `pnpm verify:d2` (agent-instructions, commit-policy, examples,
-     and the rest of the local proof chain).
-   - Runs `pnpm check:tarballs` (packed file list; not part of verify:d2).
-   - Runs the changelog gate.
-   - Packs all 13 allowlisted packages.
-   - Publishes each package to npm with provenance.
-   - Creates the GitHub Release with the changelog section as the body.
+7. **Publish through the guarded script.** Run the script once for each name
+   in `scripts/publish-allowlist.json` from a clean `main` checkout at the
+   repository tag:
 
-7. **The guard registry.** Each package's `package.json` carries a
-   `publishConfig` that points at a registry that does not exist. This
-   prevents a hand publish from a local checkout. The Release workflow
-   passes `--registry` to `npm publish`, which routes around the guard on
-   the clean runner. The guard stays for local proofs.
+   ```bash
+   OBVERSA_RELEASE=1 node scripts/release.mjs packages/runtime
+   ```
 
-## What the changelog gate checks
+   The script checks the repository tag and clean tree, packs one allowlisted
+   package, checks the tree again, and publishes its tarball. It supplies both
+   npm registry keys, pointing to the one approved destination, so the two
+   sentinel values in each package manifest are displaced together.
 
-The gate (`scripts/changelog-gate.mjs`) reads the version from the
-runtime `package.json` and checks that `CHANGELOG.md` has a heading for
-that version with at least one entry. It also checks that the tag name
-matches the version. A version without a changelog entry does not
-publish.
+## The publish guard
 
-## What happens if the workflow stops
+Each public manifest carries a never-resolving registry under both `registry`
+and `@obversa:registry`. A directory or tarball publish therefore fails closed
+unless the caller uses the explicit release script. The script is the only
+publisher and supplies both matching registry overrides.
 
-Every publish step is idempotent. A package that is already on npm is
-skipped. A GitHub Release that already exists is left alone. A workflow
-that stopped partway completes on the next tag push.
+## What happens if verification fails
+
+Do not publish. Fix the failing check, rerun the full stage chain at the same
+scope, and use the same gate-passed commit for the repository tag.

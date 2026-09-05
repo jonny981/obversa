@@ -27,7 +27,7 @@ import os from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
-import { RELEASE_REGISTRY, SCOPE_REGISTRY_KEY, checkHook, listWorkspacePackages } from "./check-publish-allowlist.mjs";
+import { RELEASE_REGISTRY, SCOPE_REGISTRY_KEY, checkHook, listWorkspacePackages, readAllowlist } from "./check-publish-allowlist.mjs";
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), "..");
 
@@ -51,9 +51,10 @@ export const PNPM_CLI = join(PNPM_DIR, "bin", "pnpm.cjs");
 // only be --dry-run, and the guard must pass. Pure apart from its inputs, so
 // the spec can hold it to that. `publishArgs(tarball)` is the exact npm
 // command line for the packed archive.
-export function releasePlan({ target, flags = [], root = ROOT, packages = listWorkspacePackages(root), check = checkHook } = {}) {
+export function releasePlan({ target, flags = [], root = ROOT, packages, check = checkHook } = {}) {
   if (typeof target !== "string" || target.length === 0) throw new Error("usage: OBVERSA_RELEASE=1 node scripts/release.mjs packages/<name> [--dry-run]");
   if (flags.some((flag) => flag !== "--dry-run")) throw new Error(`release: unknown flag ${flags.find((flag) => flag !== "--dry-run")}`);
+  packages ??= listWorkspacePackages(root).filter((p) => readAllowlist(join(root, "scripts", "publish-allowlist.json")).has(p.name));
   const real = (path) => {
     try {
       return realpathSync(path);

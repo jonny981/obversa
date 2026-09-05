@@ -10,10 +10,7 @@
 //      package directory as cwd: refuse unless every part of the release record
 //      is present — OBVERSA_RELEASE=1 (the explicit human act), the package name
 //      on scripts/publish-allowlist.json, the checkout on `main` with a clean
-//      tree, and HEAD carrying an ANNOTATED tag that names exactly this package
-//      and version (see releaseTagFor). The tag binds the approval to one
-//      package, so approving one 0.1.0 package never approves a sibling that
-//      shares the number, and each package releases independently. npm and
+//      tree, and HEAD carrying one annotated repository release tag. npm and
 //      pnpm run prepublishOnly when publishing a package DIRECTORY; publishing
 //      a prepared tarball (`npm publish ./x.tgz`) runs no package hook at all,
 //      so the hook is not the only seatbelt (see the registry below).
@@ -167,12 +164,9 @@ export function audit({ root = ROOT, allowlist = readAllowlist() } = {}) {
   return problems;
 }
 
-// The release record for one package version: an annotated git tag named for
-// the package and the version. Encoding (filesystem- and refname-safe): drop
-// the scope's "@", turn "/" into "-", then append "@<version>":
-//   @obversa/runtime 1.0.0  ->  obversa-runtime@1.0.0
-export function releaseTagFor(name, version) {
-  return `${String(name).replace(/^@/, "").replace(/\//g, "-")}@${version}`;
+// The repository release record is one annotated tag shared by every package.
+export function releaseTagFor(version) {
+  return `v${version}`;
 }
 
 function git(cwd, ...args) {
@@ -182,7 +176,7 @@ function git(cwd, ...args) {
 export function checkHook({ cwd = process.cwd(), env = process.env, allowlist = readAllowlist(), run = git } = {}) {
   const manifestPath = join(cwd, "package.json");
   if (!existsSync(manifestPath)) return [`no package.json in ${cwd}`];
-  const { name, version } = JSON.parse(readFileSync(manifestPath, "utf8"));
+  const { name } = JSON.parse(readFileSync(manifestPath, "utf8"));
   const problems = [];
   if (env.OBVERSA_RELEASE !== "1") problems.push(`refusing to publish ${name}: OBVERSA_RELEASE=1 is not set (the explicit release act)`);
   if (!allowlist.has(name)) problems.push(`refusing to publish ${name}: not on scripts/publish-allowlist.json`);
@@ -202,10 +196,11 @@ export function checkHook({ cwd = process.cwd(), env = process.env, allowlist = 
   }
   if (branch !== "main") problems.push(`refusing to publish ${name}: releases publish from main (checkout is on ${branch})`);
   if (dirty) problems.push(`refusing to publish ${name}: the working tree is not clean`);
-  const tag = releaseTagFor(name, version);
-  if (!tags.includes(tag)) {
-    problems.push(`refusing to publish ${name}: HEAD is not tagged ${tag} (the release record for this package and version)`);
+  const releaseTags = tags.filter((tag) => /^v\d+\.\d+\.\d+(?:[-+][0-9A-Za-z.-]+)?$/.test(tag));
+  if (releaseTags.length !== 1) {
+    problems.push(`refusing to publish ${name}: HEAD must carry exactly one annotated repository release tag (found ${releaseTags.join(", ") || "none"})`);
   } else {
+    const tag = releaseTags[0];
     let type = "";
     try { type = run(cwd, "cat-file", "-t", tag); } catch { type = ""; }
     if (type !== "tag") problems.push(`refusing to publish ${name}: ${tag} must be an annotated tag, not a lightweight one`);
