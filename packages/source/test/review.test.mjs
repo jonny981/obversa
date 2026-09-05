@@ -53,7 +53,16 @@ test("a supplied diff is a string within the git lane's bound; anything else is 
   for (const diffText of [null, Buffer.from(DIFF), { text: DIFF }, 42]) {
     await assert.rejects(() => reviewDiff({ diffText: /** @type {any} */ (diffText), launchSurface, clientKitSource: CLIENT_KIT }), /diffText must be a string/, String(diffText));
   }
-  await assert.rejects(() => reviewDiff({ diffText: "x".repeat(MAX_DIFF_BYTES + 1), launchSurface, clientKitSource: CLIENT_KIT }), /larger than/);
+  const diffText = "é".repeat(MAX_DIFF_BYTES / 2) + "x";
+  assert.equal(Buffer.byteLength(diffText, "utf8"), MAX_DIFF_BYTES + 1);
+  assert.ok(diffText.length < MAX_DIFF_BYTES);
+  let launches = 0;
+  await assert.rejects(() => reviewDiff({
+    diffText,
+    launchSurface: async () => { launches += 1; return { result: { status: "cancelled" } }; },
+    clientKitSource: CLIENT_KIT,
+  }), { name: "RangeError", message: `diffText is larger than ${MAX_DIFF_BYTES} bytes` });
+  assert.equal(launches, 0, "an oversized diff must not launch a partial review");
 });
 
 test("reviewDiff builds the surface, returns a validated SurfaceResult, and cleans up", async () => {
