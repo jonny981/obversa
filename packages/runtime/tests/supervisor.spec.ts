@@ -3,6 +3,8 @@ import {
   mkdtempSync,
   readFileSync,
   rmSync,
+  statSync,
+  truncateSync,
 } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -80,6 +82,25 @@ describe('run supervision', () => {
       iteration: 1,
       blocker: { kind: 'gate-failing' },
     });
+  });
+
+  it('keeps every complete recent record when the final JSONL line is torn', () => {
+    const supervisor = startSupervisor({
+      runId: 'torn-run',
+      cwd: testHome,
+      title: 'torn',
+    });
+    for (const message of ['first complete', 'second complete', 'third complete', 'partial']) {
+      supervisor.sink({ kind: 'log', ts: 1, path: [], level: 'info', message });
+    }
+    const eventsPath = runEventsPath('torn-run');
+    truncateSync(eventsPath, statSync(eventsPath).size - 4);
+
+    expect(readRunProgress('torn-run', { recent: 4 })?.recent).toEqual([
+      'first complete',
+      'second complete',
+      'third complete',
+    ]);
   });
 
   it('tracks an active DAG node and its timeout', () => {
