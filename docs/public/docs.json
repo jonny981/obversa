@@ -8,6 +8,14 @@
     "light": "#73E2A7",
     "dark": "#1C7C54"
   },
+  "fonts": {
+    "heading": {
+      "family": "Schibsted Grotesk"
+    },
+    "body": {
+      "family": "Schibsted Grotesk"
+    }
+  },
   "logo": {
     "light": "/logo-light.svg",
     "dark": "/logo-dark.svg",
