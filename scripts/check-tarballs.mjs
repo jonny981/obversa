@@ -393,7 +393,12 @@ if (isMain) {
   const directories = allowlistedDirectories();
   const allowlist = JSON.parse(readFileSync(join(ROOT, 'scripts', 'publish-allowlist.json'), 'utf8'));
   for (const [index, directory] of directories.entries()) {
-    failures.push(...checkTarball(directory, { expectedFiles: EXPECTED_FILES[allowlist.packages[index]] }));
+    const name = allowlist.packages[index];
+    if (!Object.hasOwn(EXPECTED_FILES, name)) {
+      failures.push(`${name}: missing pinned file list`);
+      continue;
+    }
+    failures.push(...checkTarball(directory, { expectedFiles: EXPECTED_FILES[name] }));
   }
   if (failures.length > 0) {
     for (const failure of failures) console.error(failure);

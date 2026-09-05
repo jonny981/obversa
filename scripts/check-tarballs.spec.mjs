@@ -4,7 +4,8 @@
 // that cannot fail proves nothing.
 
 import assert from "node:assert/strict";
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { spawnSync } from "node:child_process";
+import { copyFileSync, mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import test from "node:test";
@@ -63,6 +64,24 @@ test("a truthful package passes both tools", () => {
     { "dist/index.js": "export const a = 1;\n", "dist/index.d.ts": "export declare const a: number;\n" },
   );
   assert.deepEqual(checkTarball(directory), []);
+});
+
+test("the tarball command refuses an allowlisted package with no pinned file list", () => {
+  pkg("unpinned-workspace/packages/new", {
+    name: "@fixture/unpinned",
+    exports: { ".": { types: "./dist/index.d.ts", default: "./dist/index.js" } },
+  }, { "dist/index.js": "export const a = 1;\n", "dist/index.d.ts": "export declare const a: number;\n" });
+  const root = join(fixture, "unpinned-workspace");
+  mkdirSync(join(root, "scripts"));
+  writeFileSync(join(root, "pnpm-workspace.yaml"), "packages:\n  - packages/*\n");
+  writeFileSync(join(root, "scripts/publish-allowlist.json"), JSON.stringify({ packages: ["@fixture/unpinned"] }));
+  for (const name of ["check-tarballs.mjs", "check-publish-allowlist.mjs"]) {
+    copyFileSync(new URL(name, import.meta.url), join(root, "scripts", name));
+  }
+  symlinkSync(new URL("../node_modules", import.meta.url), join(root, "node_modules"), "dir");
+  const result = spawnSync(process.execPath, [join(root, "scripts/check-tarballs.mjs")], { cwd: root, encoding: "utf8" });
+  assert.equal(result.status, 1, `${result.stdout}\n${result.stderr}`);
+  assert.match(result.stderr, /@fixture\/unpinned: missing pinned file list/);
 });
 
 test("a build-hashed chunk matches its chunk-* pin, and a missing chunk still fails", () => {
