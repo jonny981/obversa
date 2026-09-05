@@ -109,6 +109,7 @@ afterEach(() => {
 });
 
 describe('openGitMemory', () => {
+  // The full kit performs real Git operations and needs room in a cold worktree.
   it('passes the public memory conformance kit', async () => {
     const repo = makeRepo();
 
@@ -119,7 +120,7 @@ describe('openGitMemory', () => {
         limits,
       })),
     ).resolves.toBeUndefined();
-  }, 20_000);
+  }, 60_000);
 
   it('rejects lone-surrogate scopes without rejecting emoji scopes', async () => {
     const repo = makeRepo();
