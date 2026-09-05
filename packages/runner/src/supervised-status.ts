@@ -73,7 +73,7 @@ export async function readSupervisedRunStatus(options: ReadSupervisedRunStatusOp
   const launch = records.findLast((event) => event.type === 'runner:worker-launching');
   const worker = records.findLast((event) => event.type === 'runner:worker-started');
   const exited = records.findLast((event) => event.type === 'runner:worker-exited');
-  const terminal = records.findLast((event) => [
+  const terminal = records.findLast((event) => event.revision > (launch?.revision ?? 0) && [
     'runner:completed', 'runner:paused', 'runner:failed', 'runner:stopped', 'runner:timeout', 'runner:budget-stop',
   ].includes(event.type));
   const backedOff = records.findLast((event) => event.type === 'runner:backoff');
@@ -102,7 +102,7 @@ export async function readSupervisedRunStatus(options: ReadSupervisedRunStatusOp
     if (workerAlive) processes = inspected;
   }
   const now = Date.now();
-  const end = terminal === undefined ? now : Date.parse(terminal.timestamp);
+  const end = terminal === undefined || terminal.type === 'runner:paused' ? now : Date.parse(terminal.timestamp);
   const startedAt = started?.timestamp ?? loaded.record.timestamp;
   const elapsedMs = Math.max(0, end - Date.parse(startedAt));
   const backoff = terminal === undefined && backedOff !== undefined && backedOff.revision > (launch?.revision ?? 0)

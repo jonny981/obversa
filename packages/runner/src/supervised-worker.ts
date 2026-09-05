@@ -5,7 +5,7 @@ import { inspectOwnedProcessTree } from '@obversa/engine/command';
 import { createLocalRunStorage } from '@obversa/runtime/storage/local';
 import { createGraphExecutor, loadRunDefinition, type Sha256Digest } from '@obversa/runtime';
 import {
-  hostModuleDigest, resolveHostModule, SupervisedRunError, supervisionWriter,
+  hostModuleDigest, readGraphPosition, resolveHostModule, SupervisedRunError, supervisionWriter,
   type SupervisedHostRecord,
 } from './supervised-record.js';
 import type { SupervisedRunBindings, SupervisedWorkerInput } from './supervised-run.js';
@@ -67,11 +67,11 @@ try {
     decideAction: async () => {
       const decision = await binding.decideAction();
       if (decision.kind === 'allow') return decision;
-      await append('action-denied', {
+      await append(decision.kind === 'wait' ? 'action-waiting' : 'action-denied', {
         nodeId, trustedCaller: binding.trustedCaller, permissions: binding.permissions,
         decision, reason: decision.reason,
       });
-      return { kind: 'deny' as const, reason: decision.reason };
+      return decision;
     },
   }]));
   const executor = await createGraphExecutor({
@@ -79,7 +79,11 @@ try {
     storage: { ...storage, eventStore }, runId: input.runId,
   });
   const signal = new AbortController().signal;
-  let result = await executor.run(signal);
+  const requestedPause = input.resume === undefined ? undefined
+    : await readGraphPosition(storage, input.runId, input.resume.position);
+  let result = input.resume !== undefined && requestedPause?.type === 'graph:node-paused'
+    && requestedPause.eventId === input.resume.pauseEventId
+    ? await executor.resume(input.resume.position, signal) : await executor.run(signal);
   while (result.kind === 'waiting') {
     const position = result.positions[0];
     if (position === undefined) throw new SupervisedRunError('WORKER_PROTOCOL', 'The executor is waiting without an unfinished position.');

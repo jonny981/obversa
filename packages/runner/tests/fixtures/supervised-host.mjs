@@ -1,10 +1,11 @@
 import { spawn } from 'node:child_process';
 import { createHash } from 'node:crypto';
-import { appendFile } from 'node:fs/promises';
+import { appendFile, readFile, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { setTimeout as delay } from 'node:timers/promises';
 
 import { compileGraph, dagGraphType, EngineIncompleteResultError } from '@obversa/runtime';
+import { createLocalRunStorage } from '@obversa/runtime/storage/local';
 
 const value = 'original';
 await appendFile(new URL('./module-evaluations.log', import.meta.url), `${process.pid}\n`);
@@ -12,6 +13,31 @@ await appendFile(new URL('./module-evaluations.log', import.meta.url), `${proces
 export async function bindRun({ definition, scratchDirectory }) {
   const input = definition.resolvedInputs;
   const graph = compileGraph(dagGraphType, definition.graphDefinition.value);
+  if (input.resumeCrash) {
+    const store = createLocalRunStorage(input.storage).eventStore;
+    const prototype = Object.getPrototypeOf(store);
+    const append = prototype.append;
+    async function crashOnce(file = 'resume-crash.json') {
+      const crashPath = join(scratchDirectory, file);
+      try { await writeFile(crashPath, JSON.stringify({ pid: process.pid, boundary: input.resumeCrash }), { flag: 'wx' }); }
+      catch (error) { if (error.code === 'EEXIST') return; throw error; }
+      process.kill(process.pid, 'SIGKILL');
+      await new Promise(() => {});
+    }
+    prototype.append = async function (stream, revision, batch) {
+      const target = input.resumeCrash.endsWith('resume') ? 'graph:node-resumed' : 'graph:node-completed';
+      const matches = stream.streamId === definition.runId
+        && batch.some((event) => event.type === target && event.payload.nodeId === 'last');
+      if (matches && (input.resumeCrash.startsWith('before-') || input.resumeCrash === 'after-reconcile')) await crashOnce();
+      const result = await append.call(this, stream, revision, batch);
+      if (matches && input.resumeCrash.startsWith('after-') && input.resumeCrash !== 'after-reconcile') await crashOnce();
+      if (input.resumeCrash === 'after-reconcile' && stream.streamId === definition.runId
+        && batch.some((event) => event.type === 'graph:node-paused' && event.payload.request?.kind === 'reconcile-attempt')) {
+        await crashOnce('reconcile-crash.json');
+      }
+      return result;
+    };
+  }
   const lane = definition.graphDefinition.value.nodes[0].data.lane;
   const selection = { adapter: 'fixture', adapterVersion: '1', provider: 'fixture', modelFamily: 'fixture', model: 'fixture', executable: null, capabilities: [] };
   const schema = { type: 'object' };
@@ -69,14 +95,23 @@ export async function bindRun({ definition, scratchDirectory }) {
           }
         }
         if (input.crash) process.kill(process.pid, 'SIGKILL');
+        if (input.crashOnce && (await readFile(join(scratchDirectory, `${id}.started`), 'utf8')).trim().split('\n').length === 1) {
+          process.kill(process.pid, 'SIGKILL');
+        }
         if (input.delayMs) await delay(input.delayMs, undefined, { signal });
         return { node: id, value: input.resultBytes ? 'x'.repeat(input.resultBytes) : input.value ?? value };
       },
       parseResult: input.enginePartBytes ? (part) => ({ node: id, value: part.text.slice(0, input.resultBytes) }) : null,
-      tokenBudget: null, retrySafe: true,
-      decideAction: async () => input.wait
-        ? { kind: 'wait', reason: 'A person must approve.', request: { kind: 'human' } }
-        : input.deny ? { kind: 'deny', reason: 'Not permitted.' } : { kind: 'allow' },
+      tokenBudget: null, retrySafe: input.retrySafe ?? true,
+      decideAction: async () => {
+        if (input.wait && (input.waitNode === undefined || input.waitNode === id)) {
+          if (input.approvalFile && await readFile(input.approvalFile, 'utf8').catch(() => '') === 'allow') {
+            return { kind: 'allow' };
+          }
+          return { kind: 'wait', reason: 'A person must approve.', request: { kind: 'human' } };
+        }
+        return input.deny ? { kind: 'deny', reason: 'Not permitted.' } : { kind: 'allow' };
+      },
     }])),
   };
 }

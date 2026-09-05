@@ -142,8 +142,67 @@ effect happened. For an unsafe repeat, the executor records a pause with a
 `reconcile-attempt` request.
 
 Unattended action decisions must return `allow` before node effects run. A host
-decision to wait or deny is recorded as an unattended denial; the worker does
-not open a prompt.
+decision to `wait` records a graph pause with its reason and request. A decision
+to `deny` records a failed node. The worker does not open a prompt.
+
+## Resume a paused run
+
+`resumeSupervisedRun` reopens one recorded graph pause. Pass the same storage
+settings and workspace provider, the run ID, and the exact `position` from its
+`graph:node-paused` event. Supply the runner directory, worker root, restart
+policy, and cleanup grace as for a start:
+
+```ts
+import {
+  resumeSupervisedRun,
+  type ResumeSupervisedRunOptions,
+} from '@obversa/runner';
+
+async function resume(options: ResumeSupervisedRunOptions) {
+  const handle = await resumeSupervisedRun(options);
+  try {
+    console.log(await handle.status());
+    return await handle.done;
+  } finally {
+    await handle.stop();
+  }
+}
+```
+
+The definition, host module, and run limits come from the stored run; resume
+does not accept replacements. It writes no second run-start event and does not
+repeat completed occurrences. Status shows a resumed worker as active rather
+than reporting the earlier pause as its terminal result.
+
+The original wall-clock deadline includes time spent paused. Logical dispatches
+and recorded worker restarts also keep their counts. A pause does not restore
+spent budgets; resuming after the deadline returns `TIMEOUT` without a worker.
+
+The host's action policy runs again. Record approval in the system that policy
+reads before calling resume. A repeated `wait` pauses again with its request;
+calling resume is not an approval flag. For a `reconcile-attempt` pause, the
+caller must decide whether offering the uncertain work again is safe. A worker
+replacement does not automatically approve a new reconciliation pause.
+
+Before releasing ownership after a pause, the watchdog cleans up the worker and
+saves a workspace snapshot as a `runner-pause-anchor` artifact. Resume acquires
+the process lock and workspace lease, then checks that saved snapshot before
+starting a worker. It never adopts edits made while paused. The snapshot shares
+the run's artifact size, quota, and sensitive-content rules; a failed write
+cannot produce a resumable pause.
+
+Workspace evidence failures resolve `handle.done` to `kind: 'pause'`:
+
+- **`WORKSPACE_ANCHOR_MISSING`:** the pause has no saved snapshot, including
+  pauses recorded without this artifact.
+- **`WORKSPACE_ANCHOR_INVALID`:** the saved reference or snapshot cannot be
+  verified. Invalid evidence is refused before acquiring a workspace lease.
+- **`WORKSPACE_DRIFT`:** the workspace differs from the saved snapshot.
+
+An occupied process lock rejects startup with `PROCESS_LOCKED`; an unavailable
+workspace lease rejects with `WORKSPACE_LEASE`. A run without a safely released
+pause rejects with `RUN_NOT_PAUSED`. A position that is not paused rejects with
+`RESUME_POSITION`. Resume does not take over a dead watchdog's retained lock.
 
 ## Bound the run
 

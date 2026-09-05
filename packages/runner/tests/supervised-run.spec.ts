@@ -68,6 +68,28 @@ async function startFixture(options: runner.SupervisedRunOptions) {
   return handle;
 }
 
+async function resumeFixture(options: runner.SupervisedRunOptions, position = 'dag/last/1') {
+  const resume = Reflect.get(runner, 'resumeSupervisedRun');
+  expect(resume).toBeTypeOf('function');
+  const handle: runner.SupervisedRunHandle = await resume({
+    directory: options.directory, runRoot: options.runRoot, storage: options.storage, workspace: options.workspace,
+    restart: options.restart, teardownGraceMs: options.teardownGraceMs, runId: options.definition.runId, position,
+  });
+  handles.push(handle);
+  return handle;
+}
+
+async function pausedFixture(overrides: runtime.JsonObject = {}, maxDispatches = 2) {
+  const { options } = await fixture();
+  const approvalFile = join(options.directory, 'approval');
+  const paused = {
+    ...options, limits: { ...options.limits, maxDispatches },
+    definition: { ...options.definition, resolvedInputs: { wait: true, waitNode: 'last', approvalFile, ...overrides } },
+  };
+  await expect((await startFixture(paused)).done).resolves.toMatchObject({ kind: 'pause' });
+  return { options: paused, approvalFile };
+}
+
 async function nodeStarted(directory: string, node = 'first') {
   const path = join(directory, 'scratch', `${node}.started`);
   await expect.poll(() => readFile(path, 'utf8').catch(() => ''), { timeout: 5_000 }).not.toBe('');
@@ -378,17 +400,255 @@ describe('supervised local runs', () => {
   });
 
   it('an unattended denial records its trusted context and starts no effect', async () => {
-    for (const input of [{ deny: true, wait: false }, { deny: false, wait: true }]) {
-      const { options } = await fixture();
-      const handle = await startFixture({ ...options, definition: { ...options.definition, resolvedInputs: input } });
-      await expect(handle.done).resolves.toMatchObject({ kind: 'fail' });
-      expect((await handle.status()).phase).toBe('failed');
-      await expect(readFile(join(options.directory, 'scratch/first.started'))).rejects.toMatchObject({ code: 'ENOENT' });
-      const records = await readSupervision(createLocalRunStorage(options.storage), 'fixture');
-      expect(records.find((event) => event.type === 'runner:action-denied')?.payload).toMatchObject({
-        nodeId: 'first', trustedCaller: { actor: 'fixture', provenance: 'local-test' }, permissions: [],
-      });
+    const { options } = await fixture();
+    const handle = await startFixture({ ...options, definition: { ...options.definition, resolvedInputs: { deny: true } } });
+    await expect(handle.done).resolves.toMatchObject({ kind: 'fail' });
+    expect((await handle.status()).phase).toBe('failed');
+    await expect(readFile(join(options.directory, 'scratch/first.started'))).rejects.toMatchObject({ code: 'ENOENT' });
+    const records = await readSupervision(createLocalRunStorage(options.storage), 'fixture');
+    expect(records.find((event) => event.type === 'runner:action-denied')?.payload).toMatchObject({
+      nodeId: 'first', trustedCaller: { actor: 'fixture', provenance: 'local-test' }, permissions: [],
+    });
+  });
+
+  it('resumes the exact paused position after external approval without repeating completed work', async () => {
+    const { options } = await fixture();
+    const approvalFile = join(options.directory, 'approval');
+    const handle = await startFixture({
+      ...options,
+      limits: { ...options.limits, maxDispatches: 2 },
+      definition: { ...options.definition, resolvedInputs: { wait: true, waitNode: 'last', approvalFile, delayMs: 200 } },
+    });
+    await expect(handle.done).resolves.toMatchObject({ kind: 'pause' });
+    expect(await handle.status()).toMatchObject({ phase: 'paused', workerAlive: false, cleanupVerified: true, leaseRetained: false });
+    await expect(readFile(join(options.directory, 'scratch/last.started'))).rejects.toMatchObject({ code: 'ENOENT' });
+    const resume = Reflect.get(runner, 'resumeSupervisedRun');
+    expect(resume).toBeTypeOf('function');
+    const resumeOptions = {
+      directory: options.directory, runRoot: options.runRoot, storage: options.storage, workspace: options.workspace,
+      restart: options.restart, teardownGraceMs: options.teardownGraceMs, runId: 'fixture', position: 'dag/last/1',
+    };
+    const waiting = await resume(resumeOptions);
+    handles.push(waiting);
+    await expect(waiting.done).resolves.toMatchObject({ kind: 'pause' });
+    await expect(readFile(join(options.directory, 'scratch/last.started'))).rejects.toMatchObject({ code: 'ENOENT' });
+    await writeFile(approvalFile, 'allow');
+    const resumed = await resume(resumeOptions);
+    handles.push(resumed);
+    await expect.poll(async () => (await resumed.status()).phase).toBe('running');
+    await expect(resumed.done).resolves.toMatchObject({ kind: 'complete' });
+    expect(await resumed.status()).toMatchObject({ phase: 'completed', restartCount: 0, pauseReasons: [] });
+    const events = [];
+    for await (const event of createLocalRunStorage(options.storage).eventStore.read({ namespace: 'runner-tests', streamId: 'fixture' })) events.push(event);
+    expect(events.filter((event) => event.type === 'graph:run-started')).toHaveLength(1);
+    expect(events.filter((event) => event.type === 'graph:node-dispatched')).toHaveLength(2);
+    expect(events.filter((event) => event.type === 'graph:node-resumed').map((event) => event.payload)).toEqual([
+      { nodeId: 'last', position: 'dag/last/1' }, { nodeId: 'last', position: 'dag/last/1' },
+    ]);
+    expect(events.filter((event) => event.type === 'graph:node-paused').map((event) => event.payload)).toEqual([
+      { nodeId: 'last', position: 'dag/last/1', reason: 'A person must approve.', request: { kind: 'human' } },
+      { nodeId: 'last', position: 'dag/last/1', reason: 'A person must approve.', request: { kind: 'human' } },
+    ]);
+    for (const node of ['first', 'last']) {
+      expect((await readFile(join(options.directory, `scratch/${node}.started`), 'utf8')).trim().split('\n')).toHaveLength(1);
     }
+  });
+
+  it('resume rejects wrong and completed positions without launching a worker', async () => {
+    const { options } = await pausedFixture();
+    const evaluations = await readFile(join(options.runRoot, 'module-evaluations.log'), 'utf8');
+    for (const position of ['dag/last/2', 'dag/first/1']) {
+      await expect(resumeFixture(options, position)).rejects.toMatchObject({ code: 'RESUME_POSITION' });
+    }
+    expect(await readFile(join(options.runRoot, 'module-evaluations.log'), 'utf8')).toBe(evaluations);
+    expect(await readdir(join(options.storage.directory, 'runner-locks/runner-tests'))).toEqual([]);
+  });
+
+  it('resume preserves a paused position after its accepted-result evidence is stored', async () => {
+    const { options, approvalFile } = await pausedFixture();
+    const storage = createLocalRunStorage(options.storage);
+    const proof = await storage.artifactStore.write({ namespace: 'runner-tests', runId: 'fixture' }, {
+      bytes: Buffer.from('{"passed":true}'), mediaType: 'application/json', purpose: 'proof-packet', contentMode: 'state',
+    });
+    const graph = options.definition.resolvedPlan.plan.graph;
+    await runtime.createAcceptedResultRecord(storage, 'fixture', 'dag/last/1', {
+      result: { approved: true }, inputHashes: {}, proofScope: {}, proofArtifact: { ...proof, purpose: 'proof-packet' },
+      graph: { definitionDigest: graph.definitionDigest, typeVersion: graph.typeVersion },
+      workspaceAnchor: await options.workspace.capture(), reviewerIdentity: { actor: 'test-reviewer' },
+    });
+    await writeFile(approvalFile, 'allow');
+    await expect((await resumeFixture(options)).done).resolves.toMatchObject({ kind: 'complete' });
+    expect((await readFile(join(options.directory, 'scratch/last.started'), 'utf8')).trim().split('\n')).toHaveLength(1);
+  });
+
+  it('a resume launch write failure records a truthful terminal failure without a worker', async () => {
+    const { options, approvalFile } = await pausedFixture();
+    await writeFile(approvalFile, 'allow');
+    const store = createLocalRunStorage(options.storage);
+    const prototype = Object.getPrototypeOf(store.eventStore) as typeof store.eventStore;
+    const append = prototype.append;
+    let failed = false;
+    vi.spyOn(prototype, 'append').mockImplementation(async function (this: typeof store.eventStore, ...args) {
+      const result = await append.apply(this, args);
+      if (!failed && args[2].some((event) => event.type.startsWith('runner:'))) {
+        failed = true;
+        throw new Error('Injected failure after the launch event was stored.');
+      }
+      return result;
+    });
+    const handle = await resumeFixture(options);
+    await expect(handle.done).resolves.toMatchObject({ kind: 'fail', code: 'WATCHDOG_ERROR' });
+    expect(await handle.status()).toMatchObject({ phase: 'failed', workerAlive: false, leaseRetained: false });
+    await expect(readFile(join(options.directory, 'scratch/last.started'))).rejects.toMatchObject({ code: 'ENOENT' });
+    expect(await readdir(join(options.storage.directory, 'runner-locks/runner-tests'))).toEqual([]);
+  });
+
+  it('resume refuses workspace drift with a typed pause and releases its lease', async () => {
+    const { options, approvalFile } = await pausedFixture();
+    await writeFile(approvalFile, 'allow');
+    const evaluations = await readFile(join(options.runRoot, 'module-evaluations.log'), 'utf8');
+    await writeFile(join(options.runRoot, 'foreign-edit'), 'keep');
+    const handle = await resumeFixture(options);
+    await expect(handle.done).resolves.toMatchObject({ kind: 'pause', code: 'WORKSPACE_DRIFT' });
+    expect(await handle.status()).toMatchObject({ phase: 'paused', workerAlive: false, leaseRetained: false });
+    expect(await readFile(join(options.runRoot, 'module-evaluations.log'), 'utf8')).toBe(evaluations);
+    expect(await readFile(join(options.runRoot, 'foreign-edit'), 'utf8')).toBe('keep');
+    const lease = await options.workspace.acquireLease('after-refusal', 'fixture', await options.workspace.capture());
+    expect(lease.ok).toBe(true);
+    if (lease.ok) await options.workspace.releaseLease(lease.token);
+    expect(await readdir(join(options.storage.directory, 'runner-locks/runner-tests'))).toEqual([]);
+  });
+
+  it('resume refuses a pause without a saved workspace anchor instead of capturing edited files', async () => {
+    const { options } = await pausedFixture();
+    const storage = createLocalRunStorage(options.storage);
+    await supervisionWriter(storage, 'fixture')('paused', { kind: 'pause', phase: 'paused', reason: 'A saved pause without an anchor.' });
+    const handle = await resumeFixture(options);
+    await expect(handle.done).resolves.toMatchObject({ kind: 'pause', code: 'WORKSPACE_ANCHOR_MISSING' });
+    await expect(readFile(join(options.directory, 'scratch/last.started'))).rejects.toMatchObject({ code: 'ENOENT' });
+  });
+
+  it('resume refuses malformed or wrong-purpose pause anchors before acquiring a lease', async () => {
+    const { options } = await pausedFixture();
+    const storage = createLocalRunStorage(options.storage);
+    const snapshot = await options.workspace.capture();
+    for (const [anchor, purpose, mediaType] of [
+      [{ ...snapshot, files: {} }, 'runner-pause-anchor', 'application/json'],
+      [{ ...snapshot, scope: 'src' }, 'runner-pause-anchor', 'application/json'],
+      [snapshot, 'proof-packet', 'application/json'],
+      [snapshot, 'runner-pause-anchor', 'text/plain'],
+    ] as const) {
+      const anchorArtifact = await storage.artifactStore.write({ namespace: 'runner-tests', runId: 'fixture' }, {
+        bytes: Buffer.from(JSON.stringify(anchor)), purpose, mediaType, contentMode: 'state',
+      });
+      await supervisionWriter(storage, 'fixture')('paused', { kind: 'pause', phase: 'paused', reason: 'Pause with an invalid anchor.', anchorArtifact });
+      const workspace = { ...options.workspace, acquireLease: async () => { throw new Error('Invalid anchor reached lease acquisition.'); } };
+      await expect((await resumeFixture({ ...options, workspace })).done)
+        .resolves.toMatchObject({ kind: 'pause', code: 'WORKSPACE_ANCHOR_INVALID' });
+      expect(await readdir(join(options.storage.directory, 'runner-locks/runner-tests'))).toEqual([]);
+    }
+    await expect(readFile(join(options.directory, 'scratch/last.started'))).rejects.toMatchObject({ code: 'ENOENT' });
+  });
+
+  it('resume cannot take an occupied process lock or another workspace lease', async () => {
+    const { options, approvalFile } = await pausedFixture({ delayMs: 400 });
+    const lease = await options.workspace.acquireLease('other-owner', 'fixture', await options.workspace.capture());
+    expect(lease.ok).toBe(true);
+    try {
+      await expect(resumeFixture(options)).rejects.toMatchObject({ code: 'WORKSPACE_LEASE' });
+      expect(await readdir(join(options.storage.directory, 'runner-locks/runner-tests'))).toEqual([]);
+    } finally {
+      if (lease.ok) await options.workspace.releaseLease(lease.token);
+    }
+    await writeFile(approvalFile, 'allow');
+    const handle = await resumeFixture(options);
+    await expect(resumeFixture(options)).rejects.toMatchObject({ code: 'PROCESS_LOCKED' });
+    await expect(handle.done).resolves.toMatchObject({ kind: 'complete' });
+    await expect(resumeFixture(options)).rejects.toMatchObject({ code: 'RUN_NOT_PAUSED' });
+  });
+
+  it('resume keeps the original deadline and counts time spent paused', async () => {
+    const { options, approvalFile } = await pausedFixture();
+    await writeFile(approvalFile, 'allow');
+    const storage = createLocalRunStorage(options.storage);
+    const loaded = await runtime.loadRunDefinition(storage, 'fixture');
+    const evaluations = await readFile(join(options.runRoot, 'module-evaluations.log'), 'utf8');
+    vi.spyOn(Date, 'now').mockReturnValue(Date.parse(loaded.record.timestamp) + options.limits.timeoutMs + 1);
+    expect(await runner.readSupervisedRunStatus({ storage: options.storage, runId: 'fixture' }))
+      .toMatchObject({ phase: 'paused', remainingTimeoutMs: 0 });
+    const handle = await resumeFixture(options);
+    await expect(handle.done).resolves.toMatchObject({ kind: 'fail', code: 'TIMEOUT' });
+    expect(await readFile(join(options.runRoot, 'module-evaluations.log'), 'utf8')).toBe(evaluations);
+  });
+
+  it('resume keeps dispatches spent before the pause', async () => {
+    const { options, approvalFile } = await pausedFixture({ waitNode: 'first' }, 1);
+    await writeFile(approvalFile, 'allow');
+    const handle = await resumeFixture(options, 'dag/first/1');
+    await expect(handle.done).resolves.toMatchObject({ kind: 'fail', code: 'BUDGET_STOP' });
+    expect((await readFile(join(options.directory, 'scratch/first.started'), 'utf8')).trim().split('\n')).toHaveLength(1);
+    await expect(readFile(join(options.directory, 'scratch/last.started'))).rejects.toMatchObject({ code: 'ENOENT' });
+  });
+
+  it.each(['before-resume', 'after-resume', 'before-completed', 'after-completed', 'after-reconcile'])(
+    'resume preserves effects when its worker crashes at %s', async (boundary) => {
+      const { options } = await fixture();
+      const approvalFile = join(options.directory, 'approval');
+      const paused = {
+        ...options,
+        definition: { ...options.definition, resolvedInputs: {
+          wait: true, waitNode: 'last', approvalFile, resumeCrash: boundary, storage: options.storage, retrySafe: false,
+        } },
+      };
+      await expect((await startFixture(paused)).done).resolves.toMatchObject({ kind: 'pause' });
+      await writeFile(approvalFile, 'allow');
+      const resumed = await resumeFixture(paused);
+      const result = await resumed.done;
+      const events = [];
+      for await (const event of createLocalRunStorage(options.storage).eventStore.read({ namespace: 'runner-tests', streamId: 'fixture' })) events.push(event);
+      const needsReconciliation = ['after-resume', 'before-completed', 'after-reconcile'].includes(boundary);
+      expect(result, JSON.stringify(result)).toMatchObject({ kind: needsReconciliation ? 'pause' : 'complete' });
+      expect((await resumed.status()).restartCount).toBe(boundary === 'after-reconcile' ? 2 : 1);
+      const crash = JSON.parse(await readFile(join(options.directory, 'scratch/resume-crash.json'), 'utf8'));
+      expect(crash.boundary).toBe(boundary);
+      expect(() => process.kill(crash.pid, 0)).toThrow();
+      if (boundary === 'after-reconcile') {
+        const secondCrash = JSON.parse(await readFile(join(options.directory, 'scratch/reconcile-crash.json'), 'utf8'));
+        expect(() => process.kill(secondCrash.pid, 0)).toThrow();
+      }
+      for (const node of ['first', 'last']) {
+        if (node === 'last' && boundary === 'after-resume') {
+          await expect(readFile(join(options.directory, 'scratch/last.started'))).rejects.toMatchObject({ code: 'ENOENT' });
+          continue;
+        }
+        expect((await readFile(join(options.directory, `scratch/${node}.started`), 'utf8')).trim().split('\n')).toHaveLength(1);
+      }
+      expect(events.filter((event) => event.type === 'graph:run-started')).toHaveLength(1);
+      expect(events.filter((event) => event.type === 'graph:node-dispatched')).toHaveLength(2);
+      if (needsReconciliation) {
+        expect(events.findLast((event) => event.type === 'graph:node-paused')?.payload)
+          .toMatchObject({ position: 'dag/last/1', request: { kind: 'reconcile-attempt' } });
+        expect(events.filter((event) => event.type === 'graph:node-completed')).toHaveLength(1);
+      } else expect(events.filter((event) => event.type === 'graph:node-completed')).toHaveLength(2);
+    },
+  );
+
+  it('resume preserves restarts already spent before the pause', async () => {
+    const { options } = await fixture();
+    const approvalFile = join(options.directory, 'approval');
+    const paused = {
+      ...options, restart: { ...options.restart, maxRestarts: 1 },
+      definition: { ...options.definition, resolvedInputs: { wait: true, waitNode: 'last', approvalFile, crashOnce: true } },
+    };
+    const initial = await startFixture(paused);
+    await expect(initial.done).resolves.toMatchObject({ kind: 'pause' });
+    expect((await initial.status()).restartCount).toBe(1);
+    await writeFile(approvalFile, 'allow');
+    const resumed = await resumeFixture(paused);
+    await expect(resumed.done).resolves.toMatchObject({ kind: 'fail', code: 'RESTART_EXHAUSTED' });
+    expect((await resumed.status()).restartCount).toBe(1);
+    expect((await readFile(join(options.directory, 'scratch/first.started'), 'utf8')).trim().split('\n')).toHaveLength(2);
+    expect((await readFile(join(options.directory, 'scratch/last.started'), 'utf8')).trim().split('\n')).toHaveLength(1);
   });
 
   it('exhausted backoff is a typed terminal with descendants cleaned', async () => {

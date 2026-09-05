@@ -1,7 +1,9 @@
 export {
   startSupervisedRun,
+  resumeSupervisedRun,
   SupervisedRunError,
   type SupervisedRunOptions,
+  type ResumeSupervisedRunOptions,
   type SupervisedRunHandle,
   type SupervisedRunResult,
   type SupervisedRunBindings,

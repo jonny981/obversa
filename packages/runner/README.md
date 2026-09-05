@@ -1,6 +1,6 @@
 # @obversa/runner
 
-`@obversa/runner` starts, supervises, inspects, and stops bounded Obversa runs.
+`@obversa/runner` starts, supervises, inspects, resumes, and stops bounded Obversa runs.
 It uses the public runtime and engine APIs. Hosts supply the engines and memory;
 the runner does not discover adapters.
 
@@ -27,7 +27,7 @@ pnpm --filter @obversa/runner exec tsx ../../examples/packages/supervised-run.ts
 ```
 
 See the [runner guide](https://docs.obversa.ai/runtime/runner) for the start,
-status, and stop APIs, host module contract, and stored run bounds.
+status, resume, and stop APIs, host module contract, and stored run bounds.
 
 ## Limits
 

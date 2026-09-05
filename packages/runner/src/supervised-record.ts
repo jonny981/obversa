@@ -38,6 +38,16 @@ export async function readSupervision(
   return events;
 }
 
+/** Read lifecycle state without treating proof or callback evidence as a transition. */
+export async function readGraphPosition(storage: RunStorageBinding, runId: string, position: string) {
+  let last: DomainEventEnvelope | undefined;
+  for await (const event of storage.eventStore.read({ namespace: storage.record.namespace, streamId: runId })) {
+    if (['graph:node-dispatched', 'graph:node-paused', 'graph:node-resumed', 'graph:node-completed', 'graph:node-failed'].includes(event.type)
+      && (event.payload as JsonObject).position === position) last = event;
+  }
+  return last;
+}
+
 /** The watchdog writes only while no worker is running. */
 export function supervisionWriter(storage: RunStorageBinding, runId: string) {
   let tail: Promise<void> = Promise.resolve();
