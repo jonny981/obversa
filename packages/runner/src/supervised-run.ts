@@ -83,6 +83,7 @@ export async function startSupervisedRun(options: SupervisedRunOptions): Promise
     throw new SupervisedRunError('INVALID_OPTIONS', 'Timeout plus teardown grace must fit a Node timer.');
   }
   const storage = createLocalRunStorage(options.storage);
+  const storageOptions = { ...options.storage, directory: resolve(options.storage.directory) };
   const runId = validateEventStreamRef({ namespace: storage.record.namespace, streamId: options.definition.runId }).streamId;
   const runRoot = await realpath(options.runRoot);
   const modulePath = resolveHostModule(runRoot, options.module);
@@ -99,7 +100,7 @@ export async function startSupervisedRun(options: SupervisedRunOptions): Promise
   if (await realpath(anchor.root) !== runRoot) {
     throw new SupervisedRunError('WORKSPACE_ROOT', 'The workspace provider must own the worker root.');
   }
-  const locks = join(resolve(options.storage.directory), 'runner-locks', storage.record.namespace);
+  const locks = join(storageOptions.directory, 'runner-locks', storage.record.namespace);
   const lock = join(locks, runId);
   await mkdir(locks, { recursive: true });
   try {
@@ -159,7 +160,7 @@ export async function startSupervisedRun(options: SupervisedRunOptions): Promise
       let cleanupSafe = true;
       try {
         const input: SupervisedWorkerInput = {
-          runId, runRoot, scratchDirectory, storage: options.storage,
+          runId, runRoot, scratchDirectory, storage: storageOptions,
         };
         for (;;) {
           const remaining = deadline - Date.now();
@@ -244,7 +245,7 @@ export async function startSupervisedRun(options: SupervisedRunOptions): Promise
     return Object.freeze({
       done,
       stop: async () => { cancellation.abort(); return await done; },
-      status: async () => await readSupervisedRunStatus({ storage: options.storage, runId }),
+      status: async () => await readSupervisedRunStatus({ storage: storageOptions, runId }),
     });
   } catch (error) {
     if (leaseToken !== undefined) {

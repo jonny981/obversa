@@ -1,7 +1,7 @@
 import { spawn } from 'node:child_process';
 import { chmod, mkdtemp, mkdir, readFile, readdir, realpath, rm, symlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
-import { dirname, join } from 'node:path';
+import { dirname, join, relative } from 'node:path';
 import { setTimeout as delay } from 'node:timers/promises';
 import { fileURLToPath } from 'node:url';
 
@@ -121,6 +121,37 @@ describe('supervised local runs', () => {
       { nodeId: 'first', position: 'dag/first/1', result: { node: 'first', value: 'original' } },
       { nodeId: 'last', position: 'dag/last/1', result: { node: 'last', value: 'original' } },
     ]);
+  });
+
+  it('a relative storage directory uses the caller root when runRoot is a subdirectory', async () => {
+    const { options } = await fixture();
+    const callerDirectory = dirname(options.runRoot);
+    const originalDirectory = process.cwd();
+    process.chdir(callerDirectory);
+    try {
+      const handle = await startFixture({
+        ...options,
+        storage: { ...options.storage, directory: relative(callerDirectory, options.storage.directory) },
+        restart: { ...options.restart, maxRestarts: 0 },
+      });
+      const result = await handle.done;
+      expect(result, JSON.stringify(result)).toMatchObject({ kind: 'complete' });
+      const storage = createLocalRunStorage(options.storage);
+      const records = await readSupervision(storage, 'fixture');
+      expect(records.map((event) => event.type)).toEqual(expect.arrayContaining([
+        'runner:worker-launching', 'runner:worker-started', 'runner:worker-result', 'runner:completed',
+      ]));
+      const events = [];
+      for await (const event of storage.eventStore.read({ namespace: 'runner-tests', streamId: 'fixture' })) events.push(event);
+      expect(events.filter((event) => event.type === 'graph:node-completed').map((event) => event.payload)).toEqual([
+        { nodeId: 'first', position: 'dag/first/1', result: { node: 'first', value: 'original' } },
+        { nodeId: 'last', position: 'dag/last/1', result: { node: 'last', value: 'original' } },
+      ]);
+      process.chdir(options.runRoot);
+      expect(await handle.status()).toMatchObject({ phase: 'completed', restartCount: 0 });
+    } finally {
+      process.chdir(originalDirectory);
+    }
   });
 
   it('a second start on the same run is refused by the process lock', async () => {
