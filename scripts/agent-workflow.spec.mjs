@@ -79,6 +79,7 @@ for (const [stage, branch] of [
   ['D14', 'feat/unattended-runner'],
   ['D15', 'feat/release-v1'],
   ['F4', 'feat/release-readiness'],
+  ['F5', 'feat/release-wording'],
   ['D13', 'feat/lines-v1'],
   ['D11A', 'feat/lines-v1'],
   ['F0', 'feat/factory-v1'],
@@ -107,6 +108,7 @@ for (const [stage, branch] of [
   ['D15', 'feat/lines-v1'],
   ['D15', 'feat/unattended-runner'],
   ['F4', 'feat/factory-v1'],
+  ['F5', 'feat/factory-v1'],
 ]) {
   test(`${stage} refuses the wrong branch ${branch}`, () => {
     const repository = createRepository({ feature: true, branch });

@@ -17,6 +17,7 @@ const stageBranches = {
   D14: 'feat/unattended-runner',
   D15: 'feat/release-v1',
   F4: 'feat/release-readiness',
+  F5: 'feat/release-wording',
 };
 
 export function manageStage(args, options = {}) {
