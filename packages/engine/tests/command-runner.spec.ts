@@ -4,6 +4,7 @@ import { chmodSync, symlinkSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 
 import {
+  commandCleanupCapability,
   OwnedCommandError,
   resolveCommandExecutable,
   runOwnedCommand,
@@ -52,6 +53,24 @@ function request(
 function expectFixtureStopped(directory: string): void {
   expect(fixturePids(directory).some(isProcessAlive)).toBe(false);
 }
+
+describe('command cleanup capability', () => {
+  it('reports the capability of the actual host', () => {
+    expect(commandCleanupCapability()).toBe(
+      process.platform === 'linux' ? 'inherited-owner' : 'observed-processes',
+    );
+  });
+
+  it('reports inherited owner discovery under a Linux platform fixture', () => {
+    const platform = Object.getOwnPropertyDescriptor(process, 'platform')!;
+    try {
+      Object.defineProperty(process, 'platform', { ...platform, value: 'linux' });
+      expect(commandCleanupCapability()).toBe('inherited-owner');
+    } finally {
+      Object.defineProperty(process, 'platform', platform);
+    }
+  });
+});
 
 describe('command resolution', () => {
   it('resolves one executable from an explicit search path', () => {
