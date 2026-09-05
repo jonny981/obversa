@@ -102,6 +102,7 @@ bound graph, node, and engine instances; it does not load host modules.
 Set `runRoot` to the working directory and `module` to a relative file specifier,
 such as `./host.mjs`. The file must remain inside `runRoot` after resolving
 symlinks; a path outside it is refused with `code: 'HOST_MODULE'`.
+A missing entry module is rejected with `code: 'HOST_MODULE'`.
 The module must export:
 
 ```js

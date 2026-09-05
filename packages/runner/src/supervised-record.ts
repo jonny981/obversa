@@ -79,7 +79,15 @@ export function resolveHostModule(runRoot: string, specifier: string): string {
     throw new SupervisedRunError('HOST_MODULE', 'The host module must be inside the run root.');
   }
   const realRoot = realpathSync(lexicalRoot);
-  const realModule = realpathSync(lexicalModule);
+  let realModule: string;
+  try {
+    realModule = realpathSync(lexicalModule);
+  } catch (cause) {
+    if (cause instanceof Error && 'code' in cause && cause.code === 'ENOENT') {
+      throw new SupervisedRunError('HOST_MODULE', 'The host module does not exist.', { cause });
+    }
+    throw cause;
+  }
   const realRelative = relative(realRoot, realModule);
   if (realRelative === '..' || realRelative.startsWith(`..${sep}`) || isAbsolute(realRelative)) {
     throw new SupervisedRunError('HOST_MODULE', 'The host module must be inside the run root.');

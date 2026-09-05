@@ -18,6 +18,9 @@ engine and memory packages track their own versions independently.
   `SystemRoot`, `USERPROFILE`, and `PATHEXT` from the watchdog into runner
   workers. Arbitrary parent variables such as API keys and `NODE_OPTIONS` are
   not inherited; runner identity and ownership markers are injected separately.
+- **Missing host modules:** Report a missing host entry module as a
+  `SupervisedRunError` with `code: 'HOST_MODULE'` instead of exposing the raw
+  filesystem `ENOENT` error.
 
 ## [1.0.0] - 2026-09-05
 

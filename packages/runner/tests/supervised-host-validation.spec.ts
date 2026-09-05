@@ -41,6 +41,19 @@ it('refuses host modules outside the run root, including through a symlink', asy
   }));
 });
 
+it('reports a missing host module as a supervised run error', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'obversa-host-missing-'));
+  roots.push(root);
+  expect(() => resolveHostModule(root, './missing.mjs')).toThrowError(
+    expect.objectContaining({
+      name: 'SupervisedRunError',
+      code: 'HOST_MODULE',
+      message: 'The host module does not exist.',
+      cause: expect.objectContaining({ code: 'ENOENT' }),
+    }),
+  );
+});
+
 it('reports a stored run without a host binding as a supervised run error', async () => {
   const root = await mkdtemp(join(tmpdir(), 'obversa-host-status-'));
   roots.push(root);
