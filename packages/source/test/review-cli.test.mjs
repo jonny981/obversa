@@ -3,8 +3,8 @@
 // surface. In particular a value-taking option with a missing or flag-shaped
 // value must not fall through to reviewing the current directory.
 import assert from "node:assert/strict";
-import { spawnSync } from "node:child_process";
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import { execFileSync, spawn, spawnSync } from "node:child_process";
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -62,6 +62,72 @@ test("the command exits 0 on --help and prints usage on stdout", () => {
   const run = spawnSync(process.execPath, [COMMAND, "--help"], { encoding: "utf8", timeout: 5000 });
   assert.equal(run.status, 0);
   assert.match(run.stdout, /Usage:/);
+});
+
+test("--no-open prints the reachable page URL on stderr and never runs placement", { timeout: 25_000 }, async () => {
+  const directory = mkdtempSync(path.join(os.tmpdir(), "review-cli-no-open-"));
+  const calls = path.join(directory, "placement.calls");
+  const placement = path.join(directory, "placement");
+  let child;
+  let exited;
+  try {
+    writeFileSync(placement, `#!/bin/sh\nprintf 'called\\n' >> '${calls}'\n`);
+    chmodSync(placement, 0o755);
+    const git = (...args) => execFileSync("git", args, { cwd: directory, encoding: "utf8" });
+    git("init", "-q");
+    git("config", "user.name", "Review Test");
+    git("config", "user.email", "review@example.invalid");
+    git("config", "commit.gpgsign", "false");
+    writeFileSync(path.join(directory, "a.txt"), "one\n");
+    git("add", "a.txt");
+    git("commit", "-q", "-m", "seed");
+    writeFileSync(path.join(directory, "a.txt"), "one\ntwo\n");
+    child = spawn(process.execPath, [COMMAND, "--no-open", "--cwd", directory], {
+      env: { ...process.env, OBVERSA_SURFACE_BIN: placement },
+      stdio: ["ignore", "pipe", "pipe"],
+      timeout: 20_000,
+    });
+    exited = new Promise((resolve, reject) => {
+      child.once("error", reject);
+      child.once("close", (code, signal) => resolve({ code, signal }));
+    });
+    let stdout = "";
+    let stderr = "";
+    child.stdout.on("data", (chunk) => { stdout += chunk; });
+    const url = await new Promise((resolve, reject) => {
+      const timer = setTimeout(() => reject(new Error(`no page URL on stderr: ${stderr}`)), 10_000);
+      child.stderr.on("data", (chunk) => {
+        stderr += chunk;
+        const match = /Open the review surface at: (\S+)/.exec(stderr);
+        if (match) { clearTimeout(timer); resolve(new URL(match[1])); }
+      });
+      exited.then(() => { clearTimeout(timer); reject(new Error(`command closed before URL: ${stderr}`)); }, reject);
+    });
+    assert.ok(url.hash.length > 1, "the page URL carries its access token");
+    const headers = { Authorization: `Bearer ${url.hash.slice(1)}`, Origin: url.origin, "Content-Type": "application/json" };
+    const model = await fetch(`${url.origin}/api/model`, { headers, signal: AbortSignal.timeout(5_000) });
+    assert.equal(model.status, 200, "the URL reaches the review's authenticated model");
+    const body = /** @type {{ model: { files: { path: string }[] } }} */ (await model.json());
+    assert.equal(body.model.files[0].path, "a.txt");
+    const submitted = await fetch(`${url.origin}/api/submit`, {
+      method: "POST", headers, signal: AbortSignal.timeout(5_000),
+      body: JSON.stringify({ decision: "approved", annotations: [] }),
+    });
+    assert.equal(submitted.status, 200);
+    const { operationId } = /** @type {{ operationId: string }} */ (await submitted.json());
+    const acknowledged = await fetch(`${url.origin}/api/ack`, {
+      method: "POST", headers, signal: AbortSignal.timeout(5_000), body: JSON.stringify({ operationId }),
+    });
+    assert.equal(acknowledged.status, 200);
+    assert.deepEqual(await exited, { code: 0, signal: null }, stderr);
+    assert.match(stdout, /<<<REVIEW_RESULT_V1>>>/);
+    assert.doesNotMatch(stdout, /Open the review surface at:|http:\/\/127\.0\.0\.1/);
+    assert.equal(existsSync(calls), false, "--no-open must not run the supplied placement command");
+  } finally {
+    child?.kill("SIGKILL");
+    await exited;
+    rmSync(directory, { recursive: true, force: true });
+  }
 });
 
 // A disposable consumer: the command and its argument parser copied beside a
