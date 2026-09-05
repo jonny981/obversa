@@ -1,11 +1,12 @@
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import {
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import fs, {
   mkdtempSync,
   readFileSync,
   rmSync,
   statSync,
   truncateSync,
 } from 'node:fs';
+import { syncBuiltinESMExports } from 'node:module';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
@@ -128,6 +129,48 @@ describe('run supervision', () => {
     });
     expect(progress!.current!.elapsedMs).toBeGreaterThanOrEqual(50);
     expect(progress!.current!.remainingMs).toBeGreaterThan(0);
+  });
+
+  it('reads only the byte-limited tail of a large event stream', () => {
+    const supervisor = startSupervisor({
+      runId: 'large-run',
+      cwd: testHome,
+      title: 'large',
+    });
+    const tailBytes = 256 * 1024;
+    for (const message of ['x'.repeat(tailBytes + 1), 'first tail record', 'last tail record']) {
+      supervisor.sink({ kind: 'log', ts: 1, path: [], level: 'info', message });
+    }
+    const eventsPath = runEventsPath('large-run');
+    const size = statSync(eventsPath).size;
+    expect(size).toBeGreaterThan(tailBytes);
+
+    // Observe real file reads; neither spy replaces the filesystem result.
+    const open = vi.spyOn(fs, 'openSync');
+    const read = vi.spyOn(fs, 'readSync');
+    syncBuiltinESMExports();
+    try {
+      const progress = readRunProgress('large-run', { recent: 3 });
+      const eventOpen = open.mock.calls.findIndex(([path]) => path === eventsPath);
+      expect(eventOpen).toBeGreaterThanOrEqual(0);
+      const openedAt = open.mock.invocationCallOrder[eventOpen]!;
+      const reads: unknown[][] = read.mock.calls.filter(
+        (_, index) => read.mock.invocationCallOrder[index]! > openedAt,
+      );
+      expect(reads.length).toBeGreaterThan(0);
+      let requestedBytes = 0;
+      for (const [, , , length, position] of reads) {
+        expect(position).toBeGreaterThanOrEqual(size - tailBytes);
+        expect(Number(position) + Number(length)).toBeLessThanOrEqual(size);
+        requestedBytes += Number(length);
+      }
+      expect(requestedBytes).toBeLessThanOrEqual(tailBytes);
+      expect(progress?.recent).toEqual(['first tail record', 'last tail record']);
+    } finally {
+      open.mockRestore();
+      read.mockRestore();
+      syncBuiltinESMExports();
+    }
   });
 
   it('stores proof records as JSONL without generating an HTML page', async () => {
