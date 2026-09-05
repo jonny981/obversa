@@ -48,8 +48,8 @@ A run stores its graph definition and resolved plan, including the chosen
 engines, permissions, and contracts. Editing another definition does not
 rewrite that stored plan.
 
-A fresh executor checks that the graph supplied by the host matches the
-stored definition and plan before it runs work. This check does not freeze
+Before running work, a fresh executor checks the stored definition and the
+graph ID, kind, versions and definition hash recorded in the plan. This check does not freeze
 arbitrary node code; your application must supply the intended code when
 it resumes a run.
 
