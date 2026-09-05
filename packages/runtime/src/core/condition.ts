@@ -203,10 +203,12 @@ export function commandSucceeds(
         env,
         all: opts.captureOutput,
       });
-      if (r.exitCode === 0) {
+      if (r.exitCode === 0 && !r.timedOut) {
         return { met: true, reason: `\`${command}\` exited 0` };
       }
-      const baseReason = `\`${command}\` exited ${r.exitCode ?? '?'}`;
+      const baseReason = r.timedOut
+        ? `\`${command}\` timed out after ${opts.timeoutMs} ms`
+        : `\`${command}\` exited ${r.exitCode ?? '?'}`;
       const tail = opts.captureOutput
         ? commandFailureTail(r.all ?? '', env)
         : '';

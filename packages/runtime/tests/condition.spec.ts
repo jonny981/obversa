@@ -1,3 +1,6 @@
+import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { describe, it, expect } from 'vitest';
 
 import {
@@ -187,6 +190,57 @@ describe('quorum', () => {
 });
 
 describe('commandSucceeds', () => {
+  it('honours pinned cwd and names the command timeout', async () => {
+    const root = mkdtempSync(join(tmpdir(), 'obversa-command-gate-'));
+    const cwd = join(root, 'pinned');
+    mkdirSync(cwd);
+    writeFileSync(join(cwd, 'marker'), 'expected');
+    try {
+      const ready = await untilResult(
+        commandSucceeds(
+          process.execPath,
+          ['-e', "if (require('node:fs').readFileSync('marker', 'utf8') !== 'expected') process.exit(1)"],
+          { cwd },
+        ),
+        { ...noEngine, cwd: root },
+      );
+      expect(ready?.met).toBe(true);
+      const timed = await untilResult(
+        commandSucceeds(
+          process.execPath,
+          ['-e', 'setTimeout(() => process.exit(0), 1500)'],
+          { cwd, timeoutMs: 500 },
+        ),
+        { ...noEngine, cwd: root },
+      );
+      expect(timed?.met).toBe(false);
+      expect(timed?.reason).toBe(`\`${process.execPath}\` timed out after 500 ms`);
+      const handled = await untilResult(
+        commandSucceeds(
+          process.execPath,
+          ['-e', `
+            const fs = require('node:fs');
+            process.on('SIGTERM', () => {
+              fs.writeFileSync('stopped', 'handled');
+              process.exit(0);
+            });
+            fs.writeFileSync('ready', 'ready');
+            setTimeout(() => process.exit(0), 1500);
+          `],
+          { cwd, timeoutMs: 500 },
+        ),
+        { ...noEngine, cwd: root },
+      );
+      expect(readFileSync(join(cwd, 'ready'), 'utf8')).toBe('ready');
+      expect(readFileSync(join(cwd, 'stopped'), 'utf8')).toBe('handled');
+      expect(handled?.met).toBe(false);
+      expect(handled?.reason).toBe(`\`${process.execPath}\` timed out after 500 ms`);
+      expect(handled?.output).toContain('exit: 0');
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
   it('is met when the command exits 0', async () => {
     const { outcome } = await run(
       loop({
