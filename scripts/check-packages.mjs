@@ -62,34 +62,22 @@ function exportTargets(value, output = []) {
   return output;
 }
 
-function assertPackedPackage(definition, tarball) {
+export function assertPackedPackage(definition, tarball) {
   const entries = archiveEntries(tarball).map(withoutChunkHash);
   const required = ['package/LICENSE', 'package/README.md', 'package/package.json'];
   const failures = [];
   const pinnedFiles = EXPECTED_FILES[definition.name];
 
+  if (!pinnedFiles) throw new Error(`${definition.name}: missing pinned file list`);
+
   for (const path of required) {
     if (!entries.includes(path)) failures.push(`missing ${path.slice('package/'.length)}`);
   }
-  if (pinnedFiles) {
-    for (const path of entries.filter((path) => !pinnedFiles.includes(path))) {
-      failures.push(`unexpected archive path ${path}`);
-    }
-    for (const path of pinnedFiles.filter((path) => !entries.includes(path))) {
-      failures.push(`missing ${path.slice('package/'.length)}`);
-    }
-  } else {
-    for (const path of entries) {
-      if (!required.includes(path) && !path.startsWith('package/dist/')) {
-        failures.push(`unexpected archive path ${path}`);
-      }
-    }
-    if (!entries.some((path) => path.startsWith('package/dist/') && path.endsWith('.js'))) {
-      failures.push('missing built JavaScript');
-    }
-    if (!entries.some((path) => path.startsWith('package/dist/') && path.endsWith('.d.ts'))) {
-      failures.push('missing TypeScript declarations');
-    }
+  for (const path of entries.filter((path) => !pinnedFiles.includes(path))) {
+    failures.push(`unexpected archive path ${path}`);
+  }
+  for (const path of pinnedFiles.filter((path) => !entries.includes(path))) {
+    failures.push(`missing ${path.slice('package/'.length)}`);
   }
 
   const manifest = JSON.parse(archiveText(tarball, 'package/package.json'));

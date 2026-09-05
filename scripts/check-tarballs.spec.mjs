@@ -11,6 +11,7 @@ import { dirname, join } from "node:path";
 import test from "node:test";
 
 import { checkTarball } from "./check-tarballs.mjs";
+import { assertPackedPackage } from "./check-packages.mjs";
 
 const fixture = mkdtempSync(join(tmpdir(), "obversa-tarball-spec-"));
 test.after(() => rmSync(fixture, { recursive: true, force: true }));
@@ -94,4 +95,22 @@ test("a build-hashed chunk matches its chunk-* pin, and a missing chunk still fa
   assert.deepEqual(checkTarball(directory, { expectedFiles: pinned }), [], "the hashed chunk name must satisfy the chunk-* pin");
   const failures = checkTarball(directory, { expectedFiles: [...pinned, "package/dist/chunk-*.js.map"] });
   assert.ok(failures.some((line) => line.includes("missing") && line.includes("chunk-*.js.map")), `a pinned chunk that is not packed must be named: ${JSON.stringify(failures)}`);
+});
+
+test("the packed archive checker refuses a package with no pinned file list", () => {
+  const directory = pkg("unpinned-archive", {
+    publishConfig: { access: "public", registry: "https://publish.invalid.invalid/", "@fixture:registry": "https://publish.invalid.invalid/" },
+    exports: { ".": { types: "./dist/index.d.ts", default: "./dist/index.js" } },
+  }, {
+    "LICENSE": "MIT\n",
+    "README.md": "Fixture package.\n",
+    "dist/index.js": "export const a = 1;\n",
+    "dist/index.d.ts": "export declare const a: number;\n",
+  });
+  const packed = spawnSync("pnpm", ["--dir", directory, "pack", "--pack-destination", fixture], { encoding: "utf8" });
+  assert.equal(packed.status, 0, `${packed.stdout}\n${packed.stderr}`);
+  assert.throws(
+    () => assertPackedPackage({ name: "@fixture/unpinned-archive", version: "1.0.0" }, join(fixture, "fixture-unpinned-archive-1.0.0.tgz")),
+    /@fixture\/unpinned-archive: missing pinned file list/,
+  );
 });
