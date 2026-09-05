@@ -12,5 +12,6 @@ export {
 export {
   readSupervisedRunStatus,
   type SupervisedRunStatus,
+  type SupervisedRunUsage,
   type ReadSupervisedRunStatusOptions,
 } from './supervised-status.js';

@@ -1,4 +1,5 @@
 import { spawn } from 'node:child_process';
+import { randomUUID } from 'node:crypto';
 import { chmod, mkdtemp, mkdir, readFile, readdir, realpath, rm, symlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { dirname, join, relative } from 'node:path';
@@ -11,7 +12,7 @@ import { inspectOwnedProcessTree } from '@obversa/engine/command';
 import * as runtime from '@obversa/runtime';
 import * as runner from '../src/index.js';
 import { createLocalRunStorage } from '@obversa/runtime/storage/local';
-import { readSupervision, supervisionWriter } from '../src/supervised-record.js';
+import { hostModuleDigest, readSupervision, supervisionWriter, type SupervisedHostRecord } from '../src/supervised-record.js';
 import { tmpRepo, cleanupRepos } from './git-helpers.js';
 
 const roots: string[] = [];
@@ -66,6 +67,25 @@ async function startFixture(options: runner.SupervisedRunOptions) {
   const handle = await runner.startSupervisedRun(options);
   handles.push(handle);
   return handle;
+}
+
+async function storedUsageFixture() {
+  const { options } = await fixture(true);
+  const storage = createLocalRunStorage(options.storage);
+  const host: SupervisedHostRecord = {
+    schemaVersion: 1, module: options.module,
+    digest: await hostModuleDigest(join(options.runRoot, 'host.mjs')),
+    cleanupCapability: 'observed-processes', limits: options.limits,
+  };
+  await runtime.persistRunDefinition(storage, {
+    ...options.definition, eventId: randomUUID(), timestamp: new Date().toISOString(),
+    workspaceBinding: null,
+    hostBinding: { bytes: Buffer.from(JSON.stringify(host)), mediaType: 'application/json' },
+  });
+  return {
+    append: supervisionWriter(storage, 'fixture'),
+    status: () => runner.readSupervisedRunStatus({ storage: options.storage, runId: 'fixture' }),
+  };
 }
 
 async function resumeFixture(options: runner.SupervisedRunOptions, position = 'dag/last/1') {
@@ -841,6 +861,82 @@ describe('supervised local runs', () => {
     const evaluations = (await readFile(join(options.runRoot, 'module-evaluations.log'), 'utf8')).trim().split('\n');
     expect(evaluations).toHaveLength(2);
     expect(new Set(evaluations).size).toBe(2);
+  });
+
+  it('status preserves partial engine usage after a real worker crash and retry', async () => {
+    const { options } = await fixture(true);
+    const handle = await startFixture({
+      ...options, definition: { ...options.definition, resolvedInputs: { engineCrashOnce: true } },
+    });
+    await expect(handle.done).resolves.toEqual({ kind: 'complete', output: { nodes: {
+      first: { node: 'first', value: 'original' },
+      last: { node: 'last', value: 'original' },
+    } } });
+    const records = await readSupervision(createLocalRunStorage(options.storage), 'fixture');
+    expect(records.filter((event) => [
+      'runner:engine-started', 'runner:engine-completed', 'runner:worker-crashed',
+      'runner:backoff', 'runner:completed',
+    ].includes(event.type)).map((event) => event.type)).toEqual([
+      'runner:engine-started', 'runner:worker-crashed', 'runner:backoff',
+      'runner:engine-started', 'runner:engine-completed',
+      'runner:engine-started', 'runner:engine-completed', 'runner:completed',
+    ]);
+    const starts = records.filter((event) => event.type === 'runner:engine-started');
+    const first = starts[0]!.payload as runtime.JsonObject;
+    expect(first.attemptId).toEqual(expect.any(String));
+    expect(starts[1]!.payload).toMatchObject({ nodeId: 'first', attemptId: first.attemptId });
+    const status = await handle.status();
+    expect(status.restartCount).toBe(1);
+    expect(status.usage).toEqual([
+      { nodeId: 'first', usage: { kind: 'partial', inputTokens: 7, outputTokens: 3, unknownCalls: 1 } },
+      { nodeId: 'last', usage: { kind: 'reported', inputTokens: 7, outputTokens: 3 } },
+    ]);
+  });
+
+  it('status preserves exact partial usage totals and the crash gap through later receipts', async () => {
+    const { append, status } = await storedUsageFixture();
+    const call = { nodeId: 'first', attemptId: `sha256:${'2'.repeat(64)}` };
+    await append('engine-started', call);
+    await append('engine-completed', { ...call, usage: { kind: 'reported', inputTokens: 7, outputTokens: 3 } });
+    await append('engine-started', call);
+    await append('worker-crashed', {});
+    await append('engine-started', call);
+    await append('engine-completed', { ...call, usage: { kind: 'reported', inputTokens: 11, outputTokens: 5 } });
+    expect((await status()).usage[0]!.usage).toEqual({ kind: 'partial', inputTokens: 18, outputTokens: 8, unknownCalls: 1 });
+    await append('engine-started', call);
+    await append('engine-completed', { ...call, usage: { kind: 'reported', inputTokens: 2, outputTokens: 1 } });
+    expect((await status()).usage[0]!.usage).toEqual({ kind: 'partial', inputTokens: 20, outputTokens: 9, unknownCalls: 1 });
+  });
+
+  it('status keeps usage unknown when no call has a measured receipt', async () => {
+    const { append, status } = await storedUsageFixture();
+    expect((await status()).usage[0]!.usage).toEqual({ kind: 'unknown' });
+    await append('engine-started', { nodeId: 'first' });
+    await append('worker-crashed', {});
+    await append('engine-started', { nodeId: 'first' });
+    await append('engine-failed', { nodeId: 'first', usage: { kind: 'unknown' } });
+    expect((await status()).usage[0]!.usage).toEqual({ kind: 'unknown' });
+  });
+
+  it('status reports usage when every call has a measured receipt', async () => {
+    const { append, status } = await storedUsageFixture();
+    await append('engine-started', { nodeId: 'first' });
+    await append('engine-completed', { nodeId: 'first', usage: { kind: 'reported', inputTokens: 7, outputTokens: 3 } });
+    await append('engine-started', { nodeId: 'first' });
+    await append('engine-completed', { nodeId: 'first', usage: { kind: 'reported', inputTokens: 11, outputTokens: 5 } });
+    expect((await status()).usage[0]!.usage).toEqual({ kind: 'reported', inputTokens: 18, outputTokens: 8 });
+  });
+
+  it('status includes still-open calls in partial usage', async () => {
+    const { append, status } = await storedUsageFixture();
+    await append('engine-started', { nodeId: 'first' });
+    await append('engine-completed', { nodeId: 'first', usage: { kind: 'reported', inputTokens: 7, outputTokens: 3 } });
+    await append('engine-started', { nodeId: 'first' });
+    expect((await status()).usage[0]!.usage).toEqual({ kind: 'partial', inputTokens: 7, outputTokens: 3, unknownCalls: 1 });
+    await append('engine-failed', { nodeId: 'first', usage: { kind: 'unknown' } });
+    await append('engine-started', { nodeId: 'first' });
+    await append('engine-failed', { nodeId: 'first', usage: { kind: 'unknown' } });
+    expect((await status()).usage[0]!.usage).toEqual({ kind: 'partial', inputTokens: 7, outputTokens: 3, unknownCalls: 2 });
   });
 
   it('status preserves measured engine usage on completion and incomplete failure', async () => {

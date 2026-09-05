@@ -9,6 +9,13 @@ import { createLocalRunStorage, type LocalRunStorageOptions } from '@obversa/run
 import { readSupervision, SupervisedRunError, type SupervisedHostRecord } from './supervised-record.js';
 import { localSupervisedCheckpoint } from './supervised-checkpoint.js';
 
+export type SupervisedRunUsage = UsageReceipt | {
+  readonly kind: 'partial';
+  readonly inputTokens: number;
+  readonly outputTokens: number;
+  readonly unknownCalls: number;
+};
+
 export interface SupervisedRunStatus {
   readonly phase: 'starting' | 'running' | 'recovering' | 'backoff' | 'completed' | 'paused' | 'failed' | 'stopped';
   readonly cleanupCapability: CommandCleanupCapability;
@@ -28,9 +35,9 @@ export interface SupervisedRunStatus {
     readonly startedAt: string;
     readonly elapsedMs: number;
     readonly remainingTimeoutMs: number | null;
-    readonly usage: UsageReceipt;
+    readonly usage: SupervisedRunUsage;
   }[];
-  readonly usage: readonly { readonly nodeId: string; readonly usage: UsageReceipt }[];
+  readonly usage: readonly { readonly nodeId: string; readonly usage: SupervisedRunUsage }[];
 }
 
 export interface ReadSupervisedRunStatusOptions {
@@ -47,26 +54,36 @@ export async function readSupervisedRunStatus(options: ReadSupervisedRunStatusOp
   }
   const host = JSON.parse(Buffer.from(loaded.hostBindingBytes).toString('utf8')) as SupervisedHostRecord;
   const records = await readSupervision(storage, options.runId);
-  const usageTotals = new Map<string, { pending: number; unknown: boolean; calls: number; input: number; output: number }>();
+  const usageTotals = new Map<string, { pending: number; unknown: number; reported: number; input: number; output: number }>();
   for (const record of records) {
+    if (record.type === 'runner:worker-crashed') {
+      for (const total of usageTotals.values()) {
+        total.unknown += total.pending;
+        total.pending = 0;
+      }
+      continue;
+    }
     if (!['runner:engine-started', 'runner:engine-completed', 'runner:engine-failed'].includes(record.type)) continue;
     const payload = record.payload as JsonObject;
     const nodeId = String(payload.nodeId);
-    const total = usageTotals.get(nodeId) ?? { pending: 0, unknown: false, calls: 0, input: 0, output: 0 };
-    if (record.type === 'runner:engine-started') { total.pending += 1; total.calls += 1; }
+    const total = usageTotals.get(nodeId) ?? { pending: 0, unknown: 0, reported: 0, input: 0, output: 0 };
+    if (record.type === 'runner:engine-started') total.pending += 1;
     else {
       total.pending -= 1;
       const receipt = payload.usage as UsageReceipt;
-      if (receipt.kind === 'unknown') total.unknown = true;
-      else { total.input += receipt.inputTokens; total.output += receipt.outputTokens; }
+      if (receipt.kind === 'unknown') total.unknown += 1;
+      else { total.reported += 1; total.input += receipt.inputTokens; total.output += receipt.outputTokens; }
     }
     usageTotals.set(nodeId, total);
   }
   const usage = loaded.resolvedPlan.plan.nodes.map((node) => {
     const total = usageTotals.get(node.id);
-    const receipt: UsageReceipt = total === undefined || total.calls === 0 || total.pending !== 0 || total.unknown
+    const receipt: SupervisedRunUsage = total === undefined || total.reported === 0
       || !Number.isSafeInteger(total.input) || !Number.isSafeInteger(total.output)
-      ? { kind: 'unknown' } : { kind: 'reported', inputTokens: total.input, outputTokens: total.output };
+      ? { kind: 'unknown' }
+      : total.unknown + total.pending > 0
+        ? { kind: 'partial', inputTokens: total.input, outputTokens: total.output, unknownCalls: total.unknown + total.pending }
+        : { kind: 'reported', inputTokens: total.input, outputTokens: total.output };
     return { nodeId: node.id, usage: receipt };
   });
   const started = records.find((event) => event.type === 'runner:started');

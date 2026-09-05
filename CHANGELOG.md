@@ -11,6 +11,9 @@ engine and memory packages track their own versions independently.
 
 ### Fixed
 
+- **Usage after worker crashes:** Preserve measured node totals as partial
+  usage when calls lack receipts. Token totals are measured lower bounds,
+  and `unknownCalls` keeps crash gaps visible after successful retries.
 - **Recorded runner results:** Preserve a durably recorded worker result when
   stop or timeout occurs before worker exit, after verified cleanup and lease
   release. Cleanup failures still take precedence.

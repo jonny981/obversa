@@ -70,6 +70,15 @@ export async function bindRun({ definition, scratchDirectory }) {
       engine: {
         name: 'fixture',
         async run(request) {
+          if (input.engineCrashOnce) {
+            let crash = true;
+            try { await writeFile(join(scratchDirectory, 'engine-crashed'), String(process.pid), { flag: 'wx' }); }
+            catch (error) { if (error.code === 'EEXIST') crash = false; else throw error; }
+            if (crash) {
+              process.kill(process.pid, 'SIGKILL');
+              await new Promise(() => {});
+            }
+          }
           const evidence = {
             usage: { kind: 'reported', inputTokens: 7, outputTokens: 3 },
             requested: selection, effective: selection,

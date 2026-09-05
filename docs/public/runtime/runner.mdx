@@ -262,9 +262,20 @@ fields before treating the workspace as released.
 
 `active` contains all recorded active node occurrences while the worker is
 alive. Each entry has its node ID, unchanged position, plan phase, start time,
-elapsed time, remaining node timeout, and usage state. Unknown usage is not zero.
-The top-level `usage` list keeps recorded totals by node after completion.
-An unreported or unfinished engine call makes that node's total unknown.
+elapsed time, remaining node timeout, and usage state. Each active entry uses
+its node's total. The top-level `usage` list retains node totals after completion.
+The runner exports `SupervisedRunUsage` with three states:
+
+- **Reported:** Every engine call has a measured receipt.
+- **Partial:** At least one call has a measured receipt and at least one does
+  not. `inputTokens` and `outputTokens` are measured lower bounds;
+  `unknownCalls` counts calls without receipts, including still-open calls.
+- **Unknown:** No call has a measured receipt, or measured totals exceed the
+  safe integer range.
+
+Missing usage is not zero. A later successful retry adds its measured tokens
+without erasing the gap left by a crashed call. Measured receipts from failed
+calls also contribute to the totals.
 
 Graph phases group nodes for display. They do not define execution parents.
 Position strings identify occurrences; the status reader does not split them
