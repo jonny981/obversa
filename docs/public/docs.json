@@ -5,8 +5,8 @@
   "description": "Public documentation for the Obversa packages",
   "colors": {
     "primary": "#1C7C54",
-    "light": "#F4F8F0",
-    "dark": "#1B512D"
+    "light": "#73E2A7",
+    "dark": "#1C7C54"
   },
   "logo": {
     "light": "/logo-light.svg",
