@@ -18,12 +18,11 @@ check and release script read that same list.
 2. **Set package versions.** Update each allowlisted package manifest. The
    workspace root remains private and is never published.
 
-3. **Verify the exact commit.** Run the newest stage chain, then pack checks:
+3. **Verify the exact commit.** Run the stage chain, which includes the
+   tarball check and changelog gate:
 
    ```bash
    pnpm verify:d15
-   pnpm check:tarballs
-   node scripts/changelog-gate.mjs
    ```
 
 4. **Create one repository tag.** Tag the gate-passed commit and push it:
@@ -33,8 +32,8 @@ check and release script read that same list.
    git push origin v1.0.0
    ```
 
-5. **Read the workflow record.** The `Release` workflow runs the stage chain,
-   tarball check, and changelog gate. It never publishes packages.
+5. **Read the workflow record.** The `Release` workflow runs `pnpm verify:d15`,
+   including the tarball check and changelog gate. It never publishes packages.
 
 6. **Approve the destination.** Jonny names the real npm registry before
    publishing. No publish command runs without that approval.

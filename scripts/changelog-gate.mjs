@@ -1,8 +1,8 @@
 #!/usr/bin/env node
 /**
  * The changelog gate: refuse to publish a version the changelog does not
- * describe. The Release workflow runs this after the newest verify stage and
- * pnpm check:tarballs. This script is not a prepublishOnly hook. That hook
+ * describe. The Release workflow runs pnpm verify:d15, which chains the
+ * tarball check and this gate. This script is not a prepublishOnly hook. That hook
  * is the publish allowlist, and the allowlist requires an exact command.
  * A tarball publish also skips package hooks, so scripts/release.mjs is the
  * only publishing path.
