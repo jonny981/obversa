@@ -11,6 +11,18 @@ engine and memory packages track their own versions independently.
 
 ### Added
 
+- **Review identity records:** Every engine call managed by the graph executor
+  records its requested and reported adapter, provider, model family, and
+  model, including primary and fallback calls and calls without a reported
+  identity. Review completion
+  checks generator and repair history against reported reviewer identities,
+  including cached passes. Unknown writer calls count as their declared
+  targets; data-only nodes have no engine identity.
+- **Review-loop graph type 3:** Generator and repair targets, including all
+  declared substitutions, cannot share a provider or model family with any
+  review target or substitution. This rule applies without reviewer diversity
+  enabled. Stored graph type 1 and 2 plans are refused before execution.
+
 - **Host-selected worker environment:** Accept an optional readonly
   `environmentVariables` list on start and resume. Copy only present values of
   those names from the watchdog, without storing credentials in run inputs or

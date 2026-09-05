@@ -15,6 +15,7 @@ When only plugin code changes, ship a runtime PATCH release, for example
 `1.0.0` to `1.0.1`. Increase the changed plugin's own version too. Republish
 the runtime at its new version alongside the changed plugin. The repository
 tag and the release heading in `CHANGELOG.md` use the new runtime version.
+Label the changelog entry as a runtime PATCH release for a plugin-only change.
 
 ## The steps
 
@@ -56,9 +57,10 @@ tag and the release heading in `CHANGELOG.md` use the new runtime version.
 6. **Approve the destination.** Jonny names the real npm registry before
    publishing. No publish command runs without that approval.
 
-7. **Publish through the guarded script.** Run the script once for each name
-   in `scripts/publish-allowlist.json` from a clean `main` checkout at the
-   repository tag. Six public packages use `packages/<name>`; eight plugin
+7. **Publish through the guarded script.** For `v1.0.0`, run the script once
+   for every name in `scripts/publish-allowlist.json` (fourteen packages) from
+   a clean `main` checkout at the repository tag. Six public packages use
+   `packages/<name>`; eight plugin
    packages use `plugins/<name>` (six engine adapters and two memory adapters):
 
    ```bash

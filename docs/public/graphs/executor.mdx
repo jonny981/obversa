@@ -30,9 +30,10 @@ most one live fallback from that order. Only a failure that means the lane is
 dead, such as bad credentials or a missing model, can move to the fallback. A
 rate limit, timeout, policy pause, or denied action does not run again elsewhere.
 
-Each dead-lane event records both the selected identity and the identity the
-engine reported. Stored facts and later routing use the same provider and model
-key. Later dispatches skip either identity. If every declared target is dead,
+Each dead-lane event records the selected identity and the engine's reported
+identity when available. Without a report, it uses the selected identity for
+routing. Stored facts and later routing use the same provider and model key.
+Later dispatches skip either identity. If every declared target is dead,
 no engine runs. The executor records `ENGINE_UNAVAILABLE` as a normal node
 failure so the graph can retry, fail, or recover in its usual way.
 
@@ -60,6 +61,27 @@ uncertain.
 
 An empty decision is valid only when an attempt is already in flight. The
 executor rejects a second dispatch record for the same position.
+
+## Engine identity records
+
+Each engine call through the executor records a version-1
+`graph:engine-attempt-recorded` event before fallback routing or the node's
+result. Its `EngineAttemptRecordedPayload` contains the node id, position,
+sequence, requested identity, and reported effective identity. Each
+`GraphEngineIdentity` contains the adapter, provider, model family, and model.
+Provider, model family, and model can be null when the engine does not report
+them. An unknown effective identity is null.
+
+The sequence starts at 1 for each position and continues across fallback calls
+and resume. Recovery of a started, unfinished engine node adds a record with
+both identities null before resuming or pausing it. This records uncertainty;
+it does not establish the exact number of calls before the process stopped.
+Data-only nodes and recorded action-policy waits have no recovery identity.
+
+Replay validates these records before passing them to the graph reducer.
+A receipt that cannot be saved stops execution before fallback or completion.
+The records describe what the bound engine reported; they do not inspect calls
+made inside an adapter or wrapper.
 
 ## Resume after a process stops
 

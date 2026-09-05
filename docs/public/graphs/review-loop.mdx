@@ -17,11 +17,11 @@ From an Obversa checkout, run:
 pnpm example:review-loop
 ```
 
-The example records two valid passes from separate providers and model
-families. It prints this JSON report:
+The example uses scripted events for two passes from separate providers and
+model families. It does not call an engine. It prints this JSON report:
 
 ```json
-{"decision":{"kind":"complete","output":{"iterations":1,"restarts":0,"seats":{"claude-review":"accepted","codex-review":"accepted"},"findings":[]}},"events":8,"planDigest":"sha256:eb9d0cf0279a1e8a735c69b20e3786042c942e8f7fa69b9431d4b89760e8ae54","bounds":{"dispatches":{"min":{"kind":"known","value":4},"max":{"kind":"known","value":11}},"maxConcurrency":{"kind":"known","value":2},"maxFanOut":{"kind":"known","value":2}}}
+{"decision":{"kind":"complete","output":{"iterations":1,"restarts":0,"seats":{"claude-review":"accepted","codex-review":"accepted"},"findings":[]}},"events":10,"planDigest":"sha256:499b4c4187dfb574d3a22653145a0b3289c7c6ed25eb106eb981ae86f4136aa1","bounds":{"dispatches":{"min":{"kind":"known","value":4},"max":{"kind":"known","value":11}},"maxConcurrency":{"kind":"known","value":2},"maxFanOut":{"kind":"known","value":2}}}
 ```
 
 The clean-consumer check compiles and runs the same source from the packed
@@ -89,16 +89,21 @@ const graph = compileGraph(convergence, definition);
 
 - **Node records:** The form accepts dispatch, completion, failure, pause, and
   resume records for each node attempt.
+- **Engine records:** Each call through the graph executor records its
+  requested and reported adapter, provider, model family, and model in an
+  `engine-attempt-recorded` event. A primary call and a fallback call have
+  separate records. A call
+  without a reported identity records `effective: null`.
 - **Review records:** A seat pass includes its confidence, input hashes, and
   workspace fingerprint. Evaluator evidence also names one proof artifact
   digest. Every seat dispatch receives that digest, and every seat result must
   echo it. A missing or changed digest makes that result invalid and dispatches
   the seat again while its retry limit permits. Findings from that result cannot
-  enter repair inputs or finding counts. The seat's lane declares the
-  provider and model family. `evidencePaths` names the input hashes that can
+  enter repair inputs or finding counts. The seat's engine record supplies
+  its provider and model family. `evidencePaths` names the input hashes that can
   invalidate that seat; omitting it makes every input hash relevant. The form
-  checks whether a pairwise-distinct provider and model-family subset meets the
-  quorum.
+  checks whether the accepted passes meet the quorum. With `requireDiversity`,
+  that quorum must contain pairwise-distinct providers and model families.
 - **Repair records:** Findings can send the form to its repair node. A later
   cycle keeps valid seat passes and reruns invalid seats.
 - **Policy records:** New evaluator evidence invalidates each seat whose named
@@ -110,12 +115,37 @@ pauses the run. `ENGINE_UNAVAILABLE` skips a declared skippable seat and pauses
 for a required seat. Other node failures use the declared retry cap before the
 required seat pauses as unresolved.
 
+## Excluding the writer
+
+For engine calls managed by the graph executor, a reviewer cannot count toward
+the quorum if its reported provider or model family matches any writer
+or repair call.
+This check applies even when `requireDiversity` is false. It also applies to
+a cached pass after a repair. A reviewer without a reported provider and
+model family cannot count toward the quorum.
+
+The definition must keep every writer and repair target, including all
+declared substitutions, separate from every review target and substitution
+by both provider and model family. Different adapters, models, or lane names
+do not remove a conflict. Skippable seats follow the same rule.
+
+The guarantee is proven on what the engine reported; a call that died before
+reporting counts as its declared targets. The executor records an unknown
+identity when it recovers an unfinished engine attempt. The run can resume
+and complete with reviewers outside the writer's declared set. The runtime
+does not independently verify the provider behind an engine's report.
+Calls made inside an engine adapter or wrapper are not recorded separately.
+The runtime uses only the identity that engine reports.
+
+Data-only nodes have no engine identity. Their results do not establish
+provider separation for work performed outside the runtime's engine calls.
+
 ## Stored plans and evaluator failures
 
-The convergence graph type uses version 2. A stored plan for version 1 is
+The convergence graph type uses version 3. A stored plan for version 1 or 2 is
 refused by `createGraphExecutor` with `STORED_GRAPH_MISMATCH` before a node
 starts. The executor does not convert the stored plan. Start a new run with a
-plan compiled from version 2 to use this evidence contract.
+plan compiled from version 3 to use this evidence contract.
 
 When the evaluator completes without valid review evidence, the form returns
 `fail` with code `CONVERGENCE_REVIEW_EVIDENCE_INVALID`. It dispatches no review

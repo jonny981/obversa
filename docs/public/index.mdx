@@ -13,8 +13,10 @@ choices.
 
 - Pipeline: ordered stages on the durable graph executor. See
   [Built-in pipeline](/graphs/pipeline).
-- Review loop: writer and reviewer roles use separate lanes. The review loop
-  can require a diverse quorum of reviewers. See [Review loop](/graphs/review-loop).
+- **Review loop:** For engine calls managed by the graph executor, accepted reviewers
+  share neither the writer's provider nor its model family, based on engine reports.
+  Calls without a writer report count as all declared writer targets. The loop
+  can also require a diverse quorum. See [Review loop](/graphs/review-loop).
 - Callback gate: one structured answer through a replaceable router. See
   [Callback gate](/graphs/callback-gate).
 - Crash-safe resume: a fresh executor recovers recorded progress; an uncertain
