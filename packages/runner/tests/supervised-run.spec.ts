@@ -1269,6 +1269,31 @@ process.stdout.write(JSON.stringify(await handle.done));
     expect((await readFile(join(options.directory, 'scratch/last.started'), 'utf8')).trim().split('\n')).toHaveLength(1);
   });
 
+  it('a restart-time capture failure is typed and launches no replacement', async () => {
+    const { options } = await fixture();
+    const capture = options.workspace.capture.bind(options.workspace);
+    let calls = 0;
+    const workspace = { ...options.workspace, capture: async () => {
+      calls += 1;
+      if (calls === 2) throw new Error('Injected restart capture failure.');
+      return await capture();
+    } };
+    const handle = await startFixture({
+      ...options, workspace,
+      definition: { ...options.definition, resolvedInputs: { crash: true } },
+    });
+    await expect(handle.done).resolves.toMatchObject({ kind: 'fail', code: 'WORKSPACE_ANCHOR_WRITE' });
+    expect(await handle.status()).toMatchObject({ phase: 'failed', workerAlive: false, cleanupVerified: true, leaseRetained: false });
+    const records = await readSupervision(createLocalRunStorage(options.storage), 'fixture');
+    expect(records.filter((event) => event.type === 'runner:worker-launching')).toHaveLength(1);
+    expect(records.some((event) => event.type === 'runner:worker-crashed')).toBe(true);
+    expect(records.some((event) => event.type === 'runner:restart-anchor')).toBe(false);
+    expect(await readdir(join(options.storage.directory, 'runner-locks/runner-tests'))).toEqual([]);
+    const lease = await options.workspace.acquireLease('after-restart-capture-failure', 'fixture', await capture());
+    expect(lease.ok).toBe(true);
+    if (lease.ok) await options.workspace.releaseLease(lease.token);
+  });
+
   it('exhausted backoff is a typed terminal with descendants cleaned', async () => {
     const { options } = await fixture();
     const handle = await startFixture({ ...options, definition: { ...options.definition, resolvedInputs: { crash: true } } });

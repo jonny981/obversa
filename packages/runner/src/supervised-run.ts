@@ -363,7 +363,11 @@ async function superviseRun(options: SupervisedRunOptions, resume?: {
             await release();
             return await finish({ kind: 'fail', code: 'RESTART_EXHAUSTED', message: 'The worker restart limit was reached.' });
           }
-          anchor = await options.workspace.capture();
+          try {
+            anchor = await options.workspace.capture();
+          } catch (cause) {
+            throw new SupervisedRunError('WORKSPACE_ANCHOR_WRITE', 'The restart workspace anchor could not be captured.', { cause });
+          }
           await append('restart-anchor', { anchor, restartCount });
           await release();
           const backoffMs = Math.min(options.restart.maxBackoffMs, options.restart.initialBackoffMs * 2 ** restartCount);
