@@ -225,11 +225,15 @@ async function superviseRun(options: SupervisedRunOptions, resume?: {
       } catch (error) { leaseReleaseFailed = true; throw error; }
     };
     const savePauseAnchor = async (snapshot: WorkspaceAnchor): Promise<ArtifactReference> => {
-      const anchorArtifact = await storage.artifactStore.write({ namespace: storage.record.namespace, runId }, {
-        bytes: Buffer.from(JSON.stringify(snapshot)), mediaType: 'application/json', purpose: 'runner-pause-anchor', contentMode: 'state',
-      });
-      await append('pause-anchor', { anchorArtifact });
-      return anchorArtifact;
+      try {
+        const anchorArtifact = await storage.artifactStore.write({ namespace: storage.record.namespace, runId }, {
+          bytes: Buffer.from(JSON.stringify(snapshot)), mediaType: 'application/json', purpose: 'runner-pause-anchor', contentMode: 'state',
+        });
+        await append('pause-anchor', { anchorArtifact });
+        return anchorArtifact;
+      } catch (cause) {
+        throw new SupervisedRunError('WORKSPACE_ANCHOR_WRITE', 'The pause workspace anchor could not be stored.', { cause });
+      }
     };
     const finish = async (outcome: SupervisedTerminalRecord, details: JsonObject = {}): Promise<SupervisedRunResult> => {
       let result: SupervisedRunResult;

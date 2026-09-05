@@ -117,6 +117,27 @@ async function nodeStarted(directory: string, node = 'first') {
   return pid;
 }
 
+async function expectPauseAnchorFailureCleanup(
+  options: runner.SupervisedRunOptions,
+  handle: runner.SupervisedRunHandle,
+) {
+  const pids = (await readFile(join(options.directory, 'scratch/first.started'), 'utf8')).trim().split('\n').map(Number);
+  for (const pid of pids) expect(() => process.kill(pid, 0)).toThrow();
+  expect(await handle.status()).toMatchObject({
+    phase: 'failed', workerAlive: false, cleanupVerified: true, leaseRetained: false,
+  });
+  const records = await readSupervision(createLocalRunStorage(options.storage), 'fixture');
+  expect(records.some((event) => event.type === 'runner:pause-anchor')).toBe(false);
+  expect(records.some((event) => event.type === 'runner:paused')).toBe(false);
+  expect(records.at(-1)).toMatchObject({
+    type: 'runner:failed', payload: { kind: 'fail', code: 'WORKSPACE_ANCHOR_WRITE' },
+  });
+  const lease = await options.workspace.acquireLease('after-anchor-failure', 'fixture', await options.workspace.capture());
+  expect(lease.ok).toBe(true);
+  if (lease.ok) await options.workspace.releaseLease(lease.token);
+  expect(await readdir(join(options.storage.directory, 'runner-locks/runner-tests'))).toEqual([]);
+}
+
 afterEach(async () => {
   vi.restoreAllMocks();
   await Promise.allSettled(handles.splice(0).map((handle) => handle.stop()));
@@ -529,6 +550,92 @@ describe('supervised local runs', () => {
     for (const node of ['first', 'last']) {
       expect((await readFile(join(options.directory, `scratch/${node}.started`), 'utf8')).trim().split('\n')).toHaveLength(1);
     }
+  });
+
+  it.each(['worker pause', 'workspace drift'] as const)(
+    'a pause anchor artifact write failure during %s is typed and leaves no resumable pause', async (pause) => {
+      const { options } = await fixture();
+      const storage = createLocalRunStorage(options.storage);
+      const artifactPrototype = Object.getPrototypeOf(storage.artifactStore) as typeof storage.artifactStore;
+      const write = artifactPrototype.write;
+      const artifactSpy = vi.spyOn(artifactPrototype, 'write').mockImplementation(async function (
+        this: typeof storage.artifactStore, scope, artifact,
+      ) {
+        if (artifact.purpose === 'runner-pause-anchor') throw new Error('Injected pause anchor artifact write failure.');
+        return await write.call(this, scope, artifact);
+      });
+      let handle: runner.SupervisedRunHandle;
+      try {
+        if (pause === 'worker pause') {
+          handle = await startFixture({
+            ...options,
+            definition: { ...options.definition, resolvedInputs: {
+              wait: true, waitNode: 'last', approvalFile: join(options.directory, 'approval'),
+            } },
+          });
+        } else {
+          handle = await startFixture({
+            ...options,
+            definition: { ...options.definition, resolvedInputs: { delayMs: 200 } },
+            restart: { ...options.restart, initialBackoffMs: 800, maxBackoffMs: 800 },
+          });
+          process.kill(await nodeStarted(options.directory), 'SIGKILL');
+          await expect.poll(async () => (await handle.status()).phase).toBe('backoff');
+          await writeFile(join(options.runRoot, 'outside-edit.txt'), 'someone else changed this');
+        }
+        await expect(handle.done).resolves.toMatchObject({ kind: 'fail', code: 'WORKSPACE_ANCHOR_WRITE' });
+      } finally {
+        artifactSpy.mockRestore();
+      }
+      await expectPauseAnchorFailureCleanup(options, handle!);
+    },
+  );
+
+  it('a pause anchor event write failure is typed and preserves the stored artifact', async () => {
+    const { options } = await fixture();
+    const storage = createLocalRunStorage(options.storage);
+    const scope = { namespace: 'runner-tests', runId: 'fixture' };
+    const artifactPrototype = Object.getPrototypeOf(storage.artifactStore) as typeof storage.artifactStore;
+    const write = artifactPrototype.write;
+    let anchorArtifact: runtime.ArtifactReference | undefined;
+    let anchorBytes: Uint8Array | undefined;
+    const artifactSpy = vi.spyOn(artifactPrototype, 'write').mockImplementation(async function (
+      this: typeof storage.artifactStore, writeScope, artifact,
+    ) {
+      const reference = await write.call(this, writeScope, artifact);
+      if (artifact.purpose === 'runner-pause-anchor') {
+        anchorArtifact = reference;
+        anchorBytes = Uint8Array.from(artifact.bytes);
+      }
+      return reference;
+    });
+    const eventPrototype = Object.getPrototypeOf(storage.eventStore) as typeof storage.eventStore;
+    const append = eventPrototype.append;
+    const eventSpy = vi.spyOn(eventPrototype, 'append').mockImplementation(async function (
+      this: typeof storage.eventStore, ...args
+    ) {
+      if (args[2].some((event) => event.type === 'runner:pause-anchor')) {
+        throw new Error('Injected pause anchor event write failure.');
+      }
+      return await append.apply(this, args);
+    });
+    let handle: runner.SupervisedRunHandle;
+    try {
+      handle = await startFixture({
+        ...options,
+        definition: { ...options.definition, resolvedInputs: {
+          wait: true, waitNode: 'last', approvalFile: join(options.directory, 'approval'),
+        } },
+      });
+      await expect(handle.done).resolves.toMatchObject({ kind: 'fail', code: 'WORKSPACE_ANCHOR_WRITE' });
+    } finally {
+      artifactSpy.mockRestore();
+      eventSpy.mockRestore();
+    }
+    expect(anchorArtifact).toBeDefined();
+    expect(anchorBytes).toBeDefined();
+    await expect(storage.artifactStore.read(scope, anchorArtifact!)).resolves.toEqual(anchorBytes!);
+    await expectPauseAnchorFailureCleanup(options, handle!);
   });
 
   it('resume rejects wrong and completed positions without launching a worker', async () => {

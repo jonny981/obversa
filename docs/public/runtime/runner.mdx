@@ -206,8 +206,10 @@ Before releasing ownership after a pause, the watchdog cleans up the worker and
 saves a workspace snapshot as a `runner-pause-anchor` artifact. Resume acquires
 the process lock and workspace lease, then checks that saved snapshot before
 starting a worker. It never adopts edits made while paused. The snapshot shares
-the run's artifact size, quota, and sensitive-content rules; a failed write
-cannot produce a resumable pause.
+the run's artifact size, quota, and sensitive-content rules. If the artifact
+write or its `runner:pause-anchor` event append fails, `handle.done` returns
+`kind: 'fail'` with `code: 'WORKSPACE_ANCHOR_WRITE'`. A stored artifact remains
+available when the event append fails, but no resumable runner pause is written.
 
 Workspace evidence failures resolve `handle.done` to `kind: 'pause'`:
 

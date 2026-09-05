@@ -11,6 +11,9 @@ engine and memory packages track their own versions independently.
 
 ### Fixed
 
+- **Pause-anchor storage failures:** Report pause snapshot artifact or event
+  write failures with `code: 'WORKSPACE_ANCHOR_WRITE'` after cleanup. Failed
+  persistence does not write a resumable runner pause.
 - **Paused runner budgets:** Freeze elapsed time at a settled pause until the
   next stored worker launch. Resume preflight spends no time; earlier execution
   and restart backoff remain spent across resumes and worker replacements.
