@@ -22,8 +22,7 @@ work back for corrections within the limits you set.
 ## Workflows that share a home
 
 Workflows for one team can share a repository, context, and reusable
-definitions. The factory term for that grouping is a plant: workflows that
-share a domain. It is a way to describe the team's work, with no separate
+definitions. Your team can group workflows by domain without a separate
 runtime object to configure.
 
 ## Joining the outputs
@@ -32,9 +31,9 @@ One workflow can use the results of others. A release workflow might bring
 together three components. An integration workflow might combine frontend
 and backend changes.
 
-This is the assembly pattern from a factory: earlier work supplies the
-inputs for the next process. Your code makes the connection. A node can
-run a child graph through the public executor and return its result.
+Earlier workflows supply inputs for the next workflow. Your code makes
+the connection. A node can run a child graph through the public executor
+and return its result.
 
 For larger outputs, your code can store an artifact and pass its reference.
 The reference includes a content hash, which identifies the stored bytes.
