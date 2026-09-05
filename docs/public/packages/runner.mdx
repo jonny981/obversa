@@ -21,10 +21,10 @@ Node.js 22.12 or later is required. The package depends on the public
 
 From `@obversa/runner`:
 
-- **`startSupervisedRun`:** start a stored graph with a watchdog in the calling process.
+- **Start and resume:** `startSupervisedRun` starts a stored graph with a watchdog in the calling process. `resumeSupervisedRun` reopens an exact recorded graph pause using its stored definition and run limits.
 - **`readSupervisedRunStatus`:** read recorded progress and inspect worker liveness.
 - **`SupervisedRunError`:** report a runner failure with a typed code.
-- **Run types:** `SupervisedRunOptions` describes the stored run, host module, workspace, and limits. `SupervisedRunStatus` describes progress, cleanup scope, and retained workspace ownership.
+- **Run types:** `SupervisedRunOptions` describes the stored run, host module, workspace, and limits. `ResumeSupervisedRunOptions` identifies the stored run and paused position to reopen. `SupervisedRunStatus` describes progress, cleanup scope, and retained workspace ownership.
 - **`SupervisedRunHandle`:** exposes `done`, `status()`, and `stop()` for the supervised run.
 
 Worker-crash recovery requires a live watchdog. A new watchdog does not take over
