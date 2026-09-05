@@ -197,7 +197,11 @@ async function superviseRun(options: SupervisedRunOptions, resume?: {
               throw new Error('The pending pause workspace anchor has an invalid digest or scope.');
             }
             pendingAnchor = { digest: metadata.digest, scope: metadata.scope as readonly string[] | null };
-            anchor = await options.workspace.capture(pendingAnchor.scope ?? undefined);
+            try {
+              anchor = await options.workspace.capture(pendingAnchor.scope ?? undefined);
+            } catch (cause) {
+              throw new SupervisedRunError('WORKSPACE_ANCHOR_WRITE', 'The paused workspace could not be captured for comparison.', { cause });
+            }
           }
           if (anchor === null || Array.isArray(anchor) || anchor.schemaVersion !== 1
             || typeof anchor.root !== 'string' || typeof anchor.repositoryId !== 'string'
@@ -211,9 +215,11 @@ async function superviseRun(options: SupervisedRunOptions, resume?: {
             anchor = undefined;
             resumeRefusal = { kind: 'pause', code: 'WORKSPACE_DRIFT', reason: 'The workspace changed after the captured pause.' };
           }
-        } catch {
+        } catch (error) {
           anchor = undefined;
-          resumeRefusal = { kind: 'pause', code: 'WORKSPACE_ANCHOR_INVALID', reason: 'The saved pause workspace anchor could not be verified.' };
+          resumeRefusal = pendingAnchor !== undefined && error instanceof SupervisedRunError && error.code === 'WORKSPACE_ANCHOR_WRITE'
+            ? { kind: 'pause', code: error.code, reason: error.message }
+            : { kind: 'pause', code: 'WORKSPACE_ANCHOR_INVALID', reason: 'The saved pause workspace anchor could not be verified.' };
         }
       }
     }

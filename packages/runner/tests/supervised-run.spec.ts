@@ -607,7 +607,7 @@ describe('supervised local runs', () => {
     await expectPauseAnchorCleanup(options, handle!, 'fail');
   });
 
-  it.each(['unchanged files', 'edited files', 'fresh process', 'storage still failing', 'scoped files'] as const)(
+  it.each(['unchanged files', 'edited files', 'fresh process', 'storage still failing', 'scoped files', 'comparison capture failure'] as const)(
     'storage recovery after a pause anchor artifact write failure with %s', async (recovery) => {
       const { options } = await fixture();
       const approvalFile = join(options.directory, 'approval');
@@ -650,6 +650,21 @@ describe('supervised local runs', () => {
         expect(retried.filter((event) => event.type === 'runner:worker-launching')).toHaveLength(1);
       }
       artifactSpy.mockRestore();
+      if (recovery === 'comparison capture failure') {
+        const workspace = {
+          ...options.workspace,
+          capture: async () => { throw new Error('Injected comparison capture failure.'); },
+          acquireLease: async () => { throw new Error('Failed comparison capture reached lease acquisition.'); },
+        };
+        const retry = await resumeFixture({ ...options, workspace });
+        await expect(retry.done).resolves.toMatchObject({ kind: 'pause', code: 'WORKSPACE_ANCHOR_WRITE' });
+        await expectPauseAnchorCleanup(options, retry, 'pause');
+        const retried = await readSupervision(storage, 'fixture');
+        expect((retried.at(-1)!.payload as runtime.JsonObject).pendingAnchor).toEqual(pending);
+        expect((retried.at(-1)!.payload as runtime.JsonObject).anchorArtifact).toBeUndefined();
+        expect(retried.filter((event) => event.type === 'runner:worker-launching')).toHaveLength(1);
+        await expect(readFile(join(options.directory, 'scratch/last.started'))).rejects.toMatchObject({ code: 'ENOENT' });
+      }
       await writeFile(approvalFile, 'allow');
       if (recovery === 'scoped files') {
         expect(snapshot!.scope).toEqual(['host.mjs']);
