@@ -79,7 +79,8 @@ it does not establish the exact number of calls before the process stopped.
 Data-only nodes and recorded action-policy waits have no recovery identity.
 
 Replay validates these records before passing them to the graph reducer.
-A receipt that cannot be saved stops execution before fallback or completion.
+A receipt that cannot be saved stops the affected attempt before fallback or
+completion. Other attempts in the same batch can continue.
 The records describe what the bound engine reported; they do not inspect calls
 made inside an adapter or wrapper.
 

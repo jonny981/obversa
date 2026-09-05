@@ -11,15 +11,15 @@ choices.
 
 ## What ships today
 
-- Pipeline: ordered stages on the durable graph executor. See
+- **Pipeline:** ordered stages on the durable graph executor. See
   [Built-in pipeline](/graphs/pipeline).
 - **Review loop:** For engine calls managed by the graph executor, accepted reviewers
   share neither the writer's provider nor its model family, based on engine reports.
   Calls without a writer report count as all declared writer targets. The loop
   can also require a diverse quorum. See [Review loop](/graphs/review-loop).
-- Callback gate: one structured answer through a replaceable router. See
+- **Callback gate:** one structured answer through a replaceable router. See
   [Callback gate](/graphs/callback-gate).
-- Crash-safe resume: a fresh executor recovers recorded progress; an uncertain
+- **Crash-safe resume:** a fresh executor recovers recorded progress; an uncertain
   attempt pauses unless retry was declared safe. See [Graph executor](/graphs/executor).
 
 ## Packages

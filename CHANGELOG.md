@@ -11,6 +11,13 @@ engine and memory packages track their own versions independently.
 
 ### Added
 
+- **Host-selected worker environment:** Accept an optional readonly
+  `environmentVariables` list on start and resume. Copy only present values of
+  those names from the watchdog, without storing credentials in run inputs or
+  host records. Default environment inheritance remains restrictive.
+
+### Changed
+
 - **Review identity records:** Every engine call managed by the graph executor
   records its requested and reported adapter, provider, model family, and
   model, including primary and fallback calls and calls without a reported
@@ -23,13 +30,6 @@ engine and memory packages track their own versions independently.
   review target or substitution. This rule applies without reviewer diversity
   enabled. Stored graph type 1 and 2 plans are refused before execution.
 
-- **Host-selected worker environment:** Accept an optional readonly
-  `environmentVariables` list on start and resume. Copy only present values of
-  those names from the watchdog, without storing credentials in run inputs or
-  host records. Default environment inheritance remains restrictive.
-
-### Changed
-
 - **Runner usage type:** `SupervisedRunUsage` exposes `reported`, `partial`,
   and `unknown` variants on run status and active-node usage. Consumers with an
   exhaustive switch must handle `partial`, whose totals are measured lower
@@ -37,6 +37,11 @@ engine and memory packages track their own versions independently.
 
 ### Fixed
 
+- **Unresolved merge markers:** Reject engine resolutions that retain conflict
+  marker lines of seven or more characters, abort the merge, and name the file
+  in a typed error. The failed resolution does not create a merge commit.
+- **Gate command timeouts:** Name the timeout and its configured limit in the
+  not-met result when a command exceeds that limit.
 - **Stale pause-event resumes:** Bind each resume to one pause event. A
   replacement worker that finds a different pause at the same position returns
   a named pause with `code: 'RESUME_EVENT_MISMATCH'` and the exact reason

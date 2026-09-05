@@ -533,6 +533,10 @@ async function main() {
     join(root, 'docs', 'public', 'graphs', 'callback-gate.mdx'),
     'utf8',
   );
+  const reviewLoopDocument = await readFile(
+    join(root, 'docs', 'public', 'graphs', 'review-loop.mdx'),
+    'utf8',
+  );
   const proofAcceptanceDocument = await readFile(
     join(root, 'docs', 'public', 'proof', 'acceptance.mdx'),
     'utf8',
@@ -719,6 +723,13 @@ async function main() {
     assert.deepEqual(directPipeline, expectedPipelineReport);
     assert.deepEqual(compiledReviewLoop, expectedReviewLoopReport);
     assert.deepEqual(directReviewLoop, expectedReviewLoopReport);
+    const reviewLoopReport = reviewLoopDocument.match(/```json\r?\n([\s\S]*?)```/);
+    assert.ok(reviewLoopReport, 'The review-loop page must include its JSON report');
+    assert.deepEqual(
+      JSON.parse(reviewLoopReport[1]),
+      compiledReviewLoop,
+      'The review-loop page does not match its runnable output',
+    );
     assert.deepEqual(compiledCallbackGate, expectedCallbackGateReport);
     assert.deepEqual(directCallbackGate, expectedCallbackGateReport);
     assert.deepEqual(compiledProofBoundApproval, expectedProofBoundApprovalReport);
