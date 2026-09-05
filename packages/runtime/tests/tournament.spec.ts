@@ -1,4 +1,4 @@
-import { describe, it, expect, afterAll } from 'vitest';
+import { describe, it, expect, afterAll, vi } from 'vitest';
 import { existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { execa } from 'execa';
@@ -12,6 +12,8 @@ import type { RunOptions } from '../src/api.ts';
 import { MockEngine } from '../src/testing.ts';
 import { tmpRepo, tmpBareDir, write, cleanupRepos } from './git-helpers.ts';
 
+vi.mock('execa', { spy: true });
+
 afterAll(cleanupRepos);
 
 const base: RunOptions = {
@@ -21,6 +23,7 @@ const base: RunOptions = {
 
 describe('tournament (branch-and-select)', () => {
   it('runs N candidates in isolated worktrees and lands only the winner', async () => {
+    vi.mocked(execa).mockClear();
     const repo = await tmpRepo();
     const dirs: string[] = [];
     const job = tournament({
@@ -37,7 +40,23 @@ describe('tournament (branch-and-select)', () => {
     });
 
     const { outcome } = await run(job, { ...base, cwd: repo });
-    expect(outcome.status).toBe('pass');
+    let failureDetail: string | undefined;
+    if (outcome.status !== 'pass') {
+      const executions = await Promise.allSettled(
+        vi.mocked(execa).mock.results.map((result) => result.value),
+      );
+      failureDetail = JSON.stringify({
+        outcome,
+        gitFailures: executions.flatMap((execution) => {
+          const result = execution.status === 'fulfilled' ? execution.value : execution.reason;
+          return result?.exitCode ? [{
+            command: result.command, exitCode: result.exitCode,
+            stdout: result.stdout, stderr: result.stderr,
+          }] : [];
+        }),
+      });
+    }
+    expect(outcome.status, failureDetail).toBe('pass');
     expect((outcome.data as { winner: number }).winner).toBe(2);
 
     // each candidate ran in its OWN worktree, none the shared repo
