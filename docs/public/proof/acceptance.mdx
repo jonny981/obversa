@@ -25,6 +25,10 @@ to `wait`:
 
 ## Source
 
+The example runs without a bound workspace. Its `/workspace` anchor is
+illustrative caller-supplied data used to show digest matching; it was not
+captured from a real checkout.
+
 ```ts
 import { mkdtemp, realpath, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
@@ -332,6 +336,19 @@ The record binds the result to input hashes, proof scope and artifact, graph
 definition and type version, workspace anchor, and caller-supplied reviewer
 identity. The reviewer fingerprint is the digest of that supplied identity.
 
+Accepted results require a caller-supplied `WorkspaceAnchor`; they have no
+`null` representation for an absent workspace, even when the stored run has
+`workspaceBinding: null`. Approval subjects can use `workspaceAnchor: null`.
+
+The `WorkspaceAnchor` type names the workspace root, repository identity,
+HEAD revision, content fingerprint, capture scope, and file states, with
+`schemaVersion: 1`. A `null` scope means the whole worktree. Accepted-result
+and approval validators check that a supplied anchor is a JSON object and
+bind its bytes into the record digest. They do not validate those fields,
+compare the anchor with the run's workspace binding, or verify the checkout.
+For a real workspace, the caller must use an anchor captured by its workspace
+provider and verify it before reusing a result or acting on approval.
+
 Writing the same complete record again at the same position does nothing.
 Writing a different binding for the same completed result at that position
 returns `REVISION_CONFLICT`.
@@ -376,3 +393,19 @@ changes.
 The host owns every effect after approval. These approval APIs do not make a
 backup, apply output, read the effect back, reconcile an uncertain effect, or
 merge files.
+
+## Stored identities
+
+Accepted-result records store the complete supplied `reviewerIdentity` JSON
+object alongside its fingerprint. Approval records store the complete
+supplied `actor` JSON object. A fingerprint does not hide the identity fields.
+These APIs check JSON object shape; they do not authenticate the identity or
+recognize credentials by field name.
+
+Supply only non-secret identifiers and review settings. Keep passwords,
+tokens, cookies, and private keys out of both objects. The local event store
+rejects a write with `KNOWN_SECRET` when an identity contains a value from its
+configured `knownSecrets`, including nested values and object keys. The
+caller must configure those secret values in the live storage options and
+exclude credentials that are not in that list. A rejected approval write
+stores neither the callback answer nor its approval record.

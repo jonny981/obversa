@@ -320,6 +320,29 @@ describe('callback approval', () => {
     expect(validateApprovalRecord(payload?.record)).toMatchObject({
       binding: { workspaceAnchor: null },
     });
+    await expect(resolveApproval(run.reopen(), run.runId, { request, ...subject }))
+      .resolves.toEqual({ kind: 'allow' });
+  });
+
+  it('rejects a configured secret in actor identity without storing the answer or approval', async () => {
+    await run.close();
+    run = await createStoredRunFixture('approval', [], ['fixture-credential']);
+    const subject = approvalSubject({ workspaceAnchor: null, effectivePermissions: [] });
+    const request = approvalRequest(subject);
+    const client = await createStoredCallbackClient(run.storage, run.runId);
+    await client.post(request, subject);
+    const claim = await client.claim(request.requestId, 'router-a');
+    if (!claim.ok) throw new Error('fixture claim failed');
+    await expect(client.submit(
+      request.requestId, claim.claimToken, 'router-a', request.digest,
+      { kind: 'allow' }, { id: 'owner', context: { value: 'fixture-credential' } },
+    )).rejects.toMatchObject({ code: 'KNOWN_SECRET' });
+    const restarted = await createStoredCallbackClient(run.reopen(), run.runId);
+    expect((await restarted.history(request.requestId)).some((event) => event.kind === 'callback-submitted'))
+      .toBe(false);
+    expect(await approvalEvents()).toEqual([]);
+    await expect(resolveApproval(run.reopen(), run.runId, { request, ...subject }))
+      .resolves.toMatchObject({ kind: 'wait' });
   });
 
   it('a second valid approval event cannot replace the first', async () => {

@@ -23,6 +23,7 @@ export interface StoredRunFixture {
 export async function createStoredRunFixture(
   name: string,
   permissions: readonly PermissionDescriptor[] = [],
+  knownSecrets: readonly string[] = [],
 ): Promise<StoredRunFixture> {
   const root = await mkdtemp(join(tmpdir(), `obversa-${name}-`));
   const directory = join(root, 'storage');
@@ -30,6 +31,7 @@ export async function createStoredRunFixture(
   const open = (): RunStorageBinding => createLocalRunStorage({
     directory,
     namespace,
+    knownSecrets,
     policy: {
       schemaVersion: 1,
       maxEventPayloadBytes: 64_000,

@@ -146,6 +146,34 @@ async function appendNodeEvent(
 }
 
 describe('accepted result', () => {
+  it('refuses a null workspace anchor even when the run has no workspace', async () => {
+    const { reviewA: position } = await recordCompletedReviews();
+    const stored = await loadRunDefinition(run.storage, run.runId);
+    expect(stored.record.payload.definition.workspaceBinding).toBeNull();
+    await expect(createAcceptedResultRecord(run.storage, run.runId, position, {
+      result: { verdict: 'pass' },
+      ...binding,
+      workspaceAnchor: null as unknown as WorkspaceAnchor,
+    })).rejects.toThrow('invalid accepted-result binding');
+  });
+
+  it('rejects a configured secret in reviewer identity before storing acceptance', async () => {
+    await run.close();
+    run = await createStoredRunFixture('acceptance', [], ['fixture-credential']);
+    const { reviewA: position } = await recordCompletedReviews();
+    await expect(createAcceptedResultRecord(run.storage, run.runId, position, {
+      result: { verdict: 'pass' },
+      ...binding,
+      reviewerIdentity: { id: 'reviewer', settings: { value: 'fixture-credential' } },
+    })).rejects.toMatchObject({ code: 'KNOWN_SECRET' });
+    const events = [];
+    for await (const event of run.reopen().eventStore.read({
+      namespace: run.storage.record.namespace, streamId: run.runId,
+    })) events.push(event);
+    expect(events.some((event) => event.type === 'proof:result-accepted')).toBe(false);
+    expect(JSON.stringify(events)).not.toContain('fixture-credential');
+  });
+
   it.each(
     ['in-flight', 'failed', 'wrong-result', 'wrong-node', 'wrong-version', 'extra-field', 'duplicate', 'before-dispatch']
       .flatMap((state) => ['create', 'resolve'].map((operation) => [state, operation])),
