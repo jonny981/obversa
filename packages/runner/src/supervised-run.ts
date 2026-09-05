@@ -45,6 +45,16 @@ export interface SupervisedRunOptions {
   readonly environmentVariables?: readonly string[];
 }
 
+function copyEnvironmentVariables(value: unknown): string[] {
+  if (value === undefined) return [];
+  const names = Array.isArray(value) ? [...value] : undefined;
+  if (names === undefined || names.some((name) =>
+    typeof name !== 'string' || !/^[A-Za-z_][A-Za-z0-9_]*$/u.test(name))) {
+    throw new SupervisedRunError('INVALID_OPTIONS', 'environmentVariables must be an array of portable environment variable names.');
+  }
+  return names;
+}
+
 export type SupervisedRunResult = Exclude<GraphExecutorResult, { readonly kind: 'waiting' | 'pause' }>
   | { readonly kind: 'pause'; readonly reason: string; readonly code?: 'WORKSPACE_DRIFT' | 'WORKSPACE_ANCHOR_MISSING' | 'WORKSPACE_ANCHOR_INVALID' | 'WORKSPACE_ANCHOR_WRITE' | 'RUN_STORAGE' | 'RESUME_EVENT_MISMATCH' };
 
@@ -79,7 +89,7 @@ export async function startSupervisedRun(options: SupervisedRunOptions): Promise
 export async function resumeSupervisedRun(options: ResumeSupervisedRunOptions): Promise<SupervisedRunHandle> {
   options = {
     ...options, storage: structuredClone(options.storage), restart: { ...options.restart },
-    environmentVariables: [...options.environmentVariables ?? []],
+    environmentVariables: copyEnvironmentVariables(options.environmentVariables),
   };
   const storage = createLocalRunStorage(options.storage);
   const storageOptions = { ...options.storage, directory: resolve(options.storage.directory) };
@@ -106,7 +116,7 @@ async function superviseRun(options: SupervisedRunOptions, resume?: {
     storage: structuredClone(options.storage),
     limits: Object.freeze({ ...options.limits }),
     restart: Object.freeze({ ...options.restart }),
-    environmentVariables: [...options.environmentVariables ?? []],
+    environmentVariables: copyEnvironmentVariables(options.environmentVariables),
   };
   for (const [field, value] of Object.entries({ ...options.limits, ...options.restart, teardownGraceMs: options.teardownGraceMs })) {
     if (!Number.isSafeInteger(value) || value < 0 || value > 2_147_483_647) {

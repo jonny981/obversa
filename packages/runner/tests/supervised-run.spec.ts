@@ -32,6 +32,10 @@ const policy = {
   retention: 'until-run-delete',
   sensitiveContent: { marked: 'reject', exact: 'reject', freeText: 'redact-before-hash' },
 } as const;
+const invalidNames: unknown[] = [
+  null, 'PATH', 7, {}, [''], ['A=B'], ['HAS SPACE'], ['HAS-DASH'], ['9START'],
+  ['BAD\nNAME'], [`BAD${String.fromCharCode(0)}NAME`], [7], [undefined], Array(1),
+];
 
 async function fixture(withEngine = false, nodeCount = 2) {
   const root = await realpath(await mkdtemp(join(tmpdir(), 'obversa-supervised-')));
@@ -426,6 +430,30 @@ describe('supervised local runs', () => {
       if (originalNodeOptions === undefined) delete process.env.NODE_OPTIONS;
       else process.env.NODE_OPTIONS = originalNodeOptions;
     }
+  });
+
+  it.each(invalidNames)('start rejects invalid environment names before capture or storage (%#)', async (invalid) => {
+    const { options } = await fixture();
+    const captureSpy = vi.fn(options.workspace.capture.bind(options.workspace));
+    await expect(startFixture({
+      ...options, workspace: { ...options.workspace, capture: captureSpy },
+      environmentVariables: invalid as readonly string[],
+    })).rejects.toMatchObject({ code: 'INVALID_OPTIONS' });
+    expect(captureSpy).not.toHaveBeenCalled();
+    expect(await readdir(options.storage.directory).catch(() => [])).toEqual([]);
+  });
+
+  it.each(invalidNames)('resume rejects invalid environment names without changing the paused run (%#)', async (invalid) => {
+    const { options } = await pausedFixture();
+    const storage = createLocalRunStorage(options.storage);
+    const events = await readSupervision(storage, 'fixture');
+    const evaluations = await readFile(join(options.runRoot, 'module-evaluations.log'), 'utf8');
+    await expect(resumeFixture({
+      ...options, environmentVariables: invalid as readonly string[],
+    })).rejects.toMatchObject({ code: 'INVALID_OPTIONS' });
+    expect(await readSupervision(storage, 'fixture')).toEqual(events);
+    expect(await readFile(join(options.runRoot, 'module-evaluations.log'), 'utf8')).toBe(evaluations);
+    expect(await readdir(join(options.storage.directory, 'runner-locks/runner-tests'))).toEqual([]);
   });
 
   it('a long fixture survives runner restart and continues from events', async () => {
