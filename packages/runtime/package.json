@@ -1,7 +1,7 @@
 {
   "name": "@obversa/runtime",
   "version": "1.0.0",
-  "description": "Build and run reliable agent graphs.",
+  "description": "A process runtime for software teams.",
   "license": "MIT",
   "author": "Jonny Neill <jonnyneill@hotmail.com>",
   "type": "module",
