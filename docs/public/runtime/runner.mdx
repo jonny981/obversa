@@ -58,6 +58,29 @@ same artifact reference, not the output bytes. The watchdog verifies the stored
 bytes against that reference before returning `done.output`. An unreadable or
 corrupt output artifact returns `kind: 'fail'` with `code: 'TERMINAL_ARTIFACT'`.
 
+Successful and incomplete engine calls also store their response parts as
+`runner-engine-parts` artifacts. Supervision events carry `partsArtifact`
+references instead of those parts. Each artifact must fit
+`storage.policy.maxArtifactBytes`; distinct stored parts consume the shared
+`storage.policy.maxTotalArtifactBytesPerRun` quota alongside the run's other
+artifacts. A response can fit the node's output limit and still exceed either
+storage limit.
+
+Engine parts use `contentMode: 'state'`. The store rejects parts containing a
+configured `knownSecrets` value instead of redacting them. Size or quota refusal
+raises `StorageError` with `code: 'STORAGE_LIMIT_EXCEEDED'`; a known-secret match
+raises `code: 'KNOWN_SECRET'`. Inside the worker, a refused parts write becomes
+`EngineIncompleteResultError`, even when the engine returned successfully.
+Rejected parts are not durable, and status reports unknown usage when the
+engine's final supervision event could not be written.
+
+The caller does not receive those storage codes directly from `handle.done`.
+For an otherwise valid engine result within the node's limits, the runtime
+records `graph:node-failed` with `code: 'EFFECT_FAILED'`. With the built-in DAG
+form, a failed required node makes `handle.done` resolve to `kind: 'fail'` with
+`code: 'DAG_NODE_FAILED'`, and status reports `phase: 'failed'`. Other graph
+forms decide their own response to a failed node.
+
 The status reader can run in another process with the same storage settings.
 It reads recorded progress and inspects the worker's process identity. It does
 not take ownership of the run or stop another process's watchdog.
@@ -168,9 +191,12 @@ the events, never from a status checkpoint.
 
 - **`inherited-owner` on Linux:** cleanup also searches for processes carrying
   the worker's inherited owner marker. Commands that remove or forge markers
-  are outside this bookkeeping guarantee.
+  are outside this cleanup scope.
 - **`observed-processes` on other platforms:** cleanup follows observed process
   identities and the platform's process-tree mechanisms.
+
+Linux owner cleanup has an implementation and tests, but its Linux-specific
+tests have not run on Linux for this release, so Linux cleanup is best-effort.
 
 On macOS, a helper that moves into a new session before the watchdog samples it is not swept.
 
