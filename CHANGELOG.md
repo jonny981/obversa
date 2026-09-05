@@ -22,6 +22,11 @@ engine and memory packages track their own versions independently.
   bounded restart, workspace leases, status, and process cleanup within the
   reported platform capability. Worker stdout and stderr share a fixed
   1,000,000-byte cap; excess output can fail the run with `OUTPUT_LIMIT`.
+- `@obversa/runner`: `resumeSupervisedRun` and `ResumeSupervisedRunOptions`
+  reopen an exact recorded graph pause using the stored definition and run
+  limits. The host action policy runs again before node effects.
+- Action-policy `wait` decisions record a graph pause with its reason and
+  request. A `deny` decision records a failed node with `DENIED`.
 - `@obversa/engine/command`: optional `ownerId` on command and cleanup requests,
   inherited `OBVERSA_RUN_OWNER` markers, `commandCleanupCapability`,
   `CommandCleanupCapability`, and `inspectOwnerMarkedProcesses` for process
