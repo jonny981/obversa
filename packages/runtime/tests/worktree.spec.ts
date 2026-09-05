@@ -1,9 +1,10 @@
-import { describe, it, expect, afterAll } from 'vitest';
+import { describe, it, expect, afterAll, vi } from 'vitest';
 import { existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { execa } from 'execa';
 
-import { run, dag, fnJob } from '../src/api.ts';
+import { run, dag, fnJob, isolated } from '../src/api.ts';
+import * as git from '../src/core/git.ts';
 import type { RunOptions, Outcome } from '../src/api.ts';
 import { MockEngine } from '../src/testing.ts';
 import { tmpRepo, tmpBareDir, write, cleanupRepos } from './git-helpers.ts';
@@ -16,6 +17,71 @@ const base: RunOptions = {
 };
 
 describe('dag worktree isolation (branches-as-teams)', () => {
+  it.each(['dag', 'wrapper'] as const)('serialises three simultaneous %s land-backs through real Git', async (mode) => {
+    const repo = await tmpRepo();
+    const names = ['one', 'two', 'three'];
+    const directories: string[] = [];
+    let ready = 0;
+    let finishTogether!: () => void;
+    const finished = new Promise<void>((resolve) => { finishTogether = resolve; });
+    let committed = 0;
+    let allCommitted!: () => void;
+    const captured = new Promise<void>((resolve) => { allCommitted = resolve; });
+    const commit = git.commit;
+    const mergeBranch = git.mergeBranch;
+    let activeMerges = 0;
+    let maximumMerges = 0;
+    const boundaries: string[] = [];
+    const commitObserver = vi.spyOn(git, 'commit').mockImplementation(async (...args) => {
+      const result = await commit(...args);
+      committed += 1;
+      if (committed === names.length) allCommitted();
+      return result;
+    });
+    const mergeObserver = vi.spyOn(git, 'mergeBranch').mockImplementation(async (...args) => {
+      activeMerges += 1;
+      maximumMerges = Math.max(maximumMerges, activeMerges);
+      boundaries.push('start');
+      try {
+        await captured;
+        return await mergeBranch(...args);
+      } finally {
+        boundaries.push('end');
+        activeMerges -= 1;
+      }
+    });
+    try {
+      const nodes = Object.fromEntries(names.map((name) => {
+        const job = fnJob(name, async (ctx) => {
+          directories.push(ctx.workspace.dir);
+          write(ctx.workspace.dir, `${name}.ts`, `${name}\n`);
+          ready += 1;
+          if (ready === names.length) finishTogether();
+          await finished;
+          return { status: 'pass' };
+        });
+        return [name, mode === 'wrapper' ? isolated(job, { label: name }) : job];
+      }));
+      const { outcome } = await run(dag({
+        name: 'contention', nodes, concurrency: 3, stopOnError: false,
+        ...(mode === 'dag' ? { isolation: 'worktree' as const } : {}),
+      }), { ...base, cwd: repo });
+
+      expect(maximumMerges).toBe(1);
+      expect(boundaries).toEqual(['start', 'end', 'start', 'end', 'start', 'end']);
+      expect(outcome.status).toBe('pass');
+      expect(new Set(directories).size).toBe(3);
+      expect(directories).not.toContain(repo);
+      for (const name of names) expect(readFileSync(join(repo, `${name}.ts`), 'utf8')).toBe(`${name}\n`);
+      const { stdout } = await execa('git', ['log', '--first-parent', '--merges', '--format=%H'], { cwd: repo });
+      expect(stdout.split('\n')).toHaveLength(3);
+      expect((await execa('git', ['status', '--porcelain'], { cwd: repo })).stdout).toBe('');
+    } finally {
+      commitObserver.mockRestore();
+      mergeObserver.mockRestore();
+    }
+  });
+
   it('shares the workspace when isolation is off', async () => {
     const repo = await tmpRepo();
     let seenDir = '';
