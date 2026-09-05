@@ -6,9 +6,10 @@ rules that apply to every change.
 
 ## What this repository is
 
-Obversa is a runtime for reliable agent work. You describe work as a
-graph: steps, dependencies, and review gates. The runtime runs the graph
-one bounded engine call at a time.
+A process runtime for software teams.
+
+You describe work as a graph: steps, dependencies, and review gates. The
+runtime runs the graph one bounded engine call at a time.
 It records every step as an event. It can restart a run after a crash
 without lost work. You can replace the engines (Claude, Codex, Grok,
 OpenCode, or one you add). You can replace the memory. You can write your
