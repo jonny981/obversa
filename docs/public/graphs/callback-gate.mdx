@@ -21,7 +21,23 @@ be claimed again, an accepted answer survives replay, and changing the question
 bytes creates a new request ID.
 
 ```json
-{"requestId":"release-approval#1#3a32b8f32a48c2b1ddc28ecec2c3035d4619311acf96364200e8c25efe94cd05","digest":"3a32b8f32a48c2b1ddc28ecec2c3035d4619311acf96364200e8c25efe94cd05","sameQuestionId":true,"changedQuestionId":true,"blockedKind":"claimed","released":true,"submitted":true,"events":["callback-requested","callback-claimed","callback-released","callback-claimed","callback-submitted"],"replayedPending":0}
+{
+  "requestId": "release-approval#1#3a32b8f32a48c2b1ddc28ecec2c3035d4619311acf96364200e8c25efe94cd05",
+  "digest": "3a32b8f32a48c2b1ddc28ecec2c3035d4619311acf96364200e8c25efe94cd05",
+  "sameQuestionId": true,
+  "changedQuestionId": true,
+  "blockedKind": "claimed",
+  "released": true,
+  "submitted": true,
+  "events": [
+    "callback-requested",
+    "callback-claimed",
+    "callback-released",
+    "callback-claimed",
+    "callback-submitted"
+  ],
+  "replayedPending": 0
+}
 ```
 
 ## Source
@@ -82,7 +98,7 @@ console.log(JSON.stringify({
   submitted: submitted.ok,
   events: client.history(request.requestId).map((event) => event.kind),
   replayedPending: replayed.listPending().length,
-}));
+}, null, 2));
 ```
 
 The clean-consumer check compiles and runs this exact source from the packed

@@ -53,4 +53,4 @@ console.log(JSON.stringify({
   submitted: submitted.ok,
   events: client.history(request.requestId).map((event) => event.kind),
   replayedPending: replayed.listPending().length,
-}));
+}, null, 2));

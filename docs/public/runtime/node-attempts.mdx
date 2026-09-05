@@ -19,6 +19,8 @@ From an Obversa checkout, run:
 pnpm example:attempt
 ```
 
+The report prints the stub executable paths relative to the temporary directory.
+The exported `attemptReport` keeps the absolute paths from the adapter results.
 The example uses local scripted executables. It does not call a model or the
 network. Grok returns a native structured result. OpenCode returns one marked
 text part, which the job-owned parser reads. Both adapter results pass through
@@ -33,7 +35,7 @@ import assert from 'node:assert/strict';
 import { chmod, mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { existsSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { join, relative } from 'node:path';
 
 import {
   finalResultPart,
@@ -197,10 +199,15 @@ try {
 }
 
 assert.ok(report);
-console.log(JSON.stringify({
+export const attemptReport = {
   ...report,
   temporaryDirectoryRemoved: !existsSync(directory),
-}));
+};
+console.log(JSON.stringify(attemptReport, (key, value: unknown) => (
+  key === 'executable' && typeof value === 'string'
+    ? relative(directory, value)
+    : value
+), 2));
 ```
 
 The output records both requested and effective identities. If a CLI reports a

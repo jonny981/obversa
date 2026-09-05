@@ -234,6 +234,22 @@ function checkedAttemptReport(report) {
   };
 }
 
+function checkedAttemptOutput(output) {
+  const lines = output.trimEnd().split('\n');
+  const report = JSON.parse(lines.pop());
+  const display = JSON.parse(lines.join('\n'));
+  assert.equal(lines.join('\n'), JSON.stringify(display, null, 2));
+  for (const [name, filename] of [['grok', 'grok-fixture.mjs'], ['opencode', 'opencode-fixture.mjs']]) {
+    for (const selection of ['requested', 'effective']) {
+      assert.equal(display[name][selection].executable, filename);
+      display[name][selection].executable = report[name][selection].executable;
+    }
+  }
+  // Display paths are relative; the exported selections must still be absolute.
+  assert.deepEqual(display, report);
+  return checkedAttemptReport(report);
+}
+
 function sourceFromPublicDoc(document) {
   const match = /## Source[\s\S]*?```ts\n([\s\S]*?)\n```/.exec(document);
   if (!match) throw new Error('The public page has no TypeScript source block');
@@ -656,11 +672,15 @@ async function main() {
     const directStorage = JSON.parse(
       run('pnpm', ['exec', 'tsx', 'durable-storage.ts'], { cwd: consumerDirectory }),
     );
-    const compiledAttempt = JSON.parse(
-      run(process.execPath, ['dist/safe-node-attempt.js'], { cwd: consumerDirectory }),
+    const compiledAttempt = checkedAttemptOutput(
+      run(process.execPath, ['--input-type=module', '--eval',
+        "const { attemptReport } = await import('./dist/safe-node-attempt.js'); console.log(JSON.stringify(attemptReport));",
+      ], { cwd: consumerDirectory }),
     );
-    const directAttempt = JSON.parse(
-      run('pnpm', ['exec', 'tsx', 'safe-node-attempt.ts'], { cwd: consumerDirectory }),
+    const directAttempt = checkedAttemptOutput(
+      run('pnpm', ['exec', 'tsx', '--input-type=module', '--eval',
+        "const { attemptReport } = await import('./safe-node-attempt.ts'); console.log(JSON.stringify(attemptReport));",
+      ], { cwd: consumerDirectory }),
     );
     const compiledTurnTaking = JSON.parse(
       run(process.execPath, ['dist/turn-taking.js'], { cwd: consumerDirectory }),
@@ -705,8 +725,8 @@ async function main() {
     assert.deepEqual(directProofBoundApproval, expectedProofBoundApprovalReport);
     assert.deepEqual(compiledStorage, expectedStorageReport);
     assert.deepEqual(directStorage, expectedStorageReport);
-    assert.deepEqual(checkedAttemptReport(compiledAttempt), expectedAttemptReport);
-    assert.deepEqual(checkedAttemptReport(directAttempt), expectedAttemptReport);
+    assert.deepEqual(compiledAttempt, expectedAttemptReport);
+    assert.deepEqual(directAttempt, expectedAttemptReport);
     if (
       report.runtime !== 'pass' ||
       report.memoryCases !== 17 ||

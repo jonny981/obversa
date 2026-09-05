@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { chmod, mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { existsSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { join, relative } from 'node:path';
 
 import {
   finalResultPart,
@@ -166,7 +166,12 @@ try {
 }
 
 assert.ok(report);
-console.log(JSON.stringify({
+export const attemptReport = {
   ...report,
   temporaryDirectoryRemoved: !existsSync(directory),
-}));
+};
+console.log(JSON.stringify(attemptReport, (key, value: unknown) => (
+  key === 'executable' && typeof value === 'string'
+    ? relative(directory, value)
+    : value
+), 2));
