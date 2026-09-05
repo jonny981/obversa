@@ -10,6 +10,13 @@ version. Every other public package keeps its own version in its manifest.
 The package list comes from `scripts/publish-allowlist.json`; the tarball
 check and release script read that same list.
 
+When only plugin code changes, also increase the runtime PATCH version in
+`packages/runtime/package.json`, for example from `1.0.0` to `1.0.1`. The
+publish guard requires the repository tag to match that runtime version,
+including when publishing a plugin. Add the plugin changes under the heading
+for the new runtime version in `CHANGELOG.md`, then verify and create the new
+annotated tag, for example `v1.0.1`. Bump the changed plugin's own version too.
+
 ## The steps
 
 1. **Update the changelog.** Add the release heading and entries to
