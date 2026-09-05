@@ -1,0 +1,30 @@
+name: Bug report
+description: Report a failure with enough detail to reproduce it.
+body:
+  - type: textarea
+    id: behavior
+    attributes:
+      label: What happened, and what did you expect?
+      description: Describe the failure and the expected result.
+    validations:
+      required: true
+  - type: textarea
+    id: reproduction
+    attributes:
+      label: Steps to reproduce
+      description: Include the smallest code example and exact command that show the failure.
+    validations:
+      required: true
+  - type: textarea
+    id: environment
+    attributes:
+      label: Environment
+      description: Include Obversa package versions or commit, Node.js version, operating system, and any engine adapter or CLI versions involved.
+    validations:
+      required: true
+  - type: textarea
+    id: output
+    attributes:
+      label: Relevant output
+      description: Paste the error or log output with credentials and private data removed.
+      render: text

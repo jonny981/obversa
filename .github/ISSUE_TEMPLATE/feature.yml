@@ -1,0 +1,22 @@
+name: Feature request
+description: Describe a user need and the behavior that would address it.
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: What are you trying to do?
+      description: Describe the task and what prevents you from completing it.
+    validations:
+      required: true
+  - type: textarea
+    id: outcome
+    attributes:
+      label: What should a user be able to do?
+      description: Give a concrete example of the desired behavior.
+    validations:
+      required: true
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives considered
+      description: Describe any existing API or workaround you tried and where it falls short.
