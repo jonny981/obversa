@@ -163,6 +163,20 @@ test("the hook binds every package's repository tag to the runtime version", () 
   }
 });
 
+test("the hook refuses with a message when the runtime manifest is absent", () => {
+  const { root, cwd, git } = makeReleaseRepo();
+  try {
+    git("rm", "packages/runtime/package.json");
+    git("commit", "-q", "-m", "remove runtime manifest");
+    git("tag", "-a", "-m", "release", "v1.0.0");
+    assert.deepEqual(checkHook({ cwd, env: { OBVERSA_RELEASE: "1" }, allowlist: new Set(["@x/p"]) }), [
+      "refusing to publish @x/p: packages/runtime/package.json is missing",
+    ]);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
 test("the audit requires every public package to name the never-resolving registry under both keys, no other registry route, no publish directory, and the release command to exist", () => {
   const good = { name: "@obversa/pub", version: "1.0.0", scripts: { prepublishOnly: HOOK_COMMAND }, publishConfig: { access: "public", ...SENTINELS } };
   const root = makeWorkspace({

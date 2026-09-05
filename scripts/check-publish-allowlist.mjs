@@ -202,7 +202,12 @@ export function checkHook({ cwd = process.cwd(), env = process.env, allowlist = 
   } else {
     const tag = releaseTags[0];
     const root = run(cwd, "rev-parse", "--show-toplevel");
-    const { version } = JSON.parse(readFileSync(join(root, "packages", "runtime", "package.json"), "utf8"));
+    const runtimeManifest = join(root, "packages", "runtime", "package.json");
+    if (!existsSync(runtimeManifest)) {
+      problems.push(`refusing to publish ${name}: packages/runtime/package.json is missing`);
+      return problems;
+    }
+    const { version } = JSON.parse(readFileSync(runtimeManifest, "utf8"));
     const expectedTag = releaseTagFor(version);
     if (tag !== expectedTag) problems.push(`refusing to publish ${name}: repository release tag must be ${expectedTag} (found ${tag})`);
     let type = "";
