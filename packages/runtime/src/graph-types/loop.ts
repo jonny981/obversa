@@ -293,14 +293,35 @@ function validateConvergence(definition: ConvergenceDefinition): Readonly<{
   const writers = definition.nodes.filter((node) =>
     node.data.role === 'generator' || node.data.role === 'repair');
   for (const seat of definition.nodes.filter((node) => node.data.role === 'seat')) {
-    const writer = writers.find((node) => seat.data.lane !== undefined
-      && node.data.lane?.id === seat.data.lane.id);
-    if (writer !== undefined) {
-      issues.push(issue(
-        'SELF_REVIEW_LANE',
-        `/nodes/${seat.id}/data/lane`,
-        `Review seat "${seat.id}" cannot use the ${writer.data.role} lane "${seat.data.lane!.id}".`,
-      ));
+    const reviewerLane = seat.data.lane;
+    if (reviewerLane === undefined) continue;
+    const reviewerTargets = [reviewerLane.requested,
+      ...(Array.isArray(reviewerLane.knownSubstitutions) ? reviewerLane.knownSubstitutions : [])];
+    for (const writer of writers) {
+      const writerLane = writer.data.lane;
+      if (writerLane === undefined) continue;
+      if (writerLane.id === reviewerLane.id) {
+        issues.push(issue(
+          'SELF_REVIEW_LANE',
+          `/nodes/${seat.id}/data/lane`,
+          `Review seat "${seat.id}" cannot use the ${writer.data.role} lane "${reviewerLane.id}".`,
+        ));
+        continue;
+      }
+      const writerTargets = [writerLane.requested,
+        ...(Array.isArray(writerLane.knownSubstitutions) ? writerLane.knownSubstitutions : [])];
+      for (const field of ['provider', 'modelFamily'] as const) {
+        const overlap = writerTargets.find((target) => typeof target?.[field] === 'string'
+          && reviewerTargets.some((reviewer) => reviewer?.[field] === target[field]));
+        if (overlap !== undefined) {
+          issues.push(issue(
+            'SELF_REVIEW_LANE',
+            `/nodes/${seat.id}/data/lane`,
+            `Review seat "${seat.id}" cannot share ${field} "${overlap[field]}" with the ${writer.data.role} lane "${writerLane.id}".`,
+          ));
+          break;
+        }
+      }
     }
   }
 
@@ -378,7 +399,7 @@ export const convergence: GraphType<
   ConvergenceRequirements
 > = {
   kind: 'convergence',
-  version: 2,
+  version: 3,
   compile(definition) {
     const { seats, executionLanes } = validateConvergence(definition);
     const seatSet = new Set(seats);

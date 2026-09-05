@@ -353,6 +353,38 @@ function expectIssue(definition: ConvergenceDefinition, code: string): void {
 }
 
 describe('convergence graph type', () => {
+  it('refuses a stored version-2 plan with STORED_GRAPH_MISMATCH before any node starts', async () => {
+    const definition = panel();
+    const run = await storedConvergenceRun(definition, 2);
+    const dataCalls: string[] = [];
+    const prompts: string[] = [];
+
+    await expect(createGraphExecutor({
+      ...run,
+      graph: compileGraph(convergence, definition),
+      nodes: Object.fromEntries(definition.nodes.map((node) => [node.id,
+        executorNodeBinding(run.root, node.data.role === 'seat'
+          ? { prompt: () => 'Review the draft.' }
+          : { runData: async () => { dataCalls.push(node.id); return {}; } }),
+      ])),
+      engines: [
+        reviewEngineBinding(definition, 'seat-a', PASS_ANTHROPIC, prompts),
+        reviewEngineBinding(definition, 'seat-b', PASS_OPENAI, prompts),
+      ],
+    })).rejects.toMatchObject({
+      name: 'GraphExecutionError',
+      code: 'STORED_GRAPH_MISMATCH',
+    });
+    expect(dataCalls).toEqual([]);
+    expect(prompts).toEqual([]);
+    const eventTypes: string[] = [];
+    for await (const event of run.storage.eventStore.read({
+      namespace: run.storage.record.namespace,
+      streamId: run.runId,
+    })) eventTypes.push(event.type);
+    expect(eventTypes).toEqual(['graph:run-started']);
+  });
+
   it('refuses a stored version-1 plan before executing the required proof-digest contract', async () => {
     const definition = panel();
     const run = await storedConvergenceRun(definition, 1);
@@ -573,7 +605,7 @@ describe('convergence graph type', () => {
     const compiled = compileGraph(convergence, panel());
     const description = compiled.describe();
     expect(description.graph.kind).toBe('convergence');
-    expect(description.graph.typeVersion).toBe(2);
+    expect(description.graph.typeVersion).toBe(3);
     expect(description.nodes.filter((node) => node.laneId !== null).map((node) => node.id))
       .toEqual(['seat-a', 'seat-b']);
     expect(description.bounds.dispatches.min).toEqual({ kind: 'known', value: 4 });
@@ -690,6 +722,126 @@ describe('convergence graph type', () => {
         ? { ...node, data: { ...node.data, lane: reviewLane('writer') } }
         : node),
     })).not.toThrow();
+  });
+
+  it.each(
+    (['generator', 'repair'] as const).flatMap((writerRole) =>
+      (['requested', 'substitution'] as const).flatMap((writerCandidate) =>
+        (['requested', 'substitution'] as const).flatMap((reviewerCandidate) =>
+          (['provider', 'modelFamily'] as const).map((field) => ({
+            writerRole, writerCandidate, reviewerCandidate, field,
+          }))))),
+  )('rejects $writerRole $writerCandidate sharing $field with reviewer $reviewerCandidate', ({
+    writerRole, writerCandidate, reviewerCandidate, field,
+  }) => {
+    const writerTarget = {
+      ...reviewLane('writer', 'writer-provider', 'writer-family').requested,
+      adapter: 'writer-adapter',
+    };
+    const reviewerTarget = {
+      ...reviewLane('reviewer', 'reviewer-provider', 'reviewer-family').requested,
+      adapter: 'reviewer-adapter',
+      [field]: writerTarget[field],
+    };
+    const safeWriter = reviewLane('writer-safe', 'writer-safe-provider', 'writer-safe-family').requested;
+    const safeReviewer = reviewLane('reviewer-safe', 'reviewer-safe-provider', 'reviewer-safe-family').requested;
+    const writerLane = {
+      id: 'writer-lane',
+      requested: writerCandidate === 'requested' ? writerTarget : safeWriter,
+      knownSubstitutions: writerCandidate === 'substitution'
+        ? [safeWriter, writerTarget] : [safeWriter],
+    };
+    const reviewerLane = {
+      id: 'reviewer-lane',
+      requested: reviewerCandidate === 'requested' ? reviewerTarget : safeReviewer,
+      knownSubstitutions: reviewerCandidate === 'substitution'
+        ? [safeReviewer, reviewerTarget] : [safeReviewer],
+    };
+    const base = panel({ requireDiversity: false, skippableSeats: ['seat-a'] });
+    const definition: ConvergenceDefinition = {
+      ...base,
+      nodes: base.nodes.map((node) => node.data.role === writerRole
+        ? { ...node, data: { ...node.data, lane: writerLane } }
+        : node.id === 'seat-a'
+          ? { ...node, data: { ...node.data, lane: reviewerLane } }
+          : node),
+    };
+
+    let caught: unknown;
+    try {
+      compileGraph(convergence, definition);
+    } catch (error) {
+      caught = error;
+    }
+    expect(caught).toBeInstanceOf(GraphValidationError);
+    const conflict = (caught as GraphValidationError).issues.find((item) =>
+      item.code === 'SELF_REVIEW_LANE' && item.path === '/nodes/seat-a/data/lane');
+    expect(conflict).toBeDefined();
+    expect(conflict!.message).toContain(writerRole);
+    expect(conflict!.message).toContain('seat-a');
+    expect(conflict!.message).toContain(field);
+    expect(conflict!.message).toContain(writerTarget[field]);
+  });
+
+  it('accepts disjoint writer and reviewer targets while reviewers share an identity without diversity', () => {
+    const writerLane = {
+      ...reviewLane('writer', 'writer-provider', 'writer-family'),
+      knownSubstitutions: [reviewLane('writer-substitute', 'writer-sub-provider', 'writer-sub-family').requested],
+    };
+    const reviewerLane = {
+      ...reviewLane('reviewer', 'reviewer-provider', 'reviewer-family'),
+      knownSubstitutions: [reviewLane('reviewer-substitute', 'reviewer-sub-provider', 'reviewer-sub-family').requested],
+    };
+    const base = panel({ requireDiversity: false });
+    const definition: ConvergenceDefinition = {
+      ...base,
+      nodes: base.nodes.map((node) => node.data.role === 'generator' || node.data.role === 'repair'
+        ? { ...node, data: { ...node.data, lane: writerLane } }
+        : node.data.role === 'seat'
+          ? { ...node, data: { ...node.data, lane: { ...reviewerLane, id: node.id } } }
+          : node),
+    };
+    const events = [
+      convDispatched('generator', 1),
+      completed('generator', 'convergence/1/generator/1', {}),
+      convDispatched('evaluator', 1),
+      completed('evaluator', 'convergence/1/evaluator/1', { gateMet: true, ...REVIEW_EVIDENCE }),
+      seatDispatched('seat-a', 1),
+      completed('seat-a', 'review/1/seat-a/1', PASS_ANTHROPIC),
+      seatDispatched('seat-b', 1),
+      completed('seat-b', 'review/1/seat-b/1', PASS_OPENAI),
+    ];
+
+    expect(decideAt(events, definition)).toMatchObject([{ kind: 'complete' }]);
+  });
+
+  it('keeps data-only writers and reviewers without inventing engine identity', () => {
+    const base = panel({ requireDiversity: false });
+    const definition: ConvergenceDefinition = {
+      ...base,
+      nodes: base.nodes.map((node) => ({ ...node, data: { role: node.data.role } })),
+    };
+    const graph = compileGraph(convergence, definition);
+    expect(graph.describe().executionLanes).toEqual([]);
+    expect(graph.describe().nodes.every((node) => node.laneId === null)).toBe(true);
+    const events = [
+      convDispatched('generator', 1),
+      completed('generator', 'convergence/1/generator/1', {}),
+      convDispatched('evaluator', 1),
+      completed('evaluator', 'convergence/1/evaluator/1', { gateMet: true, ...REVIEW_EVIDENCE }),
+      seatDispatched('seat-a', 1),
+      completed('seat-a', 'review/1/seat-a/1', PASS_ANTHROPIC),
+      seatDispatched('seat-b', 1),
+      completed('seat-b', 'review/1/seat-b/1', PASS_OPENAI),
+    ];
+    const state = fold(events, definition);
+    expect(state.seats['seat-a']).toMatchObject({ provider: null, modelFamily: null });
+    expect(state.seats['seat-b']).toMatchObject({ provider: null, modelFamily: null });
+    expect(graph.decide(state)).toMatchObject([{ kind: 'complete' }]);
+    expect(decideAt(events, {
+      ...definition,
+      data: { ...definition.data, requireDiversity: true },
+    })).toMatchObject([{ kind: 'fail', code: 'QUORUM_UNREACHABLE' }]);
   });
 
   it('rejects conflicting declarations for one engine lane id', () => {
