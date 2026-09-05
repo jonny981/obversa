@@ -15,7 +15,12 @@ import {
 import { MockEngine } from '@obversa/engine/testing';
 import { afterEach, describe, expect, it } from 'vitest';
 
-import { compileGraph, type GraphEvent, type GraphType } from '../src/graph/type.js';
+import {
+  compileGraph,
+  type GraphEvent,
+  type GraphType,
+} from '../src/graph/type.js';
+import type { EngineAttemptRecordedPayload, GraphEngineIdentity } from '../src/api.js';
 import type { GraphDefinition } from '../src/graph/kernel.js';
 import {
   resolveGraphPlan,
@@ -373,6 +378,7 @@ class SelectedEngine implements Engine {
   constructor(
     private readonly selection: EngineSelectionRecord,
     private readonly value: JsonValue = { ok: true },
+    private readonly effective: EngineSelectionRecord = selection,
   ) {}
 
   async run(
@@ -387,7 +393,7 @@ class SelectedEngine implements Engine {
       parts: [{ kind: 'structured', value: this.value, final: true }],
       usage: { kind: 'reported', inputTokens: 1, outputTokens: 1 },
       requested: this.selection,
-      effective: this.selection,
+      effective: this.effective,
       stopReason: 'end_turn',
     };
   }
@@ -497,10 +503,13 @@ describe('createGraphExecutor', () => {
       'graph:run-started',
       'graph:node-dispatched',
       'graph:node-attempt-started',
+      'graph:engine-attempt-recorded',
       'graph:model-unavailable',
+      'graph:engine-attempt-recorded',
       'graph:node-completed',
       'graph:node-dispatched',
       'graph:node-attempt-started',
+      'graph:engine-attempt-recorded',
       'graph:node-completed',
     ]);
   });
@@ -1256,5 +1265,339 @@ describe('createGraphExecutor', () => {
     expect(parentCompleted?.payload).toMatchObject({
       result: { child: { kind: 'complete', output: { attempts: 1 } } },
     });
+  });
+});
+
+const primaryIdentity: GraphEngineIdentity = {
+  adapter: 'mock', provider: 'provider', modelFamily: 'family', model: 'primary',
+};
+const fallbackIdentity: GraphEngineIdentity = { ...primaryIdentity, model: 'fallback' };
+const reportedIdentity: GraphEngineIdentity = {
+  adapter: 'reported-adapter', provider: 'reported-provider',
+  modelFamily: 'reported-family', model: 'reported-model',
+};
+const reportedSelection: EngineSelectionRecord = { ...PRIMARY_SELECTION, ...reportedIdentity };
+
+function engineReceipt(overrides: Partial<EngineAttemptRecordedPayload> = {}): EngineAttemptRecordedPayload {
+  return {
+    nodeId: 'worker', position: 'turns/1', sequence: 1,
+    requested: primaryIdentity, effective: primaryIdentity,
+    ...overrides,
+  };
+}
+
+async function appendStartedPosition(run: Awaited<ReturnType<typeof storedRun>>, retrySafe = true): Promise<void> {
+  await appendGraphEvent(run.storage, run.runId, {
+    type: 'node-dispatched', version: 1,
+    payload: { nodeId: 'worker', position: 'turns/1' },
+  });
+  await appendGraphEvent(run.storage, run.runId, {
+    type: 'node-attempt-started', version: 1,
+    payload: {
+      identity: createAttemptIdentity({
+        namespace: run.storage.record.namespace, streamId: run.runId,
+        nodeId: 'worker', position: 'turns/1',
+      }),
+      retrySafe,
+    },
+  });
+}
+
+describe('durable engine attempt identities', () => {
+  it('records both reported calls before fallback and completion and delivers them to the reducer', async () => {
+    const run = await storedRun(definition());
+    const primary = new MockEngine(() => {
+      throw new EngineError({ kind: 'model-unavailable', message: 'primary unavailable', effective: reportedSelection });
+    });
+    const answer = new SelectedEngine(FALLBACK_SELECTION, { ok: true }, reportedSelection);
+    let observedBeforeFallback: readonly DomainEventEnvelope[] = [];
+    const fallback: Engine = {
+      name: 'fallback',
+      async run(...args) {
+        observedBeforeFallback = await events(run.storage, run.runId);
+        return answer.run(...args);
+      },
+    };
+    const reduced: JsonValue[] = [];
+    const nodes = { worker: nodeBinding(run.root, { prompt: () => 'Answer.' }) };
+    const engines = [
+      engineBinding(PRIMARY_TARGET, PRIMARY_SELECTION, primary),
+      engineBinding(FALLBACK_TARGET, FALLBACK_SELECTION, fallback),
+    ];
+    const executor = await createGraphExecutor({
+      ...run, nodes, engines,
+      graph: {
+        ...run.graph,
+        reduce(state: TestState, event: GraphEvent) {
+          if (event.type === 'engine-attempt-recorded') reduced.push(event.payload);
+          return run.graph.reduce(state, event as TestEvent);
+        },
+      },
+    });
+
+    await expect(executor.run(new AbortController().signal)).resolves.toMatchObject({ kind: 'complete' });
+    const expected = [
+      engineReceipt({ effective: reportedIdentity }),
+      engineReceipt({ sequence: 2, requested: fallbackIdentity, effective: reportedIdentity }),
+    ];
+    expect(observedBeforeFallback.filter((event) => event.type === 'graph:engine-attempt-recorded')
+      .map((event) => event.payload)).toEqual(expected.slice(0, 1));
+    const durable = await events(run.storage, run.runId);
+    expect(durable.filter((event) => event.type === 'graph:engine-attempt-recorded')
+      .map((event) => event.payload)).toEqual(expected);
+    expect(durable.map((event) => event.type)).toEqual([
+      'graph:run-started', 'graph:node-dispatched', 'graph:node-attempt-started',
+      'graph:engine-attempt-recorded', 'graph:model-unavailable',
+      'graph:engine-attempt-recorded', 'graph:node-completed',
+    ]);
+    expect(reduced).toEqual(expect.arrayContaining(expected));
+    expect(durable.at(-1)?.payload).toEqual({ nodeId: 'worker', position: 'turns/1', result: { ok: true } });
+
+    const storage = createLocalRunStorage({ directory: join(run.root, 'storage'), namespace: 'executor-tests', policy });
+    const fresh = await createGraphExecutor({ ...run, storage, nodes, engines });
+    await expect(fresh.run(new AbortController().signal)).resolves.toMatchObject({ kind: 'complete' });
+    expect(answer.calls).toBe(1);
+  });
+
+  it('keeps an unknown primary null and starts each new position sequence at one', async () => {
+    const run = await storedRun(definition({ completeAfter: 2 }));
+    const primary = new MockEngine(() => { throw new EngineError({ kind: 'auth', message: 'no answer' }); });
+    const fallback = new SelectedEngine(FALLBACK_SELECTION);
+    const executor = await createGraphExecutor({
+      ...run,
+      nodes: { worker: nodeBinding(run.root, { prompt: () => 'Answer.' }) },
+      engines: [
+        engineBinding(PRIMARY_TARGET, PRIMARY_SELECTION, primary),
+        engineBinding(FALLBACK_TARGET, FALLBACK_SELECTION, fallback),
+      ],
+    });
+    await expect(executor.run(new AbortController().signal)).resolves.toMatchObject({ kind: 'complete' });
+    expect((await events(run.storage, run.runId)).filter((event) => event.type === 'graph:engine-attempt-recorded')
+      .map((event) => event.payload)).toEqual([
+        engineReceipt({ effective: null }),
+        engineReceipt({ sequence: 2, requested: fallbackIdentity, effective: fallbackIdentity }),
+        engineReceipt({ position: 'turns/2', requested: fallbackIdentity, effective: fallbackIdentity }),
+      ]);
+  });
+
+  it('continues the stored per-position sequence when a fresh executor resumes after result append failure', async () => {
+    const run = await storedRun(definition());
+    const primary = new SelectedEngine(PRIMARY_SELECTION);
+    const nodes = { worker: nodeBinding(run.root, { prompt: () => 'Answer.', retrySafe: true }) };
+    const engines = [
+      engineBinding(PRIMARY_TARGET, PRIMARY_SELECTION, primary),
+      engineBinding(FALLBACK_TARGET, FALLBACK_SELECTION, new SelectedEngine(FALLBACK_SELECTION)),
+    ];
+    const interruption = new Error('process stopped before node completion was stored');
+    const eventStore: EventStore = {
+      preflightAppend: (...args) => run.storage.eventStore.preflightAppend(...args),
+      read: (...args) => run.storage.eventStore.read(...args),
+      async append(stream, revision, batch) {
+        if (batch.some((event) => event.type === 'graph:node-completed')) throw interruption;
+        return run.storage.eventStore.append(stream, revision, batch);
+      },
+    };
+    const first = await createGraphExecutor({ ...run, storage: { ...run.storage, eventStore }, nodes, engines });
+    await expect(first.run(new AbortController().signal)).rejects.toBe(interruption);
+    const storage = createLocalRunStorage({ directory: join(run.root, 'storage'), namespace: 'executor-tests', policy });
+    const fresh = await createGraphExecutor({ ...run, storage, nodes, engines });
+    await expect(fresh.resume('turns/1', new AbortController().signal)).resolves.toMatchObject({ kind: 'complete' });
+    expect(primary.calls).toBe(2);
+    const durable = await events(storage, run.runId);
+    expect(durable.filter((event) => event.type === 'graph:engine-attempt-recorded').map((event) => event.payload))
+      .toEqual([
+        engineReceipt(),
+        engineReceipt({ sequence: 2, requested: null, effective: null }),
+        engineReceipt({ sequence: 3 }),
+      ]);
+    expect(durable.filter((event) => event.type === 'graph:node-dispatched')).toHaveLength(1);
+  });
+
+  it.each(['result', 'unavailable'] as const)('refuses completion and fallback when the %s receipt cannot be stored', async (outcome) => {
+    const run = await storedRun(definition());
+    const receiptError = new StorageError('STORAGE_LIMIT_EXCEEDED', 'receipt rejected');
+    const eventStore: EventStore = {
+      preflightAppend: (...args) => run.storage.eventStore.preflightAppend(...args),
+      read: (...args) => run.storage.eventStore.read(...args),
+      async append(stream, revision, batch) {
+        if (batch.some((event) => event.type === 'graph:engine-attempt-recorded')) throw receiptError;
+        return run.storage.eventStore.append(stream, revision, batch);
+      },
+    };
+    const answer = new SelectedEngine(PRIMARY_SELECTION);
+    let primaryCalls = 0;
+    const primary: Engine = {
+      name: 'primary',
+      async run(...args) {
+        primaryCalls += 1;
+        if (outcome === 'unavailable') throw new EngineError({ kind: 'auth', message: 'no answer' });
+        return answer.run(...args);
+      },
+    };
+    const fallback = new SelectedEngine(FALLBACK_SELECTION);
+    const executor = await createGraphExecutor({
+      ...run, storage: { ...run.storage, eventStore },
+      nodes: { worker: nodeBinding(run.root, { prompt: () => 'Answer.' }) },
+      engines: [
+        engineBinding(PRIMARY_TARGET, PRIMARY_SELECTION, primary),
+        engineBinding(FALLBACK_TARGET, FALLBACK_SELECTION, fallback),
+      ],
+    });
+    await expect(executor.run(new AbortController().signal)).rejects.toBe(receiptError);
+    expect(primaryCalls).toBe(1);
+    expect(fallback.calls).toBe(0);
+    expect((await events(run.storage, run.runId)).map((event) => event.type)).toEqual([
+      'graph:run-started', 'graph:node-dispatched', 'graph:node-attempt-started',
+    ]);
+  });
+
+  it('preserves the engine receipt when the result is too large to store', async () => {
+    const run = await storedRun(definition());
+    const primary = new SelectedEngine(PRIMARY_SELECTION, { text: 'x'.repeat(70_000) }, reportedSelection);
+    const executor = await createGraphExecutor({
+      ...run,
+      nodes: { worker: nodeBinding(run.root, { prompt: () => 'Answer.' }) },
+      engines: [
+        engineBinding(PRIMARY_TARGET, PRIMARY_SELECTION, primary),
+        engineBinding(FALLBACK_TARGET, FALLBACK_SELECTION, new SelectedEngine(FALLBACK_SELECTION)),
+      ],
+    });
+    await expect(executor.run(new AbortController().signal)).resolves.toMatchObject({ kind: 'fail' });
+    const durable = await events(run.storage, run.runId);
+    expect(durable.filter((event) => event.type === 'graph:engine-attempt-recorded').map((event) => event.payload))
+      .toEqual([engineReceipt({ effective: reportedIdentity })]);
+    expect(durable.at(-1)?.payload).toEqual({ nodeId: 'worker', position: 'turns/1', code: 'RESULT_TOO_LARGE' });
+  });
+
+  it.each([
+    ['version', { version: 2 }],
+    ['missing effective', { payload: { nodeId: 'worker', position: 'turns/1', sequence: 1, requested: primaryIdentity } }],
+    ['unknown field', { payload: { ...engineReceipt(), extra: true } }],
+    ['invalid reported model', { payload: engineReceipt({ effective: { ...primaryIdentity, model: 42 } as unknown as GraphEngineIdentity }) }],
+    ['missing identity field', { payload: { ...engineReceipt(), effective: { adapter: 'mock', provider: 'provider', model: 'primary' } } }],
+    ['unknown identity field', { payload: { ...engineReceipt(), effective: { ...primaryIdentity, extra: true } } }],
+    ['empty adapter', { payload: engineReceipt({ effective: { ...primaryIdentity, adapter: '' } }) }],
+    ['zero sequence', { payload: engineReceipt({ sequence: 0 }) }],
+    ['skipped sequence', { payload: engineReceipt({ sequence: 2 }) }],
+    ['fractional sequence', { payload: engineReceipt({ sequence: 1.5 }) }],
+    ['foreign node', { payload: engineReceipt({ nodeId: 'other' }) }],
+    ['foreign position', { payload: engineReceipt({ position: 'turns/other' }) }],
+    ['unplanned request', { payload: engineReceipt({ requested: reportedIdentity }) }],
+    ['reported answer without requested target', { payload: engineReceipt({ requested: null }) }],
+  ] as const)('rejects a stored engine receipt with %s before running an engine', async (_name, change) => {
+    const run = await storedRun(definition());
+    await appendStartedPosition(run);
+    await appendGraphEvent(run.storage, run.runId, {
+      type: 'engine-attempt-recorded', version: 1, payload: engineReceipt(), ...change,
+    });
+    const primary = new SelectedEngine(PRIMARY_SELECTION);
+    const executor = await createGraphExecutor({
+      ...run,
+      nodes: { worker: nodeBinding(run.root, { prompt: () => 'Answer.' }) },
+      engines: [
+        engineBinding(PRIMARY_TARGET, PRIMARY_SELECTION, primary),
+        engineBinding(FALLBACK_TARGET, FALLBACK_SELECTION, new SelectedEngine(FALLBACK_SELECTION)),
+      ],
+    });
+    await expect(executor.run(new AbortController().signal)).rejects.toMatchObject({
+      name: 'GraphExecutionError', code: 'INVALID_EVENT',
+    });
+    expect(primary.calls).toBe(0);
+  });
+
+  it.each(['before-dispatch', 'before-start', 'duplicate', 'after-completion', 'while-paused', 'data-node'] as const)('rejects a stored engine receipt %s', async (mode) => {
+    const run = await storedRun(definition({ engineBacked: mode !== 'data-node' }));
+    if (mode !== 'before-start' && mode !== 'before-dispatch') await appendStartedPosition(run);
+    if (mode === 'before-start') {
+      await appendGraphEvent(run.storage, run.runId, {
+        type: 'node-dispatched', version: 1, payload: { nodeId: 'worker', position: 'turns/1' },
+      });
+    }
+    if (mode === 'while-paused') {
+      await appendGraphEvent(run.storage, run.runId, {
+        type: 'node-paused', version: 1,
+        payload: { nodeId: 'worker', position: 'turns/1', reason: 'approval', request: {} },
+      });
+    }
+    if (mode === 'duplicate') {
+      await appendGraphEvent(run.storage, run.runId, { type: 'engine-attempt-recorded', version: 1, payload: engineReceipt() });
+    }
+    if (mode === 'after-completion') {
+      await appendGraphEvent(run.storage, run.runId, {
+        type: 'node-completed', version: 1,
+        payload: { nodeId: 'worker', position: 'turns/1', result: { ok: true } },
+      });
+    }
+    await appendGraphEvent(run.storage, run.runId, { type: 'engine-attempt-recorded', version: 1, payload: engineReceipt() });
+    const primary = new SelectedEngine(PRIMARY_SELECTION);
+    const executor = await createGraphExecutor({
+      ...run,
+      nodes: { worker: nodeBinding(run.root, mode === 'data-node'
+        ? { runData: async () => ({ ok: true }) } : { prompt: () => 'Answer.' }) },
+      engines: mode === 'data-node' ? [] : [
+        engineBinding(PRIMARY_TARGET, PRIMARY_SELECTION, primary),
+        engineBinding(FALLBACK_TARGET, FALLBACK_SELECTION, new SelectedEngine(FALLBACK_SELECTION)),
+      ],
+    });
+    await expect(executor.run(new AbortController().signal)).rejects.toMatchObject({
+      name: 'GraphExecutionError', code: 'INVALID_EVENT',
+    });
+    expect(primary.calls).toBe(0);
+  });
+});
+
+describe('engine identity recovery', () => {
+  it.each([true, false])('records an unknown interrupted engine attempt before resume with retrySafe=%s', async (retrySafe) => {
+    const run = await storedRun(definition());
+    await appendStartedPosition(run, retrySafe);
+    const primary = new SelectedEngine(PRIMARY_SELECTION);
+    const storage = createLocalRunStorage({ directory: join(run.root, 'storage'), namespace: 'executor-tests', policy });
+    const executor = await createGraphExecutor({
+      ...run, storage,
+      nodes: { worker: nodeBinding(run.root, { prompt: () => 'Answer.' }) },
+      engines: [
+        engineBinding(PRIMARY_TARGET, PRIMARY_SELECTION, primary),
+        engineBinding(FALLBACK_TARGET, FALLBACK_SELECTION, new SelectedEngine(FALLBACK_SELECTION)),
+      ],
+    });
+    await expect(executor.resume('turns/1', new AbortController().signal)).resolves.toMatchObject({
+      kind: retrySafe ? 'complete' : 'pause',
+    });
+    expect(primary.calls).toBe(retrySafe ? 1 : 0);
+    const durable = await events(storage, run.runId);
+    expect(durable.filter((event) => event.type === 'graph:engine-attempt-recorded').map((event) => event.payload))
+      .toEqual(retrySafe
+        ? [engineReceipt({ requested: null, effective: null }), engineReceipt({ sequence: 2 })]
+        : [engineReceipt({ requested: null, effective: null })]);
+    const unknownIndex = durable.findIndex((event) => event.type === 'graph:engine-attempt-recorded');
+    expect(durable[unknownIndex + 1]?.type).toBe(retrySafe ? 'graph:node-resumed' : 'graph:node-paused');
+  });
+
+  it('does not invent an interrupted engine call when resuming a recorded policy wait', async () => {
+    const run = await storedRun(definition());
+    const primary = new SelectedEngine(PRIMARY_SELECTION);
+    const engines = [
+      engineBinding(PRIMARY_TARGET, PRIMARY_SELECTION, primary),
+      engineBinding(FALLBACK_TARGET, FALLBACK_SELECTION, new SelectedEngine(FALLBACK_SELECTION)),
+    ];
+    const waiting = await createGraphExecutor({
+      ...run, engines,
+      nodes: { worker: nodeBinding(run.root, {
+        prompt: () => 'Answer.',
+        decideAction: async () => ({ kind: 'wait', reason: 'approval', request: {} }),
+      }) },
+    });
+    await expect(waiting.run(new AbortController().signal)).resolves.toMatchObject({ kind: 'pause' });
+    expect(primary.calls).toBe(0);
+    expect((await events(run.storage, run.runId)).filter((event) => event.type === 'graph:engine-attempt-recorded'))
+      .toEqual([]);
+    const fresh = await createGraphExecutor({
+      ...run, engines,
+      nodes: { worker: nodeBinding(run.root, { prompt: () => 'Answer.' }) },
+    });
+    await expect(fresh.resume('turns/1', new AbortController().signal)).resolves.toMatchObject({ kind: 'complete' });
+    expect(primary.calls).toBe(1);
+    expect((await events(run.storage, run.runId)).filter((event) => event.type === 'graph:engine-attempt-recorded')
+      .map((event) => event.payload)).toEqual([engineReceipt()]);
   });
 });

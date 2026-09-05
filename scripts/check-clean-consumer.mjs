@@ -60,7 +60,7 @@ const expectedReviewLoopReport = {
       findings: [],
     },
   },
-  events: 8,
+  events: 10,
   planDigest: 'sha256:499b4c4187dfb574d3a22653145a0b3289c7c6ed25eb106eb981ae86f4136aa1',
   bounds: {
     dispatches: {

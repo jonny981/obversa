@@ -3,13 +3,13 @@ import { mkdtemp, realpath, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
-import { EngineError, type EngineSelectionRecord } from '@obversa/engine';
-import { MockEngine } from '@obversa/engine/testing';
+import { EngineError, assistantResult, engineSelection, reportedUsage, type EngineSelectionRecord } from '@obversa/engine';
 import { afterEach, describe, expect, it } from 'vitest';
 
 import type { GraphCommand } from '../src/graph/commands.ts';
 import type { NodeId } from '../src/graph/kernel.ts';
-import { resolveGraphPlan, type PlanResolution } from '../src/graph/plan.ts';
+import { resolveGraphPlan, type ExecutionTarget, type PlanResolution } from '../src/graph/plan.ts';
+import type { DomainEventEnvelope } from '../src/events/envelope.ts';
 import {
   assertGraphTypeConformance,
   runGraphTypeConformance,
@@ -119,6 +119,20 @@ function completed(
   return { type: 'node-completed', version: 1, payload: { nodeId, position, result } };
 }
 
+function seatReceipt(
+  nodeId: NodeId,
+  position: string,
+  provider: string,
+  modelFamily: string,
+  model = `mock-${nodeId}`,
+): ConvergenceEvent {
+  const identity = { adapter: 'mock', provider, modelFamily, model };
+  return {
+    type: 'engine-attempt-recorded', version: 1,
+    payload: { nodeId, position, sequence: 1, requested: identity, effective: identity },
+  };
+}
+
 function failedNode(nodeId: NodeId, position: string, code: string): ConvergenceEvent {
   return { type: 'node-failed', version: 1, payload: { nodeId, position, code } };
 }
@@ -169,14 +183,14 @@ function planResolution(definition: ConvergenceDefinition): PlanResolution {
     version: '1.0.0',
     digest: `sha256:${'d'.repeat(64)}` as const,
   };
-  const seats = definition.nodes.filter((node) => node.data.role === 'seat');
+  const laneNodes = definition.nodes.filter((node) => node.data.lane !== undefined);
   return {
     package: identity,
     admission: { package: identity, permissions: [] },
-    executionLanes: seats.map((seat) => ({
-      id: seat.data.lane!.id,
-      effective: seat.data.lane!.requested,
-      fallbacks: seat.data.lane!.knownSubstitutions,
+    executionLanes: laneNodes.map((node) => ({
+      id: node.data.lane!.id,
+      effective: node.data.lane!.requested,
+      fallbacks: node.data.lane!.knownSubstitutions,
     })),
   };
 }
@@ -304,8 +318,8 @@ function reviewEngineBinding(
   const selection: EngineSelectionRecord = {
     adapter: target.adapter,
     adapterVersion: null,
-    provider: null,
-    modelFamily: null,
+    provider: target.provider,
+    modelFamily: target.modelFamily,
     model: target.model,
     executable: null,
     capabilities: [],
@@ -313,11 +327,18 @@ function reviewEngineBinding(
   return {
     target,
     selection,
-    engine: new MockEngine((request) => {
-      prompts.push(`${seatId}: ${request.prompt}`);
-      if (response instanceof EngineError) throw response;
-      return JSON.stringify(response);
-    }),
+    engine: {
+      name: 'mock',
+      async run(request) {
+        prompts.push(`${seatId}: ${request.prompt}`);
+        if (response instanceof EngineError) throw response;
+        return assistantResult({
+          text: JSON.stringify(response),
+          usage: reportedUsage({ inputTokens: 10, outputTokens: 5 }),
+          requested: selection, effective: selection, stopReason: 'end_turn',
+        });
+      },
+    },
     hardTokenLimitEnforceable: false,
   };
 }
@@ -411,6 +432,16 @@ describe('convergence graph type', () => {
 
   it('passes the graph type conformance kit', () => {
     const definition = panel();
+    const receiptA = {
+      nodeId: 'seat-a', position: 'review/1/seat-a/1', sequence: 1,
+      requested: { adapter: 'mock', provider: 'anthropic', modelFamily: 'claude', model: 'mock-seat-a' },
+      effective: { adapter: 'mock', provider: 'anthropic', modelFamily: 'claude', model: 'mock-seat-a' },
+    } as const;
+    const receiptB = {
+      nodeId: 'seat-b', position: 'review/1/seat-b/1', sequence: 1,
+      requested: { adapter: 'mock', provider: 'openai', modelFamily: 'gpt', model: 'mock-seat-b' },
+      effective: { adapter: 'mock', provider: 'openai', modelFamily: 'gpt', model: 'mock-seat-b' },
+    } as const;
     const fixture: GraphTypeConformanceFixture<
       ConvergenceDefinition,
       ConvergenceStatus,
@@ -425,8 +456,10 @@ describe('convergence graph type', () => {
         convDispatched('evaluator', 1),
         completed('evaluator', 'convergence/1/evaluator/1', { gateMet: true, ...REVIEW_EVIDENCE }),
         seatDispatched('seat-a', 1),
+        seatReceipt('seat-a', 'review/1/seat-a/1', 'anthropic', 'claude'),
         completed('seat-a', 'review/1/seat-a/1', PASS_ANTHROPIC),
         seatDispatched('seat-b', 1),
+        seatReceipt('seat-b', 'review/1/seat-b/1', 'openai', 'gpt'),
         completed('seat-b', 'review/1/seat-b/1', PASS_OPENAI),
       ],
       invalidDefinitions: [
@@ -445,6 +478,7 @@ describe('convergence graph type', () => {
       expected: {
         states: [
           {
+            engineAttempts: {}, writerProviders: [], writerModelFamilies: [],
             phase: 'body', iteration: 1, restarts: 0,
             nodes: {
               generator: nodeState('pending'), evaluator: nodeState('pending'),
@@ -454,6 +488,7 @@ describe('convergence graph type', () => {
             reviewEvidence: null, findingRounds: {}, pauseReason: null,
           },
           {
+            engineAttempts: {}, writerProviders: [], writerModelFamilies: [],
             phase: 'body', iteration: 1, restarts: 0,
             nodes: {
               generator: nodeState('in-flight', 1, 'convergence/1/generator/1'),
@@ -464,6 +499,7 @@ describe('convergence graph type', () => {
             reviewEvidence: null, findingRounds: {}, pauseReason: null,
           },
           {
+            engineAttempts: {}, writerProviders: [], writerModelFamilies: [],
             phase: 'body', iteration: 1, restarts: 0,
             nodes: {
               generator: nodeState('passed', 1), evaluator: nodeState('pending'),
@@ -473,6 +509,7 @@ describe('convergence graph type', () => {
             reviewEvidence: null, findingRounds: {}, pauseReason: null,
           },
           {
+            engineAttempts: {}, writerProviders: [], writerModelFamilies: [],
             phase: 'body', iteration: 1, restarts: 0,
             nodes: {
               generator: nodeState('passed', 1),
@@ -483,6 +520,7 @@ describe('convergence graph type', () => {
             reviewEvidence: null, findingRounds: {}, pauseReason: null,
           },
           {
+            engineAttempts: {}, writerProviders: [], writerModelFamilies: [],
             phase: 'review', iteration: 1, restarts: 0,
             nodes: {
               generator: nodeState('passed', 1), evaluator: nodeState('passed', 1),
@@ -492,6 +530,7 @@ describe('convergence graph type', () => {
             reviewEvidence: REVIEW_EVIDENCE, findingRounds: {}, pauseReason: null,
           },
           {
+            engineAttempts: {}, writerProviders: [], writerModelFamilies: [],
             phase: 'review', iteration: 1, restarts: 0,
             nodes: {
               generator: nodeState('passed', 1), evaluator: nodeState('passed', 1),
@@ -502,6 +541,18 @@ describe('convergence graph type', () => {
             reviewEvidence: REVIEW_EVIDENCE, findingRounds: {}, pauseReason: null,
           },
           {
+            engineAttempts: { 'review/1/seat-a/1': receiptA }, writerProviders: [], writerModelFamilies: [],
+            phase: 'review', iteration: 1, restarts: 0,
+            nodes: {
+              generator: nodeState('passed', 1), evaluator: nodeState('passed', 1),
+              'seat-a': nodeState('in-flight', 1, 'review/1/seat-a/1'),
+              'seat-b': nodeState('pending'), repair: nodeState('pending'),
+            },
+            seats: { 'seat-a': seatRecord(null), 'seat-b': seatRecord(null) },
+            reviewEvidence: REVIEW_EVIDENCE, findingRounds: {}, pauseReason: null,
+          },
+          {
+            engineAttempts: { 'review/1/seat-a/1': receiptA }, writerProviders: [], writerModelFamilies: [],
             phase: 'review', iteration: 1, restarts: 0,
             nodes: {
               generator: nodeState('passed', 1), evaluator: nodeState('passed', 1),
@@ -521,6 +572,7 @@ describe('convergence graph type', () => {
             reviewEvidence: REVIEW_EVIDENCE, findingRounds: {}, pauseReason: null,
           },
           {
+            engineAttempts: { 'review/1/seat-a/1': receiptA }, writerProviders: [], writerModelFamilies: [],
             phase: 'review', iteration: 1, restarts: 0,
             nodes: {
               generator: nodeState('passed', 1), evaluator: nodeState('passed', 1),
@@ -542,6 +594,29 @@ describe('convergence graph type', () => {
             reviewEvidence: REVIEW_EVIDENCE, findingRounds: {}, pauseReason: null,
           },
           {
+            engineAttempts: { 'review/1/seat-a/1': receiptA, 'review/1/seat-b/1': receiptB }, writerProviders: [], writerModelFamilies: [],
+            phase: 'review', iteration: 1, restarts: 0,
+            nodes: {
+              generator: nodeState('passed', 1), evaluator: nodeState('passed', 1),
+              'seat-a': nodeState('passed', 1),
+              'seat-b': nodeState('in-flight', 1, 'review/1/seat-b/1'),
+              repair: nodeState('pending'),
+            },
+            seats: {
+              'seat-a': {
+                outcome: 'valid', verdict: 'pass', confidence: 0.9,
+                provider: 'anthropic', modelFamily: 'claude',
+                inputHashes: REVIEW_EVIDENCE.inputHashes,
+                workspaceFingerprint: REVIEW_EVIDENCE.workspaceFingerprint,
+                proofArtifactDigest: REVIEW_EVIDENCE.proofArtifactDigest,
+                findings: [], stale: false,
+              },
+              'seat-b': seatRecord(null),
+            },
+            reviewEvidence: REVIEW_EVIDENCE, findingRounds: {}, pauseReason: null,
+          },
+          {
+            engineAttempts: { 'review/1/seat-a/1': receiptA, 'review/1/seat-b/1': receiptB }, writerProviders: [], writerModelFamilies: [],
             phase: 'review', iteration: 1, restarts: 0,
             nodes: {
               generator: nodeState('passed', 1), evaluator: nodeState('passed', 1),
@@ -575,7 +650,9 @@ describe('convergence graph type', () => {
           [],
           [{ kind: 'dispatch', nodeId: 'seat-a', input: { positionSummary: 'review/1, node seat-a, attempt 1', proofArtifactDigest: PROOF_ARTIFACT_DIGEST }, position: 'review/1/seat-a/1' }],
           [],
+          [],
           [{ kind: 'dispatch', nodeId: 'seat-b', input: { positionSummary: 'review/1, node seat-b, attempt 1', proofArtifactDigest: PROOF_ARTIFACT_DIGEST }, position: 'review/1/seat-b/1' }],
+          [],
           [],
           [{
             kind: 'complete',
@@ -635,6 +712,7 @@ describe('convergence graph type', () => {
           ...REVIEW_EVIDENCE,
         }),
         seatDispatched('seat-a', 1, round),
+        seatReceipt('seat-a', `review/1/seat-a/${round}`, 'mock', 'mock-family'),
         completed('seat-a', `review/1/seat-a/${round}`, {
           verdict: 'findings', confidence: 0.8, provider: 'anthropic', modelFamily: 'claude',
           findings: [finding],
@@ -675,7 +753,7 @@ describe('convergence graph type', () => {
     expect(description.executionLanes).toEqual([lane]);
   });
 
-  it('does not let seat results claim diversity absent from the planned lanes', () => {
+  it('does not let seat results claim diversity absent from the reported identities', () => {
     const lane = reviewLane('shared-review', 'anthropic', 'claude');
     const definition: ConvergenceDefinition = {
       ...panel(),
@@ -689,8 +767,10 @@ describe('convergence graph type', () => {
       convDispatched('evaluator', 1),
       completed('evaluator', 'convergence/1/evaluator/1', { gateMet: true, ...REVIEW_EVIDENCE }),
       seatDispatched('seat-a', 1),
+      seatReceipt('seat-a', 'review/1/seat-a/1', 'anthropic', 'claude', 'mock-shared-review'),
       completed('seat-a', 'review/1/seat-a/1', PASS_ANTHROPIC),
       seatDispatched('seat-b', 1),
+      seatReceipt('seat-b', 'review/1/seat-b/1', 'anthropic', 'claude', 'mock-shared-review'),
       completed('seat-b', 'review/1/seat-b/1', PASS_OPENAI),
     ];
 
@@ -699,6 +779,31 @@ describe('convergence graph type', () => {
       code: 'QUORUM_UNREACHABLE',
       message: 'Only 2 accepted passes; quorum is 2.',
     }]);
+  });
+
+  it('does not count an engine-seat pass without its reported identity receipt', () => {
+    const definition = panel({ requireDiversity: false });
+    const before = [
+      convDispatched('generator', 1),
+      completed('generator', 'convergence/1/generator/1', {}),
+      convDispatched('evaluator', 1),
+      completed('evaluator', 'convergence/1/evaluator/1', { gateMet: true, ...REVIEW_EVIDENCE }),
+      seatDispatched('seat-a', 1),
+    ];
+    const after = [
+      completed('seat-a', 'review/1/seat-a/1', PASS_ANTHROPIC),
+      seatDispatched('seat-b', 1),
+      seatReceipt('seat-b', 'review/1/seat-b/1', 'openai', 'gpt'),
+      completed('seat-b', 'review/1/seat-b/1', PASS_OPENAI),
+    ];
+    expect(decideAt([...before, ...after], definition)).toEqual([
+      expect.objectContaining({ kind: 'fail', code: 'QUORUM_UNREACHABLE' }),
+    ]);
+    expect(decideAt([
+      ...before,
+      seatReceipt('seat-a', 'review/1/seat-a/1', 'anthropic', 'claude'),
+      ...after,
+    ], definition)).toEqual([expect.objectContaining({ kind: 'complete' })]);
   });
 
   it('rejects a review seat on either writer lane and accepts a separate lane', () => {
@@ -801,14 +906,20 @@ describe('convergence graph type', () => {
           ? { ...node, data: { ...node.data, lane: { ...reviewerLane, id: node.id } } }
           : node),
     };
-    const events = [
+    const events: ConvergenceEvent[] = [
       convDispatched('generator', 1),
+      { type: 'engine-attempt-recorded', version: 1, payload: {
+        nodeId: 'generator', position: 'convergence/1/generator/1', sequence: 1,
+        requested: targetIdentity(writerLane.requested), effective: targetIdentity(writerLane.requested),
+      } },
       completed('generator', 'convergence/1/generator/1', {}),
       convDispatched('evaluator', 1),
       completed('evaluator', 'convergence/1/evaluator/1', { gateMet: true, ...REVIEW_EVIDENCE }),
       seatDispatched('seat-a', 1),
+      seatReceipt('seat-a', 'review/1/seat-a/1', 'reviewer-provider', 'reviewer-family', 'mock-reviewer'),
       completed('seat-a', 'review/1/seat-a/1', PASS_ANTHROPIC),
       seatDispatched('seat-b', 1),
+      seatReceipt('seat-b', 'review/1/seat-b/1', 'reviewer-provider', 'reviewer-family', 'mock-reviewer'),
       completed('seat-b', 'review/1/seat-b/1', PASS_OPENAI),
     ];
 
@@ -905,14 +1016,17 @@ describe('convergence graph type', () => {
       convDispatched('evaluator', 1),
       completed('evaluator', 'convergence/1/evaluator/1', { gateMet: true, ...REVIEW_EVIDENCE }),
       seatDispatched('seat-claude', 1),
+      seatReceipt('seat-claude', 'review/1/seat-claude/1', 'anthropic', 'claude', 'claude-test'),
       completed('seat-claude', 'review/1/seat-claude/1', PASS_ANTHROPIC),
       seatDispatched('seat-codex', 1),
+      seatReceipt('seat-codex', 'review/1/seat-codex/1', 'openai', 'gpt', 'gpt-test'),
       completed('seat-codex', 'review/1/seat-codex/1', {
         verdict: 'findings', confidence: 0.7, provider: 'openai', modelFamily: 'gpt',
         findings: [finding],
         ...REVIEW_EVIDENCE,
       }),
       seatDispatched('seat-grok', 1),
+      seatReceipt('seat-grok', 'review/1/seat-grok/1', 'xai', 'grok', 'grok-test'),
       completed('seat-grok', 'review/1/seat-grok/1', {
         verdict: 'low-confidence', confidence: 0.2, provider: 'xai', modelFamily: 'grok',
       }),
@@ -964,8 +1078,10 @@ describe('convergence graph type', () => {
     const verdict = decideAt([
       ...backToReview,
       seatDispatched('seat-codex', 2, 2),
+      seatReceipt('seat-codex', 'review/2/seat-codex/2', 'openai', 'gpt', 'gpt-test'),
       completed('seat-codex', 'review/2/seat-codex/2', PASS_OPENAI),
       seatDispatched('seat-grok', 2, 2),
+      seatReceipt('seat-grok', 'review/2/seat-grok/2', 'xai', 'grok', 'grok-test'),
       completed('seat-grok', 'review/2/seat-grok/2', PASS_XAI),
     ], definition);
     expect(verdict).toEqual([{
@@ -986,6 +1102,7 @@ describe('convergence graph type', () => {
       convDispatched('evaluator', 1),
       completed('evaluator', 'convergence/1/evaluator/1', { gateMet: true, ...REVIEW_EVIDENCE }),
       seatDispatched('seat-a', 1),
+      seatReceipt('seat-a', 'review/1/seat-a/1', 'anthropic', 'claude'),
       completed('seat-a', 'review/1/seat-a/1', PASS_ANTHROPIC),
       seatDispatched('seat-b', 1),
       failedNode('seat-b', 'review/1/seat-b/1', 'auth'),
@@ -1008,6 +1125,7 @@ describe('convergence graph type', () => {
     const verdict = decideAt([
       ...events,
       seatDispatched('seat-b', 1, 2),
+      seatReceipt('seat-b', 'review/1/seat-b/2', 'openai', 'gpt'),
       completed('seat-b', 'review/1/seat-b/2', PASS_OPENAI),
     ], panel({ retryCapPerNode: 1 }));
     expect(verdict[0]!.kind).toBe('complete');
@@ -1020,6 +1138,7 @@ describe('convergence graph type', () => {
       convDispatched('evaluator', 1),
       completed('evaluator', 'convergence/1/evaluator/1', { gateMet: true, ...REVIEW_EVIDENCE }),
       seatDispatched('seat-a', 1),
+      seatReceipt('seat-a', 'review/1/seat-a/1', 'anthropic', 'claude'),
       completed('seat-a', 'review/1/seat-a/1', PASS_ANTHROPIC),
       seatDispatched('seat-b', 1),
       failedNode('seat-b', 'review/1/seat-b/1', 'ENGINE_UNAVAILABLE'),
@@ -1062,10 +1181,13 @@ describe('convergence graph type', () => {
       convDispatched('evaluator', 1),
       completed('evaluator', 'convergence/1/evaluator/1', { gateMet: true, ...REVIEW_EVIDENCE }),
       seatDispatched('seat-a', 1),
+      seatReceipt('seat-a', 'review/1/seat-a/1', 'anthropic', 'claude'),
       completed('seat-a', 'review/1/seat-a/1', PASS_ANTHROPIC),
       seatDispatched('seat-b', 1),
+      seatReceipt('seat-b', 'review/1/seat-b/1', 'openai', 'gpt'),
       completed('seat-b', 'review/1/seat-b/1', PASS_OPENAI),
       seatDispatched('seat-c', 1),
+      seatReceipt('seat-c', 'review/1/seat-c/1', 'openai', 'gpt'),
       completed('seat-c', 'review/1/seat-c/1', PASS_OPENAI),
     ];
 
@@ -1100,10 +1222,13 @@ describe('convergence graph type', () => {
       convDispatched('evaluator', 1),
       completed('evaluator', 'convergence/1/evaluator/1', { gateMet: true, ...REVIEW_EVIDENCE }),
       seatDispatched('seat-a', 1),
+      seatReceipt('seat-a', 'review/1/seat-a/1', 'anthropic', 'claude'),
       completed('seat-a', 'review/1/seat-a/1', PASS_ANTHROPIC),
       seatDispatched('seat-b', 1),
+      seatReceipt('seat-b', 'review/1/seat-b/1', 'openai', 'gpt'),
       completed('seat-b', 'review/1/seat-b/1', PASS_OPENAI),
       seatDispatched('seat-c', 1),
+      seatReceipt('seat-c', 'review/1/seat-c/1', 'xai', 'grok'),
       completed('seat-c', 'review/1/seat-c/1', {
         verdict: 'findings', confidence: 0.8, findings: [finding], ...REVIEW_EVIDENCE,
       }),
@@ -1147,12 +1272,16 @@ describe('convergence graph type', () => {
       convDispatched('evaluator', 1),
       completed('evaluator', 'convergence/1/evaluator/1', { gateMet: true, ...REVIEW_EVIDENCE }),
       seatDispatched('seat-a', 1),
+      seatReceipt('seat-a', 'review/1/seat-a/1', 'p1', 'f1'),
       completed('seat-a', 'review/1/seat-a/1', pass('p1', 'f1')),
       seatDispatched('seat-b', 1),
+      seatReceipt('seat-b', 'review/1/seat-b/1', 'p2', 'f1'),
       completed('seat-b', 'review/1/seat-b/1', pass('p2', 'f1')),
       seatDispatched('seat-c', 1),
+      seatReceipt('seat-c', 'review/1/seat-c/1', 'p3', 'f2'),
       completed('seat-c', 'review/1/seat-c/1', pass('p3', 'f2')),
       seatDispatched('seat-d', 1),
+      seatReceipt('seat-d', 'review/1/seat-d/1', 'p3', 'f3'),
       completed('seat-d', 'review/1/seat-d/1', pass('p3', 'f3')),
     ];
 
@@ -1243,11 +1372,13 @@ describe('convergence graph type', () => {
       if (round === 1) {
         events.push(
           seatDispatched('seat-a', round),
+          seatReceipt('seat-a', `review/${round}/seat-a/1`, 'anthropic', 'claude'),
           completed('seat-a', `review/${round}/seat-a/1`, PASS_ANTHROPIC),
         );
       }
       events.push(
         seatDispatched('seat-b', round, round),
+        seatReceipt('seat-b', `review/${round}/seat-b/${round}`, 'openai', 'gpt'),
         completed('seat-b', `review/${round}/seat-b/${round}`, {
           verdict: 'findings', confidence: 0.7, provider: 'openai', modelFamily: 'gpt',
           findings: [finding],
@@ -1276,6 +1407,7 @@ describe('convergence graph type', () => {
       convDispatched('evaluator', 1),
       completed('evaluator', 'convergence/1/evaluator/1', { gateMet: true, ...REVIEW_EVIDENCE }),
       seatDispatched('seat-a', 1),
+      seatReceipt('seat-a', 'review/1/seat-a/1', 'anthropic', 'claude'),
       completed('seat-a', 'review/1/seat-a/1', PASS_ANTHROPIC),
       seatInvalidated('seat-a'),
     ];
@@ -1309,8 +1441,10 @@ describe('convergence graph type', () => {
       convDispatched('evaluator', 1),
       completed('evaluator', 'convergence/1/evaluator/1', { gateMet: true, ...evidenceA }),
       seatDispatched('seat-a', 1),
+      seatReceipt('seat-a', 'review/1/seat-a/1', 'anthropic', 'claude'),
       completed('seat-a', 'review/1/seat-a/1', { ...PASS_ANTHROPIC, ...evidenceA }),
       seatDispatched('seat-b', 1),
+      seatReceipt('seat-b', 'review/1/seat-b/1', 'openai', 'gpt'),
       completed('seat-b', 'review/1/seat-b/1', {
         verdict: 'findings', confidence: 0.8, provider: 'openai', modelFamily: 'gpt',
         findings: [finding],
@@ -1348,6 +1482,7 @@ describe('convergence graph type', () => {
       convDispatched('evaluator', 1),
       completed('evaluator', 'convergence/1/evaluator/1', { gateMet: true, ...REVIEW_EVIDENCE }),
       seatDispatched('seat-a', 1),
+      seatReceipt('seat-a', 'review/1/seat-a/1', 'anthropic', 'claude'),
       completed('seat-a', 'review/1/seat-a/1', {
         verdict: 'findings', confidence: 0.8, findings: [invalidFinding],
         inputHashes: REVIEW_EVIDENCE.inputHashes,
@@ -1355,6 +1490,7 @@ describe('convergence graph type', () => {
         ...proof,
       }),
       seatDispatched('seat-b', 1),
+      seatReceipt('seat-b', 'review/1/seat-b/1', 'openai', 'gpt'),
       completed('seat-b', 'review/1/seat-b/1', {
         verdict: 'findings', confidence: 0.8, findings: [validFinding], ...REVIEW_EVIDENCE,
       }),
@@ -1394,6 +1530,7 @@ describe('convergence graph type', () => {
     const mismatched = [
       ...events,
       seatDispatched('seat-a', 1),
+      seatReceipt('seat-a', 'review/1/seat-a/1', 'anthropic', 'claude'),
       completed('seat-a', 'review/1/seat-a/1', {
         ...PASS_ANTHROPIC,
         proofArtifactDigest: `sha256:${'b'.repeat(64)}`,
@@ -1460,10 +1597,13 @@ describe('convergence graph type', () => {
       convDispatched('evaluator', 1),
       completed('evaluator', 'convergence/1/evaluator/1', { gateMet: true, ...evidenceA }),
       seatDispatched('seat-a', 1),
+      seatReceipt('seat-a', 'review/1/seat-a/1', 'anthropic', 'claude'),
       completed('seat-a', 'review/1/seat-a/1', { ...PASS_ANTHROPIC, ...evidenceA }),
       seatDispatched('seat-b', 1),
+      seatReceipt('seat-b', 'review/1/seat-b/1', 'openai', 'gpt'),
       completed('seat-b', 'review/1/seat-b/1', { ...PASS_OPENAI, ...evidenceA }),
       seatDispatched('seat-c', 1),
+      seatReceipt('seat-c', 'review/1/seat-c/1', 'xai', 'grok'),
       completed('seat-c', 'review/1/seat-c/1', {
         verdict: 'findings', confidence: 0.8, findings: [finding], ...evidenceA,
       }),
@@ -1501,6 +1641,8 @@ describe('convergence graph type', () => {
     state = compiled.reduce(state, seatDispatched('seat-a', 1));
     state = compiled.reduce(state, failedNode('seat-a', 'review/1/seat-a/1', 'auth'));
     state = compiled.reduce(state, seatDispatched('seat-a', 1, 2));
+
+    state = compiled.reduce(state, seatReceipt('seat-a', 'review/1/seat-a/2', 'anthropic', 'claude'));
 
     const stale = compiled.reduce(
       state,
@@ -1545,12 +1687,14 @@ describe('convergence graph type', () => {
       convDispatched('evaluator', 1),
       completed('evaluator', 'convergence/1/evaluator/1', { gateMet: true, ...REVIEW_EVIDENCE }),
       seatDispatched('seat-a', 1),
+      seatReceipt('seat-a', 'review/1/seat-a/1', 'anthropic', 'claude'),
       completed('seat-a', 'review/1/seat-a/1', {
         verdict: 'findings', confidence: 0.8, provider: 'anthropic', modelFamily: 'claude',
         findings: [finding],
         ...REVIEW_EVIDENCE,
       }),
       seatDispatched('seat-b', 1),
+      seatReceipt('seat-b', 'review/1/seat-b/1', 'openai', 'gpt'),
       completed('seat-b', 'review/1/seat-b/1', {
         verdict: 'low-confidence', confidence: 0.2, provider: 'openai', modelFamily: 'gpt',
       }),
@@ -1657,6 +1801,7 @@ describe('convergence graph type', () => {
       { gateMet: true, ...REVIEW_EVIDENCE },
     ));
     state = compiled.reduce(state, seatDispatched('seat-a', 1));
+    state = compiled.reduce(state, seatReceipt('seat-a', 'review/1/seat-a/1', 'anthropic', 'claude'));
     state = compiled.reduce(state, seatInvalidated('seat-a'));
     expect(state.seats['seat-a']!.stale).toBe(true);
 
@@ -1686,6 +1831,7 @@ describe('convergence graph type', () => {
       convDispatched('evaluator', 1),
       completed('evaluator', 'convergence/1/evaluator/1', { gateMet: true, ...REVIEW_EVIDENCE }),
       seatDispatched('seat-a', 1),
+      seatReceipt('seat-a', 'review/1/seat-a/1', 'anthropic', 'claude'),
       completed('seat-a', 'review/1/seat-a/1', {
         verdict: 'pass', provider: 'anthropic', modelFamily: 'claude',
         ...REVIEW_EVIDENCE,
@@ -1708,11 +1854,13 @@ describe('convergence graph type', () => {
     const exhausted = [
       ...events,
       seatDispatched('seat-a', 1, 2),
+      seatReceipt('seat-a', 'review/1/seat-a/2', 'anthropic', 'claude'),
       completed('seat-a', 'review/1/seat-a/2', {
         verdict: 'pass', provider: 'anthropic', modelFamily: 'claude',
         ...REVIEW_EVIDENCE,
       }),
       seatDispatched('seat-b', 1),
+      seatReceipt('seat-b', 'review/1/seat-b/1', 'openai', 'gpt'),
       completed('seat-b', 'review/1/seat-b/1', PASS_OPENAI),
     ];
     const exhaustedState = fold(exhausted, definition);
@@ -1980,7 +2128,21 @@ describe('convergence graph type', () => {
       'seat-b: Review review/1, node seat-b, attempt 1.',
     ]));
 
-    const graphEventTypes = graphEvents.map((event) => event.type);
+    const receipts = graphEvents.filter((event) => event.type === 'graph:engine-attempt-recorded');
+    expect(receipts.map((event) => ({ version: event.version, payload: event.payload })))
+      .toEqual(expect.arrayContaining([
+        { version: 1, payload: seatReceipt('seat-a', 'review/1/seat-a/1', 'anthropic', 'claude').payload },
+        { version: 1, payload: seatReceipt('seat-b', 'review/1/seat-b/1', 'openai', 'gpt').payload },
+      ]));
+    expect(receipts).toHaveLength(2);
+    for (const receipt of receipts) {
+      const nodeId = (receipt.payload as JsonObject).nodeId;
+      const completion = graphEvents.findIndex((event) => event.type === 'graph:node-completed'
+        && (event.payload as JsonObject).nodeId === nodeId);
+      expect(graphEvents.indexOf(receipt)).toBeLessThan(completion);
+    }
+    const graphEventTypes = graphEvents.filter((event) => event.type !== 'graph:engine-attempt-recorded')
+      .map((event) => event.type);
     expect(graphEventTypes).toEqual([
       'graph:run-started',
       'graph:node-dispatched',
@@ -2054,5 +2216,272 @@ describe('convergence graph type', () => {
       }
     }
     expect(failureCodes).toEqual(['EFFECT_FAILED']);
+  });
+});
+
+
+type ReportedIdentity = Pick<EngineSelectionRecord, 'adapter' | 'provider' | 'modelFamily' | 'model'>;
+type EngineReply = JsonObject | EngineError | (() => JsonObject | EngineError);
+
+function enginePanel(overrides: Partial<ConvergenceDefinition['data']> = {}): ConvergenceDefinition {
+  const definition = panel({ maxIterations: 1, maxReviewRestarts: 0, ...overrides });
+  return {
+    ...definition,
+    nodes: definition.nodes.map((node) => node.data.role === 'generator' || node.data.role === 'repair'
+      ? { ...node, data: { ...node.data, lane: reviewLane(node.id, `${node.id}-provider`, `${node.id}-family`) } }
+      : node),
+  };
+}
+
+function withSubstitution(definition: ConvergenceDefinition, nodeId: string): ConvergenceDefinition {
+  return {
+    ...definition,
+    nodes: definition.nodes.map((node) => node.id !== nodeId ? node : {
+      ...node,
+      data: { ...node.data, lane: {
+        ...node.data.lane!,
+        knownSubstitutions: [reviewLane(`${nodeId}-fallback`, `${nodeId}-fallback-provider`, `${nodeId}-fallback-family`).requested],
+      } },
+    }),
+  };
+}
+
+function targetIdentity(target: ExecutionTarget): ReportedIdentity {
+  return { adapter: target.adapter, provider: target.provider, modelFamily: target.modelFamily, model: target.model };
+}
+
+async function reportedPanelRun(
+  definition: ConvergenceDefinition,
+  reported: Readonly<Record<string, Partial<ReportedIdentity>>> = {},
+  replies: Readonly<Record<string, EngineReply>> = {},
+) {
+  const run = await storedConvergenceRun(definition);
+  const calls: string[] = [];
+  const engines: GraphEngineBinding[] = [];
+  const nodes: Record<string, GraphNodeBinding> = {};
+  for (const node of definition.nodes) {
+    if (node.data.lane === undefined) {
+      nodes[node.id] = executorNodeBinding(run.root, {
+        runData: async () => ({ gateMet: true, ...REVIEW_EVIDENCE }),
+      });
+      continue;
+    }
+    nodes[node.id] = executorNodeBinding(run.root, { prompt: () => `Run ${node.id}.` });
+    for (const target of [node.data.lane.requested, ...node.data.lane.knownSubstitutions]) {
+      const requested = engineSelection({ ...targetIdentity(target), capabilities: target.tools });
+      const effective = engineSelection({ ...requested, ...reported[target.model] });
+      engines.push({
+        target, selection: requested, hardTokenLimitEnforceable: false,
+        engine: {
+          name: 'reported-identity-fixture',
+          async run() {
+            calls.push(target.model);
+            const scripted = replies[target.model];
+            const reply = typeof scripted === 'function' ? scripted() : scripted;
+            if (reply instanceof EngineError) throw reply;
+            return {
+              requested, effective,
+              usage: { kind: 'reported', inputTokens: 1, outputTokens: 1 },
+              parts: [{ kind: 'structured', final: true, value: reply ?? (node.data.role === 'seat'
+                ? { verdict: 'pass', confidence: 0.95, findings: [], ...REVIEW_EVIDENCE }
+                : { draft: 'ready' }) }],
+            };
+          },
+        },
+      });
+    }
+  }
+  const options = { ...run, nodes, engines };
+  const outcome = await (await createGraphExecutor(options)).run(new AbortController().signal);
+  const readEvents = async (storage = run.storage): Promise<DomainEventEnvelope[]> => {
+    const result: DomainEventEnvelope[] = [];
+    for await (const event of storage.eventStore.read({ namespace: storage.record.namespace, streamId: run.runId })) result.push(event);
+    return result;
+  };
+  const events = await readEvents();
+  const receipts = (nodeId: string) => events.filter((event) => event.type === 'graph:engine-attempt-recorded'
+    && (event.payload as JsonObject).nodeId === nodeId).map((event) => ({ version: event.version, ...event.payload as JsonObject }));
+  const expectReplay = async () => {
+    const previousCalls = [...calls];
+    const storage = createLocalRunStorage({
+      directory: join(run.root, 'storage'), namespace: run.storage.record.namespace, policy: run.storage.record.policy,
+    });
+    const reopened = await createGraphExecutor({ ...options, graph: compileGraph(convergence, definition), storage });
+    await expect(reopened.run(new AbortController().signal)).resolves.toEqual(outcome);
+    expect(calls).toEqual(previousCalls);
+    expect(await readEvents(storage)).toEqual(events);
+  };
+  return { outcome, calls, events, receipts, expectReplay };
+}
+
+describe('convergence quorum from reported engine identities', () => {
+  it.each(['provider', 'modelFamily'] as const)('excludes an actual reviewer %s shared with the writer when diversity is disabled', async (dimension) => {
+    const run = await reportedPanelRun(enginePanel({ requireDiversity: false }), {
+      'mock-generator': { provider: 'actual-writer', modelFamily: 'actual-writer-family' },
+      'mock-seat-a': { [dimension]: dimension === 'provider' ? 'actual-writer' : 'actual-writer-family' },
+    });
+    expect(run.outcome).toMatchObject({ kind: 'fail', code: 'QUORUM_UNREACHABLE' });
+    expect(run.calls).toEqual(['mock-generator', 'mock-seat-a', 'mock-seat-b']);
+    expect(run.receipts('seat-a')).toEqual([expect.objectContaining({
+      version: 1, sequence: 1, effective: expect.objectContaining({
+        [dimension]: dimension === 'provider' ? 'actual-writer' : 'actual-writer-family',
+      }),
+    })]);
+    await run.expectReplay();
+  });
+
+  it('records both reviewer calls and excludes a fallback reporting the writer provider', async () => {
+    const definition = withSubstitution(enginePanel({ requireDiversity: false }), 'seat-a');
+    const run = await reportedPanelRun(definition, {
+      'mock-seat-a-fallback': { provider: 'generator-provider' },
+    }, {
+      'mock-seat-a': new EngineError({ kind: 'model-unavailable', message: 'primary is unavailable' }),
+    });
+    expect(run.outcome).toMatchObject({ kind: 'fail', code: 'QUORUM_UNREACHABLE' });
+    expect(run.calls).toEqual(['mock-generator', 'mock-seat-a', 'mock-seat-a-fallback', 'mock-seat-b']);
+    expect(run.receipts('seat-a')).toEqual([
+      expect.objectContaining({ version: 1, sequence: 1, effective: null }),
+      expect.objectContaining({ version: 1, sequence: 2, effective: expect.objectContaining({ provider: 'generator-provider' }) }),
+    ]);
+    await run.expectReplay();
+  });
+
+  it('excludes a reviewer when the actual writer reports that reviewer provider', async () => {
+    const run = await reportedPanelRun(enginePanel({ requireDiversity: false }), {
+      'mock-generator': { provider: 'anthropic' },
+    });
+    expect(run.outcome).toMatchObject({ kind: 'fail', code: 'QUORUM_UNREACHABLE' });
+    expect(run.receipts('generator')).toEqual([expect.objectContaining({
+      requested: expect.objectContaining({ provider: 'generator-provider' }),
+      effective: expect.objectContaining({ provider: 'anthropic' }),
+    })]);
+    await run.expectReplay();
+  });
+
+  it.each([true, false])('uses actual reviewer diversity when requireDiversity is %s', async (requireDiversity) => {
+    const sameReviewer = { provider: 'actual-reviewer', modelFamily: 'actual-reviewer-family' };
+    const run = await reportedPanelRun(enginePanel({ requireDiversity }), {
+      'mock-seat-a': sameReviewer, 'mock-seat-b': sameReviewer,
+    });
+    expect(run.outcome).toMatchObject(requireDiversity
+      ? { kind: 'fail', code: 'QUORUM_UNREACHABLE' }
+      : { kind: 'complete', output: { seats: { 'seat-a': 'accepted', 'seat-b': 'accepted' } } });
+    expect(run.receipts('seat-a')).toEqual([expect.objectContaining({ effective: expect.objectContaining(sameReviewer) })]);
+    expect(run.receipts('seat-b')).toEqual([expect.objectContaining({ effective: expect.objectContaining(sameReviewer) })]);
+    await run.expectReplay();
+  });
+
+  it.each([
+    ['unknown', { provider: null, modelFamily: null, model: null }],
+    ['provider missing', { provider: null }],
+    ['family missing', { modelFamily: null }],
+  ] as const)('does not let verdict JSON replace a reported reviewer identity with %s', async (_label, effective) => {
+    const run = await reportedPanelRun(enginePanel({ requireDiversity: false }), {
+      'mock-seat-a': effective,
+    }, {
+      'mock-seat-a': { ...PASS_ANTHROPIC, provider: 'forged-provider', modelFamily: 'forged-family' },
+    });
+    expect(run.outcome).toMatchObject({ kind: 'fail', code: 'QUORUM_UNREACHABLE' });
+    expect(run.receipts('seat-a')).toEqual([expect.objectContaining({ effective: expect.objectContaining(effective) })]);
+    expect(run.events.filter((event) => event.type === 'graph:node-completed'
+      && (event.payload as JsonObject).nodeId === 'seat-a').map((event) => event.payload)).toEqual([
+      expect.objectContaining({ result: expect.objectContaining({ provider: 'forged-provider', modelFamily: 'forged-family' }) }),
+    ]);
+    await run.expectReplay();
+  });
+
+  it.each(['primary', 'substitution'] as const)('keeps the declared %s of an unreported writer call in the exclusion set after fallback succeeds', async (which) => {
+    const definition = withSubstitution(enginePanel({ requireDiversity: false }), 'generator');
+    const provider = which === 'primary' ? 'generator-provider' : 'generator-fallback-provider';
+    const run = await reportedPanelRun(definition, {
+      'mock-generator-fallback': { provider: 'reported-writer', modelFamily: 'reported-writer-family' },
+      'mock-seat-a': { provider },
+    }, {
+      'mock-generator': new EngineError({ kind: 'model-unavailable', message: 'no reported primary identity' }),
+    });
+    expect(run.outcome).toMatchObject({ kind: 'fail', code: 'QUORUM_UNREACHABLE' });
+    expect(run.calls).toEqual(['mock-generator', 'mock-generator-fallback', 'mock-seat-a', 'mock-seat-b']);
+    expect(run.receipts('generator')).toEqual([
+      expect.objectContaining({ version: 1, sequence: 1, effective: null }),
+      expect.objectContaining({ version: 1, sequence: 2, effective: expect.objectContaining({ provider: 'reported-writer' }) }),
+    ]);
+    await run.expectReplay();
+  });
+
+  it('excludes a cached accepted reviewer after a repair reports that reviewer provider without changing proof bytes', async () => {
+    let seatBCalls = 0;
+    const run = await reportedPanelRun(enginePanel({ maxIterations: 2, maxReviewRestarts: 1 }), {
+      'mock-repair': { provider: 'anthropic' },
+    }, {
+      'mock-seat-b': () => ++seatBCalls === 1
+        ? { verdict: 'findings', confidence: 0.95, ...REVIEW_EVIDENCE, findings: [{ id: 'repair-one', kind: 'patch', evidence: 'fix one item' }] }
+        : { ...PASS_OPENAI, findings: [] },
+    });
+    expect(run.outcome).toMatchObject({ kind: 'fail', code: 'QUORUM_UNREACHABLE' });
+    expect(run.calls).toEqual(['mock-generator', 'mock-seat-a', 'mock-seat-b', 'mock-repair', 'mock-generator', 'mock-seat-b']);
+    expect(run.calls.filter((model) => model === 'mock-seat-a')).toHaveLength(1);
+    expect(run.receipts('repair')).toEqual([expect.objectContaining({
+      effective: expect.objectContaining({ provider: 'anthropic' }),
+    })]);
+    const evidence = run.events.filter((event) => event.type === 'graph:node-completed'
+      && (event.payload as JsonObject).nodeId === 'evaluator').map((event) => (event.payload as JsonObject).result);
+    expect(evidence).toEqual([
+      { gateMet: true, ...REVIEW_EVIDENCE }, { gateMet: true, ...REVIEW_EVIDENCE },
+    ]);
+    await run.expectReplay();
+  });
+
+  it('completes through two other reviewers but labels the conflicting third reviewer invalid', async () => {
+    const base = enginePanel({ quorum: 2 });
+    const definition: ConvergenceDefinition = {
+      ...base,
+      nodes: [...base.nodes, { id: 'seat-c', data: { role: 'seat', lane: reviewLane('seat-c', 'xai', 'grok') } }],
+    };
+    const run = await reportedPanelRun(definition, { 'mock-seat-a': { provider: 'generator-provider' } });
+    expect(run.outcome).toMatchObject({
+      kind: 'complete', output: { seats: { 'seat-a': 'invalid', 'seat-b': 'accepted', 'seat-c': 'accepted' } },
+    });
+    expect(run.calls).toEqual(['mock-generator', 'mock-seat-a', 'mock-seat-b', 'mock-seat-c']);
+    expect(run.receipts('seat-a')).toEqual([expect.objectContaining({ effective: expect.objectContaining({ provider: 'generator-provider' }) })]);
+    await run.expectReplay();
+  });
+
+  it.each([
+    ['reported provider', { provider: 'actual-writer', modelFamily: null }, { provider: 'actual-writer' }],
+    ['unreported family', { provider: 'actual-writer', modelFamily: null }, { modelFamily: 'generator-fallback-family' }],
+    ['reported family', { provider: null, modelFamily: 'actual-family' }, { modelFamily: 'actual-family' }],
+    ['unreported provider', { provider: null, modelFamily: 'actual-family' }, { provider: 'generator-fallback-provider' }],
+  ] as const)('preserves exclusion for a writer with partial identity: %s', async (_label, writer, reviewer) => {
+    const run = await reportedPanelRun(withSubstitution(enginePanel({ requireDiversity: false }), 'generator'), {
+      'mock-generator': writer,
+      'mock-seat-a': reviewer,
+    });
+    expect(run.outcome).toMatchObject({ kind: 'fail', code: 'QUORUM_UNREACHABLE' });
+    expect(run.receipts('generator')).toEqual([expect.objectContaining({
+      effective: expect.objectContaining(writer),
+    })]);
+    await run.expectReplay();
+  });
+
+  it('keeps a failed writer call reported identity after a different fallback completes', async () => {
+    const failedIdentity = engineSelection({
+      adapter: 'mock', provider: 'failed-writer', modelFamily: 'failed-writer-family', model: 'failed-model',
+    });
+    const run = await reportedPanelRun(withSubstitution(enginePanel({ requireDiversity: false }), 'generator'), {
+      'mock-seat-a': { provider: 'failed-writer' },
+    }, {
+      'mock-generator': new EngineError({
+        kind: 'model-unavailable', message: 'failed after identifying itself', effective: failedIdentity,
+      }),
+    });
+    expect(run.outcome).toMatchObject({ kind: 'fail', code: 'QUORUM_UNREACHABLE' });
+    expect(run.calls).toEqual(['mock-generator', 'mock-generator-fallback', 'mock-seat-a', 'mock-seat-b']);
+    expect(run.receipts('generator')).toEqual([
+      expect.objectContaining({ sequence: 1, effective: {
+        adapter: 'mock', provider: 'failed-writer', modelFamily: 'failed-writer-family', model: 'failed-model',
+      } }),
+      expect.objectContaining({ sequence: 2, effective: expect.objectContaining({ provider: 'generator-fallback-provider' }) }),
+    ]);
+    await run.expectReplay();
   });
 });

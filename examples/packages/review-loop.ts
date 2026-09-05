@@ -56,6 +56,13 @@ const reviewEvidence = {
   proofArtifactDigest: 'sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
 } as const;
 
+const claudeReport = {
+  adapter: 'mock', provider: 'anthropic', modelFamily: 'claude', model: 'mock-claude',
+};
+const codexReport = {
+  adapter: 'mock', provider: 'openai', modelFamily: 'gpt', model: 'mock-gpt',
+};
+
 const events: readonly ConvergenceEvent[] = [
   {
     type: 'node-dispatched',
@@ -94,6 +101,22 @@ const events: readonly ConvergenceEvent[] = [
     type: 'node-dispatched',
     version: 1,
     payload: { nodeId: 'codex-review', position: 'review/1/codex-review/1' },
+  },
+  {
+    type: 'engine-attempt-recorded',
+    version: 1,
+    payload: {
+      nodeId: 'claude-review', position: 'review/1/claude-review/1', sequence: 1,
+      requested: claudeReport, effective: claudeReport,
+    },
+  },
+  {
+    type: 'engine-attempt-recorded',
+    version: 1,
+    payload: {
+      nodeId: 'codex-review', position: 'review/1/codex-review/1', sequence: 1,
+      requested: codexReport, effective: codexReport,
+    },
   },
   {
     type: 'node-completed',

@@ -28,6 +28,7 @@ import {
   type JsonValue,
 } from '../graph/value.js';
 import type { AttemptIdentity } from './attempt.js';
+import type { GraphEngineIdentity } from '../graph/type.js';
 import {
   validateAttemptBudgetPolicy,
   type AttemptBudgetPolicy,
@@ -136,6 +137,10 @@ export interface PreparedNodeAttempt {
   readonly recordModelUnavailable: (
     fact: ModelUnavailableFact,
   ) => Promise<void>;
+  readonly recordEngineAttempt?: (fact: Readonly<{
+    requested: GraphEngineIdentity;
+    effective: GraphEngineIdentity | null;
+  }>) => Promise<void>;
   decideAction(): Promise<ActionDecision>;
 }
 
@@ -409,6 +414,16 @@ function permissions(value: readonly string[]): readonly string[] {
 
 function selection(value: EngineSelectionRecord): EngineSelectionRecord {
   return engineSelection(value);
+}
+
+function graphIdentity(value: EngineSelectionRecord): GraphEngineIdentity {
+  const checked = selection(value);
+  return cloneFrozenJson({
+    adapter: checked.adapter,
+    provider: checked.provider,
+    modelFamily: checked.modelFamily,
+    model: checked.model,
+  });
 }
 
 function sameSelection(
@@ -699,6 +714,9 @@ export async function executeNodeAttempt(
   let workspace: NodeWorkspacePolicy | undefined;
   let workspaceEntry: Awaited<ReturnType<typeof captureWorkspaceEntry>> | undefined;
   let identity = prepared.identity;
+  let reservations: BudgetReservation[] = [];
+  const settled = new Set<number>();
+  let recorderError: { readonly error: unknown } | undefined;
 
   try {
     identity = cloneFrozenJson(prepared.identity);
@@ -720,6 +738,7 @@ export async function executeNodeAttempt(
     const parseResult = prepared.parseResult;
     const tokenBudget = prepared.tokenBudget;
     const recordModelUnavailable = prepared.recordModelUnavailable;
+    const recordEngineAttempt = prepared.recordEngineAttempt;
     const decideAction = prepared.decideAction;
     const scratchPath = prepared.scratchDirectory;
     const prompt = prepared.prompt;
@@ -751,6 +770,9 @@ export async function executeNodeAttempt(
     }
     if (typeof decideAction !== 'function') {
       throw new TypeError('decideAction must be a function');
+    }
+    if (recordEngineAttempt !== undefined && typeof recordEngineAttempt !== 'function') {
+      throw new TypeError('recordEngineAttempt must be a function');
     }
 
     inputBytes = Buffer.byteLength(canonicalJson(input), 'utf8') +
@@ -848,8 +870,6 @@ export async function executeNodeAttempt(
       }
     } else {
       facts.requestedEngine = route[0]!.selection;
-      let reservations: BudgetReservation[] = [];
-      const settled = new Set<number>();
       const settle = (index: number, usage: UsageReceipt): void => {
         if (!reservations[index] || settled.has(index)) return;
         try {
@@ -895,13 +915,29 @@ export async function executeNodeAttempt(
             timeoutMs: remainingTimeoutMs,
             teardownGraceMs: remainingHardMs - remainingTimeoutMs,
           });
+          let invoked = false;
+          let effective: GraphEngineIdentity | null = null;
+          let receiptUsage: UsageReceipt = EMPTY_USAGE;
+          const capture = (result: AgentResult): void => {
+            try {
+              effective = graphIdentity(result.effective);
+            } catch {
+              // An invalid identity is unknown, even if other result fields are valid.
+            }
+            try {
+              receiptUsage = validateIncompleteResultEvidence(result).usage;
+            } catch {
+              // Keep usage unknown when the returned evidence does not validate.
+            }
+          };
           try {
-            const completed = await runWithTimePolicy(
-              signal,
-              time,
-              async (engineSignal): Promise<AgentResult> =>
-                await selected.engine.run(
-                  requestFor(
+            let completed: Awaited<ReturnType<typeof runWithTimePolicy<AgentResult>>>;
+            try {
+              completed = await runWithTimePolicy(
+                signal,
+                time,
+                async (engineSignal): Promise<AgentResult> => {
+                  const request = requestFor(
                     identity,
                     nodeId,
                     prompt!,
@@ -911,14 +947,38 @@ export async function executeNodeAttempt(
                     scratchDirectory,
                     grantedPermissions,
                     resultContract,
-                  ),
-                  () => {},
-                  engineSignal,
-                ),
-              {
-                abortAtSoftTimeout: false,
-              },
-            );
+                  );
+                  invoked = true;
+                  try {
+                    const result = await selected.engine.run(request, () => {}, engineSignal);
+                    capture(result);
+                    return result;
+                  } catch (error) {
+                    if (error instanceof EngineIncompleteResultError) {
+                      capture(error.evidence);
+                    } else if (error instanceof EngineError && error.effective !== undefined) {
+                      effective = graphIdentity(error.effective);
+                    }
+                    throw error;
+                  }
+                },
+                { abortAtSoftTimeout: false },
+              );
+            } finally {
+              if (invoked && recordEngineAttempt !== undefined) {
+                const receipt = cloneFrozenJson({ requested: graphIdentity(selected.selection), effective });
+                try {
+                  await recordEngineAttempt(receipt);
+                } catch (error) {
+                  recorderError = { error };
+                  try {
+                    settle(index, receiptUsage);
+                  } finally {
+                    throw error;
+                  }
+                }
+              }
+            }
             const result = validateAgentResult(
               completed.timedOut && completed.value.transportFailure === undefined
                 ? {
@@ -974,6 +1034,7 @@ export async function executeNodeAttempt(
             }
             break;
           } catch (error) {
+            if (recorderError !== undefined) throw recorderError.error;
             if (error instanceof EngineIncompleteResultError) {
               let evidence;
               try {
@@ -1084,11 +1145,14 @@ export async function executeNodeAttempt(
           );
         }
       }
-      for (let index = 0; index < reservations.length; index += 1) release(index);
     }
   } catch (error) {
+    if (recorderError !== undefined) throw recorderError.error;
     facts.failure = failure('INVALID_ATTEMPT', error);
   } finally {
+    for (const [index, reservation] of reservations.entries()) {
+      if (!settled.has(index)) reservation.release();
+    }
     if (workspace && workspaceEntry) {
       try {
         facts.workspace = await inspectWorkspaceExit(

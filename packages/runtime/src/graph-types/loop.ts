@@ -29,9 +29,13 @@
  *   completed result carries the verdict record: verdict (`pass` |
  *   `findings` | `low-confidence`), confidence, the reviewed input hashes,
  *   the workspace fingerprint, and any findings; provider and model-family
- *   diversity comes from the trusted lane declaration. The evaluator's
+ *   diversity comes from recorded engine reports. The evaluator's
  *   completed result carries `gateMet` with the same evidence identity; the
  *   generator's and repair's results carry the work summaries.
+ * - `engine-attempt-recorded` — one reported engine identity per call, or
+ *   unknown. Writer history excludes matching reviewer providers or model
+ *   families, including cached passes. Unknown writer fields count as all
+ *   declared targets for that field. Data-only nodes have no engine identity.
  * - `seat-invalidated` — a seat's recorded verdict is no longer current
  *   (watched paths or fingerprints changed): the seat reruns.
  *
@@ -56,7 +60,7 @@ import { isDeepStrictEqual } from 'node:util';
 import type { GraphCommand } from '../graph/commands.js';
 import type { GraphDefinition, NodeId } from '../graph/kernel.js';
 import type { ExecutionLaneDescription, GraphDescriptionInput } from '../graph/plan.js';
-import type { GraphEvent, GraphType } from '../graph/type.js';
+import type { EngineAttemptRecordedPayload, GraphEvent, GraphType } from '../graph/type.js';
 import {
   GraphValidationError,
   type GraphValidationIssue,
@@ -159,6 +163,7 @@ export interface SeatInvalidatedPayload extends JsonObject {
 
 export type ConvergenceEvent =
   | GraphEvent<'node-dispatched', NodeDispatchedPayload>
+  | GraphEvent<'engine-attempt-recorded', EngineAttemptRecordedPayload>
   | GraphEvent<'node-completed', NodeCompletedPayload>
   | GraphEvent<'node-failed', NodeFailedPayload>
   | GraphEvent<'node-paused', NodePausedPayload>
@@ -206,6 +211,11 @@ export interface ConvergenceStatus extends JsonObject {
   readonly restarts: number;
   readonly nodes: Readonly<Record<NodeId, LoopNodeState>>;
   readonly seats: Readonly<Record<NodeId, SeatRecord>>;
+  /** Latest engine call at each recorded position. */
+  readonly engineAttempts: Readonly<Record<string, EngineAttemptRecordedPayload>>;
+  /** All reported writer identities, with declared targets for unknown fields. */
+  readonly writerProviders: readonly string[];
+  readonly writerModelFamilies: readonly string[];
   readonly reviewEvidence: ConvergenceReviewEvidence | null;
   /** Times each finding id has been reported across review rounds. */
   readonly findingRounds: Readonly<Record<string, number>>;
@@ -407,9 +417,7 @@ export const convergence: GraphType<
     const evaluator = definition.nodes.find((node) => node.data.role === 'evaluator')!.id;
     const repair = definition.nodes.find((node) => node.data.role === 'repair')!.id;
     const skippable = new Set(definition.data.skippableSeats);
-    const seatTargets = new Map(definition.nodes
-      .filter((node) => node.data.role === 'seat')
-      .map((node) => [node.id, node.data.lane?.requested] as const));
+    const nodeLanes = new Map(definition.nodes.map((node) => [node.id, node.data.lane] as const));
     const seatEvidencePaths = new Map<NodeId, readonly string[] | null>(definition.nodes
       .filter((node) => node.data.role === 'seat')
       .map((node) => [node.id, node.data.evidencePaths ?? null] as const));
@@ -485,11 +493,11 @@ export const convergence: GraphType<
       seatId: NodeId,
       result: JsonValue,
       currentEvidence: ConvergenceReviewEvidence | null,
+      attempt: EngineAttemptRecordedPayload | undefined,
     ): SeatRecord => {
       const record = asRecord(result) ?? {};
       const evidence = reviewEvidenceForSeat(seatId, readReviewEvidence(result));
       const expectedEvidence = reviewEvidenceForSeat(seatId, currentEvidence);
-      const target = seatTargets.get(seatId);
       const verdict = record.verdict === 'pass' || record.verdict === 'findings'
         || record.verdict === 'low-confidence'
         ? record.verdict
@@ -514,8 +522,8 @@ export const convergence: GraphType<
         outcome: trusted ? 'valid' : verdict === null ? null : 'invalid',
         verdict,
         confidence: typeof record.confidence === 'number' ? record.confidence : null,
-        provider: target?.provider ?? null,
-        modelFamily: target?.modelFamily ?? null,
+        provider: attempt?.effective?.provider ?? null,
+        modelFamily: attempt?.effective?.modelFamily ?? null,
         inputHashes: evidence?.inputHashes ?? null,
         workspaceFingerprint: evidence?.workspaceFingerprint ?? null,
         proofArtifactDigest: evidence?.proofArtifactDigest ?? null,
@@ -533,7 +541,14 @@ export const convergence: GraphType<
       seats.filter((id) => state.seats[id]!.outcome === 'valid');
 
     const acceptedPasses = (state: ConvergenceStatus): readonly NodeId[] =>
-      validSeats(state).filter((id) => state.seats[id]!.verdict === 'pass');
+      validSeats(state).filter((id) => {
+        const seat = state.seats[id]!;
+        if (seat.verdict !== 'pass') return false;
+        if (nodeLanes.get(id) === undefined) return true;
+        return seat.provider !== null && seat.modelFamily !== null
+          && !state.writerProviders.includes(seat.provider)
+          && !state.writerModelFamilies.includes(seat.modelFamily);
+      });
 
     const diversityHolds = (state: ConvergenceStatus): boolean => {
       if (!definition.data.requireDiversity) return true;
@@ -581,6 +596,9 @@ export const convergence: GraphType<
         restarts: 0,
         nodes: initialNodes(),
         seats: initialSeats(),
+        engineAttempts: {},
+        writerProviders: [],
+        writerModelFamilies: [],
         reviewEvidence: null,
         findingRounds: {},
         pauseReason: null,
@@ -588,6 +606,26 @@ export const convergence: GraphType<
       reduce(state, event) {
         const node = state.nodes[event.payload.nodeId as NodeId];
         switch (event.type) {
+          case 'engine-attempt-recorded': {
+            const attempt = event.payload;
+            const lane = nodeLanes.get(attempt.nodeId);
+            if (event.version !== 1 || lane === undefined
+              || node?.status !== 'in-flight' || node.inFlight !== attempt.position
+              || attempt.sequence !== (state.engineAttempts[attempt.position]?.sequence ?? 0) + 1) return state;
+            const engineAttempts = { ...state.engineAttempts, [attempt.position]: attempt };
+            if (attempt.nodeId !== generator && attempt.nodeId !== repair) return { ...state, engineAttempts };
+            const declared = [lane.requested, ...lane.knownSubstitutions];
+            const providers = attempt.effective?.provider == null
+              ? declared.map((target) => target.provider) : [attempt.effective.provider];
+            const families = attempt.effective?.modelFamily == null
+              ? declared.map((target) => target.modelFamily) : [attempt.effective.modelFamily];
+            return {
+              ...state,
+              engineAttempts,
+              writerProviders: [...new Set([...state.writerProviders, ...providers])],
+              writerModelFamilies: [...new Set([...state.writerModelFamilies, ...families])],
+            };
+          }
           case 'node-dispatched': {
             if (node === undefined) return state;
             if (!event.payload.position.endsWith(`/${node.attempts + 1}`)) return state;
@@ -641,7 +679,8 @@ export const convergence: GraphType<
                     findings: [] as readonly ConvergenceFinding[],
                     stale: false,
                   }
-                : readVerdict(event.payload.nodeId, event.payload.result, state.reviewEvidence);
+                : readVerdict(event.payload.nodeId, event.payload.result, state.reviewEvidence,
+                  state.engineAttempts[event.payload.position]);
               const untrustedPass = verdict.verdict === 'pass' && verdict.outcome !== 'valid';
               const exhaustedUntrustedPass = untrustedPass
                 && node.attempts > definition.data.retryCapPerNode;
@@ -977,6 +1016,7 @@ export const convergence: GraphType<
             if (commands.length > 0) return commands;
           }
           if (quorumHolds(state)) {
+            const accepted = new Set(acceptedPasses(state));
             return [{
               kind: 'complete',
               output: {
@@ -985,7 +1025,7 @@ export const convergence: GraphType<
                 seats: Object.fromEntries(seats.map((id) => [
                   id,
                   state.seats[id]!.outcome === 'valid' && state.seats[id]!.verdict === 'pass'
-                    ? 'accepted'
+                    ? accepted.has(id) ? 'accepted' : 'invalid'
                     : state.seats[id]!.outcome ?? 'pending',
                 ])),
                 findings: blockingFindings(state),

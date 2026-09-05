@@ -4,7 +4,12 @@ import { isDeepStrictEqual } from 'node:util';
 import type { Memory } from '@obversa/memory';
 
 import type { GraphCommand } from '../graph/commands.js';
-import type { CompiledGraphType, GraphEvent } from '../graph/type.js';
+import type {
+  CompiledGraphType,
+  EngineAttemptRecordedPayload,
+  GraphEngineIdentity,
+  GraphEvent,
+} from '../graph/type.js';
 import {
   canonicalJson,
   cloneFrozenJson,
@@ -117,6 +122,7 @@ interface FoldedAttempt {
     readonly retrySafe: boolean;
   }> | null;
   readonly status: 'in-flight' | 'paused' | 'settled';
+  readonly engineSequence: number;
 }
 
 interface FoldedRun {
@@ -181,6 +187,41 @@ function text(value: unknown, label: string): string {
     fail('INVALID_EVENT', `${label} must be a non-empty string without control characters.`);
   }
   return value;
+}
+
+function validateEngineIdentity(value: JsonValue, label: string): GraphEngineIdentity {
+  const identity = record(value, label);
+  exactFields(identity, ['adapter', 'provider', 'modelFamily', 'model'], label);
+  const nullable = (field: string): string | null => identity[field] === null
+    ? null
+    : text(identity[field], `${label}.${field}`);
+  return Object.freeze({
+    adapter: text(identity.adapter, `${label}.adapter`),
+    provider: nullable('provider'),
+    modelFamily: nullable('modelFamily'),
+    model: nullable('model'),
+  });
+}
+
+function validateEngineAttemptRecorded(envelope: DomainEventEnvelope): EngineAttemptRecordedPayload {
+  if (envelope.version !== 1) fail('INVALID_EVENT', 'Unsupported engine-attempt-recorded version.');
+  const payload = record(envelope.payload, envelope.type);
+  exactFields(payload, ['nodeId', 'position', 'sequence', 'requested', 'effective'], envelope.type);
+  if (!Number.isSafeInteger(payload.sequence) || (payload.sequence as number) < 1) {
+    fail('INVALID_EVENT', 'An engine attempt sequence must be a positive safe integer.');
+  }
+  const requested = payload.requested === null ? null : validateEngineIdentity(payload.requested!, 'requested');
+  const effective = payload.effective === null ? null : validateEngineIdentity(payload.effective!, 'effective');
+  if (requested === null && effective !== null) {
+    fail('INVALID_EVENT', 'A recovered unknown engine attempt cannot report an effective identity.');
+  }
+  return Object.freeze({
+    nodeId: text(payload.nodeId, 'nodeId'),
+    position: text(payload.position, 'position'),
+    sequence: payload.sequence as number,
+    requested,
+    effective,
+  });
 }
 
 function targetKey(target: ExecutionTarget): string {
@@ -495,7 +536,36 @@ export async function createGraphExecutor(
         continue;
       }
       let graphEvent: GraphEvent;
-      if (
+      if (type === 'engine-attempt-recorded') {
+        pendingDispatches.clear();
+        const payload = validateEngineAttemptRecorded(envelope);
+        const attempt = attempts.get(payload.position);
+        const node = nodesById.get(payload.nodeId);
+        const lane = node?.laneId === null || node?.laneId === undefined
+          ? undefined
+          : lanesById.get(node.laneId);
+        if (
+          !attempt
+          || attempt.command.nodeId !== payload.nodeId
+          || attempt.status !== 'in-flight'
+          || attempt.started === null
+          || payload.sequence !== attempt.engineSequence + 1
+          || lane === undefined
+        ) {
+          fail('INVALID_EVENT', 'An engine receipt must follow its started engine position in sequence.');
+        }
+        const requested = payload.requested;
+        if (requested !== null && ![lane.effective, ...lane.fallbacks].some((target) => (
+          target.adapter === requested.adapter
+          && target.model === requested.model
+          && (requested.provider === null || target.provider === requested.provider)
+          && (requested.modelFamily === null || target.modelFamily === requested.modelFamily)
+        ))) {
+          fail('INVALID_EVENT', 'An engine receipt requested a target outside its stored route.');
+        }
+        attempts.set(payload.position, Object.freeze({ ...attempt, engineSequence: payload.sequence }));
+        graphEvent = Object.freeze({ type, version: 1, payload });
+      } else if (
         type === 'node-dispatched'
         || type === 'node-completed'
         || type === 'node-failed'
@@ -532,6 +602,7 @@ export async function createGraphExecutor(
             command,
             started: null,
             status: 'in-flight',
+            engineSequence: 0,
           }));
         } else if (type === 'node-resumed') {
           pendingDispatches.clear();
@@ -652,6 +723,7 @@ export async function createGraphExecutor(
     prepared: PreparedDispatch,
     signal: AbortSignal,
     alreadyStarted = false,
+    engineSequence = 0,
   ): Promise<void> => {
     const { command, binding, prompt, route } = prepared;
     const identity: AttemptIdentity = createAttemptIdentity({
@@ -710,6 +782,15 @@ export async function createGraphExecutor(
           'model-unavailable',
           fact as unknown as JsonObject,
         ));
+      },
+      recordEngineAttempt: async (fact) => {
+        await enqueueAppend(newEvent(options.runId, 'engine-attempt-recorded', {
+          nodeId: command.nodeId,
+          position: command.position,
+          sequence: engineSequence + 1,
+          ...fact,
+        }));
+        engineSequence += 1;
       },
       decideAction: binding.decideAction,
     }, signal);
@@ -795,12 +876,26 @@ export async function createGraphExecutor(
     if (!attempt || attempt.status === 'settled') {
       fail('PROTOCOL', `Position "${position}" is not an unfinished attempt.`);
     }
+    const recovery: NewDomainEvent[] = [];
+    if (
+      attempt.status === 'in-flight'
+      && attempt.started !== null
+      && nodesById.get(attempt.command.nodeId)!.laneId !== null
+    ) {
+      recovery.push(newEvent(options.runId, 'engine-attempt-recorded', {
+        nodeId: attempt.command.nodeId,
+        position,
+        sequence: attempt.engineSequence + 1,
+        requested: null,
+        effective: null,
+      }));
+    }
     if (
       attempt.status === 'in-flight'
       && attempt.started !== null
       && !attempt.started.retrySafe
     ) {
-      await appendBatch(folded.revision, [newEvent(options.runId, 'node-paused', {
+      await appendBatch(folded.revision, [...recovery, newEvent(options.runId, 'node-paused', {
         nodeId: attempt.command.nodeId,
         position,
         reason: 'The previous process stopped after node code started, so its outcome is uncertain.',
@@ -814,12 +909,12 @@ export async function createGraphExecutor(
 
     const prepared = prepareDispatch(attempt.command, folded.unavailable);
     if (attempt.status === 'paused' || attempt.started !== null) {
-      await appendBatch(folded.revision, [newEvent(options.runId, 'node-resumed', {
+      await appendBatch(folded.revision, [...recovery, newEvent(options.runId, 'node-resumed', {
         nodeId: attempt.command.nodeId,
         position,
       })]);
     }
-    await appendOutcome(prepared, signal, attempt.started !== null);
+    await appendOutcome(prepared, signal, attempt.started !== null, attempt.engineSequence + recovery.length);
     return drive(signal);
   };
 

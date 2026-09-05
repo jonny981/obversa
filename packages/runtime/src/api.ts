@@ -30,6 +30,8 @@ export type {
 export {
   compileGraph,
   type GraphEvent,
+  type GraphEngineIdentity,
+  type EngineAttemptRecordedPayload,
   type GraphBindings,
   type GraphTypeCompilation,
   type CompiledGraphType,

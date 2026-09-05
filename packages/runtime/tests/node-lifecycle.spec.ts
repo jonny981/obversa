@@ -35,10 +35,12 @@ import {
 } from '../src/runtime/budget.ts';
 import {
   executeNodeAttempt,
+  type ActionDecision,
   type PreparedEngineLane,
   type PreparedNodeAttempt,
 } from '../src/runtime/node-lifecycle.ts';
 import { defineResultContract } from '../src/runtime/result-contract.ts';
+import type { GraphEngineIdentity } from '../src/graph/type.ts';
 
 const roots: string[] = [];
 const childPids: number[] = [];
@@ -87,6 +89,20 @@ const fallbackSelection = engineSelection({
   model: 'model-b',
   capabilities: ['read'],
 });
+
+const primaryIdentity: GraphEngineIdentity = {
+  adapter: 'primary',
+  provider: 'provider-a',
+  modelFamily: 'family-a',
+  model: 'model-a',
+};
+
+const fallbackIdentity: GraphEngineIdentity = {
+  adapter: 'fallback',
+  provider: 'provider-b',
+  modelFamily: 'family-b',
+  model: 'model-b',
+};
 
 const defaultPolicy: AttemptBudgetPolicy = {
   inputBytes: 4_096,
@@ -645,14 +661,17 @@ describe('node attempt lifecycle', () => {
       started = resolve;
     });
     let aborted = false;
+    let finish!: (value: AgentResult) => void;
     const selected = engine('stuck', async (_request, _onEvent, signal) => {
       started();
       signal.addEventListener('abort', () => {
         aborted = true;
       }, { once: true });
-      return await new Promise<AgentResult>(() => {});
+      return await new Promise<AgentResult>((resolve) => { finish = resolve; });
     });
+    const recordEngineAttempt = vi.fn(async () => {});
     const running = executeNodeAttempt(prepared({
+      recordEngineAttempt,
       engineRoute: [lane(selected)],
       policy: {
         ...defaultPolicy,
@@ -668,6 +687,12 @@ describe('node attempt lifecycle', () => {
     expect(aborted).toBe(true);
     expect(record.status).toBe('failed');
     expect(record.failure).toMatchObject({ code: 'TIMEOUT' });
+    finish(success('answer after the attempt already settled'));
+    await vi.runAllTimersAsync();
+    expect(recordEngineAttempt.mock.calls).toEqual([[{
+      requested: primaryIdentity,
+      effective: null,
+    }]]);
   });
 
   it('keeps a final result returned during timeout cleanup', async () => {
@@ -712,7 +737,9 @@ describe('node attempt lifecycle', () => {
         setTimeout(() => resolve(success('too late')), 31);
       });
     });
+    const recordEngineAttempt = vi.fn(async () => {});
     const running = executeNodeAttempt(prepared({
+      recordEngineAttempt,
       engineRoute: [lane(selected)],
       policy: {
         ...defaultPolicy,
@@ -727,6 +754,10 @@ describe('node attempt lifecycle', () => {
 
     expect(record.status).toBe('failed');
     expect(record.failure).toMatchObject({ code: 'TIMEOUT' });
+    expect(recordEngineAttempt.mock.calls).toEqual([[{
+      requested: primaryIdentity,
+      effective: primaryIdentity,
+    }]]);
   });
 
   it('rejects a timeout-marked result returned after the final-result deadline', async () => {
@@ -799,7 +830,9 @@ describe('node attempt lifecycle', () => {
         )), 31);
       });
     });
+    const recordEngineAttempt = vi.fn(async () => {});
     const running = executeNodeAttempt(prepared({
+      recordEngineAttempt,
       engineRoute: [lane(selected)],
       policy: {
         ...defaultPolicy,
@@ -821,6 +854,10 @@ describe('node attempt lifecycle', () => {
       { kind: 'assistant', text: 'partial answer', final: true },
     ]);
     expect(record.transportFailure).toMatchObject({ kind: 'timeout' });
+    expect(recordEngineAttempt.mock.calls).toEqual([[{
+      requested: primaryIdentity,
+      effective: primaryIdentity,
+    }]]);
   });
 
   it('keeps a parent abort distinct after the soft timeout', async () => {
@@ -840,7 +877,9 @@ describe('node attempt lifecycle', () => {
       });
     });
     const controller = new AbortController();
+    const recordEngineAttempt = vi.fn(async () => {});
     const running = executeNodeAttempt(prepared({
+      recordEngineAttempt,
       engineRoute: [lane(selected)],
       policy: {
         ...defaultPolicy,
@@ -857,6 +896,10 @@ describe('node attempt lifecycle', () => {
     expect(record.status).toBe('failed');
     expect(record.failure).toMatchObject({ code: 'ABORTED' });
     expect(record.result).toBeNull();
+    expect(recordEngineAttempt.mock.calls).toEqual([[{
+      requested: primaryIdentity,
+      effective: primaryIdentity,
+    }]]);
   });
 
   it('waits for process cleanup before keeping a final result during grace', async () => {
@@ -1140,5 +1183,139 @@ describe('node attempt lifecycle', () => {
 
     expect(record.status).toBe('completed');
     expect(seen).toEqual([root]);
+  });
+});
+
+describe('engine attempt recording', () => {
+  it.each([
+    'result', 'incomplete', 'rate-limit', 'model-unavailable', 'timeout', 'aborted',
+    'invalid-result', 'unknown', 'invalid-identity',
+  ] as const)('records the reported identity for %s exactly once', async (outcome) => {
+    const reported = { ...success(), effective: fallbackSelection };
+    const selected = engine('reported', async () => {
+      if (outcome === 'result') return reported;
+      if (outcome === 'incomplete') {
+        throw new EngineIncompleteResultError('partial answer', reported);
+      }
+      if (outcome === 'invalid-result') return { ...reported, parts: [] };
+      if (outcome === 'invalid-identity') {
+        return { ...reported, effective: { ...fallbackSelection, model: 42 } } as unknown as AgentResult;
+      }
+      if (outcome === 'unknown') throw new Error('no answer');
+      throw new EngineError({ kind: outcome, message: 'reported failure', effective: fallbackSelection });
+    });
+    const recordEngineAttempt = vi.fn(async () => {});
+    const result = await executeNodeAttempt(prepared({
+      engineRoute: [lane(selected)],
+      recordEngineAttempt,
+    }), new AbortController().signal);
+
+    expect(selected.run).toHaveBeenCalledTimes(1);
+    expect(recordEngineAttempt.mock.calls).toEqual([[{
+      requested: primaryIdentity,
+      effective: outcome === 'unknown' || outcome === 'invalid-identity' ? null : fallbackIdentity,
+    }]]);
+    expect(result.status).toBe(outcome === 'result' ? 'completed' : 'failed');
+  });
+
+  it('awaits the primary receipt before calling the fallback and records both calls', async () => {
+    let release!: () => void;
+    const released = new Promise<void>((resolve) => { release = resolve; });
+    let recording!: () => void;
+    const didRecord = new Promise<void>((resolve) => { recording = resolve; });
+    const receipts: { requested: GraphEngineIdentity; effective: GraphEngineIdentity | null }[] = [];
+    const primary = engine('primary', async () => {
+      throw new EngineError({ kind: 'auth', message: 'no reported answer' });
+    });
+    const fallback = engine('fallback', async () => success('fallback answer', fallbackSelection));
+    const running = executeNodeAttempt(prepared({
+      engineRoute: [lane(primary), lane(fallback, fallbackSelection)],
+      recordEngineAttempt: async (fact) => {
+        receipts.push(fact);
+        if (receipts.length === 1) {
+          recording();
+          await released;
+        }
+      },
+    }), new AbortController().signal);
+
+    await Promise.race([didRecord, running.then(() => {
+      throw new Error('engine attempt finished before its receipt was recorded');
+    })]);
+    expect(fallback.run).not.toHaveBeenCalled();
+    release();
+    expect((await running).status).toBe('completed');
+    expect(receipts).toEqual([
+      { requested: primaryIdentity, effective: null },
+      { requested: fallbackIdentity, effective: fallbackIdentity },
+    ]);
+  });
+
+  it.each(['result', 'unavailable'] as const)('propagates receipt storage failure after %s without fallback', async (outcome) => {
+    const unavailable = vi.fn(async () => {});
+    const primary = engine('primary', async () => {
+      if (outcome === 'result') return success();
+      throw new EngineError({ kind: 'auth', message: 'primary unavailable' });
+    });
+    const fallback = engine('fallback', async () => success('fallback', fallbackSelection));
+    const budget = createTokenBudget(30);
+    const storageError = new Error('engine receipt could not be stored');
+    const recordEngineAttempt = vi.fn(async () => { throw storageError; });
+
+    await expect(executeNodeAttempt(prepared({
+      engineRoute: [lane(primary), lane(fallback, fallbackSelection)],
+      tokenBudget: budget,
+      recordModelUnavailable: unavailable,
+      recordEngineAttempt,
+    }), new AbortController().signal)).rejects.toBe(storageError);
+    expect(primary.run).toHaveBeenCalledTimes(1);
+    expect(recordEngineAttempt).toHaveBeenCalledTimes(1);
+    expect(fallback.run).not.toHaveBeenCalled();
+    expect(unavailable).not.toHaveBeenCalled();
+    expect(budget.snapshot()).toMatchObject({
+      spent: outcome === 'result' ? 3 : 0,
+      reserved: 0,
+      unknownUsageCalls: outcome === 'result' ? 0 : 1,
+    });
+  });
+
+  it('preserves an undefined recorder rejection without fallback or reserved tokens', async () => {
+    const primary = engine('primary', async () => {
+      throw new EngineError({ kind: 'auth', message: 'primary unavailable' });
+    });
+    const fallback = engine('fallback', async () => success('fallback', fallbackSelection));
+    const budget = createTokenBudget(30);
+    const recordModelUnavailable = vi.fn(async () => {});
+    const recordEngineAttempt = vi.fn(() => Promise.reject(undefined));
+
+    await expect(executeNodeAttempt(prepared({
+      engineRoute: [lane(primary), lane(fallback, fallbackSelection)],
+      tokenBudget: budget,
+      recordModelUnavailable,
+      recordEngineAttempt,
+    }), new AbortController().signal)).rejects.toBeUndefined();
+    expect(primary.run).toHaveBeenCalledTimes(1);
+    expect(recordEngineAttempt).toHaveBeenCalledTimes(1);
+    expect(fallback.run).not.toHaveBeenCalled();
+    expect(recordModelUnavailable).not.toHaveBeenCalled();
+    expect(budget.snapshot()).toMatchObject({ spent: 0, reserved: 0, unknownUsageCalls: 1 });
+  });
+
+  it.each(['wait', 'deny', 'data', 'pre-aborted'] as const)('records no engine attempt for %s without an engine call', async (mode) => {
+    const primary = engine('primary', async () => success());
+    const recordEngineAttempt = vi.fn(async () => {});
+    const controller = new AbortController();
+    if (mode === 'pre-aborted') controller.abort();
+    await executeNodeAttempt(prepared({
+      engineRoute: mode === 'data' ? null : [lane(primary)],
+      runData: mode === 'data' ? async () => ({ answer: 42 }) : null,
+      decideAction: async (): Promise<ActionDecision> => mode === 'wait'
+        ? { kind: 'wait', reason: 'approval', request: {} }
+        : mode === 'deny' ? { kind: 'deny', reason: 'refused' } : { kind: 'allow' },
+      recordEngineAttempt,
+    }), controller.signal);
+
+    expect(primary.run).not.toHaveBeenCalled();
+    expect(recordEngineAttempt).not.toHaveBeenCalled();
   });
 });

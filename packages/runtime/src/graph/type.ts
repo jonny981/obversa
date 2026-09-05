@@ -8,6 +8,7 @@ import {
   type CompiledGraphDefinition,
   type GraphDefinition,
   type GraphKernel,
+  type NodeId,
 } from './kernel.js';
 import {
   validateGraphDescription,
@@ -20,6 +21,7 @@ import {
   GraphValidationError,
   JsonValueError,
   type GraphValidationIssue,
+  type JsonObject,
   type JsonValue,
 } from './value.js';
 
@@ -30,6 +32,21 @@ export interface GraphEvent<
   readonly type: Type;
   readonly version: number;
   readonly payload: Payload;
+}
+
+export interface GraphEngineIdentity extends JsonObject {
+  readonly adapter: string;
+  readonly provider: string | null;
+  readonly modelFamily: string | null;
+  readonly model: string | null;
+}
+
+export interface EngineAttemptRecordedPayload extends JsonObject {
+  readonly nodeId: NodeId;
+  readonly position: string;
+  readonly sequence: number;
+  readonly requested: GraphEngineIdentity | null;
+  readonly effective: GraphEngineIdentity | null;
 }
 
 export type GraphBindings<Requirements extends GraphRequirements> =
