@@ -1,10 +1,8 @@
 #!/usr/bin/env node
 /**
  * Print one version's section body from CHANGELOG.md — the release notes.
- * The Release workflow feeds this to `gh release create`, so the GitHub
- * Release body is always the changelog section, never a second hand-written
- * copy. Exits 1 when the section is missing or empty (the changelog gate
- * enforces the same bar before anything publishes).
+ * Writes the section body to standard output. Exits 1 when the changelog
+ * file or requested section is missing, or the section body is empty.
  *
  *   node scripts/changelog-section.mjs <version>
  */

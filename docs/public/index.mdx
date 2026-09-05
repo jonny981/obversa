@@ -1,6 +1,6 @@
 ---
 title: "Obversa"
-description: "Build and run durable agent graphs from small TypeScript packages."
+description: "A process runtime for software teams."
 ---
 
 A process runtime for software teams.
@@ -13,12 +13,12 @@ choices.
 
 - Pipeline: ordered stages on the durable graph executor. See
   [Built-in pipeline](/graphs/pipeline).
-- Review loop: independent seats on separate model families. A seat cannot
-  share the generator lane. See [Review loop](/graphs/review-loop).
+- Review loop: writer and reviewer roles use separate lanes. The review loop
+  can require a diverse quorum of reviewers. See [Review loop](/graphs/review-loop).
 - Callback gate: one structured answer through a replaceable router. See
   [Callback gate](/graphs/callback-gate).
-- Crash-safe resume: a fresh executor resumes the exact interrupted position
-  from the record. See [Graph executor](/graphs/executor).
+- Crash-safe resume: a fresh executor recovers recorded progress; an uncertain
+  attempt pauses unless retry was declared safe. See [Graph executor](/graphs/executor).
 
 ## Packages
 
@@ -34,8 +34,8 @@ choices.
 | `@obversa/source` | Opens a git diff for inline review | `0.1.0` |
 
 The six engine plugins have their own pages in the Packages group.
-These are unreleased workspace seed versions. The public contract is locked at
-the version-1 release.
+The runtime version matches the repository release tag. Other packages keep
+their own manifest versions.
 
 The packages have one dependency direction. The runtime imports the memory port.
 Each memory adapter also imports the memory port. The runtime does not import a
