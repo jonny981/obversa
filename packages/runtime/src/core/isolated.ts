@@ -22,8 +22,6 @@
  * both deliberately, to avoid destabilising the dag path.
  */
 
-import pLimit from 'p-limit';
-
 import type { Job, Workspace } from './types.js';
 import { childContext } from './context.js';
 import { LoopError } from './errors.js';
@@ -36,13 +34,11 @@ import {
   commit,
   isRepo,
 } from './git.js';
-import { mergeSynthesis } from './merge.js';
+import { mergeLock, mergeSynthesis } from './merge.js';
 
 const slug = (s: string) =>
   s.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '') || 'job';
 
-/** Serialise land-back merges process-wide so concurrent dispatch can't race. */
-const mergeLock = pLimit(1);
 let forkSeq = 0;
 
 export interface IsolatedOptions {

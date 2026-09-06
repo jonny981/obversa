@@ -1,6 +1,9 @@
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import { execFileSync } from 'node:child_process';
 import {
+  existsSync,
+  readdirSync,
+  readFileSync,
   mkdirSync,
   mkdtempSync,
   realpathSync,
@@ -73,6 +76,46 @@ function emitter(value: number): { command: string; args: string[] } {
 }
 
 describe('ratchet', () => {
+  it.each(['signal termination', 'handled exit zero'] as const)('names a timeout after %s without seeding or changing its baseline', async (mode) => {
+    const dir = mkdtempSync(join(workspace, 'timeout-'));
+    const stored = join(dir, 'baselines');
+    const script = join(dir, 'metric.cjs');
+    writeFileSync(script, `
+      const fs = require('node:fs');
+      const mode = fs.readFileSync('mode', 'utf8');
+      if (mode !== 'success' && ${JSON.stringify(mode)} === 'handled exit zero') {
+        process.on('SIGTERM', () => {
+          fs.writeFileSync('stopped', 'exit zero');
+          process.exit(0);
+        });
+      }
+      console.log(JSON.stringify({ score: mode === 'success' ? 10 : 1 }));
+      fs.writeFileSync('ready', 'ready');
+      if (mode !== 'success') setTimeout(() => process.exit(0), 1500);
+    `);
+    const gate = ratchet(process.execPath, [script], {
+      metric: 'score', cwd: dir, baselineDir: stored, timeoutMs: 500,
+    });
+    writeFileSync(join(dir, 'mode'), 'timeout');
+    const first = await gate(ctx(), undefined);
+    expect(readFileSync(join(dir, 'ready'), 'utf8')).toBe('ready');
+    if (mode === 'handled exit zero') expect(readFileSync(join(dir, 'stopped'), 'utf8')).toBe('exit zero');
+    expect.soft(first.met).toBe(false);
+    expect.soft(first.reason).toBe(`ratchet command \`${process.execPath}\` timed out after 500 ms`);
+    expect.soft(existsSync(stored)).toBe(false);
+
+    writeFileSync(join(dir, 'mode'), 'success');
+    expect((await gate(ctx(), undefined)).met).toBe(true);
+    const files = readdirSync(stored);
+    expect(files).toHaveLength(1);
+    const before = readFileSync(join(stored, files[0]!), 'utf8');
+    writeFileSync(join(dir, 'mode'), 'timeout');
+    const second = await gate(ctx(), undefined);
+    expect.soft(second.met).toBe(false);
+    expect.soft(second.reason).toBe(`ratchet command \`${process.execPath}\` timed out after 500 ms`);
+    expect.soft(readFileSync(join(stored, files[0]!), 'utf8')).toBe(before);
+  });
+
   it('reads the metric after two prose lines before the JSON', async () => {
     const result = await ratchet(
       process.execPath,

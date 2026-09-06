@@ -17,7 +17,7 @@ const base: RunOptions = {
 };
 
 describe('dag worktree isolation (branches-as-teams)', () => {
-  it.each(['dag', 'wrapper'] as const)('serialises three simultaneous %s land-backs through real Git', async (mode) => {
+  it.each(['dag', 'wrapper', 'mixed'] as const)('serialises three simultaneous %s land-backs through real Git', async (mode) => {
     const repo = await tmpRepo();
     const names = ['one', 'two', 'three'];
     const directories: string[] = [];
@@ -60,11 +60,13 @@ describe('dag worktree isolation (branches-as-teams)', () => {
           await finished;
           return { status: 'pass' };
         });
-        return [name, mode === 'wrapper' ? isolated(job, { label: name }) : job];
+        return [name, mode === 'wrapper' ? isolated(job, { label: name })
+          : mode === 'mixed' && name === 'one'
+            ? { job: isolated(job, { label: name }), isolate: false } : job];
       }));
       const { outcome } = await run(dag({
         name: 'contention', nodes, concurrency: 3, stopOnError: false,
-        ...(mode === 'dag' ? { isolation: 'worktree' as const } : {}),
+        ...(mode !== 'wrapper' ? { isolation: 'worktree' as const } : {}),
       }), { ...base, cwd: repo });
 
       expect(maximumMerges).toBe(1);

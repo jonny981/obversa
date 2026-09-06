@@ -131,16 +131,23 @@ describe('run supervision', () => {
     expect(progress!.current!.remainingMs).toBeGreaterThan(0);
   });
 
-  it('reads only the byte-limited tail of a large event stream', () => {
+  it.each(['inside a record', 'at a line boundary'] as const)('reads a bounded tail cut %s without dropping complete records', (cut) => {
     const supervisor = startSupervisor({
       runId: 'large-run',
       cwd: testHome,
       title: 'large',
     });
     const tailBytes = 256 * 1024;
-    for (const message of ['x'.repeat(tailBytes + 1), 'first tail record', 'last tail record']) {
-      supervisor.sink({ kind: 'log', ts: 1, path: [], level: 'info', message });
+    const event = (message: string): LoopEvent => ({ kind: 'log', ts: 1, path: [], level: 'info', message });
+    const tail = ['first tail record', 'last tail record'];
+    if (cut === 'at a line boundary') {
+      const overhead = [...tail, ''].reduce((bytes, message) => bytes + Buffer.byteLength(JSON.stringify(event(message))) + 1, 0);
+      tail.splice(1, 0, 'x'.repeat(tailBytes - overhead));
+      supervisor.sink(event('prefix outside the tail'));
+    } else {
+      supervisor.sink(event('x'.repeat(tailBytes + 1)));
     }
+    for (const message of tail) supervisor.sink(event(message));
     const eventsPath = runEventsPath('large-run');
     const size = statSync(eventsPath).size;
     expect(size).toBeGreaterThan(tailBytes);
@@ -160,12 +167,13 @@ describe('run supervision', () => {
       expect(reads.length).toBeGreaterThan(0);
       let requestedBytes = 0;
       for (const [, , , length, position] of reads) {
-        expect(position).toBeGreaterThanOrEqual(size - tailBytes);
+        expect(position).toBeGreaterThanOrEqual(size - tailBytes - 1);
         expect(Number(position) + Number(length)).toBeLessThanOrEqual(size);
         requestedBytes += Number(length);
       }
-      expect(requestedBytes).toBeLessThanOrEqual(tailBytes);
-      expect(progress?.recent).toEqual(['first tail record', 'last tail record']);
+      expect(requestedBytes).toBeLessThanOrEqual(tailBytes + 1);
+      const readable = (messages: string[]) => messages.map((message) => message.length > 100 ? 'padding' : message);
+      expect(readable(progress?.recent ?? [])).toEqual(readable(tail));
     } finally {
       open.mockRestore();
       read.mockRestore();

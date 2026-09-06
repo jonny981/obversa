@@ -32,7 +32,6 @@ engine and memory packages track their own versions independently.
   declared substitutions, cannot share a provider or model family with any
   review target or substitution. This rule applies without reviewer diversity
   enabled. Stored graph type 1 and 2 plans are refused before execution.
-
 - **Runner usage type:** `SupervisedRunUsage` exposes `reported`, `partial`,
   and `unknown` variants on run status and active-node usage. Consumers with an
   exhaustive switch must handle `partial`, whose totals are measured lower
@@ -54,11 +53,19 @@ engine and memory packages track their own versions independently.
   remain enforced.
 - **Documentation versions:** Refuse a docs build when a package version in
   the homepage table differs from its workspace manifest.
-- **Unresolved merge markers:** Reject engine resolutions that retain conflict
-  marker lines of seven or more characters, abort the merge, and name the file
-  in a typed error. The failed resolution does not create a merge commit.
-- **Gate command timeouts:** Name the timeout and its configured limit in the
-  not-met result when a command exceeds that limit.
+- **Unresolved merge markers:** Reject engine resolutions that retain an ordered
+  conflict block with matching opening, separator, and closing marker widths
+  of seven or more characters. Abort the merge and name the file in a typed
+  error without creating a merge commit. Standalone document underlines are
+  permitted. Custom conflict marker widths below seven remain undetected.
+- **Gate and ratchet command timeouts:** Reject timed-out commands even when
+  their termination handler exits zero. Name the timeout and its configured
+  limit in the not-met result. A timed-out ratchet command cannot seed or
+  change its saved baseline.
+- **Run progress:** Keep a complete event record when the bounded tail read
+  starts at its first byte.
+- **Isolated merges:** Merge isolated DAG nodes and `isolated()` jobs one at a
+  time through one process-wide lock.
 - **Stale pause-event resumes:** Bind each resume to one pause event. A
   replacement worker that finds a different pause at the same position returns
   a named pause with `code: 'RESUME_EVENT_MISMATCH'` and the exact reason

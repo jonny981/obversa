@@ -360,7 +360,8 @@ function readEventTail(runId: string): LoopEvent[] {
     const fd = openSync(runEventsPath(runId), 'r');
     try {
       const size = fstatSync(fd).size;
-      const start = Math.max(0, size - PROGRESS_TAIL_BYTES);
+      // Include the preceding byte so a cut at a newline keeps the next record.
+      const start = Math.max(0, size - PROGRESS_TAIL_BYTES - 1);
       const buffer = Buffer.alloc(size - start);
       readSync(fd, buffer, 0, buffer.length, start);
       raw = buffer.toString('utf8');

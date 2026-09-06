@@ -13,6 +13,7 @@
 
 import { readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
+import pLimit from 'p-limit';
 
 import type { JobContext } from './types.js';
 import type { EngineRef } from '../engines/engine.js';
@@ -25,6 +26,9 @@ import {
 } from './git.js';
 import { LoopError } from './errors.js';
 import { requireFinalResultText } from '../runtime/result-parts.js';
+
+// ponytail: one process-wide lock; use per-workspace locks if throughput requires it.
+export const mergeLock = pLimit(1);
 
 export interface MergeSynthesisConfig {
   /** The branch to land into the current workspace. */
@@ -50,6 +54,20 @@ function stripFence(s: string): string {
 
 function firstLine(s: string): string {
   return s.split('\n').find((l) => l.trim()) ?? '';
+}
+
+/** Match an ordered Git conflict block, not standalone document underlines. */
+function hasConflictBlock(text: string): boolean {
+  const openings = new Map<number, boolean>();
+  for (const [line, marker] of text.matchAll(/^(<{7,}|={7,}|>{7,})(?:[ \t].*)?\r?$/gm)) {
+    const width = marker!.length;
+    if (line.startsWith('<')) {
+      if (!openings.has(width)) openings.set(width, false);
+    } else if (line.startsWith('=')) {
+      if (openings.has(width)) openings.set(width, true);
+    } else if (openings.get(width)) return true;
+  }
+  return false;
 }
 
 export async function mergeSynthesis(
@@ -78,7 +96,7 @@ export async function mergeSynthesis(
           ctx.signal,
         );
         const resolved = stripFence(requireFinalResultText(out));
-        if (/^(?:<{7,}|\|{7,}|={7,}|>{7,})(?:\s|$)/m.test(resolved)) {
+        if (hasConflictBlock(resolved)) {
           throw new LoopError({
             code: 'BODY',
             message: `Merge resolution for "${file}" still contains conflict markers.`,

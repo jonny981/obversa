@@ -59,12 +59,19 @@ describe('mergeSynthesis', () => {
   it.each([
     ['the original conflict', null, 7],
     ['a configured 32-character conflict', null, 32],
+    ['a wider literal opener inside a real conflict', null, 7, '<<<<<<<< documentation\nMAIN VERSION\n', 'CAND VERSION\n'],
+    ['a same-width literal opener after the separator', null, 7, 'MAIN VERSION\n', '<<<<<<< documentation\nCAND VERSION\n'],
     ['the opening marker', '<<<<<<< HEAD\n', 7],
     ['the base marker', '||||||| base\n', 7],
     ['the separator marker', '=======\n', 7],
     ['the closing marker', '>>>>>>> cand\n', 7],
+    ['a Markdown setext heading', 'Heading\n=======\n', 7],
+    ['an RST setext heading', 'Heading\n-------\n', 7],
+    ['markers out of order', '>>>>>>> cand\n=======\n<<<<<<< HEAD\n', 7],
+    ['a block without a separator', '<<<<<<< HEAD\ncontent\n>>>>>>> cand\n', 7],
+    ['a mismatched closing width', '<<<<<<< HEAD\nleft\n=======\nright\n>>>>>>>> cand\n', 7],
     ['inline marker text', 'const markers = "<<<<<<< ||||||| ======= >>>>>>>";\n', 7],
-  ] as const)('checks %s before staging or committing the resolution', async (label, resolved, markerSize) => {
+  ] as const)('checks %s before staging or committing the resolution', async (_label, resolved, markerSize, mainContent = 'MAIN VERSION\n', candidateContent = 'CAND VERSION\n') => {
     const repo = await tmpRepo();
     write(repo, 'shared.ts', 'base\n');
     if (markerSize === 32) {
@@ -74,11 +81,11 @@ describe('mergeSynthesis', () => {
     await stageAll({ cwd: repo });
     await commit({ subject: 'chore: base' }, { cwd: repo });
     await execa('git', ['checkout', '-b', 'cand'], { cwd: repo });
-    write(repo, 'shared.ts', 'CAND VERSION\n');
+    write(repo, 'shared.ts', candidateContent);
     await stageAll({ cwd: repo });
     await commit({ subject: 'feat: candidate' }, { cwd: repo });
     await execa('git', ['checkout', 'main'], { cwd: repo });
-    write(repo, 'shared.ts', 'MAIN VERSION\n');
+    write(repo, 'shared.ts', mainContent);
     await stageAll({ cwd: repo });
     await commit({ subject: 'feat: main' }, { cwd: repo });
     const before = (await execa('git', ['rev-parse', 'HEAD'], { cwd: repo })).stdout;
@@ -104,7 +111,11 @@ describe('mergeSynthesis', () => {
         expect(lines.some((line) => line.startsWith(marker.repeat(32)))).toBe(true);
       }
     }
-    if (label === 'inline marker text') {
+    if (resolved === null && markerSize === 7) {
+      expect(conflicted).toContain(`<<<<<<< HEAD\n${mainContent}`);
+      expect(conflicted).toContain(`=======\n${candidateContent}>>>>>>> cand\n`);
+    }
+    if (resolved !== null) {
       expect(outcome.status).toBe('pass');
       expect(readFileSync(join(repo, 'shared.ts'), 'utf8')).toBe(resolved);
       expect(bodyCalls).toBe(1);
@@ -114,7 +125,7 @@ describe('mergeSynthesis', () => {
         name: 'LoopError', code: 'BODY', message: expect.stringContaining('shared.ts'),
       });
       expect.soft((await execa('git', ['rev-parse', 'HEAD'], { cwd: repo })).stdout).toBe(before);
-      expect.soft(readFileSync(join(repo, 'shared.ts'), 'utf8')).toBe('MAIN VERSION\n');
+      expect.soft(readFileSync(join(repo, 'shared.ts'), 'utf8')).toBe(mainContent);
       expect.soft(bodyCalls).toBe(0);
     }
     expect((await execa('git', ['status', '--porcelain'], { cwd: repo })).stdout).toBe('');

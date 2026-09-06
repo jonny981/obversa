@@ -148,10 +148,12 @@ export function ratchet(
         stdin: 'ignore',
         env,
       });
-      if (r.exitCode !== 0) {
+      if (r.exitCode !== 0 || r.timedOut) {
         return {
           met: false,
-          reason: `ratchet command \`${command}\` exited ${r.exitCode ?? '?'}`,
+          reason: r.timedOut
+            ? `ratchet command \`${command}\` timed out after ${opts.timeoutMs} ms`
+            : `ratchet command \`${command}\` exited ${r.exitCode ?? '?'}`,
           output: scrubCapture(`${r.stdout ?? ''}\n${r.stderr ?? ''}`, env, 4000),
         };
       }

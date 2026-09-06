@@ -36,7 +36,7 @@ import {
   deleteBranch,
   mergeBranch,
 } from './git.js';
-import { mergeSynthesis } from './merge.js';
+import { mergeLock, mergeSynthesis } from './merge.js';
 import type { EnvHandle } from '../env/environment.js';
 import { LoopError } from './errors.js';
 import { revisionFromOutcome } from './feedback.js';
@@ -166,9 +166,6 @@ export function dag(config: DagConfig): Job {
         timeoutGraceMs: nodes.get(name)!.timeoutGraceMs,
       });
 
-    // Land-back merges are serialised: concurrent nodes finishing at once must
-    // not race on the parent branch's index/HEAD.
-    const mergeLimit = pLimit(1);
     let forkSeq = 0;
 
     /**
@@ -219,7 +216,7 @@ export function dag(config: DagConfig): Job {
             },
             { cwd: wt.dir, signal: parent.signal },
           );
-          const merged = await mergeLimit(() =>
+          const merged = await mergeLock(() =>
             mergeBranch(base.dir, branch, {
               signal: parent.signal,
               message: `merge ${branch} (node ${name})`,
@@ -240,7 +237,7 @@ export function dag(config: DagConfig): Job {
               };
             }
             try {
-              await mergeLimit(() =>
+              await mergeLock(() =>
                 mergeSynthesis(parent, {
                   branch,
                   message: `merge: ${branch} (node ${name}, synthesis)`,

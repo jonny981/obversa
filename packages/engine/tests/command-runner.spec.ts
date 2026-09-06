@@ -61,6 +61,16 @@ describe('command cleanup capability', () => {
     );
   });
 
+  it('reports observed process cleanup under a Darwin platform fixture', () => {
+    const platform = Object.getOwnPropertyDescriptor(process, 'platform')!;
+    try {
+      Object.defineProperty(process, 'platform', { ...platform, value: 'darwin' });
+      expect(commandCleanupCapability()).toBe('observed-processes');
+    } finally {
+      Object.defineProperty(process, 'platform', platform);
+    }
+  });
+
   it('reports inherited owner discovery under a Linux platform fixture', () => {
     const platform = Object.getOwnPropertyDescriptor(process, 'platform')!;
     try {
