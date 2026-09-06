@@ -37,6 +37,9 @@ engine and memory packages track their own versions independently.
 
 ### Fixed
 
+- **Attempt example checks:** Read exported attempt data from a separate JSON
+  report. Printed JSON can change indentation while executable path checks
+  remain enforced.
 - **Documentation versions:** Refuse a docs build when a package version in
   the homepage table differs from its workspace manifest.
 - **Unresolved merge markers:** Reject engine resolutions that retain conflict

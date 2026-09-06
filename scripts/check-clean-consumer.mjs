@@ -234,11 +234,8 @@ function checkedAttemptReport(report) {
   };
 }
 
-function checkedAttemptOutput(output) {
-  const lines = output.trimEnd().split('\n');
-  const report = JSON.parse(lines.pop());
-  const display = JSON.parse(lines.join('\n'));
-  assert.equal(lines.join('\n'), JSON.stringify(display, null, 2));
+export function checkedAttemptOutput(output, report) {
+  const display = JSON.parse(output);
   for (const [name, filename] of [['grok', 'grok-fixture.mjs'], ['opencode', 'opencode-fixture.mjs']]) {
     for (const selection of ['requested', 'effective']) {
       assert.equal(display[name][selection].executable, filename);
@@ -676,15 +673,19 @@ async function main() {
     const directStorage = JSON.parse(
       run('pnpm', ['exec', 'tsx', 'durable-storage.ts'], { cwd: consumerDirectory }),
     );
+    const compiledAttemptOutput = run(process.execPath, ['--input-type=module', '--eval',
+      "const { writeFileSync } = await import('node:fs'); const { attemptReport } = await import('./dist/safe-node-attempt.js'); writeFileSync('compiled-attempt-report.json', JSON.stringify(attemptReport));",
+    ], { cwd: consumerDirectory });
     const compiledAttempt = checkedAttemptOutput(
-      run(process.execPath, ['--input-type=module', '--eval',
-        "const { attemptReport } = await import('./dist/safe-node-attempt.js'); console.log(JSON.stringify(attemptReport));",
-      ], { cwd: consumerDirectory }),
+      compiledAttemptOutput,
+      JSON.parse(await readFile(join(consumerDirectory, 'compiled-attempt-report.json'), 'utf8')),
     );
+    const directAttemptOutput = run('pnpm', ['exec', 'tsx', '--input-type=module', '--eval',
+      "const { writeFileSync } = await import('node:fs'); const { attemptReport } = await import('./safe-node-attempt.ts'); writeFileSync('direct-attempt-report.json', JSON.stringify(attemptReport));",
+    ], { cwd: consumerDirectory });
     const directAttempt = checkedAttemptOutput(
-      run('pnpm', ['exec', 'tsx', '--input-type=module', '--eval',
-        "const { attemptReport } = await import('./safe-node-attempt.ts'); console.log(JSON.stringify(attemptReport));",
-      ], { cwd: consumerDirectory }),
+      directAttemptOutput,
+      JSON.parse(await readFile(join(consumerDirectory, 'direct-attempt-report.json'), 'utf8')),
     );
     const compiledTurnTaking = JSON.parse(
       run(process.execPath, ['dist/turn-taking.js'], { cwd: consumerDirectory }),
