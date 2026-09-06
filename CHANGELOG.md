@@ -37,6 +37,9 @@ engine and memory packages track their own versions independently.
 
 ### Fixed
 
+- **Scripted engine receipts:** Keep typed `INVALID_ENGINE_RECEIPT` records in
+  the review-loop status when a receipt fails a version, lane, active position, or
+  sequence check. Rejected receipts do not change accepted identities or quorum.
 - **Attempt example checks:** Read exported attempt data from a separate JSON
   report. Printed JSON can change indentation while executable path checks
   remain enforced.

@@ -926,6 +926,77 @@ describe('convergence graph type', () => {
     expect(decideAt(events, definition)).toMatchObject([{ kind: 'complete' }]);
   });
 
+  it('records premature scripted engine receipts without accepting their identity', () => {
+    const compiled = compileGraph(convergence, panel());
+    const before = compiled.initialState();
+    const receipt = seatReceipt('seat-a', 'review/1/seat-a/1', 'anthropic', 'claude');
+    const rejected = compiled.reduce(before, receipt);
+
+    expect(rejected).toEqual({
+      ...before,
+      engineReceiptRejections: [{
+        code: 'INVALID_ENGINE_RECEIPT',
+        nodeId: 'seat-a',
+        position: 'review/1/seat-a/1',
+        sequence: 1,
+        reason: 'not-in-flight',
+      }],
+    });
+    expect(compiled.decide(rejected)).toEqual(compiled.decide(before));
+    expect(fold([receipt])).toEqual(rejected);
+  });
+
+  it.each([
+    ['unsupported-version', 2, 'seat-a', 'review/1/seat-a/1'],
+    ['no-engine-lane', 1, 'generator', 'convergence/1/generator/1'],
+    ['position-mismatch', 1, 'seat-a', 'review/2/seat-a/1'],
+  ] as const)('records a scripted receipt rejected for %s', (reason, version, nodeId, position) => {
+    const compiled = compileGraph(convergence, panel());
+    const before = fold([seatDispatched('seat-a', 1)]);
+    const receipt = { ...seatReceipt(nodeId, position, 'anthropic', 'claude'), version };
+
+    expect(compiled.reduce(before, receipt)).toEqual({
+      ...before,
+      engineReceiptRejections: [{
+        code: 'INVALID_ENGINE_RECEIPT', nodeId, position, sequence: 1, reason,
+      }],
+    });
+  });
+
+  it('records skipped receipt sequences and still accepts the next consecutive receipt', () => {
+    const compiled = compileGraph(convergence, panel());
+    const receipt = seatReceipt('seat-a', 'review/1/seat-a/1', 'anthropic', 'claude');
+    const before = fold([seatDispatched('seat-a', 1), receipt]);
+    const skipped = {
+      ...receipt,
+      payload: { ...receipt.payload, sequence: 3 },
+    } as ConvergenceEvent;
+    const rejected = compiled.reduce(before, skipped);
+
+    expect(rejected).toEqual({
+      ...before,
+      engineReceiptRejections: [{
+        code: 'INVALID_ENGINE_RECEIPT',
+        nodeId: 'seat-a',
+        position: 'review/1/seat-a/1',
+        sequence: 3,
+        reason: 'sequence-mismatch',
+      }],
+    });
+    expect(compiled.reduce(rejected, skipped).engineReceiptRejections).toEqual([
+      ...rejected.engineReceiptRejections!,
+      ...rejected.engineReceiptRejections!,
+    ]);
+    const next = {
+      ...receipt,
+      payload: { ...receipt.payload, sequence: 2 },
+    } as ConvergenceEvent;
+    expect(compiled.reduce(rejected, next)).toEqual({
+      ...rejected,
+      engineAttempts: { 'review/1/seat-a/1': next.payload },
+    });
+  });
+
   it('keeps data-only writers and reviewers without inventing engine identity', () => {
     const base = panel({ requireDiversity: false });
     const definition: ConvergenceDefinition = {

@@ -205,7 +205,16 @@ export interface SeatRecord extends JsonObject {
   readonly stale: boolean;
 }
 
-export interface ConvergenceStatus extends JsonObject {
+interface EngineReceiptRejection extends JsonObject {
+  readonly code: 'INVALID_ENGINE_RECEIPT';
+  readonly nodeId: NodeId;
+  readonly position: string;
+  readonly sequence: number;
+  readonly reason: 'unsupported-version' | 'no-engine-lane' | 'not-in-flight'
+    | 'position-mismatch' | 'sequence-mismatch';
+}
+
+export type ConvergenceStatus = JsonObject & {
   readonly phase: 'body' | 'review' | 'settled';
   readonly iteration: number;
   readonly restarts: number;
@@ -213,6 +222,8 @@ export interface ConvergenceStatus extends JsonObject {
   readonly seats: Readonly<Record<NodeId, SeatRecord>>;
   /** Latest engine call at each recorded position. */
   readonly engineAttempts: Readonly<Record<string, EngineAttemptRecordedPayload>>;
+  /** Scripted engine receipts refused by the reducer; absent until the first rejection. */
+  readonly engineReceiptRejections?: readonly EngineReceiptRejection[];
   /** All reported writer identities, with declared targets for unknown fields. */
   readonly writerProviders: readonly string[];
   readonly writerModelFamilies: readonly string[];
@@ -221,7 +232,7 @@ export interface ConvergenceStatus extends JsonObject {
   readonly findingRounds: Readonly<Record<string, number>>;
   /** A typed pause reason set by a limit or credit failure, or null. */
   readonly pauseReason: string | null;
-}
+};
 
 export interface ConvergenceReviewEvidence extends JsonObject {
   readonly inputHashes: JsonObject;
@@ -609,9 +620,23 @@ export const convergence: GraphType<
           case 'engine-attempt-recorded': {
             const attempt = event.payload;
             const lane = nodeLanes.get(attempt.nodeId);
-            if (event.version !== 1 || lane === undefined
-              || node?.status !== 'in-flight' || node.inFlight !== attempt.position
-              || attempt.sequence !== (state.engineAttempts[attempt.position]?.sequence ?? 0) + 1) return state;
+            const rejectReceipt = (reason: EngineReceiptRejection['reason']): ConvergenceStatus => ({
+              ...state,
+              engineReceiptRejections: [...(state.engineReceiptRejections ?? []), {
+                code: 'INVALID_ENGINE_RECEIPT',
+                nodeId: attempt.nodeId,
+                position: attempt.position,
+                sequence: attempt.sequence,
+                reason,
+              }],
+            });
+            if (event.version !== 1) return rejectReceipt('unsupported-version');
+            if (lane === undefined) return rejectReceipt('no-engine-lane');
+            if (node?.status !== 'in-flight') return rejectReceipt('not-in-flight');
+            if (node.inFlight !== attempt.position) return rejectReceipt('position-mismatch');
+            if (attempt.sequence !== (state.engineAttempts[attempt.position]?.sequence ?? 0) + 1) {
+              return rejectReceipt('sequence-mismatch');
+            }
             const engineAttempts = { ...state.engineAttempts, [attempt.position]: attempt };
             if (attempt.nodeId !== generator && attempt.nodeId !== repair) return { ...state, engineAttempts };
             const declared = [lane.requested, ...lane.knownSubstitutions];

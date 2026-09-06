@@ -95,6 +95,11 @@ const graph = compileGraph(convergence, definition);
   `engine-attempt-recorded` event. A primary call and a fallback call have
   separate records. A call
   without a reported identity records `effective: null`.
+- **Rejected engine records:** For scripted events, the loop status records
+  invalid receipts in `engineReceiptRejections`. Each record has code
+  `INVALID_ENGINE_RECEIPT`, the node ID, position, sequence, and reason.
+  The field is absent until a receipt is rejected. A rejection leaves accepted
+  engine identities and the review quorum unchanged.
 - **Review records:** A seat pass includes its confidence, input hashes, and
   workspace fingerprint. Evaluator evidence also names one proof artifact
   digest. Every seat dispatch receives that digest, and every seat result must
