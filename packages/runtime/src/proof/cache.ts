@@ -8,6 +8,11 @@ import {
 } from '../graph/value.js';
 import type { RunStorageBinding } from '../runtime/run-definition.js';
 import { writeProofArtifact, type ProofArtifactReference } from './artifact.js';
+import {
+  resolveAcceptedResult,
+  type AcceptedResultBindingInput,
+  type AcceptedResultResolution,
+} from './acceptance.js';
 
 /** Read-only sources must change their revision on every change, without reusing old revisions. */
 export interface ProofSource {
@@ -53,7 +58,18 @@ export interface ProofCacheOptions {
 
 export interface ProofCache {
   packet(jobId: string): Promise<CachedProofPacket>;
+  resolveAccepted(
+    jobId: string,
+    position: string,
+    current: ProofCacheCurrentBinding,
+  ): Promise<AcceptedResultResolution>;
 }
+
+/** The host supplies the current graph, verified workspace anchor and reviewer identity. */
+export type ProofCacheCurrentBinding = Omit<
+  AcceptedResultBindingInput,
+  'inputHashes' | 'proofScope' | 'proofArtifact'
+>;
 
 function identifier(value: string): void {
   if (typeof value !== 'string' || value.length === 0 || value !== value.trim()
@@ -166,5 +182,24 @@ export function createProofCache(options: ProofCacheOptions): ProofCache {
     return entry.value;
   }
 
-  return Object.freeze({ packet });
+  async function resolveAccepted(
+    jobId: string,
+    position: string,
+    current: ProofCacheCurrentBinding,
+  ): Promise<AcceptedResultResolution> {
+    const binding = cloneFrozenJson({
+      graph: current.graph,
+      workspaceAnchor: current.workspaceAnchor,
+      reviewerIdentity: current.reviewerIdentity,
+    }) as unknown as ProofCacheCurrentBinding;
+    const evidence = await packet(jobId);
+    return resolveAcceptedResult(storage, runId, position, {
+      ...binding,
+      inputHashes: evidence.inputHashes,
+      proofScope: evidence.proofScope,
+      proofArtifact: evidence.proofArtifact,
+    });
+  }
+
+  return Object.freeze({ packet, resolveAccepted });
 }

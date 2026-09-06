@@ -357,12 +357,70 @@ completed node result, and all bound values still match. Otherwise it returns
 `wait`.
 
 Accepted-result storage is called by the host. The graph executor does not
-store these records by itself. Any accepted-result cache also belongs to the
-host. The runtime does not provide one.
+store these records by itself. The host can use `createProofCache` to share
+declared read-only evidence and resolve stored results against that evidence.
 
-The host must limit cached work to declared read-only inputs. Before reuse,
-it must call `resolveAcceptedResult` with the current binding and require an
-`accepted` result.
+## Read-only proof cache
+
+`createProofCache` creates a cache for one host process and one stored run.
+Its `packet(jobId)` method returns a bounded proof packet, source hashes,
+proof scope, and an immutable artifact reference. Fresh workers can receive
+the same packet from the host without reading unchanged source data again.
+
+Declare each source by ID. Its `revision()` method returns an authoritative
+content revision. Its `read(expectedRevision, maxBytes)` method returns
+complete JSON or text for that revision within the byte limit.
+The source adapter must advance its revision whenever its content changes.
+The cache checks revisions before and after capture and hashes the captured
+content. It refuses an oversized packet or a capture that races a source
+change. It does not truncate source data.
+
+Declare each proof job's source IDs, proof scope, and `read-only` or
+`effectful` mode. Only declared read-only jobs can request packets or stored
+results. The cache executes no job. The adapter's source declarations and
+revision behavior are part of the host's trusted code.
+The node's `retrySafe` setting governs crash recovery; it does not declare a
+job read-only.
+
+Concurrent packet requests share source reads. A changed source invalidates
+only packets that depend on it. Unchanged dependencies keep their captured
+content. The cache keeps the latest entry for each declared source and job.
+Restarting the host creates a cold cache. Stored proof artifacts and
+accepted-result records remain in run storage.
+
+`resolveAccepted(jobId, position, current)` derives the source hashes, proof
+scope, and artifact from the current packet. Supply the current graph,
+verified workspace anchor, and reviewer identity. Each call uses
+`resolveAcceptedResult` to check the stored completion and acceptance again.
+Read `record.result` only when the returned kind is `accepted`.
+A `wait` result requires fresh proof or a decision by the host.
+A changed binding needs a newly completed proof position; it cannot replace
+the acceptance already stored for an earlier completion.
+
+Reviewers can share evidence while retaining separate accepted answers.
+A different reviewer identity does not inherit another reviewer's result.
+The cache does not execute missing proof work or create completion records.
+
+From a checkout, run the cache example:
+
+```bash
+pnpm example:proof-cache
+```
+
+The program in `examples/packages/proof-cache.ts` checks a captured timeout
+configuration with a deterministic review node. It uses a real Git workspace
+anchor and two in-memory sources that own their revision counters.
+Two packet requests share the same artifact. Changing the configuration
+reads it again, preserves the independent policy packet, and refuses the
+stored review. The report is:
+
+```json
+{"sourceReads":{"config":2,"policy":1},"proofRuns":1,"sharedPacket":true,"reused":"accepted","changedSource":"wait","unaffectedPacket":true,"changedReviewer":"wait","effectfulRefused":true}
+```
+
+The clean-consumer check compiles and runs this program from the packed
+runtime with TypeScript 6 and TypeScript 7. It checks the report against the
+documented output.
 
 ## Approval
 

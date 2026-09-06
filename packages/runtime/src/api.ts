@@ -108,6 +108,7 @@ export {
   createProofCache,
   type CachedProofPacket,
   type ProofCache,
+  type ProofCacheCurrentBinding,
   type ProofCacheOptions,
   type ProofJob,
   type ProofPacket,

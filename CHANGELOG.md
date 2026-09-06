@@ -36,6 +36,9 @@ engine and memory packages track their own versions independently.
 - Public guides and runnable examples for installation, graphs, storage,
   memory, workspaces, callbacks, proof-bound approval, hosts, and offline
   review.
+- **Stored proof reuse:** Resolve accepted results through the host cache with
+  current evidence, graph, workspace anchor, and reviewer identity. Each lookup
+  checks the stored completion and acceptance again.
 - **Read-only proof packets:** Share bounded, immutable source evidence through
   a host cache. Check authoritative revisions, reuse unchanged source reads,
   and invalidate only dependent packets. Effectful jobs cannot use the cache.

@@ -1,4 +1,5 @@
-import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import { randomUUID } from 'node:crypto';
+import { mkdtemp, readFile, realpath, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
@@ -6,6 +7,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import * as api from '../src/api.js';
 import { canonicalJson, digestJson, type JsonValue } from '../src/graph/value.js';
+import { appendRunEvent, readRunEvents } from '../src/runtime/run-event.js';
 import { createStoredRunFixture, type StoredRunFixture } from './stored-run-fixture.js';
 
 let run: StoredRunFixture;
@@ -13,7 +15,124 @@ let directory: string;
 
 beforeEach(async () => {
   run = await createStoredRunFixture('proof-cache');
-  directory = await mkdtemp(join(tmpdir(), 'obversa-proof-sources-'));
+  directory = await realpath(await mkdtemp(join(tmpdir(), 'obversa-proof-sources-')));
+});
+
+async function completedProof() {
+  const source = await fileSource('document', { body: 'Full proof — ✓', metadata: { protected: true } });
+  const options = {
+    storage: run.storage, runId: run.runId, sources: [source],
+    proofJobs: [job('review', ['document'])], maxPacketBytes: 4096,
+  };
+  const cache = api.createProofCache(options);
+  const stored = await api.loadRunDefinition(run.storage, run.runId);
+  const graph = api.compileGraph(api.dagGraphType, stored.record.payload.definition.graphDefinition.value as api.DagDefinition);
+  const prove = vi.fn(async () => {
+    const evidence = await cache.packet('review');
+    return { checked: evidence.inputHashes.document!, passed: evidence.packet.sources.length === 1 };
+  });
+  const node: api.GraphNodeBinding = {
+    prompt: null,
+    scratchDirectory: directory,
+    workspace: { mode: 'none', directory: null, allowedPaths: [] },
+    trustedCaller: {}, permissions: [],
+    policy: {
+      inputBytes: 100_000, outputBytes: 100_000, timeoutMs: 5000, teardownGraceMs: 100,
+      memoryBytes: 100_000_000, filesChanged: 0, linesChanged: 0, callTokens: null,
+    },
+    resultContract: null, runData: prove, parseResult: null, tokenBudget: null,
+    decideAction: async () => ({ kind: 'allow' }),
+  };
+  const executor = await api.createGraphExecutor({
+    runId: run.runId, graph, storage: run.storage,
+    nodes: { 'review-a': node, 'review-b': node }, engines: [],
+  });
+  const outcome = await executor.run(new AbortController().signal);
+  expect(outcome).toMatchObject({ kind: 'complete' });
+  const position = 'dag/review-a/1';
+  const events = await readRunEvents(run.storage, run.runId);
+  const completion = events.events.find((event) => event.type === 'graph:node-completed'
+    && (event.payload as api.JsonObject).position === position)!;
+  const current = {
+    graph: { definitionDigest: graph.definition.digest, typeVersion: graph.describe().graph.typeVersion },
+    workspaceAnchor: {
+      schemaVersion: 1 as const, root: directory, repositoryId: join(directory, '.git'),
+      head: 'a'.repeat(40), fingerprint: 'b'.repeat(64), scope: null, files: [],
+    },
+    reviewerIdentity: { adapter: 'fixture', provider: 'reviewer-a', modelFamily: 'review', model: '1' },
+  };
+  const evidence = await cache.packet('review');
+  const record = await api.createAcceptedResultRecord(run.storage, run.runId, position, {
+    ...current, ...evidence, result: (completion.payload as api.JsonObject).result!,
+  });
+  return { source, options, cache, current, evidence, record, position, prove, completion };
+}
+
+describe('cached proof accepted-result resolution', () => {
+  it('reuses one real completed proof through storage without rereading unchanged payloads', async () => {
+    const proof = await completedProof();
+    const first = await proof.cache.resolveAccepted('review', proof.position, proof.current);
+    const freshReviewer = () => proof.cache.resolveAccepted('review', proof.position, { ...proof.current });
+    expect(first).toEqual({ kind: 'accepted', record: proof.record });
+    expect(await freshReviewer()).toEqual(first);
+    expect(proof.source.read).toHaveBeenCalledTimes(1);
+    expect(proof.prove).toHaveBeenCalledTimes(2);
+    const events = await readRunEvents(run.reopen(), run.runId);
+    expect(events.events.filter((event) => event.type === 'proof:result-accepted')).toHaveLength(1);
+    const reopened = api.createProofCache({ ...proof.options, storage: run.reopen() });
+    expect(await reopened.resolveAccepted('review', proof.position, proof.current)).toEqual(first);
+    expect(proof.source.read).toHaveBeenCalledTimes(2);
+  });
+
+  it('refuses changed current bindings and derives evidence instead of trusting caller-supplied old hashes', async () => {
+    const proof = await completedProof();
+    expect((await proof.cache.resolveAccepted('review', proof.position, proof.current)).kind).toBe('accepted');
+    for (const current of [
+      { ...proof.current, reviewerIdentity: { ...proof.current.reviewerIdentity, provider: 'reviewer-b' } },
+      { ...proof.current, graph: { ...proof.current.graph, definitionDigest: digestJson('different graph') } },
+      { ...proof.current, workspaceAnchor: { ...proof.current.workspaceAnchor, fingerprint: 'c'.repeat(64) } },
+    ]) {
+      expect((await proof.cache.resolveAccepted('review', proof.position, current)).kind).toBe('wait');
+    }
+    const changedScope = api.createProofCache({
+      ...proof.options, proofJobs: [{ ...job('review', ['document']), proofScope: { review: 'different scope' } }],
+    });
+    expect((await changedScope.resolveAccepted('review', proof.position, proof.current)).kind).toBe('wait');
+    await proof.source.update({ body: 'Changed proof', metadata: { protected: true } });
+    const falseBinding = { ...proof.current, ...proof.evidence };
+    expect((await proof.cache.resolveAccepted('review', proof.position, falseBinding)).kind).toBe('wait');
+  });
+
+  it.each(['accepted record', 'completion'])('checks stored %s conflicts again after an accepted hit', async (kind) => {
+    const proof = await completedProof();
+    expect((await proof.cache.resolveAccepted('review', proof.position, proof.current)).kind).toBe('accepted');
+    await appendRunEvent(run.storage, run.runId, {
+      eventId: randomUUID(), version: 1, timestamp: new Date().toISOString(),
+      correlationId: run.runId, causationId: null,
+      type: kind === 'accepted record' ? 'proof:result-accepted' : 'graph:node-completed',
+      payload: kind === 'accepted record' ? { position: proof.position, record: proof.record } : proof.completion.payload,
+    });
+    expect((await proof.cache.resolveAccepted('review', proof.position, proof.current)).kind).toBe('wait');
+    expect(proof.source.read).toHaveBeenCalledTimes(1);
+  });
+
+  it('captures current identity before waiting for a source revision', async () => {
+    const proof = await completedProof();
+    const entered = deferred();
+    const release = deferred();
+    const realRevision = proof.source.revision.getMockImplementation()!;
+    proof.source.revision.mockImplementationOnce(async () => {
+      entered.resolve();
+      await release.promise;
+      return realRevision();
+    });
+    const lookup = proof.cache.resolveAccepted('review', proof.position, proof.current);
+    await entered.promise;
+    proof.current.reviewerIdentity.provider = 'changed while waiting';
+    release.resolve();
+    expect(await lookup).toEqual({ kind: 'accepted', record: proof.record });
+    expect((await proof.cache.resolveAccepted('review', proof.position, proof.current)).kind).toBe('wait');
+  });
 });
 
 afterEach(async () => {
