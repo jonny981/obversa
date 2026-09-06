@@ -105,6 +105,16 @@ export {
   type ProofArtifactReference,
 } from './proof/artifact.js';
 export {
+  createProofCache,
+  type CachedProofPacket,
+  type ProofCache,
+  type ProofCacheOptions,
+  type ProofJob,
+  type ProofPacket,
+  type ProofPacketSource,
+  type ProofSource,
+} from './proof/cache.js';
+export {
   createGraphExecutor,
   GraphExecutionError,
   type GraphExecutionErrorCode,

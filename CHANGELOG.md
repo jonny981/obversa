@@ -36,6 +36,9 @@ engine and memory packages track their own versions independently.
 - Public guides and runnable examples for installation, graphs, storage,
   memory, workspaces, callbacks, proof-bound approval, hosts, and offline
   review.
+- **Read-only proof packets:** Share bounded, immutable source evidence through
+  a host cache. Check authoritative revisions, reuse unchanged source reads,
+  and invalidate only dependent packets. Effectful jobs cannot use the cache.
 - **Host-selected worker environment:** Accept an optional readonly
   `environmentVariables` list on start and resume. Copy only present values of
   those names from the watchdog, without storing credentials in run inputs or

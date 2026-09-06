@@ -69,6 +69,7 @@ describe('public runtime API', () => {
       'createCallbackGate',
       'createGitWorktreeProvider',
       'createGraphExecutor',
+      'createProofCache',
       'createStoredCallbackClient',
       'dag',
       'dagGraphType',
