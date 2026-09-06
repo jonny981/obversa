@@ -14,6 +14,7 @@
 
 import pRetry, { AbortError } from 'p-retry';
 import pTimeout, { TimeoutError } from 'p-timeout';
+import { isDeepStrictEqual } from 'node:util';
 import {
   EngineError,
   assistantResult,
@@ -25,6 +26,7 @@ import {
   type AgentResult,
   type Engine,
   type EngineEventSink,
+  type EngineSelectionRecord,
 } from '@obversa/engine';
 
 export interface AnthropicApiEngineOptions {
@@ -117,18 +119,60 @@ export class AnthropicApiEngine implements Engine {
 
   constructor(private readonly opts: AnthropicApiEngineOptions = {}) {}
 
+  private apiKey(): string {
+    const apiKey = this.opts.apiKey ?? process.env.ANTHROPIC_API_KEY;
+    if (!apiKey) {
+      throw new EngineError({
+        kind: 'invalid-config',
+        message:
+          'the anthropic-api engine needs an API key — set ANTHROPIC_API_KEY or pass --api-key (or use the agent-sdk / claude-cli engine, which use host Claude auth)',
+      });
+    }
+    return apiKey;
+  }
+
+  private selection(request: Pick<AgentRequest, 'model'>): EngineSelectionRecord {
+    return engineSelection({
+      adapter: 'anthropic-api',
+      provider: 'anthropic',
+      model: request.model ?? this.opts.defaultModel ?? 'claude-haiku-4-5-20251001',
+      executable: null,
+      capabilities: [],
+    });
+  }
+
+  async admit(
+    request: Omit<AgentRequest, 'prompt'>,
+    signal: AbortSignal,
+    expectedSelection?: EngineSelectionRecord,
+  ): Promise<EngineSelectionRecord> {
+    if (signal.aborted) {
+      throw new EngineError({ kind: 'aborted', message: 'anthropic-api admission aborted' });
+    }
+    this.apiKey();
+    if ((request.tools !== undefined && (!Array.isArray(request.tools) || request.tools.length > 0))
+      || (request.allowedTools !== undefined
+        && (!Array.isArray(request.allowedTools) || request.allowedTools.length > 0))) {
+      throw new EngineError({
+        kind: 'invalid-config',
+        message: 'anthropic-api admission supports text-only requests without tools',
+      });
+    }
+    let selected: EngineSelectionRecord;
+    try {
+      selected = this.selection(request);
+    } catch (cause) {
+      throw new EngineError({ kind: 'invalid-config', message: 'anthropic-api admission selection is invalid', cause });
+    }
+    if (expectedSelection !== undefined && !isDeepStrictEqual(selected, expectedSelection)) {
+      throw new EngineError({ kind: 'invalid-config', message: 'anthropic-api admission does not match the saved selection' });
+    }
+    return selected;
+  }
+
   private async client(): Promise<MessagesClientLike> {
     if (!this.clientPromise) {
-      const apiKey = this.opts.apiKey ?? process.env.ANTHROPIC_API_KEY;
-      if (!apiKey) {
-        // Fail fast with an actionable, non-retryable error instead of leaking
-        // the SDK's internal "could not resolve authentication method" message.
-        throw new EngineError({
-          kind: 'invalid-config',
-          message:
-            'the anthropic-api engine needs an API key — set ANTHROPIC_API_KEY or pass --api-key (or use the agent-sdk / claude-cli engine, which use host Claude auth)',
-        });
-      }
+      const apiKey = this.apiKey();
       this.clientPromise = import('@anthropic-ai/sdk').then(
         // One cast at the boundary to the structural shape we consume.
         (m) => new m.default({ apiKey }) as unknown as MessagesClientLike,
@@ -144,8 +188,8 @@ export class AnthropicApiEngine implements Engine {
   ): Promise<AgentResult> {
     const preflight = req.purpose === 'preflight';
     const client = await this.client();
-    const model =
-      req.model ?? this.opts.defaultModel ?? 'claude-haiku-4-5-20251001';
+    const selection = this.selection(req);
+    const model = selection.model!;
     const maxTokens = req.maxTokens ?? 1024;
     const startedAt = Date.now();
     const controller = new AbortController();
@@ -232,11 +276,6 @@ export class AnthropicApiEngine implements Engine {
       outputTokens: message.usage.output_tokens,
     });
     onEvent({ type: 'usage', usage, model });
-    const selection = engineSelection({
-      adapter: 'anthropic-api',
-      provider: 'anthropic',
-      model,
-    });
     const late =
       typeof req.timeoutMs === 'number' && Date.now() - startedAt > req.timeoutMs;
     return assistantResult({
