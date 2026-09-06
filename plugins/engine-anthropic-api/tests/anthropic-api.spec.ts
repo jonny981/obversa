@@ -1,3 +1,6 @@
+import { createServer } from 'node:http';
+
+import Anthropic from '@anthropic-ai/sdk';
 import { describe, expect, it } from 'vitest';
 
 import { AnthropicApiEngine } from '../src/index.ts';
@@ -141,4 +144,60 @@ describe('AnthropicApiEngine', () => {
     )).rejects.toMatchObject({ kind });
     expect(attempts).toBe(1);
   });
+
+  it.each([
+    ['preflight', 1],
+    [undefined, 9],
+  ] as const)('uses the declared retry behavior for purpose %s', async (purpose, expectedRequests) => {
+    let requests = 0;
+    const paths: string[] = [];
+    const server = createServer((request, response) => {
+      requests += 1;
+      paths.push(request.url ?? '');
+      request.resume();
+      response.writeHead(503, {
+        'content-type': 'application/json',
+        'retry-after-ms': '1',
+        connection: 'close',
+      });
+      response.end(JSON.stringify({
+        type: 'error',
+        error: { type: 'api_error', message: 'Scripted provider unavailable.' },
+      }));
+    });
+    await new Promise<void>((resolve, reject) => {
+      server.once('error', reject);
+      server.listen(0, '127.0.0.1', resolve);
+    });
+    try {
+      const address = server.address();
+      if (address === null || typeof address === 'string') {
+        throw new Error('The local provider did not acquire a TCP port.');
+      }
+      const engine = new AnthropicApiEngine({ apiKey: 'test-key' });
+      (engine as unknown as { clientPromise: Promise<unknown> }).clientPromise = Promise.resolve(
+        new Anthropic({
+          apiKey: 'test-key',
+          baseURL: `http://127.0.0.1:${address.port}`,
+          timeout: 1_000,
+        }),
+      );
+      await expect(engine.run({
+        prompt: 'Scripted local retry check.',
+        model: 'scripted-model',
+        timeoutMs: 8_000,
+        ...(purpose === undefined ? {} : { purpose }),
+      }, () => {}, new AbortController().signal)).rejects.toMatchObject({
+        name: 'EngineError', kind: 'transient',
+      });
+      expect(requests).toBe(expectedRequests);
+      expect(paths).toEqual(Array.from({ length: expectedRequests }, () => '/v1/messages'));
+    } finally {
+      const closed = new Promise<void>((resolve, reject) => {
+        server.close((error) => error === undefined ? resolve() : reject(error));
+      });
+      server.closeAllConnections();
+      await closed;
+    }
+  }, 15_000);
 });

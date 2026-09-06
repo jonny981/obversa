@@ -1,8 +1,9 @@
 /**
  * Engine plugin: the raw Anthropic Messages API (`@anthropic-ai/sdk`). Lowest
  * level, token-level streaming, and the cheapest path for validator models.
- * Transient 429/5xx/connection errors are retried with backoff via `p-retry`;
- * non-retryable errors abort immediately.
+ * Ordinary calls retry transient 5xx and connection failures with backoff.
+ * Preflight-purpose calls disable both retry layers. Provider limits are
+ * returned to the caller without the adapter's retry loop.
  *
  * Needs `ANTHROPIC_API_KEY` (or `EngineOptions.apiKey`). Constructed lazily by
  * the registry, so other engines work without a key present.
@@ -106,7 +107,7 @@ interface MessageStreamLike {
 }
 interface MessagesClientLike {
   messages: {
-    stream(body: unknown, opts?: { signal?: AbortSignal }): MessageStreamLike;
+    stream(body: unknown, opts?: { signal?: AbortSignal; maxRetries?: number }): MessageStreamLike;
   };
 }
 
@@ -141,6 +142,7 @@ export class AnthropicApiEngine implements Engine {
     onEvent: EngineEventSink,
     signal: AbortSignal,
   ): Promise<AgentResult> {
+    const preflight = req.purpose === 'preflight';
     const client = await this.client();
     const model =
       req.model ?? this.opts.defaultModel ?? 'claude-haiku-4-5-20251001';
@@ -160,7 +162,7 @@ export class AnthropicApiEngine implements Engine {
             system: req.system,
             messages: [{ role: 'user', content: req.prompt }],
           },
-          { signal: controller.signal },
+          { signal: controller.signal, ...(preflight ? { maxRetries: 0 } : {}) },
         );
         stream.on('text', (delta) => onEvent({ type: 'text', delta }));
         return await stream.finalMessage();
@@ -185,7 +187,7 @@ export class AnthropicApiEngine implements Engine {
     let timedOut = false;
     try {
       const pending = pRetry(attempt, {
-        retries: 2,
+        retries: preflight ? 0 : 2,
         minTimeout: 500,
         factor: 2,
       });
