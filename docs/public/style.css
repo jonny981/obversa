@@ -1,6 +1,5 @@
-/* Code in IBM Plex Mono, the mono face the site uses. Mintlify includes every .css file in the
-   content directory on every page; the fonts block in docs.json has no code entry, so the face is
-   loaded here from Google Fonts by family name and applied to code and preformatted text. */
+/* The pinned Mint font schema has heading and body settings, with no code setting.
+   Load IBM Plex Mono separately for code and preformatted text. */
 @import url("https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&display=swap");
 
 code, pre, kbd, samp, pre code {
