@@ -45,11 +45,19 @@ import {
   type RunStorageBinding,
 } from './run-definition.js';
 import type { NodeWorkspacePolicy } from './workspace-policy.js';
+import {
+  EngineIdentityUnresolvedError,
+  engineFailureExclusionKeys,
+  isEngineExcluded,
+  matchesEngineTarget,
+  type EngineExclusionKey,
+} from './engine-availability.js';
 
 export type GraphExecutionErrorCode =
   | 'ABORTED'
   | 'DUPLICATE_POSITION'
   | 'EMPTY_DECISION'
+  | 'ENGINE_IDENTITY_UNRESOLVED'
   | 'INVALID_EVENT'
   | 'MISSING_ENGINE_BINDING'
   | 'MISSING_MEMORY'
@@ -130,7 +138,7 @@ interface FoldedRun {
   readonly state: JsonValue;
   readonly dispatched: ReadonlySet<string>;
   readonly inFlight: readonly string[];
-  readonly unavailable: ReadonlySet<string>;
+  readonly unavailable: ReadonlySet<EngineExclusionKey>;
   readonly attempts: ReadonlyMap<string, FoldedAttempt>;
 }
 
@@ -228,10 +236,6 @@ function targetKey(target: ExecutionTarget): string {
   return canonicalJson(target as unknown as JsonValue);
 }
 
-function availabilityKey(selection: EngineSelectionRecord): string {
-  return canonicalJson({ provider: selection.provider, model: selection.model });
-}
-
 function assertTargetSelection(
   target: ExecutionTarget,
   selection: EngineSelectionRecord,
@@ -287,17 +291,17 @@ function validateFact(
   envelope: DomainEventEnvelope,
   runId: string,
   namespace: string,
-  plannedAvailability: ReadonlySet<string>,
+  targetsForNode: (nodeId: string) => readonly ExecutionTarget[],
 ): ModelUnavailableFact {
   if (envelope.version !== 1) {
     fail('INVALID_EVENT', 'A model-unavailable event must use version 1.');
   }
   const payload = record(envelope.payload, 'A model-unavailable payload');
-  exactFields(
-    payload,
-    ['schemaVersion', 'identity', 'selection', 'effective', 'failure'],
-    'A model-unavailable payload',
-  );
+  const hasTarget = Object.hasOwn(payload, 'target');
+  exactFields(payload, [
+    'schemaVersion', 'identity', 'selection', 'effective', 'failure',
+    ...(hasTarget ? ['target'] : []),
+  ], 'A model-unavailable payload');
   if (payload.schemaVersion !== 1) {
     fail('INVALID_EVENT', 'A model-unavailable payload must use schemaVersion 1.');
   }
@@ -307,6 +311,7 @@ function validateFact(
     runId,
     namespace,
   );
+  const targets = targetsForNode(identity.nodeId);
   let selected: EngineSelectionRecord;
   let effective: EngineSelectionRecord;
   try {
@@ -315,8 +320,16 @@ function validateFact(
   } catch (error) {
     fail('INVALID_EVENT', 'A model-unavailable engine identity is invalid.', error);
   }
-  if (!plannedAvailability.has(availabilityKey(selected))) {
-    fail('INVALID_EVENT', 'A model-unavailable event selected an engine outside the stored plan.');
+  const compatible = targets.filter((target) => matchesEngineTarget(target, selected));
+  if (compatible.length === 0) {
+    fail('INVALID_EVENT', 'A model-unavailable selection is outside its recorded node lane.');
+  }
+  let target: ExecutionTarget | undefined;
+  if (hasTarget) {
+    target = compatible.find((candidate) => targetKey(candidate) === canonicalJson(payload.target!));
+    if (target === undefined) {
+      fail('INVALID_EVENT', 'A model-unavailable target must exactly match its selected route in the recorded node lane.');
+    }
   }
   if (
     typeof payload.failure !== 'string'
@@ -330,6 +343,7 @@ function validateFact(
     selection: selected,
     effective,
     failure: payload.failure as EngineFailureKind,
+    ...(target === undefined ? {} : { target }),
   });
 }
 
@@ -437,6 +451,14 @@ export async function createGraphExecutor(
   const nodeIds = new Set(loaded.resolvedPlan.plan.nodes.map((node) => node.id));
   const nodesById = new Map(loaded.resolvedPlan.plan.nodes.map((node) => [node.id, node]));
   const lanesById = new Map(loaded.resolvedPlan.plan.executionLanes.map((lane) => [lane.id, lane]));
+  const targetsForNode = (nodeId: string): readonly ExecutionTarget[] => {
+    const node = nodesById.get(nodeId);
+    const lane = node?.laneId == null ? undefined : lanesById.get(node.laneId);
+    if (lane === undefined) {
+      fail('INVALID_EVENT', `Model availability for node "${nodeId}" needs its recorded engine lane.`);
+    }
+    return [lane.effective, ...lane.fallbacks];
+  };
   const plannedTargets = new Set<string>();
   for (const lane of loaded.resolvedPlan.plan.executionLanes) {
     for (const target of [lane.effective, ...lane.fallbacks]) {
@@ -445,7 +467,6 @@ export async function createGraphExecutor(
   }
 
   const enginesByTarget = new Map<string, GraphEngineBinding>();
-  const plannedAvailability = new Set<string>();
   for (const rawBinding of options.engines) {
     let selection: EngineSelectionRecord;
     try {
@@ -467,7 +488,6 @@ export async function createGraphExecutor(
     }
     const binding = Object.freeze({ ...rawBinding, selection });
     enginesByTarget.set(key, binding);
-    plannedAvailability.add(availabilityKey(selection));
   }
   for (const target of plannedTargets) {
     if (!enginesByTarget.has(target)) {
@@ -491,7 +511,7 @@ export async function createGraphExecutor(
       string,
       Extract<GraphCommand, { readonly kind: 'dispatch' }>
     >();
-    const unavailable = new Set<string>();
+    const unavailable = new Set<EngineExclusionKey>();
     for await (const envelope of options.storage.eventStore.read(stream)) {
       revision = envelope.revision;
       if (!envelope.type.startsWith(GRAPH_PREFIX)) continue;
@@ -503,10 +523,19 @@ export async function createGraphExecutor(
           envelope,
           options.runId,
           stream.namespace,
-          plannedAvailability,
+          targetsForNode,
         );
-        unavailable.add(availabilityKey(fact.selection));
-        unavailable.add(availabilityKey(fact.effective));
+        try {
+          for (const key of engineFailureExclusionKeys(fact, targetsForNode(fact.identity.nodeId))) {
+            unavailable.add(key);
+          }
+        } catch (error) {
+          if (error instanceof EngineIdentityUnresolvedError) {
+            fail('ENGINE_IDENTITY_UNRESOLVED',
+              `Model availability for node "${fact.identity.nodeId}" cannot be resolved: ${error.message}`, error);
+          }
+          throw error;
+        }
         continue;
       }
       if (type === 'node-attempt-started') {
@@ -677,16 +706,18 @@ export async function createGraphExecutor(
 
   const routeFor = (
     lane: ResolvedExecutionLane,
-    unavailable: ReadonlySet<string>,
+    unavailable: ReadonlySet<EngineExclusionKey>,
   ): readonly [PreparedEngineLane] | readonly [PreparedEngineLane, PreparedEngineLane] | null => {
     const live: PreparedEngineLane[] = [];
-    for (const target of [lane.effective, ...lane.fallbacks]) {
+    const declaredTargets = [lane.effective, ...lane.fallbacks];
+    for (const target of declaredTargets) {
       const binding = enginesByTarget.get(targetKey(target))!;
-      if (unavailable.has(availabilityKey(binding.selection))) continue;
+      if (isEngineExcluded(unavailable, binding.selection, target, declaredTargets)) continue;
       live.push({
         engine: binding.engine,
         selection: binding.selection,
         hardTokenLimitEnforceable: binding.hardTokenLimitEnforceable,
+        target,
       });
       if (live.length === 2) break;
     }
@@ -697,7 +728,7 @@ export async function createGraphExecutor(
 
   const prepareDispatch = (
     command: Extract<GraphCommand, { readonly kind: 'dispatch' }>,
-    unavailable: ReadonlySet<string>,
+    unavailable: ReadonlySet<EngineExclusionKey>,
   ): PreparedDispatch => {
     const node = nodesById.get(command.nodeId);
     const binding = options.nodes[command.nodeId];
@@ -776,6 +807,7 @@ export async function createGraphExecutor(
       runData: binding.runData,
       parseResult: binding.parseResult,
       tokenBudget: binding.tokenBudget,
+      declaredTargets: route === null ? [] : targetsForNode(command.nodeId),
       recordModelUnavailable: async (fact) => {
         await enqueueAppend(newEvent(
           options.runId,
