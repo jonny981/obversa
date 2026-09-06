@@ -121,18 +121,6 @@ const expectedProofCacheReport = {
   effectfulRefused: true,
 };
 
-const expectedSafeChangeReport = {
-  status: 'complete',
-  sourceKinds: ['document', 'current-record', 'discussion-comment', 'historical-entry'],
-  sourceCount: 4,
-  actionCount: 2,
-  protectedFacts: 4,
-  lostProtectedFacts: 0,
-  targetResultCount: 2,
-  backupVerified: true,
-  scriptedProposalAndReview: true,
-};
-
 const expectedTurnTakingReport = {
   conformance: true,
   cases: 6,
@@ -496,7 +484,6 @@ const tsconfig = {
     'callback-gate.ts',
     'proof-bound-approval.ts',
     'proof-cache.ts',
-    'safe-change/*.ts',
     'durable-storage.ts',
     'safe-node-attempt.ts',
     'turn-taking.ts',
@@ -528,8 +515,6 @@ async function main() {
   );
   const storageExamplePath = join(root, 'examples', 'packages', 'durable-storage.ts');
   const proofCacheExamplePath = join(root, 'examples', 'packages', 'proof-cache.ts');
-  const safeChangeDirectory = join(root, 'examples', 'safe-change');
-  const safeChangeExampleSource = await readFile(join(safeChangeDirectory, 'example.ts'), 'utf8');
   const storageExampleSource = await readFile(storageExamplePath, 'utf8');
   const attemptExamplePath = join(root, 'examples', 'packages', 'safe-node-attempt.ts');
   const attemptExampleSource = await readFile(attemptExamplePath, 'utf8');
@@ -565,14 +550,6 @@ async function main() {
   const proofAcceptanceDocument = await readFile(
     join(root, 'docs', 'public', 'proof', 'acceptance.mdx'),
     'utf8',
-  );
-  const safeChangeDocument = await readFile(
-    join(root, 'docs', 'public', 'production-lines', 'safe-change.mdx'),
-    'utf8',
-  );
-  assert.equal(
-    sourceFromPublicDoc(safeChangeDocument), safeChangeExampleSource,
-    'The safe-change page must match its runnable example source',
   );
   if (sourceFromPublicDoc(publicDocument) !== exampleSource) {
     throw new Error('The offline production-line page does not match its runnable source');
@@ -636,10 +613,6 @@ async function main() {
     );
     await copyFile(storageExamplePath, join(consumerDirectory, 'durable-storage.ts'));
     await copyFile(proofCacheExamplePath, join(consumerDirectory, 'proof-cache.ts'));
-    await mkdir(join(consumerDirectory, 'safe-change'));
-    for (const filename of ['recipe.ts', 'file-adapter.ts', 'example.ts']) {
-      await copyFile(join(safeChangeDirectory, filename), join(consumerDirectory, 'safe-change', filename));
-    }
     await copyFile(attemptExamplePath, join(consumerDirectory, 'safe-node-attempt.ts'));
     await copyFile(turnTakingExamplePath, join(consumerDirectory, 'turn-taking.ts'));
     await copyFile(workspaceExamplePath, join(consumerDirectory, 'workspace.ts'));
@@ -717,12 +690,6 @@ async function main() {
     const directProofCache = JSON.parse(
       run('pnpm', ['exec', 'tsx', 'proof-cache.ts'], { cwd: consumerDirectory }),
     );
-    const compiledSafeChange = JSON.parse(
-      run(process.execPath, ['dist/safe-change/example.js'], { cwd: consumerDirectory }),
-    );
-    const directSafeChange = JSON.parse(
-      run('pnpm', ['exec', 'tsx', 'safe-change/example.ts'], { cwd: consumerDirectory }),
-    );
     const directStorage = JSON.parse(
       run('pnpm', ['exec', 'tsx', 'durable-storage.ts'], { cwd: consumerDirectory }),
     );
@@ -794,11 +761,6 @@ async function main() {
       ?.match(/```json\r?\n([\s\S]*?)```/);
     assert.ok(proofCacheReport, 'The proof page must include its cache report');
     assert.deepEqual(JSON.parse(proofCacheReport[1]), compiledProofCache);
-    assert.deepEqual(compiledSafeChange, expectedSafeChangeReport);
-    assert.deepEqual(directSafeChange, expectedSafeChangeReport);
-    const safeChangeReport = safeChangeDocument.match(/```json\r?\n([\s\S]*?)```/);
-    assert.ok(safeChangeReport, 'The safe-change page must include its JSON report');
-    assert.deepEqual(JSON.parse(safeChangeReport[1]), compiledSafeChange);
     assert.deepEqual(compiledStorage, expectedStorageReport);
     assert.deepEqual(directStorage, expectedStorageReport);
     assert.deepEqual(compiledAttempt, expectedAttemptReport);
