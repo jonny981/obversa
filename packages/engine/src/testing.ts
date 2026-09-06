@@ -20,11 +20,14 @@ import {
 
 export {
   assertEngineConformance,
+  runEngineAdmissionConformance,
   runEngineConformance,
   type EngineConformanceFailure,
   type EngineConformanceFixture,
   type EngineConformanceReport,
   type EngineConformanceScenario,
+  type EngineAdmissionConformanceFixture,
+  type EngineAdmissionConformanceReport,
 } from './conformance.js';
 
 export type MockResponder = (
