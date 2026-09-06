@@ -19,6 +19,10 @@ import {
 } from './supervised-record.js';
 import { readSupervisedRunStatus, type SupervisedRunStatus } from './supervised-status.js';
 
+const DEFAULT_WORKER_ENVIRONMENT_VARIABLES = [
+  'PATH', 'HOME', 'TMPDIR', 'TMP', 'TEMP', 'SystemRoot', 'USERPROFILE', 'PATHEXT',
+] as const;
+
 export type SupervisedRunBindings = Omit<GraphExecutorOptions, 'runId' | 'storage'>;
 type PersistRunDefinitionInput = Parameters<typeof persistRunDefinition>[1];
 
@@ -317,7 +321,7 @@ async function superviseRun(options: SupervisedRunOptions, resume?: {
           ...(resumeInput === undefined ? {} : { resume: resumeInput }),
         };
         const workerEnvironment: Record<string, string> = {};
-        for (const name of ['PATH', 'HOME', 'TMPDIR', 'TMP', 'TEMP', 'SystemRoot', 'USERPROFILE', 'PATHEXT', ...options.environmentVariables ?? []]) {
+        for (const name of [...DEFAULT_WORKER_ENVIRONMENT_VARIABLES, ...options.environmentVariables ?? []]) {
           const value = process.env[name];
           if (value !== undefined) workerEnvironment[name] = value;
         }

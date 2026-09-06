@@ -25,6 +25,13 @@ if (identity === undefined) throw new SupervisedRunError('PROCESS_INSPECTION', '
 await append('worker-started', { process: identity });
 try {
   const loaded = await loadRunDefinition(storage, input.runId);
+  const requestedPause = input.resume === undefined ? undefined
+    : await readGraphPosition(storage, input.runId, input.resume.position);
+  if (input.resume !== undefined && requestedPause?.type === 'graph:node-paused'
+    && requestedPause.eventId !== input.resume.pauseEventId) {
+    throw new SupervisedRunError('RESUME_EVENT_MISMATCH',
+      `Resume expected pause event "${input.resume.pauseEventId}" but found "${requestedPause.eventId}".`);
+  }
   if (loaded.hostBindingBytes === null) {
     throw new SupervisedRunError('HOST_MODULE', 'The run has no stored host module.');
   }
@@ -79,17 +86,13 @@ try {
     storage: { ...storage, eventStore }, runId: input.runId,
   });
   const signal = new AbortController().signal;
-  const requestedPause = input.resume === undefined ? undefined
-    : await readGraphPosition(storage, input.runId, input.resume.position);
-  let result = input.resume !== undefined && requestedPause?.type === 'graph:node-paused'
-    && requestedPause.eventId !== input.resume.pauseEventId
-    ? {
-      kind: 'pause' as const, code: 'RESUME_EVENT_MISMATCH' as const,
-      reason: `Resume expected pause event "${input.resume.pauseEventId}" but found "${requestedPause.eventId}".`,
-    }
-    : input.resume !== undefined && requestedPause?.type === 'graph:node-paused'
-    && requestedPause.eventId === input.resume.pauseEventId
-    ? await executor.resume(input.resume.position, signal) : await executor.run(signal);
+  let result: Awaited<ReturnType<typeof executor.run>>;
+  if (input.resume !== undefined && requestedPause?.type === 'graph:node-paused'
+    && requestedPause.eventId === input.resume.pauseEventId) {
+    result = await executor.resume(input.resume.position, signal);
+  } else {
+    result = await executor.run(signal);
+  }
   while (result.kind === 'waiting') {
     const position = result.positions[0];
     if (position === undefined) throw new SupervisedRunError('WORKER_PROTOCOL', 'The executor is waiting without an unfinished position.');
@@ -103,11 +106,13 @@ try {
     }),
   } : { ...result });
 } catch (error) {
-  await append('worker-result', {
-    kind: 'fail',
-    code: error instanceof SupervisedRunError ? error.code : 'WORKER_ERROR',
-    message: error instanceof Error ? error.message : 'The worker failed.',
-  });
+  await append('worker-result', error instanceof SupervisedRunError && error.code === 'RESUME_EVENT_MISMATCH'
+    ? { kind: 'pause', code: error.code, reason: error.message }
+    : {
+      kind: 'fail',
+      code: error instanceof SupervisedRunError ? error.code : 'WORKER_ERROR',
+      message: error instanceof Error ? error.message : 'The worker failed.',
+    });
 }
 // The watchdog owns teardown. A host's open handles must not delay it after
 // the worker has durably recorded its result.

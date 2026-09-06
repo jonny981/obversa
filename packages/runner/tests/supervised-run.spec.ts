@@ -1266,6 +1266,12 @@ process.stdout.write(JSON.stringify(await handle.done));
           const pid = Number(((event.payload as runtime.JsonObject).process as runtime.JsonObject).pid);
           expect(() => process.kill(pid, 0)).toThrow();
         }
+        const workerStarted = records.findLast((event) => event.type === 'runner:worker-started')!;
+        const mismatchPid = Number(((workerStarted.payload as runtime.JsonObject).process as runtime.JsonObject).pid);
+        const evaluatedPids = (await readFile(join(options.runRoot, 'module-evaluations.log'), 'utf8')).trim().split('\n').map(Number);
+        expect(evaluatedPids).not.toContain(mismatchPid);
+        expect(records.filter((event) => event.revision > workerStarted.revision)
+          .some((event) => event.type === 'runner:bound')).toBe(false);
         const explicitResume = await resumeFixture(paused);
         await expect(explicitResume.done).resolves.toMatchObject({ kind: 'complete' });
         expect((await readFile(join(options.directory, 'scratch/first.started'), 'utf8')).trim().split('\n')).toHaveLength(1);
