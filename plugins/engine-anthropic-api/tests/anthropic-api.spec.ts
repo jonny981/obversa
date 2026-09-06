@@ -109,4 +109,36 @@ describe('AnthropicApiEngine', () => {
 
     expect(result.transportFailure).toMatchObject({ kind: 'timeout' });
   });
+
+  it.each([
+    ['ambiguous quota', new Error('quota allowance reached'), 'rate-limit'],
+    ['ambiguous usage', new Error('usage limit reached'), 'rate-limit'],
+    ['monthly usage', new Error('monthly usage limit reached'), 'quota'],
+    ['historical billing tag', Object.assign(new Error('payment required'), {
+      type: 'billing_error',
+    }), 'quota'],
+  ] as const)('classifies scripted API %s without an ordinary retry', async (_label, error, kind) => {
+    let attempts = 0;
+    const engine = new AnthropicApiEngine({ apiKey: 'test-key' });
+    (engine as unknown as {
+      clientPromise: Promise<{
+        messages: {
+          stream: () => { on: () => void; finalMessage: () => Promise<never> };
+        };
+      }>;
+    }).clientPromise = Promise.resolve({
+      messages: {
+        stream: () => {
+          attempts += 1;
+          return { on: () => {}, finalMessage: async () => { throw error; } };
+        },
+      },
+    });
+    await expect(engine.run(
+      { prompt: 'scripted API limit', timeoutMs: 10_000 },
+      () => {},
+      new AbortController().signal,
+    )).rejects.toMatchObject({ kind });
+    expect(attempts).toBe(1);
+  });
 });

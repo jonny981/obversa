@@ -1200,6 +1200,10 @@ describe('OpenCode CLI adapter', () => {
       ['model-unavailable', 'model-unavailable'],
       ['rate-limit', 'rate-limit'],
       ['quota', 'quota'],
+      ['ambiguous-403', 'rate-limit'],
+      ['ambiguous-429', 'rate-limit'],
+      ['monthly-429', 'quota'],
+      ['user-limit-401', 'rate-limit'],
       ['transient', 'transient'],
       ['invalid-config', 'invalid-config'],
     ] as const) {
@@ -1232,6 +1236,20 @@ describe('OpenCode CLI adapter', () => {
       kind: 'quota',
       resetAt: 1_777_777_999_000,
     });
+  });
+
+  it('preserves the reset hint on ambiguous quota text', async () => {
+    let error: unknown;
+    try {
+      await new OpenCodeCliEngine({
+        ...options(),
+        environment: { OBVERSA_TEST_OPENCODE_SCENARIO: 'ambiguous-403' },
+      }).run(request(), () => {}, new AbortController().signal);
+    } catch (caught) {
+      error = caught;
+    }
+    expect(error).toBeInstanceOf(EngineError);
+    expect(error).toMatchObject({ kind: 'rate-limit', resetAt: 1_777_777_999_000 });
   });
 
   it('passes the public engine conformance kit', async () => {

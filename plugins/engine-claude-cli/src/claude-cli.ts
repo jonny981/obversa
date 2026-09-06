@@ -8,6 +8,7 @@ import {
   CLAUDE_SUBAGENT_TOOLS,
   EngineError,
   attemptEnvironment,
+  classifyEngineFailure,
   engineSelection,
   mapMessage,
   newAccumulator,
@@ -49,41 +50,23 @@ function modelFor(
 }
 
 /**
- * Classify a failed `claude` subprocess into a typed provider limit, or
- * return `undefined` to fall through to the generic ENGINE/TIMEOUT mapping. The
- * CLI has no structured limit channel on a hard failure, so we read its
- * (already-redacted) output text:
- *   - a usage/quota limit ("usage limit reached", "out of credits") → QUOTA.
- *     A reset time, when the message states one (epoch seconds or an absolute
- *     time the CLI prints), makes it auto-waitable; otherwise QUOTA has no
- *     reset and the run policy waits or pauses.
- *   - a plain "rate limit" → RATE_LIMIT (resets on its own).
- * Order matters: usage/quota is checked first so a usage message that also
- * contains the words "rate limit" is not mis-tagged as a transient throttle.
- *
- * Exported for unit testing without spawning a subprocess (mirrors
- * `buildClaudeArgs`).
+ * Classify redacted CLI failure text as a provider limit. Billing keeps the
+ * historical quota kind. Ambiguous usage/session/quota text is rate-limit;
+ * a parsed reset is retained without deciding the allowance duration.
+ * Unrelated failures return undefined for the existing generic error path.
  */
 export function classifyCliLimit(text: string): EngineError | undefined {
-  const lower = text.toLowerCase();
-  const isUsage =
-    /usage limit|session limit|out of credits|insufficient credits|quota|billing/.test(
-      lower,
-    );
-  const isRate = /rate limit|rate-limit|too many requests|429/.test(lower);
-  if (!isUsage && !isRate) return undefined;
-
-  const resetAt = parseResetAt(text);
-  if (isUsage) {
-    return new EngineError({
-      kind: 'quota',
-      message: `claude usage limit: ${text}`,
-      resetAt,
-    });
+  const classified = classifyEngineFailure(new Error(text));
+  if (classified !== 'billing' && classified !== 'quota' && classified !== 'rate-limit') {
+    return undefined;
   }
+  const kind = classified === 'billing' ? 'quota' : classified;
+  const resetAt = parseResetAt(text);
   return new EngineError({
-    kind: 'rate-limit',
-    message: `claude rate limited: ${text}`,
+    kind,
+    message: kind === 'quota'
+      ? `claude usage limit: ${text}`
+      : `claude rate limited: ${text}`,
     resetAt,
   });
 }

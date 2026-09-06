@@ -3,6 +3,7 @@ import {
   chmodSync,
   mkdtempSync,
   readFileSync,
+  rmSync,
   writeFileSync,
 } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -245,6 +246,30 @@ process.exit(1);
     expect((error as Error).message).toContain('Supported values');
     expect((error as Error).message).toContain('[redacted]');
     expect((error as Error).message).not.toContain(secret);
+  });
+
+  it.each([
+    ['quota allowance reached', 'rate-limit'],
+    ["You've hit your session limit", 'rate-limit'],
+    ['monthly usage limit reached', 'quota'],
+    ['402 payment required: exhausted credit balance', 'billing'],
+  ] as const)('classifies scripted failed-process text: %s', async (text, kind) => {
+    const directory = mkdtempSync(join(tmpdir(), 'lines-codex-limit-'));
+    const executable = join(directory, 'codex-fixture.mjs');
+    try {
+      writeFileSync(
+        executable,
+        `#!/usr/bin/env node\nprocess.stderr.write(${JSON.stringify(`${text}\n`)});\nprocess.exit(1);\n`,
+      );
+      chmodSync(executable, 0o755);
+      await expect(new CodexEngine({ cliBinary: executable }).run(
+        { prompt: 'scripted limit check' },
+        () => {},
+        new AbortController().signal,
+      )).rejects.toMatchObject({ name: 'EngineError', kind });
+    } finally {
+      rmSync(directory, { recursive: true, force: true });
+    }
   });
 
 });

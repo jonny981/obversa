@@ -128,63 +128,45 @@ async function createAgentSdkMemoryServer(memory: Memory) {
 }
 
 /**
- * Best-effort classification of an Agent SDK error into a provider-limit
- * `EngineError`, or `undefined` to fall through to the generic mapping.
- * The SDK exposes limit state in a few shapes (a thrown error message, an
- * `error` field carrying an `SDKAssistantMessageError` string, and a
- * `rate_limit_info.resetsAt` epoch). We read defensively rather than depend on
- * an exact internal shape:
- *   - a rate-limit / overloaded signal → RATE_LIMIT (resets on its own).
- *   - a billing / usage / credits signal → QUOTA. A `resetsAt` (when present)
- *     makes it auto-waitable; otherwise QUOTA has no reset.
+ * Classify untyped SDK limit inputs while retaining supplied reset hints.
+ * Known billing tags keep the historical quota kind. Ambiguous text uses the
+ * shared rate-limit rule. Typed EngineError values stay on run's existing
+ * branch, including its observed-model and incomplete-evidence handling.
  */
 function classifySdkLimit(
   error: unknown,
   env?: Record<string, string>,
 ): EngineError | undefined {
+  if (error instanceof EngineError) return undefined;
   const err = (error ?? {}) as Record<string, unknown>;
   const tag = typeof err.error === 'string' ? err.error : '';
-  // The SDK's message shapes are outside this repo's control and the request's
-  // env was handed to its subprocess, so scrub like the sibling CLI engines do.
   const message = scrubCapture(
     error instanceof Error ? error.message : String(error),
     env,
   );
-  const haystack = `${tag} ${message}`.toLowerCase();
-
   const info = (err.rate_limit_info ?? {}) as Record<string, unknown>;
-  const resetAt =
-    typeof info.resetsAt === 'number'
-      ? info.resetsAt
-      : typeof info.overageResetsAt === 'number'
-        ? info.overageResetsAt
-        : undefined;
-
-  const isUsage =
-    tag === 'billing_error' ||
-    info.errorCode === 'credits_required' ||
-    /billing|credit|usage limit|quota/.test(haystack);
-  if (isUsage) {
-    return new EngineError({
-      kind: 'quota',
-      message: `agent-sdk usage/billing limit: ${message}`,
-      cause: error,
-      resetAt,
-    });
+  const resetAt = typeof info.resetsAt === 'number'
+    ? info.resetsAt
+    : typeof info.overageResetsAt === 'number'
+      ? info.overageResetsAt
+      : undefined;
+  const classified = tag === 'billing_error' || info.errorCode === 'credits_required'
+    ? 'quota'
+    : tag === 'rate_limit' || tag === 'overloaded'
+      ? 'rate-limit'
+      : classifyEngineFailure(error);
+  if (classified !== 'billing' && classified !== 'quota' && classified !== 'rate-limit') {
+    return undefined;
   }
-  const isRate =
-    tag === 'rate_limit' ||
-    tag === 'overloaded' ||
-    /rate limit|rate-limit|too many requests|overloaded/.test(haystack);
-  if (isRate) {
-    return new EngineError({
-      kind: 'rate-limit',
-      message: `agent-sdk rate limited: ${message}`,
-      cause: error,
-      resetAt,
-    });
-  }
-  return undefined;
+  const kind = classified === 'billing' ? 'quota' : classified;
+  return new EngineError({
+    kind,
+    message: kind === 'quota'
+      ? `agent-sdk usage/billing limit: ${message}`
+      : `agent-sdk rate limited: ${message}`,
+    cause: error,
+    resetAt,
+  });
 }
 
 export function agentSdkSystemPrompt(

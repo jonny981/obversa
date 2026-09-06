@@ -735,6 +735,18 @@ describe('Grok CLI adapter', () => {
     });
   });
 
+  it.each([
+    ['quota', 'quota'],
+    ['ambiguous-limit', 'rate-limit'],
+  ] as const)('classifies scripted %s through the process adapter', async (scenario, kind) => {
+    await expect(new GrokCliEngine({
+      ...options(),
+      environment: { OBVERSA_TEST_GROK_SCENARIO: scenario },
+    }).run(request(), () => {}, new AbortController().signal)).rejects.toMatchObject({
+      name: 'EngineError', kind,
+    });
+  });
+
   it('passes the public engine conformance kit through the real process adapter', async () => {
     const bin = executable();
     const report = await runEngineConformance({

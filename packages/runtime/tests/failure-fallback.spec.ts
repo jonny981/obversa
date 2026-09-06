@@ -49,12 +49,12 @@ describe('classifyEngineFailure', () => {
     expect(classifyEngineFailure(enoent)).toBe('missing-cli');
   });
 
-  it('keeps lane-dead separate from limits', () => {
+  it('treats quota as lasting and rate limits as temporary', () => {
     expect(LANE_DEAD_FAILURES.has('auth')).toBe(true);
     expect(LANE_DEAD_FAILURES.has('missing-cli')).toBe(true);
     expect(LANE_DEAD_FAILURES.has('invalid-config')).toBe(true);
     expect(LANE_DEAD_FAILURES.has('rate-limit')).toBe(false);
-    expect(LANE_DEAD_FAILURES.has('quota')).toBe(false);
+    expect(LANE_DEAD_FAILURES.has('quota')).toBe(true);
     expect(LANE_DEAD_FAILURES.has('transient')).toBe(false);
   });
 });
@@ -109,14 +109,31 @@ describe('fallbackEngine', () => {
     });
   });
 
-  it('opts into quota-hopping when asked', async () => {
+  it('falls back on quota by default and keeps the exhausted engine skipped', async () => {
+    let exhaustedCalls = 0;
     const outOfQuota = engineThat('quota', async () => {
+      exhaustedCalls += 1;
       throw new LoopError({ code: 'QUOTA', message: 'usage limit' });
     });
     const live = engineThat('live', async () => 'hopped');
-    const engine = fallbackEngine([outOfQuota, live], { on: ['quota'] });
-    const result = await engine.run(req, () => {}, signal);
-    expect(finalResultText(result)).toBe('hopped');
+    const engine = fallbackEngine([outOfQuota, live]);
+    expect(finalResultText(await engine.run(req, () => {}, signal))).toBe('hopped');
+    expect(finalResultText(await engine.run(req, () => {}, signal))).toBe('hopped');
+    expect(exhaustedCalls).toBe(1);
+  });
+
+  it('keeps an explicit fallback trigger override authoritative', async () => {
+    let fallbackCalls = 0;
+    const outOfQuota = engineThat('quota', async () => {
+      throw new LoopError({ code: 'QUOTA', message: 'usage limit' });
+    });
+    const live = engineThat('live', async () => {
+      fallbackCalls += 1;
+      return 'not reached';
+    });
+    const engine = fallbackEngine([outOfQuota, live], { on: ['auth'] });
+    await expect(engine.run(req, () => {}, signal)).rejects.toMatchObject({ code: 'QUOTA' });
+    expect(fallbackCalls).toBe(0);
   });
 
   it('fails with the last lane error when every lane is dead', async () => {

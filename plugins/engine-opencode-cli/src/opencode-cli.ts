@@ -959,7 +959,8 @@ function nativeFailure(raw: JsonObject): EngineFailureKind {
     if (/CreditsError|no payment|insufficient balance/iu.test(responseBody)) {
       return 'billing';
     }
-    if (/MonthlyLimitError|UserLimitError/iu.test(responseBody)) return 'quota';
+    if (/MonthlyLimitError/iu.test(responseBody)) return 'quota';
+    if (/UserLimitError/iu.test(responseBody)) return 'rate-limit';
     if (/ModelError/iu.test(responseBody)) return 'model-unavailable';
   }
   if (status === 401) return 'auth';
@@ -968,15 +969,11 @@ function nativeFailure(raw: JsonObject): EngineFailureKind {
   if (status === 404) return 'model-unavailable';
   if (status === 408) return 'timeout';
   if (status === 429) {
-    if (
-      /credit balance|insufficient funds|out of credits|exhausted credit/iu
-        .test(detail)
-    ) {
+    if (/credit balance|insufficient funds|out of credits|exhausted credit/iu.test(detail)) {
       return 'billing';
     }
-    return /quota|allowance|session limit|usage limit/iu.test(detail)
-      ? 'quota'
-      : 'rate-limit';
+    const classified = classifyEngineFailure(new Error(detail));
+    return classified === 'billing' || classified === 'quota' ? classified : 'rate-limit';
   }
   if (status !== undefined && status >= 500) return 'transient';
   return classifyEngineFailure(new Error(detail));

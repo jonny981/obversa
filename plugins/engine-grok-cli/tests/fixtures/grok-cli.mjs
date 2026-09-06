@@ -103,6 +103,10 @@ if (scenario === 'rate-limit') {
   process.exit(1);
 }
 if (scenario === 'quota') {
+  process.stderr.write('monthly usage limit reached\n');
+  process.exit(1);
+}
+if (scenario === 'ambiguous-limit') {
   process.stderr.write('quota allowance reached\n');
   process.exit(1);
 }

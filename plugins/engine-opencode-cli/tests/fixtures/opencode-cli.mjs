@@ -182,6 +182,32 @@ if (scenario === 'quota-401') {
   });
   process.exit(1);
 }
+if (scenario === 'ambiguous-403') {
+  emit('error', {
+    error: apiError('quota allowance reached', 403, false, {
+      responseHeaders: { 'x-ratelimit-reset': '1777777999' },
+    }),
+  });
+  process.exit(1);
+}
+if (scenario === 'ambiguous-429') {
+  emit('error', { error: apiError('429 usage limit reached', 429, true) });
+  process.exit(1);
+}
+if (scenario === 'monthly-429') {
+  emit('error', { error: apiError('monthly quota exhausted', 429, true) });
+  process.exit(1);
+}
+if (scenario === 'user-limit-401') {
+  emit('error', {
+    error: apiError('OpenCode provider request failed', 401, false, {
+      responseBody: JSON.stringify({
+        error: { name: 'UserLimitError', message: 'User limit reached' },
+      }),
+    }),
+  });
+  process.exit(1);
+}
 if (scenario === 'model-401') {
   emit('error', {
     error: apiError('OpenCode provider request failed', 401, false, {
@@ -202,7 +228,7 @@ if (scenario === 'rate-limit') {
 }
 if (scenario === 'quota') {
   emit('error', {
-    error: apiError('quota allowance reached', 403, false, {
+    error: apiError('monthly usage limit reached', 403, false, {
       responseHeaders: { 'x-ratelimit-reset': '1777777999' },
     }),
   });

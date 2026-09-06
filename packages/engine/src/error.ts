@@ -1,16 +1,11 @@
 /**
- * A canonical vocabulary for *why* an engine turn failed, shared by the
- * fallback chain and preflight so they agree on what "this lane is dead"
- * means. Classification is deterministic — typed engine failures first, then
- * compatible runtime codes, spawn errnos, and substring rules
- * over the message, in the supervisor-orchestrator tradition.
+ * Shared engine failure classification. Typed engine failures and compatible
+ * runtime codes take priority over process errors and message text.
  *
- * The load-bearing split: some failures are **lane-dead** — they will not
- * heal within a run, however long you wait (a missing binary, a bad key, an
- * empty balance, an unknown model, invalid configuration). Those are what a
- * fallback chain should reroute around. Rate limits, quotas, and transient
- * provider failures are different: they heal or pause, so the fallback chain
- * leaves them alone by default.
+ * Default fallback treats auth, billing, missing executables, unavailable
+ * models, invalid configuration and exhausted long allowances as lasting for
+ * the run. Ambiguous limit wording is rate-limit, not evidence of quota.
+ * Rate limits and transient failures remain outside the default lasting set.
  */
 
 import type {
@@ -63,14 +58,14 @@ export class EngineIncompleteResultError extends EngineError {
   }
 }
 
-/** Failures that will not heal within a run: what a fallback chain reroutes
- *  around, and what preflight exists to catch before iteration 1. */
+/** Failures that default fallback treats as lasting for the run. */
 export const LANE_DEAD_FAILURES: ReadonlySet<EngineFailureKind> = new Set([
   'auth',
   'billing',
   'missing-cli',
   'model-unavailable',
   'invalid-config',
+  'quota',
 ]);
 
 interface Rule {
@@ -91,8 +86,8 @@ const MESSAGE_RULES: Rule[] = [
   { kind: 'auth', pattern: /not authenticated|unauthorized|invalid (api |x-)?key|authentication[_ ](error|failed)|expired.*(token|credentials)|login|401/ },
   { kind: 'missing-cli', pattern: /enoent|command not found|not recognized as an internal|no such file or directory.*(claude|codex)/ },
   { kind: 'model-unavailable', pattern: /model.*(not found|unavailable|does not exist|unknown)|unknown model|no such model|404/ },
-  { kind: 'quota', pattern: /quota|allowance|usage limit|session limit|out of.*credits/ },
-  { kind: 'rate-limit', pattern: /rate.?limit|too many requests|overloaded|429|529/ },
+  { kind: 'quota', pattern: /\bmonthly (?:usage limit|quota|allowance)\b|out of.*credits|\binsufficient credits\b/ },
+  { kind: 'rate-limit', pattern: /rate.?limit|too many requests|overloaded|429|529|quota|allowance|usage limit|session limit/ },
   { kind: 'timeout', pattern: /\btim(ed?)?.?out\b|deadline exceeded/ },
   { kind: 'transient', pattern: /internal server error|bad gateway|service unavailable|gateway timeout|\b5\d\d\b/ },
 ];
