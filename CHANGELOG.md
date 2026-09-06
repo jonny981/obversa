@@ -37,6 +37,8 @@ engine and memory packages track their own versions independently.
 
 ### Fixed
 
+- **Release check errors:** Name a missing runtime manifest consistently in
+  the changelog and publish checks.
 - **Package archives:** Check the number of hashed chunks and use literal
   filenames for exports and source-map reads. Report a missing file once when
   it is listed as both a pinned file and an export. Resolve workspace packages

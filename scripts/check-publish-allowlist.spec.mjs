@@ -208,6 +208,11 @@ test("the hook refuses with a message when the runtime manifest is absent", () =
     assert.deepEqual(checkHook({ cwd, env: { OBVERSA_RELEASE: "1" }, allowlist: new Set(["@x/p"]) }), [
       "refusing to publish @x/p: packages/runtime/package.json is missing",
     ]);
+    const changelog = spawnSync(process.execPath, [new URL("./changelog-gate.mjs", import.meta.url).pathname], {
+      cwd: root, encoding: "utf8",
+    });
+    assert.equal(changelog.status, 1, changelog.stdout);
+    assert.equal(changelog.stderr.trim(), "changelog gate: packages/runtime/package.json is missing");
   } finally {
     rmSync(root, { recursive: true, force: true });
   }
