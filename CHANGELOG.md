@@ -37,6 +37,10 @@ engine and memory packages track their own versions independently.
 
 ### Fixed
 
+- **Package archives:** Check the number of hashed chunks and use literal
+  filenames for exports and source-map reads. Report a missing file once when
+  it is listed as both a pinned file and an export. Resolve workspace packages
+  when packing starts instead of when the checker is imported.
 - **Scripted engine receipts:** Keep typed `INVALID_ENGINE_RECEIPT` records in
   the review-loop status when a receipt fails a version, lane, active position, or
   sequence check. Rejected receipts do not change accepted identities or quorum.

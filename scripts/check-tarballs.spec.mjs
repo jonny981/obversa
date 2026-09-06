@@ -10,7 +10,7 @@ import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import test from "node:test";
 
-import { allowlistedDirectories, checkTarball } from "./check-tarballs.mjs";
+import { allowlistedDirectories, checkTarball, EXPECTED_FILES } from "./check-tarballs.mjs";
 import { assertPackedPackage } from "./check-packages.mjs";
 
 const fixture = realpathSync(mkdtempSync(join(tmpdir(), "obversa-tarball-spec-")));
@@ -193,4 +193,58 @@ test("the packed archive checker reports a missing LICENSE once", () => {
     () => assertPackedPackage({ name: "@obversa/memory-simple", version: "0.1.0" }, join(root, "obversa-memory-simple-0.1.0.tgz")),
     { message: "@obversa/memory-simple archive is invalid:\n- missing LICENSE" },
   );
+});
+
+function packedFixture(name, { missing = [], extraChunks = 0, exportTarget = "./dist/index.js" } = {}) {
+  const directory = join(fixture, name);
+  const files = EXPECTED_FILES['@obversa/runner'].filter((path) => !missing.includes(path))
+    .map((path) => path.replace('chunk-*', 'chunk-AAAAAAAA'));
+  for (let index = 0; index < extraChunks; index += 1) {
+    files.push(`package/dist/chunk-${String(index).padStart(8, 'B')}.js`);
+  }
+  for (const file of files) {
+    mkdirSync(dirname(join(directory, file)), { recursive: true });
+    writeFileSync(join(directory, file), file === 'package/package.json' ? JSON.stringify({
+      name: '@obversa/runner', version: '0.1.0', publishConfig: { access: 'public' },
+      exports: { '.': { types: './dist/index.d.ts', import: exportTarget } },
+    }) : file.endsWith('.map') ? '{}' : 'fixture\n');
+  }
+  const archive = join(fixture, `${name}.tgz`);
+  const packed = spawnSync('tar', ['-czf', archive, '-C', directory, ...files], { encoding: 'utf8' });
+  assert.equal(packed.status, 0, packed.stderr);
+  return archive;
+}
+
+test('the packed archive checker rejects an extra hashed chunk', () => {
+  assert.equal(assertPackedPackage({ name: '@obversa/runner', version: '0.1.0' }, packedFixture('one-hashed-chunk')), EXPECTED_FILES['@obversa/runner'].length);
+  const archive = packedFixture('extra-hashed-chunk', { extraChunks: 1 });
+  assert.throws(() => assertPackedPackage({ name: '@obversa/runner', version: '0.1.0' }, archive),
+    /unexpected archive path package\/dist\/chunk-\*\.js/);
+});
+
+test('the packed archive checker names a missing pinned export only once', () => {
+  const archive = packedFixture('missing-pinned-export', { missing: ['package/dist/index.js'] });
+  assert.throws(() => assertPackedPackage({ name: '@obversa/runner', version: '0.1.0' }, archive), {
+    message: '@obversa/runner archive is invalid:\n- missing dist/index.js',
+  });
+});
+
+test('importing the packed checker does not resolve the workspace allowlist', () => {
+  const { root, directory } = packageWorkspace('lazy-package-import');
+  rmSync(directory, { recursive: true, force: true });
+  const result = spawnSync(process.execPath, ['--input-type=module', '--eval',
+    "const { assertPackedPackage } = await import('./scripts/check-packages.mjs'); console.log(typeof assertPackedPackage);"],
+  { cwd: root, encoding: 'utf8' });
+  assert.equal(result.status, 0, result.stderr);
+  assert.equal(result.stdout.trim(), 'function');
+});
+
+test('the packed archive checker reads hashed source maps and checks literal hashed exports', () => {
+  const definition = { name: '@obversa/runner', version: '0.1.0' };
+  const valid = packedFixture('hashed-export', { exportTarget: './dist/chunk-AAAAAAAA.js' });
+  assert.equal(assertPackedPackage(definition, valid), EXPECTED_FILES[definition.name].length);
+  const missing = packedFixture('wrong-hashed-export', { exportTarget: './dist/chunk-BBBBBBBB.js' });
+  assert.throws(() => assertPackedPackage(definition, missing), {
+    message: '@obversa/runner archive is invalid:\n- export target dist/chunk-BBBBBBBB.js is missing',
+  });
 });

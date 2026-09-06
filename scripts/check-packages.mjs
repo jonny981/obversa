@@ -8,10 +8,12 @@ import { spawnSync } from 'node:child_process';
 import { allowlistedDirectories, EXPECTED_FILES, withoutChunkHash } from './check-tarballs.mjs';
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '..');
-const packages = await Promise.all(allowlistedDirectories(root).map(async (directory) => {
-  const { name, version } = JSON.parse(await readFile(join(directory, 'package.json'), 'utf8'));
-  return { directory, name, version };
-}));
+async function workspacePackages() {
+  return Promise.all(allowlistedDirectories(root).map(async (directory) => {
+    const { name, version } = JSON.parse(await readFile(join(directory, 'package.json'), 'utf8'));
+    return { directory, name, version };
+  }));
+}
 
 function run(command, args, options = {}) {
   const result = spawnSync(command, args, {
@@ -51,18 +53,19 @@ function exportTargets(value, output = []) {
 }
 
 export function assertPackedPackage(definition, tarball) {
-  const entries = archiveEntries(tarball).map(withoutChunkHash);
+  const entries = archiveEntries(tarball);
   const failures = [];
   const pinnedFiles = EXPECTED_FILES[definition.name];
 
   if (!pinnedFiles) throw new Error(`${definition.name}: missing pinned file list`);
 
-  for (const path of entries.filter((path) => !pinnedFiles.includes(path))) {
-    failures.push(`unexpected archive path ${path}`);
+  const remaining = entries.map(withoutChunkHash);
+  for (const path of pinnedFiles) {
+    const index = remaining.indexOf(path);
+    if (index === -1) failures.push(`missing ${path.slice('package/'.length)}`);
+    else remaining.splice(index, 1);
   }
-  for (const path of pinnedFiles.filter((path) => !entries.includes(path))) {
-    failures.push(`missing ${path.slice('package/'.length)}`);
-  }
+  for (const path of remaining) failures.push(`unexpected archive path ${path}`);
 
   const manifest = JSON.parse(archiveText(tarball, 'package/package.json'));
   if (manifest.name !== definition.name) failures.push(`manifest name is ${manifest.name}`);
@@ -76,7 +79,7 @@ export function assertPackedPackage(definition, tarball) {
     ...exportTargets(manifest.types),
   ]);
   for (const target of targets) {
-    if (!entries.includes(`package/${target}`)) failures.push(`export target ${target} is missing`);
+    if (!entries.includes(`package/${target}`) && !pinnedFiles.includes(`package/${target}`)) failures.push(`export target ${target} is missing`);
   }
 
   for (const path of entries.filter((entry) => entry.endsWith('.map'))) {
@@ -106,6 +109,10 @@ export function assertPackedPackage(definition, tarball) {
 }
 
 export async function packWorkspacePackages(destination) {
+  return packPackages(destination, await workspacePackages());
+}
+
+async function packPackages(destination, packages) {
   const archives = new Map();
   for (const definition of packages) {
     const before = new Set(await readdir(destination));
@@ -128,7 +135,8 @@ export async function packWorkspacePackages(destination) {
 }
 
 export async function verifyPackedPackages(destination) {
-  const archives = await packWorkspacePackages(destination);
+  const packages = await workspacePackages();
+  const archives = await packPackages(destination, packages);
   const reports = [];
   for (const definition of packages) {
     const tarball = archives.get(definition.name);
