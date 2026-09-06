@@ -18,6 +18,9 @@ engine and memory packages track their own versions independently.
 
 ### Changed
 
+- **Tarball test selection:** Run the two package-command integration tests
+  with `OBVERSA_TEST_REAL_PACK=1 pnpm test:tarballs`. The default command skips
+  those tests; `verify:d15` enables them.
 - **Review identity records:** Every engine call managed by the graph executor
   records its requested and reported adapter, provider, model family, and
   model, including primary and fallback calls and calls without a reported

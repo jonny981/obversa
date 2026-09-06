@@ -13,6 +13,8 @@ import test from "node:test";
 import { allowlistedDirectories, checkTarball, EXPECTED_FILES } from "./check-tarballs.mjs";
 import { assertPackedPackage } from "./check-packages.mjs";
 
+const realPackTests = { skip: process.env.OBVERSA_TEST_REAL_PACK === "1" ? false : "set OBVERSA_TEST_REAL_PACK=1 to run real pack and npm dry-run checks" };
+
 const fixture = realpathSync(mkdtempSync(join(tmpdir(), "obversa-tarball-spec-")));
 test.after(() => rmSync(fixture, { recursive: true, force: true }));
 
@@ -158,7 +160,7 @@ for (const script of ["check-tarballs.mjs", "check-packages.mjs"]) {
   });
 }
 
-test("the package command follows the allowlist and refuses an added unpinned package", () => {
+test("the package command follows the allowlist and refuses an added unpinned package", realPackTests, () => {
   const { root } = packageWorkspace("package-allowlist");
   pkg("package-allowlist/packages/new", { name: "@fixture/unpinned" }, {});
   const check = () => spawnSync(process.execPath, [join(root, "scripts/check-packages.mjs")], { cwd: root, encoding: "utf8" });
@@ -173,7 +175,7 @@ test("the package command follows the allowlist and refuses an added unpinned pa
   assert.match(added.stderr, /@fixture\/unpinned: missing pinned file list/);
 });
 
-test("the package command checks the version from the workspace manifest", () => {
+test("the package command checks the version from the workspace manifest", realPackTests, () => {
   const { root, directory } = packageWorkspace("package-version");
   const manifestPath = join(directory, "package.json");
   const manifest = JSON.parse(readFileSync(manifestPath, "utf8"));
