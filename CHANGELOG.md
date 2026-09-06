@@ -70,6 +70,10 @@ engine and memory packages track their own versions independently.
 
 ### Fixed
 
+- **Concurrent worktree registration:** Add and remove Git worktrees one at a
+  time per repository within the runtime process. Linked checkouts share the
+  queue; unrelated repositories and the jobs in their worktrees stay concurrent.
+  A failed command releases the queue for the next operation.
 - **Release check errors:** Name a missing runtime manifest consistently in
   the changelog and publish checks.
 - **Package archives:** Check the number of hashed chunks and use literal

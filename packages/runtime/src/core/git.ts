@@ -3,7 +3,7 @@
 import { execa } from 'execa';
 import { createHash } from 'node:crypto';
 import { mkdtempSync } from 'node:fs';
-import { lstat, readFile, readlink } from 'node:fs/promises';
+import { lstat, readFile, readlink, realpath } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join, relative, resolve } from 'node:path';
 
@@ -537,6 +537,27 @@ export async function branchCommits(opts: {
 
 // ── Worktrees (branches-as-teams) ──────────────────────────────────────────
 
+// Serialize metadata changes within this process and common Git directory only.
+const worktreeQueues = new Map<string, Promise<void>>();
+
+async function withWorktreeQueue<T>(
+  repoDir: string,
+  signal: AbortSignal | undefined,
+  operation: () => Promise<T>,
+): Promise<T> {
+  const common = await git(['rev-parse', '--git-common-dir'], { cwd: repoDir, signal });
+  if (common.exitCode !== 0) throw new Error('git common directory unavailable');
+  const key = await realpath(resolve(repoDir, common.stdout.trim()));
+  const result = (worktreeQueues.get(key) ?? Promise.resolve()).then(operation);
+  const tail = result.then(() => undefined, () => undefined);
+  worktreeQueues.set(key, tail);
+  try {
+    return await result;
+  } finally {
+    if (worktreeQueues.get(key) === tail) worktreeQueues.delete(key);
+  }
+}
+
 export interface WorktreeHandle {
   /** The isolated working directory. */
   dir: string;
@@ -553,16 +574,18 @@ export async function addWorktree(
   repoDir: string,
   opts: { branch: string; base?: string; signal?: AbortSignal },
 ): Promise<WorktreeHandle> {
-  const dir = mkdtempSync(join(tmpdir(), 'lines-wt-'));
-  const r = await git(
-    ['worktree', 'add', '-b', opts.branch, dir, opts.base ?? 'HEAD'],
-    { cwd: repoDir, signal: opts.signal },
-  );
-  if (r.exitCode !== 0)
-    throw new Error(
-      `git worktree add failed (exit ${r.exitCode}): ${r.stdout}`.trim(),
+  return withWorktreeQueue(repoDir, opts.signal, async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'lines-wt-'));
+    const r = await git(
+      ['worktree', 'add', '-b', opts.branch, dir, opts.base ?? 'HEAD'],
+      { cwd: repoDir, signal: opts.signal },
     );
-  return { dir, branch: opts.branch };
+    if (r.exitCode !== 0)
+      throw new Error(
+        `git worktree add failed (exit ${r.exitCode}): ${r.stdout}`.trim(),
+      );
+    return { dir, branch: opts.branch };
+  });
 }
 
 /** Remove a worktree (force-discards anything uncommitted left in it). */
@@ -571,10 +594,10 @@ export async function removeWorktree(
   dir: string,
   opts: { signal?: AbortSignal } = {},
 ): Promise<void> {
-  await git(['worktree', 'remove', '--force', dir], {
+  await withWorktreeQueue(repoDir, opts.signal, () => git(['worktree', 'remove', '--force', dir], {
     cwd: repoDir,
     signal: opts.signal,
-  });
+  }));
 }
 
 /** Delete a branch ref (used to clean up a merged fork branch). */
