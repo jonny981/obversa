@@ -118,10 +118,20 @@ export interface ExecutionLaneResolution {
   readonly fallbacks?: readonly ExecutionTarget[];
 }
 
+export interface RunPreflightPolicy {
+  readonly timeoutMs: number;
+  readonly lanes: readonly {
+    readonly laneId: string;
+    readonly live: 'required' | 'skip';
+    readonly unsupportedStatic: 'block' | 'allow';
+  }[];
+}
+
 export interface PlanResolution {
   readonly package: GraphPackageIdentity;
   readonly admission: GraphPackageAdmission;
   readonly executionLanes: readonly ExecutionLaneResolution[];
+  readonly preflight?: RunPreflightPolicy;
 }
 
 export interface ResolvedExecutionLane extends ExecutionLaneDescription {
@@ -140,6 +150,7 @@ export interface ResolvedPlan {
   readonly edges: readonly GraphEdgeDescription[];
   readonly policies: GraphPolicyDescription;
   readonly executionLanes: readonly ResolvedExecutionLane[];
+  readonly preflight?: RunPreflightPolicy;
   readonly permissions: {
     readonly requested: readonly PermissionDescriptor[];
     readonly admitted: readonly PermissionDescriptor[];
@@ -340,6 +351,37 @@ function strictBound(value: unknown, path: string): void {
   );
 }
 
+function preflightPolicy(value: unknown, laneIds: readonly string[]): RunPreflightPolicy {
+  const root = record(value, '/preflight', 'Preflight policy');
+  exactFields(root, ['timeoutMs', 'lanes'], '/preflight');
+  if (!Number.isSafeInteger(root.timeoutMs)
+    || (root.timeoutMs as number) < 1
+    || (root.timeoutMs as number) > 2_147_483_647) {
+    fail('INVALID_BOUND', '/preflight/timeoutMs', 'Preflight timeout must be an integer from 1 to 2147483647 milliseconds.');
+  }
+  const remaining = new Set(laneIds);
+  const lanes = list(root.lanes, '/preflight/lanes', 'Preflight lanes');
+  for (let index = 0; index < lanes.length; index += 1) {
+    const path = `/preflight/lanes/${index}`;
+    const lane = record(lanes[index], path, 'Preflight lane');
+    exactFields(lane, ['laneId', 'live', 'unsupportedStatic'], path);
+    const laneId = identifier(lane.laneId, `${path}/laneId`, 'lane id');
+    if (!remaining.delete(laneId)) {
+      fail('INVALID_LANE_RESOLUTION', `${path}/laneId`, 'Preflight lane is unknown or duplicated.');
+    }
+    if (lane.live !== 'required' && lane.live !== 'skip') {
+      fail('INVALID_SHAPE', `${path}/live`, 'Preflight live policy must be required or skip.');
+    }
+    if (lane.unsupportedStatic !== 'block' && lane.unsupportedStatic !== 'allow') {
+      fail('INVALID_SHAPE', `${path}/unsupportedStatic`, 'Unsupported static policy must be block or allow.');
+    }
+  }
+  if (remaining.size !== 0) {
+    fail('INVALID_LANE_RESOLUTION', '/preflight/lanes', 'Every resolved lane needs one preflight policy.');
+  }
+  return root as unknown as RunPreflightPolicy;
+}
+
 /** Validate and freeze a resolved plan read from storage. */
 export function validateResolvedPlan(value: unknown): ResolvedPlan {
   const raw = json(value, '');
@@ -358,6 +400,7 @@ export function validateResolvedPlan(value: unknown): ResolvedPlan {
     'permissions',
     'bounds',
     'requirements',
+    ...(Object.hasOwn(root, 'preflight') ? ['preflight'] : []),
   ], '');
 
   const graph = record(root.graph, '/graph', 'Graph metadata');
@@ -477,6 +520,7 @@ export function validateResolvedPlan(value: unknown): ResolvedPlan {
       effective: lane.effective,
       fallbacks: lane.fallbacks,
     })),
+    ...(Object.hasOwn(root, 'preflight') ? { preflight: plan.preflight } : {}),
   }).plan;
   if (!isDeepStrictEqual(plan, rebuilt)) {
     fail(
@@ -766,6 +810,9 @@ export function resolveGraphPlan(
   if (resolutions.size > 0) {
     fail('INVALID_LANE_RESOLUTION', '/executionLanes', 'Resolution contains an unknown lane.');
   }
+  const preflight = Object.hasOwn(root, 'preflight')
+    ? preflightPolicy(root.preflight, resolvedLanes.map((lane) => lane.id))
+    : undefined;
 
   const admittedByName = new Map<string, PermissionDescriptor>();
   for (let index = 0; index < resolution.admission.permissions.length; index += 1) {
@@ -795,6 +842,7 @@ export function resolveGraphPlan(
     edges: description.edges,
     policies: description.policies,
     executionLanes: resolvedLanes,
+    ...(preflight === undefined ? {} : { preflight }),
     permissions: {
       requested: description.requestedPermissions,
       admitted: resolution.admission.permissions,

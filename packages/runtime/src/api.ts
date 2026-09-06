@@ -143,6 +143,7 @@ export {
   type GraphPackageIdentity,
   type GraphPackageAdmission,
   type ExecutionLaneResolution,
+  type RunPreflightPolicy,
   type PlanResolution,
   type ResolvedExecutionLane,
   type ResolvedPlan,
