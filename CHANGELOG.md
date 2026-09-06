@@ -37,6 +37,8 @@ engine and memory packages track their own versions independently.
 
 ### Fixed
 
+- **Documentation versions:** Refuse a docs build when a package version in
+  the homepage table differs from its workspace manifest.
 - **Unresolved merge markers:** Reject engine resolutions that retain conflict
   marker lines of seven or more characters, abort the merge, and name the file
   in a typed error. The failed resolution does not create a merge commit.
