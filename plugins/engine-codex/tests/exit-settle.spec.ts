@@ -153,14 +153,16 @@ setInterval(() => {}, 1000);
 `);
 
     const startedAt = Date.now();
-    await expect(
-      new CodexEngine({ cliBinary: bin }).run(
-        { prompt: 'ping', timeoutMs: 1_500 },
-        () => {},
-        new AbortController().signal,
-      ),
-    ).rejects.toMatchObject({ kind: 'timeout' });
+    const running = new CodexEngine({ cliBinary: bin }).run(
+      { prompt: 'ping', timeoutMs: 5_000 },
+      () => {},
+      new AbortController().signal,
+    );
+    // Keep an early timeout handled while the fixture reports readiness.
+    void running.catch(() => {});
+    await waitForFile(orphanPidPath);
+    await expect(running).rejects.toMatchObject({ kind: 'timeout' });
     expect(Date.now() - startedAt).toBeLessThan(10_000);
     await expectOrphanStopped(orphanPidPath);
-  });
+  }, 15_000);
 });
