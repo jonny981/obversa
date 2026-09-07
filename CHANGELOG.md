@@ -48,6 +48,14 @@ engine and memory packages track their own versions independently.
   `environmentVariables` list on start and resume. Copy only present values of
   those names from the watchdog, without storing credentials in run inputs or
   host records. Default environment inheritance remains restrictive.
+- **Feature-delivery example:** Ship a runnable feature-delivery production
+  line, `examples/production-lines/feature-delivery.line.ts`, with its
+  documentation page. It takes one written issue through analysis,
+  implementation, a real test run, a review panel with three reviewers and
+  two required votes, a bounded kickback repair, and an approval bound to the
+  exact bytes, using only public runtime exports and no model account.
+  `pnpm example:feature` runs it, and the clean-consumer check compiles and
+  runs it from the packed tarballs.
 
 ### Changed
 

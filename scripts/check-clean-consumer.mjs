@@ -478,6 +478,7 @@ const tsconfig = {
   include: [
     'consumer.ts',
     'offline-review.line.ts',
+    'feature-delivery.line.ts',
     'custom-graph.ts',
     'pipeline.ts',
     'review-loop.ts',
@@ -498,6 +499,10 @@ const tsconfig = {
 async function main() {
   const exampleSource = await readFile(
     join(root, 'examples', 'production-lines', 'offline-review.line.ts'),
+    'utf8',
+  );
+  const featureExampleSource = await readFile(
+    join(root, 'examples', 'production-lines', 'feature-delivery.line.ts'),
     'utf8',
   );
   const graphExamplePath = join(root, 'examples', 'packages', 'custom-graph.ts');
@@ -536,6 +541,10 @@ async function main() {
   );
   const publicDocument = await readFile(
     join(root, 'docs', 'public', 'production-lines', 'offline-review.mdx'),
+    'utf8',
+  );
+  const featureDocument = await readFile(
+    join(root, 'docs', 'public', 'production-lines', 'feature-delivery.mdx'),
     'utf8',
   );
   const storageDocument = await readFile(
@@ -583,6 +592,9 @@ async function main() {
   if (sourceFromPublicDoc(safeChangeDocument) !== safeChangeExampleSource) {
     throw new Error('The safe-change page does not match its runnable source');
   }
+  if (sourceFromPublicDoc(featureDocument) !== featureExampleSource) {
+    throw new Error('The feature-delivery production-line page does not match its runnable source');
+  }
 
   const directory = await mkdtemp(join(tmpdir(), 'obversa-consumer-'));
   const archivesDirectory = join(directory, 'archives');
@@ -619,6 +631,10 @@ async function main() {
     await writeFile(
       join(consumerDirectory, 'offline-review.line.ts'),
       exampleSource,
+    );
+    await writeFile(
+      join(consumerDirectory, 'feature-delivery.line.ts'),
+      featureExampleSource,
     );
     await copyFile(graphExamplePath, join(consumerDirectory, 'custom-graph.ts'));
     await copyFile(pipelineExamplePath, join(consumerDirectory, 'pipeline.ts'));
@@ -667,6 +683,12 @@ async function main() {
     );
     const directProductionLine = JSON.parse(
       run('pnpm', ['exec', 'tsx', 'offline-review.line.ts'], { cwd: consumerDirectory }),
+    );
+    const featureLine = JSON.parse(
+      run(process.execPath, ['dist/feature-delivery.line.js'], { cwd: consumerDirectory }),
+    );
+    const directFeatureLine = JSON.parse(
+      run('pnpm', ['exec', 'tsx', 'feature-delivery.line.ts'], { cwd: consumerDirectory }),
     );
     const compiledGraph = JSON.parse(
       run(process.execPath, ['dist/custom-graph.js'], { cwd: consumerDirectory }),
@@ -789,6 +811,11 @@ async function main() {
       ?.match(/```json\r?\n([\s\S]*?)```/);
     assert.ok(proofCacheReport, 'The proof page must include its cache report');
     assert.deepEqual(JSON.parse(proofCacheReport[1]), compiledProofCache);
+    const featureLinePageReport = featureDocument
+      .match(/## Run the line[\s\S]*?```json\r?\n([\s\S]*?)```/);
+    assert.ok(featureLinePageReport, 'The feature-delivery page must include its JSON report');
+    assert.deepEqual(featureLine, JSON.parse(featureLinePageReport[1]));
+    assert.deepEqual(directFeatureLine, featureLine);
     assert.deepEqual(compiledStorage, expectedStorageReport);
     assert.deepEqual(directStorage, expectedStorageReport);
     assert.deepEqual(compiledAttempt, expectedAttemptReport);
@@ -803,10 +830,20 @@ async function main() {
       productionLine.summary !== 'config is complete' ||
       directProductionLine.status !== 'pass' ||
       directProductionLine.attempts !== 2 ||
-      directProductionLine.summary !== 'config is complete'
+      directProductionLine.summary !== 'config is complete' ||
+      featureLine.status !== 'pass' ||
+      featureLine.implementRuns !== 2 ||
+      featureLine.reviewRounds !== 2 ||
+      featureLine.acceptedKickbacks !== 1 ||
+      featureLine.recordEvents !== 50 ||
+      directFeatureLine.status !== 'pass' ||
+      directFeatureLine.implementRuns !== 2 ||
+      directFeatureLine.reviewRounds !== 2 ||
+      directFeatureLine.acceptedKickbacks !== 1 ||
+      directFeatureLine.recordEvents !== 50
     ) {
       throw new Error(
-        `Packed consumer returned an invalid report: ${JSON.stringify({ report, productionLine, directProductionLine })}`,
+        `Packed consumer returned an invalid report: ${JSON.stringify({ report, productionLine, directProductionLine, featureLine, directFeatureLine })}`,
       );
     }
 
@@ -821,7 +858,7 @@ async function main() {
     if (refs.length !== 1) throw new Error(`Git memory created ${refs.length} private refs instead of one`);
 
     console.log(
-      'Clean offline consumer passed with TypeScript 7 and 6, the first production line, the safe-change production line, the outside graph, the pipeline executor example, the review loop, the callback gate, proof-bound approval, the turn-taking executor example, durable storage, safe node attempts, the supervised runner, 17 memory cases, and both memory adapters.',
+      'Clean offline consumer passed with TypeScript 7 and 6, the first production line, the safe-change production line, the feature-delivery line, the outside graph, the pipeline executor example, the review loop, the callback gate, proof-bound approval, the turn-taking executor example, durable storage, safe node attempts, the supervised runner, 17 memory cases, and both memory adapters.',
     );
   } finally {
     await rm(directory, { recursive: true, force: true });

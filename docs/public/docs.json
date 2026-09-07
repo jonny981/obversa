@@ -93,7 +93,8 @@
         "pages": [
           "production-lines/index",
           "production-lines/offline-review",
-          "production-lines/safe-change"
+          "production-lines/safe-change",
+          "production-lines/feature-delivery"
         ]
       },
       {
