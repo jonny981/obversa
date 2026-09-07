@@ -74,52 +74,54 @@ describe('attempt process markers', () => {
 });
 
 describe.runIf(process.platform !== 'win32')('owned process trees', () => {
-  it('reads one startedAt for the same process under a different locale', async () => {
+  it('reads one startedAt for the same process under a different locale and timezone', async () => {
     const commandUrl = new URL('../dist/command.js', import.meta.url).href;
-    const script = [
-      `const { inspectOwnedProcessTree } = await import(${JSON.stringify(commandUrl)});`,
-      `const tree = await inspectOwnedProcessTree({ rootPid: process.pid, rootProcessGroupId: process.pid, attemptId: ${JSON.stringify(ATTEMPT_ID)} });`,
-      'const me = tree.find((item) => item.pid === process.pid);',
-      "if (me === undefined) throw new Error('self missing from owned tree');",
-      'process.stdout.write(`${JSON.stringify(me)}\\n`);',
-      'setInterval(() => {}, 1000);',
-    ].join('\n');
-    // A restricted environment like the runner's worker: no LANG, LC_ALL or
-    // LC_TIME, so this process reads ps under the C locale.
-    const child = spawn(process.execPath, ['--input-type=module', '-e', script], {
-      env: { PATH: process.env.PATH ?? '' },
-      stdio: ['pipe', 'pipe', 'inherit'],
-    });
-    try {
-      const recorded = JSON.parse(await new Promise<string>((resolve, reject) => {
+    const reader = (targetPid: number, env: Record<string, string>) => {
+      const script = [
+        `const { inspectOwnedProcessTree } = await import(${JSON.stringify(commandUrl)});`,
+        `const tree = await inspectOwnedProcessTree({ rootPid: ${targetPid}, rootProcessGroupId: ${targetPid}, attemptId: ${JSON.stringify(ATTEMPT_ID)} });`,
+        `const me = tree.find((item) => item.pid === ${targetPid});`,
+        "if (me === undefined) throw new Error('target missing from owned tree');",
+        'process.stdout.write(`${JSON.stringify(me)}\\n`);',
+        'setInterval(() => {}, 1000);',
+      ].join('\n');
+      return spawn(process.execPath, ['--input-type=module', '-e', script], {
+        env,
+        stdio: ['pipe', 'pipe', 'inherit'],
+      });
+    };
+    const readLine = (child: ReturnType<typeof spawn>): Promise<string> =>
+      new Promise((resolve, reject) => {
         let out = '';
         child.stdout!.on('data', (chunk) => {
           out += chunk;
           if (out.includes('\n')) resolve(out);
         });
         child.once('error', reject);
-        child.once('exit', (code) => reject(new Error(`locale child exited ${code}`)));
-      })) as { pid: number; startedAt: string };
-      const parentIdentity = (await inspectOwnedProcessTree({
-        attemptId: ATTEMPT_ID,
-        rootPid: child.pid!,
-        rootProcessGroupId: child.pid!,
-      })).find((item) => item.pid === child.pid);
-      expect(parentIdentity).toBeDefined();
-      expect(parentIdentity!.startedAt).toBe(recorded.startedAt);
-      // The runner merges a recorded identity with a fresh read keyed by
-      // pid:startedAt; two spellings of one start time split one process into
-      // two entries.
-      const merged = new Map(
-        [recorded, parentIdentity!].map((identity) => [
-          `${identity.pid}:${identity.startedAt}`,
-          identity,
-        ]),
-      );
-      expect([...merged.values()]).toHaveLength(1);
+        child.once('exit', (code) => reject(new Error(`reader child exited ${code}`)));
+      });
+    // The recording side runs under a restricted environment like the
+    // runner's worker: no LANG, LC_ALL, LC_TIME or TZ, so it reads ps under
+    // the C locale and the host timezone.
+    const recorder = reader(process.pid, { PATH: process.env.PATH ?? '' });
+    // The reading side runs under a different locale AND timezone, so the
+    // two sides spell one start time two ways unless the ps call pins both.
+    const host = reader(process.pid, {
+      PATH: process.env.PATH ?? '',
+      LC_ALL: 'en_GB.UTF-8',
+      TZ: 'Asia/Tokyo',
+    });
+    try {
+      const recorded = JSON.parse(await readLine(recorder)) as { pid: number; startedAt: string };
+      const readBack = JSON.parse(await readLine(host)) as { pid: number; startedAt: string };
+      expect(recorded.pid).toBe(process.pid);
+      expect(readBack.pid).toBe(process.pid);
+      // One process, one spelling: the runner compares and keys recorded
+      // identities on this exact string.
+      expect(readBack.startedAt).toBe(recorded.startedAt);
     } finally {
-      child.stdin!.end();
-      child.kill('SIGKILL');
+      recorder.kill('SIGKILL');
+      host.kill('SIGKILL');
     }
   });
 

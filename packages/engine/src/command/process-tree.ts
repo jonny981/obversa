@@ -203,10 +203,11 @@ async function processTable(): Promise<readonly ProcessSnapshot[]> {
   const { stdout } = await execFileAsync(
     '/bin/ps',
     ['-axo', 'pid=,ppid=,pgid=,rss=,lstart='],
-    // Pin the C locale: lstart spells its date with the caller's locale, so a
-    // worker with a restricted environment and a host watchdog would record
-    // two spellings of one start time and never match on a non-C host.
-    { encoding: 'utf8', maxBuffer: 16 * 1_024 * 1_024, env: { ...process.env, LC_ALL: 'C' } },
+    // Pin the C locale and UTC: lstart spells its date with the caller's
+    // locale and timezone, so a worker with a restricted environment and a
+    // host watchdog would record two spellings of one start time and never
+    // match unless both are fixed.
+    { encoding: 'utf8', maxBuffer: 16 * 1_024 * 1_024, env: { ...process.env, LC_ALL: 'C', TZ: 'UTC' } },
   );
   return stdout
     .split('\n')

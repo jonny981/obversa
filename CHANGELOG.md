@@ -53,11 +53,14 @@ engine and memory packages track their own versions independently.
   remain enforced.
 - **Documentation versions:** Refuse a docs build when a package version in
   the homepage table differs from its workspace manifest.
-- **Process identities across locales:** Read the process table under the C
-  locale. A worker with a restricted environment and a host watchdog previously
-  spelled one start time two ways, so live status never matched on a non-C
-  host; a recorded identity now merges with the same live process instead of
-  splitting it into two entries.
+- **Process identities across locales and timezones:** Read the process table
+  under the C locale and UTC. A worker with a restricted environment and a
+  host watchdog previously spelled one start time two ways, so live status
+  never matched on a non-C host or across a timezone boundary; a recorded
+  identity now merges with the same live process instead of splitting it into
+  two entries. A run recorded by an earlier version keeps the old spelling,
+  so status on this version reports its worker as not running while it still
+  runs; nothing restarts it, and a fresh run records the new spelling.
 - **Unresolved merge markers:** Reject engine resolutions that retain an ordered
   conflict block with matching opening, separator, and closing marker widths
   of seven or more characters. Abort the merge and name the file in a typed
