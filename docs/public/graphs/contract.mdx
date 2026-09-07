@@ -296,6 +296,112 @@ When the final expected decision is exactly `complete`, the observed total must
 meet a known dispatch minimum; partial, empty, paused, and failed endings do not
 prove a minimum.
 
+## Team form contract
+
+`team()` is a graph form for several agents working on one task. It uses the
+same public graph contract as the other forms on this page. It is not a new
+kernel object.
+
+The authoring shape is:
+
+```ts
+import type { EngineRef, Job, Outcome } from '@obversa/runtime';
+import type {
+  CallbackGateDefinition,
+  IsolatedOptions,
+  ReviewPanelConfig,
+} from '@obversa/runtime';
+
+interface TeamAgent {
+  name: string;
+  role: string;
+  brief: string;
+  engine: EngineRef;
+}
+
+type TeamReview =
+  | { kind: 'panel'; config: ReviewPanelConfig }
+  | { kind: 'callback'; definition: CallbackGateDefinition };
+
+interface TeamConfig {
+  task: string;
+  agents: readonly TeamAgent[];
+  integrate?: Pick<IsolatedOptions, 'onConflict'>;
+  review?: TeamReview;
+}
+
+interface TeamAgentResult {
+  name: string;
+  role: string;
+  outcome: Outcome;
+}
+
+interface TeamResult {
+  task: string;
+  agents: readonly TeamAgentResult[];
+  integrated: boolean;
+  review?: Outcome;
+}
+
+declare function team(config: TeamConfig): Job;
+```
+
+Worktree isolation is the behavior. Each agent receives the task and its
+standing brief in a separate worktree. The existing `isolated()` path creates
+and removes that worktree. When `integrate` is supplied, passing agent changes
+return through the existing merge lock and land on the caller's branch. When
+`integrate` is omitted, the member work remains unlanded. This form adds no
+second merge or lease mechanism.
+
+The form is the members working apart and answering separately. `review` reuses
+an existing review panel or callback gate; those panel forms are the answering-
+together members of the family. The reviewer identity rule is the one
+convergence enforces. `team()` adds no second diversity rule or switch.
+
+The team returns the existing `Outcome` shape. Its `data` field contains a
+`TeamResult`; a review revision, failure, pause, or error remains on the outer
+`Outcome` so a team can be placed in a larger graph without an adapter.
+
+The team status is `pass` only when every agent passes, the configured review
+passes, and configured integration lands. A member failure or review failure
+returns `fail` with all member results preserved. A member or review pause
+returns `paused` with its reason preserved. An integration conflict returns
+`fail` unless the selected existing synthesis policy resolves it.
+
+The form validates these rules before it runs:
+
+- **Task:** `task` is a non-empty string.
+- **Roster:** `agents` contains at least one member with a unique `name`.
+- **Role:** every member has a non-empty `role` and `brief`.
+- **Engine:** every member has an engine binding.
+- **Integration:** omitted `integrate` leaves member work unlanded; supplied
+  `integrate` uses the caller's branch as the target and accepts the existing
+  `isolated()` `onConflict` option.
+- **Review:** a configured review uses the existing panel or callback contract.
+
+The communication extension is additive and off unless configured. Its fields
+are:
+
+```ts
+interface TeamRoom {
+  id: string;
+  members: readonly string[];
+}
+
+interface TeamCommunication {
+  rooms: readonly TeamRoom[];
+}
+
+interface TeamConfigWithCommunication extends TeamConfig {
+  communication?: TeamCommunication;
+}
+```
+
+When that extension is implemented, room membership is frozen with the plan,
+room messages are recorded in the run log, and a readable room-file projection
+is written beside the record. A mention dispatches the named role with only its
+permitted room tails. A wake cue only notifies a host; it is never the record.
+
 ## Limits
 
 This contract does not schedule nodes, store runs, provide built-in graph
