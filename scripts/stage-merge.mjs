@@ -19,6 +19,7 @@ const stageBranches = {
   D16: 'feat/runner-hardening',
   D18: 'feat/proof-cache-safe-change',
   D19: 'feat/writer-exclusion',
+  D28: 'feat/team-form',
   D21: 'feat/parity-tests',
   F4: 'feat/release-readiness',
   F5: 'feat/release-wording',
