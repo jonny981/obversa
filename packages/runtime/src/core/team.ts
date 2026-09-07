@@ -5,7 +5,7 @@ import { childContext } from './context.js';
 import { setMeta } from './describe.js';
 import { LoopError } from './errors.js';
 import { agentJob } from './job.js';
-import { isolated, type IsolatedOptions } from './isolated.js';
+import { isolated } from './isolated.js';
 import { parallel } from './dag.js';
 import { reviewPanel, type ReviewPanelConfig } from './feedback.js';
 import type { Job, Outcome } from './types.js';
@@ -24,7 +24,6 @@ export type TeamReview =
 export interface TeamConfig {
   task: string;
   agents: readonly TeamAgent[];
-  integrate?: Pick<IsolatedOptions, 'onConflict'>;
   review?: TeamReview;
 }
 
@@ -108,7 +107,6 @@ function teamMeta(config: TeamConfig) {
     kind: 'team',
     name: 'team',
     agents: config.agents.map(({ name, role }) => ({ name, role })),
-    ...(config.integrate ? { integrate: { ...config.integrate } } : {}),
     ...(config.review ? { review: config.review.kind } : {}),
   };
 }
@@ -125,7 +123,6 @@ export function team(config: TeamConfig): Job {
         }),
         {
           label: `team-${agent.name}`,
-          onConflict: config.integrate?.onConflict,
         },
       ),
     );

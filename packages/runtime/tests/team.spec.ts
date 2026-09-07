@@ -1,3 +1,5 @@
+import { readFile } from 'node:fs/promises';
+import { join } from 'node:path';
 import { afterAll, describe, expect, it } from 'vitest';
 
 import { run, team } from '../src/api.ts';
@@ -83,6 +85,8 @@ describe('team()', () => {
     expect(requests.every((request) => request.cwd !== repo)).toBe(true);
     expect(requests.some((request) => request.prompt.includes('Write the release note.'))).toBe(true);
     expect(requests.some((request) => request.prompt.includes('Check the release note.'))).toBe(true);
+    expect(await readFile(join(repo, 'writer.txt'), 'utf8')).toBe('writer\n');
+    expect(await readFile(join(repo, 'reviewer.txt'), 'utf8')).toBe('reviewer\n');
   });
 
   it('returns every member outcome when one member fails', async () => {

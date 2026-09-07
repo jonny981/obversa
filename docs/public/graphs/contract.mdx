@@ -308,7 +308,6 @@ The authoring shape is:
 import type { EngineRef, Job, Outcome } from '@obversa/runtime';
 import type {
   CallbackGateDefinition,
-  IsolatedOptions,
   ReviewPanelConfig,
 } from '@obversa/runtime';
 
@@ -326,7 +325,6 @@ type TeamReview =
 interface TeamConfig {
   task: string;
   agents: readonly TeamAgent[];
-  integrate?: Pick<IsolatedOptions, 'onConflict'>;
   review?: TeamReview;
 }
 
@@ -348,15 +346,13 @@ declare function team(config: TeamConfig): Job;
 
 Worktree isolation is the behavior. Each agent receives the task and its
 standing brief in a separate worktree. The existing `isolated()` path creates
-and removes that worktree. When `integrate` is supplied, passing agent changes
-return through the existing merge lock and land on the caller's branch. When
-`integrate` is omitted, the existing `isolated()` conflict policy applies.
-This form adds no second merge or lease mechanism.
+and removes that worktree. Passing agent changes land on the caller's branch
+through the existing merge lock. This form adds no second merge or lease
+mechanism.
 
 The form is the members working apart and answering separately. `review` reuses
-an existing review panel or callback gate; those panel forms are the answering-
-together members of the family. The reviewer identity rule is the one
-convergence enforces. `team()` adds no second diversity rule or switch.
+an existing review panel or callback gate. Each review keeps that panel's or
+gate's own contract.
 
 An existing review panel receives the completed team result as its previous
 outcome, so its reviewers can inspect the member outcomes and task.
@@ -370,11 +366,10 @@ A callback review creates the request through `createCallbackGate` and returns
 The host posts and answers it through the existing callback client, then
 controls resumption of the paused work.
 
-The team status is `pass` only when every agent passes, the configured review
-passes, and configured integration lands. A member failure or review failure
-returns `fail` with all member results preserved. A member or review pause
-returns `paused` with its reason preserved. An integration conflict returns
-`fail` unless the selected existing synthesis policy resolves it.
+The team status is `pass` only when every agent passes and the configured review
+passes. A member failure or review failure returns `fail` with all member
+results preserved. A member or review pause returns `paused` with its reason
+preserved. An integration conflict returns `fail`.
 
 The form validates these rules before it runs:
 
@@ -382,32 +377,7 @@ The form validates these rules before it runs:
 - **Roster:** `agents` contains at least one member with a unique `name`.
 - **Role:** every member has a non-empty `role` and `brief`.
 - **Engine:** every member has an engine binding.
-- **Integration:** supplied `integrate` accepts the existing `isolated()`
-  `onConflict` option; omission uses `isolated()`'s default conflict failure.
 - **Review:** a configured review uses the existing panel or callback contract.
-
-The communication extension is additive and off unless configured. Its fields
-are:
-
-```ts
-interface TeamRoom {
-  id: string;
-  members: readonly string[];
-}
-
-interface TeamCommunication {
-  rooms: readonly TeamRoom[];
-}
-
-interface TeamConfigWithCommunication extends TeamConfig {
-  communication?: TeamCommunication;
-}
-```
-
-When that extension is implemented, room membership is frozen with the plan,
-room messages are recorded in the run log, and a readable room-file projection
-is written beside the record. A mention dispatches the named role with only its
-permitted room tails. A wake cue only notifies a host; it is never the record.
 
 ## Limits
 
