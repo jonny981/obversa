@@ -23,6 +23,10 @@ const RESULT_SCHEMA = {
 } as const;
 
 const GROK_FIXTURE = `#!/usr/bin/env node
+if (process.argv.length === 3 && process.argv[2] === '--version') {
+  process.stdout.write('grok 1.0.5\\n');
+  process.exit(0);
+}
 process.stdout.write(JSON.stringify({
   text: '{"answer":42}',
   stopReason: 'end_turn',

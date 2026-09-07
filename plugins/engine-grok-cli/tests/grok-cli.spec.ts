@@ -7,10 +7,11 @@ import {
   readFileSync,
   realpathSync,
   rmSync,
+  symlinkSync,
   writeFileSync,
 } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { basename, dirname, join } from 'node:path';
+import { basename, delimiter, dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { setTimeout as delay } from 'node:timers/promises';
 
@@ -19,10 +20,16 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
   canonicalJson,
   digestJson,
+  EngineError,
+  engineSelection,
   type AgentRequest,
   type EngineStreamEvent,
+  type EngineSelectionRecord,
 } from '@obversa/engine';
-import { runEngineConformance } from '@obversa/engine/testing';
+import {
+  runEngineAdmissionConformance,
+  runEngineConformance,
+} from '@obversa/engine/testing';
 import {
   buildGrokArgs,
   GrokCliEngine,
@@ -111,6 +118,36 @@ function valuesAfter(args: readonly string[], flag: string): string[] {
   return args.flatMap((value, index) =>
     value === flag && args[index + 1] !== undefined ? [args[index + 1]!] : [],
   );
+}
+
+interface FixtureInvocation {
+  readonly kind: 'version' | 'model';
+  readonly program: string;
+  readonly args: readonly string[];
+  readonly stdin?: string;
+  readonly cwd: string;
+  readonly promptFilePresent: boolean;
+  readonly home: string | null;
+  readonly grokHome: string | null;
+  readonly parentSecret: string | null;
+}
+
+function invocations(path: string): FixtureInvocation[] {
+  if (!existsSync(path)) return [];
+  return readFileSync(path, 'utf8').trim().split('\n').filter(Boolean)
+    .map((line) => JSON.parse(line) as FixtureInvocation);
+}
+
+function admissionRequest(input: AgentRequest): Omit<AgentRequest, 'prompt'> {
+  const { prompt: _prompt, ...rest } = input;
+  return rest;
+}
+
+function admissionSelection(bin: string, input: AgentRequest): EngineSelectionRecord {
+  return engineSelection({
+    adapter: 'grok-cli', adapterVersion: '1.0.5', provider: 'xai', modelFamily: 'grok-4',
+    executable: bin, model: input.model, capabilities: input.tools ?? [],
+  });
 }
 
 describe('Grok CLI adapter', () => {
@@ -237,6 +274,293 @@ describe('Grok CLI adapter', () => {
         model: 'grok-4-fixture-effective',
       },
     ]);
+  });
+
+  it('constructs a missing absolute executable before admit and run report missing-cli', async () => {
+    const missing = join(temporaryDirectory('lines-grok-missing-'), 'grok');
+    let engine: GrokCliEngine | undefined;
+    expect(() => { engine = new GrokCliEngine(options(missing)); }).not.toThrow();
+    const input = request();
+    await expect(engine!.admit(admissionRequest(input), new AbortController().signal))
+      .rejects.toMatchObject({ name: 'EngineError', kind: 'missing-cli' });
+    await expect(engine!.run(input, () => {}, new AbortController().signal))
+      .rejects.toMatchObject({ name: 'EngineError', kind: 'missing-cli' });
+    await expect(new GrokCliEngine(options(missing)).run(input, () => {}, new AbortController().signal))
+      .rejects.toMatchObject({ name: 'EngineError', kind: 'missing-cli' });
+  });
+
+  it.each([
+    'grok 1.0.5 (5115b46bc909) [stable]\n',
+    'grok 1.0.5\n',
+  ])('observes the version without a prompt file or model request (%j)', async (stdout) => {
+    const bin = executable();
+    const calls = join(temporaryDirectory('lines-grok-admission-'), 'calls.jsonl');
+    const input = request();
+    vi.stubEnv('OBVERSA_POISONED_PARENT_SECRET', 'must-not-cross');
+    const engine = new GrokCliEngine({
+      ...options(bin),
+      environment: { OBVERSA_TEST_GROK_CALLS: calls, OBVERSA_TEST_GROK_VERSION_STDOUT: stdout },
+    });
+    const selected = await engine.admit(admissionRequest(input), new AbortController().signal);
+    expect(selected).toEqual(admissionSelection(bin, input));
+    expect(invocations(calls)).toEqual([expect.objectContaining({
+      kind: 'version', program: realpathSync(bin), args: ['--version'], stdin: '',
+      cwd: input.cwd, promptFilePresent: false, parentSecret: null,
+    })]);
+    const observed = invocations(calls)[0]!;
+    expect(observed.home).not.toBe(process.env.HOME);
+    expect(existsSync(observed.home!)).toBe(false);
+    expect(existsSync(observed.grokHome!)).toBe(false);
+  });
+
+  it('retains an explicit symlink path through admission, replacement and run', async () => {
+    const actual = executable();
+    const link = join(temporaryDirectory('lines-grok-link-'), 'grok');
+    symlinkSync(actual, link);
+    const calls = join(temporaryDirectory('lines-grok-admission-'), 'calls.jsonl');
+    const input = request();
+    const selectedOptions = {
+      ...options(link),
+      environment: {
+        OBVERSA_TEST_GROK_CALLS: calls,
+        OBVERSA_TEST_GROK_EFFECTIVE_MODEL: input.model!,
+      },
+    };
+    const first = new GrokCliEngine(selectedOptions);
+    const selected = await first.admit(admissionRequest(input), new AbortController().signal);
+    expect(selected.executable).toBe(link);
+    expect(selected.executable).not.toBe(realpathSync(link));
+    const replacement = new GrokCliEngine(selectedOptions);
+    await expect(replacement.admit(admissionRequest(input), new AbortController().signal, selected))
+      .resolves.toEqual(selected);
+    const result = await replacement.run(input, () => {}, new AbortController().signal);
+    expect(result.requested).toEqual(selected);
+    expect(result.effective).toEqual(selected);
+    expect(invocations(calls).filter((call) => call.kind === 'model').map((call) => call.program))
+      .toEqual([realpathSync(actual)]);
+  });
+
+  it('checks each request configuration while reusing only its observed version', async () => {
+    const bin = executable();
+    const calls = join(temporaryDirectory('lines-grok-admission-'), 'calls.jsonl');
+    const first = request();
+    const second = request({ model: 'grok-other-request', tools: ['read_file'], allowedTools: ['Read'] });
+    const engine = new GrokCliEngine({
+      ...options(bin),
+      environment: {
+        OBVERSA_TEST_GROK_CALLS: calls,
+        OBVERSA_TEST_GROK_EFFECTIVE_MODEL: second.model!,
+      },
+    });
+    expect(await engine.admit(admissionRequest(first), new AbortController().signal))
+      .toEqual(admissionSelection(bin, first));
+    const selected = await engine.admit(admissionRequest(second), new AbortController().signal);
+    expect(selected).toEqual(admissionSelection(bin, second));
+    const result = await engine.run(second, () => {}, new AbortController().signal);
+    expect(result.requested).toEqual(selected);
+    expect(result.effective).toEqual(selected);
+    expect(invocations(calls).map((call) => call.kind)).toEqual(['version', 'model']);
+    await expect(engine.admit(admissionRequest(request({ tools: ['write_file'] })), new AbortController().signal))
+      .rejects.toMatchObject({ name: 'EngineError', kind: 'invalid-config' });
+    expect(invocations(calls).map((call) => call.kind)).toEqual(['version', 'model']);
+  });
+
+  it.each([
+    ['wrong-version', 'grok 1.0.6 (5115b46bc909) [stable]\n'],
+    ['unparseable', 'scripted-secret-output-not-a-version\n'],
+    ['extra-lines', 'grok 1.0.5\nscripted-secret-output-not-a-version\n'],
+  ] as const)('refuses %s version output without exposing captured bytes', async (_label, stdout) => {
+    const calls = join(temporaryDirectory('lines-grok-admission-'), 'calls.jsonl');
+    const engine = new GrokCliEngine({
+      ...options(), environment: { OBVERSA_TEST_GROK_CALLS: calls, OBVERSA_TEST_GROK_VERSION_STDOUT: stdout },
+    });
+    let error: unknown;
+    try { await engine.admit(admissionRequest(request()), new AbortController().signal); }
+    catch (caught) { error = caught; }
+    expect(error).toBeInstanceOf(EngineError);
+    expect(error).toMatchObject({ kind: 'invalid-config' });
+    expect((error as Error).message).not.toContain(stdout.trim());
+    expect((error as Error).message).not.toContain('scripted-secret-output');
+    expect(invocations(calls).map((call) => call.kind)).toEqual(['version']);
+  });
+
+  it.each(['exit', 'overflow'] as const)('refuses the %s version command without a model request', async (mode) => {
+    const calls = join(temporaryDirectory('lines-grok-admission-'), 'calls.jsonl');
+    const engine = new GrokCliEngine({
+      ...options(), environment: { OBVERSA_TEST_GROK_CALLS: calls, OBVERSA_TEST_GROK_VERSION_MODE: mode },
+    });
+    await expect(engine.admit(admissionRequest(request()), new AbortController().signal))
+      .rejects.toMatchObject({ name: 'EngineError', kind: 'invalid-config' });
+    expect(invocations(calls).filter((call) => call.kind === 'model')).toEqual([]);
+  });
+
+  it('keeps version timeouts typed and starts no model request', async () => {
+    const calls = join(temporaryDirectory('lines-grok-admission-'), 'calls.jsonl');
+    const engine = new GrokCliEngine({
+      ...options(), environment: { OBVERSA_TEST_GROK_CALLS: calls, OBVERSA_TEST_GROK_VERSION_MODE: 'hang' },
+    });
+    await expect(engine.admit(admissionRequest(request({ timeoutMs: 250 })), new AbortController().signal))
+      .rejects.toMatchObject({ name: 'EngineError', kind: 'timeout' });
+    expect(invocations(calls).filter((call) => call.kind === 'model')).toEqual([]);
+  });
+
+  it('shares one version observation across concurrent admission calls', async () => {
+    const bin = executable();
+    const calls = join(temporaryDirectory('lines-grok-admission-'), 'calls.jsonl');
+    const engine = new GrokCliEngine({ ...options(bin), environment: { OBVERSA_TEST_GROK_CALLS: calls } });
+    const input = request();
+    const results = await Promise.all([
+      engine.admit(admissionRequest(input), new AbortController().signal),
+      engine.admit(admissionRequest(input), new AbortController().signal),
+    ]);
+    expect(results).toEqual([admissionSelection(bin, input), admissionSelection(bin, input)]);
+    expect(invocations(calls).map((call) => call.kind)).toEqual(['version']);
+  });
+
+  it('allows a later explicit admission after a failed version observation', async () => {
+    const bin = executable();
+    const calls = join(temporaryDirectory('lines-grok-admission-'), 'calls.jsonl');
+    const engine = new GrokCliEngine({ ...options(bin), environment: {
+      OBVERSA_TEST_GROK_CALLS: calls, OBVERSA_TEST_GROK_VERSION_MODE: 'fail-once',
+    } });
+    const input = request();
+    await expect(engine.admit(admissionRequest(input), new AbortController().signal))
+      .rejects.toMatchObject({ kind: 'invalid-config' });
+    expect(invocations(calls).map((call) => call.kind)).toEqual(['version']);
+    await expect(engine.admit(admissionRequest(input), new AbortController().signal))
+      .resolves.toEqual(admissionSelection(bin, input));
+    expect(invocations(calls).map((call) => call.kind)).toEqual(['version', 'version']);
+  });
+
+  it('does not infer an absent executable from a different spawn failure', async () => {
+    const root = temporaryDirectory('lines-grok-spawn-');
+    const bin = join(root, 'grok');
+    writeFileSync(bin, `#!${join(root, 'missing-interpreter')}\n`, { mode: 0o755 });
+    const engine = new GrokCliEngine(options(bin));
+    await expect(engine.admit(admissionRequest(request()), new AbortController().signal))
+      .rejects.toMatchObject({ kind: 'unknown' });
+    expect(existsSync(bin)).toBe(true);
+  });
+
+  it('keeps cancellation typed before and during a version command', async () => {
+    const calls = join(temporaryDirectory('lines-grok-admission-'), 'calls.jsonl');
+    const engine = new GrokCliEngine({
+      ...options(), environment: { OBVERSA_TEST_GROK_CALLS: calls, OBVERSA_TEST_GROK_VERSION_MODE: 'hang' },
+    });
+    const alreadyAborted = new AbortController();
+    alreadyAborted.abort();
+    await expect(engine.admit(admissionRequest(request()), alreadyAborted.signal))
+      .rejects.toMatchObject({ name: 'EngineError', kind: 'aborted' });
+    expect(invocations(calls)).toEqual([]);
+    const controller = new AbortController();
+    const running = engine.admit(admissionRequest(request()), controller.signal);
+    const outcome = expect(running).rejects.toMatchObject({ name: 'EngineError', kind: 'aborted' });
+    await waitForFile(calls);
+    controller.abort();
+    await outcome;
+    expect(invocations(calls).map((call) => call.kind)).toEqual(['version']);
+  });
+
+  it.each([
+    { model: undefined },
+    { tools: ['write_file'] },
+    { allowedTools: ['Bash(git status)'] },
+    { env: { OBVERSA_REQUEST_SECRET: 'not-allowed' } },
+    { timeoutMs: 0 },
+  ] satisfies Partial<AgentRequest>[])('refuses invalid normal configuration before a version process (%j)', async (overrides) => {
+    const calls = join(temporaryDirectory('lines-grok-admission-'), 'calls.jsonl');
+    const engine = new GrokCliEngine({ ...options(), environment: { OBVERSA_TEST_GROK_CALLS: calls } });
+    await expect(engine.admit(admissionRequest(request(overrides)), new AbortController().signal))
+      .rejects.toMatchObject({ name: 'EngineError', kind: 'invalid-config' });
+    expect(invocations(calls)).toEqual([]);
+  });
+
+  it('rechecks project guards after admission before a normal model call', async () => {
+    const cwd = temporaryDirectory('lines-grok-admitted-project-');
+    const calls = join(temporaryDirectory('lines-grok-admission-'), 'calls.jsonl');
+    const engine = new GrokCliEngine({ ...options(), environment: { OBVERSA_TEST_GROK_CALLS: calls } });
+    const input = request({ cwd });
+    await engine.admit(admissionRequest(input), new AbortController().signal);
+    writeFileSync(join(cwd, 'AGENTS.md'), 'scripted project instructions');
+    await expect(engine.admit(admissionRequest(input), new AbortController().signal))
+      .rejects.toMatchObject({ name: 'EngineError', kind: 'invalid-config' });
+    await expect(engine.run(input, () => {}, new AbortController().signal))
+      .rejects.toMatchObject({ name: 'EngineError', kind: 'invalid-config' });
+    expect(invocations(calls).map((call) => call.kind)).toEqual(['version']);
+  });
+
+  it('reports missing-cli when the admitted executable is removed before run', async () => {
+    const bin = executable();
+    const engine = new GrokCliEngine(options(bin));
+    const input = request();
+    await engine.admit(admissionRequest(input), new AbortController().signal);
+    rmSync(bin);
+    await expect(engine.run(input, () => {}, new AbortController().signal))
+      .rejects.toMatchObject({ name: 'EngineError', kind: 'missing-cli' });
+  });
+
+  it('reports a non-executable file as missing-cli after construction', async () => {
+    const bin = executable();
+    chmodSync(bin, 0o600);
+    const engine = new GrokCliEngine(options(bin));
+    const input = request();
+    await expect(engine.admit(admissionRequest(input), new AbortController().signal))
+      .rejects.toMatchObject({ name: 'EngineError', kind: 'missing-cli' });
+    await expect(engine.run(input, () => {}, new AbortController().signal))
+      .rejects.toMatchObject({ name: 'EngineError', kind: 'missing-cli' });
+  });
+
+  it('refuses a replacement whose observed version no longer matches the saved selection', async () => {
+    const bin = executable();
+    const calls = join(temporaryDirectory('lines-grok-admission-'), 'calls.jsonl');
+    const input = request();
+    const first = new GrokCliEngine({ ...options(bin), environment: { OBVERSA_TEST_GROK_CALLS: calls } });
+    const selected = await first.admit(admissionRequest(input), new AbortController().signal);
+    const replacement = new GrokCliEngine({
+      ...options(bin), environment: {
+        OBVERSA_TEST_GROK_CALLS: calls,
+        OBVERSA_TEST_GROK_VERSION_STDOUT: 'grok 1.0.6\n',
+      },
+    });
+    await expect(replacement.admit(admissionRequest(input), new AbortController().signal, selected))
+      .rejects.toMatchObject({ name: 'EngineError', kind: 'invalid-config' });
+    expect(invocations(calls).map((call) => call.kind)).toEqual(['version', 'version']);
+  });
+
+  it('passes the separate admission kit with actual process markers', async () => {
+    const bin = executable();
+    const other = executable();
+    const missing = join(temporaryDirectory('lines-grok-missing-'), 'grok');
+    const calls = join(temporaryDirectory('lines-grok-admission-'), 'calls.jsonl');
+    const input = request({ tools: ['read_file'], allowedTools: ['Read'] });
+    const open = (path: string): GrokCliEngine => new GrokCliEngine({
+      ...options(path),
+      environment: {
+        OBVERSA_TEST_GROK_CALLS: calls,
+        OBVERSA_TEST_GROK_EFFECTIVE_MODEL: input.model!,
+      },
+    });
+    const report = await runEngineAdmissionConformance({
+      request: input,
+      selection: admissionSelection(bin, input),
+      open: () => open(bin),
+      modelCalls(path) {
+        const models = invocations(calls).filter((call) => call.kind === 'model');
+        if (path === undefined) return models.length;
+        if (path === null) return 0;
+        return models.filter((call) => call.program === realpathSync(path)).length;
+      },
+      cli: {
+        moveLookup() { vi.stubEnv('PATH', `${dirname(other)}${delimiter}${process.env.PATH ?? ''}`); },
+        openDifferent: () => open(other),
+        openMissing: () => open(missing),
+      },
+    });
+    expect('kind' in report).toBe(false);
+    if ('kind' in report) throw new Error(`Grok admission is ${report.kind}`);
+    expect(report).toEqual({ ok: true, cases: 11, failures: [] });
+    expect(invocations(calls).filter((call) => call.kind === 'model').map((call) => call.program))
+      .toEqual([realpathSync(bin), realpathSync(bin)]);
   });
 
   it('admits declared web and subagents but never substitutes Grok memory', () => {
