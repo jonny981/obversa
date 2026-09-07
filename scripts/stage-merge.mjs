@@ -27,6 +27,7 @@ const stageBranches = {
   F11: 'feat/transient-phase-tests',
   F10: 'feat/release-1-1-0',
   F14: 'feat/real-work-test-limits',
+  D22: 'feat/feature-delivery-example',
 };
 
 export function manageStage(args, options = {}) {
