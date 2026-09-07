@@ -874,8 +874,10 @@ export class GrokCliEngine implements Engine {
     capabilities: readonly string[],
     signal: AbortSignal,
   ): Promise<string> {
-    const directory = mkdtempSync(join(tmpdir(), 'lines-grok-version-'));
+    let directory: string | undefined;
+    let primary: EngineError | undefined;
     try {
+      directory = mkdtempSync(join(tmpdir(), 'lines-grok-version-'));
       const environment = isolatedEnvironment(
         directory, this.#executable, request, capabilities,
         this.#environment, this.#authContents,
@@ -912,25 +914,32 @@ export class GrokCliEngine implements Engine {
       }
       return version;
     } catch (error) {
-      if (error instanceof EngineError) throw error;
-      if (signal.aborted) throw loopError('aborted', 'Grok version check was aborted');
-      if (error instanceof OwnedCommandError) {
-        if (error.code === 'INVALID_EXECUTABLE') {
-          throw loopError('missing-cli', 'Grok configured executable could not start');
-        }
-        if (error.code === 'SPAWN_FAILED') {
-          try { resolveCommandExecutable(this.#executable); }
-          catch { throw loopError('missing-cli', 'Grok configured executable is missing or not runnable'); }
-          throw loopError('unknown', 'Grok version process could not start');
-        }
-        if (error.code === 'OUTPUT_LIMIT' || error.code === 'INVALID_COMMAND') {
-          throw loopError('invalid-config', 'Grok version command exceeded or rejected its limits');
+      if (error instanceof EngineError) {
+        primary = error;
+      } else if (signal.aborted) {
+        primary = loopError('aborted', 'Grok version check was aborted');
+      } else if (error instanceof OwnedCommandError && error.code === 'INVALID_EXECUTABLE') {
+        primary = loopError('missing-cli', 'Grok configured executable could not start');
+      } else if (error instanceof OwnedCommandError && error.code === 'SPAWN_FAILED') {
+        try { resolveCommandExecutable(this.#executable); }
+        catch { primary = loopError('missing-cli', 'Grok configured executable is missing or not runnable'); }
+        if (primary === undefined) primary = loopError('unknown', 'Grok version process could not start');
+      } else if (error instanceof OwnedCommandError
+        && (error.code === 'OUTPUT_LIMIT' || error.code === 'INVALID_COMMAND')) {
+        primary = loopError('invalid-config', 'Grok version command exceeded or rejected its limits');
+      } else {
+        // Local command/cleanup failure supplies no provider availability evidence.
+        primary = loopError('unknown', 'Grok version check could not complete');
+      }
+      throw primary;
+    } finally {
+      if (directory !== undefined) {
+        try {
+          rmSync(directory, { recursive: true, force: true });
+        } catch {
+          throw primary ?? loopError('unknown', 'Grok version check could not complete');
         }
       }
-      // Local command/cleanup failure supplies no provider availability evidence.
-      throw loopError('unknown', 'Grok version check could not complete');
-    } finally {
-      rmSync(directory, { recursive: true, force: true });
     }
   }
 

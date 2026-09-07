@@ -1,6 +1,13 @@
 #!/usr/bin/env node
 
-import { appendFileSync, existsSync, readFileSync, writeFileSync } from 'node:fs';
+import {
+  appendFileSync,
+  chmodSync,
+  existsSync,
+  mkdirSync,
+  readFileSync,
+  writeFileSync,
+} from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -46,6 +53,13 @@ if (args.length === 1 && args[0] === '--version') {
   }
   process.stdout.write(process.env.OBVERSA_TEST_GROK_VERSION_STDOUT
     ?? 'grok 1.0.5 (5115b46bc909) [stable]\n');
+  if (mode === 'cleanup-success' || mode === 'cleanup-error') {
+    const locked = join(process.env.GROK_HOME, 'locked');
+    mkdirSync(locked);
+    writeFileSync(join(locked, 'marker'), 'cleanup marker');
+    chmodSync(locked, 0);
+  }
+  if (mode === 'cleanup-error') process.exit(2);
   process.exit(0);
 }
 

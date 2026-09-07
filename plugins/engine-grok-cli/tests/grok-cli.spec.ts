@@ -138,6 +138,19 @@ function invocations(path: string): FixtureInvocation[] {
     .map((line) => JSON.parse(line) as FixtureInvocation);
 }
 
+function cleanupVersionRoots(path: string): void {
+  const directories = new Set<string>();
+  for (const call of invocations(path)) {
+    if (call.kind !== 'version' || call.grokHome === null) continue;
+    const locked = join(call.grokHome, 'locked');
+    if (existsSync(locked)) chmodSync(locked, 0o700);
+    directories.add(dirname(call.grokHome));
+  }
+  for (const directory of directories) {
+    rmSync(directory, { recursive: true, force: true });
+  }
+}
+
 function admissionRequest(input: AgentRequest): Omit<AgentRequest, 'prompt'> {
   const { prompt: _prompt, ...rest } = input;
   return rest;
@@ -402,6 +415,72 @@ describe('Grok CLI adapter', () => {
     await expect(engine.admit(admissionRequest(request({ timeoutMs: 250 })), new AbortController().signal))
       .rejects.toMatchObject({ name: 'EngineError', kind: 'timeout' });
     expect(invocations(calls).filter((call) => call.kind === 'model')).toEqual([]);
+  });
+
+  it('maps a successful version cleanup failure to an unknown EngineError', async () => {
+    const calls = join(temporaryDirectory('lines-grok-admission-'), 'calls.jsonl');
+    const engine = new GrokCliEngine({
+      ...options(), environment: {
+        OBVERSA_TEST_GROK_CALLS: calls,
+        OBVERSA_TEST_GROK_VERSION_MODE: 'cleanup-success',
+      },
+    });
+    let error: unknown;
+    try {
+      await engine.admit(admissionRequest(request()), new AbortController().signal);
+    } catch (caught) {
+      error = caught;
+    } finally {
+      cleanupVersionRoots(calls);
+    }
+    expect(error).toBeInstanceOf(EngineError);
+    expect(error).toMatchObject({ name: 'EngineError', kind: 'unknown' });
+    expect((error as Error).message).not.toContain('lines-grok-version-');
+    expect(invocations(calls).map((call) => call.kind)).toEqual(['version']);
+  });
+
+  it('preserves a failed version error when cleanup also fails', async () => {
+    const calls = join(temporaryDirectory('lines-grok-admission-'), 'calls.jsonl');
+    const engine = new GrokCliEngine({
+      ...options(), environment: {
+        OBVERSA_TEST_GROK_CALLS: calls,
+        OBVERSA_TEST_GROK_VERSION_MODE: 'cleanup-error',
+      },
+    });
+    let error: unknown;
+    try {
+      await engine.admit(admissionRequest(request()), new AbortController().signal);
+    } catch (caught) {
+      error = caught;
+    } finally {
+      cleanupVersionRoots(calls);
+    }
+    expect(error).toBeInstanceOf(EngineError);
+    expect(error).toMatchObject({
+      name: 'EngineError', kind: 'invalid-config', message: 'Grok version command did not succeed',
+    });
+    expect(invocations(calls).map((call) => call.kind)).toEqual(['version']);
+  });
+
+  it('maps temporary version root creation failure to unknown without starting a process', async () => {
+    const bin = executable();
+    const input = request();
+    const root = temporaryDirectory('lines-grok-missing-tmp-');
+    const calls = join(temporaryDirectory('lines-grok-admission-'), 'calls.jsonl');
+    vi.stubEnv('TMPDIR', join(root, 'missing'));
+    const engine = new GrokCliEngine({ ...options(bin), environment: { OBVERSA_TEST_GROK_CALLS: calls } });
+    let error: unknown;
+    try {
+      await engine.admit(admissionRequest(input), new AbortController().signal);
+    } catch (caught) {
+      error = caught;
+    } finally {
+      cleanupVersionRoots(calls);
+    }
+    expect(error).toBeInstanceOf(EngineError);
+    expect(error).toMatchObject({ name: 'EngineError', kind: 'unknown' });
+    expect((error as Error).message).not.toContain('lines-grok-missing-tmp-');
+    expect(invocations(calls)).toEqual([]);
   });
 
   it('shares one version observation across concurrent admission calls', async () => {
