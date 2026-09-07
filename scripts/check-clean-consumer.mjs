@@ -489,6 +489,9 @@ const tsconfig = {
     'turn-taking.ts',
     'workspace.ts',
     'supervised-run.ts',
+    'example.ts',
+    'recipe.ts',
+    'file-adapter.ts',
   ],
 };
 
@@ -522,7 +525,11 @@ async function main() {
   const workspaceExamplePath = join(root, 'examples', 'packages', 'workspace.ts');
   const runnerExamplePath = join(root, 'examples', 'packages', 'supervised-run.ts');
   const runnerHostPath = join(root, 'examples', 'packages', 'supervised-host.mjs');
+  const safeChangeExamplePath = join(root, 'examples', 'safe-change', 'example.ts');
+  const safeChangeRecipePath = join(root, 'examples', 'safe-change', 'recipe.ts');
+  const safeChangeFileAdapterPath = join(root, 'examples', 'safe-change', 'file-adapter.ts');
   const turnTakingExampleSource = await readFile(turnTakingExamplePath, 'utf8');
+  const safeChangeExampleSource = await readFile(safeChangeExamplePath, 'utf8');
   const graphDocument = await readFile(
     join(root, 'docs', 'public', 'graphs', 'contract.mdx'),
     'utf8',
@@ -551,6 +558,10 @@ async function main() {
     join(root, 'docs', 'public', 'proof', 'acceptance.mdx'),
     'utf8',
   );
+  const safeChangeDocument = await readFile(
+    join(root, 'docs', 'public', 'production-lines', 'safe-change.mdx'),
+    'utf8',
+  );
   if (sourceFromPublicDoc(publicDocument) !== exampleSource) {
     throw new Error('The offline production-line page does not match its runnable source');
   }
@@ -568,6 +579,9 @@ async function main() {
   }
   if (sourceFromPublicDoc(proofAcceptanceDocument) !== proofBoundApprovalExampleSource) {
     throw new Error('The proof-acceptance page does not match its runnable source');
+  }
+  if (sourceFromPublicDoc(safeChangeDocument) !== safeChangeExampleSource) {
+    throw new Error('The safe-change page does not match its runnable source');
   }
 
   const directory = await mkdtemp(join(tmpdir(), 'obversa-consumer-'));
@@ -599,6 +613,9 @@ async function main() {
     await writeFile(join(consumerDirectory, 'package.json'), `${JSON.stringify(manifest, null, 2)}\n`);
     await writeFile(join(consumerDirectory, 'tsconfig.json'), `${JSON.stringify(tsconfig, null, 2)}\n`);
     await writeFile(join(consumerDirectory, 'consumer.ts'), consumerSource.trimStart());
+    await writeFile(join(consumerDirectory, 'example.ts'), safeChangeExampleSource);
+    await copyFile(safeChangeRecipePath, join(consumerDirectory, 'recipe.ts'));
+    await copyFile(safeChangeFileAdapterPath, join(consumerDirectory, 'file-adapter.ts'));
     await writeFile(
       join(consumerDirectory, 'offline-review.line.ts'),
       exampleSource,
@@ -690,6 +707,12 @@ async function main() {
     const directProofCache = JSON.parse(
       run('pnpm', ['exec', 'tsx', 'proof-cache.ts'], { cwd: consumerDirectory }),
     );
+    const compiledSafeChange = JSON.parse(
+      run(process.execPath, ['dist/example.js'], { cwd: consumerDirectory }),
+    );
+    const directSafeChange = JSON.parse(
+      run('pnpm', ['exec', 'tsx', 'example.ts'], { cwd: consumerDirectory }),
+    );
     const directStorage = JSON.parse(
       run('pnpm', ['exec', 'tsx', 'durable-storage.ts'], { cwd: consumerDirectory }),
     );
@@ -757,6 +780,11 @@ async function main() {
     assert.deepEqual(directProofBoundApproval, expectedProofBoundApprovalReport);
     assert.deepEqual(compiledProofCache, expectedProofCacheReport);
     assert.deepEqual(directProofCache, expectedProofCacheReport);
+    const safeChangePageReport = safeChangeDocument
+      .match(/## Run the line[\s\S]*?```json\r?\n([\s\S]*?)```/);
+    assert.ok(safeChangePageReport, 'The safe-change page must include its JSON report');
+    assert.deepEqual(compiledSafeChange, JSON.parse(safeChangePageReport[1]));
+    assert.deepEqual(directSafeChange, compiledSafeChange);
     const proofCacheReport = proofAcceptanceDocument.split('## Read-only proof cache')[1]
       ?.match(/```json\r?\n([\s\S]*?)```/);
     assert.ok(proofCacheReport, 'The proof page must include its cache report');
@@ -793,7 +821,7 @@ async function main() {
     if (refs.length !== 1) throw new Error(`Git memory created ${refs.length} private refs instead of one`);
 
     console.log(
-      'Clean offline consumer passed with TypeScript 7 and 6, the first production line, the outside graph, the pipeline executor example, the review loop, the callback gate, proof-bound approval, the turn-taking executor example, durable storage, safe node attempts, the supervised runner, 17 memory cases, and both memory adapters.',
+      'Clean offline consumer passed with TypeScript 7 and 6, the first production line, the safe-change production line, the outside graph, the pipeline executor example, the review loop, the callback gate, proof-bound approval, the turn-taking executor example, durable storage, safe node attempts, the supervised runner, 17 memory cases, and both memory adapters.',
     );
   } finally {
     await rm(directory, { recursive: true, force: true });

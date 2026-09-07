@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import { readFile } from 'node:fs/promises';
 import { sep } from 'node:path';
 import test from 'node:test';
 import { checkedAttemptOutput } from './check-clean-consumer.mjs';
@@ -23,4 +24,11 @@ for (const indent of [undefined, 4]) {
 test('attempt report still rejects unsanitized display and relative exported paths', () => {
   assert.throws(() => checkedAttemptOutput(JSON.stringify(report), report));
   assert.throws(() => checkedAttemptOutput(JSON.stringify(display), display));
+});
+
+test('clean consumer wires the safe-change production line', async () => {
+  const source = await readFile(new URL('./check-clean-consumer.mjs', import.meta.url), 'utf8');
+  assert.match(source, /examples', 'safe-change', 'example\.ts'/);
+  assert.match(source, /safe-change\.mdx/);
+  assert.match(source, /compiledSafeChange/);
 });
