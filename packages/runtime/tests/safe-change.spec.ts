@@ -101,6 +101,13 @@ import { sourcePath, sourceStream } from '../../../examples/safe-change/file-ada
 import { openSafeChangeRun } from '../../../examples/safe-change/recipe.ts';
 
 describe('safe-change production line', () => {
+  it.each(['source', 'target'] as const)('refuses a %s journal ID as the executor run stream', async (kind) => {
+    const { directory, input } = await fixture();
+    const runId = kind === 'source' ? sourceStream(input.sourceIds[0]!).streamId : targetStream(input.destinations[0]!.id).streamId;
+    await expect(openSafeChangeRun({ directory, runId, input })).rejects.toThrow(/stream/);
+    for (const destination of input.destinations) expect((await readTarget(directory, destination.id)).lastAction).toBeNull();
+  });
+
   it('fails an approved aggregate over 64 KiB without changing either target', async () => {
     const { directory, input } = await fixture();
     const records = JSON.parse(input.destinations[0]!.content);

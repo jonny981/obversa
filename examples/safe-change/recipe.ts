@@ -70,6 +70,9 @@ export async function openSafeChangeRun(options: {
     throw new Error('Safe-change source and destination IDs must be unique');
   }
   if (existing.length && options.input && !isDeepStrictEqual(input, options.input)) throw new Error('Stored safe-change input differs');
+  if (input.sourceIds.some((id) => sourceStream(id).streamId === runId) || input.destinations.some((target) => targetStream(target.id).streamId === runId)) {
+    throw new Error('Safe-change run stream must differ from every source and target stream');
+  }
   const writePermission = { name: 'workspace.write', scope: { paths: input.destinations.map((target) => targetPath(directory, target.id)) } };
   const actionNames = input.destinations.map((_, index) => `apply-${index + 1}`);
   const names = ['capture', 'map', 'propose', 'approval', 'backup', ...actionNames.flatMap((name) => [name, `verify-${name}`]), 'retention'];
