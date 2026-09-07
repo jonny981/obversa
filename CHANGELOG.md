@@ -36,6 +36,8 @@ engine and memory packages track their own versions independently.
 - Public guides and runnable examples for installation, graphs, storage,
   memory, workspaces, callbacks, proof-bound approval, hosts, and offline
   review.
+- **Safe file changes:** Capture complete source records, bind approval to exact
+  output bytes, back up targets, read each result back, and pause on a mismatch.
 - **Stored proof reuse:** Resolve accepted results through the host cache with
   current evidence, graph, workspace anchor, and reviewer identity. Each lookup
   checks the stored completion and acceptance again.

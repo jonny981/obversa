@@ -92,7 +92,8 @@
         "group": "Processes",
         "pages": [
           "production-lines/index",
-          "production-lines/offline-review"
+          "production-lines/offline-review",
+          "production-lines/safe-change"
         ]
       },
       {
