@@ -23,6 +23,7 @@ const stageBranches = {
   F5: 'feat/release-wording',
   F7: 'feat/residual-sweep',
   F8: 'feat/residual-sweep-two',
+  F11: 'feat/transient-phase-tests',
 };
 
 export function manageStage(args, options = {}) {
