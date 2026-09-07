@@ -1,6 +1,6 @@
 {
   "name": "@obversa/runtime",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "description": "A process runtime for software teams.",
   "license": "MIT",
   "author": "Jonny Neill <jonnyneill@hotmail.com>",

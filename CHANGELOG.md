@@ -9,6 +9,8 @@ engine and memory packages track their own versions independently.
 
 ## [Unreleased]
 
+## [1.1.0] - 2026-09-07
+
 ### Added
 
 - **Host-selected worker environment:** Accept an optional readonly
