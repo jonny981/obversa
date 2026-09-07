@@ -183,6 +183,7 @@ export const EXPECTED_FILES = {
     'package/dist/graph-types/loop.d.ts',
     'package/dist/proof/acceptance.d.ts',
     'package/dist/proof/artifact.d.ts',
+    'package/dist/proof/cache.d.ts',
     'package/dist/runtime/attempt.d.ts',
     'package/dist/runtime/budget.d.ts',
     'package/dist/runtime/graph-executor.d.ts',
