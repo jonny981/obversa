@@ -141,7 +141,8 @@ engine and memory packages track their own versions independently.
   report. Printed JSON can change indentation while executable path checks
   remain enforced.
 - **Documentation versions:** Refuse a docs build when a package version in
-  the homepage table differs from its workspace manifest.
+  the homepage table differs from its workspace manifest, and when a
+  publishable package has no homepage row at all.
 - **Process identities across locales and timezones:** Read the process table
   under the C locale and UTC. A worker with a restricted environment and a
   host watchdog previously spelled one start time two ways, so live status
