@@ -308,7 +308,7 @@ type PublicValidatorTakesOneArgument = Expect<Equal<
 const publicValidatorTakesOneArgument: PublicValidatorTakesOneArgument = true;
 
 assert.equal(MEMORY_ROOT, '/memories');
-assert.equal(runtimePackage.version, '1.1.0');
+assert.equal(runtimePackage.version, '1.0.0');
 assert.equal(commandEnvironment({
   deploy: () => ({ cmd: 'true' }),
   destroy: () => ({ cmd: 'true' }),

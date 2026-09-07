@@ -465,7 +465,7 @@ const packageRules = new Map([
   ['@obversa/runtime', {
     directory: 'packages/runtime',
     kind: 'runtime',
-    version: '1.1.0',
+    version: '1.0.0',
     dependencies: [],
     peerDependencies: ['@obversa/engine', '@obversa/memory'],
     peerDependencyVersions: {
