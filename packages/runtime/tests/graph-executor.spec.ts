@@ -1639,7 +1639,7 @@ describe('durable engine attempt identities', () => {
 
   it('keeps an unknown primary null and starts each new position sequence at one', async () => {
     const run = await storedRun(definition({ completeAfter: 2 }));
-    const primary = new MockEngine(() => { throw new EngineError({ kind: 'auth', message: 'no answer' }); });
+    const primary = new MockEngine(() => { throw new EngineError({ kind: 'model-unavailable', message: 'no answer' }); });
     const fallback = new SelectedEngine(FALLBACK_SELECTION);
     const executor = await createGraphExecutor({
       ...run,
