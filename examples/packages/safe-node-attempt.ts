@@ -51,6 +51,10 @@ process.stdout.write(JSON.stringify({
 `;
 
 const OPENCODE_FIXTURE = `#!/usr/bin/env node
+if (process.argv.length === 3 && process.argv[2] === '--version') {
+  process.stdout.write('1.18.23\\n');
+  process.exit(0);
+}
 for await (const chunk of process.stdin) void chunk;
 const base = {
   timestamp: 1777777777777,

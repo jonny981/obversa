@@ -1,8 +1,60 @@
 #!/usr/bin/env node
 
-import { existsSync, readFileSync, writeFileSync } from 'node:fs';
+import {
+  appendFileSync,
+  chmodSync,
+  existsSync,
+  mkdirSync,
+  readFileSync,
+  writeFileSync,
+} from 'node:fs';
+import { dirname, join } from 'node:path';
 
 const args = process.argv.slice(2);
+
+function recordAdmissionInvocation(kind, stdin) {
+  const target = process.env.OBVERSA_TEST_OPENCODE_ADMISSION_RECORD;
+  if (!target) return;
+  appendFileSync(target, `${JSON.stringify({
+    kind,
+    executable: process.argv[1],
+    args,
+    stdin,
+    home: process.env.HOME,
+    configDirectory: process.env.OPENCODE_CONFIG_DIR,
+    config: JSON.parse(process.env.OPENCODE_CONFIG_CONTENT ?? '{}'),
+  })}\n`);
+}
+
+if (args.length === 1 && args[0] === '--version') {
+  recordAdmissionInvocation('version', readFileSync(0, 'utf8'));
+  if (process.env.OBVERSA_TEST_OPENCODE_VERSION_BLOCK_CLEANUP === '1') {
+    const barrier = join(dirname(process.env.HOME), 'cleanup-barrier');
+    mkdirSync(barrier);
+    writeFileSync(join(barrier, 'retained'), 'fixture');
+    chmodSync(barrier, 0o000);
+  }
+  const mode = process.env.OBVERSA_TEST_OPENCODE_VERSION_MODE;
+  if (mode === 'fail-once') {
+    const log = process.env.OBVERSA_TEST_OPENCODE_ADMISSION_RECORD;
+    const versions = readFileSync(log, 'utf8').trim().split('\n')
+      .map((line) => JSON.parse(line)).filter((call) => call.kind === 'version');
+    if (versions.length === 1) process.exit(1);
+  }
+  if (mode === 'hang') await new Promise(() => { setInterval(() => {}, 1_000); });
+  if (mode === 'overflow') {
+    process.stdout.write('x'.repeat(64 * 1_024));
+    await new Promise(() => { setInterval(() => {}, 1_000); });
+  }
+  if (mode === 'exit') {
+    process.stderr.write('fixture version failure; do not retain this text');
+    process.exit(1);
+  }
+  process.stdout.write(process.env.OBVERSA_TEST_OPENCODE_VERSION_STDOUT ?? '1.18.23\n');
+  process.exit(0);
+}
+
+recordAdmissionInvocation('model', null);
 
 function value(flag) {
   const index = args.indexOf(flag);
