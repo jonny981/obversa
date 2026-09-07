@@ -10,6 +10,11 @@ import { canonicalJson, digestJson, type JsonValue } from '../src/graph/value.js
 import { appendRunEvent, readRunEvents } from '../src/runtime/run-event.js';
 import { createStoredRunFixture, type StoredRunFixture } from './stored-run-fixture.js';
 
+// Real work: these tests write files to temporary directories on disk, so
+// this file declares its own time limit; the suite default is a hang guard,
+// not a speed bar.
+vi.setConfig({ testTimeout: 30_000 });
+
 let run: StoredRunFixture;
 let directory: string;
 

@@ -13,6 +13,12 @@ import { createGraphExecutor } from '../src/runtime/graph-executor.ts';
 import {
   crashFixture, reviewerTargets, runId, writerPosition, writerTarget,
 } from './graph-types-loop-crash-fixture.ts';
+import { vi } from 'vitest';
+
+// Real work: these tests write files to temporary directories on disk, so
+// this file declares its own time limit; the suite default is a hang guard,
+// not a speed bar.
+vi.setConfig({ testTimeout: 30_000 });
 
 const identity = ({ adapter, provider, modelFamily, model }: ExecutionTarget) => ({
   adapter, provider, modelFamily, model,

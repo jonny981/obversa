@@ -4,6 +4,11 @@ import { mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
+// Real work: these tests create temporary Git repositories and write files
+// to disk, so this file declares its own time limit; the suite default is a
+// hang guard, not a speed bar.
+vi.setConfig({ testTimeout: 30_000 });
+
 const ACTIVE_LEASE_REF = 'refs/obversa/workspace-lease/v1/active';
 const LEASE_REF_PREFIX = 'refs/obversa/workspace-lease';
 const updatedLeaseRefs = vi.hoisted(() => [] as string[]);

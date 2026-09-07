@@ -12,6 +12,12 @@ import {
 import type { ArtifactReference } from '../src/artifacts/store.js';
 import type { DomainEventEnvelope, EventStreamRef } from '../src/events/envelope.js';
 import type { JsonObject } from '../src/graph/value.js';
+import { vi } from 'vitest';
+
+// Real work: these tests write files to temporary directories on disk, so
+// this file declares its own time limit; the suite default is a hang guard,
+// not a speed bar.
+vi.setConfig({ testTimeout: 30_000 });
 
 type StoredEvent = DomainEventEnvelope<string, number, JsonObject>;
 

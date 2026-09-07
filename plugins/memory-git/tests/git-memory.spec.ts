@@ -17,6 +17,11 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { openGitMemory } from '../src/index.js';
 
+// Real work: these tests create temporary Git repositories and write files
+// to disk, so this file declares its own time limit; the suite default is a
+// hang guard, not a speed bar.
+vi.setConfig({ testTimeout: 30_000 });
+
 const repos: string[] = [];
 const temporaryDirectories: string[] = [];
 const gitBinary = execFileSync('which', ['git'], { encoding: 'utf8' }).trim();

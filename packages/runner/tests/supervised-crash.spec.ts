@@ -12,6 +12,12 @@ import {
 import { startSupervisedRun, type SupervisedRunHandle } from '../src/index.js';
 import { createLocalRunStorage } from '@obversa/runtime/storage/local';
 import { cleanupRepos, tmpRepo } from './git-helpers.js';
+import { vi } from 'vitest';
+
+// Real work: these tests create temporary Git repositories and write files
+// to disk, so this file declares its own time limit; the suite default is a
+// hang guard, not a speed bar.
+vi.setConfig({ testTimeout: 30_000 });
 
 const roots: string[] = [];
 const handles: SupervisedRunHandle[] = [];

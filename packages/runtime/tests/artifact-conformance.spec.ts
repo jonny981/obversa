@@ -10,6 +10,12 @@ import {
 } from '../src/artifacts/conformance.js';
 import { createLocalArtifactStore } from '../src/artifacts/file-store.js';
 import type { ArtifactStore } from '../src/artifacts/store.js';
+import { vi } from 'vitest';
+
+// Real work: these tests write files to temporary directories on disk, so
+// this file declares its own time limit; the suite default is a hang guard,
+// not a speed bar.
+vi.setConfig({ testTimeout: 30_000 });
 
 const roots: string[] = [];
 

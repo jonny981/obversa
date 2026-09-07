@@ -24,6 +24,12 @@ import type {
   RunOptions,
 } from '../src/api.ts';
 import { MockEngine, mockVerdict } from '../src/testing.ts';
+import { vi } from 'vitest';
+
+// Real work: these tests write files to temporary directories on disk, so
+// this file declares its own time limit; the suite default is a hang guard,
+// not a speed bar.
+vi.setConfig({ testTimeout: 30_000 });
 
 // A mock engine that is never expected to be called — lets engine-free
 // conditions (predicates, quorum-of-predicates, commandSucceeds) run without
