@@ -1,7 +1,7 @@
 {
   "name": "obversa",
   "private": true,
-  "description": "A process runtime for software teams.",
+  "description": "Model how your team really works. Durable agent workflows, reviews that send work back, no database needed.",
   "license": "MIT",
   "author": "Jonny Neill <jonnyneill@hotmail.com>",
   "type": "module",

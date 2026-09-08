@@ -1,29 +1,42 @@
 # Obversa
 
-A process runtime for software teams.
+**Model how your team really works.** Obversa gives your agents the shape of a
+real team: named roles, reviews that send work back to whoever owns the step, a
+vote when one opinion is not enough, and a person to answer to.
 
-Status: In build. Public docs in `docs/public/`.
+It runs on the engines you already use, and it keeps its whole record in plain
+files, so there is no server to stand up and no database to migrate.
 
-This workspace contains fourteen publishable packages, including six engine plugins:
+```ts
+// a reviewer fails a step and names the stage that must fix it
+kickback('implement', 'The export is missing its header row.');
 
-- `@obversa/runtime` provides a runtime API and a pure contract for outside graph types.
-- `@obversa/runner` supervises stored graph runs in bounded workers.
-- `@obversa/memory` defines a small memory contract.
-- `@obversa/memory-simple` stores memory in one process.
-- `@obversa/memory-git` stores memory in private Git references.
-- `@obversa/surfacer` runs one secure local surface session: one loopback server, one opaque result, host-native placement.
-- `@obversa/engine` defines the engine contract: one bounded call, typed failures, and structured results.
-- `@obversa/source` is the review surface: it opens a git diff for inline review and returns the annotations.
+// a panel passes when enough seats agree, and you set the number
+reviewPanel({ reviewers, pass: 2 });
+```
 
-The `plugins/` directory holds the engine adapters (Claude CLI, Codex, Grok CLI, Anthropic API, Agent SDK, OpenCode CLI) and the memory adapters (in-process and Git).
+Every step a run takes appends events to a file on disk, with its artifacts
+beside them. Kill a recorded run and start it again: it reads its own events and
+picks up at the step that was running.
 
-`@obversa/runtime` is the runtime. A process is a complete program that
-composes runtime jobs, graph forms, policies, and adapters.
+- **Site:** [obversa.ai](https://obversa.ai)
+- **Docs:** [docs.obversa.ai](https://docs.obversa.ai)
+- **Start here:** [your first run](https://docs.obversa.ai/get-started/first-run)
 
-Two workstreams run in parallel. Workstream 1 builds `@obversa/runtime` in
-`packages/runtime`. Workstream 2 builds host glue in `hosts/`, then the Surfacer
-and review surfaces. Full Obversa implementation starts after the runtime
-reaches version 1.0.0.
+## What is in this repository
+
+Fourteen publishable packages. `packages/` holds the six that define the
+product: `@obversa/runtime` is the runtime and its public contract,
+`@obversa/runner` supervises stored runs, `@obversa/engine` and `@obversa/memory`
+are the engine and memory contracts, and `@obversa/surfacer` and
+`@obversa/source` are the local review surface. `plugins/` holds the eight
+adapters: six engines, for Claude Code, Codex, Grok, OpenCode, the Anthropic API
+and the Agent SDK, and two memories, one in process and one in private Git
+references. `hosts/` holds the terminal host, which is not published.
+
+A page for every package is under
+[docs/public/packages](docs/public/packages), and [AGENTS.md](AGENTS.md) is the
+contributor guide.
 
 ## Requirements
 
