@@ -13,6 +13,7 @@ import { cleanupRepos, tmpRepo } from './git-helpers.js';
 // to disk, so this file declares its own time limit; the suite default is a
 // hang guard, not a speed bar.
 const TEST_TIMEOUT_MS = 30_000;
+const ENTERED_TIMEOUT_MS = 20_000;
 vi.setConfig({ testTimeout: TEST_TIMEOUT_MS, hookTimeout: TEST_TIMEOUT_MS });
 
 let control: string;
@@ -81,7 +82,7 @@ afterEach(async () => {
 });
 
 async function entered(): Promise<void> {
-  const events = watch(control, { signal: AbortSignal.timeout(TEST_TIMEOUT_MS) })[Symbol.asyncIterator]();
+  const events = watch(control, { signal: AbortSignal.timeout(ENTERED_TIMEOUT_MS) })[Symbol.asyncIterator]();
   try {
     if (existsSync(join(control, 'entered'))) return;
     while (!(await events.next()).done) {
@@ -93,7 +94,7 @@ async function entered(): Promise<void> {
 async function withinDeadline<T>(promise: Promise<T>): Promise<T> {
   let timer: ReturnType<typeof setTimeout>;
   const deadline = new Promise<never>((_, reject) => {
-    timer = setTimeout(() => reject(new Error('unrelated repository waited for the held repository')), TEST_TIMEOUT_MS);
+    timer = setTimeout(() => reject(new Error('unrelated repository waited for the held repository')), 2000);
   });
   try { return await Promise.race([promise, deadline]); }
   finally { clearTimeout(timer!); }

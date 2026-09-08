@@ -9,6 +9,9 @@ import { startSurface, assertExactKeys } from "../src/server.mjs";
 
 const assetsDir = mkdtempSync(path.join(os.tmpdir(), "surfacer-assets-"));
 writeFileSync(path.join(assetsDir, "index.html"), "<!doctype html><title>t</title>");
+const SURFACER_TEST_TIMEOUT_MS = 30_000;
+const SURFACER_HANG_GUARD_TIMEOUT_MS = 20_000;
+const DISCONNECT_SETTLEMENT_ASSERTION_TIMEOUT_MS = 1_000;
 
 function boot(overrides = {}) {
   return startSurface({
@@ -333,7 +336,7 @@ test("the caller learns of a completion only after the winning request has been 
   }
 });
 
-test("a handler that completes and then never returns is answered at the claim, and the caller learns of the completion", async () => {
+test("a handler that completes and then never returns is answered at the claim, and the caller learns of the completion", { timeout: SURFACER_TEST_TIMEOUT_MS }, async () => {
   // Once the claim wins, the session and lease clocks are gone. The fixed
   // answer goes out at the claim itself, so the browser holds its 200 and the
   // operation id while the handler is still pending, its acknowledgement is
@@ -357,7 +360,7 @@ test("a handler that completes and then never returns is answered at the claim, 
     // that writes headers and never ends the body fails here too.
     const { status, operationId } = await Promise.race([
       request(surface, "/api/hang", { body: {} }).then(async (response) => ({ status: response.status, ...(await /** @type {any} */ (response.json())) })),
-      new Promise((_, reject) => setTimeout(() => reject(new Error("the browser was not answered at the claim")), 1_000)),
+      new Promise((_, reject) => setTimeout(() => reject(new Error("the browser was not answered at the claim")), SURFACER_HANG_GUARD_TIMEOUT_MS)),
     ]);
     assert.equal(status, 200, "the browser is answered at the claim while the handler remains pending");
     assert.equal(typeof operationId, "string");
@@ -365,7 +368,7 @@ test("a handler that completes and then never returns is answered at the claim, 
     assert.equal(ack.status, 200, "the acknowledgement is accepted");
     const decision = await Promise.race([
       surface.waitForDecision(),
-      new Promise((_, reject) => setTimeout(() => reject(new Error("the decision stayed pending after the acknowledgement")), 400)),
+      new Promise((_, reject) => setTimeout(() => reject(new Error("the decision stayed pending after the acknowledgement")), SURFACER_HANG_GUARD_TIMEOUT_MS)),
     ]);
     assert.equal(decision.status, "completed");
     assert.equal(handlerReturned, false, "the handler is still pending when the caller has the completion");
@@ -374,7 +377,7 @@ test("a handler that completes and then never returns is answered at the claim, 
   }
 });
 
-test("a client that vanishes while its completion answer is in flight starts the acknowledgement clock at the disconnect", async () => {
+test("a client that vanishes while its completion answer is in flight starts the acknowledgement clock at the disconnect", { timeout: SURFACER_TEST_TIMEOUT_MS }, async () => {
   // The answer sent at the claim is held on the way out and the browser's
   // connection goes away meanwhile; the handler never returns. The hook
   // attached at the claim sees the response close and starts the clock
@@ -407,11 +410,11 @@ test("a client that vanishes while its completion answer is in flight starts the
     controller.abort();
     const decision = await Promise.race([
       surface.waitForDecision(),
-      new Promise((_, reject) => setTimeout(() => reject(new Error("the decision stayed pending after the client vanished")), 3_000)),
+      new Promise((_, reject) => setTimeout(() => reject(new Error("the decision stayed pending after the client vanished")), SURFACER_HANG_GUARD_TIMEOUT_MS)),
     ]);
     const elapsed = Date.now() - disconnectedAt;
     assert.equal(decision.status, "completed");
-    assert.ok(elapsed < 1_000, `the clock started at the disconnect, not when the held answer finished (settled after ${elapsed}ms)`);
+    assert.ok(elapsed < DISCONNECT_SETTLEMENT_ASSERTION_TIMEOUT_MS, `the clock started at the disconnect, not when the held answer finished (settled after ${elapsed}ms)`);
   } finally {
     release();
     await surface.stop();

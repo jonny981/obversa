@@ -14,6 +14,8 @@ import { parseArgs } from "../src/review-args.mjs";
 
 const COMMAND = fileURLToPath(new URL("../bin/obversa-review.mjs", import.meta.url));
 const NO_OPEN_TEST_TIMEOUT_MS = 25_000;
+const NO_OPEN_CHILD_TIMEOUT_MS = 20_000;
+const NO_OPEN_FETCH_TIMEOUT_MS = 10_000;
 
 test("parseArgs accepts the documented shapes", () => {
   assert.equal(parseArgs([]).mode, "worktree");
@@ -86,7 +88,7 @@ test("--no-open prints the reachable page URL on stderr and never runs placement
     child = spawn(process.execPath, [COMMAND, "--no-open", "--cwd", directory], {
       env: { ...process.env, OBVERSA_SURFACE_BIN: placement },
       stdio: ["ignore", "pipe", "pipe"],
-      timeout: NO_OPEN_TEST_TIMEOUT_MS,
+      timeout: NO_OPEN_CHILD_TIMEOUT_MS,
     });
     exited = new Promise((resolve, reject) => {
       child.once("error", reject);
@@ -96,28 +98,41 @@ test("--no-open prints the reachable page URL on stderr and never runs placement
     let stderr = "";
     child.stdout.on("data", (chunk) => { stdout += chunk; });
     const url = await new Promise((resolve, reject) => {
+      const pageUrlStarted = Date.now();
+      const timer = setTimeout(() => reject(new Error(`no page URL on stderr: ${stderr}`)), NO_OPEN_FETCH_TIMEOUT_MS);
       child.stderr.on("data", (chunk) => {
         stderr += chunk;
         const match = /Open the review surface at: (\S+)/.exec(stderr);
-        if (match) resolve(new URL(match[1]));
+        if (match) {
+          clearTimeout(timer);
+          console.log(`F15 review-cli page URL wait: ${Date.now() - pageUrlStarted}ms`);
+          resolve(new URL(match[1]));
+        }
       });
-      exited.then(() => reject(new Error(`command closed before URL: ${stderr}`)), reject);
+      exited.then(() => { clearTimeout(timer); reject(new Error(`command closed before URL: ${stderr}`)); }, reject);
     });
     assert.ok(url.hash.length > 1, "the page URL carries its access token");
     const headers = { Authorization: `Bearer ${url.hash.slice(1)}`, Origin: url.origin, "Content-Type": "application/json" };
-    const model = await fetch(`${url.origin}/api/model`, { headers });
+    const modelStarted = Date.now();
+    const model = await fetch(`${url.origin}/api/model`, { headers, signal: AbortSignal.timeout(NO_OPEN_FETCH_TIMEOUT_MS) });
+    console.log(`F15 review-cli model fetch: ${Date.now() - modelStarted}ms`);
     assert.equal(model.status, 200, "the URL reaches the review's authenticated model");
     const body = /** @type {{ model: { files: { path: string }[] } }} */ (await model.json());
     assert.equal(body.model.files[0].path, "a.txt");
+    const submitStarted = Date.now();
     const submitted = await fetch(`${url.origin}/api/submit`, {
       method: "POST", headers,
+      signal: AbortSignal.timeout(NO_OPEN_FETCH_TIMEOUT_MS),
       body: JSON.stringify({ decision: "approved", annotations: [] }),
     });
+    console.log(`F15 review-cli submit fetch: ${Date.now() - submitStarted}ms`);
     assert.equal(submitted.status, 200);
     const { operationId } = /** @type {{ operationId: string }} */ (await submitted.json());
+    const ackStarted = Date.now();
     const acknowledged = await fetch(`${url.origin}/api/ack`, {
-      method: "POST", headers, body: JSON.stringify({ operationId }),
+      method: "POST", headers, signal: AbortSignal.timeout(NO_OPEN_FETCH_TIMEOUT_MS), body: JSON.stringify({ operationId }),
     });
+    console.log(`F15 review-cli ack fetch: ${Date.now() - ackStarted}ms`);
     assert.equal(acknowledged.status, 200);
     assert.deepEqual(await exited, { code: 0, signal: null }, stderr);
     assert.match(stdout, /<<<REVIEW_RESULT_V1>>>/);

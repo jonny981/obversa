@@ -10,6 +10,7 @@ import { afterEach, expect, it, vi } from 'vitest';
 // this file declares its own time limit; the suite default is a hang guard,
 // not a speed bar.
 const TEST_TIMEOUT_MS = 30_000;
+const TARGET_WRITE_TIMEOUT_MS = 10_000;
 vi.setConfig({ testTimeout: TEST_TIMEOUT_MS, hookTimeout: TEST_TIMEOUT_MS });
 
 const approvalDefinition = vi.hoisted(() => ({ version: undefined as number | undefined }));
@@ -72,7 +73,7 @@ it.each([[0, false, false], [1, false, false], [0, true, false], [0, false, true
     child.stdout!.resume();
     closed = new Promise((resolve) => child!.once('close', (code, childSignal) => resolve({ code, signal: childSignal })));
     const written = await new Promise<{ actionId: string; targetId: string }>((resolve, reject) => {
-      const timer = setTimeout(() => reject(new Error(`Target write did not finish: ${stderr}`)), TEST_TIMEOUT_MS);
+      const timer = setTimeout(() => reject(new Error(`Target write did not finish: ${stderr}`)), TARGET_WRITE_TIMEOUT_MS);
       child!.once('error', (error) => { clearTimeout(timer); reject(error); });
       child!.once('exit', (code, childSignal) => {
         clearTimeout(timer);
@@ -198,7 +199,7 @@ it.each([[0, false, false], [1, false, false], [0, true, false], [0, false, true
     if (closed) await closed;
     await rm(directory, { recursive: true, force: true });
   }
-}, 30_000);
+}, TEST_TIMEOUT_MS);
 
 it.each(['changed content', 'malformed JSON'] as const)(
   'keeps a recorded readback mismatch paused after bytes are repaired and plain resume is called (%s)', async (damage) => {

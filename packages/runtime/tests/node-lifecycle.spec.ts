@@ -42,6 +42,8 @@ import {
 import { defineResultContract } from '../src/runtime/result-contract.ts';
 import type { GraphEngineIdentity } from '../src/graph/type.ts';
 
+const INCOMPLETE_RESULT_DELAY_MS = 31;
+
 // Real work: these tests create temporary Git repositories and write files
 // to disk, so this file declares its own time limit; the suite default is a
 // hang guard, not a speed bar.
@@ -832,7 +834,7 @@ describe('node attempt lifecycle', () => {
         setTimeout(() => reject(new EngineIncompleteResultError(
           'partial result arrived too late',
           success('partial answer'),
-        )), 31);
+        )), INCOMPLETE_RESULT_DELAY_MS);
       });
     });
     const recordEngineAttempt = vi.fn(async () => {});

@@ -18,6 +18,7 @@ import {
 // this file declares its own time limit; the suite default is a hang guard,
 // not a speed bar.
 const TEST_TIMEOUT_MS = 30_000;
+const WRITER_START_TIMEOUT_MS = 10_000;
 vi.setConfig({ testTimeout: TEST_TIMEOUT_MS, hookTimeout: TEST_TIMEOUT_MS });
 
 const identity = ({ adapter, provider, modelFamily, model }: ExecutionTarget) => ({
@@ -40,7 +41,7 @@ it('resumes an engine-backed writer killed before its receipt and completes with
   });
   try {
     await new Promise<void>((resolve, reject) => {
-      const timer = setTimeout(() => reject(new Error(`Writer did not enter engine.run: ${stderr}`)), TEST_TIMEOUT_MS);
+      const timer = setTimeout(() => reject(new Error(`Writer did not enter engine.run: ${stderr}`)), WRITER_START_TIMEOUT_MS);
       child.once('error', (error) => { clearTimeout(timer); reject(error); });
       child.once('exit', (code, signal) => {
         clearTimeout(timer);
