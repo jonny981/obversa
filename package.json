@@ -76,6 +76,7 @@
     "verify:f11": "pnpm verify:d15",
     "verify:f10": "pnpm verify:d15",
     "verify:f14": "pnpm verify:d15",
+    "verify:f15": "pnpm verify:d15",
     "verify:d22": "pnpm verify:d15",
     "changeset": "changeset",
     "version-packages": "changeset version",

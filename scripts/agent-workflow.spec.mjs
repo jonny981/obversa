@@ -89,6 +89,7 @@ for (const [stage, branch] of [
   ['F11', 'feat/transient-phase-tests'],
   ['F10', 'feat/release-1-1-0'],
   ['F14', 'feat/real-work-test-limits'],
+  ['F15', 'feat/browser-proof-budgets'],
   ['D22', 'feat/feature-delivery-example'],
   ['D13', 'feat/lines-v1'],
   ['D11A', 'feat/lines-v1'],
@@ -128,6 +129,7 @@ for (const [stage, branch] of [
   ['F11', 'feat/factory-v1'],
   ['F10', 'feat/factory-v1'],
   ['F14', 'feat/factory-v1'],
+  ['F15', 'feat/factory-v1'],
   ['D22', 'feat/lines-v1'],
 ]) {
   test(`${stage} refuses the wrong branch ${branch}`, () => {
