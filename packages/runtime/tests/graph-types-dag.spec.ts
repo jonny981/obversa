@@ -5,7 +5,7 @@ import { join } from 'node:path';
 
 import { EngineError, type EngineSelectionRecord } from '@obversa/engine';
 import { MockEngine } from '@obversa/engine/testing';
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import type { GraphCommand } from '../src/graph/commands.ts';
 import type { NodeId } from '../src/graph/kernel.ts';
@@ -38,12 +38,11 @@ import {
   type DagRequirements,
   type DagStatus,
 } from '../src/graph-types/dag.ts';
-import { vi } from 'vitest';
 
 // Real work: these tests write files to temporary directories on disk, so
 // this file declares its own time limit; the suite default is a hang guard,
 // not a speed bar.
-vi.setConfig({ testTimeout: 30_000 });
+vi.setConfig({ testTimeout: 30_000, hookTimeout: 30_000 });
 
 function nodeState(
   status: DagNodeState['status'],

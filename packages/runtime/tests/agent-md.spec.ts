@@ -1,15 +1,14 @@
-import { describe, it, expect, beforeAll, afterAll } from 'vitest';
+import { describe, it, expect, beforeAll, afterAll, vi } from 'vitest';
 import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
 import { defineAgentFromMarkdown, LoopError } from '../src/api.ts';
-import { vi } from 'vitest';
 
 // Real work: these tests write files to temporary directories on disk, so
 // this file declares its own time limit; the suite default is a hang guard,
 // not a speed bar.
-vi.setConfig({ testTimeout: 30_000 });
+vi.setConfig({ testTimeout: 30_000, hookTimeout: 30_000 });
 
 // defineAgentFromMarkdown loads a Claude Code agent .md (frontmatter + body)
 // into a validated AgentDef. The parser is hand-rolled and deliberately

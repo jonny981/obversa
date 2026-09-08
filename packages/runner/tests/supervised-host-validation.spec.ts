@@ -3,18 +3,17 @@ import { chmod, mkdtemp, mkdir, rm, symlink, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
-import { afterEach, expect, it } from 'vitest';
+import { afterEach, expect, it, vi } from 'vitest';
 import { compileGraph, dagGraphType, persistRunDefinition, resolveGraphPlan } from '@obversa/runtime';
 import { createLocalRunStorage } from '@obversa/runtime/storage/local';
 
 import { readSupervisedRunStatus } from '../src/index.js';
 import { resolveHostModule } from '../src/supervised-record.js';
-import { vi } from 'vitest';
 
 // Real work: these tests write files to temporary directories on disk, so
 // this file declares its own time limit; the suite default is a hang guard,
 // not a speed bar.
-vi.setConfig({ testTimeout: 30_000 });
+vi.setConfig({ testTimeout: 30_000, hookTimeout: 30_000 });
 
 const roots: string[] = [];
 const policy = {

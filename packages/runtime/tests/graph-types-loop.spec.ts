@@ -4,7 +4,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
 import { EngineError, assistantResult, engineSelection, reportedUsage, type EngineSelectionRecord } from '@obversa/engine';
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import type { GraphCommand } from '../src/graph/commands.ts';
 import type { NodeId } from '../src/graph/kernel.ts';
@@ -34,12 +34,11 @@ import {
   type LoopNodeState,
   type SeatRecord,
 } from '../src/graph-types/loop.ts';
-import { vi } from 'vitest';
 
 // Real work: these tests write files to temporary directories on disk, so
 // this file declares its own time limit; the suite default is a hang guard,
 // not a speed bar.
-vi.setConfig({ testTimeout: 30_000 });
+vi.setConfig({ testTimeout: 30_000, hookTimeout: 30_000 });
 
 function nodeState(
   status: LoopNodeState['status'],
@@ -2295,7 +2294,6 @@ describe('convergence graph type', () => {
     expect(failureCodes).toEqual(['EFFECT_FAILED']);
   });
 });
-
 
 type ReportedIdentity = Pick<EngineSelectionRecord, 'adapter' | 'provider' | 'modelFamily' | 'model'>;
 type EngineReply = JsonObject | EngineError | (() => JsonObject | EngineError);

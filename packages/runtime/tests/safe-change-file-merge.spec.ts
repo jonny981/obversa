@@ -3,7 +3,7 @@ import { mkdtemp, readFile, realpath, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
-import { expect, it } from 'vitest';
+import { expect, it, vi } from 'vitest';
 
 import { openSafeChangeRun } from '../../../examples/safe-change/recipe.js';
 import {
@@ -12,12 +12,11 @@ import {
 import type { ArtifactReference } from '../src/artifacts/store.js';
 import type { DomainEventEnvelope, EventStreamRef } from '../src/events/envelope.js';
 import type { JsonObject } from '../src/graph/value.js';
-import { vi } from 'vitest';
 
 // Real work: these tests write files to temporary directories on disk, so
 // this file declares its own time limit; the suite default is a hang guard,
 // not a speed bar.
-vi.setConfig({ testTimeout: 30_000 });
+vi.setConfig({ testTimeout: 30_000, hookTimeout: 30_000 });
 
 type StoredEvent = DomainEventEnvelope<string, number, JsonObject>;
 

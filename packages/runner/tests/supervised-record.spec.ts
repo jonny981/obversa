@@ -1,17 +1,16 @@
 import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { expect, it } from 'vitest';
+import { expect, it, vi } from 'vitest';
 
 import type { EventStore } from '@obversa/runtime';
 import { readSupervision, supervisionWriter, supervisedElapsedMs } from '../src/supervised-record.js';
 import { createLocalRunStorage } from '@obversa/runtime/storage/local';
-import { vi } from 'vitest';
 
 // Real work: these tests write files to temporary directories on disk, so
 // this file declares its own time limit; the suite default is a hang guard,
 // not a speed bar.
-vi.setConfig({ testTimeout: 30_000 });
+vi.setConfig({ testTimeout: 30_000, hookTimeout: 30_000 });
 
 const timestamp = (ms: number) => new Date(ms).toISOString();
 const timed = (type: string, ms: number) => ({ type: `runner:${type}`, timestamp: timestamp(ms) });

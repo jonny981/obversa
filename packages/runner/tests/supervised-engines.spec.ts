@@ -2,18 +2,17 @@ import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { EngineError, EngineIncompleteResultError, type AgentRequest, type AgentResult, type Engine } from '@obversa/engine';
 import { validateArtifactReference, type JsonObject, type GraphEngineBinding, type RunStorageBinding } from '@obversa/runtime';
 import { createLocalRunStorage } from '@obversa/runtime/storage/local';
 import { superviseEngines } from '../src/supervised-engines.js';
 import { readSupervision, supervisionWriter } from '../src/supervised-record.js';
-import { vi } from 'vitest';
 
 // Real work: these tests write files to temporary directories on disk, so
 // this file declares its own time limit; the suite default is a hang guard,
 // not a speed bar.
-vi.setConfig({ testTimeout: 30_000 });
+vi.setConfig({ testTimeout: 30_000, hookTimeout: 30_000 });
 
 const selection = {
   adapter: 'fixture', adapterVersion: '1', provider: 'provider', modelFamily: 'family',

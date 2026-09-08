@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { createAcceptedResultRecord } from '../src/proof/acceptance.js';
 import { writeProofArtifact } from '../src/proof/artifact.js';
@@ -11,6 +11,12 @@ import {
   recordFixtureCompletions,
   type StoredRunFixture,
 } from './stored-run-fixture.js';
+
+// Real work: these tests write files to temporary directories on disk, so
+// this file declares its own time limit; the suite default is a hang guard,
+// not a speed bar.
+vi.setConfig({ testTimeout: 30_000, hookTimeout: 30_000 });
+
 
 const hash = (digit: string): Sha256Digest => `sha256:${digit.repeat(64)}` as Sha256Digest;
 

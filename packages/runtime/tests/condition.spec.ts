@@ -1,7 +1,7 @@
 import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi } from 'vitest';
 
 import {
   run,
@@ -24,12 +24,11 @@ import type {
   RunOptions,
 } from '../src/api.ts';
 import { MockEngine, mockVerdict } from '../src/testing.ts';
-import { vi } from 'vitest';
 
 // Real work: these tests write files to temporary directories on disk, so
 // this file declares its own time limit; the suite default is a hang guard,
 // not a speed bar.
-vi.setConfig({ testTimeout: 30_000 });
+vi.setConfig({ testTimeout: 30_000, hookTimeout: 30_000 });
 
 // A mock engine that is never expected to be called — lets engine-free
 // conditions (predicates, quorum-of-predicates, commandSucceeds) run without

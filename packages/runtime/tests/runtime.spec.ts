@@ -1,4 +1,4 @@
-import { afterAll, describe, it, expect } from 'vitest';
+import { afterAll, describe, it, expect, vi } from 'vitest';
 import {
   existsSync,
   mkdtempSync,
@@ -21,12 +21,11 @@ import type { Engine, RunOptions } from '../src/api.ts';
 import { MockEngine, MockEnvironment } from '../src/testing.ts';
 import { cleanupRepos, tmpBareDir } from './git-helpers.ts';
 import { fixtureResult, fixtureUsage } from './engine-fixture.ts';
-import { vi } from 'vitest';
 
 // Real work: these tests create temporary Git repositories and write files
 // to disk, so this file declares its own time limit; the suite default is a
 // hang guard, not a speed bar.
-vi.setConfig({ testTimeout: 30_000 });
+vi.setConfig({ testTimeout: 30_000, hookTimeout: 30_000 });
 
 afterAll(cleanupRepos);
 

@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { execa } from 'execa';
 import { mkdir, mkdtemp, readFile, realpath, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
@@ -7,12 +7,11 @@ import { basename, dirname, join } from 'node:path';
 import { runWorkspaceProviderConformance } from '../src/workspace/conformance.js';
 import { createGitWorktreeProvider } from '../src/workspace/git-provider.js';
 import type { WorkspaceAnchor } from '../src/workspace/provider.js';
-import { vi } from 'vitest';
 
 // Real work: these tests create temporary Git repositories and write files
 // to disk, so this file declares its own time limit; the suite default is a
 // hang guard, not a speed bar.
-vi.setConfig({ testTimeout: 30_000 });
+vi.setConfig({ testTimeout: 30_000, hookTimeout: 30_000 });
 
 const roots: string[] = [];
 
