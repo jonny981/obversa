@@ -3,6 +3,11 @@ import { dirname, join } from 'node:path';
 import { expect, it, vi } from 'vitest';
 import type { WorkspaceProvider } from '@obversa/runtime';
 
+// Real work: these tests run the real supervised example, which creates a
+// Git repository and writes files to disk, so this file declares its own
+// time limit; the suite default is a hang guard, not a speed bar.
+vi.setConfig({ testTimeout: 30_000, hookTimeout: 30_000 });
+
 const fault = vi.hoisted(() => ({
   root: '',
   token: '',

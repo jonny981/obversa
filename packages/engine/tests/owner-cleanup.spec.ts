@@ -3,9 +3,14 @@ import { existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import { join } from 'node:path';
 import { setTimeout as delay } from 'node:timers/promises';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { cleanupFixture, fixtureDirectory, isProcessAlive } from './process-fixture.ts';
 import { inspectOwnerMarkedProcesses } from '../src/command/run.ts';
+
+// Real work: these tests build real process fixtures in temporary
+// directories on disk and write files to them, so this file declares its
+// own time limit; the suite default is a hang guard, not a speed bar.
+vi.setConfig({ testTimeout: 30_000, hookTimeout: 30_000 });
 
 const loader = createRequire(import.meta.url).resolve('tsx');
 const fixture = join(import.meta.dirname, 'fixtures/process-tree/owner.mjs');
@@ -62,7 +67,7 @@ describe.runIf(process.platform === 'darwin' || process.platform === 'linux')('c
       }
       cleanupFixture(directory);
     }
-  }, 20_000);
+  });
 
   it(process.platform === 'linux'
     ? 'cleans a detached nested command missed while its watchdog is stopped'
@@ -106,7 +111,7 @@ describe.runIf(process.platform === 'darwin' || process.platform === 'linux')('c
       }
       cleanupFixture(directory);
     }
-  }, 20_000);
+  });
 
   it('preserves inherited ownership without sweeping the worker or its sibling', async () => {
     const directory = fixtureDirectory();
@@ -121,5 +126,5 @@ describe.runIf(process.platform === 'darwin' || process.platform === 'linux')('c
       if (existsSync(join(directory, 'sibling.json'))) stop((await record(directory, 'sibling')).pid as number);
       cleanupFixture(directory);
     }
-  }, 20_000);
+  });
 });

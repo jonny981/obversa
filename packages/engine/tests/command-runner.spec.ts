@@ -20,6 +20,11 @@ import {
   waitForFixtureRecord,
 } from './process-fixture.ts';
 
+// Real work: these tests build real process fixtures in temporary
+// directories on disk and write files to them, so this file declares its
+// own time limit; the suite default is a hang guard, not a speed bar.
+vi.setConfig({ testTimeout: 30_000, hookTimeout: 30_000 });
+
 const directories: string[] = [];
 const decoder = new TextDecoder();
 const ATTEMPT_ID =

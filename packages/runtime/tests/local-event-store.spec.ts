@@ -734,7 +734,7 @@ describe('local event store', () => {
       expect.stringMatching(/^process-(left|right)$/u),
       'process-next',
     ]);
-  }, 15_000);
+  });
 
   it('ignores a pre-link child orphan and exposes a fully linked child batch', async () => {
     const root = await temporaryRoot();
@@ -754,5 +754,5 @@ describe('local event store', () => {
     await expect(committed.result).resolves.toEqual({ status: 'ok', revision: 2 });
     expect((await collect(createLocalEventStore({ root }).read(stream)))
       .map((item) => item.eventId)).toEqual(['linked-a', 'linked-b']);
-  }, 15_000);
+  });
 });

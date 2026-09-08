@@ -34,7 +34,6 @@ import {
 // not a speed bar.
 vi.setConfig({ testTimeout: 30_000, hookTimeout: 30_000 });
 
-
 const hash = (digit: string): Sha256Digest => `sha256:${digit.repeat(64)}` as Sha256Digest;
 
 const workspaceAnchor: WorkspaceAnchor = {

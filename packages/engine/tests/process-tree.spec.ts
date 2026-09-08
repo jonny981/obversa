@@ -1,7 +1,7 @@
 import { spawn } from 'node:child_process';
 import { mkdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import {
   capturePipeOwnerProbe,
@@ -19,6 +19,11 @@ import {
   parentFixture,
   waitForFixtureRecord,
 } from './process-fixture.ts';
+
+// Real work: these tests build real process fixtures in temporary
+// directories on disk and write files to them, so this file declares its
+// own time limit; the suite default is a hang guard, not a speed bar.
+vi.setConfig({ testTimeout: 30_000, hookTimeout: 30_000 });
 
 const directories: string[] = [];
 const ATTEMPT_ID =

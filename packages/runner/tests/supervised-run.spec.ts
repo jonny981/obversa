@@ -118,7 +118,7 @@ async function pausedFixture(overrides: runtime.JsonObject = {}, maxDispatches =
 
 async function nodeStarted(directory: string, node = 'first') {
   const path = join(directory, 'scratch', `${node}.started`);
-  await expect.poll(() => readFile(path, 'utf8').catch(() => ''), { timeout: 5_000 }).not.toBe('');
+  await expect.poll(() => readFile(path, 'utf8').catch(() => ''), { timeout: 30_000 }).not.toBe('');
   const pid = Number((await readFile(path, 'utf8')).trim().split('\n').at(-1));
   return pid;
 }
@@ -353,7 +353,7 @@ describe('supervised local runs', () => {
       limits: { ...options.limits, timeoutMs: shutdown === 'timeout' ? 3_000 : options.limits.timeoutMs },
     });
     const marker = join(options.directory, 'scratch/worker-result-held');
-    await expect.poll(() => readFile(marker, 'utf8').catch(() => ''), { timeout: 5_000 }).not.toBe('');
+    await expect.poll(() => readFile(marker, 'utf8').catch(() => ''), { timeout: 30_000 }).not.toBe('');
     const pid = Number(await readFile(marker, 'utf8'));
     expect(() => process.kill(pid, 0)).not.toThrow();
     if (shutdown === 'stop') await handle.stop();
@@ -369,7 +369,7 @@ describe('supervised local runs', () => {
     const records = await readSupervision(createLocalRunStorage(options.storage), 'fixture');
     expect(records.at(-1)?.type).toBe('runner:completed');
     expect(() => process.kill(pid, 0)).toThrow();
-  }, 10_000);
+  });
 
   it.each(['default', 'start', 'resume'] as const)('worker environment forwards only selected names during %s', async (mode) => {
     const { options } = await fixture();
@@ -855,7 +855,7 @@ describe('supervised local runs', () => {
     for (const node of ['first', 'last']) {
       expect((await readFile(join(options.directory, `scratch/${node}.started`), 'utf8')).trim().split('\n')).toHaveLength(1);
     }
-  }, 15_000);
+  });
 
   it('elapsed budget exhausted before a settled pause refuses resume without another worker launch', async () => {
     const { options } = await fixture();
@@ -877,7 +877,7 @@ describe('supervised local runs', () => {
     const records = await readSupervision(createLocalRunStorage(options.storage), 'fixture');
     expect(records.filter((event) => event.type === 'runner:worker-launching')).toHaveLength(1);
     await expect(readFile(join(options.directory, 'scratch/last.started'))).rejects.toMatchObject({ code: 'ENOENT' });
-  }, 10_000);
+  });
 
   it('elapsed budget keeps execution spent across repeated genuine paused resumes', async () => {
     const { options } = await fixture();
@@ -900,7 +900,7 @@ describe('supervised local runs', () => {
     await nodeStarted(options.directory, 'last');
     await expect(resumed.done).resolves.toMatchObject({ kind: 'fail', code: 'TIMEOUT' });
     expect(await resumed.status()).toMatchObject({ remainingTimeoutMs: 0 });
-  }, 20_000);
+  });
 
   it('elapsed budget includes resumed crash backoff and replacement without a refill', async () => {
     const { options } = await fixture();
@@ -919,7 +919,7 @@ describe('supervised local runs', () => {
     expect(records.filter((event) => event.type === 'runner:worker-launching')).toHaveLength(3);
     expect(records.filter((event) => event.type === 'runner:backoff')).toHaveLength(1);
     expect((await readFile(join(options.directory, 'scratch/last.started'), 'utf8')).trim().split('\n')).toHaveLength(1);
-  }, 15_000);
+  });
 
   it('resume keeps dispatches spent before the pause', async () => {
     const { options, approvalFile } = await pausedFixture({ waitNode: 'first' }, 1);
@@ -1102,7 +1102,7 @@ describe('supervised local runs', () => {
         restart: { ...options.restart, maxRestarts: path === 'crash' ? 1 : 0 },
       });
       const childPath = join(options.directory, 'scratch/first.child');
-      await expect.poll(() => readFile(childPath, 'utf8').catch(() => ''), { timeout: 1_500 }).not.toBe('');
+      await expect.poll(() => readFile(childPath, 'utf8').catch(() => ''), { timeout: 30_000 }).not.toBe('');
       if (path === 'stop') await handle.stop();
       const result = await handle.done;
       if (path === 'completion') expect(result, JSON.stringify(result)).toMatchObject({ kind: 'complete' });
@@ -1508,5 +1508,5 @@ describe('supervised local runs', () => {
       await expect.poll(() => { try { kill(childPid, 0); return true; } catch { return false; } }).toBe(false);
       if (token !== undefined) await options.workspace.releaseLease(token);
     }
-  }, 15_000);
+  });
 });

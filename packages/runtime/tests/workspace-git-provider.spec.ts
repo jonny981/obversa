@@ -457,5 +457,5 @@ describe('git worktree provider', () => {
     expect(report.failures).toEqual([]);
     expect(report.ok).toBe(true);
     expect(report.cases).toBe(6);
-  }, 20_000);
+  });
 });

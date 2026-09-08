@@ -102,4 +102,4 @@ it('resumes an engine-backed writer killed before its receipt and completes with
     await closed;
     await rm(root, { recursive: true, force: true });
   }
-}, 20_000);
+});
