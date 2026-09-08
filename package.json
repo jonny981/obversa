@@ -73,6 +73,7 @@
     "verify:d13": "pnpm verify:d12 && pnpm --filter @obversa/runtime exec vitest run tests/acceptance.spec.ts tests/approval.spec.ts tests/callback-storage.spec.ts tests/proof-artifact.spec.ts tests/graph-types-loop.spec.ts tests/callback.spec.ts && pnpm example:proof-bound-approval",
     "verify:d14": "pnpm verify:d13 && pnpm --filter @obversa/runner test && pnpm example:runner && pnpm check:tarballs",
     "verify:d15": "pnpm verify:d14 && OBVERSA_TEST_REAL_PACK=1 pnpm test:tarballs && node scripts/changelog-gate.mjs",
+    "verify:d30": "pnpm docs:validate",
     "verify:f11": "pnpm verify:d15",
     "verify:f10": "pnpm verify:d15",
     "verify:f14": "pnpm verify:d15",
