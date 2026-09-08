@@ -153,6 +153,7 @@ export const EXPECTED_FILES = {
     'package/dist/core/progress.d.ts',
     'package/dist/core/redact.d.ts',
     'package/dist/core/stats.d.ts',
+    'package/dist/core/team.d.ts',
     'package/dist/core/text.d.ts',
     'package/dist/core/tournament.d.ts',
     'package/dist/core/types.d.ts',
