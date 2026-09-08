@@ -44,13 +44,37 @@ const CHROME_CANDIDATES = [
   "/usr/bin/chromium",
 ].filter(Boolean);
 const CHROME = CHROME_CANDIDATES.find((p) => existsSync(p));
-const BROWSER_TEST_TIMEOUT_MS = 90_000;
+const BROWSER_TEST_TIMEOUT_MS = 120_000;
 const BROWSER_RESULTS_TIMEOUT_MS = 60_000;
-const BROWSER_ACK_TIMEOUT_MS = 30_000;
-const BROWSER_RENDER_TIMEOUT_MS = 60_000;
-const DEVTOOLS_PORT_TIMEOUT_MS = 30_000;
-const DEVTOOLS_TARGET_TIMEOUT_MS = 30_000;
+const BROWSER_ACK_TIMEOUT_MS = 10_000;
+const BROWSER_RENDER_TIMEOUT_MS = 30_000;
+const DEVTOOLS_PORT_TIMEOUT_MS = 10_000;
+const DEVTOOLS_TARGET_TIMEOUT_MS = 10_000;
 const DEVTOOLS_FETCH_TIMEOUT_MS = 5_000;
+const BROWSER_SETUP_ALLOWANCE_MS = 14_000;
+const BROWSER_CLEANUP_ALLOWANCE_MS = 15_000;
+
+const BROWSER_TEST_CHAINS = {
+  render: [
+    ["setup", BROWSER_SETUP_ALLOWANCE_MS],
+    ["page post", BROWSER_RESULTS_TIMEOUT_MS],
+    ["DevTools port", DEVTOOLS_PORT_TIMEOUT_MS],
+    ["DevTools target", DEVTOOLS_TARGET_TIMEOUT_MS],
+    ["acknowledgement", BROWSER_ACK_TIMEOUT_MS],
+    ["cleanup", BROWSER_CLEANUP_ALLOWANCE_MS],
+  ],
+  cancel: [
+    ["setup", BROWSER_SETUP_ALLOWANCE_MS],
+    ["acknowledgement", BROWSER_ACK_TIMEOUT_MS],
+    ["cleanup", BROWSER_CLEANUP_ALLOWANCE_MS],
+  ],
+};
+
+assert.ok(BROWSER_RENDER_TIMEOUT_MS < BROWSER_RESULTS_TIMEOUT_MS, "the in-page probe must finish before the page-post guard");
+for (const [name, chain] of Object.entries(BROWSER_TEST_CHAINS)) {
+  const total = chain.reduce((sum, [, allowance]) => sum + allowance, 0);
+  assert.ok(total < BROWSER_TEST_TIMEOUT_MS, `${name} browser budget chain exceeds its test budget: ${total}ms >= ${BROWSER_TEST_TIMEOUT_MS}ms`);
+}
 
 const SURFACER_SERVER = new URL("../../surfacer/src/server.mjs", import.meta.url);
 const CLIENT_KIT = new URL("../../surfacer/src/client.mjs", import.meta.url);
@@ -190,7 +214,7 @@ async function devtools(profile, origin) {
     if (Date.now() - started > DEVTOOLS_PORT_TIMEOUT_MS) throw new Error("Chrome did not open a DevTools port");
     await new Promise((r) => setTimeout(r, 100));
   }
-  console.log(`F15 browser DevTools port wait: ${Date.now() - started}ms`);
+  console.log(`browser DevTools port wait: ${Date.now() - started}ms`);
   const port = Number(readFileSync(portFile, "utf8").split("\n")[0]);
   let page;
   const targetDeadline = Date.now() + DEVTOOLS_TARGET_TIMEOUT_MS;
@@ -204,8 +228,8 @@ async function devtools(profile, origin) {
       await new Promise((r) => setTimeout(r, 100));
       continue;
     }
-    console.log(`F15 DevTools target fetch: ${Date.now() - fetchStarted}ms`);
     page = targets.find((t) => t.type === "page" && t.url.startsWith(origin));
+    if (page) console.log(`browser DevTools target fetch: ${Date.now() - fetchStarted}ms`);
     if (!page) await new Promise((r) => setTimeout(r, 100));
   }
   if (!page) throw new Error("the review page is not a DevTools target");
@@ -370,10 +394,10 @@ test("the review surface renders under the exact CSP with zero violations and fi
 
     chrome = spawn(CHROME, ["--headless=new", "--disable-gpu", "--no-first-run", "--remote-debugging-port=0", `--user-data-dir=${profile}`, `${origin}/#${token}`], { stdio: "ignore" });
     const resultStarted = Date.now();
-    const resultTimeout = setTimeout(() => results.reject(new Error("the page posted no results within 60s")), BROWSER_RESULTS_TIMEOUT_MS);
+    const resultTimeout = setTimeout(() => results.reject(new Error(`the page posted no results within ${BROWSER_RESULTS_TIMEOUT_MS / 1000}s`)), BROWSER_RESULTS_TIMEOUT_MS);
     try {
       report = await results.promise;
-      console.log(`F15 browser page-post wait: ${Date.now() - resultStarted}ms`);
+      console.log(`browser page-post wait: ${Date.now() - resultStarted}ms`);
     } finally { clearTimeout(resultTimeout); }
     const dt = await devtools(profile, origin);
     try { keys = await keyboardRoute(dt); } finally { dt.close(); }
@@ -384,10 +408,10 @@ test("the review surface renders under the exact CSP with zero violations and fi
     }, BROWSER_ACK_TIMEOUT_MS);
     try {
       keys.payload = await submitted.promise;
-      console.log(`F15 browser submit acknowledgement: ${Date.now() - submittedStarted}ms`);
+      console.log(`browser submit acknowledgement: ${Date.now() - submittedStarted}ms`);
       const ackStarted = Date.now();
       keys.ack = await acked.promise;
-      console.log(`F15 browser return acknowledgement: ${Date.now() - ackStarted}ms`);
+      console.log(`browser return acknowledgement: ${Date.now() - ackStarted}ms`);
     } finally { clearTimeout(acknowledgementTimeout); }
   } finally {
     chrome?.kill("SIGKILL");
@@ -506,7 +530,7 @@ test("a page that cannot load its review cancels the session instead of holding 
     const acknowledgementTimeout = setTimeout(() => acked.reject(new Error(`the page never acknowledged a cancel; requests seen: ${seen.join(", ")}`)), BROWSER_ACK_TIMEOUT_MS);
     try {
       ack = await acked.promise;
-      console.log(`F15 browser cancel acknowledgement: ${Date.now() - acknowledgementStarted}ms`);
+      console.log(`browser cancel acknowledgement: ${Date.now() - acknowledgementStarted}ms`);
     } finally { clearTimeout(acknowledgementTimeout); }
   } finally {
     chrome?.kill("SIGKILL");

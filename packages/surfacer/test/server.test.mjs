@@ -9,9 +9,29 @@ import { startSurface, assertExactKeys } from "../src/server.mjs";
 
 const assetsDir = mkdtempSync(path.join(os.tmpdir(), "surfacer-assets-"));
 writeFileSync(path.join(assetsDir, "index.html"), "<!doctype html><title>t</title>");
-const SURFACER_TEST_TIMEOUT_MS = 30_000;
+const SURFACER_TEST_TIMEOUT_MS = 60_000;
 const SURFACER_HANG_GUARD_TIMEOUT_MS = 20_000;
-const DISCONNECT_SETTLEMENT_ASSERTION_TIMEOUT_MS = 1_000;
+const ACKNOWLEDGEMENT_SETTLEMENT_MAX_MS = 400;
+const DISCONNECT_SETTLEMENT_MAX_MS = 1_000;
+const SURFACER_SETUP_ALLOWANCE_MS = 5_000;
+const SURFACER_CLEANUP_ALLOWANCE_MS = 10_000;
+const SURFACER_TEST_CHAINS = {
+  completion: [
+    ["setup", SURFACER_SETUP_ALLOWANCE_MS],
+    ["response", SURFACER_HANG_GUARD_TIMEOUT_MS],
+    ["acknowledgement settlement", ACKNOWLEDGEMENT_SETTLEMENT_MAX_MS],
+    ["cleanup", SURFACER_CLEANUP_ALLOWANCE_MS],
+  ],
+  disconnect: [
+    ["setup", SURFACER_SETUP_ALLOWANCE_MS],
+    ["decision", SURFACER_HANG_GUARD_TIMEOUT_MS],
+    ["cleanup", SURFACER_CLEANUP_ALLOWANCE_MS],
+  ],
+};
+for (const [name, chain] of Object.entries(SURFACER_TEST_CHAINS)) {
+  const total = chain.reduce((sum, [, allowance]) => sum + allowance, 0);
+  assert.ok(total < SURFACER_TEST_TIMEOUT_MS, `${name} surfacer budget chain exceeds its test budget: ${total}ms >= ${SURFACER_TEST_TIMEOUT_MS}ms`);
+}
 
 function boot(overrides = {}) {
   return startSurface({
@@ -368,7 +388,7 @@ test("a handler that completes and then never returns is answered at the claim, 
     assert.equal(ack.status, 200, "the acknowledgement is accepted");
     const decision = await Promise.race([
       surface.waitForDecision(),
-      new Promise((_, reject) => setTimeout(() => reject(new Error("the decision stayed pending after the acknowledgement")), SURFACER_HANG_GUARD_TIMEOUT_MS)),
+      new Promise((_, reject) => setTimeout(() => reject(new Error("the decision stayed pending after the acknowledgement")), ACKNOWLEDGEMENT_SETTLEMENT_MAX_MS)),
     ]);
     assert.equal(decision.status, "completed");
     assert.equal(handlerReturned, false, "the handler is still pending when the caller has the completion");
@@ -414,7 +434,7 @@ test("a client that vanishes while its completion answer is in flight starts the
     ]);
     const elapsed = Date.now() - disconnectedAt;
     assert.equal(decision.status, "completed");
-    assert.ok(elapsed < DISCONNECT_SETTLEMENT_ASSERTION_TIMEOUT_MS, `the clock started at the disconnect, not when the held answer finished (settled after ${elapsed}ms)`);
+    assert.ok(elapsed < DISCONNECT_SETTLEMENT_MAX_MS, `the clock started at the disconnect, not when the held answer finished (settled after ${elapsed}ms)`);
   } finally {
     release();
     await surface.stop();

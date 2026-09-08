@@ -849,7 +849,7 @@ describe('node attempt lifecycle', () => {
     }), new AbortController().signal);
 
     await didStart;
-    await vi.advanceTimersByTimeAsync(31);
+    await vi.advanceTimersByTimeAsync(INCOMPLETE_RESULT_DELAY_MS);
     const record = await running;
 
     expect(record.status).toBe('failed');
