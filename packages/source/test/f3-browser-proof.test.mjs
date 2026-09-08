@@ -72,7 +72,7 @@ const BROWSER_TEST_CHAINS = {
 
 assert.ok(BROWSER_RENDER_TIMEOUT_MS < BROWSER_RESULTS_TIMEOUT_MS, "the in-page probe must finish before the page-post guard");
 for (const [name, chain] of Object.entries(BROWSER_TEST_CHAINS)) {
-  const total = chain.reduce((sum, [, allowance]) => sum + allowance, 0);
+  const total = chain.reduce((sum, [, allowance]) => sum + Number(allowance), 0);
   assert.ok(total < BROWSER_TEST_TIMEOUT_MS, `${name} browser budget chain exceeds its test budget: ${total}ms >= ${BROWSER_TEST_TIMEOUT_MS}ms`);
 }
 

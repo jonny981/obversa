@@ -25,7 +25,7 @@ const NO_OPEN_GUARD_CHAIN = [
   ["submit fetch", NO_OPEN_FETCH_TIMEOUT_MS],
   ["ack fetch", NO_OPEN_FETCH_TIMEOUT_MS],
 ];
-const noOpenChainMs = NO_OPEN_GUARD_CHAIN.reduce((sum, [, allowance]) => sum + allowance, NO_OPEN_SETUP_ALLOWANCE_MS + NO_OPEN_CLEANUP_ALLOWANCE_MS);
+const noOpenChainMs = NO_OPEN_GUARD_CHAIN.reduce((sum, [, allowance]) => sum + Number(allowance), NO_OPEN_SETUP_ALLOWANCE_MS + NO_OPEN_CLEANUP_ALLOWANCE_MS);
 assert.ok(noOpenChainMs < NO_OPEN_TEST_TIMEOUT_MS, `review-cli guard chain exceeds its test budget: ${noOpenChainMs}ms >= ${NO_OPEN_TEST_TIMEOUT_MS}ms`);
 
 test("parseArgs accepts the documented shapes", () => {
