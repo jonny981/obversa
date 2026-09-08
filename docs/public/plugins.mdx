@@ -1,0 +1,59 @@
+---
+title: "Plugins and tools"
+description: "One row per tool Obversa ships or drives: the six engines, the two memory adapters, the cmux host, and Plannotator."
+---
+
+One row per tool Obversa ships or drives. Each row says what the tool is,
+what a reader must have installed, and where the tool's own home is. The
+thirteen package pages under [Packages](/packages/runtime) stay the
+reference for every package.
+
+## Engines
+
+Each engine plugin runs one bounded engine request through one tool. Pick
+the tool a reader already has installed and authenticated.
+
+- **Claude Code.** `@obversa/engine-claude-cli` runs engine requests
+  through a fresh Claude CLI process. A reader needs Node.js 22.12 or
+  later and a Claude CLI installation with host authentication. Home:
+  [claude.com/code](https://claude.com/code).
+- **Codex CLI.** `@obversa/engine-codex` runs engine requests through a
+  fresh Codex CLI process. A reader needs Node.js 22.12 or later and a
+  Codex CLI installation with host authentication. Home:
+  [github.com/openai/codex](https://github.com/openai/codex).
+- **OpenCode CLI.** `@obversa/engine-opencode-cli` runs engine requests
+  through a fresh OpenCode CLI process. A reader needs Node.js 22.12 or
+  later, OpenCode CLI 1.18.23, and host-selected authentication. Home:
+  [opencode.ai](https://opencode.ai).
+- **Grok CLI.** `@obversa/engine-grok-cli` runs engine requests through a
+  fresh Grok CLI process. A reader needs Node.js 22.12 or later, Grok
+  CLI 1.0.5, and host-selected authentication.
+- **Anthropic API.** `@obversa/engine-anthropic-api` runs engine requests
+  through the Anthropic API. A reader needs Node.js 22.12 or later and an
+  Anthropic API key. Home:
+  [console.anthropic.com](https://console.anthropic.com).
+- **Claude Agent SDK.** `@obversa/engine-agent-sdk` runs engine requests
+  through the Claude Agent SDK, using the host's Claude Code
+  authentication. A reader needs Node.js 22.12 or later. Home:
+  [github.com/anthropics/claude-agent-sdk](https://github.com/anthropics/claude-agent-sdk).
+
+## Memory
+
+- **In-process memory.** `@obversa/memory-simple` stores memory in one
+  process. A reader needs nothing beyond the package.
+- **Git-backed memory.** `@obversa/memory-git` stores memory in private
+  Git references, so nothing lands in the working tree. A reader needs
+  Git installed.
+
+## Hosts and surfaces
+
+- **The cmux host.** The cmux glue opens the local web surface and the
+  Plannotator page as terminal splits, and opens one editor window with
+  the two Order workspace roots. A reader needs cmux installed. See
+  [The cmux host](/hosts/cmux).
+- **Plannotator.** Plannotator opens its own review page in a split
+  through the `PLANNOTATOR_BROWSER` environment variable the workspace
+  launcher binds, so every other link keeps the default browser. Home:
+  [github.com/backnotprop/plannotator](https://github.com/backnotprop/plannotator).
+  See [One route for
+  Plannotator](/hosts/cmux#one-route-for-plannotator).
