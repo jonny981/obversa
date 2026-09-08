@@ -13,6 +13,7 @@ import test from "node:test";
 import { parseArgs } from "../src/review-args.mjs";
 
 const COMMAND = fileURLToPath(new URL("../bin/obversa-review.mjs", import.meta.url));
+const NO_OPEN_TEST_TIMEOUT_MS = 25_000;
 
 test("parseArgs accepts the documented shapes", () => {
   assert.equal(parseArgs([]).mode, "worktree");
@@ -64,7 +65,7 @@ test("the command exits 0 on --help and prints usage on stdout", () => {
   assert.match(run.stdout, /Usage:/);
 });
 
-test("--no-open prints the reachable page URL on stderr and never runs placement", { timeout: 25_000 }, async () => {
+test("--no-open prints the reachable page URL on stderr and never runs placement", { timeout: NO_OPEN_TEST_TIMEOUT_MS }, async () => {
   const directory = mkdtempSync(path.join(os.tmpdir(), "review-cli-no-open-"));
   const calls = path.join(directory, "placement.calls");
   const placement = path.join(directory, "placement");
@@ -85,7 +86,7 @@ test("--no-open prints the reachable page URL on stderr and never runs placement
     child = spawn(process.execPath, [COMMAND, "--no-open", "--cwd", directory], {
       env: { ...process.env, OBVERSA_SURFACE_BIN: placement },
       stdio: ["ignore", "pipe", "pipe"],
-      timeout: 20_000,
+      timeout: NO_OPEN_TEST_TIMEOUT_MS,
     });
     exited = new Promise((resolve, reject) => {
       child.once("error", reject);
@@ -95,28 +96,27 @@ test("--no-open prints the reachable page URL on stderr and never runs placement
     let stderr = "";
     child.stdout.on("data", (chunk) => { stdout += chunk; });
     const url = await new Promise((resolve, reject) => {
-      const timer = setTimeout(() => reject(new Error(`no page URL on stderr: ${stderr}`)), 10_000);
       child.stderr.on("data", (chunk) => {
         stderr += chunk;
         const match = /Open the review surface at: (\S+)/.exec(stderr);
-        if (match) { clearTimeout(timer); resolve(new URL(match[1])); }
+        if (match) resolve(new URL(match[1]));
       });
-      exited.then(() => { clearTimeout(timer); reject(new Error(`command closed before URL: ${stderr}`)); }, reject);
+      exited.then(() => reject(new Error(`command closed before URL: ${stderr}`)), reject);
     });
     assert.ok(url.hash.length > 1, "the page URL carries its access token");
     const headers = { Authorization: `Bearer ${url.hash.slice(1)}`, Origin: url.origin, "Content-Type": "application/json" };
-    const model = await fetch(`${url.origin}/api/model`, { headers, signal: AbortSignal.timeout(5_000) });
+    const model = await fetch(`${url.origin}/api/model`, { headers });
     assert.equal(model.status, 200, "the URL reaches the review's authenticated model");
     const body = /** @type {{ model: { files: { path: string }[] } }} */ (await model.json());
     assert.equal(body.model.files[0].path, "a.txt");
     const submitted = await fetch(`${url.origin}/api/submit`, {
-      method: "POST", headers, signal: AbortSignal.timeout(5_000),
+      method: "POST", headers,
       body: JSON.stringify({ decision: "approved", annotations: [] }),
     });
     assert.equal(submitted.status, 200);
     const { operationId } = /** @type {{ operationId: string }} */ (await submitted.json());
     const acknowledged = await fetch(`${url.origin}/api/ack`, {
-      method: "POST", headers, signal: AbortSignal.timeout(5_000), body: JSON.stringify({ operationId }),
+      method: "POST", headers, body: JSON.stringify({ operationId }),
     });
     assert.equal(acknowledged.status, 200);
     assert.deepEqual(await exited, { code: 0, signal: null }, stderr);

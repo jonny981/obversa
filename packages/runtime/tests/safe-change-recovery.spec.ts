@@ -9,7 +9,8 @@ import { afterEach, expect, it, vi } from 'vitest';
 // Real work: these tests write files to temporary directories on disk, so
 // this file declares its own time limit; the suite default is a hang guard,
 // not a speed bar.
-vi.setConfig({ testTimeout: 30_000, hookTimeout: 30_000 });
+const TEST_TIMEOUT_MS = 30_000;
+vi.setConfig({ testTimeout: TEST_TIMEOUT_MS, hookTimeout: TEST_TIMEOUT_MS });
 
 const approvalDefinition = vi.hoisted(() => ({ version: undefined as number | undefined }));
 vi.mock('@obversa/runtime', async (importOriginal) => {
@@ -71,7 +72,7 @@ it.each([[0, false, false], [1, false, false], [0, true, false], [0, false, true
     child.stdout!.resume();
     closed = new Promise((resolve) => child!.once('close', (code, childSignal) => resolve({ code, signal: childSignal })));
     const written = await new Promise<{ actionId: string; targetId: string }>((resolve, reject) => {
-      const timer = setTimeout(() => reject(new Error(`Target write did not finish: ${stderr}`)), 10_000);
+      const timer = setTimeout(() => reject(new Error(`Target write did not finish: ${stderr}`)), TEST_TIMEOUT_MS);
       child!.once('error', (error) => { clearTimeout(timer); reject(error); });
       child!.once('exit', (code, childSignal) => {
         clearTimeout(timer);

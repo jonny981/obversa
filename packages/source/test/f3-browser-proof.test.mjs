@@ -44,6 +44,7 @@ const CHROME_CANDIDATES = [
   "/usr/bin/chromium",
 ].filter(Boolean);
 const CHROME = CHROME_CANDIDATES.find((p) => existsSync(p));
+const BROWSER_TEST_TIMEOUT_MS = 60_000;
 
 const SURFACER_SERVER = new URL("../../surfacer/src/server.mjs", import.meta.url);
 const CLIENT_KIT = new URL("../../surfacer/src/client.mjs", import.meta.url);
@@ -85,11 +86,11 @@ const SERVER_NEW = SERVER_OLD
 const PROBE = `(() => {
   const violations = [];
   document.addEventListener("securitypolicyviolation", (e) => violations.push(e.violatedDirective + " " + (e.blockedURI || "")));
-  const started = Date.now();
+  const deadline = Date.now() + ${BROWSER_TEST_TIMEOUT_MS};
   const tick = () => {
     const app = document.getElementById("app");
     const rendered = app && app.getAttribute("aria-busy") === "false" && document.querySelector(".row");
-    if (!rendered && Date.now() - started < 8000) return setTimeout(tick, 100);
+    if (!rendered && Date.now() < deadline) return setTimeout(tick, 100);
     const sections = document.querySelectorAll(".file");
     const jumps = document.querySelectorAll(".nav-jump");
     let flashed = false, clicked = null, sameFile = false, defLine = null, premise = false;
@@ -180,12 +181,12 @@ async function devtools(profile, origin) {
   const portFile = path.join(profile, "DevToolsActivePort");
   const started = Date.now();
   while (!existsSync(portFile)) {
-    if (Date.now() - started > 15_000) throw new Error("Chrome did not open a DevTools port");
+    if (Date.now() - started > BROWSER_TEST_TIMEOUT_MS) throw new Error("Chrome did not open a DevTools port");
     await new Promise((r) => setTimeout(r, 100));
   }
   const port = Number(readFileSync(portFile, "utf8").split("\n")[0]);
   let page;
-  for (let i = 0; i < 100 && !page; i += 1) {
+  for (let i = 0; i < BROWSER_TEST_TIMEOUT_MS / 100 && !page; i += 1) {
     const targets = /** @type {any} */ (await (await fetch(`http://127.0.0.1:${port}/json/list`)).json());
     page = targets.find((t) => t.type === "page" && t.url.startsWith(origin));
     if (!page) await new Promise((r) => setTimeout(r, 100));
@@ -291,7 +292,7 @@ test("the runtime's CSP in this proof is the one surfacer serves", async () => {
   assert.ok(serverSource.includes(`"Content-Security-Policy": "${CSP}"`), "surfacer's CSP changed; update this proof to match");
 });
 
-test("the review surface renders under the exact CSP with zero violations and file-scoped go-to-source", { skip: CHROME ? false : "Google Chrome is not installed", timeout: 60_000 }, async () => {
+test("the review surface renders under the exact CSP with zero violations and file-scoped go-to-source", { skip: CHROME ? false : "Google Chrome is not installed", timeout: BROWSER_TEST_TIMEOUT_MS }, async () => {
   const { model, meta, highlightCss } = await buildModel();
   const token = randomBytes(16).toString("hex");
   const clientKit = await readFile(CLIENT_KIT, "utf8");
@@ -351,12 +352,11 @@ test("the review surface renders under the exact CSP with zero violations and fi
     assert.equal((await fetch(`${origin}/highlight.css`)).status, 404);
 
     chrome = spawn(CHROME, ["--headless=new", "--disable-gpu", "--no-first-run", "--remote-debugging-port=0", `--user-data-dir=${profile}`, `${origin}/#${token}`], { stdio: "ignore" });
-    const timeout = setTimeout(() => results.reject(new Error("the page posted no results within 30s")), 30_000);
-    try { report = await results.promise; } finally { clearTimeout(timeout); }
+    report = await results.promise;
     const dt = await devtools(profile, origin);
     try { keys = await keyboardRoute(dt); } finally { dt.close(); }
-    const late = setTimeout(() => { submitted.reject(new Error("the page never returned the review")); acked.reject(new Error("the page never acknowledged the return")); }, 10_000);
-    try { keys.payload = await submitted.promise; keys.ack = await acked.promise; } finally { clearTimeout(late); }
+    keys.payload = await submitted.promise;
+    keys.ack = await acked.promise;
   } finally {
     chrome?.kill("SIGKILL");
     if (chrome) await new Promise((r) => { chrome.once("exit", r); setTimeout(r, 1500); });
@@ -412,7 +412,7 @@ test("the review surface renders under the exact CSP with zero violations and fi
   assert.deepEqual(keys.ack, { operationId: "op-submit" }, "the completion's operation id is acknowledged");
 });
 
-test("a page that cannot load its review cancels the session instead of holding the lease", { skip: CHROME ? false : "Google Chrome is not installed", timeout: 60_000 }, async () => {
+test("a page that cannot load its review cancels the session instead of holding the lease", { skip: CHROME ? false : "Google Chrome is not installed", timeout: BROWSER_TEST_TIMEOUT_MS }, async () => {
   // The model endpoint fails. The page must end the session — stop its
   // heartbeat, cancel, then acknowledge — so the caller receives a cancelled
   // result, rather than sit on an error while the heartbeat keeps the lease
@@ -470,8 +470,7 @@ test("a page that cannot load its review cancels the session instead of holding 
   let ack;
   try {
     chrome = spawn(CHROME, ["--headless=new", "--disable-gpu", "--no-first-run", `--user-data-dir=${profile}`, `${origin}/#${token}`], { stdio: "ignore" });
-    const timeout = setTimeout(() => acked.reject(new Error(`the page never acknowledged a cancel; requests seen: ${seen.join(", ")}`)), 30_000);
-    try { ack = await acked.promise; } finally { clearTimeout(timeout); }
+    ack = await acked.promise;
   } finally {
     chrome?.kill("SIGKILL");
     if (chrome) await new Promise((r) => { chrome.once("exit", r); setTimeout(r, 1500); });
