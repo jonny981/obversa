@@ -29,7 +29,7 @@ const SURFACER_TEST_CHAINS = {
   ],
 };
 for (const [name, chain] of Object.entries(SURFACER_TEST_CHAINS)) {
-  const total = chain.reduce((sum, [, allowance]) => sum + allowance, 0);
+  const total = chain.reduce((sum, [, allowance]) => sum + Number(allowance), 0);
   assert.ok(total < SURFACER_TEST_TIMEOUT_MS, `${name} surfacer budget chain exceeds its test budget: ${total}ms >= ${SURFACER_TEST_TIMEOUT_MS}ms`);
 }
 
