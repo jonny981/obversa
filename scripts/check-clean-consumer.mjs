@@ -690,6 +690,36 @@ async function main() {
     const directFeatureLine = JSON.parse(
       run('pnpm', ['exec', 'tsx', 'feature-delivery.line.ts'], { cwd: consumerDirectory }),
     );
+    const featureDenySource = featureExampleSource.replace(
+      '{ approved: true },',
+      '{ approved: false },',
+    );
+    await writeFile(
+      join(consumerDirectory, 'feature-delivery.deny.line.ts'),
+      featureDenySource,
+    );
+    const denyRun = spawnSync('pnpm', ['exec', 'tsx', 'feature-delivery.deny.line.ts'], {
+      cwd: consumerDirectory,
+      encoding: 'utf8',
+    });
+    assert.equal(denyRun.status, 1, denyRun.stdout + denyRun.stderr);
+    const featureDeny = JSON.parse(denyRun.stdout);
+    assert.equal(featureDeny.status, 'fail', 'a no-vote must not ship the change');
+    const featureRedSource = featureExampleSource.replace(
+      'const repaired = fixes.size > 0;',
+      'const repaired = false;',
+    );
+    await writeFile(
+      join(consumerDirectory, 'feature-delivery.red.line.ts'),
+      featureRedSource,
+    );
+    const redRun = spawnSync('pnpm', ['exec', 'tsx', 'feature-delivery.red.line.ts'], {
+      cwd: consumerDirectory,
+      encoding: 'utf8',
+    });
+    assert.equal(redRun.status, 1, redRun.stdout + redRun.stderr);
+    const featureRed = JSON.parse(redRun.stdout);
+    assert.equal(featureRed.status, 'fail', 'an unrepaired line must not pass');
     const compiledGraph = JSON.parse(
       run(process.execPath, ['dist/custom-graph.js'], { cwd: consumerDirectory }),
     );
@@ -835,12 +865,10 @@ async function main() {
       featureLine.implementRuns !== 2 ||
       featureLine.reviewRounds !== 2 ||
       featureLine.acceptedKickbacks !== 1 ||
-      featureLine.recordEvents !== 50 ||
       directFeatureLine.status !== 'pass' ||
       directFeatureLine.implementRuns !== 2 ||
       directFeatureLine.reviewRounds !== 2 ||
-      directFeatureLine.acceptedKickbacks !== 1 ||
-      directFeatureLine.recordEvents !== 50
+      directFeatureLine.acceptedKickbacks !== 1
     ) {
       throw new Error(
         `Packed consumer returned an invalid report: ${JSON.stringify({ report, productionLine, directProductionLine, featureLine, directFeatureLine })}`,

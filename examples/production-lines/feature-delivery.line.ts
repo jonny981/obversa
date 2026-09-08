@@ -5,18 +5,24 @@ import { join } from 'node:path';
 
 import {
   commandSucceeds,
-  createCallbackClient,
+  compileGraph,
   createCallbackGate,
+  createStoredCallbackClient,
+  dagGraphType,
   defineJob,
-  directRouter,
   fnJob,
   gateJob,
+  persistRunDefinition,
   pipeline,
+  resolveGraphPlan,
   reviewPanel,
   revisionRequest,
   run,
   type JobContext,
+  type Sha256Digest,
 } from '@obversa/runtime';
+import { defineGraphDefinition } from '@obversa/runtime/testing';
+import { createLocalRunStorage } from '@obversa/runtime/storage/local';
 
 // The request this line delivers. A host reads it from an issue tracker; the
 // stages below see it only through the criteria the analyse stage accepts.
@@ -40,6 +46,49 @@ function acceptedCriteria(ctx: JobContext): readonly Criterion[] {
   const value = ctx.state['criteria'];
   return Array.isArray(value) ? (value as readonly Criterion[]) : [];
 }
+
+// The approval record: the request, the claim, the answer and the digest are
+// durable events in their own store beside the run record, so a refused
+// approval is on the record, not in memory.
+const APPROVAL_RUN_ID = 'feature-delivery-approval';
+const APPROVAL_STORAGE_POLICY = {
+  schemaVersion: 1,
+  maxEventPayloadBytes: 64_000,
+  maxAppendBatchBytes: 128_000,
+  maxArtifactBytes: 1_000_000,
+  maxTotalArtifactBytesPerRun: 4_000_000,
+  retention: 'until-run-delete',
+  sensitiveContent: {
+    marked: 'reject',
+    exact: 'reject',
+    freeText: 'redact-before-hash',
+  },
+} as const;
+const APPROVAL_PACKAGE = {
+  source: 'npm:@example/feature-delivery',
+  version: '1.0.0',
+  digest: `sha256:${'f'.repeat(64)}` as Sha256Digest,
+};
+const approvalGraph = compileGraph(
+  dagGraphType,
+  defineGraphDefinition({
+    id: 'feature-delivery-approval',
+    definitionVersion: 1,
+    data: {
+      globalConcurrency: 1,
+      keyedConcurrency: {},
+      stopOnError: true,
+      retryCapPerNode: 0,
+    },
+    nodes: [{ id: 'approve', data: { kind: 'required', key: null } }],
+    edges: [],
+  }),
+);
+const approvalPlan = resolveGraphPlan(approvalGraph.describe(), {
+  package: APPROVAL_PACKAGE,
+  admission: { package: APPROVAL_PACKAGE, permissions: [] },
+  executionLanes: [],
+});
 
 // The first draft covers retry and cap but not abort — green on its own tests,
 // which is exactly the gap a review panel exists to catch.
@@ -171,6 +220,13 @@ const implement = fnJob('implement', async (ctx) => {
       .map((finding) => finding.scope)
       .filter((scope): scope is string => typeof scope === 'string'),
   );
+  const unsupported = [...fixes].filter((scope) => scope !== 'abort');
+  if (unsupported.length) {
+    return {
+      status: 'fail',
+      summary: `no repair for findings outside the abort criterion: ${unsupported.join(', ')}`,
+    };
+  }
   const repaired = fixes.size > 0;
   const root = ctx.workspace.dir;
   await mkdir(join(root, 'src'), { recursive: true });
@@ -195,7 +251,10 @@ const implement = fnJob('implement', async (ctx) => {
 // never on a worker's or a reviewer's self-report.
 const testStage = gateJob(
   'test',
-  commandSucceeds('node', ['--test', 'test/retry.test.js']),
+  commandSucceeds('node', ['--test', 'test/retry.test.js'], {
+    timeoutMs: 30_000,
+    captureOutput: true,
+  }),
 );
 
 // 4. Review: a panel of three reviewers, two votes required. A failing panel
@@ -264,6 +323,7 @@ const review = reviewPanel({
               findings: [
                 {
                   reviewer: 'api',
+                  scope: 'shape',
                   evidence: 'src/retry.js must export retry and MAX_ATTEMPTS.',
                 },
               ],
@@ -275,13 +335,31 @@ const review = reviewPanel({
   target: 'implement',
 });
 
-// 5. Approve: the change is approved as exact bytes through a callback gate.
-// The gate request carries the sha256 of the final source, so approving
-// anything else would be a different request. A host swaps the directRouter
-// for a human responder; the request, digest, and claim protocol are the same.
+// 5. Approve: the change ships only when the responder answers yes. The
+// request carries the sha256 of the final source, so approving anything else
+// would be a different request. The request, the claim, the answer and the
+// digest are durable events in the approval record beside the run record.
+// The stage reads the answer: a no fails the line with the reason. A host
+// swaps the scripted submit for a human responder; the request, digest and
+// claim protocol are the same.
 const approve = fnJob('approve', async (ctx) => {
   const bytes = await readFile(join(ctx.workspace.dir, 'src/retry.js'));
   const sha256 = createHash('sha256').update(bytes).digest('hex');
+  const storage = createLocalRunStorage({
+    directory: join(ctx.workspace.dir, 'approval-record'),
+    namespace: 'feature-delivery-example',
+    policy: APPROVAL_STORAGE_POLICY,
+  });
+  await persistRunDefinition(storage, {
+    runId: APPROVAL_RUN_ID,
+    eventId: 'feature-delivery-approval-started',
+    timestamp: '2026-01-01T00:00:00.000Z',
+    graphDefinition: approvalGraph.definition,
+    resolvedPlan: approvalPlan,
+    resolvedInputs: {},
+    workspaceBinding: null,
+    hostBinding: null,
+  });
   const request = createCallbackGate({
     gateId: 'ship-change',
     gateVersion: 1,
@@ -293,13 +371,29 @@ const approve = fnJob('approve', async (ctx) => {
     },
     input: { file: 'src/retry.js', sha256 },
   });
-  const client = createCallbackClient();
-  client.post(request);
-  const submitted = await directRouter(client, request, 'release-owner', () => ({
-    approved: true,
-  }));
+  const client = await createStoredCallbackClient(storage, APPROVAL_RUN_ID);
+  await client.post(request);
+  const claim = await client.claim(request.requestId, 'release-owner');
+  if (!claim.ok) {
+    return { status: 'fail', summary: `the approval could not be claimed: ${claim.kind}` };
+  }
+  const submitted = await client.submit(
+    request.requestId,
+    claim.claimToken,
+    'release-owner',
+    request.digest,
+    { approved: true },
+    { id: 'release-owner', kind: 'human' },
+  );
   if (!submitted.ok) {
-    return { status: 'fail', summary: `approval not submitted: ${submitted.reason}` };
+    return { status: 'fail', summary: `the approval was not submitted: ${submitted.reason}` };
+  }
+  const answer = submitted.response as { approved?: unknown };
+  if (answer.approved !== true) {
+    return {
+      status: 'fail',
+      summary: 'the approver answered no, so the change does not ship',
+    };
   }
   return {
     status: 'pass',
@@ -354,7 +448,6 @@ async function main(): Promise<void> {
           acceptedKickbacks: events.filter(
             (event) => event.kind === 'dag:kickback' && event.accepted === true,
           ).length,
-          recordEvents: events.length,
         },
         null,
         2,

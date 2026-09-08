@@ -32,3 +32,13 @@ test('clean consumer wires the safe-change production line', async () => {
   assert.match(source, /safe-change\.mdx/);
   assert.match(source, /compiledSafeChange/);
 });
+
+test('clean consumer wires the feature-delivery production line', async () => {
+  const source = await readFile(new URL('./check-clean-consumer.mjs', import.meta.url), 'utf8');
+  assert.match(source, /'feature-delivery\.line\.ts',/);
+  assert.match(source, /'feature-delivery\.mdx'/);
+  assert.match(source, /feature-delivery\.deny\.line\.ts/);
+  assert.match(source, /feature-delivery\.red\.line\.ts/);
+  assert.match(source, /featureLine\.acceptedKickbacks !== 1/);
+  assert.doesNotMatch(source, /recordEvents !== \d+/);
+});
