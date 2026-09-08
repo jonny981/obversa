@@ -1,27 +1,101 @@
-# Obversa
+<p align="center">
+  <img src="docs/public/logo-dark.svg" alt="Obversa" width="280">
+</p>
 
-**Model how your team really works.** Obversa gives your agents the shape of a
-real team: named roles, reviews that send work back to whoever owns the step, a
+<p align="center">
+  <strong>Model how your team really works.</strong>
+</p>
+
+<p align="center">
+  <img src="https://img.shields.io/badge/license-MIT-blue" alt="license: MIT">
+  <img src="https://img.shields.io/badge/node-%3E%3D22.12-3c873a" alt="node >=22.12">
+  <img src="https://img.shields.io/badge/TypeScript-strict-3178c6" alt="TypeScript strict">
+</p>
+
+Agent frameworks give you one clever session. When it dies, it starts over.
+Workflow engines give you durable steps and a server to run them on. Neither
+gives you a team: named roles, a review that returns work to whoever owns it, a
 vote when one opinion is not enough, and a person to answer to.
 
-It runs on the engines you already use, and it keeps its whole record in plain
-files, so there is no server to stand up and no database to migrate.
+That is the layer Obversa owns. You describe the work the way you would describe
+it to people, and the runtime runs it one bounded engine call at a time.
 
-```ts
-// a reviewer fails a step and names the stage that must fix it
-kickback('implement', 'The export is missing its header row.');
+Every step appends events to a file on disk, with its artifacts beside them.
+That record is the whole story: no server, no database. Kill a recorded run and
+start it again and it reads its own events, then picks up at the step that was
+running.
 
-// a panel passes when enough seats agree, and you set the number
-reviewPanel({ reviewers, pass: 2 });
+```bash
+pnpm add @obversa/runtime   # Node >= 22.12
 ```
 
-Every step a run takes appends events to a file on disk, with its artifacts
-beside them. Kill a recorded run and start it again: it reads its own events and
-picks up at the step that was running.
+## A feature, as one file
+
+Five named stages. The review is a panel of three, and a reviewer that fails a
+step names the stage that must fix it, so the work goes back to the stage that
+owns it rather than starting the run again.
+
+```ts
+import { pipeline, reviewPanel, kickback, createCallbackGate } from '@obversa/runtime';
+
+const review = reviewPanel({
+  label: 'review',
+  reviewers: [
+    { name: 'correctness', job: checks.correctness },
+    { name: 'safety', job: checks.safety },
+    { name: 'scope', job: checks.scope },
+  ],
+  pass: 2, // two of three agree and the step passes
+});
+
+export const featureDelivery = pipeline(
+  'feature-delivery',
+  [
+    { name: 'analyse', job: analyse },
+    { name: 'implement', job: implement },
+    { name: 'test', job: testStage },
+    { name: 'review', job: review },
+    { name: 'approve', job: approve }, // createCallbackGate: a person answers
+  ],
+  { maxKickbacks: 2 },
+);
+```
+
+A reviewer sends work back with one call, naming the stage and the reason:
+
+```ts
+kickback('implement', 'The export is missing its header row.');
+```
+
+Run the whole thing, offline and without a model:
+
+```bash
+pnpm example:feature
+```
+
+## Engines
+
+An engine binding names the adapter, the provider, the model family and the
+model. A review seat can be required to differ from the writer, so the model
+that wrote the work is not the model that grades it.
+
+| package | drives | needs |
+| --- | --- | --- |
+| `@obversa/engine-claude-cli` | the Claude CLI, one process per attempt | Claude CLI, host auth |
+| `@obversa/engine-codex` | the Codex CLI | Codex CLI, host auth |
+| `@obversa/engine-grok-cli` | the Grok CLI | Grok CLI 1.0.5 |
+| `@obversa/engine-opencode-cli` | the OpenCode CLI | OpenCode CLI 1.18.23 |
+| `@obversa/engine-anthropic-api` | the Anthropic API | an API key |
+| `@obversa/engine-agent-sdk` | the Claude Agent SDK | host Claude auth |
+
+Write your own against the engine contract; it must pass the conformance kit.
+
+## Where to go
 
 - **Site:** [obversa.ai](https://obversa.ai)
 - **Docs:** [docs.obversa.ai](https://docs.obversa.ai)
-- **Start here:** [your first run](https://docs.obversa.ai/get-started/first-run)
+- **Your first run:** [get started](https://docs.obversa.ai/get-started/first-run)
+- **Contributing:** [AGENTS.md](AGENTS.md)
 
 ## What is in this repository
 
@@ -30,13 +104,9 @@ product: `@obversa/runtime` is the runtime and its public contract,
 `@obversa/runner` supervises stored runs, `@obversa/engine` and `@obversa/memory`
 are the engine and memory contracts, and `@obversa/surfacer` and
 `@obversa/source` are the local review surface. `plugins/` holds the eight
-adapters: six engines, for Claude Code, Codex, Grok, OpenCode, the Anthropic API
-and the Agent SDK, and two memories, one in process and one in private Git
-references. `hosts/` holds the terminal host, which is not published.
-
-A page for every package is under
-[docs/public/packages](docs/public/packages), and [AGENTS.md](AGENTS.md) is the
-contributor guide.
+adapters: the six engines above and two memories, one in process and one in
+private Git references. `hosts/` holds the terminal host, which is not
+published.
 
 ## Requirements
 
