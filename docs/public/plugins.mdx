@@ -5,8 +5,7 @@ description: "One row per tool Obversa ships or drives: the six engines, the two
 
 One row per tool Obversa ships or drives. Each row says what the tool is,
 what a reader must have installed, and where the tool's own home is. The
-thirteen package pages under [Packages](/packages/runtime) stay the
-reference for every package.
+package pages under [Packages](/packages/runtime) stay the reference.
 
 ## Engines
 
@@ -27,7 +26,8 @@ the tool a reader already has installed and authenticated.
   [opencode.ai](https://opencode.ai).
 - **Grok CLI.** `@obversa/engine-grok-cli` runs engine requests through a
   fresh Grok CLI process. A reader needs Node.js 22.12 or later, Grok
-  CLI 1.0.5, and host-selected authentication.
+  CLI 1.0.5, and host-selected authentication. Home:
+  [docs.x.ai/build/cli/headless-scripting](https://docs.x.ai/build/cli/headless-scripting).
 - **Anthropic API.** `@obversa/engine-anthropic-api` runs engine requests
   through the Anthropic API. A reader needs Node.js 22.12 or later and an
   Anthropic API key. Home:
@@ -40,17 +40,22 @@ the tool a reader already has installed and authenticated.
 ## Memory
 
 - **In-process memory.** `@obversa/memory-simple` stores memory in one
-  process. A reader needs nothing beyond the package.
+  process. A reader needs Node.js 22.12 or later.
 - **Git-backed memory.** `@obversa/memory-git` stores memory in private
   Git references, so nothing lands in the working tree. A reader needs
-  Git installed.
+  Node.js 22.12 or later and Git installed.
 
 ## Hosts and surfaces
 
+- **The review command.** `@obversa/source` ships the `obversa-review`
+  command, which opens the working-tree diff for inline review. A reader
+  needs Node.js 22.12 or later. See [The review host](/hosts/review).
+
 - **The cmux host.** The cmux glue opens the local web surface and the
-  Plannotator page as terminal splits, and opens one editor window with
-  the two Order workspace roots. A reader needs cmux installed. See
-  [The cmux host](/hosts/cmux).
+  Plannotator page as browser splits beside the terminal, and opens one
+  editor window with the two Order workspace roots. Outside cmux, each
+  script falls back to the default browser. A reader needs cmux
+  installed. See [The cmux host](/hosts/cmux).
 - **Plannotator.** Plannotator opens its own review page in a split
   through the `PLANNOTATOR_BROWSER` environment variable the workspace
   launcher binds, so every other link keeps the default browser. Home:
