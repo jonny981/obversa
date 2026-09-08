@@ -1,5 +1,8 @@
 <p align="center">
-  <img src="docs/public/logo-dark.svg" alt="Obversa" width="280">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="docs/public/logo-dark.svg">
+    <img src="docs/public/logo-light.svg" alt="Obversa" width="280">
+  </picture>
 </p>
 
 <p align="center">
