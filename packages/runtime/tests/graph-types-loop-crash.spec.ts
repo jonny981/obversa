@@ -6,6 +6,7 @@ import { fileURLToPath } from 'node:url';
 
 import { expect, it, vi } from 'vitest';
 
+import { defineBudgetChain } from '../../../test-support/budget-chain.mjs';
 import type { DomainEventEnvelope } from '../src/events/envelope.ts';
 import type { ExecutionTarget } from '../src/graph/plan.ts';
 import type { JsonObject } from '../src/graph/value.ts';
@@ -18,7 +19,11 @@ import {
 // this file declares its own time limit; the suite default is a hang guard,
 // not a speed bar.
 const TEST_TIMEOUT_MS = 30_000;
-const WRITER_START_TIMEOUT_MS = 10_000;
+const WRITER_CHAIN = defineBudgetChain('writer crash', TEST_TIMEOUT_MS, {
+  setup: 5_000,
+  phases: [['writer readiness', 10_000], ['child exit', 5_000]],
+  cleanup: 5_000,
+});
 vi.setConfig({ testTimeout: TEST_TIMEOUT_MS, hookTimeout: TEST_TIMEOUT_MS });
 
 const identity = ({ adapter, provider, modelFamily, model }: ExecutionTarget) => ({
@@ -40,21 +45,18 @@ it('resumes an engine-backed writer killed before its receipt and completes with
     child.once('close', (code, signal) => resolve({ code, signal }));
   });
   try {
-    await new Promise<void>((resolve, reject) => {
-      const timer = setTimeout(() => reject(new Error(`Writer did not enter engine.run: ${stderr}`)), WRITER_START_TIMEOUT_MS);
-      child.once('error', (error) => { clearTimeout(timer); reject(error); });
+    await WRITER_CHAIN.run('writer readiness', () => new Promise<void>((resolve, reject) => {
+      child.once('error', reject);
       child.once('exit', (code, signal) => {
-        clearTimeout(timer);
         reject(new Error(`Writer exited before readiness (${code}/${signal}): ${stderr}`));
       });
       child.once('message', (message) => {
-        clearTimeout(timer);
         if (message !== 'writer-engine-entered') reject(new Error(`Unexpected writer marker: ${String(message)}`));
         else resolve();
       });
-    });
+    }));
     expect(child.kill('SIGKILL')).toBe(true);
-    expect(await closed).toEqual({ code: null, signal: 'SIGKILL' });
+    expect(await WRITER_CHAIN.run('child exit', () => closed)).toEqual({ code: null, signal: 'SIGKILL' });
 
     const calls: string[] = [];
     const fixture = crashFixture(root, calls);
@@ -101,7 +103,7 @@ it('resumes an engine-backed writer killed before its receipt and completes with
     expect(await readEvents()).toEqual(after);
   } finally {
     if (child.exitCode === null && child.signalCode === null) child.kill('SIGKILL');
-    await closed;
+    await WRITER_CHAIN.run('child exit', () => closed);
     await rm(root, { recursive: true, force: true });
   }
 });

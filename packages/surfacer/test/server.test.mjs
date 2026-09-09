@@ -6,6 +6,7 @@ import path from "node:path";
 import test from "node:test";
 
 import { startSurface, assertExactKeys } from "../src/server.mjs";
+import { defineBudgetChain } from "../../../test-support/budget-chain.mjs";
 
 const assetsDir = mkdtempSync(path.join(os.tmpdir(), "surfacer-assets-"));
 writeFileSync(path.join(assetsDir, "index.html"), "<!doctype html><title>t</title>");
@@ -13,25 +14,24 @@ const SURFACER_TEST_TIMEOUT_MS = 60_000;
 const SURFACER_HANG_GUARD_TIMEOUT_MS = 20_000;
 const ACKNOWLEDGEMENT_SETTLEMENT_MAX_MS = 400;
 const DISCONNECT_SETTLEMENT_MAX_MS = 1_000;
-const SURFACER_SETUP_ALLOWANCE_MS = 5_000;
-const SURFACER_CLEANUP_ALLOWANCE_MS = 10_000;
-const SURFACER_TEST_CHAINS = {
-  completion: [
-    ["setup", SURFACER_SETUP_ALLOWANCE_MS],
-    ["response", SURFACER_HANG_GUARD_TIMEOUT_MS],
+const SURFACER_COMPLETION_CLOCK_MS = 1_000;
+const SURFACER_COMPLETION_CHAIN = defineBudgetChain("surfacer completion", SURFACER_TEST_TIMEOUT_MS, {
+  setup: 5_000,
+  phases: [
+    ["response", 400],
     ["acknowledgement settlement", ACKNOWLEDGEMENT_SETTLEMENT_MAX_MS],
-    ["cleanup", SURFACER_CLEANUP_ALLOWANCE_MS],
   ],
-  disconnect: [
-    ["setup", SURFACER_SETUP_ALLOWANCE_MS],
-    ["decision", SURFACER_HANG_GUARD_TIMEOUT_MS],
-    ["cleanup", SURFACER_CLEANUP_ALLOWANCE_MS],
-  ],
-};
-for (const [name, chain] of Object.entries(SURFACER_TEST_CHAINS)) {
-  const total = chain.reduce((sum, [, allowance]) => sum + Number(allowance), 0);
-  assert.ok(total < SURFACER_TEST_TIMEOUT_MS, `${name} surfacer budget chain exceeds its test budget: ${total}ms >= ${SURFACER_TEST_TIMEOUT_MS}ms`);
-}
+  cleanup: 10_000,
+});
+const SURFACER_DISCONNECT_CHAIN = defineBudgetChain("surfacer disconnect", SURFACER_TEST_TIMEOUT_MS, {
+  setup: 5_000,
+  phases: [["decision", SURFACER_HANG_GUARD_TIMEOUT_MS]],
+  cleanup: 10_000,
+});
+assert.ok(
+  SURFACER_COMPLETION_CHAIN.allowance("response") < SURFACER_COMPLETION_CLOCK_MS,
+  "the completion response guard must stay below every clock configured by its test",
+);
 
 function boot(overrides = {}) {
   return startSurface({
@@ -364,9 +364,9 @@ test("a handler that completes and then never returns is answered at the claim, 
   // returning changes nothing.
   let handlerReturned = false;
   const surface = await boot({
-    sessionTimeoutMs: 60,
-    leaseTimeoutMs: 60,
-    ackTimeoutMs: 1_000,
+    sessionTimeoutMs: SURFACER_COMPLETION_CLOCK_MS,
+    leaseTimeoutMs: SURFACER_COMPLETION_CLOCK_MS,
+    ackTimeoutMs: SURFACER_COMPLETION_CLOCK_MS,
     api: {
       "POST /api/hang": async ({ session }) => {
         session.complete({ value: 1 });
@@ -378,18 +378,13 @@ test("a handler that completes and then never returns is answered at the claim, 
   try {
     // The race bounds the whole answer — headers and body — so a regression
     // that writes headers and never ends the body fails here too.
-    const { status, operationId } = await Promise.race([
-      request(surface, "/api/hang", { body: {} }).then(async (response) => ({ status: response.status, ...(await /** @type {any} */ (response.json())) })),
-      new Promise((_, reject) => setTimeout(() => reject(new Error("the browser was not answered at the claim")), SURFACER_HANG_GUARD_TIMEOUT_MS)),
-    ]);
+    const { status, operationId } = await SURFACER_COMPLETION_CHAIN.run("response", () =>
+      request(surface, "/api/hang", { body: {} }).then(async (response) => ({ status: response.status, ...(await /** @type {any} */ (response.json())) })));
     assert.equal(status, 200, "the browser is answered at the claim while the handler remains pending");
     assert.equal(typeof operationId, "string");
     const ack = await request(surface, "/api/ack", { body: { operationId } });
     assert.equal(ack.status, 200, "the acknowledgement is accepted");
-    const decision = await Promise.race([
-      surface.waitForDecision(),
-      new Promise((_, reject) => setTimeout(() => reject(new Error("the decision stayed pending after the acknowledgement")), ACKNOWLEDGEMENT_SETTLEMENT_MAX_MS)),
-    ]);
+    const decision = await SURFACER_COMPLETION_CHAIN.run("acknowledgement settlement", () => surface.waitForDecision());
     assert.equal(decision.status, "completed");
     assert.equal(handlerReturned, false, "the handler is still pending when the caller has the completion");
   } finally {
@@ -428,10 +423,7 @@ test("a client that vanishes while its completion answer is in flight starts the
     await claimedPromise;
     const disconnectedAt = Date.now();
     controller.abort();
-    const decision = await Promise.race([
-      surface.waitForDecision(),
-      new Promise((_, reject) => setTimeout(() => reject(new Error("the decision stayed pending after the client vanished")), SURFACER_HANG_GUARD_TIMEOUT_MS)),
-    ]);
+    const decision = await SURFACER_DISCONNECT_CHAIN.run("decision", () => surface.waitForDecision());
     const elapsed = Date.now() - disconnectedAt;
     assert.equal(decision.status, "completed");
     assert.ok(elapsed < DISCONNECT_SETTLEMENT_MAX_MS, `the clock started at the disconnect, not when the held answer finished (settled after ${elapsed}ms)`);

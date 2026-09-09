@@ -6,11 +6,17 @@ import { fileURLToPath } from 'node:url';
 
 import { afterEach, expect, it, vi } from 'vitest';
 
+import { defineBudgetChain } from '../../../test-support/budget-chain.mjs';
+
 // Real work: these tests write files to temporary directories on disk, so
 // this file declares its own time limit; the suite default is a hang guard,
 // not a speed bar.
 const TEST_TIMEOUT_MS = 30_000;
-const TARGET_WRITE_TIMEOUT_MS = 10_000;
+const SAFE_CHANGE_CHAIN = defineBudgetChain('safe-change crash', TEST_TIMEOUT_MS, {
+  setup: 5_000,
+  phases: [['target write', 10_000], ['child exit', 5_000]],
+  cleanup: 5_000,
+});
 vi.setConfig({ testTimeout: TEST_TIMEOUT_MS, hookTimeout: TEST_TIMEOUT_MS });
 
 const approvalDefinition = vi.hoisted(() => ({ version: undefined as number | undefined }));
@@ -72,21 +78,18 @@ it.each([[0, false, false], [1, false, false], [0, true, false], [0, false, true
     child.stderr!.setEncoding('utf8').on('data', (chunk: string) => { stderr += chunk; });
     child.stdout!.resume();
     closed = new Promise((resolve) => child!.once('close', (code, childSignal) => resolve({ code, signal: childSignal })));
-    const written = await new Promise<{ actionId: string; targetId: string }>((resolve, reject) => {
-      const timer = setTimeout(() => reject(new Error(`Target write did not finish: ${stderr}`)), TARGET_WRITE_TIMEOUT_MS);
-      child!.once('error', (error) => { clearTimeout(timer); reject(error); });
+    const written = await SAFE_CHANGE_CHAIN.run('target write', () => new Promise<{ actionId: string; targetId: string }>((resolve, reject) => {
+      child!.once('error', reject);
       child!.once('exit', (code, childSignal) => {
-        clearTimeout(timer);
         reject(new Error(`Child exited before target write (${code}/${childSignal}): ${stderr}`));
       });
       child!.once('message', (message) => {
-        clearTimeout(timer);
         resolve(message as { actionId: string; targetId: string });
       });
-    });
+    }));
     expect(written.targetId).toBe(selected.id);
     expect(child.kill('SIGKILL')).toBe(true);
-    expect(await closed).toEqual({ code: null, signal: 'SIGKILL' });
+    expect(await SAFE_CHANGE_CHAIN.run('child exit', () => closed)).toEqual({ code: null, signal: 'SIGKILL' });
     if (changedRequest) approvalDefinition.version = 2;
 
     const committedBytes = await readFile(targetPath(directory, selected.id));
@@ -196,7 +199,7 @@ it.each([[0, false, false], [1, false, false], [0, true, false], [0, false, true
     }
   } finally {
     if (child && child.exitCode === null && child.signalCode === null) child.kill('SIGKILL');
-    if (closed) await closed;
+    if (closed) await SAFE_CHANGE_CHAIN.run('child exit', () => closed);
     await rm(directory, { recursive: true, force: true });
   }
 }, TEST_TIMEOUT_MS);
