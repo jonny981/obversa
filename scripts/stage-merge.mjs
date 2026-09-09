@@ -29,6 +29,7 @@ const stageBranches = {
   F14: 'feat/real-work-test-limits',
   D22: 'feat/feature-delivery-example',
   F16: 'feat/source-surfacer-types',
+  D34: 'docs/retire-old-positioning',
 };
 
 export function manageStage(args, options = {}) {

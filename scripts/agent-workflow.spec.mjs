@@ -91,6 +91,7 @@ for (const [stage, branch] of [
   ['F14', 'feat/real-work-test-limits'],
   ['D22', 'feat/feature-delivery-example'],
   ['F16', 'feat/source-surfacer-types'],
+  ['D34', 'docs/retire-old-positioning'],
   ['D13', 'feat/lines-v1'],
   ['D11A', 'feat/lines-v1'],
   ['F0', 'feat/factory-v1'],

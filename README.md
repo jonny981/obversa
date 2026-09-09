@@ -29,7 +29,7 @@ start it again and it reads its own events, then picks up at the step that was
 running.
 
 ```bash
-pnpm add @obversa/runtime   # Node >= 22.12
+npm install @obversa/runtime   # Node >= 22.12
 ```
 
 ## A feature, as one file
