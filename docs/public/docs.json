@@ -55,7 +55,7 @@
         "group": "Reviewing",
         "pages": [
           "reviewing/callback-gates",
-          "reviewing/review-loops",
+          "reviewing/review-loop",
           "reviewing/proof-acceptance"
         ]
       },
@@ -146,7 +146,7 @@
     },
     {
       "source": "/graphs/review-loop",
-      "destination": "/reviewing/review-loops"
+      "destination": "/reviewing/review-loop"
     },
     {
       "source": "/proof/acceptance",
