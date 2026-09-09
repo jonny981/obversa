@@ -6,14 +6,16 @@ rules that apply to every change.
 
 ## What this repository is
 
-Model how your team really works: named roles, reviews that send work back, and a record in plain files.
+Model how your team really works: named roles, reviews that send work
+back, and a record in plain files.
 
 You describe work as a graph: steps, dependencies, and review gates. The
-runtime records graph decisions and node outcomes. A fresh executor can
-resume unfinished positions from the record. You can replace the engines
-(Claude, Codex, Grok, OpenCode, or one you add). You can replace the memory.
-You can write your own workflow shape without knowledge of the runtime
-internals.
+runtime records graph decisions and node outcomes. After a crash a fresh
+worker reads the record and carries on: steps that finished are never
+repeated, and a step that was mid-flight runs again only if its binding
+declares it safe to retry. You can replace the engines (Claude, Codex,
+Grok, OpenCode, or one you add). You can replace the memory. You can write
+your own workflow shape without knowledge of the runtime internals.
 
 ## Setting up from source
 

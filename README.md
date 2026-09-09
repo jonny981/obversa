@@ -46,8 +46,10 @@ step names the stage that must fix it, so the work goes back to the stage that
 owns it rather than starting the run again.
 
 ```ts
-import { pipeline, reviewPanel, kickback, createCallbackGate } from '@obversa/runtime';
+import { fnJob, pipeline, reviewPanel, run } from '@obversa/runtime';
+```
 
+```ts
 const review = reviewPanel({
   label: 'review',
   reviewers: [
@@ -56,6 +58,7 @@ const review = reviewPanel({
     { name: 'scope', job: checks.scope },
   ],
   pass: 2, // two of three agree and the step passes
+  target: 'implement', // a failing panel sends the work back here
 });
 
 export const featureDelivery = pipeline(
@@ -65,7 +68,7 @@ export const featureDelivery = pipeline(
     { name: 'implement', job: implement },
     { name: 'test', job: testStage },
     { name: 'review', job: review },
-    { name: 'approve', job: approve }, // createCallbackGate: a person answers
+    { name: 'approve', job: approve },
   ],
   { maxKickbacks: 2 },
 );
