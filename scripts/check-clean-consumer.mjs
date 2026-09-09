@@ -293,6 +293,20 @@ import { AgentSdkEngine } from '@obversa/engine-agent-sdk';
 import { AnthropicApiEngine } from '@obversa/engine-anthropic-api';
 import { ClaudeCliEngine } from '@obversa/engine-claude-cli';
 import { CodexEngine } from '@obversa/engine-codex';
+import type { runSurface, startSurface } from '@obversa/surfacer';
+import type { createSurfaceClient } from '@obversa/surfacer/client';
+import type { reviewDiff } from '@obversa/source';
+import type { listTrackedFiles } from '@obversa/source/testing';
+
+// Compile-time surface checks: these imports fail the consumer build if
+// either package ships no type declarations, and the assertions fail it if
+// the public callables lose their callable shape.
+type SurfaceCallable = typeof runSurface extends (...args: never[]) => unknown ? true : never;
+type SurfaceStartCallable = typeof startSurface extends (...args: never[]) => unknown ? true : never;
+type ClientCallable = typeof createSurfaceClient extends (...args: never[]) => unknown ? true : never;
+type ReviewCallable = typeof reviewDiff extends (...args: never[]) => unknown ? true : never;
+type TrackedCallable = typeof listTrackedFiles extends (...args: never[]) => unknown ? true : never;
+const _f16TypeSurfaces: [SurfaceCallable, SurfaceStartCallable, ClientCallable, ReviewCallable, TrackedCallable] = [true, true, true, true, true];
 import { GrokCliEngine } from '@obversa/engine-grok-cli';
 import { OpenCodeCliEngine } from '@obversa/engine-opencode-cli';
 import {
