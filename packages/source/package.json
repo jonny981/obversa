@@ -21,7 +21,8 @@
     "test": "node --test test/*.test.mjs",
     "typecheck": "tsc -p tsconfig.json && tsc -p assets/tsconfig.json",
     "prepublishOnly": "node ../../scripts/check-publish-allowlist.mjs",
-    "build": "tsc -p tsconfig.build.json"
+    "build": "tsc -p tsconfig.build.json",
+    "prepack": "pnpm run build"
   },
   "engines": {
     "node": ">=22.12.0"
