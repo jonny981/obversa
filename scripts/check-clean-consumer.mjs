@@ -491,8 +491,8 @@ const tsconfig = {
   },
   include: [
     'consumer.ts',
-    'offline-review.line.ts',
-    'feature-delivery.line.ts',
+    'offline-review.workflow.ts',
+    'feature-delivery.workflow.ts',
     'custom-graph.ts',
     'pipeline.ts',
     'review-loop.ts',
@@ -512,11 +512,11 @@ const tsconfig = {
 
 async function main() {
   const exampleSource = await readFile(
-    join(root, 'examples', 'production-lines', 'offline-review.line.ts'),
+    join(root, 'examples', 'workflows', 'offline-review.workflow.ts'),
     'utf8',
   );
   const featureExampleSource = await readFile(
-    join(root, 'examples', 'production-lines', 'feature-delivery.line.ts'),
+    join(root, 'examples', 'workflows', 'feature-delivery.workflow.ts'),
     'utf8',
   );
   const graphExamplePath = join(root, 'examples', 'packages', 'custom-graph.ts');
@@ -554,11 +554,11 @@ async function main() {
     'utf8',
   );
   const publicDocument = await readFile(
-    join(root, 'docs', 'public', 'production-lines', 'offline-review.mdx'),
+    join(root, 'docs', 'public', 'workflows', 'offline-review.mdx'),
     'utf8',
   );
   const featureDocument = await readFile(
-    join(root, 'docs', 'public', 'production-lines', 'feature-delivery.mdx'),
+    join(root, 'docs', 'public', 'workflows', 'feature-delivery.mdx'),
     'utf8',
   );
   const storageDocument = await readFile(
@@ -582,7 +582,7 @@ async function main() {
     'utf8',
   );
   const safeChangeDocument = await readFile(
-    join(root, 'docs', 'public', 'production-lines', 'safe-change.mdx'),
+    join(root, 'docs', 'public', 'workflows', 'safe-change.mdx'),
     'utf8',
   );
   if (sourceFromPublicDoc(publicDocument) !== exampleSource) {
@@ -643,11 +643,11 @@ async function main() {
     await copyFile(safeChangeRecipePath, join(consumerDirectory, 'recipe.ts'));
     await copyFile(safeChangeFileAdapterPath, join(consumerDirectory, 'file-adapter.ts'));
     await writeFile(
-      join(consumerDirectory, 'offline-review.line.ts'),
+      join(consumerDirectory, 'offline-review.workflow.ts'),
       exampleSource,
     );
     await writeFile(
-      join(consumerDirectory, 'feature-delivery.line.ts'),
+      join(consumerDirectory, 'feature-delivery.workflow.ts'),
       featureExampleSource,
     );
     await copyFile(graphExamplePath, join(consumerDirectory, 'custom-graph.ts'));
@@ -696,23 +696,23 @@ async function main() {
       run(process.execPath, ['dist/offline-review.line.js'], { cwd: consumerDirectory }),
     );
     const directProductionLine = JSON.parse(
-      run('pnpm', ['exec', 'tsx', 'offline-review.line.ts'], { cwd: consumerDirectory }),
+      run('pnpm', ['exec', 'tsx', 'offline-review.workflow.ts'], { cwd: consumerDirectory }),
     );
     const featureLine = JSON.parse(
       run(process.execPath, ['dist/feature-delivery.line.js'], { cwd: consumerDirectory }),
     );
     const directFeatureLine = JSON.parse(
-      run('pnpm', ['exec', 'tsx', 'feature-delivery.line.ts'], { cwd: consumerDirectory }),
+      run('pnpm', ['exec', 'tsx', 'feature-delivery.workflow.ts'], { cwd: consumerDirectory }),
     );
     const featureDenySource = featureExampleSource.replace(
       '{ approved: true },',
       '{ approved: false },',
     );
     await writeFile(
-      join(consumerDirectory, 'feature-delivery.deny.line.ts'),
+      join(consumerDirectory, 'feature-delivery.deny.workflow.ts'),
       featureDenySource,
     );
-    const denyRun = spawnSync('pnpm', ['exec', 'tsx', 'feature-delivery.deny.line.ts'], {
+    const denyRun = spawnSync('pnpm', ['exec', 'tsx', 'feature-delivery.deny.workflow.ts'], {
       cwd: consumerDirectory,
       encoding: 'utf8',
     });
@@ -724,10 +724,10 @@ async function main() {
       'const repaired = false;',
     );
     await writeFile(
-      join(consumerDirectory, 'feature-delivery.red.line.ts'),
+      join(consumerDirectory, 'feature-delivery.red.workflow.ts'),
       featureRedSource,
     );
-    const redRun = spawnSync('pnpm', ['exec', 'tsx', 'feature-delivery.red.line.ts'], {
+    const redRun = spawnSync('pnpm', ['exec', 'tsx', 'feature-delivery.red.workflow.ts'], {
       cwd: consumerDirectory,
       encoding: 'utf8',
     });

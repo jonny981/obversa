@@ -10,7 +10,7 @@ import {
 let attempts = 0;
 let config: { timeoutMs?: number } | undefined;
 
-const productionLine = defineJob(
+const reviewLoop = defineJob(
   loop({
     name: 'write-config',
     max: 4,
@@ -42,7 +42,7 @@ const productionLine = defineJob(
 );
 
 async function main(): Promise<void> {
-  const result = await run(productionLine);
+  const result = await run(reviewLoop);
 
   console.log(
     JSON.stringify(

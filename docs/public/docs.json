@@ -38,9 +38,50 @@
           "concepts/index",
           "concepts/orders",
           "concepts/workflows",
-          "concepts/callback-gates",
           "concepts/surfaces",
           "concepts/runtime"
+        ]
+      },
+      {
+        "group": "Workflows",
+        "pages": [
+          "workflows/index",
+          "workflows/offline-review",
+          "workflows/safe-change",
+          "workflows/feature-delivery"
+        ]
+      },
+      {
+        "group": "Reviewing",
+        "pages": [
+          "reviewing/callback-gates",
+          "reviewing/review-loops",
+          "reviewing/proof-acceptance"
+        ]
+      },
+      {
+        "group": "Recording runs",
+        "pages": [
+          "recording/how-a-run-is-recorded",
+          "recording/events-and-artifacts",
+          "recording/node-attempts"
+        ]
+      },
+      {
+        "group": "Driving runs",
+        "pages": [
+          "driving/runner",
+          "hosts/cmux",
+          "hosts/review"
+        ]
+      },
+      {
+        "group": "Writing workflow shapes",
+        "pages": [
+          "graphs/contract",
+          "graphs/pipeline",
+          "graphs/plan-admission",
+          "graphs/executor"
         ]
       },
       {
@@ -59,52 +100,6 @@
         ]
       },
       {
-        "group": "Graphs",
-        "pages": [
-          "graphs/contract",
-          "graphs/pipeline",
-          "graphs/plan-admission",
-          "graphs/executor",
-          "graphs/review-loop",
-          "graphs/callback-gate"
-        ]
-      },
-      {
-        "group": "Proof",
-        "pages": [
-          "proof/acceptance"
-        ]
-      },
-      {
-        "group": "Storage",
-        "pages": [
-          "storage/events-and-artifacts"
-        ]
-      },
-      {
-        "group": "Runtime",
-        "pages": [
-          "runtime/node-attempts",
-          "runtime/runner"
-        ]
-      },
-      {
-        "group": "Processes",
-        "pages": [
-          "production-lines/index",
-          "production-lines/offline-review",
-          "production-lines/safe-change",
-          "production-lines/feature-delivery"
-        ]
-      },
-      {
-        "group": "Hosts",
-        "pages": [
-          "hosts/cmux",
-          "hosts/review"
-        ]
-      },
-      {
         "group": "Packages",
         "pages": [
           "packages/runtime",
@@ -116,12 +111,58 @@
           "packages/engine-codex",
           "packages/engine-grok-cli",
           "packages/engine-opencode-cli",
-          "packages/engine-anthropic-api",
           "packages/engine-agent-sdk",
+          "packages/engine-anthropic-api",
           "packages/memory-git",
           "packages/memory-simple"
         ]
       }
     ]
-  }
+  },
+  "redirects": [
+    {
+      "source": "/production-lines",
+      "destination": "/workflows"
+    },
+    {
+      "source": "/production-lines/offline-review",
+      "destination": "/workflows/offline-review"
+    },
+    {
+      "source": "/production-lines/safe-change",
+      "destination": "/workflows/safe-change"
+    },
+    {
+      "source": "/production-lines/feature-delivery",
+      "destination": "/workflows/feature-delivery"
+    },
+    {
+      "source": "/concepts/callback-gates",
+      "destination": "/reviewing/callback-gates"
+    },
+    {
+      "source": "/graphs/callback-gate",
+      "destination": "/reviewing/callback-gates"
+    },
+    {
+      "source": "/graphs/review-loop",
+      "destination": "/reviewing/review-loops"
+    },
+    {
+      "source": "/proof/acceptance",
+      "destination": "/reviewing/proof-acceptance"
+    },
+    {
+      "source": "/storage/events-and-artifacts",
+      "destination": "/recording/events-and-artifacts"
+    },
+    {
+      "source": "/runtime/node-attempts",
+      "destination": "/recording/node-attempts"
+    },
+    {
+      "source": "/runtime/runner",
+      "destination": "/driving/runner"
+    }
+  ]
 }
