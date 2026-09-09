@@ -75,6 +75,7 @@
     "verify:d15": "pnpm verify:d14 && OBVERSA_TEST_REAL_PACK=1 pnpm test:tarballs && node scripts/changelog-gate.mjs",
     "verify:f11": "pnpm verify:d15",
     "verify:f10": "pnpm verify:d15",
+    "verify:f16": "pnpm verify:d15",
     "verify:f14": "pnpm verify:d15",
     "verify:d22": "pnpm verify:d15",
     "changeset": "changeset",
