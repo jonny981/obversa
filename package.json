@@ -27,7 +27,7 @@
     "test": "pnpm --recursive --if-present run test",
     "typecheck": "pnpm --recursive --if-present run typecheck",
     "typecheck:ts6": "pnpm --recursive --if-present run typecheck:ts6",
-    "docs:validate": "pnpm test:docs-versions && node scripts/check-docs-versions.mjs && cd docs/public && mint validate",
+    "docs:validate": "pnpm test:docs-versions && node scripts/check-docs-versions.mjs && node scripts/check-plugins-page.mjs && cd docs/public && mint validate",
     "test:docs-versions": "node --test scripts/check-docs-versions.spec.mjs",
     "example:offline": "pnpm --filter @obversa/runtime exec tsx ../../examples/production-lines/offline-review.line.ts",
     "example:feature": "pnpm --filter @obversa/runtime exec tsx ../../examples/production-lines/feature-delivery.line.ts",

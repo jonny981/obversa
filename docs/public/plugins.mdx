@@ -1,6 +1,6 @@
 ---
 title: "Plugins and tools"
-description: "One row per tool Obversa ships or drives: the engines, the memory adapters, the cmux host, and Plannotator."
+description: "One row per tool Obversa ships or drives."
 ---
 
 One row per tool Obversa ships or drives. Each row says what the tool is,
@@ -40,10 +40,12 @@ the tool a reader already has installed and authenticated.
 ## Memory
 
 - **In-process memory.** `@obversa/memory-simple` stores memory in one
-  process. A reader needs Node.js 22.12 or later.
+  process. A reader needs Node.js 22.12 or later. Home:
+  [The memory-simple package](/packages/memory-simple).
 - **Git-backed memory.** `@obversa/memory-git` stores memory in private
   Git references, so nothing lands in the working tree. A reader needs
-  Node.js 22.12 or later and Git installed.
+  Node.js 22.12 or later and Git installed. Home:
+  [The memory-git package](/packages/memory-git).
 
 ## Hosts and surfaces
 
@@ -54,12 +56,13 @@ the tool a reader already has installed and authenticated.
 - **The cmux host.** The cmux glue opens the local web surface and the
   Plannotator page as browser splits beside the terminal, and opens one
   editor window with the Project worktree and the Shared worktree. Outside
-  cmux, on macOS each script opens the default browser, and elsewhere it
-  prints the URL for you to open. A reader needs cmux
-  installed. See [The cmux host](/hosts/cmux).
+  cmux, the surface script opens the default browser on macOS, and
+  elsewhere it prints the URL for you to open. A reader needs cmux
+  installed. Home: [The cmux host](/hosts/cmux).
 - **Plannotator.** Plannotator opens its own review page in a split
   through the `PLANNOTATOR_BROWSER` environment variable the workspace
-  launcher binds, so every other link keeps the default browser. Home:
+  launcher binds, so every other link keeps the default browser. A reader
+  needs Node.js 22.12 or later and a Plannotator installation. Home:
   [github.com/backnotprop/plannotator](https://github.com/backnotprop/plannotator).
   See [One route for
   Plannotator](/hosts/cmux#one-route-for-plannotator).
