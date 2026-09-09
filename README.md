@@ -26,11 +26,14 @@ it to people, and the runtime runs it one bounded engine call at a time.
 Every step appends events to a file on disk, with its artifacts beside them.
 That record is the whole story: no server, no database.
 
-A crash does not cost you the work already done. `@obversa/runner` supervises
-a run in its own worker. After a crash it starts a fresh worker, reads the
-record, and resumes the positions that never finished. That is a separate
-layer with its own call, not something a plain `run()` does by itself.
-[The runner's page](https://docs.obversa.ai/packages/runner) has it.
+`@obversa/runner` supervises a run in its own worker. After a crash it starts
+a fresh worker that reads the record and carries on. Steps that finished are
+never repeated. A step that was mid-flight when the worker died runs again
+only if its binding declares it safe to retry; otherwise the run pauses and
+asks a person to reconcile it before it continues, so uncertain work is never
+repeated silently. That is a separate layer with its own call, not something
+a plain `run()` does by itself, and
+[the runner's page](https://docs.obversa.ai/packages/runner) has it.
 
 ```bash
 npm install @obversa/runtime   # Node >= 22.12
