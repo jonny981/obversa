@@ -1,6 +1,6 @@
 ---
 title: "Plugins and tools"
-description: "One row per tool Obversa ships or drives: the six engines, the two memory adapters, the cmux host, and Plannotator."
+description: "One row per tool Obversa ships or drives: the engines, the memory adapters, the cmux host, and Plannotator."
 ---
 
 One row per tool Obversa ships or drives. Each row says what the tool is,
@@ -53,8 +53,9 @@ the tool a reader already has installed and authenticated.
 
 - **The cmux host.** The cmux glue opens the local web surface and the
   Plannotator page as browser splits beside the terminal, and opens one
-  editor window with the two Order workspace roots. Outside cmux, each
-  script falls back to the default browser. A reader needs cmux
+  editor window with the Project worktree and the Shared worktree. Outside
+  cmux, on macOS each script opens the default browser, and elsewhere it
+  prints the URL for you to open. A reader needs cmux
   installed. See [The cmux host](/hosts/cmux).
 - **Plannotator.** Plannotator opens its own review page in a split
   through the `PLANNOTATOR_BROWSER` environment variable the workspace
