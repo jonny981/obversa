@@ -562,23 +562,23 @@ async function main() {
     'utf8',
   );
   const storageDocument = await readFile(
-    join(root, 'docs', 'public', 'storage', 'events-and-artifacts.mdx'),
+    join(root, 'docs', 'public', 'recording', 'events-and-artifacts.mdx'),
     'utf8',
   );
   const attemptDocument = await readFile(
-    join(root, 'docs', 'public', 'runtime', 'node-attempts.mdx'),
+    join(root, 'docs', 'public', 'recording', 'node-attempts.mdx'),
     'utf8',
   );
   const callbackGateDocument = await readFile(
-    join(root, 'docs', 'public', 'graphs', 'callback-gate.mdx'),
+    join(root, 'docs', 'public', 'reviewing', 'callback-gates.mdx'),
     'utf8',
   );
   const reviewLoopDocument = await readFile(
-    join(root, 'docs', 'public', 'graphs', 'review-loop.mdx'),
+    join(root, 'docs', 'public', 'reviewing', 'review-loop.mdx'),
     'utf8',
   );
   const proofAcceptanceDocument = await readFile(
-    join(root, 'docs', 'public', 'proof', 'acceptance.mdx'),
+    join(root, 'docs', 'public', 'reviewing', 'proof-acceptance.mdx'),
     'utf8',
   );
   const safeChangeDocument = await readFile(
