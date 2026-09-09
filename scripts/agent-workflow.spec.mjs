@@ -132,6 +132,7 @@ for (const [stage, branch] of [
   ['F14', 'feat/factory-v1'],
   ['D22', 'feat/lines-v1'],
   ['F16', 'feat/lines-v1'],
+  ['D34', 'feat/lines-v1'],
 ]) {
   test(`${stage} refuses the wrong branch ${branch}`, () => {
     const repository = createRepository({ feature: true, branch });

@@ -24,9 +24,13 @@ That is the layer Obversa owns. You describe the work the way you would describe
 it to people, and the runtime runs it one bounded engine call at a time.
 
 Every step appends events to a file on disk, with its artifacts beside them.
-That record is the whole story: no server, no database. Kill a recorded run and
-start it again and it reads its own events, then picks up at the step that was
-running.
+That record is the whole story: no server, no database.
+
+A crash does not cost you the work already done. `@obversa/runner` supervises
+a run in its own worker. After a crash it starts a fresh worker, reads the
+record, and resumes the positions that never finished. That is a separate
+layer with its own call, not something a plain `run()` does by itself.
+[The runner's page](https://docs.obversa.ai/packages/runner) has it.
 
 ```bash
 npm install @obversa/runtime   # Node >= 22.12
