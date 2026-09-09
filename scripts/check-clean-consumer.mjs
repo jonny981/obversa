@@ -693,13 +693,13 @@ async function main() {
     }).trim();
     const report = JSON.parse(output.split(/\r?\n/).at(-1));
     const productionLine = JSON.parse(
-      run(process.execPath, ['dist/offline-review.line.js'], { cwd: consumerDirectory }),
+      run(process.execPath, ['dist/offline-review.workflow.js'], { cwd: consumerDirectory }),
     );
     const directProductionLine = JSON.parse(
       run('pnpm', ['exec', 'tsx', 'offline-review.workflow.ts'], { cwd: consumerDirectory }),
     );
     const featureLine = JSON.parse(
-      run(process.execPath, ['dist/feature-delivery.line.js'], { cwd: consumerDirectory }),
+      run(process.execPath, ['dist/feature-delivery.workflow.js'], { cwd: consumerDirectory }),
     );
     const directFeatureLine = JSON.parse(
       run('pnpm', ['exec', 'tsx', 'feature-delivery.workflow.ts'], { cwd: consumerDirectory }),
@@ -847,7 +847,7 @@ async function main() {
     assert.deepEqual(compiledProofCache, expectedProofCacheReport);
     assert.deepEqual(directProofCache, expectedProofCacheReport);
     const safeChangePageReport = safeChangeDocument
-      .match(/## Run the line[\s\S]*?```json\r?\n([\s\S]*?)```/);
+      .match(/## Run the workflow[\s\S]*?```json\r?\n([\s\S]*?)```/);
     assert.ok(safeChangePageReport, 'The safe-change page must include its JSON report');
     assert.deepEqual(compiledSafeChange, JSON.parse(safeChangePageReport[1]));
     assert.deepEqual(directSafeChange, compiledSafeChange);
@@ -856,7 +856,7 @@ async function main() {
     assert.ok(proofCacheReport, 'The proof page must include its cache report');
     assert.deepEqual(JSON.parse(proofCacheReport[1]), compiledProofCache);
     const featureLinePageReport = featureDocument
-      .match(/## Run the line[\s\S]*?```json\r?\n([\s\S]*?)```/);
+      .match(/## Run the workflow[\s\S]*?```json\r?\n([\s\S]*?)```/);
     assert.ok(featureLinePageReport, 'The feature-delivery page must include its JSON report');
     assert.deepEqual(featureLine, JSON.parse(featureLinePageReport[1]));
     assert.deepEqual(directFeatureLine, featureLine);
