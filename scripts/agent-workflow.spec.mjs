@@ -82,6 +82,7 @@ for (const [stage, branch] of [
   ['D18', 'feat/proof-cache-safe-change'],
   ['D19', 'feat/writer-exclusion'],
   ['D21', 'feat/parity-tests'],
+  ['D28', 'feat/team-form'],
   ['F4', 'feat/release-readiness'],
   ['F5', 'feat/release-wording'],
   ['F7', 'feat/residual-sweep'],
@@ -102,6 +103,7 @@ for (const [stage, branch] of [
   ['F20', 'feat/f20-checks-that-run'],
   ['F25', 'feat/examples-a-user-would-write'],
   ['F26', 'feat/one-run-per-rename'],
+  ['D44', 'docs/lead-with-the-team'],
   ['D13', 'feat/graph-forms-v1'],
   ['D11A', 'feat/graph-forms-v1'],
   ['F0', 'feat/factory-v1'],
@@ -133,6 +135,7 @@ for (const [stage, branch] of [
   ['D18', 'feat/graph-forms-v1'],
   ['D19', 'feat/graph-forms-v1'],
   ['D21', 'feat/graph-forms-v1'],
+  ['D28', 'feat/graph-forms-v1'],
   ['F4', 'feat/factory-v1'],
   ['F5', 'feat/factory-v1'],
   ['F7', 'feat/factory-v1'],
@@ -154,6 +157,7 @@ for (const [stage, branch] of [
   ['F20', 'feat/graph-forms-v1'],
   ['F25', 'feat/graph-forms-v1'],
   ['F26', 'feat/graph-forms-v1'],
+  ['D44', 'feat/graph-forms-v1'],
 ]) {
   test(`${stage} refuses the wrong branch ${branch}`, () => {
     const repository = createRepository({ feature: true, branch });

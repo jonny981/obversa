@@ -12,32 +12,62 @@ You describe how work should move from a request to a checked result: the
 steps, who does each one, the reviews, and where a person decides. Obversa
 runs that workflow one bounded engine call at a time and records every step.
 
-before "## What a reader can do":
+## See a team run
 
-## See it run
+Five named stages, the way a real team ships a feature. The review is a
+panel of three. Two of the three fail the first attempt, so the panel sends
+the work back to `implement` with their findings, and the second attempt
+passes. No model and no network: every stage here is a small function, so
+the shape of the team is the only thing on show.
 
-Install the packages, then run the offline review workflow. It drafts a
-document, has a reviewer send it back once, and passes on the second
-attempt, with no model and no network.
+```ts
+import { fnJob, pipeline, reviewPanel, run, type Outcome } from '@obversa/runtime';
+```
 
+```ts
+const review = reviewPanel({
+  label: 'review',
+  reviewers: [
+    { name: 'correctness', job: checks.correctness },
+    { name: 'safety', job: checks.safety },
+    { name: 'scope', job: checks.scope },
+  ],
+  pass: 2, // two of three agree and the step passes
+  target: 'implement', // a failing panel sends the work back here
+});
+
+export const featureDelivery = pipeline(
+  'feature-delivery',
+  [
+    { name: 'analyse', job: analyse },
+    { name: 'implement', job: implement },
+    { name: 'test', job: testStage },
+    { name: 'review', job: review },
+    { name: 'approve', job: approve },
+  ],
+  { maxKickbacks: 2 },
+);
+```
+
+It prints:
 
 ```text
 {
   "status": "pass",
-  "attempts": 2,
-  "summary": "config is complete",
-  "record": "packages/runtime/.obversa/records/offline-review.jsonl"
+  "implementRuns": 2
 }
 ```
 
-That output is the example's own summary; the record it wrote is a
-different file, one event per line, and the supervised runner reads it to
-restart a killed run where it stopped.
+`implement` ran twice. That second run is the whole point: a reviewer said
+no, named the stage that owns the fix, and the work went back there instead
+of the run starting over. The whole file is
+[feature-team.ts](/concepts/workflows), and the
+[the examples](/workflows) has more to copy.
 
 ## What a reader can do
 
 - **Copy a workflow:** a complete, runnable program for real work. Start with
-  [the workflow bank](/workflows).
+  [the examples](/workflows).
 - **Review and approve work:** panels, revisions that send work back, and
   callback gates that wait for a person. Start with
   [callback gates](/reviewing/callback-gates).
@@ -76,5 +106,5 @@ memory adapter.
 
 1. [Install the local packages](/get-started/installation).
 2. [Run the first program](/get-started/first-run).
-3. [Copy an offline workflow](/workflows/offline-review).
+3. [Copy the feature team](/concepts/workflows) and change the stages to yours.
 4. [Use Obversa in cmux](/hosts/cmux).

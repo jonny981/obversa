@@ -64,6 +64,7 @@ export interface GraphTypeCompilation<
   reduce(state: State, event: Event): State;
   decide(state: State): readonly GraphCommand[];
   describe(): GraphDescriptionInput;
+  validateNodeResult?(nodeId: NodeId, result: JsonValue): GraphValidationIssue | null;
 }
 
 export interface CompiledGraphType<
@@ -219,6 +220,10 @@ export function compileGraph<
       fail(`/compile/${method}`, `${method} must be a function.`);
     }
   }
+  if (implementation.validateNodeResult !== undefined
+    && typeof implementation.validateNodeResult !== 'function') {
+    fail('/compile/validateNodeResult', 'validateNodeResult must be a function.');
+  }
 
   const initialState = json(implementation.initialState(), '/initialState');
   const descriptionInput = json(
@@ -253,6 +258,23 @@ export function compileGraph<
     definition: kernel.definition,
     requirements,
     initialState: () => initialState,
+    ...(implementation.validateNodeResult === undefined ? {} : {
+      validateNodeResult(nodeId: NodeId, result: JsonValue): GraphValidationIssue | null {
+        if (kernel.node(nodeId) === undefined) {
+          fail('/nodeId', `Unknown node "${nodeId}".`);
+        }
+        const returned = implementation.validateNodeResult!(nodeId, json(result, '/result'));
+        if (returned === null) return null;
+        const safeIssue = json(returned, '/validateNodeResult');
+        if (safeIssue === null || typeof safeIssue !== 'object' || Array.isArray(safeIssue)
+          || !isSameStringList(Object.keys(safeIssue).sort(), ['code', 'message', 'path'])
+          || typeof safeIssue.code !== 'string' || typeof safeIssue.path !== 'string'
+          || typeof safeIssue.message !== 'string') {
+          fail('/validateNodeResult', 'validateNodeResult must return null or an issue with code, path, and message strings.');
+        }
+        return safeIssue;
+      },
+    }),
     reduce(state: State, event: Event): State {
       const safeState = json(state, '/state');
       const safeEvent = validateEvent(event);

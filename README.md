@@ -218,7 +218,7 @@ parts, declared capabilities, workspace access, fallback, and cleanup limits.
 
 The public documentation is in [`docs/public`](docs/public). It includes the
 first-run guide, the memory contract, the guides to writing a workflow shape
-and to what a run records, the workflow bank,
+and to what a run records, the examples,
 [cmux host setup](docs/public/hosts/cmux.mdx), and
 [reviewing a diff in a host pane](docs/public/hosts/review.mdx).
 

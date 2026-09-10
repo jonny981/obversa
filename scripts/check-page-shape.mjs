@@ -170,6 +170,33 @@ function titleWords(title) {
     .map((word) => word.replace(/s$/, ''));
 }
 
+/**
+ * The examples are files. Prose that names one as if it were a feature, "the
+ * offline review workflow", "this recipe", "the workflow bank", tells a reader
+ * to pay attention to something that is forty lines of TypeScript, and
+ * undersells the product at the same time. The list is every example stem
+ * in words, plus the shapes such a name takes.
+ */
+const EXAMPLE_NOUNS = 'workflow|line|example|program|helper|recipe|process|bank';
+function coinedExampleNames(root, text) {
+  // A tree with no examples directory has no example to misname.
+  let entries;
+  try { entries = readdirSync(join(root, 'examples')); } catch { return []; }
+  const stems = entries
+    .filter((f) => /\.(ts|mjs)$/.test(f))
+    .map((f) => f.replace(/\.(ts|mjs)$/, '').replace(/-/g, ' '));
+  const body = text
+    .replace(/```[\s\S]*?```/g, '')
+    .replace(/`[^`]*`/g, '')
+    .replace(/\]\([^)]*\)/g, ']');
+  const found = new Set();
+  const named = new RegExp('\\b(?:the|this|a|an) (' + stems.map((s) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('|') + ')(?: and \\w+)? (?:' + EXAMPLE_NOUNS + ')\\b', 'gi');
+  for (const m of body.matchAll(named)) found.add(m[0]);
+  for (const m of body.matchAll(/\b(?:use this|this) (?:process|recipe|helper)\b/gi)) found.add(m[0]);
+  for (const m of body.matchAll(/\bworkflow bank\b/gi)) found.add(m[0]);
+  return [...found];
+}
+
 function definesItsOwnTitle(title, line) {
   if (!title || !line) return false;
   const opening = line.toLowerCase().match(/^(?:an?|the)?\s*([a-z0-9 -]{1,40}?)\s+(?:is|are)\s+/);
@@ -193,6 +220,9 @@ export function checkPageShape(root, { allowNoExample = new Set(), debt = buildD
     }
     const title = frontmatterTitle(text);
     const line = firstProseLine(text);
+    for (const phrase of coinedExampleNames(root, text)) {
+      failures.push(`${name}: names an example as if it were a feature: "${phrase}"`);
+    }
     if (definesItsOwnTitle(title, line) && !forgiven(name, 'opening')) {
       failures.push(`${name}: opens by defining "${title}", the word already in its title`);
     }

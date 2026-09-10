@@ -14,6 +14,21 @@ engine and memory packages track their own versions independently.
 - A dag node accepts `needs` as one name or a list, and optional `desc` and
   `gate` sentences that reach the rendered plan, the `dag:node` record and
   the input the node's reviewer receives.
+- **Saved team conversations:** Compile named members and fixed rooms with
+  `teamGraphType`. Posts in successful turn results queue mentioned members;
+  a fresh executor rebuilds messages and requested turns from the run record.
+  Each member receives its own result and permitted room messages, with
+  explicit turn, concurrency and input limits.
+- **Readable room files:** Build room copies from a saved team run with
+  `projectTeamRooms`. The helper returns the revision it read, leaves the
+  stored events unchanged and can rebuild deleted room files.
+
+### Fixed
+
+- **Invalid team turns:** Reject bad results before saving completion, and
+  retain earlier messages when replay finds invalid saved result content.
+- **Early team review validation:** Invalid panel or callback settings are
+  rejected when a callable team is created, before its members start work.
 
 ## [1.0.0]
 
