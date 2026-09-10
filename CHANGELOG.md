@@ -7,6 +7,24 @@ All notable changes to the Obversa packages. The format follows
 The runtime package (`@obversa/runtime`) tracks the repository tag. The
 engine and memory packages track their own versions independently.
 
+## [Unreleased]
+
+### Added
+
+- **Saved team conversations:** Compile named members and fixed rooms with
+  `teamGraphType`. Posts in successful turn results queue mentioned members;
+  a fresh executor rebuilds messages and requested turns from the run record.
+  Each member receives its own result and permitted room messages, with
+  explicit turn, concurrency and input limits.
+- **Readable room files:** Build room copies from a saved team run with
+  `projectTeamRooms`. The helper returns the revision it read, leaves the
+  stored events unchanged and can rebuild deleted room files.
+
+### Fixed
+
+- **Early team review validation:** Invalid panel or callback settings are
+  rejected when a callable team is created, before its members start work.
+
 ## [1.0.0]
 
 ### Added

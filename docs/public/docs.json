@@ -47,6 +47,7 @@
         "group": "Workflows",
         "pages": [
           "workflows/index",
+          "workflows/team-conversation",
           "workflows/offline-review",
           "workflows/safe-change",
           "workflows/feature-delivery",

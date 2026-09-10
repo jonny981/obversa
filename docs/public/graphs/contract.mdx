@@ -298,9 +298,11 @@ prove a minimum.
 
 ## Team form contract
 
-`team()` is a graph form for several agents working on one task. It uses the
-same public graph contract as the other forms on this page. It is not a new
-kernel object.
+`team(config)` returns a `Job`: callable work for several agents with one
+task and separate answers. It does not use the stored graph executor or
+acquire replay by being passed to `run()`. For saved room messages and
+turns requested by mentions, compile `teamGraphType` as shown in
+[Team conversation](/workflows/team-conversation).
 
 The authoring shape is:
 
@@ -344,14 +346,15 @@ interface TeamResult {
 declare function team(config: TeamConfig): Job;
 ```
 
-Worktree isolation is the behavior. Each agent receives the task and its
-standing brief in a separate worktree. The existing `isolated()` path creates
-and removes that worktree. Passing agent changes land on the caller's branch
-through the existing merge lock. This form adds no second merge or lease
-mechanism.
+In a Git workspace, each agent receives the task and its standing brief in
+a separate worktree through `isolated()`. Passing changes merge into the
+caller's branch under the existing merge lock. Outside a Git repository,
+that wrapper warns and runs in the shared workspace. A passing team result
+is therefore not proof that a Git merge occurred. No second merge or lease
+mechanism is added.
 
-The form is the members working apart and answering separately. `review` reuses
-an existing review panel or callback gate. Each review keeps that panel's or
+The callable team returns each member's separate answer. `review` reuses an
+existing review panel or callback gate. Each review keeps that panel's or
 gate's own contract.
 
 An existing review panel receives the completed team result as its previous
@@ -371,7 +374,7 @@ passes. A member failure or review failure returns `fail` with all member
 results preserved. A member or review pause returns `paused` with its reason
 preserved. An integration conflict returns `fail`.
 
-The form validates these rules before it runs:
+The callable team validates these rules before it runs:
 
 - **Task:** `task` is a non-empty string.
 - **Roster:** `agents` contains at least one member with a unique `name`.
