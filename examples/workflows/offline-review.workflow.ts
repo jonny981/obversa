@@ -53,7 +53,11 @@ async function main(): Promise<void> {
         status: result.outcome.status,
         attempts,
         summary: result.outcome.summary,
-        record: result.recordPath ? relative(process.cwd(), result.recordPath) : null,
+        // Relative to where the command was launched, so the path can be copied
+        // from the report; pnpm and npm set INIT_CWD to that directory.
+        record: result.recordPath
+          ? relative(process.env.INIT_CWD ?? process.cwd(), result.recordPath)
+          : null,
       },
       null,
       2,
