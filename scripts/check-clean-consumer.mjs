@@ -264,11 +264,30 @@ function sourceFromPublicDoc(document) {
   return `${match[1]}\n`;
 }
 
+export function checkedTeamConversationPage(document, source, output) {
+  assert.equal(sourceFromPublicDoc(document), source,
+    'The team conversation page must match its complete runnable source.');
+  const introduction = document.slice(0, document.indexOf('## Source'));
+  const blocks = [...introduction.matchAll(/```ts\n([\s\S]*?)\n```/g)];
+  assert.equal(blocks.length, 3, 'The team conversation page must have three short TypeScript blocks.');
+  for (const [index, name] of ['imports', 'definition', 'posts'].entries()) {
+    const region = new RegExp(`^[ \\t]*// #region ${name}\\n([\\s\\S]*?)\\n[ \\t]*// #endregion ${name}$`, 'm').exec(source);
+    assert.ok(region, `The ${name} source region must have both markers.`);
+    assert.equal(blocks[index][1], region[1], `The ${name} short block must match its source region.`);
+  }
+  const match = /## Output[\s\S]*?```json\r?\n([\s\S]*?)```/.exec(document);
+  assert.ok(match, 'The team conversation page must include its printed report.');
+  assert.deepEqual(JSON.parse(output), JSON.parse(match[1]),
+    'The team conversation page must match its printed report.');
+}
+
 function run(command, args, options = {}) {
   const result = spawnSync(command, args, {
     cwd: options.cwd ?? root,
     encoding: 'utf8',
     maxBuffer: 32 * 1024 * 1024,
+    timeout: options.timeout,
+    killSignal: options.timeout === undefined ? undefined : 'SIGKILL',
     env: { ...process.env, ...options.env },
   });
   if (result.status !== 0) {
@@ -497,6 +516,7 @@ const tsconfig = {
     'forge-helper.ts',
     'custom-graph.ts',
     'pipeline.ts',
+    'team-conversation.ts',
     'review-loop.ts',
     'callback-gate.ts',
     'proof-bound-approval.ts',
@@ -526,6 +546,11 @@ async function main() {
   const graphExamplePath = join(root, 'examples', 'packages', 'custom-graph.ts');
   const graphExampleSource = await readFile(graphExamplePath, 'utf8');
   const pipelineExamplePath = join(root, 'examples', 'packages', 'pipeline.ts');
+  const teamConversationPath = join(root, 'examples', 'team-conversation.ts');
+  const teamConversationSource = await readFile(teamConversationPath, 'utf8');
+  const teamConversationDocument = await readFile(
+    join(root, 'docs', 'public', 'workflows', 'team-conversation.mdx'), 'utf8',
+  );
   const reviewLoopExamplePath = join(root, 'examples', 'packages', 'review-loop.ts');
   const callbackGateExamplePath = join(root, 'examples', 'packages', 'callback-gate.ts');
   const callbackGateExampleSource = await readFile(callbackGateExamplePath, 'utf8');
@@ -665,6 +690,7 @@ async function main() {
     await copyFile(forgeExamplePath, join(consumerDirectory, 'forge-helper.ts'));
     await copyFile(graphExamplePath, join(consumerDirectory, 'custom-graph.ts'));
     await copyFile(pipelineExamplePath, join(consumerDirectory, 'pipeline.ts'));
+    await copyFile(teamConversationPath, join(consumerDirectory, 'team-conversation.ts'));
     await copyFile(reviewLoopExamplePath, join(consumerDirectory, 'review-loop.ts'));
     await copyFile(callbackGateExamplePath, join(consumerDirectory, 'callback-gate.ts'));
     await copyFile(
@@ -766,6 +792,10 @@ async function main() {
     const directPipeline = JSON.parse(
       run('pnpm', ['exec', 'tsx', 'pipeline.ts'], { cwd: consumerDirectory }),
     );
+    const compiledTeamConversation = run(process.execPath, ['dist/team-conversation.js'], { cwd: consumerDirectory, timeout: 30_000 });
+    const directTeamConversation = run(process.execPath, ['--import', 'tsx', 'team-conversation.ts'], { cwd: consumerDirectory, timeout: 30_000 });
+    checkedTeamConversationPage(teamConversationDocument, teamConversationSource, compiledTeamConversation);
+    checkedTeamConversationPage(teamConversationDocument, teamConversationSource, directTeamConversation);
     const compiledReviewLoop = JSON.parse(
       run(process.execPath, ['dist/review-loop.js'], { cwd: consumerDirectory }),
     );
