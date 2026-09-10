@@ -28,7 +28,8 @@ import {
   type GraphRequirements,
   type PlanResolution,
 } from '../src/graph/plan.js';
-import { cloneFrozenJson, type JsonObject, type JsonValue } from '../src/graph/value.js';
+import { cloneFrozenJson, digestJson, type JsonObject, type JsonValue } from '../src/graph/value.js';
+import { defineResultContract } from '../src/runtime/result-contract.js';
 import { validateNewDomainEvent, type DomainEventEnvelope } from '../src/events/envelope.js';
 import type { EventStore } from '../src/events/store.js';
 import { createLocalRunStorage } from '../src/storage/local.js';
@@ -294,7 +295,10 @@ const policy = {
 
 async function storedRun(
   input: TestDefinition,
-  options: { readonly workerFallbacks?: readonly ExecutionTarget[] } = {},
+  options: {
+    readonly workerFallbacks?: readonly ExecutionTarget[];
+    readonly form?: ReturnType<typeof graphType>;
+  } = {},
 ): Promise<{
   readonly graph: ReturnType<typeof compileGraph<TestDefinition, TestState, TestEvent, GraphRequirements>>;
   readonly runId: string;
@@ -304,7 +308,7 @@ async function storedRun(
   const root = await realpath(await mkdtemp(join(tmpdir(), 'obversa-graph-executor-')));
   roots.push(root);
   const runId = `executor-${sequence += 1}`;
-  const graph = compileGraph(graphType(), input);
+  const graph = compileGraph(options.form ?? graphType(), input);
   const executionLanes: PlanResolution['executionLanes'] = graph.describe().executionLanes.map((lane) => ({
     id: lane.id,
     effective: lane.requested,
@@ -446,6 +450,53 @@ const validMemory: Memory = {
 };
 
 describe('createGraphExecutor', () => {
+  it.each(['data', 'engine', 'permissive-contract', 'resume'] as const)(
+    'validates the %s result once before saving completion', async (mode) => {
+      const base = graphType();
+      let checks = 0;
+      const form: ReturnType<typeof graphType> = { ...base, compile(value, kernel) {
+        return { ...base.compile(value, kernel), validateNodeResult(nodeId, result) {
+          checks += 1;
+          expect(nodeId).toBe('worker');
+          return result !== null && typeof result === 'object' && !Array.isArray(result)
+            && (result as JsonObject).ok === true
+            ? null : { code: 'INVALID_TEST_RESULT', path: '/ok', message: 'Expected true.' };
+        } };
+      } };
+      const run = await storedRun(definition({ engineBacked: mode === 'engine' }), { form });
+      const binding = nodeBinding(run.root, {
+        prompt: mode === 'engine' ? () => 'Answer.' : null,
+        runData: mode === 'engine' ? null : async () => ({ ok: false }),
+      });
+      const schema = {};
+      const executor = await createGraphExecutor({
+        ...run,
+        nodes: { worker: {
+          ...binding,
+          resultContract: mode === 'permissive-contract' ? defineResultContract({
+            record: { name: 'any-json', version: 1, schemaDigest: digestJson(schema) },
+            schema, validate: (value) => value as JsonValue,
+          }) : null,
+        } },
+        engines: mode === 'engine' ? [
+          engineBinding(PRIMARY_TARGET, PRIMARY_SELECTION, new SelectedEngine(PRIMARY_SELECTION, { ok: false })),
+          engineBinding(FALLBACK_TARGET, FALLBACK_SELECTION, new SelectedEngine(FALLBACK_SELECTION)),
+        ] : [],
+      });
+      if (mode === 'resume') await appendGraphEvent(run.storage, run.runId, {
+        type: 'node-dispatched', version: 1, payload: { nodeId: 'worker', position: 'turns/1' },
+      });
+      const outcome = mode === 'resume'
+        ? await executor.resume('turns/1', new AbortController().signal)
+        : await executor.run(new AbortController().signal);
+      expect(outcome).toMatchObject({ kind: 'fail', code: 'TEST_FAILED' });
+      expect(checks).toBe(1);
+      const durable = await events(run.storage, run.runId);
+      expect(durable.filter((event) => event.type === 'graph:node-completed')).toEqual([]);
+      expect(durable.at(-1)?.payload).toEqual({ nodeId: 'worker', position: 'turns/1', code: 'RESULT_INVALID' });
+    },
+  );
+
   it('builds each engine prompt from that dispatch input', async () => {
     const run = await storedRun(definition({ completeAfter: 2 }));
     const prompts: string[] = [];

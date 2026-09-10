@@ -42,6 +42,18 @@ export {
   type DagDefinition,
 } from './graph-types/dag.js';
 export {
+  teamGraphType,
+  type TeamNodeData,
+  type TeamRoom,
+  type TeamCommunication,
+  type TeamGraphData,
+  type TeamDefinition,
+  type TeamPost,
+  type TeamTurnResult,
+  type TeamMessage,
+  type TeamGraphResult,
+} from './graph-types/team.js';
+export {
   convergence,
   type ConvergenceDefinition,
   type ConvergenceEvent,
@@ -125,6 +137,7 @@ export {
   type GraphExecutorOptions,
   type GraphExecutorResult,
 } from './runtime/graph-executor.js';
+export { projectTeamRooms } from './runtime/team-rooms.js';
 export {
   resolveGraphPlan,
   validateGraphDescription,
@@ -272,6 +285,14 @@ export { loop } from './core/loop.js';
 export { dag, sequence, parallel } from './core/dag.js';
 export { pipeline, type PipelineStage } from './core/pipeline.js';
 export { tournament, type TournamentConfig } from './core/tournament.js';
+export {
+  team,
+  type TeamAgent,
+  type TeamAgentResult,
+  type TeamConfig,
+  type TeamResult,
+  type TeamReview,
+} from './core/team.js';
 export {
   agentJob,
   fnJob,
