@@ -1,7 +1,7 @@
 /**
  * Hardening gates that keep a convergence loop honest without spending a
  * model call — deterministic conditions in the supervisor-orchestrator
- * tradition, adapted to the Lines runtime:
+ * tradition, adapted to the Obversa runtime:
  *
  * - `ratchet`: a measured metric may only hold or improve against a
  *   runtime-owned baseline that is written **only in the improving

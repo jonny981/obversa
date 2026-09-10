@@ -488,7 +488,7 @@ export interface CommitInput {
 /**
  * Commit the staged index. The message is passed on stdin (`-F -`) so an
  * arbitrarily-shaped body never has to survive shell escaping. The repo's
- * configured author is used. Lines never changes commit authorship.
+ * configured author is used. The runtime never changes commit authorship.
  * Returns the new sha, or undefined when there was nothing to commit and
  * `allowEmpty` was not set.
  */
@@ -617,7 +617,7 @@ export interface MergeResult {
 /**
  * Land a fork branch back into the branch checked out at `repoDir` (`--no-ff`).
  * On conflict the merge is aborted so the target stays clean and the caller can
- * fail the node. Lines does not auto-resolve (a merge-resolver is a separate
+ * fail the node. The runtime does not auto-resolve (a merge-resolver is a separate
  * layer).
  */
 export async function mergeBranch(

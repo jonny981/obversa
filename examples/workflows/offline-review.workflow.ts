@@ -1,3 +1,4 @@
+import { relative } from 'node:path';
 import {
   defineJob,
   fnJob,
@@ -42,7 +43,9 @@ const reviewLoop = defineJob(
 );
 
 async function main(): Promise<void> {
-  const result = await run(reviewLoop);
+  // The run writes its record to .obversa/records/offline-review.jsonl so a
+  // reader can open the file the docs describe.
+  const result = await run(reviewLoop, { recordTo: '.obversa/records/offline-review.jsonl' });
 
   console.log(
     JSON.stringify(
@@ -50,6 +53,11 @@ async function main(): Promise<void> {
         status: result.outcome.status,
         attempts,
         summary: result.outcome.summary,
+        // Relative to where the command was launched, so the path can be copied
+        // from the report; pnpm and npm set INIT_CWD to that directory.
+        record: result.recordPath
+          ? relative(process.env.INIT_CWD ?? process.cwd(), result.recordPath)
+          : null,
       },
       null,
       2,

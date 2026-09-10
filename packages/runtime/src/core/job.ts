@@ -70,7 +70,7 @@ export interface AgentJobConfig {
   graphContext?: boolean;
   /**
    * Bounded, visible escalation: the worker may ask for a consult by replying
-   * with a `<consult_advisor>` block. Lines runs one model-pinned advisor turn,
+   * with a `<consult_advisor>` block. The runtime runs one model-pinned advisor turn,
    * records the question/reply, and then gives the reply back to the worker in a
    * fresh turn. This is the sanctioned alternative to shelling out to another
    * model from inside a leaf.
@@ -145,7 +145,7 @@ function advisorInstruction(maxCalls: number): string {
     `<question>the precise question</question>\n` +
     `<context>the minimum context the advisor needs</context>\n` +
     `</consult_advisor>\n\n` +
-    `Lines will record the consult and return the advisor reply to you.`
+    `The runtime will record the consult and return the advisor reply to you.`
   );
 }
 

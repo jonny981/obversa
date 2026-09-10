@@ -1,52 +1,142 @@
 ---
 title: "Surfaces"
-description: "A surface is a small local user interface for one decision."
+description: "Put one decision in front of a person in their browser, and get one answer back."
 ---
 
-A surface is a small user interface for one decision. A diff review with
-inline comments is a surface. A form or a visual approval can use the same
-session contract.
 
-Your workflow opens a surface when it needs your input. The session ends
-after the decision, cancellation, interruption, or timeout. The caller gets
-one structured result it can use to continue the work.
+Sometimes a workflow reaches a step no agent should decide alone: approve
+this change, pick one of these two drafts, confirm the migration. You want
+that one question in front of a person, in a browser, and you want the
+answer back in the run. That is what a surface is: a small web page for one
+decision, opened for one person, answered once.
 
-## Surfacer
+The surfacer package runs it. You give it the page files and the API the
+page calls. It serves them on a private port on your own machine, opens the
+page, waits for the one answer, and hands it back to you. Then it is gone.
+No server to deploy, no accounts, nothing left running.
 
-Surfacer is the package that runs surfaces. It does three things:
+## What you get
 
-- **Runs the session:** A local server serves one surface.
-- **Places the page:** Host scripts can open it in a pane beside your
-  terminal. cmux has an adapter for this.
-- **Returns the result:** The caller receives the outcome and the data
-  supplied by the surface.
+- **One question, one answer.** A session ends exactly once: the person
+  answers, cancels, the time runs out, or you stop it. You get one result
+  either way, and the run carries on with it.
+- **Private by default.** The page lives on a loopback address with a
+  token in its URL, and every request has to carry it. Nothing on your
+  network can reach it, and a page from another origin cannot call it.
+- **Your page, your API.** A surface is plain HTML and a few JSON routes
+  you write. There is no framework to learn and nothing to install in the
+  browser.
+- **Secrets stay out.** Answers pass through secret redaction before they
+  reach you, unless you say a specific answer must come through byte for
+  byte, such as a review comment that quotes code.
 
-The caller owns the gate state, routing, and run records. Surfacer handles
-the interface and the result's return.
+## Run one
 
-## Your host stays yours
+The example asks one yes-or-no question, opens it in your browser, and
+prints the answer on stdout.
 
-Your terminal host supplies the panes, layout, and keybindings. Surfacer
-uses a placement command supplied by the host to open the page there.
+From an Obversa checkout:
 
-Without host placement, the macOS default browser is the fallback. On Linux
-and Windows, Surfacer prints the URL for you to open. Surfacer prints the URL
-if no opening command is available or all attempted commands report failure
-during their five-second startup checks.
+```bash
+node packages/surfacer/examples/hello-surface.mjs
+```
 
-The [diff review command](/hosts/review) is a complete surface you can use.
-It shows a Git diff, collects comments on lines, and returns them to its
-caller. The [cmux guide](/hosts/cmux) explains how to open it beside your
-terminal.
+```js
+// Runnable example: node examples/hello-surface.mjs
+// Opens a one-question surface and prints the framed result on stdout.
+import { mkdtempSync, writeFileSync } from "node:fs";
+import os from "node:os";
+import path from "node:path";
+import { rmSync } from "node:fs";
+import { runSurface } from "../src/launcher.mjs";
 
-## Security
+const directory = mkdtempSync(path.join(os.tmpdir(), "hello-surface-"));
+// The session CSP is script-src 'self' with no inline allowance, so the
+// page logic ships as its own file.
+writeFileSync(path.join(directory, "index.html"), `<!doctype html>
+<title>Hello surface</title>
+<h1>Answer the one question</h1>
+<button id="yes">Yes</button><button id="no">No</button>
+<script type="module" src="/app.js"></script>`);
+writeFileSync(path.join(directory, "app.js"), `
+const token = location.hash.slice(1); history.replaceState(null, "", location.pathname);
+const api = (p, b) => fetch(p, { method: "POST", headers: { Authorization: "Bearer " + token, "Content-Type": "application/json" }, body: JSON.stringify(b) }).then(r => r.json());
+document.getElementById("yes").onclick = async () => { const r = await api("/api/answer", { value: true }); await api("/api/ack", { operationId: r.operationId }); document.body.textContent = "Done."; };
+document.getElementById("no").onclick = async () => { const r = await api("/api/cancel", {}); await api("/api/ack", { operationId: r.operationId }); document.body.textContent = "Done."; };
+`);
 
-A surface server listens only on the local computer. Each session has its
-own token, and every API request must carry it. The API limits the JSON bodies
-it reads to 4 MiB.
+let result;
+try {
+  ({ result } = await runSurface({
+  app: "hello-surface",
+  assets: { directory, files: {
+    "/": ["index.html", "text/html; charset=utf-8"],
+    "/app.js": ["app.js", "text/javascript; charset=utf-8"],
+  } },
+  api: {
+    "POST /api/answer": async ({ body, session }) => {
+      session.complete({ value: body.value === true });
+      return null;
+    },
+  },
+    leaseTimeoutMs: 120_000,
+  }));
+} finally {
+  rmSync(directory, { recursive: true, force: true });
+}
+process.exit(result.status === "completed" ? 0 : 1);
+```
 
-The host receives a one-time launch URL. The page's session token stays out
-of the placement command's arguments. The launcher shuts the server down
-after the session ends.
+Click Yes and the process prints the framed result and exits 0:
 
-See [Surfacer](/packages/surfacer) for the session and launcher APIs.
+```text
+<<<HELLO_SURFACE_RESULT_V1>>>
+{"schemaVersion":1,"app":"hello-surface","surface":null,"status":"completed","operationId":"a4bad94c-7192-45e2-98e3-30e4faa7cc4c","createdAt":"2026-09-10T12:14:13.659Z","payload":{"value":true},"detail":null}
+<<<END_HELLO_SURFACE_RESULT_V1>>>
+```
+
+The page is two files, an HTML file and a script, because the page runs
+under a strict content policy and inline scripts are not allowed. The API
+is one route. When the route calls `session.complete`, the session has its
+answer and the browser is told so.
+
+## Use it in a workflow
+
+A callback gate is the step that waits for a person. Give it a surface and
+the run pauses at that step, opens the page, and resumes with the answer:
+approved, rejected, or a value the page collected. The
+[callback gates](/reviewing/callback-gates) page shows the gate; the surface
+is the thing the gate opens.
+
+The review page that ships with the source package is a surface: it opens a
+diff for inline comments and returns the annotations as the answer. The
+[review command](/hosts/review) page shows it.
+
+## Where the page opens
+
+By default the surface opens in your default browser. Inside cmux it opens
+as a split beside your terminal, so the question appears next to the run
+that asked it. The [cmux host](/hosts/cmux) page shows how, and the
+[plugins](/plugins) page lists the hosts.
+
+## Things that catch people out
+
+- **The lease.** A surface waits for a person, and people walk away. Set
+  `leaseTimeoutMs` to how long the question may stand; when it passes, the
+  result says so and the run continues on that.
+- **The acknowledgement.** The browser confirms it received the decision
+  before the session closes. A page that answers and closes itself without
+  the acknowledgement call looks, to the run, like a page that never
+  answered, until the acknowledgement timeout ends it.
+- **Inline scripts.** The page's content policy allows no inline script or
+  style; ship them as files, as the example does.
+- **Verbatim answers.** If an answer must survive exactly, quoting code for
+  example, complete it with `verbatim: true`. Everything else is redacted,
+  and that is the safe default.
+
+## Under the hood
+
+The exact limits, headers, serialisation rules and the framed result format
+are on the [surfacer reference](/packages/surfacer) page. Nothing
+there is needed to use a surface; it is there when you build a host or a
+page that must interoperate with one.

@@ -1,51 +1,131 @@
 ---
 title: "Workflows"
-description: "A workflow takes an Order through the steps that make and check the result."
+description: "A workflow is the shape of the work: the steps, who does each one, where the reviews are, and where a person decides."
 ---
 
-A workflow is the process that works on an Order. You describe its steps
-and dependencies as a graph. Each node is a step that runs an agent,
-executes code, or applies a check.
 
-A callback gate asks for a decision. The code driving the workflow records
-the answer and decides whether work can continue.
+Every team has a way work moves. A ticket gets read, someone builds it,
+someone tests it, a few people review it, and a lead says ship. Nobody draws
+that on a whiteboard before each ticket; it is just how the team works. A
+workflow is that shape, written down once so the runtime can run it for
+your agents, every time, the same way.
 
-## One change at a time
+You write a workflow in TypeScript, in one file, with the steps in the order
+they run and the reviews where they belong. The runtime runs it one bounded
+step at a time and records each step as it finishes, so the shape you wrote
+is also the record you get back.
 
-You can carry one Order from request to result without waiting for a batch.
-Its workflow can be as small as draft, review, and finish.
+## What a workflow is made of
 
-The graph defines when each node can run. A pipeline puts steps in order.
-A dependency graph can run independent steps together. A review loop sends
-work back for corrections within the limits you set.
+- **Steps.** Each step is a job: an agent call, a script, a check. A step
+  has a name, and the record carries whose work each step was.
+- **Order and dependencies.** A pipeline runs steps one after another. A
+  graph runs independent steps together and waits where one depends on
+  another. Both are one call.
+- **Reviews.** A review is a step that judges another step's result. A
+  panel passes on the count you set. A reviewer that fails a step names
+  the stage that must fix it, and the work goes back there with the
+  findings.
+- **Decisions for a person.** A callback gate stops the run, puts one
+  question in front of someone, and continues from that step with the
+  answer.
+- **Limits.** Every attempt has a budget, and a review loop has a maximum
+  number of times it may send work back. An overrun is a result you can
+  read, not a hang.
 
-## Workflows that share a home
+## A feature team, in one file
 
-Workflows for one team can share a repository, context, and reusable
-definitions. Your team can group workflows by domain without a separate
-runtime object to configure.
+Five named stages. The review is a panel of three that passes on two, and
+when it fails, the work goes back to the implement stage rather than to
+the start of the run.
 
-## Joining the outputs
+```ts
+const review = reviewPanel({
+  label: 'review',
+  reviewers: [
+    { name: 'correctness', job: checks.correctness },
+    { name: 'safety', job: checks.safety },
+    { name: 'scope', job: checks.scope },
+  ],
+  pass: 2, // two of three agree and the step passes
+  target: 'implement', // a failing panel sends the work back here
+});
 
-One workflow can use the results of others. A release workflow might bring
-together three components. An integration workflow might combine frontend
-and backend changes.
+export const featureDelivery = pipeline(
+  'feature-delivery',
+  [
+    { name: 'analyse', job: analyse },
+    { name: 'implement', job: implement },
+    { name: 'test', job: testStage },
+    { name: 'review', job: review },
+    { name: 'approve', job: approve },
+  ],
+  { maxKickbacks: 2 },
+);
+```
 
-Earlier workflows supply inputs for the next workflow. Your code makes
-the connection. A node can run a child graph through the public executor
-and return its result.
+Run it and the panel fails the first attempt, implement runs again, and the
+second attempt passes:
 
-For larger outputs, your code can store an artifact and pass its reference.
-The reference includes a content hash, which identifies the stored bytes.
-The artifact store checks those bytes when it reads them. Your application
-starts the receiving workflow and supplies its inputs.
+From an Obversa checkout:
+
+```bash
+pnpm example:feature-team
+```
+
+```text
+{
+  "status": "pass",
+  "implementRuns": 2
+}
+```
+
+The stages here are small functions so the shape is the only thing on
+show. In a real team each one calls an engine, and the file does not change
+shape when it does.
+
+## What happens when it runs
+
+The runtime reads the workflow, runs the first step it can, and appends an
+event when the step finishes. Then the next. A review that fails a step
+appends the findings and the name of the stage to fix, and the runtime runs
+that stage again with them. A gate that waits for a person appends the
+pause, and the run stops there until the answer arrives. Every one of those
+events is a line in a file on disk, and
+[how a run is recorded](/recording/how-a-run-is-recorded) says what the
+file holds and how a killed run restarts from it.
+
+## Shapes you can start from
+
+- A **pipeline** for work that goes in one direction.
+- A **review loop** for draft, review, and revise until it passes or runs
+  out of tries.
+- A **panel** for several reviewers and a threshold.
+- A **tournament** for several candidates and one winner.
+- A **graph** for anything with parallel branches.
+
+The [workflow bank](/workflows) has complete programs for the common
+shapes; copy one and change the parts that name your team. To write a shape
+of your own over the public contract, see
+[writing workflow shapes](/graphs/contract).
+
+## Things that catch people out
+
+- **One dissent does not send work back.** A panel that passes on two of
+  three passes when only one reviewer fails. If one voice must be enough,
+  set the pass count to the number of reviewers.
+- **A reviewer needs a target to send work back.** Without `target`, a
+  failing panel fails the run rather than returning the work. The example
+  above sets it.
+- **Kickbacks are counted.** `maxKickbacks` caps how many times work can go
+  back; when it runs out, the run fails with the last findings rather than
+  looping.
+- **A plain run does not resume.** `run()` starts a fresh record each time;
+  restarting a killed run is the supervised runner's job. See
+  [driving runs](/driving/runner).
 
 ## Where definitions live
 
-A workflow definition is source code. It can live in your repository, a
-shared repository, or a package. You can edit it, version it, review it,
-and share it.
-
-Start with the [workflow bank](/workflows/index) for a complete
-program, or the [pipeline example](/graphs/pipeline) for a small graph.
-Copy the example and change it to fit your work.
+A workflow is source code. Keep it in the repository it works on, in a
+shared repository, or in a package; version it, review it, and share it
+like anything else you write.

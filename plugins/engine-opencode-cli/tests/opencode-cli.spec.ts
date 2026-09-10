@@ -700,7 +700,7 @@ describe('OpenCode CLI adapter', () => {
     expect(existsSync(recordPath)).toBe(false);
   });
 
-  it('rejects per-request environment, Lines memory, bad models, and unpinned versions', async () => {
+  it('rejects per-request environment, Obversa memory, bad models, and unpinned versions', async () => {
     expect(() => new OpenCodeCliEngine(options('opencode'))).toThrow('absolute');
     expect(() => new OpenCodeCliEngine({
       ...options('/bin/echo'),
@@ -721,7 +721,7 @@ describe('OpenCode CLI adapter', () => {
       { ...request(), memory: {} } as AgentRequest & { memory: unknown },
       () => {},
       new AbortController().signal,
-    )).rejects.toThrow('does not bridge Lines memory');
+    )).rejects.toThrow('does not bridge Obversa memory');
     await expect(engine.run(
       request({ model: 'missing-slash' }),
       () => {},
