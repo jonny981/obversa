@@ -676,7 +676,22 @@ describe('team room projection', () => {
     expect(await readFile(join(directory, 'keep.txt'), 'utf8')).toBe('keep this file');
   });
 
-  it('rejects a malformed matching saved post before creating a room file', async () => {
+  it('refuses invalid membership before saving a completion without a binding result contract', async () => {
+    const run = await storedTeamRun(exchangeDefinition);
+    const outcome = await executeWithData(run, {
+      writer: async () => ({
+        summary: 'Review requested.',
+        posts: [{ roomId: 'review', text: 'Please check.', mentions: ['reviwer'] }],
+      }),
+    });
+    expect(outcome).toMatchObject({ kind: 'fail', code: 'TEAM_NODE_FAILED' });
+    const events = await readEvents(run.storage, run.runId);
+    expect(events.filter((event) => event.type === 'graph:node-completed')).toEqual([]);
+    expect(events.find((event) => event.type === 'graph:node-failed')?.payload)
+      .toMatchObject({ nodeId: 'writer', code: 'RESULT_INVALID' });
+  });
+
+  it('fails a saved invalid turn and projects only the earlier valid question without changing the record', async () => {
     const run = await storedTeamRun(exchangeDefinition);
     await appendEvent(run.storage, run.runId, 'graph:node-dispatched', {
       nodeId: 'writer',
@@ -686,8 +701,21 @@ describe('team room projection', () => {
       nodeId: 'writer',
       position: 'team/writer/1',
       result: {
-        summary: 'Malformed post.',
-        posts: [{ roomId: 'review', text: 7, mentions: ['reviewer'] }],
+        summary: 'Question saved.',
+        posts: [{ roomId: 'review', text: questionText, mentions: ['reviewer'] }],
+      },
+    });
+    await appendEvent(run.storage, run.runId, 'graph:node-dispatched', {
+      nodeId: 'reviewer', position: 'team/reviewer/1',
+    });
+    await appendEvent(run.storage, run.runId, 'graph:node-completed', {
+      nodeId: 'reviewer', position: 'team/reviewer/1',
+      result: {
+        summary: 'Bad reply.',
+        posts: [
+          { roomId: 'review', text: 'DO_NOT_DELIVER_FIRST_POST', mentions: ['writer'] },
+          { roomId: 'review', text: 7, mentions: ['writer'] },
+        ],
       },
     });
     const before = await readEvents(run.storage, run.runId);
@@ -695,12 +723,38 @@ describe('team room projection', () => {
     await mkdir(directory);
     await writeFile(join(directory, 'keep.txt'), 'keep this file');
 
-    await expect(projectTeamRooms()({
-      storage: rejectAppends(run.storage),
+    const storage = localStorage(run.root, run.storage.record.namespace);
+    const graph = runtime.compileGraph(runtime.teamGraphType, exchangeDefinition);
+    let calls = 0;
+    const fresh = await runtime.createGraphExecutor({
+      ...run, graph, storage,
+      nodes: { writer: dataBinding(run.root, async () => { calls += 1; return {}; }) },
+      engines: [],
+    });
+    expect(await fresh.run(new AbortController().signal))
+      .toMatchObject({ kind: 'fail', code: 'TEAM_NODE_FAILED' });
+    expect(calls).toBe(0);
+    const folded = before.filter((event) => event.type !== 'graph:run-started').reduce(
+      (state, event) => graph.reduce(state, {
+        type: event.type.slice('graph:'.length), version: event.version, payload: event.payload,
+      }), graph.initialState(),
+    );
+    expect(folded.nodes.reviewer).toMatchObject({ status: 'failed', failureCode: 'RESULT_INVALID' });
+    expect(folded.nodes.writer).toMatchObject({ queued: false, triggers: [] });
+    expect(folded.messages).toEqual([{
+      id: 'team/writer/1/0', sender: 'writer', position: 'team/writer/1',
+      roomId: 'review', text: questionText, mentions: ['reviewer'],
+    }]);
+    const view = await projectTeamRooms()({
+      storage: rejectAppends(storage),
       runId: run.runId,
       directory,
-    })).rejects.toBeInstanceOf(runtime.GraphValidationError);
-    expect(await readdir(directory)).toEqual(['keep.txt']);
+    });
+    const content = await readFile(fileFor(view, 'review'), 'utf8');
+    expect(nonemptyLines(content)).toHaveLength(1);
+    expect(content).toContain(questionText);
+    expect(content).not.toContain('DO_NOT_DELIVER_FIRST_POST');
+    expect(view.revision).toBe(before.at(-1)!.revision);
     expect(await readFile(join(directory, 'keep.txt'), 'utf8')).toBe('keep this file');
     expect(await readEvents(run.storage, run.runId)).toEqual(before);
   });

@@ -795,6 +795,15 @@ export async function createGraphExecutor(
       decideAction: binding.decideAction,
     }, signal);
     if (result.status === 'completed') {
+      const issue = options.graph.validateNodeResult?.(command.nodeId, result.result) ?? null;
+      if (issue !== null) {
+        await appendResult(newEvent(options.runId, 'node-failed', {
+          nodeId: command.nodeId,
+          position: command.position,
+          code: 'RESULT_INVALID',
+        }));
+        return;
+      }
       await appendResult(newEvent(options.runId, 'node-completed', {
         nodeId: command.nodeId,
         position: command.position,

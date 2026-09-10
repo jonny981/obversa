@@ -4,7 +4,7 @@ import type { GraphCommand } from '../graph/commands.js';
 import type { GraphDefinition } from '../graph/kernel.js';
 import type { ExecutionLaneDescription, GraphDescriptionInput } from '../graph/plan.js';
 import type { GraphEvent, GraphType } from '../graph/type.js';
-import { GraphValidationError, type JsonObject, type JsonValue } from '../graph/value.js';
+import { GraphValidationError, type GraphValidationIssue, type JsonObject, type JsonValue } from '../graph/value.js';
 
 export type TeamNodeData = JsonObject & {
   role: string;
@@ -60,6 +60,7 @@ interface TeamMemberState extends JsonObject {
   readonly turns: number;
   readonly inFlight: string | null;
   readonly pauseReason: string | null;
+  readonly failureCode: string | null;
   readonly result: TeamTurnResult | null;
   readonly queued: boolean;
   readonly triggers: readonly string[];
@@ -150,33 +151,41 @@ function validateTeam(definition: TeamDefinition): void {
   }
 }
 
-function validateResult(
+function resultIssue(
   value: unknown,
   sender: string,
   rooms: ReadonlyMap<string, TeamRoom>,
   communication: boolean,
-): asserts value is TeamTurnResult {
+): GraphValidationIssue | null {
   const path = '/event/payload/result';
-  record(value, path);
-  text(value.summary, `${path}/summary`);
-  if (value.posts === undefined) return;
-  if (!communication || !Array.isArray(value.posts)) {
-    fail(`${path}/posts`, 'Posts require communication and a post list.');
+  const issue = (path: string, message: string): GraphValidationIssue => ({ code: 'INVALID_TEAM', path, message });
+  if (value === null || typeof value !== 'object' || Array.isArray(value)) {
+    return issue(path, 'Expected an object.');
   }
-  for (const [index, post] of value.posts.entries()) {
+  const result = value as JsonObject;
+  if (typeof result.summary !== 'string') return issue(`${path}/summary`, 'Expected text.');
+  if (result.posts === undefined) return null;
+  if (!communication || !Array.isArray(result.posts)) {
+    return issue(`${path}/posts`, 'Posts require communication and a post list.');
+  }
+  for (const [index, value] of result.posts.entries()) {
     const postPath = `${path}/posts/${index}`;
-    record(post, postPath);
-    identifier(post.roomId, `${postPath}/roomId`);
-    text(post.text, `${postPath}/text`);
+    if (value === null || typeof value !== 'object' || Array.isArray(value)) {
+      return issue(postPath, 'Expected an object.');
+    }
+    const post = value as JsonObject;
+    if (typeof post.roomId !== 'string') return issue(`${postPath}/roomId`, 'Expected a room name.');
+    if (typeof post.text !== 'string') return issue(`${postPath}/text`, 'Expected text.');
     const room = rooms.get(post.roomId);
-    if (!room?.members.includes(sender)) fail(postPath, 'The sender must belong to the declared room.');
-    if (!Array.isArray(post.mentions)) fail(`${postPath}/mentions`, 'Expected a mention list.');
+    if (!room?.members.includes(sender)) return issue(postPath, 'The sender must belong to the declared room.');
+    if (!Array.isArray(post.mentions)) return issue(`${postPath}/mentions`, 'Expected a mention list.');
     for (const mention of post.mentions) {
       if (typeof mention !== 'string' || !room.members.includes(mention)) {
-        fail(`${postPath}/mentions`, 'Every mention must name a member of the room.');
+        return issue(`${postPath}/mentions`, 'Every mention must name a member of the room.');
       }
     }
   }
+  return null;
 }
 
 /** Pure member turns; only matching saved completions deliver posts. */
@@ -195,9 +204,10 @@ export const teamGraphType: GraphType<
     const positionFor = (id: string, node: TeamMemberState): string => `team/${id}/${node.turns + 1}`;
     return {
       requirements: { memory: 'unused' },
+      validateNodeResult: (nodeId, result) => resultIssue(result, nodeId, rooms, communication !== undefined),
       initialState: () => ({
         nodes: Object.fromEntries(definition.nodes.map((node) => [node.id, {
-          status: 'idle', turns: 0, inFlight: null, pauseReason: null, result: null,
+          status: 'idle', turns: 0, inFlight: null, pauseReason: null, failureCode: null, result: null,
           queued: node.data.initialTurn !== false, triggers: [],
         }])),
         messages: [],
@@ -240,11 +250,20 @@ export const teamGraphType: GraphType<
           });
         }
         if (event.type === 'node-failed') {
-          return update({ ...node, status: 'failed', inFlight: null, pauseReason: null });
+          text((payload as JsonObject).code, '/event/payload/code');
+          return update({
+            ...node, status: 'failed', inFlight: null, pauseReason: null,
+            failureCode: (payload as JsonObject).code as string,
+          });
         }
         if (event.type !== 'node-completed') return state;
-        const result = (payload as JsonObject).result;
-        validateResult(result, nodeId, rooms, communication !== undefined);
+        const value = (payload as JsonObject).result;
+        if (resultIssue(value, nodeId, rooms, communication !== undefined) !== null) {
+          return update({
+            ...node, status: 'failed', inFlight: null, pauseReason: null, failureCode: 'RESULT_INVALID',
+          });
+        }
+        const result = value as TeamTurnResult;
         const messages: TeamMessage[] = (result.posts ?? []).map((post, index) => ({
           roomId: post.roomId, text: post.text, mentions: post.mentions,
           id: `${position}/${index}`, sender: nodeId, position: position as string,

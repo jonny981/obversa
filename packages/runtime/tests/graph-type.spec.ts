@@ -119,6 +119,73 @@ function graphType(
 }
 
 describe('compileGraph', () => {
+  it('preserves optional result validation with copied frozen input and issue output', () => {
+    const input = { nested: { accepted: false } };
+    const issue = { code: 'REJECTED', path: '/nested/accepted', message: 'Expected acceptance.' };
+    const seen: unknown[] = [];
+    const base = graphType();
+    const compiled = compileGraph({
+      ...base,
+      compile(value, kernel) {
+        return { ...base.compile(value, kernel), validateNodeResult(nodeId: string, result: unknown) {
+          seen.push(nodeId, result);
+          expect(Object.isFrozen(result)).toBe(true);
+          expect(Object.isFrozen((result as typeof input).nested)).toBe(true);
+          return issue;
+        } };
+      },
+    }, definition);
+    expect(compiled.validateNodeResult).toBeTypeOf('function');
+    const returned = compiled.validateNodeResult!('author', input);
+    expect(seen).toEqual(['author', input]);
+    expect(seen[1]).not.toBe(input);
+    expect(Object.isFrozen(input)).toBe(false);
+    expect(Object.isFrozen(input.nested)).toBe(false);
+    expect(returned).toEqual(issue);
+    expect(returned).not.toBe(issue);
+    expect(Object.isFrozen(returned)).toBe(true);
+    issue.message = 'Changed by caller.';
+    expect(returned?.message).toBe('Expected acceptance.');
+    expect(() => compiled.validateNodeResult!('missing', input)).toThrowError(
+      expect.objectContaining({ issues: [expect.objectContaining({ path: '/nodeId', message: expect.stringMatching(/unknown node/i) })] }),
+    );
+    expect(seen).toHaveLength(2);
+    expect(compileGraph(base, definition)).not.toHaveProperty('validateNodeResult');
+  });
+
+  it.each([false, null, 'validator'])('rejects an invalid optional result method %j', (method) => {
+    const base = graphType();
+    expect(() => compileGraph({ ...base, compile(value, kernel) {
+      return { ...base.compile(value, kernel), validateNodeResult: method } as never;
+    } }, definition)).toThrow(GraphValidationError);
+  });
+
+  it.each([undefined, false, [], {}, { code: 'BAD', path: '/', message: 7 },
+    { code: 'BAD', path: '/', message: 'Bad.', extra: true },
+  ].map((value) => [value]))('rejects malformed result issue %j', (returned) => {
+    const base = graphType();
+    const compiled = compileGraph({ ...base, compile(value, kernel) {
+      return { ...base.compile(value, kernel), validateNodeResult: () => returned } as never;
+    } }, definition);
+    expect(compiled.validateNodeResult).toBeTypeOf('function');
+    expect(() => compiled.validateNodeResult!('author', {})).toThrow(GraphValidationError);
+  });
+
+  it('accepts null and preserves a thrown result validation error by identity', () => {
+    const sentinel = new Error('Implementation failed.');
+    const base = graphType();
+    const compiled = compileGraph({ ...base, compile(value, kernel) {
+      return { ...base.compile(value, kernel), validateNodeResult(_nodeId: string, result: unknown) {
+        if (result === null) return null;
+        throw sentinel;
+      } };
+    } }, definition);
+    expect(compiled.validateNodeResult).toBeTypeOf('function');
+    expect(compiled.validateNodeResult!('author', null)).toBeNull();
+    expect(() => compiled.validateNodeResult!('author', {})).toThrow(sentinel);
+    try { compiled.validateNodeResult!('author', {}); } catch (error) { expect(error).toBe(sentinel); }
+  });
+
   it('replays the same events to the same state and ordered command', () => {
     const compiled = compileGraph(graphType(), definition);
     const initial = compiled.initialState();

@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 
 import * as runtime from '../src/api.ts';
 import { runGraphTypeConformance } from '../src/testing.ts';
+import type { TeamGraphState } from '../src/graph-types/team.ts';
 import type {
   CompiledGraphType,
   DispatchGraphCommand,
@@ -92,13 +93,25 @@ function messages(input: JsonValue): JsonObject[] {
 }
 
 function expectRejectedTurn(compiled: CompiledGraphType, state: JsonValue, event: GraphEvent): void {
-  expect(() => compiled.reduce(state, event)).toThrow(runtime.GraphValidationError);
+  const payload = event.payload as JsonObject;
+  const before = state as TeamGraphState;
+  const failed = compiled.reduce(state, event) as TeamGraphState;
+  expect(failed.nodes[payload.nodeId as string]).toMatchObject({
+    status: 'failed', failureCode: 'RESULT_INVALID', inFlight: null, pauseReason: null,
+    result: before.nodes[payload.nodeId as string]!.result,
+  });
+  expect(failed.messages).toEqual(before.messages);
+  expect(compiled.decide(failed)).toEqual([{
+    kind: 'fail', code: 'TEAM_NODE_FAILED', message: `Failed team members: ${payload.nodeId}.`,
+  }]);
+  expect(compiled.validateNodeResult?.(payload.nodeId as string, payload.result!))
+    .toMatchObject({ code: 'INVALID_TEAM' });
 }
 
 describe('compiled team graph', () => {
   it('conforms with literal writer, reviewer, writer event prefixes and bounds', () => {
     compileTeam();
-    const idle = { status: 'idle', turns: 0, inFlight: null, pauseReason: null, result: null, triggers: [] };
+    const idle = { status: 'idle', turns: 0, inFlight: null, pauseReason: null, failureCode: null, result: null, triggers: [] };
     const initialWriter = { ...idle, queued: true };
     const idleReviewer = { ...idle, queued: false };
     const writerActive = { ...initialWriter, queued: false, status: 'in-flight', turns: 1, inFlight: 'team/writer/1' };
@@ -155,6 +168,48 @@ describe('compiled team graph', () => {
     });
     expect(report.failures).toEqual([]);
     expect(report.ok).toBe(true);
+    const failedReport = runGraphTypeConformance({
+      graphType: (runtime as unknown as { teamGraphType: GraphType }).teamGraphType,
+      definition,
+      events: [
+        dispatched('writer', 'team/writer/1'), completed('writer', 'team/writer/1', question),
+        dispatched('reviewer', 'team/reviewer/1'), completed('reviewer', 'team/reviewer/1', {
+          summary: 'Reject the whole reply.', posts: [
+            { roomId: 'review', text: 'Do not send.', mentions: ['writer'] },
+            { roomId: 'review', text: 'Bad recipient.', mentions: ['stranger'] },
+          ],
+        }),
+      ],
+      invalidDefinitions: [{ ...definition, edges: [{ id: 'dependency', source: 'writer', target: 'reviewer', data: {} }] }],
+      planResolution: { package: identity, admission: { package: identity, permissions: [] }, executionLanes: [] },
+      expected: {
+        states: [
+          { nodes: { writer: initialWriter, reviewer: idleReviewer }, messages: [] },
+          { nodes: { writer: writerActive, reviewer: idleReviewer }, messages: [] },
+          { nodes: { writer: writerFinished, reviewer: reviewerQueued }, messages: [savedQuestion] },
+          { nodes: { writer: writerFinished, reviewer: reviewerActive }, messages: [savedQuestion] },
+          { nodes: {
+            writer: writerFinished,
+            reviewer: { ...idleReviewer, turns: 1, status: 'failed', failureCode: 'RESULT_INVALID' },
+          }, messages: [savedQuestion] },
+        ],
+        commands: [
+          [{ kind: 'dispatch', nodeId: 'writer', position: 'team/writer/1', input: {
+            task: definition.data.task, role: 'writer', brief: 'Draft the release note.', result: null, messages: [],
+          } }], [],
+          [{ kind: 'dispatch', nodeId: 'reviewer', position: 'team/reviewer/1', input: {
+            task: definition.data.task, role: 'reviewer', brief: 'Check the draft.', result: null, messages: [savedQuestion],
+          } }], [],
+          [{ kind: 'fail', code: 'TEAM_NODE_FAILED', message: 'Failed team members: reviewer.' }],
+        ],
+        bounds: {
+          dispatches: { min: { kind: 'known', value: 1 }, max: { kind: 'known', value: 4 } },
+          maxConcurrency: { kind: 'known', value: 1 }, maxFanOut: { kind: 'known', value: 1 },
+        },
+      },
+    });
+    expect(failedReport.failures).toEqual([]);
+    expect(failedReport.ok).toBe(true);
   });
 
   it('queues a mention arriving during an active turn for a fresh later turn', () => {
@@ -218,6 +273,7 @@ describe('compiled team graph', () => {
     state = compiled.reduce(state, settlements[1]!);
     const reopened = compileTeam(input);
     const replayed = replay(reopened, [...dispatches, ...settlements]);
+    expect((replayed as TeamGraphState).nodes.writer?.failureCode).toBe('ENGINE_UNAVAILABLE');
     expect(replayed).toEqual(state);
     for (const commands of [compiled.decide(state), reopened.decide(replayed)]) {
       expect(commands).toEqual([{
@@ -231,7 +287,7 @@ describe('compiled team graph', () => {
     ...[{ roomId: 1 }, { text: 1 }, { mentions: 'reviewer' }, { mentions: [1] }].map((fields) => ({
       summary: 'ok', posts: [{ roomId: 'review', text: 'Check.', mentions: ['reviewer'], ...fields }],
     })),
-  ] as JsonValue[])('rejects malformed matching turn %j without changing saved state', (result) => {
+  ].map((value) => [value as JsonValue]))('rejects malformed matching turn %j without changing saved state', (result) => {
     const compiled = compileTeam();
     const state = replay(compiled, [dispatched('writer', 'team/writer/1')]);
     const before = structuredClone(state);
@@ -516,6 +572,10 @@ describe('compiled team graph', () => {
     }));
     expect(stale).toEqual(state);
     expect(compiled.decide(stale)).toEqual([]);
+    expectRejectedTurn(compiled, stale, completed('writer', nextWriter.position, {
+      summary: 'Bad second turn.',
+      posts: [{ roomId: 'review', text: 'Do not save.', mentions: ['stranger'] }],
+    }));
     state = compiled.reduce(stale, completed('writer', nextWriter.position, { summary: 'Finished.' }));
     expect(compiled.decide(state).map((command) => command.kind)).toEqual(['complete']);
   });

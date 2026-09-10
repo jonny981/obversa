@@ -25,6 +25,8 @@ engine and memory packages track their own versions independently.
 
 ### Fixed
 
+- **Invalid team turns:** Reject bad results before saving completion, and
+  retain earlier messages when replay finds invalid saved result content.
 - **Early team review validation:** Invalid panel or callback settings are
   rejected when a callable team is created, before its members start work.
 

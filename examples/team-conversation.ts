@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import { createHash } from 'node:crypto';
 import { access, mkdir, mkdtemp, realpath, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -7,7 +8,7 @@ import { join } from 'node:path';
 import {
   compileGraph, createGraphExecutor, loadRunDefinition, persistRunDefinition,
   projectTeamRooms, resolveGraphPlan, teamGraphType,
-  type DomainEventEnvelope, type GraphNodeBinding, type RunStoragePolicy,
+  type DomainEventEnvelope, type GraphNodeBinding, type JsonValue, type ResultContract, type RunStoragePolicy,
   type TeamDefinition, type TeamGraphResult, type TeamMessage, type TeamTurnResult,
 } from '@obversa/runtime';
 import { createLocalRunStorage } from '@obversa/runtime/storage/local';
@@ -28,6 +29,33 @@ const definition: TeamDefinition = {
 };
 // #endregion definition
 
+const graph = compileGraph(teamGraphType, definition);
+// Keys are sorted so these JSON bytes match the contract's schema digest.
+const resultSchema = {
+  properties: {
+    data: {},
+    posts: {
+      items: {
+        properties: {
+          mentions: { items: { type: 'string' }, type: 'array' },
+          roomId: { type: 'string' },
+          text: { type: 'string' },
+        },
+        required: ['roomId', 'text', 'mentions'],
+        type: 'object',
+      },
+      type: 'array',
+    },
+    summary: { type: 'string' },
+  },
+  required: ['summary'],
+  type: 'object',
+} as const;
+const resultRecord = {
+  name: 'team-turn', version: 1,
+  schemaDigest: `sha256:${createHash('sha256').update(JSON.stringify(resultSchema)).digest('hex')}` as const,
+};
+
 const storagePolicy = {
   schemaVersion: 1, maxEventPayloadBytes: 64_000, maxAppendBatchBytes: 128_000,
   maxArtifactBytes: 1_000_000, maxTotalArtifactBytesPerRun: 4_000_000,
@@ -35,7 +63,16 @@ const storagePolicy = {
   sensitiveContent: { marked: 'reject', exact: 'reject', freeText: 'redact-before-hash' },
 } as const satisfies RunStoragePolicy;
 
-function binding(directory: string, runData: NonNullable<GraphNodeBinding['runData']>): GraphNodeBinding {
+function binding(member: string, directory: string, runData: NonNullable<GraphNodeBinding['runData']>): GraphNodeBinding {
+  const resultContract: ResultContract = {
+    record: resultRecord,
+    schema: resultSchema,
+    validate(value) {
+      const issue = graph.validateNodeResult!(member, value as JsonValue);
+      if (issue !== null) throw new Error(`${issue.path}: ${issue.message}`);
+      return value as TeamTurnResult;
+    },
+  };
   return {
     prompt: null, scratchDirectory: directory,
     workspace: { mode: 'none', directory: null, allowedPaths: [] },
@@ -45,7 +82,7 @@ function binding(directory: string, runData: NonNullable<GraphNodeBinding['runDa
       teardownGraceMs: 100, memoryBytes: 10_000_000,
       filesChanged: 0, linesChanged: 0, callTokens: null,
     },
-    resultContract: null, runData, parseResult: null, tokenBudget: null,
+    resultContract, runData, parseResult: null, tokenBudget: null,
     decideAction: async () => ({ kind: 'allow' }),
   };
 }
@@ -58,7 +95,6 @@ const openStorage = () => createLocalRunStorage({
 let report;
 try {
   const storage = openStorage();
-  const graph = compileGraph(teamGraphType, definition);
   const packageIdentity = {
     source: 'npm:@example/team-conversation', version: '1.0.0',
     digest: `sha256:${'3'.repeat(64)}` as const,
@@ -75,7 +111,7 @@ try {
   type TurnInput = { task: string; result: TeamTurnResult | null; messages: TeamMessage[] };
   // #region posts
   const nodes = {
-    writer: binding(join(temporaryRoot, 'writer'), async ({ input }): Promise<TeamTurnResult> => {
+    writer: binding('writer', join(temporaryRoot, 'writer'), async ({ input }): Promise<TeamTurnResult> => {
       const turn = input as TurnInput;
       if (turn.result === null) return {
         summary: 'Review requested.',
@@ -85,7 +121,7 @@ try {
       assert.ok(reply, 'The writer requires the saved reviewer reply.');
       return { summary: `Finished ${turn.task}: ${reply.text}`, data: { replyId: reply.id, reply: reply.text } };
     }),
-    reviewer: binding(join(temporaryRoot, 'reviewer'), async ({ input }) => {
+    reviewer: binding('reviewer', join(temporaryRoot, 'reviewer'), async ({ input }) => {
       const question = (input as TurnInput).messages.find((message) => message.sender === 'writer');
       assert.ok(question, 'The reviewer requires the saved writer question.');
       return {

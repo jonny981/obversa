@@ -220,6 +220,15 @@ give runtime services.
 | `decide(state)` | Ordered dispatch, pause, complete, or fail commands. |
 | `describe()` | The stable graph description for a host. |
 
+A form may also return the pure optional operation
+`validateNodeResult(nodeId: NodeId, result: JsonValue): GraphValidationIssue | null`.
+Before saving a completion, the executor calls it with a declared node ID and
+copied, frozen result data. `null` accepts the result; an issue with string
+`code`, `path` and `message` fields records `node-failed` with `RESULT_INVALID`.
+`compileGraph` checks and freezes the returned issue. A malformed return or an
+exception from the implementation propagates as an error. Forms that omit the
+operation keep their existing behavior.
+
 `decide` returns zero or more dispatch commands, or exactly one `pause`,
 `complete`, or `fail` command. A dispatch asks the executor to start new work.
 An empty decision means start nothing new. The executor accepts it only while a recorded
