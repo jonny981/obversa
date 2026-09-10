@@ -19,13 +19,14 @@ const SURFACER_COMPLETION_CHAIN = defineBudgetChain("surfacer completion", SURFA
   setup: 5_000,
   phases: [
     ["response", 400],
+    ["acknowledgement", SURFACER_HANG_GUARD_TIMEOUT_MS],
     ["acknowledgement settlement", ACKNOWLEDGEMENT_SETTLEMENT_MAX_MS],
   ],
   cleanup: 10_000,
 });
 const SURFACER_DISCONNECT_CHAIN = defineBudgetChain("surfacer disconnect", SURFACER_TEST_TIMEOUT_MS, {
   setup: 5_000,
-  phases: [["decision", SURFACER_HANG_GUARD_TIMEOUT_MS]],
+  phases: [["claim", SURFACER_HANG_GUARD_TIMEOUT_MS], ["decision", SURFACER_HANG_GUARD_TIMEOUT_MS]],
   cleanup: 10_000,
 });
 assert.ok(
@@ -346,7 +347,7 @@ test("the caller learns of a completion only after the winning request has been 
     const { operationId } = await /** @type {any} */ (answered.json());
     assert.equal(typeof operationId, "string", "the browser gets the operation id to acknowledge");
     assert.equal(settled, false, "the decision had not settled when the browser was answered: the clock starts after the answer, not at the claim");
-    const ack = await request(surface, "/api/ack", { body: { operationId } });
+    const ack = await SURFACER_COMPLETION_CHAIN.run("acknowledgement", () => request(surface, "/api/ack", { body: { operationId } }));
     assert.equal(ack.status, 200, "the acknowledgement is accepted");
     const decision = await decided;
     assert.equal(decision.status, "completed");
@@ -382,7 +383,7 @@ test("a handler that completes and then never returns is answered at the claim, 
       request(surface, "/api/hang", { body: {} }).then(async (response) => ({ status: response.status, ...(await /** @type {any} */ (response.json())) })));
     assert.equal(status, 200, "the browser is answered at the claim while the handler remains pending");
     assert.equal(typeof operationId, "string");
-    const ack = await request(surface, "/api/ack", { body: { operationId } });
+    const ack = await SURFACER_COMPLETION_CHAIN.run("acknowledgement", () => request(surface, "/api/ack", { body: { operationId } }));
     assert.equal(ack.status, 200, "the acknowledgement is accepted");
     const decision = await SURFACER_COMPLETION_CHAIN.run("acknowledgement settlement", () => surface.waitForDecision());
     assert.equal(decision.status, "completed");
@@ -420,7 +421,7 @@ test("a client that vanishes while its completion answer is in flight starts the
       body: "{}",
       signal: controller.signal,
     }).catch(() => null);
-    await claimedPromise;
+    await SURFACER_DISCONNECT_CHAIN.run("claim", () => claimedPromise);
     const disconnectedAt = Date.now();
     controller.abort();
     const decision = await SURFACER_DISCONNECT_CHAIN.run("decision", () => surface.waitForDecision());

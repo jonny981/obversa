@@ -11,6 +11,7 @@ export interface BudgetChain {
   readonly budgetMs: number;
   readonly totalMs: number;
   allowance(phase: string): number;
+  span(name: string, phases: readonly string[]): number;
   run<Value>(
     phase: string,
     operation: (signal: AbortSignal) => Value | PromiseLike<Value>,

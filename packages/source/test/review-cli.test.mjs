@@ -18,7 +18,6 @@ const NO_OPEN_TEST_TIMEOUT_MS = 120_000;
 const NO_OPEN_CHAIN = defineBudgetChain("review-cli --no-open", NO_OPEN_TEST_TIMEOUT_MS, {
   setup: 5_000,
   phases: [
-    ["child process", 20_000],
     ["page URL", 10_000],
     ["model fetch", 10_000],
     ["submit fetch", 10_000],
@@ -27,7 +26,7 @@ const NO_OPEN_CHAIN = defineBudgetChain("review-cli --no-open", NO_OPEN_TEST_TIM
   ],
   cleanup: 10_000,
 });
-const NO_OPEN_CHILD_TIMEOUT_MS = NO_OPEN_CHAIN.allowance("child process");
+const NO_OPEN_CHILD_TIMEOUT_MS = NO_OPEN_CHAIN.span("child process", ["page URL", "model fetch", "submit fetch", "ack fetch", "child close"]);
 
 test("parseArgs accepts the documented shapes", () => {
   assert.equal(parseArgs([]).mode, "worktree");

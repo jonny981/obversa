@@ -6,6 +6,7 @@
  *   budgetMs: number,
  *   totalMs: number,
  *   allowance: (phase: string) => number,
+ *   span: (name: string, phases: readonly string[]) => number,
  *   run: <Value>(phase: string, operation: (signal: AbortSignal) => Value | PromiseLike<Value>) => Promise<Value>,
  * }} BudgetChain
  */
@@ -47,6 +48,19 @@ export function defineBudgetChain(name, budgetMs, { setup, phases, cleanup }) {
       const allowance = allowances.get(phase);
       if (allowance === undefined) throw new RangeError(`${name} has no phase named ${phase}`);
       return allowance;
+    },
+    span(spanName, phases) {
+      if (typeof spanName !== "string" || spanName.length === 0) throw new TypeError(`${name} span name must be non-empty`);
+      if (!Array.isArray(phases) || phases.length === 0) throw new TypeError(`${name} span ${spanName} needs phases`);
+      const seenPhases = new Set();
+      return phases.reduce((total, phase) => {
+        if (typeof phase !== "string" || phase.length === 0) throw new TypeError(`${name} span ${spanName} has an unnamed phase`);
+        if (seenPhases.has(phase)) throw new TypeError(`${name} span ${spanName} names phase ${phase} more than once`);
+        const allowance = allowances.get(phase);
+        if (allowance === undefined) throw new RangeError(`${name} span ${spanName} has no phase named ${phase}`);
+        seenPhases.add(phase);
+        return total + allowance;
+      }, 0);
     },
     run(phase, operation) {
       const allowance = allowances.get(phase);
