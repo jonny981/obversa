@@ -1,29 +1,26 @@
 ---
-title: "Workflow bank"
-description: "Copy complete runtime programs that use only public package exports."
+title: "Examples"
+description: "Complete files to copy. Each one runs offline against the public packages and nothing else."
 ---
 
-A workflow is a complete, runnable program: the steps, the reviews, the
-limits and the adapters, built from public package exports and nothing
-else. Copy one, change the parts that name your team, and run it.
+Every file here is a complete program: the steps, the reviews, the limits
+and the adapters, built from public package exports and nothing else. Copy
+one, change the parts that name your team, and run it.
 
-Each example states its inputs, outputs, permissions, limits, and evidence.
-Each example also states its failure and safe-retry behavior.
+Each states its inputs, outputs, permissions, limits and evidence, and what
+it does on failure and on a safe retry.
 
-The first example is [Offline review and revision](/workflows/offline-review).
-It shows a review sending work back once, then passing the corrected result.
-It finishes without a model or network service.
-
-[Safe file changes](/workflows/safe-change) captures complete source
-records, checks approval for exact output bytes, and backs up each target
-before a file merge. It reads each result back and pauses on a mismatch.
-
-[Feature delivery](/workflows/feature-delivery) takes one written
-issue through analysis, implementation, a real test run, a review panel, a
-bounded repair, and an approval bound to the exact bytes. It also finishes
-without a model or network service.
-
-[Forge helper](/workflows/forge-helper) ships a reviewed change
-through a code host such as GitHub. It pushes the branch, opens one pull
-request, passes a strict gate on the exact head revision, squashes the
-merge, and deletes the branch. It runs offline against a mock host.
+- [A review that sends work back](/workflows/offline-review). A reviewer
+  rejects the first draft with a reason and the second draft passes. No
+  model, no network.
+- [A file change approved byte for byte](/workflows/safe-change). Source
+  records are captured, every mapping checked, exact output bytes approved,
+  each target backed up before a merge, and a mismatch pauses the run.
+- [A feature from written issue to approval](/workflows/feature-delivery).
+  One issue through analysis, implementation, a real test run, a review
+  panel, a bounded repair, and an approval bound to the exact bytes. No
+  model, no network.
+- [Shipping a reviewed change through GitHub](/workflows/forge-helper).
+  Push the branch, open one pull request, pass a strict gate on the exact
+  head revision, squash the merge, delete the branch. Runs offline against
+  a mock host.

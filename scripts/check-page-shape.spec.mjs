@@ -152,3 +152,16 @@ test('an owner that is not a registered stage yet is kept, because a planned sta
   );
   assert.equal(index.size, 1);
 });
+
+test('an example named as if it were a feature is reported, and the same example named as a file is not', () => {
+  const dir = siteWith({ 'a.mdx': page('Reviews', 'Run the offline review workflow and read its output.\n\n```ts\nconst x = 1;\n```\n') });
+  try {
+    mkdirSync(join(dir, 'examples'), { recursive: true });
+    writeFileSync(join(dir, 'examples', 'offline-review.ts'), 'export {};\n');
+    const failures = checkPageShape(dir);
+    assert.equal(failures.length, 1, failures.join('; '));
+    assert.match(failures[0], /names an example as if it were a feature: "the offline review workflow"/);
+    writeFileSync(join(dir, 'docs', 'public', 'a.mdx'), page('Reviews', 'Run `examples/offline-review.ts` and read its output.\n\n```ts\nconst x = 1;\n```\n'));
+    assert.deepEqual(checkPageShape(dir), []);
+  } finally { rmSync(dir, { recursive: true, force: true }); }
+});

@@ -44,7 +44,7 @@
         ]
       },
       {
-        "group": "Workflows",
+        "group": "Examples",
         "pages": [
           "workflows/index",
           "workflows/offline-review",
