@@ -6,7 +6,7 @@
 </p>
 
 <p align="center">
-  <strong>Model how your team really works.</strong>
+  <strong>Model real teamwork.</strong>
 </p>
 
 <p align="center">
