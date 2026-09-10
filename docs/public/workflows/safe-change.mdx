@@ -121,8 +121,8 @@ import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { ArtifactReference, JsonObject } from '@obversa/runtime';
-import { openSafeChangeRun } from './recipe.js';
-import { readRecordBytes, readSource, readTarget, seedSafeChangeFixture, sourcePath, targetPath, targetStream } from './file-adapter.js';
+import { openSafeChangeRun } from './safe-change-recipe.js';
+import { readRecordBytes, readSource, readTarget, seedSafeChangeFixture, sourcePath, targetPath, targetStream } from './safe-change-file-adapter.js';
 
 const directory = await mkdtemp(join(tmpdir(), 'obversa-safe-change-'));
 let report;

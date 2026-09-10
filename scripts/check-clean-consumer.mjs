@@ -524,9 +524,9 @@ const tsconfig = {
     'turn-taking.ts',
     'workspace.ts',
     'supervised-run.ts',
-    'example.ts',
-    'recipe.ts',
-    'file-adapter.ts',
+    'safe-change.ts',
+    'safe-change-recipe.ts',
+    'safe-change-file-adapter.ts',
   ],
 };
 
@@ -547,12 +547,7 @@ async function main() {
   const reviewLoopExamplePath = join(root, 'examples', 'review-loop.ts');
   const callbackGateExamplePath = join(root, 'examples', 'callback-gate.ts');
   const callbackGateExampleSource = await readFile(callbackGateExamplePath, 'utf8');
-  const proofBoundApprovalExamplePath = join(
-    root,
-    'examples',
-    'packages',
-    'proof-bound-approval.ts',
-  );
+  const proofBoundApprovalExamplePath = join(root, 'examples', 'proof-bound-approval.ts');
   const proofBoundApprovalExampleSource = await readFile(
     proofBoundApprovalExamplePath,
     'utf8',
@@ -670,9 +665,9 @@ async function main() {
     await writeFile(join(consumerDirectory, 'package.json'), `${JSON.stringify(manifest, null, 2)}\n`);
     await writeFile(join(consumerDirectory, 'tsconfig.json'), `${JSON.stringify(tsconfig, null, 2)}\n`);
     await writeFile(join(consumerDirectory, 'consumer.ts'), consumerSource.trimStart());
-    await writeFile(join(consumerDirectory, 'example.ts'), safeChangeExampleSource);
-    await copyFile(safeChangeRecipePath, join(consumerDirectory, 'recipe.ts'));
-    await copyFile(safeChangeFileAdapterPath, join(consumerDirectory, 'file-adapter.ts'));
+    await writeFile(join(consumerDirectory, 'safe-change.ts'), safeChangeExampleSource);
+    await copyFile(safeChangeRecipePath, join(consumerDirectory, 'safe-change-recipe.ts'));
+    await copyFile(safeChangeFileAdapterPath, join(consumerDirectory, 'safe-change-file-adapter.ts'));
     await writeFile(
       join(consumerDirectory, 'offline-review.ts'),
       exampleSource,
@@ -727,13 +722,13 @@ async function main() {
     }).trim();
     const report = JSON.parse(output.split(/\r?\n/).at(-1));
     const productionLine = JSON.parse(
-      run(process.execPath, ['dist/offline-review.workflow.js'], { cwd: consumerDirectory }),
+      run(process.execPath, ['dist/offline-review.js'], { cwd: consumerDirectory }),
     );
     const directProductionLine = JSON.parse(
       run('pnpm', ['exec', 'tsx', 'offline-review.ts'], { cwd: consumerDirectory }),
     );
     const featureLine = JSON.parse(
-      run(process.execPath, ['dist/feature-delivery.workflow.js'], { cwd: consumerDirectory }),
+      run(process.execPath, ['dist/feature-delivery.js'], { cwd: consumerDirectory }),
     );
     const directFeatureLine = JSON.parse(
       run('pnpm', ['exec', 'tsx', 'feature-delivery.ts'], { cwd: consumerDirectory }),
@@ -820,10 +815,10 @@ async function main() {
       run('pnpm', ['exec', 'tsx', 'proof-cache.ts'], { cwd: consumerDirectory }),
     );
     const compiledSafeChange = JSON.parse(
-      run(process.execPath, ['dist/example.js'], { cwd: consumerDirectory }),
+      run(process.execPath, ['dist/safe-change.js'], { cwd: consumerDirectory }),
     );
     const directSafeChange = JSON.parse(
-      run('pnpm', ['exec', 'tsx', 'example.ts'], { cwd: consumerDirectory }),
+      run('pnpm', ['exec', 'tsx', 'safe-change.ts'], { cwd: consumerDirectory }),
     );
     const directStorage = JSON.parse(
       run('pnpm', ['exec', 'tsx', 'durable-storage.ts'], { cwd: consumerDirectory }),
