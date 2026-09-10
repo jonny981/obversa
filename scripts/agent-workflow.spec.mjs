@@ -98,6 +98,7 @@ for (const [stage, branch] of [
   ['D24', 'feat/forge-helper-example'],
   ['D30', 'feat/plugins-page'],
   ['D43', 'docs/reader-first-pages'],
+  ['F20', 'feat/f20-checks-that-run'],
   ['D13', 'feat/graph-forms-v1'],
   ['D11A', 'feat/graph-forms-v1'],
   ['F0', 'feat/factory-v1'],
@@ -146,6 +147,7 @@ for (const [stage, branch] of [
   ['D24', 'feat/graph-forms-v1'],
   ['D30', 'feat/graph-forms-v1'],
   ['D43', 'feat/graph-forms-v1'],
+  ['F20', 'feat/graph-forms-v1'],
 ]) {
   test(`${stage} refuses the wrong branch ${branch}`, () => {
     const repository = createRepository({ feature: true, branch });

@@ -36,6 +36,7 @@ export const stageBranches = {
   D24: 'feat/forge-helper-example',
   D30: 'feat/plugins-page',
   D43: 'docs/reader-first-pages',
+  F20: 'feat/f20-checks-that-run',
 };
 
 export function manageStage(args, options = {}) {
