@@ -130,6 +130,10 @@ export interface GraphPosition {
   path: readonly string[];
   needs: readonly string[];
   dependents: readonly string[];
+  /** One sentence describing what this node does, when declared. */
+  desc?: string;
+  /** The written acceptance criterion for this node, when declared. */
+  gate?: string;
 }
 
 /**
@@ -358,7 +362,11 @@ export interface DagNode {
    * Names of nodes that must finish before this one runs; a required producer
    * must pass, a failed optional producer does not block.
    */
-  needs?: string[];
+  needs?: string | string[];
+  /** One sentence describing what this node does. */
+  desc?: string;
+  /** The written acceptance criterion for this node. */
+  gate?: string;
   /** Gate (one or many) — when unmet the node is skipped, not failed. */
   when?: ConditionInput;
   /** A failure here does not fail the DAG, and does not block dependents. */
@@ -541,6 +549,10 @@ export type LoopEvent =
       path: string[];
       node: string;
       phase: NodePhase;
+      /** The node's declared purpose, when present. */
+      desc?: string;
+      /** The node's declared acceptance criterion, when present. */
+      gate?: string;
       outcome?: Outcome;
       /** Soft timeout in force for this node, when one is configured. */
       timeoutMs?: number;

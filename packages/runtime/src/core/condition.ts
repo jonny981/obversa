@@ -669,12 +669,15 @@ export function agentCheck(config: AgentCheckConfig): Condition {
   return setLabel(async (ctx, last) => {
     const engine = ctx.resolveEngine(config.engine);
     const contextText = await (config.context ?? defaultContext)(ctx, last);
+    const acceptanceCriterion = ctx.graph?.gate
+      ? `\n\nACCEPTANCE CRITERION:\n${ctx.graph.gate}`
+      : '';
     const closing = confidenceTag
       ? 'Write your review now, then close with `<confidence>N%</confidence>`.'
       : `Return the JSON ${dimensions ? 'scores' : 'verdict'} now.`;
     const prompt =
       `CONDITION TO EVALUATE:\n${config.question}\n\n` +
-      `EVIDENCE:\n${contextText}\n\n` +
+      `EVIDENCE:\n${contextText}${acceptanceCriterion}\n\n` +
       closing;
 
     // The validator's output contract stays authoritative (last); an optional

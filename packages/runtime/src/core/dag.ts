@@ -47,8 +47,17 @@ function slug(s: string): string {
   return s.replace(/[^A-Za-z0-9._-]+/g, '-').replace(/(^-+|-+$)/g, '') || 'node';
 }
 
+function normalizeNeeds(needs: DagNode['needs']): string[] {
+  if (needs === undefined) return [];
+  return typeof needs === 'string' ? [needs] : [...needs];
+}
+
 function normalize(node: DagNode | Job): DagNode {
-  return typeof node === 'function' ? { job: node } : node;
+  if (typeof node === 'function') return { job: node, needs: [] };
+  return {
+    ...node,
+    needs: normalizeNeeds(node.needs),
+  };
 }
 
 export function dag(config: DagConfig): Job {
@@ -65,7 +74,7 @@ export function dag(config: DagConfig): Job {
   // Fail fast on a bad graph, before the Job is ever run.
   const edges: [string, string][] = [];
   for (const [name, node] of nodes) {
-    for (const dep of node.needs ?? []) {
+    for (const dep of normalizeNeeds(node.needs)) {
       if (!nodes.has(dep)) {
         throw new LoopError({
           code: 'CONFIG',
@@ -97,12 +106,12 @@ export function dag(config: DagConfig): Job {
   for (const [dep, name] of edges) dependents.get(dep)!.push(name);
   const ancestorsOf = (name: string): Set<string> => {
     const seen = new Set<string>();
-    const stack = [...(nodes.get(name)!.needs ?? [])];
+    const stack = normalizeNeeds(nodes.get(name)!.needs);
     while (stack.length) {
       const n = stack.pop()!;
       if (seen.has(n)) continue;
       seen.add(n);
-      stack.push(...(nodes.get(n)!.needs ?? []));
+      stack.push(...normalizeNeeds(nodes.get(n)!.needs));
     }
     return seen;
   };
@@ -144,6 +153,15 @@ export function dag(config: DagConfig): Job {
 
     // Each node runs under its own name in the path, so a nested job (e.g. a
     // loop) is uniquely addressable for stats/logs even across same-named siblings.
+    const nodeContext = (name: string) => {
+      const node = nodes.get(name)!;
+      return {
+        needs: normalizeNeeds(node.needs),
+        ...(node.desc !== undefined ? { desc: node.desc } : {}),
+        ...(node.gate !== undefined ? { gate: node.gate } : {}),
+      };
+    };
+
     const nodeCtx = (
       name: string,
       workspace?: Workspace,
@@ -159,7 +177,7 @@ export function dag(config: DagConfig): Job {
           dag: config.name,
           node: name,
           path: [...path, name],
-          needs: nodes.get(name)!.needs ?? [],
+          ...nodeContext(name),
           dependents: dependents.get(name) ?? [],
         },
         timeoutMs: nodes.get(name)!.timeoutMs,
@@ -281,6 +299,7 @@ export function dag(config: DagConfig): Job {
         path,
         node: name,
         phase,
+        ...nodeContext(name),
         outcome,
         attempt: attempts.get(name),
         timeoutMs: nodes.get(name)!.timeoutMs,
@@ -315,7 +334,7 @@ export function dag(config: DagConfig): Job {
         // Whole node is guarded: a throw anywhere (dep resolution, `when`, the
         // job) becomes a recorded outcome, so the DAG always reaches `dag:end`.
         try {
-          const needs = node.needs ?? [];
+          const needs = normalizeNeeds(node.needs);
           const deps = await Promise.all(needs.map(run));
           // A declared `needs` on a REQUIRED producer is a hard dependency — its
           // failure blocks this consumer. An OPTIONAL producer is best-effort:
@@ -378,6 +397,7 @@ export function dag(config: DagConfig): Job {
                 path,
                 node: name,
                 phase: 'start',
+                ...nodeContext(name),
                 attempt: attempts.get(name),
                 timeoutMs: node.timeoutMs,
               });
@@ -563,7 +583,9 @@ export function dag(config: DagConfig): Job {
       const nodeJob = node ? node.job : (v as Job);
       return {
         name,
-        needs: node?.needs ?? [],
+        needs: normalizeNeeds(node?.needs),
+        ...(node?.desc !== undefined ? { desc: node.desc } : {}),
+        ...(node?.gate !== undefined ? { gate: node.gate } : {}),
         isolate: node?.isolate ?? false,
         optional: node?.optional === true,
         ...(node?.timeoutMs ? { timeoutMs: node.timeoutMs } : {}),

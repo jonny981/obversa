@@ -145,6 +145,8 @@ export function graphPositionBlock(graph: GraphPosition): string {
     '## Graph position',
     `DAG: ${graph.dag}`,
     `Current node: ${graph.node}`,
+    ...(graph.desc ? [`Description: ${graph.desc}`] : []),
+    ...(graph.gate ? [`Gate: ${graph.gate}`] : []),
     `Path: ${graph.path.join(' > ')}`,
     `Depends on: ${graph.needs.length ? graph.needs.join(', ') : 'none'}`,
     `Direct dependents: ${

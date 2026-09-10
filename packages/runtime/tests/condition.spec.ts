@@ -6,6 +6,7 @@ import { describe, it, expect, vi } from 'vitest';
 import {
   run,
   loop,
+  dag,
   fnJob,
   agentCheck,
   gateJob,
@@ -510,6 +511,28 @@ describe('agentCheck request options and output', () => {
     await run(gateJob('g', agentCheck({ question: 'done?', engine })), noEngine);
     expect(req().cwd).toBeUndefined();
     expect(req().timeoutMs).toBeUndefined();
+  });
+
+  it('passes a DAG node acceptance criterion into its reviewer prompt', async () => {
+    const { engine, req } = capturing(verdictJson);
+    await run(
+      dag({
+        name: 'ship',
+        nodes: {
+          review: {
+            gate: 'The implementation meets the stated acceptance criterion.',
+            job: gateJob(
+              'review',
+              agentCheck({ question: 'Is the change correct?', engine }),
+            ),
+          },
+        },
+      }),
+      noEngine,
+    );
+    expect(req().prompt).toContain(
+      'ACCEPTANCE CRITERION:\nThe implementation meets the stated acceptance criterion.',
+    );
   });
 
   const findings = `${'F'.repeat(300)}TAIL`;

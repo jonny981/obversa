@@ -1090,6 +1090,8 @@ describe('feedback protocol', () => {
           }),
           review: {
             needs: ['implementation'],
+            desc: 'Review the implementation.',
+            gate: 'The implementation meets the stated acceptance criterion.',
             job: fnJob('review', async () => ({ status: 'pass' })),
           },
         },
@@ -1101,5 +1103,27 @@ describe('feedback protocol', () => {
     expect(cap.prompts[0]).toContain('Current node: implementation');
     expect(cap.prompts[0]).toContain('Depends on: none');
     expect(cap.prompts[0]).toContain('Direct dependents: review');
+
+    await run(
+      dag({
+        name: 'ship',
+        nodes: {
+          review: {
+            desc: 'Review the implementation.',
+            gate: 'The implementation meets the stated acceptance criterion.',
+            job: agentJob({
+              label: 'review',
+              prompt: 'Review it.',
+              graphContext: true,
+            }),
+          },
+        },
+      }),
+      { ...cap.opts, cwd: repo },
+    );
+    expect(cap.prompts[1]).toContain('Description: Review the implementation.');
+    expect(cap.prompts[1]).toContain(
+      'Gate: The implementation meets the stated acceptance criterion.',
+    );
   });
 });
