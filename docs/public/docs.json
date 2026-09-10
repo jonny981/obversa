@@ -101,13 +101,18 @@
         ]
       },
       {
-        "group": "Packages",
+        "group": "Core packages",
         "pages": [
           "packages/runtime",
           "packages/runner",
           "packages/engine",
           "packages/memory",
-          "packages/surfacer",
+          "packages/surfacer"
+        ]
+      },
+      {
+        "group": "Plugins",
+        "pages": [
           "packages/engine-claude-cli",
           "packages/engine-codex",
           "packages/engine-grok-cli",

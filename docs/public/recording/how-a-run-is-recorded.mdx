@@ -7,6 +7,32 @@ A run leaves a record as it works: a file of events and a directory of
 artifacts. This page says what each holds, and which layer uses them to
 restart a run that was killed.
 
+## What a record looks like
+
+Run the offline review workflow, then open the file it wrote. Each line is
+one event, in the order it happened.
+
+From an Obversa checkout:
+
+```bash
+pnpm example:offline
+head -n 8 .obversa/records/offline-review.jsonl
+```
+
+```text
+{"kind":"loop:start","ts":1789042145568,"path":["write-config"],"depth":1,"max":4}
+{"kind":"loop:iteration","ts":1789042145569,"path":["write-config"],"iteration":1}
+{"kind":"job:start","ts":1789042145569,"path":["write-config"],"label":"author"}
+{"kind":"job:end","ts":1789042145569,"path":["write-config"],"label":"author","outcome":{"status":"pass","summary":"wrote the base config"}}
+{"kind":"loop:condition","ts":1789042145569,"path":["write-config"],"which":"until","iteration":1,"result":{"met":true,"reason":"a draft exists: true"}}
+{"kind":"job:start","ts":1789042145569,"path":["write-config"],"label":"review"}
+{"kind":"job:end","ts":1789042145569,"path":["write-config"],"label":"review","outcome":{"status":"fail","summary":"Missing a request timeout.","revision":{"reason":"Missing a request timeout.","findings":[{"reviewer":"correctness","evidence":"No timeout set; a hung upstream call blocks forever."}]}}}
+{"kind":"loop:review","ts":1789042145569,"path":["write-config"],"outcome":{"status":"fail","summary":"Missing a request timeout.","revision":{"reason":"Missing a request timeout.","findings":[{"reviewer":"correctness","evidence":"No timeout set; a hung upstream call blocks forever."}]}},"accepted":true}
+```
+
+A node started, an engine call returned, a review sent the draft back, a
+node completed: nothing in those lines is a summary. They are the run.
+
 ## One event per step, appended as it happens
 
 Every step a run takes is one event, appended to the file the moment the

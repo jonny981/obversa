@@ -42,7 +42,9 @@ const reviewLoop = defineJob(
 );
 
 async function main(): Promise<void> {
-  const result = await run(reviewLoop);
+  // The run writes its record to .obversa/records/offline-review.jsonl so a
+  // reader can open the file the docs describe.
+  const result = await run(reviewLoop, { recordTo: '.obversa/records/offline-review.jsonl' });
 
   console.log(
     JSON.stringify(
