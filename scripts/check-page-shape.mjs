@@ -58,10 +58,6 @@ const KNOWN_DEBT = [
     why: 'a list of the tools we ship with nothing to copy; the package-page rewrite gives it one engine binding a reader can paste',
   },
   {
-    page: 'workspace/example.mdx', fault: 'example', owner: 'D36',
-    why: 'a page titled as an example whose only block is a command; its example is a ready-made team that takes its own worktree',
-  },
-  {
     page: 'packages/runner.mdx', fault: 'example', owner: 'D35',
     why: 'a package page whose only block installs the package, so a reader never sees a supervised run',
   },
