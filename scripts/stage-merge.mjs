@@ -30,6 +30,7 @@ const stageBranches = {
   D22: 'feat/feature-delivery-example',
   F16: 'feat/source-surfacer-types',
   D23: 'feat/reader-task-docs',
+  D24: 'feat/forge-helper-example',
 };
 
 export function manageStage(args, options = {}) {

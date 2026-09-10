@@ -493,6 +493,7 @@ const tsconfig = {
     'consumer.ts',
     'offline-review.workflow.ts',
     'feature-delivery.workflow.ts',
+    'forge-helper.ts',
     'custom-graph.ts',
     'pipeline.ts',
     'review-loop.ts',
@@ -519,6 +520,8 @@ async function main() {
     join(root, 'examples', 'workflows', 'feature-delivery.workflow.ts'),
     'utf8',
   );
+  const forgeExamplePath = join(root, 'examples', 'packages', 'forge-helper.ts');
+  const forgeExampleSource = await readFile(forgeExamplePath, 'utf8');
   const graphExamplePath = join(root, 'examples', 'packages', 'custom-graph.ts');
   const graphExampleSource = await readFile(graphExamplePath, 'utf8');
   const pipelineExamplePath = join(root, 'examples', 'packages', 'pipeline.ts');
@@ -559,6 +562,10 @@ async function main() {
   );
   const featureDocument = await readFile(
     join(root, 'docs', 'public', 'workflows', 'feature-delivery.mdx'),
+    'utf8',
+  );
+  const forgeDocument = await readFile(
+    join(root, 'docs', 'public', 'workflows', 'forge-helper.mdx'),
     'utf8',
   );
   const storageDocument = await readFile(
@@ -609,6 +616,9 @@ async function main() {
   if (sourceFromPublicDoc(featureDocument) !== featureExampleSource) {
     throw new Error('The feature-delivery production-line page does not match its runnable source');
   }
+  if (sourceFromPublicDoc(forgeDocument) !== forgeExampleSource) {
+    throw new Error('The forge helper page does not match its runnable source');
+  }
 
   const directory = await mkdtemp(join(tmpdir(), 'obversa-consumer-'));
   const archivesDirectory = join(directory, 'archives');
@@ -650,6 +660,7 @@ async function main() {
       join(consumerDirectory, 'feature-delivery.workflow.ts'),
       featureExampleSource,
     );
+    await copyFile(forgeExamplePath, join(consumerDirectory, 'forge-helper.ts'));
     await copyFile(graphExamplePath, join(consumerDirectory, 'custom-graph.ts'));
     await copyFile(pipelineExamplePath, join(consumerDirectory, 'pipeline.ts'));
     await copyFile(reviewLoopExamplePath, join(consumerDirectory, 'review-loop.ts'));
@@ -703,6 +714,12 @@ async function main() {
     );
     const directFeatureLine = JSON.parse(
       run('pnpm', ['exec', 'tsx', 'feature-delivery.workflow.ts'], { cwd: consumerDirectory }),
+    );
+    const forgeHelper = JSON.parse(
+      run(process.execPath, ['dist/forge-helper.js'], { cwd: consumerDirectory }),
+    );
+    const directForgeHelper = JSON.parse(
+      run('pnpm', ['exec', 'tsx', 'forge-helper.ts'], { cwd: consumerDirectory }),
     );
     const featureDenySource = featureExampleSource.replace(
       '{ approved: true },',
@@ -860,6 +877,21 @@ async function main() {
     assert.ok(featureLinePageReport, 'The feature-delivery page must include its JSON report');
     assert.deepEqual(featureLine, JSON.parse(featureLinePageReport[1]));
     assert.deepEqual(directFeatureLine, featureLine);
+    const forgePageReport = forgeDocument
+      .match(/## Run the example[\s\S]*?```json\r?\n([\s\S]*?)```/);
+    assert.ok(forgePageReport, 'The forge helper page must include its JSON report');
+    assert.deepEqual(forgeHelper, JSON.parse(forgePageReport[1]));
+    assert.deepEqual(directForgeHelper, forgeHelper);
+    assert.deepEqual(forgeHelper.verdicts, {
+      unmergeable: 'RESULT: FAIL because the branch cannot merge',
+      staleChecks: 'RESULT: FAIL because the checks are from an earlier revision',
+      missingWorkflow: 'RESULT: FAIL because the expected workflow never ran on the head revision',
+      failedCheck: 'RESULT: FAIL because the tests check finished as failure',
+    });
+    assert.equal(forgeHelper.ship.verdict, 'RESULT: PASS');
+    assert.equal(forgeHelper.ship.onePullRequest, true);
+    assert.equal(forgeHelper.ship.merged, true);
+    assert.equal(forgeHelper.ship.branchDeleted, true);
     assert.deepEqual(compiledStorage, expectedStorageReport);
     assert.deepEqual(directStorage, expectedStorageReport);
     assert.deepEqual(compiledAttempt, expectedAttemptReport);
@@ -900,7 +932,7 @@ async function main() {
     if (refs.length !== 1) throw new Error(`Git memory created ${refs.length} private refs instead of one`);
 
     console.log(
-      'Clean offline consumer passed with TypeScript 7 and 6, the first production line, the safe-change production line, the feature-delivery line, the outside graph, the pipeline executor example, the review loop, the callback gate, proof-bound approval, the turn-taking executor example, durable storage, safe node attempts, the supervised runner, 17 memory cases, and both memory adapters.',
+      'Clean offline consumer passed with TypeScript 7 and 6, the first production line, the safe-change production line, the feature-delivery line, the forge helper, the outside graph, the pipeline executor example, the review loop, the callback gate, proof-bound approval, the turn-taking executor example, durable storage, safe node attempts, the supervised runner, 17 memory cases, and both memory adapters.',
     );
   } finally {
     await rm(directory, { recursive: true, force: true });

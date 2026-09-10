@@ -48,7 +48,8 @@
           "workflows/index",
           "workflows/offline-review",
           "workflows/safe-change",
-          "workflows/feature-delivery"
+          "workflows/feature-delivery",
+          "workflows/forge-helper"
         ]
       },
       {
