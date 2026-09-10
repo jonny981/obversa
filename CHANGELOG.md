@@ -7,6 +7,14 @@ All notable changes to the Obversa packages. The format follows
 The runtime package (`@obversa/runtime`) tracks the repository tag. The
 engine and memory packages track their own versions independently.
 
+## [Unreleased]
+
+### Added
+
+- A dag node accepts `needs` as one name or a list, and optional `desc` and
+  `gate` sentences that reach the rendered plan, the `dag:node` record and
+  the input the node's reviewer receives.
+
 ## [1.0.0]
 
 ### Added

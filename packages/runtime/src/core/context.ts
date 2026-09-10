@@ -28,6 +28,10 @@ export interface ContextOverride {
   envOverlay?: Record<string, string>;
   /** Override the DAG graph position for a node. */
   graph?: GraphPosition;
+  /** Set the acceptance criterion visible to a stage reviewer. */
+  reviewerGate?: string;
+  /** Carry the nearest DAG node's acceptance criterion through nested jobs. */
+  stageGate?: string;
   /** Override the inherited timeout for jobs in this scope. */
   timeoutMs?: number;
   /** Override the inherited timeout grace for jobs in this scope. */
@@ -63,6 +67,8 @@ export function childContext(
     depth: over.depth,
     path: over.path,
     graph: over.graph ?? parent.graph,
+    reviewerGate: over.reviewerGate ?? parent.reviewerGate,
+    stageGate: over.stageGate ?? parent.stageGate,
     timeoutMs: over.timeoutMs ?? parent.timeoutMs,
     timeoutGraceMs: over.timeoutGraceMs ?? parent.timeoutGraceMs,
     // Inherit the enclosing iteration by default. A `loop` always passes one

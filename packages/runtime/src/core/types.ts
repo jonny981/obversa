@@ -180,6 +180,10 @@ export interface JobContext {
   readonly path: readonly string[];
   /** The current DAG node position, when this job is running inside a dag node. */
   readonly graph?: GraphPosition;
+  /** @internal The current DAG node's acceptance criterion, only for its reviewer. */
+  readonly reviewerGate?: string;
+  /** @internal The nearest DAG node's acceptance criterion across nested jobs. */
+  readonly stageGate?: string;
   /**
    * Timeout inherited by jobs in this scope. A node can set it once and agent
    * leaves beneath it receive the same cap unless they override it directly.
@@ -549,6 +553,8 @@ export type LoopEvent =
       path: string[];
       node: string;
       phase: NodePhase;
+      /** The node dependencies, normalised to an array when present. */
+      needs?: string[];
       /** The node's declared purpose, when present. */
       desc?: string;
       /** The node's declared acceptance criterion, when present. */

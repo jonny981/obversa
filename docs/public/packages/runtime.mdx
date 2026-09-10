@@ -19,11 +19,14 @@ Node.js 22.12 or later. Nothing else to install: no server, no database.
 
 **Write a workflow and run it.** The job API is the everyday one: name the
 steps, say what each needs, put a review where it belongs, and call `run`.
-`dag` is the general shape (nodes keyed by name, each with `needs`, an
-optional `when`, and a `job`); `pipeline` is its shorthand for steps that
-go in one direction; `loop`, `sequence` and `parallel` are the other
-shorthands. Reviews go in with `reviewPanel`, `tournament`, `quorum` and
-`kickback`. A person's decision goes in with a callback gate.
+`dag` is the general shape (nodes keyed by name, each with `needs` as one
+name or a list, an optional `desc` saying what it does, an optional `gate`
+saying what done means, an optional `when`, and a `job`; `desc` and `gate`
+reach the plan, the record and the node reviewer's input); `pipeline` is its
+shorthand for steps that go in one direction; `loop`, `sequence` and
+`parallel` are the other shorthands. Reviews go in with `reviewPanel`,
+`tournament`, `quorum` and `kickback`. A person's decision goes in with a
+callback gate.
 
 **Compile a graph and drive it yourself.** Under the job API sits the
 graph contract: `compileGraph` with a graph form (`dagGraphType` is the

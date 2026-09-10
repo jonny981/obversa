@@ -128,6 +128,7 @@ describe('dag', () => {
       kind: 'dag:node',
       node: 'review',
       phase: 'start',
+      needs: ['build'],
       desc: 'Review the built change.',
       gate: 'The change meets the acceptance criteria.',
     }));

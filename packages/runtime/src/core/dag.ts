@@ -180,6 +180,7 @@ export function dag(config: DagConfig): Job {
           ...nodeContext(name),
           dependents: dependents.get(name) ?? [],
         },
+        stageGate: nodes.get(name)!.gate,
         timeoutMs: nodes.get(name)!.timeoutMs,
         timeoutGraceMs: nodes.get(name)!.timeoutGraceMs,
       });

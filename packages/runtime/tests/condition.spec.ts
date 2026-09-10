@@ -10,6 +10,8 @@ import {
   fnJob,
   agentCheck,
   gateJob,
+  reviewPanel,
+  sequence,
   quorum,
   commandSucceeds,
   not,
@@ -521,10 +523,15 @@ describe('agentCheck request options and output', () => {
         nodes: {
           review: {
             gate: 'The implementation meets the stated acceptance criterion.',
-            job: gateJob(
-              'review',
-              agentCheck({ question: 'Is the change correct?', engine }),
-            ),
+            job: reviewPanel({
+              label: 'stage-review',
+              reviewers: [
+                {
+                  name: 'reviewer',
+                  review: agentCheck({ question: 'Is the change correct?', engine }),
+                },
+              ],
+            }),
           },
         },
       }),
@@ -533,6 +540,56 @@ describe('agentCheck request options and output', () => {
     expect(req().prompt).toContain(
       'ACCEPTANCE CRITERION:\nThe implementation meets the stated acceptance criterion.',
     );
+  });
+
+  it('passes a DAG node acceptance criterion only to its stage reviewer', async () => {
+    const requests: AgentRequest[] = [];
+    const engine = new MockEngine((request: AgentRequest) => {
+      requests.push(request);
+      return verdictJson;
+    });
+
+    const result = await run(
+      dag({
+        name: 'ship',
+        nodes: {
+          review: {
+            gate: 'The implementation meets the stated acceptance criterion.',
+            when: agentCheck({ question: 'Is the prerequisite healthy?', engine }),
+            job: sequence(
+              'review-work',
+              gateJob(
+                'nested-check',
+                agentCheck({ question: 'Does the nested check pass?', engine }),
+              ),
+              reviewPanel({
+                label: 'stage-review',
+                reviewers: [
+                  {
+                    name: 'stage-reviewer',
+                    review: agentCheck({ question: 'Is the stage complete?', engine }),
+                  },
+                ],
+              }),
+            ),
+          },
+        },
+      }),
+      noEngine,
+    );
+
+    expect(result.outcome.status).toBe('pass');
+    expect(requests).toHaveLength(3);
+    const reviewerPrompts = requests.filter((request) =>
+      request.prompt.includes('ACCEPTANCE CRITERION:'),
+    );
+    expect(reviewerPrompts).toHaveLength(1);
+    expect(reviewerPrompts[0]!.prompt).toContain(
+      'ACCEPTANCE CRITERION:\nThe implementation meets the stated acceptance criterion.',
+    );
+    expect(
+      requests.filter((request) => !request.prompt.includes('ACCEPTANCE CRITERION:')),
+    ).toHaveLength(2);
   });
 
   const findings = `${'F'.repeat(300)}TAIL`;
