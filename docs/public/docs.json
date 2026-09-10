@@ -28,6 +28,7 @@
         "group": "Start",
         "pages": [
           "index",
+          "plugins",
           "get-started/installation",
           "get-started/first-run"
         ]

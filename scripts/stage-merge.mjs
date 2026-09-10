@@ -31,6 +31,7 @@ const stageBranches = {
   F16: 'feat/source-surfacer-types',
   D23: 'feat/reader-task-docs',
   D24: 'feat/forge-helper-example',
+  D30: 'feat/plugins-page',
   D43: 'docs/reader-first-pages',
 };
 

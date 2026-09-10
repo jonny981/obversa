@@ -93,6 +93,7 @@ for (const [stage, branch] of [
   ['F16', 'feat/source-surfacer-types'],
   ['D23', 'feat/reader-task-docs'],
   ['D24', 'feat/forge-helper-example'],
+  ['D30', 'feat/plugins-page'],
   ['D43', 'docs/reader-first-pages'],
   ['D13', 'feat/graph-forms-v1'],
   ['D11A', 'feat/graph-forms-v1'],
@@ -136,6 +137,7 @@ for (const [stage, branch] of [
   ['F16', 'feat/graph-forms-v1'],
   ['D23', 'feat/graph-forms-v1'],
   ['D24', 'feat/graph-forms-v1'],
+  ['D30', 'feat/graph-forms-v1'],
   ['D43', 'feat/graph-forms-v1'],
 ]) {
   test(`${stage} refuses the wrong branch ${branch}`, () => {
