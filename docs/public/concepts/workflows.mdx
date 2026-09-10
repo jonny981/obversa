@@ -40,7 +40,28 @@ when it fails, the work goes back to the implement stage rather than to
 the start of the run.
 
 ```ts
-{/* quote the README-SPAN 'team' of examples/packages/feature-team.ts, byte for byte */}
+const review = reviewPanel({
+  label: 'review',
+  reviewers: [
+    { name: 'correctness', job: checks.correctness },
+    { name: 'safety', job: checks.safety },
+    { name: 'scope', job: checks.scope },
+  ],
+  pass: 2, // two of three agree and the step passes
+  target: 'implement', // a failing panel sends the work back here
+});
+
+export const featureDelivery = pipeline(
+  'feature-delivery',
+  [
+    { name: 'analyse', job: analyse },
+    { name: 'implement', job: implement },
+    { name: 'test', job: testStage },
+    { name: 'review', job: review },
+    { name: 'approve', job: approve },
+  ],
+  { maxKickbacks: 2 },
+);
 ```
 
 Run it and the panel fails the first attempt, implement runs again, and the

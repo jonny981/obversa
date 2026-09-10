@@ -1,7 +1,8 @@
 name: Release
 
-# A v* tag runs the verification record only. Jonny publishes from the exact
-# gate-passed commit with scripts/release.mjs after approving the destination.
+# A v* tag runs the verification record only. The release owner publishes from
+# the exact gate-passed commit with scripts/release.mjs after approving the
+# destination.
 
 on:
   push:

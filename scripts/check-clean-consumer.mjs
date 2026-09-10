@@ -493,6 +493,7 @@ const tsconfig = {
     'consumer.ts',
     'offline-review.workflow.ts',
     'feature-delivery.workflow.ts',
+    'feature-team.ts',
     'forge-helper.ts',
     'custom-graph.ts',
     'pipeline.ts',
@@ -545,6 +546,7 @@ async function main() {
   const attemptExampleSource = await readFile(attemptExamplePath, 'utf8');
   const turnTakingExamplePath = join(root, 'examples', 'packages', 'turn-taking.ts');
   const workspaceExamplePath = join(root, 'examples', 'packages', 'workspace.ts');
+  const featureTeamExamplePath = join(root, 'examples', 'packages', 'feature-team.ts');
   const runnerExamplePath = join(root, 'examples', 'packages', 'supervised-run.ts');
   const runnerHostPath = join(root, 'examples', 'packages', 'supervised-host.mjs');
   const safeChangeExamplePath = join(root, 'examples', 'safe-change', 'example.ts');
@@ -674,6 +676,7 @@ async function main() {
     await copyFile(attemptExamplePath, join(consumerDirectory, 'safe-node-attempt.ts'));
     await copyFile(turnTakingExamplePath, join(consumerDirectory, 'turn-taking.ts'));
     await copyFile(workspaceExamplePath, join(consumerDirectory, 'workspace.ts'));
+    await copyFile(featureTeamExamplePath, join(consumerDirectory, 'feature-team.ts'));
     await copyFile(runnerExamplePath, join(consumerDirectory, 'supervised-run.ts'));
     await copyFile(runnerHostPath, join(consumerDirectory, 'supervised-host.mjs'));
 
