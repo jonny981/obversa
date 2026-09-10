@@ -18,6 +18,31 @@ tickets live. Your application decides what an order contains, where it is
 kept, and which workflow runs on it. That keeps Linear, GitHub, a document
 or a text file all equally good places for an order to come from.
 
+## One order, as the feature example carries it
+
+The feature delivery workflow delivers one order: a short request a host
+would read from an issue tracker. This is the order, as the example file
+holds it; the analyse stage turns it into accepted criteria before any code
+runs, and everything after works against those.
+
+```ts
+// The request this workflow delivers. A host reads it from an issue tracker; the
+// stages below see it only through the criteria the analyse stage accepts.
+const ISSUE =
+  'The checkout client must retry a failed request, must cap how many ' +
+  'times it retries, and must stop retrying when the caller aborts.';
+```
+
+From an Obversa checkout:
+
+```bash
+pnpm example:feature
+```
+
+```text
+{/* real output from a real run, captured by claude */}
+```
+
 ## What travels with one
 
 Four things, and the record links them so a reader can understand a result
