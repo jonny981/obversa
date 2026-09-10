@@ -182,6 +182,7 @@ export const EXPECTED_FILES = {
     'package/dist/graph/value.d.ts',
     'package/dist/graph-types/dag.d.ts',
     'package/dist/graph-types/loop.d.ts',
+    'package/dist/graph-types/team.d.ts',
     'package/dist/proof/acceptance.d.ts',
     'package/dist/proof/artifact.d.ts',
     'package/dist/proof/cache.d.ts',

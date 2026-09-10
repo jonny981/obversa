@@ -42,6 +42,18 @@ export {
   type DagDefinition,
 } from './graph-types/dag.js';
 export {
+  teamGraphType,
+  type TeamNodeData,
+  type TeamRoom,
+  type TeamCommunication,
+  type TeamGraphData,
+  type TeamDefinition,
+  type TeamPost,
+  type TeamTurnResult,
+  type TeamMessage,
+  type TeamGraphResult,
+} from './graph-types/team.js';
+export {
   convergence,
   type ConvergenceDefinition,
   type ConvergenceEvent,

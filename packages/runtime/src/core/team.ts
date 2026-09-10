@@ -113,6 +113,8 @@ function teamMeta(config: TeamConfig) {
 
 export function team(config: TeamConfig): Job {
   validateConfig(config);
+  const panel = config.review?.kind === 'panel' ? reviewPanel(config.review.config) : undefined;
+  const callback = config.review?.kind === 'callback' ? createCallbackGate(config.review.definition) : undefined;
   const job: Job = async (ctx) => {
     const memberJobs = config.agents.map((agent) =>
       isolated(
@@ -138,7 +140,7 @@ export function team(config: TeamConfig): Job {
       return { ...members, data: result };
     }
 
-    if (config.review?.kind === 'panel') {
+    if (panel) {
       const reviewContext = childContext(ctx, {
         depth: ctx.depth + 1,
         path: [...ctx.path, 'team-review'],
@@ -146,14 +148,14 @@ export function team(config: TeamConfig): Job {
         lastReview: ctx.lastReview,
         lastGate: ctx.lastGate,
       });
-      const review = await reviewPanel(config.review.config)(reviewContext);
+      const review = await panel(reviewContext);
       const reviewed: TeamResult = { ...result, review };
       if (review.status !== 'pass') return { ...review, data: reviewed };
       return { ...members, data: reviewed };
     }
 
-    if (config.review?.kind === 'callback') {
-      const request = createCallbackGate(config.review.definition);
+    if (callback) {
+      const request = callback;
       const review: Outcome = {
         status: 'paused',
         summary: `Team review "${request.gateId}" is waiting for a callback`,

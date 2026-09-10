@@ -3,7 +3,7 @@ import { join } from 'node:path';
 import { afterAll, describe, expect, it } from 'vitest';
 
 import { run, team } from '../src/api.ts';
-import type { AgentRequest } from '../src/api.ts';
+import type { AgentRequest, TeamReview } from '../src/api.ts';
 import { MockEngine } from '../src/testing.ts';
 import { cleanupRepos, tmpRepo, write } from './git-helpers.ts';
 
@@ -17,6 +17,30 @@ const writer = {
 };
 
 describe('team()', () => {
+  it.each([
+    { kind: 'panel', config: { reviewers: [] } },
+    { kind: 'callback', definition: {
+      gateId: '', gateVersion: 1, decisionText: 'Approve?', responseSchema: {}, input: {},
+    } },
+  ] satisfies TeamReview[])('rejects invalid $kind review before any member work', async (review) => {
+    const repo = await tmpRepo();
+    const requests: AgentRequest[] = [];
+    const engine = new MockEngine((request) => {
+      requests.push(request);
+      return 'writer answer';
+    });
+    let error: unknown;
+    try {
+      await run(team({ task: 'Prepare the release note.', agents: [writer], review }), {
+        engine: 'mock', engines: { mock: engine }, cwd: repo,
+      });
+    } catch (caught) {
+      error = caught;
+    }
+    expect(requests).toHaveLength(0);
+    expect(error).toBeInstanceOf(Error);
+  });
+
   it('constructs a job from a task and one named agent role', () => {
     const job = team({
       task: 'Prepare the release note.',

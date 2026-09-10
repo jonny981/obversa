@@ -119,6 +119,7 @@ describe('public runtime API', () => {
       'sampled',
       'sequence',
       'team',
+      'teamGraphType',
       'toCondition',
       'tournament',
       'validateAcceptedResultRecord',
