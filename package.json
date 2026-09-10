@@ -101,7 +101,8 @@
     "test:tarballs": "node --test scripts/check-tarballs.spec.mjs",
     "check:surface-consumer": "node scripts/check-surface-consumer.mjs",
     "check:skill-offline": "node scripts/check-skill-offline.mjs",
-    "test:skill-install": "node --test scripts/skill-install.spec.mjs"
+    "test:skill-install": "node --test scripts/skill-install.spec.mjs",
+    "example:write-and-review": "pnpm --filter @obversa/runtime exec tsx ../../examples/write-and-review.ts"
   },
   "devDependencies": {
     "@arethetypeswrong/cli": "0.18.5",

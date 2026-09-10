@@ -3,9 +3,13 @@ title: "Obversa in cmux"
 description: "Host glue for cmux: the correct editor opens on the correct worktrees, and local web surfaces open in splits beside the terminal."
 ---
 
-Obversa is a guest in the host that you selected. cmux is the first host.
-The glue for cmux is setup, not a product: configuration plus small
-scripts. There is no host fork and no new UI.
+This page is for people working on Obversa itself. The cmux glue is not a
+published package: it is configuration and a few small scripts that live in
+the repository, so it needs a checkout, which nothing else here does. When
+the host ships as a package this page changes with it.
+
+Obversa is a guest in whichever host you use. cmux is the first. The glue is
+setup rather than a product, and there is no host fork and no new UI.
 
 ## What you get
 
@@ -61,11 +65,8 @@ The glue is a handful of scripts in `hosts/cmux/bin/` plus one Command
 Palette entry. It targets macOS today: the default-browser fallback uses
 `open`.
 
-Put the scripts on your PATH first, or call them by full path:
-
-```sh
-export PATH="$PATH:<checkout>/hosts/cmux/bin"
-```
+The scripts live in `hosts/cmux/bin`. Call them by full path, or put that
+directory on your `PATH`.
 
 1. Obversa checkouts carry the palette entry in `.cmux/cmux.json`. Open a
    cmux workspace on the repository and run **Order Workspace** from the
