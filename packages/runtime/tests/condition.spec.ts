@@ -556,22 +556,15 @@ describe('agentCheck request options and output', () => {
           review: {
             gate: 'The implementation meets the stated acceptance criterion.',
             when: agentCheck({ question: 'Is the prerequisite healthy?', engine }),
-            job: sequence(
-              'review-work',
-              gateJob(
-                'nested-check',
-                agentCheck({ question: 'Does the nested check pass?', engine }),
-              ),
-              reviewPanel({
-                label: 'stage-review',
-                reviewers: [
-                  {
-                    name: 'stage-reviewer',
-                    review: agentCheck({ question: 'Is the stage complete?', engine }),
-                  },
-                ],
-              }),
-            ),
+            job: reviewPanel({
+              label: 'stage-review',
+              reviewers: [
+                {
+                  name: 'stage-reviewer',
+                  review: agentCheck({ question: 'Is the stage complete?', engine }),
+                },
+              ],
+            }),
           },
         },
       }),
@@ -579,7 +572,7 @@ describe('agentCheck request options and output', () => {
     );
 
     expect(result.outcome.status).toBe('pass');
-    expect(requests).toHaveLength(3);
+    expect(requests).toHaveLength(2);
     const reviewerPrompts = requests.filter((request) =>
       request.prompt.includes('ACCEPTANCE CRITERION:'),
     );
@@ -589,7 +582,66 @@ describe('agentCheck request options and output', () => {
     );
     expect(
       requests.filter((request) => !request.prompt.includes('ACCEPTANCE CRITERION:')),
-    ).toHaveLength(2);
+    ).toHaveLength(1);
+  });
+
+  it('binds nested reviewer criteria to their own DAG nodes', async () => {
+    const requests: AgentRequest[] = [];
+    const engine = new MockEngine((request: AgentRequest) => {
+      requests.push(request);
+      return verdictJson;
+    });
+
+    const result = await run(
+      dag({
+        name: 'outer',
+        nodes: {
+          parent: {
+            gate: 'PARENT CRITERION',
+            job: dag({
+              name: 'inner',
+              nodes: {
+                gated: {
+                  gate: 'CHILD CRITERION',
+                  job: reviewPanel({
+                    label: 'gated-review',
+                    reviewers: [
+                      {
+                        name: 'gated-reviewer',
+                        review: agentCheck({ question: 'Is the gated child complete?', engine }),
+                      },
+                    ],
+                  }),
+                },
+                ungated: {
+                  job: reviewPanel({
+                    label: 'ungated-review',
+                    reviewers: [
+                      {
+                        name: 'ungated-reviewer',
+                        review: agentCheck({ question: 'Is the ungated child complete?', engine }),
+                      },
+                    ],
+                  }),
+                },
+              },
+            }),
+          },
+        },
+      }),
+      noEngine,
+    );
+
+    expect(result.outcome.status).toBe('pass');
+    const gatedPrompt = requests.find((request) =>
+      request.prompt.includes('Is the gated child complete?'),
+    )!.prompt;
+    const ungatedPrompt = requests.find((request) =>
+      request.prompt.includes('Is the ungated child complete?'),
+    )!.prompt;
+    expect(gatedPrompt).toContain('ACCEPTANCE CRITERION:\nCHILD CRITERION');
+    expect(gatedPrompt).not.toContain('PARENT CRITERION');
+    expect(ungatedPrompt).not.toContain('ACCEPTANCE CRITERION:');
   });
 
   const findings = `${'F'.repeat(300)}TAIL`;

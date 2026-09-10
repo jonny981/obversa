@@ -402,6 +402,58 @@ describe('feedback protocol', () => {
     expect(runs).toBe(2);
   });
 
+  it('does not key an ungated nested review on its parent gate', async () => {
+    const repo = await tmpRepo();
+    mkdirSync(join(repo, 'src'));
+    write(repo, 'src/reviewed.ts', 'export const value = 1;\n');
+    await commitFiles(repo, 'test: add nested review fixture');
+    const state: Record<string, unknown> = {};
+    const prompts: string[] = [];
+    const engine = new MockEngine((request: AgentRequest) => {
+      prompts.push(request.prompt);
+      return JSON.stringify({ verdict: 'yes', confidence: 0.95, reason: 'clear' });
+    });
+    const build = (parentGate: string) =>
+      dag({
+        name: 'outer',
+        nodes: {
+          parent: {
+            gate: parentGate,
+            job: dag({
+              name: 'inner',
+              nodes: {
+                child: {
+                  job: reviewPanel({
+                    label: 'nested-review',
+                    persistPasses: { minConfidence: 0.9 },
+                    reviewers: [
+                      {
+                        name: 'safety',
+                        cacheVersion: 'v1',
+                        invalidateOn: ['src'],
+                        review: agentCheck({ question: 'Is the child safe?', engine }),
+                      },
+                    ],
+                  }),
+                },
+              },
+            }),
+          },
+        },
+      });
+    const opts = {
+      engine: 'mock' as const,
+      engines: { mock: engine },
+      cwd: repo,
+      state,
+    };
+
+    expect((await run(build('PARENT ONE'), opts)).outcome.status).toBe('pass');
+    expect((await run(build('PARENT TWO'), opts)).outcome.status).toBe('pass');
+    expect(prompts).toHaveLength(1);
+    expect(prompts[0]).not.toContain('ACCEPTANCE CRITERION:');
+  });
+
   it('fails closed for low-confidence and malformed persisted passes', async () => {
     const repo = await tmpRepo();
     mkdirSync(join(repo, 'src'));

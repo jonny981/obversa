@@ -180,7 +180,12 @@ export function dag(config: DagConfig): Job {
           ...nodeContext(name),
           dependents: dependents.get(name) ?? [],
         },
-        stageGate: nodes.get(name)!.gate,
+        // A nested DAG node starts a new reviewer scope. Its own reviewer
+        // receives stageGate below; other checks must not see an ancestor's.
+        reviewerGate: null,
+        // Bind the node's criterion, including an explicit empty value. A
+        // nested ungated node must not inherit its parent's criterion.
+        stageGate: nodes.get(name)!.gate ?? null,
         timeoutMs: nodes.get(name)!.timeoutMs,
         timeoutGraceMs: nodes.get(name)!.timeoutGraceMs,
       });

@@ -181,9 +181,9 @@ export interface JobContext {
   /** The current DAG node position, when this job is running inside a dag node. */
   readonly graph?: GraphPosition;
   /** @internal The current DAG node's acceptance criterion, only for its reviewer. */
-  readonly reviewerGate?: string;
+  readonly reviewerGate?: string | null;
   /** @internal The nearest DAG node's acceptance criterion across nested jobs. */
-  readonly stageGate?: string;
+  readonly stageGate?: string | null;
   /**
    * Timeout inherited by jobs in this scope. A node can set it once and agent
    * leaves beneath it receive the same cap unless they override it directly.

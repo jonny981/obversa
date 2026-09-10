@@ -26,6 +26,7 @@ import {
 } from './concurrency.js';
 import { oneLine, truncate } from './text.js';
 import { workspaceFingerprint } from './git.js';
+import { criterionFor } from './context.js';
 
 export type {
   FeedbackActionSeverity,
@@ -142,7 +143,7 @@ export function feedbackBlock(outcome: Outcome): string {
 
 export function graphPositionBlock(
   graph: GraphPosition,
-  reviewerGate?: string,
+  reviewerGate?: string | null,
 ): string {
   return [
     '## Graph position',
@@ -327,7 +328,7 @@ async function runReviewer(
   const name = reviewer.name ?? `reviewer-${index + 1}`;
   const reviewerCtx: JobContext = {
     ...ctx,
-    reviewerGate: ctx.reviewerGate ?? ctx.stageGate ?? ctx.graph?.gate,
+    reviewerGate: criterionFor(ctx),
   };
   try {
     if ('job' in reviewer) {
@@ -405,7 +406,7 @@ async function runPersistedReviewer(
   const name = reviewer.name!;
   const identity = reviewerCacheIdentity(
     reviewer,
-    ctx.stageGate ?? ctx.graph?.gate,
+    criterionFor(ctx),
   );
   const before = await workspaceFingerprint({
     cwd: ctx.workspace.dir,
@@ -515,7 +516,7 @@ async function settlePersistedReviewers(
         minConfidence,
         reviewerCacheIdentity(
           reviewer,
-          ctx.stageGate ?? ctx.graph?.gate,
+          criterionFor(ctx),
         ),
       )
     )
