@@ -58,3 +58,18 @@ test('a clean tree passes', () => {
     assert.deepEqual(checkRetiredPaths(dir), []);
   } finally { rmSync(dir, { recursive: true, force: true }); }
 });
+
+test('the allowlist names the check and its spec, and nothing else beside them', () => {
+  const dir = repoWith({
+    'scripts/check-retired-paths.mjs': "const BANNED = [/production-lines/];\n",
+    'scripts/check-retired-paths.spec.mjs': "const fixture = 'a.line.js';\n",
+    'scripts/check-retired-paths-helper.mjs': "const path = 'production-lines';\n",
+    'scripts/check-retired-paths.mjs.bak': "const path = 'production-lines';\n",
+  });
+  try {
+    const failures = checkRetiredPaths(dir);
+    assert.equal(failures.length, 2, failures.join('; '));
+    assert.match(failures.join(' '), /check-retired-paths-helper\.mjs/);
+    assert.match(failures.join(' '), /check-retired-paths\.mjs\.bak/);
+  } finally { rmSync(dir, { recursive: true, force: true }); }
+});

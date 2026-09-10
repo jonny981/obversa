@@ -13,7 +13,10 @@ const BANNED = [
   { name: 'retired heading', pattern: /## Run the line\b/ },
 ];
 
-const ALLOW = /^(docs\/public\/docs\.json|CHANGELOG\.md)$/;
+// A check that bans a set of strings has to write those strings down, and so
+// does its spec. Both are named here in full, so a new file next to them in
+// scripts/ gets no exemption.
+const ALLOW = /^(docs\/public\/docs\.json|CHANGELOG\.md|scripts\/check-retired-paths\.(mjs|spec\.mjs))$/;
 
 function trackedFiles(root) {
   const output = execFileSync('git', ['ls-files'], { cwd: root, encoding: 'utf8' });
