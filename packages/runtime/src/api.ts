@@ -137,6 +137,7 @@ export {
   type GraphExecutorOptions,
   type GraphExecutorResult,
 } from './runtime/graph-executor.js';
+export { projectTeamRooms } from './runtime/team-rooms.js';
 export {
   resolveGraphPlan,
   validateGraphDescription,

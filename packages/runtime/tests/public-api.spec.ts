@@ -104,6 +104,7 @@ describe('public runtime API', () => {
       'predicate',
       'preflight',
       'preflightEngine',
+      'projectTeamRooms',
       'prove',
       'quorum',
       'ratchet',

@@ -199,6 +199,7 @@ export const EXPECTED_FILES = {
     'package/dist/runtime/run-event.d.ts',
     'package/dist/runtime/runner.d.ts',
     'package/dist/runtime/supervisor.d.ts',
+    'package/dist/runtime/team-rooms.d.ts',
     'package/dist/runtime/workspace-policy.d.ts',
     'package/dist/storage/error.d.ts',
     'package/dist/storage/id.d.ts',
