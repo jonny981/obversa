@@ -101,6 +101,7 @@ for (const [stage, branch] of [
   ['D43', 'docs/reader-first-pages'],
   ['F20', 'feat/f20-checks-that-run'],
   ['F25', 'feat/examples-a-user-would-write'],
+  ['D44', 'docs/lead-with-the-team'],
   ['D13', 'feat/graph-forms-v1'],
   ['D11A', 'feat/graph-forms-v1'],
   ['F0', 'feat/factory-v1'],
@@ -152,6 +153,7 @@ for (const [stage, branch] of [
   ['D43', 'feat/graph-forms-v1'],
   ['F20', 'feat/graph-forms-v1'],
   ['F25', 'feat/graph-forms-v1'],
+  ['D44', 'feat/graph-forms-v1'],
 ]) {
   test(`${stage} refuses the wrong branch ${branch}`, () => {
     const repository = createRepository({ feature: true, branch });

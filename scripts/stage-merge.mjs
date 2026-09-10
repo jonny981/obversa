@@ -39,6 +39,7 @@ export const stageBranches = {
   D43: 'docs/reader-first-pages',
   F20: 'feat/f20-checks-that-run',
   F25: 'feat/examples-a-user-would-write',
+  D44: 'docs/lead-with-the-team',
 };
 
 export function manageStage(args, options = {}) {
