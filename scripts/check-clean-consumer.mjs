@@ -293,6 +293,20 @@ import { AgentSdkEngine } from '@obversa/engine-agent-sdk';
 import { AnthropicApiEngine } from '@obversa/engine-anthropic-api';
 import { ClaudeCliEngine } from '@obversa/engine-claude-cli';
 import { CodexEngine } from '@obversa/engine-codex';
+import type { runSurface, startSurface } from '@obversa/surfacer';
+import type { createSurfaceClient } from '@obversa/surfacer/client';
+import type { reviewDiff } from '@obversa/source';
+import type { listTrackedFiles } from '@obversa/source/testing';
+
+// Compile-time surface checks: these imports fail the consumer build if
+// either package ships no type declarations, and the assertions fail it if
+// the public callables lose their callable shape.
+type SurfaceCallable = typeof runSurface extends (...args: never[]) => unknown ? true : never;
+type SurfaceStartCallable = typeof startSurface extends (...args: never[]) => unknown ? true : never;
+type ClientCallable = typeof createSurfaceClient extends (...args: never[]) => unknown ? true : never;
+type ReviewCallable = typeof reviewDiff extends (...args: never[]) => unknown ? true : never;
+type TrackedCallable = typeof listTrackedFiles extends (...args: never[]) => unknown ? true : never;
+const _f16TypeSurfaces: [SurfaceCallable, SurfaceStartCallable, ClientCallable, ReviewCallable, TrackedCallable] = [true, true, true, true, true];
 import { GrokCliEngine } from '@obversa/engine-grok-cli';
 import { OpenCodeCliEngine } from '@obversa/engine-opencode-cli';
 import {
@@ -477,8 +491,10 @@ const tsconfig = {
   },
   include: [
     'consumer.ts',
-    'offline-review.line.ts',
-    'feature-delivery.line.ts',
+    'offline-review.workflow.ts',
+    'feature-delivery.workflow.ts',
+    'feature-team.ts',
+    'forge-helper.ts',
     'custom-graph.ts',
     'pipeline.ts',
     'review-loop.ts',
@@ -498,13 +514,15 @@ const tsconfig = {
 
 async function main() {
   const exampleSource = await readFile(
-    join(root, 'examples', 'production-lines', 'offline-review.line.ts'),
+    join(root, 'examples', 'workflows', 'offline-review.workflow.ts'),
     'utf8',
   );
   const featureExampleSource = await readFile(
-    join(root, 'examples', 'production-lines', 'feature-delivery.line.ts'),
+    join(root, 'examples', 'workflows', 'feature-delivery.workflow.ts'),
     'utf8',
   );
+  const forgeExamplePath = join(root, 'examples', 'packages', 'forge-helper.ts');
+  const forgeExampleSource = await readFile(forgeExamplePath, 'utf8');
   const graphExamplePath = join(root, 'examples', 'packages', 'custom-graph.ts');
   const graphExampleSource = await readFile(graphExamplePath, 'utf8');
   const pipelineExamplePath = join(root, 'examples', 'packages', 'pipeline.ts');
@@ -528,6 +546,7 @@ async function main() {
   const attemptExampleSource = await readFile(attemptExamplePath, 'utf8');
   const turnTakingExamplePath = join(root, 'examples', 'packages', 'turn-taking.ts');
   const workspaceExamplePath = join(root, 'examples', 'packages', 'workspace.ts');
+  const featureTeamExamplePath = join(root, 'examples', 'packages', 'feature-team.ts');
   const runnerExamplePath = join(root, 'examples', 'packages', 'supervised-run.ts');
   const runnerHostPath = join(root, 'examples', 'packages', 'supervised-host.mjs');
   const safeChangeExamplePath = join(root, 'examples', 'safe-change', 'example.ts');
@@ -540,35 +559,39 @@ async function main() {
     'utf8',
   );
   const publicDocument = await readFile(
-    join(root, 'docs', 'public', 'production-lines', 'offline-review.mdx'),
+    join(root, 'docs', 'public', 'workflows', 'offline-review.mdx'),
     'utf8',
   );
   const featureDocument = await readFile(
-    join(root, 'docs', 'public', 'production-lines', 'feature-delivery.mdx'),
+    join(root, 'docs', 'public', 'workflows', 'feature-delivery.mdx'),
+    'utf8',
+  );
+  const forgeDocument = await readFile(
+    join(root, 'docs', 'public', 'workflows', 'forge-helper.mdx'),
     'utf8',
   );
   const storageDocument = await readFile(
-    join(root, 'docs', 'public', 'storage', 'events-and-artifacts.mdx'),
+    join(root, 'docs', 'public', 'recording', 'events-and-artifacts.mdx'),
     'utf8',
   );
   const attemptDocument = await readFile(
-    join(root, 'docs', 'public', 'runtime', 'node-attempts.mdx'),
+    join(root, 'docs', 'public', 'recording', 'node-attempts.mdx'),
     'utf8',
   );
   const callbackGateDocument = await readFile(
-    join(root, 'docs', 'public', 'graphs', 'callback-gate.mdx'),
+    join(root, 'docs', 'public', 'reviewing', 'callback-gates.mdx'),
     'utf8',
   );
   const reviewLoopDocument = await readFile(
-    join(root, 'docs', 'public', 'graphs', 'review-loop.mdx'),
+    join(root, 'docs', 'public', 'reviewing', 'review-loop.mdx'),
     'utf8',
   );
   const proofAcceptanceDocument = await readFile(
-    join(root, 'docs', 'public', 'proof', 'acceptance.mdx'),
+    join(root, 'docs', 'public', 'reviewing', 'proof-acceptance.mdx'),
     'utf8',
   );
   const safeChangeDocument = await readFile(
-    join(root, 'docs', 'public', 'production-lines', 'safe-change.mdx'),
+    join(root, 'docs', 'public', 'workflows', 'safe-change.mdx'),
     'utf8',
   );
   if (sourceFromPublicDoc(publicDocument) !== exampleSource) {
@@ -594,6 +617,9 @@ async function main() {
   }
   if (sourceFromPublicDoc(featureDocument) !== featureExampleSource) {
     throw new Error('The feature-delivery production-line page does not match its runnable source');
+  }
+  if (sourceFromPublicDoc(forgeDocument) !== forgeExampleSource) {
+    throw new Error('The forge helper page does not match its runnable source');
   }
 
   const directory = await mkdtemp(join(tmpdir(), 'obversa-consumer-'));
@@ -629,13 +655,14 @@ async function main() {
     await copyFile(safeChangeRecipePath, join(consumerDirectory, 'recipe.ts'));
     await copyFile(safeChangeFileAdapterPath, join(consumerDirectory, 'file-adapter.ts'));
     await writeFile(
-      join(consumerDirectory, 'offline-review.line.ts'),
+      join(consumerDirectory, 'offline-review.workflow.ts'),
       exampleSource,
     );
     await writeFile(
-      join(consumerDirectory, 'feature-delivery.line.ts'),
+      join(consumerDirectory, 'feature-delivery.workflow.ts'),
       featureExampleSource,
     );
+    await copyFile(forgeExamplePath, join(consumerDirectory, 'forge-helper.ts'));
     await copyFile(graphExamplePath, join(consumerDirectory, 'custom-graph.ts'));
     await copyFile(pipelineExamplePath, join(consumerDirectory, 'pipeline.ts'));
     await copyFile(reviewLoopExamplePath, join(consumerDirectory, 'review-loop.ts'));
@@ -649,6 +676,7 @@ async function main() {
     await copyFile(attemptExamplePath, join(consumerDirectory, 'safe-node-attempt.ts'));
     await copyFile(turnTakingExamplePath, join(consumerDirectory, 'turn-taking.ts'));
     await copyFile(workspaceExamplePath, join(consumerDirectory, 'workspace.ts'));
+    await copyFile(featureTeamExamplePath, join(consumerDirectory, 'feature-team.ts'));
     await copyFile(runnerExamplePath, join(consumerDirectory, 'supervised-run.ts'));
     await copyFile(runnerHostPath, join(consumerDirectory, 'supervised-host.mjs'));
 
@@ -679,26 +707,32 @@ async function main() {
     }).trim();
     const report = JSON.parse(output.split(/\r?\n/).at(-1));
     const productionLine = JSON.parse(
-      run(process.execPath, ['dist/offline-review.line.js'], { cwd: consumerDirectory }),
+      run(process.execPath, ['dist/offline-review.workflow.js'], { cwd: consumerDirectory }),
     );
     const directProductionLine = JSON.parse(
-      run('pnpm', ['exec', 'tsx', 'offline-review.line.ts'], { cwd: consumerDirectory }),
+      run('pnpm', ['exec', 'tsx', 'offline-review.workflow.ts'], { cwd: consumerDirectory }),
     );
     const featureLine = JSON.parse(
-      run(process.execPath, ['dist/feature-delivery.line.js'], { cwd: consumerDirectory }),
+      run(process.execPath, ['dist/feature-delivery.workflow.js'], { cwd: consumerDirectory }),
     );
     const directFeatureLine = JSON.parse(
-      run('pnpm', ['exec', 'tsx', 'feature-delivery.line.ts'], { cwd: consumerDirectory }),
+      run('pnpm', ['exec', 'tsx', 'feature-delivery.workflow.ts'], { cwd: consumerDirectory }),
+    );
+    const forgeHelper = JSON.parse(
+      run(process.execPath, ['dist/forge-helper.js'], { cwd: consumerDirectory }),
+    );
+    const directForgeHelper = JSON.parse(
+      run('pnpm', ['exec', 'tsx', 'forge-helper.ts'], { cwd: consumerDirectory }),
     );
     const featureDenySource = featureExampleSource.replace(
       '{ approved: true },',
       '{ approved: false },',
     );
     await writeFile(
-      join(consumerDirectory, 'feature-delivery.deny.line.ts'),
+      join(consumerDirectory, 'feature-delivery.deny.workflow.ts'),
       featureDenySource,
     );
-    const denyRun = spawnSync('pnpm', ['exec', 'tsx', 'feature-delivery.deny.line.ts'], {
+    const denyRun = spawnSync('pnpm', ['exec', 'tsx', 'feature-delivery.deny.workflow.ts'], {
       cwd: consumerDirectory,
       encoding: 'utf8',
     });
@@ -710,10 +744,10 @@ async function main() {
       'const repaired = false;',
     );
     await writeFile(
-      join(consumerDirectory, 'feature-delivery.red.line.ts'),
+      join(consumerDirectory, 'feature-delivery.red.workflow.ts'),
       featureRedSource,
     );
-    const redRun = spawnSync('pnpm', ['exec', 'tsx', 'feature-delivery.red.line.ts'], {
+    const redRun = spawnSync('pnpm', ['exec', 'tsx', 'feature-delivery.red.workflow.ts'], {
       cwd: consumerDirectory,
       encoding: 'utf8',
     });
@@ -833,7 +867,7 @@ async function main() {
     assert.deepEqual(compiledProofCache, expectedProofCacheReport);
     assert.deepEqual(directProofCache, expectedProofCacheReport);
     const safeChangePageReport = safeChangeDocument
-      .match(/## Run the line[\s\S]*?```json\r?\n([\s\S]*?)```/);
+      .match(/## Run the workflow[\s\S]*?```json\r?\n([\s\S]*?)```/);
     assert.ok(safeChangePageReport, 'The safe-change page must include its JSON report');
     assert.deepEqual(compiledSafeChange, JSON.parse(safeChangePageReport[1]));
     assert.deepEqual(directSafeChange, compiledSafeChange);
@@ -842,10 +876,25 @@ async function main() {
     assert.ok(proofCacheReport, 'The proof page must include its cache report');
     assert.deepEqual(JSON.parse(proofCacheReport[1]), compiledProofCache);
     const featureLinePageReport = featureDocument
-      .match(/## Run the line[\s\S]*?```json\r?\n([\s\S]*?)```/);
+      .match(/## Run the workflow[\s\S]*?```json\r?\n([\s\S]*?)```/);
     assert.ok(featureLinePageReport, 'The feature-delivery page must include its JSON report');
     assert.deepEqual(featureLine, JSON.parse(featureLinePageReport[1]));
     assert.deepEqual(directFeatureLine, featureLine);
+    const forgePageReport = forgeDocument
+      .match(/## Run the example[\s\S]*?```json\r?\n([\s\S]*?)```/);
+    assert.ok(forgePageReport, 'The forge helper page must include its JSON report');
+    assert.deepEqual(forgeHelper, JSON.parse(forgePageReport[1]));
+    assert.deepEqual(directForgeHelper, forgeHelper);
+    assert.deepEqual(forgeHelper.verdicts, {
+      unmergeable: 'RESULT: FAIL because the branch cannot merge',
+      staleChecks: 'RESULT: FAIL because the checks are from an earlier revision',
+      missingWorkflow: 'RESULT: FAIL because the expected workflow never ran on the head revision',
+      failedCheck: 'RESULT: FAIL because the tests check finished as failure',
+    });
+    assert.equal(forgeHelper.ship.verdict, 'RESULT: PASS');
+    assert.equal(forgeHelper.ship.onePullRequest, true);
+    assert.equal(forgeHelper.ship.merged, true);
+    assert.equal(forgeHelper.ship.branchDeleted, true);
     assert.deepEqual(compiledStorage, expectedStorageReport);
     assert.deepEqual(directStorage, expectedStorageReport);
     assert.deepEqual(compiledAttempt, expectedAttemptReport);
@@ -886,7 +935,7 @@ async function main() {
     if (refs.length !== 1) throw new Error(`Git memory created ${refs.length} private refs instead of one`);
 
     console.log(
-      'Clean offline consumer passed with TypeScript 7 and 6, the first production line, the safe-change production line, the feature-delivery line, the outside graph, the pipeline executor example, the review loop, the callback gate, proof-bound approval, the turn-taking executor example, durable storage, safe node attempts, the supervised runner, 17 memory cases, and both memory adapters.',
+      'Clean offline consumer passed with TypeScript 7 and 6, the first production line, the safe-change production line, the feature-delivery line, the forge helper, the outside graph, the pipeline executor example, the review loop, the callback gate, proof-bound approval, the turn-taking executor example, durable storage, safe node attempts, the supervised runner, 17 memory cases, and both memory adapters.',
     );
   } finally {
     await rm(directory, { recursive: true, force: true });

@@ -1,7 +1,7 @@
 # Releasing
 
-This guide describes how Jonny verifies and publishes a version of the
-Obversa packages.
+This guide describes how the release owner verifies and publishes a
+version of the Obversa packages.
 
 ## The version numbers
 
@@ -55,8 +55,9 @@ for a plugin-only change.
 5. **Read the workflow record.** The `Release` workflow runs `pnpm verify:d15`,
    including the tarball check and changelog gate. It never publishes packages.
 
-6. **Approve the destination.** Jonny names the real npm registry before
-   publishing. No publish command runs without that approval.
+6. **Approve the destination.** The release owner names the real npm
+   registry before publishing. No publish command runs without that
+   approval.
 
 7. **Publish through the guarded script.** At the repository tag, run the
    script once for every name in `scripts/publish-allowlist.json` (fourteen

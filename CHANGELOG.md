@@ -11,6 +11,12 @@ engine and memory packages track their own versions independently.
 
 ### Added
 
+- **Type declarations for the review packages:** `@obversa/source` and
+  `@obversa/surfacer` now ship declaration files generated from their
+  JSDoc, with a `types` condition on every export entry. A TypeScript
+  reader importing either package resolves types instead of failing with
+  an implicit-any import. The clean-consumer check imports both strictly,
+  so the declarations cannot be dropped without failing the check.
 - `@obversa/runtime` 1.0.0: stored graph plans, bounded node attempts,
   durable events and artifacts, restartable execution, workspace checks,
   Callback Gates, and proof-bound decisions.
@@ -48,6 +54,14 @@ engine and memory packages track their own versions independently.
   `environmentVariables` list on start and resume. Copy only present values of
   those names from the watchdog, without storing credentials in run inputs or
   host records. Default environment inheritance remains restrictive.
+- **Forge helper example:** Ship `examples/packages/forge-helper.ts` with
+  its documentation page. It is the shipping step after a review gate:
+  push the work branch, open or update one pull request with a body from
+  the commit bodies, pass a strict gate that ships only an exact-revision
+  pass, squash the merge with the same synthesis, and delete the branch.
+  The gate prints strict `RESULT:` verdicts with the reason on the line.
+  `pnpm example:forge` runs it offline against a mock host, and the
+  clean-consumer check runs it from the packed tarballs.
 - **Feature-delivery example:** Ship a runnable feature-delivery production
   line, `examples/production-lines/feature-delivery.line.ts`, with its
   documentation page. It takes one written issue through analysis,
