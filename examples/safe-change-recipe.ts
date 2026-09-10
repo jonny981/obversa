@@ -13,7 +13,7 @@ import { createLocalRunStorage } from '@obversa/runtime/storage/local';
 import {
   applyTarget, hashBytes, readRecordBuffer, readRecordBytes, readTarget, TargetWriteUncertain, sourcePath, sourceStream, targetPath, targetStream,
   type ActionWitness, type SafeChangeHooks, type SafeChangeInput, type SourceRecord, type TargetRecord,
-} from './file-adapter.js';
+} from './safe-change-file-adapter.js';
 
 interface CapturedRecord extends JsonObject { readonly id: string; readonly bytes: string; readonly artifact: ArtifactReference }
 interface Capture extends JsonObject {

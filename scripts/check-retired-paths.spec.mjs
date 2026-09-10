@@ -53,7 +53,7 @@ test('the redirect file is the one allowed place', () => {
 });
 
 test('a clean tree passes', () => {
-  const dir = repoWith({ 'examples/workflows/offline-review.workflow.ts': 'export const workflow = 1;\n' });
+  const dir = repoWith({ 'examples/offline-review.ts': 'export const workflow = 1;\n' });
   try {
     assert.deepEqual(checkRetiredPaths(dir), []);
   } finally { rmSync(dir, { recursive: true, force: true }); }

@@ -9,16 +9,11 @@ processes, and restarts work within declared time and restart limits.
 
 ## Run the offline example
 
-From a built Obversa checkout, run:
-
-```bash
-pnpm --filter @obversa/runner exec tsx ../../examples/packages/supervised-run.ts
-```
 
 The example creates a disposable Git repository and runs two data nodes without
 an engine or network access. It checks their files and saved results, prints a
 JSON report, and removes its temporary directory after teardown succeeds.
-`examples/packages/supervised-host.mjs` supplies the worker's node bindings.
+`examples/supervised-host.mjs` supplies the worker's node bindings.
 
 ## Start, inspect, and stop
 

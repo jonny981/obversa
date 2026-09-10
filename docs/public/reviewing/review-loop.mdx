@@ -11,11 +11,6 @@ review seats. A review seat is an independent reviewer node.
 
 ## Run the example
 
-From an Obversa checkout, run:
-
-```bash
-pnpm example:review-loop
-```
 
 The example uses scripted events for two passes from separate providers and
 model families. It does not call an engine. It prints this JSON report:
@@ -27,11 +22,11 @@ model families. It does not call an engine. It prints this JSON report:
 The clean-consumer check compiles and runs the same source from the packed
 package with TypeScript 6 and TypeScript 7. It compares the report on this page
 with the example’s output. Its source is
-`examples/packages/review-loop.ts`.
+`examples/review-loop.ts`.
 
 ## Define a review loop
 
-The next fragment is from `examples/packages/review-loop.ts`.
+The next fragment is from `examples/review-loop.ts`.
 
 ```ts
 import {

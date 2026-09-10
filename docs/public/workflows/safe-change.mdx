@@ -99,11 +99,6 @@ contract. The file example makes no guarantee about an arbitrary remote API.
 
 ## Run the workflow
 
-From an Obversa checkout, run:
-
-```bash
-pnpm example:safe-change
-```
 
 The example writes only to its temporary directory and removes it when done.
 The report is:
@@ -114,10 +109,11 @@ The report is:
 
 ## Source
 
-Copy all three files from `examples/safe-change/`: `recipe.ts` drives the
-stored graph, `file-adapter.ts` reads and changes records, and `example.ts`
-runs the fixture below. Keep them in one directory. They import public
-runtime exports.
+This one is three files that sit beside each other:
+`safe-change-recipe.ts` drives the stored graph,
+`safe-change-file-adapter.ts` reads and changes records, and
+`safe-change.ts` runs the fixture below. Keep them together. They import
+public runtime exports and nothing else.
 
 ```ts
 import assert from 'node:assert/strict';

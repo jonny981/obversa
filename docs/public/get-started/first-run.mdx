@@ -3,13 +3,8 @@ title: "First run"
 description: "Run one offline workflow from a local checkout, then one programmatic job."
 ---
 
-From an Obversa checkout, after you install and build, run:
 
-```bash
-pnpm example:offline
-```
-
-That command runs `examples/workflows/offline-review.workflow.ts`. It does
+That command runs `examples/offline-review.ts`. It does
 not use a model or a network service.
 
 The result is:
@@ -22,8 +17,9 @@ The result is:
 }
 ```
 
-Other offline examples exist: `pnpm example:pipeline`, `pnpm example:review-loop`,
-and `pnpm example:callback-gate`.
+Three more files run the same way and show a different shape:
+[a pipeline](/graphs/pipeline), [a review loop](/reviewing/review-loop) and
+[a callback gate](/reviewing/callback-gates).
 
 ## Programmatic API
 

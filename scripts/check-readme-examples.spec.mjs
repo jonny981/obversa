@@ -18,7 +18,7 @@ function treeWith({ readme, example }) {
   const dir = mkdtempSync(join(tmpdir(), 'readme-examples-'));
   for (const [name, body] of Object.entries({
     'README.md': readme,
-    'examples/packages/feature-team.ts': example,
+    'examples/feature-team.ts': example,
   })) {
     mkdirSync(dirname(join(dir, name)), { recursive: true });
     writeFileSync(join(dir, name), body);

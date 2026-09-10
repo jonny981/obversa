@@ -491,8 +491,8 @@ const tsconfig = {
   },
   include: [
     'consumer.ts',
-    'offline-review.workflow.ts',
-    'feature-delivery.workflow.ts',
+    'offline-review.ts',
+    'feature-delivery.ts',
     'feature-team.ts',
     'forge-helper.ts',
     'custom-graph.ts',
@@ -514,20 +514,20 @@ const tsconfig = {
 
 async function main() {
   const exampleSource = await readFile(
-    join(root, 'examples', 'workflows', 'offline-review.workflow.ts'),
+    join(root, 'examples', 'offline-review.ts'),
     'utf8',
   );
   const featureExampleSource = await readFile(
-    join(root, 'examples', 'workflows', 'feature-delivery.workflow.ts'),
+    join(root, 'examples', 'feature-delivery.ts'),
     'utf8',
   );
-  const forgeExamplePath = join(root, 'examples', 'packages', 'forge-helper.ts');
+  const forgeExamplePath = join(root, 'examples', 'forge-helper.ts');
   const forgeExampleSource = await readFile(forgeExamplePath, 'utf8');
-  const graphExamplePath = join(root, 'examples', 'packages', 'custom-graph.ts');
+  const graphExamplePath = join(root, 'examples', 'custom-graph.ts');
   const graphExampleSource = await readFile(graphExamplePath, 'utf8');
-  const pipelineExamplePath = join(root, 'examples', 'packages', 'pipeline.ts');
-  const reviewLoopExamplePath = join(root, 'examples', 'packages', 'review-loop.ts');
-  const callbackGateExamplePath = join(root, 'examples', 'packages', 'callback-gate.ts');
+  const pipelineExamplePath = join(root, 'examples', 'pipeline.ts');
+  const reviewLoopExamplePath = join(root, 'examples', 'review-loop.ts');
+  const callbackGateExamplePath = join(root, 'examples', 'callback-gate.ts');
   const callbackGateExampleSource = await readFile(callbackGateExamplePath, 'utf8');
   const proofBoundApprovalExamplePath = join(
     root,
@@ -539,19 +539,19 @@ async function main() {
     proofBoundApprovalExamplePath,
     'utf8',
   );
-  const storageExamplePath = join(root, 'examples', 'packages', 'durable-storage.ts');
-  const proofCacheExamplePath = join(root, 'examples', 'packages', 'proof-cache.ts');
+  const storageExamplePath = join(root, 'examples', 'durable-storage.ts');
+  const proofCacheExamplePath = join(root, 'examples', 'proof-cache.ts');
   const storageExampleSource = await readFile(storageExamplePath, 'utf8');
-  const attemptExamplePath = join(root, 'examples', 'packages', 'safe-node-attempt.ts');
+  const attemptExamplePath = join(root, 'examples', 'safe-node-attempt.ts');
   const attemptExampleSource = await readFile(attemptExamplePath, 'utf8');
-  const turnTakingExamplePath = join(root, 'examples', 'packages', 'turn-taking.ts');
-  const workspaceExamplePath = join(root, 'examples', 'packages', 'workspace.ts');
-  const featureTeamExamplePath = join(root, 'examples', 'packages', 'feature-team.ts');
-  const runnerExamplePath = join(root, 'examples', 'packages', 'supervised-run.ts');
-  const runnerHostPath = join(root, 'examples', 'packages', 'supervised-host.mjs');
-  const safeChangeExamplePath = join(root, 'examples', 'safe-change', 'example.ts');
-  const safeChangeRecipePath = join(root, 'examples', 'safe-change', 'recipe.ts');
-  const safeChangeFileAdapterPath = join(root, 'examples', 'safe-change', 'file-adapter.ts');
+  const turnTakingExamplePath = join(root, 'examples', 'turn-taking.ts');
+  const workspaceExamplePath = join(root, 'examples', 'workspace.ts');
+  const featureTeamExamplePath = join(root, 'examples', 'feature-team.ts');
+  const runnerExamplePath = join(root, 'examples', 'supervised-run.ts');
+  const runnerHostPath = join(root, 'examples', 'supervised-host.mjs');
+  const safeChangeExamplePath = join(root, 'examples', 'example.ts');
+  const safeChangeRecipePath = join(root, 'examples', 'recipe.ts');
+  const safeChangeFileAdapterPath = join(root, 'examples', 'file-adapter.ts');
   const turnTakingExampleSource = await readFile(turnTakingExamplePath, 'utf8');
   const safeChangeExampleSource = await readFile(safeChangeExamplePath, 'utf8');
   const graphDocument = await readFile(
@@ -655,11 +655,11 @@ async function main() {
     await copyFile(safeChangeRecipePath, join(consumerDirectory, 'recipe.ts'));
     await copyFile(safeChangeFileAdapterPath, join(consumerDirectory, 'file-adapter.ts'));
     await writeFile(
-      join(consumerDirectory, 'offline-review.workflow.ts'),
+      join(consumerDirectory, 'offline-review.ts'),
       exampleSource,
     );
     await writeFile(
-      join(consumerDirectory, 'feature-delivery.workflow.ts'),
+      join(consumerDirectory, 'feature-delivery.ts'),
       featureExampleSource,
     );
     await copyFile(forgeExamplePath, join(consumerDirectory, 'forge-helper.ts'));
@@ -710,13 +710,13 @@ async function main() {
       run(process.execPath, ['dist/offline-review.workflow.js'], { cwd: consumerDirectory }),
     );
     const directProductionLine = JSON.parse(
-      run('pnpm', ['exec', 'tsx', 'offline-review.workflow.ts'], { cwd: consumerDirectory }),
+      run('pnpm', ['exec', 'tsx', 'offline-review.ts'], { cwd: consumerDirectory }),
     );
     const featureLine = JSON.parse(
       run(process.execPath, ['dist/feature-delivery.workflow.js'], { cwd: consumerDirectory }),
     );
     const directFeatureLine = JSON.parse(
-      run('pnpm', ['exec', 'tsx', 'feature-delivery.workflow.ts'], { cwd: consumerDirectory }),
+      run('pnpm', ['exec', 'tsx', 'feature-delivery.ts'], { cwd: consumerDirectory }),
     );
     const forgeHelper = JSON.parse(
       run(process.execPath, ['dist/forge-helper.js'], { cwd: consumerDirectory }),
@@ -729,10 +729,10 @@ async function main() {
       '{ approved: false },',
     );
     await writeFile(
-      join(consumerDirectory, 'feature-delivery.deny.workflow.ts'),
+      join(consumerDirectory, 'feature-delivery.deny.ts'),
       featureDenySource,
     );
-    const denyRun = spawnSync('pnpm', ['exec', 'tsx', 'feature-delivery.deny.workflow.ts'], {
+    const denyRun = spawnSync('pnpm', ['exec', 'tsx', 'feature-delivery.deny.ts'], {
       cwd: consumerDirectory,
       encoding: 'utf8',
     });
@@ -744,10 +744,10 @@ async function main() {
       'const repaired = false;',
     );
     await writeFile(
-      join(consumerDirectory, 'feature-delivery.red.workflow.ts'),
+      join(consumerDirectory, 'feature-delivery.red.ts'),
       featureRedSource,
     );
-    const redRun = spawnSync('pnpm', ['exec', 'tsx', 'feature-delivery.red.workflow.ts'], {
+    const redRun = spawnSync('pnpm', ['exec', 'tsx', 'feature-delivery.red.ts'], {
       cwd: consumerDirectory,
       encoding: 'utf8',
     });

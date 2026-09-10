@@ -60,7 +60,7 @@ a target across processes.
 From the workspace root, run:
 
 ```bash
-pnpm --filter @obversa/memory exec tsx ../../examples/packages/memory.ts
+pnpm --filter @obversa/memory exec tsx ../../examples/memory.ts
 ```
 
 ## License

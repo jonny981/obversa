@@ -169,10 +169,6 @@ starts the public executor, and uses a real dead-primary path through two
 The next two critic attempts go straight to the fallback. The critic permits a
 crash retry.
 
-```bash
-pnpm example:turn-taking
-```
-
-The command reports six dispatches, one primary call, three fallback calls, and
+`examples/turn-taking.ts` reports six dispatches, one primary call, three fallback calls, and
 the final result. The same source compiles and runs from the packed package with
 TypeScript 6 and TypeScript 7.
