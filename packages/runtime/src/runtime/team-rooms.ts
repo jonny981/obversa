@@ -14,6 +14,7 @@ import { GraphExecutionError, validateStandardEvent } from './graph-executor.js'
 import {
   loadRunDefinition,
   type RunStorageBinding,
+  type RunStorageRecord,
 } from './run-definition.js';
 import type { StreamRevision } from '../events/envelope.js';
 
@@ -51,8 +52,10 @@ function renderMessage(message: TeamMessage): string {
   return `${escapeLineValue(message.sender)} [${escapeLineValue(message.id)}]${mentions ? ` ${mentions}` : ''}: ${escapeLineValue(message.text)}\n`;
 }
 
-function roomFilename(runId: string, roomId: string): string {
-  const digest = createHash('sha256').update(runId).update('\0').update(roomId).digest('hex');
+function roomFilename(storage: RunStorageRecord, runId: string, roomId: string): string {
+  const { name, version, configDigest } = storage.eventStore;
+  const identity = JSON.stringify([name, version, configDigest, storage.namespace, runId, roomId]);
+  const digest = createHash('sha256').update(identity).digest('hex');
   return `obversa-team-room-${digest}.txt`;
 }
 
@@ -118,7 +121,7 @@ export async function projectTeamRooms(input: {
   const rooms = compiled.definition.value.data.communication?.rooms ?? [];
   const files = rooms.map((room) => ({
     roomId: room.id,
-    path: join(directory, roomFilename(input.runId, room.id)),
+    path: join(directory, roomFilename(loaded.record.payload.definition.storage, input.runId, room.id)),
     content: state.messages
       .filter((message) => message.roomId === room.id)
       .map(renderMessage)

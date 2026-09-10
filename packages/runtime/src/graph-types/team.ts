@@ -263,14 +263,14 @@ export const teamGraphType: GraphType<
       },
       decide(state) {
         if (Object.values(state.nodes).some((node) => node.status === 'in-flight')) return [];
-        const paused = definition.nodes.find((node) => state.nodes[node.id]!.status === 'paused');
-        if (paused) return [{ kind: 'pause', reason: state.nodes[paused.id]!.pauseReason! }];
         const failed = definition.nodes.filter((node) => state.nodes[node.id]!.status === 'failed');
         if (failed.length) return [{
           kind: 'fail',
           code: 'TEAM_NODE_FAILED',
           message: `Failed team members: ${failed.map((node) => node.id).join(', ')}.`,
         }];
+        const paused = definition.nodes.find((node) => state.nodes[node.id]!.status === 'paused');
+        if (paused) return [{ kind: 'pause', reason: state.nodes[paused.id]!.pauseReason! }];
         const queued = definition.nodes.filter((node) => state.nodes[node.id]!.queued);
         const exhausted = queued.find((node) => state.nodes[node.id]!.turns >= maxTurnsPerMember);
         if (exhausted) return [{

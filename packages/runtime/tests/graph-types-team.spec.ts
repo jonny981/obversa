@@ -194,6 +194,38 @@ describe('compiled team graph', () => {
     expect(onlyDispatch(compiled.decide(state), 'writer').position).toBe('team/writer/2');
   });
 
+  it.each(['failure first', 'pause first'])('reports a failed member after active work settles with %s, including replay', (order) => {
+    const input = structuredClone(definition);
+    input.data.globalConcurrency = 2;
+    delete input.nodes[1]!.data.initialTurn;
+    const compiled = compileTeam(input);
+    const batch = compiled.decide(compiled.initialState());
+    expect(batch.map((command) => command.kind === 'dispatch' ? command.nodeId : command.kind))
+      .toEqual(['writer', 'reviewer']);
+    const [writer, reviewer] = batch as readonly DispatchGraphCommand[];
+    const dispatches = [
+      dispatched('writer', writer!.position), dispatched('reviewer', reviewer!.position),
+    ];
+    const failure: GraphEvent = { type: 'node-failed', version: 1, payload: {
+      nodeId: 'writer', position: writer!.position, code: 'ENGINE_UNAVAILABLE',
+    } };
+    const pause: GraphEvent = { type: 'node-paused', version: 1, payload: {
+      nodeId: 'reviewer', position: reviewer!.position, reason: 'Approval needed.', request: null,
+    } };
+    const settlements = order === 'failure first' ? [failure, pause] : [pause, failure];
+    let state = replay(compiled, [...dispatches, settlements[0]!]);
+    expect(compiled.decide(state)).toEqual([]);
+    state = compiled.reduce(state, settlements[1]!);
+    const reopened = compileTeam(input);
+    const replayed = replay(reopened, [...dispatches, ...settlements]);
+    expect(replayed).toEqual(state);
+    for (const commands of [compiled.decide(state), reopened.decide(replayed)]) {
+      expect(commands).toEqual([{
+        kind: 'fail', code: 'TEAM_NODE_FAILED', message: 'Failed team members: writer.',
+      }]);
+    }
+  });
+
   it.each([null, [], 'answer', {}, { summary: 1 }, { summary: 'ok', posts: null },
     { summary: 'ok', posts: {} }, { summary: 'ok', posts: [null] },
     ...[{ roomId: 1 }, { text: 1 }, { mentions: 'reviewer' }, { mentions: [1] }].map((fields) => ({

@@ -596,6 +596,52 @@ describe('team room projection', () => {
     expect(await readFile(secondPath, 'utf8')).toContain('SECOND_RUN_MESSAGE');
   });
 
+  it.each(['different namespaces', 'different event stores'])('preserves same-named runs from %s after projection and reopen', async (difference) => {
+    const root = await temporaryRoot();
+    const secondRoot = difference === 'different event stores' ? await temporaryRoot() : root;
+    const firstNamespace = 'first-namespace';
+    const secondNamespace = difference === 'different namespaces' ? 'second-namespace' : firstNamespace;
+    const first = await storedTeamRun(exchangeDefinition, {
+      root, storage: localStorage(root, firstNamespace), runId: 'shared-run',
+    });
+    const second = await storedTeamRun(exchangeDefinition, {
+      root: secondRoot, storage: localStorage(secondRoot, secondNamespace), runId: 'shared-run',
+    });
+    for (const [run, text] of [[first, 'FIRST_STREAM_MESSAGE'], [second, 'SECOND_STREAM_MESSAGE']] as const) {
+      expect((await executeWithData(run, {
+        writer: async () => ({ summary: 'Saved.', posts: [{ roomId: 'review', text, mentions: [] }] }),
+      })).kind).toBe('complete');
+    }
+    const beforeFirst = await readEvents(first.storage, first.runId);
+    const beforeSecond = await readEvents(second.storage, second.runId);
+    const directory = join(root, 'shared-room-files');
+    const firstView = await projectTeamRooms()({ storage: first.storage, runId: first.runId, directory });
+    const firstPath = fileFor(firstView, 'review');
+    const firstBytes = await readFile(firstPath);
+    const secondView = await projectTeamRooms()({ storage: second.storage, runId: second.runId, directory });
+    const secondPath = fileFor(secondView, 'review');
+    const secondBytes = await readFile(secondPath);
+
+    expect(secondPath).not.toBe(firstPath);
+    expect(await readFile(firstPath)).toEqual(firstBytes);
+    expect(firstBytes.toString('utf8')).toContain('FIRST_STREAM_MESSAGE');
+    expect(firstBytes.toString('utf8')).not.toContain('SECOND_STREAM_MESSAGE');
+    expect(secondBytes.toString('utf8')).toContain('SECOND_STREAM_MESSAGE');
+    expect(secondBytes.toString('utf8')).not.toContain('FIRST_STREAM_MESSAGE');
+
+    for (const [run, namespace, view, before] of [
+      [first, firstNamespace, firstView, beforeFirst],
+      [second, secondNamespace, secondView, beforeSecond],
+    ] as const) {
+      const reopened = localStorage(run.root, namespace);
+      expect(await projectTeamRooms()({ storage: rejectAppends(reopened), runId: run.runId, directory }))
+        .toEqual(view);
+      expect(await readEvents(reopened, run.runId)).toEqual(before);
+    }
+    expect(await readFile(firstPath)).toEqual(firstBytes);
+    expect(await readFile(secondPath)).toEqual(secondBytes);
+  });
+
   it.each([
     { name: 'a non-team graph', kind: 'dag' },
     { name: 'a team graph with the wrong type version', kind: 'team-v2' },

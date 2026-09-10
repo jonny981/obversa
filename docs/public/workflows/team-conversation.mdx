@@ -224,9 +224,10 @@ Successful execution returns a `TeamGraphResult` in the executor outcome's
 entry contains `name`, `role` and that member's last `result`. A member that
 never receives a turn has `result: null`.
 
-`TEAM_NODE_FAILED` reports a failed member. `TEAM_TURN_LIMIT` reports a
-queued member whose turn cap is exhausted. A paused member keeps the run
-paused until the host uses the executor's existing resume contract.
+After active turns settle, `TEAM_NODE_FAILED` reports any failed member,
+even when another member is paused. Without a failed member, a paused member
+keeps the run paused until the host uses the executor's existing resume
+contract. `TEAM_TURN_LIMIT` reports a queued member whose turn cap is exhausted.
 
 ## Room files
 
