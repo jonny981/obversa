@@ -89,6 +89,7 @@ for (const [stage, branch] of [
   ['F11', 'feat/transient-phase-tests'],
   ['F10', 'feat/release-1-1-0'],
   ['F14', 'feat/real-work-test-limits'],
+  ['F15', 'feat/browser-proof-budgets'],
   ['D22', 'feat/feature-delivery-example'],
   ['F16', 'feat/source-surfacer-types'],
   ['F17', 'feat/retire-lines-name'],
@@ -96,6 +97,7 @@ for (const [stage, branch] of [
   ['D23', 'feat/reader-task-docs'],
   ['D24', 'feat/forge-helper-example'],
   ['D30', 'feat/plugins-page'],
+  ['D43', 'docs/reader-first-pages'],
   ['D13', 'feat/graph-forms-v1'],
   ['D11A', 'feat/graph-forms-v1'],
   ['F0', 'feat/factory-v1'],
@@ -134,6 +136,8 @@ for (const [stage, branch] of [
   ['F11', 'feat/factory-v1'],
   ['F10', 'feat/factory-v1'],
   ['F14', 'feat/factory-v1'],
+  ['F15', 'feat/factory-v1'],
+  ['D22', 'feat/lines-v1'],
   ['D22', 'feat/graph-forms-v1'],
   ['F16', 'feat/graph-forms-v1'],
   ['F17', 'feat/graph-forms-v1'],
@@ -141,6 +145,7 @@ for (const [stage, branch] of [
   ['D23', 'feat/graph-forms-v1'],
   ['D24', 'feat/graph-forms-v1'],
   ['D30', 'feat/graph-forms-v1'],
+  ['D43', 'feat/graph-forms-v1'],
 ]) {
   test(`${stage} refuses the wrong branch ${branch}`, () => {
     const repository = createRepository({ feature: true, branch });

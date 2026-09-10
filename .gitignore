@@ -17,3 +17,6 @@ marketing/
 .agents
 .claude
 .codex
+
+# Local run records the examples write.
+.obversa/

@@ -1,68 +1,119 @@
 ---
 title: "The runtime"
-description: "The runtime runs graphs, records events, and stores the outputs and decisions your workflow needs."
+description: "One package runs your workflows, one bounded step at a time, and writes every step to a record you own."
 ---
 
-The runtime is the package that runs your workflows: `@obversa/runtime`.
-Any tool can use it through its public APIs.
 
-## Bring your own graph
+When you hand work to a team, you do not stand over each person. You say
+what the steps are, who takes each one, and you look at the log when it is
+done. The runtime is the part of Obversa that stands over the steps for you.
+It is one package, `@obversa/runtime`, and it does three things: runs the
+workflow you wrote, one bounded step at a time; writes down each step as it
+finishes; and gives every step the engines, memory and workspace you chose.
 
-Keep one runtime while choosing the shape of the work.
+## What it does for you
 
-A graph type defines what a connection means and when a node can run.
-The built-in forms cover dependency graphs, including pipelines, and
-review workflows. Your own graph types use the same public contract.
+- **Runs the shape you wrote.** A pipeline, a review loop, a panel, a
+  tournament or a graph of your own: all run through one executor. The
+  executor never decides what the work means; it decides what runs next
+  and records it.
+- **Bounds every step.** Each attempt has a budget of time and tries. An
+  overrun is a result you can read, not a hang.
+- **Keeps the record.** Every step appends an event to a file; big outputs
+  go in an artifact directory beside it, each named by the hash of its
+  bytes. That record is the run's state, and there is no other.
+- **Stays out of your tools.** The runtime imports no engine and no memory
+  adapter; your program hands it the ones you chose. It runs where your
+  repositories are, with no server and no database.
 
-Graph decisions use frozen data. The same graph definition and recorded
-events must produce the same next decision. Model calls happen in the
-nodes that the graph dispatches.
+## See it run
 
-## What the runtime provides
+The smallest example is a three-stage pipeline with no model behind it. It
+prints one report: what completed, in what order, and the digest of the
+plan it ran.
 
-- **Graphs and runs:** Definitions, stored plans, execution, pause, and
-  explicit resume.
-- **Events and artifacts:** A durable history and stored outputs identified
-  by their content hashes.
-- **Engine contracts:** A common way to call the agents that do the work;
-  engine plugins are supplied by your application.
-- **Workspace contracts:** Operations to capture, verify, lease, and fork
-  a workspace, called by your application.
-- **Callback gates and proof:** Stored questions, claims, answers, proof
-  artifacts, and decisions bound to the evidence they cover.
+From an Obversa checkout:
 
-## The application around it
+```bash
+pnpm example:pipeline
+```
 
-Your application defines Orders and connects their context, workflows,
-outputs, and evidence. It chooses the editor, terminal host, and surfaces.
+```text
+{
+  "executor": "complete",
+  "output": {
+    "nodes": {
+      "draft": {
+        "article": "ready"
+      },
+      "review": {
+        "approved": true
+      },
+      "publish": {
+        "published": true
+      }
+    }
+  },
+  "dispatches": 3,
+  "order": [
+    "draft",
+    "review",
+    "publish"
+  ],
+  "planDigest": "sha256:ebbf122994643028c5222a0afaf8d7a99a257716e00f0e255b15f315e4b862ed",
+  "bounds": {
+    "dispatches": {
+      "min": {
+        "kind": "known",
+        "value": 3
+      },
+      "max": {
+        "kind": "known",
+        "value": 3
+      }
+    },
+    "maxConcurrency": {
+      "kind": "known",
+      "value": 1
+    },
+    "maxFanOut": {
+      "kind": "known",
+      "value": 1
+    }
+  }
+}
+```
 
-The runtime imports no engine or memory adapter. Your application supplies
-those instances. It also connects callback answers to run resumption and
-decides what action to take after an approval.
+## How a run is kept honest
 
-This keeps the same runtime useful under different tools and processes.
+A run stores the workflow it was given and the plan it resolved from it:
+the engines, the permissions, the contracts. Editing the workflow file
+afterwards changes nothing about a run already started, and a fresh
+executor checks the stored plan before it runs anything. The state of a run
+is only ever rebuilt from its events, so replaying a record never calls an
+engine and never repeats finished work.
 
-## Frozen plans
+## What the runtime is not
 
-A run stores its graph definition and resolved plan, including the chosen
-engines, permissions, and contracts. Editing another definition does not
-rewrite that stored plan.
+It is a library, not a service. It runs when your program calls it and stops
+when the run ends. Restarting a killed run is a job for the supervised
+runner in the runner package, which starts a fresh worker over the same
+record; the runtime itself will happily start a new record if you ask it
+to. [How a run is recorded](/recording/how-a-run-is-recorded) says which
+layer does what.
 
-Before running work, a fresh executor checks the stored definition and the
-graph ID, kind, versions and definition hash recorded in the plan. This check does not freeze
-arbitrary node code; your application must supply the intended code when
-it resumes a run.
+## Things that catch people out
 
-## Events hold the state
+- **Frozen plans.** A run does not pick up edits to its workflow; start a
+  new run to use them.
+- **A step that died mid-flight is uncertain.** On restart it runs again
+  only if its binding says it is safe to retry; otherwise the run pauses
+  for a person. That is the safe default, and it is loud on purpose.
+- **Engines are yours to supply.** Nothing runs without an engine plugin
+  in the program; the examples use a mock so they run offline.
 
-The executor rebuilds graph state from the stored events. Folding those
-events through the graph's pure functions does not run an agent or repeat
-completed work.
+## Where to look things up
 
-After a process stops, the executor can identify an unfinished node from
-the record. The host resumes that exact position after the earlier process
-has stopped. If node code started and the saved policy does not permit a
-safe retry, the executor pauses for the host to resolve the uncertain result.
-
-See the [graph executor](/graphs/executor) for recovery rules and the
-[runtime package](/packages/runtime) for its public APIs.
+Every export, type and option is on the [runtime package](/packages/runtime)
+page. The [graph executor](/graphs/executor) page has the exact recovery
+rules.

@@ -12,6 +12,33 @@ You describe how work should move from a request to a checked result: the
 steps, who does each one, the reviews, and where a person decides. Obversa
 runs that workflow one bounded engine call at a time and records every step.
 
+before "## What a reader can do":
+
+## See it run
+
+Install the packages, then run the offline review workflow. It drafts a
+document, has a reviewer send it back once, and passes on the second
+attempt, with no model and no network.
+
+From an Obversa checkout:
+
+```bash
+pnpm example:offline
+```
+
+```text
+{
+  "status": "pass",
+  "attempts": 2,
+  "summary": "config is complete",
+  "record": "packages/runtime/.obversa/records/offline-review.jsonl"
+}
+```
+
+That output is the example's own summary; the record it wrote is a
+different file, one event per line, and the supervised runner reads it to
+restart a killed run where it stopped.
+
 ## What a reader can do
 
 - **Copy a workflow:** a complete, runnable program for real work. Start with
@@ -19,8 +46,8 @@ runs that workflow one bounded engine call at a time and records every step.
 - **Review and approve work:** panels, revisions that send work back, and
   callback gates that wait for a person. Start with
   [callback gates](/reviewing/callback-gates).
-- **Record and restart runs:** every step appends events, and a killed run
-  restarts where it stopped. Start with
+- **Record and restart runs:** every step appends events, and the
+  supervised runner restarts a killed run where it stopped. Start with
   [how a run is recorded](/recording/how-a-run-is-recorded).
 - **Drive runs from a host:** bounded workers, supervision, and surfaces. Start
   with [the runner](/driving/runner).

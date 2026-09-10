@@ -13,7 +13,7 @@ import { assertCommitRange } from './check-commit-policy.mjs';
 import { configureGitHooks } from './configure-git-hooks.mjs';
 
 const leaseRef = 'refs/obversa/stage-merge';
-const stageBranches = {
+export const stageBranches = {
   D14: 'feat/unattended-runner',
   D15: 'feat/release-v1',
   D16: 'feat/runner-hardening',
@@ -27,6 +27,7 @@ const stageBranches = {
   F11: 'feat/transient-phase-tests',
   F10: 'feat/release-1-1-0',
   F14: 'feat/real-work-test-limits',
+  F15: 'feat/browser-proof-budgets',
   D22: 'feat/feature-delivery-example',
   F16: 'feat/source-surfacer-types',
   F17: 'feat/retire-lines-name',
@@ -34,6 +35,7 @@ const stageBranches = {
   D23: 'feat/reader-task-docs',
   D24: 'feat/forge-helper-example',
   D30: 'feat/plugins-page',
+  D43: 'docs/reader-first-pages',
 };
 
 export function manageStage(args, options = {}) {
