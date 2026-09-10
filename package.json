@@ -63,7 +63,7 @@
     "stage:claim": "node scripts/stage-merge.mjs claim",
     "stage:finish": "node scripts/stage-merge.mjs finish",
     "stage:release": "node scripts/stage-merge.mjs release",
-    "verify:d1": "pnpm check:agent-instructions && pnpm build && pnpm check:boundaries && pnpm test:boundaries && pnpm check:publish && pnpm test:publish-guard && pnpm test:agent-workflow && pnpm test:commit-policy && pnpm typecheck && pnpm typecheck:ts6 && pnpm test && pnpm check:packages && pnpm check:readme-examples && pnpm docs:validate && pnpm example:packages && pnpm example:offline && pnpm example:feature && pnpm check:consumer",
+    "verify:d1": "pnpm check:agent-instructions && pnpm build && pnpm check:boundaries && pnpm test:boundaries && pnpm check:publish && pnpm test:publish-guard && pnpm test:agent-workflow && pnpm test:commit-policy && pnpm typecheck && pnpm typecheck:ts6 && pnpm test && pnpm check:packages && pnpm check:readme-examples && pnpm example:feature-team && pnpm docs:validate && pnpm example:packages && pnpm example:offline && pnpm example:feature && pnpm check:consumer",
     "verify:d2": "pnpm verify:d1 && pnpm test:graph-purity && pnpm check:graph-purity && pnpm example:graph",
     "verify:d3": "pnpm verify:d2 && pnpm example:storage",
     "verify:d4": "pnpm verify:d3 && pnpm example:attempt",

@@ -17,6 +17,9 @@ import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const root = join(dirname(fileURLToPath(import.meta.url)), '..');
+/** Languages whose blocks must come from a file that runs. A shell block is
+ *  a command, not an excerpt. */
+const EXECUTABLE = new Set(['ts', 'tsx', 'js', 'mjs']);
 const SPAN = /\/\/ README-SPAN-START (\S+)\n([\s\S]*?)\/\/ README-SPAN-END \1\n/g;
 
 function examples(dir) {
@@ -39,6 +42,21 @@ for (const file of examples(join(root, 'examples'))) {
   }
 }
 
+// The other direction, and the one that matters more. The first version of
+// this check walked the examples and asserted each marked span was in the
+// README, which says nothing about a README block that quotes nothing at all.
+// A hand-written block is exactly what this stage exists to remove, and one
+// survived that check: `kickback('implement', ...)` sat in the README as code
+// no file had ever run.
+const sources = examples(join(root, 'examples')).map((f) => readFileSync(f, 'utf8'));
+for (const [, lang, body] of readme.matchAll(/```(\w+)\n([\s\S]*?)```/g)) {
+  if (!EXECUTABLE.has(lang)) continue;
+  const quoted = body.replace(/\n$/, '');
+  if (!sources.some((s) => s.includes(quoted))) {
+    problems.push(`README: a ${lang} block appears in no example file:\n      ${quoted.split('\n')[0].slice(0, 90)}`);
+  }
+}
+
 if (spans === 0) {
   console.error('check-readme-examples: no README-SPAN markers found; the check would pass on any README');
   process.exit(1);
@@ -47,4 +65,4 @@ if (problems.length) {
   console.error('The README no longer matches the examples it quotes:\n  ' + problems.join('\n  '));
   process.exit(1);
 }
-console.log(`README quotes ${spans} example span(s) byte for byte.`);
+console.log(`README quotes ${spans} example span(s) byte for byte, and every executable block comes from a file that runs.`);

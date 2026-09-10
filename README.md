@@ -46,7 +46,7 @@ step names the stage that must fix it, so the work goes back to the stage that
 owns it rather than starting the run again.
 
 ```ts
-import { fnJob, pipeline, reviewPanel, run } from '@obversa/runtime';
+import { fnJob, pipeline, reviewPanel, run, type Outcome } from '@obversa/runtime';
 ```
 
 ```ts
@@ -74,16 +74,11 @@ export const featureDelivery = pipeline(
 );
 ```
 
-A reviewer sends work back with one call, naming the stage and the reason:
-
-```ts
-kickback('implement', 'The export is missing its header row.');
-```
 
 Run the whole thing, offline and without a model:
 
 ```bash
-pnpm example:feature
+pnpm example:feature-team
 ```
 
 ## Engines
