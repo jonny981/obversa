@@ -74,7 +74,7 @@ assert.ok(BROWSER_RENDER_TIMEOUT_MS < BROWSER_RESULTS_TIMEOUT_MS, "the in-page p
 assert.ok(DEVTOOLS_FETCH_TIMEOUT_MS < BROWSER_RENDER_CHAIN.allowance("DevTools target"), "the DevTools fetch must fit inside its target phase");
 
 function scheduleTimer(chain, phase, callback, delayMs) {
-  void chain.run(phase, () => new Promise((resolve, reject) => {
+  void chain.run(phase, () => /** @type {Promise<void>} */ (new Promise((resolve, reject) => {
     setTimeout(() => {
       try {
         callback();
@@ -83,7 +83,7 @@ function scheduleTimer(chain, phase, callback, delayMs) {
         reject(error);
       }
     }, delayMs);
-  }));
+  })));
 }
 
 const SURFACER_SERVER = new URL("../../surfacer/src/server.mjs", import.meta.url);

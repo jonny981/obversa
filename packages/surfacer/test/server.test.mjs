@@ -81,7 +81,7 @@ function boundedSocket(operation) {
 }
 
 function scheduleTimer(callback, delayMs) {
-  void SURFACER_GENERAL_CHAIN.run("timer", () => new Promise((resolve, reject) => {
+  void SURFACER_GENERAL_CHAIN.run("timer", () => /** @type {Promise<void>} */ (new Promise((resolve, reject) => {
     setTimeout(() => {
       try {
         callback();
@@ -90,7 +90,7 @@ function scheduleTimer(callback, delayMs) {
         reject(error);
       }
     }, delayMs);
-  }));
+  })));
 }
 
 function tokenOf(surface) {
