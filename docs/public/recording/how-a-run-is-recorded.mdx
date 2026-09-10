@@ -1,0 +1,70 @@
+---
+title: "How a run is recorded"
+description: "Every step appends events to a file as it happens, and the supervised runner reads that record to restart a killed run where it stopped."
+---
+
+A run leaves a record as it works: a file of events and a directory of
+artifacts. This page says what each holds, and which layer uses them to
+restart a run that was killed.
+
+## What a record looks like
+
+Run the offline review workflow, then open the file it wrote. The report
+names the file, relative to where you ran the command, so the path can be
+copied straight out of it. Each line is one event, in the
+order it happened.
+
+From an Obversa checkout:
+
+```bash
+pnpm example:offline
+head -n 8 packages/runtime/.obversa/records/offline-review.jsonl
+```
+
+```text
+{"kind":"loop:start","ts":1789044650084,"path":["write-config"],"depth":1,"max":4}
+{"kind":"loop:iteration","ts":1789044650084,"path":["write-config"],"iteration":1}
+{"kind":"job:start","ts":1789044650084,"path":["write-config"],"label":"author"}
+{"kind":"job:end","ts":1789044650084,"path":["write-config"],"label":"author","outcome":{"status":"pass","summary":"wrote the base config"}}
+{"kind":"loop:condition","ts":1789044650084,"path":["write-config"],"which":"until","iteration":1,"result":{"met":true,"reason":"a draft exists: true"}}
+{"kind":"job:start","ts":1789044650084,"path":["write-config"],"label":"review"}
+{"kind":"job:end","ts":1789044650084,"path":["write-config"],"label":"review","outcome":{"status":"fail","summary":"Missing a request timeout.","revision":{"reason":"Missing a request timeout.","findings":[{"reviewer":"correctness","evidence":"No timeout set; a hung upstream call blocks forever."}]}}}
+{"kind":"loop:review","ts":1789044650084,"path":["write-config"],"outcome":{"status":"fail","summary":"Missing a request timeout.","revision":{"reason":"Missing a request timeout.","findings":[{"reviewer":"correctness","evidence":"No timeout set; a hung upstream call blocks forever."}]}},"accepted":true}
+```
+
+A node started, an engine call returned, a review sent the draft back, a
+node completed: nothing in those lines is a summary. They are the run.
+
+## One event per step, appended as it happens
+
+Every step a run takes is one event, appended to the file the moment the
+step finishes: a node started, an engine call returned, a review sent work
+back, a gate opened. An event that has landed is never rewritten, so a later
+step cannot change what an earlier one recorded.
+
+## Why events and artifacts are the whole record
+
+A reader with the event file can replay the run to any point, because every
+decision, outcome and engine call is in it. Anything too large for an event,
+a diff, a test log, a proof, sits in the artifact directory, and the event
+that produced it cites the file and its digest. There is no second state to
+keep in step, because there is no second state.
+
+## Which layer restarts a killed run
+
+The runner package's supervised run does. It starts a run in a bounded
+worker, and when the worker dies it starts another against the same record;
+the new worker reads the record and carries on. Steps that finished are
+never repeated. A step that was mid-flight when the worker died runs again
+only if its binding declares it safe to retry; otherwise the run pauses and
+asks a person to reconcile it before it continues, so uncertain work is
+never repeated silently. See [the runner](/driving/runner).
+
+A plain `run()` from the runtime package does not restart anything: it opens
+a fresh record each time it starts, so the examples that call it show the
+shape of a team, not a restart. The restart is the runner's job.
+
+## Why there is nothing to install beside it
+
+The record is a file and a directory the runtime already writes. Reading
+them, and restarting from them, needs no database and no server.

@@ -1,62 +1,90 @@
 ---
 title: "Orders"
-description: "An Order is the change you want, with the context and evidence needed to finish it."
+description: "An order is the change you want made: the ticket, with what the team needs to finish it."
 ---
 
-An Order is the change that you want. It might be a landing page redesign,
-a passkey feature, or a check of conversion data.
 
-## You set the scope
+Someone asks for a change: a passkey login, a report export with a header
+row, a landing page redesign. On a team that is a ticket, and the ticket
+carries what the person doing the work needs: what is wanted, why, the
+designs, the constraints, and what "done" looks like. An order is that
+ticket. A workflow is what the team does with it.
 
-You decide what one Order contains. It can be a small fix or a feature that
-touches several repositories. Order is the name for that piece of work;
-your application decides how to store it and connect it to runtime runs.
+## What the runtime does with an order
 
-Keep the change small enough to follow from request to result. One Order
-can move through its workflow without waiting for a batch of other changes.
-That gives you a short path to feedback and less unfinished work to track.
+Nothing, on purpose. The runtime runs workflows and records what they do;
+it has no order type, no ticket store and no opinion about where your
+tickets live. Your application decides what an order contains, where it is
+kept, and which workflow runs on it. That keeps Linear, GitHub, a document
+or a text file all equally good places for an order to come from.
 
-## The life of an Order
+## One order, as the feature example carries it
 
-1. **Describe the change.** Supply requirements, designs, and constraints.
-2. **Run the workflow.** Its nodes implement and check the work.
-3. **Answer at gates.** A callback gate can hold work for a decision.
-4. **Keep the evidence.** Save the checks, outputs, and review decisions.
-5. **Close the Order.** Confirm that the result meets the requirements.
+The feature delivery workflow delivers one order: a short request a host
+would read from an issue tracker. This is the order, as the example file
+holds it; the analyse stage turns it into accepted criteria before any code
+runs, and everything after works against those.
 
-These are the responsibilities of the process you build. The runtime
-supplies the graph execution and records that process can use.
+```ts
+// The request this workflow delivers. A host reads it from an issue tracker; the
+// stages below see it only through the criteria the analyse stage accepts.
+const ISSUE =
+  'The checkout client must retry a failed request, must cap how many ' +
+  'times it retries, and must stop retrying when the caller aborts.';
+```
 
-## An Order's route
+From an Obversa checkout:
 
-A route is the list of workflows an Order must pass through. For a payment
-feature, that might be implementation, security review, and release.
+```bash
+pnpm example:feature
+```
 
-The route tells you what must happen. Dependencies tell you the order.
-Your application can express those dependencies in a graph and start the
-workflows through its nodes. Independent nodes can run together within the
-graph's concurrency limits.
+```text
+{
+  "status": "pass",
+  "implementRuns": 2,
+  "reviewRounds": 2,
+  "acceptedKickbacks": 1
+}
+```
 
-You decide when the required workflows and their evidence are enough to
-close the Order.
+## What travels with one
 
-## What travels with an Order
+Four things, and the record links them so a reader can understand a result
+without reading an agent's conversation:
 
-- **Context:** The requirements, designs, and constraints for the work.
-- **Workflow:** The definition of the steps that carry it out.
-- **Output:** The files and artifacts made or changed.
-- **Evidence:** The checks and decisions used to accept the output.
+- **Context.** The requirements, designs and constraints the work needs.
+- **The workflow.** The steps that carry it out, as code.
+- **The output.** The files and artifacts the work made or changed.
+- **The evidence.** The checks, reviews and decisions that accepted the
+  output, each bound to the exact bytes it judged.
 
-Keep these records linked in your application so someone can understand
-the result without reading an agent's conversation.
+## One order at a time
 
-## The workspace
+Keep an order small enough to follow from request to result. One order
+moves through its workflow without waiting for others, gets its reviews
+and its human decisions on the way, and closes when its evidence says the
+requirements are met. A large piece of work is several orders, each with a
+short path to feedback.
 
-The [cmux setup](/hosts/cmux) can open one editor workspace with two roots:
-a Project worktree for the source and a Shared worktree for reusable context
-and workflows. You supply both roots; the command opens them together.
+## An order's route
 
-For code that needs to create an isolated worktree, the runtime's
-[workspace provider](/workspace/contract) can capture, verify, lease, and
-fork one Git repository. Your application connects those operations to the
-Order and its runs.
+Some orders need more than one workflow: a payment feature might pass
+through implementation, a security review and a release. The route is that
+list. Your application expresses it as a graph whose nodes start the
+workflows, so the dependencies decide the order and independent workflows
+run together.
+
+## Where the work happens
+
+An order's workflow can run in its own copy of the repository, so two
+writers never collide. The runtime's [workspace contract](/workspace/contract)
+captures, verifies, leases and forks one Git repository for that; the
+[cmux host](/hosts/cmux) opens the order's project worktree beside a shared
+one for reusable context.
+
+## Read next
+
+[Workflows](/concepts/workflows) for the shape the order moves through, and
+[the workflow bank](/workflows) for complete programs that take one from
+request to result.

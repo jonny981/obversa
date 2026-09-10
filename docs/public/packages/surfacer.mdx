@@ -1,11 +1,29 @@
 ---
-title: "The Surfacer"
-description: "@obversa/surfacer runs one secure local surface session and returns one opaque result to its caller."
+title: "Surfacer reference"
+description: "The exact session, handoff, client kit, launcher and placement rules of @obversa/surfacer, for hosts and pages that must interoperate with one."
 ---
+
+This is the reference for `@obversa/surfacer`. To learn what a surface is and run one, read [surfaces](/concepts/surfaces); come here for the exact rules.
 
 A surface is a small user interface for one decision. The Surfacer is
 the package that runs it: one loopback server, one single-decision session, one
 result. It owns no callback state, no routing, and no run records.
+
+## The framed result
+
+Everything on this page ends in one framed result on the launcher's stdout.
+This is the real one from a run of `packages/surfacer/examples/hello-surface.mjs`
+in which the page's Yes button was clicked:
+
+```text
+<<<HELLO_SURFACE_RESULT_V1>>>
+{"schemaVersion":1,"app":"hello-surface","surface":null,"status":"completed","operationId":"a4bad94c-7192-45e2-98e3-30e4faa7cc4c","createdAt":"2026-09-10T12:14:13.659Z","payload":{"value":true},"detail":null}
+<<<END_HELLO_SURFACE_RESULT_V1>>>
+```
+
+The frame lines bound the JSON so a caller can find it in mixed output;
+`status` is one of the terminal statuses below, `payload` is the completed
+value after redaction, and `operationId` is the id the browser acknowledged.
 
 ## The session
 

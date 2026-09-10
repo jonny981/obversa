@@ -1,52 +1,103 @@
 ---
 title: "What Obversa is"
-description: "Build your own workflows around the tools you use and the agents you run."
+description: "Give your agents the shape of a real team: named roles, reviews that send work back, and a person to answer to."
 ---
 
-Obversa is a process runtime for software teams.
 
-You describe how work should move from a request to a checked result. Obversa
-runs that workflow and records what happened. You keep your editor, terminal,
-and agents.
+Think about how a change gets made on a good team. Someone writes it.
+Someone else reads it, and if it is wrong, sends it back to the person who
+wrote it with a note saying what to fix. A hard call gets a second opinion.
+The big decisions go to a person who can say no. And when a laptop dies
+halfway through, nobody starts the week again, because the work so far is
+written down.
 
-## The model in five sentences
+Obversa lets you run your agents that way. You describe the work as steps,
+say who does each one, where the reviews are, and where a person decides.
+Obversa runs it, one bounded engine call at a time, and writes down every
+step as it happens. Run it under the supervised runner, kill it, start it
+again, and it carries on from the record with nothing already finished
+done twice.
 
-An **Order** is the change that you want.
+## Why it exists
 
-A **workflow** takes the Order through nodes, the steps that do the work.
+Agent frameworks give you one clever session; when it dies, it starts over.
+Workflow engines give you durable steps and a server to run them on. Neither
+gives you a team: named roles, a review that returns work to whoever owns
+it, a vote when one opinion is not enough, and a person the run waits for.
+That is the layer Obversa owns, and it sits on the tools you already use.
 
-A **callback gate** asks for a structured answer before work continues.
+## What you can do with it
 
-**Evidence** records the checks and decisions you use to judge the result.
+- **Give work a shape.** A pipeline, a review loop, a panel of reviewers,
+  a tournament of candidates, or a graph of your own. Each is one call in
+  TypeScript, not a diagram you draw.
+- **Send work back, not around.** A reviewer that fails a step names the
+  stage that must fix it. The work goes back there with the findings, and
+  the steps that depend on it run again.
+- **Ask for a second opinion that is really a second opinion.** A review
+  seat can be required to run on a different provider or model family from
+  the writer, so one model cannot approve its own work.
+- **Stop for a person.** A callback gate pauses the run, puts one decision
+  in front of someone, and carries on from that exact step with the answer.
+- **Use the engines you have.** Claude, Codex, Grok, OpenCode, an SDK, an
+  API, or one you write. Swap them without touching the workflow.
+- **Keep your own tools.** Your editor, your terminal, your repositories.
+  No server, no database, nothing to stand up before the first run.
 
-The **runtime** runs the graphs and stores their events and artifacts.
+## See one run
 
-## Your tools stay yours
+The offline review workflow drafts a document, has a reviewer fail it and
+send it back with a note, drafts again, and passes. It uses a mock engine,
+so it runs with no model and no network, in a few seconds.
 
-Your editor holds the code. Your terminal host supplies the panes, layout,
-and keybindings. Obversa is a guest in those tools.
+From an Obversa checkout:
 
-Engine plugins connect the runtime to agents and model services. You choose
-the plugins and credentials for your workflow. A local review surface gives
-you a place to inspect a diff and return comments.
+```bash
+pnpm example:offline
+```
 
-The runtime runs on your computer with your repositories. An engine plugin
-can call an external model service.
+```text
+{
+  "status": "pass",
+  "attempts": 2,
+  "summary": "config is complete",
+  "record": "packages/runtime/.obversa/records/offline-review.jsonl"
+}
+```
 
-## You choose the process
+That output is the example's own summary. The record is a different file,
+one event per line, that the run wrote as it went; the report names it, and
+you can open it. The [first run](/get-started/first-run) page walks
+through it; the [workflow bank](/workflows) has the complete programs to
+copy.
 
-A small fix and a large feature need different work. You define the steps,
-dependencies, checks, and decisions that fit each one. The workflow bank
-gives you runnable examples to copy and change.
+## The words you will meet
 
-Physical production can need batches to justify changing tools. Software
-work can move one change at a time. You can follow an Order from request to
-result, with feedback along the way.
+Four words carry most of the docs, and each has a page:
 
-## Read next
+- A **workflow** is the shape of the work: the steps and what depends on
+  what. [Workflows](/concepts/workflows).
+- An **order** is the change you want made; the workflow works on it.
+  [Orders](/concepts/orders).
+- A **review** is a step that judges another step's result and can send it
+  back. [Reviews](/reviewing/callback-gates).
+- The **record** is the file of events a run writes as it goes, and what
+  the supervised runner reads to restart a killed run where it stopped.
+  [How a run is recorded](/recording/how-a-run-is-recorded).
 
-- **[Orders](/concepts/orders):** Define the change you want.
-- **[Workflows](/concepts/workflows):** Describe how the work moves.
-- **[Callback gates](/concepts/callback-gates):** Ask for a decision.
-- **[Surfaces](/concepts/surfaces):** Give a person a place to answer.
-- **[The runtime](/concepts/runtime):** Run the graph and keep its record.
+## Things to know before you start
+
+- **It is a library, not a service.** You write a TypeScript file and run
+  it with Node. There is no daemon and no dashboard to sign into.
+- **The mock engine is for the shape, not the work.** Every example runs
+  offline so you can see the mechanics; a real engine plugin makes it do
+  real work, and that is one line to change.
+- **A plain run does not resume.** Resume belongs to the supervised runner;
+  the [recording](/recording/how-a-run-is-recorded) page says which layer
+  does what, so you are not surprised by it.
+
+## Where to go next
+
+Install it and run the first example in five minutes:
+[get started](/get-started/installation). The [README](https://github.com/jonny981/obversa)
+has the same story in one screen.

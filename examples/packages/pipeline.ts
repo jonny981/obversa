@@ -152,7 +152,7 @@ try {
     order,
     planDigest: plan.digest,
     bounds: plan.plan.bounds,
-  }));
+  }, null, 2));
 } finally {
   await rm(temporaryRoot, { recursive: true, force: true });
 }

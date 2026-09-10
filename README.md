@@ -1,29 +1,120 @@
-# Obversa
+<p align="center">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="docs/public/logo-dark.svg">
+    <img src="docs/public/logo-light.svg" alt="Obversa" width="280">
+  </picture>
+</p>
 
-A process runtime for software teams.
+<p align="center">
+  <strong>Model real teamwork.</strong>
+</p>
 
-Status: In build. Public docs in `docs/public/`.
+<p align="center">
+  <img src="https://img.shields.io/badge/license-MIT-blue" alt="license: MIT">
+  <img src="https://img.shields.io/badge/node-%3E%3D22.12-3c873a" alt="node >=22.12">
+  <img src="https://img.shields.io/badge/TypeScript-strict-3178c6" alt="TypeScript strict">
+</p>
 
-This workspace contains fourteen publishable packages, including six engine plugins:
+Agent frameworks give you one clever session. When it dies, it starts over.
+Workflow engines give you durable steps and a server to run them on. Neither
+gives you a team: named roles, a review that returns work to whoever owns it, a
+vote when one opinion is not enough, and a person to answer to.
 
-- `@obversa/runtime` provides a runtime API and a pure contract for outside graph types.
-- `@obversa/runner` supervises stored graph runs in bounded workers.
-- `@obversa/memory` defines a small memory contract.
-- `@obversa/memory-simple` stores memory in one process.
-- `@obversa/memory-git` stores memory in private Git references.
-- `@obversa/surfacer` runs one secure local surface session: one loopback server, one opaque result, host-native placement.
-- `@obversa/engine` defines the engine contract: one bounded call, typed failures, and structured results.
-- `@obversa/source` is the review surface: it opens a git diff for inline review and returns the annotations.
+That is the layer Obversa owns. You describe the work the way you would describe
+it to people, and the runtime runs it one bounded engine call at a time.
 
-The `plugins/` directory holds the engine adapters (Claude CLI, Codex, Grok CLI, Anthropic API, Agent SDK, OpenCode CLI) and the memory adapters (in-process and Git).
+Every step appends events to a file on disk, with its artifacts beside them.
+That record is the whole story: no server, no database.
 
-`@obversa/runtime` is the runtime. A process is a complete program that
-composes runtime jobs, graph forms, policies, and adapters.
+`@obversa/runner` supervises a run in its own worker. After a crash it starts
+a fresh worker that reads the record and carries on. Steps that finished are
+never repeated. A step that was mid-flight when the worker died runs again
+only if its binding declares it safe to retry; otherwise the run pauses and
+asks a person to reconcile it before it continues, so uncertain work is never
+repeated silently. That is a separate layer with its own call, not something
+a plain `run()` does by itself, and
+[the runner's page](https://docs.obversa.ai/packages/runner) has it.
 
-Two workstreams run in parallel. Workstream 1 builds `@obversa/runtime` in
-`packages/runtime`. Workstream 2 builds host glue in `hosts/`, then the Surfacer
-and review surfaces. Full Obversa implementation starts after the runtime
-reaches version 1.0.0.
+```bash
+npm install @obversa/runtime   # Node >= 22.12
+```
+
+## A feature, as one file
+
+Five named stages. The review is a panel of three, and the panel names the
+stage that must fix the work, so a failed review goes back to the stage that
+owns it rather than starting the run again.
+
+```ts
+import { fnJob, pipeline, reviewPanel, run, type Outcome } from '@obversa/runtime';
+```
+
+```ts
+const review = reviewPanel({
+  label: 'review',
+  reviewers: [
+    { name: 'correctness', job: checks.correctness },
+    { name: 'safety', job: checks.safety },
+    { name: 'scope', job: checks.scope },
+  ],
+  pass: 2, // two of three agree and the step passes
+  target: 'implement', // a failing panel sends the work back here
+});
+
+export const featureDelivery = pipeline(
+  'feature-delivery',
+  [
+    { name: 'analyse', job: analyse },
+    { name: 'implement', job: implement },
+    { name: 'test', job: testStage },
+    { name: 'review', job: review },
+    { name: 'approve', job: approve },
+  ],
+  { maxKickbacks: 2 },
+);
+```
+
+
+Run the whole thing, offline and without a model:
+
+```bash
+pnpm example:feature-team
+```
+
+## Engines
+
+An engine binding names the adapter, the provider, the model family and the
+model. A review seat can be required to differ from the writer, so the model
+that wrote the work is not the model that grades it.
+
+| package | drives | needs |
+| --- | --- | --- |
+| `@obversa/engine-claude-cli` | the Claude CLI, one process per attempt | Claude CLI, host auth |
+| `@obversa/engine-codex` | the Codex CLI | Codex CLI, host auth |
+| `@obversa/engine-grok-cli` | the Grok CLI | Grok CLI 1.0.5 |
+| `@obversa/engine-opencode-cli` | the OpenCode CLI | OpenCode CLI 1.18.23 |
+| `@obversa/engine-anthropic-api` | the Anthropic API | an API key |
+| `@obversa/engine-agent-sdk` | the Claude Agent SDK | host Claude auth |
+
+Write your own against the engine contract; it must pass the conformance kit.
+
+## Where to go
+
+- **Site:** [obversa.ai](https://obversa.ai)
+- **Docs:** [docs.obversa.ai](https://docs.obversa.ai)
+- **Your first run:** [get started](https://docs.obversa.ai/get-started/first-run)
+- **Contributing:** [AGENTS.md](AGENTS.md)
+
+## What is in this repository
+
+Fourteen publishable packages. `packages/` holds the six that define the
+product: `@obversa/runtime` is the runtime and its public contract,
+`@obversa/runner` supervises stored runs, `@obversa/engine` and `@obversa/memory`
+are the engine and memory contracts, and `@obversa/surfacer` and
+`@obversa/source` are the local review surface. `plugins/` holds the eight
+adapters: the six engines above and two memories, one in process and one in
+private Git references. `hosts/` holds the terminal host, which is not
+published.
 
 ## Requirements
 
@@ -43,7 +134,7 @@ pnpm build
 The install activates this repository's commit hooks for the checkout. See
 [AGENTS.md](AGENTS.md) for what the hooks need before your first commit.
 
-## Run the offline process
+## Run the offline workflow
 
 The first example uses deterministic function jobs. It does not use a model or
 network service.
@@ -55,7 +146,7 @@ pnpm example:offline
 The full form, if the shortcut is not available:
 
 ```bash
-pnpm --filter @obversa/runtime exec tsx ../../examples/production-lines/offline-review.line.ts
+pnpm --filter @obversa/runtime exec tsx ../../examples/workflows/offline-review.workflow.ts
 ```
 
 Expected result:
@@ -104,7 +195,7 @@ The example writes one large synthetic artifact, appends one small reference,
 reopens the stores through a fresh binding, folds the same state, and runs the
 event-store and artifact-store conformance kits.
 
-Read [Events and artifacts](docs/public/storage/events-and-artifacts.mdx) for
+Read [Events and artifacts](docs/public/recording/events-and-artifacts.mdx) for
 the storage contract, limits, secret handling, conflict behavior, and integrity
 checks. This storage layer does not execute graph work or recover a stopped
 run.
@@ -120,14 +211,15 @@ fixture files.
 pnpm example:attempt
 ```
 
-Read [Safe node attempts](docs/public/runtime/node-attempts.mdx) for result
+Read [Safe node attempts](docs/public/recording/node-attempts.mdx) for result
 parts, declared capabilities, workspace access, fallback, and cleanup limits.
 
 ## Documentation
 
 The public documentation is in [`docs/public`](docs/public). It includes the
-first-run guide, the memory contract, graph and storage guides, the process
-bank, [cmux host setup](docs/public/hosts/cmux.mdx), and
+first-run guide, the memory contract, the guides to writing a workflow shape
+and to what a run records, the workflow bank,
+[cmux host setup](docs/public/hosts/cmux.mdx), and
 [reviewing a diff in a host pane](docs/public/hosts/review.mdx).
 
 Validate the documentation from the workspace root:

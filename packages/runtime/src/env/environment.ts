@@ -5,10 +5,10 @@
  * running thing, so "done" can mean "the e2e suite passes against the running
  * preview", not just "unit tests pass against static files on disk".
  *
- * Like `Engine`, this is only an interface. Lines owns the interface and the
+ * Like `Engine`, this is only an interface. The runtime owns the interface and the
  * lifecycle binding; the actual adapter (sst, Vercel, Docker, …) is
  * provider-specific and lives in the consumer's loop definition, next to the
- * deploy config it wraps. Lines never takes a dependency on a deploy tool.
+ * deploy config it wraps. The runtime never takes a dependency on a deploy tool.
  * Implement `up`, return a handle:
  *
  *   const sstEnv: Environment = {

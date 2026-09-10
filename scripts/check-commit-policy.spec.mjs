@@ -26,7 +26,7 @@ function run(command, args, cwd, expectedStatus = 0, env = {}) {
   return result.stdout.trim();
 }
 
-function createSignedHistory({ unsignedBetweenLinesAndRuntime = false } = {}) {
+function createSignedHistory({ unsignedBeforeRuntimeRename = false } = {}) {
   const directory = mkdtempSync(join(tmpdir(), 'obversa-commit-policy-'));
   const repository = join(directory, 'repository');
   const signingKey = join(directory, 'signing-key');
@@ -75,7 +75,7 @@ function createSignedHistory({ unsignedBetweenLinesAndRuntime = false } = {}) {
     boundaryEnvironment,
   );
 
-  if (unsignedBetweenLinesAndRuntime) {
+  if (unsignedBeforeRuntimeRename) {
     run(
       'git',
       ['commit', '--allow-empty', '--quiet', '--no-gpg-sign', '-m', 'fix(lines): expose skipped history'],
@@ -163,7 +163,7 @@ test('accepts initial-history mode without a value', () => {
   assert.throws(() => parsePolicyArgs(['--initial-history', 'HEAD']));
 });
 
-test('initial history ignores noncompliant unsigned commits before Lines', () => {
+test('initial history ignores noncompliant unsigned commits before the runtime rename', () => {
   const fixture = createSignedHistory();
   try {
     assert.equal(typeof commitPolicy.assertInitialHistory, 'function');
@@ -178,7 +178,7 @@ test('initial history ignores noncompliant unsigned commits before Lines', () =>
   }
 });
 
-test('initial history rejects an unsigned commit after Lines', () => {
+test('initial history rejects an unsigned commit after the runtime rename', () => {
   const fixture = createSignedHistory();
   try {
     run(
@@ -202,8 +202,8 @@ test('initial history rejects an unsigned commit after Lines', () => {
   }
 });
 
-test('initial history follows the Lines package through its runtime rename', () => {
-  const fixture = createSignedHistory({ unsignedBetweenLinesAndRuntime: true });
+test('initial history follows the runtime package through its rename', () => {
+  const fixture = createSignedHistory({ unsignedBeforeRuntimeRename: true });
   try {
     assert.throws(
       () =>

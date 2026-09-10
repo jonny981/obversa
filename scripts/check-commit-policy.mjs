@@ -237,7 +237,7 @@ export function assertInitialHistory(options = {}) {
   const legacyCount = history.length - commits.length;
   console.log(
     `Initial-history policy passed for ${commits.length} commit(s) from ${boundary.slice(0, 12)}; ` +
-      `ignored ${legacyCount} pre-Lines legacy commit(s).`,
+      `ignored ${legacyCount} pre-runtime legacy commit(s).`,
   );
 }
 

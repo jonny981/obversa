@@ -62,7 +62,7 @@ test('allows a commit from an isolated feature branch', () => {
   const result = runNode(checkBranch, [], feature);
 
   assert.equal(result.status, 0, result.stderr);
-  assert.match(result.stdout, /feat\/lines-v1/);
+  assert.match(result.stdout, /feat\/graph-forms-v1/);
 });
 
 test('a workstream cannot claim the other workstream stage family', () => {
@@ -71,7 +71,7 @@ test('a workstream cannot claim the other workstream stage family', () => {
   const result = runStage('claim', 'D2', repository.feature);
 
   assert.notEqual(result.status, 0);
-  assert.match(result.stderr, /D2 belongs to feat\/lines-v1/);
+  assert.match(result.stderr, /D2 belongs to feat\/graph-forms-v1/);
   assert.equal(existsSync(stageLock(repository)), false);
 });
 
@@ -90,9 +90,17 @@ for (const [stage, branch] of [
   ['F11', 'feat/transient-phase-tests'],
   ['F10', 'feat/release-1-1-0'],
   ['F14', 'feat/real-work-test-limits'],
+  ['F15', 'feat/browser-proof-budgets'],
   ['D22', 'feat/feature-delivery-example'],
-  ['D13', 'feat/lines-v1'],
-  ['D11A', 'feat/lines-v1'],
+  ['F16', 'feat/source-surfacer-types'],
+  ['F17', 'feat/retire-lines-name'],
+  ['D34', 'docs/retire-old-positioning'],
+  ['D23', 'feat/reader-task-docs'],
+  ['D24', 'feat/forge-helper-example'],
+  ['D30', 'feat/plugins-page'],
+  ['D43', 'docs/reader-first-pages'],
+  ['D13', 'feat/graph-forms-v1'],
+  ['D11A', 'feat/graph-forms-v1'],
   ['F0', 'feat/factory-v1'],
   ['F2b', 'feat/factory-v1'],
 ]) {
@@ -114,15 +122,15 @@ for (const [stage, branch] of [
 }
 
 for (const [stage, branch] of [
-  ['D14', 'feat/lines-v1'],
+  ['D14', 'feat/graph-forms-v1'],
   ['D14', 'feat/release-v1'],
-  ['D15', 'feat/lines-v1'],
+  ['D15', 'feat/graph-forms-v1'],
   ['D15', 'feat/unattended-runner'],
-  ['D16', 'feat/lines-v1'],
-  ['D18', 'feat/lines-v1'],
-  ['D19', 'feat/lines-v1'],
-  ['D21', 'feat/lines-v1'],
-  ['D28', 'feat/lines-v1'],
+  ['D16', 'feat/graph-forms-v1'],
+  ['D18', 'feat/graph-forms-v1'],
+  ['D19', 'feat/graph-forms-v1'],
+  ['D21', 'feat/graph-forms-v1'],
+  ['D28', 'feat/graph-forms-v1'],
   ['F4', 'feat/factory-v1'],
   ['F5', 'feat/factory-v1'],
   ['F7', 'feat/factory-v1'],
@@ -130,7 +138,16 @@ for (const [stage, branch] of [
   ['F11', 'feat/factory-v1'],
   ['F10', 'feat/factory-v1'],
   ['F14', 'feat/factory-v1'],
+  ['F15', 'feat/factory-v1'],
   ['D22', 'feat/lines-v1'],
+  ['D22', 'feat/graph-forms-v1'],
+  ['F16', 'feat/graph-forms-v1'],
+  ['F17', 'feat/graph-forms-v1'],
+  ['D34', 'feat/graph-forms-v1'],
+  ['D23', 'feat/graph-forms-v1'],
+  ['D24', 'feat/graph-forms-v1'],
+  ['D30', 'feat/graph-forms-v1'],
+  ['D43', 'feat/graph-forms-v1'],
 ]) {
   test(`${stage} refuses the wrong branch ${branch}`, () => {
     const repository = createRepository({ feature: true, branch });
@@ -249,7 +266,7 @@ test('claiming a stage stores a complete versioned owner without a machine path'
   assert.match(owner.acquisitionToken, /^[0-9a-f-]{36}$/);
   assert.deepEqual({ ...owner, acquisitionToken: '<token>' }, {
     acquisitionToken: '<token>',
-    branch: 'feat/lines-v1',
+    branch: 'feat/graph-forms-v1',
     mainHead,
     stage: 'D1',
     version: 1,
@@ -407,7 +424,7 @@ test('two parallel claims produce one complete owner record', async () => {
   assert.equal(results.some((result) => /another stage merge is active/.test(result.stderr)), true);
   const { owner } = readStageLease(repository);
   assert.equal(owner.stage, 'D1');
-  assert.equal(owner.branch, 'feat/lines-v1');
+  assert.equal(owner.branch, 'feat/graph-forms-v1');
 });
 
 test('finishing supports a complete legacy directory claim', () => {
@@ -416,7 +433,7 @@ test('finishing supports a complete legacy directory claim', () => {
   const lock = stageLock(repository);
   mkdirSync(lock);
   writeFileSync(join(lock, 'owner.json'), `${JSON.stringify({
-    branch: 'feat/lines-v1',
+    branch: 'feat/graph-forms-v1',
     mainHead: git(repository.main, 'rev-parse', 'HEAD').stdout.trim(),
     stage: 'D1',
     worktree: git(repository.feature, 'rev-parse', '--show-toplevel').stdout.trim(),
@@ -502,7 +519,7 @@ test('a delayed release cannot delete a replacement lease', () => {
   assert.equal(readStageLease(repository).owner.stage, 'F0');
 });
 
-function createRepository({ feature = false, instructions, branch = 'feat/lines-v1' } = {}) {
+function createRepository({ feature = false, instructions, branch = 'feat/graph-forms-v1' } = {}) {
   const directory = mkdtempSync(join(tmpdir(), 'obversa-agent-workflow-'));
   temporaryDirectories.push(directory);
   const main = join(directory, 'main');

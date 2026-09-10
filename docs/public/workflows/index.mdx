@@ -3,21 +3,27 @@ title: "Workflow bank"
 description: "Copy complete runtime programs that use only public package exports."
 ---
 
-A process is a complete program. It composes jobs, graph forms,
-policies, and adapters from public package exports.
+A workflow is a complete, runnable program: the steps, the reviews, the
+limits and the adapters, built from public package exports and nothing
+else. Copy one, change the parts that name your team, and run it.
 
 Each example states its inputs, outputs, permissions, limits, and evidence.
 Each example also states its failure and safe-retry behavior.
 
-The first example is [Offline review and revision](/production-lines/offline-review).
+The first example is [Offline review and revision](/workflows/offline-review).
 It shows a review sending work back once, then passing the corrected result.
 It finishes without a model or network service.
 
-[Safe file changes](/production-lines/safe-change) captures complete source
+[Safe file changes](/workflows/safe-change) captures complete source
 records, checks approval for exact output bytes, and backs up each target
 before a file merge. It reads each result back and pauses on a mismatch.
 
-[Feature delivery](/production-lines/feature-delivery) takes one written
+[Feature delivery](/workflows/feature-delivery) takes one written
 issue through analysis, implementation, a real test run, a review panel, a
 bounded repair, and an approval bound to the exact bytes. It also finishes
 without a model or network service.
+
+[Forge helper](/workflows/forge-helper) ships a reviewed change
+through a code host such as GitHub. It pushes the branch, opens one pull
+request, passes a strict gate on the exact head revision, squashes the
+merge, and deletes the branch. It runs offline against a mock host.

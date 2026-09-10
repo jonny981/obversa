@@ -60,7 +60,7 @@ const STEP_FINISH_REASONS = new Set([
   'unknown',
 ]);
 const BASE_SYSTEM_PROMPT =
-  'Execute one isolated Lines node attempt. Follow only this system prompt and the user prompt. Use only the declared tools and permissions.';
+  'Execute one isolated Obversa node attempt. Follow only this system prompt and the user prompt. Use only the declared tools and permissions.';
 const STRUCTURED_RESULT_INSTRUCTION = [
   'Your final answer must be one completed text part beginning with exactly:',
   'OBVERSA_STRUCTURED_RESULT_V1',
@@ -633,7 +633,7 @@ export function buildOpenCodeInvocation(
     (request as AgentRequest & { readonly memory?: unknown }).memory !==
     undefined
   ) {
-    throw new TypeError('OpenCode CLI does not bridge Lines memory');
+    throw new TypeError('OpenCode CLI does not bridge Obversa memory');
   }
   if (request.env !== undefined && Object.keys(request.env).length > 0) {
     throw new TypeError(

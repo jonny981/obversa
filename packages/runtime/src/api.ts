@@ -1,4 +1,4 @@
-/** Public programmatic API for the Lines graph runtime. */
+/** Public programmatic API for the Obversa graph runtime. */
 
 export type {
   JsonPrimitive,

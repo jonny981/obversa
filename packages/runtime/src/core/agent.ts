@@ -5,7 +5,7 @@
  * around the `.md` — author the prompt as markdown, get type safety and validation in code.
  *
  * Adapted from an application-specific agent profile without duplicating the orchestration
- * that Lines already provides: `dag` is the dispatcher, `conditions`/`quorum` are the
+ * that the runtime already provides: `dag` is the dispatcher, `conditions`/`quorum` are the
  * gates, and `Outcome` is the result channel. AgentDef captures who the agent is, what it
  * may touch, and how it works; `agentJob` resolves that contract into an engine request.
  */
@@ -34,7 +34,7 @@ export interface AgentOutputContract {
   /** Stable output name, such as `patch`, `review`, or `test-report`. */
   name: string;
   description?: string;
-  /** Optional structured schema owned by the loop author. Lines stores it, it does not interpret it. */
+  /** Optional structured schema owned by the loop author. The runtime stores it, it does not interpret it. */
   schema?: unknown;
 }
 

@@ -6,7 +6,7 @@
  * command configuration.
  *
  * It drives the CLIs through `execa` (no SDK, no new dependency), so it stays in
- * the Lines package as an opt-in subpath without coupling
+ * the Obversa package as an opt-in subpath without coupling
  * the core to any deploy tool. An SDK-bound adapter (e.g. @aws-sdk) adds a real
  * dependency and belongs in a separate package or the consumer instead.
  *
