@@ -39,6 +39,7 @@ export function findProofPathViolations(source, fileName = "fixture.mjs") {
   const units = [root];
   const unitByFunction = new Map();
   const functionsByName = new Map();
+  const budgetChainIdentifiers = new Set();
   const spanDerivedTimeouts = new Set();
   const externalIdentifiers = new Set();
   const externalPromiseObjects = new Set();
@@ -97,6 +98,9 @@ export function findProofPathViolations(source, fileName = "fixture.mjs") {
   return violations;
 
   function collectDefinitions(node, enclosingUnit) {
+    if (ts.isVariableDeclaration(node) && ts.isIdentifier(node.name) && isBudgetChainCall(node.initializer)) {
+      budgetChainIdentifiers.add(node.name.text);
+    }
     if (isFunctionLike(node)) {
       const unit = { node, name: functionName(node) };
       units.push(unit);
@@ -121,7 +125,7 @@ export function findProofPathViolations(source, fileName = "fixture.mjs") {
       if (child) {
         const parent = node.parent;
         if (ts.isCallExpression(parent) && parent.arguments.some((argument) => argument === node)) {
-          edges.push({ from: unit, to: child, mode: isRunCall(parent) ? "guarded" : "inherit" });
+          edges.push({ from: unit, to: child, mode: isRunCall(parent, budgetChainIdentifiers) ? "guarded" : "inherit" });
         } else if (ts.isNewExpression(parent) && parent.arguments?.some((argument) => argument === node)) {
           edges.push({ from: unit, to: child, mode: "inherit" });
         }
@@ -137,7 +141,7 @@ export function findProofPathViolations(source, fileName = "fixture.mjs") {
     }
 
     if (ts.isAwaitExpression(node)) {
-      if (!isRunExpression(node.expression) && isExternalExpression(node.expression)) {
+      if (!isRunExpression(node.expression, budgetChainIdentifiers) && isExternalExpression(node.expression)) {
         findings.push({ kind: "await", node, message: "external wait is outside a budget-chain phase" });
       }
     } else if (ts.isForOfStatement(node) && node.awaitModifier) {
@@ -151,7 +155,7 @@ export function findProofPathViolations(source, fileName = "fixture.mjs") {
           findings.push({ kind, node, message: `${timer} is outside a budget-chain phase` });
         }
       }
-      if (hasLiteralSpawnTimeout(node)) {
+      if (hasInvalidSyncProcessTimeout(node, spanDerivedTimeouts)) {
         findings.push({ kind: "spawn-timeout", node, message: "spawn timeout is not derived from chain.span" });
       }
       const calledName = callName(node);
@@ -202,7 +206,7 @@ export function findProofPathViolations(source, fileName = "fixture.mjs") {
     if (ts.isIdentifier(node)) return externalIdentifiers.has(node.text);
     if (ts.isPropertyAccessExpression(node)) {
       if (node.name.text === "promise" && ts.isIdentifier(unwrap(node.expression))) return externalPromiseObjects.has(unwrap(node.expression).text);
-      return false;
+      return node.name.text === "body";
     }
     if (ts.isNewExpression(node)) return isExternalPromiseConstructor(node);
     if (ts.isCallExpression(node)) return isExternalCall(node);
@@ -213,6 +217,7 @@ export function findProofPathViolations(source, fileName = "fixture.mjs") {
     const expression = unwrap(node.expression);
     const name = callName(node);
     if (name === "fetch" || ["waitForDecision", "send", "evaluate", "tab", "enter", "type"].includes(name)) return true;
+    if (isResponseBodyCall(node)) return true;
     if (name && externalUnits.has(functionsByName.get(name))) return true;
     if (ts.isPropertyAccessExpression(expression) && ["then", "catch", "finally"].includes(expression.name.text)) {
       return isExternalExpression(expression.expression);
@@ -285,7 +290,7 @@ export function findProofPathViolations(source, fileName = "fixture.mjs") {
   }
 
   function collectSpanDerived(node) {
-    if (ts.isVariableDeclaration(node) && node.initializer && ts.isIdentifier(node.name) && isSpanCall(node.initializer)) {
+    if (ts.isVariableDeclaration(node) && node.initializer && ts.isIdentifier(node.name) && isSpanCall(node.initializer, budgetChainIdentifiers)) {
       spanDerivedTimeouts.add(node.name.text);
     }
     ts.forEachChild(node, collectSpanDerived);
@@ -299,6 +304,13 @@ export function findProofPathViolations(source, fileName = "fixture.mjs") {
   function toViolation(file, name, node, kind, message) {
     const start = file.getLineAndCharacterOfPosition(node.getStart(file));
     return { file: name, line: start.line + 1, column: start.character + 1, kind, message };
+  }
+
+  function isResponseBodyCall(node) {
+    const expression = unwrap(node.expression);
+    if (!ts.isPropertyAccessExpression(expression)) return false;
+    if (["json", "text", "arrayBuffer"].includes(expression.name.text)) return true;
+    return containsPropertyAccess(expression.expression, "body");
   }
 }
 
@@ -336,13 +348,22 @@ function unwrap(node) {
   return node;
 }
 
-function isRunCall(node) {
+function isRunCall(node, budgetChainIdentifiers) {
   const expression = unwrap(node.expression);
-  return ts.isPropertyAccessExpression(expression) && expression.name.text === "run";
+  return ts.isPropertyAccessExpression(expression)
+    && expression.name.text === "run"
+    && ts.isIdentifier(unwrap(expression.expression))
+    && budgetChainIdentifiers.has(unwrap(expression.expression).text);
 }
 
-function isRunExpression(node) {
-  return ts.isCallExpression(unwrap(node)) && isRunCall(unwrap(node));
+function isRunExpression(node, budgetChainIdentifiers) {
+  return ts.isCallExpression(unwrap(node)) && isRunCall(unwrap(node), budgetChainIdentifiers);
+}
+
+function isBudgetChainCall(node) {
+  if (!node) return false;
+  const expression = unwrap(node);
+  return ts.isCallExpression(expression) && callName(expression) === "defineBudgetChain";
 }
 
 function identifierCallName(node) {
@@ -384,14 +405,16 @@ function timerCallbackKills(node) {
   return kills;
 }
 
-function hasLiteralSpawnTimeout(node) {
+function hasInvalidSyncProcessTimeout(node, spanDerivedTimeouts) {
+  const name = identifierCallName(node);
+  if (!name || !["spawnSync", "execFileSync"].includes(name)) return false;
   const timeout = spawnTimeoutExpression(node);
-  return timeout !== undefined && ts.isNumericLiteral(timeout);
+  return !(timeout && ts.isIdentifier(timeout) && spanDerivedTimeouts.has(timeout.text));
 }
 
 function spawnTimeoutExpression(node) {
   const name = identifierCallName(node);
-  if (!name || !["spawn", "spawnSync"].includes(name)) return undefined;
+  if (!name || !["spawn", "spawnSync", "execFileSync"].includes(name)) return undefined;
   for (const argument of node.arguments) {
     if (!ts.isObjectLiteralExpression(argument)) continue;
     for (const property of argument.properties) {
@@ -402,10 +425,23 @@ function spawnTimeoutExpression(node) {
   return undefined;
 }
 
-function isSpanCall(node) {
+function isSpanCall(node, budgetChainIdentifiers) {
   if (!ts.isCallExpression(node)) return false;
   const expression = unwrap(node.expression);
-  return ts.isPropertyAccessExpression(expression) && expression.name.text === "span";
+  return ts.isPropertyAccessExpression(expression)
+    && expression.name.text === "span"
+    && ts.isIdentifier(unwrap(expression.expression))
+    && budgetChainIdentifiers.has(unwrap(expression.expression).text);
+}
+
+function containsPropertyAccess(node, propertyName) {
+  node = unwrap(node);
+  if (!node) return false;
+  if (ts.isPropertyAccessExpression(node)) {
+    return node.name.text === propertyName || containsPropertyAccess(node.expression, propertyName);
+  }
+  if (ts.isCallExpression(node)) return containsPropertyAccess(node.expression, propertyName);
+  return false;
 }
 
 function timerValueIsLiteral(node) {

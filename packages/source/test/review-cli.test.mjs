@@ -27,6 +27,7 @@ const NO_OPEN_CHAIN = defineBudgetChain("review-cli --no-open", NO_OPEN_TEST_TIM
   cleanup: 10_000,
 });
 const NO_OPEN_CHILD_TIMEOUT_MS = NO_OPEN_CHAIN.span("child process", ["page URL", "model fetch", "submit fetch", "ack fetch", "child close"]);
+const NO_OPEN_SETUP_TIMEOUT_MS = NO_OPEN_CHAIN.span("setup", ["setup"]);
 const SHORT_COMMAND_CHAIN = defineBudgetChain("review-cli short command", 10_000, {
   setup: 500,
   phases: [["child process", 5_000]],
@@ -93,7 +94,7 @@ test("--no-open prints the reachable page URL on stderr and never runs placement
   try {
     writeFileSync(placement, `#!/bin/sh\nprintf 'called\\n' >> '${calls}'\n`);
     chmodSync(placement, 0o755);
-    const git = (...args) => execFileSync("git", args, { cwd: directory, encoding: "utf8" });
+    const git = (...args) => execFileSync("git", args, { cwd: directory, encoding: "utf8", timeout: NO_OPEN_SETUP_TIMEOUT_MS });
     git("init", "-q");
     git("config", "user.name", "Review Test");
     git("config", "user.email", "review@example.invalid");

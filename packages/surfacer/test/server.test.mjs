@@ -165,7 +165,7 @@ test("app handler completes the session and the decision resolves after ack", as
   try {
     const response = await boundedRequest(surface, "/api/answer", { body: { value: 42 } });
     assert.equal(response.status, 200);
-    const submitted = await /** @type {any} */ (response.json());
+    const submitted = await SURFACER_GENERAL_CHAIN.run("external progress", () => /** @type {Promise<any>} */ (response.json()));
     assert.equal(submitted.ok, true);
     assert.ok(submitted.operationId, "the reply carries the operation id for ack");
     const ack = await boundedRequest(surface, "/api/ack", { body: { operationId: submitted.operationId } });
@@ -184,7 +184,7 @@ test("cancel settles the decision and closes the session", async () => {
   try {
     const cancelled = await boundedRequest(surface, "/api/cancel", { body: {} });
     assert.equal(cancelled.status, 200);
-    const { operationId } = await /** @type {any} */ (cancelled.json());
+    const { operationId } = await SURFACER_GENERAL_CHAIN.run("external progress", () => /** @type {Promise<any>} */ (cancelled.json()));
     await boundedRequest(surface, "/api/ack", { body: { operationId } });
     const decision = await boundedDecision(surface);
     assert.equal(decision.status, "cancelled");
@@ -325,7 +325,7 @@ test("a handler that completes and then throws still reports the completion", as
   try {
     const response = await boundedRequest(surface, "/api/boom", { body: {} });
     assert.equal(response.status, 200);
-    const body = await /** @type {any} */ (response.json());
+    const body = await SURFACER_GENERAL_CHAIN.run("external progress", () => /** @type {Promise<any>} */ (response.json()));
     assert.equal(body.ok, true);
     assert.ok(body.operationId);
     const decision = await boundedDecision(surface);
@@ -374,7 +374,7 @@ test("the caller learns of a completion only after the winning request has been 
     const decided = boundedDecision(surface).then((decision) => { settled = true; return decision; });
     const answered = await boundedRequest(surface, "/api/slow", { body: {} });
     assert.equal(answered.status, 200);
-    const { operationId } = await /** @type {any} */ (answered.json());
+    const { operationId } = await SURFACER_GENERAL_CHAIN.run("external progress", () => /** @type {Promise<any>} */ (answered.json()));
     assert.equal(typeof operationId, "string", "the browser gets the operation id to acknowledge");
     assert.equal(settled, false, "the decision had not settled when the browser was answered: the clock starts after the answer, not at the claim");
     const ack = await SURFACER_COMPLETION_CHAIN.run("acknowledgement", () => request(surface, "/api/ack", { body: { operationId } }));
@@ -475,7 +475,7 @@ test("a cancel is answered before the caller learns of it, and its acknowledgeme
     const decided = boundedDecision(surface).then((decision) => { settled = true; return decision; });
     const answered = await boundedRequest(surface, "/api/cancel", { body: {} });
     assert.equal(answered.status, 200);
-    const { operationId } = await /** @type {any} */ (answered.json());
+    const { operationId } = await SURFACER_GENERAL_CHAIN.run("external progress", () => /** @type {Promise<any>} */ (answered.json()));
     assert.equal(typeof operationId, "string");
     assert.equal(settled, false, "the decision had not settled when the cancel was answered");
     const ack = await boundedRequest(surface, "/api/ack", { body: { operationId } });

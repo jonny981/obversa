@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 import test from "node:test";
 
 import { findProofPathViolations } from "./check-proof-path-budgets.mjs";
@@ -83,6 +84,71 @@ test("reports a helper wait when the helper is called outside a chain phase", ()
 
   const violations = findProofPathViolations(source, "fixture.mjs");
   assert.ok(violations.some(({ kind }) => kind === "await" && /readLater/.test(violationText(violations, kind))));
+});
+
+test("verify:f15 runs the proof-path spec before the checker", () => {
+  const { scripts } = JSON.parse(readFileSync(new URL("../package.json", import.meta.url), "utf8"));
+  assert.match(scripts["verify:f15"], /pnpm test:proof-path-budgets && pnpm check:proof-path-budgets/);
+});
+
+test("reports response body reads outside a budget-chain phase", () => {
+  const source = `
+    async function readBody(response) {
+      await response.json();
+      await response.text();
+      await response.arrayBuffer();
+      await response.body.getReader().read();
+    }
+
+    test("unbounded body", async () => {
+      await readBody(response);
+    });
+  `;
+
+  const violations = findProofPathViolations(source, "fixture.mjs");
+  assert.ok(violations.filter(({ kind }) => kind === "await").length >= 4);
+});
+
+test("reports synchronous process calls without a chain-derived timeout", () => {
+  const source = `
+    const session = {
+      run(callback) { return callback(); },
+      span() { return 10; },
+    };
+
+    test("unbounded process", async () => {
+      await session.run(async () => { await fetch("https://example.test"); });
+      spawnSync(process.execPath, []);
+      execFileSync("git", ["status"]);
+    });
+  `;
+
+  const violations = findProofPathViolations(source, "fixture.mjs");
+  assert.equal(violations.filter(({ kind }) => kind === "spawn-timeout").length, 2);
+});
+
+test("only a budget-chain receiver creates a guarded phase or derived span", () => {
+  const source = `
+    const chain = defineBudgetChain("fixture", 100, {
+      setup: 10,
+      phases: [["work", 20]],
+      cleanup: 10,
+    });
+    const session = {
+      run(callback) { return callback(); },
+      span() { return 10; },
+    };
+    const timeout = session.span("child", ["work"]);
+
+    test("collisions are not guards", async () => {
+      await session.run(async () => { await fetch("https://example.test"); });
+      spawnSync(process.execPath, [], { timeout });
+    });
+  `;
+
+  const violations = findProofPathViolations(source, "fixture.mjs");
+  assert.ok(violations.some(({ kind }) => kind === "await"), "session.run does not guard the callback");
+  assert.ok(violations.some(({ kind }) => kind === "spawn-timeout"), "session.span does not derive a child timeout");
 });
 
 function violationText(violations, kind) {

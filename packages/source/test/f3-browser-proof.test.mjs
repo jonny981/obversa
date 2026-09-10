@@ -70,11 +70,12 @@ const BROWSER_CANCEL_CHAIN = defineBudgetChain("browser cancel", BROWSER_TEST_TI
 const BROWSER_RESULTS_TIMEOUT_MS = BROWSER_RENDER_CHAIN.allowance("page post");
 const BROWSER_RENDER_TIMEOUT_MS = 30_000;
 const DEVTOOLS_FETCH_TIMEOUT_MS = 5_000;
+const BROWSER_SETUP_TIMEOUT_MS = BROWSER_RENDER_CHAIN.span("setup", ["setup"]);
 assert.ok(BROWSER_RENDER_TIMEOUT_MS < BROWSER_RESULTS_TIMEOUT_MS, "the in-page probe must finish before the page-post guard");
 assert.ok(DEVTOOLS_FETCH_TIMEOUT_MS < BROWSER_RENDER_CHAIN.allowance("DevTools target"), "the DevTools fetch must fit inside its target phase");
 
-function scheduleTimer(chain, phase, callback, delayMs) {
-  void chain.run(phase, () => /** @type {Promise<void>} */ (new Promise((resolve, reject) => {
+function scheduleCancelTimer(phase, callback, delayMs) {
+  void BROWSER_CANCEL_CHAIN.run(phase, () => /** @type {Promise<void>} */ (new Promise((resolve, reject) => {
     setTimeout(() => {
       try {
         callback();
@@ -174,7 +175,7 @@ const PROBE = `(() => {
 
 async function buildModel() {
   const cwd = mkdtempSync(path.join(os.tmpdir(), "browser-proof-"));
-  const git = (...a) => execFileSync("git", a, { cwd, encoding: "utf8" });
+  const git = (...a) => execFileSync("git", a, { cwd, encoding: "utf8", timeout: BROWSER_SETUP_TIMEOUT_MS });
   git("init", "-q"); git("config", "user.email", "t@example.com"); git("config", "user.name", "T"); git("config", "commit.gpgsign", "false");
   mkdirSync(path.join(cwd, "src"), { recursive: true });
   writeFileSync(path.join(cwd, "src/server.js"), SERVER_OLD);
@@ -392,7 +393,7 @@ test("the runtime's CSP in this proof is the one surfacer serves", async () => {
 });
 
 test("the review surface renders under the exact CSP with zero violations and file-scoped go-to-source", { skip: CHROME ? false : "Google Chrome is not installed", timeout: BROWSER_TEST_TIMEOUT_MS }, async () => {
-  const { model, meta, highlightCss } = await buildModel();
+  const { model, meta, highlightCss } = await BROWSER_RENDER_CHAIN.run("setup", () => buildModel());
   const token = randomBytes(16).toString("hex");
   const clientKit = await readFile(CLIENT_KIT, "utf8");
   const shell = buildIndexHtml().replace('<script type="module" src="/app.js"></script>', '<script src="/probe.js"></script>\n<script type="module" src="/app.js"></script>');
@@ -559,7 +560,7 @@ test("a page that cannot load its review cancels the session instead of holding 
       if (url.pathname === "/api/model") return send(500, "application/json", JSON.stringify({ error: "the model is unavailable" }));
       if (url.pathname === "/api/cancel") {
         cancelSeen = true;
-        scheduleTimer(BROWSER_CANCEL_CHAIN, "cancel response", () => send(200, "application/json", JSON.stringify({ ok: true, status: "cancelled", operationId: "op-cancel" })), 1000);
+        scheduleCancelTimer("cancel response", () => send(200, "application/json", JSON.stringify({ ok: true, status: "cancelled", operationId: "op-cancel" })), 1000);
         return;
       }
       if (url.pathname === "/api/heartbeat" && cancelSeen) heartbeatsAfterCancel += 1;
