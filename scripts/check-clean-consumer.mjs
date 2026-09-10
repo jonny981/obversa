@@ -25,6 +25,23 @@ const expectedGraphReport = {
   maxFanOut: { kind: 'known', value: 1 },
 };
 
+const expectedDescribedTeamReport = {
+  plan: `dag "described-team" (3 nodes)
+  - brief
+      desc: Turn the request into a short delivery brief.
+      gate: The brief names the user, outcome, and constraints.
+      fn "brief"
+  - build (needs brief)
+      desc: Build the smallest useful change from the brief.
+      gate: The change meets the brief and its checks pass.
+      fn "build"
+  - review (needs build)
+      desc: Check the change before it reaches the user.
+      gate: The change is safe to release and easy to explain.
+      fn "review"`,
+  status: 'pass',
+};
+
 const expectedPipelineReport = {
   executor: 'complete',
   output: {
@@ -494,6 +511,7 @@ const tsconfig = {
     'offline-review.workflow.ts',
     'feature-delivery.workflow.ts',
     'feature-team.ts',
+    'described-team.ts',
     'forge-helper.ts',
     'custom-graph.ts',
     'pipeline.ts',
@@ -547,6 +565,7 @@ async function main() {
   const turnTakingExamplePath = join(root, 'examples', 'packages', 'turn-taking.ts');
   const workspaceExamplePath = join(root, 'examples', 'packages', 'workspace.ts');
   const featureTeamExamplePath = join(root, 'examples', 'packages', 'feature-team.ts');
+  const describedTeamExamplePath = join(root, 'examples', 'packages', 'described-team.ts');
   const runnerExamplePath = join(root, 'examples', 'packages', 'supervised-run.ts');
   const runnerHostPath = join(root, 'examples', 'packages', 'supervised-host.mjs');
   const safeChangeExamplePath = join(root, 'examples', 'safe-change', 'example.ts');
@@ -677,6 +696,7 @@ async function main() {
     await copyFile(turnTakingExamplePath, join(consumerDirectory, 'turn-taking.ts'));
     await copyFile(workspaceExamplePath, join(consumerDirectory, 'workspace.ts'));
     await copyFile(featureTeamExamplePath, join(consumerDirectory, 'feature-team.ts'));
+    await copyFile(describedTeamExamplePath, join(consumerDirectory, 'described-team.ts'));
     await copyFile(runnerExamplePath, join(consumerDirectory, 'supervised-run.ts'));
     await copyFile(runnerHostPath, join(consumerDirectory, 'supervised-host.mjs'));
 
@@ -717,6 +737,12 @@ async function main() {
     );
     const directFeatureLine = JSON.parse(
       run('pnpm', ['exec', 'tsx', 'feature-delivery.workflow.ts'], { cwd: consumerDirectory }),
+    );
+    const compiledDescribedTeam = JSON.parse(
+      run(process.execPath, ['dist/described-team.js'], { cwd: consumerDirectory }),
+    );
+    const directDescribedTeam = JSON.parse(
+      run('pnpm', ['exec', 'tsx', 'described-team.ts'], { cwd: consumerDirectory }),
     );
     const forgeHelper = JSON.parse(
       run(process.execPath, ['dist/forge-helper.js'], { cwd: consumerDirectory }),
@@ -849,6 +875,8 @@ async function main() {
     }
     assert.deepEqual(compiledGraph, expectedGraphReport);
     assert.deepEqual(directGraph, expectedGraphReport);
+    assert.deepEqual(compiledDescribedTeam, expectedDescribedTeamReport);
+    assert.deepEqual(directDescribedTeam, expectedDescribedTeamReport);
     assert.deepEqual(compiledPipeline, expectedPipelineReport);
     assert.deepEqual(directPipeline, expectedPipelineReport);
     assert.deepEqual(compiledReviewLoop, expectedReviewLoopReport);
@@ -935,7 +963,7 @@ async function main() {
     if (refs.length !== 1) throw new Error(`Git memory created ${refs.length} private refs instead of one`);
 
     console.log(
-      'Clean offline consumer passed with TypeScript 7 and 6, the first production line, the safe-change production line, the feature-delivery line, the forge helper, the outside graph, the pipeline executor example, the review loop, the callback gate, proof-bound approval, the turn-taking executor example, durable storage, safe node attempts, the supervised runner, 17 memory cases, and both memory adapters.',
+      'Clean offline consumer passed with TypeScript 7 and 6, the first production line, the described-team example, the safe-change production line, the feature-delivery line, the forge helper, the outside graph, the pipeline executor example, the review loop, the callback gate, proof-bound approval, the turn-taking executor example, durable storage, safe node attempts, the supervised runner, 17 memory cases, and both memory adapters.',
     );
   } finally {
     await rm(directory, { recursive: true, force: true });

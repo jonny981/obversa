@@ -359,6 +359,101 @@ describe('feedback protocol', () => {
     expect(runs).toBe(2);
   });
 
+  it('reruns a persisted stage review when its node gate changes', async () => {
+    const repo = await tmpRepo();
+    mkdirSync(join(repo, 'src'));
+    write(repo, 'src/reviewed.ts', 'export const value = 1;\n');
+    await commitFiles(repo, 'test: add gate review fixture');
+    const state: Record<string, unknown> = {};
+    let runs = 0;
+    const build = (gate: string) =>
+      dag({
+        name: 'reviewable',
+        nodes: {
+          review: {
+            gate,
+            job: reviewPanel({
+              label: 'stage-review',
+              persistPasses: { minConfidence: 0.9 },
+              reviewers: [
+                {
+                  name: 'safety',
+                  cacheVersion: 'v1',
+                  invalidateOn: ['src'],
+                  review: async () => {
+                    runs += 1;
+                    return { met: true, confidence: 0.95, reason: 'clear' };
+                  },
+                },
+              ],
+            }),
+          },
+        },
+      });
+    const opts = {
+      engine: 'mock' as const,
+      engines: { mock: new MockEngine(() => '') },
+      cwd: repo,
+      state,
+    };
+
+    expect((await run(build('The first criterion.'), opts)).outcome.status).toBe('pass');
+    expect((await run(build('The tightened criterion.'), opts)).outcome.status).toBe('pass');
+    expect(runs).toBe(2);
+  });
+
+  it('does not key an ungated nested review on its parent gate', async () => {
+    const repo = await tmpRepo();
+    mkdirSync(join(repo, 'src'));
+    write(repo, 'src/reviewed.ts', 'export const value = 1;\n');
+    await commitFiles(repo, 'test: add nested review fixture');
+    const state: Record<string, unknown> = {};
+    const prompts: string[] = [];
+    const engine = new MockEngine((request: AgentRequest) => {
+      prompts.push(request.prompt);
+      return JSON.stringify({ verdict: 'yes', confidence: 0.95, reason: 'clear' });
+    });
+    const build = (parentGate: string) =>
+      dag({
+        name: 'outer',
+        nodes: {
+          parent: {
+            gate: parentGate,
+            job: dag({
+              name: 'inner',
+              nodes: {
+                child: {
+                  job: reviewPanel({
+                    label: 'nested-review',
+                    persistPasses: { minConfidence: 0.9 },
+                    reviewers: [
+                      {
+                        name: 'safety',
+                        cacheVersion: 'v1',
+                        invalidateOn: ['src'],
+                        review: agentCheck({ question: 'Is the child safe?', engine }),
+                      },
+                    ],
+                  }),
+                },
+              },
+            }),
+          },
+        },
+      });
+    const opts = {
+      engine: 'mock' as const,
+      engines: { mock: engine },
+      cwd: repo,
+      state,
+    };
+
+    expect((await run(build('PARENT ONE'), opts)).outcome.status).toBe('pass');
+    expect((await run(build('PARENT TWO'), opts)).outcome.status).toBe('pass');
+    expect(prompts).toHaveLength(1);
+    expect(prompts[0]).not.toContain('ACCEPTANCE CRITERION:');
+  });
+
   it('fails closed for low-confidence and malformed persisted passes', async () => {
     const repo = await tmpRepo();
     mkdirSync(join(repo, 'src'));
@@ -1083,13 +1178,19 @@ describe('feedback protocol', () => {
       dag({
         name: 'ship',
         nodes: {
-          implementation: agentJob({
-            label: 'implementation',
-            prompt: 'Build it.',
-            graphContext: true,
-          }),
+          implementation: {
+            desc: 'Build the implementation.',
+            gate: 'The implementation is complete.',
+            job: agentJob({
+              label: 'implementation',
+              prompt: 'Build it.',
+              graphContext: true,
+            }),
+          },
           review: {
             needs: ['implementation'],
+            desc: 'Review the implementation.',
+            gate: 'The implementation meets the stated acceptance criterion.',
             job: fnJob('review', async () => ({ status: 'pass' })),
           },
         },
@@ -1101,5 +1202,36 @@ describe('feedback protocol', () => {
     expect(cap.prompts[0]).toContain('Current node: implementation');
     expect(cap.prompts[0]).toContain('Depends on: none');
     expect(cap.prompts[0]).toContain('Direct dependents: review');
+    expect(cap.prompts[0]).not.toContain('Gate: The implementation is complete.');
+
+    await run(
+      dag({
+        name: 'ship',
+        nodes: {
+          review: {
+            desc: 'Review the implementation.',
+            gate: 'The implementation meets the stated acceptance criterion.',
+            job: reviewPanel({
+              label: 'stage-review',
+              reviewers: [
+                {
+                  name: 'reviewer',
+                  job: agentJob({
+                    label: 'review',
+                    prompt: 'Review it.',
+                    graphContext: true,
+                  }),
+                },
+              ],
+            }),
+          },
+        },
+      }),
+      { ...cap.opts, cwd: repo },
+    );
+    expect(cap.prompts[1]).toContain('Description: Review the implementation.');
+    expect(cap.prompts[1]).toContain(
+      'Gate: The implementation meets the stated acceptance criterion.',
+    );
   });
 });

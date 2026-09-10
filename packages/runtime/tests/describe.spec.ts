@@ -101,6 +101,53 @@ describe('job introspection (meta + renderPlan)', () => {
     expect(plan).toContain('loop "impl"');
   });
 
+  it('normalizes scalar needs and carries node purpose into the plan and record shape', () => {
+    const job = dag({
+      name: 'ship',
+      nodes: {
+        build: fnJob('build', async () => ({ status: 'pass' as const })),
+        review: {
+          needs: 'build',
+          desc: 'Review the built change.',
+          gate: 'The change meets the acceptance criteria.',
+          job: fnJob('review', async () => ({ status: 'pass' as const })),
+        },
+      },
+    });
+
+    const meta = jobMeta(job)!;
+    const nodes = meta.nodes as Array<{
+      name: string;
+      needs: string[];
+      desc?: string;
+      gate?: string;
+    }>;
+    expect(nodes[1]).toMatchObject({
+      name: 'review',
+      needs: ['build'],
+      desc: 'Review the built change.',
+      gate: 'The change meets the acceptance criteria.',
+    });
+
+    const plan = renderPlan(meta).join('\n');
+    expect(plan).toContain('- review (needs build)');
+    expect(plan).toContain('desc: Review the built change.');
+    expect(plan).toContain('gate: The change meets the acceptance criteria.');
+
+    const shape = jobShapeV1(meta);
+    expect(shape).toMatchObject({ kind: 'dag' });
+    if (shape.kind !== 'dag') throw new Error('expected a DAG job shape');
+    expect(shape.nodes).toEqual([
+      expect.objectContaining({ name: 'build', needs: [] }),
+      expect.objectContaining({
+        name: 'review',
+        needs: ['build'],
+        desc: 'Review the built change.',
+        gate: 'The change meets the acceptance criteria.',
+      }),
+    ]);
+  });
+
   it('captures optional and when on dag nodes and renders them', () => {
     const job = dag({
       name: 'ship',

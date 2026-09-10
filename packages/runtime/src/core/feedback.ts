@@ -26,6 +26,7 @@ import {
 } from './concurrency.js';
 import { oneLine, truncate } from './text.js';
 import { workspaceFingerprint } from './git.js';
+import { criterionFor } from './context.js';
 
 export type {
   FeedbackActionSeverity,
@@ -140,11 +141,16 @@ export function feedbackBlock(outcome: Outcome): string {
   return parts.join('\n\n');
 }
 
-export function graphPositionBlock(graph: GraphPosition): string {
+export function graphPositionBlock(
+  graph: GraphPosition,
+  reviewerGate?: string | null,
+): string {
   return [
     '## Graph position',
     `DAG: ${graph.dag}`,
     `Current node: ${graph.node}`,
+    ...(graph.desc ? [`Description: ${graph.desc}`] : []),
+    ...(reviewerGate ? [`Gate: ${reviewerGate}`] : []),
     `Path: ${graph.path.join(' > ')}`,
     `Depends on: ${graph.needs.length ? graph.needs.join(', ') : 'none'}`,
     `Direct dependents: ${
@@ -213,7 +219,10 @@ type PersistedReviewPasses = Record<string, unknown>;
 
 const SHA256_FINGERPRINT = /^[0-9a-f]{64}$/;
 
-function reviewerCacheIdentity(reviewer: ReviewTarget): string {
+function reviewerCacheIdentity(
+  reviewer: ReviewTarget,
+  reviewerGate?: string,
+): string {
   const invalidateOn = [...new Set(reviewer.invalidateOn ?? [])]
     .map((path) => path.trim())
     .filter(Boolean)
@@ -226,6 +235,7 @@ function reviewerCacheIdentity(reviewer: ReviewTarget): string {
         kind: 'job' in reviewer ? 'job' : 'review',
         scope: reviewer.scope ?? null,
         invalidateOn,
+        reviewerGate: reviewerGate ?? null,
       }),
     )
     .digest('hex');
@@ -316,9 +326,13 @@ async function runReviewer(
   ctx: JobContext,
 ): Promise<ReviewResult> {
   const name = reviewer.name ?? `reviewer-${index + 1}`;
+  const reviewerCtx: JobContext = {
+    ...ctx,
+    reviewerGate: criterionFor(ctx),
+  };
   try {
     if ('job' in reviewer) {
-      const outcome = await reviewer.job(ctx);
+      const outcome = await reviewer.job(reviewerCtx);
       const outcomeError = outcome.error;
       if (isReviewInfrastructureError(outcomeError)) {
         return {
@@ -340,7 +354,7 @@ async function runReviewer(
       };
     }
     const result: ConditionResult = await toCondition(reviewer.review)(
-      ctx,
+      reviewerCtx,
       ctx.lastOutcome,
     );
     return {
@@ -390,7 +404,10 @@ async function runPersistedReviewer(
   minConfidence: number,
 ): Promise<PersistedReviewRun> {
   const name = reviewer.name!;
-  const identity = reviewerCacheIdentity(reviewer);
+  const identity = reviewerCacheIdentity(
+    reviewer,
+    criterionFor(ctx),
+  );
   const before = await workspaceFingerprint({
     cwd: ctx.workspace.dir,
     signal: ctx.signal,
@@ -497,7 +514,10 @@ async function settlePersistedReviewers(
       !reusableReviewPass(
         cached,
         minConfidence,
-        reviewerCacheIdentity(reviewer),
+        reviewerCacheIdentity(
+          reviewer,
+          criterionFor(ctx),
+        ),
       )
     )
       return;

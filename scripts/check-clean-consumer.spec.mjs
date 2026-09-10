@@ -42,3 +42,9 @@ test('clean consumer wires the feature-delivery production line', async () => {
   assert.match(source, /featureLine\.acceptedKickbacks !== 1/);
   assert.doesNotMatch(source, /recordEvents !== \d+/);
 });
+
+test('clean consumer wires the described-team example', async () => {
+  const source = await readFile(new URL('./check-clean-consumer.mjs', import.meta.url), 'utf8');
+  assert.match(source, /described-team\.ts/);
+  assert.match(source, /expectedDescribedTeamReport/);
+});
