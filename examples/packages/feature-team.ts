@@ -90,3 +90,21 @@ console.log(JSON.stringify({
   status: result.outcome.status,
   implementRuns,
 }, null, 2));
+
+/**
+ * The example is part of the documentation proof, so it has to fail the build
+ * when the behaviour it shows stops happening. Printing alone would not: a
+ * panel that quietly stopped sending work back would still print a passing
+ * run, and `implement` running once is the tell.
+ */
+const faults: string[] = [];
+if (result.outcome.status !== 'pass') {
+  faults.push(`the run ended ${result.outcome.status}, so the second attempt never satisfied the panel`);
+}
+if (implementRuns !== 2) {
+  faults.push(`implement ran ${implementRuns} time(s), so the panel did not send the work back exactly once`);
+}
+if (faults.length) {
+  for (const fault of faults) console.error(fault);
+  process.exitCode = 1;
+}
