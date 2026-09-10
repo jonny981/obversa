@@ -8,22 +8,26 @@ description: "Model how your team really works. Durable agent workflows, reviews
 
 Model how your team really works: named roles, reviews that send work back, and a record in plain files.
 
-`@obversa/runtime` compiles graph definitions and runs them through a durable
-executor. The memory packages give each run one memory port and two storage
-choices.
+You describe how work should move from a request to a checked result: the
+steps, who does each one, the reviews, and where a person decides. Obversa
+runs that workflow one bounded engine call at a time and records every step.
 
-## What ships today
+## What a reader can do
 
-- **Pipeline:** ordered stages on the durable graph executor. See
-  [Built-in pipeline](/graphs/pipeline).
-- **Review loop:** For engine calls managed by the graph executor, accepted reviewers
-  share neither the writer's provider nor its model family, based on engine reports.
-  Calls without a writer report count as all declared writer targets. The loop
-  can also require a diverse quorum. See [Review loop](/graphs/review-loop).
-- **Callback gate:** one structured answer through a replaceable router. See
-  [Callback gate](/graphs/callback-gate).
-- **Crash-safe resume:** a fresh executor recovers recorded progress; an uncertain
-  attempt pauses unless retry was declared safe. See [Graph executor](/graphs/executor).
+- **Copy a workflow:** a complete, runnable program for real work. Start with
+  [the workflow bank](/workflows).
+- **Review and approve work:** panels, revisions that send work back, and
+  callback gates that wait for a person. Start with
+  [callback gates](/reviewing/callback-gates).
+- **Record and restart runs:** every step appends events, and a killed run
+  restarts where it stopped. Start with
+  [how a run is recorded](/recording/how-a-run-is-recorded).
+- **Drive runs from a host:** bounded workers, supervision, and surfaces. Start
+  with [the runner](/driving/runner).
+- **Write a workflow shape:** your own graph form over the public contract.
+  Start with [the graph contract](/graphs/contract).
+- **Choose engines and memory:** adapters for the tools a team already has.
+  Start with [memory](/memory) and the package pages below.
 
 ## Packages
 
@@ -38,9 +42,9 @@ choices.
 | `@obversa/surfacer` | Runs one local surface session | `0.1.0` |
 | `@obversa/source` | Opens a git diff for inline review | `0.1.0` |
 
-The six engine plugins have their own pages in the Packages group.
-The runtime version matches the repository release tag. Other packages keep
-their own manifest versions.
+The six engine plugins and the two memory adapters have their own pages in
+the Packages group. The runtime version matches the repository release tag.
+Other packages keep their own manifest versions.
 
 The packages have one dependency direction. The runtime imports the memory port.
 Each memory adapter also imports the memory port. The runtime does not import a
@@ -50,5 +54,5 @@ memory adapter.
 
 1. [Install the local packages](/get-started/installation).
 2. [Run the first program](/get-started/first-run).
-3. [Copy an offline process](/production-lines/offline-review).
+3. [Copy an offline workflow](/workflows/offline-review).
 4. [Use Obversa in cmux](/hosts/cmux).

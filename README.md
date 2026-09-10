@@ -146,7 +146,7 @@ pnpm example:offline
 The full form, if the shortcut is not available:
 
 ```bash
-pnpm --filter @obversa/runtime exec tsx ../../examples/production-lines/offline-review.line.ts
+pnpm --filter @obversa/runtime exec tsx ../../examples/workflows/offline-review.workflow.ts
 ```
 
 Expected result:
