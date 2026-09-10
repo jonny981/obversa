@@ -30,12 +30,14 @@ pnpm example:offline
 {
   "status": "pass",
   "attempts": 2,
-  "summary": "config is complete"
+  "summary": "config is complete",
+  "record": "packages/runtime/.obversa/records/offline-review.jsonl"
 }
 ```
 
-Every line of that output is an event in a file the run wrote, and that
-file is why a killed run restarts where it stopped.
+That output is the example's own summary; the record it wrote is a
+different file, one event per line, and the supervised runner reads it to
+restart a killed run where it stopped.
 
 ## What a reader can do
 

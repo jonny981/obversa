@@ -14,8 +14,9 @@ written down.
 Obversa lets you run your agents that way. You describe the work as steps,
 say who does each one, where the reviews are, and where a person decides.
 Obversa runs it, one bounded engine call at a time, and writes down every
-step as it happens. Kill it and start it again and it carries on from the
-record, with nothing already finished done twice.
+step as it happens. Run it under the supervised runner, kill it, start it
+again, and it carries on from the record with nothing already finished
+done twice.
 
 ## Why it exists
 
@@ -59,12 +60,14 @@ pnpm example:offline
 {
   "status": "pass",
   "attempts": 2,
-  "summary": "config is complete"
+  "summary": "config is complete",
+  "record": "packages/runtime/.obversa/records/offline-review.jsonl"
 }
 ```
 
-Every line of that output is an event in the run's record, and the record
-is a file you can open. The [first run](/get-started/first-run) page walks
+That output is the example's own summary. The record is a different file,
+one event per line, that the run wrote as it went; the report names it, and
+you can open it. The [first run](/get-started/first-run) page walks
 through it; the [workflow bank](/workflows) has the complete programs to
 copy.
 
@@ -78,8 +81,8 @@ Four words carry most of the docs, and each has a page:
   [Orders](/concepts/orders).
 - A **review** is a step that judges another step's result and can send it
   back. [Reviews](/reviewing/callback-gates).
-- The **record** is the file of events a run writes as it goes, and the
-  reason a killed run restarts where it stopped.
+- The **record** is the file of events a run writes as it goes, and what
+  the supervised runner reads to restart a killed run where it stopped.
   [How a run is recorded](/recording/how-a-run-is-recorded).
 
 ## Things to know before you start
