@@ -29,6 +29,11 @@ const SURFACER_DISCONNECT_CHAIN = defineBudgetChain("surfacer disconnect", SURFA
   phases: [["claim", SURFACER_HANG_GUARD_TIMEOUT_MS], ["decision", SURFACER_HANG_GUARD_TIMEOUT_MS]],
   cleanup: 10_000,
 });
+const SURFACER_GENERAL_CHAIN = defineBudgetChain("surfacer general", SURFACER_TEST_TIMEOUT_MS, {
+  setup: 5_000,
+  phases: [["external progress", 35_000], ["timer", 2_000]],
+  cleanup: 10_000,
+});
 assert.ok(
   SURFACER_COMPLETION_CHAIN.allowance("response") < SURFACER_COMPLETION_CLOCK_MS,
   "the completion response guard must stay below every clock configured by its test",
@@ -63,6 +68,31 @@ function request(surface, pathname, { method = "POST", body = {}, token = tokenO
   });
 }
 
+function boundedRequest(surface, pathname, options = {}) {
+  return SURFACER_GENERAL_CHAIN.run("external progress", () => request(surface, pathname, options));
+}
+
+function boundedDecision(surface) {
+  return SURFACER_GENERAL_CHAIN.run("external progress", () => surface.waitForDecision());
+}
+
+function boundedSocket(operation) {
+  return SURFACER_GENERAL_CHAIN.run("external progress", operation);
+}
+
+function scheduleTimer(callback, delayMs) {
+  void SURFACER_GENERAL_CHAIN.run("timer", () => new Promise((resolve, reject) => {
+    setTimeout(() => {
+      try {
+        callback();
+        resolve();
+      } catch (error) {
+        reject(error);
+      }
+    }, delayMs);
+  }));
+}
+
 function tokenOf(surface) {
   return surface.url.split("#")[1];
 }
@@ -70,7 +100,7 @@ function tokenOf(surface) {
 test("serves the static shell with security headers and no token", async () => {
   const surface = await boot();
   try {
-    const response = await fetch(`${surface.origin}/`);
+    const response = await boundedRequest(surface, "/", { method: "GET" });
     assert.equal(response.status, 200);
     assert.match(response.headers.get("content-security-policy"), /default-src 'self'/);
     assert.equal(response.headers.get("x-frame-options"), "DENY");
@@ -84,7 +114,7 @@ test("rejects a wrong Host header", async () => {
   try {
     // fetch refuses to override Host, so send the request raw.
     const http = await import("node:http");
-    const status = await new Promise((resolve, reject) => {
+    const status = await boundedSocket(() => new Promise((resolve, reject) => {
       const raw = http.request({
         host: "127.0.0.1",
         port: surface.port,
@@ -94,7 +124,7 @@ test("rejects a wrong Host header", async () => {
       }, (response) => resolve(response.statusCode));
       raw.once("error", reject);
       raw.end();
-    });
+    }));
     assert.equal(status, 421);
   } finally {
     await surface.stop();
@@ -104,11 +134,11 @@ test("rejects a wrong Host header", async () => {
 test("requires the bearer token and a matching origin", async () => {
   const surface = await boot();
   try {
-    const unauthorized = await request(surface, "/api/state", { method: "GET", token: null });
+    const unauthorized = await boundedRequest(surface, "/api/state", { method: "GET", token: null });
     assert.equal(unauthorized.status, 401);
-    const badToken = await request(surface, "/api/state", { method: "GET", token: "wrong" });
+    const badToken = await boundedRequest(surface, "/api/state", { method: "GET", token: "wrong" });
     assert.equal(badToken.status, 401);
-    const badOrigin = await request(surface, "/api/answer", {
+    const badOrigin = await boundedRequest(surface, "/api/answer", {
       body: { value: 1 },
       headers: { Origin: "http://evil.example" },
     });
@@ -121,7 +151,7 @@ test("requires the bearer token and a matching origin", async () => {
 test("bounds the request body", async () => {
   const surface = await boot();
   try {
-    const response = await request(surface, "/api/heartbeat", {
+    const response = await boundedRequest(surface, "/api/heartbeat", {
       body: { pad: "x".repeat(5 * 1024 * 1024) },
     });
     assert.equal(response.status, 413);
@@ -133,14 +163,14 @@ test("bounds the request body", async () => {
 test("app handler completes the session and the decision resolves after ack", async () => {
   const surface = await boot();
   try {
-    const response = await request(surface, "/api/answer", { body: { value: 42 } });
+    const response = await boundedRequest(surface, "/api/answer", { body: { value: 42 } });
     assert.equal(response.status, 200);
     const submitted = await /** @type {any} */ (response.json());
     assert.equal(submitted.ok, true);
     assert.ok(submitted.operationId, "the reply carries the operation id for ack");
-    const ack = await request(surface, "/api/ack", { body: { operationId: submitted.operationId } });
+    const ack = await boundedRequest(surface, "/api/ack", { body: { operationId: submitted.operationId } });
     assert.equal(ack.status, 200);
-    const decision = await surface.waitForDecision();
+    const decision = await boundedDecision(surface);
     assert.equal(decision.status, "completed");
     assert.equal(decision.app, "test-app");
     assert.deepEqual(decision.payload, { value: 42 });
@@ -152,13 +182,13 @@ test("app handler completes the session and the decision resolves after ack", as
 test("cancel settles the decision and closes the session", async () => {
   const surface = await boot();
   try {
-    const cancelled = await request(surface, "/api/cancel", { body: {} });
+    const cancelled = await boundedRequest(surface, "/api/cancel", { body: {} });
     assert.equal(cancelled.status, 200);
     const { operationId } = await /** @type {any} */ (cancelled.json());
-    await request(surface, "/api/ack", { body: { operationId } });
-    const decision = await surface.waitForDecision();
+    await boundedRequest(surface, "/api/ack", { body: { operationId } });
+    const decision = await boundedDecision(surface);
     assert.equal(decision.status, "cancelled");
-    const afterClose = await request(surface, "/api/answer", { body: { value: 1 } });
+    const afterClose = await boundedRequest(surface, "/api/answer", { body: { value: 1 } });
     assert.equal(afterClose.status, 409);
   } finally {
     await surface.stop();
@@ -168,8 +198,8 @@ test("cancel settles the decision and closes the session", async () => {
 test("a second terminal decision is refused", async () => {
   const surface = await boot();
   try {
-    await request(surface, "/api/answer", { body: { value: 1 } });
-    const again = await request(surface, "/api/cancel", { body: {} });
+    await boundedRequest(surface, "/api/answer", { body: { value: 1 } });
+    const again = await boundedRequest(surface, "/api/cancel", { body: {} });
     assert.equal(again.status, 409);
   } finally {
     await surface.stop();
@@ -179,7 +209,7 @@ test("a second terminal decision is refused", async () => {
 test("an expired lease times the session out without an ack", async () => {
   const surface = await boot({ leaseTimeoutMs: 120 });
   try {
-    const decision = await surface.waitForDecision();
+    const decision = await boundedDecision(surface);
     assert.equal(decision.status, "timed_out");
   } finally {
     await surface.stop();
@@ -190,11 +220,11 @@ test("heartbeat renews the lease", async () => {
   const surface = await boot({ leaseTimeoutMs: 250 });
   try {
     for (let round = 0; round < 4; round += 1) {
-      await new Promise((resolve) => setTimeout(resolve, 100));
-      const beat = await request(surface, "/api/heartbeat", { body: {} });
+      await SURFACER_GENERAL_CHAIN.run("timer", () => new Promise((resolve) => setTimeout(resolve, 100)));
+      const beat = await boundedRequest(surface, "/api/heartbeat", { body: {} });
       assert.equal(beat.status, 200);
     }
-    const alive = await request(surface, "/api/state", { method: "GET" });
+    const alive = await boundedRequest(surface, "/api/state", { method: "GET" });
     assert.equal(alive.status, 200);
   } finally {
     await surface.stop();
@@ -204,8 +234,8 @@ test("heartbeat renews the lease", async () => {
 test("a missing ack finalizes after the ack timeout", async () => {
   const surface = await boot({ ackTimeoutMs: 100 });
   try {
-    await request(surface, "/api/answer", { body: { value: 7 } });
-    const decision = await surface.waitForDecision();
+    await boundedRequest(surface, "/api/answer", { body: { value: 7 } });
+    const decision = await boundedDecision(surface);
     assert.equal(decision.status, "completed");
   } finally {
     await surface.stop();
@@ -216,7 +246,7 @@ test("interrupt settles the decision immediately", async () => {
   const surface = await boot();
   try {
     surface.interrupt("SIGINT");
-    const decision = await surface.waitForDecision();
+    const decision = await boundedDecision(surface);
     assert.equal(decision.status, "interrupted");
     assert.match(decision.detail, /SIGINT/);
   } finally {
@@ -227,9 +257,9 @@ test("interrupt settles the decision immediately", async () => {
 test("unknown routes 404 and schema violations 400", async () => {
   const surface = await boot();
   try {
-    const missing = await request(surface, "/api/nothing", { body: {} });
+    const missing = await boundedRequest(surface, "/api/nothing", { body: {} });
     assert.equal(missing.status, 404);
-    const badBody = await request(surface, "/api/answer", { body: { wrong: true } });
+    const badBody = await boundedRequest(surface, "/api/answer", { body: { wrong: true } });
     assert.equal(badBody.status, 400);
   } finally {
     await surface.stop();
@@ -243,15 +273,15 @@ test("a handler finishing after a timeout cannot report success", async () => {
     leaseTimeoutMs: 250,
     api: {
       "POST /api/slow": async () => {
-        await new Promise((resolve) => setTimeout(resolve, 900));
+        await SURFACER_GENERAL_CHAIN.run("timer", () => new Promise((resolve) => setTimeout(resolve, 900)));
         return { status: 200, body: { ok: true } };
       },
     },
   });
   try {
-    const response = await request(surface, "/api/slow", { body: {} });
+    const response = await boundedRequest(surface, "/api/slow", { body: {} });
     assert.equal(response.status, 409);
-    const decision = await surface.waitForDecision();
+    const decision = await boundedDecision(surface);
     assert.equal(decision.status, "timed_out");
   } finally {
     await surface.stop();
@@ -275,8 +305,8 @@ test("session.run refuses work after the session closes", async () => {
     },
   });
   try {
-    await request(surface, "/api/grab", { body: {} });
-    await request(surface, "/api/cancel", { body: {} });
+    await boundedRequest(surface, "/api/grab", { body: {} });
+    await boundedRequest(surface, "/api/cancel", { body: {} });
     await assert.rejects(() => capturedSession.run(async () => "work"), /session is closed/);
   } finally {
     await surface.stop();
@@ -293,12 +323,12 @@ test("a handler that completes and then throws still reports the completion", as
     },
   });
   try {
-    const response = await request(surface, "/api/boom", { body: {} });
+    const response = await boundedRequest(surface, "/api/boom", { body: {} });
     assert.equal(response.status, 200);
     const body = await /** @type {any} */ (response.json());
     assert.equal(body.ok, true);
     assert.ok(body.operationId);
-    const decision = await surface.waitForDecision();
+    const decision = await boundedDecision(surface);
     assert.equal(decision.status, "completed");
   } finally {
     await surface.stop();
@@ -314,7 +344,7 @@ function holdResponseEnd(pathname, ms) {
   const original = ServerResponse.prototype.end;
   ServerResponse.prototype.end = function held(...args) {
     if (this.req?.url === pathname) {
-      setTimeout(() => original.apply(this, args), ms);
+      scheduleTimer(() => original.apply(this, args), ms);
       return this;
     }
     return original.apply(this, args);
@@ -333,7 +363,7 @@ test("the caller learns of a completion only after the winning request has been 
     api: {
       "POST /api/slow": async ({ session }) => {
         session.complete({ value: 1 });
-        await new Promise((resolve) => setTimeout(resolve, 150));
+        await SURFACER_GENERAL_CHAIN.run("timer", () => new Promise((resolve) => setTimeout(resolve, 150)));
         return null;
       },
     },
@@ -341,8 +371,8 @@ test("the caller learns of a completion only after the winning request has been 
   const release = holdResponseEnd("/api/slow", 250);
   try {
     let settled = false;
-    const decided = surface.waitForDecision().then((decision) => { settled = true; return decision; });
-    const answered = await request(surface, "/api/slow", { body: {} });
+    const decided = boundedDecision(surface).then((decision) => { settled = true; return decision; });
+    const answered = await boundedRequest(surface, "/api/slow", { body: {} });
     assert.equal(answered.status, 200);
     const { operationId } = await /** @type {any} */ (answered.json());
     assert.equal(typeof operationId, "string", "the browser gets the operation id to acknowledge");
@@ -442,13 +472,13 @@ test("a cancel is answered before the caller learns of it, and its acknowledgeme
   const release = holdResponseEnd("/api/cancel", 250);
   try {
     let settled = false;
-    const decided = surface.waitForDecision().then((decision) => { settled = true; return decision; });
-    const answered = await request(surface, "/api/cancel", { body: {} });
+    const decided = boundedDecision(surface).then((decision) => { settled = true; return decision; });
+    const answered = await boundedRequest(surface, "/api/cancel", { body: {} });
     assert.equal(answered.status, 200);
     const { operationId } = await /** @type {any} */ (answered.json());
     assert.equal(typeof operationId, "string");
     assert.equal(settled, false, "the decision had not settled when the cancel was answered");
-    const ack = await request(surface, "/api/ack", { body: { operationId } });
+    const ack = await boundedRequest(surface, "/api/ack", { body: { operationId } });
     assert.equal(ack.status, 200, "the acknowledgement is accepted");
     const decision = await decided;
     assert.equal(decision.status, "cancelled");

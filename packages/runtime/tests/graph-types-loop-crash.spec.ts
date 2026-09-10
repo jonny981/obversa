@@ -21,7 +21,7 @@ import {
 const TEST_TIMEOUT_MS = 30_000;
 const WRITER_CHAIN = defineBudgetChain('writer crash', TEST_TIMEOUT_MS, {
   setup: 5_000,
-  phases: [['writer readiness', 10_000], ['child exit', 5_000]],
+  phases: [['writer readiness', 10_000], ['child exit', 5_000], ['event read', 4_000]],
   cleanup: 5_000,
 });
 vi.setConfig({ testTimeout: TEST_TIMEOUT_MS, hookTimeout: TEST_TIMEOUT_MS });
@@ -67,7 +67,8 @@ it('resumes an engine-backed writer killed before its receipt and completes with
       })) events.push(event);
       return events;
     };
-    const before = await readEvents();
+    const boundedReadEvents = () => WRITER_CHAIN.run('event read', () => readEvents());
+    const before = await boundedReadEvents();
     expect(before.map((event) => event.type)).toEqual([
       'graph:run-started', 'graph:node-dispatched', 'graph:node-attempt-started',
     ]);
@@ -79,7 +80,7 @@ it('resumes an engine-backed writer killed before its receipt and completes with
       kind: 'complete', output: { seats: { 'seat-0': 'accepted', 'seat-1': 'accepted' } },
     });
     expect(calls).toEqual([writerTarget.model, ...reviewerTargets.map((target) => target.model)]);
-    const after = await readEvents();
+    const after = await boundedReadEvents();
     const receipts = after.filter((event) => event.type === 'graph:engine-attempt-recorded');
     expect(receipts.map((event) => ({ version: event.version, payload: event.payload }))).toEqual([
       { version: 1, payload: {
@@ -100,7 +101,7 @@ it('resumes an engine-backed writer killed before its receipt and completes with
     const replayed = await createGraphExecutor(crashFixture(root, calls));
     await expect(replayed.run(new AbortController().signal)).resolves.toEqual(outcome);
     expect(calls).toHaveLength(3);
-    expect(await readEvents()).toEqual(after);
+    expect(await boundedReadEvents()).toEqual(after);
   } finally {
     if (child.exitCode === null && child.signalCode === null) child.kill('SIGKILL');
     await WRITER_CHAIN.run('child exit', () => closed);

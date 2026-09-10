@@ -49,6 +49,10 @@ const BROWSER_TEST_TIMEOUT_MS = 180_000;
 const BROWSER_RENDER_CHAIN = defineBudgetChain("browser render", BROWSER_TEST_TIMEOUT_MS, {
   setup: 14_000,
   phases: [
+    ["server listen", 5_000],
+    ["shell fetch", 5_000],
+    ["model auth", 5_000],
+    ["highlight auth", 5_000],
     ["page post", 60_000],
     ["DevTools port", 10_000],
     ["DevTools target", 10_000],
@@ -60,7 +64,7 @@ const BROWSER_RENDER_CHAIN = defineBudgetChain("browser render", BROWSER_TEST_TI
 });
 const BROWSER_CANCEL_CHAIN = defineBudgetChain("browser cancel", BROWSER_TEST_TIMEOUT_MS, {
   setup: 14_000,
-  phases: [["acknowledgement", 10_000]],
+  phases: [["server listen", 5_000], ["acknowledgement", 10_000], ["cancel response", 2_000]],
   cleanup: 15_000,
 });
 const BROWSER_RESULTS_TIMEOUT_MS = BROWSER_RENDER_CHAIN.allowance("page post");
@@ -68,6 +72,19 @@ const BROWSER_RENDER_TIMEOUT_MS = 30_000;
 const DEVTOOLS_FETCH_TIMEOUT_MS = 5_000;
 assert.ok(BROWSER_RENDER_TIMEOUT_MS < BROWSER_RESULTS_TIMEOUT_MS, "the in-page probe must finish before the page-post guard");
 assert.ok(DEVTOOLS_FETCH_TIMEOUT_MS < BROWSER_RENDER_CHAIN.allowance("DevTools target"), "the DevTools fetch must fit inside its target phase");
+
+function scheduleTimer(chain, phase, callback, delayMs) {
+  void chain.run(phase, () => new Promise((resolve, reject) => {
+    setTimeout(() => {
+      try {
+        callback();
+        resolve();
+      } catch (error) {
+        reject(error);
+      }
+    }, delayMs);
+  }));
+}
 
 const SURFACER_SERVER = new URL("../../surfacer/src/server.mjs", import.meta.url);
 const CLIENT_KIT = new URL("../../surfacer/src/client.mjs", import.meta.url);
@@ -419,7 +436,7 @@ test("the review surface renders under the exact CSP with zero violations and fi
     if (asset) return send(200, asset[1], readFileSync(path.join(ASSETS_DIR, asset[0]), "utf8"));
     send(404, "text/plain", "not found");
   });
-  await /** @type {Promise<void>} */ (new Promise((r) => server.listen(0, "127.0.0.1", () => r())));
+  await BROWSER_RENDER_CHAIN.run("server listen", () => /** @type {Promise<void>} */ (new Promise((r) => server.listen(0, "127.0.0.1", () => r()))));
   const origin = `http://127.0.0.1:${/** @type {import("node:net").AddressInfo} */ (server.address()).port}`;
   const profile = mkdtempSync(path.join(os.tmpdir(), "browser-proof-profile-"));
   let chrome;
@@ -427,11 +444,11 @@ test("the review surface renders under the exact CSP with zero violations and fi
   let keys;
   try {
     // The static shell carries no diff; the model is gated.
-    const shellText = await (await fetch(`${origin}/`)).text();
+    const shellText = await BROWSER_RENDER_CHAIN.run("shell fetch", () => fetch(`${origin}/`).then((response) => response.text()));
     assert.doesNotMatch(shellText, /verbatimSECRET|review-data|line15|highlight\.css/);
-    assert.equal((await fetch(`${origin}/api/model`)).status, 401);
+    assert.equal((await BROWSER_RENDER_CHAIN.run("model auth", () => fetch(`${origin}/api/model`))).status, 401);
     // The highlight rules depend on the review's tokens, so no pre-auth route serves them.
-    assert.equal((await fetch(`${origin}/highlight.css`)).status, 404);
+    assert.equal((await BROWSER_RENDER_CHAIN.run("highlight auth", () => fetch(`${origin}/highlight.css`))).status, 404);
 
     chrome = spawn(CHROME, ["--headless=new", "--disable-gpu", "--no-first-run", "--remote-debugging-port=0", `--user-data-dir=${profile}`, `${origin}/#${token}`], { stdio: "ignore" });
     const resultStarted = Date.now();
@@ -542,7 +559,7 @@ test("a page that cannot load its review cancels the session instead of holding 
       if (url.pathname === "/api/model") return send(500, "application/json", JSON.stringify({ error: "the model is unavailable" }));
       if (url.pathname === "/api/cancel") {
         cancelSeen = true;
-        setTimeout(() => send(200, "application/json", JSON.stringify({ ok: true, status: "cancelled", operationId: "op-cancel" })), 1000);
+        scheduleTimer(BROWSER_CANCEL_CHAIN, "cancel response", () => send(200, "application/json", JSON.stringify({ ok: true, status: "cancelled", operationId: "op-cancel" })), 1000);
         return;
       }
       if (url.pathname === "/api/heartbeat" && cancelSeen) heartbeatsAfterCancel += 1;
@@ -560,7 +577,7 @@ test("a page that cannot load its review cancels the session instead of holding 
     if (asset) return send(200, asset[1], readFileSync(path.join(ASSETS_DIR, asset[0]), "utf8"));
     send(404, "text/plain", "not found");
   });
-  await /** @type {Promise<void>} */ (new Promise((r) => server.listen(0, "127.0.0.1", () => r())));
+  await BROWSER_CANCEL_CHAIN.run("server listen", () => /** @type {Promise<void>} */ (new Promise((r) => server.listen(0, "127.0.0.1", () => r()))));
   const origin = `http://127.0.0.1:${/** @type {import("node:net").AddressInfo} */ (server.address()).port}`;
   const profile = mkdtempSync(path.join(os.tmpdir(), "browser-proof-cancel-"));
   let chrome;

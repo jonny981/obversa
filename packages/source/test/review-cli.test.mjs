@@ -27,6 +27,12 @@ const NO_OPEN_CHAIN = defineBudgetChain("review-cli --no-open", NO_OPEN_TEST_TIM
   cleanup: 10_000,
 });
 const NO_OPEN_CHILD_TIMEOUT_MS = NO_OPEN_CHAIN.span("child process", ["page URL", "model fetch", "submit fetch", "ack fetch", "child close"]);
+const SHORT_COMMAND_CHAIN = defineBudgetChain("review-cli short command", 10_000, {
+  setup: 500,
+  phases: [["child process", 5_000]],
+  cleanup: 500,
+});
+const SHORT_COMMAND_TIMEOUT_MS = SHORT_COMMAND_CHAIN.span("child process", ["child process"]);
 
 test("parseArgs accepts the documented shapes", () => {
   assert.equal(parseArgs([]).mode, "worktree");
@@ -62,7 +68,7 @@ test("the command exits 2 on a bad argument, prints usage, writes nothing to std
   for (const args of cases) {
     // A surface would wait for a browser; a five-second cap turns a launched
     // surface into a failure of this test rather than a hang.
-    const run = spawnSync(process.execPath, [COMMAND, ...args], { encoding: "utf8", timeout: 5000 });
+    const run = spawnSync(process.execPath, [COMMAND, ...args], { encoding: "utf8", timeout: SHORT_COMMAND_TIMEOUT_MS });
     assert.equal(run.signal, null, `${args.join(" ")}: the command must exit on its own, not be killed`);
     assert.equal(run.status, 2, `${args.join(" ")}: exit code`);
     assert.equal(run.stdout, "", `${args.join(" ")}: nothing on stdout`);
@@ -73,7 +79,7 @@ test("the command exits 2 on a bad argument, prints usage, writes nothing to std
 });
 
 test("the command exits 0 on --help and prints usage on stdout", () => {
-  const run = spawnSync(process.execPath, [COMMAND, "--help"], { encoding: "utf8", timeout: 5000 });
+  const run = spawnSync(process.execPath, [COMMAND, "--help"], { encoding: "utf8", timeout: SHORT_COMMAND_TIMEOUT_MS });
   assert.equal(run.status, 0);
   assert.match(run.stdout, /Usage:/);
 });
@@ -200,7 +206,7 @@ test("the client kit is resolved under the import condition, the one the browser
   // browser CommonJS.
   const split = consumer({ import: "./client.mjs", require: "./client.cjs" });
   try {
-    const run = spawnSync(process.execPath, [path.join(split, "bin", "obversa-review.mjs"), "--no-open"], { encoding: "utf8", timeout: 5000, cwd: split });
+    const run = spawnSync(process.execPath, [path.join(split, "bin", "obversa-review.mjs"), "--no-open"], { encoding: "utf8", timeout: SHORT_COMMAND_TIMEOUT_MS, cwd: split });
     assert.equal(run.status, 0, run.stderr);
     assert.match(run.stdout, /KIT:export const kit = 'esm';/, "the ESM client kit reached the review");
     assert.doesNotMatch(run.stdout, /cjs/);
@@ -211,7 +217,7 @@ test("the client kit is resolved under the import condition, the one the browser
   // require-condition lookup has nothing to resolve and fails before main.
   const importOnly = consumer({ import: "./client.mjs" });
   try {
-    const help = spawnSync(process.execPath, [path.join(importOnly, "bin", "obversa-review.mjs"), "--help"], { encoding: "utf8", timeout: 5000, cwd: importOnly });
+    const help = spawnSync(process.execPath, [path.join(importOnly, "bin", "obversa-review.mjs"), "--help"], { encoding: "utf8", timeout: SHORT_COMMAND_TIMEOUT_MS, cwd: importOnly });
     assert.equal(help.status, 0, help.stderr);
     assert.match(help.stdout, /Usage:/);
   } finally {
@@ -226,10 +232,10 @@ test("the command behaves the same when run through a symlink, as a bin install 
   const link = path.join(dir, "obversa-review");
   symlinkSync(COMMAND, link);
   try {
-    const help = spawnSync(process.execPath, [link, "--help"], { encoding: "utf8", timeout: 5000 });
+    const help = spawnSync(process.execPath, [link, "--help"], { encoding: "utf8", timeout: SHORT_COMMAND_TIMEOUT_MS });
     assert.equal(help.status, 0);
     assert.match(help.stdout, /Usage:/, "help must print through a symlink");
-    const bad = spawnSync(process.execPath, [link, "--cwd"], { encoding: "utf8", timeout: 5000 });
+    const bad = spawnSync(process.execPath, [link, "--cwd"], { encoding: "utf8", timeout: SHORT_COMMAND_TIMEOUT_MS });
     assert.equal(bad.status, 2);
     assert.match(bad.stderr, /--cwd needs a value/);
     assert.equal(bad.stdout, "");

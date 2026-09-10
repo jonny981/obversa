@@ -14,7 +14,7 @@ import { defineBudgetChain } from '../../../test-support/budget-chain.mjs';
 const TEST_TIMEOUT_MS = 30_000;
 const SAFE_CHANGE_CHAIN = defineBudgetChain('safe-change crash', TEST_TIMEOUT_MS, {
   setup: 5_000,
-  phases: [['target write', 10_000], ['child exit', 5_000]],
+  phases: [['target write', 10_000], ['child exit', 5_000], ['event read', 4_000]],
   cleanup: 5_000,
 });
 vi.setConfig({ testTimeout: TEST_TIMEOUT_MS, hookTimeout: TEST_TIMEOUT_MS });
@@ -50,6 +50,10 @@ async function events(run: SafeChangeRun, stream: EventStreamRef): Promise<Store
   return values;
 }
 
+function boundedEvents(run: SafeChangeRun, stream: EventStreamRef): Promise<StoredEvent[]> {
+  return SAFE_CHANGE_CHAIN.run('event read', () => events(run, stream));
+}
+
 it.each([[0, false, false], [1, false, false], [0, true, false], [0, false, true]] as const)(
   'reconciles outward write %i after SIGKILL without applying it twice (missing witness: %s, changed request: %s)', async (index, missingWitness, changedRequest) => {
   const directory = await realpath(await mkdtemp(join(tmpdir(), 'obversa-safe-change-crash-')));
@@ -63,7 +67,7 @@ it.each([[0, false, false], [1, false, false], [0, true, false], [0, false, true
     const targetBytes = await Promise.all(input.destinations.map(({ id }) => readFile(targetPath(directory, id))));
     const run = await openSafeChangeRun({ directory, runId, input });
     expect(await run.executor.run(signal())).toMatchObject({ kind: 'pause' });
-    const sourceHistory = await Promise.all(input.sourceIds.map((id) => events(run, sourceStream(id))));
+    const sourceHistory = await Promise.all(input.sourceIds.map((id) => boundedEvents(run, sourceStream(id))));
     await run.approve();
     const originalApproval = changedRequest ? await run.requestApproval() : null;
 
@@ -109,7 +113,7 @@ it.each([[0, false, false], [1, false, false], [0, true, false], [0, false, true
       expect(changedApproval.requestId).not.toBe(originalApproval!.requestId);
       expect(changedApproval.digest).not.toBe(originalApproval!.digest);
     }
-    const targetBefore = await events(fresh, targetStream(selected.id));
+    const targetBefore = await boundedEvents(fresh, targetStream(selected.id));
     expect(targetBefore.map((event) => event.type)).toEqual(['safe-change:intent']);
     const backup = JSON.parse(new TextDecoder().decode(await fresh.storage.artifactStore.read(
       { namespace: fresh.storage.record.namespace, runId },
@@ -130,24 +134,24 @@ it.each([[0, false, false], [1, false, false], [0, true, false], [0, false, true
     const position = fresh.actionPositions[index]!;
     expect(await fresh.executor.run(signal())).toMatchObject({ kind: 'waiting', positions: [position] });
     expect(await fresh.executor.resume(position, signal())).toMatchObject({ kind: 'pause' });
-    const recoveryEvents = await events(fresh, { namespace: fresh.storage.record.namespace, streamId: runId });
+    const recoveryEvents = await boundedEvents(fresh, { namespace: fresh.storage.record.namespace, streamId: runId });
     const started = recoveryEvents.find((event) => event.type === 'graph:node-attempt-started'
       && (event.payload.identity as JsonObject).position === position)!;
     expect(recoveryEvents.find((event) => event.type === 'graph:node-paused' && event.payload.position === position)?.payload)
       .toMatchObject({ request: { kind: 'reconcile-attempt', attemptId: (started.payload.identity as JsonObject).attemptId } });
     expect(await readFile(targetPath(directory, selected.id))).toEqual(pendingBytes);
-    expect(await events(fresh, targetStream(selected.id))).toEqual(targetBefore);
+    expect(await boundedEvents(fresh, targetStream(selected.id))).toEqual(targetBefore);
 
     if (changedRequest) {
       const next = input.destinations[1]!;
       const nextBefore = await readFile(targetPath(directory, next.id));
       expect(await fresh.executor.resume(position, signal())).toMatchObject({ kind: 'pause' });
-      const after = await events(fresh, { namespace: fresh.storage.record.namespace, streamId: runId });
+      const after = await boundedEvents(fresh, { namespace: fresh.storage.record.namespace, streamId: runId });
       expect(after.some((event) => event.type === 'graph:node-completed' && event.payload.position === position)).toBe(false);
-      expect((await events(fresh, targetStream(selected.id))).some((event) => event.payload.outcome === 'verified')).toBe(false);
+      expect((await boundedEvents(fresh, targetStream(selected.id))).some((event) => event.payload.outcome === 'verified')).toBe(false);
       expect(await readFile(targetPath(directory, selected.id))).toEqual(committedBytes);
       expect(await readFile(targetPath(directory, next.id))).toEqual(nextBefore);
-      expect(await events(fresh, targetStream(next.id))).toEqual([]);
+      expect(await boundedEvents(fresh, targetStream(next.id))).toEqual([]);
       return;
     }
 
@@ -157,14 +161,14 @@ it.each([[0, false, false], [1, false, false], [0, true, false], [0, false, true
       expect(await fresh.executor.resume(position, signal())).toMatchObject({ kind: 'pause' });
       expect(await readFile(targetPath(directory, selected.id))).toEqual(pendingBytes);
       expect(await readFile(targetPath(directory, next.id))).toEqual(nextBefore);
-      expect(await events(fresh, targetStream(next.id))).toEqual([]);
-      expect((await events(fresh, targetStream(selected.id))).some((event) => event.payload.outcome === 'verified')).toBe(false);
+      expect(await boundedEvents(fresh, targetStream(next.id))).toEqual([]);
+      expect((await boundedEvents(fresh, targetStream(selected.id))).some((event) => event.payload.outcome === 'verified')).toBe(false);
       await writeFile(targetPath(directory, selected.id), committedBytes);
       const repaired = await openSafeChangeRun({ directory, runId });
       expect(await repaired.executor.resume(position, signal())).toMatchObject({ kind: 'pause' });
       expect(await readFile(targetPath(directory, selected.id))).toEqual(committedBytes);
       expect(await readFile(targetPath(directory, next.id))).toEqual(nextBefore);
-      expect(await events(repaired, targetStream(next.id))).toEqual([]);
+      expect(await boundedEvents(repaired, targetStream(next.id))).toEqual([]);
       return;
     }
 
@@ -179,23 +183,23 @@ it.each([[0, false, false], [1, false, false], [0, true, false], [0, false, true
       const records = JSON.parse(target.content);
       expect(records).toEqual(input.mappings.filter((mapping) => mapping.targetId === destination.id)
         .map((mapping) => JSON.parse(sourceBytes[input.sourceIds.indexOf(mapping.sourceId)]!.toString('utf8'))));
-      const history = await events(fresh, targetStream(destination.id));
+      const history = await boundedEvents(fresh, targetStream(destination.id));
       expect(history.map((event) => event.type)).toEqual(['safe-change:intent', 'safe-change:result']);
       expect(history[1]!.payload).toMatchObject({ actionId: target.lastAction.actionId, outcome: 'verified' });
       return { bytes, history };
     }));
     for (const [sourceIndex, id] of input.sourceIds.entries()) {
       expect(await readFile(sourcePath(directory, id))).toEqual(sourceBytes[sourceIndex]);
-      expect(await events(fresh, sourceStream(id))).toEqual(sourceHistory[sourceIndex]);
+      expect(await boundedEvents(fresh, sourceStream(id))).toEqual(sourceHistory[sourceIndex]);
     }
     const graphStream = { namespace: fresh.storage.record.namespace, streamId: runId };
-    const graphBeforeReplay = await events(fresh, graphStream);
+    const graphBeforeReplay = await boundedEvents(fresh, graphStream);
     const replay = await openSafeChangeRun({ directory, runId });
     expect(await replay.executor.run(signal())).toMatchObject({ kind: 'complete' });
-    expect(await events(replay, graphStream)).toEqual(graphBeforeReplay);
+    expect(await boundedEvents(replay, graphStream)).toEqual(graphBeforeReplay);
     for (const [targetIndex, destination] of input.destinations.entries()) {
       expect(await readFile(targetPath(directory, destination.id))).toEqual(completedTargets[targetIndex]!.bytes);
-      expect(await events(replay, targetStream(destination.id))).toEqual(completedTargets[targetIndex]!.history);
+      expect(await boundedEvents(replay, targetStream(destination.id))).toEqual(completedTargets[targetIndex]!.history);
     }
   } finally {
     if (child && child.exitCode === null && child.signalCode === null) child.kill('SIGKILL');
@@ -230,16 +234,16 @@ it.each(['changed content', 'malformed JSON'] as const)(
     expect(await run.executor.run(signal())).toMatchObject({ kind: 'pause' });
     await run.approve();
     expect(await run.executor.resume(run.approvalPosition, signal())).toMatchObject({ kind: 'pause' });
-    const history = await events(run, targetStream(first.id));
+    const history = await boundedEvents(run, targetStream(first.id));
     expect(history.find((event) => event.type === 'safe-change:result')?.payload).toMatchObject({ outcome: 'mismatch' });
     expect(await readFile(targetPath(directory, second.id))).toEqual(secondBefore);
-    expect(await events(run, targetStream(second.id))).toEqual([]);
+    expect(await boundedEvents(run, targetStream(second.id))).toEqual([]);
     expect(approvedBytes).toBeDefined();
     await writeFile(targetPath(directory, first.id), approvedBytes!);
     const reopened = await openSafeChangeRun({ directory, runId });
     expect(await reopened.executor.resume(reopened.verificationPositions[0]!, signal())).toMatchObject({ kind: 'pause' });
-    expect(await events(reopened, targetStream(first.id))).toEqual(history);
-    expect(await events(reopened, targetStream(second.id))).toEqual([]);
+    expect(await boundedEvents(reopened, targetStream(first.id))).toEqual(history);
+    expect(await boundedEvents(reopened, targetStream(second.id))).toEqual([]);
     expect(await readFile(targetPath(directory, second.id))).toEqual(secondBefore);
   } finally {
     await rm(directory, { recursive: true, force: true });
@@ -263,8 +267,8 @@ it('fails when readback cannot run instead of recording a content-mismatch pause
     await run.approve();
     expect(await run.executor.resume(run.approvalPosition, signal())).toMatchObject({ kind: 'fail' });
     expect(await readFile(targetPath(directory, second.id))).toEqual(secondBefore);
-    expect(await events(run, targetStream(second.id))).toEqual([]);
-    expect((await events(run, targetStream(first.id))).some((event) => event.payload.outcome === 'mismatch')).toBe(false);
+    expect(await boundedEvents(run, targetStream(second.id))).toEqual([]);
+    expect((await boundedEvents(run, targetStream(first.id))).some((event) => event.payload.outcome === 'mismatch')).toBe(false);
   } finally {
     await rm(directory, { recursive: true, force: true });
   }
@@ -302,9 +306,9 @@ it.each(['source', 'target version', 'destination activity'] as const)(
       expect(await run.executor.resume(run.approvalPosition, signal())).toMatchObject({ kind: 'fail' });
       expect(secondAfterDrift).toBeDefined();
       expect(await readFile(targetPath(directory, second.id))).toEqual(secondAfterDrift);
-      expect((await events(run, targetStream(first.id))).find((event) => event.type === 'safe-change:result')?.payload)
+      expect((await boundedEvents(run, targetStream(first.id))).find((event) => event.type === 'safe-change:result')?.payload)
         .toMatchObject({ outcome: 'verified' });
-      expect((await events(run, targetStream(second.id))).some((event) => event.type === 'safe-change:result')).toBe(false);
+      expect((await boundedEvents(run, targetStream(second.id))).some((event) => event.type === 'safe-change:result')).toBe(false);
     } finally {
       await rm(directory, { recursive: true, force: true });
     }
