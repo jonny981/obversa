@@ -49,7 +49,7 @@ reference points to a tree and does not add a commit to the project history.
 The example creates and removes a temporary Git repository:
 
 ```bash
-pnpm --filter @obversa/memory-git exec tsx ../../examples/packages/memory-git.ts
+pnpm --filter @obversa/memory-git exec tsx ../../examples/memory-git.ts
 ```
 
 ## License

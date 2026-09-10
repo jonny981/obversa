@@ -13,7 +13,9 @@ import { LoopError } from './errors.js';
 
 export interface GraphNodeShape {
   name: string;
-  needs?: string[];
+  needs?: string | string[];
+  desc?: string;
+  gate?: string;
   optional?: boolean;
   /** A boolean meaning "a `when` gate exists" — the meta stores condition
    *  labels, so this is a presence check, not label equality. */
@@ -50,8 +52,13 @@ function sameSet(a: string[], b: string[]): boolean {
 }
 
 function checkNode(node: NodeMeta, exp: GraphNodeShape, path: string): void {
-  if (exp.needs && !sameSet(exp.needs, node.needs ?? []))
+  const expectedNeeds = typeof exp.needs === 'string' ? [exp.needs] : exp.needs;
+  if (expectedNeeds && !sameSet(expectedNeeds, node.needs ?? []))
     fail(`${path}.needs`, exp.needs, node.needs ?? []);
+  if (exp.desc !== undefined && node.desc !== exp.desc)
+    fail(`${path}.desc`, exp.desc, node.desc);
+  if (exp.gate !== undefined && node.gate !== exp.gate)
+    fail(`${path}.gate`, exp.gate, node.gate);
   if (exp.optional !== undefined && (node.optional ?? false) !== exp.optional)
     fail(`${path}.optional`, exp.optional, node.optional ?? false);
   if (exp.isolate !== undefined && (node.isolate ?? false) !== exp.isolate)

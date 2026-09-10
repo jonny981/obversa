@@ -32,10 +32,10 @@ vi.mock('@obversa/runtime', async (importOriginal) => {
 });
 afterEach(() => { approvalDefinition.version = undefined; });
 
-import { openSafeChangeRun } from '../../../examples/safe-change/recipe.js';
+import { openSafeChangeRun } from '../../../examples/safe-change-recipe.js';
 import {
   seedSafeChangeFixture, sourcePath, sourceStream, targetPath, targetStream,
-} from '../../../examples/safe-change/file-adapter.js';
+} from '../../../examples/safe-change-file-adapter.js';
 import type { DomainEventEnvelope, EventStreamRef } from '../src/events/envelope.js';
 import type { ArtifactReference } from '../src/artifacts/store.js';
 import type { JsonObject } from '../src/graph/value.js';

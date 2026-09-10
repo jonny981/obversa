@@ -33,6 +33,75 @@ is also the record you get back.
   number of times it may send work back. An overrun is a result you can
   read, not a hang.
 
+## Say what each step is for, beside the code
+
+A step can carry two sentences next to its job: `desc`, what the step does,
+and `gate`, what done means for it. Both are optional. Both travel into the
+plan the runtime prints, into the record, and into the input the step's
+reviewer receives, so a reviewer judges the work against the sentence the
+author wrote beside the code. A criterion written beside the code is much
+harder to write vaguely. `needs` takes a single name when a step has one
+dependency, which is the common case.
+
+```ts
+import {
+  dag,
+  fnJob,
+  jobMeta,
+  renderPlan,
+  run,
+  type Outcome,
+} from '@obversa/runtime';
+
+function stage(name: string, summary: string) {
+  return fnJob(name, async (): Promise<Outcome> => ({
+    status: 'pass',
+    summary,
+  }));
+}
+
+const describedTeam = dag({
+  name: 'described-team',
+  nodes: {
+    brief: {
+      desc: 'Turn the request into a short delivery brief.',
+      gate: 'The brief names the user, outcome, and constraints.',
+      job: stage('brief', 'brief ready'),
+    },
+    build: {
+      needs: 'brief',
+      desc: 'Build the smallest useful change from the brief.',
+      gate: 'The change meets the brief and its checks pass.',
+      job: stage('build', 'change built'),
+    },
+    review: {
+      needs: 'build',
+      desc: 'Check the change before it reaches the user.',
+      gate: 'The change is safe to release and easy to explain.',
+      job: stage('review', 'review complete'),
+    },
+  },
+});
+
+const result = await run(describedTeam);
+const report = {
+  plan: renderPlan(jobMeta(describedTeam)).join('\n'),
+  status: result.outcome.status,
+};
+console.log(JSON.stringify(report, null, 2));
+
+if (result.outcome.status !== 'pass') process.exitCode = 1;
+```
+
+The plan the runtime renders shows both sentences under each step:
+
+```text
+{
+  "plan": "dag \"described-team\" (3 nodes)\n  - brief\n      desc: Turn the request into a short delivery brief.\n      gate: The brief names the user, outcome, and constraints.\n      fn \"brief\"\n  - build (needs brief)\n      desc: Build the smallest useful change from the brief.\n      gate: The change meets the brief and its checks pass.\n      fn \"build\"\n  - review (needs build)\n      desc: Check the change before it reaches the user.\n      gate: The change is safe to release and easy to explain.\n      fn \"review\"",
+  "status": "pass"
+}
+```
+
 ## A feature team, in one file
 
 Five named stages. The review is a panel of three that passes on two, and
@@ -67,11 +136,6 @@ export const featureDelivery = pipeline(
 Run it and the panel fails the first attempt, implement runs again, and the
 second attempt passes:
 
-From an Obversa checkout:
-
-```bash
-pnpm example:feature-team
-```
 
 ```text
 {

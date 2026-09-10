@@ -9,11 +9,6 @@ binds a stored action decision to the same kind of exact subject.
 
 ## Run the example
 
-From an Obversa checkout, run:
-
-```bash
-pnpm example:proof-bound-approval
-```
 
 The report shows that two accepted-result records cite one proof digest, stored
 state survives reopening, and changed workspace-anchor or output bytes return
@@ -401,13 +396,7 @@ Reviewers can share evidence while retaining separate accepted answers.
 A different reviewer identity does not inherit another reviewer's result.
 The cache does not execute missing proof work or create completion records.
 
-From a checkout, run the cache example:
-
-```bash
-pnpm example:proof-cache
-```
-
-The program in `examples/packages/proof-cache.ts` checks a captured timeout
+The program in `examples/proof-cache.ts` checks a captured timeout
 configuration with a deterministic review node. It uses a real Git workspace
 anchor and two in-memory sources that own their revision counters.
 Two packet requests share the same artifact. Changing the configuration

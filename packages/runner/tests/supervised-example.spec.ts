@@ -45,7 +45,7 @@ it('the real example preserves files and the original failure when startup canno
   try {
     let failure: unknown;
     try {
-      await import('../../../examples/packages/supervised-run.ts');
+      await import('../../../examples/supervised-run.ts');
     } catch (error) {
       failure = error;
     }

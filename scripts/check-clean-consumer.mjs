@@ -25,6 +25,23 @@ const expectedGraphReport = {
   maxFanOut: { kind: 'known', value: 1 },
 };
 
+const expectedDescribedTeamReport = {
+  plan: `dag "described-team" (3 nodes)
+  - brief
+      desc: Turn the request into a short delivery brief.
+      gate: The brief names the user, outcome, and constraints.
+      fn "brief"
+  - build (needs brief)
+      desc: Build the smallest useful change from the brief.
+      gate: The change meets the brief and its checks pass.
+      fn "build"
+  - review (needs build)
+      desc: Check the change before it reaches the user.
+      gate: The change is safe to release and easy to explain.
+      fn "review"`,
+  status: 'pass',
+};
+
 const expectedPipelineReport = {
   executor: 'complete',
   output: {
@@ -510,9 +527,10 @@ const tsconfig = {
   },
   include: [
     'consumer.ts',
-    'offline-review.workflow.ts',
-    'feature-delivery.workflow.ts',
+    'offline-review.ts',
+    'feature-delivery.ts',
     'feature-team.ts',
+    'described-team.ts',
     'forge-helper.ts',
     'custom-graph.ts',
     'pipeline.ts',
@@ -526,57 +544,53 @@ const tsconfig = {
     'turn-taking.ts',
     'workspace.ts',
     'supervised-run.ts',
-    'example.ts',
-    'recipe.ts',
-    'file-adapter.ts',
+    'safe-change.ts',
+    'safe-change-recipe.ts',
+    'safe-change-file-adapter.ts',
   ],
 };
 
 async function main() {
   const exampleSource = await readFile(
-    join(root, 'examples', 'workflows', 'offline-review.workflow.ts'),
+    join(root, 'examples', 'offline-review.ts'),
     'utf8',
   );
   const featureExampleSource = await readFile(
-    join(root, 'examples', 'workflows', 'feature-delivery.workflow.ts'),
+    join(root, 'examples', 'feature-delivery.ts'),
     'utf8',
   );
-  const forgeExamplePath = join(root, 'examples', 'packages', 'forge-helper.ts');
+  const forgeExamplePath = join(root, 'examples', 'forge-helper.ts');
   const forgeExampleSource = await readFile(forgeExamplePath, 'utf8');
-  const graphExamplePath = join(root, 'examples', 'packages', 'custom-graph.ts');
+  const graphExamplePath = join(root, 'examples', 'custom-graph.ts');
   const graphExampleSource = await readFile(graphExamplePath, 'utf8');
-  const pipelineExamplePath = join(root, 'examples', 'packages', 'pipeline.ts');
+  const pipelineExamplePath = join(root, 'examples', 'pipeline.ts');
   const teamConversationPath = join(root, 'examples', 'team-conversation.ts');
   const teamConversationSource = await readFile(teamConversationPath, 'utf8');
   const teamConversationDocument = await readFile(
     join(root, 'docs', 'public', 'workflows', 'team-conversation.mdx'), 'utf8',
   );
-  const reviewLoopExamplePath = join(root, 'examples', 'packages', 'review-loop.ts');
-  const callbackGateExamplePath = join(root, 'examples', 'packages', 'callback-gate.ts');
+  const reviewLoopExamplePath = join(root, 'examples', 'review-loop.ts');
+  const callbackGateExamplePath = join(root, 'examples', 'callback-gate.ts');
   const callbackGateExampleSource = await readFile(callbackGateExamplePath, 'utf8');
-  const proofBoundApprovalExamplePath = join(
-    root,
-    'examples',
-    'packages',
-    'proof-bound-approval.ts',
-  );
+  const proofBoundApprovalExamplePath = join(root, 'examples', 'proof-bound-approval.ts');
   const proofBoundApprovalExampleSource = await readFile(
     proofBoundApprovalExamplePath,
     'utf8',
   );
-  const storageExamplePath = join(root, 'examples', 'packages', 'durable-storage.ts');
-  const proofCacheExamplePath = join(root, 'examples', 'packages', 'proof-cache.ts');
+  const storageExamplePath = join(root, 'examples', 'durable-storage.ts');
+  const proofCacheExamplePath = join(root, 'examples', 'proof-cache.ts');
   const storageExampleSource = await readFile(storageExamplePath, 'utf8');
-  const attemptExamplePath = join(root, 'examples', 'packages', 'safe-node-attempt.ts');
+  const attemptExamplePath = join(root, 'examples', 'safe-node-attempt.ts');
   const attemptExampleSource = await readFile(attemptExamplePath, 'utf8');
-  const turnTakingExamplePath = join(root, 'examples', 'packages', 'turn-taking.ts');
-  const workspaceExamplePath = join(root, 'examples', 'packages', 'workspace.ts');
-  const featureTeamExamplePath = join(root, 'examples', 'packages', 'feature-team.ts');
-  const runnerExamplePath = join(root, 'examples', 'packages', 'supervised-run.ts');
-  const runnerHostPath = join(root, 'examples', 'packages', 'supervised-host.mjs');
-  const safeChangeExamplePath = join(root, 'examples', 'safe-change', 'example.ts');
-  const safeChangeRecipePath = join(root, 'examples', 'safe-change', 'recipe.ts');
-  const safeChangeFileAdapterPath = join(root, 'examples', 'safe-change', 'file-adapter.ts');
+  const turnTakingExamplePath = join(root, 'examples', 'turn-taking.ts');
+  const workspaceExamplePath = join(root, 'examples', 'workspace.ts');
+  const featureTeamExamplePath = join(root, 'examples', 'feature-team.ts');
+  const runnerExamplePath = join(root, 'examples', 'supervised-run.ts');
+  const runnerHostPath = join(root, 'examples', 'supervised-host.mjs');
+  const safeChangeExamplePath = join(root, 'examples', 'safe-change.ts');
+  const safeChangeRecipePath = join(root, 'examples', 'safe-change-recipe.ts');
+  const safeChangeFileAdapterPath = join(root, 'examples', 'safe-change-file-adapter.ts');
+  const describedTeamExamplePath = join(root, 'examples', 'described-team.ts');
   const turnTakingExampleSource = await readFile(turnTakingExamplePath, 'utf8');
   const safeChangeExampleSource = await readFile(safeChangeExamplePath, 'utf8');
   const graphDocument = await readFile(
@@ -676,15 +690,15 @@ async function main() {
     await writeFile(join(consumerDirectory, 'package.json'), `${JSON.stringify(manifest, null, 2)}\n`);
     await writeFile(join(consumerDirectory, 'tsconfig.json'), `${JSON.stringify(tsconfig, null, 2)}\n`);
     await writeFile(join(consumerDirectory, 'consumer.ts'), consumerSource.trimStart());
-    await writeFile(join(consumerDirectory, 'example.ts'), safeChangeExampleSource);
-    await copyFile(safeChangeRecipePath, join(consumerDirectory, 'recipe.ts'));
-    await copyFile(safeChangeFileAdapterPath, join(consumerDirectory, 'file-adapter.ts'));
+    await writeFile(join(consumerDirectory, 'safe-change.ts'), safeChangeExampleSource);
+    await copyFile(safeChangeRecipePath, join(consumerDirectory, 'safe-change-recipe.ts'));
+    await copyFile(safeChangeFileAdapterPath, join(consumerDirectory, 'safe-change-file-adapter.ts'));
     await writeFile(
-      join(consumerDirectory, 'offline-review.workflow.ts'),
+      join(consumerDirectory, 'offline-review.ts'),
       exampleSource,
     );
     await writeFile(
-      join(consumerDirectory, 'feature-delivery.workflow.ts'),
+      join(consumerDirectory, 'feature-delivery.ts'),
       featureExampleSource,
     );
     await copyFile(forgeExamplePath, join(consumerDirectory, 'forge-helper.ts'));
@@ -703,6 +717,7 @@ async function main() {
     await copyFile(turnTakingExamplePath, join(consumerDirectory, 'turn-taking.ts'));
     await copyFile(workspaceExamplePath, join(consumerDirectory, 'workspace.ts'));
     await copyFile(featureTeamExamplePath, join(consumerDirectory, 'feature-team.ts'));
+    await copyFile(describedTeamExamplePath, join(consumerDirectory, 'described-team.ts'));
     await copyFile(runnerExamplePath, join(consumerDirectory, 'supervised-run.ts'));
     await copyFile(runnerHostPath, join(consumerDirectory, 'supervised-host.mjs'));
 
@@ -733,16 +748,22 @@ async function main() {
     }).trim();
     const report = JSON.parse(output.split(/\r?\n/).at(-1));
     const productionLine = JSON.parse(
-      run(process.execPath, ['dist/offline-review.workflow.js'], { cwd: consumerDirectory }),
+      run(process.execPath, ['dist/offline-review.js'], { cwd: consumerDirectory }),
     );
     const directProductionLine = JSON.parse(
-      run('pnpm', ['exec', 'tsx', 'offline-review.workflow.ts'], { cwd: consumerDirectory }),
+      run('pnpm', ['exec', 'tsx', 'offline-review.ts'], { cwd: consumerDirectory }),
     );
     const featureLine = JSON.parse(
-      run(process.execPath, ['dist/feature-delivery.workflow.js'], { cwd: consumerDirectory }),
+      run(process.execPath, ['dist/feature-delivery.js'], { cwd: consumerDirectory }),
     );
     const directFeatureLine = JSON.parse(
-      run('pnpm', ['exec', 'tsx', 'feature-delivery.workflow.ts'], { cwd: consumerDirectory }),
+      run('pnpm', ['exec', 'tsx', 'feature-delivery.ts'], { cwd: consumerDirectory }),
+    );
+    const compiledDescribedTeam = JSON.parse(
+      run(process.execPath, ['dist/described-team.js'], { cwd: consumerDirectory }),
+    );
+    const directDescribedTeam = JSON.parse(
+      run('pnpm', ['exec', 'tsx', 'described-team.ts'], { cwd: consumerDirectory }),
     );
     const forgeHelper = JSON.parse(
       run(process.execPath, ['dist/forge-helper.js'], { cwd: consumerDirectory }),
@@ -755,10 +776,10 @@ async function main() {
       '{ approved: false },',
     );
     await writeFile(
-      join(consumerDirectory, 'feature-delivery.deny.workflow.ts'),
+      join(consumerDirectory, 'feature-delivery.deny.ts'),
       featureDenySource,
     );
-    const denyRun = spawnSync('pnpm', ['exec', 'tsx', 'feature-delivery.deny.workflow.ts'], {
+    const denyRun = spawnSync('pnpm', ['exec', 'tsx', 'feature-delivery.deny.ts'], {
       cwd: consumerDirectory,
       encoding: 'utf8',
     });
@@ -770,10 +791,10 @@ async function main() {
       'const repaired = false;',
     );
     await writeFile(
-      join(consumerDirectory, 'feature-delivery.red.workflow.ts'),
+      join(consumerDirectory, 'feature-delivery.red.ts'),
       featureRedSource,
     );
-    const redRun = spawnSync('pnpm', ['exec', 'tsx', 'feature-delivery.red.workflow.ts'], {
+    const redRun = spawnSync('pnpm', ['exec', 'tsx', 'feature-delivery.red.ts'], {
       cwd: consumerDirectory,
       encoding: 'utf8',
     });
@@ -824,10 +845,10 @@ async function main() {
       run('pnpm', ['exec', 'tsx', 'proof-cache.ts'], { cwd: consumerDirectory }),
     );
     const compiledSafeChange = JSON.parse(
-      run(process.execPath, ['dist/example.js'], { cwd: consumerDirectory }),
+      run(process.execPath, ['dist/safe-change.js'], { cwd: consumerDirectory }),
     );
     const directSafeChange = JSON.parse(
-      run('pnpm', ['exec', 'tsx', 'example.ts'], { cwd: consumerDirectory }),
+      run('pnpm', ['exec', 'tsx', 'safe-change.ts'], { cwd: consumerDirectory }),
     );
     const directStorage = JSON.parse(
       run('pnpm', ['exec', 'tsx', 'durable-storage.ts'], { cwd: consumerDirectory }),
@@ -879,6 +900,8 @@ async function main() {
     }
     assert.deepEqual(compiledGraph, expectedGraphReport);
     assert.deepEqual(directGraph, expectedGraphReport);
+    assert.deepEqual(compiledDescribedTeam, expectedDescribedTeamReport);
+    assert.deepEqual(directDescribedTeam, expectedDescribedTeamReport);
     assert.deepEqual(compiledPipeline, expectedPipelineReport);
     assert.deepEqual(directPipeline, expectedPipelineReport);
     assert.deepEqual(compiledReviewLoop, expectedReviewLoopReport);
@@ -965,7 +988,7 @@ async function main() {
     if (refs.length !== 1) throw new Error(`Git memory created ${refs.length} private refs instead of one`);
 
     console.log(
-      'Clean offline consumer passed with TypeScript 7 and 6, the first production line, the safe-change production line, the feature-delivery line, the forge helper, the outside graph, the pipeline executor example, the review loop, the callback gate, proof-bound approval, the turn-taking executor example, durable storage, safe node attempts, the supervised runner, 17 memory cases, and both memory adapters.',
+      'Clean offline consumer passed with TypeScript 7 and 6, the first production line, the described-team example, the safe-change production line, the feature-delivery line, the forge helper, the outside graph, the pipeline executor example, the review loop, the callback gate, proof-bound approval, the turn-taking executor example, durable storage, safe node attempts, the supervised runner, 17 memory cases, and both memory adapters.',
     );
   } finally {
     await rm(directory, { recursive: true, force: true });

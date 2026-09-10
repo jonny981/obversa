@@ -9,7 +9,7 @@ import {
   run,
   sequence,
 } from '../src/api.ts';
-import type { Outcome, RunOptions } from '../src/api.ts';
+import type { LoopEvent, Outcome, RunOptions } from '../src/api.ts';
 import { MockEngine } from '../src/testing.ts';
 
 const runOptions: RunOptions = {
@@ -93,6 +93,45 @@ describe('dag', () => {
 
     expect(result.outcome.status).toBe('fail');
     expect(order).toEqual(['producer']);
+  });
+
+  it('accepts scalar needs and records node purpose for the reviewer context', async () => {
+    const events: LoopEvent[] = [];
+    let graph: unknown;
+    const result = await run(
+      dag({
+        name: 'reviewable-change',
+        nodes: {
+          build: pass([], 'build'),
+          review: {
+            needs: 'build',
+            desc: 'Review the built change.',
+            gate: 'The change meets the acceptance criteria.',
+            job: async (ctx) => {
+              graph = ctx.graph;
+              return { status: 'pass' as const };
+            },
+          },
+        },
+      }),
+      { ...runOptions, onEvent: (event) => events.push(event) },
+    );
+
+    expect(result.outcome.status).toBe('pass');
+    expect(graph).toMatchObject({
+      node: 'review',
+      needs: ['build'],
+      desc: 'Review the built change.',
+      gate: 'The change meets the acceptance criteria.',
+    });
+    expect(events).toContainEqual(expect.objectContaining({
+      kind: 'dag:node',
+      node: 'review',
+      phase: 'start',
+      needs: ['build'],
+      desc: 'Review the built change.',
+      gate: 'The change meets the acceptance criteria.',
+    }));
   });
 
   it('allows a dependent to run after an optional producer fails', async () => {

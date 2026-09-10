@@ -31,12 +31,15 @@ export const stageBranches = {
   F15: 'feat/browser-proof-budgets',
   D22: 'feat/feature-delivery-example',
   F16: 'feat/source-surfacer-types',
+  F19: 'feat/f19-dag-node-metadata',
   F17: 'feat/retire-lines-name',
   D34: 'docs/retire-old-positioning',
   D23: 'feat/reader-task-docs',
   D24: 'feat/forge-helper-example',
   D30: 'feat/plugins-page',
   D43: 'docs/reader-first-pages',
+  F20: 'feat/f20-checks-that-run',
+  F25: 'feat/examples-a-user-would-write',
 };
 
 export function manageStage(args, options = {}) {

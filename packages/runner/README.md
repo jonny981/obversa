@@ -23,7 +23,7 @@ pnpm build
 Run the offline example from the workspace root:
 
 ```bash
-pnpm --filter @obversa/runner exec tsx ../../examples/packages/supervised-run.ts
+pnpm --filter @obversa/runner exec tsx ../../examples/supervised-run.ts
 ```
 
 See the [runner guide](https://docs.obversa.ai/runtime/runner) for the start,

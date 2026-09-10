@@ -2,7 +2,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { mkdtemp, open, readFile, realpath, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { applyTarget, hashBytes, readRecordBytes, readTarget, replaceTarget, seedSafeChangeFixture, targetPath, targetStream, TargetWriteUncertain } from '../../../examples/safe-change/file-adapter.ts';
+import { applyTarget, hashBytes, readRecordBytes, readTarget, replaceTarget, seedSafeChangeFixture, targetPath, targetStream, TargetWriteUncertain } from '../../../examples/safe-change-file-adapter.ts';
 
 // Real work: these tests write files to temporary directories on disk, so
 // this file declares its own time limit; the suite default is a hang guard,
@@ -102,8 +102,8 @@ describe('safe-change file adapter', () => {
 });
 
 import { loadRunDefinition } from '@obversa/runtime';
-import { sourcePath, sourceStream } from '../../../examples/safe-change/file-adapter.ts';
-import { openSafeChangeRun } from '../../../examples/safe-change/recipe.ts';
+import { sourcePath, sourceStream } from '../../../examples/safe-change-file-adapter.ts';
+import { openSafeChangeRun } from '../../../examples/safe-change-recipe.ts';
 
 describe('safe-change production line', () => {
   it.each(['source', 'target'] as const)('refuses a %s journal ID as the executor run stream', async (kind) => {

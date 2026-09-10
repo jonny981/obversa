@@ -11,6 +11,9 @@ engine and memory packages track their own versions independently.
 
 ### Added
 
+- A dag node accepts `needs` as one name or a list, and optional `desc` and
+  `gate` sentences that reach the rendered plan, the `dag:node` record and
+  the input the node's reviewer receives.
 - **Saved team conversations:** Compile named members and fixed rooms with
   `teamGraphType`. Posts in successful turn results queue mentioned members;
   a fresh executor rebuilds messages and requested turns from the run record.

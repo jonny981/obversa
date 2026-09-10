@@ -30,17 +30,17 @@ test('attempt report still rejects unsanitized display and relative exported pat
 
 test('clean consumer wires the safe-change production line', async () => {
   const source = await readFile(new URL('./check-clean-consumer.mjs', import.meta.url), 'utf8');
-  assert.match(source, /examples', 'safe-change', 'example\.ts'/);
+  assert.match(source, /examples', 'safe-change\.ts'/);
   assert.match(source, /safe-change\.mdx/);
   assert.match(source, /compiledSafeChange/);
 });
 
 test('clean consumer wires the feature-delivery production line', async () => {
   const source = await readFile(new URL('./check-clean-consumer.mjs', import.meta.url), 'utf8');
-  assert.match(source, /'feature-delivery\.workflow\.ts',/);
+  assert.match(source, /'feature-delivery\.ts',/);
   assert.match(source, /'feature-delivery\.mdx'/);
-  assert.match(source, /feature-delivery\.deny\.workflow\.ts/);
-  assert.match(source, /feature-delivery\.red\.workflow\.ts/);
+  assert.match(source, /feature-delivery\.deny\.ts/);
+  assert.match(source, /feature-delivery\.red\.ts/);
   assert.match(source, /featureLine\.acceptedKickbacks !== 1/);
   assert.doesNotMatch(source, /recordEvents !== \d+/);
 });
@@ -111,4 +111,10 @@ test('team page checks the whole runnable source and actual printed report', asy
       /imports source region/,
     );
   });
+});
+
+test('clean consumer wires the described-team example', async () => {
+  const source = await readFile(new URL('./check-clean-consumer.mjs', import.meta.url), 'utf8');
+  assert.match(source, /described-team\.ts/);
+  assert.match(source, /expectedDescribedTeamReport/);
 });

@@ -146,7 +146,7 @@ pnpm example:offline
 The full form, if the shortcut is not available:
 
 ```bash
-pnpm --filter @obversa/runtime exec tsx ../../examples/workflows/offline-review.workflow.ts
+pnpm --filter @obversa/runtime exec tsx ../../examples/offline-review.ts
 ```
 
 Expected result:
@@ -171,7 +171,7 @@ Run the checked-in example from the workspace root:
 pnpm example:graph
 ```
 
-The example is `examples/packages/custom-graph.ts`. It defines a graph type,
+The example is `examples/custom-graph.ts`. It defines a graph type,
 checks it with the public conformance kit, and prints its resolved plan bounds.
 
 `validateGraphDescription(unknown)` returns a frozen valid description or

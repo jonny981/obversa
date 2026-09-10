@@ -6,9 +6,12 @@ import { describe, it, expect, vi } from 'vitest';
 import {
   run,
   loop,
+  dag,
   fnJob,
   agentCheck,
   gateJob,
+  reviewPanel,
+  sequence,
   quorum,
   commandSucceeds,
   not,
@@ -510,6 +513,135 @@ describe('agentCheck request options and output', () => {
     await run(gateJob('g', agentCheck({ question: 'done?', engine })), noEngine);
     expect(req().cwd).toBeUndefined();
     expect(req().timeoutMs).toBeUndefined();
+  });
+
+  it('passes a DAG node acceptance criterion into its reviewer prompt', async () => {
+    const { engine, req } = capturing(verdictJson);
+    await run(
+      dag({
+        name: 'ship',
+        nodes: {
+          review: {
+            gate: 'The implementation meets the stated acceptance criterion.',
+            job: reviewPanel({
+              label: 'stage-review',
+              reviewers: [
+                {
+                  name: 'reviewer',
+                  review: agentCheck({ question: 'Is the change correct?', engine }),
+                },
+              ],
+            }),
+          },
+        },
+      }),
+      noEngine,
+    );
+    expect(req().prompt).toContain(
+      'ACCEPTANCE CRITERION:\nThe implementation meets the stated acceptance criterion.',
+    );
+  });
+
+  it('passes a DAG node acceptance criterion only to its stage reviewer', async () => {
+    const requests: AgentRequest[] = [];
+    const engine = new MockEngine((request: AgentRequest) => {
+      requests.push(request);
+      return verdictJson;
+    });
+
+    const result = await run(
+      dag({
+        name: 'ship',
+        nodes: {
+          review: {
+            gate: 'The implementation meets the stated acceptance criterion.',
+            when: agentCheck({ question: 'Is the prerequisite healthy?', engine }),
+            job: reviewPanel({
+              label: 'stage-review',
+              reviewers: [
+                {
+                  name: 'stage-reviewer',
+                  review: agentCheck({ question: 'Is the stage complete?', engine }),
+                },
+              ],
+            }),
+          },
+        },
+      }),
+      noEngine,
+    );
+
+    expect(result.outcome.status).toBe('pass');
+    expect(requests).toHaveLength(2);
+    const reviewerPrompts = requests.filter((request) =>
+      request.prompt.includes('ACCEPTANCE CRITERION:'),
+    );
+    expect(reviewerPrompts).toHaveLength(1);
+    expect(reviewerPrompts[0]!.prompt).toContain(
+      'ACCEPTANCE CRITERION:\nThe implementation meets the stated acceptance criterion.',
+    );
+    expect(
+      requests.filter((request) => !request.prompt.includes('ACCEPTANCE CRITERION:')),
+    ).toHaveLength(1);
+  });
+
+  it('binds nested reviewer criteria to their own DAG nodes', async () => {
+    const requests: AgentRequest[] = [];
+    const engine = new MockEngine((request: AgentRequest) => {
+      requests.push(request);
+      return verdictJson;
+    });
+
+    const result = await run(
+      dag({
+        name: 'outer',
+        nodes: {
+          parent: {
+            gate: 'PARENT CRITERION',
+            job: dag({
+              name: 'inner',
+              nodes: {
+                gated: {
+                  gate: 'CHILD CRITERION',
+                  job: reviewPanel({
+                    label: 'gated-review',
+                    reviewers: [
+                      {
+                        name: 'gated-reviewer',
+                        review: agentCheck({ question: 'Is the gated child complete?', engine }),
+                      },
+                    ],
+                  }),
+                },
+                ungated: {
+                  job: reviewPanel({
+                    label: 'ungated-review',
+                    reviewers: [
+                      {
+                        name: 'ungated-reviewer',
+                        review: agentCheck({ question: 'Is the ungated child complete?', engine }),
+                      },
+                    ],
+                  }),
+                },
+              },
+            }),
+          },
+        },
+      }),
+      noEngine,
+    );
+
+    expect(result.outcome.status).toBe('pass');
+    const gatedPrompt = requests.find((request) =>
+      request.prompt.includes('Is the gated child complete?'),
+    )!.prompt;
+    const ungatedPrompt = requests.find((request) =>
+      request.prompt.includes('Is the ungated child complete?'),
+    )!.prompt;
+    expect(gatedPrompt).toContain('ACCEPTANCE CRITERION:\nCHILD CRITERION');
+    expect(gatedPrompt).not.toContain('PARENT CRITERION');
+    expect(ungatedPrompt).not.toContain('ACCEPTANCE CRITERION:');
   });
 
   const findings = `${'F'.repeat(300)}TAIL`;

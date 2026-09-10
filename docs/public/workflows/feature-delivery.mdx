@@ -42,7 +42,7 @@ bytes.
 
 ## Source
 
-Copy `examples/workflows/feature-delivery.workflow.ts` from the repository.
+Copy `examples/feature-delivery.ts` from the repository.
 
 The example imports only the public package exports.
 
@@ -515,11 +515,6 @@ void main();
 
 ## Run the workflow
 
-From an Obversa checkout, run:
-
-```bash
-pnpm example:feature
-```
 
 The result is:
 
@@ -539,7 +534,7 @@ record rather than from memory. The approval answer lands in its own
 durable record beside the run record.
 
 After you copy the source into a project that has `@obversa/runtime` and
-`tsx` installed, `pnpm exec tsx feature-delivery.workflow.ts` runs the same workflow.
+`tsx` installed, `pnpm exec tsx feature-delivery.ts` runs the same workflow.
 
 ## Failure behavior
 

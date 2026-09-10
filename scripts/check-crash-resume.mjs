@@ -6,7 +6,7 @@ import { fileURLToPath } from 'node:url';
 import assert from 'node:assert/strict';
 
 const repository = dirname(dirname(fileURLToPath(import.meta.url)));
-const sourcePath = join(repository, 'examples/packages/turn-taking.ts');
+const sourcePath = join(repository, 'examples/turn-taking.ts');
 
 function replaceOnce(source, before, after) {
   const index = source.indexOf(before);

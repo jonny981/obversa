@@ -1,42 +1,82 @@
 ---
 title: "Installation"
-description: "Install and build the Obversa workspace from a local checkout."
+description: "Add Obversa to your own project and write your first file."
 ---
+
+Obversa is a set of packages you import. You do not clone anything, and there
+is no service to stand up.
 
 ## Requirements
 
-- Node.js 22.12 or later
-- pnpm 10.15.1
+Node.js 22.12 or later. Nothing else.
 
-The workspace `packageManager` field pins pnpm 10.15.1. The `engines` field
-requires Node.js 22.12 or later.
-
-## Install the workspace
-
-From an Obversa checkout, run:
+## Add it to your project
 
 ```bash
-corepack enable
-pnpm install --frozen-lockfile
-pnpm build
+npm install @obversa/runtime
 ```
 
-The build creates JavaScript and TypeScript declaration files for each
-package. Run the build before you run an example. The examples import the
-built packages.
-
-## Do the package checks
+That is the runtime and its public contract. Add an engine when you want a
+real model to do the work, and a memory adapter when you want the work
+remembered:
 
 ```bash
-pnpm typecheck
-pnpm typecheck:ts6
-pnpm test
+npm install @obversa/engine-claude-cli @obversa/memory-simple
 ```
 
-The first type check uses TypeScript 7. The second type check uses TypeScript
-6. The test script runs each package test target. Those tests do not call a
-live model.
+Every package is on the [packages](/packages/runtime) pages, with what each
+one is for.
 
-## Run an example
+## Write a file
 
-After the build, go to [First run](/get-started/first-run).
+A workflow is a TypeScript file that imports the runtime and describes the
+work. Nothing else is involved: no configuration file, no scaffolding step,
+no directory layout to adopt.
+
+```ts
+/**
+ * The first file a reader writes.
+ *
+ * Two steps and a dependency between them, in the shape every larger workflow
+ * uses: nodes with names, each saying what it is for, and `needs` saying what
+ * has to happen first. It runs offline with no model, so the shape is the only
+ * thing on show.
+ */
+import { dag, fnJob, run, type Outcome } from '@obversa/runtime';
+
+const draft = fnJob('draft', async (): Promise<Outcome> => ({
+  status: 'pass',
+  summary: 'wrote the first version',
+}));
+
+const review = fnJob('review', async (ctx): Promise<Outcome> => ({
+  status: 'pass',
+  summary: `read ${ctx.lastOutcome?.summary ?? 'the draft'}`,
+}));
+
+export const writeAndReview = dag({
+  name: 'write-and-review',
+  nodes: {
+    draft: { desc: 'Write the first version', job: draft },
+    review: { desc: 'Read it and say whether it stands', needs: 'draft', job: review },
+  },
+});
+
+const result = await run(writeAndReview);
+console.log(JSON.stringify({ status: result.outcome.status }, null, 2));
+
+if (result.outcome.status !== 'pass') process.exitCode = 1;
+```
+
+Run it the way you run any TypeScript file in your project.
+
+## Next
+
+[First run](/get-started/first-run) takes a real example apart. The
+[workflow bank](/workflows) has complete files to copy.
+
+## Contributing
+
+Working on Obversa itself is the one case that needs a checkout, and
+[AGENTS.md](https://github.com/jonny981/obversa/blob/main/AGENTS.md) in the
+repository covers it.

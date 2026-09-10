@@ -121,7 +121,7 @@ Run the checked-in example from the workspace root:
 pnpm example:graph
 ```
 
-The example is `examples/packages/custom-graph.ts`. It uses only public exports
+The example is `examples/custom-graph.ts`. It uses only public exports
 and runs the public graph conformance kit.
 
 This graph contract does not schedule nodes, store runs, provide built-in
