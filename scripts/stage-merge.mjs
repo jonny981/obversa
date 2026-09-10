@@ -29,6 +29,7 @@ const stageBranches = {
   F14: 'feat/real-work-test-limits',
   D22: 'feat/feature-delivery-example',
   F16: 'feat/source-surfacer-types',
+  F17: 'feat/retire-lines-name',
   D23: 'feat/reader-task-docs',
 };
 

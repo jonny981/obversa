@@ -91,6 +91,7 @@ for (const [stage, branch] of [
   ['F14', 'feat/real-work-test-limits'],
   ['D22', 'feat/feature-delivery-example'],
   ['F16', 'feat/source-surfacer-types'],
+  ['F17', 'feat/retire-lines-name'],
   ['D23', 'feat/reader-task-docs'],
   ['D13', 'feat/graph-forms-v1'],
   ['D11A', 'feat/graph-forms-v1'],
@@ -132,6 +133,7 @@ for (const [stage, branch] of [
   ['F14', 'feat/factory-v1'],
   ['D22', 'feat/graph-forms-v1'],
   ['F16', 'feat/graph-forms-v1'],
+  ['F17', 'feat/graph-forms-v1'],
   ['D23', 'feat/graph-forms-v1'],
 ]) {
   test(`${stage} refuses the wrong branch ${branch}`, () => {

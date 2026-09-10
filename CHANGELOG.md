@@ -65,6 +65,10 @@ engine and memory packages track their own versions independently.
 
 ### Changed
 
+- **The old runtime name:** Remove the pre-rename name from the twenty tracked
+  files that carried it, including the consult instruction and the two plugin
+  system prompts a model reads at run time. English uses of the word stay. A
+  grep of the word now finds only the diff module's ordinary sentence.
 - **Tarball test selection:** Run the two package-command integration tests
   with `OBVERSA_TEST_REAL_PACK=1 pnpm test:tarballs`. The default command skips
   those tests; `verify:d15` enables them.
