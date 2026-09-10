@@ -134,15 +134,17 @@ describe('job introspection (meta + renderPlan)', () => {
     expect(plan).toContain('desc: Review the built change.');
     expect(plan).toContain('gate: The change meets the acceptance criteria.');
 
-    expect(jobShapeV1(meta)).toMatchObject({
-      kind: 'dag',
-      nodes: [{
+    const shape = jobShapeV1(meta);
+    expect(shape).toMatchObject({ kind: 'dag' });
+    expect(shape.nodes).toEqual([
+      expect.objectContaining({ name: 'build', needs: [] }),
+      expect.objectContaining({
         name: 'review',
         needs: ['build'],
         desc: 'Review the built change.',
         gate: 'The change meets the acceptance criteria.',
-      }],
-    });
+      }),
+    ]);
   });
 
   it('captures optional and when on dag nodes and renders them', () => {
