@@ -136,6 +136,7 @@ describe('job introspection (meta + renderPlan)', () => {
 
     const shape = jobShapeV1(meta);
     expect(shape).toMatchObject({ kind: 'dag' });
+    if (shape.kind !== 'dag') throw new Error('expected a DAG job shape');
     expect(shape.nodes).toEqual([
       expect.objectContaining({ name: 'build', needs: [] }),
       expect.objectContaining({
