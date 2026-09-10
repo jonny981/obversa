@@ -126,3 +126,29 @@ test('an exemption that does not say what it hides is refused too', () => {
     /does not say what it hides/,
   );
 });
+
+test('an exemption whose owner has landed is refused, like one with no owner at all', () => {
+  assert.throws(
+    () => buildDebtIndex(
+      [{ page: 'a.mdx', fault: 'example', owner: 'D34', why: 'queued' }],
+      { landed: new Set(['D34']) },
+    ),
+    /names D34, which has landed, so nobody owns this fault any more/,
+  );
+});
+
+test('an exemption whose owner is still open is kept', () => {
+  const index = buildDebtIndex(
+    [{ page: 'a.mdx', fault: 'example', owner: 'D36', why: 'queued' }],
+    { landed: new Set(['D34']) },
+  );
+  assert.equal(index.size, 1);
+});
+
+test('an owner that is not a registered stage yet is kept, because a planned stage has no branch', () => {
+  const index = buildDebtIndex(
+    [{ page: 'a.mdx', fault: 'example', owner: 'D99', why: 'planned' }],
+    { landed: new Set(['D34']) },
+  );
+  assert.equal(index.size, 1);
+});

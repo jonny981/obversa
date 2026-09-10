@@ -13,7 +13,7 @@ import { assertCommitRange } from './check-commit-policy.mjs';
 import { configureGitHooks } from './configure-git-hooks.mjs';
 
 const leaseRef = 'refs/obversa/stage-merge';
-const stageBranches = {
+export const stageBranches = {
   D14: 'feat/unattended-runner',
   D15: 'feat/release-v1',
   D16: 'feat/runner-hardening',

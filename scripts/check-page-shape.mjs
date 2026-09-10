@@ -11,8 +11,11 @@
  * title; the first line should say what they can now do, and the definition
  * can follow.
  */
+import { execFileSync } from 'node:child_process';
 import { readFileSync, readdirSync } from 'node:fs';
 import { join } from 'node:path';
+
+import { stageBranches } from './stage-merge.mjs';
 
 /**
  * An example is code the reader can read and copy, not a command that runs
@@ -84,11 +87,52 @@ const KNOWN_DEBT = [
   },
 ];
 
-export function buildDebtIndex(entries = KNOWN_DEBT) {
+/**
+ * Whether a stage has already landed on main.
+ *
+ * An entry whose owner has landed is exactly as silent as an entry with no
+ * owner: the stage it is waiting for is finished, so the fault it hides is
+ * nobody's and stays forgiven for ever. A stage with no branch yet is a stage
+ * still to come, which is what an entry here is for.
+ */
+export function assertDebtOwnersAreOpen(root, run = defaultRun) {
+  const landed = landedStages(root, run);
+  buildDebtIndex(KNOWN_DEBT, { landed });
+}
+
+function landedStages(root, run = defaultRun) {
+  const landed = new Set();
+  let main;
+  try {
+    main = run(['rev-parse', '--verify', 'main'], root).trim();
+  } catch {
+    // Better to say the list cannot be checked than to pass a list nobody read.
+    throw new Error('main cannot be resolved here, so the allowlist owners cannot be checked');
+  }
+  for (const [stage, branch] of Object.entries(stageBranches)) {
+    try {
+      run(['merge-base', '--is-ancestor', branch, main], root);
+      landed.add(stage);
+    } catch {
+      // Either the branch does not exist yet or it is not on main. Both mean
+      // the stage has not landed, which is the state an entry expects.
+    }
+  }
+  return landed;
+}
+
+function defaultRun(args, cwd) {
+  return execFileSync('git', args, { cwd, encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] });
+}
+
+export function buildDebtIndex(entries = KNOWN_DEBT, { landed } = {}) {
   const index = new Map();
   for (const entry of entries) {
     if (!entry.owner) throw new Error(`the allowlist entry for ${entry.page} names no stage that owns the fix`);
     if (!entry.why) throw new Error(`the allowlist entry for ${entry.page} does not say what it hides`);
+    if (landed?.has(entry.owner)) {
+      throw new Error(`the allowlist entry for ${entry.page} names ${entry.owner}, which has landed, so nobody owns this fault any more`);
+    }
     index.set(`${entry.page}::${entry.fault}`, entry);
   }
   return index;
@@ -161,7 +205,18 @@ export function checkPageShape(root, { allowNoExample = new Set(), debt = buildD
 }
 
 if (process.argv[1] && import.meta.url === new URL(`file://${process.argv[1]}`).href) {
-  const failures = checkPageShape(process.argv[2] ?? process.cwd());
+  let failures;
+  const root = process.argv[2] ?? process.cwd();
+  try {
+    // The list's own health first: an exemption nobody owns any more forgives
+    // a fault for ever, so it is a failure before any page is read.
+    assertDebtOwnersAreOpen(root);
+    failures = checkPageShape(root);
+  } catch (error) {
+    // A list that cannot be trusted is a failure, not a crash.
+    console.error(error instanceof Error ? error.message : String(error));
+    process.exit(1);
+  }
   if (failures.length) {
     for (const failure of failures) console.error(failure);
     process.exitCode = 1;
