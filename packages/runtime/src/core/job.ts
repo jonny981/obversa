@@ -159,7 +159,7 @@ function withOperationalContext(
     parts.push(feedbackBlock(ctx.lastReview));
   }
   if (config.graphContext && ctx.graph) {
-    parts.push(graphPositionBlock(ctx.graph));
+    parts.push(graphPositionBlock(ctx.graph, ctx.reviewerGate));
   }
   if (config.advisor) parts.push(advisorInstruction(config.advisor.maxCalls ?? 1));
   return parts.join('\n\n---\n\n');
