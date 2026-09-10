@@ -1,3 +1,4 @@
+import { relative } from 'node:path';
 import {
   defineJob,
   fnJob,
@@ -52,6 +53,7 @@ async function main(): Promise<void> {
         status: result.outcome.status,
         attempts,
         summary: result.outcome.summary,
+        record: result.recordPath ? relative(process.cwd(), result.recordPath) : null,
       },
       null,
       2,
