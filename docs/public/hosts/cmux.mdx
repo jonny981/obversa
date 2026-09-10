@@ -3,10 +3,28 @@ title: "Obversa in cmux"
 description: "Host glue for cmux: the correct editor opens on the correct worktrees, and local web surfaces open in splits beside the terminal."
 ---
 
-This page is for people working on Obversa itself. The cmux glue is not a
-published package: it is configuration and a few small scripts that live in
-the repository, so it needs a checkout, which nothing else here does. When
-the host ships as a package this page changes with it.
+The cmux glue is not an npm package: it is five small scripts and one
+Command Palette entry. One command installs them.
+
+```bash
+curl -fsSL https://obversa.ai/install/cmux.sh | bash
+```
+
+It writes only into `~/.obversa/cmux`, prints every path before it writes,
+and never edits an existing cmux configuration: if you already have one it
+copies it aside and prints the entry for you to add. macOS only today,
+because the default-browser fallback uses `open`.
+
+Prefer to have an agent do it? Paste this:
+
+> Install the Obversa cmux glue. Fetch the five scripts from
+> `hosts/cmux/bin` in github.com/jonny981/obversa into `~/.obversa/cmux/bin`,
+> make them executable, add a Command Palette entry named "Order Workspace"
+> to `~/.config/cmux/cmux.json` pointing at the absolute path of
+> `obversa-order-workspace`, and add `~/.obversa/cmux/bin` to my PATH. Do not
+> put `OBVERSA_SURFACE_BIN` or `PLANNOTATOR_BROWSER` in any profile or
+> settings file: those bind per workspace, and a global one sends every
+> review to the wrong host.
 
 Obversa is a guest in whichever host you use. cmux is the first. The glue is
 setup rather than a product, and there is no host fork and no new UI.
@@ -65,16 +83,13 @@ The glue is a handful of scripts in `hosts/cmux/bin/` plus one Command
 Palette entry. It targets macOS today: the default-browser fallback uses
 `open`.
 
-The scripts live in `hosts/cmux/bin`. Call them by full path, or put that
-directory on your `PATH`.
+If you would rather do it by hand, the scripts are in `hosts/cmux/bin` in
+the repository, and the palette entry names the launcher by absolute path.
 
-1. Obversa checkouts carry the palette entry in `.cmux/cmux.json`. Open a
-   cmux workspace on the repository and run **Order Workspace** from the
-   Command Palette. The first run shows the cmux trust prompt.
-2. For every other workspace, add the same entry to
-   `~/.config/cmux/cmux.json` with the script's absolute path. The
-   project-local entry overrides the global one, so the pair never
-   conflicts.
+1. Run **Order Workspace** from the Command Palette. The first run shows
+   the cmux trust prompt.
+2. A project-local `.cmux/cmux.json` overrides the global entry, so a
+   repository can carry its own and the pair never conflicts.
 3. Set the Shared root once: `export OBVERSA_SHARED_ROOT=<shared worktree>`.
 4. Create workspaces through the host's launcher, which binds both
    placement variables — `OBVERSA_SURFACE_BIN` for Obversa surfaces and
