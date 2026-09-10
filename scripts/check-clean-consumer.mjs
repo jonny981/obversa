@@ -530,7 +530,49 @@ const tsconfig = {
   ],
 };
 
+/**
+ * Read every file this proof needs, and report every one that is missing.
+ *
+ * The proof used to read them one at a time and stop at the first failure,
+ * so a rename that moved five files cost five runs to find, each about a
+ * minute: fix one, run, learn the next. That happened twice in one day.
+ * This walks every path first, collects what is not there, and names all of
+ * it at once, so a rename costs one run whatever it touched.
+ */
+async function readAllOrReportEveryMissingFile(paths) {
+  const contents = new Map();
+  const missing = [];
+  await Promise.all(
+    [...new Set(paths)].map(async (path) => {
+      try {
+        contents.set(path, await readFile(path, 'utf8'));
+      } catch (error) {
+        if ((error && error.code) === 'ENOENT') missing.push(path);
+        else throw error;
+      }
+    }),
+  );
+  if (missing.length) {
+    const list = missing.sort().map((path) => `  ${path.slice(root.length + 1)}`).join('\n');
+    throw new Error(
+      `${missing.length} file(s) this proof reads are not there:\n${list}\n` +
+        'Every one is listed so a rename costs one run rather than one run each.',
+    );
+  }
+  return contents;
+}
+
 async function main() {
+  // Preflight. The tsconfig above names every example the throwaway project
+  // compiles, and each one is a file in examples/ with the same name. Check
+  // that invariant before anything else runs: it is the one a rename breaks,
+  // and checking it here names every casualty at once instead of one per run.
+  await readAllOrReportEveryMissingFile(
+    tsconfig.include
+      .filter((name) => name !== 'consumer.ts')
+      .map((name) => join(root, 'examples', name)),
+  );
+
   const exampleSource = await readFile(
     join(root, 'examples', 'offline-review.ts'),
     'utf8',

@@ -48,3 +48,14 @@ test('clean consumer wires the described-team example', async () => {
   assert.match(source, /described-team\.ts/);
   assert.match(source, /expectedDescribedTeamReport/);
 });
+
+test('a rename that moves several examples is reported in one run, not one per run', async () => {
+  const source = await readFile(new URL('./check-clean-consumer.mjs', import.meta.url), 'utf8');
+  // The preflight runs before the first read and is driven by the compile
+  // list, so every example the throwaway project builds is checked together.
+  assert.match(source, /readAllOrReportEveryMissingFile\(\s*\n\s*tsconfig\.include/);
+  assert.match(source, /file\(s\) this proof reads are not there/);
+  // And it must collect rather than stop: the loop pushes onto `missing`
+  // instead of throwing on the first one.
+  assert.match(source, /missing\.push\(path\)/);
+});
