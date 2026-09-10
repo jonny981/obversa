@@ -41,8 +41,8 @@ npm install @obversa/runtime   # Node >= 22.12
 
 ## A feature, as one file
 
-Five named stages. The review is a panel of three, and a reviewer that fails a
-step names the stage that must fix it, so the work goes back to the stage that
+Five named stages. The review is a panel of three, and the panel names the
+stage that must fix the work, so a failed review goes back to the stage that
 owns it rather than starting the run again.
 
 ```ts
@@ -195,7 +195,7 @@ The example writes one large synthetic artifact, appends one small reference,
 reopens the stores through a fresh binding, folds the same state, and runs the
 event-store and artifact-store conformance kits.
 
-Read [Events and artifacts](docs/public/storage/events-and-artifacts.mdx) for
+Read [Events and artifacts](docs/public/recording/events-and-artifacts.mdx) for
 the storage contract, limits, secret handling, conflict behavior, and integrity
 checks. This storage layer does not execute graph work or recover a stopped
 run.
@@ -211,7 +211,7 @@ fixture files.
 pnpm example:attempt
 ```
 
-Read [Safe node attempts](docs/public/runtime/node-attempts.mdx) for result
+Read [Safe node attempts](docs/public/recording/node-attempts.mdx) for result
 parts, declared capabilities, workspace access, fallback, and cleanup limits.
 
 ## Documentation
