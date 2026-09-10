@@ -134,7 +134,7 @@ pnpm build
 The install activates this repository's commit hooks for the checkout. See
 [AGENTS.md](AGENTS.md) for what the hooks need before your first commit.
 
-## Run the offline process
+## Run the offline workflow
 
 The first example uses deterministic function jobs. It does not use a model or
 network service.
@@ -217,8 +217,9 @@ parts, declared capabilities, workspace access, fallback, and cleanup limits.
 ## Documentation
 
 The public documentation is in [`docs/public`](docs/public). It includes the
-first-run guide, the memory contract, graph and storage guides, the process
-bank, [cmux host setup](docs/public/hosts/cmux.mdx), and
+first-run guide, the memory contract, the guides to writing a workflow shape
+and to what a run records, the workflow bank,
+[cmux host setup](docs/public/hosts/cmux.mdx), and
 [reviewing a diff in a host pane](docs/public/hosts/review.mdx).
 
 Validate the documentation from the workspace root:
