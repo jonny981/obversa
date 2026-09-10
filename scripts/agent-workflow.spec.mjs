@@ -92,7 +92,10 @@ for (const [stage, branch] of [
   ['D22', 'feat/feature-delivery-example'],
   ['F16', 'feat/source-surfacer-types'],
   ['F17', 'feat/retire-lines-name'],
+  ['D34', 'docs/retire-old-positioning'],
   ['D23', 'feat/reader-task-docs'],
+  ['D24', 'feat/forge-helper-example'],
+  ['D30', 'feat/plugins-page'],
   ['D13', 'feat/graph-forms-v1'],
   ['D11A', 'feat/graph-forms-v1'],
   ['F0', 'feat/factory-v1'],
@@ -134,7 +137,10 @@ for (const [stage, branch] of [
   ['D22', 'feat/graph-forms-v1'],
   ['F16', 'feat/graph-forms-v1'],
   ['F17', 'feat/graph-forms-v1'],
+  ['D34', 'feat/graph-forms-v1'],
   ['D23', 'feat/graph-forms-v1'],
+  ['D24', 'feat/graph-forms-v1'],
+  ['D30', 'feat/graph-forms-v1'],
 ]) {
   test(`${stage} refuses the wrong branch ${branch}`, () => {
     const repository = createRepository({ feature: true, branch });

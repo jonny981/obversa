@@ -22,3 +22,8 @@ before a file merge. It reads each result back and pauses on a mismatch.
 issue through analysis, implementation, a real test run, a review panel, a
 bounded repair, and an approval bound to the exact bytes. It also finishes
 without a model or network service.
+
+[Forge helper](/workflows/forge-helper) ships a reviewed change
+through a code host such as GitHub. It pushes the branch, opens one pull
+request, passes a strict gate on the exact head revision, squashes the
+merge, and deletes the branch. It runs offline against a mock host.

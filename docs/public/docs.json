@@ -28,6 +28,7 @@
         "group": "Start",
         "pages": [
           "index",
+          "plugins",
           "get-started/installation",
           "get-started/first-run"
         ]
@@ -48,7 +49,8 @@
           "workflows/index",
           "workflows/offline-review",
           "workflows/safe-change",
-          "workflows/feature-delivery"
+          "workflows/feature-delivery",
+          "workflows/forge-helper"
         ]
       },
       {

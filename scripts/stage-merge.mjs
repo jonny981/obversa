@@ -30,7 +30,10 @@ const stageBranches = {
   D22: 'feat/feature-delivery-example',
   F16: 'feat/source-surfacer-types',
   F17: 'feat/retire-lines-name',
+  D34: 'docs/retire-old-positioning',
   D23: 'feat/reader-task-docs',
+  D24: 'feat/forge-helper-example',
+  D30: 'feat/plugins-page',
 };
 
 export function manageStage(args, options = {}) {
