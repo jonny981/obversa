@@ -11,6 +11,12 @@ engine and memory packages track their own versions independently.
 
 ### Added
 
+- **Type declarations for the review packages:** `@obversa/source` and
+  `@obversa/surfacer` now ship declaration files generated from their
+  JSDoc, with a `types` condition on every export entry. A TypeScript
+  reader importing either package resolves types instead of failing with
+  an implicit-any import. The clean-consumer check imports both strictly,
+  so the declarations cannot be dropped without failing the check.
 - `@obversa/runtime` 1.0.0: stored graph plans, bounded node attempts,
   durable events and artifacts, restartable execution, workspace checks,
   Callback Gates, and proof-bound decisions.

@@ -4,14 +4,25 @@
   "description": "Open a git diff for inline review.",
   "type": "module",
   "exports": {
-    ".": "./src/index.mjs",
-    "./testing": "./src/testing.mjs",
-    "./bin": "./bin/obversa-review.mjs"
+    ".": {
+      "types": "./dist/src/index.d.mts",
+      "default": "./src/index.mjs"
+    },
+    "./testing": {
+      "types": "./dist/src/testing.d.mts",
+      "default": "./src/testing.mjs"
+    },
+    "./bin": {
+      "types": "./dist/bin/obversa-review.d.mts",
+      "default": "./bin/obversa-review.mjs"
+    }
   },
   "scripts": {
     "test": "node --test test/*.test.mjs",
     "typecheck": "tsc -p tsconfig.json && tsc -p assets/tsconfig.json",
-    "prepublishOnly": "node ../../scripts/check-publish-allowlist.mjs"
+    "prepublishOnly": "node ../../scripts/check-publish-allowlist.mjs",
+    "build": "tsc -p tsconfig.build.json",
+    "prepack": "pnpm run build"
   },
   "engines": {
     "node": ">=22.12.0"
@@ -26,6 +37,7 @@
   },
   "license": "MIT",
   "files": [
+    "dist",
     "src",
     "bin",
     "assets",

@@ -24,7 +24,7 @@ import {
 import { defineGraphDefinition } from '@obversa/runtime/testing';
 import { createLocalRunStorage } from '@obversa/runtime/storage/local';
 
-// The request this line delivers. A host reads it from an issue tracker; the
+// The request this workflow delivers. A host reads it from an issue tracker; the
 // stages below see it only through the criteria the analyse stage accepts.
 const ISSUE =
   'The checkout client must retry a failed request, must cap how many ' +
@@ -49,7 +49,9 @@ function acceptedCriteria(ctx: JobContext): readonly Criterion[] {
 
 // The approval record: the request, the claim, the answer and the digest are
 // durable events in their own store beside the run record, so a refused
-// approval is on the record, not in memory.
+// approval is on the record, not in memory. The small approval graph below
+// exists so the stored callback client can open its record; it is not the
+// workflow's own graph.
 const APPROVAL_RUN_ID = 'feature-delivery-approval';
 const APPROVAL_STORAGE_POLICY = {
   schemaVersion: 1,
@@ -339,7 +341,7 @@ const review = reviewPanel({
 // request carries the sha256 of the final source, so approving anything else
 // would be a different request. The request, the claim, the answer and the
 // digest are durable events in the approval record beside the run record.
-// The stage reads the answer: a no fails the line with the reason. A host
+// The stage reads the answer: a no fails the workflow with the reason. A host
 // swaps the scripted submit for a human responder; the request, digest and
 // claim protocol are the same.
 const approve = fnJob('approve', async (ctx) => {
@@ -401,7 +403,7 @@ const approve = fnJob('approve', async (ctx) => {
   };
 });
 
-const productionLine = defineJob(
+const featureDelivery = defineJob(
   pipeline(
     'feature-delivery',
     [
@@ -424,7 +426,7 @@ interface RecordedEvent {
 async function main(): Promise<void> {
   const workspace = await realpath(await mkdtemp(join(tmpdir(), 'feature-delivery-')));
   try {
-    const result = await run(productionLine, {
+    const result = await run(featureDelivery, {
       cwd: workspace,
       runId: 'feature-delivery-example',
       recordTo: 'auto',

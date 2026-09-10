@@ -1,6 +1,6 @@
 # Obversa
 
-A process runtime for software teams.
+A workflow runtime for software teams.
 
 Status: In build. Public docs in `docs/public/`.
 
@@ -17,13 +17,17 @@ This workspace contains fourteen publishable packages, including six engine plug
 
 The `plugins/` directory holds the engine adapters (Claude CLI, Codex, Grok CLI, Anthropic API, Agent SDK, OpenCode CLI) and the memory adapters (in-process and Git).
 
-`@obversa/runtime` is the runtime. A process is a complete program that
+`@obversa/runtime` is the runtime. A workflow is a complete program that
 composes runtime jobs, graph forms, policies, and adapters.
 
+Steps that finished are never repeated. A step that was mid-flight when
+the worker died runs again only if its binding declares it safe to retry;
+otherwise the run pauses and asks a person to reconcile it before it
+continues, so uncertain work is never repeated silently.
+
 Two workstreams run in parallel. Workstream 1 builds `@obversa/runtime` in
-`packages/runtime`. Workstream 2 builds host glue in `hosts/`, then the Surfacer
-and review surfaces. Full Obversa implementation starts after the runtime
-reaches version 1.0.0.
+`packages/runtime`. Host glue lives in `hosts/`, and the surfaces build on the
+public runtime contract.
 
 ## Requirements
 
@@ -55,7 +59,7 @@ pnpm example:offline
 The full form, if the shortcut is not available:
 
 ```bash
-pnpm --filter @obversa/runtime exec tsx ../../examples/production-lines/offline-review.line.ts
+pnpm --filter @obversa/runtime exec tsx ../../examples/workflows/offline-review.workflow.ts
 ```
 
 Expected result:

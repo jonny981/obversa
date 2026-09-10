@@ -28,6 +28,8 @@ const stageBranches = {
   F10: 'feat/release-1-1-0',
   F14: 'feat/real-work-test-limits',
   D22: 'feat/feature-delivery-example',
+  F16: 'feat/source-surfacer-types',
+  D23: 'feat/reader-task-docs',
   D30: 'feat/plugins-page',
 };
 
@@ -187,7 +189,7 @@ function featureContext(stage, cwd) {
     throw new Error('manage a stage from its named feature branch, not main');
   }
   const expectedBranch = stageBranches[stage]
-    ?? (stage.startsWith('D') ? 'feat/lines-v1' : 'feat/factory-v1');
+    ?? (stage.startsWith('D') ? 'feat/graph-forms-v1' : 'feat/factory-v1');
   if (branch !== expectedBranch) {
     throw new Error(
       `${stage} belongs to ${expectedBranch}; ${branch} cannot claim ${stage}`,

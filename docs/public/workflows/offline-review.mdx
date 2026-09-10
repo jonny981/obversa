@@ -1,6 +1,6 @@
 ---
 title: "Offline review and revision"
-description: "Run a bounded process that acts on review feedback before it passes."
+description: "Run a bounded workflow that acts on review feedback before it passes."
 ---
 
 Use this process to learn the review and revision path without a model
@@ -27,7 +27,7 @@ changes the work, and passes the second review.
 
 ## Source
 
-Copy `examples/production-lines/offline-review.line.ts` from the repository.
+Copy `examples/workflows/offline-review.workflow.ts` from the repository.
 
 The example imports only the public package exports.
 
@@ -44,7 +44,7 @@ import {
 let attempts = 0;
 let config: { timeoutMs?: number } | undefined;
 
-const productionLine = defineJob(
+const reviewLoop = defineJob(
   loop({
     name: 'write-config',
     max: 4,
@@ -76,7 +76,7 @@ const productionLine = defineJob(
 );
 
 async function main(): Promise<void> {
-  const result = await run(productionLine);
+  const result = await run(reviewLoop);
 
   console.log(
     JSON.stringify(
@@ -96,7 +96,7 @@ async function main(): Promise<void> {
 void main();
 ```
 
-## Run the line
+## Run the workflow
 
 From an Obversa checkout, run:
 
@@ -108,7 +108,7 @@ After you copy the source into a project that has `@obversa/runtime` and `tsx`
 installed, run:
 
 ```bash
-pnpm exec tsx offline-review.line.ts
+pnpm exec tsx offline-review.workflow.ts
 ```
 
 The result is:
@@ -123,13 +123,13 @@ The result is:
 
 ## Failure behavior
 
-The line allows four attempts. If review keeps asking for a revision, the line
+The workflow allows four attempts. If review keeps asking for a revision, the workflow
 ends with an exhausted result and the process exits with code 1.
 
 ## Pause, resume, and retry behavior
 
 This line does not pause and does not store state. Run it again from the start.
-The line has no external effect, so a full retry is safe.
+The workflow has no external effect, so a full retry is safe.
 
 ## Engine lanes
 

@@ -6,7 +6,7 @@ rules that apply to every change.
 
 ## What this repository is
 
-A process runtime for software teams.
+A workflow runtime for software teams.
 
 You describe work as a graph: steps, dependencies, and review gates. The
 runtime records graph decisions and node outcomes. A fresh executor can

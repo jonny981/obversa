@@ -6,27 +6,29 @@ description: "Take one written issue through analysis, implementation, a real te
 Use this process to deliver one change from a written request to an approved
 result without a model account. The first draft passes its own tests but
 misses a requirement. The review panel catches the miss and sends it back.
-The line repairs the work, proves it again, and approves the exact final
+The workflow repairs the work, proves it again, and approves the exact final
 bytes.
 
 ## Graph
 
 1. The `analyse` stage turns the issue into typed acceptance criteria
-   before any code runs. Work with no accepted criteria fails the line.
+   before any code runs. Work with no accepted criteria fails the workflow.
 2. The `implement` stage writes the change as real files: `src/retry.js`
    and its tests. The first draft covers two of the three criteria.
-3. The `test` stage runs the tests as a command gate. The line advances
+3. The `test` stage runs the tests as a command gate. The workflow advances
    only when the command exits 0, never on a self-report.
 4. The `review` stage is a panel of three reviewers, and two votes pass it.
    Round one fails with findings, and the panel sends them back to
-   `implement` as a kickback, bounded by the line's kickback budget.
+   `implement` as a kickback, bounded by the workflow's kickback budget.
 5. The re-run of `implement` is the repair: it reads the last review's
    findings and covers the third criterion. The `test` and `review` stages
    re-run with it, so nothing passes on the strength of the fix alone.
 6. The `approve` stage binds the approval to the sha256 of the final
    source. The request, the claim, the answer and the digest are durable
    events in an approval record beside the run record. The stage reads the
-   answer, and a no fails the line.
+   answer, and a no fails the workflow. The small approval graph in the
+   source exists so the stored callback client can open its record; it is
+   not the workflow's own graph.
 
 ## Contract
 
@@ -40,7 +42,7 @@ bytes.
 
 ## Source
 
-Copy `examples/production-lines/feature-delivery.line.ts` from the repository.
+Copy `examples/workflows/feature-delivery.workflow.ts` from the repository.
 
 The example imports only the public package exports.
 
@@ -71,7 +73,7 @@ import {
 import { defineGraphDefinition } from '@obversa/runtime/testing';
 import { createLocalRunStorage } from '@obversa/runtime/storage/local';
 
-// The request this line delivers. A host reads it from an issue tracker; the
+// The request this workflow delivers. A host reads it from an issue tracker; the
 // stages below see it only through the criteria the analyse stage accepts.
 const ISSUE =
   'The checkout client must retry a failed request, must cap how many ' +
@@ -96,7 +98,9 @@ function acceptedCriteria(ctx: JobContext): readonly Criterion[] {
 
 // The approval record: the request, the claim, the answer and the digest are
 // durable events in their own store beside the run record, so a refused
-// approval is on the record, not in memory.
+// approval is on the record, not in memory. The small approval graph below
+// exists so the stored callback client can open its record; it is not the
+// workflow's own graph.
 const APPROVAL_RUN_ID = 'feature-delivery-approval';
 const APPROVAL_STORAGE_POLICY = {
   schemaVersion: 1,
@@ -386,7 +390,7 @@ const review = reviewPanel({
 // request carries the sha256 of the final source, so approving anything else
 // would be a different request. The request, the claim, the answer and the
 // digest are durable events in the approval record beside the run record.
-// The stage reads the answer: a no fails the line with the reason. A host
+// The stage reads the answer: a no fails the workflow with the reason. A host
 // swaps the scripted submit for a human responder; the request, digest and
 // claim protocol are the same.
 const approve = fnJob('approve', async (ctx) => {
@@ -448,7 +452,7 @@ const approve = fnJob('approve', async (ctx) => {
   };
 });
 
-const productionLine = defineJob(
+const featureDelivery = defineJob(
   pipeline(
     'feature-delivery',
     [
@@ -471,7 +475,7 @@ interface RecordedEvent {
 async function main(): Promise<void> {
   const workspace = await realpath(await mkdtemp(join(tmpdir(), 'feature-delivery-')));
   try {
-    const result = await run(productionLine, {
+    const result = await run(featureDelivery, {
       cwd: workspace,
       runId: 'feature-delivery-example',
       recordTo: 'auto',
@@ -509,7 +513,7 @@ async function main(): Promise<void> {
 void main();
 ```
 
-## Run the line
+## Run the workflow
 
 From an Obversa checkout, run:
 
@@ -528,22 +532,22 @@ The result is:
 }
 ```
 
-The line reads its own record back before it exits. `implementRuns` and
+The workflow reads its own record back before it exits. `implementRuns` and
 `reviewRounds` count the recorded stage runs, and `acceptedKickbacks`
 counts the accepted `dag:kickback` events, so the numbers come from the
 record rather than from memory. The approval answer lands in its own
 durable record beside the run record.
 
 After you copy the source into a project that has `@obversa/runtime` and
-`tsx` installed, `pnpm exec tsx feature-delivery.line.ts` runs the same line.
+`tsx` installed, `pnpm exec tsx feature-delivery.workflow.ts` runs the same workflow.
 
 ## Failure behavior
 
-The line allows two kickbacks. If the panel keeps rejecting the work, the
+The workflow allows two kickbacks. If the panel keeps rejecting the work, the
 budget is spent, the review's failed verdict stands, and the process exits
-with code 1. A refused approval fails the line the same way: the approver
+with code 1. A refused approval fails the workflow the same way: the approver
 who answers no stops the ship, and the no is a durable event in the
-approval record. The line never advances past a failing test command, so an
+approval record. The workflow never advances past a failing test command, so an
 unproven draft cannot reach the panel or the approval.
 
 ## Pause, resume, and retry behavior
@@ -556,7 +560,7 @@ so a full retry from the start is safe.
 
 This line uses function jobs. It does not call an engine, and it needs no
 model account. Each stage names where an engine goes: replace `implement`'s
-`fnJob` with `agentJob` and an engine, and the same line drives a model that
+`fnJob` with `agentJob` and an engine, and the same workflow drives a model that
 writes the change; replace the panel's reviewer jobs with `agentCheck`
 conditions and models read the code; put a person behind the approval gate
 in place of the scripted submit, answering through the same claim and
