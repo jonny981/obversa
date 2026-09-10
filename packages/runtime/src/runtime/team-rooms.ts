@@ -1,5 +1,5 @@
 import { createHash, randomUUID } from 'node:crypto';
-import { mkdir, rename, rm, writeFile } from 'node:fs/promises';
+import { mkdir, open, rename, rm } from 'node:fs/promises';
 import { isDeepStrictEqual } from 'node:util';
 import { join, resolve } from 'node:path';
 
@@ -10,7 +10,7 @@ import {
   type TeamGraphState,
   type TeamMessage,
 } from '../graph-types/team.js';
-import { GraphExecutionError } from './graph-executor.js';
+import { GraphExecutionError, validateStandardEvent } from './graph-executor.js';
 import {
   loadRunDefinition,
   type RunStorageBinding,
@@ -18,6 +18,13 @@ import {
 import type { StreamRevision } from '../events/envelope.js';
 
 const GRAPH_PREFIX = 'graph:';
+const STANDARD_EVENT_TYPES = new Set([
+  'node-dispatched',
+  'node-completed',
+  'node-failed',
+  'node-paused',
+  'node-resumed',
+]);
 
 function mismatch(): never {
   throw new GraphExecutionError(
@@ -51,8 +58,13 @@ function roomFilename(runId: string, roomId: string): string {
 
 async function replaceFile(path: string, content: string): Promise<void> {
   const temporary = `${path}.${randomUUID()}.tmp`;
+  const handle = await open(temporary, 'wx', 0o600);
   try {
-    await writeFile(temporary, content, { encoding: 'utf8', flag: 'wx', mode: 0o600 });
+    try {
+      await handle.writeFile(content, { encoding: 'utf8' });
+    } finally {
+      await handle.close();
+    }
     await rename(temporary, path);
   } finally {
     await rm(temporary, { force: true });
@@ -84,6 +96,7 @@ export async function projectTeamRooms(input: {
   );
   if (!isDeepStrictEqual(storedGraph, compiled.describe().graph)) mismatch();
 
+  const nodeIds = new Set(compiled.definition.value.nodes.map((node) => node.id));
   let state: TeamGraphState = compiled.initialState();
   let revision = 0;
   for await (const event of input.storage.eventStore.read({
@@ -94,11 +107,12 @@ export async function projectTeamRooms(input: {
     if (!event.type.startsWith(GRAPH_PREFIX)) continue;
     const type = event.type.slice(GRAPH_PREFIX.length);
     if (type === 'run-started') continue;
-    state = compiled.reduce(state, {
-      type,
-      version: event.version,
-      payload: event.payload,
-    });
+    state = compiled.reduce(
+      state,
+      STANDARD_EVENT_TYPES.has(type)
+        ? validateStandardEvent(event, type, nodeIds)
+        : { type, version: event.version, payload: event.payload },
+    );
   }
 
   const rooms = compiled.definition.value.data.communication?.rooms ?? [];

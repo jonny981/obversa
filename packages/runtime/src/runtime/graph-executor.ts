@@ -333,7 +333,7 @@ function validateFact(
   });
 }
 
-function validateStandardEvent(
+export function validateStandardEvent(
   envelope: DomainEventEnvelope,
   type: string,
   nodeIds: ReadonlySet<string>,

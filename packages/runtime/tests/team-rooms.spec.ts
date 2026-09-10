@@ -3,6 +3,7 @@ import {
   lstat,
   mkdir,
   mkdtemp,
+  open,
   readFile,
   readdir,
   realpath,
@@ -33,6 +34,15 @@ import type {
 // this file declares its own time limit; the suite default is a hang guard,
 // not a speed bar.
 vi.setConfig({ testTimeout: 30_000, hookTimeout: 30_000 });
+
+vi.mock('node:fs/promises', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('node:fs/promises')>();
+  return {
+    ...actual,
+    open: vi.fn(actual.open),
+    writeFile: vi.fn(actual.writeFile),
+  };
+});
 
 type ProjectTeamRooms = (input: {
   readonly storage: RunStorageBinding;
@@ -225,6 +235,7 @@ async function appendEvent(
   runId: string,
   type: string,
   payload: JsonValue,
+  version = 1,
 ): Promise<void> {
   const events = await readEvents(storage, runId);
   await storage.eventStore.append(
@@ -233,7 +244,7 @@ async function appendEvent(
     [runtime.validateNewDomainEvent({
       eventId: randomUUID(),
       type,
-      version: 1,
+      version,
       timestamp: new Date().toISOString(),
       correlationId: runId,
       causationId: null,
@@ -441,6 +452,43 @@ describe('team room projection', () => {
     expect(await readFile(unrelatedPath)).toEqual(unrelatedBytes);
   });
 
+  it('preserves a pre-existing temporary file when exclusive creation fails', async () => {
+    const run = await storedTeamRun(exchangeDefinition);
+    const directory = join(run.root, 'room-files');
+    const collisionBytes = Buffer.from('foreign temporary bytes');
+    const actual = await vi.importActual<typeof import('node:fs/promises')>('node:fs/promises');
+    let collisionPath: string | undefined;
+    const collide = async (path: unknown): Promise<void> => {
+      if (collisionPath !== undefined) return;
+      collisionPath = String(path);
+      await actual.writeFile(collisionPath, collisionBytes, { flag: 'wx', mode: 0o600 });
+    };
+    vi.mocked(open).mockImplementation(async (...args) => {
+      if (args[1] === 'wx') await collide(args[0]);
+      return actual.open(...args);
+    });
+    vi.mocked(writeFile).mockImplementation(async (...args) => {
+      const options = args[2];
+      if (
+        typeof options === 'object'
+        && options !== null
+        && 'flag' in options
+        && options.flag === 'wx'
+      ) await collide(args[0]);
+      return actual.writeFile(...args);
+    });
+
+    try {
+      await expect(projectTeamRooms()({ storage: run.storage, runId: run.runId, directory }))
+        .rejects.toMatchObject({ code: 'EEXIST' });
+      expect(collisionPath).toBeDefined();
+      expect(await readFile(collisionPath!)).toEqual(collisionBytes);
+    } finally {
+      vi.mocked(open).mockImplementation(actual.open);
+      vi.mocked(writeFile).mockImplementation(actual.writeFile);
+    }
+  });
+
   it('writes empty declared rooms and returns no files when communication is omitted', async () => {
     const root = await temporaryRoot();
     const storage = localStorage(root);
@@ -606,6 +654,32 @@ describe('team room projection', () => {
       runId: run.runId,
       directory,
     })).rejects.toBeInstanceOf(runtime.GraphValidationError);
+    expect(await readdir(directory)).toEqual(['keep.txt']);
+    expect(await readFile(join(directory, 'keep.txt'), 'utf8')).toBe('keep this file');
+    expect(await readEvents(run.storage, run.runId)).toEqual(before);
+  });
+
+  it('rejects a matching version-2 completion before creating a room file', async () => {
+    const run = await storedTeamRun(exchangeDefinition);
+    await appendEvent(run.storage, run.runId, 'graph:node-dispatched', {
+      nodeId: 'writer',
+      position: 'team/writer/1',
+    });
+    await appendEvent(run.storage, run.runId, 'graph:node-completed', {
+      nodeId: 'writer',
+      position: 'team/writer/1',
+      result: {
+        summary: 'Valid post with an unsupported event version.',
+        posts: [{ roomId: 'review', text: 'DO_NOT_PROJECT_VERSION_2', mentions: [] }],
+      },
+    }, 2);
+    const before = await readEvents(run.storage, run.runId);
+    const directory = join(run.root, 'room-files');
+    await mkdir(directory);
+    await writeFile(join(directory, 'keep.txt'), 'keep this file');
+
+    await expect(projectTeamRooms()({ storage: run.storage, runId: run.runId, directory }))
+      .rejects.toMatchObject({ name: 'GraphExecutionError', code: 'INVALID_EVENT' });
     expect(await readdir(directory)).toEqual(['keep.txt']);
     expect(await readFile(join(directory, 'keep.txt'), 'utf8')).toBe('keep this file');
     expect(await readEvents(run.storage, run.runId)).toEqual(before);
