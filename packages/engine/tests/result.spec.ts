@@ -10,6 +10,7 @@ import {
   finalResultPart,
   finalResultText,
   validateAgentResult,
+  validateIncompleteResultEvidence,
 } from '../src/result.ts';
 
 const selection: EngineSelectionRecord = {
@@ -131,5 +132,29 @@ describe('engine result records', () => {
         exitCode: 1,
       },
     })).toThrow('transportFailure.kind');
+  });
+
+  it.each([
+    { label: 'object', text: {} },
+    { label: 'array', text: [] },
+    { label: 'number', text: 7 },
+    { label: 'boolean', text: false },
+    { label: 'null', text: null },
+  ])('rejects $label assistant text in complete and incomplete evidence', ({ text }) => {
+    expect.soft(() => validateAgentResult(result([
+      { kind: 'assistant', text: text as unknown as string, final: true },
+    ]))).toThrow('parts[0].text must be a string');
+    expect.soft(() => validateIncompleteResultEvidence(result([
+      { kind: 'assistant', text: text as unknown as string, final: false },
+    ]))).toThrow('parts[0].text must be a string');
+  });
+
+  it.each(['', 'answer'])('preserves valid assistant text %j in both validators', (text) => {
+    expect(validateAgentResult(result([
+      { kind: 'assistant', text, final: true },
+    ])).parts).toEqual([{ kind: 'assistant', text, final: true }]);
+    expect(validateIncompleteResultEvidence(result([
+      { kind: 'assistant', text, final: false },
+    ])).parts).toEqual([{ kind: 'assistant', text, final: false }]);
   });
 });
