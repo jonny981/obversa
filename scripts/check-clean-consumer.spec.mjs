@@ -45,6 +45,24 @@ test('clean consumer wires the feature-delivery production line', async () => {
   assert.doesNotMatch(source, /recordEvents !== \d+/);
 });
 
+test('clean consumer runs the three packed team examples', async () => {
+  const source = await readFile(new URL('./check-clean-consumer.mjs', import.meta.url), 'utf8');
+  assert.match(source, /'teams\/scripted-engine\.ts'/);
+  assert.match(source, /'teams\/writer-reviewer-pair\.proof\.ts'/);
+  assert.match(source, /'teams\/threshold-panel\.proof\.ts'/);
+  assert.match(source, /'teams\/feature-delivery\.proof\.ts'/);
+  assert.match(source, /'teams\/writer-reviewer-pair\.ts'/);
+  assert.match(source, /'teams\/threshold-panel\.ts'/);
+  assert.match(source, /'teams\/feature-delivery\.ts'/);
+  assert.match(source, /reviewerKickbacks/);
+});
+
+test('clean consumer compiles and runs the tournament example', async () => {
+  const source = await readFile(new URL('./check-clean-consumer.mjs', import.meta.url), 'utf8');
+  assert.match(source, /'tournament\.ts'/);
+  assert.match(source, /compiledTournament/);
+});
+
 test('team conversation example requires the reply to queue another writer turn', async (t) => {
   const source = await readFile(new URL('../examples/team-conversation.ts', import.meta.url), 'utf8');
   const directory = await mkdtemp(new URL('../examples/.team-conversation-', import.meta.url));

@@ -6,9 +6,7 @@
  * with no model and no network: every job here is a small function, so the
  * shape of the team is the only thing on show.
  */
-// README-SPAN-START imports
 import { fnJob, pipeline, reviewPanel, run, type Outcome } from '@obversa/runtime';
-// README-SPAN-END imports
 
 /** The work itself. In a real team each of these calls an engine. */
 const analyse = fnJob('analyse', async (): Promise<Outcome> => ({
@@ -55,7 +53,6 @@ const checks = {
       : { status: 'pass', summary: 'inside the ticket' }),
 };
 
-// README-SPAN-START team
 const review = reviewPanel({
   label: 'review',
   reviewers: [
@@ -78,7 +75,6 @@ export const featureDelivery = pipeline(
   ],
   { maxKickbacks: 2 },
 );
-// README-SPAN-END team
 
 const result = await run(featureDelivery);
 console.log(JSON.stringify({

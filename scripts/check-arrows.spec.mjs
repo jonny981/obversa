@@ -57,6 +57,12 @@ manifest("packages/runner", {
   exports: { ".": "./src/index.mjs" },
   dependencies: { "@obversa/engine": "workspace:*", "@obversa/runtime": "workspace:*" },
 });
+manifest("packages/teams", {
+  name: "@obversa/teams",
+  type: "module",
+  exports: { ".": "./src/index.mjs" },
+  dependencies: { "@obversa/runtime": "workspace:*" },
+});
 manifest("packages/surfacer", { name: "@obversa/surfacer", type: "module", exports: { ".": "./src/index.mjs" } });
 manifest("plugins/memory-git", {
   name: "@obversa/memory-git",
@@ -83,10 +89,11 @@ manifest("hosts/cmux", {
   type: "module",
   dependencies: { "@obversa/source": "workspace:*", "@obversa/surfacer": "workspace:*" },
 });
-for (const name of ["engine", "memory", "process", "runner", "runtime", "source", "surfacer"]) {
+for (const name of ["engine", "memory", "process", "runner", "runtime", "source", "surfacer", "teams"]) {
   mkdirSync(join(fixture, "node_modules", "@obversa"), { recursive: true });
   symlinkSync(join("..", "..", "packages", name), join(fixture, "node_modules", "@obversa", name));
 }
+symlinkSync(join("..", "..", "plugins", "engine-codex"), join(fixture, "node_modules", "@obversa", "engine-codex"));
 manifest("node_modules/left-pad", { name: "left-pad", version: "1.0.0", main: "index.js" });
 file("node_modules/left-pad/index.js", "module.exports = (s) => s;\n");
 manifest("node_modules/devtool", { name: "devtool", version: "1.0.0", main: "index.js" });
@@ -117,6 +124,7 @@ const forbidden = [
   ["packages/runtime/src/runner.mjs", "import '@obversa/runner';\n", "runtime-reaches-interfaces-only"],
   ["packages/runner/src/memory.mjs", "import '@obversa/memory';\n", "runner-reaches-runtime-and-engine-only"],
   ["packages/runner/src/plugin.mjs", "import '../../../plugins/engine-codex/src/index.mjs';\n", "runner-reaches-runtime-and-engine-only"],
+  ["packages/teams/src/adapter.mjs", "import '@obversa/engine-codex';\n", "teams-reaches-runtime-only"],
   ["packages/runner/src/private.mjs", "import '../../runtime/src/index.mjs';\n", "no-cross-package-internal-path"],
   ["packages/surfacer/src/bad-a.mjs", "import '../../memory/src/index.mjs';\n", "no-cross-package-internal-path"],
   ["packages/surfacer/src/bad-a.mjs", null, "surfacer-reaches-no-package"],
@@ -148,6 +156,7 @@ for (const [path, content] of forbidden) if (content !== null) file(path, conten
 // The allowed forms: the same arrows done properly raise nothing.
 const allowed = [
   ["packages/runner/src/public.mjs", "import '@obversa/runtime';\nimport '@obversa/engine';\n"],
+  ["packages/teams/src/public.mjs", "import '@obversa/runtime';\n"],
   ["plugins/memory-git/src/ok1.mjs", "import '@obversa/memory';\nimport '@obversa/process';\n"],
   ["packages/runtime/src/ok9.mjs", "import '@obversa/engine';\nimport '@obversa/memory';\n"],
   ["plugins/engine-codex/src/ok10.mjs", "import '@obversa/engine';\nimport '@obversa/process';\n"],

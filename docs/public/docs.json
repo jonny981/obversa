@@ -47,6 +47,10 @@
         "group": "Examples",
         "pages": [
           "workflows/index",
+          "workflows/writer-and-reviewer",
+          "workflows/review-panel",
+          "workflows/feature-team",
+          "workflows/tournament",
           "workflows/team-conversation",
           "workflows/offline-review",
           "workflows/safe-change",
@@ -110,6 +114,7 @@
           "packages/engine",
           "packages/memory",
           "packages/process",
+          "packages/teams",
           "packages/surfacer"
         ]
       },

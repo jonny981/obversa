@@ -515,6 +515,7 @@ const packageRules = new Map([
   // so a host keeps placement glue only.
   ['@obversa/surfacer', { directory: 'packages/surfacer', kind: 'surface', version: '0.1.0', dependencies: [], peerDependencies: [] }],
   ['@obversa/source', { directory: 'packages/source', kind: 'surface', version: '0.1.0', dependencies: ['@obversa/surfacer'], peerDependencies: [] }],
+  ['@obversa/teams', { directory: 'packages/teams', kind: 'workflow', version: '0.1.0', dependencies: ['@obversa/runtime'], peerDependencies: [] }],
   ['@obversa/engine-agent-sdk', {
     directory: 'plugins/engine-agent-sdk',
     kind: 'plugin',
@@ -1199,8 +1200,8 @@ for (const absolute of files) {
 }
 
 for (const [name, rule] of packageRules) {
-  if (!['interface', 'runtime', 'plugin', 'surface', 'host'].includes(rule.kind))
-    failures.push(`${name}: boundary kind must be interface, runtime, plugin, surface, or host; found ${rule.kind ?? 'absent'}`);
+  if (!['interface', 'runtime', 'plugin', 'surface', 'host', 'workflow'].includes(rule.kind))
+    failures.push(`${name}: boundary kind must be interface, runtime, plugin, surface, host, or workflow; found ${rule.kind ?? 'absent'}`);
   const directory = join(root, rule.directory);
   if (rule.kind === 'runtime' || rule.kind === 'plugin') {
     for (const dependency of [...rule.dependencies, ...rule.peerDependencies]) {

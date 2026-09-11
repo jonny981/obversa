@@ -49,14 +49,6 @@ const COMMANDS_ARE_THE_CONTENT = new Set(['get-started/installation.mdx']);
  */
 const KNOWN_DEBT = [
   {
-    page: 'workflows/index.mdx', fault: 'example', owner: 'D36',
-    why: 'the bank quotes the first ready-made team, which arrives with the teams a reader can run by name',
-  },
-  {
-    page: 'workflows/index.mdx', fault: 'opening', owner: 'D36',
-    why: 'the opening is rewritten around the quote that arrives with it',
-  },
-  {
     page: 'plugins.mdx', fault: 'example', owner: 'D35',
     why: 'a list of the tools we ship with nothing to copy; the package-page rewrite gives it one engine binding a reader can paste',
   },

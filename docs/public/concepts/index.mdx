@@ -106,39 +106,82 @@ inference.
 
 ## See a team run
 
-Five named stages, the way a real team ships a feature. The review is a
-panel of three. Two of the three fail the first attempt, so the panel sends
-the work back to `implement` with their findings, and the second attempt
-passes. No model and no network: every stage here is a small function, so
-the shape of the team is the only thing on show.
+Five named steps, the way a real team ships a feature: a Claude seat
+turns the brief into a requirements note, a Codex seat implements it, Node
+runs the test, a Claude reviewer reads the result, and a final seat writes
+the approval. A rejected review sends the work back to the implementer. The
+file is complete; copy it, put your brief in, run it with Node.
 
 ```ts
-import { fnJob, pipeline, reviewPanel, run, type Outcome } from '@obversa/runtime';
-```
+import { ClaudeCliEngine } from '@obversa/engine-claude-cli';
+import { CodexEngine } from '@obversa/engine-codex';
+import { run } from '@obversa/runtime';
+import { featureDelivery } from '@obversa/teams';
 
-```ts
-const review = reviewPanel({
-  label: 'review',
-  reviewers: [
-    { name: 'correctness', job: checks.correctness },
-    { name: 'safety', job: checks.safety },
-    { name: 'scope', job: checks.scope },
-  ],
-  pass: 2, // two of three agree and the step passes
-  target: 'implement', // a failing panel sends the work back here
+const workspace = process.cwd();
+const analyse = {
+  engine: new ClaudeCliEngine({
+    defaultModel: 'claude-sonnet-4-5',
+    permissionMode: 'bypassPermissions',
+  }),
+  identity: {
+    adapter: 'claude-cli',
+    provider: 'anthropic',
+    modelFamily: 'claude',
+    model: 'claude-sonnet-4-5',
+  },
+};
+const implement = {
+  engine: new CodexEngine({
+    defaultModel: 'gpt-5.6-luna',
+    permissionMode: 'bypassPermissions',
+  }),
+  identity: {
+    adapter: 'codex',
+    provider: 'openai',
+    modelFamily: 'gpt',
+    model: 'gpt-5.6-luna',
+  },
+};
+const reviewer = {
+  engine: new ClaudeCliEngine({
+    defaultModel: 'claude-sonnet-4-5',
+    permissionMode: 'bypassPermissions',
+  }),
+  identity: {
+    adapter: 'claude-cli',
+    provider: 'anthropic',
+    modelFamily: 'claude',
+    model: 'claude-sonnet-4-5',
+  },
+};
+const approve = {
+  engine: new ClaudeCliEngine({
+    defaultModel: 'claude-sonnet-4-5',
+    permissionMode: 'bypassPermissions',
+  }),
+  identity: {
+    adapter: 'claude-cli',
+    provider: 'anthropic',
+    modelFamily: 'claude',
+    model: 'claude-sonnet-4-5',
+  },
+};
+
+const team = featureDelivery({
+  brief: 'Deliver a pure triple(value) function in src/triple.mjs with a Node test in test/triple.test.mjs.',
+  workspace,
+  files: ['src/triple.mjs', 'test/triple.test.mjs'],
+  test: { command: 'node', args: ['--test', 'test/triple.test.mjs'] },
+  analyse,
+  implement,
+  reviewers: [{ name: 'correctness', seat: reviewer }],
+  reviewThreshold: 1,
+  approve,
 });
 
-export const featureDelivery = pipeline(
-  'feature-delivery',
-  [
-    { name: 'analyse', job: analyse },
-    { name: 'implement', job: implement },
-    { name: 'test', job: testStage },
-    { name: 'review', job: review },
-    { name: 'approve', job: approve },
-  ],
-  { maxKickbacks: 2 },
-);
+const result = await run(team, { cwd: workspace });
+console.log(JSON.stringify(result.outcome, null, 2));
 ```
 
 Write many small jobs, each with its own review, for the specific research,
@@ -147,21 +190,56 @@ ones. A coarse step hands the whole task to one inference and hopes. A
 small step with a review cycle is a process the run can hold to, and the
 team above is the shape to grow, not the size to stop at.
 
-It prints:
+One real run of this file printed:
 
-```text
+```json
 {
   "status": "pass",
-  "implementRuns": 2
+  "summary": "dag \"feature-delivery\": all 5 node(s) green",
+  "data": {
+    "analyse": {
+      "status": "pass",
+      "summary": "Requirements extracted from work brief and documented in team-output/brief.md. Identified 4 core requirements: pure triple(value) function, source location (src/triple.mjs), Node test implementation, and test location (test/triple.test.mjs)."
+    },
+    "implement": {
+      "status": "pass",
+      "summary": "Implemented pure triple(value) with finite-number validation and added Node tests for numeric and invalid inputs."
+    },
+    "test": {
+      "status": "pass",
+      "summary": "`node` exited 0"
+    },
+    "review": {
+      "status": "pass",
+      "summary": "Review panel: 1/1 reviewer(s) cleared.",
+      "data": {
+        "findings": [],
+        "escalatedFindings": [],
+        "errors": [],
+        "results": [
+          {
+            "kind": "verdict",
+            "name": "correctness",
+            "met": true,
+            "reason": "Implementation is correct. The triple function is pure, properly validates inputs, and correctly multiplies finite numbers by 3. Tests comprehensively verify both valid inputs and error cases."
+          }
+        ],
+        "passed": 1,
+        "required": 1,
+        "severityCounts": {}
+      }
+    },
+    "approve": {
+      "status": "pass",
+      "summary": "Implementation meets all requirements. The triple function is pure, correctly multiplies finite numbers by 3, properly validates inputs, and has comprehensive passing tests (2/2). Ready to ship."
+    }
+  }
 }
 ```
 
-`implement` ran twice. That second run is the whole point: a reviewer said
-no, named the stage that owns the fix, and the work went back there instead
-of the run starting over. The whole file is
-[feature-team.ts](/concepts/workflows), and the
-[the examples](/workflows) has more to copy.
-
+Every step's own words are in that record. The files the models wrote, the
+requirements note and the approval included, are on the
+[feature delivery](/workflows/feature-team) page.
 ## The words you will meet
 
 Four words carry most of the docs, and each has a page:
@@ -180,9 +258,7 @@ Four words carry most of the docs, and each has a page:
 
 - **It is a library, not a service.** You write a TypeScript file and run
   it with Node. There is no daemon and no dashboard to sign into.
-- **The mock engine is for the shape, not the work.** Every example runs
-  offline so you can see the mechanics; a real engine plugin makes it do
-  real work, and that is one line to change.
+- **Two kinds of example.** The three teams run real engine plugins and their pages show what a real run printed. The single-mechanism pages run offline against small functions so the shape is the only thing on show.
 - **A plain run does not resume.** Resume belongs to the supervised runner;
   the [recording](/recording/how-a-run-is-recorded) page says which layer
   does what, so you are not surprised by it.
