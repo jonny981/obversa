@@ -2,7 +2,6 @@
  * A small team in DAG form. Each stage says what it does and what done means.
  * It runs offline, so the example needs no model or network.
  */
-// DOCS-SPAN-START described-team
 import {
   dag,
   fnJob,
@@ -50,4 +49,3 @@ const report = {
 console.log(JSON.stringify(report, null, 2));
 
 if (result.outcome.status !== 'pass') process.exitCode = 1;
-// DOCS-SPAN-END described-team

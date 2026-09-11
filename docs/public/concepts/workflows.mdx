@@ -44,6 +44,10 @@ harder to write vaguely. `needs` takes a single name when a step has one
 dependency, which is the common case.
 
 ```ts
+/**
+ * A small team in DAG form. Each stage says what it does and what done means.
+ * It runs offline, so the example needs no model or network.
+ */
 import {
   dag,
   fnJob,
@@ -106,36 +110,12 @@ The plan the runtime renders shows both sentences under each step:
 
 Five named stages. The review is a panel of three that passes on two, and
 when it fails, the work goes back to the implement stage rather than to
-the start of the run.
+the start of the run. The whole file is on the
+[first run](/get-started/first-run) page; copy it from there.
 
-```ts
-const review = reviewPanel({
-  label: 'review',
-  reviewers: [
-    { name: 'correctness', job: checks.correctness },
-    { name: 'safety', job: checks.safety },
-    { name: 'scope', job: checks.scope },
-  ],
-  pass: 2, // two of three agree and the step passes
-  target: 'implement', // a failing panel sends the work back here
-});
-
-export const featureDelivery = pipeline(
-  'feature-delivery',
-  [
-    { name: 'analyse', job: analyse },
-    { name: 'implement', job: implement },
-    { name: 'test', job: testStage },
-    { name: 'review', job: review },
-    { name: 'approve', job: approve },
-  ],
-  { maxKickbacks: 2 },
-);
-```
 
 Run it and the panel fails the first attempt, implement runs again, and the
 second attempt passes:
-
 
 ```text
 {
