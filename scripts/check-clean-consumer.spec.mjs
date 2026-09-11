@@ -57,6 +57,12 @@ test('clean consumer runs the three packed team examples', async () => {
   assert.match(source, /reviewerKickbacks/);
 });
 
+test('clean consumer compiles and runs the tournament example', async () => {
+  const source = await readFile(new URL('./check-clean-consumer.mjs', import.meta.url), 'utf8');
+  assert.match(source, /'tournament\.ts'/);
+  assert.match(source, /compiledTournament/);
+});
+
 test('team conversation example requires the reply to queue another writer turn', async (t) => {
   const source = await readFile(new URL('../examples/team-conversation.ts', import.meta.url), 'utf8');
   const directory = await mkdtemp(new URL('../examples/.team-conversation-', import.meta.url));

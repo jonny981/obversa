@@ -11,9 +11,7 @@
  * the README used to carry hand-written code that resembled this and had
  * quietly lost the one line that makes the work go back.
  */
-// README-SPAN-START imports
 import { fnJob, pipeline, reviewPanel, run, type Outcome } from '@obversa/runtime';
-// README-SPAN-END imports
 
 /** The work itself. In a real team each of these calls an engine. */
 const analyse = fnJob('analyse', async (): Promise<Outcome> => ({
@@ -60,7 +58,6 @@ const checks = {
       : { status: 'pass', summary: 'inside the ticket' }),
 };
 
-// README-SPAN-START team
 const review = reviewPanel({
   label: 'review',
   reviewers: [
@@ -83,7 +80,6 @@ export const featureDelivery = pipeline(
   ],
   { maxKickbacks: 2 },
 );
-// README-SPAN-END team
 
 const result = await run(featureDelivery);
 console.log(JSON.stringify({

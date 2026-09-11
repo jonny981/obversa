@@ -568,6 +568,7 @@ const tsconfig = {
     'teams/threshold-panel.proof.ts',
     'teams/feature-delivery.ts',
     'teams/feature-delivery.proof.ts',
+    'tournament.ts',
   ],
 };
 
@@ -648,6 +649,7 @@ async function main() {
   const turnTakingExamplePath = join(root, 'examples', 'turn-taking.ts');
   const workspaceExamplePath = join(root, 'examples', 'workspace.ts');
   const featureTeamExamplePath = join(root, 'examples', 'feature-team.ts');
+  const tournamentExamplePath = join(root, 'examples', 'tournament.ts');
   const runnerExamplePath = join(root, 'examples', 'supervised-run.ts');
   const runnerHostPath = join(root, 'examples', 'supervised-host.mjs');
   const safeChangeExamplePath = join(root, 'examples', 'safe-change.ts');
@@ -792,6 +794,7 @@ async function main() {
     await copyFile(turnTakingExamplePath, join(consumerDirectory, 'turn-taking.ts'));
     await copyFile(workspaceExamplePath, join(consumerDirectory, 'workspace.ts'));
     await copyFile(featureTeamExamplePath, join(consumerDirectory, 'feature-team.ts'));
+    await copyFile(tournamentExamplePath, join(consumerDirectory, 'tournament.ts'));
     await copyFile(describedTeamExamplePath, join(consumerDirectory, 'described-team.ts'));
     await copyFile(runnerExamplePath, join(consumerDirectory, 'supervised-run.ts'));
     await copyFile(runnerHostPath, join(consumerDirectory, 'supervised-host.mjs'));
@@ -879,6 +882,12 @@ async function main() {
     const directTeamFeature = JSON.parse(
       run('pnpm', ['exec', 'tsx', 'teams/feature-delivery.proof.ts'], { cwd: consumerDirectory }),
     );
+    const compiledTournament = JSON.parse(
+      run(process.execPath, ['dist/tournament.js'], { cwd: consumerDirectory }),
+    );
+    const directTournament = JSON.parse(
+      run('pnpm', ['exec', 'tsx', 'tournament.ts'], { cwd: consumerDirectory }),
+    );
     assert.equal(compiledRunChild, 'ready');
     assert.equal(directRunChild, 'ready');
     assert.deepEqual(compiledTeamPair, directTeamPair);
@@ -896,6 +905,12 @@ async function main() {
     assert.equal(compiledTeamFeature.testCommandsRun, 2);
     assert.equal(compiledTeamFeature.reviewRounds, 2);
     assert.equal(compiledTeamFeature.kickbacks, 1);
+    assert.deepEqual(compiledTournament, directTournament);
+    assert.equal(compiledTournament.status, 'pass');
+    assert.equal(compiledTournament.candidates, 3);
+    assert.equal(compiledTournament.winnerLanded, true);
+    assert.deepEqual(compiledTournament.candidateBranches, []);
+    assert.equal(compiledTournament.temporaryDirectoryRemoved, true);
     const featureDenySource = featureExampleSource.replace(
       '{ approved: true },',
       '{ approved: false },',

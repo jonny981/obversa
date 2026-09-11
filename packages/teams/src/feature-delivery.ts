@@ -20,9 +20,7 @@ export function featureDelivery(config: FeatureDeliveryConfig) {
   assertTeamInput(config);
   assertReviewers(config.reviewers, config.reviewThreshold);
   assertDistinctSeats([
-    config.analyse,
     config.implement,
-    config.approve,
     ...config.reviewers.map(({ seat }) => seat),
   ]);
   const maxKickbacks = config.maxKickbacks ?? 1;

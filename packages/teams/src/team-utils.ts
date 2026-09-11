@@ -122,7 +122,6 @@ function rolePrompt(role: string, brief: string): string {
     `Obversa team role: ${role}`,
     `Work brief: ${brief}`,
     'Work in the supplied cwd.',
-    'Return one JSON object: {"status":"pass"|"revise","summary":"...","findings":[{"evidence":"..."}]}',
   ].join('\n');
 }
 
@@ -140,7 +139,7 @@ export function teamAgent(
     model: identity.model,
     cwd: input.workspace,
     consumeFeedback: target !== undefined,
-    prompt: `${rolePrompt(label, input.brief)}\n${instructions}`,
+    prompt: `${rolePrompt(label, input.brief)}\n${instructions}\nReturn one JSON object: {"status":"pass"|"revise","summary":"...","findings":[{"evidence":"..."}]}`,
     outcome: (text) => outcomeFromAgentText(text, target),
   });
 }

@@ -139,4 +139,36 @@ describe('featureDelivery', () => {
       await rm(workspace, { recursive: true, force: true });
     }
   });
+
+  it('checks diversity between implementation and reviewers, not analyse or approve', () => {
+    const make = (name: string) => scriptedEngine(name, [async () => pass('unused')]);
+    const analyse = make('analyse');
+    const implement = make('implement');
+    const reviewer = make('reviewer');
+    const approve = make('approve');
+
+    expect(() => featureDelivery({
+      brief: 'Deliver a module.',
+      workspace: '/tmp/obversa-teams-feature',
+      files: ['src/result.mjs'],
+      test: testCommand,
+      analyse: seat(analyse, 'same-family'),
+      implement: seat(implement, 'implementation-family'),
+      reviewers: [{ name: 'reviewer', seat: seat(reviewer, 'same-family') }],
+      reviewThreshold: 1,
+      approve: seat(approve, 'same-family'),
+    })).not.toThrow();
+
+    expect(() => featureDelivery({
+      brief: 'Deliver a module.',
+      workspace: '/tmp/obversa-teams-feature',
+      files: ['src/result.mjs'],
+      test: testCommand,
+      analyse: seat(analyse, 'analyse-family'),
+      implement: seat(implement, 'same-family'),
+      reviewers: [{ name: 'reviewer', seat: seat(reviewer, 'same-family') }],
+      reviewThreshold: 1,
+      approve: seat(approve, 'approve-family'),
+    })).toThrow(/model family/i);
+  });
 });
