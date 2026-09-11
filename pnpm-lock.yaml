@@ -28,6 +28,9 @@ importers:
       '@obversa/runtime':
         specifier: workspace:^
         version: link:packages/runtime
+      '@obversa/teams':
+        specifier: workspace:^
+        version: link:packages/teams
       '@types/node':
         specifier: 22.12.0
         version: 22.12.0
@@ -158,6 +161,16 @@ importers:
         version: 4.4.3
 
   packages/surfacer: {}
+
+  packages/teams:
+    dependencies:
+      '@obversa/runtime':
+        specifier: workspace:^
+        version: link:../runtime
+    devDependencies:
+      '@types/node':
+        specifier: 22.12.0
+        version: 22.12.0
 
   plugins/engine-agent-sdk:
     dependencies:

@@ -15,6 +15,7 @@
     "@obversa/runner",
     "@obversa/runtime",
     "@obversa/source",
-    "@obversa/surfacer"
+    "@obversa/surfacer",
+    "@obversa/teams"
   ]
 }
