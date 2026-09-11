@@ -146,14 +146,15 @@ await new Promise(() => {});
     });
   });
 
-  it('classifies a null exit after the deadline as a timeout', async () => {
+  it('classifies a null exit after timeout teardown as a timeout', async () => {
     const { bin } = stub(`#!/usr/bin/env node
 import { readFileSync, writeFileSync } from 'node:fs';
 const args = process.argv.slice(2);
 readFileSync(0, 'utf8');
-process.on('SIGTERM', () => {});
 writeFileSync(args[args.indexOf('-o') + 1], 'PONG');
-setTimeout(() => process.kill(process.pid, 'SIGKILL'), 325);
+process.on('SIGTERM', () => {
+  process.kill(process.pid, 'SIGKILL');
+});
 setInterval(() => {}, 1_000);
 `);
 
