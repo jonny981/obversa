@@ -181,9 +181,13 @@ of your own over the public contract, see
 - **A reviewer needs a target to send work back.** Without `target`, a
   failing panel fails the run rather than returning the work. The example
   above sets it.
-- **Kickbacks are counted.** `maxKickbacks` caps how many times work can go
-  back; when it runs out, the run fails with the last findings rather than
-  looping.
+- **Kickbacks are counted, per target if you say so.** `maxKickbacks` caps
+  how many times work can go back. A number is one budget for the whole
+  graph. A map, `{ plan: 3, 'tests-first': 3 }`, gives each target its own,
+  so a review that spends its budget on one step cannot starve another; a
+  target the map does not name gets none. When a budget runs out, the run
+  fails with the last findings rather than looping, and every request is in
+  the record with its count and its limit.
 - **A plain run does not resume.** `run()` starts a fresh record each time;
   restarting a killed run is the supervised runner's job. See
   [driving runs](/driving/runner).
