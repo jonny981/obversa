@@ -11,7 +11,7 @@
  *
  * Non-goals: this is pinning, not a lifecycle. Unlike the Environment interface, an
  * overlay has no `down()` and never touches the Environment handle. It cannot unset
- * an inherited var: execa merges env over `process.env`, so an overlay only adds or
+ * an inherited var: the process helper merges env over `process.env`, so an overlay only adds or
  * shadows values.
  */
 
@@ -35,7 +35,7 @@ export function mergeEnv(
     for (const [k, v] of Object.entries(layer)) {
       // Null-prototype accumulator: on a plain `{}` a key named `__proto__`
       // hits the inherited accessor and the set is a silent no-op, so the
-      // entry would vanish from the child env (execa accepts null-prototype
+      // entry would vanish from the child env (the process helper accepts null-prototype
       // env objects; spreading one works too).
       (merged ??= Object.create(null) as Record<string, string>)[k] = v;
     }
@@ -46,7 +46,7 @@ export function mergeEnv(
 /**
  * The layered env for one engine/subprocess call, least → most specific: the
  * running environment's vars, then the `withEnv` overlay, then the per-call
- * layer (`commandSucceeds` `opts.env` / `agentJob` `config.env`). execa (and
+ * layer (`commandSucceeds` `opts.env` / `agentJob` `config.env`). The process helper (and
  * the SDK adapter) merge the result over `process.env`, completing the
  * precedence chain in the header. One helper so a new call site cannot forget
  * a layer and silently break `withEnv`'s "everything beneath it" contract.

@@ -146,6 +146,30 @@ await new Promise(() => {});
     });
   });
 
+  it('classifies a null exit after the deadline as a timeout', async () => {
+    const { bin } = stub(`#!/usr/bin/env node
+import { readFileSync, writeFileSync } from 'node:fs';
+const args = process.argv.slice(2);
+readFileSync(0, 'utf8');
+process.on('SIGTERM', () => {});
+writeFileSync(args[args.indexOf('-o') + 1], 'PONG');
+setTimeout(() => process.kill(process.pid, 'SIGKILL'), 325);
+setInterval(() => {}, 1_000);
+`);
+
+    const result = await new CodexEngine({ cliBinary: bin }).run(
+      { prompt: 'ping', timeoutMs: 300, timeoutGraceMs: 100 },
+      () => {},
+      new AbortController().signal,
+    );
+
+    expect(finalResultText(result)).toBe('PONG');
+    expect(result.transportFailure).toMatchObject({
+      kind: 'timeout',
+      exitCode: null,
+    });
+  });
+
   it('the hard timeout still fires when the engine never exits', async () => {
     const { bin, orphanPidPath } = stub(`#!/usr/bin/env node
 ${SPAWN_ORPHAN}

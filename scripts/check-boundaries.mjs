@@ -466,7 +466,7 @@ const packageRules = new Map([
     directory: 'packages/runtime',
     kind: 'runtime',
     version: '1.0.0',
-    dependencies: [],
+    dependencies: ['@obversa/process'],
     peerDependencies: ['@obversa/engine', '@obversa/memory'],
     peerDependencyVersions: {
       '@obversa/engine': '>=0.1.0 <0.2.0',
@@ -475,6 +475,13 @@ const packageRules = new Map([
   }],
   ['@obversa/engine', {
     directory: 'packages/engine',
+    kind: 'interface',
+    version: '0.1.0',
+    dependencies: ['@obversa/process'],
+    peerDependencies: [],
+  }],
+  ['@obversa/process', {
+    directory: 'packages/process',
     kind: 'interface',
     version: '0.1.0',
     dependencies: [],
@@ -498,7 +505,7 @@ const packageRules = new Map([
     directory: 'plugins/memory-git',
     kind: 'plugin',
     version: '0.1.0',
-    dependencies: ['@obversa/memory'],
+    dependencies: ['@obversa/memory', '@obversa/process'],
     peerDependencies: [],
   }],
   // Private workspace packages get a rule too, so a sibling import inside

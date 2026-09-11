@@ -1,7 +1,7 @@
 {
-  "name": "@obversa/engine",
+  "name": "@obversa/process",
   "version": "0.1.0",
-  "description": "The engine contract for bounded agent calls.",
+  "description": "Bounded child-process execution for Obversa packages.",
   "author": "Jonny Neill <jonnyneill@hotmail.com>",
   "type": "module",
   "license": "MIT",
@@ -20,14 +20,6 @@
     ".": {
       "types": "./dist/index.d.ts",
       "import": "./dist/index.js"
-    },
-    "./command": {
-      "types": "./dist/command/run.d.ts",
-      "import": "./dist/command.js"
-    },
-    "./testing": {
-      "types": "./dist/testing.d.ts",
-      "import": "./dist/testing.js"
     }
   },
   "files": [
@@ -43,16 +35,11 @@
     "prepack": "pnpm run build",
     "prepublishOnly": "node ../../scripts/check-publish-allowlist.mjs"
   },
-  "dependencies": {
-    "@obversa/process": "workspace:^"
-  },
   "devDependencies": {
     "@types/node": "22.12.0"
   },
   "keywords": [
-    "agent",
-    "graph",
-    "workflow",
+    "process",
     "runtime",
     "obversa"
   ],

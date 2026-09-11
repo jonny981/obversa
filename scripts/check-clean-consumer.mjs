@@ -281,6 +281,12 @@ function sourceFromPublicDoc(document) {
   return `${match[1]}\n`;
 }
 
+function sourceFromProcessDoc(document) {
+  const match = /## Run one\n\n```ts\n([\s\S]*?)\n```/.exec(document);
+  if (!match) throw new Error('The process page has no TypeScript example block');
+  return `${match[1]}\n`;
+}
+
 function run(command, args, options = {}) {
   const result = spawnSync(command, args, {
     cwd: options.cwd ?? root,
@@ -324,8 +330,11 @@ type ClientCallable = typeof createSurfaceClient extends (...args: never[]) => u
 type ReviewCallable = typeof reviewDiff extends (...args: never[]) => unknown ? true : never;
 type TrackedCallable = typeof listTrackedFiles extends (...args: never[]) => unknown ? true : never;
 const _f16TypeSurfaces: [SurfaceCallable, SurfaceStartCallable, ClientCallable, ReviewCallable, TrackedCallable] = [true, true, true, true, true];
+type RunChildCallable = typeof runChild extends (...args: never[]) => unknown ? true : never;
+const _f22ProcessSurface: RunChildCallable = true;
 import { GrokCliEngine } from '@obversa/engine-grok-cli';
 import { OpenCodeCliEngine } from '@obversa/engine-opencode-cli';
+import { runChild } from '@obversa/process';
 import {
   GraphValidationError,
   JsonValueError,
@@ -527,6 +536,7 @@ const tsconfig = {
     'safe-change.ts',
     'safe-change-recipe.ts',
     'safe-change-file-adapter.ts',
+    'run-child.ts',
   ],
 };
 
@@ -566,6 +576,7 @@ async function main() {
   const safeChangeRecipePath = join(root, 'examples', 'safe-change-recipe.ts');
   const safeChangeFileAdapterPath = join(root, 'examples', 'safe-change-file-adapter.ts');
   const describedTeamExamplePath = join(root, 'examples', 'described-team.ts');
+  const runChildExamplePath = join(root, 'examples', 'run-child.ts');
   const turnTakingExampleSource = await readFile(turnTakingExamplePath, 'utf8');
   const safeChangeExampleSource = await readFile(safeChangeExamplePath, 'utf8');
   const graphDocument = await readFile(
@@ -608,6 +619,11 @@ async function main() {
     join(root, 'docs', 'public', 'workflows', 'safe-change.mdx'),
     'utf8',
   );
+  const processDocument = await readFile(
+    join(root, 'docs', 'public', 'packages', 'process.mdx'),
+    'utf8',
+  );
+  const runChildExampleSource = await readFile(runChildExamplePath, 'utf8');
   if (sourceFromPublicDoc(publicDocument) !== exampleSource) {
     throw new Error('The offline production-line page does not match its runnable source');
   }
@@ -634,6 +650,12 @@ async function main() {
   }
   if (sourceFromPublicDoc(forgeDocument) !== forgeExampleSource) {
     throw new Error('The forge helper page does not match its runnable source');
+  }
+  if (sourceFromProcessDoc(processDocument) !== runChildExampleSource) {
+    throw new Error('The process page does not match its runnable source');
+  }
+  if (!/```text\nready\n```/.test(processDocument)) {
+    throw new Error('The process page does not record the runnable output');
   }
 
   const directory = await mkdtemp(join(tmpdir(), 'obversa-consumer-'));
@@ -694,6 +716,7 @@ async function main() {
     await copyFile(describedTeamExamplePath, join(consumerDirectory, 'described-team.ts'));
     await copyFile(runnerExamplePath, join(consumerDirectory, 'supervised-run.ts'));
     await copyFile(runnerHostPath, join(consumerDirectory, 'supervised-host.mjs'));
+    await copyFile(runChildExamplePath, join(consumerDirectory, 'run-child.ts'));
 
     run('pnpm', ['install', '--offline', '--ignore-scripts'], {
       cwd: consumerDirectory,
@@ -745,6 +768,14 @@ async function main() {
     const directForgeHelper = JSON.parse(
       run('pnpm', ['exec', 'tsx', 'forge-helper.ts'], { cwd: consumerDirectory }),
     );
+    const compiledRunChild = run(process.execPath, ['dist/run-child.js'], {
+      cwd: consumerDirectory,
+    }).trim();
+    const directRunChild = run('pnpm', ['exec', 'tsx', 'run-child.ts'], {
+      cwd: consumerDirectory,
+    }).trim();
+    assert.equal(compiledRunChild, 'ready');
+    assert.equal(directRunChild, 'ready');
     const featureDenySource = featureExampleSource.replace(
       '{ approved: true },',
       '{ approved: false },',

@@ -88,15 +88,21 @@ importers:
 
   packages/engine:
     dependencies:
-      execa:
-        specifier: ^9.6.1
-        version: 9.6.1
+      '@obversa/process':
+        specifier: workspace:^
+        version: link:../process
     devDependencies:
       '@types/node':
         specifier: 22.12.0
         version: 22.12.0
 
   packages/memory: {}
+
+  packages/process:
+    devDependencies:
+      '@types/node':
+        specifier: 22.12.0
+        version: 22.12.0
 
   packages/runner:
     dependencies:
@@ -113,9 +119,9 @@ importers:
 
   packages/runtime:
     dependencies:
-      execa:
-        specifier: ^9.6.1
-        version: 9.6.1
+      '@obversa/process':
+        specifier: workspace:^
+        version: link:../process
       p-limit:
         specifier: ^7.3.0
         version: 7.3.1
@@ -135,6 +141,9 @@ importers:
       '@types/toposort':
         specifier: ^2.0.7
         version: 2.0.7
+      execa:
+        specifier: ^9.6.1
+        version: 9.6.1
 
   packages/source:
     dependencies:
@@ -213,9 +222,9 @@ importers:
       '@obversa/memory':
         specifier: workspace:^
         version: link:../../packages/memory
-      execa:
-        specifier: ^9.6.1
-        version: 9.6.1
+      '@obversa/process':
+        specifier: workspace:^
+        version: link:../../packages/process
 
   plugins/memory-simple:
     dependencies:

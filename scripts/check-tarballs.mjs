@@ -348,6 +348,14 @@ export const EXPECTED_FILES = {
     'package/dist/index.js.map',
     'package/package.json',
   ],
+  '@obversa/process': [
+    'package/LICENSE',
+    'package/README.md',
+    'package/dist/index.d.ts',
+    'package/dist/index.js',
+    'package/dist/index.js.map',
+    'package/package.json',
+  ],
 };
 
 // Pack one package directory and prove the tarball with both tools.

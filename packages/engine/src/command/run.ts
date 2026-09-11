@@ -1,3 +1,4 @@
+import type { ChildProcess } from 'node:child_process';
 import { accessSync, constants, statSync } from 'node:fs';
 import {
   basename,
@@ -8,7 +9,7 @@ import {
 } from 'node:path';
 import { setTimeout as delay } from 'node:timers/promises';
 
-import { execa } from 'execa';
+import { RunChildError, runChild, type RunChildOptions } from '@obversa/process';
 
 import { digestJson, type Sha256Digest } from '../json.js';
 import {
@@ -77,7 +78,7 @@ export interface OwnedCommandRequest {
   readonly args: readonly string[];
   readonly cwd: string;
   readonly env: Readonly<Record<string, string>>;
-  /** Whether Execa may merge the parent process environment. Default true. */
+  /** Whether the process helper may merge the parent environment. Default true. */
   readonly inheritParentEnv?: boolean;
   readonly stdin: string;
   readonly attemptId: Sha256Digest;
@@ -131,6 +132,16 @@ type StopReason =
   | 'output'
   | 'memory'
   | 'inspection';
+
+type OwnedRunChildOptions = Omit<RunChildOptions, 'hooks'> & {
+  readonly hooks: {
+    readonly onSpawn: (child: ChildProcess) => void;
+    readonly onExit: (code: number | null, signal: NodeJS.Signals | null) => void | Promise<void>;
+    readonly onStdout?: (chunk: Uint8Array) => void;
+    readonly onStderr?: (chunk: Uint8Array) => void;
+    readonly onStop: (reason: 'timeout' | 'abort' | 'output') => void | Promise<void>;
+  };
+};
 
 function positiveSafeInteger(value: unknown, field: string): number {
   if (!Number.isSafeInteger(value) || (value as number) < 1) {
@@ -323,18 +334,6 @@ function mergeObserved(
   return [...merged.values()];
 }
 
-function bytes(chunk: unknown): Uint8Array {
-  if (typeof chunk === 'string') return Buffer.from(chunk);
-  if (chunk instanceof Uint8Array) return chunk;
-  return Buffer.from(String(chunk));
-}
-
-function joined(chunks: readonly Uint8Array[]): Uint8Array {
-  return Uint8Array.from(
-    Buffer.concat(chunks.map((chunk) => Buffer.from(chunk))),
-  );
-}
-
 function pipeFileDescriptor(stream: unknown): number | undefined {
   const descriptor = (
     stream as { readonly _handle?: { readonly fd?: unknown } } | undefined
@@ -372,258 +371,222 @@ export async function runOwnedCommand(
   const ownsOwner = inheritedOwner === undefined && request.ownerId !== undefined;
 
   const cancellation = new AbortController();
-  const subprocess = execa(request.executable, [...request.args], {
-    cwd: request.cwd,
-    env: {
-      ...request.env,
-      ...(ownerId === undefined ? {} : { OBVERSA_RUN_OWNER: ownerId }),
-      OBVERSA_ATTEMPT_ID: request.attemptId,
-      OBVERSA_RUN_ID: request.runId,
-      OBVERSA_HEADLESS: '1',
-    },
-    extendEnv: request.inheritParentEnv,
-    input: request.stdin,
-    cancelSignal: cancellation.signal,
-    forceKillAfterDelay: false,
-    reject: false,
-    buffer: false,
-    detached: process.platform !== 'win32',
-    cleanup: true,
-  });
-  const rootPid = subprocess.pid;
-  if (rootPid === undefined) {
-    const result = await subprocess;
-    throw new OwnedCommandError(
-      'SPAWN_FAILED',
-      result.shortMessage ?? `failed to spawn ${request.executable}`,
-    );
-  }
-  const rootProcessGroupId = rootPid;
-  const rawPipeFileDescriptors = [
-    pipeFileDescriptor(subprocess.stdout),
-    pipeFileDescriptor(subprocess.stderr),
-  ].filter((descriptor): descriptor is number => descriptor !== undefined);
-  const treeRequest = {
-    attemptId: request.attemptId,
-    ...(ownsOwner ? { ownerId } : {}),
-    rootPid,
-    rootProcessGroupId,
-  } as const;
+  let treeRequest: {
+    readonly attemptId: Sha256Digest;
+    readonly ownerId?: Sha256Digest;
+    readonly rootPid: number;
+    readonly rootProcessGroupId: number;
+  } | undefined;
+  let pipeProbe: ReturnType<typeof capturePipeOwnerProbe> | undefined;
+  let observed: readonly ProcessIdentity[] = [];
+  let peakMemoryBytes = 0;
+  let stopReason: StopReason | undefined;
+  let cleanupPromise: Promise<readonly ProcessIdentity[]> | undefined;
+  let monitorPromise: Promise<void> | undefined;
+  let monitorStopped = false;
+  let inspectionFailure: unknown;
+  let cleanupError: unknown;
 
-  let pipeProbe;
-  try {
-    pipeProbe = capturePipeOwnerProbe(rawPipeFileDescriptors);
-  } catch (error) {
-    cancellation.abort();
-    const remaining = await stopOwnedProcessTree({
-      ...treeRequest,
-      graceMs: request.teardownGraceMs,
-    });
-    subprocess.stdout?.destroy();
-    subprocess.stderr?.destroy();
-    await subprocess;
-    throw new OwnedCommandError(
-      remaining.length === 0 ? 'PROCESS_INSPECTION' : 'TEARDOWN_INCOMPLETE',
-      error instanceof Error ? error.message : 'could not retain pipe identity',
-      remaining,
-    );
-  }
+  const requestStop = (reason: StopReason): void => {
+    if (stopReason !== undefined) return;
+    stopReason = reason;
+    if (reason !== 'exit') cancellation.abort();
+  };
 
-  try {
-    const stdoutChunks: Uint8Array[] = [];
-    const stderrChunks: Uint8Array[] = [];
-    let outputBytes = 0;
-    let observed: readonly ProcessIdentity[] = [];
-    let peakMemoryBytes = 0;
-    let stopReason: StopReason | undefined;
-    let cleanupPromise: Promise<readonly ProcessIdentity[]> | undefined;
-    let monitorStopped = false;
-    let inspectionFailure: unknown;
-
-    const requestStop = (reason: StopReason): void => {
-      if (stopReason !== undefined) return;
-      stopReason = reason;
-      if (reason !== 'exit') cancellation.abort();
-      cleanupPromise = (async () => {
-        try {
-          const [pipeHolders, markedProcesses] = await Promise.all([
-            inspectPipeHoldingProcesses(pipeProbe.fileDescriptors),
-            inspectAttemptMarkedProcesses(request.attemptId),
-          ]);
-          observed = mergeObserved(observed, pipeHolders);
-          observed = mergeObserved(observed, markedProcesses);
-        } catch (error) {
-          inspectionFailure = error;
-        }
-        return await stopOwnedProcessTree({
-          ...treeRequest,
-          observed,
-          graceMs: request.teardownGraceMs,
-        });
-      })();
-    };
-
-    const retain = (
-      target: Uint8Array[],
-      chunk: unknown,
-      observe: ((chunk: Uint8Array) => void) | undefined,
-    ): void => {
-      const value = bytes(chunk);
-      const remaining = Math.max(0, request.maxOutputBytes - outputBytes);
-      if (remaining > 0) {
-        const kept =
-          value.byteLength > remaining ? value.subarray(0, remaining) : value;
-        const copy = Uint8Array.from(kept);
-        target.push(copy);
-        outputBytes += copy.byteLength;
-        observe?.(Uint8Array.from(copy));
-      }
-      if (value.byteLength > remaining) requestStop('output');
-    };
-
-    subprocess.stdout?.on('data', (chunk) =>
-      retain(stdoutChunks, chunk, observer.onStdout),
-    );
-    subprocess.stderr?.on('data', (chunk) =>
-      retain(stderrChunks, chunk, observer.onStderr),
-    );
-
-    const monitorPromise = (async () => {
+  const cleanup = (): Promise<readonly ProcessIdentity[]> => {
+    if (cleanupPromise !== undefined) return cleanupPromise;
+    if (treeRequest === undefined) return Promise.resolve(Object.freeze([]));
+    cleanupPromise = (async () => {
       try {
-        while (!monitorStopped && stopReason === undefined) {
-          const found = await inspectOwnedProcessTree({
-            ...treeRequest,
-            observed,
-          });
-          observed = mergeObserved(observed, found);
-          const residentBytes = await measureOwnedProcessMemory({
-            ...treeRequest,
-            observed,
-          });
-          peakMemoryBytes = Math.max(peakMemoryBytes, residentBytes);
-          if (residentBytes > request.maxMemoryBytes) {
-            requestStop('memory');
-            return;
-          }
-          await delay(PROCESS_SAMPLE_MS);
-        }
+        const [pipeHolders, markedProcesses] = await Promise.all([
+          pipeProbe === undefined
+            ? Promise.resolve(Object.freeze([]) as readonly ProcessIdentity[])
+            : inspectPipeHoldingProcesses(pipeProbe.fileDescriptors),
+          inspectAttemptMarkedProcesses(request.attemptId),
+        ]);
+        observed = mergeObserved(observed, pipeHolders);
+        observed = mergeObserved(observed, markedProcesses);
       } catch (error) {
         inspectionFailure = error;
-        requestStop('inspection');
       }
-    })();
-
-    const onAbort = (): void => requestStop('abort');
-    signal.addEventListener('abort', onAbort, { once: true });
-    const timeout = setTimeout(() => requestStop('timeout'), request.timeoutMs);
-    timeout.unref?.();
-
-    let exitCode: number | null = null;
-    try {
-      await new Promise<void>((resolve, reject) => {
-        subprocess.once('exit', (code) => {
-          exitCode = code;
-          requestStop('exit');
-          resolve();
-        });
-        subprocess.once('error', reject);
+      return await stopOwnedProcessTree({
+        ...treeRequest,
+        observed,
+        graceMs: request.teardownGraceMs,
       });
-    } catch (error) {
-      requestStop('inspection');
-      inspectionFailure = error;
-    }
+    })();
+    return cleanupPromise;
+  };
 
-    let remainingProcesses: readonly ProcessIdentity[] = Object.freeze([]);
-    let firstFailure: { readonly error: unknown } | undefined;
-    let cleanupFailed = false;
-    const rememberFailure = (error: unknown): void => {
-      firstFailure ??= { error };
-    };
+  const monitor = async (): Promise<void> => {
     try {
-      remainingProcesses = await cleanupPromise!;
-    } catch (error) {
-      cleanupFailed = true;
-      rememberFailure(error);
-    } finally {
-      monitorStopped = true;
-      clearTimeout(timeout);
-      signal.removeEventListener('abort', onAbort);
-      subprocess.stdout?.destroy();
-      subprocess.stderr?.destroy();
-      try {
-        await monitorPromise;
-      } catch (error) {
-        rememberFailure(error);
-      }
-      if (cleanupFailed) {
-        cancellation.abort();
-        try {
-          remainingProcesses = await stopOwnedProcessTree({
-            ...treeRequest,
-            observed,
-            graceMs: request.teardownGraceMs,
-          });
-        } catch (error) {
-          inspectionFailure ??= error;
+      while (!monitorStopped && stopReason === undefined && treeRequest !== undefined) {
+        const found = await inspectOwnedProcessTree({
+          ...treeRequest,
+          observed,
+        });
+        observed = mergeObserved(observed, found);
+        const residentBytes = await measureOwnedProcessMemory({
+          ...treeRequest,
+          observed,
+        });
+        peakMemoryBytes = Math.max(peakMemoryBytes, residentBytes);
+        if (residentBytes > request.maxMemoryBytes) {
+          requestStop('memory');
+          return;
         }
+        await delay(PROCESS_SAMPLE_MS);
       }
-      try {
-        await subprocess;
-      } catch (error) {
-        rememberFailure(error);
-      }
+    } catch (error) {
+      inspectionFailure = error;
+      requestStop('inspection');
     }
-    if (firstFailure !== undefined) throw firstFailure.error;
+  };
 
-    if (remainingProcesses.length > 0) {
-      throw new OwnedCommandError(
-        'TEARDOWN_INCOMPLETE',
-        'owned command left processes running after teardown',
-        remainingProcesses,
-      );
+  const onAbort = (): void => requestStop('abort');
+  signal.addEventListener('abort', onAbort, { once: true });
+
+  let childResult: Awaited<ReturnType<typeof runChild>> | undefined;
+  let childError: unknown;
+  let remainingProcesses: readonly ProcessIdentity[] = Object.freeze([]);
+  try {
+    const childOptions: OwnedRunChildOptions = {
+      executable: request.executable,
+      args: request.args,
+      cwd: request.cwd,
+      env: {
+        ...request.env,
+        ...(ownerId === undefined ? {} : { OBVERSA_RUN_OWNER: ownerId }),
+        OBVERSA_ATTEMPT_ID: request.attemptId,
+        OBVERSA_RUN_ID: request.runId,
+        OBVERSA_HEADLESS: '1',
+      },
+      inheritParentEnv: request.inheritParentEnv,
+      stdin: request.stdin,
+      timeoutMs: request.timeoutMs,
+      killGraceMs: request.teardownGraceMs,
+      maxOutputBytes: request.maxOutputBytes,
+      signal: cancellation.signal,
+      hooks: {
+        onSpawn: (child) => {
+          const rootPid = child.pid;
+          if (rootPid === undefined) throw new Error('owned command has no process id');
+          treeRequest = {
+            attemptId: request.attemptId,
+            ...(ownsOwner ? { ownerId } : {}),
+            rootPid,
+            rootProcessGroupId: rootPid,
+          };
+          const descriptors = [
+            pipeFileDescriptor(child.stdout),
+            pipeFileDescriptor(child.stderr),
+          ].filter((descriptor): descriptor is number => descriptor !== undefined);
+          try {
+            pipeProbe = capturePipeOwnerProbe(descriptors);
+          } catch (error) {
+            inspectionFailure = error;
+            throw error;
+          }
+          monitorPromise = monitor();
+        },
+        onExit: async () => {
+          requestStop('exit');
+          await cleanup();
+        },
+        onStdout: observer.onStdout,
+        onStderr: observer.onStderr,
+        onStop: async (reason) => {
+          requestStop(reason);
+          await cleanup();
+        },
+      },
+    };
+    childResult = await runChild(childOptions);
+  } catch (error) {
+    childError = error;
+  } finally {
+    monitorStopped = true;
+    signal.removeEventListener('abort', onAbort);
+    if (monitorPromise !== undefined) await monitorPromise;
+    if (cleanupPromise !== undefined) {
+      try {
+        remainingProcesses = await cleanupPromise;
+      } catch (error) {
+        cleanupError = error;
+      }
     }
-    if (stopReason === 'output') {
+    pipeProbe?.close();
+  }
+
+  if (cleanupError !== undefined) throw cleanupError;
+  if (childError !== undefined) {
+    if (childError instanceof RunChildError && childError.code === 'OUTPUT_LIMIT') {
       throw new OwnedCommandError(
         'OUTPUT_LIMIT',
         `owned command output exceeded ${request.maxOutputBytes} bytes`,
       );
     }
-    if (stopReason === 'memory') {
-      throw new OwnedCommandError(
-        'MEMORY_LIMIT',
-        `owned process tree exceeded ${request.maxMemoryBytes} bytes`,
-      );
+    if (childError instanceof RunChildError && childError.code === 'SPAWN_FAILED') {
+      throw new OwnedCommandError('SPAWN_FAILED', childError.message);
     }
-    if (stopReason === 'inspection') {
-      throw new OwnedCommandError(
-        'PROCESS_INSPECTION',
-        inspectionFailure instanceof Error
-          ? inspectionFailure.message
-          : 'owned process inspection failed',
-      );
+    if (childError instanceof RunChildError && childError.code === 'TEARDOWN_INCOMPLETE') {
+      if (remainingProcesses.length > 0) {
+        throw new OwnedCommandError(
+          'TEARDOWN_INCOMPLETE',
+          childError.message,
+          remainingProcesses,
+        );
+      }
+      if (inspectionFailure !== undefined) {
+        throw new OwnedCommandError(
+          'PROCESS_INSPECTION',
+          inspectionFailure instanceof Error
+            ? inspectionFailure.message
+            : 'owned process inspection failed',
+        );
+      }
+      throw new OwnedCommandError('TEARDOWN_INCOMPLETE', childError.message);
     }
-    if (inspectionFailure !== undefined) {
-      throw new OwnedCommandError(
-        'PROCESS_INSPECTION',
-        inspectionFailure instanceof Error
-          ? inspectionFailure.message
-          : 'owned pipe inspection failed',
-      );
-    }
-
-    const result: OwnedCommandResult = {
-      exitCode,
-      stdout: joined(stdoutChunks),
-      stderr: joined(stderrChunks),
-      timedOut: stopReason === 'timeout',
-      aborted: stopReason === 'abort',
-      peakMemoryBytes,
-      remainingProcesses: Object.freeze([]),
-    };
-    return Object.freeze(result);
-  } finally {
-    pipeProbe.close();
+    throw childError;
   }
+  if (remainingProcesses.length > 0) {
+    throw new OwnedCommandError(
+      'TEARDOWN_INCOMPLETE',
+      'owned command left processes running after teardown',
+      remainingProcesses,
+    );
+  }
+  if (stopReason === 'output') {
+    throw new OwnedCommandError(
+      'OUTPUT_LIMIT',
+      `owned command output exceeded ${request.maxOutputBytes} bytes`,
+    );
+  }
+  if (stopReason === 'memory') {
+    throw new OwnedCommandError(
+      'MEMORY_LIMIT',
+      `owned process tree exceeded ${request.maxMemoryBytes} bytes`,
+    );
+  }
+  if (stopReason === 'inspection' || inspectionFailure !== undefined) {
+    throw new OwnedCommandError(
+      'PROCESS_INSPECTION',
+      inspectionFailure instanceof Error
+        ? inspectionFailure.message
+        : 'owned process inspection failed',
+    );
+  }
+
+  const result: OwnedCommandResult = {
+    exitCode: childResult?.exitCode ?? null,
+    stdout: childResult?.stdout ?? new Uint8Array(),
+    stderr: childResult?.stderr ?? new Uint8Array(),
+    timedOut: stopReason === 'timeout',
+    aborted: stopReason === 'abort',
+    peakMemoryBytes,
+    remainingProcesses: Object.freeze([]),
+  };
+  return Object.freeze(result);
 }
 
 export { attemptEnvironment };

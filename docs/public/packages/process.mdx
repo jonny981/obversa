@@ -1,0 +1,78 @@
+---
+title: "process package"
+description: "Run one child process with a deadline and get a result you can read whatever the child did."
+---
+
+{/* F22+F23 page by the lead, 10 September. Job: look up. The example is
+    examples/run-child.ts, quoted byte for byte with its real output; codex-2
+    adds the file to the flat examples directory and the consumer check. */}
+
+Every workflow runs child processes: a `git` call, a model CLI, a test
+command. Each is the one thing that can wait forever, and a hang carries no
+error. `@obversa/process` runs one child with a deadline and returns a
+result you can read whatever happened: it finished, it hung, it filled a
+pipe, or it ignored a signal.
+
+```bash
+npm install @obversa/process
+```
+
+## What you get
+
+- **A deadline that always means timeout.** When the time passes, the
+  child and its process group are stopped and the result says so, even when
+  the stopped child reports no exit code.
+- **No pipe can stall it.** Standard input is closed after the optional
+  input, and both output streams are drained until they close, under one
+  combined byte cap.
+- **A result, not a race.** The exit code, the output bytes and the
+  timed-out and aborted flags come from facts the helper recorded, never
+  from whichever callback fired first.
+
+## Run one
+
+```ts
+import { runChild } from '@obversa/process';
+
+const result = await runChild({
+  executable: process.execPath,
+  args: ['-e', 'process.stdout.write("ready")'],
+  cwd: process.cwd(),
+  env: {},
+  stdin: '',
+  timeoutMs: 30_000,
+  killGraceMs: 5_000,
+  maxOutputBytes: 1_024 * 1_024,
+});
+
+console.log(new TextDecoder().decode(result.stdout));
+```
+
+```text
+ready
+```
+
+## The call
+
+`runChild(options)` takes `executable`, `args`, `cwd`, `env`, an optional
+`stdin`, `timeoutMs`, `killGraceMs`, `maxOutputBytes`, an optional
+`AbortSignal`, and `inheritParentEnv` (default true). It returns
+`exitCode` (a number, or `null` when a signal stopped the child), `stdout`
+and `stderr` as bytes, `timedOut` and `aborted`. It throws `RunChildError`
+with code `SPAWN_FAILED` when the executable cannot start,
+`OUTPUT_LIMIT` when the child writes past the cap, and
+`TEARDOWN_INCOMPLETE` when the child does not stop within the grace period
+after its deadline.
+
+## Things that catch people out
+
+- **The output cap is combined** across standard output and standard error.
+- **The environment is merged** over the parent's unless you say otherwise.
+- **A timed-out child still has output**: what it wrote before the deadline
+  is in the result, up to the cap.
+
+## Where it is used
+
+The engine command runner, the runtime's git and command sites, and the Git
+memory adapter run their children through this package, so a hang in any
+of them ends the same way, with a timeout you can read.

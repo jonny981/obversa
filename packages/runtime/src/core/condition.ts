@@ -20,8 +20,6 @@ import type {
   Job,
   JobContext,
 } from './types.js';
-import { execa } from 'execa';
-
 import type { EngineRef } from '../engines/engine.js';
 import { isInfrastructureError, LoopError } from './errors.js';
 import { resolveEnv } from './env-overlay.js';
@@ -35,6 +33,7 @@ import {
   logEngineTransportFailure,
 } from './engine-meta.js';
 import { requireFinalResultText } from '../runtime/result-parts.js';
+import { processText, runRuntimeProcess } from './process.js';
 
 const COMMAND_FAILURE_TAIL_MAX = 3000;
 const COMMAND_FAILURE_TAIL_MARKER = '… [output truncated]\n';
@@ -194,15 +193,17 @@ export function commandSucceeds(
   return setLabel(async (ctx) => {
     try {
       const env = resolveEnv(ctx, opts.env);
-      const r = await execa(command, args, {
+      const r = await runRuntimeProcess({
+        executable: command,
+        args,
         cwd: opts.cwd ?? ctx.workspace.dir,
-        timeout: opts.timeoutMs,
-        cancelSignal: ctx.signal,
-        reject: false,
-        stdin: 'ignore',
+        timeoutMs: opts.timeoutMs,
+        signal: ctx.signal,
         env,
-        all: opts.captureOutput,
       });
+      const stdout = processText(r.stdout);
+      const stderr = processText(r.stderr);
+      const all = `${stdout}${stderr}`;
       if (r.exitCode === 0 && !r.timedOut) {
         return { met: true, reason: `\`${command}\` exited 0` };
       }
@@ -210,7 +211,7 @@ export function commandSucceeds(
         ? `\`${command}\` timed out after ${opts.timeoutMs} ms`
         : `\`${command}\` exited ${r.exitCode ?? '?'}`;
       const tail = opts.captureOutput
-        ? commandFailureTail(r.all ?? '', env)
+        ? commandFailureTail(all, env)
         : '';
       return {
         met: false,
@@ -223,8 +224,8 @@ export function commandSucceeds(
         // pinned credential's shape is unknowable to pattern scrubbing.
         output:
           `exit: ${r.exitCode ?? '(command did not run)'}\n\n` +
-          `stdout:\n${scrubCapture(r.stdout ?? '', env, 4000)}\n\n` +
-          `stderr:\n${scrubCapture(r.stderr ?? '', env, 4000)}`,
+          `stdout:\n${scrubCapture(stdout, env, 4000)}\n\n` +
+          `stderr:\n${scrubCapture(stderr, env, 4000)}`,
       };
     } catch (e) {
       return {
