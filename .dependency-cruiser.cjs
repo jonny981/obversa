@@ -45,7 +45,7 @@ module.exports = {
       from: { path: '^examples/' },
       to: {
         couldNotResolve: true,
-        pathNot: '^@obversa/(engine|engine-agent-sdk|engine-anthropic-api|engine-claude-cli|engine-codex|engine-grok-cli|engine-opencode-cli|memory|memory-git|memory-simple|runner|runtime|source|surfacer)(/|$)',
+        pathNot: '^@obversa/(engine|engine-agent-sdk|engine-anthropic-api|engine-claude-cli|engine-codex|engine-grok-cli|engine-opencode-cli|memory|memory-git|memory-simple|process|runner|runtime|source|surfacer)(/|$)',
       },
     },
     {
@@ -129,7 +129,14 @@ module.exports = {
       comment: '@obversa/engine is a contract package; it reaches no other package or plugin',
       severity: 'error',
       from: { path: '^packages/engine/' },
-      to: { path: '^(packages|plugins)/', pathNot: '^packages/engine/' },
+      to: { path: '^(packages|plugins)/', pathNot: '^packages/(engine|process)/' },
+    },
+    {
+      name: 'process-reaches-no-package',
+      comment: '@obversa/process is dependency-free infrastructure; it reaches no other package or plugin',
+      severity: 'error',
+      from: { path: '^packages/process/' },
+      to: { path: '^(packages|plugins)/', pathNot: '^packages/process/' },
     },
     {
       name: 'memory-reaches-no-package',
@@ -158,7 +165,7 @@ module.exports = {
       comment: 'the runtime reaches only the engine and memory interfaces; never a provider plugin or surface',
       severity: 'error',
       from: { path: '^packages/runtime/' },
-      to: { path: '^(packages|plugins)/', pathNot: '^packages/(runtime|engine|memory)/' },
+      to: { path: '^(packages|plugins)/', pathNot: '^packages/(runtime|engine|memory|process)/' },
     },
     {
       name: 'runner-reaches-runtime-and-engine-only',
@@ -172,21 +179,21 @@ module.exports = {
       comment: 'a memory plugin reaches only the memory interface and its own files',
       severity: 'error',
       from: { path: '^plugins/(memory-(?:git|simple))/' },
-      to: { path: '^(packages|plugins)/', pathNot: '^(plugins/$1/|packages/memory/)' },
+      to: { path: '^(packages|plugins)/', pathNot: '^(plugins/$1/|packages/(memory|process)/)' },
     },
     {
       name: 'agent-sdk-plugin-reaches-interfaces-only',
       comment: 'the Agent SDK plugin reaches the engine and memory interfaces only',
       severity: 'error',
       from: { path: '^plugins/engine-agent-sdk/' },
-      to: { path: '^(packages|plugins)/', pathNot: '^(plugins/engine-agent-sdk/|packages/(engine|memory)/)' },
+      to: { path: '^(packages|plugins)/', pathNot: '^(plugins/engine-agent-sdk/|packages/(engine|memory|process)/)' },
     },
     {
       name: 'engine-plugin-reaches-engine-only',
       comment: 'an engine plugin reaches only the engine interface and its own files',
       severity: 'error',
       from: { path: '^plugins/(engine-(?:anthropic-api|claude-cli|codex|grok-cli|opencode-cli))/' },
-      to: { path: '^(packages|plugins)/', pathNot: '^(plugins/$1/|packages/engine/)' },
+      to: { path: '^(packages|plugins)/', pathNot: '^(plugins/$1/|packages/(engine|process)/)' },
     },
     {
       name: 'host-reaches-no-package',
