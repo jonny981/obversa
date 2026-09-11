@@ -124,25 +124,47 @@ export function requireNoFiles(
   files: readonly string[],
 ): Job {
   return async (ctx) => {
+    const before = new Map<string, FileSnapshot>();
+    for (const file of files) {
+      before.set(file, await snapshotFile(join(workspace, file)));
+    }
     const outcome = await job(ctx);
     if (outcome.status !== 'pass') return outcome;
-    const present: string[] = [];
+    const changed: string[] = [];
     for (const file of files) {
-      try {
-        await stat(join(workspace, file));
-        present.push(file);
-      } catch {
-        // The expected absence is the successful result.
+      const after = await snapshotFile(join(workspace, file));
+      const previous = before.get(file)!;
+      if (
+        previous.exists !== after.exists
+        || previous.size !== after.size
+        || previous.mtimeMs !== after.mtimeMs
+      ) {
+        changed.push(file);
       }
     }
-    if (present.length) {
+    if (changed.length) {
       return {
         status: 'fail',
-        summary: `${label} wrote the implementation before its step completed: ${present.join(', ')}`,
+        summary: `${label} wrote the implementation before its step completed: ${changed.join(', ')}`,
       };
     }
     return outcome;
   };
+}
+
+interface FileSnapshot {
+  exists: boolean;
+  size: number | null;
+  mtimeMs: number | null;
+}
+
+async function snapshotFile(path: string): Promise<FileSnapshot> {
+  try {
+    const details = await stat(path);
+    return { exists: true, size: details.size, mtimeMs: details.mtimeMs };
+  } catch {
+    return { exists: false, size: null, mtimeMs: null };
+  }
 }
 
 function rolePrompt(role: string, brief: string): string {

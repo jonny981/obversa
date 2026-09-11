@@ -186,12 +186,17 @@ revision request aimed at `implement`, bounded by `maxKickbacks`.
   reviewers in one family are refused too. The point of a panel is a second
   opinion, and two seats of one model are one opinion twice.
 - **A reviewer's decision is its reply, not a file.** The panel counts the
-  JSON decision each reviewer returns, and it finds the object even when the
-  model wraps it in prose. A reply with no object is a non-acceptance with
+  JSON decision each reviewer returns, and it takes the first object in the
+  reply even when prose surrounds it. A reply with no object is a non-acceptance with
   the reason recorded, which is what the run above shows for `scope`. A
   reviewer may also write notes in the workspace, and the Codex seat did.
 - **A threshold equal to the reviewer count means unanimity.** Set it lower
   when you want a majority.
+- **A writing seat can write anywhere the process can.** The files above
+  start their Claude and Codex seats with permission prompts off, which is
+  what lets a model write files. Run them in a directory you are willing
+  to let a model change, and give a reviewing seat a read-only mode if its
+  plugin has one.
 
 ## Source
 

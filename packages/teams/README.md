@@ -22,9 +22,9 @@ npm install @obversa/runtime @obversa/teams
   to the implementer, and the approve step writes an approval note.
 
 Every team is a graph of named steps with a `desc` and a `gate` sentence on
-each, and every seat is checked before a run: two seats in one model family
-are refused, and a step that promises a file fails by name when the file is
-missing or empty.
+each, and every seat is checked before a run: the implementer and each
+reviewer must be different model families, and a step that promises a file
+fails by name when the file is missing or empty.
 
 ## What you give it
 

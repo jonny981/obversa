@@ -162,6 +162,7 @@ that wrote the work is not the model that grades it.
 | `@obversa/engine-opencode-cli` | the OpenCode CLI | OpenCode CLI 1.18.23 |
 | `@obversa/engine-anthropic-api` | the Anthropic API | an API key |
 | `@obversa/engine-agent-sdk` | the Claude Agent SDK | host Claude auth |
+| `@obversa/teams` | three ready-made teams: a writer and a reviewer, a review panel, feature delivery | `@obversa/runtime` and the engine plugins you seat |
 
 Write your own against the engine contract; it must pass the conformance kit.
 
