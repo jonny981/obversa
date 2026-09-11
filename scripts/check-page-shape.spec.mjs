@@ -4,7 +4,7 @@ import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import test from 'node:test';
 
-import { checkPageShape, buildDebtIndex } from './check-page-shape.mjs';
+import { checkPageShape, buildDebtIndex, realEngineExamples } from './check-page-shape.mjs';
 
 const debt = (entries) => new Map(entries.map((e) => [`${e.page}::${e.fault}`, e]));
 
@@ -206,7 +206,7 @@ function siteWithExamples(pages, examples, scripts) {
 
 function runWithExamples({ pages, examples, scripts, compiled, debt: entries }, assertions) {
   const dir = siteWithExamples(pages, examples, scripts);
-  const options = { compiled: new Set(compiled ?? []) };
+  const options = { compiled: new Set(compiled ?? []), realEngine: new Set() };
   if (entries) options.debt = debt(entries);
   try { assertions(checkPageShape(dir, options)); } finally { rmSync(dir, { recursive: true, force: true }); }
 }
@@ -283,5 +283,36 @@ test('a whole file whose script no verify chain calls is reported as not run', (
   }, (failures) => {
     assert.equal(failures.length, 1, failures.join('; '));
     assert.match(failures[0], /no example:\* script runs it/);
+  });
+});
+
+test('a real-engine example that no chain runs is accepted when it is named with a reason, and refused without one', () => {
+  const dir = siteWithExamples(
+    { 'a.mdx': page('Teams', `Run the team.\n\n\`\`\`ts\n${whole}\`\`\`\n`) },
+    { 'teams/pair.ts': whole }, {});
+  try {
+    const named = realEngineExamples([{ file: 'teams/pair.ts', why: 'runs two model CLIs; the page carries one real run' }]);
+    assert.deepEqual(checkPageShape(dir, { compiled: new Set(['teams/pair.ts']), realEngine: named }), []);
+    assert.throws(() => realEngineExamples([{ file: 'teams/pair.ts' }]), /needs a file and a why/);
+    const unnamed = checkPageShape(dir, { compiled: new Set(['teams/pair.ts']), realEngine: new Set() });
+    assert.equal(unnamed.length, 1, unnamed.join('; '));
+    assert.match(unnamed[0], /no example:\* script runs it/);
+  } finally { rmSync(dir, { recursive: true, force: true }); }
+});
+
+test('a js block is left alone, because pages show the files a real run wrote as js', () => {
+  runWithExamples({
+    pages: { 'a.mdx': page('Teams', `Run the team.\n\n\`\`\`ts\n${whole}\`\`\`\n\nThe writer left this behind:\n\n\`\`\`js\nexport const add = (a, b) => a + b;\n\`\`\`\n`) },
+    examples: { 'whole.ts': whole }, scripts: ran, compiled: ['whole.ts'],
+  }, (failures) => assert.deepEqual(failures, []));
+});
+
+test('prose that names an example file which does not exist is reported', () => {
+  runWithExamples({
+    pages: { 'a.mdx': page('Teams', `Run examples/gone.mjs and read it.\n\n\`\`\`ts\n${whole}\`\`\`\n`) },
+    examples: { 'whole.ts': whole }, scripts: ran, compiled: ['whole.ts'],
+  }, (failures) => {
+    assert.equal(failures.length, 1, failures.join('; '));
+    assert.match(failures[0], /names examples\/gone\.mjs, which does not exist/);
   });
 });

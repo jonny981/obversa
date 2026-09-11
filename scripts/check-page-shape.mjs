@@ -13,7 +13,7 @@
  */
 import { execFileSync } from 'node:child_process';
 
-import { CONSUMER_EXAMPLES } from './consumer-examples.mjs';
+import { CONSUMER_EXAMPLES, REAL_ENGINE_EXAMPLES } from './consumer-examples.mjs';
 import { reachableScripts } from './check-spec-coverage.mjs';
 import { readFileSync, readdirSync } from 'node:fs';
 import { join } from 'node:path';
@@ -126,7 +126,7 @@ const KNOWN_DEBT = [
   },
   {
     page: 'concepts/surfaces.mdx', fault: 'wholefile', owner: 'D47',
-    why: 'a js block that names examples/hello-surface.mjs, a file that does not exist',
+    why: 'its block names examples/hello-surface.mjs, a file that does not exist; the surfaces page gets a whole file that runs',
   },
   {
     page: 'driving/runner.mdx', fault: 'wholefile', owner: 'D47',
@@ -308,7 +308,13 @@ function definesItsOwnTitle(title, line) {
  * asked for by name: "All examples must be in full and be able to compile and
  * run."
  */
-const WHOLE_FILE_LANGS = new Set(['ts', 'typescript', 'tsx', 'js', 'javascript', 'mjs']);
+/**
+ * The languages a reader's program is written in. A `js` block is left alone:
+ * the pages that show a real run print the files a model wrote as `js`, and
+ * those are the run's output, not an example to copy.
+ */
+const WHOLE_FILE_LANGS = new Set(['ts', 'typescript', 'tsx', 'mjs']);
+const NAMED_EXAMPLE = /examples\/([A-Za-z0-9_./-]+\.(?:ts|mjs))/g;
 
 function exampleFiles(root, dir = join(root, 'examples'), prefix = '') {
   const found = new Map();
@@ -348,7 +354,17 @@ function fencedBlocks(text) {
     .map((m) => ({ lang: m[1], body: m[2].replace(/\n+$/, '') }));
 }
 
-export function wholeFileFaults(name, text, { examples, ran, compiled }) {
+/** Files a chain cannot run because they need signed-in model CLIs, each with its reason. */
+export function realEngineExamples(entries = REAL_ENGINE_EXAMPLES) {
+  const files = new Set();
+  for (const entry of entries) {
+    if (!entry.file || !entry.why) throw new Error(`a real-engine example entry needs a file and a why: ${JSON.stringify(entry)}`);
+    files.add(entry.file);
+  }
+  return files;
+}
+
+export function wholeFileFaults(name, text, { examples, ran, compiled, realEngine = realEngineExamples() }) {
   const faults = [];
   for (const block of fencedBlocks(text)) {
     if (!WHOLE_FILE_LANGS.has(block.lang)) continue;
@@ -359,13 +375,18 @@ export function wholeFileFaults(name, text, { examples, ran, compiled }) {
       faults.push(`${name}: a ${block.lang} block is not a whole file under examples/ (it starts "${first}")`);
       continue;
     }
-    if (!ran.has(file)) faults.push(`${name}: quotes examples/${file} whole, but no example:* script runs it`);
+    if (!ran.has(file) && !realEngine.has(file)) faults.push(`${name}: quotes examples/${file} whole, but no example:* script runs it`);
     if (!compiled.has(file)) faults.push(`${name}: quotes examples/${file} whole, but the clean consumer does not compile it`);
+  }
+  // A page that names a file under examples/ in its prose names one that exists.
+  const prose = text.replace(/```[\s\S]*?```/g, '');
+  for (const match of prose.matchAll(NAMED_EXAMPLE)) {
+    if (!examples.has(match[1])) faults.push(`${name}: names examples/${match[1]}, which does not exist`);
   }
   return faults;
 }
 
-export function checkPageShape(root, { allowNoExample = new Set(), debt = buildDebtIndex(), compiled = new Set(CONSUMER_EXAMPLES) } = {}) {
+export function checkPageShape(root, { allowNoExample = new Set(), debt = buildDebtIndex(), compiled = new Set(CONSUMER_EXAMPLES), realEngine = realEngineExamples() } = {}) {
   const examples = exampleFiles(root);
   const ran = examplesRunByTheChain(root);
   const failures = [];
@@ -382,7 +403,7 @@ export function checkPageShape(root, { allowNoExample = new Set(), debt = buildD
     }
     const title = frontmatterTitle(text);
     const line = firstProseLine(text);
-    if (!forgiven(name, 'wholefile')) failures.push(...wholeFileFaults(name, text, { examples, ran, compiled }));
+    if (!forgiven(name, 'wholefile')) failures.push(...wholeFileFaults(name, text, { examples, ran, compiled, realEngine }));
     for (const phrase of coinedExampleNames(root, text)) {
       failures.push(`${name}: names an example as if it were a feature: "${phrase}"`);
     }

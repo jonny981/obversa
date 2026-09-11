@@ -31,4 +31,24 @@ export const CONSUMER_EXAMPLES = Object.freeze([
   'run-child.ts',
   'write-and-review.ts',
   'one-agent-job.ts',
+  'teams/scripted-engine.ts',
+  'teams/writer-reviewer-pair.ts',
+  'teams/writer-reviewer-pair.proof.ts',
+  'teams/threshold-panel.ts',
+  'teams/threshold-panel.proof.ts',
+  'teams/feature-delivery.ts',
+  'teams/feature-delivery.proof.ts',
+]);
+
+/**
+ * Example files that run real engine plugins. The chain compiles them (they
+ * are on the list above) but never runs them, because a run needs signed-in
+ * model CLIs; each was run for real once by the stage that wrote it, and the
+ * page that quotes it carries that run's output. The page-shape check counts
+ * a file here as run for that reason, and each entry says so.
+ */
+export const REAL_ENGINE_EXAMPLES = Object.freeze([
+  { file: 'teams/writer-reviewer-pair.ts', why: 'a Claude seat writes and a Codex seat reviews; the page carries one real run' },
+  { file: 'teams/threshold-panel.ts', why: 'Claude implements, Codex and OpenCode review; the page carries one real run' },
+  { file: 'teams/feature-delivery.ts', why: 'Claude analyses and approves, Codex implements, Claude reviews; the page carries one real run' },
 ]);
