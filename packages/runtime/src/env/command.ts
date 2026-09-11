@@ -5,7 +5,7 @@
  * down. This factory captures that shape. The consumer supplies the concrete
  * command configuration.
  *
- * It drives the CLIs through `execa` (no SDK, no new dependency), so it stays in
+ * It drives the CLIs through the bounded process helper, so it stays in
  * the Obversa package as an opt-in subpath without coupling
  * the core to any deploy tool. An SDK-bound adapter (e.g. @aws-sdk) adds a real
  * dependency and belongs in a separate package or the consumer instead.
@@ -15,10 +15,9 @@
  * outputs become the env vars the gate reads). The factory stays tool-agnostic.
  */
 
-import { execa } from 'execa';
-
 import type { Workspace } from '../core/types.js';
 import type { Environment, EnvHandle } from './environment.js';
+import { processText, runRuntimeProcess } from '../core/process.js';
 
 /** A command to run: a binary and its args. */
 export interface Cmd {
@@ -85,20 +84,22 @@ export function commandEnvironment(config: CommandEnvConfig): Environment {
       const cwd = cwdOf(ws);
 
       const exec = async (c: Cmd, phase: string): Promise<string> => {
-        const r = await execa(c.cmd, c.args ?? [], {
+        const r = await runRuntimeProcess({
+          executable: c.cmd,
+          args: c.args ?? [],
           cwd,
-          cancelSignal: signal,
-          timeout: config.timeoutMs,
-          reject: false,
-          stdin: 'ignore',
+          timeoutMs: config.timeoutMs,
+          signal,
         });
         if (r.exitCode !== 0) {
-          const detail = (r.stderr || r.stdout || '').slice(0, 500);
+          const stderr = processText(r.stderr);
+          const stdout = processText(r.stdout);
+          const detail = (stderr || stdout).slice(0, 500);
           throw new Error(
             `${name} ${phase} failed for stage "${stage}" (exit ${r.exitCode}): ${detail}`.trim(),
           );
         }
-        return r.stdout ?? '';
+        return processText(r.stdout).replace(/\r?\n$/u, '');
       };
 
       await exec(config.deploy(stage, ws), 'deploy');
@@ -112,12 +113,12 @@ export function commandEnvironment(config: CommandEnvConfig): Environment {
         env: mapped.env ?? {},
         async down(sig: AbortSignal): Promise<void> {
           const d = config.destroy(stage, ws);
-          await execa(d.cmd, d.args ?? [], {
+          await runRuntimeProcess({
+            executable: d.cmd,
+            args: d.args ?? [],
             cwd,
-            cancelSignal: sig,
-            timeout: config.timeoutMs,
-            reject: false,
-            stdin: 'ignore',
+            timeoutMs: config.timeoutMs,
+            signal: sig,
           });
         },
       };

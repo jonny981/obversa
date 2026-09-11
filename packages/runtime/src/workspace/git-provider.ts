@@ -19,7 +19,6 @@
  * with a complete blob, so a kill cannot publish a partial valid owner.
  */
 
-import { execa } from 'execa';
 import { createHash, randomUUID } from 'node:crypto';
 import { realpath } from 'node:fs/promises';
 import { basename, dirname, isAbsolute, join } from 'node:path';
@@ -40,6 +39,7 @@ import {
   type WorkspaceDrift,
   type WorkspaceProvider,
 } from './provider.js';
+import { processText, runRuntimeProcess } from '../core/process.js';
 
 interface LeaseFile {
   readonly owner: string;
@@ -65,14 +65,15 @@ async function git(
   args: readonly string[],
   input?: string,
 ): Promise<{ stdout: string; stderr: string; exitCode: number }> {
-  const result = await execa('git', args, {
+  const result = await runRuntimeProcess({
+    executable: 'git',
+    args,
     cwd,
-    reject: false,
-    ...(input === undefined ? {} : { input }),
+    ...(input === undefined ? {} : { stdin: input }),
   });
   return {
-    stdout: result.stdout ?? '',
-    stderr: result.stderr ?? '',
+    stdout: processText(result.stdout),
+    stderr: processText(result.stderr),
     exitCode: result.exitCode ?? 1,
   };
 }

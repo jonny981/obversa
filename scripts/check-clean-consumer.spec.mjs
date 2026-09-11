@@ -119,6 +119,14 @@ test('clean consumer wires the described-team example', async () => {
   assert.match(source, /expectedDescribedTeamReport/);
 });
 
+test('clean consumer wires the bounded process example', async () => {
+  const source = await readFile(new URL('./check-clean-consumer.mjs', import.meta.url), 'utf8');
+  assert.match(source, /run-child\.ts/);
+  assert.match(source, /packages', 'process\.mdx'/);
+  assert.match(source, /compiledRunChild/);
+  assert.match(source, /directRunChild/);
+});
+
 test('a rename that moves several examples is reported in one run, not one per run', async () => {
   const source = await readFile(new URL('./check-clean-consumer.mjs', import.meta.url), 'utf8');
   // The preflight runs before the first read and is driven by the compile

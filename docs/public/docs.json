@@ -109,6 +109,7 @@
           "packages/runner",
           "packages/engine",
           "packages/memory",
+          "packages/process",
           "packages/surfacer"
         ]
       },

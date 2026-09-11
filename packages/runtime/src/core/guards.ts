@@ -24,8 +24,6 @@ import {
 } from 'node:fs';
 import { homedir } from 'node:os';
 import { dirname, join } from 'node:path';
-import { execa } from 'execa';
-
 import type { Condition, ConditionInput, JobContext } from './types.js';
 import {
   prepareCondition,
@@ -36,6 +34,7 @@ import { resolveEnv } from './env-overlay.js';
 import { setLabel } from './describe.js';
 import { workspaceFingerprint } from './git.js';
 import { scrubCapture } from './redact.js';
+import { processText, runRuntimeProcess } from './process.js';
 
 // ── ratchet ────────────────────────────────────────────────────────────────
 
@@ -140,24 +139,26 @@ export function ratchet(
     const env = resolveEnv(ctx, opts.env);
     let stdout: string;
     try {
-      const r = await execa(command, args, {
+      const r = await runRuntimeProcess({
+        executable: command,
+        args,
         cwd: dir,
-        timeout: opts.timeoutMs,
-        cancelSignal: ctx.signal,
-        reject: false,
-        stdin: 'ignore',
+        timeoutMs: opts.timeoutMs,
+        signal: ctx.signal,
         env,
       });
+      const stdoutText = processText(r.stdout);
+      const stderrText = processText(r.stderr);
       if (r.exitCode !== 0 || r.timedOut) {
         return {
           met: false,
           reason: r.timedOut
             ? `ratchet command \`${command}\` timed out after ${opts.timeoutMs} ms`
             : `ratchet command \`${command}\` exited ${r.exitCode ?? '?'}`,
-          output: scrubCapture(`${r.stdout ?? ''}\n${r.stderr ?? ''}`, env, 4000),
+          output: scrubCapture(`${stdoutText}\n${stderrText}`, env, 4000),
         };
       }
-      stdout = r.stdout ?? '';
+      stdout = stdoutText;
     } catch (e) {
       return {
         met: false,
@@ -294,17 +295,13 @@ async function worktreeHashes(
 ): Promise<PathProbe> {
   const values = new Map<string, string>();
   for (const chunk of pathChunks(paths)) {
-    const result = await execa(
-      'git',
-      ['hash-object', '--no-filters', '--', ...chunk],
-      {
-        cwd: dir,
-        cancelSignal: signal,
-        reject: false,
-        stdin: 'ignore',
-      },
-    );
-    const hashes = (result.stdout ?? '').split('\n').filter(Boolean);
+    const result = await runRuntimeProcess({
+      executable: 'git',
+      args: ['hash-object', '--no-filters', '--', ...chunk],
+      cwd: dir,
+      signal,
+    });
+    const hashes = processText(result.stdout).split('\n').filter(Boolean);
     if (result.exitCode !== 0 || hashes.length !== chunk.length) {
       return {
         values,
@@ -323,9 +320,9 @@ async function indexEntries(
 ): Promise<PathProbe> {
   const values = new Map<string, string>();
   for (const chunk of pathChunks(paths)) {
-    const result = await execa(
-      'git',
-      [
+    const result = await runRuntimeProcess({
+      executable: 'git',
+      args: [
         '--literal-pathspecs',
         'ls-files',
         '--stage',
@@ -333,21 +330,16 @@ async function indexEntries(
         '--',
         ...chunk,
       ],
-      {
-        cwd: dir,
-        cancelSignal: signal,
-        reject: false,
-        stdin: 'ignore',
-        stripFinalNewline: false,
-      },
-    );
+      cwd: dir,
+      signal,
+    });
     if (result.exitCode !== 0) {
       return {
         values,
         error: 'writeScope: index inspection failed (fail-closed)',
       };
     }
-    for (const record of (result.stdout ?? '').split('\0')) {
+    for (const record of processText(result.stdout).split('\0')) {
       const tab = record.indexOf('\t');
       if (tab === -1) continue;
       const path = record.slice(tab + 1);
@@ -387,17 +379,12 @@ async function workspaceChanges(
   signal: AbortSignal,
 ): Promise<WorkspaceChanges> {
   try {
-    const status = await execa(
-      'git',
-      ['status', '--porcelain=v1', '-z', '--untracked-files=all'],
-      {
-        cwd: dir,
-        cancelSignal: signal,
-        reject: false,
-        stdin: 'ignore',
-        stripFinalNewline: false,
-      },
-    );
+    const status = await runRuntimeProcess({
+      executable: 'git',
+      args: ['status', '--porcelain=v1', '-z', '--untracked-files=all'],
+      cwd: dir,
+      signal,
+    });
     if (status.exitCode !== 0) {
       return {
         entries: new Map(),
@@ -405,7 +392,7 @@ async function workspaceChanges(
       };
     }
 
-    const dirty = statusEntries(status.stdout ?? '').map((entry) =>
+    const dirty = statusEntries(processText(status.stdout)).map((entry) =>
       dirtyPath(dir, entry),
     );
     const filePaths = dirty

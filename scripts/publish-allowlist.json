@@ -11,6 +11,7 @@
     "@obversa/memory",
     "@obversa/memory-git",
     "@obversa/memory-simple",
+    "@obversa/process",
     "@obversa/runner",
     "@obversa/runtime",
     "@obversa/source",

@@ -43,6 +43,7 @@ manifest("packages/memory", {
   devDependencies: { devtool: "1.0.0" },
 });
 manifest("packages/engine", { name: "@obversa/engine", type: "module", exports: { ".": "./src/index.mjs", "./testing": "./src/testing.mjs" } });
+manifest("packages/process", { name: "@obversa/process", type: "module", exports: { ".": "./src/index.mjs" } });
 manifest("packages/runtime", {
   name: "@obversa/runtime",
   type: "module",
@@ -82,7 +83,7 @@ manifest("hosts/cmux", {
   type: "module",
   dependencies: { "@obversa/source": "workspace:*", "@obversa/surfacer": "workspace:*" },
 });
-for (const name of ["engine", "memory", "runner", "runtime", "source", "surfacer"]) {
+for (const name of ["engine", "memory", "process", "runner", "runtime", "source", "surfacer"]) {
   mkdirSync(join(fixture, "node_modules", "@obversa"), { recursive: true });
   symlinkSync(join("..", "..", "packages", name), join(fixture, "node_modules", "@obversa", name));
 }
@@ -96,6 +97,7 @@ file("packages/memory/src/index.mjs", "export const memory = 1;\n");
 file("packages/memory/src/testing.mjs", "export const probe = 1;\n");
 file("packages/engine/src/index.mjs", "export const engine = 1;\n");
 file("packages/engine/src/testing.mjs", "export const mockEngine = 1;\n");
+file("packages/process/src/index.mjs", "export const process = 1;\n");
 file("packages/runtime/src/index.mjs", "export const runtime = 1;\n");
 file("packages/runner/src/index.mjs", "export const runner = 1;\n");
 file("packages/source/src/index.mjs", "export const source = 1;\n");
@@ -119,6 +121,7 @@ const forbidden = [
   ["packages/surfacer/src/bad-a.mjs", "import '../../memory/src/index.mjs';\n", "no-cross-package-internal-path"],
   ["packages/surfacer/src/bad-a.mjs", null, "surfacer-reaches-no-package"],
   ["packages/source/src/a.mjs", "export * from '../../runtime/src/index.mjs';\n", "source-reaches-surfacer-only"],
+  ["packages/process/src/b.mjs", "export const p = import('@obversa/memory');\n", "process-reaches-no-package"],
   ["packages/memory/src/b.mjs", "export const p = import('../../runtime/src/index.mjs');\n", "memory-reaches-no-package"],
   ["plugins/memory-git/src/c.cjs", "module.exports = require('@obversa/runtime');\n", "memory-plugin-reaches-memory-only"],
   ["packages/runtime/src/d.ts", "import type { X } from '@obversa/source';\nexport const d: X | number = 1;\n", "runtime-reaches-interfaces-only"],
@@ -145,10 +148,10 @@ for (const [path, content] of forbidden) if (content !== null) file(path, conten
 // The allowed forms: the same arrows done properly raise nothing.
 const allowed = [
   ["packages/runner/src/public.mjs", "import '@obversa/runtime';\nimport '@obversa/engine';\n"],
-  ["plugins/memory-git/src/ok1.mjs", "import '@obversa/memory';\n"],
+  ["plugins/memory-git/src/ok1.mjs", "import '@obversa/memory';\nimport '@obversa/process';\n"],
   ["packages/runtime/src/ok9.mjs", "import '@obversa/engine';\nimport '@obversa/memory';\n"],
-  ["plugins/engine-codex/src/ok10.mjs", "import '@obversa/engine';\n"],
-  ["plugins/engine-agent-sdk/src/ok11.mjs", "import '@obversa/engine';\nimport '@obversa/memory';\n"],
+  ["plugins/engine-codex/src/ok10.mjs", "import '@obversa/engine';\nimport '@obversa/process';\n"],
+  ["plugins/engine-agent-sdk/src/ok11.mjs", "import '@obversa/engine';\nimport '@obversa/memory';\nimport '@obversa/process';\n"],
   ["packages/source/src/ok8.mjs", "import '@obversa/surfacer';\n"],
   ["packages/source/test/ok2.test.mjs", "import '../src/index.mjs';\n"],
   ["plugins/memory-git/tests/ok3.test.mjs", "import '@obversa/memory/testing';\n"],

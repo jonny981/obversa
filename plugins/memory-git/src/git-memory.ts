@@ -11,7 +11,7 @@ import {
   type MemoryResult,
   type MemorySuccess,
 } from '@obversa/memory';
-import { execa } from 'execa';
+import { RunChildError, runChild } from '@obversa/process';
 
 const META_NAME = '.obversa-memory.json';
 const REF_PREFIX = 'refs/obversa/memory/v1';
@@ -27,6 +27,8 @@ const SEGMENT = /^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/;
 const MAX_PATH_BYTES = 1_024;
 const MAX_GIT_COMMAND_OUTPUT_BYTES = 1_048_576;
 const SMALL_GIT_OUTPUT_BYTES = 8_192;
+const GIT_COMMAND_TIMEOUT_MS = 10 * 60 * 1_000;
+const GIT_COMMAND_GRACE_MS = 5 * 1_000;
 const METADATA_FIXED_BYTES = 1_024;
 const METADATA_ENTRY_BYTES = MAX_PATH_BYTES + 128;
 const TREE_ENTRY_FIXED_BYTES = 14;
@@ -1035,35 +1037,28 @@ async function invoke(
   maxOutputBytes = MAX_GIT_COMMAND_OUTPUT_BYTES,
 ): Promise<GitOutput> {
   try {
-    const result = await execa('git', ['-C', repositoryPath, '-c', 'core.hooksPath=/dev/null', ...args], {
+    const result = await runChild({
+      executable: 'git',
+      args: ['-C', repositoryPath, '-c', 'core.hooksPath=/dev/null', ...args],
       env: cleanGitEnvironment(),
-      extendEnv: false,
-      input,
-      maxBuffer: maxOutputBytes,
-      reject: false,
-      encoding: 'buffer',
-      stripFinalNewline: false,
-      stdin: input === undefined ? 'ignore' : 'pipe',
+      inheritParentEnv: false,
+      ...(input === undefined ? {} : { stdin: input }),
+      timeoutMs: GIT_COMMAND_TIMEOUT_MS,
+      killGraceMs: GIT_COMMAND_GRACE_MS,
+      maxOutputBytes,
     });
-    if (result.isMaxBuffer) {
-      throw new StorageFault('UNSAFE_STORAGE', 'Git output exceeded the memory storage limit.');
-    }
     return {
       exitCode: result.exitCode ?? 1,
-      stdout: Buffer.isBuffer(result.stdout) ? result.stdout : Buffer.from(result.stdout),
-      stderr: Buffer.isBuffer(result.stderr) ? result.stderr : Buffer.from(result.stderr),
+      stdout: Buffer.from(result.stdout),
+      stderr: Buffer.from(result.stderr),
     };
   } catch (error) {
     if (error instanceof StorageFault) throw error;
-    if (isMaxBufferError(error)) {
+    if (error instanceof RunChildError && error.code === 'OUTPUT_LIMIT') {
       throw new StorageFault('UNSAFE_STORAGE', 'Git output exceeded the memory storage limit.');
     }
     throw new StorageFault('STORAGE_ERROR', 'Git could not start.');
   }
-}
-
-function isMaxBufferError(error: unknown): boolean {
-  return isRecord(error) && error.isMaxBuffer === true;
 }
 
 function cleanGitEnvironment(): NodeJS.ProcessEnv {

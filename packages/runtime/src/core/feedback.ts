@@ -1,8 +1,6 @@
 import { existsSync, readFileSync } from 'node:fs';
 import { createHash } from 'node:crypto';
 import { join } from 'node:path';
-import { execa } from 'execa';
-
 import type {
   ConditionInput,
   ConditionResult,
@@ -27,6 +25,7 @@ import {
 import { oneLine, truncate } from './text.js';
 import { workspaceFingerprint } from './git.js';
 import { criterionFor } from './context.js';
+import { processText, runRuntimeProcess } from './process.js';
 
 export type {
   FeedbackActionSeverity,
@@ -809,13 +808,13 @@ async function gitOutput(
   args: string[],
   signal: AbortSignal,
 ): Promise<string> {
-  const out = await execa('git', args, {
+  const out = await runRuntimeProcess({
+    executable: 'git',
+    args,
     cwd,
-    reject: false,
-    stripFinalNewline: false,
-    cancelSignal: signal,
+    signal,
   });
-  return out.stdout.trim();
+  return processText(out.stdout).trim();
 }
 
 async function resolveFiles(
@@ -863,22 +862,21 @@ export function reviewContext(config: ReviewContextConfig) {
       // reject out of reviewContext and throw the whole review. Guard it, and
       // never report `exit: 0` for a command that did not actually run — that
       // would tell the judge the tests passed.
-      const result = await execa(
-        config.tests.command,
-        config.tests.args ?? [],
-        { cwd, reject: false, stripFinalNewline: false, cancelSignal: ctx.signal },
-      ).catch((e: unknown) => {
+      const result = await runRuntimeProcess({
+        executable: config.tests.command,
+        args: config.tests.args ?? [],
+        cwd,
+        signal: ctx.signal,
+      }).catch((e: unknown) => {
         if (ctx.signal.aborted) throw e; // a real abort stops the run
-        return {
-          exitCode: undefined as number | undefined,
-          stdout: '',
-          stderr: e instanceof Error ? e.message : String(e),
-        };
+        return undefined;
       });
-      const exit = result.exitCode ?? '(command did not run)';
+      const exit = result?.exitCode ?? '(command did not run)';
+      const stdout = result === undefined ? '' : processText(result.stdout);
+      const stderr = result === undefined ? '' : processText(result.stderr);
       return [
         `## Test command\n\n${config.tests.command} ${(config.tests.args ?? []).join(' ')}\n\n` +
-          `exit: ${exit}\n\nstdout:\n${truncate(result.stdout ?? '', max)}\n\nstderr:\n${truncate(result.stderr ?? '', max)}`,
+          `exit: ${exit}\n\nstdout:\n${truncate(stdout, max)}\n\nstderr:\n${truncate(stderr, max)}`,
       ];
     };
 
