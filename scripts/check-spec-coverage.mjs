@@ -29,7 +29,8 @@ const OUTSIDE_THE_CHAIN = [
 /** The script every verify chain reaches, so a walk that misses it is broken. */
 const CONTROL = 'check:boundaries';
 
-function reachableScripts(scripts) {
+/** Every script a `verify:*` chain reaches, by walking its `pnpm <script>` calls. */
+export function reachableScripts(scripts) {
   const calls = new Map(
     Object.entries(scripts).map(([name, body]) => [name, [...body.matchAll(CALL)].map((m) => m[1])]),
   );
