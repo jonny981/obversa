@@ -26,7 +26,10 @@ async function git(
     signal,
     ...(input === undefined ? {} : { stdin: input }),
   });
-  return { stdout: processText(r.stdout), exitCode: r.exitCode ?? 1 };
+  return {
+    stdout: processText(r.stdout).replace(/\r?\n$/u, ''),
+    exitCode: r.exitCode ?? 1,
+  };
 }
 
 /** True when `cwd` is inside a git work tree. Never throws. */

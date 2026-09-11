@@ -23,12 +23,33 @@ engine and memory packages track their own versions independently.
   `projectTeamRooms`. The helper returns the revision it read, leaves the
   stored events unchanged and can rebuild deleted room files.
 
+- **Bounded child processes:** The `@obversa/process` package exports one
+  function, `runChild`. It runs a child to a deadline and returns a typed
+  result: the exit code, the captured bytes, and timed-out and aborted flags
+  decided from recorded facts, never from which callback fired first.
+  Standard input is closed after the optional input, both output streams are
+  drained until they close or for a short grace after the child exits, and
+  live children are stopped when the parent process exits. Every git and
+  engine spawn in the runtime, the engine command runner, the Codex adapter
+  and the Git memory adapter run through it, and `execa` is no longer a
+  dependency.
+
+### Changed
+
+- A child started through `runChild` sits in the caller's process group
+  unless `detached: true` is passed. The engine command runner passes it, so
+  its process sweep still sees the whole group.
+- The Git memory adapter's output cap counts standard output and standard
+  error together. It counted each stream on its own before.
+- A timeout is decided by the deadline against the moment the child's exit
+  was observed. Teardown work after the exit never counts.
+
 ### Fixed
 
-- **Bounded child execution:** The caller race in node-lifecycle could not be
-  made red on this host without a test-only seam; the process package's
-  real-child null-exit fixture and the memory-git caller proof are red-first,
-  and CI after the push is the second witness.
+- **A child that never exits is a timeout:** A model CLI stopped at its
+  deadline without an exit code is reported as a timeout, not as an exit
+  with no code. A child that exits leaving a helper holding its output pipe
+  no longer holds the result until the deadline.
 - **Invalid team turns:** Reject bad results before saving completion, and
   retain earlier messages when replay finds invalid saved result content.
 - **Early team review validation:** Invalid panel or callback settings are

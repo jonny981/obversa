@@ -99,7 +99,7 @@ export function commandEnvironment(config: CommandEnvConfig): Environment {
             `${name} ${phase} failed for stage "${stage}" (exit ${r.exitCode}): ${detail}`.trim(),
           );
         }
-        return processText(r.stdout);
+        return processText(r.stdout).replace(/\r?\n$/u, '');
       };
 
       await exec(config.deploy(stage, ws), 'deploy');

@@ -157,7 +157,6 @@ export class CodexEngine implements Engine {
     onEvent: EngineEventSink,
     signal: AbortSignal,
   ): Promise<AgentResult> {
-    const startedAt = Date.now();
     if (req.tools?.length === 0)
       throw new EngineError({
         kind: 'invalid-config',
@@ -213,10 +212,7 @@ export class CodexEngine implements Engine {
         throw new EngineError({ kind: 'aborted', message: 'codex run aborted' });
       const stdout = new TextDecoder().decode(sub.stdout);
       const stderr = new TextDecoder().decode(sub.stderr);
-      const late =
-        typeof req.timeoutMs === 'number' &&
-        Date.now() - startedAt > req.timeoutMs;
-      const timedOut = sub.timedOut || late;
+      const timedOut = sub.timedOut;
       const failed = aborted || timedOut || sub.exitCode !== 0;
       const diagnostic = diagnosticCapture(stderr, stdout, env);
       let transportFailure: AgentResult['transportFailure'];
@@ -257,17 +253,7 @@ export class CodexEngine implements Engine {
         usage,
         requested,
         stopReason: 'end_turn',
-        ...(transportFailure
-          ? { transportFailure }
-          : late
-            ? {
-                transportFailure: {
-                  kind: 'timeout' as const,
-                  message: 'codex result arrived after the soft timeout',
-                  exitCode: sub.exitCode ?? null,
-                },
-              }
-            : {}),
+        ...(transportFailure ? { transportFailure } : {}),
       });
     } finally {
       rmSync(dir, { recursive: true, force: true });
