@@ -36,23 +36,22 @@ const refReadGate = vi.hoisted(() => ({
   resume: Promise.resolve() as Promise<void>,
 }));
 
-vi.mock('execa', async (importOriginal) => {
-  const actual = await importOriginal<typeof import('execa')>();
+vi.mock('../src/core/process.js', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../src/core/process.js')>();
   const wrapped = async (
-    file: string,
-    args: readonly string[] = [],
-    options: Record<string, unknown> = {},
-  ): Promise<unknown> => {
-    if (file === 'git' && args[0] === 'update-ref') {
+    options: Parameters<typeof actual.runRuntimeProcess>[0],
+  ): ReturnType<typeof actual.runRuntimeProcess> => {
+    const args = options.args ?? [];
+    if (options.executable === 'git' && args[0] === 'update-ref') {
       updatedLeaseRefs.push(...args.filter((arg) => arg.startsWith(LEASE_REF_PREFIX)));
-      if (typeof options.input === 'string') {
+      if (typeof options.stdin === 'string') {
         updatedLeaseRefs.push(
-          ...(options.input.match(new RegExp(`${LEASE_REF_PREFIX}[^\\s]*`, 'gu')) ?? []),
+          ...(options.stdin.match(new RegExp(`${LEASE_REF_PREFIX}[^\\s]*`, 'gu')) ?? []),
         );
       }
     }
     if (
-      file === 'git'
+      options.executable === 'git'
       && args[0] === 'rev-parse'
       && args.includes('--verify')
       && args.includes(ACTIVE_LEASE_REF)
@@ -63,7 +62,7 @@ vi.mock('execa', async (importOriginal) => {
       await refReadGate.resume;
     }
     if (
-      file === 'git'
+      options.executable === 'git'
       && args[0] === 'update-ref'
       && args.includes(ACTIVE_LEASE_REF)
     ) {
@@ -75,9 +74,9 @@ vi.mock('execa', async (importOriginal) => {
         await gate.resume;
       }
     }
-    return actual.execa(file, [...args], options);
+    return actual.runRuntimeProcess(options);
   };
-  return { ...actual, execa: wrapped as typeof actual.execa };
+  return { ...actual, runRuntimeProcess: wrapped };
 });
 
 import { createGitWorktreeProvider } from '../src/workspace/git-provider.js';

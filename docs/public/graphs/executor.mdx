@@ -31,11 +31,15 @@ dead, such as bad credentials or a missing model, can move to the fallback. A
 rate limit, timeout, policy pause, or denied action does not run again elsewhere.
 
 Each dead-lane event records the selected identity and the engine's reported
-identity when available. Without a report, it uses the selected identity for
-routing. Stored facts and later routing use the same provider and model key.
-Later dispatches skip either identity. If every declared target is dead,
-no engine runs. The executor records `ENGINE_UNAVAILABLE` as a normal node
-failure so the graph can retry, fail, or recover in its usual way.
+identity when available. Without a report, it uses the selected identity.
+What the failure retires depends on what it says: bad credentials retire
+every model on that adapter and provider, because the credential is theirs;
+a missing model retires that one model, and the same seat's other models
+stay available. Later dispatches in the run skip whatever was retired, and
+stored facts and later routing agree on the same key. If every declared
+target is dead, no engine runs. The executor records `ENGINE_UNAVAILABLE`
+as a normal node failure so the graph can retry, fail, or recover in its
+usual way.
 
 An action-policy wait records `node-paused` with its reason and request. A
 denied action records `node-failed` with `DENIED`. An aborted attempt records
@@ -169,10 +173,6 @@ starts the public executor, and uses a real dead-primary path through two
 The next two critic attempts go straight to the fallback. The critic permits a
 crash retry.
 
-```bash
-pnpm example:turn-taking
-```
-
-The command reports six dispatches, one primary call, three fallback calls, and
+`examples/turn-taking.ts` reports six dispatches, one primary call, three fallback calls, and
 the final result. The same source compiles and runs from the packed package with
 TypeScript 6 and TypeScript 7.

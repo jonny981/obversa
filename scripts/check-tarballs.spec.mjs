@@ -69,6 +69,10 @@ test("a truthful package passes both tools", () => {
   assert.deepEqual(checkTarball(directory), []);
 });
 
+test("the runtime archive pins the team declaration", () => {
+  assert.ok(EXPECTED_FILES["@obversa/runtime"].includes("package/dist/core/team.d.ts"));
+});
+
 test("the tarball command refuses an allowlisted package with no pinned file list", () => {
   pkg("unpinned-workspace/packages/new", {
     name: "@fixture/unpinned",

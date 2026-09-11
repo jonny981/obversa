@@ -52,6 +52,8 @@ const count = (n: number, w: string) => `${n} ${w}${n === 1 ? '' : 's'}`;
 export interface NodeMeta {
   name: string;
   needs?: string[];
+  desc?: string;
+  gate?: string;
   isolate?: boolean;
   optional?: boolean;
   /** Condition labels for the node's `when` gate, when one is configured. */
@@ -186,6 +188,8 @@ export function renderPlan(meta: JobMeta | undefined, indent = ''): string[] {
         if (node.when?.length) bits.push(`when: ${node.when.join(', ')}`);
         if (node.isolate) bits.push('isolated');
         out.push(`${indent}  - ${node.name}${bits.length ? ` (${bits.join('; ')})` : ''}`);
+        if (node.desc) out.push(`${indent}      desc: ${node.desc}`);
+        if (node.gate) out.push(`${indent}      gate: ${node.gate}`);
         out.push(...renderPlan(node.job, `${indent}      `));
       }
       break;

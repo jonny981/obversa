@@ -222,6 +222,35 @@ describe('openGitMemory', () => {
     expect(git(repo, ['cat-file', '-t', refFor('clean-environment')])).toBe('tree');
   });
 
+  it('turns an oversized Git response into a bounded storage failure', async () => {
+    const repo = makeRepo();
+    const wrapperDirectory = makeTemporaryDirectory('obversa-memory-git-output-');
+    const wrapper = join(wrapperDirectory, 'git');
+    writeFileSync(wrapper, `#!/usr/bin/env node
+import { spawnSync } from 'node:child_process';
+
+const args = process.argv.slice(2);
+if (args.includes('--show-object-format=storage')) {
+  process.stdout.write('x'.repeat(512 * 1024 + 1));
+  process.stderr.write('y'.repeat(512 * 1024));
+} else {
+  const result = spawnSync(process.env.OBVERSA_MEMORY_GIT_REAL_GIT, args, {
+    env: process.env,
+    stdio: 'inherit',
+  });
+  process.exit(result.status ?? 1);
+}
+`);
+    chmodSync(wrapper, 0o755);
+    vi.stubEnv('PATH', `${wrapperDirectory}:${process.env.PATH ?? ''}`);
+    vi.stubEnv('OBVERSA_MEMORY_GIT_REAL_GIT', gitBinary);
+
+    await expect(openGitMemory({ repositoryPath: repo, scope: 'bounded-output' })).rejects.toMatchObject({
+      code: 'UNSAFE_STORAGE',
+      message: 'Git output exceeded the memory storage limit.',
+    });
+  });
+
   it('disables lazy object fetches for every Git command', async () => {
     const repo = makeRepo();
     const wrapperDirectory = makeTemporaryDirectory('obversa-memory-git-wrapper-');

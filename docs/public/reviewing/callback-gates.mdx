@@ -1,0 +1,166 @@
+---
+title: "Callback gates"
+description: "Stop the run for one question a person, an agent or a service must answer, and carry on with the answer."
+---
+
+
+Some steps are not the agent's to decide. Ship this release? Is this the
+migration we meant? Which of these two drafts? On a team those go to a
+person, the work waits, and it carries on when the answer comes back. A
+callback gate is that pause. The workflow asks one question with a fixed
+shape of answer, stops, and continues from that exact step when someone
+answers it.
+
+The question can go to a person in their browser, to another agent, or to
+a service. The gate does not care who answers; it cares that the answer
+comes back in the shape it asked for, so the workflow can branch on it
+without asking a model what the answer meant.
+
+## What you get
+
+- **One question, one typed answer.** You state the question and the
+  shape of the answer, such as `{ approved: boolean }`. The run records
+  the answer and branches on it.
+- **The run survives the wait.** The question is an event in the record,
+  so a process that dies while a person is thinking loses nothing; a fresh
+  process rebuilds the pause and waits for the same answer.
+- **Any answerer.** A router takes the question to whoever answers it: a
+  surface in a browser for a person, an engine call for an agent, an API
+  call for a service. Swap the router and the question is unchanged.
+- **Answers bound to what they judged.** An approval can carry the exact
+  bytes, proof and workspace state it approved, so a later change cannot
+  ride on an old yes.
+
+## See one run
+
+The example asks one approval question, has two routers compete for it,
+releases it, answers it, and shows the answer surviving a replay of the
+record. It runs offline in under a second.
+
+
+```text
+{
+  "requestId": "release-approval#1#3a32b8f32a48c2b1ddc28ecec2c3035d4619311acf96364200e8c25efe94cd05",
+  "digest": "3a32b8f32a48c2b1ddc28ecec2c3035d4619311acf96364200e8c25efe94cd05",
+  "sameQuestionId": true,
+  "changedQuestionId": true,
+  "blockedKind": "claimed",
+  "released": true,
+  "submitted": true,
+  "events": [
+    "callback-requested",
+    "callback-claimed",
+    "callback-released",
+    "callback-claimed",
+    "callback-submitted"
+  ],
+  "replayedPending": 0
+}
+```
+
+## Source
+
+The example, byte for byte from `examples/callback-gate.ts`. Copy it
+into a project that has `@obversa/runtime` installed and run it with `tsx`.
+
+```ts
+import {
+  createCallbackClient,
+  createCallbackGate,
+  directRouter,
+  replayCallbackClient,
+  type CallbackGateDefinition,
+} from '@obversa/runtime';
+
+const definition: CallbackGateDefinition = {
+  gateId: 'release-approval',
+  gateVersion: 1,
+  decisionText: 'Approve release abc123?',
+  responseSchema: {
+    type: 'object',
+    properties: { approved: { type: 'boolean' } },
+    required: ['approved'],
+  },
+  input: { revision: 'abc123' },
+};
+
+const client = createCallbackClient();
+const request = createCallbackGate(definition);
+client.post(request);
+
+const firstClaim = client.claim(request.requestId, 'router-a');
+const blockedClaim = client.claim(request.requestId, 'router-b');
+if (!firstClaim.ok) throw new Error('The first router did not claim the request.');
+const released = client.release(request.requestId, firstClaim.claimToken);
+const submitted = await directRouter(
+  client,
+  request,
+  'router-b',
+  () => ({ approved: true }),
+);
+
+const sameQuestion = createCallbackGate({
+  ...definition,
+  presentation: { theme: 'dark' },
+});
+const changedQuestion = createCallbackGate({
+  ...definition,
+  input: { revision: 'def456' },
+});
+const replayed = replayCallbackClient(client.history());
+
+console.log(JSON.stringify({
+  requestId: request.requestId,
+  digest: request.digest,
+  sameQuestionId: sameQuestion.requestId === request.requestId,
+  changedQuestionId: changedQuestion.requestId !== request.requestId,
+  blockedKind: blockedClaim.ok ? null : blockedClaim.kind,
+  released: released.ok,
+  submitted: submitted.ok,
+  events: client.history(request.requestId).map((event) => event.kind),
+  replayedPending: replayed.listPending().length,
+}, null, 2));
+```
+
+## How it works when it runs
+
+1. The workflow posts the question; the record gains a request event.
+2. A router claims it. Two routers cannot hold one question at once.
+3. The router asks: opens a surface, calls an agent, calls a service.
+4. The router submits the answer; the run checks its shape and records it.
+5. The host resumes the paused step with the answer in hand.
+
+If the router dies between claim and answer, the question is still there
+and still claimed; the owner releases it and another router can take it.
+
+## Using it in a workflow
+
+Put a gate where a person must say yes: before a release, before a
+destructive change, before spending money. Give it a surface to open and
+the run pauses with the question on screen beside the terminal; the
+[surfaces](/concepts/surfaces) page shows the page half. For decisions
+about a proposed change, bind the approval to the evidence with
+[proof acceptance](/reviewing/proof-acceptance), so an approval means
+"these bytes", not "whatever is there now".
+
+## Things that catch people out
+
+- **The gate checks shape, not meaning.** Required fields and their types
+  are checked; deeper rules are your host's to check before it submits.
+- **Change the question and it is a new question.** The question text, the
+  answer shape and the input make up the request's identity; change any of
+  them and a previous answer no longer applies. Changing how it is shown
+  does not.
+- **Resume is explicit.** An answer arriving does not restart the run by
+  itself; the host reads the decision and resumes the step. That is what
+  lets a host decide that an approval needs a second look.
+- **The in-memory client forgets.** It is for tests. The stored client is
+  the one whose questions survive a process exit.
+
+## Reference: what the request identity covers
+
+The request digest covers the gate id and version, the question text, the
+response schema and the input. Presentation hints, such as a theme or a
+pane placement, are outside it. An approval gate can additionally bind the
+answer to proof, input artifacts, output bytes, permissions and a workspace
+anchor; the host checks those still match before it acts on the approval.

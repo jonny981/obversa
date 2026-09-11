@@ -37,7 +37,7 @@ if (mode === 'complete') {
   process.exit(0);
 }
 
-if (mode === 'flood') {
+if (mode === 'flood' || mode === 'flood-ignore') {
   const chunk = Buffer.alloc(16 * 1_024, 0x78);
   while (true) {
     if (!process.stdout.write(chunk)) {

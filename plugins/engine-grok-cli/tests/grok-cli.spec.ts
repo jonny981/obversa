@@ -663,7 +663,7 @@ describe('Grok CLI adapter', () => {
       { ...request(), memory: {} } as AgentRequest & { memory: unknown },
       options('/bin/echo'),
       promptFile,
-    )).toThrow('does not bridge Lines memory');
+    )).toThrow('does not bridge Obversa memory');
   });
 
   it('passes a result schema and returns the native structured value', async () => {

@@ -3,7 +3,10 @@ import type { EngineFailureKind } from '../engines/failure.js';
 import type { ExecutionTarget } from '../graph/plan.js';
 import { canonicalJson, cloneFrozenJson, type JsonValue } from '../graph/value.js';
 
-export type EngineExclusionKey = `adapter:${string}` | `provider-model:${string}`;
+export type EngineExclusionKey =
+  | `adapter:${string}`
+  | `adapter-provider:${string}`
+  | `provider-model:${string}`;
 
 export interface EngineFailureIdentity {
   readonly selection: EngineSelectionRecord;
@@ -61,8 +64,38 @@ function adapterKey(adapter: string): EngineExclusionKey {
   return `adapter:${canonicalJson([adapter])}`;
 }
 
+function adapterProviderKey(adapter: string, provider: string): EngineExclusionKey {
+  return `adapter-provider:${canonicalJson([adapter, provider])}`;
+}
+
+function hasAdapterProviderKey(
+  unavailable: ReadonlySet<EngineExclusionKey>,
+  adapter: string,
+): boolean {
+  const prefix = `adapter-provider:${canonicalJson([adapter]).slice(0, -1)},`;
+  return [...unavailable].some((key) => key.startsWith(prefix));
+}
+
 function providerModelKey(provider: string, model: string): EngineExclusionKey {
   return `provider-model:${canonicalJson([provider, model])}`;
+}
+
+function resolveAdapterProvider(
+  selection: EngineSelectionRecord,
+  declaredTargets: readonly ExecutionTarget[],
+): EngineExclusionKey {
+  if (selection.provider !== null) {
+    return adapterProviderKey(selection.adapter, selection.provider);
+  }
+  const keys = new Set(declaredTargets
+    .filter((target) => matchesEngineTarget(target, selection))
+    .map((target) => adapterProviderKey(target.adapter, target.provider)));
+  if (keys.size !== 1) {
+    throw new EngineIdentityUnresolvedError(
+      `Cannot resolve ${selection.adapter}/${selection.model ?? '(unknown model)'} to one declared adapter/provider; matches: ${canonicalJson([...keys].sort())}.`,
+    );
+  }
+  return keys.values().next().value!;
 }
 
 function resolveProviderModel(
@@ -103,8 +136,11 @@ export function engineFailureExclusionKeys(
   switch (fact.failure) {
     case 'missing-cli':
     case 'invalid-config':
-    case 'auth':
       return [adapterKey(fact.selection.adapter)];
+    case 'auth':
+      return [fact.target === undefined
+        ? resolveAdapterProvider(fact.selection, declaredTargets)
+        : adapterProviderKey(fact.target.adapter, fact.target.provider)];
     case 'model-unavailable':
     case 'billing':
     case 'quota': {
@@ -128,6 +164,14 @@ export function isEngineExcluded(
   declaredTargets: readonly ExecutionTarget[],
 ): boolean {
   if (unavailable.has(adapterKey(selection.adapter))) return true;
+  const authKey = target !== undefined
+    ? adapterProviderKey(target.adapter, target.provider)
+    : selection.provider !== null
+      ? adapterProviderKey(selection.adapter, selection.provider)
+      : hasAdapterProviderKey(unavailable, selection.adapter)
+        ? resolveAdapterProvider(selection, declaredTargets)
+        : null;
+  if (authKey !== null && unavailable.has(authKey)) return true;
   if (![...unavailable].some((key) => key.startsWith('provider-model:'))) return false;
   const key = target === undefined
     ? resolveProviderModel(selection, declaredTargets)

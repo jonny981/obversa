@@ -247,7 +247,7 @@ describe('run', () => {
     expect(readFileSync(`${dir}/.obversa/.gitignore`, 'utf8')).toBe('*\n');
   });
 
-  it('rejects Lines-managed paths that escape through a symlink', async () => {
+  it('rejects runtime-managed paths that escape through a symlink', async () => {
     const dir = tmpBareDir();
     const target = mkdtempSync(join(tmpdir(), 'lines-escape-target-'));
     symlinkSync(target, join(dir, '.obversa'));

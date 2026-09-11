@@ -1,4 +1,4 @@
-import { openSafeChangeRun } from '../../../examples/safe-change/recipe.js';
+import { openSafeChangeRun } from '../../../examples/safe-change-recipe.js';
 
 const [directory, runId, selectedTarget] = process.argv.slice(2);
 if (!directory || !runId || !selectedTarget) throw new Error('Expected directory, run id, and target id.');

@@ -57,7 +57,7 @@ Pass a `Memory` instance in the run options when a job uses memory:
 await run(job, { memory });
 ```
 
-Lines imports the `@obversa/memory` port. Your program selects the storage
+The runtime imports the `@obversa/memory` port. Your program selects the storage
 adapter.
 
 With the Agent SDK engine, passing memory makes its one in-process memory tool
@@ -121,7 +121,7 @@ Run the checked-in example from the workspace root:
 pnpm example:graph
 ```
 
-The example is `examples/packages/custom-graph.ts`. It uses only public exports
+The example is `examples/custom-graph.ts`. It uses only public exports
 and runs the public graph conformance kit.
 
 This graph contract does not schedule nodes, store runs, provide built-in

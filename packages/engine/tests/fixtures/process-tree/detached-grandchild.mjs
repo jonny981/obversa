@@ -14,7 +14,7 @@ writeFileSync(`${barrier}.tmp`, JSON.stringify({
 }));
 renameSync(`${barrier}.tmp`, barrier);
 
-if (mode === 'ignore') {
+if (mode === 'ignore' || mode === 'flood-ignore') {
   process.on('SIGTERM', () => {});
 }
 

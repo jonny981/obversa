@@ -50,7 +50,7 @@ adapter discards its data when its process exits.
 From the workspace root, run:
 
 ```bash
-pnpm --filter @obversa/memory-simple exec tsx ../../examples/packages/memory-simple.ts
+pnpm --filter @obversa/memory-simple exec tsx ../../examples/memory-simple.ts
 ```
 
 ## License

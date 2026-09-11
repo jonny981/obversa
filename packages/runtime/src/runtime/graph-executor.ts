@@ -322,6 +322,12 @@ function validateFact(
   }
   const compatible = targets.filter((target) => matchesEngineTarget(target, selected));
   if (compatible.length === 0) {
+    if (!hasTarget && selected.provider === null && payload.failure === 'auth') {
+      fail(
+        'ENGINE_IDENTITY_UNRESOLVED',
+        `Model availability for node "${identity.nodeId}" cannot resolve its legacy auth provider.`,
+      );
+    }
     fail('INVALID_EVENT', 'A model-unavailable selection is outside its recorded node lane.');
   }
   let target: ExecutionTarget | undefined;
@@ -347,7 +353,7 @@ function validateFact(
   });
 }
 
-function validateStandardEvent(
+export function validateStandardEvent(
   envelope: DomainEventEnvelope,
   type: string,
   nodeIds: ReadonlySet<string>,
@@ -827,6 +833,15 @@ export async function createGraphExecutor(
       decideAction: binding.decideAction,
     }, signal);
     if (result.status === 'completed') {
+      const issue = options.graph.validateNodeResult?.(command.nodeId, result.result) ?? null;
+      if (issue !== null) {
+        await appendResult(newEvent(options.runId, 'node-failed', {
+          nodeId: command.nodeId,
+          position: command.position,
+          code: 'RESULT_INVALID',
+        }));
+        return;
+      }
       await appendResult(newEvent(options.runId, 'node-completed', {
         nodeId: command.nodeId,
         position: command.position,

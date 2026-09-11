@@ -53,7 +53,7 @@ const VERSION_TEARDOWN_MS = 1_000;
 const VERSION_OUTPUT_BYTES = 4_096;
 const GROK_VERSION = /^grok ([0-9]+\.[0-9]+\.[0-9]+)(?: \([0-9a-f]+\))?(?: \[[A-Za-z0-9._-]+\])?$/u;
 const BASE_SYSTEM_PROMPT =
-  'Execute one isolated Lines node attempt. Follow only this system prompt and the user prompt. Use only the declared tools and permissions.';
+  'Execute one isolated Obversa node attempt. Follow only this system prompt and the user prompt. Use only the declared tools and permissions.';
 const WEB_TOOLS = new Set(['web_search', 'web_fetch', 'websearch', 'webfetch']);
 const READ_ONLY_TOOLS = new Set([
   'read_file',
@@ -393,7 +393,7 @@ export function buildGrokArgs(
     (request as AgentRequest & { readonly memory?: unknown }).memory !==
     undefined
   ) {
-    throw new TypeError('Grok CLI does not bridge Lines memory');
+    throw new TypeError('Grok CLI does not bridge Obversa memory');
   }
   const model = nonEmptyText(request.model, 'Grok request model');
   const tools = requestedCapabilities(request);

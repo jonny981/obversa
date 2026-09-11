@@ -13,22 +13,59 @@ runs the matching stage.
 
 ## Run the example
 
-From an Obversa checkout, run:
-
-```bash
-pnpm example:pipeline
-```
 
 The command stores and runs a three-stage pipeline through the public executor.
 It prints one JSON report:
 
 ```json
-{"executor":"complete","output":{"nodes":{"draft":{"article":"ready"},"review":{"approved":true},"publish":{"published":true}}},"dispatches":3,"order":["draft","review","publish"],"planDigest":"sha256:ebbf122994643028c5222a0afaf8d7a99a257716e00f0e255b15f315e4b862ed","bounds":{"dispatches":{"min":{"kind":"known","value":3},"max":{"kind":"known","value":3}},"maxConcurrency":{"kind":"known","value":1},"maxFanOut":{"kind":"known","value":1}}}
+{
+  "executor": "complete",
+  "output": {
+    "nodes": {
+      "draft": {
+        "article": "ready"
+      },
+      "review": {
+        "approved": true
+      },
+      "publish": {
+        "published": true
+      }
+    }
+  },
+  "dispatches": 3,
+  "order": [
+    "draft",
+    "review",
+    "publish"
+  ],
+  "planDigest": "sha256:ebbf122994643028c5222a0afaf8d7a99a257716e00f0e255b15f315e4b862ed",
+  "bounds": {
+    "dispatches": {
+      "min": {
+        "kind": "known",
+        "value": 3
+      },
+      "max": {
+        "kind": "known",
+        "value": 3
+      }
+    },
+    "maxConcurrency": {
+      "kind": "known",
+      "value": 1
+    },
+    "maxFanOut": {
+      "kind": "known",
+      "value": 1
+    }
+  }
+}
 ```
 
 The clean-consumer check compiles and runs the same source from the packed
 package with TypeScript 6 and TypeScript 7. Its source is
-`examples/packages/pipeline.ts`.
+`examples/pipeline.ts`.
 
 ## Define a pipeline
 

@@ -1,0 +1,289 @@
+---
+title: "Events and artifacts"
+description: "Store small events and large content, then reopen and fold the same state."
+---
+
+The runtime keeps durable history in two ports. An `EventStore` appends small JSON
+events. An `ArtifactStore` saves larger byte content and returns a small
+reference for an event to carry.
+
+This guide stays at the storage layer. It does not execute graph work, resume a
+stopped run, list runs, or manage a workspace.
+
+## Run the example
+
+
+The example writes one 65 KB synthetic artifact and appends one event that
+contains its 194-byte reference. It creates a fresh storage binding over the
+same directory, reads the event and artifact, and folds the same state. It also
+runs both public storage conformance kits.
+
+## Source
+
+```ts
+import { mkdtemp, rm } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+
+import {
+  validateArtifactReference,
+  type JsonObject,
+  type JsonValue,
+  type RunStorageBinding,
+  type RunStoragePolicy,
+} from '@obversa/runtime';
+import {
+  runArtifactStoreConformance,
+  runEventStoreConformance,
+} from '@obversa/runtime/testing';
+import {
+  createLocalArtifactStore,
+  createLocalEventStore,
+  createLocalRunStorage,
+} from '@obversa/runtime/storage/local';
+
+const encoder = new TextEncoder();
+const policy = {
+  schemaVersion: 1,
+  maxEventPayloadBytes: 8_192,
+  maxAppendBatchBytes: 32_768,
+  maxArtifactBytes: 131_072,
+  maxTotalArtifactBytesPerRun: 1_048_576,
+  retention: 'until-run-delete',
+  sensitiveContent: {
+    marked: 'reject',
+    exact: 'reject',
+    freeText: 'redact-before-hash',
+  },
+} as const satisfies RunStoragePolicy;
+
+function isJsonObject(value: JsonValue): value is JsonObject {
+  return value !== null && typeof value === 'object' && !Array.isArray(value);
+}
+
+async function foldStoredState(binding: RunStorageBinding, runId: string) {
+  const stream = { namespace: binding.record.namespace, streamId: runId };
+  const scope = { namespace: binding.record.namespace, runId };
+  let eventCount = 0;
+  let artifactBytes = 0;
+  let lastArtifactDigest: string | null = null;
+
+  for await (const event of binding.eventStore.read(stream)) {
+    if (
+      event.type !== 'example:artifact-recorded'
+      || !isJsonObject(event.payload)
+    ) {
+      throw new Error(`Unexpected stored event ${event.type}.`);
+    }
+    const reference = validateArtifactReference(event.payload.artifact);
+    const bytes = await binding.artifactStore.read(scope, reference);
+    eventCount += 1;
+    artifactBytes += bytes.byteLength;
+    lastArtifactDigest = reference.digest;
+  }
+
+  return { eventCount, artifactBytes, lastArtifactDigest };
+}
+
+async function main(): Promise<void> {
+  const directory = await mkdtemp(join(tmpdir(), 'obversa-storage-example-'));
+
+  try {
+    const runId = 'run-one';
+    const storageOptions = {
+      directory: join(directory, 'run-storage'),
+      namespace: 'example-host',
+      policy,
+      knownSecrets: ['example-secret'],
+    } as const;
+    const first = createLocalRunStorage(storageOptions);
+    const scope = { namespace: first.record.namespace, runId };
+    const stream = { namespace: first.record.namespace, streamId: runId };
+    const largeBytes = encoder.encode(JSON.stringify({
+      schemaVersion: 1,
+      kind: 'synthetic-result',
+      text: 'x'.repeat(65_536),
+    }));
+    const reference = await first.artifactStore.write(scope, {
+      bytes: largeBytes,
+      mediaType: 'application/json',
+      purpose: 'synthetic-result',
+      contentMode: 'state',
+    });
+
+    await first.eventStore.append(stream, 0, [{
+      eventId: 'artifact-recorded-1',
+      type: 'example:artifact-recorded',
+      version: 1,
+      timestamp: '2026-01-01T00:00:00.000Z',
+      correlationId: runId,
+      causationId: null,
+      payload: { artifact: reference },
+    }]);
+
+    const firstState = await foldStoredState(first, runId);
+    const reopened = createLocalRunStorage(storageOptions);
+    const reopenedState = await foldStoredState(reopened, runId);
+    if (JSON.stringify(firstState) !== JSON.stringify(reopenedState)) {
+      throw new Error('Fresh storage binding folded a different state.');
+    }
+
+    const eventConformance = await runEventStoreConformance((options) =>
+      createLocalEventStore({
+        root: join(directory, 'event-conformance'),
+        ...options,
+      }));
+    const artifactConformance = await runArtifactStoreConformance((options) =>
+      createLocalArtifactStore({
+        root: join(directory, 'artifact-conformance'),
+        ...options,
+      }));
+    if (!eventConformance.ok || !artifactConformance.ok) {
+      throw new Error(JSON.stringify({ eventConformance, artifactConformance }));
+    }
+
+    console.log(JSON.stringify({
+      storedArtifactBytes: reference.byteLength,
+      eventPayloadBytes: encoder.encode(JSON.stringify({ artifact: reference })).byteLength,
+      reopenedState,
+      conformance: {
+        events: eventConformance.cases,
+        artifacts: artifactConformance.cases,
+      },
+    }, null, 2));
+  } finally {
+    await rm(directory, { recursive: true, force: true });
+  }
+}
+
+await main();
+```
+
+The result is:
+
+```json
+{
+  "storedArtifactBytes": 65591,
+  "eventPayloadBytes": 194,
+  "reopenedState": {
+    "eventCount": 1,
+    "artifactBytes": 65591,
+    "lastArtifactDigest": "sha256:45ccde9ad00cd4b72ab6c8aced15a85c3199c7ceab300942bf678ae1fa3d40cc"
+  },
+  "conformance": {
+    "events": 10,
+    "artifacts": 15
+  }
+}
+```
+
+## Use the two ports
+
+`createLocalRunStorage` returns a live `RunStorageBinding`. The binding contains
+one frozen `record`, the known secret values used for write checks, an event
+store, and an artifact store. Use `binding.record.namespace` for store calls.
+The live store handles and secret values are never serialized. The exact same
+record is stored with the run and checked again when the run is loaded.
+
+The record contains only safe JSON: namespace, provider identity, provider
+configuration digest, and resolved policy. A provider digest can bind safe
+adapter settings, but it must not contain a secret value or secret-derived
+hash. The local provider digest binds the resolved absolute storage root and
+its numeric limits. Moving the same stored bytes to another root produces a
+different live record, so loading the run fails instead of silently reading a
+different storage address.
+
+Every event operation names a namespace and stream. Every artifact operation
+names a namespace and run. Two namespaces can share one physical provider
+without reading or changing each other's data. Both ports use the same storage
+identity rule: 1 to 128 ASCII characters, starting with a letter or digit;
+later characters may also be dots, underscores, or hyphens.
+
+## Keep wrappers strict and payloads opaque
+
+The runtime rejects unknown fields in wrappers it owns. These wrappers include event
+envelopes, artifact references, receipts, run-start records, and stored storage
+records.
+
+Graph, host, and workspace payloads are opaque. Opaque means the runtime preserves
+their JSON or bytes without assigning meaning to their fields. Code that owns
+an opaque payload must validate any nested value it uses. The example calls
+`validateArtifactReference` before it reads the reference inside its event.
+
+## Set limits before the first write
+
+| Policy field | What it limits |
+| --- | --- |
+| `maxEventPayloadBytes` | One event payload. |
+| `maxAppendBatchBytes` | One atomic event append. |
+| `maxArtifactBytes` | One artifact after permitted free-text redaction. |
+| `maxTotalArtifactBytesPerRun` | Unique admitted artifact digests for one run. |
+
+The local stores reject a value over a limit before it becomes visible. A
+second receipt for the same digest does not charge the artifact bytes again.
+Accepted artifacts stay until `deleteRun` removes that run.
+
+`ArtifactStore.deleteRun` removes only the artifacts in its scope. It leaves
+the event stream and its artifact references in history, so later reads through
+those references fail closed. Hosts must coordinate event and artifact cleanup.
+
+Call `preflightAppend` with the exact event batch before a run writes its
+artifacts. Call `preflightWrite` once with the complete same-run artifact batch;
+it returns the references that later writes must issue. Both calls are
+side-effect-free. They do not reserve a stream revision or artifact quota, so
+the real append or write checks again and can still lose a later race.
+
+A provider-internal crash before artifact admission can leave temporary or
+blob bytes. They are not readable and do not count against the run quota. A
+process crash or competing run start after admission can leave a verified,
+quota-charged artifact without an event reference. Hosts must handle cleanup
+and reconciliation. The storage contract does not promise a transaction across
+two independent ports.
+
+## Handle secrets by content mode
+
+Set `contentMode` to describe how the bytes are used:
+
+- `exact` and `state` bytes reject a configured known secret. JSON state also
+  checks decoded keys and values, including `application/*+json`. The store
+  never changes these bytes.
+- `free-text` bytes can replace configured known secrets before the store
+  calculates the digest and byte size. The replacement is checked again and
+  the write fails if it would create another configured secret.
+- `sensitive: true` rejects the artifact instead of storing it.
+
+The local artifact store checks receipt metadata and its exact serialized
+admission record too. The local event store checks the complete event and
+segment metadata, not only the payload.
+
+The known secret values belong in the live local-store options. They do not
+belong in a stored storage record or digest. Rotating those values does not
+make committed events or artifacts unreadable; the replacement set applies to
+later writes.
+
+## Expect conflicts and verify reads
+
+An event append supplies the expected stream revision. If another writer wins,
+the losing append receives `REVISION_CONFLICT` and no part of its batch becomes
+visible. A retry with the same event bytes returns the revision of its earlier
+commit. A retry with different bytes receives `REVISION_CONFLICT`.
+
+A fresh local event store checks immutable segment order, revisions, and
+checksums when it reads.
+
+An artifact write returns a receipt with its digest, byte size, media type, and
+purpose. A read checks that the exact receipt was admitted for the run, then
+checks the stored bytes against it. Missing or changed data fails closed with a
+typed `StorageError`.
+
+## Bring another storage provider
+
+Implement the root `EventStore` and `ArtifactStore` ports. Then pass fresh
+provider instances to `runEventStoreConformance` and
+`runArtifactStoreConformance`. These framework-free kits check durable reopen,
+revision conflicts, namespace and run isolation, size limits, secret handling,
+content addressing, provider preflight, policy identity, and read integrity.
+
+The storage ports record and reopen data. The executor consumes a stored run
+definition and explicitly resumes an unfinished node. This behavior does not
+belong in a storage provider.

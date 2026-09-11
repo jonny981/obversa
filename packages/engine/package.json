@@ -44,7 +44,7 @@
     "prepublishOnly": "node ../../scripts/check-publish-allowlist.mjs"
   },
   "dependencies": {
-    "execa": "^9.6.1"
+    "@obversa/process": "workspace:^"
   },
   "devDependencies": {
     "@types/node": "22.12.0"

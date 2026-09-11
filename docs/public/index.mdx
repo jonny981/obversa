@@ -1,29 +1,85 @@
 ---
 title: "Obversa"
-description: "A process runtime for software teams."
+description: "Model how your team really works. Durable agent workflows, reviews that send work back, no database needed."
 ---
 
 {/* The pinned Mint font schema has heading and body settings, with no code
     setting. style.css loads IBM Plex Mono for code through Google Fonts. */}
 
-A process runtime for software teams.
+Model how your team really works: named roles, reviews that send work back, and a record in plain files.
 
-`@obversa/runtime` compiles graph definitions and runs them through a durable
-executor. The memory packages give each run one memory port and two storage
-choices.
+You describe how work should move from a request to a checked result: the
+steps, who does each one, the reviews, and where a person decides. Obversa
+runs that workflow one bounded engine call at a time and records every step.
 
-## What ships today
+## See a team run
 
-- **Pipeline:** ordered stages on the durable graph executor. See
-  [Built-in pipeline](/graphs/pipeline).
-- **Review loop:** For engine calls managed by the graph executor, accepted reviewers
-  share neither the writer's provider nor its model family, based on engine reports.
-  Calls without a writer report count as all declared writer targets. The loop
-  can also require a diverse quorum. See [Review loop](/graphs/review-loop).
-- **Callback gate:** one structured answer through a replaceable router. See
-  [Callback gate](/graphs/callback-gate).
-- **Crash-safe resume:** a fresh executor recovers recorded progress; an uncertain
-  attempt pauses unless retry was declared safe. See [Graph executor](/graphs/executor).
+Five named stages, the way a real team ships a feature. The review is a
+panel of three. Two of the three fail the first attempt, so the panel sends
+the work back to `implement` with their findings, and the second attempt
+passes. No model and no network: every stage here is a small function, so
+the shape of the team is the only thing on show.
+
+```ts
+import { fnJob, pipeline, reviewPanel, run, type Outcome } from '@obversa/runtime';
+```
+
+```ts
+const review = reviewPanel({
+  label: 'review',
+  reviewers: [
+    { name: 'correctness', job: checks.correctness },
+    { name: 'safety', job: checks.safety },
+    { name: 'scope', job: checks.scope },
+  ],
+  pass: 2, // two of three agree and the step passes
+  target: 'implement', // a failing panel sends the work back here
+});
+
+export const featureDelivery = pipeline(
+  'feature-delivery',
+  [
+    { name: 'analyse', job: analyse },
+    { name: 'implement', job: implement },
+    { name: 'test', job: testStage },
+    { name: 'review', job: review },
+    { name: 'approve', job: approve },
+  ],
+  { maxKickbacks: 2 },
+);
+```
+
+It prints:
+
+```text
+{
+  "status": "pass",
+  "implementRuns": 2
+}
+```
+
+`implement` ran twice. That second run is the whole point: a reviewer said
+no, named the stage that owns the fix, and the work went back there instead
+of the run starting over. The whole file is
+[feature-team.ts](/concepts/workflows), and the
+[the examples](/workflows) has more to copy.
+
+## What a reader can do
+
+- **Copy a workflow:** a complete, runnable program for real work. Start with
+  [the examples](/workflows).
+- **Review and approve work:** panels, revisions that send work back, and
+  callback gates that wait for a person. Start with
+  [callback gates](/reviewing/callback-gates).
+- **Record and restart runs:** every step appends events, and the
+  supervised runner restarts a killed run where it stopped. Start with
+  [how a run is recorded](/recording/how-a-run-is-recorded).
+- **Drive runs from a host:** bounded workers, supervision, and surfaces. Start
+  with [the runner](/driving/runner).
+- **Write a workflow shape:** your own graph form over the public contract.
+  Start with [the graph contract](/graphs/contract).
+- **Choose engines and memory:** adapters for the tools a team already has.
+  Start with [memory](/memory) and the package pages below.
 
 ## Packages
 
@@ -32,15 +88,22 @@ choices.
 | `@obversa/runtime` | Compiles and runs pipeline, review-loop, and DAG graph forms | `1.0.0` |
 | `@obversa/runner` | Supervises stored graph runs in bounded workers | `0.1.0` |
 | `@obversa/engine` | Defines the contract for one bounded engine attempt | `0.1.0` |
+| `@obversa/process` | Runs one child process with a deadline and a readable result | `0.1.0` |
 | `@obversa/memory` | Defines the memory command contract | `0.1.0` |
 | `@obversa/memory-simple` | Stores memory in one process | `0.1.0` |
 | `@obversa/memory-git` | Stores memory in private Git references | `0.1.0` |
 | `@obversa/surfacer` | Runs one local surface session | `0.1.0` |
 | `@obversa/source` | Opens a git diff for inline review | `0.1.0` |
+| `@obversa/engine-agent-sdk` | Runs one engine attempt through the Agent SDK | `0.1.0` |
+| `@obversa/engine-anthropic-api` | Runs one engine attempt through the Anthropic API | `0.1.0` |
+| `@obversa/engine-claude-cli` | Runs one engine attempt through the Claude CLI | `0.1.0` |
+| `@obversa/engine-codex` | Runs one engine attempt through the Codex CLI | `0.1.0` |
+| `@obversa/engine-grok-cli` | Runs one engine attempt through the Grok CLI | `0.1.0` |
+| `@obversa/engine-opencode-cli` | Runs one engine attempt through the OpenCode CLI | `0.1.0` |
 
-The six engine plugins have their own pages in the Packages group.
-The runtime version matches the repository release tag. Other packages keep
-their own manifest versions.
+The six engine plugins and the two memory adapters have their own pages in
+the Packages group. The runtime version matches the repository release tag.
+Other packages keep their own manifest versions.
 
 The packages have one dependency direction. The runtime imports the memory port.
 Each memory adapter also imports the memory port. The runtime does not import a
@@ -50,5 +113,5 @@ memory adapter.
 
 1. [Install the local packages](/get-started/installation).
 2. [Run the first program](/get-started/first-run).
-3. [Copy an offline process](/production-lines/offline-review).
+3. [Copy the feature team](/concepts/workflows) and change the stages to yours.
 4. [Use Obversa in cmux](/hosts/cmux).

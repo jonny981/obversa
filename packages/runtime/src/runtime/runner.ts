@@ -57,7 +57,7 @@ export interface RunOptions {
   /**
    * Bring an environment up for the run (the root workspace) before the job and
    * tear it down after, so the gate can test the running thing. You supply the
-   * adapter; Lines owns only the interface. Per-team environments at the
+   * adapter; the runtime owns only the interface. Per-team environments at the
    * worktree boundary are a separate, later binding.
    */
   environment?: Environment;

@@ -1,8 +1,6 @@
 import { existsSync, readFileSync } from 'node:fs';
 import { createHash } from 'node:crypto';
 import { join } from 'node:path';
-import { execa } from 'execa';
-
 import type {
   ConditionInput,
   ConditionResult,
@@ -26,6 +24,8 @@ import {
 } from './concurrency.js';
 import { oneLine, truncate } from './text.js';
 import { workspaceFingerprint } from './git.js';
+import { criterionFor } from './context.js';
+import { processText, runRuntimeProcess } from './process.js';
 
 export type {
   FeedbackActionSeverity,
@@ -140,11 +140,16 @@ export function feedbackBlock(outcome: Outcome): string {
   return parts.join('\n\n');
 }
 
-export function graphPositionBlock(graph: GraphPosition): string {
+export function graphPositionBlock(
+  graph: GraphPosition,
+  reviewerGate?: string | null,
+): string {
   return [
     '## Graph position',
     `DAG: ${graph.dag}`,
     `Current node: ${graph.node}`,
+    ...(graph.desc ? [`Description: ${graph.desc}`] : []),
+    ...(reviewerGate ? [`Gate: ${reviewerGate}`] : []),
     `Path: ${graph.path.join(' > ')}`,
     `Depends on: ${graph.needs.length ? graph.needs.join(', ') : 'none'}`,
     `Direct dependents: ${
@@ -213,7 +218,10 @@ type PersistedReviewPasses = Record<string, unknown>;
 
 const SHA256_FINGERPRINT = /^[0-9a-f]{64}$/;
 
-function reviewerCacheIdentity(reviewer: ReviewTarget): string {
+function reviewerCacheIdentity(
+  reviewer: ReviewTarget,
+  reviewerGate?: string,
+): string {
   const invalidateOn = [...new Set(reviewer.invalidateOn ?? [])]
     .map((path) => path.trim())
     .filter(Boolean)
@@ -226,6 +234,7 @@ function reviewerCacheIdentity(reviewer: ReviewTarget): string {
         kind: 'job' in reviewer ? 'job' : 'review',
         scope: reviewer.scope ?? null,
         invalidateOn,
+        reviewerGate: reviewerGate ?? null,
       }),
     )
     .digest('hex');
@@ -316,9 +325,13 @@ async function runReviewer(
   ctx: JobContext,
 ): Promise<ReviewResult> {
   const name = reviewer.name ?? `reviewer-${index + 1}`;
+  const reviewerCtx: JobContext = {
+    ...ctx,
+    reviewerGate: criterionFor(ctx),
+  };
   try {
     if ('job' in reviewer) {
-      const outcome = await reviewer.job(ctx);
+      const outcome = await reviewer.job(reviewerCtx);
       const outcomeError = outcome.error;
       if (isReviewInfrastructureError(outcomeError)) {
         return {
@@ -340,7 +353,7 @@ async function runReviewer(
       };
     }
     const result: ConditionResult = await toCondition(reviewer.review)(
-      ctx,
+      reviewerCtx,
       ctx.lastOutcome,
     );
     return {
@@ -390,7 +403,10 @@ async function runPersistedReviewer(
   minConfidence: number,
 ): Promise<PersistedReviewRun> {
   const name = reviewer.name!;
-  const identity = reviewerCacheIdentity(reviewer);
+  const identity = reviewerCacheIdentity(
+    reviewer,
+    criterionFor(ctx),
+  );
   const before = await workspaceFingerprint({
     cwd: ctx.workspace.dir,
     signal: ctx.signal,
@@ -497,7 +513,10 @@ async function settlePersistedReviewers(
       !reusableReviewPass(
         cached,
         minConfidence,
-        reviewerCacheIdentity(reviewer),
+        reviewerCacheIdentity(
+          reviewer,
+          criterionFor(ctx),
+        ),
       )
     )
       return;
@@ -789,13 +808,13 @@ async function gitOutput(
   args: string[],
   signal: AbortSignal,
 ): Promise<string> {
-  const out = await execa('git', args, {
+  const out = await runRuntimeProcess({
+    executable: 'git',
+    args,
     cwd,
-    reject: false,
-    stripFinalNewline: false,
-    cancelSignal: signal,
+    signal,
   });
-  return out.stdout.trim();
+  return processText(out.stdout).trim();
 }
 
 async function resolveFiles(
@@ -843,22 +862,21 @@ export function reviewContext(config: ReviewContextConfig) {
       // reject out of reviewContext and throw the whole review. Guard it, and
       // never report `exit: 0` for a command that did not actually run — that
       // would tell the judge the tests passed.
-      const result = await execa(
-        config.tests.command,
-        config.tests.args ?? [],
-        { cwd, reject: false, stripFinalNewline: false, cancelSignal: ctx.signal },
-      ).catch((e: unknown) => {
+      const result = await runRuntimeProcess({
+        executable: config.tests.command,
+        args: config.tests.args ?? [],
+        cwd,
+        signal: ctx.signal,
+      }).catch((e: unknown) => {
         if (ctx.signal.aborted) throw e; // a real abort stops the run
-        return {
-          exitCode: undefined as number | undefined,
-          stdout: '',
-          stderr: e instanceof Error ? e.message : String(e),
-        };
+        return undefined;
       });
-      const exit = result.exitCode ?? '(command did not run)';
+      const exit = result?.exitCode ?? '(command did not run)';
+      const stdout = result === undefined ? '' : processText(result.stdout);
+      const stderr = result === undefined ? '' : processText(result.stderr);
       return [
         `## Test command\n\n${config.tests.command} ${(config.tests.args ?? []).join(' ')}\n\n` +
-          `exit: ${exit}\n\nstdout:\n${truncate(result.stdout ?? '', max)}\n\nstderr:\n${truncate(result.stderr ?? '', max)}`,
+          `exit: ${exit}\n\nstdout:\n${truncate(stdout, max)}\n\nstderr:\n${truncate(stderr, max)}`,
       ];
     };
 

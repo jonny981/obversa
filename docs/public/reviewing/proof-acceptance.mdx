@@ -1,0 +1,458 @@
+---
+title: "Proof-bound acceptance and approval"
+description: "Reuse a result or decision only while every covered byte still matches."
+---
+
+A proof artifact has one content digest. An accepted-result record binds a
+review outcome to that proof and the bytes it covered. An approval record
+binds a stored action decision to the same kind of exact subject.
+
+## Run the example
+
+
+The report shows that two accepted-result records cite one proof digest, stored
+state survives reopening, and changed workspace-anchor or output bytes return
+to `wait`:
+
+```json
+{"proof":{"digest":"sha256:db5b2a0eb5743b52617a78335dbc003a9a10619dc6cab05f6099f81c9b7fb329","byteLength":133,"recordsShareDigest":true},"callback":{"responseSurvivedReopen":true,"changedRequest":true},"acceptedResult":{"unchanged":"accepted","changedAnchor":"wait"},"approval":{"unchanged":"allow","changedOutput":"wait"}}
+```
+
+## Source
+
+The example runs without a bound workspace. Its `/workspace` anchor is
+illustrative caller-supplied data used to show digest matching; it was not
+captured from a real checkout.
+
+```ts
+import { mkdtemp, realpath, rm } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+
+import {
+  compileGraph,
+  createAcceptedResultRecord,
+  createApprovalCallbackGate,
+  createStoredCallbackClient,
+  createGraphExecutor,
+  dagGraphType,
+  persistRunDefinition,
+  resolveAcceptedResult,
+  resolveApproval,
+  resolveGraphPlan,
+  writeProofArtifact,
+  type ApprovalSubjectInput,
+  type CallbackGateDefinition,
+  type Sha256Digest,
+  type WorkspaceAnchor,
+} from '@obversa/runtime';
+import { createLocalRunStorage } from '@obversa/runtime/storage/local';
+
+const digest = (digit: string): Sha256Digest => (
+  `sha256:${digit.repeat(64)}` as Sha256Digest
+);
+
+const storagePolicy = {
+  schemaVersion: 1,
+  maxEventPayloadBytes: 64_000,
+  maxAppendBatchBytes: 128_000,
+  maxArtifactBytes: 1_000_000,
+  maxTotalArtifactBytesPerRun: 4_000_000,
+  retention: 'until-run-delete',
+  sensitiveContent: {
+    marked: 'reject',
+    exact: 'reject',
+    freeText: 'redact-before-hash',
+  },
+} as const;
+
+const graph = compileGraph(dagGraphType, {
+  id: 'proof-bound-approval',
+  definitionVersion: 1,
+  data: {
+    globalConcurrency: 2,
+    keyedConcurrency: {},
+    stopOnError: true,
+    retryCapPerNode: 0,
+  },
+  nodes: [
+    { id: 'architecture', data: { kind: 'required', key: null } },
+    { id: 'correctness', data: { kind: 'required', key: null } },
+  ],
+  edges: [],
+});
+const packageIdentity = {
+  source: 'npm:@example/proof-bound-approval',
+  version: '1.0.0',
+  digest: digest('7'),
+} as const;
+const plan = resolveGraphPlan(graph.describe(), {
+  package: packageIdentity,
+  admission: {
+    package: packageIdentity,
+    permissions: [{ name: 'workspace.write', scope: { paths: ['packages/runtime'] } }],
+  },
+  executionLanes: [],
+});
+const workspaceAnchor: WorkspaceAnchor = {
+  schemaVersion: 1,
+  root: '/workspace',
+  repositoryId: '/workspace/.git',
+  head: 'a'.repeat(40),
+  fingerprint: 'b'.repeat(64),
+  scope: null,
+  files: [],
+};
+const proofScope = { kind: 'change', paths: ['packages/runtime'] } as const;
+const inputHashes = { proposal: digest('1') };
+const runId = 'proof-bound-approval-run';
+
+const directory = await realpath(await mkdtemp(join(tmpdir(), 'obversa-proof-approval-')));
+try {
+  const openStorage = () => createLocalRunStorage({
+    directory: join(directory, 'storage'),
+    namespace: 'proof-approval-example',
+    policy: storagePolicy,
+  });
+  const storage = openStorage();
+  await persistRunDefinition(storage, {
+    runId,
+    eventId: 'proof-bound-approval-started',
+    timestamp: '2026-01-01T00:00:00.000Z',
+    graphDefinition: graph.definition,
+    resolvedPlan: plan,
+    resolvedInputs: {},
+    workspaceBinding: null,
+    hostBinding: null,
+  });
+  const initialCommands = graph.decide(graph.initialState());
+  const architectureReview = initialCommands.find((command) => (
+    command.kind === 'dispatch' && command.nodeId === 'architecture'
+  ));
+  const correctnessReview = initialCommands.find((command) => (
+    command.kind === 'dispatch' && command.nodeId === 'correctness'
+  ));
+  if (architectureReview?.kind !== 'dispatch' || correctnessReview?.kind !== 'dispatch') {
+    throw new Error('The review graph did not dispatch both review nodes.');
+  }
+  const reviewNode = {
+    prompt: null,
+    scratchDirectory: directory,
+    workspace: { mode: 'none', directory: null, allowedPaths: [] },
+    trustedCaller: {},
+    permissions: [],
+    policy: {
+      inputBytes: 100_000,
+      outputBytes: 100_000,
+      timeoutMs: 5_000,
+      teardownGraceMs: 100,
+      memoryBytes: 100_000_000,
+      filesChanged: 0,
+      linesChanged: 0,
+      callTokens: null,
+    },
+    resultContract: null,
+    runData: async () => ({ verdict: 'pass' }),
+    parseResult: null,
+    tokenBudget: null,
+    decideAction: async () => ({ kind: 'allow' } as const),
+  } as const;
+  const executor = await createGraphExecutor({
+    runId,
+    graph,
+    storage,
+    nodes: { architecture: reviewNode, correctness: reviewNode },
+    engines: [],
+  });
+  const completed = await executor.run(new AbortController().signal);
+  if (completed.kind !== 'complete') throw new Error('The review nodes did not complete.');
+
+  const proofArtifact = await writeProofArtifact(
+    storage.artifactStore,
+    { namespace: storage.record.namespace, runId },
+    {
+      inputs: { proposal: digest('1') },
+      result: { passed: true, tests: 21 },
+    },
+  );
+  const acceptedBinding = {
+    inputHashes,
+    proofScope,
+    proofArtifact,
+    graph: {
+      definitionDigest: plan.plan.graph.definitionDigest,
+      typeVersion: plan.plan.graph.typeVersion,
+    },
+    workspaceAnchor,
+  } as const;
+  const firstReview = await createAcceptedResultRecord(
+    storage,
+    runId,
+    architectureReview.position,
+    {
+      ...acceptedBinding,
+      result: { verdict: 'pass' },
+      reviewerIdentity: { provider: 'anthropic', model: 'reviewer-a' },
+    },
+  );
+  const secondReview = await createAcceptedResultRecord(
+    storage,
+    runId,
+    correctnessReview.position,
+    {
+      ...acceptedBinding,
+      result: { verdict: 'pass' },
+      reviewerIdentity: { provider: 'openai', model: 'reviewer-b' },
+    },
+  );
+
+  const proposedOutput = new TextEncoder().encode('approved output');
+  const approvalSubject: ApprovalSubjectInput = {
+    workspaceAnchor,
+    inputArtifactHashes: inputHashes,
+    proofScope,
+    proofArtifact,
+    proposedOutput,
+    effectivePermissions: [{
+      name: 'workspace.write',
+      scope: { paths: ['packages/runtime'] },
+    }],
+  };
+  const approvalDefinition: CallbackGateDefinition = {
+    gateId: 'apply-reviewed-output',
+    gateVersion: 1,
+    decisionText: 'Apply these exact reviewed bytes?',
+    responseSchema: {
+      type: 'object',
+      properties: { kind: { type: 'string' } },
+      required: ['kind'],
+    },
+    input: { change: 'runtime-update' },
+  };
+  const request = createApprovalCallbackGate(approvalDefinition, approvalSubject);
+  const callbacks = await createStoredCallbackClient(storage, runId);
+  await callbacks.post(request, approvalSubject);
+  const claim = await callbacks.claim(request.requestId, 'human-review');
+  if (!claim.ok) throw new Error('The approval request was not claimed.');
+  const submitted = await callbacks.submit(
+    request.requestId,
+    claim.claimToken,
+    'human-review',
+    request.digest,
+    { kind: 'allow' },
+    { id: 'release-owner', kind: 'human' },
+  );
+  if (!submitted.ok) throw new Error(`The approval was refused: ${submitted.reason}`);
+
+  const reopenedStorage = openStorage();
+  const reopenedCallbacks = await createStoredCallbackClient(reopenedStorage, runId);
+  const changedSubject: ApprovalSubjectInput = {
+    ...approvalSubject,
+    proposedOutput: new TextEncoder().encode('changed output'),
+  };
+  const changedRequest = createApprovalCallbackGate(approvalDefinition, changedSubject);
+  await reopenedCallbacks.post(changedRequest, changedSubject);
+  const unchangedAccepted = await resolveAcceptedResult(
+    reopenedStorage,
+    runId,
+    architectureReview.position,
+    { ...acceptedBinding, reviewerIdentity: { provider: 'anthropic', model: 'reviewer-a' } },
+  );
+  const changedAnchor = await resolveAcceptedResult(
+    reopenedStorage,
+    runId,
+    architectureReview.position,
+    {
+      ...acceptedBinding,
+      workspaceAnchor: { ...workspaceAnchor, fingerprint: 'c'.repeat(64) },
+      reviewerIdentity: { provider: 'anthropic', model: 'reviewer-a' },
+    },
+  );
+  const unchangedApproval = await resolveApproval(
+    reopenedStorage,
+    runId,
+    { request, ...approvalSubject },
+  );
+  const changedApproval = await resolveApproval(
+    reopenedStorage,
+    runId,
+    { request, ...changedSubject },
+  );
+
+  console.log(JSON.stringify({
+    proof: {
+      digest: proofArtifact.digest,
+      byteLength: proofArtifact.byteLength,
+      recordsShareDigest: firstReview.binding.proofArtifact.digest
+        === secondReview.binding.proofArtifact.digest,
+    },
+    callback: {
+      responseSurvivedReopen: (await reopenedCallbacks.history(request.requestId)).some((event) => (
+        event.kind === 'callback-submitted'
+      )),
+      changedRequest: (await reopenedCallbacks.listPending()).some((pending) => (
+        pending.requestId === changedRequest.requestId
+      )),
+    },
+    acceptedResult: {
+      unchanged: unchangedAccepted.kind,
+      changedAnchor: changedAnchor.kind,
+    },
+    approval: {
+      unchanged: unchangedApproval.kind,
+      changedOutput: changedApproval.kind,
+    },
+  }));
+} finally {
+  await rm(directory, { recursive: true, force: true });
+}
+```
+
+The clean-consumer check compiles and runs this exact source from the packed
+package with TypeScript 6 and TypeScript 7.
+
+## One proof artifact
+
+`writeProofArtifact` stores the stable JSON bytes of one proof packet. Its
+reference contains the content digest, byte length, media type, and
+`proof-packet` purpose. Reordered object fields produce the same bytes and
+digest. Changed proof data produces another digest.
+
+The caller chooses the packet fields and proof scope. This file does not
+check how a proof was produced.
+
+## Accepted results
+
+`createAcceptedResultRecord` stores a result only when the graph matches the
+stored run plan and the run contains exactly one dispatch for that position,
+followed by a completed event with the same node and result. Missing, failed,
+or conflicting completions are refused with `INVALID_STORED_VALUE`.
+The record binds the result to input hashes, proof scope and artifact, graph
+definition and type version, workspace anchor, and caller-supplied reviewer
+identity. The reviewer fingerprint is the digest of that supplied identity.
+
+Accepted results require a caller-supplied `WorkspaceAnchor`; they have no
+`null` representation for an absent workspace, even when the stored run has
+`workspaceBinding: null`. Approval subjects can use `workspaceAnchor: null`.
+
+The `WorkspaceAnchor` type names the workspace root, repository identity,
+HEAD revision, content fingerprint, capture scope, and file states, with
+`schemaVersion: 1`. A `null` scope means the whole worktree. Accepted-result
+and approval validators check that a supplied anchor is a JSON object and
+bind its bytes into the record digest. They do not validate those fields,
+compare the anchor with the run's workspace binding, or verify the checkout.
+For a real workspace, the caller must use an anchor captured by its workspace
+provider and verify it before reusing a result or acting on approval.
+
+Writing the same complete record again at the same position does nothing.
+Writing a different binding for the same completed result at that position
+returns `REVISION_CONFLICT`.
+`resolveAcceptedResult` returns `accepted` only while the stored graph,
+completed node result, and all bound values still match. Otherwise it returns
+`wait`.
+
+Accepted-result storage is called by the host. The graph executor does not
+store these records by itself. The host can use `createProofCache` to share
+declared read-only evidence and resolve stored results against that evidence.
+
+## Read-only proof cache
+
+`createProofCache` creates a cache for one host process and one stored run.
+Its `packet(jobId)` method returns a bounded proof packet, source hashes,
+proof scope, and an immutable artifact reference. Fresh workers can receive
+the same packet from the host without reading unchanged source data again.
+
+Declare each source by ID. Its `revision()` method returns an authoritative
+content revision. Its `read(expectedRevision, maxBytes)` method returns
+complete JSON or text for that revision within the byte limit.
+The source adapter must advance its revision whenever its content changes.
+The cache checks revisions before and after capture and hashes the captured
+content. It refuses an oversized packet or a capture that races a source
+change. It does not truncate source data.
+
+Declare each proof job's source IDs, proof scope, and `read-only` or
+`effectful` mode. Only declared read-only jobs can request packets or stored
+results. The cache executes no job. The adapter's source declarations and
+revision behavior are part of the host's trusted code.
+The node's `retrySafe` setting governs crash recovery; it does not declare a
+job read-only.
+
+Concurrent packet requests share source reads. A changed source invalidates
+only packets that depend on it. Unchanged dependencies keep their captured
+content. The cache keeps the latest entry for each declared source and job.
+Restarting the host creates a cold cache. Stored proof artifacts and
+accepted-result records remain in run storage.
+
+`resolveAccepted(jobId, position, current)` derives the source hashes, proof
+scope, and artifact from the current packet. Supply the current graph,
+verified workspace anchor, and reviewer identity. Each call uses
+`resolveAcceptedResult` to check the stored completion and acceptance again.
+Read `record.result` only when the returned kind is `accepted`.
+A `wait` result requires fresh proof or a decision by the host.
+A changed binding needs a newly completed proof position; it cannot replace
+the acceptance already stored for an earlier completion.
+
+Reviewers can share evidence while retaining separate accepted answers.
+A different reviewer identity does not inherit another reviewer's result.
+The cache does not execute missing proof work or create completion records.
+
+The program in `examples/proof-cache.ts` checks a captured timeout
+configuration with a deterministic review node. It uses a real Git workspace
+anchor and two in-memory sources that own their revision counters.
+Two packet requests share the same artifact. Changing the configuration
+reads it again, preserves the independent policy packet, and refuses the
+stored review. The report is:
+
+```json
+{"sourceReads":{"config":2,"policy":1},"proofRuns":1,"sharedPacket":true,"reused":"accepted","changedSource":"wait","unaffectedPacket":true,"changedReviewer":"wait","effectfulRefused":true}
+```
+
+The clean-consumer check compiles and runs this program from the packed
+runtime with TypeScript 6 and TypeScript 7. It checks the report against the
+documented output.
+
+## Approval
+
+`createApprovalCallbackGate` puts the subject digest into the callback request
+before its identity is created. `StoredCallbackClient.post` stores that exact
+subject with the request. Its `submit` method stores the callback answer and
+approval record in one event batch.
+
+The approval subject covers input artifact hashes, proof scope and artifact,
+proposed output bytes, effective permissions, and a workspace anchor or
+`null`. The record also binds the stored run plan, graph, caller-supplied
+actor, router path, and action decision.
+
+Each effective permission in the subject must match one permission admitted
+by the stored run plan. Its name and JSON scope must match exactly. Object key
+order does not matter. The subject may use a subset of the admitted
+permissions.
+
+`post` throws `ApprovalSubjectError` with `SUBJECT_MISMATCH` for a permission
+outside the stored plan. `submit` returns the typed `invalid` result if its
+stored subject is outside that plan. `resolveApproval` returns `wait` in the
+same case.
+
+`resolveApproval` returns the stored decision only while the current request
+and subject match the record. It returns `wait` after any covered byte
+changes.
+
+The host owns every effect after approval. These approval APIs do not make a
+backup, apply output, read the effect back, reconcile an uncertain effect, or
+merge files.
+
+## Stored identities
+
+Accepted-result records store the complete supplied `reviewerIdentity` JSON
+object alongside its fingerprint. Approval records store the complete
+supplied `actor` JSON object. A fingerprint does not hide the identity fields.
+These APIs check JSON object shape; they do not authenticate the identity or
+recognize credentials by field name.
+
+Supply only non-secret identifiers and review settings. Keep passwords,
+tokens, cookies, and private keys out of both objects. The local event store
+rejects a write with `KNOWN_SECRET` when an identity contains a value from its
+configured `knownSecrets`, including nested values and object keys. The
+caller must configure those secret values in the live storage options and
+exclude credentials that are not in that list. A rejected approval write
+stores neither the callback answer nor its approval record.

@@ -12,7 +12,9 @@ const grandchild = spawn(
   [join(import.meta.dirname, 'detached-grandchild.mjs'), mode, barrierDir],
   {
     detached: true,
-    env: process.env,
+    env: mode === 'flood-ignore'
+      ? Object.fromEntries(Object.entries(process.env).filter(([name]) => !['OBVERSA_ATTEMPT_ID', 'OBVERSA_RUN_OWNER'].includes(name)))
+      : process.env,
     stdio: 'inherit',
   },
 );
@@ -33,7 +35,7 @@ writeFileSync(`${barrier}.tmp`, JSON.stringify({
 }));
 renameSync(`${barrier}.tmp`, barrier);
 
-if (mode === 'ignore') {
+if (mode === 'ignore' || mode === 'flood-ignore') {
   process.on('SIGTERM', () => {});
 }
 

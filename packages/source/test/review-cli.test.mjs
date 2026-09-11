@@ -11,8 +11,29 @@ import { fileURLToPath } from "node:url";
 import test from "node:test";
 
 import { parseArgs } from "../src/review-args.mjs";
+import { defineBudgetChain } from "../../../test-support/budget-chain.mjs";
 
 const COMMAND = fileURLToPath(new URL("../bin/obversa-review.mjs", import.meta.url));
+const NO_OPEN_TEST_TIMEOUT_MS = 120_000;
+const NO_OPEN_CHAIN = defineBudgetChain("review-cli --no-open", NO_OPEN_TEST_TIMEOUT_MS, {
+  setup: 5_000,
+  phases: [
+    ["page URL", 10_000],
+    ["model fetch", 10_000],
+    ["submit fetch", 10_000],
+    ["ack fetch", 10_000],
+    ["child close", 10_000],
+  ],
+  cleanup: 10_000,
+});
+const NO_OPEN_CHILD_TIMEOUT_MS = NO_OPEN_CHAIN.span("child process", ["page URL", "model fetch", "submit fetch", "ack fetch", "child close"]);
+const NO_OPEN_SETUP_TIMEOUT_MS = NO_OPEN_CHAIN.span("setup", ["setup"]);
+const SHORT_COMMAND_CHAIN = defineBudgetChain("review-cli short command", 10_000, {
+  setup: 500,
+  phases: [["child process", 5_000]],
+  cleanup: 500,
+});
+const SHORT_COMMAND_TIMEOUT_MS = SHORT_COMMAND_CHAIN.span("child process", ["child process"]);
 
 test("parseArgs accepts the documented shapes", () => {
   assert.equal(parseArgs([]).mode, "worktree");
@@ -48,7 +69,7 @@ test("the command exits 2 on a bad argument, prints usage, writes nothing to std
   for (const args of cases) {
     // A surface would wait for a browser; a five-second cap turns a launched
     // surface into a failure of this test rather than a hang.
-    const run = spawnSync(process.execPath, [COMMAND, ...args], { encoding: "utf8", timeout: 5000 });
+    const run = spawnSync(process.execPath, [COMMAND, ...args], { encoding: "utf8", timeout: SHORT_COMMAND_TIMEOUT_MS });
     assert.equal(run.signal, null, `${args.join(" ")}: the command must exit on its own, not be killed`);
     assert.equal(run.status, 2, `${args.join(" ")}: exit code`);
     assert.equal(run.stdout, "", `${args.join(" ")}: nothing on stdout`);
@@ -59,12 +80,12 @@ test("the command exits 2 on a bad argument, prints usage, writes nothing to std
 });
 
 test("the command exits 0 on --help and prints usage on stdout", () => {
-  const run = spawnSync(process.execPath, [COMMAND, "--help"], { encoding: "utf8", timeout: 5000 });
+  const run = spawnSync(process.execPath, [COMMAND, "--help"], { encoding: "utf8", timeout: SHORT_COMMAND_TIMEOUT_MS });
   assert.equal(run.status, 0);
   assert.match(run.stdout, /Usage:/);
 });
 
-test("--no-open prints the reachable page URL on stderr and never runs placement", { timeout: 25_000 }, async () => {
+test("--no-open prints the reachable page URL on stderr and never runs placement", { timeout: NO_OPEN_TEST_TIMEOUT_MS }, async () => {
   const directory = mkdtempSync(path.join(os.tmpdir(), "review-cli-no-open-"));
   const calls = path.join(directory, "placement.calls");
   const placement = path.join(directory, "placement");
@@ -73,7 +94,7 @@ test("--no-open prints the reachable page URL on stderr and never runs placement
   try {
     writeFileSync(placement, `#!/bin/sh\nprintf 'called\\n' >> '${calls}'\n`);
     chmodSync(placement, 0o755);
-    const git = (...args) => execFileSync("git", args, { cwd: directory, encoding: "utf8" });
+    const git = (...args) => execFileSync("git", args, { cwd: directory, encoding: "utf8", timeout: NO_OPEN_SETUP_TIMEOUT_MS });
     git("init", "-q");
     git("config", "user.name", "Review Test");
     git("config", "user.email", "review@example.invalid");
@@ -85,7 +106,7 @@ test("--no-open prints the reachable page URL on stderr and never runs placement
     child = spawn(process.execPath, [COMMAND, "--no-open", "--cwd", directory], {
       env: { ...process.env, OBVERSA_SURFACE_BIN: placement },
       stdio: ["ignore", "pipe", "pipe"],
-      timeout: 20_000,
+      timeout: NO_OPEN_CHILD_TIMEOUT_MS,
     });
     exited = new Promise((resolve, reject) => {
       child.once("error", reject);
@@ -94,38 +115,59 @@ test("--no-open prints the reachable page URL on stderr and never runs placement
     let stdout = "";
     let stderr = "";
     child.stdout.on("data", (chunk) => { stdout += chunk; });
-    const url = await new Promise((resolve, reject) => {
-      const timer = setTimeout(() => reject(new Error(`no page URL on stderr: ${stderr}`)), 10_000);
+    const url = await NO_OPEN_CHAIN.run("page URL", () => new Promise((resolve, reject) => {
+      const pageUrlStarted = Date.now();
       child.stderr.on("data", (chunk) => {
         stderr += chunk;
         const match = /Open the review surface at: (\S+)/.exec(stderr);
-        if (match) { clearTimeout(timer); resolve(new URL(match[1])); }
+        if (match) {
+          console.log(`review-cli page URL wait: ${Date.now() - pageUrlStarted}ms`);
+          resolve(new URL(match[1]));
+        }
       });
-      exited.then(() => { clearTimeout(timer); reject(new Error(`command closed before URL: ${stderr}`)); }, reject);
-    });
+      exited.then(() => reject(new Error(`command closed before URL: ${stderr}`)), reject);
+    }));
     assert.ok(url.hash.length > 1, "the page URL carries its access token");
     const headers = { Authorization: `Bearer ${url.hash.slice(1)}`, Origin: url.origin, "Content-Type": "application/json" };
-    const model = await fetch(`${url.origin}/api/model`, { headers, signal: AbortSignal.timeout(5_000) });
+    const { response: model, body } = await NO_OPEN_CHAIN.run("model fetch", async (signal) => {
+      const modelStarted = Date.now();
+      const response = await fetch(`${url.origin}/api/model`, { headers, signal });
+      const body = /** @type {{ model: { files: { path: string }[] } }} */ (await response.json());
+      console.log(`review-cli model fetch: ${Date.now() - modelStarted}ms`);
+      return { response, body };
+    });
     assert.equal(model.status, 200, "the URL reaches the review's authenticated model");
-    const body = /** @type {{ model: { files: { path: string }[] } }} */ (await model.json());
     assert.equal(body.model.files[0].path, "a.txt");
-    const submitted = await fetch(`${url.origin}/api/submit`, {
-      method: "POST", headers, signal: AbortSignal.timeout(5_000),
-      body: JSON.stringify({ decision: "approved", annotations: [] }),
+    const { response: submitted, body: submittedBody } = await NO_OPEN_CHAIN.run("submit fetch", async (signal) => {
+      const submitStarted = Date.now();
+      const response = await fetch(`${url.origin}/api/submit`, {
+        method: "POST", headers,
+        signal,
+        body: JSON.stringify({ decision: "approved", annotations: [] }),
+      });
+      const body = /** @type {{ operationId: string }} */ (await response.json());
+      console.log(`review-cli submit fetch: ${Date.now() - submitStarted}ms`);
+      return { response, body };
     });
     assert.equal(submitted.status, 200);
-    const { operationId } = /** @type {{ operationId: string }} */ (await submitted.json());
-    const acknowledged = await fetch(`${url.origin}/api/ack`, {
-      method: "POST", headers, signal: AbortSignal.timeout(5_000), body: JSON.stringify({ operationId }),
+    const { operationId } = submittedBody;
+    const { response: acknowledged } = await NO_OPEN_CHAIN.run("ack fetch", async (signal) => {
+      const ackStarted = Date.now();
+      const response = await fetch(`${url.origin}/api/ack`, {
+        method: "POST", headers, signal, body: JSON.stringify({ operationId }),
+      });
+      await response.json();
+      console.log(`review-cli ack fetch: ${Date.now() - ackStarted}ms`);
+      return { response };
     });
     assert.equal(acknowledged.status, 200);
-    assert.deepEqual(await exited, { code: 0, signal: null }, stderr);
+    assert.deepEqual(await NO_OPEN_CHAIN.run("child close", () => exited), { code: 0, signal: null }, stderr);
     assert.match(stdout, /<<<REVIEW_RESULT_V1>>>/);
     assert.doesNotMatch(stdout, /Open the review surface at:|http:\/\/127\.0\.0\.1/);
     assert.equal(existsSync(calls), false, "--no-open must not run the supplied placement command");
   } finally {
     child?.kill("SIGKILL");
-    await exited;
+    await NO_OPEN_CHAIN.run("child close", () => exited);
     rmSync(directory, { recursive: true, force: true });
   }
 });
@@ -165,7 +207,7 @@ test("the client kit is resolved under the import condition, the one the browser
   // browser CommonJS.
   const split = consumer({ import: "./client.mjs", require: "./client.cjs" });
   try {
-    const run = spawnSync(process.execPath, [path.join(split, "bin", "obversa-review.mjs"), "--no-open"], { encoding: "utf8", timeout: 5000, cwd: split });
+    const run = spawnSync(process.execPath, [path.join(split, "bin", "obversa-review.mjs"), "--no-open"], { encoding: "utf8", timeout: SHORT_COMMAND_TIMEOUT_MS, cwd: split });
     assert.equal(run.status, 0, run.stderr);
     assert.match(run.stdout, /KIT:export const kit = 'esm';/, "the ESM client kit reached the review");
     assert.doesNotMatch(run.stdout, /cjs/);
@@ -176,7 +218,7 @@ test("the client kit is resolved under the import condition, the one the browser
   // require-condition lookup has nothing to resolve and fails before main.
   const importOnly = consumer({ import: "./client.mjs" });
   try {
-    const help = spawnSync(process.execPath, [path.join(importOnly, "bin", "obversa-review.mjs"), "--help"], { encoding: "utf8", timeout: 5000, cwd: importOnly });
+    const help = spawnSync(process.execPath, [path.join(importOnly, "bin", "obversa-review.mjs"), "--help"], { encoding: "utf8", timeout: SHORT_COMMAND_TIMEOUT_MS, cwd: importOnly });
     assert.equal(help.status, 0, help.stderr);
     assert.match(help.stdout, /Usage:/);
   } finally {
@@ -191,10 +233,10 @@ test("the command behaves the same when run through a symlink, as a bin install 
   const link = path.join(dir, "obversa-review");
   symlinkSync(COMMAND, link);
   try {
-    const help = spawnSync(process.execPath, [link, "--help"], { encoding: "utf8", timeout: 5000 });
+    const help = spawnSync(process.execPath, [link, "--help"], { encoding: "utf8", timeout: SHORT_COMMAND_TIMEOUT_MS });
     assert.equal(help.status, 0);
     assert.match(help.stdout, /Usage:/, "help must print through a symlink");
-    const bad = spawnSync(process.execPath, [link, "--cwd"], { encoding: "utf8", timeout: 5000 });
+    const bad = spawnSync(process.execPath, [link, "--cwd"], { encoding: "utf8", timeout: SHORT_COMMAND_TIMEOUT_MS });
     assert.equal(bad.status, 2);
     assert.match(bad.stderr, /--cwd needs a value/);
     assert.equal(bad.stdout, "");

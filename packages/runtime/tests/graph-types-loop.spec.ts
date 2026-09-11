@@ -184,7 +184,7 @@ function reviewLane(
 
 function planResolution(definition: ConvergenceDefinition): PlanResolution {
   const identity = {
-    source: 'file:examples/packages/convergence',
+    source: 'file:examples/convergence',
     version: '1.0.0',
     digest: `sha256:${'d'.repeat(64)}` as const,
   };

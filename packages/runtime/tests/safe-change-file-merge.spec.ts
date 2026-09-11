@@ -5,10 +5,10 @@ import { join } from 'node:path';
 
 import { expect, it, vi } from 'vitest';
 
-import { openSafeChangeRun } from '../../../examples/safe-change/recipe.js';
+import { openSafeChangeRun } from '../../../examples/safe-change-recipe.js';
 import {
   seedSafeChangeFixture, sourcePath, sourceStream, targetPath, targetStream,
-} from '../../../examples/safe-change/file-adapter.js';
+} from '../../../examples/safe-change-file-adapter.js';
 import type { ArtifactReference } from '../src/artifacts/store.js';
 import type { DomainEventEnvelope, EventStreamRef } from '../src/events/envelope.js';
 import type { JsonObject } from '../src/graph/value.js';

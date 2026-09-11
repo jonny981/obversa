@@ -16,13 +16,8 @@ itself. The conformance kit checks public behavior. It does not stop effects.
 The checked-in example defines a two-step graph, runs the public conformance
 kit, compiles its definition, and resolves its plan.
 
-From an Obversa checkout, run:
 
-```bash
-pnpm example:graph
-```
-
-Copy `examples/packages/custom-graph.ts` when you start a graph type. The
+Copy `examples/custom-graph.ts` when you start a graph type. The
 example uses only `@obversa/runtime` public exports.
 
 ## Source
@@ -225,6 +220,15 @@ give runtime services.
 | `decide(state)` | Ordered dispatch, pause, complete, or fail commands. |
 | `describe()` | The stable graph description for a host. |
 
+A form may also return the pure optional operation
+`validateNodeResult(nodeId: NodeId, result: JsonValue): GraphValidationIssue | null`.
+Before saving a completion, the executor calls it with a declared node ID and
+copied, frozen result data. `null` accepts the result; an issue with string
+`code`, `path` and `message` fields records `node-failed` with `RESULT_INVALID`.
+`compileGraph` checks and freezes the returned issue. A malformed return or an
+exception from the implementation propagates as an error. Forms that omit the
+operation keep their existing behavior.
+
 `decide` returns zero or more dispatch commands, or exactly one `pause`,
 `complete`, or `fail` command. A dispatch asks the executor to start new work.
 An empty decision means start nothing new. The executor accepts it only while a recorded
@@ -295,6 +299,92 @@ check to durable dispatch events before it starts work.
 When the final expected decision is exactly `complete`, the observed total must
 meet a known dispatch minimum; partial, empty, paused, and failed endings do not
 prove a minimum.
+
+## Team form contract
+
+`team(config)` returns a `Job`: callable work for several agents with one
+task and separate answers. It does not use the stored graph executor or
+acquire replay by being passed to `run()`. For saved room messages and
+turns requested by mentions, compile `teamGraphType` as shown in
+[Team conversation](/workflows/team-conversation).
+
+The authoring shape is:
+
+```ts
+import type { EngineRef, Job, Outcome } from '@obversa/runtime';
+import type {
+  CallbackGateDefinition,
+  ReviewPanelConfig,
+} from '@obversa/runtime';
+
+interface TeamAgent {
+  name: string;
+  role: string;
+  brief: string;
+  engine: EngineRef;
+}
+
+type TeamReview =
+  | { kind: 'panel'; config: ReviewPanelConfig }
+  | { kind: 'callback'; definition: CallbackGateDefinition };
+
+interface TeamConfig {
+  task: string;
+  agents: readonly TeamAgent[];
+  review?: TeamReview;
+}
+
+interface TeamAgentResult {
+  name: string;
+  role: string;
+  outcome: Outcome;
+}
+
+interface TeamResult {
+  task: string;
+  agents: readonly TeamAgentResult[];
+  integrated: boolean;
+  review?: Outcome;
+}
+
+declare function team(config: TeamConfig): Job;
+```
+
+In a Git workspace, each agent receives the task and its standing brief in
+a separate worktree through `isolated()`. Passing changes merge into the
+caller's branch under the existing merge lock. Outside a Git repository,
+that wrapper warns and runs in the shared workspace. A passing team result
+is therefore not proof that a Git merge occurred. No second merge or lease
+mechanism is added.
+
+The callable team returns each member's separate answer. `review` reuses an
+existing review panel or callback gate. Each review keeps that panel's or
+gate's own contract.
+
+An existing review panel receives the completed team result as its previous
+outcome, so its reviewers can inspect the member outcomes and task.
+
+The team returns the existing `Outcome` shape. Its `data` field contains a
+`TeamResult`; a review revision, failure, pause, or error remains on the outer
+`Outcome` so a team can be placed in a larger graph without an adapter.
+
+A callback review creates the request through `createCallbackGate` and returns
+`paused`. The nested review outcome contains that request in its `data` field.
+The host posts and answers it through the existing callback client, then
+controls resumption of the paused work.
+
+The team status is `pass` only when every agent passes and the configured review
+passes. A member failure or review failure returns `fail` with all member
+results preserved. A member or review pause returns `paused` with its reason
+preserved. An integration conflict returns `fail`.
+
+The callable team validates these rules before it runs:
+
+- **Task:** `task` is a non-empty string.
+- **Roster:** `agents` contains at least one member with a unique `name`.
+- **Role:** every member has a non-empty `role` and `brief`.
+- **Engine:** every member has an engine binding.
+- **Review:** a configured review uses the existing panel or callback contract.
 
 ## Limits
 

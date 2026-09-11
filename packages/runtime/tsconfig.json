@@ -2,6 +2,7 @@
   "extends": "../../tsconfig.base.json",
   "compilerOptions": {
     "paths": {
+      "@obversa/process": ["../process/src/index.ts"],
       "@obversa/engine": ["../engine/src/index.ts"],
       "@obversa/engine/command": ["../engine/src/command/run.ts"],
       "@obversa/engine/testing": ["../engine/src/testing.ts"],

@@ -1,0 +1,26 @@
+---
+title: "Examples"
+description: "Complete files to copy. Each one runs offline against the public packages and nothing else."
+---
+
+Every file here is a complete program: the steps, the reviews, the limits
+and the adapters, built from public package exports and nothing else. Copy
+one, change the parts that name your team, and run it.
+
+Each states its inputs, outputs, permissions, limits and evidence, and what
+it does on failure and on a safe retry.
+
+- [A review that sends work back](/workflows/offline-review). A reviewer
+  rejects the first draft with a reason and the second draft passes. No
+  model, no network.
+- [A file change approved byte for byte](/workflows/safe-change). Source
+  records are captured, every mapping checked, exact output bytes approved,
+  each target backed up before a merge, and a mismatch pauses the run.
+- [A feature from written issue to approval](/workflows/feature-delivery).
+  One issue through analysis, implementation, a real test run, a review
+  panel, a bounded repair, and an approval bound to the exact bytes. No
+  model, no network.
+- [Shipping a reviewed change through GitHub](/workflows/forge-helper).
+  Push the branch, open one pull request, pass a strict gate on the exact
+  head revision, squash the merge, delete the branch. Runs offline against
+  a mock host.

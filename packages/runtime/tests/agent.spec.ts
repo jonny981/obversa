@@ -212,7 +212,7 @@ describe('AgentDef', () => {
     expect(cap2.req().leaf).toBe(true);
   });
 
-  it('agentJob supplies Lines leaf metadata to every engine request', async () => {
+  it('agentJob supplies the runtime leaf metadata to every engine request', async () => {
     const repo = await tmpRepo();
     const cap = capturing();
     await run(agentJob({ label: 'leaf', prompt: 'go' }), {
@@ -433,7 +433,7 @@ describe('AgentDef', () => {
     expect(events.join('\n')).toContain('[redacted]');
   });
 
-  it('agentCheck supplies Lines leaf metadata to judge engine requests', async () => {
+  it('agentCheck supplies the runtime leaf metadata to judge engine requests', async () => {
     const repo = await tmpRepo();
     let seen: AgentRequest | undefined;
     await run(gateJob('review', agentCheck({ question: 'Is it correct?' })), {

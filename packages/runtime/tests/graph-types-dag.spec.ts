@@ -132,7 +132,7 @@ function resumedNode(nodeId: NodeId, attempt = 1): DagEvent {
 
 function planResolution(): PlanResolution {
   const identity = {
-    source: 'file:examples/packages/dag',
+    source: 'file:examples/dag',
     version: '1.0.0',
     digest: `sha256:${'c'.repeat(64)}` as const,
   };

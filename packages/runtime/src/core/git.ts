@@ -1,11 +1,11 @@
 /** Local Git helpers used by workspace-aware jobs. */
 
-import { execa } from 'execa';
 import { createHash } from 'node:crypto';
 import { mkdtempSync } from 'node:fs';
 import { lstat, readFile, readlink, realpath } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join, relative, resolve } from 'node:path';
+import { processText, runRuntimeProcess } from './process.js';
 
 interface GitOpts {
   cwd: string;
@@ -19,14 +19,17 @@ async function git(
   { cwd, signal }: GitOpts,
   input?: string,
 ): Promise<{ stdout: string; exitCode: number }> {
-  const r = await execa('git', args, {
+  const r = await runRuntimeProcess({
+    executable: 'git',
+    args,
     cwd,
-    cancelSignal: signal,
-    reject: false,
-    stdin: input === undefined ? 'ignore' : undefined,
-    input,
+    signal,
+    ...(input === undefined ? {} : { stdin: input }),
   });
-  return { stdout: r.stdout ?? '', exitCode: r.exitCode ?? 1 };
+  return {
+    stdout: processText(r.stdout).replace(/\r?\n$/u, ''),
+    exitCode: r.exitCode ?? 1,
+  };
 }
 
 /** True when `cwd` is inside a git work tree. Never throws. */
@@ -403,15 +406,14 @@ async function blobLines(
   if (!oid) return Object.freeze([]);
   const cached = cache.get(oid);
   if (cached) return cached;
-  const result = await execa('git', ['cat-file', 'blob', oid], {
+  const result = await runRuntimeProcess({
+    executable: 'git',
+    args: ['cat-file', 'blob', oid],
     cwd: root,
-    cancelSignal: signal,
-    reject: false,
-    stdin: 'ignore',
-    encoding: 'buffer',
+    signal,
   });
   if (result.exitCode !== 0) throw new Error(`git cannot read workspace blob ${oid}`);
-  const lines = lineDigests(result.stdout ?? new Uint8Array());
+  const lines = lineDigests(result.stdout);
   cache.set(oid, lines);
   return lines;
 }
@@ -488,7 +490,7 @@ export interface CommitInput {
 /**
  * Commit the staged index. The message is passed on stdin (`-F -`) so an
  * arbitrarily-shaped body never has to survive shell escaping. The repo's
- * configured author is used. Lines never changes commit authorship.
+ * configured author is used. The runtime never changes commit authorship.
  * Returns the new sha, or undefined when there was nothing to commit and
  * `allowEmpty` was not set.
  */
@@ -617,7 +619,7 @@ export interface MergeResult {
 /**
  * Land a fork branch back into the branch checked out at `repoDir` (`--no-ff`).
  * On conflict the merge is aborted so the target stays clean and the caller can
- * fail the node. Lines does not auto-resolve (a merge-resolver is a separate
+ * fail the node. The runtime does not auto-resolve (a merge-resolver is a separate
  * layer).
  */
 export async function mergeBranch(

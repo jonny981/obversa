@@ -64,6 +64,6 @@ opens and nothing external is called.
 
 ## Rules
 
-- No dependency on Lines, Obversa records, or one required host.
+- No dependency on Obversa records, or one required host.
 - Short surface sessions only; no long-lived viewer lifecycle.
 - A surface returns one opaque result. The caller interprets it.

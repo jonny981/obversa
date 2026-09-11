@@ -205,7 +205,7 @@ export interface SeatRecord extends JsonObject {
   readonly stale: boolean;
 }
 
-interface EngineReceiptRejection extends JsonObject {
+export interface EngineReceiptRejection extends JsonObject {
   readonly code: 'INVALID_ENGINE_RECEIPT';
   readonly nodeId: NodeId;
   readonly position: string;

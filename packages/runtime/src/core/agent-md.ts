@@ -1,7 +1,7 @@
 /**
  * `defineAgentFromMarkdown(path)` — load a Claude Code agent `.md` file into an
  * `AgentDef`. The markdown body becomes `system`; the frontmatter maps onto the
- * def's structured fields. Lines has no yaml dependency, so the frontmatter
+ * def's structured fields. The runtime has no yaml dependency, so the frontmatter
  * parser is hand-rolled and deliberately scoped. The FULL supported grammar:
  *
  *   - Frontmatter is an optional leading block delimited by `---` lines (the

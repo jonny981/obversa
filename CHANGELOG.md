@@ -7,10 +7,64 @@ All notable changes to the Obversa packages. The format follows
 The runtime package (`@obversa/runtime`) tracks the repository tag. The
 engine and memory packages track their own versions independently.
 
+## [Unreleased]
+
+### Added
+
+- A dag node accepts `needs` as one name or a list, and optional `desc` and
+  `gate` sentences that reach the rendered plan, the `dag:node` record and
+  the input the node's reviewer receives.
+- **Saved team conversations:** Compile named members and fixed rooms with
+  `teamGraphType`. Posts in successful turn results queue mentioned members;
+  a fresh executor rebuilds messages and requested turns from the run record.
+  Each member receives its own result and permitted room messages, with
+  explicit turn, concurrency and input limits.
+- **Readable room files:** Build room copies from a saved team run with
+  `projectTeamRooms`. The helper returns the revision it read, leaves the
+  stored events unchanged and can rebuild deleted room files.
+
+- **Bounded child processes:** The `@obversa/process` package exports one
+  function, `runChild`. It runs a child to a deadline and returns a typed
+  result: the exit code, the captured bytes, and timed-out and aborted flags
+  decided from recorded facts, never from which callback fired first.
+  Standard input is closed after the optional input, both output streams are
+  drained until they close or for a short grace after the child exits, and
+  live children are stopped when the parent process exits. Every git and
+  engine spawn in the runtime, the engine command runner, the Codex adapter
+  and the Git memory adapter run through it, and `execa` is no longer a
+  dependency.
+
+### Changed
+
+- A child started through `runChild` sits in the caller's process group
+  unless `detached: true` is passed. The engine command runner passes it, so
+  its process sweep still sees the whole group.
+- The Git memory adapter's output cap counts standard output and standard
+  error together. It counted each stream on its own before.
+- A timeout is decided by the deadline against the moment the child's exit
+  was observed. Teardown work after the exit never counts.
+
+### Fixed
+
+- **A child that never exits is a timeout:** A model CLI stopped at its
+  deadline without an exit code is reported as a timeout, not as an exit
+  with no code. A child that exits leaving a helper holding its output pipe
+  no longer holds the result until the deadline.
+- **Invalid team turns:** Reject bad results before saving completion, and
+  retain earlier messages when replay finds invalid saved result content.
+- **Early team review validation:** Invalid panel or callback settings are
+  rejected when a callable team is created, before its members start work.
+
 ## [1.0.0]
 
 ### Added
 
+- **Type declarations for the review packages:** `@obversa/source` and
+  `@obversa/surfacer` now ship declaration files generated from their
+  JSDoc, with a `types` condition on every export entry. A TypeScript
+  reader importing either package resolves types instead of failing with
+  an implicit-any import. The clean-consumer check imports both strictly,
+  so the declarations cannot be dropped without failing the check.
 - `@obversa/runtime` 1.0.0: stored graph plans, bounded node attempts,
   durable events and artifacts, restartable execution, workspace checks,
   Callback Gates, and proof-bound decisions.
@@ -48,6 +102,14 @@ engine and memory packages track their own versions independently.
   `environmentVariables` list on start and resume. Copy only present values of
   those names from the watchdog, without storing credentials in run inputs or
   host records. Default environment inheritance remains restrictive.
+- **Forge helper example:** Ship `examples/packages/forge-helper.ts` with
+  its documentation page. It is the shipping step after a review gate:
+  push the work branch, open or update one pull request with a body from
+  the commit bodies, pass a strict gate that ships only an exact-revision
+  pass, squash the merge with the same synthesis, and delete the branch.
+  The gate prints strict `RESULT:` verdicts with the reason on the line.
+  `pnpm example:forge` runs it offline against a mock host, and the
+  clean-consumer check runs it from the packed tarballs.
 - **Feature-delivery example:** Ship a runnable feature-delivery production
   line, `examples/production-lines/feature-delivery.line.ts`, with its
   documentation page. It takes one written issue through analysis,
@@ -59,6 +121,13 @@ engine and memory packages track their own versions independently.
 
 ### Changed
 
+- **The old runtime name:** Remove the pre-rename name from the twenty tracked
+  files that carried it, including the consult instruction and the two plugin
+  system prompts a model reads at run time. English uses of the word stay. A
+  grep of the word now finds only the diff module's ordinary sentence.
+- **Review-loop status typing:** `ConvergenceStatus` is a type alias rather
+  than an interface, and `EngineReceiptRejection` is exported, so a consumer
+  can name the rejection element type directly instead of by indexed access.
 - **Tarball test selection:** Run the two package-command integration tests
   with `OBVERSA_TEST_REAL_PACK=1 pnpm test:tarballs`. The default command skips
   those tests; `verify:d15` enables them.
@@ -97,7 +166,8 @@ engine and memory packages track their own versions independently.
   report. Printed JSON can change indentation while executable path checks
   remain enforced.
 - **Documentation versions:** Refuse a docs build when a package version in
-  the homepage table differs from its workspace manifest.
+  the homepage table differs from its workspace manifest, and when a
+  publishable package has no homepage row at all.
 - **Process identities across locales and timezones:** Read the process table
   under the C locale and UTC. A worker with a restricted environment and a
   host watchdog previously spelled one start time two ways, so live status

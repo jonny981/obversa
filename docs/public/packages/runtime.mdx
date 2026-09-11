@@ -1,53 +1,315 @@
 ---
-title: "@obversa/runtime"
-description: "Compile graph definitions and record node outcomes."
+title: "runtime package"
+description: "The package that runs your workflows and keeps their record: what you write, what you call, and every export by what you do with it."
 ---
 
-`@obversa/runtime` compiles graph definitions and records graph decisions and
-node outcomes. A host can resume unfinished positions from that record.
 
-## Install
+`@obversa/runtime` is the package you install to run a workflow. You write
+the workflow as TypeScript, hand it the engines and storage you chose, and
+call it. It runs the steps one bounded engine call at a time and appends
+every step to a record on disk.
 
 ```bash
-pnpm add @obversa/runtime
+npm install @obversa/runtime
 ```
 
-Node.js 22.12 or later is required.
+Node.js 22.12 or later. Nothing else to install: no server, no database.
 
-## Public entry points
+## Two ways in
 
-From `@obversa/runtime` (`packages/runtime/src/api.ts`):
+**Write a workflow and run it.** The job API is the everyday one: name the
+steps, say what each needs, put a review where it belongs, and call `run`.
+`dag` is the general shape (nodes keyed by name, each with `needs` as one
+name or a list, an optional `desc` saying what it does, an optional `gate`
+saying what done means, an optional `when`, and a `job`; `desc` and `gate`
+reach the plan, the record and the node reviewer's input); `pipeline` is its
+shorthand for steps that go in one direction; `loop`, `sequence` and
+`parallel` are the other shorthands. Reviews go in with `reviewPanel`,
+`tournament`, `quorum` and `kickback`. A person's decision goes in with a
+callback gate.
 
-- **Graph definitions:** `compileGraph`, `dagGraphType`, and `convergence`
-  define dependency graphs and repeated reviews.
-- **Graph runs:** `createGraphExecutor`, `resolveGraphPlan`, and
-  `persistRunDefinition` run and resume a stored graph.
-- **In-process callbacks:** `createCallbackGate`, `createCallbackClient`,
-  `replayCallbackClient`, and `directRouter` manage replayable questions.
-- **Stored callbacks:** `createStoredCallbackClient` stores callback history in
-  the run event stream.
-- **Proof artifacts:** `writeProofArtifact` stores one stable JSON proof packet
-  and returns its content digest.
-- **Accepted results:** `createAcceptedResultRecord`, `resolveAcceptedResult`,
-  and `acceptedResultMatches` bind a result to its reviewed inputs, proof,
-  graph, workspace, and caller-supplied reviewer identity.
-- **Approval:** `createApprovalCallbackGate`, `approvalSubjectDigest`, and
-  `resolveApproval` bind a stored decision to the exact subject bytes. The
-  stored client writes the callback submission and approval together.
-- **Job helpers:** `run`, `loop`, `pipeline`, `dag`, and `sequence` are the
-  older job API.
+**Compile a graph and drive it yourself.** Under the job API sits the
+graph contract: `compileGraph` with a graph form (`dagGraphType` is the
+built-in one), `createGraphExecutor` to run it against stored events, and
+`resolveGraphPlan` to see exactly what will run. This is the layer a host
+uses to supervise, pause and resume runs, and the layer you build on to
+write a workflow shape of your own.
 
-Subpaths:
+## See it run
 
-- **Testing:** `@obversa/runtime/testing` provides graph definition helpers and
-  mocks.
-- **Local storage:** `@obversa/runtime/storage/local` provides
-  `createLocalRunStorage`.
+The smallest example stores a three-stage pipeline and drives it through
+the graph executor. It runs offline.
 
-## Runnable example
 
-From an Obversa checkout, run `pnpm example:pipeline`. The source is
-`examples/packages/pipeline.ts`. It stores a three-stage pipeline and runs it
-through `createGraphExecutor`.
+```ts
+import { mkdtemp, realpath, rm } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 
-See [Built-in pipeline](/graphs/pipeline) for the report that command prints.
+import {
+  compileGraph,
+  createGraphExecutor,
+  dagGraphType,
+  persistRunDefinition,
+  resolveGraphPlan,
+  type DagDefinition,
+  type GraphNodeBinding,
+  type PlanResolution,
+  type RunStoragePolicy,
+} from '@obversa/runtime';
+import { defineGraphDefinition } from '@obversa/runtime/testing';
+import { createLocalRunStorage } from '@obversa/runtime/storage/local';
+
+const definition: DagDefinition = defineGraphDefinition({
+  id: 'release-pipeline',
+  definitionVersion: 1,
+  data: {
+    globalConcurrency: 1,
+    keyedConcurrency: {},
+    stopOnError: true,
+    retryCapPerNode: 0,
+  },
+  nodes: [
+    { id: 'draft', data: { kind: 'required', key: null } },
+    { id: 'review', data: { kind: 'required', key: null } },
+    { id: 'publish', data: { kind: 'required', key: null } },
+  ],
+  edges: [
+    { id: 'draft-to-review', source: 'draft', target: 'review', data: {} },
+    { id: 'review-to-publish', source: 'review', target: 'publish', data: {} },
+  ],
+});
+
+const packageIdentity = {
+  source: 'npm:@example/release-pipeline',
+  version: '1.0.0',
+  digest: 'sha256:3333333333333333333333333333333333333333333333333333333333333333',
+} as const;
+const resolution: PlanResolution = {
+  package: packageIdentity,
+  admission: { package: packageIdentity, permissions: [] },
+  executionLanes: [],
+};
+const graph = compileGraph(dagGraphType, definition);
+const plan = resolveGraphPlan(graph.describe(), resolution);
+
+const storagePolicy = {
+  schemaVersion: 1,
+  maxEventPayloadBytes: 64_000,
+  maxAppendBatchBytes: 128_000,
+  maxArtifactBytes: 1_000_000,
+  maxTotalArtifactBytesPerRun: 4_000_000,
+  retention: 'until-run-delete',
+  sensitiveContent: {
+    marked: 'reject',
+    exact: 'reject',
+    freeText: 'redact-before-hash',
+  },
+} as const satisfies RunStoragePolicy;
+
+function nodeBinding(
+  root: string,
+  runData: NonNullable<GraphNodeBinding['runData']>,
+): GraphNodeBinding {
+  return {
+    prompt: null,
+    scratchDirectory: root,
+    workspace: { mode: 'none', directory: null, allowedPaths: [] },
+    trustedCaller: {},
+    permissions: [],
+    policy: {
+      inputBytes: 10_000,
+      outputBytes: 10_000,
+      timeoutMs: 5_000,
+      teardownGraceMs: 100,
+      memoryBytes: 10_000_000,
+      filesChanged: 0,
+      linesChanged: 0,
+      callTokens: null,
+    },
+    resultContract: null,
+    runData,
+    parseResult: null,
+    tokenBudget: null,
+    decideAction: async () => ({ kind: 'allow' }),
+  };
+}
+
+const temporaryRoot = await realpath(await mkdtemp(join(tmpdir(), 'obversa-pipeline-')));
+const order: string[] = [];
+try {
+  const storage = createLocalRunStorage({
+    directory: join(temporaryRoot, 'storage'),
+    namespace: 'pipeline-example',
+    policy: storagePolicy,
+  });
+  await persistRunDefinition(storage, {
+    runId: 'release-pipeline-run',
+    eventId: 'release-pipeline-started',
+    timestamp: '2026-01-01T00:00:00.000Z',
+    graphDefinition: graph.definition,
+    resolvedPlan: plan,
+    resolvedInputs: {},
+    workspaceBinding: null,
+    hostBinding: null,
+  });
+
+  const executor = await createGraphExecutor({
+    runId: 'release-pipeline-run',
+    graph,
+    storage,
+    nodes: {
+      draft: nodeBinding(temporaryRoot, async () => {
+        order.push('draft');
+        return { article: 'ready' };
+      }),
+      review: nodeBinding(temporaryRoot, async ({ input }) => {
+        order.push('review');
+        const draft = (input as {
+          readonly results: { readonly draft: { readonly article: string } };
+        }).results.draft;
+        return { approved: draft.article === 'ready' };
+      }),
+      publish: nodeBinding(temporaryRoot, async ({ input }) => {
+        order.push('publish');
+        const review = (input as {
+          readonly results: { readonly review: { readonly approved: boolean } };
+        }).results.review;
+        return { published: review.approved };
+      }),
+    },
+    engines: [],
+  });
+  const result = await executor.run(new AbortController().signal);
+  const storedEvents = [];
+  for await (const event of storage.eventStore.read({
+    namespace: storage.record.namespace,
+    streamId: 'release-pipeline-run',
+  })) storedEvents.push(event);
+
+  console.log(JSON.stringify({
+    executor: result.kind,
+    output: result.kind === 'complete' ? result.output : null,
+    dispatches: storedEvents.filter(
+      (event) => event.type === 'graph:node-dispatched',
+    ).length,
+    order,
+    planDigest: plan.digest,
+    bounds: plan.plan.bounds,
+  }, null, 2));
+} finally {
+  await rm(temporaryRoot, { recursive: true, force: true });
+}
+```
+
+```text
+{
+  "executor": "complete",
+  "output": {
+    "nodes": {
+      "draft": {
+        "article": "ready"
+      },
+      "review": {
+        "approved": true
+      },
+      "publish": {
+        "published": true
+      }
+    }
+  },
+  "dispatches": 3,
+  "order": [
+    "draft",
+    "review",
+    "publish"
+  ],
+  "planDigest": "sha256:ebbf122994643028c5222a0afaf8d7a99a257716e00f0e255b15f315e4b862ed",
+  "bounds": {
+    "dispatches": {
+      "min": {
+        "kind": "known",
+        "value": 3
+      },
+      "max": {
+        "kind": "known",
+        "value": 3
+      }
+    },
+    "maxConcurrency": {
+      "kind": "known",
+      "value": 1
+    },
+    "maxFanOut": {
+      "kind": "known",
+      "value": 1
+    }
+  }
+}
+```
+
+## Exports by what you do with them
+
+**Define the work**
+
+- `dag`, `pipeline`, `sequence`, `parallel`, `loop`: the shapes a workflow
+  takes; each returns a job you can run or nest.
+- `fnJob`, `agentJob`, `defineAgent`, `defineAgentFromMarkdown`: the steps,
+  from a plain function to a named agent with a brief.
+- `isolated`: run a step in its own worktree and branch.
+
+**Review inside it**
+
+- `reviewPanel`, `quorum`, `tournament`: several reviewers or several
+  candidates, with the threshold you set.
+- `kickback`, `revisionRequest`: a reviewer sends the work back to a named
+  stage with its findings.
+
+**Run it**
+
+- `run`: run a job from a fresh record.
+- `compileGraph`, `dagGraphType`, `createGraphExecutor`, `resolveGraphPlan`,
+  `persistRunDefinition`: the graph layer, for hosts and for shapes of your
+  own.
+
+**Ask a person**
+
+- `createCallbackGate`, `createCallbackClient`, `createStoredCallbackClient`,
+  `replayCallbackClient`, `directRouter`: a question with a typed answer,
+  recorded so it survives a restart.
+- `createApprovalCallbackGate`, `approvalSubjectDigest`, `resolveApproval`:
+  an approval bound to the exact bytes it approves.
+
+**Keep the evidence**
+
+- `writeProofArtifact`: one stable proof packet, addressed by its digest.
+- `createAcceptedResultRecord`, `resolveAcceptedResult`,
+  `acceptedResultMatches`: a result bound to the inputs, proof, graph and
+  workspace it was judged on.
+
+**Choose engines, memory and workspace**
+
+- `withEnv`, the engine and memory contracts, and the workspace provider:
+  the runtime imports no adapter; your program supplies the instances.
+
+**Test**
+
+- `@obversa/runtime/testing`: graph definition helpers and mock engines,
+  so a workflow runs offline in a test.
+- `@obversa/runtime/storage/local`: `createLocalRunStorage`, the on-disk
+  event and artifact stores the examples use.
+
+## Things that catch people out
+
+- **`run` starts a fresh record.** It does not resume. Restarting a killed
+  run is the supervised runner's job, in `@obversa/runner`.
+- **Every attempt has a budget.** An overrun comes back as a typed result,
+  not a hang; read the outcome rather than waiting on it.
+- **The runtime imports no engine.** Nothing runs until your program hands
+  it one; the examples use a mock so they run offline.
+
+## Where to go
+
+[What Obversa is](/concepts/index) if you are deciding; [workflows](/concepts/workflows)
+to learn the shape; [the examples](/workflows) for complete programs
+to copy; the [runner](/packages/runner) for supervised, restartable runs.

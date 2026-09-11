@@ -466,7 +466,7 @@ const packageRules = new Map([
     directory: 'packages/runtime',
     kind: 'runtime',
     version: '1.0.0',
-    dependencies: [],
+    dependencies: ['@obversa/process'],
     peerDependencies: ['@obversa/engine', '@obversa/memory'],
     peerDependencyVersions: {
       '@obversa/engine': '>=0.1.0 <0.2.0',
@@ -475,6 +475,13 @@ const packageRules = new Map([
   }],
   ['@obversa/engine', {
     directory: 'packages/engine',
+    kind: 'interface',
+    version: '0.1.0',
+    dependencies: ['@obversa/process'],
+    peerDependencies: [],
+  }],
+  ['@obversa/process', {
+    directory: 'packages/process',
     kind: 'interface',
     version: '0.1.0',
     dependencies: [],
@@ -498,7 +505,7 @@ const packageRules = new Map([
     directory: 'plugins/memory-git',
     kind: 'plugin',
     version: '0.1.0',
-    dependencies: ['@obversa/memory'],
+    dependencies: ['@obversa/memory', '@obversa/process'],
     peerDependencies: [],
   }],
   // Private workspace packages get a rule too, so a sibling import inside
@@ -1030,6 +1037,8 @@ const hostRules = new Map([
       'bin/obversa-plannotator-browser': 'ef180a43d479ad9c9ae2242bb7f24b74ab58f85781465ffd6eace1c45b9ef34a',
       'bin/obversa-surface': 'd2e704106aaf9c6d07a8e6057ce1a09ca504471fc2cacacedb7e0eb95b5ab552',
       'bin/obversa-whereis': 'a80752222928dae5f619b916a38f8f6aaf479da968f84705cc35aad09ae58198',
+      // The one-command installer a reader runs before they have a checkout.
+      'install.sh': '61e730feb173b57523d8c131ec867792cf06c63d71a7f63dcb3defc76290e214',
     },
   }],
 ]);

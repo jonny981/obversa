@@ -312,7 +312,6 @@ export class CodexEngine implements Engine {
     const args = buildCodexArgs(req, this.opts, outFile);
     const env = attemptEnvironment(req);
     const prompt = req.system ? `${req.system}\n\n---\n\n${req.prompt}` : req.prompt;
-    const startedAt = Date.now();
     const owner = ownedCommandIdentity({
       adapter: 'codex',
       runId: req.attempt?.runId,
@@ -351,12 +350,13 @@ export class CodexEngine implements Engine {
         throw new EngineError({ kind: 'aborted', message: 'codex run aborted' });
       const stdout = new TextDecoder().decode(sub.stdout);
       const stderr = new TextDecoder().decode(sub.stderr);
-      const failed = aborted || sub.timedOut || sub.exitCode !== 0;
+      const timedOut = sub.timedOut;
+      const failed = aborted || timedOut || sub.exitCode !== 0;
       const diagnostic = diagnosticCapture(stderr, stdout, env);
       let transportFailure: AgentResult['transportFailure'];
       if (failed && !text)
         throw new EngineError({
-          kind: sub.timedOut
+          kind: timedOut
             ? 'timeout'
             : classifyEngineFailure(new Error(diagnostic)),
           // The combined streams are scrubbed in full before the middle cut,
@@ -367,7 +367,7 @@ export class CodexEngine implements Engine {
         });
       if (failed) {
         transportFailure = {
-          kind: aborted ? 'aborted' : sub.timedOut ? 'timeout' : 'unknown',
+          kind: aborted ? 'aborted' : timedOut ? 'timeout' : 'unknown',
           message: `codex completed but exited ${sub.exitCode ?? '?'} during teardown${
             diagnostic ? `: ${diagnostic}` : ''
           }`,
@@ -380,25 +380,12 @@ export class CodexEngine implements Engine {
       const usage = usageFromJsonl(stdout);
       if (text) onEvent({ type: 'text', delta: text });
       onEvent({ type: 'usage', usage, model: model ?? 'codex' });
-      const late =
-        typeof req.timeoutMs === 'number' &&
-        Date.now() - startedAt > req.timeoutMs;
       return assistantResult({
         text,
         usage,
         requested,
         stopReason: 'end_turn',
-        ...(transportFailure
-          ? { transportFailure }
-          : late
-            ? {
-                transportFailure: {
-                  kind: 'timeout' as const,
-                  message: 'codex result arrived after the soft timeout',
-                  exitCode: sub.exitCode ?? null,
-                },
-              }
-            : {}),
+        ...(transportFailure ? { transportFailure } : {}),
       });
     } finally {
       rmSync(dir, { recursive: true, force: true });
