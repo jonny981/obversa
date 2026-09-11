@@ -281,6 +281,7 @@ export type {
   LoopConfig,
   RetryPolicy,
   DagConfig,
+  KickbackBudget,
   DagNode,
   LoopEvent,
   LogLevel,

@@ -39,9 +39,9 @@ function run(args, options = {}) {
 // extra file; a tarball is exactly this list or the check fails, so a file
 // that slips beneath an allowed directory is met here, reviewed, and pinned.
 // scripts/check-packages.mjs reads the same map, so every publishable
-// package is pinned here: the runtime, the engine interface, the six engine
-// plugins, and the memory interface and plugins. Source maps and the public
-// testing entry points ship on purpose.
+// package is pinned here: the runtime, engine and memory interfaces, their
+// plugins, the runner, the review surfaces, and the ready-made teams package.
+// Source maps and the public testing entry points ship on purpose.
 export const EXPECTED_FILES = {
   '@obversa/runner': [
     'package/LICENSE',
@@ -360,6 +360,20 @@ export const EXPECTED_FILES = {
     'package/dist/index.d.ts',
     'package/dist/index.js',
     'package/dist/index.js.map',
+    'package/package.json',
+  ],
+  '@obversa/teams': [
+    'package/LICENSE',
+    'package/README.md',
+    'package/dist/agent-response.d.ts',
+    'package/dist/feature-delivery.d.ts',
+    'package/dist/index.d.ts',
+    'package/dist/index.js',
+    'package/dist/index.js.map',
+    'package/dist/team-utils.d.ts',
+    'package/dist/threshold-panel.d.ts',
+    'package/dist/types.d.ts',
+    'package/dist/writer-reviewer-pair.d.ts',
     'package/package.json',
   ],
 };

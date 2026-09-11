@@ -3,6 +3,7 @@ import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { join, sep } from 'node:path';
 import { spawnSync } from 'node:child_process';
 import * as consumer from './check-clean-consumer.mjs';
+import { CONSUMER_EXAMPLES } from './consumer-examples.mjs';
 import test from 'node:test';
 import { checkedAttemptOutput } from './check-clean-consumer.mjs';
 
@@ -37,12 +38,33 @@ test('clean consumer wires the safe-change production line', async () => {
 
 test('clean consumer wires the feature-delivery production line', async () => {
   const source = await readFile(new URL('./check-clean-consumer.mjs', import.meta.url), 'utf8');
-  assert.match(source, /'feature-delivery\.ts',/);
+  // The compile list lives in consumer-examples.mjs, read by this check and the page-shape check.
+  assert.ok(CONSUMER_EXAMPLES.includes('feature-delivery.ts'));
   assert.match(source, /'feature-delivery\.mdx'/);
   assert.match(source, /feature-delivery\.deny\.ts/);
   assert.match(source, /feature-delivery\.red\.ts/);
   assert.match(source, /featureLine\.acceptedKickbacks !== 1/);
   assert.doesNotMatch(source, /recordEvents !== \d+/);
+});
+
+test('clean consumer runs the three packed team examples', async () => {
+  const source = await readFile(new URL('./check-clean-consumer.mjs', import.meta.url), 'utf8');
+  for (const file of [
+    'teams/scripted-engine.ts',
+    'teams/writer-reviewer-pair.proof.ts',
+    'teams/threshold-panel.proof.ts',
+    'teams/feature-delivery.proof.ts',
+    'teams/writer-reviewer-pair.ts',
+    'teams/threshold-panel.ts',
+    'teams/feature-delivery.ts',
+  ]) assert.ok(CONSUMER_EXAMPLES.includes(file), `${file} is not on the consumer compile list`);
+  assert.match(source, /reviewerKickbacks/);
+});
+
+test('clean consumer compiles and runs the tournament example', async () => {
+  const source = await readFile(new URL('./check-clean-consumer.mjs', import.meta.url), 'utf8');
+  assert.ok(CONSUMER_EXAMPLES.includes('tournament.ts'));
+  assert.match(source, /compiledTournament/);
 });
 
 test('team conversation example requires the reply to queue another writer turn', async (t) => {

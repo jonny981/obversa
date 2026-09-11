@@ -41,46 +41,118 @@ npm install @obversa/runtime   # Node >= 22.12
 
 ## A feature, as one file
 
-Five named stages. The review is a panel of three, and the panel names the
-stage that must fix the work, so a failed review goes back to the stage that
-owns it rather than starting the run again.
-
-```ts
-import { fnJob, pipeline, reviewPanel, run, type Outcome } from '@obversa/runtime';
-```
-
-```ts
-const review = reviewPanel({
-  label: 'review',
-  reviewers: [
-    { name: 'correctness', job: checks.correctness },
-    { name: 'safety', job: checks.safety },
-    { name: 'scope', job: checks.scope },
-  ],
-  pass: 2, // two of three agree and the step passes
-  target: 'implement', // a failing panel sends the work back here
-});
-
-export const featureDelivery = pipeline(
-  'feature-delivery',
-  [
-    { name: 'analyse', job: analyse },
-    { name: 'implement', job: implement },
-    { name: 'test', job: testStage },
-    { name: 'review', job: review },
-    { name: 'approve', job: approve },
-  ],
-  { maxKickbacks: 2 },
-);
-```
-
-
-Run the whole thing, offline and without a model:
+Install the teams package and two engine plugins, and this file delivers a
+change with a team of models: one analyses the brief, another implements
+it, your test command runs, a reviewer from a different model family reads
+the result, and a final seat writes the approval. A rejected review sends
+the work back to the implementer, once. The file is complete; copy it, put
+your brief in, run it with Node.
 
 ```bash
-pnpm example:feature-team
+npm install @obversa/runtime @obversa/teams @obversa/engine-claude-cli @obversa/engine-codex
 ```
 
+```ts
+import { ClaudeCliEngine } from '@obversa/engine-claude-cli';
+import { CodexEngine } from '@obversa/engine-codex';
+import { run } from '@obversa/runtime';
+import { featureDelivery } from '@obversa/teams';
+
+const workspace = process.cwd();
+const analyse = {
+  engine: new ClaudeCliEngine({
+    defaultModel: 'claude-sonnet-4-5',
+    permissionMode: 'bypassPermissions',
+  }),
+  identity: {
+    adapter: 'claude-cli',
+    provider: 'anthropic',
+    modelFamily: 'claude',
+    model: 'claude-sonnet-4-5',
+  },
+};
+const implement = {
+  engine: new CodexEngine({
+    defaultModel: 'gpt-5.6-luna',
+    permissionMode: 'bypassPermissions',
+  }),
+  identity: {
+    adapter: 'codex',
+    provider: 'openai',
+    modelFamily: 'gpt',
+    model: 'gpt-5.6-luna',
+  },
+};
+const reviewer = {
+  engine: new ClaudeCliEngine({
+    defaultModel: 'claude-sonnet-4-5',
+    permissionMode: 'bypassPermissions',
+  }),
+  identity: {
+    adapter: 'claude-cli',
+    provider: 'anthropic',
+    modelFamily: 'claude',
+    model: 'claude-sonnet-4-5',
+  },
+};
+const approve = {
+  engine: new ClaudeCliEngine({
+    defaultModel: 'claude-sonnet-4-5',
+    permissionMode: 'bypassPermissions',
+  }),
+  identity: {
+    adapter: 'claude-cli',
+    provider: 'anthropic',
+    modelFamily: 'claude',
+    model: 'claude-sonnet-4-5',
+  },
+};
+
+const team = featureDelivery({
+  brief: 'Deliver a pure triple(value) function in src/triple.mjs with a Node test in test/triple.test.mjs.',
+  workspace,
+  files: ['src/triple.mjs', 'test/triple.test.mjs'],
+  test: { command: 'node', args: ['--test', 'test/triple.test.mjs'] },
+  analyse,
+  implement,
+  reviewers: [{ name: 'correctness', seat: reviewer }],
+  reviewThreshold: 1,
+  approve,
+});
+
+const result = await run(team, { cwd: workspace });
+console.log(JSON.stringify(result.outcome, null, 2));
+```
+
+A writing seat can write anywhere the process can: the file starts its
+Claude and Codex seats with permission prompts off, which is what lets a
+model write files. Run it in a directory you are willing to let a model
+change.
+
+Each seat is an engine and the identity it runs under: adapter, provider,
+model family and model. The implementer and every reviewer must be
+different model families, and the package refuses the team before any
+model runs if they are not.
+
+The team is a graph of five named steps. Every step carries a sentence
+saying what it does and a sentence saying what must be true for it to
+count, and both reach the reviewer and the run record:
+
+| step | done when |
+| --- | --- |
+| analyse | The delivery note is in the workspace and names each requirement. |
+| implement | The code and its test cover every requirement in the note. |
+| test | The test command exits 0. |
+| review | At least the threshold number of reviewers have accepted. |
+| approve | An approval note is in the workspace. |
+
+A step that promises a file fails by name when the file is missing. The
+test step passes on the command's exit code, never on a model's report.
+[Feature delivery](https://docs.obversa.ai/workflows/feature-team) shows
+what a real run of this file printed and the files the models wrote; a
+[writer and reviewer](https://docs.obversa.ai/workflows/writer-and-reviewer)
+and a [review panel](https://docs.obversa.ai/workflows/review-panel) are
+the two smaller teams in the same package.
 ## Engines
 
 An engine binding names the adapter, the provider, the model family and the
@@ -107,14 +179,15 @@ Write your own against the engine contract; it must pass the conformance kit.
 
 ## What is in this repository
 
-Fourteen publishable packages. `packages/` holds the six that define the
+16 publishable packages. `packages/` holds the eight that define the
 product: `@obversa/runtime` is the runtime and its public contract,
-`@obversa/runner` supervises stored runs, `@obversa/engine` and `@obversa/memory`
-are the engine and memory contracts, and `@obversa/surfacer` and
-`@obversa/source` are the local review surface. `plugins/` holds the eight
-adapters: the six engines above and two memories, one in process and one in
-private Git references. `hosts/` holds the terminal host, which is not
-published.
+`@obversa/teams` is three ready-made teams built on it, `@obversa/runner`
+supervises stored runs, `@obversa/engine` and `@obversa/memory` are the
+engine and memory contracts, `@obversa/process` runs a child process to a
+deadline, and `@obversa/surfacer` and `@obversa/source` are the local
+review surface. `plugins/` holds the eight adapters: the six engines above
+and two memories, one in process and one in private Git references.
+`hosts/` holds the terminal host, which is not published.
 
 ## Requirements
 

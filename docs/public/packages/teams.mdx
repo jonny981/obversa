@@ -1,0 +1,116 @@
+---
+title: "@obversa/teams"
+description: "Three teams of models you can run on your own work: a writer and a reviewer, a review panel with a threshold, and feature delivery."
+---
+
+Three functions, each a team: give it your brief, your workspace, your test
+command and one engine per seat, and it returns a job for `run`.
+
+```bash
+npm install @obversa/runtime @obversa/teams
+```
+
+## What you get
+
+- **`writerReviewerPair`.** One model writes the files your brief names, your
+  test command runs, and a model from a different family reviews the result.
+  A rejection sends the work back to the writer.
+- **`thresholdPanel`.** One model implements, your test command runs, and
+  several reviewers read the change at the same time. The change passes
+  when at least the threshold number of them accept.
+- **`featureDelivery`.** Analyse, implement, test, review, approve. The
+  analyse step writes a delivery note, the reviewers can send the work back
+  to the implementer, and the approve step writes an approval note.
+
+Every team is a graph of named steps with a `desc` and a `gate` sentence on
+each. Every seat is checked before a run: the implementer and each reviewer
+must be different model families. A step that promises a file fails by
+name when the file is missing or empty. The test step passes on the
+command's exit code.
+
+## Run one
+
+```ts
+import { ClaudeCliEngine } from '@obversa/engine-claude-cli';
+import { CodexEngine } from '@obversa/engine-codex';
+import { run } from '@obversa/runtime';
+import { writerReviewerPair } from '@obversa/teams';
+
+const workspace = process.cwd();
+const writer = {
+  engine: new ClaudeCliEngine({
+    defaultModel: 'claude-sonnet-4-5',
+    permissionMode: 'bypassPermissions',
+  }),
+  identity: {
+    adapter: 'claude-cli',
+    provider: 'anthropic',
+    modelFamily: 'claude',
+    model: 'claude-sonnet-4-5',
+  },
+};
+const reviewer = {
+  engine: new CodexEngine({
+    defaultModel: 'gpt-5.6-luna',
+    permissionMode: 'bypassPermissions',
+  }),
+  identity: {
+    adapter: 'codex',
+    provider: 'openai',
+    modelFamily: 'gpt',
+    model: 'gpt-5.6-luna',
+  },
+};
+const team = writerReviewerPair({
+  brief: 'Write a pure add(a, b) function in src/add.mjs with a Node test in test/add.test.mjs.',
+  workspace,
+  files: ['src/add.mjs', 'test/add.test.mjs'],
+  test: { command: 'node', args: ['--test', 'test/add.test.mjs'] },
+  writer,
+  reviewer,
+});
+const result = await run(team, { cwd: workspace });
+
+console.log(JSON.stringify(result.outcome, null, 2));
+```
+
+A real run of this file, and the files it left behind, are on the
+[writer and reviewer](/workflows/writer-and-reviewer) page. The
+[review panel](/workflows/review-panel) and
+[feature delivery](/workflows/feature-team) pages do the same for the other
+two teams.
+
+## What every team takes
+
+| field | what it is |
+| --- | --- |
+| `brief` | The work, as text. Every model in the team reads it. |
+| `workspace` | The directory the team works in. Files are written here. |
+| `files` | The paths, relative to the workspace, that the brief expects written. At least one. |
+| `test` | `{ command, args, timeoutMs? }`, run in the workspace. Exit 0 passes. |
+| `maxKickbacks` | How many times a rejection may send work back. Default 1. |
+
+A seat is `{ engine, identity }`: an engine plugin instance and the identity
+it runs under, `{ adapter, provider, modelFamily, model }`. The identity is
+what the run record and the family check use, so it must name what runs.
+
+| team | seats |
+| --- | --- |
+| `writerReviewerPair` | `writer`, `reviewer` |
+| `thresholdPanel` | `implement`, `reviewers` (a list of `{ name, seat }`), `threshold` |
+| `featureDelivery` | `analyse`, `implement`, `reviewers`, `reviewThreshold`, `approve` |
+
+## Gotchas
+
+- **It ships no command.** You import a team and run it from your own file.
+- **Engines are yours to construct.** The package chooses no model. Each seat
+  is a plugin instance you build, with the permission mode the role needs:
+  a writer must be allowed to write files.
+- **The distinct-family check reads your declaration.** Declaring one family
+  for two different models defeats it, and declaring two families for one
+  model lies to the record.
+
+## Source
+
+`packages/teams` in the repository. The package depends on
+`@obversa/runtime` and nothing else.

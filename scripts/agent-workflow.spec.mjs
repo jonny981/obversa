@@ -106,6 +106,9 @@ for (const [stage, branch] of [
   ['F26', 'feat/one-run-per-rename'],
   ['D44', 'docs/lead-with-the-team'],
   ['F27', 'fix/sweep-three-proof'],
+  ['F29', 'fix/runtime-per-target-kickbacks'],
+  ['D36', 'feat/teams'],
+  ['D45', 'docs/whole-file-examples'],
   ['D13', 'feat/graph-forms-v1'],
   ['D11A', 'feat/graph-forms-v1'],
   ['F0', 'feat/factory-v1'],
@@ -162,6 +165,9 @@ for (const [stage, branch] of [
   ['F26', 'feat/graph-forms-v1'],
   ['D44', 'feat/graph-forms-v1'],
   ['F27', 'feat/graph-forms-v1'],
+  ['F29', 'feat/graph-forms-v1'],
+  ['D36', 'feat/graph-forms-v1'],
+  ['D45', 'feat/graph-forms-v1'],
 ]) {
   test(`${stage} refuses the wrong branch ${branch}`, () => {
     const repository = createRepository({ feature: true, branch });

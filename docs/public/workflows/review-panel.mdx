@@ -1,0 +1,204 @@
+---
+title: "A review panel with a threshold"
+description: "One model implements, several review at the same time, and the change passes when enough of them accept."
+---
+
+When one opinion is not enough, ask several at once. This file has a Claude
+seat implement a brief, runs the test with Node, and then has two
+reviewers from two other model families read the change at the same time.
+The change passes when at least `threshold` of them accept. A panel below
+the threshold sends the work back to the implementer, once.
+
+```bash
+npm install @obversa/runtime @obversa/teams @obversa/engine-claude-cli @obversa/engine-codex @obversa/engine-opencode-cli
+```
+
+## The file
+
+The third seat runs through the OpenCode command line tool, which is a
+path you give it.
+
+```ts
+import { ClaudeCliEngine } from '@obversa/engine-claude-cli';
+import { CodexEngine } from '@obversa/engine-codex';
+import { OpenCodeCliEngine } from '@obversa/engine-opencode-cli';
+import { run } from '@obversa/runtime';
+import { thresholdPanel } from '@obversa/teams';
+
+function required(name: string): string {
+  const value = process.env[name];
+  if (!value) throw new Error(`Set ${name} to the absolute CLI path before running this example.`);
+  return value;
+}
+
+const workspace = process.cwd();
+const implement = {
+  engine: new ClaudeCliEngine({
+    defaultModel: 'claude-sonnet-4-5',
+    permissionMode: 'bypassPermissions',
+  }),
+  identity: {
+    adapter: 'claude-cli',
+    provider: 'anthropic',
+    modelFamily: 'claude',
+    model: 'claude-sonnet-4-5',
+  },
+};
+const correctness = {
+  engine: new CodexEngine({
+    defaultModel: 'gpt-5.6-luna',
+    permissionMode: 'bypassPermissions',
+  }),
+  identity: {
+    adapter: 'codex',
+    provider: 'openai',
+    modelFamily: 'gpt',
+    model: 'gpt-5.6-luna',
+  },
+};
+const scope = {
+  engine: new OpenCodeCliEngine({
+    executable: required('OPENCODE_BIN'),
+    version: '1.18.23',
+    identity: { provider: 'opencode', modelFamily: null },
+  }),
+  identity: {
+    adapter: 'opencode-cli',
+    provider: 'opencode',
+    modelFamily: 'big-pickle',
+    model: 'opencode/big-pickle',
+  },
+};
+const team = thresholdPanel({
+  brief: 'Write a pure double(value) function in src/double.mjs with a Node test in test/double.test.mjs.',
+  workspace,
+  files: ['src/double.mjs', 'test/double.test.mjs'],
+  test: { command: 'node', args: ['--test', 'test/double.test.mjs'] },
+  implement,
+  reviewers: [
+    { name: 'correctness', seat: correctness },
+    { name: 'scope', seat: scope },
+  ],
+  threshold: 1,
+});
+const result = await run(team, { cwd: workspace });
+
+console.log(JSON.stringify(result.outcome, null, 2));
+```
+
+## What a run printed
+
+From one real run of this file. The Codex reviewer accepted. The OpenCode
+seat, on a free preview model, answered with no decision object in its
+reply, so it counts as not accepting and the panel records it as a finding.
+With `threshold: 1` the change still passed. Set the threshold to two and
+the same run would have sent the work back to the implementer.
+
+```json
+{
+  "status": "pass",
+  "summary": "dag \"threshold-panel\": all 3 node(s) green",
+  "data": {
+    "implement": {
+      "status": "pass",
+      "summary": "Implemented pure double(value) function in src/double.mjs and Node test in test/double.test.mjs. Test passes with coverage for positive, negative, zero, and decimal values."
+    },
+    "test": {
+      "status": "pass",
+      "summary": "`node` exited 0"
+    },
+    "review": {
+      "status": "pass",
+      "summary": "Review panel: 1/2 reviewer(s) cleared.\n- scope [block]: The engine response was not a valid team decision JSON object.",
+      "data": {
+        "findings": [
+          {
+            "reviewer": "scope",
+            "severity": "block",
+            "evidence": "The engine response was not a valid team decision JSON object."
+          }
+        ],
+        "escalatedFindings": [],
+        "errors": [],
+        "results": [
+          {
+            "kind": "verdict",
+            "name": "correctness",
+            "met": true,
+            "reason": "The pure double(value) function is correct and the focused Node test passes."
+          },
+          {
+            "kind": "verdict",
+            "name": "scope",
+            "met": false,
+            "reason": "The engine response was not a valid team decision JSON object."
+          }
+        ],
+        "passed": 1,
+        "required": 1,
+        "severityCounts": {
+          "block": 1
+        }
+      }
+    }
+  }
+}
+```
+
+The implementer wrote `src/double.mjs`:
+
+```js
+export function double(value) {
+  return value * 2;
+}
+```
+
+and `test/double.test.mjs`:
+
+```js
+import { strict as assert } from 'node:assert';
+import { test } from 'node:test';
+import { double } from '../src/double.mjs';
+
+test('double returns twice the input value', () => {
+  assert.equal(double(2), 4);
+  assert.equal(double(0), 0);
+  assert.equal(double(-3), -6);
+  assert.equal(double(2.5), 5);
+});
+```
+
+## The team's shape
+
+| step | does | done when |
+| --- | --- | --- |
+| implement | Write the code and its test from the brief. | The files named in the brief exist in the workspace. |
+| test | Run the test command against the written files. | The test command exits 0. |
+| review | Have every reviewer read the change at the same time and count the acceptances. | At least the threshold number of reviewers have accepted. |
+
+The reviewers run concurrently, one job each. `threshold` is a whole number
+from one to the number of reviewers. A panel below the threshold is a
+revision request aimed at `implement`, bounded by `maxKickbacks`.
+
+## Gotchas
+
+- **The implementer and every reviewer are different families.** Two
+  reviewers in one family are refused too. The point of a panel is a second
+  opinion, and two seats of one model are one opinion twice.
+- **A reviewer's decision is its reply, not a file.** The panel counts the
+  JSON decision each reviewer returns, and it takes the first object in the
+  reply even when prose surrounds it. A reply with no object is a non-acceptance with
+  the reason recorded, which is what the run above shows for `scope`. A
+  reviewer may also write notes in the workspace, and the Codex seat did.
+- **A threshold equal to the reviewer count means unanimity.** Set it lower
+  when you want a majority.
+- **A writing seat can write anywhere the process can.** The files above
+  start their Claude and Codex seats with permission prompts off, which is
+  what lets a model write files. Run them in a directory you are willing
+  to let a model change, and give a reviewing seat a read-only mode if its
+  plugin has one.
+
+## Source
+
+The file is `examples/teams/threshold-panel.ts`. The
+[teams package page](/packages/teams) lists every input.

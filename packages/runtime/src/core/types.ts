@@ -399,6 +399,8 @@ export interface DagNode {
   acceptsKickbackTo?: string[];
 }
 
+export type KickbackBudget = number | Readonly<Record<string, number>>;
+
 export interface DagConfig {
   name: string;
   /** Node name → a `DagNode`, or a bare `Job` (shorthand for no deps/gates). */
@@ -427,13 +429,11 @@ export interface DagConfig {
    */
   onConflict?: 'fail' | 'synthesize';
   /**
-   * Total re-run budget for cross-stage feedback. When a node's outcome carries
-   * a `kickback`, the dag re-runs the target node and its transitive dependents,
-   * threading the reason in as `lastReview`. Each such re-run spends one unit of
-   * this budget; once it is exhausted, a further kickback is rejected and the dag
-   * terminates. Default 0 — kickbacks are ignored and behaviour is unchanged.
+   * Re-run budget for cross-stage feedback. A number keeps the graph-wide
+   * counter. A map gives each target node its own counter. Default 0 means
+   * kickbacks are ignored and behaviour is unchanged.
    */
-  maxKickbacks?: number;
+  maxKickbacks?: KickbackBudget;
 }
 
 /** Per-node disposition within a DAG run. */
@@ -581,6 +581,10 @@ export type LoopEvent =
       to: string;
       reason: string;
       accepted: boolean;
+      /** The one-based request count for this target in this DAG run. */
+      count: number;
+      /** The configured limit for this target, including the numeric form. */
+      limit: number;
       note?: string;
     }
   | {

@@ -1,0 +1,190 @@
+---
+title: "A writer and a reviewer"
+description: "One model writes the files your brief names, your test command runs, and a model from a different family reviews the result."
+---
+
+Give one model a brief and another model the job of checking it. This
+file has a Claude seat write a function and its test, runs the test with
+Node, and has a Codex seat read the files and the test result. If the
+reviewer sends the work back, the writer runs again with the findings, once.
+
+```bash
+npm install @obversa/runtime @obversa/teams @obversa/engine-claude-cli @obversa/engine-codex
+```
+
+## The file
+
+Change the brief, the file list and the test command to your own. Run it
+from the directory the work belongs in.
+
+```ts
+import { ClaudeCliEngine } from '@obversa/engine-claude-cli';
+import { CodexEngine } from '@obversa/engine-codex';
+import { run } from '@obversa/runtime';
+import { writerReviewerPair } from '@obversa/teams';
+
+const workspace = process.cwd();
+const writer = {
+  engine: new ClaudeCliEngine({
+    defaultModel: 'claude-sonnet-4-5',
+    permissionMode: 'bypassPermissions',
+  }),
+  identity: {
+    adapter: 'claude-cli',
+    provider: 'anthropic',
+    modelFamily: 'claude',
+    model: 'claude-sonnet-4-5',
+  },
+};
+const reviewer = {
+  engine: new CodexEngine({
+    defaultModel: 'gpt-5.6-luna',
+    permissionMode: 'bypassPermissions',
+  }),
+  identity: {
+    adapter: 'codex',
+    provider: 'openai',
+    modelFamily: 'gpt',
+    model: 'gpt-5.6-luna',
+  },
+};
+const team = writerReviewerPair({
+  brief: 'Write a pure add(a, b) function in src/add.mjs with a Node test in test/add.test.mjs.',
+  workspace,
+  files: ['src/add.mjs', 'test/add.test.mjs'],
+  test: { command: 'node', args: ['--test', 'test/add.test.mjs'] },
+  writer,
+  reviewer,
+});
+const result = await run(team, { cwd: workspace });
+
+console.log(JSON.stringify(result.outcome, null, 2));
+```
+
+## What a run printed
+
+The output below is from one real run of this file, with the two command
+line tools signed in on the machine.
+
+```json
+{
+  "status": "pass",
+  "summary": "dag \"writer-reviewer-pair\": all 3 node(s) green",
+  "data": {
+    "writer": {
+      "status": "pass",
+      "summary": "Created pure add(a, b) function in src/add.mjs and comprehensive test suite in test/add.test.mjs. All 5 tests pass, covering positive numbers, negative numbers, mixed signs, zero, and decimals."
+    },
+    "test": {
+      "status": "pass",
+      "summary": "`node` exited 0"
+    },
+    "reviewer": {
+      "status": "pass",
+      "summary": "The required pure add function and Node test are present and pass."
+    }
+  }
+}
+```
+
+The writer left two files behind. `src/add.mjs`:
+
+```js
+/**
+ * Pure function that adds two numbers.
+ * @param {number} a - First number
+ * @param {number} b - Second number
+ * @returns {number} Sum of a and b
+ */
+export function add(a, b) {
+  return a + b;
+}
+```
+
+and `test/add.test.mjs`:
+
+```js
+import { describe, it } from 'node:test';
+import assert from 'node:assert/strict';
+import { add } from '../src/add.mjs';
+
+describe('add', () => {
+  it('adds two positive numbers', () => {
+    assert.strictEqual(add(2, 3), 5);
+  });
+
+  it('adds two negative numbers', () => {
+    assert.strictEqual(add(-2, -3), -5);
+  });
+
+  it('adds positive and negative numbers', () => {
+    assert.strictEqual(add(5, -3), 2);
+  });
+
+  it('adds zero', () => {
+    assert.strictEqual(add(0, 5), 5);
+    assert.strictEqual(add(5, 0), 5);
+  });
+
+  it('adds decimal numbers', () => {
+    assert.strictEqual(add(1.5, 2.5), 4);
+  });
+});
+```
+
+The reviewer wrote its decision to `reviews/reviewer.json`:
+
+```json
+{
+  "status": "pass",
+  "summary": "The required pure add function and Node test are present and pass.",
+  "findings": [
+    {
+      "evidence": "src/add.mjs exports add(a, b) and returns only a + b, with no side effects."
+    },
+    {
+      "evidence": "test/add.test.mjs uses Node's built-in test and assert modules and covers positive, negative, mixed-sign, zero, and decimal inputs."
+    },
+    {
+      "evidence": "node --test test/add.test.mjs completed with 5 passing tests and 0 failures."
+    }
+  ]
+}
+```
+
+## The team's shape
+
+| step | does | done when |
+| --- | --- | --- |
+| writer | Write the code and its test from the brief. | The files named in the brief exist in the workspace. |
+| test | Run the test command against the written files. | The test command exits 0. |
+| reviewer | Read the code and the test result and accept or send the work back. | A different model family has accepted the change. |
+
+The reviewer runs after the test, so it reads a result and not a promise.
+A rejection is a revision request aimed at `writer`, and `maxKickbacks`
+(default 1) bounds how many times the pair goes round.
+
+## Gotchas
+
+- **The two seats must be different model families.** The team refuses to
+  build when `writer.identity.modelFamily` equals the reviewer's. The check
+  reads the identity you declare, so declare what runs.
+- **A seat is an engine and its identity.** The plugin runs the model; the
+  identity is the record of what ran, and it is what the run record and the
+  family check use.
+- **The writer needs permission to write.** A Claude or Codex seat started
+  in a read-only mode returns a plan and no files, and the writer step then
+  fails by name for the first missing file.
+- **The test command runs in the workspace.** Its arguments are relative to
+  the directory you pass as `workspace`, which the file above sets to the
+  current directory.
+- **A writing seat can write anywhere the process can.** The files above
+  start their Claude and Codex seats with permission prompts off, which is
+  what lets a model write files. Run them in a directory you are willing
+  to let a model change, and give a reviewing seat a read-only mode if its
+  plugin has one.
+
+## Source
+
+The file is `examples/teams/writer-reviewer-pair.ts`. The
+[teams package page](/packages/teams) lists every input.

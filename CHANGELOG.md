@@ -14,6 +14,9 @@ engine and memory packages track their own versions independently.
 - A dag node accepts `needs` as one name or a list, and optional `desc` and
   `gate` sentences that reach the rendered plan, the `dag:node` record and
   the input the node's reviewer receives.
+- A dag's `maxKickbacks` accepts a map of target name to count as well as
+  a number, so each step that receives work back has its own budget. The
+  `dag:kickback` event and the rendered plan carry the count and the limit.
 - **Saved team conversations:** Compile named members and fixed rooms with
   `teamGraphType`. Posts in successful turn results queue mentioned members;
   a fresh executor rebuilds messages and requested turns from the run record.

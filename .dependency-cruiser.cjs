@@ -45,7 +45,7 @@ module.exports = {
       from: { path: '^examples/' },
       to: {
         couldNotResolve: true,
-        pathNot: '^@obversa/(engine|engine-agent-sdk|engine-anthropic-api|engine-claude-cli|engine-codex|engine-grok-cli|engine-opencode-cli|memory|memory-git|memory-simple|process|runner|runtime|source|surfacer)(/|$)',
+        pathNot: '^@obversa/(engine|engine-agent-sdk|engine-anthropic-api|engine-claude-cli|engine-codex|engine-grok-cli|engine-opencode-cli|memory|memory-git|memory-simple|process|runner|runtime|source|surfacer|teams)(/|$)',
       },
     },
     {
@@ -173,6 +173,13 @@ module.exports = {
       severity: 'error',
       from: { path: '^packages/runner/' },
       to: { path: '^(packages|plugins)/', pathNot: '^packages/(runner|runtime|engine)/' },
+    },
+    {
+      name: 'teams-reaches-runtime-only',
+      comment: '@obversa/teams builds ready-made workflows over the public runtime and reaches no adapter, plugin, or sibling package',
+      severity: 'error',
+      from: { path: '^packages/teams/' },
+      to: { path: '^(packages|plugins)/', pathNot: '^packages/(teams|runtime)/' },
     },
     {
       name: 'memory-plugin-reaches-memory-only',

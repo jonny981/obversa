@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 
+import { CONSUMER_EXAMPLES } from './consumer-examples.mjs';
 import assert from 'node:assert/strict';
 import { copyFile, mkdtemp, mkdir, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
@@ -363,6 +364,10 @@ import {
 } from '@obversa/runtime';
 import { commandEnvironment } from '@obversa/runtime/env/command';
 import runtimePackage from '@obversa/runtime/package.json' with { type: 'json' };
+import { featureDelivery, thresholdPanel, writerReviewerPair } from '@obversa/teams';
+
+const packedTeamBuilders = [featureDelivery, thresholdPanel, writerReviewerPair];
+assert.equal(packedTeamBuilders.length, 3);
 
 type Equal<Left, Right> =
   (<Value>() => Value extends Left ? 1 : 2) extends
@@ -534,30 +539,7 @@ const tsconfig = {
     outDir: 'dist',
     types: ['node'],
   },
-  include: [
-    'consumer.ts',
-    'offline-review.ts',
-    'feature-delivery.ts',
-    'feature-team.ts',
-    'described-team.ts',
-    'forge-helper.ts',
-    'custom-graph.ts',
-    'pipeline.ts',
-    'team-conversation.ts',
-    'review-loop.ts',
-    'callback-gate.ts',
-    'proof-bound-approval.ts',
-    'proof-cache.ts',
-    'durable-storage.ts',
-    'safe-node-attempt.ts',
-    'turn-taking.ts',
-    'workspace.ts',
-    'supervised-run.ts',
-    'safe-change.ts',
-    'safe-change-recipe.ts',
-    'safe-change-file-adapter.ts',
-    'run-child.ts',
-  ],
+  include: ['consumer.ts', ...CONSUMER_EXAMPLES],
 };
 
 /**
@@ -637,6 +619,7 @@ async function main() {
   const turnTakingExamplePath = join(root, 'examples', 'turn-taking.ts');
   const workspaceExamplePath = join(root, 'examples', 'workspace.ts');
   const featureTeamExamplePath = join(root, 'examples', 'feature-team.ts');
+  const tournamentExamplePath = join(root, 'examples', 'tournament.ts');
   const runnerExamplePath = join(root, 'examples', 'supervised-run.ts');
   const runnerHostPath = join(root, 'examples', 'supervised-host.mjs');
   const safeChangeExamplePath = join(root, 'examples', 'safe-change.ts');
@@ -781,10 +764,19 @@ async function main() {
     await copyFile(turnTakingExamplePath, join(consumerDirectory, 'turn-taking.ts'));
     await copyFile(workspaceExamplePath, join(consumerDirectory, 'workspace.ts'));
     await copyFile(featureTeamExamplePath, join(consumerDirectory, 'feature-team.ts'));
+    await copyFile(tournamentExamplePath, join(consumerDirectory, 'tournament.ts'));
     await copyFile(describedTeamExamplePath, join(consumerDirectory, 'described-team.ts'));
     await copyFile(runnerExamplePath, join(consumerDirectory, 'supervised-run.ts'));
     await copyFile(runnerHostPath, join(consumerDirectory, 'supervised-host.mjs'));
     await copyFile(runChildExamplePath, join(consumerDirectory, 'run-child.ts'));
+    await mkdir(join(consumerDirectory, 'teams'), { recursive: true });
+    await copyFile(join(root, 'examples', 'teams', 'scripted-engine.ts'), join(consumerDirectory, 'teams', 'scripted-engine.ts'));
+    await copyFile(join(root, 'examples', 'teams', 'writer-reviewer-pair.ts'), join(consumerDirectory, 'teams', 'writer-reviewer-pair.ts'));
+    await copyFile(join(root, 'examples', 'teams', 'writer-reviewer-pair.proof.ts'), join(consumerDirectory, 'teams', 'writer-reviewer-pair.proof.ts'));
+    await copyFile(join(root, 'examples', 'teams', 'threshold-panel.ts'), join(consumerDirectory, 'teams', 'threshold-panel.ts'));
+    await copyFile(join(root, 'examples', 'teams', 'threshold-panel.proof.ts'), join(consumerDirectory, 'teams', 'threshold-panel.proof.ts'));
+    await copyFile(join(root, 'examples', 'teams', 'feature-delivery.ts'), join(consumerDirectory, 'teams', 'feature-delivery.ts'));
+    await copyFile(join(root, 'examples', 'teams', 'feature-delivery.proof.ts'), join(consumerDirectory, 'teams', 'feature-delivery.proof.ts'));
 
     run('pnpm', ['install', '--offline', '--ignore-scripts'], {
       cwd: consumerDirectory,
@@ -842,8 +834,53 @@ async function main() {
     const directRunChild = run('pnpm', ['exec', 'tsx', 'run-child.ts'], {
       cwd: consumerDirectory,
     }).trim();
+    const compiledTeamPair = JSON.parse(
+      run(process.execPath, ['dist/teams/writer-reviewer-pair.proof.js'], { cwd: consumerDirectory }),
+    );
+    const directTeamPair = JSON.parse(
+      run('pnpm', ['exec', 'tsx', 'teams/writer-reviewer-pair.proof.ts'], { cwd: consumerDirectory }),
+    );
+    const compiledTeamPanel = JSON.parse(
+      run(process.execPath, ['dist/teams/threshold-panel.proof.js'], { cwd: consumerDirectory }),
+    );
+    const directTeamPanel = JSON.parse(
+      run('pnpm', ['exec', 'tsx', 'teams/threshold-panel.proof.ts'], { cwd: consumerDirectory }),
+    );
+    const compiledTeamFeature = JSON.parse(
+      run(process.execPath, ['dist/teams/feature-delivery.proof.js'], { cwd: consumerDirectory }),
+    );
+    const directTeamFeature = JSON.parse(
+      run('pnpm', ['exec', 'tsx', 'teams/feature-delivery.proof.ts'], { cwd: consumerDirectory }),
+    );
+    const compiledTournament = JSON.parse(
+      run(process.execPath, ['dist/tournament.js'], { cwd: consumerDirectory }),
+    );
+    const directTournament = JSON.parse(
+      run('pnpm', ['exec', 'tsx', 'tournament.ts'], { cwd: consumerDirectory }),
+    );
     assert.equal(compiledRunChild, 'ready');
     assert.equal(directRunChild, 'ready');
+    assert.deepEqual(compiledTeamPair, directTeamPair);
+    assert.deepEqual(compiledTeamPanel, directTeamPanel);
+    assert.deepEqual(compiledTeamFeature, directTeamFeature);
+    assert.equal(compiledTeamPair.status, 'pass');
+    assert.equal(compiledTeamPair.testCommandsRun, 2);
+    assert.equal(compiledTeamPair.reviewerKickbacks, 1);
+    assert.deepEqual(compiledTeamPair.modelFamilies, ['claude', 'gpt']);
+    assert.equal(compiledTeamPanel.status, 'pass');
+    assert.equal(compiledTeamPanel.testCommandsRun, 2);
+    assert.equal(compiledTeamPanel.threshold, '3 of 3');
+    assert.deepEqual(compiledTeamPanel.reviewerCalls, [2, 2, 2]);
+    assert.equal(compiledTeamFeature.status, 'pass');
+    assert.equal(compiledTeamFeature.testCommandsRun, 2);
+    assert.equal(compiledTeamFeature.reviewRounds, 2);
+    assert.equal(compiledTeamFeature.kickbacks, 1);
+    assert.deepEqual(compiledTournament, directTournament);
+    assert.equal(compiledTournament.status, 'pass');
+    assert.equal(compiledTournament.candidates, 3);
+    assert.equal(compiledTournament.winnerLanded, true);
+    assert.deepEqual(compiledTournament.candidateBranches, []);
+    assert.equal(compiledTournament.temporaryDirectoryRemoved, true);
     const featureDenySource = featureExampleSource.replace(
       '{ approved: true },',
       '{ approved: false },',
@@ -1046,7 +1083,7 @@ async function main() {
       directFeatureLine.acceptedKickbacks !== 1
     ) {
       throw new Error(
-        `Packed consumer returned an invalid report: ${JSON.stringify({ report, productionLine, directProductionLine, featureLine, directFeatureLine })}`,
+        `Packed consumer returned an invalid report: ${JSON.stringify({ report, productionLine, directProductionLine, featureLine, directFeatureLine, compiledTeamPair, compiledTeamPanel, compiledTeamFeature })}`,
       );
     }
 
@@ -1061,7 +1098,7 @@ async function main() {
     if (refs.length !== 1) throw new Error(`Git memory created ${refs.length} private refs instead of one`);
 
     console.log(
-      'Clean offline consumer passed with TypeScript 7 and 6, offline-review.ts, described-team.ts, safe-change.ts, feature-delivery.ts, forge-helper.ts, the outside graph, the pipeline executor example, the review loop, the callback gate, proof-bound approval, the turn-taking executor example, durable storage, safe node attempts, the supervised runner, 17 memory cases, and both memory adapters.',
+      'Clean offline consumer passed with TypeScript 7 and 6, offline-review.ts, described-team.ts, safe-change.ts, feature-delivery.ts, the three packed team examples, forge-helper.ts, the outside graph, the pipeline executor example, the review loop, the callback gate, proof-bound approval, the turn-taking executor example, durable storage, safe node attempts, the supervised runner, 17 memory cases, and both memory adapters.',
     );
   } finally {
     await rm(directory, { recursive: true, force: true });
