@@ -12,7 +12,7 @@ const writer = {
   identity: {
     adapter: 'claude-cli',
     provider: 'anthropic',
-    modelFamily: 'claude-sonnet-4-5',
+    modelFamily: 'claude',
     model: 'claude-sonnet-4-5',
   },
 };
@@ -24,7 +24,7 @@ const reviewer = {
   identity: {
     adapter: 'codex',
     provider: 'openai',
-    modelFamily: 'gpt-5.6-luna',
+    modelFamily: 'gpt',
     model: 'gpt-5.6-luna',
   },
 };
@@ -32,7 +32,7 @@ const team = writerReviewerPair({
   brief: 'Write a pure add(a, b) function in src/add.mjs with a Node test in test/add.test.mjs.',
   workspace,
   files: ['src/add.mjs', 'test/add.test.mjs'],
-  test: { command: process.execPath, args: ['--test', 'test/add.test.mjs'] },
+  test: { command: 'node', args: ['--test', 'test/add.test.mjs'] },
   writer,
   reviewer,
 });

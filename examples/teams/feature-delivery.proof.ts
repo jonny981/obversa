@@ -25,15 +25,15 @@ async function writeImplementation(cwd: string, repaired: boolean): Promise<void
 
 const workspace = await mkdtemp(join(tmpdir(), 'obversa-team-feature-example-'));
 try {
-  const analyse = scriptedSeat('feature-analyse', 'analyse-family', [async (request) => {
+  const analyse = scriptedSeat('feature-analyse', 'claude', [async (request) => {
     await writeBrief(request.cwd!);
     return pass('brief accepted');
   }]);
-  const implement = scriptedSeat('feature-implement', 'implement-family', [
+  const implement = scriptedSeat('feature-implement', 'gpt', [
     async (request) => { await writeImplementation(request.cwd!, false); return pass('first implementation written'); },
     async (request) => { await writeImplementation(request.cwd!, true); return pass('implementation repaired'); },
   ]);
-  const correctness = scriptedSeat('feature-correctness', 'correctness-family', [
+  const correctness = scriptedSeat('feature-correctness', 'claude', [
     async (request) => {
       await mkdir(join(request.cwd!, 'reviews'), { recursive: true });
       await writeFile(join(request.cwd!, 'reviews/correctness.json'), '{"round":1}\n');
@@ -44,7 +44,7 @@ try {
       return pass('result meets the brief');
     },
   ]);
-  const scope = scriptedSeat('feature-scope', 'scope-family', [
+  const scope = scriptedSeat('feature-scope', 'big-pickle', [
     async (request) => {
       await mkdir(join(request.cwd!, 'reviews'), { recursive: true });
       await writeFile(join(request.cwd!, 'reviews/scope.json'), '{"round":1}\n');
@@ -52,7 +52,7 @@ try {
     },
     async () => pass('scope remains inside the brief'),
   ]);
-  const approve = scriptedSeat('feature-approve', 'approve-family', [async (request) => {
+  const approve = scriptedSeat('feature-approve', 'claude', [async (request) => {
     await writeFile(join(request.cwd!, 'team-output/approval.md'), 'The change is ready to ship.\n');
     return pass('delivery approved');
   }]);

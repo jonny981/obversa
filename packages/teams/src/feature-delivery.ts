@@ -10,6 +10,7 @@ import {
   DELIVERY_NOTE,
   expectedFilesPrompt,
   panelReviewers,
+  requireNoFiles,
   requireNonEmptyFiles,
   teamAgent,
   teamTest,
@@ -29,7 +30,7 @@ export function featureDelivery(config: FeatureDeliveryConfig) {
     'analyse',
     config.analyse,
     config,
-    `Write a delivery note to ${DELIVERY_NOTE} that names each requirement in the brief.`,
+    `Write only a delivery note to ${DELIVERY_NOTE} that names each requirement in the brief. Do not create or modify any other file, including these expected implementation files: ${config.files.join(', ')}.`,
   );
   const implement = teamAgent(
     'implement',
@@ -52,11 +53,11 @@ export function featureDelivery(config: FeatureDeliveryConfig) {
     config,
     `Read the brief, implementation, test result, and review evidence. Write an approval note to ${APPROVAL_NOTE} stating that the change is ready to ship.`,
   );
-  const checkedAnalyse = requireNonEmptyFiles(
+  const checkedAnalyse = requireNoFiles(
     'analyse',
-    analyse,
+    requireNonEmptyFiles('analyse', analyse, config.workspace, [DELIVERY_NOTE]),
     config.workspace,
-    [DELIVERY_NOTE],
+    config.files,
   );
   const checkedImplement = requireNonEmptyFiles(
     'implement',

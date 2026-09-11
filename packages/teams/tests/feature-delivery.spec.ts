@@ -140,6 +140,37 @@ describe('featureDelivery', () => {
     }
   });
 
+  it('fails analyse when it writes an expected implementation file', async () => {
+    const workspace = await mkdtemp(join(tmpdir(), 'obversa-teams-feature-analysis-'));
+    try {
+      const analyse = scriptedEngine('analyse', [async (request) => {
+        await writeAnalysis(request.cwd!);
+        await mkdir(join(request.cwd!, 'src'), { recursive: true });
+        await writeFile(join(request.cwd!, 'src/result.mjs'), 'export const result = 11;\n');
+        return pass('brief accepted');
+      }]);
+      const implement = scriptedEngine('implement', [async () => pass('unused')]);
+      const reviewer = scriptedEngine('reviewer', [async () => pass('unused')]);
+      const approve = scriptedEngine('approve', [async () => pass('unused')]);
+      const result = await run(featureDelivery({
+        brief: 'Deliver a module that exports result 11.',
+        workspace,
+        files: ['src/result.mjs', 'test/result.test.mjs'],
+        test: testCommand,
+        analyse: seat(analyse, 'claude'),
+        implement: seat(implement, 'gpt'),
+        reviewers: [{ name: 'reviewer', seat: seat(reviewer, 'claude') }],
+        reviewThreshold: 1,
+        approve: seat(approve, 'claude'),
+      }), { cwd: workspace });
+      expect(result.outcome.status).toBe('fail');
+      const nodes = result.outcome.data as { analyse?: { summary?: string } };
+      expect(nodes.analyse?.summary).toContain('analyse wrote the implementation');
+    } finally {
+      await rm(workspace, { recursive: true, force: true });
+    }
+  });
+
   it('checks diversity between implementation and reviewers, not analyse or approve', () => {
     const make = (name: string) => scriptedEngine(name, [async () => pass('unused')]);
     const analyse = make('analyse');

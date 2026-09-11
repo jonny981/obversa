@@ -14,7 +14,7 @@ const analyse = {
   identity: {
     adapter: 'claude-cli',
     provider: 'anthropic',
-    modelFamily: 'claude-sonnet-4-5',
+    modelFamily: 'claude',
     model: 'claude-sonnet-4-5',
   },
 };
@@ -26,7 +26,7 @@ const implement = {
   identity: {
     adapter: 'codex',
     provider: 'openai',
-    modelFamily: 'gpt-5.6-luna',
+    modelFamily: 'gpt',
     model: 'gpt-5.6-luna',
   },
 };
@@ -38,7 +38,7 @@ const reviewer = {
   identity: {
     adapter: 'claude-cli',
     provider: 'anthropic',
-    modelFamily: 'claude-sonnet-4-5',
+    modelFamily: 'claude',
     model: 'claude-sonnet-4-5',
   },
 };
@@ -50,7 +50,7 @@ const approve = {
   identity: {
     adapter: 'claude-cli',
     provider: 'anthropic',
-    modelFamily: 'claude-sonnet-4-5',
+    modelFamily: 'claude',
     model: 'claude-sonnet-4-5',
   },
 };
@@ -60,7 +60,7 @@ const team = featureDelivery({
   brief: 'Deliver a pure triple(value) function in src/triple.mjs with a Node test in test/triple.test.mjs.',
   workspace,
   files: ['src/triple.mjs', 'test/triple.test.mjs'],
-  test: { command: process.execPath, args: ['--test', 'test/triple.test.mjs'] },
+  test: { command: 'node', args: ['--test', 'test/triple.test.mjs'] },
   analyse,
   implement,
   reviewers: [{ name: 'correctness', seat: reviewer }],

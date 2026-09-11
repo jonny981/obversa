@@ -20,11 +20,11 @@ async function writeFiles(cwd: string): Promise<void> {
 
 const workspace = await mkdtemp(join(tmpdir(), 'obversa-team-pair-example-'));
 try {
-  const writer = scriptedSeat('pair-writer', 'writer-family', [
+  const writer = scriptedSeat('pair-writer', 'claude', [
     async (request) => { await writeFiles(request.cwd!); return pass('writer wrote the files'); },
     async (request) => { await writeFiles(request.cwd!); return pass('writer applied the review'); },
   ]);
-  const reviewer = scriptedSeat('pair-reviewer', 'reviewer-family', [
+  const reviewer = scriptedSeat('pair-reviewer', 'gpt', [
     async (request) => {
       await mkdir(join(request.cwd!, 'reviews'), { recursive: true });
       await writeFile(join(request.cwd!, 'reviews/reviewer.json'), '{"status":"revise"}\n');

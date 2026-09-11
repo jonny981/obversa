@@ -117,6 +117,34 @@ export function requireNonEmptyFiles(
   };
 }
 
+export function requireNoFiles(
+  label: string,
+  job: Job,
+  workspace: string,
+  files: readonly string[],
+): Job {
+  return async (ctx) => {
+    const outcome = await job(ctx);
+    if (outcome.status !== 'pass') return outcome;
+    const present: string[] = [];
+    for (const file of files) {
+      try {
+        await stat(join(workspace, file));
+        present.push(file);
+      } catch {
+        // The expected absence is the successful result.
+      }
+    }
+    if (present.length) {
+      return {
+        status: 'fail',
+        summary: `${label} wrote the implementation before its step completed: ${present.join(', ')}`,
+      };
+    }
+    return outcome;
+  };
+}
+
 function rolePrompt(role: string, brief: string): string {
   return [
     `Obversa team role: ${role}`,

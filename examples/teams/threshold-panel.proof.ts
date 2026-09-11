@@ -20,13 +20,13 @@ async function writeFiles(cwd: string): Promise<void> {
 
 const workspace = await mkdtemp(join(tmpdir(), 'obversa-team-panel-example-'));
 try {
-  const implement = scriptedSeat('panel-implement', 'implement-family', [
+  const implement = scriptedSeat('panel-implement', 'claude', [
     async (request) => { await writeFiles(request.cwd!); return pass('implementation written'); },
     async (request) => { await writeFiles(request.cwd!); return pass('implementation repaired'); },
   ]);
   const reviewers = ['correctness', 'tests', 'scope'].map((name, index) => scriptedSeat(
     `panel-${name}`,
-    `${name}-family`,
+    ['gpt', 'big-pickle', 'scripted'][index]!,
     [
       async (request) => {
         await mkdir(join(request.cwd!, 'reviews'), { recursive: true });

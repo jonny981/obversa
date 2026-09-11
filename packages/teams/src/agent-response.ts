@@ -10,10 +10,33 @@ interface AgentDecision {
   readonly findings?: readonly FeedbackFinding[];
 }
 
+function firstObject(text: string): string | undefined {
+  const start = text.indexOf('{');
+  if (start === -1) return undefined;
+  let depth = 0;
+  let inString = false;
+  let escaped = false;
+  for (let index = start; index < text.length; index += 1) {
+    const character = text[index]!;
+    if (inString) {
+      if (escaped) escaped = false;
+      else if (character === '\\') escaped = true;
+      else if (character === '"') inString = false;
+      continue;
+    }
+    if (character === '"') inString = true;
+    else if (character === '{') depth += 1;
+    else if (character === '}' && --depth === 0) return text.slice(start, index + 1);
+  }
+  return undefined;
+}
+
 function parseDecision(text: string): AgentDecision | undefined {
-  const trimmed = text.trim().replace(/^```(?:json)?\s*|\s*```$/g, '');
+  const trimmed = text.trim();
+  const object = firstObject(trimmed);
+  if (!object) return undefined;
   try {
-    const value: unknown = JSON.parse(trimmed);
+    const value: unknown = JSON.parse(object);
     if (typeof value !== 'object' || value === null || Array.isArray(value)) return undefined;
     const candidate = value as Partial<AgentDecision>;
     if (candidate.status !== 'pass' && candidate.status !== 'revise') return undefined;

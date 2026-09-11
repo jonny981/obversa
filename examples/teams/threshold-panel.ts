@@ -19,7 +19,7 @@ const implement = {
   identity: {
     adapter: 'claude-cli',
     provider: 'anthropic',
-    modelFamily: 'claude-sonnet-4-5',
+    modelFamily: 'claude',
     model: 'claude-sonnet-4-5',
   },
 };
@@ -31,7 +31,7 @@ const correctness = {
   identity: {
     adapter: 'codex',
     provider: 'openai',
-    modelFamily: 'gpt-5.6-luna',
+    modelFamily: 'gpt',
     model: 'gpt-5.6-luna',
   },
 };
@@ -52,7 +52,7 @@ const team = thresholdPanel({
   brief: 'Write a pure double(value) function in src/double.mjs with a Node test in test/double.test.mjs.',
   workspace,
   files: ['src/double.mjs', 'test/double.test.mjs'],
-  test: { command: process.execPath, args: ['--test', 'test/double.test.mjs'] },
+  test: { command: 'node', args: ['--test', 'test/double.test.mjs'] },
   implement,
   reviewers: [
     { name: 'correctness', seat: correctness },
