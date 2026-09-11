@@ -1,4 +1,5 @@
 import { spawn, type ChildProcess } from 'node:child_process';
+import { performance } from 'node:perf_hooks';
 
 const MAX_TIMER_MS = 2_147_483_647;
 
@@ -130,6 +131,7 @@ function joined(chunks: readonly Uint8Array[]): Uint8Array {
 /** Run one bounded child process and drain both output pipes until close. */
 export function runChild(options: RunChildOptions): Promise<RunChildResult> {
   const limits = validate(options);
+  const deadline = performance.now() + limits.timeoutMs;
   if (options.signal?.aborted) {
     return Promise.resolve(Object.freeze({
       exitCode: null,
@@ -215,7 +217,8 @@ export function runChild(options: RunChildOptions): Promise<RunChildResult> {
         exitCode: closeSignal === null ? closeCode : null,
         stdout: captured.stdout,
         stderr: captured.stderr,
-        timedOut: stopReason === 'timeout',
+        timedOut: stopReason === 'timeout'
+          || (stopReason === undefined && performance.now() >= deadline),
         aborted: stopReason === 'abort',
       }));
     };

@@ -602,7 +602,7 @@ export async function runOwnedCommand(
     exitCode: childResult?.exitCode ?? null,
     stdout: childResult?.stdout ?? new Uint8Array(),
     stderr: childResult?.stderr ?? new Uint8Array(),
-    timedOut: stopReason === 'timeout',
+    timedOut: stopReason === 'timeout' || childResult?.timedOut === true,
     aborted: stopReason === 'abort',
     peakMemoryBytes,
     remainingProcesses: Object.freeze([]),

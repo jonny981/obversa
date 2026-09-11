@@ -61,6 +61,29 @@ describe('runChild', () => {
     });
   });
 
+  it('keeps timeout classification when setup delays the timeout callback', async () => {
+    const result = await runChild({
+      executable: node,
+      args: ['-e', 'setInterval(() => {}, 1_000)'],
+      timeoutMs: 20,
+      killGraceMs: 100,
+      maxOutputBytes: 1_024,
+      hooks: {
+        onSpawn(child) {
+          const end = Date.now() + 100;
+          while (Date.now() < end) {}
+          expect(child.kill('SIGKILL')).toBe(true);
+        },
+      },
+    });
+
+    expect(result).toMatchObject({
+      exitCode: null,
+      timedOut: true,
+      aborted: false,
+    });
+  });
+
   it('fails with an output limit while draining a full pipe', async () => {
     await expect(runChild({
       executable: node,
