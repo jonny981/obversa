@@ -124,6 +124,11 @@ const result = await run(team, { cwd: workspace });
 console.log(JSON.stringify(result.outcome, null, 2));
 ```
 
+A writing seat can write anywhere the process can: the file starts its
+Claude and Codex seats with permission prompts off, which is what lets a
+model write files. Run it in a directory you are willing to let a model
+change.
+
 Each seat is an engine and the identity it runs under: adapter, provider,
 model family and model. The implementer and every reviewer must be
 different model families, and the package refuses the team before any
@@ -162,7 +167,6 @@ that wrote the work is not the model that grades it.
 | `@obversa/engine-opencode-cli` | the OpenCode CLI | OpenCode CLI 1.18.23 |
 | `@obversa/engine-anthropic-api` | the Anthropic API | an API key |
 | `@obversa/engine-agent-sdk` | the Claude Agent SDK | host Claude auth |
-| `@obversa/teams` | three ready-made teams: a writer and a reviewer, a review panel, feature delivery | `@obversa/runtime` and the engine plugins you seat |
 
 Write your own against the engine contract; it must pass the conformance kit.
 
@@ -175,14 +179,15 @@ Write your own against the engine contract; it must pass the conformance kit.
 
 ## What is in this repository
 
-Fourteen publishable packages. `packages/` holds the six that define the
+16 publishable packages. `packages/` holds the eight that define the
 product: `@obversa/runtime` is the runtime and its public contract,
-`@obversa/runner` supervises stored runs, `@obversa/engine` and `@obversa/memory`
-are the engine and memory contracts, and `@obversa/surfacer` and
-`@obversa/source` are the local review surface. `plugins/` holds the eight
-adapters: the six engines above and two memories, one in process and one in
-private Git references. `hosts/` holds the terminal host, which is not
-published.
+`@obversa/teams` is three ready-made teams built on it, `@obversa/runner`
+supervises stored runs, `@obversa/engine` and `@obversa/memory` are the
+engine and memory contracts, `@obversa/process` runs a child process to a
+deadline, and `@obversa/surfacer` and `@obversa/source` are the local
+review surface. `plugins/` holds the eight adapters: the six engines above
+and two memories, one in process and one in private Git references.
+`hosts/` holds the terminal host, which is not published.
 
 ## Requirements
 

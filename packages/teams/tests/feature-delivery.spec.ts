@@ -6,7 +6,7 @@ import { describe, expect, it } from 'vitest';
 import { jobMeta, run } from '@obversa/runtime';
 
 import { featureDelivery } from '../src/index.js';
-import { requireNoFiles } from '../src/team-utils.js';
+import { assertTeamInput, requireNoFiles } from '../src/team-utils.js';
 import { pass, revise, scriptedEngine, seat } from './scripted-engine.js';
 
 const testCommand = {
@@ -186,9 +186,20 @@ describe('featureDelivery', () => {
       }), { cwd: workspace });
       expect(result.outcome.status).toBe('fail');
       const nodes = result.outcome.data as { analyse?: { summary?: string } };
-      expect(nodes.analyse?.summary).toContain('analyse wrote the implementation');
+      expect(nodes.analyse?.summary).toContain('analyse wrote, changed or removed the implementation');
     } finally {
       await rm(workspace, { recursive: true, force: true });
+    }
+  });
+
+  it('rejects team output notes as expected files', () => {
+    for (const file of ['team-output/brief.md', 'team-output/approval.md']) {
+      expect(() => assertTeamInput({
+        brief: 'Deliver a module.',
+        workspace: '/tmp/obversa-teams-feature',
+        files: [file],
+        test: testCommand,
+      })).toThrow(/team output note/);
     }
   });
 

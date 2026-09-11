@@ -1,4 +1,5 @@
-import { stat } from 'node:fs/promises';
+import { createHash } from 'node:crypto';
+import { readFile, stat } from 'node:fs/promises';
 import { join } from 'node:path';
 
 import {
@@ -22,6 +23,9 @@ export function assertTeamInput(input: TeamInput): void {
   for (const file of input.files) {
     if (typeof file !== 'string' || !file.trim() || file.startsWith('/') || file.split('/').includes('..')) {
       throw new TypeError(`expected file must be a non-empty relative path: ${file}`);
+    }
+    if (file === DELIVERY_NOTE || file === APPROVAL_NOTE) {
+      throw new TypeError(`expected file must not be a team output note: ${file}`);
     }
   }
   if (!input.test.command.trim()) throw new TypeError('test command must not be empty');
@@ -136,8 +140,7 @@ export function requireNoFiles(
       const previous = before.get(file)!;
       if (
         previous.exists !== after.exists
-        || previous.size !== after.size
-        || previous.mtimeMs !== after.mtimeMs
+        || previous.hash !== after.hash
       ) {
         changed.push(file);
       }
@@ -145,7 +148,7 @@ export function requireNoFiles(
     if (changed.length) {
       return {
         status: 'fail',
-        summary: `${label} wrote the implementation before its step completed: ${changed.join(', ')}`,
+        summary: `${label} wrote, changed or removed the implementation before its step completed: ${changed.join(', ')}`,
       };
     }
     return outcome;
@@ -154,16 +157,17 @@ export function requireNoFiles(
 
 interface FileSnapshot {
   exists: boolean;
-  size: number | null;
-  mtimeMs: number | null;
+  hash: string | null;
 }
 
 async function snapshotFile(path: string): Promise<FileSnapshot> {
   try {
     const details = await stat(path);
-    return { exists: true, size: details.size, mtimeMs: details.mtimeMs };
+    if (!details.isFile()) return { exists: true, hash: null };
+    const contents = await readFile(path);
+    return { exists: true, hash: createHash('sha256').update(contents).digest('hex') };
   } catch {
-    return { exists: false, size: null, mtimeMs: null };
+    return { exists: false, hash: null };
   }
 }
 

@@ -133,6 +133,11 @@ const result = await run(team, { cwd: workspace });
 console.log(JSON.stringify(result.outcome, null, 2));
 ```
 
+A writing seat can write anywhere the process can: the file starts its
+Claude and Codex seats with permission prompts off, which is what lets a
+model write files. Run it in a directory you are willing to let a model
+change.
+
 One real run of this file printed:
 
 ```json
