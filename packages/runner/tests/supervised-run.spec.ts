@@ -8,13 +8,23 @@ import { fileURLToPath } from 'node:url';
 
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { digestJson } from '@obversa/engine';
-import { inspectOwnedProcessTree, stopOwnedProcessTree } from '@obversa/engine/command';
+import { inspectOwnedProcessTree, runOwnedCommand, stopOwnedProcessTree } from '@obversa/engine/command';
 
 import * as runtime from '@obversa/runtime';
 import * as runner from '../src/index.js';
 import { createLocalRunStorage } from '@obversa/runtime/storage/local';
 import { hostModuleDigest, readSupervision, supervisionWriter, type SupervisedHostRecord } from '../src/supervised-record.js';
 import { tmpRepo, cleanupRepos } from './git-helpers.js';
+
+vi.mock('@obversa/engine/command', async (importOriginal) => {
+  const command = await importOriginal<typeof import('@obversa/engine/command')>();
+  return { ...command, runOwnedCommand: vi.fn(command.runOwnedCommand) };
+});
+
+vi.mock('@obversa/runtime', async (importOriginal) => {
+  const runtime = await importOriginal<typeof import('@obversa/runtime')>();
+  return { ...runtime, interruptRunPreflight: vi.fn(runtime.interruptRunPreflight) };
+});
 
 // Real work: these tests create temporary Git repositories and write files
 // to disk, so this file declares its own time limit; the suite default is a
@@ -37,7 +47,7 @@ const invalidNames: unknown[] = [
   ['BAD\nNAME'], [`BAD${String.fromCharCode(0)}NAME`], [7], [undefined], Array(1),
 ];
 
-async function fixture(withEngine = false, nodeCount = 2) {
+async function fixture(withEngine = false, nodeCount = 2, preflight = false) {
   const root = await realpath(await mkdtemp(join(tmpdir(), 'obversa-supervised-')));
   roots.push(root);
   const runRoot = await realpath(await tmpRepo());
@@ -58,6 +68,10 @@ async function fixture(withEngine = false, nodeCount = 2) {
   const resolvedPlan = runtime.resolveGraphPlan(graph.describe(), {
     package: identity, admission: { package: identity, permissions: [] },
     executionLanes: withEngine ? [{ id: lane.id, effective: target }] : [],
+    ...(preflight ? { preflight: {
+      timeoutMs: 30_000,
+      lanes: [{ laneId: lane.id, live: 'required' as const, unsupportedStatic: 'block' as const }],
+    } } : {}),
   });
   const storage = { directory: join(root, 'storage'), namespace: 'runner-tests', policy };
   return {
@@ -149,6 +163,111 @@ async function expectPauseAnchorCleanup(
   expect(lease.ok).toBe(true);
   if (lease.ok) await options.workspace.releaseLease(lease.token);
   expect(await readdir(join(options.storage.directory, 'runner-locks/runner-tests'))).toEqual([]);
+}
+
+async function preflightFixture(control: runtime.JsonObject = { mode: 'fail' }) {
+  const { root, options } = await fixture(true, 2, true);
+  const controlFile = join(root, 'probe-control.json');
+  await writeFile(controlFile, JSON.stringify(control));
+  return {
+    controlFile,
+    options: {
+      ...options,
+      definition: { ...options.definition, resolvedInputs: {
+        preflightControl: controlFile, storage: options.storage,
+      } },
+    },
+  };
+}
+
+async function resumePreflight(
+  options: runner.SupervisedRunOptions, preflightEventId: string,
+  extra: Record<string, unknown> = {},
+) {
+  const handle = await runner.resumeSupervisedRun({
+    directory: options.directory, runRoot: options.runRoot, storage: options.storage,
+    workspace: options.workspace, restart: options.restart, teardownGraceMs: options.teardownGraceMs,
+    environmentVariables: options.environmentVariables,
+    runId: options.definition.runId, preflightEventId, ...extra,
+  });
+  handles.push(handle);
+  return handle;
+}
+
+async function runEvents(options: runner.SupervisedRunOptions) {
+  const events: runtime.DomainEventEnvelope[] = [];
+  for await (const event of createLocalRunStorage(options.storage).eventStore.read({
+    namespace: options.storage.namespace, streamId: options.definition.runId,
+  })) events.push(event);
+  return events;
+}
+
+async function probeCalls(options: runner.SupervisedRunOptions) {
+  const bytes = await readFile(join(options.directory, 'scratch/preflight-calls.jsonl'), 'utf8').catch(() => '');
+  return bytes.trim().split('\n').filter(Boolean).map((line) => JSON.parse(line) as {
+    stage: 'static' | 'live'; pid: number; attempt: {
+      runId: string; attemptId: string; leafId: string; path: string[];
+      label: string; iteration: number; leaf: boolean;
+    }; model: string; tools: string[]; cwd: string;
+  });
+}
+
+async function pausedPreflight() {
+  const fixture = await preflightFixture();
+  const handle = await startFixture(fixture.options);
+  const result = await handle.done;
+  expect(result, JSON.stringify(result)).toMatchObject({ kind: 'pause', code: 'PREFLIGHT_PAUSED', preflightEventId: expect.any(String) });
+  const state = await runtime.readRunPreflight(createLocalRunStorage(fixture.options.storage), 'fixture');
+  expect(result).toEqual(state.pause);
+  return { ...fixture, handle, pause: state.pause! };
+}
+
+// The test appends one unfinished check, then uses the real public interruption
+// writer. It creates no receipt or model call and is used only while no worker runs.
+async function advancePausedPreflight(options: runner.SupervisedRunOptions, oldId: string) {
+  const storage = createLocalRunStorage(options.storage);
+  const events = await runEvents(options);
+  const live = events.findLast((event) => event.type === 'preflight:probe-started'
+    && (event.payload as runtime.JsonObject).stage === 'live')!;
+  const resumedId = randomUUID();
+  await storage.eventStore.append({ namespace: options.storage.namespace, streamId: 'fixture' }, events.at(-1)!.revision, [{
+    eventId: resumedId, type: 'preflight:resumed', version: 1, timestamp: new Date().toISOString(),
+    correlationId: 'fixture', causationId: oldId, payload: { preflightEventId: oldId },
+  }, {
+    eventId: randomUUID(), type: 'preflight:probe-started', version: 1,
+    timestamp: new Date().toISOString(), correlationId: 'fixture', causationId: resumedId,
+    payload: live.payload,
+  }]);
+  const pause = await runtime.interruptRunPreflight(storage, 'fixture');
+  expect(pause).not.toBeNull();
+  return pause!;
+}
+
+async function assertProbePauseOwnership(options: runner.SupervisedRunOptions, handle: runner.SupervisedRunHandle) {
+  const state = await runtime.readRunPreflight(createLocalRunStorage(options.storage), 'fixture');
+  expect(state.phase).toBe('paused');
+  expect(state.unfinishedProbeEventId).toBeNull();
+  expect(await handle.status()).toMatchObject({
+    phase: 'paused', workerAlive: false, cleanupVerified: true, leaseRetained: false, active: [],
+    usage: [
+      { nodeId: 'first', usage: { kind: 'unknown' } },
+      { nodeId: 'last', usage: { kind: 'unknown' } },
+    ],
+  });
+  const records = await readSupervision(createLocalRunStorage(options.storage), 'fixture');
+  const terminal = records.at(-1)!.payload as runtime.JsonObject;
+  const reference = runtime.validateArtifactReference(terminal.anchorArtifact);
+  const bytes = await createLocalRunStorage(options.storage).artifactStore.read(
+    { namespace: options.storage.namespace, runId: 'fixture' }, reference,
+  );
+  const anchor = JSON.parse(Buffer.from(bytes).toString('utf8')) as runtime.WorkspaceAnchor;
+  expect(await options.workspace.verify(anchor)).toMatchObject({ ok: true });
+  const lease = await options.workspace.acquireLease('after-preflight', 'fixture', anchor);
+  expect(lease.ok).toBe(true);
+  if (lease.ok) await options.workspace.releaseLease(lease.token);
+  expect(await readdir(join(options.storage.directory, 'runner-locks/runner-tests'))).toEqual([]);
+  for (const call of await probeCalls(options)) expect(() => process.kill(call.pid, 0)).toThrow();
+  return records;
 }
 
 afterEach(async () => {
@@ -1798,5 +1917,660 @@ process.stdout.write(JSON.stringify(await handle.done));
       await expect.poll(() => { try { kill(childPid, 0); return true; } catch { return false; } }).toBe(false);
       if (token !== undefined) await options.workspace.releaseLease(token);
     }
+  });
+});
+
+describe('supervised preflight recovery', () => {
+  it('returns an exact token, resumes once, and keeps probe usage out of node totals', async () => {
+    const { options, controlFile, pause } = await pausedPreflight();
+    const storage = createLocalRunStorage(options.storage);
+    const before = await probeCalls(options);
+    expect(before.filter((call) => call.stage === 'live')).toHaveLength(1);
+    expect((await runEvents(options)).some((event) => event.type === 'graph:node-dispatched')).toBe(false);
+    await writeFile(controlFile, JSON.stringify({ mode: 'success' }));
+    const handle = await resumePreflight(options, pause.preflightEventId);
+    await expect(handle.done).resolves.toMatchObject({ kind: 'complete' });
+    const events = await runEvents(options);
+    expect(events.filter((event) => event.type === 'preflight:resumed').map((event) => event.payload))
+      .toEqual([{ preflightEventId: pause.preflightEventId }]);
+    expect(events.filter((event) => event.type === 'graph:node-dispatched')).toHaveLength(2);
+    const calls = await probeCalls(options);
+    expect(calls.filter((call) => call.stage === 'live')).toHaveLength(2);
+    for (const call of calls) {
+      const start = events.find((event) => event.eventId === call.attempt.leafId)!;
+      expect(start.type).toBe('preflight:probe-started');
+      expect((start.payload as runtime.JsonObject).stage).toBe(call.stage);
+      expect(call.attempt).toEqual({
+        runId: 'fixture',
+        attemptId: digestJson({ namespace: options.storage.namespace, runId: 'fixture', preflightEventId: start.eventId }),
+        leafId: start.eventId, path: ['preflight', start.eventId], label: 'preflight', iteration: 0, leaf: true,
+      });
+      expect(call.cwd).toBe(await realpath(join(options.directory, 'scratch')));
+    }
+    expect((await handle.status()).usage).toEqual([
+      { nodeId: 'first', usage: { kind: 'reported', inputTokens: 7, outputTokens: 3 } },
+      { nodeId: 'last', usage: { kind: 'reported', inputTokens: 7, outputTokens: 3 } },
+    ]);
+    const records = await readSupervision(storage, 'fixture');
+    expect(records.filter((event) => event.type === 'runner:engine-started')).toHaveLength(2);
+    expect(records.filter((event) => event.type === 'runner:worker-exited')).toHaveLength(2);
+    const beforeRetry = await runEvents(options);
+    await expect(resumePreflight(options, pause.preflightEventId)).rejects.toMatchObject({ code: 'RESUME_EVENT_MISMATCH' });
+    expect(await runEvents(options)).toEqual(beforeRetry);
+    expect(await readSupervision(storage, 'fixture')).toEqual(records);
+  });
+
+  it('normalizes a symlinked run directory before preflight and resume', async () => {
+    const { options, controlFile } = await preflightFixture();
+    await mkdir(options.directory, { recursive: true });
+    const linkedDirectory = join(dirname(options.directory), 'runner-link');
+    await symlink(options.directory, linkedDirectory);
+    const configured = { ...options, directory: linkedDirectory };
+    const handle = await startFixture(configured);
+    await expect(handle.done).resolves.toMatchObject({ kind: 'pause', code: 'PREFLIGHT_PAUSED' });
+    const pause = (await runtime.readRunPreflight(createLocalRunStorage(options.storage), 'fixture')).pause!;
+    const scratch = await realpath(join(linkedDirectory, 'scratch'));
+    expect(scratch).not.toBe(join(linkedDirectory, 'scratch'));
+    const before = await probeCalls(configured);
+    expect(before.filter((call) => call.stage === 'live')).toHaveLength(1);
+    for (const call of before) expect(call.cwd).toBe(scratch);
+    await writeFile(controlFile, JSON.stringify({ mode: 'success' }));
+    await expect((await resumePreflight(configured, pause.preflightEventId)).done).resolves.toMatchObject({ kind: 'complete' });
+    const calls = await probeCalls(configured);
+    expect(calls.filter((call) => call.stage === 'live')).toHaveLength(2);
+    for (const call of calls) expect(call.cwd).toBe(scratch);
+  }, 30_000);
+
+  it('refuses stale tokens before resolving a missing host and writes neither stream', async () => {
+    const { options, pause } = await pausedPreflight();
+    const storage = createLocalRunStorage(options.storage);
+    const events = await runEvents(options);
+    const records = await readSupervision(storage, 'fixture');
+    const evaluations = await readFile(join(options.runRoot, 'module-evaluations.log'), 'utf8');
+    await rm(join(options.runRoot, 'host.mjs'));
+    await expect(resumePreflight(options, 'older-token')).rejects.toMatchObject({
+      code: 'RESUME_EVENT_MISMATCH',
+      message: `Resume expected preflight pause event "older-token" but found "${pause.preflightEventId}".`,
+    });
+    expect(await runEvents(options)).toEqual(events);
+    expect(await readSupervision(storage, 'fixture')).toEqual(records);
+    expect(await readFile(join(options.runRoot, 'module-evaluations.log'), 'utf8')).toBe(evaluations);
+    expect(await readdir(join(options.storage.directory, 'runner-locks/runner-tests'))).toEqual([]);
+  });
+
+  it.each([
+    { preflightEventId: '' }, { preflightEventId: ' padded ' }, { preflightEventId: 7 },
+    { preflightEventId: 'bad\nvalue' }, { preflightEventId: 'x'.repeat(257) },
+    { position: 'dag/last/1' }, { position: undefined },
+  ])('rejects malformed or mixed preflight input %# before host work', async (extra) => {
+    const { options, pause } = await pausedPreflight();
+    const storage = createLocalRunStorage(options.storage);
+    const before = await readSupervision(storage, 'fixture');
+    const evaluations = await readFile(join(options.runRoot, 'module-evaluations.log'), 'utf8');
+    await expect(resumePreflight(options, pause.preflightEventId, extra)).rejects.toMatchObject({ code: 'INVALID_OPTIONS' });
+    expect(await readSupervision(storage, 'fixture')).toEqual(before);
+    expect(await readFile(join(options.runRoot, 'module-evaluations.log'), 'utf8')).toBe(evaluations);
+  });
+
+  it('rejects an inherited preflight marker without changing old graph string validation', async () => {
+    const { options, pause } = await pausedPreflight();
+    const supplied = Object.assign(Object.create({ preflightEventId: pause.preflightEventId }), {
+      directory: options.directory, runRoot: options.runRoot, storage: options.storage,
+      workspace: options.workspace, restart: options.restart, teardownGraceMs: options.teardownGraceMs, runId: 'fixture',
+    });
+    await expect(runner.resumeSupervisedRun(supplied)).rejects.toMatchObject({ code: 'INVALID_OPTIONS' });
+    const graph = await pausedFixture();
+    await expect(resumeFixture(graph.options, ' dag/last/1 ')).rejects.toMatchObject({ code: 'RESUME_POSITION' });
+    // Trimming would resume the real unpadded position; a new trim guard would
+    // report INVALID_OPTIONS. Both are changes to the existing exact-byte path.
+  });
+
+  it('rereads the current token under the lock before host resolution', async () => {
+    const { options, pause } = await pausedPreflight();
+    const storage = createLocalRunStorage(options.storage);
+    const prototype = Object.getPrototypeOf(storage.eventStore) as typeof storage.eventStore;
+    const read = prototype.read;
+    let changed = false;
+    let newer: runtime.PreflightPauseResult | undefined;
+    const lock = join(options.storage.directory, 'runner-locks/runner-tests/fixture');
+    vi.spyOn(prototype, 'read').mockImplementation(function (this: typeof storage.eventStore, stream, ...rest) {
+      const store = this;
+      return (async function* () {
+        if (!changed && stream.streamId === 'fixture'
+          && await readdir(lock).then(() => true, () => false)) {
+          changed = true;
+          newer = await advancePausedPreflight(options, pause.preflightEventId);
+          await rm(join(options.runRoot, 'host.mjs'));
+        }
+        yield* read.call(store, stream, ...rest);
+      })();
+    });
+    const before = await readSupervision(storage, 'fixture');
+    await expect(resumePreflight(options, pause.preflightEventId)).rejects.toMatchObject({ code: 'RESUME_EVENT_MISMATCH' });
+    expect(changed).toBe(true);
+    expect((await runtime.readRunPreflight(storage, 'fixture')).pause).toEqual(newer);
+    expect(await readSupervision(storage, 'fixture')).toEqual(before);
+    expect(await readdir(join(options.storage.directory, 'runner-locks/runner-tests'))).toEqual([]);
+  });
+
+  it('captures the supplied token before awaited storage reads', async () => {
+    const { options, pause, controlFile } = await pausedPreflight();
+    await writeFile(controlFile, JSON.stringify({ mode: 'success' }));
+    const input = {
+      directory: options.directory, runRoot: options.runRoot, storage: options.storage,
+      workspace: options.workspace, restart: options.restart, teardownGraceMs: options.teardownGraceMs,
+      runId: 'fixture', preflightEventId: pause.preflightEventId,
+    };
+    const pending = runner.resumeSupervisedRun(input);
+    input.preflightEventId = 'caller-mutated';
+    const handle = await pending;
+    handles.push(handle);
+    await expect(handle.done).resolves.toMatchObject({ kind: 'complete' });
+  });
+
+  it.each(['before-host', 'executor-guard'] as const)('preserves named mismatch at %s with the verified current token', async (boundary) => {
+    const { options, pause, controlFile } = await pausedPreflight();
+    const storage = createLocalRunStorage(options.storage);
+    if (boundary === 'executor-guard') {
+      await writeFile(controlFile, JSON.stringify({ mode: 'fail', advanceDuringBind: true }));
+    } else {
+      const prototype = Object.getPrototypeOf(storage.eventStore) as typeof storage.eventStore;
+      const append = prototype.append;
+      let advanced = false;
+      vi.spyOn(prototype, 'append').mockImplementation(async function (this: typeof storage.eventStore, ...args) {
+        const result = await append.apply(this, args);
+        if (!advanced && args[2].some((event) => event.type === 'runner:worker-launching')) {
+          advanced = true;
+          await advancePausedPreflight(options, pause.preflightEventId);
+        }
+        return result;
+      });
+    }
+    const handle = await resumePreflight(options, pause.preflightEventId);
+    const result = await handle.done;
+    const state = await runtime.readRunPreflight(storage, 'fixture');
+    expect(state.pause!.preflightEventId).not.toBe(pause.preflightEventId);
+    const expected = {
+      kind: 'pause', code: 'RESUME_EVENT_MISMATCH',
+      reason: `Resume expected preflight pause event "${pause.preflightEventId}" but found "${state.pause!.preflightEventId}".`,
+      preflightEventId: state.pause!.preflightEventId,
+    };
+    expect(result).toEqual(expected);
+    const records = await assertProbePauseOwnership(options, handle);
+    expect(records.findLast((event) => event.type === 'runner:worker-result')!.payload).toEqual(expected);
+    expect(records.at(-1)!.payload).toMatchObject(expected);
+    const worker = records.findLast((event) => event.type === 'runner:worker-started')!;
+    const workerPid = Number(((worker.payload as runtime.JsonObject).process as runtime.JsonObject).pid);
+    const evaluated = (await readFile(join(options.runRoot, 'module-evaluations.log'), 'utf8')).trim().split('\n').map(Number);
+    expect(evaluated.includes(workerPid)).toBe(boundary === 'executor-guard');
+    if (boundary === 'before-host') {
+      expect(records.some((event) => event.revision > worker.revision && event.type === 'runner:bound')).toBe(false);
+    }
+    const events = await runEvents(options);
+    expect(events.some((event) => event.type === 'preflight:resumed'
+      && (event.payload as runtime.JsonObject).preflightEventId === state.pause!.preflightEventId)).toBe(false);
+    expect(events.some((event) => event.type === 'graph:node-dispatched')).toBe(false);
+  });
+
+  it.each(['kill', 'stop', 'timeout', 'noisy'] as const)('pauses an interrupted probe after %s even with zero restarts', async (mode) => {
+    const { options } = await preflightFixture({ mode: mode === 'noisy' ? 'noisy' : 'hold', child: mode === 'kill' });
+    const configured = {
+      ...options, restart: { ...options.restart, maxRestarts: 0 },
+      limits: { ...options.limits, timeoutMs: mode === 'timeout' ? 15_000 : options.limits.timeoutMs },
+    };
+    let held = false;
+    let verifiedBeforeRelease = false;
+    let childPid: number | undefined;
+    let childSignalled = false;
+    const kill = process.kill.bind(process);
+    const signalSpy = vi.spyOn(process, 'kill').mockImplementation((pid, signal) => {
+      if (pid === childPid && (signal === 'SIGTERM' || signal === 'SIGKILL')) childSignalled = true;
+      return kill(pid, signal);
+    });
+    const workspace: runtime.WorkspaceProvider = {
+      ...options.workspace,
+      acquireLease: async (...args) => {
+        const lease = await options.workspace.acquireLease(...args);
+        if (lease.ok) held = true;
+        return lease;
+      },
+      capture: async (...args) => {
+        const probe = await readFile(join(options.directory, 'scratch/probe.held'), 'utf8').catch(() => '');
+        if (probe !== '') {
+          expect(held).toBe(true);
+          expect(() => process.kill(Number(probe), 0)).toThrow();
+          if (childPid !== undefined) {
+            expect(childSignalled).toBe(true);
+            expect(() => kill(childPid!, 0)).toThrow();
+          }
+        }
+        return await options.workspace.capture(...args);
+      },
+      releaseLease: async (token) => {
+        const records = await readSupervision(createLocalRunStorage(options.storage), 'fixture');
+        expect(records.at(-1)!.type).toBe('runner:pause-anchor');
+        verifiedBeforeRelease = true;
+        const released = await options.workspace.releaseLease(token);
+        if (released.ok) held = false;
+        return released;
+      },
+    };
+    try {
+      const handle = await startFixture({ ...configured, workspace });
+      if (mode !== 'noisy') {
+        const marker = join(options.directory, 'scratch/probe.held');
+        await expect.poll(() => readFile(marker, 'utf8').catch(() => ''), { timeout: 15_000 }).not.toBe('');
+        if (mode === 'kill') {
+          childPid = Number((await readFile(join(options.directory, 'scratch/probe.child'), 'utf8')).trim());
+          expect(Number.isSafeInteger(childPid) && childPid > 0).toBe(true);
+          expect(() => kill(childPid!, 0)).not.toThrow();
+          kill(Number(await readFile(marker, 'utf8')), 'SIGKILL');
+        }
+        if (mode === 'stop') await handle.stop();
+      }
+      const result = await handle.done;
+      expect(result).toMatchObject({ kind: 'pause', code: 'PREFLIGHT_PAUSED', preflightEventId: expect.any(String) });
+      expect(verifiedBeforeRelease).toBe(true);
+      if (mode === 'kill') {
+        expect(childPid).toBeDefined();
+        expect(childSignalled).toBe(true);
+        expect(() => kill(childPid!, 0)).toThrow();
+      }
+      const records = await assertProbePauseOwnership(configured, handle);
+      expect(records.filter((event) => event.type === 'runner:worker-launching')).toHaveLength(1);
+      if (mode !== 'noisy') {
+        const exited = records.filter((event) => event.type === 'runner:worker-exited');
+        expect(exited).toHaveLength(1);
+        expect(exited[0]!.revision).toBeLessThan(records.findLast((event) => event.type === 'runner:pause-anchor')!.revision);
+      }
+      expect(records.some((event) => ['runner:backoff', 'runner:engine-started', 'runner:stopped', 'runner:timeout'].includes(event.type))).toBe(false);
+      const events = await runEvents(options);
+      const interrupted = events.filter((event) => event.type === 'preflight:probe-finished'
+        && ((event.payload as runtime.JsonObject).outcome as runtime.JsonObject).kind === 'interrupted');
+      expect(interrupted).toHaveLength(1);
+      expect(interrupted[0]!.payload).toMatchObject({ stage: 'live', outcome: {
+        kind: 'interrupted', usage: { kind: 'unknown' }, effective: null, evidence: null, diagnostic: null,
+      } });
+      expect(events.filter((event) => event.type === 'preflight:paused')).toHaveLength(1);
+      expect(events.some((event) => event.type === 'graph:node-dispatched')).toBe(false);
+      if (mode === 'timeout') {
+        expect((await handle.status()).remainingTimeoutMs).toBe(0);
+        const state = await runtime.readRunPreflight(createLocalRunStorage(options.storage), 'fixture');
+        await expect((await resumePreflight(configured, state.pause!.preflightEventId)).done)
+          .resolves.toMatchObject({ kind: 'fail', code: 'TIMEOUT' });
+        expect((await readSupervision(createLocalRunStorage(options.storage), 'fixture'))
+          .filter((event) => event.type === 'runner:worker-launching')).toHaveLength(1);
+      }
+    } finally {
+      signalSpy.mockRestore();
+      if (childPid !== undefined) {
+        try { kill(childPid, 'SIGKILL'); }
+        catch (error) { if ((error as NodeJS.ErrnoException).code !== 'ESRCH') throw error; }
+        await expect.poll(() => { try { kill(childPid!, 0); return true; } catch { return false; } }).toBe(false);
+      }
+    }
+  }, 30_000);
+
+  it.each(['resumed', 'live-success'] as const)('restarts after %s without repeating completed calls or consuming a token twice', async (boundary) => {
+    const prepared = boundary === 'resumed' ? await pausedPreflight() : { ...await preflightFixture({ mode: 'success' }), pause: undefined };
+    await writeFile(prepared.controlFile, JSON.stringify({ mode: 'success', crashAfter: boundary }));
+    const handle = prepared.pause !== undefined
+      ? await resumePreflight(prepared.options, prepared.pause.preflightEventId)
+      : await startFixture(prepared.options);
+    await expect(handle.done).resolves.toMatchObject({ kind: 'complete' });
+    expect((await handle.status()).restartCount).toBe(1);
+    const events = await runEvents(prepared.options);
+    expect(events.filter((event) => event.type === 'preflight:resumed')).toHaveLength(boundary === 'resumed' ? 1 : 0);
+    expect((await probeCalls(prepared.options)).filter((call) => call.stage === 'live')).toHaveLength(boundary === 'resumed' ? 2 : 1);
+    expect(events.filter((event) => event.type === 'graph:node-dispatched')).toHaveLength(2);
+  });
+
+  it('recovers an interrupted static check without inventing model usage', async () => {
+    const { options } = await preflightFixture({ mode: 'static-hold' });
+    const handle = await startFixture({ ...options, restart: { ...options.restart, maxRestarts: 0 } });
+    const marker = join(options.directory, 'scratch/probe.held');
+    await expect.poll(() => readFile(marker, 'utf8').catch(() => ''), { timeout: 15_000 }).not.toBe('');
+    process.kill(Number(await readFile(marker, 'utf8')), 'SIGKILL');
+    await expect(handle.done).resolves.toMatchObject({ kind: 'pause', code: 'PREFLIGHT_PAUSED' });
+    await assertProbePauseOwnership(options, handle);
+    const calls = await probeCalls(options);
+    expect(calls.map((call) => call.stage)).toEqual(['static']);
+    const finished = (await runEvents(options)).filter((event) => event.type === 'preflight:probe-finished');
+    expect(finished).toHaveLength(1);
+    expect(finished[0]!.payload).toMatchObject({ stage: 'static', outcome: { kind: 'interrupted' } });
+    expect((finished[0]!.payload as runtime.JsonObject).outcome).not.toHaveProperty('usage');
+  }, 30_000);
+
+  it('returns a newly recorded runtime pause unchanged when its worker dies before returning it', async () => {
+    const { options } = await preflightFixture({ mode: 'fail', crashAfter: 'pause' });
+    const handle = await startFixture({ ...options, restart: { ...options.restart, maxRestarts: 0 } });
+    const result = await handle.done;
+    expect(result).toEqual((await runtime.readRunPreflight(createLocalRunStorage(options.storage), 'fixture')).pause);
+    const records = await assertProbePauseOwnership(options, handle);
+    expect(records.filter((event) => event.type === 'runner:worker-launching')).toHaveLength(1);
+    const exited = records.filter((event) => event.type === 'runner:worker-exited');
+    expect(exited).toHaveLength(1);
+    expect(exited[0]!.revision).toBeLessThan(records.findLast((event) => event.type === 'runner:pause-anchor')!.revision);
+    expect((await runEvents(options)).filter((event) => event.type === 'preflight:paused')).toHaveLength(1);
+  });
+});
+
+describe('supervised preflight storage and ownership', () => {
+  it.each([
+    { preflightEventId: 'token', position: 'dag/last/1' },
+    { preflightEventId: 'token', pauseEventId: 'graph-event' },
+    { preflightEventId: 'token', extra: true },
+    { preflightEventId: ' padded ' },
+  ])('a real worker refuses malformed preflight resume %# before importing its host', async (resume) => {
+    const { options } = await pausedPreflight();
+    const storage = createLocalRunStorage(options.storage);
+    const before = await runEvents(options);
+    const evaluations = await readFile(join(options.runRoot, 'module-evaluations.log'), 'utf8');
+    const command = await runOwnedCommand({
+      executable: process.execPath,
+      args: [fileURLToPath(new URL('./dist/supervised-worker.js', import.meta.resolve('@obversa/runner/package.json')))],
+      cwd: options.runRoot, env: {}, stdin: JSON.stringify({
+        runId: 'fixture', runRoot: options.runRoot, scratchDirectory: join(options.directory, 'scratch'),
+        storage: options.storage, resume,
+      }),
+      runId: 'fixture', attemptId: digestJson({ test: randomUUID() }), ownerId: digestJson({ owner: randomUUID() }),
+      timeoutMs: 5_000, teardownGraceMs: 100, maxOutputBytes: 1_000_000, maxMemoryBytes: Number.MAX_SAFE_INTEGER,
+    }, new AbortController().signal);
+    expect(command.remainingProcesses).toEqual([]);
+    expect(command.exitCode, Buffer.from(command.stderr).toString('utf8')).toBe(0);
+    expect((await readSupervision(storage, 'fixture')).findLast((event) => event.type === 'runner:worker-result')!.payload)
+      .toMatchObject({ kind: 'fail', code: 'INVALID_OPTIONS' });
+    expect(await runEvents(options)).toEqual(before);
+    expect(await readFile(join(options.runRoot, 'module-evaluations.log'), 'utf8')).toBe(evaluations);
+  });
+
+  it.each(['normal', 'noisy'] as const)(
+    'keeps anchor and storage failures inside terminal recovery after %s cleanup', async (path) => {
+      for (const fault of ['capture', 'artifact', 'anchor-event', 'terminal-before', 'terminal-after', 'interrupt-before', 'interrupt-after'] as const) {
+        const { options, controlFile } = await preflightFixture({ mode: path === 'noisy' ? 'noisy' : 'hold' });
+        const storage = createLocalRunStorage(options.storage);
+        const artifactPrototype = Object.getPrototypeOf(storage.artifactStore) as typeof storage.artifactStore;
+        const write = artifactPrototype.write;
+        const eventPrototype = Object.getPrototypeOf(storage.eventStore) as typeof storage.eventStore;
+        const append = eventPrototype.append;
+        let interruptions = 0;
+        let terminalFault = false;
+        let captures = 0;
+        let snapshot: runtime.WorkspaceAnchor | undefined;
+        const artifactSpy = vi.spyOn(artifactPrototype, 'write').mockImplementation(async function (
+          this: typeof storage.artifactStore, scope, artifact,
+        ) {
+          if (artifact.purpose === 'runner-pause-anchor') {
+            snapshot = JSON.parse(Buffer.from(artifact.bytes).toString('utf8')) as runtime.WorkspaceAnchor;
+            if (fault === 'artifact') throw new Error('Injected preflight anchor artifact failure');
+          }
+          return await write.call(this, scope, artifact);
+        });
+        const eventSpy = vi.spyOn(eventPrototype, 'append').mockImplementation(async function (
+          this: typeof storage.eventStore, ...args
+        ) {
+          const interrupting = args[2].some((event) => event.type === 'preflight:probe-finished'
+            && ((event.payload as runtime.JsonObject).outcome as runtime.JsonObject).kind === 'interrupted');
+          if (interrupting) {
+            interruptions += 1;
+            if (fault === 'interrupt-before') throw new Error('Injected interruption before append');
+          }
+          if (fault === 'anchor-event' && args[2].some((event) => event.type === 'runner:pause-anchor')) {
+            throw new Error('Injected preflight anchor event failure');
+          }
+          const failingTerminal = !terminalFault && fault.startsWith('terminal-')
+            && args[2].some((event) => event.type === 'runner:paused');
+          if (failingTerminal) {
+            terminalFault = true;
+            if (fault === 'terminal-before') throw new Error('Injected terminal failure before append');
+          }
+          const result = await append.apply(this, args);
+          if (failingTerminal && fault === 'terminal-after') throw new Error('Injected terminal failure after append');
+          if (interrupting && fault === 'interrupt-after') throw new Error('Injected interruption after append');
+          return result;
+        });
+        const workspace: runtime.WorkspaceProvider = {
+          ...options.workspace,
+          capture: async (...args) => {
+            captures += 1;
+            if (fault === 'capture' && captures === 2) throw new Error('Injected preflight pause capture failure');
+            return await options.workspace.capture(...args);
+          },
+        };
+        let handle: runner.SupervisedRunHandle;
+        try {
+          handle = await startFixture({ ...options, workspace, restart: { ...options.restart, maxRestarts: 0 } });
+          if (path === 'normal') {
+            const marker = join(options.directory, 'scratch/probe.held');
+            await expect.poll(() => readFile(marker, 'utf8').catch(() => ''), { timeout: 15_000 }).not.toBe('');
+            process.kill(Number(await readFile(marker, 'utf8')), 'SIGKILL');
+          }
+          const recoverable = fault === 'artifact' || fault === 'anchor-event' || fault.startsWith('terminal-');
+          await expect(handle.done).resolves.toMatchObject({
+            kind: recoverable ? 'pause' : 'fail',
+            code: fault.startsWith('interrupt-') || fault.startsWith('terminal-') ? 'RUN_STORAGE' : 'WORKSPACE_ANCHOR_WRITE',
+          });
+          expect(interruptions).toBe(1);
+          const records = await readSupervision(storage, 'fixture');
+          expect(records.filter((event) => event.type === 'runner:worker-launching')).toHaveLength(1);
+          expect(records.some((event) => event.type === 'runner:backoff')).toBe(false);
+          const terminal = records.at(-1)!.payload as runtime.JsonObject;
+          expect(terminal).toMatchObject({ cleanupSafe: true, leaseRetained: false });
+          if (recoverable) {
+            const state = await runtime.readRunPreflight(storage, 'fixture');
+            expect(terminal.preflightEventId).toBe(state.pause!.preflightEventId);
+            if (fault === 'artifact') {
+              expect(terminal.pendingAnchor).toEqual({ digest: digestJson(snapshot!), scope: snapshot!.scope });
+              expect(terminal.anchorArtifact).toBeUndefined();
+            } else expect(runtime.validateArtifactReference(terminal.anchorArtifact).purpose).toBe('runner-pause-anchor');
+          }
+          if (fault === 'interrupt-before') {
+            expect((await runtime.readRunPreflight(storage, 'fixture')).unfinishedProbeEventId).not.toBeNull();
+          }
+          if (fault === 'interrupt-after') expect((await runtime.readRunPreflight(storage, 'fixture')).phase).toBe('paused');
+          expect(await readdir(join(options.storage.directory, 'runner-locks/runner-tests'))).toEqual([]);
+          for (const call of await probeCalls(options)) expect(() => process.kill(call.pid, 0)).toThrow();
+        } finally {
+          artifactSpy.mockRestore();
+          eventSpy.mockRestore();
+        }
+        if (fault === 'artifact' || fault === 'anchor-event' || fault.startsWith('terminal-')) {
+          const state = await runtime.readRunPreflight(storage, 'fixture');
+          await writeFile(controlFile, JSON.stringify({ mode: 'success' }));
+          await expect((await resumePreflight(options, state.pause!.preflightEventId)).done)
+            .resolves.toMatchObject({ kind: 'complete' });
+        }
+      }
+    }, 60_000,
+  );
+
+  it('retains ownership on PROCESS_INSPECTION even with no remaining process identities', async () => {
+    const { options, pause } = await pausedPreflight();
+    const storage = createLocalRunStorage(options.storage);
+    const beforeEvents = await runEvents(options);
+    const beforeRecords = await readSupervision(storage, 'fixture');
+    const beforeAnchors = beforeRecords.filter((event) => event.type === 'runner:pause-anchor');
+    let leaseToken: string | undefined;
+    const workspace: runtime.WorkspaceProvider = {
+      ...options.workspace,
+      acquireLease: async (...args) => {
+        const lease = await options.workspace.acquireLease(...args);
+        if (lease.ok) leaseToken = lease.token;
+        return lease;
+      },
+    };
+    const command = await import('@obversa/engine/command');
+    const failure = new command.OwnedCommandError('PROCESS_INSPECTION', 'inspection boundary failed');
+    expect(failure.remainingProcesses).toEqual([]);
+    const runSpy = vi.mocked(command.runOwnedCommand).mockClear().mockRejectedValueOnce(failure);
+    const interruptSpy = vi.mocked(runtime.interruptRunPreflight).mockClear();
+    const releaseSpy = vi.spyOn(workspace, 'releaseLease');
+    try {
+      const handle = await resumePreflight({ ...options, workspace }, pause.preflightEventId);
+      await expect(handle.done).resolves.toMatchObject({ kind: 'fail', code: 'PROCESS_INSPECTION' });
+      expect(runSpy).toHaveBeenCalledTimes(1);
+      expect(interruptSpy).not.toHaveBeenCalled();
+      expect(releaseSpy).not.toHaveBeenCalled();
+      expect(leaseToken).toBeDefined();
+      expect(await handle.status()).toMatchObject({ cleanupVerified: false, leaseRetained: true });
+      expect(await runEvents(options)).toEqual(beforeEvents);
+      expect((await runtime.readRunPreflight(storage, 'fixture')).pause).toEqual(pause);
+      const records = await readSupervision(storage, 'fixture');
+      expect(records.filter((event) => event.type === 'runner:pause-anchor')).toEqual(beforeAnchors);
+      expect(records.at(-1)!.payload).toMatchObject({
+        cleanupSafe: false, leaseRetained: true, remainingProcesses: [],
+      });
+      expect(await readdir(join(options.storage.directory, 'runner-locks/runner-tests'))).toEqual(['fixture']);
+    } finally {
+      runSpy.mockReset();
+      interruptSpy.mockReset();
+      releaseSpy.mockRestore();
+      if (leaseToken !== undefined) await options.workspace.releaseLease(leaseToken);
+    }
+  });
+
+  it('does not interrupt or release ownership when a real probe child survives cleanup', async () => {
+    const { options } = await preflightFixture({ mode: 'hold', child: true });
+    let leaseToken: string | undefined;
+    const workspace: runtime.WorkspaceProvider = {
+      ...options.workspace,
+      acquireLease: async (...args) => {
+        const lease = await options.workspace.acquireLease(...args);
+        if (lease.ok) leaseToken = lease.token;
+        return lease;
+      },
+    };
+    const handle = await startFixture({ ...options, workspace });
+    const childPath = join(options.directory, 'scratch/probe.child');
+    await expect.poll(() => readFile(childPath, 'utf8').catch(() => ''), { timeout: 15_000 }).not.toBe('');
+    const childPid = Number((await readFile(childPath, 'utf8')).trim());
+    expect(Number.isSafeInteger(childPid) && childPid > 0).toBe(true);
+    const workerPath = join(options.directory, 'scratch/probe.held');
+    await expect.poll(() => readFile(workerPath, 'utf8').catch(() => ''), { timeout: 15_000 }).not.toBe('');
+    const workerPid = Number((await readFile(workerPath, 'utf8')).trim());
+    expect(Number.isSafeInteger(workerPid) && workerPid > 0 && workerPid !== childPid).toBe(true);
+    const kill = process.kill.bind(process);
+    const refusedSignals: NodeJS.Signals[] = [];
+    const refusedGroupSignals: NodeJS.Signals[] = [];
+    const signalSpy = vi.spyOn(process, 'kill').mockImplementation((pid, signal) => {
+      if ((pid === childPid || pid === -workerPid) && (signal === 'SIGTERM' || signal === 'SIGKILL')) {
+        (pid === childPid ? refusedSignals : refusedGroupSignals).push(signal);
+        return true;
+      }
+      return kill(pid, signal);
+    });
+    try {
+      await expect(handle.stop()).resolves.toMatchObject({ kind: 'fail', code: 'TEARDOWN_INCOMPLETE' });
+      expect(refusedSignals).toContain('SIGTERM');
+      expect(refusedSignals).toContain('SIGKILL');
+      expect(refusedGroupSignals).toContain('SIGTERM');
+      expect(() => kill(childPid, 0)).not.toThrow();
+      expect(await handle.status()).toMatchObject({ cleanupVerified: false, leaseRetained: true });
+      const state = await runtime.readRunPreflight(createLocalRunStorage(options.storage), 'fixture');
+      expect(state.pause).toBeNull();
+      expect(state.unfinishedProbeEventId).not.toBeNull();
+      expect(await readdir(join(options.storage.directory, 'runner-locks/runner-tests'))).toEqual(['fixture']);
+      expect((await readSupervision(createLocalRunStorage(options.storage), 'fixture'))
+        .some((event) => event.type === 'runner:pause-anchor')).toBe(false);
+    } finally {
+      signalSpy.mockRestore();
+      try { kill(childPid, 'SIGKILL'); }
+      catch (error) { if ((error as NodeJS.ErrnoException).code !== 'ESRCH') throw error; }
+      await expect.poll(() => { try { kill(childPid, 0); return true; } catch { return false; } }).toBe(false);
+      if (leaseToken !== undefined) await options.workspace.releaseLease(leaseToken);
+    }
+  }, 30_000);
+
+  it.each(['normal', 'noisy'] as const)('retains release failure and the first %s failure with the lease and lock', async (path) => {
+    const { options } = await preflightFixture({ mode: path === 'noisy' ? 'noisy' : 'hold' });
+    let leaseToken: string | undefined;
+    const workspace: runtime.WorkspaceProvider = {
+      ...options.workspace,
+      acquireLease: async (...args) => {
+        const lease = await options.workspace.acquireLease(...args);
+        if (lease.ok) leaseToken = lease.token;
+        return lease;
+      },
+      releaseLease: async () => ({ ok: false, kind: 'not-owner' }),
+    };
+    try {
+      const handle = await startFixture({ ...options, workspace });
+      if (path === 'normal') {
+        const marker = join(options.directory, 'scratch/probe.held');
+        await expect.poll(() => readFile(marker, 'utf8').catch(() => ''), { timeout: 15_000 }).not.toBe('');
+        process.kill(Number(await readFile(marker, 'utf8')), 'SIGKILL');
+      }
+      await expect(handle.done).resolves.toMatchObject({ kind: 'fail', code: path === 'noisy' ? 'OUTPUT_LIMIT' : 'WORKSPACE_RELEASE' });
+      const terminal = (await readSupervision(createLocalRunStorage(options.storage), 'fixture')).at(-1)!.payload;
+      expect(terminal).toMatchObject({ cleanupSafe: true, leaseRetained: true, releaseFailure: 'WORKSPACE_RELEASE' });
+      expect(await readdir(join(options.storage.directory, 'runner-locks/runner-tests'))).toEqual(['fixture']);
+    } finally {
+      if (leaseToken !== undefined) await options.workspace.releaseLease(leaseToken);
+    }
+  }, 30_000);
+
+  it('preserves workspace drift refusal and the current token without consuming it', async () => {
+    const { options, pause } = await pausedPreflight();
+    await writeFile(join(options.runRoot, 'foreign-edit'), 'keep');
+    const before = await runEvents(options);
+    const handle = await resumePreflight(options, pause.preflightEventId);
+    await expect(handle.done).resolves.toMatchObject({
+      kind: 'pause', code: 'WORKSPACE_DRIFT', preflightEventId: pause.preflightEventId,
+    });
+    expect(await runEvents(options)).toEqual(before);
+    expect((await readSupervision(createLocalRunStorage(options.storage), 'fixture'))
+      .filter((event) => event.type === 'runner:worker-launching')).toHaveLength(1);
+    expect(await readFile(join(options.runRoot, 'foreign-edit'), 'utf8')).toBe('keep');
+  });
+
+  it('resumes from a fresh watchdog process with the same token and saved workspace', async () => {
+    const { options, pause, controlFile } = await pausedPreflight();
+    await writeFile(controlFile, JSON.stringify({ mode: 'success' }));
+    const source = `
+import { resumeSupervisedRun } from ${JSON.stringify(import.meta.resolve('@obversa/runner'))};
+import { createGitWorktreeProvider } from ${JSON.stringify(import.meta.resolve('@obversa/runtime'))};
+const chunks = [];
+for await (const chunk of process.stdin) chunks.push(chunk);
+const options = JSON.parse(Buffer.concat(chunks).toString('utf8'));
+const handle = await resumeSupervisedRun({ ...options,
+  workspace: createGitWorktreeProvider({ repositoryPath: options.runRoot }),
+});
+process.stdout.write(JSON.stringify(await handle.done));
+`;
+    const command = await runOwnedCommand({
+      executable: process.execPath, args: ['--input-type=module', '--eval', source], cwd: options.runRoot,
+      env: {}, stdin: JSON.stringify({
+        directory: options.directory, runRoot: options.runRoot, storage: options.storage,
+        restart: options.restart, teardownGraceMs: options.teardownGraceMs,
+        runId: 'fixture', preflightEventId: pause.preflightEventId,
+      }),
+      runId: 'fixture', attemptId: digestJson({ test: randomUUID() }), ownerId: digestJson({ owner: randomUUID() }),
+      timeoutMs: 15_000, teardownGraceMs: 100, maxOutputBytes: 1_000_000, maxMemoryBytes: Number.MAX_SAFE_INTEGER,
+    }, new AbortController().signal);
+    expect(command.remainingProcesses).toEqual([]);
+    expect(command.exitCode, Buffer.from(command.stderr).toString('utf8')).toBe(0);
+    expect(JSON.parse(Buffer.from(command.stdout).toString('utf8'))).toMatchObject({ kind: 'complete' });
+    expect((await runEvents(options)).filter((event) => event.type === 'preflight:resumed')).toHaveLength(1);
+    expect((await probeCalls(options)).filter((call) => call.stage === 'live')).toHaveLength(2);
+  }, 25_000);
+
+  it('keeps the dispatch budget and frozen elapsed interval across a preflight pause', async () => {
+    const { options, controlFile } = await preflightFixture();
+    const limited = { ...options, limits: { ...options.limits, maxDispatches: 1 } };
+    const handle = await startFixture(limited);
+    const pause = await handle.done;
+    expect(pause).toMatchObject({ kind: 'pause', code: 'PREFLIGHT_PAUSED' });
+    const state = await runtime.readRunPreflight(createLocalRunStorage(options.storage), 'fixture');
+    const before = await handle.status();
+    await delay(100);
+    expect(await handle.status()).toMatchObject({ elapsedMs: before.elapsedMs, remainingTimeoutMs: before.remainingTimeoutMs });
+    await writeFile(controlFile, JSON.stringify({ mode: 'success' }));
+    const resumed = await resumePreflight(limited, state.pause!.preflightEventId);
+    await expect(resumed.done).resolves.toMatchObject({ kind: 'fail', code: 'BUDGET_STOP' });
+    const records = await readSupervision(createLocalRunStorage(options.storage), 'fixture');
+    const launch = records.findLast((event) => event.type === 'runner:worker-launching')!;
+    expect((await resumed.status()).elapsedMs).toBe(before.elapsedMs
+      + Date.parse(records.at(-1)!.timestamp) - Date.parse(launch.timestamp));
+    expect((await runEvents(options)).filter((event) => event.type === 'graph:node-dispatched')).toHaveLength(1);
   });
 });
