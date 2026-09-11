@@ -157,6 +157,7 @@ export class CodexEngine implements Engine {
     onEvent: EngineEventSink,
     signal: AbortSignal,
   ): Promise<AgentResult> {
+    const startedAt = Date.now();
     if (req.tools?.length === 0)
       throw new EngineError({
         kind: 'invalid-config',
@@ -174,7 +175,6 @@ export class CodexEngine implements Engine {
     const args = buildCodexArgs(req, this.opts, outFile);
     const env = attemptEnvironment(req);
     const prompt = req.system ? `${req.system}\n\n---\n\n${req.prompt}` : req.prompt;
-    const startedAt = Date.now();
     const owner = ownedCommandIdentity({
       adapter: 'codex',
       runId: req.attempt?.runId,
