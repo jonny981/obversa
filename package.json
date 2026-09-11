@@ -103,6 +103,7 @@
     "verify:f26": "pnpm verify:d43",
     "verify:d44": "pnpm verify:d43",
     "verify:f27": "pnpm verify:d43",
+    "verify:d36": "pnpm verify:f27 && pnpm --filter @obversa/runtime exec tsx ../../examples/teams/writer-reviewer-pair.proof.ts && pnpm --filter @obversa/runtime exec tsx ../../examples/teams/threshold-panel.proof.ts && pnpm --filter @obversa/runtime exec tsx ../../examples/teams/feature-delivery.proof.ts && pnpm --filter @obversa/runtime exec tsx ../../examples/tournament.ts",
     "verify:d24": "pnpm verify:d23",
     "changeset": "changeset",
     "version-packages": "changeset version",

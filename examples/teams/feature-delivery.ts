@@ -1,9 +1,7 @@
-// README-SPAN-START imports
 import { ClaudeCliEngine } from '@obversa/engine-claude-cli';
 import { CodexEngine } from '@obversa/engine-codex';
 import { run } from '@obversa/runtime';
 import { featureDelivery } from '@obversa/teams';
-// README-SPAN-END imports
 
 const workspace = process.cwd();
 const analyse = {
@@ -55,7 +53,6 @@ const approve = {
   },
 };
 
-// README-SPAN-START team
 const team = featureDelivery({
   brief: 'Deliver a pure triple(value) function in src/triple.mjs with a Node test in test/triple.test.mjs.',
   workspace,
@@ -67,7 +64,6 @@ const team = featureDelivery({
   reviewThreshold: 1,
   approve,
 });
-// README-SPAN-END team
 
 const result = await run(team, { cwd: workspace });
 console.log(JSON.stringify(result.outcome, null, 2));

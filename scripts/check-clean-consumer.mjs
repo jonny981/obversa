@@ -896,7 +896,7 @@ async function main() {
     assert.equal(compiledTeamPair.status, 'pass');
     assert.equal(compiledTeamPair.testCommandsRun, 2);
     assert.equal(compiledTeamPair.reviewerKickbacks, 1);
-    assert.deepEqual(compiledTeamPair.modelFamilies, ['writer-family', 'reviewer-family']);
+    assert.deepEqual(compiledTeamPair.modelFamilies, ['claude', 'gpt']);
     assert.equal(compiledTeamPanel.status, 'pass');
     assert.equal(compiledTeamPanel.testCommandsRun, 2);
     assert.equal(compiledTeamPanel.threshold, '3 of 3');

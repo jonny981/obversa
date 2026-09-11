@@ -1,26 +1,94 @@
 ---
 title: "Examples"
-description: "Complete files to copy. Each one runs offline against the public packages and nothing else."
+description: "Three teams you can run on your own work today, and the single mechanisms they are built from."
 ---
 
-Every file here is a complete program: the steps, the reviews, the limits
-and the adapters, built from public package exports and nothing else. Copy
-one, change the parts that name your team, and run it.
+Install two packages, write one file, and a team of models writes code,
+runs your tests and reviews the result before you see it. Each team below
+is a complete file: copy it, put your brief and your engines in, run it.
 
-Each states its inputs, outputs, permissions, limits and evidence, and what
-it does on failure and on a safe retry.
+The smallest team, whole. A Claude seat writes the files the brief names,
+Node runs the test, and a Codex seat reviews the result:
 
+```ts
+import { ClaudeCliEngine } from '@obversa/engine-claude-cli';
+import { CodexEngine } from '@obversa/engine-codex';
+import { run } from '@obversa/runtime';
+import { writerReviewerPair } from '@obversa/teams';
+
+const workspace = process.cwd();
+const writer = {
+  engine: new ClaudeCliEngine({
+    defaultModel: 'claude-sonnet-4-5',
+    permissionMode: 'bypassPermissions',
+  }),
+  identity: {
+    adapter: 'claude-cli',
+    provider: 'anthropic',
+    modelFamily: 'claude',
+    model: 'claude-sonnet-4-5',
+  },
+};
+const reviewer = {
+  engine: new CodexEngine({
+    defaultModel: 'gpt-5.6-luna',
+    permissionMode: 'bypassPermissions',
+  }),
+  identity: {
+    adapter: 'codex',
+    provider: 'openai',
+    modelFamily: 'gpt',
+    model: 'gpt-5.6-luna',
+  },
+};
+const team = writerReviewerPair({
+  brief: 'Write a pure add(a, b) function in src/add.mjs with a Node test in test/add.test.mjs.',
+  workspace,
+  files: ['src/add.mjs', 'test/add.test.mjs'],
+  test: { command: 'node', args: ['--test', 'test/add.test.mjs'] },
+  writer,
+  reviewer,
+});
+const result = await run(team, { cwd: workspace });
+
+console.log(JSON.stringify(result.outcome, null, 2));
+```
+
+What that printed on one real run, and the files the two models wrote, are
+on [its page](/workflows/writer-and-reviewer).
+
+## Teams you run on your own work
+
+- [A writer and a reviewer](/workflows/writer-and-reviewer). One model
+  writes the files your brief names and a model from a different family
+  reads them. Your test command runs in between. A rejection sends the
+  work back once.
+- [A review panel with a threshold](/workflows/review-panel). One model
+  implements, several review at the same time, and the change passes when
+  enough of them accept. Every seat is a different model family.
+- [Feature delivery](/workflows/feature-team). Analyse, implement, test,
+  review, approve. The reviewers can send the work back to the implementer,
+  and the approval is a note in your workspace.
+
+Each team is a graph of named steps. Every step carries a `desc` sentence
+saying what it does and a `gate` sentence saying what must be true for it
+to count, and both reach the reviewer's input and the run record.
+
+## Mechanisms shown one at a time
+
+These files run offline against the public packages and nothing else.
+
+- [Three candidates, one winner](/workflows/tournament). Three isolated
+  attempts at one task, a deterministic judge, the winner lands and the
+  losers leave nothing behind.
 - [A review that sends work back](/workflows/offline-review). A reviewer
-  rejects the first draft with a reason and the second draft passes. No
-  model, no network.
+  rejects the first draft with a reason and the second draft passes.
 - [A file change approved byte for byte](/workflows/safe-change). Source
   records are captured, every mapping checked, exact output bytes approved,
   each target backed up before a merge, and a mismatch pauses the run.
 - [A feature from written issue to approval](/workflows/feature-delivery).
   One issue through analysis, implementation, a real test run, a review
-  panel, a bounded repair, and an approval bound to the exact bytes. No
-  model, no network.
+  panel, a bounded repair, and an approval bound to the exact bytes.
 - [Shipping a reviewed change through GitHub](/workflows/forge-helper).
   Push the branch, open one pull request, pass a strict gate on the exact
-  head revision, squash the merge, delete the branch. Runs offline against
-  a mock host.
+  head revision, squash the merge, delete the branch.
