@@ -18,6 +18,7 @@ import toposort from 'toposort';
 
 import type {
   DagConfig,
+  KickbackBudget,
   DagNode,
   Job,
   JobContext,
@@ -60,6 +61,42 @@ function normalize(node: DagNode | Job): DagNode {
   };
 }
 
+function validateKickbackBudget(
+  budget: KickbackBudget | undefined,
+  nodes: ReadonlyMap<string, DagNode>,
+): void {
+  if (budget === undefined) return;
+  if (typeof budget === 'number') {
+    if (!Number.isInteger(budget) || budget < 0) {
+      throw new LoopError({
+        code: 'CONFIG',
+        message: 'dag maxKickbacks must be a non-negative integer',
+      });
+    }
+    return;
+  }
+  if (budget === null || typeof budget !== 'object' || Array.isArray(budget)) {
+    throw new LoopError({
+      code: 'CONFIG',
+      message: 'dag maxKickbacks must be a number or target budget map',
+    });
+  }
+  for (const [target, limit] of Object.entries(budget)) {
+    if (!nodes.has(target)) {
+      throw new LoopError({
+        code: 'CONFIG',
+        message: `dag maxKickbacks names unknown target "${target}"`,
+      });
+    }
+    if (!Number.isInteger(limit) || limit < 0) {
+      throw new LoopError({
+        code: 'CONFIG',
+        message: `dag maxKickbacks for "${target}" must be a non-negative integer`,
+      });
+    }
+  }
+}
+
 export function dag(config: DagConfig): Job {
   if (!config.name)
     throw new LoopError({
@@ -70,6 +107,7 @@ export function dag(config: DagConfig): Job {
   const nodes = new Map<string, DagNode>(
     names.map((n) => [n, normalize(config.nodes[n]!)]),
   );
+  validateKickbackBudget(config.maxKickbacks, nodes);
 
   // Fail fast on a bad graph, before the Job is ever run.
   const edges: [string, string][] = [];
@@ -97,6 +135,12 @@ export function dag(config: DagConfig): Job {
 
   const stopOnError = config.stopOnError ?? true;
   const maxKickbacks = config.maxKickbacks ?? 0;
+  const perTargetBudget = typeof maxKickbacks !== 'number';
+  const targetLimit = (target: string): number => typeof maxKickbacks === 'number'
+    ? maxKickbacks
+    : maxKickbacks[target] ?? 0;
+  const routeKickbacks = config.maxKickbacks !== undefined
+    && (perTargetBudget || maxKickbacks > 0);
 
   // Static graph relations for routing cross-stage feedback (kickback). All pure
   // functions of the declared `needs` edges, computed once. `dependents` is the
@@ -137,6 +181,7 @@ export function dag(config: DagConfig): Job {
     const path = [...parent.path, config.name];
     const depth = parent.depth + 1;
     const ts = () => Date.now();
+    const targetCounts = new Map<string, number>();
     parent.emit({ kind: 'dag:start', ts: ts(), path, depth, nodes: names });
 
     const limit = pLimit(limitN);
@@ -322,7 +367,7 @@ export function dag(config: DagConfig): Job {
         stopOnError &&
         // A node requesting a kickback is going to be re-run — don't let its
         // (provisional) non-pass abort siblings before the feedback is resolved.
-        !(maxKickbacks > 0 && revisionFromOutcome(outcome)?.target)
+        !(routeKickbacks && revisionFromOutcome(outcome)?.target)
       ) {
         stopped = true;
       }
@@ -440,9 +485,9 @@ export function dag(config: DagConfig): Job {
     // Cross-stage feedback: a node may return a `kickback` asking an earlier
     // node to redo work. We re-run the target + its dependents (the cycle lives
     // in execution, the graph stays acyclic), bounded by `maxKickbacks` so it
-    // provably terminates. The whole block is inert when `maxKickbacks` is 0, so
-    // the default path is exactly the single pass above.
-    if (maxKickbacks > 0) {
+    // provably terminates. An omitted budget or numeric zero keeps the default
+    // single-pass path; a target map still records rejected requests at zero.
+    if (routeKickbacks) {
       let used = 0;
       const rejected = new Set<string>();
       const emitKickback = (
@@ -450,6 +495,8 @@ export function dag(config: DagConfig): Job {
         to: string,
         reason: string,
         accepted: boolean,
+        count: number,
+        limit: number,
         note?: string,
       ) =>
         parent.emit({
@@ -460,6 +507,8 @@ export function dag(config: DagConfig): Job {
           to,
           reason,
           accepted,
+          count,
+          limit,
           note,
         });
       for (;;) {
@@ -480,6 +529,9 @@ export function dag(config: DagConfig): Job {
         const request = revisionFromOutcome(results.get(from)!)!;
         const to = request.target!;
         const { reason } = request;
+        const count = (targetCounts.get(to) ?? 0) + 1;
+        targetCounts.set(to, count);
+        const limit = targetLimit(to);
 
         // Validate the target: it must exist, be an ancestor, and (if the node
         // declares `acceptsKickbackTo`) be an allowed target. An invalid target
@@ -494,11 +546,11 @@ export function dag(config: DagConfig): Job {
               : undefined;
         if (note) {
           rejected.add(from);
-          emitKickback(from, to, reason, false, note);
+          emitKickback(from, to, reason, false, count, limit, note);
           continue;
         }
 
-        if (used >= maxKickbacks) {
+        if (perTargetBudget ? count > limit : used >= limit) {
           // Budget spent. Reject and stop: the unresolved kickback leaves the
           // kicking node's own outcome to stand.
           emitKickback(
@@ -506,13 +558,19 @@ export function dag(config: DagConfig): Job {
             to,
             reason,
             false,
-            `kickback budget (${maxKickbacks}) exhausted`,
+            count,
+            limit,
+            `kickback budget for "${to}" (${limit}) exhausted`,
           );
+          if (perTargetBudget) {
+            rejected.add(from);
+            continue;
+          }
           break;
         }
 
         used += 1;
-        emitKickback(from, to, reason, true);
+        emitKickback(from, to, reason, true, count, limit);
         const dirty = dirtyFrom(to);
         for (const d of dirty) {
           memo.delete(d); // force re-run
@@ -584,6 +642,9 @@ export function dag(config: DagConfig): Job {
   return setMeta(job, {
     kind: 'dag',
     name: config.name,
+    ...(config.maxKickbacks !== undefined
+      ? { maxKickbacks: config.maxKickbacks }
+      : {}),
     nodes: Object.entries(config.nodes).map(([name, v]) => {
       const node = typeof v === 'function' ? undefined : v;
       const nodeJob = node ? node.job : (v as Job);

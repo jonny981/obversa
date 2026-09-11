@@ -181,6 +181,15 @@ export function renderPlan(meta: JobMeta | undefined, indent = ''): string[] {
     case 'dag': {
       const nodes = (meta.nodes as NodeMeta[] | undefined) ?? [];
       out.push(`${indent}dag${nm} (${count(nodes.length, 'node')})`);
+      const kickbacks = meta.maxKickbacks;
+      if (typeof kickbacks === 'number') {
+        out.push(`${indent}  kickbacks: ${kickbacks}`);
+      } else if (kickbacks && typeof kickbacks === 'object' && !Array.isArray(kickbacks)) {
+        const limits = Object.entries(kickbacks)
+          .map(([target, limit]) => `${target} ${String(limit)}`)
+          .join(', ');
+        out.push(`${indent}  kickbacks: ${limits}`);
+      }
       for (const node of nodes) {
         const bits: string[] = [];
         if (node.needs?.length) bits.push(`needs ${node.needs.join(', ')}`);

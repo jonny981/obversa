@@ -475,7 +475,7 @@ function renderEvent(event: LoopEvent): string {
     case 'dag:node':
       return `${at}· node ${event.node}: ${event.phase}${event.outcome ? ` (${event.outcome.status}${event.outcome.late ? ' late' : ''})` : ''}`;
     case 'dag:kickback':
-      return `${at}↩ kickback ${event.accepted ? 'accepted' : 'rejected'} ${event.from} -> ${event.to}: ${event.reason}${event.note ? ` (${event.note})` : ''}`;
+      return `${at}↩ kickback ${event.accepted ? 'accepted' : 'rejected'} ${event.from} -> ${event.to} [${event.count}/${event.limit}]: ${event.reason}${event.note ? ` (${event.note})` : ''}`;
     case 'dag:end':
       return `${at}◂ dag ${event.outcome.status}${event.outcome.late ? ' late' : ''}`;
     case 'job:start':
