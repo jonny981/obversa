@@ -1875,6 +1875,32 @@ describe('createGraphExecutor', () => {
       result: { child: { kind: 'complete', output: { attempts: 1 } } },
     });
   });
+
+  it('replays the captured preflight envelopes without a second full stream traversal', async () => {
+    const run = await storedRun(definition({ engineBacked: false }));
+    await appendGraphEvent(run.storage, run.runId, {
+      type: 'node-dispatched', version: 1, payload: { nodeId: 'worker', position: 'turns/1' },
+    });
+    const yielded: number[] = [];
+    const eventStore: EventStore = {
+      append: run.storage.eventStore.append.bind(run.storage.eventStore),
+      preflightAppend: run.storage.eventStore.preflightAppend.bind(run.storage.eventStore),
+      async *read(stream, afterRevision) {
+        const index = yielded.push(0) - 1;
+        for await (const event of run.storage.eventStore.read(stream, afterRevision)) {
+          yielded[index] = yielded[index]! + 1;
+          yield event;
+        }
+      },
+    };
+    const executor = await createGraphExecutor({
+      ...run, storage: { ...run.storage, eventStore }, engines: [],
+      nodes: { worker: nodeBinding(run.root, { runData: async () => { throw new Error('unfinished work must not run'); } }) },
+    });
+    expect(await executor.run(new AbortController().signal)).toEqual({ kind: 'waiting', positions: ['turns/1'] });
+    // Constructor definition read, loader definition read, then one full traversal.
+    expect(yielded).toEqual([1, 1, 2]);
+  });
 });
 
 const primaryIdentity: GraphEngineIdentity = {

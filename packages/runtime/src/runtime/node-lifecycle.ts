@@ -504,7 +504,7 @@ export function validateActionDecision(value: ActionDecision): ActionDecision {
   throw new TypeError('action decision kind must be allow, wait, or deny');
 }
 
-async function validateScratchDirectory(value: string): Promise<string> {
+export async function validateScratchDirectory(value: string): Promise<string> {
   if (typeof value !== 'string' || !isAbsolute(value)) {
     throw new TypeError('scratchDirectory must be an absolute path');
   }

@@ -30,11 +30,27 @@ type PublicReleaseResultsStayDistinct = Expect<Equal<
   Equal<ReleaseResult, WorkspaceReleaseResult>,
   false
 >>;
+type PublicPreflightResume = Expect<Equal<
+  Parameters<api.GraphExecutor['resume']>,
+  [target: string | { readonly preflightEventId: string }, signal: AbortSignal]
+>>;
+type PublicPreflightScratch = Expect<Equal<
+  Pick<api.GraphExecutorOptions, 'preflightScratchDirectory'>,
+  { readonly preflightScratchDirectory?: string }
+>>;
 
 const publicValidatorTakesOneArgument: PublicValidatorTakesOneArgument = true;
 const publicDomainEventIdValidatorSignature: PublicDomainEventIdValidatorSignature = true;
 const publicGraphKernelType: GraphKernel | undefined = undefined;
 const publicReleaseResultsStayDistinct: PublicReleaseResultsStayDistinct = true;
+const publicPreflightResume: PublicPreflightResume = true;
+const publicPreflightScratch: PublicPreflightScratch = true;
+const publicPreflightPause: api.GraphExecutorResult = {
+  kind: 'pause', code: 'PREFLIGHT_PAUSED', reason: 'Resume this recorded check.', preflightEventId: 'pause-event',
+};
+const publicPreflightFailure: api.GraphExecutorResult = {
+  kind: 'fail', code: 'PREFLIGHT_FAILED', message: 'No declared target can enter work.',
+};
 const callbackReleaseResult: ReleaseResult = { ok: false, kind: 'missing' };
 const workspaceReleaseResult: WorkspaceReleaseResult = { ok: false, kind: 'unknown-token' };
 

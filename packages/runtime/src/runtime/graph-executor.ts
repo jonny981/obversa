@@ -1,4 +1,5 @@
 import { randomUUID } from 'node:crypto';
+import { realpath } from 'node:fs/promises';
 import { isDeepStrictEqual } from 'node:util';
 
 import type { Memory } from '@obversa/memory';
@@ -13,6 +14,7 @@ import type {
 import {
   canonicalJson,
   cloneFrozenJson,
+  digestJson,
   type JsonObject,
   type JsonValue,
 } from '../graph/value.js';
@@ -21,18 +23,37 @@ import {
   validateDomainEventBatch,
   type DomainEventBatch,
 } from '../events/store.js';
-import type { DomainEventEnvelope, NewDomainEvent } from '../events/envelope.js';
-import type {
-  AgentResultPart,
-  Engine,
-  EngineSelectionRecord,
+import {
+  validateDomainEventId,
+  validateNewDomainEvent,
+  type DomainEventEnvelope,
+  type NewDomainEvent,
+} from '../events/envelope.js';
+import {
+  EngineError,
+  type AgentRequest,
+  type AgentResultPart,
+  type AttemptMetadata,
+  type Engine,
+  type EngineSelectionRecord,
 } from '../engines/engine.js';
-import { LANE_DEAD_FAILURES, type EngineFailureKind } from '../engines/failure.js';
+import {
+  classifyEngineFailure,
+  LANE_DEAD_FAILURES,
+  type EngineFailureKind,
+} from '../engines/failure.js';
+import type { ArtifactReference } from '../artifacts/store.js';
+import { preflightEngine, type PreflightResult } from '../engines/preflight.js';
 import { StorageError } from '../storage/error.js';
 import { createAttemptIdentity, type AttemptIdentity } from './attempt.js';
-import type { AttemptBudgetPolicy, TokenBudget } from './budget.js';
+import {
+  validateAttemptBudgetPolicy,
+  type AttemptBudgetPolicy,
+  type TokenBudget,
+} from './budget.js';
 import {
   executeNodeAttempt,
+  validateScratchDirectory,
   type ActionDecision,
   type ModelUnavailableFact,
   type NodeDataContext,
@@ -44,7 +65,10 @@ import {
   loadRunDefinition,
   type RunStorageBinding,
 } from './run-definition.js';
-import type { NodeWorkspacePolicy } from './workspace-policy.js';
+import {
+  validateWorkspacePolicy,
+  type NodeWorkspacePolicy,
+} from './workspace-policy.js';
 import {
   EngineIdentityUnresolvedError,
   engineFailureExclusionKeys,
@@ -52,6 +76,17 @@ import {
   matchesEngineTarget,
   type EngineExclusionKey,
 } from './engine-availability.js';
+import {
+  loadRunPreflight,
+  type CompletedProbe,
+  type LiveOutcome,
+  type LoadedRunPreflight,
+  type PreflightFailureResult,
+  type PreflightPauseResult,
+  type ProbeFinishPayload,
+  type ProbeStartPayload,
+  type StaticOutcome,
+} from './preflight-record.js';
 
 export type GraphExecutionErrorCode =
   | 'ABORTED'
@@ -59,10 +94,12 @@ export type GraphExecutionErrorCode =
   | 'EMPTY_DECISION'
   | 'ENGINE_IDENTITY_UNRESOLVED'
   | 'INVALID_EVENT'
+  | 'INVALID_PREFLIGHT_CONFIG'
   | 'MISSING_ENGINE_BINDING'
   | 'MISSING_MEMORY'
   | 'MISSING_NODE_BINDING'
   | 'PROTOCOL'
+  | 'RESUME_EVENT_MISMATCH'
   | 'STORED_GRAPH_MISMATCH';
 
 export class GraphExecutionError extends Error {
@@ -106,6 +143,7 @@ export interface GraphExecutorOptions {
   readonly storage: RunStorageBinding;
   readonly nodes: Readonly<Record<string, GraphNodeBinding>>;
   readonly engines: readonly GraphEngineBinding[];
+  readonly preflightScratchDirectory?: string;
   readonly bindings?: {
     readonly memory?: Memory;
   };
@@ -113,6 +151,8 @@ export interface GraphExecutorOptions {
 
 export type GraphExecutorResult =
   | Extract<GraphCommand, { readonly kind: 'pause' | 'complete' | 'fail' }>
+  | PreflightPauseResult
+  | PreflightFailureResult
   | {
       readonly kind: 'waiting';
       readonly positions: readonly string[];
@@ -120,7 +160,7 @@ export type GraphExecutorResult =
 
 export interface GraphExecutor {
   run(signal: AbortSignal): Promise<GraphExecutorResult>;
-  resume(position: string, signal: AbortSignal): Promise<GraphExecutorResult>;
+  resume(target: string | { readonly preflightEventId: string }, signal: AbortSignal): Promise<GraphExecutorResult>;
 }
 
 interface FoldedAttempt {
@@ -135,6 +175,7 @@ interface FoldedAttempt {
 
 interface FoldedRun {
   readonly revision: number;
+  readonly preflight: LoadedRunPreflight;
   readonly state: JsonValue;
   readonly dispatched: ReadonlySet<string>;
   readonly inFlight: readonly string[];
@@ -431,6 +472,105 @@ function newEvent(
   };
 }
 
+type StaticObservation =
+  | { readonly kind: 'admitted'; readonly selection: EngineSelectionRecord }
+  | { readonly kind: 'unsupported' }
+  | { readonly kind: 'failed'; readonly failure: EngineFailureKind; readonly effective: EngineSelectionRecord | null; readonly detail: string };
+
+function preflightEvent(runId: string, type: string, payload: unknown, causationId: string | null = null): NewDomainEvent {
+  return validateNewDomainEvent({
+    eventId: randomUUID(), type, version: 1, timestamp: new Date().toISOString(),
+    correlationId: runId, causationId, payload: cloneFrozenJson(payload as JsonValue),
+  });
+}
+function probeContextKey(laneId: string, target: ExecutionTarget, contextNodeId: string | null): string {
+  return canonicalJson([laneId, target, contextNodeId] as unknown as JsonValue);
+}
+async function preflightScratch(value: unknown): Promise<string> {
+  try {
+    if (typeof value !== 'string') throw new TypeError('Scratch must be an absolute path.');
+    return await validateScratchDirectory(value);
+  } catch (error) {
+    fail('INVALID_PREFLIGHT_CONFIG', 'Preflight requires an absolute, real, normalized scratch directory.', error);
+  }
+}
+function probeAttempt(namespace: string, runId: string, eventId: string): AttemptMetadata {
+  return {
+    runId, attemptId: digestJson({ namespace, runId, preflightEventId: eventId }),
+    leafId: eventId, path: ['preflight', eventId], label: 'preflight', iteration: 0, leaf: true,
+  };
+}
+function unknownStatic(): StaticObservation {
+  return { kind: 'failed', failure: 'unknown', effective: null, detail: 'Static admission returned an invalid or incompatible engine identity.' };
+}
+async function observeStatic(
+  engine: Engine,
+  request: Omit<AgentRequest, 'prompt'>,
+  expected: EngineSelectionRecord | null,
+  target: ExecutionTarget,
+  timeoutMs: number,
+  signal: AbortSignal,
+): Promise<StaticObservation> {
+  if (typeof engine.admit !== 'function') return { kind: 'unsupported' };
+  const deadline = performance.now() + timeoutMs;
+  const controller = new AbortController();
+  let reason: 'timeout' | 'aborted' | undefined;
+  let resolveStop!: () => void;
+  const stopped = new Promise<void>((resolve) => { resolveStop = resolve; });
+  const stop = (kind: 'timeout' | 'aborted') => {
+    if (reason !== undefined) return;
+    reason = kind;
+    resolveStop();
+    controller.abort();
+  };
+  const onAbort = () => stop('aborted');
+  const timer = setTimeout(() => stop('timeout'), timeoutMs);
+  signal.addEventListener('abort', onAbort, { once: true });
+  const interruption = (): StaticObservation | undefined => {
+    if (reason === undefined && performance.now() >= deadline) stop('timeout');
+    return reason === undefined ? undefined : {
+      kind: 'failed', failure: reason, effective: null,
+      detail: reason === 'timeout' ? 'Static admission exceeded its time limit.' : 'Static admission was aborted.',
+    };
+  };
+  try {
+    if (signal.aborted) stop('aborted');
+    const alreadyStopped = interruption();
+    if (alreadyStopped) return alreadyStopped;
+    let pending: Promise<EngineSelectionRecord>;
+    try { pending = Promise.resolve(engine.admit(request, controller.signal, expected ?? undefined)); }
+    catch (error) { pending = Promise.reject(error); }
+    const operation = pending.then(
+      (value) => ({ kind: 'value' as const, value }),
+      (error: unknown) => ({ kind: 'error' as const, error }),
+    );
+    const outcome = await Promise.race([operation, stopped.then(() => ({ kind: 'stopped' as const }))]);
+    const interrupted = interruption();
+    if (interrupted) return interrupted;
+    if (outcome.kind === 'stopped') return unknownStatic();
+    if (outcome.kind === 'error') {
+      let effective: EngineSelectionRecord | null = null;
+      try {
+        if (outcome.error instanceof EngineError && outcome.error.effective !== undefined) effective = engineSelection(outcome.error.effective);
+      } catch { return unknownStatic(); }
+      return {
+        kind: 'failed', failure: classifyEngineFailure(outcome.error), effective,
+        detail: outcome.error instanceof Error ? outcome.error.message : String(outcome.error),
+      };
+    }
+    // Do not classify a return-value validation error as an adapter failure.
+    try {
+      const selection = engineSelection(outcome.value);
+      if (!isDeepStrictEqual(selection, outcome.value) || !matchesEngineTarget(target, selection)
+        || (expected !== null && !isDeepStrictEqual(selection, expected))) return unknownStatic();
+      return interruption() ?? { kind: 'admitted', selection };
+    } catch { return unknownStatic(); }
+  } finally {
+    clearTimeout(timer);
+    signal.removeEventListener('abort', onAbort);
+  }
+}
+
 /** Build one executor from the stored definition and frozen execution plan. */
 export async function createGraphExecutor(
   options: GraphExecutorOptions,
@@ -501,6 +641,12 @@ export async function createGraphExecutor(
     }
   }
 
+  const plan = loaded.resolvedPlan.plan;
+  const preflightPolicy = plan.preflight;
+  const scratch = preflightPolicy === undefined ? undefined : await preflightScratch(options.preflightScratchDirectory);
+  const restoredContexts = new Set<string>();
+  const blockedRoutes = new Set<string>();
+
   const stream = {
     namespace: options.storage.record.namespace,
     streamId: options.runId,
@@ -510,6 +656,14 @@ export async function createGraphExecutor(
   let running = false;
 
   const readFolded = async (): Promise<FoldedRun> => {
+    let preflight: LoadedRunPreflight;
+    try { preflight = await loadRunPreflight(options.storage, options.runId); }
+    catch (error) {
+      if (error instanceof EngineIdentityUnresolvedError) {
+        fail('ENGINE_IDENTITY_UNRESOLVED', error.message, error);
+      }
+      throw error;
+    }
     let state = options.graph.initialState();
     let revision = 0;
     const attempts = new Map<string, FoldedAttempt>();
@@ -518,13 +672,18 @@ export async function createGraphExecutor(
       Extract<GraphCommand, { readonly kind: 'dispatch' }>
     >();
     const unavailable = new Set<EngineExclusionKey>();
-    for await (const envelope of options.storage.eventStore.read(stream)) {
+    for (const envelope of preflight.events) {
       revision = envelope.revision;
       if (!envelope.type.startsWith(GRAPH_PREFIX)) continue;
       const type = envelope.type.slice(GRAPH_PREFIX.length);
       if (type === 'run-started') continue;
       if (type === 'model-unavailable') {
         pendingDispatches.clear();
+        const probeFailure = preflight.probeFailures.get(envelope.eventId);
+        if (probeFailure !== undefined) {
+          for (const key of probeFailure.exclusionKeys) unavailable.add(key);
+          continue;
+        }
         const fact = validateFact(
           envelope,
           options.runId,
@@ -686,6 +845,7 @@ export async function createGraphExecutor(
     appendRevision = revision;
     return Object.freeze({
       revision,
+      preflight,
       state,
       dispatched,
       inFlight: Object.freeze(inFlight),
@@ -702,12 +862,235 @@ export async function createGraphExecutor(
     appendRevision = await options.storage.eventStore.append(stream, expectedRevision, batch);
   };
 
-  const enqueueAppend = (event: NewDomainEvent): Promise<void> => {
-    const current = appendTail
-      .catch(() => undefined)
-      .then(async () => appendBatch(appendRevision, [event]));
+  const enqueueBatch = (events: readonly NewDomainEvent[]): Promise<void> => {
+    const current = appendTail.catch(() => undefined)
+      .then(async () => appendBatch(appendRevision, events));
     appendTail = current.then(() => undefined, () => undefined);
     return current;
+  };
+  const enqueueAppend = (event: NewDomainEvent): Promise<void> => enqueueBatch([event]);
+
+  const laneTargets = (lane: ResolvedExecutionLane): readonly ExecutionTarget[] => [lane.effective, ...lane.fallbacks];
+  const lanePolicy = (lane: ResolvedExecutionLane) => preflightPolicy!.lanes.find((value) => value.laneId === lane.id)!;
+  const routeId = (lane: ResolvedExecutionLane, target: ExecutionTarget) => canonicalJson([lane.id, target] as unknown as JsonValue);
+  const contexts = (lane: ResolvedExecutionLane): readonly (string | null)[] => {
+    const ids = plan.nodes.filter((node) => node.laneId === lane.id).map((node) => node.id);
+    return ids.length === 0 ? [null] : ids;
+  };
+  const forTarget = (probe: CompletedProbe, lane: ResolvedExecutionLane, target: ExecutionTarget) =>
+    probe.start.payload.laneId === lane.id && targetKey(probe.start.payload.target) === targetKey(target);
+  const latestStatic = (folded: FoldedRun, lane: ResolvedExecutionLane, target: ExecutionTarget, contextNodeId: string | null) =>
+    [...folded.preflight.probes].reverse().find((probe) => forTarget(probe, lane, target)
+      && probe.start.payload.stage === 'static' && probe.start.payload.contextNodeId === contextNodeId);
+  const savedSelection = (folded: FoldedRun, lane: ResolvedExecutionLane, target: ExecutionTarget): EngineSelectionRecord | null => {
+    for (const probe of [...folded.preflight.probes].reverse()) {
+      if (forTarget(probe, lane, target) && probe.payload.outcome.kind === 'admitted') return probe.payload.outcome.selection;
+    }
+    return null;
+  };
+  const staticBlocked = (folded: FoldedRun, lane: ResolvedExecutionLane, target: ExecutionTarget) =>
+    lanePolicy(lane).unsupportedStatic === 'block' && contexts(lane).some((id) => latestStatic(folded, lane, target, id)?.payload.outcome.kind === 'unsupported');
+  const excluded = (keys: ReadonlySet<EngineExclusionKey>, lane: ResolvedExecutionLane, target: ExecutionTarget) =>
+    isEngineExcluded(keys, enginesByTarget.get(targetKey(target))!.selection, target, laneTargets(lane));
+  const eligible = (folded: FoldedRun, lane: ResolvedExecutionLane, target: ExecutionTarget) =>
+    !excluded(folded.unavailable, lane, target) && contexts(lane).every((id) => {
+      const outcome = latestStatic(folded, lane, target, id)?.payload.outcome;
+      return outcome?.kind === 'admitted' || (outcome?.kind === 'unsupported' && lanePolicy(lane).unsupportedStatic === 'allow');
+    });
+  const answered = (folded: FoldedRun, lane: ResolvedExecutionLane, target: ExecutionTarget) =>
+    folded.preflight.probes.some((probe) => forTarget(probe, lane, target)
+      && probe.payload.stage === 'live' && probe.payload.outcome.kind === 'succeeded');
+  const updateBlockedRoutes = (folded: FoldedRun) => {
+    blockedRoutes.clear();
+    if (preflightPolicy === undefined) return;
+    for (const lane of plan.executionLanes) for (const target of laneTargets(lane)) {
+      if (staticBlocked(folded, lane, target)) blockedRoutes.add(routeId(lane, target));
+    }
+  };
+  const staticRequestFor = async (
+    target: ExecutionTarget, contextNodeId: string | null,
+  ): Promise<Omit<AgentRequest, 'prompt' | 'attempt'>> => {
+    if (contextNodeId === null) return {
+      model: target.model, tools: [...target.tools], cwd: scratch!,
+      timeoutMs: preflightPolicy!.timeoutMs, leaf: true,
+    };
+    const binding = options.nodes[contextNodeId];
+    if (binding === undefined) fail('MISSING_NODE_BINDING', `No node behaviour is bound for "${contextNodeId}".`);
+    const policy = validateAttemptBudgetPolicy(binding.policy);
+    const workspace = validateWorkspacePolicy(binding.workspace);
+    const nodeScratch = await preflightScratch(binding.scratchDirectory);
+    if (!Array.isArray(binding.permissions) || binding.permissions.some((permission) =>
+      typeof permission !== 'string' || permission.length === 0 || permission !== permission.trim()
+      || /[\u0000-\u001f\u007f]/u.test(permission)) || new Set(binding.permissions).size !== binding.permissions.length) {
+      throw new TypeError('Static admission permissions must be unique trimmed strings without control characters.');
+    }
+    const permissions = cloneFrozenJson([...binding.permissions]);
+    return {
+      model: target.model, tools: [...target.tools], allowedTools: [...permissions],
+      ...(binding.resultContract === null ? {} : { jsonSchema: cloneFrozenJson(binding.resultContract.schema) }),
+      ...(policy.callTokens === null ? {} : { maxTokens: policy.callTokens.tokens }),
+      cwd: workspace.directory === null ? nodeScratch : await realpath(workspace.directory),
+      workspaceMode: workspace.mode, timeoutMs: policy.timeoutMs, timeoutGraceMs: policy.teardownGraceMs,
+      maxOutputBytes: policy.outputBytes, maxMemoryBytes: policy.memoryBytes, leaf: true,
+    };
+  };
+  const writeDocument = async <Purpose extends string>(purpose: Purpose, document: unknown): Promise<ArtifactReference<Purpose>> =>
+    await options.storage.artifactStore.write({ namespace: stream.namespace, runId: options.runId }, {
+      bytes: Buffer.from(JSON.stringify(document)), mediaType: 'application/json', purpose, contentMode: 'state',
+    }) as ArtifactReference<Purpose>;
+
+  const appendProbeOutcome = async (
+    start: NewDomainEvent,
+    payload: ProbeStartPayload,
+    observation: { readonly stage: 'static'; readonly value: StaticObservation }
+      | { readonly stage: 'live'; readonly value: PreflightResult },
+  ): Promise<StaticOutcome | LiveOutcome> => {
+    let outcome: StaticOutcome | LiveOutcome;
+    const diagnostic = (detail: string) => writeDocument('preflight-diagnostic', {
+      schemaVersion: 1, runId: options.runId, probeEventId: start.eventId, detail,
+    });
+    try {
+      if (observation.stage === 'static') {
+        const value = observation.value;
+        outcome = value.kind === 'failed' ? {
+          kind: 'failed', failure: value.failure, effective: value.effective,
+          diagnostic: await diagnostic(value.detail),
+        } : value;
+      } else {
+        const value = observation.value;
+        const evidence = value.evidence === undefined ? null : await writeDocument('preflight-evidence', {
+          schemaVersion: 1, runId: options.runId, probeEventId: start.eventId, evidence: value.evidence,
+        });
+        const common = { usage: value.usage ?? { kind: 'unknown' as const }, effective: value.effective ?? null,
+          evidence, diagnostic: await diagnostic(value.detail) };
+        if (value.ok) {
+          if (evidence === null) throw new TypeError('Successful preflight must retain complete evidence.');
+          outcome = { ...common, kind: 'succeeded', evidence };
+        } else outcome = { ...common, kind: 'failed', failure: value.failure ?? 'unknown' };
+      }
+    } catch (error) {
+      if (!(error instanceof StorageError)) throw error;
+      outcome = observation.stage === 'static' ? { kind: 'recording-failed', storageCode: error.code } : {
+        kind: 'recording-failed', storageCode: error.code,
+        usage: observation.value.usage ?? { kind: 'unknown' }, effective: observation.value.effective ?? null,
+        evidence: null, diagnostic: null,
+      };
+    }
+    const finishPayload = { probeEventId: start.eventId, stage: observation.stage, outcome } as ProbeFinishPayload;
+    const finish = preflightEvent(options.runId, 'preflight:probe-finished', finishPayload, start.eventId);
+    const batch: NewDomainEvent[] = [finish];
+    if (outcome.kind === 'failed' && LANE_DEAD_FAILURES.has(outcome.failure)) {
+      batch.push(preflightEvent(options.runId, 'graph:model-unavailable', {
+        schemaVersion: 1, source: { kind: 'preflight', probeEventId: start.eventId, laneId: payload.laneId },
+        target: payload.target, selection: payload.selection, effective: outcome.effective ?? payload.selection,
+        failure: outcome.failure,
+      }, finish.eventId));
+    } else if (outcome.kind === 'failed' || outcome.kind === 'recording-failed') {
+      batch.push(preflightEvent(options.runId, 'preflight:paused', {
+        finishedProbeEventId: finish.eventId,
+        reason: outcome.kind === 'recording-failed' ? 'recording-failure' : 'engine-failure',
+      }, finish.eventId));
+    }
+    await enqueueBatch(batch);
+    return outcome;
+  };
+
+  const admitBeforeWork = async (signal: AbortSignal): Promise<
+    { readonly folded: FoldedRun } | { readonly result: PreflightPauseResult | PreflightFailureResult }
+  > => {
+    for (;;) {
+      const folded = await readFolded();
+      updateBlockedRoutes(folded);
+      const snapshot = folded.preflight;
+      if (snapshot.state.pause !== null) return { result: snapshot.state.pause };
+      if (snapshot.state.phase === 'failed') return { result: {
+        kind: 'fail', code: 'PREFLIGHT_FAILED', message: 'A declared lane has no admissible engine target.',
+      } };
+      if (snapshot.openProbe !== null) fail('PROTOCOL', `Preflight probe "${snapshot.openProbe.envelope.eventId}" is unfinished; verify worker cleanup and call interruptRunPreflight before resuming.`);
+      if (signal.aborted) fail('ABORTED', 'The graph run was aborted.');
+      if (preflightPolicy === undefined) return { folded };
+      const probeExcluded = new Set<EngineExclusionKey>();
+      for (const failure of snapshot.probeFailures.values()) for (const key of failure.exclusionKeys) probeExcluded.add(key);
+      const dead = plan.executionLanes.find((lane) => laneTargets(lane).every((target) =>
+        excluded(probeExcluded, lane, target) || staticBlocked(folded, lane, target)));
+      if (dead !== undefined) {
+        await enqueueAppend(preflightEvent(options.runId, 'preflight:failed', {
+          laneId: dead.id, code: 'PREFLIGHT_FAILED', reason: 'no-admissible-target',
+        }));
+        continue;
+      }
+      const completed = snapshot.admissionCompletedAtRevision !== null;
+      let check: { lane: ResolvedExecutionLane; target: ExecutionTarget; contextNodeId: string | null } | undefined;
+      for (const lane of plan.executionLanes) {
+        for (const target of laneTargets(lane)) {
+          const unavailable = excluded(folded.unavailable, lane, target) || staticBlocked(folded, lane, target);
+          for (const contextNodeId of contexts(lane)) {
+            const previous = latestStatic(folded, lane, target, contextNodeId);
+            const contextKey = probeContextKey(lane.id, target, contextNodeId);
+            // Initial unvisited contexts are still checked after a different context excluded the target.
+            if (completed && unavailable) continue;
+            if (previous !== undefined && unavailable) continue;
+            if (restoredContexts.has(contextKey)) continue;
+            check = { lane, target, contextNodeId };
+            break;
+          }
+          if (check) break;
+        }
+        if (check) break;
+      }
+      const resumed = [...snapshot.events].reverse().find((event) => event.type === 'preflight:resumed');
+      const cause = resumed?.eventId ?? null;
+      if (check !== undefined) {
+        const { lane, target, contextNodeId } = check;
+        const binding = enginesByTarget.get(targetKey(target))!;
+        const expectedSelection = savedSelection(folded, lane, target);
+        const payload: ProbeStartPayload = { stage: 'static', laneId: lane.id, target,
+          selection: binding.selection, contextNodeId, expectedSelection };
+        const start = preflightEvent(options.runId, 'preflight:probe-started', payload, cause);
+        // Validate caller configuration before recording a call that has not begun.
+        const configuration = await staticRequestFor(target, contextNodeId);
+        if (signal.aborted) fail('ABORTED', 'The graph run was aborted.');
+        await enqueueAppend(start);
+        const request = { ...configuration, attempt: probeAttempt(stream.namespace, options.runId, start.eventId) };
+        const observation = await observeStatic(binding.engine, request, expectedSelection, target, preflightPolicy.timeoutMs, signal);
+        const outcome = await appendProbeOutcome(start, payload, { stage: 'static', value: observation });
+        const contextKey = probeContextKey(lane.id, target, contextNodeId);
+        if (outcome.kind === 'admitted') {
+          enginesByTarget.set(targetKey(target), Object.freeze({ ...binding, selection: outcome.selection }));
+          restoredContexts.add(contextKey);
+        } else if (outcome.kind === 'unsupported') restoredContexts.add(contextKey);
+        else restoredContexts.delete(contextKey);
+        continue;
+      }
+      if (completed) return { folded };
+      let live: { lane: ResolvedExecutionLane; target: ExecutionTarget } | undefined;
+      for (const lane of plan.executionLanes) {
+        if (lanePolicy(lane).live === 'skip'
+          || laneTargets(lane).some((target) => eligible(folded, lane, target) && answered(folded, lane, target))) continue;
+        const target = laneTargets(lane).find((target) => eligible(folded, lane, target) && !answered(folded, lane, target));
+        if (target !== undefined) { live = { lane, target }; break; }
+      }
+      if (live === undefined) fail('PROTOCOL', 'Preflight has no permitted unfinished check and is not admitted.');
+      const binding = enginesByTarget.get(targetKey(live.target))!;
+      const admitted = savedSelection(folded, live.lane, live.target);
+      const normal = admitted ?? binding.selection;
+      const payload: ProbeStartPayload = { stage: 'live', laneId: live.lane.id, target: live.target, selection: normal };
+      const start = preflightEvent(options.runId, 'preflight:probe-started', payload, cause);
+      await enqueueAppend(start);
+      let observation = await preflightEngine(binding.engine, {
+        model: live.target.model, timeoutMs: preflightPolicy.timeoutMs, cwd: scratch,
+        attempt: probeAttempt(stream.namespace, options.runId, start.eventId), signal,
+      });
+      const requested = observation.evidence?.kind === 'complete' ? observation.evidence.result.requested : null;
+      const compatible = requested !== null && requested.capabilities.length === 0 && (admitted !== null
+        ? isDeepStrictEqual(requested, engineSelection({ ...admitted, capabilities: [] }))
+        : requested.adapter === normal.adapter && requested.provider === normal.provider
+          && requested.modelFamily === normal.modelFamily && requested.model === normal.model);
+      if (observation.ok && !compatible) {
+        observation = { ...observation, ok: false, failure: 'unknown', detail: 'Live preflight requested identity does not match its selected target.' };
+      }
+      await appendProbeOutcome(start, payload, { stage: 'live', value: observation });
+    }
   };
 
   const routeFor = (
@@ -718,6 +1101,7 @@ export async function createGraphExecutor(
     const declaredTargets = [lane.effective, ...lane.fallbacks];
     for (const target of declaredTargets) {
       const binding = enginesByTarget.get(targetKey(target))!;
+      if (blockedRoutes.has(routeId(lane, target))) continue;
       if (isEngineExcluded(unavailable, binding.selection, target, declaredTargets)) continue;
       live.push({
         engine: binding.engine,
@@ -870,7 +1254,9 @@ export async function createGraphExecutor(
   const drive = async (signal: AbortSignal): Promise<GraphExecutorResult> => {
     for (;;) {
       if (signal.aborted) fail('ABORTED', 'The graph run was aborted.');
-      const folded = await readFolded();
+      const admission = await admitBeforeWork(signal);
+      if ('result' in admission) return admission.result;
+      const { folded } = admission;
       const commands = options.graph.decide(folded.state);
       if (commands.length === 0) {
         if (folded.inFlight.length === 0) {
@@ -918,7 +1304,9 @@ export async function createGraphExecutor(
     signal: AbortSignal,
   ): Promise<GraphExecutorResult> => {
     if (signal.aborted) fail('ABORTED', 'The graph run was aborted.');
-    const folded = await readFolded();
+    const admission = await admitBeforeWork(signal);
+    if ('result' in admission) return admission.result;
+    const { folded } = admission;
     const attempt = folded.attempts.get(position);
     if (!attempt || attempt.status === 'settled') {
       fail('PROTOCOL', `Position "${position}" is not an unfinished attempt.`);
@@ -965,6 +1353,26 @@ export async function createGraphExecutor(
     return drive(signal);
   };
 
+  const resumePreflight = async (target: { readonly preflightEventId: string }, signal: AbortSignal): Promise<GraphExecutorResult> => {
+    const value: unknown = target;
+    const item = value !== null && typeof value === 'object' && !Array.isArray(value)
+      ? value as Record<string, unknown> : undefined;
+    if (item === undefined || Object.getOwnPropertyNames(item).length !== 1 || Object.getOwnPropertySymbols(item).length !== 0 || !Object.hasOwn(item, 'preflightEventId') || 'position' in item) {
+      fail('RESUME_EVENT_MISMATCH', 'Preflight resume requires exactly one valid preflightEventId.');
+    }
+    let requested: string;
+    try { requested = validateDomainEventId(item.preflightEventId, '/preflightEventId'); }
+    catch (cause) { fail('RESUME_EVENT_MISMATCH', 'Preflight resume requires exactly one valid preflightEventId.', cause); }
+    if (signal.aborted) fail('ABORTED', 'The graph run was aborted.');
+    const folded = await readFolded();
+    const current = folded.preflight.state.pause?.preflightEventId ?? null;
+    if (current !== requested) {
+      fail('RESUME_EVENT_MISMATCH', `Resume expected preflight event "${requested}" but found "${current ?? '(none)'}".`);
+    }
+    await enqueueAppend(preflightEvent(options.runId, 'preflight:resumed', { preflightEventId: requested }, requested));
+    return drive(signal);
+  };
+
   const exclusively = async (
     operation: () => Promise<GraphExecutorResult>,
   ): Promise<GraphExecutorResult> => {
@@ -979,8 +1387,8 @@ export async function createGraphExecutor(
 
   return Object.freeze({
     run: (signal: AbortSignal) => exclusively(() => drive(signal)),
-    resume: (position: string, signal: AbortSignal) => exclusively(
-      () => resumePosition(position, signal),
+    resume: (target: string | { readonly preflightEventId: string }, signal: AbortSignal) => exclusively(
+      () => typeof target === 'string' ? resumePosition(target, signal) : resumePreflight(target, signal),
     ),
   });
 }
