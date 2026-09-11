@@ -25,10 +25,10 @@ engine and memory packages track their own versions independently.
 
 ### Fixed
 
-- **Bounded child execution:** The caller race in node-lifecycle and
-  engine-codex could not be made red on this host without a test-only seam;
-  the process package's real-child null-exit fixture and the memory-git caller
-  proof are red-first, and CI after the push is the second witness.
+- **Bounded child execution:** The caller race in node-lifecycle could not be
+  made red on this host without a test-only seam; the process package's
+  real-child null-exit fixture and the memory-git caller proof are red-first,
+  and CI after the push is the second witness.
 - **Invalid team turns:** Reject bad results before saving completion, and
   retain earlier messages when replay finds invalid saved result content.
 - **Early team review validation:** Invalid panel or callback settings are

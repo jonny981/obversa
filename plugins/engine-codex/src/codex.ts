@@ -213,12 +213,16 @@ export class CodexEngine implements Engine {
         throw new EngineError({ kind: 'aborted', message: 'codex run aborted' });
       const stdout = new TextDecoder().decode(sub.stdout);
       const stderr = new TextDecoder().decode(sub.stderr);
-      const failed = aborted || sub.timedOut || sub.exitCode !== 0;
+      const late =
+        typeof req.timeoutMs === 'number' &&
+        Date.now() - startedAt > req.timeoutMs;
+      const timedOut = sub.timedOut || late;
+      const failed = aborted || timedOut || sub.exitCode !== 0;
       const diagnostic = diagnosticCapture(stderr, stdout, env);
       let transportFailure: AgentResult['transportFailure'];
       if (failed && !text)
         throw new EngineError({
-          kind: sub.timedOut
+          kind: timedOut
             ? 'timeout'
             : classifyEngineFailure(new Error(diagnostic)),
           // The combined streams are scrubbed in full before the middle cut,
@@ -229,7 +233,7 @@ export class CodexEngine implements Engine {
         });
       if (failed) {
         transportFailure = {
-          kind: aborted ? 'aborted' : sub.timedOut ? 'timeout' : 'unknown',
+          kind: aborted ? 'aborted' : timedOut ? 'timeout' : 'unknown',
           message: `codex completed but exited ${sub.exitCode ?? '?'} during teardown${
             diagnostic ? `: ${diagnostic}` : ''
           }`,
@@ -248,9 +252,6 @@ export class CodexEngine implements Engine {
         model: model ?? 'codex',
         executable,
       });
-      const late =
-        typeof req.timeoutMs === 'number' &&
-        Date.now() - startedAt > req.timeoutMs;
       return assistantResult({
         text,
         usage,
