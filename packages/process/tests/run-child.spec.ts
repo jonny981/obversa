@@ -188,6 +188,53 @@ describe('runChild', () => {
     expect(result.aborted).toBe(false);
   });
 
+  it('does not reject after SIGKILL while the exit hook finishes', async () => {
+    let survivorPid: number | undefined;
+    let childOutput = '';
+    try {
+      const result = await runChild({
+        executable: node,
+        args: ['--input-type=module', '-e', [
+          'import { spawn } from "node:child_process";',
+          'process.on("SIGTERM", () => {});',
+          'const survivor = spawn(process.execPath, ["-e", "setInterval(() => {}, 30_000)"], { detached: true, stdio: "inherit" });',
+          'process.stdout.write(`${survivor.pid}\\n`);',
+          'setInterval(() => {}, 1_000);',
+        ].join('')],
+        timeoutMs: 500,
+        killGraceMs: 50,
+        maxOutputBytes: 1_024,
+        hooks: {
+          onStdout(chunk) {
+            childOutput += new TextDecoder().decode(chunk);
+            survivorPid = Number(childOutput.match(/^\d+/u)?.[0]);
+          },
+          async onExit() {
+            await new Promise<void>((resolve) => setTimeout(resolve, 200));
+          },
+        },
+      });
+      expect(result).toMatchObject({
+        exitCode: null,
+        timedOut: true,
+        aborted: false,
+      });
+    } finally {
+      if (survivorPid !== undefined && Number.isSafeInteger(survivorPid)) {
+        try {
+          process.kill(survivorPid, 'SIGKILL');
+        } catch {
+          // The fixture may have ended during cleanup.
+        }
+        const deadline = Date.now() + 1_000;
+        while (isProcessAlive(survivorPid) && Date.now() < deadline) {
+          await new Promise((resolve) => setTimeout(resolve, 20));
+        }
+        expect(isProcessAlive(survivorPid)).toBe(false);
+      }
+    }
+  });
+
   it('keeps timeout classification when the stopped child closes with no exit code', async () => {
     const result = await runChild({
       executable: node,

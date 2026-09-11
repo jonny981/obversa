@@ -358,6 +358,8 @@ export function runChild(options: RunChildOptions): Promise<RunChildResult> {
     child.once('exit', (code, signal) => {
       stoppedAt = performance.now();
       if (timeoutTimer !== undefined) clearTimeout(timeoutTimer);
+      if (forceKillTimer !== undefined) clearTimeout(forceKillTimer);
+      if (teardownTimer !== undefined) clearTimeout(teardownTimer);
       try {
         exitPromise = Promise.resolve(options.hooks?.onExit?.(code, signal));
         void exitPromise.then(
