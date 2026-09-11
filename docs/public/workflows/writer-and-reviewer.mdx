@@ -178,6 +178,11 @@ A rejection is a revision request aimed at `writer`, and `maxKickbacks`
 - **The test command runs in the workspace.** Its arguments are relative to
   the directory you pass as `workspace`, which the file above sets to the
   current directory.
+- **A writing seat can write anywhere the process can.** The files above
+  start their Claude and Codex seats with permission prompts off, which is
+  what lets a model write files. Run them in a directory you are willing
+  to let a model change, and give a reviewing seat a read-only mode if its
+  plugin has one.
 
 ## Source
 

@@ -6,6 +6,7 @@ import { describe, expect, it } from 'vitest';
 import { jobMeta, run } from '@obversa/runtime';
 
 import { featureDelivery } from '../src/index.js';
+import { requireNoFiles } from '../src/team-utils.js';
 import { pass, revise, scriptedEngine, seat } from './scripted-engine.js';
 
 const testCommand = {
@@ -135,6 +136,26 @@ describe('featureDelivery', () => {
       expect(result.outcome.status).toBe('fail');
       const nodes = result.outcome.data as { approve?: { summary?: string } };
       expect(nodes.approve?.summary).toContain('approve did not produce a non-empty file: team-output/approval.md');
+    } finally {
+      await rm(workspace, { recursive: true, force: true });
+    }
+  });
+
+  it('allows an expected file that existed before analyse ran', async () => {
+    const workspace = await mkdtemp(join(tmpdir(), 'obversa-teams-feature-existing-file-'));
+    try {
+      await mkdir(join(workspace, 'src'), { recursive: true });
+      await writeFile(join(workspace, 'src/result.mjs'), 'export const result = 10;\n');
+      const result = await run(
+        requireNoFiles(
+          'analyse',
+          async () => ({ status: 'pass' as const, summary: 'brief accepted' }),
+          workspace,
+          ['src/result.mjs'],
+        ),
+        { cwd: workspace },
+      );
+      expect(result.outcome.status).toBe('pass');
     } finally {
       await rm(workspace, { recursive: true, force: true });
     }

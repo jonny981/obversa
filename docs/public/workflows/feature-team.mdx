@@ -236,14 +236,21 @@ findings, then the test and the review run again with it.
 
 ## Gotchas
 
-- **The analyse step writes the note and nothing else.** If the analyse seat
-  writes the implementation itself, the step fails by name, because a plan
-  written after the code is not a plan.
+- **The analyse step writes the note and nothing else.** The package
+  compares the expected files before and after the analyse step, and fails
+  it by name if the seat wrote or changed any of them, because a plan
+  written after the code is not a plan. Files that were already in the
+  workspace before the run are left alone.
 - **The implementer and every reviewer are different model families.** The
   analyse and approve seats are free to share a family with either.
 - **The approval is a file, not a status.** `team-output/approval.md` is
   what the approve step must leave behind, and the step fails when it is
   missing or empty.
+- **A writing seat can write anywhere the process can.** The files above
+  start their Claude and Codex seats with permission prompts off, which is
+  what lets a model write files. Run them in a directory you are willing
+  to let a model change, and give a reviewing seat a read-only mode if its
+  plugin has one.
 
 ## Source
 
