@@ -58,7 +58,7 @@ const team = thresholdPanel({
     { name: 'correctness', seat: correctness },
     { name: 'scope', seat: scope },
   ],
-  threshold: 2,
+  threshold: 1,
 });
 const result = await run(team, { cwd: workspace });
 
