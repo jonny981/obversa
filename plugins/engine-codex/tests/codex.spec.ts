@@ -12,6 +12,12 @@ import { join } from 'node:path';
 import { classifyEngineFailure, finalResultText } from '@obversa/engine';
 import { buildCodexArgs, CodexEngine } from '../src/index.ts';
 
+const VERSION_ONLY = `if (process.argv.length === 3 && process.argv[2] === '--version') {
+  process.stdout.write('codex-cli 0.153.2\\n');
+  process.exit(0);
+}
+`;
+
 describe('buildCodexArgs', () => {
   it('defaults to a read-only ephemeral exec and writes the last message', () => {
     const args = buildCodexArgs({ prompt: 'review this' }, {}, '/tmp/out.txt');
@@ -76,6 +82,7 @@ describe('buildCodexArgs', () => {
     writeFileSync(
       bin,
       `#!/usr/bin/env node
+${VERSION_ONLY}
 import { readFileSync, writeFileSync } from 'node:fs';
 
 const args = process.argv.slice(2);
@@ -117,6 +124,7 @@ writeFileSync(out, 'stub final');
     writeFileSync(
       bin,
       `#!/usr/bin/env node
+${VERSION_ONLY}
 import { writeFileSync } from 'node:fs';
 
 const args = process.argv.slice(2);
@@ -165,6 +173,7 @@ process.stdout.write(JSON.stringify({
     writeFileSync(
       bin,
       `#!/usr/bin/env node
+${VERSION_ONLY}
 import { writeFileSync } from 'node:fs';
 
 const args = process.argv.slice(2);
@@ -199,6 +208,7 @@ process.exit(1);
     writeFileSync(
       bin,
       `#!/usr/bin/env node
+${VERSION_ONLY}
 console.error('transport failed before completion');
 process.exit(1);
 `,
@@ -221,6 +231,7 @@ process.exit(1);
     writeFileSync(
       bin,
       `#!/usr/bin/env node
+${VERSION_ONLY}
 process.stderr.write('OpenAI Codex v0.144.4\\n' + 'startup detail '.repeat(40));
 process.stdout.write(${JSON.stringify(secret)} + " HTTP 400: Invalid value: 'max'. Supported values are: none, low, high, xhigh\\n");
 process.exit(1);
@@ -259,7 +270,7 @@ process.exit(1);
     try {
       writeFileSync(
         executable,
-        `#!/usr/bin/env node\nprocess.stderr.write(${JSON.stringify(`${text}\n`)});\nprocess.exit(1);\n`,
+        `#!/usr/bin/env node\n${VERSION_ONLY}process.stderr.write(${JSON.stringify(`${text}\n`)});\nprocess.exit(1);\n`,
       );
       chmodSync(executable, 0o755);
       await expect(new CodexEngine({ cliBinary: executable }).run(
