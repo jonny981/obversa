@@ -415,6 +415,7 @@ export async function runOwnedCommand(
         graceMs: request.teardownGraceMs,
       });
     })();
+    void cleanupPromise.catch(() => {});
     return cleanupPromise;
   };
 
@@ -518,7 +519,27 @@ export async function runOwnedCommand(
     pipeProbe?.close();
   }
 
-  if (cleanupError !== undefined) throw cleanupError;
+  if (cleanupError !== undefined) {
+    if (treeRequest !== undefined) {
+      cancellation.abort();
+      try {
+        remainingProcesses = await stopOwnedProcessTree({
+          ...treeRequest,
+          observed,
+          graceMs: request.teardownGraceMs,
+        });
+      } catch (error) {
+        inspectionFailure ??= error;
+      }
+    }
+    throw new OwnedCommandError(
+      'TEARDOWN_INCOMPLETE',
+      cleanupError instanceof Error
+        ? cleanupError.message
+        : 'owned process teardown failed',
+      remainingProcesses,
+    );
+  }
   if (childError !== undefined) {
     if (childError instanceof RunChildError && childError.code === 'OUTPUT_LIMIT') {
       throw new OwnedCommandError(

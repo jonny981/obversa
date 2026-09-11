@@ -229,7 +229,8 @@ describe.runIf(process.platform !== 'win32')('owned command runner', () => {
     }
 
     expect(forced).toBe(true);
-    expect(caught).toBe(failure);
+    expect(caught).toBeInstanceOf(OwnedCommandError);
+    expect(caught).toMatchObject({ code: 'TEARDOWN_INCOMPLETE' });
     expect(getEventListeners(controller.signal, 'abort')).toEqual([]);
     expectFixtureStopped(directory);
   });

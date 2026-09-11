@@ -282,9 +282,16 @@ export function runChild(options: RunChildOptions): Promise<RunChildResult> {
     child.once('exit', (code, signal) => {
       try {
         exitPromise = Promise.resolve(options.hooks?.onExit?.(code, signal));
+        void exitPromise.catch((error) => {
+          stopError = error;
+          child.stdout?.destroy();
+          child.stderr?.destroy();
+        });
       } catch (error) {
         stopError = error;
         exitPromise = Promise.resolve();
+        child.stdout?.destroy();
+        child.stderr?.destroy();
       }
     });
     child.once('close', (code, signal) => {
