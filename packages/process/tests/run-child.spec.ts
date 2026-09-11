@@ -110,6 +110,11 @@ describe('runChild', () => {
         } catch {
           // The fixture may have ended during cleanup.
         }
+        const deadline = Date.now() + 1_000;
+        while (isProcessAlive(survivorPid) && Date.now() < deadline) {
+          await new Promise((resolve) => setTimeout(resolve, 20));
+        }
+        expect(isProcessAlive(survivorPid)).toBe(false);
       }
     }
   });
