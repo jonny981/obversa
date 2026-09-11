@@ -97,6 +97,7 @@
     "verify:f25": "pnpm verify:d43",
     "verify:f26": "pnpm verify:d43",
     "verify:d44": "pnpm verify:d43",
+    "verify:f27": "pnpm verify:d43",
     "verify:d24": "pnpm verify:d23",
     "changeset": "changeset",
     "version-packages": "changeset version",

@@ -43,6 +43,7 @@ export const stageBranches = {
   F25: 'feat/examples-a-user-would-write',
   F26: 'feat/one-run-per-rename',
   D44: 'docs/lead-with-the-team',
+  F27: 'fix/sweep-three-proof',
 };
 
 export function manageStage(args, options = {}) {

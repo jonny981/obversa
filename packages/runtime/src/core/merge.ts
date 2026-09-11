@@ -27,7 +27,7 @@ import {
 import { LoopError } from './errors.js';
 import { requireFinalResultText } from '../runtime/result-parts.js';
 
-// ponytail: one process-wide lock; use per-workspace locks if throughput requires it.
+// One process-wide lock; use per-workspace locks if throughput requires it.
 export const mergeLock = pLimit(1);
 
 export interface MergeSynthesisConfig {

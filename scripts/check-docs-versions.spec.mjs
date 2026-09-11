@@ -11,6 +11,8 @@ test('docs versions follow each package manifest, including plugins', () => {
   const root = mkdtempSync(join(tmpdir(), 'obversa-docs-versions-'));
   try {
     writeFileSync(join(root, 'pnpm-workspace.yaml'), "packages:\n  - 'packages/*'\n  - 'plugins/*'\n");
+    mkdirSync(join(root, 'scripts'), { recursive: true });
+    writeFileSync(join(root, 'scripts/publish-allowlist.json'), JSON.stringify({ packages: ['@obversa/runtime', '@obversa/memory-git'] }));
     mkdirSync(join(root, 'docs/public'), { recursive: true });
     for (const [directory, name, version] of [
       ['packages/runtime', '@obversa/runtime', '1.2.3'],
@@ -54,6 +56,13 @@ test('docs versions follow each package manifest, including plugins', () => {
     assert.match(run().stderr, /@obversa\/unknown.*manifest/);
     writeFileSync(page, '## Packages\n');
     assert.match(run().stderr, /package table.*missing/i);
+
+    const dropped = '## Packages\n\n| Package | Purpose | Version |\n| --- | --- | --- |\n'
+      + '| `@obversa/runtime` | Runtime | `1.2.3` |\n';
+    writeFileSync(page, dropped);
+    const missingRow = run();
+    assert.equal(missingRow.status, 1);
+    assert.match(missingRow.stderr, /@obversa\/memory-git.*homepage row/i);
   } finally {
     rmSync(root, { recursive: true, force: true });
   }

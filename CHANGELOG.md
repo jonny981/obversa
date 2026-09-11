@@ -125,6 +125,9 @@ engine and memory packages track their own versions independently.
   files that carried it, including the consult instruction and the two plugin
   system prompts a model reads at run time. English uses of the word stay. A
   grep of the word now finds only the diff module's ordinary sentence.
+- **Review-loop status typing:** `ConvergenceStatus` is a type alias rather
+  than an interface, and `EngineReceiptRejection` is exported, so a consumer
+  can name the rejection element type directly instead of by indexed access.
 - **Tarball test selection:** Run the two package-command integration tests
   with `OBVERSA_TEST_REAL_PACK=1 pnpm test:tarballs`. The default command skips
   those tests; `verify:d15` enables them.
@@ -163,7 +166,8 @@ engine and memory packages track their own versions independently.
   report. Printed JSON can change indentation while executable path checks
   remain enforced.
 - **Documentation versions:** Refuse a docs build when a package version in
-  the homepage table differs from its workspace manifest.
+  the homepage table differs from its workspace manifest, and when a
+  publishable package has no homepage row at all.
 - **Process identities across locales and timezones:** Read the process table
   under the C locale and UTC. A worker with a restricted environment and a
   host watchdog previously spelled one start time two ways, so live status
