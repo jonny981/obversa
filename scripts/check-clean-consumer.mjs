@@ -287,11 +287,30 @@ function sourceFromProcessDoc(document) {
   return `${match[1]}\n`;
 }
 
+export function checkedTeamConversationPage(document, source, output) {
+  assert.equal(sourceFromPublicDoc(document), source,
+    'The team conversation page must match its complete runnable source.');
+  const introduction = document.slice(0, document.indexOf('## Source'));
+  const blocks = [...introduction.matchAll(/```ts\n([\s\S]*?)\n```/g)];
+  assert.equal(blocks.length, 3, 'The team conversation page must have three short TypeScript blocks.');
+  for (const [index, name] of ['imports', 'definition', 'posts'].entries()) {
+    const region = new RegExp(`^[ \\t]*// #region ${name}\\n([\\s\\S]*?)\\n[ \\t]*// #endregion ${name}$`, 'm').exec(source);
+    assert.ok(region, `The ${name} source region must have both markers.`);
+    assert.equal(blocks[index][1], region[1], `The ${name} short block must match its source region.`);
+  }
+  const match = /## Output[\s\S]*?```json\r?\n([\s\S]*?)```/.exec(document);
+  assert.ok(match, 'The team conversation page must include its printed report.');
+  assert.deepEqual(JSON.parse(output), JSON.parse(match[1]),
+    'The team conversation page must match its printed report.');
+}
+
 function run(command, args, options = {}) {
   const result = spawnSync(command, args, {
     cwd: options.cwd ?? root,
     encoding: 'utf8',
     maxBuffer: 32 * 1024 * 1024,
+    timeout: options.timeout,
+    killSignal: options.timeout === undefined ? undefined : 'SIGKILL',
     env: { ...process.env, ...options.env },
   });
   if (result.status !== 0) {
@@ -524,6 +543,7 @@ const tsconfig = {
     'forge-helper.ts',
     'custom-graph.ts',
     'pipeline.ts',
+    'team-conversation.ts',
     'review-loop.ts',
     'callback-gate.ts',
     'proof-bound-approval.ts',
@@ -540,7 +560,49 @@ const tsconfig = {
   ],
 };
 
+/**
+ * Read every file this proof needs, and report every one that is missing.
+ *
+ * The proof used to read them one at a time and stop at the first failure,
+ * so a rename that moved five files cost five runs to find, each about a
+ * minute: fix one, run, learn the next. That happened twice in one day.
+ * This walks every path first, collects what is not there, and names all of
+ * it at once, so a rename costs one run whatever it touched.
+ */
+async function readAllOrReportEveryMissingFile(paths) {
+  const contents = new Map();
+  const missing = [];
+  await Promise.all(
+    [...new Set(paths)].map(async (path) => {
+      try {
+        contents.set(path, await readFile(path, 'utf8'));
+      } catch (error) {
+        if ((error && error.code) === 'ENOENT') missing.push(path);
+        else throw error;
+      }
+    }),
+  );
+  if (missing.length) {
+    const list = missing.sort().map((path) => `  ${path.slice(root.length + 1)}`).join('\n');
+    throw new Error(
+      `${missing.length} file(s) this proof reads are not there:\n${list}\n` +
+        'Every one is listed so a rename costs one run rather than one run each.',
+    );
+  }
+  return contents;
+}
+
 async function main() {
+  // Preflight. The tsconfig above names every example the throwaway project
+  // compiles, and each one is a file in examples/ with the same name. Check
+  // that invariant before anything else runs: it is the one a rename breaks,
+  // and checking it here names every casualty at once instead of one per run.
+  await readAllOrReportEveryMissingFile(
+    tsconfig.include
+      .filter((name) => name !== 'consumer.ts')
+      .map((name) => join(root, 'examples', name)),
+  );
+
   const exampleSource = await readFile(
     join(root, 'examples', 'offline-review.ts'),
     'utf8',
@@ -554,6 +616,11 @@ async function main() {
   const graphExamplePath = join(root, 'examples', 'custom-graph.ts');
   const graphExampleSource = await readFile(graphExamplePath, 'utf8');
   const pipelineExamplePath = join(root, 'examples', 'pipeline.ts');
+  const teamConversationPath = join(root, 'examples', 'team-conversation.ts');
+  const teamConversationSource = await readFile(teamConversationPath, 'utf8');
+  const teamConversationDocument = await readFile(
+    join(root, 'docs', 'public', 'workflows', 'team-conversation.mdx'), 'utf8',
+  );
   const reviewLoopExamplePath = join(root, 'examples', 'review-loop.ts');
   const callbackGateExamplePath = join(root, 'examples', 'callback-gate.ts');
   const callbackGateExampleSource = await readFile(callbackGateExamplePath, 'utf8');
@@ -701,6 +768,7 @@ async function main() {
     await copyFile(forgeExamplePath, join(consumerDirectory, 'forge-helper.ts'));
     await copyFile(graphExamplePath, join(consumerDirectory, 'custom-graph.ts'));
     await copyFile(pipelineExamplePath, join(consumerDirectory, 'pipeline.ts'));
+    await copyFile(teamConversationPath, join(consumerDirectory, 'team-conversation.ts'));
     await copyFile(reviewLoopExamplePath, join(consumerDirectory, 'review-loop.ts'));
     await copyFile(callbackGateExamplePath, join(consumerDirectory, 'callback-gate.ts'));
     await copyFile(
@@ -818,6 +886,10 @@ async function main() {
     const directPipeline = JSON.parse(
       run('pnpm', ['exec', 'tsx', 'pipeline.ts'], { cwd: consumerDirectory }),
     );
+    const compiledTeamConversation = run(process.execPath, ['dist/team-conversation.js'], { cwd: consumerDirectory, timeout: 30_000 });
+    const directTeamConversation = run(process.execPath, ['--import', 'tsx', 'team-conversation.ts'], { cwd: consumerDirectory, timeout: 30_000 });
+    checkedTeamConversationPage(teamConversationDocument, teamConversationSource, compiledTeamConversation);
+    checkedTeamConversationPage(teamConversationDocument, teamConversationSource, directTeamConversation);
     const compiledReviewLoop = JSON.parse(
       run(process.execPath, ['dist/review-loop.js'], { cwd: consumerDirectory }),
     );
@@ -989,7 +1061,7 @@ async function main() {
     if (refs.length !== 1) throw new Error(`Git memory created ${refs.length} private refs instead of one`);
 
     console.log(
-      'Clean offline consumer passed with TypeScript 7 and 6, the first production line, the described-team example, the safe-change production line, the feature-delivery line, the forge helper, the outside graph, the pipeline executor example, the review loop, the callback gate, proof-bound approval, the turn-taking executor example, durable storage, safe node attempts, the supervised runner, 17 memory cases, and both memory adapters.',
+      'Clean offline consumer passed with TypeScript 7 and 6, offline-review.ts, described-team.ts, safe-change.ts, feature-delivery.ts, forge-helper.ts, the outside graph, the pipeline executor example, the review loop, the callback gate, proof-bound approval, the turn-taking executor example, durable storage, safe node attempts, the supervised runner, 17 memory cases, and both memory adapters.',
     );
   } finally {
     await rm(directory, { recursive: true, force: true });

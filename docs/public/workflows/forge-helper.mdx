@@ -1,14 +1,14 @@
 ---
-title: "Forge helper"
+title: "Shipping a reviewed change through GitHub"
 description: "Ship a reviewed change through a code host: push the branch, open one pull request, pass a strict gate, squash the merge."
 ---
 
-A forge is a code host such as GitHub. This helper ships a reviewed change
-through a forge. It pushes the work branch, opens or updates one pull
+Once a change has passed review it still has to reach the code host. This
+file does that step for GitHub, or any host with the same five operations. It pushes the work branch, opens or updates one pull
 request, proves that the change can merge, squashes the work into the base
 branch, and deletes the work branch.
 
-Call this helper after a review gate passes. A host supplies the five
+Call this file after a review gate passes. A host supplies the five
 operations, in the same way it supplies memory. The helper is host-side
 code: it imports no runtime package.
 

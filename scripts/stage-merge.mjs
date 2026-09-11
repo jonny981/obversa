@@ -19,6 +19,7 @@ export const stageBranches = {
   D16: 'feat/runner-hardening',
   D18: 'feat/proof-cache-safe-change',
   D19: 'feat/writer-exclusion',
+  D28: 'feat/team-form',
   D21: 'feat/parity-tests',
   F4: 'feat/release-readiness',
   F5: 'feat/release-wording',
@@ -40,6 +41,8 @@ export const stageBranches = {
   F20: 'feat/f20-checks-that-run',
   F22: 'feat/bounded-child-process',
   F25: 'feat/examples-a-user-would-write',
+  F26: 'feat/one-run-per-rename',
+  D44: 'docs/lead-with-the-team',
 };
 
 export function manageStage(args, options = {}) {
