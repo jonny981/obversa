@@ -20,38 +20,89 @@ done twice.
 
 ## Why it exists
 
-Agent frameworks give you one clever session; when it dies, it starts over.
-Workflow engines give you durable steps and a server to run them on. Neither
-gives you a team: named roles, a review that returns work to whoever owns
-it, a vote when one opinion is not enough, and a person the run waits for.
-That is the layer Obversa owns, and it sits on the tools you already use.
+Agents are not deterministic. Left to themselves, there is no guarantee
+that every step of a process is followed, in the right order, under the
+right conditions. Obversa puts a deterministic process around the
+inference: many small jobs, each with a review cycle, so the research, the
+implementation and the tests are each checked before the next step runs.
+
+The workflows built into a frontier harness cannot be saved, shared or
+repeated. An Obversa workflow is a file. You save it, share it, and run it
+again, and it runs the same way each time.
+
+It models process at every layer: the organisation, the team and the
+individual. Agent frameworks give you one clever session; workflow engines
+give you durable steps and a server. Neither gives you a team with a
+process, and that is the layer Obversa owns.
+
+## Inference at the leaves
+
+Inference belongs mostly at the leaves. Around each inference step you can
+build as much process as you like: deterministic scripts, tools and checks,
+so that the job an agent has to do is clearer, simpler, better bounded and
+cheaper. Squeeze the determinism out of the agents and what is left is a
+set of very specific, focused agents doing narrow tasks.
+
+That improves quality, and it does something else: a narrow, well-bounded
+task can be done by a small open-weight model tuned to it, as well as a
+frontier model would, at a fraction of the cost.
+
+Process engineers call the method value stream mapping: understand the
+process, then make the steps that add no value cheaper, faster, or cut
+them out. The same idea applies here. Lift every deterministic step out of
+the agents, so their context shrinks to the parts that truly need
+inference.
+
 
 ## What you can do with it
 
-- **Start from a ready-made team.** A writer and a reviewer, a review panel
-  with a threshold, or feature delivery from brief to approval: one import,
-  your brief, your engines, run. [The examples](/workflows).
-- **Give work a shape.** A pipeline, a review loop, a panel of reviewers,
-  a tournament of candidates, or a graph of your own. Each is one call in
-  TypeScript, not a diagram you draw.
-- **Send work back, not around.** A reviewer that fails a step names the
-  step that must fix it. The work goes back there with the findings, and
-  the steps that depend on it run again.
-- **Ask for a second opinion that is really a second opinion.** The
-  implementer and every reviewer run on different model families, so one
-  model cannot approve its own work.
-- **Stop for a person.** A callback gate pauses the run, puts one decision
-  in front of someone, and carries on from that exact step with the answer.
-- **Restart where it stopped.** Every step is written to a record as it
-  happens. Run under the supervised runner, kill it, start it again, and
-  nothing already finished is done twice.
-- **Let teammates talk.** Named members post in rooms, mention one another,
-  and a mentioned member is woken with the message. The rooms are files you
-  can read.
-- **Use the engines you have.** Claude, Codex, Grok, OpenCode, an SDK, an
-  API, or one you write. Swap them without touching the workflow.
-- **Keep your own tools.** Your editor, your terminal, your repositories.
-  No server, no database, nothing to stand up before the first run.
+- **Run a ready-made team on your own files.** A writer and a reviewer, a
+  review panel with a threshold, or feature delivery from brief to approval:
+  one import, your brief, your engines, run.
+  [The teams package](/packages/teams).
+- **Give work a shape in one call.** Steps in order, a graph with parallel
+  branches, a loop that revises until it passes, a tournament of
+  candidates, a quorum of opinions. [Workflows](/concepts/workflows).
+- **Say what each step does and what done means.** A sentence for each on
+  the node, and the reviewer judges against it.
+  [Workflows](/concepts/workflows).
+- **Send work back to the step that owns it.** A failed review names the
+  step that must fix it, and the work goes back there with the findings.
+  [A review that sends work back](/reviewing/review-loop).
+- **Get a second opinion that is really a second opinion.** The implementer
+  and every reviewer run on different model families, checked before a run.
+  [The teams package](/packages/teams).
+- **Stop for a person.** A callback gate puts one decision in front of
+  someone and the run carries on from that step with the answer.
+  [Callback gates](/reviewing/callback-gates).
+- **Approve only what was proved.** An approval is bound to the exact bytes
+  and test result it was given. [Proof acceptance](/reviewing/proof-acceptance).
+- **Run a step as a command.** The step passes on the exit code, never on a
+  model's report. [Workflows](/concepts/workflows).
+- **Use the engines you have.** Claude, Codex, Grok, OpenCode, the Agent
+  SDK, the Anthropic API, or one you write to the contract.
+  [Engines](/packages/engine).
+- **Define agents and skills in markdown.** The files your team already
+  writes become the persona and the skills a step runs with.
+  [Workflows](/concepts/workflows).
+- **Give each step its own worktree.** A change touches only the paths it
+  declared, and a mismatch pauses the run.
+  [The workspace contract](/workspace/contract).
+- **Keep every step in a file on disk.** Events and artifacts beside each
+  other, no server and no database.
+  [How a run is recorded](/recording/how-a-run-is-recorded).
+- **Kill a run and start it again where it stopped.** Nothing finished is
+  done twice. [The runner](/packages/runner).
+- **Give the team a memory.** In process or in private git refs, curated
+  and grounded by the steps themselves. [Memory](/memory).
+- **Put a diff in front of a person in their own editor.** Or drive runs
+  from cmux. [Surfaces](/concepts/surfaces).
+- **Let team members talk.** Messages, mentions, and a teammate woken by
+  name, in rooms that are files.
+  [A team conversation](/workflows/team-conversation).
+- **Set a budget and read the cost.** A cap on an attempt and a cost report
+  for the run. [The runtime](/concepts/runtime).
+
 
 ## See a team run
 
@@ -137,6 +188,12 @@ A writing seat can write anywhere the process can: the file starts its
 Claude and Codex seats with permission prompts off, which is what lets a
 model write files. Run it in a directory you are willing to let a model
 change.
+
+Write many small jobs, each with its own review, for the specific research,
+implementation and test tasks in your process, rather than a few large
+ones. A coarse step hands the whole task to one inference and hopes. A
+small step with a review cycle is a process the run can hold to, and the
+team above is the shape to grow, not the size to stop at.
 
 One real run of this file printed:
 

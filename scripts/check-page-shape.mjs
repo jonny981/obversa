@@ -12,6 +12,9 @@
  * can follow.
  */
 import { execFileSync } from 'node:child_process';
+
+import { CONSUMER_EXAMPLES, REAL_ENGINE_EXAMPLES } from './consumer-examples.mjs';
+import { reachableScripts } from './check-spec-coverage.mjs';
 import { readFileSync, readdirSync } from 'node:fs';
 import { join } from 'node:path';
 
@@ -40,7 +43,7 @@ const COMMANDS_ARE_THE_CONTENT = new Set(['get-started/installation.mdx']);
  * it shrinks as those stages land. A page that is not on this list fails the
  * build.
  *
- * `fault` is `example` or `opening`, matching the two rules below. An entry
+ * `fault` is `example`, `opening` or `wholefile`, matching the three rules below. An entry
  * with no owner is refused: the point of the list is that every exemption has
  * someone's name against it.
  */
@@ -68,6 +71,98 @@ const KNOWN_DEBT = [
   {
     page: 'workflows/forge-helper.mdx', fault: 'opening', owner: 'D35',
     why: 'it opens by defining a forge; the everyday case, you have a reviewed change and want it merged, comes first',
+  },
+  {
+    page: 'packages/engine-agent-sdk.mdx', fault: 'wholefile', owner: 'D35',
+    why: 'two fragments: a binding and a call, with no run around them',
+  },
+  {
+    page: 'packages/engine-anthropic-api.mdx', fault: 'wholefile', owner: 'D35',
+    why: 'one fragment: the binding alone',
+  },
+  {
+    page: 'packages/engine-claude-cli.mdx', fault: 'wholefile', owner: 'D35',
+    why: 'one fragment: the binding alone',
+  },
+  {
+    page: 'packages/engine-codex.mdx', fault: 'wholefile', owner: 'D35',
+    why: 'one fragment: the binding alone',
+  },
+  {
+    page: 'packages/engine-grok-cli.mdx', fault: 'wholefile', owner: 'D35',
+    why: 'one fragment: the binding alone',
+  },
+  {
+    page: 'packages/engine-opencode-cli.mdx', fault: 'wholefile', owner: 'D35',
+    why: 'one fragment: the binding alone',
+  },
+  {
+    page: 'packages/engine.mdx', fault: 'wholefile', owner: 'D35',
+    why: 'one fragment: the Engine type imported and nothing done with it',
+  },
+  {
+    page: 'packages/memory-git.mdx', fault: 'wholefile', owner: 'D35',
+    why: 'one fragment: openGitMemory called with nothing run against it',
+  },
+  {
+    page: 'packages/memory-simple.mdx', fault: 'wholefile', owner: 'D35',
+    why: 'one fragment: createSimpleMemory called with nothing run against it',
+  },
+  {
+    page: 'packages/surfacer.mdx', fault: 'wholefile', owner: 'D35',
+    why: 'names examples/hello-surface.mjs twice, a file that does not exist; the package page gets a whole file that runs',
+  },
+  {
+    page: 'packages/memory.mdx', fault: 'wholefile', owner: 'D35',
+    why: 'quotes memory.ts whole, but the clean consumer does not compile it; the package-page stage adds it to the list',
+  },
+  {
+    page: 'concepts/orders.mdx', fault: 'wholefile', owner: 'D47',
+    why: 'a span of feature-delivery.ts: the order alone, its imports elsewhere',
+  },
+  {
+    page: 'concepts/surfaces.mdx', fault: 'wholefile', owner: 'D47',
+    why: 'its block names examples/hello-surface.mjs, a file that does not exist; the surfaces page gets a whole file that runs',
+  },
+  {
+    page: 'driving/runner.mdx', fault: 'wholefile', owner: 'D47',
+    why: 'four fragments of a host: imports, a binding, a start call and a second import, none a file',
+  },
+  {
+    page: 'graphs/contract.mdx', fault: 'wholefile', owner: 'D47',
+    why: 'the second block is the contract types imported and unused; custom-graph.ts already shows the whole',
+  },
+  {
+    page: 'graphs/executor.mdx', fault: 'wholefile', owner: 'D47',
+    why: 'three fragments of executor calls with no executor built',
+  },
+  {
+    page: 'graphs/pipeline.mdx', fault: 'wholefile', owner: 'D47',
+    why: 'one fragment: an import with nothing after it',
+  },
+  {
+    page: 'memory/adapters.mdx', fault: 'wholefile', owner: 'D47',
+    why: 'four fragments: two constructions and two calls, no file',
+  },
+  {
+    page: 'memory/index.mdx', fault: 'wholefile', owner: 'D47',
+    why: 'seven memory.execute fragments, one per command; one whole file runs them all',
+  },
+  {
+    page: 'memory/mechanics.mdx', fault: 'wholefile', owner: 'D47',
+    why: 'three fragments of consolidate and its result',
+  },
+  {
+    page: 'reviewing/review-loop.mdx', fault: 'wholefile', owner: 'D47',
+    why: 'one fragment: an import with nothing after it; review-loop.ts exists and runs',
+  },
+  {
+    page: 'workflows/team-conversation.mdx', fault: 'wholefile', owner: 'D47',
+    why: 'three spans of team-conversation.ts beside the whole file; the spans go, the whole stays',
+  },
+  {
+    page: 'workspace/contract.mdx', fault: 'wholefile', owner: 'D47',
+    why: 'one fragment: the provider constructed and never used',
   },
   {
     page: 'graphs/plan-admission.mdx', fault: 'example', owner: 'D35',
@@ -197,7 +292,99 @@ function definesItsOwnTitle(title, line) {
   return titleWords(title).some((word) => subject.includes(word));
 }
 
-export function checkPageShape(root, { allowNoExample = new Set(), debt = buildDebtIndex() } = {}) {
+/**
+ * The third shape a page must not have: code that is not a whole file.
+ *
+ * A block that is a cut from a file shows an import in one block and a body
+ * in another, and uses names the reader never sees declared. A block that
+ * exists on no file compiles nowhere and drifts the day the API moves. So
+ * every TypeScript block on a page is one whole file under `examples/`, byte
+ * for byte, and that file is one the chain runs (an `example:*` script) and
+ * compiles against the packed packages (the clean consumer's list). This was
+ * asked for by name: "All examples must be in full and be able to compile and
+ * run."
+ */
+/**
+ * The languages a reader's program is written in. A `js` block is left alone:
+ * the pages that show a real run print the files a model wrote as `js`, and
+ * those are the run's output, not an example to copy.
+ */
+const WHOLE_FILE_LANGS = new Set(['ts', 'typescript', 'tsx', 'mjs']);
+const NAMED_EXAMPLE = /examples\/([A-Za-z0-9_./-]+\.(?:ts|mjs))/g;
+
+function exampleFiles(root, dir = join(root, 'examples'), prefix = '') {
+  const found = new Map();
+  let entries;
+  try { entries = readdirSync(dir, { withFileTypes: true }); } catch { return found; }
+  for (const entry of entries) {
+    const rel = prefix ? `${prefix}/${entry.name}` : entry.name;
+    if (entry.isDirectory()) {
+      for (const [k, v] of exampleFiles(root, join(dir, entry.name), rel)) found.set(k, v);
+    } else if (/\.(ts|mjs)$/.test(entry.name)) {
+      found.set(rel, readFileSync(join(dir, entry.name), 'utf8').replace(/\n+$/, ''));
+    }
+  }
+  return found;
+}
+
+/**
+ * The example files a `verify:*` chain runs: an `example:*` script counts only
+ * when a chain reaches it, so a script that exists and is never called is
+ * not "run by the chain".
+ */
+export function examplesRunByTheChain(root) {
+  let manifest;
+  try { manifest = JSON.parse(readFileSync(join(root, 'package.json'), 'utf8')); } catch { return new Set(); }
+  const scripts = manifest.scripts ?? {};
+  const reached = reachableScripts(scripts);
+  const ran = new Set();
+  for (const [name, command] of Object.entries(scripts)) {
+    if (!name.startsWith('example:') || !reached.has(name)) continue;
+    for (const match of String(command).matchAll(/examples\/([A-Za-z0-9_./-]+\.(?:ts|mjs))/g)) ran.add(match[1]);
+  }
+  return ran;
+}
+
+function fencedBlocks(text) {
+  return [...text.matchAll(/^[ \t]*```([a-zA-Z0-9]*)[^\n]*\n([\s\S]*?)^[ \t]*```/gm)]
+    .map((m) => ({ lang: m[1], body: m[2].replace(/\n+$/, '') }));
+}
+
+/** Files a chain cannot run because they need signed-in model CLIs, each with its reason. */
+export function realEngineExamples(entries = REAL_ENGINE_EXAMPLES) {
+  const files = new Set();
+  for (const entry of entries) {
+    if (!entry.file || !entry.why) throw new Error(`a real-engine example entry needs a file and a why: ${JSON.stringify(entry)}`);
+    files.add(entry.file);
+  }
+  return files;
+}
+
+export function wholeFileFaults(name, text, { examples, ran, compiled, realEngine = realEngineExamples() }) {
+  const faults = [];
+  for (const block of fencedBlocks(text)) {
+    if (!WHOLE_FILE_LANGS.has(block.lang)) continue;
+    const first = (block.body.split('\n')[0] ?? '').slice(0, 60);
+    let file;
+    for (const [rel, content] of examples) if (content === block.body) { file = rel; break; }
+    if (file === undefined) {
+      faults.push(`${name}: a ${block.lang} block is not a whole file under examples/ (it starts "${first}")`);
+      continue;
+    }
+    if (!ran.has(file) && !realEngine.has(file)) faults.push(`${name}: quotes examples/${file} whole, but no example:* script runs it`);
+    if (!compiled.has(file)) faults.push(`${name}: quotes examples/${file} whole, but the clean consumer does not compile it`);
+  }
+  // A page that names a file under examples/ in its prose names one that exists.
+  const prose = text.replace(/```[\s\S]*?```/g, '');
+  for (const match of prose.matchAll(NAMED_EXAMPLE)) {
+    if (!examples.has(match[1])) faults.push(`${name}: names examples/${match[1]}, which does not exist`);
+  }
+  return faults;
+}
+
+export function checkPageShape(root, { allowNoExample = new Set(), debt = buildDebtIndex(), compiled = new Set(CONSUMER_EXAMPLES), realEngine = realEngineExamples() } = {}) {
+  const examples = exampleFiles(root);
+  const ran = examplesRunByTheChain(root);
   const failures = [];
   const forgiven = (page, fault) => debt.has(`${page}::${fault}`);
   for (const path of pages(join(root, 'docs', 'public')).sort()) {
@@ -212,6 +399,7 @@ export function checkPageShape(root, { allowNoExample = new Set(), debt = buildD
     }
     const title = frontmatterTitle(text);
     const line = firstProseLine(text);
+    if (!forgiven(name, 'wholefile')) failures.push(...wholeFileFaults(name, text, { examples, ran, compiled, realEngine }));
     for (const phrase of coinedExampleNames(root, text)) {
       failures.push(`${name}: names an example as if it were a feature: "${phrase}"`);
     }

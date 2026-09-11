@@ -12,6 +12,32 @@ You describe how work should move from a request to a checked result: the
 steps, who does each one, the reviews, and where a person decides. Obversa
 runs that workflow one bounded engine call at a time and records every step.
 
+Agents are not deterministic, so nothing guarantees that every step of a
+process is followed, in the right order, under the right conditions.
+Obversa puts a deterministic process around the inference: many small jobs,
+each with a review cycle. A workflow built into a frontier harness cannot
+be saved, shared or repeated; an Obversa workflow is a file you save, share
+and run again. And it models process at every layer, the organisation, the
+team and the individual.
+
+## Inference at the leaves
+
+Inference belongs mostly at the leaves. Around each inference step you can
+build as much process as you like: deterministic scripts, tools and checks,
+so that the job an agent has to do is clearer, simpler, better bounded and
+cheaper. Squeeze the determinism out of the agents and what is left is a
+set of very specific, focused agents doing narrow tasks.
+
+That improves quality, and it does something else: a narrow, well-bounded
+task can be done by a small open-weight model tuned to it, as well as a
+frontier model would, at a fraction of the cost.
+
+Process engineers call the method value stream mapping: understand the
+process, then make the steps that add no value cheaper, faster, or cut
+them out. The same idea applies here. Lift every deterministic step out of
+the agents, so their context shrinks to the parts that truly need
+inference.
+
 ## See a team run
 
 Five named steps, the way a real team ships a feature: a Claude seat
@@ -97,6 +123,12 @@ Claude and Codex seats with permission prompts off, which is what lets a
 model write files. Run it in a directory you are willing to let a model
 change.
 
+Write many small jobs, each with its own review, for the specific research,
+implementation and test tasks in your process, rather than a few large
+ones. A coarse step hands the whole task to one inference and hopes. A
+small step with a review cycle is a process the run can hold to, and the
+team above is the shape to grow, not the size to stop at.
+
 One real run of this file printed:
 
 ```json
@@ -150,22 +182,56 @@ and the approval. The files the models wrote, the note and the approval
 included, are on the [feature delivery](/workflows/feature-team) page, and
 [the examples](/workflows) have the two smaller teams and the single
 mechanisms they are built from.
-## What a reader can do
 
-- **Copy a workflow:** a complete, runnable program for real work. Start with
-  [the examples](/workflows).
-- **Review and approve work:** panels, revisions that send work back, and
-  callback gates that wait for a person. Start with
-  [callback gates](/reviewing/callback-gates).
-- **Record and restart runs:** every step appends events, and the
-  supervised runner restarts a killed run where it stopped. Start with
-  [how a run is recorded](/recording/how-a-run-is-recorded).
-- **Drive runs from a host:** bounded workers, supervision, and surfaces. Start
-  with [the runner](/driving/runner).
-- **Write a workflow shape:** your own graph form over the public contract.
-  Start with [the graph contract](/graphs/contract).
-- **Choose engines and memory:** adapters for the tools a team already has.
-  Start with [memory](/memory) and the package pages below.
+## What you can do with it
+
+- **Run a ready-made team on your own files.** A writer and a reviewer, a
+  review panel with a threshold, or feature delivery from brief to approval:
+  one import, your brief, your engines, run.
+  [The teams package](/packages/teams).
+- **Give work a shape in one call.** Steps in order, a graph with parallel
+  branches, a loop that revises until it passes, a tournament of
+  candidates, a quorum of opinions. [Workflows](/concepts/workflows).
+- **Say what each step does and what done means.** A sentence for each on
+  the node, and the reviewer judges against it.
+  [Workflows](/concepts/workflows).
+- **Send work back to the step that owns it.** A failed review names the
+  step that must fix it, and the work goes back there with the findings.
+  [A review that sends work back](/reviewing/review-loop).
+- **Get a second opinion that is really a second opinion.** The implementer
+  and every reviewer run on different model families, checked before a run.
+  [The teams package](/packages/teams).
+- **Stop for a person.** A callback gate puts one decision in front of
+  someone and the run carries on from that step with the answer.
+  [Callback gates](/reviewing/callback-gates).
+- **Approve only what was proved.** An approval is bound to the exact bytes
+  and test result it was given. [Proof acceptance](/reviewing/proof-acceptance).
+- **Run a step as a command.** The step passes on the exit code, never on a
+  model's report. [Workflows](/concepts/workflows).
+- **Use the engines you have.** Claude, Codex, Grok, OpenCode, the Agent
+  SDK, the Anthropic API, or one you write to the contract.
+  [Engines](/packages/engine).
+- **Define agents and skills in markdown.** The files your team already
+  writes become the persona and the skills a step runs with.
+  [Workflows](/concepts/workflows).
+- **Give each step its own worktree.** A change touches only the paths it
+  declared, and a mismatch pauses the run.
+  [The workspace contract](/workspace/contract).
+- **Keep every step in a file on disk.** Events and artifacts beside each
+  other, no server and no database.
+  [How a run is recorded](/recording/how-a-run-is-recorded).
+- **Kill a run and start it again where it stopped.** Nothing finished is
+  done twice. [The runner](/packages/runner).
+- **Give the team a memory.** In process or in private git refs, curated
+  and grounded by the steps themselves. [Memory](/memory).
+- **Put a diff in front of a person in their own editor.** Or drive runs
+  from cmux. [Surfaces](/concepts/surfaces).
+- **Let team members talk.** Messages, mentions, and a teammate woken by
+  name, in rooms that are files.
+  [A team conversation](/workflows/team-conversation).
+- **Set a budget and read the cost.** A cap on an attempt and a cost report
+  for the run. [The runtime](/concepts/runtime).
+
 
 ## Packages
 

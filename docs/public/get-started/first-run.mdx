@@ -1,17 +1,101 @@
 ---
 title: "First run"
-description: "Copy one file and watch a review panel send work back to the stage that owns it, then pass on the second attempt."
+description: "Two files to run first: a real writer-and-reviewer team on your own files, and an offline feature team that shows work going back to the step that owns it."
 ---
 
-You have `@obversa/runtime` installed. This is the first thing worth
-running: a feature moving through five named stages the way a team ships
-it. The review is a panel of three. Two of them fail the first attempt, so
-the panel sends the work back to `implement` with their findings, and the
-second attempt passes. No model and no network: every stage is a small
-function, so the shape of the team is the only thing on show.
+Two files are worth running first. The first is a real team: a Claude
+seat writes a function and its test, Node runs the test, and a Codex seat
+reviews the result. The second runs with no model and no network and shows
+the mechanism a team is built on: a review that sends work back to the
+step that owns it.
 
-Here is the whole file. Copy it into your project and run it the way you
-run any TypeScript file.
+## A real team on your own files
+
+You need the two command line tools signed in, then:
+
+```bash
+npm install @obversa/runtime @obversa/teams @obversa/engine-claude-cli @obversa/engine-codex
+```
+
+Copy this file into the directory the work belongs in and run it with Node.
+
+```ts
+import { ClaudeCliEngine } from '@obversa/engine-claude-cli';
+import { CodexEngine } from '@obversa/engine-codex';
+import { run } from '@obversa/runtime';
+import { writerReviewerPair } from '@obversa/teams';
+
+const workspace = process.cwd();
+const writer = {
+  engine: new ClaudeCliEngine({
+    defaultModel: 'claude-sonnet-4-5',
+    permissionMode: 'bypassPermissions',
+  }),
+  identity: {
+    adapter: 'claude-cli',
+    provider: 'anthropic',
+    modelFamily: 'claude',
+    model: 'claude-sonnet-4-5',
+  },
+};
+const reviewer = {
+  engine: new CodexEngine({
+    defaultModel: 'gpt-5.6-luna',
+    permissionMode: 'bypassPermissions',
+  }),
+  identity: {
+    adapter: 'codex',
+    provider: 'openai',
+    modelFamily: 'gpt',
+    model: 'gpt-5.6-luna',
+  },
+};
+const team = writerReviewerPair({
+  brief: 'Write a pure add(a, b) function in src/add.mjs with a Node test in test/add.test.mjs.',
+  workspace,
+  files: ['src/add.mjs', 'test/add.test.mjs'],
+  test: { command: 'node', args: ['--test', 'test/add.test.mjs'] },
+  writer,
+  reviewer,
+});
+const result = await run(team, { cwd: workspace });
+
+console.log(JSON.stringify(result.outcome, null, 2));
+```
+
+One real run printed:
+
+```json
+{
+  "status": "pass",
+  "summary": "dag \"writer-reviewer-pair\": all 3 node(s) green",
+  "data": {
+    "writer": {
+      "status": "pass",
+      "summary": "Created pure add(a, b) function in src/add.mjs and comprehensive test suite in test/add.test.mjs. All 5 tests pass, covering positive numbers, negative numbers, mixed signs, zero, and decimals."
+    },
+    "test": {
+      "status": "pass",
+      "summary": "`node` exited 0"
+    },
+    "reviewer": {
+      "status": "pass",
+      "summary": "The required pure add function and Node test are present and pass."
+    }
+  }
+}
+```
+
+The writer's files and the reviewer's decision, as they were left in the
+workspace, are on the [writer and reviewer](/workflows/writer-and-reviewer)
+page. Change the brief, the file list and the test command and it is your
+own work.
+
+## Without a model
+
+This file is a feature team in five named steps with a review panel of
+three that passes on two. Every step is a small function, so the shape is
+the only thing on show, and it runs anywhere Node runs.
 
 ```ts
 /**
@@ -21,15 +105,8 @@ run any TypeScript file.
  * goes back to the stage that owns it when the panel fails. It runs offline,
  * with no model and no network: every job here is a small function, so the
  * shape of the team is the only thing on show.
- *
- * The README quotes the two marked spans below byte for byte, and a check in
- * the documentation proof fails if they ever drift apart. That is deliberate:
- * the README used to carry hand-written code that resembled this and had
- * quietly lost the one line that makes the work go back.
  */
-// README-SPAN-START imports
 import { fnJob, pipeline, reviewPanel, run, type Outcome } from '@obversa/runtime';
-// README-SPAN-END imports
 
 /** The work itself. In a real team each of these calls an engine. */
 const analyse = fnJob('analyse', async (): Promise<Outcome> => ({
@@ -76,7 +153,6 @@ const checks = {
       : { status: 'pass', summary: 'inside the ticket' }),
 };
 
-// README-SPAN-START team
 const review = reviewPanel({
   label: 'review',
   reviewers: [
@@ -99,7 +175,6 @@ export const featureDelivery = pipeline(
   ],
   { maxKickbacks: 2 },
 );
-// README-SPAN-END team
 
 const result = await run(featureDelivery);
 console.log(JSON.stringify({
@@ -135,20 +210,16 @@ It prints:
 }
 ```
 
-`implement` ran twice. The first attempt left the header row out, two of
-the three reviewers said so, and the panel sent the work back to the stage
-that owns it with those findings. The second attempt passed. That is the
-thing to look at: the run did not start over, the right stage did its work
-again with the reason in hand.
+`implement` ran twice. Two of the three reviewers failed the first attempt,
+the panel named `implement` as the step that owns the fix, and the work
+went back there with their findings instead of the run starting over. The
+second attempt passed. That is the thing to look at: the right step did its
+work again with the reason in hand.
 
-Three more files run the same way and show a different shape:
-[a pipeline](/graphs/pipeline), [a review loop](/reviewing/review-loop) and
-[a callback gate](/reviewing/callback-gates).
+## One agent job
 
-## Programmatic API
-
-This program runs one agent job through a scripted engine. The scripted engine
-does not make a network call.
+The smallest thing that runs an engine: one job, one prompt, a scripted
+engine that answers without a network call.
 
 ```ts
 import { agentJob, run } from '@obversa/runtime';
@@ -170,14 +241,15 @@ const result = await run(job, {
 console.log(result.outcome.status);
 ```
 
-The result is:
+It prints:
 
 ```text
 pass
 ```
 
-`agentJob` creates one unit of work. `run` supplies the run context and starts
-the job. `MockEngine` follows the public engine contract with fixed responses.
+Swap the scripted engine for a plugin and the same job runs a real model.
 
-The runtime package does not expose a command. Use the programmatic API or the
-workspace example scripts above.
+## Where next
+
+[Workflows](/concepts/workflows) is the shape of the work. [The examples](/workflows)
+have the two other teams and the single mechanisms they are built from.

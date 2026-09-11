@@ -5,11 +5,6 @@
  * goes back to the stage that owns it when the panel fails. It runs offline,
  * with no model and no network: every job here is a small function, so the
  * shape of the team is the only thing on show.
- *
- * The README quotes the two marked spans below byte for byte, and a check in
- * the documentation proof fails if they ever drift apart. That is deliberate:
- * the README used to carry hand-written code that resembled this and had
- * quietly lost the one line that makes the work go back.
  */
 import { fnJob, pipeline, reviewPanel, run, type Outcome } from '@obversa/runtime';
 

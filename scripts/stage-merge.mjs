@@ -46,6 +46,7 @@ export const stageBranches = {
   F27: 'fix/sweep-three-proof',
   F29: 'fix/runtime-per-target-kickbacks',
   D36: 'feat/teams',
+  D45: 'docs/whole-file-examples',
 };
 
 export function manageStage(args, options = {}) {

@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 
+import { CONSUMER_EXAMPLES } from './consumer-examples.mjs';
 import assert from 'node:assert/strict';
 import { copyFile, mkdtemp, mkdir, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
@@ -538,38 +539,7 @@ const tsconfig = {
     outDir: 'dist',
     types: ['node'],
   },
-  include: [
-    'consumer.ts',
-    'offline-review.ts',
-    'feature-delivery.ts',
-    'feature-team.ts',
-    'described-team.ts',
-    'forge-helper.ts',
-    'custom-graph.ts',
-    'pipeline.ts',
-    'team-conversation.ts',
-    'review-loop.ts',
-    'callback-gate.ts',
-    'proof-bound-approval.ts',
-    'proof-cache.ts',
-    'durable-storage.ts',
-    'safe-node-attempt.ts',
-    'turn-taking.ts',
-    'workspace.ts',
-    'supervised-run.ts',
-    'safe-change.ts',
-    'safe-change-recipe.ts',
-    'safe-change-file-adapter.ts',
-    'run-child.ts',
-    'teams/scripted-engine.ts',
-    'teams/writer-reviewer-pair.ts',
-    'teams/writer-reviewer-pair.proof.ts',
-    'teams/threshold-panel.ts',
-    'teams/threshold-panel.proof.ts',
-    'teams/feature-delivery.ts',
-    'teams/feature-delivery.proof.ts',
-    'tournament.ts',
-  ],
+  include: ['consumer.ts', ...CONSUMER_EXAMPLES],
 };
 
 /**

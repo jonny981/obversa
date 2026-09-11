@@ -28,6 +28,9 @@ importers:
       '@obversa/engine-opencode-cli':
         specifier: workspace:^
         version: link:plugins/engine-opencode-cli
+      '@obversa/process':
+        specifier: workspace:^
+        version: link:packages/process
       '@obversa/runner':
         specifier: workspace:^
         version: link:packages/runner
