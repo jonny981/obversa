@@ -150,11 +150,11 @@ await new Promise(() => {});
     const { bin } = stub(`#!/usr/bin/env node
 import { readFileSync, writeFileSync } from 'node:fs';
 const args = process.argv.slice(2);
-readFileSync(0, 'utf8');
-writeFileSync(args[args.indexOf('-o') + 1], 'PONG');
 process.on('SIGTERM', () => {
   process.kill(process.pid, 'SIGKILL');
 });
+readFileSync(0, 'utf8');
+writeFileSync(args[args.indexOf('-o') + 1], 'PONG');
 setInterval(() => {}, 1_000);
 `);
 
