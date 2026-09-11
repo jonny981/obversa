@@ -21,8 +21,9 @@ end, at a deadline, with a typed result.
 ## What you get
 
 - **A deadline that always means timeout.** When `timeoutMs` passes, the
-  child and its process group are stopped and the result says
-  `timedOut: true`, even when the stopped child reports no exit code.
+  child is stopped and the result says `timedOut: true`, even when the
+  stopped child reports no exit code. With `detached: true`, its process group
+  is stopped too.
 - **No pipe can stall it.** Standard input is closed after the optional
   input is written, and both output streams are drained until they close
   or for a short grace after the child exits, under one combined byte cap.

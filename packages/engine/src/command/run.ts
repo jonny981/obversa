@@ -542,6 +542,13 @@ export async function runOwnedCommand(
     );
   }
   if (childError !== undefined) {
+    if (remainingProcesses.length > 0) {
+      throw new OwnedCommandError(
+        'TEARDOWN_INCOMPLETE',
+        childError instanceof Error ? childError.message : 'owned command left processes running after teardown',
+        remainingProcesses,
+      );
+    }
     if (childError instanceof RunChildError && childError.code === 'OUTPUT_LIMIT') {
       throw new OwnedCommandError(
         'OUTPUT_LIMIT',
@@ -552,13 +559,6 @@ export async function runOwnedCommand(
       throw new OwnedCommandError('SPAWN_FAILED', childError.message);
     }
     if (childError instanceof RunChildError && childError.code === 'TEARDOWN_INCOMPLETE') {
-      if (remainingProcesses.length > 0) {
-        throw new OwnedCommandError(
-          'TEARDOWN_INCOMPLETE',
-          childError.message,
-          remainingProcesses,
-        );
-      }
       if (inspectionFailure !== undefined) {
         throw new OwnedCommandError(
           'PROCESS_INSPECTION',
