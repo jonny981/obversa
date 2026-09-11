@@ -1,94 +1,96 @@
 import assert from 'node:assert/strict';
-import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
+import { ClaudeCliEngine } from '@obversa/engine-claude-cli';
+import { CodexEngine } from '@obversa/engine-codex';
+import { GrokCliEngine } from '@obversa/engine-grok-cli';
+import { OpenCodeCliEngine } from '@obversa/engine-opencode-cli';
 import { run } from '@obversa/runtime';
 import { featureDelivery } from '@obversa/teams';
 
-import { pass, revise, scriptedSeat } from './scripted-engine.js';
-
-async function writeBrief(cwd: string): Promise<void> {
-  await mkdir(join(cwd, 'team-output'), { recursive: true });
-  await writeFile(join(cwd, 'team-output/brief.md'), 'The module must export result 11.\n');
+function required(name: string): string {
+  const value = process.env[name];
+  if (!value) throw new Error(`Set ${name} to the absolute CLI path before running this example.`);
+  return value;
 }
 
-async function writeImplementation(cwd: string, repaired: boolean): Promise<void> {
-  await mkdir(join(cwd, 'src'), { recursive: true });
-  await mkdir(join(cwd, 'test'), { recursive: true });
-  await writeFile(join(cwd, 'src/result.mjs'), `export const result = ${repaired ? 11 : 10};\n`);
-  await writeFile(
-    join(cwd, 'test/result.test.mjs'),
-    "import assert from 'node:assert/strict';\nimport test from 'node:test';\nimport { result } from '../src/result.mjs';\ntest('result exists', () => assert.equal(typeof result, 'number'));\n",
-  );
-}
-
-const workspace = await mkdtemp(join(tmpdir(), 'obversa-team-feature-example-'));
+const workspace = await mkdtemp(join(tmpdir(), 'obversa-team-feature-'));
 try {
-  const analyse = scriptedSeat('feature-analyse', 'analyse-family', [async (request) => {
-    await writeBrief(request.cwd!);
-    return pass('brief accepted');
-  }]);
-  const implement = scriptedSeat('feature-implement', 'implement-family', [
-    async (request) => { await writeImplementation(request.cwd!, false); return pass('first implementation written'); },
-    async (request) => { await writeImplementation(request.cwd!, true); return pass('implementation repaired'); },
-  ]);
-  const correctness = scriptedSeat('feature-correctness', 'correctness-family', [
-    async (request) => {
-      await mkdir(join(request.cwd!, 'reviews'), { recursive: true });
-      await writeFile(join(request.cwd!, 'reviews/correctness.json'), '{"round":1}\n');
-      return revise('result is not 11', 'the implementation does not meet the brief');
+  const analyse = {
+    engine: new ClaudeCliEngine({
+      defaultModel: 'claude-sonnet-4-5',
+      permissionMode: 'bypassPermissions',
+    }),
+    identity: {
+      adapter: 'claude-cli',
+      provider: 'anthropic',
+      modelFamily: 'claude',
+      model: 'claude-sonnet-4-5',
     },
-    async (request) => {
-      await writeFile(join(request.cwd!, 'reviews/correctness.json'), '{"round":2}\n');
-      return pass('result meets the brief');
+  };
+  const implement = {
+    engine: new CodexEngine({
+      defaultModel: 'gpt-5.6-luna',
+      permissionMode: 'bypassPermissions',
+    }),
+    identity: {
+      adapter: 'codex',
+      provider: 'openai',
+      modelFamily: 'codex',
+      model: 'gpt-5.6-luna',
     },
-  ]);
-  const scope = scriptedSeat('feature-scope', 'scope-family', [
-    async (request) => {
-      await mkdir(join(request.cwd!, 'reviews'), { recursive: true });
-      await writeFile(join(request.cwd!, 'reviews/scope.json'), '{"round":1}\n');
-      return pass('scope is inside the brief');
+  };
+  const reviewer = {
+    engine: new GrokCliEngine({
+      executable: required('GROK_BIN'),
+      version: '1.0.5',
+      identity: { provider: 'xai', modelFamily: 'grok-4' },
+      permissionMode: 'dontAsk',
+    }),
+    identity: {
+      adapter: 'grok-cli',
+      provider: 'xai',
+      modelFamily: 'grok',
+      model: 'grok-4',
     },
-    async () => pass('scope remains inside the brief'),
-  ]);
-  const approve = scriptedSeat('feature-approve', 'approve-family', [async (request) => {
-    await writeFile(join(request.cwd!, 'team-output/approval.md'), 'The change is ready to ship.\n');
-    return pass('delivery approved');
-  }]);
-  let testRuns = 0;
-  const team = featureDelivery({
-    brief: 'Deliver a module that exports result 11.',
+  };
+  const approve = {
+    engine: new OpenCodeCliEngine({
+      executable: required('OPENCODE_BIN'),
+      version: '1.18.23',
+      identity: { provider: 'anthropic', modelFamily: 'claude' },
+    }),
+    identity: {
+      adapter: 'opencode-cli',
+      provider: 'anthropic',
+      modelFamily: 'opencode',
+      model: 'opencode-default',
+    },
+  };
+  let testCommandsRun = 0;
+  const result = await run(featureDelivery({
+    brief: 'Deliver a pure triple(value) function in src/triple.mjs with a Node test in test/triple.test.mjs.',
     workspace,
-    files: ['src/result.mjs', 'test/result.test.mjs'],
-    test: { command: process.execPath, args: ['--test', 'test/result.test.mjs'] },
+    files: ['src/triple.mjs', 'test/triple.test.mjs'],
+    test: { command: process.execPath, args: ['--test', 'test/triple.test.mjs'] },
     analyse,
     implement,
-    reviewers: [
-      { name: 'correctness', seat: correctness },
-      { name: 'scope', seat: scope },
-    ],
-    reviewThreshold: 2,
+    reviewers: [{ name: 'correctness', seat: reviewer }],
+    reviewThreshold: 1,
     approve,
-    maxKickbacks: 1,
-  });
-  const result = await run(team, {
+  }), {
     cwd: workspace,
     onEvent: (event) => {
-      if (event.kind === 'condition:result' && event.label === 'test') testRuns += 1;
+      if (event.kind === 'condition:result' && event.label === 'test') testCommandsRun += 1;
     },
   });
   assert.equal(result.outcome.status, 'pass');
-  assert.equal(testRuns, 2);
-  assert.equal(implement.calls.length, 2);
-  assert.match(await readFile(join(workspace, 'src/result.mjs'), 'utf8'), /result = 11/);
-  assert.match(await readFile(join(workspace, 'team-output/approval.md'), 'utf8'), /ready to ship/);
   console.log(JSON.stringify({
     status: result.outcome.status,
-    filesWritten: ['team-output/brief.md', 'team-output/approval.md', 'src/result.mjs', 'test/result.test.mjs', 'reviews/correctness.json', 'reviews/scope.json'],
-    testCommandsRun: testRuns,
-    reviewRounds: 2,
-    kickbacks: 1,
+    files: ['team-output/brief.md', 'team-output/approval.md', 'src/triple.mjs', 'test/triple.test.mjs', 'reviews/correctness.json'],
+    testCommandsRun,
   }, null, 2));
 } finally {
   await rm(workspace, { recursive: true, force: true });

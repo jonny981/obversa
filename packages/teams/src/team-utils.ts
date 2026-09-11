@@ -15,13 +15,6 @@ import type { ReviewerSeat, TeamInput, TeamSeat } from './types.js';
 export const DELIVERY_NOTE = 'team-output/brief.md';
 export const APPROVAL_NOTE = 'team-output/approval.md';
 
-interface SeatIdentity {
-  readonly adapter: string;
-  readonly provider: string;
-  readonly modelFamily: string;
-  readonly model: string;
-}
-
 export function assertTeamInput(input: TeamInput): void {
   if (!input.brief.trim()) throw new TypeError('brief must not be empty');
   if (!input.workspace.trim()) throw new TypeError('workspace must not be empty');
@@ -37,29 +30,22 @@ export function assertTeamInput(input: TeamInput): void {
   }
 }
 
-export function seatIdentity(seat: TeamSeat): SeatIdentity {
-  const target = seat.binding.target;
-  const selection = seat.binding.selection;
-  if (!target.adapter.trim() || !target.provider.trim() || !target.model.trim() || !target.modelFamily.trim()) {
-    throw new TypeError('engine binding must contain adapter, provider, model family, and model');
-  }
+export function seatIdentity(seat: TeamSeat): TeamSeat['identity'] {
+  const identity = seat.identity;
   if (
-    selection.adapter !== target.adapter ||
-    selection.provider !== target.provider ||
-    selection.modelFamily !== target.modelFamily ||
-    selection.model !== target.model
+    !identity
+    || typeof identity.adapter !== 'string'
+    || typeof identity.provider !== 'string'
+    || typeof identity.modelFamily !== 'string'
+    || typeof identity.model !== 'string'
+    || !identity.adapter.trim()
+    || !identity.provider.trim()
+    || !identity.model.trim()
+    || !identity.modelFamily.trim()
   ) {
-    throw new TypeError('engine binding target and recorded selection must match');
+    throw new TypeError('engine identity must contain adapter, provider, model family, and model');
   }
-  if (typeof seat.engine !== 'string' && seat.engine !== seat.binding.engine) {
-    throw new TypeError('EngineRef must be the engine carried by its GraphEngineBinding');
-  }
-  return {
-    adapter: target.adapter,
-    provider: target.provider,
-    modelFamily: target.modelFamily,
-    model: target.model,
-  };
+  return identity;
 }
 
 export function assertDistinctSeats(seats: readonly TeamSeat[]): void {

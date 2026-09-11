@@ -1,12 +1,8 @@
-import type {
-  EngineRef,
-  GraphEngineBinding,
-  Job,
-} from '@obversa/runtime';
+import type { Engine, ExecutionTarget } from '@obversa/runtime';
 
 export interface TeamSeat {
-  readonly engine: EngineRef;
-  readonly binding: GraphEngineBinding;
+  readonly engine: Engine;
+  readonly identity: Omit<ExecutionTarget, 'tools'>;
 }
 
 export interface TestCommand {
@@ -48,10 +44,4 @@ export interface FeatureDeliveryConfig extends TeamInput {
   readonly reviewThreshold: number;
   readonly approve: TeamSeat;
   readonly maxKickbacks?: number;
-}
-
-export interface TeamBuilders {
-  readonly writerReviewerPair: (config: PairConfig) => Job;
-  readonly thresholdPanel: (config: PanelConfig) => Job;
-  readonly featureDelivery: (config: FeatureDeliveryConfig) => Job;
 }

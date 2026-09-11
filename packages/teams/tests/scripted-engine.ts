@@ -2,7 +2,6 @@ import type {
   AgentRequest,
   AgentResult,
   Engine,
-  GraphEngineBinding,
 } from '@obversa/runtime';
 
 import type { TeamSeat } from '../src/types.js';
@@ -47,27 +46,15 @@ export function scriptedEngine(
 
 export function seat(engine: Engine, modelFamily: string): TeamSeat {
   const model = `${engine.name}-model`;
-  const binding: GraphEngineBinding = {
-    target: {
-      adapter: 'scripted',
-      provider: 'obversa-test',
-      modelFamily,
-      model,
-      tools: [],
-    },
-    selection: {
-      adapter: 'scripted',
-      adapterVersion: '1.0.0',
-      provider: 'obversa-test',
-      modelFamily,
-      model,
-      executable: null,
-      capabilities: [],
-    },
+  return {
     engine,
-    hardTokenLimitEnforceable: true,
+    identity: {
+      adapter: 'scripted',
+      provider: 'obversa-test',
+      modelFamily,
+      model,
+    },
   };
-  return { engine, binding };
 }
 
 export function pass(summary: string): string {

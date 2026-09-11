@@ -84,7 +84,7 @@ describe('thresholdPanel', () => {
     }
   });
 
-  it('refuses duplicate model families across panel binding identities', () => {
+  it('refuses duplicate model families across panel seat identities', () => {
     const make = (name: string) => scriptedEngine(name, [async () => pass('unused')]);
     const implement = make('implement');
     const reviewer = make('reviewer');

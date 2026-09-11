@@ -563,8 +563,11 @@ const tsconfig = {
     'run-child.ts',
     'teams/scripted-engine.ts',
     'teams/writer-reviewer-pair.ts',
+    'teams/writer-reviewer-pair.proof.ts',
     'teams/threshold-panel.ts',
+    'teams/threshold-panel.proof.ts',
     'teams/feature-delivery.ts',
+    'teams/feature-delivery.proof.ts',
   ],
 };
 
@@ -796,8 +799,11 @@ async function main() {
     await mkdir(join(consumerDirectory, 'teams'), { recursive: true });
     await copyFile(join(root, 'examples', 'teams', 'scripted-engine.ts'), join(consumerDirectory, 'teams', 'scripted-engine.ts'));
     await copyFile(join(root, 'examples', 'teams', 'writer-reviewer-pair.ts'), join(consumerDirectory, 'teams', 'writer-reviewer-pair.ts'));
+    await copyFile(join(root, 'examples', 'teams', 'writer-reviewer-pair.proof.ts'), join(consumerDirectory, 'teams', 'writer-reviewer-pair.proof.ts'));
     await copyFile(join(root, 'examples', 'teams', 'threshold-panel.ts'), join(consumerDirectory, 'teams', 'threshold-panel.ts'));
+    await copyFile(join(root, 'examples', 'teams', 'threshold-panel.proof.ts'), join(consumerDirectory, 'teams', 'threshold-panel.proof.ts'));
     await copyFile(join(root, 'examples', 'teams', 'feature-delivery.ts'), join(consumerDirectory, 'teams', 'feature-delivery.ts'));
+    await copyFile(join(root, 'examples', 'teams', 'feature-delivery.proof.ts'), join(consumerDirectory, 'teams', 'feature-delivery.proof.ts'));
 
     run('pnpm', ['install', '--offline', '--ignore-scripts'], {
       cwd: consumerDirectory,
@@ -856,22 +862,22 @@ async function main() {
       cwd: consumerDirectory,
     }).trim();
     const compiledTeamPair = JSON.parse(
-      run(process.execPath, ['dist/teams/writer-reviewer-pair.js'], { cwd: consumerDirectory }),
+      run(process.execPath, ['dist/teams/writer-reviewer-pair.proof.js'], { cwd: consumerDirectory }),
     );
     const directTeamPair = JSON.parse(
-      run('pnpm', ['exec', 'tsx', 'teams/writer-reviewer-pair.ts'], { cwd: consumerDirectory }),
+      run('pnpm', ['exec', 'tsx', 'teams/writer-reviewer-pair.proof.ts'], { cwd: consumerDirectory }),
     );
     const compiledTeamPanel = JSON.parse(
-      run(process.execPath, ['dist/teams/threshold-panel.js'], { cwd: consumerDirectory }),
+      run(process.execPath, ['dist/teams/threshold-panel.proof.js'], { cwd: consumerDirectory }),
     );
     const directTeamPanel = JSON.parse(
-      run('pnpm', ['exec', 'tsx', 'teams/threshold-panel.ts'], { cwd: consumerDirectory }),
+      run('pnpm', ['exec', 'tsx', 'teams/threshold-panel.proof.ts'], { cwd: consumerDirectory }),
     );
     const compiledTeamFeature = JSON.parse(
-      run(process.execPath, ['dist/teams/feature-delivery.js'], { cwd: consumerDirectory }),
+      run(process.execPath, ['dist/teams/feature-delivery.proof.js'], { cwd: consumerDirectory }),
     );
     const directTeamFeature = JSON.parse(
-      run('pnpm', ['exec', 'tsx', 'teams/feature-delivery.ts'], { cwd: consumerDirectory }),
+      run('pnpm', ['exec', 'tsx', 'teams/feature-delivery.proof.ts'], { cwd: consumerDirectory }),
     );
     assert.equal(compiledRunChild, 'ready');
     assert.equal(directRunChild, 'ready');

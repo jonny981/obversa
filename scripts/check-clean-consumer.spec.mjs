@@ -48,9 +48,12 @@ test('clean consumer wires the feature-delivery production line', async () => {
 test('clean consumer runs the three packed team examples', async () => {
   const source = await readFile(new URL('./check-clean-consumer.mjs', import.meta.url), 'utf8');
   assert.match(source, /'teams\/scripted-engine\.ts'/);
-  assert.match(source, /compiledTeamPair/);
-  assert.match(source, /compiledTeamPanel/);
-  assert.match(source, /compiledTeamFeature/);
+  assert.match(source, /'teams\/writer-reviewer-pair\.proof\.ts'/);
+  assert.match(source, /'teams\/threshold-panel\.proof\.ts'/);
+  assert.match(source, /'teams\/feature-delivery\.proof\.ts'/);
+  assert.match(source, /'teams\/writer-reviewer-pair\.ts'/);
+  assert.match(source, /'teams\/threshold-panel\.ts'/);
+  assert.match(source, /'teams\/feature-delivery\.ts'/);
   assert.match(source, /reviewerKickbacks/);
 });
 

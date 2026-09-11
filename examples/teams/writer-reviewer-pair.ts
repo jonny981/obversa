@@ -1,61 +1,68 @@
 import assert from 'node:assert/strict';
-import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import { cp, mkdir, mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
 
+import { ClaudeCliEngine } from '@obversa/engine-claude-cli';
+import { CodexEngine } from '@obversa/engine-codex';
 import { run } from '@obversa/runtime';
 import { writerReviewerPair } from '@obversa/teams';
 
-import { pass, revise, scriptedSeat } from './scripted-engine.js';
-
-async function writeFiles(cwd: string): Promise<void> {
-  await mkdir(join(cwd, 'src'), { recursive: true });
-  await mkdir(join(cwd, 'test'), { recursive: true });
-  await writeFile(join(cwd, 'src/result.mjs'), 'export const result = 42;\n');
-  await writeFile(
-    join(cwd, 'test/result.test.mjs'),
-    "import assert from 'node:assert/strict';\nimport test from 'node:test';\nimport { result } from '../src/result.mjs';\ntest('result is written', () => assert.equal(result, 42));\n",
-  );
-}
-
-const workspace = await mkdtemp(join(tmpdir(), 'obversa-team-pair-example-'));
+const workspace = await mkdtemp(join(tmpdir(), 'obversa-team-pair-'));
 try {
-  const writer = scriptedSeat('pair-writer', 'writer-family', [
-    async (request) => { await writeFiles(request.cwd!); return pass('writer wrote the files'); },
-    async (request) => { await writeFiles(request.cwd!); return pass('writer applied the review'); },
-  ]);
-  const reviewer = scriptedSeat('pair-reviewer', 'reviewer-family', [
-    async (request) => {
-      await mkdir(join(request.cwd!, 'reviews'), { recursive: true });
-      await writeFile(join(request.cwd!, 'reviews/reviewer.json'), '{"status":"revise"}\n');
-      return revise('review requested one repair', 'the implementation needs one repair');
+  const writer = {
+    engine: new ClaudeCliEngine({
+      defaultModel: 'claude-sonnet-4-5',
+      permissionMode: 'bypassPermissions',
+    }),
+    identity: {
+      adapter: 'claude-cli',
+      provider: 'anthropic',
+      modelFamily: 'claude',
+      model: 'claude-sonnet-4-5',
     },
-    async () => pass('review accepted the repaired files'),
-  ]);
-  let testRuns = 0;
-  const team = writerReviewerPair({
-    brief: 'Write a module that exports result 42 and a test for it.',
+  };
+  const reviewer = {
+    engine: new CodexEngine({
+      defaultModel: 'gpt-5.6-luna',
+      permissionMode: 'bypassPermissions',
+    }),
+    identity: {
+      adapter: 'codex',
+      provider: 'openai',
+      modelFamily: 'codex',
+      model: 'gpt-5.6-luna',
+    },
+  };
+  let testCommandsRun = 0;
+  const result = await run(writerReviewerPair({
+    brief: 'Write a pure add(a, b) function in src/add.mjs with a Node test in test/add.test.mjs.',
     workspace,
-    files: ['src/result.mjs', 'test/result.test.mjs'],
-    test: { command: process.execPath, args: ['--test', 'test/result.test.mjs'] },
+    files: ['src/add.mjs', 'test/add.test.mjs'],
+    test: { command: process.execPath, args: ['--test', 'test/add.test.mjs'] },
     writer,
     reviewer,
-  });
-  const result = await run(team, {
+  }), {
     cwd: workspace,
     onEvent: (event) => {
-      if (event.kind === 'condition:result' && event.label === 'test') testRuns += 1;
+      if (event.kind === 'condition:result' && event.label === 'test') testCommandsRun += 1;
     },
   });
-  assert.equal(result.outcome.status, 'pass');
-  assert.equal(testRuns, 2);
-  assert.match(await readFile(join(workspace, 'src/result.mjs'), 'utf8'), /result = 42/);
+  assert.equal(result.outcome.status, 'pass', JSON.stringify(result.outcome));
+  const files = ['src/add.mjs', 'test/add.test.mjs', 'reviews/reviewer.json'];
+  const captureDirectory = process.env.OBVERSA_TEAM_CAPTURE_DIR;
+  if (captureDirectory) {
+    for (const file of files) {
+      const destination = join(captureDirectory, file);
+      await mkdir(dirname(destination), { recursive: true });
+      await cp(join(workspace, file), destination);
+    }
+  }
   console.log(JSON.stringify({
     status: result.outcome.status,
-    filesWritten: ['src/result.mjs', 'test/result.test.mjs', 'reviews/reviewer.json'],
-    testCommandsRun: testRuns,
-    reviewerKickbacks: reviewer.calls.length - 1,
-    modelFamilies: [writer.binding.target.modelFamily, reviewer.binding.target.modelFamily],
+    files,
+    testCommandsRun,
+    modelFamilies: [writer.identity.modelFamily, reviewer.identity.modelFamily],
   }, null, 2));
 } finally {
   await rm(workspace, { recursive: true, force: true });

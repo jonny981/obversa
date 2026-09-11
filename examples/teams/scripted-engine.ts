@@ -2,7 +2,6 @@ import type {
   AgentRequest,
   AgentResult,
   Engine,
-  GraphEngineBinding,
 } from '@obversa/runtime';
 import type { TeamSeat } from '@obversa/teams';
 
@@ -43,19 +42,16 @@ export function scriptedSeat(
       };
     },
   };
-  const binding: GraphEngineBinding = {
-    target: {
+  return {
+    engine,
+    identity: {
       adapter: 'scripted',
       provider: 'obversa-example',
       modelFamily,
       model,
-      tools: [],
     },
-    selection,
-    engine,
-    hardTokenLimitEnforceable: true,
+    calls,
   };
-  return { engine, binding, calls };
 }
 
 export const pass = (summary: string): string =>

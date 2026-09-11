@@ -34,7 +34,7 @@ async function writePairFiles(
 }
 
 describe('writerReviewerPair', () => {
-  it('runs owned writer, real test, and reviewer nodes with distinct binding identities', async () => {
+  it('runs owned writer, real test, and reviewer nodes with distinct seat identities', async () => {
     const workspace = await mkdtemp(join(tmpdir(), 'obversa-teams-pair-'));
     try {
       const writerEngine = scriptedEngine('writer', [
@@ -81,7 +81,7 @@ describe('writerReviewerPair', () => {
     }
   });
 
-  it('refuses equal model families from the two recorded bindings', async () => {
+  it('refuses equal model families from the two seat identities', async () => {
     const writer = scriptedEngine('writer', [async () => pass('unused')]);
     const reviewer = scriptedEngine('reviewer', [async () => pass('unused')]);
     expect(() => writerReviewerPair({

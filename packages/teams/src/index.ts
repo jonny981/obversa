@@ -6,7 +6,6 @@ export type {
   PairConfig,
   PanelConfig,
   ReviewerSeat,
-  TeamBuilders,
   TeamInput,
   TeamSeat,
   TestCommand,
