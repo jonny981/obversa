@@ -117,6 +117,10 @@ const KNOWN_DEBT = [
     why: 'one fragment: createSimpleMemory called with nothing run against it',
   },
   {
+    page: 'packages/surfacer.mdx', fault: 'wholefile', owner: 'D35',
+    why: 'names examples/hello-surface.mjs twice, a file that does not exist; the package page gets a whole file that runs',
+  },
+  {
     page: 'packages/memory.mdx', fault: 'wholefile', owner: 'D35',
     why: 'quotes memory.ts whole, but the clean consumer does not compile it; the package-page stage adds it to the list',
   },

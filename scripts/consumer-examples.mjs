@@ -31,6 +31,7 @@ export const CONSUMER_EXAMPLES = Object.freeze([
   'run-child.ts',
   'write-and-review.ts',
   'one-agent-job.ts',
+  'tournament.ts',
   'teams/scripted-engine.ts',
   'teams/writer-reviewer-pair.ts',
   'teams/writer-reviewer-pair.proof.ts',
