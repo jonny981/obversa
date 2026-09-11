@@ -467,6 +467,7 @@ export async function runOwnedCommand(
       timeoutMs: request.timeoutMs,
       killGraceMs: request.teardownGraceMs,
       maxOutputBytes: request.maxOutputBytes,
+      detached: true,
       signal: cancellation.signal,
       hooks: {
         onSpawn: (child) => {

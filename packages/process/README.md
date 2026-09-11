@@ -24,8 +24,10 @@ end, at a deadline, with a typed result.
   child and its process group are stopped and the result says
   `timedOut: true`, even when the stopped child reports no exit code.
 - **No pipe can stall it.** Standard input is closed after the optional
-  input is written, and both output streams are drained until they close,
-  under one combined byte cap.
+  input is written, and both output streams are drained until they close
+  or for a short grace after the child exits, under one combined byte cap.
+  A helper the child left behind holding its pipe cannot hold your result;
+  the exit is the result, and the pipes are a bounded extra.
 - **A result, not a race.** Exit code, output bytes, and the timed-out and
   aborted flags come from facts the helper recorded, never from whichever
   callback fired first.
@@ -50,6 +52,19 @@ const result = await runChild({
 `result.exitCode` is the child's exit code, or `null` when a signal stopped
 it. `result.stdout` and `result.stderr` are the captured bytes. `timedOut`
 and `aborted` say which limit, if any, ended the run.
+
+## When your process dies
+
+Children the helper started are stopped when your process exits or is
+interrupted, by the same rule the signal-exit library uses: on exit every
+live child gets a terminate signal, and on an interrupt the helper kills
+its children, removes its own handler, and re-raises the signal so your
+process ends the way it would have anyway. If you install your own handler
+for a signal, you own that decision and the helper stays out of it.
+
+By default a child sits in your process group, so an interrupt at the
+terminal reaches it directly. Pass `detached: true` when a caller needs
+the child in its own group, as the engine command runner does for its sweep.
 
 ## Things that catch people out
 

@@ -2,6 +2,18 @@ import { spawn, type ChildProcess } from 'node:child_process';
 import { performance } from 'node:perf_hooks';
 
 const MAX_TIMER_MS = 2_147_483_647;
+const DRAIN_GRACE_MS = 500;
+const PARENT_SIGNALS = ['SIGINT', 'SIGTERM', 'SIGHUP'] as const;
+type ParentSignal = (typeof PARENT_SIGNALS)[number];
+
+interface LiveChild {
+  readonly child: ChildProcess;
+  readonly detached: boolean;
+}
+
+const liveChildren = new Set<LiveChild>();
+const parentSignalHandlers = new Map<ParentSignal, () => void>();
+let parentCleanupInstalled = false;
 
 export interface RunChildOptions {
   readonly executable: string;
@@ -14,6 +26,8 @@ export interface RunChildOptions {
   readonly maxOutputBytes: number;
   /** Merge `env` over the parent environment. Defaults to true. */
   readonly inheritParentEnv?: boolean;
+  /** Place the child in its own process group. Defaults to false. */
+  readonly detached?: boolean;
   readonly signal?: AbortSignal;
   /** @internal */
   readonly hooks?: RunChildHooks;
@@ -102,22 +116,56 @@ function validate(options: RunChildOptions): Required<Pick<RunChildOptions, 'tim
   };
 }
 
-function signalProcess(child: ChildProcess, signal: NodeJS.Signals): boolean {
+function signalProcess(child: ChildProcess, signal: NodeJS.Signals, detached: boolean): boolean {
   if (child.pid === undefined) return false;
   try {
-    if (process.platform !== 'win32') {
-      process.kill(-child.pid, signal);
-    } else {
-      child.kill(signal);
-    }
-    return true;
+    if (detached) return process.kill(-child.pid, signal);
+    return child.kill(signal);
   } catch {
-    try {
-      return child.kill(signal);
-    } catch {
-      return false;
-    }
+    return false;
   }
+}
+
+function stopLiveChildren(signal: NodeJS.Signals): void {
+  for (const { child, detached } of liveChildren) {
+    signalProcess(child, signal, detached);
+  }
+}
+
+function removeParentSignalHandlers(): void {
+  for (const [signal, handler] of parentSignalHandlers) {
+    process.removeListener(signal, handler);
+  }
+  parentSignalHandlers.clear();
+}
+
+function handleParentSignal(signal: ParentSignal): void {
+  if (process.listenerCount(signal) !== 1) return;
+  stopLiveChildren(signal);
+  removeParentSignalHandlers();
+  try {
+    process.kill(process.pid, signal);
+  } catch {
+    // The process may already be exiting.
+  }
+}
+
+function installParentCleanup(): void {
+  if (parentCleanupInstalled) return;
+  parentCleanupInstalled = true;
+  process.once('exit', () => stopLiveChildren('SIGTERM'));
+  for (const signal of PARENT_SIGNALS) {
+    const handler = (): void => handleParentSignal(signal);
+    parentSignalHandlers.set(signal, handler);
+    process.on(signal, handler);
+  }
+}
+
+function registerLiveChild(child: ChildProcess, detached: boolean): () => void {
+  installParentCleanup();
+  const entry = { child, detached };
+  liveChildren.add(entry);
+  return () => liveChildren.delete(entry);
 }
 
 function bytes(value: string | Uint8Array): Uint8Array {
@@ -128,7 +176,7 @@ function joined(chunks: readonly Uint8Array[]): Uint8Array {
   return Uint8Array.from(Buffer.concat(chunks.map((chunk) => Buffer.from(chunk))));
 }
 
-/** Run one bounded child process and drain both output pipes until close. */
+/** Run one bounded child process and drain both output pipes until close or grace expiry. */
 export function runChild(options: RunChildOptions): Promise<RunChildResult> {
   const limits = validate(options);
   const deadline = performance.now() + limits.timeoutMs;
@@ -152,7 +200,7 @@ export function runChild(options: RunChildOptions): Promise<RunChildResult> {
           ? process.env
           : { ...process.env, ...options.env },
       stdio: ['pipe', 'pipe', 'pipe'],
-      detached: process.platform !== 'win32',
+      detached: options.detached === true && process.platform !== 'win32',
       windowsHide: true,
     });
   } catch (error) {
@@ -161,6 +209,9 @@ export function runChild(options: RunChildOptions): Promise<RunChildResult> {
       error instanceof Error ? error.message : 'child process could not start',
     );
   }
+
+  const detached = options.detached === true && process.platform !== 'win32';
+  const unregisterChild = registerLiveChild(child, detached);
 
   return new Promise<RunChildResult>((resolve, reject) => {
     const stdoutChunks: Uint8Array[] = [];
@@ -178,11 +229,15 @@ export function runChild(options: RunChildOptions): Promise<RunChildResult> {
     let timeoutTimer: NodeJS.Timeout | undefined;
     let forceKillTimer: NodeJS.Timeout | undefined;
     let teardownTimer: NodeJS.Timeout | undefined;
+    let drainTimer: NodeJS.Timeout | undefined;
+    let drainStarted = false;
+    let onAbort: (() => void) | undefined;
 
     const clearTimers = (): void => {
       if (timeoutTimer !== undefined) clearTimeout(timeoutTimer);
       if (forceKillTimer !== undefined) clearTimeout(forceKillTimer);
       if (teardownTimer !== undefined) clearTimeout(teardownTimer);
+      if (drainTimer !== undefined) clearTimeout(drainTimer);
     };
 
     const output = (): { readonly stdout: Uint8Array; readonly stderr: Uint8Array } => ({
@@ -194,7 +249,24 @@ export function runChild(options: RunChildOptions): Promise<RunChildResult> {
       if (settled) return;
       settled = true;
       clearTimers();
+      options.signal?.removeEventListener('abort', onAbort!);
+      unregisterChild();
       reject(error);
+    };
+
+    const destroyOutput = (): void => {
+      child.stdout?.destroy();
+      child.stderr?.destroy();
+    };
+
+    const startDrain = (): void => {
+      if (drainStarted || closed || settled) return;
+      drainStarted = true;
+      drainTimer = setTimeout(() => {
+        if (closed || settled) return;
+        destroyOutput();
+      }, DRAIN_GRACE_MS);
+      drainTimer.unref?.();
     };
 
     const finish = (): void => {
@@ -214,6 +286,7 @@ export function runChild(options: RunChildOptions): Promise<RunChildResult> {
         return;
       }
       settled = true;
+      unregisterChild();
       resolve(Object.freeze({
         exitCode: closeSignal === null ? closeCode : null,
         stdout: captured.stdout,
@@ -234,7 +307,7 @@ export function runChild(options: RunChildOptions): Promise<RunChildResult> {
         stopError = error;
         stopHook = Promise.resolve();
       }
-      signalProcess(child, 'SIGTERM');
+      signalProcess(child, 'SIGTERM', detached);
       stopPromise = (async () => {
         try {
           await Promise.race([
@@ -247,11 +320,10 @@ export function runChild(options: RunChildOptions): Promise<RunChildResult> {
         if (closed) return;
         forceKillTimer = setTimeout(() => {
           if (closed) return;
-          signalProcess(child, 'SIGKILL');
+          signalProcess(child, 'SIGKILL', detached);
           teardownTimer = setTimeout(() => {
             if (closed) return;
-            child.stdout?.destroy();
-            child.stderr?.destroy();
+            destroyOutput();
             fail(new RunChildError('TEARDOWN_INCOMPLETE', 'child process did not stop after SIGKILL', output()));
           }, limits.killGraceMs);
         }, limits.killGraceMs);
@@ -271,7 +343,7 @@ export function runChild(options: RunChildOptions): Promise<RunChildResult> {
       if (chunk.byteLength > remaining) terminate('output');
     };
 
-    const onAbort = (): void => terminate('abort');
+    onAbort = (): void => terminate('abort');
     options.signal?.addEventListener('abort', onAbort, { once: true });
 
     child.stdin?.on('error', () => {});
@@ -285,18 +357,20 @@ export function runChild(options: RunChildOptions): Promise<RunChildResult> {
     });
     child.once('exit', (code, signal) => {
       stoppedAt = performance.now();
+      if (timeoutTimer !== undefined) clearTimeout(timeoutTimer);
       try {
         exitPromise = Promise.resolve(options.hooks?.onExit?.(code, signal));
-        void exitPromise.catch((error) => {
-          stopError = error;
-          child.stdout?.destroy();
-          child.stderr?.destroy();
-        });
+        void exitPromise.then(
+          () => startDrain(),
+          (error: unknown) => {
+            stopError = error;
+            destroyOutput();
+          },
+        );
       } catch (error) {
         stopError = error;
         exitPromise = Promise.resolve();
-        child.stdout?.destroy();
-        child.stderr?.destroy();
+        destroyOutput();
       }
     });
     child.once('close', (code, signal) => {

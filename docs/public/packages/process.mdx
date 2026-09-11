@@ -23,8 +23,9 @@ npm install @obversa/process
   child and its process group are stopped and the result says so, even when
   the stopped child reports no exit code.
 - **No pipe can stall it.** Standard input is closed after the optional
-  input, and both output streams are drained until they close, under one
-  combined byte cap.
+  input, and both output streams are drained until they close or for a
+  short grace after the child exits, under one combined byte cap. The exit
+  is the result; the pipes are a bounded extra.
 - **A result, not a race.** The exit code, the output bytes and the
   timed-out and aborted flags come from facts the helper recorded, never
   from whichever callback fired first.
@@ -64,8 +65,19 @@ with code `SPAWN_FAILED` when the executable cannot start,
 `TEARDOWN_INCOMPLETE` when the child does not stop within the grace period
 after its deadline.
 
+## When your process dies
+
+Children the helper started are stopped when your process exits or is
+interrupted, the way the signal-exit library does it: a terminate signal on
+exit, and on an interrupt the helper stops its children and re-raises the
+signal so your process ends as it would have. Your own handler for a
+signal takes precedence. A child sits in your process group by default so
+a terminal interrupt reaches it; `detached: true` gives it its own group.
+
 ## Things that catch people out
 
+- **Bytes written after the grace are not captured**; the result holds
+  what arrived before the child exited plus the short drain.
 - **The output cap is combined** across standard output and standard error.
 - **The environment is merged** over the parent's unless you say otherwise.
 - **A timed-out child still has output**: what it wrote before the deadline
