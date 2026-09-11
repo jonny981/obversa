@@ -171,6 +171,7 @@ export function runChild(options: RunChildOptions): Promise<RunChildResult> {
     let settled = false;
     let closeCode: number | null = null;
     let closeSignal: NodeJS.Signals | null = null;
+    let stoppedAt: number | undefined;
     let stopPromise: Promise<void> | undefined;
     let exitPromise: Promise<void> | undefined;
     let stopError: unknown;
@@ -217,8 +218,8 @@ export function runChild(options: RunChildOptions): Promise<RunChildResult> {
         exitCode: closeSignal === null ? closeCode : null,
         stdout: captured.stdout,
         stderr: captured.stderr,
-        timedOut: stopReason === 'timeout'
-          || (stopReason === undefined && performance.now() >= deadline),
+        timedOut: stopReason !== 'abort'
+          && (stoppedAt ?? performance.now()) >= deadline,
         aborted: stopReason === 'abort',
       }));
     };
@@ -283,6 +284,7 @@ export function runChild(options: RunChildOptions): Promise<RunChildResult> {
       fail(new RunChildError('SPAWN_FAILED', error.message, output()));
     });
     child.once('exit', (code, signal) => {
+      stoppedAt = performance.now();
       try {
         exitPromise = Promise.resolve(options.hooks?.onExit?.(code, signal));
         void exitPromise.catch((error) => {
@@ -298,6 +300,7 @@ export function runChild(options: RunChildOptions): Promise<RunChildResult> {
       }
     });
     child.once('close', (code, signal) => {
+      stoppedAt ??= performance.now();
       closed = true;
       closeCode = code;
       closeSignal = signal;

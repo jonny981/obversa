@@ -28,6 +28,26 @@ describe('runChild', () => {
     expect(new TextDecoder().decode(result.stderr)).toBe('WARN');
   });
 
+  it('does not count teardown after an in-deadline exit as a timeout', async () => {
+    const result = await runChild({
+      executable: node,
+      args: ['-e', 'process.exit(0)'],
+      timeoutMs: 1_000,
+      maxOutputBytes: 1_024,
+      hooks: {
+        async onExit() {
+          await new Promise<void>((resolve) => setTimeout(resolve, 1_100));
+        },
+      },
+    });
+
+    expect(result).toMatchObject({
+      exitCode: 0,
+      timedOut: false,
+      aborted: false,
+    });
+  });
+
   it('reports a child that never exits as timed out and stops it', async () => {
     const result = await runChild({
       executable: node,
