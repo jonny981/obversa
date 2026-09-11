@@ -39,3 +39,8 @@ test('a missing page is one failure that says so', () => {
     assert.match(failures[0], /the page is missing/);
   } finally { rmSync(dir, { recursive: true, force: true }); }
 });
+
+test('a phrase that wraps across a line break still counts', () => {
+  const dir = site({ 'a.mdx': 'It models process at every\nlayer.\n\nInference belongs mostly at\nthe leaves.\n' });
+  try { assert.deepEqual(checkFirstPageClaims(dir, claims), []); } finally { rmSync(dir, { recursive: true, force: true }); }
+});

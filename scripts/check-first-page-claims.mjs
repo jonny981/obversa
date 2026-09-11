@@ -47,8 +47,10 @@ export function checkFirstPageClaims(root, claims = FIRST_PAGE_CLAIMS) {
       failures.push(`${page}: the page is missing, so every sentence it must keep is gone`);
       continue;
     }
+    // Prose wraps at eighty columns, so a phrase may cross a line break.
+    const flat = text.replace(/\s+/g, ' ');
     for (const phrase of phrases) {
-      if (!text.includes(phrase)) failures.push(`${page}: no longer says "${phrase}"`);
+      if (!flat.includes(phrase)) failures.push(`${page}: no longer says "${phrase}"`);
     }
   }
   return failures;
