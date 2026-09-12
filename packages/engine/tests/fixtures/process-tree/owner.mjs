@@ -1,27 +1,11 @@
-import { ChildProcess, execFileSync, spawn } from 'node:child_process';
-import { appendFileSync, existsSync, renameSync, writeFileSync } from 'node:fs';
+import { execFileSync, spawn } from 'node:child_process';
+import { existsSync, renameSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { setTimeout as delay } from 'node:timers/promises';
 import { runOwnedCommand } from '../../../src/command/run.ts';
 
 const [mode, directory, ownerId, loader, requestedAttemptId, workerPid] = process.argv.slice(2);
 const attemptId = requestedAttemptId ?? `sha256:${(mode === 'watchdog' ? '1' : '2').repeat(64)}`;
-const killDiagnostic = join(directory, 'kill-diagnostic.log');
-const recordKill = (kind, pid, signal) => {
-  try {
-    appendFileSync(killDiagnostic, `${JSON.stringify({ kind, pid, signal, stack: new Error().stack })}\n`);
-  } catch {}
-};
-const nativeProcessKill = process.kill.bind(process);
-process.kill = (pid, signal) => {
-  recordKill('process.kill', pid, signal);
-  return nativeProcessKill(pid, signal);
-};
-const nativeChildKill = ChildProcess.prototype.kill;
-ChildProcess.prototype.kill = function kill(signal) {
-  recordKill('ChildProcess.kill', this.pid, signal);
-  return nativeChildKill.call(this, signal);
-};
 const record = (name, value) => {
   const path = join(directory, `${name}.json`);
   writeFileSync(`${path}.tmp`, JSON.stringify(value));
@@ -45,35 +29,8 @@ const processGroupId = () => {
 };
 
 if (mode === 'watchdog' || mode === 'term-watchdog') {
-  const diagnostic = { exitCode: null, signal: null, timedOut: null, stdout: '', stderr: '' };
-  const observer = {
-    onStdout: (chunk) => { diagnostic.stdout += Buffer.from(chunk).toString('utf8'); },
-    onStderr: (chunk) => { diagnostic.stderr += Buffer.from(chunk).toString('utf8'); },
-    onExit: (exitCode, signal) => {
-      diagnostic.exitCode = exitCode;
-      diagnostic.signal = signal;
-    },
-  };
-  try {
-    const result = await runOwnedCommand(
-      command(mode === 'watchdog' ? 'worker' : 'term-root', { ownerId }),
-      new AbortController().signal,
-      observer,
-    );
-    diagnostic.timedOut = result.timedOut;
-    record('run-diagnostic', { ...diagnostic, result: { exitCode: result.exitCode, timedOut: result.timedOut, aborted: result.aborted } });
-    record('result', { exitCode: result.exitCode, remaining: result.remainingProcesses });
-  } catch (error) {
-    record('run-diagnostic', {
-      ...diagnostic,
-      error: {
-        name: error?.name,
-        message: error?.message,
-        code: error?.code,
-      },
-    });
-    throw error;
-  }
+  const result = await runOwnedCommand(command(mode === 'watchdog' ? 'worker' : 'term-root', { ownerId }), new AbortController().signal);
+  record('result', { exitCode: result.exitCode, remaining: result.remainingProcesses });
 } else if (mode === 'term-root') {
   spawn(process.execPath, ['--import', loader, import.meta.filename, 'term-parent', directory, ownerId, loader, attemptId, workerPid], {
     detached: true, stdio: 'ignore',

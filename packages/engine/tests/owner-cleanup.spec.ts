@@ -1,5 +1,5 @@
 import { execFileSync, spawn, type ChildProcess } from 'node:child_process';
-import { existsSync, readFileSync, readdirSync, writeFileSync } from 'node:fs';
+import { existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import { join } from 'node:path';
 import { setTimeout as delay } from 'node:timers/promises';
@@ -18,9 +18,9 @@ const textOwner = `sha256:${'a'.repeat(64)}` as const;
 const termOwner = `sha256:${'c'.repeat(64)}` as const;
 const nestedOwner = `sha256:${'d'.repeat(64)}` as const;
 const inheritedOwner = `sha256:${'e'.repeat(64)}` as const;
-const termAttempt = `sha256:${'3'.repeat(64)}` as const;
-const nestedAttempt = `sha256:${'4'.repeat(64)}` as const;
-const inheritedAttempt = `sha256:${'5'.repeat(64)}` as const;
+const termAttempt = `sha256:${'8'.repeat(64)}` as const;
+const nestedAttempt = `sha256:${'9'.repeat(64)}` as const;
+const inheritedAttempt = `sha256:${'a'.repeat(64)}` as const;
 
 async function waitForExit(child: ChildProcess): Promise<void> {
   if (child.exitCode !== null || child.signalCode !== null) return;
@@ -35,17 +35,6 @@ async function record(directory: string, name: string): Promise<Record<string, u
     await delay(10);
   }
   return JSON.parse(readFileSync(path, 'utf8'));
-}
-
-async function reportDiagnostic(directory: string): Promise<void> {
-  const path = join(directory, 'run-diagnostic.json');
-  const deadline = Date.now() + 1_000;
-  while (!existsSync(path) && Date.now() < deadline) await delay(10);
-  if (existsSync(path)) {
-    console.error(`[owner-cleanup diagnostic] ${readFileSync(path, 'utf8')}`);
-  } else {
-    console.error(`[owner-cleanup diagnostic] no run-diagnostic.json; files=${JSON.stringify(readdirSync(directory))}`);
-  }
 }
 
 function stop(pid: number): void {
@@ -105,14 +94,7 @@ describe.runIf(process.platform === 'darwin' || process.platform === 'linux')('c
       stdio: 'inherit',
     });
     try {
-      let worker: Record<string, unknown>;
-      try {
-        worker = await record(directory, 'worker');
-      } catch (error) {
-        try { process.kill(watchdog.pid!, 'SIGCONT'); } catch {}
-        await reportDiagnostic(directory);
-        throw error;
-      }
+      const worker = await record(directory, 'worker');
       process.kill(watchdog.pid!, 'SIGSTOP');
       await delay(50);
       writeFileSync(join(directory, 'go'), '');
