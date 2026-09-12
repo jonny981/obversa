@@ -21,15 +21,36 @@ import type { LoopError } from './errors.js';
 import type { Budget } from './budget.js';
 import type { EnvHandle, Environment } from '../env/environment.js';
 import type { JsonValue, RunBrief } from '../graph/value.js';
-import type { CallbackClient } from '../callback/client.js';
-import type { StoredCallbackClient } from '../callback/stored-client.js';
+import type {
+  CallbackEvent,
+  ClaimResult,
+  ReleaseResult,
+  SubmitResult,
+} from '../callback/client.js';
+import type { CallbackRequest } from '../callback/gate.js';
 
 /**
- * The client a run's questions go through: the in-memory client, or the
- * stored client whose questions survive a process exit. Every method of the
- * stored client is awaited; a step that asks awaits both shapes alike.
+ * The client a run's questions go through: the in-memory `CallbackClient`,
+ * or the stored client (`createStoredCallbackClient`) whose questions survive
+ * a process exit. Each method may answer at once or as a promise; a step
+ * that asks awaits both shapes alike. Written as the awaited shape here, so
+ * the core types import no storage module.
  */
-export type RunCallbacks = CallbackClient | Readonly<StoredCallbackClient>;
+export interface RunCallbacks {
+  post(request: CallbackRequest): void | Promise<void>;
+  listPending(): readonly CallbackRequest[] | Promise<readonly CallbackRequest[]>;
+  claim(requestId: string, routerId: string): ClaimResult | Promise<ClaimResult>;
+  submit(
+    requestId: string,
+    claimToken: string,
+    routerId: string,
+    requestDigest: string,
+    response: JsonValue,
+  ): SubmitResult | Promise<SubmitResult>;
+  release(requestId: string, claimToken: string): ReleaseResult | Promise<ReleaseResult>;
+  supersede(requestId: string, supersededBy: string): void | Promise<void>;
+  history(requestId?: string): readonly CallbackEvent[] | Promise<readonly CallbackEvent[]>;
+}
 
 /** Terminal disposition of a `Job`. */
 export type OutcomeStatus =
