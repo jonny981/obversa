@@ -18,9 +18,10 @@ npm install @obversa/runtime @obversa/teams
 - **`thresholdPanel`.** One model implements, your test command runs, and
   several reviewers read the change at the same time. The change passes
   when at least the threshold number of them accept.
-- **`featureDelivery`.** Analyse, implement, test, review, approve. The
-  analyse step writes a delivery note, the reviewers can send the work back
-  to the implementer, and the approve step writes an approval note.
+- **`featureDelivery`.** Research, plan, write tests, implement, verify,
+  approve, and close. The plan, test, and implementation reviews each send
+  work back to the step that owns it, and the run writes evidence and
+  learning notes.
 
 Every team is a graph of named steps with a `desc` and a `gate` sentence on
 each. Every seat is checked before a run: the implementer and each reviewer
@@ -88,7 +89,8 @@ two teams.
 | `workspace` | The directory the team works in. Files are written here. |
 | `files` | The paths, relative to the workspace, that the brief expects written. At least one. |
 | `test` | `{ command, args, timeoutMs? }`, run in the workspace. Exit 0 passes. |
-| `maxKickbacks` | How many times a rejection may send work back. Default 1. |
+| `testFiles` | The paths in `files` that the test-writing stage must create before implementation. |
+| `maxKickbacks` | A number for one shared limit, or a map such as `{ plan: 3, 'tests-first': 3, implement: 3 }` for separate limits. Default 1. |
 
 A seat is `{ engine, identity }`: an engine plugin instance and the identity
 it runs under, `{ adapter, provider, modelFamily, model }`. The identity is
@@ -98,7 +100,7 @@ what the run record and the family check use, so it must name what runs.
 | --- | --- |
 | `writerReviewerPair` | `writer`, `reviewer` |
 | `thresholdPanel` | `implement`, `reviewers` (a list of `{ name, seat }`), `threshold` |
-| `featureDelivery` | `analyse`, `implement`, `reviewers`, `reviewThreshold`, `approve` |
+| `featureDelivery` | `analyse`, `implement`, `reviewers`, `reviewThreshold`, `approve`, `testFiles`, `maxKickbacks` |
 
 ## Gotchas
 
