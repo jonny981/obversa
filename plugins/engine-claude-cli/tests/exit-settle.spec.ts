@@ -17,6 +17,7 @@ import { ClaudeCliEngine } from '../src/index.ts';
 const ORPHAN_PID_PATH = '__ORPHAN_PID_PATH__';
 const ORPHAN_HELPER_PATH = '__ORPHAN_HELPER_PATH__';
 const FINAL_MARKER_PATH = '__FINAL_MARKER_PATH__';
+const PHASE_PATH = '__PHASE_PATH__';
 const fixtures: Array<{
   readonly directory: string;
   readonly orphanPidPath: string;
@@ -35,12 +36,14 @@ function stub(source: string): {
   readonly bin: string;
   readonly orphanPidPath: string;
   readonly finalMarkerPath: string;
+  readonly phasePath: string;
 } {
   const dir = mkdtempSync(join(tmpdir(), 'claude-cli-exit-settle-'));
   const bin = join(dir, 'engine-stub.mjs');
   const orphanHelper = join(dir, 'orphan-helper.mjs');
   const orphanPidPath = join(dir, 'orphan.pid');
   const finalMarkerPath = join(dir, 'final-written');
+  const phasePath = join(dir, 'phases.jsonl');
   fixtures.push({ directory: dir, orphanPidPath });
   writeFileSync(orphanHelper, `
 import { writeFileSync } from 'node:fs';
@@ -53,6 +56,14 @@ setInterval(() => {}, 1000);
     bin,
     source
       .replace('#!/usr/bin/env node\n', `#!/usr/bin/env node
+import { appendFileSync } from 'node:fs';
+appendFileSync(PHASE_PATH, JSON.stringify({
+  phase: process.argv.length === 3 && process.argv[2] === '--version'
+    ? 'version-observation'
+    : 'main-spawn',
+  at: Date.now(),
+  pid: process.pid,
+}) + '\\n');
 if (process.argv.length === 3 && process.argv[2] === '--version') {
   process.stdout.write('2.1.261 (Claude Code)\\n');
   process.exit(0);
@@ -60,10 +71,11 @@ if (process.argv.length === 3 && process.argv[2] === '--version') {
 `)
       .replaceAll(ORPHAN_PID_PATH, JSON.stringify(orphanPidPath))
       .replaceAll(ORPHAN_HELPER_PATH, JSON.stringify(orphanHelper))
-      .replaceAll(FINAL_MARKER_PATH, JSON.stringify(finalMarkerPath)),
+      .replaceAll(FINAL_MARKER_PATH, JSON.stringify(finalMarkerPath))
+      .replaceAll(PHASE_PATH, JSON.stringify(phasePath)),
   );
   chmodSync(bin, 0o755);
-  return { bin, orphanPidPath, finalMarkerPath };
+  return { bin, orphanPidPath, finalMarkerPath, phasePath };
 }
 
 const SPAWN_ORPHAN = `
@@ -200,20 +212,47 @@ await new Promise(() => {});
   });
 
   it('settles an abort instead of waiting for the orphan', async () => {
-    const { bin, orphanPidPath } = stub(`#!/usr/bin/env node
+    const { bin, orphanPidPath, phasePath } = stub(`#!/usr/bin/env node
 ${SPAWN_ORPHAN}
 setInterval(() => {}, 1000);
 `);
 
     const controller = new AbortController();
     const startedAt = Date.now();
+    let abortAt: number | undefined;
     const running = new ClaudeCliEngine({ cliBinary: bin }).run(
       { prompt: 'ping' },
       () => {},
       controller.signal,
     );
+    const readPhases = () => existsSync(phasePath)
+      ? readFileSync(phasePath, 'utf8').trim().split('\n').filter(Boolean)
+        .map((line) => JSON.parse(line) as { phase: string; at: number; pid: number })
+      : [];
+    const report = (extra: Record<string, unknown> = {}) => console.error(JSON.stringify({
+      startedAt,
+      phases: readPhases().map(({ phase, at }) => ({ phase, offsetMs: at - startedAt })),
+      orphanExists: existsSync(orphanPidPath),
+      ...extra,
+    }));
+    const snapshotTimer = setTimeout(() => report({ snapshotAt: Date.now() }), 4_000);
+    void running.then(
+      () => {
+        clearTimeout(snapshotTimer);
+        report({ settledAt: Date.now(), abortToSettleMs: abortAt === undefined ? undefined : Date.now() - abortAt });
+      },
+      (error: unknown) => {
+        clearTimeout(snapshotTimer);
+        report({
+          settledAt: Date.now(),
+          abortToSettleMs: abortAt === undefined ? undefined : Date.now() - abortAt,
+          error: error instanceof Error ? error.message : String(error),
+        });
+      },
+    );
     const rejected = expect(running).rejects.toMatchObject({ kind: 'aborted' });
     await waitForOrphan(orphanPidPath);
+    abortAt = Date.now();
     controller.abort();
     await rejected;
     expect(Date.now() - startedAt).toBeLessThan(10_000);
