@@ -60,51 +60,27 @@ import { featureDelivery } from '@obversa/teams';
 
 const workspace = process.cwd();
 const analyse = {
-  engine: new ClaudeCliEngine({
-    defaultModel: 'claude-sonnet-4-5',
-    permissionMode: 'bypassPermissions',
-  }),
+  engine: new ClaudeCliEngine({ defaultModel: 'claude-sonnet-4-5', permissionMode: 'bypassPermissions' }),
   identity: {
-    adapter: 'claude-cli',
-    provider: 'anthropic',
-    modelFamily: 'claude',
-    model: 'claude-sonnet-4-5',
+    adapter: 'claude-cli', provider: 'anthropic', modelFamily: 'claude', model: 'claude-sonnet-4-5',
   },
 };
 const implement = {
-  engine: new CodexEngine({
-    defaultModel: 'gpt-5.6-luna',
-    permissionMode: 'bypassPermissions',
-  }),
+  engine: new CodexEngine({ defaultModel: 'gpt-5.6-luna', permissionMode: 'bypassPermissions' }),
   identity: {
-    adapter: 'codex',
-    provider: 'openai',
-    modelFamily: 'gpt',
-    model: 'gpt-5.6-luna',
+    adapter: 'codex', provider: 'openai', modelFamily: 'gpt', model: 'gpt-5.6-luna',
   },
 };
 const reviewer = {
-  engine: new ClaudeCliEngine({
-    defaultModel: 'claude-sonnet-4-5',
-    permissionMode: 'bypassPermissions',
-  }),
+  engine: new ClaudeCliEngine({ defaultModel: 'claude-sonnet-4-5', permissionMode: 'bypassPermissions' }),
   identity: {
-    adapter: 'claude-cli',
-    provider: 'anthropic',
-    modelFamily: 'claude',
-    model: 'claude-sonnet-4-5',
+    adapter: 'claude-cli', provider: 'anthropic', modelFamily: 'claude', model: 'claude-sonnet-4-5',
   },
 };
 const approve = {
-  engine: new ClaudeCliEngine({
-    defaultModel: 'claude-sonnet-4-5',
-    permissionMode: 'bypassPermissions',
-  }),
+  engine: new ClaudeCliEngine({ defaultModel: 'claude-sonnet-4-5', permissionMode: 'bypassPermissions' }),
   identity: {
-    adapter: 'claude-cli',
-    provider: 'anthropic',
-    modelFamily: 'claude',
-    model: 'claude-sonnet-4-5',
+    adapter: 'claude-cli', provider: 'anthropic', modelFamily: 'claude', model: 'claude-sonnet-4-5',
   },
 };
 
@@ -112,16 +88,19 @@ const team = featureDelivery({
   brief: 'Deliver a pure triple(value) function in src/triple.mjs with a Node test in test/triple.test.mjs.',
   workspace,
   files: ['src/triple.mjs', 'test/triple.test.mjs'],
+  testFiles: ['test/triple.test.mjs'],
   test: { command: 'node', args: ['--test', 'test/triple.test.mjs'] },
   analyse,
   implement,
-  reviewers: [{ name: 'correctness', seat: reviewer }],
+  reviewers: [{ name: 'correctness', seat: reviewer, scope: 'implementation' }],
   reviewThreshold: 1,
   approve,
+  maxKickbacks: { plan: 3, 'tests-first': 3, implement: 3 },
 });
 
 const result = await run(team, { cwd: workspace });
 console.log(JSON.stringify(result.outcome, null, 2));
+if (result.outcome.status !== 'pass') process.exitCode = 1;
 ```
 
 A writing seat can write anywhere the process can: the file starts its
@@ -134,22 +113,31 @@ model family and model. The implementer and every reviewer must be
 different model families, and the package refuses the team before any
 model runs if they are not.
 
-The team is a graph of five named steps. Every step carries a sentence
+The team is a graph of eleven named steps. Every step carries a sentence
 saying what it does and a sentence saying what must be true for it to
-count, and both reach the reviewer and the run record:
+count, and both reach the reviewers and the run record. Plan review can
+send work back to `plan`, test review can send it back to `tests-first`,
+and implementation review can send it back to `implement`. Each target
+has its own bounded kickback budget.
 
 | step | done when |
 | --- | --- |
-| analyse | The delivery note is in the workspace and names each requirement. |
-| implement | The code and its test cover every requirement in the note. |
-| test | The test command exits 0. |
-| review | At least the threshold number of reviewers have accepted. |
-| approve | An approval note is in the workspace. |
+| prepare | Any approval from an earlier run is removed and a run marker is recorded. |
+| research-context | The context note is in the workspace and a reviewer accepts it. |
+| research-requirements | The requirements note is in the workspace and a reviewer accepts it. |
+| plan | The plan contains one acceptance check for each requirement. |
+| plan-review | At least the threshold number of reviewers accept the plan. |
+| tests-first | Every declared test file exists and is not empty. |
+| tests-review | At least the threshold number of reviewers accept the tests. |
+| implement | The implementation files are written, the test passes, and reviewers accept the change. |
+| verify | The final test command exits 0. |
+| approve | An approval note carrying this run's marker is in the workspace. |
+| close | Evidence and learning notes are written from the run record. |
 
 A step that promises a file fails by name when the file is missing. The
 test step passes on the command's exit code, never on a model's report.
 [Feature delivery](https://docs.obversa.ai/workflows/feature-team) shows
-what a real run of this file printed and the files the models wrote; a
+what a real run of this file prints and the files the models write; a
 [writer and reviewer](https://docs.obversa.ai/workflows/writer-and-reviewer)
 and a [review panel](https://docs.obversa.ai/workflows/review-panel) are
 the two smaller teams in the same package.
