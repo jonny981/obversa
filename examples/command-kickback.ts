@@ -4,22 +4,22 @@
  * No agent runs or watches the tests. `test` runs a command; when it fails,
  * its captured output goes straight back to `implement` as the finding, and
  * `implement` runs again with it in hand. `size` is a command too, and the two
- * reviews that depend on it each read its outcome and run only on their path.
+ * reviews that depend on it each run only on their path.
  * It runs offline, with no model and no network: `implement` is a small
  * function that gets the code wrong once, so the kickback has something to do.
  */
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
-import { commandSucceeds, dag, fnJob, gateJob, predicate, run, type Outcome } from '@obversa/runtime';
+import { commandJob, dag, failed, fnJob, passed, run } from '@obversa/runtime';
 
 const workspace = mkdtempSync(join(tmpdir(), 'command-kickback-'));
 const source = join(workspace, 'add.mjs');
 
 /** The writer. In a real team this is an agent; here it gets the sign wrong once. */
 let implementRuns = 0;
-const implement = fnJob('implement', async (ctx): Promise<Outcome> => {
+const implement = fnJob('implement', (ctx) => {
   implementRuns += 1;
   writeFileSync(
     source,
@@ -27,44 +27,36 @@ const implement = fnJob('implement', async (ctx): Promise<Outcome> => {
       ? 'export const add = (a, b) => a - b;\n'
       : 'export const add = (a, b) => a + b;\n',
   );
-  return {
-    status: 'pass',
-    summary: ctx.lastReview
-      ? `second attempt, after the tests said: ${ctx.lastReview.summary}`
-      : 'first attempt',
-  };
+  return ctx.lastReview
+    ? `second attempt, after the tests said: ${ctx.lastReview.summary}`
+    : 'first attempt';
 });
 
 /** The tests, as a command. A red run goes back to `implement` with the output. */
-const test = gateJob(
+const test = commandJob(
   'test',
-  commandSucceeds(
+  [
     process.execPath,
-    [
-      '--input-type=module',
-      '-e',
-      `import { add } from ${JSON.stringify(source)};
-       if (add(2, 2) !== 4) { console.error('add(2, 2) returned ' + add(2, 2)); process.exit(1); }`,
-    ],
-    { captureOutput: true },
-  ),
+    '--input-type=module',
+    '-e',
+    `import { add } from ${JSON.stringify(source)};
+     if (add(2, 2) !== 4) { console.error('add(2, 2) returned ' + add(2, 2)); process.exit(1); }`,
+  ],
   { target: 'implement' },
 );
 
 /** The decision, as a command: exit 0 for a small change, exit 1 for a large one. */
-const size = gateJob(
-  'size',
-  commandSucceeds(process.execPath, [
-    '-e',
-    `process.exit(require('node:fs').readFileSync(${JSON.stringify(source)}).length > 200 ? 1 : 0)`,
-  ]),
-);
+const size = commandJob('size', [
+  process.execPath,
+  '-e',
+  `process.exit(require('node:fs').readFileSync(${JSON.stringify(source)}).length > 200 ? 1 : 0)`,
+]);
 
 const reviewed: string[] = [];
 const review = (name: string, summary: string) =>
-  fnJob(name, async (): Promise<Outcome> => {
+  fnJob(name, () => {
     reviewed.push(name);
-    return { status: 'pass', summary };
+    return summary;
   });
 
 export const commandKickback = dag({
@@ -91,14 +83,14 @@ export const commandKickback = dag({
     },
     'quick-review': {
       needs: 'size',
-      when: predicate((ctx) => ctx.needs?.size?.status === 'pass', 'the change is small'),
+      when: passed('size'),
       desc: 'One reviewer reads a small change.',
       gate: 'The reviewer has read it.',
       job: review('quick-review', 'small change, one reader'),
     },
     'full-review': {
       needs: 'size',
-      when: predicate((ctx) => ctx.needs?.size?.status === 'fail', 'the change is large'),
+      when: failed('size'),
       desc: 'A panel reads a large change.',
       gate: 'The panel has read it.',
       job: review('full-review', 'large change, a panel'),

@@ -122,6 +122,21 @@ describe('passed and failed', () => {
     expect(ran).toEqual(['large']);
   });
 
+  it('meet neither when the dependency never got to decide', async () => {
+    const ran: string[] = [];
+    const { outcome } = await run(dag({
+      name: 'blocked',
+      nodes: {
+        implement: fnJob('implement', (): Outcome => ({ status: 'fail', summary: 'no file' })),
+        size: { needs: 'implement', optional: true, job: commandJob('size', [node, '-e', '0']) },
+        small: { needs: 'size', when: passed('size'), job: fnJob('small', () => { ran.push('small'); }) },
+        large: { needs: 'size', when: failed('size'), job: fnJob('large', () => { ran.push('large'); }) },
+      },
+    }));
+    expect(outcome.status).toBe('fail');
+    expect(ran).toEqual([]);
+  });
+
   it('fail the run when the named node is not a dependency', async () => {
     const { outcome } = await run(dag({
       name: 'branch',
@@ -131,7 +146,8 @@ describe('passed and failed', () => {
       },
     }));
     expect(outcome.status).toBe('fail');
-    expect(JSON.stringify(outcome)).toMatch(/"c" is not a dependency/);
+    const nodes = outcome.data as Record<string, Outcome>;
+    expect(nodes.b?.summary).toContain('"c" is not a dependency of this node');
   });
 });
 

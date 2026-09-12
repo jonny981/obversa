@@ -877,3 +877,88 @@ export function gateJob(
     return outcome;
   }, { kind: 'gate', name: label });
 }
+
+/**
+ * A command as a job: `pass` on exit 0, `fail` otherwise, with the command's
+ * output as the evidence. Give the command as one string when no argument
+ * needs quoting (`'pnpm test'`), or as an array, one argument per entry
+ * (`['node', '--test', 'test/']`). `target` names the node that owns the fix,
+ * exactly as `gateJob` does: a red run goes back there with the output as the
+ * finding and no agent in between. `capture` (default true) appends the
+ * output tail to the failure summary.
+ */
+export function commandJob(
+  label: string,
+  command: string | readonly string[],
+  opts: {
+    cwd?: string;
+    timeoutMs?: number;
+    env?: Record<string, string>;
+    target?: string;
+    capture?: boolean;
+  } = {},
+): Job {
+  const [executable, ...args] = splitCommand(command);
+  return gateJob(
+    label,
+    commandSucceeds(executable, args, {
+      ...(opts.cwd !== undefined ? { cwd: opts.cwd } : {}),
+      ...(opts.timeoutMs !== undefined ? { timeoutMs: opts.timeoutMs } : {}),
+      ...(opts.env !== undefined ? { env: opts.env } : {}),
+      captureOutput: opts.capture ?? true,
+    }),
+    opts.target !== undefined ? { target: opts.target } : {},
+  );
+}
+
+function splitCommand(command: string | readonly string[]): [string, ...string[]] {
+  if (typeof command === 'string' && /["']/.test(command)) {
+    throw new TypeError(
+      `commandJob: "${command}" has a quote in it; pass the command as an array, one argument per entry`,
+    );
+  }
+  const parts = typeof command === 'string' ? command.trim().split(/\s+/) : [...command];
+  const [executable, ...args] = parts;
+  if (executable === undefined || executable === '') {
+    throw new TypeError('commandJob needs a command to run');
+  }
+  return [executable, ...args];
+}
+
+function needOutcome(ctx: JobContext, name: string, caller: string): Outcome {
+  const outcome = ctx.needs?.[name];
+  if (outcome === undefined) {
+    throw new LoopError({
+      code: 'VALIDATION',
+      message: `${caller}("${name}"): "${name}" is not a dependency of this node; add it to the node's needs`,
+    });
+  }
+  return outcome;
+}
+
+/**
+ * Met when the named dependency passed. For a node's `when`: the node runs
+ * only on that path (`when: passed('size')`). A skipped dependency counts as
+ * passed, as it does everywhere in a dag. A name the node does not `need` is
+ * a configuration error, not a quiet false.
+ */
+export function passed(name: string): Condition {
+  return setLabel(async (ctx) => {
+    const outcome = needOutcome(ctx, name, 'passed');
+    const met = outcome.status === 'pass';
+    return { met, reason: `${name} ${outcome.status}` };
+  }, `passed ${name}`);
+}
+
+/**
+ * Met when the named dependency ran and failed: the other branch of `passed`.
+ * A dependency that never got to decide (blocked by a failure upstream, or
+ * aborted) meets neither, so a branch runs only on a decision.
+ */
+export function failed(name: string): Condition {
+  return setLabel(async (ctx) => {
+    const outcome = needOutcome(ctx, name, 'failed');
+    const met = outcome.status === 'fail';
+    return { met, reason: `${name} ${outcome.status}` };
+  }, `failed ${name}`);
+}

@@ -306,6 +306,7 @@ export {
 export {
   agentJob,
   fnJob,
+  type FnJobResult,
   prove,
   kickback,
   revisionRequest,
@@ -367,8 +368,12 @@ export {
   never,
   agentCheck,
   gateJob,
+  commandJob,
+  passed,
+  failed,
   type AgentCheckConfig,
 } from './core/condition.js';
+export { approval, type ApprovalAnswer, type ApprovalOptions } from './core/approval-job.js';
 export type {
   NoProgressConfig,
   NoProgressInput,

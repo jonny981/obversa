@@ -476,9 +476,16 @@ export function agentJob(config: AgentJobConfig): Job {
 export { kickback, revisionRequest };
 
 /** A deterministic step from a plain function — for glue, checks, side effects. */
+/**
+ * What a `fnJob` function may return: a full outcome, a one-line summary (the
+ * step passed, and this is what it did), or nothing (the step passed; its
+ * label is the summary). A throw is a fail carrying the error.
+ */
+export type FnJobResult = Outcome | string | void;
+
 export function fnJob(
   label: string,
-  fn: (ctx: JobContext) => Outcome | Promise<Outcome>,
+  fn: (ctx: JobContext) => FnJobResult | Promise<FnJobResult>,
 ): Job {
   const job: Job = async (ctx) => {
     const path = [...ctx.path];
@@ -491,7 +498,12 @@ export function fnJob(
     });
     let outcome: Outcome;
     try {
-      outcome = await fn(ctx);
+      const returned = await fn(ctx);
+      outcome = returned === undefined
+        ? { status: 'pass', summary: label }
+        : typeof returned === 'string'
+          ? { status: 'pass', summary: returned }
+          : returned;
     } catch (e) {
       const error = LoopError.from(e, {
         code: 'BODY',

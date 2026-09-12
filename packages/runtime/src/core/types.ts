@@ -21,6 +21,7 @@ import type { LoopError } from './errors.js';
 import type { Budget } from './budget.js';
 import type { EnvHandle, Environment } from '../env/environment.js';
 import type { JsonValue, RunBrief } from '../graph/value.js';
+import type { CallbackClient } from '../callback/client.js';
 
 /** Terminal disposition of a `Job`. */
 export type OutcomeStatus =
@@ -162,6 +163,12 @@ export interface JobContext {
   readonly state: Record<string, unknown>;
   /** Memory available to jobs in this run, when the caller supplied it. */
   readonly memory?: Memory;
+  /**
+   * The run's callbacks client: where a step posts a question for a person or
+   * an outside router, and where the answer is found again on a resume. Every
+   * run has one; pass `callbacks` to `run` to keep it across runs.
+   */
+  readonly callbacks?: CallbackClient;
   /** Where this job's code lives — the working dir and branch (the substrate). */
   readonly workspace: Workspace;
   /** The running environment for this workspace, when one is up (gate target). */

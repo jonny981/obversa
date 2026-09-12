@@ -63,6 +63,7 @@ export function childContext(
     params: parent.params,
     state: parent.state,
     memory: parent.memory,
+    callbacks: parent.callbacks,
     // A child inherits the parent's workspace by default; a concurrency
     // boundary forks it into an isolated worktree by passing `workspace`.
     workspace: over.workspace ?? parent.workspace,
