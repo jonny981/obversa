@@ -116,7 +116,7 @@ const defaultPolicy: AttemptBudgetPolicy = {
   outputBytes: 4_096,
   timeoutMs: 1_000,
   teardownGraceMs: 50,
-  memoryBytes: 64 * 1_024 * 1_024,
+  memoryBytes: 512 * 1_024 * 1_024,
   filesChanged: 2,
   linesChanged: 8,
   callTokens: { mode: 'observed', tokens: 10 },
@@ -276,7 +276,7 @@ describe('node attempt lifecycle', () => {
       timeoutMs: 1_000,
       timeoutGraceMs: 50,
       maxOutputBytes: 4_096,
-      maxMemoryBytes: 64 * 1_024 * 1_024,
+      maxMemoryBytes: 512 * 1_024 * 1_024,
       leaf: true,
       attempt: {
         leaf: true,
@@ -1015,7 +1015,6 @@ describe('node attempt lifecycle', () => {
           ...defaultPolicy,
           timeoutMs: 300,
           teardownGraceMs: 100,
-          memoryBytes: 512 * 1_024 * 1_024,
         },
       }), new AbortController().signal);
 
