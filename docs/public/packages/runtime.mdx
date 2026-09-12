@@ -274,7 +274,9 @@ try {
 - `readRunPreflight`, `interruptRunPreflight`: read a stored run's engine
   checks without calling an engine, and close a check the process died in
   the middle of; `validateDomainEventId` checks an event id before you pass
-  it to a resume.
+  it to a resume. Their types: `RunPreflightPolicy`, `RunPreflightState`,
+  `PreflightPauseResult`, `PreflightFailureResult`, and `GraphExecutorResult`
+  for what the executor returns.
 
 **Ask a person**
 

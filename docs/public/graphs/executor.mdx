@@ -333,16 +333,19 @@ call keeps spending, and whatever that call would have proved is lost.
 - **An engine without `admit` is `unsupported`,** and the lane's
   `unsupportedStatic` policy says whether that blocks the run or is allowed.
   Unsupported is never a success receipt.
-- **Checks need a scratch directory, and the constructor is what refuses.**
-  When the plan carries a preflight policy, `createGraphExecutor` requires
-  `preflightScratchDirectory`, an absolute, real, normalized path. The
+- **Checks need scratch directories, and two places refuse.** When the
+  plan carries a preflight policy, `createGraphExecutor` requires
+  `preflightScratchDirectory`, an absolute, real, normalized path; the
   option is optional in the type, so `await createGraphExecutor(...)`
   rejects with a `GraphExecutionError` whose code is
   `INVALID_PREFLIGHT_CONFIG` when the plan needs it and it is missing or
-  malformed. It is the construction that rejects, not `run()`, so the
-  handling goes around the construction. The policy itself must name every
-  resolved lane once and keep `timeoutMs` between 1 and 2147483647
-  milliseconds, or `resolveGraphPlan` rejects it before the plan is frozen.
+  malformed. Each node binding's own `scratchDirectory` is checked the same
+  way when its lane is checked, which happens inside `run()` and `resume()`,
+  and a relative or symlinked path there rejects with the same code and
+  message. Handle the code at both call sites; it does not say which path
+  failed. The policy itself must name every resolved lane once and keep
+  `timeoutMs` between 1 and 2147483647 milliseconds, or `resolveGraphPlan`
+  rejects it before the plan is frozen.
 - **Usage from checks is separate from usage from nodes,** and missing
   usage is not zero.
 
@@ -353,3 +356,8 @@ in `examples/preflight-host.mjs`. The executor's options and result types
 are exported by `@obversa/runtime`; `readRunPreflight` reads the preflight
 record of a stored run without touching an engine, and
 `interruptRunPreflight` closes a check the process died in the middle of.
+The types are `GraphExecutorResult` for what `run()` and `resume()` return
+(`complete`, `pause`, `fail` or `waiting`), `RunPreflightPolicy` for the
+plan's checks, `RunPreflightState` for what `readRunPreflight` returns, and
+`PreflightPauseResult` and `PreflightFailureResult` for the two ways the
+checks end a run early.
