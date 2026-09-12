@@ -46,6 +46,10 @@ export const stageBranches = {
   D44: 'docs/lead-with-the-team',
   F27: 'fix/sweep-three-proof',
   F29: 'fix/runtime-per-target-kickbacks',
+  F30: 'fix/engine-owner-cleanup',
+  F31: 'fix/runtime-node-timeout',
+  F32: 'fix/engine-codex-timeout',
+  F33: 'fix/tournament-node-test',
   D36: 'feat/teams',
   D45: 'docs/whole-file-examples',
 };

@@ -1,10 +1,11 @@
-import { spawn } from 'node:child_process';
+import { execFileSync, spawn } from 'node:child_process';
 import { existsSync, renameSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { setTimeout as delay } from 'node:timers/promises';
 import { runOwnedCommand } from '../../../src/command/run.ts';
 
-const [mode, directory, ownerId, loader, workerPid] = process.argv.slice(2);
+const [mode, directory, ownerId, loader, requestedAttemptId, workerPid] = process.argv.slice(2);
+const attemptId = requestedAttemptId ?? `sha256:${(mode === 'watchdog' ? '1' : '2').repeat(64)}`;
 const record = (name, value) => {
   const path = join(directory, `${name}.json`);
   writeFileSync(`${path}.tmp`, JSON.stringify(value));
@@ -12,19 +13,26 @@ const record = (name, value) => {
 };
 const command = (childMode, extra = {}) => ({
   executable: process.execPath,
-  args: ['--import', loader, import.meta.filename, childMode, directory, ownerId, loader, String(process.pid)],
+  args: ['--import', loader, import.meta.filename, childMode, directory, ownerId, loader, attemptId, String(process.pid)],
   cwd: directory, env: {}, stdin: '',
-  attemptId: `sha256:${(mode === 'watchdog' ? '1' : '2').repeat(64)}`,
+  attemptId,
   runId: mode, timeoutMs: 15_000, teardownGraceMs: 100,
   maxOutputBytes: 1024, maxMemoryBytes: 512 * 1024 * 1024,
   ...extra,
 });
+const processGroupId = () => {
+  try {
+    return Number(execFileSync('/bin/ps', ['-o', 'pgid=', '-p', String(process.pid)], { encoding: 'utf8' }).trim());
+  } catch {
+    return null;
+  }
+};
 
 if (mode === 'watchdog' || mode === 'term-watchdog') {
   const result = await runOwnedCommand(command(mode === 'watchdog' ? 'worker' : 'term-root', { ownerId }), new AbortController().signal);
   record('result', { exitCode: result.exitCode, remaining: result.remainingProcesses });
 } else if (mode === 'term-root') {
-  spawn(process.execPath, ['--import', loader, import.meta.filename, 'term-parent', directory, ownerId, loader, workerPid], {
+  spawn(process.execPath, ['--import', loader, import.meta.filename, 'term-parent', directory, ownerId, loader, attemptId, workerPid], {
     detached: true, stdio: 'ignore',
   }).unref();
   while (!existsSync(join(directory, 'term-parent.json'))) await delay(5);
@@ -41,7 +49,7 @@ if (mode === 'watchdog' || mode === 'term-watchdog') {
   record('term-parent', { pid: process.pid });
   setInterval(() => {}, 1000);
 } else if (mode === 'worker') {
-  record('worker', { pid: process.pid });
+  record('worker', { pid: process.pid, ppid: process.ppid, pgid: processGroupId() });
   while (!existsSync(join(directory, 'go'))) await delay(5);
   await runOwnedCommand(command('helper', { inheritParentEnv: false }), new AbortController().signal);
 } else if (mode === 'helper') {

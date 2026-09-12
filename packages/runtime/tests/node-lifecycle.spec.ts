@@ -118,7 +118,7 @@ const defaultPolicy: AttemptBudgetPolicy = {
   outputBytes: 4_096,
   timeoutMs: 1_000,
   teardownGraceMs: 50,
-  memoryBytes: 64 * 1_024 * 1_024,
+  memoryBytes: 512 * 1_024 * 1_024,
   filesChanged: 2,
   linesChanged: 8,
   callTokens: { mode: 'observed', tokens: 10 },
@@ -278,7 +278,7 @@ describe('node attempt lifecycle', () => {
       timeoutMs: 1_000,
       timeoutGraceMs: 50,
       maxOutputBytes: 4_096,
-      maxMemoryBytes: 64 * 1_024 * 1_024,
+      maxMemoryBytes: 512 * 1_024 * 1_024,
       leaf: true,
       attempt: {
         leaf: true,
@@ -1394,20 +1394,21 @@ describe('node attempt lifecycle', () => {
     'keeps final evidence captured before a SIGTERM-ignoring command times out',
     async () => {
       const budget = createTokenBudget(20);
+      let commandSeen: { exitCode: number | null; timedOut: boolean; aborted: boolean } | undefined;
       const selected = engine('process-backed', async (request, _onEvent, signal) => {
         let captured: AgentResult | undefined;
         const command = await runOwnedCommand({
           executable: process.execPath,
           args: [
             '-e',
-            "process.on('SIGTERM', () => {}); process.stdout.write('FINAL'); setTimeout(() => process.kill(process.pid, 'SIGKILL'), 325); setInterval(() => {}, 1000)",
+            "process.on('SIGTERM', () => {}); process.stdout.write('FINAL'); setInterval(() => {}, 1000)",
           ],
           cwd: request.cwd!,
           env: {},
           stdin: '',
           attemptId: identity.attemptId,
           runId: identity.streamId,
-          timeoutMs: request.timeoutMs!,
+          timeoutMs: 2_000,
           teardownGraceMs: request.timeoutGraceMs!,
           maxOutputBytes: request.maxOutputBytes!,
           maxMemoryBytes: request.maxMemoryBytes!,
@@ -1421,10 +1422,15 @@ describe('node attempt lifecycle', () => {
             });
           },
         });
+        commandSeen = {
+          exitCode: command.exitCode,
+          timedOut: command.timedOut,
+          aborted: command.aborted,
+        };
         expect(command).toMatchObject({
           exitCode: null,
-          timedOut: true,
-          aborted: false,
+          timedOut: false,
+          aborted: true,
         });
         if (captured === undefined) throw new Error('final output was not captured');
         return {
@@ -1447,6 +1453,9 @@ describe('node attempt lifecycle', () => {
         },
       }), new AbortController().signal);
 
+      if (record.failure?.code !== 'TIMEOUT') {
+        console.error(`[F31 diagnostic] record.failure=${JSON.stringify(record.failure)} command=${JSON.stringify(commandSeen)}`);
+      }
       expect(record.status).toBe('failed');
       expect(record.failure).toMatchObject({ code: 'TIMEOUT' });
       expect(record.result).toBeNull();

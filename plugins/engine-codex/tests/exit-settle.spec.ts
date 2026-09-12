@@ -9,7 +9,7 @@
  * fixtures reproduce the orphan deterministically (a detached `sleep` given
  * the inherited stdio) and prove each adapter resolves at exit anyway.
  */
-import { afterEach, describe, it, expect } from 'vitest';
+import { afterEach, describe, it, expect, vi } from 'vitest';
 import {
   chmodSync,
   existsSync,
@@ -22,7 +22,35 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { setTimeout as delay } from 'node:timers/promises';
 
-import { finalResultText } from '@obversa/engine';
+import {
+  digestJson,
+  finalResultText,
+  type AgentRequest,
+} from '@obversa/engine';
+import type { OwnedCommandResult } from '@obversa/engine/command';
+
+const commandState = vi.hoisted(() => ({
+  result: undefined as OwnedCommandResult | undefined,
+}));
+
+vi.mock('@obversa/engine/command', async () => {
+  const actual = await vi.importActual<typeof import('@obversa/engine/command')>(
+    '@obversa/engine/command',
+  );
+  return {
+    ...actual,
+    runOwnedCommand: async (
+      request: Parameters<typeof actual.runOwnedCommand>[0],
+      signal: Parameters<typeof actual.runOwnedCommand>[1],
+      observer?: Parameters<typeof actual.runOwnedCommand>[2],
+    ) => {
+      const result = await actual.runOwnedCommand(request, signal, observer);
+      commandState.result = result;
+      return result;
+    },
+  };
+});
+
 import { CodexEngine } from '../src/index.ts';
 
 /** Seconds the orphan holds the pipes — far beyond any test bound below, so a
@@ -31,6 +59,31 @@ const HOLD_SECS = 120;
 const ORPHAN_PID_PATH = '__ORPHAN_PID_PATH__';
 const FINAL_MARKER_PATH = '__FINAL_MARKER_PATH__';
 const directories: string[] = [];
+
+function requestFor(
+  testId: string,
+  options: Partial<AgentRequest> = {},
+): AgentRequest {
+  return {
+    prompt: 'ping',
+    ...options,
+    attempt: {
+      leaf: true,
+      runId: `exit-settle-${testId}`,
+      attemptId: digestJson({
+        schemaVersion: 1,
+        namespace: 'engine-codex-exit-settle',
+        streamId: 'exit-settle',
+        nodeId: testId,
+        position: testId,
+      }),
+      leafId: testId,
+      path: [testId],
+      label: testId,
+      iteration: 0,
+    },
+  };
+}
 
 function isProcessAlive(pid: number): boolean {
   try {
@@ -76,6 +129,7 @@ orphan.unref();
 `;
 
 afterEach(() => {
+  commandState.result = undefined;
   for (const directory of directories.splice(0)) {
     rmSync(directory, { recursive: true, force: true });
   }
@@ -107,7 +161,7 @@ process.exit(0);
 
     const startedAt = Date.now();
     const result = await new CodexEngine({ cliBinary: bin }).run(
-      { prompt: 'ping' },
+      requestFor('completed-at-exit'),
       () => {},
       new AbortController().signal,
     );
@@ -133,7 +187,10 @@ await new Promise(() => {});
     const controller = new AbortController();
     let abortFired = false;
     const running = new CodexEngine({ cliBinary: bin }).run(
-      { prompt: 'ping', timeoutMs: 5_000, timeoutGraceMs: 500 },
+      requestFor('abort-during-teardown', {
+        timeoutMs: 5_000,
+        timeoutGraceMs: 500,
+      }),
       () => {},
       controller.signal,
     );
@@ -160,14 +217,34 @@ setInterval(() => {}, 1000);
 
     const startedAt = Date.now();
     const running = new CodexEngine({ cliBinary: bin }).run(
-      { prompt: 'ping', timeoutMs: 5_000 },
+      requestFor('hard-timeout', { timeoutMs: 5_000 }),
       () => {},
       new AbortController().signal,
     );
     // Keep an early timeout handled while the fixture reports readiness.
-    void running.catch(() => {});
     await waitForFile(orphanPidPath);
-    await expect(running).rejects.toMatchObject({ kind: 'timeout' });
+    let failure: unknown;
+    try {
+      await running;
+    } catch (error) {
+      failure = error;
+    }
+    if ((failure as { readonly kind?: unknown } | undefined)?.kind !== 'timeout') {
+      console.error(
+        `[F32 diagnostic] adapter=${JSON.stringify({
+          name: failure instanceof Error ? failure.name : typeof failure,
+          kind: (failure as { readonly kind?: unknown } | undefined)?.kind,
+          message: failure instanceof Error ? failure.message : String(failure),
+        })} ownedCommand=${JSON.stringify(commandState.result === undefined ? null : {
+          exitCode: commandState.result.exitCode,
+          timedOut: commandState.result.timedOut,
+          aborted: commandState.result.aborted,
+          peakMemoryBytes: commandState.result.peakMemoryBytes,
+          remainingProcesses: commandState.result.remainingProcesses,
+        })}`,
+      );
+    }
+    expect(failure).toMatchObject({ kind: 'timeout' });
     expect(Date.now() - startedAt).toBeLessThan(10_000);
     await expectOrphanStopped(orphanPidPath);
   }, 15_000);
