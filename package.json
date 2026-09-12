@@ -113,6 +113,7 @@
     "verify:d36": "pnpm verify:f27 && pnpm --filter @obversa/runtime exec tsx ../../examples/teams/writer-reviewer-pair.proof.ts && pnpm --filter @obversa/runtime exec tsx ../../examples/teams/threshold-panel.proof.ts && pnpm --filter @obversa/runtime exec tsx ../../examples/teams/feature-delivery.proof.ts && pnpm --filter @obversa/runtime exec tsx ../../examples/tournament.ts",
     "verify:d45": "pnpm verify:d36",
     "verify:d17": "pnpm verify:d45 && pnpm example:preflight && pnpm example:runner-preflight",
+    "verify:f34": "pnpm verify:d17 && pnpm example:command-kickback",
     "verify:d24": "pnpm verify:d23",
     "changeset": "changeset",
     "version-packages": "changeset version",
@@ -126,7 +127,8 @@
     "check:skill-offline": "node scripts/check-skill-offline.mjs",
     "test:skill-install": "node --test scripts/skill-install.spec.mjs",
     "example:write-and-review": "pnpm --filter @obversa/runtime exec tsx ../../examples/write-and-review.ts",
-    "example:one-agent-job": "pnpm --filter @obversa/runtime exec tsx ../../examples/one-agent-job.ts"
+    "example:one-agent-job": "pnpm --filter @obversa/runtime exec tsx ../../examples/one-agent-job.ts",
+    "example:command-kickback": "pnpm --filter @obversa/runtime exec tsx ../../examples/command-kickback.ts"
   },
   "devDependencies": {
     "@arethetypeswrong/cli": "0.18.5",

@@ -359,3 +359,121 @@ describe('dag kickback (cross-stage feedback)', () => {
     ]));
   });
 });
+
+describe('a gate job with a target', () => {
+  it('sends a failing command back to the named step with the command output as the finding', async () => {
+    const { mkdtempSync, writeFileSync, rmSync } = await import('node:fs');
+    const { tmpdir } = await import('node:os');
+    const { join } = await import('node:path');
+    const { gateJob, commandSucceeds } = await import('../src/api.ts');
+    const dir = mkdtempSync(join(tmpdir(), 'gate-target-'));
+    const marker = join(dir, 'state.txt');
+    let implementRuns = 0;
+    let lastReview: string | undefined;
+    const events: LoopEvent[] = [];
+    try {
+      const { outcome } = await run(dag({
+        name: 'command-kickback',
+        maxKickbacks: 1,
+        nodes: {
+          implement: fnJob('implement', async (ctx) => {
+            implementRuns += 1;
+            lastReview = ctx.lastReview?.summary;
+            writeFileSync(marker, implementRuns === 1 ? 'broken' : 'fixed');
+            return { status: 'pass', summary: `attempt ${implementRuns}` };
+          }),
+          test: {
+            needs: ['implement'],
+            job: gateJob(
+              'test',
+              commandSucceeds(process.execPath, [
+                '-e',
+                `const s = require('node:fs').readFileSync(${JSON.stringify(marker)}, 'utf8'); if (s !== 'fixed') { console.error('expected fixed, got ' + s); process.exit(1); }`,
+              ], { captureOutput: true }),
+              { target: 'implement' },
+            ),
+          },
+        },
+      }), { ...mockOpts, onEvent: (event) => events.push(event) });
+
+      expect(outcome.status).toBe('pass');
+      expect(implementRuns).toBe(2);
+      expect(kbEvents(events)).toMatchObject([{ from: 'test', to: 'implement', accepted: true }]);
+      expect(lastReview).toContain('expected fixed, got broken');
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it('fails plainly, with no revision, when no target is given', async () => {
+    const { gateJob, commandSucceeds } = await import('../src/api.ts');
+    const { outcome } = await run(
+      gateJob('test', commandSucceeds(process.execPath, ['-e', 'process.exit(1)'])),
+      mockOpts,
+    );
+    expect(outcome.status).toBe('fail');
+    expect(outcome.revision).toBeUndefined();
+  });
+});
+
+describe('a decision node', () => {
+  it('lets each branch read the outcome of the node it depends on and run only on its path', async () => {
+    const { predicate } = await import('../src/api.ts');
+    const ran: string[] = [];
+    const events: LoopEvent[] = [];
+    const { outcome } = await run(dag({
+      name: 'decision',
+      nodes: {
+        decide: fnJob('decide', async () => {
+          ran.push('decide');
+          return { status: 'pass', summary: 'the change touches the schema', data: { path: 'migrate' } };
+        }),
+        migrate: {
+          needs: ['decide'],
+          when: predicate((ctx) => (ctx.needs?.decide?.data as { path?: string } | undefined)?.path === 'migrate', 'the decision chose migrate'),
+          job: fnJob('migrate', async () => { ran.push('migrate'); return { status: 'pass' }; }),
+        },
+        fast: {
+          needs: ['decide'],
+          when: predicate((ctx) => (ctx.needs?.decide?.data as { path?: string } | undefined)?.path === 'fast', 'the decision chose fast'),
+          job: fnJob('fast', async () => { ran.push('fast'); return { status: 'pass' }; }),
+        },
+      },
+    }), { ...mockOpts, onEvent: (event) => events.push(event) });
+
+    expect(outcome.status).toBe('pass');
+    expect(ran).toEqual(['decide', 'migrate']);
+    expect(events.filter((e) => e.kind === 'dag:node' && e.node === 'fast' && e.phase === 'skip')).toHaveLength(1);
+  });
+
+  it('gives a failed optional command node to its dependents as an outcome, so a red suite can choose a path', async () => {
+    const { predicate, gateJob, commandSucceeds } = await import('../src/api.ts');
+    const ran: string[] = [];
+    const { outcome } = await run(dag({
+      name: 'red-or-green',
+      nodes: {
+        tests: {
+          optional: true,
+          job: gateJob('tests', commandSucceeds(process.execPath, ['-e', 'console.error("2 failing"); process.exit(1)'], { captureOutput: true })),
+        },
+        ship: {
+          needs: ['tests'],
+          when: predicate((ctx) => ctx.needs?.tests?.status === 'pass', 'the tests passed'),
+          job: fnJob('ship', async () => { ran.push('ship'); return { status: 'pass' }; }),
+        },
+        triage: {
+          needs: ['tests'],
+          when: predicate((ctx) => ctx.needs?.tests?.status === 'fail', 'the tests failed'),
+          job: fnJob('triage', async (ctx) => {
+            ran.push('triage');
+            return { status: 'pass', summary: String(ctx.needs?.tests?.summary) };
+          }),
+        },
+      },
+    }), mockOpts);
+
+    expect(outcome.status).toBe('pass');
+    expect(ran).toEqual(['triage']);
+    expect(outcome.data).toMatchObject({ triage: { summary: expect.stringContaining('2 failing') } });
+  });
+});
