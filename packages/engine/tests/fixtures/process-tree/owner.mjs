@@ -4,7 +4,7 @@ import { join } from 'node:path';
 import { setTimeout as delay } from 'node:timers/promises';
 import { runOwnedCommand } from '../../../src/command/run.ts';
 
-const [mode, directory, ownerId, loader, workerPid, requestedAttemptId] = process.argv.slice(2);
+const [mode, directory, ownerId, loader, requestedAttemptId, workerPid] = process.argv.slice(2);
 const attemptId = requestedAttemptId ?? `sha256:${(mode === 'watchdog' ? '1' : '2').repeat(64)}`;
 const record = (name, value) => {
   const path = join(directory, `${name}.json`);
@@ -13,7 +13,7 @@ const record = (name, value) => {
 };
 const command = (childMode, extra = {}) => ({
   executable: process.execPath,
-  args: ['--import', loader, import.meta.filename, childMode, directory, ownerId, loader, String(process.pid), attemptId],
+  args: ['--import', loader, import.meta.filename, childMode, directory, ownerId, loader, attemptId, String(process.pid)],
   cwd: directory, env: {}, stdin: '',
   attemptId,
   runId: mode, timeoutMs: 15_000, teardownGraceMs: 100,
@@ -52,7 +52,7 @@ if (mode === 'watchdog' || mode === 'term-watchdog') {
     throw error;
   }
 } else if (mode === 'term-root') {
-  spawn(process.execPath, ['--import', loader, import.meta.filename, 'term-parent', directory, ownerId, loader, workerPid], {
+  spawn(process.execPath, ['--import', loader, import.meta.filename, 'term-parent', directory, ownerId, loader, attemptId, workerPid], {
     detached: true, stdio: 'ignore',
   }).unref();
   while (!existsSync(join(directory, 'term-parent.json'))) await delay(5);
