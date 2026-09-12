@@ -109,6 +109,7 @@ for (const [stage, branch] of [
   ['F30', 'fix/engine-owner-cleanup'],
   ['F31', 'fix/runtime-node-timeout'],
   ['F32', 'fix/engine-codex-timeout'],
+  ['F33', 'fix/tournament-node-test'],
   ['D36', 'feat/teams'],
   ['D45', 'docs/whole-file-examples'],
   ['D13', 'feat/graph-forms-v1'],
@@ -170,6 +171,7 @@ for (const [stage, branch] of [
   ['F30', 'feat/graph-forms-v1'],
   ['F31', 'feat/graph-forms-v1'],
   ['F32', 'feat/graph-forms-v1'],
+  ['F33', 'feat/graph-forms-v1'],
   ['D36', 'feat/graph-forms-v1'],
   ['D45', 'feat/graph-forms-v1'],
 ]) {

@@ -48,6 +48,7 @@ export const stageBranches = {
   F30: 'fix/engine-owner-cleanup',
   F31: 'fix/runtime-node-timeout',
   F32: 'fix/engine-codex-timeout',
+  F33: 'fix/tournament-node-test',
   D36: 'feat/teams',
   D45: 'docs/whole-file-examples',
 };
