@@ -21,8 +21,35 @@ const command = (childMode, extra = {}) => ({
 });
 
 if (mode === 'watchdog' || mode === 'term-watchdog') {
-  const result = await runOwnedCommand(command(mode === 'watchdog' ? 'worker' : 'term-root', { ownerId }), new AbortController().signal);
-  record('result', { exitCode: result.exitCode, remaining: result.remainingProcesses });
+  const diagnostic = { exitCode: null, signal: null, timedOut: null, stdout: '', stderr: '' };
+  const observer = {
+    onStdout: (chunk) => { diagnostic.stdout += Buffer.from(chunk).toString('utf8'); },
+    onStderr: (chunk) => { diagnostic.stderr += Buffer.from(chunk).toString('utf8'); },
+    onExit: (exitCode, signal) => {
+      diagnostic.exitCode = exitCode;
+      diagnostic.signal = signal;
+    },
+  };
+  try {
+    const result = await runOwnedCommand(
+      command(mode === 'watchdog' ? 'worker' : 'term-root', { ownerId }),
+      new AbortController().signal,
+      observer,
+    );
+    diagnostic.timedOut = result.timedOut;
+    record('run-diagnostic', { ...diagnostic, result: { exitCode: result.exitCode, timedOut: result.timedOut, aborted: result.aborted } });
+    record('result', { exitCode: result.exitCode, remaining: result.remainingProcesses });
+  } catch (error) {
+    record('run-diagnostic', {
+      ...diagnostic,
+      error: {
+        name: error?.name,
+        message: error?.message,
+        code: error?.code,
+      },
+    });
+    throw error;
+  }
 } else if (mode === 'term-root') {
   spawn(process.execPath, ['--import', loader, import.meta.filename, 'term-parent', directory, ownerId, loader, workerPid], {
     detached: true, stdio: 'ignore',

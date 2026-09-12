@@ -104,6 +104,7 @@ export interface OwnedCommandResult {
 export interface OwnedCommandObserver {
   readonly onStdout?: (chunk: Uint8Array) => void;
   readonly onStderr?: (chunk: Uint8Array) => void;
+  readonly onExit?: (code: number | null, signal: NodeJS.Signals | null) => void;
 }
 
 export function ownedCommandIdentity(input: {
@@ -491,7 +492,8 @@ export async function runOwnedCommand(
           }
           monitorPromise = monitor();
         },
-        onExit: async () => {
+        onExit: async (code, childSignal) => {
+          observer.onExit?.(code, childSignal);
           requestStop('exit');
           await cleanup();
         },
