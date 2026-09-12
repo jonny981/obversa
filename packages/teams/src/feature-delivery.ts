@@ -10,6 +10,7 @@ import {
   loop,
   predicate,
   reviewPanel,
+  revisionRequest,
   type Job,
   type JobContext,
   type Outcome,
@@ -126,13 +127,18 @@ function failOnUnchangedNote(
   job: Job,
   workspace: string,
   note: string,
+  requireRewriteOnReentry = false,
 ): Job {
   let previousHash: string | undefined;
   return async (ctx) => {
     const outcome = await job(ctx);
     if (outcome.status !== 'pass') return outcome;
     const currentHash = await fileHash(workspace, note);
-    if (ctx.lastReview && previousHash !== undefined && currentHash === previousHash) {
+    if (
+      (ctx.lastReview || requireRewriteOnReentry)
+      && previousHash !== undefined
+      && currentHash === previousHash
+    ) {
       const summary = `${label} returned the rejected note unchanged`;
       return {
         status: 'fail',
@@ -145,27 +151,65 @@ function failOnUnchangedNote(
   };
 }
 
-function requirePlanChecks(job: Job, workspace: string): Job {
-  return async (ctx) => {
-    const outcome = await job(ctx);
-    if (outcome.status !== 'pass') return outcome;
+const REQUIREMENT_ID = /\bREQ-\d+\b/g;
+const REQUIREMENT_LINE = /^\s*(REQ-\d+)\s*:/;
+
+function idsInPlan(text: string): string[] {
+  return [...text.matchAll(REQUIREMENT_ID)].map(([id]) => id!);
+}
+
+function idsInRequirements(text: string): string[] {
+  return text.split(/\r?\n/).flatMap((line) => {
+    const id = REQUIREMENT_LINE.exec(line)?.[1];
+    return id ? [id] : [];
+  });
+}
+
+function planRequirementsReview(workspace: string): Job {
+  return async () => {
     try {
       const requirements = await readFile(join(workspace, RESEARCH_REQUIREMENTS_NOTE), 'utf8');
       const plan = await readFile(join(workspace, PLAN_NOTE), 'utf8');
-      const requirementCount = requirements.split(/\r?\n/).filter((line) => (
-        /^\s*(?:(?:\*\*|__)?(?:\d+[.)]|R\d+[:.)])(?:\*\*|__)?\s+|[-+*]\s+)/.test(line)
-      )).length;
-      const checkCount = plan.match(/\b(?:acceptance|check)\b/gi)?.length ?? 0;
-      if (requirementCount === 0 || checkCount < requirementCount) {
-        return {
-          status: 'fail',
-          summary: `plan does not contain one acceptance check for each numbered requirement (${checkCount}/${requirementCount})`,
-        };
+      const required = [...new Set(idsInRequirements(requirements))];
+      const planned = new Set(idsInPlan(plan));
+      const missing = required.filter((id) => !planned.has(id));
+      const extra = [...planned].filter((id) => !required.includes(id));
+      if (missing.length || extra.length) {
+        const findings = [
+          ...missing.map((id) => ({
+            severity: 'block' as const,
+            evidence: `Add an acceptance check named ${id}.`,
+          })),
+          ...extra.map((id) => ({
+            severity: 'block' as const,
+            evidence: `Remove the acceptance check for unknown requirement ${id}.`,
+          })),
+        ];
+        const parts = [
+          missing.length ? `is missing acceptance checks for ${missing.join(', ')}` : undefined,
+          extra.length ? `has unknown requirement ids ${extra.join(', ')}` : undefined,
+        ].filter(Boolean);
+        return revisionRequest({
+          source: 'plan-requirement-id-check',
+          reason: `plan ${parts.join('; ')}`,
+          findings,
+        });
       }
+      if (required.length === 0) {
+        return revisionRequest({
+          source: 'plan-requirement-id-check',
+          reason: 'requirements note contains no REQ-n ids',
+          findings: [{ severity: 'block', evidence: 'Start every requirement line with an id such as REQ-1.' }],
+        });
+      }
+      return { status: 'pass', summary: `plan covers ${required.join(', ')}` };
     } catch {
-      return { status: 'fail', summary: 'plan or requirements note could not be read' };
+      return revisionRequest({
+        source: 'plan-requirement-id-check',
+        reason: 'plan or requirements note could not be read',
+        findings: [{ severity: 'block', evidence: 'Write both notes before the plan review.' }],
+      });
     }
-    return outcome;
   };
 }
 
@@ -279,7 +323,7 @@ export function featureDelivery(config: FeatureDeliveryConfig) {
     config.analyse,
     config,
     RESEARCH_REQUIREMENTS_NOTE,
-    `Read ${RESEARCH_CONTEXT_NOTE} and turn it into small testable requirements. Do not write implementation or test files.`,
+    `Read ${RESEARCH_CONTEXT_NOTE} and turn it into small testable requirements. Every requirement line must start with an id in the exact form REQ-n. Do not write implementation or test files.`,
     'research-requirements',
   );
   const requirementsReview = scopedPanel(
@@ -288,22 +332,28 @@ export function featureDelivery(config: FeatureDeliveryConfig) {
     'research-requirements',
     RESEARCH_REQUIREMENTS_NOTE,
   );
-  const plan = failOnUnchangedNote(
-    'plan',
-    requirePlanChecks(
+  const plan = loop({
+    name: 'plan-loop',
+    body: failOnUnchangedNote(
+      'plan',
       outputWriter(
         'plan',
         config.analyse,
         config,
         PLAN_NOTE,
-        `Read ${RESEARCH_REQUIREMENTS_NOTE} and write a short executable plan with one acceptance check per numbered requirement. Do not write implementation or test files.`,
+        `Read ${RESEARCH_REQUIREMENTS_NOTE} and write a short executable plan. Every acceptance check must name the REQ-n it covers. Do not write implementation or test files.`,
         'plan',
       ),
       config.workspace,
+      PLAN_NOTE,
+      true,
     ),
-    config.workspace,
-    PLAN_NOTE,
-  );
+    until: noteExists(config.workspace, PLAN_NOTE),
+    review: planRequirementsReview(config.workspace),
+    max: 3,
+    maxReviewRestarts: 3,
+    noProgress: { window: 2, gate: true },
+  });
   const planReview = scopedPanel(
     'plan-review',
     config,

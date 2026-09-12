@@ -21,8 +21,8 @@ async function writeNote(cwd: string, file: string, text: string): Promise<void>
 }
 
 function noteText(file: string): string {
-  if (file.endsWith('research-requirements.md')) return 'R1: Export result.\nR2: Test result.\n';
-  if (file.endsWith('plan.md')) return 'R1: Export result. Acceptance check: source exists.\nR2: Test result. Acceptance check: command exits 0.\n';
+  if (file.endsWith('research-requirements.md')) return 'REQ-1: Export result.\nREQ-2: Test result.\n';
+  if (file.endsWith('plan.md')) return 'REQ-1: Export result. Acceptance check: source exists.\nREQ-2: Test result. Acceptance check: command exits 0.\n';
   return 'The workspace context is recorded.\n';
 }
 

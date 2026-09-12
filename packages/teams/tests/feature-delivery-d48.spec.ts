@@ -21,9 +21,9 @@ function config(overrides: Partial<FeatureDeliveryConfig> = {}): FeatureDelivery
     const output = request.prompt.match(/Write only ([^\.]+\.md)/)?.[1] ?? 'team-output/unknown.md';
     await mkdir(join(request.cwd!, 'team-output'), { recursive: true });
     const text = output.endsWith('research-requirements.md')
-      ? '1. Export result.\n2. Test result.\n'
+      ? 'REQ-1: Export result.\nREQ-2: Test result.\n'
       : output.endsWith('plan.md')
-        ? '1. Export result. Acceptance check: source exists.\n2. Test result. Acceptance check: command exits 0.\n'
+        ? 'REQ-1: Acceptance check: source exists.\nREQ-2: Acceptance check: command exits 0.\n'
         : 'The workspace context is recorded.\n';
     await writeFile(join(request.cwd!, output), text);
     return pass('accepted');
@@ -183,9 +183,9 @@ describe('featureDelivery D48 contract', () => {
       const output = request.prompt.match(/Write only ([^\.]+\.md)/)?.[1] ?? 'team-output/unknown.md';
       await mkdir(join(request.cwd!, 'team-output'), { recursive: true });
       const text = output.endsWith('research-requirements.md')
-        ? '1. Export result.\n2. Test result.\n'
+        ? 'REQ-1: Export result.\nREQ-2: Test result.\n'
         : output.endsWith('plan.md')
-          ? '1. Export result. Acceptance check: source exists.\n2. Test result. Acceptance check: command exits 0.\n'
+          ? 'REQ-1: Acceptance check: source exists.\nREQ-2: Acceptance check: command exits 0.\n'
           : 'The workspace context is recorded.\n';
       await writeFile(join(request.cwd!, output), text);
       return pass('analysis accepted');
@@ -257,12 +257,12 @@ describe('featureDelivery D48 contract', () => {
         const output = request.prompt.match(/Write only ([^\.]+\.md)/)?.[1] ?? 'team-output/unknown.md';
         await mkdir(join(request.cwd!, 'team-output'), { recursive: true });
         if (output.endsWith('research-requirements.md')) {
-          await writeFile(join(request.cwd!, output), '1. Export result.\n2. Test result.\n');
+          await writeFile(join(request.cwd!, output), 'REQ-1: Export result.\nREQ-2: Test result.\n');
         } else if (output.endsWith('plan.md')) {
           planWrites += 1;
           await writeFile(
             join(request.cwd!, output),
-            `1. Export result. Acceptance check: source exists.\n2. Test result. Acceptance check: command exits 0. Revision ${planWrites}.\n`,
+            `REQ-1: Acceptance check: source exists.\nREQ-2: Acceptance check: command exits 0. Revision ${planWrites}.\n`,
           );
         } else {
           await writeFile(join(request.cwd!, output), 'The workspace context is recorded.\n');
@@ -350,12 +350,12 @@ describe('featureDelivery D48 contract', () => {
       const output = request.prompt.match(/Write only ([^\.]+\.md)/)?.[1] ?? 'team-output/unknown.md';
       await mkdir(join(request.cwd!, 'team-output'), { recursive: true });
       if (output.endsWith('research-requirements.md')) {
-        await writeFile(join(request.cwd!, output), '1. Export result.\n2. Test result.\n');
+        await writeFile(join(request.cwd!, output), 'REQ-1: Export result.\nREQ-2: Test result.\n');
       } else if (output.endsWith('plan.md')) {
         planWrites += 1;
         await writeFile(
           join(request.cwd!, output),
-          '1. Export result. Acceptance check: source exists.\n2. Test result. Acceptance check: command exits 0.\n',
+          'REQ-1: Acceptance check: source exists.\nREQ-2: Acceptance check: command exits 0.\n',
         );
       } else {
         await writeFile(join(request.cwd!, output), 'The workspace context is recorded.\n');
@@ -381,6 +381,82 @@ describe('featureDelivery D48 contract', () => {
       expect(data?.plan?.summary).toBe('plan returned the rejected note unchanged');
       expect(planWrites).toBe(2);
       expect(planReviews).toBe(1);
+    } finally {
+      await rm(workspace, { recursive: true, force: true });
+    }
+  });
+
+  it('names missing requirement ids in the plan review', async () => {
+    const workspace = await mkdtemp(join(tmpdir(), 'obversa-teams-plan-id-review-'));
+    const events: Array<Record<string, unknown>> = [];
+    const analyse = scriptedEngine('analyse', [async (request) => {
+      const output = request.prompt.match(/Write only ([^\.]+\.md)/)?.[1] ?? 'team-output/unknown.md';
+      await mkdir(join(request.cwd!, 'team-output'), { recursive: true });
+      if (output.endsWith('research-requirements.md')) {
+        await writeFile(join(request.cwd!, output), 'REQ-1: Export result.\nREQ-2: Test result.\n');
+      } else if (output.endsWith('plan.md')) {
+        await writeFile(join(request.cwd!, output), 'REQ-1: Acceptance check: source exists.\n');
+      } else {
+        await writeFile(join(request.cwd!, output), 'The workspace context is recorded.\n');
+      }
+      return pass('accepted');
+    }]);
+    try {
+      const result = await run(featureDelivery(config({
+        workspace,
+        analyse: seat(analyse, 'analyse'),
+      })), {
+        cwd: workspace,
+        onEvent: (event) => events.push(event as unknown as Record<string, unknown>),
+      });
+
+      expect(result.outcome.status).not.toBe('pass');
+      const reviews = events.filter((event) => (
+        event.kind === 'loop:review'
+        && Array.isArray(event.path)
+        && event.path.at(-1) === 'plan-loop'
+      ));
+      expect(reviews[0]?.outcome).toMatchObject({
+        summary: 'plan is missing acceptance checks for REQ-2',
+      });
+    } finally {
+      await rm(workspace, { recursive: true, force: true });
+    }
+  });
+
+  it('feeds missing requirement ids back to the plan writer', async () => {
+    const workspace = await mkdtemp(join(tmpdir(), 'obversa-teams-plan-id-round-trip-'));
+    const planPrompts: string[] = [];
+    let planWrites = 0;
+    const analyse = scriptedEngine('analyse', [async (request) => {
+      const output = request.prompt.match(/Write only ([^\.]+\.md)/)?.[1] ?? 'team-output/unknown.md';
+      await mkdir(join(request.cwd!, 'team-output'), { recursive: true });
+      if (output.endsWith('research-requirements.md')) {
+        await writeFile(join(request.cwd!, output), 'REQ-1: Export result.\nREQ-2: Test result.\n');
+      } else if (output.endsWith('plan.md')) {
+        planWrites += 1;
+        planPrompts.push(request.prompt);
+        await writeFile(
+          join(request.cwd!, output),
+          planWrites === 1
+            ? 'REQ-1: Acceptance check: source exists.\n'
+            : 'REQ-1: Acceptance check: source exists.\nREQ-2: Acceptance check: command exits 0.\n',
+        );
+      } else {
+        await writeFile(join(request.cwd!, output), 'The workspace context is recorded.\n');
+      }
+      return pass('accepted');
+    }]);
+    try {
+      const result = await run(featureDelivery(config({
+        workspace,
+        analyse: seat(analyse, 'analyse'),
+      })), { cwd: workspace });
+
+      expect(result.outcome.status, JSON.stringify(result.outcome)).toBe('pass');
+      expect(planWrites).toBe(2);
+      expect(planPrompts[1]).toContain('Feedback to address');
+      expect(planPrompts[1]).toContain('REQ-2');
     } finally {
       await rm(workspace, { recursive: true, force: true });
     }
