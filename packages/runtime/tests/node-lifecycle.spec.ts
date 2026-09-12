@@ -1015,6 +1015,7 @@ describe('node attempt lifecycle', () => {
           ...defaultPolicy,
           timeoutMs: 300,
           teardownGraceMs: 100,
+          memoryBytes: 512 * 1_024 * 1_024,
         },
       }), new AbortController().signal);
 
