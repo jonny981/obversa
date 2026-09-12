@@ -7,6 +7,7 @@ import { afterEach, describe, it, expect } from 'vitest';
 
 import {
   LoopError,
+  all,
   approval,
   commandJob,
   createCallbackClient,
@@ -15,6 +16,7 @@ import {
   directRouter,
   failed,
   fnJob,
+  loop,
   passed,
   pipeline,
   run,
@@ -106,7 +108,9 @@ describe('fnJob returning a string or nothing', () => {
   it('names a return that is neither an outcome, a string nor nothing', async () => {
     const { outcome } = await run(fnJob('count', () => 42 as unknown as Outcome));
     expect(outcome.status).toBe('fail');
-    expect(outcome.summary).toContain('not an outcome');
+    expect(outcome.summary).toContain('returned a number');
+    const nothing = await run(fnJob('count', () => null as unknown as Outcome));
+    expect(nothing.outcome.summary).toContain('returned null');
   });
 
   it('still accepts a full outcome', async () => {
@@ -241,17 +245,43 @@ describe('passed and failed', () => {
     })).toThrow(/optional/);
   });
 
-  it('fail the run when the named node is not a dependency', async () => {
-    const { outcome } = await run(dag({
+  it('refuse at build time a name that is not a node', () => {
+    expect(() => dag({
       name: 'branch',
       nodes: {
         a: fnJob('a', () => {}),
         b: { needs: 'a', when: passed('c'), job: fnJob('b', () => {}) },
       },
-    }));
-    expect(outcome.status).toBe('fail');
-    const nodes = outcome.data as Record<string, Outcome>;
-    expect(nodes.b?.summary).toContain('"c" is not a dependency of this node');
+    })).toThrow(/"c" is not a node/);
+  });
+
+  it('refuse at build time a name the node does not need', () => {
+    expect(() => dag({
+      name: 'branch',
+      nodes: {
+        a: fnJob('a', () => {}),
+        c: { optional: true, job: fnJob('c', () => {}) },
+        b: { needs: 'a', when: failed('c'), job: fnJob('b', () => {}) },
+      },
+    })).toThrow(/not one of its needs/);
+  });
+
+  it('refuse failed(x) on a required x inside an array and inside all()', () => {
+    for (const when of [[failed('size')], all(passed('size'), failed('size'))]) {
+      expect(() => dag({
+        name: 'wrapped',
+        nodes: {
+          size: commandJob('size', [node, '-e', 'process.exit(1)']),
+          large: { needs: 'size', when, job: fnJob('large', () => {}) },
+        },
+      })).toThrow(/optional/);
+    }
+  });
+
+  it('fail the run when passed is used outside a dag', async () => {
+    const { outcome } = await run(loop({ name: 'outside', body: fnJob('b', () => {}), until: passed('c'), max: 1 }));
+    expect(outcome.status).not.toBe('pass');
+    expect(JSON.stringify(outcome)).toContain('not a dependency');
   });
 });
 
@@ -417,6 +447,41 @@ describe('approval', () => {
 
     const second = await run(ship, { callbacks: await createStoredCallbackClient(storage, runId) });
     expect(second.outcome.status).toBe('pass');
+  });
+
+  it('releases its claim when the answer throws, so the same client can answer next time', async () => {
+    const client = createCallbackClient();
+    const asked = { question: 'Ship?', input: { change: 'abc' } };
+    const first = await run(approval('approve', { ...asked, answer: () => { throw new Error('walked away'); } }), { callbacks: client });
+    expect(first.outcome.status).toBe('fail');
+    expect(client.listPending()).toHaveLength(1);
+    const second = await run(approval('approve', { ...asked, answer: () => ({ approved: true }) }), { callbacks: client });
+    expect(second.outcome.status).toBe('pass');
+  });
+
+  it('releases its claim on the stored client too, and the next run over the store can answer', async () => {
+    const { runId, storage } = await storedRun();
+    const asked = { question: 'Ship?', input: { change: 'abc' } };
+    const first = await run(
+      approval('approve', { ...asked, answer: () => { throw new Error('walked away'); } }),
+      { callbacks: await createStoredCallbackClient(storage, runId) },
+    );
+    expect(first.outcome.status).toBe('fail');
+    const second = await run(
+      approval('approve', { ...asked, answer: () => ({ approved: true }) }),
+      { callbacks: await createStoredCallbackClient(storage, runId) },
+    );
+    expect(second.outcome.status).toBe('pass');
+  });
+
+  it('redacts the note on the yes path as it does on the no path', async () => {
+    const secret = 'ghp_' + 'a'.repeat(36);
+    const { outcome } = await run(approval('approve', {
+      question: 'Ship?',
+      answer: () => ({ approved: true, note: `used ${secret}` }),
+    }));
+    expect(outcome.status).toBe('pass');
+    expect(JSON.stringify(outcome.data)).not.toContain(secret);
   });
 
   it('turns a throw in the answer into a fail and still ends the job', async () => {
