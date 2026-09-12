@@ -215,30 +215,12 @@ export class CodexEngine implements Engine {
       const timedOut = sub.timedOut;
       const failed = aborted || timedOut || sub.exitCode !== 0;
       const diagnostic = diagnosticCapture(stderr, stdout, env);
-      const failureKind = timedOut
-        ? 'timeout'
-        : classifyEngineFailure(new Error(diagnostic));
-      if (failed && failureKind !== 'timeout') {
-        console.error(
-          `[F32 diagnostic] adapter=${JSON.stringify({
-            kind: failureKind,
-            exitCode: sub.exitCode,
-            timedOut,
-            aborted,
-          })} ownedCommand=${JSON.stringify({
-            exitCode: sub.exitCode,
-            timedOut: sub.timedOut,
-            aborted: sub.aborted,
-            peakMemoryBytes: sub.peakMemoryBytes,
-            remainingProcesses: sub.remainingProcesses,
-            diagnostic,
-          })}`,
-        );
-      }
       let transportFailure: AgentResult['transportFailure'];
       if (failed && !text)
         throw new EngineError({
-          kind: failureKind,
+          kind: timedOut
+            ? 'timeout'
+            : classifyEngineFailure(new Error(diagnostic)),
           // The combined streams are scrubbed in full before the middle cut,
           // so provider diagnostics survive without exposing a split secret.
           message: `codex exited ${sub.exitCode ?? '?'}${
