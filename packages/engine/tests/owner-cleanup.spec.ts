@@ -18,6 +18,9 @@ const textOwner = `sha256:${'a'.repeat(64)}` as const;
 const termOwner = `sha256:${'c'.repeat(64)}` as const;
 const nestedOwner = `sha256:${'d'.repeat(64)}` as const;
 const inheritedOwner = `sha256:${'e'.repeat(64)}` as const;
+const termAttempt = `sha256:${'3'.repeat(64)}` as const;
+const nestedAttempt = `sha256:${'4'.repeat(64)}` as const;
+const inheritedAttempt = `sha256:${'5'.repeat(64)}` as const;
 
 async function waitForExit(child: ChildProcess): Promise<void> {
   if (child.exitCode !== null || child.signalCode !== null) return;
@@ -70,7 +73,7 @@ describe.runIf(process.platform === 'darwin' || process.platform === 'linux')('c
 
   it.runIf(process.platform === 'linux')('cleans a helper created by an owned child during SIGTERM', async () => {
     const directory = fixtureDirectory();
-    const watchdog = spawn(process.execPath, ['--import', loader, fixture, 'term-watchdog', directory, termOwner, loader], {
+    const watchdog = spawn(process.execPath, ['--import', loader, fixture, 'term-watchdog', directory, termOwner, loader, termAttempt], {
       stdio: 'inherit',
     });
     try {
@@ -98,7 +101,7 @@ describe.runIf(process.platform === 'darwin' || process.platform === 'linux')('c
       detached: true, stdio: 'ignore',
       env: { ...process.env, OBVERSA_RUN_OWNER: marker },
     }));
-    const watchdog = spawn(process.execPath, ['--import', loader, fixture, 'watchdog', directory, nestedOwner, loader], {
+    const watchdog = spawn(process.execPath, ['--import', loader, fixture, 'watchdog', directory, nestedOwner, loader, nestedAttempt], {
       stdio: 'inherit',
     });
     try {
@@ -146,7 +149,7 @@ describe.runIf(process.platform === 'darwin' || process.platform === 'linux')('c
 
   it('preserves inherited ownership without sweeping the worker or its sibling', async () => {
     const directory = fixtureDirectory();
-    const worker = spawn(process.execPath, ['--import', loader, fixture, 'nested', directory, inheritedOwner, loader], {
+    const worker = spawn(process.execPath, ['--import', loader, fixture, 'nested', directory, inheritedOwner, loader, inheritedAttempt], {
       stdio: 'inherit', env: { ...process.env, OBVERSA_RUN_OWNER: inheritedOwner },
     });
     try {

@@ -4,7 +4,8 @@ import { join } from 'node:path';
 import { setTimeout as delay } from 'node:timers/promises';
 import { runOwnedCommand } from '../../../src/command/run.ts';
 
-const [mode, directory, ownerId, loader, workerPid] = process.argv.slice(2);
+const [mode, directory, ownerId, loader, workerPid, requestedAttemptId] = process.argv.slice(2);
+const attemptId = requestedAttemptId ?? `sha256:${(mode === 'watchdog' ? '1' : '2').repeat(64)}`;
 const record = (name, value) => {
   const path = join(directory, `${name}.json`);
   writeFileSync(`${path}.tmp`, JSON.stringify(value));
@@ -12,9 +13,9 @@ const record = (name, value) => {
 };
 const command = (childMode, extra = {}) => ({
   executable: process.execPath,
-  args: ['--import', loader, import.meta.filename, childMode, directory, ownerId, loader, String(process.pid)],
+  args: ['--import', loader, import.meta.filename, childMode, directory, ownerId, loader, String(process.pid), attemptId],
   cwd: directory, env: {}, stdin: '',
-  attemptId: `sha256:${(mode === 'watchdog' ? '1' : '2').repeat(64)}`,
+  attemptId,
   runId: mode, timeoutMs: 15_000, teardownGraceMs: 100,
   maxOutputBytes: 1024, maxMemoryBytes: 512 * 1024 * 1024,
   ...extra,
