@@ -9,7 +9,7 @@ every engine plugin, plus the owned-command layer that runs a command-line
 tool with time, output and memory bounds and cleans up what it started.
 
 ```bash
-npm install @obversa/engine
+npm install @obversa/engine @obversa/runtime
 ```
 
 ## The contract
@@ -211,7 +211,7 @@ What it printed is on the [graph executor](/graphs/executor) page.
 | `canonicalJson`, `digestJson`, `cloneFrozenJson` | JSON helpers the contract uses. |
 | `attemptEnvironment` | The environment for a command-backed attempt. |
 | `retryAfterHeaderToMs`, `scrubCapture`, `redactEnvValues`, `redactSecrets` | Helpers for command adapters. |
-| `@obversa/engine/testing` | The conformance kit and `MockEngine`. |
+| `@obversa/engine/testing` | `runEngineConformance` for the run contract, `runEngineAdmissionConformance` for `admit`, and `MockEngine`. An adapter author runs both kits; an adapter without `admit` runs the first alone. |
 | `@obversa/engine/command` | `runOwnedCommand`, `stopOwnedProcessTree`, `commandCleanupCapability`, `inspectOwnerMarkedProcesses`. |
 
 ## Owned commands and cleanup

@@ -202,7 +202,7 @@ try {
       output: completed.output,
     },
     calls,
-    controlOutsideCapturedWorkspace: true,
+    controlOutsideCapturedWorkspace: relative(runRoot, controlFile).startsWith('..'),
   };
 } finally {
   // Preserve the lock and lease if cleanup cannot be verified.

@@ -229,7 +229,7 @@ try {
       output: completed.output,
     },
     calls,
-    controlOutsideCapturedWorkspace: true,
+    controlOutsideCapturedWorkspace: relative(runRoot, controlFile).startsWith('..'),
   };
 } finally {
   // Preserve the lock and lease if cleanup cannot be verified.
@@ -315,8 +315,11 @@ configuration and no prompt.
 - **Checks before the worker launches spend no run budget.** Checks inside
   the worker do.
 
-If the pause record cannot be written, the run does not promise a durable
-pause and does not retry on its own; the failure is returned as it is.
+If the pause event itself cannot be written, the run returns a failure
+with `RUN_STORAGE` and no resumable pause exists. If the pause was written
+and only the watchdog's final record failed, the result is a pause with
+`RUN_STORAGE`, and a later resume can reopen it. Neither path retries the
+write on its own.
 
 ## What a failed check retires
 

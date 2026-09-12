@@ -1,6 +1,6 @@
 ---
 title: "Plan admission"
-description: "Bind a graph description to a host admission record."
+description: "Bind a graph description to a host admission record, and freeze what the run may use: package, permissions, lanes, and the engine checks that run before the first step."
 ---
 
 Use `resolveGraphPlan(description, resolution)` after you compile a graph.
@@ -18,6 +18,10 @@ The host provides a `PlanResolution`. It contains:
 - One effective execution target for each declared execution lane.
 - An optional ordered fallback list for each lane. An omitted list means no
   fallback.
+- An optional preflight policy: a `timeoutMs` for the checks that run
+  before the first step, and one entry per lane with `live: 'required'`
+  or `'skip'` and `unsupportedStatic: 'block'` or `'allow'`. An omitted
+  policy means no checks.
 
 The package identity in the resolution and admission record must match exactly.
 The graph package asks for permissions in `describe()`. Each requested
@@ -27,6 +31,11 @@ not match, `resolveGraphPlan` throws `GraphValidationError` with
 
 Extra admitted permissions do not become graph permissions. The resolved plan
 keeps requested and admitted permissions as separate lists.
+
+When a preflight policy is present, every resolved lane needs exactly one
+entry and no entry may name a lane that does not exist; `timeoutMs` is a
+whole number of milliseconds from 1 to 2147483647. A policy that breaks
+either rule is rejected before the plan is frozen.
 
 ## Resolve execution lanes
 
@@ -39,13 +48,13 @@ extra lane resolutions are rejected.
 
 The resolved plan records the requested target, effective target, and fallback
 order. A change to an adapter, provider, model family, model, tools, allowed
-substitution, or fallback order changes the plan digest.
+substitution, fallback order, or preflight policy changes the plan digest.
 
 ## Plan snapshot
 
 Resolve the plan before a host starts work. The returned plan snapshot is
-frozen. Its package identity, permissions, lanes, policies, and bounds stay in
-the snapshot that its digest identifies.
+frozen. Its package identity, permissions, lanes, policies, preflight policy,
+and bounds stay in the snapshot that its digest identifies.
 
 Run parameters are not part of the resolved plan or its digest. The run record
 keeps resolved inputs as part of the frozen run.

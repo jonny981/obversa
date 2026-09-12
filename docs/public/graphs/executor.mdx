@@ -311,6 +311,13 @@ rewrite an earlier record.
 - **An engine without `admit` is `unsupported`,** and the lane's
   `unsupportedStatic` policy says whether that blocks the run or is allowed.
   Unsupported is never a success receipt.
+- **Checks need a scratch directory.** When the plan carries a preflight
+  policy, `createGraphExecutor` requires `preflightScratchDirectory`, an
+  absolute, real, normalized path; the option is optional in the type and
+  `run()` fails with `INVALID_PREFLIGHT_CONFIG` when the plan needs it and
+  it is missing. The policy itself must name every resolved lane once and
+  keep `timeoutMs` between 1 and 2147483647 milliseconds, or
+  `resolveGraphPlan` rejects it before the plan is frozen.
 - **Usage from checks is separate from usage from nodes,** and missing
   usage is not zero.
 
