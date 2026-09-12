@@ -51,6 +51,7 @@ export const stageBranches = {
   F33: 'fix/tournament-node-test',
   D36: 'feat/teams',
   D45: 'docs/whole-file-examples',
+  F34: 'feat/command-kickback',
 };
 
 export function manageStage(args, options = {}) {
