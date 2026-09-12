@@ -30,8 +30,8 @@ engine and memory packages track their own versions independently.
   pending. Run again with the same client, the step finds the answer.
 - `run` takes `callbacks`, the client the run's questions go through: the
   in-memory client or the stored client (`RunCallbacks`), and every job sees
-  it as `ctx.callbacks`. The default is one in memory that lives for the
-  process; the stored client is the one whose questions survive a process
+  it as `ctx.callbacks`. The default is a fresh in-memory client for the
+  run; the stored client is the one whose questions survive a process
   exit.
 - A callback request posted again after being superseded is live again: the
   newest post is always the question a router can answer.

@@ -195,7 +195,8 @@ export interface JobContext {
   /**
    * The run's callbacks client: where a step posts a question for a person or
    * an outside router, and where the answer is found again on a resume. Every
-   * run has one; pass `callbacks` to `run` to keep it across runs.
+   * run has one, a fresh in-memory client by default; pass `callbacks` to
+   * `run` to keep questions across runs.
    */
   readonly callbacks?: RunCallbacks;
   /** Where this job's code lives — the working dir and branch (the substrate). */

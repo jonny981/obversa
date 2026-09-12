@@ -253,6 +253,7 @@ export function not(c: ConditionInput): Condition {
       output: r.output,
     };
   };
+  setMeta(condition, { kind: 'condition', name: 'not', inputs: [c] });
   return withConditionPreparation(condition, async (ctx) =>
     not(await prepareCondition(c, ctx)),
   );
@@ -281,6 +282,7 @@ export function all(...inputs: ConditionInput[]): Condition {
       reason: `all(${results.map((r) => r.reason).join(' & ')})`,
     };
   };
+  setMeta(condition, { kind: 'condition', name: 'all', inputs });
   return withConditionPreparation(condition, async (ctx) =>
     all(...(await Promise.all(inputs.map((input) => prepareCondition(input, ctx))))),
   );
@@ -310,6 +312,7 @@ export function any(...inputs: ConditionInput[]): Condition {
     }
     return { met: false, reason: `any(${reasons.join(' | ')})`, output };
   };
+  setMeta(condition, { kind: 'condition', name: 'any', inputs });
   return withConditionPreparation(condition, async (ctx) =>
     any(...(await Promise.all(inputs.map((input) => prepareCondition(input, ctx))))),
   );
@@ -377,6 +380,7 @@ export function quorum(k: number, ...inputs: ConditionInput[]): Condition {
       output: met ? undefined : output,
     };
   }, `quorum ${k}/${inputs.length}`);
+  setMeta(condition, { kind: 'condition', name: 'quorum', inputs });
   return withConditionPreparation(condition, async (ctx) =>
     quorum(
       k,
@@ -951,11 +955,13 @@ function needOutcome(ctx: JobContext, name: string, caller: string): Outcome {
  * a configuration error, not a quiet false.
  */
 export function passed(name: string): Condition {
-  return setLabel(async (ctx) => {
+  const cond: Condition = async (ctx) => {
     const outcome = needOutcome(ctx, name, 'passed');
     const met = outcome.status === 'pass';
     return { met, reason: `${name} ${outcome.status}` };
-  }, `passed ${name}`);
+  };
+  setMeta(cond, { kind: 'condition', name: 'passed', need: name });
+  return setLabel(cond, `passed ${name}`);
 }
 
 /**
@@ -976,14 +982,28 @@ export function failed(name: string): Condition {
   return setLabel(cond, `failed ${name}`);
 }
 
+/** One `passed(name)` or `failed(name)` found inside a condition input. */
+export interface NeedDecision {
+  readonly on: 'passed' | 'failed';
+  readonly need: string;
+}
+
 /**
- * The dependency a `failed(name)` condition decides on, for the graph
- * builder's check that the node is optional. Undefined for any other input.
+ * Every `passed(name)` and `failed(name)` inside a condition input, however
+ * it is composed: arrays are walked, and `all`, `any`, `not` and `quorum`
+ * carry their inputs in their meta so the walk reaches inside them. The
+ * graph builder reads this to refuse a branch that could never run.
  */
-export function failedDependencyOf(input: ConditionInput): string | undefined {
-  if (typeof input !== 'function') return undefined;
+export function needDecisionsOf(input: ConditionInput): NeedDecision[] {
+  if (Array.isArray(input)) return input.flatMap((item) => needDecisionsOf(item));
+  if (typeof input !== 'function') return [];
   const meta = jobMeta(input as unknown as Job);
-  return meta?.kind === 'condition' && meta.name === 'failed' && typeof meta.need === 'string'
-    ? meta.need
-    : undefined;
+  if (meta?.kind !== 'condition') return [];
+  if ((meta.name === 'passed' || meta.name === 'failed') && typeof meta.need === 'string') {
+    return [{ on: meta.name, need: meta.need }];
+  }
+  if (Array.isArray(meta.inputs)) {
+    return (meta.inputs as ConditionInput[]).flatMap((item) => needDecisionsOf(item));
+  }
+  return [];
 }

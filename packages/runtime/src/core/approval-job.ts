@@ -151,7 +151,11 @@ async function decide(ctx: JobContext, label: string, opts: ApprovalOptions): Pr
     return { status: 'paused', summary: `waiting for a person: ${opts.question}`, data: request };
   }
   if (answer.approved) {
-    return { status: 'pass', summary: `approved: ${opts.question}`, data: answer };
+    const accepted: ApprovalAnswer = {
+      approved: true,
+      ...(typeof answer.note === 'string' && answer.note !== '' ? { note: redactSecrets(answer.note) } : {}),
+    };
+    return { status: 'pass', summary: `approved: ${opts.question}`, data: accepted };
   }
   const note = typeof answer.note === 'string' && answer.note !== ''
     ? redactSecrets(answer.note)
@@ -189,7 +193,15 @@ async function answerInProcess(
       message: `the question "${request.decisionText}" could not be claimed to answer it (${claim.kind})`,
     });
   }
-  const response = await respond(request);
+  // The claim is durable: a throw or a refused answer gives it back, as
+  // `directRouter` does, so the question stays answerable on the next run.
+  let response: ApprovalAnswer;
+  try {
+    response = await respond(request);
+  } catch (error) {
+    await client.release(request.requestId, claim.claimToken);
+    throw error;
+  }
   const submitted = await client.submit(
     request.requestId,
     claim.claimToken,
@@ -198,6 +210,7 @@ async function answerInProcess(
     response as unknown as JsonObject,
   );
   if (!submitted.ok) {
+    await client.release(request.requestId, claim.claimToken);
     throw new LoopError({
       code: 'VALIDATION',
       message: `the answer to "${request.decisionText}" was refused: ${submitted.reason}`,

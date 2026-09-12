@@ -475,7 +475,7 @@ describe('approval', () => {
   });
 
   it('redacts the note on the yes path as it does on the no path', async () => {
-    const secret = 'ghp_' + 'a'.repeat(36);
+    const secret = 'sk-' + 'a'.repeat(40);
     const { outcome } = await run(approval('approve', {
       question: 'Ship?',
       answer: () => ({ approved: true, note: `used ${secret}` }),

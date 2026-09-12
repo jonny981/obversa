@@ -71,10 +71,11 @@ export interface RunOptions {
   /** Memory instance available to every job in the run. */
   memory?: Memory;
   /**
-   * The client the run's questions go through (`approval`). Default: one in
-   * memory that lives for this process. Pass the stored client
-   * (`createStoredCallbackClient`) so a paused run finds its answers when it
-   * runs again after a process exit.
+   * The client the run's questions go through (`approval`). Default: a fresh
+   * in-memory client for this run, so a run without one forgets its questions
+   * when it ends. Pass a client to keep them: the in-memory one across runs
+   * in a process, the stored client (`createStoredCallbackClient`) across a
+   * process exit.
    */
   callbacks?: RunCallbacks;
   /**

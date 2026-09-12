@@ -491,7 +491,8 @@ function isOutcome(value: unknown): value is Outcome {
 }
 
 function describeReturn(value: unknown): string {
-  if (typeof value === 'object' && value !== null) {
+  if (value === null) return 'null';
+  if (typeof value === 'object') {
     return `an object with status ${JSON.stringify((value as { status?: unknown }).status)}`;
   }
   return `a ${typeof value}`;
