@@ -53,10 +53,6 @@ const KNOWN_DEBT = [
     why: 'a list of the tools we ship with nothing to copy; the package-page rewrite gives it one engine binding a reader can paste',
   },
   {
-    page: 'packages/runner.mdx', fault: 'example', owner: 'D35',
-    why: 'a package page whose only block installs the package, so a reader never sees a supervised run',
-  },
-  {
     page: 'hosts/cmux.mdx', fault: 'example', owner: 'D35',
     why: 'the page tells a reader which commands to run and never shows the configuration they run against',
   },
@@ -97,10 +93,6 @@ const KNOWN_DEBT = [
     why: 'one fragment: the binding alone',
   },
   {
-    page: 'packages/engine.mdx', fault: 'wholefile', owner: 'D35',
-    why: 'one fragment: the Engine type imported and nothing done with it',
-  },
-  {
     page: 'packages/memory-git.mdx', fault: 'wholefile', owner: 'D35',
     why: 'one fragment: openGitMemory called with nothing run against it',
   },
@@ -125,16 +117,8 @@ const KNOWN_DEBT = [
     why: 'its block names examples/hello-surface.mjs, a file that does not exist; the surfaces page gets a whole file that runs',
   },
   {
-    page: 'driving/runner.mdx', fault: 'wholefile', owner: 'D47',
-    why: 'four fragments of a host: imports, a binding, a start call and a second import, none a file',
-  },
-  {
     page: 'graphs/contract.mdx', fault: 'wholefile', owner: 'D47',
     why: 'the second block is the contract types imported and unused; custom-graph.ts already shows the whole',
-  },
-  {
-    page: 'graphs/executor.mdx', fault: 'wholefile', owner: 'D47',
-    why: 'three fragments of executor calls with no executor built',
   },
   {
     page: 'graphs/pipeline.mdx', fault: 'wholefile', owner: 'D47',

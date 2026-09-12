@@ -1,372 +1,478 @@
 ---
 title: "Supervised local runs"
-description: "Run a graph in a worker process, inspect its progress, and recover safely after a worker crash."
+description: "Run a graph in a worker process that checks its engines before any work, pauses on a durable record when a check fails, resumes from that exact pause, and recovers after a crash without repeating finished work."
 ---
 
-`startSupervisedRun` from `@obversa/runner` starts a graph in a separate worker process. The calling
-process acts as its watchdog: it waits for the worker, stops discoverable child
-processes, and restarts work within declared time and restart limits.
+Start a graph in a worker, and let the calling process be its watchdog:
+it checks every engine seat before the first step runs, waits for the
+worker, stops the worker's child processes, and restarts work within the
+time and restart limits you declare. Every step is written to the run's
+record, so a killed run carries on from where it stopped, and a check that
+fails pauses the run on a record you can resume from later.
 
-## Run the offline example
+```bash
+npm install @obversa/runtime @obversa/runner
+```
 
+## The file
 
-The example creates a disposable Git repository and runs two data nodes without
-an engine or network access. It checks their files and saved results, prints a
-JSON report, and removes its temporary directory after teardown succeeds.
-`examples/supervised-host.mjs` supplies the worker's node bindings.
-
-## Start, inspect, and stop
+This file starts a one-node graph under the watchdog with a scripted local
+engine that is not ready. The run pauses before any work is dispatched.
+The file makes the engine ready, stops the old watchdog, resumes the run
+from the recorded pause, and prints what happened. The engine and its
+bindings live in `examples/preflight-host.mjs`, which the file copies into
+the disposable repository it creates; the runner loads that copy as the
+host module.
 
 ```ts
+import assert from 'node:assert/strict';
+import { execFile } from 'node:child_process';
+import { createHash } from 'node:crypto';
+import { existsSync } from 'node:fs';
+import { createRequire } from 'node:module';
+import { mkdir, mkdtemp, readFile, realpath, rm, symlink, writeFile } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { dirname, join, relative } from 'node:path';
+import { promisify } from 'node:util';
+
 import {
-  readSupervisedRunStatus,
+  compileGraph,
+  createGitWorktreeProvider,
+  dagGraphType,
+  readRunPreflight,
+  resolveGraphPlan,
+  type DagDefinition,
+  type RunStoragePolicy,
+} from '@obversa/runtime';
+import { createLocalRunStorage } from '@obversa/runtime/storage/local';
+import {
+  resumeSupervisedRun,
   startSupervisedRun,
-  type SupervisedRunOptions,
+  type SupervisedRunHandle,
 } from '@obversa/runner';
 
-async function run(options: SupervisedRunOptions) {
-  const handle = await startSupervisedRun(options);
-  try {
-    console.log(await handle.status());
-    return await handle.done;
-  } finally {
+const git = promisify(execFile);
+const temporaryRoot = await realpath(await mkdtemp(join(tmpdir(), 'obversa-preflight-supervised-')));
+const runRoot = join(temporaryRoot, 'workspace');
+const controlFile = join(temporaryRoot, 'control.txt');
+const callsFile = join(temporaryRoot, 'engine-calls.log');
+const runnerDirectory = join(temporaryRoot, 'runner');
+const runId = 'preflight-supervised-run';
+let handle: SupervisedRunHandle | undefined;
+let startupAttempted = false;
+let report: Record<string, unknown> | undefined;
+
+const target = {
+  adapter: 'scripted-local',
+  provider: 'local',
+  modelFamily: 'scripted',
+  model: 'offline-check',
+  tools: [],
+} as const;
+
+const definition = {
+  id: 'preflight-supervised',
+  definitionVersion: 1,
+  data: {
+    globalConcurrency: 1,
+    keyedConcurrency: {},
+    stopOnError: true,
+    retryCapPerNode: 0,
+  },
+  nodes: [{
+    id: 'check',
+    data: {
+      kind: 'required',
+      key: null,
+      lane: { id: 'local', requested: target, knownSubstitutions: [] },
+    },
+  }],
+  edges: [],
+} as const satisfies DagDefinition;
+
+const storagePolicy = {
+  schemaVersion: 1,
+  maxEventPayloadBytes: 64_000,
+  maxAppendBatchBytes: 128_000,
+  maxArtifactBytes: 1_000_000,
+  maxTotalArtifactBytesPerRun: 4_000_000,
+  retention: 'until-run-delete',
+  sensitiveContent: {
+    marked: 'reject',
+    exact: 'reject',
+    freeText: 'redact-before-hash',
+  },
+} as const satisfies RunStoragePolicy;
+
+try {
+  await writeFile(controlFile, 'not-ready\n');
+  await writeFile(callsFile, '');
+  assert.equal(relative(runRoot, controlFile).startsWith('..'), true);
+
+  await mkdir(runRoot);
+  const hostBytes = await readFile(new URL('./preflight-host.mjs', import.meta.url));
+  await writeFile(join(runRoot, 'host.mjs'), hostBytes);
+  await writeFile(join(runRoot, '.gitignore'), 'node_modules/\n');
+  await git('git', ['init', '-q', '-b', 'main'], { cwd: runRoot });
+  await git('git', ['add', 'host.mjs', '.gitignore'], { cwd: runRoot });
+  await git('git', [
+    '-c', 'user.name=Example',
+    '-c', 'user.email=example@example.com',
+    '-c', 'commit.gpgsign=false',
+    'commit', '-qm', 'chore: initialize disposable preflight example',
+  ], { cwd: runRoot });
+
+  await mkdir(join(runRoot, 'node_modules/@obversa'), { recursive: true });
+  await symlink(
+    dirname(createRequire(join(process.cwd(), 'package.json')).resolve('@obversa/runtime/package.json')),
+    join(runRoot, 'node_modules/@obversa/runtime'),
+    'junction',
+  );
+
+  const graph = compileGraph(dagGraphType, definition);
+  const packageIdentity = {
+    source: 'file:host.mjs',
+    version: '1.0.0',
+    digest: `sha256:${createHash('sha256').update(hostBytes).digest('hex')}`,
+  } as const;
+  const resolvedPlan = resolveGraphPlan(graph.describe(), {
+    package: packageIdentity,
+    admission: { package: packageIdentity, permissions: [] },
+    executionLanes: [{ id: 'local', effective: target }],
+    preflight: {
+      timeoutMs: 2_000,
+      lanes: [{ laneId: 'local', live: 'required', unsupportedStatic: 'block' }],
+    },
+  });
+  const storage = {
+    directory: join(temporaryRoot, 'storage'),
+    namespace: 'preflight-supervised-example',
+    policy: storagePolicy,
+  } as const;
+  const workspace = createGitWorktreeProvider({ repositoryPath: runRoot });
+  const restart = {
+    maxRestarts: 1,
+    initialBackoffMs: 100,
+    maxBackoffMs: 1_000,
+  } as const;
+
+  startupAttempted = true;
+  handle = await startSupervisedRun({
+    directory: runnerDirectory,
+    runRoot,
+    module: './host.mjs',
+    storage,
+    workspace,
+    definition: {
+      runId,
+      graphDefinition: graph.definition,
+      resolvedPlan,
+      resolvedInputs: { controlFile, callsFile },
+    },
+    limits: { timeoutMs: 20_000, maxDispatches: 1 },
+    restart,
+    teardownGraceMs: 100,
+  });
+  const paused = await handle.done;
+  if (paused.kind !== 'pause' || paused.code !== 'PREFLIGHT_PAUSED' || paused.preflightEventId === undefined) {
+    throw new Error(`Expected a preflight pause, received ${JSON.stringify(paused)}.`);
+  }
+  const pausedStatus = await handle.status();
+  assert.equal(pausedStatus.phase, 'paused');
+  assert.equal(pausedStatus.cleanupVerified, true);
+  assert.equal(pausedStatus.leaseRetained, false);
+
+  const runStorage = createLocalRunStorage(storage);
+  let dispatchesBeforeResume = 0;
+  for await (const event of runStorage.eventStore.read({
+    namespace: storage.namespace,
+    streamId: runId,
+  })) {
+    if (event.type === 'graph:node-dispatched') dispatchesBeforeResume += 1;
+  }
+  assert.equal(dispatchesBeforeResume, 0);
+
+  await writeFile(controlFile, 'ready\n');
+  await handle.stop();
+  handle = undefined;
+  handle = await resumeSupervisedRun({
+    directory: runnerDirectory,
+    runRoot,
+    storage,
+    workspace,
+    restart,
+    teardownGraceMs: 100,
+    runId,
+    preflightEventId: paused.preflightEventId,
+  });
+  const completed = await handle.done;
+  if (completed.kind !== 'complete') {
+    throw new Error(`Expected completion, received ${JSON.stringify(completed)}.`);
+  }
+  assert.deepEqual(completed.output, { nodes: { check: { checked: 'offline' } } });
+  const completedStatus = await handle.status();
+  assert.equal(completedStatus.phase, 'completed');
+  assert.equal(completedStatus.cleanupVerified, true);
+  assert.equal(completedStatus.leaseRetained, false);
+  const finalPreflight = await readRunPreflight(runStorage, runId);
+  assert.equal(finalPreflight.phase, 'admitted');
+  assert.equal(finalPreflight.resumedPreflightEventId, paused.preflightEventId);
+  const calls = (await readFile(callsFile, 'utf8')).trim().split('\n').filter(Boolean);
+  assert.deepEqual(calls, ['static', 'live:not-ready', 'static', 'live:ready', 'ordinary']);
+
+  report = {
+    pause: { phase: pausedStatus.phase, code: paused.code, dispatches: dispatchesBeforeResume },
+    resume: {
+      usedReturnedToken: finalPreflight.resumedPreflightEventId === paused.preflightEventId,
+      phase: completedStatus.phase,
+      result: completed.kind,
+      output: completed.output,
+    },
+    calls,
+    controlOutsideCapturedWorkspace: true,
+  };
+} finally {
+  // Preserve the lock and lease if cleanup cannot be verified.
+  if (handle !== undefined) {
     await handle.stop();
+    const status = await handle.status();
+    assert.equal(status.cleanupVerified, true, 'Retain the directory when cleanup is unverified.');
+    assert.equal(status.leaseRetained, false, 'Retain the directory while its workspace lease is held.');
+  }
+  // Startup can fail before returning a handle while retaining ownership.
+  if (!startupAttempted || handle !== undefined) {
+    await rm(temporaryRoot, { recursive: true, force: true });
   }
 }
 
-async function inspect(options: SupervisedRunOptions) {
-  return await readSupervisedRunStatus({
-    storage: options.storage,
-    runId: options.definition.runId,
-  });
+console.log(JSON.stringify({
+  ...report,
+  temporaryDirectoryRemoved: !existsSync(temporaryRoot),
+}, null, 2));
+```
+
+## What it printed
+
+```json
+{
+  "pause": {
+    "phase": "paused",
+    "code": "PREFLIGHT_PAUSED",
+    "dispatches": 0
+  },
+  "resume": {
+    "usedReturnedToken": true,
+    "phase": "completed",
+    "result": "complete",
+    "output": {
+      "nodes": {
+        "check": {
+          "checked": "offline"
+        }
+      }
+    }
+  },
+  "calls": [
+    "static",
+    "live:not-ready",
+    "static",
+    "live:ready",
+    "ordinary"
+  ],
+  "controlOutsideCapturedWorkspace": true,
+  "temporaryDirectoryRemoved": true
 }
 ```
 
-Call `handle.stop()` while work is running to request a stop and await cleanup.
-A clean stop without a recorded worker result returns `kind: 'fail'` and
-`code: 'STOPPED'`. Calling it after completion returns the settled result.
-`handle.done` resolves to a graph result:
-`complete`, `pause`, or `fail`. Infrastructure errors can reject the promise.
+Five engine calls, in order: a static check of the seat, a live check
+that found it not ready, and after resume a second static check, a live
+check that found it ready, and the one ordinary call the graph asked for.
+No node was dispatched before the resume. The resume used the exact pause
+event the first run returned.
 
-After verified process cleanup and workspace lease release, the watchdog returns
-the current worker's durably recorded result even if a stop request or timeout
-arrives before worker exit. Without a recorded result, stop and timeout return
-`STOPPED` and `TIMEOUT`. Cleanup or lease-release failures take precedence over
-the recorded result.
+## Checks before the first step
 
-Completion output is stored once as an artifact, subject to the storage policy's
-artifact size and quota limits. Worker and watchdog completion events carry the
-same artifact reference, not the output bytes. The watchdog verifies the stored
-bytes against that reference before returning `done.output`. An unreadable or
-corrupt output artifact returns `kind: 'fail'` with `code: 'TERMINAL_ARTIFACT'`.
+When the stored plan carries a preflight policy, the worker checks every
+declared engine seat before it dispatches anything, with real node
+configuration and no prompt.
 
-Successful and incomplete engine calls also store their response parts as
-`runner-engine-parts` artifacts. Supervision events carry `partsArtifact`
-references instead of those parts. Each artifact must fit
-`storage.policy.maxArtifactBytes`; distinct stored parts consume the shared
-`storage.policy.maxTotalArtifactBytesPerRun` quota alongside the run's other
-artifacts. A response can fit the node's output limit and still exceed either
-storage limit.
+- **A static check** asks the engine to admit the seat: the engine reports
+  the identity it will run under (adapter, provider, model family, model,
+  executable) and the runtime compares it with the saved identity. An
+  engine that does not support the check is `unsupported`, and the lane's
+  policy says whether that blocks the run or is allowed.
+- **A live check**, when the lane requires one, is one tool-free engine
+  call with no workspace, run once per eligible seat and one at a time,
+  stopping at the first seat that answers. It proves the seat can answer
+  today, not only that it is configured.
+- **A failed check pauses the run** on a `PREFLIGHT_PAUSED` record before
+  any dispatch. The record carries the pause event id. Nothing has run, so
+  there is nothing to reconcile.
+- **Resume takes that exact id.** Pass `preflightEventId` to
+  `resumeSupervisedRun`. The static checks run again and the live receipts
+  that still apply are reused. A stale id is refused with
+  `RESUME_EVENT_MISMATCH`, and the message names both ids.
+- **Checks before the worker launches spend no run budget.** Checks inside
+  the worker do.
 
-Engine parts use `contentMode: 'state'`. The store rejects parts containing a
-configured `knownSecrets` value instead of redacting them. Size or quota refusal
-raises `StorageError` with `code: 'STORAGE_LIMIT_EXCEEDED'`; a known-secret match
-raises `code: 'KNOWN_SECRET'`. Inside the worker, a refused parts write becomes
-`EngineIncompleteResultError`, even when the engine returned successfully.
-Rejected parts are not durable, and status reports unknown usage when the
-engine's final supervision event could not be written.
+If the pause record cannot be written, the run does not promise a durable
+pause and does not retry on its own; the failure is returned as it is.
 
-The caller does not receive those storage codes directly from `handle.done`.
-For an otherwise valid engine result within the node's limits, the runtime
-records `graph:node-failed` with `code: 'EFFECT_FAILED'`. With the built-in DAG
-form, a failed required node makes `handle.done` resolve to `kind: 'fail'` with
-`code: 'DAG_NODE_FAILED'`, and status reports `phase: 'failed'`. Other graph
-forms decide their own response to a failed node.
+## What a failed check retires
 
-The status reader can run in another process with the same storage settings.
-It reads recorded progress and inspects the worker's process identity. It does
-not take ownership of the run or stop another process's watchdog.
-A stored run without a host binding rejects with `SupervisedRunError` and
-`code: 'HOST_MODULE'`.
+A check that fails tells the run what not to try again, and the scope
+follows what the failure proves. Bad credentials retire every model on that
+adapter and provider, because the credential is theirs. A missing model,
+exhausted credit or an exhausted quota retire that provider and model. A
+missing command-line tool or an invalid configuration retire the adapter.
+A rate limit or a transport error retire nothing, because they clear in
+seconds or minutes; a quota is an allowance gone for hours or longer. The
+retirement reads the seat that was selected, never an identity the engine
+claimed in its output. An old auth record with no provider recovers one
+from its lane; when that is ambiguous the run refuses before any work with
+`ENGINE_IDENTITY_UNRESOLVED`.
 
-## Supply a host module
+Command-line adapters record the path and version they were admitted with,
+not a hash of the executable. An API-key adapter is admitted locally with
+no executable and no capabilities, and its retry layers are off for the
+check only. Environment variable names are validated and their values
+captured before any asynchronous work; no value is written to run storage.
 
-The runner loads host modules and supervises processes. The runtime receives
-bound graph, node, and engine instances; it does not load host modules.
+## Start, inspect, stop
 
-Set `runRoot` to the working directory and `module` to a relative file specifier,
-such as `./host.mjs`. The file must remain inside `runRoot` after resolving
-symlinks; a path outside it is refused with `code: 'HOST_MODULE'`.
-Every filesystem error while resolving the selected entry path is rejected with
-`code: 'HOST_MODULE'` and the original error as its cause. This includes a missing
-file, an unreadable directory, a non-directory path component, or a symlink loop.
-This error boundary does not cover resolving `runRoot` itself.
-The module must export:
+`startSupervisedRun` takes the runner directory, the worker root, the host
+module as a relative specifier inside that root, the storage settings, the
+workspace provider, the stored definition, the limits, the restart policy
+and the cleanup grace. It returns a handle with `done`, `status()` and
+`stop()`. `done` resolves to the graph's result: `complete`, `pause` or
+`fail`. Infrastructure errors reject it.
 
-```js
-export async function bindRun({ definition, scratchDirectory }) {
-  // Compile definition.graphDefinition.value with its graph form.
-  // Return { graph, nodes, engines }, plus memory if the form requires it.
-}
-```
+Call `stop()` while work is running to request a stop and await cleanup. A
+clean stop without a recorded worker result returns `fail` with `STOPPED`;
+after completion it returns the settled result. When the worker has
+recorded a result and cleanup and lease release are verified, the watchdog
+returns that result even if a stop or timeout arrives before the worker
+exits. Cleanup and lease failures take precedence over a recorded result.
 
-The runner stores the host module's path and byte digest. Each worker checks the
-digest before import and again after import. Changed module bytes produce a
-`HOST_MODULE_CHANGED` failure. Each worker imports the module once and calls
-`bindRun` with the stored definition and scratch directory.
+`readSupervisedRunStatus` reads a run's recorded progress from another
+process with the same storage settings. It does not take ownership of the
+run or stop another process's watchdog.
 
-The digest covers the selected module file only. Transitive imports are not
-pinned. An edit after a worker has imported the module does not replace that
-worker's loaded bindings.
+Completion output is stored once as an artifact under the storage policy's
+size and quota limits, and the watchdog verifies the stored bytes before
+returning `done.output`. An unreadable artifact returns `fail` with
+`TERMINAL_ARTIFACT`. Engine responses are stored the same way as
+`runner-engine-parts` artifacts; a response that fits the node's output
+limit can still exceed a storage limit, and a refused write becomes a
+failed node with `EFFECT_FAILED`.
 
-The stored graph definition, resolved plan, and resolved inputs supply the
-execution contract. The worker loads them from storage. Its bindings must match
-that contract; it does not reconstruct the run from mutable command-line inputs.
+## The host module
 
-By default, the values copied from the watchdog environment into the worker are the
-present values of `PATH`, `HOME`, `TMPDIR`, `TMP`, `TEMP`, `SystemRoot`,
-`USERPROFILE`, and `PATHEXT`. Arbitrary parent variables, including API keys and
-`NODE_OPTIONS`, are not inherited. The owned-command layer separately sets
-`OBVERSA_ATTEMPT_ID`, `OBVERSA_RUN_ID`, `OBVERSA_HEADLESS`, and
-`OBVERSA_RUN_OWNER` for runner identity and process cleanup.
+The runner loads host modules and supervises processes; the runtime never
+loads a module. The module exports `bindRun`, which receives the stored
+definition and a scratch directory and returns the compiled graph, the
+node bindings and the engine bindings. The file above shows one.
 
-To supply engine credentials, list the required environment variable names in
-`environmentVariables` on `startSupervisedRun` or `resumeSupervisedRun`:
+The module must stay inside the worker root after symlinks resolve; a path
+outside it is refused with `HOST_MODULE`. The runner stores the module's
+path and byte digest and checks the digest before and after each import;
+changed bytes fail with `HOST_MODULE_CHANGED`. The digest covers the module
+file alone, not what it imports.
 
-```ts
-const handle = await startSupervisedRun({
-  ...options,
-  environmentVariables: ['ANTHROPIC_API_KEY'],
-});
-```
-
-The runner copies each listed variable only when it is present in the watchdog
-environment. It snapshots the list at each start or resume call. Supply the list
-again when resuming; credentials are not stored in run inputs or host records.
-`resolvedInputs` is durable storage. Do not put secrets in it.
-
-The workspace provider must capture the same root as `runRoot`. Capture and
-storage preflight failures start no worker and write no run. If storage fails
-during publication, startup returns `RUN_STORAGE` and starts no worker. Artifacts
-or a start event that were published before the error remain available. The
-runner never deletes that evidence or promises a transaction across both stores.
+The worker inherits only `PATH`, `HOME`, `TMPDIR`, `TMP`, `TEMP`,
+`SystemRoot`, `USERPROFILE` and `PATHEXT` from the watchdog. To pass an
+engine credential, list its variable name in `environmentVariables` on the
+start or resume call; the runner copies the value when present and stores
+neither the name nor the value in the run. `resolvedInputs` is durable
+storage: keep secrets out of it.
 
 ## Recover after a worker crash
 
-The watchdog waits for worker exit and cleanup before starting a replacement.
-The replacement loads the stored run and folds its graph events to decide what
-remains.
+The watchdog waits for worker exit and cleanup, then starts a replacement
+that reads the record and decides what remains.
 
 | Crash boundary | Recovery |
 | --- | --- |
 | Before a dispatch is recorded | Decide and dispatch the work. |
 | After dispatch, before node code starts | Start the recorded occurrence. |
-| After node code starts, before its result is recorded | Pause for reconciliation unless the binding explicitly declares `retrySafe: true`. |
-| After the result is recorded | Continue without repeating the completed occurrence. |
+| After node code starts, before its result is recorded | Pause for reconciliation unless the binding declares `retrySafe: true`. |
+| After the result is recorded | Continue without repeating the finished occurrence. |
 
-Set `retrySafe: true` only when repeating the node is acceptable after an unknown
-outcome. A saved start without a saved result does not prove whether an outward
-effect happened. For an unsafe repeat, the executor records a pause with a
-`reconcile-attempt` request.
-
-Unattended action decisions must return `allow` before node effects run. A host
-decision to `wait` records a graph pause with its reason and request. A decision
-to `deny` records a failed node. The worker does not open a prompt.
+A saved start without a saved result does not prove whether an outward
+effect happened. Set `retrySafe: true` only when repeating the node is
+acceptable after an unknown outcome; otherwise the run pauses with a
+`reconcile-attempt` request for a person to answer.
 
 ## Resume a paused run
 
-`resumeSupervisedRun` reopens one recorded graph pause. Pass the same storage
-settings and workspace provider, the run ID, and the exact `position` from its
-`graph:node-paused` event. Supply the runner directory, worker root, restart
-policy, and cleanup grace as for a start:
+`resumeSupervisedRun` reopens one recorded pause. For a node pause, pass
+the run id and the exact `position` and `pauseEventId` from its
+`graph:node-paused` event; for a preflight pause, pass the run id and the
+`preflightEventId`. The definition, host module and limits come from the
+stored run. Resume writes no second start event and repeats no finished
+occurrence.
 
-```ts
-import {
-  resumeSupervisedRun,
-  type ResumeSupervisedRunOptions,
-} from '@obversa/runner';
+Before releasing ownership after a node pause, the watchdog saves a
+snapshot of the workspace. Resume checks the workspace against that
+snapshot before starting a worker and never adopts edits made while
+paused: a changed workspace pauses again with `WORKSPACE_DRIFT`, a missing
+snapshot with `WORKSPACE_ANCHOR_MISSING`, and an unreadable one with
+`WORKSPACE_ANCHOR_INVALID`. If the snapshot cannot be written at pause
+time, the run fails with `WORKSPACE_ANCHOR_WRITE` and no resumable pause
+is recorded; a capture that fails during the comparison is a capture
+failure, not evidence of an edit.
 
-async function resume(options: ResumeSupervisedRunOptions) {
-  const handle = await resumeSupervisedRun(options);
-  try {
-    console.log(await handle.status());
-    return await handle.done;
-  } finally {
-    await handle.stop();
-  }
-}
-```
+The host's action policy runs again on resume. Record approval where that
+policy reads it; calling resume is not an approval.
 
-The definition, host module, and run limits come from the stored run; resume
-does not accept replacements. It writes no second run-start event and does not
-repeat completed occurrences. Status shows a resumed worker as active rather
-than reporting the earlier pause as its terminal result.
-
-A resume is bound to one pause event. If a replacement worker finds a different
-pause event at the same position, `handle.done` resolves to `kind: 'pause'` with
-`code: 'RESUME_EVENT_MISMATCH'`. Its `reason` preserves the exact message:
-`Resume expected pause event "<expected>" but found "<found>".`
-Both placeholders contain the recorded event IDs. After worker cleanup, the
-watchdog saves the workspace anchor and records `runner:paused`. A later explicit
-`resumeSupervisedRun` call can reopen that pause. The replacement does not resume
-the newer pause or approve reconciliation automatically.
-
-The elapsed budget freezes at the settled runner pause and resumes at the next
-stored worker launch. Resume preflight, including workspace checks, does not
-spend that budget. Earlier execution and restart backoff remain spent across
-repeated pauses and worker replacements. Logical dispatches and recorded
-worker restarts also keep their counts. An exhausted elapsed budget returns
-`TIMEOUT` without starting a worker.
-
-The host's action policy runs again. Record approval in the system that policy
-reads before calling resume. A repeated `wait` pauses again with its request;
-calling resume is not an approval flag. For a `reconcile-attempt` pause, the
-caller must decide whether offering the uncertain work again is safe. An explicit
-resume may repeat an effect whose completion was not recorded; completed
-occurrences are not repeated. A worker
-replacement does not automatically approve a new reconciliation pause.
-
-Before releasing ownership after a pause, the watchdog cleans up the worker and
-saves a workspace snapshot as a `runner-pause-anchor` artifact. Resume acquires
-the process lock and workspace lease, then checks that saved snapshot before
-starting a worker. It never adopts edits made while paused. The snapshot shares
-the run's artifact size, quota, and sensitive-content rules. If pause-time capture,
-the artifact write, or its `runner:pause-anchor` event append fails, `handle.done` returns
-`kind: 'fail'` with `code: 'WORKSPACE_ANCHOR_WRITE'`. A stored artifact remains
-available when the event append fails, but no resumable runner pause is written.
-This failure is terminal; the runner has no anchor-persistence retry path.
-Initial workspace capture failures remain `WORKSPACE_CAPTURE`. A workspace-drift
-pause saves the earlier anchor, without capturing the changed workspace.
-
-Workspace evidence failures resolve `handle.done` to `kind: 'pause'`:
-
-- **`WORKSPACE_ANCHOR_MISSING`:** the pause has no saved snapshot, including
-  pauses recorded without this artifact.
-- **`WORKSPACE_ANCHOR_INVALID`:** the saved reference or snapshot cannot be
-  verified. Invalid evidence is refused before acquiring a workspace lease.
-- **`WORKSPACE_DRIFT`:** the workspace differs from the saved snapshot.
-
-An occupied process lock rejects startup with `PROCESS_LOCKED`; an unavailable
-workspace lease rejects with `WORKSPACE_LEASE`. A run without a safely released
-pause rejects with `RUN_NOT_PAUSED`. A position that is not paused rejects with
-`RESUME_POSITION`. Resume does not take over a dead watchdog's retained lock.
-
-## Bound the run
+## Bounds
 
 - **Elapsed time:** `limits.timeoutMs` covers worker execution and restart
-  backoff across pauses and resumes. Counting starts at the stored run timestamp,
-  freezes at each settled runner pause, and resumes at the next stored worker
-  launch. Teardown can continue beyond that work deadline.
-- **Logical dispatches:** `limits.maxDispatches` counts recorded graph
-  dispatches across workers. Resuming one recorded occurrence does not create
-  another dispatch.
-- **Restarts:** `restart.maxRestarts` caps replacement workers. Backoff grows
-  from `initialBackoffMs` up to `maxBackoffMs`.
-- **Cleanup grace:** `teardownGraceMs` allows processes to stop before forceful
-  termination.
-
-Each worker launch has a fixed 1 MB (1,000,000 bytes) limit across its combined
-stdout and stderr. When excess output triggers this limit, the watchdog stops
-the worker without restarting it. After successful process cleanup,
-`handle.done` resolves to `kind: 'fail'` with `code: 'OUTPUT_LIMIT'`, and status
-reports `phase: 'failed'`. If cleanup reports surviving processes, `handle.done`
-instead resolves to `kind: 'fail'` with `code: 'TEARDOWN_INCOMPLETE'`, and the
-watchdog retains its workspace lease and process lock.
-
-This limit applies to worker console output. Engine response parts and graph
-completion output use the separate artifact size and quota limits described
-above. `SupervisedRunOptions` exposes no setting for the worker output cap or
-a worker memory ceiling. The watchdog passes `Number.MAX_SAFE_INTEGER` as its
-worker memory limit; it does not enforce a practical memory budget for the
-worker.
-
-Token budgets apply per worker process and do not enforce a shared token cap
-across worker restarts.
+  backoff across pauses and resumes. It counts from the stored run
+  timestamp, freezes at each settled pause, and resumes at the next worker
+  launch. Resume checks and preflight checks before launch do not spend it.
+- **Dispatches:** `limits.maxDispatches` counts recorded graph dispatches
+  across workers.
+- **Restarts:** `restart.maxRestarts` caps replacement workers, with backoff
+  from `initialBackoffMs` to `maxBackoffMs`.
+- **Cleanup grace:** `teardownGraceMs` is the time processes get to stop
+  before they are killed.
+- **Worker output:** each worker launch may write 1,000,000 bytes to its
+  combined stdout and stderr. Beyond that the watchdog stops the worker
+  without restarting it and `done` resolves to `fail` with `OUTPUT_LIMIT`.
 
 ## Read progress
 
-Status includes the run phase, worker liveness, inspected processes, restart
-count, backoff, elapsed execution time, remaining timeout, and pause reasons.
-Run-level elapsed time and remaining timeout stay fixed during settled pauses
-and resume preflight. They use the same execution budget as the watchdog.
+Status carries the run phase, worker liveness, inspected processes, the
+restart count, backoff, elapsed and remaining time, and pause reasons.
+`cleanupVerified` is `null` before a terminal result, `true` when cleanup
+was verified within the platform's capability, and `false` when it could
+not be. `leaseRetained` reports a lease still held after a terminal
+failure. A dead worker or an empty process list is not proof of cleanup;
+read these two fields before treating the workspace as released.
 
-`cleanupVerified` is `null` before a terminal result, `true` when cleanup was
-verified within the reported capability, and `false` when cleanup could not be
-verified. `leaseRetained` reports a lease held after terminal failure. A dead
-worker or an empty process list does not prove cleanup succeeded; inspect these
-fields before treating the workspace as released.
-
-`active` contains all recorded active node occurrences while the worker is
-alive. Each entry has its node ID, unchanged position, plan phase, start time,
-elapsed time, remaining node timeout, and usage state. Each active entry uses
-its node's total. The top-level `usage` list retains node totals after completion.
-The runner exports `SupervisedRunUsage` with three states:
-
-- **Reported:** Every engine call has a measured receipt.
-- **Partial:** At least one call has a measured receipt and at least one does
-  not. `inputTokens` and `outputTokens` are measured lower bounds;
-  `unknownCalls` counts calls without receipts, including still-open calls.
-- **Unknown:** No call has a measured receipt, or measured totals exceed the
-  safe integer range.
-
-Missing usage is not zero. A later successful retry adds its measured tokens
-without erasing the gap left by a crashed call. Measured receipts from failed
-calls also contribute to the totals.
-
-Graph phases group nodes for display. They do not define execution parents.
-Position strings identify occurrences; the status reader does not split them
-into a parent chain or choose a supposed deepest node.
-
-Checkpoints cache display state only. Missing, stale, or malformed checkpoints
-can be rebuilt from graph events. The executor always makes its decisions from
-the events, never from a status checkpoint.
+Usage is reported per engine call. Missing usage is not zero: a call
+without a receipt counts as unknown, and the run's usage is `partial` when
+some calls have receipts and some do not. The check calls before the run
+report their own usage, separate from the nodes'.
 
 ## Process cleanup and workspace ownership
 
-The watchdog uses the public `@obversa/engine/command` API. Command and cleanup
-requests accept an optional `ownerId`, a SHA-256 digest used to track the outer
-command's processes. The command passes it to child processes as
-`OBVERSA_RUN_OWNER`. Nested commands keep a valid inherited marker instead of
-replacing it with their own
-`ownerId`. During Linux cleanup, only the outer command uses that marker to
-discover processes to stop.
+The watchdog holds the workspace lease while the worker runs and while
+cleanup executes. Cleanup uses the public `@obversa/engine/command` API and
+its owner markers; on Linux it also finds processes carrying the worker's
+inherited marker, elsewhere it follows the observed process tree, and a
+helper that moves into a new session before it is observed is not swept.
+Incomplete cleanup or a failed lease release retains the process lock and
+starts no further worker.
 
-`commandCleanupCapability()` returns the `CommandCleanupCapability` type:
-`'inherited-owner'` on Linux or `'observed-processes'` elsewhere.
-`inspectOwnerMarkedProcesses(ownerId)` returns matching process identities on
-Linux and an empty list elsewhere. An empty list on another platform does not
-prove that the owner's processes have stopped.
+The process lock is scoped to the storage directory, namespace and run id.
+A second watchdog for the same stored run receives `PROCESS_LOCKED`. If the
+watchdog itself dies, its lock and lease remain; a new watchdog does not
+force a takeover.
 
-`cleanupCapability` states the cleanup scope:
+## Source
 
-- **`inherited-owner` on Linux:** cleanup also searches for processes carrying
-  the worker's inherited owner marker. Commands that remove or forge markers
-  are outside this cleanup scope.
-- **`observed-processes` on other platforms:** cleanup follows observed process
-  identities and the platform's process-tree mechanisms.
-
-Linux owner cleanup has an implementation and tests, but its Linux-specific
-tests have not run on Linux for this release, so Linux cleanup is best-effort.
-
-On macOS, a helper that moves into a new session before the watchdog samples it is not swept.
-
-The watchdog holds the workspace lease token while the worker runs and while
-cleanup executes. After a crash that permits restart, it captures and records a
-fresh workspace snapshot while still holding the lease. It then releases the
-lease for backoff. A replacement must acquire a lease and verify that snapshot
-before starting. Changes during the released interval produce a pause with
-`code: 'WORKSPACE_DRIFT'`.
-
-This restart snapshot includes workspace changes left by the stopped worker;
-it does not replace the stored graph plan or inputs. A terminal result releases
-the lease after successful cleanup. Incomplete cleanup or failed lease release
-retains the process lock instead of starting another worker.
-
-The process lock is scoped to the storage directory, namespace, and run ID.
-A second watchdog for that stored run receives `PROCESS_LOCKED`, even if it
-uses another scratch directory.
-
-Worker-crash recovery requires a live watchdog. If the watchdog dies, its lock
-and any held lease remain. A new watchdog does not force takeover or infer that
-the workspace is safe from a missing PID. This API has no automatic recovery
-for watchdog death.
+The file is `examples/preflight-supervised-run.ts`, with its engine and
+bindings in `examples/preflight-host.mjs`. The
+[runner package page](/packages/runner) lists the public entry points.

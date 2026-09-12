@@ -1,178 +1,322 @@
 ---
 title: "Graph executor"
-description: "Run outside graph types through durable decisions and node attempts."
+description: "Run a stored graph one recorded decision at a time: check the engines first, pause on a record when a check fails, resume from that exact record, and recover after a process stops."
 ---
 
-The graph executor turns a stored run into useful work. Your graph still makes
-the decisions. The runtime records what happened and runs each node safely.
+The graph executor turns a stored run into work. Your graph makes the
+decisions; the executor records each one before any node runs, runs each
+node inside the safe attempt lifecycle, and records what came back. When
+the plan carries a preflight policy it checks every engine seat before the
+first dispatch, and a failed check pauses the run on a record you resume
+from later.
+
+## The file
+
+This file stores a one-node graph, runs the executor against a scripted
+local engine that is not ready, sees the run pause before any dispatch,
+makes the engine ready, and resumes with the exact pause event the first
+run returned. The engine and its bindings are in
+`examples/preflight-host.mjs`.
+
+```ts
+import assert from 'node:assert/strict';
+import { existsSync } from 'node:fs';
+import { mkdtemp, readFile, realpath, rm, writeFile } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+
+import {
+  compileGraph,
+  createGraphExecutor,
+  dagGraphType,
+  loadRunDefinition,
+  persistRunDefinition,
+  readRunPreflight,
+  resolveGraphPlan,
+  type DagDefinition,
+  type ExecutionTarget,
+  type RunStoragePolicy,
+} from '@obversa/runtime';
+import { createLocalRunStorage } from '@obversa/runtime/storage/local';
+import { bindRun } from './preflight-host.mjs';
+
+const target = {
+  adapter: 'scripted-local',
+  provider: 'local',
+  modelFamily: 'scripted',
+  model: 'offline-check',
+  tools: [],
+} as const satisfies ExecutionTarget;
+
+const definition = {
+  id: 'preflight-executor',
+  definitionVersion: 1,
+  data: {
+    globalConcurrency: 1,
+    keyedConcurrency: {},
+    stopOnError: true,
+    retryCapPerNode: 0,
+  },
+  nodes: [{
+    id: 'check',
+    data: {
+      kind: 'required',
+      key: null,
+      lane: { id: 'local', requested: target, knownSubstitutions: [] },
+    },
+  }],
+  edges: [],
+} as const satisfies DagDefinition;
+
+const storagePolicy = {
+  schemaVersion: 1,
+  maxEventPayloadBytes: 64_000,
+  maxAppendBatchBytes: 128_000,
+  maxArtifactBytes: 1_000_000,
+  maxTotalArtifactBytesPerRun: 4_000_000,
+  retention: 'until-run-delete',
+  sensitiveContent: {
+    marked: 'reject',
+    exact: 'reject',
+    freeText: 'redact-before-hash',
+  },
+} as const satisfies RunStoragePolicy;
+
+const temporaryRoot = await realpath(await mkdtemp(join(tmpdir(), 'obversa-preflight-executor-')));
+const controlFile = join(temporaryRoot, 'control.txt');
+const runId = 'preflight-executor-run';
+const callsFile = join(temporaryRoot, 'engine-calls.log');
+let report: Record<string, unknown> | undefined;
+
+try {
+  await writeFile(controlFile, 'not-ready\n');
+  await writeFile(callsFile, '');
+  const graph = compileGraph(dagGraphType, definition);
+  const packageIdentity = {
+    source: 'npm:@example/preflight-executor',
+    version: '1.0.0',
+    digest: 'sha256:4444444444444444444444444444444444444444444444444444444444444444',
+  } as const;
+  const plan = resolveGraphPlan(graph.describe(), {
+    package: packageIdentity,
+    admission: { package: packageIdentity, permissions: [] },
+    executionLanes: [{ id: 'local', effective: target }],
+    preflight: {
+      timeoutMs: 2_000,
+      lanes: [{ laneId: 'local', live: 'required', unsupportedStatic: 'block' }],
+    },
+  });
+  const storage = createLocalRunStorage({
+    directory: join(temporaryRoot, 'storage'),
+    namespace: 'preflight-executor-example',
+    policy: storagePolicy,
+  });
+  await persistRunDefinition(storage, {
+    runId,
+    eventId: 'preflight-executor-started',
+    timestamp: new Date().toISOString(),
+    graphDefinition: graph.definition,
+    resolvedPlan: plan,
+    resolvedInputs: { controlFile, callsFile },
+    workspaceBinding: null,
+    hostBinding: null,
+  });
+
+  const loaded = await loadRunDefinition(storage, runId);
+  const makeExecutor = async () => createGraphExecutor({
+    ...await bindRun({
+      definition: loaded.record.payload.definition,
+      scratchDirectory: temporaryRoot,
+    }),
+    runId,
+    storage,
+    preflightScratchDirectory: temporaryRoot,
+  });
+
+  const paused = await (await makeExecutor()).run(new AbortController().signal);
+  if (paused.kind !== 'pause' || !('preflightEventId' in paused)) {
+    throw new Error(`Expected a preflight pause, received ${JSON.stringify(paused)}.`);
+  }
+  assert.equal(paused.code, 'PREFLIGHT_PAUSED');
+  assert.equal((await readRunPreflight(storage, runId)).phase, 'paused');
+
+  let dispatchesBeforeResume = 0;
+  for await (const event of storage.eventStore.read({
+    namespace: storage.record.namespace,
+    streamId: runId,
+  })) {
+    if (event.type === 'graph:node-dispatched') dispatchesBeforeResume += 1;
+  }
+  assert.equal(dispatchesBeforeResume, 0);
+
+  await writeFile(controlFile, 'ready\n');
+  const completed = await (await makeExecutor()).resume(
+    { preflightEventId: paused.preflightEventId },
+    new AbortController().signal,
+  );
+  if (completed.kind !== 'complete') {
+    throw new Error(`Expected completion, received ${JSON.stringify(completed)}.`);
+  }
+  assert.deepEqual(completed.output, { nodes: { check: { checked: 'offline' } } });
+  const finalPreflight = await readRunPreflight(storage, runId);
+  assert.equal(finalPreflight.phase, 'admitted');
+  assert.equal(finalPreflight.resumedPreflightEventId, paused.preflightEventId);
+  const calls = (await readFile(callsFile, 'utf8')).trim().split('\n').filter(Boolean);
+  assert.deepEqual(calls, ['static', 'live:not-ready', 'static', 'live:ready', 'ordinary']);
+
+  report = {
+    pause: { phase: 'paused', code: paused.code, dispatches: dispatchesBeforeResume },
+    resume: {
+      usedReturnedToken: finalPreflight.resumedPreflightEventId === paused.preflightEventId,
+      phase: finalPreflight.phase,
+      result: completed.kind,
+      output: completed.output,
+    },
+    calls,
+  };
+} finally {
+  await rm(temporaryRoot, { recursive: true, force: true });
+}
+
+console.log(JSON.stringify({
+  ...report,
+  temporaryDirectoryRemoved: !existsSync(temporaryRoot),
+}, null, 2));
+```
+
+## What it printed
+
+```json
+{
+  "pause": {
+    "phase": "paused",
+    "code": "PREFLIGHT_PAUSED",
+    "dispatches": 0
+  },
+  "resume": {
+    "usedReturnedToken": true,
+    "phase": "admitted",
+    "result": "complete",
+    "output": {
+      "nodes": {
+        "check": {
+          "checked": "offline"
+        }
+      }
+    }
+  },
+  "calls": [
+    "static",
+    "live:not-ready",
+    "static",
+    "live:ready",
+    "ordinary"
+  ],
+  "temporaryDirectoryRemoved": true
+}
+```
 
 ## How a dispatch runs
 
-1. The executor loads the run definition and frozen plan from storage.
-2. It checks that the supplied graph matches the stored definition.
-3. It folds the run's `graph:` events into graph state.
-4. The graph returns its next command.
-5. The executor records the whole dispatch decision before any node starts.
-6. It records `node-attempt-started` immediately before each node starts.
-7. It runs each node through the safe node-attempt lifecycle.
-8. It records `node-completed`, `node-paused`, or `node-failed`, then asks the
-   graph again.
+1. The executor loads the run definition and the frozen plan from storage
+   and checks that the supplied graph matches them.
+2. When the plan carries a preflight policy, it checks every engine seat:
+   a static check of the seat's identity, and where the lane requires it,
+   one tool-free live call. A failed check pauses the run with
+   `PREFLIGHT_PAUSED` before anything is dispatched.
+3. It folds the run's recorded events into graph state and asks the graph
+   for its next command.
+4. It records the whole dispatch decision, then `node-attempt-started`
+   immediately before each node starts.
+5. It runs each node through the safe attempt lifecycle and records
+   `node-completed`, `node-paused` or `node-failed`, then asks the graph
+   again.
 
-Node behaviour is keyed by node id. A data-only node gets a data function. An
-engine-backed node gets a prompt builder. The builder receives that dispatch's
-typed input, so two positions can produce different prompts. The node then uses
-the lane in the stored plan. Engine bindings join that exact plan target to the
-full engine identity, including its adapter version and executable path when
-present.
+Node behaviour is keyed by node id: a data-only node gets a function, an
+engine-backed node gets a prompt builder that receives that dispatch's
+typed input. The node uses the lane in the stored plan, and the engine
+binding joins that plan target to the full engine identity.
 
-The host chooses the order once. The executor tries the effective target and at
-most one live fallback from that order. Only a failure that means the lane is
-dead, such as bad credentials or a missing model, can move to the fallback. A
-rate limit, timeout, policy pause, or denied action does not run again elsewhere.
+## Fallback and what a failure retires
 
-Each dead-lane event records the selected identity and the engine's reported
-identity when available. Without a report, it uses the selected identity.
-What the failure retires depends on what it says: bad credentials retire
-every model on that adapter and provider, because the credential is theirs;
-a missing model retires that one model, and the same seat's other models
-stay available. Later dispatches in the run skip whatever was retired, and
-stored facts and later routing agree on the same key. If every declared
-target is dead, no engine runs. The executor records `ENGINE_UNAVAILABLE`
-as a normal node failure so the graph can retry, fail, or recover in its
+The host chooses the lane order once. The executor tries the effective
+target and at most one live fallback. Only a failure that means the lane is
+dead can move to the fallback; a rate limit, a timeout, a policy pause or a
+denied action does not run again elsewhere.
+
+Each dead-lane event records the selected identity and the engine's
+reported identity when available. What the failure retires depends on what
+it proves: bad credentials retire every model on that adapter and
+provider, because the credential is theirs; a missing model, exhausted
+credit or an exhausted quota retire that provider and model; a missing
+command-line tool or an invalid configuration retire the adapter; a rate
+limit or a transport error retire nothing. The retirement is keyed on the
+seat that was selected, never on an identity the engine claimed in its
+output. An old auth record with no provider recovers one from its lane,
+and an ambiguous recovery refuses before any work with
+`ENGINE_IDENTITY_UNRESOLVED`. Later dispatches skip whatever was retired.
+If every declared target is dead, the executor records `ENGINE_UNAVAILABLE`
+as a normal node failure so the graph can retry, fail or recover in its
 usual way.
 
-An action-policy wait records `node-paused` with its reason and request. A
-denied action records `node-failed` with `DENIED`. An aborted attempt records
-`node-failed` with `ABORTED`. These events stay distinct when the graph folds
-the stream. If a result or pause request is too large for the event stream, the
-executor records a small `node-failed` event with `RESULT_TOO_LARGE` so the
-dispatch does not stay in flight.
-
-If a process stops after `node-attempt-started` and the start record has
-`retrySafe: false`, `resume` does not run node code. It records `node-paused`
-with this request shape:
-
-```ts
-{
-  kind: 'reconcile-attempt',
-  attemptId: started.identity.attemptId,
-}
-```
-
-`attemptId` is the attempt identity from that start record. The pause reason is
-that the previous process stopped after node code started, so the outcome is
-uncertain.
-
-An empty decision is valid only when an attempt is already in flight. The
-executor rejects a second dispatch record for the same position.
+An action-policy wait records `node-paused` with its reason and request.
+A denied action records `node-failed` with `DENIED`; an aborted attempt,
+`ABORTED`. A result too large for the event stream records a small
+`node-failed` with `RESULT_TOO_LARGE`, so the dispatch never stays in
+flight.
 
 ## Engine identity records
 
-Each engine call through the executor records a version-1
-`graph:engine-attempt-recorded` event before fallback routing or the node's
-result. Its `EngineAttemptRecordedPayload` contains the node id, position,
-sequence, requested identity, and reported effective identity. Each
-`GraphEngineIdentity` contains the adapter, provider, model family, and model.
-Provider, model family, and model can be null when the engine does not report
-them. An unknown effective identity is null.
+Every engine call records a `graph:engine-attempt-recorded` event before
+fallback routing or the node's result: node id, position, sequence,
+requested identity and reported effective identity. The sequence starts at
+1 for each position and continues across fallback calls and resume.
+Recovery of a started, unfinished engine node adds a record with both
+identities null, which records uncertainty rather than a count of calls.
 
-The sequence starts at 1 for each position and continues across fallback calls
-and resume. Recovery of a started, unfinished engine node adds a record with
-both identities null before resuming or pausing it. This records uncertainty;
-it does not establish the exact number of calls before the process stopped.
-Data-only nodes and recorded action-policy waits have no recovery identity.
-
-Replay validates these records before passing them to the graph reducer.
 A receipt that cannot be saved makes `run()` reject and stops the affected
 attempt before fallback or completion. Other attempts in the same batch can
-continue.
-The records describe what the bound engine reported; they do not inspect calls
-made inside an adapter or wrapper.
+continue. The records describe what the bound engine reported; they do not
+see inside an adapter.
 
 ## Resume after a process stops
 
-A fresh executor returns `waiting` when a dispatch has no result. Call
-`resume` with one exact position from that result:
+A fresh executor returns `waiting` when a dispatch has no result, with the
+open positions. Call `resume` with one exact position, only after the
+earlier process has stopped; the executor does not lock the run between
+processes. If two dispatches were open, the result after the first resume
+is `waiting` again with the sibling's position.
 
-```ts
-const pending = await freshExecutor.run(signal);
+- **Node code did not start.** The executor runs the attempt at its
+  recorded position.
+- **A retry is safe.** With `retrySafe: true` saved in the start record,
+  resume records `node-resumed` and runs the same attempt again.
+- **The result is not known.** With `retrySafe` false, resume records a
+  pause with a `reconcile-attempt` request naming the attempt, and does not
+  call node code.
+- **The node is paused.** Resume records `node-resumed` and offers the same
+  attempt again.
 
-if (pending.kind === 'waiting') {
-  const position = pending.positions[0];
-  if (position === undefined) throw new Error('The waiting result has no position.');
-  await freshExecutor.resume(position, signal);
-}
-```
+For a preflight pause, call `resume` with `{ preflightEventId }` from the
+pause the first run returned. The static checks run again, live receipts
+that still apply are reused, and a stale id is refused with
+`RESUME_EVENT_MISMATCH` naming both ids. The saved `retrySafe` value and
+the saved plan govern recovery; a change in the live binding does not
+rewrite an earlier record.
 
-Call `resume` only after the earlier executor process stops. The executor does
-not lock the run between processes.
+## Gotchas
 
-Resume rebuilds the dispatch input from its event prefix and the graph
-decision. It does not add a second dispatch event.
+- **A check is not a run.** The live check is one tool-free call with no
+  workspace. It proves the seat answers; it does no work.
+- **An engine without `admit` is `unsupported`,** and the lane's
+  `unsupportedStatic` policy says whether that blocks the run or is allowed.
+  Unsupported is never a success receipt.
+- **Usage from checks is separate from usage from nodes,** and missing
+  usage is not zero.
 
-- **Node code did not start.** If no start record exists, the executor runs
-  the attempt at its recorded position. It does not write `node-resumed`.
-- **A retry is safe.** Set `retrySafe: true` in the node binding. The start
-  record saves this rule before node code starts. Resume records `node-resumed`
-  for that in-flight position, then runs the same attempt again.
-- **The result is not known.** If the saved rule is false, resume records a
-  typed pause with a `reconcile-attempt` request and does not call node code.
-- **The node is paused.** Resume records `node-resumed` for the exact position
-  and offers the same attempt again.
+## Source
 
-`node-resumed` is recorded for a paused node and for an in-flight attempt that
-already has a start record with `retrySafe: true`.
-
-The saved `retrySafe` value controls crash recovery. A changed value in the
-live binding does not change an earlier start record.
-
-### Two nodes in flight
-
-A graph can dispatch more than one node at a time. If the process stops with
-two dispatches still open, a fresh executor returns `waiting` with both
-positions. `resume` takes one position. After that attempt settles, if the
-sibling is still unfinished, the result is `waiting` again with the sibling's
-position:
-
-```ts
-const first = await freshExecutor.run(signal);
-if (first.kind !== 'waiting') {
-  throw new Error('The run has no in-flight dispatch.');
-}
-const firstPosition = first.positions[0];
-if (firstPosition === undefined) {
-  throw new Error('The waiting result has no position.');
-}
-const next = await freshExecutor.resume(firstPosition, signal);
-if (next.kind === 'waiting') {
-  const sibling = next.positions[0];
-  if (sibling === undefined) {
-    throw new Error('The waiting result has no position.');
-  }
-  await freshExecutor.resume(sibling, signal);
-}
-```
-
-At this stage, the executor checks the stored graph definition and plan. It
-does not check general code or node-body fingerprints.
-
-If the graph declares memory as required, `createGraphExecutor` also requires a
-live `Memory` object. The executor passes that same object into the node attempt,
-and a data-only node receives it in its context. The runtime check covers
-TypeScript and plain JavaScript callers.
-
-A data-only node can call another executor and return the child result. This is
-how parent and child graphs compose without adding a second execution system.
-
-## Turn-taking example
-
-The outside example alternates a writer and critic for three rounds. Each critic
-prompt includes that dispatch's position summary. The example stores the run,
-starts the public executor, and uses a real dead-primary path through two
-`MockEngine` instances. The first critic attempt records the primary as dead.
-The next two critic attempts go straight to the fallback. The critic permits a
-crash retry.
-
-`examples/turn-taking.ts` reports six dispatches, one primary call, three fallback calls, and
-the final result. The same source compiles and runs from the packed package with
-TypeScript 6 and TypeScript 7.
+The file is `examples/preflight-executor.ts`, with its engine and bindings
+in `examples/preflight-host.mjs`. The executor's options and result types
+are exported by `@obversa/runtime`; `readRunPreflight` reads the preflight
+record of a stored run.
