@@ -1,4 +1,4 @@
-import type { Engine, ExecutionTarget } from '@obversa/runtime';
+import type { Engine, ExecutionTarget, KickbackBudget } from '@obversa/runtime';
 
 export interface TeamSeat {
   readonly engine: Engine;
@@ -27,14 +27,14 @@ export interface ReviewerSeat {
 export interface PairConfig extends TeamInput {
   readonly writer: TeamSeat;
   readonly reviewer: TeamSeat;
-  readonly maxKickbacks?: number;
+  readonly maxKickbacks?: KickbackBudget;
 }
 
 export interface PanelConfig extends TeamInput {
   readonly implement: TeamSeat;
   readonly reviewers: readonly ReviewerSeat[];
   readonly threshold: number;
-  readonly maxKickbacks?: number;
+  readonly maxKickbacks?: KickbackBudget;
 }
 
 export interface FeatureDeliveryConfig extends TeamInput {
@@ -45,5 +45,5 @@ export interface FeatureDeliveryConfig extends TeamInput {
   readonly reviewers: readonly ReviewerSeat[];
   readonly reviewThreshold: number;
   readonly approve: TeamSeat;
-  readonly maxKickbacks?: number;
+  readonly maxKickbacks?: KickbackBudget;
 }

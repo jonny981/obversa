@@ -17,10 +17,37 @@ const testCommand = {
 };
 
 function config(overrides: Partial<FeatureDeliveryConfig> = {}): FeatureDeliveryConfig {
-  const analyse = scriptedEngine('analyse', [async () => pass('accepted')]);
-  const implement = scriptedEngine('implement', [async () => pass('accepted')]);
+  const analyse = scriptedEngine('analyse', [async (request) => {
+    const output = request.prompt.match(/Write only ([^\.]+\.md)/)?.[1] ?? 'team-output/unknown.md';
+    await mkdir(join(request.cwd!, 'team-output'), { recursive: true });
+    const text = output.endsWith('research-requirements.md')
+      ? '1. Export result.\n2. Test result.\n'
+      : output.endsWith('plan.md')
+        ? '1. Export result. Acceptance check: source exists.\n2. Test result. Acceptance check: command exits 0.\n'
+        : 'The workspace context is recorded.\n';
+    await writeFile(join(request.cwd!, output), text);
+    return pass('accepted');
+  }]);
+  const implement = scriptedEngine('implement', [async (request) => {
+    if (request.prompt.includes('write the declared tests first')) {
+      await mkdir(join(request.cwd!, 'test'), { recursive: true });
+      await writeFile(
+        join(request.cwd!, 'test/result.test.mjs'),
+        "import assert from 'node:assert/strict';\nimport test from 'node:test';\ntest('result is 11', () => assert.equal(11, 11));\n",
+      );
+    } else {
+      await mkdir(join(request.cwd!, 'src'), { recursive: true });
+      await writeFile(join(request.cwd!, 'src/result.mjs'), 'export const result = 11;\n');
+    }
+    return pass('accepted');
+  }]);
   const reviewer = scriptedEngine('reviewer', [async () => pass('accepted')]);
-  const approve = scriptedEngine('approve', [async () => pass('accepted')]);
+  const approve = scriptedEngine('approve', [async (request) => {
+    const marker = request.prompt.match(/marker value (.+?) anywhere/)?.[1] ?? '';
+    await mkdir(join(request.cwd!, 'team-output'), { recursive: true });
+    await writeFile(join(request.cwd!, 'team-output/approval.md'), `Run marker: ${marker}\n`);
+    return pass('accepted');
+  }]);
   return {
     brief: 'Deliver a module that exports result 11.',
     workspace: '/tmp/obversa-teams-feature',
@@ -32,6 +59,7 @@ function config(overrides: Partial<FeatureDeliveryConfig> = {}): FeatureDelivery
     reviewers: [{ name: 'correctness', seat: seat(reviewer, 'reviewer'), scope: 'implementation' }],
     reviewThreshold: 1,
     approve: seat(approve, 'approve'),
+    maxKickbacks: { plan: 3, 'tests-first': 3, implement: 3 },
     ...overrides,
   };
 }
@@ -41,7 +69,7 @@ describe('featureDelivery D48 contract', () => {
     const invalid = config() as unknown as Record<string, unknown>;
     delete invalid.testFiles;
 
-    expect(() => featureDelivery(invalid as FeatureDeliveryConfig)).toThrow(/testFiles/i);
+    expect(() => featureDelivery(invalid as unknown as FeatureDeliveryConfig)).toThrow(/testFiles/i);
   });
 
   it('exposes the fine-grained stage list', () => {
@@ -202,6 +230,7 @@ describe('featureDelivery D48 contract', () => {
         reviewers: [{ name: 'correctness', seat: seat(reviewer, 'reviewer'), scope: 'implementation' }],
         reviewThreshold: 1,
         approve: seat(approve, 'approve'),
+        maxKickbacks: { plan: 3, 'tests-first': 3, implement: 3 },
       }), { cwd: workspace });
 
       expect(result.outcome.status, JSON.stringify(result.outcome)).toBe('pass');
@@ -232,11 +261,9 @@ describe('featureDelivery D48 contract', () => {
         }
         return pass(`${target} accepted`);
       }]);
-      const budget = { plan: 3, 'tests-first': 3, implement: 3 };
       const result = await run(featureDelivery({
         ...base,
         reviewers: [{ name: 'correctness', seat: seat(reviewer, 'budget-reviewer'), scope: 'implementation' }],
-        maxKickbacks: budget as unknown as number,
       }), {
         cwd: workspace,
         onEvent: (event) => events.push(event),

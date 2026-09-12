@@ -9,6 +9,7 @@ import {
   gateJob,
   type Job,
   type JobContext,
+  type KickbackBudget,
 } from '@obversa/runtime';
 
 import { outcomeFromAgentText } from './agent-response.js';
@@ -75,9 +76,20 @@ export function assertReviewers(reviewers: readonly ReviewerSeat[], threshold: n
   }
 }
 
-export function assertKickbacks(maxKickbacks: number): void {
-  if (!Number.isInteger(maxKickbacks) || maxKickbacks < 0) {
-    throw new TypeError('maxKickbacks must be a non-negative integer');
+export function assertKickbacks(maxKickbacks: KickbackBudget): void {
+  if (typeof maxKickbacks === 'number') {
+    if (!Number.isInteger(maxKickbacks) || maxKickbacks < 0) {
+      throw new TypeError('maxKickbacks must be a non-negative integer or target budget map');
+    }
+    return;
+  }
+  if (!maxKickbacks || typeof maxKickbacks !== 'object') {
+    throw new TypeError('maxKickbacks must be a non-negative integer or target budget map');
+  }
+  for (const limit of Object.values(maxKickbacks)) {
+    if (!Number.isInteger(limit) || limit < 0) {
+      throw new TypeError('maxKickbacks must be a non-negative integer or target budget map');
+    }
   }
 }
 

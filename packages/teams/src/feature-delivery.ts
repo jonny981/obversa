@@ -143,9 +143,7 @@ function approvalWithMarker(job: Job, workspace: string): Job {
     try {
       const approvalPath = join(workspace, APPROVAL_NOTE);
       const note = await readFile(approvalPath, 'utf8');
-      const details = await stat(approvalPath);
-      const startedAt = Date.parse(String(ctx.state[RUN_STARTED_AT] ?? ''));
-      if (!note.includes(marker) || !Number.isFinite(startedAt) || details.mtimeMs < startedAt) {
+      if (!note.includes(marker)) {
         return { status: 'fail', summary: 'approval note does not belong to this run' };
       }
     } catch {

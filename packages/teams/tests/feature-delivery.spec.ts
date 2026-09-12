@@ -57,7 +57,7 @@ function baseConfig(workspace: string) {
   ]);
   const reviewer = scriptedEngine('reviewer', [async () => pass('review accepted')]);
   const approve = scriptedEngine('approve', [async (request) => {
-    const marker = request.prompt.match(/Run marker: ([^\"]+)/)?.[1]?.trim() ?? '';
+    const marker = request.prompt.match(/marker value (.+?) anywhere/)?.[1]?.trim() ?? '';
     await writeNote(request.cwd!, 'team-output/approval.md', `**Date:** 2026-09-11\nRun marker: ${marker}\n`);
     return pass('approved');
   }]);

@@ -40,6 +40,7 @@ const team = featureDelivery({
   reviewers: [{ name: 'correctness', seat: reviewer, scope: 'implementation' }],
   reviewThreshold: 1,
   approve,
+  maxKickbacks: { plan: 3, 'tests-first': 3, implement: 3 },
 });
 
 const result = await run(team, { cwd: workspace });

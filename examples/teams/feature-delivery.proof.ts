@@ -46,7 +46,7 @@ try {
   ]);
   const reviewer = scriptedSeat('feature-reviewer', 'claude', [async () => pass('review accepted')]);
   const approve = scriptedSeat('feature-approve', 'claude', [async (request) => {
-    const marker = request.prompt.match(/Run marker: ([^\"]+)/)?.[1]?.trim() ?? '';
+    const marker = request.prompt.match(/marker value (.+?) anywhere/)?.[1]?.trim() ?? '';
     await writeNote(request.cwd!, 'team-output/approval.md');
     await writeFile(join(request.cwd!, 'team-output/approval.md'), `Date: 2026-09-11\nRun marker: ${marker}\n`);
     return pass('delivery approved');
@@ -63,6 +63,7 @@ try {
     reviewers: [{ name: 'correctness', seat: reviewer, scope: 'implementation' }],
     reviewThreshold: 1,
     approve,
+    maxKickbacks: { plan: 3, 'tests-first': 3, implement: 3 },
   });
   let testCommandsRun = 0;
   let reviewRounds = 0;
