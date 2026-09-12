@@ -89,12 +89,27 @@ const CANDIDATE_TEST = [
   '',
 ].join('\n');
 
-async function runNodeTest(ctx: JobContext): Promise<void> {
-  await promisify(execFile)(
-    process.execPath,
-    ['--experimental-strip-types', '--test', 'candidate.test.ts'],
-    { cwd: ctx.workspace.dir },
-  );
+async function runNodeTest(ctx: JobContext, candidate: number): Promise<void> {
+  const args = ['--experimental-strip-types', '--test', 'candidate.test.ts'];
+  try {
+    await promisify(execFile)(process.execPath, args, { cwd: ctx.workspace.dir });
+  } catch (error) {
+    const result = error as {
+      code?: number | string;
+      signal?: string | null;
+      stdout?: string;
+      stderr?: string;
+    };
+    console.error(JSON.stringify({
+      candidate,
+      command: [process.execPath, ...args],
+      code: result.code ?? null,
+      signal: result.signal ?? null,
+      stdout: result.stdout ?? '',
+      stderr: result.stderr ?? '',
+    }));
+    throw error;
+  }
 }
 
 const score = async (outcome: Outcome, ctx: JobContext): Promise<number> => {
@@ -126,7 +141,7 @@ try {
       candidate: (i) => fnJob(`candidate-${i}`, async (ctx) => {
         await writeFile(join(ctx.workspace.dir, 'src/retry.ts'), TASK[1] + ANGLES[i]!);
         await writeFile(join(ctx.workspace.dir, 'candidate.test.ts'), CANDIDATE_TEST);
-        await runNodeTest(ctx);
+        await runNodeTest(ctx, i);
         return { status: 'pass' as const, data: { candidate: i } };
       }),
       judge: score,
