@@ -114,6 +114,7 @@
     "verify:d45": "pnpm verify:d36",
     "verify:d17": "pnpm verify:d45 && pnpm example:preflight && pnpm example:runner-preflight",
     "verify:f34": "pnpm verify:d17 && pnpm example:command-kickback",
+    "verify:f36": "pnpm verify:f34 && pnpm example:approval",
     "verify:d24": "pnpm verify:d23",
     "changeset": "changeset",
     "version-packages": "changeset version",
@@ -128,7 +129,8 @@
     "test:skill-install": "node --test scripts/skill-install.spec.mjs",
     "example:write-and-review": "pnpm --filter @obversa/runtime exec tsx ../../examples/write-and-review.ts",
     "example:one-agent-job": "pnpm --filter @obversa/runtime exec tsx ../../examples/one-agent-job.ts",
-    "example:command-kickback": "pnpm --filter @obversa/runtime exec tsx ../../examples/command-kickback.ts"
+    "example:command-kickback": "pnpm --filter @obversa/runtime exec tsx ../../examples/command-kickback.ts",
+    "example:approval": "pnpm --filter @obversa/runtime exec tsx ../../examples/approval.ts"
   },
   "devDependencies": {
     "@arethetypeswrong/cli": "0.18.5",
