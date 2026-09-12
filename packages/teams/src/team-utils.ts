@@ -8,6 +8,7 @@ import {
   dag,
   gateJob,
   type Job,
+  type JobContext,
 } from '@obversa/runtime';
 
 import { outcomeFromAgentText } from './agent-response.js';
@@ -65,8 +66,12 @@ export function assertReviewers(reviewers: readonly ReviewerSeat[], threshold: n
   if (!Number.isInteger(threshold) || threshold < 1 || threshold > reviewers.length) {
     throw new TypeError(`review threshold must be an integer from 1 to ${reviewers.length}`);
   }
+  const names = new Set<string>();
   for (const reviewer of reviewers) {
-    if (!reviewer.name.trim()) throw new TypeError('reviewer name must not be empty');
+    const name = reviewer.name.trim();
+    if (!name) throw new TypeError('reviewer name must not be empty');
+    if (names.has(name)) throw new TypeError(`reviewer name must be unique: ${name}`);
+    names.add(name);
   }
 }
 
@@ -155,6 +160,15 @@ export function requireNoFiles(
   };
 }
 
+export function requireFilesUnchanged(
+  label: string,
+  job: Job,
+  workspace: string,
+  files: readonly string[],
+): Job {
+  return requireNoFiles(label, job, workspace, files);
+}
+
 interface FileSnapshot {
   exists: boolean;
   hash: string | null;
@@ -183,7 +197,7 @@ export function teamAgent(
   label: string,
   seat: TeamSeat,
   input: TeamInput,
-  instructions: string,
+  instructions: string | ((ctx: JobContext) => string),
   target?: string,
 ): Job {
   const identity = seatIdentity(seat);
@@ -193,7 +207,7 @@ export function teamAgent(
     model: identity.model,
     cwd: input.workspace,
     consumeFeedback: target !== undefined,
-    prompt: `${rolePrompt(label, input.brief)}\n${instructions}\nReturn one JSON object: {"status":"pass"|"revise","summary":"...","findings":[{"evidence":"..."}]}`,
+    prompt: (ctx) => `${rolePrompt(label, input.brief)}\n${typeof instructions === 'function' ? instructions(ctx) : instructions}\nReturn one JSON object: {"status":"pass"|"revise","summary":"...","findings":[{"evidence":"..."}]}`,
     outcome: (text) => outcomeFromAgentText(text, target),
   });
 }
@@ -201,6 +215,7 @@ export function teamAgent(
 export function panelReviewers(
   reviewers: readonly ReviewerSeat[],
   input: TeamInput,
+  reviewTarget?: string,
 ): Array<{ name: string; scope?: string; job: Job }> {
   return reviewers.map((reviewer) => ({
       name: reviewer.name,
@@ -209,7 +224,12 @@ export function panelReviewers(
         reviewer.name,
         reviewer.seat,
         input,
-        `Inspect the files and test evidence. Write reviews/${reviewer.name}.json.`,
+        () => [
+          `Review target: ${reviewTarget ?? 'the supplied files and test evidence'}.`,
+          'Judge only that target against this stage gate; do not require files from another stage.',
+          `Write reviews/${reviewer.name}.json.`,
+          reviewer.scope ? `Scope: ${reviewer.scope}` : undefined,
+        ].filter(Boolean).join('\n'),
       ),
   }));
 }

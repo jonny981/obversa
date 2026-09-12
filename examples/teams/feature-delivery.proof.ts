@@ -6,89 +6,99 @@ import { join } from 'node:path';
 import { run } from '@obversa/runtime';
 import { featureDelivery } from '@obversa/teams';
 
-import { pass, revise, scriptedSeat } from './scripted-engine.js';
+import { pass, scriptedSeat } from './scripted-engine.js';
 
-async function writeBrief(cwd: string): Promise<void> {
+async function writeNote(cwd: string, file: string): Promise<void> {
   await mkdir(join(cwd, 'team-output'), { recursive: true });
-  await writeFile(join(cwd, 'team-output/brief.md'), 'The module must export result 11.\n');
+  const text = file.endsWith('research-requirements.md')
+    ? '1. Export result.\n2. Test result.\n'
+    : file.endsWith('plan.md')
+      ? '1. Export result. Acceptance check: source exists.\n2. Test result. Acceptance check: command exits 0.\n'
+      : 'The workspace context is recorded.\n';
+  await writeFile(join(cwd, file), text);
 }
 
-async function writeImplementation(cwd: string, repaired: boolean): Promise<void> {
-  await mkdir(join(cwd, 'src'), { recursive: true });
+async function writeTests(cwd: string): Promise<void> {
   await mkdir(join(cwd, 'test'), { recursive: true });
-  await writeFile(join(cwd, 'src/result.mjs'), `export const result = ${repaired ? 11 : 10};\n`);
   await writeFile(
     join(cwd, 'test/result.test.mjs'),
-    "import assert from 'node:assert/strict';\nimport test from 'node:test';\nimport { result } from '../src/result.mjs';\ntest('result exists', () => assert.equal(typeof result, 'number'));\n",
+    "import assert from 'node:assert/strict';\nimport test from 'node:test';\nimport { result } from '../src/result.mjs';\ntest('result is 11', () => assert.equal(result, 11));\n",
   );
 }
 
-const workspace = await mkdtemp(join(tmpdir(), 'obversa-team-feature-example-'));
+async function writeSource(cwd: string, result: number): Promise<void> {
+  await mkdir(join(cwd, 'src'), { recursive: true });
+  await writeFile(join(cwd, 'src/result.mjs'), `export const result = ${result};\n`);
+}
+
+const workspace = await mkdtemp(join(tmpdir(), 'obversa-team-feature-proof-'));
 try {
   const analyse = scriptedSeat('feature-analyse', 'claude', [async (request) => {
-    await writeBrief(request.cwd!);
-    return pass('brief accepted');
+    const output = request.prompt.match(/Write only ([^\.]+\.md)/)?.[1] ?? 'team-output/unknown.md';
+    await writeNote(request.cwd!, output);
+    return pass('research and plan note accepted');
   }]);
+  let implementationCalls = 0;
   const implement = scriptedSeat('feature-implement', 'gpt', [
-    async (request) => { await writeImplementation(request.cwd!, false); return pass('first implementation written'); },
-    async (request) => { await writeImplementation(request.cwd!, true); return pass('implementation repaired'); },
+    async (request) => { await writeTests(request.cwd!); return pass('tests written first'); },
+    async (request) => { implementationCalls += 1; await writeSource(request.cwd!, 10); return pass('first implementation written'); },
+    async (request) => { implementationCalls += 1; await writeSource(request.cwd!, 11); return pass('implementation repaired'); },
   ]);
-  const correctness = scriptedSeat('feature-correctness', 'claude', [
-    async (request) => {
-      await mkdir(join(request.cwd!, 'reviews'), { recursive: true });
-      await writeFile(join(request.cwd!, 'reviews/correctness.json'), '{"round":1}\n');
-      return revise('result is not 11', 'the implementation does not meet the brief');
-    },
-    async (request) => {
-      await writeFile(join(request.cwd!, 'reviews/correctness.json'), '{"round":2}\n');
-      return pass('result meets the brief');
-    },
-  ]);
-  const scope = scriptedSeat('feature-scope', 'big-pickle', [
-    async (request) => {
-      await mkdir(join(request.cwd!, 'reviews'), { recursive: true });
-      await writeFile(join(request.cwd!, 'reviews/scope.json'), '{"round":1}\n');
-      return pass('scope is inside the brief');
-    },
-    async () => pass('scope remains inside the brief'),
-  ]);
+  const reviewer = scriptedSeat('feature-reviewer', 'claude', [async () => pass('review accepted')]);
   const approve = scriptedSeat('feature-approve', 'claude', [async (request) => {
-    await writeFile(join(request.cwd!, 'team-output/approval.md'), 'The change is ready to ship.\n');
+    const marker = request.prompt.match(/Run marker: ([^\"]+)/)?.[1]?.trim() ?? '';
+    await writeNote(request.cwd!, 'team-output/approval.md');
+    await writeFile(join(request.cwd!, 'team-output/approval.md'), `Date: 2026-09-11\nRun marker: ${marker}\n`);
     return pass('delivery approved');
   }]);
-  let testRuns = 0;
+
   const team = featureDelivery({
     brief: 'Deliver a module that exports result 11.',
     workspace,
     files: ['src/result.mjs', 'test/result.test.mjs'],
+    testFiles: ['test/result.test.mjs'],
     test: { command: process.execPath, args: ['--test', 'test/result.test.mjs'] },
     analyse,
     implement,
-    reviewers: [
-      { name: 'correctness', seat: correctness },
-      { name: 'scope', seat: scope },
-    ],
-    reviewThreshold: 2,
+    reviewers: [{ name: 'correctness', seat: reviewer, scope: 'implementation' }],
+    reviewThreshold: 1,
     approve,
-    maxKickbacks: 1,
   });
+  let testCommandsRun = 0;
+  let reviewRounds = 0;
+  let acceptedReviewPanels = 0;
   const result = await run(team, {
     cwd: workspace,
     onEvent: (event) => {
-      if (event.kind === 'condition:result' && event.label === 'test') testRuns += 1;
+      if (event.kind === 'condition:result' && event.label === 'test') testCommandsRun += 1;
+      if (event.kind === 'loop:condition' && event.which === 'until' && event.path.at(-1) === 'implementation-loop') testCommandsRun += 1;
+      if (event.kind === 'loop:review' && event.path.at(-1) === 'implementation-loop' && event.outcome.status === 'pass') reviewRounds += 1;
+      if (event.kind === 'job:end' && event.label.endsWith('-review') && event.outcome.status === 'pass') acceptedReviewPanels += 1;
     },
   });
   assert.equal(result.outcome.status, 'pass');
-  assert.equal(testRuns, 2);
-  assert.equal(implement.calls.length, 2);
+  assert.equal(implementationCalls, 2);
   assert.match(await readFile(join(workspace, 'src/result.mjs'), 'utf8'), /result = 11/);
-  assert.match(await readFile(join(workspace, 'team-output/approval.md'), 'utf8'), /ready to ship/);
+  assert.match(await readFile(join(workspace, 'team-output/approval.md'), 'utf8'), /Run marker:/);
+  assert.match(await readFile(join(workspace, 'team-output/evidence.md'), 'utf8'), /Verification: passed/);
   console.log(JSON.stringify({
     status: result.outcome.status,
-    filesWritten: ['team-output/brief.md', 'team-output/approval.md', 'src/result.mjs', 'test/result.test.mjs', 'reviews/correctness.json', 'reviews/scope.json'],
-    testCommandsRun: testRuns,
-    reviewRounds: 2,
-    kickbacks: 1,
+    stages: 11,
+    testCommandsRun,
+    implementationIterations: implementationCalls,
+    reviewRounds,
+    acceptedReviewPanels,
+    kickbacks: 0,
+    filesWritten: [
+      'team-output/research-context.md',
+      'team-output/research-requirements.md',
+      'team-output/plan.md',
+      'team-output/approval.md',
+      'team-output/evidence.md',
+      'team-output/learning.md',
+      'src/result.mjs',
+      'test/result.test.mjs',
+    ],
   }, null, 2));
 } finally {
   await rm(workspace, { recursive: true, force: true });

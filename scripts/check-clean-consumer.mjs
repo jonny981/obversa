@@ -800,6 +800,7 @@ async function main() {
     await copyFile(join(root, 'examples', 'teams', 'threshold-panel.proof.ts'), join(consumerDirectory, 'teams', 'threshold-panel.proof.ts'));
     await copyFile(join(root, 'examples', 'teams', 'feature-delivery.ts'), join(consumerDirectory, 'teams', 'feature-delivery.ts'));
     await copyFile(join(root, 'examples', 'teams', 'feature-delivery.proof.ts'), join(consumerDirectory, 'teams', 'feature-delivery.proof.ts'));
+    await copyFile(join(root, 'examples', 'real-process.ts'), join(consumerDirectory, 'real-process.ts'));
 
     run('pnpm', ['install', '--prefer-offline', '--ignore-scripts'], {
       cwd: consumerDirectory,
@@ -896,9 +897,12 @@ async function main() {
     assert.equal(compiledTeamPanel.threshold, '3 of 3');
     assert.deepEqual(compiledTeamPanel.reviewerCalls, [2, 2, 2]);
     assert.equal(compiledTeamFeature.status, 'pass');
-    assert.equal(compiledTeamFeature.testCommandsRun, 2);
-    assert.equal(compiledTeamFeature.reviewRounds, 2);
-    assert.equal(compiledTeamFeature.kickbacks, 1);
+    assert.equal(compiledTeamFeature.stages, 11);
+    assert.equal(compiledTeamFeature.testCommandsRun, 3);
+    assert.equal(compiledTeamFeature.implementationIterations, 2);
+    assert.equal(compiledTeamFeature.reviewRounds, 1);
+    assert.equal(compiledTeamFeature.acceptedReviewPanels, 5);
+    assert.equal(compiledTeamFeature.kickbacks, 0);
     assert.deepEqual(compiledTournament, directTournament);
     assert.equal(compiledTournament.status, 'pass');
     assert.equal(compiledTournament.candidates, 3);

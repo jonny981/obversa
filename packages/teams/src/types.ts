@@ -38,6 +38,8 @@ export interface PanelConfig extends TeamInput {
 }
 
 export interface FeatureDeliveryConfig extends TeamInput {
+  /** Files created by the tests-first stage. Every entry must be in `files`. */
+  readonly testFiles: readonly string[];
   readonly analyse: TeamSeat;
   readonly implement: TeamSeat;
   readonly reviewers: readonly ReviewerSeat[];
