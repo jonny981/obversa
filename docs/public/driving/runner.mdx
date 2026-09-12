@@ -376,8 +376,11 @@ size and quota limits, and the watchdog verifies the stored bytes before
 returning `done.output`. An unreadable artifact returns `fail` with
 `TERMINAL_ARTIFACT`. Engine responses are stored the same way as
 `runner-engine-parts` artifacts; a response that fits the node's output
-limit can still exceed a storage limit, and a refused write becomes a
-failed node with `EFFECT_FAILED`.
+limit can still exceed a storage limit: size or quota refusal raises
+`StorageError` with `STORAGE_LIMIT_EXCEEDED`, a match on a configured known
+secret raises `KNOWN_SECRET`, and inside the worker the refused write
+becomes a failed node with `EFFECT_FAILED`. With the built-in dag form a
+failed required node makes `done` resolve to `fail` with `DAG_NODE_FAILED`.
 
 ## The host module
 
