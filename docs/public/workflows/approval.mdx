@@ -128,10 +128,11 @@ question was asked again about the new attempt.
   history.
 - **The client is the run's.** `run` takes `callbacks`, the in-memory
   client or the stored one (`RunCallbacks` names either); every job sees it
-  as `ctx.callbacks`. The default is one in memory that lives for the
-  process. Pass the stored client over a directory and a paused run finds
-  its answer after a restart: the next run over the same store reads it
-  from the history.
+  as `ctx.callbacks`. The default is one in memory that lives for that
+  run. Pass the stored client over a directory and a paused run finds its
+  answer after a restart: the next run over the same store reads it from
+  the history. One approval label per workflow: two steps with the same
+  label ask the same question and supersede each other.
 - **A question nobody can answer fails plainly.** After asking, the step
   reads the request's state; if it is neither pending nor answered, the
   step fails with a summary that says so instead of waiting for nothing.
@@ -142,6 +143,11 @@ question was asked again about the new attempt.
 
 - **The in-memory client forgets.** A run that must survive a process exit
   needs the stored client. See [callback gates](/reviewing/callback-gates).
+- **Running again runs the earlier steps again.** `run` starts a fresh
+  record, so the steps ahead of the question do their work again before
+  the question finds its answer. When those steps cost money, resume the
+  paused run through the supervised runner instead; see
+  [driving runs](/driving/runner).
 - **An approval bound to bytes is a different tool.** `approval` asks about
   outcomes. For an approval that must name the exact files it approved,
   use the proof-bound gate in [proof acceptance](/reviewing/proof-acceptance).
