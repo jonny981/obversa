@@ -393,7 +393,7 @@ describe('featureDelivery D48 contract', () => {
       const output = request.prompt.match(/Write only ([^\.]+\.md)/)?.[1] ?? 'team-output/unknown.md';
       await mkdir(join(request.cwd!, 'team-output'), { recursive: true });
       if (output.endsWith('research-requirements.md')) {
-        await writeFile(join(request.cwd!, output), 'REQ-1: Export result.\nREQ-2: Test result.\n');
+        await writeFile(join(request.cwd!, output), 'Export result: **REQ-1**.\nTest result: - REQ-2.\n');
       } else if (output.endsWith('plan.md')) {
         await writeFile(join(request.cwd!, output), 'REQ-1: Acceptance check: source exists.\n');
       } else {
@@ -457,6 +457,44 @@ describe('featureDelivery D48 contract', () => {
       expect(planWrites).toBe(2);
       expect(planPrompts[1]).toContain('Feedback to address');
       expect(planPrompts[1]).toContain('REQ-2');
+    } finally {
+      await rm(workspace, { recursive: true, force: true });
+    }
+  });
+
+  it('routes an id-less requirements note back to research once', async () => {
+    const workspace = await mkdtemp(join(tmpdir(), 'obversa-teams-requirement-id-round-trip-'));
+    let requirementWrites = 0;
+    const requirementPrompts: string[] = [];
+    const analyse = scriptedEngine('analyse', [async (request) => {
+      const output = request.prompt.match(/Write only ([^\.]+\.md)/)?.[1] ?? 'team-output/unknown.md';
+      await mkdir(join(request.cwd!, 'team-output'), { recursive: true });
+      if (output.endsWith('research-requirements.md')) {
+        requirementWrites += 1;
+        requirementPrompts.push(request.prompt);
+        await writeFile(
+          join(request.cwd!, output),
+          requirementWrites === 1
+            ? 'The implementation should be tested.\n'
+            : 'The implementation should satisfy REQ-1.\n',
+        );
+      } else if (output.endsWith('plan.md')) {
+        await writeFile(join(request.cwd!, output), 'REQ-1: Acceptance check: the test passes.\n');
+      } else {
+        await writeFile(join(request.cwd!, output), 'The workspace context is recorded.\n');
+      }
+      return pass('accepted');
+    }]);
+    try {
+      const result = await run(featureDelivery(config({
+        workspace,
+        analyse: seat(analyse, 'analyse'),
+      })), { cwd: workspace });
+
+      expect(result.outcome.status, JSON.stringify(result.outcome)).toBe('pass');
+      expect(requirementWrites).toBe(2);
+      expect(requirementPrompts[1]).toContain('Feedback to address');
+      expect(requirementPrompts[1]).toContain('REQ-n');
     } finally {
       await rm(workspace, { recursive: true, force: true });
     }

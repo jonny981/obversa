@@ -152,17 +152,26 @@ function failOnUnchangedNote(
 }
 
 const REQUIREMENT_ID = /\bREQ-\d+\b/g;
-const REQUIREMENT_LINE = /^\s*(REQ-\d+)\s*:/;
 
-function idsInPlan(text: string): string[] {
+function idsInText(text: string): string[] {
   return [...text.matchAll(REQUIREMENT_ID)].map(([id]) => id!);
 }
 
-function idsInRequirements(text: string): string[] {
-  return text.split(/\r?\n/).flatMap((line) => {
-    const id = REQUIREMENT_LINE.exec(line)?.[1];
-    return id ? [id] : [];
-  });
+function requireRequirementIds(workspace: string): Job {
+  return async () => {
+    try {
+      const requirements = await readFile(join(workspace, RESEARCH_REQUIREMENTS_NOTE), 'utf8');
+      if (idsInText(requirements).length > 0) return { status: 'pass', summary: 'requirements carry REQ-n ids' };
+    } catch {
+      // Return the same targeted repair below: the research note is the missing input.
+    }
+    return revisionRequest({
+      target: 'research-requirements',
+      source: 'plan-requirement-id-check',
+      reason: 'requirements note contains no REQ-n ids',
+      findings: [{ severity: 'block', evidence: 'Add a REQ-n id to every requirement.' }],
+    });
+  };
 }
 
 function planRequirementsReview(workspace: string): Job {
@@ -170,8 +179,16 @@ function planRequirementsReview(workspace: string): Job {
     try {
       const requirements = await readFile(join(workspace, RESEARCH_REQUIREMENTS_NOTE), 'utf8');
       const plan = await readFile(join(workspace, PLAN_NOTE), 'utf8');
-      const required = [...new Set(idsInRequirements(requirements))];
-      const planned = new Set(idsInPlan(plan));
+      const required = [...new Set(idsInText(requirements))];
+      const planned = new Set(idsInText(plan));
+      if (required.length === 0) {
+        return revisionRequest({
+          target: 'research-requirements',
+          source: 'plan-requirement-id-check',
+          reason: 'requirements note contains no REQ-n ids',
+          findings: [{ severity: 'block', evidence: 'Add a REQ-n id to every requirement.' }],
+        });
+      }
       const missing = required.filter((id) => !planned.has(id));
       const extra = [...planned].filter((id) => !required.includes(id));
       if (missing.length || extra.length) {
@@ -193,13 +210,6 @@ function planRequirementsReview(workspace: string): Job {
           source: 'plan-requirement-id-check',
           reason: `plan ${parts.join('; ')}`,
           findings,
-        });
-      }
-      if (required.length === 0) {
-        return revisionRequest({
-          source: 'plan-requirement-id-check',
-          reason: 'requirements note contains no REQ-n ids',
-          findings: [{ severity: 'block', evidence: 'Start every requirement line with an id such as REQ-1.' }],
         });
       }
       return { status: 'pass', summary: `plan covers ${required.join(', ')}` };
@@ -282,15 +292,26 @@ function researchLoop(
   note: string,
   review: Job,
 ): Job {
-  return loop({
+  let inheritedReview: Outcome | undefined;
+  const research = loop({
     name,
-    body: failOnUnchangedNote(name.replace(/-loop$/, ''), writer, workspace, note),
+    body: failOnUnchangedNote(
+      name.replace(/-loop$/, ''),
+      async (ctx) => writer({ ...ctx, lastReview: ctx.lastReview ?? inheritedReview }),
+      workspace,
+      note,
+      true,
+    ),
     until: noteExists(workspace, note),
     review,
     max: 3,
     maxReviewRestarts: 3,
     noProgress: { window: 2, gate: true },
   });
+  return async (parent) => {
+    inheritedReview = parent.lastReview;
+    return research(parent);
+  };
 }
 
 export function featureDelivery(config: FeatureDeliveryConfig) {
@@ -301,7 +322,10 @@ export function featureDelivery(config: FeatureDeliveryConfig) {
     config.implement,
     ...config.reviewers.map(({ seat }) => seat),
   ]);
-  const maxKickbacks = config.maxKickbacks ?? 1;
+  const configuredKickbacks = config.maxKickbacks ?? 1;
+  const maxKickbacks = typeof configuredKickbacks === 'number'
+    ? configuredKickbacks
+    : { 'research-requirements': 1, ...configuredKickbacks };
   assertKickbacks(maxKickbacks);
 
   const contextWriter = outputWriter(
@@ -323,7 +347,7 @@ export function featureDelivery(config: FeatureDeliveryConfig) {
     config.analyse,
     config,
     RESEARCH_REQUIREMENTS_NOTE,
-    `Read ${RESEARCH_CONTEXT_NOTE} and turn it into small testable requirements. Every requirement line must start with an id in the exact form REQ-n. Do not write implementation or test files.`,
+    `Read ${RESEARCH_CONTEXT_NOTE} and turn it into small testable requirements. Give every requirement an id in the form REQ-n. Do not write implementation or test files.`,
     'research-requirements',
   );
   const requirementsReview = scopedPanel(
@@ -332,18 +356,20 @@ export function featureDelivery(config: FeatureDeliveryConfig) {
     'research-requirements',
     RESEARCH_REQUIREMENTS_NOTE,
   );
-  const plan = loop({
+  const planWriter = outputWriter(
+    'plan',
+    config.analyse,
+    config,
+    PLAN_NOTE,
+    `Read ${RESEARCH_REQUIREMENTS_NOTE} and write a short executable plan. Every acceptance check must name the REQ-n it covers. Do not write implementation or test files.`,
+    'plan',
+  );
+  let planParentReview: Outcome | undefined;
+  const planLoop = loop({
     name: 'plan-loop',
     body: failOnUnchangedNote(
       'plan',
-      outputWriter(
-        'plan',
-        config.analyse,
-        config,
-        PLAN_NOTE,
-        `Read ${RESEARCH_REQUIREMENTS_NOTE} and write a short executable plan. Every acceptance check must name the REQ-n it covers. Do not write implementation or test files.`,
-        'plan',
-      ),
+      async (ctx) => planWriter({ ...ctx, lastReview: ctx.lastReview ?? planParentReview }),
       config.workspace,
       PLAN_NOTE,
       true,
@@ -354,6 +380,12 @@ export function featureDelivery(config: FeatureDeliveryConfig) {
     maxReviewRestarts: 3,
     noProgress: { window: 2, gate: true },
   });
+  const plan = async (parent: JobContext): Promise<Outcome> => {
+    const requirementsCheck = await requireRequirementIds(config.workspace)(parent);
+    if (requirementsCheck.status !== 'pass') return requirementsCheck;
+    planParentReview = parent.lastReview;
+    return planLoop(parent);
+  };
   const planReview = scopedPanel(
     'plan-review',
     config,

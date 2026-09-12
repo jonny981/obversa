@@ -1,5 +1,3 @@
-import { appendFileSync, writeFileSync } from 'node:fs';
-
 import { ClaudeCliEngine } from '@obversa/engine-claude-cli';
 import { CodexEngine } from '@obversa/engine-codex';
 import { run } from '@obversa/runtime';
@@ -45,13 +43,9 @@ const team = featureDelivery({
   maxKickbacks: { plan: 3, 'tests-first': 3, implement: 3 },
 });
 
-const eventLog = process.env.OBVERSA_TEAM_EVENT_LOG;
-if (eventLog) writeFileSync(eventLog, '');
 const result = await run(team, {
   cwd: workspace,
-  ...(eventLog
-    ? { onEvent: (event: unknown) => appendFileSync(eventLog, `${JSON.stringify(event)}\n`) }
-    : {}),
+  recordTo: 'team-output/events.jsonl',
 });
 console.log(JSON.stringify(result.outcome, null, 2));
 if (result.outcome.status !== 'pass') process.exitCode = 1;
