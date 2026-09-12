@@ -1,11 +1,27 @@
-import { spawn } from 'node:child_process';
-import { existsSync, renameSync, writeFileSync } from 'node:fs';
+import { ChildProcess, execFileSync, spawn } from 'node:child_process';
+import { appendFileSync, existsSync, renameSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { setTimeout as delay } from 'node:timers/promises';
 import { runOwnedCommand } from '../../../src/command/run.ts';
 
 const [mode, directory, ownerId, loader, requestedAttemptId, workerPid] = process.argv.slice(2);
 const attemptId = requestedAttemptId ?? `sha256:${(mode === 'watchdog' ? '1' : '2').repeat(64)}`;
+const killDiagnostic = join(directory, 'kill-diagnostic.log');
+const recordKill = (kind, pid, signal) => {
+  try {
+    appendFileSync(killDiagnostic, `${JSON.stringify({ kind, pid, signal, stack: new Error().stack })}\n`);
+  } catch {}
+};
+const nativeProcessKill = process.kill.bind(process);
+process.kill = (pid, signal) => {
+  recordKill('process.kill', pid, signal);
+  return nativeProcessKill(pid, signal);
+};
+const nativeChildKill = ChildProcess.prototype.kill;
+ChildProcess.prototype.kill = function kill(signal) {
+  recordKill('ChildProcess.kill', this.pid, signal);
+  return nativeChildKill.call(this, signal);
+};
 const record = (name, value) => {
   const path = join(directory, `${name}.json`);
   writeFileSync(`${path}.tmp`, JSON.stringify(value));
@@ -20,6 +36,13 @@ const command = (childMode, extra = {}) => ({
   maxOutputBytes: 1024, maxMemoryBytes: 512 * 1024 * 1024,
   ...extra,
 });
+const processGroupId = () => {
+  try {
+    return Number(execFileSync('/bin/ps', ['-o', 'pgid=', '-p', String(process.pid)], { encoding: 'utf8' }).trim());
+  } catch {
+    return null;
+  }
+};
 
 if (mode === 'watchdog' || mode === 'term-watchdog') {
   const diagnostic = { exitCode: null, signal: null, timedOut: null, stdout: '', stderr: '' };
@@ -69,7 +92,7 @@ if (mode === 'watchdog' || mode === 'term-watchdog') {
   record('term-parent', { pid: process.pid });
   setInterval(() => {}, 1000);
 } else if (mode === 'worker') {
-  record('worker', { pid: process.pid });
+  record('worker', { pid: process.pid, ppid: process.ppid, pgid: processGroupId() });
   while (!existsSync(join(directory, 'go'))) await delay(5);
   await runOwnedCommand(command('helper', { inheritParentEnv: false }), new AbortController().signal);
 } else if (mode === 'helper') {
