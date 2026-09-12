@@ -164,8 +164,11 @@ if (faults.length) {
 - **A command that decides the path.** Two steps both need the command
   node, and each carries a `when`: `passed('size')` on one, `failed('size')`
   on the other. One runs when the command exited 0, the other when it did
-  not. The step whose condition is not met is skipped and recorded as
-  skipped; the graph stays a graph.
+  not. The deciding node is `optional: true`, so its red result blocks
+  nothing and the branches decide; without that, a red result would block
+  every step that needs it, and the `failed` branch could never run. The
+  step whose condition is not met is skipped and recorded as skipped; the
+  graph stays a graph.
 
 `passed` and `failed` read the named dependency's outcome through
 `ctx.needs`, the outcomes of the steps this node needs, by name. A name the
@@ -183,6 +186,8 @@ meets neither, so a branch runs only on a decision.
 - **The kickback budget is per target.** `maxKickbacks` as a map gives the
   writer its own count of returns; when it is spent, the run fails with the
   last output as its reason rather than looping.
+- **A decision node is optional.** `failed(name)` can only fire when `name`
+  is `optional: true`; the dag refuses the shape without it and says so.
 - **A command with a quote in it goes in as an array.** The string form
   splits on spaces and refuses a quote; give one argument per entry when an
   argument has spaces or quotes of its own.

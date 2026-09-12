@@ -126,9 +126,17 @@ question was asked again about the new attempt.
   router claims the request and submits `{ approved, note? }`; run the job
   again with the same client and the step finds the answer in the client's
   history.
-- **The client is the run's.** `run` takes `callbacks`; every job sees it as
-  `ctx.callbacks`. The default is one in memory that lives for the process.
-  Pass a stored client so a paused run finds its answers after a restart.
+- **The client is the run's.** `run` takes `callbacks`, the in-memory
+  client or the stored one (`RunCallbacks` names either); every job sees it
+  as `ctx.callbacks`. The default is one in memory that lives for the
+  process. Pass the stored client over a directory and a paused run finds
+  its answer after a restart: the next run over the same store reads it
+  from the history.
+- **A question nobody can answer fails plainly.** After asking, the step
+  reads the request's state; if it is neither pending nor answered, the
+  step fails with a summary that says so instead of waiting for nothing.
+  Asking a question again makes it the live one, so the ordinary case,
+  the same question after a kickback, never gets there.
 
 ## Things that catch people out
 

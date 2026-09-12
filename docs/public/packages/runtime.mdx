@@ -262,7 +262,10 @@ try {
 - `commandJob`: a command as a step, pass on exit 0 and fail with the output
   as the evidence otherwise; `target` names the step that owns the fix.
 - `passed`, `failed`: conditions for a node's `when` that read a named
-  dependency's outcome, so a command's exit code chooses the branch.
+  dependency's outcome, so a command's exit code chooses the branch. The
+  node `failed` decides on must be `optional: true`, or its red result
+  would block the branch before the condition is read; `dag` refuses the
+  graph otherwise and says which node to mark.
 - `isolated`: run a step in its own worktree and branch.
 
 **Review inside it**
@@ -275,7 +278,8 @@ try {
 **Run it**
 
 - `run`: run a job from a fresh record. `callbacks` is the client the run's
-  questions go through; every job sees it as `ctx.callbacks`.
+  questions go through, in memory or stored (`RunCallbacks` names either);
+  every job sees it as `ctx.callbacks`.
 - `compileGraph`, `dagGraphType`, `createGraphExecutor`, `resolveGraphPlan`,
   `persistRunDefinition`: the graph layer, for hosts and for shapes of your
   own.
