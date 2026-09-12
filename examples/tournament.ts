@@ -92,7 +92,15 @@ const CANDIDATE_TEST = [
 async function runNodeTest(ctx: JobContext, candidate: number): Promise<void> {
   const args = ['--experimental-strip-types', '--test', 'candidate.test.ts'];
   try {
-    await promisify(execFile)(process.execPath, args, { cwd: ctx.workspace.dir });
+    const output = await promisify(execFile)(process.execPath, args, { cwd: ctx.workspace.dir });
+    console.error(JSON.stringify({
+      candidate,
+      node: process.version,
+      command: [process.execPath, ...args],
+      code: 0,
+      stdout: output.stdout,
+      stderr: output.stderr,
+    }));
   } catch (error) {
     const result = error as {
       code?: number | string;
@@ -139,6 +147,7 @@ try {
       name: 'retry-implementation',
       n: ANGLES.length,
       candidate: (i) => fnJob(`candidate-${i}`, async (ctx) => {
+        console.error(JSON.stringify({ candidate: i, node: process.version, event: 'start' }));
         await writeFile(join(ctx.workspace.dir, 'src/retry.ts'), TASK[1] + ANGLES[i]!);
         await writeFile(join(ctx.workspace.dir, 'candidate.test.ts'), CANDIDATE_TEST);
         await runNodeTest(ctx, i);
