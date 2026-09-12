@@ -10,6 +10,7 @@ import {
 } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { delimiter, dirname, isAbsolute, join } from 'node:path';
+import { isDeepStrictEqual } from 'node:util';
 import {
   EngineError,
   attemptEnvironment,
@@ -32,6 +33,7 @@ import {
 } from '@obversa/engine';
 import {
   DEFAULT_OWNED_COMMAND_LIMITS,
+  OwnedCommandError,
   ownedCommandIdentity,
   resolveCommandExecutable,
   runOwnedCommand,
@@ -46,6 +48,10 @@ type PermissionMode =
   | 'auto';
 
 const CONTROL_CHARACTER = /[\u0000-\u001f\u007f]/u;
+const VERSION_TIMEOUT_MS = 5_000;
+const VERSION_TEARDOWN_MS = 1_000;
+const VERSION_OUTPUT_BYTES = 4_096;
+const GROK_VERSION = /^grok ([0-9]+\.[0-9]+\.[0-9]+)(?: \([0-9a-f]+\))?(?: \[[A-Za-z0-9._-]+\])?$/u;
 const BASE_SYSTEM_PROMPT =
   'Execute one isolated Obversa node attempt. Follow only this system prompt and the user prompt. Use only the declared tools and permissions.';
 const WEB_TOOLS = new Set(['web_search', 'web_fetch', 'websearch', 'webfetch']);
@@ -721,6 +727,7 @@ export class GrokCliEngine implements Engine {
   readonly name = 'grok-cli';
   readonly #executable: string;
   readonly #version: string;
+  #versionObservation: Promise<string> | undefined;
   readonly #identity: GrokCliIdentity;
   readonly #environment: Readonly<Record<string, string>>;
   readonly #authFile: string | null;
@@ -733,11 +740,7 @@ export class GrokCliEngine implements Engine {
     if (typeof options.executable !== 'string' || !isAbsolute(options.executable)) {
       throw new TypeError('Grok executable must be an absolute path');
     }
-    try {
-      this.#executable = resolveCommandExecutable(options.executable);
-    } catch {
-      throw new Error(`grok command not found at ${options.executable}`);
-    }
+    this.#executable = nonEmptyText(options.executable, 'Grok executable');
     this.#version = nonEmptyText(options.version, 'Grok CLI version');
     const checked = engineSelection({
       adapter: 'grok-cli',
@@ -797,6 +800,149 @@ export class GrokCliEngine implements Engine {
     });
   }
 
+  async admit(
+    request: Omit<AgentRequest, 'prompt'>,
+    signal: AbortSignal,
+    expectedSelection?: EngineSelectionRecord,
+  ): Promise<EngineSelectionRecord> {
+    if (signal.aborted) {
+      throw loopError('aborted', 'Grok admission was aborted before start');
+    }
+    let normalized: AgentRequest;
+    let selected: EngineSelectionRecord;
+    try {
+      if (request.env !== undefined && Object.keys(request.env).length > 0) {
+        throw new TypeError(
+          'Grok request environment is not allowed; select values in the constructor environment',
+        );
+      }
+      const model = nonEmptyText(request.model, 'Grok request model');
+      if (typeof request.cwd !== 'string' || !isAbsolute(request.cwd)) {
+        throw new TypeError('Grok request cwd must be an absolute path');
+      }
+      const cwd = assertNoProjectExtensions(request.cwd);
+      normalized = { ...request, cwd, prompt: '' };
+      const capabilities = requestedCapabilities(normalized);
+      buildGrokArgs(normalized, this.#options, join(cwd, 'prompt.md'));
+      const timeout = request.timeoutMs ?? DEFAULT_OWNED_COMMAND_LIMITS.timeoutMs;
+      const grace = request.timeoutGraceMs ?? DEFAULT_OWNED_COMMAND_LIMITS.teardownGraceMs;
+      const output = request.maxOutputBytes ?? DEFAULT_OWNED_COMMAND_LIMITS.maxOutputBytes;
+      const memory = request.maxMemoryBytes ?? DEFAULT_OWNED_COMMAND_LIMITS.maxMemoryBytes;
+      if (!Number.isSafeInteger(timeout) || timeout < 1 || timeout > 2_147_483_647
+        || !Number.isSafeInteger(grace) || grace < 0 || grace > 2_147_483_647 - timeout
+        || !Number.isSafeInteger(output) || output < 0
+        || !Number.isSafeInteger(memory) || memory < 1) {
+        throw new TypeError('Grok request command limits are invalid');
+      }
+      ownedCommandIdentity({
+        adapter: 'grok-cli', runId: request.attempt?.runId,
+        leafId: request.attempt?.leafId, attemptId: request.attempt?.attemptId,
+      });
+      selected = engineSelection({
+        adapter: 'grok-cli', adapterVersion: this.#version,
+        provider: this.#identity.provider, modelFamily: this.#identity.modelFamily,
+        model, executable: this.#executable, capabilities,
+      });
+      if (expectedSelection !== undefined
+        && !isDeepStrictEqual(engineSelection(expectedSelection), selected)) {
+        throw new TypeError('Grok expected selection does not match its configured path and request');
+      }
+    } catch (error) {
+      const diagnostic = error instanceof Error ? error.message : 'invalid request';
+      throw loopError('invalid-config', scrubCapture(
+        scrubAuthValues(diagnostic, this.#authRedactions), { ...this.#environment }, 700,
+      ));
+    }
+    // Recheck availability at the retained absolute path, never choose another path.
+    try {
+      resolveCommandExecutable(this.#executable);
+    } catch {
+      throw loopError('missing-cli', 'Grok configured executable is missing or not runnable');
+    }
+    const version = await (this.#versionObservation ??= this.#observeVersion(
+      normalized, selected.capabilities, signal,
+    ).catch((error: unknown) => {
+      this.#versionObservation = undefined;
+      throw error;
+    }));
+    if (signal.aborted) throw loopError('aborted', 'Grok admission was aborted');
+    return engineSelection({ ...selected, adapterVersion: version });
+  }
+
+  async #observeVersion(
+    request: AgentRequest,
+    capabilities: readonly string[],
+    signal: AbortSignal,
+  ): Promise<string> {
+    let directory: string | undefined;
+    let primary: EngineError | undefined;
+    try {
+      directory = mkdtempSync(join(tmpdir(), 'lines-grok-version-'));
+      const environment = isolatedEnvironment(
+        directory, this.#executable, request, capabilities,
+        this.#environment, this.#authContents,
+      );
+      const command = await runOwnedCommand({
+        executable: this.#executable,
+        args: ['--version'],
+        cwd: request.cwd!,
+        env: environment,
+        inheritParentEnv: false,
+        stdin: '',
+        ...ownedCommandIdentity({
+          adapter: 'grok-cli', runId: request.attempt?.runId,
+          leafId: request.attempt?.leafId, attemptId: request.attempt?.attemptId,
+        }),
+        timeoutMs: Math.min(request.timeoutMs ?? VERSION_TIMEOUT_MS, VERSION_TIMEOUT_MS),
+        teardownGraceMs: Math.min(request.timeoutGraceMs ?? VERSION_TEARDOWN_MS, VERSION_TEARDOWN_MS),
+        maxOutputBytes: Math.min(request.maxOutputBytes ?? VERSION_OUTPUT_BYTES, VERSION_OUTPUT_BYTES),
+        maxMemoryBytes: request.maxMemoryBytes ?? DEFAULT_OWNED_COMMAND_LIMITS.maxMemoryBytes,
+      }, signal);
+      if (command.aborted || signal.aborted) {
+        throw loopError('aborted', 'Grok version check was aborted');
+      }
+      if (command.timedOut) throw loopError('timeout', 'Grok version check timed out');
+      if (command.exitCode !== 0) {
+        throw loopError('invalid-config', 'Grok version command did not succeed');
+      }
+      const version = GROK_VERSION.exec(new TextDecoder().decode(command.stdout).trim())?.[1];
+      if (version === undefined) {
+        throw loopError('invalid-config', 'Grok returned an unsupported version format');
+      }
+      if (version !== this.#version) {
+        throw loopError('invalid-config', 'Grok observed version does not match its configured version');
+      }
+      return version;
+    } catch (error) {
+      if (error instanceof EngineError) {
+        primary = error;
+      } else if (signal.aborted) {
+        primary = loopError('aborted', 'Grok version check was aborted');
+      } else if (error instanceof OwnedCommandError && error.code === 'INVALID_EXECUTABLE') {
+        primary = loopError('missing-cli', 'Grok configured executable could not start');
+      } else if (error instanceof OwnedCommandError && error.code === 'SPAWN_FAILED') {
+        try { resolveCommandExecutable(this.#executable); }
+        catch { primary = loopError('missing-cli', 'Grok configured executable is missing or not runnable'); }
+        if (primary === undefined) primary = loopError('unknown', 'Grok version process could not start');
+      } else if (error instanceof OwnedCommandError
+        && (error.code === 'OUTPUT_LIMIT' || error.code === 'INVALID_COMMAND')) {
+        primary = loopError('invalid-config', 'Grok version command exceeded or rejected its limits');
+      } else {
+        // Local command/cleanup failure supplies no provider availability evidence.
+        primary = loopError('unknown', 'Grok version check could not complete');
+      }
+      throw primary;
+    } finally {
+      if (directory !== undefined) {
+        try {
+          rmSync(directory, { recursive: true, force: true });
+        } catch {
+          throw primary ?? loopError('unknown', 'Grok version check could not complete');
+        }
+      }
+    }
+  }
+
   async run(
     request: AgentRequest,
     onEvent: EngineEventSink,
@@ -805,22 +951,10 @@ export class GrokCliEngine implements Engine {
     if (signal.aborted) {
       throw loopError('aborted', 'Grok attempt was aborted before start');
     }
-    if (request.env !== undefined && Object.keys(request.env).length > 0) {
-      throw new TypeError(
-        'Grok request environment is not allowed; select values in the constructor environment',
-      );
-    }
-    const model = nonEmptyText(request.model, 'Grok request model');
-    const capabilities = requestedCapabilities(request);
-    const requested = engineSelection({
-      adapter: 'grok-cli',
-      adapterVersion: this.#version,
-      provider: this.#identity.provider,
-      modelFamily: this.#identity.modelFamily,
-      model,
-      executable: this.#executable,
-      capabilities,
-    });
+    const { prompt: _prompt, ...staticRequest } = request;
+    const requested = await this.admit(staticRequest, signal);
+    const model = requested.model!;
+    const capabilities = requested.capabilities;
     const cwd = assertNoProjectExtensions(
       typeof request.cwd === 'string' ? request.cwd : '',
     );
@@ -932,7 +1066,7 @@ export class GrokCliEngine implements Engine {
       const observedCapabilities = accumulator.capabilities ?? capabilities;
       const effective = engineSelection({
         adapter: 'grok-cli',
-        adapterVersion: this.#version,
+        adapterVersion: requested.adapterVersion,
         provider: this.#identity.provider,
         modelFamily: this.#identity.modelFamily,
         model: structured && terminal !== null
@@ -1012,6 +1146,16 @@ export class GrokCliEngine implements Engine {
             : {}),
         raw: terminal,
       });
+    } catch (error) {
+      if (error instanceof OwnedCommandError && error.code === 'INVALID_EXECUTABLE') {
+        throw loopError('missing-cli', 'Grok configured executable could not start');
+      }
+      if (error instanceof OwnedCommandError && error.code === 'SPAWN_FAILED') {
+        try { resolveCommandExecutable(this.#executable); }
+        catch { throw loopError('missing-cli', 'Grok configured executable is missing or not runnable'); }
+        throw loopError('unknown', 'Grok model process could not start');
+      }
+      throw error;
     } finally {
       rmSync(directory, { recursive: true, force: true });
     }

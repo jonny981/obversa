@@ -1,21 +1,14 @@
 /**
- * A fallback chain as an engine combinator: because `Engine` is one method,
- * "try the next provider when this lane is dead" needs no runner support — it
- * is just another `Engine`, usable anywhere an `EngineRef` goes (a run's
- * default, one job's `engine`, a judge's).
+ * A fallback chain over engine instances, tried in declared order.
  *
- * Semantics, deliberately narrow:
+ * Default triggers are auth, billing, missing CLI, unavailable model,
+ * invalid configuration and quota. An engine that reports one of these is
+ * skipped for the rest of this chain's lifetime. Rate limits and transient
+ * failures propagate to the caller. An explicit `on` set replaces the
+ * defaults.
  *
- * - It falls back only on **lane-dead** failures (`LANE_DEAD_FAILURES`: auth,
- *   billing, missing CLI, unknown model, invalid configuration), the ones that
- *   will not heal within a run. Rate limits, quotas, and the token budget stay
- *   owned by the runner's `onLimit` policy (wait or pause);
- *   swallowing them here would silently bypass that machinery. Opt in via
- *   `on` if you really want a quota to hop providers instead of pausing.
- * - A lane that failed dead is **latched** for the rest of the run: a missing
- *   binary does not get retried fifty iterations in a row.
- * - Aborts never fall back, and a chain with every lane latched fails with
- *   the last lane's error — honestly, not with a synthetic one.
+ * Aborts never fall back. If every engine fails, the final engine error is
+ * thrown. A subsequent call with every engine skipped reports no live engine.
  */
 
 import type {

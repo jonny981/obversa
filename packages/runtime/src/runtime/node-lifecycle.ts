@@ -36,6 +36,15 @@ import {
   type TokenBudget,
 } from './budget.js';
 import type { ResultContract } from './result-contract.js';
+import type { ExecutionTarget } from '../graph/plan.js';
+import {
+  EngineIdentityUnresolvedError,
+  engineFailureExclusionKeys,
+  isEngineExcluded,
+  matchesEngineTarget,
+  validateExecutionTarget,
+  type EngineExclusionKey,
+} from './engine-availability.js';
 import {
   engineSelection,
   validateAgentResult,
@@ -88,6 +97,7 @@ export interface PreparedEngineLane {
   readonly engine: Engine;
   readonly selection: EngineSelectionRecord;
   readonly hardTokenLimitEnforceable: boolean;
+  readonly target?: ExecutionTarget;
 }
 
 export interface NodeDataContext {
@@ -106,6 +116,7 @@ export interface ModelUnavailableFact {
   readonly selection: EngineSelectionRecord;
   readonly effective: EngineSelectionRecord;
   readonly failure: EngineFailureKind;
+  readonly target?: ExecutionTarget;
 }
 
 export interface PreparedNodeAttempt {
@@ -124,6 +135,7 @@ export interface PreparedNodeAttempt {
     | readonly [PreparedEngineLane]
     | readonly [PreparedEngineLane, PreparedEngineLane]
     | null;
+  readonly declaredTargets?: readonly ExecutionTarget[];
   readonly runData:
     | ((context: NodeDataContext) => Promise<JsonValue>)
     | null;
@@ -154,6 +166,7 @@ export type NodeAttemptFailureCode =
   | 'EFFECT_FAILED'
   | 'ENGINE_UNAVAILABLE'
   | 'MODEL_UNAVAILABLE_RECORD'
+  | 'ENGINE_IDENTITY_UNRESOLVED'
   | 'RESULT_INVALID'
   | 'OUTPUT_LIMIT'
   | 'WORKSPACE_INSPECTION'
@@ -435,22 +448,23 @@ function sameSelection(
 }
 
 function validateLane(value: PreparedEngineLane, index: number): PreparedEngineLane {
-  if (
-    typeof value.engine !== 'object' ||
-    value.engine === null ||
-    typeof value.engine.run !== 'function'
-  ) {
+  if (typeof value.engine !== 'object' || value.engine === null
+    || typeof value.engine.run !== 'function') {
     throw new TypeError(`engineRoute[${index}].engine must be an Engine`);
   }
   if (typeof value.hardTokenLimitEnforceable !== 'boolean') {
-    throw new TypeError(
-      `engineRoute[${index}].hardTokenLimitEnforceable must be a boolean`,
-    );
+    throw new TypeError(`engineRoute[${index}].hardTokenLimitEnforceable must be a boolean`);
+  }
+  const selected = selection(value.selection);
+  const target = value.target === undefined ? undefined : validateExecutionTarget(value.target);
+  if (target !== undefined && !matchesEngineTarget(target, selected)) {
+    throw new TypeError(`engineRoute[${index}].target must match its selection`);
   }
   return Object.freeze({
     engine: value.engine,
-    selection: selection(value.selection),
+    selection: selected,
     hardTokenLimitEnforceable: value.hardTokenLimitEnforceable,
+    ...(target === undefined ? {} : { target }),
   });
 }
 
@@ -490,7 +504,7 @@ export function validateActionDecision(value: ActionDecision): ActionDecision {
   throw new TypeError('action decision kind must be allow, wait, or deny');
 }
 
-async function validateScratchDirectory(value: string): Promise<string> {
+export async function validateScratchDirectory(value: string): Promise<string> {
   if (typeof value !== 'string' || !isAbsolute(value)) {
     throw new TypeError('scratchDirectory must be an absolute path');
   }
@@ -652,6 +666,7 @@ async function unavailable(
     selection: lane.selection,
     effective,
     failure: failureKind,
+    ...(lane.target === undefined ? {} : { target: lane.target }),
   } as unknown as JsonValue) as unknown as ModelUnavailableFact;
   await recordModelUnavailable(fact);
   return fact;
@@ -733,6 +748,13 @@ export async function executeNodeAttempt(
     let attemptWorkspace = validateWorkspacePolicy(prepared.workspace);
     workspace = attemptWorkspace;
     const route = prepared.engineRoute?.map(validateLane) ?? null;
+    let declaredTargets: readonly ExecutionTarget[] | undefined;
+    if (prepared.declaredTargets !== undefined) {
+      if (!Array.isArray(prepared.declaredTargets)) {
+        throw new TypeError('declaredTargets must be an array');
+      }
+      declaredTargets = [...prepared.declaredTargets].map(validateExecutionTarget);
+    }
     const runData = prepared.runData;
     const resultContract = prepared.resultContract;
     const parseResult = prepared.parseResult;
@@ -870,6 +892,7 @@ export async function executeNodeAttempt(
       }
     } else {
       facts.requestedEngine = route[0]!.selection;
+      const excluded = new Set<EngineExclusionKey>();
       const settle = (index: number, usage: UsageReceipt): void => {
         if (!reservations[index] || settled.has(index)) return;
         try {
@@ -894,6 +917,20 @@ export async function executeNodeAttempt(
         const time = attemptDeadline(attemptPolicy);
         for (let index = 0; index < route.length; index += 1) {
           const selected = route[index]!;
+          try {
+            if (declaredTargets !== undefined
+              && isEngineExcluded(excluded, selected.selection, selected.target, declaredTargets)) {
+              release(index);
+              continue;
+            }
+          } catch (error) {
+            facts.failure = failure(
+              error instanceof EngineIdentityUnresolvedError ? 'ENGINE_IDENTITY_UNRESOLVED' : 'INVALID_ATTEMPT',
+              error,
+            );
+            for (let unused = index; unused < route.length; unused += 1) release(unused);
+            break;
+          }
           const now = performance.now();
           const remainingTimeoutMs = Math.ceil(time.soft - now);
           if (remainingTimeoutMs < 1) {
@@ -1118,8 +1155,9 @@ export async function executeNodeAttempt(
               ? selection(error.effective)
               : selected.selection;
             facts.unavailableModels.push(effective);
+            let fact: ModelUnavailableFact;
             try {
-              await unavailable(
+              fact = await unavailable(
                 identity,
                 recordModelUnavailable,
                 selected,
@@ -1131,6 +1169,18 @@ export async function executeNodeAttempt(
               for (let unused = index + 1; unused < route.length; unused += 1) {
                 release(unused);
               }
+              break;
+            }
+            try {
+              if (declaredTargets !== undefined) {
+                for (const key of engineFailureExclusionKeys(fact, declaredTargets)) excluded.add(key);
+              }
+            } catch (error) {
+              facts.failure = failure(
+                error instanceof EngineIdentityUnresolvedError ? 'ENGINE_IDENTITY_UNRESOLVED' : 'INVALID_ATTEMPT',
+                error,
+              );
+              for (let unused = index + 1; unused < route.length; unused += 1) release(unused);
               break;
             }
             if (index === route.length - 1) {

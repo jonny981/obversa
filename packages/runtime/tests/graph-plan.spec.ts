@@ -10,6 +10,10 @@ import {
 
 const definitionDigest = `sha256:${'1'.repeat(64)}` as const;
 const packageDigest = `sha256:${'2'.repeat(64)}` as const;
+const preflight = {
+  timeoutMs: 2_000,
+  lanes: [{ laneId: 'author-lane', live: 'required', unsupportedStatic: 'block' }],
+} as const;
 
 function deeplyNestedJson(depth = 10_000): unknown {
   return JSON.parse(`${'['.repeat(depth)}null${']'.repeat(depth)}`);
@@ -239,6 +243,171 @@ describe('resolveGraphPlan', () => {
     expect(resolved.plan.executionLanes[0]!.fallbacks).toEqual([]);
     expect(Object.isFrozen(resolved.plan.executionLanes[0]!.fallbacks)).toBe(true);
   });
+
+  it('freezes the host preflight policy and preserves it through stored validation', () => {
+    const original = resolveGraphPlan(description, resolution());
+    const input = {
+      ...resolution(),
+      preflight: structuredClone(preflight),
+    };
+    const snapshot = resolveGraphPlan(description, input);
+    const plan = snapshot.plan;
+    expect(plan.preflight).toEqual(preflight);
+    expect(snapshot.digest).not.toBe(original.digest);
+    expect(validateResolvedPlan(plan)).toEqual(plan);
+    expect(Object.isFrozen(plan.preflight)).toBe(true);
+    expect(Object.isFrozen(plan.preflight!.lanes)).toBe(true);
+    expect(Object.isFrozen(plan.preflight!.lanes[0])).toBe(true);
+    expect(original.plan).not.toHaveProperty('preflight');
+    expect(JSON.stringify(validateResolvedPlan(original.plan))).toBe(
+      JSON.stringify(original.plan),
+    );
+  });
+
+  it.each([
+    ['timeout', { ...preflight, timeoutMs: 2_001 }],
+    ['live', {
+      ...preflight,
+      lanes: [{ ...preflight.lanes[0], live: 'skip' }],
+    }],
+    ['unsupportedStatic', {
+      ...preflight,
+      lanes: [{ ...preflight.lanes[0], unsupportedStatic: 'allow' }],
+    }],
+  ] as const)('changes the digest when preflight %s changes', (_field, changed) => {
+    const base = resolveGraphPlan(description, {
+      ...resolution(),
+      preflight,
+    });
+    const updated = resolveGraphPlan(description, {
+      ...resolution(),
+      preflight: changed,
+    });
+
+    expect(updated.digest).not.toBe(base.digest);
+  });
+
+  it('isolates the saved preflight policy from caller mutation', () => {
+    const mutable: {
+      timeoutMs: number;
+      lanes: {
+        laneId: string;
+        live: 'required' | 'skip';
+        unsupportedStatic: 'block' | 'allow';
+      }[];
+    } = {
+      timeoutMs: preflight.timeoutMs,
+      lanes: preflight.lanes.map((lane) => ({ ...lane })),
+    };
+    const snapshot = resolveGraphPlan(description, {
+      ...resolution(),
+      preflight: mutable,
+    });
+
+    mutable.timeoutMs = 1;
+    mutable.lanes[0]!.live = 'skip';
+    mutable.lanes[0]!.unsupportedStatic = 'allow';
+    mutable.lanes.push({
+      laneId: 'other',
+      live: 'required',
+      unsupportedStatic: 'block',
+    });
+
+    expect(snapshot.plan.preflight).toEqual(preflight);
+  });
+
+  it.each([
+    ['required', 'block'],
+    ['required', 'allow'],
+    ['skip', 'block'],
+    ['skip', 'allow'],
+  ] as const)(
+    'accepts preflight live %s with unsupported static %s',
+    (live, unsupportedStatic) => {
+      const policy = {
+        timeoutMs: 1,
+        lanes: [{ laneId: 'author-lane', live, unsupportedStatic }],
+      };
+      const snapshot = resolveGraphPlan(description, {
+        ...resolution(),
+        preflight: policy,
+      });
+
+      expect(snapshot.plan.preflight).toEqual(policy);
+      expect(validateResolvedPlan(snapshot.plan)).toEqual(snapshot.plan);
+    },
+  );
+
+  it('accepts an empty preflight lane list for a graph with no engine lanes', () => {
+    const noEngineDescription: GraphDescription = {
+      ...description,
+      nodes: [{ ...description.nodes[0]!, laneId: null }],
+      executionLanes: [],
+    };
+    const policy = { timeoutMs: 1, lanes: [] } as const;
+    const snapshot = resolveGraphPlan(noEngineDescription, {
+      ...resolution(),
+      executionLanes: [],
+      preflight: policy,
+    });
+
+    expect(snapshot.plan.preflight).toEqual(policy);
+    expect(validateResolvedPlan(snapshot.plan)).toEqual(snapshot.plan);
+  });
+
+  const lane = {
+    laneId: 'author-lane',
+    live: 'required',
+    unsupportedStatic: 'block',
+  };
+  const invalidPolicies: unknown[] = [
+    null,
+    [],
+    {},
+    { timeoutMs: 0, lanes: [lane] },
+    { timeoutMs: -1, lanes: [lane] },
+    { timeoutMs: 0.5, lanes: [lane] },
+    { timeoutMs: 2_147_483_648, lanes: [lane] },
+    { timeoutMs: 1, lanes: null },
+    { timeoutMs: 1, lanes: [] },
+    { timeoutMs: 1, lanes: [lane, lane] },
+    { timeoutMs: 1, lanes: [{ ...lane, laneId: 'other' }] },
+    { timeoutMs: 1, lanes: [{ ...lane, laneId: ' author-lane' }] },
+    { timeoutMs: 1, lanes: [{ ...lane, live: 'optional' }] },
+    { timeoutMs: 1, lanes: [{ ...lane, unsupportedStatic: true }] },
+    { timeoutMs: 1, lanes: [{ laneId: 'author-lane', live: 'skip' }] },
+    { timeoutMs: 1, lanes: [{ ...lane, extra: true }] },
+    { timeoutMs: 1, lanes: [lane], extra: true },
+  ];
+
+  it.each(invalidPolicies)(
+    'rejects invalid host preflight policy %# with GraphValidationError',
+    (policy) => {
+      expect(() => resolveGraphPlan(description, {
+        ...resolution(),
+        preflight: policy,
+      } as unknown as PlanResolution)).toThrowError(
+        expect.objectContaining({ name: 'GraphValidationError' }),
+      );
+    },
+  );
+
+  it.each(invalidPolicies)(
+    'rejects invalid stored preflight policy %# with GraphValidationError',
+    (policy) => {
+      const snapshot = resolveGraphPlan(description, {
+        ...resolution(),
+        preflight,
+      });
+
+      expect(() => validateResolvedPlan({
+        ...snapshot.plan,
+        preflight: policy,
+      })).toThrowError(
+        expect.objectContaining({ name: 'GraphValidationError' }),
+      );
+    },
+  );
 
   it('rejects unknown fields inside runtime-owned resolved-plan records', () => {
     const resolved = resolveGraphPlan(description, resolution());

@@ -17,6 +17,23 @@ engine and memory packages track their own versions independently.
 - A dag's `maxKickbacks` accepts a map of target name to count as well as
   a number, so each step that receives work back has its own budget. The
   `dag:kickback` event and the rendered plan carry the count and the limit.
+- **Engine checks before graph work:** A plan may carry a preflight policy,
+  one entry per lane with `live: 'required' | 'skip'` and
+  `unsupportedStatic: 'block' | 'allow'`. Before the first dispatch the
+  executor asks each engine to `admit` the seat with real node
+  configuration and, where required, makes one tool-free live call per
+  eligible seat, one at a time, stopping at the first that answers. A
+  failed check pauses the run with `PREFLIGHT_PAUSED` before any work;
+  `resume({ preflightEventId })` and `resumeSupervisedRun` with
+  `preflightEventId` reopen that exact pause, repeat the static checks and
+  reuse live receipts that still apply. `readRunPreflight` reads the record,
+  and `interruptRunPreflight` closes a check the process died in the middle
+  of, once the caller has verified the old worker is gone. When every target
+  of a lane is excluded or blocked, the run ends with `PREFLIGHT_FAILED`, a
+  terminal failure with no pause to resume from.
+- `Engine.admit` on the engine contract: an engine reports the identity it
+  will run under, and refuses when it would now run as something else.
+  `AgentRequest.purpose: 'preflight'` marks a live check.
 - `gateJob(label, condition, { target })`: when the condition is not met,
   the step returns a revision request to `target` carrying the condition's
   evidence, so a red test command sends its output straight back to the
@@ -47,6 +64,26 @@ engine and memory packages track their own versions independently.
 
 ### Changed
 
+- A failed engine check or call retires what the failure proves: bad
+  credentials retire the selected adapter and provider; a missing model,
+  exhausted credit or an exhausted quota retire the provider and model; a
+  missing command-line tool or an invalid configuration retire the
+  adapter; a rate limit or a transport error retire nothing. The reported
+  effective identity is evidence in the record and never widens the scope.
+  An old auth record with no provider recovers one from its lane, and an
+  ambiguous recovery refuses before work with `ENGINE_IDENTITY_UNRESOLVED`.
+- `LANE_DEAD_FAILURES` from `@obversa/engine` now includes `quota`, and the
+  wording rules that classify a provider's message changed with it: usage
+  limit, allowance and session limit wording is a `rate-limit`, which
+  clears in minutes; monthly usage limit and out-of-credits wording is a
+  `quota`, which is an allowance gone for hours or longer and retires the
+  provider and model.
+- Usage that was not reported is unknown, not zero; usage from checks is
+  recorded separately from usage from nodes. Preflight checks before a
+  worker launches spend no run budget; checks inside a worker do.
+- Environment variable names passed to a supervised run are validated and
+  their values captured before any asynchronous work; no value reaches run
+  storage.
 - A child started through `runChild` sits in the caller's process group
   unless `detached: true` is passed. The engine command runner passes it, so
   its process sweep still sees the whole group.
@@ -57,6 +94,9 @@ engine and memory packages track their own versions independently.
 
 ### Fixed
 
+- A result whose assistant text is not a string is rejected by the shared
+  engine validator, in complete results and in incomplete evidence alike;
+  an empty string is still valid text.
 - **A child that never exits is a timeout:** A model CLI stopped at its
   deadline without an exit code is reported as a timeout, not as an exit
   with no code. A child that exits leaving a helper holding its output pipe

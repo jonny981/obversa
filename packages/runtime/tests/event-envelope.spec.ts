@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 
 import {
   validateDomainEventEnvelope,
+  validateDomainEventId,
   validateNewDomainEvent,
 } from '../src/events/envelope.js';
 import { StorageError } from '../src/storage/error.js';
@@ -94,6 +95,54 @@ describe('domain event envelopes', () => {
       envelopeVersion: 2,
     })).toThrowError(expect.objectContaining({
       code: 'UNSUPPORTED_ENVELOPE_VERSION',
+    }));
+  });
+});
+
+const IDENTIFIER_ERROR = 'Identifier must be a non-empty trimmed string of at most 256 UTF-8 bytes without control characters.';
+
+describe('domain event identifiers', () => {
+  it.each([
+    ['one byte', 'x', 1],
+    ['256 ASCII bytes', 'a'.repeat(256), 256],
+    ['256 UTF-8 bytes', 'é'.repeat(128), 256],
+  ])('accepts %s at the shared boundary', (_name, value, byteLength) => {
+    expect(Buffer.byteLength(value, 'utf8')).toBe(byteLength);
+    expect(validateDomainEventId(value, '/shared-id')).toBe(value);
+  });
+
+  it.each([
+    ['a non-string', 7, null],
+    ['an empty string', '', null],
+    ['leading whitespace', ' event-id', null],
+    ['trailing whitespace', 'event-id ', null],
+    ['an embedded NUL', 'event\u0000id', null],
+    ['an embedded unit separator', 'event\u001fid', null],
+    ['an embedded delete character', 'event\u007fid', null],
+    ['257 ASCII bytes', 'a'.repeat(257), 257],
+    ['257 UTF-8 bytes', `${'é'.repeat(128)}a`, 257],
+  ] as const)('rejects %s with the existing typed error', (_name, value, byteLength) => {
+    if (byteLength !== null) expect(Buffer.byteLength(value as string, 'utf8')).toBe(byteLength);
+    expect(() => validateDomainEventId(value, '/shared-id')).toThrowError(expect.objectContaining({
+      name: 'StorageError',
+      code: 'INVALID_STORED_VALUE',
+      message: IDENTIFIER_ERROR,
+      details: { path: '/shared-id' },
+    }));
+  });
+
+  it.each([
+    ['eventId', '/eventId'],
+    ['type', '/type'],
+    ['correlationId', '/correlationId'],
+    ['causationId', '/causationId'],
+  ] as const)('keeps the existing %s validation path', (field, path) => {
+    expect(() => validateNewDomainEvent({
+      ...newEvent(),
+      [field]: 'invalid\u0000identifier',
+    })).toThrowError(expect.objectContaining({
+      message: IDENTIFIER_ERROR,
+      details: { path },
     }));
   });
 });

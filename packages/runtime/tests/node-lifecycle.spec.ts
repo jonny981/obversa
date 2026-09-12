@@ -28,6 +28,7 @@ import {
   reportedUsage,
 } from '../src/runtime/result-parts.ts';
 import { canonicalJson, digestJson, type JsonValue } from '../src/graph/value.ts';
+import type { ExecutionTarget } from '../src/graph/plan.ts';
 import { createAttemptIdentity } from '../src/runtime/attempt.ts';
 import {
   createTokenBudget,
@@ -36,6 +37,7 @@ import {
 import {
   executeNodeAttempt,
   type ActionDecision,
+  type ModelUnavailableFact,
   type PreparedEngineLane,
   type PreparedNodeAttempt,
 } from '../src/runtime/node-lifecycle.ts';
@@ -593,6 +595,439 @@ describe('node attempt lifecycle', () => {
       reserved: 0,
       unknownUsageCalls: 1,
     });
+  });
+
+  it.each(['missing-cli', 'invalid-config'] as const)(
+    '%s permits another adapter for the same provider and model', async (kind) => {
+      const alternate = engineSelection({ ...primarySelection, adapter: 'alternate' });
+      const primary = engine('primary', async () => {
+        throw new EngineError({ kind, message: 'scripted adapter failure' });
+      });
+      const fallback = engine('alternate', async () => success('fallback', alternate));
+      const recordModelUnavailable = vi.fn(async () => {});
+      const result = await executeNodeAttempt(prepared({
+        engineRoute: [lane(primary), lane(fallback, alternate)],
+        declaredTargets: [],
+        recordModelUnavailable,
+      }), new AbortController().signal);
+      expect(result.status).toBe('completed');
+      expect(primary.run).toHaveBeenCalledTimes(1);
+      expect(fallback.run).toHaveBeenCalledTimes(1);
+      expect(recordModelUnavailable).toHaveBeenCalledTimes(1);
+    },
+  );
+
+  it.each([
+    ['the same adapter and another provider', engineSelection({
+      ...primarySelection, provider: 'provider-b',
+    }), true],
+    ['the same adapter and provider with another model', engineSelection({
+      ...primarySelection, model: 'model-b',
+    }), false],
+    ['another adapter with the same provider and model', engineSelection({
+      ...primarySelection, adapter: 'alternate',
+    }), true],
+  ] as const)('auth permits %s only when it uses different credentials', async (
+    _candidate,
+    alternate,
+    permitted,
+  ) => {
+    const target: ExecutionTarget = {
+      adapter: 'primary', provider: 'provider-a', modelFamily: 'family-a',
+      model: 'model-a', tools: ['read'],
+    };
+    const alternateTarget: ExecutionTarget = {
+      adapter: alternate.adapter,
+      provider: alternate.provider!,
+      modelFamily: alternate.modelFamily!,
+      model: alternate.model!,
+      tools: [...alternate.capabilities],
+    };
+    const primary = engine('primary', async () => {
+      throw new EngineError({ kind: 'auth', message: 'scripted credential failure' });
+    });
+    const fallback = engine(alternate.adapter, async () => success('fallback', alternate));
+    const facts: ModelUnavailableFact[] = [];
+    const budget = createTokenBudget(100);
+    const result = await executeNodeAttempt(prepared({
+      engineRoute: [
+        { ...lane(primary), target },
+        { ...lane(fallback, alternate), target: alternateTarget },
+      ],
+      declaredTargets: [target, alternateTarget],
+      tokenBudget: budget,
+      recordModelUnavailable: async (fact) => { facts.push(fact); },
+    }), new AbortController().signal);
+
+    expect(primary.run).toHaveBeenCalledTimes(1);
+    expect(fallback.run).toHaveBeenCalledTimes(permitted ? 1 : 0);
+    expect(result.status).toBe(permitted ? 'completed' : 'failed');
+    expect(result.failure?.code).toBe(permitted ? undefined : 'ENGINE_UNAVAILABLE');
+    expect(facts).toEqual([{
+      schemaVersion: 1,
+      identity,
+      target,
+      selection: primarySelection,
+      effective: primarySelection,
+      failure: 'auth',
+    }]);
+    expect(budget.snapshot().reserved).toBe(0);
+  });
+
+  it.each(['model-unavailable', 'billing', 'quota'] as const)(
+    '%s skips a prepared same-provider/model fallback and releases its reservation', async (kind) => {
+      const alternate = engineSelection({ ...primarySelection, adapter: 'alternate' });
+      const primary = engine('primary', async () => {
+        throw new EngineError({ kind, message: 'scripted provider/model failure' });
+      });
+      const fallback = engine('alternate', async () => success('wrong', alternate));
+      const budget = createTokenBudget(100);
+      const result = await executeNodeAttempt(prepared({
+        engineRoute: [lane(primary), lane(fallback, alternate)],
+        declaredTargets: [],
+        tokenBudget: budget,
+      }), new AbortController().signal);
+      expect(result.failure?.code).toBe('ENGINE_UNAVAILABLE');
+      expect(primary.run).toHaveBeenCalledTimes(1);
+      expect(fallback.run).not.toHaveBeenCalled();
+      expect(budget.snapshot()).toEqual({
+        limit: 100, spent: 0, reserved: 0, unknownUsageCalls: 1,
+      });
+    },
+  );
+
+  it('quota keeps the same model on another provider usable', async () => {
+    const alternate = engineSelection({ ...primarySelection, provider: 'other-provider' });
+    const primary = engine('primary', async () => {
+      throw new EngineError({ kind: 'quota', message: 'scripted quota failure' });
+    });
+    const fallback = engine('primary', async () => success('other provider', alternate));
+    const result = await executeNodeAttempt(prepared({
+      engineRoute: [lane(primary), lane(fallback, alternate)],
+      declaredTargets: [],
+    }), new AbortController().signal);
+    expect(result.status).toBe('completed');
+    expect(fallback.run).toHaveBeenCalledTimes(1);
+  });
+
+  it('keeps null auth evidence unchanged while another provider on the selected adapter runs', async () => {
+    const target: ExecutionTarget = {
+      adapter: 'primary', provider: 'provider-a', modelFamily: 'family-a',
+      model: 'model-a', tools: ['read'],
+    };
+    const alternateTarget: ExecutionTarget = { ...target, provider: 'provider-b' };
+    const observed = engineSelection({
+      ...primarySelection, provider: null, modelFamily: null,
+    });
+    const alternate = engineSelection({ ...primarySelection, provider: 'provider-b' });
+    const primary = engine('primary', async () => {
+      throw new EngineError({
+        kind: 'auth', message: 'scripted credential failure', effective: observed,
+      });
+    });
+    const fallback = engine('primary', async () => success('other provider', alternate));
+    const facts: ModelUnavailableFact[] = [];
+    const result = await executeNodeAttempt(prepared({
+      engineRoute: [
+        { ...lane(primary, observed), target },
+        { ...lane(fallback, alternate), target: alternateTarget },
+      ],
+      declaredTargets: [target, alternateTarget],
+      recordModelUnavailable: async (fact) => { facts.push(fact); },
+    }), new AbortController().signal);
+
+    expect(result.status).toBe('completed');
+    expect(fallback.run).toHaveBeenCalledTimes(1);
+    expect(facts).toEqual([{
+      schemaVersion: 1,
+      identity,
+      target,
+      selection: observed,
+      effective: observed,
+      failure: 'auth',
+    }]);
+  });
+
+  it('does not resolve a distinct ambiguous effective identity for auth', async () => {
+    const target: ExecutionTarget = {
+      adapter: 'primary', provider: 'provider-a', modelFamily: 'family-a',
+      model: 'model-a', tools: ['read'],
+    };
+    const fallbackTarget: ExecutionTarget = {
+      ...target, provider: 'provider-b', model: 'model-b',
+    };
+    const otherTarget: ExecutionTarget = {
+      ...fallbackTarget, provider: 'provider-c',
+    };
+    const effective = engineSelection({
+      ...primarySelection,
+      provider: null,
+      model: 'model-b',
+    });
+    const alternate = engineSelection({
+      ...primarySelection,
+      provider: 'provider-b',
+      model: 'model-b',
+    });
+    const primary = engine('primary', async () => {
+      throw new EngineError({
+        kind: 'auth', message: 'scripted credential failure', effective,
+      });
+    });
+    const fallback = engine('primary', async () => success('other provider', alternate));
+    const facts: ModelUnavailableFact[] = [];
+    const result = await executeNodeAttempt(prepared({
+      engineRoute: [
+        { ...lane(primary), target },
+        { ...lane(fallback, alternate), target: fallbackTarget },
+      ],
+      declaredTargets: [target, fallbackTarget, otherTarget],
+      recordModelUnavailable: async (fact) => { facts.push(fact); },
+    }), new AbortController().signal);
+
+    expect(result.status).toBe('completed');
+    expect(fallback.run).toHaveBeenCalledTimes(1);
+    expect(facts).toEqual([{
+      schemaVersion: 1,
+      identity,
+      target,
+      selection: primarySelection,
+      effective,
+      failure: 'auth',
+    }]);
+  });
+
+  it('uses a selected provider for auth when its model is unknown', async () => {
+    const observed = engineSelection({ ...primarySelection, model: null });
+    const alternate = engineSelection({
+      ...primarySelection, provider: 'provider-b',
+    });
+    const primary = engine('primary', async () => {
+      throw new EngineError({ kind: 'auth', message: 'scripted credential failure' });
+    });
+    const fallback = engine('primary', async () => success('other provider', alternate));
+    const facts: ModelUnavailableFact[] = [];
+    const result = await executeNodeAttempt(prepared({
+      engineRoute: [
+        lane(primary, observed),
+        lane(fallback, alternate),
+      ],
+      declaredTargets: [],
+      recordModelUnavailable: async (fact) => { facts.push(fact); },
+    }), new AbortController().signal);
+
+    expect(result.status).toBe('completed');
+    expect(fallback.run).toHaveBeenCalledTimes(1);
+    expect(facts).toEqual([{
+      schemaVersion: 1,
+      identity,
+      selection: observed,
+      effective: observed,
+      failure: 'auth',
+    }]);
+  });
+
+  it('refuses a same-adapter null-provider fallback when supplied declarations cannot resolve it', async () => {
+    const alternate = engineSelection({ ...primarySelection, provider: null });
+    const primary = engine('primary', async () => {
+      throw new EngineError({ kind: 'auth', message: 'scripted credential failure' });
+    });
+    const fallback = engine('primary', async () => success('unresolved provider', alternate));
+    const facts: ModelUnavailableFact[] = [];
+    const budget = createTokenBudget(100);
+    const result = await executeNodeAttempt(prepared({
+      engineRoute: [
+        lane(primary),
+        lane(fallback, alternate),
+      ],
+      declaredTargets: [],
+      tokenBudget: budget,
+      recordModelUnavailable: async (fact) => { facts.push(fact); },
+    }), new AbortController().signal);
+
+    expect(result.failure?.code).toBe('ENGINE_IDENTITY_UNRESOLVED');
+    expect(primary.run).toHaveBeenCalledTimes(1);
+    expect(fallback.run).not.toHaveBeenCalled();
+    expect(facts).toEqual([{
+      schemaVersion: 1,
+      identity,
+      selection: primarySelection,
+      effective: primarySelection,
+      failure: 'auth',
+    }]);
+    expect(budget.snapshot().reserved).toBe(0);
+  });
+
+  it('does not resolve a null provider on an unrelated adapter for an auth exclusion', async () => {
+    const target: ExecutionTarget = {
+      adapter: 'primary', provider: 'provider-a', modelFamily: 'family-a',
+      model: 'model-a', tools: ['read'],
+    };
+    const alternate = engineSelection({
+      ...primarySelection,
+      adapter: 'alternate',
+      provider: null,
+      modelFamily: null,
+    });
+    const primary = engine('primary', async () => {
+      throw new EngineError({ kind: 'auth', message: 'scripted credential failure' });
+    });
+    const fallback = engine('alternate', async () => success('unrelated adapter', alternate));
+    const result = await executeNodeAttempt(prepared({
+      engineRoute: [
+        { ...lane(primary), target },
+        lane(fallback, alternate),
+      ],
+      declaredTargets: [target],
+    }), new AbortController().signal);
+
+    expect(result.status).toBe('completed');
+    expect(fallback.run).toHaveBeenCalledTimes(1);
+  });
+
+  it('keeps successful standalone null-provider calls valid without a target', async () => {
+    const observed = engineSelection({ ...primarySelection, provider: null, modelFamily: null });
+    const primary = engine('primary', async () => success('done', observed));
+    const result = await executeNodeAttempt(prepared({
+      engineRoute: [lane(primary, observed)],
+    }), new AbortController().signal);
+    expect(result.status).toBe('completed');
+    expect(result.effectiveEngine).toEqual(observed);
+  });
+
+  it('records exact routing beside null observations before skipping a fallback', async () => {
+    const target: ExecutionTarget = {
+      adapter: 'primary', provider: 'provider-a', modelFamily: 'family-a',
+      model: 'model-a', tools: ['read'],
+    };
+    const alternateTarget: ExecutionTarget = { ...target, adapter: 'alternate' };
+    const observed = engineSelection({ ...primarySelection, provider: null, modelFamily: null });
+    const alternate = engineSelection({ ...observed, adapter: 'alternate' });
+    const primary = engine('primary', async () => {
+      throw new EngineError({ kind: 'quota', message: 'scripted quota', effective: observed });
+    });
+    const fallback = engine('alternate', async () => success('wrong', alternate));
+    const facts: ModelUnavailableFact[] = [];
+    const result = await executeNodeAttempt(prepared({
+      engineRoute: [
+        { ...lane(primary, observed), target },
+        { ...lane(fallback, alternate), target: alternateTarget },
+      ],
+      declaredTargets: [target, alternateTarget],
+      recordModelUnavailable: async (fact) => { facts.push(fact); },
+    }), new AbortController().signal);
+    expect(result.failure?.code).toBe('ENGINE_UNAVAILABLE');
+    expect(fallback.run).not.toHaveBeenCalled();
+    expect(facts).toEqual([{
+      schemaVersion: 1, identity, target, selection: observed, effective: observed, failure: 'quota',
+    }]);
+    expect(result.unavailableModels).toEqual([observed]);
+  });
+
+  it.each(['missing', 'ambiguous'] as const)('preserves a %s effective provider before refusing fallback', async (resolution) => {
+    const target: ExecutionTarget = {
+      adapter: 'primary', provider: 'provider-a', modelFamily: 'family-a',
+      model: 'model-a', tools: ['read'],
+    };
+    const effective = engineSelection({ ...primarySelection, model: 'undeclared', provider: null });
+    const primary = engine('primary', async () => {
+      throw new EngineError({ kind: 'quota', message: 'scripted substitution', effective });
+    });
+    const fallback = engine('fallback', async () => success('wrong', fallbackSelection));
+    const facts: ModelUnavailableFact[] = [];
+    const budget = createTokenBudget(100);
+    const result = await executeNodeAttempt(prepared({
+      engineRoute: [{ ...lane(primary), target }, lane(fallback, fallbackSelection)],
+      declaredTargets: resolution === 'missing' ? [target] : [
+        target,
+        { ...target, model: 'undeclared', provider: 'provider-b' },
+        { ...target, model: 'undeclared', provider: 'provider-c' },
+      ],
+      tokenBudget: budget,
+      recordModelUnavailable: async (fact) => { facts.push(fact); },
+    }), new AbortController().signal);
+    expect(result.failure?.code).toBe('ENGINE_IDENTITY_UNRESOLVED');
+    expect(facts).toEqual([{
+      schemaVersion: 1, identity, target,
+      selection: primarySelection, effective, failure: 'quota',
+    }]);
+    expect(result.unavailableModels).toEqual([effective]);
+    expect(fallback.run).not.toHaveBeenCalled();
+    expect(budget.snapshot().reserved).toBe(0);
+  });
+
+  it('does not fall back when the lasting-failure append fails', async () => {
+    const primary = engine('primary', async () => {
+      throw new EngineError({ kind: 'auth', message: 'scripted auth' });
+    });
+    const fallback = engine('fallback', async () => success('wrong', fallbackSelection));
+    const result = await executeNodeAttempt(prepared({
+      engineRoute: [lane(primary), lane(fallback, fallbackSelection)],
+      recordModelUnavailable: async () => { throw new Error('scripted append failure'); },
+    }), new AbortController().signal);
+    expect(result.failure?.code).toBe('MODEL_UNAVAILABLE_RECORD');
+    expect(fallback.run).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ['null', null],
+    ['object', {}],
+    ['iterable', new Set()],
+    ['sparse array', new Array(1)],
+  ] as const)('rejects %s declarations before an engine call', async (_label, invalid) => {
+    const primary = engine('primary', async () => success('not called', primarySelection));
+    const result = await executeNodeAttempt(prepared({
+      engineRoute: [lane(primary)],
+      declaredTargets: invalid as unknown as readonly ExecutionTarget[],
+    }), new AbortController().signal);
+    expect(result.failure?.code).toBe('INVALID_ATTEMPT');
+    expect(primary.run).not.toHaveBeenCalled();
+  });
+
+  it('resolves a changed null-provider effective model from full lane declarations', async () => {
+    const target: ExecutionTarget = {
+      adapter: 'primary', provider: 'provider-a', modelFamily: 'family-a',
+      model: 'model-a', tools: ['read'],
+    };
+    const declaredEffective: ExecutionTarget = { ...target, provider: 'provider-b', model: 'model-b' };
+    const fallbackTarget: ExecutionTarget = { ...declaredEffective, adapter: 'fallback' };
+    const effective = engineSelection({ ...primarySelection, model: 'model-b', provider: null });
+    const fallbackObserved = engineSelection({
+      ...primarySelection, adapter: 'fallback', provider: 'provider-b', model: 'model-b',
+    });
+    const primary = engine('primary', async () => {
+      throw new EngineError({ kind: 'billing', message: 'scripted substitution', effective });
+    });
+    const fallback = engine('fallback', async () => success('wrong', fallbackObserved));
+    const result = await executeNodeAttempt(prepared({
+      engineRoute: [
+        { ...lane(primary), target },
+        { ...lane(fallback, fallbackObserved), target: fallbackTarget },
+      ],
+      declaredTargets: [target, fallbackTarget, declaredEffective],
+    }), new AbortController().signal);
+    expect(result.failure?.code).toBe('ENGINE_UNAVAILABLE');
+    expect(fallback.run).not.toHaveBeenCalled();
+    expect(result.unavailableModels).toEqual([effective]);
+  });
+
+  it.each([null, 'provider-a'] as const)('preserves standalone fallback with provider %s when declarations are omitted', async (provider) => {
+    const observed = engineSelection({ ...primarySelection, provider });
+    const alternate = engineSelection({ ...observed, adapter: 'fallback' });
+    const primary = engine('primary', async () => {
+      throw new EngineError({ kind: 'quota', message: 'scripted quota' });
+    });
+    const fallback = engine('fallback', async () => success('compatible', alternate));
+    const facts: ModelUnavailableFact[] = [];
+    const result = await executeNodeAttempt(prepared({
+      engineRoute: [lane(primary, observed), lane(fallback, alternate)],
+      recordModelUnavailable: async (fact) => { facts.push(fact); },
+    }), new AbortController().signal);
+    expect(result.status).toBe('completed');
+    expect(fallback.run).toHaveBeenCalledTimes(1);
+    expect(facts).toEqual([{
+      schemaVersion: 1, identity, selection: observed, effective: observed, failure: 'quota',
+    }]);
   });
 
   it('does not reset the attempt deadline for a fallback lane', async () => {

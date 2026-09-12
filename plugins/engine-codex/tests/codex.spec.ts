@@ -3,6 +3,7 @@ import {
   chmodSync,
   mkdtempSync,
   readFileSync,
+  rmSync,
   writeFileSync,
 } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -10,6 +11,12 @@ import { join } from 'node:path';
 
 import { classifyEngineFailure, finalResultText } from '@obversa/engine';
 import { buildCodexArgs, CodexEngine } from '../src/index.ts';
+
+const VERSION_ONLY = `if (process.argv.length === 3 && process.argv[2] === '--version') {
+  process.stdout.write('codex-cli 0.153.2\\n');
+  process.exit(0);
+}
+`;
 
 describe('buildCodexArgs', () => {
   it('defaults to a read-only ephemeral exec and writes the last message', () => {
@@ -75,6 +82,7 @@ describe('buildCodexArgs', () => {
     writeFileSync(
       bin,
       `#!/usr/bin/env node
+${VERSION_ONLY}
 import { readFileSync, writeFileSync } from 'node:fs';
 
 const args = process.argv.slice(2);
@@ -116,6 +124,7 @@ writeFileSync(out, 'stub final');
     writeFileSync(
       bin,
       `#!/usr/bin/env node
+${VERSION_ONLY}
 import { writeFileSync } from 'node:fs';
 
 const args = process.argv.slice(2);
@@ -164,6 +173,7 @@ process.stdout.write(JSON.stringify({
     writeFileSync(
       bin,
       `#!/usr/bin/env node
+${VERSION_ONLY}
 import { writeFileSync } from 'node:fs';
 
 const args = process.argv.slice(2);
@@ -198,6 +208,7 @@ process.exit(1);
     writeFileSync(
       bin,
       `#!/usr/bin/env node
+${VERSION_ONLY}
 console.error('transport failed before completion');
 process.exit(1);
 `,
@@ -220,6 +231,7 @@ process.exit(1);
     writeFileSync(
       bin,
       `#!/usr/bin/env node
+${VERSION_ONLY}
 process.stderr.write('OpenAI Codex v0.144.4\\n' + 'startup detail '.repeat(40));
 process.stdout.write(${JSON.stringify(secret)} + " HTTP 400: Invalid value: 'max'. Supported values are: none, low, high, xhigh\\n");
 process.exit(1);
@@ -245,6 +257,30 @@ process.exit(1);
     expect((error as Error).message).toContain('Supported values');
     expect((error as Error).message).toContain('[redacted]');
     expect((error as Error).message).not.toContain(secret);
+  });
+
+  it.each([
+    ['quota allowance reached', 'rate-limit'],
+    ["You've hit your session limit", 'rate-limit'],
+    ['monthly usage limit reached', 'quota'],
+    ['402 payment required: exhausted credit balance', 'billing'],
+  ] as const)('classifies scripted failed-process text: %s', async (text, kind) => {
+    const directory = mkdtempSync(join(tmpdir(), 'lines-codex-limit-'));
+    const executable = join(directory, 'codex-fixture.mjs');
+    try {
+      writeFileSync(
+        executable,
+        `#!/usr/bin/env node\n${VERSION_ONLY}process.stderr.write(${JSON.stringify(`${text}\n`)});\nprocess.exit(1);\n`,
+      );
+      chmodSync(executable, 0o755);
+      await expect(new CodexEngine({ cliBinary: executable }).run(
+        { prompt: 'scripted limit check' },
+        () => {},
+        new AbortController().signal,
+      )).rejects.toMatchObject({ name: 'EngineError', kind });
+    } finally {
+      rmSync(directory, { recursive: true, force: true });
+    }
   });
 
 });

@@ -22,18 +22,67 @@ type PublicValidatorTakesOneArgument = Expect<Equal<
   Parameters<typeof api.validateGraphDescription>,
   [value: unknown]
 >>;
+type PublicDomainEventIdValidatorSignature = Expect<Equal<
+  [Parameters<typeof api.validateDomainEventId>, ReturnType<typeof api.validateDomainEventId>],
+  [[value: unknown, path: string], string]
+>>;
 type PublicReleaseResultsStayDistinct = Expect<Equal<
   Equal<ReleaseResult, WorkspaceReleaseResult>,
   false
 >>;
+type PublicPreflightResume = Expect<Equal<
+  Parameters<api.GraphExecutor['resume']>,
+  [target: string | { readonly preflightEventId: string }, signal: AbortSignal]
+>>;
+type PublicPreflightScratch = Expect<Equal<
+  Pick<api.GraphExecutorOptions, 'preflightScratchDirectory'>,
+  { readonly preflightScratchDirectory?: string }
+>>;
 
 const publicValidatorTakesOneArgument: PublicValidatorTakesOneArgument = true;
+const publicDomainEventIdValidatorSignature: PublicDomainEventIdValidatorSignature = true;
 const publicGraphKernelType: GraphKernel | undefined = undefined;
 const publicReleaseResultsStayDistinct: PublicReleaseResultsStayDistinct = true;
+const publicPreflightResume: PublicPreflightResume = true;
+const publicPreflightScratch: PublicPreflightScratch = true;
+const publicPreflightPause: api.GraphExecutorResult = {
+  kind: 'pause', code: 'PREFLIGHT_PAUSED', reason: 'Resume this recorded check.', preflightEventId: 'pause-event',
+};
+const publicPreflightFailure: api.GraphExecutorResult = {
+  kind: 'fail', code: 'PREFLIGHT_FAILED', message: 'No declared target can enter work.',
+};
 const callbackReleaseResult: ReleaseResult = { ok: false, kind: 'missing' };
 const workspaceReleaseResult: WorkspaceReleaseResult = { ok: false, kind: 'unknown-token' };
 
 describe('public runtime API', () => {
+  it('exposes read and interruption without exposing the internal preflight loader', () => {
+    expect(api.readRunPreflight).toBeTypeOf('function');
+    expect(api.interruptRunPreflight).toBeTypeOf('function');
+    expect(api).not.toHaveProperty('loadRunPreflight');
+    const state: api.RunPreflightState = {
+      phase: 'paused',
+      pause: { kind: 'pause', code: 'PREFLIGHT_PAUSED', reason: 'Explicit resume required.', preflightEventId: 'pause-id' },
+      resumedPreflightEventId: null,
+      unfinishedProbeEventId: null,
+    };
+    const failed: api.PreflightFailureResult = { kind: 'fail', code: 'PREFLIGHT_FAILED', message: 'No admissible target.' };
+    expect(state.pause!.preflightEventId).toBe('pause-id');
+    expect(failed.code).toBe('PREFLIGHT_FAILED');
+  });
+
+  it('lists the shared domain event id validator on the public runtime API', () => {
+    expect(Object.hasOwn(api, 'validateDomainEventId')).toBe(true);
+  });
+
+  it('validates domain event ids through the public runtime API', () => {
+    const boundary = 'é'.repeat(128);
+    expect(api.validateDomainEventId(boundary, '/public-id')).toBe(boundary);
+    expect(() => api.validateDomainEventId(`${boundary}a`, '/public-id')).toThrowError(expect.objectContaining({
+      code: 'INVALID_STORED_VALUE',
+      details: { path: '/public-id' },
+    }));
+  });
+
   it('exports only the reviewed programmatic surface', () => {
     expect(Object.keys(api).sort()).toEqual([
       'ApprovalSubjectError',
@@ -88,6 +137,7 @@ describe('public runtime API', () => {
       'formatPreflight',
       'fromFile',
       'gateJob',
+      'interruptRunPreflight',
       'isolated',
       'jobMeta',
       'kickback',
@@ -108,6 +158,7 @@ describe('public runtime API', () => {
       'prove',
       'quorum',
       'ratchet',
+      'readRunPreflight',
       'renderPlan',
       'replayCallbackClient',
       'resolveAcceptedResult',
@@ -133,6 +184,7 @@ describe('public runtime API', () => {
       'validateCallbackResponse',
       'validateDomainEventBatch',
       'validateDomainEventEnvelope',
+      'validateDomainEventId',
       'validateEventStreamRef',
       'validateGraphDescription',
       'validateNewArtifact',
@@ -146,6 +198,7 @@ describe('public runtime API', () => {
       'writeScope',
     ]);
     expect(publicGraphKernelType).toBeUndefined();
+    expect(publicDomainEventIdValidatorSignature).toBe(true);
     expect(publicReleaseResultsStayDistinct).toBe(true);
     expect(callbackReleaseResult.kind).toBe('missing');
     expect(workspaceReleaseResult.kind).toBe('unknown-token');

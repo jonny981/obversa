@@ -52,6 +52,12 @@ setInterval(() => {}, 1000);
   writeFileSync(
     bin,
     source
+      .replace('#!/usr/bin/env node\n', `#!/usr/bin/env node
+if (process.argv.length === 3 && process.argv[2] === '--version') {
+  process.stdout.write('2.1.261 (Claude Code)\\n');
+  process.exit(0);
+}
+`)
       .replaceAll(ORPHAN_PID_PATH, JSON.stringify(orphanPidPath))
       .replaceAll(ORPHAN_HELPER_PATH, JSON.stringify(orphanHelper))
       .replaceAll(FINAL_MARKER_PATH, JSON.stringify(finalMarkerPath)),

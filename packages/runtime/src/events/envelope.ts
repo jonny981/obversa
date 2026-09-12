@@ -100,7 +100,7 @@ function exactFields(
   }
 }
 
-function identifier(value: JsonValue | undefined, path: string): string {
+export function validateDomainEventId(value: unknown, path: string): string {
   if (
     typeof value !== 'string'
     || value.length === 0
@@ -136,12 +136,12 @@ function timestamp(value: JsonValue | undefined, path: string): string {
 }
 
 function validateNewEventObject(value: JsonObject): NewDomainEvent {
-  identifier(value.eventId, '/eventId');
-  identifier(value.type, '/type');
+  validateDomainEventId(value.eventId, '/eventId');
+  validateDomainEventId(value.type, '/type');
   positiveVersion(value.version, '/version');
   timestamp(value.timestamp, '/timestamp');
-  identifier(value.correlationId, '/correlationId');
-  if (value.causationId !== null) identifier(value.causationId, '/causationId');
+  validateDomainEventId(value.correlationId, '/correlationId');
+  if (value.causationId !== null) validateDomainEventId(value.causationId, '/causationId');
   return value as unknown as NewDomainEvent;
 }
 

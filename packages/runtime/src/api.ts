@@ -156,6 +156,7 @@ export {
   type GraphPackageIdentity,
   type GraphPackageAdmission,
   type ExecutionLaneResolution,
+  type RunPreflightPolicy,
   type PlanResolution,
   type ResolvedExecutionLane,
   type ResolvedPlan,
@@ -193,6 +194,7 @@ export type {
   RecoverResult,
 } from './workspace/provider.js';
 export {
+  validateDomainEventId,
   validateNewDomainEvent,
   validateDomainEventEnvelope,
   type DomainEventId,
@@ -237,6 +239,13 @@ export {
   type RunStartRecord,
   type RunStorageBinding,
 } from './runtime/run-definition.js';
+export {
+  readRunPreflight,
+  interruptRunPreflight,
+  type RunPreflightState,
+  type PreflightPauseResult,
+  type PreflightFailureResult,
+} from './runtime/preflight-record.js';
 export type {
   AttemptBudgetPolicy,
   TokenBudget,

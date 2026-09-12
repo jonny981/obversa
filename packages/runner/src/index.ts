@@ -4,6 +4,7 @@ export {
   SupervisedRunError,
   type SupervisedRunOptions,
   type ResumeSupervisedRunOptions,
+  type ResumePreflightSupervisedRunOptions,
   type SupervisedRunHandle,
   type SupervisedRunResult,
   type SupervisedRunBindings,

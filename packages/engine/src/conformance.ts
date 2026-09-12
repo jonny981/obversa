@@ -1,6 +1,6 @@
 import { isDeepStrictEqual } from 'node:util';
 
-import { classifyEngineFailure, type EngineFailureKind } from './error.js';
+import { EngineError, classifyEngineFailure, type EngineFailureKind } from './error.js';
 import type {
   AgentRequest,
   AgentResult,
@@ -10,7 +10,7 @@ import type {
   EngineStreamEvent,
 } from './contracts.js';
 import type { JsonValue } from './json.js';
-import { validateAgentResult } from './result.js';
+import { engineSelection, validateAgentResult } from './result.js';
 
 export type EngineConformanceScenario =
   | 'ordered-parts'
@@ -366,4 +366,188 @@ export async function assertEngineConformance(
     .map((item) => `${item.case}: ${item.message}`)
     .join('; ');
   throw new Error(`Engine conformance failed: ${detail}`);
+}
+
+export interface EngineAdmissionConformanceFixture {
+  readonly request: AgentRequest;
+  readonly selection: EngineSelectionRecord;
+  open(): Engine | Promise<Engine>;
+  /** No argument counts all model calls; a path/null counts that target. */
+  modelCalls(executable?: string | null): number | Promise<number>;
+  readonly cli?: {
+    /** Move bare-name lookup while keeping the admitted path runnable. */
+    moveLookup(): void | Promise<void>;
+    /** Same configuration, except an explicitly different absolute path. */
+    openDifferent(): Engine | Promise<Engine>;
+    /** A syntactically valid absolute path with no executable. */
+    openMissing(): Engine | Promise<Engine>;
+  };
+}
+
+export type EngineAdmissionConformanceReport = EngineConformanceReport | {
+  readonly kind: 'unsupported';
+  readonly adapter: string;
+};
+
+class AdmissionUnsupportedError extends Error {
+  constructor(readonly adapter: string) {
+    super(`${adapter} does not implement admit`);
+  }
+}
+
+/** Check optional admission without imposing the full run-scenario protocol. */
+export async function runEngineAdmissionConformance(
+  fixture: EngineAdmissionConformanceFixture,
+): Promise<EngineAdmissionConformanceReport> {
+  const failures: EngineConformanceFailure[] = [];
+  let cases = 0;
+  let unsupported: Extract<EngineAdmissionConformanceReport, { kind: 'unsupported' }>
+    | undefined;
+
+  const report = (): EngineAdmissionConformanceReport => unsupported ?? Object.freeze({
+    ok: failures.length === 0,
+    cases,
+    failures: Object.freeze(failures.map((failure) => Object.freeze(failure))),
+  });
+  const runCase = async <Value>(
+    name: string,
+    action: () => Promise<Value>,
+  ): Promise<Value | undefined> => {
+    if (unsupported) return;
+    cases += 1;
+    try {
+      return await action();
+    } catch (error) {
+      if (error instanceof AdmissionUnsupportedError) {
+        unsupported = Object.freeze({ kind: 'unsupported', adapter: error.adapter });
+      } else {
+        failures.push({ case: name, message: message(error) });
+      }
+    }
+  };
+  const method = (engine: Engine): NonNullable<Engine['admit']> => {
+    if (typeof engine.admit !== 'function') throw new AdmissionUnsupportedError(engine.name);
+    return engine.admit.bind(engine);
+  };
+  const request = (): Omit<AgentRequest, 'prompt'> => {
+    const { prompt: _prompt, ...rest } = structuredClone(fixture.request);
+    return rest;
+  };
+  const noModelCall = async <Value>(action: () => Promise<Value>): Promise<Value> => {
+    const before = await fixture.modelCalls();
+    try {
+      return await action();
+    } finally {
+      check(await fixture.modelCalls() === before, 'Admission or refusal made a model call.');
+    }
+  };
+  const expectFailureKind = async (
+    action: () => Promise<unknown>,
+    kind: EngineFailureKind,
+  ): Promise<void> => {
+    let error: unknown;
+    try { await action(); } catch (caught) { error = caught; }
+    if (error instanceof AdmissionUnsupportedError) throw error;
+    check(error instanceof EngineError && error.kind === kind,
+      `Expected a typed ${kind} failure, got ${error === undefined ? 'success' : message(error)}.`);
+  };
+  const signal = (): AbortSignal => new AbortController().signal;
+  const runSelected = async (engine: Engine, selected: EngineSelectionRecord): Promise<void> => {
+    const total = await fixture.modelCalls();
+    const atPath = await fixture.modelCalls(selected.executable);
+    const result = validateAgentResult(await engine.run(
+      structuredClone(fixture.request), () => {}, signal(),
+    ));
+    check(isDeepStrictEqual(result.requested, selected), 'Run changed its admitted requested identity.');
+    check(isDeepStrictEqual(result.effective, selected), 'Run changed its admitted effective identity.');
+    check(await fixture.modelCalls() === total + 1, 'Run did not make exactly one fixture model call.');
+    check(await fixture.modelCalls(selected.executable) === atPath + 1,
+      'Run used a different executable from its admitted selection.');
+  };
+
+  const initial = await runCase('initial admission', async () => {
+    const engine = await fixture.open();
+    const admit = method(engine);
+    const selected = engineSelection(fixture.selection);
+    check((selected.executable !== null) === (fixture.cli !== undefined),
+      'CLI selection requires CLI controls; a null executable must not supply them.');
+    const admitted = await noModelCall(async () => engineSelection(await admit(request(), signal())));
+    check(isDeepStrictEqual(admitted, selected), 'Admission changed the expected selection.');
+    return { engine, selection: admitted };
+  });
+  if (!initial) return report();
+  const first = initial.engine;
+  const selected = initial.selection;
+
+  await runCase('same instance retains selection', async () => {
+    await fixture.cli?.moveLookup();
+    const again = await noModelCall(async () => engineSelection(
+      await method(first)(request(), signal(), selected),
+    ));
+    check(isDeepStrictEqual(again, selected), 'Re-admission changed the saved selection.');
+    await runSelected(first, selected);
+  });
+
+  await runCase('replacement restores selection', async () => {
+    const replacement = await fixture.open();
+    const restored = await noModelCall(async () => engineSelection(
+      await method(replacement)(request(), signal(), selected),
+    ));
+    check(isDeepStrictEqual(restored, selected), 'Replacement did not restore the saved selection.');
+    await runSelected(replacement, selected);
+  });
+
+  const changed: ReadonlyArray<readonly [string, EngineSelectionRecord]> = [
+    ['adapter', engineSelection({ ...selected, adapter: `${selected.adapter}-different` })],
+    ['provider', engineSelection({ ...selected, provider: `${selected.provider ?? ''}-different` })],
+    ['family', engineSelection({ ...selected, modelFamily: `${selected.modelFamily ?? ''}-different` })],
+    ['model', engineSelection({ ...selected, model: `${selected.model ?? ''}-different` })],
+    ['capabilities', engineSelection({
+      ...selected, capabilities: selected.capabilities.length === 0 ? ['different'] : [],
+    })],
+    ['version', engineSelection({ ...selected, adapterVersion: `${selected.adapterVersion ?? ''}-different` })],
+  ];
+  for (const [field, expected] of changed) {
+    await runCase(`changed ${field} is refused`, async () => {
+      await noModelCall(async () => expectFailureKind(
+        async () => method(first)(request(), signal(), expected), 'invalid-config',
+      ));
+    });
+  }
+
+  if (fixture.cli) {
+    const cli = fixture.cli;
+    await runCase('explicitly swapped path is refused', async () => {
+      await noModelCall(async () => {
+        const different = await cli.openDifferent();
+        const other = engineSelection(await method(different)(request(), signal()));
+        check(other.executable !== null && other.executable !== selected.executable,
+          'Different-executable fixture did not select a different path.');
+        check(isDeepStrictEqual({ ...other, executable: selected.executable }, selected),
+          'Different-executable fixture also changed non-path identity.');
+        const freshDifferent = await cli.openDifferent();
+        await expectFailureKind(
+          async () => method(freshDifferent)(request(), signal(), selected), 'invalid-config',
+        );
+        await expectFailureKind(
+          async () => method(first)(request(), signal(), other), 'invalid-config',
+        );
+      });
+    });
+    await runCase('missing executable fails after construction', async () => {
+      await noModelCall(async () => {
+        const missing = await cli.openMissing();
+        await expectFailureKind(async () => method(missing)(request(), signal()), 'missing-cli');
+        await expectFailureKind(async () => missing.run(
+          structuredClone(fixture.request), () => {}, signal(),
+        ), 'missing-cli');
+        const freshMissing = await cli.openMissing();
+        method(freshMissing);
+        await expectFailureKind(async () => freshMissing.run(
+          structuredClone(fixture.request), () => {}, signal(),
+        ), 'missing-cli');
+      });
+    });
+  }
+  return report();
 }

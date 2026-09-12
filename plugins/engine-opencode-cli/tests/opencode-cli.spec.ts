@@ -5,13 +5,14 @@ import {
   mkdirSync,
   mkdtempSync,
   readFileSync,
+  readdirSync,
   realpathSync,
   rmSync,
   symlinkSync,
   writeFileSync,
 } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { dirname, join } from 'node:path';
+import { delimiter, dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { setTimeout as delay } from 'node:timers/promises';
 
@@ -22,12 +23,17 @@ import {
   EngineIncompleteResultError,
   classifyEngineFailure,
   digestJson,
+  engineSelection,
   type AgentRequest,
   type AgentResultPart,
   type EngineStreamEvent,
+  type EngineSelectionRecord,
   type JsonValue,
 } from '@obversa/engine';
-import { runEngineConformance } from '@obversa/engine/testing';
+import {
+  runEngineAdmissionConformance,
+  runEngineConformance,
+} from '@obversa/engine/testing';
 import {
   buildOpenCodeInvocation,
   OpenCodeCliEngine,
@@ -44,6 +50,435 @@ afterEach(() => {
   for (const root of roots.splice(0)) {
     rmSync(root, { recursive: true, force: true });
   }
+});
+
+describe('OpenCode static admission', () => {
+  it('constructs a missing absolute executable and refuses admit and run as missing-cli', async () => {
+    const bin = join(temporaryDirectory('lines-opencode-missing-'), 'opencode');
+    const input = request();
+    let engine!: OpenCodeCliEngine;
+    expect(() => { engine = new OpenCodeCliEngine(options(bin)); }).not.toThrow();
+    await expect(engine.admit(admissionRequest(input), new AbortController().signal))
+      .rejects.toMatchObject({ name: 'EngineError', kind: 'missing-cli' });
+    await expect(engine.run(input, () => {}, new AbortController().signal))
+      .rejects.toMatchObject({ name: 'EngineError', kind: 'missing-cli' });
+    await expect(new OpenCodeCliEngine(options(bin)).run(input, () => {}, new AbortController().signal))
+      .rejects.toMatchObject({ name: 'EngineError', kind: 'missing-cli' });
+  });
+
+  it('observes the version once without a prompt or model request and preserves normal tools', async () => {
+    const fixture = admissionFixture();
+    const input = request();
+    const selected = await fixture.engine.admit(admissionRequest(input), new AbortController().signal);
+    expect(selected).toEqual(admissionSelection(input, fixture.bin));
+    expect(fixture.calls()).toHaveLength(1);
+    expect(fixture.calls()[0]).toMatchObject({
+      kind: 'version', executable: fixture.bin, args: ['--version'], stdin: '',
+      config: { tools: { '*': false, read: true, grep: true }, model: input.model },
+    });
+    expect(existsSync(fixture.calls()[0]!.home)).toBe(false);
+    expect(existsSync(fixture.calls()[0]!.configDirectory)).toBe(false);
+    expect(await fixture.engine.admit(admissionRequest(input), new AbortController().signal, selected))
+      .toEqual(selected);
+    const result = await fixture.engine.run(input, () => {}, new AbortController().signal);
+    expect(result.requested).toEqual(selected);
+    expect(result.effective).toEqual(selected);
+    expect(fixture.calls().map((call) => call.kind)).toEqual(['version', 'model']);
+  });
+
+  it('validates each request instead of caching its selection', async () => {
+    const fixture = admissionFixture();
+    const first = request();
+    const second = { ...first, model: 'fixture-provider/other-model', tools: ['read'], allowedTools: ['Read'] };
+    await fixture.engine.admit(admissionRequest(first), new AbortController().signal);
+    const selected = await fixture.engine.admit(admissionRequest(second), new AbortController().signal);
+    expect(selected).toEqual(admissionSelection(second, fixture.bin));
+    const result = await fixture.engine.run(second, () => {}, new AbortController().signal);
+    expect(result.requested).toEqual(selected);
+    expect(result.effective).toEqual(selected);
+    expect(fixture.calls().map((call) => call.kind)).toEqual(['version', 'model']);
+    await expect(fixture.engine.admit(admissionRequest({ ...second, tools: ['invented-tool'] }), new AbortController().signal))
+      .rejects.toMatchObject({ kind: 'invalid-config' });
+    expect(fixture.calls()).toHaveLength(2);
+  });
+
+  it('shares one version process between two concurrent first admissions', async () => {
+    const fixture = admissionFixture();
+    const input = request();
+    const [first, second] = await Promise.all([
+      fixture.engine.admit(admissionRequest(input), new AbortController().signal),
+      fixture.engine.admit(admissionRequest(input), new AbortController().signal),
+    ]);
+    expect(first).toEqual(admissionSelection(input, fixture.bin));
+    expect(second).toEqual(first);
+    expect(fixture.calls().map((call) => call.kind)).toEqual(['version']);
+  });
+
+  it('allows a successful explicit admission after a failed version observation', async () => {
+    const fixture = admissionFixture({ OBVERSA_TEST_OPENCODE_VERSION_MODE: 'fail-once' });
+    const input = request();
+    await expect(fixture.engine.admit(admissionRequest(input), new AbortController().signal))
+      .rejects.toMatchObject({ kind: 'invalid-config' });
+    expect(await fixture.engine.admit(admissionRequest(input), new AbortController().signal))
+      .toEqual(admissionSelection(input, fixture.bin));
+    expect(fixture.calls().map((call) => call.kind)).toEqual(['version', 'version']);
+    expect((await fixture.engine.run(input, () => {}, new AbortController().signal)).requested)
+      .toEqual(admissionSelection(input, fixture.bin));
+    expect(fixture.calls().map((call) => call.kind)).toEqual(['version', 'version', 'model']);
+  });
+
+  it('preserves the configured symlink path and restores it in a fresh instance', async () => {
+    const fixture = admissionFixture();
+    const wrapper = join(temporaryDirectory('lines-opencode-wrapper-'), 'opencode');
+    symlinkSync(fixture.bin, wrapper);
+    const input = request();
+    const engine = new OpenCodeCliEngine({ ...options(wrapper), environment: fixture.environment });
+    const selected = await engine.admit(admissionRequest(input), new AbortController().signal);
+    expect(selected.executable).toBe(wrapper);
+    const replacement = new OpenCodeCliEngine({ ...options(wrapper), environment: fixture.environment });
+    expect(await replacement.admit(admissionRequest(input), new AbortController().signal, selected)).toEqual(selected);
+    expect((await replacement.run(input, () => {}, new AbortController().signal)).requested.executable).toBe(wrapper);
+    expect(fixture.calls().filter((call) => call.kind === 'model')).toHaveLength(1);
+  });
+
+  it('derives a null configured provider from the model without filling a null family', async () => {
+    const fixture = admissionFixture();
+    const input = request();
+    const engine = new OpenCodeCliEngine({
+      ...options(fixture.bin), identity: { provider: null, modelFamily: null }, environment: fixture.environment,
+    });
+    const selected = await engine.admit(admissionRequest(input), new AbortController().signal);
+    expect(selected).toMatchObject({ provider: 'fixture-provider', modelFamily: null });
+    expect((await engine.run(input, () => {}, new AbortController().signal)).effective).toEqual(selected);
+  });
+
+  it.each([
+    ['unparseable', 'opencode version secret-synthetic-output'],
+    ['unsupported', '1.18.24\n'],
+    ['extra output', '1.18.23\nsecret-synthetic-output'],
+  ])('refuses %s version output without retaining it', async (_label, stdout) => {
+    const fixture = admissionFixture({ OBVERSA_TEST_OPENCODE_VERSION_STDOUT: stdout });
+    const input = request();
+    let failure: unknown;
+    try { await fixture.engine.admit(admissionRequest(input), new AbortController().signal); }
+    catch (error) { failure = error; }
+    expect(failure).toBeInstanceOf(EngineError);
+    expect(failure).toMatchObject({ kind: 'invalid-config' });
+    expect(String(failure)).not.toContain('secret-synthetic-output');
+    expect(fixture.calls().map((call) => call.kind)).toEqual(['version']);
+  });
+
+  it.each(['exit', 'overflow'])('refuses the %s version command without a model call', async (mode) => {
+    const fixture = admissionFixture({ OBVERSA_TEST_OPENCODE_VERSION_MODE: mode });
+    await expect(fixture.engine.admit(admissionRequest(request()), new AbortController().signal))
+      .rejects.toMatchObject({ kind: 'invalid-config' });
+    expect(fixture.calls().map((call) => call.kind)).toEqual(['version']);
+  });
+
+  it('keeps version timeout typed and releases its temporary configuration', async () => {
+    const fixture = admissionFixture({ OBVERSA_TEST_OPENCODE_VERSION_MODE: 'hang' });
+    await expect(fixture.engine.admit(admissionRequest(request({ timeoutMs: 500 })), new AbortController().signal))
+      .rejects.toMatchObject({ kind: 'timeout' });
+    expect(fixture.calls().map((call) => call.kind)).toEqual(['version']);
+    expect(existsSync(fixture.calls()[0]!.home)).toBe(false);
+  });
+
+  it('keeps version abort typed and allows an explicit later admission', async () => {
+    const fixture = admissionFixture({ OBVERSA_TEST_OPENCODE_VERSION_MODE: 'hang' });
+    const input = request();
+    const controller = new AbortController();
+    const pending = fixture.engine.admit(admissionRequest(input), controller.signal);
+    const rejected = expect(pending).rejects.toMatchObject({ kind: 'aborted' });
+    await waitForFile(fixture.log);
+    controller.abort();
+    await rejected;
+    const again = new AbortController();
+    const second = fixture.engine.admit(admissionRequest(input), again.signal);
+    const secondRejected = expect(second).rejects.toMatchObject({ kind: 'aborted' });
+    const deadline = Date.now() + 5_000;
+    while (fixture.calls().length < 2 && Date.now() < deadline) await delay(10);
+    again.abort();
+    await secondRejected;
+    expect(fixture.calls().map((call) => call.kind)).toEqual(['version', 'version']);
+    expect(fixture.calls().every((call) => !existsSync(call.home))).toBe(true);
+  });
+
+  it('refuses an already aborted request before starting a version process', async () => {
+    const fixture = admissionFixture();
+    const controller = new AbortController();
+    controller.abort();
+    await expect(fixture.engine.admit(admissionRequest(request()), controller.signal))
+      .rejects.toMatchObject({ kind: 'aborted' });
+    expect(fixture.calls()).toEqual([]);
+  });
+
+  it('rechecks executable availability after admission', async () => {
+    const fixture = admissionFixture();
+    const input = request();
+    await fixture.engine.admit(admissionRequest(input), new AbortController().signal);
+    rmSync(fixture.bin);
+    await expect(fixture.engine.run(input, () => {}, new AbortController().signal))
+      .rejects.toMatchObject({ kind: 'missing-cli' });
+    expect(fixture.calls().map((call) => call.kind)).toEqual(['version']);
+  });
+
+  it('refuses an existing executable without execute permission as missing-cli', async () => {
+    const fixture = admissionFixture();
+    chmodSync(fixture.bin, 0o600);
+    const input = request();
+    await expect(fixture.engine.admit(admissionRequest(input), new AbortController().signal))
+      .rejects.toMatchObject({ kind: 'missing-cli' });
+    await expect(fixture.engine.run(input, () => {}, new AbortController().signal))
+      .rejects.toMatchObject({ kind: 'missing-cli' });
+    expect(fixture.calls()).toEqual([]);
+  });
+
+  it('does not invent missing-cli from a failed start of a runnable file', async () => {
+    const fixture = admissionFixture();
+    const missingInterpreter = join(temporaryDirectory('lines-opencode-missing-interpreter-'), 'absent-interpreter');
+    writeFileSync(fixture.bin, `#!${missingInterpreter}\n`);
+    chmodSync(fixture.bin, 0o755);
+    await expect(fixture.engine.admit(admissionRequest(request()), new AbortController().signal))
+      .rejects.toMatchObject({ kind: 'unknown' });
+    expect(fixture.calls()).toEqual([]);
+  });
+
+  it('applies managed config and normal-tool project guards before a version process', async () => {
+    const fixture = admissionFixture();
+    const input = request();
+    const managed = temporaryDirectory('lines-opencode-managed-admission-');
+    vi.stubEnv('OPENCODE_TEST_MANAGED_CONFIG_DIR', managed);
+    writeFileSync(join(managed, 'opencode.json'), '{}');
+    await expect(fixture.engine.admit(admissionRequest(input), new AbortController().signal))
+      .rejects.toMatchObject({ kind: 'invalid-config' });
+    rmSync(join(managed, 'opencode.json'));
+    mkdirSync(join(input.cwd!, 'src'));
+    writeFileSync(join(input.cwd!, 'src', 'AGENTS.md'), 'fixture instruction');
+    await expect(fixture.engine.admit(admissionRequest(input), new AbortController().signal))
+      .rejects.toMatchObject({ kind: 'invalid-config' });
+    expect(fixture.calls()).toEqual([]);
+    const noFiles = { ...input, tools: [], allowedTools: [], workspaceMode: 'none' as const };
+    await expect(fixture.engine.admit(admissionRequest(noFiles), new AbortController().signal))
+      .resolves.toMatchObject({ capabilities: [] });
+    expect(fixture.calls().map((call) => call.kind)).toEqual(['version']);
+  });
+
+  it('keeps the project guard active for a run after successful admission', async () => {
+    const fixture = admissionFixture();
+    const input = request();
+    writeFileSync(join(input.cwd!, 'AGENTS.md'), 'allowed root instructions');
+    await fixture.engine.admit(admissionRequest(input), new AbortController().signal);
+    mkdirSync(join(input.cwd!, 'src'));
+    writeFileSync(join(input.cwd!, 'src', 'AGENTS.md'), 'nested instructions');
+    await expect(fixture.engine.run(input, () => {}, new AbortController().signal))
+      .rejects.toMatchObject({ kind: 'invalid-config' });
+    expect(fixture.calls().map((call) => call.kind)).toEqual(['version']);
+  });
+
+  it.each([
+    { env: { EXTRA: 'not allowed' } },
+    { system: '{file:/etc/passwd}' },
+    { allowedTools: ['Read({file:/etc/passwd})', 'Grep'] },
+    { model: 'different-provider/model' },
+    { tools: ['edit'], allowedTools: ['Edit'], workspaceMode: 'read' as const },
+    { timeoutMs: 0 },
+    { cwd: 'relative' },
+  ])('refuses incompatible normal configuration without any process: %j', async (overrides) => {
+    const fixture = admissionFixture();
+    await expect(fixture.engine.admit(admissionRequest(request(overrides)), new AbortController().signal))
+      .rejects.toMatchObject({ kind: 'invalid-config' });
+    expect(fixture.calls()).toEqual([]);
+  });
+
+  it('classifies validation-directory creation failure as unknown without a version process', async () => {
+    const fixture = admissionFixture();
+    const input = admissionRequest(request());
+    const blocked = join(temporaryDirectory('lines-opencode-invalid-tmp-'), 'not-a-directory');
+    writeFileSync(blocked, 'fixture');
+    vi.stubEnv('TMPDIR', blocked);
+
+    let failure: unknown;
+    try { await fixture.engine.admit(input, new AbortController().signal); }
+    catch (error) { failure = error; }
+    expect(failure).toBeInstanceOf(EngineError);
+    expect(failure).toMatchObject({ kind: 'unknown' });
+    expect(String(failure)).not.toContain(blocked);
+    expect(fixture.calls()).toEqual([]);
+  });
+
+  it('classifies validation cleanup failure as unknown without starting version observation', async () => {
+    const fixture = admissionFixture();
+    const input = admissionRequest(request());
+    const parent = temporaryDirectory('lines-opencode-admission-parent-');
+    const attempt = { ...input.attempt! };
+    let validationDirectory: string | undefined;
+    Object.defineProperty(attempt, 'label', {
+      enumerable: true,
+      get() {
+        validationDirectory = admissionValidationDirectory(parent);
+        blockDirectoryCleanup(validationDirectory);
+        return 'reviewer';
+      },
+    });
+    vi.stubEnv('TMPDIR', parent);
+
+    let failure: unknown;
+    try {
+      await fixture.engine.admit({ ...input, attempt }, new AbortController().signal);
+    } catch (error) {
+      failure = error;
+    } finally {
+      releaseDirectoryCleanup(validationDirectory);
+    }
+    expect(failure).toBeInstanceOf(EngineError);
+    expect(failure).toMatchObject({ kind: 'unknown' });
+    expect(String(failure)).not.toContain(parent);
+    expect(fixture.calls()).toEqual([]);
+  });
+
+  it('preserves invalid request configuration when validation cleanup also fails', async () => {
+    const fixture = admissionFixture();
+    const input = admissionRequest(request());
+    const parent = temporaryDirectory('lines-opencode-admission-parent-');
+    const attempt = {
+      ...input.attempt!,
+      path: {
+        join() {
+          throw new TypeError('synthetic invalid OpenCode attempt path');
+        },
+      } as never,
+    };
+    let validationDirectory: string | undefined;
+    Object.defineProperty(attempt, 'label', {
+      enumerable: true,
+      get() {
+        validationDirectory = admissionValidationDirectory(parent);
+        blockDirectoryCleanup(validationDirectory);
+        return 'reviewer';
+      },
+    });
+    vi.stubEnv('TMPDIR', parent);
+
+    let failure: unknown;
+    try {
+      await fixture.engine.admit({ ...input, attempt }, new AbortController().signal);
+    } catch (error) {
+      failure = error;
+    } finally {
+      releaseDirectoryCleanup(validationDirectory);
+    }
+    expect(failure).toBeInstanceOf(EngineError);
+    expect(failure).toMatchObject({ kind: 'invalid-config' });
+    expect(String(failure)).toContain('synthetic invalid OpenCode attempt path');
+    expect(String(failure)).not.toContain(parent);
+    expect(fixture.calls()).toEqual([]);
+  });
+
+  it('classifies version-directory creation failure as unknown after validation cleanup', async () => {
+    const fixture = admissionFixture();
+    const input = admissionRequest(request());
+    const parent = temporaryDirectory('lines-opencode-admission-parent-');
+    const blocked = join(temporaryDirectory('lines-opencode-invalid-tmp-'), 'not-a-directory');
+    writeFileSync(blocked, 'fixture');
+    const attempt = { ...input.attempt! };
+    let validationDirectory: string | undefined;
+    Object.defineProperty(attempt, 'label', {
+      enumerable: true,
+      get() {
+        validationDirectory = admissionValidationDirectory(parent);
+        if (!existsSync(join(validationDirectory, 'home'))
+          || !existsSync(join(validationDirectory, 'xdg-config'))
+          || !existsSync(join(validationDirectory, 'tmp'))) {
+          throw new Error('OpenCode validation setup did not complete');
+        }
+        vi.stubEnv('TMPDIR', blocked);
+        return 'reviewer';
+      },
+    });
+    vi.stubEnv('TMPDIR', parent);
+
+    let failure: unknown;
+    try { await fixture.engine.admit({ ...input, attempt }, new AbortController().signal); }
+    catch (error) { failure = error; }
+    expect(validationDirectory).toBeDefined();
+    expect(existsSync(validationDirectory!)).toBe(false);
+    expect(failure).toBeInstanceOf(EngineError);
+    expect(failure).toMatchObject({ kind: 'unknown' });
+    expect(String(failure)).not.toContain(blocked);
+    expect(fixture.calls()).toEqual([]);
+  });
+
+  it('classifies successful version cleanup failure as unknown without retaining its path', async () => {
+    const fixture = admissionFixture({
+      OBVERSA_TEST_OPENCODE_VERSION_BLOCK_CLEANUP: '1',
+    });
+    let failure: unknown;
+    let versionDirectory: string | undefined;
+    try {
+      await fixture.engine.admit(admissionRequest(request()), new AbortController().signal);
+    } catch (error) {
+      failure = error;
+    } finally {
+      const call = fixture.calls()[0];
+      versionDirectory = call === undefined ? undefined : dirname(call.home);
+      releaseDirectoryCleanup(versionDirectory);
+    }
+    expect(fixture.calls().map((call) => call.kind)).toEqual(['version']);
+    expect(failure).toBeInstanceOf(EngineError);
+    expect(failure).toMatchObject({ kind: 'unknown' });
+    expect(String(failure)).not.toContain(versionDirectory!);
+  });
+
+  it('preserves the version command failure when version cleanup also fails', async () => {
+    const fixture = admissionFixture({
+      OBVERSA_TEST_OPENCODE_VERSION_BLOCK_CLEANUP: '1',
+      OBVERSA_TEST_OPENCODE_VERSION_MODE: 'exit',
+    });
+    let failure: unknown;
+    let versionDirectory: string | undefined;
+    try {
+      await fixture.engine.admit(admissionRequest(request()), new AbortController().signal);
+    } catch (error) {
+      failure = error;
+    } finally {
+      const call = fixture.calls()[0];
+      versionDirectory = call === undefined ? undefined : dirname(call.home);
+      releaseDirectoryCleanup(versionDirectory);
+    }
+    expect(fixture.calls().map((call) => call.kind)).toEqual(['version']);
+    expect(failure).toBeInstanceOf(EngineError);
+    expect(failure).toMatchObject({ kind: 'invalid-config' });
+    expect(String(failure)).toContain('OpenCode version command did not succeed');
+    expect(String(failure)).not.toContain(versionDirectory!);
+  });
+
+  it('passes the separate admission kit with actual executable markers', async () => {
+    const fixture = admissionFixture();
+    const input = request({ tools: ['read'], allowedTools: ['Read'] });
+    const other = executable();
+    let lookup = dirname(fixture.bin);
+    const open = (bin: string) => new OpenCodeCliEngine({
+      ...options(bin),
+      environment: {
+        ...fixture.environment,
+        PATH: [lookup, dirname(process.execPath), '/usr/bin', '/bin'].join(delimiter),
+      },
+    });
+    const report = await runEngineAdmissionConformance({
+      request: input,
+      selection: admissionSelection(input, fixture.bin),
+      open: () => open(fixture.bin),
+      modelCalls: (bin) => fixture.calls().filter((call) => call.kind === 'model'
+        && (bin === undefined || call.executable === bin)).length,
+      cli: {
+        moveLookup() { lookup = dirname(other); vi.stubEnv('PATH', [lookup, process.env.PATH ?? ''].join(delimiter)); },
+        openDifferent: () => open(other),
+        openMissing: () => open(join(dirname(other), 'missing-opencode')),
+      },
+    });
+    expect(report).toEqual({ ok: true, cases: 11, failures: [] });
+    expect(fixture.calls().filter((call) => call.kind === 'model').every((call) => call.executable === fixture.bin)).toBe(true);
+  });
 });
 
 function temporaryDirectory(label: string): string {
@@ -109,6 +544,78 @@ async function waitForFile(path: string): Promise<void> {
   const deadline = Date.now() + 5_000;
   while (!existsSync(path) && Date.now() < deadline) await delay(10);
   expect(existsSync(path)).toBe(true);
+}
+
+interface AdmissionInvocation {
+  kind: 'version' | 'model';
+  executable: string;
+  args: string[];
+  stdin: string | null;
+  home: string;
+  configDirectory: string;
+  config: { tools: Record<string, boolean>; model: string };
+}
+
+function admissionRequest(input: AgentRequest): Omit<AgentRequest, 'prompt'> {
+  const { prompt: _prompt, ...result } = input;
+  return result;
+}
+
+function admissionInvocations(path: string): AdmissionInvocation[] {
+  if (!existsSync(path)) return [];
+  return readFileSync(path, 'utf8').trim().split('\n')
+    .filter(Boolean).map((line) => JSON.parse(line) as AdmissionInvocation);
+}
+
+function admissionFixture(environment: Record<string, string> = {}) {
+  const bin = executable();
+  const log = join(temporaryDirectory('lines-opencode-admission-log-'), 'calls.jsonl');
+  const selectedEnvironment = {
+    ...environment,
+    OBVERSA_TEST_OPENCODE_ADMISSION_RECORD: log,
+  };
+  return {
+    bin,
+    log,
+    environment: selectedEnvironment,
+    engine: new OpenCodeCliEngine({ ...options(bin), environment: selectedEnvironment }),
+    calls: () => admissionInvocations(log),
+  };
+}
+
+function admissionSelection(input: AgentRequest, bin: string): EngineSelectionRecord {
+  return engineSelection({
+    adapter: 'opencode-cli',
+    adapterVersion: '1.18.23',
+    provider: 'fixture-provider',
+    modelFamily: 'fixture-family',
+    model: input.model!,
+    executable: bin,
+    capabilities: input.tools ?? [],
+  });
+}
+
+function admissionValidationDirectory(parent: string): string {
+  const names = readdirSync(parent)
+    .filter((name) => name.startsWith('lines-opencode-admission-'));
+  if (names.length !== 1) {
+    throw new Error(`expected one OpenCode admission directory, found ${names.length}`);
+  }
+  return join(parent, names[0]!);
+}
+
+function blockDirectoryCleanup(directory: string): void {
+  const barrier = join(directory, 'cleanup-barrier');
+  mkdirSync(barrier);
+  writeFileSync(join(barrier, 'retained'), 'fixture');
+  chmodSync(barrier, 0o000);
+}
+
+function releaseDirectoryCleanup(directory: string | undefined): void {
+  if (directory === undefined || !existsSync(directory)) return;
+  const barrier = join(directory, 'cleanup-barrier');
+  if (existsSync(barrier)) chmodSync(barrier, 0o700);
+  rmSync(directory, { recursive: true, force: true });
 }
 
 function invocationConfig(value: ReturnType<typeof buildOpenCodeInvocation>) {
@@ -1189,31 +1696,33 @@ describe('OpenCode CLI adapter', () => {
     expect((error as Error).message).toContain('[redacted]');
   });
 
-  it('classifies native OpenCode failures through the public vocabulary', async () => {
-    for (const [scenario, expected] of [
-      ['auth', 'auth'],
-      ['billing', 'billing'],
-      ['billing-429', 'billing'],
-      ['billing-401', 'billing'],
-      ['quota-401', 'quota'],
-      ['model-401', 'model-unavailable'],
-      ['model-unavailable', 'model-unavailable'],
-      ['rate-limit', 'rate-limit'],
-      ['quota', 'quota'],
-      ['transient', 'transient'],
-      ['invalid-config', 'invalid-config'],
-    ] as const) {
-      let error: unknown;
-      try {
-        await new OpenCodeCliEngine({
-          ...options(),
-          environment: { OBVERSA_TEST_OPENCODE_SCENARIO: scenario },
-        }).run(request(), () => {}, new AbortController().signal);
-      } catch (caught) {
-        error = caught;
-      }
-      expect(classifyEngineFailure(error), scenario).toBe(expected);
+  it.each([
+    ['auth', 'auth'],
+    ['billing', 'billing'],
+    ['billing-429', 'billing'],
+    ['billing-401', 'billing'],
+    ['quota-401', 'quota'],
+    ['model-401', 'model-unavailable'],
+    ['model-unavailable', 'model-unavailable'],
+    ['rate-limit', 'rate-limit'],
+    ['quota', 'quota'],
+    ['ambiguous-403', 'rate-limit'],
+    ['ambiguous-429', 'rate-limit'],
+    ['monthly-429', 'quota'],
+    ['user-limit-401', 'rate-limit'],
+    ['transient', 'transient'],
+    ['invalid-config', 'invalid-config'],
+  ] as const)('classifies native OpenCode failure %s through the public vocabulary', async (scenario, expected) => {
+    let error: unknown;
+    try {
+      await new OpenCodeCliEngine({
+        ...options(),
+        environment: { OBVERSA_TEST_OPENCODE_SCENARIO: scenario },
+      }).run(request(), () => {}, new AbortController().signal);
+    } catch (caught) {
+      error = caught;
     }
+    expect(classifyEngineFailure(error), scenario).toBe(expected);
   });
 
   it('preserves a reported quota reset for the run limit policy', async () => {
@@ -1232,6 +1741,20 @@ describe('OpenCode CLI adapter', () => {
       kind: 'quota',
       resetAt: 1_777_777_999_000,
     });
+  });
+
+  it('preserves the reset hint on ambiguous quota text', async () => {
+    let error: unknown;
+    try {
+      await new OpenCodeCliEngine({
+        ...options(),
+        environment: { OBVERSA_TEST_OPENCODE_SCENARIO: 'ambiguous-403' },
+      }).run(request(), () => {}, new AbortController().signal);
+    } catch (caught) {
+      error = caught;
+    }
+    expect(error).toBeInstanceOf(EngineError);
+    expect(error).toMatchObject({ kind: 'rate-limit', resetAt: 1_777_777_999_000 });
   });
 
   it('passes the public engine conformance kit', async () => {

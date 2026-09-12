@@ -219,6 +219,21 @@ const expectedAttemptReport = {
   temporaryDirectoryRemoved: true,
 };
 
+const expectedPreflightExecutorReport = {
+  pause: { phase: 'paused', code: 'PREFLIGHT_PAUSED', dispatches: 0 },
+  resume: {
+    usedReturnedToken: true, phase: 'admitted', result: 'complete',
+    output: { nodes: { check: { checked: 'offline' } } },
+  },
+  calls: ['static', 'live:not-ready', 'static', 'live:ready', 'ordinary'],
+  temporaryDirectoryRemoved: true,
+};
+const expectedPreflightRunnerReport = {
+  ...expectedPreflightExecutorReport,
+  resume: { ...expectedPreflightExecutorReport.resume, phase: 'completed' },
+  controlOutsideCapturedWorkspace: true,
+};
+
 function withoutExecutablePath(selection, filename) {
   assert.equal(typeof selection.executable, 'string');
   assert.equal(isAbsolute(selection.executable), true);
@@ -536,6 +551,8 @@ const tsconfig = {
     verbatimModuleSyntax: true,
     resolveJsonModule: true,
     skipLibCheck: false,
+    allowJs: true,
+    checkJs: true,
     outDir: 'dist',
     types: ['node'],
   },
@@ -622,6 +639,9 @@ async function main() {
   const tournamentExamplePath = join(root, 'examples', 'tournament.ts');
   const runnerExamplePath = join(root, 'examples', 'supervised-run.ts');
   const runnerHostPath = join(root, 'examples', 'supervised-host.mjs');
+  const preflightExecutorPath = join(root, 'examples', 'preflight-executor.ts');
+  const preflightRunnerPath = join(root, 'examples', 'preflight-supervised-run.ts');
+  const preflightHostPath = join(root, 'examples', 'preflight-host.mjs');
   const safeChangeExamplePath = join(root, 'examples', 'safe-change.ts');
   const safeChangeRecipePath = join(root, 'examples', 'safe-change-recipe.ts');
   const safeChangeFileAdapterPath = join(root, 'examples', 'safe-change-file-adapter.ts');
@@ -768,6 +788,9 @@ async function main() {
     await copyFile(describedTeamExamplePath, join(consumerDirectory, 'described-team.ts'));
     await copyFile(runnerExamplePath, join(consumerDirectory, 'supervised-run.ts'));
     await copyFile(runnerHostPath, join(consumerDirectory, 'supervised-host.mjs'));
+    await copyFile(preflightExecutorPath, join(consumerDirectory, 'preflight-executor.ts'));
+    await copyFile(preflightRunnerPath, join(consumerDirectory, 'preflight-supervised-run.ts'));
+    await copyFile(preflightHostPath, join(consumerDirectory, 'preflight-host.mjs'));
     await copyFile(runChildExamplePath, join(consumerDirectory, 'run-child.ts'));
     await mkdir(join(consumerDirectory, 'teams'), { recursive: true });
     await copyFile(join(root, 'examples', 'teams', 'scripted-engine.ts'), join(consumerDirectory, 'teams', 'scripted-engine.ts'));
@@ -797,6 +820,7 @@ async function main() {
     const tsc6 = join(root, 'node_modules', '@typescript', 'typescript6', 'bin', 'tsc6');
     run(process.execPath, [tsc6, '-p', 'tsconfig.json'], { cwd: consumerDirectory });
     await copyFile(runnerHostPath, join(consumerDirectory, 'dist', 'supervised-host.mjs'));
+    await copyFile(preflightHostPath, join(consumerDirectory, 'dist', 'preflight-host.mjs'));
 
     run('git', ['init', '--quiet', gitRepository]);
     const output = run(process.execPath, ['dist/consumer.js'], {
@@ -1000,6 +1024,18 @@ async function main() {
         temporaryDirectoryRemoved: true,
       });
     }
+    const compiledPreflightExecutor = JSON.parse(run(process.execPath,
+      ['dist/preflight-executor.js'], { cwd: consumerDirectory, timeout: 60_000 }));
+    const directPreflightExecutor = JSON.parse(run('pnpm',
+      ['exec', 'tsx', 'preflight-executor.ts'], { cwd: consumerDirectory, timeout: 60_000 }));
+    const compiledPreflightRunner = JSON.parse(run(process.execPath,
+      ['dist/preflight-supervised-run.js'], { cwd: consumerDirectory, timeout: 60_000 }));
+    const directPreflightRunner = JSON.parse(run('pnpm',
+      ['exec', 'tsx', 'preflight-supervised-run.ts'], { cwd: consumerDirectory, timeout: 60_000 }));
+    assert.deepEqual(compiledPreflightExecutor, expectedPreflightExecutorReport);
+    assert.deepEqual(directPreflightExecutor, expectedPreflightExecutorReport);
+    assert.deepEqual(compiledPreflightRunner, expectedPreflightRunnerReport);
+    assert.deepEqual(directPreflightRunner, expectedPreflightRunnerReport);
     assert.deepEqual(compiledTurnTaking, expectedTurnTakingReport);
     assert.deepEqual(directTurnTaking, expectedTurnTakingReport);
     for (const report of [compiledWorkspace, directWorkspace]) {
@@ -1098,7 +1134,7 @@ async function main() {
     if (refs.length !== 1) throw new Error(`Git memory created ${refs.length} private refs instead of one`);
 
     console.log(
-      'Clean offline consumer passed with TypeScript 7 and 6, offline-review.ts, described-team.ts, safe-change.ts, feature-delivery.ts, the three packed team examples, forge-helper.ts, the outside graph, the pipeline executor example, the review loop, the callback gate, proof-bound approval, the turn-taking executor example, durable storage, safe node attempts, the supervised runner, 17 memory cases, and both memory adapters.',
+      'Clean offline consumer passed with TypeScript 7 and 6, offline-review.ts, described-team.ts, safe-change.ts, feature-delivery.ts, the three packed team examples, forge-helper.ts, the outside graph, the pipeline executor example, the review loop, the callback gate, proof-bound approval, the turn-taking executor example, durable storage, safe node attempts, the supervised runner, both preflight examples, 17 memory cases, and both memory adapters.',
     );
   } finally {
     await rm(directory, { recursive: true, force: true });

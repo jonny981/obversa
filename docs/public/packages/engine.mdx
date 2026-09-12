@@ -1,102 +1,248 @@
 ---
 title: "@obversa/engine"
-description: "The provider-neutral contract for one bounded engine attempt."
+description: "The contract every engine adapter implements: one bounded attempt, one typed result, and a check that admits a seat before any work."
 ---
 
-`@obversa/engine` is the engine port. An engine runs one fresh agent attempt and
-returns a structured result or a typed failure. Runtime code and engine plugins
-share this contract.
-
-## Install
+An engine runs one fresh agent attempt and returns a structured result or a
+typed failure. This package is that contract, shared by the runtime and
+every engine plugin, plus the owned-command layer that runs a command-line
+tool with time, output and memory bounds and cleans up what it started.
 
 ```bash
-pnpm add @obversa/engine
+npm install @obversa/engine @obversa/runtime
 ```
 
-Node.js 22.12 or later is required.
+## The contract
+
+An `Engine` has a name and a `run` method: one request, one event sink,
+one abort signal, one `AgentResult`. It may also have `admit`, which the
+runtime calls before a run when the plan asks for engine checks: `admit`
+receives the request without its prompt, and returns the identity the
+engine will run under, an `EngineSelectionRecord` with adapter, provider,
+model family, model, executable and capabilities. When the runtime passes
+the identity it saved earlier, an engine that would now run as something
+else refuses. An engine without `admit` is `unsupported` for the check, and
+the plan says whether that blocks the run.
+
+A live check is an ordinary `run` with `purpose: 'preflight'`, no tools, no
+workspace and a leaf request. It proves the seat answers; it does no work.
+
+## Run one
+
+This file runs a graph whose engine is not ready and shows the check pause
+the run before any dispatch, then the resume once the engine is ready. The
+engine implements both `admit` and `run`; it is in
+`examples/preflight-host.mjs`.
+
+```ts
+import assert from 'node:assert/strict';
+import { existsSync } from 'node:fs';
+import { mkdtemp, readFile, realpath, rm, writeFile } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+
+import {
+  compileGraph,
+  createGraphExecutor,
+  dagGraphType,
+  loadRunDefinition,
+  persistRunDefinition,
+  readRunPreflight,
+  resolveGraphPlan,
+  type DagDefinition,
+  type ExecutionTarget,
+  type RunStoragePolicy,
+} from '@obversa/runtime';
+import { createLocalRunStorage } from '@obversa/runtime/storage/local';
+import { bindRun } from './preflight-host.mjs';
+
+const target = {
+  adapter: 'scripted-local',
+  provider: 'local',
+  modelFamily: 'scripted',
+  model: 'offline-check',
+  tools: [],
+} as const satisfies ExecutionTarget;
+
+const definition = {
+  id: 'preflight-executor',
+  definitionVersion: 1,
+  data: {
+    globalConcurrency: 1,
+    keyedConcurrency: {},
+    stopOnError: true,
+    retryCapPerNode: 0,
+  },
+  nodes: [{
+    id: 'check',
+    data: {
+      kind: 'required',
+      key: null,
+      lane: { id: 'local', requested: target, knownSubstitutions: [] },
+    },
+  }],
+  edges: [],
+} as const satisfies DagDefinition;
+
+const storagePolicy = {
+  schemaVersion: 1,
+  maxEventPayloadBytes: 64_000,
+  maxAppendBatchBytes: 128_000,
+  maxArtifactBytes: 1_000_000,
+  maxTotalArtifactBytesPerRun: 4_000_000,
+  retention: 'until-run-delete',
+  sensitiveContent: {
+    marked: 'reject',
+    exact: 'reject',
+    freeText: 'redact-before-hash',
+  },
+} as const satisfies RunStoragePolicy;
+
+const temporaryRoot = await realpath(await mkdtemp(join(tmpdir(), 'obversa-preflight-executor-')));
+const controlFile = join(temporaryRoot, 'control.txt');
+const runId = 'preflight-executor-run';
+const callsFile = join(temporaryRoot, 'engine-calls.log');
+let report: Record<string, unknown> | undefined;
+
+try {
+  await writeFile(controlFile, 'not-ready\n');
+  await writeFile(callsFile, '');
+  const graph = compileGraph(dagGraphType, definition);
+  const packageIdentity = {
+    source: 'npm:@example/preflight-executor',
+    version: '1.0.0',
+    digest: 'sha256:4444444444444444444444444444444444444444444444444444444444444444',
+  } as const;
+  const plan = resolveGraphPlan(graph.describe(), {
+    package: packageIdentity,
+    admission: { package: packageIdentity, permissions: [] },
+    executionLanes: [{ id: 'local', effective: target }],
+    preflight: {
+      timeoutMs: 2_000,
+      lanes: [{ laneId: 'local', live: 'required', unsupportedStatic: 'block' }],
+    },
+  });
+  const storage = createLocalRunStorage({
+    directory: join(temporaryRoot, 'storage'),
+    namespace: 'preflight-executor-example',
+    policy: storagePolicy,
+  });
+  await persistRunDefinition(storage, {
+    runId,
+    eventId: 'preflight-executor-started',
+    timestamp: new Date().toISOString(),
+    graphDefinition: graph.definition,
+    resolvedPlan: plan,
+    resolvedInputs: { controlFile, callsFile },
+    workspaceBinding: null,
+    hostBinding: null,
+  });
+
+  const loaded = await loadRunDefinition(storage, runId);
+  const makeExecutor = async () => createGraphExecutor({
+    ...await bindRun({
+      definition: loaded.record.payload.definition,
+      scratchDirectory: temporaryRoot,
+    }),
+    runId,
+    storage,
+    preflightScratchDirectory: temporaryRoot,
+  });
+
+  const paused = await (await makeExecutor()).run(new AbortController().signal);
+  if (paused.kind !== 'pause' || !('preflightEventId' in paused)) {
+    throw new Error(`Expected a preflight pause, received ${JSON.stringify(paused)}.`);
+  }
+  assert.equal(paused.code, 'PREFLIGHT_PAUSED');
+  assert.equal((await readRunPreflight(storage, runId)).phase, 'paused');
+
+  let dispatchesBeforeResume = 0;
+  for await (const event of storage.eventStore.read({
+    namespace: storage.record.namespace,
+    streamId: runId,
+  })) {
+    if (event.type === 'graph:node-dispatched') dispatchesBeforeResume += 1;
+  }
+  assert.equal(dispatchesBeforeResume, 0);
+
+  await writeFile(controlFile, 'ready\n');
+  const completed = await (await makeExecutor()).resume(
+    { preflightEventId: paused.preflightEventId },
+    new AbortController().signal,
+  );
+  if (completed.kind !== 'complete') {
+    throw new Error(`Expected completion, received ${JSON.stringify(completed)}.`);
+  }
+  assert.deepEqual(completed.output, { nodes: { check: { checked: 'offline' } } });
+  const finalPreflight = await readRunPreflight(storage, runId);
+  assert.equal(finalPreflight.phase, 'admitted');
+  assert.equal(finalPreflight.resumedPreflightEventId, paused.preflightEventId);
+  const calls = (await readFile(callsFile, 'utf8')).trim().split('\n').filter(Boolean);
+  assert.deepEqual(calls, ['static', 'live:not-ready', 'static', 'live:ready', 'ordinary']);
+
+  report = {
+    pause: { phase: 'paused', code: paused.code, dispatches: dispatchesBeforeResume },
+    resume: {
+      usedReturnedToken: finalPreflight.resumedPreflightEventId === paused.preflightEventId,
+      phase: finalPreflight.phase,
+      result: completed.kind,
+      output: completed.output,
+    },
+    calls,
+  };
+} finally {
+  await rm(temporaryRoot, { recursive: true, force: true });
+}
+
+console.log(JSON.stringify({
+  ...report,
+  temporaryDirectoryRemoved: !existsSync(temporaryRoot),
+}, null, 2));
+```
+
+What it printed is on the [graph executor](/graphs/executor) page.
 
 ## Public entry points
 
-From `@obversa/engine` (`packages/engine/src/index.ts`):
+| export | what it is |
+| --- | --- |
+| `Engine`, `AgentRequest`, `AgentResult`, `EngineSelectionRecord` | The contract types. |
+| `EngineError` | A typed engine failure: `auth`, `billing`, `quota`, `rate-limit`, `model-unavailable`, `missing-cli`, `invalid-config`, `transient`, `aborted`, and the rest of `EngineFailureKind`. |
+| `canonicalJson`, `digestJson`, `cloneFrozenJson` | JSON helpers the contract uses. |
+| `attemptEnvironment` | The environment for a command-backed attempt. |
+| `retryAfterHeaderToMs`, `scrubCapture`, `redactEnvValues`, `redactSecrets` | Helpers for command adapters. |
+| `@obversa/engine/testing` | `runEngineConformance` for the run contract, `runEngineAdmissionConformance` for `admit`, and `MockEngine`. An adapter author runs both kits; an adapter without `admit` runs the first alone. |
+| `@obversa/engine/command` | `runOwnedCommand`, `stopOwnedProcessTree`, `commandCleanupCapability`, `inspectOwnerMarkedProcesses`. |
 
-- `Engine`: the run contract (one prompt, one attempt, one abort signal).
-- `EngineError`: typed engine failures.
-- `canonicalJson`, `digestJson`, `cloneFrozenJson`: JSON helpers the contract
-  uses.
-- `attemptEnvironment`: environment for a command-backed attempt.
-- `retryAfterHeaderToMs`, `scrubCapture`, `redactEnvValues`, `redactSecrets`:
-  command-adapter helpers.
+## Owned commands and cleanup
 
-Subpaths:
+`runOwnedCommand` runs a command-line tool to a deadline with output and
+memory bounds and returns a typed result; `stopOwnedProcessTree` stops what
+it started. Both accept an `ownerId`, a `sha256:` digest that the command
+passes to its children as `OBVERSA_RUN_OWNER`; an inherited marker is kept
+by nested commands and wins over a supplied `ownerId`. Only the outer
+command that supplied the id sweeps that owner's marked processes during
+cleanup.
 
-- `@obversa/engine/testing`: the conformance kit and `MockEngine`.
-- `@obversa/engine/command`: owned-process execution with time, output, and
-  memory bounds.
+`commandCleanupCapability()` says how the platform cleans up:
+`inherited-owner` on Linux, where processes carrying the marker are found
+through `/proc`, and `observed-processes` elsewhere, where cleanup follows
+the observed tree and a helper that starts a new session before it is seen
+can escape. `inspectOwnerMarkedProcesses(ownerId)` lists marked processes
+on Linux without stopping them, and returns an empty list elsewhere, which
+proves nothing. Owner markers coordinate cleanup; they are not a security
+boundary.
 
-## Command ownership and cleanup
+## Gotchas
 
-The `@obversa/engine/command` entry point exports `runOwnedCommand` for bounded
-command execution and `stopOwnedProcessTree` for process cleanup.
+- **Unsupported is not a success.** An engine without `admit` passes a
+  static check only when the lane's policy allows unsupported seats.
+- **A command-line adapter is admitted by path and version,** not by a
+  hash of the executable, and it does not control grandchildren it cannot
+  see. An API-key adapter is admitted locally, with no executable, and its
+  retry layers are off for the check only.
 
-Both accept an optional `ownerId`: a string beginning with `sha256:` followed by
-64 lowercase hexadecimal characters. Use a separate owner ID for each outer
-command whose descendants should be cleaned up together.
+## Source
 
-`runOwnedCommand` passes `OBVERSA_RUN_OWNER` to the child. A valid marker in the
-calling process takes priority over `ownerId`, which in turn overrides
-`env.OBVERSA_RUN_OWNER`. The inherited marker is kept even when `inheritParentEnv`
-is `false`. Without an inherited marker or `ownerId`, no owner ID is created.
-An environment-only marker is passed through but does not make this call an
-outer owner for cleanup. Descendants that keep the environment keep the marker,
-including processes that start a separate session.
-
-Only the command that supplies an owner ID without inheriting one sweeps that
-owner's marked processes during automatic cleanup. Nested commands still clean
-up their observed process trees; they do not sweep the inherited owner's other
-processes. When calling `stopOwnedProcessTree` directly, pass `ownerId` only from
-the outer owner, not from a nested command.
-
-### Platform capability
-
-`commandCleanupCapability()` returns the exported `CommandCleanupCapability`
-type. It reports the platform's cleanup method, not a permissions check or a
-guarantee that every descendant can be found.
-
-| Platform | Return value | Cleanup method |
-| --- | --- | --- |
-| Linux | `inherited-owner` | Observed processes plus owner markers read from `/proc`. |
-| Other platforms | `observed-processes` | Processes discovered through the observed process tree. |
-
-On platforms without owner-marker inspection, a helper that starts a separate
-session before it is observed can escape cleanup. Owner markers coordinate
-cleanup; they are not a security boundary.
-
-### Inspect marked processes
-
-`inspectOwnerMarkedProcesses(ownerId)` returns a promise of a read-only list of
-`ProcessIdentity` values: `pid`, `parentPid`, `processGroupId`, and `startedAt`.
-It inspects processes without stopping them.
-
-On Linux, it matches the complete `OBVERSA_RUN_OWNER` environment entry and
-returns processes whose identity is unchanged across the scan. Missing
-environment files and access-denied errors are skipped; other read errors
-reject the promise. On other platforms it returns an empty list, which does not
-prove that no owned processes remain. An invalid owner ID rejects the promise
-with a `TypeError`.
-
-## Runnable example
-
-```ts
-import type { Engine } from '@obversa/engine';
-
-declare const engine: Engine;
-
-const result = await engine.run(
-  { prompt: 'Review this change.' },
-  () => {},
-  new AbortController().signal,
-);
-```
-
-This fragment is from `packages/engine/README.md`. The workspace mock is
-`MockEngine` from `@obversa/engine/testing`.
+`packages/engine` in the repository. The plugins under `plugins/` implement
+this contract; the [plugins page](/plugins) lists them.

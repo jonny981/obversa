@@ -9,15 +9,20 @@ import { commandCleanupCapability, OwnedCommandError, runOwnedCommand } from '@o
 import { digestJson } from '@obversa/engine';
 import { createLocalRunStorage, type LocalRunStorageOptions } from '@obversa/runtime/storage/local';
 import {
-  loadRunDefinition, persistRunDefinition, validateArtifactReference, validateEventStreamRef,
+  interruptRunPreflight, loadRunDefinition, persistRunDefinition, readRunPreflight,
+  validateArtifactReference, validateDomainEventId, validateEventStreamRef,
   type ArtifactReference, type JsonObject, type WorkspaceAnchor, type WorkspaceProvider,
-  type GraphExecutorOptions, type GraphExecutorResult, type RunDefinition,
+  type GraphExecutorOptions, type GraphExecutorResult, type PreflightPauseResult, type RunDefinition,
 } from '@obversa/runtime';
 import {
   hostModuleDigest, readGraphPosition, readSupervision, resolveHostModule, SupervisedRunError,
   supervisionWriter, supervisedElapsedMs, type SupervisedHostRecord,
 } from './supervised-record.js';
 import { readSupervisedRunStatus, type SupervisedRunStatus } from './supervised-status.js';
+
+const DEFAULT_WORKER_ENVIRONMENT_VARIABLES = [
+  'PATH', 'HOME', 'TMPDIR', 'TMP', 'TEMP', 'SystemRoot', 'USERPROFILE', 'PATHEXT',
+] as const;
 
 export type SupervisedRunBindings = Omit<GraphExecutorOptions, 'runId' | 'storage'>;
 type PersistRunDefinitionInput = Parameters<typeof persistRunDefinition>[1];
@@ -45,12 +50,34 @@ export interface SupervisedRunOptions {
   readonly environmentVariables?: readonly string[];
 }
 
+function copyEnvironmentVariables(value: unknown): string[] {
+  if (value === undefined) return [];
+  const names = Array.isArray(value) ? [...value] : undefined;
+  if (names === undefined || names.some((name) =>
+    typeof name !== 'string' || !/^[A-Za-z_][A-Za-z0-9_]*$/u.test(name))) {
+    throw new SupervisedRunError('INVALID_OPTIONS', 'environmentVariables must be an array of portable environment variable names.');
+  }
+  return names;
+}
+
 export type SupervisedRunResult = Exclude<GraphExecutorResult, { readonly kind: 'waiting' | 'pause' }>
-  | { readonly kind: 'pause'; readonly reason: string; readonly code?: 'WORKSPACE_DRIFT' | 'WORKSPACE_ANCHOR_MISSING' | 'WORKSPACE_ANCHOR_INVALID' | 'RESUME_EVENT_MISMATCH' };
+  | PreflightPauseResult
+  | {
+    readonly kind: 'pause';
+    readonly reason: string;
+    readonly code?: 'WORKSPACE_DRIFT' | 'WORKSPACE_ANCHOR_MISSING' | 'WORKSPACE_ANCHOR_INVALID'
+      | 'WORKSPACE_ANCHOR_WRITE' | 'RUN_STORAGE' | 'RESUME_EVENT_MISMATCH';
+    readonly preflightEventId?: string;
+  };
 
 export interface ResumeSupervisedRunOptions extends Omit<SupervisedRunOptions, 'definition' | 'module' | 'limits'> {
   readonly runId: string;
   readonly position: string;
+}
+
+export interface ResumePreflightSupervisedRunOptions extends Omit<ResumeSupervisedRunOptions, 'position'> {
+  readonly preflightEventId: string;
+  readonly position?: never;
 }
 
 type SupervisedTerminalRecord = Exclude<SupervisedRunResult, { readonly kind: 'complete' }>
@@ -61,7 +88,9 @@ export interface SupervisedWorkerInput {
   readonly runRoot: string;
   readonly scratchDirectory: string;
   readonly storage: LocalRunStorageOptions;
-  readonly resume?: { readonly position: string; readonly pauseEventId: string };
+  readonly resume?:
+    | { readonly position: string; readonly pauseEventId: string; readonly preflightEventId?: never }
+    | { readonly preflightEventId: string; readonly position?: never; readonly pauseEventId?: never };
 }
 
 export interface SupervisedRunHandle {
@@ -75,14 +104,45 @@ export async function startSupervisedRun(options: SupervisedRunOptions): Promise
   return await superviseRun(options);
 }
 
+function preflightResumeId(value: unknown): string | undefined {
+  if (value === null || typeof value !== 'object' || !('preflightEventId' in value)) return undefined;
+  const id = value.preflightEventId;
+  if (Array.isArray(value) || !Object.hasOwn(value, 'preflightEventId') || !Object.hasOwn(value, 'runId')
+    || 'position' in value) {
+    throw new SupervisedRunError('INVALID_OPTIONS', 'Preflight resume requires one own preflightEventId and no position.');
+  }
+  try { return validateDomainEventId(id, '/preflightEventId'); }
+  catch (cause) {
+    throw new SupervisedRunError('INVALID_OPTIONS', 'Preflight resume requires one own preflightEventId and no position.', { cause });
+  }
+}
+
+function commandCleanupIsSafe(error: OwnedCommandError): boolean {
+  return error.remainingProcesses.length === 0 && [
+    'INVALID_EXECUTABLE', 'INVALID_COMMAND', 'SPAWN_FAILED', 'OUTPUT_LIMIT', 'MEMORY_LIMIT',
+  ].includes(error.code);
+}
+
 /** Reopen one recorded pause without replacing its definition or run bounds. */
-export async function resumeSupervisedRun(options: ResumeSupervisedRunOptions): Promise<SupervisedRunHandle> {
+export async function resumeSupervisedRun(options:
+  | (ResumeSupervisedRunOptions & { readonly preflightEventId?: never })
+  | ResumePreflightSupervisedRunOptions,
+): Promise<SupervisedRunHandle> {
+  const preflightEventId = preflightResumeId(options);
   options = {
     ...options, storage: structuredClone(options.storage), restart: { ...options.restart },
-    environmentVariables: [...options.environmentVariables ?? []],
+    environmentVariables: copyEnvironmentVariables(options.environmentVariables),
   };
   const storage = createLocalRunStorage(options.storage);
   const storageOptions = { ...options.storage, directory: resolve(options.storage.directory) };
+  if (preflightEventId !== undefined) {
+    const state = await readRunPreflight(storage, options.runId);
+    const current = state.pause?.preflightEventId;
+    if (current !== preflightEventId) {
+      throw new SupervisedRunError('RESUME_EVENT_MISMATCH',
+        `Resume expected preflight pause event "${preflightEventId}" but found "${current ?? '<none>'}".`);
+    }
+  }
   const loaded = await loadRunDefinition(storage, options.runId);
   if (loaded.hostBindingBytes === null) throw new SupervisedRunError('HOST_MODULE', 'The run has no stored host module.');
   const host = JSON.parse(Buffer.from(loaded.hostBindingBytes).toString('utf8')) as SupervisedHostRecord;
@@ -92,13 +152,15 @@ export async function resumeSupervisedRun(options: ResumeSupervisedRunOptions): 
       runId: options.runId, graphDefinition: loaded.record.payload.definition.graphDefinition,
       resolvedPlan: loaded.resolvedPlan, resolvedInputs: loaded.record.payload.definition.resolvedInputs,
     },
-  }, { loaded, host, position: options.position });
+  }, { loaded, host, target: preflightEventId === undefined
+    ? { position: (options as ResumeSupervisedRunOptions).position }
+    : { preflightEventId } });
 }
 
 async function superviseRun(options: SupervisedRunOptions, resume?: {
   readonly loaded: Awaited<ReturnType<typeof loadRunDefinition>>;
   readonly host: SupervisedHostRecord;
-  readonly position: string;
+  readonly target: { readonly position: string } | { readonly preflightEventId: string };
 }): Promise<SupervisedRunHandle> {
   options = {
     ...options,
@@ -106,7 +168,7 @@ async function superviseRun(options: SupervisedRunOptions, resume?: {
     storage: structuredClone(options.storage),
     limits: Object.freeze({ ...options.limits }),
     restart: Object.freeze({ ...options.restart }),
-    environmentVariables: [...options.environmentVariables ?? []],
+    environmentVariables: copyEnvironmentVariables(options.environmentVariables),
   };
   for (const [field, value] of Object.entries({ ...options.limits, ...options.restart, teardownGraceMs: options.teardownGraceMs })) {
     if (!Number.isSafeInteger(value) || value < 0 || value > 2_147_483_647) {
@@ -123,12 +185,13 @@ async function superviseRun(options: SupervisedRunOptions, resume?: {
   const storageOptions = { ...options.storage, directory: resolve(options.storage.directory) };
   const runId = validateEventStreamRef({ namespace: storage.record.namespace, streamId: options.definition.runId }).streamId;
   const runRoot = await realpath(options.runRoot);
-  const modulePath = resolveHostModule(runRoot, options.module);
+  const modulePath = resume !== undefined && 'preflightEventId' in resume.target
+    ? undefined : resolveHostModule(runRoot, options.module);
   const host: SupervisedHostRecord = resume?.host ?? {
-    schemaVersion: 1, module: options.module, digest: await hostModuleDigest(modulePath),
+    schemaVersion: 1, module: options.module, digest: await hostModuleDigest(modulePath!),
     cleanupCapability: commandCleanupCapability(), limits: options.limits,
   };
-  if (resume !== undefined && await hostModuleDigest(modulePath) !== host.digest) {
+  if (resume !== undefined && modulePath !== undefined && await hostModuleDigest(modulePath) !== host.digest) {
     throw new SupervisedRunError('HOST_MODULE_CHANGED', 'The host module differs from its stored digest.');
   }
   let anchor: WorkspaceAnchor | undefined;
@@ -155,33 +218,72 @@ async function superviseRun(options: SupervisedRunOptions, resume?: {
   try {
     let resumeInput: SupervisedWorkerInput['resume'];
     let resumeRefusal: Extract<SupervisedRunResult, { kind: 'pause' }> | undefined;
+    let verifiedPreflightPause: PreflightPauseResult | undefined;
     let pauseAnchorArtifact: ArtifactReference | undefined;
+    let pendingAnchor: { readonly digest: string; readonly scope: readonly string[] | null } | undefined;
+    const pauseEvidence = (): JsonObject => pauseAnchorArtifact !== undefined ? { anchorArtifact: pauseAnchorArtifact }
+      : pendingAnchor !== undefined ? { pendingAnchor } : {};
     let restartCount = 0;
     if (resume !== undefined) {
+      if ('preflightEventId' in resume.target) {
+        const state = await readRunPreflight(storage, runId);
+        const current = state.pause?.preflightEventId;
+        if (current !== resume.target.preflightEventId) {
+          throw new SupervisedRunError('RESUME_EVENT_MISMATCH',
+            `Resume expected preflight pause event "${resume.target.preflightEventId}" but found "${current ?? '<none>'}".`);
+        }
+        verifiedPreflightPause = state.pause!;
+        const resumedModule = resolveHostModule(runRoot, options.module);
+        if (await hostModuleDigest(resumedModule) !== host.digest) {
+          throw new SupervisedRunError('HOST_MODULE_CHANGED', 'The host module differs from its stored digest.');
+        }
+      }
       const records = await readSupervision(storage, runId);
       const paused = records.at(-1);
       if (paused?.type !== 'runner:paused' || (paused.payload as JsonObject).leaseRetained === true
         || (paused.payload as JsonObject).cleanupSafe === false) {
         throw new SupervisedRunError('RUN_NOT_PAUSED', 'Resume requires a paused run with safely released ownership.');
       }
-      const position = await readGraphPosition(storage, runId, resume.position);
-      if (position?.type !== 'graph:node-paused') {
-        throw new SupervisedRunError('RESUME_POSITION', 'Resume requires an exact recorded paused position.');
+      if ('preflightEventId' in resume.target) {
+        resumeInput = { preflightEventId: resume.target.preflightEventId };
+      } else {
+        const position = await readGraphPosition(storage, runId, resume.target.position);
+        if (position?.type !== 'graph:node-paused') {
+          throw new SupervisedRunError('RESUME_POSITION', 'Resume requires an exact recorded paused position.');
+        }
+        resumeInput = { position: resume.target.position, pauseEventId: position.eventId };
       }
-      resumeInput = { position: resume.position, pauseEventId: position.eventId };
       const launch = records.findLast((event) => event.type === 'runner:worker-launching');
       restartCount = launch === undefined ? 0 : Number((launch.payload as JsonObject).restartCount);
       const saved = (paused.payload as JsonObject).anchorArtifact;
-      if (saved === undefined) {
+      const pending = (paused.payload as JsonObject).pendingAnchor;
+      if (saved === undefined && pending === undefined) {
         resumeRefusal = { kind: 'pause', code: 'WORKSPACE_ANCHOR_MISSING', reason: 'The pause has no saved workspace anchor.' };
       } else {
         try {
-          pauseAnchorArtifact = validateArtifactReference(saved);
-          if (pauseAnchorArtifact.purpose !== 'runner-pause-anchor' || pauseAnchorArtifact.mediaType !== 'application/json') {
-            throw new Error('The saved reference is not a pause workspace anchor.');
+          if (saved !== undefined) {
+            pauseAnchorArtifact = validateArtifactReference(saved);
+            if (pauseAnchorArtifact.purpose !== 'runner-pause-anchor' || pauseAnchorArtifact.mediaType !== 'application/json') {
+              throw new Error('The saved reference is not a pause workspace anchor.');
+            }
+            const bytes = await storage.artifactStore.read({ namespace: storage.record.namespace, runId }, pauseAnchorArtifact);
+            anchor = JSON.parse(Buffer.from(bytes).toString('utf8')) as WorkspaceAnchor;
+          } else {
+            if (pending === null || typeof pending !== 'object' || Array.isArray(pending)) {
+              throw new Error('The pending pause workspace anchor has an invalid digest or scope.');
+            }
+            const metadata = pending as JsonObject;
+            if (typeof metadata.digest !== 'string' || !/^sha256:[0-9a-f]{64}$/u.test(metadata.digest)
+              || !(metadata.scope === null || Array.isArray(metadata.scope) && metadata.scope.every((path) => typeof path === 'string'))) {
+              throw new Error('The pending pause workspace anchor has an invalid digest or scope.');
+            }
+            pendingAnchor = { digest: metadata.digest, scope: metadata.scope as readonly string[] | null };
+            try {
+              anchor = await options.workspace.capture(pendingAnchor.scope ?? undefined);
+            } catch (cause) {
+              throw new SupervisedRunError('WORKSPACE_ANCHOR_WRITE', 'The paused workspace could not be captured for comparison.', { cause });
+            }
           }
-          const bytes = await storage.artifactStore.read({ namespace: storage.record.namespace, runId }, pauseAnchorArtifact);
-          anchor = JSON.parse(Buffer.from(bytes).toString('utf8')) as WorkspaceAnchor;
           if (anchor === null || Array.isArray(anchor) || anchor.schemaVersion !== 1
             || typeof anchor.root !== 'string' || typeof anchor.repositoryId !== 'string'
             || typeof anchor.head !== 'string' || typeof anchor.fingerprint !== 'string'
@@ -190,9 +292,15 @@ async function superviseRun(options: SupervisedRunOptions, resume?: {
             || await realpath(anchor.root) !== runRoot) {
             throw new Error('The saved workspace anchor has an invalid shape or worker root.');
           }
-        } catch {
+          if (pendingAnchor !== undefined && digestJson(anchor) !== pendingAnchor.digest) {
+            anchor = undefined;
+            resumeRefusal = { kind: 'pause', code: 'WORKSPACE_DRIFT', reason: 'The workspace changed after the captured pause.' };
+          }
+        } catch (error) {
           anchor = undefined;
-          resumeRefusal = { kind: 'pause', code: 'WORKSPACE_ANCHOR_INVALID', reason: 'The saved pause workspace anchor could not be verified.' };
+          resumeRefusal = pendingAnchor !== undefined && error instanceof SupervisedRunError && error.code === 'WORKSPACE_ANCHOR_WRITE'
+            ? { kind: 'pause', code: error.code, reason: error.message }
+            : { kind: 'pause', code: 'WORKSPACE_ANCHOR_INVALID', reason: 'The saved pause workspace anchor could not be verified.' };
         }
       }
     }
@@ -206,8 +314,9 @@ async function superviseRun(options: SupervisedRunOptions, resume?: {
         resumeRefusal = { kind: 'pause', code: 'WORKSPACE_DRIFT', reason: 'The workspace changed after the saved pause.' };
       }
     }
-    const scratchDirectory = join(resolve(options.directory), 'scratch');
-    await mkdir(scratchDirectory, { recursive: true });
+    const scratchPath = join(resolve(options.directory), 'scratch');
+    await mkdir(scratchPath, { recursive: true });
+    const scratchDirectory = await realpath(scratchPath);
     const started = resume?.loaded.record ?? await persistRunDefinition(storage, {
       ...options.definition, eventId: randomUUID(), timestamp: new Date().toISOString(),
       workspaceBinding: anchor!,
@@ -230,18 +339,29 @@ async function superviseRun(options: SupervisedRunOptions, resume?: {
       } catch (error) { leaseReleaseFailed = true; throw error; }
     };
     const savePauseAnchor = async (snapshot?: WorkspaceAnchor): Promise<ArtifactReference> => {
+      pauseAnchorArtifact = undefined;
+      pendingAnchor = undefined;
       try {
         snapshot ??= await options.workspace.capture();
-        const anchorArtifact = await storage.artifactStore.write({ namespace: storage.record.namespace, runId }, {
+      } catch (cause) {
+        throw new SupervisedRunError('WORKSPACE_ANCHOR_WRITE', 'The pause workspace anchor could not be captured.', { cause });
+      }
+      pendingAnchor = { digest: digestJson(snapshot), scope: snapshot.scope };
+      try {
+        pauseAnchorArtifact = await storage.artifactStore.write({ namespace: storage.record.namespace, runId }, {
           bytes: Buffer.from(JSON.stringify(snapshot)), mediaType: 'application/json', purpose: 'runner-pause-anchor', contentMode: 'state',
         });
-        await append('pause-anchor', { anchorArtifact });
-        return anchorArtifact;
+        await append('pause-anchor', { anchorArtifact: pauseAnchorArtifact });
+        pendingAnchor = undefined;
+        return pauseAnchorArtifact;
       } catch (cause) {
         throw new SupervisedRunError('WORKSPACE_ANCHOR_WRITE', 'The pause workspace anchor could not be stored.', { cause });
       }
     };
     const finish = async (outcome: SupervisedTerminalRecord, details: JsonObject = {}): Promise<SupervisedRunResult> => {
+      if (outcome.kind === 'pause' && outcome.preflightEventId === undefined && verifiedPreflightPause !== undefined) {
+        outcome = { ...outcome, preflightEventId: verifiedPreflightPause.preflightEventId };
+      }
       let result: SupervisedRunResult;
       if (outcome.kind === 'complete') {
         try {
@@ -259,19 +379,52 @@ async function superviseRun(options: SupervisedRunOptions, resume?: {
       await append(type, { ...outcome, phase, ...details });
       return result;
     };
+    const settlePreflightInterruption = async (launchRevision: number): Promise<SupervisedRunResult | null> => {
+      if (options.definition.resolvedPlan.plan.preflight === undefined) return null;
+      let pause: PreflightPauseResult | null;
+      try {
+        pause = await interruptRunPreflight(storage, runId);
+      } catch (cause) {
+        throw new SupervisedRunError('RUN_STORAGE', 'Preflight interruption could not be recorded.', { cause });
+      }
+      if (pause === null) return null;
+      verifiedPreflightPause = pause;
+      let outcome: Extract<SupervisedRunResult, { kind: 'pause' }> = pause;
+      try {
+        const records = await readSupervision(storage, runId);
+        const candidate = records.findLast((event) => event.revision > launchRevision
+          && event.type === 'runner:worker-result')?.payload as SupervisedTerminalRecord | undefined;
+        if (candidate?.kind === 'pause' && candidate.code === 'RESUME_EVENT_MISMATCH'
+          && candidate.preflightEventId === pause.preflightEventId
+          && typeof resumeInput?.preflightEventId === 'string'
+          && resumeInput.preflightEventId !== pause.preflightEventId) {
+          outcome = {
+            kind: 'pause', code: 'RESUME_EVENT_MISMATCH', preflightEventId: pause.preflightEventId,
+            reason: `Resume expected preflight pause event "${resumeInput.preflightEventId}" but found "${pause.preflightEventId}".`,
+          };
+        }
+      } catch (cause) {
+        throw new SupervisedRunError('RUN_STORAGE', 'The preflight worker result could not be read.', { cause });
+      }
+      const anchorArtifact = await savePauseAnchor();
+      await release();
+      try { return await finish(outcome, { anchorArtifact }); }
+      catch (cause) { throw new SupervisedRunError('RUN_STORAGE', 'The preflight pause terminal could not be recorded.', { cause }); }
+    };
     const done = (async (): Promise<SupervisedRunResult> => {
       let cleanupSafe = true;
       try {
         if (resumeRefusal !== undefined) {
           await release();
-          return await finish(resumeRefusal, pauseAnchorArtifact === undefined ? {} : { anchorArtifact: pauseAnchorArtifact });
+          return await finish(resumeRefusal, pauseEvidence());
         }
+        if (pendingAnchor !== undefined) await savePauseAnchor(anchor!);
         const input: SupervisedWorkerInput = {
           runId, runRoot, scratchDirectory, storage: storageOptions,
           ...(resumeInput === undefined ? {} : { resume: resumeInput }),
         };
         const workerEnvironment: Record<string, string> = {};
-        for (const name of ['PATH', 'HOME', 'TMPDIR', 'TMP', 'TEMP', 'SystemRoot', 'USERPROFILE', 'PATHEXT', ...options.environmentVariables ?? []]) {
+        for (const name of [...DEFAULT_WORKER_ENVIRONMENT_VARIABLES, ...options.environmentVariables ?? []]) {
           const value = process.env[name];
           if (value !== undefined) workerEnvironment[name] = value;
         }
@@ -283,28 +436,60 @@ async function superviseRun(options: SupervisedRunOptions, resume?: {
           }
           const attemptId = digestJson({ worker: randomUUID() });
           const ownerId = digestJson({ owner: randomUUID() });
-          await append('worker-launching', { attemptId, ownerId, restartCount, ...(resumeInput === undefined ? {} : { resume: resumeInput }) });
+          try {
+            await append('worker-launching', {
+              attemptId, ownerId, restartCount,
+              ...(resumeInput === undefined ? {} : { resume: resumeInput.preflightEventId !== undefined
+                ? { preflightEventId: resumeInput.preflightEventId }
+                : { position: resumeInput.position, pauseEventId: resumeInput.pauseEventId } }),
+            });
+          } catch (cause) {
+            if (resume === undefined || pauseAnchorArtifact === undefined) throw cause;
+            throw new SupervisedRunError('RUN_STORAGE', 'The resume worker launch could not be recorded.', { cause });
+          }
           const launch = (await readSupervision(storage, runId)).at(-1)!;
           const revision = launch.revision;
           // Set this once: replacement workers spend the same resumed interval.
           deadline ??= Date.parse(launch.timestamp) + carriedRemaining;
           const launchRemaining = deadline - Date.now();
           if (launchRemaining <= 0 || cancellation.signal.aborted) continue;
+          pauseAnchorArtifact = undefined;
+          pendingAnchor = undefined;
+          verifiedPreflightPause = undefined;
           cleanupSafe = false;
-          const command = await runOwnedCommand({
-            executable: process.execPath,
-            args: [fileURLToPath(new URL('./dist/supervised-worker.js', import.meta.resolve('@obversa/runner/package.json')))],
-            cwd: runRoot, env: workerEnvironment, inheritParentEnv: false, stdin: JSON.stringify(input), runId,
-            ownerId, attemptId,
-            timeoutMs: launchRemaining, teardownGraceMs: options.teardownGraceMs,
-            maxOutputBytes: 1_000_000, maxMemoryBytes: Number.MAX_SAFE_INTEGER,
-          }, cancellation.signal);
+          let command: Awaited<ReturnType<typeof runOwnedCommand>>;
+          try {
+            command = await runOwnedCommand({
+              executable: process.execPath,
+              args: [fileURLToPath(new URL('./dist/supervised-worker.js', import.meta.resolve('@obversa/runner/package.json')))],
+              cwd: runRoot, env: workerEnvironment, inheritParentEnv: false, stdin: JSON.stringify(input), runId,
+              ownerId, attemptId,
+              timeoutMs: launchRemaining, teardownGraceMs: options.teardownGraceMs,
+              maxOutputBytes: 1_000_000, maxMemoryBytes: Number.MAX_SAFE_INTEGER,
+            }, cancellation.signal);
+          } catch (error) {
+            if (error instanceof OwnedCommandError) {
+              cleanupSafe = commandCleanupIsSafe(error);
+            }
+            if (cleanupSafe) {
+              try {
+                const paused = await settlePreflightInterruption(revision);
+                if (paused !== null) return paused;
+              } catch (recoveryError) {
+                if (leaseReleaseFailed) throw error;
+                throw recoveryError;
+              }
+            }
+            throw error;
+          }
           cleanupSafe = command.remainingProcesses.length === 0;
           if (!cleanupSafe) throw new SupervisedRunError('TEARDOWN_INCOMPLETE', 'Owned processes remain; the lease is retained.');
+          await append('worker-exited', { exitCode: command.exitCode, restartCount });
+          const preflightPause = await settlePreflightInterruption(revision);
+          if (preflightPause !== null) return preflightPause;
           const events = await readSupervision(storage, runId);
           const record = events.findLast((event) => event.revision > revision && event.type === 'runner:worker-result');
           const result = record?.payload as SupervisedTerminalRecord | undefined;
-          await append('worker-exited', { exitCode: command.exitCode, restartCount });
           if (result !== undefined) {
             const details: JsonObject = result.kind === 'pause'
               ? { anchorArtifact: await savePauseAnchor() } : {};
@@ -320,7 +505,11 @@ async function superviseRun(options: SupervisedRunOptions, resume?: {
             await release();
             return await finish({ kind: 'fail', code: 'RESTART_EXHAUSTED', message: 'The worker restart limit was reached.' });
           }
-          anchor = await options.workspace.capture();
+          try {
+            anchor = await options.workspace.capture();
+          } catch (cause) {
+            throw new SupervisedRunError('WORKSPACE_ANCHOR_WRITE', 'The restart workspace anchor could not be captured.', { cause });
+          }
           await append('restart-anchor', { anchor, restartCount });
           await release();
           const backoffMs = Math.min(options.restart.maxBackoffMs, options.restart.initialBackoffMs * 2 ** restartCount);
@@ -341,12 +530,17 @@ async function superviseRun(options: SupervisedRunOptions, resume?: {
         }
       } catch (error) {
         if (error instanceof OwnedCommandError) {
-          cleanupSafe = error.remainingProcesses.length === 0 && [
-            'INVALID_EXECUTABLE', 'INVALID_COMMAND', 'SPAWN_FAILED', 'OUTPUT_LIMIT', 'MEMORY_LIMIT',
-          ].includes(error.code);
+          cleanupSafe = commandCleanupIsSafe(error);
         }
         if (cleanupSafe && !leaseReleaseFailed) {
           try { await release(); } catch { /* Keep the first failure and record the retained lease below. */ }
+        }
+        if (cleanupSafe && !leaseReleaseFailed && error instanceof SupervisedRunError
+          && (error.code === 'WORKSPACE_ANCHOR_WRITE' || error.code === 'RUN_STORAGE')
+          && (pauseAnchorArtifact !== undefined || pendingAnchor !== undefined)) {
+          return await finish({ kind: 'pause', code: error.code, reason: error.message }, {
+            ...pauseEvidence(), cleanupSafe, leaseRetained: false,
+          });
         }
         return await finish({
           kind: 'fail', code: error instanceof SupervisedRunError || error instanceof OwnedCommandError ? error.code : 'WATCHDOG_ERROR',

@@ -720,7 +720,7 @@ describe('dag graph type', () => {
     let fallbackCalls = 0;
     const primary = new MockEngine(() => {
       primaryCalls += 1;
-      throw new EngineError({ kind: 'auth', message: 'primary is dead' });
+      throw new EngineError({ kind: 'model-unavailable', message: 'primary model is unavailable' });
     });
     const fallback = new MockEngine(() => {
       fallbackCalls += 1;

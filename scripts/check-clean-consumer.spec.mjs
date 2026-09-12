@@ -67,6 +67,27 @@ test('clean consumer compiles and runs the tournament example', async () => {
   assert.match(source, /compiledTournament/);
 });
 
+test('clean consumer compiles and runs both preflight examples', async () => {
+  const manifest = JSON.parse(await readFile(new URL('../package.json', import.meta.url), 'utf8'));
+  const source = await readFile(new URL('./check-clean-consumer.mjs', import.meta.url), 'utf8');
+  assert.equal(manifest.scripts['verify:d17'],
+    'pnpm verify:d45 && pnpm example:preflight && pnpm example:runner-preflight');
+  assert.equal(manifest.scripts['example:preflight'],
+    'pnpm --filter @obversa/runtime exec tsx ../../examples/preflight-executor.ts');
+  assert.equal(manifest.scripts['example:runner-preflight'],
+    'pnpm --filter @obversa/runner exec tsx ../../examples/preflight-supervised-run.ts');
+  for (const file of ['preflight-executor.ts', 'preflight-supervised-run.ts', 'preflight-host.mjs']) {
+    assert.ok(CONSUMER_EXAMPLES.includes(file), `${file} is not on the consumer compile list`);
+    assert.ok(source.includes(file), `${file} is not copied into the consumer`);
+  }
+  assert.match(source, /allowJs: true/);
+  assert.match(source, /checkJs: true/);
+  for (const name of ['compiledPreflightExecutor', 'directPreflightExecutor',
+    'compiledPreflightRunner', 'directPreflightRunner']) {
+    assert.ok(source.includes(name), `${name} is not checked by the consumer`);
+  }
+});
+
 test('team conversation example requires the reply to queue another writer turn', async (t) => {
   const source = await readFile(new URL('../examples/team-conversation.ts', import.meta.url), 'utf8');
   const directory = await mkdtemp(new URL('../examples/.team-conversation-', import.meta.url));

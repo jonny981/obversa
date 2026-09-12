@@ -107,6 +107,14 @@ const SAME_MODEL_FALLBACK_TARGET: ExecutionTarget = {
   ...PRIMARY_TARGET,
   adapter: 'mock-fallback',
 };
+const OTHER_PROVIDER_TARGET: ExecutionTarget = {
+  ...PRIMARY_TARGET,
+  provider: 'other-provider',
+};
+const OTHER_ADAPTER_PROVIDER_TARGET: ExecutionTarget = {
+  ...OTHER_PROVIDER_TARGET,
+  adapter: 'mock-fallback',
+};
 const PRIMARY_SELECTION: EngineSelectionRecord = {
   adapter: 'mock',
   adapterVersion: '1.0.0',
@@ -126,6 +134,14 @@ const REVIEWER_SELECTION: EngineSelectionRecord = {
 };
 const SAME_MODEL_FALLBACK_SELECTION: EngineSelectionRecord = {
   ...PRIMARY_SELECTION,
+  adapter: 'mock-fallback',
+};
+const OTHER_PROVIDER_SELECTION: EngineSelectionRecord = {
+  ...PRIMARY_SELECTION,
+  provider: 'other-provider',
+};
+const OTHER_ADAPTER_PROVIDER_SELECTION: EngineSelectionRecord = {
+  ...OTHER_PROVIDER_SELECTION,
   adapter: 'mock-fallback',
 };
 
@@ -226,7 +242,12 @@ function graphType(): GraphType<TestDefinition, TestState, TestEvent, GraphRequi
                 ? {
                     id: 'worker-lane',
                     requested: PRIMARY_TARGET,
-                    knownSubstitutions: [FALLBACK_TARGET, SAME_MODEL_FALLBACK_TARGET],
+                    knownSubstitutions: [
+                      FALLBACK_TARGET,
+                      SAME_MODEL_FALLBACK_TARGET,
+                      OTHER_PROVIDER_TARGET,
+                      OTHER_ADAPTER_PROVIDER_TARGET,
+                    ],
                   }
                 : {
                     id: `${node.id}-lane`,
@@ -531,19 +552,21 @@ describe('createGraphExecutor', () => {
   });
 
   it('records an auth-dead primary once, then skips it on the next dispatch', async () => {
-    const run = await storedRun(definition({ completeAfter: 2 }));
+    const run = await storedRun(definition({ completeAfter: 2 }), {
+      workerFallbacks: [SAME_MODEL_FALLBACK_TARGET],
+    });
     let primaryCalls = 0;
     const primary = new MockEngine(() => {
       primaryCalls += 1;
       throw new EngineError({ kind: 'auth', message: 'bad primary credentials' });
     });
-    const fallback = new SelectedEngine(FALLBACK_SELECTION);
+    const fallback = new SelectedEngine(SAME_MODEL_FALLBACK_SELECTION);
     const executor = await createGraphExecutor({
       ...run,
       nodes: { worker: nodeBinding(run.root, { prompt: () => 'Do the work.' }) },
       engines: [
         engineBinding(PRIMARY_TARGET, PRIMARY_SELECTION, primary),
-        engineBinding(FALLBACK_TARGET, FALLBACK_SELECTION, fallback),
+        engineBinding(SAME_MODEL_FALLBACK_TARGET, SAME_MODEL_FALLBACK_SELECTION, fallback),
       ],
     });
 
@@ -596,7 +619,9 @@ describe('createGraphExecutor', () => {
   });
 
   it('records ENGINE_UNAVAILABLE and retries without another engine call', async () => {
-    const run = await storedRun(definition({ failAfter: 2 }));
+    const run = await storedRun(definition({ failAfter: 2 }), {
+      workerFallbacks: [SAME_MODEL_FALLBACK_TARGET],
+    });
     let primaryCalls = 0;
     let fallbackCalls = 0;
     const primary = new MockEngine(() => {
@@ -612,7 +637,7 @@ describe('createGraphExecutor', () => {
       nodes: { worker: nodeBinding(run.root, { prompt: () => 'Do the work.' }) },
       engines: [
         engineBinding(PRIMARY_TARGET, PRIMARY_SELECTION, primary),
-        engineBinding(FALLBACK_TARGET, FALLBACK_SELECTION, fallback),
+        engineBinding(SAME_MODEL_FALLBACK_TARGET, SAME_MODEL_FALLBACK_SELECTION, fallback),
       ],
     });
 
@@ -636,7 +661,7 @@ describe('createGraphExecutor', () => {
       nodes: { worker: nodeBinding(run.root, { prompt: () => 'Do the work.' }) },
       engines: [
         engineBinding(PRIMARY_TARGET, PRIMARY_SELECTION, primary),
-        engineBinding(FALLBACK_TARGET, FALLBACK_SELECTION, fallback),
+        engineBinding(SAME_MODEL_FALLBACK_TARGET, SAME_MODEL_FALLBACK_SELECTION, fallback),
       ],
     });
     await expect(fresh.run(new AbortController().signal)).resolves.toMatchObject({ kind: 'fail' });
@@ -1149,8 +1174,10 @@ describe('createGraphExecutor', () => {
     });
   });
 
-  it('uses the same provider and model identity to validate and skip a dead lane', async () => {
-    const run = await storedRun(definition());
+  it('accepts a recorded executable and version while excluding the selected adapter/provider', async () => {
+    const run = await storedRun(definition(), {
+      workerFallbacks: [SAME_MODEL_FALLBACK_TARGET],
+    });
     const recordedPrimary = {
       ...PRIMARY_SELECTION,
       adapterVersion: '9.9.9',
@@ -1173,13 +1200,13 @@ describe('createGraphExecutor', () => {
       } as unknown as JsonValue),
     });
     const primary = new SelectedEngine(PRIMARY_SELECTION);
-    const fallback = new SelectedEngine(FALLBACK_SELECTION);
+    const fallback = new SelectedEngine(SAME_MODEL_FALLBACK_SELECTION);
     const executor = await createGraphExecutor({
       ...run,
       nodes: { worker: nodeBinding(run.root, { prompt: () => 'Do the work.' }) },
       engines: [
         engineBinding(PRIMARY_TARGET, PRIMARY_SELECTION, primary),
-        engineBinding(FALLBACK_TARGET, FALLBACK_SELECTION, fallback),
+        engineBinding(SAME_MODEL_FALLBACK_TARGET, SAME_MODEL_FALLBACK_SELECTION, fallback),
       ],
     });
 
@@ -1215,7 +1242,7 @@ describe('createGraphExecutor', () => {
   });
 
   it('allows a same-model adapter fallback after a missing CLI', async () => {
-    const run = await storedRun(definition(), {
+    const run = await storedRun(definition({ completeAfter: 2 }), {
       workerFallbacks: [SAME_MODEL_FALLBACK_TARGET],
     });
     const primary = new MockEngine(() => {
@@ -1234,11 +1261,13 @@ describe('createGraphExecutor', () => {
     await expect(executor.run(new AbortController().signal)).resolves.toMatchObject({
       kind: 'complete',
     });
-    expect(fallback.calls).toBe(1);
+    expect(fallback.calls).toBe(2);
   });
 
   it('keeps the result append queue usable after a fact append fails', async () => {
-    const run = await storedRun(definition());
+    const run = await storedRun(definition(), {
+      workerFallbacks: [SAME_MODEL_FALLBACK_TARGET],
+    });
     let rejectedFact = false;
     const eventStore: EventStore = {
       preflightAppend: (...args) => run.storage.eventStore.preflightAppend(...args),
@@ -1256,14 +1285,14 @@ describe('createGraphExecutor', () => {
       primaryCalls += 1;
       throw new EngineError({ kind: 'auth', message: 'primary is dead' });
     });
-    const fallback = new SelectedEngine(FALLBACK_SELECTION);
+    const fallback = new SelectedEngine(SAME_MODEL_FALLBACK_SELECTION);
     const executor = await createGraphExecutor({
       ...run,
       storage: { ...run.storage, eventStore },
       nodes: { worker: nodeBinding(run.root, { prompt: () => 'Do the work.' }) },
       engines: [
         engineBinding(PRIMARY_TARGET, PRIMARY_SELECTION, primary),
-        engineBinding(FALLBACK_TARGET, FALLBACK_SELECTION, fallback),
+        engineBinding(SAME_MODEL_FALLBACK_TARGET, SAME_MODEL_FALLBACK_SELECTION, fallback),
       ],
     });
 
@@ -1273,6 +1302,530 @@ describe('createGraphExecutor', () => {
     expect((await events(run.storage, run.runId)).find((event) => event.type === 'graph:node-failed')?.payload)
       .toMatchObject({ code: 'MODEL_UNAVAILABLE_RECORD' });
   });
+
+  it.each(['model-unavailable', 'billing', 'quota'] as const)(
+    '%s excludes a second adapter immediately and on the next dispatch', async (failure) => {
+      const run = await storedRun(definition({ failAfter: 2 }), {
+        workerFallbacks: [SAME_MODEL_FALLBACK_TARGET],
+      });
+      let primaryCalls = 0;
+      const primary = new MockEngine(() => {
+        primaryCalls += 1;
+        throw new EngineError({ kind: failure, message: 'scripted provider/model failure' });
+      });
+      const fallback = new SelectedEngine(SAME_MODEL_FALLBACK_SELECTION);
+      const executor = await createGraphExecutor({
+        ...run,
+        nodes: { worker: nodeBinding(run.root, { prompt: () => 'Do the work.' }) },
+        engines: [
+          engineBinding(PRIMARY_TARGET, PRIMARY_SELECTION, primary),
+          engineBinding(SAME_MODEL_FALLBACK_TARGET, SAME_MODEL_FALLBACK_SELECTION, fallback),
+        ],
+      });
+      await expect(executor.run(new AbortController().signal)).resolves.toMatchObject({ kind: 'fail' });
+      expect(primaryCalls).toBe(1);
+      expect(fallback.calls).toBe(0);
+      const durable = await events(run.storage, run.runId);
+      expect(durable.filter((event) => event.type === 'graph:model-unavailable').map((event) => event.payload))
+        .toEqual([{
+          schemaVersion: 1,
+          identity: createAttemptIdentity({
+            namespace: run.storage.record.namespace, streamId: run.runId,
+            nodeId: 'worker', position: 'turns/1',
+          }),
+          selection: PRIMARY_SELECTION, effective: PRIMARY_SELECTION,
+          target: PRIMARY_TARGET, failure,
+        }]);
+      expect(durable.filter((event) => event.type === 'graph:node-failed')).toHaveLength(2);
+    },
+  );
+
+  it.each([
+    ['auth', FALLBACK_TARGET, FALLBACK_SELECTION, SAME_MODEL_FALLBACK_TARGET, SAME_MODEL_FALLBACK_SELECTION],
+    ['quota', SAME_MODEL_FALLBACK_TARGET, SAME_MODEL_FALLBACK_SELECTION, OTHER_PROVIDER_TARGET, OTHER_PROVIDER_SELECTION],
+  ] as const)('%s leaves the independently configured later target usable', async (
+    kind, excludedTarget, excludedSelection, usableTarget, usableSelection,
+  ) => {
+    const run = await storedRun(definition({ failAfter: 2 }), {
+      workerFallbacks: [excludedTarget, usableTarget],
+    });
+    let primaryCalls = 0;
+    const primary = new MockEngine(() => {
+      primaryCalls += 1;
+      throw new EngineError({ kind, message: 'scripted lasting failure' });
+    });
+    const excluded = new SelectedEngine(excludedSelection);
+    const usable = new SelectedEngine(usableSelection);
+    const executor = await createGraphExecutor({
+      ...run,
+      nodes: { worker: nodeBinding(run.root, { prompt: () => 'Do the work.' }) },
+      engines: [
+        engineBinding(PRIMARY_TARGET, PRIMARY_SELECTION, primary),
+        engineBinding(excludedTarget, excludedSelection, excluded),
+        engineBinding(usableTarget, usableSelection, usable),
+      ],
+    });
+    await expect(executor.run(new AbortController().signal)).resolves.toMatchObject({ kind: 'complete' });
+    expect(primaryCalls).toBe(1);
+    expect(excluded.calls).toBe(0);
+    expect(usable.calls).toBe(1);
+  });
+
+  it.each([
+    [
+      'the same adapter and another provider',
+      OTHER_PROVIDER_SELECTION,
+      OTHER_PROVIDER_TARGET,
+      OTHER_PROVIDER_SELECTION,
+    ],
+    [
+      'another adapter and another provider',
+      OTHER_ADAPTER_PROVIDER_SELECTION,
+      OTHER_ADAPTER_PROVIDER_TARGET,
+      OTHER_ADAPTER_PROVIDER_SELECTION,
+    ],
+  ] as const)('auth uses the selected credentials despite effective evidence from %s', async (
+    _effectiveCase,
+    effective,
+    usableTarget,
+    usableSelection,
+  ) => {
+    const run = await storedRun(definition({ failAfter: 2 }), {
+      workerFallbacks: [FALLBACK_TARGET, usableTarget],
+    });
+    let primaryCalls = 0;
+    const primary = new MockEngine(() => {
+      primaryCalls += 1;
+      throw new EngineError({
+        kind: 'auth', message: 'scripted credential failure', effective,
+      });
+    });
+    const blocked = new SelectedEngine(FALLBACK_SELECTION);
+    const usable = new SelectedEngine(usableSelection);
+    const executor = await createGraphExecutor({
+      ...run,
+      nodes: { worker: nodeBinding(run.root, { prompt: () => 'Do the work.' }) },
+      engines: [
+        engineBinding(PRIMARY_TARGET, PRIMARY_SELECTION, primary),
+        engineBinding(FALLBACK_TARGET, FALLBACK_SELECTION, blocked),
+        engineBinding(usableTarget, usableSelection, usable),
+      ],
+    });
+
+    await expect(executor.run(new AbortController().signal)).resolves.toEqual({
+      kind: 'complete', output: { attempts: 2 },
+    });
+    expect(primaryCalls).toBe(1);
+    expect(blocked.calls).toBe(0);
+    expect(usable.calls).toBe(1);
+    expect((await events(run.storage, run.runId)).find(
+      (event) => event.type === 'graph:model-unavailable',
+    )?.payload).toEqual({
+      schemaVersion: 1,
+      identity: createAttemptIdentity({
+        namespace: run.storage.record.namespace,
+        streamId: run.runId,
+        nodeId: 'worker',
+        position: 'turns/1',
+      }),
+      selection: PRIMARY_SELECTION,
+      effective,
+      target: PRIMARY_TARGET,
+      failure: 'auth',
+    });
+  });
+
+  it.each([
+    [
+      'the same adapter and another provider',
+      OTHER_PROVIDER_TARGET,
+      OTHER_PROVIDER_SELECTION,
+      PRIMARY_SELECTION,
+    ],
+    [
+      'another adapter with the same provider and model',
+      SAME_MODEL_FALLBACK_TARGET,
+      SAME_MODEL_FALLBACK_SELECTION,
+      PRIMARY_SELECTION,
+    ],
+    [
+      'the same adapter and another provider from null observations',
+      OTHER_PROVIDER_TARGET,
+      OTHER_PROVIDER_SELECTION,
+      { ...PRIMARY_SELECTION, provider: null, modelFamily: null },
+    ],
+  ] as const)('a fresh executor keeps %s available after recorded auth failure', async (
+    _candidate,
+    usableTarget,
+    usableSelection,
+    recordedSelection,
+  ) => {
+    const run = await storedRun(definition(), {
+      workerFallbacks: [FALLBACK_TARGET, usableTarget],
+    });
+    const payload = cloneFrozenJson({
+      schemaVersion: 1,
+      identity: createAttemptIdentity({
+        namespace: run.storage.record.namespace,
+        streamId: run.runId,
+        nodeId: 'worker',
+        position: 'turns/recorded',
+      }),
+      selection: recordedSelection,
+      effective: recordedSelection,
+      target: PRIMARY_TARGET,
+      failure: 'auth',
+    } as unknown as JsonValue);
+    await appendGraphEvent(run.storage, run.runId, {
+      type: 'model-unavailable', version: 1, payload,
+    });
+    const primary = new SelectedEngine(PRIMARY_SELECTION);
+    const blocked = new SelectedEngine(FALLBACK_SELECTION);
+    const usable = new SelectedEngine(usableSelection);
+    const storage = createLocalRunStorage({
+      directory: join(run.root, 'storage'), namespace: 'executor-tests', policy,
+    });
+    const executor = await createGraphExecutor({
+      ...run,
+      storage,
+      nodes: { worker: nodeBinding(run.root, { prompt: () => 'Do the work.' }) },
+      engines: [
+        engineBinding(PRIMARY_TARGET, PRIMARY_SELECTION, primary),
+        engineBinding(FALLBACK_TARGET, FALLBACK_SELECTION, blocked),
+        engineBinding(usableTarget, usableSelection, usable),
+      ],
+    });
+
+    await expect(executor.run(new AbortController().signal)).resolves.toMatchObject({
+      kind: 'complete',
+    });
+    expect(primary.calls).toBe(0);
+    expect(blocked.calls).toBe(0);
+    expect(usable.calls).toBe(1);
+    expect((await events(storage, run.runId)).find(
+      (event) => event.type === 'graph:model-unavailable',
+    )?.payload).toEqual(payload);
+  });
+
+  it('uses the complete recorded lane for a changed effective adapter during execution and replay', async () => {
+    const run = await storedRun(definition({ completeAfter: 2 }), {
+      workerFallbacks: [FALLBACK_TARGET, SAME_MODEL_FALLBACK_TARGET],
+    });
+    const effective = { ...SAME_MODEL_FALLBACK_SELECTION, provider: null, modelFamily: null };
+    let primaryCalls = 0;
+    const primary = new MockEngine(() => {
+      primaryCalls += 1;
+      throw new EngineError({ kind: 'quota', message: 'scripted adapter substitution', effective });
+    });
+    const fallback = new SelectedEngine(FALLBACK_SELECTION);
+    const substituted = new SelectedEngine(SAME_MODEL_FALLBACK_SELECTION);
+    const executor = await createGraphExecutor({
+      ...run,
+      nodes: { worker: nodeBinding(run.root, { prompt: () => 'Do the work.' }) },
+      engines: [
+        engineBinding(PRIMARY_TARGET, PRIMARY_SELECTION, primary),
+        engineBinding(FALLBACK_TARGET, FALLBACK_SELECTION, fallback),
+        engineBinding(SAME_MODEL_FALLBACK_TARGET, SAME_MODEL_FALLBACK_SELECTION, substituted),
+      ],
+    });
+    await expect(executor.run(new AbortController().signal)).resolves.toMatchObject({ kind: 'complete' });
+    expect(primaryCalls).toBe(1);
+    expect(fallback.calls).toBe(2);
+    expect(substituted.calls).toBe(0);
+    expect((await events(run.storage, run.runId)).find((event) => event.type === 'graph:model-unavailable')?.payload)
+      .toMatchObject({ target: PRIMARY_TARGET, selection: PRIMARY_SELECTION, effective });
+  });
+
+  it.each(['rate-limit', 'transient'] as const)('%s produces no lasting exclusions on retry', async (kind) => {
+    const run = await storedRun(definition({ failAfter: 2 }));
+    let primaryCalls = 0;
+    const primary = new MockEngine(() => {
+      primaryCalls += 1;
+      throw new EngineError({ kind, message: 'scripted temporary failure' });
+    });
+    const fallback = new SelectedEngine(FALLBACK_SELECTION);
+    const executor = await createGraphExecutor({
+      ...run,
+      nodes: { worker: nodeBinding(run.root, { prompt: () => 'Do the work.' }) },
+      engines: [
+        engineBinding(PRIMARY_TARGET, PRIMARY_SELECTION, primary),
+        engineBinding(FALLBACK_TARGET, FALLBACK_SELECTION, fallback),
+      ],
+    });
+    await expect(executor.run(new AbortController().signal)).resolves.toMatchObject({ kind: 'fail' });
+    expect(primaryCalls).toBe(2);
+    expect(fallback.calls).toBe(0);
+    expect((await events(run.storage, run.runId)).filter((event) => event.type === 'graph:model-unavailable'))
+      .toEqual([]);
+  });
+
+  it.each(['legacy', 'exact'] as const)('replays a %s null-provider fact without altering its evidence', async (shape) => {
+    const run = await storedRun(definition(), { workerFallbacks: [SAME_MODEL_FALLBACK_TARGET] });
+    const observed = { ...PRIMARY_SELECTION, provider: null, modelFamily: null,
+      adapterVersion: '9.9.9', executable: '/recorded/old/mock' };
+    const payload = cloneFrozenJson({
+      schemaVersion: 1,
+      identity: createAttemptIdentity({
+        namespace: run.storage.record.namespace, streamId: run.runId,
+        nodeId: 'worker', position: 'turns/recorded',
+      }),
+      selection: observed, effective: observed, failure: 'quota',
+      ...(shape === 'exact' ? { target: PRIMARY_TARGET } : {}),
+    } as unknown as JsonValue);
+    await appendGraphEvent(run.storage, run.runId, { type: 'model-unavailable', version: 1, payload });
+    const primary = new SelectedEngine(PRIMARY_SELECTION);
+    const fallback = new SelectedEngine(SAME_MODEL_FALLBACK_SELECTION);
+    const executor = await createGraphExecutor({
+      ...run,
+      nodes: { worker: nodeBinding(run.root, { prompt: () => 'Do the work.' }) },
+      engines: [
+        engineBinding(PRIMARY_TARGET, PRIMARY_SELECTION, primary),
+        engineBinding(SAME_MODEL_FALLBACK_TARGET, SAME_MODEL_FALLBACK_SELECTION, fallback),
+      ],
+    });
+    await expect(executor.run(new AbortController().signal)).resolves.toMatchObject({ kind: 'fail' });
+    expect(primary.calls).toBe(0);
+    expect(fallback.calls).toBe(0);
+    expect((await events(run.storage, run.runId)).find((event) => event.type === 'graph:model-unavailable')?.payload)
+      .toEqual(payload);
+  });
+
+  it.each(['legacy', 'exact'] as const)('handles two compatible providers in a %s fact without guessing', async (shape) => {
+    const run = await storedRun(definition(), { workerFallbacks: [OTHER_PROVIDER_TARGET] });
+    const observed = { ...PRIMARY_SELECTION, provider: null, modelFamily: null };
+    const payload = cloneFrozenJson({
+      schemaVersion: 1,
+      identity: createAttemptIdentity({
+        namespace: run.storage.record.namespace, streamId: run.runId,
+        nodeId: 'worker', position: 'turns/recorded',
+      }),
+      selection: observed, effective: observed, failure: 'quota',
+      ...(shape === 'exact' ? { target: PRIMARY_TARGET } : {}),
+    } as unknown as JsonValue);
+    await appendGraphEvent(run.storage, run.runId, { type: 'model-unavailable', version: 1, payload });
+    const before = await events(run.storage, run.runId);
+    const primary = new SelectedEngine(PRIMARY_SELECTION);
+    const fallback = new SelectedEngine(OTHER_PROVIDER_SELECTION);
+    const executor = await createGraphExecutor({
+      ...run,
+      nodes: { worker: nodeBinding(run.root, { prompt: () => 'Do the work.' }) },
+      engines: [
+        engineBinding(PRIMARY_TARGET, PRIMARY_SELECTION, primary),
+        engineBinding(OTHER_PROVIDER_TARGET, OTHER_PROVIDER_SELECTION, fallback),
+      ],
+    });
+    if (shape === 'legacy') {
+      await expect(executor.run(new AbortController().signal)).rejects.toMatchObject({
+        name: 'GraphExecutionError', code: 'ENGINE_IDENTITY_UNRESOLVED',
+      });
+      expect(fallback.calls).toBe(0);
+      expect(await events(run.storage, run.runId)).toEqual(before);
+    } else {
+      await expect(executor.run(new AbortController().signal)).resolves.toMatchObject({ kind: 'complete' });
+      expect(fallback.calls).toBe(1);
+      expect((await events(run.storage, run.runId)).find((event) => event.type === 'graph:model-unavailable')?.payload)
+        .toEqual(payload);
+    }
+    expect(primary.calls).toBe(0);
+  });
+
+  it('resolves an explicit provider from a legacy auth fact', async () => {
+    const run = await storedRun(definition(), {
+      workerFallbacks: [FALLBACK_TARGET, OTHER_PROVIDER_TARGET],
+    });
+    const payload = cloneFrozenJson({
+      schemaVersion: 1,
+      identity: createAttemptIdentity({
+        namespace: run.storage.record.namespace, streamId: run.runId,
+        nodeId: 'worker', position: 'turns/recorded',
+      }),
+      selection: PRIMARY_SELECTION,
+      effective: PRIMARY_SELECTION,
+      failure: 'auth',
+    } as unknown as JsonValue);
+    await appendGraphEvent(run.storage, run.runId, {
+      type: 'model-unavailable', version: 1, payload,
+    });
+    const primary = new SelectedEngine(PRIMARY_SELECTION);
+    const blocked = new SelectedEngine(FALLBACK_SELECTION);
+    const usable = new SelectedEngine(OTHER_PROVIDER_SELECTION);
+    const executor = await createGraphExecutor({
+      ...run,
+      nodes: { worker: nodeBinding(run.root, { prompt: () => 'Do the work.' }) },
+      engines: [
+        engineBinding(PRIMARY_TARGET, PRIMARY_SELECTION, primary),
+        engineBinding(FALLBACK_TARGET, FALLBACK_SELECTION, blocked),
+        engineBinding(OTHER_PROVIDER_TARGET, OTHER_PROVIDER_SELECTION, usable),
+      ],
+    });
+
+    await expect(executor.run(new AbortController().signal)).resolves.toMatchObject({
+      kind: 'complete',
+    });
+    expect(primary.calls).toBe(0);
+    expect(blocked.calls).toBe(0);
+    expect(usable.calls).toBe(1);
+    expect((await events(run.storage, run.runId)).find(
+      (event) => event.type === 'graph:model-unavailable',
+    )?.payload).toEqual(payload);
+  });
+
+  it('resolves one compatible provider from a legacy null-provider auth fact', async () => {
+    const run = await storedRun(definition(), {
+      workerFallbacks: [FALLBACK_TARGET, OTHER_PROVIDER_TARGET],
+    });
+    const observed = {
+      ...FALLBACK_SELECTION, provider: null, modelFamily: null,
+    };
+    const payload = cloneFrozenJson({
+      schemaVersion: 1,
+      identity: createAttemptIdentity({
+        namespace: run.storage.record.namespace, streamId: run.runId,
+        nodeId: 'worker', position: 'turns/recorded',
+      }),
+      selection: observed,
+      effective: observed,
+      failure: 'auth',
+    } as unknown as JsonValue);
+    await appendGraphEvent(run.storage, run.runId, {
+      type: 'model-unavailable', version: 1, payload,
+    });
+    const primary = new SelectedEngine(PRIMARY_SELECTION);
+    const blocked = new SelectedEngine(FALLBACK_SELECTION);
+    const usable = new SelectedEngine(OTHER_PROVIDER_SELECTION);
+    const executor = await createGraphExecutor({
+      ...run,
+      nodes: { worker: nodeBinding(run.root, { prompt: () => 'Do the work.' }) },
+      engines: [
+        engineBinding(PRIMARY_TARGET, PRIMARY_SELECTION, primary),
+        engineBinding(FALLBACK_TARGET, FALLBACK_SELECTION, blocked),
+        engineBinding(OTHER_PROVIDER_TARGET, OTHER_PROVIDER_SELECTION, usable),
+      ],
+    });
+
+    await expect(executor.run(new AbortController().signal)).resolves.toMatchObject({
+      kind: 'complete',
+    });
+    expect(primary.calls).toBe(0);
+    expect(blocked.calls).toBe(0);
+    expect(usable.calls).toBe(1);
+    expect((await events(run.storage, run.runId)).find(
+      (event) => event.type === 'graph:model-unavailable',
+    )?.payload).toEqual(payload);
+  });
+
+  it.each(['zero', 'multiple'] as const)(
+    'refuses a legacy null-provider auth fact with %s compatible providers', async (matches) => {
+      const run = await storedRun(definition(), {
+        workerFallbacks: matches === 'multiple' ? [OTHER_PROVIDER_TARGET] : [FALLBACK_TARGET],
+      });
+      const observed = {
+        ...PRIMARY_SELECTION,
+        provider: null,
+        modelFamily: null,
+        ...(matches === 'zero' ? { model: 'undeclared' } : {}),
+      };
+      await appendGraphEvent(run.storage, run.runId, {
+        type: 'model-unavailable', version: 1,
+        payload: cloneFrozenJson({
+          schemaVersion: 1,
+          identity: createAttemptIdentity({
+            namespace: run.storage.record.namespace, streamId: run.runId,
+            nodeId: 'worker', position: 'turns/recorded',
+          }),
+          selection: observed, effective: observed, failure: 'auth',
+        } as unknown as JsonValue),
+      });
+      const before = await events(run.storage, run.runId);
+      const primary = new SelectedEngine(PRIMARY_SELECTION);
+      const fallback = new SelectedEngine(
+        matches === 'multiple' ? OTHER_PROVIDER_SELECTION : FALLBACK_SELECTION,
+      );
+      const executor = await createGraphExecutor({
+        ...run,
+        nodes: { worker: nodeBinding(run.root, { prompt: () => 'Do the work.' }) },
+        engines: [
+          engineBinding(PRIMARY_TARGET, PRIMARY_SELECTION, primary),
+          matches === 'multiple'
+            ? engineBinding(OTHER_PROVIDER_TARGET, OTHER_PROVIDER_SELECTION, fallback)
+            : engineBinding(FALLBACK_TARGET, FALLBACK_SELECTION, fallback),
+        ],
+      });
+
+      await expect(executor.run(new AbortController().signal)).rejects.toMatchObject({
+        name: 'GraphExecutionError', code: 'ENGINE_IDENTITY_UNRESOLVED',
+      });
+      expect(primary.calls + fallback.calls).toBe(0);
+      expect(await events(run.storage, run.runId)).toEqual(before);
+    },
+  );
+
+  it.each(['missing-cli', 'invalid-config'] as const)(
+    'keeps legacy %s failures adapter-wide without inferring a provider', async (failure) => {
+      const run = await storedRun(definition(), { workerFallbacks: [OTHER_PROVIDER_TARGET] });
+      const observed = { ...PRIMARY_SELECTION, provider: null, modelFamily: null };
+      await appendGraphEvent(run.storage, run.runId, {
+        type: 'model-unavailable', version: 1,
+        payload: cloneFrozenJson({
+          schemaVersion: 1,
+          identity: createAttemptIdentity({
+            namespace: run.storage.record.namespace, streamId: run.runId,
+            nodeId: 'worker', position: 'turns/recorded',
+          }),
+          selection: observed, effective: observed, failure,
+        } as unknown as JsonValue),
+      });
+      const primary = new SelectedEngine(PRIMARY_SELECTION);
+      const fallback = new SelectedEngine(OTHER_PROVIDER_SELECTION);
+      const executor = await createGraphExecutor({
+        ...run,
+        nodes: { worker: nodeBinding(run.root, { prompt: () => 'Do the work.' }) },
+        engines: [
+          engineBinding(PRIMARY_TARGET, PRIMARY_SELECTION, primary),
+          engineBinding(OTHER_PROVIDER_TARGET, OTHER_PROVIDER_SELECTION, fallback),
+        ],
+      });
+      await expect(executor.run(new AbortController().signal)).resolves.toMatchObject({ kind: 'fail' });
+      expect(primary.calls).toBe(0);
+      expect(fallback.calls).toBe(0);
+    },
+  );
+
+  it.each(['wrong-node', 'wrong-target', 'extra-field', 'null-target'] as const)(
+    'rejects %s failure attribution before dispatch', async (invalid) => {
+      const run = await storedRun(definition({ parallel: true }));
+      const payload = {
+        schemaVersion: 1,
+        identity: createAttemptIdentity({
+          namespace: run.storage.record.namespace, streamId: run.runId,
+          nodeId: invalid === 'wrong-node' ? 'reviewer' : 'worker', position: 'turns/recorded',
+        }),
+        selection: PRIMARY_SELECTION, effective: PRIMARY_SELECTION, failure: 'auth',
+        ...(invalid === 'wrong-target' ? { target: REVIEWER_TARGET } : {}),
+        ...(invalid === 'extra-field' ? { extra: true } : {}),
+        ...(invalid === 'null-target' ? { target: null } : {}),
+      };
+      await appendGraphEvent(run.storage, run.runId, {
+        type: 'model-unavailable', version: 1, payload: cloneFrozenJson(payload as unknown as JsonValue),
+      });
+      const before = await events(run.storage, run.runId);
+      const primary = new SelectedEngine(PRIMARY_SELECTION);
+      const fallback = new SelectedEngine(FALLBACK_SELECTION);
+      const reviewer = new SelectedEngine(REVIEWER_SELECTION);
+      const executor = await createGraphExecutor({
+        ...run,
+        nodes: { worker: nodeBinding(run.root), reviewer: nodeBinding(run.root) },
+        engines: [
+          engineBinding(PRIMARY_TARGET, PRIMARY_SELECTION, primary),
+          engineBinding(FALLBACK_TARGET, FALLBACK_SELECTION, fallback),
+          engineBinding(REVIEWER_TARGET, REVIEWER_SELECTION, reviewer),
+        ],
+      });
+      await expect(executor.run(new AbortController().signal)).rejects.toMatchObject({ code: 'INVALID_EVENT' });
+      expect(primary.calls + fallback.calls + reviewer.calls).toBe(0);
+      expect(await events(run.storage, run.runId)).toEqual(before);
+    },
+  );
 
   it('refuses a compiled graph that does not match the stored run definition', async () => {
     const run = await storedRun(definition({ engineBacked: false }));
@@ -1321,6 +1874,32 @@ describe('createGraphExecutor', () => {
     expect(parentCompleted?.payload).toMatchObject({
       result: { child: { kind: 'complete', output: { attempts: 1 } } },
     });
+  });
+
+  it('replays the captured preflight envelopes without a second full stream traversal', async () => {
+    const run = await storedRun(definition({ engineBacked: false }));
+    await appendGraphEvent(run.storage, run.runId, {
+      type: 'node-dispatched', version: 1, payload: { nodeId: 'worker', position: 'turns/1' },
+    });
+    const yielded: number[] = [];
+    const eventStore: EventStore = {
+      append: run.storage.eventStore.append.bind(run.storage.eventStore),
+      preflightAppend: run.storage.eventStore.preflightAppend.bind(run.storage.eventStore),
+      async *read(stream, afterRevision) {
+        const index = yielded.push(0) - 1;
+        for await (const event of run.storage.eventStore.read(stream, afterRevision)) {
+          yielded[index] = yielded[index]! + 1;
+          yield event;
+        }
+      },
+    };
+    const executor = await createGraphExecutor({
+      ...run, storage: { ...run.storage, eventStore }, engines: [],
+      nodes: { worker: nodeBinding(run.root, { runData: async () => { throw new Error('unfinished work must not run'); } }) },
+    });
+    expect(await executor.run(new AbortController().signal)).toEqual({ kind: 'waiting', positions: ['turns/1'] });
+    // Constructor definition read, loader definition read, then one full traversal.
+    expect(yielded).toEqual([1, 1, 2]);
   });
 });
 
@@ -1417,7 +1996,7 @@ describe('durable engine attempt identities', () => {
 
   it('keeps an unknown primary null and starts each new position sequence at one', async () => {
     const run = await storedRun(definition({ completeAfter: 2 }));
-    const primary = new MockEngine(() => { throw new EngineError({ kind: 'auth', message: 'no answer' }); });
+    const primary = new MockEngine(() => { throw new EngineError({ kind: 'model-unavailable', message: 'no answer' }); });
     const fallback = new SelectedEngine(FALLBACK_SELECTION);
     const executor = await createGraphExecutor({
       ...run,

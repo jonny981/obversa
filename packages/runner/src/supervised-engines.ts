@@ -1,6 +1,7 @@
 import {
   EngineError, EngineIncompleteResultError, cloneFrozenJson, validateAgentResult,
-  validateIncompleteResultEvidence, type AgentResult, type Engine,
+  validateIncompleteResultEvidence, type AgentRequest, type AgentResult, type Engine,
+  type EngineSelectionRecord,
   type EngineIncompleteResultEvidence, type JsonObject,
 } from '@obversa/engine';
 import type { GraphEngineBinding, RunStorageBinding } from '@obversa/runtime';
@@ -27,10 +28,25 @@ export function superviseEngines(
   runId: string,
 ): readonly GraphEngineBinding[] {
   return Object.freeze(bindings.map((binding) => {
-    const selected = cloneFrozenJson({ ...binding.selection });
+    const initialSelection = cloneFrozenJson({ ...binding.selection });
+    let selected = initialSelection;
+    const admit = binding.engine.admit?.bind(binding.engine);
     const engine = Object.freeze<Engine>({
       name: binding.engine.name,
+      ...(admit === undefined ? {} : {
+        async admit(
+          request: Omit<AgentRequest, 'prompt'>,
+          signal: AbortSignal,
+          expectedSelection?: EngineSelectionRecord,
+        ) {
+          const isPreflight = request.purpose === 'preflight';
+          const admitted = await admit(request, signal, expectedSelection);
+          if (!isPreflight) selected = cloneFrozenJson({ ...admitted });
+          return admitted;
+        },
+      }),
       async run(request, onEvent, signal) {
+        if (request.purpose === 'preflight') return binding.engine.run(request, onEvent, signal);
         const base = cloneFrozenJson({
           attemptId: request.attempt?.attemptId ?? null,
           position: request.attempt?.path[0] ?? null,
@@ -74,6 +90,6 @@ export function superviseEngines(
         return result;
       },
     });
-    return Object.freeze({ ...binding, target: cloneFrozenJson({ ...binding.target }), selection: selected, engine });
+    return Object.freeze({ ...binding, target: cloneFrozenJson({ ...binding.target }), selection: initialSelection, engine });
   }));
 }

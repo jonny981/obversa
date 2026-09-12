@@ -1,8 +1,69 @@
 #!/usr/bin/env node
 
-import { existsSync, readFileSync, writeFileSync } from 'node:fs';
+import {
+  appendFileSync,
+  chmodSync,
+  existsSync,
+  mkdirSync,
+  readFileSync,
+  writeFileSync,
+} from 'node:fs';
+import { dirname, join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 
 const args = process.argv.slice(2);
+
+function recordInvocation(kind) {
+  if (!process.env.OBVERSA_TEST_GROK_CALLS) return;
+  const grokHome = process.env.GROK_HOME;
+  appendFileSync(process.env.OBVERSA_TEST_GROK_CALLS, `${JSON.stringify({
+    kind,
+    program: fileURLToPath(import.meta.url),
+    args,
+    ...(kind === 'version' ? { stdin: readFileSync(0, 'utf8') } : {}),
+    cwd: process.cwd(),
+    promptFilePresent: grokHome
+      ? existsSync(join(dirname(grokHome), 'prompt.md'))
+      : false,
+    home: process.env.HOME ?? null,
+    grokHome: grokHome ?? null,
+    parentSecret: process.env.OBVERSA_POISONED_PARENT_SECRET ?? null,
+  })}\n`);
+}
+
+if (args.length === 1 && args[0] === '--version') {
+  recordInvocation('version');
+  const mode = process.env.OBVERSA_TEST_GROK_VERSION_MODE;
+  if (mode === 'hang') {
+    setInterval(() => {}, 1_000);
+    await new Promise(() => {});
+  }
+  if (mode === 'exit') {
+    process.stderr.write('scripted unsupported version command\n');
+    process.exit(2);
+  }
+  if (mode === 'fail-once' && process.env.OBVERSA_TEST_GROK_CALLS
+    && readFileSync(process.env.OBVERSA_TEST_GROK_CALLS, 'utf8').trim().split('\n')
+      .filter((line) => JSON.parse(line).kind === 'version').length === 1) {
+    process.exit(2);
+  }
+  if (mode === 'overflow') {
+    process.stdout.write('x'.repeat(8_192));
+    process.exit(0);
+  }
+  process.stdout.write(process.env.OBVERSA_TEST_GROK_VERSION_STDOUT
+    ?? 'grok 1.0.5 (5115b46bc909) [stable]\n');
+  if (mode === 'cleanup-success' || mode === 'cleanup-error') {
+    const locked = join(process.env.GROK_HOME, 'locked');
+    mkdirSync(locked);
+    writeFileSync(join(locked, 'marker'), 'cleanup marker');
+    chmodSync(locked, 0);
+  }
+  if (mode === 'cleanup-error') process.exit(2);
+  process.exit(0);
+}
+
+recordInvocation('model');
 
 function value(flag) {
   const index = args.indexOf(flag);
@@ -103,6 +164,10 @@ if (scenario === 'rate-limit') {
   process.exit(1);
 }
 if (scenario === 'quota') {
+  process.stderr.write('monthly usage limit reached\n');
+  process.exit(1);
+}
+if (scenario === 'ambiguous-limit') {
   process.stderr.write('quota allowance reached\n');
   process.exit(1);
 }

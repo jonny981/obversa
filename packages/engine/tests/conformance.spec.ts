@@ -56,7 +56,7 @@ function errorFor(scenario: EngineConformanceScenario): Error | undefined {
     case 'rate-limit':
       return new Error('429 rate limit reached');
     case 'quota':
-      return new Error('quota allowance reached');
+      return new Error('monthly usage limit reached');
     case 'transient':
       return new Error('503 service unavailable');
     case 'timeout':

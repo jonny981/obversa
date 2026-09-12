@@ -111,6 +111,9 @@ function validatePart(value: AgentResultPart, index: number): AgentResultPart {
     if (typeof value.final !== 'boolean') {
       throw new TypeError(`parts[${index}].final must be a boolean`);
     }
+    if (typeof value.text !== 'string') {
+      throw new TypeError(`parts[${index}].text must be a string`);
+    }
     cloneFrozenJson(value.text);
     return Object.freeze({
       kind: 'assistant',

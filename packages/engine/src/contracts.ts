@@ -84,6 +84,7 @@ export const CLAUDE_SUBAGENT_TOOLS = ['Task', 'Agent'];
 
 export interface AgentRequest {
   prompt: string;
+  purpose?: 'preflight';
   system?: string;
   systemMode?: 'append' | 'replace';
   model?: string;
@@ -127,6 +128,11 @@ export type EngineEventSink = (event: EngineStreamEvent) => void;
 
 export interface Engine {
   readonly name: string;
+  admit?(
+    request: Omit<AgentRequest, 'prompt'>,
+    signal: AbortSignal,
+    expectedSelection?: EngineSelectionRecord,
+  ): Promise<EngineSelectionRecord>;
   run(
     request: AgentRequest,
     onEvent: EngineEventSink,

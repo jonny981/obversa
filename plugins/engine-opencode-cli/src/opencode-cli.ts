@@ -16,6 +16,7 @@ import {
   relative,
   sep,
 } from 'node:path';
+import { isDeepStrictEqual } from 'node:util';
 import {
   EngineError,
   EngineIncompleteResultError,
@@ -42,12 +43,17 @@ import {
 } from '@obversa/engine';
 import {
   DEFAULT_OWNED_COMMAND_LIMITS,
+  OwnedCommandError,
   ownedCommandIdentity,
   resolveCommandExecutable,
   runOwnedCommand,
 } from '@obversa/engine/command';
 
 const SUPPORTED_VERSION = '1.18.23';
+const VERSION_TIMEOUT_MS = 10_000;
+const VERSION_TEARDOWN_MS = 1_000;
+const VERSION_OUTPUT_BYTES = 4_096;
+const OPENCODE_VERSION = /^\d+\.\d+\.\d+$/u;
 const CONTROL_CHARACTER = /[\u0000-\u001f\u007f]/u;
 const STRUCTURED_RESULT_MARKER = 'OBVERSA_STRUCTURED_RESULT_V1\n';
 const CONFIG_INTERPOLATION = /\{(?:env|file):/u;
@@ -959,7 +965,8 @@ function nativeFailure(raw: JsonObject): EngineFailureKind {
     if (/CreditsError|no payment|insufficient balance/iu.test(responseBody)) {
       return 'billing';
     }
-    if (/MonthlyLimitError|UserLimitError/iu.test(responseBody)) return 'quota';
+    if (/MonthlyLimitError/iu.test(responseBody)) return 'quota';
+    if (/UserLimitError/iu.test(responseBody)) return 'rate-limit';
     if (/ModelError/iu.test(responseBody)) return 'model-unavailable';
   }
   if (status === 401) return 'auth';
@@ -968,15 +975,11 @@ function nativeFailure(raw: JsonObject): EngineFailureKind {
   if (status === 404) return 'model-unavailable';
   if (status === 408) return 'timeout';
   if (status === 429) {
-    if (
-      /credit balance|insufficient funds|out of credits|exhausted credit/iu
-        .test(detail)
-    ) {
+    if (/credit balance|insufficient funds|out of credits|exhausted credit/iu.test(detail)) {
       return 'billing';
     }
-    return /quota|allowance|session limit|usage limit/iu.test(detail)
-      ? 'quota'
-      : 'rate-limit';
+    const classified = classifyEngineFailure(new Error(detail));
+    return classified === 'billing' || classified === 'quota' ? classified : 'rate-limit';
   }
   if (status !== undefined && status >= 500) return 'transient';
   return classifyEngineFailure(new Error(detail));
@@ -1080,16 +1083,13 @@ export class OpenCodeCliEngine implements Engine {
   readonly #auth: JsonObject;
   readonly #authRedactions: Readonly<Record<string, string>>;
   readonly #options: OpenCodeCliEngineOptions;
+  #versionObservation: Promise<string> | undefined;
 
   constructor(options: OpenCodeCliEngineOptions) {
     if (typeof options.executable !== 'string' || !isAbsolute(options.executable)) {
       throw new TypeError('OpenCode executable must be an absolute path');
     }
-    try {
-      this.#executable = resolveCommandExecutable(options.executable);
-    } catch {
-      throw new Error(`opencode command not found at ${options.executable}`);
-    }
+    this.#executable = text(options.executable, 'OpenCode executable');
     if (options.version !== SUPPORTED_VERSION) {
       throw new TypeError(`OpenCode CLI version must be ${SUPPORTED_VERSION}`);
     }
@@ -1121,6 +1121,186 @@ export class OpenCodeCliEngine implements Engine {
     });
   }
 
+  async admit(
+    request: Omit<AgentRequest, 'prompt'>,
+    signal: AbortSignal,
+    expectedSelection?: EngineSelectionRecord,
+  ): Promise<EngineSelectionRecord> {
+    if (signal.aborted) throw loopError('aborted', 'OpenCode admission was aborted before start');
+    let normalized: AgentRequest;
+    let selected: EngineSelectionRecord;
+    try {
+      assertNoManagedConfig();
+      const selectedModel = model(request.model);
+      const selectedProvider = providerForModel(selectedModel, this.#identity);
+      const capabilities = requestedCapabilities({ ...request, prompt: '' });
+      if (typeof request.cwd !== 'string' || !isAbsolute(request.cwd)) {
+        throw new TypeError('OpenCode request cwd must be an absolute path');
+      }
+      const cwd = realpathSync(request.cwd);
+      assertNoProjectInstructions(cwd, capabilities);
+      normalized = { ...request, cwd, prompt: '' };
+      const timeout = request.timeoutMs ?? DEFAULT_OWNED_COMMAND_LIMITS.timeoutMs;
+      const grace = request.timeoutGraceMs ?? DEFAULT_OWNED_COMMAND_LIMITS.teardownGraceMs;
+      const output = request.maxOutputBytes ?? DEFAULT_OWNED_COMMAND_LIMITS.maxOutputBytes;
+      const memory = request.maxMemoryBytes ?? DEFAULT_OWNED_COMMAND_LIMITS.maxMemoryBytes;
+      if (!Number.isSafeInteger(timeout) || timeout < 1 || timeout > 2_147_483_647
+        || !Number.isSafeInteger(grace) || grace < 0 || grace > 2_147_483_647 - timeout
+        || !Number.isSafeInteger(output) || output < 0
+        || !Number.isSafeInteger(memory) || memory < 1) {
+        throw new TypeError('OpenCode request command limits are invalid');
+      }
+      ownedCommandIdentity({
+        adapter: 'opencode-cli', runId: request.attempt?.runId,
+        leafId: request.attempt?.leafId, attemptId: request.attempt?.attemptId,
+      });
+      selected = engineSelection({
+        adapter: 'opencode-cli', adapterVersion: this.#version,
+        provider: selectedProvider, modelFamily: this.#identity.modelFamily,
+        model: selectedModel.value, executable: this.#executable, capabilities,
+      });
+      if (expectedSelection !== undefined
+        && !isDeepStrictEqual(engineSelection(expectedSelection), selected)) {
+        throw new TypeError('OpenCode expected selection does not match its configured path and request');
+      }
+      let validationDirectory: string;
+      try {
+        validationDirectory = mkdtempSync(join(tmpdir(), 'lines-opencode-admission-'));
+      } catch {
+        throw loopError(
+          'unknown',
+          'OpenCode admission temporary configuration could not be created',
+        );
+      }
+
+      let validationFailed = false;
+      let validationFailure: unknown;
+      try {
+        buildOpenCodeInvocation(normalized, this.#options, validationDirectory);
+        assertNoManagedConfig();
+      } catch (error) {
+        validationFailed = true;
+        validationFailure = error instanceof TypeError || error instanceof EngineError
+          ? error
+          : loopError(
+              'unknown',
+              'OpenCode admission temporary configuration could not be prepared',
+            );
+      }
+      try {
+        rmSync(validationDirectory, { recursive: true, force: true });
+      } catch {
+        if (!validationFailed) {
+          throw loopError(
+            'unknown',
+            'OpenCode admission temporary configuration could not be removed',
+          );
+        }
+      }
+      if (validationFailed) throw validationFailure;
+    } catch (error) {
+      if (error instanceof EngineError) throw error;
+      const diagnostic = error instanceof Error ? error.message : 'invalid request';
+      throw loopError('invalid-config', scrubCapture(
+        scrubExactValues(diagnostic, { ...this.#authRedactions, ...this.#environment }),
+        { ...this.#environment }, 700,
+      ));
+    }
+    // Check the retained absolute path; never choose another command through PATH.
+    try { resolveCommandExecutable(this.#executable); }
+    catch { throw loopError('missing-cli', 'OpenCode configured executable is missing or not runnable'); }
+    const version = await (this.#versionObservation ??= this.#observeVersion(normalized, signal)
+      .catch((error: unknown) => { this.#versionObservation = undefined; throw error; }));
+    if (signal.aborted) throw loopError('aborted', 'OpenCode admission was aborted');
+    return engineSelection({ ...selected, adapterVersion: version });
+  }
+
+  async #observeVersion(request: AgentRequest, signal: AbortSignal): Promise<string> {
+    let directory: string;
+    try {
+      directory = mkdtempSync(join(tmpdir(), 'lines-opencode-version-'));
+    } catch {
+      throw loopError(
+        'unknown',
+        'OpenCode version temporary configuration could not be created',
+      );
+    }
+
+    let version: string | undefined;
+    let versionFailed = false;
+    let versionFailure: unknown;
+    try {
+      const invocation = buildOpenCodeInvocation(request, this.#options, directory);
+      assertNoManagedConfig();
+      const command = await runOwnedCommand({
+        executable: this.#executable,
+        args: ['--version'],
+        cwd: request.cwd!,
+        env: invocation.environment,
+        inheritParentEnv: false,
+        stdin: '',
+        ...ownedCommandIdentity({
+          adapter: 'opencode-cli', runId: request.attempt?.runId,
+          leafId: request.attempt?.leafId, attemptId: request.attempt?.attemptId,
+        }),
+        timeoutMs: Math.min(request.timeoutMs ?? VERSION_TIMEOUT_MS, VERSION_TIMEOUT_MS),
+        teardownGraceMs: Math.min(request.timeoutGraceMs ?? VERSION_TEARDOWN_MS, VERSION_TEARDOWN_MS),
+        maxOutputBytes: Math.min(request.maxOutputBytes ?? VERSION_OUTPUT_BYTES, VERSION_OUTPUT_BYTES),
+        maxMemoryBytes: request.maxMemoryBytes ?? DEFAULT_OWNED_COMMAND_LIMITS.maxMemoryBytes,
+      }, signal);
+      if (command.aborted || signal.aborted) throw loopError('aborted', 'OpenCode version check was aborted');
+      if (command.timedOut) throw loopError('timeout', 'OpenCode version check timed out');
+      if (command.exitCode !== 0) throw loopError('invalid-config', 'OpenCode version command did not succeed');
+      const observed = new TextDecoder().decode(command.stdout).trim();
+      if (!OPENCODE_VERSION.test(observed)) {
+        throw loopError('invalid-config', 'OpenCode returned an unsupported version format');
+      }
+      if (observed !== SUPPORTED_VERSION) {
+        throw loopError('invalid-config', 'OpenCode observed version does not match its supported version');
+      }
+      version = observed;
+    } catch (error) {
+      versionFailed = true;
+      versionFailure = error;
+    }
+
+    try {
+      rmSync(directory, { recursive: true, force: true });
+    } catch {
+      if (!versionFailed) {
+        throw loopError(
+          'unknown',
+          'OpenCode version temporary configuration could not be removed',
+        );
+      }
+    }
+
+    if (versionFailed) {
+      const error = versionFailure;
+      if (error instanceof EngineError) throw error;
+      if (signal.aborted) throw loopError('aborted', 'OpenCode version check was aborted');
+      if (error instanceof OwnedCommandError) {
+        if (error.code === 'INVALID_EXECUTABLE') {
+          throw loopError('missing-cli', 'OpenCode configured executable could not start');
+        }
+        if (error.code === 'SPAWN_FAILED') {
+          try { resolveCommandExecutable(this.#executable); }
+          catch { throw loopError('missing-cli', 'OpenCode configured executable is missing or not runnable'); }
+          throw loopError('unknown', 'OpenCode version process could not start');
+        }
+        if (error.code === 'OUTPUT_LIMIT' || error.code === 'INVALID_COMMAND') {
+          throw loopError('invalid-config', 'OpenCode version command exceeded or rejected its limits');
+        }
+      }
+      if (error instanceof TypeError) {
+        throw loopError('invalid-config', 'OpenCode version configuration is invalid');
+      }
+      throw loopError('unknown', 'OpenCode version check could not complete');
+    }
+
+    return version!;
+  }
+
   async run(
     request: AgentRequest,
     onEvent: EngineEventSink,
@@ -1129,19 +1309,9 @@ export class OpenCodeCliEngine implements Engine {
     if (signal.aborted) {
       throw loopError('aborted', 'OpenCode attempt was aborted before start');
     }
-    assertNoManagedConfig();
-    const selectedModel = model(request.model);
-    const selectedProvider = providerForModel(selectedModel, this.#identity);
-    const capabilities = requestedCapabilities(request);
-    const requested: EngineSelectionRecord = engineSelection({
-      adapter: 'opencode-cli',
-      adapterVersion: this.#version,
-      provider: selectedProvider,
-      modelFamily: this.#identity.modelFamily,
-      model: selectedModel.value,
-      executable: this.#executable,
-      capabilities,
-    });
+    const { prompt: _prompt, ...staticRequest } = request;
+    const requested = await this.admit(staticRequest, signal);
+    const capabilities = requested.capabilities;
     if (typeof request.cwd !== 'string' || !isAbsolute(request.cwd)) {
       throw new TypeError('OpenCode request cwd must be an absolute path');
     }
@@ -1396,6 +1566,16 @@ export class OpenCodeCliEngine implements Engine {
             : {}),
         raw: cloneFrozenJson(accumulator.frames),
       });
+    } catch (error) {
+      if (error instanceof OwnedCommandError && error.code === 'INVALID_EXECUTABLE') {
+        throw loopError('missing-cli', 'OpenCode configured executable could not start');
+      }
+      if (error instanceof OwnedCommandError && error.code === 'SPAWN_FAILED') {
+        try { resolveCommandExecutable(this.#executable); }
+        catch { throw loopError('missing-cli', 'OpenCode configured executable is missing or not runnable'); }
+        throw loopError('unknown', 'OpenCode model process could not start');
+      }
+      throw error;
     } finally {
       rmSync(directory, { recursive: true, force: true });
     }

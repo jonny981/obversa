@@ -107,6 +107,12 @@ function stub(source: string): {
   writeFileSync(
     bin,
     source
+      .replace('#!/usr/bin/env node\n', `#!/usr/bin/env node
+if (process.argv.length === 3 && process.argv[2] === '--version') {
+  process.stdout.write('codex-cli 0.153.2\\n');
+  process.exit(0);
+}
+`)
       .replaceAll(ORPHAN_PID_PATH, JSON.stringify(orphanPidPath))
       .replaceAll(FINAL_MARKER_PATH, JSON.stringify(finalMarkerPath)),
   );
