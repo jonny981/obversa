@@ -257,8 +257,8 @@ What it printed, and what each of the five engine calls was, are on the
 | `resumeSupervisedRun` | Reopens one recorded pause: a node pause by `position` and `pauseEventId`, or a preflight pause by `preflightEventId`. |
 | `readSupervisedRunStatus` | Reads a run's recorded progress and worker liveness from any process with the same storage settings. |
 | `SupervisedRunHandle` | `done`, `status()` and `stop()` for a run. |
-| `SupervisedRunError` | A runner failure with a typed code. |
-| `SupervisedRunOptions`, `ResumeSupervisedRunOptions`, `SupervisedRunStatus`, `SupervisedRunUsage` | The option and status types. |
+| `SupervisedRunError` | A runner failure with a typed code. `done` can also resolve to the graph's own terminal failure, such as `PREFLIGHT_FAILED` when a lane has no admissible seat. |
+| `SupervisedRunOptions`, `ResumeSupervisedRunOptions`, `ResumePreflightSupervisedRunOptions`, `SupervisedRunStatus`, `SupervisedRunUsage` | The option and status types; the preflight resume options carry the run id and the `preflightEventId` alone. |
 
 ## Gotchas
 

@@ -314,6 +314,16 @@ configuration and no prompt.
   `RESUME_EVENT_MISMATCH`, and the message names both ids.
 - **Checks before the worker launches spend no run budget.** Checks inside
   the worker do.
+- **A lane with no admissible seat ends the run.** When every target of a
+  lane is excluded or blocked by its checks, the worker returns
+  `PREFLIGHT_FAILED` and `done` resolves to `fail` with that code. It is
+  terminal: nothing was dispatched and there is no pause to resume from.
+- **A check the worker died in the middle of stays open.** The next worker
+  refuses with `PROTOCOL` until the run's owner has verified the old
+  process is gone and closed the probe with `interruptRunPreflight` from
+  `@obversa/runtime`, which records it as interrupted and writes a pause
+  the next resume takes. Do not call it while the old engine call may
+  still be running.
 
 If the pause event itself cannot be written, the run returns a failure
 with `RUN_STORAGE` and no resumable pause exists. If the pause was written

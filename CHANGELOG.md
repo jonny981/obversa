@@ -26,7 +26,11 @@ engine and memory packages track their own versions independently.
   failed check pauses the run with `PREFLIGHT_PAUSED` before any work;
   `resume({ preflightEventId })` and `resumeSupervisedRun` with
   `preflightEventId` reopen that exact pause, repeat the static checks and
-  reuse live receipts that still apply. `readRunPreflight` reads the record.
+  reuse live receipts that still apply. `readRunPreflight` reads the record,
+  and `interruptRunPreflight` closes a check the process died in the middle
+  of, once the caller has verified the old worker is gone. When every target
+  of a lane is excluded or blocked, the run ends with `PREFLIGHT_FAILED`, a
+  terminal failure with no pause to resume from.
 - `Engine.admit` on the engine contract: an engine reports the identity it
   will run under, and refuses when it would now run as something else.
   `AgentRequest.purpose: 'preflight'` marks a live check.
@@ -60,6 +64,12 @@ engine and memory packages track their own versions independently.
   effective identity is evidence in the record and never widens the scope.
   An old auth record with no provider recovers one from its lane, and an
   ambiguous recovery refuses before work with `ENGINE_IDENTITY_UNRESOLVED`.
+- `LANE_DEAD_FAILURES` from `@obversa/engine` now includes `quota`, and the
+  wording rules that classify a provider's message changed with it: usage
+  limit, allowance and session limit wording is a `rate-limit`, which
+  clears in minutes; monthly usage limit and out-of-credits wording is a
+  `quota`, which is an allowance gone for hours or longer and retires the
+  provider and model.
 - Usage that was not reported is unknown, not zero; usage from checks is
   recorded separately from usage from nodes. Preflight checks before a
   worker launches spend no run budget; checks inside a worker do.

@@ -255,9 +255,15 @@ seat that was selected, never on an identity the engine claimed in its
 output. An old auth record with no provider recovers one from its lane,
 and an ambiguous recovery refuses before any work with
 `ENGINE_IDENTITY_UNRESOLVED`. Later dispatches skip whatever was retired.
-If every declared target is dead, the executor records `ENGINE_UNAVAILABLE`
-as a normal node failure so the graph can retry, fail or recover in its
-usual way.
+During a run, if every declared target of a lane is dead, the executor
+records `ENGINE_UNAVAILABLE` as a normal node failure so the graph can
+retry, fail or recover in its usual way. Before the first step, when the
+plan carries a preflight policy and every target of a lane is excluded or
+blocked by its checks, the run ends instead with `PREFLIGHT_FAILED`: a
+terminal failure written to the record as `preflight:failed`, returned by
+`run()` as `{ kind: 'fail', code: 'PREFLIGHT_FAILED' }`, and still terminal
+on a fresh executor. Nothing was dispatched, and there is no pause to
+resume from.
 
 An action-policy wait records `node-paused` with its reason and request.
 A denied action records `node-failed` with `DENIED`; an aborted attempt,
@@ -304,6 +310,22 @@ that still apply are reused, and a stale id is refused with
 the saved plan govern recovery; a change in the live binding does not
 rewrite an earlier record.
 
+## When a check was interrupted
+
+A live check is an engine call, and the process can die in the middle of
+it. The record then holds an open probe, and a fresh executor's `run()`
+fails with `PROTOCOL`, naming the probe and telling you what to do: verify
+that the old worker and its engine process are gone, then call
+`interruptRunPreflight(storage, runId)`. It closes the open probe as
+`interrupted` with one expected-revision append, writes a preflight pause,
+and returns that pause, whose `preflightEventId` the next resume takes; it
+returns `null` when no probe is open, and the existing pause when one is
+already recorded. It never retries and never calls an engine.
+
+Call it only when you own the run and have verified the worker is gone. If
+the old engine call is still alive, the record says interrupted while the
+call keeps spending, and whatever that call would have proved is lost.
+
 ## Gotchas
 
 - **A check is not a run.** The live check is one tool-free call with no
@@ -311,13 +333,16 @@ rewrite an earlier record.
 - **An engine without `admit` is `unsupported`,** and the lane's
   `unsupportedStatic` policy says whether that blocks the run or is allowed.
   Unsupported is never a success receipt.
-- **Checks need a scratch directory.** When the plan carries a preflight
-  policy, `createGraphExecutor` requires `preflightScratchDirectory`, an
-  absolute, real, normalized path; the option is optional in the type and
-  `run()` fails with `INVALID_PREFLIGHT_CONFIG` when the plan needs it and
-  it is missing. The policy itself must name every resolved lane once and
-  keep `timeoutMs` between 1 and 2147483647 milliseconds, or
-  `resolveGraphPlan` rejects it before the plan is frozen.
+- **Checks need a scratch directory, and the constructor is what refuses.**
+  When the plan carries a preflight policy, `createGraphExecutor` requires
+  `preflightScratchDirectory`, an absolute, real, normalized path. The
+  option is optional in the type, so `await createGraphExecutor(...)`
+  rejects with a `GraphExecutionError` whose code is
+  `INVALID_PREFLIGHT_CONFIG` when the plan needs it and it is missing or
+  malformed. It is the construction that rejects, not `run()`, so the
+  handling goes around the construction. The policy itself must name every
+  resolved lane once and keep `timeoutMs` between 1 and 2147483647
+  milliseconds, or `resolveGraphPlan` rejects it before the plan is frozen.
 - **Usage from checks is separate from usage from nodes,** and missing
   usage is not zero.
 
@@ -326,4 +351,5 @@ rewrite an earlier record.
 The file is `examples/preflight-executor.ts`, with its engine and bindings
 in `examples/preflight-host.mjs`. The executor's options and result types
 are exported by `@obversa/runtime`; `readRunPreflight` reads the preflight
-record of a stored run.
+record of a stored run without touching an engine, and
+`interruptRunPreflight` closes a check the process died in the middle of.
