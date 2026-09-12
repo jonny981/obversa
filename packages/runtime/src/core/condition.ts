@@ -23,7 +23,6 @@ import type {
 import type { EngineRef } from '../engines/engine.js';
 import { isInfrastructureError, LoopError } from './errors.js';
 import { resolveEnv } from './env-overlay.js';
-import { revisionRequest } from './feedback.js';
 import { setLabel, setMeta } from './describe.js';
 import { assertBudget } from './budget.js';
 import { resolveSystem, type AgentDef } from './agent.js';
@@ -846,15 +845,22 @@ export function gateJob(
       iteration: ctx.iteration,
       result: r,
     });
+    // Built here rather than through `revisionRequest`, which lives in
+    // feedback.ts and imports this module; the shape is the public
+    // `RevisionRequest`, with the rerun a targeted revision always has.
     const outcome: Outcome = !r.met && opts.target !== undefined
-      ? revisionRequest(
-          {
+      ? {
+          status: 'fail',
+          confidence: r.confidence,
+          summary: r.reason,
+          data: r.output,
+          revision: {
             target: opts.target,
             reason: r.reason,
             findings: [{ evidence: r.output ?? r.reason, severity: 'block' }],
+            rerun: 'target-and-dependents',
           },
-          { confidence: r.confidence, data: r.output },
-        )
+        }
       : {
           status: r.met ? 'pass' : 'fail',
           confidence: r.confidence,
