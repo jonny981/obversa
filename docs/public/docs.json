@@ -52,6 +52,7 @@
           "workflows/feature-team",
           "workflows/tournament",
           "workflows/command-kickback",
+          "workflows/approval",
           "workflows/team-conversation",
           "workflows/offline-review",
           "workflows/safe-change",

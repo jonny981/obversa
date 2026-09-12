@@ -1,0 +1,144 @@
+---
+title: "A person decides"
+description: "Put a question to a person as a step: a yes passes, a no goes back to the step that owns the fix with the note as the finding, and with nobody answering the run pauses and carries on from the answer."
+---
+
+Some steps are not the agent's to decide. Ship this change? Is this the
+migration we meant? On a team those go to a person, the work waits, and it
+carries on when the answer comes back. `approval` is that step. It asks one
+question through the run's callbacks client and does one of three things: a
+yes passes the step; a no goes back to the step that owns the fix with the
+person's note as the finding, and the work comes round again; and with
+nobody answering, the run pauses with the question pending and, when it
+runs again with the same client, carries on from the answer.
+
+## The file
+
+Everything here runs offline. The writer is a small function that leaves
+the header row out once, so the refusal has something to send back; in a
+real team it is an agent seat. The person answers from this file: in a real
+team the answer arrives through the callbacks client, from a surface in a
+browser, another agent or a service.
+
+```ts
+/**
+ * A person decides.
+ *
+ * The last step of a delivery is a question to a person: ship this change?
+ * `approval` asks it through the run's callbacks client. A yes passes the
+ * step. A no goes back to the step that owns the fix with the person's note
+ * as the finding, and the work comes round again. With nobody answering, the
+ * run pauses with the question pending and carries on, when it runs again
+ * with the same client, from the answer. This runs offline, with no model and
+ * no network: the writer is a small function that leaves the header row out
+ * once, and the person answers from this file.
+ */
+import { approval, fnJob, pipeline, run, type CallbackRequest } from '@obversa/runtime';
+
+const analyse = fnJob('analyse', () => 'the ticket asks for a report export with a header row');
+
+/** The writer. In a real team this is an agent; here it forgets the header once. */
+let implementRuns = 0;
+const implement = fnJob('implement', () => {
+  implementRuns += 1;
+  return implementRuns === 1 ? 'report.csv, rows only' : 'report.csv, header and rows';
+});
+
+/**
+ * The person. The question is about what came before (the outcome of
+ * `implement`), so a second attempt is a new question. In a real team the
+ * answer arrives through the callbacks client; here it is decided in place.
+ */
+const decisions: string[] = [];
+const approve = approval('approve', {
+  question: 'Ship this change?',
+  target: 'implement',
+  answer: (request: CallbackRequest) => {
+    const approved = JSON.stringify(request.input).includes('header');
+    decisions.push(approved ? 'yes' : 'no');
+    return approved
+      ? { approved: true }
+      : { approved: false, note: 'the ticket asked for a header row' };
+  },
+});
+
+export const shipIt = pipeline(
+  'ship-it',
+  [
+    { name: 'analyse', job: analyse },
+    { name: 'implement', job: implement },
+    { name: 'approve', job: approve },
+  ],
+  { maxKickbacks: 1 },
+);
+
+const result = await run(shipIt);
+console.log(JSON.stringify({
+  status: result.outcome.status,
+  implementRuns,
+  decisions,
+}, null, 2));
+
+/**
+ * Part of the documentation proof: it must fail when the behaviour it shows
+ * stops happening. A refusal that quietly stopped sending the work back would
+ * still print a passing run, and `implement` running once is the tell.
+ */
+const faults: string[] = [];
+if (result.outcome.status !== 'pass') faults.push(`the run ended ${result.outcome.status}`);
+if (implementRuns !== 2) faults.push(`implement ran ${implementRuns} time(s), so the refusal did not send the work back exactly once`);
+if (decisions.join(',') !== 'no,yes') faults.push(`the person decided [${decisions.join(', ')}], not a no and then a yes`);
+if (faults.length) {
+  for (const fault of faults) console.error(fault);
+  process.exitCode = 1;
+}
+```
+
+## What it printed
+
+```json
+{
+  "status": "pass",
+  "implementRuns": 2,
+  "decisions": [
+    "no",
+    "yes"
+  ]
+}
+```
+
+The person said no to the first attempt and yes to the second. `implement`
+ran twice: the refusal went back there as a revision request with the note
+as its one finding, the writer ran again with the note in hand, and the
+question was asked again about the new attempt.
+
+## How the question is asked
+
+- **The question is about what came before.** By default the request's
+  input is the outcomes of the steps this one depends on, so a change
+  upstream after a kickback is a new question and the same question about
+  the same thing is the same request. Give `input` to say otherwise.
+- **A no needs a home.** With `target`, a refusal goes back to that step
+  with the note as the finding. Without it, a refusal fails the step with
+  the note as its summary.
+- **Nobody answering is a pause, not a failure.** Without `answer`, the step
+  posts the request and returns `paused` with the request as its data. A
+  router claims the request and submits `{ approved, note? }`; run the job
+  again with the same client and the step finds the answer in the client's
+  history.
+- **The client is the run's.** `run` takes `callbacks`; every job sees it as
+  `ctx.callbacks`. The default is one in memory that lives for the process.
+  Pass a stored client so a paused run finds its answers after a restart.
+
+## Things that catch people out
+
+- **The in-memory client forgets.** A run that must survive a process exit
+  needs the stored client. See [callback gates](/reviewing/callback-gates).
+- **An approval bound to bytes is a different tool.** `approval` asks about
+  outcomes. For an approval that must name the exact files it approved,
+  use the proof-bound gate in [proof acceptance](/reviewing/proof-acceptance).
+
+## Source
+
+The file is `examples/approval.ts`. `approval`, `fnJob`, `pipeline` and
+`run` are exported by `@obversa/runtime`.
