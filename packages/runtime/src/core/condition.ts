@@ -23,6 +23,7 @@ import type {
 import type { EngineRef } from '../engines/engine.js';
 import { isInfrastructureError, LoopError } from './errors.js';
 import { resolveEnv } from './env-overlay.js';
+import { revisionRequest } from './feedback.js';
 import { setLabel, setMeta } from './describe.js';
 import { assertBudget } from './budget.js';
 import { resolveSystem, type AgentDef } from './agent.js';
@@ -813,7 +814,20 @@ export function agentCheck(config: AgentCheckConfig): Condition {
  * (`gateJob('review', agentCheck(...))`). The condition's diagnostic `output`
  * rides `Outcome.data`, so it survives the Job boundary.
  */
-export function gateJob(label: string, condition: ConditionInput): Job {
+export function gateJob(
+  label: string,
+  condition: ConditionInput,
+  opts: {
+    /**
+     * The upstream node that owns the fix. When the condition is not met, the
+     * outcome carries a revision request to that node with the condition's
+     * evidence as the finding, so a red test suite goes straight back to the
+     * step that must fix it, with the output in hand and no agent in between.
+     * The enclosing `dag` routes it exactly as it routes a review panel's.
+     */
+    target?: string;
+  } = {},
+): Job {
   const cond = toCondition(condition);
   return setMeta(async (ctx) => {
     ctx.emit({
@@ -832,12 +846,21 @@ export function gateJob(label: string, condition: ConditionInput): Job {
       iteration: ctx.iteration,
       result: r,
     });
-    const outcome: Outcome = {
-      status: r.met ? 'pass' : 'fail',
-      confidence: r.confidence,
-      summary: r.reason,
-    };
-    if (r.output !== undefined) outcome.data = r.output;
+    const outcome: Outcome = !r.met && opts.target !== undefined
+      ? revisionRequest(
+          {
+            target: opts.target,
+            reason: r.reason,
+            findings: [{ evidence: r.output ?? r.reason, severity: 'block' }],
+          },
+          { confidence: r.confidence, data: r.output },
+        )
+      : {
+          status: r.met ? 'pass' : 'fail',
+          confidence: r.confidence,
+          summary: r.reason,
+        };
+    if (r.output !== undefined && outcome.data === undefined) outcome.data = r.output;
     ctx.emit({
       kind: 'job:end',
       ts: Date.now(),
