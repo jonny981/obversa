@@ -23,7 +23,7 @@ import type {
 import type { EngineRef } from '../engines/engine.js';
 import { isInfrastructureError, LoopError } from './errors.js';
 import { resolveEnv } from './env-overlay.js';
-import { setLabel, setMeta } from './describe.js';
+import { jobMeta, setLabel, setMeta } from './describe.js';
 import { assertBudget } from './budget.js';
 import { resolveSystem, type AgentDef } from './agent.js';
 import { truncate } from './text.js';
@@ -913,14 +913,22 @@ export function commandJob(
 
 function splitCommand(command: string | readonly string[]): [string, ...string[]] {
   if (typeof command === 'string' && /["']/.test(command)) {
-    throw new TypeError(
-      `commandJob: "${command}" has a quote in it; pass the command as an array, one argument per entry`,
-    );
+    throw new LoopError({
+      code: 'VALIDATION',
+      message: `commandJob: "${command}" has a quote in it; pass the command as an array, one argument per entry`,
+    });
+  }
+  if (typeof command === 'string' && /[|&;<>$`()]/.test(command)) {
+    throw new LoopError({
+      code: 'VALIDATION',
+      message: `commandJob: "${command}" has shell syntax in it, and nothing here runs through a shell; `
+        + 'give one command as an array, one argument per entry, or run a script',
+    });
   }
   const parts = typeof command === 'string' ? command.trim().split(/\s+/) : [...command];
   const [executable, ...args] = parts;
   if (executable === undefined || executable === '') {
-    throw new TypeError('commandJob needs a command to run');
+    throw new LoopError({ code: 'VALIDATION', message: 'commandJob needs a command to run' });
   }
   return [executable, ...args];
 }
@@ -953,12 +961,29 @@ export function passed(name: string): Condition {
 /**
  * Met when the named dependency ran and failed: the other branch of `passed`.
  * A dependency that never got to decide (blocked by a failure upstream, or
- * aborted) meets neither, so a branch runs only on a decision.
+ * aborted) meets neither, so a branch runs only on a decision. The deciding
+ * node must be `optional: true`: a required node's failure blocks its
+ * dependents before any `when` runs, so a branch on `failed` would never be
+ * reached. `dag` refuses the graph at build time when it is not.
  */
 export function failed(name: string): Condition {
-  return setLabel(async (ctx) => {
+  const cond: Condition = async (ctx) => {
     const outcome = needOutcome(ctx, name, 'failed');
     const met = outcome.status === 'fail';
     return { met, reason: `${name} ${outcome.status}` };
-  }, `failed ${name}`);
+  };
+  setMeta(cond, { kind: 'condition', name: 'failed', need: name });
+  return setLabel(cond, `failed ${name}`);
+}
+
+/**
+ * The dependency a `failed(name)` condition decides on, for the graph
+ * builder's check that the node is optional. Undefined for any other input.
+ */
+export function failedDependencyOf(input: ConditionInput): string | undefined {
+  if (typeof input !== 'function') return undefined;
+  const meta = jobMeta(input as unknown as Job);
+  return meta?.kind === 'condition' && meta.name === 'failed' && typeof meta.need === 'string'
+    ? meta.need
+    : undefined;
 }

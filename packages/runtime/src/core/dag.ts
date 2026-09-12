@@ -26,7 +26,7 @@ import type {
   Workspace,
 } from './types.js';
 import { childContext } from './context.js';
-import { toCondition } from './condition.js';
+import { failedDependencyOf, toCondition } from './condition.js';
 import { setMeta, jobMeta, describeConditions } from './describe.js';
 import {
   isRepo,
@@ -120,6 +120,16 @@ export function dag(config: DagConfig): Job {
         });
       }
       edges.push([dep, name]); // dep must precede name
+    }
+    // A branch on `failed(x)` is reached only when x is optional: a required
+    // x that fails blocks this node before its `when` is ever read.
+    const decidedBy = node.when === undefined ? undefined : failedDependencyOf(node.when);
+    if (decidedBy !== undefined && nodes.get(decidedBy)?.optional !== true) {
+      throw new LoopError({
+        code: 'CONFIG',
+        message: `dag "${config.name}": node "${name}" branches on failed("${decidedBy}"), `
+          + `so "${decidedBy}" must be optional: true; a required node that fails blocks "${name}" before its when runs`,
+      });
     }
   }
   let order: string[];

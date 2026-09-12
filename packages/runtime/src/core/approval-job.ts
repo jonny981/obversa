@@ -3,15 +3,17 @@
  * callbacks client and does one of three things: passes when the answer is
  * yes, sends the work back (or fails) with the person's note when it is no,
  * and pauses the run with the request pending when nobody has answered yet.
- * A run started again with the same client finds the answer and carries on.
+ * A run started again with the same client, or the stored client over the
+ * same store, finds the answer and carries on.
  */
 
-import { directRouter } from '../callback/client.js';
+import type { CallbackEvent } from '../callback/client.js';
 import { createCallbackGate, type CallbackRequest } from '../callback/gate.js';
 import type { JsonObject, JsonValue } from '../graph/value.js';
 import { setMeta } from './describe.js';
 import { LoopError } from './errors.js';
-import type { Job, JobContext, Outcome } from './types.js';
+import { redactSecrets } from './redact.js';
+import type { Job, JobContext, Outcome, RunCallbacks } from './types.js';
 
 /** The answer a person gives: yes or no, and a note when there is one. */
 export interface ApprovalAnswer {
@@ -71,20 +73,37 @@ function toAnswer(response: JsonValue): ApprovalAnswer {
   };
 }
 
-function answerTo(ctx: JobContext, requestId: string): ApprovalAnswer | undefined {
-  const events = ctx.callbacks!.history(requestId);
-  for (let i = events.length - 1; i >= 0; i -= 1) {
-    const event = events[i]!;
-    if (event.kind === 'callback-submitted') return toAnswer(event.response);
+type RequestState = 'absent' | 'pending' | 'claimed' | 'answered' | 'superseded';
+
+/** Fold a request's history into its state and its answer, when it has one. */
+function stateOf(events: readonly CallbackEvent[]): { state: RequestState; answer?: ApprovalAnswer } {
+  let state: RequestState = 'absent';
+  let answer: ApprovalAnswer | undefined;
+  for (const event of events) {
+    switch (event.kind) {
+      case 'callback-requested': state = 'pending'; break;
+      case 'callback-claimed': state = 'claimed'; break;
+      case 'callback-released': state = 'pending'; break;
+      case 'callback-submitted': state = 'answered'; answer = toAnswer(event.response); break;
+      case 'callback-superseded': state = 'superseded'; break;
+      case 'callback-rejected': break;
+    }
   }
-  return undefined;
+  return answer === undefined ? { state } : { state, answer };
 }
 
 export function approval(label: string, opts: ApprovalOptions): Job {
   const job: Job = async (ctx) => {
     const path = [...ctx.path];
     ctx.emit({ kind: 'job:start', ts: Date.now(), path, label, timeoutMs: ctx.timeoutMs });
-    const outcome = await decide(ctx, label, opts);
+    let outcome: Outcome;
+    try {
+      outcome = await decide(ctx, label, opts);
+    } catch (e) {
+      const error = LoopError.from(e, { code: 'BODY', phase: 'body', path: ctx.path, iteration: ctx.iteration });
+      outcome = { status: 'fail', summary: error.message, error };
+      ctx.emit({ kind: 'error', ts: Date.now(), path, message: error.message, code: error.code });
+    }
     ctx.emit({ kind: 'job:end', ts: Date.now(), path, label, outcome });
     return outcome;
   };
@@ -97,7 +116,7 @@ export function approval(label: string, opts: ApprovalOptions): Job {
 }
 
 async function decide(ctx: JobContext, label: string, opts: ApprovalOptions): Promise<Outcome> {
-  const client = ctx.callbacks;
+  const client: RunCallbacks | undefined = ctx.callbacks;
   if (client === undefined) {
     throw new LoopError({
       code: 'VALIDATION',
@@ -111,37 +130,42 @@ async function decide(ctx: JobContext, label: string, opts: ApprovalOptions): Pr
     responseSchema: RESPONSE_SCHEMA,
     input: opts.input ?? aboutOf(ctx),
   });
-  let answer = answerTo(ctx, request.requestId);
+  let { state, answer } = stateOf(await client.history(request.requestId));
   if (answer === undefined) {
-    client.post(request);
-    if (opts.answer === undefined) {
-      return { status: 'paused', summary: `waiting for a person: ${opts.question}`, data: request };
+    // The newest post is the live question: it re-opens this request if an
+    // earlier question superseded it, and supersedes the others.
+    await client.post(request);
+    ({ state, answer } = stateOf(await client.history(request.requestId)));
+    if (answer === undefined && state !== 'pending' && state !== 'claimed') {
+      return {
+        status: 'fail',
+        summary: `the question "${opts.question}" is not pending and not answered after it was asked (${state}); nobody can answer it`,
+        data: request,
+      };
     }
-    const respond = opts.answer;
-    const submitted = await directRouter(
-      client,
-      request,
-      `${label}:answer`,
-      async (asked) => (await respond(asked)) as unknown as JsonObject,
-    );
-    if (!submitted.ok) {
-      return { status: 'fail', summary: `the answer to "${opts.question}" was refused: ${submitted.reason}` };
-    }
-    answer = toAnswer(submitted.response);
+  }
+  if (answer === undefined && opts.answer !== undefined) {
+    answer = await answerInProcess(client, request, `${label}:answer`, opts.answer);
+  }
+  if (answer === undefined) {
+    return { status: 'paused', summary: `waiting for a person: ${opts.question}`, data: request };
   }
   if (answer.approved) {
     return { status: 'pass', summary: `approved: ${opts.question}`, data: answer };
   }
-  const note = typeof answer.note === 'string' && answer.note !== '' ? answer.note : `refused: ${opts.question}`;
+  const note = typeof answer.note === 'string' && answer.note !== ''
+    ? redactSecrets(answer.note)
+    : `refused: ${opts.question}`;
+  const scrubbed: ApprovalAnswer = { approved: false, note };
   if (opts.target === undefined) {
-    return { status: 'fail', summary: note, data: answer };
+    return { status: 'fail', summary: note, data: scrubbed };
   }
   // The public `RevisionRequest` shape, built here for the same reason
   // `gateJob` builds its own: feedback.ts imports the condition module.
   return {
     status: 'fail',
     summary: note,
-    data: answer,
+    data: scrubbed,
     revision: {
       target: opts.target,
       reason: note,
@@ -149,4 +173,35 @@ async function decide(ctx: JobContext, label: string, opts: ApprovalOptions): Pr
       rerun: 'target-and-dependents',
     },
   };
+}
+
+/** Claim the question for the in-process responder, ask it, and submit its answer. */
+async function answerInProcess(
+  client: RunCallbacks,
+  request: CallbackRequest,
+  routerId: string,
+  respond: NonNullable<ApprovalOptions['answer']>,
+): Promise<ApprovalAnswer> {
+  const claim = await client.claim(request.requestId, routerId);
+  if (!claim.ok) {
+    throw new LoopError({
+      code: 'VALIDATION',
+      message: `the question "${request.decisionText}" could not be claimed to answer it (${claim.kind})`,
+    });
+  }
+  const response = await respond(request);
+  const submitted = await client.submit(
+    request.requestId,
+    claim.claimToken,
+    routerId,
+    request.digest,
+    response as unknown as JsonObject,
+  );
+  if (!submitted.ok) {
+    throw new LoopError({
+      code: 'VALIDATION',
+      message: `the answer to "${request.decisionText}" was refused: ${submitted.reason}`,
+    });
+  }
+  return toAnswer(submitted.response);
 }

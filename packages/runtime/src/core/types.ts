@@ -22,6 +22,14 @@ import type { Budget } from './budget.js';
 import type { EnvHandle, Environment } from '../env/environment.js';
 import type { JsonValue, RunBrief } from '../graph/value.js';
 import type { CallbackClient } from '../callback/client.js';
+import type { StoredCallbackClient } from '../callback/stored-client.js';
+
+/**
+ * The client a run's questions go through: the in-memory client, or the
+ * stored client whose questions survive a process exit. Every method of the
+ * stored client is awaited; a step that asks awaits both shapes alike.
+ */
+export type RunCallbacks = CallbackClient | Readonly<StoredCallbackClient>;
 
 /** Terminal disposition of a `Job`. */
 export type OutcomeStatus =
@@ -168,7 +176,7 @@ export interface JobContext {
    * an outside router, and where the answer is found again on a resume. Every
    * run has one; pass `callbacks` to `run` to keep it across runs.
    */
-  readonly callbacks?: CallbackClient;
+  readonly callbacks?: RunCallbacks;
   /** Where this job's code lives — the working dir and branch (the substrate). */
   readonly workspace: Workspace;
   /** The running environment for this workspace, when one is up (gate target). */

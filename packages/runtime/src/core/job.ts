@@ -483,6 +483,20 @@ export { kickback, revisionRequest };
  */
 export type FnJobResult = Outcome | string | void;
 
+const OUTCOME_STATUSES = new Set(['pass', 'fail', 'aborted', 'exhausted', 'paused']);
+
+function isOutcome(value: unknown): value is Outcome {
+  return typeof value === 'object' && value !== null
+    && OUTCOME_STATUSES.has((value as { status?: unknown }).status as string);
+}
+
+function describeReturn(value: unknown): string {
+  if (typeof value === 'object' && value !== null) {
+    return `an object with status ${JSON.stringify((value as { status?: unknown }).status)}`;
+  }
+  return `a ${typeof value}`;
+}
+
 export function fnJob(
   label: string,
   fn: (ctx: JobContext) => FnJobResult | Promise<FnJobResult>,
@@ -499,11 +513,18 @@ export function fnJob(
     let outcome: Outcome;
     try {
       const returned = await fn(ctx);
-      outcome = returned === undefined
-        ? { status: 'pass', summary: label }
-        : typeof returned === 'string'
-          ? { status: 'pass', summary: returned }
-          : returned;
+      if (returned === undefined) {
+        outcome = { status: 'pass', summary: label };
+      } else if (typeof returned === 'string') {
+        outcome = { status: 'pass', summary: returned };
+      } else if (isOutcome(returned)) {
+        outcome = returned;
+      } else {
+        throw new LoopError({
+          code: 'VALIDATION',
+          message: `fnJob "${label}" returned ${describeReturn(returned)}, which is not an outcome, a string or nothing`,
+        });
+      }
     } catch (e) {
       const error = LoopError.from(e, {
         code: 'BODY',

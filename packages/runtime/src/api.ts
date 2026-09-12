@@ -374,6 +374,7 @@ export {
   type AgentCheckConfig,
 } from './core/condition.js';
 export { approval, type ApprovalAnswer, type ApprovalOptions } from './core/approval-job.js';
+export type { RunCallbacks } from './core/types.js';
 export type {
   NoProgressConfig,
   NoProgressInput,

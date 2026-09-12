@@ -28,9 +28,16 @@ engine and memory packages track their own versions independently.
   passes, a no goes back to `target` with the note as the finding (or fails
   the step with the note), and no answer pauses the run with the request
   pending. Run again with the same client, the step finds the answer.
-- `run` takes `callbacks`, the client the run's questions go through, and
-  every job sees it as `ctx.callbacks`. The default is one in memory that
-  lives for the process.
+- `run` takes `callbacks`, the client the run's questions go through: the
+  in-memory client or the stored client (`RunCallbacks`), and every job sees
+  it as `ctx.callbacks`. The default is one in memory that lives for the
+  process; the stored client is the one whose questions survive a process
+  exit.
+- A callback request posted again after being superseded is live again: the
+  newest post is always the question a router can answer.
+- `dag` refuses a `when: failed(x)` on a node whose `x` is not
+  `optional: true` at build time, because a required node that fails blocks
+  its dependents before any `when` runs.
 
 - A dag node accepts `needs` as one name or a list, and optional `desc` and
   `gate` sentences that reach the rendered plan, the `dag:node` record and
