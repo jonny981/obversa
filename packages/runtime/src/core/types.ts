@@ -191,6 +191,14 @@ export interface JobContext {
   readonly timeoutMs?: number;
   /** Extra hard-timeout window after `timeoutMs` for accepting a completed turn. */
   readonly timeoutGraceMs?: number;
+  /**
+   * Inside a `dag` node: the outcomes of the nodes this node `needs`, by the
+   * same names its config uses (`needs: ['test']` gives `ctx.needs.test`). A
+   * branch's `when` reads the deciding node's outcome here, so a command can
+   * choose the path the graph takes next with no agent deciding. Undefined
+   * outside a dag node.
+   */
+  readonly needs?: Readonly<Record<string, Outcome>>;
   /** The previous body outcome in the enclosing loop (used by `review`/gates). */
   readonly lastOutcome?: Outcome;
   /** The most recent failed-review outcome, so a restart can act on it. */

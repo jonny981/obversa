@@ -20,6 +20,8 @@ export interface ContextOverride {
   lastOutcome?: Outcome;
   lastReview?: Outcome;
   lastGate?: ConditionResult;
+  /** The outcomes of a dag node's `needs`, set by the dag for that node only. */
+  needs?: Readonly<Record<string, Outcome>>;
   /** Override the workspace (a worktree fork at a concurrency boundary). */
   workspace?: Workspace;
   /** Override the environment (a per-team env at a concurrency boundary). */
@@ -91,5 +93,7 @@ export function childContext(
     lastOutcome: over.lastOutcome,
     lastReview: over.lastReview,
     lastGate: over.lastGate,
+    // Not inherited: a nested job sees its own dag node's needs, never an ancestor's.
+    needs: over.needs,
   };
 }
