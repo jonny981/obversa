@@ -10,6 +10,8 @@ interface AgentDecision {
   readonly findings?: readonly FeedbackFinding[];
 }
 
+export const INVALID_TEAM_DECISION = 'The engine response was not a valid team decision JSON object.';
+
 function firstObject(text: string): string | undefined {
   const start = text.indexOf('{');
   if (start === -1) return undefined;
@@ -57,7 +59,7 @@ export function outcomeFromAgentText(text: string, target?: string): Outcome {
   if (!decision) {
     return {
       status: 'fail',
-      summary: 'The engine response was not a valid team decision JSON object.',
+      summary: INVALID_TEAM_DECISION,
       data: { response: text },
     };
   }

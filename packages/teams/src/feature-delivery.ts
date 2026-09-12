@@ -508,14 +508,14 @@ export function featureDelivery(config: FeatureDeliveryConfig) {
       },
       'research-requirements': {
         job: researchLoop('research-requirements-loop', requirementsWriter, config.workspace, RESEARCH_REQUIREMENTS_NOTE, requirementsReview),
-        desc: 'Turn the brief and the context note into a numbered list of requirements, until a reviewer accepts it.',
-        gate: 'The requirements note is in the workspace and a reviewer has accepted it.',
+        desc: 'Turn the brief and the context note into requirements, one REQ-n per line, each testable and traced to the brief.',
+        gate: 'Every requirement is testable, traces to the brief, and asks for nothing the brief does not.',
         needs: ['research-context'],
       },
       plan: {
         job: plan,
         desc: 'Write an executable plan from the requirements, one acceptance check per job.',
-        gate: 'The plan is in the workspace and every requirement has a check.',
+        gate: 'Every requirement has a check in the plan and no check asks for more than its requirement.',
         needs: ['research-requirements'],
       },
       'plan-review': {

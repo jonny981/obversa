@@ -174,6 +174,66 @@ describe('featureDelivery D48 contract', () => {
     }
   });
 
+  it('retries one malformed reviewer reply before reviewing the note', async () => {
+    const workspace = await mkdtemp(join(tmpdir(), 'obversa-teams-review-retry-'));
+    const reviewer = scriptedEngine('malformed-reviewer', [
+      async () => 'not a decision',
+      async () => pass('accepted after retry'),
+    ]);
+    try {
+      const input = config({
+        workspace,
+        reviewers: [{
+          name: 'correctness',
+          seat: seat(reviewer, 'malformed-reviewer'),
+          scope: 'requirements',
+        }],
+      });
+      const result = await run(reviewPanel({
+        label: 'review-retry',
+        reviewers: panelReviewers(input.reviewers, input, 'team-output/research-requirements.md'),
+        pass: 1,
+        target: 'research-requirements',
+      }), { cwd: workspace });
+
+      expect(result.outcome.status).toBe('pass');
+      expect(reviewer.calls).toHaveLength(2);
+      expect(reviewer.calls[1]?.prompt).toContain('previous response was not a valid decision');
+    } finally {
+      await rm(workspace, { recursive: true, force: true });
+    }
+  });
+
+  it('pauses without a writer finding when the reviewer gives no decision twice', async () => {
+    const workspace = await mkdtemp(join(tmpdir(), 'obversa-teams-review-no-decision-'));
+    const reviewer = scriptedEngine('malformed-reviewer', [async () => 'not a decision']);
+    try {
+      const input = config({
+        workspace,
+        reviewers: [{
+          name: 'correctness',
+          seat: seat(reviewer, 'malformed-reviewer'),
+          scope: 'requirements',
+        }],
+      });
+      const result = await run(reviewPanel({
+        label: 'review-no-decision',
+        reviewers: panelReviewers(input.reviewers, input, 'team-output/research-requirements.md'),
+        pass: 1,
+        target: 'research-requirements',
+      }), { cwd: workspace });
+      const data = result.outcome.data as { findings?: unknown[] } | undefined;
+
+      expect(result.outcome.status).toBe('paused');
+      expect(result.outcome.summary).toContain('reviewer correctness returned no decision');
+      expect(result.outcome.revision).toBeUndefined();
+      expect(data?.findings).toEqual([]);
+      expect(reviewer.calls).toHaveLength(2);
+    } finally {
+      await rm(workspace, { recursive: true, force: true });
+    }
+  });
+
   it('reruns tests-first with tests-review findings before implementation', async () => {
     const workspace = await mkdtemp(join(tmpdir(), 'obversa-teams-kickback-'));
     let testsFirstCalls = 0;

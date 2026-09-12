@@ -7,12 +7,13 @@ import {
   commandSucceeds,
   dag,
   gateJob,
+  LoopError,
   type Job,
   type JobContext,
   type KickbackBudget,
 } from '@obversa/runtime';
 
-import { outcomeFromAgentText } from './agent-response.js';
+import { INVALID_TEAM_DECISION, outcomeFromAgentText } from './agent-response.js';
 import type { ReviewerSeat, TeamInput, TeamSeat } from './types.js';
 
 export const DELIVERY_NOTE = 'team-output/brief.md';
@@ -229,21 +230,39 @@ export function panelReviewers(
   input: TeamInput,
   reviewTarget?: string,
 ): Array<{ name: string; scope?: string; job: Job }> {
-  return reviewers.map((reviewer) => ({
-      name: reviewer.name,
-      scope: reviewer.scope,
-      job: teamAgent(
-        reviewer.name,
-        reviewer.seat,
-        input,
-        () => [
-          `Review target: ${reviewTarget ?? 'the supplied files and test evidence'}.`,
-          'Judge only that target against this stage gate; do not require files from another stage.',
-          `Write reviews/${reviewer.name}.json.`,
-          reviewer.scope ? `Scope: ${reviewer.scope}` : undefined,
-        ].filter(Boolean).join('\n'),
-      ),
-  }));
+  return reviewers.map((reviewer) => {
+    const instructions = [
+      `Review target: ${reviewTarget ?? 'the supplied files and test evidence'}.`,
+      'Judge only that target against this stage gate; do not require files from another stage.',
+      `Write reviews/${reviewer.name}.json.`,
+      reviewer.scope ? `Scope: ${reviewer.scope}` : undefined,
+    ].filter(Boolean).join('\n');
+    const review = teamAgent(
+      reviewer.name,
+      reviewer.seat,
+      input,
+      instructions,
+    );
+    const retry = teamAgent(
+      reviewer.name,
+      reviewer.seat,
+      input,
+      `${instructions}\nYour previous response was not a valid decision. Return only the required JSON object.`,
+    );
+    const job: Job = async (ctx) => {
+      const first = await review(ctx);
+      if (first.status !== 'fail' || first.summary !== INVALID_TEAM_DECISION) return first;
+      const second = await retry(ctx);
+      if (second.status !== 'fail' || second.summary !== INVALID_TEAM_DECISION) return second;
+      const summary = `reviewer ${reviewer.name} returned no decision`;
+      return {
+        status: 'fail',
+        summary,
+        error: new LoopError({ code: 'ENGINE', phase: 'review', message: summary }),
+      };
+    };
+    return { name: reviewer.name, scope: reviewer.scope, job };
+  });
 }
 
 export { dag };

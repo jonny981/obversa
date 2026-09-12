@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import { outcomeFromAgentText } from '../src/agent-response.js';
+import { INVALID_TEAM_DECISION, outcomeFromAgentText } from '../src/agent-response.js';
 
 describe('outcomeFromAgentText', () => {
   it.each([
@@ -13,7 +13,7 @@ describe('outcomeFromAgentText', () => {
   it('keeps malformed replies as a named failure', () => {
     expect(outcomeFromAgentText('Here is my review: {not valid JSON}')).toMatchObject({
       status: 'fail',
-      summary: 'The engine response was not a valid team decision JSON object.',
+      summary: INVALID_TEAM_DECISION,
     });
   });
 });
