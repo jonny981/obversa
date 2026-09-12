@@ -81,6 +81,10 @@ These files run offline against the public packages and nothing else.
 - [Three candidates, one winner](/workflows/tournament). Three isolated
   attempts at one task, a deterministic judge, the winner lands and the
   losers leave nothing behind.
+- [A command decides the path](/workflows/command-kickback). The tests run
+  as a node with no inference; a red run goes straight back to the writer
+  with the output attached, and a second command's exit code chooses which
+  review runs next.
 - [A review that sends work back](/workflows/offline-review). A reviewer
   rejects the first draft with a reason and the second draft passes.
 - [A file change approved byte for byte](/workflows/safe-change). Source

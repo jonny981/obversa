@@ -161,6 +161,12 @@ of your own over the public contract, see
 - **A reviewer needs a target to send work back.** Without `target`, a
   failing panel fails the run rather than returning the work. The example
   above sets it.
+- **A command can send work back, and a command can choose the path.**
+  `gateJob(label, condition, { target })` returns a red command's captured
+  output to the step named as a revision request, no agent in between; and
+  a node's `when` predicate can read the outcomes of the steps it needs
+  through `ctx.needs`, so a command's exit code decides which branch runs.
+  [A command decides the path](/workflows/command-kickback) shows both.
 - **Kickbacks are counted, per target if you say so.** `maxKickbacks` caps
   how many times work can go back. A number is one budget for the whole
   graph. A map, `{ plan: 3, 'tests-first': 3 }`, gives each target its own,

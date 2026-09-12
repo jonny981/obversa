@@ -1,4 +1,5 @@
 import type { ChildProcess } from 'node:child_process';
+import { randomUUID } from 'node:crypto';
 import { accessSync, constants, statSync } from 'node:fs';
 import {
   basename,
@@ -120,6 +121,7 @@ export function ownedCommandIdentity(input: {
           adapter: input.adapter,
           runId,
           leafId: input.leafId ?? 'standalone',
+          nonce: randomUUID(),
         })
       : validateAttemptId(input.attemptId);
   return Object.freeze({ attemptId, runId });

@@ -6,6 +6,7 @@ import { join } from 'node:path';
 import {
   commandCleanupCapability,
   OwnedCommandError,
+  ownedCommandIdentity,
   resolveCommandExecutable,
   runOwnedCommand,
   type OwnedCommandRequest,
@@ -84,6 +85,17 @@ describe('command cleanup capability', () => {
     } finally {
       Object.defineProperty(process, 'platform', platform);
     }
+  });
+});
+
+describe('command ownership identity', () => {
+  it('gives standalone commands distinct ownership markers', () => {
+    const first = ownedCommandIdentity({ adapter: 'test' });
+    const second = ownedCommandIdentity({ adapter: 'test' });
+
+    expect(first.runId).toBe('standalone');
+    expect(second.runId).toBe('standalone');
+    expect(second.attemptId).not.toBe(first.attemptId);
   });
 });
 

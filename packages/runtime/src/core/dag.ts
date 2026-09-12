@@ -218,6 +218,11 @@ export function dag(config: DagConfig): Job {
         workspace,
         environment,
         lastReview: pendingKickback.get(name),
+        needs: Object.freeze(Object.fromEntries(
+          normalizeNeeds(nodes.get(name)!.needs)
+            .filter((n) => results.has(n))
+            .map((n) => [n, results.get(n)!]),
+        )),
         graph: {
           dag: config.name,
           node: name,

@@ -813,7 +813,20 @@ export function agentCheck(config: AgentCheckConfig): Condition {
  * (`gateJob('review', agentCheck(...))`). The condition's diagnostic `output`
  * rides `Outcome.data`, so it survives the Job boundary.
  */
-export function gateJob(label: string, condition: ConditionInput): Job {
+export function gateJob(
+  label: string,
+  condition: ConditionInput,
+  opts: {
+    /**
+     * The upstream node that owns the fix. When the condition is not met, the
+     * outcome carries a revision request to that node with the condition's
+     * evidence as the finding, so a red test suite goes straight back to the
+     * step that must fix it, with the output in hand and no agent in between.
+     * The enclosing `dag` routes it exactly as it routes a review panel's.
+     */
+    target?: string;
+  } = {},
+): Job {
   const cond = toCondition(condition);
   return setMeta(async (ctx) => {
     ctx.emit({
@@ -832,12 +845,28 @@ export function gateJob(label: string, condition: ConditionInput): Job {
       iteration: ctx.iteration,
       result: r,
     });
-    const outcome: Outcome = {
-      status: r.met ? 'pass' : 'fail',
-      confidence: r.confidence,
-      summary: r.reason,
-    };
-    if (r.output !== undefined) outcome.data = r.output;
+    // Built here rather than through `revisionRequest`, which lives in
+    // feedback.ts and imports this module; the shape is the public
+    // `RevisionRequest`, with the rerun a targeted revision always has.
+    const outcome: Outcome = !r.met && opts.target !== undefined
+      ? {
+          status: 'fail',
+          confidence: r.confidence,
+          summary: r.reason,
+          data: r.output,
+          revision: {
+            target: opts.target,
+            reason: r.reason,
+            findings: [{ evidence: r.output ?? r.reason, severity: 'block' }],
+            rerun: 'target-and-dependents',
+          },
+        }
+      : {
+          status: r.met ? 'pass' : 'fail',
+          confidence: r.confidence,
+          summary: r.reason,
+        };
+    if (r.output !== undefined && outcome.data === undefined) outcome.data = r.output;
     ctx.emit({
       kind: 'job:end',
       ts: Date.now(),
