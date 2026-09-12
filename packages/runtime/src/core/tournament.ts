@@ -110,12 +110,6 @@ export function tournament(config: TournamentConfig): Job {
             return { i, branch, dir: wt.dir, outcome, score };
           } catch (e) {
             const error = LoopError.from(e, { code: 'BODY', path });
-            console.error(JSON.stringify({
-              diagnostic: 'F33',
-              candidate: i,
-              code: error.code,
-              message: error.message,
-            }));
             return {
               i,
               branch,

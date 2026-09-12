@@ -89,35 +89,12 @@ const CANDIDATE_TEST = [
   '',
 ].join('\n');
 
-async function runNodeTest(ctx: JobContext, candidate: number): Promise<void> {
-  const args = ['--experimental-strip-types', '--test', 'candidate.test.ts'];
-  try {
-    const output = await promisify(execFile)(process.execPath, args, { cwd: ctx.workspace.dir });
-    console.error(JSON.stringify({
-      candidate,
-      node: process.version,
-      command: [process.execPath, ...args],
-      code: 0,
-      stdout: output.stdout,
-      stderr: output.stderr,
-    }));
-  } catch (error) {
-    const result = error as {
-      code?: number | string;
-      signal?: string | null;
-      stdout?: string;
-      stderr?: string;
-    };
-    console.error(JSON.stringify({
-      candidate,
-      command: [process.execPath, ...args],
-      code: result.code ?? null,
-      signal: result.signal ?? null,
-      stdout: result.stdout ?? '',
-      stderr: result.stderr ?? '',
-    }));
-    throw error;
-  }
+async function runNodeTest(ctx: JobContext): Promise<void> {
+  await promisify(execFile)(
+    process.execPath,
+    ['--experimental-strip-types', '--test', 'candidate.test.ts'],
+    { cwd: ctx.workspace.dir },
+  );
 }
 
 const score = async (outcome: Outcome, ctx: JobContext): Promise<number> => {
@@ -136,10 +113,11 @@ try {
   await mkdir(join(repo, 'src'), { recursive: true });
   await writeFile(join(repo, 'src/retry.ts'), '// written by the winning candidate\n');
   await git('git', ['init', '-q', '-b', 'main'], { cwd: repo });
+  await git('git', ['config', 'user.name', 'Example'], { cwd: repo });
+  await git('git', ['config', 'user.email', 'example@example.com'], { cwd: repo });
   await git('git', ['add', 'src/retry.ts'], { cwd: repo });
   await git('git', [
-    '-c', 'user.name=Example', '-c', 'user.email=example@example.com',
-    '-c', 'commit.gpgsign=false', 'commit', '-qm', 'chore: seed the task file',
+    'commit', '-qm', 'chore: seed the task file',
   ], { cwd: repo });
 
   const result = await run(
@@ -147,10 +125,9 @@ try {
       name: 'retry-implementation',
       n: ANGLES.length,
       candidate: (i) => fnJob(`candidate-${i}`, async (ctx) => {
-        console.error(JSON.stringify({ candidate: i, node: process.version, event: 'start' }));
         await writeFile(join(ctx.workspace.dir, 'src/retry.ts'), TASK[1] + ANGLES[i]!);
         await writeFile(join(ctx.workspace.dir, 'candidate.test.ts'), CANDIDATE_TEST);
-        await runNodeTest(ctx, i);
+        await runNodeTest(ctx);
         return { status: 'pass' as const, data: { candidate: i } };
       }),
       judge: score,
