@@ -115,6 +115,7 @@ try {
   await git('git', ['init', '-q', '-b', 'main'], { cwd: repo });
   await git('git', ['config', 'user.name', 'Example'], { cwd: repo });
   await git('git', ['config', 'user.email', 'example@example.com'], { cwd: repo });
+  await git('git', ['config', 'commit.gpgsign', 'false'], { cwd: repo });
   await git('git', ['add', 'src/retry.ts'], { cwd: repo });
   await git('git', [
     'commit', '-qm', 'chore: seed the task file',

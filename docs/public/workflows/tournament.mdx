@@ -143,10 +143,12 @@ try {
   await mkdir(join(repo, 'src'), { recursive: true });
   await writeFile(join(repo, 'src/retry.ts'), '// written by the winning candidate\n');
   await git('git', ['init', '-q', '-b', 'main'], { cwd: repo });
+  await git('git', ['config', 'user.name', 'Example'], { cwd: repo });
+  await git('git', ['config', 'user.email', 'example@example.com'], { cwd: repo });
+  await git('git', ['config', 'commit.gpgsign', 'false'], { cwd: repo });
   await git('git', ['add', 'src/retry.ts'], { cwd: repo });
   await git('git', [
-    '-c', 'user.name=Example', '-c', 'user.email=example@example.com',
-    '-c', 'commit.gpgsign=false', 'commit', '-qm', 'chore: seed the task file',
+    'commit', '-qm', 'chore: seed the task file',
   ], { cwd: repo });
 
   const result = await run(
