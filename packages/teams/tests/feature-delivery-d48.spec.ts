@@ -234,6 +234,65 @@ describe('featureDelivery D48 contract', () => {
     }
   });
 
+  it('accepts a fresh review file when the reviewer reply is prose', async () => {
+    const workspace = await mkdtemp(join(tmpdir(), 'obversa-teams-review-file-'));
+    const reviewer = scriptedEngine('file-reviewer', [async (request) => {
+      await mkdir(join(request.cwd!, 'reviews'), { recursive: true });
+      await writeFile(join(request.cwd!, 'reviews/correctness.json'), pass('accepted from file'));
+      return 'Result written to reviews/correctness.json';
+    }]);
+    try {
+      const input = config({
+        workspace,
+        reviewers: [{
+          name: 'correctness',
+          seat: seat(reviewer, 'file-reviewer'),
+          scope: 'requirements',
+        }],
+      });
+      const result = await run(reviewPanel({
+        label: 'review-file',
+        reviewers: panelReviewers(input.reviewers, input, 'team-output/research-requirements.md'),
+        pass: 1,
+        target: 'research-requirements',
+      }), { cwd: workspace });
+
+      expect(result.outcome.status).toBe('pass');
+      expect(reviewer.calls).toHaveLength(1);
+    } finally {
+      await rm(workspace, { recursive: true, force: true });
+    }
+  });
+
+  it('does not trust a stale review file when the reviewer reply is prose', async () => {
+    const workspace = await mkdtemp(join(tmpdir(), 'obversa-teams-stale-review-'));
+    await mkdir(join(workspace, 'reviews'), { recursive: true });
+    await writeFile(join(workspace, 'reviews/correctness.json'), pass('stale acceptance'));
+    const reviewer = scriptedEngine('stale-reviewer', [async () => 'Result written to reviews/correctness.json']);
+    try {
+      const input = config({
+        workspace,
+        reviewers: [{
+          name: 'correctness',
+          seat: seat(reviewer, 'stale-reviewer'),
+          scope: 'requirements',
+        }],
+      });
+      const result = await run(reviewPanel({
+        label: 'stale-review-file',
+        reviewers: panelReviewers(input.reviewers, input, 'team-output/research-requirements.md'),
+        pass: 1,
+        target: 'research-requirements',
+      }), { cwd: workspace });
+
+      expect(result.outcome.status).toBe('paused');
+      expect(result.outcome.summary).toContain('reviewer correctness returned no decision');
+      expect(reviewer.calls).toHaveLength(2);
+    } finally {
+      await rm(workspace, { recursive: true, force: true });
+    }
+  });
+
   it('reruns tests-first with tests-review findings before implementation', async () => {
     const workspace = await mkdtemp(join(tmpdir(), 'obversa-teams-kickback-'));
     let testsFirstCalls = 0;

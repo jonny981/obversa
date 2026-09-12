@@ -42,14 +42,16 @@ describe('thresholdPanel', () => {
         const engine = scriptedEngine(name, [
           async (request) => {
             await mkdir(join(request.cwd!, 'reviews'), { recursive: true });
-            await writeFile(join(request.cwd!, `reviews/${name}.json`), `{"round":1}\n`);
-            return index === 2
+            const decision = index === 2
               ? pass(`${name} accepted the first implementation`)
               : revise(`${name} requested a repair`, `${name} found a missing requirement`);
+            await writeFile(join(request.cwd!, `reviews/${name}.json`), decision);
+            return decision;
           },
           async (request) => {
-            await writeFile(join(request.cwd!, `reviews/${name}.json`), `{"round":2}\n`);
-            return pass(`${name} accepted the repair`);
+            const decision = pass(`${name} accepted the repair`);
+            await writeFile(join(request.cwd!, `reviews/${name}.json`), decision);
+            return decision;
           },
         ]);
         return { name, engine, seat: seat(engine, name) };
@@ -78,7 +80,7 @@ describe('thresholdPanel', () => {
         expect.any(Array),
         expect.any(Array),
       ]);
-      expect(await readFile(join(workspace, 'reviews/correctness.json'), 'utf8')).toContain('round');
+      expect(await readFile(join(workspace, 'reviews/correctness.json'), 'utf8')).toContain('"status":"pass"');
     } finally {
       await rm(workspace, { recursive: true, force: true });
     }

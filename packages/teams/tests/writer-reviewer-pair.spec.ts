@@ -50,8 +50,9 @@ describe('writerReviewerPair', () => {
       const reviewerEngine = scriptedEngine('reviewer', [
         async (request) => {
           await mkdir(join(request.cwd!, 'reviews'), { recursive: true });
-          await writeFile(join(request.cwd!, 'reviews/reviewer.json'), '{"status":"revise"}\n');
-          return revise('review requested one repair', 'the review requires one repair');
+          const decision = revise('review requested one repair', 'the review requires one repair');
+          await writeFile(join(request.cwd!, 'reviews/reviewer.json'), decision);
+          return decision;
         },
         async () => pass('review accepted the repaired files'),
       ]);

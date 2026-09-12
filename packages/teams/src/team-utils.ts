@@ -212,9 +212,10 @@ export function teamAgent(
   input: TeamInput,
   instructions: string | ((ctx: JobContext) => string),
   target?: string,
+  decisionFile?: string,
 ): Job {
   const identity = seatIdentity(seat);
-  return agentJob({
+  const agent = agentJob({
     label,
     engine: seat.engine,
     model: identity.model,
@@ -223,6 +224,20 @@ export function teamAgent(
     prompt: (ctx) => `${rolePrompt(label, input.brief)}\n${typeof instructions === 'function' ? instructions(ctx) : instructions}\nReturn one JSON object: {"status":"pass"|"revise","summary":"...","findings":[{"evidence":"..."}]}`,
     outcome: (text) => outcomeFromAgentText(text, target),
   });
+  if (!decisionFile) return agent;
+  return async (ctx) => {
+    const path = join(input.workspace, decisionFile);
+    const before = await snapshotFile(path);
+    const replyOutcome = await agent(ctx);
+    const after = await snapshotFile(path);
+    const changed = before.exists !== after.exists || before.hash !== after.hash;
+    if (!changed || !after.exists || after.hash === null) return replyOutcome;
+    try {
+      return outcomeFromAgentText(await readFile(path, 'utf8'), target);
+    } catch {
+      return replyOutcome;
+    }
+  };
 }
 
 export function panelReviewers(
@@ -242,12 +257,16 @@ export function panelReviewers(
       reviewer.seat,
       input,
       instructions,
+      undefined,
+      `reviews/${reviewer.name}.json`,
     );
     const retry = teamAgent(
       reviewer.name,
       reviewer.seat,
       input,
       `${instructions}\nYour previous response was not a valid decision. Return only the required JSON object.`,
+      undefined,
+      `reviews/${reviewer.name}.json`,
     );
     const job: Job = async (ctx) => {
       const first = await review(ctx);
