@@ -959,6 +959,7 @@ describe('node attempt lifecycle', () => {
     'keeps final evidence captured before a SIGTERM-ignoring command times out',
     async () => {
       const budget = createTokenBudget(20);
+      let commandSeen: { exitCode: number | null; timedOut: boolean; aborted: boolean } | undefined;
       const selected = engine('process-backed', async (request, _onEvent, signal) => {
         let captured: AgentResult | undefined;
         const command = await runOwnedCommand({
@@ -986,6 +987,11 @@ describe('node attempt lifecycle', () => {
             });
           },
         });
+        commandSeen = {
+          exitCode: command.exitCode,
+          timedOut: command.timedOut,
+          aborted: command.aborted,
+        };
         expect(command).toMatchObject({
           exitCode: null,
           timedOut: true,
@@ -1012,6 +1018,9 @@ describe('node attempt lifecycle', () => {
         },
       }), new AbortController().signal);
 
+      if (record.failure?.code !== 'TIMEOUT') {
+        console.error(`[F31 diagnostic] record.failure=${JSON.stringify(record.failure)} command=${JSON.stringify(commandSeen)}`);
+      }
       expect(record.status).toBe('failed');
       expect(record.failure).toMatchObject({ code: 'TIMEOUT' });
       expect(record.result).toBeNull();
