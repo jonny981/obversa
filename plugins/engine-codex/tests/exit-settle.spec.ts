@@ -22,7 +22,11 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { setTimeout as delay } from 'node:timers/promises';
 
-import { finalResultText } from '@obversa/engine';
+import {
+  digestJson,
+  finalResultText,
+  type AgentRequest,
+} from '@obversa/engine';
 import { CodexEngine } from '../src/index.ts';
 
 /** Seconds the orphan holds the pipes — far beyond any test bound below, so a
@@ -31,6 +35,31 @@ const HOLD_SECS = 120;
 const ORPHAN_PID_PATH = '__ORPHAN_PID_PATH__';
 const FINAL_MARKER_PATH = '__FINAL_MARKER_PATH__';
 const directories: string[] = [];
+
+function requestFor(
+  testId: string,
+  options: Partial<AgentRequest> = {},
+): AgentRequest {
+  return {
+    prompt: 'ping',
+    ...options,
+    attempt: {
+      leaf: true,
+      runId: `exit-settle-${testId}`,
+      attemptId: digestJson({
+        schemaVersion: 1,
+        namespace: 'engine-codex-exit-settle',
+        streamId: 'exit-settle',
+        nodeId: testId,
+        position: testId,
+      }),
+      leafId: testId,
+      path: [testId],
+      label: testId,
+      iteration: 0,
+    },
+  };
+}
 
 function isProcessAlive(pid: number): boolean {
   try {
@@ -101,7 +130,7 @@ process.exit(0);
 
     const startedAt = Date.now();
     const result = await new CodexEngine({ cliBinary: bin }).run(
-      { prompt: 'ping' },
+      requestFor('completed-at-exit'),
       () => {},
       new AbortController().signal,
     );
@@ -127,7 +156,10 @@ await new Promise(() => {});
     const controller = new AbortController();
     let abortFired = false;
     const running = new CodexEngine({ cliBinary: bin }).run(
-      { prompt: 'ping', timeoutMs: 5_000, timeoutGraceMs: 500 },
+      requestFor('abort-during-teardown', {
+        timeoutMs: 5_000,
+        timeoutGraceMs: 500,
+      }),
       () => {},
       controller.signal,
     );
@@ -154,7 +186,7 @@ setInterval(() => {}, 1000);
 
     const startedAt = Date.now();
     const running = new CodexEngine({ cliBinary: bin }).run(
-      { prompt: 'ping', timeoutMs: 5_000 },
+      requestFor('hard-timeout', { timeoutMs: 5_000 }),
       () => {},
       new AbortController().signal,
     );
