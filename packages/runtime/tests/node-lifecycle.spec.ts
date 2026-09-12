@@ -966,14 +966,14 @@ describe('node attempt lifecycle', () => {
           executable: process.execPath,
           args: [
             '-e',
-            "process.on('SIGTERM', () => {}); process.stdout.write('FINAL'); setTimeout(() => process.kill(process.pid, 'SIGKILL'), 325); setInterval(() => {}, 1000)",
+            "process.on('SIGTERM', () => {}); process.stdout.write('FINAL'); setInterval(() => {}, 1000)",
           ],
           cwd: request.cwd!,
           env: {},
           stdin: '',
           attemptId: identity.attemptId,
           runId: identity.streamId,
-          timeoutMs: request.timeoutMs!,
+          timeoutMs: 2_000,
           teardownGraceMs: request.timeoutGraceMs!,
           maxOutputBytes: request.maxOutputBytes!,
           maxMemoryBytes: request.maxMemoryBytes!,
@@ -994,8 +994,8 @@ describe('node attempt lifecycle', () => {
         };
         expect(command).toMatchObject({
           exitCode: null,
-          timedOut: true,
-          aborted: false,
+          timedOut: false,
+          aborted: true,
         });
         if (captured === undefined) throw new Error('final output was not captured');
         return {
