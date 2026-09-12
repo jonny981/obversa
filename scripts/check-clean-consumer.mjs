@@ -778,7 +778,7 @@ async function main() {
     await copyFile(join(root, 'examples', 'teams', 'feature-delivery.ts'), join(consumerDirectory, 'teams', 'feature-delivery.ts'));
     await copyFile(join(root, 'examples', 'teams', 'feature-delivery.proof.ts'), join(consumerDirectory, 'teams', 'feature-delivery.proof.ts'));
 
-    run('pnpm', ['install', '--offline', '--ignore-scripts'], {
+    run('pnpm', ['install', '--prefer-offline', '--ignore-scripts'], {
       cwd: consumerDirectory,
       env: { CI: 'true', COREPACK_ENABLE_DOWNLOAD_PROMPT: '0' },
     });
