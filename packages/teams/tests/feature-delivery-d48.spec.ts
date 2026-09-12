@@ -250,8 +250,25 @@ describe('featureDelivery D48 contract', () => {
     const workspace = await mkdtemp(join(tmpdir(), 'obversa-teams-budget-map-'));
     const reviewerCalls = new Map<string, number>();
     const events: Array<{ kind?: string; from?: string; to?: string; accepted?: boolean }> = [];
+    let planWrites = 0;
     try {
       const base = config({ workspace });
+      const analyse = scriptedEngine('budget-analyse', [async (request) => {
+        const output = request.prompt.match(/Write only ([^\.]+\.md)/)?.[1] ?? 'team-output/unknown.md';
+        await mkdir(join(request.cwd!, 'team-output'), { recursive: true });
+        if (output.endsWith('research-requirements.md')) {
+          await writeFile(join(request.cwd!, output), '1. Export result.\n2. Test result.\n');
+        } else if (output.endsWith('plan.md')) {
+          planWrites += 1;
+          await writeFile(
+            join(request.cwd!, output),
+            `1. Export result. Acceptance check: source exists.\n2. Test result. Acceptance check: command exits 0. Revision ${planWrites}.\n`,
+          );
+        } else {
+          await writeFile(join(request.cwd!, output), 'The workspace context is recorded.\n');
+        }
+        return pass('accepted');
+      }]);
       const reviewer = scriptedEngine('budget-reviewer', [async (request) => {
         const target = request.prompt.match(/Review target: ([^\n]+)/)?.[1]?.trim() ?? '';
         const calls = (reviewerCalls.get(target) ?? 0) + 1;
@@ -263,6 +280,7 @@ describe('featureDelivery D48 contract', () => {
       }]);
       const result = await run(featureDelivery({
         ...base,
+        analyse: seat(analyse, 'budget-analyse'),
         reviewers: [{ name: 'correctness', seat: seat(reviewer, 'budget-reviewer'), scope: 'implementation' }],
       }), {
         cwd: workspace,
@@ -274,6 +292,95 @@ describe('featureDelivery D48 contract', () => {
         expect.objectContaining({ to: 'plan', accepted: true }),
         expect.objectContaining({ to: 'tests-first', accepted: true }),
       ]);
+    } finally {
+      await rm(workspace, { recursive: true, force: true });
+    }
+  });
+
+  it('fails when a research writer returns the rejected note unchanged', async () => {
+    const workspace = await mkdtemp(join(tmpdir(), 'obversa-teams-unchanged-requirements-'));
+    const requirementPrompts: string[] = [];
+    let requirementWrites = 0;
+    let requirementReviews = 0;
+    const analyse = scriptedEngine('analyse', [async (request) => {
+      const output = request.prompt.match(/Write only ([^\.]+\.md)/)?.[1] ?? 'team-output/unknown.md';
+      await mkdir(join(request.cwd!, 'team-output'), { recursive: true });
+      if (output.endsWith('research-requirements.md')) {
+        requirementWrites += 1;
+        requirementPrompts.push(request.prompt);
+        await writeFile(join(request.cwd!, output), '1. The behavior is observable.\n');
+      } else {
+        await writeFile(join(request.cwd!, output), 'The workspace context is recorded.\n');
+      }
+      return pass('accepted');
+    }]);
+    const reviewer = scriptedEngine('reviewer', [async (request) => {
+      if (request.prompt.includes('Review target: team-output/research-requirements.md')) {
+        requirementReviews += 1;
+        return revise('rewrite the requirements', 'remove the implementation prescription');
+      }
+      return pass('accepted');
+    }]);
+
+    try {
+      const result = await run(featureDelivery(config({
+        workspace,
+        analyse: seat(analyse, 'analyse'),
+        reviewers: [{ name: 'correctness', seat: seat(reviewer, 'reviewer'), scope: 'requirements' }],
+      })), { cwd: workspace });
+      const data = result.outcome.data as Record<string, { summary?: string }> | undefined;
+
+      expect(data?.['research-requirements']?.summary).toBe(
+        'research-requirements returned the rejected note unchanged',
+      );
+      expect(requirementWrites).toBe(2);
+      expect(requirementReviews).toBe(1);
+      expect(requirementPrompts[1]).toContain('A reviewer rejected the previous note');
+      expect(requirementPrompts[1]).toContain('every finding');
+    } finally {
+      await rm(workspace, { recursive: true, force: true });
+    }
+  });
+
+  it('fails when a plan writer returns the rejected note unchanged', async () => {
+    const workspace = await mkdtemp(join(tmpdir(), 'obversa-teams-unchanged-plan-'));
+    let planWrites = 0;
+    let planReviews = 0;
+    const analyse = scriptedEngine('analyse', [async (request) => {
+      const output = request.prompt.match(/Write only ([^\.]+\.md)/)?.[1] ?? 'team-output/unknown.md';
+      await mkdir(join(request.cwd!, 'team-output'), { recursive: true });
+      if (output.endsWith('research-requirements.md')) {
+        await writeFile(join(request.cwd!, output), '1. Export result.\n2. Test result.\n');
+      } else if (output.endsWith('plan.md')) {
+        planWrites += 1;
+        await writeFile(
+          join(request.cwd!, output),
+          '1. Export result. Acceptance check: source exists.\n2. Test result. Acceptance check: command exits 0.\n',
+        );
+      } else {
+        await writeFile(join(request.cwd!, output), 'The workspace context is recorded.\n');
+      }
+      return pass('accepted');
+    }]);
+    const reviewer = scriptedEngine('reviewer', [async (request) => {
+      if (request.prompt.includes('Review target: team-output/research-requirements.md and team-output/plan.md')) {
+        planReviews += 1;
+        return revise('rewrite the plan', 'add the missing acceptance check');
+      }
+      return pass('accepted');
+    }]);
+
+    try {
+      const result = await run(featureDelivery(config({
+        workspace,
+        analyse: seat(analyse, 'analyse'),
+        reviewers: [{ name: 'correctness', seat: seat(reviewer, 'reviewer'), scope: 'plan' }],
+      })), { cwd: workspace });
+      const data = result.outcome.data as Record<string, { summary?: string }> | undefined;
+
+      expect(data?.plan?.summary).toBe('plan returned the rejected note unchanged');
+      expect(planWrites).toBe(2);
+      expect(planReviews).toBe(1);
     } finally {
       await rm(workspace, { recursive: true, force: true });
     }

@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto';
 import { mkdir, readFile, rm, stat, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 
@@ -5,10 +6,12 @@ import {
   commandSucceeds,
   dag,
   fnJob,
+  LoopError,
   loop,
   predicate,
   reviewPanel,
   type Job,
+  type JobContext,
   type Outcome,
 } from '@obversa/runtime';
 
@@ -72,6 +75,21 @@ async function fileExists(workspace: string, file: string): Promise<boolean> {
   }
 }
 
+async function fileHash(workspace: string, file: string): Promise<string | undefined> {
+  try {
+    const contents = await readFile(join(workspace, file));
+    return createHash('sha256').update(contents).digest('hex');
+  } catch {
+    return undefined;
+  }
+}
+
+function rewriteInstruction(note: string, ctx: JobContext): string | undefined {
+  return ctx.lastReview
+    ? `A reviewer rejected the previous note. Rewrite ${note} and resolve every finding in the feedback in the rewritten file.`
+    : undefined;
+}
+
 function outputWriter(
   label: string,
   seat: FeatureDeliveryConfig['analyse'],
@@ -84,13 +102,47 @@ function outputWriter(
     label,
     requireNonEmptyFiles(
       label,
-      teamAgent(label, seat, config, `${instructions} Write only ${output}.`, target),
+      teamAgent(
+        label,
+        seat,
+        config,
+        (ctx) => [
+          instructions,
+          rewriteInstruction(output, ctx),
+          `Write only ${output}.`,
+        ].filter(Boolean).join('\n'),
+        target,
+      ),
       config.workspace,
       [output],
     ),
     config.workspace,
     config.files,
   );
+}
+
+function failOnUnchangedNote(
+  label: string,
+  job: Job,
+  workspace: string,
+  note: string,
+): Job {
+  let previousHash: string | undefined;
+  return async (ctx) => {
+    const outcome = await job(ctx);
+    if (outcome.status !== 'pass') return outcome;
+    const currentHash = await fileHash(workspace, note);
+    if (ctx.lastReview && previousHash !== undefined && currentHash === previousHash) {
+      const summary = `${label} returned the rejected note unchanged`;
+      return {
+        status: 'fail',
+        summary,
+        error: new LoopError({ code: 'VALIDATION', phase: 'body', message: summary }),
+      };
+    }
+    previousHash = currentHash;
+    return outcome;
+  };
 }
 
 function requirePlanChecks(job: Job, workspace: string): Job {
@@ -188,7 +240,7 @@ function researchLoop(
 ): Job {
   return loop({
     name,
-    body: writer,
+    body: failOnUnchangedNote(name.replace(/-loop$/, ''), writer, workspace, note),
     until: noteExists(workspace, note),
     review,
     max: 3,
@@ -236,16 +288,21 @@ export function featureDelivery(config: FeatureDeliveryConfig) {
     'research-requirements',
     RESEARCH_REQUIREMENTS_NOTE,
   );
-  const plan = requirePlanChecks(
-    outputWriter(
-      'plan',
-      config.analyse,
-      config,
-      PLAN_NOTE,
-      `Read ${RESEARCH_REQUIREMENTS_NOTE} and write a short executable plan with one acceptance check per numbered requirement. Do not write implementation or test files.`,
-      'plan',
+  const plan = failOnUnchangedNote(
+    'plan',
+    requirePlanChecks(
+      outputWriter(
+        'plan',
+        config.analyse,
+        config,
+        PLAN_NOTE,
+        `Read ${RESEARCH_REQUIREMENTS_NOTE} and write a short executable plan with one acceptance check per numbered requirement. Do not write implementation or test files.`,
+        'plan',
+      ),
+      config.workspace,
     ),
     config.workspace,
+    PLAN_NOTE,
   );
   const planReview = scopedPanel(
     'plan-review',
