@@ -17,6 +17,14 @@ engine and memory packages track their own versions independently.
 - A dag's `maxKickbacks` accepts a map of target name to count as well as
   a number, so each step that receives work back has its own budget. The
   `dag:kickback` event and the rendered plan carry the count and the limit.
+- `gateJob(label, condition, { target })`: when the condition is not met,
+  the step returns a revision request to `target` carrying the condition's
+  evidence, so a red test command sends its output straight back to the
+  step that owns the fix with no agent in between.
+- `ctx.needs` inside a dag node: the outcomes of the steps the node needs,
+  by the names its `needs` list uses, read by the node's `when` predicate
+  and its job, so a command's result can choose which branch runs next.
+  Undefined outside a dag node.
 - **Saved team conversations:** Compile named members and fixed rooms with
   `teamGraphType`. Posts in successful turn results queue mentioned members;
   a fresh executor rebuilds messages and requested turns from the run record.
