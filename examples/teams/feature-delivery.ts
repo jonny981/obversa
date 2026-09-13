@@ -77,6 +77,7 @@ const team = workflow('feature-delivery', {
       panel: 'code-review',
       agree: 1,
       desc: 'Read the change and the test result against the plan.',
+      gate: 'At least one reviewer has accepted the change.',
       sendsBackTo: 'implement',
     }),
 
