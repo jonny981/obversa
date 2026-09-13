@@ -9,7 +9,69 @@ engine and memory packages track their own versions independently.
 
 ## [Unreleased]
 
+## [1.0.0] - 2026-09-14
+
 ### Added
+
+- **Type declarations for the review packages:** `@obversa/source` and
+  `@obversa/surfacer` now ship declaration files generated from their
+  JSDoc, with a `types` condition on every export entry. A TypeScript
+  reader importing either package resolves types instead of failing with
+  an implicit-any import. The clean-consumer check imports both strictly,
+  so the declarations cannot be dropped without failing the check.
+- `@obversa/runtime` 1.0.0: stored graph plans, bounded node attempts,
+  durable events and artifacts, restartable execution, workspace checks,
+  Callback Gates, and proof-bound decisions.
+- `@obversa/engine` 0.1.0 and six engine plugins at 0.1.0: typed engine
+  results through Agent SDK, Claude, Codex, Grok, OpenCode, and Anthropic adapters.
+- `@obversa/runner` 0.1.0: local worker supervision with stored run inputs,
+  bounded restart, workspace leases, status, and process cleanup within the
+  reported platform capability. Worker stdout and stderr share a fixed
+  1,000,000-byte cap; excess output can fail the run with `OUTPUT_LIMIT`.
+- `@obversa/runner`: `resumeSupervisedRun` and `ResumeSupervisedRunOptions`
+  reopen an exact recorded graph pause using the stored definition and run
+  limits. The host action policy runs again before node effects.
+- Action-policy `wait` decisions record a graph pause with its reason and
+  request. A `deny` decision records a failed node with `DENIED`.
+- `@obversa/engine/command`: optional `ownerId` on command and cleanup requests,
+  inherited `OBVERSA_RUN_OWNER` markers, `commandCleanupCapability`,
+  `CommandCleanupCapability`, and `inspectOwnerMarkedProcesses` for process
+  ownership and cleanup inspection.
+- `@obversa/memory` 0.1.0 with `@obversa/memory-simple` and
+  `@obversa/memory-git` at 0.1.0: replaceable memory with conformance tests.
+- `@obversa/source` 0.1.0 and `@obversa/surfacer` 0.1.0: local review
+  surfaces over public package contracts.
+- Public guides and runnable examples for installation, graphs, storage,
+  memory, workspaces, callbacks, proof-bound approval, hosts, and offline
+  review.
+- **Safe file changes:** Capture complete source records, bind approval to exact
+  output bytes, back up targets, read each result back, and pause on a mismatch.
+- **Stored proof reuse:** Resolve accepted results through the host cache with
+  current evidence, graph, workspace anchor, and reviewer identity. Each lookup
+  checks the stored completion and acceptance again.
+- **Read-only proof packets:** Share bounded, immutable source evidence through
+  a host cache. Check authoritative revisions, reuse unchanged source reads,
+  and invalidate only dependent packets. Effectful jobs cannot use the cache.
+- **Host-selected worker environment:** Accept an optional readonly
+  `environmentVariables` list on start and resume. Copy only present values of
+  those names from the watchdog, without storing credentials in run inputs or
+  host records. Default environment inheritance remains restrictive.
+- **Forge helper example:** Ship `examples/packages/forge-helper.ts` with
+  its documentation page. It is the shipping step after a review gate:
+  push the work branch, open or update one pull request with a body from
+  the commit bodies, pass a strict gate that ships only an exact-revision
+  pass, squash the merge with the same synthesis, and delete the branch.
+  The gate prints strict `RESULT:` verdicts with the reason on the line.
+  `pnpm example:forge` runs it offline against a mock host, and the
+  clean-consumer check runs it from the packed tarballs.
+- **Feature-delivery example:** Ship a runnable feature-delivery production
+  line, `examples/production-lines/feature-delivery.line.ts`, with its
+  documentation page. It takes one written issue through analysis,
+  implementation, a real test run, a review panel with three reviewers and
+  two required votes, a bounded kickback repair, and an approval bound to the
+  exact bytes, using only public runtime exports and no model account.
+  `pnpm example:feature` runs it, and the clean-consumer check compiles and
+  runs it from the packed tarballs.
 
 - **A team as a workflow file:** `workflow(name, { brief, roles, stages })`
   and `stage(name, { agent | run | panel | input, writes, desc, gate,
@@ -132,6 +194,32 @@ engine and memory packages track their own versions independently.
 
 ### Changed
 
+- **The old runtime name:** Remove the pre-rename name from the twenty tracked
+  files that carried it, including the consult instruction and the two plugin
+  system prompts a model reads at run time. English uses of the word stay. A
+  grep of the word now finds only the diff module's ordinary sentence.
+- **Review-loop status typing:** `ConvergenceStatus` is a type alias rather
+  than an interface, and `EngineReceiptRejection` is exported, so a consumer
+  can name the rejection element type directly instead of by indexed access.
+- **Tarball test selection:** Run the two package-command integration tests
+  with `OBVERSA_TEST_REAL_PACK=1 pnpm test:tarballs`. The default command skips
+  those tests; `verify:d15` enables them.
+- **Review identity records:** Every engine call managed by the graph executor
+  records its requested and reported adapter, provider, model family, and
+  model, including primary and fallback calls and calls without a reported
+  identity. Review completion
+  checks generator and repair history against reported reviewer identities,
+  including cached passes. Unknown writer calls count as their declared
+  targets; data-only nodes have no engine identity.
+- **Review-loop graph type 3:** Generator and repair targets, including all
+  declared substitutions, cannot share a provider or model family with any
+  review target or substitution. This rule applies without reviewer diversity
+  enabled. Stored graph type 1 and 2 plans are refused before execution.
+- **Runner usage type:** `SupervisedRunUsage` exposes `reported`, `partial`,
+  and `unknown` variants on run status and active-node usage. Consumers with an
+  exhaustive switch must handle `partial`, whose totals are measured lower
+  bounds and whose `unknownCalls` counts calls without receipts.
+
 - A failed engine check or call retires what the failure proves: bad
   credentials retire the selected adapter and provider; a missing model,
   exhausted credit or an exhausted quota retire the provider and model; a
@@ -159,112 +247,6 @@ engine and memory packages track their own versions independently.
   error together. It counted each stream on its own before.
 - A timeout is decided by the deadline against the moment the child's exit
   was observed. Teardown work after the exit never counts.
-
-### Fixed
-
-- A result whose assistant text is not a string is rejected by the shared
-  engine validator, in complete results and in incomplete evidence alike;
-  an empty string is still valid text.
-- **A child that never exits is a timeout:** A model CLI stopped at its
-  deadline without an exit code is reported as a timeout, not as an exit
-  with no code. A child that exits leaving a helper holding its output pipe
-  no longer holds the result until the deadline.
-- **Invalid team turns:** Reject bad results before saving completion, and
-  retain earlier messages when replay finds invalid saved result content.
-- **Early team review validation:** Invalid panel or callback settings are
-  rejected when a callable team is created, before its members start work.
-
-## [1.0.0]
-
-### Added
-
-- **Type declarations for the review packages:** `@obversa/source` and
-  `@obversa/surfacer` now ship declaration files generated from their
-  JSDoc, with a `types` condition on every export entry. A TypeScript
-  reader importing either package resolves types instead of failing with
-  an implicit-any import. The clean-consumer check imports both strictly,
-  so the declarations cannot be dropped without failing the check.
-- `@obversa/runtime` 1.0.0: stored graph plans, bounded node attempts,
-  durable events and artifacts, restartable execution, workspace checks,
-  Callback Gates, and proof-bound decisions.
-- `@obversa/engine` 0.1.0 and six engine plugins at 0.1.0: typed engine
-  results through Agent SDK, Claude, Codex, Grok, OpenCode, and Anthropic adapters.
-- `@obversa/runner` 0.1.0: local worker supervision with stored run inputs,
-  bounded restart, workspace leases, status, and process cleanup within the
-  reported platform capability. Worker stdout and stderr share a fixed
-  1,000,000-byte cap; excess output can fail the run with `OUTPUT_LIMIT`.
-- `@obversa/runner`: `resumeSupervisedRun` and `ResumeSupervisedRunOptions`
-  reopen an exact recorded graph pause using the stored definition and run
-  limits. The host action policy runs again before node effects.
-- Action-policy `wait` decisions record a graph pause with its reason and
-  request. A `deny` decision records a failed node with `DENIED`.
-- `@obversa/engine/command`: optional `ownerId` on command and cleanup requests,
-  inherited `OBVERSA_RUN_OWNER` markers, `commandCleanupCapability`,
-  `CommandCleanupCapability`, and `inspectOwnerMarkedProcesses` for process
-  ownership and cleanup inspection.
-- `@obversa/memory` 0.1.0 with `@obversa/memory-simple` and
-  `@obversa/memory-git` at 0.1.0: replaceable memory with conformance tests.
-- `@obversa/source` 0.1.0 and `@obversa/surfacer` 0.1.0: local review
-  surfaces over public package contracts.
-- Public guides and runnable examples for installation, graphs, storage,
-  memory, workspaces, callbacks, proof-bound approval, hosts, and offline
-  review.
-- **Safe file changes:** Capture complete source records, bind approval to exact
-  output bytes, back up targets, read each result back, and pause on a mismatch.
-- **Stored proof reuse:** Resolve accepted results through the host cache with
-  current evidence, graph, workspace anchor, and reviewer identity. Each lookup
-  checks the stored completion and acceptance again.
-- **Read-only proof packets:** Share bounded, immutable source evidence through
-  a host cache. Check authoritative revisions, reuse unchanged source reads,
-  and invalidate only dependent packets. Effectful jobs cannot use the cache.
-- **Host-selected worker environment:** Accept an optional readonly
-  `environmentVariables` list on start and resume. Copy only present values of
-  those names from the watchdog, without storing credentials in run inputs or
-  host records. Default environment inheritance remains restrictive.
-- **Forge helper example:** Ship `examples/packages/forge-helper.ts` with
-  its documentation page. It is the shipping step after a review gate:
-  push the work branch, open or update one pull request with a body from
-  the commit bodies, pass a strict gate that ships only an exact-revision
-  pass, squash the merge with the same synthesis, and delete the branch.
-  The gate prints strict `RESULT:` verdicts with the reason on the line.
-  `pnpm example:forge` runs it offline against a mock host, and the
-  clean-consumer check runs it from the packed tarballs.
-- **Feature-delivery example:** Ship a runnable feature-delivery production
-  line, `examples/production-lines/feature-delivery.line.ts`, with its
-  documentation page. It takes one written issue through analysis,
-  implementation, a real test run, a review panel with three reviewers and
-  two required votes, a bounded kickback repair, and an approval bound to the
-  exact bytes, using only public runtime exports and no model account.
-  `pnpm example:feature` runs it, and the clean-consumer check compiles and
-  runs it from the packed tarballs.
-
-### Changed
-
-- **The old runtime name:** Remove the pre-rename name from the twenty tracked
-  files that carried it, including the consult instruction and the two plugin
-  system prompts a model reads at run time. English uses of the word stay. A
-  grep of the word now finds only the diff module's ordinary sentence.
-- **Review-loop status typing:** `ConvergenceStatus` is a type alias rather
-  than an interface, and `EngineReceiptRejection` is exported, so a consumer
-  can name the rejection element type directly instead of by indexed access.
-- **Tarball test selection:** Run the two package-command integration tests
-  with `OBVERSA_TEST_REAL_PACK=1 pnpm test:tarballs`. The default command skips
-  those tests; `verify:d15` enables them.
-- **Review identity records:** Every engine call managed by the graph executor
-  records its requested and reported adapter, provider, model family, and
-  model, including primary and fallback calls and calls without a reported
-  identity. Review completion
-  checks generator and repair history against reported reviewer identities,
-  including cached passes. Unknown writer calls count as their declared
-  targets; data-only nodes have no engine identity.
-- **Review-loop graph type 3:** Generator and repair targets, including all
-  declared substitutions, cannot share a provider or model family with any
-  review target or substitution. This rule applies without reviewer diversity
-  enabled. Stored graph type 1 and 2 plans are refused before execution.
-- **Runner usage type:** `SupervisedRunUsage` exposes `reported`, `partial`,
-  and `unknown` variants on run status and active-node usage. Consumers with an
-  exhaustive switch must handle `partial`, whose totals are measured lower
-  bounds and whose `unknownCalls` counts calls without receipts.
 
 ### Fixed
 
@@ -336,3 +318,15 @@ engine and memory packages track their own versions independently.
   selected host entry as a `SupervisedRunError` with `code: 'HOST_MODULE'` and the
   original cause. Run-root resolution and path containment checks keep their
   existing boundaries.
+
+- A result whose assistant text is not a string is rejected by the shared
+  engine validator, in complete results and in incomplete evidence alike;
+  an empty string is still valid text.
+- **A child that never exits is a timeout:** A model CLI stopped at its
+  deadline without an exit code is reported as a timeout, not as an exit
+  with no code. A child that exits leaving a helper holding its output pipe
+  no longer holds the result until the deadline.
+- **Invalid team turns:** Reject bad results before saving completion, and
+  retain earlier messages when replay finds invalid saved result content.
+- **Early team review validation:** Invalid panel or callback settings are
+  rejected when a callable team is created, before its members start work.
