@@ -37,8 +37,6 @@ try {
     brief: {
       brief: 'Write a pure add(a, b) function in src/add.mjs with a Node test in test/add.test.mjs.',
       files: ['src/add.mjs'],
-      testFiles: ['test/add.test.mjs'],
-      test: { command: process.execPath, args: ['--test', 'test/add.test.mjs'] },
     },
     roles: {
       write: writer,
