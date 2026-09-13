@@ -369,6 +369,7 @@ export const EXPECTED_FILES = {
     'package/LICENSE',
     'package/README.md',
     'package/dist/agent-response.d.ts',
+    'package/dist/declarative.d.ts',
     'package/dist/feature-delivery.d.ts',
     'package/dist/index.d.ts',
     'package/dist/index.js',
