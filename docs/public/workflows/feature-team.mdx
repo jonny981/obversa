@@ -1,15 +1,16 @@
 ---
 title: "Feature delivery"
-description: "One brief to an approved change through eleven small steps: research with its own reviews, a plan, tests first, an implementation loop held to green tests and a panel, verification, approval, evidence."
+description: "One brief to a change a person is asked to ship, in nine small steps: research with its own reviews, a plan, tests first, an implementation held to green tests and a panel, a person's decision, evidence."
 ---
 
-Hand a brief to a team and get back an approved change with the evidence
-beside it, the way a real team ships a feature: research first, a plan
-that is reviewed, tests before code, an implementation that repeats with
-the reviewers' findings until the tests pass and the panel accepts, one
-more verification, an approval, and a record of what happened. Inference
-sits at the leaves; everything between the leaves is a check the run can
-hold to.
+Hand a brief to a team and get back a change ready for a person to ship,
+the way a real team delivers a feature: research first, each note
+reviewed; a plan that is reviewed; tests before code; an implementation
+that runs again with the reviewers' findings until the tests pass and the
+panel accepts; then the question to a person, and the evidence written
+from the record. Inference sits at the leaves; everything between the
+leaves is a check the run can hold to. The whole team is one file that
+reads top to bottom.
 
 ```bash
 npm install @obversa/runtime @obversa/teams @obversa/engine-claude-cli @obversa/engine-codex
@@ -18,119 +19,150 @@ npm install @obversa/runtime @obversa/teams @obversa/engine-claude-cli @obversa/
 ## The file
 
 ```ts
-import { ClaudeCliEngine } from '@obversa/engine-claude-cli';
-import { CodexEngine } from '@obversa/engine-codex';
+import { claude } from '@obversa/engine-claude-cli';
+import { codex } from '@obversa/engine-codex';
 import { run } from '@obversa/runtime';
-import { featureDelivery } from '@obversa/teams';
+import { fromFile, person, stage, workflow } from '@obversa/teams';
 
-const workspace = process.cwd();
-const analyse = {
-  engine: new ClaudeCliEngine({ defaultModel: 'claude-sonnet-4-5', permissionMode: 'bypassPermissions' }),
-  identity: {
-    adapter: 'claude-cli', provider: 'anthropic', modelFamily: 'claude', model: 'claude-sonnet-4-5',
-  },
-};
-const implement = {
-  engine: new CodexEngine({ defaultModel: 'gpt-5.6-luna', permissionMode: 'bypassPermissions' }),
-  identity: {
-    adapter: 'codex', provider: 'openai', modelFamily: 'gpt', model: 'gpt-5.6-luna',
-  },
-};
-const reviewer = {
-  engine: new ClaudeCliEngine({ defaultModel: 'claude-sonnet-4-5', permissionMode: 'bypassPermissions' }),
-  identity: {
-    adapter: 'claude-cli', provider: 'anthropic', modelFamily: 'claude', model: 'claude-sonnet-4-5',
-  },
-};
-const approve = {
-  engine: new ClaudeCliEngine({ defaultModel: 'claude-sonnet-4-5', permissionMode: 'bypassPermissions' }),
-  identity: {
-    adapter: 'claude-cli', provider: 'anthropic', modelFamily: 'claude', model: 'claude-sonnet-4-5',
-  },
-};
+/**
+ * A feature, delivered the way a team delivers one. The roles are named once;
+ * every stage is a small block of nouns: who does it, what it writes, who
+ * reads it, where a red result goes back to. Inference happens only where a
+ * role is named; every other stage is a command or a person.
+ */
+const team = workflow('feature-delivery', {
+  brief: fromFile('briefs/triple.md'),
+  options: { timeout: '10m' },
 
-const team = featureDelivery({
-  brief: 'Deliver a pure triple(value) function in src/triple.mjs with a Node test in test/triple.test.mjs.',
-  workspace,
-  files: ['src/triple.mjs', 'test/triple.test.mjs'],
-  testFiles: ['test/triple.test.mjs'],
-  test: { command: 'node', args: ['--test', 'test/triple.test.mjs'] },
-  analyse,
-  implement,
-  reviewers: [{ name: 'correctness', seat: reviewer, scope: 'implementation' }],
-  reviewThreshold: 1,
-  approve,
-  maxKickbacks: { plan: 3, 'tests-first': 3, implement: 3 },
+  roles: {
+    analyse: claude('claude-sonnet-4-5'),
+    implement: codex('gpt-5.6-luna'),
+    review: [claude('claude-sonnet-4-5'), codex('gpt-5.6-luna')],
+    approve: person('Ship this change?'),
+  },
+
+  stages: [
+    stage('research-context', {
+      agent: 'analyse',
+      writes: 'team-output/research-context.md',
+      desc: 'Read the workspace and write down what the change touches.',
+      gate: 'The context note is in the workspace and a reviewer has accepted it.',
+      reviewedBy: 'review',
+      retry: 3,
+    }),
+
+    stage('research-requirements', {
+      agent: 'analyse',
+      writes: 'team-output/research-requirements.md',
+      desc: 'Turn the brief and the context note into requirements, one REQ-n per line.',
+      gate: 'The requirements note is in the workspace and a reviewer has accepted it.',
+      reviewedBy: 'review',
+      retry: 3,
+    }),
+
+    stage('plan', {
+      agent: 'analyse',
+      writes: 'team-output/plan.md',
+      desc: 'Write an executable plan from the requirements, one check per REQ-n.',
+      gate: 'Every requirement has a check in the plan.',
+      reviewedBy: 'review',
+      retry: 3,
+    }),
+
+    stage('tests-first', {
+      agent: 'implement',
+      writes: 'test/triple.test.mjs',
+      desc: 'Write the declared test files from the accepted plan before any implementation exists.',
+      gate: 'Every declared test file exists and covers the plan.',
+      reviewedBy: 'review',
+      retry: 3,
+    }),
+
+    stage('implement', {
+      agent: 'implement',
+      writes: 'src/triple.mjs',
+      desc: 'Write the code to the plan and the tests.',
+      gate: 'The source file exists.',
+      retry: 3,
+    }),
+
+    stage('test', {
+      run: ['node', '--test', 'test/triple.test.mjs'],
+      desc: 'Run the tests; a red run goes back to implement with the output.',
+      gate: 'The test command exits 0.',
+      sendsBackTo: 'implement',
+    }),
+
+    stage('review', {
+      panel: 'review',
+      agree: 1,
+      desc: 'Read the change and the test result against the plan.',
+      sendsBackTo: 'implement',
+    }),
+
+    stage('approve', {
+      input: 'approve',
+      desc: 'Put the verified change in front of a person.',
+      gate: 'A person has said yes.',
+    }),
+
+    stage('close', {
+      agent: 'analyse',
+      writes: ['team-output/evidence.md', 'team-output/learning.md'],
+      desc: 'Write the evidence of the run and what was learned, from the record alone.',
+      gate: 'Both notes are in the workspace.',
+    }),
+  ],
+
 });
 
-const result = await run(team, {
-  cwd: workspace,
-  recordTo: 'team-output/events.jsonl',
-});
+const result = await run(team);
 console.log(JSON.stringify(result.outcome, null, 2));
-if (result.outcome.status !== 'pass') process.exitCode = 1;
 ```
 
-A writing seat can write anywhere the process can: the file starts its
-Claude and Codex seats with permission prompts off, which is what lets a
-model write files. Run it in a directory you are willing to let a model
-change. `recordTo` writes every event of the run to a file as it happens.
+A writing seat can write anywhere the process can: the seat helpers start
+their engines with permission prompts off, which is what lets a model
+write files. Run it in a directory you are willing to let a model change.
+`recordTo` writes every event of the run to a file as it happens.
 
 ## What a run printed
 
-From one real run of this file. It took thirteen minutes. The tests
-review sent the tests back once, with three gaps named, and accepted the
-second version; every other step passed first time.
+From one real run of this file. The run stops at `approve` with the
+question on the record, because a person answers it, not the file; that
+is where a team hands over. Everything before it ran on real engines.
 
 ```json
 {
-  "status": "pass",
-  "summary": "dag \"feature-delivery\": all 11 node(s) green",
+  "status": "paused",
+  "summary": "waiting for a person: Ship this change?",
   "data": {
-    "prepare": {
-      "status": "pass",
-      "summary": "prepared run unassigned:2026-09-13T00:28:28.182Z"
-    },
     "research-context": {
       "status": "pass",
-      "summary": "Review panel: 1/1 reviewer(s) cleared."
+      "summary": "Review panel: 2/2 reviewer(s) cleared."
     },
     "research-requirements": {
       "status": "pass",
-      "summary": "Review panel: 1/1 reviewer(s) cleared."
+      "summary": "Review panel: 2/2 reviewer(s) cleared."
     },
     "plan": {
       "status": "pass",
-      "summary": "plan covers REQ-1, REQ-2, REQ-3, REQ-4, REQ-5, REQ-6, REQ-7, REQ-8, REQ-9, REQ-10, REQ-11, REQ-12, REQ-13, REQ-14, REQ-15, REQ-16, REQ-17"
-    },
-    "plan-review": {
-      "status": "pass",
-      "summary": "Review panel: 1/1 reviewer(s) cleared.",
-      "data": {
-        "findings": [],
-        "escalatedFindings": [],
-        "errors": [],
-        "results": [
-          {
-            "kind": "verdict",
-            "name": "correctness",
-            "met": true,
-            "reason": "Requirements and plan correctly capture the work brief. All aspects of the pure triple function and Node test are specified: mathematical behavior (positive/zero/negative multiplication by 3), purity constraints (deterministic, no side effects, input-only dependency), module format (ESM with named export), file paths (src/triple.mjs, test/triple.test.mjs), and test requirements (Node built-in runner, three coverage cases). The plan's two tasks and 17 acceptance checks directly map to the requirements with no gaps or misinterpretations.",
-            "scope": "implementation"
-          }
-        ],
-        "passed": 1,
-        "required": 1,
-        "severityCounts": {}
-      }
+      "summary": "Review panel: 2/2 reviewer(s) cleared."
     },
     "tests-first": {
       "status": "pass",
-      "summary": "Updated test/triple.test.mjs with decimal, invalid-input, and non-finite number coverage. No implementation file was created."
+      "summary": "Review panel: 2/2 reviewer(s) cleared."
     },
-    "tests-review": {
+    "implement": {
       "status": "pass",
-      "summary": "Review panel: 1/1 reviewer(s) cleared.",
+      "summary": "Added pure ES module triple(value) implementation in src/triple.mjs. Existing Node tests pass: 4/4."
+    },
+    "test": {
+      "status": "pass",
+      "summary": "`node` exited 0"
+    },
+    "review": {
+      "status": "pass",
+      "summary": "Review panel: 2/2 reviewer(s) cleared.",
       "data": {
         "findings": [],
         "escalatedFindings": [],
@@ -138,225 +170,193 @@ second version; every other step passed first time.
         "results": [
           {
             "kind": "verdict",
-            "name": "correctness",
+            "name": "review-1",
             "met": true,
-            "reason": "Test file is comprehensive and correct. All assertions are mathematically sound, edge cases are well-covered, and test structure follows Node.js conventions.",
-            "scope": "implementation"
+            "reason": "All 10 requirements satisfied. Function src/triple.mjs is pure (no side effects), correctly implements multiplication by 3, and exports as ES module. Test suite test/triple.test.mjs uses Node.js built-in test runner, provides 4 test cases covering positive, negative, zero, and decimal inputs, and executes successfully with 100% pass rate. Research artifacts (context, requirements, plan) are comprehensive and accurately document the implementation. No external dependencies introduced."
+          },
+          {
+            "kind": "verdict",
+            "name": "review-2",
+            "met": true,
+            "reason": "The requested pure triple(value) function and Node test are complete. src/triple.mjs exports value * 3 without side effects, and test/triple.test.mjs uses node:test with coverage for positive, negative, zero, and decimal values. The exact gate command passes all 4 tests."
           }
         ],
-        "passed": 1,
+        "passed": 2,
         "required": 1,
         "severityCounts": {}
       }
     },
-    "implement": {
-      "status": "pass",
-      "summary": "Review panel: 1/1 reviewer(s) cleared."
-    },
-    "verify": {
-      "status": "pass",
-      "summary": "`node` exited 0"
-    },
     "approve": {
-      "status": "pass",
-      "summary": "Implementation meets all 17 requirements. The triple() function correctly multiplies input by 3, maintains purity (no side effects, deterministic), uses proper ESM module format, and includes comprehensive test coverage with Node's built-in test runner. Review confirms all 6 test cases pass."
+      "status": "paused",
+      "summary": "waiting for a person: Ship this change?",
+      "data": {
+        "requestId": "approve#1#a6f6e4acfcf4ee7450d661524297313af24ef2701ebdca49965efaca587767ca",
+        "gateId": "approve",
+        "gateVersion": 1,
+        "digest": "a6f6e4acfcf4ee7450d661524297313af24ef2701ebdca49965efaca587767ca",
+        "decisionText": "Ship this change?",
+        "responseSchema": {
+          "type": "object",
+          "properties": {
+            "approved": {
+              "type": "boolean"
+            },
+            "note": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "approved"
+          ]
+        },
+        "input": {
+          "review": "Review panel: 2/2 reviewer(s) cleared."
+        },
+        "presentation": {}
+      }
     },
     "close": {
-      "status": "pass",
-      "summary": "evidence and learning records written"
+      "status": "aborted",
+      "summary": "blocked by a failed dependency"
     }
   }
 }
 ```
 
 The notes the team left in `team-output/`, in the order they were
-written: the requirements, the plan, the approval and the evidence. The
-context note and the learning note are in the same directory.
+written: the requirements and the plan. The context note is in the same
+directory; the evidence and the learning are written by the last stage,
+after the person's answer.
 
 ```md
 # Requirements: Triple Function
 
-## Function Identity
-
-**REQ-1:** The function must be named `triple`
-
-**REQ-2:** The function must accept a single parameter named `value`
-
-## Mathematical Behavior
-
-**REQ-3:** When given a positive number, return that number multiplied by 3
-
-**REQ-4:** When given zero, return zero
-
-**REQ-5:** When given a negative number, return that number multiplied by 3
-
-## Purity Constraints
-
-**REQ-6:** The function must produce the same output for the same input (deterministic)
-
-**REQ-7:** The function must have no side effects (no I/O, no mutations, no external state changes)
-
-**REQ-8:** The return value must depend only on the input parameter
-
-## Module Format
-
-**REQ-9:** Implementation must be in `src/triple.mjs` using ESM module format
-
-**REQ-10:** The function must be exported as a named export using `export function triple(value) { ... }`
-
-## Test Requirements
-
-**REQ-11:** Test file must be at `test/triple.test.mjs` using ESM module format
-
-**REQ-12:** Test must import the function with `import { triple } from '../src/triple.mjs'`
-
-**REQ-13:** Test must use Node's built-in test runner (import from `node:test`)
-
-**REQ-14:** Test must be executable with `node --test test/triple.test.mjs`
-
-## Test Coverage
-
-**REQ-15:** Test must verify behavior with a positive number
-
-**REQ-16:** Test must verify behavior with zero
-
-**REQ-17:** Test must verify behavior with a negative number
+REQ-1: Function must be named `triple` and accept a `value` parameter
+REQ-2: Function must be pure (no side effects, deterministic output, no external state mutation, no I/O)
+REQ-3: Function must return the input value multiplied by 3
+REQ-4: Function must be exported from `src/triple.mjs` as an ES module
+REQ-5: Test file must be located at `test/triple.test.mjs`
+REQ-6: Test file must use Node.js built-in test runner
+REQ-7: Test file must be an ES module
+REQ-8: Test must validate correctness of the triple function
+REQ-9: Test must be executable via `node --test test/triple.test.mjs`
+REQ-10: No external dependencies beyond Node.js runtime
 ```
 
 ```md
-# Plan: Triple Function
+# Implementation Plan: Triple Function
 
-## Tasks
+## Overview
 
-1. **Create `src/triple.mjs`**
-   - Write named export `triple(value)` that multiplies input by 3
-   - Use ESM module format
-   - Ensure pure implementation (no side effects, deterministic, input-only dependency)
+Implement a pure `triple(value)` function in `src/triple.mjs` with Node.js test coverage in `test/triple.test.mjs`.
 
-2. **Create `test/triple.test.mjs`**
-   - Import `{ triple }` from `../src/triple.mjs`
-   - Use Node's built-in test runner (`node:test`)
-   - Write three test cases: positive number, zero, negative number
-   - Verify executable with `node --test test/triple.test.mjs`
+## Implementation Steps
 
-## Acceptance Checks
+### Step 1: Create Source File
 
-- [ ] Function named `triple` exists (REQ-1)
-- [ ] Function accepts single parameter `value` (REQ-2)
-- [ ] Positive input multiplied by 3 (REQ-3)
-- [ ] Zero returns zero (REQ-4)
-- [ ] Negative input multiplied by 3 (REQ-5)
-- [ ] Deterministic output (REQ-6)
-- [ ] No side effects (REQ-7)
-- [ ] Return depends only on input (REQ-8)
-- [ ] Implementation at `src/triple.mjs` using ESM (REQ-9)
-- [ ] Named export `export function triple(value) { ... }` (REQ-10)
-- [ ] Test at `test/triple.test.mjs` using ESM (REQ-11)
-- [ ] Test imports `import { triple } from '../src/triple.mjs'` (REQ-12)
-- [ ] Test uses `node:test` (REQ-13)
-- [ ] Test executable with `node --test test/triple.test.mjs` (REQ-14)
-- [ ] Test verifies positive number (REQ-15)
-- [ ] Test verifies zero (REQ-16)
-- [ ] Test verifies negative number (REQ-17)
-```
+**Action:** Create `src/triple.mjs` with the triple function
 
-```md
-# Approval: Triple Function
+**Implementation:**
+- Create the `src/` directory if it doesn't exist
+- Write a function named `triple` that accepts a `value` parameter
+- Implement the function to return `value * 3`
+- Export the function as an ES module using `export function triple(value)`
+- Ensure the function is pure: no side effects, no external state, no I/O
 
-**Status:** APPROVED ✅
+**Checks:**
+- [ ] **REQ-1:** Function is named `triple` and accepts a `value` parameter
+- [ ] **REQ-2:** Function is pure (no side effects, deterministic, no external state mutation, no I/O)
+- [ ] **REQ-3:** Function returns input value multiplied by 3
+- [ ] **REQ-4:** Function is exported from `src/triple.mjs` as an ES module
+- [ ] **REQ-10:** No external dependencies beyond Node.js runtime (verify no imports in source file)
 
-**Marker:** unassigned:2026-09-13T00:28:28.182Z
+### Step 2: Create Test File
 
-## Summary
+**Action:** Create `test/triple.test.mjs` with test coverage
 
-The triple function implementation meets all 17 requirements. The function correctly multiplies its input by 3, maintains purity (no side effects, deterministic, input-only dependency), uses proper ESM module format, and includes comprehensive test coverage using Node's built-in test runner.
+**Implementation:**
+- Create the `test/` directory if it doesn't exist
+- Import Node.js built-in `test` and `assert` modules
+- Import the `triple` function from `../src/triple.mjs`
+- Write test cases that validate:
+  - Positive numbers are tripled correctly
+  - Negative numbers are tripled correctly
+  - Zero returns zero
+  - Decimal values are tripled correctly
+- Use Node.js built-in test runner syntax (`test()` function)
+- Ensure the file is an ES module (`.mjs` extension, ES import/export syntax)
 
-## Requirements Compliance
+**Checks:**
+- [ ] **REQ-5:** Test file is located at `test/triple.test.mjs`
+- [ ] **REQ-6:** Test file uses Node.js built-in test runner
+- [ ] **REQ-7:** Test file is an ES module
+- [ ] **REQ-8:** Test validates correctness of the triple function
+- [ ] **REQ-10:** No external dependencies beyond Node.js runtime (verify only built-in modules imported)
 
-### Function Identity & Behavior (REQ-1 to REQ-5)
-- Named `triple` with single parameter `value`
-- Correctly multiplies positive numbers by 3 (4 → 12)
-- Returns zero for zero input
-- Correctly multiplies negative numbers by 3 (-5 → -15)
+### Step 3: Verify Test Execution
 
-### Purity Constraints (REQ-6 to REQ-8)
-- Pure implementation: `return value * 3`
-- No side effects (no I/O, mutations, or external state)
-- Deterministic output depends only on input
+**Action:** Execute the test to confirm it runs and passes
 
-### Module Format (REQ-9 to REQ-10)
-- Implementation at `src/triple.mjs` using ESM
-- Named export: `export function triple(value) { ... }`
+**Implementation:**
+- Run `node --test test/triple.test.mjs` from the project root
+- Verify all test cases pass
+- Confirm the command exits with status 0 (success)
 
-### Test Requirements (REQ-11 to REQ-17)
-- Test at `test/triple.test.mjs` using ESM
-- Correct import: `import { triple } from '../src/triple.mjs'`
-- Uses Node's test runner: `import { test } from 'node:test'`
-- Executable with `node --test test/triple.test.mjs`
-- Verifies positive number, zero, and negative number
+**Checks:**
+- [ ] **REQ-9:** Test is executable via `node --test test/triple.test.mjs`
+- [ ] All test cases pass successfully
 
-## Exceeds Requirements
+## Verification Checklist
 
-The test suite includes additional coverage beyond the 17 specified requirements:
-- Decimal numbers (1.5 → 4.5)
-- Non-finite values (Infinity, -Infinity, NaN)
-- Non-numeric inputs (null, undefined, strings, objects)
+All requirements mapped to checks:
 
-## Review Evidence
+- [ ] **REQ-1:** Function named `triple` accepting `value` parameter (Step 1)
+- [ ] **REQ-2:** Function is pure (Step 1)
+- [ ] **REQ-3:** Function returns input × 3 (Step 1)
+- [ ] **REQ-4:** Exported from `src/triple.mjs` as ES module (Step 1)
+- [ ] **REQ-5:** Test file at `test/triple.test.mjs` (Step 2)
+- [ ] **REQ-6:** Test uses Node.js built-in test runner (Step 2)
+- [ ] **REQ-7:** Test file is ES module (Step 2)
+- [ ] **REQ-8:** Test validates correctness (Step 2)
+- [ ] **REQ-9:** Test executable via `node --test test/triple.test.mjs` (Step 3)
+- [ ] **REQ-10:** No external dependencies (Steps 1 & 2)
 
-The correctness review confirms:
-- All 6 test cases pass
-- Function is pure with no side effects
-- Implementation correctly multiplies input by 3 for all numeric values
+## Files to Create
 
-## Decision
+1. `src/triple.mjs` - Source implementation
+2. `test/triple.test.mjs` - Test suite
 
-**APPROVED** for delivery. The implementation is correct, complete, and ready for use.
-```
+## Success Criteria
 
-```md
-Run marker: unassigned:2026-09-13T00:28:28.182Z
-Started: 2026-09-13T00:28:28.182Z
-Verification: passed
-Files: src/triple.mjs, test/triple.test.mjs
+- All 10 requirements have corresponding checks in the plan
+- Test command executes successfully: `node --test test/triple.test.mjs`
+- All test cases pass
+- No external dependencies introduced
+- Function maintains purity guarantees
 ```
 
 The files the models wrote. The tests came first, from the plan; the
 second version is the one the review accepted.
 
 ```js
+import test from 'node:test';
 import assert from 'node:assert/strict';
-import { test } from 'node:test';
-
 import { triple } from '../src/triple.mjs';
 
-test('triples a positive number', () => {
+test('triples positive numbers', () => {
   assert.strictEqual(triple(4), 12);
 });
 
-test('triples zero', () => {
+test('triples negative numbers', () => {
+  assert.strictEqual(triple(-4), -12);
+});
+
+test('returns zero for zero', () => {
   assert.strictEqual(triple(0), 0);
 });
 
-test('triples a negative number', () => {
-  assert.strictEqual(triple(-5), -15);
-});
-
-test('triples a decimal number', () => {
+test('triples decimal values', () => {
   assert.strictEqual(triple(1.5), 4.5);
-});
-
-test('preserves multiplication behavior for non-finite numbers', () => {
-  assert.strictEqual(triple(Infinity), Infinity);
-  assert.strictEqual(triple(-Infinity), -Infinity);
-  assert.ok(Number.isNaN(triple(Number.NaN)));
-});
-
-test('returns predictable results for non-number inputs', () => {
-  assert.strictEqual(triple(null), 0);
-  assert.ok(Number.isNaN(triple(undefined)));
-  assert.ok(Number.isNaN(triple('not a number')));
-  assert.ok(Number.isNaN(triple({})));
 });
 ```
 
@@ -368,56 +368,50 @@ export function triple(value) {
 
 ## The team's shape
 
-Eleven steps, each needing the one before it. Four of them repeat: the
-two research steps and the plan run again until a reviewer accepts the
-note, and the implementation step runs again until the test command
-exits 0 and the panel accepts, three cycles at most. A rejected plan, test or
-implementation goes back to the step that owns it with the reviewer's
-findings, each target with its own budget.
+Nine stages, each needing the one before it. A reviewed stage runs again
+with the reviewer's findings until the review accepts, a red test or a
+rejected review sends the work back to the stage it names, and each
+stage that repeats carries its own `retry`.
 
 | step | does | done when |
 | --- | --- | --- |
-| prepare | Clear any approval left by an earlier run and mark the start of this one. | No approval note exists and the run marker is recorded. |
-| research-context | Read the workspace and write down what the change touches, until a reviewer accepts the note. | The context note is in the workspace and a reviewer has accepted it. |
-| research-requirements | Turn the brief and the context note into requirements, one REQ-n per line, each testable and traced to the brief. | Every requirement is testable, traces to the brief, and asks for nothing the brief does not. |
-| plan | Write an executable plan from the requirements, one acceptance check per job. | Every requirement has a check in the plan and no check asks for more than its requirement. |
-| plan-review | Have the reviewers read the plan against the requirements and send it back if it falls short. | At least the threshold number of reviewers have accepted the plan. |
-| tests-first | Write the declared test files from the accepted plan before any implementation exists. | Every declared test file exists and is not empty. |
-| tests-review | Have the reviewers check that the tests cover the plan and that any red test is red for a stated reason. | At least the threshold number of reviewers have accepted the tests. |
-| implement | Write the code to the plan and the tests, run the test command, and repeat with the reviewers' findings until it passes. | The test command exits 0 and the reviewers have accepted the change, within three cycles. |
-| verify | Run the test command once more on the final files. | The final test command exits 0. |
-| approve | Record that the verified change is ready to ship. | An approval note carrying this run's marker is in the workspace. |
-| close | Write the evidence of the run and what was learned, from the record alone. | The evidence note and the learning note are in the workspace. |
+| research-context | Read the workspace and write down what the change touches. | The context note is in the workspace and a reviewer has accepted it. |
+| research-requirements | Turn the brief and the context note into requirements, one REQ-n per line. | The requirements note is in the workspace and a reviewer has accepted it. |
+| plan | Write an executable plan from the requirements, one check per REQ-n. | Every requirement has a check in the plan. |
+| tests-first | Write the declared test files from the accepted plan before any implementation exists. | Every declared test file exists and covers the plan. |
+| implement | Write the code to the plan and the tests. | The source file exists. |
+| test | Run the tests; a red run goes back to implement with the output. | The test command exits 0. |
+| review | Read the change and the test result against the plan. | A person has said yes. |
+| approve | Put the verified change in front of a person. | A person has said yes. |
+| close | Write the evidence of the run and what was learned, from the record alone. | Both notes are in the workspace. |
 
-Where a step's gate names a file, the package checks the file after the
+Where a stage's gate names a file, the package checks the file after the
 job. Where it names an exit code, the command decides. Where it names a
-reviewer, the reviewer's decision file decides. A model's own report of
-its work never passes a step.
+reviewer, the reviewer's decision decides. A model's own report of its
+work never passes a stage.
 
 ## Gotchas
 
-- **Tests come first and may be red.** The `testFiles` you declare are
-  written from the plan before any implementation exists. The tests-review
-  step asks the reviewers whether a red test is red for a stated reason;
-  the implement step is what turns it green.
-- **Requirements carry ids.** Every requirement line carries `REQ-n`, every
-  check in the plan names the requirement it covers, and the plan step
-  compares the two sets. A plan that misses one goes back to its writer
-  with the missing ids named; a requirements note with no ids goes back to
-  its own writer.
+- **Tests come first and may be red.** The tests-first stage writes the
+  test file from the plan before any implementation exists; its review
+  asks whether a red test is red for a stated reason, and the implement
+  stage is what turns it green.
+- **A stage writes what it declares and nothing else.** `writes` names the
+  files a stage may write; a stage that touches another declared file
+  fails by name, so the tests-first stage cannot write the implementation.
 - **A note that comes back unchanged fails.** A writer sent its review's
-  findings must rewrite the note; the same bytes again end the loop with a
-  plain summary instead of a second identical review.
-- **A stale approval cannot pass a new run.** The prepare step removes the
-  approval note, and the approve step writes one carrying this run's
-  marker. An approval from yesterday is not an approval today.
+  findings must rewrite the note; the same bytes again end the stage with
+  a plain summary instead of a second identical review.
 - **The implementer and every reviewer are different model families.** The
-  research, plan and approve seats are free to share a family with either.
+  analyse seat is free to share a family with either.
 - **A reviewer's decision is its file.** Each reviewer writes
   `reviews/<name>.json`; the team reads that file first and the reply
   second. A reply with no decision in either is asked for once more, then
   the review stops with a plain summary rather than a rejection of the
   work.
+- **A person's answer is not in the file.** The run pauses at `approve`
+  with the question pending. [A person decides](/workflows/approval) shows
+  how a stored callbacks client carries the answer into the next run.
 - **A writing seat can write anywhere the process can.** Run the file in a
   directory you are willing to let a model change.
 

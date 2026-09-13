@@ -1,123 +1,141 @@
 ---
 title: "@obversa/teams"
-description: "Three teams of models you can run on your own work: a writer and a reviewer, a review panel with a threshold, and feature delivery."
+description: "Declare a team as a workflow: roles named once, stages in order, each a small block of nouns, and the runtime holds the run to it. Three ready-made teams come with it."
 ---
 
-Three functions, each a team: give it your brief, your workspace, your test
-command and one engine per seat, and it returns a job for `run`.
+Write the team as one file that reads top to bottom: the brief, the
+roles, the stages in order. Each stage says who does it, what it writes,
+who reads it and where the work goes back to. The package compiles that
+into the runtime's graph, so a review that fails sends the work back, a
+command decides on its exit code, a person's answer is waited for, and
+every step is on the record.
 
 ```bash
-npm install @obversa/runtime @obversa/teams
+npm install @obversa/runtime @obversa/teams @obversa/engine-claude-cli @obversa/engine-codex
 ```
 
-## What you get
+## The smallest team
 
-- **`writerReviewerPair`.** One model writes the files your brief names, your
-  test command runs, and a model from a different family reviews the result.
-  A rejection sends the work back to the writer.
-- **`thresholdPanel`.** One model implements, your test command runs, and
-  several reviewers read the change at the same time. The change passes
-  when at least the threshold number of them accept.
-- **`featureDelivery`.** Research, plan, tests first, implement, verify,
-  approve, close: eleven steps, with a review after the research, the
-  plan, the tests and the implementation. A rejected plan, test or
-  implementation goes back to the step that owns it, each with its own
-  budget, and the run ends with an approval note and the evidence.
-- **`outcomeFromAgentText`.** The parser the teams use on a reviewer's
-  reply: the first JSON decision object becomes a pass, or a revise with
-  its findings aimed at the step you name. For a panel of your own whose
-  lenses must be able to say no.
-
-Every team is a graph of named steps with a `desc` and a `gate` sentence on
-each. Every seat is checked before a run: the implementer and each reviewer
-must be different model families. A step that promises a file fails by
-name when the file is missing or empty. The test step passes on the
-command's exit code.
-
-## Run one
+A Claude seat writes the files the brief names, Node runs the test, and a
+Codex seat reads the result. A rejection sends the work back to the writer.
 
 ```ts
-import { ClaudeCliEngine } from '@obversa/engine-claude-cli';
-import { CodexEngine } from '@obversa/engine-codex';
+import { claude } from '@obversa/engine-claude-cli';
+import { codex } from '@obversa/engine-codex';
 import { run } from '@obversa/runtime';
-import { writerReviewerPair } from '@obversa/teams';
+import { fromFile, stage, workflow } from '@obversa/teams';
 
-const workspace = process.cwd();
-const writer = {
-  engine: new ClaudeCliEngine({
-    defaultModel: 'claude-sonnet-4-5',
-    permissionMode: 'bypassPermissions',
-  }),
-  identity: {
-    adapter: 'claude-cli',
-    provider: 'anthropic',
-    modelFamily: 'claude',
-    model: 'claude-sonnet-4-5',
+const team = workflow('writer-reviewer-pair', {
+  brief: fromFile('briefs/add.md'),
+  options: { timeout: '10m' },
+
+  roles: {
+    write: claude('claude-sonnet-4-5'),
+    review: [codex('gpt-5.6-luna')],
   },
-};
-const reviewer = {
-  engine: new CodexEngine({
-    defaultModel: 'gpt-5.6-luna',
-    permissionMode: 'bypassPermissions',
-  }),
-  identity: {
-    adapter: 'codex',
-    provider: 'openai',
-    modelFamily: 'gpt',
-    model: 'gpt-5.6-luna',
-  },
-};
-const team = writerReviewerPair({
-  brief: 'Write a pure add(a, b) function in src/add.mjs with a Node test in test/add.test.mjs.',
-  workspace,
-  files: ['src/add.mjs', 'test/add.test.mjs'],
-  test: { command: 'node', args: ['--test', 'test/add.test.mjs'] },
-  writer,
-  reviewer,
+
+  stages: [
+    stage('write', {
+      agent: 'write',
+      writes: ['src/add.mjs', 'test/add.test.mjs'],
+      desc: 'Write the function and its test from the brief.',
+      gate: 'The files named in the brief exist in the workspace.',
+      retry: 1,
+    }),
+    stage('test', {
+      run: ['node', '--test', 'test/add.test.mjs'],
+      desc: 'Run the test command against the written files.',
+      gate: 'The test command exits 0.',
+      sendsBackTo: 'write',
+    }),
+    stage('review', {
+      panel: 'review',
+      agree: 1,
+      desc: 'Read the code, the test and its result.',
+      gate: 'The change meets the brief.',
+      sendsBackTo: 'write',
+    }),
+  ],
 });
-const result = await run(team, { cwd: workspace });
 
+const result = await run(team);
 console.log(JSON.stringify(result.outcome, null, 2));
 ```
 
 A real run of this file, and the files it left behind, are on the
 [writer and reviewer](/workflows/writer-and-reviewer) page. The
 [review panel](/workflows/review-panel) and
-[feature delivery](/workflows/feature-team) pages do the same for the other
-two teams.
+[feature delivery](/workflows/feature-team) pages do the same for the two
+larger teams.
 
-## What every team takes
+## What you get
 
-| field | what it is |
+- **`workflow(name, { brief, roles, stages, options?, post? })`.** The
+  team, as a job for `run`. Stages run in the order written, each after
+  the one before it.
+- **`stage(name, { ... })`.** One step. Exactly one of `agent`, `run`,
+  `panel` or `input` says what kind of step it is; the other keys say what
+  it writes, who reads it and where the work goes back to.
+- **Seats from the engine plugins.** `claude('claude-sonnet-4-5')` from
+  `@obversa/engine-claude-cli`, `codex('gpt-5.6-luna')` from
+  `@obversa/engine-codex`, `opencode(model, { executable })` from
+  `@obversa/engine-opencode-cli`. Each carries the identity the plugin
+  records and starts the engine able to write files.
+- **`person(question)`.** A role a person fills: the stage that names it
+  puts the question to a person and waits for the answer.
+- **`fromFile(path)`.** A brief kept as a markdown file beside the code.
+  Its body is the brief; front matter may carry `files`, `testFiles` and
+  `test` so the workflow file names nothing twice.
+- **The three ready-made teams,** `writerReviewerPair`, `thresholdPanel`
+  and `featureDelivery`, as functions that take seats and return a job.
+  They are what the three example files declare, and the shape to copy
+  when a workflow file is not what you want.
+- **`outcomeFromAgentText`.** The parser the teams use on a reviewer's
+  reply: the first JSON decision object becomes a pass, or a revise with
+  its findings aimed at the step you name.
+
+## The keys of a stage
+
+| key | what it means |
 | --- | --- |
-| `brief` | The work, as text. Every model in the team reads it. |
-| `workspace` | The directory the team works in. Files are written here. |
-| `files` | The paths, relative to the workspace, that the brief expects written. At least one. |
-| `test` | `{ command, args, timeoutMs? }`, run in the workspace. Exit 0 passes. |
-| `testFiles` | `featureDelivery` only: the paths in `files` its tests-first step writes from the plan before any code exists. |
-| `maxKickbacks` | How many times work may go back, one number for the whole team or a map with a budget per step, such as `{ plan: 3, 'tests-first': 3, implement: 3 }`. Default 1. |
+| `agent` | The role that does the work. The stage must say what it `writes`. |
+| `run` | A command, one string with no quoting or an array. Exit 0 passes; a red run goes back to `sendsBackTo` with the output as the finding. |
+| `panel` | A role that is a list of seats. `agree` is how many must accept; the default is all of them. |
+| `input` | A person role. The stage asks the question and waits. |
+| `writes` | The files this stage writes, relative to the workspace. It writes those and no other declared file; a missing or empty one fails the stage by name. |
+| `desc`, `gate` | What the stage does and what must be true for it to count. Both reach the reviewers and the record. |
+| `reviewedBy` | A panel role that reads this stage's work. A rejection runs the stage again with the findings; a note written back unchanged fails plainly. |
+| `sendsBackTo` | The earlier stage a rejection or a red run goes back to. A stage cannot send back to itself; use `reviewedBy`. |
+| `retry` | How many times this stage may run again: the review restarts of a reviewed stage, or the kickback budget of a stage others send back to. Default 1. It belongs to the stage that repeats. |
 
-A seat is `{ engine, identity }`: an engine plugin instance and the identity
-it runs under, `{ adapter, provider, modelFamily, model }`. The identity is
-what the run record and the family check use, so it must name what runs.
+## The keys of a workflow
 
-| team | seats |
+| key | what it means |
 | --- | --- |
-| `writerReviewerPair` | `writer`, `reviewer` |
-| `thresholdPanel` | `implement`, `reviewers` (a list of `{ name, seat }`), `threshold` |
-| `featureDelivery` | `analyse`, `implement`, `reviewers`, `reviewThreshold`, `approve`, `testFiles`, `maxKickbacks` |
+| `brief` | The work, as text or `fromFile`. Every model in the team reads it. |
+| `roles` | Every seat and person, named once. Stages refer to the names. |
+| `stages` | The steps, in order. Each needs the one before it. |
+| `options.timeout` | A duration such as `'10m'`, applied to every stage. |
+| `post.always` | Runs after the graph settles, with the record. |
+
+The workspace is the directory the file runs in.
 
 ## Gotchas
 
-- **It ships no command.** You import a team and run it from your own file.
-- **Engines are yours to construct.** The package chooses no model. Each seat
-  is a plugin instance you build, with the permission mode the role needs:
-  a writer must be allowed to write files.
-- **The distinct-family check reads your declaration.** Declaring one family
-  for two different models defeats it, and declaring two families for one
-  model lies to the record.
+- **It ships no command.** You import a workflow and run it from your own
+  file.
+- **A seat starts its engine able to write.** The seat helpers set the
+  permission mode a writing role needs. Run a team in a directory you are
+  willing to let a model change.
+- **The distinct-family check reads the seats.** The stage that implements
+  and every seat that reviews it must be different model families, or the
+  team is refused before any model runs.
+- **`reviewedBy` and `sendsBackTo` are two different returns.** The first
+  runs the same stage again; the second goes back to an earlier one. A
+  stage uses one or the other.
 
 ## Source
 
 `packages/teams` in the repository. The package depends on
-`@obversa/runtime` and nothing else.
+`@obversa/runtime` and nothing else; the seat helpers live in the engine
+plugins.

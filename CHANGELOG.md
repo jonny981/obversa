@@ -11,6 +11,22 @@ engine and memory packages track their own versions independently.
 
 ### Added
 
+- **A team as a workflow file:** `workflow(name, { brief, roles, stages })`
+  and `stage(name, { agent | run | panel | input, writes, desc, gate,
+  reviewedBy, sendsBackTo, retry })` from `@obversa/teams` declare a team
+  as an ordered list of stages, each a block of nouns, and compile it to
+  the runtime's graph: a reviewed stage runs again with the findings, a red
+  command or a rejected review goes back to the stage it names, `retry`
+  bounds the stage that repeats, `writes` bounds what a stage may write,
+  `person(question)` is a role a person fills, and `post.always` runs with
+  the record.
+- **Seats from the engine plugins:** `claude(model)`, `codex(model)` and
+  `opencode(model, { executable })` return a seat with the identity the
+  plugin records, started able to write files.
+- **Briefs as markdown files:** `fromFile(path)` reads a brief beside the
+  code; its front matter may carry `files`, `testFiles` and `test`.
+- The three team examples are written in the workflow form and shrink by
+  more than half; the explicit functions stay.
 - **Feature delivery in eleven steps:** `featureDelivery` researches the
   brief and writes the requirements and the plan, each reviewed; writes the
   declared `testFiles` before any code; implements until the test command

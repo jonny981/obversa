@@ -42,96 +42,141 @@ npm install @obversa/runtime   # Node >= 22.12
 ## A feature, as one file
 
 Install the teams package and two engine plugins, and this file delivers a
-change with a team of models: one seat researches the brief and writes the
-requirements and the plan, each reviewed; another writes the tests before
-any code, then implements until the tests pass and a reviewer from a
-different model family accepts; the tests run once more; a seat records
-the approval; the evidence is written from the record. A rejected plan,
-test or implementation goes back to the step that owns it with the
-findings. The file is complete; copy it, put your brief in, run it with
-Node.
+change with a team of models: one seat researches the brief and writes
+the requirements and the plan, each reviewed; another writes the tests
+before any code, then implements until the tests pass and a reviewer from
+a different model family accepts; then the change is put to a person; and
+the evidence is written from the record. A red test or a rejected review
+sends the work back to the stage that owns it, with the findings. The
+file is complete; copy it, put your brief in, run it with Node.
 
 ```bash
 npm install @obversa/runtime @obversa/teams @obversa/engine-claude-cli @obversa/engine-codex
 ```
 
 ```ts
-import { ClaudeCliEngine } from '@obversa/engine-claude-cli';
-import { CodexEngine } from '@obversa/engine-codex';
+import { claude } from '@obversa/engine-claude-cli';
+import { codex } from '@obversa/engine-codex';
 import { run } from '@obversa/runtime';
-import { featureDelivery } from '@obversa/teams';
+import { fromFile, person, stage, workflow } from '@obversa/teams';
 
-const workspace = process.cwd();
-const analyse = {
-  engine: new ClaudeCliEngine({ defaultModel: 'claude-sonnet-4-5', permissionMode: 'bypassPermissions' }),
-  identity: {
-    adapter: 'claude-cli', provider: 'anthropic', modelFamily: 'claude', model: 'claude-sonnet-4-5',
-  },
-};
-const implement = {
-  engine: new CodexEngine({ defaultModel: 'gpt-5.6-luna', permissionMode: 'bypassPermissions' }),
-  identity: {
-    adapter: 'codex', provider: 'openai', modelFamily: 'gpt', model: 'gpt-5.6-luna',
-  },
-};
-const reviewer = {
-  engine: new ClaudeCliEngine({ defaultModel: 'claude-sonnet-4-5', permissionMode: 'bypassPermissions' }),
-  identity: {
-    adapter: 'claude-cli', provider: 'anthropic', modelFamily: 'claude', model: 'claude-sonnet-4-5',
-  },
-};
-const approve = {
-  engine: new ClaudeCliEngine({ defaultModel: 'claude-sonnet-4-5', permissionMode: 'bypassPermissions' }),
-  identity: {
-    adapter: 'claude-cli', provider: 'anthropic', modelFamily: 'claude', model: 'claude-sonnet-4-5',
-  },
-};
+/**
+ * A feature, delivered the way a team delivers one. The roles are named once;
+ * every stage is a small block of nouns: who does it, what it writes, who
+ * reads it, where a red result goes back to. Inference happens only where a
+ * role is named; every other stage is a command or a person.
+ */
+const team = workflow('feature-delivery', {
+  brief: fromFile('briefs/triple.md'),
+  options: { timeout: '10m' },
 
-const team = featureDelivery({
-  brief: 'Deliver a pure triple(value) function in src/triple.mjs with a Node test in test/triple.test.mjs.',
-  workspace,
-  files: ['src/triple.mjs', 'test/triple.test.mjs'],
-  testFiles: ['test/triple.test.mjs'],
-  test: { command: 'node', args: ['--test', 'test/triple.test.mjs'] },
-  analyse,
-  implement,
-  reviewers: [{ name: 'correctness', seat: reviewer, scope: 'implementation' }],
-  reviewThreshold: 1,
-  approve,
-  maxKickbacks: { plan: 3, 'tests-first': 3, implement: 3 },
+  roles: {
+    analyse: claude('claude-sonnet-4-5'),
+    implement: codex('gpt-5.6-luna'),
+    review: [claude('claude-sonnet-4-5'), codex('gpt-5.6-luna')],
+    approve: person('Ship this change?'),
+  },
+
+  stages: [
+    stage('research-context', {
+      agent: 'analyse',
+      writes: 'team-output/research-context.md',
+      desc: 'Read the workspace and write down what the change touches.',
+      gate: 'The context note is in the workspace and a reviewer has accepted it.',
+      reviewedBy: 'review',
+      retry: 3,
+    }),
+
+    stage('research-requirements', {
+      agent: 'analyse',
+      writes: 'team-output/research-requirements.md',
+      desc: 'Turn the brief and the context note into requirements, one REQ-n per line.',
+      gate: 'The requirements note is in the workspace and a reviewer has accepted it.',
+      reviewedBy: 'review',
+      retry: 3,
+    }),
+
+    stage('plan', {
+      agent: 'analyse',
+      writes: 'team-output/plan.md',
+      desc: 'Write an executable plan from the requirements, one check per REQ-n.',
+      gate: 'Every requirement has a check in the plan.',
+      reviewedBy: 'review',
+      retry: 3,
+    }),
+
+    stage('tests-first', {
+      agent: 'implement',
+      writes: 'test/triple.test.mjs',
+      desc: 'Write the declared test files from the accepted plan before any implementation exists.',
+      gate: 'Every declared test file exists and covers the plan.',
+      reviewedBy: 'review',
+      retry: 3,
+    }),
+
+    stage('implement', {
+      agent: 'implement',
+      writes: 'src/triple.mjs',
+      desc: 'Write the code to the plan and the tests.',
+      gate: 'The source file exists.',
+      retry: 3,
+    }),
+
+    stage('test', {
+      run: ['node', '--test', 'test/triple.test.mjs'],
+      desc: 'Run the tests; a red run goes back to implement with the output.',
+      gate: 'The test command exits 0.',
+      sendsBackTo: 'implement',
+    }),
+
+    stage('review', {
+      panel: 'review',
+      agree: 1,
+      desc: 'Read the change and the test result against the plan.',
+      sendsBackTo: 'implement',
+    }),
+
+    stage('approve', {
+      input: 'approve',
+      desc: 'Put the verified change in front of a person.',
+      gate: 'A person has said yes.',
+    }),
+
+    stage('close', {
+      agent: 'analyse',
+      writes: ['team-output/evidence.md', 'team-output/learning.md'],
+      desc: 'Write the evidence of the run and what was learned, from the record alone.',
+      gate: 'Both notes are in the workspace.',
+    }),
+  ],
+
 });
 
-const result = await run(team, {
-  cwd: workspace,
-  recordTo: 'team-output/events.jsonl',
-});
+const result = await run(team);
 console.log(JSON.stringify(result.outcome, null, 2));
-if (result.outcome.status !== 'pass') process.exitCode = 1;
 ```
 
-Each seat is an engine and the identity it runs under: adapter, provider,
-model family and model. The implementer and every reviewer must be
-different model families, and the package refuses the team before any
-model runs if they are not.
+The roles are named once, from the seat helpers the engine plugins export,
+and every stage refers to a role by name. The implementer and every
+reviewer must be different model families, and the package refuses the
+team before any model runs if they are not.
 
-The team is a graph of eleven named steps. Every step carries a sentence
+The team is a graph of nine named stages. Every step carries a sentence
 saying what it does and a sentence saying what must be true for it to
 count, and both reach the reviewers and the run record. Each step that
-can receive work back has its own budget in `maxKickbacks`.
+repeats carries its own `retry`.
 
-| step | done when |
+| stage | done when |
 | --- | --- |
-| prepare | No approval note exists and the run marker is recorded. |
 | research-context | The context note is in the workspace and a reviewer has accepted it. |
-| research-requirements | Every requirement is testable, traces to the brief, and asks for nothing the brief does not. |
-| plan | Every requirement has a check in the plan and no check asks for more than its requirement. |
-| plan-review | At least the threshold number of reviewers have accepted the plan. |
-| tests-first | Every declared test file exists and is not empty. |
-| tests-review | At least the threshold number of reviewers have accepted the tests. |
-| implement | The test command exits 0 and the reviewers have accepted the change, within three cycles. |
-| verify | The final test command exits 0. |
-| approve | An approval note carrying this run's marker is in the workspace. |
-| close | The evidence note and the learning note are in the workspace. |
+| research-requirements | The requirements note is in the workspace and a reviewer has accepted it. |
+| plan | Every requirement has a check in the plan. |
+| tests-first | Every declared test file exists and covers the plan. |
+| implement | The source file exists. |
+| test | The test command exits 0. |
+| review | A person has said yes. |
+| approve | A person has said yes. |
+| close | Both notes are in the workspace. |
 
 A step that promises a file fails by name when the file is missing. The
 test step passes on the command's exit code, never on a model's report,
@@ -140,7 +185,9 @@ and a reviewer's decision is the file it writes.
 what a real run of this file printed and the files the models wrote; a
 [writer and reviewer](https://docs.obversa.ai/workflows/writer-and-reviewer)
 and a [review panel](https://docs.obversa.ai/workflows/review-panel) are
-the two smaller teams in the same package.
+the two smaller teams in the same package, and
+[the shape of a real process](https://docs.obversa.ai/workflows/real-process)
+is the full-size one.
 
 ## Engines
 

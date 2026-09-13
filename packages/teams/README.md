@@ -1,9 +1,10 @@
 # @obversa/teams
 
-Three teams of models you can run on your own work: a writer and a
-reviewer, a review panel with a threshold, and feature delivery. Each is a
-function that takes your brief, your workspace, your test command and one
-engine per seat, and returns a job for `run` from `@obversa/runtime`.
+Declare a team as a workflow file: the brief, the roles named once, the
+stages in order, each a small block of nouns saying who does it, what it
+writes, who reads it and where the work goes back to. The package
+compiles that into a job for `run` from `@obversa/runtime`. Three
+ready-made teams come with it as functions.
 
 ```bash
 npm install @obversa/runtime @obversa/teams
@@ -11,47 +12,30 @@ npm install @obversa/runtime @obversa/teams
 
 ## What you get
 
-- **`writerReviewerPair`.** One model writes the files your brief names, your
-  test command runs, and a model from a different family reviews the result.
-  A rejection sends the work back to the writer, once by default.
-- **`thresholdPanel`.** One model implements, your test command runs, and
-  several reviewers read the change at the same time. The change passes
-  when at least the threshold number of them accept.
-- **`featureDelivery`.** Research, plan, tests first, implement, verify,
-  approve, close: eleven steps, with a review after the research, the
-  plan, the tests and the implementation. A rejected plan, test or
-  implementation goes back to the step that owns it, each with its own
-  budget, and the run ends with an approval note and the evidence.
-- **`outcomeFromAgentText`.** The parser the teams use on a reviewer's
-  reply: the first JSON decision object becomes a pass, or a revise with
-  its findings aimed at the step you name. For a panel of your own whose
-  lenses must be able to say no.
+- **`workflow(name, { brief, roles, stages })`.** The team as a job. Stages
+  run in the order written.
+- **`stage(name, { agent | run | panel | input, writes, desc, gate,
+  reviewedBy, sendsBackTo, retry })`.** One step.
+- **`person(question)`** and **`fromFile(path)`.** A person as a role, and a
+  brief kept as a markdown file with optional front matter for `files`,
+  `testFiles` and `test`.
+- **Seats** come from the engine plugins: `claude(model)`, `codex(model)`,
+  `opencode(model, { executable })`.
+- **`writerReviewerPair`, `thresholdPanel`, `featureDelivery`.** The three
+  teams as functions, for a program that builds a team from parts.
+- **`outcomeFromAgentText`.** A reviewer's reply as a pass or a revise with
+  findings.
 
-Every team is a graph of named steps with a `desc` and a `gate` sentence on
-each, and every seat is checked before a run: the implementer and each
-reviewer must be different model families, and a step that promises a file
-fails by name when the file is missing or empty.
-
-## What you give it
-
-| field | what it is |
-| --- | --- |
-| `brief` | The work, as text. Every model in the team reads it. |
-| `workspace` | The directory the team works in. Files are written here. |
-| `files` | The paths, relative to the workspace, that the brief expects written. |
-| `testFiles` | `featureDelivery` only: the paths in `files` its tests-first step writes from the plan before any code exists. |
-| `test` | The command and arguments that prove the files, run in the workspace. |
-| `maxKickbacks` | How many times work may go back, one number for the whole team or a map with a budget per step, such as `{ plan: 3, 'tests-first': 3, implement: 3 }`. Default 1. |
-| seats | One `{ engine, identity }` per role. The identity names the adapter, provider, model family and model. |
-
-The reviewers on a panel are a list of `{ name, seat }`, with the threshold
-as a whole number from one to the number of reviewers.
+Every stage carries a `desc` and a `gate` sentence that reach the reviewers
+and the record. A stage that promises a file fails by name when the file
+is missing or empty, a command stage passes on its exit code, a reviewer's
+decision is the file it writes, and the implementer and every reviewer must
+be different model families.
 
 ## What it does not do
 
-It ships no command. You import a team and run it from your own file. It
-adds no dependency beyond `@obversa/runtime`. It does not choose engines for
-you: every seat is one you construct from an engine plugin and pass in.
+It ships no command. It adds no dependency beyond `@obversa/runtime`. It
+chooses no model: every seat comes from an engine plugin you install.
 
 The full pages, with a complete file and its captured output for each team,
 are at [docs.obversa.ai/workflows](https://docs.obversa.ai/workflows).
