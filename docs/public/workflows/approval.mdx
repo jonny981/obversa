@@ -118,9 +118,10 @@ question was asked again about the new attempt.
   input is the outcomes of the steps this one depends on, so a change
   upstream after a kickback is a new question and the same question about
   the same thing is the same request. Give `input` to say otherwise.
-- **A no needs a home.** With `target`, a refusal goes back to that step
-  with the note as the finding. Without it, a refusal fails the step with
-  the note as its summary.
+- **A no needs a home, and a budget.** With `target`, a refusal goes back
+  to that step with the note as the finding; the graph's `maxKickbacks`
+  must allow it, or the run fails with the note instead. Without a target,
+  a refusal fails the step with the note as its summary.
 - **Nobody answering is a pause, not a failure.** Without `answer`, the step
   posts the request and returns `paused` with the request as its data. A
   router claims the request and submits `{ approved, note? }`; run the job
