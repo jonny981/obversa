@@ -56,6 +56,7 @@ export const stageBranches = {
   F35: 'feat/teams-declarative',
   F34: 'feat/command-kickback',
   F36: 'feat/runtime-conveniences',
+  F38: 'feat/release-1-0-0-cut',
 };
 
 export function manageStage(args, options = {}) {

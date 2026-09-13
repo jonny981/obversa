@@ -185,6 +185,30 @@ test("the changelog command uses the runtime version from its checkout", () => {
   }
 });
 
+test("the changelog command refuses a tag run while Unreleased still holds entries", () => {
+  const root = makeWorkspace({ "packages/runtime": { name: "@obversa/runtime", version: "2.3.4" } });
+  try {
+    const run = () => spawnSync(process.execPath, [new URL("./changelog-gate.mjs", import.meta.url).pathname], {
+      cwd: root, encoding: "utf8", env: { ...process.env, GITHUB_REF_NAME: "v2.3.4" },
+    });
+    writeFileSync(path.join(root, "CHANGELOG.md"), "# Changelog\n\n## [Unreleased]\n\n### Added\n\n- Something not yet cut.\n\n## [2.3.4]\n\nA release entry.\n");
+    const refused = run();
+    assert.equal(refused.status, 1, refused.stdout);
+    assert.match(refused.stderr, /Unreleased still holds 1 line\(s\)/);
+    writeFileSync(path.join(root, "CHANGELOG.md"), "# Changelog\n\n## [Unreleased]\n\n## [2.3.4]\n\nA release entry.\n");
+    const accepted = run();
+    assert.equal(accepted.status, 0, accepted.stderr);
+    // Off a tag, an Unreleased section with entries is the normal state of main.
+    const onMain = spawnSync(process.execPath, [new URL("./changelog-gate.mjs", import.meta.url).pathname], {
+      cwd: root, encoding: "utf8", env: { ...process.env, GITHUB_REF_NAME: "main" },
+    });
+    writeFileSync(path.join(root, "CHANGELOG.md"), "# Changelog\n\n## [Unreleased]\n\n- Something not yet cut.\n\n## [2.3.4]\n\nA release entry.\n");
+    assert.equal(onMain.status, 0, onMain.stderr);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
 test("the changelog command names the required heading format without assuming an Unreleased section", () => {
   const root = makeWorkspace({ "packages/runtime": { name: "@obversa/runtime", version: "2.3.4" } });
   try {
