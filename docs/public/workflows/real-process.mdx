@@ -36,6 +36,7 @@ import {
   type Engine,
   type TeamAgent,
 } from '@obversa/runtime';
+import { outcomeFromAgentText } from '@obversa/teams';
 import { mkdir, readFile, stat, writeFile } from 'node:fs/promises';
 import { join, relative } from 'node:path';
 
@@ -48,6 +49,7 @@ const PLAN_NOTE = join(output, 'plan.md');
 const TEST_FILE = join(output, 'tests', 'acceptance.test.mjs');
 const SOURCE_FILE = join(output, 'src', 'result.mjs');
 const LEARNING_NOTE = join(output, 'learning.md');
+const SOURCE_LOAD_ARGS = ['--input-type=module', '--eval', `import(${JSON.stringify(SOURCE_FILE)})`];
 
 function depthValue(value: string | undefined): number {
   const depth = Number.parseInt(value ?? '1', 10);
@@ -124,16 +126,24 @@ function commandStage(label: string, args: string[], text: string): Job {
 }
 
 function reportPanel(label: string, target?: string, lensCount: 2 | 4 = 2): Job {
+  const reviewPrompt = 'Return one JSON object: {"status":"pass"|"revise","summary":"...","findings":[{"evidence":"..."}]}';
+  const reviewer = (reviewerLabel: string, engine: Engine, instruction: string): Job => agentJob({
+    label: reviewerLabel,
+    engine,
+    cwd: workspace,
+    prompt: `${BRIEF}\n\n${instruction}\n${reviewPrompt}`,
+    outcome: (text) => outcomeFromAgentText(text, target),
+  });
   const reviewers = [
     {
       name: 'architecture',
       scope: 'process shape',
-      job: agentLeaf(`${label}-architecture`, claude, 'Check the process shape and its stage boundaries.'),
+      job: reviewer(`${label}-architecture`, claude, 'Check the process shape and its stage boundaries.'),
     },
     {
       name: 'correctness',
       scope: 'evidence',
-      job: agentLeaf(`${label}-correctness`, codex, 'Check that the evidence supports the stage gate.'),
+      job: reviewer(`${label}-correctness`, codex, 'Check that the evidence supports the stage gate.'),
     },
   ];
   if (lensCount === 4) {
@@ -141,12 +151,12 @@ function reportPanel(label: string, target?: string, lensCount: 2 | 4 = 2): Job 
       {
         name: 'adversary',
         scope: 'failure paths',
-        job: agentLeaf(`${label}-adversary`, codex, 'Try to find a concrete failure path the process does not cover.'),
+        job: reviewer(`${label}-adversary`, codex, 'Try to find a concrete failure path the process does not cover.'),
       },
       {
         name: 'conformance',
         scope: 'public contract',
-        job: agentLeaf(`${label}-conformance`, claude, 'Check the result against the public contract and its promised evidence.'),
+        job: reviewer(`${label}-conformance`, claude, 'Check the result against the public contract and its promised evidence.'),
       },
     );
   }
@@ -231,8 +241,8 @@ const graph = dag({
     'tests-review': { job: reportPanel('tests-review'), desc: 'Have two reviewers check that every test names the acceptance it proves.', gate: 'Both reviewers have accepted the tests.', needs: ['tests-first'] },
     implementation: { job: implementation, desc: 'Write the code, run the tests, and repeat with the reviewers\' findings until it passes.', gate: 'The test command exits 0 and the reviewers have accepted, within three cycles.', needs: ['tests-review'] },
     conformance: { job: commandStage('conformance', ['--test', TEST_FILE], 'The declared process contract was checked.'), desc: 'Run the checks that prove the change keeps its declared contract.', gate: 'Every conformance check exits 0.', needs: ['implementation'] },
-    boundary: { job: commandStage('boundary', ['--check', SOURCE_FILE], 'Dependency and formatting boundaries were checked.'), desc: 'Run the dependency and formatting checks.', gate: 'Every boundary check exits 0.', needs: ['conformance'] },
-    build: { job: commandStage('build', ['--check', SOURCE_FILE], 'The process build completed.'), desc: 'Build the package and record the result.', gate: 'The build exits 0.', needs: ['boundary'] },
+    boundary: { job: commandStage('boundary', ['--check', SOURCE_FILE], 'The source parse check completed.'), desc: 'Run a source parse check as the example stand-in for dependency and formatting checks.', gate: 'The source parse check exits 0.', needs: ['conformance'] },
+    build: { job: commandStage('build', SOURCE_LOAD_ARGS, 'The source load check completed.'), desc: 'Run a source load check as the example stand-in for the build.', gate: 'The source load check exits 0.', needs: ['boundary'] },
     'candidate-review': { job: reportPanel('candidate-review', undefined, 4), desc: 'Have the reviewers read the built change, each through its own lens.', gate: 'At least the threshold number of reviewers have accepted the candidate.', needs: ['build'] },
     'promotion-gate': { job: callbackStage('promotion-gate', 'Promote the accepted result to the named target?'), desc: 'Put the candidate in front of a person before any action on a target; otherwise record that no person was asked.', gate: 'A person has approved the promotion, or the skip is recorded with its reason.', when: optional(Boolean(frozen.decisionSource), skipReasons.promotion ?? 'promotion decision source is named'), needs: ['candidate-review'] },
     'observe-action': { job: writeRecord('observe-action', `Observed target: ${frozen.deploymentTarget ?? 'none'}.`), desc: 'Take the one configured action against the target and record what was observed.', gate: 'The action ran and its observation is recorded, or the stage is skipped for lack of a target.', when: optional(Boolean(frozen.actionEnabled && frozen.deploymentTarget), skipReasons.target ?? 'target action is configured'), needs: ['promotion-gate'] },
@@ -294,8 +304,8 @@ implementation and the reviews ran on real engines.
     },
     "plan": {
       "status": "pass",
-      "summary": "**Plan delivered** to `team-output/real-process/plan.md`.\n\n**What you get:** One task with 7 bite-sized steps (write test → verify failure → implement → verify pass → commit), following TDD. Includes exact commands to run, expected output at each step, and 5 acceptance criteria t",
-      "data": "**Plan delivered** to `team-output/real-process/plan.md`.\n\n**What you get:** One task with 7 bite-sized steps (write test → verify failure → implement → verify pass → commit), following TDD. Includes exact commands to run, expected output at each step, and 5 acceptance criteria that prove the module works."
+      "summary": "## Completion Report\n\n**Delivered:**\n- **Plan:** `team-output/real-process/plan.md` with 3 jobs, each with one acceptance check\n- **Source:** `src/result.mjs` exporting `result = 23`\n- **Test:** `test.mjs` proving the value with Node's assert\n- **Verification:** Test passes ✓\n\nAl",
+      "data": "## Completion Report\n\n**Delivered:**\n- **Plan:** `team-output/real-process/plan.md` with 3 jobs, each with one acceptance check\n- **Source:** `src/result.mjs` exporting `result = 23`\n- **Test:** `test.mjs` proving the value with Node's assert\n- **Verification:** Test passes ✓\n\nAll acceptance checks met. Test confirms `result === 23`."
     },
     "plan-review": {
       "status": "pass",
@@ -306,8 +316,8 @@ implementation and the reviews ran on real engines.
     },
     "tests-first": {
       "status": "pass",
-      "summary": "Completed.\n\n- [result.mjs](/private/tmp/real-process/team-output/real-process/src/result.mjs) exports `result = 23`.\n- [acceptance.test.mjs](/private/tmp/real-process/team-output/real-process/tests/acceptance.test.mjs) imports and asserts it.\n- Test passes: 1 passed, 0 failed.",
-      "data": "Completed.\n\n- [result.mjs](/private/tmp/real-process/team-output/real-process/src/result.mjs) exports `result = 23`.\n- [acceptance.test.mjs](/private/tmp/real-process/team-output/real-process/tests/acceptance.test.mjs) imports and asserts it.\n- Test passes: 1 passed, 0 failed."
+      "summary": "Implemented and verified.\n\n- [result.mjs](/private/tmp/real-process/team-output/real-process/src/result.mjs) exports `result = 23`.\n- [acceptance.test.mjs](/private/tmp/real-process/team-output/real-process/tests/acceptance.test.mjs) asserts it.\n\n`node --test`: 1 passed, 0 failed",
+      "data": "Implemented and verified.\n\n- [result.mjs](/private/tmp/real-process/team-output/real-process/src/result.mjs) exports `result = 23`.\n- [acceptance.test.mjs](/private/tmp/real-process/team-output/real-process/tests/acceptance.test.mjs) asserts it.\n\n`node --test`: 1 passed, 0 failed."
     },
     "tests-review": {
       "status": "pass",
@@ -321,14 +331,14 @@ implementation and the reviews ran on real engines.
             "kind": "verdict",
             "name": "architecture",
             "met": true,
-            "reason": "**Completion Report**\n\nDelivered `src/result.mjs` exporting `result = 23` with passing Node test.\n\n**Process shape:** Single atomic unit. No stage boundaries — this is the minimal useful shape. If extended, future phases would build additively: same export, relaxed validation, or",
+            "reason": "Implementation verified. src/result.mjs exports result = 23, Node test passes, task workflow completed through proper stage boundaries (pending → in_progress → completed).",
             "scope": "process shape"
           },
           {
             "kind": "verdict",
             "name": "correctness",
             "met": true,
-            "reason": "## Complete\n\n- **Module:** [src/result.mjs](/private/tmp/real-process/src/result.mjs:1) exports `result = 23`.\n- **Test:** [test/result.test.mjs](/private/tmp/real-process/test/result.test.mjs:5) uses Node’s built-in test runner.\n- **Evidence:** Both tests pass: 1 test, 0 failure",
+            "reason": "Stage gate supported.",
             "scope": "evidence"
           }
         ],
@@ -340,7 +350,7 @@ implementation and the reviews ran on real engines.
     "implementation": {
       "status": "pass",
       "summary": "Review panel: 4/4 reviewer(s) cleared.",
-      "data": "Completed in the supplied workspace.\n\n- [result.mjs](/private/tmp/real-process/team-output/real-process/src/result.mjs) exports `result = 23`.\n- [Node test](/private/tmp/real-process/team-output/real-process/tests/acceptance.test.mjs) passes: 1/1."
+      "data": "Delivered and verified:\n\n- [result.mjs](/private/tmp/real-process/team-output/real-process/src/result.mjs) exports `result = 23`.\n- [acceptance.test.mjs](/private/tmp/real-process/team-output/real-process/tests/acceptance.test.mjs) passes: 1 test, 0 failures."
     },
     "conformance": {
       "status": "pass",
@@ -366,28 +376,28 @@ implementation and the reviews ran on real engines.
             "kind": "verdict",
             "name": "architecture",
             "met": true,
-            "reason": "## Process Shape Verified\n\n**Implementation complete.** All stage boundaries passed:\n\n**Stages:**\n1. **Preconditions** → Node v25.5.0 available\n2. **Plan** → TDD implementation plan with 7 steps\n3. **Build** → `src/result.mjs` exports `23`, test passes\n4. **Boundary** → Dependenc",
+            "reason": "Implementation delivers the required export with verified test coverage. Module boundaries are clean: source defines the constant, test verifies it through the public interface. No boundary violations or stage mixing detected.",
             "scope": "process shape"
           },
           {
             "kind": "verdict",
             "name": "correctness",
             "met": true,
-            "reason": "Completed and verified.\n\n- [src/result.mjs](/private/tmp/real-process/src/result.mjs) exports `result = 23`.\n- [test/result.test.mjs](/private/tmp/real-process/test/result.test.mjs) proves the value with Node’s built-in test runner.\n- Primary and acceptance tests: 1 passed, 0 fai",
+            "reason": "src/result.mjs exports result = 23 and the Node tests pass.",
             "scope": "evidence"
           },
           {
             "kind": "verdict",
             "name": "adversary",
             "met": true,
-            "reason": "Delivered:\n\n- [src/result.mjs](/private/tmp/real-process/src/result.mjs:1) exports `result = 23`.\n- [test/result.test.mjs](/private/tmp/real-process/test/result.test.mjs:5) proves the value with Node’s built-in test runner.\n\nVerification: `1 passed, 0 failed`.\n\nFailure path found",
+            "reason": "src/result.mjs exports result = 23; node --test test.mjs passes 1/1.",
             "scope": "failure paths"
           },
           {
             "kind": "verdict",
             "name": "conformance",
             "met": true,
-            "reason": "## Completion Report\n\n**Deliverable verified:** `src/result.mjs` exports `result = 23` with passing test.\n\n**Contract compliance:**\n- ✅ Module exists at `src/result.mjs` with ESM export\n- ✅ Value is exactly `23` (verified by test and direct import)\n- ✅ Test passes: `node test/res",
+            "reason": "src/result.mjs exports result = 23, test proves the implementation, all contract checks pass",
             "scope": "public contract"
           }
         ],
@@ -444,8 +454,8 @@ implementation and the reviews ran on real engines.
     },
     "learning": {
       "status": "pass",
-      "summary": "## Completion Report\n\nAll tasks completed successfully:\n\n**Module delivered:** `src/result.mjs` exports `result = 23`\n\n**Test verified:** Node test at `test/result.test.mjs` passes (1 test, 0 failures)\n\n**Learning documented:** Complete output written to `team-output/real-process",
-      "data": "## Completion Report\n\nAll tasks completed successfully:\n\n**Module delivered:** `src/result.mjs` exports `result = 23`\n\n**Test verified:** Node test at `test/result.test.mjs` passes (1 test, 0 failures)\n\n**Learning documented:** Complete output written to `team-output/real-process/learning.md` covering the file structure, testing approach, and key findings for future sessions\n\nThe files already existed from a previous run. Test execution confirmed the module works correctly."
+      "summary": "**Done.** Created `src/result.mjs` exporting `result = 23`, wrote a passing Node test in `test/result.test.mjs`, and documented the pattern in `team-output/real-process/learning.md`. Test verified: ✔ 1/1 passed.",
+      "data": "**Done.** Created `src/result.mjs` exporting `result = 23`, wrote a passing Node test in `test/result.test.mjs`, and documented the pattern in `team-output/real-process/learning.md`. Test verified: ✔ 1/1 passed."
     },
     "close": {
       "status": "pass",
@@ -470,8 +480,8 @@ implementation and the reviews ran on real engines.
 | tests-review | Have two reviewers check that every test names the acceptance it proves. | Both reviewers have accepted the tests. |
 | implementation | Write the code, run the tests, and repeat with the reviewers' findings until it passes. | The test command exits 0 and the reviewers have accepted, within three cycles. |
 | conformance | Run the checks that prove the change keeps its declared contract. | Every conformance check exits 0. |
-| boundary | Run the dependency and formatting checks. | Every boundary check exits 0. |
-| build | Build the package and record the result. | The build exits 0. |
+| boundary | Run a source parse check as the example stand-in for dependency and formatting checks. | The source parse check exits 0. |
+| build | Run a source load check as the example stand-in for the build. | The source load check exits 0. |
 | candidate-review | Have the reviewers read the built change, each through its own lens. | At least the threshold number of reviewers have accepted the candidate. |
 | promotion-gate | Put the candidate in front of a person before any action on a target; otherwise record that no person was asked. | A person has approved the promotion, or the skip is recorded with its reason. |
 | observe-action | Take the one configured action against the target and record what was observed. | The action ran and its observation is recorded, or the stage is skipped for lack of a target. |
@@ -495,13 +505,22 @@ implementation and the reviews ran on real engines.
 - **The action against the target is observed and reverted in the same
   run.** It exists to show that the deployed thing behaves, not to leave a
   change behind.
-- **Every reviewer lens is a different model family from the writer it
-  reviews.** The panels are the second opinions; the writer never grades
-  its own work.
+- **No panel passes on one family's word.** Each panel holds a Claude lens
+  and a Codex lens, two of two must accept, and the four-lens panels need
+  three of four with two lenses from each family, so a change never passes
+  without a lens from a different model family than its writer accepting
+  it. A lens answers with the same decision object the teams use, pass or
+  revise with findings, and a revise goes back to the step the panel
+  names.
+- **A writing seat can write anywhere the process can.** The file starts
+  its Claude and Codex seats with permission prompts off, which is what
+  lets a model write files. Run it in a directory you are willing to let a
+  model change.
 
 ## Source
 
 The file is `examples/real-process.ts`. Its stages are the primitives on
 the [workflows](/concepts/workflows) page: a `dag` with `when` conditions
 on the conditional stages, `loop` for the three repair cycles, `reviewPanel`
-for the panels, and command gates between every inference.
+for the panels, `outcomeFromAgentText` from `@obversa/teams` for each
+lens's verdict, and command gates between every inference.

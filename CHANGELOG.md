@@ -31,6 +31,9 @@ engine and memory packages track their own versions independently.
   inference only at the leaves and every stage that needs a target, a
   person or a check source recorded as skipped with the reason when it is
   not there.
+- `outcomeFromAgentText` is exported from `@obversa/teams`: the parser that
+  turns a reviewer's reply into a pass or a revise with findings, for a
+  review panel of your own whose lenses must be able to say no.
 - `fnJob` takes a function that returns a one-line summary or nothing, as
   well as a full outcome: a string is a pass with that summary, nothing is a
   pass with the label as its summary, and a throw is a fail carrying the

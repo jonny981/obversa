@@ -22,6 +22,10 @@ npm install @obversa/runtime @obversa/teams
   plan, the tests and the implementation. A rejected plan, test or
   implementation goes back to the step that owns it, each with its own
   budget, and the run ends with an approval note and the evidence.
+- **`outcomeFromAgentText`.** The parser the teams use on a reviewer's
+  reply: the first JSON decision object becomes a pass, or a revise with
+  its findings aimed at the step you name. For a panel of your own whose
+  lenses must be able to say no.
 
 Every team is a graph of named steps with a `desc` and a `gate` sentence on
 each, and every seat is checked before a run: the implementer and each
@@ -35,7 +39,7 @@ fails by name when the file is missing or empty.
 | `brief` | The work, as text. Every model in the team reads it. |
 | `workspace` | The directory the team works in. Files are written here. |
 | `files` | The paths, relative to the workspace, that the brief expects written. |
-| `testFiles` | The paths in `files` the tests-first step writes from the plan before any code exists. |
+| `testFiles` | `featureDelivery` only: the paths in `files` its tests-first step writes from the plan before any code exists. |
 | `test` | The command and arguments that prove the files, run in the workspace. |
 | `maxKickbacks` | How many times work may go back, one number for the whole team or a map with a budget per step, such as `{ plan: 3, 'tests-first': 3, implement: 3 }`. Default 1. |
 | seats | One `{ engine, identity }` per role. The identity names the adapter, provider, model family and model. |
