@@ -17,7 +17,7 @@ import {
   type TeamAgent,
 } from '@obversa/runtime';
 import { mkdir, readFile, stat, writeFile } from 'node:fs/promises';
-import { join } from 'node:path';
+import { join, relative } from 'node:path';
 
 const workspace = process.cwd();
 const BRIEF = 'Deliver src/result.mjs exporting result = 23 with a Node test that proves it.';
@@ -73,7 +73,7 @@ function agentLeaf(label: string, engine: Engine, instruction: string): Job {
 }
 
 function agentFile(label: string, engine: Engine, instruction: string, file: string): Job {
-  const job = agentLeaf(label, engine, `${instruction}\nWrite the complete non-empty output to ${file}.`);
+  const job = agentLeaf(label, engine, `${instruction}\nWrite the complete non-empty output to ${relative(workspace, file)}.`);
   return async (ctx) => {
     const outcome = await job(ctx);
     if (outcome.status !== 'pass') return outcome;
@@ -90,7 +90,7 @@ function agentFile(label: string, engine: Engine, instruction: string, file: str
 }
 
 function commandStage(label: string, args: string[], text: string): Job {
-  const command = gateJob(label, commandSucceeds(process.execPath, args, {
+  const command = gateJob(label, commandSucceeds('node', args, {
     cwd: workspace,
     captureOutput: true,
   }));
@@ -178,8 +178,8 @@ function callbackStage(label: string, decisionText: string): Job {
 
 const implementation = loop({
   name: 'implementation-loop',
-  body: agentFile('implementation', codex, `Implement the accepted plan in the supplied workspace. The source file is ${SOURCE_FILE}.`, SOURCE_FILE),
-  until: commandSucceeds(process.execPath, ['--test', TEST_FILE], { cwd: workspace, captureOutput: true }),
+  body: agentFile('implementation', codex, `Implement the accepted plan in the supplied workspace. The source file is ${relative(workspace, SOURCE_FILE)}.`, SOURCE_FILE),
+  until: commandSucceeds('node', ['--test', TEST_FILE], { cwd: workspace, captureOutput: true }),
   review: reportPanel('implementation-review', 'implementation', 4),
   max: 3,
   maxReviewRestarts: 3,
@@ -189,7 +189,7 @@ const implementation = loop({
 const ciFix = loop({
   name: 'ci-fix-loop',
   body: agentLeaf('ci-fix-worker', codex, 'Repair the named failing CI check without changing unrelated work.'),
-  until: commandSucceeds(process.execPath, ['--test', TEST_FILE], { cwd: workspace, captureOutput: true }),
+  until: commandSucceeds('node', ['--test', TEST_FILE], { cwd: workspace, captureOutput: true }),
   review: reportPanel('ci-fix-review', 'ci-fix'),
   max: 3,
   maxReviewRestarts: 3,
@@ -207,7 +207,7 @@ const graph = dag({
     'research-review': { job: reportPanel('research-review'), desc: 'Have two reviewers read the research notes against the brief.', gate: 'Both reviewers have accepted the research.', when: optional(frozen.depth >= 2, 'research review requires process depth 2'), needs: ['research-requirements'] },
     plan: { job: agentFile('plan', claude, 'Write an executable plan from the requirements, one acceptance check per job.', PLAN_NOTE), desc: 'Write an executable plan from the requirements, one acceptance check per job.', gate: 'The plan is in the workspace and every requirement has a check.', needs: ['research-review'] },
     'plan-review': { job: callbackStage('plan-review', 'Approve the executable process plan?'), desc: 'Put the plan in front of a person when one is configured; otherwise record that no person was asked.', gate: 'A person has accepted the plan, or the skip is recorded with its reason.', when: optional(Boolean(frozen.decisionSource), skipReasons.planReview ?? 'plan decision source is named'), needs: ['plan'] },
-    'tests-first': { job: agentFile('tests-first', codex, `Write the tests from the accepted plan before any implementation exists. The test file must import ${SOURCE_FILE} and assert the declared result.`, TEST_FILE), desc: 'Write the tests from the accepted plan before any implementation exists.', gate: 'Every declared test file exists and is not empty.', needs: ['plan-review'] },
+    'tests-first': { job: agentFile('tests-first', codex, `Write the tests from the accepted plan before any implementation exists. The test file must import ${relative(workspace, SOURCE_FILE)} and assert the declared result.`, TEST_FILE), desc: 'Write the tests from the accepted plan before any implementation exists.', gate: 'Every declared test file exists and is not empty.', needs: ['plan-review'] },
     'tests-review': { job: reportPanel('tests-review'), desc: 'Have two reviewers check that every test names the acceptance it proves.', gate: 'Both reviewers have accepted the tests.', needs: ['tests-first'] },
     implementation: { job: implementation, desc: 'Write the code, run the tests, and repeat with the reviewers\' findings until it passes.', gate: 'The test command exits 0 and the reviewers have accepted, within three cycles.', needs: ['tests-review'] },
     conformance: { job: commandStage('conformance', ['--test', TEST_FILE], 'The declared process contract was checked.'), desc: 'Run the checks that prove the change keeps its declared contract.', gate: 'Every conformance check exits 0.', needs: ['implementation'] },
