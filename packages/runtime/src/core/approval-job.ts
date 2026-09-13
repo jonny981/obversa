@@ -202,13 +202,25 @@ async function answerInProcess(
     await client.release(request.requestId, claim.claimToken);
     throw error;
   }
-  const submitted = await client.submit(
-    request.requestId,
-    claim.claimToken,
-    routerId,
-    request.digest,
-    response as unknown as JsonObject,
-  );
+  // Only the fields with a value go to the store: `note: undefined` is a
+  // type-legal answer and not a JSON value.
+  const submission: JsonObject = {
+    approved: response.approved,
+    ...(typeof response.note === 'string' ? { note: response.note } : {}),
+  };
+  let submitted: Awaited<ReturnType<RunCallbacks['submit']>>;
+  try {
+    submitted = await client.submit(
+      request.requestId,
+      claim.claimToken,
+      routerId,
+      request.digest,
+      submission,
+    );
+  } catch (error) {
+    await client.release(request.requestId, claim.claimToken);
+    throw error;
+  }
   if (!submitted.ok) {
     await client.release(request.requestId, claim.claimToken);
     throw new LoopError({

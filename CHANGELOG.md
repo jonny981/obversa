@@ -35,9 +35,11 @@ engine and memory packages track their own versions independently.
   exit.
 - A callback request posted again after being superseded is live again: the
   newest post is always the question a router can answer.
-- `dag` refuses a `when: failed(x)` on a node whose `x` is not
-  `optional: true` at build time, because a required node that fails blocks
-  its dependents before any `when` runs.
+- `dag` refuses at build time a `when` that reads a dependency the node
+  does not need, and a `failed(x)` on a node whose `x` is not
+  `optional: true`, because a required node that fails blocks its
+  dependents before any `when` runs. The check reads the condition itself,
+  each item of an array and each input of `all`.
 
 - A dag node accepts `needs` as one name or a list, and optional `desc` and
   `gate` sentences that reach the rendered plan, the `dag:node` record and

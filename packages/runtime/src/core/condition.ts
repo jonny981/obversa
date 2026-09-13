@@ -989,10 +989,12 @@ export interface NeedDecision {
 }
 
 /**
- * Every `passed(name)` and `failed(name)` inside a condition input, however
- * it is composed: arrays are walked, and `all`, `any`, `not` and `quorum`
- * carry their inputs in their meta so the walk reaches inside them. The
- * graph builder reads this to refuse a branch that could never run.
+ * Every `passed(name)` and `failed(name)` a condition input requires: the
+ * input itself, each item of an array, and each input of `all`, which carry
+ * their inputs in their meta. `not`, `any` and `quorum` are not walked: a
+ * branch composed with them can be met another way, so a `failed(x)` inside
+ * one does not make the branch dead. The graph builder reads this to refuse
+ * a branch that could never run.
  */
 export function needDecisionsOf(input: ConditionInput): NeedDecision[] {
   if (Array.isArray(input)) return input.flatMap((item) => needDecisionsOf(item));
@@ -1002,7 +1004,7 @@ export function needDecisionsOf(input: ConditionInput): NeedDecision[] {
   if ((meta.name === 'passed' || meta.name === 'failed') && typeof meta.need === 'string') {
     return [{ on: meta.name, need: meta.need }];
   }
-  if (Array.isArray(meta.inputs)) {
+  if (meta.name === 'all' && Array.isArray(meta.inputs)) {
     return (meta.inputs as ConditionInput[]).flatMap((item) => needDecisionsOf(item));
   }
   return [];

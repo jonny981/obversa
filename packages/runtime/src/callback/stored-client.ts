@@ -305,7 +305,10 @@ export async function createStoredCallbackClient(
           }
         }
         state.client.post(storedRequest);
-        return { result: undefined, approvalSubject };
+        // A request the store already knows keeps its one subject: a post
+        // that re-opens a superseded request records the request again and
+        // the subject never, so the history stays readable.
+        return { result: undefined, approvalSubject: storedSubject === undefined ? approvalSubject : undefined };
       });
     },
     listPending: async () => (await read()).client.listPending(),
