@@ -233,7 +233,10 @@ export function teamAgent(
     const changed = before.exists !== after.exists || before.hash !== after.hash;
     if (!changed || !after.exists || after.hash === null) return replyOutcome;
     try {
-      return outcomeFromAgentText(await readFile(path, 'utf8'), target);
+      const fileOutcome = outcomeFromAgentText(await readFile(path, 'utf8'), target);
+      return fileOutcome.status === 'fail' && fileOutcome.summary === INVALID_TEAM_DECISION
+        ? replyOutcome
+        : fileOutcome;
     } catch {
       return replyOutcome;
     }

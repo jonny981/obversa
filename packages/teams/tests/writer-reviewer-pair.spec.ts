@@ -82,6 +82,45 @@ describe('writerReviewerPair', () => {
     }
   });
 
+  it('uses a valid reviewer reply when the changed decision file is incomplete', async () => {
+    const workspace = await mkdtemp(join(tmpdir(), 'obversa-teams-pair-invalid-file-'));
+    try {
+      const writerEngine = scriptedEngine('writer', [
+        async (request) => {
+          await writePairFiles(request.cwd!);
+          return pass('writer wrote the requested files');
+        },
+        async (request) => {
+          await writePairFiles(request.cwd!);
+          return pass('writer applied the review');
+        },
+      ]);
+      const reviewerEngine = scriptedEngine('reviewer', [
+        async (request) => {
+          await mkdir(join(request.cwd!, 'reviews'), { recursive: true });
+          await writeFile(join(request.cwd!, 'reviews/reviewer.json'), '{"status":"revise"}\n');
+          return revise('review requested one repair', 'the implementation needs one repair');
+        },
+        async () => pass('review accepted the repaired files'),
+      ]);
+
+      const result = await run(writerReviewerPair({
+        brief: 'Write a module that exports result 42 and a test for it.',
+        workspace,
+        files: ['src/result.mjs', 'test/result.test.mjs'],
+        test: testCommand,
+        writer: seat(writerEngine, 'writer'),
+        reviewer: seat(reviewerEngine, 'reviewer'),
+      }), { cwd: workspace });
+
+      expect(result.outcome.status).toBe('pass');
+      expect(writerEngine.calls).toHaveLength(2);
+      expect(reviewerEngine.calls).toHaveLength(2);
+    } finally {
+      await rm(workspace, { recursive: true, force: true });
+    }
+  });
+
   it('refuses equal model families from the two seat identities', async () => {
     const writer = scriptedEngine('writer', [async () => pass('unused')]);
     const reviewer = scriptedEngine('reviewer', [async () => pass('unused')]);
