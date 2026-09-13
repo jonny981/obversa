@@ -53,6 +53,7 @@ export const stageBranches = {
   D36: 'feat/teams',
   D45: 'docs/whole-file-examples',
   D48: 'feat/d48-fine-grained',
+  F35: 'feat/teams-declarative',
   F34: 'feat/command-kickback',
   F36: 'feat/runtime-conveniences',
 };
