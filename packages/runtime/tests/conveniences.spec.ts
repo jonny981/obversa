@@ -8,6 +8,7 @@ import { afterEach, describe, it, expect } from 'vitest';
 import {
   LoopError,
   all,
+  any,
   approval,
   commandJob,
   createCallbackClient,
@@ -17,11 +18,13 @@ import {
   failed,
   fnJob,
   loop,
+  not,
   passed,
   pipeline,
   run,
 } from '../src/api.ts';
-import type { CallbackClient, CallbackRequest, LoopEvent, Outcome } from '../src/api.ts';
+import type { CallbackClient, CallbackRequest, Job, LoopEvent, Outcome, Sha256Digest } from '../src/api.ts';
+import { createApprovalCallbackGate, type ApprovalSubjectInput } from '../src/callback/approval.js';
 import { compileGraph } from '../src/graph/type.js';
 import { dag as dagGraphType } from '../src/graph-types/dag.js';
 import { resolveGraphPlan } from '../src/graph/plan.js';
@@ -82,6 +85,26 @@ async function storedRun() {
   });
   return { runId, storage };
 }
+
+const hash = (digit: string): Sha256Digest => `sha256:${digit.repeat(64)}` as Sha256Digest;
+
+/** A subject-backed question: the bytes a person approves, named in the request. */
+const subjectFor = (output: string): ApprovalSubjectInput => ({
+  workspaceAnchor: null,
+  inputArtifactHashes: { source: hash('5') },
+  proofScope: { kind: 'change', paths: ['packages/runtime'] },
+  proofArtifact: { schemaVersion: 1, digest: hash('2'), byteLength: 128, mediaType: 'application/json', purpose: 'proof-packet' },
+  proposedOutput: new TextEncoder().encode(output),
+  effectivePermissions: [{ name: 'workspace.write', scope: { paths: ['packages/runtime'] } }],
+});
+
+const subjectGate = (revision: string, subject: ApprovalSubjectInput) => createApprovalCallbackGate({
+  gateId: 'apply-change',
+  gateVersion: 1,
+  decisionText: 'Apply these exact bytes?',
+  responseSchema: { type: 'object', properties: { kind: { type: 'string' } }, required: ['kind'] },
+  input: { revision },
+}, subject);
 
 const node = process.execPath;
 
@@ -151,6 +174,10 @@ describe('commandJob', () => {
 
   it('refuses a one-string command that needs quoting', () => {
     expect(() => commandJob('test', `${node} -e "process.exit(1)"`)).toThrow(/array/);
+  });
+
+  it('refuses an empty one-string command', () => {
+    expect(() => commandJob('nothing', '   ')).toThrow(/needs a command/);
   });
 
   it('refuses shell syntax in the one-string form, as the validation error the surface throws', () => {
@@ -276,6 +303,33 @@ describe('passed and failed', () => {
         },
       })).toThrow(/optional/);
     }
+  });
+
+  it('accept failed(x) on a required x inside not() and any(), which a branch can reach another way', () => {
+    for (const when of [not(failed('size')), any(passed('size'), failed('size'))]) {
+      expect(() => dag({
+        name: 'reachable',
+        nodes: {
+          size: commandJob('size', [node, '-e', '0']),
+          next: { needs: 'size', when, job: fnJob('next', () => {}) },
+        },
+      })).not.toThrow();
+    }
+  });
+
+  it('fire neither branch over a decider that aborted, and none over one that paused', async () => {
+    const ran: string[] = [];
+    const branches = (decide: Job) => ({
+      decide: { optional: true, job: decide },
+      yes: { needs: 'decide', when: passed('decide'), job: fnJob('yes', () => { ran.push('yes'); }) },
+      no: { needs: 'decide', when: failed('decide'), job: fnJob('no', () => { ran.push('no'); }) },
+    });
+    const aborted = await run(dag({ name: 'aborted', nodes: branches(fnJob('decide', (): Outcome => ({ status: 'aborted', summary: 'cut short' }))) }));
+    expect(aborted.outcome.status).toBe('pass');
+    expect(ran).toEqual([]);
+    const paused = await run(dag({ name: 'paused', nodes: branches(fnJob('decide', (): Outcome => ({ status: 'paused', summary: 'later' }))) }));
+    expect(paused.outcome.status).toBe('paused');
+    expect(ran).toEqual([]);
   });
 
   it('fail the run when passed is used outside a dag', async () => {
@@ -471,6 +525,47 @@ describe('approval', () => {
       approval('approve', { ...asked, answer: () => ({ approved: true }) }),
       { callbacks: await createStoredCallbackClient(storage, runId) },
     );
+    expect(second.outcome.status).toBe('pass');
+  });
+
+  it('re-opens a superseded subject-backed question on the stored client without a second subject', async () => {
+    const { runId, storage } = await storedRun();
+    const client = await createStoredCallbackClient(storage, runId);
+    const subjectA = subjectFor('bytes A');
+    const subjectB = subjectFor('bytes B');
+    const a = subjectGate('a', subjectA);
+    const b = subjectGate('b', subjectB);
+    await client.post(a, subjectA);
+    await client.post(b, subjectB);
+    await client.post(a, subjectA);
+    const fresh = await createStoredCallbackClient(storage, runId);
+    const pending = await fresh.listPending();
+    expect(pending.map((r) => r.requestId)).toEqual([a.requestId]);
+    await expect(client.post(a, subjectFor('other bytes'))).rejects.toThrow();
+  });
+
+  it('answers on the stored client when the note is undefined', async () => {
+    const { runId, storage } = await storedRun();
+    const { outcome } = await run(
+      approval('approve', { question: 'Ship?', input: { change: 'abc' }, answer: () => ({ approved: true, note: undefined }) }),
+      { callbacks: await createStoredCallbackClient(storage, runId) },
+    );
+    expect(outcome.status).toBe('pass');
+  });
+
+  it('releases its claim when submit itself throws, so the next run can answer', async () => {
+    const real = createCallbackClient();
+    let submits = 0;
+    const throwing: CallbackClient = {
+      ...real,
+      submit: (...args) => { submits += 1; if (submits === 1) throw new Error('the store refused the bytes'); return real.submit(...args); },
+    };
+    const asked = { question: 'Ship?', input: { change: 'abc' } };
+    const first = await run(approval('approve', { ...asked, answer: () => ({ approved: true }) }), { callbacks: throwing });
+    expect(first.outcome.status).toBe('fail');
+    expect(first.outcome.summary).toContain('the store refused the bytes');
+    expect(real.listPending()).toHaveLength(1);
+    const second = await run(approval('approve', { ...asked, answer: () => ({ approved: true }) }), { callbacks: throwing });
     expect(second.outcome.status).toBe('pass');
   });
 
