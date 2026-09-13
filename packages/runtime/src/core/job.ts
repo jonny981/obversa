@@ -476,9 +476,31 @@ export function agentJob(config: AgentJobConfig): Job {
 export { kickback, revisionRequest };
 
 /** A deterministic step from a plain function — for glue, checks, side effects. */
+/**
+ * What a `fnJob` function may return: a full outcome, a one-line summary (the
+ * step passed, and this is what it did), or nothing (the step passed; its
+ * label is the summary). A throw is a fail carrying the error.
+ */
+export type FnJobResult = Outcome | string | void;
+
+const OUTCOME_STATUSES = new Set(['pass', 'fail', 'aborted', 'exhausted', 'paused']);
+
+function isOutcome(value: unknown): value is Outcome {
+  return typeof value === 'object' && value !== null
+    && OUTCOME_STATUSES.has((value as { status?: unknown }).status as string);
+}
+
+function describeReturn(value: unknown): string {
+  if (value === null) return 'null';
+  if (typeof value === 'object') {
+    return `an object with status ${JSON.stringify((value as { status?: unknown }).status)}`;
+  }
+  return `a ${typeof value}`;
+}
+
 export function fnJob(
   label: string,
-  fn: (ctx: JobContext) => Outcome | Promise<Outcome>,
+  fn: (ctx: JobContext) => FnJobResult | Promise<FnJobResult>,
 ): Job {
   const job: Job = async (ctx) => {
     const path = [...ctx.path];
@@ -491,7 +513,19 @@ export function fnJob(
     });
     let outcome: Outcome;
     try {
-      outcome = await fn(ctx);
+      const returned = await fn(ctx);
+      if (returned === undefined) {
+        outcome = { status: 'pass', summary: label };
+      } else if (typeof returned === 'string') {
+        outcome = { status: 'pass', summary: returned };
+      } else if (isOutcome(returned)) {
+        outcome = returned;
+      } else {
+        throw new LoopError({
+          code: 'VALIDATION',
+          message: `fnJob "${label}" returned ${describeReturn(returned)}, which is not an outcome, a string or nothing`,
+        });
+      }
     } catch (e) {
       const error = LoopError.from(e, {
         code: 'BODY',

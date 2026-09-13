@@ -182,7 +182,11 @@ function applyEvent(
   switch (event.kind) {
     case 'callback-requested': {
       const existing = states.get(event.request.requestId);
-      if (existing !== undefined) throw new TypeError('callback request is recorded more than once');
+      // A superseded question posted again is live again: the newest post is
+      // always the question a router can answer.
+      if (existing !== undefined && existing.status !== 'superseded') {
+        throw new TypeError('callback request is recorded more than once');
+      }
       states.set(event.request.requestId, {
         request: event.request,
         status: 'pending',
@@ -286,7 +290,8 @@ export function createCallbackClient(seed?: readonly CallbackEvent[]): CallbackC
           });
         }
       }
-      if (!states.has(storedRequest.requestId)) {
+      const current = states.get(storedRequest.requestId);
+      if (current === undefined || current.status === 'superseded') {
         record({ kind: 'callback-requested', request: storedRequest });
       }
     },

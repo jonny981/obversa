@@ -157,6 +157,7 @@ export const EXPECTED_FILES = {
     'package/dist/chunk-*.js.map',
     'package/dist/core/agent-md.d.ts',
     'package/dist/core/agent.d.ts',
+    'package/dist/core/approval-job.d.ts',
     'package/dist/core/assert-graph.d.ts',
     'package/dist/core/budget.d.ts',
     'package/dist/core/concurrency.d.ts',

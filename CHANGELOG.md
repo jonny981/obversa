@@ -11,6 +11,36 @@ engine and memory packages track their own versions independently.
 
 ### Added
 
+- `fnJob` takes a function that returns a one-line summary or nothing, as
+  well as a full outcome: a string is a pass with that summary, nothing is a
+  pass with the label as its summary, and a throw is a fail carrying the
+  error.
+- `commandJob(label, command, opts)` runs a command as a step: pass on exit
+  0, fail with the output as the evidence otherwise. `target` names the node
+  that owns the fix, as `gateJob` does; the command is one string or an
+  array, one argument per entry.
+- `passed(name)` and `failed(name)` are conditions for a node's `when` that
+  read the named dependency's outcome, so a branch follows a command's
+  decision with no code reading `ctx.needs` by hand. A name the node does
+  not depend on is a configuration error.
+- `approval(label, { question, input?, target?, answer? })` is a person's
+  decision as a step. It asks through the run's callbacks client: a yes
+  passes, a no goes back to `target` with the note as the finding (or fails
+  the step with the note), and no answer pauses the run with the request
+  pending. Run again with the same client, the step finds the answer.
+- `run` takes `callbacks`, the client the run's questions go through: the
+  in-memory client or the stored client (`RunCallbacks`), and every job sees
+  it as `ctx.callbacks`. The default is a fresh in-memory client for the
+  run; the stored client is the one whose questions survive a process
+  exit.
+- A callback request posted again after being superseded is live again: the
+  newest post is always the question a router can answer.
+- `dag` refuses at build time a `when` that reads a dependency the node
+  does not need, and a `failed(x)` on a node whose `x` is not
+  `optional: true`, because a required node that fails blocks its
+  dependents before any `when` runs. The check reads the condition itself,
+  each item of an array and each input of `all`.
+
 - A dag node accepts `needs` as one name or a list, and optional `desc` and
   `gate` sentences that reach the rendered plan, the `dag:node` record and
   the input the node's reviewer receives.

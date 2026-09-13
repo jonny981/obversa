@@ -54,6 +54,7 @@ export const stageBranches = {
   D45: 'docs/whole-file-examples',
   D48: 'feat/d48-fine-grained',
   F34: 'feat/command-kickback',
+  F36: 'feat/runtime-conveniences',
 };
 
 export function manageStage(args, options = {}) {

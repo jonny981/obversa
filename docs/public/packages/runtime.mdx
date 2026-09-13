@@ -255,7 +255,17 @@ try {
 - `dag`, `pipeline`, `sequence`, `parallel`, `loop`: the shapes a workflow
   takes; each returns a job you can run or nest.
 - `fnJob`, `agentJob`, `defineAgent`, `defineAgentFromMarkdown`: the steps,
-  from a plain function to a named agent with a brief.
+  from a plain function to a named agent with a brief. A `fnJob` function
+  returns a full outcome, a one-line summary (a pass) or nothing (a pass
+  with the label as its summary); a throw is a fail carrying the error.
+  `FnJobResult` names what it may return.
+- `commandJob`: a command as a step, pass on exit 0 and fail with the output
+  as the evidence otherwise; `target` names the step that owns the fix.
+- `passed`, `failed`: conditions for a node's `when` that read a named
+  dependency's outcome, so a command's exit code chooses the branch. The
+  node `failed` decides on must be `optional: true`, or its red result
+  would block the branch before the condition is read; `dag` refuses the
+  graph otherwise and says which node to mark.
 - `isolated`: run a step in its own worktree and branch.
 
 **Review inside it**
@@ -267,7 +277,9 @@ try {
 
 **Run it**
 
-- `run`: run a job from a fresh record.
+- `run`: run a job from a fresh record. `callbacks` is the client the run's
+  questions go through, in memory or stored (`RunCallbacks` names either);
+  every job sees it as `ctx.callbacks`.
 - `compileGraph`, `dagGraphType`, `createGraphExecutor`, `resolveGraphPlan`,
   `persistRunDefinition`: the graph layer, for hosts and for shapes of your
   own.
@@ -280,6 +292,10 @@ try {
 
 **Ask a person**
 
+- `approval`: a person's decision as a step; a yes passes, a no goes back
+  to the step that owns the fix with the note as the finding, no answer
+  pauses the run. `ApprovalOptions` is what it takes and `ApprovalAnswer`
+  what the person gives.
 - `createCallbackGate`, `createCallbackClient`, `createStoredCallbackClient`,
   `replayCallbackClient`, `directRouter`: a question with a typed answer,
   recorded so it survives a restart.

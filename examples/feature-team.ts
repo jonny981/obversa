@@ -1,38 +1,31 @@
 /**
  * A feature team, as one file.
  *
- * Five named stages, a review panel of three that passes on two, and work that
- * goes back to the stage that owns it when the panel fails. It runs offline,
- * with no model and no network: every job here is a small function, so the
- * shape of the team is the only thing on show.
+ * Five named stages, a review panel of three that passes on two, work that
+ * goes back to the stage that owns it when the panel fails, and a person who
+ * decides at the end. It runs offline, with no model and no network: every
+ * job here is a small function, so the shape of the team is the only thing
+ * on show.
  */
-import { fnJob, pipeline, reviewPanel, run, type Outcome } from '@obversa/runtime';
+import { approval, fnJob, pipeline, reviewPanel, run, type Outcome } from '@obversa/runtime';
 
 /** The work itself. In a real team each of these calls an engine. */
-const analyse = fnJob('analyse', async (): Promise<Outcome> => ({
-  status: 'pass',
-  summary: 'the ticket asks for a report export with a header row',
-}));
+const analyse = fnJob('analyse', () => 'the ticket asks for a report export with a header row');
 
 /** Fails its first attempt so the panel has something to send back. */
 let implementRuns = 0;
-const implement = fnJob('implement', async (): Promise<Outcome> => {
+const implement = fnJob('implement', () => {
   implementRuns += 1;
-  return {
-    status: 'pass',
-    summary: implementRuns === 1 ? 'report.csv, rows only' : 'report.csv, header and rows',
-  };
+  return implementRuns === 1 ? 'report.csv, rows only' : 'report.csv, header and rows';
 });
 
-const testStage = fnJob('test', async (): Promise<Outcome> => ({
-  status: 'pass',
-  summary: 'the export parses',
-}));
+const testStage = fnJob('test', () => 'the export parses');
 
-const approve = fnJob('approve', async (): Promise<Outcome> => ({
-  status: 'pass',
-  summary: 'released',
-}));
+/** The person at the end. In a real team the answer arrives through the callbacks client. */
+const approve = approval('approve', {
+  question: 'Ship this change?',
+  answer: () => ({ approved: true }),
+});
 
 /**
  * The three reviewers. Two of them fail the first attempt, because the panel
@@ -42,15 +35,15 @@ const approve = fnJob('approve', async (): Promise<Outcome> => ({
  */
 const missingHeader = () => implementRuns === 1;
 const checks = {
-  correctness: fnJob('correctness', async (): Promise<Outcome> =>
+  correctness: fnJob('correctness', (): Outcome | string =>
     missingHeader()
       ? { status: 'fail', summary: 'the export is missing its header row' }
-      : { status: 'pass', summary: 'header and rows present' }),
-  safety: fnJob('safety', async (): Promise<Outcome> => ({ status: 'pass', summary: 'no destructive path' })),
-  scope: fnJob('scope', async (): Promise<Outcome> =>
+      : 'header and rows present'),
+  safety: fnJob('safety', () => 'no destructive path'),
+  scope: fnJob('scope', (): Outcome | string =>
     missingHeader()
       ? { status: 'fail', summary: 'the ticket asked for a header row' }
-      : { status: 'pass', summary: 'inside the ticket' }),
+      : 'inside the ticket'),
 };
 
 const review = reviewPanel({

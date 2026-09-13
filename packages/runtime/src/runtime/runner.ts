@@ -22,6 +22,7 @@ import { jobMeta } from '../core/describe.js';
 import { currentBranch } from '../core/git.js';
 import type { Environment, EnvHandle } from '../env/environment.js';
 import type { Memory } from '@obversa/memory';
+import { createCallbackClient } from '../callback/client.js';
 import {
   cloneFrozenJson,
   JsonValueError,
@@ -34,6 +35,7 @@ import type {
   LoopEvent,
   Outcome,
   Workspace,
+  RunCallbacks,
 } from '../core/types.js';
 
 /** Default ceiling on an interruptible limit-wait: 5 minutes. */
@@ -68,6 +70,14 @@ export interface RunOptions {
   state?: Record<string, unknown>;
   /** Memory instance available to every job in the run. */
   memory?: Memory;
+  /**
+   * The client the run's questions go through (`approval`). Default: a fresh
+   * in-memory client for this run, so a run without one forgets its questions
+   * when it ends. Pass a client to keep them: the in-memory one across runs
+   * in a process, the stored client (`createStoredCallbackClient`) across a
+   * process exit.
+   */
+  callbacks?: RunCallbacks;
   /**
    * Cap total tokens (input + output) for the run. A bare number is the limit;
    * pass `{ limit, headroom?, soft? }` for headroom or warn-don't-refuse mode.
@@ -269,6 +279,7 @@ export async function run(
     params,
     state: initialState,
     memory: options.memory,
+    callbacks: options.callbacks ?? createCallbackClient(),
     workspace,
     environment,
     budget,

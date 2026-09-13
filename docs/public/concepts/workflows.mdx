@@ -162,11 +162,15 @@ of your own over the public contract, see
   failing panel fails the run rather than returning the work. The example
   above sets it.
 - **A command can send work back, and a command can choose the path.**
-  `gateJob(label, condition, { target })` returns a red command's captured
+  `commandJob(label, command, { target })` returns a red command's captured
   output to the step named as a revision request, no agent in between; and
-  a node's `when` predicate can read the outcomes of the steps it needs
-  through `ctx.needs`, so a command's exit code decides which branch runs.
-  [A command decides the path](/workflows/command-kickback) shows both.
+  a node's `when` can read the outcome of a step it needs with
+  `passed(name)` or `failed(name)`, so a command's exit code decides which
+  branch runs. [A command decides the path](/workflows/command-kickback)
+  shows both.
+- **A person can be a step.** `approval(label, { question, target })` asks
+  one question; a no goes back to `target` with the note as the finding.
+  [A person decides](/workflows/approval) shows it.
 - **Kickbacks are counted, per target if you say so.** `maxKickbacks` caps
   how many times work can go back. A number is one budget for the whole
   graph. A map, `{ plan: 3, 'tests-first': 3 }`, gives each target its own,

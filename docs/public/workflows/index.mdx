@@ -85,6 +85,10 @@ These files run offline against the public packages and nothing else.
   as a node with no inference; a red run goes straight back to the writer
   with the output attached, and a second command's exit code chooses which
   review runs next.
+- [A person decides](/workflows/approval). A question to a person as a
+  step: a no goes back to the writer with the note as the finding, a yes
+  passes, and with nobody answering the run pauses and carries on from the
+  answer.
 - [A review that sends work back](/workflows/offline-review). A reviewer
   rejects the first draft with a reason and the second draft passes.
 - [A file change approved byte for byte](/workflows/safe-change). Source

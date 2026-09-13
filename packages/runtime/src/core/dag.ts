@@ -26,7 +26,7 @@ import type {
   Workspace,
 } from './types.js';
 import { childContext } from './context.js';
-import { toCondition } from './condition.js';
+import { needDecisionsOf, toCondition } from './condition.js';
 import { setMeta, jobMeta, describeConditions } from './describe.js';
 import {
   isRepo,
@@ -120,6 +120,29 @@ export function dag(config: DagConfig): Job {
         });
       }
       edges.push([dep, name]); // dep must precede name
+    }
+    // A `when` that reads a dependency's outcome (`passed(x)`, `failed(x)`,
+    // however composed) must name one of this node's needs, and a branch on
+    // `failed(x)` is reached only when x is optional: a required x that
+    // fails blocks this node before its `when` is ever read.
+    for (const { on, need } of node.when === undefined ? [] : needDecisionsOf(node.when)) {
+      const where = `dag "${config.name}": node "${name}" branches on ${on}("${need}")`;
+      if (!nodes.has(need)) {
+        throw new LoopError({ code: 'CONFIG', message: `${where}, but "${need}" is not a node in this dag` });
+      }
+      if (!normalizeNeeds(node.needs).includes(need)) {
+        throw new LoopError({
+          code: 'CONFIG',
+          message: `${where}, but "${need}" is not one of its needs; add it to the node's needs`,
+        });
+      }
+      if (on === 'failed' && nodes.get(need)?.optional !== true) {
+        throw new LoopError({
+          code: 'CONFIG',
+          message: `${where}, so "${need}" must be optional: true; `
+            + `a required node that fails blocks "${name}" before its when runs`,
+        });
+      }
     }
   }
   let order: string[];

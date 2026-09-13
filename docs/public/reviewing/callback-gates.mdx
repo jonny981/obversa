@@ -122,6 +122,15 @@ console.log(JSON.stringify({
 }, null, 2));
 ```
 
+## A person's decision as a step
+
+For the common case, one question in a workflow, `approval` wraps the gate:
+it asks through the run's callbacks client, a yes passes the step, a no goes
+back to the step that owns the fix with the person's note as the finding,
+and no answer pauses the run with the request pending. [A person decides](/workflows/approval)
+shows it in a running file. The client, the routers and the stored history
+below are what it stands on, and what a host uses to answer.
+
 ## How it works when it runs
 
 1. The workflow posts the question; the record gains a request event.

@@ -23,7 +23,7 @@ import type {
 import type { EngineRef } from '../engines/engine.js';
 import { isInfrastructureError, LoopError } from './errors.js';
 import { resolveEnv } from './env-overlay.js';
-import { setLabel, setMeta } from './describe.js';
+import { jobMeta, setLabel, setMeta } from './describe.js';
 import { assertBudget } from './budget.js';
 import { resolveSystem, type AgentDef } from './agent.js';
 import { truncate } from './text.js';
@@ -253,6 +253,7 @@ export function not(c: ConditionInput): Condition {
       output: r.output,
     };
   };
+  setMeta(condition, { kind: 'condition', name: 'not', inputs: [c] });
   return withConditionPreparation(condition, async (ctx) =>
     not(await prepareCondition(c, ctx)),
   );
@@ -281,6 +282,7 @@ export function all(...inputs: ConditionInput[]): Condition {
       reason: `all(${results.map((r) => r.reason).join(' & ')})`,
     };
   };
+  setMeta(condition, { kind: 'condition', name: 'all', inputs });
   return withConditionPreparation(condition, async (ctx) =>
     all(...(await Promise.all(inputs.map((input) => prepareCondition(input, ctx))))),
   );
@@ -310,6 +312,7 @@ export function any(...inputs: ConditionInput[]): Condition {
     }
     return { met: false, reason: `any(${reasons.join(' | ')})`, output };
   };
+  setMeta(condition, { kind: 'condition', name: 'any', inputs });
   return withConditionPreparation(condition, async (ctx) =>
     any(...(await Promise.all(inputs.map((input) => prepareCondition(input, ctx))))),
   );
@@ -377,6 +380,7 @@ export function quorum(k: number, ...inputs: ConditionInput[]): Condition {
       output: met ? undefined : output,
     };
   }, `quorum ${k}/${inputs.length}`);
+  setMeta(condition, { kind: 'condition', name: 'quorum', inputs });
   return withConditionPreparation(condition, async (ctx) =>
     quorum(
       k,
@@ -876,4 +880,132 @@ export function gateJob(
     });
     return outcome;
   }, { kind: 'gate', name: label });
+}
+
+/**
+ * A command as a job: `pass` on exit 0, `fail` otherwise, with the command's
+ * output as the evidence. Give the command as one string when no argument
+ * needs quoting (`'pnpm test'`), or as an array, one argument per entry
+ * (`['node', '--test', 'test/']`). `target` names the node that owns the fix,
+ * exactly as `gateJob` does: a red run goes back there with the output as the
+ * finding and no agent in between. `capture` (default true) appends the
+ * output tail to the failure summary.
+ */
+export function commandJob(
+  label: string,
+  command: string | readonly string[],
+  opts: {
+    cwd?: string;
+    timeoutMs?: number;
+    env?: Record<string, string>;
+    target?: string;
+    capture?: boolean;
+  } = {},
+): Job {
+  const [executable, ...args] = splitCommand(command);
+  return gateJob(
+    label,
+    commandSucceeds(executable, args, {
+      ...(opts.cwd !== undefined ? { cwd: opts.cwd } : {}),
+      ...(opts.timeoutMs !== undefined ? { timeoutMs: opts.timeoutMs } : {}),
+      ...(opts.env !== undefined ? { env: opts.env } : {}),
+      captureOutput: opts.capture ?? true,
+    }),
+    opts.target !== undefined ? { target: opts.target } : {},
+  );
+}
+
+function splitCommand(command: string | readonly string[]): [string, ...string[]] {
+  if (typeof command === 'string' && /["']/.test(command)) {
+    throw new LoopError({
+      code: 'VALIDATION',
+      message: `commandJob: "${command}" has a quote in it; pass the command as an array, one argument per entry`,
+    });
+  }
+  if (typeof command === 'string' && /[|&;<>$`()]/.test(command)) {
+    throw new LoopError({
+      code: 'VALIDATION',
+      message: `commandJob: "${command}" has shell syntax in it, and nothing here runs through a shell; `
+        + 'give one command as an array, one argument per entry, or run a script',
+    });
+  }
+  const parts = typeof command === 'string' ? command.trim().split(/\s+/) : [...command];
+  const [executable, ...args] = parts;
+  if (executable === undefined || executable === '') {
+    throw new LoopError({ code: 'VALIDATION', message: 'commandJob needs a command to run' });
+  }
+  return [executable, ...args];
+}
+
+function needOutcome(ctx: JobContext, name: string, caller: string): Outcome {
+  const outcome = ctx.needs?.[name];
+  if (outcome === undefined) {
+    throw new LoopError({
+      code: 'VALIDATION',
+      message: `${caller}("${name}"): "${name}" is not a dependency of this node; add it to the node's needs`,
+    });
+  }
+  return outcome;
+}
+
+/**
+ * Met when the named dependency passed. For a node's `when`: the node runs
+ * only on that path (`when: passed('size')`). A skipped dependency counts as
+ * passed, as it does everywhere in a dag. A name the node does not `need` is
+ * a configuration error, not a quiet false.
+ */
+export function passed(name: string): Condition {
+  const cond: Condition = async (ctx) => {
+    const outcome = needOutcome(ctx, name, 'passed');
+    const met = outcome.status === 'pass';
+    return { met, reason: `${name} ${outcome.status}` };
+  };
+  setMeta(cond, { kind: 'condition', name: 'passed', need: name });
+  return setLabel(cond, `passed ${name}`);
+}
+
+/**
+ * Met when the named dependency ran and failed: the other branch of `passed`.
+ * A dependency that never got to decide (blocked by a failure upstream, or
+ * aborted) meets neither, so a branch runs only on a decision. The deciding
+ * node must be `optional: true`: a required node's failure blocks its
+ * dependents before any `when` runs, so a branch on `failed` would never be
+ * reached. `dag` refuses the graph at build time when it is not.
+ */
+export function failed(name: string): Condition {
+  const cond: Condition = async (ctx) => {
+    const outcome = needOutcome(ctx, name, 'failed');
+    const met = outcome.status === 'fail';
+    return { met, reason: `${name} ${outcome.status}` };
+  };
+  setMeta(cond, { kind: 'condition', name: 'failed', need: name });
+  return setLabel(cond, `failed ${name}`);
+}
+
+/** One `passed(name)` or `failed(name)` found inside a condition input. */
+export interface NeedDecision {
+  readonly on: 'passed' | 'failed';
+  readonly need: string;
+}
+
+/**
+ * Every `passed(name)` and `failed(name)` a condition input requires: the
+ * input itself, each item of an array, and each input of `all`, which carry
+ * their inputs in their meta. `not`, `any` and `quorum` are not walked: a
+ * branch composed with them can be met another way, so a `failed(x)` inside
+ * one does not make the branch dead. The graph builder reads this to refuse
+ * a branch that could never run.
+ */
+export function needDecisionsOf(input: ConditionInput): NeedDecision[] {
+  if (Array.isArray(input)) return input.flatMap((item) => needDecisionsOf(item));
+  if (typeof input !== 'function') return [];
+  const meta = jobMeta(input as unknown as Job);
+  if (meta?.kind !== 'condition') return [];
+  if ((meta.name === 'passed' || meta.name === 'failed') && typeof meta.need === 'string') {
+    return [{ on: meta.name, need: meta.need }];
+  }
+  if (meta.name === 'all' && Array.isArray(meta.inputs)) {
+    return (meta.inputs as ConditionInput[]).flatMap((item) => needDecisionsOf(item));
+  }
+  return [];
 }

@@ -21,6 +21,36 @@ import type { LoopError } from './errors.js';
 import type { Budget } from './budget.js';
 import type { EnvHandle, Environment } from '../env/environment.js';
 import type { JsonValue, RunBrief } from '../graph/value.js';
+import type {
+  CallbackEvent,
+  ClaimResult,
+  ReleaseResult,
+  SubmitResult,
+} from '../callback/client.js';
+import type { CallbackRequest } from '../callback/gate.js';
+
+/**
+ * The client a run's questions go through: the in-memory `CallbackClient`,
+ * or the stored client (`createStoredCallbackClient`) whose questions survive
+ * a process exit. Each method may answer at once or as a promise; a step
+ * that asks awaits both shapes alike. Written as the awaited shape here, so
+ * the core types import no storage module.
+ */
+export interface RunCallbacks {
+  post(request: CallbackRequest): void | Promise<void>;
+  listPending(): readonly CallbackRequest[] | Promise<readonly CallbackRequest[]>;
+  claim(requestId: string, routerId: string): ClaimResult | Promise<ClaimResult>;
+  submit(
+    requestId: string,
+    claimToken: string,
+    routerId: string,
+    requestDigest: string,
+    response: JsonValue,
+  ): SubmitResult | Promise<SubmitResult>;
+  release(requestId: string, claimToken: string): ReleaseResult | Promise<ReleaseResult>;
+  supersede(requestId: string, supersededBy: string): void | Promise<void>;
+  history(requestId?: string): readonly CallbackEvent[] | Promise<readonly CallbackEvent[]>;
+}
 
 /** Terminal disposition of a `Job`. */
 export type OutcomeStatus =
@@ -162,6 +192,13 @@ export interface JobContext {
   readonly state: Record<string, unknown>;
   /** Memory available to jobs in this run, when the caller supplied it. */
   readonly memory?: Memory;
+  /**
+   * The run's callbacks client: where a step posts a question for a person or
+   * an outside router, and where the answer is found again on a resume. Every
+   * run has one, a fresh in-memory client by default; pass `callbacks` to
+   * `run` to keep questions across runs.
+   */
+  readonly callbacks?: RunCallbacks;
   /** Where this job's code lives — the working dir and branch (the substrate). */
   readonly workspace: Workspace;
   /** The running environment for this workspace, when one is up (gate target). */
