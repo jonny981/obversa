@@ -71,9 +71,9 @@ describe('declarative teams', () => {
     const file = join(directory, 'brief.md');
     await writeFile(file, [
       '---',
-      'files: src/triple.mjs, test/triple.test.mjs',
-      'testFiles: test/triple.test.mjs',
-      'test: node --test test/triple.test.mjs',
+      'files: ["src/triple.mjs"]',
+      'testFiles: ["test/triple.test.mjs"]',
+      'test: ["node", "--test", "test/triple.test.mjs"]',
       '---',
       '',
       'Deliver a triple function.',
@@ -83,7 +83,7 @@ describe('declarative teams', () => {
     try {
       expect(fromFile(file)).toEqual({
         brief: 'Deliver a triple function.',
-        files: ['src/triple.mjs', 'test/triple.test.mjs'],
+        files: ['src/triple.mjs'],
         testFiles: ['test/triple.test.mjs'],
         test: {
           command: 'node',

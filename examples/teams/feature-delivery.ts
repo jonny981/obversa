@@ -1,51 +1,94 @@
-import { ClaudeCliEngine } from '@obversa/engine-claude-cli';
-import { CodexEngine } from '@obversa/engine-codex';
-import { run } from '@obversa/runtime';
-import { featureDelivery } from '@obversa/teams';
+import { claude } from '@obversa/engine-claude-cli';
+import { codex } from '@obversa/engine-codex';
+import { fromFile, person, stage, workflow } from '@obversa/teams';
 
-const workspace = process.cwd();
-const analyse = {
-  engine: new ClaudeCliEngine({ defaultModel: 'claude-sonnet-4-5', permissionMode: 'bypassPermissions' }),
-  identity: {
-    adapter: 'claude-cli', provider: 'anthropic', modelFamily: 'claude', model: 'claude-sonnet-4-5',
-  },
-};
-const implement = {
-  engine: new CodexEngine({ defaultModel: 'gpt-5.6-luna', permissionMode: 'bypassPermissions' }),
-  identity: {
-    adapter: 'codex', provider: 'openai', modelFamily: 'gpt', model: 'gpt-5.6-luna',
-  },
-};
-const reviewer = {
-  engine: new ClaudeCliEngine({ defaultModel: 'claude-sonnet-4-5', permissionMode: 'bypassPermissions' }),
-  identity: {
-    adapter: 'claude-cli', provider: 'anthropic', modelFamily: 'claude', model: 'claude-sonnet-4-5',
-  },
-};
-const approve = {
-  engine: new ClaudeCliEngine({ defaultModel: 'claude-sonnet-4-5', permissionMode: 'bypassPermissions' }),
-  identity: {
-    adapter: 'claude-cli', provider: 'anthropic', modelFamily: 'claude', model: 'claude-sonnet-4-5',
-  },
-};
+/**
+ * A feature, delivered the way a team delivers one. The roles are named once;
+ * every stage is a small block of nouns: who does it, what it writes, who
+ * reads it, where a red result goes back to. Inference happens only where a
+ * role is named; every other stage is a command or a person.
+ */
+export default workflow('feature-delivery', {
+  brief: fromFile('briefs/triple.md'),
+  options: { timeout: '10m' },
 
-const team = featureDelivery({
-  brief: 'Deliver a pure triple(value) function in src/triple.mjs with a Node test in test/triple.test.mjs.',
-  workspace,
-  files: ['src/triple.mjs', 'test/triple.test.mjs'],
-  testFiles: ['test/triple.test.mjs'],
-  test: { command: 'node', args: ['--test', 'test/triple.test.mjs'] },
-  analyse,
-  implement,
-  reviewers: [{ name: 'correctness', seat: reviewer, scope: 'implementation' }],
-  reviewThreshold: 1,
-  approve,
-  maxKickbacks: { plan: 3, 'tests-first': 3, implement: 3 },
+  roles: {
+    analyse: claude('claude-sonnet-4-5'),
+    implement: codex('gpt-5.6-luna'),
+    review: [claude('claude-sonnet-4-5'), codex('gpt-5.6-luna')],
+    approve: person('Ship this change?'),
+  },
+
+  stages: [
+    stage('research-context', {
+      agent: 'analyse',
+      writes: 'team-output/research-context.md',
+      desc: 'Read the workspace and write down what the change touches.',
+      gate: 'The context note is in the workspace and a reviewer has accepted it.',
+      reviewedBy: 'review',
+      retry: 3,
+    }),
+
+    stage('research-requirements', {
+      agent: 'analyse',
+      writes: 'team-output/research-requirements.md',
+      desc: 'Turn the brief and the context note into requirements, one REQ-n per line.',
+      gate: 'The requirements note is in the workspace and a reviewer has accepted it.',
+      reviewedBy: 'review',
+      retry: 3,
+    }),
+
+    stage('plan', {
+      agent: 'analyse',
+      writes: 'team-output/plan.md',
+      desc: 'Write an executable plan from the requirements, one check per REQ-n.',
+      gate: 'Every requirement has a check in the plan.',
+      reviewedBy: 'review',
+      retry: 3,
+    }),
+
+    stage('tests-first', {
+      agent: 'implement',
+      writes: 'test/triple.test.mjs',
+      desc: 'Write the declared test files from the accepted plan before any implementation exists.',
+      gate: 'Every declared test file exists and covers the plan.',
+      reviewedBy: 'review',
+      retry: 3,
+    }),
+
+    stage('implement', {
+      agent: 'implement',
+      writes: 'src/triple.mjs',
+      desc: 'Write the code to the plan and the tests.',
+      gate: 'The source file exists.',
+      retry: 3,
+    }),
+
+    stage('test', {
+      run: ['node', '--test', 'test/triple.test.mjs'],
+      sendsBackTo: 'implement',
+    }),
+
+    stage('review', {
+      panel: 'review',
+      agree: 1,
+      desc: 'Read the change and the test result against the plan.',
+      sendsBackTo: 'implement',
+    }),
+
+    stage('approve', {
+      input: 'approve',
+    }),
+
+    stage('close', {
+      agent: 'analyse',
+      writes: ['team-output/evidence.md', 'team-output/learning.md'],
+      desc: 'Write the evidence of the run and what was learned, from the record alone.',
+      gate: 'Both notes are in the workspace.',
+    }),
+  ],
+
+  post: {
+    always: ({ record }) => console.log(record.summary()),
+  },
 });
-
-const result = await run(team, {
-  cwd: workspace,
-  recordTo: 'team-output/events.jsonl',
-});
-console.log(JSON.stringify(result.outcome, null, 2));
-if (result.outcome.status !== 'pass') process.exitCode = 1;

@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 
 import {
   OpenCodeCliEngine,
+  opencode,
   buildOpenCodeInvocation,
   type OpenCodeCliEngineOptions,
   type OpenCodeCliIdentity,
@@ -23,5 +24,17 @@ describe('@obversa/engine-opencode-cli', () => {
 
     expect(engine.name).toBe('opencode-cli');
     expect(typeof buildOpenCodeInvocation).toBe('function');
+  });
+
+  it('creates the declarative seat shape from a provider model and executable', () => {
+    const seat = opencode('opencode/big-pickle', { executable: '/usr/bin/false' });
+
+    expect(seat.engine.name).toBe('opencode-cli');
+    expect(seat.identity).toEqual({
+      adapter: 'opencode-cli',
+      provider: 'opencode',
+      modelFamily: 'big-pickle',
+      model: 'opencode/big-pickle',
+    });
   });
 });

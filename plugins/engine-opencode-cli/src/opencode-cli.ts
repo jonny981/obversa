@@ -129,6 +129,39 @@ export interface OpenCodeCliEngineOptions {
   readonly auth?: JsonObject;
 }
 
+export interface OpenCodeSeatOptions {
+  readonly executable: string;
+}
+
+export interface OpenCodeSeat {
+  readonly engine: OpenCodeCliEngine;
+  readonly identity: {
+    readonly adapter: 'opencode-cli';
+    readonly provider: string;
+    readonly modelFamily: string;
+    readonly model: string;
+  };
+}
+
+/** Create the OpenCode seat used by declarative team workflows. */
+export function opencode(modelName: string, options: OpenCodeSeatOptions): OpenCodeSeat {
+  const selected = model(modelName);
+  const modelFamily = selected.value.slice(selected.provider.length + 1);
+  return {
+    engine: new OpenCodeCliEngine({
+      executable: options.executable,
+      version: SUPPORTED_VERSION,
+      identity: { provider: selected.provider, modelFamily },
+    }),
+    identity: {
+      adapter: 'opencode-cli',
+      provider: selected.provider,
+      modelFamily,
+      model: selected.value,
+    },
+  };
+}
+
 export interface OpenCodeInvocation {
   readonly args: readonly string[];
   readonly stdin: string;

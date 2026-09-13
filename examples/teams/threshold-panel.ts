@@ -1,65 +1,43 @@
-import { ClaudeCliEngine } from '@obversa/engine-claude-cli';
-import { CodexEngine } from '@obversa/engine-codex';
-import { OpenCodeCliEngine } from '@obversa/engine-opencode-cli';
-import { run } from '@obversa/runtime';
-import { thresholdPanel } from '@obversa/teams';
+import { claude } from '@obversa/engine-claude-cli';
+import { codex } from '@obversa/engine-codex';
+import { opencode } from '@obversa/engine-opencode-cli';
+import { fromFile, stage, workflow } from '@obversa/teams';
 
-function required(name: string): string {
-  const value = process.env[name];
-  if (!value) throw new Error(`Set ${name} to the absolute CLI path before running this example.`);
-  return value;
-}
+const executable = process.env.OPENCODE_BIN;
+if (!executable) throw new Error('Set OPENCODE_BIN to the absolute OpenCode CLI path before running this example.');
 
-const workspace = process.cwd();
-const implement = {
-  engine: new ClaudeCliEngine({
-    defaultModel: 'claude-sonnet-4-5',
-    permissionMode: 'bypassPermissions',
-  }),
-  identity: {
-    adapter: 'claude-cli',
-    provider: 'anthropic',
-    modelFamily: 'claude',
-    model: 'claude-sonnet-4-5',
+export default workflow('threshold-panel', {
+  brief: fromFile('briefs/double.md'),
+  options: { timeout: '10m' },
+
+  roles: {
+    implement: claude('claude-sonnet-4-5'),
+    review: [
+      codex('gpt-5.6-luna'),
+      opencode('opencode/big-pickle', { executable }),
+    ],
   },
-};
-const correctness = {
-  engine: new CodexEngine({
-    defaultModel: 'gpt-5.6-luna',
-    permissionMode: 'bypassPermissions',
-  }),
-  identity: {
-    adapter: 'codex',
-    provider: 'openai',
-    modelFamily: 'gpt',
-    model: 'gpt-5.6-luna',
-  },
-};
-const scope = {
-  engine: new OpenCodeCliEngine({
-    executable: required('OPENCODE_BIN'),
-    version: '1.18.23',
-    identity: { provider: 'opencode', modelFamily: null },
-  }),
-  identity: {
-    adapter: 'opencode-cli',
-    provider: 'opencode',
-    modelFamily: 'big-pickle',
-    model: 'opencode/big-pickle',
-  },
-};
-const team = thresholdPanel({
-  brief: 'Write a pure double(value) function in src/double.mjs with a Node test in test/double.test.mjs.',
-  workspace,
-  files: ['src/double.mjs', 'test/double.test.mjs'],
-  test: { command: 'node', args: ['--test', 'test/double.test.mjs'] },
-  implement,
-  reviewers: [
-    { name: 'correctness', seat: correctness },
-    { name: 'scope', seat: scope },
+
+  stages: [
+    stage('implement', {
+      agent: 'implement',
+      writes: ['src/double.mjs', 'test/double.test.mjs'],
+      desc: 'Write the function and its test from the brief.',
+      gate: 'The files named in the brief exist in the workspace.',
+      retry: 1,
+    }),
+    stage('test', {
+      run: ['node', '--test', 'test/double.test.mjs'],
+      desc: 'Run the test command against the written files.',
+      gate: 'The test command exits 0.',
+      sendsBackTo: 'implement',
+    }),
+    stage('review', {
+      panel: 'review',
+      agree: 1,
+      desc: 'Have both reviewers read the change and count the acceptances.',
+      gate: 'At least one reviewer has accepted.',
+      sendsBackTo: 'implement',
+    }),
   ],
-  threshold: 1,
 });
-const result = await run(team, { cwd: workspace });
-
-console.log(JSON.stringify(result.outcome, null, 2));

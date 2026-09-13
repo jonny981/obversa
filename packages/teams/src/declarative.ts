@@ -119,8 +119,18 @@ function pathList(value: unknown, label: string): string[] {
 }
 
 function commandValue(value: unknown): TestCommand {
-  if (value !== null && typeof value === 'object' && !Array.isArray(value)) {
-    const record = value as { command?: unknown; args?: unknown };
+  const parsed = typeof value === 'string' && value.trim().startsWith('[')
+    ? JSON.parse(value) as unknown
+    : value;
+  if (Array.isArray(parsed)) {
+    if (!parsed.length) throw new TypeError('test command must contain a command');
+    return {
+      command: text(parsed[0], 'test command'),
+      args: parsed.slice(1).map((arg, index) => text(arg, `test args[${index}]`)),
+    };
+  }
+  if (parsed !== null && typeof parsed === 'object') {
+    const record = parsed as { command?: unknown; args?: unknown };
     return {
       command: text(record.command, 'test command'),
       args: Array.isArray(record.args)
@@ -128,7 +138,7 @@ function commandValue(value: unknown): TestCommand {
         : [],
     };
   }
-  const parts = text(value, 'test command').split(/\s+/);
+  const parts = text(parsed, 'test command').split(/\s+/);
   return { command: parts[0]!, args: parts.slice(1) };
 }
 

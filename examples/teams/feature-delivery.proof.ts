@@ -3,101 +3,181 @@ import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
-import { run } from '@obversa/runtime';
-import { featureDelivery } from '@obversa/teams';
+import { createCallbackClient, directRouter, run, type LoopEvent } from '@obversa/runtime';
+import { person, stage, workflow } from '@obversa/teams';
 
 import { pass, scriptedSeat } from './scripted-engine.js';
 
-async function writeNote(cwd: string, file: string): Promise<void> {
-  await mkdir(join(cwd, 'team-output'), { recursive: true });
-  const text = file.endsWith('research-requirements.md')
-    ? 'REQ-1: Export result.\nREQ-2: Test result.\n'
-    : file.endsWith('plan.md')
-      ? 'REQ-1: Export result. Acceptance check: source exists.\nREQ-2: Test result. Acceptance check: command exits 0.\n'
-      : 'The workspace context is recorded.\n';
-  await writeFile(join(cwd, file), text);
+async function writeAnalysis(cwd: string, prompt: string): Promise<void> {
+  const line = prompt.split('\n').find((value) => value.startsWith('This stage may write only:'));
+  const files = line
+    ?.replace(/^This stage may write only: /, '')
+    .replace(/\. Do not write.*$/, '')
+    .split(', ')
+    .filter(Boolean) ?? [];
+  await Promise.all(files.map(async (file) => {
+    await mkdir(join(cwd, file, '..'), { recursive: true });
+    const text = file.endsWith('research-requirements.md')
+      ? 'REQ-1: Export triple.\nREQ-2: Test triple.\n'
+      : file.endsWith('plan.md')
+        ? 'REQ-1: Source exports triple. Check: source exists.\nREQ-2: Test covers triple. Check: command exits 0.\n'
+        : file.endsWith('evidence.md')
+          ? 'Verification: passed.\n'
+          : file.endsWith('learning.md')
+            ? 'The run records its evidence.\n'
+            : 'The workspace context is recorded.\n';
+    await writeFile(join(cwd, file), text);
+  }));
 }
 
 async function writeTests(cwd: string): Promise<void> {
   await mkdir(join(cwd, 'test'), { recursive: true });
   await writeFile(
-    join(cwd, 'test/result.test.mjs'),
-    "import assert from 'node:assert/strict';\nimport test from 'node:test';\nimport { result } from '../src/result.mjs';\ntest('result is 11', () => assert.equal(result, 11));\n",
+    join(cwd, 'test/triple.test.mjs'),
+    "import assert from 'node:assert/strict';\nimport test from 'node:test';\nimport { triple } from '../src/triple.mjs';\ntest('triple returns three times the input', () => assert.equal(triple(3), 9));\n",
   );
 }
 
-async function writeSource(cwd: string, result: number): Promise<void> {
+async function writeSource(cwd: string, value: number): Promise<void> {
   await mkdir(join(cwd, 'src'), { recursive: true });
-  await writeFile(join(cwd, 'src/result.mjs'), `export const result = ${result};\n`);
+  await writeFile(join(cwd, 'src/triple.mjs'), `export const triple = (value) => value * ${value};\n`);
 }
 
 const workspace = await mkdtemp(join(tmpdir(), 'obversa-team-feature-proof-'));
 try {
   const analyse = scriptedSeat('feature-analyse', 'claude', [async (request) => {
-    const output = request.prompt.match(/Write only ([^\.]+\.md)/)?.[1] ?? 'team-output/unknown.md';
-    await writeNote(request.cwd!, output);
-    return pass('research and plan note accepted');
+    await writeAnalysis(request.cwd!, request.prompt);
+    return pass('analysis note written');
   }]);
   let implementationCalls = 0;
   const implement = scriptedSeat('feature-implement', 'gpt', [
     async (request) => { await writeTests(request.cwd!); return pass('tests written first'); },
     async (request) => { implementationCalls += 1; await writeSource(request.cwd!, 10); return pass('first implementation written'); },
-    async (request) => { implementationCalls += 1; await writeSource(request.cwd!, 11); return pass('implementation repaired'); },
+    async (request) => { implementationCalls += 1; await writeSource(request.cwd!, 3); return pass('implementation repaired'); },
   ]);
-  const reviewer = scriptedSeat('feature-reviewer', 'claude', [async () => pass('review accepted')]);
-  const approve = scriptedSeat('feature-approve', 'claude', [async (request) => {
-    const marker = request.prompt.match(/marker value (.+?) anywhere/)?.[1]?.trim() ?? '';
-    await writeFile(join(request.cwd!, 'team-output/approval.md'), `Date: 2026-09-11\nRun marker: ${marker}\n`);
-    return pass('delivery approved');
+  const reviewer = scriptedSeat('feature-reviewer', 'claude-review', [async (request) => {
+    const stageName = request.prompt.match(/Stage: ([^\n]+)/)?.[1] ?? 'stage';
+    await mkdir(join(request.cwd!, 'reviews'), { recursive: true });
+    await writeFile(join(request.cwd!, `reviews/${stageName}-1.json`), '{"status":"pass"}\n');
+    return pass('review accepted');
   }]);
-
-  const team = featureDelivery({
-    brief: 'Deliver a module that exports result 11.',
-    workspace,
-    files: ['src/result.mjs', 'test/result.test.mjs'],
-    testFiles: ['test/result.test.mjs'],
-    test: { command: process.execPath, args: ['--test', 'test/result.test.mjs'] },
-    analyse,
-    implement,
-    reviewers: [{ name: 'correctness', seat: reviewer, scope: 'implementation' }],
-    reviewThreshold: 1,
-    approve,
-    maxKickbacks: { plan: 3, 'tests-first': 3, implement: 3 },
+  const callbacks = createCallbackClient();
+  const team = workflow('feature-delivery', {
+    brief: {
+      brief: 'Deliver a pure triple(value) function in src/triple.mjs with a Node test in test/triple.test.mjs.',
+      files: ['src/triple.mjs'],
+      testFiles: ['test/triple.test.mjs'],
+      test: { command: process.execPath, args: ['--test', 'test/triple.test.mjs'] },
+    },
+    options: { timeout: '10m' },
+    roles: {
+      analyse,
+      implement,
+      review: [reviewer],
+      approve: person('Ship this change?'),
+    },
+    stages: [
+      stage('research-context', {
+        agent: 'analyse',
+        writes: 'team-output/research-context.md',
+        desc: 'Read the workspace and write down what the change touches.',
+        gate: 'The context note is in the workspace and a reviewer has accepted it.',
+        reviewedBy: 'review',
+        retry: 3,
+      }),
+      stage('research-requirements', {
+        agent: 'analyse',
+        writes: 'team-output/research-requirements.md',
+        desc: 'Turn the brief and the context note into requirements, one REQ-n per line.',
+        gate: 'The requirements note is in the workspace and a reviewer has accepted it.',
+        reviewedBy: 'review',
+        retry: 3,
+      }),
+      stage('plan', {
+        agent: 'analyse',
+        writes: 'team-output/plan.md',
+        desc: 'Write an executable plan from the requirements, one check per REQ-n.',
+        gate: 'Every requirement has a check in the plan.',
+        reviewedBy: 'review',
+        retry: 3,
+      }),
+      stage('tests-first', {
+        agent: 'implement',
+        writes: 'test/triple.test.mjs',
+        desc: 'Write the declared test files from the accepted plan before any implementation exists.',
+        gate: 'Every declared test file exists and covers the plan.',
+        reviewedBy: 'review',
+        retry: 3,
+      }),
+      stage('implement', {
+        agent: 'implement',
+        writes: 'src/triple.mjs',
+        desc: 'Write the code to the plan and the tests.',
+        gate: 'The source file exists.',
+        retry: 3,
+      }),
+      stage('test', {
+        run: [process.execPath, '--test', 'test/triple.test.mjs'],
+        sendsBackTo: 'implement',
+      }),
+      stage('review', {
+        panel: 'review',
+        agree: 1,
+        desc: 'Read the change and the test result against the plan.',
+        sendsBackTo: 'implement',
+      }),
+      stage('approve', {
+        input: 'approve',
+      }),
+      stage('close', {
+        agent: 'analyse',
+        writes: ['team-output/evidence.md', 'team-output/learning.md'],
+        desc: 'Write the evidence of the run and what was learned, from the record alone.',
+        gate: 'Both notes are in the workspace.',
+      }),
+    ],
   });
   let testCommandsRun = 0;
   let reviewRounds = 0;
   let acceptedReviewPanels = 0;
-  const result = await run(team, {
-    cwd: workspace,
-    onEvent: (event) => {
-      if (event.kind === 'condition:result' && event.label === 'test') testCommandsRun += 1;
-      if (event.kind === 'loop:condition' && event.which === 'until' && event.path.at(-1) === 'implementation-loop') testCommandsRun += 1;
-      if (event.kind === 'loop:review' && event.path.at(-1) === 'implementation-loop' && event.outcome.status === 'pass') reviewRounds += 1;
-      if (event.kind === 'job:end' && event.label.endsWith('-review') && event.outcome.status === 'pass') acceptedReviewPanels += 1;
-    },
-  });
+  let kickbacks = 0;
+  const onEvent = (event: LoopEvent) => {
+    if (event.kind === 'condition:result' && event.label === 'test') testCommandsRun += 1;
+    if (event.kind === 'loop:review' && event.outcome.status === 'pass') {
+      reviewRounds += 1;
+      acceptedReviewPanels += 1;
+    }
+    if (event.kind === 'job:end' && event.label === 'review' && event.outcome.status === 'pass') {
+      acceptedReviewPanels += 1;
+    }
+    if (event.kind === 'dag:kickback' && event.accepted) kickbacks += 1;
+  };
+  const first = await run(team, { cwd: workspace, callbacks, onEvent });
+  assert.equal(first.outcome.status, 'paused');
+  const pending = callbacks.listPending();
+  assert.equal(pending.length, 1);
+  const answered = await directRouter(callbacks, pending[0]!, 'feature-proof-person', () => ({ approved: true }));
+  assert.equal(answered.ok, true);
+  const result = await run(team, { cwd: workspace, callbacks, onEvent });
   assert.equal(result.outcome.status, 'pass');
-  assert.equal(implementationCalls, 2);
-  assert.match(await readFile(join(workspace, 'src/result.mjs'), 'utf8'), /result = 11/);
-  assert.match(await readFile(join(workspace, 'team-output/approval.md'), 'utf8'), /Run marker:/);
+  assert.match(await readFile(join(workspace, 'src/triple.mjs'), 'utf8'), /triple = \(value\) => value \* 3/);
   assert.match(await readFile(join(workspace, 'team-output/evidence.md'), 'utf8'), /Verification: passed/);
   console.log(JSON.stringify({
     status: result.outcome.status,
-    stages: 11,
+    stages: 9,
     testCommandsRun,
     implementationIterations: implementationCalls,
     reviewRounds,
     acceptedReviewPanels,
-    kickbacks: 0,
+    kickbacks,
     filesWritten: [
       'team-output/research-context.md',
       'team-output/research-requirements.md',
       'team-output/plan.md',
-      'team-output/approval.md',
       'team-output/evidence.md',
       'team-output/learning.md',
-      'src/result.mjs',
-      'test/result.test.mjs',
+      'src/triple.mjs',
+      'test/triple.test.mjs',
     ],
   }, null, 2));
 } finally {
