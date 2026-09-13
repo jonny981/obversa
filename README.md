@@ -73,7 +73,8 @@ const team = workflow('feature-delivery', {
   roles: {
     analyse: claude('claude-sonnet-4-5'),
     implement: codex('gpt-5.6-luna'),
-    review: [claude('claude-sonnet-4-5'), codex('gpt-5.6-luna')],
+    'research-review': [codex('gpt-5.6-luna')],
+    'code-review': [claude('claude-sonnet-4-5')],
     approve: person('Ship this change?'),
   },
 
@@ -83,7 +84,7 @@ const team = workflow('feature-delivery', {
       writes: 'team-output/research-context.md',
       desc: 'Read the workspace and write down what the change touches.',
       gate: 'The context note is in the workspace and a reviewer has accepted it.',
-      reviewedBy: 'review',
+      reviewedBy: 'research-review',
       retry: 3,
     }),
 
@@ -92,7 +93,7 @@ const team = workflow('feature-delivery', {
       writes: 'team-output/research-requirements.md',
       desc: 'Turn the brief and the context note into requirements, one REQ-n per line.',
       gate: 'The requirements note is in the workspace and a reviewer has accepted it.',
-      reviewedBy: 'review',
+      reviewedBy: 'research-review',
       retry: 3,
     }),
 
@@ -101,7 +102,7 @@ const team = workflow('feature-delivery', {
       writes: 'team-output/plan.md',
       desc: 'Write an executable plan from the requirements, one check per REQ-n.',
       gate: 'Every requirement has a check in the plan.',
-      reviewedBy: 'review',
+      reviewedBy: 'research-review',
       retry: 3,
     }),
 
@@ -110,7 +111,7 @@ const team = workflow('feature-delivery', {
       writes: 'test/triple.test.mjs',
       desc: 'Write the declared test files from the accepted plan before any implementation exists.',
       gate: 'Every declared test file exists and covers the plan.',
-      reviewedBy: 'review',
+      reviewedBy: 'code-review',
       retry: 3,
     }),
 
@@ -130,9 +131,10 @@ const team = workflow('feature-delivery', {
     }),
 
     stage('review', {
-      panel: 'review',
+      panel: 'code-review',
       agree: 1,
       desc: 'Read the change and the test result against the plan.',
+      gate: 'At least one reviewer has accepted the change.',
       sendsBackTo: 'implement',
     }),
 
@@ -174,7 +176,7 @@ repeats carries its own `retry`.
 | tests-first | Every declared test file exists and covers the plan. |
 | implement | The source file exists. |
 | test | The test command exits 0. |
-| review | A person has said yes. |
+| review | At least one reviewer has accepted the change. |
 | approve | A person has said yes. |
 | close | Both notes are in the workspace. |
 

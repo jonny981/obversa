@@ -17,7 +17,7 @@ npm install @obversa/runtime @obversa/teams @obversa/engine-claude-cli @obversa/
 ## The file
 
 The brief is `briefs/add.md` beside the file: its body is the task and
-its front matter names the files and the test command. Change those to
+its front matter names the files the brief expects written. Change those to
 your own and run the file from the directory the work belongs in.
 
 ```ts
@@ -162,9 +162,11 @@ round.
   run when the writer and the reviewer share a family, so one model cannot
   approve its own work.
 - **A seat comes from its plugin.** `claude('claude-sonnet-4-5')` and
-  `codex('gpt-5.6-luna')` carry the identity the plugin records and start
-  the engine able to write files; the record and the family check read
-  that identity.
+  `codex('gpt-5.6-luna')` carry the identity the plugin records; the record
+  and the family check read it. The Codex seat runs sandboxed to the
+  workspace with approvals off; the Claude seat runs with permission
+  prompts off and can run any command the process can. Each takes an
+  options object to choose otherwise.
 - **A stage writes what it declares.** `writes` names the files the write
   stage produces; a missing or empty one fails the stage by name, and a
   file it did not declare is refused.

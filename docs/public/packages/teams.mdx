@@ -84,8 +84,8 @@ larger teams.
 - **`person(question)`.** A role a person fills: the stage that names it
   puts the question to a person and waits for the answer.
 - **`fromFile(path)`.** A brief kept as a markdown file beside the code.
-  Its body is the brief; front matter may carry `files`, `testFiles` and
-  `test` so the workflow file names nothing twice.
+  Its body is the brief; front matter may carry `files`, the paths the
+  brief expects written.
 - **The three ready-made teams,** `writerReviewerPair`, `thresholdPanel`
   and `featureDelivery`, as functions that take seats and return a job.
   They are what the three example files declare, and the shape to copy
@@ -124,12 +124,16 @@ The workspace is the directory the file runs in.
 
 - **It ships no command.** You import a workflow and run it from your own
   file.
-- **A seat starts its engine able to write.** The seat helpers set the
-  permission mode a writing role needs. Run a team in a directory you are
-  willing to let a model change.
-- **The distinct-family check reads the seats.** The stage that implements
-  and every seat that reviews it must be different model families, or the
-  team is refused before any model runs.
+- **A seat starts its engine unattended, and the two plugins differ.** A
+  Codex seat runs sandboxed to the workspace with approvals off. A Claude
+  seat runs with permission prompts off, which lets it run any command the
+  process can, because the mode that only accepts edits blocks the commands
+  a headless run needs. Both take an options object to choose otherwise.
+  Run a team in a directory you are willing to let a model change.
+- **A reviewer is never the writer's own family.** Every seat of a
+  `reviewedBy` panel, and of a panel that sends work back to an agent
+  stage, must be a different model family from that stage's seat, or the
+  workflow is refused before any model runs.
 - **`reviewedBy` and `sendsBackTo` are two different returns.** The first
   runs the same stage again; the second goes back to an earlier one. A
   stage uses one or the other.

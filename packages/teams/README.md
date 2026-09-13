@@ -17,8 +17,7 @@ npm install @obversa/runtime @obversa/teams
 - **`stage(name, { agent | run | panel | input, writes, desc, gate,
   reviewedBy, sendsBackTo, retry })`.** One step.
 - **`person(question)`** and **`fromFile(path)`.** A person as a role, and a
-  brief kept as a markdown file with optional front matter for `files`,
-  `testFiles` and `test`.
+  brief kept as a markdown file with optional front matter for `files`.
 - **Seats** come from the engine plugins: `claude(model)`, `codex(model)`,
   `opencode(model, { executable })`.
 - **`writerReviewerPair`, `thresholdPanel`, `featureDelivery`.** The three
@@ -29,8 +28,8 @@ npm install @obversa/runtime @obversa/teams
 Every stage carries a `desc` and a `gate` sentence that reach the reviewers
 and the record. A stage that promises a file fails by name when the file
 is missing or empty, a command stage passes on its exit code, a reviewer's
-decision is the file it writes, and the implementer and every reviewer must
-be different model families.
+decision is the file it writes, and every reviewer must be a different model
+family from the writer it reads.
 
 ## What it does not do
 
