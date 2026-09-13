@@ -16,7 +16,7 @@ import { delimiter, dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { setTimeout as delay } from 'node:timers/promises';
 
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import {
   EngineError,
@@ -44,6 +44,12 @@ const roots: string[] = [];
 const fixtureSource = fileURLToPath(
   new URL('fixtures/opencode-cli.mjs', import.meta.url),
 );
+
+beforeEach(() => {
+  for (const name of Object.keys(process.env)) {
+    if (name.startsWith('OPENCODE_')) vi.stubEnv(name, undefined);
+  }
+});
 
 afterEach(() => {
   vi.unstubAllEnvs();
