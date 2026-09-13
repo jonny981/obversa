@@ -114,6 +114,7 @@
     "verify:d45": "pnpm verify:d36",
     "verify:d48": "pnpm verify:f34",
     "verify:f35": "pnpm verify:d48",
+    "verify:f39": "pnpm verify:f35",
     "verify:d17": "pnpm verify:d45 && pnpm example:preflight && pnpm example:runner-preflight",
     "verify:f34": "pnpm verify:d17 && pnpm example:command-kickback",
     "verify:f36": "pnpm verify:f34 && pnpm example:approval",

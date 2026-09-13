@@ -534,10 +534,12 @@ export function workflow(name: string, config: WorkflowConfig): Job {
       );
       if (targetSeats.length) {
         const reviewers = panelRole(config.roles, stageConfig.panel);
-        assertDistinctSeats([
-          ...targetSeats.map((candidate) => seatRole(config.roles, candidate.config.agent)),
-          ...reviewers,
-        ]);
+        for (const targetSeat of targetSeats) {
+          assertDistinctSeats([
+            seatRole(config.roles, targetSeat.config.agent),
+            ...reviewers,
+          ]);
+        }
       }
     }
   }
