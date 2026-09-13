@@ -11,9 +11,9 @@ import { pass, scriptedSeat } from './scripted-engine.js';
 async function writeNote(cwd: string, file: string): Promise<void> {
   await mkdir(join(cwd, 'team-output'), { recursive: true });
   const text = file.endsWith('research-requirements.md')
-    ? '1. Export result.\n2. Test result.\n'
+    ? 'REQ-1: Export result.\nREQ-2: Test result.\n'
     : file.endsWith('plan.md')
-      ? '1. Export result. Acceptance check: source exists.\n2. Test result. Acceptance check: command exits 0.\n'
+      ? 'REQ-1: Export result. Acceptance check: source exists.\nREQ-2: Test result. Acceptance check: command exits 0.\n'
       : 'The workspace context is recorded.\n';
   await writeFile(join(cwd, file), text);
 }
