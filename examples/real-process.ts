@@ -20,6 +20,7 @@ import { mkdir, readFile, stat, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 
 const workspace = process.cwd();
+const BRIEF = 'Deliver src/result.mjs exporting result = 23 with a Node test that proves it.';
 const output = join(workspace, 'team-output', 'real-process');
 const CONTEXT_NOTE = join(output, 'research-context.md');
 const REQUIREMENTS_NOTE = join(output, 'research-requirements.md');
@@ -67,7 +68,7 @@ function agentLeaf(label: string, engine: Engine, instruction: string): Job {
     label,
     engine,
     cwd: workspace,
-    prompt: `${instruction}\nReturn a short completion report.`,
+    prompt: `${BRIEF}\n\n${instruction}\nReturn a short completion report.`,
   });
 }
 
