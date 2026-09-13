@@ -115,6 +115,7 @@ for (const [stage, branch] of [
   ['D45', 'docs/whole-file-examples'],
   ['D48', 'feat/d48-fine-grained'],
   ['F35', 'feat/teams-declarative'],
+  ['F39', 'feat/writer-family-check'],
   ['D13', 'feat/graph-forms-v1'],
   ['D11A', 'feat/graph-forms-v1'],
   ['F0', 'feat/factory-v1'],
@@ -183,6 +184,7 @@ for (const [stage, branch] of [
   ['D45', 'feat/graph-forms-v1'],
   ['F34', 'feat/graph-forms-v1'],
   ['F36', 'feat/graph-forms-v1'],
+  ['F39', 'feat/graph-forms-v1'],
   ['F38', 'feat/graph-forms-v1'],
 ]) {
   test(`${stage} refuses the wrong branch ${branch}`, () => {

@@ -303,6 +303,21 @@ describe('declarative teams', () => {
     })).not.toThrow();
   });
 
+  it('allows two same-family writers when the panel reviewers differ from each writer', () => {
+    const writer = seat(scriptedEngine('writer', [async () => 'accepted']), 'claude');
+    const reviewer = seat(scriptedEngine('reviewer', [async () => 'accepted']), 'codex');
+
+    expect(() => workflow('draft-refine', {
+      brief: 'Draft and refine one change.',
+      roles: { writer, review: [reviewer] },
+      stages: [
+        stage('draft', { agent: 'writer', writes: 'draft.md' }),
+        stage('refine', { agent: 'writer', writes: 'refine.md' }),
+        stage('review', { panel: 'review', sendsBackTo: 'draft', agree: 1 }),
+      ],
+    })).not.toThrow();
+  });
+
   it('checks a panel against the preceding writer when its target writes nothing', async () => {
     const directory = await mkdtemp(join(tmpdir(), 'obversa-f35-target-run-'));
     const writer = seat(scriptedEngine('writer', [async (request) => {
