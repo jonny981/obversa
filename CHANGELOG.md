@@ -24,7 +24,8 @@ engine and memory packages track their own versions independently.
   `opencode(model, { executable })` return a seat with the identity the
   plugin records, started able to write files.
 - **Briefs as markdown files:** `fromFile(path)` reads a brief beside the
-  code; its front matter may carry `files`, `testFiles` and `test`.
+  code; its front matter may carry `files`, the paths the brief expects
+  written.
 - The three team examples are written in the workflow form and shrink by
   more than half; the explicit functions stay.
 - **Feature delivery in eleven steps:** `featureDelivery` researches the
