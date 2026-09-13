@@ -303,6 +303,51 @@ describe('declarative teams', () => {
     })).not.toThrow();
   });
 
+  it('checks a panel against the preceding writer when its target writes nothing', async () => {
+    const directory = await mkdtemp(join(tmpdir(), 'obversa-f35-target-run-'));
+    const writer = seat(scriptedEngine('writer', [async (request) => {
+      await writeFile(join(request.cwd!, 'note.md'), 'written\n');
+      return pass('note written');
+    }]), 'claude');
+    const reviewer = seat(scriptedEngine('reviewer', [async (request) => {
+      expect(request.prompt).toContain('Review target: note.md.');
+      expect(request.prompt).not.toContain('brief.md');
+      return pass('review accepted');
+    }]), 'grok');
+
+    const job = workflow('target-run-review', {
+      brief: { brief: 'Review one note.', files: ['brief.md'] },
+      roles: { writer, review: [reviewer] },
+      stages: [
+        stage('write', { agent: 'writer', writes: 'note.md' }),
+        stage('test', { run: ['true'] }),
+        stage('review', { panel: 'review', sendsBackTo: 'test', agree: 1 }),
+      ],
+    });
+
+    try {
+      const result = await run(job, { cwd: directory });
+      expect(result.outcome.status).toBe('pass');
+    } finally {
+      await rm(directory, { recursive: true, force: true });
+    }
+  });
+
+  it('rejects a panel whose run target follows a same-family writer', () => {
+    const writer = seat(scriptedEngine('writer', [async () => 'accepted']), 'claude');
+    const reviewer = seat(scriptedEngine('reviewer', [async () => 'accepted']), 'claude');
+
+    expect(() => workflow('same-family-run-target', {
+      brief: 'Review one note.',
+      roles: { writer, review: [reviewer] },
+      stages: [
+        stage('write', { agent: 'writer', writes: 'note.md' }),
+        stage('test', { run: ['true'] }),
+        stage('review', { panel: 'review', sendsBackTo: 'test', agree: 1 }),
+      ],
+    })).toThrow(/model family must be distinct/);
+  });
+
   it('rejects reviewedBy on non-agent stages', () => {
     const reviewer = seat(scriptedEngine('reviewer', [async () => 'accepted']), 'grok');
     const stages = [

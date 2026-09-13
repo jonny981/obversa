@@ -147,6 +147,7 @@ export function requireNoFiles(
   job: Job,
   workspace: string,
   files: readonly string[],
+  phase: 'body' | 'review' = 'review',
 ): Job {
   return async (ctx) => {
     const before = new Map<string, FileSnapshot>();
@@ -170,7 +171,7 @@ export function requireNoFiles(
       return {
         status: 'fail',
         summary,
-        error: new LoopError({ code: 'VALIDATION', phase: 'review', message: summary }),
+        error: new LoopError({ code: 'WRITE_BOUNDARY', phase, message: summary }),
       };
     }
     return outcome;

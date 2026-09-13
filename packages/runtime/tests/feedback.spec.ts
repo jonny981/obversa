@@ -933,7 +933,7 @@ describe('feedback protocol', () => {
   it('pauses k-of-n when a reviewer boundary reports a validation error', async () => {
     const pass: Condition = async () => ({ met: true, reason: 'ok' });
     const boundary = new LoopError({
-      code: 'VALIDATION',
+      code: 'WRITE_BOUNDARY',
       phase: 'review',
       message: 'reviewer changed note.md',
     });
@@ -959,6 +959,37 @@ describe('feedback protocol', () => {
     expect(outcome.status).toBe('paused');
     expect(outcome.error).toBe(boundary);
     expect((outcome.data as { errors: unknown[] }).errors).toHaveLength(1);
+  });
+
+  it('counts another validation error as reviewer dissent', async () => {
+    const pass: Condition = async () => ({ met: true, reason: 'ok' });
+    const validation = new LoopError({
+      code: 'VALIDATION',
+      phase: 'review',
+      message: 'reviewer returned an invalid decision shape',
+    });
+
+    const { outcome } = await run(
+      reviewPanel({
+        pass: 1,
+        reviewers: [
+          { name: 'a', review: pass },
+          {
+            name: 'validation',
+            job: fnJob('validation', async () => ({
+              status: 'fail',
+              summary: validation.message,
+              error: validation,
+            })),
+          },
+        ],
+      }),
+      { engine: 'mock', engines: { mock: new MockEngine(() => '') } },
+    );
+
+    expect(outcome.status).toBe('pass');
+    expect((outcome.data as { findings: unknown[] }).findings).toHaveLength(1);
+    expect((outcome.data as { errors: unknown[] }).errors).toHaveLength(0);
   });
 
   it('pauses k-of-n when an infrastructure error could change the threshold', async () => {

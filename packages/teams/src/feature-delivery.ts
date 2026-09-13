@@ -118,6 +118,7 @@ function outputWriter(
     ),
     config.workspace,
     config.files,
+    'body',
   );
 }
 
@@ -411,6 +412,7 @@ export function featureDelivery(config: FeatureDeliveryConfig) {
     ),
     config.workspace,
     nonTestFiles,
+    'body',
   );
   const testsReview = scopedPanel(
     'tests-review',
@@ -440,6 +442,7 @@ export function featureDelivery(config: FeatureDeliveryConfig) {
     ),
     config.workspace,
     config.testFiles,
+    'body',
   );
   const implementationLoop = loop({
     name: 'implementation-loop',

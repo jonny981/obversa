@@ -179,17 +179,13 @@ function retryCount(retry: number | undefined, label: string): number {
   return retry;
 }
 
-function reviewRetryOf(config: WorkflowStage): number {
-  return config.retry === undefined ? 1 : retryCount(config.retry, 'retry');
-}
-
-function targetRetryOf(config: WorkflowStage): number {
+function retryOf(config: WorkflowStage): number {
   return config.retry === undefined ? 1 : retryCount(config.retry, 'retry');
 }
 
 function retryForStage(config: WorkflowStage, receivesKickback: boolean): number {
-  if ('reviewedBy' in config && config.reviewedBy) return reviewRetryOf(config);
-  if (receivesKickback) return targetRetryOf(config);
+  if ('reviewedBy' in config && config.reviewedBy) return retryOf(config);
+  if (receivesKickback) return retryOf(config);
   if (config.retry !== undefined) {
     throw new TypeError('retry must be on a reviewed stage or a kickback target');
   }
@@ -221,11 +217,10 @@ function reviewerDefinitions(
 
 function reviewTarget(
   named: NamedStage,
-  files: readonly string[],
   targetFiles?: readonly string[],
 ): string {
   const writes = targetFiles ?? writesOf(named.config);
-  return writes.length ? writes.join(', ') : files.join(', ');
+  return writes.length ? writes.join(', ') : 'no declared writes';
 }
 
 function reviewerPanel(
@@ -256,7 +251,7 @@ function reviewerPanel(
         const reviewer = panelReviewers(
           definitions,
           panelInput(brief, files, ctx.workspace.dir),
-          reviewTarget(named, files, targetFiles),
+          reviewTarget(named, targetFiles),
         )[index]!;
         return requireNoFiles(
           `${named.name}-${definition.name}`,
@@ -359,7 +354,7 @@ function guardedAgent(
   return async (ctx) => {
     const required = requireNonEmptyFiles(named.name, agent, ctx.workspace.dir, writes);
     const forbidden = declaredFiles.filter((file) => !writes.includes(file));
-    return requireNoFiles(named.name, required, ctx.workspace.dir, forbidden)(ctx);
+    return requireNoFiles(named.name, required, ctx.workspace.dir, forbidden, 'body')(ctx);
   };
 }
 
@@ -414,7 +409,7 @@ function stageJob(
       : unchangedNoteGuard(named.name, guarded, writes);
     if (config.reviewedBy === undefined) return job;
     const panel = reviewerPanel(brief, named, panelRole(roles, config.reviewedBy), files, declaredFiles, undefined);
-    const retry = reviewRetryOf(config);
+    const retry = retryOf(config);
     return loop({
       name: `${named.name}-review`,
       body: job,
@@ -454,6 +449,32 @@ function workflowRecord(outcome: Outcome): WorkflowRecord {
     outcome,
     summary: () => outcome.summary ?? outcome.status,
   };
+}
+
+function precedingAgent(stages: readonly NamedStage[], index: number): NamedStage | undefined {
+  return [...stages.slice(0, index)]
+    .reverse()
+    .find((candidate) => 'agent' in candidate.config && candidate.config.agent !== undefined);
+}
+
+function panelTarget(stages: readonly NamedStage[], index: number): NamedStage | undefined {
+  const config = stages[index]!.config;
+  if (!('panel' in config) || config.panel === undefined) return undefined;
+  if (config.sendsBackTo !== undefined) {
+    return stages.find((candidate) => candidate.name === config.sendsBackTo);
+  }
+  return precedingAgent(stages, index);
+}
+
+function panelReviewFiles(stages: readonly NamedStage[], index: number): string[] {
+  const target = panelTarget(stages, index);
+  const preceding = precedingAgent(stages, index);
+  const targetWrites = target === undefined ? [] : writesOf(target.config);
+  return targetWrites.length
+    ? targetWrites
+    : preceding === undefined
+      ? []
+      : writesOf(preceding.config);
 }
 
 export function workflow(name: string, config: WorkflowConfig): Job {
@@ -500,15 +521,21 @@ export function workflow(name: string, config: WorkflowConfig): Job {
       ]);
     }
     if ('panel' in stageConfig && stageConfig.panel !== undefined) {
-      const target = stageConfig.sendsBackTo === undefined
-        ? [...config.stages.slice(0, index)]
-          .reverse()
-          .find((candidate) => 'agent' in candidate.config && candidate.config.agent !== undefined)
-        : config.stages.find((candidate) => candidate.name === stageConfig.sendsBackTo);
-      if (target && 'agent' in target.config && target.config.agent !== undefined) {
+      const preceding = precedingAgent(config.stages, index);
+      const target = panelTarget(config.stages, index);
+      const familyTargets = [preceding, target]
+        .filter((candidate): candidate is NamedStage => candidate !== undefined)
+        .filter((candidate, targetIndex, candidates) =>
+          candidates.findIndex((other) => other.name === candidate.name) === targetIndex,
+        );
+      const targetSeats = familyTargets.filter(
+        (candidate): candidate is NamedStage & { config: { agent: string } } =>
+          'agent' in candidate.config && candidate.config.agent !== undefined,
+      );
+      if (targetSeats.length) {
         const reviewers = panelRole(config.roles, stageConfig.panel);
         assertDistinctSeats([
-          seatRole(config.roles, target.config.agent),
+          ...targetSeats.map((candidate) => seatRole(config.roles, candidate.config.agent)),
           ...reviewers,
         ]);
       }
@@ -521,7 +548,7 @@ export function workflow(name: string, config: WorkflowConfig): Job {
       const target = config.stages.find((candidate) => candidate.name === named.config.sendsBackTo)!;
       maxKickbacks[named.config.sendsBackTo] = Math.max(
         maxKickbacks[named.config.sendsBackTo] ?? 0,
-        targetRetryOf(target.config),
+        retryOf(target.config),
       );
     }
   }
@@ -529,14 +556,10 @@ export function workflow(name: string, config: WorkflowConfig): Job {
   const nodes = Object.fromEntries(config.stages.map((named, index) => {
     const files = stageFiles(brief, config.stages, index);
     const stageConfig = named.config;
-    const target = 'panel' in stageConfig && stageConfig.panel !== undefined
-      ? stageConfig.sendsBackTo === undefined
-        ? [...config.stages.slice(0, index)]
-          .reverse()
-          .find((candidate) => 'agent' in candidate.config && candidate.config.agent !== undefined)
-        : config.stages.find((candidate) => candidate.name === stageConfig.sendsBackTo)
-      : undefined;
-    const targetFiles = target === undefined ? undefined : writesOf(target.config);
+    const targetFiles =
+      'panel' in stageConfig && stageConfig.panel !== undefined
+        ? panelReviewFiles(config.stages, index)
+        : undefined;
     return [named.name, {
       job: stageJob(brief, named, config.roles, files, declaredFiles, targetFiles),
       needs: stageDependencies(config.stages, index),

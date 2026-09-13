@@ -304,7 +304,7 @@ function isReviewInfrastructureError(
 }
 
 function isReviewBoundaryError(error: LoopError | undefined): error is LoopError {
-  return error?.code === 'VALIDATION';
+  return error?.code === 'WRITE_BOUNDARY';
 }
 
 function findingFromOutput(

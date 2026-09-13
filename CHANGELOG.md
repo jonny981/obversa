@@ -28,6 +28,9 @@ engine and memory packages track their own versions independently.
   written.
 - The three team examples are written in the workflow form and shrink by
   more than half; the explicit functions stay.
+- A reviewer that writes a declared file it does not own is a boundary
+  breach: the panel records it as a blocking error and does not count it
+  as a vote. Every other error a reviewer raises scores as it did before.
 - **Feature delivery in eleven steps:** `featureDelivery` researches the
   brief and writes the requirements and the plan, each reviewed; writes the
   declared `testFiles` before any code; implements until the test command
