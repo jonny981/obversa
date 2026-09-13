@@ -3,9 +3,9 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
 import { describe, expect, it } from 'vitest';
-import { jobMeta, run } from '@obversa/runtime';
+import { agentJob, jobMeta, reviewPanel, run } from '@obversa/runtime';
 
-import { thresholdPanel } from '../src/index.js';
+import { outcomeFromAgentText, thresholdPanel } from '../src/index.js';
 import { pass, revise, scriptedEngine, seat } from './scripted-engine.js';
 
 const testCommand = {
@@ -25,6 +25,45 @@ async function writePanelFiles(cwd: string): Promise<void> {
 }
 
 describe('thresholdPanel', () => {
+  it('lets a revise decision fail two-of-two while three-of-four passes with one revise', async () => {
+    const makeReview = (name: string, response: string) => {
+      const engine = scriptedEngine(name, [async () => response]);
+      return agentJob({
+        label: name,
+        engine,
+        cwd: process.cwd(),
+        prompt: 'Return one JSON decision object.',
+        outcome: (text) => outcomeFromAgentText(text, 'candidate'),
+      });
+    };
+    const reviseResponse = revise('needs another pass', 'the test is missing');
+    const passResponse = pass('accepted');
+
+    const twoOfTwo = await run(reviewPanel({
+      label: 'two-of-two',
+      reviewers: [
+        { name: 'architecture', job: makeReview('two-architecture', reviseResponse) },
+        { name: 'correctness', job: makeReview('two-correctness', passResponse) },
+      ],
+      pass: 2,
+      target: 'candidate',
+    }), { cwd: process.cwd() });
+    expect(twoOfTwo.outcome.status).toBe('fail');
+
+    const threeOfFour = await run(reviewPanel({
+      label: 'three-of-four',
+      reviewers: [
+        { name: 'architecture', job: makeReview('four-architecture', reviseResponse) },
+        { name: 'correctness', job: makeReview('four-correctness', passResponse) },
+        { name: 'adversary', job: makeReview('four-adversary', passResponse) },
+        { name: 'conformance', job: makeReview('four-conformance', passResponse) },
+      ],
+      pass: 3,
+      target: 'candidate',
+    }), { cwd: process.cwd() });
+    expect(threeOfFour.outcome.status).toBe('pass');
+  });
+
   it('runs implementation, real test, parallel reviewers, and a threshold kickback', async () => {
     const workspace = await mkdtemp(join(tmpdir(), 'obversa-teams-panel-'));
     try {
