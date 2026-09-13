@@ -75,6 +75,25 @@ if (!substance.length) {
   );
 }
 
+// On a tag run the cut is done: nothing may still be waiting under
+// Unreleased, or the tag documents one thing and the changelog another.
+if (tag && /^v\d/.test(tag)) {
+  const unreleasedAt = lines.findIndex((line) => line.startsWith('## [Unreleased]'));
+  if (unreleasedAt !== -1) {
+    const pending = [];
+    for (const line of lines.slice(unreleasedAt + 1)) {
+      if (line.startsWith('## ')) break;
+      if (line.trim() && !line.startsWith('### ')) pending.push(line);
+    }
+    if (pending.length) {
+      fail(
+        `Unreleased still holds ${pending.length} line(s) on tag ${tag} — ` +
+          `move them under "## [${version}]" before tagging`,
+      );
+    }
+  }
+}
+
 console.log(
   `changelog gate: ok — ${version} is documented (${substance.length} line(s))`,
 );
