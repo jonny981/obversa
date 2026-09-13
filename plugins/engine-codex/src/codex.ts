@@ -2,8 +2,8 @@
  * Engine adapter: the `codex` CLI (GPT-5) as a non-interactive subprocess. A
  * different model behind the same `Engine` interface: point a reviewer at
  * `engine: 'codex'` for a second-model signal, with no bespoke integration.
- * Read-only by default: a report-only reviewer never edits, so the sandbox
- * forbids writes and the run cannot touch the workspace.
+ * The declarative seat defaults to workspace writes with approval prompts off;
+ * callers can choose a read-only or full-access sandbox explicitly.
  *
  * `codex exec` reads the prompt from stdin (`-`) so large grounded prompts do
  * not ride argv; the final assistant message is captured via `-o <file>` rather

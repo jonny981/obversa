@@ -48,9 +48,8 @@ export interface WorkflowStageBase {
 }
 
 export type WorkflowStage = WorkflowStageBase & {
-  readonly reviewedBy?: string;
 } & (
-  | { readonly agent: string; readonly run?: never; readonly panel?: never; readonly input?: never; }
+  | { readonly agent: string; readonly reviewedBy?: string; readonly run?: never; readonly panel?: never; readonly input?: never; }
   | { readonly run: string | readonly string[]; readonly agent?: never; readonly panel?: never; readonly input?: never; }
   | { readonly panel: string; readonly agree?: number; readonly agent?: never; readonly run?: never; readonly input?: never; }
   | { readonly input: string; readonly agent?: never; readonly run?: never; readonly panel?: never; }
@@ -182,7 +181,8 @@ function retryCount(retry: number | undefined, label: string): number {
 
 function reviewRetryOf(config: WorkflowStage): number {
   const retry = retryCount(config.retry, 'retry');
-  if (config.retry !== undefined && !config.reviewedBy) {
+  const reviewedBy = 'reviewedBy' in config ? config.reviewedBy : undefined;
+  if (config.retry !== undefined && !reviewedBy) {
     throw new TypeError('retry needs reviewedBy');
   }
   return retry;
@@ -193,7 +193,7 @@ function targetRetryOf(config: WorkflowStage): number {
 }
 
 function retryForStage(config: WorkflowStage, receivesKickback: boolean): number {
-  if (config.reviewedBy) return reviewRetryOf(config);
+  if ('reviewedBy' in config && config.reviewedBy) return reviewRetryOf(config);
   if (receivesKickback) return targetRetryOf(config);
   if (config.retry !== undefined) {
     throw new TypeError('retry must be on a reviewed stage or a kickback target');
@@ -234,13 +234,20 @@ function reviewerPanel(
   named: NamedStage,
   seats: readonly TeamSeat[],
   files: readonly string[],
+  declaredFiles: readonly string[],
   target?: string,
   agree?: number,
 ): Job {
+  const pass = agree === undefined ? 'all' : (() => {
+    if (!Number.isSafeInteger(agree) || agree < 1 || agree > seats.length) {
+      throw new TypeError(`agree must be between 1 and ${seats.length}`);
+    }
+    return agree;
+  })();
   const definitions = reviewerDefinitions(named, seats);
   return reviewPanel({
     label: named.name,
-    pass: agree ?? 'all',
+    pass,
     target,
     reviewers: definitions.map((definition, index) => ({
       name: definition.name,
@@ -251,7 +258,12 @@ function reviewerPanel(
           panelInput(brief, files, ctx.workspace.dir),
           reviewTarget(named, files),
         )[index]!;
-        return reviewer.job(ctx);
+        return requireNoFiles(
+          `${named.name}-${definition.name}`,
+          reviewer.job,
+          ctx.workspace.dir,
+          declaredFiles,
+        )(ctx);
       },
     })),
   });
@@ -335,11 +347,12 @@ function guardedAgent(
   const writes = writesOf(named.config);
   if (!writes.length) throw new TypeError(`agent stage ${named.name} must declare writes`);
   const target = named.config.sendsBackTo;
+  const reviewedBy = 'reviewedBy' in named.config ? named.config.reviewedBy : undefined;
   const agent = agentJob({
     label: named.name,
     engine: seat.engine,
     model: seatIdentity(seat).model,
-    consumeFeedback: target !== undefined || named.config.reviewedBy !== undefined,
+    consumeFeedback: target !== undefined || reviewedBy !== undefined,
     prompt: agentPrompt(brief, named, files, writes),
     outcome: (textValue) => outcomeFromAgentText(textValue, target),
   });
@@ -399,7 +412,7 @@ function stageJob(
       ? guarded
       : unchangedNoteGuard(named.name, guarded, writes);
     if (config.reviewedBy === undefined) return job;
-    const panel = reviewerPanel(brief, named, panelRole(roles, config.reviewedBy), files);
+    const panel = reviewerPanel(brief, named, panelRole(roles, config.reviewedBy), files, declaredFiles);
     const retry = reviewRetryOf(config);
     return loop({
       name: `${named.name}-review`,
@@ -426,7 +439,7 @@ function stageJob(
     return commandJob(named.name, config.run, { target: config.sendsBackTo });
   }
   if ('panel' in config && config.panel !== undefined) {
-    return reviewerPanel(brief, named, panelRole(roles, config.panel), files, config.sendsBackTo, config.agree);
+    return reviewerPanel(brief, named, panelRole(roles, config.panel), files, declaredFiles, config.sendsBackTo, config.agree);
   }
   if ('input' in config && config.input !== undefined) {
     const personRole = inputRole(roles, config.input);
@@ -467,13 +480,17 @@ export function workflow(name: string, config: WorkflowConfig): Job {
         throw new TypeError(`stage ${stageName} sends back to ${sendsBackTo}, which is not an earlier stage`);
       }
     }
-    if (stageConfig.reviewedBy !== undefined && stageConfig.sendsBackTo !== undefined) {
+    const reviewedBy = 'reviewedBy' in stageConfig ? stageConfig.reviewedBy : undefined;
+    if (reviewedBy !== undefined && !('agent' in stageConfig)) {
+      throw new TypeError(`reviewedBy is for agent stages: ${stageName}`);
+    }
+    if (reviewedBy !== undefined && stageConfig.sendsBackTo !== undefined) {
       throw new TypeError(`stage ${stageName} cannot use both reviewedBy and sendsBackTo`);
     }
     retryForStage(stageConfig, incomingTargets.has(stageName));
     writesOf(stageConfig);
   }
-  for (const named of config.stages) {
+  for (const [index, named] of config.stages.entries()) {
     const stageConfig = named.config;
     if ('agent' in stageConfig && stageConfig.agent !== undefined && stageConfig.reviewedBy !== undefined) {
       assertDistinctSeats([
@@ -481,13 +498,26 @@ export function workflow(name: string, config: WorkflowConfig): Job {
         ...panelRole(config.roles, stageConfig.reviewedBy),
       ]);
     }
-    if ('panel' in stageConfig && stageConfig.panel !== undefined && stageConfig.sendsBackTo !== undefined) {
-      const target = config.stages.find((candidate) => candidate.name === stageConfig.sendsBackTo)!;
-      if ('agent' in target.config && target.config.agent !== undefined) {
-        assertDistinctSeats([
-          seatRole(config.roles, target.config.agent),
-          ...panelRole(config.roles, stageConfig.panel),
-        ]);
+    if ('panel' in stageConfig && stageConfig.panel !== undefined) {
+      const preceding = [...config.stages.slice(0, index)]
+        .reverse()
+        .find((candidate) => 'agent' in candidate.config && candidate.config.agent !== undefined);
+      const target = stageConfig.sendsBackTo === undefined
+        ? undefined
+        : config.stages.find((candidate) => candidate.name === stageConfig.sendsBackTo);
+      const writerStages = [preceding, target].filter(
+        (candidate): candidate is NamedStage => candidate !== undefined
+          && 'agent' in candidate.config
+          && candidate.config.agent !== undefined,
+      ).filter((candidate, candidateIndex, candidates) => candidates.findIndex((item) => item.name === candidate.name) === candidateIndex);
+      if (writerStages.length) {
+        const reviewers = panelRole(config.roles, stageConfig.panel);
+        for (const writer of writerStages) {
+          assertDistinctSeats([
+            seatRole(config.roles, writer.config.agent!),
+            ...reviewers,
+          ]);
+        }
       }
     }
   }

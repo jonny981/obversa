@@ -10,6 +10,7 @@ import {
   person,
   stage,
   workflow,
+  type WorkflowStage,
 } from '../src/index.js';
 import { pass, scriptedEngine, seat } from './scripted-engine.js';
 
@@ -255,7 +256,7 @@ describe('declarative teams', () => {
     expect(writer.engine).toBeDefined();
   });
 
-  it('rejects a kickback panel whose reviewers share a model family with its target writer', () => {
+  it('rejects a panel whose reviewers share a model family with its preceding writer', () => {
     const writer = seat(scriptedEngine('writer', [async () => 'accepted']), 'gpt');
     const reviewer = seat(scriptedEngine('reviewer', [async () => 'accepted']), 'gpt');
 
@@ -264,9 +265,69 @@ describe('declarative teams', () => {
       roles: { writer, review: [reviewer] },
       stages: [
         stage('write', { agent: 'writer', writes: 'note.md' }),
-        stage('review', { panel: 'review', sendsBackTo: 'write', agree: 1 }),
+        stage('review', { panel: 'review', agree: 1 }),
       ],
     })).toThrow(/model family must be distinct/);
+  });
+
+  it('rejects reviewedBy on non-agent stages', () => {
+    const reviewer = seat(scriptedEngine('reviewer', [async () => 'accepted']), 'grok');
+    const stages = [
+      stage('run', { run: ['true'], reviewedBy: 'review', retry: 1 } as WorkflowStage),
+      stage('panel', { panel: 'review', reviewedBy: 'review', retry: 1 } as WorkflowStage),
+      stage('input', { input: 'approve', reviewedBy: 'review', retry: 1 } as WorkflowStage),
+    ];
+
+    for (const invalidStage of stages) {
+      expect(() => workflow('invalid-reviewed-by', {
+        brief: 'Reject invalid review placement.',
+        roles: { review: [reviewer], approve: person('Approve?') },
+        stages: [invalidStage],
+      })).toThrow('reviewedBy is for agent stages');
+    }
+  });
+
+  it('rejects a reviewer that changes a declared workflow file', async () => {
+    const directory = await mkdtemp(join(tmpdir(), 'obversa-f35-review-writes-'));
+    const writer = scriptedEngine('writer', [async (request) => {
+      await writeFile(join(request.cwd!, 'note.md'), 'original\n');
+      return pass('note written');
+    }]);
+    const reviewer = scriptedEngine('reviewer', [async (request) => {
+      await mkdir(join(request.cwd!, 'reviews'), { recursive: true });
+      await writeFile(join(request.cwd!, 'reviews/review-1.json'), '{"status":"pass"}\n');
+      await writeFile(join(request.cwd!, 'note.md'), 'changed by reviewer\n');
+      return pass('review accepted');
+    }]);
+    const job = workflow('review-writes', {
+      brief: { brief: 'Review one note.', files: ['note.md'] },
+      roles: {
+        writer: seat(writer, 'writer'),
+        review: [seat(reviewer, 'reviewer')],
+      },
+      stages: [
+        stage('write', { agent: 'writer', writes: 'note.md' }),
+        stage('review', { panel: 'review', agree: 1 }),
+      ],
+    });
+
+    try {
+      const result = await run(job, { cwd: directory });
+      expect(result.outcome.status).toBe('fail');
+    } finally {
+      await rm(directory, { recursive: true, force: true });
+    }
+  });
+
+  it('rejects an agree count outside the panel size', () => {
+    const reviewer = seat(scriptedEngine('reviewer', [async () => 'accepted']), 'grok');
+    for (const agree of [0, 2]) {
+      expect(() => workflow('invalid-agree', {
+        brief: 'Reject an invalid panel threshold.',
+        roles: { review: [reviewer] },
+        stages: [stage('review', { panel: 'review', agree })],
+      })).toThrow(/agree must be between 1 and 1/);
+    }
   });
 
   it('rejects invalid stage links and retry placement before building jobs', () => {
