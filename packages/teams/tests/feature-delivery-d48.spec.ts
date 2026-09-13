@@ -516,6 +516,20 @@ describe('featureDelivery D48 contract', () => {
     }
   });
 
+  it('can run the same featureDelivery object twice', async () => {
+    const workspace = await mkdtemp(join(tmpdir(), 'obversa-teams-rerun-'));
+    try {
+      const job = featureDelivery(config({ workspace }));
+      const first = await run(job, { cwd: workspace });
+      const second = await run(job, { cwd: workspace });
+
+      expect(first.outcome.status, JSON.stringify(first.outcome)).toBe('pass');
+      expect(second.outcome.status, JSON.stringify(second.outcome)).toBe('pass');
+    } finally {
+      await rm(workspace, { recursive: true, force: true });
+    }
+  });
+
   it('names missing requirement ids in the plan review', async () => {
     const workspace = await mkdtemp(join(tmpdir(), 'obversa-teams-plan-id-review-'));
     const events: Array<Record<string, unknown>> = [];

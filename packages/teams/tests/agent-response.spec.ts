@@ -1,7 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { outcomeFromAgentText } from '../src/index.js';
-
-import { INVALID_TEAM_DECISION } from '../src/agent-response.js';
+import { INVALID_TEAM_DECISION, outcomeFromAgentText } from '../src/index.js';
 
 describe('outcomeFromAgentText', () => {
   it.each([

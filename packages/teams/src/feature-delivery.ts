@@ -24,7 +24,6 @@ import {
   APPROVAL_NOTE,
   expectedFilesPrompt,
   panelReviewers,
-  requireFilesUnchanged,
   requireNoFiles,
   requireNonEmptyFiles,
   teamAgent,
@@ -129,14 +128,15 @@ function failOnUnchangedNote(
   note: string,
   requireRewriteOnReentry = false,
 ): Job {
-  let previousHash: string | undefined;
+  const previousHashKey = `featureDeliveryPreviousHash:${label}`;
   return async (ctx) => {
     const outcome = await job(ctx);
     if (outcome.status !== 'pass') return outcome;
     const currentHash = await fileHash(workspace, note);
+    const previousHash = ctx.state[previousHashKey];
     if (
       (ctx.lastReview || requireRewriteOnReentry)
-      && previousHash !== undefined
+      && typeof previousHash === 'string'
       && currentHash === previousHash
     ) {
       const summary = `${label} returned the rejected note unchanged`;
@@ -146,7 +146,7 @@ function failOnUnchangedNote(
         error: new LoopError({ code: 'VALIDATION', phase: 'body', message: summary }),
       };
     }
-    previousHash = currentHash;
+    ctx.state[previousHashKey] = currentHash;
     return outcome;
   };
 }
@@ -419,7 +419,7 @@ export function featureDelivery(config: FeatureDeliveryConfig) {
     config.testFiles.join(', '),
   );
 
-  const implementation = requireFilesUnchanged(
+  const implementation = requireNoFiles(
     'implement',
     requireNonEmptyFiles(
       'implement',

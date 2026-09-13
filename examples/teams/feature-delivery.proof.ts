@@ -47,7 +47,6 @@ try {
   const reviewer = scriptedSeat('feature-reviewer', 'claude', [async () => pass('review accepted')]);
   const approve = scriptedSeat('feature-approve', 'claude', [async (request) => {
     const marker = request.prompt.match(/marker value (.+?) anywhere/)?.[1]?.trim() ?? '';
-    await writeNote(request.cwd!, 'team-output/approval.md');
     await writeFile(join(request.cwd!, 'team-output/approval.md'), `Date: 2026-09-11\nRun marker: ${marker}\n`);
     return pass('delivery approved');
   }]);

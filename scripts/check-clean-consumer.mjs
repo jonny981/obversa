@@ -800,7 +800,6 @@ async function main() {
     await copyFile(join(root, 'examples', 'teams', 'threshold-panel.proof.ts'), join(consumerDirectory, 'teams', 'threshold-panel.proof.ts'));
     await copyFile(join(root, 'examples', 'teams', 'feature-delivery.ts'), join(consumerDirectory, 'teams', 'feature-delivery.ts'));
     await copyFile(join(root, 'examples', 'teams', 'feature-delivery.proof.ts'), join(consumerDirectory, 'teams', 'feature-delivery.proof.ts'));
-    await copyFile(join(root, 'examples', 'real-process.ts'), join(consumerDirectory, 'real-process.ts'));
 
     run('pnpm', ['install', '--prefer-offline', '--ignore-scripts'], {
       cwd: consumerDirectory,

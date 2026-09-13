@@ -176,15 +176,6 @@ export function requireNoFiles(
   };
 }
 
-export function requireFilesUnchanged(
-  label: string,
-  job: Job,
-  workspace: string,
-  files: readonly string[],
-): Job {
-  return requireNoFiles(label, job, workspace, files);
-}
-
 interface FileSnapshot {
   exists: boolean;
   hash: string | null;

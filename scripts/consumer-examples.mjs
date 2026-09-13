@@ -44,7 +44,6 @@ export const CONSUMER_EXAMPLES = Object.freeze([
   'teams/threshold-panel.proof.ts',
   'teams/feature-delivery.ts',
   'teams/feature-delivery.proof.ts',
-  'real-process.ts',
 ]);
 
 /**
@@ -58,5 +57,4 @@ export const REAL_ENGINE_EXAMPLES = Object.freeze([
   { file: 'teams/writer-reviewer-pair.ts', why: 'a Claude seat writes and a Codex seat reviews; the page carries one real run' },
   { file: 'teams/threshold-panel.ts', why: 'Claude implements, Codex and OpenCode review; the page carries one real run' },
   { file: 'teams/feature-delivery.ts', why: 'Claude analyses and approves, Codex implements, Claude reviews; the page carries one real run' },
-  { file: 'real-process.ts', why: 'The complete process showcase carries one real run with conditional stages recorded' },
 ]);
