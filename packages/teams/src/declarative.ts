@@ -19,11 +19,12 @@ import {
 
 import { outcomeFromAgentText } from './agent-response.js';
 import {
+  panelReviewers,
   requireNoFiles,
   requireNonEmptyFiles,
   seatIdentity,
 } from './team-utils.js';
-import type { TeamSeat, TestCommand } from './types.js';
+import type { ReviewerSeat, TeamInput, TeamSeat, TestCommand } from './types.js';
 
 export interface BriefSource {
   readonly brief: string;
@@ -192,14 +193,87 @@ function writesOf(config: WorkflowStage): string[] {
   return writes;
 }
 
-function retryOf(config: WorkflowStage, needsBudget: boolean): number {
-  const retry = config.retry ?? (needsBudget ? 1 : undefined);
+function retryCount(retry: number | undefined, label: string): number {
   if (retry === undefined) return 0;
-  if (!Number.isSafeInteger(retry) || retry < 0) throw new TypeError('retry must be a non-negative integer');
-  if (!config.reviewedBy && !config.sendsBackTo) {
-    throw new TypeError('retry needs reviewedBy or sendsBackTo');
+  if (!Number.isSafeInteger(retry) || retry < 0) throw new TypeError(`${label} must be a non-negative integer`);
+  return retry;
+}
+
+function reviewRetryOf(config: WorkflowStage): number {
+  const retry = retryCount(config.retry, 'retry');
+  if (config.retry !== undefined && !config.reviewedBy) {
+    throw new TypeError('retry needs reviewedBy');
   }
   return retry;
+}
+
+function targetRetryOf(config: WorkflowStage): number {
+  return config.retry === undefined ? 1 : retryCount(config.retry, 'retry');
+}
+
+function retryForStage(config: WorkflowStage, receivesKickback: boolean): number {
+  if (config.reviewedBy) return reviewRetryOf(config);
+  if (receivesKickback) return targetRetryOf(config);
+  if (config.retry !== undefined) {
+    throw new TypeError('retry must be on a reviewed stage or a kickback target');
+  }
+  return 0;
+}
+
+function stageDependencies(stages: readonly NamedStage[], index: number): string[] {
+  return index === 0 ? [] : [stages[index - 1]!.name];
+}
+
+function panelInput(brief: BriefSource, files: readonly string[], workspace: string): TeamInput {
+  return {
+    brief: brief.brief,
+    workspace,
+    files,
+    test: brief.test ?? { command: 'true', args: [] },
+  };
+}
+
+function reviewerDefinitions(
+  named: NamedStage,
+  seats: readonly TeamSeat[],
+): ReviewerSeat[] {
+  return seats.map((seat, index) => ({
+    name: `${named.name}-${index + 1}`,
+    seat,
+  }));
+}
+
+function reviewTarget(named: NamedStage, files: readonly string[]): string {
+  const writes = writesOf(named.config);
+  return writes.length ? writes.join(', ') : files.join(', ');
+}
+
+function reviewerPanel(
+  brief: BriefSource,
+  named: NamedStage,
+  seats: readonly TeamSeat[],
+  files: readonly string[],
+  target?: string,
+  agree?: number,
+): Job {
+  const definitions = reviewerDefinitions(named, seats);
+  return reviewPanel({
+    label: named.name,
+    pass: agree ?? 'all',
+    target,
+    reviewers: definitions.map((definition, index) => ({
+      name: definition.name,
+      scope: definition.scope,
+      job: async (ctx) => {
+        const reviewer = panelReviewers(
+          definitions,
+          panelInput(brief, files, ctx.workspace.dir),
+          reviewTarget(named, files),
+        )[index]!;
+        return reviewer.job(ctx);
+      },
+    })),
+  });
 }
 
 function briefValue(value: string | BriefSource): BriefSource {
@@ -326,43 +400,6 @@ function unchangedNoteGuard(
   };
 }
 
-function reviewerPanel(
-  brief: BriefSource,
-  named: NamedStage,
-  seats: readonly TeamSeat[],
-  target?: string,
-  agree?: number,
-): Job {
-  return reviewPanel({
-    label: named.name,
-    pass: agree ?? 'all',
-    target,
-    reviewers: seats.map((seat, index) => {
-      const identity = seatIdentity(seat);
-      return {
-        name: `${named.name}-${index + 1}`,
-        job: agentJob({
-          label: `${named.name}-${index + 1}`,
-          engine: seat.engine,
-          model: identity.model,
-          graphContext: true,
-          prompt: (ctx) => [
-            `Work brief:\n${brief.brief}`,
-            `Review stage: ${named.name}`,
-            named.config.desc ? `Task: ${named.config.desc}` : undefined,
-            named.config.gate ? `Gate: ${named.config.gate}` : undefined,
-            (ctx as JobContext & { reviewerGate?: string }).reviewerGate
-              ? `Judge the work against this gate: ${(ctx as JobContext & { reviewerGate?: string }).reviewerGate}`
-              : undefined,
-            'Return one JSON object: {"status":"pass"|"revise","summary":"...","findings":[{"evidence":"..."}]}',
-          ].filter((line): line is string => line !== undefined).join('\n\n'),
-          outcome: (textValue) => outcomeFromAgentText(textValue),
-        }),
-      };
-    }),
-  });
-}
-
 function stageJob(
   brief: BriefSource,
   named: NamedStage,
@@ -377,8 +414,8 @@ function stageJob(
       ? guarded
       : unchangedNoteGuard(named.name, guarded, writes);
     if (config.reviewedBy === undefined) return job;
-    const panel = reviewerPanel(brief, named, panelRole(roles, config.reviewedBy), config.sendsBackTo);
-    const retry = retryOf(config, false);
+    const panel = reviewerPanel(brief, named, panelRole(roles, config.reviewedBy), files);
+    const retry = reviewRetryOf(config);
     return loop({
       name: `${named.name}-review`,
       body: job,
@@ -404,7 +441,7 @@ function stageJob(
     return commandJob(named.name, config.run, { target: config.sendsBackTo });
   }
   if ('panel' in config && config.panel !== undefined) {
-    return reviewerPanel(brief, named, panelRole(roles, config.panel), config.sendsBackTo, config.agree);
+    return reviewerPanel(brief, named, panelRole(roles, config.panel), files, config.sendsBackTo, config.agree);
   }
   if ('input' in config && config.input !== undefined) {
     const personRole = inputRole(roles, config.input);
@@ -425,19 +462,30 @@ export function workflow(name: string, config: WorkflowConfig): Job {
   const brief = briefValue(config.brief);
   if (!Array.isArray(config.stages) || !config.stages.length) throw new TypeError('workflow needs at least one stage');
   const names = new Set<string>();
+  const incomingTargets = new Set<string>();
+  for (const named of config.stages) {
+    if (named.config.sendsBackTo !== undefined) incomingTargets.add(named.config.sendsBackTo);
+  }
   for (const named of config.stages) {
     const stageName = text(named.name, 'stage name');
     if (names.has(stageName)) throw new TypeError(`workflow stage is duplicated: ${stageName}`);
     names.add(stageName);
     const stageConfig = named.config;
     const sendsBackTo = stageConfig.sendsBackTo;
-    if (sendsBackTo !== undefined && !names.has(sendsBackTo) && !config.stages.some((item) => item.name === sendsBackTo)) {
-      throw new TypeError(`stage ${stageName} sends back to unknown stage ${sendsBackTo}`);
+    if (sendsBackTo === stageName) {
+      throw new TypeError(`stage ${stageName} cannot send back to itself; use reviewedBy`);
+    }
+    if (sendsBackTo !== undefined) {
+      const targetIndex = config.stages.findIndex((item) => item.name === sendsBackTo);
+      if (targetIndex < 0) throw new TypeError(`stage ${stageName} sends back to unknown stage ${sendsBackTo}`);
+      if (targetIndex >= config.stages.indexOf(named)) {
+        throw new TypeError(`stage ${stageName} sends back to ${sendsBackTo}, which is not an earlier stage`);
+      }
     }
     if (stageConfig.reviewedBy !== undefined && stageConfig.sendsBackTo !== undefined) {
       throw new TypeError(`stage ${stageName} cannot use both reviewedBy and sendsBackTo`);
     }
-    retryOf(stageConfig, stageConfig.sendsBackTo !== undefined);
+    retryForStage(stageConfig, incomingTargets.has(stageName));
     writesOf(stageConfig);
   }
   const files = stageFiles(brief, config.stages);
@@ -445,14 +493,16 @@ export function workflow(name: string, config: WorkflowConfig): Job {
   const maxKickbacks: Record<string, number> = {};
   for (const named of config.stages) {
     if (named.config.sendsBackTo !== undefined) {
+      const target = config.stages.find((candidate) => candidate.name === named.config.sendsBackTo)!;
       maxKickbacks[named.config.sendsBackTo] = Math.max(
         maxKickbacks[named.config.sendsBackTo] ?? 0,
-        retryOf(named.config, true),
+        targetRetryOf(target.config),
       );
     }
   }
-  const nodes = Object.fromEntries(config.stages.map((named) => [named.name, {
+  const nodes = Object.fromEntries(config.stages.map((named, index) => [named.name, {
     job: stageJob(brief, named, config.roles, files),
+    needs: stageDependencies(config.stages, index),
     ...(named.config.desc === undefined ? {} : { desc: named.config.desc }),
     ...(named.config.gate === undefined ? {} : { gate: named.config.gate }),
     ...(timeoutMs === undefined ? {} : { timeoutMs }),

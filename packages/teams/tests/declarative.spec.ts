@@ -46,6 +46,7 @@ function workflowInput() {
         writes: 'src/triple.mjs',
         desc: 'Write the source.',
         gate: 'The source exists.',
+        retry: 3,
       }),
       stage('test', {
         run: ['node', '--test', 'test/triple.test.mjs'],
@@ -106,13 +107,46 @@ describe('declarative teams', () => {
       'review',
       'approve',
     ]);
+    expect(nodes.map((node) => node.needs)).toEqual([
+      [],
+      ['research-context'],
+      ['implement'],
+      ['test'],
+      ['review'],
+    ]);
     expect(nodeMeta(nodes[0]!.job).kind).toBe('loop');
     expect(nodeMeta(nodes[0]!.job).review).toBe(true);
     expect(nodeMeta(nodes[2]!.job).kind).toBe('gate');
     expect(nodeMeta(nodes[3]!.job).kind).toBe('reviewPanel');
     expect(nodeMeta(nodes[4]!.job).kind).toBe('approval');
-    expect(meta.maxKickbacks).toEqual({ implement: 1 });
+    expect(meta.maxKickbacks).toEqual({ implement: 3 });
     expect(nodes[0]!.timeoutMs).toBe(600_000);
+  });
+
+  it('runs stages in the declared order', async () => {
+    const directory = await mkdtemp(join(tmpdir(), 'obversa-f35-order-'));
+    const append = (value: string) => [
+      process.execPath,
+      '-e',
+      `require('node:fs').appendFileSync('order.txt', '${value}\\n')`,
+    ];
+    const job = workflow('ordered', {
+      brief: 'Run three steps.',
+      roles: {},
+      stages: [
+        stage('first', { run: append('first') }),
+        stage('second', { run: append('second') }),
+        stage('third', { run: append('third') }),
+      ],
+    });
+
+    try {
+      const result = await run(job, { cwd: directory });
+      expect(result.outcome.status).toBe('pass');
+      expect(await readFile(join(directory, 'order.txt'), 'utf8')).toBe('first\nsecond\nthird\n');
+    } finally {
+      await rm(directory, { recursive: true, force: true });
+    }
   });
 
   it('keeps a reviewed stage bounded by its declared retry count', () => {
@@ -187,6 +221,30 @@ describe('declarative teams', () => {
       expect(result.outcome.status).not.toBe('pass');
       expect(result.outcome.summary).toContain('unchanged');
       expect(writer.calls).toHaveLength(2);
+    } finally {
+      await rm(directory, { recursive: true, force: true });
+    }
+  });
+
+  it('retries a malformed panel reply before accepting the panel', async () => {
+    const directory = await mkdtemp(join(tmpdir(), 'obversa-f35-panel-'));
+    const reviewer = scriptedEngine('reviewer', [
+      async () => 'not a decision',
+      async () => '{"status":"pass","summary":"accepted after retry"}',
+    ]);
+    const job = workflow('panel-retry', {
+      brief: 'Review the change.',
+      roles: { review: [seat(reviewer, 'reviewer')] },
+      stages: [stage('review', {
+        panel: 'review',
+        agree: 1,
+      })],
+    });
+
+    try {
+      const result = await run(job, { cwd: directory });
+      expect(result.outcome.status).toBe('pass');
+      expect(reviewer.calls).toHaveLength(2);
     } finally {
       await rm(directory, { recursive: true, force: true });
     }
