@@ -1,8 +1,9 @@
 import { claude } from '@obversa/engine-claude-cli';
 import { codex } from '@obversa/engine-codex';
+import { run } from '@obversa/runtime';
 import { fromFile, stage, workflow } from '@obversa/teams';
 
-export default workflow('writer-reviewer-pair', {
+const team = workflow('writer-reviewer-pair', {
   brief: fromFile('briefs/add.md'),
   options: { timeout: '10m' },
 
@@ -34,3 +35,5 @@ export default workflow('writer-reviewer-pair', {
     }),
   ],
 });
+
+await run(team);

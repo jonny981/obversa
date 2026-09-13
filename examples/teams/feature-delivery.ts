@@ -1,5 +1,6 @@
 import { claude } from '@obversa/engine-claude-cli';
 import { codex } from '@obversa/engine-codex';
+import { run } from '@obversa/runtime';
 import { fromFile, person, stage, workflow } from '@obversa/teams';
 
 /**
@@ -8,7 +9,7 @@ import { fromFile, person, stage, workflow } from '@obversa/teams';
  * reads it, where a red result goes back to. Inference happens only where a
  * role is named; every other stage is a command or a person.
  */
-export default workflow('feature-delivery', {
+const team = workflow('feature-delivery', {
   brief: fromFile('briefs/triple.md'),
   options: { timeout: '10m' },
 
@@ -66,6 +67,8 @@ export default workflow('feature-delivery', {
 
     stage('test', {
       run: ['node', '--test', 'test/triple.test.mjs'],
+      desc: 'Run the tests; a red run goes back to implement with the output.',
+      gate: 'The test command exits 0.',
       sendsBackTo: 'implement',
     }),
 
@@ -78,6 +81,8 @@ export default workflow('feature-delivery', {
 
     stage('approve', {
       input: 'approve',
+      desc: 'Put the verified change in front of a person.',
+      gate: 'A person has said yes.',
     }),
 
     stage('close', {
@@ -92,3 +97,5 @@ export default workflow('feature-delivery', {
     always: ({ record }) => console.log(record.summary()),
   },
 });
+
+await run(team);

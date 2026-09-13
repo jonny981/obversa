@@ -1,12 +1,13 @@
 import { claude } from '@obversa/engine-claude-cli';
 import { codex } from '@obversa/engine-codex';
 import { opencode } from '@obversa/engine-opencode-cli';
+import { run } from '@obversa/runtime';
 import { fromFile, stage, workflow } from '@obversa/teams';
 
 const executable = process.env.OPENCODE_BIN;
 if (!executable) throw new Error('Set OPENCODE_BIN to the absolute OpenCode CLI path before running this example.');
 
-export default workflow('threshold-panel', {
+const team = workflow('threshold-panel', {
   brief: fromFile('briefs/double.md'),
   options: { timeout: '10m' },
 
@@ -41,3 +42,5 @@ export default workflow('threshold-panel', {
     }),
   ],
 });
+
+await run(team);
