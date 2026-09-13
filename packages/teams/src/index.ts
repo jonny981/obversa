@@ -1,6 +1,7 @@
 export { featureDelivery } from './feature-delivery.js';
 export { thresholdPanel } from './threshold-panel.js';
 export { writerReviewerPair } from './writer-reviewer-pair.js';
+export { outcomeFromAgentText } from './agent-response.js';
 export type {
   FeatureDeliveryConfig,
   PairConfig,

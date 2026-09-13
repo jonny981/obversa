@@ -16,8 +16,10 @@ import {
   type Engine,
   type TeamAgent,
 } from '@obversa/runtime';
+import { outcomeFromAgentText } from '@obversa/teams';
 import { mkdir, readFile, stat, writeFile } from 'node:fs/promises';
 import { join, relative } from 'node:path';
+import { pathToFileURL } from 'node:url';
 
 const workspace = process.cwd();
 const BRIEF = 'Deliver src/result.mjs exporting result = 23 with a Node test that proves it.';
@@ -28,6 +30,13 @@ const PLAN_NOTE = join(output, 'plan.md');
 const TEST_FILE = join(output, 'tests', 'acceptance.test.mjs');
 const SOURCE_FILE = join(output, 'src', 'result.mjs');
 const LEARNING_NOTE = join(output, 'learning.md');
+const SOURCE_LOAD_ARGS = [
+  '--import',
+  'tsx',
+  '--input-type=module',
+  '--eval',
+  `import(${JSON.stringify(SOURCE_FILE)})`,
+];
 
 function depthValue(value: string | undefined): number {
   const depth = Number.parseInt(value ?? '1', 10);
@@ -54,6 +63,20 @@ const skipReasons = Object.freeze({
 
 const claude = new ClaudeCliEngine({ defaultModel: 'claude-sonnet-4-5', permissionMode: 'bypassPermissions' });
 const codex = new CodexEngine({ defaultModel: 'gpt-5.6-luna', permissionMode: 'bypassPermissions' });
+
+export interface ReportPanelEngines {
+  readonly architecture: Engine;
+  readonly correctness: Engine;
+  readonly adversary: Engine;
+  readonly conformance: Engine;
+}
+
+const reportPanelEngines: ReportPanelEngines = {
+  architecture: claude,
+  correctness: codex,
+  adversary: codex,
+  conformance: claude,
+};
 
 function writeRecord(label: string, text: string): Job {
   return fnJob(label, async () => {
@@ -103,17 +126,30 @@ function commandStage(label: string, args: string[], text: string): Job {
   };
 }
 
-function reportPanel(label: string, target?: string, lensCount: 2 | 4 = 2): Job {
+export function reportPanel(
+  label: string,
+  target?: string,
+  lensCount: 2 | 4 = 2,
+  engines: ReportPanelEngines = reportPanelEngines,
+): Job {
+  const reviewPrompt = 'Return one JSON object: {"status":"pass"|"revise","summary":"...","findings":[{"evidence":"..."}]}';
+  const reviewer = (reviewerLabel: string, engine: Engine, instruction: string): Job => agentJob({
+    label: reviewerLabel,
+    engine,
+    cwd: workspace,
+    prompt: `${BRIEF}\n\n${instruction}\n${reviewPrompt}`,
+    outcome: (text) => outcomeFromAgentText(text, target),
+  });
   const reviewers = [
     {
       name: 'architecture',
       scope: 'process shape',
-      job: agentLeaf(`${label}-architecture`, claude, 'Check the process shape and its stage boundaries.'),
+      job: reviewer(`${label}-architecture`, engines.architecture, 'Check the process shape and its stage boundaries.'),
     },
     {
       name: 'correctness',
       scope: 'evidence',
-      job: agentLeaf(`${label}-correctness`, codex, 'Check that the evidence supports the stage gate.'),
+      job: reviewer(`${label}-correctness`, engines.correctness, 'Check that the evidence supports the stage gate.'),
     },
   ];
   if (lensCount === 4) {
@@ -121,12 +157,12 @@ function reportPanel(label: string, target?: string, lensCount: 2 | 4 = 2): Job 
       {
         name: 'adversary',
         scope: 'failure paths',
-        job: agentLeaf(`${label}-adversary`, codex, 'Try to find a concrete failure path the process does not cover.'),
+        job: reviewer(`${label}-adversary`, engines.adversary, 'Try to find a concrete failure path the process does not cover.'),
       },
       {
         name: 'conformance',
         scope: 'public contract',
-        job: agentLeaf(`${label}-conformance`, claude, 'Check the result against the public contract and its promised evidence.'),
+        job: reviewer(`${label}-conformance`, engines.conformance, 'Check the result against the public contract and its promised evidence.'),
       },
     );
   }
@@ -211,8 +247,8 @@ const graph = dag({
     'tests-review': { job: reportPanel('tests-review'), desc: 'Have two reviewers check that every test names the acceptance it proves.', gate: 'Both reviewers have accepted the tests.', needs: ['tests-first'] },
     implementation: { job: implementation, desc: 'Write the code, run the tests, and repeat with the reviewers\' findings until it passes.', gate: 'The test command exits 0 and the reviewers have accepted, within three cycles.', needs: ['tests-review'] },
     conformance: { job: commandStage('conformance', ['--test', TEST_FILE], 'The declared process contract was checked.'), desc: 'Run the checks that prove the change keeps its declared contract.', gate: 'Every conformance check exits 0.', needs: ['implementation'] },
-    boundary: { job: commandStage('boundary', ['--check', SOURCE_FILE], 'Dependency and formatting boundaries were checked.'), desc: 'Run the dependency and formatting checks.', gate: 'Every boundary check exits 0.', needs: ['conformance'] },
-    build: { job: commandStage('build', ['--check', SOURCE_FILE], 'The process build completed.'), desc: 'Build the package and record the result.', gate: 'The build exits 0.', needs: ['boundary'] },
+    boundary: { job: commandStage('boundary', ['--check', SOURCE_FILE], 'The source parse check completed.'), desc: 'Run a source parse check as the example stand-in for dependency and formatting checks.', gate: 'The source parse check exits 0.', needs: ['conformance'] },
+    build: { job: commandStage('build', SOURCE_LOAD_ARGS, 'The source load check completed.'), desc: 'Run a source load check as the example stand-in for the build.', gate: 'The source load check exits 0.', needs: ['boundary'] },
     'candidate-review': { job: reportPanel('candidate-review', undefined, 4), desc: 'Have the reviewers read the built change, each through its own lens.', gate: 'At least the threshold number of reviewers have accepted the candidate.', needs: ['build'] },
     'promotion-gate': { job: callbackStage('promotion-gate', 'Promote the accepted result to the named target?'), desc: 'Put the candidate in front of a person before any action on a target; otherwise record that no person was asked.', gate: 'A person has approved the promotion, or the skip is recorded with its reason.', when: optional(Boolean(frozen.decisionSource), skipReasons.promotion ?? 'promotion decision source is named'), needs: ['candidate-review'] },
     'observe-action': { job: writeRecord('observe-action', `Observed target: ${frozen.deploymentTarget ?? 'none'}.`), desc: 'Take the one configured action against the target and record what was observed.', gate: 'The action ran and its observation is recorded, or the stage is skipped for lack of a target.', when: optional(Boolean(frozen.actionEnabled && frozen.deploymentTarget), skipReasons.target ?? 'target action is configured'), needs: ['promotion-gate'] },
@@ -226,6 +262,8 @@ const graph = dag({
   },
 });
 
-const result = await run(graph, { cwd: workspace });
-console.log(JSON.stringify(result.outcome, null, 2));
-if (result.outcome.status !== 'pass') process.exitCode = 1;
+if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
+  const result = await run(graph, { cwd: workspace });
+  console.log(JSON.stringify(result.outcome, null, 2));
+  if (result.outcome.status !== 'pass') process.exitCode = 1;
+}

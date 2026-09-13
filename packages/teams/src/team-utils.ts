@@ -72,6 +72,9 @@ export function assertReviewers(reviewers: readonly ReviewerSeat[], threshold: n
   for (const reviewer of reviewers) {
     const name = reviewer.name.trim();
     if (!name) throw new TypeError('reviewer name must not be empty');
+    if (name.startsWith('/') || name.split('/').includes('..')) {
+      throw new TypeError(`reviewer name must be a non-empty relative path: ${name}`);
+    }
     if (names.has(name)) throw new TypeError(`reviewer name must be unique: ${name}`);
     names.add(name);
   }

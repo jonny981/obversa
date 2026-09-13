@@ -103,6 +103,17 @@ describe('featureDelivery D48 contract', () => {
     expect(() => featureDelivery(duplicate)).toThrow(/reviewer name/i);
   });
 
+  it('rejects reviewer names outside the workspace', () => {
+    for (const name of ['../outside', '/tmp/outside']) {
+      const invalid = config({
+        reviewers: [{ name, seat: seat(scriptedEngine(name, [async () => pass('ok')]), name) }],
+        reviewThreshold: 1,
+      });
+
+      expect(() => featureDelivery(invalid)).toThrow(/relative path/i);
+    }
+  });
+
   it('puts reviewer scope in the reviewer request', async () => {
     const workspace = await mkdtemp(join(tmpdir(), 'obversa-teams-scope-'));
     const reviewer = scriptedEngine('scoped-reviewer', [async (request) => {
