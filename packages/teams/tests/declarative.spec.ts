@@ -172,7 +172,7 @@ describe('declarative teams', () => {
       return pass('stage files written');
     }]);
     const reviewer = scriptedEngine('reviewer', [async (request) => {
-      expect(request.prompt).toContain('Review target: team-output/first.md, src/second.mjs.');
+      expect(request.prompt).toContain('Review target: src/second.mjs.');
       expect(request.prompt).not.toContain('team-output/later.md');
       return pass('review accepted');
     }]);
@@ -208,6 +208,23 @@ describe('declarative teams', () => {
     const reviewed = nodeMeta(nodes[0]!.job);
 
     expect(reviewed.max).toBe(4);
+  });
+
+  it('defaults a reviewed stage to one review restart', () => {
+    const input = workflowInput();
+    const job = workflow('default-review-retry', {
+      ...input,
+      stages: [stage('note', {
+        agent: 'analyse',
+        writes: 'note.md',
+        reviewedBy: 'review',
+      })],
+    });
+    const node = ((nodeMeta(job).nodes ?? []) as Array<Record<string, unknown>>)[0]!;
+    const reviewed = nodeMeta(node.job);
+
+    expect(reviewed.max).toBe(2);
+    expect(reviewed.maxReviewRestarts).toBe(1);
   });
 
   it('rejects an agent that changes another declared file', async () => {
@@ -270,6 +287,22 @@ describe('declarative teams', () => {
     })).toThrow(/model family must be distinct/);
   });
 
+  it('checks a panel against the writer whose files it targets', () => {
+    const preceding = seat(scriptedEngine('preceding', [async () => 'accepted']), 'claude');
+    const target = seat(scriptedEngine('target', [async () => 'accepted']), 'gpt');
+    const reviewer = seat(scriptedEngine('reviewer', [async () => 'accepted']), 'claude');
+
+    expect(() => workflow('target-family-review', {
+      brief: 'Review one note.',
+      roles: { preceding, target, review: [reviewer] },
+      stages: [
+        stage('preceding', { agent: 'preceding', writes: 'old.md' }),
+        stage('target', { agent: 'target', writes: 'note.md' }),
+        stage('review', { panel: 'review', sendsBackTo: 'target', agree: 1 }),
+      ],
+    })).not.toThrow();
+  });
+
   it('rejects reviewedBy on non-agent stages', () => {
     const reviewer = seat(scriptedEngine('reviewer', [async () => 'accepted']), 'grok');
     const stages = [
@@ -313,7 +346,77 @@ describe('declarative teams', () => {
 
     try {
       const result = await run(job, { cwd: directory });
-      expect(result.outcome.status).toBe('fail');
+      expect(result.outcome.status).toBe('paused');
+      expect(result.outcome.summary).toContain('note.md');
+      expect((result.outcome.data as { review: { error?: unknown } }).review.error).toBeDefined();
+    } finally {
+      await rm(directory, { recursive: true, force: true });
+    }
+  });
+
+  it('checks a reviewer that changes a declared file before returning a rejection', async () => {
+    const directory = await mkdtemp(join(tmpdir(), 'obversa-f35-review-rejection-'));
+    const writer = scriptedEngine('writer', [async (request) => {
+      await writeFile(join(request.cwd!, 'note.md'), 'original\n');
+      return pass('note written');
+    }]);
+    const reviewer = scriptedEngine('reviewer', [async (request) => {
+      await writeFile(join(request.cwd!, 'note.md'), 'changed by reviewer\n');
+      return '{"status":"revise","summary":"needs a correction"}';
+    }]);
+    const job = workflow('review-rejection-writes', {
+      brief: { brief: 'Review one note.', files: ['note.md'] },
+      roles: {
+        writer: seat(writer, 'writer'),
+        review: [seat(reviewer, 'reviewer')],
+      },
+      stages: [
+        stage('write', { agent: 'writer', writes: 'note.md' }),
+        stage('review', { panel: 'review', agree: 1 }),
+      ],
+    });
+
+    try {
+      const result = await run(job, { cwd: directory });
+      expect(result.outcome.status).toBe('paused');
+      expect(result.outcome.summary).toContain('note.md');
+      expect((result.outcome.data as { review: { error?: unknown } }).review.error).toBeDefined();
+    } finally {
+      await rm(directory, { recursive: true, force: true });
+    }
+  });
+
+  it('does not hide a reviewer tamper behind a one-of-two threshold', async () => {
+    const directory = await mkdtemp(join(tmpdir(), 'obversa-f35-review-threshold-'));
+    const writer = scriptedEngine('writer', [async (request) => {
+      await writeFile(join(request.cwd!, 'note.md'), 'original\n');
+      return pass('note written');
+    }]);
+    const tamperingReviewer = scriptedEngine('tampering-reviewer', [async (request) => {
+      await writeFile(join(request.cwd!, 'note.md'), 'changed by reviewer\n');
+      return pass('accepted');
+    }]);
+    const passingReviewer = scriptedEngine('passing-reviewer', [async () => pass('accepted')]);
+    const job = workflow('review-threshold-writes', {
+      brief: { brief: 'Review one note.', files: ['note.md'] },
+      roles: {
+        writer: seat(writer, 'writer'),
+        review: [
+          seat(tamperingReviewer, 'tamper-family'),
+          seat(passingReviewer, 'pass-family'),
+        ],
+      },
+      stages: [
+        stage('write', { agent: 'writer', writes: 'note.md' }),
+        stage('review', { panel: 'review', agree: 1 }),
+      ],
+    });
+
+    try {
+      const result = await run(job, { cwd: directory });
+      expect(result.outcome.status).toBe('paused');
+      expect(result.outcome.summary).toContain('note.md');
+      expect(result.outcome.summary).toContain('Engine errors');
     } finally {
       await rm(directory, { recursive: true, force: true });
     }

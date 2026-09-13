@@ -664,6 +664,7 @@ export function loop(config: LoopConfig): Job {
     gate: describeConditions(config.until),
     stopOn: describeConditions(config.stopOn),
     review: !!config.review,
+    maxReviewRestarts: config.maxReviewRestarts,
     body: jobMeta(config.body),
   });
 }

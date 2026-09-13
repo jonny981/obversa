@@ -169,7 +169,8 @@ round.
   options object to choose otherwise.
 - **A stage writes what it declares.** `writes` names the files the write
   stage produces; a missing or empty one fails the stage by name, and a
-  file it did not declare is refused.
+  write to another declared file is refused. Files the workflow does not
+  declare are not checked.
 - **The test command runs in the workspace.** Its arguments are relative to
   the directory the file runs in, as the brief's front matter names them.
 - **A writing seat can write anywhere the process can.** Run the file in a

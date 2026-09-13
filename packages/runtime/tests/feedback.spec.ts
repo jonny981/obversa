@@ -930,6 +930,37 @@ describe('feedback protocol', () => {
     expect((outcome.data as { errors: unknown[] }).errors).toHaveLength(1);
   });
 
+  it('pauses k-of-n when a reviewer boundary reports a validation error', async () => {
+    const pass: Condition = async () => ({ met: true, reason: 'ok' });
+    const boundary = new LoopError({
+      code: 'VALIDATION',
+      phase: 'review',
+      message: 'reviewer changed note.md',
+    });
+
+    const { outcome } = await run(
+      reviewPanel({
+        pass: 1,
+        reviewers: [
+          { name: 'a', review: pass },
+          {
+            name: 'tamper',
+            job: fnJob('tamper', async () => ({
+              status: 'fail',
+              summary: boundary.message,
+              error: boundary,
+            })),
+          },
+        ],
+      }),
+      { engine: 'mock', engines: { mock: new MockEngine(() => '') } },
+    );
+
+    expect(outcome.status).toBe('paused');
+    expect(outcome.error).toBe(boundary);
+    expect((outcome.data as { errors: unknown[] }).errors).toHaveLength(1);
+  });
+
   it('pauses k-of-n when an infrastructure error could change the threshold', async () => {
     const pass: Condition = async () => ({ met: true, reason: 'ok' });
     const fail: Condition = async () => ({

@@ -202,6 +202,7 @@ interface ReviewEngineError {
   name: string;
   reason: string;
   error?: LoopError;
+  blocking?: boolean;
   scope?: string;
   findings?: FeedbackFinding[];
 }
@@ -302,6 +303,10 @@ function isReviewInfrastructureError(
   return isInfrastructureError(error);
 }
 
+function isReviewBoundaryError(error: LoopError | undefined): error is LoopError {
+  return error?.code === 'VALIDATION';
+}
+
 function findingFromOutput(
   reviewer: string,
   scope: string | undefined,
@@ -333,13 +338,14 @@ async function runReviewer(
     if ('job' in reviewer) {
       const outcome = await reviewer.job(reviewerCtx);
       const outcomeError = outcome.error;
-      if (isReviewInfrastructureError(outcomeError)) {
+      if (isReviewInfrastructureError(outcomeError) || isReviewBoundaryError(outcomeError)) {
         return {
           kind: 'engine-error',
           name,
           scope: reviewer.scope,
           reason: outcome.summary ?? outcomeError.message,
           error: outcomeError,
+          blocking: isReviewBoundaryError(outcomeError),
         };
       }
       return {
@@ -371,13 +377,14 @@ async function runReviewer(
     // A genuine abort stops the whole run — let it propagate.
     if (ctx.signal.aborted) throw e;
     const error = e instanceof LoopError ? e : undefined;
-    if (error && isReviewInfrastructureError(error)) {
+    if (error && (isReviewInfrastructureError(error) || isReviewBoundaryError(error))) {
       return {
         kind: 'engine-error',
         name,
         scope: reviewer.scope,
         reason: error.message,
         error,
+        blocking: isReviewBoundaryError(error),
         findings: findingFromOutput(
           name,
           reviewer.scope,
@@ -696,6 +703,7 @@ export function reviewPanel(config: ReviewPanelConfig): Job {
     const errors = results.filter(
       (r): r is ReviewEngineError => r.kind === 'engine-error',
     );
+    const blockingErrors = errors.filter((error) => error.blocking);
     const passedCount = verdicts.filter((r) => r.met).length;
     const required =
       config.pass === undefined || config.pass === 'all'
@@ -711,7 +719,7 @@ export function reviewPanel(config: ReviewPanelConfig): Job {
     const escalatedFindings = rawFindings
       .filter((f) => !isActionableFinding(f, config.actionableScopes))
       .map(escalatedFinding);
-    const passed = verdicts.length > 0 && passedCount >= required;
+    const passed = blockingErrors.length === 0 && verdicts.length > 0 && passedCount >= required;
     const summaryHead = `Review panel: ${passedCount}/${results.length} reviewer(s) cleared`;
     const summaryParts = [`${summaryHead}.`];
     if (findings.length) summaryParts.push(findings.map(findingLine).join('\n'));
@@ -746,10 +754,12 @@ export function reviewPanel(config: ReviewPanelConfig): Job {
       severityCounts: findingSeverityCounts(findings),
     };
     const blockedByInfrastructure =
-      errors.length > 0 &&
-      (config.pass === undefined || config.pass === 'all'
-        ? true
-        : passedCount < required && passedCount + errors.length >= required);
+      blockingErrors.length > 0 || (
+        errors.length > 0 &&
+        (config.pass === undefined || config.pass === 'all'
+          ? true
+          : passedCount < required && passedCount + errors.length >= required)
+      );
     let outcome: Outcome;
     if (passed) {
       outcome = { status: 'pass', summary, confidence, data };

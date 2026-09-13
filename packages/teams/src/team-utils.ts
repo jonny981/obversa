@@ -154,7 +154,6 @@ export function requireNoFiles(
       before.set(file, await snapshotFile(join(workspace, file)));
     }
     const outcome = await job(ctx);
-    if (outcome.status !== 'pass') return outcome;
     const changed: string[] = [];
     for (const file of files) {
       const after = await snapshotFile(join(workspace, file));
@@ -167,9 +166,11 @@ export function requireNoFiles(
       }
     }
     if (changed.length) {
+      const summary = `${label} wrote, changed or removed the implementation before its step completed: ${changed.join(', ')}`;
       return {
         status: 'fail',
-        summary: `${label} wrote, changed or removed the implementation before its step completed: ${changed.join(', ')}`,
+        summary,
+        error: new LoopError({ code: 'VALIDATION', phase: 'review', message: summary }),
       };
     }
     return outcome;
