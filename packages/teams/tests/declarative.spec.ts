@@ -11,7 +11,7 @@ import {
   stage,
   workflow,
 } from '../src/index.js';
-import { scriptedEngine, seat } from './scripted-engine.js';
+import { pass, scriptedEngine, seat } from './scripted-engine.js';
 
 function nodeMeta(job: unknown): Record<string, unknown> {
   if (typeof job === 'function') {
@@ -144,6 +144,47 @@ describe('declarative teams', () => {
       const result = await run(job, { cwd: directory });
       expect(result.outcome.status).toBe('pass');
       expect(await readFile(join(directory, 'order.txt'), 'utf8')).toBe('first\nsecond\nthird\n');
+    } finally {
+      await rm(directory, { recursive: true, force: true });
+    }
+  });
+
+  it('limits stage prompts and review targets to files declared so far', async () => {
+    const directory = await mkdtemp(join(tmpdir(), 'obversa-f35-stage-files-'));
+    const writer = scriptedEngine('writer', [async (request) => {
+      const match = request.prompt.match(/This stage may write only: (.+?)\. Do not/);
+      const file = match?.[1];
+      if (!file) throw new Error('writer file was not declared');
+      await mkdir(join(request.cwd!, file, '..'), { recursive: true });
+      await writeFile(join(request.cwd!, file), 'written\n');
+      return pass('stage files written');
+    }]);
+    const reviewer = scriptedEngine('reviewer', [async (request) => {
+      expect(request.prompt).toContain('Review target: team-output/first.md, src/second.mjs.');
+      expect(request.prompt).not.toContain('team-output/later.md');
+      return pass('review accepted');
+    }]);
+    const job = workflow('stage-files', {
+      brief: 'Write the declared files in order.',
+      roles: {
+        writer: seat(writer, 'writer'),
+        review: [seat(reviewer, 'reviewer')],
+      },
+      stages: [
+        stage('first', { agent: 'writer', writes: 'team-output/first.md' }),
+        stage('second', { agent: 'writer', writes: 'src/second.mjs' }),
+        stage('review', { panel: 'review', agree: 1 }),
+        stage('later', { agent: 'writer', writes: 'team-output/later.md' }),
+      ],
+    });
+
+    try {
+      const result = await run(job, { cwd: directory });
+      expect(result.outcome.status).toBe('pass');
+      expect(writer.calls[0]!.prompt).toContain('Workflow files: team-output/first.md');
+      expect(writer.calls[0]!.prompt).not.toContain('src/second.mjs');
+      expect(writer.calls[1]!.prompt).toContain('Workflow files: team-output/first.md, src/second.mjs');
+      expect(writer.calls[1]!.prompt).not.toContain('team-output/later.md');
     } finally {
       await rm(directory, { recursive: true, force: true });
     }

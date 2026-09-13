@@ -328,9 +328,9 @@ function inputRole(roles: WorkflowConfig['roles'], name: string): PersonRole {
   return value;
 }
 
-function stageFiles(brief: BriefSource, stages: readonly NamedStage[]): string[] {
+function stageFiles(brief: BriefSource, stages: readonly NamedStage[], through: number): string[] {
   const fromBrief = brief.files === undefined ? [] : pathList(brief.files, 'files');
-  const fromStages = stages.flatMap(({ config }) => writesOf(config));
+  const fromStages = stages.slice(0, through + 1).flatMap(({ config }) => writesOf(config));
   return [...new Set([...fromBrief, ...fromStages])];
 }
 
@@ -498,7 +498,6 @@ export function workflow(name: string, config: WorkflowConfig): Job {
     retryForStage(stageConfig, incomingTargets.has(stageName));
     writesOf(stageConfig);
   }
-  const files = stageFiles(brief, config.stages);
   const timeoutMs = duration(config.options?.timeout);
   const maxKickbacks: Record<string, number> = {};
   for (const named of config.stages) {
@@ -510,13 +509,16 @@ export function workflow(name: string, config: WorkflowConfig): Job {
       );
     }
   }
-  const nodes = Object.fromEntries(config.stages.map((named, index) => [named.name, {
-    job: stageJob(brief, named, config.roles, files),
-    needs: stageDependencies(config.stages, index),
-    ...(named.config.desc === undefined ? {} : { desc: named.config.desc }),
-    ...(named.config.gate === undefined ? {} : { gate: named.config.gate }),
-    ...(timeoutMs === undefined ? {} : { timeoutMs }),
-  }]));
+  const nodes = Object.fromEntries(config.stages.map((named, index) => {
+    const files = stageFiles(brief, config.stages, index);
+    return [named.name, {
+      job: stageJob(brief, named, config.roles, files),
+      needs: stageDependencies(config.stages, index),
+      ...(named.config.desc === undefined ? {} : { desc: named.config.desc }),
+      ...(named.config.gate === undefined ? {} : { gate: named.config.gate }),
+      ...(timeoutMs === undefined ? {} : { timeoutMs }),
+    }];
+  }));
   const graph = dag({
     name: workflowName,
     nodes,
