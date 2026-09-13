@@ -66,9 +66,17 @@ on [its page](/workflows/writer-and-reviewer).
 - [A review panel with a threshold](/workflows/review-panel). One model
   implements, several review at the same time, and the change passes when
   enough of them accept. Every seat is a different model family.
-- [Feature delivery](/workflows/feature-team). Analyse, implement, test,
-  review, approve. The reviewers can send the work back to the implementer,
-  and the approval is a note in your workspace.
+- [Feature delivery](/workflows/feature-team). Eleven steps: research and
+  a plan, each reviewed; tests before code; an implementation that repeats
+  with the reviewers' findings; verification, approval, evidence. Work
+  goes back to the step that owns it.
+- [The shape of a real process](/workflows/real-process). Twenty-three
+  stages in one file, inference only at the leaves: preconditions, research
+  with reviews, a plan a person can see, tests first, an implementation
+  loop, conformance, build, a promotion gate, an observed and reverted
+  action, deployed checks, a CI watch, evidence and learning. It runs as
+  far as your machine allows and records every stage it skipped, with the
+  reason.
 
 Each team is a graph of named steps. Every step carries a `desc` sentence
 saying what it does and a `gate` sentence saying what must be true for it

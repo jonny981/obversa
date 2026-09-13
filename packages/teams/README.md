@@ -17,10 +17,11 @@ npm install @obversa/runtime @obversa/teams
 - **`thresholdPanel`.** One model implements, your test command runs, and
   several reviewers read the change at the same time. The change passes
   when at least the threshold number of them accept.
-- **`featureDelivery`.** Research, plan, write tests, implement, verify,
-  approve, and close. The plan, test, and implementation reviews each send
-  work back to the step that owns it, and the run writes evidence and
-  learning notes.
+- **`featureDelivery`.** Research, plan, tests first, implement, verify,
+  approve, close: eleven steps, with a review after the research, the
+  plan, the tests and the implementation. A rejected plan, test or
+  implementation goes back to the step that owns it, each with its own
+  budget, and the run ends with an approval note and the evidence.
 
 Every team is a graph of named steps with a `desc` and a `gate` sentence on
 each, and every seat is checked before a run: the implementer and each
@@ -34,9 +35,9 @@ fails by name when the file is missing or empty.
 | `brief` | The work, as text. Every model in the team reads it. |
 | `workspace` | The directory the team works in. Files are written here. |
 | `files` | The paths, relative to the workspace, that the brief expects written. |
-| `testFiles` | The paths in `files` that the test-writing stage must create before implementation. |
+| `testFiles` | The paths in `files` the tests-first step writes from the plan before any code exists. |
 | `test` | The command and arguments that prove the files, run in the workspace. |
-| `maxKickbacks` | A number for one shared limit, or a map with separate limits for `plan`, `tests-first`, and `implement`. Default 1. |
+| `maxKickbacks` | How many times work may go back, one number for the whole team or a map with a budget per step, such as `{ plan: 3, 'tests-first': 3, implement: 3 }`. Default 1. |
 | seats | One `{ engine, identity }` per role. The identity names the adapter, provider, model family and model. |
 
 The reviewers on a panel are a list of `{ name, seat }`, with the threshold

@@ -42,11 +42,14 @@ npm install @obversa/runtime   # Node >= 22.12
 ## A feature, as one file
 
 Install the teams package and two engine plugins, and this file delivers a
-change with a team of models: one analyses the brief, another implements
-it, your test command runs, a reviewer from a different model family reads
-the result, and a final seat writes the approval. A rejected review sends
-the work back to the implementer, once. The file is complete; copy it, put
-your brief in, run it with Node.
+change with a team of models: one seat researches the brief and writes the
+requirements and the plan, each reviewed; another writes the tests before
+any code, then implements until the tests pass and a reviewer from a
+different model family accepts; the tests run once more; a seat records
+the approval; the evidence is written from the record. A rejected plan,
+test or implementation goes back to the step that owns it with the
+findings. The file is complete; copy it, put your brief in, run it with
+Node.
 
 ```bash
 npm install @obversa/runtime @obversa/teams @obversa/engine-claude-cli @obversa/engine-codex
@@ -98,15 +101,13 @@ const team = featureDelivery({
   maxKickbacks: { plan: 3, 'tests-first': 3, implement: 3 },
 });
 
-const result = await run(team, { cwd: workspace });
+const result = await run(team, {
+  cwd: workspace,
+  recordTo: 'team-output/events.jsonl',
+});
 console.log(JSON.stringify(result.outcome, null, 2));
 if (result.outcome.status !== 'pass') process.exitCode = 1;
 ```
-
-A writing seat can write anywhere the process can: the file starts its
-Claude and Codex seats with permission prompts off, which is what lets a
-model write files. Run it in a directory you are willing to let a model
-change.
 
 Each seat is an engine and the identity it runs under: adapter, provider,
 model family and model. The implementer and every reviewer must be
@@ -115,32 +116,34 @@ model runs if they are not.
 
 The team is a graph of eleven named steps. Every step carries a sentence
 saying what it does and a sentence saying what must be true for it to
-count, and both reach the reviewers and the run record. Plan review can
-send work back to `plan`, test review can send it back to `tests-first`,
-and implementation review can send it back to `implement`. Each target
-has its own bounded kickback budget.
+count, and both reach the reviewers and the run record. Each step that
+can receive work back has its own budget in `maxKickbacks`.
 
 | step | done when |
 | --- | --- |
-| prepare | Any approval from an earlier run is removed and a run marker is recorded. |
-| research-context | The context note is in the workspace and a reviewer accepts it. |
-| research-requirements | The requirements note is in the workspace and a reviewer accepts it. |
-| plan | The plan contains one acceptance check for each requirement. |
-| plan-review | At least the threshold number of reviewers accept the plan. |
+| prepare | No approval note exists and the run marker is recorded. |
+| research-context | The context note is in the workspace and a reviewer has accepted it. |
+| research-requirements | Every requirement is testable, traces to the brief, and asks for nothing the brief does not. |
+| plan | Every requirement has a check in the plan and no check asks for more than its requirement. |
+| plan-review | At least the threshold number of reviewers have accepted the plan. |
 | tests-first | Every declared test file exists and is not empty. |
-| tests-review | At least the threshold number of reviewers accept the tests. |
-| implement | The implementation files are written, the test passes, and reviewers accept the change. |
+| tests-review | At least the threshold number of reviewers have accepted the tests. |
+| implement | The test command exits 0 and the reviewers have accepted the change, within three cycles. |
 | verify | The final test command exits 0. |
 | approve | An approval note carrying this run's marker is in the workspace. |
-| close | Evidence and learning notes are written from the run record. |
+| close | The evidence note and the learning note are in the workspace. |
 
 A step that promises a file fails by name when the file is missing. The
-test step passes on the command's exit code, never on a model's report.
+test step passes on the command's exit code, never on a model's report,
+and a reviewer's decision is the file it writes.
 [Feature delivery](https://docs.obversa.ai/workflows/feature-team) shows
-what a real run of this file prints and the files the models write; a
+what a real run of this file printed and the files the models wrote; a
 [writer and reviewer](https://docs.obversa.ai/workflows/writer-and-reviewer)
 and a [review panel](https://docs.obversa.ai/workflows/review-panel) are
-the two smaller teams in the same package.
+the two smaller teams in the same package, and
+[the shape of a real process](https://docs.obversa.ai/workflows/real-process)
+is the full-size one.
+
 ## Engines
 
 An engine binding names the adapter, the provider, the model family and the

@@ -106,10 +106,15 @@ inference.
 
 ## See a team run
 
-Eleven named steps model the work as a real team ships a feature: the team
-records context and requirements, writes and reviews a plan, writes and
-reviews tests, implements and verifies the change, then records approval and
-evidence. The file is complete; copy it, put your brief in, run it with Node.
+Eleven named steps, the way a real team ships a feature: a Claude seat
+writes the context and the requirements, each until a reviewer accepts
+it; the plan is written and reviewed; a Codex seat writes the tests
+before any code; the reviewer reads them; the same seat implements until
+the tests pass and the reviewer accepts; the tests run once more; a seat
+records the approval; and the evidence is written from the record. A
+rejected plan, test or implementation goes back to the step that owns it,
+with the findings. The file is complete; copy it, put your brief in, run
+it with Node.
 
 ```ts
 import { ClaudeCliEngine } from '@obversa/engine-claude-cli';
@@ -157,7 +162,10 @@ const team = featureDelivery({
   maxKickbacks: { plan: 3, 'tests-first': 3, implement: 3 },
 });
 
-const result = await run(team, { cwd: workspace });
+const result = await run(team, {
+  cwd: workspace,
+  recordTo: 'team-output/events.jsonl',
+});
 console.log(JSON.stringify(result.outcome, null, 2));
 if (result.outcome.status !== 'pass') process.exitCode = 1;
 ```
@@ -173,7 +181,7 @@ ones. A coarse step hands the whole task to one inference and hopes. A
 small step with a review cycle is a process the run can hold to, and the
 team above is the shape to grow, not the size to stop at.
 
-The result of a successful run includes all eleven named stages:
+One real run of this file printed:
 
 ```json
 {
@@ -182,9 +190,13 @@ The result of a successful run includes all eleven named stages:
 }
 ```
 
-Every step's own words are in that record. The files the models wrote, the
-research notes and the approval included, are on the
-[feature delivery](/workflows/feature-team) page.
+Every step's own words are in that record: what the research seats found,
+what the plan covers, the reviewers' reasons, the test command's exit and
+the approval. The full output, the notes the team wrote and the files the
+models left are on the [feature delivery](/workflows/feature-team) page,
+and [the examples](/workflows) have the two smaller teams, the full-size
+process and the single mechanisms they are built from.
+
 ## The words you will meet
 
 Four words carry most of the docs, and each has a page:

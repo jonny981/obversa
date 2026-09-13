@@ -11,6 +11,26 @@ engine and memory packages track their own versions independently.
 
 ### Added
 
+- **Feature delivery in eleven steps:** `featureDelivery` researches the
+  brief and writes the requirements and the plan, each reviewed; writes the
+  declared `testFiles` before any code; implements until the test command
+  exits 0 and the reviewers accept; runs the tests once more; records an
+  approval carrying the run's marker; and writes the evidence and the
+  learning from the record. A rejected plan, test or implementation goes
+  back to the step that owns it, each target with its own `maxKickbacks`
+  budget. Requirements carry `REQ-n` ids and the plan step compares them
+  with the plan's checks; a note that comes back unchanged after a review
+  fails plainly.
+- **A reviewer's decision is its file:** a team reads `reviews/<name>.json`
+  when the reviewer wrote it in this turn, then the first JSON object in
+  the reply. A reply with no decision in either is asked for once more;
+  a second one stops the review with a plain summary and sends nothing to
+  the writer.
+- **The shape of a real process:** `examples/real-process.ts` runs
+  twenty-three stages in one file, from preconditions to learning, with
+  inference only at the leaves and every stage that needs a target, a
+  person or a check source recorded as skipped with the reason when it is
+  not there.
 - `fnJob` takes a function that returns a one-line summary or nothing, as
   well as a full outcome: a string is a pass with that summary, nothing is a
   pass with the label as its summary, and a throw is a fail carrying the
