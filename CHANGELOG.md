@@ -26,11 +26,6 @@ engine and memory packages track their own versions independently.
   the reply. A reply with no decision in either is asked for once more;
   a second one stops the review with a plain summary and sends nothing to
   the writer.
-- **The shape of a real process:** `examples/real-process.ts` runs
-  twenty-three stages in one file, from preconditions to learning, with
-  inference only at the leaves and every stage that needs a target, a
-  person or a check source recorded as skipped with the reason when it is
-  not there.
 - `outcomeFromAgentText` is exported from `@obversa/teams`: the parser that
   turns a reviewer's reply into a pass or a revise with findings, for a
   review panel of your own whose lenses must be able to say no.

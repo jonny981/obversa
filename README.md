@@ -140,9 +140,7 @@ and a reviewer's decision is the file it writes.
 what a real run of this file printed and the files the models wrote; a
 [writer and reviewer](https://docs.obversa.ai/workflows/writer-and-reviewer)
 and a [review panel](https://docs.obversa.ai/workflows/review-panel) are
-the two smaller teams in the same package, and
-[the shape of a real process](https://docs.obversa.ai/workflows/real-process)
-is the full-size one.
+the two smaller teams in the same package.
 
 ## Engines
 
