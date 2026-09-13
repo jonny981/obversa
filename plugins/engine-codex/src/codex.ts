@@ -52,6 +52,30 @@ export interface CodexEngineOptions {
     | 'auto';
 }
 
+export interface CodexSeat {
+  readonly engine: CodexEngine;
+  readonly identity: {
+    readonly adapter: 'codex';
+    readonly provider: 'openai';
+    readonly modelFamily: 'gpt';
+    readonly model: string;
+  };
+}
+
+/** Create the Codex seat used by declarative team workflows. */
+export function codex(model: string): CodexSeat {
+  if (!model.trim()) throw new TypeError('codex model must not be empty');
+  return {
+    engine: new CodexEngine({ defaultModel: model, permissionMode: 'bypassPermissions' }),
+    identity: {
+      adapter: 'codex',
+      provider: 'openai',
+      modelFamily: 'gpt',
+      model,
+    },
+  };
+}
+
 function usageFromJsonl(stdout: unknown): UsageReceipt {
   if (typeof stdout !== 'string') return { kind: 'unknown' };
   for (const line of stdout.trim().split('\n').reverse()) {

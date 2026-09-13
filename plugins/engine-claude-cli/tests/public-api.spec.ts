@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 
 import {
   ClaudeCliEngine,
+  claude,
   type ClaudeCliEngineOptions,
 } from '../src/index.ts';
 
@@ -17,5 +18,17 @@ describe('@obversa/engine-claude-cli', () => {
     const engine = new ClaudeCliEngine(options);
 
     expect(engine.name).toBe('claude-cli');
+  });
+
+  it('creates a write-capable declarative seat with the package identity', () => {
+    const seat = claude('claude-sonnet-4-5');
+
+    expect(seat.engine).toBeInstanceOf(ClaudeCliEngine);
+    expect(seat.identity).toEqual({
+      adapter: 'claude-cli',
+      provider: 'anthropic',
+      modelFamily: 'claude',
+      model: 'claude-sonnet-4-5',
+    });
   });
 });

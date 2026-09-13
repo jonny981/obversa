@@ -46,6 +46,30 @@ export interface ClaudeCliEngineOptions {
     | 'auto';
 }
 
+export interface ClaudeSeat {
+  readonly engine: ClaudeCliEngine;
+  readonly identity: {
+    readonly adapter: 'claude-cli';
+    readonly provider: 'anthropic';
+    readonly modelFamily: 'claude';
+    readonly model: string;
+  };
+}
+
+/** Create the Claude seat used by declarative team workflows. */
+export function claude(model: string): ClaudeSeat {
+  if (!model.trim()) throw new TypeError('claude model must not be empty');
+  return {
+    engine: new ClaudeCliEngine({ defaultModel: model, permissionMode: 'bypassPermissions' }),
+    identity: {
+      adapter: 'claude-cli',
+      provider: 'anthropic',
+      modelFamily: 'claude',
+      model,
+    },
+  };
+}
+
 function modelFor(
   request: AgentRequest,
   options: ClaudeCliEngineOptions,

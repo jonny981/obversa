@@ -3,6 +3,7 @@ import { describe, expect, it } from 'vitest';
 import {
   CodexEngine,
   buildCodexArgs,
+  codex,
   type CodexEngineOptions,
 } from '../src/index.ts';
 
@@ -21,5 +22,17 @@ describe('@obversa/engine-codex', () => {
     expect(buildCodexArgs({ prompt: 'review' }, options, '/tmp/out')).toContain(
       'gpt-test',
     );
+  });
+
+  it('creates a write-capable declarative seat with the package identity', () => {
+    const seat = codex('gpt-5.6-luna');
+
+    expect(seat.engine).toBeInstanceOf(CodexEngine);
+    expect(seat.identity).toEqual({
+      adapter: 'codex',
+      provider: 'openai',
+      modelFamily: 'gpt',
+      model: 'gpt-5.6-luna',
+    });
   });
 });

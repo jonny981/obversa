@@ -14,7 +14,10 @@ import {
 import { scriptedEngine, seat } from './scripted-engine.js';
 
 function nodeMeta(job: unknown): Record<string, unknown> {
-  return (jobMeta(job as Parameters<typeof jobMeta>[0]) ?? {}) as Record<string, unknown>;
+  if (typeof job === 'function') {
+    return (jobMeta(job as Parameters<typeof jobMeta>[0]) ?? {}) as Record<string, unknown>;
+  }
+  return (job ?? {}) as Record<string, unknown>;
 }
 
 function workflowInput() {
@@ -28,6 +31,7 @@ function workflowInput() {
       review: [analyse, implement],
       approve: person('Ship this change?'),
     },
+    options: { timeout: '10m' },
     stages: [
       stage('research-context', {
         agent: 'analyse',
@@ -57,7 +61,6 @@ function workflowInput() {
         sendsBackTo: 'implement',
       }),
     ],
-    post: { always: ({ record }: { record: unknown }) => record },
   };
 }
 
@@ -104,12 +107,12 @@ describe('declarative teams', () => {
       'approve',
     ]);
     expect(nodeMeta(nodes[0]!.job).kind).toBe('loop');
-    expect(nodeMeta(nodeMeta(nodes[0]!.job).review).kind).toBe('review-panel');
-    expect(nodeMeta(nodes[1]!.job).kind).toBe('agent');
+    expect(nodeMeta(nodes[0]!.job).review).toBe(true);
     expect(nodeMeta(nodes[2]!.job).kind).toBe('gate');
-    expect(nodeMeta(nodes[3]!.job).kind).toBe('review-panel');
+    expect(nodeMeta(nodes[3]!.job).kind).toBe('reviewPanel');
     expect(nodeMeta(nodes[4]!.job).kind).toBe('approval');
     expect(meta.maxKickbacks).toEqual({ implement: 1 });
+    expect(nodes[0]!.timeoutMs).toBe(600_000);
   });
 
   it('keeps a reviewed stage bounded by its declared retry count', () => {
@@ -117,7 +120,7 @@ describe('declarative teams', () => {
     const nodes = (nodeMeta(job).nodes ?? []) as Array<Record<string, unknown>>;
     const reviewed = nodeMeta(nodes[0]!.job);
 
-    expect(reviewed.maxReviewRestarts).toBe(3);
+    expect(reviewed.max).toBe(4);
   });
 
   it('rejects an agent that changes another declared file', async () => {
@@ -126,7 +129,7 @@ describe('declarative teams', () => {
       await mkdir(join(request.cwd!, 'src'), { recursive: true });
       await writeFile(join(request.cwd!, 'src/triple.mjs'), 'export const triple = 3;\n');
       await writeFile(join(request.cwd!, 'test-result.txt'), 'unexpected\n');
-      return 'accepted';
+      return '{"status":"pass","summary":"accepted"}';
     }]);
     const job = workflow('writes-boundary', {
       brief: {
@@ -147,6 +150,66 @@ describe('declarative teams', () => {
       expect(result.outcome.status).toBe('fail');
       expect(result.outcome.summary).toContain('write');
       expect(await readFile(join(directory, 'test-result.txt'), 'utf8')).toBe('unexpected\n');
+    } finally {
+      await rm(directory, { recursive: true, force: true });
+    }
+  });
+
+  it('rejects a reviewed note that is written unchanged after feedback', async () => {
+    const directory = await mkdtemp(join(tmpdir(), 'obversa-f35-unchanged-'));
+    const writer = scriptedEngine('writer', [async (request) => {
+      await mkdir(join(request.cwd!, 'team-output'), { recursive: true });
+      await writeFile(join(request.cwd!, 'team-output/note.md'), 'same note\n');
+      return '{"status":"pass","summary":"written"}';
+    }]);
+    const reviewer = scriptedEngine('reviewer', [async () => (
+      '{"status":"revise","summary":"add the missing detail","findings":[{"evidence":"detail"}]}'
+    )]);
+    const job = workflow('unchanged-note', {
+      brief: {
+        brief: 'Write one note.',
+        files: ['team-output/note.md'],
+      },
+      roles: {
+        writer: seat(writer, 'writer'),
+        review: [seat(reviewer, 'reviewer')],
+      },
+      stages: [stage('note', {
+        agent: 'writer',
+        writes: 'team-output/note.md',
+        reviewedBy: 'review',
+        retry: 2,
+      })],
+    });
+
+    try {
+      const result = await run(job, { cwd: directory });
+      expect(result.outcome.status).not.toBe('pass');
+      expect(result.outcome.summary).toContain('unchanged');
+      expect(writer.calls).toHaveLength(2);
+    } finally {
+      await rm(directory, { recursive: true, force: true });
+    }
+  });
+
+  it('runs post.always with a record after the graph settles', async () => {
+    const directory = await mkdtemp(join(tmpdir(), 'obversa-f35-post-'));
+    let summary = '';
+    const job = workflow('post-hook', {
+      brief: 'Run one command.',
+      roles: {},
+      stages: [stage('test', {
+        run: [process.execPath, '-e', 'process.exit(0)'],
+      })],
+      post: {
+        always: ({ record }) => { summary = record.summary(); },
+      },
+    });
+
+    try {
+      const result = await run(job, { cwd: directory });
+      expect(result.outcome.status).toBe('pass');
+      expect(summary).toContain('all 1 node(s) green');
     } finally {
       await rm(directory, { recursive: true, force: true });
     }
