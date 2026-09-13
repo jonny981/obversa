@@ -93,9 +93,7 @@ const team = workflow('feature-delivery', {
     }),
   ],
 
-  post: {
-    always: ({ record }) => console.log(record.summary()),
-  },
 });
 
-await run(team);
+const result = await run(team);
+console.log(JSON.stringify(result.outcome, null, 2));

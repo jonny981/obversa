@@ -43,4 +43,5 @@ const team = workflow('threshold-panel', {
   ],
 });
 
-await run(team);
+const result = await run(team);
+console.log(JSON.stringify(result.outcome, null, 2));
