@@ -115,12 +115,14 @@ for (const [stage, branch] of [
   ['D45', 'docs/whole-file-examples'],
   ['D48', 'feat/d48-fine-grained'],
   ['F35', 'feat/teams-declarative'],
+  ['F39', 'feat/writer-family-check'],
   ['D13', 'feat/graph-forms-v1'],
   ['D11A', 'feat/graph-forms-v1'],
   ['F0', 'feat/factory-v1'],
   ['F2b', 'feat/factory-v1'],
   ['F34', 'feat/command-kickback'],
   ['F36', 'feat/runtime-conveniences'],
+  ['F39', 'feat/graph-forms-v1'],
 ]) {
   test(`${stage} lands from its assigned branch ${branch}`, () => {
     const repository = createRepository({ feature: true, branch });
