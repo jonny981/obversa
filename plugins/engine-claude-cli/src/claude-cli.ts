@@ -56,11 +56,18 @@ export interface ClaudeSeat {
   };
 }
 
+export interface ClaudeSeatOptions {
+  readonly permissionMode?: ClaudeCliEngineOptions['permissionMode'];
+}
+
 /** Create the Claude seat used by declarative team workflows. */
-export function claude(model: string): ClaudeSeat {
+export function claude(model: string, options: ClaudeSeatOptions = {}): ClaudeSeat {
   if (!model.trim()) throw new TypeError('claude model must not be empty');
   return {
-    engine: new ClaudeCliEngine({ defaultModel: model, permissionMode: 'bypassPermissions' }),
+    engine: new ClaudeCliEngine({
+      defaultModel: model,
+      permissionMode: options.permissionMode ?? 'bypassPermissions',
+    }),
     identity: {
       adapter: 'claude-cli',
       provider: 'anthropic',

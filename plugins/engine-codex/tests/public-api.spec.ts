@@ -34,5 +34,18 @@ describe('@obversa/engine-codex', () => {
       modelFamily: 'gpt',
       model: 'gpt-5.6-luna',
     });
+    expect((seat.engine as unknown as { opts: CodexEngineOptions }).opts).toMatchObject({
+      sandbox: 'workspace-write',
+      approvalPolicy: 'never',
+    });
+  });
+
+  it('passes a caller sandbox choice without enabling the dangerous bypass', () => {
+    const seat = codex('gpt-5.6-luna', { sandbox: 'read-only' });
+
+    expect((seat.engine as unknown as { opts: CodexEngineOptions }).opts).toMatchObject({
+      sandbox: 'read-only',
+      approvalPolicy: 'never',
+    });
   });
 });

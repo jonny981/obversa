@@ -43,6 +43,8 @@ export interface CodexEngineOptions {
   readonly defaultModel?: string;
   readonly cliBinary?: string;
   readonly cliArgs?: readonly string[];
+  readonly sandbox?: 'read-only' | 'workspace-write' | 'danger-full-access';
+  readonly approvalPolicy?: 'on-request' | 'never';
   readonly permissionMode?:
     | 'default'
     | 'acceptEdits'
@@ -50,6 +52,11 @@ export interface CodexEngineOptions {
     | 'plan'
     | 'dontAsk'
     | 'auto';
+}
+
+export interface CodexSeatOptions {
+  readonly sandbox?: CodexEngineOptions['sandbox'];
+  readonly approvalPolicy?: CodexEngineOptions['approvalPolicy'];
 }
 
 export interface CodexSeat {
@@ -63,10 +70,14 @@ export interface CodexSeat {
 }
 
 /** Create the Codex seat used by declarative team workflows. */
-export function codex(model: string): CodexSeat {
+export function codex(model: string, options: CodexSeatOptions = {}): CodexSeat {
   if (!model.trim()) throw new TypeError('codex model must not be empty');
   return {
-    engine: new CodexEngine({ defaultModel: model, permissionMode: 'bypassPermissions' }),
+    engine: new CodexEngine({
+      defaultModel: model,
+      sandbox: options.sandbox ?? 'workspace-write',
+      approvalPolicy: options.approvalPolicy ?? 'never',
+    }),
     identity: {
       adapter: 'codex',
       provider: 'openai',
@@ -159,7 +170,8 @@ export function buildCodexArgs(
   if (opts.permissionMode === 'bypassPermissions') {
     args.push('--dangerously-bypass-approvals-and-sandbox');
   } else {
-    args.push('-s', 'read-only');
+    args.push('-s', opts.sandbox ?? 'read-only');
+    if (opts.approvalPolicy) args.push('-a', opts.approvalPolicy);
   }
 
   if (req.cwd) args.push('-C', req.cwd);

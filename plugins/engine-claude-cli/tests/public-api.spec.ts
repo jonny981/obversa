@@ -30,5 +30,14 @@ describe('@obversa/engine-claude-cli', () => {
       modelFamily: 'claude',
       model: 'claude-sonnet-4-5',
     });
+    expect((seat.engine as unknown as { opts: ClaudeCliEngineOptions }).opts.permissionMode)
+      .toBe('bypassPermissions');
+  });
+
+  it('passes a caller permission mode to the engine', () => {
+    const seat = claude('claude-sonnet-4-5', { permissionMode: 'plan' });
+
+    expect((seat.engine as unknown as { opts: ClaudeCliEngineOptions }).opts.permissionMode)
+      .toBe('plan');
   });
 });

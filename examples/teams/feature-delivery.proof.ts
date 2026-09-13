@@ -56,9 +56,9 @@ try {
     async (request) => { implementationCalls += 1; await writeSource(request.cwd!, 3); return pass('implementation repaired'); },
   ]);
   const reviewer = scriptedSeat('feature-reviewer', 'claude-review', [async (request) => {
-    const stageName = request.prompt.match(/Stage: ([^\n]+)/)?.[1] ?? 'stage';
+    const reviewerName = request.prompt.match(/^Obversa team role: ([^\n]+)/m)?.[1] ?? 'stage-1';
     await mkdir(join(request.cwd!, 'reviews'), { recursive: true });
-    await writeFile(join(request.cwd!, `reviews/${stageName}-1.json`), '{"status":"pass"}\n');
+    await writeFile(join(request.cwd!, `reviews/${reviewerName}.json`), '{"status":"pass"}\n');
     return pass('review accepted');
   }]);
   const callbacks = createCallbackClient();
@@ -66,8 +66,6 @@ try {
     brief: {
       brief: 'Deliver a pure triple(value) function in src/triple.mjs with a Node test in test/triple.test.mjs.',
       files: ['src/triple.mjs'],
-      testFiles: ['test/triple.test.mjs'],
-      test: { command: process.execPath, args: ['--test', 'test/triple.test.mjs'] },
     },
     options: { timeout: '10m' },
     roles: {

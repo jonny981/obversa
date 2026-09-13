@@ -41,6 +41,18 @@ describe('buildCodexArgs', () => {
     expect(args[args.indexOf('-C') + 1]).toBe('/repo');
   });
 
+  it('passes the sandbox and approval policy to the CLI', () => {
+    const args = buildCodexArgs(
+      { prompt: 'edit files' },
+      { sandbox: 'workspace-write', approvalPolicy: 'never' },
+      '/tmp/out.txt',
+    );
+    expect(args).toContain('workspace-write');
+    expect(args).toContain('-a');
+    expect(args[args.indexOf('-a') + 1]).toBe('never');
+    expect(args).not.toContain('--dangerously-bypass-approvals-and-sandbox');
+  });
+
   it('folds system text into the prompt and passes model plus extra args', () => {
     const args = buildCodexArgs(
       { prompt: 'go', system: 'be careful', model: 'gpt-5.1-codex' },

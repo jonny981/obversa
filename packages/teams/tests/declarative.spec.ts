@@ -23,12 +23,13 @@ function nodeMeta(job: unknown): Record<string, unknown> {
 function workflowInput() {
   const analyse = seat(scriptedEngine('analyse', [async () => 'accepted']), 'claude');
   const implement = seat(scriptedEngine('implement', [async () => 'accepted']), 'codex');
+  const reviewer = seat(scriptedEngine('reviewer', [async () => 'accepted']), 'grok');
   return {
     brief: 'Deliver a triple function.',
     roles: {
       analyse,
       implement,
-      review: [analyse, implement],
+      review: [reviewer],
       approve: person('Ship this change?'),
     },
     options: { timeout: '10m' },
@@ -72,23 +73,33 @@ describe('declarative teams', () => {
     await writeFile(file, [
       '---',
       'files: ["src/triple.mjs"]',
-      'testFiles: ["test/triple.test.mjs"]',
-      'test: ["node", "--test", "test/triple.test.mjs"]',
       '---',
       '',
       'Deliver a triple function.',
+      '---',
+      'Keep this line in the brief.',
       '',
     ].join('\n'));
 
     try {
       expect(fromFile(file)).toEqual({
-        brief: 'Deliver a triple function.',
+        brief: 'Deliver a triple function.\n---\nKeep this line in the brief.',
         files: ['src/triple.mjs'],
-        testFiles: ['test/triple.test.mjs'],
-        test: {
-          command: 'node',
-          args: ['--test', 'test/triple.test.mjs'],
-        },
+      });
+    } finally {
+      await rm(directory, { recursive: true, force: true });
+    }
+  });
+
+  it('reads CRLF front matter without losing the brief body', async () => {
+    const directory = await mkdtemp(join(tmpdir(), 'obversa-f35-crlf-'));
+    const file = join(directory, 'brief.md');
+    await writeFile(file, '---\r\nfiles: src/triple.mjs\r\n---\r\n\r\nKeep the brief.\r\n');
+
+    try {
+      expect(fromFile(file)).toEqual({
+        brief: 'Keep the brief.',
+        files: ['src/triple.mjs'],
       });
     } finally {
       await rm(directory, { recursive: true, force: true });
@@ -209,15 +220,13 @@ describe('declarative teams', () => {
     const job = workflow('writes-boundary', {
       brief: {
         brief: 'Write the source.',
-        files: ['src/triple.mjs', 'test-result.txt'],
-        testFiles: [],
-        test: { command: 'true', args: [] },
+        files: ['src/triple.mjs'],
       },
       roles: { writer: seat(writer, 'writer') },
-      stages: [stage('write', {
-        agent: 'writer',
-        writes: 'src/triple.mjs',
-      })],
+      stages: [
+        stage('write', { agent: 'writer', writes: 'src/triple.mjs' }),
+        stage('test', { run: ['true'], writes: 'test-result.txt' }),
+      ],
     });
 
     try {
@@ -227,6 +236,59 @@ describe('declarative teams', () => {
       expect(await readFile(join(directory, 'test-result.txt'), 'utf8')).toBe('unexpected\n');
     } finally {
       await rm(directory, { recursive: true, force: true });
+    }
+  });
+
+  it('rejects a reviewed stage whose writer shares a model family with a reviewer', () => {
+    const writer = seat(scriptedEngine('writer', [async () => 'accepted']), 'gpt');
+    const reviewer = seat(scriptedEngine('reviewer', [async () => 'accepted']), 'gpt');
+
+    expect(() => workflow('same-family-review', {
+      brief: 'Review one note.',
+      roles: { writer, review: [reviewer] },
+      stages: [stage('note', {
+        agent: 'writer',
+        writes: 'note.md',
+        reviewedBy: 'review',
+      })],
+    })).toThrow(/model family must be distinct/);
+    expect(writer.engine).toBeDefined();
+  });
+
+  it('rejects a kickback panel whose reviewers share a model family with its target writer', () => {
+    const writer = seat(scriptedEngine('writer', [async () => 'accepted']), 'gpt');
+    const reviewer = seat(scriptedEngine('reviewer', [async () => 'accepted']), 'gpt');
+
+    expect(() => workflow('same-family-kickback', {
+      brief: 'Review one note.',
+      roles: { writer, review: [reviewer] },
+      stages: [
+        stage('write', { agent: 'writer', writes: 'note.md' }),
+        stage('review', { panel: 'review', sendsBackTo: 'write', agree: 1 }),
+      ],
+    })).toThrow(/model family must be distinct/);
+  });
+
+  it('rejects invalid stage links and retry placement before building jobs', () => {
+    const cases: Array<[string, ReturnType<typeof workflowInput>['stages']]> = [
+      ['duplicate', [stage('same', { run: ['true'] }), stage('same', { run: ['true'] })]],
+      ['self', [stage('same', { run: ['true'], sendsBackTo: 'same' })]],
+      ['unknown', [stage('later', { run: ['true'], sendsBackTo: 'missing' })]],
+      ['future', [stage('first', { run: ['true'], sendsBackTo: 'later' }), stage('later', { run: ['true'] })]],
+      ['both', [
+        stage('first', { run: ['true'] }),
+        stage('note', {
+          agent: 'analyse',
+          writes: 'note.md',
+          reviewedBy: 'review',
+          sendsBackTo: 'first',
+        }),
+      ]],
+      ['retry', [stage('note', { run: ['true'], retry: 1 })]],
+    ];
+
+    for (const [name, stages] of cases) {
+      expect(() => workflow(name, { ...workflowInput(), stages })).toThrow();
     }
   });
 

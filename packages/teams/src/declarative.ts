@@ -19,18 +19,17 @@ import {
 
 import { outcomeFromAgentText } from './agent-response.js';
 import {
+  assertDistinctSeats,
   panelReviewers,
   requireNoFiles,
   requireNonEmptyFiles,
   seatIdentity,
 } from './team-utils.js';
-import type { ReviewerSeat, TeamInput, TeamSeat, TestCommand } from './types.js';
+import type { ReviewerSeat, TeamInput, TeamSeat } from './types.js';
 
 export interface BriefSource {
   readonly brief: string;
   readonly files?: readonly string[];
-  readonly testFiles?: readonly string[];
-  readonly test?: TestCommand;
 }
 
 export interface PersonRole {
@@ -85,8 +84,7 @@ export interface WorkflowConfig {
   };
 }
 
-const FRONT_MATTER_MARKER = /^---\r?\n/;
-const PATH_FIELDS = new Set(['files', 'testFiles']);
+const PATH_FIELDS = new Set(['files']);
 
 function text(value: unknown, label: string): string {
   if (typeof value !== 'string' || !value.trim()) {
@@ -118,53 +116,26 @@ function pathList(value: unknown, label: string): string[] {
   return result;
 }
 
-function commandValue(value: unknown): TestCommand {
-  const parsed = typeof value === 'string' && value.trim().startsWith('[')
-    ? JSON.parse(value) as unknown
-    : value;
-  if (Array.isArray(parsed)) {
-    if (!parsed.length) throw new TypeError('test command must contain a command');
-    return {
-      command: text(parsed[0], 'test command'),
-      args: parsed.slice(1).map((arg, index) => text(arg, `test args[${index}]`)),
-    };
-  }
-  if (parsed !== null && typeof parsed === 'object') {
-    const record = parsed as { command?: unknown; args?: unknown };
-    return {
-      command: text(record.command, 'test command'),
-      args: Array.isArray(record.args)
-        ? record.args.map((arg, index) => text(arg, `test args[${index}]`))
-        : [],
-    };
-  }
-  const parts = text(parsed, 'test command').split(/\s+/);
-  return { command: parts[0]!, args: parts.slice(1) };
-}
-
 function parseFrontMatter(source: string): BriefSource {
-  if (!FRONT_MATTER_MARKER.test(source)) return { brief: source.trim() };
-  const closingOffset = source.slice(4).search(/^---\r?$/m);
-  if (closingOffset < 0) throw new TypeError('brief front matter is not closed');
-  const end = closingOffset + 4;
-  const markerEnd = source.indexOf('\n', end);
-  const header = source.slice(4, end).trim();
-  const body = source.slice(markerEnd < 0 ? source.length : markerEnd + 1).trim();
+  const lines = source.split(/\r?\n/);
+  if (lines[0] !== '---') return { brief: source.trim() };
+  const closingLine = lines.findIndex((line, index) => index > 0 && line === '---');
+  if (closingLine < 0) throw new TypeError('brief front matter is not closed');
+  const header = lines.slice(1, closingLine).join('\n').trim();
+  const body = lines.slice(closingLine + 1).join('\n').trim();
   const values: Record<string, unknown> = {};
   for (const line of header.split(/\r?\n/)) {
+    if (!line.trim()) continue;
     const separator = line.indexOf(':');
     if (separator < 1) throw new TypeError(`invalid brief front matter line: ${line}`);
     const key = line.slice(0, separator).trim();
     const value = line.slice(separator + 1).trim();
     if (PATH_FIELDS.has(key)) values[key] = pathList(value, key);
-    else if (key === 'test') values.test = commandValue(value);
     else throw new TypeError(`unknown brief front matter field: ${key}`);
   }
   return {
     brief: body,
     ...(values.files === undefined ? {} : { files: values.files as string[] }),
-    ...(values.testFiles === undefined ? {} : { testFiles: values.testFiles as string[] }),
-    ...(values.test === undefined ? {} : { test: values.test as TestCommand }),
   };
 }
 
@@ -239,7 +210,7 @@ function panelInput(brief: BriefSource, files: readonly string[], workspace: str
     brief: brief.brief,
     workspace,
     files,
-    test: brief.test ?? { command: 'true', args: [] },
+    test: { command: 'true', args: [] },
   };
 }
 
@@ -290,10 +261,6 @@ function briefValue(value: string | BriefSource): BriefSource {
   return typeof value === 'string' ? { brief: text(value, 'brief') } : {
     brief: text(value.brief, 'brief'),
     ...(value.files === undefined ? {} : { files: pathList(value.files, 'files') }),
-    ...(value.testFiles === undefined ? {} : {
-      testFiles: value.testFiles.length ? pathList(value.testFiles, 'testFiles') : [],
-    }),
-    ...(value.test === undefined ? {} : { test: commandValue(value.test) }),
   };
 }
 
@@ -334,6 +301,12 @@ function stageFiles(brief: BriefSource, stages: readonly NamedStage[], through: 
   return [...new Set([...fromBrief, ...fromStages])];
 }
 
+function workflowFiles(brief: BriefSource, stages: readonly NamedStage[]): string[] {
+  const fromBrief = brief.files === undefined ? [] : pathList(brief.files, 'files');
+  const fromStages = stages.flatMap(({ config }) => writesOf(config));
+  return [...new Set([...fromBrief, ...fromStages])];
+}
+
 function agentPrompt(
   brief: BriefSource,
   named: NamedStage,
@@ -357,6 +330,7 @@ function guardedAgent(
   named: NamedStage,
   seat: TeamSeat,
   files: readonly string[],
+  declaredFiles: readonly string[],
 ): Job {
   const writes = writesOf(named.config);
   if (!writes.length) throw new TypeError(`agent stage ${named.name} must declare writes`);
@@ -371,7 +345,7 @@ function guardedAgent(
   });
   return async (ctx) => {
     const required = requireNonEmptyFiles(named.name, agent, ctx.workspace.dir, writes);
-    const forbidden = files.filter((file) => !writes.includes(file));
+    const forbidden = declaredFiles.filter((file) => !writes.includes(file));
     return requireNoFiles(named.name, required, ctx.workspace.dir, forbidden)(ctx);
   };
 }
@@ -415,11 +389,12 @@ function stageJob(
   named: NamedStage,
   roles: WorkflowConfig['roles'],
   files: readonly string[],
+  declaredFiles: readonly string[],
 ): Job {
   const config = named.config;
   if ('agent' in config && config.agent !== undefined) {
     const writes = writesOf(config);
-    const guarded = guardedAgent(brief, named, seatRole(roles, config.agent), files);
+    const guarded = guardedAgent(brief, named, seatRole(roles, config.agent), files, declaredFiles);
     const job = config.reviewedBy === undefined
       ? guarded
       : unchangedNoteGuard(named.name, guarded, writes);
@@ -498,6 +473,24 @@ export function workflow(name: string, config: WorkflowConfig): Job {
     retryForStage(stageConfig, incomingTargets.has(stageName));
     writesOf(stageConfig);
   }
+  for (const named of config.stages) {
+    const stageConfig = named.config;
+    if ('agent' in stageConfig && stageConfig.agent !== undefined && stageConfig.reviewedBy !== undefined) {
+      assertDistinctSeats([
+        seatRole(config.roles, stageConfig.agent),
+        ...panelRole(config.roles, stageConfig.reviewedBy),
+      ]);
+    }
+    if ('panel' in stageConfig && stageConfig.panel !== undefined && stageConfig.sendsBackTo !== undefined) {
+      const target = config.stages.find((candidate) => candidate.name === stageConfig.sendsBackTo)!;
+      if ('agent' in target.config && target.config.agent !== undefined) {
+        assertDistinctSeats([
+          seatRole(config.roles, target.config.agent),
+          ...panelRole(config.roles, stageConfig.panel),
+        ]);
+      }
+    }
+  }
   const timeoutMs = duration(config.options?.timeout);
   const maxKickbacks: Record<string, number> = {};
   for (const named of config.stages) {
@@ -509,10 +502,11 @@ export function workflow(name: string, config: WorkflowConfig): Job {
       );
     }
   }
+  const declaredFiles = workflowFiles(brief, config.stages);
   const nodes = Object.fromEntries(config.stages.map((named, index) => {
     const files = stageFiles(brief, config.stages, index);
     return [named.name, {
-      job: stageJob(brief, named, config.roles, files),
+      job: stageJob(brief, named, config.roles, files, declaredFiles),
       needs: stageDependencies(config.stages, index),
       ...(named.config.desc === undefined ? {} : { desc: named.config.desc }),
       ...(named.config.gate === undefined ? {} : { gate: named.config.gate }),
