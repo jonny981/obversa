@@ -171,7 +171,7 @@ export function buildCodexArgs(
     args.push('--dangerously-bypass-approvals-and-sandbox');
   } else {
     args.push('-s', opts.sandbox ?? 'read-only');
-    if (opts.approvalPolicy) args.push('-a', opts.approvalPolicy);
+    if (opts.approvalPolicy) args.push('-c', `approval_policy=${opts.approvalPolicy}`);
   }
 
   if (req.cwd) args.push('-C', req.cwd);

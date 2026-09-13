@@ -48,8 +48,8 @@ describe('buildCodexArgs', () => {
       '/tmp/out.txt',
     );
     expect(args).toContain('workspace-write');
-    expect(args).toContain('-a');
-    expect(args[args.indexOf('-a') + 1]).toBe('never');
+    expect(args).toContain('-c');
+    expect(args[args.indexOf('-c') + 1]).toBe('approval_policy=never');
     expect(args).not.toContain('--dangerously-bypass-approvals-and-sandbox');
   });
 
