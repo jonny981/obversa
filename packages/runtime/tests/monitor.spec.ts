@@ -206,6 +206,18 @@ describe('the run monitor', () => {
     expect(state.nodes.implement!.runs).toBe(2);
   });
 
+  it('refuses to be framed by any origin, on the page and on the state', async () => {
+    const result = await run(fnJob('a', () => {}), { monitor: true });
+    opened.push(result);
+    for (const path of ['', 'state']) {
+      const res = await fetch(`${result.monitor!.url}${path}`);
+      expect(res.headers.get('x-frame-options')).toBe('DENY');
+      expect(res.headers.get('content-security-policy')).toContain("frame-ancestors 'none'");
+    }
+    const page = (await get(result.monitor!.url)).body;
+    expect(page).not.toContain('onclick=');
+  });
+
   it('closes on request, and the port is released', async () => {
     const result = await run(fnJob('a', () => {}), { monitor: true });
     const url = result.monitor!.url;
