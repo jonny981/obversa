@@ -182,7 +182,14 @@ function ownPage(req: IncomingMessage, host: string): boolean {
 }
 
 function send(res: ServerResponse, status: number, body: string, type: string): void {
-  res.writeHead(status, { 'content-type': type, 'content-length': Buffer.byteLength(body), 'cache-control': 'no-store' });
+  // No page may frame this one: the answer buttons must be the person's own click on this tab.
+  res.writeHead(status, {
+    'content-type': type,
+    'content-length': Buffer.byteLength(body),
+    'cache-control': 'no-store',
+    'x-frame-options': 'DENY',
+    'content-security-policy': "frame-ancestors 'none'",
+  });
   res.end(body);
 }
 
@@ -328,12 +335,18 @@ function page(name: string | undefined): string {
   const el = (id) => document.getElementById(id);
   const esc = (s) => String(s).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
   async function answer(requestId, approved) {
-    const note = (el('note-' + requestId) || {}).value || '';
+    const box = document.querySelector('[data-note="' + CSS.escape(requestId) + '"]');
+    const note = box && box.value ? box.value : '';
     const response = note ? { approved, note } : { approved };
-    await fetch('answer', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ requestId, response }) });
+    const res = await fetch('answer', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ requestId, response }) });
+    const result = await res.json().catch(() => ({ ok: false, reason: 'no answer from the run' }));
+    el('status').textContent = result.ok ? 'answered' : 'the answer was refused: ' + (result.reason || res.status);
     render();
   }
-  window.answer = answer;
+  el('pending').addEventListener('click', (event) => {
+    const button = event.target.closest('button[data-answer]');
+    if (button) answer(button.getAttribute('data-request'), button.getAttribute('data-answer') === 'yes');
+  });
   async function render() {
     let s;
     try { s = await (await fetch('state', { cache: 'no-store' })).json(); } catch { el('status').textContent = 'the run has gone'; return; }
@@ -345,7 +358,7 @@ function page(name: string | undefined): string {
       + '<span class="phase" data-phase="' + esc(v.phase) + '" data-status="' + esc(v.outcome ? v.outcome.status : '') + '">' + esc(v.phase === 'done' && v.outcome ? v.outcome.status : v.phase) + '</span></li>'; }).join('');
     el('kickbacks').innerHTML = s.kickbacks.map((k) => '<p class="kick">' + esc(k.from) + ' sent work back to ' + esc(k.to) + (k.accepted ? '' : ' (not accepted' + (k.note ? ': ' + esc(k.note) : '') + ')') + ': ' + esc(k.reason) + ' (' + k.count + ' of ' + k.limit + ')</p>').join('');
     el('pending-title').hidden = s.pending.length === 0;
-    el('pending').innerHTML = s.pending.map((p) => '<div><p>' + esc(p.decisionText) + '</p><form onsubmit="return false"><input id="note-' + esc(p.requestId) + '" placeholder="a note, if any"><button class="yes" onclick="answer(' + JSON.stringify(p.requestId).replace(/"/g, '&quot;') + ', true)">Yes</button><button onclick="answer(' + JSON.stringify(p.requestId).replace(/"/g, '&quot;') + ', false)">No</button></form></div>').join('');
+    el('pending').innerHTML = s.pending.map((p) => '<div><p>' + esc(p.decisionText) + '</p><form onsubmit="return false"><input data-note="' + esc(p.requestId) + '" placeholder="a note, if any"><button class="yes" data-answer="yes" data-request="' + esc(p.requestId) + '">Yes</button><button data-answer="no" data-request="' + esc(p.requestId) + '">No</button></form></div>').join('');
     el('record').textContent = s.events.slice(-40).map((e) => new Date(e.ts).toISOString().slice(11, 19) + '  ' + e.kind.padEnd(14) + (e.node || e.label || '') + (e.summary ? '  ' + e.summary : '')).join('\\n');
     if (s.status !== 'done') setTimeout(render, 1000);
   }

@@ -375,7 +375,7 @@ export {
 } from './core/condition.js';
 export { approval, type ApprovalAnswer, type ApprovalOptions } from './core/approval-job.js';
 export type { RunCallbacks } from './core/types.js';
-export type { RunMonitor, MonitorState, MonitorNodeState, MonitorKickback } from './runtime/monitor.js';
+export type { RunMonitor, MonitorState, MonitorNodeState, MonitorNodePhase, MonitorKickback } from './runtime/monitor.js';
 export type {
   NoProgressConfig,
   NoProgressInput,
