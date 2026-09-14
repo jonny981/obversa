@@ -9,8 +9,8 @@ engine and memory packages track their own versions independently.
 
 ## [Unreleased]
 
-- Declarative team stages support `when` conditions and optional failures.
-- Declarative team stages can name earlier stages in `needs` while retaining the implicit previous-stage dependency.
+- `stage()` takes `when`, a runtime condition such as `passed()`, `failed()` or an async predicate, and `optional`. A stage whose `when` is not met is recorded as skipped and counts as passed for the stages after it.
+- `stage()` takes `needs`, one or more earlier stage names, so a condition can read a stage further back than the one before it.
 
 ## [1.0.0] - 2026-09-14
 
