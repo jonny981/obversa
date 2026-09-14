@@ -15,6 +15,7 @@ import {
   type Job,
   type JobContext,
   type Outcome,
+  type ConditionInput,
 } from '@obversa/runtime';
 
 import { outcomeFromAgentText } from './agent-response.js';
@@ -43,6 +44,9 @@ export interface WorkflowStageBase {
   readonly writes?: string | readonly string[];
   readonly desc?: string;
   readonly gate?: string;
+  readonly when?: ConditionInput;
+  readonly optional?: boolean;
+  readonly needs?: string | readonly string[];
   readonly sendsBackTo?: string;
   readonly retry?: number;
 }
@@ -179,6 +183,12 @@ function retryCount(retry: number | undefined, label: string): number {
   return retry;
 }
 
+function optionalFlag(optional: unknown): boolean | undefined {
+  if (optional === undefined) return undefined;
+  if (typeof optional !== 'boolean') throw new TypeError('optional must be a boolean');
+  return optional;
+}
+
 function retryOf(config: WorkflowStage): number {
   return config.retry === undefined ? 1 : retryCount(config.retry, 'retry');
 }
@@ -193,7 +203,21 @@ function retryForStage(config: WorkflowStage, receivesKickback: boolean): number
 }
 
 function stageDependencies(stages: readonly NamedStage[], index: number): string[] {
-  return index === 0 ? [] : [stages[index - 1]!.name];
+  const stage = stages[index]!;
+  const requested = stage.config.needs === undefined
+    ? []
+    : Array.isArray(stage.config.needs)
+      ? [...stage.config.needs]
+      : [stage.config.needs];
+  const earlier = new Set(stages.slice(0, index).map((candidate) => candidate.name));
+  const explicit = requested.map((name, needIndex) => text(name, `needs[${needIndex}]`));
+  for (const name of explicit) {
+    if (!earlier.has(name)) {
+      throw new TypeError(`stage ${stage.name} needs ${name}, which is not an earlier stage`);
+    }
+  }
+  const previous = index === 0 ? [] : [stages[index - 1]!.name];
+  return [...new Set([...previous, ...explicit])];
 }
 
 function panelInput(brief: BriefSource, files: readonly string[], workspace: string): TeamInput {
@@ -510,6 +534,7 @@ export function workflow(name: string, config: WorkflowConfig): Job {
       throw new TypeError(`stage ${stageName} cannot use both reviewedBy and sendsBackTo`);
     }
     retryForStage(stageConfig, incomingTargets.has(stageName));
+    optionalFlag(stageConfig.optional);
     writesOf(stageConfig);
   }
   for (const [index, named] of config.stages.entries()) {
@@ -567,6 +592,8 @@ export function workflow(name: string, config: WorkflowConfig): Job {
       needs: stageDependencies(config.stages, index),
       ...(named.config.desc === undefined ? {} : { desc: named.config.desc }),
       ...(named.config.gate === undefined ? {} : { gate: named.config.gate }),
+      ...(named.config.when === undefined ? {} : { when: named.config.when }),
+      ...(named.config.optional === undefined ? {} : { optional: named.config.optional }),
       ...(timeoutMs === undefined ? {} : { timeoutMs }),
     }];
   }));

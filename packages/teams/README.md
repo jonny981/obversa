@@ -15,7 +15,7 @@ npm install @obversa/runtime @obversa/teams
 - **`workflow(name, { brief, roles, stages })`.** The team as a job. Stages
   run in the order written.
 - **`stage(name, { agent | run | panel | input, writes, desc, gate,
-  reviewedBy, sendsBackTo, retry })`.** One step.
+  reviewedBy, sendsBackTo, retry, when, optional, needs })`.** One step.
 - **`person(question)`** and **`fromFile(path)`.** A person as a role, and a
   brief kept as a markdown file with optional front matter for `files`.
 - **Seats** come from the engine plugins: `claude(model)`, `codex(model)`,

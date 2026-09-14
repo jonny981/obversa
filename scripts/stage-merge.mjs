@@ -55,6 +55,7 @@ export const stageBranches = {
   D48: 'feat/d48-fine-grained',
   F35: 'feat/teams-declarative',
   F39: 'feat/writer-family-check',
+  F40: 'feat/stage-when-optional',
   F34: 'feat/command-kickback',
   F36: 'feat/runtime-conveniences',
   F38: 'feat/release-1-0-0-cut',

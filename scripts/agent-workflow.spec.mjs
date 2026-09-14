@@ -116,6 +116,7 @@ for (const [stage, branch] of [
   ['D48', 'feat/d48-fine-grained'],
   ['F35', 'feat/teams-declarative'],
   ['F39', 'feat/writer-family-check'],
+  ['F40', 'feat/stage-when-optional'],
   ['D13', 'feat/graph-forms-v1'],
   ['D11A', 'feat/graph-forms-v1'],
   ['F0', 'feat/factory-v1'],
@@ -186,6 +187,7 @@ for (const [stage, branch] of [
   ['F34', 'feat/graph-forms-v1'],
   ['F36', 'feat/graph-forms-v1'],
   ['F39', 'feat/graph-forms-v1'],
+  ['F40', 'feat/graph-forms-v1'],
   ['F38', 'feat/graph-forms-v1'],
   ['D50', 'feat/graph-forms-v1'],
 ]) {

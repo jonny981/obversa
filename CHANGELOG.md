@@ -17,6 +17,8 @@ engine and memory packages track their own versions independently.
   questions a person can answer through the run's callbacks client, and the
   record tail. The address is one `monitor` event and one line in the record,
   never stdout; `RunResult.monitor` carries it and closes the page.
+- `stage()` takes `when`, a runtime condition such as `passed()`, `failed()` or an async predicate, and `optional`. A stage whose `when` is not met is recorded as skipped and counts as passed for the stages after it.
+- `stage()` takes `needs`, one or more earlier stage names, so a condition can read a stage further back than the one before it.
 
 ## [1.0.0] - 2026-09-14
 

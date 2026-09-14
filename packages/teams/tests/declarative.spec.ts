@@ -2,7 +2,7 @@ import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
-import { jobMeta, run } from '@obversa/runtime';
+import { failed, jobMeta, passed, run } from '@obversa/runtime';
 import { describe, expect, it } from 'vitest';
 
 import {
@@ -133,6 +133,180 @@ describe('declarative teams', () => {
     expect(nodeMeta(nodes[4]!.job).kind).toBe('approval');
     expect(meta.maxKickbacks).toEqual({ implement: 3 });
     expect(nodes[0]!.timeoutMs).toBe(600_000);
+  });
+
+  it('uses a value written by a dependency before running a conditional stage', async () => {
+    const directory = await mkdtemp(join(tmpdir(), 'obversa-f40-condition-'));
+    const writeDepth = [
+      process.execPath,
+      '-e',
+      "require('node:fs').writeFileSync('depth.txt', 'dev\\n')",
+    ];
+    const append = (value: string) => [
+      process.execPath,
+      '-e',
+      `require('node:fs').appendFileSync('actions.txt', '${value}\\n')`,
+    ];
+    const job = workflow('conditional-depth', {
+      brief: 'Run the action only at full depth.',
+      roles: {},
+      stages: [
+        stage('depth', { run: writeDepth, optional: true }),
+        stage('middle-one', { run: ['true'] }),
+        stage('middle-two', { run: ['true'] }),
+        stage('perform', {
+          run: append('perform'),
+          needs: ['depth', 'middle-two'],
+          when: async (ctx) => {
+            if (ctx.needs?.depth?.status !== 'pass') return false;
+            const value = await readFile(join(ctx.workspace!.dir, 'depth.txt'), 'utf8');
+            return value.trim() === 'full';
+          },
+        }),
+        stage('after', { run: append('after') }),
+      ],
+    });
+
+    try {
+      const meta = nodeMeta(job);
+      const nodes = (meta.nodes ?? []) as Array<Record<string, unknown>>;
+      expect(nodes[3]!.when).toBeDefined();
+      expect(nodes[3]!.needs).toEqual(['middle-two', 'depth']);
+      expect(nodes[0]!.optional).toBe(true);
+
+      const result = await run(job, { cwd: directory });
+      expect(result.outcome.status).toBe('pass');
+      expect(await readFile(join(directory, 'actions.txt'), 'utf8')).toBe('after\n');
+    } finally {
+      await rm(directory, { recursive: true, force: true });
+    }
+  });
+
+  it('runs the conditional stage when the dependency writes full depth', async () => {
+    const directory = await mkdtemp(join(tmpdir(), 'obversa-f40-full-depth-'));
+    const append = (value: string) => [
+      process.execPath,
+      '-e',
+      `require('node:fs').appendFileSync('actions.txt', '${value}\\n')`,
+    ];
+    const job = workflow('full-depth', {
+      brief: 'Run the action at full depth.',
+      roles: {},
+      stages: [
+        stage('depth', {
+          run: [process.execPath, '-e', "require('node:fs').writeFileSync('depth.txt', 'full\\n')"],
+        }),
+        stage('perform', {
+          run: append('perform'),
+          when: async (ctx) => {
+            const value = await readFile(join(ctx.workspace!.dir, 'depth.txt'), 'utf8');
+            return ctx.needs?.depth?.status === 'pass' && value.trim() === 'full';
+          },
+        }),
+      ],
+    });
+
+    try {
+      expect((await run(job, { cwd: directory })).outcome.status).toBe('pass');
+      expect(await readFile(join(directory, 'actions.txt'), 'utf8')).toBe('perform\n');
+    } finally {
+      await rm(directory, { recursive: true, force: true });
+    }
+  });
+
+  it('uses passed and failed conditions with an optional dependency', async () => {
+    const passDirectory = await mkdtemp(join(tmpdir(), 'obversa-f40-passed-'));
+    const failDirectory = await mkdtemp(join(tmpdir(), 'obversa-f40-failed-'));
+    const append = (value: string) => [
+      process.execPath,
+      '-e',
+      `require('node:fs').appendFileSync('path.txt', '${value}\\n')`,
+    ];
+
+    const passJob = workflow('passed-condition', {
+      brief: 'Choose the passed path.',
+      roles: {},
+      stages: [
+        stage('probe', { run: ['true'] }),
+        stage('passed-path', { run: append('passed'), when: passed('probe') }),
+      ],
+    });
+    const failJob = workflow('failed-condition', {
+      brief: 'Choose the failed path.',
+      roles: {},
+      stages: [
+        stage('probe', {
+          run: [process.execPath, '-e', 'process.exit(1)'],
+          optional: true,
+        }),
+        stage('failed-path', { run: append('failed'), when: failed('probe') }),
+      ],
+    });
+
+    try {
+      expect((await run(passJob, { cwd: passDirectory })).outcome.status).toBe('pass');
+      expect(await readFile(join(passDirectory, 'path.txt'), 'utf8')).toBe('passed\n');
+      expect((await run(failJob, { cwd: failDirectory })).outcome.status).toBe('pass');
+      expect(await readFile(join(failDirectory, 'path.txt'), 'utf8')).toBe('failed\n');
+    } finally {
+      await Promise.all([
+        rm(passDirectory, { recursive: true, force: true }),
+        rm(failDirectory, { recursive: true, force: true }),
+      ]);
+    }
+  });
+
+  it('resolves passed through an explicit dependency three stages away', async () => {
+    const directory = await mkdtemp(join(tmpdir(), 'obversa-f40-passed-needs-'));
+    const append = [
+      process.execPath,
+      '-e',
+      "require('node:fs').appendFileSync('path.txt', 'perform\\n')",
+    ];
+    const job = workflow('passed-explicit-needs', {
+      brief: 'Choose a path from a stage three steps back.',
+      roles: {},
+      stages: [
+        stage('depth', { run: ['true'] }),
+        stage('middle-one', { run: ['true'] }),
+        stage('middle-two', { run: ['true'] }),
+        stage('perform', {
+          run: append,
+          needs: ['depth', 'middle-two'],
+          when: passed('depth'),
+        }),
+      ],
+    });
+
+    try {
+      const nodes = (nodeMeta(job).nodes ?? []) as Array<Record<string, unknown>>;
+      expect(nodes[3]!.needs).toEqual(['middle-two', 'depth']);
+      expect((await run(job, { cwd: directory })).outcome.status).toBe('pass');
+      expect(await readFile(join(directory, 'path.txt'), 'utf8')).toBe('perform\n');
+    } finally {
+      await rm(directory, { recursive: true, force: true });
+    }
+  });
+
+  it('keeps a required failure from running its dependent', async () => {
+    const directory = await mkdtemp(join(tmpdir(), 'obversa-f40-required-'));
+    const job = workflow('required-failure', {
+      brief: 'Stop after a required failure.',
+      roles: {},
+      stages: [
+        stage('probe', { run: [process.execPath, '-e', 'process.exit(1)'] }),
+        stage('dependent', {
+          run: [process.execPath, '-e', "require('node:fs').writeFileSync('ran.txt', 'yes\\n')"],
+        }),
+      ],
+    });
+
+    try {
+      expect((await run(job, { cwd: directory })).outcome.status).not.toBe('pass');
+      await expect(readFile(join(directory, 'ran.txt'), 'utf8')).rejects.toThrow();
+    } finally {
+      await rm(directory, { recursive: true, force: true });
+    }
   });
 
   it('runs stages in the declared order', async () => {
@@ -499,6 +673,11 @@ describe('declarative teams', () => {
       ['self', [stage('same', { run: ['true'], sendsBackTo: 'same' })]],
       ['unknown', [stage('later', { run: ['true'], sendsBackTo: 'missing' })]],
       ['future', [stage('first', { run: ['true'], sendsBackTo: 'later' }), stage('later', { run: ['true'] })]],
+      ['needs-future', [
+        stage('first', { run: ['true'], needs: 'later' } as WorkflowStage),
+        stage('later', { run: ['true'] }),
+      ]],
+      ['needs-missing', [stage('first', { run: ['true'], needs: 'missing' } as WorkflowStage)]],
       ['both', [
         stage('first', { run: ['true'] }),
         stage('note', {
@@ -513,6 +692,15 @@ describe('declarative teams', () => {
 
     for (const [name, stages] of cases) {
       expect(() => workflow(name, { ...workflowInput(), stages })).toThrow();
+    }
+  });
+
+  it('rejects a non-boolean optional flag before building jobs', () => {
+    for (const optional of [1, 'yes', null]) {
+      expect(() => workflow('invalid-optional', {
+        ...workflowInput(),
+        stages: [stage('probe', { run: ['true'], optional } as unknown as WorkflowStage)],
+      })).toThrow(/optional must be a boolean/);
     }
   });
 
