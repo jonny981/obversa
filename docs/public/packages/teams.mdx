@@ -99,10 +99,10 @@ larger teams.
 | key | what it means |
 | --- | --- |
 | `agent` | The role that does the work. The stage must say what it `writes`. |
-| `run` | A command, one string with no quoting or an array. Exit 0 passes; a red run goes back to `sendsBackTo` with the output as the finding. It may change the files it `writes` and no other declared file; with no `writes` it may change none of the declared files, and a change fails the stage by name. |
+| `run` | A command, one string with no quoting or an array. Exit 0 passes; a red run goes back to `sendsBackTo` with the output as the finding. It may change the files it `writes` and no other declared file; a change to another declared file fails the stage by name. Files nobody declared are not watched. |
 | `panel` | A role that is a list of seats. `agree` is how many must accept; the default is all of them. |
 | `input` | A person role. The stage asks the question and waits. |
-| `writes` | The files this stage writes, relative to the workspace. It writes those and no other declared file; a missing or empty one fails the stage by name. |
+| `writes` | The files this stage writes, relative to the workspace. It writes those and no other declared file. For an agent stage a missing or empty one fails the stage by name; a command stage is judged by its exit code. |
 | `desc`, `gate` | What the stage does and what must be true for it to count. Both reach the reviewers and the record. |
 | `reviewedBy` | A panel role that reads this stage's work. A rejection runs the stage again with the findings; a note written back unchanged fails plainly. |
 | `sendsBackTo` | The earlier stage a rejection or a red run goes back to. A stage cannot send back to itself; use `reviewedBy`. |
