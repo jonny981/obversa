@@ -115,7 +115,7 @@
     "verify:d48": "pnpm verify:f34",
     "verify:f35": "pnpm verify:d48",
     "verify:f39": "pnpm verify:f35",
-    "verify:d50": "pnpm verify:f38 && pnpm --filter @obversa/runtime exec vitest run tests/monitor.spec.ts",
+    "verify:d50": "pnpm verify:f39 && pnpm --filter @obversa/runtime exec vitest run tests/monitor.spec.ts",
     "verify:f38": "pnpm verify:f39 && GITHUB_REF_NAME=v$(node -p \"require('./packages/runtime/package.json').version\") node scripts/changelog-gate.mjs",
     "verify:d17": "pnpm verify:d45 && pnpm example:preflight && pnpm example:runner-preflight",
     "verify:f34": "pnpm verify:d17 && pnpm example:command-kickback",
