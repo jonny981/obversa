@@ -261,6 +261,9 @@ try {
   returns a full outcome, a one-line summary (a pass) or nothing (a pass
   with the label as its summary); a throw is a fail carrying the error.
   `FnJobResult` names what it may return.
+- `jobMeta`, `copyJobMeta`, `renderPlan`: inspect a job's described shape,
+  carry that shape onto a wrapper that keeps the job's behaviour, and render
+  the plan for a reader or host.
 - `commandJob`: a command as a step, pass on exit 0 and fail with the output
   as the evidence otherwise; `target` names the step that owns the fix.
 - `passed`, `failed`: conditions for a node's `when` that read a named
