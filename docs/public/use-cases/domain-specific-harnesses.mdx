@@ -1,0 +1,156 @@
+---
+title: "Domain-specific harnesses"
+description: "Write the harness for one job as a workflow: named roles, a review that sends work back, and a person at the gate, on the engines you already use."
+---
+
+You can write the harness for one job as one file: who does each step, who
+reviews it, where the work goes back, and where a person decides. The engines
+are the ones you already run. The runtime keeps the order, the record, and
+the returns.
+
+A domain-specific harness is the loop, the tools and the rules that make a
+model useful in one field: insurance intake, a company's own integrations, a
+research desk. The model is the same one everyone has. The harness is the
+part that is yours. Most of it is process: what runs first, what checks it,
+what happens when the check fails, and who signs at the end.
+
+## What the file holds
+
+The file is `examples/teams/feature-delivery.ts`.
+
+```ts
+import { claude } from '@obversa/engine-claude-cli';
+import { codex } from '@obversa/engine-codex';
+import { run } from '@obversa/runtime';
+import { fromFile, person, stage, workflow } from '@obversa/teams';
+
+/**
+ * A feature, delivered the way a team delivers one. The roles are named once;
+ * every stage is a small block of nouns: who does it, what it writes, who
+ * reads it, where a red result goes back to. Inference happens only where a
+ * role is named; every other stage is a command or a person.
+ */
+const team = workflow('feature-delivery', {
+  brief: fromFile('briefs/triple.md'),
+  options: { timeout: '10m' },
+
+  roles: {
+    analyse: claude('claude-sonnet-4-5'),
+    implement: codex('gpt-5.6-luna'),
+    'research-review': [codex('gpt-5.6-luna')],
+    'code-review': [claude('claude-sonnet-4-5')],
+    approve: person('Ship this change?'),
+  },
+
+  stages: [
+    stage('research-context', {
+      agent: 'analyse',
+      writes: 'team-output/research-context.md',
+      desc: 'Read the workspace and write down what the change touches.',
+      gate: 'The context note is in the workspace and a reviewer has accepted it.',
+      reviewedBy: 'research-review',
+      retry: 3,
+    }),
+
+    stage('research-requirements', {
+      agent: 'analyse',
+      writes: 'team-output/research-requirements.md',
+      desc: 'Turn the brief and the context note into requirements, one REQ-n per line.',
+      gate: 'The requirements note is in the workspace and a reviewer has accepted it.',
+      reviewedBy: 'research-review',
+      retry: 3,
+    }),
+
+    stage('plan', {
+      agent: 'analyse',
+      writes: 'team-output/plan.md',
+      desc: 'Write an executable plan from the requirements, one check per REQ-n.',
+      gate: 'Every requirement has a check in the plan.',
+      reviewedBy: 'research-review',
+      retry: 3,
+    }),
+
+    stage('tests-first', {
+      agent: 'implement',
+      writes: 'test/triple.test.mjs',
+      desc: 'Write the declared test files from the accepted plan before any implementation exists.',
+      gate: 'Every declared test file exists and covers the plan.',
+      reviewedBy: 'code-review',
+      retry: 3,
+    }),
+
+    stage('implement', {
+      agent: 'implement',
+      writes: 'src/triple.mjs',
+      desc: 'Write the code to the plan and the tests.',
+      gate: 'The source file exists.',
+      retry: 3,
+    }),
+
+    stage('test', {
+      run: ['node', '--test', 'test/triple.test.mjs'],
+      desc: 'Run the tests; a red run goes back to implement with the output.',
+      gate: 'The test command exits 0.',
+      sendsBackTo: 'implement',
+    }),
+
+    stage('review', {
+      panel: 'code-review',
+      agree: 1,
+      desc: 'Read the change and the test result against the plan.',
+      gate: 'At least one reviewer has accepted the change.',
+      sendsBackTo: 'implement',
+    }),
+
+    stage('approve', {
+      input: 'approve',
+      desc: 'Put the verified change in front of a person.',
+      gate: 'A person has said yes.',
+    }),
+
+    stage('close', {
+      agent: 'analyse',
+      writes: ['team-output/evidence.md', 'team-output/learning.md'],
+      desc: 'Write the evidence of the run and what was learned, from the record alone.',
+      gate: 'Both notes are in the workspace.',
+    }),
+  ],
+
+});
+
+const result = await run(team);
+console.log(JSON.stringify(result.outcome, null, 2));
+```
+
+The roles name the engines. The stages name the work and the files each stage
+may write. A review role reads a stage's work and sends it back with findings
+when it is not right. A person role asks a question and waits for the answer.
+The run writes every step to a record as it happens.
+
+## What is yours and what is the runtime's
+
+| yours | the runtime's |
+| --- | --- |
+| The steps and their order. | Running one bounded engine call at a time. |
+| The brief, as a markdown file if it is long. | Handing each stage the brief and the files it needs. |
+| Which engine takes which role. | Starting each engine in a fresh process. |
+| What a reviewer looks for. | Sending the work back to the stage that owns it, with the findings. |
+| The question a person answers. | Pausing on that question; the answer arrives through the callbacks client. |
+| Which files a stage may write. | Failing the stage by name when it writes another stage's file. |
+
+## Things that catch people out
+
+- **A harness is not an agent.** Claude Code, Codex and the others are the
+  agents. This file drives them. See [harnesses we drive](/plugins).
+- **A reviewer from another family catches more.** A review by the model
+  that wrote the work agrees with it more often. Give the review role a seat
+  from a different provider.
+- **The person's answer is not in the file.** The run pauses at the person
+  role and carries on when the answer arrives through the callbacks client.
+  See [a person decides](/workflows/approval).
+
+## Where to go
+
+[A feature team, as a file](/workflows/feature-team) for the same shape with
+its recorded run; [software factory, as a workflow](/use-cases/software-factory)
+if you arrived from that search.

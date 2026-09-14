@@ -44,6 +44,13 @@
         ]
       },
       {
+        "group": "Use cases",
+        "pages": [
+          "use-cases/domain-specific-harnesses",
+          "use-cases/software-factory"
+        ]
+      },
+      {
         "group": "Examples",
         "pages": [
           "workflows/index",
@@ -107,6 +114,25 @@
         "pages": [
           "workspace/contract",
           "workspace/example"
+        ]
+      },
+      {
+        "group": "Compare",
+        "pages": [
+          "compare/langgraph",
+          "compare/crewai",
+          "compare/temporal",
+          "compare/claude-code-subagents"
+        ]
+      },
+      {
+        "group": "Glossary",
+        "pages": [
+          "glossary/domain-specific-harness",
+          "glossary/software-factory",
+          "glossary/agent-harness",
+          "glossary/meta-harness",
+          "glossary/agent-pipeline"
         ]
       },
       {
