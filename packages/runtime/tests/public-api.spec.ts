@@ -110,6 +110,7 @@ describe('public runtime API', () => {
       'commandJob',
       'commandSucceeds',
       'compileGraph',
+      'copyJobMeta',
       'confidenceCondition',
       'confidenceFromText',
       'convergence',

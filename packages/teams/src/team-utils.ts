@@ -5,6 +5,7 @@ import { join } from 'node:path';
 import {
   agentJob,
   commandSucceeds,
+  copyJobMeta,
   dag,
   gateJob,
   LoopError,
@@ -149,7 +150,7 @@ export function requireNoFiles(
   files: readonly string[],
   phase: 'body' | 'review' = 'review',
 ): Job {
-  return async (ctx) => {
+  const wrapper: Job = async (ctx) => {
     const before = new Map<string, FileSnapshot>();
     for (const file of files) {
       before.set(file, await snapshotFile(join(workspace, file)));
@@ -176,6 +177,7 @@ export function requireNoFiles(
     }
     return outcome;
   };
+  return copyJobMeta(wrapper, job);
 }
 
 interface FileSnapshot {

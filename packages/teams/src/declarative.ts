@@ -7,6 +7,7 @@ import {
   agentJob,
   approval,
   commandJob,
+  copyJobMeta,
   dag,
   LoopError,
   loop,
@@ -459,13 +460,14 @@ function stageJob(
     const command = commandJob(named.name, config.run, { target: config.sendsBackTo });
     const writes = writesOf(config);
     const forbidden = declaredFiles.filter((file) => !writes.includes(file));
-    return async (ctx) => requireNoFiles(
+    const guarded: Job = async (ctx) => requireNoFiles(
       named.name,
       command,
       ctx.workspace.dir,
       forbidden,
       'body',
     )(ctx);
+    return copyJobMeta(guarded, command);
   }
   if ('panel' in config && config.panel !== undefined) {
     return reviewerPanel(brief, named, panelRole(roles, config.panel), files, declaredFiles, targetFiles, config.sendsBackTo, config.agree);

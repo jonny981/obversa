@@ -323,7 +323,7 @@ export {
   type RevisionRequestInput,
 } from './core/feedback.js';
 
-export { jobMeta, renderPlan, describeConditions } from './core/describe.js';
+export { copyJobMeta, jobMeta, renderPlan, describeConditions } from './core/describe.js';
 export {
   assertGraph,
   type GraphShape,

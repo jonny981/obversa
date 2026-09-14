@@ -25,6 +25,12 @@ export function jobMeta(job: Job): JobMeta | undefined {
   return typeof job === 'function' ? META.get(job) : undefined;
 }
 
+/** Carry a Job's shape onto a wrapper that preserves its public behavior. */
+export function copyJobMeta<T extends object>(target: T, source: Job): T {
+  const meta = jobMeta(source);
+  return meta ? setMeta(target, meta) : target;
+}
+
 /** Register a one-line label for a condition (used by the gate-describing path). */
 export function setLabel<T extends object>(cond: T, label: string): T {
   LABEL.set(cond, label);
