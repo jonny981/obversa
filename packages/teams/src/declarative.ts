@@ -15,6 +15,7 @@ import {
   type Job,
   type JobContext,
   type Outcome,
+  type ConditionInput,
 } from '@obversa/runtime';
 
 import { outcomeFromAgentText } from './agent-response.js';
@@ -43,6 +44,8 @@ export interface WorkflowStageBase {
   readonly writes?: string | readonly string[];
   readonly desc?: string;
   readonly gate?: string;
+  readonly when?: ConditionInput;
+  readonly optional?: boolean;
   readonly sendsBackTo?: string;
   readonly retry?: number;
 }
@@ -567,6 +570,8 @@ export function workflow(name: string, config: WorkflowConfig): Job {
       needs: stageDependencies(config.stages, index),
       ...(named.config.desc === undefined ? {} : { desc: named.config.desc }),
       ...(named.config.gate === undefined ? {} : { gate: named.config.gate }),
+      ...(named.config.when === undefined ? {} : { when: named.config.when }),
+      ...(named.config.optional === undefined ? {} : { optional: named.config.optional }),
       ...(timeoutMs === undefined ? {} : { timeoutMs }),
     }];
   }));
