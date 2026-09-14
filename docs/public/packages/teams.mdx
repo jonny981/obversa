@@ -99,7 +99,7 @@ larger teams.
 | key | what it means |
 | --- | --- |
 | `agent` | The role that does the work. The stage must say what it `writes`. |
-| `run` | A command, one string with no quoting or an array. Exit 0 passes; a red run goes back to `sendsBackTo` with the output as the finding. |
+| `run` | A command, one string with no quoting or an array. Exit 0 passes; a red run goes back to `sendsBackTo` with the output as the finding. It may change only the files it `writes`; with no `writes` it may change none of the declared files, and a change fails the stage by name. |
 | `panel` | A role that is a list of seats. `agree` is how many must accept; the default is all of them. |
 | `input` | A person role. The stage asks the question and waits. |
 | `writes` | The files this stage writes, relative to the workspace. It writes those and no other declared file; a missing or empty one fails the stage by name. |

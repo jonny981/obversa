@@ -11,6 +11,7 @@ engine and memory packages track their own versions independently.
 
 ### Added
 
+- A command stage may change only the files it `writes`; with no `writes` it may change none of the declared files, and a change fails the stage by name.
 - `run` takes `monitor: true` (on by default under `supervise`) and serves
   the run's own page on a free loopback port: the declared graph with each
   step's live state folded from the run's events, the returns, the pending

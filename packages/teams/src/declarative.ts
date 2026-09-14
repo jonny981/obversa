@@ -456,7 +456,16 @@ function stageJob(
     });
   }
   if ('run' in config && config.run !== undefined) {
-    return commandJob(named.name, config.run, { target: config.sendsBackTo });
+    const command = commandJob(named.name, config.run, { target: config.sendsBackTo });
+    const writes = writesOf(config);
+    const forbidden = declaredFiles.filter((file) => !writes.includes(file));
+    return async (ctx) => requireNoFiles(
+      named.name,
+      command,
+      ctx.workspace.dir,
+      forbidden,
+      'body',
+    )(ctx);
   }
   if ('panel' in config && config.panel !== undefined) {
     return reviewerPanel(brief, named, panelRole(roles, config.panel), files, declaredFiles, targetFiles, config.sendsBackTo, config.agree);

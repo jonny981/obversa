@@ -431,6 +431,85 @@ describe('declarative teams', () => {
     }
   });
 
+  it('allows a command to change its declared workflow file', async () => {
+    const directory = await mkdtemp(join(tmpdir(), 'obversa-f41-command-owned-'));
+    try {
+      const job = workflow('command-owned-file', {
+        brief: { brief: 'Run the command.', files: ['owned.txt', 'other.txt'] },
+        roles: {},
+        stages: [stage('write', {
+          run: [process.execPath, '-e', "require('node:fs').writeFileSync('owned.txt', 'owned\\n')"],
+          writes: 'owned.txt',
+        })],
+      });
+
+      const result = await run(job, { cwd: directory });
+
+      expect(result.outcome.status).toBe('pass');
+      expect(await readFile(join(directory, 'owned.txt'), 'utf8')).toBe('owned\n');
+    } finally {
+      await rm(directory, { recursive: true, force: true });
+    }
+  });
+
+  it('rejects a command that changes another declared file', async () => {
+    const directory = await mkdtemp(join(tmpdir(), 'obversa-f41-command-forbidden-'));
+    try {
+      const job = workflow('command-forbidden-file', {
+        brief: { brief: 'Run the command.', files: ['owned.txt', 'other.txt'] },
+        roles: {},
+        stages: [stage('write', {
+          run: [process.execPath, '-e', "require('node:fs').writeFileSync('other.txt', 'unexpected\\n')"],
+          writes: 'owned.txt',
+        })],
+      });
+
+      const result = await run(job, { cwd: directory });
+
+      expect(result.outcome.status).toBe('fail');
+      expect(JSON.stringify(result.outcome.data)).toContain('other.txt');
+    } finally {
+      await rm(directory, { recursive: true, force: true });
+    }
+  });
+
+  it('allows a command with no writes to leave workflow files unchanged', async () => {
+    const directory = await mkdtemp(join(tmpdir(), 'obversa-f41-command-read-only-'));
+    try {
+      const job = workflow('command-read-only', {
+        brief: { brief: 'Run the check.', files: ['other.txt'] },
+        roles: {},
+        stages: [stage('check', { run: ['true'] })],
+      });
+
+      const result = await run(job, { cwd: directory });
+
+      expect(result.outcome.status).toBe('pass');
+    } finally {
+      await rm(directory, { recursive: true, force: true });
+    }
+  });
+
+  it('rejects a command with no writes that changes a workflow file', async () => {
+    const directory = await mkdtemp(join(tmpdir(), 'obversa-f41-command-no-writes-'));
+    try {
+      const job = workflow('command-no-writes', {
+        brief: { brief: 'Run the check.', files: ['other.txt'] },
+        roles: {},
+        stages: [stage('check', {
+          run: [process.execPath, '-e', "require('node:fs').writeFileSync('other.txt', 'unexpected\\n')"],
+        })],
+      });
+
+      const result = await run(job, { cwd: directory });
+
+      expect(result.outcome.status).toBe('fail');
+      expect(JSON.stringify(result.outcome.data)).toContain('other.txt');
+    } finally {
+      await rm(directory, { recursive: true, force: true });
+    }
+  });
+
   it('rejects a reviewed stage whose writer shares a model family with a reviewer', () => {
     const writer = seat(scriptedEngine('writer', [async () => 'accepted']), 'gpt');
     const reviewer = seat(scriptedEngine('reviewer', [async () => 'accepted']), 'gpt');
