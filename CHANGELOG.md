@@ -12,7 +12,7 @@ engine and memory packages track their own versions independently.
 ### Added
 
 - `copyJobMeta` carries a job's shape (its name, kind and stage metadata) onto a wrapper that keeps its behaviour, so a guarded job still appears in the stage table and the monitor.
-- A command stage may change only the files it `writes`; with no `writes` it may change none of the declared files, and a change fails the stage by name.
+- A command stage may change the files it `writes` and no other declared file; with no `writes` it may change none of the declared files, and a change fails the stage by name.
 - `run` takes `monitor: true` (on by default under `supervise`) and serves
   the run's own page on a free loopback port: the declared graph with each
   step's live state folded from the run's events, the returns, the pending
