@@ -1,0 +1,157 @@
+---
+title: "Obversa and Temporal for agent work"
+description: "Temporal is a durable execution runtime with a server and eight SDKs. Obversa is a TypeScript library for agent teams with no server. What each is for, and where each wins."
+---
+
+Pick Temporal when your agent work must survive anything for days, at
+scale, and you can run or rent its service. Pick Obversa when the work is a
+team of agent tools on one machine, and what you need is the process
+between them written down: roles, reviews that send work back, a person at
+the gate, a record.
+
+Temporal's own words: "Temporal is a scalable and reliable runtime for
+durable function executions called Temporal Workflow Executions." A
+workflow calls activities; every step is an event in a history; a new
+worker replays the history after a crash and continues from the exact
+point. A person is a signal the workflow waits for. Sending rejected work
+back to an earlier step is control flow you write in the workflow.
+
+Here is the shape Obversa is for, as one file:
+
+```ts
+import { claude } from '@obversa/engine-claude-cli';
+import { codex } from '@obversa/engine-codex';
+import { run } from '@obversa/runtime';
+import { fromFile, person, stage, workflow } from '@obversa/teams';
+
+/**
+ * A feature, delivered the way a team delivers one. The roles are named once;
+ * every stage is a small block of nouns: who does it, what it writes, who
+ * reads it, where a red result goes back to. Inference happens only where a
+ * role is named; every other stage is a command or a person.
+ */
+const team = workflow('feature-delivery', {
+  brief: fromFile('briefs/triple.md'),
+  options: { timeout: '10m' },
+
+  roles: {
+    analyse: claude('claude-sonnet-4-5'),
+    implement: codex('gpt-5.6-luna'),
+    'research-review': [codex('gpt-5.6-luna')],
+    'code-review': [claude('claude-sonnet-4-5')],
+    approve: person('Ship this change?'),
+  },
+
+  stages: [
+    stage('research-context', {
+      agent: 'analyse',
+      writes: 'team-output/research-context.md',
+      desc: 'Read the workspace and write down what the change touches.',
+      gate: 'The context note is in the workspace and a reviewer has accepted it.',
+      reviewedBy: 'research-review',
+      retry: 3,
+    }),
+
+    stage('research-requirements', {
+      agent: 'analyse',
+      writes: 'team-output/research-requirements.md',
+      desc: 'Turn the brief and the context note into requirements, one REQ-n per line.',
+      gate: 'The requirements note is in the workspace and a reviewer has accepted it.',
+      reviewedBy: 'research-review',
+      retry: 3,
+    }),
+
+    stage('plan', {
+      agent: 'analyse',
+      writes: 'team-output/plan.md',
+      desc: 'Write an executable plan from the requirements, one check per REQ-n.',
+      gate: 'Every requirement has a check in the plan.',
+      reviewedBy: 'research-review',
+      retry: 3,
+    }),
+
+    stage('tests-first', {
+      agent: 'implement',
+      writes: 'test/triple.test.mjs',
+      desc: 'Write the declared test files from the accepted plan before any implementation exists.',
+      gate: 'Every declared test file exists and covers the plan.',
+      reviewedBy: 'code-review',
+      retry: 3,
+    }),
+
+    stage('implement', {
+      agent: 'implement',
+      writes: 'src/triple.mjs',
+      desc: 'Write the code to the plan and the tests.',
+      gate: 'The source file exists.',
+      retry: 3,
+    }),
+
+    stage('test', {
+      run: ['node', '--test', 'test/triple.test.mjs'],
+      desc: 'Run the tests; a red run goes back to implement with the output.',
+      gate: 'The test command exits 0.',
+      sendsBackTo: 'implement',
+    }),
+
+    stage('review', {
+      panel: 'code-review',
+      agree: 1,
+      desc: 'Read the change and the test result against the plan.',
+      gate: 'At least one reviewer has accepted the change.',
+      sendsBackTo: 'implement',
+    }),
+
+    stage('approve', {
+      input: 'approve',
+      desc: 'Put the verified change in front of a person.',
+      gate: 'A person has said yes.',
+    }),
+
+    stage('close', {
+      agent: 'analyse',
+      writes: ['team-output/evidence.md', 'team-output/learning.md'],
+      desc: 'Write the evidence of the run and what was learned, from the record alone.',
+      gate: 'Both notes are in the workspace.',
+    }),
+  ],
+
+});
+
+const result = await run(team);
+console.log(JSON.stringify(result.outcome, null, 2));
+```
+
+## Side by side
+
+| | Temporal | Obversa |
+| --- | --- | --- |
+| Unit of work | A workflow calling activities. | A stage: an engine call, a command, a panel or a person, with the files it may write. |
+| The workers | Your code in activities, which may call any model. | Claude Code, Codex, Grok and OpenCode, driven as engines, one fresh process per call. |
+| A review that sends work back | Control flow you write in the workflow. | Built in: a review role sends the work back to the stage that owns it, with findings, up to a budget. |
+| A person deciding | A signal the workflow waits for. | A person role; the run pauses on the question and the answer arrives through the callbacks client. |
+| More than one provider | Inside your activities, with a client library. | Each role names its engine; a review seat from another provider is one line. |
+| A run that survives a crash | Event history and replay; the run continues from the exact point. | A plain run records to a file and does not resume. The supervised runner restarts a compiled graph from its own record. |
+| Where it runs | A service you run or rent, plus your workers. | A library, no server. |
+| Languages | Eight SDKs, TypeScript among them. | TypeScript. |
+
+## Where Temporal wins
+
+- Durable execution is the requirement: multi-day runs, many workers,
+  replay after any failure.
+- You already run Temporal for other work.
+- You need a language other than TypeScript.
+
+## Where Obversa wins
+
+- There is one machine, the agents are tools on it, and a server would be
+  more than the job needs.
+- The review that sends work back and the person at the gate should be
+  declared, not written as control flow each time.
+- The team should be readable as one file with the record beside it.
+
+## Where to go
+
+[A feature team, as a file](/workflows/feature-team) for the file above with
+its recorded run; [what is a meta-harness](/glossary/meta-harness) for the
+layer Obversa is.

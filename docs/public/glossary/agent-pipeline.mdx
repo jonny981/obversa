@@ -1,0 +1,133 @@
+---
+title: "What is an agent pipeline with a review and a person at the merge?"
+description: "The smallest team shape that holds up: steps in order, a review that sends work back to the step that owns it, and a person who decides at the end."
+---
+
+You can write one in a page. The smallest team shape that holds up has
+three parts: steps in order, a review that sends work back to the step that
+owns the fix, and a person who decides at the end. Without the return, the
+review is decoration. Without the person, nothing merges on a human's say.
+
+Here it is offline, with small functions in place of engines so the shape
+is the only thing on show:
+
+```ts
+/**
+ * A feature team, as one file.
+ *
+ * Five named stages, a review panel of three that passes on two, work that
+ * goes back to the stage that owns it when the panel fails, and a person who
+ * decides at the end. It runs offline, with no model and no network: every
+ * job here is a small function, so the shape of the team is the only thing
+ * on show.
+ */
+import { approval, fnJob, pipeline, reviewPanel, run, type Outcome } from '@obversa/runtime';
+
+/** The work itself. In a real team each of these calls an engine. */
+const analyse = fnJob('analyse', () => 'the ticket asks for a report export with a header row');
+
+/** Fails its first attempt so the panel has something to send back. */
+let implementRuns = 0;
+const implement = fnJob('implement', () => {
+  implementRuns += 1;
+  return implementRuns === 1 ? 'report.csv, rows only' : 'report.csv, header and rows';
+});
+
+const testStage = fnJob('test', () => 'the export parses');
+
+/** The person at the end. In a real team the answer arrives through the callbacks client. */
+const approve = approval('approve', {
+  question: 'Ship this change?',
+  answer: () => ({ approved: true }),
+});
+
+/**
+ * The three reviewers. Two of them fail the first attempt, because the panel
+ * passes on two of three: one dissenting voice is not enough to send work
+ * back, and an example where only one fails would show a panel that passes
+ * and prove nothing about the kickback.
+ */
+const missingHeader = () => implementRuns === 1;
+const checks = {
+  correctness: fnJob('correctness', (): Outcome | string =>
+    missingHeader()
+      ? { status: 'fail', summary: 'the export is missing its header row' }
+      : 'header and rows present'),
+  safety: fnJob('safety', () => 'no destructive path'),
+  scope: fnJob('scope', (): Outcome | string =>
+    missingHeader()
+      ? { status: 'fail', summary: 'the ticket asked for a header row' }
+      : 'inside the ticket'),
+};
+
+const review = reviewPanel({
+  label: 'review',
+  reviewers: [
+    { name: 'correctness', job: checks.correctness },
+    { name: 'safety', job: checks.safety },
+    { name: 'scope', job: checks.scope },
+  ],
+  pass: 2, // two of three agree and the step passes
+  target: 'implement', // a failing panel sends the work back here
+});
+
+export const featureDelivery = pipeline(
+  'feature-delivery',
+  [
+    { name: 'analyse', job: analyse },
+    { name: 'implement', job: implement },
+    { name: 'test', job: testStage },
+    { name: 'review', job: review },
+    { name: 'approve', job: approve },
+  ],
+  { maxKickbacks: 2 },
+);
+
+const result = await run(featureDelivery);
+console.log(JSON.stringify({
+  status: result.outcome.status,
+  implementRuns,
+}, null, 2));
+
+/**
+ * The example is part of the documentation proof, so it has to fail the build
+ * when the behaviour it shows stops happening. Printing alone would not: a
+ * panel that quietly stopped sending work back would still print a passing
+ * run, and `implement` running once is the tell.
+ */
+const faults: string[] = [];
+if (result.outcome.status !== 'pass') {
+  faults.push(`the run ended ${result.outcome.status}, so the second attempt never satisfied the panel`);
+}
+if (implementRuns !== 2) {
+  faults.push(`implement ran ${implementRuns} time(s), so the panel did not send the work back exactly once`);
+}
+if (faults.length) {
+  for (const fault of faults) console.error(fault);
+  process.exitCode = 1;
+}
+```
+
+## The three parts
+
+| part | in the file |
+| --- | --- |
+| Steps in order | `pipeline` with five named steps. |
+| A review that sends work back | `reviewPanel` with three reviewers, passing on two, `target: 'implement'`. |
+| A person at the merge | `approval` with a question. This file answers it in place with `answer`, so it never pauses; in a real team the answer arrives through the callbacks client. |
+
+## Things that catch people out
+
+- **A panel that always passes proves nothing.** The example fails its
+  first attempt on purpose, so the return is exercised and the run's exit
+  code tells you when it stops happening.
+- **The budget is finite.** `maxKickbacks` caps how often work goes back;
+  when it runs out the run fails with the last findings rather than looping.
+- **The person's answer is a pause, not a failure.** With nobody answering,
+  the run pauses with the question pending. See [a person decides](/workflows/approval).
+
+## Where to go
+
+[A feature team, as a file](/workflows/feature-team) for the same shape on
+real engines with a recorded run; [the review loop](/reviewing/review-loop)
+for how a return is wired.

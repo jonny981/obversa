@@ -1,0 +1,156 @@
+---
+title: "Obversa and LangGraph"
+description: "LangGraph is a low-level graph runtime for stateful agents in Python and JavaScript. Obversa is a TypeScript library for agent teams with reviews that send work back and a person at the gate. What each is for, and where each wins."
+---
+
+Choose by what you are building. The graph runtime fits when you are building the agent itself and want a graph of
+your own nodes with state that survives a crash. Pick Obversa when the
+agents already exist as tools on your machine and what you need is the
+team around them: named roles, a review that sends the work back, a person
+who decides, and a record of every step.
+
+LangGraph's own words: "A low-level orchestration framework and runtime
+for building, managing, and deploying long-running, stateful agents." A
+node is a function over shared state, and edges say what runs next. A
+review that sends work back is something you build from a conditional
+edge or a jump to an earlier node. A person is an interrupt that a client
+resumes with a value. The checkpointer saves the graph's state at every
+step, in Postgres or SQLite, so a run resumes after a crash.
+
+Here is the shape Obversa is for, as one file:
+
+```ts
+import { claude } from '@obversa/engine-claude-cli';
+import { codex } from '@obversa/engine-codex';
+import { run } from '@obversa/runtime';
+import { fromFile, person, stage, workflow } from '@obversa/teams';
+
+/**
+ * A feature, delivered the way a team delivers one. The roles are named once;
+ * every stage is a small block of nouns: who does it, what it writes, who
+ * reads it, where a red result goes back to. Inference happens only where a
+ * role is named; every other stage is a command or a person.
+ */
+const team = workflow('feature-delivery', {
+  brief: fromFile('briefs/triple.md'),
+  options: { timeout: '10m' },
+
+  roles: {
+    analyse: claude('claude-sonnet-4-5'),
+    implement: codex('gpt-5.6-luna'),
+    'research-review': [codex('gpt-5.6-luna')],
+    'code-review': [claude('claude-sonnet-4-5')],
+    approve: person('Ship this change?'),
+  },
+
+  stages: [
+    stage('research-context', {
+      agent: 'analyse',
+      writes: 'team-output/research-context.md',
+      desc: 'Read the workspace and write down what the change touches.',
+      gate: 'The context note is in the workspace and a reviewer has accepted it.',
+      reviewedBy: 'research-review',
+      retry: 3,
+    }),
+
+    stage('research-requirements', {
+      agent: 'analyse',
+      writes: 'team-output/research-requirements.md',
+      desc: 'Turn the brief and the context note into requirements, one REQ-n per line.',
+      gate: 'The requirements note is in the workspace and a reviewer has accepted it.',
+      reviewedBy: 'research-review',
+      retry: 3,
+    }),
+
+    stage('plan', {
+      agent: 'analyse',
+      writes: 'team-output/plan.md',
+      desc: 'Write an executable plan from the requirements, one check per REQ-n.',
+      gate: 'Every requirement has a check in the plan.',
+      reviewedBy: 'research-review',
+      retry: 3,
+    }),
+
+    stage('tests-first', {
+      agent: 'implement',
+      writes: 'test/triple.test.mjs',
+      desc: 'Write the declared test files from the accepted plan before any implementation exists.',
+      gate: 'Every declared test file exists and covers the plan.',
+      reviewedBy: 'code-review',
+      retry: 3,
+    }),
+
+    stage('implement', {
+      agent: 'implement',
+      writes: 'src/triple.mjs',
+      desc: 'Write the code to the plan and the tests.',
+      gate: 'The source file exists.',
+      retry: 3,
+    }),
+
+    stage('test', {
+      run: ['node', '--test', 'test/triple.test.mjs'],
+      desc: 'Run the tests; a red run goes back to implement with the output.',
+      gate: 'The test command exits 0.',
+      sendsBackTo: 'implement',
+    }),
+
+    stage('review', {
+      panel: 'code-review',
+      agree: 1,
+      desc: 'Read the change and the test result against the plan.',
+      gate: 'At least one reviewer has accepted the change.',
+      sendsBackTo: 'implement',
+    }),
+
+    stage('approve', {
+      input: 'approve',
+      desc: 'Put the verified change in front of a person.',
+      gate: 'A person has said yes.',
+    }),
+
+    stage('close', {
+      agent: 'analyse',
+      writes: ['team-output/evidence.md', 'team-output/learning.md'],
+      desc: 'Write the evidence of the run and what was learned, from the record alone.',
+      gate: 'Both notes are in the workspace.',
+    }),
+  ],
+
+});
+
+const result = await run(team);
+console.log(JSON.stringify(result.outcome, null, 2));
+```
+
+## Side by side
+
+| | LangGraph | Obversa |
+| --- | --- | --- |
+| Unit of work | A node: a function over shared state. | A stage: an engine call, a command, a panel or a person, with the files it may write. |
+| The workers | Model calls you write inside nodes. | Claude Code, Codex, Grok and OpenCode, driven as engines, one fresh process per call. |
+| A review that sends work back | Built from a conditional edge or a jump to an earlier node. | Built in: a review role sends the work back to the stage that owns it, with findings, up to a budget. |
+| A person deciding | `interrupt()` in a node; a client resumes with the answer. | A person role; the run pauses on the question and the answer arrives through the callbacks client. |
+| More than one provider | Different nodes can call different providers; you write the client each time. | Each role names its engine; a review seat from another provider is one line. |
+| A run that survives a crash | The checkpointer, with Postgres or SQLite behind it. | A plain run records to a file and does not resume. The supervised runner restarts a compiled graph from its own record. |
+| Where it runs | A library you host, with a hosted platform on offer. | A library, no server. |
+| Languages | Python, and JavaScript with TypeScript. | TypeScript. |
+
+## Where LangGraph wins
+
+- You are writing the agent's inner loop, not driving an existing one.
+- You need crash resume for any graph today, with a database behind it.
+- Your team writes Python.
+
+## Where Obversa wins
+
+- The agents are Claude Code, Codex and their kin, and the work is to give
+  them a process with a review that sends work back and a person at the end.
+- You want that process readable as one file, with the record beside it.
+- You want a second opinion from another provider without writing a client.
+
+## Where to go
+
+[A feature team, as a file](/workflows/feature-team) for the file above with
+its recorded run; [what is a meta-harness](/glossary/meta-harness) for the
+layer Obversa is.

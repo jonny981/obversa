@@ -1,0 +1,140 @@
+---
+title: "What is a software factory, and what do you run?"
+description: "A software factory is the picture of issues going in and merged pull requests coming out. What runs is a workflow with a review that sends work back and a person at the merge."
+---
+
+You run a workflow. A software factory is the picture: issues in, merged
+pull requests out, agents doing the work in between. The teams that make
+the picture real do not run a belt. They run a process in which one agent
+writes, another reviews, the work goes back when the review fails, tests
+run as commands, and a person decides at the end.
+
+That process is one file:
+
+```ts
+import { claude } from '@obversa/engine-claude-cli';
+import { codex } from '@obversa/engine-codex';
+import { run } from '@obversa/runtime';
+import { fromFile, person, stage, workflow } from '@obversa/teams';
+
+/**
+ * A feature, delivered the way a team delivers one. The roles are named once;
+ * every stage is a small block of nouns: who does it, what it writes, who
+ * reads it, where a red result goes back to. Inference happens only where a
+ * role is named; every other stage is a command or a person.
+ */
+const team = workflow('feature-delivery', {
+  brief: fromFile('briefs/triple.md'),
+  options: { timeout: '10m' },
+
+  roles: {
+    analyse: claude('claude-sonnet-4-5'),
+    implement: codex('gpt-5.6-luna'),
+    'research-review': [codex('gpt-5.6-luna')],
+    'code-review': [claude('claude-sonnet-4-5')],
+    approve: person('Ship this change?'),
+  },
+
+  stages: [
+    stage('research-context', {
+      agent: 'analyse',
+      writes: 'team-output/research-context.md',
+      desc: 'Read the workspace and write down what the change touches.',
+      gate: 'The context note is in the workspace and a reviewer has accepted it.',
+      reviewedBy: 'research-review',
+      retry: 3,
+    }),
+
+    stage('research-requirements', {
+      agent: 'analyse',
+      writes: 'team-output/research-requirements.md',
+      desc: 'Turn the brief and the context note into requirements, one REQ-n per line.',
+      gate: 'The requirements note is in the workspace and a reviewer has accepted it.',
+      reviewedBy: 'research-review',
+      retry: 3,
+    }),
+
+    stage('plan', {
+      agent: 'analyse',
+      writes: 'team-output/plan.md',
+      desc: 'Write an executable plan from the requirements, one check per REQ-n.',
+      gate: 'Every requirement has a check in the plan.',
+      reviewedBy: 'research-review',
+      retry: 3,
+    }),
+
+    stage('tests-first', {
+      agent: 'implement',
+      writes: 'test/triple.test.mjs',
+      desc: 'Write the declared test files from the accepted plan before any implementation exists.',
+      gate: 'Every declared test file exists and covers the plan.',
+      reviewedBy: 'code-review',
+      retry: 3,
+    }),
+
+    stage('implement', {
+      agent: 'implement',
+      writes: 'src/triple.mjs',
+      desc: 'Write the code to the plan and the tests.',
+      gate: 'The source file exists.',
+      retry: 3,
+    }),
+
+    stage('test', {
+      run: ['node', '--test', 'test/triple.test.mjs'],
+      desc: 'Run the tests; a red run goes back to implement with the output.',
+      gate: 'The test command exits 0.',
+      sendsBackTo: 'implement',
+    }),
+
+    stage('review', {
+      panel: 'code-review',
+      agree: 1,
+      desc: 'Read the change and the test result against the plan.',
+      gate: 'At least one reviewer has accepted the change.',
+      sendsBackTo: 'implement',
+    }),
+
+    stage('approve', {
+      input: 'approve',
+      desc: 'Put the verified change in front of a person.',
+      gate: 'A person has said yes.',
+    }),
+
+    stage('close', {
+      agent: 'analyse',
+      writes: ['team-output/evidence.md', 'team-output/learning.md'],
+      desc: 'Write the evidence of the run and what was learned, from the record alone.',
+      gate: 'Both notes are in the workspace.',
+    }),
+  ],
+
+});
+
+const result = await run(team);
+console.log(JSON.stringify(result.outcome, null, 2));
+```
+
+## The picture and the file
+
+| the picture says | the file has |
+| --- | --- |
+| Agents build features. | Named roles, one engine each. |
+| Quality is automatic. | A review role from another provider that sends work back with findings. |
+| Nothing needs a human. | A person at the merge, asked a question the run waits on. |
+| It runs all day. | A record of every step. A plain run does not resume; the [supervised runner](/driving/runner) restarts a killed run from its own record, and today it drives a compiled graph rather than a file like this one. |
+
+## Things that catch people out
+
+- **Product factory is the same picture with a larger scope.** The file is
+  the same shape.
+- **A pipeline with no return is a queue.** The step that sends work back
+  is what makes a review count. See [the review loop](/reviewing/review-loop).
+- **Tests are commands.** An agent that runs a test suite spends tokens to
+  do what a command does for free. Write them as `run` stages.
+
+## Where to go
+
+[Software factory, as a workflow](/use-cases/software-factory) for the use
+case; [what is an agent pipeline with a review and a person](/glossary/agent-pipeline)
+for the smallest version of the shape.

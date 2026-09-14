@@ -1,0 +1,159 @@
+---
+title: "Obversa and CrewAI"
+description: "CrewAI pairs agents with tasks in Python and runs them as a crew. Obversa drives existing agent tools as a team in TypeScript, with reviews that send work back and a person at the gate. What each is for, and where each wins."
+---
+
+Pick CrewAI when you want to describe agents by role, goal and backstory in
+Python and let a crew work through tasks. Pick Obversa when the agents are
+tools you already run, Claude Code or Codex or their kin, and what you need
+is the process around them: who does what, who reviews it, where the work
+goes back, and who signs.
+
+CrewAI's own words: "CrewAI is the leading open-source framework for
+orchestrating autonomous AI agents and building complex workflows." An
+agent has a role, a goal and a backstory; a task has a description, an
+expected output and the agent that does it. A task guardrail retries the
+same task when its output fails a check. A person is `human_input=True` on
+a task, or a webhook flow that pauses the run until a decision comes back.
+Checkpointing captures the crew's state, memory and event history so a run
+can be restored.
+
+Here is the shape Obversa is for, as one file:
+
+```ts
+import { claude } from '@obversa/engine-claude-cli';
+import { codex } from '@obversa/engine-codex';
+import { run } from '@obversa/runtime';
+import { fromFile, person, stage, workflow } from '@obversa/teams';
+
+/**
+ * A feature, delivered the way a team delivers one. The roles are named once;
+ * every stage is a small block of nouns: who does it, what it writes, who
+ * reads it, where a red result goes back to. Inference happens only where a
+ * role is named; every other stage is a command or a person.
+ */
+const team = workflow('feature-delivery', {
+  brief: fromFile('briefs/triple.md'),
+  options: { timeout: '10m' },
+
+  roles: {
+    analyse: claude('claude-sonnet-4-5'),
+    implement: codex('gpt-5.6-luna'),
+    'research-review': [codex('gpt-5.6-luna')],
+    'code-review': [claude('claude-sonnet-4-5')],
+    approve: person('Ship this change?'),
+  },
+
+  stages: [
+    stage('research-context', {
+      agent: 'analyse',
+      writes: 'team-output/research-context.md',
+      desc: 'Read the workspace and write down what the change touches.',
+      gate: 'The context note is in the workspace and a reviewer has accepted it.',
+      reviewedBy: 'research-review',
+      retry: 3,
+    }),
+
+    stage('research-requirements', {
+      agent: 'analyse',
+      writes: 'team-output/research-requirements.md',
+      desc: 'Turn the brief and the context note into requirements, one REQ-n per line.',
+      gate: 'The requirements note is in the workspace and a reviewer has accepted it.',
+      reviewedBy: 'research-review',
+      retry: 3,
+    }),
+
+    stage('plan', {
+      agent: 'analyse',
+      writes: 'team-output/plan.md',
+      desc: 'Write an executable plan from the requirements, one check per REQ-n.',
+      gate: 'Every requirement has a check in the plan.',
+      reviewedBy: 'research-review',
+      retry: 3,
+    }),
+
+    stage('tests-first', {
+      agent: 'implement',
+      writes: 'test/triple.test.mjs',
+      desc: 'Write the declared test files from the accepted plan before any implementation exists.',
+      gate: 'Every declared test file exists and covers the plan.',
+      reviewedBy: 'code-review',
+      retry: 3,
+    }),
+
+    stage('implement', {
+      agent: 'implement',
+      writes: 'src/triple.mjs',
+      desc: 'Write the code to the plan and the tests.',
+      gate: 'The source file exists.',
+      retry: 3,
+    }),
+
+    stage('test', {
+      run: ['node', '--test', 'test/triple.test.mjs'],
+      desc: 'Run the tests; a red run goes back to implement with the output.',
+      gate: 'The test command exits 0.',
+      sendsBackTo: 'implement',
+    }),
+
+    stage('review', {
+      panel: 'code-review',
+      agree: 1,
+      desc: 'Read the change and the test result against the plan.',
+      gate: 'At least one reviewer has accepted the change.',
+      sendsBackTo: 'implement',
+    }),
+
+    stage('approve', {
+      input: 'approve',
+      desc: 'Put the verified change in front of a person.',
+      gate: 'A person has said yes.',
+    }),
+
+    stage('close', {
+      agent: 'analyse',
+      writes: ['team-output/evidence.md', 'team-output/learning.md'],
+      desc: 'Write the evidence of the run and what was learned, from the record alone.',
+      gate: 'Both notes are in the workspace.',
+    }),
+  ],
+
+});
+
+const result = await run(team);
+console.log(JSON.stringify(result.outcome, null, 2));
+```
+
+## Side by side
+
+| | CrewAI | Obversa |
+| --- | --- | --- |
+| Unit of work | An agent with a task. | A stage: an engine call, a command, a panel or a person, with the files it may write. |
+| The workers | Model calls the framework makes for each agent. | Claude Code, Codex, Grok and OpenCode, driven as engines, one fresh process per call. |
+| A review that sends work back | A guardrail retries the same task; routing back to an earlier step is flow logic you write. | Built in: a review role sends the work back to the stage that owns it, with findings, up to a budget. |
+| A person deciding | `human_input=True`, or the webhook flow that pauses the run. | A person role; the run pauses on the question and the answer arrives through the callbacks client. |
+| More than one provider | Each agent takes its own model; many providers supported. | Each role names its engine; a review seat from another provider is one line. |
+| A run that survives a crash | Checkpointing restores a run mid-flight. | A plain run records to a file and does not resume. The supervised runner restarts a compiled graph from its own record. |
+| Where it runs | A library, with a paid hosted platform on offer. | A library, no server. |
+| Languages | Python. | TypeScript. |
+
+## Where CrewAI wins
+
+- You want agents written as roles with goals, and the framework to make
+  the model calls.
+- You need a restorable run with its memory captured, today.
+- Your team writes Python.
+
+## Where Obversa wins
+
+- The agents are coding tools you already have, and each call should run in
+  a fresh process, allowed to write only the files the stage declared.
+- A failed review must send the work back to the stage that owns the fix,
+  not retry the same task.
+- You want the whole team readable as one TypeScript file.
+
+## Where to go
+
+[A feature team, as a file](/workflows/feature-team) for the file above with
+its recorded run; [what is a meta-harness](/glossary/meta-harness) for the
+layer Obversa is.
