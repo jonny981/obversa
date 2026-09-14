@@ -1,4 +1,5 @@
 import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
+import { request } from 'node:http';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
@@ -164,8 +165,11 @@ describe('the run monitor', () => {
     const url = result.monitor!.url;
     const requestId = client.listPending()[0]!.requestId;
     const body = JSON.stringify({ requestId, response: { approved: true } });
-    const rebound = await fetch(`${url}state`, { headers: { host: 'rebinding.example' } });
-    expect(rebound.status).toBe(403);
+    // fetch drops a caller's Host header, so the rebound request goes through node:http.
+    const rebound = await new Promise<number>((resolve, reject) => {
+      request(`${url}state`, { headers: { host: 'rebinding.example' } }, (res) => { res.resume(); resolve(res.statusCode ?? 0); }).on('error', reject).end();
+    });
+    expect(rebound).toBe(403);
     const crossSite = await fetch(`${url}answer`, { method: 'POST', headers: { 'content-type': 'text/plain' }, body });
     expect(crossSite.status).toBe(415);
     const foreign = await fetch(`${url}answer`, { method: 'POST', headers: { 'content-type': 'application/json', origin: 'http://evil.example' }, body });

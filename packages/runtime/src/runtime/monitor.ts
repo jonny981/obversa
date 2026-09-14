@@ -141,11 +141,44 @@ async function pendingOf(client: RunCallbacks): Promise<MonitorState['pending']>
   return pending.map((request) => ({ requestId: request.requestId, decisionText: request.decisionText, input: request.input }));
 }
 
+const BODY_LIMIT = 64 * 1024;
+
+class BodyError extends Error {
+  constructor(readonly status: number, message: string) { super(message); }
+}
+
+/** The body as JSON, bounded, or a status the handler answers with. */
 async function readJson(req: IncomingMessage): Promise<JsonValue> {
+  const type = String(req.headers['content-type'] ?? '').split(';')[0]!.trim().toLowerCase();
+  if (type !== 'application/json') throw new BodyError(415, 'the body must be application/json');
   const chunks: Buffer[] = [];
-  for await (const chunk of req) chunks.push(chunk as Buffer);
+  let size = 0;
+  for await (const chunk of req) {
+    size += (chunk as Buffer).length;
+    if (size > BODY_LIMIT) throw new BodyError(413, 'the body is too large');
+    chunks.push(chunk as Buffer);
+  }
   const text = Buffer.concat(chunks).toString('utf8');
-  return text ? (JSON.parse(text) as JsonValue) : null;
+  try {
+    return text ? (JSON.parse(text) as JsonValue) : null;
+  } catch {
+    throw new BodyError(400, 'the body is not valid JSON');
+  }
+}
+
+/**
+ * Only the page's own browser tab may read or write: the Host must be the
+ * bound loopback address (a rebound DNS name is refused), and a write must
+ * come from our own origin or from no origin at all (a script), never from
+ * another site's page.
+ */
+function ownPage(req: IncomingMessage, host: string): boolean {
+  if (req.headers.host !== host) return false;
+  const origin = req.headers.origin;
+  if (typeof origin === 'string' && origin !== `http://${host}`) return false;
+  const site = req.headers['sec-fetch-site'];
+  if (typeof site === 'string' && site !== 'same-origin' && site !== 'none') return false;
+  return true;
 }
 
 function send(res: ServerResponse, status: number, body: string, type: string): void {
@@ -198,10 +231,12 @@ export async function startMonitor(opts: { job: Job; callbacks: RunCallbacks; ru
     events: fold.events,
   });
 
+  let host = '';
   const server: Server = createServer((req, res) => {
     void (async () => {
       const path = (req.url ?? '/').split('?')[0];
       try {
+        if (!ownPage(req, host)) return send(res, 403, 'not this page', 'text/plain');
         if (path === '/' || path === '/index.html') {
           if (req.method !== 'GET') return send(res, 405, 'method not allowed', 'text/plain');
           return send(res, 200, page(fold.name), 'text/html; charset=utf-8');
@@ -217,6 +252,7 @@ export async function startMonitor(opts: { job: Job; callbacks: RunCallbacks; ru
         }
         return send(res, 404, 'not found', 'text/plain');
       } catch (error) {
+        if (error instanceof BodyError) return json(res, error.status, { ok: false, reason: error.message });
         return json(res, 500, { ok: false, reason: error instanceof Error ? error.message : String(error) });
       }
     })();
@@ -230,7 +266,8 @@ export async function startMonitor(opts: { job: Job; callbacks: RunCallbacks; ru
   server.unref();
   const address = server.address();
   const port = typeof address === 'object' && address ? address.port : 0;
-  const url = `http://127.0.0.1:${port}/`;
+  host = `127.0.0.1:${port}`;
+  const url = `http://${host}/`;
   let closed: Promise<void> | undefined;
   const monitor: RunMonitor = {
     url,

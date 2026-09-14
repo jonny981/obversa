@@ -249,6 +249,10 @@ export async function run(
     branch: await currentBranch({ cwd: dir, signal: controller.signal }),
   };
 
+  // The page's address goes out before anything can fail, so the record
+  // carries it on every path.
+  if (started) emit({ kind: 'monitor', ts: Date.now(), path: [], url: started.monitor.url });
+
   // Bring the environment up for the run before the job, so the gate can test
   // the running thing. A failed start fails the run cleanly rather than throwing.
   let environment: EnvHandle | undefined;
@@ -270,6 +274,7 @@ export async function run(
         error,
       };
       supervisor?.finish(failOutcome);
+      started?.finish(failOutcome);
       return {
         outcome: failOutcome,
         stats: stats.snapshot(),
@@ -282,6 +287,7 @@ export async function run(
           : undefined,
         runId: supervisor?.runId ?? runId,
         recordPath,
+        ...(started ? { monitor: started.monitor } : {}),
       };
     }
   }
@@ -308,8 +314,6 @@ export async function run(
     log: (message, level = 'info') =>
       emit({ kind: 'log', ts: Date.now(), path: [], level, message }),
   };
-
-  if (started) emit({ kind: 'monitor', ts: Date.now(), path: [], url: started.monitor.url });
 
   let outcome: Outcome;
   try {
