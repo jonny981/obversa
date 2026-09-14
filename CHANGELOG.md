@@ -9,6 +9,9 @@ engine and memory packages track their own versions independently.
 
 ## [Unreleased]
 
+- Declarative team stages support `when` conditions and optional failures.
+- Declarative team stages can name earlier stages in `needs` while retaining the implicit previous-stage dependency.
+
 ## [1.0.0] - 2026-09-14
 
 ### Added

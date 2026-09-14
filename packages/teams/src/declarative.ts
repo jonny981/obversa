@@ -46,6 +46,7 @@ export interface WorkflowStageBase {
   readonly gate?: string;
   readonly when?: ConditionInput;
   readonly optional?: boolean;
+  readonly needs?: string | readonly string[];
   readonly sendsBackTo?: string;
   readonly retry?: number;
 }
@@ -196,7 +197,21 @@ function retryForStage(config: WorkflowStage, receivesKickback: boolean): number
 }
 
 function stageDependencies(stages: readonly NamedStage[], index: number): string[] {
-  return index === 0 ? [] : [stages[index - 1]!.name];
+  const stage = stages[index]!;
+  const requested = stage.config.needs === undefined
+    ? []
+    : Array.isArray(stage.config.needs)
+      ? [...stage.config.needs]
+      : [stage.config.needs];
+  const earlier = new Set(stages.slice(0, index).map((candidate) => candidate.name));
+  const explicit = requested.map((name, needIndex) => text(name, `needs[${needIndex}]`));
+  for (const name of explicit) {
+    if (!earlier.has(name)) {
+      throw new TypeError(`stage ${stage.name} needs ${name}, which is not an earlier stage`);
+    }
+  }
+  const previous = index === 0 ? [] : [stages[index - 1]!.name];
+  return [...new Set([...previous, ...explicit])];
 }
 
 function panelInput(brief: BriefSource, files: readonly string[], workspace: string): TeamInput {

@@ -152,8 +152,11 @@ describe('declarative teams', () => {
       roles: {},
       stages: [
         stage('depth', { run: writeDepth, optional: true }),
+        stage('middle-one', { run: ['true'] }),
+        stage('middle-two', { run: ['true'] }),
         stage('perform', {
           run: append('perform'),
+          needs: ['depth', 'middle-two'],
           when: async (ctx) => {
             if (ctx.needs?.depth?.status !== 'pass') return false;
             const value = await readFile(join(ctx.workspace!.dir, 'depth.txt'), 'utf8');
@@ -167,7 +170,8 @@ describe('declarative teams', () => {
     try {
       const meta = nodeMeta(job);
       const nodes = (meta.nodes ?? []) as Array<Record<string, unknown>>;
-      expect(nodes[1]!.when).toBeDefined();
+      expect(nodes[3]!.when).toBeDefined();
+      expect(nodes[3]!.needs).toEqual(['middle-two', 'depth']);
       expect(nodes[0]!.optional).toBe(true);
 
       const result = await run(job, { cwd: directory });
@@ -637,6 +641,11 @@ describe('declarative teams', () => {
       ['self', [stage('same', { run: ['true'], sendsBackTo: 'same' })]],
       ['unknown', [stage('later', { run: ['true'], sendsBackTo: 'missing' })]],
       ['future', [stage('first', { run: ['true'], sendsBackTo: 'later' }), stage('later', { run: ['true'] })]],
+      ['needs-future', [
+        stage('first', { run: ['true'], needs: 'later' } as WorkflowStage),
+        stage('later', { run: ['true'] }),
+      ]],
+      ['needs-missing', [stage('first', { run: ['true'], needs: 'missing' } as WorkflowStage)]],
       ['both', [
         stage('first', { run: ['true'] }),
         stage('note', {
