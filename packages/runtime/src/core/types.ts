@@ -615,6 +615,8 @@ export type LoopEvent =
       attempt?: number;
     }
   | { kind: 'dag:end'; ts: number; path: string[]; outcome: Outcome }
+  /** The run's monitor page is up at `url`; emitted once, before the job starts. */
+  | { kind: 'monitor'; ts: number; path: string[]; url: string }
   | {
       // A node sent work back to an earlier node. `accepted` distinguishes a
       // honoured kickback (the subgraph re-runs) from a rejected one (non-ancestor,

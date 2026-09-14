@@ -229,6 +229,7 @@ export const EXPECTED_FILES = {
     'package/dist/runtime/result-parts.d.ts',
     'package/dist/runtime/run-definition.d.ts',
     'package/dist/runtime/run-event.d.ts',
+    'package/dist/runtime/monitor.d.ts',
     'package/dist/runtime/runner.d.ts',
     'package/dist/runtime/supervisor.d.ts',
     'package/dist/runtime/team-rooms.d.ts',

@@ -9,6 +9,15 @@ engine and memory packages track their own versions independently.
 
 ## [Unreleased]
 
+### Added
+
+- `run` takes `monitor: true` (on by default under `supervise`) and serves
+  the run's own page on a free loopback port: the declared graph with each
+  step's live state folded from the run's events, the returns, the pending
+  questions a person can answer through the run's callbacks client, and the
+  record tail. The address is one `monitor` event and one line in the record,
+  never stdout; `RunResult.monitor` carries it and closes the page.
+
 ## [1.0.0] - 2026-09-14
 
 ### Added

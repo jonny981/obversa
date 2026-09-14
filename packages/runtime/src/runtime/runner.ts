@@ -23,6 +23,7 @@ import { currentBranch } from '../core/git.js';
 import type { Environment, EnvHandle } from '../env/environment.js';
 import type { Memory } from '@obversa/memory';
 import { createCallbackClient } from '../callback/client.js';
+import { startMonitor, type RunMonitor, type StartedMonitor } from './monitor.js';
 import {
   cloneFrozenJson,
   JsonValueError,
@@ -79,6 +80,13 @@ export interface RunOptions {
    */
   callbacks?: RunCallbacks;
   /**
+   * Serve the run's own page on a free loopback port: the declared graph with
+   * each step's live state, the returns, the pending questions, the record
+   * tail. Off by default; on under `supervise` unless set to false. The
+   * address is one `monitor` event and one line in the record, never stdout.
+   */
+  monitor?: boolean;
+  /**
    * Cap total tokens (input + output) for the run. A bare number is the limit;
    * pass `{ limit, headroom?, soft? }` for headroom or warn-don't-refuse mode.
    * Engine call sites refuse to spend past it (see `Budget`).
@@ -124,6 +132,8 @@ export interface RunResult {
   budget?: { limit: number; spent: number; remaining: number };
   /** The registry id, when the run was supervised. */
   runId?: string;
+  /** The run's page, when `monitor` was on: its address, and a way to close it. */
+  monitor?: RunMonitor;
   /** The JSONL event record path, when recording was enabled. */
   recordPath?: string;
   /** The priced receipt, when `RunOptions.cost` was set. */
@@ -198,6 +208,13 @@ export async function run(
       shape,
     });
     sinks.push(supervisor.sink);
+  }
+
+  const callbacks = options.callbacks ?? createCallbackClient();
+  let started: StartedMonitor | undefined;
+  if (options.monitor ?? options.supervise === true) {
+    started = await startMonitor({ job, callbacks, runId: supervisor?.runId ?? runId });
+    sinks.push(started.sink);
   }
 
   const emit = (event: LoopEvent) => {
@@ -279,7 +296,7 @@ export async function run(
     params,
     state: initialState,
     memory: options.memory,
-    callbacks: options.callbacks ?? createCallbackClient(),
+    callbacks,
     workspace,
     environment,
     budget,
@@ -291,6 +308,8 @@ export async function run(
     log: (message, level = 'info') =>
       emit({ kind: 'log', ts: Date.now(), path: [], level, message }),
   };
+
+  if (started) emit({ kind: 'monitor', ts: Date.now(), path: [], url: started.monitor.url });
 
   let outcome: Outcome;
   try {
@@ -311,6 +330,7 @@ export async function run(
   }
 
   supervisor?.finish(outcome);
+  started?.finish(outcome);
 
   const finalStats = stats.snapshot();
   return {
@@ -325,6 +345,7 @@ export async function run(
       : undefined,
     runId: supervisor?.runId ?? runId,
     recordPath,
+    ...(started ? { monitor: started.monitor } : {}),
     cost: options.cost
       ? costReport(finalStats, options.cost.prices, options.cost.baselineModel)
       : undefined,
