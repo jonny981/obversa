@@ -58,6 +58,7 @@ export const stageBranches = {
   F34: 'feat/command-kickback',
   F36: 'feat/runtime-conveniences',
   F38: 'feat/release-1-0-0-cut',
+  D50: 'feat/run-monitor',
 };
 
 export function manageStage(args, options = {}) {
