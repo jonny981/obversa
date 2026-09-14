@@ -183,6 +183,12 @@ function retryCount(retry: number | undefined, label: string): number {
   return retry;
 }
 
+function optionalFlag(optional: unknown): boolean | undefined {
+  if (optional === undefined) return undefined;
+  if (typeof optional !== 'boolean') throw new TypeError('optional must be a boolean');
+  return optional;
+}
+
 function retryOf(config: WorkflowStage): number {
   return config.retry === undefined ? 1 : retryCount(config.retry, 'retry');
 }
@@ -528,6 +534,7 @@ export function workflow(name: string, config: WorkflowConfig): Job {
       throw new TypeError(`stage ${stageName} cannot use both reviewedBy and sendsBackTo`);
     }
     retryForStage(stageConfig, incomingTargets.has(stageName));
+    optionalFlag(stageConfig.optional);
     writesOf(stageConfig);
   }
   for (const [index, named] of config.stages.entries()) {

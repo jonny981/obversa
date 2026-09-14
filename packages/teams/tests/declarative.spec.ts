@@ -256,6 +256,38 @@ describe('declarative teams', () => {
     }
   });
 
+  it('resolves passed through an explicit dependency three stages away', async () => {
+    const directory = await mkdtemp(join(tmpdir(), 'obversa-f40-passed-needs-'));
+    const append = [
+      process.execPath,
+      '-e',
+      "require('node:fs').appendFileSync('path.txt', 'perform\\n')",
+    ];
+    const job = workflow('passed-explicit-needs', {
+      brief: 'Choose a path from a stage three steps back.',
+      roles: {},
+      stages: [
+        stage('depth', { run: ['true'] }),
+        stage('middle-one', { run: ['true'] }),
+        stage('middle-two', { run: ['true'] }),
+        stage('perform', {
+          run: append,
+          needs: ['depth', 'middle-two'],
+          when: passed('depth'),
+        }),
+      ],
+    });
+
+    try {
+      const nodes = (nodeMeta(job).nodes ?? []) as Array<Record<string, unknown>>;
+      expect(nodes[3]!.needs).toEqual(['middle-two', 'depth']);
+      expect((await run(job, { cwd: directory })).outcome.status).toBe('pass');
+      expect(await readFile(join(directory, 'path.txt'), 'utf8')).toBe('perform\n');
+    } finally {
+      await rm(directory, { recursive: true, force: true });
+    }
+  });
+
   it('keeps a required failure from running its dependent', async () => {
     const directory = await mkdtemp(join(tmpdir(), 'obversa-f40-required-'));
     const job = workflow('required-failure', {
@@ -660,6 +692,15 @@ describe('declarative teams', () => {
 
     for (const [name, stages] of cases) {
       expect(() => workflow(name, { ...workflowInput(), stages })).toThrow();
+    }
+  });
+
+  it('rejects a non-boolean optional flag before building jobs', () => {
+    for (const optional of [1, 'yes', null]) {
+      expect(() => workflow('invalid-optional', {
+        ...workflowInput(),
+        stages: [stage('probe', { run: ['true'], optional } as unknown as WorkflowStage)],
+      })).toThrow(/optional must be a boolean/);
     }
   });
 
