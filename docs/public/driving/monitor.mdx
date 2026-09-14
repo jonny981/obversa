@@ -1,0 +1,127 @@
+---
+title: "Watch a run in the browser"
+description: "Every run can serve its own page on a free local port: the declared steps with their live state, the work sent back, the questions waiting for a person, and the tail of the record. The page's one control answers a waiting question."
+---
+
+Turn the page on and the run binds a free port on the loopback address, folds the run's own
+events into the state of each declared step, and serves that state as a
+page and as JSON. Nothing on the page starts, stops or edits the run. Its
+one control answers a question the run is waiting on, through the same
+callbacks client any router uses.
+
+```ts
+/**
+ * Watch a run in the browser.
+ *
+ * A run can serve a page about itself while it works. `monitor: true` binds
+ * a free port on the loopback address and folds the run's own events into
+ * the state of each declared step. The address arrives as one `monitor`
+ * event, so it is in the record and never on stdout. This example runs two
+ * plain steps offline, reads the page's state as JSON once the run is done,
+ * and closes the page. Open the printed address while a longer run is going
+ * to watch it move.
+ */
+import { fnJob, pipeline, run, type LoopEvent } from '@obversa/runtime';
+
+const gather = fnJob('gather', () => ({ status: 'pass', summary: 'two files read' }));
+const summarise = fnJob('summarise', () => ({ status: 'pass', summary: 'one page written' }));
+
+const digest = pipeline('digest', [
+  { name: 'gather', job: gather },
+  { name: 'summarise', job: summarise },
+]);
+
+let address: string | undefined;
+const result = await run(digest, {
+  monitor: true,
+  onEvent: (event: LoopEvent) => {
+    if (event.kind === 'monitor') address = event.url;
+  },
+});
+
+const state = address === undefined
+  ? undefined
+  : (await (await fetch(`${address}state`)).json()) as {
+    status: string;
+    outcome?: { status: string };
+    nodes: Record<string, { phase: string }>;
+  };
+console.log(JSON.stringify({
+  address,
+  run: result.outcome.status,
+  page: state?.status,
+  steps: state ? Object.fromEntries(Object.entries(state.nodes).map(([name, node]) => [name, node.phase])) : undefined,
+}, null, 2));
+await result.monitor?.close();
+
+/**
+ * Part of the documentation proof: it must fail when the behaviour it shows
+ * stops happening. A page that never announced its address, or that still
+ * said running after the run, would otherwise print a passing run.
+ */
+const faults: string[] = [];
+if (address === undefined) faults.push('the run announced no monitor address');
+if (result.monitor?.url !== address) faults.push('result.monitor.url is not the announced address');
+if (state?.status !== 'done') faults.push(`the page says ${state?.status ?? 'nothing'} after the run`);
+if (state && Object.values(state.nodes).some((node) => node.phase !== 'done')) faults.push('a step is not done on the page');
+if (faults.length) {
+  for (const fault of faults) console.error(fault);
+  process.exitCode = 1;
+}
+```
+
+The address is written once as a `monitor` event, so it is in the record
+and in any `onEvent` sink. It is never printed. `result.monitor` carries
+the same `url` and a `close()`.
+
+## When it is on
+
+- `monitor: true` turns it on for a plain `run`. The default is off.
+- Under `supervise` it is on unless you pass `monitor: false`.
+
+The server does not keep the process alive. A script that finishes its
+run exits as it did before, and the page goes with it. A process that
+stays up keeps serving the final state until `close()` is called.
+
+## What the page shows
+
+- **Each declared step**, in order, with what it needs, its `desc`, and its
+  phase: declared, running, done with its outcome, or skipped. A step that
+  ran more than once says how many times.
+- **Work sent back**: which step sent it, to which step, why, and how much
+  of that step's budget is used.
+- **Questions waiting for a person**, each with a Yes, a No and a note.
+- **The tail of the record**, the last forty events.
+
+The page polls once a second and stops when the run is done. Only the
+steps of the outermost graph appear; a graph nested inside a step shows
+through that step's outcome.
+
+## The routes
+
+| route | what it does |
+| --- | --- |
+| `GET /` | The page. |
+| `GET /state` | The same state as JSON: `status`, `outcome`, `nodes`, `kickbacks`, `pending`, `events`. The type is `MonitorState`. |
+| `POST /answer` | Answers one waiting question. The body is JSON: `{ "requestId": "...", "response": { "approved": true, "note": "..." } }`. The answer is claimed and submitted through the run's callbacks client as the router `monitor`. |
+
+Any other route is 404, any other method is 405, and a body that is not
+JSON is 400. A request whose `Host` is not the bound address is refused,
+and `/answer` takes only `application/json`, so a page from another origin
+cannot post to it.
+
+## Things that catch people out
+
+- **Anyone on this machine can answer.** The page carries no token. It is
+  for the person at the machine the run is on, not for a shared host.
+- **The page is not the record.** It keeps the last two hundred events in
+  memory and shows forty. The record file has all of them.
+- **A run that never started still binds the port.** If the environment
+  fails to come up, the run fails, the page shows that final state, and
+  `result.monitor.close()` releases the port.
+
+## Where to go
+
+[Supervised local runs](/driving/runner) for a run that survives a crash;
+[how a run is recorded](/recording/how-a-run-is-recorded) for the record
+the page is folded from.

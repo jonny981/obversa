@@ -80,6 +80,7 @@
         "group": "Driving runs",
         "pages": [
           "driving/runner",
+          "driving/monitor",
           "hosts/cmux",
           "hosts/review"
         ]

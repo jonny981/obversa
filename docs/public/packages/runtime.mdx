@@ -280,6 +280,10 @@ try {
 - `run`: run a job from a fresh record. `callbacks` is the client the run's
   questions go through, in memory or stored (`RunCallbacks` names either);
   every job sees it as `ctx.callbacks`.
+- `monitor: true` on `run` (on by default under `supervise`) serves the
+  run's own page on a free loopback port; `RunResult.monitor` carries its
+  address and closes it, and `MonitorState` is what `/state` returns. See
+  [watch a run in the browser](/driving/monitor).
 - `compileGraph`, `dagGraphType`, `createGraphExecutor`, `resolveGraphPlan`,
   `persistRunDefinition`: the graph layer, for hosts and for shapes of your
   own.
