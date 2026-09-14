@@ -4,8 +4,8 @@ import { join } from 'node:path';
 
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
-import { approval, createCallbackClient, dag, fnJob, pipeline, run } from '../src/api.ts';
-import type { LoopEvent, RunResult } from '../src/api.ts';
+import { approval, createCallbackClient, dag, fnJob, kickback, pipeline, run } from '../src/api.ts';
+import type { LoopEvent, Outcome, RunResult } from '../src/api.ts';
 
 type MonitorEvent = Extract<LoopEvent, { kind: 'monitor' }>;
 const monitorEvents = (events: LoopEvent[]): MonitorEvent[] =>
@@ -139,6 +139,67 @@ describe('the run monitor', () => {
     expect(forbidden.status).toBe(405);
     const unknown = await fetch(`${url}stop`, { method: 'POST' });
     expect(unknown.status).toBe(404);
+  });
+
+  it('finishes the page and hands back its handle when the environment fails to start', async () => {
+    const events: LoopEvent[] = [];
+    const result = await run(fnJob('a', () => {}), {
+      monitor: true,
+      onEvent: (e) => events.push(e),
+      environment: { name: 'broken', up: async () => { throw new Error('no daemon'); } },
+    });
+    opened.push(result);
+    expect(result.outcome.status).toBe('fail');
+    expect(monitorEvents(events)).toHaveLength(1);
+    expect(result.monitor).toBeDefined();
+    const state = JSON.parse((await get(`${result.monitor!.url}state`)).body) as { status: string; outcome?: { status: string } };
+    expect(state.status).toBe('done');
+    expect(state.outcome?.status).toBe('fail');
+  });
+
+  it('refuses a request that did not come from its own page', async () => {
+    const client = createCallbackClient();
+    const result = await run(approval('approve', { question: 'Ship?', input: { change: 'abc' } }), { monitor: true, callbacks: client });
+    opened.push(result);
+    const url = result.monitor!.url;
+    const requestId = client.listPending()[0]!.requestId;
+    const body = JSON.stringify({ requestId, response: { approved: true } });
+    const rebound = await fetch(`${url}state`, { headers: { host: 'rebinding.example' } });
+    expect(rebound.status).toBe(403);
+    const crossSite = await fetch(`${url}answer`, { method: 'POST', headers: { 'content-type': 'text/plain' }, body });
+    expect(crossSite.status).toBe(415);
+    const foreign = await fetch(`${url}answer`, { method: 'POST', headers: { 'content-type': 'application/json', origin: 'http://evil.example' }, body });
+    expect(foreign.status).toBe(403);
+    expect(client.listPending()).toHaveLength(1);
+  });
+
+  it('answers 400 to a malformed body and 404 to an unknown question', async () => {
+    const result = await run(fnJob('a', () => {}), { monitor: true });
+    opened.push(result);
+    const url = result.monitor!.url;
+    const malformed = await fetch(`${url}answer`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: 'not json' });
+    expect(malformed.status).toBe(400);
+    const unknown = await fetch(`${url}answer`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ requestId: 'nope#1#x', response: { approved: true } }) });
+    expect(unknown.status).toBe(404);
+  });
+
+  it('folds a kickback and counts the runs of the step it went back to', async () => {
+    let reviews = 0;
+    const result = await run(dag({
+      name: 'returned',
+      maxKickbacks: 1,
+      nodes: {
+        implement: fnJob('implement', () => 'wrote it'),
+        review: {
+          needs: 'implement',
+          job: fnJob('review', (): Outcome => (reviews++ === 0 ? kickback('implement', 'missing header') : { status: 'pass', summary: 'fine' })),
+        },
+      },
+    }), { monitor: true });
+    opened.push(result);
+    const state = JSON.parse((await get(`${result.monitor!.url}state`)).body) as { kickbacks: Array<{ from: string; to: string; accepted: boolean }>; nodes: Record<string, { runs: number }> };
+    expect(state.kickbacks).toEqual([expect.objectContaining({ from: 'review', to: 'implement', accepted: true })]);
+    expect(state.nodes.implement!.runs).toBe(2);
   });
 
   it('closes on request, and the port is released', async () => {
