@@ -133,10 +133,12 @@ The workspace is the directory the file runs in.
   process can, because the mode that only accepts edits blocks the commands
   a headless run needs. Both take an options object to choose otherwise.
   Run a team in a directory you are willing to let a model change.
-- **A reviewer is never the writer's own family.** Every seat of a
-  `reviewedBy` panel, and of a panel that sends work back to an agent
-  stage, must be a different model family from that stage's seat, or the
-  workflow is refused before any model runs.
+- **A reviewer declares a different model family from the writer.** Every
+  seat of a `reviewedBy` panel, and of a panel that sends work back to an
+  agent stage, must report a different model family from that stage's seat,
+  or the workflow is refused before any model runs. What the check compares
+  is what each seat reports about itself, so name the seats yourself when
+  the second opinion has to come from another provider.
 - **`reviewedBy` and `sendsBackTo` are two different returns.** The first
   runs the same stage again; the second goes back to an earlier one. A
   stage uses one or the other.
