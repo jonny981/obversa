@@ -39,6 +39,11 @@ import {
   OpenCodeCliEngine,
   type OpenCodeCliEngineOptions,
 } from '../src/index.ts';
+import {
+  assertNoManagedConfig,
+  findManagedConfig,
+  managedConfigSources,
+} from '../src/opencode-cli.ts';
 
 const roots: string[] = [];
 const fixtureSource = fileURLToPath(
@@ -253,10 +258,11 @@ describe('OpenCode static admission', () => {
     const fixture = admissionFixture();
     const input = request();
     const managed = temporaryDirectory('lines-opencode-managed-admission-');
-    vi.stubEnv('OPENCODE_TEST_MANAGED_CONFIG_DIR', managed);
     writeFileSync(join(managed, 'opencode.json'), '{}');
-    await expect(fixture.engine.admit(admissionRequest(input), new AbortController().signal))
-      .rejects.toMatchObject({ kind: 'invalid-config' });
+    expect(findManagedConfig(managedConfigSources([managed]))).toBe(join(managed, 'opencode.json'));
+    expect(() => assertNoManagedConfig(managedConfigSources([managed]))).toThrow(
+      `managed OpenCode config is not isolated: ${join(managed, 'opencode.json')}`,
+    );
     rmSync(join(managed, 'opencode.json'));
     mkdirSync(join(input.cwd!, 'src'));
     writeFileSync(join(input.cwd!, 'src', 'AGENTS.md'), 'fixture instruction');
@@ -267,6 +273,24 @@ describe('OpenCode static admission', () => {
     await expect(fixture.engine.admit(admissionRequest(noFiles), new AbortController().signal))
       .resolves.toMatchObject({ capabilities: [] });
     expect(fixture.calls().map((call) => call.kind)).toEqual(['version']);
+  });
+
+  it('lists both managed config file names for a supplied directory', () => {
+    const managed = temporaryDirectory('lines-opencode-managed-list-');
+    expect(managedConfigSources([managed])).toEqual(
+      expect.arrayContaining([
+        join(managed, 'opencode.json'),
+        join(managed, 'opencode.jsonc'),
+      ]),
+    );
+  });
+
+  it('ignores the retired test environment variable', () => {
+    const managed = temporaryDirectory('lines-opencode-managed-ignored-');
+    writeFileSync(join(managed, 'opencode.json'), '{}');
+    vi.stubEnv('OPENCODE_TEST_MANAGED_CONFIG_DIR', managed);
+    const sources = managedConfigSources();
+    expect(sources.some((source) => source.startsWith(managed))).toBe(false);
   });
 
   it('keeps the project guard active for a run after successful admission', async () => {
@@ -824,22 +848,13 @@ describe('OpenCode CLI adapter', () => {
     expect(result.effective.executable).toBe(selectedOptions.executable);
   });
 
-  it('refuses machine-managed config before spawn', async () => {
+  it('refuses a managed config supplied as a source before spawn', async () => {
     const managed = temporaryDirectory('lines-opencode-managed-');
-    const recordPath = join(
-      temporaryDirectory('lines-opencode-record-'),
-      'call.json',
-    );
     writeFileSync(join(managed, 'opencode.json'), '{"tools":{"bash":true}}');
-    vi.stubEnv('OPENCODE_TEST_MANAGED_CONFIG_DIR', managed);
-
-    await expect(new OpenCodeCliEngine({
-      ...options(),
-      environment: { OBVERSA_TEST_OPENCODE_RECORD: recordPath },
-    }).run(request(), () => {}, new AbortController().signal)).rejects.toThrow(
+    expect(findManagedConfig(managedConfigSources([managed]))).toBe(join(managed, 'opencode.json'));
+    expect(() => assertNoManagedConfig(managedConfigSources([managed]))).toThrow(
       'managed OpenCode config',
     );
-    expect(existsSync(recordPath)).toBe(false);
   });
 
   it.each(['AGENTS.md', 'CLAUDE.md', 'CONTEXT.md'])(
