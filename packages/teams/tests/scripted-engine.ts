@@ -19,7 +19,7 @@ export function scriptedEngine(
   const selection = {
     adapter: 'scripted',
     adapterVersion: '1.0.0',
-    provider: 'obversa-test',
+    provider: name,
     modelFamily: name,
     model: `${name}-model`,
     executable: null,
@@ -44,13 +44,13 @@ export function scriptedEngine(
   };
 }
 
-export function seat(engine: Engine, modelFamily: string): TeamSeat {
+export function seat(engine: Engine, modelFamily: string, provider = engine.name): TeamSeat {
   const model = `${engine.name}-model`;
   return {
     engine,
     identity: {
       adapter: 'scripted',
-      provider: 'obversa-test',
+      provider,
       modelFamily,
       model,
     },

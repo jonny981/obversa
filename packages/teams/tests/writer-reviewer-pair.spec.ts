@@ -134,6 +134,50 @@ describe('writerReviewerPair', () => {
     })).toThrow(/model family/i);
   });
 
+  it('refuses seats from one provider even when their families differ', () => {
+    const writer = scriptedEngine('writer', [async () => pass('unused')]);
+    const reviewer = scriptedEngine('reviewer', [async () => pass('unused')]);
+    expect(() => writerReviewerPair({
+      brief: 'Write a module.',
+      workspace: '/tmp/obversa-teams-pair',
+      files: ['src/result.mjs'],
+      test: testCommand,
+      writer: seat(writer, 'claude', 'anthropic'),
+      reviewer: seat(reviewer, 'gpt', 'anthropic'),
+    })).toThrow(/provider/i);
+  });
+
+  it('refuses equal model families from different providers', () => {
+    const writer = scriptedEngine('writer', [async () => pass('unused')]);
+    const reviewer = scriptedEngine('reviewer', [async () => pass('unused')]);
+    expect(() => writerReviewerPair({
+      brief: 'Write a module.',
+      workspace: '/tmp/obversa-teams-pair',
+      files: ['src/result.mjs'],
+      test: testCommand,
+      writer: seat(writer, 'claude', 'anthropic'),
+      reviewer: seat(reviewer, 'claude', 'openai'),
+    })).toThrow(/model family/i);
+  });
+
+  it('refuses a seat with a missing identity field', () => {
+    const writer = scriptedEngine('writer', [async () => pass('unused')]);
+    const reviewer = scriptedEngine('reviewer', [async () => pass('unused')]);
+    const validReviewer = seat(reviewer, 'reviewer', 'openai');
+    const invalidReviewer = {
+      ...validReviewer,
+      identity: { ...validReviewer.identity, provider: null },
+    } as unknown as typeof validReviewer;
+    expect(() => writerReviewerPair({
+      brief: 'Write a module.',
+      workspace: '/tmp/obversa-teams-pair',
+      files: ['src/result.mjs'],
+      test: testCommand,
+      writer: seat(writer, 'writer', 'anthropic'),
+      reviewer: invalidReviewer,
+    })).toThrow(/engine identity/i);
+  });
+
   it('fails the writer node when a promised file is missing', async () => {
     const workspace = await mkdtemp(join(tmpdir(), 'obversa-teams-pair-missing-'));
     try {

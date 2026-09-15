@@ -146,7 +146,7 @@ export interface OpenCodeSeat {
 /** Create the OpenCode seat used by declarative team workflows. */
 export function opencode(modelName: string, options: OpenCodeSeatOptions): OpenCodeSeat {
   const selected = model(modelName);
-  const modelFamily = selected.value.slice(selected.provider.length + 1);
+  const modelFamily = familyForModel(selected.value.slice(selected.provider.length + 1));
   return {
     engine: new OpenCodeCliEngine({
       executable: options.executable,
@@ -243,6 +243,12 @@ function model(value: unknown): { readonly value: string; readonly provider: str
     throw new TypeError('OpenCode request model must use provider/model format');
   }
   return Object.freeze({ value: checked, provider: checked.slice(0, slash) });
+}
+
+function familyForModel(identifier: string): string {
+  const family = identifier.split('-', 1)[0]?.trim().toLowerCase() ?? '';
+  if (!family) throw new TypeError('OpenCode model family must not be empty');
+  return family;
 }
 
 function providerForModel(
