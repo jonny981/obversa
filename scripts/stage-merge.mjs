@@ -63,6 +63,7 @@ export const stageBranches = {
   D50: 'feat/run-monitor',
   F46: 'docs/stage-f46-use-cases',
   F44: 'feat/fixture-free-examples',
+  F43: 'docs/stage-f43-resume-sentences',
 };
 
 export function manageStage(args, options = {}) {

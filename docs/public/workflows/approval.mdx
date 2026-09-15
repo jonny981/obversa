@@ -146,8 +146,9 @@ question was asked again about the new attempt.
   needs the stored client. See [callback gates](/reviewing/callback-gates).
 - **Running again runs the earlier steps again.** `run` starts a fresh
   record, so the steps ahead of the question do their work again before
-  the question finds its answer. When those steps cost money, resume the
-  paused run through the supervised runner instead; see
+  the question finds its answer. The supervised runner resumes a paused
+  run at the step it stopped on, but it drives a graph definition through
+  a host module, not a file like this one; see
   [driving runs](/driving/runner).
 - **An approval bound to bytes is a different tool.** `approval` asks about
   outcomes. For an approval that must name the exact files it approved,

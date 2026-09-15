@@ -332,8 +332,9 @@ try {
 
 ## Things that catch people out
 
-- **`run` starts a fresh record.** It does not resume. Restarting a killed
-  run is the supervised runner's job, in `@obversa/runner`.
+- **`run` starts a fresh record.** It does not resume. The supervised
+  runner in `@obversa/runner` restarts a killed run from a graph definition
+  and a host module, not from a `run` file.
 - **Every attempt has a budget.** An overrun comes back as a typed result,
   not a hang; read the outcome rather than waiting on it.
 - **The runtime imports no engine.** Nothing runs until your program hands
