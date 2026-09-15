@@ -67,6 +67,7 @@ export const stageBranches = {
   F43: 'docs/stage-f43-resume-sentences',
   F48: 'feat/runner-restart-race',
   F55: 'feat/surfaces-rewrite',
+  F56: 'feat/surfaces-workflow-example',
   F50: 'docs/stage-f50-review-panel-page',
   F53: 'docs/stage-f53-family-claim',
   F52: 'feat/model-identity-proof',
