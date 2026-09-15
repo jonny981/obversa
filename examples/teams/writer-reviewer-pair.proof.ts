@@ -34,10 +34,18 @@ try {
     },
     async () => pass('review accepted the repaired files'),
   ]);
-  const team = createWriterReviewerPair({
-    claude: () => writer,
-    codex: () => reviewer,
-  });
+  const team = (() => {
+    const previousCwd = process.cwd();
+    try {
+      process.chdir(workspace);
+      return createWriterReviewerPair({
+        claude: () => writer,
+        codex: () => reviewer,
+      });
+    } finally {
+      process.chdir(previousCwd);
+    }
+  })();
   let testRuns = 0;
   const result = await run(team, {
     cwd: workspace,

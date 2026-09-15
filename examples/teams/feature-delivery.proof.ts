@@ -74,7 +74,15 @@ try {
     codex: () => codexSeats[codexIndex++]!,
   };
   const callbacks = createCallbackClient();
-  const team = createFeatureDelivery(engines);
+  const team = (() => {
+    const previousCwd = process.cwd();
+    try {
+      process.chdir(workspace);
+      return createFeatureDelivery(engines);
+    } finally {
+      process.chdir(previousCwd);
+    }
+  })();
   let testCommandsRun = 0;
   let reviewRounds = 0;
   let acceptedReviewPanels = 0;

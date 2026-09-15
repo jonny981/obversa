@@ -147,7 +147,15 @@ try {
     api: api.engine,
   };
   const events: LoopEvent[] = [];
-  const featureDelivery = createFeatureDelivery(engines);
+  const featureDelivery = (() => {
+    const previousCwd = process.cwd();
+    try {
+      process.chdir(workspace);
+      return createFeatureDelivery(engines);
+    } finally {
+      process.chdir(previousCwd);
+    }
+  })();
   const first = await run(featureDelivery, {
     cwd: workspace,
     callbacks,
@@ -166,10 +174,12 @@ try {
   assert.equal(result.outcome.status, 'pass');
   assert.match(await readFile(join(workspace, 'src/retry.js'), 'utf8'), /signal\?\.aborted/);
   assert.match(await readFile(join(workspace, 'test/retry.test.js'), 'utf8'), /abort:/);
-  assert.equal(implement.calls.length, 2);
-  assert.equal(correctness.calls.length, 2);
-  assert.equal(tests.calls.length, 2);
-  assert.equal(api.calls.length, 2);
+  // A plain run does not resume from the approval pause, so the second run
+  // replays the earlier stages: two calls before the pause and one after it.
+  assert.equal(implement.calls.length, 3);
+  assert.equal(correctness.calls.length, 3);
+  assert.equal(tests.calls.length, 3);
+  assert.equal(api.calls.length, 3);
   console.log(JSON.stringify({
     status: result.outcome.status,
     implementRuns: implement.calls.length,

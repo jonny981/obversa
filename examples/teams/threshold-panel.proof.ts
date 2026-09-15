@@ -36,11 +36,19 @@ try {
       return pass(`${name} accepted the implementation`);
     }],
   ));
-  const team = createThresholdPanel({
-    claude: () => implement,
-    codex: () => reviewers[0]!,
-    opencode: () => reviewers[1]!,
-  });
+  const team = (() => {
+    const previousCwd = process.cwd();
+    try {
+      process.chdir(workspace);
+      return createThresholdPanel({
+        claude: () => implement,
+        codex: () => reviewers[0]!,
+        opencode: () => reviewers[1]!,
+      });
+    } finally {
+      process.chdir(previousCwd);
+    }
+  })();
   let testRuns = 0;
   const result = await run(team, {
     cwd: workspace,
