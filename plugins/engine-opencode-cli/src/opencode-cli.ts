@@ -127,6 +127,10 @@ export interface OpenCodeCliEngineOptions {
   readonly environment?: Readonly<Record<string, string>>;
   /** Exact provider-keyed OpenCode auth data copied into the child environment. */
   readonly auth?: JsonObject;
+  /** Extra directories the managed-config check also reads, beyond the real
+   * system paths. Production callers pass none; a caller must pass a
+   * directory deliberately, so an ambient environment variable cannot. */
+  readonly managedConfigDirectories?: readonly string[];
 }
 
 export interface OpenCodeSeatOptions {
@@ -1159,6 +1163,9 @@ export class OpenCodeCliEngine implements Engine {
     this.#environment = selectedEnvironment(options.environment);
     this.#auth = authValue(options.auth);
     this.#authRedactions = authRedactions(this.#auth);
+    const managedConfigDirectories = Object.freeze([
+      ...(options.managedConfigDirectories ?? []),
+    ]);
     this.#options = Object.freeze({
       executable: this.#executable,
       version: this.#version,
@@ -1167,6 +1174,9 @@ export class OpenCodeCliEngine implements Engine {
         ? {}
         : { environment: this.#environment }),
       ...(Object.keys(this.#auth).length === 0 ? {} : { auth: this.#auth }),
+      ...(managedConfigDirectories.length === 0
+        ? {}
+        : { managedConfigDirectories }),
     });
   }
 
@@ -1179,7 +1189,7 @@ export class OpenCodeCliEngine implements Engine {
     let normalized: AgentRequest;
     let selected: EngineSelectionRecord;
     try {
-      assertNoManagedConfig(managedConfigSources());
+      assertNoManagedConfig(managedConfigSources(this.#options.managedConfigDirectories));
       const selectedModel = model(request.model);
       const selectedProvider = providerForModel(selectedModel, this.#identity);
       const capabilities = requestedCapabilities({ ...request, prompt: '' });
@@ -1226,7 +1236,7 @@ export class OpenCodeCliEngine implements Engine {
       let validationFailure: unknown;
       try {
         buildOpenCodeInvocation(normalized, this.#options, validationDirectory);
-        assertNoManagedConfig(managedConfigSources());
+        assertNoManagedConfig(managedConfigSources(this.#options.managedConfigDirectories));
       } catch (error) {
         validationFailed = true;
         validationFailure = error instanceof TypeError || error instanceof EngineError
@@ -1280,7 +1290,7 @@ export class OpenCodeCliEngine implements Engine {
     let versionFailure: unknown;
     try {
       const invocation = buildOpenCodeInvocation(request, this.#options, directory);
-      assertNoManagedConfig(managedConfigSources());
+      assertNoManagedConfig(managedConfigSources(this.#options.managedConfigDirectories));
       const command = await runOwnedCommand({
         executable: this.#executable,
         args: ['--version'],
@@ -1410,7 +1420,7 @@ export class OpenCodeCliEngine implements Engine {
         this.#options,
         directory,
       );
-      assertNoManagedConfig(managedConfigSources());
+      assertNoManagedConfig(managedConfigSources(this.#options.managedConfigDirectories));
       const command = await runOwnedCommand({
         executable: this.#executable,
         args: invocation.args,
