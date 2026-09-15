@@ -32,7 +32,7 @@
     "example:offline": "pnpm --filter @obversa/runtime exec tsx ../../examples/offline-review.ts",
     "check:readme-examples": "node --test scripts/check-readme-examples.spec.mjs && node scripts/check-readme-examples.mjs",
     "example:feature-team": "pnpm --filter @obversa/runtime exec tsx ../../examples/feature-team.ts",
-    "example:feature": "pnpm --filter @obversa/runtime exec tsx ../../examples/feature-delivery.ts",
+    "example:feature": "pnpm --filter @obversa/runtime exec tsx ../../examples/feature-delivery.proof.ts",
     "example:team-pair": "pnpm --filter @obversa/runtime exec tsx ../../examples/teams/writer-reviewer-pair.proof.ts",
     "example:team-panel": "pnpm --filter @obversa/runtime exec tsx ../../examples/teams/threshold-panel.proof.ts",
     "example:team-feature": "pnpm --filter @obversa/runtime exec tsx ../../examples/teams/feature-delivery.proof.ts",

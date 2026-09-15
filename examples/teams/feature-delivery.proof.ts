@@ -3,10 +3,10 @@ import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
-import { createCallbackClient, directRouter, run, type LoopEvent } from '@obversa/runtime';
-import { person, stage, workflow } from '@obversa/teams';
+import { createCallbackClient, directRouter, run, type AgentRequest, type LoopEvent } from '@obversa/runtime';
 
 import { pass, scriptedSeat } from './scripted-engine.js';
+import { createFeatureDelivery } from './feature-delivery.js';
 
 async function writeAnalysis(cwd: string, prompt: string): Promise<void> {
   const line = prompt.split('\n').find((value) => value.startsWith('This stage may write only:'));
@@ -45,6 +45,8 @@ async function writeSource(cwd: string, value: number): Promise<void> {
 
 const workspace = await mkdtemp(join(tmpdir(), 'obversa-team-feature-proof-'));
 try {
+  await mkdir(join(workspace, 'briefs'), { recursive: true });
+  await writeFile(join(workspace, 'briefs/triple.md'), '---\nfiles: ["src/triple.mjs"]\n---\n\nDeliver a pure triple(value) function in src/triple.mjs with a Node test in test/triple.test.mjs.\n');
   const analyse = scriptedSeat('feature-analyse', 'claude', [async (request) => {
     await writeAnalysis(request.cwd!, request.prompt);
     return pass('analysis note written');
@@ -55,86 +57,24 @@ try {
     async (request) => { implementationCalls += 1; await writeSource(request.cwd!, 10); return pass('first implementation written'); },
     async (request) => { implementationCalls += 1; await writeSource(request.cwd!, 3); return pass('implementation repaired'); },
   ]);
-  const reviewer = scriptedSeat('feature-reviewer', 'claude-review', [async (request) => {
+  const review = async (request: AgentRequest) => {
     const reviewerName = request.prompt.match(/^Obversa team role: ([^\n]+)/m)?.[1] ?? 'stage-1';
     await mkdir(join(request.cwd!, 'reviews'), { recursive: true });
     await writeFile(join(request.cwd!, `reviews/${reviewerName}.json`), '{"status":"pass"}\n');
     return pass('review accepted');
-  }]);
+  };
+  const researchReviewer = scriptedSeat('feature-research-reviewer', 'gpt', [review]);
+  const codeReviewer = scriptedSeat('feature-code-reviewer', 'claude', [review]);
+  const claudeSeats = [analyse, codeReviewer];
+  const codexSeats = [implement, researchReviewer];
+  let claudeIndex = 0;
+  let codexIndex = 0;
+  const engines = {
+    claude: () => claudeSeats[claudeIndex++]!,
+    codex: () => codexSeats[codexIndex++]!,
+  };
   const callbacks = createCallbackClient();
-  const team = workflow('feature-delivery', {
-    brief: {
-      brief: 'Deliver a pure triple(value) function in src/triple.mjs with a Node test in test/triple.test.mjs.',
-      files: ['src/triple.mjs'],
-    },
-    options: { timeout: '10m' },
-    roles: {
-      analyse,
-      implement,
-      review: [reviewer],
-      approve: person('Ship this change?'),
-    },
-    stages: [
-      stage('research-context', {
-        agent: 'analyse',
-        writes: 'team-output/research-context.md',
-        desc: 'Read the workspace and write down what the change touches.',
-        gate: 'The context note is in the workspace and a reviewer has accepted it.',
-        reviewedBy: 'review',
-        retry: 3,
-      }),
-      stage('research-requirements', {
-        agent: 'analyse',
-        writes: 'team-output/research-requirements.md',
-        desc: 'Turn the brief and the context note into requirements, one REQ-n per line.',
-        gate: 'The requirements note is in the workspace and a reviewer has accepted it.',
-        reviewedBy: 'review',
-        retry: 3,
-      }),
-      stage('plan', {
-        agent: 'analyse',
-        writes: 'team-output/plan.md',
-        desc: 'Write an executable plan from the requirements, one check per REQ-n.',
-        gate: 'Every requirement has a check in the plan.',
-        reviewedBy: 'review',
-        retry: 3,
-      }),
-      stage('tests-first', {
-        agent: 'implement',
-        writes: 'test/triple.test.mjs',
-        desc: 'Write the declared test files from the accepted plan before any implementation exists.',
-        gate: 'Every declared test file exists and covers the plan.',
-        reviewedBy: 'review',
-        retry: 3,
-      }),
-      stage('implement', {
-        agent: 'implement',
-        writes: 'src/triple.mjs',
-        desc: 'Write the code to the plan and the tests.',
-        gate: 'The source file exists.',
-        retry: 3,
-      }),
-      stage('test', {
-        run: [process.execPath, '--test', 'test/triple.test.mjs'],
-        sendsBackTo: 'implement',
-      }),
-      stage('review', {
-        panel: 'review',
-        agree: 1,
-        desc: 'Read the change and the test result against the plan.',
-        sendsBackTo: 'implement',
-      }),
-      stage('approve', {
-        input: 'approve',
-      }),
-      stage('close', {
-        agent: 'analyse',
-        writes: ['team-output/evidence.md', 'team-output/learning.md'],
-        desc: 'Write the evidence of the run and what was learned, from the record alone.',
-        gate: 'Both notes are in the workspace.',
-      }),
-    ],
-  });
+  const team = createFeatureDelivery(engines);
   let testCommandsRun = 0;
   let reviewRounds = 0;
   let acceptedReviewPanels = 0;

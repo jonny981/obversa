@@ -4,9 +4,9 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
 import { run } from '@obversa/runtime';
-import { stage, workflow } from '@obversa/teams';
 
 import { pass, revise, scriptedSeat } from './scripted-engine.js';
+import { createWriterReviewerPair } from './writer-reviewer-pair.js';
 
 async function writeFiles(cwd: string): Promise<void> {
   await mkdir(join(cwd, 'src'), { recursive: true });
@@ -20,6 +20,8 @@ async function writeFiles(cwd: string): Promise<void> {
 
 const workspace = await mkdtemp(join(tmpdir(), 'obversa-team-pair-example-'));
 try {
+  await mkdir(join(workspace, 'briefs'), { recursive: true });
+  await writeFile(join(workspace, 'briefs/add.md'), '---\nfiles: ["src/add.mjs"]\n---\n\nWrite a pure add(a, b) function in src/add.mjs with a Node test in test/add.test.mjs.\n');
   const writer = scriptedSeat('pair-writer', 'claude', [
     async (request) => { await writeFiles(request.cwd!); return pass('writer wrote the files'); },
     async (request) => { await writeFiles(request.cwd!); return pass('writer applied the review'); },
@@ -32,39 +34,11 @@ try {
     },
     async () => pass('review accepted the repaired files'),
   ]);
-  let testRuns = 0;
-  const team = workflow('writer-reviewer-pair', {
-    brief: {
-      brief: 'Write a pure add(a, b) function in src/add.mjs with a Node test in test/add.test.mjs.',
-      files: ['src/add.mjs'],
-    },
-    roles: {
-      write: writer,
-      review: [reviewer],
-    },
-    stages: [
-      stage('write', {
-        agent: 'write',
-        writes: ['src/add.mjs', 'test/add.test.mjs'],
-        desc: 'Write the function and its test from the brief.',
-        gate: 'The files named in the brief exist in the workspace.',
-        retry: 1,
-      }),
-      stage('test', {
-        run: [process.execPath, '--test', 'test/add.test.mjs'],
-        desc: 'Run the test command against the written files.',
-        gate: 'The test command exits 0.',
-        sendsBackTo: 'write',
-      }),
-      stage('review', {
-        panel: 'review',
-        agree: 1,
-        desc: 'Read the code, the test and its result.',
-        gate: 'The change meets the brief.',
-        sendsBackTo: 'write',
-      }),
-    ],
+  const team = createWriterReviewerPair({
+    claude: () => writer,
+    codex: () => reviewer,
   });
+  let testRuns = 0;
   const result = await run(team, {
     cwd: workspace,
     onEvent: (event) => {

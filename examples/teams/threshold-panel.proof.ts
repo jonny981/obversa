@@ -4,9 +4,9 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
 import { run } from '@obversa/runtime';
-import { stage, workflow } from '@obversa/teams';
 
 import { pass, scriptedSeat } from './scripted-engine.js';
+import { createThresholdPanel } from './threshold-panel.js';
 
 async function writeFiles(cwd: string, result: number): Promise<void> {
   await mkdir(join(cwd, 'src'), { recursive: true });
@@ -20,6 +20,8 @@ async function writeFiles(cwd: string, result: number): Promise<void> {
 
 const workspace = await mkdtemp(join(tmpdir(), 'obversa-team-panel-example-'));
 try {
+  await mkdir(join(workspace, 'briefs'), { recursive: true });
+  await writeFile(join(workspace, 'briefs/double.md'), '---\nfiles: ["src/double.mjs"]\n---\n\nWrite a pure double(value) function in src/double.mjs with a Node test in test/double.test.mjs.\n');
   let implementationCalls = 0;
   const implement = scriptedSeat('panel-implement', 'claude', [
     async (request) => { implementationCalls += 1; await writeFiles(request.cwd!, 6); return pass('implementation written'); },
@@ -34,39 +36,12 @@ try {
       return pass(`${name} accepted the implementation`);
     }],
   ));
-  let testRuns = 0;
-  const team = workflow('threshold-panel', {
-    brief: {
-      brief: 'Write a pure double(value) function in src/double.mjs with a Node test in test/double.test.mjs.',
-      files: ['src/double.mjs'],
-    },
-    roles: {
-      implement,
-      review: reviewers,
-    },
-    stages: [
-      stage('implement', {
-        agent: 'implement',
-        writes: ['src/double.mjs', 'test/double.test.mjs'],
-        desc: 'Write the function and its test from the brief.',
-        gate: 'The files named in the brief exist in the workspace.',
-        retry: 1,
-      }),
-      stage('test', {
-        run: [process.execPath, '--test', 'test/double.test.mjs'],
-        desc: 'Run the test command against the written files.',
-        gate: 'The test command exits 0.',
-        sendsBackTo: 'implement',
-      }),
-      stage('review', {
-        panel: 'review',
-        agree: 1,
-        desc: 'Have both reviewers read the change and count the acceptances.',
-        gate: 'At least one reviewer has accepted.',
-        sendsBackTo: 'implement',
-      }),
-    ],
+  const team = createThresholdPanel({
+    claude: () => implement,
+    codex: () => reviewers[0]!,
+    opencode: () => reviewers[1]!,
   });
+  let testRuns = 0;
   const result = await run(team, {
     cwd: workspace,
     onEvent: (event) => {

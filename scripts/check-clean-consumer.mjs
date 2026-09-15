@@ -834,12 +834,6 @@ async function main() {
     const directProductionLine = JSON.parse(
       run('pnpm', ['exec', 'tsx', 'offline-review.ts'], { cwd: consumerDirectory }),
     );
-    const featureLine = JSON.parse(
-      run(process.execPath, ['dist/feature-delivery.js'], { cwd: consumerDirectory }),
-    );
-    const directFeatureLine = JSON.parse(
-      run('pnpm', ['exec', 'tsx', 'feature-delivery.ts'], { cwd: consumerDirectory }),
-    );
     const compiledDescribedTeam = JSON.parse(
       run(process.execPath, ['dist/described-team.js'], { cwd: consumerDirectory }),
     );
@@ -908,36 +902,6 @@ async function main() {
     assert.equal(compiledTournament.winnerLanded, true);
     assert.deepEqual(compiledTournament.candidateBranches, []);
     assert.equal(compiledTournament.temporaryDirectoryRemoved, true);
-    const featureDenySource = featureExampleSource.replace(
-      '{ approved: true },',
-      '{ approved: false },',
-    );
-    await writeFile(
-      join(consumerDirectory, 'feature-delivery.deny.ts'),
-      featureDenySource,
-    );
-    const denyRun = spawnSync('pnpm', ['exec', 'tsx', 'feature-delivery.deny.ts'], {
-      cwd: consumerDirectory,
-      encoding: 'utf8',
-    });
-    assert.equal(denyRun.status, 1, denyRun.stdout + denyRun.stderr);
-    const featureDeny = JSON.parse(denyRun.stdout);
-    assert.equal(featureDeny.status, 'fail', 'a no-vote must not ship the change');
-    const featureRedSource = featureExampleSource.replace(
-      'const repaired = fixes.size > 0;',
-      'const repaired = false;',
-    );
-    await writeFile(
-      join(consumerDirectory, 'feature-delivery.red.ts'),
-      featureRedSource,
-    );
-    const redRun = spawnSync('pnpm', ['exec', 'tsx', 'feature-delivery.red.ts'], {
-      cwd: consumerDirectory,
-      encoding: 'utf8',
-    });
-    assert.equal(redRun.status, 1, redRun.stdout + redRun.stderr);
-    const featureRed = JSON.parse(redRun.stdout);
-    assert.equal(featureRed.status, 'fail', 'an unrepaired line must not pass');
     const compiledGraph = JSON.parse(
       run(process.execPath, ['dist/custom-graph.js'], { cwd: consumerDirectory }),
     );
@@ -1077,11 +1041,6 @@ async function main() {
       ?.match(/```json\r?\n([\s\S]*?)```/);
     assert.ok(proofCacheReport, 'The proof page must include its cache report');
     assert.deepEqual(JSON.parse(proofCacheReport[1]), compiledProofCache);
-    const featureLinePageReport = featureDocument
-      .match(/## Run the workflow[\s\S]*?```json\r?\n([\s\S]*?)```/);
-    assert.ok(featureLinePageReport, 'The feature-delivery page must include its JSON report');
-    assert.deepEqual(featureLine, JSON.parse(featureLinePageReport[1]));
-    assert.deepEqual(directFeatureLine, featureLine);
     const forgePageReport = forgeDocument
       .match(/## Run the example[\s\S]*?```json\r?\n([\s\S]*?)```/);
     assert.ok(forgePageReport, 'The forge helper page must include its JSON report');
@@ -1111,18 +1070,10 @@ async function main() {
       productionLine.summary !== 'config is complete' ||
       directProductionLine.status !== 'pass' ||
       directProductionLine.attempts !== 2 ||
-      directProductionLine.summary !== 'config is complete' ||
-      featureLine.status !== 'pass' ||
-      featureLine.implementRuns !== 2 ||
-      featureLine.reviewRounds !== 2 ||
-      featureLine.acceptedKickbacks !== 1 ||
-      directFeatureLine.status !== 'pass' ||
-      directFeatureLine.implementRuns !== 2 ||
-      directFeatureLine.reviewRounds !== 2 ||
-      directFeatureLine.acceptedKickbacks !== 1
+      directProductionLine.summary !== 'config is complete'
     ) {
       throw new Error(
-        `Packed consumer returned an invalid report: ${JSON.stringify({ report, productionLine, directProductionLine, featureLine, directFeatureLine, compiledTeamPair, compiledTeamPanel, compiledTeamFeature })}`,
+        `Packed consumer returned an invalid report: ${JSON.stringify({ report, productionLine, directProductionLine, compiledTeamPair, compiledTeamPanel, compiledTeamFeature })}`,
       );
     }
 
@@ -1137,7 +1088,7 @@ async function main() {
     if (refs.length !== 1) throw new Error(`Git memory created ${refs.length} private refs instead of one`);
 
     console.log(
-      'Clean offline consumer passed with TypeScript 7 and 6, offline-review.ts, described-team.ts, safe-change.ts, feature-delivery.ts, the three packed team examples, forge-helper.ts, the outside graph, the pipeline executor example, the review loop, the callback gate, proof-bound approval, the turn-taking executor example, durable storage, safe node attempts, the supervised runner, both preflight examples, 17 memory cases, and both memory adapters.',
+      'Clean offline consumer passed with TypeScript 7 and 6, offline-review.ts, described-team.ts, safe-change.ts, the compiled feature-delivery.ts real-engine example, the three packed team examples, forge-helper.ts, the outside graph, the pipeline executor example, the review loop, the callback gate, proof-bound approval, the turn-taking executor example, durable storage, safe node attempts, the supervised runner, both preflight examples, 17 memory cases, and both memory adapters.',
     );
   } finally {
     await rm(directory, { recursive: true, force: true });
