@@ -65,6 +65,7 @@ export const stageBranches = {
   F44: 'feat/fixture-free-examples',
   F43: 'docs/stage-f43-resume-sentences',
   F50: 'docs/stage-f50-review-panel-page',
+  F53: 'docs/stage-f53-family-claim',
 };
 
 export function manageStage(args, options = {}) {
