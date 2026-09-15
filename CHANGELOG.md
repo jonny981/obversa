@@ -4,8 +4,8 @@ All notable changes to the Obversa packages. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions follow
 [SemVer](https://semver.org).
 
-The runtime package (`@obversa/runtime`) tracks the repository tag. The
-engine and memory packages track their own versions independently.
+The runtime package (`@obversa/runtime`) tracks the repository tag. Every
+other published package tracks its own version independently of it.
 
 ## [Unreleased]
 
