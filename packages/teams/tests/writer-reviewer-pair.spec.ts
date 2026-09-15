@@ -134,7 +134,7 @@ describe('writerReviewerPair', () => {
     })).toThrow(/model family/i);
   });
 
-  it('refuses seats from one provider even when their families differ', () => {
+  it('accepts seats from one provider when their families differ', () => {
     const writer = scriptedEngine('writer', [async () => pass('unused')]);
     const reviewer = scriptedEngine('reviewer', [async () => pass('unused')]);
     expect(() => writerReviewerPair({
@@ -144,7 +144,7 @@ describe('writerReviewerPair', () => {
       test: testCommand,
       writer: seat(writer, 'claude', 'anthropic'),
       reviewer: seat(reviewer, 'gpt', 'anthropic'),
-    })).toThrow(/provider/i);
+    })).not.toThrow();
   });
 
   it('refuses equal model families from different providers', () => {

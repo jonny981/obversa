@@ -69,15 +69,10 @@ export function assertDistinctSeats(seats: readonly TeamSeat[]): void {
     for (let rightIndex = leftIndex + 1; rightIndex < identities.length; rightIndex += 1) {
       const left = identities[leftIndex]!;
       const right = identities[rightIndex]!;
-      const sameProvider = left.provider === right.provider;
       const sameFamily = left.modelFamily === right.modelFamily;
-      if (!sameProvider && !sameFamily) continue;
-      const matches = [
-        ...(sameProvider ? [`provider ${left.provider}`] : []),
-        ...(sameFamily ? [`model family ${left.modelFamily}`] : []),
-      ].join(' and ');
+      if (!sameFamily) continue;
       throw new TypeError(
-        `seats ${leftIndex + 1} and ${rightIndex + 1} report the same ${matches}; provider and model family must both differ; model family must be distinct per seat`,
+        `seats ${leftIndex + 1} and ${rightIndex + 1} report the same model family ${left.modelFamily}; model family must be distinct per seat`,
       );
     }
   }
