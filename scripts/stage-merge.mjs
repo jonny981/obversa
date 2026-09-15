@@ -57,6 +57,7 @@ export const stageBranches = {
   F39: 'feat/writer-family-check',
   F40: 'feat/stage-when-optional',
   F41: 'feat/command-write-boundary',
+  F42: 'feat/declarative-resume',
   F34: 'feat/command-kickback',
   F36: 'feat/runtime-conveniences',
   F38: 'feat/release-1-0-0-cut',

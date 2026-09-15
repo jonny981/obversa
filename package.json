@@ -137,7 +137,8 @@
     "example:one-agent-job": "pnpm --filter @obversa/runtime exec tsx ../../examples/one-agent-job.ts",
     "example:command-kickback": "pnpm --filter @obversa/runtime exec tsx ../../examples/command-kickback.ts",
     "example:approval": "pnpm --filter @obversa/runtime exec tsx ../../examples/approval.ts",
-    "example:monitor": "pnpm --filter @obversa/runtime exec tsx ../../examples/monitor.ts"
+    "example:monitor": "pnpm --filter @obversa/runtime exec tsx ../../examples/monitor.ts",
+    "verify:f42": "pnpm verify:f39 && pnpm --filter @obversa/teams test"
   },
   "devDependencies": {
     "@arethetypeswrong/cli": "0.18.5",
