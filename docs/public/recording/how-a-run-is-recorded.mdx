@@ -1,11 +1,12 @@
 ---
 title: "How a run is recorded"
-description: "Every step appends events to a file as it happens, and the supervised runner reads that record to restart a killed run where it stopped."
+description: "Every step appends events to a file as it happens, and a run under the supervised runner keeps a durable record it restarts from where it stopped."
 ---
 
 A run leaves a record as it works: a file of events and a directory of
-artifacts. This page says what each holds, and which layer uses them to
-restart a run that was killed.
+artifacts. This page says what each holds. A run under the supervised
+runner keeps a record of its own, in a store that holds the run's
+definition beside its events, and restarts from that.
 
 ## What a record looks like
 
@@ -47,12 +48,15 @@ keep in step, because there is no second state.
 ## Which layer restarts a killed run
 
 The runner package's supervised run does. It starts a run in a bounded
-worker, and when the worker dies it starts another against the same record;
-the new worker reads the record and carries on. Steps that finished are
-never repeated. A step that was mid-flight when the worker died runs again
-only if its binding declares it safe to retry; otherwise the run pauses and
-asks a person to reconcile it before it continues, so uncertain work is
-never repeated silently. See [the runner](/driving/runner).
+worker, and when the worker dies it starts another against the run's own
+store, which holds the run's definition beside its events; the new worker
+reads that store and carries on. Steps that finished are never repeated. A
+step that was mid-flight when the worker died runs again only if its
+binding declares it safe to retry; otherwise the run pauses and asks a
+person to reconcile it before it continues, so uncertain work is never
+repeated silently. The file shown above is a plain run's record, written
+where you point `recordTo`; starting a plain run again does not resume it.
+See [the runner](/driving/runner).
 
 A plain `run()` from the runtime package does not restart anything: it opens
 a fresh record each time it starts, so the examples that call it show the

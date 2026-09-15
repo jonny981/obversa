@@ -62,6 +62,7 @@ export const stageBranches = {
   F38: 'feat/release-1-0-0-cut',
   D50: 'feat/run-monitor',
   F46: 'docs/stage-f46-use-cases',
+  F43: 'docs/stage-f43-resume-sentences',
 };
 
 export function manageStage(args, options = {}) {
