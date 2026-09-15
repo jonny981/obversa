@@ -41,43 +41,103 @@ is gone. No server to deploy, no accounts, nothing left running.
 
 ## Run one
 
-The review surface ships in `@obversa/source`. It opens your git diff in a
-browser, you comment on the lines you care about, you approve or reject,
-and the command prints what you did.
+Most surfaces are opened by a workflow, not by hand. This is the shape: a
+pipeline that analyses, implements, and then stops for a person. A no sends
+the work back to the step that owns the fix, with the person's note as the
+finding, and the work comes round again.
+
+```ts
+// Runnable example: pnpm example:approval
+/**
+ * A person decides.
+ *
+ * The last step of a delivery is a question to a person: ship this change?
+ * `approval` asks it through the run's callbacks client. A yes passes the
+ * step. A no goes back to the step that owns the fix with the person's note
+ * as the finding, and the work comes round again. With nobody answering, the
+ * run pauses with the question pending and carries on, when it runs again
+ * with the same client, from the answer. This runs offline, with no model and
+ * no network: the writer is a small function that leaves the header row out
+ * once, and the person answers from this file.
+ */
+import { approval, fnJob, pipeline, run, type CallbackRequest } from '@obversa/runtime';
+
+const analyse = fnJob('analyse', () => 'the ticket asks for a report export with a header row');
+
+/** The writer. In a real team this is an agent; here it forgets the header once. */
+let implementRuns = 0;
+const implement = fnJob('implement', () => {
+  implementRuns += 1;
+  return implementRuns === 1 ? 'report.csv, rows only' : 'report.csv, header and rows';
+});
+
+/**
+ * The person. The question is about what came before (the outcome of
+ * `implement`), so a second attempt is a new question. In a real team the
+ * answer arrives through the callbacks client; here it is decided in place.
+ */
+const decisions: string[] = [];
+const approve = approval('approve', {
+  question: 'Ship this change?',
+  target: 'implement',
+  answer: (request: CallbackRequest) => {
+    const approved = JSON.stringify(request.input).includes('header');
+    decisions.push(approved ? 'yes' : 'no');
+    return approved
+      ? { approved: true }
+      : { approved: false, note: 'the ticket asked for a header row' };
+  },
+});
+
+export const shipIt = pipeline(
+  'ship-it',
+  [
+    { name: 'analyse', job: analyse },
+    { name: 'implement', job: implement },
+    { name: 'approve', job: approve },
+  ],
+  { maxKickbacks: 1 },
+);
+
+const result = await run(shipIt);
+console.log(JSON.stringify({
+  status: result.outcome.status,
+  implementRuns,
+  decisions,
+}, null, 2));
+
+/**
+ * Part of the documentation proof: it must fail when the behaviour it shows
+ * stops happening. A refusal that quietly stopped sending the work back would
+ * still print a passing run, and `implement` running once is the tell.
+ */
+const faults: string[] = [];
+if (result.outcome.status !== 'pass') faults.push(`the run ended ${result.outcome.status}`);
+if (implementRuns !== 2) faults.push(`implement ran ${implementRuns} time(s), so the refusal did not send the work back exactly once`);
+if (decisions.join(',') !== 'no,yes') faults.push(`the person decided [${decisions.join(', ')}], not a no and then a yes`);
+if (faults.length) {
+  for (const fault of faults) console.error(fault);
+  process.exitCode = 1;
+}
+```
+
+The step that waits is `approval`. The question reaches a person through the
+run's callbacks client, and a surface is what puts it in front of them. This
+file answers in place so it runs offline with no model and no network; in a
+team the answer comes back from the page. The
+[callback gates](/reviewing/callback-gates) page shows the step itself.
+
+## The review surface
+
+`@obversa/source` ships one, built the same way. It opens your git diff in a
+browser, you comment on the lines you care about, you approve or reject, and
+it hands back the decision with every comment anchored to a file and a line.
 
 ```sh
 obversa-review --range main..HEAD
 ```
 
-The answer is not a yes or a no. It is your decision and every comment you
-left, each one anchored to a file and a line, carrying any replies an agent
-has already made to it:
-
-```json
-{
-  "decision": "changes-requested",
-  "annotations": [
-    {
-      "anchor": { "target": "src/git.mjs", "side": "new", "position": 42 },
-      "body": "Reject an empty range here too.",
-      "thread": [
-        { "author": { "kind": "agent", "id": "fixer" },
-          "body": "Done: the empty range is refused with its own message." }
-      ]
-    }
-  ]
-}
-```
-
-A run that opened that surface now has a code review in hand, in a shape it
-can act on, without a service or an account anywhere. The
-[review command](/hosts/review) page has the full result shape and the
-other ways to select a diff.
-
-Your own surface is the same shape: you supply the page files and the JSON
-routes the page calls, and you call `session.complete` with whatever the
-person gave you. The [surfacer reference](/packages/surfacer) has the
-contract.
+The [review command](/hosts/review) page has the full result shape.
 
 ## Use cases
 
@@ -91,18 +151,6 @@ contract.
   judgement call with six fields.
 
 Same session every time. Only the page changes.
-
-## Use it in a workflow
-
-A callback gate is the step that waits for a person. Give it a surface and
-the run pauses at that step, opens the page, and resumes with the answer:
-approved, rejected, or a value the page collected. The
-[callback gates](/reviewing/callback-gates) page shows the gate; the surface
-is the thing the gate opens.
-
-The review page that ships with the source package is a surface: it opens a
-diff for inline comments and returns the annotations as the answer. The
-[review command](/hosts/review) page shows it.
 
 ## Where the page opens
 
