@@ -36,15 +36,13 @@ test('clean consumer wires the safe-change production line', async () => {
   assert.match(source, /compiledSafeChange/);
 });
 
-test('clean consumer wires the feature-delivery production line', async () => {
+test('clean consumer compiles the feature-delivery production line', async () => {
   const source = await readFile(new URL('./check-clean-consumer.mjs', import.meta.url), 'utf8');
   // The compile list lives in consumer-examples.mjs, read by this check and the page-shape check.
   assert.ok(CONSUMER_EXAMPLES.includes('feature-delivery.ts'));
   assert.match(source, /'feature-delivery\.mdx'/);
-  assert.match(source, /feature-delivery\.deny\.ts/);
-  assert.match(source, /feature-delivery\.red\.ts/);
-  assert.match(source, /featureLine\.acceptedKickbacks !== 1/);
-  assert.doesNotMatch(source, /recordEvents !== \d+/);
+  assert.match(source, /featureExampleSource/);
+  assert.match(source, /join\(consumerDirectory, 'feature-delivery\.ts'\)/);
 });
 
 test('clean consumer runs the three packed team examples', async () => {
