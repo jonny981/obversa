@@ -271,6 +271,8 @@ try {
   node `failed` decides on must be `optional: true`, or its red result
   would block the branch before the condition is read; `dag` refuses the
   graph otherwise and says which node to mark.
+- `agentCheck`: a condition that asks an engine for a scored check before the
+  graph continues; its confidence and evidence stay in the decision record.
 - `isolated`: run a step in its own worktree and branch.
 
 **Review inside it**

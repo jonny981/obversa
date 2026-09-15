@@ -17,7 +17,11 @@ You need the two command line tools signed in, then:
 npm install @obversa/runtime @obversa/teams @obversa/engine-claude-cli @obversa/engine-codex
 ```
 
-Copy this file into the directory the work belongs in and run it with Node.
+Copy this file into the directory the work belongs in, save it with a
+`.ts` name, and run it with `npx tsx` and that name. The directory needs
+`"type": "module"` in its `package.json`; see
+[installation](/get-started/installation). Paths inside the file, the brief
+among them, are read from the directory you run the command in.
 
 ```ts
 import { claude } from '@obversa/engine-claude-cli';

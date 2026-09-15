@@ -27,6 +27,10 @@ the plan says whether that blocks the run.
 A live check is an ordinary `run` with `purpose: 'preflight'`, no tools, no
 workspace and a leaf request. It proves the seat answers; it does no work.
 
+For a command-line adapter that needs an absolute executable, use
+`resolveCommandExecutable('opencode')`. It reads the reader's `PATH` when the
+file runs, so a copied example does not contain a machine-specific path.
+
 ## Run one
 
 This file runs a graph whose engine is not ready and shows the check pause

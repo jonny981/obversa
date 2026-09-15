@@ -49,7 +49,7 @@ test('one-level export-star traversal finds values without type exports', () => 
 });
 
 test('the surface parser refuses a truncated value export list', () => {
-  const values = ['run', 'createGraphExecutor', 'startSupervisedRun', ...Array.from({ length: 97 }, (_, i) => `value${i}`)];
+  const values = ['run', 'createGraphExecutor', 'startSupervisedRun', 'resolveCommandExecutable', ...Array.from({ length: 96 }, (_, i) => `value${i}`)];
   assert.doesNotThrow(() => assertSurfaceShape({ values }));
   assert.throws(
     () => assertSurfaceShape({ values: values.slice(0, 99) }),

@@ -11,19 +11,27 @@ them accept. A panel below that sends the work back to the implementer,
 once.
 
 ```bash
-npm install @obversa/runtime @obversa/teams @obversa/engine-claude-cli @obversa/engine-codex @obversa/engine-opencode-cli
+npm install @obversa/engine @obversa/runtime @obversa/teams @obversa/engine-claude-cli @obversa/engine-codex @obversa/engine-opencode-cli
 ```
 
 ## The file
 
 The third seat runs through the OpenCode command line tool named `opencode`.
-Put that command on your `PATH` before running the file.
+The adapter requires an absolute executable, so the file resolves `opencode`
+from the reader's `PATH` when it runs. The Claude and Codex adapters resolve
+their own command names.
+
+In that directory, create `package.json` with `"type": "module"`, then run
+the install command above before running the copied file.
 
 ```ts
 import { claude } from '@obversa/engine-claude-cli';
 import { codex } from '@obversa/engine-codex';
+import { resolveCommandExecutable } from '@obversa/engine/command';
 import { opencode } from '@obversa/engine-opencode-cli';
-import { pathToFileURL } from 'node:url';
+import { realpathSync } from 'node:fs';
+import { basename } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { run } from '@obversa/runtime';
 import { fromFile, stage, workflow, type TeamSeat } from '@obversa/teams';
 
@@ -36,7 +44,9 @@ export interface ThresholdPanelEngines {
 const realEngines: ThresholdPanelEngines = {
   claude,
   codex,
-  opencode: (model) => opencode(model, { executable: 'opencode' }),
+  opencode: (model) => opencode(model, {
+    executable: resolveCommandExecutable('opencode'),
+  }),
 };
 
 export function createThresholdPanel(engines: ThresholdPanelEngines = realEngines) {
@@ -77,20 +87,26 @@ export function createThresholdPanel(engines: ThresholdPanelEngines = realEngine
   });
 }
 
-if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
+// Resolve both paths because a symlink can change the spelling of one file.
+const entryPath = process.argv[1];
+const modulePath = fileURLToPath(import.meta.url);
+if (entryPath && realpathSync(entryPath) === realpathSync(modulePath)) {
   const result = await run(createThresholdPanel());
   console.log(JSON.stringify(result.outcome, null, 2));
+} else if (entryPath && basename(entryPath) === basename(modulePath)) {
+  console.error('This example was started through a path that could not be matched to its module. Run the copied file directly.');
+  process.exitCode = 1;
 }
 ```
 
 ## What a run printed
 
 From one real run of this file. The Codex reviewer accepted. The OpenCode
-seat, on a free preview model, answered with no decision object twice, so
-the panel records an engine error for it rather than a rejection, and
-sends nothing back to the implementer on its account. With `agree: 1` the
-change passed on the one acceptance. Set `agree` to two and the same run
-would have failed the panel, because an error is not an acceptance.
+process completed without a transport failure, but its response was a tool
+request rather than the required JSON decision, so the panel records no
+decision as a non-blocking engine error. With `agree: 1` the change passed
+on the one acceptance. Set `agree` to two and the same run would have failed
+the panel, because an error is not an acceptance.
 
 ```json
 {
@@ -99,7 +115,7 @@ would have failed the panel, because an error is not an acceptance.
   "data": {
     "implement": {
       "status": "pass",
-      "summary": "Created pure double function in src/double.mjs and Node test in test/double.test.mjs. Test passes with 4 assertions covering positive, negative, zero, and decimal values."
+      "summary": "Created src/double.mjs with the double() function and test/double.test.mjs with Node tests"
     },
     "test": {
       "status": "pass",
@@ -130,7 +146,7 @@ would have failed the panel, because an error is not an acceptance.
             "kind": "verdict",
             "name": "review-1",
             "met": true,
-            "reason": "The pure double(value) function is implemented in src/double.mjs, and the Node test covers positive, zero, negative, and fractional inputs. The required test command passes."
+            "reason": "src/double.mjs exports the required pure double(value) function, and test/double.test.mjs covers positive, zero, negative, and fractional numeric inputs. node --test test/double.test.mjs passes."
           },
           {
             "kind": "engine-error",
@@ -203,8 +219,9 @@ that stage's `retry`.
 - **`agree` equal to the reviewer count means unanimity.** Set it lower
   and one dissent does not send the work back; the dissent is still on the
   record.
-- **The OpenCode seat needs a command.** `opencode(model, { executable: 'opencode' })`
-  uses the command line tool available on your `PATH`.
+- **The OpenCode seat needs an absolute command path.**
+  `resolveCommandExecutable('opencode')` reads the command from your `PATH` when
+  the file runs, then passes that path to `opencode`.
 
 ## Source
 

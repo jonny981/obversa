@@ -1,6 +1,8 @@
 import { claude } from '@obversa/engine-claude-cli';
 import { codex } from '@obversa/engine-codex';
-import { pathToFileURL } from 'node:url';
+import { realpathSync } from 'node:fs';
+import { basename } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import {
   agentJob,
   approval,
@@ -170,8 +172,14 @@ Reply with JSON: status "pass" when the module shape is correct, or status "revi
   );
 }
 
-if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
+// Resolve both paths because a symlink can change the spelling of one file.
+const entryPath = process.argv[1];
+const modulePath = fileURLToPath(import.meta.url);
+if (entryPath && realpathSync(entryPath) === realpathSync(modulePath)) {
   const result = await run(createFeatureDelivery(), { recordTo: 'auto' });
   console.log(JSON.stringify({ status: result.outcome.status }, null, 2));
   if (result.outcome.status === 'fail') process.exitCode = 1;
+} else if (entryPath && basename(entryPath) === basename(modulePath)) {
+  console.error('This example was started through a path that could not be matched to its module. Run the copied file directly.');
+  process.exitCode = 1;
 }
