@@ -1289,6 +1289,10 @@ export class OpenCodeCliEngine implements Engine {
     let versionFailure: unknown;
     try {
       const invocation = buildOpenCodeInvocation(request, this.#options, directory);
+      // Close the window between the admission check and this spawn: the
+      // workspace walk above takes real time and a machine-managed config
+      // can arrive inside it. The between-admission-and-spawn case in the
+      // plugin's spec demonstrates the arrival on the run path.
       assertNoManagedConfig(managedConfigSources(this.#options.managedConfigDirectories));
       const command = await runOwnedCommand({
         executable: this.#executable,
@@ -1419,6 +1423,10 @@ export class OpenCodeCliEngine implements Engine {
         this.#options,
         directory,
       );
+      // Close the window between the admission check and this spawn: a
+      // machine-managed config can arrive after admission passes. The
+      // between-admission-and-spawn case in the plugin's spec
+      // demonstrates the arrival.
       assertNoManagedConfig(managedConfigSources(this.#options.managedConfigDirectories));
       const command = await runOwnedCommand({
         executable: this.#executable,
