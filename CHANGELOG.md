@@ -83,9 +83,9 @@ engine and memory packages track their own versions independently.
   exports. It names real seats, so running it needs accounts for those
   models. Beside it, `examples/feature-delivery.proof.ts` runs the same
   workflow with scripted seats and no model account, and `pnpm
-  example:feature` runs it. The clean-consumer check compiles the workflow
-  file against the packed packages; it runs neither, because a real run
-  needs signed-in model CLIs.
+  example:feature` runs it. The clean-consumer check installs the packed
+  packages and runs that proof twice with one mutation each, refusing the
+  approval and leaving the repair undone, and requires both to fail.
 
 - **A team as a workflow file:** `workflow(name, { brief, roles, stages })`
   and `stage(name, { agent | run | panel | input, writes, desc, gate,
