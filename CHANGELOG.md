@@ -333,6 +333,13 @@ engine and memory packages track their own versions independently.
   workers. Arbitrary parent variables such as API keys and `NODE_OPTIONS` are
   not inherited unless explicitly listed; runner identity and ownership markers
   are injected separately.
+- **OpenCode managed-config seam:** The OpenCode plugin no longer reads the
+  `OPENCODE_TEST_MANAGED_CONFIG_DIR` environment variable, so an ambient
+  variable can no longer add a config source to a published package. The
+  managed-config source list takes the directories it checks, production
+  callers pass none, and the refusal check splits into a pure finder and
+  the message thrower. The tests pass their fixture directory, and one
+  case proves the retired variable is ignored.
 - **Host entry resolution:** Report every filesystem failure while resolving the
   selected host entry as a `SupervisedRunError` with `code: 'HOST_MODULE'` and the
   original cause. Run-root resolution and path containment checks keep their
