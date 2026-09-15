@@ -9,6 +9,8 @@ engine and memory packages track their own versions independently.
 
 ## [Unreleased]
 
+## [1.0.0] - 2026-09-15
+
 ### Added
 
 - `copyJobMeta` carries a job's shape (its name, kind and stage metadata) onto a wrapper that keeps its behaviour, so a guarded job retains its shape when the plan is rendered.
@@ -21,24 +23,6 @@ engine and memory packages track their own versions independently.
   never stdout; `RunResult.monitor` carries it and closes the page.
 - `stage()` takes `when`, a runtime condition such as `passed()`, `failed()` or an async predicate, and `optional`. A stage whose `when` is not met is recorded as skipped and counts as passed for the stages after it.
 - `stage()` takes `needs`, one or more earlier stage names, so a condition can read a stage further back than the one before it.
-
-### Fixed
-
-- Public workflow examples resolve their direct-run guard through real paths,
-  so a symlinked directory cannot make a copied example exit successfully
-  without running or printing its outcome.
-
-- **OpenCode managed-config seam:** The OpenCode plugin no longer reads the
-  `OPENCODE_TEST_MANAGED_CONFIG_DIR` environment variable, so an ambient
-  variable can no longer add a config source to a published package. The
-  managed-config source list takes the directories it checks, production
-  callers pass none, and the refusal check splits into a pure finder and
-  the message thrower. The tests pass their fixture directory, and one
-  case proves the retired variable is ignored.
-
-## [1.0.0] - 2026-09-14
-
-### Added
 
 - **Type declarations for the review packages:** `@obversa/source` and
   `@obversa/surfacer` now ship declaration files generated from their
@@ -83,7 +67,7 @@ engine and memory packages track their own versions independently.
   `environmentVariables` list on start and resume. Copy only present values of
   those names from the watchdog, without storing credentials in run inputs or
   host records. Default environment inheritance remains restrictive.
-- **Forge helper example:** Ship `examples/packages/forge-helper.ts` with
+- **Forge helper example:** Ship `examples/forge-helper.ts` with
   its documentation page. It is the shipping step after a review gate:
   push the work branch, open or update one pull request with a body from
   the commit bodies, pass a strict gate that ships only an exact-revision
@@ -91,14 +75,16 @@ engine and memory packages track their own versions independently.
   The gate prints strict `RESULT:` verdicts with the reason on the line.
   `pnpm example:forge` runs it offline against a mock host, and the
   clean-consumer check runs it from the packed tarballs.
-- **Feature-delivery example:** Ship a runnable feature-delivery production
-  line, `examples/production-lines/feature-delivery.line.ts`, with its
-  documentation page. It takes one written issue through analysis,
-  implementation, a real test run, a review panel with three reviewers and
-  two required votes, a bounded kickback repair, and an approval bound to the
-  exact bytes, using only public runtime exports and no model account.
-  `pnpm example:feature` runs it, and the clean-consumer check compiles and
-  runs it from the packed tarballs.
+- **Feature-delivery example:** Ship a runnable feature-delivery workflow,
+  `examples/feature-delivery.ts`, with its documentation page. It takes one
+  written issue through analysis, implementation, a real test run, a review
+  panel with three reviewers and two required votes, a bounded kickback
+  repair, and an approval bound to the exact bytes, using only public runtime
+  exports. It names real seats, so running it needs accounts for those
+  models. Beside it, `examples/feature-delivery.proof.ts` runs the same
+  workflow with scripted seats and no model account; `pnpm example:feature`
+  runs that proof, and the clean-consumer check compiles and runs both from
+  the packed tarballs.
 
 - **A team as a workflow file:** `workflow(name, { brief, roles, stages })`
   and `stage(name, { agent | run | panel | input, writes, desc, gate,
@@ -276,6 +262,19 @@ engine and memory packages track their own versions independently.
   was observed. Teardown work after the exit never counts.
 
 ### Fixed
+
+- **Cross-family seat check:** An OpenCode seat derives its model family from the model name, taking the first hyphen-delimited segment after the provider prefix, so `opencode('anthropic/claude-sonnet-4-5')` declares the family `claude`. In a `workflow()`, a stage's seat and each of its reviewers must declare a different model family from one another, or the workflow is refused before any model runs. That now includes seats naming one model through two adapters. The check compares what each seat declares about itself.
+- Public workflow examples resolve their direct-run guard through real paths,
+  so a symlinked directory cannot make a copied example exit successfully
+  without running or printing its outcome.
+
+- **OpenCode managed-config seam:** The OpenCode plugin no longer reads the
+  `OPENCODE_TEST_MANAGED_CONFIG_DIR` environment variable, so an ambient
+  variable can no longer add a config source to a published package. The
+  managed-config source list takes the directories it checks, production
+  callers pass none, and the refusal check splits into a pure finder and
+  the message thrower. The tests pass their fixture directory, and one
+  case proves the retired variable is ignored.
 
 - **Concurrent worktree registration:** Add and remove Git worktrees one at a
   time per repository within the runtime process. Linked checkouts share the

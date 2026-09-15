@@ -13,6 +13,8 @@
   <img src="https://img.shields.io/badge/license-MIT-blue" alt="license: MIT">
   <img src="https://img.shields.io/badge/node-%3E%3D22.12-3c873a" alt="node >=22.12">
   <img src="https://img.shields.io/badge/TypeScript-strict-3178c6" alt="TypeScript strict">
+  <a href="https://www.npmjs.com/package/@obversa/runtime"><img src="https://img.shields.io/npm/v/@obversa/runtime" alt="npm: @obversa/runtime"></a>
+  <a href="https://github.com/jonny981/obversa/actions/workflows/ci.yml"><img src="https://github.com/jonny981/obversa/actions/workflows/ci.yml/badge.svg" alt="CI"></a>
 </p>
 
 Agent frameworks give you one clever session. When it dies, it starts over.
@@ -23,11 +25,20 @@ vote when one opinion is not enough, and a person to answer to.
 That is the layer Obversa owns. You describe the work the way you would describe
 it to people, and the runtime runs it one bounded engine call at a time.
 
+A domain-specific harness is a workflow for one job: the tools, the rules and
+the checks that make a model useful in one field. Obversa is the runtime you
+write that harness in, on the models you already use. The reviews and the
+person at the gate are part of the file.
+
 Every step appends events to a file on disk, with its artifacts beside them.
 That record is the whole story: no server, no database.
 
+If you searched for a software factory, a product factory or an agent
+pipeline: what you write here is a workflow with a review that sends work
+back and a person at the merge.
+
 `@obversa/runner` supervises a run in its own worker. After a crash it starts
-a fresh worker that reads the record and carries on. Steps that finished are
+a fresh worker that reads its own record and carries on. Steps that finished are
 never repeated. A step that was mid-flight when the worker died runs again
 only if its binding declares it safe to retry; otherwise the run pauses and
 asks a person to reconcile it before it continues, so uncertain work is never

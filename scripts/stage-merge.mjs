@@ -68,6 +68,7 @@ export const stageBranches = {
   F48: 'feat/runner-restart-race',
   F50: 'docs/stage-f50-review-panel-page',
   F53: 'docs/stage-f53-family-claim',
+  F45: 'release/stage-f45-cut',
   F52: 'feat/model-identity-proof',
 };
 

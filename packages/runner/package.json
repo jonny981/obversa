@@ -2,6 +2,14 @@
   "name": "@obversa/runner",
   "version": "0.1.0",
   "description": "Bounded supervision for Obversa runs.",
+  "keywords": [
+    "agent",
+    "graph",
+    "workflow",
+    "runtime",
+    "obversa",
+    "durable-workflow"
+  ],
   "author": "Jonny Neill <jonnyneill@hotmail.com>",
   "type": "module",
   "license": "MIT",

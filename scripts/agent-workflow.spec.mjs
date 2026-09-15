@@ -133,6 +133,7 @@ for (const [stage, branch] of [
   ['F48', 'feat/runner-restart-race'],
   ['F50', 'docs/stage-f50-review-panel-page'],
   ['F53', 'docs/stage-f53-family-claim'],
+  ['F45', 'release/stage-f45-cut'],
   ['F52', 'feat/model-identity-proof'],
 ]) {
   test(`${stage} lands from its assigned branch ${branch}`, () => {
@@ -207,6 +208,7 @@ for (const [stage, branch] of [
   ['F48', 'feat/factory-v1'],
   ['F50', 'feat/graph-forms-v1'],
   ['F53', 'feat/graph-forms-v1'],
+  ['F45', 'feat/graph-forms-v1'],
   ['F52', 'feat/graph-forms-v1'],
 ]) {
   test(`${stage} refuses the wrong branch ${branch}`, () => {
