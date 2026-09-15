@@ -38,3 +38,4 @@ const engine = new OpenCodeCliEngine({
 - The plugin requires an absolute path to the OpenCode executable.
 - The executable must match supported version `1.18.23`.
 - Structured outputs require the model to emit the expected result marker format.
+- `managedConfigDirectories` names extra directories the managed-config check reads beyond the real system paths; a caller passes them deliberately, and the check refuses to run when any of those directories holds a managed config file.

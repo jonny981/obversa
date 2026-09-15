@@ -1289,6 +1289,7 @@ export class OpenCodeCliEngine implements Engine {
     let versionFailure: unknown;
     try {
       const invocation = buildOpenCodeInvocation(request, this.#options, directory);
+      assertNoManagedConfig(managedConfigSources(this.#options.managedConfigDirectories));
       const command = await runOwnedCommand({
         executable: this.#executable,
         args: ['--version'],
