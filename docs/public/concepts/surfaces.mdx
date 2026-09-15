@@ -1,25 +1,34 @@
 ---
 title: "Surfaces"
-description: "Put one decision in front of a person in their browser, and get one answer back."
+description: "Pause a run and put an interactive micro UI in front of a person, then carry on with what they tell you."
 ---
 
 
 Sometimes a workflow reaches a step no agent should decide alone: approve
 this change, pick one of these two drafts, confirm the migration. You want
 that one question in front of a person, in a browser, and you want the
-answer back in the run. That is what a surface is: a small web page for one
-decision, opened for one person, answered once.
+answer back in the run. That is what a surface is: a micro UI, one small
+web page that pauses the run until a person has had their say.
 
 The surfacer package runs it. You give it the page files and the API the
 page calls. It serves them on a private port on your own machine, opens the
-page, waits for the one answer, and hands it back to you. Then it is gone.
-No server to deploy, no accounts, nothing left running.
+page, waits for the person, and hands back whatever they gave you. Then it
+is gone. No server to deploy, no accounts, nothing left running.
 
 ## What you get
 
-- **One question, one answer.** A session ends exactly once: the person
-  answers, cancels, the time runs out, or you stop it. You get one result
-  either way, and the run carries on with it.
+- **Disposable by design.** A surface is a short session, not a viewer. It
+  opens for one pause in one run and closes when that pause is over. There
+  is no long-lived page to manage, nothing to redeploy when it changes, and
+  nothing left running when the run moves on.
+- **A pause for a person, not a prompt.** The run stops, the micro UI
+  opens, and it waits. What comes back is whatever the page collected: an
+  approval, answers to a dozen fields, a whole code review with comments
+  anchored to lines. You decide what the page asks and what the answer
+  looks like.
+- **It always ends, and it ends once.** The person finishes, cancels, the
+  time runs out, or you stop it. Every one of those gives you a result, so
+  a run never hangs on a person who walked away.
 - **Private by default.** The page lives on a loopback address with a
   token in its URL, and every request has to carry it. Nothing on your
   network can reach it, and a page from another origin cannot call it.
@@ -32,68 +41,56 @@ No server to deploy, no accounts, nothing left running.
 
 ## Run one
 
-The example asks one yes-or-no question, opens it in your browser, and
-prints the answer on stdout.
+The review surface ships in `@obversa/source`. It opens your git diff in a
+browser, you comment on the lines you care about, you approve or reject,
+and the command prints what you did.
 
+```sh
+obversa-review --range main..HEAD
+```
 
-```js
-// Runnable example: node examples/hello-surface.mjs
-// Opens a one-question surface and prints the framed result on stdout.
-import { mkdtempSync, writeFileSync } from "node:fs";
-import os from "node:os";
-import path from "node:path";
-import { rmSync } from "node:fs";
-import { runSurface } from "../src/launcher.mjs";
+The answer is not a yes or a no. It is your decision and every comment you
+left, each one anchored to a file and a line, carrying any replies an agent
+has already made to it:
 
-const directory = mkdtempSync(path.join(os.tmpdir(), "hello-surface-"));
-// The session CSP is script-src 'self' with no inline allowance, so the
-// page logic ships as its own file.
-writeFileSync(path.join(directory, "index.html"), `<!doctype html>
-<title>Hello surface</title>
-<h1>Answer the one question</h1>
-<button id="yes">Yes</button><button id="no">No</button>
-<script type="module" src="/app.js"></script>`);
-writeFileSync(path.join(directory, "app.js"), `
-const token = location.hash.slice(1); history.replaceState(null, "", location.pathname);
-const api = (p, b) => fetch(p, { method: "POST", headers: { Authorization: "Bearer " + token, "Content-Type": "application/json" }, body: JSON.stringify(b) }).then(r => r.json());
-document.getElementById("yes").onclick = async () => { const r = await api("/api/answer", { value: true }); await api("/api/ack", { operationId: r.operationId }); document.body.textContent = "Done."; };
-document.getElementById("no").onclick = async () => { const r = await api("/api/cancel", {}); await api("/api/ack", { operationId: r.operationId }); document.body.textContent = "Done."; };
-`);
-
-let result;
-try {
-  ({ result } = await runSurface({
-  app: "hello-surface",
-  assets: { directory, files: {
-    "/": ["index.html", "text/html; charset=utf-8"],
-    "/app.js": ["app.js", "text/javascript; charset=utf-8"],
-  } },
-  api: {
-    "POST /api/answer": async ({ body, session }) => {
-      session.complete({ value: body.value === true });
-      return null;
-    },
-  },
-    leaseTimeoutMs: 120_000,
-  }));
-} finally {
-  rmSync(directory, { recursive: true, force: true });
+```json
+{
+  "decision": "changes-requested",
+  "annotations": [
+    {
+      "anchor": { "target": "src/git.mjs", "side": "new", "position": 42 },
+      "body": "Reject an empty range here too.",
+      "thread": [
+        { "author": { "kind": "agent", "id": "fixer" },
+          "body": "Done: the empty range is refused with its own message." }
+      ]
+    }
+  ]
 }
-process.exit(result.status === "completed" ? 0 : 1);
 ```
 
-Click Yes and the process prints the framed result and exits 0:
+A run that opened that surface now has a code review in hand, in a shape it
+can act on, without a service or an account anywhere. The
+[review command](/hosts/review) page has the full result shape and the
+other ways to select a diff.
 
-```text
-<<<HELLO_SURFACE_RESULT_V1>>>
-{"schemaVersion":1,"app":"hello-surface","surface":null,"status":"completed","operationId":"a4bad94c-7192-45e2-98e3-30e4faa7cc4c","createdAt":"2026-09-10T12:14:13.659Z","payload":{"value":true},"detail":null}
-<<<END_HELLO_SURFACE_RESULT_V1>>>
-```
+Your own surface is the same shape: you supply the page files and the JSON
+routes the page calls, and you call `session.complete` with whatever the
+person gave you. The [surfacer reference](/packages/surfacer) has the
+contract.
 
-The page is two files, an HTML file and a script, because the page runs
-under a strict content policy and inline scripts are not allowed. The API
-is one route. When the route calls `session.complete`, the session has its
-answer and the browser is told so.
+## Use cases
+
+- **Code review.** A diff, inline comments, a decision. The example above.
+- **Approval before something irreversible.** Merging, migrating, spending.
+  [Callback gates](/reviewing/callback-gates) is the step that waits;
+  [approval](/workflows/approval) shows one in a team.
+- **A choice between agent outputs.** Two drafts, two plans, two patches.
+  The page returns the one a person picked.
+- **A form nobody wants to script.** Credentials a machine must not hold, a
+  judgement call with six fields.
+
+Same session every time. Only the page changes.
 
 ## Use it in a workflow
 
@@ -114,8 +111,11 @@ as a split beside your terminal, so the question appears next to the run
 that asked it. The [cmux host](/hosts/cmux) page shows how, and the
 [plugins](/plugins) page lists the hosts.
 
-## Things that catch people out
+## Gotchas
 
+- **You cannot hand the link to someone else.** The page only exists on
+  the machine that started the run. If the decision belongs to a colleague,
+  it has to reach them another way.
 - **The lease.** A surface waits for a person, and people walk away. Set
   `leaseTimeoutMs` to how long the question may stand; when it passes, the
   result says so and the run continues on that.
@@ -124,7 +124,7 @@ that asked it. The [cmux host](/hosts/cmux) page shows how, and the
   the acknowledgement call looks, to the run, like a page that never
   answered, until the acknowledgement timeout ends it.
 - **Inline scripts.** The page's content policy allows no inline script or
-  style; ship them as files, as the example does.
+  style; ship them as files.
 - **Verbatim answers.** If an answer must survive exactly, quoting code for
   example, complete it with `verbatim: true`. Everything else is redacted,
   and that is the safe default.
