@@ -55,6 +55,7 @@ export const CONSUMER_EXAMPLES = Object.freeze([
  * a file here as run for that reason, and each entry says so.
  */
 export const REAL_ENGINE_EXAMPLES = Object.freeze([
+  { file: 'feature-delivery.ts', why: 'Claude and Codex run the analysis, implementation and review jobs; the page carries one real run' },
   { file: 'teams/writer-reviewer-pair.ts', why: 'a Claude seat writes and a Codex seat reviews; the page carries one real run' },
   { file: 'teams/threshold-panel.ts', why: 'Claude implements, Codex and OpenCode review; the page carries one real run' },
   { file: 'teams/feature-delivery.ts', why: 'Claude analyses and approves, Codex implements, Claude reviews; the page carries one real run' },

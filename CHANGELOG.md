@@ -22,6 +22,12 @@ engine and memory packages track their own versions independently.
 - `stage()` takes `when`, a runtime condition such as `passed()`, `failed()` or an async predicate, and `optional`. A stage whose `when` is not met is recorded as skipped and counts as passed for the stages after it.
 - `stage()` takes `needs`, one or more earlier stage names, so a condition can read a stage further back than the one before it.
 
+### Fixed
+
+- Public workflow examples resolve their direct-run guard through real paths,
+  so a symlinked directory cannot make a copied example exit successfully
+  without running or printing its outcome.
+
 ## [1.0.0] - 2026-09-14
 
 ### Added

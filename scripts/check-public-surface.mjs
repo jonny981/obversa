@@ -13,6 +13,12 @@ const sources = [
   path.join(root, 'packages/runtime/src/runtime/graph-executor.ts'),
   path.join(root, 'packages/runner/src/supervised-run.ts'),
 ];
+const additionalPublicValues = [
+  {
+    file: path.join(root, 'packages/engine/src/command/run.ts'),
+    names: ['resolveCommandExecutable'],
+  },
+];
 const pageText = fs.readdirSync(docs, { recursive: true }).filter((f) => f.endsWith('.mdx')).map((f) => fs.readFileSync(path.join(docs, f), 'utf8')).join('\n');
 function debtEntries(names, owner, page) {
   return names.map((name) => ({
@@ -56,7 +62,12 @@ const TRACKED_TYPE_EXPORTS = new Set([
   'SupervisedRunStatus', 'SupervisedRunUsage', 'ReadSupervisedRunStatusOptions',
 ]);
 const MINIMUM_VALUE_EXPORTS = 100;
-const REQUIRED_VALUE_EXPORTS = ['run', 'createGraphExecutor', 'startSupervisedRun'];
+const REQUIRED_VALUE_EXPORTS = [
+  'run',
+  'createGraphExecutor',
+  'startSupervisedRun',
+  'resolveCommandExecutable',
+];
 
 export function exportListNames(list) {
   return list.split(',').flatMap((raw) => {
@@ -116,6 +127,11 @@ function unionCodes(source, name) {
 function surfaceFromSources(files = sources) {
   const contents = files.map((file) => ({ file, source: fs.readFileSync(file, 'utf8') }));
   const values = contents.flatMap(({ file, source }) => exportedValues(file, source));
+  const extraValues = additionalPublicValues.flatMap(({ file, names }) => {
+    const source = fs.readFileSync(file, 'utf8');
+    const exported = exportedValues(file, source);
+    return names.filter((name) => exported.includes(name));
+  });
   const types = contents.flatMap(({ source }) => exportedTypes(source));
   const graph = contents.find(({ file }) => file.endsWith('graph-executor.ts'))?.source ?? '';
   const supervised = contents.find(({ file }) => file.endsWith('supervised-run.ts'))?.source ?? '';
@@ -125,7 +141,7 @@ function surfaceFromSources(files = sources) {
     ...unionCodes(supervised, 'SupervisedRunResult'),
   ];
   return {
-    values: [...new Set(values)],
+    values: [...new Set([...values, ...extraValues])],
     types: [...new Set(types)],
     codes: [...new Set(codes)],
   };

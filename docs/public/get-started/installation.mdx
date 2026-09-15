@@ -8,7 +8,19 @@ is no service to stand up.
 
 ## Requirements
 
-Node.js 22.12 or later. Nothing else.
+Node.js 22.12 or later, and two lines of setup in your project, because
+every Obversa package is an ES module and a workflow is a TypeScript file.
+Your project needs `"type": "module"` in its `package.json`, and the file
+runs through `tsx`:
+
+```bash
+npm pkg set type=module
+npm install --save-dev tsx
+```
+
+Node 22.12 can also read the file without `tsx`, using
+`node --experimental-strip-types`. The flag is required at that version and
+stops being experimental in Node 22.18.
 
 ## Add it to your project
 
