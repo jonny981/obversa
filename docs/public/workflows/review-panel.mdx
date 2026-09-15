@@ -5,7 +5,7 @@ description: "One model implements, several review at the same time, and the cha
 
 When one opinion is not enough, ask several at once. This file names a
 Claude seat that implements the brief and a panel of two reviewers from
-two other model families; Node runs the test, then both reviewers read
+two other model families; Node runs the test, then both reviewers judge
 the change at the same time. The change passes when at least `agree` of
 them accept. A panel below that sends the work back to the implementer,
 once.
@@ -72,11 +72,15 @@ console.log(JSON.stringify(result.outcome, null, 2));
 ## What a run printed
 
 From one real run of this file. The Codex reviewer accepted. The OpenCode
-seat, on a free preview model, answered with no decision object twice, so
-the panel records an engine error for it rather than a rejection, and
-sends nothing back to the implementer on its account. With `agree: 1` the
-change passed on the one acceptance. Set `agree` to two and the same run
-would have failed the panel, because an error is not an acceptance.
+seat returned no decision, and the reason is ours rather than the model's:
+a reviewer is sent the brief and its instructions, and what it may read is
+left to the engine's own default. That default lets a Codex or Claude seat
+open the files and leaves an OpenCode seat with nothing it can read, so
+that seat was asked to judge a change it could not see. The panel records
+an engine error for it rather than a rejection, and sends nothing back to
+the implementer on its account. With `agree: 1` the change passed on the
+one acceptance. Set `agree` to two and the same run would have failed the
+panel, because an error is not an acceptance.
 
 ```json
 {
