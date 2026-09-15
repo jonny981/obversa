@@ -610,6 +610,8 @@ async function main() {
     join(root, 'examples', 'feature-delivery.ts'),
     'utf8',
   );
+  const featureProofPath = join(root, 'examples', 'feature-delivery.proof.ts');
+  const featureProofSource = await readFile(featureProofPath, 'utf8');
   const forgeExamplePath = join(root, 'examples', 'forge-helper.ts');
   const forgeExampleSource = await readFile(forgeExamplePath, 'utf8');
   const graphExamplePath = join(root, 'examples', 'custom-graph.ts');
@@ -768,6 +770,7 @@ async function main() {
       join(consumerDirectory, 'feature-delivery.ts'),
       featureExampleSource,
     );
+    await copyFile(featureProofPath, join(consumerDirectory, 'feature-delivery.proof.ts'));
     await copyFile(forgeExamplePath, join(consumerDirectory, 'forge-helper.ts'));
     await copyFile(graphExamplePath, join(consumerDirectory, 'custom-graph.ts'));
     await copyFile(pipelineExamplePath, join(consumerDirectory, 'pipeline.ts'));
@@ -902,6 +905,48 @@ async function main() {
     assert.equal(compiledTournament.winnerLanded, true);
     assert.deepEqual(compiledTournament.candidateBranches, []);
     assert.equal(compiledTournament.temporaryDirectoryRemoved, true);
+    const featureDenySource = featureProofSource.replace(
+      '{ approved: true }',
+      '{ approved: false }',
+    );
+    assert.notEqual(featureDenySource, featureProofSource, 'The approval mutation must change the proof source.');
+    await writeFile(
+      join(consumerDirectory, 'feature-delivery.deny.ts'),
+      featureDenySource,
+    );
+    const denyRun = spawnSync('pnpm', ['exec', 'tsx', 'feature-delivery.deny.ts'], {
+      cwd: consumerDirectory,
+      encoding: 'utf8',
+      maxBuffer: 32 * 1024 * 1024,
+      timeout: 30_000,
+      killSignal: 'SIGKILL',
+    });
+    assert.equal(denyRun.status, 1, denyRun.stdout + denyRun.stderr);
+    assert.notEqual(denyRun.stdout.trim(), '', denyRun.stderr);
+    const featureDeny = JSON.parse(denyRun.stdout);
+    assert.equal(featureDeny.status, 'fail', 'a no-vote must not ship the change');
+
+    const featureRedSource = featureProofSource.replace(
+      'await writeFiles(request.cwd!, REPAIRED_SOURCE, REPAIRED_TESTS);',
+      'await writeFiles(request.cwd!, DRAFT_SOURCE, REPAIRED_TESTS);',
+    );
+    assert.notEqual(featureRedSource, featureProofSource, 'The repair mutation must change the proof source.');
+    await writeFile(
+      join(consumerDirectory, 'feature-delivery.red.ts'),
+      featureRedSource,
+    );
+    const redRun = spawnSync('pnpm', ['exec', 'tsx', 'feature-delivery.red.ts'], {
+      cwd: consumerDirectory,
+      encoding: 'utf8',
+      maxBuffer: 32 * 1024 * 1024,
+      timeout: 30_000,
+      killSignal: 'SIGKILL',
+    });
+    assert.equal(redRun.status, 1, redRun.stdout + redRun.stderr);
+    assert.notEqual(redRun.stdout.trim(), '', redRun.stderr);
+    const featureRed = JSON.parse(redRun.stdout);
+    assert.equal(featureRed.status, 'fail', 'an unrepaired line must not pass');
+
     const compiledGraph = JSON.parse(
       run(process.execPath, ['dist/custom-graph.js'], { cwd: consumerDirectory }),
     );

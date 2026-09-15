@@ -161,7 +161,15 @@ try {
     callbacks,
     onEvent: (event) => events.push(event),
   });
-  assert.equal(first.outcome.status, 'paused');
+  if (first.outcome.status !== 'paused') {
+    console.log(JSON.stringify({
+      status: first.outcome.status,
+      implementRuns: implement.calls.length,
+      reviewRounds: events.filter((event) => event.kind === 'loop:review').length,
+      filesWritten: [],
+    }, null, 2));
+    throw new Error('The first run must pause for approval.');
+  }
   const pending = callbacks.listPending();
   assert.equal(pending.length, 1);
   const answered = await directRouter(callbacks, pending[0]!, 'feature-proof-person', () => ({ approved: true }));
@@ -171,16 +179,7 @@ try {
     callbacks,
     onEvent: (event) => events.push(event),
   });
-  assert.equal(result.outcome.status, 'pass');
-  assert.match(await readFile(join(workspace, 'src/retry.js'), 'utf8'), /signal\?\.aborted/);
-  assert.match(await readFile(join(workspace, 'test/retry.test.js'), 'utf8'), /abort:/);
-  // A plain run does not resume from the approval pause, so the second run
-  // replays the earlier stages: two calls before the pause and one after it.
-  assert.equal(implement.calls.length, 3);
-  assert.equal(correctness.calls.length, 3);
-  assert.equal(tests.calls.length, 3);
-  assert.equal(api.calls.length, 3);
-  console.log(JSON.stringify({
+  const report = {
     status: result.outcome.status,
     implementRuns: implement.calls.length,
     reviewRounds: events.filter((event) => event.kind === 'loop:review').length,
@@ -191,7 +190,17 @@ try {
       'reviews/tests-first.json',
       'reviews/api.json',
     ],
-  }, null, 2));
+  };
+  console.log(JSON.stringify(report, null, 2));
+  assert.equal(result.outcome.status, 'pass');
+  assert.match(await readFile(join(workspace, 'src/retry.js'), 'utf8'), /signal\?\.aborted/);
+  assert.match(await readFile(join(workspace, 'test/retry.test.js'), 'utf8'), /abort:/);
+  // A plain run does not resume from the approval pause, so the second run
+  // replays the earlier stages: two calls before the pause and one after it.
+  assert.equal(implement.calls.length, 3);
+  assert.equal(correctness.calls.length, 3);
+  assert.equal(tests.calls.length, 3);
+  assert.equal(api.calls.length, 3);
 } finally {
   await rm(workspace, { recursive: true, force: true });
 }
