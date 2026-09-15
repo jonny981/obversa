@@ -1236,7 +1236,6 @@ export class OpenCodeCliEngine implements Engine {
       let validationFailure: unknown;
       try {
         buildOpenCodeInvocation(normalized, this.#options, validationDirectory);
-        assertNoManagedConfig(managedConfigSources(this.#options.managedConfigDirectories));
       } catch (error) {
         validationFailed = true;
         validationFailure = error instanceof TypeError || error instanceof EngineError
@@ -1290,7 +1289,6 @@ export class OpenCodeCliEngine implements Engine {
     let versionFailure: unknown;
     try {
       const invocation = buildOpenCodeInvocation(request, this.#options, directory);
-      assertNoManagedConfig(managedConfigSources(this.#options.managedConfigDirectories));
       const command = await runOwnedCommand({
         executable: this.#executable,
         args: ['--version'],

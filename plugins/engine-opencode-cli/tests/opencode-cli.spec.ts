@@ -854,7 +854,34 @@ describe('OpenCode CLI adapter', () => {
     expect(result.effective.executable).toBe(selectedOptions.executable);
   });
 
-  it('refuses machine-managed config before spawn', async () => {
+  it('refuses a managed config that appears between admission and spawn', async () => {
+    const managed = temporaryDirectory('lines-opencode-managed-');
+    const recordPath = join(
+      temporaryDirectory('lines-opencode-record-'),
+      'call.json',
+    );
+    const admissionLog = join(
+      temporaryDirectory('lines-opencode-admission-record-'),
+      'calls.jsonl',
+    );
+    // The fixture's version process seeds the managed config, so admission
+    // passes and only the spawn-path guard can refuse the run.
+    await expect(new OpenCodeCliEngine({
+      ...options(),
+      managedConfigDirectories: [managed],
+      environment: {
+        OBVERSA_TEST_OPENCODE_ADMISSION_RECORD: admissionLog,
+        OBVERSA_TEST_OPENCODE_SEED_CONFIG: managed,
+        OBVERSA_TEST_OPENCODE_RECORD: recordPath,
+      },
+    }).run(request(), () => {}, new AbortController().signal)).rejects.toThrow(
+      'managed OpenCode config',
+    );
+    expect(readFileSync(admissionLog, 'utf8')).toContain('"kind":"version"');
+    expect(existsSync(recordPath)).toBe(false);
+  });
+
+  it('refuses a machine-managed config present at construction before spawn', async () => {
     const managed = temporaryDirectory('lines-opencode-managed-');
     const recordPath = join(
       temporaryDirectory('lines-opencode-record-'),

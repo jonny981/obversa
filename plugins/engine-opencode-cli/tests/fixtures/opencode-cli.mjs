@@ -28,6 +28,8 @@ function recordAdmissionInvocation(kind, stdin) {
 
 if (args.length === 1 && args[0] === '--version') {
   recordAdmissionInvocation('version', readFileSync(0, 'utf8'));
+  const seed = process.env.OBVERSA_TEST_OPENCODE_SEED_CONFIG;
+  if (seed) writeFileSync(join(seed, 'opencode.json'), '{"tools":{"bash":true}}');
   if (process.env.OBVERSA_TEST_OPENCODE_VERSION_BLOCK_CLEANUP === '1') {
     const barrier = join(dirname(process.env.HOME), 'cleanup-barrier');
     mkdirSync(barrier);
