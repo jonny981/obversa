@@ -1,4 +1,4 @@
-import { appendFileSync, mkdirSync, writeFileSync } from 'node:fs';
+import { appendFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname } from 'node:path';
 
 import type { LoopEvent, Outcome } from '../core/types.js';
@@ -10,6 +10,35 @@ const NOISE: ReadonlySet<LoopEvent['kind']> = new Set([
 
 interface RecorderOptions {
   thin?: boolean;
+  /** Append to the existing record instead of truncating it, and return
+   * the stage outcomes it already holds so a resuming run can skip
+   * completed work. */
+  resume?: boolean;
+}
+
+/** The stage outcomes a record already holds, keyed by the job path that
+ * produced them. Built from the job:end events of a prior run. */
+export type ResumedStageOutcomes = ReadonlyMap<string, Outcome>;
+
+/** Read a record's job:end events into a path-keyed outcome map. A record
+ * that does not exist, or one with no job:end events, yields an empty map:
+ * resume over nothing is a fresh run. */
+export function readStageOutcomes(path: string): ResumedStageOutcomes {
+  if (!existsSync(path)) return new Map();
+  const outcomes = new Map<string, Outcome>();
+  for (const line of readFileSync(path, 'utf8').split(/\r?\n/)) {
+    if (!line) continue;
+    let event: LoopEvent;
+    try {
+      event = JSON.parse(line) as LoopEvent;
+    } catch {
+      continue;
+    }
+    if (event.kind === 'job:end') {
+      outcomes.set(event.path.join('/'), event.outcome);
+    }
+  }
+  return outcomes;
 }
 
 function ensureDir(path: string): void {
@@ -23,7 +52,7 @@ export function makeRecorder(
   options: RecorderOptions = {},
 ): (event: LoopEvent) => void {
   ensureDir(path);
-  writeFileSync(path, '');
+  if (options.resume !== true) writeFileSync(path, '');
   return (event) => {
     if (NOISE.has(event.kind)) return;
     try {

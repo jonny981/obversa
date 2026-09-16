@@ -15,7 +15,11 @@ import { Stats, type StatsSnapshot } from '../core/stats.js';
 import { costReport, type CostReport, type PriceTable } from '../core/cost.js';
 import { LoopError } from '../core/errors.js';
 import { Budget, type BudgetConfig } from '../core/budget.js';
-import { makeRecorder } from './persist.js';
+import { makeRecorder, readStageOutcomes } from './persist.js';
+
+/** Shared state key holding the stage outcomes a resuming run seeded from
+ * its record. Workflow layers read it to skip completed stages. */
+export const RESUME_STAGE_OUTCOMES = 'obversa:resumed-stage-outcomes';
 import { ensureRunSubdir } from './paths.js';
 import { startSupervisor, newRunId, type Supervisor } from './supervisor.js';
 import { jobMeta } from '../core/describe.js';
@@ -94,6 +98,14 @@ export interface RunOptions {
   budget?: number | BudgetConfig;
   /** Append every structured event as JSONL here, or auto-name one under `.obversa/records`. */
   recordTo?: string | 'auto';
+  /**
+   * Resume from the record at `recordTo` instead of truncating it: stages
+   * whose completion is already recorded are skipped, interrupted stages
+   * re-run. Requires an explicit `recordTo` path; a missing record is a
+   * fresh run, not an error. Two processes resuming one record at once is
+   * out of scope.
+   */
+  resume?: boolean;
   /**
    * Register this run in the global registry (`~/.obversa/runs/<runId>`) and write
    * its live state there, so another process can inspect it. Off by default;
@@ -190,12 +202,22 @@ export async function run(
 
   // Persistence sinks observe the same event stream as outside readers.
   const sinks: Array<(event: LoopEvent) => void> = [];
+  if (options.resume === true && (options.recordTo === undefined || options.recordTo === 'auto')) {
+    throw new TypeError('resume requires an explicit recordTo path');
+  }
   const recordPath =
     options.recordTo === 'auto'
       ? join(ensureRunSubdir(dir, 'records'), `${runId!}.jsonl`)
       : options.recordTo;
   if (recordPath) {
-    sinks.push(makeRecorder(recordPath, { thin: options.recordTo === 'auto' }));
+    const resumedOutcomes = options.resume === true ? readStageOutcomes(recordPath) : undefined;
+    sinks.push(makeRecorder(recordPath, {
+      thin: options.recordTo === 'auto',
+      ...(resumedOutcomes === undefined ? {} : { resume: true }),
+    }));
+    if (resumedOutcomes !== undefined && resumedOutcomes.size > 0) {
+      initialState[RESUME_STAGE_OUTCOMES] = resumedOutcomes;
+    }
   }
   // A supervised run registers itself in the global registry (~/.obversa/runs) and
   // writes its live state there, so another process can list/status/tail it.

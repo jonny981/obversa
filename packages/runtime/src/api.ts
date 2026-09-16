@@ -415,6 +415,7 @@ export {
   type RunOptions,
   type RunResult,
 } from './runtime/runner.js';
+export { RESUME_STAGE_OUTCOMES } from './runtime/runner.js';
 export type { StatsSnapshot } from './core/stats.js';
 export {
   classifyEngineFailure,

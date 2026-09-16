@@ -17,6 +17,7 @@ import {
   type JobContext,
   type Outcome,
   type ConditionInput,
+  RESUME_STAGE_OUTCOMES,
 } from '@obversa/runtime';
 
 import { outcomeFromAgentText } from './agent-response.js';
@@ -512,6 +513,77 @@ function panelReviewFiles(stages: readonly NamedStage[], index: number): string[
       : writesOf(preceding.config);
 }
 
+/** A canonical, digestable view of a declared value: primitives pass
+ * through, plain objects sort their keys, functions serialize as their
+ * source, so a changed predicate changes the digest. */
+function canonicalForDigest(value: unknown): unknown {
+  if (typeof value === 'function') return `fn:${value.toString()}`;
+  if (Array.isArray(value)) return value.map(canonicalForDigest);
+  if (value !== null && typeof value === 'object') {
+    return Object.fromEntries(
+      Object.keys(value as Record<string, unknown>).sort().map((key) => [
+        key,
+        canonicalForDigest((value as Record<string, unknown>)[key]),
+      ]),
+    );
+  }
+  return value;
+}
+
+/** The workflow's resume identity: one digest over everything a change to
+ * which means the recorded completions no longer describe this workflow.
+ * Restart-from-the-top on any change is the honest default. The digest
+ * covers only the DECLARED shape: the brief, the stage list with each
+ * stage's declared fields, and each role's declared identity. Engine
+ * instances are excluded because they carry mutable call state, and a
+ * digest that changes between two runs of the same workflow cannot match
+ * anything. */
+function resumeIdentity(name: string, config: WorkflowConfig): string {
+  const declared = {
+    name,
+    brief: config.brief,
+    stages: config.stages.map((named) => ({
+      name: named.name,
+      config: canonicalForDigest(Object.fromEntries(
+        Object.entries(named.config).filter(([key]) => key !== 'engine'),
+      )),
+    })),
+    roles: Object.fromEntries(Object.entries(config.roles).map(([key, value]) => [
+      key,
+      Array.isArray(value)
+        ? value.map((seat) => seatIdentity(seat))
+        : typeof value === 'object' && value !== null && 'kind' in value
+          ? value
+          : seatIdentity(value as TeamSeat),
+    ])),
+  };
+  return createHash('sha256').update(JSON.stringify(declared)).digest('hex');
+}
+
+/** Wrap a stage job with the resume guard: a resuming run skips a stage
+ * whose recorded completion carries this workflow's identity, re-runs an
+ * interrupted or changed stage, and attaches the identity to its own
+ * passing completion so the NEXT resume can skip it. */
+function resumeGuard(job: Job, identity: string, label: string): Job {
+  return async (ctx) => {
+    const resumed = ctx.state[RESUME_STAGE_OUTCOMES] as ReadonlyMap<string, Outcome> | undefined;
+    if (resumed !== undefined) {
+      const recorded = resumed.get(ctx.path.join('/'));
+      const recordedIdentity = (recorded?.data as { resumeIdentity?: unknown } | undefined)?.resumeIdentity;
+      if (recorded !== undefined && recordedIdentity === identity) {
+        return recorded;
+      }
+    }
+    ctx.emit({ kind: 'job:start', ts: Date.now(), path: [...ctx.path], label, timeoutMs: ctx.timeoutMs });
+    const outcome = await job(ctx);
+    const guarded = outcome.status === 'pass'
+      ? { ...outcome, data: { ...(outcome.data ?? {}), resumeIdentity: identity } }
+      : outcome;
+    ctx.emit({ kind: 'job:end', ts: Date.now(), path: [...ctx.path], label, outcome: guarded });
+    return guarded;
+  };
+}
+
 export function workflow(name: string, config: WorkflowConfig): Job {
   const workflowName = text(name, 'workflow name');
   const brief = briefValue(config.brief);
@@ -590,6 +662,7 @@ export function workflow(name: string, config: WorkflowConfig): Job {
       );
     }
   }
+  const stageJobIdentity = resumeIdentity(workflowName, config);
   const declaredFiles = workflowFiles(brief, config.stages);
   const nodes = Object.fromEntries(config.stages.map((named, index) => {
     const files = stageFiles(brief, config.stages, index);
@@ -598,8 +671,9 @@ export function workflow(name: string, config: WorkflowConfig): Job {
       'panel' in stageConfig && stageConfig.panel !== undefined
         ? panelReviewFiles(config.stages, index)
         : undefined;
+    const innerStage = stageJob(brief, named, config.roles, files, declaredFiles, targetFiles);
     return [named.name, {
-      job: stageJob(brief, named, config.roles, files, declaredFiles, targetFiles),
+      job: copyJobMeta(resumeGuard(innerStage, stageJobIdentity, named.name), innerStage),
       needs: stageDependencies(config.stages, index),
       ...(named.config.desc === undefined ? {} : { desc: named.config.desc }),
       ...(named.config.gate === undefined ? {} : { gate: named.config.gate }),
