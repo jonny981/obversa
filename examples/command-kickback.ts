@@ -84,14 +84,14 @@ export const commandKickback = dag({
     'quick-review': {
       needs: 'size',
       when: passed('size'),
-      desc: 'One reviewer reads a small change.',
+      desc: 'The quick review of a small change.',
       gate: 'The quick review has returned a verdict.',
       job: review('quick-review', 'small change, one reader'),
     },
     'full-review': {
       needs: 'size',
       when: failed('size'),
-      desc: 'A panel reads a large change.',
+      desc: 'The full review of a large change.',
       gate: 'The panel review has returned a verdict.',
       job: review('full-review', 'large change, a panel'),
     },

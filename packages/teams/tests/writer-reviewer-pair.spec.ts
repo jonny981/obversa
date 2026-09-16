@@ -50,10 +50,8 @@ describe('writerReviewerPair', () => {
       ]);
       const reviewerEngine = scriptedEngine('reviewer', [
         async (request) => {
-          await mkdir(join(request.cwd!, 'reviews'), { recursive: true });
-          const decision = revise('review requested one repair', 'the review requires one repair');
-          await writeFile(join(request.cwd!, 'reviews/reviewer.json'), decision);
-          return decision;
+          expect(request.prompt).not.toContain('Write your review evidence');
+          return revise('review requested one repair', 'the review requires one repair');
         },
         async () => pass('review accepted the repaired files'),
       ]);
@@ -102,23 +100,23 @@ describe('writerReviewerPair', () => {
         identity: { ...reviewer.identity, tools: [] },
       } as unknown as TeamSeat;
 
-      const result = await run(writerReviewerPair({
+      expect(() => writerReviewerPair({
         brief: 'Write a module that exports result 42 and a test for it.',
         workspace,
         files: ['src/result.mjs', 'test/result.test.mjs'],
         test: testCommand,
         writer: seat(writerEngine, 'writer'),
         reviewer: blindReviewer,
-      }), { cwd: workspace });
+      })).toThrow(/reviewer.*tools/);
 
-      expect(result.outcome.status).toBe('fail');
+      expect(writerEngine.calls).toHaveLength(0);
       expect(reviewerEngine.calls).toHaveLength(0);
     } finally {
       await rm(workspace, { recursive: true, force: true });
     }
   });
 
-  it('uses a valid reviewer reply when the changed decision file is incomplete', async () => {
+  it('uses the reviewer reply instead of an unrequested decision file', async () => {
     const workspace = await mkdtemp(join(tmpdir(), 'obversa-teams-pair-invalid-file-'));
     try {
       const writerEngine = scriptedEngine('writer', [
@@ -134,7 +132,7 @@ describe('writerReviewerPair', () => {
       const reviewerEngine = scriptedEngine('reviewer', [
         async (request) => {
           await mkdir(join(request.cwd!, 'reviews'), { recursive: true });
-          await writeFile(join(request.cwd!, 'reviews/reviewer.json'), '{"status":"revise"}\n');
+          await writeFile(join(request.cwd!, 'reviews/reviewer.json'), pass('file claims acceptance'));
           return revise('review requested one repair', 'the implementation needs one repair');
         },
         async () => pass('review accepted the repaired files'),

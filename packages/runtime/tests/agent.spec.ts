@@ -153,8 +153,28 @@ describe('AgentDef', () => {
     expect(req.system).toContain('Try to REFUTE it.'); // skill folded into the system
     expect(req.model).toBe('haiku');
     expect(req.tools).toEqual(['read']);
-    expect(req.allowedTools).toEqual(['read']);
+    expect(req.allowedTools).toBeUndefined();
     expect(req.prompt).toBe('review the PR'); // the per-call task, not the persona
+  });
+
+  it.each([
+    { allowedTools: undefined, expected: undefined },
+    { allowedTools: [], expected: [] },
+    { allowedTools: ['Read(src/**)'], expected: ['Read(src/**)'] },
+  ])('does not turn tool availability into approval: $allowedTools', async ({ allowedTools, expected }) => {
+    const repo = await tmpRepo();
+    const cap = capturing();
+    const result = await run(agentJob({
+      prompt: 'review the files',
+      tools: ['Read', 'Edit', 'Bash'],
+      allowedTools,
+      workspaceMode: 'read',
+    }), { engine: cap.engine, cwd: repo });
+
+    expect(result.outcome.status).toBe('pass');
+    expect(cap.req().tools).toEqual(['Read', 'Edit', 'Bash']);
+    expect(cap.req().allowedTools).toEqual(expected);
+    expect(cap.req().workspaceMode).toBe('read');
   });
 
   it('inline config overrides the agent def', async () => {

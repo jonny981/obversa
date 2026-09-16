@@ -77,7 +77,7 @@ export function codex(model: string, options: CodexSeatOptions = {}): CodexSeat 
   return {
     engine: new CodexEngine({
       defaultModel: model,
-      sandbox: options.sandbox ?? 'workspace-write',
+      sandbox: options.sandbox,
       approvalPolicy: options.approvalPolicy ?? 'never',
     }),
     identity: {
@@ -160,7 +160,27 @@ export function buildCodexArgs(
   opts: CodexEngineOptions,
   outFile: string,
 ): string[] {
-  assertReadAccess(req);
+  try {
+    assertReadAccess(req);
+    if (req.workspaceMode === 'none') {
+      throw new TypeError('codex cannot disable filesystem access');
+    }
+    if (req.workspaceMode !== undefined) {
+      const sandbox = req.workspaceMode === 'read' ? 'read-only' : 'workspace-write';
+      if (opts.sandbox !== undefined && opts.sandbox !== sandbox) {
+        throw new TypeError(`codex sandbox ${opts.sandbox} conflicts with workspace mode ${req.workspaceMode}`);
+      }
+      if (opts.permissionMode === 'bypassPermissions' || opts.cliArgs?.length) {
+        throw new TypeError('codex cannot enforce workspace mode with bypassPermissions or extra CLI arguments');
+      }
+    }
+  } catch (cause) {
+    throw new EngineError({
+      kind: 'invalid-config',
+      message: cause instanceof Error ? cause.message : 'invalid Codex workspace configuration',
+      cause,
+    });
+  }
   const model = req.model ?? opts.defaultModel;
   const args = [
     'exec',

@@ -105,7 +105,7 @@ describe.runIf(process.platform !== 'win32')('Claude static admission', () => {
   it('admits without a model request or ordinary flags and observes only the numeric version', async () => {
     const f = fixture();
     const engine = new ClaudeCliEngine({ cliBinary: f.a, permissionMode: 'auto', cliArgs: ['--debug'] });
-    expect(await engine.admit(withoutPrompt(f.request), signal())).toEqual(f.selected());
+    expect(await engine.admit({ ...withoutPrompt(f.request), workspaceMode: undefined }, signal())).toEqual(f.selected());
     expect(invocations(f.calls)).toEqual([{
       kind: 'version', executable: f.a, args: ['--version'], stdin: '', cwd: f.dir,
     }]);

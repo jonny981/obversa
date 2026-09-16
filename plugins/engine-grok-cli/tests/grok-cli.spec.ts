@@ -653,6 +653,7 @@ describe('Grok CLI adapter', () => {
 
     const expanded = buildGrokArgs(request({
       tools: ['read_file', 'web_search', 'task'],
+      allowedTools: ['Read'],
       workspaceMode: 'write',
       leaf: false,
     }), options('/bin/echo'), promptFile);
@@ -755,6 +756,7 @@ describe('Grok CLI adapter', () => {
     }).run(
       request({
         tools: ['task'],
+        allowedTools: [],
         workspaceMode: 'write',
         leaf: false,
         jsonSchema: { type: 'object' },
@@ -795,7 +797,7 @@ describe('Grok CLI adapter', () => {
   it('maps every workspace mode and blocks write tools in read-only work', () => {
     const promptFile = '/tmp/lines-grok-prompt.md';
     expect(valuesAfter(buildGrokArgs(
-      request({ workspaceMode: 'none' }),
+      request({ workspaceMode: 'none', tools: [], allowedTools: [] }),
       options('/bin/echo'),
       promptFile,
     ), '--sandbox')).toEqual(['strict']);
@@ -819,6 +821,38 @@ describe('Grok CLI adapter', () => {
       options('/bin/echo'),
       promptFile,
     )).toThrow('read-only workspace');
+  });
+
+  it('refuses filesystem capabilities when workspace mode is none', () => {
+    expect(() => buildGrokArgs(
+      request({ workspaceMode: 'none', tools: ['read_file'], allowedTools: ['Read'] }),
+      options('/bin/echo'),
+      '/tmp/lines-grok-prompt.md',
+    )).toThrow();
+  });
+
+  it('refuses a read workspace whose only capability is web access', () => {
+    expect(() => buildGrokArgs(
+      request({ workspaceMode: 'read', tools: ['web_fetch'], allowedTools: ['WebFetch'] }),
+      options('/bin/echo'), '/tmp/fixture-prompt.md',
+    )).toThrow(/read/);
+  });
+
+  it('refuses a write-mode approval for an undeclared tool', () => {
+    expect(() => buildGrokArgs(
+      request({ workspaceMode: 'write', tools: ['read_file'], allowedTools: ['Bash'] }),
+      options('/bin/echo'), '/tmp/fixture-prompt.md',
+    )).toThrow(/permission|capability/);
+  });
+
+  it('preserves write-mode approvals for declared native tools', () => {
+    const args = buildGrokArgs(request({
+      workspaceMode: 'write',
+      tools: ['read_file', 'search_replace', 'run_terminal_command'],
+      allowedTools: ['Read(src/**)', 'Edit(src/**)', 'Write(src/**)', 'Bash(node:*)'],
+    }), options('/bin/echo'), '/tmp/fixture-prompt.md');
+    expect(valuesAfter(args, '--tools')).toEqual(['read_file,search_replace,run_terminal_command']);
+    expect(valuesAfter(args, '--allow')).toEqual(['Read(src/**)', 'Edit(src/**)', 'Write(src/**)', 'Bash(node:*)']);
   });
 
   it('rejects an undeclared init capability before later work runs', async () => {
@@ -1152,6 +1186,11 @@ describe('Grok CLI adapter', () => {
 
   it('passes the public engine conformance kit through the real process adapter', async () => {
     const bin = executable();
+    const calls = join(temporaryDirectory('grok-workspace-'), 'calls.jsonl');
+    const selected = (capabilities: string[], effective = false) => engineSelection({
+      adapter: 'grok-cli', adapterVersion: '1.0.5', provider: 'xai', modelFamily: 'grok-4',
+      model: effective ? 'grok-4-fixture-effective' : 'grok-4-fixture', executable: bin, capabilities,
+    });
     const report = await runEngineConformance({
       request: request({
         system: undefined,
@@ -1176,17 +1215,32 @@ describe('Grok CLI adapter', () => {
         executable: bin,
         capabilities: ['read_file'],
       },
+      workspace: {
+        modes: {
+          none: { request: request({ tools: [], allowedTools: [] }), outcome: 'supported', requested: selected([]), effective: selected([], true) },
+          read: { request: request({ tools: ['read_file'], allowedTools: ['Read'] }), outcome: 'supported' },
+          write: { request: request({ tools: ['read_file', 'search_replace'], allowedTools: ['Read', 'Write'] }), outcome: 'supported', requested: selected(['read_file', 'search_replace']), effective: selected(['read_file', 'search_replace'], true) },
+        },
+        observe() {
+          const models = readFileSync(calls, 'utf8').split('\n').filter(Boolean)
+            .map((line) => JSON.parse(line) as { kind: string; args: string[] }).filter((call) => call.kind === 'model');
+          const args = models.at(-1)?.args ?? [];
+          const tools = args[args.indexOf('--tools') + 1]?.split(',') ?? [];
+          return { modelCalls: models.length, canRead: tools.includes('read_file'), canWrite: tools.includes('search_replace') };
+        },
+      },
       open(scenario) {
+        writeFileSync(calls, '');
         const binForScenario = scenario === 'missing-cli'
             ? join(temporaryDirectory('lines-grok-missing-'), 'grok')
             : bin;
         return new GrokCliEngine({
           ...options(binForScenario),
-          environment: { OBVERSA_ENGINE_CONFORMANCE_SCENARIO: scenario },
+          environment: { OBVERSA_ENGINE_CONFORMANCE_SCENARIO: scenario, OBVERSA_TEST_GROK_CALLS: calls },
         });
       },
     });
 
-    expect(report).toEqual({ ok: true, cases: 17, failures: [] });
+    expect(report).toEqual({ ok: true, cases: 20, failures: [], unsupported: [] });
   });
 });

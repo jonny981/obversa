@@ -1143,6 +1143,20 @@ describe('OpenCode CLI adapter', () => {
     expect(read.tools).toEqual({ '*': false, read: true, webfetch: true });
   });
 
+  it('refuses a read workspace whose only capability is web access', () => {
+    expect(() => buildOpenCodeInvocation(
+      request({ tools: ['webfetch'], allowedTools: ['WebFetch'], workspaceMode: 'read' }),
+      options('/bin/echo'), temporaryDirectory('opencode-web-only-'),
+    )).toThrow(/read/);
+  });
+
+  it.each(['none', 'read'] as const)('refuses delegation that can escape %s workspace access', (workspaceMode) => {
+    expect(() => buildOpenCodeInvocation(
+      request({ tools: ['task', ...(workspaceMode === 'read' ? ['read'] : [])], allowedTools: ['Task'], workspaceMode, leaf: false }),
+      options('/bin/echo'), temporaryDirectory('opencode-restricted-task-'),
+    )).toThrow(/workspace|capability/);
+  });
+
   it.each([
     ['webfetch', 'WebFetch(https://example.test/**)', 'fixture-provider/model'],
     ['websearch', 'WebSearch(query)', 'opencode/model'],
@@ -1822,6 +1836,11 @@ describe('OpenCode CLI adapter', () => {
 
   it('passes the public engine conformance kit', async () => {
     const bin = executable();
+    const calls = join(temporaryDirectory('opencode-workspace-'), 'calls.jsonl');
+    const selected = (capabilities: string[]) => engineSelection({
+      adapter: 'opencode-cli', adapterVersion: '1.18.23', provider: 'fixture-provider', modelFamily: 'fixture-family',
+      model: 'fixture-provider/fixture-model', executable: bin, capabilities,
+    });
     const report = await runEngineConformance({
       request: request({ tools: ['read'], allowedTools: ['Read'] }),
       requested: {
@@ -1843,18 +1862,33 @@ describe('OpenCode CLI adapter', () => {
         capabilities: ['read'],
       },
       parseStructuredResult,
+      workspace: {
+        modes: {
+          none: { request: request({ tools: [], allowedTools: [] }), outcome: 'supported', requested: selected([]), effective: selected([]) },
+          read: { request: request({ tools: ['read'], allowedTools: ['Read'] }), outcome: 'supported' },
+          write: { request: request({ tools: ['read', 'edit'], allowedTools: ['Read', 'Edit'] }), outcome: 'supported', requested: selected(['read', 'edit']), effective: selected(['read', 'edit']) },
+        },
+        observe() {
+          const models = readFileSync(calls, 'utf8').split('\n').filter(Boolean)
+            .map((line) => JSON.parse(line) as { kind: string; config: { tools: Record<string, boolean> } })
+            .filter((call) => call.kind === 'model');
+          const tools = models.at(-1)?.config.tools ?? {};
+          return { modelCalls: models.length, canRead: tools.read === true, canWrite: tools.edit === true || tools.bash === true };
+        },
+      },
       open(scenario) {
+        writeFileSync(calls, '');
         const binForScenario = scenario === 'missing-cli'
           ? join(temporaryDirectory('lines-opencode-missing-'), 'opencode')
           : bin;
         return new OpenCodeCliEngine({
           ...options(binForScenario),
-          environment: { OBVERSA_ENGINE_CONFORMANCE_SCENARIO: scenario },
+          environment: { OBVERSA_ENGINE_CONFORMANCE_SCENARIO: scenario, OBVERSA_TEST_OPENCODE_ADMISSION_RECORD: calls },
         });
       },
     });
 
-    expect(report).toEqual({ ok: true, cases: 17, failures: [] });
+    expect(report).toEqual({ ok: true, cases: 20, failures: [], unsupported: [] });
   });
 
   it('uses EngineError types for adapter-owned abort and timeout failures', async () => {

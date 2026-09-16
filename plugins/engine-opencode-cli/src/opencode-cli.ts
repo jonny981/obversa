@@ -530,6 +530,9 @@ function requestedCapabilities(request: AgentRequest): readonly string[] {
     throw new TypeError('OpenCode leaf attempts cannot expose task');
   }
   const workspaceMode = request.workspaceMode ?? 'none';
+  if (workspaceMode !== 'write' && capabilities.includes('task')) {
+    throw new TypeError(`OpenCode workspace mode ${workspaceMode} cannot expose task capability`);
+  }
   if (workspaceMode === 'none') {
     const unsafe = capabilities.find(
       (capability) => FILESYSTEM_CAPABILITIES.has(capability),
@@ -548,6 +551,9 @@ function requestedCapabilities(request: AgentRequest): readonly string[] {
       throw new TypeError(
         `OpenCode read-only workspace cannot expose capability ${unsafe}`,
       );
+    }
+    if (!capabilities.some((capability) => ['read', 'glob', 'grep'].includes(capability))) {
+      throw new TypeError('OpenCode read workspace requires a file-reading capability');
     }
   }
   if (workspaceMode !== 'none' && workspaceMode !== 'read' && workspaceMode !== 'write') {

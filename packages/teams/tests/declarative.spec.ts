@@ -857,15 +857,12 @@ describe('declarative teams', () => {
       ...seat(reviewer, 'reviewer'),
       identity: { ...seat(reviewer, 'reviewer').identity, tools: [] },
     };
-    const job = workflow('blind-panel', {
-      brief: 'Review the change.',
-      roles: { review: [reviewerSeat] },
-      stages: [stage('review', { panel: 'review', agree: 1 })],
-    });
-
     try {
-      const result = await run(job, { cwd: directory });
-      expect(result.outcome.status).not.toBe('pass');
+      expect(() => workflow('blind-panel', {
+        brief: 'Review the change.',
+        roles: { review: [reviewerSeat] },
+        stages: [stage('review', { panel: 'review', agree: 1 })],
+      })).toThrow(/reviewer.*tools/);
       expect(reviewer.calls).toHaveLength(0);
     } finally {
       await rm(directory, { recursive: true, force: true });

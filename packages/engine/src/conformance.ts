@@ -29,12 +29,37 @@ export type EngineConformanceScenario =
   | 'transient'
   | 'timeout'
   | 'invalid-config'
-  | 'read-access';
+  | 'read-access'
+  | 'workspace-none'
+  | 'workspace-read'
+  | 'workspace-write';
+
+type WorkspaceMode = NonNullable<AgentRequest['workspaceMode']>;
+type FeatureScenario = Exclude<EngineConformanceScenario, 'read-access' | `workspace-${WorkspaceMode}`>;
 
 export interface EngineConformanceFixture {
   readonly request: AgentRequest;
   readonly requested: EngineSelectionRecord;
   readonly effective: EngineSelectionRecord;
+  readonly unsupported?: Partial<Record<FeatureScenario, string>>;
+  readonly workspace: {
+    readonly modes: Record<WorkspaceMode, {
+      readonly request: AgentRequest;
+      readonly outcome: 'supported' | 'refused';
+      readonly requested?: EngineSelectionRecord;
+      readonly effective?: EngineSelectionRecord;
+    }>;
+    /** Observe actual process arguments or provider options, never the input request. */
+    observe(): {
+      readonly modelCalls: number;
+      readonly canRead: boolean;
+      readonly canWrite: boolean;
+    } | Promise<{
+      readonly modelCalls: number;
+      readonly canRead: boolean;
+      readonly canWrite: boolean;
+    }>;
+  };
   /** Parse a final assistant part when the backend has no native schema mode. */
   readonly parseStructuredResult?: (
     part: AgentResultPart,
@@ -54,8 +79,13 @@ export interface EngineConformanceReport {
   readonly failures: readonly EngineConformanceFailure[];
 }
 
+export interface EngineAdapterConformanceReport extends EngineConformanceReport {
+  readonly unsupported: readonly { readonly case: FeatureScenario; readonly reason: string }[];
+}
+
 interface ConformanceCase {
   readonly name: string;
+  readonly scenario?: EngineConformanceScenario;
   run(): Promise<void>;
 }
 
@@ -182,7 +212,7 @@ function withDeadline<Value>(
 /** Run framework-free behavioral checks against an outside Engine adapter. */
 export async function runEngineConformance(
   fixture: EngineConformanceFixture,
-): Promise<EngineConformanceReport> {
+): Promise<EngineAdapterConformanceReport> {
   check(
     typeof fixture === 'object'
       && fixture !== null
@@ -198,6 +228,7 @@ export async function runEngineConformance(
   const cases: readonly ConformanceCase[] = [
     {
       name: 'ordered result parts',
+      scenario: 'ordered-parts',
       async run() {
         const { result, events } = await openAndRun(fixture, 'ordered-parts');
         check(
@@ -217,6 +248,7 @@ export async function runEngineConformance(
     },
     {
       name: 'structured result',
+      scenario: 'structured-result',
       async run() {
         const { result } = await openAndRun(fixture, 'structured-result');
         const final = result.parts.find((part) => part.final);
@@ -232,6 +264,7 @@ export async function runEngineConformance(
     },
     {
       name: 'unknown usage remains unknown',
+      scenario: 'unknown-usage',
       async run() {
         const { result, events } = await openAndRun(fixture, 'unknown-usage');
         check(result.usage.kind === 'unknown', 'Engine invented a usage receipt.');
@@ -246,6 +279,7 @@ export async function runEngineConformance(
     },
     {
       name: 'reported usage stays measured',
+      scenario: 'reported-usage',
       async run() {
         const { result, events } = await openAndRun(fixture, 'reported-usage');
         check(
@@ -267,6 +301,7 @@ export async function runEngineConformance(
     },
     {
       name: 'tool observations stay ordered',
+      scenario: 'tool-events',
       async run() {
         const { events } = await openAndRun(fixture, 'tool-events');
         const tools = events.filter((event) => event.type === 'tool');
@@ -286,6 +321,7 @@ export async function runEngineConformance(
     },
     {
       name: 'late final survives transport failure',
+      scenario: 'late-final',
       async run() {
         const { result } = await openAndRun(fixture, 'late-final');
         check(
@@ -304,6 +340,7 @@ export async function runEngineConformance(
     },
     {
       name: 'in-flight cancellation',
+      scenario: 'cancellation',
       async run() {
         const controller = new AbortController();
         const engine = await fixture.open('cancellation');
@@ -341,16 +378,62 @@ export async function runEngineConformance(
       ['invalid-config', 'invalid-config'],
     ] as const).map(([scenario, expected]) => ({
       name: `${scenario} failure classification`,
+      scenario,
       run: () => expectFailure(fixture, scenario, expected),
     })),
     {
       name: 'read workspace requires declared tools',
       run: () => expectFailure(fixture, 'read-access', 'invalid-config'),
     },
+    ...(['none', 'read', 'write'] as const).map((mode): ConformanceCase => ({
+      name: `workspace ${mode}`,
+      async run() {
+        const probe = fixture.workspace?.modes[mode];
+        check(probe !== undefined && typeof fixture.workspace.observe === 'function',
+          `Workspace ${mode} requires a process/provider boundary fixture.`);
+        check(probe.outcome === 'supported' || probe.outcome === 'refused', 'Invalid workspace outcome.');
+        const engine = await fixture.open(`workspace-${mode}`);
+        let result: AgentResult | undefined;
+        let error: unknown;
+        try {
+          result = await engine.run({ ...probe.request, workspaceMode: mode }, () => {}, new AbortController().signal);
+        } catch (caught) {
+          error = caught;
+        }
+        const observed = await fixture.workspace.observe();
+        check(Number.isSafeInteger(observed.modelCalls) && observed.modelCalls >= 0,
+          'Workspace fixture must count actual model calls.');
+        if (probe.outcome === 'refused') {
+          check(error instanceof EngineError && error.kind === 'invalid-config',
+            'Unsupported workspace mode must return a typed invalid-config failure.');
+          check(observed.modelCalls === 0, 'Workspace refusal happened after a model call.');
+          return;
+        }
+        if (error !== undefined) throw error;
+        check(observed.modelCalls > 0, 'Supported workspace fixture never reached the model boundary.');
+        check(observed.canRead === (mode !== 'none'), `Workspace ${mode} exposed incorrect read access.`);
+        check(observed.canWrite === (mode === 'write'), `Workspace ${mode} exposed incorrect write access.`);
+        const valid = validateAgentResult(result);
+        check(isDeepStrictEqual(valid.requested, probe.requested ?? fixture.requested),
+          'Workspace result changed the requested engine identity or capabilities.');
+        check(isDeepStrictEqual(valid.effective, probe.effective ?? fixture.effective),
+          'Workspace result changed the effective engine identity or capabilities.');
+      },
+    })),
   ];
 
   const failures: EngineConformanceFailure[] = [];
+  const unsupported: { case: FeatureScenario; reason: string }[] = [];
+  for (const [scenario, reason] of Object.entries(fixture.unsupported ?? {})) {
+    check(cases.some((item) => item.scenario === scenario), `Cannot skip mandatory or unknown scenario ${scenario}.`);
+    check(typeof reason === 'string' && reason.trim().length > 0, `Unsupported scenario ${scenario} requires a reason.`);
+  }
   for (const item of cases) {
+    const reason = item.scenario === undefined ? undefined : fixture.unsupported?.[item.scenario as FeatureScenario];
+    if (reason !== undefined) {
+      unsupported.push({ case: item.scenario as FeatureScenario, reason });
+      continue;
+    }
     try {
       await item.run();
     } catch (error) {
@@ -359,8 +442,9 @@ export async function runEngineConformance(
   }
   return Object.freeze({
     ok: failures.length === 0,
-    cases: cases.length,
+    cases: cases.length - unsupported.length,
     failures: Object.freeze(failures.map((item) => Object.freeze(item))),
+    unsupported: Object.freeze(unsupported.map((item) => Object.freeze(item))),
   });
 }
 

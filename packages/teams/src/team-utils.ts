@@ -231,34 +231,26 @@ export function teamAgent(
   workspaceMode: TeamWorkspaceMode = 'write',
 ): Job {
   const identity = seatIdentity(seat);
+  if (workspaceMode === 'read' && identity.tools.length === 0) {
+    throw new TypeError(`${label} cannot read the workspace: reviewer seat declares no tools`);
+  }
   const agent = agentJob({
     label,
     engine: seat.engine,
     model: identity.model,
     tools: [...identity.tools],
+    allowedTools: [...identity.tools],
     workspaceMode,
     cwd: input.workspace,
     consumeFeedback: target !== undefined,
     prompt: (ctx) => `${rolePrompt(label, input.brief)}\n${typeof instructions === 'function' ? instructions(ctx) : instructions}\nReturn one JSON object: {"status":"pass"|"revise","summary":"...","findings":[{"evidence":"..."}]}`,
     outcome: (text) => outcomeFromAgentText(text, target),
   });
-  const checkedAgent: Job = async (ctx) => {
-    if (workspaceMode === 'read' && identity.tools.length === 0) {
-      const summary = `${label} cannot read the workspace: reviewer seat declares no tools`;
-      return {
-        status: 'fail',
-        summary,
-        error: new LoopError({ code: 'CONFIG', phase: 'body', message: summary }),
-      };
-    }
-    return agent(ctx);
-  };
-  const checked = copyJobMeta(checkedAgent, agent);
-  if (!decisionFile) return checked;
+  if (!decisionFile) return agent;
   return async (ctx) => {
     const path = join(input.workspace, decisionFile);
     const before = await snapshotFile(path);
-    const replyOutcome = await checked(ctx);
+    const replyOutcome = await agent(ctx);
     const after = await snapshotFile(path);
     const changed = before.exists !== after.exists || before.hash !== after.hash;
     if (!changed || !after.exists || after.hash === null) return replyOutcome;
@@ -282,7 +274,6 @@ export function panelReviewers(
     const instructions = [
       `Review target: ${reviewTarget ?? 'the supplied files and test evidence'}.`,
       'Judge only that target against this stage gate; do not require files from another stage.',
-      `Write reviews/${reviewer.name}.json.`,
       reviewer.scope ? `Scope: ${reviewer.scope}` : undefined,
     ].filter(Boolean).join('\n');
     const review = teamAgent(
@@ -291,7 +282,7 @@ export function panelReviewers(
       input,
       instructions,
       undefined,
-      `reviews/${reviewer.name}.json`,
+      undefined,
       'read',
     );
     const retry = teamAgent(
@@ -300,7 +291,7 @@ export function panelReviewers(
       input,
       `${instructions}\nYour previous response was not a valid decision. Return only the required JSON object.`,
       undefined,
-      `reviews/${reviewer.name}.json`,
+      undefined,
       'read',
     );
     const job: Job = async (ctx) => {

@@ -333,7 +333,7 @@ export function agentJob(config: AgentJobConfig): Job {
               model: routeModel,
               maxTokens: config.maxTokens,
               tools: config.tools ?? config.agent?.tools,
-              allowedTools: config.allowedTools ?? config.tools ?? config.agent?.tools,
+              allowedTools: config.allowedTools,
               workspaceMode: config.workspaceMode,
               leaf: config.leaf ?? config.agent?.leaf,
               cwd: config.cwd ?? ctx.workspace.dir,

@@ -13,9 +13,8 @@ import { z } from 'zod';
 import type { Options as SdkOptions } from '@anthropic-ai/claude-agent-sdk';
 import type { Memory, MemoryCommand } from '@obversa/memory';
 import {
-  CLAUDE_SUBAGENT_TOOLS,
   EngineError,
-  assertReadAccess,
+  claudeToolOptions,
   attemptEnvironment,
   classifyEngineFailure,
   engineSelection,
@@ -83,13 +82,15 @@ export function agentSdkToolOptions(
   req: Pick<AgentRequest, 'tools' | 'allowedTools' | 'workspaceMode' | 'leaf'>,
   memory?: Memory,
 ): Pick<SdkOptions, 'tools' | 'allowedTools' | 'disallowedTools'> {
-  assertReadAccess(req);
+  const tools = claudeToolOptions(req);
+  if (memory && (req.workspaceMode === 'none' || req.workspaceMode === 'read')) {
+    throw new EngineError({ kind: 'invalid-config', message: 'Agent SDK restricted workspace cannot expose a writable memory tool' });
+  }
   return {
-    tools: req.tools,
+    ...tools,
     allowedTools: memory
-      ? agentSdkMemoryAllowedTools(req.allowedTools)
-      : req.allowedTools,
-    disallowedTools: req.leaf ? CLAUDE_SUBAGENT_TOOLS : undefined,
+      ? agentSdkMemoryAllowedTools(tools.allowedTools)
+      : tools.allowedTools,
   };
 }
 
@@ -210,15 +211,8 @@ export class AgentSdkEngine implements Engine {
     onEvent: EngineEventSink,
     signal: AbortSignal,
   ): Promise<AgentResult> {
-    try {
-      assertReadAccess(req);
-    } catch (error) {
-      throw new EngineError({
-        kind: 'invalid-config',
-        message: error instanceof Error ? error.message : 'invalid read access request',
-        cause: error,
-      });
-    }
+    const toolOptions = agentSdkToolOptions(req, this.opts.memory);
+    const restricted = req.workspaceMode === 'none' || req.workspaceMode === 'read';
     // Lazy import so installs/runs that never touch this engine don't pay for it.
     const { query } = await import('@anthropic-ai/claude-agent-sdk');
 
@@ -228,6 +222,7 @@ export class AgentSdkEngine implements Engine {
       adapter: 'agent-sdk',
       provider: 'anthropic',
       model: acc.model,
+      capabilities: Array.isArray(toolOptions.tools) ? toolOptions.tools : [],
     });
     const env = attemptEnvironment(req);
     const abort = new AbortController();
@@ -262,7 +257,8 @@ export class AgentSdkEngine implements Engine {
       model,
       systemPrompt: agentSdkSystemPrompt(req),
       cwd: req.cwd,
-      ...agentSdkToolOptions(req, this.opts.memory),
+      ...toolOptions,
+      ...(restricted ? { settingSources: [], strictMcpConfig: true } : {}),
       mcpServers: memoryServer ? { [MEMORY_SERVER]: memoryServer } : undefined,
       // The SDK's `env` REPLACES the subprocess environment entirely, the
       // opposite of execa's merge semantics, so spread `process.env` under the
@@ -308,11 +304,13 @@ export class AgentSdkEngine implements Engine {
           adapter: 'agent-sdk',
           provider: 'anthropic',
           model: model ?? null,
+          capabilities: req.tools ?? [],
         });
         const effective = engineSelection({
           adapter: 'agent-sdk',
           provider: 'anthropic',
           model: acc.model,
+          capabilities: Array.isArray(toolOptions.tools) ? toolOptions.tools : [],
         });
         onEvent({
           type: 'usage',
@@ -385,11 +383,13 @@ export class AgentSdkEngine implements Engine {
       adapter: 'agent-sdk',
       provider: 'anthropic',
       model: model ?? null,
+      capabilities: req.tools ?? [],
     });
     const effective = engineSelection({
       adapter: 'agent-sdk',
       provider: 'anthropic',
       model: acc.model,
+      capabilities: Array.isArray(toolOptions.tools) ? toolOptions.tools : [],
     });
     const late =
       typeof req.timeoutMs === 'number' && Date.now() - startedAt > req.timeoutMs;

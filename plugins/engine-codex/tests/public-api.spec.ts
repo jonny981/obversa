@@ -36,7 +36,7 @@ describe('@obversa/engine-codex', () => {
       tools: ['Read', 'Edit', 'Bash'],
     });
     expect((seat.engine as unknown as { opts: CodexEngineOptions }).opts).toMatchObject({
-      sandbox: 'workspace-write',
+      sandbox: undefined,
       approvalPolicy: 'never',
     });
   });

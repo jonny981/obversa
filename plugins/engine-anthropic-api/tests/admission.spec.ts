@@ -103,7 +103,7 @@ describe('API static admission', () => {
     await expect(open().admit({ ...staticRequest(), workspaceMode: 'read' }, signal()))
       .rejects.toMatchObject({
         kind: 'invalid-config',
-        message: 'read workspace requires at least one declared tool',
+        message: 'anthropic-api supports text-only requests without tools or workspace access',
       });
     expect(bodies).toEqual([]);
   });

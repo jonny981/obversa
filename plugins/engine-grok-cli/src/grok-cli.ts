@@ -65,6 +65,15 @@ const READ_ONLY_TOOLS = new Set([
   'web_fetch',
 ]);
 const PERMISSION_RULE = /^(?:Bash|Edit|Write|Read|Grep|WebFetch|MCPTool)(?:\([^\u0000-\u001f\u007f]*\))?$/u;
+const PERMISSION_TOOLS: Readonly<Record<string, readonly string[]>> = {
+  Bash: ['run_terminal_command'],
+  Edit: ['search_replace'],
+  Write: ['search_replace'],
+  Read: ['read_file', 'list_dir', 'grep', 'glob'],
+  Grep: ['grep', 'glob', 'list_dir'],
+  WebFetch: ['web_fetch'],
+  MCPTool: ['use_tool'],
+};
 const PROJECT_EXTENSION_PATHS = [
   'Agents.md',
   'Claude.md',
@@ -212,6 +221,13 @@ function assertReadOnlyCapabilities(
   tools: readonly string[],
   rules: readonly string[],
 ): void {
+  if (request.workspaceMode === 'none') {
+    if (tools.some((tool) => !WEB_TOOLS.has(tool.toLowerCase()))
+      || rules.some((rule) => !/^WebFetch(?:\([^\u0000-\u001f\u007f]*\))?$/u.test(rule))) {
+      throw new TypeError('Grok workspace mode none cannot expose filesystem tools or permissions');
+    }
+    return;
+  }
   if (request.workspaceMode !== 'read') return;
   const unsafeTool = tools.find((tool) => !READ_ONLY_TOOLS.has(tool.toLowerCase()));
   if (unsafeTool !== undefined) {
@@ -226,6 +242,9 @@ function assertReadOnlyCapabilities(
     throw new TypeError(
       `Grok read-only workspace cannot grant permission ${unsafeRule}`,
     );
+  }
+  if (!tools.some((tool) => READ_ONLY_TOOLS.has(tool.toLowerCase()) && !WEB_TOOLS.has(tool.toLowerCase()))) {
+    throw new TypeError('Grok read workspace requires a file-reading capability');
   }
 }
 
@@ -401,6 +420,12 @@ export function buildGrokArgs(
   const tools = requestedCapabilities(request);
   const rules = permissionRules(request);
   assertReadOnlyCapabilities(request, tools, rules);
+  for (const rule of rules) {
+    const permission = rule.split('(', 1)[0]!;
+    if (!PERMISSION_TOOLS[permission]!.some((tool) => hasTool(tools, tool))) {
+      throw new TypeError(`Grok permission ${rule} has no declared capability`);
+    }
+  }
   const structured = request.jsonSchema !== undefined;
   const subagentsAllowed = request.leaf === false && hasTool(tools, 'task');
   const args = [

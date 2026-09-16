@@ -245,7 +245,7 @@ describe('featureDelivery D48 contract', () => {
     }
   });
 
-  it('accepts a fresh review file when the reviewer reply is prose', async () => {
+  it('does not accept an unrequested file instead of a read-only reviewer decision', async () => {
     const workspace = await mkdtemp(join(tmpdir(), 'obversa-teams-review-file-'));
     const reviewer = scriptedEngine('file-reviewer', [async (request) => {
       await mkdir(join(request.cwd!, 'reviews'), { recursive: true });
@@ -268,8 +268,10 @@ describe('featureDelivery D48 contract', () => {
         target: 'research-requirements',
       }), { cwd: workspace });
 
-      expect(result.outcome.status).toBe('pass');
-      expect(reviewer.calls).toHaveLength(1);
+      expect(result.outcome.status).toBe('paused');
+      expect(result.outcome.summary).toContain('reviewer correctness returned no decision');
+      expect(reviewer.calls).toHaveLength(2);
+      expect(reviewer.calls[0]!.prompt).not.toContain('Write reviews/');
     } finally {
       await rm(workspace, { recursive: true, force: true });
     }
