@@ -33,6 +33,7 @@ describe('@obversa/engine-codex', () => {
       provider: 'openai',
       modelFamily: 'gpt',
       model: 'gpt-5.6-luna',
+      tools: ['Read', 'Edit', 'Bash'],
     });
     expect((seat.engine as unknown as { opts: CodexEngineOptions }).opts).toMatchObject({
       sandbox: 'workspace-write',
