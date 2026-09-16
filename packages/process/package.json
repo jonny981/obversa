@@ -40,6 +40,9 @@
   },
   "keywords": [
     "process",
+    "agent",
+    "graph",
+    "workflow",
     "runtime",
     "obversa"
   ],

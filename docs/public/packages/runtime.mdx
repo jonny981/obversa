@@ -271,6 +271,8 @@ try {
   node `failed` decides on must be `optional: true`, or its red result
   would block the branch before the condition is read; `dag` refuses the
   graph otherwise and says which node to mark.
+- `agentCheck`: a condition that asks an engine for a scored check before the
+  graph continues; its confidence and evidence stay in the decision record.
 - `isolated`: run a step in its own worktree and branch.
 
 **Review inside it**
@@ -332,8 +334,9 @@ try {
 
 ## Things that catch people out
 
-- **`run` starts a fresh record.** It does not resume. Restarting a killed
-  run is the supervised runner's job, in `@obversa/runner`.
+- **`run` starts a fresh record.** It does not resume. The supervised
+  runner in `@obversa/runner` restarts a killed run from a graph definition
+  and a host module, not from a `run` file.
 - **Every attempt has a budget.** An overrun comes back as a typed result,
   not a hang; read the outcome rather than waiting on it.
 - **The runtime imports no engine.** Nothing runs until your program hands

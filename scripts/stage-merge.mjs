@@ -49,6 +49,7 @@ export const stageBranches = {
   F30: 'fix/engine-owner-cleanup',
   F31: 'fix/runtime-node-timeout',
   F32: 'fix/engine-codex-timeout',
+  F47: 'feat/remove-opencode-test-hook',
   F33: 'fix/tournament-node-test',
   D36: 'feat/teams',
   D45: 'docs/whole-file-examples',
@@ -63,6 +64,16 @@ export const stageBranches = {
   F38: 'feat/release-1-0-0-cut',
   D50: 'feat/run-monitor',
   F46: 'docs/stage-f46-use-cases',
+  F44: 'feat/fixture-free-examples',
+  F43: 'docs/stage-f43-resume-sentences',
+  F48: 'feat/runner-restart-race',
+  F55: 'feat/surfaces-rewrite',
+  F56: 'feat/surfaces-workflow-example',
+  F57: 'feat/surfaces-block-identity',
+  F50: 'docs/stage-f50-review-panel-page',
+  F53: 'docs/stage-f53-family-claim',
+  F45: 'release/stage-f45-cut',
+  F52: 'feat/model-identity-proof',
 };
 
 export function manageStage(args, options = {}) {

@@ -113,10 +113,6 @@ const KNOWN_DEBT = [
     why: 'a span of feature-delivery.ts: the order alone, its imports elsewhere',
   },
   {
-    page: 'concepts/surfaces.mdx', fault: 'wholefile', owner: 'D47',
-    why: 'its block names examples/hello-surface.mjs, a file that does not exist; the surfaces page gets a whole file that runs',
-  },
-  {
     page: 'graphs/contract.mdx', fault: 'wholefile', owner: 'D47',
     why: 'the second block is the contract types imported and unused; custom-graph.ts already shows the whole',
   },

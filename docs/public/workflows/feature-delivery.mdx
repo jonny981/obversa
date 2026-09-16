@@ -1,42 +1,33 @@
 ---
 title: "A feature from written issue to approval"
-description: "Take one written issue through analysis, implementation, a real test run, a review panel, a bounded repair, and an approval bound to the exact bytes."
+description: "Take one written issue through analysis, implementation, a real test run, a review panel, a bounded repair, and a person approval."
 ---
 
-This file takes one change from a written request to an approved result
-with no model account. The first draft passes its own tests but
-misses a requirement. The review panel catches the miss and sends it back.
-The workflow repairs the work, proves it again, and approves the exact final
-bytes.
+This file takes one change from a written request to a person who can approve
+it. Model seats analyse the work, write the source and tests, and review the
+result. A command gate runs the tests before the review panel and a bounded
+repair sends rejected work back to `implement`.
 
 ## Graph
 
-1. The `analyse` stage turns the issue into typed acceptance criteria
-   before any code runs. Work with no accepted criteria fails the workflow.
-2. The `implement` stage writes the change as real files: `src/retry.js`
-   and its tests. The first draft covers two of the three criteria.
+1. The `analyse` stage reads the brief and names the accepted retry criteria
+   before implementation starts.
+2. The `implement` stage writes `src/retry.js` and `test/retry.test.js`.
 3. The `test` stage runs the tests as a command gate. The workflow advances
    only when the command exits 0, never on a self-report.
-4. The `review` stage is a panel of three reviewers, and two votes pass it.
-   Round one fails with findings, and the panel sends them back to
-   `implement` as a kickback, bounded by the workflow's kickback budget.
-5. The re-run of `implement` is the repair: it reads the last review's
-   findings and covers the third criterion. The `test` and `review` stages
-   re-run with it, so nothing passes on the strength of the fix alone.
-6. The `approve` stage binds the approval to the sha256 of the final
-   source. The request, the claim, the answer and the digest are durable
-   events in an approval record beside the run record. The stage reads the
-   answer, and a no fails the workflow. The small approval graph in the
-   source exists so the stored callback client can open its record; it is
-   not the workflow's own graph.
+4. The `review` stage asks three model seats to read the source and tests.
+   Two accepts pass the panel; a failed panel sends its findings back to
+   `implement` within the kickback budget.
+5. The `approve` stage pauses for a person. The answer is recorded beside the
+   run record, and a refusal fails the workflow.
 
 ## Contract
 
 | Item | Value |
 | --- | --- |
 | Input | One written issue |
-| Output | A pass result and an approved change |
-| Permissions | Writes only inside its own temporary directory. The test stage starts one `node --test` child process that inherits the run environment. No network access |
+| Output | A result and a recorded approval decision |
+| Permissions | Model seats write inside the run workspace. The test stage starts one `node --test` child process |
 | Limit | Two kickbacks |
 | Evidence | One JSON result on standard output and one JSONL run record read back before exit |
 
@@ -44,520 +35,234 @@ bytes.
 
 Copy `examples/feature-delivery.ts` from the repository.
 
-The example imports only the public package exports.
+The example imports only public package exports. It uses Claude and Codex seat
+helpers directly, so copying this file does not require a second local module.
+
+In that directory, create `package.json` with `"type": "module"`, then run
+the install command above before running the copied file.
+
+```bash
+npm install @obversa/runtime @obversa/engine-claude-cli @obversa/engine-codex
+```
 
 ```ts
-import { createHash } from 'node:crypto';
-import { mkdir, mkdtemp, readFile, realpath, rm, writeFile } from 'node:fs/promises';
-import { tmpdir } from 'node:os';
-import { join } from 'node:path';
-
+import { claude } from '@obversa/engine-claude-cli';
+import { codex } from '@obversa/engine-codex';
+import { realpathSync } from 'node:fs';
+import { basename } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import {
+  agentJob,
+  approval,
   commandSucceeds,
-  compileGraph,
-  createCallbackGate,
-  createStoredCallbackClient,
-  dagGraphType,
-  defineJob,
-  fnJob,
   gateJob,
-  persistRunDefinition,
   pipeline,
-  resolveGraphPlan,
   reviewPanel,
   revisionRequest,
   run,
-  type JobContext,
-  type Sha256Digest,
+  type Engine,
+  type Job,
+  type Outcome,
 } from '@obversa/runtime';
-import { defineGraphDefinition } from '@obversa/runtime/testing';
-import { createLocalRunStorage } from '@obversa/runtime/storage/local';
 
-// The request this workflow delivers. A host reads it from an issue tracker; the
-// stages below see it only through the criteria the analyse stage accepts.
-const ISSUE =
-  'The checkout client must retry a failed request, must cap how many ' +
-  'times it retries, and must stop retrying when the caller aborts.';
-
-interface Criterion {
-  readonly id: string;
-  readonly need: string;
-  readonly match: string;
+export interface FeatureDeliveryEngines {
+  readonly analyse: Engine;
+  readonly implement: Engine;
+  readonly correctness: Engine;
+  readonly tests: Engine;
+  readonly api: Engine;
 }
 
-const CATALOG: readonly Criterion[] = [
-  { id: 'retry', need: 'retries a failing request until it succeeds', match: 'retry' },
-  { id: 'cap', need: 'caps the retry attempts', match: 'cap' },
-  { id: 'abort', need: 'stops when the caller aborts', match: 'abort' },
-];
+export const FEATURE_BRIEF =
+  'Build a retry helper that retries failed requests, caps attempts, and stops when the caller aborts.';
 
-function acceptedCriteria(ctx: JobContext): readonly Criterion[] {
-  const value = ctx.state['criteria'];
-  return Array.isArray(value) ? (value as readonly Criterion[]) : [];
-}
-
-// The approval record: the request, the claim, the answer and the digest are
-// durable events in their own store beside the run record, so a refused
-// approval is on the record, not in memory. The small approval graph below
-// exists so the stored callback client can open its record; it is not the
-// workflow's own graph.
-const APPROVAL_RUN_ID = 'feature-delivery-approval';
-const APPROVAL_STORAGE_POLICY = {
-  schemaVersion: 1,
-  maxEventPayloadBytes: 64_000,
-  maxAppendBatchBytes: 128_000,
-  maxArtifactBytes: 1_000_000,
-  maxTotalArtifactBytesPerRun: 4_000_000,
-  retention: 'until-run-delete',
-  sensitiveContent: {
-    marked: 'reject',
-    exact: 'reject',
-    freeText: 'redact-before-hash',
-  },
-} as const;
-const APPROVAL_PACKAGE = {
-  source: 'npm:@example/feature-delivery',
-  version: '1.0.0',
-  digest: `sha256:${'f'.repeat(64)}` as Sha256Digest,
+const realEngines: FeatureDeliveryEngines = {
+  analyse: claude('claude-sonnet-4-5').engine,
+  implement: codex('gpt-5.6-luna').engine,
+  correctness: claude('claude-sonnet-4-5').engine,
+  tests: codex('gpt-5.6-luna').engine,
+  api: claude('claude-sonnet-4-5').engine,
 };
-const approvalGraph = compileGraph(
-  dagGraphType,
-  defineGraphDefinition({
-    id: 'feature-delivery-approval',
-    definitionVersion: 1,
-    data: {
-      globalConcurrency: 1,
-      keyedConcurrency: {},
-      stopOnError: true,
-      retryCapPerNode: 0,
-    },
-    nodes: [{ id: 'approve', data: { kind: 'required', key: null } }],
-    edges: [],
-  }),
-);
-const approvalPlan = resolveGraphPlan(approvalGraph.describe(), {
-  package: APPROVAL_PACKAGE,
-  admission: { package: APPROVAL_PACKAGE, permissions: [] },
-  executionLanes: [],
-});
 
-// The first draft covers retry and cap but not abort — green on its own tests,
-// which is exactly the gap a review panel exists to catch.
-const DRAFT_SOURCE = [
-  'export const MAX_ATTEMPTS = 3;',
-  '',
-  'export async function retry(fn, options = {}) {',
-  '  const attempts = options.attempts ?? MAX_ATTEMPTS;',
-  '  const delayMs = options.delayMs ?? 10;',
-  '  let lastError;',
-  '  for (let used = 0; used < attempts; used += 1) {',
-  '    try {',
-  '      return await fn();',
-  '    } catch (error) {',
-  '      lastError = error;',
-  '      if (used + 1 < attempts) {',
-  '        await new Promise((resolve) => setTimeout(resolve, delayMs));',
-  '      }',
-  '    }',
-  '  }',
-  '  throw lastError;',
-  '}',
-  '',
-].join('\n');
-
-const REPAIRED_SOURCE = [
-  'export const MAX_ATTEMPTS = 3;',
-  '',
-  'export async function retry(fn, options = {}) {',
-  '  const attempts = options.attempts ?? MAX_ATTEMPTS;',
-  '  const delayMs = options.delayMs ?? 10;',
-  '  const signal = options.signal;',
-  '  let lastError;',
-  '  for (let used = 0; used < attempts; used += 1) {',
-  "    if (signal && signal.aborted) {",
-  "      throw new Error('aborted');",
-  '    }',
-  '    try {',
-  '      return await fn();',
-  '    } catch (error) {',
-  '      lastError = error;',
-  '      if (used + 1 < attempts) {',
-  '        await new Promise((resolve) => setTimeout(resolve, delayMs));',
-  '      }',
-  '    }',
-  '  }',
-  '  throw lastError;',
-  '}',
-  '',
-].join('\n');
-
-const DRAFT_TESTS = [
-  "import assert from 'node:assert/strict';",
-  "import test from 'node:test';",
-  "import { retry } from '../src/retry.js';",
-  '',
-  "test('retry: a failing request is retried until it succeeds', async () => {",
-  '  let calls = 0;',
-  '  const value = await retry(async () => {',
-  '    calls += 1;',
-  "    if (calls < 3) throw new Error('flaky');",
-  "    return 'ok';",
-  '  });',
-  "  assert.equal(value, 'ok');",
-  '  assert.equal(calls, 3);',
-  '});',
-  '',
-  "test('cap: the retry attempts are capped', async () => {",
-  '  let calls = 0;',
-  '  await assert.rejects(',
-  '    retry(async () => {',
-  '      calls += 1;',
-  "      throw new Error('down');",
-  '    }),',
-  '    /down/,',
-  '  );',
-  '  assert.equal(calls, 3);',
-  '});',
-  '',
-].join('\n');
-
-const REPAIRED_TESTS = [
-  DRAFT_TESTS,
-  "test('abort: retrying stops when the caller aborts', async () => {",
-  '  const controller = new AbortController();',
-  '  controller.abort();',
-  '  let calls = 0;',
-  '  await assert.rejects(',
-  '    retry(',
-  '      async () => {',
-  '        calls += 1;',
-  "        return 'ok';",
-  '      },',
-  '      { signal: controller.signal },',
-  '    ),',
-  '    /aborted/,',
-  '  );',
-  '  assert.equal(calls, 0);',
-  '});',
-  '',
-].join('\n');
-
-// 1. Analyse: the issue becomes typed, accepted criteria before any code runs.
-const analyse = fnJob('analyse', (ctx) => {
-  const text = ISSUE.toLowerCase();
-  const criteria = CATALOG.filter((criterion) => text.includes(criterion.match));
-  if (!criteria.length) {
-    return { status: 'fail', summary: 'the issue names no deliverable work' };
-  }
-  ctx.state['criteria'] = criteria;
-  return {
-    status: 'pass',
-    summary: `accepted: ${criteria.map((criterion) => criterion.id).join(', ')}`,
-  };
-});
-
-// 2. Implement: writes the change as real files. The first run writes the
-// draft; a kickback re-run reads the review findings and repairs. In a real
-// line this stage is an agentJob with an engine — the plumbing around it is
-// identical.
-const implement = fnJob('implement', async (ctx) => {
-  const criteria = acceptedCriteria(ctx);
-  if (!criteria.length) {
-    return { status: 'fail', summary: 'no accepted criteria to implement' };
-  }
-  const findings = ctx.lastReview?.revision?.findings ?? [];
-  const fixes = new Set(
-    findings
-      .map((finding) => finding.scope)
-      .filter((scope): scope is string => typeof scope === 'string'),
-  );
-  const unsupported = [...fixes].filter((scope) => scope !== 'abort');
-  if (unsupported.length) {
-    return {
-      status: 'fail',
-      summary: `no repair for findings outside the abort criterion: ${unsupported.join(', ')}`,
+function responseOutcome(text: string, target?: string): Outcome {
+  try {
+    const value = JSON.parse(text) as {
+      status?: unknown;
+      summary?: unknown;
+      findings?: unknown;
     };
-  }
-  const repaired = fixes.size > 0;
-  const root = ctx.workspace.dir;
-  await mkdir(join(root, 'src'), { recursive: true });
-  await mkdir(join(root, 'test'), { recursive: true });
-  await writeFile(
-    join(root, 'src/retry.js'),
-    repaired ? REPAIRED_SOURCE : DRAFT_SOURCE,
-  );
-  await writeFile(
-    join(root, 'test/retry.test.js'),
-    repaired ? REPAIRED_TESTS : DRAFT_TESTS,
-  );
-  return {
-    status: 'pass',
-    summary: repaired
-      ? `repaired from review findings: ${[...fixes].join(', ')}`
-      : 'wrote the first draft',
-  };
-});
-
-// 3. Test: a real command gate. The line advances only when the tests exit 0,
-// never on a worker's or a reviewer's self-report.
-const testStage = gateJob(
-  'test',
-  commandSucceeds('node', ['--test', 'test/retry.test.js'], {
-    timeoutMs: 30_000,
-    captureOutput: true,
-  }),
-);
-
-// 4. Review: a panel of three reviewers, two votes required. A failing panel
-// sends its findings back to the implement stage as a kickback.
-function coverageReviewer(
-  name: string,
-  read: (root: string) => Promise<string>,
-  covers: (content: string, criterion: Criterion) => boolean,
-) {
-  return fnJob(name, async (ctx) => {
-    const criteria = acceptedCriteria(ctx);
-    const content = await read(ctx.workspace.dir);
-    const missing = criteria.filter((criterion) => !covers(content, criterion));
-    if (!missing.length) {
+    if (value.status === 'pass') {
       return {
         status: 'pass',
-        summary: `${name}: every accepted criterion is covered`,
+        summary: typeof value.summary === 'string' ? value.summary : 'accepted',
       };
     }
-    return revisionRequest({
-      reason: `${name}: ${missing.length} accepted criterion not covered`,
-      findings: missing.map((criterion) => ({
-        reviewer: name,
-        scope: criterion.id,
-        evidence: `${name} sees no coverage for "${criterion.need}".`,
-      })),
-    });
+    if (value.status === 'revise' && target) {
+      const findings = Array.isArray(value.findings)
+        ? value.findings.map((finding) => ({
+            reviewer: 'agent',
+            severity: 'block' as const,
+            evidence: typeof finding === 'string' ? finding : JSON.stringify(finding),
+          }))
+        : [{ reviewer: 'agent', severity: 'block' as const, evidence: 'the reviewer requested a repair' }];
+      return revisionRequest({
+        target,
+        reason: typeof value.summary === 'string' ? value.summary : 'the reviewer requested a repair',
+        findings,
+      });
+    }
+  } catch {
+    // A plain reply is still useful evidence for an analysis stage.
+  }
+  return { status: 'pass', summary: text.trim().slice(0, 280), data: text };
+}
+
+function worker(
+  label: string,
+  engine: Engine,
+  prompt: string,
+  target?: string,
+): Job {
+  return agentJob({
+    label,
+    engine,
+    prompt,
+    consumeFeedback: target !== undefined,
+    outcome: (text) => responseOutcome(text, target),
   });
 }
 
-const review = reviewPanel({
-  label: 'review-panel',
-  reviewers: [
-    {
-      name: 'correctness',
-      job: coverageReviewer(
-        'correctness',
-        (root) => readFile(join(root, 'src/retry.js'), 'utf8'),
-        (source, criterion) =>
-          criterion.id === 'retry'
-            ? source.includes('async function retry')
-            : criterion.id === 'cap'
-              ? source.includes('attempts')
-              : source.includes('signal'),
-      ),
-    },
-    {
-      name: 'tests',
-      job: coverageReviewer(
-        'tests',
-        (root) => readFile(join(root, 'test/retry.test.js'), 'utf8'),
-        (tests, criterion) => tests.includes(`test('${criterion.id}:`),
-      ),
-    },
-    {
-      name: 'api',
-      job: fnJob('api', async (ctx) => {
-        const source = await readFile(join(ctx.workspace.dir, 'src/retry.js'), 'utf8');
-        const shaped =
-          source.includes('export async function retry') &&
-          source.includes('export const MAX_ATTEMPTS');
-        return shaped
-          ? { status: 'pass', summary: 'api: exports retry and MAX_ATTEMPTS' }
-          : revisionRequest({
-              reason: 'api: module shape is wrong',
-              findings: [
-                {
-                  reviewer: 'api',
-                  scope: 'shape',
-                  evidence: 'src/retry.js must export retry and MAX_ATTEMPTS.',
-                },
-              ],
-            });
-      }),
-    },
-  ],
-  pass: 2,
-  target: 'implement',
-});
-
-// 5. Approve: the change ships only when the responder answers yes. The
-// request carries the sha256 of the final source, so approving anything else
-// would be a different request. The request, the claim, the answer and the
-// digest are durable events in the approval record beside the run record.
-// The stage reads the answer: a no fails the workflow with the reason. A host
-// swaps the scripted submit for a human responder; the request, digest and
-// claim protocol are the same.
-const approve = fnJob('approve', async (ctx) => {
-  const bytes = await readFile(join(ctx.workspace.dir, 'src/retry.js'));
-  const sha256 = createHash('sha256').update(bytes).digest('hex');
-  const storage = createLocalRunStorage({
-    directory: join(ctx.workspace.dir, 'approval-record'),
-    namespace: 'feature-delivery-example',
-    policy: APPROVAL_STORAGE_POLICY,
-  });
-  await persistRunDefinition(storage, {
-    runId: APPROVAL_RUN_ID,
-    eventId: 'feature-delivery-approval-started',
-    timestamp: '2026-01-01T00:00:00.000Z',
-    graphDefinition: approvalGraph.definition,
-    resolvedPlan: approvalPlan,
-    resolvedInputs: {},
-    workspaceBinding: null,
-    hostBinding: null,
-  });
-  const request = createCallbackGate({
-    gateId: 'ship-change',
-    gateVersion: 1,
-    decisionText: 'Approve shipping this exact change?',
-    responseSchema: {
-      type: 'object',
-      properties: { approved: { type: 'boolean' } },
-      required: ['approved'],
-    },
-    input: { file: 'src/retry.js', sha256 },
-  });
-  const client = await createStoredCallbackClient(storage, APPROVAL_RUN_ID);
-  await client.post(request);
-  const claim = await client.claim(request.requestId, 'release-owner');
-  if (!claim.ok) {
-    return { status: 'fail', summary: `the approval could not be claimed: ${claim.kind}` };
-  }
-  const submitted = await client.submit(
-    request.requestId,
-    claim.claimToken,
-    'release-owner',
-    request.digest,
-    { approved: true },
-    { id: 'release-owner', kind: 'human' },
+export function createFeatureDelivery(
+  engines: FeatureDeliveryEngines = realEngines,
+): Job {
+  const analyse = worker(
+    'analyse',
+    engines.analyse,
+    `Read this brief: ${FEATURE_BRIEF}
+Define the accepted criteria for a retry helper:
+- a failed request is retried until it succeeds;
+- retry attempts are capped;
+- an aborted caller stops the retry.
+Write no source or test files. Reply with JSON containing status "pass" and a short summary.`,
   );
-  if (!submitted.ok) {
-    return { status: 'fail', summary: `the approval was not submitted: ${submitted.reason}` };
-  }
-  const answer = submitted.response as { approved?: unknown };
-  if (answer.approved !== true) {
-    return {
-      status: 'fail',
-      summary: 'the approver answered no, so the change does not ship',
-    };
-  }
-  return {
-    status: 'pass',
-    summary: `approved src/retry.js (${sha256.slice(0, 12)})`,
-  };
-});
 
-const featureDelivery = defineJob(
-  pipeline(
+  const implement = worker(
+    'implement',
+    engines.implement,
+    `Implement the accepted retry criteria in src/retry.js and test/retry.test.js.
+On the first pass, write tests for retrying and the attempt cap, then write the matching source.
+When review feedback names a missing criterion, add that test and repair the source.
+Run no command; the test stage runs the declared command. Reply with JSON containing status "pass" and a short summary.`,
+    'implement',
+  );
+
+  const test = gateJob(
+    'test',
+    commandSucceeds('node', ['--test', 'test/retry.test.js'], {
+      timeoutMs: 30_000,
+      captureOutput: true,
+    }),
+  );
+
+  const review = reviewPanel({
+    label: 'review-panel',
+    reviewers: [
+      {
+        name: 'correctness',
+        job: worker(
+          'correctness',
+          engines.correctness,
+          `Read src/retry.js against the accepted retry criteria. Check retrying, the attempt cap, and abort handling.
+Reply with JSON: status "pass" when all three are implemented, or status "revise" with a findings array naming each missing criterion.`,
+          'implement',
+        ),
+      },
+      {
+        name: 'tests',
+        job: worker(
+          'tests',
+          engines.tests,
+          `Read test/retry.test.js against the accepted retry criteria.
+Reply with JSON: status "pass" when the tests cover retrying, the attempt cap, and abort handling, or status "revise" with a findings array naming each missing test.`,
+          'implement',
+        ),
+      },
+      {
+        name: 'api',
+        job: worker(
+          'api',
+          engines.api,
+          `Read src/retry.js as a public module. Check that it exports retry and MAX_ATTEMPTS and keeps the function usable with an AbortSignal.
+Reply with JSON: status "pass" when the module shape is correct, or status "revise" with a findings array.`,
+          'implement',
+        ),
+      },
+    ],
+    pass: 2,
+    target: 'implement',
+  });
+
+  const approve = approval('approve', {
+    question: 'Approve shipping the retry helper and its tests?',
+    target: 'implement',
+  });
+
+  return pipeline(
     'feature-delivery',
     [
       { name: 'analyse', job: analyse },
       { name: 'implement', job: implement },
-      { name: 'test', job: testStage },
+      { name: 'test', job: test },
       { name: 'review', job: review },
       { name: 'approve', job: approve },
     ],
     { maxKickbacks: 2 },
-  ),
-);
-
-interface RecordedEvent {
-  kind?: string;
-  label?: string;
-  accepted?: boolean;
+  );
 }
 
-async function main(): Promise<void> {
-  const workspace = await realpath(await mkdtemp(join(tmpdir(), 'feature-delivery-')));
-  try {
-    const result = await run(featureDelivery, {
-      cwd: workspace,
-      runId: 'feature-delivery-example',
-      recordTo: 'auto',
-    });
-    const events: RecordedEvent[] = result.recordPath
-      ? (await readFile(result.recordPath, 'utf8'))
-          .split('\n')
-          .filter(Boolean)
-          .map((line) => JSON.parse(line) as RecordedEvent)
-      : [];
-    console.log(
-      JSON.stringify(
-        {
-          status: result.outcome.status,
-          implementRuns: events.filter(
-            (event) => event.kind === 'job:end' && event.label === 'implement',
-          ).length,
-          reviewRounds: events.filter(
-            (event) => event.kind === 'job:end' && event.label === 'review-panel',
-          ).length,
-          acceptedKickbacks: events.filter(
-            (event) => event.kind === 'dag:kickback' && event.accepted === true,
-          ).length,
-        },
-        null,
-        2,
-      ),
-    );
-    if (result.outcome.status !== 'pass') process.exitCode = 1;
-  } finally {
-    await rm(workspace, { recursive: true, force: true });
-  }
+// Resolve both paths because a symlink can change the spelling of one file.
+const entryPath = process.argv[1];
+const modulePath = fileURLToPath(import.meta.url);
+if (entryPath && realpathSync(entryPath) === realpathSync(modulePath)) {
+  const result = await run(createFeatureDelivery(), { recordTo: 'auto' });
+  console.log(JSON.stringify({ status: result.outcome.status }, null, 2));
+  if (result.outcome.status === 'fail') process.exitCode = 1;
+} else if (entryPath && basename(entryPath) === basename(modulePath)) {
+  console.error('This example was started through a path that could not be matched to its module. Run the copied file directly.');
+  process.exitCode = 1;
 }
-
-void main();
 ```
 
 ## Run the workflow
-
 
 The result is:
 
 ```json
 {
-  "status": "pass",
-  "implementRuns": 2,
-  "reviewRounds": 2,
-  "acceptedKickbacks": 1
+  "status": "paused"
 }
 ```
 
-The workflow reads its own record back before it exits. `implementRuns` and
-`reviewRounds` count the recorded stage runs, and `acceptedKickbacks`
-counts the accepted `dag:kickback` events, so the numbers come from the
-record rather than from memory. The approval answer lands in its own
-durable record beside the run record.
+The run pauses at `approve` until a person answers through the run's callback
+client. `recordTo: 'auto'` writes the event record beside the run workspace.
 
-After you copy the source into a project that has `@obversa/runtime` and
-`tsx` installed, `pnpm exec tsx feature-delivery.ts` runs the same workflow.
+After you copy the source into a project that has `@obversa/runtime`, both
+engine plugins and `tsx` installed, `pnpm exec tsx feature-delivery.ts` runs
+the same workflow.
 
 ## Failure behavior
 
 The workflow allows two kickbacks. If the panel keeps rejecting the work, the
-budget is spent, the review's failed verdict stands, and the process exits
-with code 1. A refused approval fails the workflow the same way: the approver
-who answers no stops the ship, and the no is a durable event in the
-approval record. The workflow never advances past a failing test command, so an
-unproven draft cannot reach the panel or the approval.
+budget is spent and the review's failed verdict stands. A refused approval
+fails the workflow. The workflow never advances past a failing test command.
 
 ## Pause, resume, and retry behavior
 
-This line does not pause and stores nothing outside its own temporary
-directory, which is removed when it exits. It changes nothing a reader owns,
-so a full retry from the start is safe.
+The approval stage pauses until a person answers. The event record keeps the
+stage results and the answer so a host can inspect the decision.
 
 ## Engine lanes
 
-This line uses function jobs. It does not call an engine, and it needs no
-model account. Each stage names where an engine goes: replace `implement`'s
-`fnJob` with `agentJob` and an engine, and the same workflow drives a model that
-writes the change; replace the panel's reviewer jobs with `agentCheck`
-conditions and models read the code; put a person behind the approval gate
-in place of the scripted submit, answering through the same claim and
-digest protocol against the same record. The stages, the kickback, and the
-records stay the same.
+The file uses Claude for analysis, correctness and API review, and Codex for
+implementation and test review. The command gate remains a local check, and
+the person gate remains a callback handled by the host.

@@ -57,10 +57,24 @@ export function seatIdentity(seat: TeamSeat): TeamSeat['identity'] {
 }
 
 export function assertDistinctSeats(seats: readonly TeamSeat[]): void {
-  const families = seats.map((seat) => seatIdentity(seat).modelFamily);
-  const duplicates = families.filter((family, index) => families.indexOf(family) !== index);
-  if (duplicates.length) {
-    throw new TypeError(`model family must be distinct per seat: ${[...new Set(duplicates)].join(', ')}`);
+  const identities = seats.map((seat, index) => {
+    try {
+      return seatIdentity(seat);
+    } catch (cause) {
+      const message = cause instanceof Error ? cause.message : 'invalid engine identity';
+      throw new TypeError(`seat ${index + 1} has an invalid engine identity: ${message}`, { cause });
+    }
+  });
+  for (let leftIndex = 0; leftIndex < identities.length; leftIndex += 1) {
+    for (let rightIndex = leftIndex + 1; rightIndex < identities.length; rightIndex += 1) {
+      const left = identities[leftIndex]!;
+      const right = identities[rightIndex]!;
+      const sameFamily = left.modelFamily === right.modelFamily;
+      if (!sameFamily) continue;
+      throw new TypeError(
+        `seats ${leftIndex + 1} and ${rightIndex + 1} report the same model family ${left.modelFamily}; model family must be distinct per seat`,
+      );
+    }
   }
 }
 

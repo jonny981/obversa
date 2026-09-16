@@ -1507,7 +1507,14 @@ process.stdout.write(JSON.stringify(await handle.done));
         definition: { ...options.definition, resolvedInputs: {
           child: true, delayMs: path === 'stop' || path === 'timeout' ? 4_000 : 10, crash: path === 'crash',
         } },
-        limits: { timeoutMs: path === 'timeout' ? 1_000 : 2_000, maxDispatches: path === 'budget' ? 1 : 10 },
+        // The crash path is about the restart budget, not the clock: its run
+        // timeout is one the path cannot reach, so under load the only
+        // terminal cause available to it is RESTART_EXHAUSTED. The timeout
+        // path keeps the one second that is its whole point.
+        limits: {
+          timeoutMs: path === 'timeout' ? 1_000 : path === 'crash' ? 120_000 : 2_000,
+          maxDispatches: path === 'budget' ? 1 : 10,
+        },
         restart: { ...options.restart, maxRestarts: path === 'crash' ? 1 : 0 },
       });
       const childPath = join(options.directory, 'scratch/first.child');

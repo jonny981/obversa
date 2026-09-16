@@ -127,6 +127,10 @@ export interface OpenCodeCliEngineOptions {
   readonly environment?: Readonly<Record<string, string>>;
   /** Exact provider-keyed OpenCode auth data copied into the child environment. */
   readonly auth?: JsonObject;
+  /** Extra directories the managed-config check also reads, beyond the real
+   * system paths. Production callers pass none; a caller must pass a
+   * directory deliberately, so an ambient environment variable cannot. */
+  readonly managedConfigDirectories?: readonly string[];
 }
 
 export interface OpenCodeSeatOptions {
@@ -146,7 +150,7 @@ export interface OpenCodeSeat {
 /** Create the OpenCode seat used by declarative team workflows. */
 export function opencode(modelName: string, options: OpenCodeSeatOptions): OpenCodeSeat {
   const selected = model(modelName);
-  const modelFamily = selected.value.slice(selected.provider.length + 1);
+  const modelFamily = familyForModel(selected.value.slice(selected.provider.length + 1));
   return {
     engine: new OpenCodeCliEngine({
       executable: options.executable,
@@ -243,6 +247,12 @@ function model(value: unknown): { readonly value: string; readonly provider: str
     throw new TypeError('OpenCode request model must use provider/model format');
   }
   return Object.freeze({ value: checked, provider: checked.slice(0, slash) });
+}
+
+function familyForModel(identifier: string): string {
+  const family = identifier.split('-', 1)[0]?.trim().toLowerCase() ?? '';
+  if (!family) throw new TypeError('OpenCode model family must not be empty');
+  return family;
 }
 
 function providerForModel(
@@ -349,15 +359,16 @@ function authValue(value: JsonObject | undefined): JsonObject {
   return checked;
 }
 
-function managedConfigSources(): readonly string[] {
+/** The managed-config files a machine may control, from the real system
+ * locations plus any extra directories the caller supplies. Production
+ * callers pass no extras; tests pass their fixture directory. */
+function managedConfigSources(extraDirectories: readonly string[] = []): readonly string[] {
   const systemDirectory = process.platform === 'darwin'
     ? '/Library/Application Support/opencode'
     : process.platform === 'win32'
       ? 'C:\\ProgramData\\opencode'
       : '/etc/opencode';
-  const directories = [systemDirectory];
-  const testDirectory = process.env.OPENCODE_TEST_MANAGED_CONFIG_DIR;
-  if (testDirectory !== undefined) directories.push(testDirectory);
+  const directories = [systemDirectory, ...extraDirectories];
   const sources = directories.flatMap((directory) => [
     join(directory, 'opencode.json'),
     join(directory, 'opencode.jsonc'),
@@ -381,8 +392,15 @@ function managedConfigSources(): readonly string[] {
   return Object.freeze(sources);
 }
 
-function assertNoManagedConfig(): void {
-  const source = managedConfigSources().find((candidate) => existsSync(candidate));
+/** The first managed-config file that exists on disk, or undefined. Pure: it
+ * reads only the source list it is given. */
+function findManagedConfig(sources: readonly string[]): string | undefined {
+  return sources.find((candidate) => existsSync(candidate));
+}
+
+/** Refuse to run when a managed config file exists, naming the exact file. */
+function assertNoManagedConfig(sources: readonly string[]): void {
+  const source = findManagedConfig(sources);
   if (source !== undefined) {
     throw new TypeError(`managed OpenCode config is not isolated: ${source}`);
   }
@@ -1107,6 +1125,8 @@ function transportFailure(
   return Object.freeze({ kind, message, exitCode });
 }
 
+export { assertNoManagedConfig, findManagedConfig, managedConfigSources };
+
 export class OpenCodeCliEngine implements Engine {
   readonly name = 'opencode-cli';
   readonly #executable: string;
@@ -1143,6 +1163,9 @@ export class OpenCodeCliEngine implements Engine {
     this.#environment = selectedEnvironment(options.environment);
     this.#auth = authValue(options.auth);
     this.#authRedactions = authRedactions(this.#auth);
+    const managedConfigDirectories = Object.freeze([
+      ...(options.managedConfigDirectories ?? []),
+    ]);
     this.#options = Object.freeze({
       executable: this.#executable,
       version: this.#version,
@@ -1151,6 +1174,9 @@ export class OpenCodeCliEngine implements Engine {
         ? {}
         : { environment: this.#environment }),
       ...(Object.keys(this.#auth).length === 0 ? {} : { auth: this.#auth }),
+      ...(managedConfigDirectories.length === 0
+        ? {}
+        : { managedConfigDirectories }),
     });
   }
 
@@ -1163,7 +1189,7 @@ export class OpenCodeCliEngine implements Engine {
     let normalized: AgentRequest;
     let selected: EngineSelectionRecord;
     try {
-      assertNoManagedConfig();
+      assertNoManagedConfig(managedConfigSources(this.#options.managedConfigDirectories));
       const selectedModel = model(request.model);
       const selectedProvider = providerForModel(selectedModel, this.#identity);
       const capabilities = requestedCapabilities({ ...request, prompt: '' });
@@ -1210,7 +1236,6 @@ export class OpenCodeCliEngine implements Engine {
       let validationFailure: unknown;
       try {
         buildOpenCodeInvocation(normalized, this.#options, validationDirectory);
-        assertNoManagedConfig();
       } catch (error) {
         validationFailed = true;
         validationFailure = error instanceof TypeError || error instanceof EngineError
@@ -1264,7 +1289,11 @@ export class OpenCodeCliEngine implements Engine {
     let versionFailure: unknown;
     try {
       const invocation = buildOpenCodeInvocation(request, this.#options, directory);
-      assertNoManagedConfig();
+      // Close the window between the admission check and this spawn: the
+      // workspace walk above takes real time and a machine-managed config
+      // can arrive inside it. The between-admission-and-spawn case in the
+      // plugin's spec demonstrates the arrival on the run path.
+      assertNoManagedConfig(managedConfigSources(this.#options.managedConfigDirectories));
       const command = await runOwnedCommand({
         executable: this.#executable,
         args: ['--version'],
@@ -1394,7 +1423,11 @@ export class OpenCodeCliEngine implements Engine {
         this.#options,
         directory,
       );
-      assertNoManagedConfig();
+      // Close the window between the admission check and this spawn: a
+      // machine-managed config can arrive after admission passes. The
+      // between-admission-and-spawn case in the plugin's spec
+      // demonstrates the arrival.
+      assertNoManagedConfig(managedConfigSources(this.#options.managedConfigDirectories));
       const command = await runOwnedCommand({
         executable: this.#executable,
         args: invocation.args,

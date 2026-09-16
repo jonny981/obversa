@@ -13,6 +13,8 @@
   <img src="https://img.shields.io/badge/license-MIT-blue" alt="license: MIT">
   <img src="https://img.shields.io/badge/node-%3E%3D22.12-3c873a" alt="node >=22.12">
   <img src="https://img.shields.io/badge/TypeScript-strict-3178c6" alt="TypeScript strict">
+  <a href="https://www.npmjs.com/package/@obversa/runtime"><img src="https://img.shields.io/npm/v/@obversa/runtime" alt="npm: @obversa/runtime"></a>
+  <a href="https://github.com/jonny981/obversa/actions/workflows/ci.yml"><img src="https://github.com/jonny981/obversa/actions/workflows/ci.yml/badge.svg" alt="CI"></a>
 </p>
 
 Agent frameworks give you one clever session. When it dies, it starts over.
@@ -23,11 +25,20 @@ vote when one opinion is not enough, and a person to answer to.
 That is the layer Obversa owns. You describe the work the way you would describe
 it to people, and the runtime runs it one bounded engine call at a time.
 
+A domain-specific harness is a workflow for one job: the tools, the rules and
+the checks that make a model useful in one field. Obversa is the runtime you
+write that harness in, on the models you already use. The reviews and the
+person at the gate are part of the file.
+
 Every step appends events to a file on disk, with its artifacts beside them.
 That record is the whole story: no server, no database.
 
+If you searched for a software factory, a product factory or an agent
+pipeline: what you write here is a workflow with a review that sends work
+back and a person at the merge.
+
 `@obversa/runner` supervises a run in its own worker. After a crash it starts
-a fresh worker that reads the record and carries on. Steps that finished are
+a fresh worker that reads its own record and carries on. Steps that finished are
 never repeated. A step that was mid-flight when the worker died runs again
 only if its binding declares it safe to retry; otherwise the run pauses and
 asks a person to reconcile it before it continues, so uncertain work is never
@@ -57,8 +68,18 @@ npm install @obversa/runtime @obversa/teams @obversa/engine-claude-cli @obversa/
 ```ts
 import { claude } from '@obversa/engine-claude-cli';
 import { codex } from '@obversa/engine-codex';
+import { realpathSync } from 'node:fs';
+import { basename } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { run } from '@obversa/runtime';
-import { fromFile, person, stage, workflow } from '@obversa/teams';
+import { fromFile, person, stage, workflow, type TeamSeat } from '@obversa/teams';
+
+export interface FeatureDeliveryEngines {
+  readonly claude: (model: string) => TeamSeat;
+  readonly codex: (model: string) => TeamSeat;
+}
+
+const realEngines: FeatureDeliveryEngines = { claude, codex };
 
 /**
  * A feature, delivered the way a team delivers one. The roles are named once;
@@ -66,96 +87,105 @@ import { fromFile, person, stage, workflow } from '@obversa/teams';
  * reads it, where a red result goes back to. Inference happens only where a
  * role is named; every other stage is a command or a person.
  */
-const team = workflow('feature-delivery', {
-  brief: fromFile('briefs/triple.md'),
-  options: { timeout: '10m' },
+export function createFeatureDelivery(engines: FeatureDeliveryEngines = realEngines) {
+  return workflow('feature-delivery', {
+    brief: fromFile('briefs/triple.md'),
+    options: { timeout: '10m' },
 
-  roles: {
-    analyse: claude('claude-sonnet-4-5'),
-    implement: codex('gpt-5.6-luna'),
-    'research-review': [codex('gpt-5.6-luna')],
-    'code-review': [claude('claude-sonnet-4-5')],
-    approve: person('Ship this change?'),
-  },
+    roles: {
+      analyse: engines.claude('claude-sonnet-4-5'),
+      implement: engines.codex('gpt-5.6-luna'),
+      'research-review': [engines.codex('gpt-5.6-luna')],
+      'code-review': [engines.claude('claude-sonnet-4-5')],
+      approve: person('Ship this change?'),
+    },
 
-  stages: [
-    stage('research-context', {
-      agent: 'analyse',
-      writes: 'team-output/research-context.md',
-      desc: 'Read the workspace and write down what the change touches.',
-      gate: 'The context note is in the workspace and a reviewer has accepted it.',
-      reviewedBy: 'research-review',
-      retry: 3,
-    }),
+    stages: [
+      stage('research-context', {
+        agent: 'analyse',
+        writes: 'team-output/research-context.md',
+        desc: 'Read the workspace and write down what the change touches.',
+        gate: 'The context note is in the workspace and a reviewer has accepted it.',
+        reviewedBy: 'research-review',
+        retry: 3,
+      }),
 
-    stage('research-requirements', {
-      agent: 'analyse',
-      writes: 'team-output/research-requirements.md',
-      desc: 'Turn the brief and the context note into requirements, one REQ-n per line.',
-      gate: 'The requirements note is in the workspace and a reviewer has accepted it.',
-      reviewedBy: 'research-review',
-      retry: 3,
-    }),
+      stage('research-requirements', {
+        agent: 'analyse',
+        writes: 'team-output/research-requirements.md',
+        desc: 'Turn the brief and the context note into requirements, one REQ-n per line.',
+        gate: 'The requirements note is in the workspace and a reviewer has accepted it.',
+        reviewedBy: 'research-review',
+        retry: 3,
+      }),
 
-    stage('plan', {
-      agent: 'analyse',
-      writes: 'team-output/plan.md',
-      desc: 'Write an executable plan from the requirements, one check per REQ-n.',
-      gate: 'Every requirement has a check in the plan.',
-      reviewedBy: 'research-review',
-      retry: 3,
-    }),
+      stage('plan', {
+        agent: 'analyse',
+        writes: 'team-output/plan.md',
+        desc: 'Write an executable plan from the requirements, one check per REQ-n.',
+        gate: 'Every requirement has a check in the plan.',
+        reviewedBy: 'research-review',
+        retry: 3,
+      }),
 
-    stage('tests-first', {
-      agent: 'implement',
-      writes: 'test/triple.test.mjs',
-      desc: 'Write the declared test files from the accepted plan before any implementation exists.',
-      gate: 'Every declared test file exists and covers the plan.',
-      reviewedBy: 'code-review',
-      retry: 3,
-    }),
+      stage('tests-first', {
+        agent: 'implement',
+        writes: 'test/triple.test.mjs',
+        desc: 'Write the declared test files from the accepted plan before any implementation exists.',
+        gate: 'Every declared test file exists and covers the plan.',
+        reviewedBy: 'code-review',
+        retry: 3,
+      }),
 
-    stage('implement', {
-      agent: 'implement',
-      writes: 'src/triple.mjs',
-      desc: 'Write the code to the plan and the tests.',
-      gate: 'The source file exists.',
-      retry: 3,
-    }),
+      stage('implement', {
+        agent: 'implement',
+        writes: 'src/triple.mjs',
+        desc: 'Write the code to the plan and the tests.',
+        gate: 'The source file exists.',
+        retry: 3,
+      }),
 
-    stage('test', {
-      run: ['node', '--test', 'test/triple.test.mjs'],
-      desc: 'Run the tests; a red run goes back to implement with the output.',
-      gate: 'The test command exits 0.',
-      sendsBackTo: 'implement',
-    }),
+      stage('test', {
+        run: ['node', '--test', 'test/triple.test.mjs'],
+        desc: 'Run the tests; a red run goes back to implement with the output.',
+        gate: 'The test command exits 0.',
+        sendsBackTo: 'implement',
+      }),
 
-    stage('review', {
-      panel: 'code-review',
-      agree: 1,
-      desc: 'Read the change and the test result against the plan.',
-      gate: 'At least one reviewer has accepted the change.',
-      sendsBackTo: 'implement',
-    }),
+      stage('review', {
+        panel: 'code-review',
+        agree: 1,
+        desc: 'Read the change and the test result against the plan.',
+        gate: 'At least one reviewer has accepted the change.',
+        sendsBackTo: 'implement',
+      }),
 
-    stage('approve', {
-      input: 'approve',
-      desc: 'Put the verified change in front of a person.',
-      gate: 'A person has said yes.',
-    }),
+      stage('approve', {
+        input: 'approve',
+        desc: 'Put the verified change in front of a person.',
+        gate: 'A person has said yes.',
+      }),
 
-    stage('close', {
-      agent: 'analyse',
-      writes: ['team-output/evidence.md', 'team-output/learning.md'],
-      desc: 'Write the evidence of the run and what was learned, from the record alone.',
-      gate: 'Both notes are in the workspace.',
-    }),
-  ],
+      stage('close', {
+        agent: 'analyse',
+        writes: ['team-output/evidence.md', 'team-output/learning.md'],
+        desc: 'Write the evidence of the run and what was learned, from the record alone.',
+        gate: 'Both notes are in the workspace.',
+      }),
+    ],
+  });
+}
 
-});
-
-const result = await run(team);
-console.log(JSON.stringify(result.outcome, null, 2));
+// Resolve both paths because a symlink can change the spelling of one file.
+const entryPath = process.argv[1];
+const modulePath = fileURLToPath(import.meta.url);
+if (entryPath && realpathSync(entryPath) === realpathSync(modulePath)) {
+  const result = await run(createFeatureDelivery());
+  console.log(JSON.stringify(result.outcome, null, 2));
+} else if (entryPath && basename(entryPath) === basename(modulePath)) {
+  console.error('This example was started through a path that could not be matched to its module. Run the copied file directly.');
+  process.exitCode = 1;
+}
 ```
 
 The roles are named once, from the seat helpers the engine plugins export,
@@ -186,10 +216,8 @@ and a reviewer's decision is the file it writes.
 [Feature delivery](https://docs.obversa.ai/workflows/feature-team) shows
 what a real run of this file printed and the files the models wrote; a
 [writer and reviewer](https://docs.obversa.ai/workflows/writer-and-reviewer)
-and a [review panel](https://docs.obversa.ai/workflows/review-panel) are
-the two smaller teams in the same package, and
-[the shape of a real process](https://docs.obversa.ai/workflows/real-process)
-is the full-size one.
+and a [review panel](https://docs.obversa.ai/workflows/review-panel) are the
+other two teams in the same package.
 
 ## Engines
 

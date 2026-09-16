@@ -110,6 +110,7 @@ for (const [stage, branch] of [
   ['F30', 'fix/engine-owner-cleanup'],
   ['F31', 'fix/runtime-node-timeout'],
   ['F32', 'fix/engine-codex-timeout'],
+  ['F47', 'feat/remove-opencode-test-hook'],
   ['F33', 'fix/tournament-node-test'],
   ['D36', 'feat/teams'],
   ['D45', 'docs/whole-file-examples'],
@@ -128,6 +129,16 @@ for (const [stage, branch] of [
   ['F38', 'feat/release-1-0-0-cut'],
   ['D50', 'feat/run-monitor'],
   ['F46', 'docs/stage-f46-use-cases'],
+  ['F44', 'feat/fixture-free-examples'],
+  ['F43', 'docs/stage-f43-resume-sentences'],
+  ['F48', 'feat/runner-restart-race'],
+  ['F55', 'feat/surfaces-rewrite'],
+  ['F56', 'feat/surfaces-workflow-example'],
+  ['F57', 'feat/surfaces-block-identity'],
+  ['F50', 'docs/stage-f50-review-panel-page'],
+  ['F53', 'docs/stage-f53-family-claim'],
+  ['F45', 'release/stage-f45-cut'],
+  ['F52', 'feat/model-identity-proof'],
 ]) {
   test(`${stage} lands from its assigned branch ${branch}`, () => {
     const repository = createRepository({ feature: true, branch });
@@ -184,6 +195,7 @@ for (const [stage, branch] of [
   ['F30', 'feat/graph-forms-v1'],
   ['F31', 'feat/graph-forms-v1'],
   ['F32', 'feat/graph-forms-v1'],
+  ['F47', 'feat/graph-forms-v1'],
   ['F33', 'feat/graph-forms-v1'],
   ['D36', 'feat/graph-forms-v1'],
   ['D45', 'feat/graph-forms-v1'],
@@ -196,6 +208,16 @@ for (const [stage, branch] of [
   ['F38', 'feat/graph-forms-v1'],
   ['D50', 'feat/graph-forms-v1'],
   ['F46', 'feat/graph-forms-v1'],
+  ['F44', 'feat/graph-forms-v1'],
+  ['F43', 'feat/graph-forms-v1'],
+  ['F48', 'feat/factory-v1'],
+  ['F55', 'feat/factory-v1'],
+  ['F56', 'feat/factory-v1'],
+  ['F57', 'feat/factory-v1'],
+  ['F50', 'feat/graph-forms-v1'],
+  ['F53', 'feat/graph-forms-v1'],
+  ['F45', 'feat/graph-forms-v1'],
+  ['F52', 'feat/graph-forms-v1'],
 ]) {
   test(`${stage} refuses the wrong branch ${branch}`, () => {
     const repository = createRepository({ feature: true, branch });
