@@ -15,6 +15,31 @@ import type {
   ProofArtifact,
 } from './types.js';
 import { setMeta } from './describe.js';
+
+/** Shared state key holding every engine answer the run recorded so far.
+ * Written by the runtime beside each engine:usage event; read by workflow
+ * layers that must compare what answered against what was declared. */
+export const RECORDED_ENGINE_USAGE = 'obversa:recorded-engine-usage';
+
+/** One recorded engine answer: the answering model and the job path that
+ * produced it. */
+export interface RecordedEngineUsage {
+  readonly model: string;
+  readonly path: readonly string[];
+}
+
+function recordEngineUsage(
+  ctx: { readonly state: Record<string, unknown> },
+  model: string,
+  path: readonly string[],
+): void {
+  const records = ctx.state[RECORDED_ENGINE_USAGE] as RecordedEngineUsage[] | undefined;
+  if (records === undefined) {
+    ctx.state[RECORDED_ENGINE_USAGE] = [{ model, path: [...path] }];
+  } else {
+    records.push({ model, path: [...path] });
+  }
+}
 import type { AgentResult, EngineRef } from '../engines/engine.js';
 import { resolveEnv } from './env-overlay.js';
 import { LoopError, type LoopErrorCode } from './errors.js';
@@ -228,6 +253,7 @@ async function runAdvisorConsult(
           model: event.model,
           usage: event.usage,
         });
+        recordEngineUsage(ctx, event.model, ctx.path);
       } else if (event.type === 'tool') {
         ctx.emit({
           kind: 'engine:tool',
@@ -365,6 +391,7 @@ export function agentJob(config: AgentJobConfig): Job {
                     model: e.model,
                     usage: e.usage,
                   });
+                  recordEngineUsage(ctx, e.model, path);
                   break;
               }
             },

@@ -14,8 +14,10 @@ export type ScriptStep = (
 export function scriptedEngine(
   name: string,
   steps: readonly ScriptStep[],
+  options: { readonly usageModel?: string } = {},
 ): Engine & { readonly calls: AgentRequest[] } {
   const calls: AgentRequest[] = [];
+  const usageModel = options.usageModel;
   const selection = {
     adapter: 'scripted',
     adapterVersion: '1.0.0',
@@ -28,12 +30,15 @@ export function scriptedEngine(
   return {
     name,
     calls,
-    async run(request, _onEvent, signal): Promise<AgentResult> {
+    async run(request, onEvent, signal): Promise<AgentResult> {
       if (signal.aborted) throw new Error('aborted');
       calls.push(request);
       const step = steps[Math.min(calls.length - 1, steps.length - 1)];
       if (!step) throw new Error(`no scripted response for ${name}`);
       const text = await step(request, calls.length);
+      if (usageModel !== undefined) {
+        onEvent({ type: 'usage', usage: { kind: 'unknown' }, model: usageModel });
+      }
       return {
         parts: [{ kind: 'assistant', text, final: true }],
         usage: { kind: 'unknown' },

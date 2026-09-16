@@ -9,6 +9,16 @@ other published package tracks its own version independently of it.
 
 ## [Unreleased]
 
+### Added
+
+- **Recorded model families:** A panel that requires its reviewers to differ
+  in model family from the writers it reviews now compares what actually
+  answered against what each seat declared. The runtime records every
+  engine answer beside its job path, and the panel refuses when a recorded
+  answer belongs to a family it must differ from, or when an answer carries
+  no readable family at all. The refusal names the seats, their declared
+  families and the answers.
+
 ## [1.0.0] - 2026-09-15
 
 ### Added

@@ -314,6 +314,8 @@ export {
   type AgentRoute,
   type ProofDescriptor,
   type ProofProducer,
+  RECORDED_ENGINE_USAGE,
+  type RecordedEngineUsage,
 } from './core/job.js';
 export {
   reviewPanel,
