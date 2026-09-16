@@ -13,6 +13,7 @@ import {
   type WorkflowStage,
 } from '../src/index.js';
 import { pass, revise, scriptedEngine, seat } from './scripted-engine.js';
+import { createCallbackClient } from '@obversa/runtime';
 
 function nodeMeta(job: unknown): Record<string, unknown> {
   if (typeof job === 'function') {
@@ -651,6 +652,46 @@ describe('declarative teams', () => {
     try {
       await expect(run(job, { cwd: directory, recordTo: 'auto', resume: true, runId: 'resume-auto' }))
         .rejects.toThrow(/resume requires an explicit recordTo path/i);
+    } finally {
+      await rm(directory, { recursive: true, force: true });
+    }
+  });
+
+  it('a resumed workflow with a still-pending gate exits at once without re-posting', async () => {
+    const directory = await mkdtemp(join(tmpdir(), 'obversa-f42-gate-'));
+    const recordPath = join(directory, 'record.jsonl');
+    const writer = scriptedEngine('writer', [async (request) => {
+      await writeFile(join(request.cwd!, 'note.md'), 'written\n');
+      return pass('note written');
+    }]);
+    const posts: string[] = [];
+    const base = createCallbackClient();
+    const callbacks = {
+      ...base,
+      post: async (request: Parameters<ReturnType<typeof createCallbackClient>['post']>[0]) => {
+        posts.push(request.requestId);
+        return base.post(request);
+      },
+    } as ReturnType<typeof createCallbackClient>;
+    const job = workflow('resume-gate', {
+      brief: { brief: 'Write one note.', files: ['note.md'] },
+      roles: { writer: seat(writer, 'gpt'), approve: person('Approve the note?') },
+      stages: [
+        stage('write', { agent: 'writer', writes: 'note.md' }),
+        stage('approve', { input: 'approve' }),
+      ],
+    });
+
+    try {
+      const first = await run(job, { cwd: directory, recordTo: recordPath, callbacks });
+      expect(first.outcome.status).toBe('paused');
+      expect(posts).toHaveLength(1);
+      expect(writer.calls).toHaveLength(1);
+
+      const resumed = await run(job, { cwd: directory, recordTo: recordPath, resume: true, callbacks });
+      expect(resumed.outcome.status).toBe('paused');
+      expect(posts).toHaveLength(1);
+      expect(writer.calls).toHaveLength(1);
     } finally {
       await rm(directory, { recursive: true, force: true });
     }

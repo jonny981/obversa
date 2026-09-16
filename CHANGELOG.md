@@ -19,8 +19,12 @@ other published package tracks its own version independently of it.
   public surface.
   Stages whose passing completion is recorded under the same declared
   shape are skipped, interrupted stages re-run, a changed brief restarts
-  from the top, and a person gate re-posts at its recorded position. Two
-  processes resuming one record at once is out of scope.
+  from the top, and a person gate re-posts at its recorded position. A
+  resume that finds the gate still pending unanswered exits with the
+  still-waiting code at once: it reads the record, observes the pending
+  request through the callbacks client, and sends nothing - no model
+  call, no second notification. Two processes resuming one record at once
+  is out of scope.
 
 ## [1.0.0] - 2026-09-15
 

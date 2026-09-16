@@ -573,6 +573,18 @@ function resumeGuard(job: Job, identity: string, label: string): Job {
       if (recorded !== undefined && recordedIdentity === identity) {
         return recorded;
       }
+      if (recorded !== undefined && recorded.status === 'paused') {
+        // A paused gate stays a cheap no-op while its question is still
+        // pending unanswered: exit at once, no re-post, no model call.
+        const request = (recorded.data as { requestId?: string } | undefined);
+        const pending = ctx.callbacks === undefined
+          ? []
+          : await ctx.callbacks.listPending();
+        if (request?.requestId !== undefined
+            && pending.some((candidate) => candidate.requestId === request.requestId)) {
+          return recorded;
+        }
+      }
     }
     ctx.emit({ kind: 'job:start', ts: Date.now(), path: [...ctx.path], label, timeoutMs: ctx.timeoutMs });
     const outcome = await job(ctx);
