@@ -17,6 +17,7 @@ import pTimeout, { TimeoutError } from 'p-timeout';
 import { isDeepStrictEqual } from 'node:util';
 import {
   EngineError,
+  assertReadAccess,
   assistantResult,
   classifyEngineFailure,
   engineSelection,
@@ -149,6 +150,15 @@ export class AnthropicApiEngine implements Engine {
     if (signal.aborted) {
       throw new EngineError({ kind: 'aborted', message: 'anthropic-api admission aborted' });
     }
+    try {
+      assertReadAccess(request);
+    } catch (error) {
+      throw new EngineError({
+        kind: 'invalid-config',
+        message: error instanceof Error ? error.message : 'invalid read access request',
+        cause: error,
+      });
+    }
     this.apiKey();
     if ((request.tools !== undefined && (!Array.isArray(request.tools) || request.tools.length > 0))
       || (request.allowedTools !== undefined
@@ -186,6 +196,15 @@ export class AnthropicApiEngine implements Engine {
     onEvent: EngineEventSink,
     signal: AbortSignal,
   ): Promise<AgentResult> {
+    try {
+      assertReadAccess(req);
+    } catch (error) {
+      throw new EngineError({
+        kind: 'invalid-config',
+        message: error instanceof Error ? error.message : 'invalid read access request',
+        cause: error,
+      });
+    }
     const preflight = req.purpose === 'preflight';
     const client = await this.client();
     const selection = this.selection(req);

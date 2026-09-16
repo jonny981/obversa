@@ -28,7 +28,8 @@ export type EngineConformanceScenario =
   | 'quota'
   | 'transient'
   | 'timeout'
-  | 'invalid-config';
+  | 'invalid-config'
+  | 'read-access';
 
 export interface EngineConformanceFixture {
   readonly request: AgentRequest;
@@ -89,6 +90,9 @@ function requestFor(
     ...(fixture.request.env === undefined
       ? {}
       : { env: { ...fixture.request.env } }),
+    ...(scenario === 'read-access'
+      ? { tools: [], allowedTools: [], workspaceMode: 'read' as const }
+      : {}),
     ...(scenario === 'structured-result'
       ? {
           jsonSchema: {
@@ -339,6 +343,10 @@ export async function runEngineConformance(
       name: `${scenario} failure classification`,
       run: () => expectFailure(fixture, scenario, expected),
     })),
+    {
+      name: 'read workspace requires declared tools',
+      run: () => expectFailure(fixture, 'read-access', 'invalid-config'),
+    },
   ];
 
   const failures: EngineConformanceFailure[] = [];

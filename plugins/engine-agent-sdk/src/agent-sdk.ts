@@ -15,6 +15,7 @@ import type { Memory, MemoryCommand } from '@obversa/memory';
 import {
   CLAUDE_SUBAGENT_TOOLS,
   EngineError,
+  assertReadAccess,
   attemptEnvironment,
   classifyEngineFailure,
   engineSelection,
@@ -79,9 +80,10 @@ export function agentSdkPermissionOptions(
 }
 
 export function agentSdkToolOptions(
-  req: Pick<AgentRequest, 'tools' | 'allowedTools' | 'leaf'>,
+  req: Pick<AgentRequest, 'tools' | 'allowedTools' | 'workspaceMode' | 'leaf'>,
   memory?: Memory,
 ): Pick<SdkOptions, 'tools' | 'allowedTools' | 'disallowedTools'> {
+  assertReadAccess(req);
   return {
     tools: req.tools,
     allowedTools: memory
@@ -208,6 +210,15 @@ export class AgentSdkEngine implements Engine {
     onEvent: EngineEventSink,
     signal: AbortSignal,
   ): Promise<AgentResult> {
+    try {
+      assertReadAccess(req);
+    } catch (error) {
+      throw new EngineError({
+        kind: 'invalid-config',
+        message: error instanceof Error ? error.message : 'invalid read access request',
+        cause: error,
+      });
+    }
     // Lazy import so installs/runs that never touch this engine don't pay for it.
     const { query } = await import('@anthropic-ai/claude-agent-sdk');
 

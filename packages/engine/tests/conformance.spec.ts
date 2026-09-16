@@ -66,6 +66,11 @@ function errorFor(scenario: EngineConformanceScenario): Error | undefined {
       });
     case 'invalid-config':
       return new Error('invalid configuration');
+    case 'read-access':
+      return new EngineError({
+        kind: 'invalid-config',
+        message: 'read workspace requires at least one declared tool',
+      });
     default:
       return undefined;
   }
@@ -158,7 +163,7 @@ describe('public engine conformance kit', () => {
   it('passes a conforming engine across results, usage, tools, stops, and failures', async () => {
     const report = await runEngineConformance(fixture());
 
-    expect(report).toEqual({ ok: true, cases: 16, failures: [] });
+    expect(report).toEqual({ ok: true, cases: 17, failures: [] });
     await expect(assertEngineConformance(fixture())).resolves.toBeUndefined();
   });
 
@@ -193,7 +198,7 @@ describe('public engine conformance kit', () => {
       },
     });
 
-    expect(report).toEqual({ ok: true, cases: 16, failures: [] });
+    expect(report).toEqual({ ok: true, cases: 17, failures: [] });
   });
 
   it('reports a named failure from a deliberately dishonest usage adapter', async () => {

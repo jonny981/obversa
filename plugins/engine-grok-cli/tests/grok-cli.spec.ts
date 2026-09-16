@@ -1187,6 +1187,6 @@ describe('Grok CLI adapter', () => {
       },
     });
 
-    expect(report).toEqual({ ok: true, cases: 16, failures: [] });
+    expect(report).toEqual({ ok: true, cases: 17, failures: [] });
   });
 });

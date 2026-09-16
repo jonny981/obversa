@@ -1854,7 +1854,7 @@ describe('OpenCode CLI adapter', () => {
       },
     });
 
-    expect(report).toEqual({ ok: true, cases: 16, failures: [] });
+    expect(report).toEqual({ ok: true, cases: 17, failures: [] });
   });
 
   it('uses EngineError types for adapter-owned abort and timeout failures', async () => {

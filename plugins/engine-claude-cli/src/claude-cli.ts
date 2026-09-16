@@ -12,6 +12,7 @@ import { isDeepStrictEqual } from 'node:util';
 import {
   CLAUDE_SUBAGENT_TOOLS,
   EngineError,
+  assertReadAccess,
   attemptEnvironment,
   classifyEngineFailure,
   engineSelection,
@@ -53,6 +54,7 @@ export interface ClaudeSeat {
     readonly provider: 'anthropic';
     readonly modelFamily: 'claude';
     readonly model: string;
+    readonly tools: readonly string[];
   };
 }
 
@@ -73,6 +75,7 @@ export function claude(model: string, options: ClaudeSeatOptions = {}): ClaudeSe
       provider: 'anthropic',
       modelFamily: 'claude',
       model,
+      tools: ['Read', 'Edit', 'Bash'],
     },
   };
 }
@@ -253,6 +256,7 @@ export function buildClaudeArgs(
   req: AgentRequest,
   opts: ClaudeCliEngineOptions,
 ): string[] {
+  assertReadAccess(req);
   const model = modelFor(req, opts);
   const args = ['-p', '--output-format', 'stream-json', '--verbose'];
   if (model) args.push('--model', model);

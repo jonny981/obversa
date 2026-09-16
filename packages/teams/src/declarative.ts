@@ -368,10 +368,13 @@ function guardedAgent(
   if (!writes.length) throw new TypeError(`agent stage ${named.name} must declare writes`);
   const target = named.config.sendsBackTo;
   const reviewedBy = 'reviewedBy' in named.config ? named.config.reviewedBy : undefined;
+  const identity = seatIdentity(seat);
   const agent = agentJob({
     label: named.name,
     engine: seat.engine,
-    model: seatIdentity(seat).model,
+    model: identity.model,
+    tools: [...identity.tools],
+    workspaceMode: 'write',
     consumeFeedback: target !== undefined || reviewedBy !== undefined,
     prompt: agentPrompt(brief, named, files, writes),
     outcome: (textValue) => outcomeFromAgentText(textValue, target),

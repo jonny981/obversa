@@ -36,6 +36,7 @@ export function writerReviewerPair(config: PairConfig) {
     `Review the expected files against the brief. ${expectedFilesPrompt(config.files)} Write your review evidence under reviews/reviewer.json.`,
     'writer',
     'reviews/reviewer.json',
+    'read',
   );
   return dag({
     name: 'writer-reviewer-pair',

@@ -49,6 +49,7 @@ export function scriptedSeat(
       provider: 'obversa-example',
       modelFamily,
       model,
+      tools: ['read', 'edit', 'bash'],
     },
     calls,
   };

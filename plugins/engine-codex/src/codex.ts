@@ -15,6 +15,7 @@ import { basename, isAbsolute, join } from 'node:path';
 import { isDeepStrictEqual } from 'node:util';
 import {
   EngineError,
+  assertReadAccess,
   assistantResult,
   attemptEnvironment,
   classifyEngineFailure,
@@ -66,6 +67,7 @@ export interface CodexSeat {
     readonly provider: 'openai';
     readonly modelFamily: 'gpt';
     readonly model: string;
+    readonly tools: readonly string[];
   };
 }
 
@@ -83,6 +85,7 @@ export function codex(model: string, options: CodexSeatOptions = {}): CodexSeat 
       provider: 'openai',
       modelFamily: 'gpt',
       model,
+      tools: ['Read', 'Edit', 'Bash'],
     },
   };
 }
@@ -157,6 +160,7 @@ export function buildCodexArgs(
   opts: CodexEngineOptions,
   outFile: string,
 ): string[] {
+  assertReadAccess(req);
   const model = req.model ?? opts.defaultModel;
   const args = [
     'exec',
@@ -170,7 +174,12 @@ export function buildCodexArgs(
   if (opts.permissionMode === 'bypassPermissions') {
     args.push('--dangerously-bypass-approvals-and-sandbox');
   } else {
-    args.push('-s', opts.sandbox ?? 'read-only');
+    const sandbox = req.workspaceMode === 'read'
+      ? 'read-only'
+      : req.workspaceMode === 'write'
+        ? 'workspace-write'
+        : opts.sandbox ?? 'read-only';
+    args.push('-s', sandbox);
     if (opts.approvalPolicy) args.push('-c', `approval_policy=${opts.approvalPolicy}`);
   }
 

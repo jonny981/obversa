@@ -98,6 +98,16 @@ describe('API static admission', () => {
     expect(bodies).toEqual([]);
   });
 
+  it('refuses a read workspace without declared tools without a provider call', async () => {
+    const { open, bodies } = harness();
+    await expect(open().admit({ ...staticRequest(), workspaceMode: 'read' }, signal()))
+      .rejects.toMatchObject({
+        kind: 'invalid-config',
+        message: 'read workspace requires at least one declared tool',
+      });
+    expect(bodies).toEqual([]);
+  });
+
   it('refuses an aborted admission before local client creation', async () => {
     const controller = new AbortController();
     controller.abort();

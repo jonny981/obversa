@@ -14,6 +14,7 @@ import { isDeepStrictEqual } from 'node:util';
 import {
   EngineError,
   attemptEnvironment,
+  assertReadAccess,
   canonicalJson,
   classifyEngineFailure,
   engineSelection,
@@ -157,6 +158,7 @@ function nullableText(value: unknown, field: string): string | null {
 }
 
 function requestedCapabilities(request: AgentRequest): readonly string[] {
+  assertReadAccess(request);
   return engineSelection({
     adapter: 'grok-cli',
     capabilities: request.tools ?? [],

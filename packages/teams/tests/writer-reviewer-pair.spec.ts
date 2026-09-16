@@ -6,6 +6,7 @@ import { describe, expect, it } from 'vitest';
 import { jobMeta, run } from '@obversa/runtime';
 
 import { writerReviewerPair } from '../src/index.js';
+import type { TeamSeat } from '../src/types.js';
 import { pass, revise, scriptedEngine, seat } from './scripted-engine.js';
 
 const testCommand = {
@@ -76,7 +77,42 @@ describe('writerReviewerPair', () => {
       expect(result.outcome.status).toBe('pass');
       expect(writerEngine.calls).toHaveLength(2);
       expect(reviewerEngine.calls).toHaveLength(2);
+      expect(reviewerEngine.calls[0]).toMatchObject({
+        tools: ['read', 'edit', 'bash'],
+        allowedTools: ['read', 'edit', 'bash'],
+        workspaceMode: 'read',
+      });
       expect(await readFile(join(workspace, 'src/retry.mjs'), 'utf8')).toContain('result = 42');
+    } finally {
+      await rm(workspace, { recursive: true, force: true });
+    }
+  });
+
+  it('fails before a reviewer without read tools can accept the work', async () => {
+    const workspace = await mkdtemp(join(tmpdir(), 'obversa-teams-pair-blind-reviewer-'));
+    try {
+      const writerEngine = scriptedEngine('writer', [async (request) => {
+        await writePairFiles(request.cwd!);
+        return pass('writer wrote the requested files');
+      }]);
+      const reviewerEngine = scriptedEngine('reviewer', [async () => pass('blind review accepted')]);
+      const reviewer = seat(reviewerEngine, 'reviewer');
+      const blindReviewer = {
+        ...reviewer,
+        identity: { ...reviewer.identity, tools: [] },
+      } as unknown as TeamSeat;
+
+      const result = await run(writerReviewerPair({
+        brief: 'Write a module that exports result 42 and a test for it.',
+        workspace,
+        files: ['src/result.mjs', 'test/result.test.mjs'],
+        test: testCommand,
+        writer: seat(writerEngine, 'writer'),
+        reviewer: blindReviewer,
+      }), { cwd: workspace });
+
+      expect(result.outcome.status).toBe('fail');
+      expect(reviewerEngine.calls).toHaveLength(0);
     } finally {
       await rm(workspace, { recursive: true, force: true });
     }

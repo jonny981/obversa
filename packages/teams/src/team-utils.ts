@@ -17,6 +17,8 @@ import {
 import { INVALID_TEAM_DECISION, outcomeFromAgentText } from './agent-response.js';
 import type { ReviewerSeat, TeamInput, TeamSeat } from './types.js';
 
+type TeamWorkspaceMode = 'read' | 'write';
+
 export const DELIVERY_NOTE = 'team-output/brief.md';
 export const APPROVAL_NOTE = 'team-output/approval.md';
 
@@ -46,6 +48,7 @@ export function seatIdentity(seat: TeamSeat): TeamSeat['identity'] {
     || typeof identity.provider !== 'string'
     || typeof identity.modelFamily !== 'string'
     || typeof identity.model !== 'string'
+    || !Array.isArray(identity.tools)
     || !identity.adapter.trim()
     || !identity.provider.trim()
     || !identity.model.trim()
@@ -225,22 +228,37 @@ export function teamAgent(
   instructions: string | ((ctx: JobContext) => string),
   target?: string,
   decisionFile?: string,
+  workspaceMode: TeamWorkspaceMode = 'write',
 ): Job {
   const identity = seatIdentity(seat);
   const agent = agentJob({
     label,
     engine: seat.engine,
     model: identity.model,
+    tools: [...identity.tools],
+    workspaceMode,
     cwd: input.workspace,
     consumeFeedback: target !== undefined,
     prompt: (ctx) => `${rolePrompt(label, input.brief)}\n${typeof instructions === 'function' ? instructions(ctx) : instructions}\nReturn one JSON object: {"status":"pass"|"revise","summary":"...","findings":[{"evidence":"..."}]}`,
     outcome: (text) => outcomeFromAgentText(text, target),
   });
-  if (!decisionFile) return agent;
+  const checkedAgent: Job = async (ctx) => {
+    if (workspaceMode === 'read' && identity.tools.length === 0) {
+      const summary = `${label} cannot read the workspace: reviewer seat declares no tools`;
+      return {
+        status: 'fail',
+        summary,
+        error: new LoopError({ code: 'CONFIG', phase: 'body', message: summary }),
+      };
+    }
+    return agent(ctx);
+  };
+  const checked = copyJobMeta(checkedAgent, agent);
+  if (!decisionFile) return checked;
   return async (ctx) => {
     const path = join(input.workspace, decisionFile);
     const before = await snapshotFile(path);
-    const replyOutcome = await agent(ctx);
+    const replyOutcome = await checked(ctx);
     const after = await snapshotFile(path);
     const changed = before.exists !== after.exists || before.hash !== after.hash;
     if (!changed || !after.exists || after.hash === null) return replyOutcome;
@@ -274,6 +292,7 @@ export function panelReviewers(
       instructions,
       undefined,
       `reviews/${reviewer.name}.json`,
+      'read',
     );
     const retry = teamAgent(
       reviewer.name,
@@ -282,6 +301,7 @@ export function panelReviewers(
       `${instructions}\nYour previous response was not a valid decision. Return only the required JSON object.`,
       undefined,
       `reviews/${reviewer.name}.json`,
+      'read',
     );
     const job: Job = async (ctx) => {
       const first = await review(ctx);

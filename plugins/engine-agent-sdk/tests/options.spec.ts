@@ -167,4 +167,12 @@ describe('Agent SDK memory tool', () => {
       disallowedTools: ['Task', 'Agent'],
     });
   });
+
+  it('refuses a read workspace without declared tools', () => {
+    expect(() => agentSdkToolOptions({
+      tools: [],
+      allowedTools: [],
+      workspaceMode: 'read',
+    })).toThrow('read workspace requires at least one declared tool');
+  });
 });
