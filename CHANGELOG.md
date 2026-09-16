@@ -9,6 +9,15 @@ other published package tracks its own version independently of it.
 
 ## [Unreleased]
 
+### Added
+
+- **Workflow resume:** `run(job, { recordTo: path, resume: true })` resumes
+  a declarative workflow from its own record instead of truncating it.
+  Stages whose passing completion is recorded under the same declared
+  shape are skipped, interrupted stages re-run, a changed brief restarts
+  from the top, and a person gate re-posts at its recorded position. Two
+  processes resuming one record at once is out of scope.
+
 ## [1.0.0] - 2026-09-15
 
 ### Added
