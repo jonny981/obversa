@@ -281,6 +281,7 @@ try {
   candidates, with the threshold you set.
 - `kickback`, `revisionRequest`: a reviewer sends the work back to a named
   stage with its findings.
+- `RECORDED_ENGINE_USAGE`, `RecordedEngineUsage`: the state key under which a run records which model family answered each engine call, beside the job path that made the call; the declarative panel guard reads it to compare the answering family against the seat that was declared.
 
 **Run it**
 
