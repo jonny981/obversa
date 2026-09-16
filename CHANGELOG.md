@@ -12,7 +12,11 @@ other published package tracks its own version independently of it.
 ### Added
 
 - **Workflow resume:** `run(job, { recordTo: path, resume: true })` resumes
-  a declarative workflow from its own record instead of truncating it.
+  a declarative workflow from its own record instead of truncating it. The
+  runtime seeds the recorded completions into the shared run state under
+  the exported `RESUME_STAGE_OUTCOMES` key, and the workflow guard reads
+  that state, never the record file, so the teams layer imports only the
+  public surface.
   Stages whose passing completion is recorded under the same declared
   shape are skipped, interrupted stages re-run, a changed brief restarts
   from the top, and a person gate re-posts at its recorded position. Two
