@@ -1889,9 +1889,10 @@ describe('OpenCode CLI adapter', () => {
           : bin;
         // The engine under test reports the identity the shared derivation reads
         // from the model it was given, which is what the kit's identity case checks.
+        const derived = modelIdentity('fixture-provider/fixture-model');
         return new OpenCodeCliEngine({
           ...options(binForScenario),
-          identity: modelIdentity('fixture-provider/fixture-model'),
+          identity: { provider: derived.provider ?? null, modelFamily: derived.modelFamily },
           environment: { OBVERSA_ENGINE_CONFORMANCE_SCENARIO: scenario, OBVERSA_TEST_OPENCODE_ADMISSION_RECORD: calls },
         });
       },
