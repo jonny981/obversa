@@ -19,7 +19,6 @@ import {
   type ConditionInput,
   RECORDED_ENGINE_USAGE,
   type RecordedEngineUsage,
-  childContext,
 } from '@obversa/runtime';
 
 import { outcomeFromAgentText } from './agent-response.js';
@@ -585,7 +584,11 @@ function stageJob(
       // The review runs at a child path so its records carry a deeper
       // path than the writer body's, which is what separates the two
       // recorded sides. The outcome passes through unchanged.
-      review: async (ctx) => panel(childContext(ctx, { depth: ctx.depth + 1, path: [...ctx.path, 'review-panel'] })),
+      review: async (ctx) => panel({
+        ...ctx,
+        depth: ctx.depth + 1,
+        path: [...ctx.path, 'review-panel'],
+      }),
       max: retry + 1,
       maxReviewRestarts: retry,
       noProgress: { window: 2, gate: true },

@@ -107,7 +107,6 @@ describe('public runtime API', () => {
       'assertGraph',
       'bodyPassed',
       'callbackRequestDigest',
-      'childContext',
       'classifyEngineFailure',
       'commandJob',
       'commandSucceeds',
