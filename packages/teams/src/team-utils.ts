@@ -229,6 +229,7 @@ export function teamAgent(
   target?: string,
   decisionFile?: string,
   workspaceMode: TeamWorkspaceMode = 'write',
+  recordAs?: { readonly role: 'writer' | 'reviewer'; readonly stage: string },
 ): Job {
   const identity = seatIdentity(seat);
   if (workspaceMode === 'read' && identity.tools.length === 0) {
@@ -243,6 +244,7 @@ export function teamAgent(
     workspaceMode,
     cwd: input.workspace,
     consumeFeedback: target !== undefined,
+    ...(recordAs === undefined ? {} : { recordAs }),
     prompt: (ctx) => `${rolePrompt(label, input.brief)}\n${typeof instructions === 'function' ? instructions(ctx) : instructions}\nReturn one JSON object: {"status":"pass"|"revise","summary":"...","findings":[{"evidence":"..."}]}`,
     outcome: (text) => outcomeFromAgentText(text, target),
   });
@@ -269,6 +271,7 @@ export function panelReviewers(
   reviewers: readonly ReviewerSeat[],
   input: TeamInput,
   reviewTarget?: string,
+  recordAs?: { readonly role: 'writer' | 'reviewer'; readonly stage: string },
 ): Array<{ name: string; scope?: string; job: Job }> {
   return reviewers.map((reviewer) => {
     const instructions = [
@@ -284,6 +287,7 @@ export function panelReviewers(
       undefined,
       undefined,
       'read',
+      recordAs,
     );
     const retry = teamAgent(
       reviewer.name,
@@ -293,6 +297,7 @@ export function panelReviewers(
       undefined,
       undefined,
       'read',
+      recordAs,
     );
     const job: Job = async (ctx) => {
       const first = await review(ctx);

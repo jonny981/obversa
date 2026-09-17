@@ -261,6 +261,10 @@ try {
   returns a full outcome, a one-line summary (a pass) or nothing (a pass
   with the label as its summary); a throw is a fail carrying the error.
   `FnJobResult` names what it may return.
+  `recordAs: { role, stage }` on `agentJob` tags the answers it records with
+  the seat's role and stage, so a review gate compares recorded seats
+  rather than paths. A job the workflow does not build as a writer or a
+  reviewer carries no tag and stands outside that gate.
 - `jobMeta`, `copyJobMeta`, `renderPlan`: inspect a job's described shape,
   carry that shape onto a wrapper that keeps the job's behaviour, and render
   the plan for a reader or host.
@@ -281,6 +285,12 @@ try {
   candidates, with the threshold you set.
 - `kickback`, `revisionRequest`: a reviewer sends the work back to a named
   stage with its findings.
+- `RECORDED_ENGINE_USAGE`, `RecordedEngineUsage`: the state key under which a
+  run records which model family answered each engine call an agent job made,
+  beside the job path that made the call. When the job was built with
+  `recordAs`, the entry also carries the seat's role (`writer` or `reviewer`)
+  and stage. The declarative review gate reads those tags and compares the
+  families that answered as writers with those that answered as reviewers.
 
 **Run it**
 

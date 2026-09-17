@@ -111,6 +111,7 @@ for (const [stage, branch] of [
   ['F31', 'fix/runtime-node-timeout'],
   ['F32', 'fix/engine-codex-timeout'],
   ['F47', 'feat/remove-opencode-test-hook'],
+  ['F54', 'feat/recorded-family-check'],
   ['F33', 'fix/tournament-node-test'],
   ['D36', 'feat/teams'],
   ['D45', 'docs/whole-file-examples'],
@@ -143,6 +144,7 @@ for (const [stage, branch] of [
   ['F52', 'feat/model-identity-proof'],
   ['F71', 'fix/opencode-admission-boot-window'],
   ['F72', 'feat/shared-family-derivation'],
+  ['F77', 'fix/kit-fixture-boot-window'],
 ]) {
   test(`${stage} lands from its assigned branch ${branch}`, () => {
     const repository = createRepository({ feature: true, branch });
@@ -200,6 +202,7 @@ for (const [stage, branch] of [
   ['F31', 'feat/graph-forms-v1'],
   ['F32', 'feat/graph-forms-v1'],
   ['F47', 'feat/graph-forms-v1'],
+  ['F54', 'feat/graph-forms-v1'],
   ['F33', 'feat/graph-forms-v1'],
   ['D36', 'feat/graph-forms-v1'],
   ['D45', 'feat/graph-forms-v1'],
@@ -226,6 +229,7 @@ for (const [stage, branch] of [
   ['F52', 'feat/graph-forms-v1'],
   ['F71', 'feat/graph-forms-v1'],
   ['F72', 'feat/factory-v1'],
+  ['F77', 'feat/graph-forms-v1'],
 ]) {
   test(`${stage} refuses the wrong branch ${branch}`, () => {
     const repository = createRepository({ feature: true, branch });

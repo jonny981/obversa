@@ -91,7 +91,7 @@ function request(overrides: Partial<AgentRequest> = {}): AgentRequest {
     cwd: temporaryDirectory('lines-grok-cwd-'),
     workspaceMode: 'read',
     leaf: true,
-    timeoutMs: 2_000,
+    timeoutMs: 10_000,
     timeoutGraceMs: 200,
     maxOutputBytes: 64 * 1_024,
     maxMemoryBytes: 256 * 1_024 * 1_024,
@@ -1184,7 +1184,7 @@ describe('Grok CLI adapter', () => {
     });
   });
 
-  it('passes the public engine conformance kit through the real process adapter', async () => {
+  it.each([0, 2_500])('passes the public engine conformance kit through the real process adapter (structured-result boot delay %i ms)', async (bootDelayMs) => {
     const bin = executable();
     const calls = join(temporaryDirectory('grok-workspace-'), 'calls.jsonl');
     const selected = (capabilities: string[], effective = false) => engineSelection({
@@ -1236,11 +1236,15 @@ describe('Grok CLI adapter', () => {
             : bin;
         return new GrokCliEngine({
           ...options(binForScenario),
-          environment: { OBVERSA_ENGINE_CONFORMANCE_SCENARIO: scenario, OBVERSA_TEST_GROK_CALLS: calls },
+          environment: {
+            OBVERSA_ENGINE_CONFORMANCE_SCENARIO: scenario,
+            OBVERSA_TEST_GROK_CALLS: calls,
+            OBVERSA_TEST_GROK_BOOT_DELAY_MS: String(scenario === 'structured-result' ? bootDelayMs : 0),
+          },
         });
       },
     });
 
     expect(report).toEqual({ ok: true, cases: 20, failures: [], unsupported: [] });
-  });
+  }, 30_000);
 });

@@ -1,4 +1,6 @@
 import { createHash } from 'node:crypto';
+
+import { modelIdentity } from '@obversa/engine';
 import { readFileSync } from 'node:fs';
 import { readFile, stat } from 'node:fs/promises';
 import { join } from 'node:path';
@@ -17,6 +19,8 @@ import {
   type JobContext,
   type Outcome,
   type ConditionInput,
+  RECORDED_ENGINE_USAGE,
+  type RecordedEngineUsage,
 } from '@obversa/runtime';
 
 import { outcomeFromAgentText } from './agent-response.js';
@@ -277,6 +281,7 @@ function reviewerPanel(
           definitions,
           panelInput(brief, files, ctx.workspace.dir),
           reviewTarget(named, targetFiles),
+          { role: 'reviewer', stage: named.name },
         )[index]!;
         return requireNoFiles(
           `${named.name}-${definition.name}`,
@@ -310,6 +315,138 @@ function seatRole(roles: WorkflowConfig['roles'], name: string): TeamSeat {
   const seat = value as TeamSeat;
   seatIdentity(seat);
   return seat;
+}
+
+/** The model family a recorded answering model belongs to, or undefined when
+ * the string carries no family a comparison can use. Mirrors the OpenCode
+ * seat's derivation: a provider prefix before a slash is dropped, then the
+ * first hyphen-delimited segment is the family. */
+// The family a recorded answer belongs to, read through the one derivation
+// every harness that runs other providers' models shares. A model string the
+// derivation refuses (no family, or the `unknown` placeholder) is unreadable
+// here, and an unreadable family refuses the review rather than passing it.
+function recordedFamilyOf(model: string): string | undefined {
+  try {
+    return modelIdentity(model).modelFamily;
+  } catch {
+    return undefined;
+  }
+}
+
+function recordedUsage(ctx: JobContext): readonly RecordedEngineUsage[] {
+  const value = ctx.state[RECORDED_ENGINE_USAGE];
+  return Array.isArray(value) ? value as readonly RecordedEngineUsage[] : [];
+}
+
+/** Refuse a panel when a recorded answer contradicts the distinct-family
+ * requirement: an answer whose recorded family equals a family it must
+ * differ from, or an answer whose family cannot be read at all. Fail
+ * closed on identity, never pass in silence. */
+/** Refuse a panel when a recorded answer contradicts the distinct-family
+ * requirement: an answer whose recorded family equals a family it must
+ * differ from, or an answer whose family cannot be read at all. Every
+ * recorded answer up to the panel is read, never the first per seat. The
+ * refusal names the seats, their declared families and the answers, so a
+ * reader can act on it without reading source. Fail closed on identity,
+ * never pass in silence. */
+function assertRecordedFamilies(
+  records: readonly RecordedEngineUsage[],
+  opposing: readonly { readonly label: string; readonly family: string }[],
+): void {
+  const declared = opposing.map((seat) => `${seat.label} declares ${seat.family}`).join('; ');
+  for (const record of records) {
+    const family = recordedFamilyOf(record.model);
+    if (family === undefined) {
+      throw new LoopError({
+        code: 'BODY',
+        phase: 'review',
+        message: `recorded model family is unknown: the answer ${record.model} carries no readable family, and ${declared}; a panel that requires distinct families refuses an unreadable answer`,
+      });
+    }
+    const collision = opposing.find((seat) => seat.family === family);
+    if (collision !== undefined) {
+      throw new LoopError({
+        code: 'BODY',
+        phase: 'review',
+        message: `recorded model family collision: the answer ${record.model} belongs to the family ${family}, and ${collision.label} declares ${collision.family}; the panel requires the recorded answers to differ from it (${declared})`,
+      });
+    }
+  }
+}
+
+/** The gate around a panel stage: before the reviewers run, every recorded
+ * answer from the stages this panel must differ from is compared against
+ * the reviewers' declared families; after the reviewers run, their own
+ * recorded answers are compared against the families they must differ
+ * from. Tagged writer and reviewer answers are checked; untagged advisor
+ * and agentCheck answers are outside this gate. An unreadable family on
+ * either tagged side is a refusal, never a pass. */
+function recordedFamilyGate(
+  panel: Job,
+  reviewers: readonly TeamSeat[],
+  writerStageNames: readonly string[],
+  writerFamilies: readonly string[],
+): Job {
+  const reviewerDeclarations = reviewers.map((seat) => ({
+    label: `reviewer seat ${seatIdentity(seat).model}`,
+    family: seatIdentity(seat).modelFamily,
+  }));
+  const writerDeclarations = writerStageNames.map((name, index) => ({
+    label: `writer stage ${name}`,
+    family: writerFamilies[index] ?? '',
+  })).filter((entry) => entry.family !== '');
+  return async (ctx) => {
+    try {
+      const all = recordedUsage(ctx);
+      const beforeLength = all.length;
+      const writerSide = (records: readonly RecordedEngineUsage[]) => records.filter(
+        (record) => record.role === 'writer'
+          && record.stage !== undefined
+          && writerStageNames.includes(record.stage),
+      );
+      // Every recorded writer answer up to the panel keeps the reviewers'
+      // declared difference. Records are compared by role and stage, never
+      // by path.
+      assertRecordedFamilies(writerSide(all.slice(0, beforeLength)), reviewerDeclarations);
+      const outcome = await panel(ctx);
+      if (outcome.status !== 'pass') return outcome;
+      const current = recordedUsage(ctx);
+      const after = current.slice(beforeLength);
+      assertRecordedFamilies(writerSide(after), reviewerDeclarations);
+      const reviewerSide = after.filter((record) => record.role === 'reviewer');
+      assertRecordedFamilies(reviewerSide, writerDeclarations);
+      // The two recorded sides themselves must be disjoint: two declared
+      // differences mean nothing when one family answered both.
+      const writerAnswerFamilies = new Set(
+        writerSide(current).map((record) => recordedFamilyOf(record.model)).filter(
+          (family): family is string => family !== undefined,
+        ),
+      );
+      for (const record of reviewerSide) {
+        const family = recordedFamilyOf(record.model);
+        if (family === undefined) {
+          throw new LoopError({
+            code: 'BODY',
+            phase: 'review',
+            message: `recorded model family is unknown: the answer ${record.model} carries no readable family, and the panel requires the two recorded sides to differ`,
+          });
+        }
+        if (writerAnswerFamilies.has(family)) {
+          throw new LoopError({
+            code: 'BODY',
+            phase: 'review',
+            message: `recorded model family collision: the answer ${record.model} belongs to the family ${family}, and a writer stage's recorded answer belongs to the same family; the panel requires the two recorded sides to be disjoint`,
+          });
+        }
+      }
+      return outcome;
+    } catch (error) {
+      if (error instanceof LoopError && error.message.startsWith('recorded model family')) {
+        return { status: 'fail' as const, summary: error.message, error };
+      }
+      throw error;
+    }
+  };
 }
 
 function panelRole(roles: WorkflowConfig['roles'], name: string): readonly TeamSeat[] {
@@ -383,6 +520,7 @@ function guardedAgent(
     consumeFeedback: target !== undefined || reviewedBy !== undefined,
     prompt: agentPrompt(brief, named, files, writes),
     outcome: (textValue) => outcomeFromAgentText(textValue, target),
+    recordAs: { role: 'writer', stage: named.name },
   });
   return async (ctx) => {
     const required = requireNonEmptyFiles(named.name, agent, ctx.workspace.dir, writes);
@@ -432,6 +570,8 @@ function stageJob(
   files: readonly string[],
   declaredFiles: readonly string[],
   targetFiles: readonly string[] | undefined,
+  familyTargetStageNames: readonly string[],
+  familyTargetFamilies: readonly string[],
 ): Job {
   const config = named.config;
   if ('agent' in config && config.agent !== undefined) {
@@ -441,9 +581,10 @@ function stageJob(
       ? guarded
       : unchangedNoteGuard(named.name, guarded, writes);
     if (config.reviewedBy === undefined) return job;
-    const panel = reviewerPanel(brief, named, panelRole(roles, config.reviewedBy), files, declaredFiles, undefined);
+    const reviewers = panelRole(roles, config.reviewedBy);
+    const panel = reviewerPanel(brief, named, reviewers, files, declaredFiles, undefined);
     const retry = retryOf(config);
-    return loop({
+    const reviewLoop = loop({
       name: `${named.name}-review`,
       body: job,
       until: predicate(async (ctx) => {
@@ -458,11 +599,26 @@ function stageJob(
         }
         return true;
       }, `${named.name} writes`),
-      review: panel,
+      // Review events use a child path. The jobs' role tags, not their
+      // paths, separate the recorded sides. The outcome passes through.
+      review: async (ctx) => panel({
+        ...ctx,
+        depth: ctx.depth + 1,
+        path: [...ctx.path, 'review-panel'],
+      }),
       max: retry + 1,
       maxReviewRestarts: retry,
       noProgress: { window: 2, gate: true },
     });
+    return copyJobMeta(
+      recordedFamilyGate(
+        reviewLoop,
+        reviewers,
+        [named.name],
+        [seatIdentity(seatRole(roles, config.agent)).modelFamily],
+      ),
+      reviewLoop,
+    );
   }
   if ('run' in config && config.run !== undefined) {
     const command = commandJob(named.name, config.run, { target: config.sendsBackTo });
@@ -478,7 +634,9 @@ function stageJob(
     return copyJobMeta(guarded, command);
   }
   if ('panel' in config && config.panel !== undefined) {
-    return reviewerPanel(brief, named, panelRole(roles, config.panel), files, declaredFiles, targetFiles, config.sendsBackTo, config.agree);
+    const reviewers = panelRole(roles, config.panel);
+    const panel = reviewerPanel(brief, named, reviewers, files, declaredFiles, targetFiles, config.sendsBackTo, config.agree);
+    return copyJobMeta(recordedFamilyGate(panel, reviewers, familyTargetStageNames, familyTargetFamilies), panel);
   }
   if ('input' in config && config.input !== undefined) {
     const personRole = inputRole(roles, config.input);
@@ -606,8 +764,31 @@ export function workflow(name: string, config: WorkflowConfig): Job {
       'panel' in stageConfig && stageConfig.panel !== undefined
         ? panelReviewFiles(config.stages, index)
         : undefined;
+    const panelFamilyTargets = ('panel' in stageConfig && stageConfig.panel !== undefined)
+      ? (() => {
+        const preceding = precedingAgent(config.stages, index);
+        const target = panelTarget(config.stages, index);
+        return [preceding, target]
+          .filter((candidate): candidate is NamedStage => candidate !== undefined)
+          .filter((candidate, targetIndex, candidates) =>
+            candidates.findIndex((other) => other.name === candidate.name) === targetIndex,
+          )
+          .filter((candidate): candidate is NamedStage & { config: { agent: string } } =>
+            'agent' in candidate.config && candidate.config.agent !== undefined,
+          );
+      })()
+      : [];
     return [named.name, {
-      job: stageJob(brief, named, config.roles, files, declaredFiles, targetFiles),
+      job: stageJob(
+        brief,
+        named,
+        config.roles,
+        files,
+        declaredFiles,
+        targetFiles,
+        panelFamilyTargets.map((candidate) => candidate.name),
+        panelFamilyTargets.map((candidate) => seatIdentity(seatRole(config.roles, candidate.config.agent)).modelFamily),
+      ),
       needs: stageDependencies(config.stages, index),
       ...(named.config.desc === undefined ? {} : { desc: named.config.desc }),
       ...(named.config.gate === undefined ? {} : { gate: named.config.gate }),

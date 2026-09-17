@@ -12,6 +12,20 @@ other published package tracks its own version independently of it.
 ### Added
 
 - **One identity derivation for every harness that runs other providers' models:** `@obversa/engine` exports `modelIdentity`, which reads the provider and model family from the model string a harness was given, or refuses a string with no readable family. The OpenCode adapter derives its seat identity through it, and the review gate reads recorded models through the same function, so two seats on one model wearing different tool names cannot pass as a cross-family panel.
+- **Recorded model families:** The runtime exports `RECORDED_ENGINE_USAGE`,
+  the shared state key under which every agent job's engine answer is
+  recorded beside its job path, and the declarative panel guard reads
+  that state.
+- **Recorded model families:** A panel that requires its reviewers to differ
+  in model family from the writers it reviews now compares what actually
+  answered against what each seat declared. The runtime records every
+  engine answer beside its job path, and the panel refuses when a recorded
+  answer belongs to a family it must differ from, or when an answer carries
+  no readable family at all. The refusal names the seats, their declared
+  families and the answers.
+  An agent job built with `recordAs: { role, stage }` records its answers
+  with the seat's role and stage. The gate compares recorded seats, never
+  job paths. A refusal is a `LoopError` the record keeps.
 - **Declared access is enforced on every engine:** a seat's workspace mode is
   a ceiling. An approval never adds a capability the mode withholds, and a
   bypass never exceeds it. An adapter that cannot express the declared access

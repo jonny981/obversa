@@ -1,5 +1,9 @@
 #!/usr/bin/env node
 import { appendFileSync, readFileSync, writeFileSync } from 'node:fs';
+import { setTimeout as delay } from 'node:timers/promises';
+
+const bootDelayMs = Number(process.env.OBVERSA_TEST_CODEX_BOOT_DELAY_MS ?? 0);
+if (bootDelayMs > 0) await delay(bootDelayMs);
 
 const args = process.argv.slice(2);
 const calls = process.env.OBVERSA_TEST_CODEX_CALLS;

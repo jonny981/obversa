@@ -515,7 +515,7 @@ const packageRules = new Map([
   // so a host keeps placement glue only.
   ['@obversa/surfacer', { directory: 'packages/surfacer', kind: 'surface', version: '0.1.0', dependencies: [], peerDependencies: [] }],
   ['@obversa/source', { directory: 'packages/source', kind: 'surface', version: '0.1.0', dependencies: ['@obversa/surfacer'], peerDependencies: [] }],
-  ['@obversa/teams', { directory: 'packages/teams', kind: 'workflow', version: '0.1.0', dependencies: ['@obversa/runtime'], peerDependencies: [] }],
+  ['@obversa/teams', { directory: 'packages/teams', kind: 'workflow', version: '0.1.0', dependencies: ['@obversa/runtime', '@obversa/engine'], peerDependencies: [] }],
   ['@obversa/engine-agent-sdk', {
     directory: 'plugins/engine-agent-sdk',
     kind: 'plugin',

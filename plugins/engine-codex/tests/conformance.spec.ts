@@ -6,17 +6,17 @@ import { expect, it } from 'vitest';
 import { engineSelection, runEngineConformance, type AgentRequest } from '@obversa/engine';
 import { CodexEngine } from '../src/index.ts';
 
-it('runs the full kit through the Codex process boundary', async () => {
+it.each([0, 2_500])('runs the full kit through the Codex process boundary (structured-result boot delay %i ms)', async (bootDelayMs) => {
   const dir = realpathSync(mkdtempSync(join(tmpdir(), 'codex-conformance-')));
   try {
     const bin = join(dir, 'codex');
     const calls = join(dir, 'calls.jsonl');
     copyFileSync(fileURLToPath(new URL('./fixtures/codex-cli.mjs', import.meta.url)), bin);
     chmodSync(bin, 0o755);
-    const env = { OBVERSA_TEST_CODEX_CALLS: calls, OBVERSA_ENGINE_CONFORMANCE_SCENARIO: '' };
+    const env = { OBVERSA_TEST_CODEX_CALLS: calls, OBVERSA_ENGINE_CONFORMANCE_SCENARIO: '', OBVERSA_TEST_CODEX_BOOT_DELAY_MS: '0' };
     const request: AgentRequest = {
       prompt: 'fixture', model: 'gpt-test', tools: ['Read'], allowedTools: ['Read'],
-      cwd: dir, leaf: true, timeoutMs: 2_000, timeoutGraceMs: 200, env,
+      cwd: dir, leaf: true, timeoutMs: 10_000, timeoutGraceMs: 200, env,
     };
     const selected = engineSelection({
       adapter: 'codex', provider: 'openai', model: 'gpt-test', adapterVersion: '0.153.2', executable: bin, capabilities: ['Read'],
@@ -51,6 +51,7 @@ it('runs the full kit through the Codex process boundary', async () => {
       open(scenario) {
         writeFileSync(calls, '');
         env.OBVERSA_ENGINE_CONFORMANCE_SCENARIO = scenario;
+        env.OBVERSA_TEST_CODEX_BOOT_DELAY_MS = String(scenario === 'structured-result' ? bootDelayMs : 0);
         return new CodexEngine({ cliBinary: scenario === 'missing-cli' ? join(dir, 'absent') : bin });
       },
     });
