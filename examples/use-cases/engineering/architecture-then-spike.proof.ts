@@ -63,7 +63,16 @@ await withExample({
   assert.match(run.printed.summary ?? '', /Build this for real/);
   assert.equal(run.printed.data?.['spike-runs']?.status, 'pass');
   assert.equal(run.printed.data?.['team-review']?.status, 'pass');
+  // Both seats cleared, not merely enough of them. A panel status is the
+  // threshold's verdict, so a reviewer that fails before it answers reads as
+  // a dissent the threshold was built to survive; the count says which.
+  assert.equal(
+    (run.printed.data?.['team-review']?.data as { passed?: number } | undefined)?.passed,
+    2,
+    `both reviewers cleared: ${JSON.stringify(run.printed.data?.['team-review'])}`,
+  );
   assert.equal(run.seatCalls.filter((call) => call.role === 'claude').length, 4, 'research, design, spike, and the spike again after the red run');
+  assert.equal(run.seatCalls.filter((call) => call.role === 'codex').length, 3, 'the research and design reviews, then the panel');
   assert.equal(run.seatCalls.filter((call) => call.role === 'opencode').length, 1, 'the second family on the panel reads once');
   assert.match(run.stdout, /kickback accepted spike-runs -> spike/, 'the red run went back to the spike');
   assert.match(await run.read('poc/index.mjs'), /tx\.reference\.includes/, 'the repaired spike is the one on disk');

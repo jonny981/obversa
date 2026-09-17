@@ -89,6 +89,8 @@ await withExample({
   assert.equal(run.printed.data?.escalate?.status, 'paused');
   assert.match(run.printed.summary ?? '', /This ticket needs you/);
   assert.equal(run.commandCalls.length, 0, 'the helpdesk is never called');
+  assert.equal(run.seatCalls.filter((call) => call.role === 'claude').length, 1, 'the classifier decides once');
+  assert.equal(run.seatCalls.filter((call) => call.role === 'codex').length, 1, 'the second opinion agrees first time');
   assert.match(await run.read('triage/reply.json'), /looking into where it is/, 'the draft is ready for the person');
 
   console.log(JSON.stringify({

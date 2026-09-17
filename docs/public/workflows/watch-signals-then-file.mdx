@@ -141,7 +141,8 @@ never passes a stage.
 ## Gotchas
 
 - **The pull is a command that writes a declared file.** `writes: 'signals/events.json'` on a `run` stage says which file the command may leave behind; `--create-dirs` makes the directory, because curl does not.
-- **The key is in the environment.** `POSTHOG_API_KEY` is read once when the file loads; the run fails at `pull` when it is missing, before any model runs.
+- **Two things to change before your first run.** `POSTHOG.project` is a placeholder, so put your own project id there, and the query names the events you care about. The host is the one your project is in.
+- **The key is in the environment.** `POSTHOG_API_KEY` is a personal API key read once when the file loads; the run fails at `pull` when it is missing, before any model runs. It is never in the file.
 - **The reviewer checks the grouping against the rows.** A row that dropped out of every friction sends the clustering back; the proof does exactly that with a row of exceptions.
 - **Nothing is filed before the person answers.** `file` is downstream of `decide`; a paused run has opened no issue, and a run that is never answered opens none.
 
