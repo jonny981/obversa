@@ -93,15 +93,21 @@ if (role === 'claude') {
     usage: { input_tokens: 42, cached_input_tokens: 30, output_tokens: 7 },
   })}\n`);
 } else {
-  const base = { sessionID: 'stand-in-session', timestamp: 1_777_777_777_777 };
+  // OpenCode's stream: a wrapper frame per event with the part inside it,
+  // the shape the adapter's parser reads (a text part, then a step-finish
+  // part carrying the usage).
+  const base = { timestamp: 1_777_777_777_777, sessionID: 'stand-in-session' };
+  const part = { sessionID: 'stand-in-session', messageID: 'stand-in-message' };
   process.stdout.write(`${JSON.stringify({
-    type: 'text', ...base, messageID: 'stand-in-message',
-    id: 'stand-in-text', text: entry.reply, time: { start: 1, end: 2 },
+    type: 'text', ...base,
+    part: { ...part, id: 'stand-in-text', type: 'text', text: entry.reply, time: { start: 1, end: 2 } },
   })}\n`);
   process.stdout.write(`${JSON.stringify({
-    type: 'step-finish', ...base, messageID: 'stand-in-message',
-    id: 'stand-in-finish', reason: 'stop', cost: 0,
-    tokens: { input: 2, output: 5, reasoning: 2, cache: { read: 3, write: 1 } },
+    type: 'step_finish', ...base,
+    part: {
+      ...part, id: 'stand-in-finish', type: 'step-finish', reason: 'stop', cost: 0,
+      tokens: { input: 2, output: 5, reasoning: 2, cache: { read: 3, write: 1 } },
+    },
   })}\n`);
 }
 process.exit(0);
