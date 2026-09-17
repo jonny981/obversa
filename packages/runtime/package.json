@@ -49,7 +49,7 @@
     "node": ">=22.12.0"
   },
   "dependencies": {
-    "@obversa/process": "workspace:^",
+    "@obversa/core": "workspace:^",
     "p-limit": "^7.3.0",
     "toposort": "^2.0.2"
   },

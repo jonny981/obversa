@@ -4,8 +4,8 @@ const processMock = vi.hoisted(() => ({
   runChild: vi.fn(),
 }));
 
-vi.mock('@obversa/process', async () => {
-  const actual = await vi.importActual<typeof import('@obversa/process')>('@obversa/process');
+vi.mock('@obversa/core', async () => {
+  const actual = await vi.importActual<typeof import('@obversa/core')>('@obversa/core');
   return { ...actual, runChild: processMock.runChild };
 });
 

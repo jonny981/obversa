@@ -37,7 +37,7 @@
   },
   "dependencies": {
     "@obversa/memory": "workspace:^",
-    "@obversa/process": "workspace:^"
+    "@obversa/core": "workspace:^"
   },
   "keywords": [
     "agent",

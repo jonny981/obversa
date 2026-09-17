@@ -1,10 +1,10 @@
-# @obversa/process
+# @obversa/core
 
 Run one child process with a deadline, and get a result you can read
 whatever the child did: finished, hung, filled a pipe, or ignored a signal.
 
 ```bash
-npm install @obversa/process
+npm install @obversa/core
 ```
 
 Node.js 22.12 or later. No dependencies.
@@ -37,7 +37,7 @@ end, at a deadline, with a typed result.
 ## Use it
 
 ```ts
-import { runChild } from '@obversa/process';
+import { runChild } from '@obversa/core';
 
 const result = await runChild({
   executable: process.execPath,

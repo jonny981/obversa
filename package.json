@@ -164,7 +164,7 @@
     "@obversa/engine-codex": "workspace:^",
     "@obversa/engine-grok-cli": "workspace:^",
     "@obversa/engine-opencode-cli": "workspace:^",
-    "@obversa/process": "workspace:^",
+    "@obversa/core": "workspace:^",
     "@obversa/runner": "workspace:^",
     "@obversa/runtime": "workspace:^",
     "@obversa/teams": "workspace:^",

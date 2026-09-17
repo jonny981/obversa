@@ -28,9 +28,9 @@ importers:
       '@obversa/engine-opencode-cli':
         specifier: workspace:^
         version: link:plugins/engine-opencode-cli
-      '@obversa/process':
+      '@obversa/core':
         specifier: workspace:^
-        version: link:packages/process
+        version: link:packages/core
       '@obversa/runner':
         specifier: workspace:^
         version: link:packages/runner
@@ -100,9 +100,9 @@ importers:
 
   packages/engine:
     dependencies:
-      '@obversa/process':
+      '@obversa/core':
         specifier: workspace:^
-        version: link:../process
+        version: link:../core
     devDependencies:
       '@types/node':
         specifier: 22.12.0
@@ -110,7 +110,7 @@ importers:
 
   packages/memory: {}
 
-  packages/process:
+  packages/core:
     devDependencies:
       '@types/node':
         specifier: 22.12.0
@@ -131,9 +131,9 @@ importers:
 
   packages/runtime:
     dependencies:
-      '@obversa/process':
+      '@obversa/core':
         specifier: workspace:^
-        version: link:../process
+        version: link:../core
       p-limit:
         specifier: ^7.3.0
         version: 7.3.1
@@ -244,9 +244,9 @@ importers:
       '@obversa/memory':
         specifier: workspace:^
         version: link:../../packages/memory
-      '@obversa/process':
+      '@obversa/core':
         specifier: workspace:^
-        version: link:../../packages/process
+        version: link:../../packages/core
 
   plugins/memory-simple:
     dependencies:

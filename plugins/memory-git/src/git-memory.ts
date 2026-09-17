@@ -11,7 +11,7 @@ import {
   type MemoryResult,
   type MemorySuccess,
 } from '@obversa/memory';
-import { RunChildError, runChild } from '@obversa/process';
+import { RunChildError, runChild } from '@obversa/core';
 
 const META_NAME = '.obversa-memory.json';
 const REF_PREFIX = 'refs/obversa/memory/v1';
