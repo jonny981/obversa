@@ -53,6 +53,7 @@ export function seat(engine: Engine, modelFamily: string, provider = engine.name
       provider,
       modelFamily,
       model,
+      tools: ['read', 'edit', 'bash'],
     },
   };
 }

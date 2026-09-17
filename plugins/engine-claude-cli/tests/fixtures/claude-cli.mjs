@@ -35,6 +35,34 @@ if (version) {
 const modelAt = args.indexOf('--model');
 const requestedModel = modelAt === -1 ? 'claude-test' : args[modelAt + 1];
 const model = process.env.OBVERSA_TEST_CLAUDE_EFFECTIVE_MODEL ?? requestedModel;
+const scenario = process.env.OBVERSA_ENGINE_CONFORMANCE_SCENARIO;
+if (scenario) {
+  const errors = {
+    auth: '401 unauthorized', billing: '402 payment required',
+    'model-unavailable': 'unknown model fixture', 'rate-limit': '429 rate limit reached',
+    quota: 'monthly usage limit reached', transient: '503 service unavailable',
+    'invalid-config': 'invalid configuration',
+  };
+  if (errors[scenario]) {
+    const stream = process.env.OBVERSA_TEST_CLAUDE_FAILURE_STREAM === 'stdout'
+      ? process.stdout : process.stderr;
+    stream.write(errors[scenario]);
+    process.exit(1);
+  }
+  const emit = (message) => process.stdout.write(`${JSON.stringify(message)}\n`);
+  const assistant = (text) => emit({ type: 'assistant', message: { model, content: [{ type: 'text', text }] } });
+  if (scenario === 'timeout' || scenario === 'cancellation') {
+    if (scenario === 'cancellation') assistant('started');
+    await new Promise(() => { setInterval(() => {}, 1_000); });
+  }
+  if (scenario === 'ordered-parts') assistant('draft');
+  const answer = scenario === 'structured-result' ? '{"answer":42}' : 'answer';
+  assistant(answer);
+  emit({ type: 'result', result: answer,
+    ...(scenario === 'reported-usage' ? { usage: { input_tokens: 5, output_tokens: 3 } } : {}),
+  });
+  process.exit(scenario === 'late-final' ? 7 : 0);
+}
 process.stdout.write(`${JSON.stringify({
   type: 'assistant',
   message: { model, content: [{ type: 'text', text: 'PONG' }] },

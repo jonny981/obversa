@@ -30,6 +30,25 @@ if (version) {
 
 const outAt = args.indexOf('-o');
 if (outAt === -1) throw new Error('fixture requires normal output file');
+const scenario = process.env.OBVERSA_ENGINE_CONFORMANCE_SCENARIO;
+if (scenario) {
+  const errors = {
+    auth: '401 unauthorized', billing: '402 payment required',
+    'model-unavailable': 'unknown model fixture', 'rate-limit': '429 rate limit reached',
+    quota: 'monthly usage limit reached', transient: '503 service unavailable',
+    'invalid-config': 'invalid configuration',
+  };
+  if (errors[scenario]) {
+    process.stderr.write(errors[scenario]);
+    process.exit(1);
+  }
+  if (scenario === 'timeout') await new Promise(() => { setInterval(() => {}, 1_000); });
+  writeFileSync(args[outAt + 1], scenario === 'structured-result' ? '{"answer":42}' : 'answer');
+  if (scenario === 'reported-usage') process.stdout.write(`${JSON.stringify({
+    type: 'turn.completed', usage: { input_tokens: 5, output_tokens: 3 },
+  })}\n`);
+  process.exit(scenario === 'late-final' ? 7 : 0);
+}
 writeFileSync(args[outAt + 1], 'PONG');
 process.stdout.write(`${JSON.stringify({
   type: 'turn.completed',
