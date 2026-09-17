@@ -3,11 +3,12 @@ import { readFile } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-import { pass, revise, withExample } from '../proof-host.ts';
+import { pass, revise, sourceDir, withExample } from '../proof-host.js';
 
 const here = dirname(fileURLToPath(import.meta.url));
-const brief = await readFile(join(here, 'briefs/support.md'), 'utf8');
-const damagedBook = await readFile(join(here, 'tickets/inbox.json'), 'utf8');
+const samples = sourceDir(here);
+const brief = await readFile(join(samples, 'briefs/support.md'), 'utf8');
+const damagedBook = await readFile(join(samples, 'tickets/inbox.json'), 'utf8');
 
 const decision = (ticket: string, route: 'auto' | 'escalate', confidence: number, reason: string): string =>
   `${JSON.stringify({ ticket, route, confidence, reason }, null, 2)}\n`;

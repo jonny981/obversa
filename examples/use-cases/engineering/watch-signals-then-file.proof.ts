@@ -3,10 +3,11 @@ import { readFile } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-import { pass, revise, withExample } from '../proof-host.ts';
+import { pass, revise, sourceDir, withExample } from '../proof-host.js';
 
 const here = dirname(fileURLToPath(import.meta.url));
-const brief = await readFile(join(here, 'briefs/friction.md'), 'utf8');
+const samples = sourceDir(here);
+const brief = await readFile(join(samples, 'briefs/friction.md'), 'utf8');
 
 const rows = JSON.stringify({
   columns: ['event', 'url', 'n'],

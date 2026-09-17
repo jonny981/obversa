@@ -3,11 +3,12 @@ import { readFile } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-import { pass, revise, withExample } from '../proof-host.ts';
+import { pass, revise, sourceDir, withExample } from '../proof-host.js';
 
 const here = dirname(fileURLToPath(import.meta.url));
-const brief = await readFile(join(here, 'briefs/backlog.md'), 'utf8');
-const raw = await readFile(join(here, 'backlog/raw.md'), 'utf8');
+const samples = sourceDir(here);
+const brief = await readFile(join(samples, 'briefs/backlog.md'), 'utf8');
+const raw = await readFile(join(samples, 'backlog/raw.md'), 'utf8');
 
 const story = (title: string, from: string, sentence: string, ...checks: string[]): string =>
   `## ${title}\n\nFrom: ${from}\n\n${sentence}\n\n${checks.map((check) => `- ${check}`).join('\n')}\n\n`;

@@ -3,12 +3,13 @@ import { readFile } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-import { pass, revise, withExample } from '../proof-host.ts';
+import { pass, revise, sourceDir, withExample } from '../proof-host.js';
 
 const here = dirname(fileURLToPath(import.meta.url));
-const brief = await readFile(join(here, 'briefs/translation.md'), 'utf8');
-const article = await readFile(join(here, 'source/article.md'), 'utf8');
-const glossary = await readFile(join(here, 'glossary/en-fr.md'), 'utf8');
+const samples = sourceDir(here);
+const brief = await readFile(join(samples, 'briefs/translation.md'), 'utf8');
+const article = await readFile(join(samples, 'source/article.md'), 'utf8');
+const glossary = await readFile(join(samples, 'glossary/en-fr.md'), 'utf8');
 
 const literal = '# Les factures partent maintenant toutes seules\n\nÀ partir d\'aujourd\'hui, une facture récurrente s\'expédie elle-même. Réglez le calendrier une fois, et Ledgerline crée la facture, attache le PDF et l\'expédie le jour dit, puis la marque payée quand l\'argent arrive.\n\nVous restez aux commandes. Chaque facture attend dans Brouillons aussi longtemps que vous voulez avant son premier envoi, et vous pouvez mettre un calendrier en pause depuis la page de la facture.\n\nRien ne change pour les factures ponctuelles. Le bouton Envoyer fait ce qu\'il a toujours fait, et les rappels de paiement gardent leur rythme.\n';
 const revised = literal

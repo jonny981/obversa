@@ -3,10 +3,11 @@ import { readFile } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-import { pass, revise, withExample } from '../proof-host.ts';
+import { pass, revise, sourceDir, withExample } from '../proof-host.js';
 
 const here = dirname(fileURLToPath(import.meta.url));
-const brief = await readFile(join(here, 'briefs/idea.md'), 'utf8');
+const samples = sourceDir(here);
+const brief = await readFile(join(samples, 'briefs/idea.md'), 'utf8');
 
 const research = '# Research\n\nWhat exists: invoices in Postgres, a nightly job, no bank feed.\n\nWays: (a) match on exact amount only; (b) match on amount and the invoice number in the reference; (c) a learned matcher. (b) is the one four weeks affords and the one that never matches twice by accident.\n';
 const spec = '# Spec\n\nUpload a bank CSV; for each credit, match an open invoice when the amount is equal and the reference contains the invoice number; otherwise leave it for a person. The spike must prove that the rule never matches one transaction to two invoices on real-shaped data.\n';

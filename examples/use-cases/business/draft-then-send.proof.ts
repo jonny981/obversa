@@ -3,11 +3,12 @@ import { readFile } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-import { pass, revise, withExample } from '../proof-host.ts';
+import { pass, revise, sourceDir, withExample } from '../proof-host.js';
 
 const here = dirname(fileURLToPath(import.meta.url));
-const brief = await readFile(join(here, 'briefs/outreach.md'), 'utf8');
-const leads = await readFile(join(here, 'leads.csv'), 'utf8');
+const samples = sourceDir(here);
+const brief = await readFile(join(samples, 'briefs/outreach.md'), 'utf8');
+const leads = await readFile(join(samples, 'leads.csv'), 'utf8');
 
 const email = (to: string, subject: string, text: string) =>
   ({ from: 'ines@lanternanalytics.example', to: [to], subject, text });

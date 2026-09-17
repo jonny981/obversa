@@ -16,7 +16,7 @@ import { spawnSync } from 'node:child_process';
 import { existsSync } from 'node:fs';
 import { chmod, mkdir, mkdtemp, readFile, rm, symlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
-import { dirname, join, resolve } from 'node:path';
+import { dirname, join, resolve, sep } from 'node:path';
 
 /** One scripted answer from a model seat: the files it writes, then its reply. */
 export interface SeatCall {
@@ -86,6 +86,18 @@ export interface ExampleRun {
 export const pass = (summary: string): string => JSON.stringify({ status: 'pass', summary });
 export const revise = (summary: string, ...findings: string[]): string =>
   JSON.stringify({ status: 'revise', summary, findings: findings.map((evidence) => ({ evidence })) });
+
+/**
+ * Where a proof's brief and sample inputs are: beside the proof's source.
+ * A proof compiled into a `dist/` directory reads them from the source
+ * tree it was compiled from, so the files a page quotes are the files the
+ * proof runs.
+ */
+export function sourceDir(here: string): string {
+  const marker = `${sep}dist${sep}`;
+  const at = here.indexOf(marker);
+  return at === -1 ? here : `${here.slice(0, at)}${sep}${here.slice(at + marker.length)}`;
+}
 
 /** The repository root, or the throwaway consumer's root: the nearest directory with a package.json. */
 function rootAbove(here: string): string {

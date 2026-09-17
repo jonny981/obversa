@@ -3,11 +3,12 @@ import { readFile } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-import { pass, revise, withExample } from '../proof-host.ts';
+import { pass, revise, sourceDir, withExample } from '../proof-host.js';
 
 const here = dirname(fileURLToPath(import.meta.url));
-const brief = await readFile(join(here, 'briefs/playbook.md'), 'utf8');
-const contract = await readFile(join(here, 'contracts/msa.md'), 'utf8');
+const samples = sourceDir(here);
+const brief = await readFile(join(samples, 'briefs/playbook.md'), 'utf8');
+const contract = await readFile(join(samples, 'contracts/msa.md'), 'utf8');
 
 const clauses = [
   '1. Term: push back (auto-renewal; 30-day notice)',
