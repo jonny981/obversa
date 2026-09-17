@@ -9,7 +9,7 @@
 // into its cwd, prints the reply in that role's line protocol, appends one
 // line per call to .obversa-stand-in-calls.log beside the script, and exits
 // 0. Past the end of the list it repeats the last entry.
-import { appendFileSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { appendFileSync, mkdirSync, readFileSync, rmdirSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 
 const args = process.argv.slice(2);
@@ -30,6 +30,22 @@ function call() {
   return list[Math.min(count, list.length - 1)];
 }
 
+// Two seats of one role can run at the same time (a review panel runs its
+// reviewers together), and each would count the same prior calls and take the
+// same entry. Counting, choosing and logging happen under one lock, taken by
+// creating a directory, which is atomic on every platform Node runs on.
+function withCallsLock(fn) {
+  const lock = `${callsLog}.lock`;
+  const deadline = Date.now() + 10_000;
+  for (;;) {
+    try { mkdirSync(lock); break; } catch (error) {
+      if (error.code !== 'EEXIST' || Date.now() > deadline) throw error;
+      Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 5);
+    }
+  }
+  try { return fn(); } finally { rmdirSync(lock); }
+}
+
 function countCalls(role) {
   try {
     return readFileSync(callsLog, 'utf8').split('\n').filter(Boolean)
@@ -44,19 +60,20 @@ if (args.length === 1 && args[0] === '--version') {
   process.exit(0);
 }
 
-const entry = call();
-for (const [path, content] of Object.entries(entry.writes ?? {})) {
-  mkdirSync(dirname(path), { recursive: true });
-  writeFileSync(path, content);
-}
-if (callsLog !== undefined) {
+const entry = withCallsLock(() => {
+  const chosen = call();
   appendFileSync(callsLog, `${JSON.stringify({
     role,
-    reply: entry.reply,
-    writes: entry.writes ?? {},
+    reply: chosen.reply,
+    writes: chosen.writes ?? {},
     cwd: process.cwd(),
     args,
   })}\n`);
+  return chosen;
+});
+for (const [path, content] of Object.entries(entry.writes ?? {})) {
+  mkdirSync(dirname(path), { recursive: true });
+  writeFileSync(path, content);
 }
 
 if (role === 'claude') {

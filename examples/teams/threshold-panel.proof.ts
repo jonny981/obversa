@@ -19,10 +19,16 @@ const repo = (() => {
 })();
 const standIn = join(repo, 'scripts', 'stand-in-cli.mjs');
 
-const workspace = await mkdtemp(join(tmpdir(), 'obversa-team-panel-proof-'));
+// The stand-in executables live beside the workspace, not inside it: a read-only
+// reviewer's workspace guard refuses a symlink under the workspace that resolves
+// outside it, and the stand-in is a symlink to a script in the repository.
+const root = await mkdtemp(join(tmpdir(), 'obversa-team-panel-proof-'));
+const workspace = join(root, 'workspace');
+const bin = join(root, 'bin');
 try {
   await mkdir(join(workspace, 'briefs'), { recursive: true });
-  await mkdir(join(workspace, 'bin'), { recursive: true });
+  await mkdir(workspace, { recursive: true });
+  await mkdir(bin, { recursive: true });
   await writeFile(join(workspace, 'briefs/double.md'), '---\nfiles: ["src/double.mjs"]\n---\n\nWrite a pure double(value) function in src/double.mjs with a Node test in test/double.test.mjs.\n');
   await writeFile(
     join(workspace, '.obversa-stand-in.json'),
@@ -41,7 +47,7 @@ try {
   );
   const callsLog = join(workspace, '.obversa-stand-in-calls.log');
   for (const name of ['claude', 'codex', 'opencode']) {
-    await symlink(standIn, join(workspace, 'bin', name));
+    await symlink(standIn, join(bin, name));
   }
 
   // Inside a fresh consumer there is no packages/runtime/tsconfig.json; tsx then
@@ -57,7 +63,7 @@ try {
     cwd: workspace,
     env: {
       ...process.env,
-      PATH: `${join(workspace, 'bin')}:${process.env.PATH ?? ''}`,
+      PATH: `${bin}:${process.env.PATH ?? ''}`,
     },
     encoding: 'utf8',
     timeout: 120_000,
@@ -93,5 +99,5 @@ try {
     mode,
   }, null, 2));
 } finally {
-  await rm(workspace, { recursive: true, force: true });
+  await rm(root, { recursive: true, force: true });
 }
