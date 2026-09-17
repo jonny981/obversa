@@ -410,6 +410,7 @@ export async function runEngineConformance(
           return;
         }
         if (error !== undefined) throw error;
+        check(result !== undefined, 'Supported workspace mode returned no result.');
         check(observed.modelCalls > 0, 'Supported workspace fixture never reached the model boundary.');
         check(observed.canRead === (mode !== 'none'), `Workspace ${mode} exposed incorrect read access.`);
         check(observed.canWrite === (mode === 'write'), `Workspace ${mode} exposed incorrect write access.`);

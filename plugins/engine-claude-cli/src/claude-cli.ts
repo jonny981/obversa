@@ -541,19 +541,20 @@ export class ClaudeCliEngine implements Engine {
           },
         });
       }
-      // A rate/usage limit can land on either stream; check both (redacted)
-      // before falling through to the generic exit-code error.
+      // An unfinished failure can land on either stream. Classify only
+      // redacted text, retaining limit reset times and billing's quota kind.
+      const stdout = scrubCapture(
+        new TextDecoder().decode(result.stdout),
+        env,
+        400,
+      );
+      const detail = `${stderr}\n${stdout}`;
       if (!result.timedOut) {
-        const stdout = scrubCapture(
-          new TextDecoder().decode(result.stdout),
-          env,
-          400,
-        );
-        const limit = classifyCliLimit(`${stderr}\n${stdout}`);
+        const limit = classifyCliLimit(detail);
         if (limit) throw limit;
       }
       throw new EngineError({
-        kind: result.timedOut ? 'timeout' : 'unknown',
+        kind: result.timedOut ? 'timeout' : classifyEngineFailure(new Error(detail)),
         message: `claude exited ${result.exitCode ?? '?'}${stderr ? `: ${stderr}` : ''}`,
       });
     }

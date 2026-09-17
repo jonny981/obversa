@@ -6,14 +6,18 @@ import { expect, it } from 'vitest';
 import { engineSelection, runEngineConformance, type AgentRequest } from '@obversa/engine';
 import { ClaudeCliEngine } from '../src/index.ts';
 
-it('runs the full kit through the Claude process boundary', async () => {
+it.each(['stderr', 'stdout'])('runs the full kit through the Claude process boundary with failures on %s', async (stream) => {
   const dir = realpathSync(mkdtempSync(join(tmpdir(), 'claude-conformance-')));
   try {
     const bin = join(dir, 'claude');
     const calls = join(dir, 'calls.jsonl');
     copyFileSync(fileURLToPath(new URL('./fixtures/claude-cli.mjs', import.meta.url)), bin);
     chmodSync(bin, 0o755);
-    const env = { OBVERSA_TEST_CLAUDE_CALLS: calls, OBVERSA_ENGINE_CONFORMANCE_SCENARIO: '' };
+    const env = {
+      OBVERSA_TEST_CLAUDE_CALLS: calls,
+      OBVERSA_ENGINE_CONFORMANCE_SCENARIO: '',
+      OBVERSA_TEST_CLAUDE_FAILURE_STREAM: stream,
+    };
     const request: AgentRequest = {
       prompt: 'fixture', model: 'claude-test', tools: ['Read'], allowedTools: ['Read'],
       cwd: dir, leaf: true, timeoutMs: 2_000, timeoutGraceMs: 200, env,

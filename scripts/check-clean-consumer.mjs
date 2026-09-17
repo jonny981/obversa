@@ -2,7 +2,7 @@
 
 import { CONSUMER_EXAMPLES } from './consumer-examples.mjs';
 import assert from 'node:assert/strict';
-import { copyFile, mkdtemp, mkdir, readFile, rm, writeFile } from 'node:fs/promises';
+import { access, copyFile, mkdtemp, mkdir, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { basename, dirname, isAbsolute, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -787,6 +787,12 @@ async function main() {
     await copyFile(turnTakingExamplePath, join(consumerDirectory, 'turn-taking.ts'));
     await copyFile(workspaceExamplePath, join(consumerDirectory, 'workspace.ts'));
     await copyFile(featureTeamExamplePath, join(consumerDirectory, 'feature-team.ts'));
+
+    await copyFile(join(root, 'examples', 'write-and-review.ts'), join(consumerDirectory, 'write-and-review.ts'));
+    await copyFile(join(root, 'examples', 'one-agent-job.ts'), join(consumerDirectory, 'one-agent-job.ts'));
+    await copyFile(join(root, 'examples', 'command-kickback.ts'), join(consumerDirectory, 'command-kickback.ts'));
+    await copyFile(join(root, 'examples', 'approval.ts'), join(consumerDirectory, 'approval.ts'));
+    await copyFile(join(root, 'examples', 'monitor.ts'), join(consumerDirectory, 'monitor.ts'));
     await copyFile(tournamentExamplePath, join(consumerDirectory, 'tournament.ts'));
     await copyFile(describedTeamExamplePath, join(consumerDirectory, 'described-team.ts'));
     await copyFile(runnerExamplePath, join(consumerDirectory, 'supervised-run.ts'));
@@ -815,6 +821,18 @@ async function main() {
       );
       if (JSON.stringify(installed).includes('workspace:')) {
         throw new Error(`${name} retained a workspace dependency after installation`);
+      }
+    }
+
+
+    // The include silently skips a file that was never copied, so the proof
+    // would compile fewer files than the header claims. Name every file the
+    // list promises and refuse before tsc runs if one is missing.
+    for (const example of CONSUMER_EXAMPLES) {
+      try {
+        await access(join(consumerDirectory, example));
+      } catch {
+        throw new Error(`the consumer proof lists ${example} but never copies it into the clean consumer`);
       }
     }
 

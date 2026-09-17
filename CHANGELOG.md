@@ -9,6 +9,29 @@ other published package tracks its own version independently of it.
 
 ## [Unreleased]
 
+### Added
+
+- **Declared access is enforced on every engine:** a seat's workspace mode is
+  a ceiling. An approval never adds a capability the mode withholds, and a
+  bypass never exceeds it. An adapter that cannot express the declared access
+  refuses before a model runs. A reviewer with no way to read the work is
+  refused rather than run. The engine conformance kit runs the `none`, `read`
+  and `write` modes against every shipped adapter. Features an adapter does
+  not support are listed in `EngineAdapterConformanceReport.unsupported`, never
+  as passes. The engine package exports `claudeToolOptions`, the helper the
+  two Claude adapters share.
+
+### Changed
+
+- **`command-kickback` example:** the two review gates and their descriptions
+  state what each review node establishes ("has returned a verdict") rather
+  than what a reviewer did. The page that quotes the file follows it.
+
+### Fixed
+
+- The Claude CLI adapter classifies auth, model-unavailable, transient and
+  invalid-config failures instead of reporting them as unknown.
+
 ## [1.0.0] - 2026-09-15
 
 ### Added

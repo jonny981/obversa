@@ -52,3 +52,7 @@ const engine = new AgentSdkEngine({
 - Requires local Claude Code host authentication; it does not accept raw API keys.
 - Each call runs in-process via SDK query sessions rather than separate OS child processes.
 - Memory integration attaches an MCP memory tool into the query context.
+- In the `read` and `none` workspace modes the adapter passes Claude a bounded
+  tool list (`Read`, `Grep` and `Glob` for `read`; none for `none`). It
+  disallows `Bash`, `Edit`, `Write`, the sub-agent tools and every MCP tool. A
+  settings file outside the run cannot restore them.

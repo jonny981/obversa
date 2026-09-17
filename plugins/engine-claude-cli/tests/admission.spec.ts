@@ -163,7 +163,9 @@ describe.runIf(process.platform !== 'win32')('Claude static admission', () => {
     expect(model.args[model.args.indexOf('--tools') + 1]).toBe('');
     expect(model.args).not.toContain('--allowedTools');
     expect(model.args[model.args.indexOf('--permission-mode') + 1]).toBe('auto');
-    expect(model.args[model.args.indexOf('--disallowedTools') + 1]).toBe('Task,Agent');
+    expect(model.args[model.args.indexOf('--disallowedTools') + 1]).toBe(
+      'Bash,Edit,Write,MultiEdit,NotebookEdit,Task,Agent,Skill,ToolSearch,mcp__*',
+    );
     expect(invocations(f.calls).filter((call) => call.kind === 'version')).toHaveLength(1);
   });
 

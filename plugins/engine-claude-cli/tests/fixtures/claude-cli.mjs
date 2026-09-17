@@ -44,7 +44,9 @@ if (scenario) {
     'invalid-config': 'invalid configuration',
   };
   if (errors[scenario]) {
-    process.stderr.write(errors[scenario]);
+    const stream = process.env.OBVERSA_TEST_CLAUDE_FAILURE_STREAM === 'stdout'
+      ? process.stdout : process.stderr;
+    stream.write(errors[scenario]);
     process.exit(1);
   }
   const emit = (message) => process.stdout.write(`${JSON.stringify(message)}\n`);

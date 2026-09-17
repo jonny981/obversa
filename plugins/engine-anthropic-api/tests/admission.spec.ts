@@ -91,9 +91,11 @@ describe('API static admission', () => {
     expect((engine as unknown as { clientPromise?: unknown }).clientPromise).toBeUndefined();
   });
 
-  it.each(['tools', 'allowedTools'] as const)('refuses nonempty %s without a provider call', async (field) => {
+  it.each(['tools', 'allowedTools'] as const)('refuses nonempty %s at admission and execution without a provider call', async (field) => {
     const { open, bodies } = harness();
     await expect(open().admit({ ...staticRequest(), [field]: ['Read'] }, signal()))
+      .rejects.toMatchObject({ kind: 'invalid-config' });
+    await expect(open().run({ ...request, [field]: ['Read'] }, () => {}, signal()))
       .rejects.toMatchObject({ kind: 'invalid-config' });
     expect(bodies).toEqual([]);
   });
@@ -138,9 +140,9 @@ describe('API static admission', () => {
     expect(bodies).toEqual([expect.objectContaining({ model: 'second-model' })]);
   });
 
-  it('keeps ordinary requests text-only without claiming requested tools', async () => {
+  it('keeps supported requests text-only without claiming tools', async () => {
     const { open, bodies } = harness();
-    const result = await open().run({ ...request, tools: ['Read'], allowedTools: ['Read'] }, () => {}, signal());
+    const result = await open().run(request, () => {}, signal());
     expect(result.requested.capabilities).toEqual([]);
     expect(result.effective.capabilities).toEqual([]);
     expect(bodies).toHaveLength(1);
