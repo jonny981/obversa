@@ -292,8 +292,10 @@ describe('OpenCode static admission', () => {
     expect(sources.some((source) => source.startsWith(managed))).toBe(false);
   });
 
-  it('keeps the project guard active for a run after successful admission', async () => {
-    const fixture = admissionFixture();
+  it.each([0, 2_500])('keeps the project guard active for a run after successful admission (boot delay %i ms)', async (bootDelayMs) => {
+    const fixture = admissionFixture({
+      OBVERSA_TEST_OPENCODE_BOOT_DELAY_MS: String(bootDelayMs),
+    });
     const input = request();
     writeFileSync(join(input.cwd!, 'AGENTS.md'), 'allowed root instructions');
     await fixture.engine.admit(admissionRequest(input), new AbortController().signal);
@@ -302,7 +304,7 @@ describe('OpenCode static admission', () => {
     await expect(fixture.engine.run(input, () => {}, new AbortController().signal))
       .rejects.toMatchObject({ kind: 'invalid-config' });
     expect(fixture.calls().map((call) => call.kind)).toEqual(['version']);
-  });
+  }, 15_000);
 
   it.each([
     { env: { EXTRA: 'not allowed' } },
@@ -437,9 +439,10 @@ describe('OpenCode static admission', () => {
     expect(fixture.calls()).toEqual([]);
   });
 
-  it('classifies successful version cleanup failure as unknown without retaining its path', async () => {
+  it.each([0, 2_500])('classifies successful version cleanup failure as unknown without retaining its path (boot delay %i ms)', async (bootDelayMs) => {
     const fixture = admissionFixture({
       OBVERSA_TEST_OPENCODE_VERSION_BLOCK_CLEANUP: '1',
+      OBVERSA_TEST_OPENCODE_BOOT_DELAY_MS: String(bootDelayMs),
     });
     let failure: unknown;
     let versionDirectory: string | undefined;
@@ -456,7 +459,7 @@ describe('OpenCode static admission', () => {
     expect(failure).toBeInstanceOf(EngineError);
     expect(failure).toMatchObject({ kind: 'unknown' });
     expect(String(failure)).not.toContain(versionDirectory!);
-  });
+  }, 15_000);
 
   it('preserves the version command failure when version cleanup also fails', async () => {
     const fixture = admissionFixture({
@@ -552,7 +555,8 @@ function request(overrides: Partial<AgentRequest> = {}): AgentRequest {
     cwd: temporaryDirectory('lines-opencode-cwd-'),
     workspaceMode: 'read',
     leaf: true,
-    timeoutMs: 2_000,
+    // Startup is not under test; leave the version probe its production window.
+    timeoutMs: 10_000,
     timeoutGraceMs: 200,
     maxOutputBytes: 64 * 1_024,
     maxMemoryBytes: 256 * 1_024 * 1_024,

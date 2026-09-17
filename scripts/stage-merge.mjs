@@ -70,10 +70,12 @@ export const stageBranches = {
   F56: 'feat/surfaces-workflow-example',
   F57: 'feat/surfaces-block-identity',
   F65: 'feat/example-host-proofs',
+  F68: 'feat/consumer-proof-materialisation',
   F50: 'docs/stage-f50-review-panel-page',
   F53: 'docs/stage-f53-family-claim',
   F45: 'release/stage-f45-cut',
   F52: 'feat/model-identity-proof',
+  F71: 'fix/opencode-admission-boot-window',
 };
 
 export function manageStage(args, options = {}) {
