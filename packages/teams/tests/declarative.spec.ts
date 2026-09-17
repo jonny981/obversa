@@ -619,6 +619,78 @@ describe('declarative teams', () => {
     }
   });
 
+  it('refuses a reviewedBy stage whose recorded answers share one family despite declared difference', async () => {
+    const directory = await mkdtemp(join(tmpdir(), 'obversa-f54-reviewedby-'));
+    const writer = seat(scriptedEngine('writer', [async (request) => {
+      await writeFile(join(request.cwd!, 'note.md'), 'written\n');
+      return pass('note written');
+    }], { usageModel: 'grok-4' }), 'claude');
+    const reviewer = seat(scriptedEngine('reviewer', [async () => pass('accepted')], { usageModel: 'grok-4' }), 'gpt');
+    const job = workflow('recorded-family-reviewedby', {
+      brief: { brief: 'Write one note.', files: ['note.md'] },
+      roles: { writer, review: [reviewer] },
+      stages: [stage('note', { agent: 'writer', writes: 'note.md', reviewedBy: 'review' })],
+    });
+
+    try {
+      const result = await run(job, { cwd: directory });
+      expect(result.outcome.status).toBe('fail');
+      expect(JSON.stringify(result.outcome.data ?? result.outcome.summary)).toMatch(/recorded model family collision/i);
+    } finally {
+      await rm(directory, { recursive: true, force: true });
+    }
+  });
+
+  it('refuses a panel whose two recorded sides answered from one family despite declared difference', async () => {
+    const directory = await mkdtemp(join(tmpdir(), 'obversa-f54-recorded-vs-recorded-'));
+    const writer = seat(scriptedEngine('writer', [async (request) => {
+      await writeFile(join(request.cwd!, 'note.md'), 'written\n');
+      return pass('note written');
+    }], { usageModel: 'grok-4' }), 'claude');
+    const reviewer = seat(scriptedEngine('reviewer', [async () => pass('accepted')], { usageModel: 'grok-4' }), 'gpt');
+    const job = workflow('recorded-family-both-grok', {
+      brief: { brief: 'Write one note.', files: ['note.md'] },
+      roles: { writer, review: [reviewer] },
+      stages: [
+        stage('write', { agent: 'writer', writes: 'note.md' }),
+        stage('review', { panel: 'review', agree: 1 }),
+      ],
+    });
+
+    try {
+      const result = await run(job, { cwd: directory });
+      expect(result.outcome.status).toBe('fail');
+      expect(JSON.stringify(result.outcome.data ?? result.outcome.summary)).toMatch(/recorded model family collision/i);
+    } finally {
+      await rm(directory, { recursive: true, force: true });
+    }
+  });
+
+  it('refuses a reviewer that reports it cannot tell which family answered', async () => {
+    const directory = await mkdtemp(join(tmpdir(), 'obversa-f54-unknown-'));
+    const writer = seat(scriptedEngine('writer', [async (request) => {
+      await writeFile(join(request.cwd!, 'note.md'), 'written\n');
+      return pass('note written');
+    }], { usageModel: 'claude-sonnet-4-5' }), 'claude');
+    const reviewer = seat(scriptedEngine('reviewer', [async () => pass('accepted')], { usageModel: 'unknown' }), 'gpt');
+    const job = workflow('recorded-family-unknown-reviewer', {
+      brief: { brief: 'Write one note.', files: ['note.md'] },
+      roles: { writer, review: [reviewer] },
+      stages: [
+        stage('write', { agent: 'writer', writes: 'note.md' }),
+        stage('review', { panel: 'review', agree: 1 }),
+      ],
+    });
+
+    try {
+      const result = await run(job, { cwd: directory });
+      expect(result.outcome.status).toBe('fail');
+      expect(JSON.stringify(result.outcome.data ?? result.outcome.summary)).toMatch(/recorded model family is unknown/i);
+    } finally {
+      await rm(directory, { recursive: true, force: true });
+    }
+  });
+
   it('accepts a panel whose recorded answers keep the declared family difference', async () => {
     const directory = await mkdtemp(join(tmpdir(), 'obversa-f54-recorded-ok-'));
     const writer = seat(scriptedEngine('writer', [async (request) => {

@@ -12,8 +12,9 @@ other published package tracks its own version independently of it.
 ### Added
 
 - **Recorded model families:** The runtime exports `RECORDED_ENGINE_USAGE`,
-  the shared state key under which every engine answer is recorded beside
-  its job path, and the declarative panel guard reads that state.
+  the shared state key under which every agent job's engine answer is
+  recorded beside its job path, and the declarative panel guard reads
+  that state.
 - **Recorded model families:** A panel that requires its reviewers to differ
   in model family from the writers it reviews now compares what actually
   answered against what each seat declared. The runtime records every

@@ -321,7 +321,8 @@ function seatRole(roles: WorkflowConfig['roles'], name: string): TeamSeat {
 function recordedFamilyOf(model: string): string | undefined {
   const withoutProvider = model.slice(model.indexOf('/') + 1);
   const family = withoutProvider.split('-', 1)[0]?.trim().toLowerCase() ?? '';
-  return family === '' ? undefined : family;
+  if (family === '' || family === 'unknown') return undefined;
+  return family;
 }
 
 function recordedUsage(ctx: JobContext): readonly RecordedEngineUsage[] {
@@ -372,32 +373,57 @@ function recordedFamilyGate(
   reviewers: readonly TeamSeat[],
   writerStageNames: readonly string[],
   writerFamilies: readonly string[],
+  bodyMarker?: string,
 ): Job {
   const reviewerFamilies = reviewers.map((seat) => seatIdentity(seat).modelFamily);
   return async (ctx) => {
     try {
       const all = recordedUsage(ctx);
       const beforeLength = all.length;
-      // Every recorded answer up to the panel is read, never the first per seat.
-      assertRecordedFamilies(
-        all.slice(0, beforeLength).filter(
-          (record) => writerStageNames.some((name) => record.path.includes(name)),
-        ),
-        reviewers.map((seat) => ({
-          label: `reviewer seat ${seatIdentity(seat).model}`,
-          family: seatIdentity(seat).modelFamily,
-        })),
+      const writerRecords = all.slice(0, beforeLength).filter(
+        (record) => writerStageNames.some((name) => record.path.includes(name)),
       );
+      const reviewerDeclarations = reviewers.map((seat) => ({
+        label: `reviewer seat ${seatIdentity(seat).model}`,
+        family: seatIdentity(seat).modelFamily,
+      }));
+      // Every recorded answer up to the panel is read, never the first
+      // per seat, and each must keep the declared difference.
+      assertRecordedFamilies(writerRecords, reviewerDeclarations);
       const outcome = await panel(ctx);
       if (outcome.status !== 'pass') return outcome;
       const after = recordedUsage(ctx).slice(beforeLength);
-      assertRecordedFamilies(
-        after,
-        writerStageNames.map((name, index) => ({
-          label: `writer stage ${name}`,
-          family: writerFamilies[index] ?? '',
-        })).filter((entry) => entry.family !== ''),
+      const writerDeclarations = writerStageNames.map((name, index) => ({
+        label: `writer stage ${name}`,
+        family: writerFamilies[index] ?? '',
+      })).filter((entry) => entry.family !== '');
+      assertRecordedFamilies(after, writerDeclarations);
+      // The recorded sides themselves must be disjoint: two declared
+      // differences mean nothing when one family answered both. In the
+      // reviewedBy form the writer's answers appear DURING the wrapped
+      // loop, so the writer side is attributed by the loop body's path
+      // leaf rather than by the pre-loop filter.
+      const writerAnswerFamilies = new Set(
+        (bodyMarker === undefined
+          ? writerRecords
+          : after.filter((record) => record.path[record.path.length - 1] === bodyMarker)
+        ).map((record) => recordedFamilyOf(record.model)).filter(
+          (family): family is string => family !== undefined,
+        ),
       );
+      for (const record of after) {
+        const family = recordedFamilyOf(record.model);
+        if (family === undefined) {
+          throw new TypeError(
+            `recorded model family is unknown: the answer ${record.model} from ${record.path.join('/')} carries no readable family, and the panel requires the two recorded sides to differ`,
+          );
+        }
+        if (writerAnswerFamilies.has(family)) {
+          throw new TypeError(
+            `recorded model family collision: the answer ${record.model} from ${record.path.join('/')} belongs to the family ${family}, and a writer stage's recorded answer belongs to the same family; the panel requires the two recorded sides to be disjoint`,
+          );
+        }
+      }
       return outcome;
     } catch (error) {
       if (error instanceof TypeError && error.message.startsWith('recorded model family')) {
@@ -531,9 +557,10 @@ function stageJob(
       ? guarded
       : unchangedNoteGuard(named.name, guarded, writes);
     if (config.reviewedBy === undefined) return job;
-    const panel = reviewerPanel(brief, named, panelRole(roles, config.reviewedBy), files, declaredFiles, undefined);
+    const reviewers = panelRole(roles, config.reviewedBy);
+    const panel = reviewerPanel(brief, named, reviewers, files, declaredFiles, undefined);
     const retry = retryOf(config);
-    return loop({
+    const reviewLoop = loop({
       name: `${named.name}-review`,
       body: job,
       until: predicate(async (ctx) => {
@@ -553,6 +580,16 @@ function stageJob(
       maxReviewRestarts: retry,
       noProgress: { window: 2, gate: true },
     });
+    return copyJobMeta(
+      recordedFamilyGate(
+        reviewLoop,
+        reviewers,
+        [named.name],
+        [seatIdentity(seatRole(roles, config.agent)).modelFamily],
+        `${named.name}-review`,
+      ),
+      reviewLoop,
+    );
   }
   if ('run' in config && config.run !== undefined) {
     const command = commandJob(named.name, config.run, { target: config.sendsBackTo });
