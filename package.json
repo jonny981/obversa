@@ -116,6 +116,7 @@
     "verify:f35": "pnpm verify:d48",
     "test:example-output": "node --test scripts/check-example-output.spec.mjs",
     "verify:f39": "pnpm verify:f35 && pnpm test:example-output",
+    "verify:f71": "pnpm verify:f39 && pnpm --filter @obversa/engine-opencode-cli test",
     "verify:f45": "pnpm verify:f38",
     "verify:f53": "pnpm verify:f39 && node scripts/check-page-shape.mjs && node scripts/check-retired-paths.mjs",
     "verify:f52": "pnpm verify:f39",

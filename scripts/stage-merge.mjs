@@ -74,6 +74,7 @@ export const stageBranches = {
   F53: 'docs/stage-f53-family-claim',
   F45: 'release/stage-f45-cut',
   F52: 'feat/model-identity-proof',
+  F71: 'fix/opencode-admission-boot-window',
 };
 
 export function manageStage(args, options = {}) {
