@@ -11,6 +11,7 @@ import {
   defineSkill,
   fromFile,
   LoopError,
+  RECORDED_ENGINE_USAGE,
 } from '../src/api.ts';
 import type { Engine, RunOptions, AgentRequest, LoopEvent } from '../src/api.ts';
 import { agentContract, resolveSystem } from '../src/core/agent.ts';
@@ -308,6 +309,34 @@ describe('AgentDef', () => {
       timeoutGraceMs: 200,
       leaf: true,
     });
+  });
+
+  it('records advisor usage without inheriting the writer role or stage', async () => {
+    const repo = await tmpRepo();
+    const state: Record<string, unknown> = {};
+    let writerCalls = 0;
+    const writer = new MockEngine(() => {
+      writerCalls += 1;
+      return writerCalls === 1
+        ? '<consult_advisor><question>Which design?</question></consult_advisor>'
+        : 'final answer';
+    });
+    const advisor = new MockEngine(() => 'Use the smaller design.');
+
+    const { outcome } = await run(agentJob({
+      prompt: 'build',
+      engine: writer,
+      model: 'claude-sonnet-4-5',
+      recordAs: { role: 'writer', stage: 'write' },
+      advisor: { engine: advisor, model: 'gpt-5', maxCalls: 1 },
+    }), { cwd: repo, state });
+
+    expect(outcome.status).toBe('pass');
+    expect(state[RECORDED_ENGINE_USAGE]).toEqual([
+      { model: 'claude-sonnet-4-5', path: [], role: 'writer', stage: 'write' },
+      { model: 'gpt-5', path: [] },
+      { model: 'claude-sonnet-4-5', path: [], role: 'writer', stage: 'write' },
+    ]);
   });
 
   it('emits a warning from a completed advisor consult', async () => {

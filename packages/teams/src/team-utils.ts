@@ -225,6 +225,7 @@ export function teamAgent(
   instructions: string | ((ctx: JobContext) => string),
   target?: string,
   decisionFile?: string,
+  recordAs?: { readonly role: 'writer' | 'reviewer'; readonly stage: string },
 ): Job {
   const identity = seatIdentity(seat);
   const agent = agentJob({
@@ -233,6 +234,7 @@ export function teamAgent(
     model: identity.model,
     cwd: input.workspace,
     consumeFeedback: target !== undefined,
+    ...(recordAs === undefined ? {} : { recordAs }),
     prompt: (ctx) => `${rolePrompt(label, input.brief)}\n${typeof instructions === 'function' ? instructions(ctx) : instructions}\nReturn one JSON object: {"status":"pass"|"revise","summary":"...","findings":[{"evidence":"..."}]}`,
     outcome: (text) => outcomeFromAgentText(text, target),
   });
@@ -259,6 +261,7 @@ export function panelReviewers(
   reviewers: readonly ReviewerSeat[],
   input: TeamInput,
   reviewTarget?: string,
+  recordAs?: { readonly role: 'writer' | 'reviewer'; readonly stage: string },
 ): Array<{ name: string; scope?: string; job: Job }> {
   return reviewers.map((reviewer) => {
     const instructions = [
@@ -274,6 +277,7 @@ export function panelReviewers(
       instructions,
       undefined,
       `reviews/${reviewer.name}.json`,
+      recordAs,
     );
     const retry = teamAgent(
       reviewer.name,
@@ -282,6 +286,7 @@ export function panelReviewers(
       `${instructions}\nYour previous response was not a valid decision. Return only the required JSON object.`,
       undefined,
       `reviews/${reviewer.name}.json`,
+      recordAs,
     );
     const job: Job = async (ctx) => {
       const first = await review(ctx);

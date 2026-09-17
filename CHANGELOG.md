@@ -22,6 +22,9 @@ other published package tracks its own version independently of it.
   answer belongs to a family it must differ from, or when an answer carries
   no readable family at all. The refusal names the seats, their declared
   families and the answers.
+  An agent job built with `recordAs: { role, stage }` records its answers
+  with the seat's role and stage. The gate compares recorded seats, never
+  job paths. A refusal is a `LoopError` the record keeps.
 
 ## [1.0.0] - 2026-09-15
 
