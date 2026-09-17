@@ -32,6 +32,11 @@ describe('modelIdentity', () => {
     ['anthropic/', 'a provider with no model'],
     ['/claude-sonnet-4-5', 'a model with an empty provider'],
     ['anthropic/claude sonnet', 'a model name with a space'],
+    ['anth ropic/claude-sonnet-4-5', 'a provider with a space'],
+    ['anthropic/claude\tsonnet', 'a tab inside the model name'],
+    ['anthropic//', 'a second separator with nothing after it'],
+    ['anthropic//unknown', 'the unknown placeholder behind a second separator'],
+    ['anthropic/claude/extra', 'two separators'],
   ])('refuses %j (%s) with an invalid-config engine error', (model) => {
     let caught: unknown;
     try {

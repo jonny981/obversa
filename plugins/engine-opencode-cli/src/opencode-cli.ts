@@ -248,6 +248,12 @@ function model(value: unknown): { readonly value: string; readonly provider: str
     slash < 1
     || slash === checked.length - 1
     || checked.includes(' ')
+    // A second separator is the same malformed request as a missing one, and
+    // it reads as a family: `anthropic//unknown` walked past the refusal the
+    // `unknown` placeholder exists to trigger. It refuses here with the
+    // wording this adapter already uses for a malformed request model, and
+    // the shared derivation refuses it again on its own account.
+    || checked.indexOf('/', slash + 1) !== -1
   ) {
     throw new TypeError('OpenCode request model must use provider/model format');
   }

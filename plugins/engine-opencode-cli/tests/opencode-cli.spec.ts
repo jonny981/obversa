@@ -1364,6 +1364,11 @@ describe('OpenCode CLI adapter', () => {
       () => {},
       new AbortController().signal,
     )).rejects.toThrow('provider/model');
+    await expect(engine.run(
+      request({ model: 'anthropic//claude-sonnet-4-5' }),
+      () => {},
+      new AbortController().signal,
+    )).rejects.toThrow('provider/model');
   });
 
   it('rejects an unresolved builder executable and non-object auth', () => {

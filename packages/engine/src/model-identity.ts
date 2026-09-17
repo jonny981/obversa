@@ -20,6 +20,8 @@ export interface ModelIdentity {
  * recorded models back, derives the identity through this one function.
  *
  * `provider/model` yields both parts; a bare `model` yields the family alone.
+ * A second separator, or whitespace anywhere inside, is refused rather than
+ * read as part of a name.
  * The family is the model name up to its first hyphen, lowercased, so
  * `claude-sonnet-4-5` and `claude-opus-4-1` are one family and `gpt-5.6-luna`
  * another. A string that names no readable family, including the `unknown`
@@ -37,8 +39,19 @@ export function modelIdentity(model: string): ModelIdentity {
   if (slash !== -1 && (provider === '' || name === '')) {
     throw invalid(`model ${JSON.stringify(model)} must name both a provider and a model`);
   }
-  if (name.includes(' ')) {
-    throw invalid(`model ${JSON.stringify(model)} must not contain spaces`);
+  // One provider and one model, with nothing hidden inside either part. A
+  // second separator let `anthropic//unknown` read as the family `/unknown`,
+  // which walks straight past the refusal the `unknown` placeholder exists to
+  // trigger, and `anthropic//` read as the family `/`. Whitespace anywhere
+  // inside is the same kind of hiding place, so it is refused across the whole
+  // identifier rather than in the model half alone.
+  if (name.includes('/')) {
+    throw invalid(
+      `model ${JSON.stringify(model)} must name one provider and one model, separated once`,
+    );
+  }
+  if (/\s/u.test(trimmed)) {
+    throw invalid(`model ${JSON.stringify(model)} must not contain whitespace`);
   }
   const family = name.split('-', 1)[0]?.trim().toLowerCase() ?? '';
   if (family === '' || family === 'unknown') {
