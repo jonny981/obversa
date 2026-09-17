@@ -1,9 +1,9 @@
 ---
-title: "Surfacer reference"
-description: "The exact session, handoff, client kit, launcher and placement rules of @obversa/surfacer, for hosts and pages that must interoperate with one."
+title: "@obversa/surface-decision"
+description: "The exact session, handoff, client kit, launcher and placement rules of @obversa/surface-decision, for hosts and pages that must interoperate with one."
 ---
 
-This is the reference for `@obversa/surfacer`. To learn what a surface is and run one, read [surfaces](/concepts/surfaces); come here for the exact rules.
+This is the reference for `@obversa/surface-decision`. To learn what a surface is and run one, read [surfaces](/concepts/surfaces); come here for the exact rules.
 
 A surface is a small user interface for one decision. The Surfacer is
 the package that runs it: one loopback server, one single-decision session, one
@@ -12,7 +12,7 @@ result. It owns no callback state, no routing, and no run records.
 ## The framed result
 
 Everything on this page ends in one framed result on the launcher's stdout.
-This is the real one from a run of `packages/surfacer/examples/hello-surface.mjs`
+This is the real one from a run of `packages/surface-decision/examples/hello-surface.mjs`
 in which the page's Yes button was clicked:
 
 ```text
@@ -99,7 +99,7 @@ bytes before use. Diagnostics stay on stderr.
 
 ## The client kit
 
-`@obversa/surfacer/client` is the no-framework browser kit: it reads
+`@obversa/surface-decision/client` is the no-framework browser kit: it reads
 the token from the fragment, removes it from the address bar, keeps the
 lease alive with a heartbeat, wraps every call with the bearer token,
 and acknowledges the terminal decision on submit or cancel.
@@ -109,7 +109,7 @@ and acknowledges the terminal decision on submit or cancel.
 `runSurface` is the one call an app makes: it starts the session,
 places the page, waits for the decision, frames it on stdout, and shuts
 down. Signals interrupt cleanly. The runnable example is
-`packages/surfacer/examples/hello-surface.mjs`.
+`packages/surface-decision/examples/hello-surface.mjs`.
 
 ## Placement
 

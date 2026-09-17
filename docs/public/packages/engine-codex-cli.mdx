@@ -1,9 +1,9 @@
 ---
-title: "Codex Engine"
-description: "@obversa/engine-codex runs engine requests through a fresh Codex CLI process."
+title: "@obversa/engine-codex-cli"
+description: "@obversa/engine-codex-cli runs engine requests through a fresh Codex CLI process."
 ---
 
-`@obversa/engine-codex` is an engine plugin that runs requests through the `codex` command-line interface. It provides an OpenAI-backed engine for verification and review seats.
+`@obversa/engine-codex-cli` is an engine plugin that runs requests through the `codex` command-line interface. It provides an OpenAI-backed engine for verification and review seats.
 
 ## Requirements
 
@@ -13,7 +13,7 @@ description: "@obversa/engine-codex runs engine requests through a fresh Codex C
 ## Install
 
 ```bash
-pnpm add @obversa/engine-codex
+pnpm add @obversa/engine-codex-cli
 ```
 
 ## Identity
@@ -23,7 +23,7 @@ The plugin serves the OpenAI provider. It reports `provider: 'openai'` and uses 
 ## Usage
 
 ```ts
-import { CodexEngine } from '@obversa/engine-codex';
+import { CodexEngine } from '@obversa/engine-codex-cli';
 
 const engine = new CodexEngine({
   defaultModel: 'gpt-5.4',

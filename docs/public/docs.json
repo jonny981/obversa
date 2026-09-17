@@ -144,17 +144,17 @@
           "packages/memory",
           "packages/process",
           "packages/teams",
-          "packages/surfacer"
+          "packages/surface-decision"
         ]
       },
       {
         "group": "Plugins",
         "pages": [
           "packages/engine-claude-cli",
-          "packages/engine-codex",
+          "packages/engine-codex-cli",
           "packages/engine-grok-cli",
           "packages/engine-opencode-cli",
-          "packages/engine-agent-sdk",
+          "packages/engine-claude-agent-sdk",
           "packages/engine-anthropic-api",
           "packages/memory-git",
           "packages/memory-simple"
@@ -206,6 +206,18 @@
     {
       "source": "/runtime/runner",
       "destination": "/driving/runner"
+    },
+    {
+      "source": "/packages/surfacer",
+      "destination": "/packages/surface-decision"
+    },
+    {
+      "source": "/packages/engine-codex",
+      "destination": "/packages/engine-codex-cli"
+    },
+    {
+      "source": "/packages/engine-agent-sdk",
+      "destination": "/packages/engine-claude-agent-sdk"
     }
   ]
 }
