@@ -135,10 +135,12 @@ for (const [stage, branch] of [
   ['F55', 'feat/surfaces-rewrite'],
   ['F56', 'feat/surfaces-workflow-example'],
   ['F57', 'feat/surfaces-block-identity'],
+  ['F68', 'feat/consumer-proof-materialisation'],
   ['F50', 'docs/stage-f50-review-panel-page'],
   ['F53', 'docs/stage-f53-family-claim'],
   ['F45', 'release/stage-f45-cut'],
   ['F52', 'feat/model-identity-proof'],
+  ['F71', 'fix/opencode-admission-boot-window'],
 ]) {
   test(`${stage} lands from its assigned branch ${branch}`, () => {
     const repository = createRepository({ feature: true, branch });
@@ -214,10 +216,12 @@ for (const [stage, branch] of [
   ['F55', 'feat/factory-v1'],
   ['F56', 'feat/factory-v1'],
   ['F57', 'feat/factory-v1'],
+  ['F68', 'feat/factory-v1'],
   ['F50', 'feat/graph-forms-v1'],
   ['F53', 'feat/graph-forms-v1'],
   ['F45', 'feat/graph-forms-v1'],
   ['F52', 'feat/graph-forms-v1'],
+  ['F71', 'feat/graph-forms-v1'],
 ]) {
   test(`${stage} refuses the wrong branch ${branch}`, () => {
     const repository = createRepository({ feature: true, branch });
