@@ -38,7 +38,6 @@ export const CONSUMER_EXAMPLES = Object.freeze([
   'approval.ts',
   'monitor.ts',
   'tournament.ts',
-  'teams/scripted-engine.ts',
   'teams/writer-reviewer-pair.ts',
   'teams/writer-reviewer-pair.proof.ts',
   'teams/threshold-panel.ts',

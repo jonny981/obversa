@@ -48,14 +48,16 @@ test('clean consumer proves the feature-delivery production line and its failure
   assert.match(source, /feature-delivery\.red\.ts/);
   assert.match(source, /denyRun\.status/);
   assert.match(source, /redRun\.status/);
-  assert.match(source, /featureDeny\.status/);
-  assert.match(source, /featureRed\.status/);
+  // A host proof refuses on stderr and prints nothing on stdout, so the
+  // controls read the child's failed outcome from the refusal, never a report.
+  assert.match(source, /a panel that never accepts must not reach the person gate/);
+  assert.match(source, /an unrepaired line must not pass/);
+  assert.match(source, /"status": "fail"/);
 });
 
 test('clean consumer runs the three packed team examples', async () => {
   const source = await readFile(new URL('./check-clean-consumer.mjs', import.meta.url), 'utf8');
   for (const file of [
-    'teams/scripted-engine.ts',
     'teams/writer-reviewer-pair.proof.ts',
     'teams/threshold-panel.proof.ts',
     'teams/feature-delivery.proof.ts',

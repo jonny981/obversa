@@ -118,13 +118,10 @@ complete; copy it, put your brief in, run it with Node.
 ```ts
 import { claude } from '@obversa/engine-claude-cli';
 import { codex } from '@obversa/engine-codex';
-import { realpathSync } from 'node:fs';
-import { basename } from 'node:path';
-import { fileURLToPath } from 'node:url';
 import { run } from '@obversa/runtime';
 import { fromFile, person, stage, workflow, type TeamSeat } from '@obversa/teams';
 
-export interface FeatureDeliveryEngines {
+interface FeatureDeliveryEngines {
   readonly claude: (model: string) => TeamSeat;
   readonly codex: (model: string) => TeamSeat;
 }
@@ -137,7 +134,7 @@ const realEngines: FeatureDeliveryEngines = { claude, codex };
  * reads it, where a red result goes back to. Inference happens only where a
  * role is named; every other stage is a command or a person.
  */
-export function createFeatureDelivery(engines: FeatureDeliveryEngines = realEngines) {
+function createFeatureDelivery(engines: FeatureDeliveryEngines = realEngines) {
   return workflow('feature-delivery', {
     brief: fromFile('briefs/triple.md'),
     options: { timeout: '10m' },
@@ -226,16 +223,8 @@ export function createFeatureDelivery(engines: FeatureDeliveryEngines = realEngi
   });
 }
 
-// Resolve both paths because a symlink can change the spelling of one file.
-const entryPath = process.argv[1];
-const modulePath = fileURLToPath(import.meta.url);
-if (entryPath && realpathSync(entryPath) === realpathSync(modulePath)) {
-  const result = await run(createFeatureDelivery());
-  console.log(JSON.stringify(result.outcome, null, 2));
-} else if (entryPath && basename(entryPath) === basename(modulePath)) {
-  console.error('This example was started through a path that could not be matched to its module. Run the copied file directly.');
-  process.exitCode = 1;
-}
+const result = await run(createFeatureDelivery());
+console.log(JSON.stringify(result.outcome, null, 2));
 ```
 
 A writing seat can write anywhere the process can: the seat helpers start

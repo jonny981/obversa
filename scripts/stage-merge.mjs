@@ -69,6 +69,7 @@ export const stageBranches = {
   F55: 'feat/surfaces-rewrite',
   F56: 'feat/surfaces-workflow-example',
   F57: 'feat/surfaces-block-identity',
+  F65: 'feat/example-host-proofs',
   F50: 'docs/stage-f50-review-panel-page',
   F53: 'docs/stage-f53-family-claim',
   F45: 'release/stage-f45-cut',
