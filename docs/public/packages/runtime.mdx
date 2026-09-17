@@ -301,6 +301,7 @@ try {
   `PreflightPauseResult`, `PreflightFailureResult`, and `GraphExecutorResult`
   for what the executor returns.
 
+  - `RESUME_STAGE_OUTCOMES`: the state key under which a resumed run carries the outcomes its stages reached before it paused; the declarative layer reads it so a gate that was already pending is observed rather than asked a second time.
 **Ask a person**
 
 - `approval`: a person's decision as a step; a yes passes, a no goes back
