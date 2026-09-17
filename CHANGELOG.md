@@ -11,6 +11,7 @@ other published package tracks its own version independently of it.
 
 ### Added
 
+- **One identity derivation for every harness that runs other providers' models:** `@obversa/engine` exports `modelIdentity`, which reads the provider and model family from the model string a harness was given, or refuses a string with no readable family. The OpenCode adapter derives its seat identity through it, and the review gate reads recorded models through the same function, so two seats on one model wearing different tool names cannot pass as a cross-family panel.
 - **Use-case examples outside software delivery:** Seven complete
   `workflow()` files under `examples/use-cases/`, in three groups: software
   and product engineering (backlog grooming that a person ranks,

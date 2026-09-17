@@ -33,8 +33,10 @@ family from the writer it reads.
 
 ## What it does not do
 
-It ships no command. It adds no dependency beyond `@obversa/runtime`. It
-chooses no model: every seat comes from an engine plugin you install.
+It ships no command. Beyond `@obversa/runtime` it depends only on
+`@obversa/engine`, for the one function that reads a model family from a
+model name. It chooses no model: every seat comes from an engine plugin
+you install.
 
 The full pages, with a complete file and its captured output for each team,
 are at [docs.obversa.ai/workflows](https://docs.obversa.ai/workflows).

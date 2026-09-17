@@ -1,4 +1,6 @@
 import { createHash } from 'node:crypto';
+
+import { modelIdentity } from '@obversa/engine';
 import { readFileSync } from 'node:fs';
 import { readFile, stat } from 'node:fs/promises';
 import { join } from 'node:path';
@@ -315,15 +317,18 @@ function seatRole(roles: WorkflowConfig['roles'], name: string): TeamSeat {
   return seat;
 }
 
-/** The model family a recorded answering model belongs to, or undefined when
- * the string carries no family a comparison can use. Mirrors the OpenCode
- * seat's derivation: a provider prefix before a slash is dropped, then the
- * first hyphen-delimited segment is the family. */
+/**
+ * The family a recorded answer belongs to, read through the one derivation
+ * every harness that runs other providers' models shares. A model string the
+ * derivation refuses (no family, or the `unknown` placeholder) is unreadable
+ * here, and an unreadable family refuses the review rather than passing it.
+ */
 function recordedFamilyOf(model: string): string | undefined {
-  const withoutProvider = model.slice(model.indexOf('/') + 1);
-  const family = withoutProvider.split('-', 1)[0]?.trim().toLowerCase() ?? '';
-  if (family === '' || family === 'unknown') return undefined;
-  return family;
+  try {
+    return modelIdentity(model).modelFamily;
+  } catch {
+    return undefined;
+  }
 }
 
 function recordedUsage(ctx: JobContext): readonly RecordedEngineUsage[] {
@@ -331,10 +336,6 @@ function recordedUsage(ctx: JobContext): readonly RecordedEngineUsage[] {
   return Array.isArray(value) ? value as readonly RecordedEngineUsage[] : [];
 }
 
-/** Refuse a panel when a recorded answer contradicts the distinct-family
- * requirement: an answer whose recorded family equals a family it must
- * differ from, or an answer whose family cannot be read at all. Fail
- * closed on identity, never pass in silence. */
 /** Refuse a panel when a recorded answer contradicts the distinct-family
  * requirement: an answer whose recorded family equals a family it must
  * differ from, or an answer whose family cannot be read at all. Every
