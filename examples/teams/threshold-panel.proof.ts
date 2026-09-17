@@ -85,6 +85,10 @@ try {
   assert.match(implementerCalls[1]!.writes['src/double.mjs'] ?? '', /result = 7/, 'the repair passes the test');
   assert.equal(calls.filter((call) => call.role === 'codex').length, 1, 'the first reviewer ran');
   assert.equal(calls.filter((call) => call.role === 'opencode').length, 1, 'the second reviewer ran');
+  // Both seats must clear, not just enough of them: a reviewer that fails
+  // before it answers (a stream the adapter cannot read) would otherwise
+  // hide behind the threshold.
+  assert.equal(printed.data?.review?.data?.passed, 2, `both reviewers cleared: ${JSON.stringify(printed.data?.review)}`);
 
   assert.match(await readFile(join(workspace, 'src/double.mjs'), 'utf8'), /result = 7/);
   assert.ok((await readFile(join(workspace, 'reviews/review-1.json'), 'utf8')).includes('"pass"'));

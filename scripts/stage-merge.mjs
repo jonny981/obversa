@@ -80,6 +80,7 @@ export const stageBranches = {
   F71: 'fix/opencode-admission-boot-window',
   F72: 'feat/shared-family-derivation',
   F77: 'fix/kit-fixture-boot-window',
+  F78: 'fix/stand-in-opencode-frames',
 };
 
 export function manageStage(args, options = {}) {
