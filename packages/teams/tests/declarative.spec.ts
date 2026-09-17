@@ -628,6 +628,35 @@ describe('declarative teams', () => {
     }
   });
 
+  it('refuses an answer whose recorded model the shared derivation cannot read', async () => {
+    // The gate reads families through @obversa/engine's modelIdentity, the one
+    // function every harness that runs other providers' models derives through.
+    // A model string with a space names no family there; a hand-rolled split
+    // would have read "gpt" and let the answer through.
+    const directory = await mkdtemp(join(tmpdir(), 'obversa-f72-recorded-unreadable-'));
+    const writer = seat(scriptedEngine('writer', [async (request) => {
+      await writeFile(join(request.cwd!, 'note.md'), 'written\n');
+      return pass('note written');
+    }], { usageModel: 'gpt 5.4' }), 'gpt');
+    const reviewer = seat(scriptedEngine('reviewer', [async () => pass('accepted')], { usageModel: 'claude-sonnet-4-5' }), 'claude');
+    const job = workflow('recorded-family-unreadable', {
+      brief: { brief: 'Write one note.', files: ['note.md'] },
+      roles: { writer, review: [reviewer] },
+      stages: [
+        stage('write', { agent: 'writer', writes: 'note.md' }),
+        stage('review', { panel: 'review', agree: 1 }),
+      ],
+    });
+
+    try {
+      const result = await run(job, { cwd: directory });
+      expect(result.outcome.status).toBe('fail');
+      expect(JSON.stringify(result.outcome.data ?? result.outcome.summary)).toMatch(/recorded model family is unknown/i);
+    } finally {
+      await rm(directory, { recursive: true, force: true });
+    }
+  });
+
   it('refuses a reviewedBy stage whose recorded answers share one family despite declared difference', async () => {
     const directory = await mkdtemp(join(tmpdir(), 'obversa-f54-reviewedby-'));
     const writer = seat(scriptedEngine('writer', [async (request) => {

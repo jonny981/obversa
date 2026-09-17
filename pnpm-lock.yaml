@@ -173,6 +173,9 @@ importers:
 
   packages/teams:
     dependencies:
+      '@obversa/engine':
+        specifier: workspace:^
+        version: link:../engine
       '@obversa/runtime':
         specifier: workspace:^
         version: link:../runtime

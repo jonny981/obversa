@@ -144,7 +144,7 @@ try {
     version: '1.18.23',
     identity: { provider: 'opencode', modelFamily: null },
   }).run(
-    request(directory, 'opencode/x-preview-f-free', RESULT_SCHEMA),
+    request(directory, 'opencode/big-pickle', RESULT_SCHEMA),
     () => {},
     new AbortController().signal,
   ));

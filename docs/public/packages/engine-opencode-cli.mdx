@@ -19,7 +19,13 @@ pnpm add @obversa/engine-opencode-cli
 
 ## Identity
 
-The plugin serves the configured provider and model family. For example, it can report `provider: 'anthropic'` and model family `claude`, or another provider configured by the caller.
+The plugin reports the provider and the model family of the model each
+request names, read from the `provider/model` string through the one
+derivation every harness that runs other providers' models shares.
+`anthropic/claude-sonnet-4-5` is reported as provider `anthropic` and
+model family `claude`. The identity given to the constructor is a claim
+about what the instance serves: a request whose model disagrees with it
+is refused before anything runs.
 
 ## Usage
 

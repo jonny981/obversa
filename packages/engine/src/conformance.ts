@@ -10,6 +10,7 @@ import type {
   EngineStreamEvent,
 } from './contracts.js';
 import type { JsonValue } from './json.js';
+import { modelIdentity } from './model-identity.js';
 import { engineSelection, validateAgentResult } from './result.js';
 
 export type EngineConformanceScenario =
@@ -65,6 +66,13 @@ export interface EngineConformanceFixture {
     part: AgentResultPart,
     parts: readonly AgentResultPart[],
   ) => JsonValue;
+  /**
+   * True for an adapter whose provider and model family come from the model
+   * it was given rather than from its own name (OpenCode, Devin). The kit then
+   * checks that the identity it reports is the one `modelIdentity` reads from
+   * the reported model, so two seats on one model cannot pass as two families.
+   */
+  readonly identityFromModel?: boolean;
   open(scenario: EngineConformanceScenario): Engine | Promise<Engine>;
 }
 
@@ -226,6 +234,23 @@ export async function runEngineConformance(
   );
 
   const cases: readonly ConformanceCase[] = [
+    ...(fixture.identityFromModel === true
+      ? [{
+          name: 'identity follows the model it was given',
+          scenario: 'ordered-parts' as const,
+          async run() {
+            const { result } = await openAndRun(fixture, 'ordered-parts');
+            const reported = result.effective;
+            check(typeof reported.model === 'string' && reported.model.length > 0,
+              'Engine reported no model to derive an identity from.');
+            const derived = modelIdentity(reported.model);
+            check(reported.modelFamily === derived.modelFamily,
+              `Engine reported family ${String(reported.modelFamily)} for model ${reported.model}; the shared derivation reads ${derived.modelFamily}.`);
+            check(derived.provider === undefined || reported.provider === derived.provider,
+              `Engine reported provider ${String(reported.provider)} for model ${reported.model}; the shared derivation reads ${derived.provider}.`);
+          },
+        } satisfies ConformanceCase]
+      : []),
     {
       name: 'ordered result parts',
       scenario: 'ordered-parts',

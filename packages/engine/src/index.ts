@@ -11,3 +11,4 @@ export {
 } from './command/run.js';
 export { mapMessage, newAccumulator, type Accumulator } from './claude-stream-json.js';
 export { claudeToolOptions } from './claude-tools.js';
+export { modelIdentity, type ModelIdentity } from './model-identity.js';

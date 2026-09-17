@@ -176,10 +176,10 @@ module.exports = {
     },
     {
       name: 'teams-reaches-runtime-only',
-      comment: '@obversa/teams builds ready-made workflows over the public runtime and reaches no adapter, plugin, or sibling package',
+      comment: '@obversa/teams builds ready-made workflows over the public runtime and reaches no adapter, plugin, or sibling package; it also reaches the engine contract, for the one identity derivation shared by every harness that runs the models of other providers, until the contract folds into the api package',
       severity: 'error',
       from: { path: '^packages/teams/' },
-      to: { path: '^(packages|plugins)/', pathNot: '^packages/(teams|runtime)/' },
+      to: { path: '^(packages|plugins)/', pathNot: '^packages/(teams|runtime|engine)/' },
     },
     {
       name: 'memory-plugin-reaches-memory-only',

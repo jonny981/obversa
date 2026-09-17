@@ -509,13 +509,13 @@ const packageRules = new Map([
     peerDependencies: [],
   }],
   // Private workspace packages get a rule too, so a sibling import inside
-  // them is caught the same way. Surfacer must never depend on the runtime or
-  // another package. Source depends on surfacer — the flipped arrow: the
-  // review command lives in source and injects surfacer's launch port itself,
+  // them is caught the same way. Surface decision must never depend on the runtime or
+  // another package. Surface diff depends on surface decision — the flipped arrow: the
+  // review command lives in surface diff and injects surface decision's launch port itself,
   // so a host keeps placement glue only.
   ['@obversa/surface-decision', { directory: 'packages/surface-decision', kind: 'surface', version: '0.1.0', dependencies: [], peerDependencies: [] }],
   ['@obversa/surface-diff', { directory: 'packages/surface-diff', kind: 'surface', version: '0.1.0', dependencies: ['@obversa/surface-decision'], peerDependencies: [] }],
-  ['@obversa/teams', { directory: 'packages/teams', kind: 'workflow', version: '0.1.0', dependencies: ['@obversa/runtime'], peerDependencies: [] }],
+  ['@obversa/teams', { directory: 'packages/teams', kind: 'workflow', version: '0.1.0', dependencies: ['@obversa/runtime', '@obversa/engine'], peerDependencies: [] }],
   ['@obversa/engine-claude-agent-sdk', {
     directory: 'plugins/engine-claude-agent-sdk',
     kind: 'plugin',

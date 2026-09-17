@@ -6,6 +6,7 @@ import type {
   AgentResult,
   Engine,
   EngineEventSink,
+  EngineSelectionRecord,
 } from '../src/index.ts';
 import {
   assertEngineConformance,
@@ -76,7 +77,13 @@ function errorFor(scenario: EngineConformanceScenario): Error | undefined {
   }
 }
 
-function scriptedEngine(scenario: EngineConformanceScenario): Engine {
+function scriptedEngine(
+  scenario: EngineConformanceScenario,
+  /** What this engine reports it ran, when a case is about the identity. */
+  selection?: { readonly requested: EngineSelectionRecord; readonly effective: EngineSelectionRecord },
+): Engine {
+  const scripted = (input: Partial<AgentResult> = {}): AgentResult =>
+    result({ ...(selection ?? {}), ...input });
   return {
     name: 'fixture',
     async run(
@@ -101,7 +108,7 @@ function scriptedEngine(scenario: EngineConformanceScenario): Engine {
         onEvent({ type: 'text', delta: 'draft' });
         onEvent({ type: 'text', delta: 'answer' });
         onEvent({ type: 'usage', usage: { kind: 'unknown' }, model: 'fixture-effective' });
-        return result({
+        return scripted({
           parts: [
             { kind: 'assistant', text: 'draft', final: false },
             { kind: 'assistant', text: 'answer', final: true },
@@ -110,24 +117,24 @@ function scriptedEngine(scenario: EngineConformanceScenario): Engine {
       }
       if (scenario === 'structured-result') {
         onEvent({ type: 'usage', usage: { kind: 'unknown' }, model: 'fixture-effective' });
-        return result({
+        return scripted({
           parts: [{ kind: 'structured', value: { answer: 42 }, final: true }],
         });
       }
       if (scenario === 'reported-usage') {
         const usage = reportedUsage({ inputTokens: 5, outputTokens: 3 });
         onEvent({ type: 'usage', usage, model: 'fixture-effective' });
-        return result({ usage });
+        return scripted({ usage });
       }
       if (scenario === 'tool-events') {
         onEvent({ type: 'tool', name: 'read', phase: 'use' });
         onEvent({ type: 'tool', name: 'read', phase: 'result' });
         onEvent({ type: 'usage', usage: { kind: 'unknown' }, model: 'fixture-effective' });
-        return result();
+        return scripted();
       }
       if (scenario === 'late-final') {
         onEvent({ type: 'usage', usage: { kind: 'unknown' }, model: 'fixture-effective' });
-        return result({
+        return scripted({
           transportFailure: {
             kind: 'unknown',
             message: 'transport failed after final result',
@@ -136,7 +143,7 @@ function scriptedEngine(scenario: EngineConformanceScenario): Engine {
         });
       }
       onEvent({ type: 'usage', usage: { kind: 'unknown' }, model: 'fixture-effective' });
-      return result();
+      return scripted();
     },
   };
 }
@@ -144,6 +151,8 @@ function scriptedEngine(scenario: EngineConformanceScenario): Engine {
 function fixture(
   open: EngineConformanceFixture['open'] = async (scenario) =>
     scriptedEngine(scenario),
+  /** What every engine in this fixture reports it ran, identity cases included. */
+  selection: { readonly requested: EngineSelectionRecord; readonly effective: EngineSelectionRecord } = { requested, effective },
 ): EngineConformanceFixture {
   let access = { modelCalls: 0, canRead: false, canWrite: false };
   const workspaceRequest = { prompt: 'workspace probe' };
@@ -155,8 +164,8 @@ function fixture(
       cwd: '/tmp',
       leaf: true,
     },
-    requested,
-    effective,
+    requested: selection.requested,
+    effective: selection.effective,
     workspace: {
       modes: {
         none: { request: workspaceRequest, outcome: 'supported' },
@@ -172,7 +181,7 @@ function fixture(
         name: 'workspace-fixture',
         async run(request) {
           access = { modelCalls: 1, canRead: request.workspaceMode !== 'none', canWrite: request.workspaceMode === 'write' };
-          return result();
+          return result(selection);
         },
       };
     },
@@ -290,6 +299,47 @@ describe('public engine conformance kit', () => {
     expect(report).toMatchObject({
       unsupported: [{ case: 'tool-events', reason: 'This adapter has no tool execution.' }],
     });
+  });
+
+  it('passes the identity case when the reported family is the one its model derives', async () => {
+    // The acceptance control for the identity case: without a fixture that
+    // reports an identity of its own, the case is exercised only by an
+    // adapter's honest run and nothing shows it can fail.
+    const honest = engineSelection({
+      adapter: 'fixture', adapterVersion: '1.0.0',
+      provider: 'anthropic', modelFamily: 'claude',
+      model: 'anthropic/claude-sonnet-4-5', capabilities: ['read'],
+    });
+    const report = await runEngineConformance({
+      ...fixture(
+        async (scenario) => scriptedEngine(scenario, { requested: honest, effective: honest }),
+        { requested: honest, effective: honest },
+      ),
+      identityFromModel: true,
+    });
+
+    expect(report).toEqual({ ok: true, cases: 21, failures: [], unsupported: [] });
+  });
+
+  it('fails the identity case when the reported family is not the one its model derives', async () => {
+    const liar = engineSelection({
+      adapter: 'fixture', adapterVersion: '1.0.0',
+      provider: 'anthropic', modelFamily: 'opencode',
+      model: 'anthropic/claude-sonnet-4-5', capabilities: ['read'],
+    });
+    const report = await runEngineConformance({
+      ...fixture(
+        async (scenario) => scriptedEngine(scenario, { requested: liar, effective: liar }),
+        { requested: liar, effective: liar },
+      ),
+      identityFromModel: true,
+    });
+
+    expect(report.ok).toBe(false);
+    expect(report.failures.map((failure) => failure.case))
+      .toContain('identity follows the model it was given');
+    expect(report.failures.find((failure) => failure.case === 'identity follows the model it was given')?.message)
+      .toContain('claude');
   });
 
   it('passes a conforming engine across results, usage, tools, stops, and failures', async () => {
