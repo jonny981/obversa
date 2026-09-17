@@ -36,7 +36,7 @@ export function readStageOutcomes(path: string): ResumedStageOutcomes {
     }
     if (event.kind === 'job:end') {
       outcomes.set(event.path.join('/'), event.outcome);
-    } else if (event.kind === 'dag:node') {
+    } else if (event.kind === 'dag:node' && event.outcome !== undefined) {
       // The dag records the node job's own return, which carries the
       // workflow's resume identity when the declarative guard attached it.
       outcomes.set([...event.path, event.node].join('/'), event.outcome);
