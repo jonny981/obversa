@@ -564,7 +564,7 @@ function resumeIdentity(name: string, config: WorkflowConfig): string {
  * whose recorded completion carries this workflow's identity, re-runs an
  * interrupted or changed stage, and attaches the identity to its own
  * passing completion so the NEXT resume can skip it. */
-function resumeGuard(job: Job, identity: string, label: string): Job {
+function resumeGuard(job: Job, identity: string, _label: string): Job {
   return async (ctx) => {
     const resumed = ctx.state[RESUME_STAGE_OUTCOMES] as ReadonlyMap<string, Outcome> | undefined;
     if (resumed !== undefined) {
@@ -586,13 +586,10 @@ function resumeGuard(job: Job, identity: string, label: string): Job {
         }
       }
     }
-    ctx.emit({ kind: 'job:start', ts: Date.now(), path: [...ctx.path], label, timeoutMs: ctx.timeoutMs });
     const outcome = await job(ctx);
-    const guarded = outcome.status === 'pass'
+    return outcome.status === 'pass'
       ? { ...outcome, data: { ...(outcome.data ?? {}), resumeIdentity: identity } }
       : outcome;
-    ctx.emit({ kind: 'job:end', ts: Date.now(), path: [...ctx.path], label, outcome: guarded });
-    return guarded;
   };
 }
 
