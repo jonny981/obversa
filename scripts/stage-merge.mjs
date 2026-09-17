@@ -77,6 +77,7 @@ export const stageBranches = {
   F45: 'release/stage-f45-cut',
   F52: 'feat/model-identity-proof',
   F71: 'fix/opencode-admission-boot-window',
+  F77: 'fix/kit-fixture-boot-window',
 };
 
 export function manageStage(args, options = {}) {
