@@ -44,6 +44,21 @@ export const CONSUMER_EXAMPLES = Object.freeze([
   'teams/threshold-panel.proof.ts',
   'teams/feature-delivery.ts',
   'teams/feature-delivery.proof.ts',
+  'use-cases/proof-host.ts',
+  'use-cases/engineering/backlog-groom-then-rank.ts',
+  'use-cases/engineering/backlog-groom-then-rank.proof.ts',
+  'use-cases/engineering/architecture-then-spike.ts',
+  'use-cases/engineering/architecture-then-spike.proof.ts',
+  'use-cases/engineering/watch-signals-then-file.ts',
+  'use-cases/engineering/watch-signals-then-file.proof.ts',
+  'use-cases/business/draft-then-send.ts',
+  'use-cases/business/draft-then-send.proof.ts',
+  'use-cases/business/support-triage.ts',
+  'use-cases/business/support-triage.proof.ts',
+  'use-cases/business/contract-playbook.ts',
+  'use-cases/business/contract-playbook.proof.ts',
+  'use-cases/other/translate-reflect.ts',
+  'use-cases/other/translate-reflect.proof.ts',
 ]);
 
 /**
@@ -58,4 +73,11 @@ export const REAL_ENGINE_EXAMPLES = Object.freeze([
   { file: 'teams/writer-reviewer-pair.ts', why: 'a Claude seat writes and a Codex seat reviews; the page carries one real run' },
   { file: 'teams/threshold-panel.ts', why: 'Claude implements, Codex and OpenCode review; the page carries one real run' },
   { file: 'teams/feature-delivery.ts', why: 'Claude analyses and approves, Codex implements, Claude reviews; the page carries one real run' },
+  { file: 'use-cases/engineering/backlog-groom-then-rank.ts', why: 'a Claude seat splits and clarifies, a Codex seat reviews; the page carries one real run' },
+  { file: 'use-cases/engineering/architecture-then-spike.ts', why: 'a Claude seat researches, designs and spikes, Codex reviews, Codex and OpenCode sit on the panel; the page carries one real run' },
+  { file: 'use-cases/engineering/watch-signals-then-file.ts', why: 'a Claude seat clusters and drafts, a Codex seat reviews, PostHog answers the pull; the page carries one real run' },
+  { file: 'use-cases/business/draft-then-send.ts', why: 'a Claude seat researches and drafts, a Codex seat reviews; the page carries one real run' },
+  { file: 'use-cases/business/support-triage.ts', why: 'a Claude seat classifies, a Codex seat gives the second opinion; the page carries one real run' },
+  { file: 'use-cases/business/contract-playbook.ts', why: 'a Claude seat maps, redlines and positions, a Codex seat checks; the page carries one real run' },
+  { file: 'use-cases/other/translate-reflect.ts', why: 'a Claude seat translates, a Codex seat reflects; the page carries one real run' },
 ]);

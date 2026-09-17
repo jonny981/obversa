@@ -79,6 +79,7 @@ export const stageBranches = {
   F52: 'feat/model-identity-proof',
   F71: 'fix/opencode-admission-boot-window',
   F77: 'fix/kit-fixture-boot-window',
+  F73: 'feat/use-case-examples-one',
 };
 
 export function manageStage(args, options = {}) {

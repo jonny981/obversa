@@ -1,0 +1,137 @@
+---
+title: "Support triage with a confidence gate"
+description: "One model reads the ticket and writes the route, how sure it is and the reply; a second model checks; a confident reply goes out by command and an unsure one goes to a person."
+---
+
+Route the tickets the policy answers and hand the rest to a person. One
+model reads the ticket against the policy and writes the route, a
+confidence from 0 to 1 and the reply as the exact payload to send; a model
+from another family checks that decision before anything happens. A
+confident reply goes out by command; an unsure one goes to a person with
+the draft already written. Only one of the last two stages runs, chosen
+by `when` from the file the classifier wrote.
+
+```bash
+npm install @obversa/runtime @obversa/teams @obversa/engine-claude-cli @obversa/engine-codex
+```
+
+In that directory, create `package.json` with `"type": "module"`, put the
+brief and the sample inputs from `examples/use-cases/business/`
+beside it, then run the copied file.
+
+## The file
+
+```ts
+import { readFile } from 'node:fs/promises';
+import { join } from 'node:path';
+
+import { claude } from '@obversa/engine-claude-cli';
+import { codex } from '@obversa/engine-codex';
+import { formatEvent, run, type JobContext } from '@obversa/runtime';
+import { fromFile, person, stage, workflow, type TeamSeat } from '@obversa/teams';
+
+interface SupportTriageEngines {
+  readonly claude: (model: string) => TeamSeat;
+  readonly codex: (model: string) => TeamSeat;
+}
+
+const realEngines: SupportTriageEngines = { claude, codex };
+
+/** Where a reply goes when the run is sure enough to send it itself. */
+const REPLY_ENDPOINT = 'https://hooks.example.com/helpdesk/reply';
+
+interface Decision {
+  readonly route: 'auto' | 'escalate';
+  readonly confidence: number;
+}
+
+/** The classifier's decision, read from the file it wrote. */
+async function decision(ctx: JobContext): Promise<Decision> {
+  return JSON.parse(await readFile(join(ctx.workspace.dir, 'triage/decision.json'), 'utf8')) as Decision;
+}
+
+/**
+ * Support triage with a confidence gate. One model reads the ticket and
+ * writes the route, how sure it is and the reply; a model from another
+ * family checks that decision before anything happens. A confident reply
+ * goes out by command; an unsure one goes to a person. Only one of the last
+ * two stages runs, chosen by `when` from the file the classifier wrote.
+ */
+function createSupportTriage(engines: SupportTriageEngines = realEngines) {
+  return workflow('support-triage', {
+    brief: fromFile('briefs/support.md'),
+    options: { timeout: '10m' },
+
+    roles: {
+      classify: engines.claude('claude-sonnet-4-5'),
+      'second-opinion': [engines.codex('gpt-5.6-luna')],
+      support: person('This ticket needs you: reply, reassign or close?'),
+    },
+
+    stages: [
+      stage('classify', {
+        agent: 'classify',
+        writes: ['triage/decision.json', 'triage/reply.json'],
+        desc: 'Read the ticket in tickets/inbox.json against the policy; write the route, a confidence from 0 to 1, and the reply as the exact payload to send.',
+        gate: 'Both files exist and a model from another family agrees with the route and the confidence.',
+        reviewedBy: 'second-opinion',
+        retry: 2,
+      }),
+
+      stage('auto-reply', {
+        run: ['curl', '-fsS', '-X', 'POST', REPLY_ENDPOINT, '-H', 'Content-Type: application/json', '--data-binary', '@triage/reply.json'],
+        when: async (ctx) => (await decision(ctx)).route === 'auto',
+        desc: 'Post the reply to the helpdesk, only when the classifier was sure enough.',
+        gate: 'The helpdesk accepted the reply.',
+      }),
+
+      stage('escalate', {
+        input: 'support',
+        when: async (ctx) => (await decision(ctx)).route === 'escalate',
+        desc: 'Put the ticket, the draft reply and the doubt in front of a person.',
+        gate: 'A person has decided.',
+      }),
+    ],
+  });
+}
+
+const result = await run(createSupportTriage(), {
+  onEvent: (event) => console.log(formatEvent(event)),
+});
+console.log(JSON.stringify(result.outcome, null, 2));
+```
+
+Every event of the run prints as one line as it happens, the usage lines
+included, and the outcome prints last as JSON.
+
+A confident ticket completes: `auto-reply` posts `triage/reply.json` and
+`escalate` is skipped. An unsure ticket pauses at `escalate` with the
+question on the record and the draft reply in the workspace; `auto-reply`
+is skipped and nothing was sent.
+
+## The team's shape
+
+| step | does | done when |
+| --- | --- | --- |
+| classify | Read the ticket in tickets/inbox.json against the policy; write the route, a confidence from 0 to 1, and the reply as the exact payload to send. | Both files exist and a model from another family agrees with the route and the confidence. |
+| auto-reply | Post the reply to the helpdesk, only when the classifier was sure enough. | The helpdesk accepted the reply. |
+| escalate | Put the ticket, the draft reply and the doubt in front of a person. | A person has decided. |
+
+Where a stage's gate names a file, the package checks the file after the
+job. Where it names an exit code, the command decides. Where it names a
+reviewer, the reviewer's decision decides. Where it names a person, the
+run pauses until the person answers. A model's own report of its work
+never passes a stage.
+
+## Gotchas
+
+- **`when` reads the workspace, not the model's reply.** Both branches read `triage/decision.json`; a stage whose `when` is not met is skipped and counts as green, which is how one file chooses between a command and a person.
+- **The second opinion is a different family.** `reviewedBy: 'second-opinion'` runs the classifier again with the findings until a Codex seat agrees with the route and the confidence, or the retries run out.
+- **The reply is written even when the ticket escalates.** The brief asks for it, so the person starts from a draft rather than a blank box.
+- **The endpoint is an inbound hook.** `REPLY_ENDPOINT` takes the payload file as its body; point it at your helpdesk's inbound endpoint and shape `triage/reply.json` in the brief to match.
+
+## Source
+
+The file is `examples/use-cases/business/support-triage.ts`; its proof, brief and
+sample inputs sit beside it. The [teams package page](/packages/teams)
+lists every input.

@@ -54,17 +54,39 @@
         "group": "Examples",
         "pages": [
           "workflows/index",
-          "workflows/writer-and-reviewer",
-          "workflows/review-panel",
-          "workflows/feature-team",
-          "workflows/tournament",
-          "workflows/command-kickback",
-          "workflows/approval",
-          "workflows/team-conversation",
-          "workflows/offline-review",
-          "workflows/safe-change",
-          "workflows/feature-delivery",
-          "workflows/forge-helper"
+          {
+            "group": "Software and product engineering",
+            "pages": [
+              "workflows/writer-and-reviewer",
+              "workflows/review-panel",
+              "workflows/feature-team",
+              "workflows/tournament",
+              "workflows/command-kickback",
+              "workflows/approval",
+              "workflows/team-conversation",
+              "workflows/offline-review",
+              "workflows/safe-change",
+              "workflows/feature-delivery",
+              "workflows/forge-helper",
+              "workflows/backlog-groom-then-rank",
+              "workflows/architecture-then-spike",
+              "workflows/watch-signals-then-file"
+            ]
+          },
+          {
+            "group": "Business and commercial",
+            "pages": [
+              "workflows/draft-then-send",
+              "workflows/support-triage",
+              "workflows/contract-playbook"
+            ]
+          },
+          {
+            "group": "Other",
+            "pages": [
+              "workflows/translate-reflect"
+            ]
+          }
         ]
       },
       {

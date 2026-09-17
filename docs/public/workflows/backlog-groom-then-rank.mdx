@@ -1,0 +1,124 @@
+---
+title: "Backlog grooming, then a person ranks"
+description: "Raw tickets in, stories with acceptance checks and the questions to settle first out, each read by a second model; then the product owner ranks."
+---
+
+Hand the week's raw tickets to a team and get back stories a developer
+could pick up: each with its acceptance checks and the ticket it came
+from, each read back against the raw tickets by a model from another
+family, and beside them the questions that must be settled before anyone
+writes code. Then the person who owns the product ranks. Nothing here
+writes code: the work is deciding what is worth writing, and the run stops
+at the person.
+
+```bash
+npm install @obversa/runtime @obversa/teams @obversa/engine-claude-cli @obversa/engine-codex
+```
+
+In that directory, create `package.json` with `"type": "module"`, put the
+brief and the sample inputs from `examples/use-cases/engineering/`
+beside it, then run the copied file.
+
+## The file
+
+```ts
+import { claude } from '@obversa/engine-claude-cli';
+import { codex } from '@obversa/engine-codex';
+import { formatEvent, run } from '@obversa/runtime';
+import { fromFile, person, stage, workflow, type TeamSeat } from '@obversa/teams';
+
+interface BacklogGroomEngines {
+  readonly claude: (model: string) => TeamSeat;
+  readonly codex: (model: string) => TeamSeat;
+}
+
+const realEngines: BacklogGroomEngines = { claude, codex };
+
+/**
+ * Backlog grooming, then a person ranks. The raw tickets are whatever the
+ * week left behind: support threads, a sales ask, a one-line wish. One
+ * model turns each into stories with acceptance checks and a model from
+ * another family reads them back against the raw tickets; the same pair
+ * writes down the questions that must be settled before anyone codes.
+ * Then the product owner ranks. Nothing here writes code: the work is
+ * deciding what is worth writing.
+ */
+function createBacklogGroom(engines: BacklogGroomEngines = realEngines) {
+  return workflow('backlog-groom-then-rank', {
+    brief: fromFile('briefs/backlog.md'),
+    options: { timeout: '10m' },
+
+    roles: {
+      groom: engines.claude('claude-sonnet-4-5'),
+      'story-review': [engines.codex('gpt-5.6-luna')],
+      owner: person('Which of these go into the next cycle, and in what order?'),
+    },
+
+    stages: [
+      stage('split', {
+        agent: 'groom',
+        writes: 'backlog/stories.md',
+        desc: 'Turn every raw ticket in backlog/raw.md into one or more stories, each with its acceptance checks and the ticket it came from.',
+        gate: 'Every raw ticket is covered by at least one story and a reviewer from another family has accepted the set.',
+        reviewedBy: 'story-review',
+        retry: 2,
+      }),
+
+      stage('clarify', {
+        agent: 'groom',
+        writes: 'backlog/questions.md',
+        desc: 'For each story, list the questions that must be answered before anyone writes code, with a proposed answer for each.',
+        gate: 'Every story has its questions, or the line "no open questions", and a reviewer has accepted them.',
+        reviewedBy: 'story-review',
+        retry: 2,
+      }),
+
+      stage('rank', {
+        input: 'owner',
+        desc: 'Put the stories and the open questions in front of the product owner.',
+        gate: 'The owner has ranked the cycle.',
+        sendsBackTo: 'split',
+      }),
+    ],
+  });
+}
+
+const result = await run(createBacklogGroom(), {
+  onEvent: (event) => console.log(formatEvent(event)),
+});
+console.log(JSON.stringify(result.outcome, null, 2));
+```
+
+Every event of the run prints as one line as it happens, the usage lines
+included, and the outcome prints last as JSON.
+
+The run stops at `rank` with the question on the record. The stories
+and the questions are in `backlog/` for the owner to read; an answer
+through the run's callbacks client carries on from there, and a no goes
+back to `split` with the owner's note as the finding.
+
+## The team's shape
+
+| step | does | done when |
+| --- | --- | --- |
+| split | Turn every raw ticket in backlog/raw.md into one or more stories, each with its acceptance checks and the ticket it came from. | Every raw ticket is covered by at least one story and a reviewer from another family has accepted the set. |
+| clarify | For each story, list the questions that must be answered before anyone writes code, with a proposed answer for each. | Every story has its questions, or the line "no open questions", and a reviewer has accepted them. |
+| rank | Put the stories and the open questions in front of the product owner. | The owner has ranked the cycle. |
+
+Where a stage's gate names a file, the package checks the file after the
+job. Where it names an exit code, the command decides. Where it names a
+reviewer, the reviewer's decision decides. Where it names a person, the
+run pauses until the person answers. A model's own report of its work
+never passes a stage.
+
+## Gotchas
+
+- **The reviewer reads the raw tickets, not just the stories.** The review's gate is coverage: a raw ticket with no story sends the split back, which is what happens in the proof.
+- **Priority is not the model's to decide.** The brief says so and the workflow ends at a person; a story order that appeared in `stories.md` would be a model's guess dressed as a decision.
+- **A note that comes back unchanged fails.** A split sent back with findings must change; the same bytes again end the stage rather than run a second identical review.
+
+## Source
+
+The file is `examples/use-cases/engineering/backlog-groom-then-rank.ts`; its proof, brief and
+sample inputs sit beside it. The [teams package page](/packages/teams)
+lists every input.

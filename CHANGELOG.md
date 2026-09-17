@@ -11,6 +11,16 @@ other published package tracks its own version independently of it.
 
 ### Added
 
+- **Use-case examples outside software delivery:** Seven complete
+  `workflow()` files under `examples/use-cases/`, in three groups: software
+  and product engineering (backlog grooming that a person ranks,
+  architecture then a spike then a team review, product signals pulled
+  from PostHog and filed as work), business and commercial (drafts a person
+  sends, support triage with a confidence gate, contract review against a
+  playbook) and other (a translation reflected on against a glossary).
+  Every one ends at a person, so a run stops before anything is sent or
+  filed; each has a proof that runs it offline, and a page that shows the
+  file whole with what one real run printed.
 - **Recorded model families:** The runtime exports `RECORDED_ENGINE_USAGE`,
   the shared state key under which every agent job's engine answer is
   recorded beside its job path, and the declarative panel guard reads

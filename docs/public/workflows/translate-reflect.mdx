@@ -1,0 +1,121 @@
+---
+title: "Translate, reflect, glossary, then you"
+description: "One model translates with the glossary open, a second reads it as an editor would and sends back what to change, the translator records how every term was rendered, and the person who knows the readers decides the nuance."
+---
+
+A translation that is reflected on rather than shipped from one call.
+One model translates the article with the glossary open; a model from
+another family reads the translation the way an editor would and sends it
+back with what to change, not a score; the translator then writes down
+how every glossary term was rendered and where the glossary and natural
+French pulled apart. The person who knows the readers decides the nuance
+and says publish.
+
+```bash
+npm install @obversa/runtime @obversa/teams @obversa/engine-claude-cli @obversa/engine-codex
+```
+
+In that directory, create `package.json` with `"type": "module"`, put the
+brief and the sample inputs from `examples/use-cases/other/`
+beside it, then run the copied file.
+
+## The file
+
+```ts
+import { claude } from '@obversa/engine-claude-cli';
+import { codex } from '@obversa/engine-codex';
+import { formatEvent, run } from '@obversa/runtime';
+import { fromFile, person, stage, workflow, type TeamSeat } from '@obversa/teams';
+
+interface TranslateEngines {
+  readonly claude: (model: string) => TeamSeat;
+  readonly codex: (model: string) => TeamSeat;
+}
+
+const realEngines: TranslateEngines = { claude, codex };
+
+/**
+ * Translate, reflect, glossary, and the last part is you. One model
+ * translates the article with the glossary open; a model from another
+ * family reads the translation the way an editor would and sends it back
+ * with what to change, not a score; the translator writes down how every
+ * glossary term was rendered and where the glossary and natural French
+ * pulled apart. The person who knows the readers decides the nuance and
+ * says publish.
+ */
+function createTranslateReflect(engines: TranslateEngines = realEngines) {
+  return workflow('translate-reflect', {
+    brief: fromFile('briefs/translation.md'),
+    options: { timeout: '10m' },
+
+    roles: {
+      translate: engines.claude('claude-sonnet-4-5'),
+      reflect: [engines.codex('gpt-5.6-luna')],
+      editor: person('Publish this translation?'),
+    },
+
+    stages: [
+      stage('translate', {
+        agent: 'translate',
+        writes: 'fr/article.md',
+        desc: 'Translate source/article.md into French for a reader in France, in the tone the brief names, rendering every term in glossary/en-fr.md as the glossary says.',
+        gate: 'The translation is complete and a reviewer from another family, reading it as an editor would, has accepted it.',
+        reviewedBy: 'reflect',
+        retry: 2,
+      }),
+
+      stage('terms', {
+        agent: 'translate',
+        writes: 'fr/terms.md',
+        desc: 'List every glossary term, where it appears, and how it was rendered; flag each place where the glossary and natural French pulled apart.',
+        gate: 'Every glossary term is on the list.',
+      }),
+
+      stage('nuance', {
+        input: 'editor',
+        desc: 'Put the translation and the terms note in front of the person who knows the readers.',
+        gate: 'A person has said publish.',
+        sendsBackTo: 'translate',
+      }),
+    ],
+  });
+}
+
+const result = await run(createTranslateReflect(), {
+  onEvent: (event) => console.log(formatEvent(event)),
+});
+console.log(JSON.stringify(result.outcome, null, 2));
+```
+
+Every event of the run prints as one line as it happens, the usage lines
+included, and the outcome prints last as JSON.
+
+The run stops at `nuance` with the translation in `fr/article.md` and the
+terms note in `fr/terms.md`. A no goes back to `translate` with the
+editor's note as the finding.
+
+## The team's shape
+
+| step | does | done when |
+| --- | --- | --- |
+| translate | Translate source/article.md into French for a reader in France, in the tone the brief names, rendering every term in glossary/en-fr.md as the glossary says. | The translation is complete and a reviewer from another family, reading it as an editor would, has accepted it. |
+| terms | List every glossary term, where it appears, and how it was rendered; flag each place where the glossary and natural French pulled apart. | Every glossary term is on the list. |
+| nuance | Put the translation and the terms note in front of the person who knows the readers. | A person has said publish. |
+
+Where a stage's gate names a file, the package checks the file after the
+job. Where it names an exit code, the command decides. Where it names a
+reviewer, the reviewer's decision decides. Where it names a person, the
+run pauses until the person answers. A model's own report of its work
+never passes a stage.
+
+## Gotchas
+
+- **The glossary wins, and the note says where it cost.** The brief holds the translator to the glossary even where another word reads better, and asks for each such place in `fr/terms.md`, so the person decides with the trade-off in front of them.
+- **The reviewer reflects, it does not score.** Its findings are sentences about what to change; the translator runs again with them until the reviewer accepts or the retries run out.
+- **The source and the glossary are workspace files the brief names.** Both are in the brief's front matter, so every seat knows they exist and the translating seat cannot write them.
+
+## Source
+
+The file is `examples/use-cases/other/translate-reflect.ts`; its proof, brief and
+sample inputs sit beside it. The [teams package page](/packages/teams)
+lists every input.

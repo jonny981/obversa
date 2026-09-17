@@ -1,0 +1,133 @@
+---
+title: "Draft, then a person sends"
+description: "A model researches each lead and writes the emails, a second model reads them for tone and for claims we cannot back, and the person whose name is on them approves the exact payload before a command sends it."
+---
+
+The loudest shape people ask for outside software: the model drafts, a
+person taps send. One model writes a note per lead from the file and the
+brief, one writes the emails, and a model from another family reads them
+for tone and for any claim the file cannot back, sending them back with
+what to change. Then the person whose name is on the emails decides. What
+they approve is the exact payload the command sends, byte for byte, and a
+no goes back to the drafting stage with their note as the finding.
+
+```bash
+npm install @obversa/runtime @obversa/teams @obversa/engine-claude-cli @obversa/engine-codex
+```
+
+In that directory, create `package.json` with `"type": "module"`, put the
+brief and the sample inputs from `examples/use-cases/business/`
+beside it, then run the copied file.
+
+## The file
+
+```ts
+import { claude } from '@obversa/engine-claude-cli';
+import { codex } from '@obversa/engine-codex';
+import { formatEvent, run } from '@obversa/runtime';
+import { fromFile, person, stage, workflow, type TeamSeat } from '@obversa/teams';
+
+interface DraftThenSendEngines {
+  readonly claude: (model: string) => TeamSeat;
+  readonly codex: (model: string) => TeamSeat;
+}
+
+const realEngines: DraftThenSendEngines = { claude, codex };
+
+/** Where the approved emails go: a mail API's batch endpoint, the key from the environment. */
+const MAIL_ENDPOINT = 'https://api.resend.com/emails/batch';
+const MAIL_KEY = process.env.RESEND_API_KEY ?? '';
+
+/**
+ * Draft, then a person sends. A model researches each lead from the file
+ * and the brief, a model writes the emails, a model from another family
+ * reads them for tone and for claims we cannot back, and then the person
+ * whose name is on them decides. What the person approves is the exact
+ * payload the command sends, byte for byte; a no goes back to the drafting
+ * stage with the person's note as the finding.
+ */
+function createDraftThenSend(engines: DraftThenSendEngines = realEngines) {
+  return workflow('draft-then-send', {
+    brief: fromFile('briefs/outreach.md'),
+    options: { timeout: '10m' },
+
+    roles: {
+      research: engines.claude('claude-sonnet-4-5'),
+      draft: engines.claude('claude-sonnet-4-5'),
+      'tone-review': [engines.codex('gpt-5.6-luna')],
+      sender: person('Send these emails exactly as they stand in outreach/emails.json?'),
+    },
+
+    stages: [
+      stage('research', {
+        agent: 'research',
+        writes: 'outreach/notes.md',
+        desc: 'For each lead in leads.csv, write what the file and the brief say about them and one reason they would care.',
+        gate: 'Every lead in the file has a note.',
+      }),
+
+      stage('draft', {
+        agent: 'draft',
+        writes: ['outreach/drafts.md', 'outreach/emails.json'],
+        desc: 'Write one email per lead: the readable drafts in drafts.md, and the same text as the exact payload in emails.json.',
+        gate: 'Both files exist, they say the same thing, and a reviewer from another family has accepted the tone and every claim.',
+        reviewedBy: 'tone-review',
+        retry: 3,
+      }),
+
+      stage('send', {
+        input: 'sender',
+        desc: 'Put the drafts in front of the person whose name is on them.',
+        gate: 'The person has said yes to the payload as written.',
+        sendsBackTo: 'draft',
+      }),
+
+      stage('deliver', {
+        run: ['curl', '-fsS', '-X', 'POST', MAIL_ENDPOINT, '-H', `Authorization: Bearer ${MAIL_KEY}`, '-H', 'Content-Type: application/json', '--data-binary', '@outreach/emails.json'],
+        desc: 'Send the approved payload.',
+        gate: 'The mail API accepted the batch.',
+      }),
+    ],
+  });
+}
+
+const result = await run(createDraftThenSend(), {
+  onEvent: (event) => console.log(formatEvent(event)),
+});
+console.log(JSON.stringify(result.outcome, null, 2));
+```
+
+Every event of the run prints as one line as it happens, the usage lines
+included, and the outcome prints last as JSON.
+
+The run stops at `send` with the question on the record; nothing has
+been sent. The drafts are in `outreach/drafts.md` to read and the payload
+in `outreach/emails.json` is what `deliver` posts after a yes.
+
+## The team's shape
+
+| step | does | done when |
+| --- | --- | --- |
+| research | For each lead in leads.csv, write what the file and the brief say about them and one reason they would care. | Every lead in the file has a note. |
+| draft | Write one email per lead: the readable drafts in drafts.md, and the same text as the exact payload in emails.json. | Both files exist, they say the same thing, and a reviewer from another family has accepted the tone and every claim. |
+| send | Put the drafts in front of the person whose name is on them. | The person has said yes to the payload as written. |
+| deliver | Send the approved payload. | The mail API accepted the batch. |
+
+Where a stage's gate names a file, the package checks the file after the
+job. Where it names an exit code, the command decides. Where it names a
+reviewer, the reviewer's decision decides. Where it names a person, the
+run pauses until the person answers. A model's own report of its work
+never passes a stage.
+
+## Gotchas
+
+- **The person approves the payload, not a summary.** The drafting stage writes the readable drafts and the JSON payload from the same text; the question names the payload file, and `deliver` sends that file and nothing else.
+- **A reviewer from another family reads every draft.** `reviewedBy` runs the draft again with the findings until the reviewer accepts or the retries run out; the proof sends the first draft back for an unbacked claim.
+- **The key is in the environment.** `RESEND_API_KEY` is read once when the file loads; change `MAIL_ENDPOINT` and the payload shape for another mail API.
+- **A no comes round again.** `sendsBackTo: 'draft'` on the person stage: a refusal with a note is a finding the drafting seat consumes on its next run.
+
+## Source
+
+The file is `examples/use-cases/business/draft-then-send.ts`; its proof, brief and
+sample inputs sit beside it. The [teams package page](/packages/teams)
+lists every input.
