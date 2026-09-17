@@ -86,6 +86,7 @@ describe('public runtime API', () => {
   it('exports only the reviewed programmatic surface', () => {
     expect(Object.keys(api).sort()).toEqual([
       'ApprovalSubjectError',
+      'childContext',
       'EXIT_PAUSED',
       'EngineError',
       'EngineIncompleteResultError',

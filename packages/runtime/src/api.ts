@@ -410,6 +410,7 @@ export {
 export type { Environment, EnvHandle } from './env/environment.js';
 export { withEnv } from './core/env-overlay.js';
 
+export { childContext } from './core/context.js';
 export {
   run,
   exitCodeFor,

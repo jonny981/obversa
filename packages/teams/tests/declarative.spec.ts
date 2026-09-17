@@ -691,6 +691,27 @@ describe('declarative teams', () => {
     }
   });
 
+  it('accepts an honest reviewedBy stage whose recorded answers keep the declared difference', async () => {
+    const directory = await mkdtemp(join(tmpdir(), 'obversa-f54-reviewedby-ok-'));
+    const writer = seat(scriptedEngine('writer', [async (request) => {
+      await writeFile(join(request.cwd!, 'note.md'), 'written\n');
+      return pass('note written');
+    }], { usageModel: 'claude-sonnet-4-5' }), 'claude');
+    const reviewer = seat(scriptedEngine('reviewer', [async () => pass('accepted')], { usageModel: 'gpt-5' }), 'gpt');
+    const job = workflow('recorded-family-reviewedby-ok', {
+      brief: { brief: 'Write one note.', files: ['note.md'] },
+      roles: { writer, review: [reviewer] },
+      stages: [stage('note', { agent: 'writer', writes: 'note.md', reviewedBy: 'review' })],
+    });
+
+    try {
+      const result = await run(job, { cwd: directory });
+      expect(result.outcome.status).toBe('pass');
+    } finally {
+      await rm(directory, { recursive: true, force: true });
+    }
+  });
+
   it('accepts a panel whose recorded answers keep the declared family difference', async () => {
     const directory = await mkdtemp(join(tmpdir(), 'obversa-f54-recorded-ok-'));
     const writer = seat(scriptedEngine('writer', [async (request) => {

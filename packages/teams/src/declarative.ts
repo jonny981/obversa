@@ -19,6 +19,7 @@ import {
   type ConditionInput,
   RECORDED_ENGINE_USAGE,
   type RecordedEngineUsage,
+  childContext,
 } from '@obversa/runtime';
 
 import { outcomeFromAgentText } from './agent-response.js';
@@ -397,21 +398,27 @@ function recordedFamilyGate(
         label: `writer stage ${name}`,
         family: writerFamilies[index] ?? '',
       })).filter((entry) => entry.family !== '');
-      assertRecordedFamilies(after, writerDeclarations);
+      // In the reviewedBy form the writer body and the review both run
+      // INSIDE the wrapped loop: the writer's records sit exactly at the
+      // loop's path leaf, the review's carry the deeper panel segment.
+      const bodySide = bodyMarker === undefined
+        ? []
+        : after.filter((record) => record.path[record.path.length - 1] === bodyMarker);
+      const reviewSide = bodyMarker === undefined
+        ? after
+        : after.filter((record) => record.path[record.path.length - 1] !== bodyMarker);
+      // Each recorded side keeps the declared difference of the other.
+      assertRecordedFamilies(bodySide, reviewerDeclarations);
+      assertRecordedFamilies(reviewSide, writerDeclarations);
       // The recorded sides themselves must be disjoint: two declared
-      // differences mean nothing when one family answered both. In the
-      // reviewedBy form the writer's answers appear DURING the wrapped
-      // loop, so the writer side is attributed by the loop body's path
-      // leaf rather than by the pre-loop filter.
+      // differences mean nothing when one family answered both.
       const writerAnswerFamilies = new Set(
-        (bodyMarker === undefined
-          ? writerRecords
-          : after.filter((record) => record.path[record.path.length - 1] === bodyMarker)
-        ).map((record) => recordedFamilyOf(record.model)).filter(
-          (family): family is string => family !== undefined,
-        ),
+        (bodyMarker === undefined ? writerRecords : bodySide)
+          .map((record) => recordedFamilyOf(record.model)).filter(
+            (family): family is string => family !== undefined,
+          ),
       );
-      for (const record of after) {
+      for (const record of reviewSide) {
         const family = recordedFamilyOf(record.model);
         if (family === undefined) {
           throw new TypeError(
@@ -575,7 +582,10 @@ function stageJob(
         }
         return true;
       }, `${named.name} writes`),
-      review: panel,
+      // The review runs at a child path so its records carry a deeper
+      // path than the writer body's, which is what separates the two
+      // recorded sides. The outcome passes through unchanged.
+      review: async (ctx) => panel(childContext(ctx, { depth: ctx.depth + 1, path: [...ctx.path, 'review-panel'] })),
       max: retry + 1,
       maxReviewRestarts: retry,
       noProgress: { window: 2, gate: true },
