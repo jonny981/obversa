@@ -2,13 +2,10 @@ import { claude } from '@obversa/engine-claude-cli';
 import { codex } from '@obversa/engine-codex';
 import { resolveCommandExecutable } from '@obversa/engine/command';
 import { opencode } from '@obversa/engine-opencode-cli';
-import { realpathSync } from 'node:fs';
-import { basename } from 'node:path';
-import { fileURLToPath } from 'node:url';
 import { run } from '@obversa/runtime';
 import { fromFile, stage, workflow, type TeamSeat } from '@obversa/teams';
 
-export interface ThresholdPanelEngines {
+interface ThresholdPanelEngines {
   readonly claude: (model: string) => TeamSeat;
   readonly codex: (model: string) => TeamSeat;
   readonly opencode: (model: string) => TeamSeat;
@@ -22,7 +19,7 @@ const realEngines: ThresholdPanelEngines = {
   }),
 };
 
-export function createThresholdPanel(engines: ThresholdPanelEngines = realEngines) {
+function createThresholdPanel(engines: ThresholdPanelEngines = realEngines) {
   return workflow('threshold-panel', {
     brief: fromFile('briefs/double.md'),
     options: { timeout: '10m' },
@@ -60,13 +57,5 @@ export function createThresholdPanel(engines: ThresholdPanelEngines = realEngine
   });
 }
 
-// Resolve both paths because a symlink can change the spelling of one file.
-const entryPath = process.argv[1];
-const modulePath = fileURLToPath(import.meta.url);
-if (entryPath && realpathSync(entryPath) === realpathSync(modulePath)) {
-  const result = await run(createThresholdPanel());
-  console.log(JSON.stringify(result.outcome, null, 2));
-} else if (entryPath && basename(entryPath) === basename(modulePath)) {
-  console.error('This example was started through a path that could not be matched to its module. Run the copied file directly.');
-  process.exitCode = 1;
-}
+const result = await run(createThresholdPanel());
+console.log(JSON.stringify(result.outcome, null, 2));

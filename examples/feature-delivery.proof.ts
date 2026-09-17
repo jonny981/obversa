@@ -1,18 +1,28 @@
 import assert from 'node:assert/strict';
-import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import { existsSync } from 'node:fs';
+import { mkdir, mkdtemp, readFile, readdir, rm, symlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { join, resolve, dirname } from 'node:path';
+import { fileURLToPath } from 'node:url';
+import { spawnSync } from 'node:child_process';
 
-import {
-  createCallbackClient,
-  directRouter,
-  run,
-  type AgentRequest,
-  type LoopEvent,
-} from '@obversa/runtime';
+const here = dirname(fileURLToPath(import.meta.url));
+const repo = (() => {
+  // The repo root is the nearest directory with a package.json: the
+  // repository and the throwaway consumer have different depths.
+  let dir = here;
+  for (let i = 0; i < 4; i += 1) {
+    if (existsSync(join(dir, 'package.json'))) return dir;
+    dir = resolve(dir, '..');
+  }
+  throw new Error('no package.json above the proof');
+})();
+const standIn = join(repo, 'scripts', 'stand-in-cli.mjs');
 
-import { pass, revise, scriptedSeat } from './teams/scripted-engine.js';
-import { createFeatureDelivery } from './feature-delivery.js';
+const pass = (summary: string): string => JSON.stringify({ status: 'pass', summary });
+const revise = (summary: string, finding: string): string => JSON.stringify({
+  status: 'revise', summary, findings: [{ severity: 'block', evidence: finding }],
+});
 
 const DRAFT_SOURCE = [
   'export const MAX_ATTEMPTS = 3;',
@@ -66,12 +76,9 @@ const DRAFT_TESTS = [
   '',
 ].join('\n');
 
-const REPAIRED_SOURCE = [
-  DRAFT_SOURCE.replace('  const delayMs = options.delayMs ?? 10;\n', '  const delayMs = options.delayMs ?? 10;\n  const signal = options.signal;\n'),
-].join('').replace(
-  '  for (let used = 0; used < attempts; used += 1) {\n',
-  "  for (let used = 0; used < attempts; used += 1) {\n    if (signal?.aborted) throw new Error('aborted');\n",
-);
+const REPAIRED_SOURCE = DRAFT_SOURCE
+  .replace('  const delayMs = options.delayMs ?? 10;\n', '  const delayMs = options.delayMs ?? 10;\n  const signal = options.signal;\n')
+  .replace('  for (let used = 0; used < attempts; used += 1) {\n', "  for (let used = 0; used < attempts; used += 1) {\n    if (signal?.aborted) throw new Error('aborted');\n");
 
 const REPAIRED_TESTS = [
   DRAFT_TESTS,
@@ -91,116 +98,94 @@ const REPAIRED_TESTS = [
   '',
 ].join('\n');
 
-async function writeFiles(cwd: string, source: string, tests: string): Promise<void> {
-  await mkdir(join(cwd, 'src'), { recursive: true });
-  await mkdir(join(cwd, 'test'), { recursive: true });
-  await writeFile(join(cwd, 'src/retry.js'), source);
-  await writeFile(join(cwd, 'test/retry.test.js'), tests);
-}
-
-function reviewer(name: string, family: string, finding: string) {
-  return scriptedSeat(`feature-${name}`, family, [
-    async (request: AgentRequest) => {
-      await mkdir(join(request.cwd!, 'reviews'), { recursive: true });
-      await writeFile(join(request.cwd!, `reviews/${name}-first.json`), '{"status":"revise"}\n');
-      return revise(`${name} found one missing criterion`, finding);
-    },
-    async (request: AgentRequest) => {
-      await mkdir(join(request.cwd!, 'reviews'), { recursive: true });
-      await writeFile(join(request.cwd!, `reviews/${name}-second.json`), '{"status":"pass"}\n');
-      return pass(`${name} accepted the repaired files`);
-    },
-  ]);
-}
-
-const workspace = await mkdtemp(join(tmpdir(), 'obversa-feature-delivery-proof-'));
+// The stand-in executables live beside the workspace, not inside it: a read-only
+// reviewer's workspace guard refuses a symlink under the workspace that resolves
+// outside it, and the stand-in is a symlink to a script in the repository.
+const root = await mkdtemp(join(tmpdir(), 'obversa-feature-delivery-proof-'));
+const workspace = join(root, 'workspace');
+const bin = join(root, 'bin');
 try {
-  const analyse = scriptedSeat('feature-analyse', 'claude', [
-    async () => pass('retry, cap and abort are accepted criteria'),
-  ]);
-  const implement = scriptedSeat('feature-implement', 'gpt', [
-    async (request) => {
-      await writeFiles(request.cwd!, DRAFT_SOURCE, DRAFT_TESTS);
-      return pass('wrote the first draft');
-    },
-    async (request) => {
-      await writeFiles(request.cwd!, REPAIRED_SOURCE, REPAIRED_TESTS);
-      return pass('repaired the abort criterion');
-    },
-  ]);
-  const correctness = reviewer('correctness', 'claude', 'the source does not stop when the caller aborts');
-  const tests = reviewer('tests', 'gpt', 'the tests do not cover an aborted caller');
-  const api = scriptedSeat('feature-api', 'claude', [
-    async (request) => {
-      await mkdir(join(request.cwd!, 'reviews'), { recursive: true });
-      await writeFile(join(request.cwd!, 'reviews/api.json'), '{"status":"pass"}\n');
-      return pass('the public exports are correct');
-    },
-    async () => pass('the public exports remain correct'),
-  ]);
-  const callbacks = createCallbackClient();
-  const engines = {
-    analyse: analyse.engine,
-    implement: implement.engine,
-    correctness: correctness.engine,
-    tests: tests.engine,
-    api: api.engine,
-  };
-  const events: LoopEvent[] = [];
-  const featureDelivery = (() => {
-    const previousCwd = process.cwd();
-    try {
-      process.chdir(workspace);
-      return createFeatureDelivery(engines);
-    } finally {
-      process.chdir(previousCwd);
-    }
-  })();
-  const first = await run(featureDelivery, {
-    cwd: workspace,
-    callbacks,
-    onEvent: (event) => events.push(event),
-  });
-  if (first.outcome.status !== 'paused') {
-    console.log(JSON.stringify({
-      status: first.outcome.status,
-      implementRuns: implement.calls.length,
-      reviewRounds: events.filter((event) => event.kind === 'loop:review').length,
-      filesWritten: [],
-    }, null, 2));
-    throw new Error('The first run must pause for approval.');
+  await mkdir(workspace, { recursive: true });
+  await mkdir(bin, { recursive: true });
+  await writeFile(
+    join(workspace, '.obversa-stand-in.json'),
+    JSON.stringify({
+      claude: [
+        { writes: {}, reply: pass('retry, cap and abort are accepted criteria') },
+        { writes: { 'reviews/correctness-first.json': '{"status":"revise"}\n' }, reply: revise('correctness found one missing criterion', 'the source does not stop when the caller aborts') },
+        { writes: { 'reviews/api.json': '{"status":"pass"}\n' }, reply: pass('the public exports are correct') },
+        { writes: { 'reviews/correctness-second.json': '{"status":"pass"}\n' }, reply: pass('correctness accepted the repaired files') },
+        { writes: {}, reply: pass('the public exports remain correct') },
+      ],
+      codex: [
+        { writes: { 'src/retry.js': DRAFT_SOURCE, 'test/retry.test.js': DRAFT_TESTS }, reply: pass('wrote the first draft') },
+        { writes: { 'reviews/tests-first.json': '{"status":"revise"}\n' }, reply: revise('tests found one missing criterion', 'the tests do not cover an aborted caller') },
+        { writes: { 'src/retry.js': REPAIRED_SOURCE, 'test/retry.test.js': REPAIRED_TESTS }, reply: pass('repaired the abort criterion') },
+        { writes: { 'reviews/tests-second.json': '{"status":"pass"}\n' }, reply: pass('tests accepted the repaired files') },
+      ],
+    }, null, 2) + '\n',
+  );
+  const callsLog = join(workspace, '.obversa-stand-in-calls.log');
+  for (const name of ['claude', 'codex', 'opencode']) {
+    await symlink(standIn, join(bin, name));
   }
-  const pending = callbacks.listPending();
-  assert.equal(pending.length, 1);
-  const answered = await directRouter(callbacks, pending[0]!, 'feature-proof-person', () => ({ approved: true }));
-  assert.equal(answered.ok, true);
-  const result = await run(featureDelivery, {
+
+  // The workflow ends at the approve stage, where a person answers. Until
+  // F42 gives a second process that route, the proof asserts to the pause.
+  // Inside a fresh consumer there is no packages/runtime/tsconfig.json; tsx then
+  // reads the nearest tsconfig, which is the consumer's own.
+  const repoTsconfig = join(repo, 'packages', 'runtime', 'tsconfig.json');
+  const tsconfigArgs = existsSync(repoTsconfig) ? ['--tsconfig', repoTsconfig] : [];
+  const compiled = join(here, 'feature-delivery.js');
+  const child = existsSync(compiled)
+    ? { file: process.execPath, args: [compiled] }
+    : { file: join(repo, 'node_modules', '.bin', 'tsx'), args: [...tsconfigArgs, join(here, 'feature-delivery.ts')] };
+  const started = Date.now();
+  const run = spawnSync(child.file, child.args, {
     cwd: workspace,
-    callbacks,
-    onEvent: (event) => events.push(event),
+    env: {
+      ...process.env,
+      PATH: `${bin}:${process.env.PATH ?? ''}`,
+    },
+    encoding: 'utf8',
+    timeout: 120_000,
   });
-  const report = {
-    status: result.outcome.status,
-    implementRuns: implement.calls.length,
-    reviewRounds: events.filter((event) => event.kind === 'loop:review').length,
-    filesWritten: [
-      'src/retry.js',
-      'test/retry.test.js',
-      'reviews/correctness-first.json',
-      'reviews/tests-first.json',
-      'reviews/api.json',
-    ],
-  };
-  console.log(JSON.stringify(report, null, 2));
-  assert.equal(result.outcome.status, 'pass');
+  const elapsed = Date.now() - started;
+
+  const mode = existsSync(compiled) ? 'compiled-from-dist' : existsSync(repoTsconfig) ? 'repo-tsx' : 'consumer-tsx';
+  assert.equal(run.status, 0, `the example child ${child.file} ${child.args.join(' ')} exited ${run.status ?? `signal ${run.signal}`} after ${elapsed}ms in ${mode} mode
+  spawn error: ${run.error ?? 'none'}
+  stdout: ${run.stdout}
+  stderr: ${run.stderr}`);
+  const printed = JSON.parse(run.stdout.slice(run.stdout.lastIndexOf('\n{') + 1));
+  assert.equal(printed.status, 'paused');
+
+  const calls = (await readFile(callsLog, 'utf8')).trim().split('\n').map((line) => JSON.parse(line) as { role: string; writes: Record<string, string> });
+  const implementRuns = calls.filter((call) => 'src/retry.js' in call.writes).length;
+  assert.equal(implementRuns, 2, 'the implementer runs once and repairs once');
+
   assert.match(await readFile(join(workspace, 'src/retry.js'), 'utf8'), /signal\?\.aborted/);
   assert.match(await readFile(join(workspace, 'test/retry.test.js'), 'utf8'), /abort:/);
-  // A plain run does not resume from the approval pause, so the second run
-  // replays the earlier stages: two calls before the pause and one after it.
-  assert.equal(implement.calls.length, 3);
-  assert.equal(correctness.calls.length, 3);
-  assert.equal(tests.calls.length, 3);
-  assert.equal(api.calls.length, 3);
+  const reviews = await readdir(join(workspace, 'reviews'));
+  assert.ok(reviews.includes('correctness-first.json') && reviews.includes('tests-first.json') && reviews.includes('api.json'), `reviews: ${reviews.join(', ')}`);
+
+  // The example writes its record beside the workspace; the pause is in it.
+  const recordRoot = join(workspace, '.obversa', 'records');
+  const record = (await readdir(recordRoot)).filter((name) => name.endsWith('.jsonl')).map((name) => join(recordRoot, name))[0]!;
+  const events = (await readFile(record, 'utf8')).trim().split('\n').map((line) => JSON.parse(line) as { kind?: string; path?: string[]; outcome?: { status?: string } });
+  assert.ok(events.some((event) => event.kind === 'job:end' && event.path?.includes('approve')
+    && (event as { outcome?: { status?: string } }).outcome?.status === 'paused'), 'the pause is in the record');
+  assert.ok(events.some((event) => event.kind === 'dag:end'
+    && (event as { outcome?: { status?: string } }).outcome?.status === 'paused'), 'the run recorded its paused end');
+
+  console.log(JSON.stringify({
+    status: printed.status,
+    implementRuns,
+    reviewRounds: 2,
+    filesWritten: ['src/retry.js', 'test/retry.test.js', 'reviews/correctness-first.json', 'reviews/tests-first.json', 'reviews/api.json'],
+    pausedAt: 'approve',
+    mode,
+  }, null, 2));
 } finally {
-  await rm(workspace, { recursive: true, force: true });
+  await rm(root, { recursive: true, force: true });
 }

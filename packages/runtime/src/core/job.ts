@@ -52,7 +52,7 @@ function recordEngineUsage(
     records.push(entry);
   }
 }
-import type { AgentResult, EngineRef } from '../engines/engine.js';
+import type { AgentRequest, AgentResult, EngineRef } from '../engines/engine.js';
 import { resolveEnv } from './env-overlay.js';
 import { LoopError, type LoopErrorCode } from './errors.js';
 import { scrubCapture } from './redact.js';
@@ -92,7 +92,9 @@ export interface AgentJobConfig {
   /** Bare model id — passed straight through to the engine. */
   model?: string;
   maxTokens?: number;
+  tools?: string[];
   allowedTools?: string[];
+  workspaceMode?: AgentRequest['workspaceMode'];
   /**
    * Mark this turn a leaf: forbid spawning sub-agents (the engine disallows the sub-agent
    * tool), so a branch bottoms out here. Falls back to the agent def's `leaf`.
@@ -373,8 +375,9 @@ export function agentJob(config: AgentJobConfig): Job {
               system,
               model: routeModel,
               maxTokens: config.maxTokens,
-              tools: config.agent?.tools,
-              allowedTools: config.allowedTools ?? config.agent?.tools,
+              tools: config.tools ?? config.agent?.tools,
+              allowedTools: config.allowedTools,
+              workspaceMode: config.workspaceMode,
               leaf: config.leaf ?? config.agent?.leaf,
               cwd: config.cwd ?? ctx.workspace.dir,
               timeoutMs,

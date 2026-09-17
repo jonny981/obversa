@@ -445,7 +445,11 @@ function recordedFamilyGate(
 function panelRole(roles: WorkflowConfig['roles'], name: string): readonly TeamSeat[] {
   const value = role(roles, name);
   if (!Array.isArray(value) || !value.length) throw new TypeError(`role ${name} must be a non-empty reviewer panel`);
-  value.forEach((seat) => seatIdentity(seat));
+  value.forEach((seat) => {
+    if (seatIdentity(seat).tools.length === 0) {
+      throw new TypeError(`reviewer role ${name} must declare read tools`);
+    }
+  });
   return value;
 }
 
@@ -498,10 +502,14 @@ function guardedAgent(
   if (!writes.length) throw new TypeError(`agent stage ${named.name} must declare writes`);
   const target = named.config.sendsBackTo;
   const reviewedBy = 'reviewedBy' in named.config ? named.config.reviewedBy : undefined;
+  const identity = seatIdentity(seat);
   const agent = agentJob({
     label: named.name,
     engine: seat.engine,
-    model: seatIdentity(seat).model,
+    model: identity.model,
+    tools: [...identity.tools],
+    allowedTools: [...identity.tools],
+    workspaceMode: 'write',
     consumeFeedback: target !== undefined || reviewedBy !== undefined,
     prompt: agentPrompt(brief, named, files, writes),
     outcome: (textValue) => outcomeFromAgentText(textValue, target),

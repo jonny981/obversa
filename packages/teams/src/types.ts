@@ -2,7 +2,7 @@ import type { Engine, ExecutionTarget, KickbackBudget } from '@obversa/runtime';
 
 export interface TeamSeat {
   readonly engine: Engine;
-  readonly identity: Omit<ExecutionTarget, 'tools'>;
+  readonly identity: ExecutionTarget;
 }
 
 export interface TestCommand {

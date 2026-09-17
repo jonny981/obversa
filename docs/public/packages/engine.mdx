@@ -215,7 +215,8 @@ What it printed is on the [graph executor](/graphs/executor) page.
 | `canonicalJson`, `digestJson`, `cloneFrozenJson` | JSON helpers the contract uses. |
 | `attemptEnvironment` | The environment for a command-backed attempt. |
 | `retryAfterHeaderToMs`, `scrubCapture`, `redactEnvValues`, `redactSecrets` | Helpers for command adapters. |
-| `@obversa/engine/testing` | `runEngineConformance` for the run contract, `runEngineAdmissionConformance` for `admit`, and `MockEngine`. An adapter author runs both kits; an adapter without `admit` runs the first alone. |
+| `claudeToolOptions` | The helper the two Claude adapters share. It keeps a Claude seat's tools inside its workspace mode: `read` keeps `Read`, `Grep` and `Glob`; `none` keeps nothing. A permission rule that names a withheld tool, or a custom tool that the mode cannot bound, is refused before a model runs. |
+| `@obversa/engine/testing` | `runEngineConformance` for the run contract, `runEngineAdmissionConformance` for `admit`, and `MockEngine`. An adapter author runs both kits; an adapter without `admit` runs the first alone. The run kit exercises the workspace modes `none`, `read` and `write` against the real adapter, never a stand-in. Its report (`EngineAdapterConformanceReport`) lists each unsupported feature under `unsupported`, with its reason. Unsupported features are never counted as passes. |
 | `@obversa/engine/command` | `runOwnedCommand`, `stopOwnedProcessTree`, `commandCleanupCapability`, `inspectOwnerMarkedProcesses`. |
 
 ## Owned commands and cleanup

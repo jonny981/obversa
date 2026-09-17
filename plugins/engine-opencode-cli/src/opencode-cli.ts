@@ -20,6 +20,7 @@ import { isDeepStrictEqual } from 'node:util';
 import {
   EngineError,
   EngineIncompleteResultError,
+  assertReadAccess,
   attemptEnvironment,
   canonicalJson,
   classifyEngineFailure,
@@ -135,6 +136,7 @@ export interface OpenCodeCliEngineOptions {
 
 export interface OpenCodeSeatOptions {
   readonly executable: string;
+  readonly tools?: readonly string[];
 }
 
 export interface OpenCodeSeat {
@@ -144,6 +146,7 @@ export interface OpenCodeSeat {
     readonly provider: string;
     readonly modelFamily: string;
     readonly model: string;
+    readonly tools: readonly string[];
   };
 }
 
@@ -162,6 +165,7 @@ export function opencode(modelName: string, options: OpenCodeSeatOptions): OpenC
       provider: selected.provider,
       modelFamily,
       model: selected.value,
+      tools: options.tools ?? ['read', 'grep'],
     },
   };
 }
@@ -510,6 +514,7 @@ function scrubExactValues(
 }
 
 function requestedCapabilities(request: AgentRequest): readonly string[] {
+  assertReadAccess(request);
   const capabilities = engineSelection({
     adapter: 'opencode-cli',
     capabilities: request.tools ?? [],
@@ -525,6 +530,9 @@ function requestedCapabilities(request: AgentRequest): readonly string[] {
     throw new TypeError('OpenCode leaf attempts cannot expose task');
   }
   const workspaceMode = request.workspaceMode ?? 'none';
+  if (workspaceMode !== 'write' && capabilities.includes('task')) {
+    throw new TypeError(`OpenCode workspace mode ${workspaceMode} cannot expose task capability`);
+  }
   if (workspaceMode === 'none') {
     const unsafe = capabilities.find(
       (capability) => FILESYSTEM_CAPABILITIES.has(capability),
@@ -543,6 +551,9 @@ function requestedCapabilities(request: AgentRequest): readonly string[] {
       throw new TypeError(
         `OpenCode read-only workspace cannot expose capability ${unsafe}`,
       );
+    }
+    if (!capabilities.some((capability) => ['read', 'glob', 'grep'].includes(capability))) {
+      throw new TypeError('OpenCode read workspace requires a file-reading capability');
     }
   }
   if (workspaceMode !== 'none' && workspaceMode !== 'read' && workspaceMode !== 'write') {

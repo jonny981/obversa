@@ -91,7 +91,7 @@ describe.runIf(process.platform !== 'win32')('Codex static admission', () => {
   it('observes numeric version without normal arguments or output-file creation', async () => {
     const f = fixture();
     const engine = new CodexEngine({ cliBinary: f.a, cliArgs: ['--debug'], permissionMode: 'bypassPermissions' });
-    expect(await engine.admit(withoutPrompt(f.request), signal())).toEqual(f.selected());
+    expect(await engine.admit({ ...withoutPrompt(f.request), workspaceMode: undefined }, signal())).toEqual(f.selected());
     expect(invocations(f.calls)).toEqual([{
       kind: 'version', executable: f.a, args: ['--version'], stdin: '', cwd: f.dir,
     }]);
@@ -157,9 +157,9 @@ describe.runIf(process.platform !== 'win32')('Codex static admission', () => {
   it('rebuilds model, capabilities, workspace and normal arguments after admission', async () => {
     const f = fixture();
     const engine = new CodexEngine({ cliBinary: f.a, permissionMode: 'bypassPermissions', cliArgs: ['--debug'] });
-    await engine.admit(withoutPrompt(f.request), signal());
+    await engine.admit({ ...withoutPrompt(f.request), workspaceMode: undefined }, signal());
     const cwd = join(f.dir, 'next-workspace'); mkdirSync(cwd);
-    const next: AgentRequest = { ...f.request, cwd, model: 'gpt-other', tools: ['Bash'], allowedTools: ['Bash'] };
+    const next: AgentRequest = { ...f.request, workspaceMode: undefined, cwd, model: 'gpt-other', tools: ['Bash'], allowedTools: ['Bash'] };
     const selected = await engine.admit(withoutPrompt(next), signal());
     expect(selected).toEqual(f.selected(f.a, next));
     const result = await engine.run(next, () => {}, signal());

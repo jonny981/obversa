@@ -10,8 +10,8 @@ import {
 } from 'node:path';
 import { isDeepStrictEqual } from 'node:util';
 import {
-  CLAUDE_SUBAGENT_TOOLS,
   EngineError,
+  claudeToolOptions,
   attemptEnvironment,
   classifyEngineFailure,
   engineSelection,
@@ -53,6 +53,7 @@ export interface ClaudeSeat {
     readonly provider: 'anthropic';
     readonly modelFamily: 'claude';
     readonly model: string;
+    readonly tools: readonly string[];
   };
 }
 
@@ -73,6 +74,7 @@ export function claude(model: string, options: ClaudeSeatOptions = {}): ClaudeSe
       provider: 'anthropic',
       modelFamily: 'claude',
       model,
+      tools: ['Read', 'Edit', 'Bash'],
     },
   };
 }
@@ -253,6 +255,11 @@ export function buildClaudeArgs(
   req: AgentRequest,
   opts: ClaudeCliEngineOptions,
 ): string[] {
+  const tools = claudeToolOptions(req);
+  const restricted = req.workspaceMode === 'none' || req.workspaceMode === 'read';
+  if (restricted && opts.cliArgs?.length) {
+    throw new EngineError({ kind: 'invalid-config', message: 'Claude restricted workspace cannot use extra CLI arguments' });
+  }
   const model = modelFor(req, opts);
   const args = ['-p', '--output-format', 'stream-json', '--verbose'];
   if (model) args.push('--model', model);
@@ -261,12 +268,13 @@ export function buildClaudeArgs(
       req.systemMode === 'replace' ? '--system-prompt' : '--append-system-prompt',
       req.system,
     );
-  if (req.tools) args.push('--tools', req.tools.join(','));
-  if (req.allowedTools?.length)
-    args.push('--allowedTools', req.allowedTools.join(','));
+  if (tools.tools) args.push('--tools', tools.tools.join(','));
+  if (tools.allowedTools?.length)
+    args.push('--allowedTools', tools.allowedTools.join(','));
   // A leaf agent may not spawn sub-agents, so disallow the spawn tool (wins over any allowlist).
-  if (req.leaf)
-    args.push('--disallowedTools', CLAUDE_SUBAGENT_TOOLS.join(','));
+  if (tools.disallowedTools?.length)
+    args.push('--disallowedTools', tools.disallowedTools.join(','));
+  if (restricted) args.push('--strict-mcp-config', '--setting-sources', '');
   if (opts.permissionMode) args.push('--permission-mode', opts.permissionMode);
   if (opts.cliArgs?.length) args.push(...opts.cliArgs);
   return args;
@@ -509,7 +517,7 @@ export class ClaudeCliEngine implements Engine {
       );
       if (acc.terminal && acc.parts.some((part) => part.final)) {
         const effective = engineSelection({
-          ...requested, model: acc.model,
+          ...requested, model: acc.model, capabilities: claudeToolOptions(req).tools ?? [],
         });
         onEvent({
           type: 'usage',
@@ -533,19 +541,20 @@ export class ClaudeCliEngine implements Engine {
           },
         });
       }
-      // A rate/usage limit can land on either stream; check both (redacted)
-      // before falling through to the generic exit-code error.
+      // An unfinished failure can land on either stream. Classify only
+      // redacted text, retaining limit reset times and billing's quota kind.
+      const stdout = scrubCapture(
+        new TextDecoder().decode(result.stdout),
+        env,
+        400,
+      );
+      const detail = `${stderr}\n${stdout}`;
       if (!result.timedOut) {
-        const stdout = scrubCapture(
-          new TextDecoder().decode(result.stdout),
-          env,
-          400,
-        );
-        const limit = classifyCliLimit(`${stderr}\n${stdout}`);
+        const limit = classifyCliLimit(detail);
         if (limit) throw limit;
       }
       throw new EngineError({
-        kind: result.timedOut ? 'timeout' : 'unknown',
+        kind: result.timedOut ? 'timeout' : classifyEngineFailure(new Error(detail)),
         message: `claude exited ${result.exitCode ?? '?'}${stderr ? `: ${stderr}` : ''}`,
       });
     }
@@ -556,7 +565,7 @@ export class ClaudeCliEngine implements Engine {
       model: acc.model ?? model ?? 'claude-cli',
     });
     const effective = engineSelection({
-      ...requested, model: acc.model,
+      ...requested, model: acc.model, capabilities: claudeToolOptions(req).tools ?? [],
     });
     return validateAgentResult({
       parts: acc.parts,

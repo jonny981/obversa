@@ -251,6 +251,12 @@ Usage has two states. `reported` means the engine supplied a valid receipt.
 holds the narrower permission rules approved by the host. The selected adapter
 rejects a rule it cannot express before it starts the process.
 
+The workspace mode is a ceiling. An approval never adds a capability the mode
+withholds, and a bypass never exceeds it. An adapter that cannot express
+the declared access refuses the request before any model runs. A reviewer with
+no way to read the work is refused rather than run. A review can rest only on
+material the seat could open.
+
 The example uses `workspaceMode: 'none'` and exposes no tools. An evidence-only
 job can use `workspaceMode: 'read'` with declared read tools. A writing job must
 name its write access and gets a separate scratch directory for temporary data.

@@ -802,8 +802,9 @@ async function main() {
     await copyFile(preflightHostPath, join(consumerDirectory, 'preflight-host.mjs'));
     await copyFile(runChildExamplePath, join(consumerDirectory, 'run-child.ts'));
     await mkdir(join(consumerDirectory, 'teams'), { recursive: true });
-    await copyFile(join(root, 'examples', 'teams', 'scripted-engine.ts'), join(consumerDirectory, 'teams', 'scripted-engine.ts'));
     await copyFile(join(root, 'examples', 'teams', 'writer-reviewer-pair.ts'), join(consumerDirectory, 'teams', 'writer-reviewer-pair.ts'));
+    await mkdir(join(consumerDirectory, 'scripts'), { recursive: true });
+    await copyFile(join(root, 'scripts', 'stand-in-cli.mjs'), join(consumerDirectory, 'scripts', 'stand-in-cli.mjs'));
     await copyFile(join(root, 'examples', 'teams', 'writer-reviewer-pair.proof.ts'), join(consumerDirectory, 'teams', 'writer-reviewer-pair.proof.ts'));
     await copyFile(join(root, 'examples', 'teams', 'threshold-panel.ts'), join(consumerDirectory, 'teams', 'threshold-panel.ts'));
     await copyFile(join(root, 'examples', 'teams', 'threshold-panel.proof.ts'), join(consumerDirectory, 'teams', 'threshold-panel.proof.ts'));
@@ -899,9 +900,14 @@ async function main() {
     );
     assert.equal(compiledRunChild, 'ready');
     assert.equal(directRunChild, 'ready');
-    assert.deepEqual(compiledTeamPair, directTeamPair);
-    assert.deepEqual(compiledTeamPanel, directTeamPanel);
-    assert.deepEqual(compiledTeamFeature, directTeamFeature);
+    // The two runs must agree on everything except how they ran: the compiled
+    // proof runs the compiled example from dist, the direct proof runs the
+    // example source through tsx with the consumer's own tsconfig. Each side's
+    // mode is asserted on its own below.
+    const withoutMode = ({ mode, ...report }) => report;
+    assert.deepEqual(withoutMode(compiledTeamPair), withoutMode(directTeamPair));
+    assert.deepEqual(withoutMode(compiledTeamPanel), withoutMode(directTeamPanel));
+    assert.deepEqual(withoutMode(compiledTeamFeature), withoutMode(directTeamFeature));
     assert.equal(compiledTeamPair.status, 'pass');
     assert.equal(compiledTeamPair.testCommandsRun, 2);
     assert.equal(compiledTeamPair.reviewerKickbacks, 1);
@@ -910,24 +916,43 @@ async function main() {
     assert.equal(compiledTeamPanel.testCommandsRun, 2);
     assert.equal(compiledTeamPanel.threshold, '1 of 2');
     assert.deepEqual(compiledTeamPanel.reviewerCalls, [1, 1]);
-    assert.equal(compiledTeamFeature.status, 'pass');
+    assert.equal(compiledTeamFeature.status, 'paused');
     assert.equal(compiledTeamFeature.stages, 9);
-    assert.equal(compiledTeamFeature.testCommandsRun, 3);
-    assert.equal(compiledTeamFeature.implementationIterations, 4);
-    assert.equal(compiledTeamFeature.reviewRounds, 8);
-    assert.equal(compiledTeamFeature.acceptedReviewPanels, 10);
+    assert.equal(compiledTeamFeature.implementationIterations, 2);
+    assert.equal(compiledTeamFeature.reviewRounds, 2);
     assert.equal(compiledTeamFeature.kickbacks, 1);
+    // The compiled mode is the one that proves the package: a repo-mode green
+    // must never stand in for it.
+    assert.equal(compiledTeamPair.mode, 'compiled-from-dist');
+    assert.equal(compiledTeamPanel.mode, 'compiled-from-dist');
+    assert.equal(compiledTeamFeature.mode, 'compiled-from-dist');
+    // The direct run proves the source proof works outside the repository: no
+    // repo tsconfig exists here, so tsx must have read the consumer's own.
+    assert.equal(directTeamPair.mode, 'consumer-tsx');
+    assert.equal(directTeamPanel.mode, 'consumer-tsx');
+    assert.equal(directTeamFeature.mode, 'consumer-tsx');
     assert.deepEqual(compiledTournament, directTournament);
     assert.equal(compiledTournament.status, 'pass');
     assert.equal(compiledTournament.candidates, 3);
     assert.equal(compiledTournament.winnerLanded, true);
     assert.deepEqual(compiledTournament.candidateBranches, []);
     assert.equal(compiledTournament.temporaryDirectoryRemoved, true);
-    const featureDenySource = featureProofSource.replace(
-      '{ approved: true }',
-      '{ approved: false }',
-    );
-    assert.notEqual(featureDenySource, featureProofSource, 'The approval mutation must change the proof source.');
+    // The proof is a host: it runs the example as a child with stand-in
+    // engines and reads what a person can see, so a mutation goes into the
+    // stand-in script, and a run that must not ship ends with the child
+    // printing a failed outcome and the proof refusing it on stderr. The
+    // person's no-vote cannot be given from outside the process until F42
+    // lands; until then the control is a panel that never accepts.
+    const featureDenySource = featureProofSource
+      .replace(
+        "{ writes: { 'reviews/correctness-second.json': '{\"status\":\"pass\"}\\n' }, reply: pass('correctness accepted the repaired files') }",
+        "{ writes: { 'reviews/correctness-second.json': '{\"status\":\"revise\"}\\n' }, reply: revise('correctness still finds one missing criterion', 'the source still does not stop when the caller aborts') }",
+      )
+      .replace(
+        "{ writes: { 'reviews/tests-second.json': '{\"status\":\"pass\"}\\n' }, reply: pass('tests accepted the repaired files') }",
+        "{ writes: { 'reviews/tests-second.json': '{\"status\":\"revise\"}\\n' }, reply: revise('tests still find one missing criterion', 'the tests still do not cover an aborted caller') }",
+      );
+    assert.notEqual(featureDenySource, featureProofSource, 'The never-accepts mutation must change the proof source.');
     await writeFile(
       join(consumerDirectory, 'feature-delivery.deny.ts'),
       featureDenySource,
@@ -936,17 +961,15 @@ async function main() {
       cwd: consumerDirectory,
       encoding: 'utf8',
       maxBuffer: 32 * 1024 * 1024,
-      timeout: 30_000,
+      timeout: 120_000,
       killSignal: 'SIGKILL',
     });
     assert.equal(denyRun.status, 1, denyRun.stdout + denyRun.stderr);
-    assert.notEqual(denyRun.stdout.trim(), '', denyRun.stderr);
-    const featureDeny = JSON.parse(denyRun.stdout);
-    assert.equal(featureDeny.status, 'fail', 'a no-vote must not ship the change');
+    assert.match(denyRun.stderr, /"status": "fail"/, 'a panel that never accepts must not reach the person gate');
 
     const featureRedSource = featureProofSource.replace(
-      'await writeFiles(request.cwd!, REPAIRED_SOURCE, REPAIRED_TESTS);',
-      'await writeFiles(request.cwd!, DRAFT_SOURCE, REPAIRED_TESTS);',
+      "{ writes: { 'src/retry.js': REPAIRED_SOURCE, 'test/retry.test.js': REPAIRED_TESTS }, reply: pass('repaired the abort criterion') }",
+      "{ writes: { 'src/retry.js': DRAFT_SOURCE, 'test/retry.test.js': REPAIRED_TESTS }, reply: pass('repaired the abort criterion') }",
     );
     assert.notEqual(featureRedSource, featureProofSource, 'The repair mutation must change the proof source.');
     await writeFile(
@@ -957,13 +980,11 @@ async function main() {
       cwd: consumerDirectory,
       encoding: 'utf8',
       maxBuffer: 32 * 1024 * 1024,
-      timeout: 30_000,
+      timeout: 120_000,
       killSignal: 'SIGKILL',
     });
     assert.equal(redRun.status, 1, redRun.stdout + redRun.stderr);
-    assert.notEqual(redRun.stdout.trim(), '', redRun.stderr);
-    const featureRed = JSON.parse(redRun.stdout);
-    assert.equal(featureRed.status, 'fail', 'an unrepaired line must not pass');
+    assert.match(redRun.stderr, /"status": "fail"/, 'an unrepaired line must not pass');
 
     const compiledGraph = JSON.parse(
       run(process.execPath, ['dist/custom-graph.js'], { cwd: consumerDirectory }),

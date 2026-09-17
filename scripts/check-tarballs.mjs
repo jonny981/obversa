@@ -254,6 +254,7 @@ export const EXPECTED_FILES = {
     'package/dist/chunk-*.js',
     'package/dist/chunk-*.js.map',
     'package/dist/claude-stream-json.d.ts',
+    'package/dist/claude-tools.d.ts',
     'package/dist/command.js',
     'package/dist/command.js.map',
     'package/dist/command/attempt-env.d.ts',

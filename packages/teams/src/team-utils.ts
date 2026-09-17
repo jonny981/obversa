@@ -17,6 +17,8 @@ import {
 import { INVALID_TEAM_DECISION, outcomeFromAgentText } from './agent-response.js';
 import type { ReviewerSeat, TeamInput, TeamSeat } from './types.js';
 
+type TeamWorkspaceMode = 'read' | 'write';
+
 export const DELIVERY_NOTE = 'team-output/brief.md';
 export const APPROVAL_NOTE = 'team-output/approval.md';
 
@@ -46,6 +48,7 @@ export function seatIdentity(seat: TeamSeat): TeamSeat['identity'] {
     || typeof identity.provider !== 'string'
     || typeof identity.modelFamily !== 'string'
     || typeof identity.model !== 'string'
+    || !Array.isArray(identity.tools)
     || !identity.adapter.trim()
     || !identity.provider.trim()
     || !identity.model.trim()
@@ -225,13 +228,20 @@ export function teamAgent(
   instructions: string | ((ctx: JobContext) => string),
   target?: string,
   decisionFile?: string,
+  workspaceMode: TeamWorkspaceMode = 'write',
   recordAs?: { readonly role: 'writer' | 'reviewer'; readonly stage: string },
 ): Job {
   const identity = seatIdentity(seat);
+  if (workspaceMode === 'read' && identity.tools.length === 0) {
+    throw new TypeError(`${label} cannot read the workspace: reviewer seat declares no tools`);
+  }
   const agent = agentJob({
     label,
     engine: seat.engine,
     model: identity.model,
+    tools: [...identity.tools],
+    allowedTools: [...identity.tools],
+    workspaceMode,
     cwd: input.workspace,
     consumeFeedback: target !== undefined,
     ...(recordAs === undefined ? {} : { recordAs }),
@@ -267,7 +277,6 @@ export function panelReviewers(
     const instructions = [
       `Review target: ${reviewTarget ?? 'the supplied files and test evidence'}.`,
       'Judge only that target against this stage gate; do not require files from another stage.',
-      `Write reviews/${reviewer.name}.json.`,
       reviewer.scope ? `Scope: ${reviewer.scope}` : undefined,
     ].filter(Boolean).join('\n');
     const review = teamAgent(
@@ -276,7 +285,8 @@ export function panelReviewers(
       input,
       instructions,
       undefined,
-      `reviews/${reviewer.name}.json`,
+      undefined,
+      'read',
       recordAs,
     );
     const retry = teamAgent(
@@ -285,7 +295,8 @@ export function panelReviewers(
       input,
       `${instructions}\nYour previous response was not a valid decision. Return only the required JSON object.`,
       undefined,
-      `reviews/${reviewer.name}.json`,
+      undefined,
+      'read',
       recordAs,
     );
     const job: Job = async (ctx) => {

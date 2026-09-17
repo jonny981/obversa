@@ -130,6 +130,14 @@ writeFileSync(out, 'stub final');
     });
   });
 
+  it('refuses a read workspace without declared tools', () => {
+    expect(() => buildCodexArgs(
+      { prompt: 'review', tools: [], workspaceMode: 'read' },
+      {},
+      '/tmp/out.txt',
+    )).toThrow('read workspace requires at least one declared tool');
+  });
+
   it('reports terminal JSONL usage without double-counting cached input', async () => {
     const dir = mkdtempSync(join(tmpdir(), 'lines-codex-stub-'));
     const bin = join(dir, 'codex-stub.mjs');
