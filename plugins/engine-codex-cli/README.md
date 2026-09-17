@@ -1,6 +1,6 @@
-# @obversa/engine-codex
+# @obversa/engine-codex-cli
 
-`@obversa/engine-codex` runs Obversa engine requests through a fresh Codex CLI
+`@obversa/engine-codex-cli` runs Obversa engine requests through a fresh Codex CLI
 process.
 
 ## Requirements
@@ -11,13 +11,13 @@ process.
 ## Install
 
 ```bash
-pnpm add @obversa/engine-codex
+pnpm add @obversa/engine-codex-cli
 ```
 
 ## Use
 
 ```ts
-import { CodexEngine } from '@obversa/engine-codex';
+import { CodexEngine } from '@obversa/engine-codex-cli';
 
 const engine = new CodexEngine({ defaultModel: 'gpt-5.4' });
 ```

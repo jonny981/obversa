@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 // The standalone surface-consumer proof: a clean consumer with nothing but the packed
-// @obversa/source tarball and its declared dependencies opens a review with
+// @obversa/surface-diff tarball and its declared dependencies opens a review with
 // --no-open, completes it over HTTP the way the browser would, and reads
 // the framed result carrying the surface identity.
 //
@@ -56,11 +56,11 @@ async function main() {
       name: 'obversa-surface-consumer-proof',
       private: true,
       type: 'module',
-      dependencies: { '@obversa/source': `file:${sourceTarball}` },
+      dependencies: { '@obversa/surface-diff': `file:${sourceTarball}` },
       // pnpm pack rewrote the workspace range into a registry version; the
       // override points that name at the packed surfacer instead, so nothing
       // resolves outside the two tarballs and the offline store.
-      pnpm: { overrides: { '@obversa/surfacer': `file:${surfacerTarball}` } },
+      pnpm: { overrides: { '@obversa/surface-decision': `file:${surfacerTarball}` } },
     }, null, 2)}\n`);
     run('pnpm', ['install', '--offline', '--ignore-scripts'], {
       cwd: consumer,
@@ -161,7 +161,7 @@ async function main() {
     const result = JSON.parse(frame[1]);
     const packedVersion = JSON.parse(await readFile(join(consumer, 'node_modules', '@obversa', 'source', 'package.json'), 'utf8')).version;
     assert.equal(result.status, 'completed');
-    assert.deepEqual(result.surface, { package: '@obversa/source', version: packedVersion }, 'the frame names the surface package and its resolved version');
+    assert.deepEqual(result.surface, { package: '@obversa/surface-diff', version: packedVersion }, 'the frame names the surface package and its resolved version');
     assert.equal(result.payload.decision, 'changes-requested');
     assert.equal(result.payload.annotations.length, 1);
     assert.match(stderr, /finished: changes-requested, 1 annotation returned/);

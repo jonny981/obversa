@@ -4,7 +4,7 @@
 
 /**
  * New-side line numbers visible in one parsed diff file.
- * `file` matches packages/source parseUnifiedDiff: hunks[].lines[].newNumber
+ * `file` matches packages/surface-diff parseUnifiedDiff: hunks[].lines[].newNumber
  * (null on deletions).
  * @param {{ hunks?: Array<{ lines?: Array<{ newNumber: number | null }> }> }} file
  * @returns {Set<number>}

@@ -9,7 +9,7 @@ import { checkPackageCounts } from './check-package-counts.mjs';
 const validReadme = (packages, plugins, total) => `
 ## What is in this repository
 
-${total} publishable packages. packages/ holds the ${packages} that define the product: @obversa/runtime is the runtime and its public contract, @obversa/teams is three ready-made teams built on it, @obversa/runner supervises stored runs, @obversa/engine and @obversa/memory are the engine and memory contracts, @obversa/process runs a child process to a deadline, and @obversa/surfacer and @obversa/source are the local review surface. plugins/ holds the ${plugins} adapters: the six engines above and two memories, one in process and one in private Git references.
+${total} publishable packages. packages/ holds the ${packages} that define the product: @obversa/runtime is the runtime and its public contract, @obversa/teams is three ready-made teams built on it, @obversa/runner supervises stored runs, @obversa/engine and @obversa/memory are the engine and memory contracts, @obversa/process runs a child process to a deadline, and @obversa/surface-decision and @obversa/surface-diff are the local review surface. plugins/ holds the ${plugins} adapters: the six engines above and two memories, one in process and one in private Git references.
 `;
 
 const validReleasing = (packages, plugins, total) => `

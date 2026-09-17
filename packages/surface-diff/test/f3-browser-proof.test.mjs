@@ -1,7 +1,7 @@
 // Browser proof of the review surface under the runtime's exact security
 // headers and auth model. A local server mirrors the surfacer contract on the
 // parts that matter — the Content-Security-Policy header (asserted below to be
-// the very string in packages/surfacer/src/server.mjs, so drift fails this
+// the very string in packages/surface-decision/src/server.mjs, so drift fails this
 // test), a bearer-gated verbatim GET /api/model, a static shell with no diff
 // — and serves the real assets and the real client kit. Headless Chrome loads
 // the session URL; a probe registered before app.js counts CSP violations and
@@ -27,7 +27,7 @@ import os from "node:os";
 import path from "node:path";
 import test from "node:test";
 
-import { ASSETS_DIR, buildIndexHtml, computeDiff, parseUnifiedDiff } from "@obversa/source";
+import { ASSETS_DIR, buildIndexHtml, computeDiff, parseUnifiedDiff } from "@obversa/surface-diff";
 import {
   contextModel,
   createHighlightRegistry,
@@ -35,7 +35,7 @@ import {
   listTrackedFiles,
   navModel,
   registryToCss,
-} from "@obversa/source/testing";
+} from "@obversa/surface-diff/testing";
 import { defineBudgetChain } from "../../../test-support/budget-chain.mjs";
 
 const CHROME_CANDIDATES = [

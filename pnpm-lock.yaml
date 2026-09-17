@@ -19,9 +19,9 @@ importers:
       '@obversa/engine-claude-cli':
         specifier: workspace:^
         version: link:plugins/engine-claude-cli
-      '@obversa/engine-codex':
+      '@obversa/engine-codex-cli':
         specifier: workspace:^
-        version: link:plugins/engine-codex
+        version: link:plugins/engine-codex-cli
       '@obversa/engine-grok-cli':
         specifier: workspace:^
         version: link:plugins/engine-grok-cli
@@ -94,9 +94,9 @@ importers:
 
   hosts/cmux:
     dependencies:
-      '@obversa/source':
+      '@obversa/surface-diff':
         specifier: workspace:*
-        version: link:../../packages/source
+        version: link:../../packages/surface-diff
 
   packages/engine:
     dependencies:
@@ -157,11 +157,11 @@ importers:
         specifier: ^9.6.1
         version: 9.6.1
 
-  packages/source:
+  packages/surface-diff:
     dependencies:
-      '@obversa/surfacer':
+      '@obversa/surface-decision':
         specifier: workspace:*
-        version: link:../surfacer
+        version: link:../surface-decision
       acorn:
         specifier: 8.18.0
         version: 8.18.0
@@ -169,7 +169,7 @@ importers:
         specifier: 4.4.3
         version: 4.4.3
 
-  packages/surfacer: {}
+  packages/surface-decision: {}
 
   packages/teams:
     dependencies:
@@ -181,7 +181,7 @@ importers:
         specifier: 22.12.0
         version: 22.12.0
 
-  plugins/engine-agent-sdk:
+  plugins/engine-claude-agent-sdk:
     dependencies:
       '@anthropic-ai/claude-agent-sdk':
         specifier: 0.3.241
@@ -221,7 +221,7 @@ importers:
         specifier: workspace:^
         version: link:../../packages/engine
 
-  plugins/engine-codex:
+  plugins/engine-codex-cli:
     dependencies:
       '@obversa/engine':
         specifier: workspace:^

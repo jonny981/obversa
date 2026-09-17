@@ -4,7 +4,7 @@
 // a router plugin reaches it through the package's ./bin subpath export.
 //
 // The package reaches itself by its own public name — Node resolves
-// "@obversa/source" from inside the package through its exports map — so
+// "@obversa/surface-diff" from inside the package through its exports map — so
 // even the command consumes only what the package exports, and a disposable
 // consumer with stub packages in node_modules decides resolution the same
 // way a real install does.
@@ -12,8 +12,8 @@
 import { readFile } from "node:fs/promises";
 import { fileURLToPath } from "node:url";
 
-import { runSurface } from "@obversa/surfacer";
-import { reviewDiff } from "@obversa/source";
+import { runSurface } from "@obversa/surface-decision";
+import { reviewDiff } from "@obversa/surface-diff";
 import { HELP, parseArgs } from "./review-args.mjs";
 
 /**
@@ -43,7 +43,7 @@ export async function runReviewCommand(argv) {
   // under the `import` condition, the one the browser's module import
   // matches, not the `require` condition a createRequire lookup would follow.
   const clientKitSource = await readFile(
-    fileURLToPath(import.meta.resolve("@obversa/surfacer/client")),
+    fileURLToPath(import.meta.resolve("@obversa/surface-decision/client")),
     "utf8",
   );
 

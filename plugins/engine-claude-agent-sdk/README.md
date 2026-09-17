@@ -1,6 +1,6 @@
-# @obversa/engine-agent-sdk
+# @obversa/engine-claude-agent-sdk
 
-`@obversa/engine-agent-sdk` runs Obversa engine requests through the Claude
+`@obversa/engine-claude-agent-sdk` runs Obversa engine requests through the Claude
 Agent SDK. It uses the host's Claude Code authentication.
 
 ## Requirements
@@ -10,13 +10,13 @@ Agent SDK. It uses the host's Claude Code authentication.
 ## Install
 
 ```bash
-pnpm add @obversa/engine-agent-sdk
+pnpm add @obversa/engine-claude-agent-sdk
 ```
 
 ## Use
 
 ```ts
-import { AgentSdkEngine } from '@obversa/engine-agent-sdk';
+import { AgentSdkEngine } from '@obversa/engine-claude-agent-sdk';
 
 const engine = new AgentSdkEngine({
   defaultModel: 'claude-sonnet-4-5',

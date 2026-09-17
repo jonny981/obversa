@@ -28,7 +28,7 @@ const sdk = vi.hoisted(() => ({
 
 vi.mock('@anthropic-ai/claude-agent-sdk', () => sdk);
 
-describe('@obversa/engine-agent-sdk', () => {
+describe('@obversa/engine-claude-agent-sdk', () => {
   it('injects constructor memory into a provider-neutral request', async () => {
     const memory: Memory = {
       scope: 'test',

@@ -1,5 +1,5 @@
 import { claude } from '@obversa/engine-claude-cli';
-import { codex } from '@obversa/engine-codex';
+import { codex } from '@obversa/engine-codex-cli';
 import { resolveCommandExecutable } from '@obversa/engine/command';
 import { opencode } from '@obversa/engine-opencode-cli';
 import { run } from '@obversa/runtime';

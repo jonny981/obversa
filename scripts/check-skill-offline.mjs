@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 // The offline skill proof: the
-// packed @obversa/source archive carries the review-diff skill and the one
+// packed @obversa/surface-diff archive carries the review-diff skill and the one
 // bin with a matching major; and the skill's exact command line — npx with
 // the pinned major — resolves the packed bin from a local registry stand-in,
 // prints the loopback URL, and frames the interrupted session with the
@@ -211,7 +211,7 @@ async function main() {
     // the stand-in, prints the loopback URL, and the interrupted session
     // frames with the surface identity.
     const runSkillCommand = (extraEnv, args) => {
-      const spawned = spawn(process.execPath, [NPX_CLI, '-y', '@obversa/source@0', ...args], {
+      const spawned = spawn(process.execPath, [NPX_CLI, '-y', '@obversa/surface-diff@0', ...args], {
         cwd: repository,
         stdio: ['ignore', 'pipe', 'pipe'],
         env: { ...environment, ...extraEnv },
@@ -247,7 +247,7 @@ async function main() {
     assert.ok(frame, `the interrupted session still frames; stdout:\n${child.stdout.slice(0, 300)}`);
     const interrupted = JSON.parse(frame[1]);
     assert.equal(interrupted.status, 'interrupted');
-    assert.deepEqual(interrupted.surface, { package: '@obversa/source', version: sourceManifest.version }, 'the frame carries the surface identity');
+    assert.deepEqual(interrupted.surface, { package: '@obversa/surface-diff', version: sourceManifest.version }, 'the frame carries the surface identity');
 
     // Step 5a: with a recording adapter injected, the same command hands the
     // adapter the one-time launch URL, never the token-bearing page URL.
@@ -269,7 +269,7 @@ async function main() {
     child.child.kill('SIGINT');
     await child.exit();
 
-    console.log(`Offline skill proof passed: the pinned command resolved @obversa/source@${sourceManifest.version} from the stand-in (${packages.size} packages served), framed the interrupt with the identity, and handed placement the launch url.`);
+    console.log(`Offline skill proof passed: the pinned command resolved @obversa/surface-diff@${sourceManifest.version} from the stand-in (${packages.size} packages served), framed the interrupt with the identity, and handed placement the launch url.`);
   } finally {
     try { child?.child.kill('SIGKILL'); } catch {}
     server?.close();

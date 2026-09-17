@@ -198,8 +198,8 @@ const gitPort = { repositoryRoot, computeDiff, listTrackedFiles, rangeEnd };
  *
  * `reviewDiff` owns diff production and the review UI but not the surface
  * runtime: the caller injects a `launchSurface` port (the same shape as
- * @obversa/surfacer's runSurface) and the surface client-kit source. The
- * package's own command binds @obversa/surfacer to that port; the injection
+ * @obversa/surface-decision's runSurface) and the surface client-kit source. The
+ * package's own command binds @obversa/surface-decision to that port; the injection
  * seam stays so a test or another runtime can bind its own.
  *
  * Options:

@@ -1,5 +1,5 @@
 {
-  "name": "@obversa/source",
+  "name": "@obversa/surface-diff",
   "version": "0.1.0",
   "description": "Open a git diff for inline review.",
   "type": "module",
@@ -30,7 +30,7 @@
   "dependencies": {
     "acorn": "8.18.0",
     "shiki": "4.4.3",
-    "@obversa/surfacer": "workspace:*"
+    "@obversa/surface-decision": "workspace:*"
   },
   "bin": {
     "obversa-review": "./bin/obversa-review.mjs"

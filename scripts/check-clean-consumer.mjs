@@ -347,14 +347,14 @@ import { runMemoryConformance } from '@obversa/memory/testing';
 import { createSimpleMemory } from '@obversa/memory-simple';
 import { openGitMemory } from '@obversa/memory-git';
 import { MockEngine } from '@obversa/engine/testing';
-import { AgentSdkEngine } from '@obversa/engine-agent-sdk';
+import { AgentSdkEngine } from '@obversa/engine-claude-agent-sdk';
 import { AnthropicApiEngine } from '@obversa/engine-anthropic-api';
 import { ClaudeCliEngine } from '@obversa/engine-claude-cli';
-import { CodexEngine } from '@obversa/engine-codex';
-import type { runSurface, startSurface } from '@obversa/surfacer';
-import type { createSurfaceClient } from '@obversa/surfacer/client';
-import type { reviewDiff } from '@obversa/source';
-import type { listTrackedFiles } from '@obversa/source/testing';
+import { CodexEngine } from '@obversa/engine-codex-cli';
+import type { runSurface, startSurface } from '@obversa/surface-decision';
+import type { createSurfaceClient } from '@obversa/surface-decision/client';
+import type { reviewDiff } from '@obversa/surface-diff';
+import type { listTrackedFiles } from '@obversa/surface-diff/testing';
 
 // Compile-time surface checks: these imports fail the consumer build if
 // either package ships no type declarations, and the assertions fail it if

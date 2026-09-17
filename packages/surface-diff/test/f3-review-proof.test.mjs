@@ -1,4 +1,4 @@
-// F3 composition proof: the review surface really runs on @obversa/surfacer.
+// F3 composition proof: the review surface really runs on @obversa/surface-decision.
 //
 // This is the F2 completion evidence and the F3 core evidence in one place. It
 // wires source's reviewDiff to surfacer's runSurface exactly as the composition
@@ -19,8 +19,8 @@ import path from "node:path";
 import { Writable } from "node:stream";
 import test from "node:test";
 
-import { parseFramedResult, runSurface } from "@obversa/surfacer";
-import { computeDiff, parseUnifiedDiff, reviewDiff } from "@obversa/source";
+import { parseFramedResult, runSurface } from "@obversa/surface-decision";
+import { computeDiff, parseUnifiedDiff, reviewDiff } from "@obversa/surface-diff";
 
 const clientKitSource = await readFile(
   new URL("../../surfacer/src/client.mjs", import.meta.url),
@@ -230,7 +230,7 @@ test("the review surface runs on surfacer and returns annotations", { timeout: 3
     assert.ok(framed, "a complete framed result is on stdout when reviewDiff resolves");
     assert.equal(framed.status, "completed");
     const ownManifest = JSON.parse(await readFile(new URL("../package.json", import.meta.url), "utf8"));
-    assert.deepEqual(framed.surface, { package: "@obversa/source", version: ownManifest.version }, "the frame names the surface package and its resolved version");
+    assert.deepEqual(framed.surface, { package: "@obversa/surface-diff", version: ownManifest.version }, "the frame names the surface package and its resolved version");
     assert.equal(framed.payload.surfaceId, outcome.result.surfaceId);
     assert.equal(framed.payload.decision, "changes-requested");
     assert.equal(framed.payload.annotations.length, 500);

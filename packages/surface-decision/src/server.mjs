@@ -537,7 +537,7 @@ function authorized(request, expectedToken) {
 // own enumerable string-keyed properties and indexed items as one JSON
 // serialisation reads them (a getter's answer or a toJSON result included),
 // recursively — and that is exactly what gets framed. (A review location in
-// @obversa/source is stricter: own data properties only, for a stable key.)
+// @obversa/surface-diff is stricter: own data properties only, for a stable key.)
 // Hidden internal state
 // (a Map's entries, a URL's address) is not data: it is neither carried nor
 // promised, and no finite list of brand checks could promise otherwise. What

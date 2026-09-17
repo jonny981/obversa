@@ -14,10 +14,6 @@ if (existsSync(join(root, 'packages/process')) || !existsSync(join(root, 'packag
 }
 const moves = [
   ['packages/teams', 'packages/builtin-workflows'],
-  ['packages/surfacer', 'packages/surface-decision'],
-  ['packages/source', 'packages/surface-diff'],
-  ['plugins/engine-codex', 'plugins/engine-codex-cli'],
-  ['plugins/engine-agent-sdk', 'plugins/engine-claude-agent-sdk'],
   ['docs/public/packages/teams.mdx', 'docs/public/packages/builtin-workflows.mdx'],
   ['docs/public/packages/process.mdx', 'docs/public/packages/core.mdx'],
   ['docs/public/packages/surfacer.mdx', 'docs/public/packages/surface-decision.mdx'],
@@ -34,6 +30,10 @@ const names = new Map([
 ]);
 const paths = new Map([
   ['packages/process', 'packages/core'],
+  ['packages/surfacer', 'packages/surface-decision'],
+  ['packages/source', 'packages/surface-diff'],
+  ['plugins/engine-codex', 'plugins/engine-codex-cli'],
+  ['plugins/engine-agent-sdk', 'plugins/engine-claude-agent-sdk'],
   ...moves.filter(([from]) => !from.endsWith('.mdx')),
 ]);
 const escaped = (value) => value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');

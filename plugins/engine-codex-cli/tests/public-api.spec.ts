@@ -7,7 +7,7 @@ import {
   type CodexEngineOptions,
 } from '../src/index.ts';
 
-describe('@obversa/engine-codex', () => {
+describe('@obversa/engine-codex-cli', () => {
   it('exports the package-owned engine, options, and argument builder', () => {
     const options: CodexEngineOptions = {
       defaultModel: 'gpt-test',

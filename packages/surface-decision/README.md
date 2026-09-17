@@ -1,6 +1,6 @@
-# @obversa/surfacer
+# @obversa/surface-decision
 
-Surfacer runs one secure local surface session: a small user interface for
+This package runs one secure local surface session: a small user interface for
 one decision. It owns the loopback server, the session lifecycle, and the
 handoff of exactly one opaque result. It owns no callback state, no
 routing, and no run records.
@@ -12,7 +12,7 @@ inventory, graph, or editing behaviour survives here.
 ## Install
 
 ```bash
-pnpm add @obversa/surfacer
+pnpm add @obversa/surface-decision
 ```
 ## What the package gives
 
@@ -42,7 +42,7 @@ pnpm add @obversa/surfacer
 - `createPrivateTransfer` — private temporary files (0700 directory,
   0600 files) with SHA-256 hashes in the manifest. `removeTransfer`
   removes only directories this module created.
-- `@obversa/surfacer/client` — the no-framework browser kit: token
+- `@obversa/surface-decision/client` — the no-framework browser kit: token
   handling, authenticated fetch, heartbeat, submit and cancel with
   acknowledgement.
 - `openSurfaceUrl` — host placement: the command the host injected as

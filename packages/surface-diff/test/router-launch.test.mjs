@@ -14,7 +14,7 @@ import test from "node:test";
 
 test("the bin subpath resolves to the file the bin field names, and runs with an empty PATH", () => {
   const manifest = JSON.parse(readFileSync(new URL("../package.json", import.meta.url), "utf8"));
-  const resolved = fileURLToPath(import.meta.resolve("@obversa/source/bin"));
+  const resolved = fileURLToPath(import.meta.resolve("@obversa/surface-diff/bin"));
   assert.ok(resolved.endsWith(manifest.bin["obversa-review"].slice(1)), `${resolved} is the bin field's file`);
 
   const help = spawnSync(process.execPath, [resolved, "--help"], { encoding: "utf8", timeout: 10_000, env: { PATH: "" } });
@@ -29,7 +29,7 @@ test("the bin subpath resolves to the file the bin field names, and runs with an
 test("an empty-PATH launch fails at git, not at finding the command", () => {
   // The bin and its whole module graph loaded — the failure names the git
   // spawn the review needs, which the router's real environment carries.
-  const resolved = fileURLToPath(import.meta.resolve("@obversa/source/bin"));
+  const resolved = fileURLToPath(import.meta.resolve("@obversa/surface-diff/bin"));
   const run = spawnSync(process.execPath, [resolved, "--no-open"], { encoding: "utf8", timeout: 15_000, env: { PATH: "" } });
   assert.equal(run.status, 1);
   assert.match(run.stderr, /spawn git|git.*ENOENT/i, "the one missing piece is git from the environment");

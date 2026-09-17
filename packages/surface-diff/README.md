@@ -1,4 +1,4 @@
-# @obversa/source
+# @obversa/surface-diff
 
 The review surface: open a git diff for inline review in a browser and get
 the reviewer's decision and line-anchored annotations back as one framed
@@ -8,7 +8,7 @@ JSON object on stdout.
 ## Install
 
 ```bash
-pnpm add @obversa/source
+pnpm add @obversa/surface-diff
 ```
 ## The command
 
@@ -31,10 +31,10 @@ browser opens the page.
 
 ## The library
 
-`@obversa/source` exports the diff production and page model
+`@obversa/surface-diff` exports the diff production and page model
 (`computeDiff`, `parseUnifiedDiff`, `reviewDiff`, the surface contract);
-`@obversa/source/bin` resolves the runnable command file a router spawns
+`@obversa/surface-diff/bin` resolves the runnable command file a router spawns
 under its own Node, shell-free;
-`@obversa/source/testing` exports the internals the proofs exercise, with
-no stability promise. The surface session itself is `@obversa/surfacer`,
+`@obversa/surface-diff/testing` exports the internals the proofs exercise, with
+no stability promise. The surface session itself is `@obversa/surface-decision`,
 which this package depends on and binds.

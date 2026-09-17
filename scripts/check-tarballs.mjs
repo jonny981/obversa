@@ -61,7 +61,7 @@ export const EXPECTED_FILES = {
     'package/dist/supervised-worker.js.map',
     'package/package.json',
   ],
-  '@obversa/source': [
+  '@obversa/surface-diff': [
     'package/LICENSE',
     'package/README.md',
     'package/assets/app.css',
@@ -108,7 +108,7 @@ export const EXPECTED_FILES = {
     'package/dist/src/review.d.mts',
     'package/dist/src/testing.d.mts',
   ],
-  '@obversa/surfacer': [
+  '@obversa/surface-decision': [
     'package/LICENSE',
     'package/README.md',
     'package/package.json',
@@ -275,7 +275,7 @@ export const EXPECTED_FILES = {
     'package/dist/testing.js.map',
     'package/package.json',
   ],
-  '@obversa/engine-agent-sdk': [
+  '@obversa/engine-claude-agent-sdk': [
     'package/LICENSE',
     'package/README.md',
     'package/dist/agent-sdk.d.ts',
@@ -302,7 +302,7 @@ export const EXPECTED_FILES = {
     'package/dist/index.js.map',
     'package/package.json',
   ],
-  '@obversa/engine-codex': [
+  '@obversa/engine-codex-cli': [
     'package/LICENSE',
     'package/README.md',
     'package/dist/codex.d.ts',
