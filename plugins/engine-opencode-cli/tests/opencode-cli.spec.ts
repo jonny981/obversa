@@ -29,6 +29,7 @@ import {
   type EngineStreamEvent,
   type EngineSelectionRecord,
   type JsonValue,
+  modelIdentity,
 } from '@obversa/engine';
 import {
   runEngineAdmissionConformance,
@@ -1842,16 +1843,17 @@ describe('OpenCode CLI adapter', () => {
     const bin = executable();
     const calls = join(temporaryDirectory('opencode-workspace-'), 'calls.jsonl');
     const selected = (capabilities: string[]) => engineSelection({
-      adapter: 'opencode-cli', adapterVersion: '1.18.23', provider: 'fixture-provider', modelFamily: 'fixture-family',
+      adapter: 'opencode-cli', adapterVersion: '1.18.23', provider: 'fixture-provider', modelFamily: 'fixture',
       model: 'fixture-provider/fixture-model', executable: bin, capabilities,
     });
     const report = await runEngineConformance({
+      identityFromModel: true,
       request: request({ tools: ['read'], allowedTools: ['Read'] }),
       requested: {
         adapter: 'opencode-cli',
         adapterVersion: '1.18.23',
         provider: 'fixture-provider',
-        modelFamily: 'fixture-family',
+        modelFamily: 'fixture',
         model: 'fixture-provider/fixture-model',
         executable: bin,
         capabilities: ['read'],
@@ -1860,7 +1862,7 @@ describe('OpenCode CLI adapter', () => {
         adapter: 'opencode-cli',
         adapterVersion: '1.18.23',
         provider: 'fixture-provider',
-        modelFamily: 'fixture-family',
+        modelFamily: 'fixture',
         model: 'fixture-provider/fixture-model',
         executable: bin,
         capabilities: ['read'],
@@ -1885,15 +1887,20 @@ describe('OpenCode CLI adapter', () => {
         const binForScenario = scenario === 'missing-cli'
           ? join(temporaryDirectory('lines-opencode-missing-'), 'opencode')
           : bin;
+        // The engine under test reports the identity the shared derivation reads
+        // from the model it was given, which is what the kit's identity case checks.
         return new OpenCodeCliEngine({
           ...options(binForScenario),
+          identity: modelIdentity('fixture-provider/fixture-model'),
           environment: { OBVERSA_ENGINE_CONFORMANCE_SCENARIO: scenario, OBVERSA_TEST_OPENCODE_ADMISSION_RECORD: calls },
         });
       },
     });
 
-    expect(report).toEqual({ ok: true, cases: 20, failures: [], unsupported: [] });
-  });
+    expect(report).toEqual({ ok: true, cases: 21, failures: [], unsupported: [] });
+  // Twenty-one cases, each a fresh fake process: a loaded single-worker machine
+  // needs more than the default five seconds, so the window is stated here.
+  }, 30_000);
 
   it('uses EngineError types for adapter-owned abort and timeout failures', async () => {
     const controller = new AbortController();

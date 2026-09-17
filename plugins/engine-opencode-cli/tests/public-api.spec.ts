@@ -1,5 +1,7 @@
 import { describe, expect, it } from 'vitest';
 
+import { EngineError, modelIdentity } from '@obversa/engine';
+
 import {
   OpenCodeCliEngine,
   opencode,
@@ -52,8 +54,21 @@ describe('@obversa/engine-opencode-cli', () => {
     expect(gpt.identity).toMatchObject({ provider: 'openai', modelFamily: 'gpt' });
   });
 
-  it('refuses a model with an empty first family segment', () => {
-    expect(() => opencode('anthropic/-claude-sonnet-4-5', { executable: '/usr/bin/false' }))
-      .toThrow('OpenCode model family must not be empty');
+  it('derives the seat identity through the one function every multi-model harness shares', () => {
+    for (const model of ['anthropic/claude-sonnet-4-5', 'openai/GPT-5.6-luna', 'opencode/big-pickle']) {
+      const seat = opencode(model, { executable: '/usr/bin/false' });
+      expect(seat.identity).toMatchObject(modelIdentity(model));
+    }
+  });
+
+  it('refuses a model with an empty first family segment with the shared invalid-config error', () => {
+    let caught: unknown;
+    try {
+      opencode('anthropic/-claude-sonnet-4-5', { executable: '/usr/bin/false' });
+    } catch (error) {
+      caught = error;
+    }
+    expect(caught).toBeInstanceOf(EngineError);
+    expect((caught as EngineError).kind).toBe('invalid-config');
   });
 });

@@ -11,6 +11,7 @@ other published package tracks its own version independently of it.
 
 ### Added
 
+- **One identity derivation for every harness that runs other providers' models:** `@obversa/engine` exports `modelIdentity`, which reads the provider and model family from the model string a harness was given, or refuses a string with no readable family. The OpenCode adapter derives its seat identity through it, and the review gate reads recorded models through the same function, so two seats on one model wearing different tool names cannot pass as a cross-family panel.
 - **Declared access is enforced on every engine:** a seat's workspace mode is
   a ceiling. An approval never adds a capability the mode withholds, and a
   bypass never exceeds it. An adapter that cannot express the declared access
