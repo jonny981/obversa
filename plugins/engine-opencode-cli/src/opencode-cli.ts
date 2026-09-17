@@ -251,6 +251,16 @@ function model(value: unknown): { readonly value: string; readonly provider: str
   ) {
     throw new TypeError('OpenCode request model must use provider/model format');
   }
+  // A model name carrying one of OpenCode's config interpolation tokens would
+  // expand inside the config file, so it is refused where the name is checked
+  // rather than read as an identity: the reason a reader needs is the token,
+  // not the family it happens to derive. The serialized config keeps the same
+  // guard for every other field it carries.
+  if (CONFIG_INTERPOLATION.test(checked)) {
+    throw new TypeError(
+      'OpenCode request model must not carry config interpolation tokens {env:...} or {file:...}',
+    );
+  }
   // The provider comes from the one derivation every harness that runs other
   // providers' models shares, so it is lowercased exactly where the family is
   // and a seat cannot report a provider in one case and a family in another.
