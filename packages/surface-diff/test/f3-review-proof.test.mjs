@@ -23,7 +23,7 @@ import { parseFramedResult, runSurface } from "@obversa/surface-decision";
 import { computeDiff, parseUnifiedDiff, reviewDiff } from "@obversa/surface-diff";
 
 const clientKitSource = await readFile(
-  new URL("../../surfacer/src/client.mjs", import.meta.url),
+  new URL("../../surface-decision/src/client.mjs", import.meta.url),
   "utf8",
 );
 
