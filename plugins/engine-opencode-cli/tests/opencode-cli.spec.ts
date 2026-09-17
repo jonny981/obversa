@@ -78,6 +78,47 @@ describe('OpenCode static admission', () => {
       .rejects.toMatchObject({ name: 'EngineError', kind: 'missing-cli' });
   });
 
+  it('records the family of the model the request names, not the family it was built for', async () => {
+    // The hole this closes: one instance built to serve `opencode` models can
+    // be handed another provider's model, and the admission record is what a
+    // review panel compares when it requires two families. It has to name the
+    // family that answered.
+    const engine = new OpenCodeCliEngine({
+      ...options(executable()),
+      identity: { provider: 'anthropic', modelFamily: null },
+    });
+    const input = request({ model: 'anthropic/claude-sonnet-4-5' });
+
+    const selected = await engine.admit(admissionRequest(input), new AbortController().signal);
+
+    expect(selected).toMatchObject({ provider: 'anthropic', modelFamily: 'claude' });
+  });
+
+  it('refuses a built family that disagrees with the model the request names', async () => {
+    const engine = new OpenCodeCliEngine({
+      ...options(executable()),
+      identity: { provider: 'anthropic', modelFamily: 'opencode' },
+    });
+    const input = request({ model: 'anthropic/claude-sonnet-4-5' });
+
+    await expect(engine.admit(admissionRequest(input), new AbortController().signal))
+      .rejects.toMatchObject({
+        name: 'EngineError',
+        kind: 'invalid-config',
+        message: expect.stringContaining('model family identity opencode does not match model family claude'),
+      });
+    // The same disagreement is refused on the path that builds the call, so a
+    // run cannot reach the CLI with an identity the record would not carry.
+    expect(() => buildOpenCodeInvocation(
+      { ...input, prompt: '' },
+      {
+        ...options(executable()),
+        identity: { provider: 'anthropic', modelFamily: 'opencode' },
+      },
+      temporaryDirectory('lines-opencode-family-'),
+    )).toThrow(/model family identity opencode does not match model family claude/);
+  });
+
   it('observes the version once without a prompt or model request and preserves normal tools', async () => {
     const fixture = admissionFixture();
     const input = request();
@@ -533,8 +574,10 @@ function options(bin = executable()): OpenCodeCliEngineOptions {
     executable: bin,
     version: '1.18.23',
     identity: {
+      // The family the fixture model derives: fixture-model -> fixture. A
+      // constructed family that disagrees with the request model is refused.
       provider: 'fixture-provider',
-      modelFamily: 'fixture-family',
+      modelFamily: 'fixture',
     },
   };
 }
@@ -629,7 +672,7 @@ function admissionSelection(input: AgentRequest, bin: string): EngineSelectionRe
     adapter: 'opencode-cli',
     adapterVersion: '1.18.23',
     provider: 'fixture-provider',
-    modelFamily: 'fixture-family',
+    modelFamily: 'fixture',
     model: input.model!,
     executable: bin,
     capabilities: input.tools ?? [],

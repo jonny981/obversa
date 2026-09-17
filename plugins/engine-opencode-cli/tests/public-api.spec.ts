@@ -61,6 +61,16 @@ describe('@obversa/engine-opencode-cli', () => {
     }
   });
 
+  it('lowercases the provider through the same derivation as the family', () => {
+    // A seat that reported `OpenAI` for the provider and `gpt` for the family
+    // read one string two ways. Both come from the shared derivation now.
+    const seat = opencode('OpenAI/GPT-5.6-luna', { executable: '/usr/bin/false' });
+
+    expect(seat.identity).toMatchObject({ provider: 'openai', modelFamily: 'gpt' });
+    expect(seat.identity).toMatchObject(modelIdentity('OpenAI/GPT-5.6-luna'));
+    expect(seat.identity.model).toBe('OpenAI/GPT-5.6-luna');
+  });
+
   it('refuses a model with an empty first family segment with the shared invalid-config error', () => {
     let caught: unknown;
     try {

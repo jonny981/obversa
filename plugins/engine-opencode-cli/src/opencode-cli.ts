@@ -251,7 +251,15 @@ function model(value: unknown): { readonly value: string; readonly provider: str
   ) {
     throw new TypeError('OpenCode request model must use provider/model format');
   }
-  return Object.freeze({ value: checked, provider: checked.slice(0, slash) });
+  // The provider comes from the one derivation every harness that runs other
+  // providers' models shares, so it is lowercased exactly where the family is
+  // and a seat cannot report a provider in one case and a family in another.
+  // `value` stays the string the caller gave, which is what reaches the CLI.
+  const derived = modelIdentity(checked);
+  if (derived.provider === undefined) {
+    throw new TypeError('OpenCode request model must use provider/model format');
+  }
+  return Object.freeze({ value: checked, provider: derived.provider });
 }
 
 function providerForModel(
@@ -265,6 +273,31 @@ function providerForModel(
     );
   }
   return selectedModel.provider;
+}
+
+/**
+ * The model family this call serves, read from the model the request names.
+ *
+ * A class can be constructed with a family, and that family is a claim about
+ * what the class serves rather than a fact about this request: one instance
+ * built for `opencode` can be handed `anthropic/claude-sonnet-4-5`, and the
+ * recorded identity has to be the family that actually answers or a panel
+ * comparing families is comparing tool names. So the family is derived from
+ * the request model through the shared derivation, and a constructed family
+ * that disagrees is refused, the way a constructed provider already is.
+ */
+function familyForModel(
+  selectedModel: { readonly value: string },
+  identity: OpenCodeCliIdentity,
+): string {
+  const asserted = nullableText(identity.modelFamily, 'OpenCode model family');
+  const derived = modelIdentity(selectedModel.value).modelFamily;
+  if (asserted !== null && asserted !== derived) {
+    throw new TypeError(
+      `OpenCode model family identity ${asserted} does not match model family ${derived}`,
+    );
+  }
+  return derived;
 }
 
 function selectedEnvironment(
@@ -715,6 +748,7 @@ export function buildOpenCodeInvocation(
 
   const selectedModel = model(request.model);
   providerForModel(selectedModel, options.identity);
+  familyForModel(selectedModel, options.identity);
   const built = permissions(request);
   if (
     built.capabilities.includes('websearch')
@@ -1198,6 +1232,7 @@ export class OpenCodeCliEngine implements Engine {
       assertNoManagedConfig(managedConfigSources(this.#options.managedConfigDirectories));
       const selectedModel = model(request.model);
       const selectedProvider = providerForModel(selectedModel, this.#identity);
+      const selectedFamily = familyForModel(selectedModel, this.#identity);
       const capabilities = requestedCapabilities({ ...request, prompt: '' });
       if (typeof request.cwd !== 'string' || !isAbsolute(request.cwd)) {
         throw new TypeError('OpenCode request cwd must be an absolute path');
@@ -1221,7 +1256,7 @@ export class OpenCodeCliEngine implements Engine {
       });
       selected = engineSelection({
         adapter: 'opencode-cli', adapterVersion: this.#version,
-        provider: selectedProvider, modelFamily: this.#identity.modelFamily,
+        provider: selectedProvider, modelFamily: selectedFamily,
         model: selectedModel.value, executable: this.#executable, capabilities,
       });
       if (expectedSelection !== undefined
