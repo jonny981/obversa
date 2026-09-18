@@ -32,7 +32,7 @@ export interface CommandStandIn {
 export interface ProofOptions {
   /** The directory of the proof file; the example is its sibling. */
   readonly here: string;
-  /** The example's file stem, `support-triage` for `support-triage.ts`. */
+  /** The example's file stem, `translate-reflect` for `translate-reflect.ts`. */
   readonly example: string;
   /** Workspace files present before the run, path to content. */
   readonly files: Readonly<Record<string, string>>;
