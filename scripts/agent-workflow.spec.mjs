@@ -147,6 +147,7 @@ for (const [stage, branch] of [
   ['F77', 'fix/kit-fixture-boot-window'],
   ['F73', 'feat/use-case-examples-one'],
   ['F78', 'fix/stand-in-opencode-frames'],
+  ['F66', 'feat/api-polish'],
 ]) {
   test(`${stage} lands from its assigned branch ${branch}`, () => {
     const repository = createRepository({ feature: true, branch });

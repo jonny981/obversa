@@ -1,6 +1,6 @@
 import { pathToFileURL } from 'node:url';
 
-import { inspectOwnedProcessTree } from '@obversa/engine/command';
+import { inspectOwnedProcessTree } from '@obversa/core/command';
 import { createLocalRunStorage } from '@obversa/runtime/storage/local';
 import {
   createGraphExecutor, GraphExecutionError, loadRunDefinition, readRunPreflight, validateDomainEventId,

@@ -69,7 +69,7 @@ const KNOWN_DEBT = [
     why: 'it opens by defining a forge; the everyday case, you have a reviewed change and want it merged, comes first',
   },
   {
-    page: 'packages/engine-agent-sdk.mdx', fault: 'wholefile', owner: 'D35',
+    page: 'packages/engine-claude-agent-sdk.mdx', fault: 'wholefile', owner: 'D35',
     why: 'two fragments: a binding and a call, with no run around them',
   },
   {
@@ -81,7 +81,7 @@ const KNOWN_DEBT = [
     why: 'one fragment: the binding alone',
   },
   {
-    page: 'packages/engine-codex.mdx', fault: 'wholefile', owner: 'D35',
+    page: 'packages/engine-codex-cli.mdx', fault: 'wholefile', owner: 'D35',
     why: 'one fragment: the binding alone',
   },
   {
@@ -101,12 +101,8 @@ const KNOWN_DEBT = [
     why: 'one fragment: createSimpleMemory called with nothing run against it',
   },
   {
-    page: 'packages/surfacer.mdx', fault: 'wholefile', owner: 'D35',
+    page: 'packages/surface-decision.mdx', fault: 'wholefile', owner: 'D35',
     why: 'names examples/hello-surface.mjs twice, a file that does not exist; the package page gets a whole file that runs',
-  },
-  {
-    page: 'packages/memory.mdx', fault: 'wholefile', owner: 'D35',
-    why: 'quotes memory.ts whole, but the clean consumer does not compile it; the package-page stage adds it to the list',
   },
   {
     page: 'concepts/orders.mdx', fault: 'wholefile', owner: 'D47',

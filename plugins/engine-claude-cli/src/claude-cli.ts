@@ -11,27 +11,26 @@ import {
 import { isDeepStrictEqual } from 'node:util';
 import {
   EngineError,
-  claudeToolOptions,
-  attemptEnvironment,
   classifyEngineFailure,
   engineSelection,
-  mapMessage,
-  newAccumulator,
-  scrubCapture,
   validateAgentResult,
   type AgentRequest,
   type AgentResult,
   type Engine,
   type EngineEventSink,
   type EngineSelectionRecord,
-} from '@obversa/engine';
+} from '@obversa/api';
+import { claudeToolOptions } from '@obversa/core/claude-tools';
+import { mapMessage, newAccumulator } from '@obversa/core/claude-stream-json';
 import {
+  attemptEnvironment,
+  scrubCapture,
   DEFAULT_OWNED_COMMAND_LIMITS,
   OwnedCommandError,
   ownedCommandIdentity,
   resolveCommandExecutable,
   runOwnedCommand,
-} from '@obversa/engine/command';
+} from '@obversa/core/command';
 
 export interface ClaudeCliEngineOptions {
   readonly defaultModel?: string;

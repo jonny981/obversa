@@ -1,0 +1,72 @@
+{
+  "name": "@obversa/api",
+  "version": "0.1.0",
+  "description": "Shared contracts and validation for Obversa engines, memory, graphs, and storage.",
+  "author": "Jonny Neill <jonnyneill@hotmail.com>",
+  "type": "module",
+  "license": "MIT",
+  "sideEffects": false,
+  "publishConfig": {
+    "access": "public",
+    "registry": "http://publish-guard.invalid/",
+    "@obversa:registry": "http://publish-guard.invalid/"
+  },
+  "engines": {
+    "node": ">=22.12.0"
+  },
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    },
+    "./testing": {
+      "types": "./dist/testing.d.ts",
+      "import": "./dist/testing.js"
+    },
+    "./run-definition-support": {
+      "types": "./dist/run-definition-support.d.ts",
+      "import": "./dist/run-definition-support.js"
+    },
+    "./accepted-result-support": {
+      "types": "./dist/accepted-result-support.d.ts",
+      "import": "./dist/accepted-result-support.js"
+    },
+    "./approval-support": {
+      "types": "./dist/approval-support.d.ts",
+      "import": "./dist/approval-support.js"
+    }
+  },
+  "files": [
+    "dist",
+    "README.md",
+    "LICENSE"
+  ],
+  "scripts": {
+    "build": "tsup && tsc -p tsconfig.build.json",
+    "test": "vitest run",
+    "typecheck": "tsc --noEmit -p tsconfig.json",
+    "typecheck:ts6": "tsc6 --noEmit -p tsconfig.json",
+    "prepack": "pnpm run build",
+    "prepublishOnly": "node ../../scripts/check-publish-allowlist.mjs"
+  },
+  "devDependencies": {
+    "@types/node": "22.12.0"
+  },
+  "keywords": [
+    "agent",
+    "graph",
+    "workflow",
+    "runtime",
+    "obversa"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/jonny981/obversa.git"
+  },
+  "homepage": "https://docs.obversa.ai",
+  "bugs": {
+    "url": "https://github.com/jonny981/obversa/issues"
+  }
+}

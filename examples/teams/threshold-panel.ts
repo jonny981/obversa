@@ -1,9 +1,9 @@
 import { claude } from '@obversa/engine-claude-cli';
-import { codex } from '@obversa/engine-codex';
-import { resolveCommandExecutable } from '@obversa/engine/command';
+import { codex } from '@obversa/engine-codex-cli';
+import { resolveCommandExecutable } from '@obversa/core/command';
 import { opencode } from '@obversa/engine-opencode-cli';
 import { run } from '@obversa/runtime';
-import { fromFile, stage, workflow, type TeamSeat } from '@obversa/teams';
+import { briefFromFile, stage, workflow, type TeamSeat } from '@obversa/runtime';
 
 interface ThresholdPanelEngines {
   readonly claude: (model: string) => TeamSeat;
@@ -21,7 +21,7 @@ const realEngines: ThresholdPanelEngines = {
 
 function createThresholdPanel(engines: ThresholdPanelEngines = realEngines) {
   return workflow('threshold-panel', {
-    brief: fromFile('briefs/double.md'),
+    brief: briefFromFile('briefs/double.md'),
     options: { timeout: '10m' },
 
     roles: {

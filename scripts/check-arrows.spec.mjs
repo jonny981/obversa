@@ -36,134 +36,128 @@ function manifest(path, body) {
 // The workspace skeleton. Package directories reuse the real names because
 // the arrow-matrix rules are written against them.
 manifest(".", { name: "fixture-root", private: true });
-manifest("packages/memory", {
-  name: "@obversa/memory",
-  type: "module",
-  exports: { ".": "./src/index.mjs", "./testing": "./src/testing.mjs" },
-  devDependencies: { devtool: "1.0.0" },
-});
-manifest("packages/engine", { name: "@obversa/engine", type: "module", exports: { ".": "./src/index.mjs", "./testing": "./src/testing.mjs" } });
-manifest("packages/process", { name: "@obversa/process", type: "module", exports: { ".": "./src/index.mjs" } });
+manifest("packages/api", { name: "@obversa/api", type: "module", exports: { ".": "./src/index.mjs", "./testing": "./src/testing.mjs" }, devDependencies: { devtool: "1.0.0" } });
+manifest("packages/core", { name: "@obversa/core", type: "module", exports: { ".": "./src/index.mjs" }, dependencies: { "@obversa/api": "workspace:*" } });
 manifest("packages/runtime", {
   name: "@obversa/runtime",
   type: "module",
   exports: { ".": "./src/index.mjs" },
-  dependencies: { "@obversa/engine": "workspace:*", "@obversa/memory": "workspace:*" },
+  dependencies: { "@obversa/api": "workspace:*", "@obversa/core": "workspace:*" },
 });
-manifest("packages/source", { name: "@obversa/source", type: "module", exports: { ".": "./src/index.mjs" } });
+manifest("packages/surface-diff", { name: "@obversa/surface-diff", type: "module", exports: { ".": "./src/index.mjs" } });
 manifest("packages/runner", {
   name: "@obversa/runner",
   type: "module",
   exports: { ".": "./src/index.mjs" },
-  dependencies: { "@obversa/engine": "workspace:*", "@obversa/runtime": "workspace:*" },
+  dependencies: { "@obversa/api": "workspace:*", "@obversa/core": "workspace:*", "@obversa/runtime": "workspace:*" },
 });
-manifest("packages/teams", {
-  name: "@obversa/teams",
+manifest("packages/builtin-workflows", {
+  name: "@obversa/builtin-workflows",
   type: "module",
   exports: { ".": "./src/index.mjs" },
-  dependencies: { "@obversa/runtime": "workspace:*" },
+  dependencies: { "@obversa/api": "workspace:*", "@obversa/runtime": "workspace:*" },
 });
-manifest("packages/surfacer", { name: "@obversa/surfacer", type: "module", exports: { ".": "./src/index.mjs" } });
+manifest("packages/surface-decision", { name: "@obversa/surface-decision", type: "module", exports: { ".": "./src/index.mjs" } });
 manifest("plugins/memory-git", {
   name: "@obversa/memory-git",
   type: "module",
   exports: { ".": "./src/index.mjs" },
-  dependencies: { "@obversa/memory": "workspace:*", "@obversa/runtime": "workspace:*" },
+  dependencies: { "@obversa/api": "workspace:*", "@obversa/core": "workspace:*" },
 });
 manifest("plugins/memory-simple", {
   name: "@obversa/memory-simple",
   type: "module",
   exports: { ".": "./src/index.mjs" },
-  imports: { "#sneak": "../surfacer/src/index.mjs" },
+  imports: { "#sneak": "../surface-decision/src/index.mjs" },
 });
-for (const name of ["engine-agent-sdk", "engine-anthropic-api", "engine-claude-cli", "engine-codex", "engine-grok-cli", "engine-opencode-cli"]) {
+for (const name of ["engine-claude-agent-sdk", "engine-anthropic-api", "engine-claude-cli", "engine-codex-cli", "engine-grok-cli", "engine-opencode-cli"]) {
   manifest(`plugins/${name}`, {
     name: `@obversa/${name}`,
     type: "module",
     exports: { ".": "./src/index.mjs" },
-    dependencies: { "@obversa/engine": "workspace:*" },
+    dependencies: { "@obversa/api": "workspace:*", "@obversa/core": "workspace:*" },
   });
 }
 manifest("hosts/cmux", {
   name: "@obversa/cmux-host",
   type: "module",
-  dependencies: { "@obversa/source": "workspace:*", "@obversa/surfacer": "workspace:*" },
+  dependencies: { "@obversa/surface-diff": "workspace:*", "@obversa/surface-decision": "workspace:*" },
 });
-for (const name of ["engine", "memory", "process", "runner", "runtime", "source", "surfacer", "teams"]) {
+for (const name of ["api", "core", "runner", "runtime", "surface-diff", "surface-decision", "builtin-workflows"]) {
   mkdirSync(join(fixture, "node_modules", "@obversa"), { recursive: true });
   symlinkSync(join("..", "..", "packages", name), join(fixture, "node_modules", "@obversa", name));
 }
-symlinkSync(join("..", "..", "plugins", "engine-codex"), join(fixture, "node_modules", "@obversa", "engine-codex"));
+symlinkSync(join("..", "..", "plugins", "engine-codex-cli"), join(fixture, "node_modules", "@obversa", "engine-codex-cli"));
+symlinkSync(join("..", "..", "plugins", "memory-simple"), join(fixture, "node_modules", "@obversa", "memory-simple"));
 manifest("node_modules/left-pad", { name: "left-pad", version: "1.0.0", main: "index.js" });
 file("node_modules/left-pad/index.js", "module.exports = (s) => s;\n");
 manifest("node_modules/devtool", { name: "devtool", version: "1.0.0", main: "index.js" });
 file("node_modules/devtool/index.js", "module.exports = 1;\n");
 
 // Clean targets.
-file("packages/memory/src/index.mjs", "export const memory = 1;\n");
-file("packages/memory/src/testing.mjs", "export const probe = 1;\n");
-file("packages/engine/src/index.mjs", "export const engine = 1;\n");
-file("packages/engine/src/testing.mjs", "export const mockEngine = 1;\n");
-file("packages/process/src/index.mjs", "export const process = 1;\n");
+file("packages/api/src/index.mjs", "export const engine = 1;\n");
+file("packages/api/src/testing.mjs", "export const mockEngine = 1;\n");
+file("packages/core/src/index.mjs", "export const process = 1;\n");
 file("packages/runtime/src/index.mjs", "export const runtime = 1;\n");
 file("packages/runner/src/index.mjs", "export const runner = 1;\n");
-file("packages/source/src/index.mjs", "export const source = 1;\n");
-file("packages/source/src/private.mjs", "export const priv = 1;\n");
-file("packages/surfacer/src/index.mjs", "export const surfacer = 1;\n");
+file("packages/builtin-workflows/src/index.mjs", "export const workflows = 1;\n");
+file("packages/surface-diff/src/index.mjs", "export const source = 1;\n");
+file("packages/surface-diff/src/private.mjs", "export const priv = 1;\n");
+file("packages/surface-decision/src/index.mjs", "export const surfacer = 1;\n");
 file("plugins/memory-git/src/index.mjs", "export const gitMemory = 1;\n");
 file("plugins/memory-simple/src/index.mjs", "export const simple = 1;\n");
-for (const name of ["engine-agent-sdk", "engine-anthropic-api", "engine-claude-cli", "engine-codex", "engine-grok-cli", "engine-opencode-cli"]) {
+for (const name of ["engine-claude-agent-sdk", "engine-anthropic-api", "engine-claude-cli", "engine-codex-cli", "engine-grok-cli", "engine-opencode-cli"]) {
   file(`plugins/${name}/src/index.mjs`, `export const name = ${JSON.stringify(name)};\n`);
 }
-file("packages/source/src/h.test.mjs", "export const t = 1;\n");
-file("packages/source/test/j.test.mjs", "export const t = 1;\n");
+file("packages/surface-diff/src/h.test.mjs", "export const t = 1;\n");
+file("packages/surface-diff/test/j.test.mjs", "export const t = 1;\n");
 file("hosts/cmux/lib/l.mjs", "export const glue = 1;\n");
 
 // The forbidden forms, one file each: [path, content, rule that must fire].
 const forbidden = [
   ["packages/runtime/src/runner.mjs", "import '@obversa/runner';\n", "runtime-reaches-interfaces-only"],
-  ["packages/runner/src/memory.mjs", "import '@obversa/memory';\n", "runner-reaches-runtime-and-engine-only"],
-  ["packages/runner/src/plugin.mjs", "import '../../../plugins/engine-codex/src/index.mjs';\n", "runner-reaches-runtime-and-engine-only"],
-  ["packages/teams/src/adapter.mjs", "import '@obversa/engine-codex';\n", "teams-reaches-runtime-only"],
+  ["packages/runner/src/adapter.mjs", "import '@obversa/memory-simple';\n", "runner-reaches-runtime-and-engine-only"],
+  ["packages/runner/src/plugin.mjs", "import '../../../plugins/engine-codex-cli/src/index.mjs';\n", "runner-reaches-runtime-and-engine-only"],
+  ["packages/builtin-workflows/src/adapter.mjs", "import '@obversa/engine-codex-cli';\n", "builtin-workflows-reaches-runtime-only"],
   ["packages/runner/src/private.mjs", "import '../../runtime/src/index.mjs';\n", "no-cross-package-internal-path"],
-  ["packages/surfacer/src/bad-a.mjs", "import '../../memory/src/index.mjs';\n", "no-cross-package-internal-path"],
-  ["packages/surfacer/src/bad-a.mjs", null, "surfacer-reaches-no-package"],
-  ["packages/source/src/a.mjs", "export * from '../../runtime/src/index.mjs';\n", "source-reaches-surfacer-only"],
-  ["packages/process/src/b.mjs", "export const p = import('@obversa/memory');\n", "process-reaches-no-package"],
-  ["packages/memory/src/b.mjs", "export const p = import('../../runtime/src/index.mjs');\n", "memory-reaches-no-package"],
+  ["packages/surface-decision/src/bad-a.mjs", "import '../../core/src/index.mjs';\n", "no-cross-package-internal-path"],
+  ["packages/surface-decision/src/bad-a.mjs", null, "surface-decision-reaches-no-package"],
+  ["packages/surface-diff/src/a.mjs", "export * from '../../runtime/src/index.mjs';\n", "surface-diff-reaches-surface-decision-only"],
+  ["packages/core/src/b.mjs", "export const p = import('@obversa/runtime');\n", "core-reaches-api-only"],
+  ["packages/api/src/b.mjs", "export const p = import('../../runtime/src/index.mjs');\n", "api-reaches-no-package"],
   ["plugins/memory-git/src/c.cjs", "module.exports = require('@obversa/runtime');\n", "memory-plugin-reaches-memory-only"],
-  ["packages/runtime/src/d.ts", "import type { X } from '@obversa/source';\nexport const d: X | number = 1;\n", "runtime-reaches-interfaces-only"],
+  ["packages/runtime/src/d.ts", "import type { X } from '@obversa/surface-diff';\nexport const d: X | number = 1;\n", "runtime-reaches-interfaces-only"],
   ["plugins/memory-simple/src/e.mjs", "import '#sneak';\n", "no-unresolvable"],
-  ["hosts/cmux/lib/f.mjs", "import '@obversa/source/src/private.mjs';\n", "no-unresolvable"],
-  ["packages/source/src/g.mjs", "import './h.test.mjs';\n", "no-test-from-prod"],
-  ["packages/surfacer/test/i.test.mjs", "import '../../source/test/j.test.mjs';\n", "no-cross-package-test-import"],
-  ["packages/source/src/k.mjs", "import '../../../hosts/cmux/lib/l.mjs';\n", "no-package-to-host"],
-  ["hosts/cmux/lib/m.mjs", "import '../../../packages/surfacer/src/index.mjs';\n", "no-host-internal-path"],
-  ["hosts/cmux/lib/n.mjs", "import '@obversa/memory';\n", "host-reaches-no-package"],
-  ["scripts/o.mjs", "import '../packages/source/src/index.mjs';\n", "no-script-internal-path"],
-  ["packages/surfacer/src/p.mjs", "import 'left-pad';\n", "no-undeclared-external"],
-  ["packages/memory/src/q.mjs", "import 'devtool';\n", "no-dev-dep-from-prod"],
-  ["packages/memory/src/r1.mjs", "import './r2.mjs';\nexport const r1 = 1;\n", "no-circular"],
-  ["packages/memory/src/r2.mjs", "import './r1.mjs';\nexport const r2 = 1;\n", null],
-  ["packages/source/src/s.mjs", "import './missing.mjs';\n", "no-unresolvable"],
+  ["hosts/cmux/lib/f.mjs", "import '@obversa/surface-diff/src/private.mjs';\n", "no-unresolvable"],
+  ["packages/surface-diff/src/g.mjs", "import './h.test.mjs';\n", "no-test-from-prod"],
+  ["packages/surface-decision/test/i.test.mjs", "import '../../surface-diff/test/j.test.mjs';\n", "no-cross-package-test-import"],
+  ["packages/surface-diff/src/k.mjs", "import '../../../hosts/cmux/lib/l.mjs';\n", "no-package-to-host"],
+  ["hosts/cmux/lib/m.mjs", "import '../../../packages/surface-decision/src/index.mjs';\n", "no-host-internal-path"],
+  ["hosts/cmux/lib/n.mjs", "import '@obversa/api';\n", "host-reaches-no-package"],
+  ["scripts/o.mjs", "import '../packages/surface-diff/src/index.mjs';\n", "no-script-internal-path"],
+  ["packages/surface-decision/src/p.mjs", "import 'left-pad';\n", "no-undeclared-external"],
+  ["packages/api/src/q.mjs", "import 'devtool';\n", "no-dev-dep-from-prod"],
+  ["packages/api/src/r1.mjs", "import './r2.mjs';\nexport const r1 = 1;\n", "no-circular"],
+  ["packages/api/src/r2.mjs", "import './r1.mjs';\nexport const r2 = 1;\n", null],
+  ["packages/surface-diff/src/s.mjs", "import './missing.mjs';\n", "no-unresolvable"],
   ["examples/bad7.mjs", "import '@obversa/does-not-resolve';\n", "no-unresolvable-example"],
   ["plugins/memory-simple/src/f2.mjs", "import '@obversa/runtime';\n", "memory-plugin-reaches-memory-only"],
-  ["plugins/engine-codex/src/f3.mjs", "import '@obversa/memory';\n", "engine-plugin-reaches-engine-only"],
-  ["plugins/engine-agent-sdk/src/f4.mjs", "import '@obversa/runtime';\n", "agent-sdk-plugin-reaches-interfaces-only"],
+  ["plugins/engine-codex-cli/src/f3.mjs", "import '@obversa/builtin-workflows';\n", "engine-plugin-reaches-engine-only"],
+  ["plugins/engine-claude-agent-sdk/src/f4.mjs", "import '@obversa/runtime';\n", "agent-sdk-plugin-reaches-interfaces-only"],
 ];
 for (const [path, content] of forbidden) if (content !== null) file(path, content);
 
 // The allowed forms: the same arrows done properly raise nothing.
 const allowed = [
-  ["packages/runner/src/public.mjs", "import '@obversa/runtime';\nimport '@obversa/engine';\n"],
-  ["packages/teams/src/public.mjs", "import '@obversa/runtime';\n"],
-  ["plugins/memory-git/src/ok1.mjs", "import '@obversa/memory';\nimport '@obversa/process';\n"],
-  ["packages/runtime/src/ok9.mjs", "import '@obversa/engine';\nimport '@obversa/memory';\n"],
-  ["plugins/engine-codex/src/ok10.mjs", "import '@obversa/engine';\nimport '@obversa/process';\n"],
-  ["plugins/engine-agent-sdk/src/ok11.mjs", "import '@obversa/engine';\nimport '@obversa/memory';\nimport '@obversa/process';\n"],
-  ["packages/source/src/ok8.mjs", "import '@obversa/surfacer';\n"],
-  ["packages/source/test/ok2.test.mjs", "import '../src/index.mjs';\n"],
-  ["plugins/memory-git/tests/ok3.test.mjs", "import '@obversa/memory/testing';\n"],
+  ["packages/runner/src/public.mjs", "import '@obversa/runtime';\nimport '@obversa/api';\nimport '@obversa/core';\n"],
+  ["packages/builtin-workflows/src/public.mjs", "import '@obversa/runtime';\nimport '@obversa/api';\n"],
+  ["plugins/memory-git/src/ok1.mjs", "import '@obversa/api';\nimport '@obversa/core';\n"],
+  ["packages/runtime/src/ok9.mjs", "import '@obversa/api';\nimport '@obversa/core';\n"],
+  ["plugins/engine-codex-cli/src/ok10.mjs", "import '@obversa/api';\nimport '@obversa/core';\n"],
+  ["plugins/engine-claude-agent-sdk/src/ok11.mjs", "import '@obversa/api';\nimport '@obversa/core';\n"],
+  ["packages/surface-diff/src/ok8.mjs", "import '@obversa/surface-decision';\n"],
+  ["packages/surface-diff/test/ok2.test.mjs", "import '../src/index.mjs';\n"],
+  ["plugins/memory-git/tests/ok3.test.mjs", "import '@obversa/api/testing';\n"],
   ["hosts/cmux/test/ok4.test.mjs", "import 'node:test';\n"],
   ["examples/ok5.mjs", "import '@obversa/runtime';\n"],
   ["scripts/ok6.mjs", "import 'node:fs';\n"],
@@ -180,6 +174,7 @@ const run = spawnSync(
   [cruiserBin, "--config", rulesFile, "--output-type", "json", "packages", "plugins", "hosts", "scripts", "examples"],
   { cwd: fixture, encoding: "utf8", maxBuffer: 64 * 1024 * 1024 },
 );
+if (!run.stdout.trim()) throw new Error(`dependency-cruiser produced no JSON: ${run.stderr}`);
 const report = JSON.parse(run.stdout);
 const violations = report.summary.violations;
 const fired = new Set(violations.map((violation) => `${violation.rule.name}|${violation.from}`));
@@ -220,7 +215,8 @@ test("the live cruise roots cover every workspace package", () => {
     assert.ok(roots.some((root) => root.startsWith(`${member}/`)), `${member} has no cruise root in check:arrows`);
     if (!member.startsWith("hosts/")) {
       const [, name] = member.split("/");
-      assert.ok(new RegExp(`\\^(?:packages|plugins)/${name}/|\\^${member}/`).test(rules) || rules.includes(`|${name}|`) || rules.includes(`(${name}|`) || rules.includes(`|${name})`), `${member} is not named by any arrow-matrix rule`);
+      const groupName = name.startsWith("engine-") ? name.slice(7) : name.startsWith("memory-") ? name.slice(7) : name;
+      assert.ok(new RegExp(`\\^(?:packages|plugins)/${name}/|\\^${member}/`).test(rules) || rules.includes(`|${groupName}|`) || rules.includes(`(?:${groupName}|`) || rules.includes(`|${groupName})`), `${member} is not named by any arrow-matrix rule`);
     }
   }
 });

@@ -3,7 +3,7 @@ import { mkdtemp, realpath, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
-import { EngineError, assistantResult, engineSelection, reportedUsage, type EngineSelectionRecord } from '@obversa/engine';
+import { EngineError, assistantResult, engineSelection, reportedUsage, type EngineSelectionRecord } from '@obversa/api';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import type { GraphCommand } from '../src/graph/commands.ts';

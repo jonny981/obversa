@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import { EngineError } from '@obversa/engine';
+import { EngineError } from '@obversa/api';
 import { buildClaudeArgs } from '../src/index.ts';
 
 describe('Claude workspace access', () => {

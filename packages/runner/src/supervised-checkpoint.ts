@@ -3,7 +3,7 @@ import { lstat, mkdir, readFile, rename, unlink, writeFile } from 'node:fs/promi
 import { join, resolve } from 'node:path';
 
 import type { DomainEventEnvelope } from '@obversa/runtime';
-import { cloneFrozenJson, digestJson, type JsonObject, type Sha256Digest } from '@obversa/engine';
+import { cloneFrozenJson, digestJson, type JsonObject, type Sha256Digest } from '@obversa/api';
 
 interface ActiveOccurrence extends JsonObject {
   readonly nodeId: string;

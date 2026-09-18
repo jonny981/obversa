@@ -3,7 +3,7 @@ import { mkdtemp, realpath, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
-import type { Memory } from '@obversa/memory';
+import type { Memory } from '@obversa/api';
 import {
   EngineError,
   type AgentRequest,
@@ -11,8 +11,8 @@ import {
   type Engine,
   type EngineEventSink,
   type EngineSelectionRecord,
-} from '@obversa/engine';
-import { MockEngine } from '@obversa/engine/testing';
+} from '@obversa/api';
+import { MockEngine } from '@obversa/core/testing';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import {

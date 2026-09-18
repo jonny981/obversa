@@ -36,7 +36,8 @@
     "prepublishOnly": "node ../../scripts/check-publish-allowlist.mjs"
   },
   "dependencies": {
-    "@obversa/engine": "workspace:^",
+    "@obversa/api": "workspace:^",
+    "@obversa/core": "workspace:^",
     "@obversa/runtime": "workspace:^"
   },
   "devDependencies": { "@types/node": "22.12.0" },

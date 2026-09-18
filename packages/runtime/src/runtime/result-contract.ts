@@ -1,7 +1,6 @@
 import {
   cloneFrozenJson,
   digestJson,
-  type JsonObject,
   type JsonValue,
   type Sha256Digest,
 } from '../graph/value.js';
@@ -9,29 +8,8 @@ import {
 const CONTROL_CHARACTER = /[\u0000-\u001f\u007f]/u;
 const SHA256_DIGEST = /^sha256:[0-9a-f]{64}$/u;
 
-export interface ResultContractRecord extends JsonObject {
-  readonly name: string;
-  readonly version: number;
-  readonly schemaDigest: Sha256Digest;
-}
-
-export interface ResultContract<
-  Schema extends JsonValue = JsonValue,
-  Result extends JsonValue = JsonValue,
-> {
-  readonly record: ResultContractRecord;
-  readonly schema: Schema;
-  validate(value: unknown): Result;
-}
-
-export interface ResultContractDefinition<
-  Schema extends JsonValue,
-  Result extends JsonValue,
-> {
-  readonly record: ResultContractRecord;
-  readonly schema: Schema;
-  readonly validate: (value: unknown) => Result;
-}
+import type { ResultContract, ResultContractDefinition } from '@obversa/api';
+export { type ResultContractRecord, type ResultContract, type ResultContractDefinition } from '@obversa/api';
 
 function name(value: unknown): string {
   if (

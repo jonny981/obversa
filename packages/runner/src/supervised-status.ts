@@ -2,7 +2,7 @@ import {
   inspectOwnedProcessTree,
   type CommandCleanupCapability,
   type ProcessIdentity,
-} from '@obversa/engine/command';
+} from '@obversa/core/command';
 
 import { loadRunDefinition, type DomainEventEnvelope, type UsageReceipt, type JsonObject, type Sha256Digest } from '@obversa/runtime';
 import { createLocalRunStorage, type LocalRunStorageOptions } from '@obversa/runtime/storage/local';

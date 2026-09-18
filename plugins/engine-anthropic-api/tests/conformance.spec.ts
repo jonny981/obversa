@@ -1,5 +1,6 @@
 import { expect, it } from 'vitest';
-import { engineSelection, runEngineConformance, type AgentRequest } from '@obversa/engine';
+import { engineSelection, type AgentRequest } from '@obversa/api';
+import { runEngineConformance } from '@obversa/api/testing';
 import { AnthropicApiEngine } from '../src/index.ts';
 
 it('runs the full kit at the Messages API boundary', async () => {

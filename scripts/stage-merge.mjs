@@ -82,6 +82,7 @@ export const stageBranches = {
   F77: 'fix/kit-fixture-boot-window',
   F73: 'feat/use-case-examples-one',
   F78: 'fix/stand-in-opencode-frames',
+  F66: 'feat/api-polish',
 };
 
 export function manageStage(args, options = {}) {

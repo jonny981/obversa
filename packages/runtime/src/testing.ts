@@ -106,7 +106,7 @@ export {
   type EngineConformanceFixture,
   type EngineConformanceFailure,
   type EngineConformanceReport,
-} from '@obversa/engine/testing';
+} from '@obversa/api/testing';
 export {
   runWorkspaceProviderConformance,
   assertWorkspaceProviderConformance,

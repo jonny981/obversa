@@ -42,12 +42,12 @@ In that directory, create `package.json` with `"type": "module"`, then run
 the install command above before running the copied file.
 
 ```bash
-npm install @obversa/runtime @obversa/engine-claude-cli @obversa/engine-codex
+npm install @obversa/runtime @obversa/engine-claude-cli @obversa/engine-codex-cli
 ```
 
 ```ts
 import { claude } from '@obversa/engine-claude-cli';
-import { codex } from '@obversa/engine-codex';
+import { codex } from '@obversa/engine-codex-cli';
 import {
   agentJob,
   approval,

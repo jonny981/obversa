@@ -51,9 +51,9 @@ complete; copy it, put your brief in, run it with Node.
 
 ```ts
 import { claude } from '@obversa/engine-claude-cli';
-import { codex } from '@obversa/engine-codex';
+import { codex } from '@obversa/engine-codex-cli';
 import { run } from '@obversa/runtime';
-import { fromFile, person, stage, workflow, type TeamSeat } from '@obversa/teams';
+import { briefFromFile, person, stage, workflow, type TeamSeat } from '@obversa/runtime';
 
 interface FeatureDeliveryEngines {
   readonly claude: (model: string) => TeamSeat;
@@ -70,7 +70,7 @@ const realEngines: FeatureDeliveryEngines = { claude, codex };
  */
 function createFeatureDelivery(engines: FeatureDeliveryEngines = realEngines) {
   return workflow('feature-delivery', {
-    brief: fromFile('briefs/triple.md'),
+    brief: briefFromFile('briefs/triple.md'),
     options: { timeout: '10m' },
 
     roles: {
@@ -194,7 +194,7 @@ mechanisms they are built from.
 - **Run a ready-made team on your own files.** A writer and a reviewer, a
   review panel with a threshold, or feature delivery from brief to approval:
   one import, your brief, your engines, run.
-  [The teams package](/packages/teams).
+  [The runtime workflow builder](/packages/runtime).
 - **Give work a shape in one call.** Steps in order, a graph with parallel
   branches, a loop that revises until it passes, a tournament of
   candidates, a quorum of opinions. [Workflows](/concepts/workflows).
@@ -206,7 +206,7 @@ mechanisms they are built from.
   [A review that sends work back](/reviewing/review-loop).
 - **Get a second opinion that is really a second opinion.** The implementer
   and every reviewer run on different model families, checked before a run.
-  [The teams package](/packages/teams).
+  [The runtime workflow builder](/packages/runtime).
 - **Stop for a person.** A callback gate puts one decision in front of
   someone and the run carries on from that step with the answer.
   [Callback gates](/reviewing/callback-gates).
@@ -216,7 +216,7 @@ mechanisms they are built from.
   model's report. [Workflows](/concepts/workflows).
 - **Use the engines you have.** Claude, Codex, Grok, OpenCode, the Agent
   SDK, the Anthropic API, or one you write to the contract.
-  [Engines](/packages/engine).
+  [Engine contracts](/packages/api).
 - **Define agents and skills in markdown.** The files your team already
   writes become the persona and the skills a step runs with.
   [Workflows](/concepts/workflows).
@@ -245,18 +245,17 @@ mechanisms they are built from.
 | --- | --- | --- |
 | `@obversa/runtime` | Compiles and runs pipeline, review-loop, and DAG graph forms | `1.0.0` |
 | `@obversa/runner` | Supervises stored graph runs in bounded workers | `0.1.0` |
-| `@obversa/engine` | Defines the contract for one bounded engine attempt | `0.1.0` |
-| `@obversa/process` | Runs one child process with a deadline and a readable result | `0.1.0` |
-| `@obversa/memory` | Defines the memory command contract | `0.1.0` |
+| `@obversa/api` | Defines every contract: engine, memory, graph, events, artifacts, workspace, callbacks, proofs and run definitions, with their validators | `0.1.0` |
+| `@obversa/core` | Runs one child process with a deadline and a readable result | `0.1.0` |
 | `@obversa/memory-simple` | Stores memory in one process | `0.1.0` |
 | `@obversa/memory-git` | Stores memory in private Git references | `0.1.0` |
-| `@obversa/teams` | Three teams of models you run on your own work | `0.1.0` |
-| `@obversa/surfacer` | Runs one local surface session | `0.1.0` |
-| `@obversa/source` | Opens a git diff for inline review | `0.1.0` |
-| `@obversa/engine-agent-sdk` | Runs one engine attempt through the Agent SDK | `0.1.0` |
+| `@obversa/builtin-workflows` | Three ready-made workflows | `0.1.0` |
+| `@obversa/surface-decision` | Runs one local surface session | `0.1.0` |
+| `@obversa/surface-diff` | Opens a git diff for inline review | `0.1.0` |
+| `@obversa/engine-claude-agent-sdk` | Runs one engine attempt through the Agent SDK | `0.1.0` |
 | `@obversa/engine-anthropic-api` | Runs one engine attempt through the Anthropic API | `0.1.0` |
 | `@obversa/engine-claude-cli` | Runs one engine attempt through the Claude CLI | `0.1.0` |
-| `@obversa/engine-codex` | Runs one engine attempt through the Codex CLI | `0.1.0` |
+| `@obversa/engine-codex-cli` | Runs one engine attempt through the Codex CLI | `0.1.0` |
 | `@obversa/engine-grok-cli` | Runs one engine attempt through the Grok CLI | `0.1.0` |
 | `@obversa/engine-opencode-cli` | Runs one engine attempt through the OpenCode CLI | `0.1.0` |
 

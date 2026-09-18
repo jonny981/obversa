@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 
-import { EngineError } from '@obversa/engine';
+import { EngineError } from '@obversa/api';
 import { agentJob, run } from '../src/api.ts';
 import type { Engine } from '../src/api.ts';
 import { MockEngine } from '../src/testing.ts';

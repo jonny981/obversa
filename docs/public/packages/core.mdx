@@ -1,0 +1,122 @@
+---
+title: "@obversa/core"
+description: "Run one child process with a deadline and get a result you can read whatever the child did."
+---
+
+Every workflow runs child processes: a `git` call, a model CLI, a test
+command. Each is the one thing that can wait forever, and a hang carries no
+error. `@obversa/core` runs one child with a deadline and returns a
+result you can read whatever happened: it finished, it hung, it filled a
+pipe, or it ignored a signal.
+
+```bash
+npm install @obversa/core
+```
+
+## What you get
+
+- **A deadline that always means timeout.** When the time passes, the child
+  is stopped and the result says so, even when the stopped child reports no
+  exit code. By default only the child is signalled, so a process the child
+  started and left behind is not stopped. Pass `detached: true` to stop the
+  child's whole process group.
+- **No pipe can stall it.** Standard input is closed after the optional
+  input, and both output streams are drained until they close or for a
+  short grace after the child exits, under one combined byte cap. The exit
+  is the result; the pipes are a bounded extra.
+- **A result, not a race.** The exit code, the output bytes and the
+  timed-out and aborted flags come from facts the helper recorded, never
+  from whichever callback fired first.
+
+## Run one
+
+```ts
+import { runChild } from '@obversa/core';
+
+const result = await runChild({
+  executable: process.execPath,
+  args: ['-e', 'process.stdout.write("ready")'],
+  cwd: process.cwd(),
+  env: {},
+  stdin: '',
+  timeoutMs: 30_000,
+  killGraceMs: 5_000,
+  maxOutputBytes: 1_024 * 1_024,
+});
+
+console.log(new TextDecoder().decode(result.stdout));
+```
+
+```text
+ready
+```
+
+## The call
+
+`runChild(options)` takes `executable`, `args`, `cwd`, `env`, an optional
+`stdin`, `timeoutMs`, `killGraceMs`, `maxOutputBytes`, an optional
+`AbortSignal`, and `inheritParentEnv` (default true). It returns
+`exitCode` (a number, or `null` when a signal stopped the child), `stdout`
+and `stderr` as bytes, `timedOut` and `aborted`. It throws `RunChildError`
+with code `SPAWN_FAILED` when the executable cannot start,
+`OUTPUT_LIMIT` when the child writes past the cap, and
+`TEARDOWN_INCOMPLETE` when the child does not stop within the grace period
+after its deadline.
+
+## When your process dies
+
+Children the helper started are stopped when your process exits or is
+interrupted, the way the signal-exit library does it: a terminate signal on
+exit, and on an interrupt the helper stops its children and re-raises the
+signal so your process ends as it would have. Your own handler for a
+signal takes precedence. A child sits in your process group by default so
+a terminal interrupt reaches it; `detached: true` gives it its own group.
+
+## Things that catch people out
+
+- **Bytes written after the grace are not captured**; the result holds
+  what arrived before the child exited plus the short drain.
+- **The output cap is combined** across standard output and standard error.
+- **The environment is merged** over the parent's unless you say otherwise.
+- **A timed-out child still has output**: what it wrote before the deadline
+  is in the result, up to the cap.
+
+## Where it is used
+
+The engine command runner, the runtime's git and command sites, and the Git
+memory adapter run their children through this package, so a hang in any
+of them ends the same way, with a timeout you can read.
+
+## Adapter helpers
+
+| entry | what it provides |
+| --- | --- |
+| `@obversa/core/command` | `runOwnedCommand`, `ownedCommandIdentity`, `resolveCommandExecutable`, `attemptEnvironment`, process cleanup and inspection, `retryAfterHeaderToMs`, `scrubCapture`, `redactEnvValues` and `redactSecrets`. |
+| `@obversa/core/claude-stream-json` | `mapMessage`, `newAccumulator` and the `Accumulator` type for reading Claude stream messages. |
+| `@obversa/core/claude-tools` | `claudeToolOptions`, the tool configuration shared by the Claude adapters. |
+| `@obversa/core/testing` | `MockEngine`, `MockResponder` and `mockVerdict` for scripted engine results. Adapter conformance checks are in `@obversa/api/testing`. |
+
+`claudeToolOptions` keeps only requested `Read`, `Grep` and `Glob` tools in
+`read` mode, and no tools in `none` mode. It removes permission rules for
+withheld tools. It refuses malformed rules and custom tools it cannot
+bound in those modes with an `EngineError` of kind `invalid-config`.
+`CLAUDE_SUBAGENT_TOOLS`, the shared tool-name list, belongs to `@obversa/api`.
+
+## Owned commands and cleanup
+
+`runOwnedCommand` runs a command-line tool to a deadline with output and
+memory bounds and returns a typed result; `stopOwnedProcessTree` stops what
+it started. Both accept an `ownerId`, a `sha256:` digest that the command
+passes to its children as `OBVERSA_RUN_OWNER`; an inherited marker is kept
+by nested commands and wins over a supplied `ownerId`. Only the outer
+command that supplied the id sweeps that owner's marked processes during
+cleanup.
+
+`commandCleanupCapability()` says how the platform cleans up:
+`inherited-owner` on Linux, where processes carrying the marker are found
+through `/proc`, and `observed-processes` elsewhere, where cleanup follows
+the observed tree and a helper that starts a new session before it is seen
+can escape. `inspectOwnerMarkedProcesses(ownerId)` lists marked processes
+on Linux without stopping them, and returns an empty list elsewhere, which
+proves nothing. Owner markers coordinate cleanup; they are not a security
+boundary.

@@ -21,14 +21,11 @@ import {
   EngineError,
   EngineIncompleteResultError,
   assertReadAccess,
-  attemptEnvironment,
   canonicalJson,
   classifyEngineFailure,
   cloneFrozenJson,
   engineSelection,
   reportedUsage,
-  retryAfterHeaderToMs,
-  scrubCapture,
   type AgentRequest,
   type AgentResult,
   type AgentResultPart,
@@ -42,14 +39,17 @@ import {
   validateAgentResult,
   validateIncompleteResultEvidence,
   modelIdentity,
-} from '@obversa/engine';
+} from '@obversa/api';
 import {
+  attemptEnvironment,
+  retryAfterHeaderToMs,
+  scrubCapture,
   DEFAULT_OWNED_COMMAND_LIMITS,
   OwnedCommandError,
   ownedCommandIdentity,
   resolveCommandExecutable,
   runOwnedCommand,
-} from '@obversa/engine/command';
+} from '@obversa/core/command';
 
 const SUPPORTED_VERSION = '1.18.23';
 const VERSION_TIMEOUT_MS = 10_000;

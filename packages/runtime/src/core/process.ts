@@ -3,7 +3,7 @@ import {
   runChild,
   type RunChildOptions,
   type RunChildResult,
-} from '@obversa/process';
+} from '@obversa/core';
 
 export const DEFAULT_PROCESS_TIMEOUT_MS = 10 * 60 * 1_000;
 export const DEFAULT_PROCESS_GRACE_MS = 5 * 1_000;

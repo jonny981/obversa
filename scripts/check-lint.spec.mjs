@@ -91,7 +91,7 @@ test("the browser page is linted in full, not ignored", () => {
   // applies to the page like any other file.
   const page = spawnSync(
     process.execPath,
-    [eslintBin, "--format", "json", join(repoRoot, "packages", "source", "assets", "app.js")],
+    [eslintBin, "--format", "json", join(repoRoot, "packages", "surface-diff", "assets", "app.js")],
     { cwd: repoRoot, encoding: "utf8", maxBuffer: 64 * 1024 * 1024 },
   );
   assert.equal(page.status, 0, page.stderr);

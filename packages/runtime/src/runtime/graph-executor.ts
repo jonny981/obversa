@@ -2,11 +2,10 @@ import { randomUUID } from 'node:crypto';
 import { realpath } from 'node:fs/promises';
 import { isDeepStrictEqual } from 'node:util';
 
-import type { Memory } from '@obversa/memory';
+import type { Memory } from '@obversa/api';
 
 import type { GraphCommand } from '../graph/commands.js';
 import type {
-  CompiledGraphType,
   EngineAttemptRecordedPayload,
   GraphEngineIdentity,
   GraphEvent,
@@ -32,7 +31,6 @@ import {
 import {
   EngineError,
   type AgentRequest,
-  type AgentResultPart,
   type AttemptMetadata,
   type Engine,
   type EngineSelectionRecord,
@@ -48,18 +46,14 @@ import { StorageError } from '../storage/error.js';
 import { createAttemptIdentity, type AttemptIdentity } from './attempt.js';
 import {
   validateAttemptBudgetPolicy,
-  type AttemptBudgetPolicy,
-  type TokenBudget,
 } from './budget.js';
 import {
   executeNodeAttempt,
   validateScratchDirectory,
   type ActionDecision,
   type ModelUnavailableFact,
-  type NodeDataContext,
   type PreparedEngineLane,
 } from './node-lifecycle.js';
-import type { ResultContract } from './result-contract.js';
 import { engineSelection } from './result-parts.js';
 import {
   loadRunDefinition,
@@ -67,7 +61,6 @@ import {
 } from './run-definition.js';
 import {
   validateWorkspacePolicy,
-  type NodeWorkspacePolicy,
 } from './workspace-policy.js';
 import {
   EngineIdentityUnresolvedError,
@@ -88,80 +81,8 @@ import {
   type StaticOutcome,
 } from './preflight-record.js';
 
-export type GraphExecutionErrorCode =
-  | 'ABORTED'
-  | 'DUPLICATE_POSITION'
-  | 'EMPTY_DECISION'
-  | 'ENGINE_IDENTITY_UNRESOLVED'
-  | 'INVALID_EVENT'
-  | 'INVALID_PREFLIGHT_CONFIG'
-  | 'MISSING_ENGINE_BINDING'
-  | 'MISSING_MEMORY'
-  | 'MISSING_NODE_BINDING'
-  | 'PROTOCOL'
-  | 'RESUME_EVENT_MISMATCH'
-  | 'STORED_GRAPH_MISMATCH';
-
-export class GraphExecutionError extends Error {
-  readonly code: GraphExecutionErrorCode;
-
-  constructor(code: GraphExecutionErrorCode, message: string, options?: ErrorOptions) {
-    super(message, options);
-    this.name = 'GraphExecutionError';
-    this.code = code;
-  }
-}
-
-export interface GraphNodeBinding {
-  readonly prompt: ((input: JsonValue) => string) | null;
-  readonly scratchDirectory: string;
-  readonly workspace: NodeWorkspacePolicy;
-  readonly trustedCaller: JsonObject;
-  readonly permissions: readonly string[];
-  readonly policy: AttemptBudgetPolicy;
-  readonly resultContract: ResultContract | null;
-  readonly runData: ((context: NodeDataContext) => Promise<JsonValue>) | null;
-  readonly parseResult:
-    | ((part: AgentResultPart, parts: readonly AgentResultPart[]) => JsonValue)
-    | null;
-  readonly tokenBudget: TokenBudget | null;
-  /** Whether node code may run again after a crash leaves its outcome unknown. */
-  readonly retrySafe?: boolean;
-  decideAction(): Promise<ActionDecision>;
-}
-
-export interface GraphEngineBinding {
-  readonly target: ExecutionTarget;
-  readonly selection: EngineSelectionRecord;
-  readonly engine: Engine;
-  readonly hardTokenLimitEnforceable: boolean;
-}
-
-export interface GraphExecutorOptions {
-  readonly runId: string;
-  readonly graph: CompiledGraphType;
-  readonly storage: RunStorageBinding;
-  readonly nodes: Readonly<Record<string, GraphNodeBinding>>;
-  readonly engines: readonly GraphEngineBinding[];
-  readonly preflightScratchDirectory?: string;
-  readonly bindings?: {
-    readonly memory?: Memory;
-  };
-}
-
-export type GraphExecutorResult =
-  | Extract<GraphCommand, { readonly kind: 'pause' | 'complete' | 'fail' }>
-  | PreflightPauseResult
-  | PreflightFailureResult
-  | {
-      readonly kind: 'waiting';
-      readonly positions: readonly string[];
-    };
-
-export interface GraphExecutor {
-  run(signal: AbortSignal): Promise<GraphExecutorResult>;
-  resume(target: string | { readonly preflightEventId: string }, signal: AbortSignal): Promise<GraphExecutorResult>;
-}
+import { type GraphExecutionErrorCode, GraphExecutionError, type GraphNodeBinding, type GraphEngineBinding, type GraphExecutorOptions, type GraphExecutorResult, type GraphExecutor } from '@obversa/api';
+export { type GraphExecutionErrorCode, GraphExecutionError, type GraphNodeBinding, type GraphEngineBinding, type GraphExecutorOptions, type GraphExecutorResult, type GraphExecutor } from '@obversa/api';
 
 interface FoldedAttempt {
   readonly command: Extract<GraphCommand, { readonly kind: 'dispatch' }>;

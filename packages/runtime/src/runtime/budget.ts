@@ -1,53 +1,23 @@
-import type { UsageReceipt } from '../engines/engine.js';
-import {
-  cloneFrozenJson,
-  digestJson,
-  type JsonObject,
-  type Sha256Digest,
-} from '../graph/value.js';
+import type {
+  UsageReceipt,
+  TokenAllowance,
+  AttemptBudgetPolicy,
+  TokenBudgetSnapshot,
+  BudgetReservation,
+  TokenBudget,
+} from '@obversa/api';
+import { cloneFrozenJson, digestJson } from '../graph/value.js';
 
-export type TokenLimitMode = 'hard' | 'observed';
+export type {
+  TokenLimitMode,
+  TokenAllowance,
+  AttemptBudgetPolicy,
+  TokenBudgetSnapshot,
+  BudgetReservation,
+  TokenBudget,
+} from '@obversa/api';
 
 const MAX_TIMER_MS = 2_147_483_647;
-
-export interface TokenAllowance extends JsonObject {
-  readonly mode: TokenLimitMode;
-  readonly tokens: number;
-}
-
-export interface AttemptBudgetPolicy extends JsonObject {
-  readonly inputBytes: number;
-  readonly outputBytes: number;
-  readonly timeoutMs: number;
-  readonly teardownGraceMs: number;
-  readonly memoryBytes: number;
-  readonly filesChanged: number;
-  readonly linesChanged: number;
-  readonly callTokens: TokenAllowance | null;
-}
-
-export interface TokenBudgetSnapshot {
-  readonly limit: number;
-  readonly spent: number;
-  readonly reserved: number;
-  readonly unknownUsageCalls: number;
-}
-
-export interface BudgetReservation {
-  readonly reservationId: Sha256Digest;
-  readonly amount: number;
-  commit(usage: UsageReceipt): void;
-  release(): void;
-}
-
-export interface TokenBudget {
-  child(limit: number): TokenBudget;
-  reserve(
-    allowance: TokenAllowance,
-    capabilities: { readonly hardLimitEnforceable: boolean },
-  ): BudgetReservation;
-  snapshot(): TokenBudgetSnapshot;
-}
 
 function positiveSafeInteger(value: unknown, field: string): number {
   if (!Number.isSafeInteger(value) || (value as number) < 1) {

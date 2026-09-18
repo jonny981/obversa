@@ -2,4 +2,4 @@ export {
   mapMessage,
   newAccumulator,
   type Accumulator,
-} from '@obversa/engine';
+} from '@obversa/core/claude-stream-json';

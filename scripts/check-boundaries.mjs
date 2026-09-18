@@ -459,78 +459,67 @@ const packageRules = new Map([
     directory: 'packages/runner',
     kind: 'host',
     version: '0.1.0',
-    dependencies: ['@obversa/engine', '@obversa/runtime'],
+    dependencies: ['@obversa/api', '@obversa/core', '@obversa/runtime'],
     peerDependencies: [],
   }],
   ['@obversa/runtime', {
     directory: 'packages/runtime',
     kind: 'runtime',
     version: '1.0.0',
-    dependencies: ['@obversa/process'],
-    peerDependencies: ['@obversa/engine', '@obversa/memory'],
+    dependencies: ['@obversa/core'],
+    peerDependencies: ['@obversa/api'],
     peerDependencyVersions: {
-      '@obversa/engine': '>=0.1.0 <0.2.0',
-      '@obversa/memory': '>=0.1.0 <0.2.0',
+      '@obversa/api': '>=0.1.0 <0.2.0',
     },
   }],
-  ['@obversa/engine', {
-    directory: 'packages/engine',
-    kind: 'interface',
-    version: '0.1.0',
-    dependencies: ['@obversa/process'],
-    peerDependencies: [],
-  }],
-  ['@obversa/process', {
-    directory: 'packages/process',
+  ['@obversa/api', {
+    directory: 'packages/api',
     kind: 'interface',
     version: '0.1.0',
     dependencies: [],
     peerDependencies: [],
   }],
-  ['@obversa/memory', {
-    directory: 'packages/memory',
+  ['@obversa/core', {
+    directory: 'packages/core',
     kind: 'interface',
     version: '0.1.0',
-    dependencies: [],
+    dependencies: ['@obversa/api'],
     peerDependencies: [],
   }],
   ['@obversa/memory-simple', {
     directory: 'plugins/memory-simple',
     kind: 'plugin',
     version: '0.1.0',
-    dependencies: ['@obversa/memory'],
+    dependencies: ['@obversa/api'],
     peerDependencies: [],
   }],
   ['@obversa/memory-git', {
     directory: 'plugins/memory-git',
     kind: 'plugin',
     version: '0.1.0',
-    dependencies: ['@obversa/memory', '@obversa/process'],
+    dependencies: ['@obversa/api', '@obversa/core'],
     peerDependencies: [],
   }],
   // Private workspace packages get a rule too, so a sibling import inside
-  // them is caught the same way. Surfacer must never depend on the runtime or
-  // another package. Source depends on surfacer — the flipped arrow: the
-  // review command lives in source and injects surfacer's launch port itself,
+  // them is caught the same way. Surface decision must never depend on the runtime or
+  // another package. Surface diff depends on surface decision — the flipped arrow: the
+  // review command lives in surface diff and injects surface decision's launch port itself,
   // so a host keeps placement glue only.
-  ['@obversa/surfacer', { directory: 'packages/surfacer', kind: 'surface', version: '0.1.0', dependencies: [], peerDependencies: [] }],
-  ['@obversa/source', { directory: 'packages/source', kind: 'surface', version: '0.1.0', dependencies: ['@obversa/surfacer'], peerDependencies: [] }],
-  ['@obversa/teams', { directory: 'packages/teams', kind: 'workflow', version: '0.1.0', dependencies: ['@obversa/runtime', '@obversa/engine'], peerDependencies: [] }],
-  ['@obversa/engine-agent-sdk', {
-    directory: 'plugins/engine-agent-sdk',
+  ['@obversa/surface-decision', { directory: 'packages/surface-decision', kind: 'surface', version: '0.1.0', dependencies: [], peerDependencies: [] }],
+  ['@obversa/surface-diff', { directory: 'packages/surface-diff', kind: 'surface', version: '0.1.0', dependencies: ['@obversa/surface-decision'], peerDependencies: [] }],
+  ['@obversa/builtin-workflows', { directory: 'packages/builtin-workflows', kind: 'workflow', version: '0.1.0', dependencies: ['@obversa/runtime', '@obversa/api'], peerDependencies: [] }],
+  ['@obversa/engine-claude-agent-sdk', {
+    directory: 'plugins/engine-claude-agent-sdk',
     kind: 'plugin',
     version: '0.1.0',
-    dependencies: ['@obversa/engine'],
-    peerDependencies: ['@obversa/memory'],
-    peerDependencyVersions: {
-      '@obversa/memory': '>=0.1.0 <0.2.0',
-    },
+    dependencies: ['@obversa/api', '@obversa/core'],
+    peerDependencies: [],
   }],
-  ['@obversa/engine-anthropic-api', { directory: 'plugins/engine-anthropic-api', kind: 'plugin', version: '0.1.0', dependencies: ['@obversa/engine'], peerDependencies: [] }],
-  ['@obversa/engine-claude-cli', { directory: 'plugins/engine-claude-cli', kind: 'plugin', version: '0.1.0', dependencies: ['@obversa/engine'], peerDependencies: [] }],
-  ['@obversa/engine-codex', { directory: 'plugins/engine-codex', kind: 'plugin', version: '0.1.0', dependencies: ['@obversa/engine'], peerDependencies: [] }],
-  ['@obversa/engine-grok-cli', { directory: 'plugins/engine-grok-cli', kind: 'plugin', version: '0.1.0', dependencies: ['@obversa/engine'], peerDependencies: [] }],
-  ['@obversa/engine-opencode-cli', { directory: 'plugins/engine-opencode-cli', kind: 'plugin', version: '0.1.0', dependencies: ['@obversa/engine'], peerDependencies: [] }],
+  ['@obversa/engine-anthropic-api', { directory: 'plugins/engine-anthropic-api', kind: 'plugin', version: '0.1.0', dependencies: ['@obversa/api', '@obversa/core'], peerDependencies: [] }],
+  ['@obversa/engine-claude-cli', { directory: 'plugins/engine-claude-cli', kind: 'plugin', version: '0.1.0', dependencies: ['@obversa/api', '@obversa/core'], peerDependencies: [] }],
+  ['@obversa/engine-codex-cli', { directory: 'plugins/engine-codex-cli', kind: 'plugin', version: '0.1.0', dependencies: ['@obversa/api', '@obversa/core'], peerDependencies: [] }],
+  ['@obversa/engine-grok-cli', { directory: 'plugins/engine-grok-cli', kind: 'plugin', version: '0.1.0', dependencies: ['@obversa/api', '@obversa/core'], peerDependencies: [] }],
+  ['@obversa/engine-opencode-cli', { directory: 'plugins/engine-opencode-cli', kind: 'plugin', version: '0.1.0', dependencies: ['@obversa/api', '@obversa/core'], peerDependencies: [] }],
 ]);
 const packageNamesByDirectory = new Map(
   [...packageRules].map(([name, rule]) => [rule.directory, name]),
@@ -851,7 +840,7 @@ function crossingPackage(
   if (!file || !repoRoot || !(/^\.\.?\//.test(specifier) || isAbsolute(specifier))) return null;
   // Where the loader lands, by real path from the importing file's real
   // directory: on a case-insensitive disk `../PACKAGES/SURFACER/x` opens
-  // packages/surfacer/x, so the crossing is judged where the path really
+  // packages/surface-decision/x, so the crossing is judged where the path really
   // lands, and a spelling other than the disk's own (case, a symlink) is
   // refused outright. A target that does not exist keeps its spelling: the
   // compiler's own resolution places it, or reports it.
@@ -1218,9 +1207,9 @@ for (const [name, rule] of packageRules) {
   } else if (manifest.publishConfig?.access !== 'public') {
     failures.push(`${name}: publishConfig.access must be public`);
   }
-  // The review command is @obversa/source's one bin;
+  // The review command is @obversa/surface-diff's one bin;
   // no other package exposes a command.
-  const allowedBins = name === '@obversa/source' ? { 'obversa-review': './bin/obversa-review.mjs' } : undefined;
+  const allowedBins = name === '@obversa/surface-diff' ? { 'obversa-review': './bin/obversa-review.mjs' } : undefined;
   if (JSON.stringify(manifest.bin) !== JSON.stringify(allowedBins))
     failures.push(`${name}: bin must be ${JSON.stringify(allowedBins) ?? 'absent'}; found ${JSON.stringify(manifest.bin) ?? 'absent'}`);
   // pnpm promotes publishConfig fields into the packed manifest, so a
@@ -1428,7 +1417,7 @@ for (const absolute of files) {
     }
   }
   // A host carries placement glue only: the review command lives in
-  // @obversa/source, so host JavaScript — a .mjs/.cjs/.js file, or an
+  // @obversa/surface-diff, so host JavaScript — a .mjs/.cjs/.js file, or an
   // extensionless command with a node shebang — is refused on sight rather
   // than import-scanned. dependency-cruiser cannot read an extensionless
   // script, so the refusal is what keeps a node command from reappearing

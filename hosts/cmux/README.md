@@ -12,7 +12,7 @@ or fails with a clear message.
 
 All commands live in `bin/`, on macOS (the default-browser fallback uses
 `open`). Every one is placement glue on bash: `obversa-order-workspace`,
-`obversa-surface`, `obversa-plannotator-browser`, `obversa-whereis`. The review command itself is `@obversa/source`'s bin —
+`obversa-surface`, `obversa-plannotator-browser`, `obversa-whereis`. The review command itself is `@obversa/surface-diff`'s bin —
 this host only depends on that package so `node_modules/.bin/obversa-review`
 exists here. Put `bin/` on your PATH or call the commands by full path.
 Workspace-file generation and cmux-context parsing use `python3` for
@@ -104,8 +104,8 @@ default browser.
 ### obversa-review (the source package's command)
 
 Opens a git diff for inline review in a browser pane beside the terminal
-and returns the annotations to the caller. The command is `@obversa/source`'s
-bin — the package injects `@obversa/surfacer`'s session itself — and this
+and returns the annotations to the caller. The command is `@obversa/surface-diff`'s
+bin — the package injects `@obversa/surface-decision`'s session itself — and this
 host takes it by public name: `pnpm exec obversa-review` from this
 directory, or `node_modules/.bin/obversa-review` by path.
 
@@ -172,7 +172,7 @@ for the review surface.
    global variable binds every launch to one host, so a skill launched in
    another host would land here instead of where it started. For a workspace
    opened by hand, export `OBVERSA_SURFACE_BIN` as the absolute path of this
-   host's `obversa-surface` in that workspace — the surfacer reads the
+   host's `obversa-surface` in that workspace — the surface-decision package reads the
    variable only, never `PATH` — and outside cmux the surface opens the
    default browser.
 

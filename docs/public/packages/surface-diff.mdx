@@ -1,0 +1,88 @@
+---
+title: "@obversa/surface-diff"
+description: "Review a Git diff in a browser and return a decision with line-anchored annotations."
+---
+
+`@obversa/surface-diff` opens a Git diff for inline review. The reviewer
+returns a decision and annotations tied to lines in the diff. The command
+writes the result as framed JSON on stdout and diagnostics on stderr.
+
+## Install
+
+```bash
+pnpm add @obversa/surface-diff
+```
+
+Node.js 22.12 or later and Git are required.
+
+## Review a diff
+
+Run from the repository you want to review:
+
+```bash
+obversa-review
+obversa-review --staged
+obversa-review --range main..HEAD
+obversa-review --no-open
+```
+
+The default reviews working-tree changes. `--staged` reviews the index;
+`--range` reviews the named Git range. `--no-open` prints the review URL
+instead of opening it.
+
+The default result frame starts with `<<<REVIEW_RESULT_V1>>>` and ends
+with `<<<END_REVIEW_RESULT_V1>>>`. Exit 0 means the reviewer returned,
+including a decision that requests changes. Exit 1 means the session did
+not complete or the command failed; exit 2 means the arguments were invalid.
+
+## Public entry points
+
+| entry | what it provides |
+| --- | --- |
+| `@obversa/surface-diff` | `reviewDiff`, `computeDiff`, `parseUnifiedDiff`, page generation and the review request/result checks. |
+| `@obversa/surface-diff/bin` | The command file, for a host to resolve and run under Node. |
+| `@obversa/surface-diff/testing` | Diff highlighting, navigation and context helpers used by the package's checks. |
+
+The browser session and result framing come from
+[@obversa/surface-decision](/packages/surface-decision). See that page for
+session ownership, host placement and browser fallback behavior.
+
+## Offline example
+
+This complete file parses a fixed Git diff and checks the line numbers and
+changed text. It runs offline and does not open a browser. The command
+above adds the interactive review session.
+
+`examples/surface-diff.ts`, in full:
+
+```ts
+import assert from 'node:assert/strict';
+
+import { parseUnifiedDiff } from '@obversa/surface-diff';
+
+const diff = [
+  'diff --git a/answer.txt b/answer.txt',
+  '--- a/answer.txt',
+  '+++ b/answer.txt',
+  '@@ -1 +1 @@',
+  '-41',
+  '+42',
+  '',
+].join('\n');
+
+const parsed = parseUnifiedDiff(diff);
+assert.equal(parsed.files.length, 1);
+const file = parsed.files[0]!;
+assert.equal(file.path, 'answer.txt');
+assert.equal(file.hunks.length, 1);
+assert.deepEqual(file.hunks[0]!.lines, [
+  { type: 'del', oldNumber: 1, newNumber: null, text: '41' },
+  { type: 'add', oldNumber: null, newNumber: 1, text: '42' },
+]);
+
+console.log(JSON.stringify({ path: file.path, lines: file.hunks[0]!.lines }, null, 2));
+```
+
+## Source
+
+`packages/surface-diff` in the repository.

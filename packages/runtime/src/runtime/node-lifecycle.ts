@@ -1,7 +1,7 @@
 import { lstat, realpath } from 'node:fs/promises';
 import { isAbsolute } from 'node:path';
 
-import type { Memory } from '@obversa/memory';
+import type { Memory } from '@obversa/api';
 
 import {
   EngineError,
@@ -73,25 +73,8 @@ const EMPTY_WORKSPACE = cloneFrozenJson({
   linesChanged: 0,
 } satisfies WorkspaceAttemptEvidence);
 
-export interface AllowActionDecision extends JsonObject {
-  readonly kind: 'allow';
-}
-
-export interface WaitActionDecision extends JsonObject {
-  readonly kind: 'wait';
-  readonly reason: string;
-  readonly request: JsonValue;
-}
-
-export interface DenyActionDecision extends JsonObject {
-  readonly kind: 'deny';
-  readonly reason: string;
-}
-
-export type ActionDecision =
-  | AllowActionDecision
-  | WaitActionDecision
-  | DenyActionDecision;
+import { validateActionDecision, type ActionDecision } from '@obversa/api';
+export { validateActionDecision, type ActionDecision, type AllowActionDecision, type WaitActionDecision, type DenyActionDecision } from '@obversa/api';
 
 export interface PreparedEngineLane {
   readonly engine: Engine;
@@ -100,15 +83,8 @@ export interface PreparedEngineLane {
   readonly target?: ExecutionTarget;
 }
 
-export interface NodeDataContext {
-  readonly input: JsonValue;
-  readonly memory: Memory | null;
-  readonly scratchDirectory: string;
-  readonly workspaceDirectory: string | null;
-  readonly trustedCaller: JsonObject;
-  readonly permissions: readonly string[];
-  readonly signal: AbortSignal;
-}
+import { type NodeDataContext } from '@obversa/api';
+export { type NodeDataContext } from '@obversa/api';
 
 export interface ModelUnavailableFact {
   readonly schemaVersion: 1;
@@ -468,41 +444,6 @@ function validateLane(value: PreparedEngineLane, index: number): PreparedEngineL
   });
 }
 
-export function validateActionDecision(value: ActionDecision): ActionDecision {
-  if (typeof value !== 'object' || value === null || Array.isArray(value)) {
-    throw new TypeError('action decision must be an object');
-  }
-  if (value.kind === 'allow') {
-    if (Object.keys(value).length !== 1) {
-      throw new TypeError('allow action decision has unknown fields');
-    }
-    return cloneFrozenJson({ kind: 'allow' });
-  }
-  if (value.kind === 'wait') {
-    if (
-      Object.keys(value).length !== 3 ||
-      !Object.hasOwn(value, 'reason') ||
-      !Object.hasOwn(value, 'request')
-    ) {
-      throw new TypeError('wait action decision has missing or unknown fields');
-    }
-    return cloneFrozenJson({
-      kind: 'wait',
-      reason: text(value.reason, 'action wait reason'),
-      request: cloneFrozenJson(value.request),
-    });
-  }
-  if (value.kind === 'deny') {
-    if (Object.keys(value).length !== 2 || !Object.hasOwn(value, 'reason')) {
-      throw new TypeError('deny action decision has missing or unknown fields');
-    }
-    return cloneFrozenJson({
-      kind: 'deny',
-      reason: text(value.reason, 'action deny reason'),
-    });
-  }
-  throw new TypeError('action decision kind must be allow, wait, or deny');
-}
 
 export async function validateScratchDirectory(value: string): Promise<string> {
   if (typeof value !== 'string' || !isAbsolute(value)) {

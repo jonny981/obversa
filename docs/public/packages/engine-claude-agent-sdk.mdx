@@ -1,0 +1,58 @@
+---
+title: "@obversa/engine-claude-agent-sdk"
+description: "@obversa/engine-claude-agent-sdk runs engine requests through the Claude Agent SDK."
+---
+
+`@obversa/engine-claude-agent-sdk` is an engine plugin that runs requests through the Claude Agent SDK. Each request runs as a clean query call, using existing host Claude Code authentication.
+
+## Requirements
+
+- Node.js 22.12 or later
+- Host Claude Code authentication
+
+## Install
+
+```bash
+pnpm add @obversa/engine-claude-agent-sdk
+```
+
+## Identity
+
+The plugin serves the Anthropic provider. It reports `provider: 'anthropic'`, with the model passed in the request or configured in options.
+
+## Usage
+
+```ts
+import { AgentSdkEngine } from '@obversa/engine-claude-agent-sdk';
+
+const engine = new AgentSdkEngine({
+  defaultModel: 'claude-sonnet-4-5',
+});
+```
+
+To enable memory access, pass an instance of the `Memory` contract from `@obversa/api` in the constructor:
+
+```ts
+import { AgentSdkEngine } from '@obversa/engine-claude-agent-sdk';
+import { openGitMemory } from '@obversa/memory-git';
+
+const memory = await openGitMemory({
+  repositoryPath: process.cwd(),
+  scope: 'run-1',
+});
+
+const engine = new AgentSdkEngine({
+  defaultModel: 'claude-sonnet-4-5',
+  memory,
+});
+```
+
+## Limits
+
+- Requires local Claude Code host authentication; it does not accept raw API keys.
+- Each call runs in-process via SDK query sessions rather than separate OS child processes.
+- Memory integration attaches an MCP memory tool into the query context.
+- In the `read` and `none` workspace modes the adapter passes Claude a bounded
+  tool list (`Read`, `Grep` and `Glob` for `read`; none for `none`). It
+  disallows `Bash`, `Edit`, `Write`, the sub-agent tools and every MCP tool. A
+  settings file outside the run cannot restore them.

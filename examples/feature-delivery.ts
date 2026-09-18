@@ -1,5 +1,5 @@
 import { claude } from '@obversa/engine-claude-cli';
-import { codex } from '@obversa/engine-codex';
+import { codex } from '@obversa/engine-codex-cli';
 import {
   agentJob,
   approval,

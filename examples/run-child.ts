@@ -1,4 +1,4 @@
-import { runChild } from '@obversa/process';
+import { runChild } from '@obversa/core';
 
 const result = await runChild({
   executable: process.execPath,

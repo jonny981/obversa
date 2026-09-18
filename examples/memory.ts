@@ -1,4 +1,4 @@
-import { curate, type GroundedMemory } from '@obversa/memory';
+import { curate, type GroundedMemory } from '@obversa/runtime/memory';
 
 const grounded: GroundedMemory = {
   documents: [

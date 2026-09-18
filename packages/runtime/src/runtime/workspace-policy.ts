@@ -12,13 +12,8 @@ import { cloneFrozenJson, type JsonObject } from '../graph/value.js';
 
 const CONTROL_CHARACTER = /[\u0000-\u001f\u007f]/u;
 
-export type WorkspaceMode = 'none' | 'read' | 'write';
-
-export interface NodeWorkspacePolicy {
-  readonly mode: WorkspaceMode;
-  readonly directory: string | null;
-  readonly allowedPaths: readonly string[];
-}
+import type { NodeWorkspacePolicy } from '@obversa/api';
+export { type WorkspaceMode, type NodeWorkspacePolicy } from '@obversa/api';
 
 export interface WorkspaceEntry {
   readonly policy: NodeWorkspacePolicy;

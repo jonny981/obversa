@@ -16,7 +16,7 @@
  */
 
 import type { Engine, EngineRef, UsageReceipt } from '../engines/engine.js';
-import type { Memory } from '@obversa/memory';
+import type { Memory } from '@obversa/api';
 import type { LoopError } from './errors.js';
 import type { Budget } from './budget.js';
 import type { EnvHandle, Environment } from '../env/environment.js';

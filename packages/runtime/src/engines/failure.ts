@@ -5,4 +5,4 @@ export {
   classifyEngineFailure,
   type EngineErrorInit,
   type EngineFailureKind,
-} from '@obversa/engine';
+} from '@obversa/api';

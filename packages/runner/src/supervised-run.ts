@@ -4,9 +4,9 @@ import { join, resolve } from 'node:path';
 import { setTimeout as delay } from 'node:timers/promises';
 import { fileURLToPath } from 'node:url';
 
-import { commandCleanupCapability, OwnedCommandError, runOwnedCommand } from '@obversa/engine/command';
+import { commandCleanupCapability, OwnedCommandError, runOwnedCommand } from '@obversa/core/command';
 
-import { digestJson } from '@obversa/engine';
+import { digestJson } from '@obversa/api';
 import { createLocalRunStorage, type LocalRunStorageOptions } from '@obversa/runtime/storage/local';
 import {
   interruptRunPreflight, loadRunDefinition, persistRunDefinition, readRunPreflight,

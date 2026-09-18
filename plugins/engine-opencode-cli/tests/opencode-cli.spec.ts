@@ -30,11 +30,11 @@ import {
   type EngineSelectionRecord,
   type JsonValue,
   modelIdentity,
-} from '@obversa/engine';
+} from '@obversa/api';
 import {
   runEngineAdmissionConformance,
   runEngineConformance,
-} from '@obversa/engine/testing';
+} from '@obversa/api/testing';
 import {
   buildOpenCodeInvocation,
   OpenCodeCliEngine,

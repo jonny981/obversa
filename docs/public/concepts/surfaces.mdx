@@ -10,7 +10,7 @@ that one question in front of a person, in a browser, and you want the
 answer back in the run. That is what a surface is: a micro UI, one small
 web page that pauses the run until a person has had their say.
 
-The surfacer package runs it. You give it the page files and the API the
+The surface-decision package runs it. You give it the page files and the API the
 page calls. It serves them on a private port on your own machine, opens the
 page, waits for the person, and hands back whatever they gave you. Then it
 is gone. No server to deploy, no accounts, nothing left running.
@@ -130,7 +130,7 @@ team the answer comes back from the page. The
 
 ## The review surface
 
-`@obversa/source` ships one, built the same way. It opens your git diff in a
+`@obversa/surface-diff` ships one, built the same way. It opens your git diff in a
 browser, you comment on the lines you care about, you approve or reject, and
 it hands back the decision with every comment anchored to a file and a line.
 
@@ -181,6 +181,6 @@ that asked it. The [cmux host](/hosts/cmux) page shows how, and the
 ## Under the hood
 
 The exact limits, headers, serialisation rules and the framed result format
-are on the [surfacer reference](/packages/surfacer) page. Nothing
+are on the [surface decision reference](/packages/surface-decision) page. Nothing
 there is needed to use a surface; it is there when you build a host or a
 page that must interoperate with one.

@@ -8,7 +8,7 @@ import {
   EngineError, EngineIncompleteResultError,
   type AgentRequest, type AgentResult, type Engine, type EngineSelectionRecord,
   type EngineEventSink, type EngineFailureKind, type UsageReceipt,
-} from '@obversa/engine';
+} from '@obversa/api';
 import {
   createGraphExecutor, interruptRunPreflight, readRunPreflight,
   type GraphExecutorOptions, type GraphNodeBinding, type PreflightPauseResult,
