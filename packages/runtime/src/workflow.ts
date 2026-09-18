@@ -400,13 +400,6 @@ function recordedFamilyGate(
       // declared difference. Records are compared by role and stage, never
       // by path.
       const beforeWriters = writerSide(all.slice(0, beforeLength));
-      if (!writerRunsInsidePanel && writerStageNames.length > 0 && beforeWriters.length === 0) {
-        throw new LoopError({
-          code: 'BODY',
-          phase: 'review',
-          message: `recorded model family missing: writer stage ${writerStageNames.join(', ')} has no recorded answer before panel stage ${panelStage}`,
-        });
-      }
       assertRecordedFamilies(beforeWriters, reviewerDeclarations);
       const outcome = await panel(ctx);
       if (outcome.status !== 'pass') return outcome;
@@ -739,6 +732,14 @@ function resumeIdentity(name: string, config: WorkflowConfig): string {
   return createHash('sha256').update(JSON.stringify(declared)).digest('hex');
 }
 
+function restoreRecordedUsage(ctx: JobContext): void {
+  const priorUsage = (ctx.state[RESUME_RECORDED_USAGE] as ReadonlyMap<string, readonly RecordedEngineUsage[]> | undefined)
+    ?.get(ctx.path.join('/'));
+  if (priorUsage?.length) {
+    ctx.state[RECORDED_ENGINE_USAGE] = [...recordedUsage(ctx), ...priorUsage];
+  }
+}
+
 /** Reuse a completed first attempt, or reconcile an unsafe interrupted one. */
 function resumeGuard(job: Job, identity: string, label: string, retrySafe: boolean): Job {
   return async (ctx) => {
@@ -750,14 +751,13 @@ function resumeGuard(job: Job, identity: string, label: string, retrySafe: boole
       : undefined;
     if (ctx.graph?.attempt === 1 && recorded !== undefined) {
       if (recorded.kind === 'interrupted') {
-        if (!retrySafe) return reconcileInterrupted(ctx, label, identity, anchor!.recordId, recorded.startLine);
+        if (!retrySafe) {
+          restoreRecordedUsage(ctx);
+          return reconcileInterrupted(ctx, label, identity, anchor!.recordId, recorded.startLine);
+        }
       } else if (recorded.outcome.status === 'pass'
           && (recorded.outcome.data as { skipped?: boolean } | undefined)?.skipped !== true) {
-        const priorUsage = (ctx.state[RESUME_RECORDED_USAGE] as ReadonlyMap<string, readonly RecordedEngineUsage[]> | undefined)
-          ?.get(ctx.path.join('/'));
-        if (priorUsage?.length) {
-          ctx.state[RECORDED_ENGINE_USAGE] = [...recordedUsage(ctx), ...priorUsage];
-        }
+        restoreRecordedUsage(ctx);
         return recorded.outcome;
       } else if (recorded.outcome.status === 'fail'
           && (recorded.outcome.data as { resumeReconciliation?: boolean } | undefined)?.resumeReconciliation === true) {
@@ -776,6 +776,7 @@ function resumeGuard(job: Job, identity: string, label: string, retrySafe: boole
           return recorded.outcome;
         }
         if (request?.resumeReconciliation === true && request.input?.startLine !== undefined) {
+          restoreRecordedUsage(ctx);
           return reconcileInterrupted(ctx, label, identity, anchor!.recordId, request.input.startLine);
         }
       }

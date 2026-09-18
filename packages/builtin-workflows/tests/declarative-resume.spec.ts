@@ -38,6 +38,75 @@ import { pass, scriptedEngine, seat } from './scripted-engine.js';
  * does not.
  */
 describe('a declarative workflow with a person gate, run twice on one record', () => {
+  it('lets a separate panel review when its conditional writer was skipped', async () => {
+    const directory = await mkdtemp(join(tmpdir(), 'f42-skipped-writer-panel-'));
+    const writer = scriptedEngine('writer', [async () => pass('written')]);
+    const reviewer = scriptedEngine('reviewer', [async () => pass('accepted')], {
+      usageModel: 'claude-sonnet-4-5',
+    });
+    const job = workflow('skipped-writer-panel', {
+      brief: { brief: 'Review the available work.', files: ['note.md'] },
+      roles: { writer: seat(writer, 'gpt'), review: [seat(reviewer, 'claude')] },
+      stages: [
+        stage('probe', { run: [process.execPath, '-e', 'process.exit(1)'], optional: true }),
+        stage('write', { agent: 'writer', writes: 'note.md', when: passed('probe') }),
+        stage('review', { panel: 'review', agree: 1 }),
+      ],
+    });
+
+    try {
+      const result = await run(job, { cwd: directory });
+      expect(result.outcome.status).toBe('pass');
+      expect((result.outcome.data as { write: { data?: { skipped?: boolean } } }).write.data?.skipped).toBe(true);
+      expect(writer.calls).toHaveLength(0);
+      expect(reviewer.calls).toHaveLength(1);
+    } finally {
+      await rm(directory, { recursive: true, force: true });
+    }
+  });
+
+  it.each([
+    { writerModel: 'gpt-5', reviewerModel: 'claude-sonnet-4-5', expectedStatus: 'pass', expectedMessage: undefined, reviewerCalls: 2 },
+    { writerModel: 'claude-sonnet-4-5', reviewerModel: 'claude-sonnet-4-5', expectedStatus: 'fail', expectedMessage: 'recorded model family collision', reviewerCalls: 0 },
+  ])('compares the recorded $writerModel writer after reconciliation against $reviewerModel', async ({ writerModel, reviewerModel, expectedStatus, expectedMessage, reviewerCalls }) => {
+    const directory = await mkdtemp(join(tmpdir(), 'f42-reconciled-writer-panel-'));
+    const recordPath = join(directory, 'record.jsonl');
+    const callbacks = createCallbackClient();
+    const writer = scriptedEngine('writer', [async (request) => {
+      await writeFile(join(request.cwd!, 'note.md'), 'written\n');
+      return pass('written');
+    }], { usageModel: writerModel });
+    const reviewer = scriptedEngine('reviewer', [async () => pass('accepted')], {
+      usageModel: reviewerModel,
+    });
+    const job = workflow('reconciled-writer-panel', {
+      brief: { brief: 'Write and review one note.', files: ['note.md'] },
+      roles: { writer: seat(writer, 'gpt'), review: [seat(reviewer, 'claude')] },
+      stages: [
+        stage('write', { agent: 'writer', writes: 'note.md' }),
+        stage('review', { panel: 'review', agree: 1 }),
+      ],
+    });
+
+    try {
+      expect((await run(job, { cwd: directory, recordTo: recordPath, callbacks })).outcome.status).toBe(expectedStatus);
+      await retainWriterUsageBeforeDone(recordPath, 'write');
+      expect((await run(job, { cwd: directory, recordTo: recordPath, resume: true, callbacks })).outcome.status).toBe('paused');
+      const request = callbacks.listPending()[0]!;
+      expect((await directRouter(callbacks, request, 'operator', () => ({ approved: true }))).ok).toBe(true);
+
+      const resumed = await run(job, { cwd: directory, recordTo: recordPath, resume: true, callbacks });
+      expect(resumed.outcome.status).toBe(expectedStatus);
+      if (expectedMessage !== undefined) {
+        expect(JSON.stringify(resumed.outcome.data ?? resumed.outcome.summary)).toContain(expectedMessage);
+      }
+      expect(writer.calls).toHaveLength(1);
+      expect(reviewer.calls).toHaveLength(reviewerCalls);
+    } finally {
+      await rm(directory, { recursive: true, force: true });
+    }
+  });
+
   it('runs a stage skipped by when after its optional dependency recovers', async () => {
     const directory = await mkdtemp(join(tmpdir(), 'f42-when-resume-'));
     const recordPath = join(directory, 'record.jsonl');
@@ -581,6 +650,16 @@ async function retainStageStart(recordPath: string, stageName: string): Promise<
   const index = lines.findIndex((line) => {
     const event = JSON.parse(line) as { kind: string; node?: string; phase?: string };
     return event.kind === 'dag:node' && event.node === stageName && event.phase === 'start';
+  });
+  expect(index).toBeGreaterThanOrEqual(0);
+  await writeFile(recordPath, `${lines.slice(0, index + 1).join('\n')}\n`);
+}
+
+async function retainWriterUsageBeforeDone(recordPath: string, stageName: string): Promise<void> {
+  const lines = (await readFile(recordPath, 'utf8')).trim().split('\n');
+  const index = lines.findIndex((line) => {
+    const event = JSON.parse(line) as { kind: string; role?: string; stage?: string };
+    return event.kind === 'engine:usage' && event.role === 'writer' && event.stage === stageName;
   });
   expect(index).toBeGreaterThanOrEqual(0);
   await writeFile(recordPath, `${lines.slice(0, index + 1).join('\n')}\n`);

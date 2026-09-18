@@ -842,40 +842,27 @@ describe('declarative teams', () => {
     }
   });
 
-  it.each([
-    {
-      form: 'separate panel',
-      stages: [
-        stage('write', { agent: 'writer', writes: 'note.md' }),
-        stage('review', { panel: 'review', agree: 1 }),
-      ],
-      writerStage: 'write',
-    },
-    {
-      form: 'reviewedBy',
-      stages: [stage('note', { agent: 'writer', writes: 'note.md', reviewedBy: 'review' })],
-      writerStage: 'note',
-    },
-  ])('refuses $form when its writer has no recorded answer', async ({ stages, writerStage }) => {
+  it('refuses a reviewedBy writer with no recorded answer even when both seats select the same model', async () => {
     const directory = await mkdtemp(join(tmpdir(), 'obversa-f42-empty-writer-'));
-    const writer = scriptedEngine('writer', [async (request) => {
+    const writer = scriptedEngine('same-model', [async (request) => {
       await writeFile(join(request.cwd!, 'note.md'), 'written\n');
       return pass('note written');
     }]);
-    const reviewer = scriptedEngine('reviewer', [async () => pass('accepted')], {
+    const reviewer = scriptedEngine('same-model', [async () => pass('accepted')], {
       usageModel: 'gpt-5',
     });
-    const job = workflow(`missing-writer-${writerStage}`, {
+    const job = workflow('missing-reviewedBy-writer', {
       brief: { brief: 'Write one note.', files: ['note.md'] },
       roles: { writer: seat(writer, 'claude'), review: [seat(reviewer, 'gpt')] },
-      stages,
+      stages: [stage('note', { agent: 'writer', writes: 'note.md', reviewedBy: 'review' })],
     });
 
     try {
       const result = await run(job, { cwd: directory });
       expect(result.outcome.status).toBe('fail');
-      expect(JSON.stringify(result.outcome.data ?? result.outcome.summary)).toContain(`writer stage ${writerStage}`);
-      if (writerStage === 'write') expect(reviewer.calls).toHaveLength(0);
+      expect(JSON.stringify(result.outcome.data ?? result.outcome.summary)).toContain('writer stage note');
+      expect(writer.calls).toHaveLength(1);
+      expect(reviewer.calls).toHaveLength(1);
     } finally {
       await rm(directory, { recursive: true, force: true });
     }
