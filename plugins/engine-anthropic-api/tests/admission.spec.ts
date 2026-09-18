@@ -1,10 +1,9 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
   engineSelection,
-  runEngineAdmissionConformance,
   type AgentRequest,
-  type EngineAdmissionConformanceFixture,
-} from '@obversa/engine';
+} from '@obversa/api';
+import { runEngineAdmissionConformance, type EngineAdmissionConformanceFixture } from '@obversa/api/testing';
 import { AnthropicApiEngine } from '../src/index.ts';
 
 const request: AgentRequest = {

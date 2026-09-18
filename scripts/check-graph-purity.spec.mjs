@@ -44,6 +44,15 @@ test('scans every configured graph source root', () => {
   assert.match(result.stderr, /graph-types\/impure\.ts:.*process/);
 });
 
+test('rejects a clock in a directly named API graph file', () => {
+  const result = runFixture({
+    'api/graph-kernel.ts': 'export const compiledAt = Date.now();',
+  }, ['api/graph-kernel.ts']);
+
+  assert.equal(result.status, 1, result.stdout);
+  assert.match(result.stderr, /graph-kernel\.ts:.*time/);
+});
+
 test('allows graph types to use the pinned topological sorter', () => {
   const result = runFixture({
     'graph/kernel.ts': 'export type NodeId = string;',
@@ -62,10 +71,9 @@ test('allows pure local modules and the reviewed interface-package imports', () 
     'graph.ts': `
       import { createHash } from 'node:crypto';
       import { isDeepStrictEqual } from 'node:util';
-      import type { Memory } from '@obversa/memory';
-      import { type MemoryCommand } from '@obversa/memory';
-      import type { JsonObject } from '@obversa/engine';
-      export { canonicalJson, type JsonValue } from '@obversa/engine';
+      import type { Memory, JsonObject } from '@obversa/api';
+      import { type MemoryCommand } from '@obversa/api';
+      export { canonicalJson, type JsonValue } from '@obversa/api';
       import { local } from './nested/local.js';
       export { local } from './nested/local.js';
       export const value = createHash('sha256').update(String(local)).digest('hex');
@@ -80,6 +88,23 @@ test('allows pure local modules and the reviewed interface-package imports', () 
 
   assert.equal(result.status, 0, result.stderr);
   assert.match(result.stdout, /Graph purity check passed \(4 files\)/);
+});
+
+test('allows only the moved pure graph contracts from the API package', () => {
+  const allowed = runFixture({
+    'graph.ts': `
+      import { GraphValidationError, resolveGraphPlan, type GraphCommand, type GraphType, type ResolvedPlan } from '@obversa/api';
+      export { GraphValidationError, resolveGraphPlan };
+      export type { GraphCommand, GraphType, ResolvedPlan };
+    `,
+  });
+  assert.equal(allowed.status, 0, allowed.stderr);
+
+  const forbidden = runFixture({
+    'graph.ts': "import { createProofCache } from '@obversa/api'; export { createProofCache };",
+  });
+  assert.equal(forbidden.status, 1, forbidden.stdout);
+  assert.match(forbidden.stderr, /createProofCache is not a reviewed graph/);
 });
 
 test('rejects forbidden dependencies through static imports and export-from', () => {
@@ -97,9 +122,7 @@ test('rejects forbidden dependencies through static imports and export-from', ()
     'node:process',
     '@obversa/memory-simple',
     '@obversa/memory-git',
-    '@obversa/memory/testing',
-    '@obversa/memory',
-    '@obversa/engine',
+    '@obversa/api',
     'execa',
     '../core/job.js',
     '../shared/helpers.js',
@@ -119,9 +142,7 @@ test('rejects forbidden dependencies through static imports and export-from', ()
       import process from 'node:process';
       import { openSimpleMemory } from '@obversa/memory-simple';
       import { openGitMemory } from '@obversa/memory-git';
-      import type { MemoryConformanceReport } from '@obversa/memory/testing';
-      import { MEMORY_ROOT } from '@obversa/memory';
-      import { MockEngine } from '@obversa/engine';
+      import { MockEngine } from '@obversa/api';
       import { execa } from 'execa';
       import { agentJob } from '../core/job.js';
       import { helper } from '../shared/helpers.js';

@@ -50,6 +50,7 @@ export const stageBranches = {
   F31: 'fix/runtime-node-timeout',
   F32: 'fix/engine-codex-timeout',
   F47: 'feat/remove-opencode-test-hook',
+  F54: 'feat/recorded-family-check',
   F33: 'fix/tournament-node-test',
   D36: 'feat/teams',
   D45: 'docs/whole-file-examples',
@@ -78,6 +79,10 @@ export const stageBranches = {
   F45: 'release/stage-f45-cut',
   F52: 'feat/model-identity-proof',
   F71: 'fix/opencode-admission-boot-window',
+  F72: 'feat/shared-family-derivation',
+  F77: 'fix/kit-fixture-boot-window',
+  F78: 'fix/stand-in-opencode-frames',
+  F66: 'feat/api-polish',
 };
 
 export function manageStage(args, options = {}) {

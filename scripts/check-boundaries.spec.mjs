@@ -50,22 +50,22 @@ function fakeHost(files) {
   };
 }
 const tree = (extra = {}) => ({
-  "/repo/packages/source/src/a.ts": "",
-  "/repo/packages/surfacer/src/index.ts": "",
-  "/repo/packages/memory/src/index.ts": "",
+  "/repo/packages/surface-diff/src/a.ts": "",
+  "/repo/packages/surface-decision/src/index.ts": "",
+  "/repo/packages/api/src/index.ts": "",
   "/repo/tsconfig.base.json": '{ "compilerOptions": { "types": ["node"] } }',
   ...extra,
 });
-const SOURCE = "/repo/packages/source/tsconfig.json";
+const SOURCE = "/repo/packages/surface-diff/tsconfig.json";
 const deps = (text, extra, file = SOURCE) => tsconfigDependencies(text, { file, root: "/repo", host: fakeHost(tree(extra)) });
 const refused = (list) => list.filter((d) => d.startsWith("@obversa/<"));
 
 test("a package.json imports alias, a workspace devDependency, and an alias that installs a sibling under another name are arrows the rules must allow", () => {
-  const at = { file: "/repo/packages/source/package.json", root: "/repo" };
-  assert.deepEqual(manifestImportTargets({ imports: { "#surface": "@obversa/surfacer" } }, at), ["@obversa/surfacer"], "an alias to a sibling by name");
+  const at = { file: "/repo/packages/surface-diff/package.json", root: "/repo" };
+  assert.deepEqual(manifestImportTargets({ imports: { "#surface": "@obversa/surface-decision" } }, at), ["@obversa/surface-decision"], "an alias to a sibling by name");
   assert.deepEqual(
-    manifestImportTargets({ imports: { "#kit": { node: "@obversa/surfacer/client", default: "./src/local.mjs" }, "#mem": ["../memory/src/index.ts", "./fallback.mjs"] } }, at),
-    ["@obversa/surfacer", "@obversa/memory"],
+    manifestImportTargets({ imports: { "#kit": { node: "@obversa/surface-decision/client", default: "./src/local.mjs" }, "#mem": ["../api/src/index.ts", "./fallback.mjs"] } }, at),
+    ["@obversa/surface-decision", "@obversa/api"],
     "every string leaf: a conditional object, an array, a subpath, a relative path into a sibling (a pattern leaf is refused outright; see the vm-alias test)",
   );
   assert.deepEqual(manifestImportTargets({ imports: { "#local": "./src/x.mjs", "#dep": "some-external" } }, at), [], "own paths and external packages are not crossings");
@@ -73,28 +73,28 @@ test("a package.json imports alias, a workspace devDependency, and an alias that
   assert.deepEqual(manifestImportTargets({ imports: { "#module": "module" } }, at), [builtinAlias("module")], "an alias of the module builtin hides its loaders");
   assert.deepEqual(manifestImportTargets({ imports: { "#m": { node: "node:module", default: ["node:module", "./x.mjs"] } } }, at), [builtinAlias("node:module"), builtinAlias("node:module")], "through conditions and arrays");
   assert.deepEqual(manifestImportTargets({}, at), []);
-  assert.deepEqual(manifestImportTargets({ imports: { "#self": "@obversa/source" } }, at), ["@obversa/source"], "a self-alias is reported by name; the scan allows the owner's own name for imports");
-  assert.deepEqual(internalDependencies({ devDependencies: { "@obversa/surfacer": "workspace:^", vitest: "1" } }, "devDependencies"), ["@obversa/surfacer"]);
+  assert.deepEqual(manifestImportTargets({ imports: { "#self": "@obversa/surface-diff" } }, at), ["@obversa/surface-diff"], "a self-alias is reported by name; the scan allows the owner's own name for imports");
+  assert.deepEqual(internalDependencies({ devDependencies: { "@obversa/surface-decision": "workspace:^", vitest: "1" } }, "devDependencies"), ["@obversa/surface-decision"]);
   assert.deepEqual(internalDependencies({}, "devDependencies"), []);
   // The value installs the sibling whatever the key says: `import "hidden"`
-  // then loads @obversa/surfacer, so the alias is the arrow.
+  // then loads @obversa/surface-decision, so the alias is the arrow.
   assert.deepEqual(
-    internalDependencies({ dependencies: { hidden: "npm:@obversa/surfacer@0.1.0", other: "workspace:@obversa/memory@*", "@obversa/runtime": "workspace:^", ext: "npm:lodash@4", plain: "^1.0.0" } }, "dependencies"),
-    ["@obversa/memory", "@obversa/runtime", "@obversa/surfacer"],
+    internalDependencies({ dependencies: { hidden: "npm:@obversa/surface-decision@0.1.0", other: "workspace:@obversa/api@*", "@obversa/runtime": "workspace:^", ext: "npm:lodash@4", plain: "^1.0.0" } }, "dependencies"),
+    ["@obversa/api", "@obversa/runtime", "@obversa/surface-decision"],
     "npm: and workspace: aliases by value, keys by name, externals ignored",
   );
-  assert.deepEqual(internalDependencies({ peerDependencies: { mem: "npm:@obversa/memory@^0.1.0" } }, "peerDependencies"), ["@obversa/memory"], "a peer alias counts too");
-  assert.deepEqual(internalDependencies({ peerDependencies: { mem: "npm:@obversa/memory" } }, "peerDependencies"), [refusal("peerDependencies mem is npm:@obversa/memory, whose selector is not a version range")], "an alias without a selector is a tag");
+  assert.deepEqual(internalDependencies({ peerDependencies: { mem: "npm:@obversa/api@^0.1.0" } }, "peerDependencies"), ["@obversa/api"], "a peer alias counts too");
+  assert.deepEqual(internalDependencies({ peerDependencies: { mem: "npm:@obversa/api" } }, "peerDependencies"), [refusal("peerDependencies mem is npm:@obversa/api, whose selector is not a version range")], "an alias without a selector is a tag");
   // pnpm links a relative workspace spec to the package at that path.
-  assert.deepEqual(internalDependencies({ dependencies: { hidden: "workspace:../surfacer" } }, "dependencies", at), ["@obversa/surfacer"], "a relative workspace alias is placed by its directory");
-  assert.deepEqual(internalDependencies({ dependencies: { self: "workspace:./" } }, "dependencies", at), ["@obversa/source"], "the owner's own directory names the owner");
+  assert.deepEqual(internalDependencies({ dependencies: { hidden: "workspace:../surface-decision" } }, "dependencies", at), ["@obversa/surface-decision"], "a relative workspace alias is placed by its directory");
+  assert.deepEqual(internalDependencies({ dependencies: { self: "workspace:./" } }, "dependencies", at), ["@obversa/surface-diff"], "the owner's own directory names the owner");
   assert.deepEqual(internalDependencies({ dependencies: { odd: "workspace:../../hosts/cmux" } }, "dependencies", at), [refusal("dependencies odd links ../../hosts/cmux, which is not a workspace package the scan can place")]);
-  assert.deepEqual(internalDependencies({ dependencies: { hidden: "workspace:../surfacer" } }, "dependencies"), [refusal("dependencies hidden links ../surfacer, which is not a workspace package the scan can place")], "without a location a path alias is refused");
-  assert.deepEqual(internalDependencies({ dependencies: { "@obversa/memory": "workspace:^" } }, "dependencies", at), ["@obversa/memory"], "a version range is not a path");
+  assert.deepEqual(internalDependencies({ dependencies: { hidden: "workspace:../surface-decision" } }, "dependencies"), [refusal("dependencies hidden links ../surface-decision, which is not a workspace package the scan can place")], "without a location a path alias is refused");
+  assert.deepEqual(internalDependencies({ dependencies: { "@obversa/api": "workspace:^" } }, "dependencies", at), ["@obversa/api"], "a version range is not a path");
 });
 
 test("a dependency value is a registry range, a registry alias, a workspace package, or refused", () => {
-  const at = { file: "/repo/packages/source/package.json", root: "/repo" };
+  const at = { file: "/repo/packages/surface-diff/package.json", root: "/repo" };
   for (const range of ["1.2.3", "^1.2.3", "~0.1.0", ">=0.1.0 <0.2.0", ">= 1.0.0", ">= 0.1.0 < 0.2.0", "1.x", "*", "1.2.3 - 2.0.0", "^1.0.0 || ^2.0.0", "4.4.3", "0.3.241", "1.0.0-beta.1", "1.0.0-rc-1+build.7"]) assert.equal(isVersionRange(range), true, range);
   // node-semver's grammar, as pnpm reads it: an identifier is [0-9A-Za-z-];
   // anything it returns null for falls through to a tag.
@@ -103,7 +103,7 @@ test("a dependency value is a registry range, a registry alias, a workspace pack
   // version is pinned).
   for (const range of ["1", "1.2", "1.x", "1.X", "1.*", "1.2.x", "1.x.x", "x", "X", "x.x.x", "*.*", "1.x.3", "x.1", "1.*.3", "x.1.2"]) assert.equal(isVersionRange(range), true, `${range} is an x-range`);
   // What pnpm treats as a tag: validRange(..., { loose: true }) is null.
-  const tags = ["1.2-foo", "1.x-foo", "1.2.3.4", "9007199254740992.0.0", `1.2.3-${"a".repeat(300)}`, "0+a", "latest", "1.0.0-foo_bar", "1.0.0+a_b", "../surfacer", "github:obversa/surfacer", "obversa/surfacer", "git+ssh://git@github.com/o/s.git", "https://example.test/s.tgz", "file:../surfacer", "link:../surfacer", "catalog:"];
+  const tags = ["1.2-foo", "1.x-foo", "1.2.3.4", "9007199254740992.0.0", `1.2.3-${"a".repeat(300)}`, "0+a", "latest", "1.0.0-foo_bar", "1.0.0+a_b", "../surface-decision", "github:obversa/surface-decision", "obversa/surface-decision", "git+ssh://git@github.com/o/s.git", "https://example.test/s.tgz", "file:../surface-decision", "link:../surface-decision", "catalog:"];
   for (const other of tags) assert.equal(isVersionRange(other), false, `${other} is a tag to pnpm`);
   assert.equal(isVersionRange(""), false, "an empty selector is nothing to pnpm, though validRange reads it as *");
   // The premise, on the pinned semver 7.7.2 that pnpm 10.15.1 bundles:
@@ -116,25 +116,25 @@ test("a dependency value is a registry range, a registry alias, a workspace pack
   assert.deepEqual(dependencyTarget("lod", "npm:lodash@^4", at), { external: true }, "an alias of a registry package");
   assert.deepEqual(dependencyTarget("lod", "npm:lodash", at), { refused: "lod is npm:lodash, which is not a registry version the scan can read" }, "an alias without a version installs latest, a tag");
   assert.deepEqual(dependencyTarget("x", "1.0.0-foo_bar", at), { refused: "x is 1.0.0-foo_bar, which is not a registry version the scan can read" });
-  assert.deepEqual(dependencyTarget("@obversa/memory", "workspace:^", at), { name: "@obversa/memory" });
-  assert.deepEqual(dependencyTarget("@obversa/memory", ">=0.1.0 <0.2.0", at), { name: "@obversa/memory" }, "a peer by range");
-  assert.deepEqual(dependencyTarget("hidden", "npm:@obversa/surfacer@0.1.0", at), { name: "@obversa/surfacer" });
-  assert.deepEqual(dependencyTarget("hidden", "workspace:@obversa/surfacer@^", at), { name: "@obversa/surfacer" });
-  assert.deepEqual(dependencyTarget("hidden", "workspace:@obversa/surfacer@>=0.1.0", at), { name: "@obversa/surfacer" });
+  assert.deepEqual(dependencyTarget("@obversa/api", "workspace:^", at), { name: "@obversa/api" });
+  assert.deepEqual(dependencyTarget("@obversa/api", ">=0.1.0 <0.2.0", at), { name: "@obversa/api" }, "a peer by range");
+  assert.deepEqual(dependencyTarget("hidden", "npm:@obversa/surface-decision@0.1.0", at), { name: "@obversa/surface-decision" });
+  assert.deepEqual(dependencyTarget("hidden", "workspace:@obversa/surface-decision@^", at), { name: "@obversa/surface-decision" });
+  assert.deepEqual(dependencyTarget("hidden", "workspace:@obversa/surface-decision@>=0.1.0", at), { name: "@obversa/surface-decision" });
   // An internal alias needs a real selector too: a tag or none installs
   // whatever the tag points at.
-  assert.deepEqual(dependencyTarget("hidden", "npm:@obversa/memory@latest", at), { refused: "hidden is npm:@obversa/memory@latest, whose selector is not a version range" });
-  assert.deepEqual(dependencyTarget("hidden", "npm:@obversa/memory", at), { refused: "hidden is npm:@obversa/memory, whose selector is not a version range" });
-  assert.deepEqual(dependencyTarget("hidden", "workspace:@obversa/memory@latest", at), { refused: "hidden is workspace:@obversa/memory@latest, whose selector is not a version range" });
-  assert.deepEqual(dependencyTarget("hidden", "workspace:../surfacer", at), { name: "@obversa/surfacer" });
-  assert.deepEqual(dependencyTarget("hidden", "../surfacer", at), { refused: "hidden is ../surfacer, which is not a registry version the scan can read" }, "a bare path is a local install");
-  assert.deepEqual(dependencyTarget("hidden", "github:obversa/surfacer", at), { refused: "hidden is github:obversa/surfacer, which is not a registry version the scan can read" });
-  assert.deepEqual(dependencyTarget("hidden", "obversa/surfacer", at), { refused: "hidden is obversa/surfacer, which is not a registry version the scan can read" }, "a bare owner/repo is a Git spec");
+  assert.deepEqual(dependencyTarget("hidden", "npm:@obversa/api@latest", at), { refused: "hidden is npm:@obversa/api@latest, whose selector is not a version range" });
+  assert.deepEqual(dependencyTarget("hidden", "npm:@obversa/api", at), { refused: "hidden is npm:@obversa/api, whose selector is not a version range" });
+  assert.deepEqual(dependencyTarget("hidden", "workspace:@obversa/api@latest", at), { refused: "hidden is workspace:@obversa/api@latest, whose selector is not a version range" });
+  assert.deepEqual(dependencyTarget("hidden", "workspace:../surface-decision", at), { name: "@obversa/surface-decision" });
+  assert.deepEqual(dependencyTarget("hidden", "../surface-decision", at), { refused: "hidden is ../surface-decision, which is not a registry version the scan can read" }, "a bare path is a local install");
+  assert.deepEqual(dependencyTarget("hidden", "github:obversa/surface-decision", at), { refused: "hidden is github:obversa/surface-decision, which is not a registry version the scan can read" });
+  assert.deepEqual(dependencyTarget("hidden", "obversa/surface-decision", at), { refused: "hidden is obversa/surface-decision, which is not a registry version the scan can read" }, "a bare owner/repo is a Git spec");
   assert.deepEqual(dependencyTarget("hidden", "git+ssh://git@github.com/o/s.git", at), { refused: "hidden is git+ssh://git@github.com/o/s.git, which is not a registry version the scan can read" });
-  assert.deepEqual(dependencyTarget("hidden", "link:packages/surfacer", at), { refused: "hidden is link:packages/surfacer, which is not a registry version the scan can read" });
+  assert.deepEqual(dependencyTarget("hidden", "link:packages/surface-decision", at), { refused: "hidden is link:packages/surface-decision, which is not a registry version the scan can read" });
   assert.deepEqual(dependencyTarget("hidden", "catalog:", at), { refused: "hidden is catalog:, which is not a registry version the scan can read" });
   assert.deepEqual(dependencyTarget("hidden", "latest", at), { refused: "hidden is latest, which is not a registry version the scan can read" }, "a tag is not a version");
-  assert.deepEqual(dependencyTarget("@obversa/memory", "link:../memory", at), { refused: "@obversa/memory is link:../memory, which is not a workspace range the scan can read" });
+  assert.deepEqual(dependencyTarget("@obversa/api", "link:../api", at), { refused: "@obversa/api is link:../api, which is not a workspace range the scan can read" });
 });
 
 test("path ownership comes from the explicit package map when directory and package names differ", () => {
@@ -162,82 +162,82 @@ test("path ownership comes from the explicit package map when directory and pack
 });
 
 test("a manifest's entry fields are placed by the package their real path lies in", () => {
-  const at = { file: "/repo/packages/source/package.json", root: "/repo", host: fakeHost(tree()) };
+  const at = { file: "/repo/packages/surface-diff/package.json", root: "/repo", host: fakeHost(tree()) };
   assert.deepEqual(manifestPathTargets({ main: "./dist/index.js", types: "./dist/index.d.ts", exports: { ".": { types: "./dist/index.d.ts", import: "./dist/index.js" }, "./package.json": "./package.json" } }, at), [], "own paths");
-  assert.deepEqual(manifestPathTargets({ main: "../surfacer/src/index.mjs" }, at), ["@obversa/surfacer"], "main into a sibling");
-  assert.deepEqual(manifestPathTargets({ module: "../memory/src/index.ts", browser: { "./x.js": "../surfacer/src/client.mjs", fs: "browserify-fs" } }, at), ["@obversa/memory", "@obversa/surfacer"], "module and a browser map; a bare package name is not a path");
-  assert.deepEqual(manifestPathTargets({ types: "../surfacer/types/index.d.ts" }, at), ["@obversa/surfacer"], "types");
-  assert.deepEqual(manifestPathTargets({ typings: "../surfacer/types/index.d.ts" }, at), ["@obversa/surfacer"], "typings");
-  assert.deepEqual(manifestPathTargets({ typesVersions: { ">=4": { "testing": ["../memory/dist/testing.d.ts"] } } }, at), ["@obversa/memory"], "an exact typesVersions mapping by its path");
-  assert.deepEqual(manifestPathTargets({ typesVersions: { "*": { "*": ["types/*"] } } }, at), [refusal("typesVersions uses a wildcard, which substitutes a consumer subpath the scan cannot bound")], "a wildcard mapping lets @obversa/source/../../surfacer/index resolve into the sibling under the compiler");
-  assert.deepEqual(manifestPathTargets({ typesVersions: { "*": { "*": ["../memory/dist/*"] } } }, at), [refusal("typesVersions uses a wildcard, which substitutes a consumer subpath the scan cannot bound"), "@obversa/memory"]);
-  assert.deepEqual(manifestPathTargets({ exports: { "./deep": "../surfacer/src/index.mjs" } }, at), ["@obversa/surfacer"], "an exports leaf");
-  assert.deepEqual(manifestPathTargets({ directories: { lib: "../surfacer/src" } }, at), ["@obversa/surfacer"]);
-  assert.deepEqual(manifestPathTargets({ publishConfig: { access: "public", directory: "../surfacer" } }, at), ["@obversa/surfacer"], "publishing another directory");
+  assert.deepEqual(manifestPathTargets({ main: "../surface-decision/src/index.mjs" }, at), ["@obversa/surface-decision"], "main into a sibling");
+  assert.deepEqual(manifestPathTargets({ module: "../api/src/index.ts", browser: { "./x.js": "../surface-decision/src/client.mjs", fs: "browserify-fs" } }, at), ["@obversa/api", "@obversa/surface-decision"], "module and a browser map; a bare package name is not a path");
+  assert.deepEqual(manifestPathTargets({ types: "../surface-decision/types/index.d.ts" }, at), ["@obversa/surface-decision"], "types");
+  assert.deepEqual(manifestPathTargets({ typings: "../surface-decision/types/index.d.ts" }, at), ["@obversa/surface-decision"], "typings");
+  assert.deepEqual(manifestPathTargets({ typesVersions: { ">=4": { "testing": ["../api/dist/testing.d.ts"] } } }, at), ["@obversa/api"], "an exact typesVersions mapping by its path");
+  assert.deepEqual(manifestPathTargets({ typesVersions: { "*": { "*": ["types/*"] } } }, at), [refusal("typesVersions uses a wildcard, which substitutes a consumer subpath the scan cannot bound")], "a wildcard mapping lets @obversa/surface-diff/../../surface-decision/index resolve into the sibling under the compiler");
+  assert.deepEqual(manifestPathTargets({ typesVersions: { "*": { "*": ["../api/dist/*"] } } }, at), [refusal("typesVersions uses a wildcard, which substitutes a consumer subpath the scan cannot bound"), "@obversa/api"]);
+  assert.deepEqual(manifestPathTargets({ exports: { "./deep": "../surface-decision/src/index.mjs" } }, at), ["@obversa/surface-decision"], "an exports leaf");
+  assert.deepEqual(manifestPathTargets({ directories: { lib: "../surface-decision/src" } }, at), ["@obversa/surface-decision"]);
+  assert.deepEqual(manifestPathTargets({ publishConfig: { access: "public", directory: "../surface-decision" } }, at), ["@obversa/surface-decision"], "publishing another directory");
   assert.deepEqual(manifestPathTargets({ main: "../../" }, at), [refusal("main reaches ., which holds every package")]);
-  assert.deepEqual(manifestPathTargets({ main: "@obversa/surfacer/src/index.mjs" }, at), ["@obversa/surfacer"], "by name");
+  assert.deepEqual(manifestPathTargets({ main: "@obversa/surface-decision/src/index.mjs" }, at), ["@obversa/surface-decision"], "by name");
   // `?` and `*` are ordinary characters in an entry path; Node loads the
   // file they name, `..` and all.
-  assert.deepEqual(manifestPathTargets({ main: "./x?/../../surfacer/index.cjs" }, at), ["@obversa/surfacer"], "a question mark does not end the path");
-  assert.deepEqual(manifestPathTargets({ module: "./x*/../../memory/index.js", types: "./t?/../../surfacer/index.d.ts" }, at), ["@obversa/memory", "@obversa/surfacer"]);
-  assert.deepEqual(manifestImportTargets({ imports: { "#x": "./x?/../../surfacer/src/index.mjs" } }, { file: "/repo/packages/source/package.json", root: "/repo" }), ["@obversa/surfacer"], "an imports leaf too");
+  assert.deepEqual(manifestPathTargets({ main: "./x?/../../surface-decision/index.cjs" }, at), ["@obversa/surface-decision"], "a question mark does not end the path");
+  assert.deepEqual(manifestPathTargets({ module: "./x*/../../api/index.js", types: "./t?/../../surface-decision/index.d.ts" }, at), ["@obversa/api", "@obversa/surface-decision"]);
+  assert.deepEqual(manifestImportTargets({ imports: { "#x": "./x?/../../surface-decision/src/index.mjs" } }, { file: "/repo/packages/surface-diff/package.json", root: "/repo" }), ["@obversa/surface-decision"], "an imports leaf too");
 });
 
 test("a project config is read as the compiler reads it: every extends form, ${configDir}, and the options a base carries", () => {
-  const base = '{ "compilerOptions": { "jsxImportSource": "@obversa/surfacer" } }';
-  const deeper = '{ "extends": "./deeper.json", "compilerOptions": { "paths": { "#m/*": ["../memory/src/*"] } } }';
-  const chain = { "/repo/packages/source/base.json": '{ "extends": "./deeper.json", "compilerOptions": { "jsxImportSource": "@obversa/surfacer" } }', "/repo/packages/source/deeper.json": '{ "compilerOptions": { "paths": { "#m/*": ["../memory/src/*"] } } }' };
-  assert.deepEqual(deps('{ "extends": "./base.json" }', chain), ["@obversa/surfacer", "@obversa/memory"], "a same-package base carries the dependency, and its own base too");
-  assert.deepEqual(deps('{ "extends": "/repo/packages/source/base.json" }', chain), ["@obversa/surfacer", "@obversa/memory"], "an absolute parent");
-  assert.deepEqual(deps('{ "extends": "./base" }', chain), ["@obversa/surfacer", "@obversa/memory"], "an extensionless parent is probed with .json, as the compiler does");
-  assert.deepEqual(deps('{ "extends": ["./deeper.json", "./base.json"] }', chain), ["@obversa/surfacer", "@obversa/memory"], "an extends array inherits each base");
+  const base = '{ "compilerOptions": { "jsxImportSource": "@obversa/surface-decision" } }';
+  const deeper = '{ "extends": "./deeper.json", "compilerOptions": { "paths": { "#m/*": ["../api/src/*"] } } }';
+  const chain = { "/repo/packages/surface-diff/base.json": '{ "extends": "./deeper.json", "compilerOptions": { "jsxImportSource": "@obversa/surface-decision" } }', "/repo/packages/surface-diff/deeper.json": '{ "compilerOptions": { "paths": { "#m/*": ["../api/src/*"] } } }' };
+  assert.deepEqual(deps('{ "extends": "./base.json" }', chain), ["@obversa/surface-decision", "@obversa/api"], "a same-package base carries the dependency, and its own base too");
+  assert.deepEqual(deps('{ "extends": "/repo/packages/surface-diff/base.json" }', chain), ["@obversa/surface-decision", "@obversa/api"], "an absolute parent");
+  assert.deepEqual(deps('{ "extends": "./base" }', chain), ["@obversa/surface-decision", "@obversa/api"], "an extensionless parent is probed with .json, as the compiler does");
+  assert.deepEqual(deps('{ "extends": ["./deeper.json", "./base.json"] }', chain), ["@obversa/surface-decision", "@obversa/api"], "an extends array inherits each base");
   assert.deepEqual(
-    deps('{ "extends": "#config" }', { "/repo/packages/source/package.json": '{ "name": "@obversa/source", "imports": { "#config": "./base.json" } }', "/repo/packages/source/base.json": base }),
-    ["@obversa/surfacer"],
+    deps('{ "extends": "#config" }', { "/repo/packages/surface-diff/package.json": '{ "name": "@obversa/surface-diff", "imports": { "#config": "./base.json" } }', "/repo/packages/surface-diff/base.json": base }),
+    ["@obversa/surface-decision"],
     "a base named through the manifest's imports map is inherited",
   );
   assert.deepEqual(
-    deps('{ "extends": "@obversa/source/config" }', { "/repo/packages/source/package.json": '{ "name": "@obversa/source", "exports": { "./config": "./base.json" } }', "/repo/packages/source/base.json": base }),
-    ["@obversa/surfacer"],
+    deps('{ "extends": "@obversa/surface-diff/config" }', { "/repo/packages/surface-diff/package.json": '{ "name": "@obversa/surface-diff", "exports": { "./config": "./base.json" } }', "/repo/packages/surface-diff/base.json": base }),
+    ["@obversa/surface-decision"],
     "a base named through the package's own exports is inherited",
   );
-  assert.deepEqual(deps('{ "extends": "../surfacer/tsconfig.json" }', { "/repo/packages/surfacer/tsconfig.json": deeper, "/repo/packages/surfacer/deeper.json": "{}" }), ["@obversa/surfacer", "@obversa/surfacer", "@obversa/memory"], "a base in a sibling is a crossing, its own base too, and what it carries is inherited");
+  assert.deepEqual(deps('{ "extends": "../surface-decision/tsconfig.json" }', { "/repo/packages/surface-decision/tsconfig.json": deeper, "/repo/packages/surface-decision/deeper.json": "{}" }), ["@obversa/surface-decision", "@obversa/surface-decision", "@obversa/api"], "a base in a sibling is a crossing, its own base too, and what it carries is inherited");
   assert.deepEqual(deps('{ "extends": "@tsconfig/node22/tsconfig.json" }', { "/repo/node_modules/@tsconfig/node22/tsconfig.json": "{}" }), [], "an installed external base is not a crossing");
-  assert.deepEqual(deps('{ "compilerOptions": { "baseUrl": "${configDir}/../surfacer" } }'), ["@obversa/surfacer"], "${configDir} expands to the config's directory");
+  assert.deepEqual(deps('{ "compilerOptions": { "baseUrl": "${configDir}/../surface-decision" } }'), ["@obversa/surface-decision"], "${configDir} expands to the config's directory");
   assert.deepEqual(deps('{ "extends": "../../tsconfig.base.json", "include": ["src"], "compilerOptions": { "paths": { "#local/*": ["./src/*"] } } }'), [], "the repository base, own sources, and own aliases are not crossings");
   // Every JSON under a package that the compiler would read as a project.
-  assert.equal(isProjectConfig("packages/source/tsconfig.json", "{}"), true);
-  assert.equal(isProjectConfig("packages/source/config/tsconfig.build.json", "{}"), true, "a nested tsconfig");
-  assert.equal(isProjectConfig("packages/source/jsconfig.json", "{}"), true, "a jsconfig");
-  assert.equal(isProjectConfig("packages/source/config/build.json", '{ "compilerOptions": { "paths": {} } }'), true, "any name, by its project fields: tsc -p accepts it");
-  assert.equal(isProjectConfig("packages/source/config/build.json", '{ "extends": "./x.json" }'), true);
-  assert.equal(isProjectConfig("packages/source/data.json", '{ "a": 1 }'), false, "plain data");
-  assert.equal(isProjectConfig("packages/source/list.json", "[1]"), false);
-  assert.equal(isProjectConfig("packages/source/package.json", '{ "files": ["dist"] }'), false, "the manifest is read separately");
+  assert.equal(isProjectConfig("packages/surface-diff/tsconfig.json", "{}"), true);
+  assert.equal(isProjectConfig("packages/surface-diff/config/tsconfig.build.json", "{}"), true, "a nested tsconfig");
+  assert.equal(isProjectConfig("packages/surface-diff/jsconfig.json", "{}"), true, "a jsconfig");
+  assert.equal(isProjectConfig("packages/surface-diff/config/build.json", '{ "compilerOptions": { "paths": {} } }'), true, "any name, by its project fields: tsc -p accepts it");
+  assert.equal(isProjectConfig("packages/surface-diff/config/build.json", '{ "extends": "./x.json" }'), true);
+  assert.equal(isProjectConfig("packages/surface-diff/data.json", '{ "a": 1 }'), false, "plain data");
+  assert.equal(isProjectConfig("packages/surface-diff/list.json", "[1]"), false);
+  assert.equal(isProjectConfig("packages/surface-diff/package.json", '{ "files": ["dist"] }'), false, "the manifest is read separately");
   assert.equal(isProjectConfig("hosts/cmux/tsconfig.json", "{}"), false, "only packages carry boundary rules");
 });
 
 test("every effective option that can reach a sibling is placed by the package it lands in; a value that reaches every package is refused", () => {
-  assert.deepEqual(deps('{\n  // comments and trailing commas are fine\n  "compilerOptions": { "jsx": "react-jsx", "jsxImportSource": "@obversa/surfacer", },\n}\n'), ["@obversa/surfacer"]);
+  assert.deepEqual(deps('{\n  // comments and trailing commas are fine\n  "compilerOptions": { "jsx": "react-jsx", "jsxImportSource": "@obversa/surface-decision", },\n}\n'), ["@obversa/surface-decision"]);
   assert.deepEqual(deps('{ "compilerOptions": { "jsx": "react-jsx" } }'), []);
-  assert.deepEqual(deps('{ "compilerOptions": { "types": ["node", "@obversa/surfacer"] } }'), ["@obversa/surfacer"], "types by name");
-  assert.deepEqual(deps('{ "compilerOptions": { "typeRoots": ["./types", "../surfacer/types"] } }'), ["@obversa/surfacer"], "typeRoots");
-  assert.deepEqual(deps('{ "compilerOptions": { "typeRoots": ["../../hosts/types"], "types": ["../surfacer/types"] } }'), ["@obversa/surfacer"], "a types entry by path");
-  assert.deepEqual(deps('{ "compilerOptions": { "baseUrl": "../surfacer" } }'), ["@obversa/surfacer"], "baseUrl");
-  assert.deepEqual(deps('{ "compilerOptions": { "baseUrl": "/repo/packages/surfacer" } }'), ["@obversa/surfacer"], "an absolute baseUrl");
-  assert.deepEqual(deps('{ "compilerOptions": { "rootDirs": ["./src", "../memory/src"] } }'), ["@obversa/memory"], "rootDirs");
-  assert.deepEqual(deps('{ "compilerOptions": { "plugins": [{ "name": "@obversa/surfacer" }] } }'), ["@obversa/surfacer"], "a plugin by name");
-  assert.deepEqual(deps('{ "typeAcquisition": { "include": ["@obversa/memory"] } }'), ["@obversa/memory"], "typeAcquisition.include");
-  assert.deepEqual(deps('{ "compilerOptions": { "paths": { "#kit/*": ["../surfacer/src/*"] } } }'), ["@obversa/surfacer"], "a paths alias into a sibling");
-  assert.deepEqual(deps('{ "references": [{ "path": "../memory" }] }'), ["@obversa/memory"], "a project reference");
-  assert.deepEqual(deps('{ "include": ["src/**/*", "../surfacer/src/**/*"] }'), ["@obversa/surfacer", "@obversa/surfacer"], "include with a glob into a sibling: the file it matches, and the directory it walks");
-  assert.deepEqual(deps('{ "files": ["../memory/src/index.ts"] }'), ["@obversa/memory"], "files");
-  assert.deepEqual(deps('{ "files": ["/repo/packages/memory/src/index.ts"] }'), ["@obversa/memory"], "an absolute file");
+  assert.deepEqual(deps('{ "compilerOptions": { "types": ["node", "@obversa/surface-decision"] } }'), ["@obversa/surface-decision"], "types by name");
+  assert.deepEqual(deps('{ "compilerOptions": { "typeRoots": ["./types", "../surface-decision/types"] } }'), ["@obversa/surface-decision"], "typeRoots");
+  assert.deepEqual(deps('{ "compilerOptions": { "typeRoots": ["../../hosts/types"], "types": ["../surface-decision/types"] } }'), ["@obversa/surface-decision"], "a types entry by path");
+  assert.deepEqual(deps('{ "compilerOptions": { "baseUrl": "../surface-decision" } }'), ["@obversa/surface-decision"], "baseUrl");
+  assert.deepEqual(deps('{ "compilerOptions": { "baseUrl": "/repo/packages/surface-decision" } }'), ["@obversa/surface-decision"], "an absolute baseUrl");
+  assert.deepEqual(deps('{ "compilerOptions": { "rootDirs": ["./src", "../api/src"] } }'), ["@obversa/api"], "rootDirs");
+  assert.deepEqual(deps('{ "compilerOptions": { "plugins": [{ "name": "@obversa/surface-decision" }] } }'), ["@obversa/surface-decision"], "a plugin by name");
+  assert.deepEqual(deps('{ "typeAcquisition": { "include": ["@obversa/api"] } }'), ["@obversa/api"], "typeAcquisition.include");
+  assert.deepEqual(deps('{ "compilerOptions": { "paths": { "#kit/*": ["../surface-decision/src/*"] } } }'), ["@obversa/surface-decision"], "a paths alias into a sibling");
+  assert.deepEqual(deps('{ "references": [{ "path": "../api" }] }'), ["@obversa/api"], "a project reference");
+  assert.deepEqual(deps('{ "include": ["src/**/*", "../surface-decision/src/**/*"] }'), ["@obversa/surface-decision", "@obversa/surface-decision"], "include with a glob into a sibling: the file it matches, and the directory it walks");
+  assert.deepEqual(deps('{ "files": ["../api/src/index.ts"] }'), ["@obversa/api"], "files");
+  assert.deepEqual(deps('{ "files": ["/repo/packages/api/src/index.ts"] }'), ["@obversa/api"], "an absolute file");
   // paths targets substitute against baseUrl when it is set — even one
   // inherited from a base — else against the config that declared them.
-  assert.deepEqual(deps('{ "compilerOptions": { "baseUrl": "./src", "paths": { "#surf/*": ["../../surfacer/src/*"] } } }'), ["@obversa/surfacer"], "a paths target relative to an own baseUrl");
-  const inherited = deps('{ "extends": "./base.json", "compilerOptions": { "paths": { "#surf/*": ["packages/surfacer/src/*"] } } }', { "/repo/packages/source/base.json": '{ "compilerOptions": { "baseUrl": "../.." } }' });
-  assert.deepEqual(inherited, [refusal("baseUrl reaches ., which holds every package"), "@obversa/surfacer"], "the inherited baseUrl at the repository root is refused, and the target it anchors still names the sibling");
+  assert.deepEqual(deps('{ "compilerOptions": { "baseUrl": "./src", "paths": { "#surf/*": ["../../surface-decision/src/*"] } } }'), ["@obversa/surface-decision"], "a paths target relative to an own baseUrl");
+  const inherited = deps('{ "extends": "./base.json", "compilerOptions": { "paths": { "#surf/*": ["packages/surface-decision/src/*"] } } }', { "/repo/packages/surface-diff/base.json": '{ "compilerOptions": { "baseUrl": "../.." } }' });
+  assert.deepEqual(inherited, [refusal("baseUrl reaches ., which holds every package"), "@obversa/surface-decision"], "the inherited baseUrl at the repository root is refused, and the target it anchors still names the sibling");
   // A wildcard whose literal prefix is packages/ or above ranges over every
   // sibling; so does an include walking above the package.
   assert.deepEqual(deps('{ "compilerOptions": { "paths": { "#pick/*": ["../*/src/index.ts"] } } }'), [refusal("paths target ../*/src/index.ts for #pick/* reaches packages, which holds every package")]);
@@ -245,17 +245,17 @@ test("every effective option that can reach a sibling is placed by the package i
   assert.deepEqual(refused(deps('{ "include": ["../**/*"] }')), [refusal("include reaches packages, which holds every package")]);
   // The premises: the compiler resolves the aliases the way the scan assumes.
   const host = fakeHost(tree());
-  const resolved = (name, options) => ts.resolveModuleName(name, "/repo/packages/source/src/a.ts", options, host).resolvedModule?.resolvedFileName;
-  assert.equal(resolved("#surf/index", { baseUrl: "/repo", paths: { "#surf/*": ["packages/surfacer/src/*"] } }), "/repo/packages/surfacer/src/index.ts", "a paths target is substituted against baseUrl");
-  assert.equal(resolved("#pick/surfacer", { paths: { "#pick/*": ["../*/src/index.ts"] }, pathsBasePath: "/repo/packages/source" }), "/repo/packages/surfacer/src/index.ts", "a wildcard in a directory segment ranges over siblings");
-  const emitted = ts.transpileModule("export const view = <Panel />;", { compilerOptions: { jsx: ts.JsxEmit.ReactJSX, jsxImportSource: "@obversa/surfacer", module: ts.ModuleKind.ESNext }, fileName: "view.jsx" }).outputText;
-  assert.match(emitted, /@obversa\/surfacer\/jsx-runtime/, "with that option and no pragma, the compiler emits the import");
+  const resolved = (name, options) => ts.resolveModuleName(name, "/repo/packages/surface-diff/src/a.ts", options, host).resolvedModule?.resolvedFileName;
+  assert.equal(resolved("#surf/index", { baseUrl: "/repo", paths: { "#surf/*": ["packages/surface-decision/src/*"] } }), "/repo/packages/surface-decision/src/index.ts", "a paths target is substituted against baseUrl");
+  assert.equal(resolved("#pick/surface-decision", { paths: { "#pick/*": ["../*/src/index.ts"] }, pathsBasePath: "/repo/packages/surface-diff" }), "/repo/packages/surface-decision/src/index.ts", "a wildcard in a directory segment ranges over siblings");
+  const emitted = ts.transpileModule("export const view = <Panel />;", { compilerOptions: { jsx: ts.JsxEmit.ReactJSX, jsxImportSource: "@obversa/surface-decision", module: ts.ModuleKind.ESNext }, fileName: "view.jsx" }).outputText;
+  assert.match(emitted, /@obversa\/surface-decision\/jsx-runtime/, "with that option and no pragma, the compiler emits the import");
 });
 
 test("a config the compiler cannot read is refused whole; a project with no inputs is not", () => {
   const only = (list) => (assert.equal(list.length, 1, list.join()), list[0]);
   assert.match(only(deps("{")), /^@obversa\/<the config cannot be read as the compiler reads it: TS1005 /, "malformed JSON");
-  assert.match(only(deps('{ "extends": "./missing.json" }')), /TS5083 Cannot read file '\/repo\/packages\/source\/missing\.json'/, "an unreadable base named with its extension");
+  assert.match(only(deps('{ "extends": "./missing.json" }')), /TS5083 Cannot read file '\/repo\/packages\/surface-diff\/missing\.json'/, "an unreadable base named with its extension");
   assert.match(only(deps('{ "extends": "./missing" }')), /TS6053 File '\.\/missing' not found/, "an unreadable base the compiler probed for");
   const circular = '{ "extends": "./tsconfig.json" }';
   assert.match(only(deps(circular, { [SOURCE]: circular })), /TS18000 Circularity detected/, "a config extending itself (on disk, so the compiler reaches the cycle)");
@@ -266,16 +266,16 @@ test("a config the compiler cannot read is refused whole; a project with no inpu
 test("an input reached through a symlink outside every package is placed where it really is", () => {
   const dir = realpathSync(mkdtempSync(path.join(os.tmpdir(), "boundary-link-")));
   try {
-    mkdirSync(path.join(dir, "packages/source"), { recursive: true });
-    mkdirSync(path.join(dir, "packages/surfacer/src"), { recursive: true });
+    mkdirSync(path.join(dir, "packages/surface-diff"), { recursive: true });
+    mkdirSync(path.join(dir, "packages/surface-decision/src"), { recursive: true });
     mkdirSync(path.join(dir, "links"), { recursive: true });
-    writeFileSync(path.join(dir, "packages/surfacer/src/index.ts"), "export const x = 1;\n");
-    symlinkSync("../packages/surfacer/src/index.ts", path.join(dir, "links/index.ts"));
-    symlinkSync("../packages/surfacer/src", path.join(dir, "links/src"));
-    const file = path.join(dir, "packages/source/tsconfig.json");
-    assert.deepEqual(tsconfigDependencies('{ "files": ["../../links/index.ts"] }', { file, root: dir }), ["@obversa/surfacer"], "a file through a link");
-    assert.deepEqual(tsconfigDependencies('{ "include": ["../../links/src"] }', { file, root: dir }), ["@obversa/surfacer", "@obversa/surfacer"], "a directory through a link: the file it holds and the directory itself");
-    assert.deepEqual(tsconfigDependencies('{ "compilerOptions": { "rootDirs": ["../../links/src"] } }', { file, root: dir }), ["@obversa/surfacer"], "an option through a link");
+    writeFileSync(path.join(dir, "packages/surface-decision/src/index.ts"), "export const x = 1;\n");
+    symlinkSync("../packages/surface-decision/src/index.ts", path.join(dir, "links/index.ts"));
+    symlinkSync("../packages/surface-decision/src", path.join(dir, "links/src"));
+    const file = path.join(dir, "packages/surface-diff/tsconfig.json");
+    assert.deepEqual(tsconfigDependencies('{ "files": ["../../links/index.ts"] }', { file, root: dir }), ["@obversa/surface-decision"], "a file through a link");
+    assert.deepEqual(tsconfigDependencies('{ "include": ["../../links/src"] }', { file, root: dir }), ["@obversa/surface-decision", "@obversa/surface-decision"], "a directory through a link: the file it holds and the directory itself");
+    assert.deepEqual(tsconfigDependencies('{ "compilerOptions": { "rootDirs": ["../../links/src"] } }', { file, root: dir }), ["@obversa/surface-decision"], "an option through a link");
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
@@ -324,8 +324,8 @@ test("the guard, run on a disposable copy of the tree, refuses a shipped host im
     const command = path.join(root, "hosts", "cmux", "bin", "probe-review");
     for (const content of [
       "#!/usr/bin/env node\nexport {};\n",
-      '#!/usr/bin/env node\nimport { e } from "../../../packages/surfacer/src/index.mjs";\ne;\n',
-      "#!/usr/bin/env -S node --import=./packages/surfacer/src/index.mjs\nexport {};\n",
+      '#!/usr/bin/env node\nimport { e } from "../../../packages/surface-decision/src/index.mjs";\ne;\n',
+      "#!/usr/bin/env -S node --import=./packages/surface-decision/src/index.mjs\nexport {};\n",
       "#!/usr/local/bin/node\nexport {};\n",
     ]) {
       writeFileSync(command, content);
@@ -363,16 +363,16 @@ test("the guard, run on a disposable copy of the tree, refuses a shipped host im
     writeFileSync(manifestPath, JSON.stringify(manifest));
     // A symlink under packages/ is a recorded refusal, not a crash: the walk
     // sits outside the check's scope and is handed its failure list.
-    const link = path.join(root, "packages", "source", "src", "link.mjs");
-    symlinkSync(path.join("..", "..", "surfacer", "src", "host.mjs"), link);
+    const link = path.join(root, "packages", "surface-diff", "src", "link.mjs");
+    symlinkSync(path.join("..", "..", "surface-decision", "src", "host.mjs"), link);
     const linked = guard();
     assert.notEqual(linked.status, 0);
-    assert.match(linked.stderr, /packages\/source\/src\/link\.mjs: a symlink is refused wherever the scan walks/);
+    assert.match(linked.stderr, /packages\/surface-diff\/src\/link\.mjs: a symlink is refused wherever the scan walks/);
     assert.doesNotMatch(linked.stderr, /ReferenceError/);
     rmSync(link);
     // A host script is pinned verbatim: one that preloads a package's
     // internals names no import the scan reads.
-    writeFileSync(manifestPath, JSON.stringify({ ...manifest, scripts: { test: "node --import ../../packages/surfacer/src/index.mjs --test test/*.test.mjs" } }));
+    writeFileSync(manifestPath, JSON.stringify({ ...manifest, scripts: { test: "node --import ../../packages/surface-decision/src/index.mjs --test test/*.test.mjs" } }));
     const script = guard();
     assert.notEqual(script.status, 0);
     assert.match(script.stderr, /hosts\/cmux\/package\.json: script test must be absent/);
@@ -381,16 +381,16 @@ test("the guard, run on a disposable copy of the tree, refuses a shipped host im
     // names itself.
     const nestedHost = path.join(root, "hosts", "cmux", "lib", "package.json");
     mkdirSync(path.dirname(nestedHost), { recursive: true });
-    writeFileSync(nestedHost, JSON.stringify({ name: "@obversa/source", exports: { "./escape": "./dist/escape.mjs" } }));
+    writeFileSync(nestedHost, JSON.stringify({ name: "@obversa/surface-diff", exports: { "./escape": "./dist/escape.mjs" } }));
     const nestedHostRun = guard();
     assert.notEqual(nestedHostRun.status, 0);
     assert.match(nestedHostRun.stderr, /hosts\/cmux\/lib\/package\.json: a nested manifest makes itself the package scope/);
     rmSync(nestedHost);
-    const nestedPackage = path.join(root, "packages", "source", "src", "package.json");
-    writeFileSync(nestedPackage, JSON.stringify({ name: "@obversa/surfacer", exports: { "./escape": "./escape.mjs" } }));
+    const nestedPackage = path.join(root, "packages", "surface-diff", "src", "package.json");
+    writeFileSync(nestedPackage, JSON.stringify({ name: "@obversa/surface-decision", exports: { "./escape": "./escape.mjs" } }));
     const nestedPackageRun = guard();
     assert.notEqual(nestedPackageRun.status, 0);
-    assert.match(nestedPackageRun.stderr, /packages\/source\/src\/package\.json: a nested manifest makes itself the package scope/);
+    assert.match(nestedPackageRun.stderr, /packages\/surface-diff\/src\/package\.json: a nested manifest makes itself the package scope/);
     rmSync(nestedPackage);
     // A workspace dependency on another host, with no exports map, would let
     // a bare subpath reach that host's unscanned dist.
@@ -480,33 +480,33 @@ test("the guard, run on a disposable copy of the tree, refuses a shipped host im
     assert.notEqual(nestedModules.status, 0);
     assert.match(nestedModules.stderr, /hosts\/cmux\/lib\/node_modules: a node_modules directory below a host's root is not install output/);
     rmSync(path.join(root, "hosts", "cmux", "lib", "node_modules"), { recursive: true });
-    mkdirSync(path.join(root, "packages", "source", "dist"), { recursive: true });
-    const packageDistLink = path.join(root, "packages", "source", "dist", "link.mjs");
+    mkdirSync(path.join(root, "packages", "surface-diff", "dist"), { recursive: true });
+    const packageDistLink = path.join(root, "packages", "surface-diff", "dist", "link.mjs");
     symlinkSync(path.join("..", "..", "..", "scripts", "escape.mjs"), packageDistLink);
     const packageDistLinked = guard();
     assert.notEqual(packageDistLinked.status, 0);
-    assert.match(packageDistLinked.stderr, /packages\/source\/dist\/link\.mjs: a symlink is refused wherever the scan walks/);
-    rmSync(path.join(root, "packages", "source", "dist"), { recursive: true });
+    assert.match(packageDistLinked.stderr, /packages\/surface-diff\/dist\/link\.mjs: a symlink is refused wherever the scan walks/);
+    rmSync(path.join(root, "packages", "surface-diff", "dist"), { recursive: true });
     rmSync(escapeScript);
     // A shell host command that names a package path runs it with no import
     // to scan.
     const shellCommand = path.join(root, "hosts", "cmux", "bin", "obversa-surface");
     const shellOriginal = readFileSync(shellCommand, "utf8");
-    writeFileSync(shellCommand, `${shellOriginal}\nnode ../../../packages/surfacer/src/index.mjs "$@"\n`);
+    writeFileSync(shellCommand, `${shellOriginal}\nnode ../../../packages/surface-decision/src/index.mjs "$@"\n`);
     const shell = guard();
     assert.notEqual(shell.status, 0);
     assert.match(shell.stderr, /hosts\/cmux\/bin\/obversa-surface: a shell host command names packages\//);
     writeFileSync(shellCommand, shellOriginal);
     // A publishConfig field pnpm promotes at pack time is refused on a
     // public package.
-    const memoryManifestPath = path.join(root, "packages", "memory", "package.json");
-    const memoryManifestText = readFileSync(memoryManifestPath, "utf8");
-    const memoryManifest = JSON.parse(memoryManifestText);
-    writeFileSync(memoryManifestPath, JSON.stringify({ ...memoryManifest, publishConfig: { ...memoryManifest.publishConfig, bin: { escape: "./dist/escape.js" } } }));
+    const apiManifestPath = path.join(root, "packages", "api", "package.json");
+    const apiManifestText = readFileSync(apiManifestPath, "utf8");
+    const apiManifest = JSON.parse(apiManifestText);
+    writeFileSync(apiManifestPath, JSON.stringify({ ...apiManifest, publishConfig: { ...apiManifest.publishConfig, bin: { escape: "./dist/escape.js" } } }));
     const promoted = guard();
     assert.notEqual(promoted.status, 0);
-    assert.match(promoted.stderr, /@obversa\/memory: publishConfig\.bin is promoted into the packed manifest by pnpm/);
-    writeFileSync(memoryManifestPath, memoryManifestText);
+    assert.match(promoted.stderr, /@obversa\/api: publishConfig\.bin is promoted into the packed manifest by pnpm/);
+    writeFileSync(apiManifestPath, apiManifestText);
     // A symlink outside packages/ and hosts/ — a release command that lives
     // elsewhere — is refused wherever the walk meets it.
     const releaseScript = path.join(root, "scripts", "release.mjs");
@@ -532,20 +532,20 @@ test("the guard, run on a disposable copy of the tree, refuses a shipped host im
     // Text can be assembled; the geometry cannot: a parent segment or an
     // absolute path outside the system directories is refused whatever
     // spells the rest.
-    writeFileSync(shellCommand, `${shellOriginal}\nP=pack\nnode "../../../${"$"}{P}ages/surfacer/src/index.mjs" "$URL"\n`);
+    writeFileSync(shellCommand, `${shellOriginal}\nP=pack\nnode "../../../${"$"}{P}ages/surface-decision/src/index.mjs" "$URL"\n`);
     const assembled = guard();
     assert.notEqual(assembled.status, 0);
     assert.match(assembled.stderr, /obversa-surface: a shell host command holds a parent-directory segment/);
-    writeFileSync(shellCommand, `${shellOriginal}\nnode /Users/someone/obversa/packages/surfacer/src/index.mjs "$URL"\n`);
+    writeFileSync(shellCommand, `${shellOriginal}\nnode /Users/someone/obversa/packages/surface-decision/src/index.mjs "$URL"\n`);
     const absoluteLiteral = guard();
     assert.notEqual(absoluteLiteral.status, 0);
-    assert.match(absoluteLiteral.stderr, /obversa-surface: a shell host command names the absolute path \/Users\/someone\/obversa\/packages\/surfacer\/src\/index\.mjs/);
+    assert.match(absoluteLiteral.stderr, /obversa-surface: a shell host command names the absolute path \/Users\/someone\/obversa\/packages\/surface-decision\/src\/index\.mjs/);
     writeFileSync(shellCommand, shellOriginal);
     // A shell helper with a shebang anywhere under the host is held to the
     // same rules.
     const helper = path.join(root, "hosts", "cmux", "tools", "helper.sh");
     mkdirSync(path.dirname(helper), { recursive: true });
-    writeFileSync(helper, '#!/bin/bash\nnode ../../../packages/surfacer/src/index.mjs\n');
+    writeFileSync(helper, '#!/bin/bash\nnode ../../../packages/surface-decision/src/index.mjs\n');
     const helperRun = guard();
     assert.notEqual(helperRun.status, 0);
     assert.match(helperRun.stderr, /hosts\/cmux\/tools\/helper\.sh: a shell host command names packages\//);
@@ -581,7 +581,7 @@ test("the guard, run on a disposable copy of the tree, refuses a shipped host im
     // A file under bin/ or lib/ with any extension the scan does not know
     // is read all the same and refused: an extension is not a way past the
     // host checks.
-    for (const [name, body] of [["bin/obversa-new.bash", "#!/bin/bash\nnode ../../../packages/surfacer/src/index.mjs\n"], ["lib/helper.py", "#!/usr/bin/env python3\nprint(1)\n"], ["bin/obversa-new.zsh", "echo hi\n"]]) {
+    for (const [name, body] of [["bin/obversa-new.bash", "#!/bin/bash\nnode ../../../packages/surface-decision/src/index.mjs\n"], ["lib/helper.py", "#!/usr/bin/env python3\nprint(1)\n"], ["bin/obversa-new.zsh", "echo hi\n"]]) {
       const odd = path.join(root, "hosts", "cmux", ...name.split("/"));
       mkdirSync(path.dirname(odd), { recursive: true });
       writeFileSync(odd, body);
@@ -596,8 +596,8 @@ test("the guard, run on a disposable copy of the tree, refuses a shipped host im
     // meets the extension rule, the pin, and the path rule like any other.
     for (const [name, body, expect] of [
       ["lib/helper.test.py", "#!/usr/bin/env python3\nprint(1)\n", /lib\/helper\.test\.py: a file under a host's bin\/ or lib\/ is an extensionless command or JavaScript source/],
-      ["bin/obversa-new.test.bash", "#!/bin/bash\nnode ../../../packages/surfacer/src/index.mjs\n", /obversa-new\.test\.bash: a shell host command names packages\//],
-      ["bin/test/obversa-x", "#!/bin/bash\nnode ../../../packages/surfacer/src/index.mjs\n", /bin\/test\/obversa-x: a shell host command is pinned by content in hostRules; this one is not pinned/],
+      ["bin/obversa-new.test.bash", "#!/bin/bash\nnode ../../../packages/surface-decision/src/index.mjs\n", /obversa-new\.test\.bash: a shell host command names packages\//],
+      ["bin/test/obversa-x", "#!/bin/bash\nnode ../../../packages/surface-decision/src/index.mjs\n", /bin\/test\/obversa-x: a shell host command is pinned by content in hostRules; this one is not pinned/],
     ]) {
       const shaped = path.join(root, "hosts", "cmux", ...name.split("/"));
       mkdirSync(path.dirname(shaped), { recursive: true });
@@ -709,7 +709,7 @@ test("the workspace file pin keeps packages, plugins, and hosts in the boundary"
 
 test("the loader-hatch scan covers package and plugin TypeScript", () => {
   assert.equal(scansImports("packages/runtime/src/api.ts"), true);
-  assert.equal(scansImports("plugins/engine-codex/src/index.ts"), true);
+  assert.equal(scansImports("plugins/engine-codex-cli/src/index.ts"), true);
   assert.equal(scansImports("hosts/cmux/src/index.ts"), false);
 });
 

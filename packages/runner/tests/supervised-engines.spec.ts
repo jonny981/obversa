@@ -6,7 +6,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
   EngineError, EngineIncompleteResultError,
   type AgentRequest, type AgentResult, type Engine, type EngineSelectionRecord,
-} from '@obversa/engine';
+} from '@obversa/api';
 import { validateArtifactReference, type JsonObject, type GraphEngineBinding, type RunStorageBinding } from '@obversa/runtime';
 import { createLocalRunStorage } from '@obversa/runtime/storage/local';
 import { superviseEngines } from '../src/supervised-engines.js';

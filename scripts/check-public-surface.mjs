@@ -10,13 +10,25 @@ const docs = path.join(root, 'docs/public');
 const sources = [
   path.join(root, 'packages/runtime/src/api.ts'),
   path.join(root, 'packages/runner/src/index.ts'),
-  path.join(root, 'packages/runtime/src/runtime/graph-executor.ts'),
+  path.join(root, 'packages/api/src/graph-executor.ts'),
   path.join(root, 'packages/runner/src/supervised-run.ts'),
 ];
 const additionalPublicValues = [
   {
-    file: path.join(root, 'packages/engine/src/command/run.ts'),
+    file: path.join(root, 'packages/core/src/command/run.ts'),
     names: ['resolveCommandExecutable'],
+  },
+  {
+    file: path.join(root, 'packages/api/src/model-identity.ts'),
+    names: ['modelIdentity'],
+  },
+  {
+    file: path.join(root, 'packages/core/src/claude-tools.ts'),
+    names: ['claudeToolOptions'],
+  },
+  {
+    file: path.join(root, 'packages/runtime/src/workflow-support.ts'),
+    names: ['seatIdentity', 'assertDistinctSeats', 'requireNonEmptyFiles', 'requireNoFiles', 'teamAgent', 'panelReviewers', 'INVALID_TEAM_DECISION', 'outcomeFromAgentText'],
   },
 ];
 const pageText = fs.readdirSync(docs, { recursive: true }).filter((f) => f.endsWith('.mdx')).map((f) => fs.readFileSync(path.join(docs, f), 'utf8')).join('\n');
@@ -36,7 +48,7 @@ const KNOWN_DEBT = [
     'validateApprovalRecord', 'validateAcceptedResultRecord', 'validateNewDomainEvent',
     'validateDomainEventEnvelope', 'validateDomainEventBatch', 'validateEventStreamRef',
     'validateArtifactScope', 'validateNewArtifact', 'validateRunDefinition', 'validateRunStartRecord',
-    'validateRunStoragePolicy', 'validateRunStorageRecord', 'reviewContext', 'defineSkill', 'fromFile',
+    'validateRunStoragePolicy', 'validateRunStorageRecord', 'reviewContext', 'defineSkill', 'briefFromFile',
     'LoopError', 'EngineIncompleteResultError', 'finalResultText', 'exitCodeFor', 'EXIT_PAUSED',
   ], 'D35', 'docs/public/packages/runtime.mdx'),
   ...debtEntries([
@@ -67,6 +79,10 @@ const REQUIRED_VALUE_EXPORTS = [
   'createGraphExecutor',
   'startSupervisedRun',
   'resolveCommandExecutable',
+  'modelIdentity',
+  'claudeToolOptions',
+  'seatIdentity', 'assertDistinctSeats', 'requireNonEmptyFiles', 'requireNoFiles',
+  'teamAgent', 'panelReviewers', 'INVALID_TEAM_DECISION', 'outcomeFromAgentText',
 ];
 
 export function exportListNames(list) {

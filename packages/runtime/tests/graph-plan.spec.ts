@@ -1,4 +1,6 @@
 import { describe, expect, it } from 'vitest';
+import * as api from '@obversa/api';
+import { GraphValidationError } from '../src/graph/value.ts';
 
 import {
   resolveGraphPlan,
@@ -151,6 +153,14 @@ const invalidIdentifierCases: readonly [string, GraphDescription][] = [
 ];
 
 describe('resolveGraphPlan', () => {
+  it('shares the API resolver, validators, and error constructor', () => {
+    expect(resolveGraphPlan).toBe(api.resolveGraphPlan);
+    expect(validateGraphDescription).toBe(api.validateGraphDescription);
+    expect(validateResolvedPlan).toBe(api.validateResolvedPlan);
+    expect(GraphValidationError).toBe(api.GraphValidationError);
+    expect(() => api.validateGraphDescription({})).toThrow(GraphValidationError);
+  });
+
   it('returns structured validation errors for malformed public data', () => {
     expect(() => validateGraphDescription({} as never)).toThrow(/required field/i);
     expect(() => resolveGraphPlan(description, {} as never)).toThrow(/required field/i);

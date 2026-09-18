@@ -1,21 +1,20 @@
 {
   "note": "Exact npm names that may be published. Nothing else under @obversa/ publishes. Checked by scripts/check-publish-allowlist.mjs (a per-package prepublishOnly hook plus a root audit).",
   "packages": [
-    "@obversa/engine",
-    "@obversa/engine-agent-sdk",
+    "@obversa/api",
+    "@obversa/builtin-workflows",
+    "@obversa/core",
     "@obversa/engine-anthropic-api",
+    "@obversa/engine-claude-agent-sdk",
     "@obversa/engine-claude-cli",
-    "@obversa/engine-codex",
+    "@obversa/engine-codex-cli",
     "@obversa/engine-grok-cli",
     "@obversa/engine-opencode-cli",
-    "@obversa/memory",
     "@obversa/memory-git",
     "@obversa/memory-simple",
-    "@obversa/process",
     "@obversa/runner",
     "@obversa/runtime",
-    "@obversa/source",
-    "@obversa/surfacer",
-    "@obversa/teams"
+    "@obversa/surface-decision",
+    "@obversa/surface-diff"
   ]
 }

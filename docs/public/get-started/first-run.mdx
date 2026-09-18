@@ -14,7 +14,7 @@ step that owns it.
 You need the two command line tools signed in, then:
 
 ```bash
-npm install @obversa/runtime @obversa/teams @obversa/engine-claude-cli @obversa/engine-codex
+npm install @obversa/runtime @obversa/api @obversa/engine-claude-cli @obversa/engine-codex-cli
 ```
 
 Copy this file into the directory the work belongs in, save it with a
@@ -25,9 +25,9 @@ among them, are read from the directory you run the command in.
 
 ```ts
 import { claude } from '@obversa/engine-claude-cli';
-import { codex } from '@obversa/engine-codex';
+import { codex } from '@obversa/engine-codex-cli';
 import { run } from '@obversa/runtime';
-import { fromFile, stage, workflow, type TeamSeat } from '@obversa/teams';
+import { briefFromFile, stage, workflow, type TeamSeat } from '@obversa/runtime';
 
 interface WriterReviewerEngines {
   readonly claude: (model: string) => TeamSeat;
@@ -38,7 +38,7 @@ const realEngines: WriterReviewerEngines = { claude, codex };
 
 function createWriterReviewerPair(engines: WriterReviewerEngines = realEngines) {
   return workflow('writer-reviewer-pair', {
-    brief: fromFile('briefs/add.md'),
+    brief: briefFromFile('briefs/add.md'),
     options: { timeout: '10m' },
 
     roles: {

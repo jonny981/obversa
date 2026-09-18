@@ -15,6 +15,43 @@ import type {
   ProofArtifact,
 } from './types.js';
 import { setMeta } from './describe.js';
+
+/** Shared state key holding every engine answer the run recorded so far.
+ * Written by the runtime beside each engine:usage event; read by workflow
+ * layers that must compare what answered against what was declared. */
+export const RECORDED_ENGINE_USAGE = 'obversa:recorded-engine-usage';
+
+/** One recorded engine answer: the answering model and the job path that
+ * produced it. */
+export interface RecordedEngineUsage {
+  readonly model: string;
+  readonly path: readonly string[];
+  /** The review side this answer belongs to, set by the workflow layer
+   * that built the job. Untagged entries (advisors, agentCheck) belong
+   * to neither side and are outside the recorded-family gate. */
+  readonly role?: 'writer' | 'reviewer';
+  /** The stage name this answer belongs to. */
+  readonly stage?: string;
+}
+
+function recordEngineUsage(
+  ctx: { readonly state: Record<string, unknown> },
+  model: string,
+  path: readonly string[],
+  recordAs?: { readonly role: 'writer' | 'reviewer'; readonly stage: string },
+): void {
+  const records = ctx.state[RECORDED_ENGINE_USAGE] as RecordedEngineUsage[] | undefined;
+  const entry: RecordedEngineUsage = {
+    model,
+    path: [...path],
+    ...(recordAs === undefined ? {} : { role: recordAs.role, stage: recordAs.stage }),
+  };
+  if (records === undefined) {
+    ctx.state[RECORDED_ENGINE_USAGE] = [entry];
+  } else {
+    records.push(entry);
+  }
+}
 import type { AgentRequest, AgentResult, EngineRef } from '../engines/engine.js';
 import { resolveEnv } from './env-overlay.js';
 import { LoopError, type LoopErrorCode } from './errors.js';
@@ -35,6 +72,10 @@ import { cloneFrozenJson, type JsonValue } from '../graph/value.js';
 import { requireFinalResultText } from '../runtime/result-parts.js';
 
 export interface AgentJobConfig {
+  /** Tag this job's engine answers with the review side and stage they
+   * belong to, so a workflow layer can compare recorded sides without
+   * inferring them from paths. Untagged answers are outside such gates. */
+  readonly recordAs?: { readonly role: 'writer' | 'reviewer'; readonly stage: string };
   /** Job label (for events). Defaults to the agent's name, then `'agent'`. */
   label?: string;
   /**
@@ -230,6 +271,7 @@ async function runAdvisorConsult(
           model: event.model,
           usage: event.usage,
         });
+        recordEngineUsage(ctx, event.model, ctx.path);
       } else if (event.type === 'tool') {
         ctx.emit({
           kind: 'engine:tool',
@@ -263,6 +305,7 @@ async function runAdvisorConsult(
 /** Run one fresh agent turn through whichever engine is selected. */
 export function agentJob(config: AgentJobConfig): Job {
   const job: Job = async (ctx) => {
+    const recordAs = 'recordAs' in config ? config.recordAs : undefined;
     const path = [...ctx.path];
     const label = config.label ?? config.agent?.name ?? 'agent';
     const defaultTimeoutMs = config.timeoutMs ?? ctx.timeoutMs;
@@ -368,6 +411,7 @@ export function agentJob(config: AgentJobConfig): Job {
                     model: e.model,
                     usage: e.usage,
                   });
+                  recordEngineUsage(ctx, e.model, path, recordAs);
                   break;
               }
             },

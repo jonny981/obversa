@@ -11,4 +11,4 @@ export {
   type PipeOwnerProbe,
   type ProcessIdentity,
   type StopOwnedProcessTreeRequest,
-} from '@obversa/engine/command';
+} from '@obversa/core/command';

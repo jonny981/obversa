@@ -25,7 +25,7 @@ import { startSupervisor, newRunId, type Supervisor } from './supervisor.js';
 import { jobMeta } from '../core/describe.js';
 import { currentBranch } from '../core/git.js';
 import type { Environment, EnvHandle } from '../env/environment.js';
-import type { Memory } from '@obversa/memory';
+import type { Memory } from '@obversa/api';
 import { createCallbackClient } from '../callback/client.js';
 import { startMonitor, type RunMonitor, type StartedMonitor } from './monitor.js';
 import {

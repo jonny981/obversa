@@ -59,7 +59,7 @@ inference.
 - **Run a ready-made team on your own files.** A writer and a reviewer, a
   review panel with a threshold, or feature delivery from brief to approval:
   one import, your brief, your engines, run.
-  [The teams package](/packages/teams).
+  [The runtime workflow builder](/packages/runtime).
 - **Give work a shape in one call.** Steps in order, a graph with parallel
   branches, a loop that revises until it passes, a tournament of
   candidates, a quorum of opinions. [Workflows](/concepts/workflows).
@@ -71,7 +71,7 @@ inference.
   [A review that sends work back](/reviewing/review-loop).
 - **Get a second opinion that is really a second opinion.** The implementer
   and every reviewer run on different model families, checked before a run.
-  [The teams package](/packages/teams).
+  [The runtime workflow builder](/packages/runtime).
 - **Stop for a person.** A callback gate puts one decision in front of
   someone and the run carries on from that step with the answer.
   [Callback gates](/reviewing/callback-gates).
@@ -81,7 +81,7 @@ inference.
   model's report. [Workflows](/concepts/workflows).
 - **Use the engines you have.** Claude, Codex, Grok, OpenCode, the Agent
   SDK, the Anthropic API, or one you write to the contract.
-  [Engines](/packages/engine).
+  [Engine contracts](/packages/api).
 - **Define agents and skills in markdown.** The files your team already
   writes become the persona and the skills a step runs with.
   [Workflows](/concepts/workflows).
@@ -117,9 +117,9 @@ complete; copy it, put your brief in, run it with Node.
 
 ```ts
 import { claude } from '@obversa/engine-claude-cli';
-import { codex } from '@obversa/engine-codex';
+import { codex } from '@obversa/engine-codex-cli';
 import { run } from '@obversa/runtime';
-import { fromFile, person, stage, workflow, type TeamSeat } from '@obversa/teams';
+import { briefFromFile, person, stage, workflow, type TeamSeat } from '@obversa/runtime';
 
 interface FeatureDeliveryEngines {
   readonly claude: (model: string) => TeamSeat;
@@ -136,7 +136,7 @@ const realEngines: FeatureDeliveryEngines = { claude, codex };
  */
 function createFeatureDelivery(engines: FeatureDeliveryEngines = realEngines) {
   return workflow('feature-delivery', {
-    brief: fromFile('briefs/triple.md'),
+    brief: briefFromFile('briefs/triple.md'),
     options: { timeout: '10m' },
 
     roles: {

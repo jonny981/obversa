@@ -3,7 +3,7 @@ title: "Memory mechanics"
 description: "Ground, curate, and consolidate memory through caller-supplied functions."
 ---
 
-`@obversa/memory` supplies three storage-neutral memory mechanics. These
+`@obversa/runtime/memory` supplies three storage-neutral memory mechanics. These
 mechanics accept the `Memory` port and do not select an engine.
 
 ## Ground
@@ -12,7 +12,7 @@ mechanics accept the `Memory` port and do not select an engine.
 sources, and reads directories recursively.
 
 ```ts
-import { consolidate, curate, ground } from '@obversa/memory';
+import { consolidate, curate, ground } from '@obversa/runtime/memory';
 
 const result = await ground(memory, {
   sources: [

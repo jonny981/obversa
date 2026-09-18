@@ -52,7 +52,7 @@ npm install @obversa/runtime   # Node >= 22.12
 
 ## A feature, as one file
 
-Install the teams package and two engine plugins, and this file delivers a
+Install the runtime and two engine plugins, and this file delivers a
 change with a team of models: one seat researches the brief and writes
 the requirements and the plan, each reviewed; another writes the tests
 before any code, then implements until the tests pass and a reviewer from
@@ -62,14 +62,14 @@ sends the work back to the stage that owns it, with the findings. The
 file is complete; copy it, put your brief in, run it with Node.
 
 ```bash
-npm install @obversa/runtime @obversa/teams @obversa/engine-claude-cli @obversa/engine-codex
+npm install @obversa/runtime @obversa/api @obversa/engine-claude-cli @obversa/engine-codex-cli
 ```
 
 ```ts
 import { claude } from '@obversa/engine-claude-cli';
-import { codex } from '@obversa/engine-codex';
+import { codex } from '@obversa/engine-codex-cli';
 import { run } from '@obversa/runtime';
-import { fromFile, person, stage, workflow, type TeamSeat } from '@obversa/teams';
+import { briefFromFile, person, stage, workflow, type TeamSeat } from '@obversa/runtime';
 
 interface FeatureDeliveryEngines {
   readonly claude: (model: string) => TeamSeat;
@@ -86,7 +86,7 @@ const realEngines: FeatureDeliveryEngines = { claude, codex };
  */
 function createFeatureDelivery(engines: FeatureDeliveryEngines = realEngines) {
   return workflow('feature-delivery', {
-    brief: fromFile('briefs/triple.md'),
+    brief: briefFromFile('briefs/triple.md'),
     options: { timeout: '10m' },
 
     roles: {
@@ -179,7 +179,7 @@ console.log(JSON.stringify(result.outcome, null, 2));
 
 The roles are named once, from the seat helpers the engine plugins export,
 and every stage refers to a role by name. The implementer and every
-reviewer must be different model families, and the package refuses the
+reviewer must be different model families, and the runtime refuses the
 team before any model runs if they are not.
 
 The team is a graph of nine named stages. Every step carries a sentence
@@ -206,7 +206,7 @@ and a reviewer's decision is the file it writes.
 what a real run of this file printed and the files the models wrote; a
 [writer and reviewer](https://docs.obversa.ai/workflows/writer-and-reviewer)
 and a [review panel](https://docs.obversa.ai/workflows/review-panel) are the
-other two teams in the same package.
+other two recipes in the built-in workflows package.
 
 ## Engines
 
@@ -217,11 +217,11 @@ that wrote the work is not the model that grades it.
 | package | drives | needs |
 | --- | --- | --- |
 | `@obversa/engine-claude-cli` | the Claude CLI, one process per attempt | Claude CLI, host auth |
-| `@obversa/engine-codex` | the Codex CLI | Codex CLI, host auth |
+| `@obversa/engine-codex-cli` | the Codex CLI | Codex CLI, host auth |
 | `@obversa/engine-grok-cli` | the Grok CLI | Grok CLI 1.0.5 |
 | `@obversa/engine-opencode-cli` | the OpenCode CLI | OpenCode CLI 1.18.23 |
 | `@obversa/engine-anthropic-api` | the Anthropic API | an API key |
-| `@obversa/engine-agent-sdk` | the Claude Agent SDK | host Claude auth |
+| `@obversa/engine-claude-agent-sdk` | the Claude Agent SDK | host Claude auth |
 
 Write your own against the engine contract; it must pass the conformance kit.
 
@@ -234,12 +234,12 @@ Write your own against the engine contract; it must pass the conformance kit.
 
 ## What is in this repository
 
-16 publishable packages. `packages/` holds the eight that define the
-product: `@obversa/runtime` is the runtime and its public contract,
-`@obversa/teams` is three ready-made teams built on it, `@obversa/runner`
-supervises stored runs, `@obversa/engine` and `@obversa/memory` are the
-engine and memory contracts, `@obversa/process` runs a child process to a
-deadline, and `@obversa/surfacer` and `@obversa/source` are the local
+15 publishable packages. `packages/` holds the seven that define the
+product: `@obversa/runtime` runs workflows, `@obversa/builtin-workflows`
+provides three ready-made recipes, `@obversa/runner` supervises stored
+runs, `@obversa/api` holds the shared contracts and checks,
+`@obversa/core` runs bounded child processes, and
+`@obversa/surface-decision` and `@obversa/surface-diff` are the local
 review surface. `plugins/` holds the eight adapters: the six engines above
 and two memories, one in process and one in private Git references.
 `hosts/` holds the terminal host, which is not published.

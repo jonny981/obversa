@@ -7,8 +7,8 @@ import { setTimeout as delay } from 'node:timers/promises';
 import { fileURLToPath } from 'node:url';
 
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { digestJson } from '@obversa/engine';
-import { inspectOwnedProcessTree, runOwnedCommand, stopOwnedProcessTree } from '@obversa/engine/command';
+import { digestJson } from '@obversa/api';
+import { inspectOwnedProcessTree, runOwnedCommand, stopOwnedProcessTree } from '@obversa/core/command';
 
 import * as runtime from '@obversa/runtime';
 import * as runner from '../src/index.js';
@@ -16,8 +16,8 @@ import { createLocalRunStorage } from '@obversa/runtime/storage/local';
 import { hostModuleDigest, readSupervision, supervisionWriter, type SupervisedHostRecord } from '../src/supervised-record.js';
 import { tmpRepo, cleanupRepos } from './git-helpers.js';
 
-vi.mock('@obversa/engine/command', async (importOriginal) => {
-  const command = await importOriginal<typeof import('@obversa/engine/command')>();
+vi.mock('@obversa/core/command', async (importOriginal) => {
+  const command = await importOriginal<typeof import('@obversa/core/command')>();
   return { ...command, runOwnedCommand: vi.fn(command.runOwnedCommand) };
 });
 
@@ -2406,7 +2406,7 @@ describe('supervised preflight storage and ownership', () => {
         return lease;
       },
     };
-    const command = await import('@obversa/engine/command');
+    const command = await import('@obversa/core/command');
     const failure = new command.OwnedCommandError('PROCESS_INSPECTION', 'inspection boundary failed');
     expect(failure.remainingProcesses).toEqual([]);
     const runSpy = vi.mocked(command.runOwnedCommand).mockClear().mockRejectedValueOnce(failure);

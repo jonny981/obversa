@@ -11,8 +11,8 @@ import {
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
-import type { MemoryPath } from '@obversa/memory';
-import { assertMemoryConformance } from '@obversa/memory/testing';
+import type { MemoryPath } from '@obversa/api';
+import { assertMemoryConformance } from '@obversa/api/testing';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { openGitMemory } from '../src/index.js';

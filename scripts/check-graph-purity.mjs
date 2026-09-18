@@ -1,4 +1,4 @@
-import { readdir, readFile } from 'node:fs/promises';
+import { readdir, readFile, stat } from 'node:fs/promises';
 import { basename, dirname, extname, isAbsolute, relative, resolve, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -9,12 +9,61 @@ const allowedNodeImports = new Map([
   ['node:crypto', 'createHash'],
   ['node:util', 'isDeepStrictEqual'],
 ]);
-const allowedEngineImports = new Map([
+const allowedApiImports = new Map([
+  ['Memory', 'type'],
+  ['MemoryCommand', 'type'],
+  ['ExecutionTarget', 'type'],
+  ['DispatchGraphCommand', 'type'],
+  ['PauseGraphCommand', 'type'],
+  ['CompleteGraphCommand', 'type'],
+  ['FailGraphCommand', 'type'],
+  ['GraphCommand', 'type'],
+  ['GraphValidationIssue', 'type'],
+  ['RunBrief', 'type'],
+  ['GraphId', 'type'],
+  ['NodeId', 'type'],
+  ['EdgeId', 'type'],
+  ['GraphNode', 'type'],
+  ['GraphEdge', 'type'],
+  ['GraphDefinition', 'type'],
+  ['CompiledGraphDefinition', 'type'],
+  ['GraphKernel', 'type'],
+  ['GraphEvent', 'type'],
+  ['GraphEngineIdentity', 'type'],
+  ['EngineAttemptRecordedPayload', 'type'],
+  ['GraphBindings', 'type'],
+  ['GraphTypeCompilation', 'type'],
+  ['CompiledGraphType', 'type'],
+  ['GraphType', 'type'],
+  ['PermissionDescriptor', 'type'],
+  ['ExecutionLaneDescription', 'type'],
+  ['GraphPhaseDescription', 'type'],
+  ['GraphNodeDescription', 'type'],
+  ['GraphEdgeDescription', 'type'],
+  ['PlanBound', 'type'],
+  ['GraphBounds', 'type'],
+  ['GraphPolicyDescription', 'type'],
+  ['GraphRequirements', 'type'],
+  ['GraphDescriptionInput', 'type'],
+  ['GraphDescription', 'type'],
+  ['GraphPackageIdentity', 'type'],
+  ['GraphPackageAdmission', 'type'],
+  ['ExecutionLaneResolution', 'type'],
+  ['RunPreflightPolicy', 'type'],
+  ['PlanResolution', 'type'],
+  ['ResolvedExecutionLane', 'type'],
+  ['ResolvedPlan', 'type'],
+  ['ResolvedPlanSnapshot', 'type'],
   ['JsonObject', 'type'],
   ['JsonPrimitive', 'type'],
   ['JsonValue', 'type'],
   ['Sha256Digest', 'type'],
   ['JsonValueError', 'value'],
+  ['GraphValidationError', 'value'],
+  ['compileGraphDefinition', 'value'],
+  ['validateResolvedPlan', 'value'],
+  ['validateGraphDescription', 'value'],
+  ['resolveGraphPlan', 'value'],
   ['canonicalJson', 'value'],
   ['cloneFrozenJson', 'value'],
   ['digestJson', 'value'],
@@ -97,9 +146,17 @@ const effectfulGlobals = new Map([
 ]);
 
 const repositoryRoot = resolve(dirname(fileURLToPath(import.meta.url)), '..');
+const apiGraphFiles = [
+  'graph-kernel.ts', 'graph-plan.ts', 'graph-type.ts', 'graph-contract.ts',
+  'graph-commands.ts', 'json.ts', 'contracts.ts', 'memory-types.ts',
+];
 const scanRoots = (process.argv.length > 2
   ? process.argv.slice(2)
-  : [resolve(repositoryRoot, 'packages/runtime/src/graph')])
+  : [
+      resolve(repositoryRoot, 'packages/runtime/src/graph'),
+      resolve(repositoryRoot, 'packages/runtime/src/graph-types'),
+      ...apiGraphFiles.map((file) => resolve(repositoryRoot, 'packages/api/src', file)),
+    ])
   .map((root) => resolve(root));
 
 const violations = [];
@@ -121,6 +178,10 @@ if (violations.length > 0) {
 }
 
 async function sourceFiles(directory) {
+  if ((await stat(directory)).isFile()) {
+    if (!sourceExtensions.has(extname(directory))) throw new Error(`not a graph source file: ${directory}`);
+    return [directory];
+  }
   const entries = await readdir(directory, { withFileTypes: true });
   const paths = [];
 
@@ -158,20 +219,20 @@ function visit(node, sourceFile) {
   if (ts.isImportDeclaration(node)) {
     checkImportDeclaration(node, sourceFile);
   } else if (ts.isExportDeclaration(node) && node.moduleSpecifier) {
-    if (ts.isStringLiteralLike(node.moduleSpecifier) && node.moduleSpecifier.text === '@obversa/engine') {
+    if (ts.isStringLiteralLike(node.moduleSpecifier) && node.moduleSpecifier.text === '@obversa/api') {
       checkEngineExport(node, sourceFile);
     } else {
-      checkSpecifier(node.moduleSpecifier, sourceFile, false);
+      checkSpecifier(node.moduleSpecifier, sourceFile);
     }
   } else if (
     ts.isImportEqualsDeclaration(node)
     && ts.isExternalModuleReference(node.moduleReference)
   ) {
-    checkSpecifier(node.moduleReference.expression, sourceFile, false);
+    checkSpecifier(node.moduleReference.expression, sourceFile);
   } else if (ts.isImportTypeNode(node)) {
     const argument = node.argument;
     if (ts.isLiteralTypeNode(argument)) {
-      checkSpecifier(argument.literal, sourceFile, true);
+      checkSpecifier(argument.literal, sourceFile);
     } else {
       report(sourceFile, argument.getStart(sourceFile), 'import type must use a string literal');
     }
@@ -236,7 +297,7 @@ function checkImportDeclaration(declaration, sourceFile) {
     return;
   }
 
-  if (node.text === '@obversa/engine') {
+  if (node.text === '@obversa/api') {
     const clause = declaration.importClause;
     const elements = clause?.namedBindings && ts.isNamedImports(clause.namedBindings)
       ? clause.namedBindings.elements
@@ -245,7 +306,7 @@ function checkImportDeclaration(declaration, sourceFile) {
       report(
         sourceFile,
         node.getStart(sourceFile),
-        "'@obversa/engine': only reviewed named JSON imports are allowed",
+        "'@obversa/api': only reviewed named imports are allowed",
       );
       return;
     }
@@ -253,7 +314,7 @@ function checkImportDeclaration(declaration, sourceFile) {
     return;
   }
 
-  checkSpecifier(node, sourceFile, isTypeOnlyMemoryImport(declaration));
+  checkSpecifier(node, sourceFile);
 }
 
 function checkEngineExport(declaration, sourceFile) {
@@ -265,7 +326,7 @@ function checkEngineExport(declaration, sourceFile) {
     report(
       sourceFile,
       node.getStart(sourceFile),
-      "'@obversa/engine': only reviewed named JSON exports are allowed",
+      "'@obversa/api': only reviewed named JSON exports are allowed",
     );
     return;
   }
@@ -275,12 +336,12 @@ function checkEngineExport(declaration, sourceFile) {
 function checkEngineElements(elements, declarationIsTypeOnly, node, sourceFile) {
   for (const element of elements) {
     const importedName = element.propertyName?.text ?? element.name.text;
-    const kind = allowedEngineImports.get(importedName);
+    const kind = allowedApiImports.get(importedName);
     if (!kind) {
       report(
         sourceFile,
         node.getStart(sourceFile),
-        `'@obversa/engine': ${importedName} is not a reviewed graph JSON import`,
+        `'@obversa/api': ${importedName} is not a reviewed graph JSON import`,
       );
       continue;
     }
@@ -288,7 +349,7 @@ function checkEngineElements(elements, declarationIsTypeOnly, node, sourceFile) 
       report(
         sourceFile,
         node.getStart(sourceFile),
-        `'@obversa/engine': ${importedName} must be imported or exported as a type`,
+        `'@obversa/api': ${importedName} must be imported or exported as a type`,
       );
     }
   }
@@ -301,51 +362,28 @@ function checkCallSpecifier(call, sourceFile, label) {
     return;
   }
 
-  checkSpecifier(argument, sourceFile, false);
+  checkSpecifier(argument, sourceFile);
 }
 
-function checkSpecifier(node, sourceFile, allowMemoryPortType) {
+function checkSpecifier(node, sourceFile) {
   if (!node || !ts.isStringLiteralLike(node)) {
     report(sourceFile, node?.getStart(sourceFile) ?? 0, 'module specifier must be a string literal');
     return;
   }
 
   const specifier = node.text;
-  const reason = forbiddenReason(specifier, sourceFile, allowMemoryPortType);
+  const reason = forbiddenReason(specifier, sourceFile);
   if (reason) {
     report(sourceFile, node.getStart(sourceFile), `'${specifier}': ${reason}`);
   }
 }
 
-function isTypeOnlyMemoryImport(declaration) {
-  if (declaration.moduleSpecifier.text !== '@obversa/memory') {
-    return false;
-  }
-
-  const clause = declaration.importClause;
-  if (!clause) {
-    return false;
-  }
-  if (clause.isTypeOnly) {
-    return true;
-  }
-  if (clause.name || !clause.namedBindings || !ts.isNamedImports(clause.namedBindings)) {
-    return false;
-  }
-
-  const elements = clause.namedBindings.elements;
-  return elements.length > 0 && elements.every((element) => element.isTypeOnly);
-}
-
-function forbiddenReason(specifier, sourceFile, allowMemoryPortType) {
+function forbiddenReason(specifier, sourceFile) {
   if (specifier === 'toposort') return undefined;
-  if (specifier === '@obversa/engine') {
-    return 'only reviewed named JSON imports are allowed';
+  if (specifier === '@obversa/api') {
+    return 'only reviewed named imports are allowed';
   }
-  if (specifier === '@obversa/memory') {
-    return allowMemoryPortType ? undefined : 'only type imports from the memory port are allowed';
-  }
-  if (specifier.startsWith('@obversa/memory')) {
+  if (specifier.startsWith('@obversa/memory-')) {
     return 'memory adapters are outside the graph core';
   }
 
@@ -363,7 +401,7 @@ function forbiddenReason(specifier, sourceFile, allowMemoryPortType) {
 
   if (specifier.startsWith('.')) {
     const target = resolve(dirname(sourceFile.fileName), specifier);
-    if (!scanRoots.some((root) => isInside(root, target))) {
+    if (!scanRoots.some((root) => isInside(sourceExtensions.has(extname(root)) ? dirname(root) : root, target))) {
       return 'local imports must stay inside the graph root';
     }
     if (!localSourceCandidates(target).some((candidate) => scannedFiles.has(candidate))) {
@@ -461,7 +499,9 @@ function isReferenceIdentifier(node) {
 function report(sourceFile, position, message) {
   const location = sourceFile.getLineAndCharacterOfPosition(position);
   const root = scanRoots.find((candidate) => isInside(candidate, sourceFile.fileName));
-  const path = `${scanRoots.length === 1 ? '' : `${basename(root)}/`}${relative(root, sourceFile.fileName)}`
+  const path = (root === sourceFile.fileName
+    ? basename(root)
+    : `${scanRoots.length === 1 ? '' : `${basename(root)}/`}${relative(root, sourceFile.fileName)}`)
     .split(sep)
     .join('/');
   violations.push(`${path}:${location.line + 1}:${location.character + 1}: ${message}`);

@@ -16,6 +16,14 @@
       "types": "./dist/testing.d.ts",
       "import": "./dist/testing.js"
     },
+    "./memory": {
+      "types": "./dist/memory.d.ts",
+      "import": "./dist/memory.js"
+    },
+    "./workflow-support": {
+      "types": "./dist/workflow-support.d.ts",
+      "import": "./dist/workflow-support.js"
+    },
     "./env/command": {
       "types": "./dist/env/command.d.ts",
       "import": "./dist/env/command.js"
@@ -49,17 +57,15 @@
     "node": ">=22.12.0"
   },
   "dependencies": {
-    "@obversa/process": "workspace:^",
+    "@obversa/core": "workspace:^",
     "p-limit": "^7.3.0",
     "toposort": "^2.0.2"
   },
   "peerDependencies": {
-    "@obversa/engine": ">=0.1.0 <0.2.0",
-    "@obversa/memory": ">=0.1.0 <0.2.0"
+    "@obversa/api": ">=0.1.0 <0.2.0"
   },
   "devDependencies": {
-    "@obversa/engine": "workspace:^",
-    "@obversa/memory": "workspace:^",
+    "@obversa/api": "workspace:^",
     "@types/node": "22.12.0",
     "@types/toposort": "^2.0.7",
     "execa": "^9.6.1"

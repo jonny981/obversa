@@ -12,7 +12,7 @@
 
 import type { LoopError, LoopErrorCode } from './errors.js';
 
-export { retryAfterHeaderToMs } from '@obversa/engine';
+export { retryAfterHeaderToMs } from '@obversa/core/command';
 
 /** The error codes the limit policy reacts to: provider limits + the budget. */
 const LIMIT_CODES: ReadonlySet<LoopErrorCode> = new Set([

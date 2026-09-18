@@ -1,7 +1,7 @@
 import { claude } from '@obversa/engine-claude-cli';
-import { codex } from '@obversa/engine-codex';
+import { codex } from '@obversa/engine-codex-cli';
 import { run } from '@obversa/runtime';
-import { fromFile, stage, workflow, type TeamSeat } from '@obversa/teams';
+import { briefFromFile, stage, workflow, type TeamSeat } from '@obversa/runtime';
 
 interface WriterReviewerEngines {
   readonly claude: (model: string) => TeamSeat;
@@ -12,7 +12,7 @@ const realEngines: WriterReviewerEngines = { claude, codex };
 
 function createWriterReviewerPair(engines: WriterReviewerEngines = realEngines) {
   return workflow('writer-reviewer-pair', {
-    brief: fromFile('briefs/add.md'),
+    brief: briefFromFile('briefs/add.md'),
     options: { timeout: '10m' },
 
     roles: {

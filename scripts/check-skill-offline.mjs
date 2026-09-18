@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 // The offline skill proof: the
-// packed @obversa/source archive carries the review-diff skill and the one
+// packed @obversa/surface-diff archive carries the review-diff skill and the one
 // bin with a matching major; and the skill's exact command line — npx with
 // the pinned major — resolves the packed bin from a local registry stand-in,
 // prints the loopback URL, and frames the interrupted session with the
@@ -35,7 +35,7 @@ function run(command, args, options = {}) {
   return result.stdout;
 }
 
-// ---- The closure: every package the source tarball's install needs. ----
+// ---- The closure: every package the surface-diff tarball's install needs. ----
 
 // The workspace's installed copy of name@version, from the isolated store.
 function installedDirectory(name, version) {
@@ -129,18 +129,18 @@ async function main() {
   let child;
   try {
     // Step 1: the packed archive carries the skill and the bin, majors agree.
-    const sourceManifest = JSON.parse(await readFile(join(root, 'packages', 'source', 'package.json'), 'utf8'));
-    const sourceTarball = join(archives, 'obversa-source.tgz');
-    run('pnpm', ['--dir', join(root, 'packages', 'source'), 'pack', '--pack-destination', archives]);
-    run('mv', [join(archives, `obversa-source-${sourceManifest.version}.tgz`), sourceTarball]);
-    const entries = run('tar', ['-tzf', sourceTarball]).split('\n');
+    const surfaceDiffManifest = JSON.parse(await readFile(join(root, 'packages', 'surface-diff', 'package.json'), 'utf8'));
+    const surfaceDiffTarball = join(archives, 'obversa-surface-diff.tgz');
+    run('pnpm', ['--dir', join(root, 'packages', 'surface-diff'), 'pack', '--pack-destination', archives]);
+    run('mv', [join(archives, `obversa-surface-diff-${surfaceDiffManifest.version}.tgz`), surfaceDiffTarball]);
+    const entries = run('tar', ['-tzf', surfaceDiffTarball]).split('\n');
     assert.ok(entries.includes('package/skills/review-diff/SKILL.md'), 'the packed archive carries the skill');
     assert.ok(entries.includes('package/bin/obversa-review.mjs'), 'the packed archive carries the bin');
-    assert.deepEqual(sourceManifest.obversa?.skills, ['review-diff'], 'the manifest lists the skill as audit metadata');
-    const skillText = await readFile(join(root, 'packages', 'source', 'skills', 'review-diff', 'SKILL.md'), 'utf8');
-    const commandMatch = /npx -y @obversa\/source@(\d+)/.exec(skillText);
+    assert.deepEqual(surfaceDiffManifest.obversa?.skills, ['review-diff'], 'the manifest lists the skill as audit metadata');
+    const skillText = await readFile(join(root, 'packages', 'surface-diff', 'skills', 'review-diff', 'SKILL.md'), 'utf8');
+    const commandMatch = /npx -y @obversa\/surface-diff@(\d+)/.exec(skillText);
     assert.ok(commandMatch, 'the skill carries the one command line');
-    assert.equal(commandMatch[1], sourceManifest.version.split('.')[0], "the skill's command major equals the package major");
+    assert.equal(commandMatch[1], surfaceDiffManifest.version.split('.')[0], "the skill's command major equals the package major");
     assert.match(skillText, /<<<REVIEW_RESULT_V1>>>/, 'the skill names the real frame markers');
 
     // The registry closure: the packed surfaces plus every external
@@ -150,13 +150,13 @@ async function main() {
       const listing = run('tar', ['-xzOf', tarball, 'package/package.json']);
       return JSON.parse(listing);
     };
-    const surfacerTarball = join(archives, 'obversa-surfacer.tgz');
-    run('pnpm', ['--dir', join(root, 'packages', 'surfacer'), 'pack', '--pack-destination', archives]);
-    const surfacerManifest = JSON.parse(await readFile(join(root, 'packages', 'surfacer', 'package.json'), 'utf8'));
-    run('mv', [join(archives, `obversa-surfacer-${surfacerManifest.version}.tgz`), surfacerTarball]);
-    record(packages, packedManifest(sourceTarball), sourceTarball);
-    record(packages, packedManifest(surfacerTarball), surfacerTarball);
-    const queue = Object.entries(packedManifest(sourceTarball).dependencies ?? {}).filter(([name]) => !name.startsWith('@obversa/'));
+    const surfaceDecisionTarball = join(archives, 'obversa-surface-decision.tgz');
+    run('pnpm', ['--dir', join(root, 'packages', 'surface-decision'), 'pack', '--pack-destination', archives]);
+    const surfaceDecisionManifest = JSON.parse(await readFile(join(root, 'packages', 'surface-decision', 'package.json'), 'utf8'));
+    run('mv', [join(archives, `obversa-surface-decision-${surfaceDecisionManifest.version}.tgz`), surfaceDecisionTarball]);
+    record(packages, packedManifest(surfaceDiffTarball), surfaceDiffTarball);
+    record(packages, packedManifest(surfaceDecisionTarball), surfaceDecisionTarball);
+    const queue = Object.entries(packedManifest(surfaceDiffTarball).dependencies ?? {}).filter(([name]) => !name.startsWith('@obversa/'));
     const seen = new Set();
     while (queue.length > 0) {
       const [name, range] = queue.shift();
@@ -211,7 +211,7 @@ async function main() {
     // the stand-in, prints the loopback URL, and the interrupted session
     // frames with the surface identity.
     const runSkillCommand = (extraEnv, args) => {
-      const spawned = spawn(process.execPath, [NPX_CLI, '-y', '@obversa/source@0', ...args], {
+      const spawned = spawn(process.execPath, [NPX_CLI, '-y', '@obversa/surface-diff@0', ...args], {
         cwd: repository,
         stdio: ['ignore', 'pipe', 'pipe'],
         env: { ...environment, ...extraEnv },
@@ -247,7 +247,7 @@ async function main() {
     assert.ok(frame, `the interrupted session still frames; stdout:\n${child.stdout.slice(0, 300)}`);
     const interrupted = JSON.parse(frame[1]);
     assert.equal(interrupted.status, 'interrupted');
-    assert.deepEqual(interrupted.surface, { package: '@obversa/source', version: sourceManifest.version }, 'the frame carries the surface identity');
+    assert.deepEqual(interrupted.surface, { package: '@obversa/surface-diff', version: surfaceDiffManifest.version }, 'the frame carries the surface identity');
 
     // Step 5a: with a recording adapter injected, the same command hands the
     // adapter the one-time launch URL, never the token-bearing page URL.
@@ -269,7 +269,7 @@ async function main() {
     child.child.kill('SIGINT');
     await child.exit();
 
-    console.log(`Offline skill proof passed: the pinned command resolved @obversa/source@${sourceManifest.version} from the stand-in (${packages.size} packages served), framed the interrupt with the identity, and handed placement the launch url.`);
+    console.log(`Offline skill proof passed: the pinned command resolved @obversa/surface-diff@${surfaceDiffManifest.version} from the stand-in (${packages.size} packages served), framed the interrupt with the identity, and handed placement the launch url.`);
   } finally {
     try { child?.child.kill('SIGKILL'); } catch {}
     server?.close();

@@ -57,7 +57,7 @@ Pass a `Memory` instance in the run options when a job uses memory:
 await run(job, { memory });
 ```
 
-The runtime imports the `@obversa/memory` port. Your program selects the storage
+The runtime imports the `@obversa/api` memory port. Your program selects the storage
 adapter.
 
 With the Agent SDK engine, passing memory makes its one in-process memory tool

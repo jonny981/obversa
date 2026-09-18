@@ -29,11 +29,12 @@ import {
   type EngineStreamEvent,
   type EngineSelectionRecord,
   type JsonValue,
-} from '@obversa/engine';
+  modelIdentity,
+} from '@obversa/api';
 import {
   runEngineAdmissionConformance,
   runEngineConformance,
-} from '@obversa/engine/testing';
+} from '@obversa/api/testing';
 import {
   buildOpenCodeInvocation,
   OpenCodeCliEngine,
@@ -77,6 +78,47 @@ describe('OpenCode static admission', () => {
       .rejects.toMatchObject({ name: 'EngineError', kind: 'missing-cli' });
   });
 
+  it('records the family of the model the request names, not the family it was built for', async () => {
+    // The hole this closes: one instance built to serve `opencode` models can
+    // be handed another provider's model, and the admission record is what a
+    // review panel compares when it requires two families. It has to name the
+    // family that answered.
+    const engine = new OpenCodeCliEngine({
+      ...options(executable()),
+      identity: { provider: 'anthropic', modelFamily: null },
+    });
+    const input = request({ model: 'anthropic/claude-sonnet-4-5' });
+
+    const selected = await engine.admit(admissionRequest(input), new AbortController().signal);
+
+    expect(selected).toMatchObject({ provider: 'anthropic', modelFamily: 'claude' });
+  });
+
+  it('refuses a built family that disagrees with the model the request names', async () => {
+    const engine = new OpenCodeCliEngine({
+      ...options(executable()),
+      identity: { provider: 'anthropic', modelFamily: 'opencode' },
+    });
+    const input = request({ model: 'anthropic/claude-sonnet-4-5' });
+
+    await expect(engine.admit(admissionRequest(input), new AbortController().signal))
+      .rejects.toMatchObject({
+        name: 'EngineError',
+        kind: 'invalid-config',
+        message: expect.stringContaining('model family identity opencode does not match model family claude'),
+      });
+    // The same disagreement is refused on the path that builds the call, so a
+    // run cannot reach the CLI with an identity the record would not carry.
+    expect(() => buildOpenCodeInvocation(
+      { ...input, prompt: '' },
+      {
+        ...options(executable()),
+        identity: { provider: 'anthropic', modelFamily: 'opencode' },
+      },
+      temporaryDirectory('lines-opencode-family-'),
+    )).toThrow(/model family identity opencode does not match model family claude/);
+  });
+
   it('observes the version once without a prompt or model request and preserves normal tools', async () => {
     const fixture = admissionFixture();
     const input = request();
@@ -100,7 +142,9 @@ describe('OpenCode static admission', () => {
   it('validates each request instead of caching its selection', async () => {
     const fixture = admissionFixture();
     const first = request();
-    const second = { ...first, model: 'fixture-provider/other-model', tools: ['read'], allowedTools: ['Read'] };
+    // A different model in the same family: the selection must differ per
+    // request, and a family the engine was not built for is a separate refusal.
+    const second = { ...first, model: 'fixture-provider/fixture-model-two', tools: ['read'], allowedTools: ['Read'] };
     await fixture.engine.admit(admissionRequest(first), new AbortController().signal);
     const selected = await fixture.engine.admit(admissionRequest(second), new AbortController().signal);
     expect(selected).toEqual(admissionSelection(second, fixture.bin));
@@ -152,14 +196,17 @@ describe('OpenCode static admission', () => {
     expect(fixture.calls().filter((call) => call.kind === 'model')).toHaveLength(1);
   });
 
-  it('derives a null configured provider from the model without filling a null family', async () => {
+  it('derives both a null provider and a null family from the model it was given', async () => {
+    // Neither field is left empty: the record is what a review panel compares
+    // when it requires two families, so an absent family is read from the
+    // model rather than recorded as nothing.
     const fixture = admissionFixture();
     const input = request();
     const engine = new OpenCodeCliEngine({
       ...options(fixture.bin), identity: { provider: null, modelFamily: null }, environment: fixture.environment,
     });
     const selected = await engine.admit(admissionRequest(input), new AbortController().signal);
-    expect(selected).toMatchObject({ provider: 'fixture-provider', modelFamily: null });
+    expect(selected).toMatchObject({ provider: 'fixture-provider', modelFamily: 'fixture' });
     expect((await engine.run(input, () => {}, new AbortController().signal)).effective).toEqual(selected);
   });
 
@@ -532,8 +579,10 @@ function options(bin = executable()): OpenCodeCliEngineOptions {
     executable: bin,
     version: '1.18.23',
     identity: {
+      // The family the fixture model derives: fixture-model -> fixture. A
+      // constructed family that disagrees with the request model is refused.
       provider: 'fixture-provider',
-      modelFamily: 'fixture-family',
+      modelFamily: 'fixture',
     },
   };
 }
@@ -628,7 +677,7 @@ function admissionSelection(input: AgentRequest, bin: string): EngineSelectionRe
     adapter: 'opencode-cli',
     adapterVersion: '1.18.23',
     provider: 'fixture-provider',
-    modelFamily: 'fixture-family',
+    modelFamily: modelIdentity(input.model!).modelFamily,
     model: input.model!,
     executable: bin,
     capabilities: input.tools ?? [],
@@ -1315,6 +1364,11 @@ describe('OpenCode CLI adapter', () => {
       () => {},
       new AbortController().signal,
     )).rejects.toThrow('provider/model');
+    await expect(engine.run(
+      request({ model: 'anthropic//claude-sonnet-4-5' }),
+      () => {},
+      new AbortController().signal,
+    )).rejects.toThrow('provider/model');
   });
 
   it('rejects an unresolved builder executable and non-object auth', () => {
@@ -1354,7 +1408,8 @@ describe('OpenCode CLI adapter', () => {
     }).run(request(), () => {}, new AbortController().signal);
     expect(derived.requested.provider).toBe('fixture-provider');
     expect(derived.effective.provider).toBe('fixture-provider');
-    expect(derived.requested.modelFamily).toBeNull();
+    // A null configured family is filled from the model, never left null.
+    expect(derived.requested.modelFamily).toBe('fixture');
 
     const recordPath = join(
       temporaryDirectory('lines-opencode-record-'),
@@ -1842,16 +1897,17 @@ describe('OpenCode CLI adapter', () => {
     const bin = executable();
     const calls = join(temporaryDirectory('opencode-workspace-'), 'calls.jsonl');
     const selected = (capabilities: string[]) => engineSelection({
-      adapter: 'opencode-cli', adapterVersion: '1.18.23', provider: 'fixture-provider', modelFamily: 'fixture-family',
+      adapter: 'opencode-cli', adapterVersion: '1.18.23', provider: 'fixture-provider', modelFamily: 'fixture',
       model: 'fixture-provider/fixture-model', executable: bin, capabilities,
     });
     const report = await runEngineConformance({
+      identityFromModel: true,
       request: request({ tools: ['read'], allowedTools: ['Read'] }),
       requested: {
         adapter: 'opencode-cli',
         adapterVersion: '1.18.23',
         provider: 'fixture-provider',
-        modelFamily: 'fixture-family',
+        modelFamily: 'fixture',
         model: 'fixture-provider/fixture-model',
         executable: bin,
         capabilities: ['read'],
@@ -1860,7 +1916,7 @@ describe('OpenCode CLI adapter', () => {
         adapter: 'opencode-cli',
         adapterVersion: '1.18.23',
         provider: 'fixture-provider',
-        modelFamily: 'fixture-family',
+        modelFamily: 'fixture',
         model: 'fixture-provider/fixture-model',
         executable: bin,
         capabilities: ['read'],
@@ -1885,15 +1941,21 @@ describe('OpenCode CLI adapter', () => {
         const binForScenario = scenario === 'missing-cli'
           ? join(temporaryDirectory('lines-opencode-missing-'), 'opencode')
           : bin;
+        // The engine under test reports the identity the shared derivation reads
+        // from the model it was given, which is what the kit's identity case checks.
+        const derived = modelIdentity('fixture-provider/fixture-model');
         return new OpenCodeCliEngine({
           ...options(binForScenario),
+          identity: { provider: derived.provider ?? null, modelFamily: derived.modelFamily },
           environment: { OBVERSA_ENGINE_CONFORMANCE_SCENARIO: scenario, OBVERSA_TEST_OPENCODE_ADMISSION_RECORD: calls },
         });
       },
     });
 
-    expect(report).toEqual({ ok: true, cases: 20, failures: [], unsupported: [] });
-  });
+    expect(report).toEqual({ ok: true, cases: 21, failures: [], unsupported: [] });
+  // Twenty-one cases, each a fresh fake process: a loaded single-worker machine
+  // needs more than the default five seconds, so the window is stated here.
+  }, 30_000);
 
   it('uses EngineError types for adapter-owned abort and timeout failures', async () => {
     const controller = new AbortController();

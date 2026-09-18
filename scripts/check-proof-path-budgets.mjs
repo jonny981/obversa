@@ -7,9 +7,9 @@ import ts from "@typescript/typescript6";
 export const DEFAULT_PROOF_PATH_FILES = [
   "packages/runtime/tests/graph-types-loop-crash.spec.ts",
   "packages/runtime/tests/safe-change-recovery.spec.ts",
-  "packages/source/test/f3-browser-proof.test.mjs",
-  "packages/source/test/review-cli.test.mjs",
-  "packages/surfacer/test/server.test.mjs",
+  "packages/surface-diff/test/f3-browser-proof.test.mjs",
+  "packages/surface-diff/test/review-cli.test.mjs",
+  "packages/surface-decision/test/server.test.mjs",
 ];
 
 /**

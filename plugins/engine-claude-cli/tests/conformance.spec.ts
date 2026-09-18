@@ -3,10 +3,11 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { expect, it } from 'vitest';
-import { engineSelection, runEngineConformance, type AgentRequest } from '@obversa/engine';
+import { engineSelection, type AgentRequest } from '@obversa/api';
+import { runEngineConformance } from '@obversa/api/testing';
 import { ClaudeCliEngine } from '../src/index.ts';
 
-it.each(['stderr', 'stdout'])('runs the full kit through the Claude process boundary with failures on %s', async (stream) => {
+it.each([['stderr', 0], ['stdout', 0], ['stderr', 2_500]] as const)('runs the full kit through the Claude process boundary with failures on %s (structured-result boot delay %i ms)', async (stream, bootDelayMs) => {
   const dir = realpathSync(mkdtempSync(join(tmpdir(), 'claude-conformance-')));
   try {
     const bin = join(dir, 'claude');
@@ -17,10 +18,11 @@ it.each(['stderr', 'stdout'])('runs the full kit through the Claude process boun
       OBVERSA_TEST_CLAUDE_CALLS: calls,
       OBVERSA_ENGINE_CONFORMANCE_SCENARIO: '',
       OBVERSA_TEST_CLAUDE_FAILURE_STREAM: stream,
+      OBVERSA_TEST_CLAUDE_BOOT_DELAY_MS: '0',
     };
     const request: AgentRequest = {
       prompt: 'fixture', model: 'claude-test', tools: ['Read'], allowedTools: ['Read'],
-      cwd: dir, leaf: true, timeoutMs: 2_000, timeoutGraceMs: 200, env,
+      cwd: dir, leaf: true, timeoutMs: 10_000, timeoutGraceMs: 200, env,
     };
     const selection = (capabilities: string[]) => engineSelection({
       adapter: 'claude-cli', provider: 'anthropic', model: 'claude-test',
@@ -56,6 +58,7 @@ it.each(['stderr', 'stdout'])('runs the full kit through the Claude process boun
       open(scenario) {
         writeFileSync(calls, '');
         env.OBVERSA_ENGINE_CONFORMANCE_SCENARIO = scenario;
+        env.OBVERSA_TEST_CLAUDE_BOOT_DELAY_MS = String(scenario === 'structured-result' ? bootDelayMs : 0);
         return new ClaudeCliEngine({
           cliBinary: scenario === 'missing-cli' ? join(dir, 'absent') : bin,
           permissionMode: 'bypassPermissions',

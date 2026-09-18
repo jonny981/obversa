@@ -1,4 +1,4 @@
-import type { GraphKernel, NodeId } from './kernel.js';
+import type { GraphKernel } from './kernel.js';
 import {
   cloneFrozenJson,
   GraphValidationError,
@@ -7,38 +7,8 @@ import {
   type JsonValue,
 } from './value.js';
 
-export interface DispatchGraphCommand<Input extends JsonValue = JsonValue> {
-  readonly kind: 'dispatch';
-  readonly nodeId: NodeId;
-  readonly input: Input;
-  /** Stable logical identity and location of this requested node occurrence. */
-  readonly position: string;
-}
-
-export interface PauseGraphCommand {
-  readonly kind: 'pause';
-  readonly reason: string;
-}
-
-export interface CompleteGraphCommand<Output extends JsonValue = JsonValue> {
-  readonly kind: 'complete';
-  readonly output: Output;
-}
-
-export interface FailGraphCommand {
-  readonly kind: 'fail';
-  readonly code: string;
-  readonly message: string;
-}
-
-export type GraphCommand<
-  Input extends JsonValue = JsonValue,
-  Output extends JsonValue = JsonValue,
-> =
-  | DispatchGraphCommand<Input>
-  | PauseGraphCommand
-  | CompleteGraphCommand<Output>
-  | FailGraphCommand;
+import type { GraphCommand } from '@obversa/api';
+export { type DispatchGraphCommand, type PauseGraphCommand, type CompleteGraphCommand, type FailGraphCommand, type GraphCommand } from '@obversa/api';
 
 function issue(path: string, message: string): GraphValidationIssue {
   return { code: 'INVALID_GRAPH_COMMAND', path, message };

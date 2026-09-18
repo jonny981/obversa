@@ -1,0 +1,122 @@
+---
+title: "@obversa/builtin-workflows"
+description: "Three ready-made workflows: a writer and reviewer, a review panel, and feature delivery."
+---
+
+Give a recipe its brief, workspace, expected files, test command and engine
+seats. It returns a job for `run` from `@obversa/runtime`.
+
+## Install
+
+```bash
+npm install @obversa/builtin-workflows @obversa/runtime
+```
+
+Install the engine plugins whose seats you want to use. Node.js 22.12 or
+later is required.
+
+## Choose a recipe
+
+| function | what it runs | configuration |
+| --- | --- | --- |
+| `writerReviewerPair` | A writer, the test command, and a reviewer whose findings return to the writer. | `PairConfig`: `writer`, `reviewer`, optional `maxKickbacks`. |
+| `thresholdPanel` | An implementation, the test command, and a panel that needs the specified number of acceptances. | `PanelConfig`: `implement`, `reviewers`, `threshold`, optional `maxKickbacks`. |
+| `featureDelivery` | Research, requirements, planning, tests, implementation, review, approval, evidence and learning steps. | `FeatureDeliveryConfig`: `analyse`, `implement`, `reviewers`, `reviewThreshold`, `approve`, `testFiles`, optional `maxKickbacks`. |
+
+Every configuration includes `TeamInput`: `brief`, `workspace`, `files`
+and `test`. The `TestCommand` record names a `command`, its `args` and an
+optional `timeoutMs`. A `ReviewerSeat` names a reviewer, its `seat` and an
+optional review `scope`. The `TeamSeat` contract belongs to `@obversa/api`.
+
+Complete runnable files are in `examples/teams/writer-reviewer-pair.ts`,
+`examples/teams/threshold-panel.ts` and `examples/teams/feature-delivery.ts`.
+
+## Write your own stages
+
+Use `workflow`, `stage`, `person` and `briefFromFile` from
+`@obversa/runtime` when you want to declare your own roles and stages.
+The [runtime package page](/packages/runtime#declare-roles-and-stages)
+contains the complete example and field reference. These builders are not
+exports of `@obversa/builtin-workflows`.
+
+## Review decisions
+
+`outcomeFromAgentText` reads a reviewer's JSON decision and turns it into a
+pass or findings for the named target. `INVALID_TEAM_DECISION` identifies
+an invalid decision. Both are re-exported from
+`@obversa/runtime/workflow-support`.
+
+## Offline example
+
+This complete file runs the writer, a real Node check and the reviewer
+offline. The scripted engines write and inspect one temporary file. The
+example checks the outcome and removes its workspace.
+
+`examples/builtin-workflows.ts`, in full:
+
+```ts
+import assert from 'node:assert/strict';
+import { readFileSync, writeFileSync } from 'node:fs';
+import { mkdtemp, realpath, rm } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+
+import type { TeamSeat } from '@obversa/api';
+import { writerReviewerPair } from '@obversa/builtin-workflows';
+import { MockEngine } from '@obversa/core/testing';
+import { run } from '@obversa/runtime';
+
+const workspace = await realpath(await mkdtemp(join(tmpdir(), 'obversa-pair-')));
+const answer = join(workspace, 'answer.txt');
+let writes = 0;
+let reviews = 0;
+
+try {
+  const writer: TeamSeat = {
+    engine: new MockEngine(() => {
+      writes += 1;
+      writeFileSync(answer, '42\n');
+      return JSON.stringify({ status: 'pass', summary: 'Wrote the answer.' });
+    }),
+    identity: {
+      adapter: 'mock', provider: 'local', modelFamily: 'writer',
+      model: 'writer-offline', tools: ['Write'],
+    },
+  };
+  const reviewer: TeamSeat = {
+    engine: new MockEngine(() => {
+      reviews += 1;
+      assert.equal(readFileSync(answer, 'utf8'), '42\n');
+      return JSON.stringify({ status: 'pass', summary: 'The answer matches the brief.' });
+    }),
+    identity: {
+      adapter: 'mock', provider: 'local', modelFamily: 'reviewer',
+      model: 'reviewer-offline', tools: ['Read'],
+    },
+  };
+  const job = writerReviewerPair({
+    brief: 'Write answer.txt containing 42 followed by a newline.',
+    workspace,
+    files: ['answer.txt'],
+    writer,
+    reviewer,
+    test: {
+      command: process.execPath,
+      args: ['-e', 'require("node:assert/strict").equal(require("node:fs").readFileSync("answer.txt", "utf8"), "42\\n")'],
+      timeoutMs: 5_000,
+    },
+  });
+  const result = await run(job, { recordTo: join(workspace, 'run.jsonl') });
+  assert.equal(result.outcome.status, 'pass');
+  assert.equal(writes, 1);
+  assert.equal(reviews, 1);
+  console.log(JSON.stringify({ status: result.outcome.status, writes, reviews }, null, 2));
+} finally {
+  await rm(workspace, { recursive: true, force: true });
+}
+```
+
+## Source
+
+`packages/builtin-workflows` in the repository. The package uses the
+runtime to execute jobs and API contracts to describe engine seats.

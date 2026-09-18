@@ -99,7 +99,7 @@ so a consumer can always say which surface produced the frame.
 {
   "schemaVersion": 1,
   "app": "review",
-  "surface": { "package": "@obversa/source", "version": "0.1.0" },
+  "surface": { "package": "@obversa/surface-diff", "version": "0.1.0" },
   "status": "completed",
   "operationId": "…",
   "createdAt": "…",
@@ -133,7 +133,7 @@ so a consumer can always say which surface produced the frame.
 An annotation may carry a `thread`: an ordered list of replies, each an
 author and a body, shaped and bounded like the annotation itself. A
 responder agent appends to it with `appendToThread(annotation, entry)` from
-`@obversa/source` — the call returns a new annotation and never mutates the
+`@obversa/surface-diff` — the call returns a new annotation and never mutates the
 input — and a thread submitted with the review rides the framed result
 intact, so the next round sees the conversation so far.
 
@@ -165,7 +165,7 @@ for `completed`, 1 for every other status, and 2 for a bad argument.
 
 ## Security
 
-The page runs on [the Surfacer](/packages/surfacer): one loopback server,
+The page runs on [the surface decision package](/packages/surface-decision): one loopback server,
 one session token, one result. The static page names nothing under review:
 not the diff, not the ref, not even the highlight rules, which are built
 from the tokens the diff contains. The page fetches the diff, its label, and

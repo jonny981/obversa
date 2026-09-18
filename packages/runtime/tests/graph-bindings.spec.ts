@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import type { Memory } from '@obversa/memory';
+import type { Memory } from '@obversa/api';
 import type { GraphRequirements } from '../src/graph/plan.ts';
 import type { GraphBindings } from '../src/graph/type.ts';
 

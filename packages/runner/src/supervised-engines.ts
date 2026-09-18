@@ -3,7 +3,7 @@ import {
   validateIncompleteResultEvidence, type AgentRequest, type AgentResult, type Engine,
   type EngineSelectionRecord,
   type EngineIncompleteResultEvidence, type JsonObject,
-} from '@obversa/engine';
+} from '@obversa/api';
 import type { GraphEngineBinding, RunStorageBinding } from '@obversa/runtime';
 
 async function recordable(evidence: EngineIncompleteResultEvidence, storage: RunStorageBinding, runId: string): Promise<JsonObject> {

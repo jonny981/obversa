@@ -36,8 +36,8 @@
     "prepublishOnly": "node ../../scripts/check-publish-allowlist.mjs"
   },
   "dependencies": {
-    "@obversa/memory": "workspace:^",
-    "@obversa/process": "workspace:^"
+    "@obversa/api": "workspace:^",
+    "@obversa/core": "workspace:^"
   },
   "keywords": [
     "agent",

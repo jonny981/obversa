@@ -12,7 +12,7 @@ import {
   type MemoryLimits,
   type MemoryPath,
   type MemoryResult,
-} from '@obversa/memory';
+} from '@obversa/api';
 
 export interface SimpleMemoryOptions {
   readonly scope: string;
