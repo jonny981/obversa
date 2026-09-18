@@ -13,7 +13,9 @@
 
 /**
  * Declare one test's sequential timeout path and return the same guards for
- * the waits on that path. The import-time check keeps a stale chain from
+ * the waits on that path. Each phase names one wait and carries a ceiling for
+ * it; reaching that ceiling means the thing waited for did not happen, and the
+ * failure names the phase. The import-time check keeps a stale chain from
  * passing silently after a phase is added.
  *
  * @param {string} name
@@ -34,9 +36,20 @@ export function defineBudgetChain(name, budgetMs, { setup, phases, cleanup }) {
     seen.add(phase);
   }
 
+  // A phase allowance is a ceiling on one wait, and the test's own timeout is
+  // what bounds the whole run. Requiring the allowances to SUM inside the test
+  // budget treated worst cases as if they happened together, which squeezed
+  // every ceiling until an ordinary slow moment tripped one: the browser
+  // proof's phases summed to 179s against a 180s budget, and a loaded machine
+  // cost a gate round on a ten-second wait for a browser target. So the sum is
+  // reported and not ruled on, while a single phase that reaches the test
+  // budget is still refused, because such a phase could never fail before the
+  // test did and its name would never reach the reader.
   const totalMs = entries.reduce((total, [, allowance]) => total + allowance, 0);
-  if (totalMs >= budgetMs) {
-    throw new RangeError(`${name} budget chain exceeds its test budget: ${totalMs}ms >= ${budgetMs}ms`);
+  for (const [phase, allowance] of entries) {
+    if (allowance >= budgetMs) {
+      throw new RangeError(`${name} phase ${phase} reaches its test budget: ${allowance}ms >= ${budgetMs}ms`);
+    }
   }
 
   const allowances = new Map(entries);

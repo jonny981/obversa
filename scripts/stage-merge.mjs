@@ -82,7 +82,8 @@ export const stageBranches = {
   F72: 'feat/shared-family-derivation',
   F77: 'fix/kit-fixture-boot-window',
   F78: 'fix/stand-in-opencode-frames',
-  F66: 'feat/api-polish',
+  F66: 'feat/api-polish',  F83: 'fix/proof-budgets-wait-for-a-condition',
+
 };
 
 export function manageStage(args, options = {}) {
