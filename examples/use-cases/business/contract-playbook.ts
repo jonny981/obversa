@@ -57,7 +57,13 @@ function createContractPlaybook(engines: ContractPlaybookEngines = realEngines) 
         agent: 'review',
         writes: 'review/positions.md',
         desc: 'Write the negotiating note: what to hold, what to concede and to what, and what is a walk-away.',
-        gate: 'Every redline has a position.',
+        gate: 'Every redline has a position, and a reviewer from another family has accepted them.',
+        reviewedBy: 'playbook-check',
+        // Three attempts: the allowance matches how open-ended the work is.
+        // Deciding what to hold, what to concede and what is a walk-away is
+        // the most judgement-heavy step here, and it had none while listing
+        // clauses had three.
+        retry: 3,
       }),
 
       stage('negotiate', {

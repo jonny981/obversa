@@ -58,17 +58,24 @@ function createDraftThenSend(engines: DraftThenSendEngines = realEngines) {
         retry: 3,
       }),
 
+      stage('seal', {
+        run: ['sh', '-c', 'cp outreach/emails.json outreach/approved.json && shasum -a 256 outreach/approved.json > outreach/approved.sha256'],
+        writes: ['outreach/approved.json', 'outreach/approved.sha256'],
+        desc: 'Freeze the exact bytes the person is about to read, and record their digest.',
+        gate: 'The frozen payload and its digest are on disk.',
+      }),
+
       stage('send', {
         input: 'sender',
-        desc: 'Put the drafts in front of the person whose name is on them.',
-        gate: 'The person has said yes to the payload as written.',
+        desc: 'Put the frozen payload in front of the person whose name is on it.',
+        gate: 'The person has said yes to outreach/approved.json as it stands.',
         sendsBackTo: 'draft',
       }),
 
       stage('deliver', {
-        run: ['curl', '-fsS', '-X', 'POST', MAIL_ENDPOINT, '-H', `Authorization: Bearer ${MAIL_KEY}`, '-H', 'Content-Type: application/json', '--data-binary', '@outreach/emails.json'],
-        desc: 'Send the approved payload.',
-        gate: 'The mail API accepted the batch.',
+        run: ['sh', '-c', `shasum -a 256 -c outreach/approved.sha256 && curl -fsS -X POST ${MAIL_ENDPOINT} -H "Authorization: Bearer ${MAIL_KEY}" -H "Content-Type: application/json" --data-binary @outreach/approved.json`],
+        desc: 'Check the bytes are the ones that were approved, then send those bytes.',
+        gate: 'The digest still matches and the mail API accepted the batch.',
       }),
     ],
   });

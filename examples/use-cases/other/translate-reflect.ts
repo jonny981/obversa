@@ -44,7 +44,11 @@ function createTranslateReflect(engines: TranslateEngines = realEngines) {
         desc: 'Translate source/article.md into French for a reader in France, in the tone the brief names, rendering every term in glossary/en-fr.md as the glossary says.',
         gate: 'The translation is complete and a reviewer from another family, reading it as an editor would, has accepted it.',
         reviewedBy: 'reflect',
-        retry: 2,
+        // Three attempts, not two: the allowance matches how open-ended the
+        // work is. A translation that honours a glossary and still reads
+        // naturally has many defensible answers, so reviewer and writer need
+        // room to meet.
+        retry: 3,
       }),
 
       stage('terms', {

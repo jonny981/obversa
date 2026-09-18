@@ -63,7 +63,10 @@ function createWatchSignals(engines: WatchSignalsEngines = realEngines) {
         desc: 'Group the rows in signals/events.json into frictions a person would recognise, worst first, each with its pages and its count.',
         gate: 'Every friction names its pages and its count, and a reviewer from another family has accepted the grouping against the rows.',
         reviewedBy: 'signal-review',
-        retry: 2,
+        // Three attempts, not two: the allowance matches how open-ended the
+        // work is. Naming the frictions in raw product signals has many
+        // defensible answers, so reviewer and writer need room to meet.
+        retry: 3,
       }),
 
       stage('draft', {
@@ -72,7 +75,10 @@ function createWatchSignals(engines: WatchSignalsEngines = realEngines) {
         desc: 'Write one ticket per friction worth fixing: a title, the evidence, and a first suspect.',
         gate: 'Every ticket carries its evidence.',
         reviewedBy: 'signal-review',
-        retry: 2,
+        // Three attempts, not two: the allowance matches how open-ended the
+        // work is. Naming the frictions in raw product signals has many
+        // defensible answers, so reviewer and writer need room to meet.
+        retry: 3,
       }),
 
       stage('decide', {

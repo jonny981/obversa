@@ -104,6 +104,94 @@ and the questions are in `backlog/` for the owner to read; an answer
 through the run's callbacks client carries on from there, and a no goes
 back to `split` with the owner's note as the finding.
 
+## What a run printed
+
+The output below is from one real run of this file, with the two command line
+tools signed in on the machine. This run did not finish, and it is here
+because of that rather than in spite of it.
+
+The reviewer is a model from another family. Three times it read the stories
+and sent them back with a real problem: a dark-mode story that said every
+screen renders "correctly" without saying which screens or what proves it, and
+an export story that had quietly become two, finishing a yearly export and
+running one every month. Each round the writer fixed what it was told and the
+reviewer found something else true. On the third the loop reached its
+allowance and stopped.
+
+Nothing was published. A grooming loop that stops with the work unfinished is
+doing its job; one that runs out of attempts and passes the stories on anyway
+would not be. The allowance is the thing to match to the work: three rounds
+suit a job with a few defensible answers, and splitting a backlog of vague
+tickets is not that job.
+
+```text
+backlog-groom-then-rank ▸ dag (3 nodes)
+backlog-groom-then-rank · node split: start
+backlog-groom-then-rank › split › split-review ▸ loop (max 4)
+backlog-groom-then-rank › split › split-review · iteration 1
+backlog-groom-then-rank › split › split-review • split
+backlog-groom-then-rank › split › split-review engine:thinking
+backlog-groom-then-rank › split › split-review engine:text
+backlog-groom-then-rank › split › split-review   tool Read use
+backlog-groom-then-rank › split › split-review   tool tool result
+backlog-groom-then-rank › split › split-review engine:thinking
+backlog-groom-then-rank › split › split-review engine:text
+backlog-groom-then-rank › split › split-review   tool Write use
+backlog-groom-then-rank › split › split-review   tool tool result
+backlog-groom-then-rank › split › split-review engine:thinking
+backlog-groom-then-rank › split › split-review   tool Read use
+backlog-groom-then-rank › split › split-review   tool tool result
+backlog-groom-then-rank › split › split-review engine:thinking
+backlog-groom-then-rank › split › split-review   tool Bash use
+backlog-groom-then-rank › split › split-review   tool tool result
+backlog-groom-then-rank › split › split-review engine:thinking
+… 60 more event lines …
+backlog-groom-then-rank › split › split-review   tool Edit use
+backlog-groom-then-rank › split › split-review   tool tool result
+backlog-groom-then-rank › split › split-review engine:thinking
+backlog-groom-then-rank › split › split-review engine:text
+backlog-groom-then-rank › split › split-review   claude-sonnet-4-5-20250929: 334000/2636 tok
+backlog-groom-then-rank › split › split-review • split: fail
+backlog-groom-then-rank › split › split-review · until met: split writes: true
+backlog-groom-then-rank › split › split-review › review-panel • split
+backlog-groom-then-rank › split › split-review › review-panel • split-1
+backlog-groom-then-rank › split › split-review › review-panel engine:text
+backlog-groom-then-rank › split › split-review › review-panel   gpt-5.6-luna: 192268/2663 tok
+backlog-groom-then-rank › split › split-review › review-panel • split-1: fail
+backlog-groom-then-rank › split › split-review › review-panel • split: fail
+backlog-groom-then-rank › split › split-review · review: fail
+review did not pass (Review panel: 0/1 reviewer(s) cleared. - split-1 [block]: backlog/stories.md:40-45 combines completing within two minutes with avoiding timeout errors; these are two distinct user outcomes and should be separate story sections, both sourced from “Export takes forever”.); re-entering split-review
+backlog-groom-then-rank › split › split-review ◂ exhausted (3 iter)
+backlog-groom-then-rank · node split: done (exhausted)
+backlog-groom-then-rank · node clarify: done (aborted)
+backlog-groom-then-rank · node rank: done (aborted)
+backlog-groom-then-rank ◂ dag fail
+```
+
+```json
+{
+  "status": "fail",
+  "summary": "dag \"backlog-groom-then-rank\": 2 required node(s) did not complete",
+  "data": {
+    "split": {
+      "status": "exhausted",
+      "summary": "review rejected 3× (maxReviewRestarts)",
+      "data": {
+        "response": "Fixed. Removed the scheduling language from \"Fast export for large invoice volumes\" and replaced it with a concrete performance check. The acceptance checks now verify export reliability and speed for the stated use case, without implying automated scheduling that wasn't requested."
+      }
+    },
+    "clarify": {
+      "status": "aborted",
+      "summary": "blocked by a failed dependency"
+    },
+    "rank": {
+      "status": "aborted",
+      "summary": "blocked by a failed dependency"
+    }
+  }
+}
+```
+
 ## The team's shape
 
 | step | does | done when |

@@ -17,8 +17,8 @@ Policy:
   chargeback, a lawyer or the press, and any request to change a delivery
   address after dispatch go to a person.
 
-Write triage/decision.json as {"ticket": "<id>", "route": "auto" | "escalate",
-"confidence": <0 to 1>, "reason": "<one sentence>"} and triage/reply.json as
+The result is triage/decision.json, holding {"ticket": "<id>", "route": "auto" | "escalate",
+"confidence": <0 to 1>, "reason": "<one sentence>"}, and triage/reply.json, holding
 {"ticket": "<id>", "body": "<the reply, in plain warm English, signed
-Harbourline Books>"}. Write the reply even when you escalate: the person
+Harbourline Books>"}. The reply exists even when the route is escalate: the person
 starts from your draft.

@@ -47,7 +47,9 @@ Replacement: struck; exclusivity of any kind is never signed.
 
 // The checker sends the redlines back once: two never-sign clauses had no
 // redline. The second set covers every push-back and never clause, the
-// positions note follows, and the run stops at the lawyer.
+// positions note follows and is checked in its turn, and the run stops at the
+// lawyer. The note is reviewed because deciding what to concede is the most
+// judgement-heavy step here; it used to be the only unreviewed one.
 await withExample({
   here,
   example: 'contract-playbook',
@@ -62,6 +64,7 @@ await withExample({
     codex: [
       { reply: revise('two never-sign clauses have no redline', 'clause 4 (uncapped indemnity) is marked never in clauses.md and absent from redlines.md', 'clause 6 (exclusivity) is marked never and absent') },
       { reply: pass('every push-back and never clause has a redline, and none goes past its rule') },
+      { reply: pass('every redline has a position, and the two walk-aways match the never-sign rules') },
     ],
   },
 }, async (run) => {
@@ -69,7 +72,7 @@ await withExample({
   assert.equal(run.printed.data?.negotiate?.status, 'paused');
   assert.match(run.printed.summary ?? '', /Send these redlines/);
   assert.equal(run.seatCalls.filter((call) => call.role === 'claude').length, 4, 'clauses once, redlines twice, positions once');
-  assert.equal(run.seatCalls.filter((call) => call.role === 'codex').length, 2, 'the checker reads both sets of redlines');
+  assert.equal(run.seatCalls.filter((call) => call.role === 'codex').length, 3, 'the checker reads both sets of redlines, then the positions note');
   const redlines = await run.read('review/redlines.md');
   assert.match(redlines, /## Clause 4/, 'the indemnity redline is on disk');
   assert.match(redlines, /## Clause 6/, 'the exclusivity redline is on disk');

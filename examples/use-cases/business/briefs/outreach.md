@@ -10,7 +10,7 @@ Write to each lead once. Short, plain, one reason we noticed their shop, one
 question, no offer of a call in the first line, no claims about them we
 cannot back from the file. Sign off as Ines.
 
-Write outreach/drafts.md with one section per lead (To, Subject, then the
-body) and outreach/emails.json as a JSON array of
+The result is outreach/drafts.md, one section per lead (To, Subject, then the
+body), and outreach/emails.json, a JSON array of
 {"from": "ines@lanternanalytics.example", "to": ["<email>"], "subject": "<subject>", "text": "<body>"}
 with the same text as the drafts.

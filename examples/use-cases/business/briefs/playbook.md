@@ -27,8 +27,14 @@ Never sign:
 - Exclusivity of any kind.
 - An indemnity that is not capped.
 
-Write review/clauses.md as one line per clause: the clause number, its
-subject, and `accept`, `push back` or `never`, with the rule. Write
-review/redlines.md with, for every push-back or never clause, the clause
-number, the current wording, and the replacement wording from the
-playbook. Write review/positions.md as the negotiating note.
+The work happens in three steps and each is judged on its own, so a step is
+never owed another's result.
+
+The first step's result is review/clauses.md, one line per clause: the clause
+number, its subject, and `accept`, `push back` or `never`, with the rule.
+
+The second step's result is review/redlines.md, holding for every push-back or
+never clause the clause number, the current wording, and the replacement
+wording from the playbook.
+
+The third step's result is review/positions.md, the negotiating note.

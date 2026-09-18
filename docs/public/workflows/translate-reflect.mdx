@@ -101,6 +101,102 @@ The run stops at `nuance` with the translation in `fr/article.md` and the
 terms note in `fr/terms.md`. A no goes back to `translate` with the
 editor's note as the finding.
 
+## What a run printed
+
+The output below is from one real run of this file, with the two command
+line tools signed in on the machine. The run stops at the person, which is
+what every example here does before anything is sent or filed.
+
+```text
+translate-reflect ▸ dag (3 nodes)
+translate-reflect · node translate: start
+translate-reflect › translate › translate-review ▸ loop (max 4)
+translate-reflect › translate › translate-review · iteration 1
+translate-reflect › translate › translate-review • translate
+translate-reflect › translate › translate-review engine:thinking
+translate-reflect › translate › translate-review engine:text
+translate-reflect › translate › translate-review   tool Read use
+translate-reflect › translate › translate-review   tool tool result
+translate-reflect › translate › translate-review   tool Read use
+translate-reflect › translate › translate-review   tool tool result
+translate-reflect › translate › translate-review engine:thinking
+translate-reflect › translate › translate-review engine:text
+translate-reflect › translate › translate-review   tool Write use
+translate-reflect › translate › translate-review   tool tool result
+translate-reflect › translate › translate-review engine:thinking
+translate-reflect › translate › translate-review engine:text
+translate-reflect › translate › translate-review   tool Bash use
+translate-reflect › translate › translate-review   tool tool result
+translate-reflect › translate › translate-review engine:thinking
+… 43 more event lines …
+translate-reflect › terms   tool tool result
+translate-reflect › terms engine:thinking
+translate-reflect › terms   tool Write use
+translate-reflect › terms   tool tool result
+translate-reflect › terms engine:thinking
+translate-reflect › terms   tool Bash use
+translate-reflect › terms   tool tool result
+translate-reflect › terms engine:thinking
+translate-reflect › terms   tool Bash use
+translate-reflect › terms   tool tool result
+translate-reflect › terms engine:thinking
+translate-reflect › terms engine:text
+translate-reflect › terms   claude-sonnet-4-5-20250929: 557355/2860 tok
+translate-reflect › terms • terms: pass
+translate-reflect · node terms: done (pass)
+translate-reflect · node nuance: start
+translate-reflect › nuance • nuance
+translate-reflect › nuance • nuance: paused
+translate-reflect · node nuance: done (paused)
+translate-reflect ◂ dag paused
+```
+
+```json
+{
+  "status": "paused",
+  "summary": "waiting for a person: Publish this translation?",
+  "data": {
+    "translate": {
+      "status": "pass",
+      "summary": "Review panel: 1/1 reviewer(s) cleared."
+    },
+    "terms": {
+      "status": "pass",
+      "summary": "All 6 glossary terms catalogued across 13 occurrences. Two divergences noted: 'Drafts' capitalised per UI convention vs natural lowercase; 'Envoyer' as infinitive button label vs French imperative preference."
+    },
+    "nuance": {
+      "status": "paused",
+      "summary": "waiting for a person: Publish this translation?",
+      "data": {
+        "requestId": "nuance#1#1173ebffeb1e9c76c8e75c9bbdb9e4e92850c7d08f0b6c3587172eecc2a93732",
+        "gateId": "nuance",
+        "gateVersion": 1,
+        "digest": "1173ebffeb1e9c76c8e75c9bbdb9e4e92850c7d08f0b6c3587172eecc2a93732",
+        "decisionText": "Publish this translation?",
+        "responseSchema": {
+          "type": "object",
+          "properties": {
+            "approved": {
+              "type": "boolean"
+            },
+            "note": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "approved"
+          ]
+        },
+        "input": {
+          "terms": "All 6 glossary terms catalogued across 13 occurrences. Two divergences noted: 'Drafts' capitalised per UI convention vs natural lowercase; 'Envoyer' as infinitive button label vs French imperative preference."
+        },
+        "presentation": {}
+      }
+    }
+  }
+}
+```
+
 ## The team's shape
 
 | step | does | done when |

@@ -51,7 +51,16 @@ await withExample({
   assert.equal(run.printed.data?.send?.status, 'paused');
   assert.match(run.printed.summary ?? '', /exactly as they stand/);
   assert.notEqual(run.printed.data?.deliver?.status, 'pass', 'nothing is delivered before the person answers');
+  // The seal runs before the person, so what they are shown is frozen: the
+  // approval and the delivery now name one file, and the mutable draft cannot
+  // be swapped underneath them afterwards.
+  // The seal is a real shell command rather than a stood-in one, so it leaves
+  // its evidence on disk instead of in commandCalls: the mail API is the only
+  // command stood in for, and it has not been called.
   assert.equal(run.commandCalls.length, 0, 'the mail API is never called');
+  assert.equal(await run.read('outreach/approved.json'), await run.read('outreach/emails.json'), 'the frozen payload is the drafted one');
+  assert.match(await run.read('outreach/approved.sha256'), /approved\.json/, 'the digest of the frozen payload is recorded beside it');
+  assert.notEqual(run.printed.data?.deliver?.status, 'pass', 'delivery waits behind the person');
   assert.equal(run.seatCalls.filter((call) => call.role === 'claude').length, 3, 'research once, draft twice');
   assert.equal(run.seatCalls.filter((call) => call.role === 'codex').length, 2, 'the reviewer reads both drafts');
   const emails = JSON.parse(await run.read('outreach/emails.json')) as { text: string }[];
