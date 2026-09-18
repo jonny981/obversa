@@ -40,36 +40,42 @@ const view = await memory.execute({
 
 ## The reasoning record
 
-The same package opens a second thing over the same repository, with
-different semantics. `openGitMemory` uses Git as a store: a private
-reference per scope, a tree, no commits, and nothing that touches your
-HEAD or your working tree. `openReasoningRecord` uses Git as the record:
-what a stage was thinking while it worked, composed into the commit body
-of the work itself, where it sits against the lines it explains and every
-tool a reader already has can find it.
+The same package opens a second thing, and the difference between them is
+where the words land. `openGitMemory` uses Git as a store: a private
+reference per scope, a tree, no commits, and nothing that touches your HEAD
+or your working tree. `openReasoningRecord` uses Git as the record: why a
+change was made, written into the body of the commit that carries it.
 
-A stage opts in, and nothing is paid for where it is not chosen. The
-record reads the run's own events, so a writer's turns are captured as
-they happen rather than summarised afterwards, and at the stage boundary
-one call composes them into a body. If that call fails or has nothing to
-say, a body is still written from the outcome, so a routine iteration
-leaves a trace instead of a gap.
+It writes no commit of its own. A stage that opts in already runs in its
+own worktree and is committed there before its work merges back, and that
+commit is the one the reasoning belongs on; a second commit would be a note
+beside the work, and a note is not attached to a line. So the record
+watches the stage work and, when there is something to commit, supplies
+that commit's message.
+
+What it captures is captured while the stage works, because a summary
+written afterwards has already lost the discarded attempt, which is the
+part a later reader cannot reconstruct. Composition has a floor: if the
+call that composes fails or returns nothing usable, the message is still
+built from the outcome, so a change never lands with a body that explains
+nothing.
 
 ```ts
 import { openReasoningRecord } from '@obversa/memory-git';
+import { isolated, run } from '@obversa/runtime';
 
-const record = await openReasoningRecord({
-  repositoryPath: workspace,
+const record = openReasoningRecord({
   stage: 'implement',
-  compose: ({ captured, outcome }) => composeBody(captured, outcome),
+  path: ['delivery', 'implement'],
+  compose: ({ captured, outcome }) => composeMessage(captured, outcome),
 });
 
-const result = await run(job, { onEvent: (event) => record.observe(event) });
-await record.close(result.outcome);
+const result = await run(isolated(implement, { label: 'implement', record }), {
+  onEvent: (event) => record.observe(event),
+});
 ```
 
-A stage that asks to record in a directory that is not a Git repository is
-refused by name rather than having its reasoning dropped in silence.
+A stage that changed nothing produces no commit, so it produces no body.
 
 ## Commands
 

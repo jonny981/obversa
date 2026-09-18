@@ -88,3 +88,9 @@ export {
   type RunStorageBinding,
 } from './run-definition.js';
 export { modelIdentity, type ModelIdentity } from './model-identity.js';
+export type {
+  ReasoningEvent,
+  ReasoningMessage,
+  ReasoningOutcome,
+  ReasoningRecorder,
+} from './reasoning-record-contract.js';

@@ -23,6 +23,8 @@
  */
 
 import type { Job, Workspace } from './types.js';
+import type { ReasoningRecorder } from '@obversa/api';
+
 import { childContext } from './context.js';
 import { LoopError } from './errors.js';
 import {
@@ -32,6 +34,7 @@ import {
   mergeBranch,
   stageAll,
   commit,
+  hasStagedChanges,
   isRepo,
 } from './git.js';
 import { mergeLock, mergeSynthesis } from './merge.js';
@@ -46,6 +49,13 @@ export interface IsolatedOptions {
   label?: string;
   /** On a land-back conflict: 'fail' (default) or 'synthesize'. */
   onConflict?: 'fail' | 'synthesize';
+  /**
+   * A record of why this stage's change exists. It watches the stage's own
+   * events and, when the stage passes with something to commit, supplies the
+   * message for the commit that carries the change. A stage that changed
+   * nothing produces no commit, so it is never asked for one.
+   */
+  record?: ReasoningRecorder;
 }
 
 /** Wrap a Job so it runs in an isolated worktree and lands back on pass. */
@@ -78,10 +88,17 @@ export function isolated(job: Job, opts: IsolatedOptions = {}): Job {
       if (outcome.status === 'pass') {
         // Capture anything the job left uncommitted, then land it back.
         await stageAll({ cwd: wt.dir, signal: parent.signal });
+        // The reasoning rides the commit that carries the change: this one.
+        // It is asked for only when there is something staged, so a stage
+        // that changed nothing writes neither a commit nor a body.
+        const message = opts.record && (await hasStagedChanges({ cwd: wt.dir, signal: parent.signal }))
+          ? await opts.record.message({
+            status: outcome.status,
+            ...(outcome.summary === undefined ? {} : { summary: outcome.summary }),
+          })
+          : undefined;
         await commit(
-          {
-            subject: `chore(${slug(label)}): worktree changes`,
-          },
+          message ?? { subject: `chore(${slug(label)}): worktree changes` },
           { cwd: wt.dir, signal: parent.signal },
         );
         const merged = await mergeLock(() =>

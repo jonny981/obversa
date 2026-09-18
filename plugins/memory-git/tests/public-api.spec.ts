@@ -22,11 +22,11 @@ describe('@obversa/memory-git', () => {
 
   it('names the options each one takes', () => {
     const store: GitMemoryOptions = { repositoryPath: '/tmp/fixture', scope: 'fixture' };
-    const record: ReasoningRecordOptions = { repositoryPath: '/tmp/fixture', stage: 'implement' };
+    // The record takes no repository: it writes no commit of its own, it
+    // supplies the message for the commit that carries the stage's change.
+    const record: ReasoningRecordOptions = { stage: 'implement', path: ['delivery', 'implement'] };
 
-    expect(store.scope).toBe('fixture');
-    // The record is opted into by a stage, so the stage is what it is given
-    // and what its refusal names.
+    expect(store.repositoryPath).toBe('/tmp/fixture');
     expect(record.stage).toBe('implement');
   });
 });
