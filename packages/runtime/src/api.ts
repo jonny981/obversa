@@ -434,6 +434,8 @@ export {
   type RunOptions,
   type RunResult,
 } from './runtime/runner.js';
+export { RESUME_STAGE_OUTCOMES } from './runtime/runner.js';
+export type { RecordedStage, ResumedStageRecords } from './runtime/persist.js';
 // A run's events are handed to `onEvent` as data. This turns one of them into
 // the line a person reads, so an example or a host can print a run as it
 // happens without writing its own formatter.

@@ -95,6 +95,7 @@ describe('public runtime API', () => {
       'LANE_DEAD_FAILURES',
       'LoopError',
       'RECORDED_ENGINE_USAGE',
+      'RESUME_STAGE_OUTCOMES',
       'StorageError',
       'acceptedResultMatches',
       'agentCheck',

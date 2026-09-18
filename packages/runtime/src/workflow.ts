@@ -1,4 +1,4 @@
-import { createHash } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 
 import { modelIdentity, type TeamSeat } from '@obversa/api';
 import { readFileSync } from 'node:fs';
@@ -14,6 +14,8 @@ import { LoopError } from './core/errors.js';
 import { loop } from './core/loop.js';
 import { reviewPanel } from './core/feedback.js';
 import type { Job, JobContext, Outcome, ConditionInput } from './core/types.js';
+import { RESUME_RECORDED_USAGE, RESUME_STAGE_OUTCOMES } from './runtime/runner.js';
+import type { ResumedStageRecords } from './runtime/persist.js';
 
 import { outcomeFromAgentText } from './workflow-agent-response.js';
 import {
@@ -46,6 +48,8 @@ export interface WorkflowStageBase {
   readonly needs?: string | readonly string[];
   readonly sendsBackTo?: string;
   readonly retry?: number;
+  /** An interrupted attempt may run again without a person's reconciliation. */
+  readonly retrySafe?: boolean;
 }
 
 export type WorkflowStage = WorkflowStageBase & {
@@ -372,6 +376,7 @@ function recordedFamilyGate(
   reviewers: readonly TeamSeat[],
   writerStageNames: readonly string[],
   writerFamilies: readonly string[],
+  writerRunsInsidePanel: boolean,
 ): Job {
   const reviewerDeclarations = reviewers.map((seat) => ({
     label: `reviewer seat ${seatIdentity(seat).model}`,
@@ -390,16 +395,33 @@ function recordedFamilyGate(
           && record.stage !== undefined
           && writerStageNames.includes(record.stage),
       );
+      const panelStage = ctx.graph?.node ?? ctx.path.at(-1) ?? 'panel';
       // Every recorded writer answer up to the panel keeps the reviewers'
       // declared difference. Records are compared by role and stage, never
       // by path.
-      assertRecordedFamilies(writerSide(all.slice(0, beforeLength)), reviewerDeclarations);
+      const beforeWriters = writerSide(all.slice(0, beforeLength));
+      assertRecordedFamilies(beforeWriters, reviewerDeclarations);
       const outcome = await panel(ctx);
       if (outcome.status !== 'pass') return outcome;
       const current = recordedUsage(ctx);
       const after = current.slice(beforeLength);
-      assertRecordedFamilies(writerSide(after), reviewerDeclarations);
+      const afterWriters = writerSide(after);
+      if (writerRunsInsidePanel && afterWriters.length === 0) {
+        throw new LoopError({
+          code: 'BODY',
+          phase: 'review',
+          message: `recorded model family missing: writer stage ${writerStageNames.join(', ')} has no recorded answer in stage ${panelStage}`,
+        });
+      }
+      assertRecordedFamilies(afterWriters, reviewerDeclarations);
       const reviewerSide = after.filter((record) => record.role === 'reviewer');
+      if (reviewerSide.length === 0) {
+        throw new LoopError({
+          code: 'BODY',
+          phase: 'review',
+          message: `recorded model family missing: reviewer stage ${panelStage} has no recorded answer`,
+        });
+      }
       assertRecordedFamilies(reviewerSide, writerDeclarations);
       // The two recorded sides themselves must be disjoint: two declared
       // differences mean nothing when one family answered both.
@@ -602,6 +624,7 @@ function stageJob(
         reviewers,
         [named.name],
         [seatIdentity(seatRole(roles, config.agent)).modelFamily],
+        true,
       ),
       reviewLoop,
     );
@@ -622,7 +645,7 @@ function stageJob(
   if ('panel' in config && config.panel !== undefined) {
     const reviewers = panelRole(roles, config.panel);
     const panel = reviewerPanel(brief, named, reviewers, files, declaredFiles, targetFiles, config.sendsBackTo, config.agree);
-    return copyJobMeta(recordedFamilyGate(panel, reviewers, familyTargetStageNames, familyTargetFamilies), panel);
+    return copyJobMeta(recordedFamilyGate(panel, reviewers, familyTargetStageNames, familyTargetFamilies, false), panel);
   }
   if ('input' in config && config.input !== undefined) {
     const personRole = inputRole(roles, config.input);
@@ -664,6 +687,138 @@ function panelReviewFiles(stages: readonly NamedStage[], index: number): string[
       : writesOf(preceding.config);
 }
 
+/** A canonical, digestable view of a declared value: primitives pass
+ * through, plain objects sort their keys, functions serialize as their
+ * source, so a changed predicate changes the digest. */
+function canonicalForDigest(value: unknown): unknown {
+  if (typeof value === 'function') return `fn:${value.toString()}`;
+  if (Array.isArray(value)) return value.map(canonicalForDigest);
+  if (value !== null && typeof value === 'object') {
+    return Object.fromEntries(
+      Object.keys(value as Record<string, unknown>).sort().map((key) => [
+        key,
+        canonicalForDigest((value as Record<string, unknown>)[key]),
+      ]),
+    );
+  }
+  return value;
+}
+
+/** The workflow's resume identity: one digest over everything a change to
+ * which means the recorded completions no longer describe this workflow.
+ * Restart-from-the-top on any change is the honest default. The digest
+ * covers only the DECLARED shape: the brief, the stage list with each
+ * stage's declared fields, and each role's declared identity. Engine
+ * instances are excluded because they carry mutable call state, and a
+ * digest that changes between two runs of the same workflow cannot match
+ * anything. */
+function resumeIdentity(name: string, config: WorkflowConfig): string {
+  const declared = {
+    name,
+    brief: config.brief,
+    stages: config.stages.map((named) => ({
+      name: named.name,
+      config: canonicalForDigest(named.config),
+    })),
+    roles: Object.fromEntries(Object.entries(config.roles).map(([key, value]) => [
+      key,
+      Array.isArray(value)
+        ? value.map((seat) => seatIdentity(seat))
+        : typeof value === 'object' && value !== null && 'kind' in value
+          ? value
+          : seatIdentity(value as TeamSeat),
+    ])),
+  };
+  return createHash('sha256').update(JSON.stringify(declared)).digest('hex');
+}
+
+function restoreRecordedUsage(ctx: JobContext): void {
+  const priorUsage = (ctx.state[RESUME_RECORDED_USAGE] as ReadonlyMap<string, readonly RecordedEngineUsage[]> | undefined)
+    ?.get(ctx.path.join('/'));
+  if (priorUsage?.length) {
+    const current = recordedUsage(ctx);
+    const key = (record: RecordedEngineUsage) => JSON.stringify([record.path, record.role, record.model]);
+    const present = new Map<string, number>();
+    for (const record of current) {
+      const identity = key(record);
+      present.set(identity, (present.get(identity) ?? 0) + 1);
+    }
+    const missing = priorUsage.filter((record) => {
+      const identity = key(record);
+      const count = present.get(identity) ?? 0;
+      if (count === 0) return true;
+      present.set(identity, count - 1);
+      return false;
+    });
+    if (missing.length) ctx.state[RECORDED_ENGINE_USAGE] = [...current, ...missing];
+  }
+}
+
+/** Reuse a completed first attempt, or reconcile an unsafe interrupted one. */
+function resumeGuard(job: Job, identity: string, label: string, retrySafe: boolean): Job {
+  return async (ctx) => {
+    const resumed = ctx.state[RESUME_STAGE_OUTCOMES] as ResumedStageRecords | undefined;
+    const parentPath = ctx.path.slice(0, -1).join('/');
+    const anchor = resumed?.anchors.get(parentPath);
+    const recorded = anchor?.identity === identity && anchor.workspace === ctx.workspace.dir
+      ? resumed?.stages.get(ctx.path.join('/'))
+      : undefined;
+    if (ctx.graph?.attempt === 1 && recorded !== undefined) {
+      if (recorded.kind === 'interrupted') {
+        if (!retrySafe) {
+          restoreRecordedUsage(ctx);
+          return reconcileInterrupted(ctx, job, label, identity, anchor!.recordId, recorded.startLine);
+        }
+      } else if (recorded.outcome.status === 'pass'
+          && (recorded.outcome.data as { skipped?: boolean } | undefined)?.skipped !== true) {
+        restoreRecordedUsage(ctx);
+        return recorded.outcome;
+      } else if (recorded.outcome.status === 'paused') {
+        const request = recorded.outcome.data as {
+          requestId?: string;
+          resumeReconciliation?: boolean;
+          input?: { startLine?: number };
+        } | undefined;
+        const pending = ctx.callbacks === undefined
+          ? []
+          : await ctx.callbacks.listPending();
+        if (request?.requestId !== undefined
+            && pending.some((candidate) => candidate.requestId === request.requestId)) {
+          return recorded.outcome;
+        }
+        if (request?.resumeReconciliation === true && request.input?.startLine !== undefined) {
+          restoreRecordedUsage(ctx);
+          return reconcileInterrupted(ctx, job, label, identity, anchor!.recordId, request.input.startLine);
+        }
+      }
+    }
+    return job(ctx);
+  };
+}
+
+async function reconcileInterrupted(
+  ctx: JobContext,
+  job: Job,
+  label: string,
+  identity: string,
+  recordId: string,
+  startLine: number,
+): Promise<Outcome> {
+  const outcome = await approval(`reconcile ${label}`, {
+    question: `Did stage "${label}" finish? Approve to continue without running it again; refuse if it did not finish.`,
+    input: { identity, workspace: ctx.workspace.dir, stage: label, recordId, startLine },
+  })(ctx);
+  if (outcome.status === 'fail' && (outcome.data as { approved?: boolean } | undefined)?.approved === false) {
+    // A crash during this new attempt must not reuse the answer about the old one.
+    ctx.emit({
+      kind: 'dag:node', ts: Date.now(), path: ctx.path.slice(0, -1), node: label,
+      phase: 'start', attempt: (ctx.graph?.attempt ?? 1) + 1,
+    });
+    return job(ctx);
+  }
+  return { ...outcome, data: { ...(outcome.data ?? {}), resumeReconciliation: true } };
+}
+
 export function workflow(name: string, config: WorkflowConfig): Job {
   const workflowName = text(name, 'workflow name');
   const brief = briefValue(config.brief);
@@ -698,6 +853,9 @@ export function workflow(name: string, config: WorkflowConfig): Job {
     }
     retryForStage(stageConfig, incomingTargets.has(stageName));
     optionalFlag(stageConfig.optional);
+    if (stageConfig.retrySafe !== undefined && typeof stageConfig.retrySafe !== 'boolean') {
+      throw new TypeError('retrySafe must be a boolean');
+    }
     writesOf(stageConfig);
   }
   for (const [index, named] of config.stages.entries()) {
@@ -742,6 +900,7 @@ export function workflow(name: string, config: WorkflowConfig): Job {
       );
     }
   }
+  const stageJobIdentity = resumeIdentity(workflowName, config);
   const declaredFiles = workflowFiles(brief, config.stages);
   const nodes = Object.fromEntries(config.stages.map((named, index) => {
     const files = stageFiles(brief, config.stages, index);
@@ -764,17 +923,18 @@ export function workflow(name: string, config: WorkflowConfig): Job {
           );
       })()
       : [];
+    const innerStage = stageJob(
+      brief,
+      named,
+      config.roles,
+      files,
+      declaredFiles,
+      targetFiles,
+      panelFamilyTargets.map((candidate) => candidate.name),
+      panelFamilyTargets.map((candidate) => seatIdentity(seatRole(config.roles, candidate.config.agent)).modelFamily),
+    );
     return [named.name, {
-      job: stageJob(
-        brief,
-        named,
-        config.roles,
-        files,
-        declaredFiles,
-        targetFiles,
-        panelFamilyTargets.map((candidate) => candidate.name),
-        panelFamilyTargets.map((candidate) => seatIdentity(seatRole(config.roles, candidate.config.agent)).modelFamily),
-      ),
+      job: copyJobMeta(resumeGuard(innerStage, stageJobIdentity, named.name, stageConfig.retrySafe === true), innerStage),
       needs: stageDependencies(config.stages, index),
       ...(named.config.desc === undefined ? {} : { desc: named.config.desc }),
       ...(named.config.gate === undefined ? {} : { gate: named.config.gate }),
@@ -788,11 +948,26 @@ export function workflow(name: string, config: WorkflowConfig): Job {
     nodes,
     ...(Object.keys(maxKickbacks).length ? { maxKickbacks } : {}),
   });
+  const resumeGraph = copyJobMeta(async (ctx: JobContext) => {
+    const prior = (ctx.state[RESUME_STAGE_OUTCOMES] as ResumedStageRecords | undefined)
+      ?.anchors.get([...ctx.path, workflowName].join('/'));
+    ctx.emit({
+      kind: 'workflow:start',
+      ts: Date.now(),
+      path: [...ctx.path, workflowName],
+      identity: stageJobIdentity,
+      workspace: ctx.workspace.dir,
+      recordId: prior?.identity === stageJobIdentity && prior.workspace === ctx.workspace.dir
+        ? prior.recordId ?? randomUUID()
+        : randomUUID(),
+    });
+    return graph(ctx);
+  }, graph);
   const always = config.post?.always;
-  if (!always) return graph;
+  if (!always) return resumeGraph;
   return loop({
     name: `${workflowName}-post`,
-    body: graph,
+    body: resumeGraph,
     until: predicate(() => true, 'workflow complete'),
     max: 1,
     onComplete: async (outcome, ctx) => {

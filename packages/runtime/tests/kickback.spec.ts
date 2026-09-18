@@ -58,6 +58,7 @@ describe('dag kickback (cross-stage feedback)', () => {
   it('honours a kickback: re-runs the target and its dependents, threading the reason', async () => {
     const ran: string[] = [];
     let aSawReason: string | undefined;
+    const attempts: Array<number | undefined> = [];
     let cRuns = 0;
     const events: LoopEvent[] = [];
 
@@ -68,6 +69,7 @@ describe('dag kickback (cross-stage feedback)', () => {
         nodes: {
           a: fnJob('a', async (ctx) => {
             ran.push('a');
+            attempts.push(ctx.graph!.attempt);
             if (ctx.lastReview) aSawReason = ctx.lastReview.summary;
             return { status: 'pass' };
           }),
@@ -96,6 +98,7 @@ describe('dag kickback (cross-stage feedback)', () => {
     expect(outcome.status).toBe('pass');
     // First pass, then one re-run of the whole a→b→c chain (a is the target).
     expect(ran).toEqual(['a', 'b', 'c', 'a', 'b', 'c']);
+    expect(attempts).toEqual([1, 2]);
     expect(aSawReason).toContain('contract drifted');
 
     const kb = kbEvents(events);

@@ -3,6 +3,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
 import {
+  createCallbackClient,
   failed,
   jobMeta,
   LoopError,
@@ -21,7 +22,7 @@ import {
   type WorkflowStage,
   type TeamSeat,
 } from '@obversa/runtime';
-import { pass, scriptedEngine, seat } from './scripted-engine.js';
+import { pass, revise, scriptedEngine, seat } from './scripted-engine.js';
 
 function nodeMeta(job: unknown): Record<string, unknown> {
   if (typeof job === 'function') {
@@ -353,12 +354,12 @@ describe('declarative teams', () => {
       await mkdir(join(request.cwd!, file, '..'), { recursive: true });
       await writeFile(join(request.cwd!, file), 'written\n');
       return pass('stage files written');
-    }]);
+    }], { usageModel: 'writer-model' });
     const reviewer = scriptedEngine('reviewer', [async (request) => {
       expect(request.prompt).toContain('Review target: src/second.mjs.');
       expect(request.prompt).not.toContain('team-output/later.md');
       return pass('review accepted');
-    }]);
+    }], { usageModel: 'reviewer-model' });
     const job = workflow('stage-files', {
       brief: 'Write the declared files in order.',
       roles: {
@@ -549,6 +550,162 @@ describe('declarative teams', () => {
     })).toThrow(/model family must be distinct/);
   });
 
+  it('resumes a workflow, skipping a completed stage and re-running a failed review', async () => {
+    const directory = await mkdtemp(join(tmpdir(), 'obversa-f42-resume-'));
+    const recordPath = join(directory, 'record.jsonl');
+    let writeCalls = 0;
+    const writer = scriptedEngine('writer', [async (request) => {
+      writeCalls += 1;
+      await writeFile(join(request.cwd!, 'note.md'), 'written\n');
+      return pass('note written');
+    }], { usageModel: 'gpt-5' });
+    let reviewCalls = 0;
+    const reviewer = scriptedEngine('reviewer', [async () => {
+      reviewCalls += 1;
+      if (reviewCalls === 1) return revise('the note is not good enough', 'missing substance');
+      return pass('accepted');
+    }], { usageModel: 'claude-sonnet-4-5' });
+    const makeWorkflow = () => workflow('resume-skip', {
+      brief: { brief: 'Write one note.', files: ['note.md'] },
+      roles: { writer: seat(writer, 'gpt'), review: [seat(reviewer, 'claude')] },
+      stages: [
+        stage('write', { agent: 'writer', writes: 'note.md' }),
+        stage('review', { panel: 'review', agree: 1 }),
+      ],
+    });
+
+    try {
+      const first = await run(makeWorkflow(), { cwd: directory, recordTo: recordPath });
+      expect(first.outcome.status).toBe('fail');
+      expect(writeCalls).toBe(1);
+
+      const resumed = await run(makeWorkflow(), { cwd: directory, recordTo: recordPath, resume: true });
+      expect(resumed.outcome.status).toBe('pass');
+      expect(writeCalls).toBe(1);
+      expect(reviewCalls).toBe(2);
+    } finally {
+      await rm(directory, { recursive: true, force: true });
+    }
+  });
+
+  it('restarts a resumed workflow from the top when the brief changed', async () => {
+    const directory = await mkdtemp(join(tmpdir(), 'obversa-f42-changed-'));
+    const recordPath = join(directory, 'record.jsonl');
+    let writeCalls = 0;
+    const writer = scriptedEngine('writer', [async (request) => {
+      writeCalls += 1;
+      await writeFile(join(request.cwd!, 'note.md'), 'written\n');
+      return pass('note written');
+    }], { usageModel: 'gpt-5' });
+    const reviewer = scriptedEngine('reviewer', [async () => pass('accepted')], { usageModel: 'claude-sonnet-4-5' });
+    const makeWorkflow = (brief: string) => workflow('resume-changed', {
+      brief: { brief, files: ['note.md'] },
+      roles: { writer: seat(writer, 'gpt'), review: [seat(reviewer, 'claude')] },
+      stages: [
+        stage('write', { agent: 'writer', writes: 'note.md' }),
+        stage('review', { panel: 'review', agree: 1 }),
+      ],
+    });
+
+    try {
+      const first = await run(makeWorkflow('Write one note.'), { cwd: directory, recordTo: recordPath });
+      expect(first.outcome.status).toBe('pass');
+      expect(writeCalls).toBe(1);
+
+      const resumed = await run(makeWorkflow('Write a DIFFERENT note.'), { cwd: directory, recordTo: recordPath, resume: true });
+      expect(resumed.outcome.status).toBe('pass');
+      expect(writeCalls).toBe(2);
+    } finally {
+      await rm(directory, { recursive: true, force: true });
+    }
+  });
+
+  it('treats resume without a record file as a fresh run', async () => {
+    const directory = await mkdtemp(join(tmpdir(), 'obversa-f42-fresh-'));
+    const writer = scriptedEngine('writer', [async (request) => {
+      await writeFile(join(request.cwd!, 'note.md'), 'written\n');
+      return pass('note written');
+    }], { usageModel: 'gpt-5' });
+    const reviewer = scriptedEngine('reviewer', [async () => pass('accepted')], { usageModel: 'claude-sonnet-4-5' });
+    const job = workflow('resume-fresh', {
+      brief: { brief: 'Write one note.', files: ['note.md'] },
+      roles: { writer: seat(writer, 'gpt'), review: [seat(reviewer, 'claude')] },
+      stages: [
+        stage('write', { agent: 'writer', writes: 'note.md' }),
+        stage('review', { panel: 'review', agree: 1 }),
+      ],
+    });
+
+    try {
+      const result = await run(job, {
+        cwd: directory,
+        recordTo: join(directory, 'absent.jsonl'),
+        resume: true,
+      });
+      expect(result.outcome.status).toBe('pass');
+      expect(writer.calls).toHaveLength(1);
+    } finally {
+      await rm(directory, { recursive: true, force: true });
+    }
+  });
+
+  it('refuses resume with recordTo auto, naming the path requirement', async () => {
+    const directory = await mkdtemp(join(tmpdir(), 'obversa-f42-auto-'));
+    const writer = scriptedEngine('writer', [async () => pass('note written')]);
+    const job = workflow('resume-auto', {
+      brief: { brief: 'Write one note.', files: ['note.md'] },
+      roles: { writer: seat(writer, 'gpt') },
+      stages: [stage('write', { agent: 'writer', writes: 'note.md' })],
+    });
+
+    try {
+      await expect(run(job, { cwd: directory, recordTo: 'auto', resume: true, runId: 'resume-auto' }))
+        .rejects.toThrow(/resume requires an explicit recordTo path/i);
+    } finally {
+      await rm(directory, { recursive: true, force: true });
+    }
+  });
+
+  it('a resumed workflow with a still-pending gate exits at once without re-posting', async () => {
+    const directory = await mkdtemp(join(tmpdir(), 'obversa-f42-gate-'));
+    const recordPath = join(directory, 'record.jsonl');
+    const writer = scriptedEngine('writer', [async (request) => {
+      await writeFile(join(request.cwd!, 'note.md'), 'written\n');
+      return pass('note written');
+    }]);
+    const posts: string[] = [];
+    const base = createCallbackClient();
+    const callbacks = {
+      ...base,
+      post: async (request: Parameters<ReturnType<typeof createCallbackClient>['post']>[0]) => {
+        posts.push(request.requestId);
+        return base.post(request);
+      },
+    } as ReturnType<typeof createCallbackClient>;
+    const job = workflow('resume-gate', {
+      brief: { brief: 'Write one note.', files: ['note.md'] },
+      roles: { writer: seat(writer, 'gpt'), approve: person('Approve the note?') },
+      stages: [
+        stage('write', { agent: 'writer', writes: 'note.md' }),
+        stage('approve', { input: 'approve' }),
+      ],
+    });
+
+    try {
+      const first = await run(job, { cwd: directory, recordTo: recordPath, callbacks });
+      expect(first.outcome.status).toBe('paused');
+      expect(posts).toHaveLength(1);
+      expect(writer.calls).toHaveLength(1);
+
+      const resumed = await run(job, { cwd: directory, recordTo: recordPath, resume: true, callbacks });
+      expect(resumed.outcome.status).toBe('paused');
+      expect(posts).toHaveLength(1);
+      expect(writer.calls).toHaveLength(1);
+    } finally {
+      await rm(directory, { recursive: true, force: true });
+    }
+  });
+
   it('refuses a panel whose recorded answers share one family despite declared difference', async () => {
     const directory = await mkdtemp(join(tmpdir(), 'obversa-f54-recorded-'));
     const writer = seat(scriptedEngine('writer', [async (request) => {
@@ -685,6 +842,68 @@ describe('declarative teams', () => {
     }
   });
 
+  it('refuses a reviewedBy writer with no recorded answer even when both seats select the same model', async () => {
+    const directory = await mkdtemp(join(tmpdir(), 'obversa-f42-empty-writer-'));
+    const writer = scriptedEngine('same-model', [async (request) => {
+      await writeFile(join(request.cwd!, 'note.md'), 'written\n');
+      return pass('note written');
+    }]);
+    const reviewer = scriptedEngine('same-model', [async () => pass('accepted')], {
+      usageModel: 'gpt-5',
+    });
+    const job = workflow('missing-reviewedBy-writer', {
+      brief: { brief: 'Write one note.', files: ['note.md'] },
+      roles: { writer: seat(writer, 'claude'), review: [seat(reviewer, 'gpt')] },
+      stages: [stage('note', { agent: 'writer', writes: 'note.md', reviewedBy: 'review' })],
+    });
+
+    try {
+      const result = await run(job, { cwd: directory });
+      expect(result.outcome.status).toBe('fail');
+      expect(JSON.stringify(result.outcome.data ?? result.outcome.summary)).toContain('writer stage note');
+      expect(writer.calls).toHaveLength(1);
+      expect(reviewer.calls).toHaveLength(1);
+    } finally {
+      await rm(directory, { recursive: true, force: true });
+    }
+  });
+
+  it.each([
+    {
+      form: 'separate panel',
+      stages: [
+        stage('write', { agent: 'writer', writes: 'note.md' }),
+        stage('review', { panel: 'review', agree: 1 }),
+      ],
+      reviewerStage: 'review',
+    },
+    {
+      form: 'reviewedBy',
+      stages: [stage('note', { agent: 'writer', writes: 'note.md', reviewedBy: 'review' })],
+      reviewerStage: 'note',
+    },
+  ])('refuses a passing $form with no recorded reviewer answer', async ({ stages, reviewerStage }) => {
+    const directory = await mkdtemp(join(tmpdir(), 'obversa-f42-empty-reviewer-'));
+    const writer = scriptedEngine('writer', [async (request) => {
+      await writeFile(join(request.cwd!, 'note.md'), 'written\n');
+      return pass('note written');
+    }], { usageModel: 'claude-sonnet-4-5' });
+    const reviewer = scriptedEngine('reviewer', [async () => pass('accepted')]);
+    const job = workflow('missing-reviewer', {
+      brief: { brief: 'Write one note.', files: ['note.md'] },
+      roles: { writer: seat(writer, 'claude'), review: [seat(reviewer, 'gpt')] },
+      stages,
+    });
+
+    try {
+      const result = await run(job, { cwd: directory });
+      expect(result.outcome.status).toBe('fail');
+      expect(JSON.stringify(result.outcome.data ?? result.outcome.summary)).toContain(`reviewer stage ${reviewerStage}`);
+    } finally {
+      await rm(directory, { recursive: true, force: true });
+    }
+  });
+
   it.each([
     { model: 'gpt-5', usageArray: 'absent', reason: 'recorded model family collision' },
     { model: 'gpt-5', usageArray: 'empty', reason: 'recorded model family collision' },
@@ -812,8 +1031,16 @@ describe('declarative teams', () => {
 
     try {
       const state: Record<string, unknown> = {};
-      const result = await run(job, { cwd: directory, state });
+      const recorded: unknown[] = [];
+      const result = await run(job, {
+        cwd: directory,
+        state,
+        onEvent: (event) => {
+          if (event.kind === 'engine:usage') recorded.push(event);
+        },
+      });
       expect(result.outcome.status).toBe('pass');
+      expect(recorded).toMatchObject(expected);
       expect(state[RECORDED_ENGINE_USAGE]).toMatchObject(expected);
     } finally {
       await rm(directory, { recursive: true, force: true });
@@ -933,12 +1160,12 @@ describe('declarative teams', () => {
     const writer = seat(scriptedEngine('writer', [async (request) => {
       await writeFile(join(request.cwd!, 'note.md'), 'written\n');
       return pass('note written');
-    }]), 'claude');
+    }], { usageModel: 'claude-sonnet-4-5' }), 'claude');
     const reviewer = seat(scriptedEngine('reviewer', [async (request) => {
       expect(request.prompt).toContain('Review target: note.md.');
       expect(request.prompt).not.toContain('brief.md');
       return pass('review accepted');
-    }]), 'grok');
+    }], { usageModel: 'grok-4' }), 'grok');
 
     const job = workflow('target-run-review', {
       brief: { brief: 'Review one note.', files: ['brief.md'] },
@@ -995,7 +1222,7 @@ describe('declarative teams', () => {
     const writer = scriptedEngine('writer', [async (request) => {
       await writeFile(join(request.cwd!, 'note.md'), 'original\n');
       return pass('note written');
-    }]);
+    }], { usageModel: 'writer-model' });
     const reviewer = scriptedEngine('reviewer', [async (request) => {
       await mkdir(join(request.cwd!, 'reviews'), { recursive: true });
       await writeFile(join(request.cwd!, 'reviews/review-1.json'), '{"status":"pass"}\n');
@@ -1029,7 +1256,7 @@ describe('declarative teams', () => {
     const writer = scriptedEngine('writer', [async (request) => {
       await writeFile(join(request.cwd!, 'note.md'), 'original\n');
       return pass('note written');
-    }]);
+    }], { usageModel: 'writer-model' });
     const reviewer = scriptedEngine('reviewer', [async (request) => {
       await writeFile(join(request.cwd!, 'note.md'), 'changed by reviewer\n');
       return '{"status":"revise","summary":"needs a correction"}';
@@ -1061,7 +1288,7 @@ describe('declarative teams', () => {
     const writer = scriptedEngine('writer', [async (request) => {
       await writeFile(join(request.cwd!, 'note.md'), 'original\n');
       return pass('note written');
-    }]);
+    }], { usageModel: 'writer-model' });
     const tamperingReviewer = scriptedEngine('tampering-reviewer', [async (request) => {
       await writeFile(join(request.cwd!, 'note.md'), 'changed by reviewer\n');
       return pass('accepted');
@@ -1182,7 +1409,7 @@ describe('declarative teams', () => {
     const reviewer = scriptedEngine('reviewer', [
       async () => 'not a decision',
       async () => '{"status":"pass","summary":"accepted after retry"}',
-    ]);
+    ], { usageModel: 'reviewer-model' });
     const job = workflow('panel-retry', {
       brief: 'Review the change.',
       roles: { review: [seat(reviewer, 'reviewer')] },

@@ -410,6 +410,7 @@ export function agentJob(config: AgentJobConfig): Job {
                     path,
                     model: e.model,
                     usage: e.usage,
+                    ...recordAs,
                   });
                   recordEngineUsage(ctx, e.model, path, recordAs);
                   break;

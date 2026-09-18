@@ -130,7 +130,7 @@ console.log(JSON.stringify(result.outcome, null, 2));
 | Agents build features. | Named roles, one engine each. |
 | Quality is automatic. | A review role from another provider that sends work back with findings. |
 | Nothing needs a human. | A person at the merge, asked a question the run waits on. |
-| It runs all day. | A record of every step. A plain run does not resume; the [supervised runner](/driving/runner) restarts a killed run from its own record, and today it drives a compiled graph rather than a file like this one. |
+| It runs all day. | A record of every step as it happens. A workflow started again with `resume: true` carries on from that record, and the [supervised runner](/driving/runner) restarts a killed run from its own record. |
 
 ## Things that catch people out
 

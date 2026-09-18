@@ -249,6 +249,7 @@ export function dag(config: DagConfig): Job {
         graph: {
           dag: config.name,
           node: name,
+          attempt: attempts.get(name) ?? 1,
           path: [...path, name],
           ...nodeContext(name),
           dependents: dependents.get(name) ?? [],

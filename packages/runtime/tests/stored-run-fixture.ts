@@ -16,21 +16,19 @@ import { createLocalRunStorage } from '../src/storage/local.js';
 export interface StoredRunFixture {
   readonly runId: string;
   readonly storage: RunStorageBinding;
+  readonly directory: string;
   reopen(): RunStorageBinding;
   close(): Promise<void>;
 }
 
-export async function createStoredRunFixture(
+export function openStoredRunFixtureStorage(
   name: string,
-  permissions: readonly PermissionDescriptor[] = [],
+  directory: string,
   knownSecrets: readonly string[] = [],
-): Promise<StoredRunFixture> {
-  const root = await mkdtemp(join(tmpdir(), `obversa-${name}-`));
-  const directory = join(root, 'storage');
-  const namespace = `${name}-tests`;
-  const open = (): RunStorageBinding => createLocalRunStorage({
+): RunStorageBinding {
+  return createLocalRunStorage({
     directory,
-    namespace,
+    namespace: `${name}-tests`,
     knownSecrets,
     policy: {
       schemaVersion: 1,
@@ -46,6 +44,16 @@ export async function createStoredRunFixture(
       },
     },
   });
+}
+
+export async function createStoredRunFixture(
+  name: string,
+  permissions: readonly PermissionDescriptor[] = [],
+  knownSecrets: readonly string[] = [],
+): Promise<StoredRunFixture> {
+  const root = await mkdtemp(join(tmpdir(), `obversa-${name}-`));
+  const directory = join(root, 'storage');
+  const open = (): RunStorageBinding => openStoredRunFixtureStorage(name, directory, knownSecrets);
   const storage = open();
   const graph = compileGraph(dag, {
     id: `${name}-graph`,
@@ -85,6 +93,7 @@ export async function createStoredRunFixture(
   return {
     runId,
     storage,
+    directory,
     reopen: open,
     close: () => rm(root, { recursive: true, force: true }),
   };

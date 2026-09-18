@@ -302,7 +302,11 @@ try {
 
 - `run`: run a job from a fresh record. `callbacks` is the client the run's
   questions go through, in memory or stored (`RunCallbacks` names either);
-  every job sees it as `ctx.callbacks`.
+  every job sees it as `ctx.callbacks`. `resume: true` reads the record at
+  `recordTo` first. For a job built with `workflow()` it carries on from that
+  record: finished stages are not repeated, a waiting gate is observed rather
+  than asked again, and an interrupted stage runs again only when it carries
+  `retrySafe: true`. Any other job appends to that record and runs again.
 - `monitor: true` on `run` (on by default under `supervise`) serves the
   run's own page on a free loopback port; `RunResult.monitor` carries its
   address and closes it, and `MonitorState` is what `/state` returns. See
@@ -316,6 +320,8 @@ try {
   it to a resume. Their types: `RunPreflightPolicy`, `RunPreflightState`,
   `PreflightPauseResult`, `PreflightFailureResult`, and `GraphExecutorResult`
   for what the executor returns.
+
+- `RESUME_STAGE_OUTCOMES`: the state key under which a resumed run carries the outcomes its stages reached before it paused; the declarative layer reads it so a gate that was already pending is observed rather than asked a second time.
 
 **Ask a person**
 
@@ -350,9 +356,13 @@ try {
 
 ## Things that catch people out
 
-- **`run` starts a fresh record.** It does not resume. The supervised
-  runner in `@obversa/runner` restarts a killed run from a graph definition
-  and a host module, not from a `run` file.
+- **`run` starts a fresh record unless you pass `resume: true`.** With
+  `resume`, the file at `recordTo` is read first. A job built with
+  `workflow()` skips its finished stages; any other job appends to the
+  record and runs again. For a workflow, the record applies to the same
+  name, workspace, brief and stage list; change any of them and the run
+  starts again. The supervised runner in `@obversa/runner` restarts a
+  killed run from a graph definition and a host module.
 - **Every attempt has a budget.** An overrun comes back as a typed result,
   not a hang; read the outcome rather than waiting on it.
 - **The runtime imports no engine.** Nothing runs until your program hands
@@ -372,6 +382,16 @@ who reads it and where the work goes back to. The package compiles that
 into the runtime's graph, so a review that fails sends the work back, a
 command decides on its exit code, a person's answer is waited for, and
 every step is on the record.
+
+Run the same workflow again with `resume: true` and it reads its record first.
+Stages that finished are skipped. A review that sent work back runs the
+writer again. A gate that was still waiting for a person is observed, and the
+run exits with the recorded pause, so a schedule can start the same file
+until the answer arrives and never asks twice. The record applies to the same
+workflow name, workspace, brief and stage list; change the brief and the run
+starts again. A stage that was mid-flight when the process died runs again
+only when it carries `retrySafe: true`; otherwise the run pauses and asks a
+person to reconcile it.
 
 ```bash
 npm install @obversa/runtime @obversa/engine-claude-cli @obversa/engine-codex-cli
@@ -484,9 +504,10 @@ larger teams.
 | `input` | A person role. The stage asks the question and waits. |
 | `writes` | The files this stage writes, relative to the workspace. It writes those and no other declared file. For an agent stage a missing or empty one fails the stage by name; a command stage is judged by its exit code. |
 | `desc`, `gate` | What the stage does and what must be true for it to count. Both reach the reviewers and the record. |
-| `reviewedBy` | A panel role that reads this stage's work. A rejection runs the stage again with the findings; a note written back unchanged fails plainly. |
+| `reviewedBy` | A panel role that reads this stage's work. A rejection runs the stage again with the findings; a note written back unchanged fails plainly. The stage and its review are one step, so a run that dies part-way through the review runs the whole step again. It does not resume inside the review. |
 | `sendsBackTo` | The earlier stage a rejection or a red run goes back to. A stage cannot send back to itself; use `reviewedBy`. |
 | `retry` | How many times this stage may run again: the review restarts of a reviewed stage, or the kickback budget of a stage others send back to. Default 1. It belongs to the stage that repeats. |
+| `retrySafe` | `true` when the stage may run again after an interruption without a person reconciling it. Off unless set. |
 | `when` | A condition read before the stage runs: `passed(name)`, `failed(name)`, or an async predicate over `ctx`. A stage whose `when` is not met is recorded as skipped and counts as passed for the stages after it. |
 | `optional` | A red run of this stage does not fail the workflow or block the stages after it. `failed(name)` on a later stage is allowed only when the named stage is optional; on a required stage a red run stops the workflow, so there is no other path to choose. |
 | `needs` | One or more earlier stage names this stage also depends on, beside the one before it. A condition can then read a stage further back through `passed`, `failed` or `ctx.needs`. A name that is not an earlier stage is an error when the workflow is built. |

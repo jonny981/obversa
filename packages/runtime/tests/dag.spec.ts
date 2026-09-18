@@ -120,6 +120,7 @@ describe('dag', () => {
     expect(result.outcome.status).toBe('pass');
     expect(graph).toMatchObject({
       node: 'review',
+      attempt: 1,
       needs: ['build'],
       desc: 'Review the built change.',
       gate: 'The change meets the acceptance criteria.',

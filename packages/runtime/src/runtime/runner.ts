@@ -15,7 +15,11 @@ import { Stats, type StatsSnapshot } from '../core/stats.js';
 import { costReport, type CostReport, type PriceTable } from '../core/cost.js';
 import { LoopError } from '../core/errors.js';
 import { Budget, type BudgetConfig } from '../core/budget.js';
-import { makeRecorder } from './persist.js';
+import { makeRecorder, readResumeRecord } from './persist.js';
+
+/** Run-owned keys holding the workflow state read from its record. */
+export const RESUME_STAGE_OUTCOMES = 'obversa:resumed-stage-outcomes';
+export const RESUME_RECORDED_USAGE = 'obversa:resumed-recorded-usage';
 import { ensureRunSubdir } from './paths.js';
 import { startSupervisor, newRunId, type Supervisor } from './supervisor.js';
 import { jobMeta } from '../core/describe.js';
@@ -94,6 +98,14 @@ export interface RunOptions {
   budget?: number | BudgetConfig;
   /** Append every structured event as JSONL here, or auto-name one under `.obversa/records`. */
   recordTo?: string | 'auto';
+  /**
+   * Resume from the record at `recordTo` instead of truncating it: stages
+   * whose completion is already recorded are skipped, interrupted stages
+   * re-run. Requires an explicit `recordTo` path; a missing record is a
+   * fresh run, not an error. Two processes resuming one record at once is
+   * out of scope.
+   */
+  resume?: boolean;
   /**
    * Register this run in the global registry (`~/.obversa/runs/<runId>`) and write
    * its live state there, so another process can inspect it. Off by default;
@@ -186,16 +198,44 @@ export async function run(
     });
   }
   const runId = needsRunId ? (options.runId ?? newRunId(title)) : undefined;
-  const initialState: Record<string, unknown> = options.state ?? {};
+  const callerState = options.state ?? {};
+  const resumeState: Record<string, unknown> = {};
+  const privateKeys = new Set([RESUME_STAGE_OUTCOMES, RESUME_RECORDED_USAGE]);
+  const initialState: Record<string, unknown> = new Proxy(callerState, {
+    get(target, key) {
+      return typeof key === 'string' && privateKeys.has(key)
+        ? resumeState[key]
+        : target[key as string];
+    },
+    set(target, key, value) {
+      if (typeof key === 'string' && privateKeys.has(key)) {
+        resumeState[key] = value;
+      } else {
+        target[key as string] = value;
+      }
+      return true;
+    },
+  });
 
   // Persistence sinks observe the same event stream as outside readers.
   const sinks: Array<(event: LoopEvent) => void> = [];
+  if (options.resume === true && (options.recordTo === undefined || options.recordTo === 'auto')) {
+    throw new TypeError('resume requires an explicit recordTo path');
+  }
   const recordPath =
     options.recordTo === 'auto'
       ? join(ensureRunSubdir(dir, 'records'), `${runId!}.jsonl`)
       : options.recordTo;
   if (recordPath) {
-    sinks.push(makeRecorder(recordPath, { thin: options.recordTo === 'auto' }));
+    const resumed = options.resume === true ? readResumeRecord(recordPath) : undefined;
+    sinks.push(makeRecorder(recordPath, {
+      thin: options.recordTo === 'auto',
+      ...(resumed === undefined ? {} : { resume: true }),
+    }));
+    if (resumed !== undefined && resumed.outcomes.anchors.size > 0) {
+      initialState[RESUME_STAGE_OUTCOMES] = resumed.outcomes;
+      initialState[RESUME_RECORDED_USAGE] = resumed.usage;
+    }
   }
   // A supervised run registers itself in the global registry (~/.obversa/runs) and
   // writes its live state there, so another process can list/status/tail it.
