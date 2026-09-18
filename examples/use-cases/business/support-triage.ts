@@ -2,9 +2,17 @@ import { readFile } from 'node:fs/promises';
 import { join } from 'node:path';
 
 import { claude } from '@obversa/engine-claude-cli';
-import { codex } from '@obversa/engine-codex';
-import { formatEvent, run, type JobContext } from '@obversa/runtime';
-import { fromFile, person, stage, workflow, type TeamSeat } from '@obversa/teams';
+import { codex } from '@obversa/engine-codex-cli';
+import {
+  briefFromFile,
+  formatEvent,
+  person,
+  run,
+  stage,
+  workflow,
+  type JobContext,
+  type TeamSeat,
+} from '@obversa/runtime';
 
 interface SupportTriageEngines {
   readonly claude: (model: string) => TeamSeat;
@@ -35,7 +43,7 @@ async function decision(ctx: JobContext): Promise<Decision> {
  */
 function createSupportTriage(engines: SupportTriageEngines = realEngines) {
   return workflow('support-triage', {
-    brief: fromFile('briefs/support.md'),
+    brief: briefFromFile('briefs/support.md'),
     options: { timeout: '10m' },
 
     roles: {

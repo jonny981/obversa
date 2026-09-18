@@ -12,7 +12,7 @@ they approve is the exact payload the command sends, byte for byte, and a
 no goes back to the drafting stage with their note as the finding.
 
 ```bash
-npm install @obversa/runtime @obversa/teams @obversa/engine-claude-cli @obversa/engine-codex
+npm install @obversa/runtime @obversa/engine-claude-cli @obversa/engine-codex-cli
 ```
 
 In that directory, create `package.json` with `"type": "module"`, put the
@@ -23,9 +23,16 @@ beside it, then run the copied file.
 
 ```ts
 import { claude } from '@obversa/engine-claude-cli';
-import { codex } from '@obversa/engine-codex';
-import { formatEvent, run } from '@obversa/runtime';
-import { fromFile, person, stage, workflow, type TeamSeat } from '@obversa/teams';
+import { codex } from '@obversa/engine-codex-cli';
+import {
+  briefFromFile,
+  formatEvent,
+  person,
+  run,
+  stage,
+  workflow,
+  type TeamSeat,
+} from '@obversa/runtime';
 
 interface DraftThenSendEngines {
   readonly claude: (model: string) => TeamSeat;
@@ -48,7 +55,7 @@ const MAIL_KEY = process.env.RESEND_API_KEY ?? '';
  */
 function createDraftThenSend(engines: DraftThenSendEngines = realEngines) {
   return workflow('draft-then-send', {
-    brief: fromFile('briefs/outreach.md'),
+    brief: briefFromFile('briefs/outreach.md'),
     options: { timeout: '10m' },
 
     roles: {
@@ -129,5 +136,5 @@ never passes a stage.
 ## Source
 
 The file is `examples/use-cases/business/draft-then-send.ts`; its proof, brief and
-sample inputs sit beside it. The [teams package page](/packages/teams)
+sample inputs sit beside it. The [runtime package page](/packages/runtime)
 lists every input.

@@ -12,7 +12,7 @@ the draft already written. Only one of the last two stages runs, chosen
 by `when` from the file the classifier wrote.
 
 ```bash
-npm install @obversa/runtime @obversa/teams @obversa/engine-claude-cli @obversa/engine-codex
+npm install @obversa/runtime @obversa/engine-claude-cli @obversa/engine-codex-cli
 ```
 
 In that directory, create `package.json` with `"type": "module"`, put the
@@ -26,9 +26,17 @@ import { readFile } from 'node:fs/promises';
 import { join } from 'node:path';
 
 import { claude } from '@obversa/engine-claude-cli';
-import { codex } from '@obversa/engine-codex';
-import { formatEvent, run, type JobContext } from '@obversa/runtime';
-import { fromFile, person, stage, workflow, type TeamSeat } from '@obversa/teams';
+import { codex } from '@obversa/engine-codex-cli';
+import {
+  briefFromFile,
+  formatEvent,
+  person,
+  run,
+  stage,
+  workflow,
+  type JobContext,
+  type TeamSeat,
+} from '@obversa/runtime';
 
 interface SupportTriageEngines {
   readonly claude: (model: string) => TeamSeat;
@@ -59,7 +67,7 @@ async function decision(ctx: JobContext): Promise<Decision> {
  */
 function createSupportTriage(engines: SupportTriageEngines = realEngines) {
   return workflow('support-triage', {
-    brief: fromFile('briefs/support.md'),
+    brief: briefFromFile('briefs/support.md'),
     options: { timeout: '10m' },
 
     roles: {
@@ -133,5 +141,5 @@ never passes a stage.
 ## Source
 
 The file is `examples/use-cases/business/support-triage.ts`; its proof, brief and
-sample inputs sit beside it. The [teams package page](/packages/teams)
+sample inputs sit beside it. The [runtime package page](/packages/runtime)
 lists every input.

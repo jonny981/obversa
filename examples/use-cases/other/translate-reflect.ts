@@ -1,7 +1,14 @@
 import { claude } from '@obversa/engine-claude-cli';
-import { codex } from '@obversa/engine-codex';
-import { formatEvent, run } from '@obversa/runtime';
-import { fromFile, person, stage, workflow, type TeamSeat } from '@obversa/teams';
+import { codex } from '@obversa/engine-codex-cli';
+import {
+  briefFromFile,
+  formatEvent,
+  person,
+  run,
+  stage,
+  workflow,
+  type TeamSeat,
+} from '@obversa/runtime';
 
 interface TranslateEngines {
   readonly claude: (model: string) => TeamSeat;
@@ -21,7 +28,7 @@ const realEngines: TranslateEngines = { claude, codex };
  */
 function createTranslateReflect(engines: TranslateEngines = realEngines) {
   return workflow('translate-reflect', {
-    brief: fromFile('briefs/translation.md'),
+    brief: briefFromFile('briefs/translation.md'),
     options: { timeout: '10m' },
 
     roles: {

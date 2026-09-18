@@ -1,9 +1,16 @@
 import { claude } from '@obversa/engine-claude-cli';
-import { codex } from '@obversa/engine-codex';
-import { resolveCommandExecutable } from '@obversa/engine/command';
+import { codex } from '@obversa/engine-codex-cli';
+import { resolveCommandExecutable } from '@obversa/core/command';
 import { opencode } from '@obversa/engine-opencode-cli';
-import { formatEvent, run } from '@obversa/runtime';
-import { fromFile, person, stage, workflow, type TeamSeat } from '@obversa/teams';
+import {
+  briefFromFile,
+  formatEvent,
+  person,
+  run,
+  stage,
+  workflow,
+  type TeamSeat,
+} from '@obversa/runtime';
 
 interface ArchitectureEngines {
   readonly claude: (model: string) => TeamSeat;
@@ -31,7 +38,7 @@ const realEngines: ArchitectureEngines = {
  */
 function createArchitectureThenSpike(engines: ArchitectureEngines = realEngines) {
   return workflow('architecture-then-spike', {
-    brief: fromFile('briefs/idea.md'),
+    brief: briefFromFile('briefs/idea.md'),
     options: { timeout: '15m' },
 
     roles: {

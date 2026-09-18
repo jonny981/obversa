@@ -1,7 +1,14 @@
 import { claude } from '@obversa/engine-claude-cli';
-import { codex } from '@obversa/engine-codex';
-import { formatEvent, run } from '@obversa/runtime';
-import { fromFile, person, stage, workflow, type TeamSeat } from '@obversa/teams';
+import { codex } from '@obversa/engine-codex-cli';
+import {
+  briefFromFile,
+  formatEvent,
+  person,
+  run,
+  stage,
+  workflow,
+  type TeamSeat,
+} from '@obversa/runtime';
 
 interface DraftThenSendEngines {
   readonly claude: (model: string) => TeamSeat;
@@ -24,7 +31,7 @@ const MAIL_KEY = process.env.RESEND_API_KEY ?? '';
  */
 function createDraftThenSend(engines: DraftThenSendEngines = realEngines) {
   return workflow('draft-then-send', {
-    brief: fromFile('briefs/outreach.md'),
+    brief: briefFromFile('briefs/outreach.md'),
     options: { timeout: '10m' },
 
     roles: {

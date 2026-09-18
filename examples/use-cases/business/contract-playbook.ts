@@ -1,7 +1,14 @@
 import { claude } from '@obversa/engine-claude-cli';
-import { codex } from '@obversa/engine-codex';
-import { formatEvent, run } from '@obversa/runtime';
-import { fromFile, person, stage, workflow, type TeamSeat } from '@obversa/teams';
+import { codex } from '@obversa/engine-codex-cli';
+import {
+  briefFromFile,
+  formatEvent,
+  person,
+  run,
+  stage,
+  workflow,
+  type TeamSeat,
+} from '@obversa/runtime';
 
 interface ContractPlaybookEngines {
   readonly claude: (model: string) => TeamSeat;
@@ -20,7 +27,7 @@ const realEngines: ContractPlaybookEngines = { claude, codex };
  */
 function createContractPlaybook(engines: ContractPlaybookEngines = realEngines) {
   return workflow('contract-playbook', {
-    brief: fromFile('briefs/playbook.md'),
+    brief: briefFromFile('briefs/playbook.md'),
     options: { timeout: '15m' },
 
     roles: {

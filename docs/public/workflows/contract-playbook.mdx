@@ -12,7 +12,7 @@ when a clause is missing or a redline goes further than its rule. The
 lawyer decides what is sent to the other side.
 
 ```bash
-npm install @obversa/runtime @obversa/teams @obversa/engine-claude-cli @obversa/engine-codex
+npm install @obversa/runtime @obversa/engine-claude-cli @obversa/engine-codex-cli
 ```
 
 In that directory, create `package.json` with `"type": "module"`, put the
@@ -23,9 +23,16 @@ beside it, then run the copied file.
 
 ```ts
 import { claude } from '@obversa/engine-claude-cli';
-import { codex } from '@obversa/engine-codex';
-import { formatEvent, run } from '@obversa/runtime';
-import { fromFile, person, stage, workflow, type TeamSeat } from '@obversa/teams';
+import { codex } from '@obversa/engine-codex-cli';
+import {
+  briefFromFile,
+  formatEvent,
+  person,
+  run,
+  stage,
+  workflow,
+  type TeamSeat,
+} from '@obversa/runtime';
 
 interface ContractPlaybookEngines {
   readonly claude: (model: string) => TeamSeat;
@@ -44,7 +51,7 @@ const realEngines: ContractPlaybookEngines = { claude, codex };
  */
 function createContractPlaybook(engines: ContractPlaybookEngines = realEngines) {
   return workflow('contract-playbook', {
-    brief: fromFile('briefs/playbook.md'),
+    brief: briefFromFile('briefs/playbook.md'),
     options: { timeout: '15m' },
 
     roles: {
@@ -124,5 +131,5 @@ never passes a stage.
 ## Source
 
 The file is `examples/use-cases/business/contract-playbook.ts`; its proof, brief and
-sample inputs sit beside it. The [teams package page](/packages/teams)
+sample inputs sit beside it. The [runtime package page](/packages/runtime)
 lists every input.

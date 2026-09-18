@@ -1,7 +1,14 @@
 import { claude } from '@obversa/engine-claude-cli';
-import { codex } from '@obversa/engine-codex';
-import { formatEvent, run } from '@obversa/runtime';
-import { fromFile, person, stage, workflow, type TeamSeat } from '@obversa/teams';
+import { codex } from '@obversa/engine-codex-cli';
+import {
+  briefFromFile,
+  formatEvent,
+  person,
+  run,
+  stage,
+  workflow,
+  type TeamSeat,
+} from '@obversa/runtime';
 
 interface WatchSignalsEngines {
   readonly claude: (model: string) => TeamSeat;
@@ -33,7 +40,7 @@ const REPO = 'your-org/your-app';
  */
 function createWatchSignals(engines: WatchSignalsEngines = realEngines) {
   return workflow('watch-signals-then-file', {
-    brief: fromFile('briefs/friction.md'),
+    brief: briefFromFile('briefs/friction.md'),
     options: { timeout: '10m' },
 
     roles: {

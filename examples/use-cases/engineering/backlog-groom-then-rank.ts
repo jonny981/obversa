@@ -1,7 +1,14 @@
 import { claude } from '@obversa/engine-claude-cli';
-import { codex } from '@obversa/engine-codex';
-import { formatEvent, run } from '@obversa/runtime';
-import { fromFile, person, stage, workflow, type TeamSeat } from '@obversa/teams';
+import { codex } from '@obversa/engine-codex-cli';
+import {
+  briefFromFile,
+  formatEvent,
+  person,
+  run,
+  stage,
+  workflow,
+  type TeamSeat,
+} from '@obversa/runtime';
 
 interface BacklogGroomEngines {
   readonly claude: (model: string) => TeamSeat;
@@ -21,7 +28,7 @@ const realEngines: BacklogGroomEngines = { claude, codex };
  */
 function createBacklogGroom(engines: BacklogGroomEngines = realEngines) {
   return workflow('backlog-groom-then-rank', {
-    brief: fromFile('briefs/backlog.md'),
+    brief: briefFromFile('briefs/backlog.md'),
     options: { timeout: '10m' },
 
     roles: {

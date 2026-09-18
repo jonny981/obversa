@@ -12,7 +12,7 @@ French pulled apart. The person who knows the readers decides the nuance
 and says publish.
 
 ```bash
-npm install @obversa/runtime @obversa/teams @obversa/engine-claude-cli @obversa/engine-codex
+npm install @obversa/runtime @obversa/engine-claude-cli @obversa/engine-codex-cli
 ```
 
 In that directory, create `package.json` with `"type": "module"`, put the
@@ -23,9 +23,16 @@ beside it, then run the copied file.
 
 ```ts
 import { claude } from '@obversa/engine-claude-cli';
-import { codex } from '@obversa/engine-codex';
-import { formatEvent, run } from '@obversa/runtime';
-import { fromFile, person, stage, workflow, type TeamSeat } from '@obversa/teams';
+import { codex } from '@obversa/engine-codex-cli';
+import {
+  briefFromFile,
+  formatEvent,
+  person,
+  run,
+  stage,
+  workflow,
+  type TeamSeat,
+} from '@obversa/runtime';
 
 interface TranslateEngines {
   readonly claude: (model: string) => TeamSeat;
@@ -45,7 +52,7 @@ const realEngines: TranslateEngines = { claude, codex };
  */
 function createTranslateReflect(engines: TranslateEngines = realEngines) {
   return workflow('translate-reflect', {
-    brief: fromFile('briefs/translation.md'),
+    brief: briefFromFile('briefs/translation.md'),
     options: { timeout: '10m' },
 
     roles: {
@@ -117,5 +124,5 @@ never passes a stage.
 ## Source
 
 The file is `examples/use-cases/other/translate-reflect.ts`; its proof, brief and
-sample inputs sit beside it. The [teams package page](/packages/teams)
+sample inputs sit beside it. The [runtime package page](/packages/runtime)
 lists every input.
