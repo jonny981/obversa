@@ -387,6 +387,7 @@ export const EXPECTED_FILES = {
     'package/dist/index.d.ts',
     'package/dist/index.js',
     'package/dist/index.js.map',
+    'package/dist/reasoning-record.d.ts',
     'package/package.json',
   ],
   '@obversa/memory-simple': [

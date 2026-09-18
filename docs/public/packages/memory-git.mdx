@@ -38,6 +38,39 @@ const view = await memory.execute({
 });
 ```
 
+## The reasoning record
+
+The same package opens a second thing over the same repository, with
+different semantics. `openGitMemory` uses Git as a store: a private
+reference per scope, a tree, no commits, and nothing that touches your
+HEAD or your working tree. `openReasoningRecord` uses Git as the record:
+what a stage was thinking while it worked, composed into the commit body
+of the work itself, where it sits against the lines it explains and every
+tool a reader already has can find it.
+
+A stage opts in, and nothing is paid for where it is not chosen. The
+record reads the run's own events, so a writer's turns are captured as
+they happen rather than summarised afterwards, and at the stage boundary
+one call composes them into a body. If that call fails or has nothing to
+say, a body is still written from the outcome, so a routine iteration
+leaves a trace instead of a gap.
+
+```ts
+import { openReasoningRecord } from '@obversa/memory-git';
+
+const record = await openReasoningRecord({
+  repositoryPath: workspace,
+  stage: 'implement',
+  compose: ({ captured, outcome }) => composeBody(captured, outcome),
+});
+
+const result = await run(job, { onEvent: (event) => record.observe(event) });
+await record.close(result.outcome);
+```
+
+A stage that asks to record in a directory that is not a Git repository is
+refused by name rather than having its reasoning dropped in silence.
+
 ## Commands
 
 The adapter supports six memory operations:

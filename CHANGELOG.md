@@ -11,6 +11,16 @@ other published package tracks its own version independently of it.
 
 ### Added
 
+- **Git as the reasoning record:** `@obversa/memory-git` opens a second
+  thing over the same repository with `openReasoningRecord`. The Git memory
+  beside it uses Git as a store; this uses Git as the record. A stage opts
+  in, its writer's turns are captured from the run's own events as they
+  happen, and at the stage boundary one call composes them into the commit
+  body of the work itself: why, what else was considered, what constrained
+  it, what comes next, and never what changed. Composition that fails or
+  has nothing to say still writes a body from the outcome, so every
+  iteration leaves a trace. A stage that asks to record in a directory that
+  is not a Git repository is refused by name.
 - **One identity derivation for every harness that runs other providers' models:** `@obversa/api` exports `modelIdentity`, which reads the provider and model family from the model string a harness was given, or refuses a string with no readable family. The OpenCode adapter derives its seat identity through it, and the review gate reads recorded models through the same function, so two seats on one model wearing different tool names cannot pass as a cross-family panel.
 - **Recorded model families:** The runtime exports `RECORDED_ENGINE_USAGE`,
   the shared state key under which every agent job's engine answer is

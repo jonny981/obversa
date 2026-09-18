@@ -1030,7 +1030,9 @@ async function objectSize(config: GitConfig, value: string): Promise<number> {
   return size;
 }
 
-async function invoke(
+/** Run one git plumbing command. Internal to this package; the public
+ * surface is what `index.ts` exports. */
+export async function invoke(
   repositoryPath: string,
   args: string[],
   input?: Buffer,
