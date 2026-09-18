@@ -67,9 +67,14 @@ describe('the reasoning record', () => {
     expect(seen).toEqual(['kept', 'also kept']);
   });
 
-  it('filters by the stage name when no path is given', async () => {
-    // The hole: an empty filter accepted everything, so a record opened with
-    // a stage and no path explained this change with a sibling's reasoning.
+  it('binds to the path of the first event carrying its stage name', async () => {
+    // Two holes, closed in turn. An empty filter accepted everything, so a
+    // record opened with a stage and no path took a sibling's reasoning.
+    // Matching the last segment closed that but left this one: two stages both
+    // named implement, under different parents, both end in implement, so one
+    // record still took both. This assertion used to expect 'mine too' and
+    // that expectation WAS the hole. The first matching event now fixes the
+    // path and a same-named stage elsewhere in the run cannot join it.
     const seen: string[] = [];
     const record = openReasoningRecord({
       stage: 'implement',
@@ -81,10 +86,81 @@ describe('the reasoning record', () => {
 
     record.observe(turn('mine', ['delivery', 'implement']));
     record.observe(turn('the sibling\'s', ['delivery', 'document']));
-    record.observe(turn('mine too', ['other-run', 'implement']));
+    record.observe(turn('another implement stage', ['other-run', 'implement']));
+    // The pin must not shut the record to its own stage's later turns.
+    record.observe(turn('mine as well', ['delivery', 'implement']));
     await record.message({ status: 'pass' });
 
-    expect(seen).toEqual(['mine', 'mine too']);
+    expect(seen).toEqual(['mine', 'mine as well']);
+  });
+
+  it('keeps the turns of a looped or nested writer under its stage', async () => {
+    // The turns of a real stage do not arrive on the stage's own path.
+    // isolated() appends its label, a loop appends its name, and the engine
+    // emits under that. Requiring the stage name to be the LAST segment made a
+    // stage that is a loop capture nothing at all and floor to zero turns,
+    // which is exactly what the package page's own example builds.
+    const seen: string[] = [];
+    const record = openReasoningRecord({
+      stage: 'implement',
+      compose: ({ captured }) => {
+        seen.push(...captured.map((entry) => entry.text));
+        return { subject: 'feat(implement): x', body: 'why' };
+      },
+    });
+
+    record.observe(turn('first pass', ['delivery', 'implement', 'write']));
+    record.observe(turn('second pass', ['delivery', 'implement', 'write']));
+    record.observe(turn('deeper still', ['delivery', 'implement', 'write', 'attempt-2']));
+    record.observe(turn('a sibling stage', ['delivery', 'document', 'write']));
+    record.observe(turn('the same name elsewhere', ['other-run', 'implement', 'write']));
+    await record.message({ status: 'pass' });
+
+    expect(seen).toEqual(['first pass', 'second pass', 'deeper still']);
+  });
+
+  it('bounds the body it will put on a commit', async () => {
+    // Writer turns are the engine's raw stream, not the scrubbed result text,
+    // and a commit is permanent and pushable. An hour of streaming must not
+    // become an unbounded body in history.
+    const record = openReasoningRecord({
+      stage: 'implement',
+      compose: () => ({ subject: 'feat(implement): x', body: 'y'.repeat(40_000) }),
+    });
+
+    record.observe(turn('mine'));
+    const message = await record.message({ status: 'pass' });
+
+    expect(message.body.length).toBeLessThan(20_000);
+    expect(message.body).toContain('body truncated');
+  });
+
+  it('refuses a composed subject that is not one line, and says so at the floor', async () => {
+    // ReasoningMessage promises one line then the reasoning under it. A
+    // subject carrying a newline breaks that silently: everything after the
+    // newline reads as body with no blank line before it.
+    const record = openReasoningRecord({
+      stage: 'implement',
+      compose: () => ({ subject: 'feat(implement): x\nand a second line', body: 'why' }),
+    });
+
+    record.observe(turn('mine'));
+    const message = await record.message({ status: 'pass', summary: 'done' });
+
+    expect(message.subject).not.toContain('\n');
+    expect(message.subject).toBe('record(implement): done');
+  });
+
+  it('normalises a multiline outcome summary into the floor subject', async () => {
+    // The summary comes from the job and can be many lines. The floor exists
+    // to be dependable, so it must not inherit the problem it is there for.
+    const record = openReasoningRecord({ stage: 'implement' });
+
+    record.observe(turn('mine'));
+    const message = await record.message({ status: 'pass', summary: 'built the thing\nover two lines' });
+
+    expect(message.subject).not.toContain('\n');
+    expect(message.subject).toBe('record(implement): built the thing over two lines');
   });
 
   it('starts the next iteration empty once its message is on a commit', async () => {

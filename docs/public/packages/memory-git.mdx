@@ -77,11 +77,18 @@ await run(isolated(implement, { label: 'implement', record }), {
 });
 ```
 
-The stage names itself, so the record keeps that stage's turns and leaves a
-sibling running beside it alone. Pass a `path` only when a stage's own path
-in the run is not the one its name would find.
+The stage names itself. The record waits for the first turn that carries that
+name, keeps the path it arrived on, and from then on takes turns from that
+path alone: a sibling running beside it is left out, and so is another stage
+of the same name somewhere else in the run. Pass a `path` when you want the
+record bound before it sees anything.
 
 A stage that changed nothing produces no commit, so it produces no body.
+
+Opting in is two wires: the stage takes the record, and the run shows it the
+events. `examples/reasoning-record.ts` runs both together against a real
+repository and reads the reasoning back off the commit that carries the
+change.
 
 ## Commands
 

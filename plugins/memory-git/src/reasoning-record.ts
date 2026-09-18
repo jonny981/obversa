@@ -56,6 +56,22 @@ export interface ReasoningRecordOptions {
 
 const WRITER_TURNS = new Set(['engine:text', 'engine:thinking']);
 
+/**
+ * The most body a record will put on a commit.
+ *
+ * Writer turns are the engine's raw stream, not the scrubbed result text, and
+ * a commit is permanent and pushable. A composed body is therefore capped
+ * rather than trusted: a run that streamed for an hour cannot write an
+ * unbounded body into history. The floor never carries turn text at all, only
+ * how many turns there were, so it has nothing to cap.
+ */
+const BODY_LIMIT = 16_000;
+
+function bounded(body: string): string {
+  if (body.length <= BODY_LIMIT) return body;
+  return `${body.slice(0, BODY_LIMIT)}\n\n[record: body truncated at ${BODY_LIMIT} characters]`;
+}
+
 function nonEmpty(value: unknown, field: string): string {
   if (typeof value !== 'string' || value.trim() === '') {
     throw new TypeError(`${field} must be a non-empty string`);
@@ -63,11 +79,21 @@ function nonEmpty(value: unknown, field: string): string {
   return value;
 }
 
+/** Collapse anything that would break a one-line commit subject. */
+function oneLine(value: string): string {
+  return value.replace(/\s+/g, ' ').trim();
+}
+
 function usable(message: unknown): message is ReasoningMessage {
   return typeof message === 'object'
     && message !== null
     && typeof (message as ReasoningMessage).subject === 'string'
     && (message as ReasoningMessage).subject.trim() !== ''
+    // ReasoningMessage promises one line then the reasoning under it. A
+    // composed subject carrying a newline breaks that promise silently, and
+    // everything after the newline reads as body with no blank line before it.
+    // Refusing here sends it to the floor, which says what happened.
+    && !/[\r\n]/.test((message as ReasoningMessage).subject)
     && typeof (message as ReasoningMessage).body === 'string'
     && (message as ReasoningMessage).body.trim() !== '';
 }
@@ -77,7 +103,9 @@ function usable(message: unknown): message is ReasoningMessage {
 function floor(stage: string, outcome: ReasoningOutcome, captured: number): ReasoningMessage {
   const turns = captured === 1 ? '1 captured turn' : `${captured} captured turns`;
   return {
-    subject: `record(${stage}): ${outcome.summary ?? outcome.status}`,
+    // The summary comes from the job and can be many lines; the floor exists
+    // to be dependable, so it normalises rather than inheriting the problem.
+    subject: oneLine(`record(${stage}): ${outcome.summary ?? outcome.status}`),
     body: [
       '## Why',
       '',
@@ -92,28 +120,59 @@ function floor(stage: string, outcome: ReasoningOutcome, captured: number): Reas
 /**
  * True when the event belongs to the stage this record was opened for.
  *
- * With a path, the event's own path starts with it. Without one, the stage
- * name is the filter: the runtime names a stage's child path with the stage
- * as its last segment, so that is what an event of this stage looks like.
- * An empty filter accepting everything was the hole: a record opened with a
- * stage and no path took a concurrent stage's words and explained one change
- * with another's reasoning.
+ * With a path, the event's own path starts with it.
+ *
+ * Without one, the stage name finds the path once and the record then holds
+ * it, and everything under that path belongs to the stage. Two holes sit on
+ * either side of this. Matching the last segment kept a record from seeing its
+ * own work whenever the stage was a loop or a nested job, because the engine's
+ * turns arrive one or more segments deeper. Matching the name anywhere without
+ * pinning let two stages both named `implement`, under `ticket-a` and
+ * `ticket-b`, share one record and explain one change with the other's
+ * reasoning. Pinning the path up to the name, then matching by prefix, closes
+ * both: the stage's descendants are kept and its namesake elsewhere is not.
  */
 function belongs(event: ReasoningEvent, stage: string, path: readonly string[]): boolean {
   const where = event.path ?? [];
-  if (path.length > 0) return path.every((segment, index) => where[index] === segment);
-  return where[where.length - 1] === stage;
+  if (path.length === 0) return false;
+  return path.every((segment, index) => where[index] === segment);
+}
+
+/**
+ * The path this record is bound to, once an event has revealed it.
+ *
+ * The stage's own turns do not all arrive on the stage's own path. `isolated`
+ * appends its label, and then whatever runs underneath appends more: a loop
+ * adds its name, and the engine emits its text under that. So the stage name
+ * is looked for anywhere in the path, and what is pinned is the path up to and
+ * including it, which is the stage's own path. Requiring the name to be the
+ * LAST segment was the hole: a stage that is a loop or a nested job then
+ * matched nothing at all and floored to zero captured turns, which is what the
+ * package page's own example does.
+ */
+function pathFor(event: ReasoningEvent, stage: string): readonly string[] | undefined {
+  const where = event.path ?? [];
+  const at = where.indexOf(stage);
+  return at === -1 ? undefined : where.slice(0, at + 1);
 }
 
 export function openReasoningRecord(options: ReasoningRecordOptions): ReasoningRecorder {
   const stage = nonEmpty(options.stage, 'stage');
-  const path = options.path ?? [];
+  // Given a path, the record is bound before it sees anything. Given only a
+  // stage name, it binds to the path of the first event that carries that name
+  // and keeps it, so a same-named stage elsewhere in the run cannot join.
+  let path = options.path ?? [];
   const captured: CapturedTurn[] = [];
 
   return Object.freeze({
     observe(event: ReasoningEvent): void {
       if (!WRITER_TURNS.has(event.kind)) return;
       if (typeof event.delta !== 'string' || event.delta === '') return;
+      if (path.length === 0) {
+        const found = pathFor(event, stage);
+        if (!found) return;
+        path = [...found];
+      }
       if (!belongs(event, stage, path)) return;
       const where = event.path ?? [];
       captured.push({ node: where[where.length - 1] ?? stage, text: event.delta });
@@ -130,7 +189,8 @@ export function openReasoningRecord(options: ReasoningRecordOptions): ReasoningR
           composed = undefined;
         }
       }
-      return usable(composed) ? composed : floor(stage, outcome, captured.length);
+      if (!usable(composed)) return floor(stage, outcome, captured.length);
+      return { subject: composed.subject, body: bounded(composed.body) };
     },
     committed(): void {
       // The words are on a commit now. Keeping them would put this change's

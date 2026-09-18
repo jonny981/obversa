@@ -107,11 +107,13 @@ export function isolated(job: Job, opts: IsolatedOptions = {}): Job {
         // It is asked for only when there is something staged, so a stage
         // that changed nothing writes neither a commit nor a body.
         const staged = await hasStagedChanges({ cwd: wt.dir, signal: parent.signal });
-        if (opts.record && !staged) {
-          // The stage produced changes and committed them itself, so there is
-          // no commit left for the reasoning to ride. Failing says so; going
-          // on would merge the work with a body that never existed and
-          // nothing would report it.
+        // A record attaches to the commit this wrapper makes, so any commit the
+        // job made itself carries no reasoning and must stop the stage. The
+        // question is whether HEAD moved, never whether anything is staged: a
+        // job that commits one file and leaves another has both a commit of its
+        // own and something staged, and reading `staged` would let that commit
+        // merge back unexplained while the body landed on the leftover.
+        if (opts.record) {
           const head = await headSha({ cwd: wt.dir, signal: parent.signal });
           if (head !== undefined && head !== startSha) {
             const message = `isolated("${label}") cannot record its reasoning: the stage committed its own work, `
@@ -133,9 +135,6 @@ export function isolated(job: Job, opts: IsolatedOptions = {}): Job {
           message ?? { subject: `chore(${slug(label)}): worktree changes` },
           { cwd: wt.dir, signal: parent.signal },
         );
-        // Told the commit exists, the recorder starts the next iteration
-        // empty; never told, it keeps the turns for another attempt.
-        if (opts.record && message && sha !== undefined) opts.record.committed(sha);
         const merged = await mergeLock(() =>
           mergeBranch(base.dir, branch, {
             signal: parent.signal,
@@ -170,6 +169,12 @@ export function isolated(job: Job, opts: IsolatedOptions = {}): Job {
             };
           }
         }
+        // Told the work has landed, the recorder starts the next iteration
+        // empty; never told, it keeps the turns for another attempt. This is
+        // after the merge, not after the fork commit: a land-back that fails
+        // leaves the change outside the parent, and a recorder cleared at the
+        // fork commit would compose the retry from nothing.
+        if (opts.record && message && sha !== undefined) opts.record.committed(sha);
         await deleteBranch(base.dir, branch, { signal: parent.signal }).catch(() => {});
       }
       return outcome;

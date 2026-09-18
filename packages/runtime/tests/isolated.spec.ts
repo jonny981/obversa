@@ -27,14 +27,19 @@ describe('isolated() — worktree as a composable Job wrapper', () => {
   const recorderSpy = (message = { subject: 'feat(build): the change', body: '## Why\n\nbecause' }) => {
     const seen: string[] = [];
     const commits: string[] = [];
+    // asked() counted commits, so a test saying "it was never asked for a
+    // message" was really saying "it was never told of a commit". Those come
+    // apart as soon as the telling moves, so they are counted separately.
+    let asks = 0;
     return {
       seen,
       commits,
-      asked: () => commits.length,
+      asked: () => asks,
+      told: () => commits.length,
       observe(event: { kind: string; path?: readonly string[]; delta?: string }) {
         if (event.kind === 'engine:text' && typeof event.delta === 'string') seen.push(event.delta);
       },
-      async message() { return message; },
+      async message() { asks += 1; return message; },
       committed(sha: string) { commits.push(sha); },
     };
   };
@@ -63,8 +68,38 @@ describe('isolated() — worktree as a composable Job wrapper', () => {
     const body = execFileSync('git', ['-C', repo, 'log', '-1', '--format=%B', blamed], { encoding: 'utf8' });
     expect(body).toContain('feat(build): the change');
     expect(body).toContain('because');
-    // Told the commit exists, so the next iteration does not inherit these turns.
+    // Told the work has landed, so the next iteration does not inherit these turns.
     expect(record.asked()).toBe(1);
+    expect(record.told()).toBe(1);
+  });
+
+  it('does not clear the record when the work fails to land back', async () => {
+    // The clear used to happen at the fork commit, which is before the merge.
+    // A land-back that fails leaves the change outside the parent, and a
+    // recorder cleared at the fork commit would compose the retry from nothing
+    // and write the floor over reasoning we still hold.
+    const repo = await tmpRepo();
+    const record = recorderSpy();
+    const job = isolated(
+      fnJob('build', async (ctx) => {
+        write(ctx.workspace.dir, 'out.ts', 'the stage wrote this\n');
+        // The parent moves the same file underneath, so the land-back conflicts.
+        write(repo, 'out.ts', 'the parent wrote this\n');
+        execFileSync('git', ['-C', repo, 'add', 'out.ts']);
+        execFileSync('git', ['-C', repo, 'commit', '--quiet', '-m', 'the parent changed out.ts']);
+        return { status: 'pass', summary: 'built' };
+      }),
+      { label: 'build', record },
+    );
+
+    const { outcome } = await run(job, { ...base, cwd: repo });
+
+    expect(outcome.status).toBe('fail');
+    expect(outcome.summary).toContain('merge conflict');
+    // Asked for a message, because the fork commit was made; never told it
+    // landed, because it did not.
+    expect(record.asked()).toBe(1);
+    expect(record.told()).toBe(0);
   });
 
   it('refuses a stage that asked to record where there is no repository', async () => {
@@ -93,6 +128,32 @@ describe('isolated() — worktree as a composable Job wrapper', () => {
         write(ctx.workspace.dir, 'out.ts', 'built\n');
         execFileSync('git', ['-C', ctx.workspace.dir, 'add', '-A']);
         execFileSync('git', ['-C', ctx.workspace.dir, 'commit', '--quiet', '-m', 'the job committed this itself']);
+        return { status: 'pass', summary: 'built' };
+      }),
+      { label: 'build', record },
+    );
+
+    const { outcome } = await run(job, { ...base, cwd: repo });
+
+    expect(outcome.status).toBe('fail');
+    expect(outcome.summary).toContain('committed its own work');
+    expect(record.asked()).toBe(0);
+  });
+
+  // The refusal above used to read `staged`, so it only caught a job that
+  // committed everything. A job that commits one file and leaves another has
+  // something staged, so the refusal never fired: the body landed on the
+  // leftover commit and the job's own commit merged back unexplained, which is
+  // what blaming the first file would find.
+  it('fails a recording stage that committed one file and left another uncommitted', async () => {
+    const repo = await tmpRepo();
+    const record = recorderSpy();
+    const job = isolated(
+      fnJob('build', async (ctx) => {
+        write(ctx.workspace.dir, 'a.ts', 'committed by the job\n');
+        execFileSync('git', ['-C', ctx.workspace.dir, 'add', 'a.ts']);
+        execFileSync('git', ['-C', ctx.workspace.dir, 'commit', '--quiet', '-m', 'the job committed a.ts itself']);
+        write(ctx.workspace.dir, 'b.ts', 'left for the wrapper\n');
         return { status: 'pass', summary: 'built' };
       }),
       { label: 'build', record },
