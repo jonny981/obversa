@@ -1,6 +1,7 @@
 import { appendFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname } from 'node:path';
 
+import type { RecordedEngineUsage } from '../core/job.js';
 import type { LoopEvent, Outcome } from '../core/types.js';
 
 const NOISE: ReadonlySet<LoopEvent['kind']> = new Set([
@@ -23,12 +24,17 @@ export interface ResumedStageRecords {
   readonly stages: ReadonlyMap<string, RecordedStage>;
 }
 
-/** Read each workflow's identity, workspace, and latest stage state.
+/** Read the latest stage state and the engine answers recorded for each stage.
  * A missing record has no stage state, so resume starts fresh. */
-export function readStageOutcomes(path: string): ResumedStageRecords {
+export function readResumeRecord(path: string): {
+  readonly outcomes: ResumedStageRecords;
+  readonly usage: ReadonlyMap<string, readonly RecordedEngineUsage[]>;
+} {
   const anchors = new Map<string, { identity: string; workspace: string; recordId: string }>();
   const stages = new Map<string, RecordedStage>();
-  if (!existsSync(path)) return { anchors, stages };
+  const usage = new Map<string, RecordedEngineUsage[]>();
+  const started = new Set<string>();
+  if (!existsSync(path)) return { outcomes: { anchors, stages }, usage };
   const lines = readFileSync(path, 'utf8').split(/\r?\n/);
   for (const [lineNumber, line] of lines.entries()) {
     if (!line) continue;
@@ -46,15 +52,38 @@ export function readStageOutcomes(path: string): ResumedStageRecords {
         for (const stage of stages.keys()) {
           if (stage.startsWith(prefix)) stages.delete(stage);
         }
+        for (const stage of usage.keys()) {
+          if (stage.startsWith(prefix)) usage.delete(stage);
+        }
+        for (const stage of started) {
+          if (stage.startsWith(prefix)) started.delete(stage);
+        }
       }
       anchors.set(key, { identity: event.identity, workspace: event.workspace, recordId: event.recordId });
     } else if (event.kind === 'dag:node') {
       const key = [...event.path, event.node].join('/');
-      if (event.phase === 'start') stages.set(key, { kind: 'interrupted', startLine: lineNumber });
-      else if (event.outcome !== undefined) stages.set(key, { kind: 'completed', outcome: event.outcome });
+      started.add(key);
+      if (event.phase === 'start') {
+        const prior = stages.get(key);
+        if (!(event.attempt === 1 && prior?.kind === 'completed' && prior.outcome.status === 'pass')) {
+          stages.set(key, { kind: 'interrupted', startLine: lineNumber });
+        }
+      } else if (event.outcome !== undefined) {
+        stages.set(key, { kind: 'completed', outcome: event.outcome });
+      }
+    } else if (event.kind === 'engine:usage' && event.role !== undefined && event.stage !== undefined) {
+      for (let index = event.path.length; index > 0; index -= 1) {
+        if (event.path[index - 1] !== event.stage) continue;
+        const key = event.path.slice(0, index).join('/');
+        if (!started.has(key)) continue;
+        const answers = usage.get(key) ?? [];
+        answers.push({ model: event.model, path: event.path, role: event.role, stage: event.stage });
+        usage.set(key, answers);
+        break;
+      }
     }
   }
-  return { anchors, stages };
+  return { outcomes: { anchors, stages }, usage };
 }
 
 function ensureDir(path: string): void {

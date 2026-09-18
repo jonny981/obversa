@@ -321,7 +321,8 @@ try {
   `PreflightPauseResult`, `PreflightFailureResult`, and `GraphExecutorResult`
   for what the executor returns.
 
-  - `RESUME_STAGE_OUTCOMES`: the state key under which a resumed run carries the outcomes its stages reached before it paused; the declarative layer reads it so a gate that was already pending is observed rather than asked a second time.
+- `RESUME_STAGE_OUTCOMES`: the state key under which a resumed run carries the outcomes its stages reached before it paused; the declarative layer reads it so a gate that was already pending is observed rather than asked a second time.
+
 **Ask a person**
 
 - `approval`: a person's decision as a step; a yes passes, a no goes back
@@ -503,6 +504,7 @@ larger teams.
 | `reviewedBy` | A panel role that reads this stage's work. A rejection runs the stage again with the findings; a note written back unchanged fails plainly. |
 | `sendsBackTo` | The earlier stage a rejection or a red run goes back to. A stage cannot send back to itself; use `reviewedBy`. |
 | `retry` | How many times this stage may run again: the review restarts of a reviewed stage, or the kickback budget of a stage others send back to. Default 1. It belongs to the stage that repeats. |
+| `retrySafe` | `true` when the stage may run again after an interruption without a person reconciling it. Off unless set. |
 | `when` | A condition read before the stage runs: `passed(name)`, `failed(name)`, or an async predicate over `ctx`. A stage whose `when` is not met is recorded as skipped and counts as passed for the stages after it. |
 | `optional` | A red run of this stage does not fail the workflow or block the stages after it. `failed(name)` on a later stage is allowed only when the named stage is optional; on a required stage a red run stops the workflow, so there is no other path to choose. |
 | `needs` | One or more earlier stage names this stage also depends on, beside the one before it. A condition can then read a stage further back through `passed`, `failed` or `ctx.needs`. A name that is not an earlier stage is an error when the workflow is built. |

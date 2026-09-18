@@ -354,12 +354,12 @@ describe('declarative teams', () => {
       await mkdir(join(request.cwd!, file, '..'), { recursive: true });
       await writeFile(join(request.cwd!, file), 'written\n');
       return pass('stage files written');
-    }]);
+    }], { usageModel: 'writer-model' });
     const reviewer = scriptedEngine('reviewer', [async (request) => {
       expect(request.prompt).toContain('Review target: src/second.mjs.');
       expect(request.prompt).not.toContain('team-output/later.md');
       return pass('review accepted');
-    }]);
+    }], { usageModel: 'reviewer-model' });
     const job = workflow('stage-files', {
       brief: 'Write the declared files in order.',
       roles: {
@@ -558,13 +558,13 @@ describe('declarative teams', () => {
       writeCalls += 1;
       await writeFile(join(request.cwd!, 'note.md'), 'written\n');
       return pass('note written');
-    }]);
+    }], { usageModel: 'gpt-5' });
     let reviewCalls = 0;
     const reviewer = scriptedEngine('reviewer', [async () => {
       reviewCalls += 1;
       if (reviewCalls === 1) return revise('the note is not good enough', 'missing substance');
       return pass('accepted');
-    }]);
+    }], { usageModel: 'claude-sonnet-4-5' });
     const makeWorkflow = () => workflow('resume-skip', {
       brief: { brief: 'Write one note.', files: ['note.md'] },
       roles: { writer: seat(writer, 'gpt'), review: [seat(reviewer, 'claude')] },
@@ -596,8 +596,8 @@ describe('declarative teams', () => {
       writeCalls += 1;
       await writeFile(join(request.cwd!, 'note.md'), 'written\n');
       return pass('note written');
-    }]);
-    const reviewer = scriptedEngine('reviewer', [async () => pass('accepted')]);
+    }], { usageModel: 'gpt-5' });
+    const reviewer = scriptedEngine('reviewer', [async () => pass('accepted')], { usageModel: 'claude-sonnet-4-5' });
     const makeWorkflow = (brief: string) => workflow('resume-changed', {
       brief: { brief, files: ['note.md'] },
       roles: { writer: seat(writer, 'gpt'), review: [seat(reviewer, 'claude')] },
@@ -625,8 +625,8 @@ describe('declarative teams', () => {
     const writer = scriptedEngine('writer', [async (request) => {
       await writeFile(join(request.cwd!, 'note.md'), 'written\n');
       return pass('note written');
-    }]);
-    const reviewer = scriptedEngine('reviewer', [async () => pass('accepted')]);
+    }], { usageModel: 'gpt-5' });
+    const reviewer = scriptedEngine('reviewer', [async () => pass('accepted')], { usageModel: 'claude-sonnet-4-5' });
     const job = workflow('resume-fresh', {
       brief: { brief: 'Write one note.', files: ['note.md'] },
       roles: { writer: seat(writer, 'gpt'), review: [seat(reviewer, 'claude')] },
@@ -843,6 +843,81 @@ describe('declarative teams', () => {
   });
 
   it.each([
+    {
+      form: 'separate panel',
+      stages: [
+        stage('write', { agent: 'writer', writes: 'note.md' }),
+        stage('review', { panel: 'review', agree: 1 }),
+      ],
+      writerStage: 'write',
+    },
+    {
+      form: 'reviewedBy',
+      stages: [stage('note', { agent: 'writer', writes: 'note.md', reviewedBy: 'review' })],
+      writerStage: 'note',
+    },
+  ])('refuses $form when its writer has no recorded answer', async ({ stages, writerStage }) => {
+    const directory = await mkdtemp(join(tmpdir(), 'obversa-f42-empty-writer-'));
+    const writer = scriptedEngine('writer', [async (request) => {
+      await writeFile(join(request.cwd!, 'note.md'), 'written\n');
+      return pass('note written');
+    }]);
+    const reviewer = scriptedEngine('reviewer', [async () => pass('accepted')], {
+      usageModel: 'gpt-5',
+    });
+    const job = workflow(`missing-writer-${writerStage}`, {
+      brief: { brief: 'Write one note.', files: ['note.md'] },
+      roles: { writer: seat(writer, 'claude'), review: [seat(reviewer, 'gpt')] },
+      stages,
+    });
+
+    try {
+      const result = await run(job, { cwd: directory });
+      expect(result.outcome.status).toBe('fail');
+      expect(JSON.stringify(result.outcome.data ?? result.outcome.summary)).toContain(`writer stage ${writerStage}`);
+      if (writerStage === 'write') expect(reviewer.calls).toHaveLength(0);
+    } finally {
+      await rm(directory, { recursive: true, force: true });
+    }
+  });
+
+  it.each([
+    {
+      form: 'separate panel',
+      stages: [
+        stage('write', { agent: 'writer', writes: 'note.md' }),
+        stage('review', { panel: 'review', agree: 1 }),
+      ],
+      reviewerStage: 'review',
+    },
+    {
+      form: 'reviewedBy',
+      stages: [stage('note', { agent: 'writer', writes: 'note.md', reviewedBy: 'review' })],
+      reviewerStage: 'note',
+    },
+  ])('refuses a passing $form with no recorded reviewer answer', async ({ stages, reviewerStage }) => {
+    const directory = await mkdtemp(join(tmpdir(), 'obversa-f42-empty-reviewer-'));
+    const writer = scriptedEngine('writer', [async (request) => {
+      await writeFile(join(request.cwd!, 'note.md'), 'written\n');
+      return pass('note written');
+    }], { usageModel: 'claude-sonnet-4-5' });
+    const reviewer = scriptedEngine('reviewer', [async () => pass('accepted')]);
+    const job = workflow('missing-reviewer', {
+      brief: { brief: 'Write one note.', files: ['note.md'] },
+      roles: { writer: seat(writer, 'claude'), review: [seat(reviewer, 'gpt')] },
+      stages,
+    });
+
+    try {
+      const result = await run(job, { cwd: directory });
+      expect(result.outcome.status).toBe('fail');
+      expect(JSON.stringify(result.outcome.data ?? result.outcome.summary)).toContain(`reviewer stage ${reviewerStage}`);
+    } finally {
+      await rm(directory, { recursive: true, force: true });
+    }
+  });
+
+  it.each([
     { model: 'gpt-5', usageArray: 'absent', reason: 'recorded model family collision' },
     { model: 'gpt-5', usageArray: 'empty', reason: 'recorded model family collision' },
     { model: '/', usageArray: 'absent', reason: 'recorded model family is unknown' },
@@ -969,8 +1044,16 @@ describe('declarative teams', () => {
 
     try {
       const state: Record<string, unknown> = {};
-      const result = await run(job, { cwd: directory, state });
+      const recorded: unknown[] = [];
+      const result = await run(job, {
+        cwd: directory,
+        state,
+        onEvent: (event) => {
+          if (event.kind === 'engine:usage') recorded.push(event);
+        },
+      });
       expect(result.outcome.status).toBe('pass');
+      expect(recorded).toMatchObject(expected);
       expect(state[RECORDED_ENGINE_USAGE]).toMatchObject(expected);
     } finally {
       await rm(directory, { recursive: true, force: true });
@@ -1090,12 +1173,12 @@ describe('declarative teams', () => {
     const writer = seat(scriptedEngine('writer', [async (request) => {
       await writeFile(join(request.cwd!, 'note.md'), 'written\n');
       return pass('note written');
-    }]), 'claude');
+    }], { usageModel: 'claude-sonnet-4-5' }), 'claude');
     const reviewer = seat(scriptedEngine('reviewer', [async (request) => {
       expect(request.prompt).toContain('Review target: note.md.');
       expect(request.prompt).not.toContain('brief.md');
       return pass('review accepted');
-    }]), 'grok');
+    }], { usageModel: 'grok-4' }), 'grok');
 
     const job = workflow('target-run-review', {
       brief: { brief: 'Review one note.', files: ['brief.md'] },
@@ -1152,7 +1235,7 @@ describe('declarative teams', () => {
     const writer = scriptedEngine('writer', [async (request) => {
       await writeFile(join(request.cwd!, 'note.md'), 'original\n');
       return pass('note written');
-    }]);
+    }], { usageModel: 'writer-model' });
     const reviewer = scriptedEngine('reviewer', [async (request) => {
       await mkdir(join(request.cwd!, 'reviews'), { recursive: true });
       await writeFile(join(request.cwd!, 'reviews/review-1.json'), '{"status":"pass"}\n');
@@ -1186,7 +1269,7 @@ describe('declarative teams', () => {
     const writer = scriptedEngine('writer', [async (request) => {
       await writeFile(join(request.cwd!, 'note.md'), 'original\n');
       return pass('note written');
-    }]);
+    }], { usageModel: 'writer-model' });
     const reviewer = scriptedEngine('reviewer', [async (request) => {
       await writeFile(join(request.cwd!, 'note.md'), 'changed by reviewer\n');
       return '{"status":"revise","summary":"needs a correction"}';
@@ -1218,7 +1301,7 @@ describe('declarative teams', () => {
     const writer = scriptedEngine('writer', [async (request) => {
       await writeFile(join(request.cwd!, 'note.md'), 'original\n');
       return pass('note written');
-    }]);
+    }], { usageModel: 'writer-model' });
     const tamperingReviewer = scriptedEngine('tampering-reviewer', [async (request) => {
       await writeFile(join(request.cwd!, 'note.md'), 'changed by reviewer\n');
       return pass('accepted');
@@ -1339,7 +1422,7 @@ describe('declarative teams', () => {
     const reviewer = scriptedEngine('reviewer', [
       async () => 'not a decision',
       async () => '{"status":"pass","summary":"accepted after retry"}',
-    ]);
+    ], { usageModel: 'reviewer-model' });
     const job = workflow('panel-retry', {
       brief: 'Review the change.',
       roles: { review: [seat(reviewer, 'reviewer')] },

@@ -691,6 +691,8 @@ export type LoopEvent =
       path: string[];
       model: string;
       usage: UsageReceipt;
+      role?: 'writer' | 'reviewer';
+      stage?: string;
     }
   | {
       kind: 'log';

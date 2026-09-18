@@ -1,4 +1,4 @@
-import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import { appendFile, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
@@ -60,6 +60,14 @@ describe('a declarative workflow with a person gate, run twice on one record', (
 
     const afterFirst = await readFile(join(directory, 'count.txt'), 'utf8');
     expect(afterFirst).toBe('one\n');
+    const events = (await readFile(recordPath, 'utf8')).trim().split('\n').map((line) => JSON.parse(line) as {
+      kind: string;
+      phase?: string;
+      outcome?: { data?: Record<string, unknown> };
+    });
+    const completed = events.filter((event) => event.kind === 'dag:node' && event.phase === 'done');
+    expect(completed.length).toBeGreaterThan(0);
+    expect(completed.every((event) => event.outcome?.data?.resumeIdentity === undefined)).toBe(true);
 
     // The finished count is reused; the person gate is still pending.
     const second = await run(counter, { cwd: directory, recordTo: recordPath, resume: true } as RunOptions);
@@ -67,6 +75,47 @@ describe('a declarative workflow with a person gate, run twice on one record', (
 
     const afterSecond = await readFile(join(directory, 'count.txt'), 'utf8');
     expect(afterSecond).toBe('one\n');
+  });
+
+  it('checks a resumed writer’s recorded model before a separate panel runs', async () => {
+    const directory = await mkdtemp(join(tmpdir(), 'f42-recorded-family-'));
+    const recordPath = join(directory, 'record.jsonl');
+    const callbacks = createCallbackClient();
+    const writer = scriptedEngine('writer', [async (request) => {
+      await writeFile(join(request.cwd!, 'note.md'), 'written\n');
+      return pass('note written');
+    }], { usageModel: 'claude-sonnet-4-5' });
+    const reviewer = scriptedEngine('reviewer', [async () => pass('accepted')], {
+      usageModel: 'claude-sonnet-4-5',
+    });
+    const job = workflow('resumed-recorded-family', {
+      brief: { brief: 'Write and review one note.', files: ['note.md'] },
+      roles: {
+        writer: seat(writer, 'gpt'),
+        approver: person('Review the note?'),
+        review: [seat(reviewer, 'claude')],
+      },
+      stages: [
+        stage('write', { agent: 'writer', writes: 'note.md' }),
+        stage('approve', { input: 'approver' }),
+        stage('review', { panel: 'review', agree: 1 }),
+      ],
+    });
+
+    try {
+      expect((await run(job, { cwd: directory, recordTo: recordPath, callbacks })).outcome.status).toBe('paused');
+      expect(writer.calls).toHaveLength(1);
+      const request = callbacks.listPending()[0]!;
+      expect((await directRouter(callbacks, request, 'approver', () => ({ approved: true }))).ok).toBe(true);
+
+      const resumed = await run(job, { cwd: directory, recordTo: recordPath, resume: true, callbacks });
+      expect(resumed.outcome.status).toBe('fail');
+      expect(JSON.stringify(resumed.outcome.data ?? resumed.outcome.summary)).toMatch(/recorded model family collision/);
+      expect(writer.calls).toHaveLength(1);
+      expect(reviewer.calls).toHaveLength(0);
+    } finally {
+      await rm(directory, { recursive: true, force: true });
+    }
   });
 
   it('re-runs a recorded writer when a person sends its work back during resume', async () => {
@@ -119,22 +168,29 @@ describe('a declarative workflow with a person gate, run twice on one record', (
   it('does not infer resume from a state object reused by the caller', async () => {
     const directory = await mkdtemp(join(tmpdir(), 'f42-explicit-'));
     const recordPath = join(directory, 'record.jsonl');
-    const state: Record<string, unknown> = {};
-    const job = workflow('count-explicit', {
+    const state: Record<string, unknown> = { shared: 'kept' };
+    const workflowJob = workflow('count-explicit', {
       brief: 'Count once per fresh run.',
       roles: {},
       stages: [stage('count', {
         run: ['node', '-e', "require('node:fs').appendFileSync('count.txt', 'one\\n')"],
       })],
     });
+    const job: Job = async (ctx) => {
+      ctx.state.calls = (ctx.state.calls as number | undefined ?? 0) + 1;
+      return workflowJob(ctx);
+    };
 
     try {
       expect((await run(job, { cwd: directory, recordTo: recordPath, state })).outcome.status).toBe('pass');
+      expect(state).toEqual({ shared: 'kept', calls: 1 });
       expect((await run(job, { cwd: directory, recordTo: recordPath, resume: true, state })).outcome.status).toBe('pass');
       expect(await readFile(join(directory, 'count.txt'), 'utf8')).toBe('one\n');
+      expect(state).toEqual({ shared: 'kept', calls: 2 });
 
       expect((await run(job, { cwd: directory, recordTo: recordPath, state })).outcome.status).toBe('pass');
       expect(await readFile(join(directory, 'count.txt'), 'utf8')).toBe('one\none\n');
+      expect(state).toEqual({ shared: 'kept', calls: 3 });
     } finally {
       await rm(directory, { recursive: true, force: true });
     }
@@ -218,6 +274,72 @@ describe('a declarative workflow with a person gate, run twice on one record', (
       const reconciled = await run(job, { cwd: directory, recordTo: recordPath, resume: true, callbacks });
       expect(reconciled.outcome.status).toBe('pass');
       expect(await readFile(join(directory, 'deployments.txt'), 'utf8')).toBe('deployed\n');
+    } finally {
+      await rm(directory, { recursive: true, force: true });
+    }
+  });
+
+  it('reuses a completed stage when a later cached skip stopped after its start event', async () => {
+    const directory = await mkdtemp(join(tmpdir(), 'f42-cached-start-'));
+    const recordPath = join(directory, 'record.jsonl');
+    const job = workflow('cached-count', {
+      brief: 'Count once.',
+      roles: {},
+      stages: [stage('count', {
+        run: ['node', '-e', "require('node:fs').appendFileSync('count.txt', 'one\\n')"],
+      })],
+    });
+
+    try {
+      expect((await run(job, { cwd: directory, recordTo: recordPath })).outcome.status).toBe('pass');
+      const events = (await readFile(recordPath, 'utf8')).trim().split('\n').map((line) => JSON.parse(line) as {
+        kind: string;
+        node?: string;
+        phase?: string;
+        attempt?: number;
+      });
+      const start = events.find((event) => event.kind === 'dag:node'
+        && event.node === 'count' && event.phase === 'start');
+      expect(start).toBeDefined();
+      await appendFile(recordPath, `${JSON.stringify(start)}\n`);
+
+      const resumed = await run(job, { cwd: directory, recordTo: recordPath, resume: true });
+      expect(resumed.outcome.status).toBe('pass');
+      expect(await readFile(join(directory, 'count.txt'), 'utf8')).toBe('one\n');
+    } finally {
+      await rm(directory, { recursive: true, force: true });
+    }
+  });
+
+  it('still reconciles a later attempt that stopped after its start event', async () => {
+    const directory = await mkdtemp(join(tmpdir(), 'f42-later-attempt-'));
+    const recordPath = join(directory, 'record.jsonl');
+    const callbacks = createCallbackClient();
+    const job = workflow('later-attempt', {
+      brief: 'Count again only after a person checks.',
+      roles: {},
+      stages: [stage('count', {
+        run: ['node', '-e', "require('node:fs').appendFileSync('count.txt', 'one\\n')"],
+      })],
+    });
+
+    try {
+      expect((await run(job, { cwd: directory, recordTo: recordPath })).outcome.status).toBe('pass');
+      const events = (await readFile(recordPath, 'utf8')).trim().split('\n').map((line) => JSON.parse(line) as {
+        kind: string;
+        node?: string;
+        phase?: string;
+        attempt?: number;
+      });
+      const start = events.find((event) => event.kind === 'dag:node'
+        && event.node === 'count' && event.phase === 'start');
+      expect(start).toBeDefined();
+      await appendFile(recordPath, `${JSON.stringify({ ...start, attempt: 2 })}\n`);
+
+      const resumed = await run(job, { cwd: directory, recordTo: recordPath, resume: true, callbacks });
+      expect(resumed.outcome.status).toBe('paused');
+      expect(callbacks.listPending()).toHaveLength(1);
+      expect(await readFile(join(directory, 'count.txt'), 'utf8')).toBe('one\n');
     } finally {
       await rm(directory, { recursive: true, force: true });
     }

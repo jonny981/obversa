@@ -14,7 +14,7 @@ import { LoopError } from './core/errors.js';
 import { loop } from './core/loop.js';
 import { reviewPanel } from './core/feedback.js';
 import type { Job, JobContext, Outcome, ConditionInput } from './core/types.js';
-import { RESUME_STAGE_OUTCOMES } from './runtime/runner.js';
+import { RESUME_RECORDED_USAGE, RESUME_STAGE_OUTCOMES } from './runtime/runner.js';
 import type { ResumedStageRecords } from './runtime/persist.js';
 
 import { outcomeFromAgentText } from './workflow-agent-response.js';
@@ -376,6 +376,7 @@ function recordedFamilyGate(
   reviewers: readonly TeamSeat[],
   writerStageNames: readonly string[],
   writerFamilies: readonly string[],
+  writerRunsInsidePanel: boolean,
 ): Job {
   const reviewerDeclarations = reviewers.map((seat) => ({
     label: `reviewer seat ${seatIdentity(seat).model}`,
@@ -394,16 +395,40 @@ function recordedFamilyGate(
           && record.stage !== undefined
           && writerStageNames.includes(record.stage),
       );
+      const panelStage = ctx.graph?.node ?? ctx.path.at(-1) ?? 'panel';
       // Every recorded writer answer up to the panel keeps the reviewers'
       // declared difference. Records are compared by role and stage, never
       // by path.
-      assertRecordedFamilies(writerSide(all.slice(0, beforeLength)), reviewerDeclarations);
+      const beforeWriters = writerSide(all.slice(0, beforeLength));
+      if (!writerRunsInsidePanel && writerStageNames.length > 0 && beforeWriters.length === 0) {
+        throw new LoopError({
+          code: 'BODY',
+          phase: 'review',
+          message: `recorded model family missing: writer stage ${writerStageNames.join(', ')} has no recorded answer before panel stage ${panelStage}`,
+        });
+      }
+      assertRecordedFamilies(beforeWriters, reviewerDeclarations);
       const outcome = await panel(ctx);
       if (outcome.status !== 'pass') return outcome;
       const current = recordedUsage(ctx);
       const after = current.slice(beforeLength);
-      assertRecordedFamilies(writerSide(after), reviewerDeclarations);
+      const afterWriters = writerSide(after);
+      if (writerRunsInsidePanel && afterWriters.length === 0) {
+        throw new LoopError({
+          code: 'BODY',
+          phase: 'review',
+          message: `recorded model family missing: writer stage ${writerStageNames.join(', ')} has no recorded answer in stage ${panelStage}`,
+        });
+      }
+      assertRecordedFamilies(afterWriters, reviewerDeclarations);
       const reviewerSide = after.filter((record) => record.role === 'reviewer');
+      if (reviewerSide.length === 0) {
+        throw new LoopError({
+          code: 'BODY',
+          phase: 'review',
+          message: `recorded model family missing: reviewer stage ${panelStage} has no recorded answer`,
+        });
+      }
       assertRecordedFamilies(reviewerSide, writerDeclarations);
       // The two recorded sides themselves must be disjoint: two declared
       // differences mean nothing when one family answered both.
@@ -606,6 +631,7 @@ function stageJob(
         reviewers,
         [named.name],
         [seatIdentity(seatRole(roles, config.agent)).modelFamily],
+        true,
       ),
       reviewLoop,
     );
@@ -626,7 +652,7 @@ function stageJob(
   if ('panel' in config && config.panel !== undefined) {
     const reviewers = panelRole(roles, config.panel);
     const panel = reviewerPanel(brief, named, reviewers, files, declaredFiles, targetFiles, config.sendsBackTo, config.agree);
-    return copyJobMeta(recordedFamilyGate(panel, reviewers, familyTargetStageNames, familyTargetFamilies), panel);
+    return copyJobMeta(recordedFamilyGate(panel, reviewers, familyTargetStageNames, familyTargetFamilies, false), panel);
   }
   if ('input' in config && config.input !== undefined) {
     const personRole = inputRole(roles, config.input);
@@ -699,9 +725,7 @@ function resumeIdentity(name: string, config: WorkflowConfig): string {
     brief: config.brief,
     stages: config.stages.map((named) => ({
       name: named.name,
-      config: canonicalForDigest(Object.fromEntries(
-        Object.entries(named.config).filter(([key]) => key !== 'engine'),
-      )),
+      config: canonicalForDigest(named.config),
     })),
     roles: Object.fromEntries(Object.entries(config.roles).map(([key, value]) => [
       key,
@@ -727,9 +751,15 @@ function resumeGuard(job: Job, identity: string, label: string, retrySafe: boole
     if (ctx.graph?.attempt === 1 && recorded !== undefined) {
       if (recorded.kind === 'interrupted') {
         if (!retrySafe) return reconcileInterrupted(ctx, label, identity, anchor!.recordId, recorded.startLine);
-      } else if (recorded.outcome.status === 'pass'
-          || (recorded.outcome.status === 'fail'
-            && (recorded.outcome.data as { resumeReconciliation?: boolean } | undefined)?.resumeReconciliation === true)) {
+      } else if (recorded.outcome.status === 'pass') {
+        const priorUsage = (ctx.state[RESUME_RECORDED_USAGE] as ReadonlyMap<string, readonly RecordedEngineUsage[]> | undefined)
+          ?.get(ctx.path.join('/'));
+        if (priorUsage?.length) {
+          ctx.state[RECORDED_ENGINE_USAGE] = [...recordedUsage(ctx), ...priorUsage];
+        }
+        return recorded.outcome;
+      } else if (recorded.outcome.status === 'fail'
+          && (recorded.outcome.data as { resumeReconciliation?: boolean } | undefined)?.resumeReconciliation === true) {
         return recorded.outcome;
       } else if (recorded.outcome.status === 'paused') {
         const request = recorded.outcome.data as {
@@ -749,10 +779,7 @@ function resumeGuard(job: Job, identity: string, label: string, retrySafe: boole
         }
       }
     }
-    const outcome = await job(ctx);
-    return outcome.status === 'pass'
-      ? { ...outcome, data: { ...(outcome.data ?? {}), resumeIdentity: identity } }
-      : outcome;
+    return job(ctx);
   };
 }
 

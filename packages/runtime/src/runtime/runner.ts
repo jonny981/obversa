@@ -15,11 +15,11 @@ import { Stats, type StatsSnapshot } from '../core/stats.js';
 import { costReport, type CostReport, type PriceTable } from '../core/cost.js';
 import { LoopError } from '../core/errors.js';
 import { Budget, type BudgetConfig } from '../core/budget.js';
-import { makeRecorder, readStageOutcomes } from './persist.js';
+import { makeRecorder, readResumeRecord } from './persist.js';
 
-/** Shared state key holding the workflow anchors and stage states a resuming
- * run read from its record. Workflow layers use it to decide what can resume. */
+/** Run-owned keys holding the workflow state read from its record. */
 export const RESUME_STAGE_OUTCOMES = 'obversa:resumed-stage-outcomes';
+export const RESUME_RECORDED_USAGE = 'obversa:resumed-recorded-usage';
 import { ensureRunSubdir } from './paths.js';
 import { startSupervisor, newRunId, type Supervisor } from './supervisor.js';
 import { jobMeta } from '../core/describe.js';
@@ -198,8 +198,24 @@ export async function run(
     });
   }
   const runId = needsRunId ? (options.runId ?? newRunId(title)) : undefined;
-  const initialState: Record<string, unknown> = options.state ?? {};
-  delete initialState[RESUME_STAGE_OUTCOMES];
+  const callerState = options.state ?? {};
+  const resumeState: Record<string, unknown> = {};
+  const privateKeys = new Set([RESUME_STAGE_OUTCOMES, RESUME_RECORDED_USAGE]);
+  const initialState: Record<string, unknown> = new Proxy(callerState, {
+    get(target, key) {
+      return typeof key === 'string' && privateKeys.has(key)
+        ? resumeState[key]
+        : target[key as string];
+    },
+    set(target, key, value) {
+      if (typeof key === 'string' && privateKeys.has(key)) {
+        resumeState[key] = value;
+      } else {
+        target[key as string] = value;
+      }
+      return true;
+    },
+  });
 
   // Persistence sinks observe the same event stream as outside readers.
   const sinks: Array<(event: LoopEvent) => void> = [];
@@ -211,13 +227,14 @@ export async function run(
       ? join(ensureRunSubdir(dir, 'records'), `${runId!}.jsonl`)
       : options.recordTo;
   if (recordPath) {
-    const resumedOutcomes = options.resume === true ? readStageOutcomes(recordPath) : undefined;
+    const resumed = options.resume === true ? readResumeRecord(recordPath) : undefined;
     sinks.push(makeRecorder(recordPath, {
       thin: options.recordTo === 'auto',
-      ...(resumedOutcomes === undefined ? {} : { resume: true }),
+      ...(resumed === undefined ? {} : { resume: true }),
     }));
-    if (resumedOutcomes !== undefined && resumedOutcomes.anchors.size > 0) {
-      initialState[RESUME_STAGE_OUTCOMES] = resumedOutcomes;
+    if (resumed !== undefined && resumed.outcomes.anchors.size > 0) {
+      initialState[RESUME_STAGE_OUTCOMES] = resumed.outcomes;
+      initialState[RESUME_RECORDED_USAGE] = resumed.usage;
     }
   }
   // A supervised run registers itself in the global registry (~/.obversa/runs) and
