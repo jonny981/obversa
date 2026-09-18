@@ -65,7 +65,11 @@ export function readResumeRecord(path: string): {
       started.add(key);
       if (event.phase === 'start') {
         const prior = stages.get(key);
-        if (!(event.attempt === 1 && prior?.kind === 'completed' && prior.outcome.status === 'pass')) {
+        const safeCompletion = prior?.kind === 'completed'
+          && (prior.outcome.status === 'paused'
+            || (prior.outcome.status === 'pass'
+              && (prior.outcome.data as { skipped?: boolean } | undefined)?.skipped !== true));
+        if (event.attempt !== 1 || !safeCompletion) {
           stages.set(key, { kind: 'interrupted', startLine: lineNumber });
         }
       } else if (event.outcome !== undefined) {

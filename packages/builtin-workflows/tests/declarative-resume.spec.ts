@@ -8,6 +8,7 @@ import {
   briefFromFile,
   createCallbackClient,
   directRouter,
+  passed,
   person,
   run,
   stage,
@@ -37,6 +38,112 @@ import { pass, scriptedEngine, seat } from './scripted-engine.js';
  * does not.
  */
 describe('a declarative workflow with a person gate, run twice on one record', () => {
+  it('runs a stage skipped by when after its optional dependency recovers', async () => {
+    const directory = await mkdtemp(join(tmpdir(), 'f42-when-resume-'));
+    const recordPath = join(directory, 'record.jsonl');
+    const job = workflow('conditional-resume', {
+      brief: 'Run after the optional probe passes.',
+      roles: {},
+      stages: [
+        stage('probe', {
+          run: [process.execPath, '-e', "if (!require('node:fs').existsSync('ready.txt')) process.exit(1)"],
+          optional: true,
+        }),
+        stage('after', {
+          run: [process.execPath, '-e', "require('node:fs').writeFileSync('after.txt', 'ran\\n')"],
+          when: passed('probe'),
+        }),
+      ],
+    });
+
+    try {
+      expect((await run(job, { cwd: directory, recordTo: recordPath })).outcome.status).toBe('pass');
+      await expect(readFile(join(directory, 'after.txt'), 'utf8')).rejects.toThrow();
+      await writeFile(join(directory, 'ready.txt'), 'ready\n');
+      expect((await run(job, { cwd: directory, recordTo: recordPath, resume: true })).outcome.status).toBe('pass');
+      expect(await readFile(join(directory, 'after.txt'), 'utf8')).toBe('ran\n');
+    } finally {
+      await rm(directory, { recursive: true, force: true });
+    }
+  });
+
+  it('keeps a pending person question after a resumed start has no done event', async () => {
+    const directory = await mkdtemp(join(tmpdir(), 'f42-paused-start-'));
+    const recordPath = join(directory, 'record.jsonl');
+    const callbacks = createCallbackClient();
+    const job = workflow('pending-resume', {
+      brief: 'Ask once.',
+      roles: { approver: person('Approve this?') },
+      stages: [stage('approve', { input: 'approver' })],
+    });
+
+    try {
+      expect((await run(job, { cwd: directory, recordTo: recordPath, callbacks })).outcome.status).toBe('paused');
+      const requestId = callbacks.listPending()[0]!.requestId;
+      expect((await run(job, { cwd: directory, recordTo: recordPath, resume: true, callbacks })).outcome.status).toBe('paused');
+      expect(callbacks.listPending().map((request) => request.requestId)).toEqual([requestId]);
+      const events = (await readFile(recordPath, 'utf8')).trim().split('\n').map((line) => JSON.parse(line) as {
+        kind: string;
+        node?: string;
+        phase?: string;
+        attempt?: number;
+      });
+      const start = events.findLast((event) => event.kind === 'dag:node'
+        && event.node === 'approve' && event.phase === 'start');
+      expect(start).toBeDefined();
+      await appendFile(recordPath, `${JSON.stringify(start)}\n`);
+
+      expect((await run(job, { cwd: directory, recordTo: recordPath, resume: true, callbacks })).outcome.status).toBe('paused');
+      expect(callbacks.listPending().map((request) => request.requestId)).toEqual([requestId]);
+    } finally {
+      await rm(directory, { recursive: true, force: true });
+    }
+  });
+
+  it('does not mistake a previously skipped stage for completed work after a start', async () => {
+    const directory = await mkdtemp(join(tmpdir(), 'f42-skipped-start-'));
+    const recordPath = join(directory, 'record.jsonl');
+    const callbacks = createCallbackClient();
+    const job = workflow('skipped-start', {
+      brief: 'Run after the probe recovers.',
+      roles: {},
+      stages: [
+        stage('probe', {
+          run: [process.execPath, '-e', "if (!require('node:fs').existsSync('ready.txt')) process.exit(1)"],
+          optional: true,
+        }),
+        stage('after', {
+          run: [process.execPath, '-e', "require('node:fs').writeFileSync('after.txt', 'ran\\n')"],
+          when: passed('probe'),
+        }),
+      ],
+    });
+
+    try {
+      expect((await run(job, { cwd: directory, recordTo: recordPath, callbacks })).outcome.status).toBe('pass');
+      await expect(readFile(join(directory, 'after.txt'), 'utf8')).rejects.toThrow();
+      const events = (await readFile(recordPath, 'utf8')).trim().split('\n').map((line) => JSON.parse(line) as {
+        kind: string;
+        path: string[];
+        node?: string;
+        phase?: string;
+      });
+      const skipped = events.find((event) => event.kind === 'dag:node'
+        && event.node === 'after' && event.phase === 'skip');
+      expect(skipped).toBeDefined();
+      await writeFile(join(directory, 'ready.txt'), 'ready\n');
+      await appendFile(recordPath, `${JSON.stringify({
+        kind: 'dag:node', ts: Date.now(), path: skipped!.path, node: 'after', phase: 'start', attempt: 1,
+      })}\n`);
+
+      expect((await run(job, { cwd: directory, recordTo: recordPath, resume: true, callbacks })).outcome.status).toBe('paused');
+      expect(callbacks.listPending()[0]!.decisionText).toContain('after');
+      await expect(readFile(join(directory, 'after.txt'), 'utf8')).rejects.toThrow();
+    } finally {
+      await rm(directory, { recursive: true, force: true });
+    }
+  });
+
   it('does not re-run the stage that finished before the gate', async () => {
     const directory = await mkdtemp(join(tmpdir(), 'f42-resume-'));
     const recordPath = join(directory, 'record.jsonl');

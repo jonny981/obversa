@@ -501,7 +501,7 @@ larger teams.
 | `input` | A person role. The stage asks the question and waits. |
 | `writes` | The files this stage writes, relative to the workspace. It writes those and no other declared file. For an agent stage a missing or empty one fails the stage by name; a command stage is judged by its exit code. |
 | `desc`, `gate` | What the stage does and what must be true for it to count. Both reach the reviewers and the record. |
-| `reviewedBy` | A panel role that reads this stage's work. A rejection runs the stage again with the findings; a note written back unchanged fails plainly. |
+| `reviewedBy` | A panel role that reads this stage's work. A rejection runs the stage again with the findings; a note written back unchanged fails plainly. The stage and its review are one step, so a run that dies part-way through the review runs the whole step again. It does not resume inside the review. |
 | `sendsBackTo` | The earlier stage a rejection or a red run goes back to. A stage cannot send back to itself; use `reviewedBy`. |
 | `retry` | How many times this stage may run again: the review restarts of a reviewed stage, or the kickback budget of a stage others send back to. Default 1. It belongs to the stage that repeats. |
 | `retrySafe` | `true` when the stage may run again after an interruption without a person reconciling it. Off unless set. |

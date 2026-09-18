@@ -751,7 +751,8 @@ function resumeGuard(job: Job, identity: string, label: string, retrySafe: boole
     if (ctx.graph?.attempt === 1 && recorded !== undefined) {
       if (recorded.kind === 'interrupted') {
         if (!retrySafe) return reconcileInterrupted(ctx, label, identity, anchor!.recordId, recorded.startLine);
-      } else if (recorded.outcome.status === 'pass') {
+      } else if (recorded.outcome.status === 'pass'
+          && (recorded.outcome.data as { skipped?: boolean } | undefined)?.skipped !== true) {
         const priorUsage = (ctx.state[RESUME_RECORDED_USAGE] as ReadonlyMap<string, readonly RecordedEngineUsage[]> | undefined)
           ?.get(ctx.path.join('/'));
         if (priorUsage?.length) {
