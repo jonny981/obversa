@@ -577,7 +577,7 @@ test("the publish guard asks a git from the system directories, whatever git is 
   writeFileSync(path.join(fakeBin, "git"), "#!/bin/sh\ncase \"$*\" in *rev-parse*) echo main;; *cat-file*) echo tag;; *) echo;; esac\n");
   chmodSync(path.join(fakeBin, "git"), 0o755);
   const repoRoot = new URL("..", import.meta.url).pathname;
-  const target = path.join(repoRoot, "packages", "memory");
+  const target = path.join(repoRoot, "packages", "api");
   const direct = JSON.stringify(checkHook({ cwd: target }));
   const child = spawnSync(process.execPath, ["-e", "import('./scripts/check-publish-allowlist.mjs').then((m) => console.log(JSON.stringify(m.checkHook({ cwd: process.argv[1] }))))", target], { cwd: repoRoot, encoding: "utf8", env: { ...process.env, PATH: `${fakeBin}${path.delimiter}${process.env.PATH}` } });
   assert.equal(child.status, 0, child.stderr);
