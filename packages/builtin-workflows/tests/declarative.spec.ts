@@ -550,7 +550,7 @@ describe('declarative teams', () => {
     })).toThrow(/model family must be distinct/);
   });
 
-  it('resumes a workflow, skipping a completed stage and re-running the interrupted one', async () => {
+  it('resumes a workflow, skipping a completed stage and re-running a failed review', async () => {
     const directory = await mkdtemp(join(tmpdir(), 'obversa-f42-resume-'));
     const recordPath = join(directory, 'record.jsonl');
     let writeCalls = 0;

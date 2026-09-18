@@ -1,24 +1,33 @@
-import { mkdtemp, readFile, writeFile } from 'node:fs/promises';
+import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
 import { describe, expect, it } from 'vitest';
 
-import { briefFromFile, person, run, stage, workflow, type RunOptions } from '@obversa/runtime';
+import {
+  briefFromFile,
+  createCallbackClient,
+  directRouter,
+  person,
+  run,
+  stage,
+  workflow,
+  type Job,
+  type RunOptions,
+} from '@obversa/runtime';
+import { pass, scriptedEngine, seat } from './scripted-engine.js';
 
 /**
  * A declarative workflow with a person gate, run twice against one record.
  *
- * This is the red test for the F42 seam. It proves the defect first: the
- * earlier stage runs again on the second run, because the plain run path
- * truncates its record on start (packages/runtime/src/runtime/persist.ts:26)
- * and nothing reads one back. The contract it names, from the F42 ruling:
+ * The record is reused only when the caller asks for resume and the
+ * workflow and workspace still match. An interrupted side effect needs a
+ * person's answer unless the stage is declared safe to retry.
  *
  * 1. Resume is asked for, never inferred: the second run passes
  *    `resume: true`, so an old record never changes behaviour quietly.
  * 2. A stage is the same stage when the workflow name, the workspace, the
- *    brief and the stage list all match; any change restarts from the top,
- *    and the result says so.
+ *    brief and the stage list all match; any change restarts from the top.
  * 3. A stage that started and did not finish re-runs only when it is
  *    declared safe to retry; otherwise the resumed run pauses and asks a
  *    person to reconcile before going on. A resumed run that silently
@@ -52,16 +61,298 @@ describe('a declarative workflow with a person gate, run twice on one record', (
     const afterFirst = await readFile(join(directory, 'count.txt'), 'utf8');
     expect(afterFirst).toBe('one\n');
 
-    // The second run asks to resume the record the first run wrote.
-    // Today this re-runs the count stage: the recorder truncates the
-    // record on start and the workflow starts from the top. The contract
-    // this test names instead: the finished stage is not repeated, the
-    // run returns to the person gate at its recorded position, and the
-    // counter still says one.
+    // The finished count is reused; the person gate is still pending.
     const second = await run(counter, { cwd: directory, recordTo: recordPath, resume: true } as RunOptions);
     expect(second.outcome.status).toBe('paused');
 
     const afterSecond = await readFile(join(directory, 'count.txt'), 'utf8');
     expect(afterSecond).toBe('one\n');
   });
+
+  it('re-runs a recorded writer when a person sends its work back during resume', async () => {
+    const directory = await mkdtemp(join(tmpdir(), 'f42-kickback-'));
+    const recordPath = join(directory, 'record.jsonl');
+    const callbacks = createCallbackClient();
+    const writer = scriptedEngine('writer', [async (request, call) => {
+      await writeFile(join(request.cwd!, 'note.md'), `version ${call}\n`);
+      return pass(`version ${call}`);
+    }]);
+    const job = workflow('revise-note', {
+      brief: { brief: 'Write a note for approval.', files: ['note.md'] },
+      roles: { writer: seat(writer, 'writer'), approver: person('Approve the note?') },
+      stages: [
+        stage('write', { agent: 'writer', writes: 'note.md', retry: 1 }),
+        stage('approve', { input: 'approver', sendsBackTo: 'write' }),
+      ],
+    });
+
+    try {
+      const first = await run(job, { cwd: directory, recordTo: recordPath, callbacks });
+      expect(first.outcome.status).toBe('paused');
+      expect(writer.calls).toHaveLength(1);
+
+      const request = callbacks.listPending()[0]!;
+      const answered = await directRouter(callbacks, request, 'approver', () => ({
+        approved: false,
+        note: 'rewrite the note',
+      }));
+      expect(answered.ok).toBe(true);
+
+      const second = await run(job, { cwd: directory, recordTo: recordPath, resume: true, callbacks });
+      expect(writer.calls).toHaveLength(2);
+      expect(second.outcome.status).toBe('paused');
+      expect(await readFile(join(directory, 'note.md'), 'utf8')).toBe('version 2\n');
+      const events = (await readFile(recordPath, 'utf8')).trim().split('\n').map((line) => JSON.parse(line) as {
+        kind: string;
+        node?: string;
+        phase?: string;
+        attempt?: number;
+      });
+      expect(events.some((event) => event.kind === 'dag:kickback')).toBe(true);
+      expect(events.some((event) => event.kind === 'dag:node'
+        && event.node === 'write' && event.phase === 'done' && event.attempt === 2)).toBe(true);
+    } finally {
+      await rm(directory, { recursive: true, force: true });
+    }
+  });
+
+  it('does not infer resume from a state object reused by the caller', async () => {
+    const directory = await mkdtemp(join(tmpdir(), 'f42-explicit-'));
+    const recordPath = join(directory, 'record.jsonl');
+    const state: Record<string, unknown> = {};
+    const job = workflow('count-explicit', {
+      brief: 'Count once per fresh run.',
+      roles: {},
+      stages: [stage('count', {
+        run: ['node', '-e', "require('node:fs').appendFileSync('count.txt', 'one\\n')"],
+      })],
+    });
+
+    try {
+      expect((await run(job, { cwd: directory, recordTo: recordPath, state })).outcome.status).toBe('pass');
+      expect((await run(job, { cwd: directory, recordTo: recordPath, resume: true, state })).outcome.status).toBe('pass');
+      expect(await readFile(join(directory, 'count.txt'), 'utf8')).toBe('one\n');
+
+      expect((await run(job, { cwd: directory, recordTo: recordPath, state })).outcome.status).toBe('pass');
+      expect(await readFile(join(directory, 'count.txt'), 'utf8')).toBe('one\none\n');
+    } finally {
+      await rm(directory, { recursive: true, force: true });
+    }
+  });
+
+  it('runs an arbitrary job again even when resume is requested', async () => {
+    const directory = await mkdtemp(join(tmpdir(), 'f42-ordinary-'));
+    const recordPath = join(directory, 'record.jsonl');
+    let calls = 0;
+    const job: Job = async () => {
+      calls += 1;
+      return { status: 'pass' };
+    };
+
+    try {
+      expect((await run(job, { cwd: directory, recordTo: recordPath })).outcome.status).toBe('pass');
+      expect((await run(job, { cwd: directory, recordTo: recordPath, resume: true })).outcome.status).toBe('pass');
+      expect(calls).toBe(2);
+    } finally {
+      await rm(directory, { recursive: true, force: true });
+    }
+  });
+
+  it('runs the stage in a new workspace even when another workspace used the same record', async () => {
+    const firstDirectory = await mkdtemp(join(tmpdir(), 'f42-workspace-a-'));
+    const secondDirectory = await mkdtemp(join(tmpdir(), 'f42-workspace-b-'));
+    const recordPath = join(firstDirectory, 'record.jsonl');
+    const job = workflow('workspace-check', {
+      brief: 'Write the local marker.',
+      roles: {},
+      stages: [stage('write', {
+        run: ['node', '-e', "require('node:fs').writeFileSync('local.txt', 'here\\n')"],
+        writes: 'local.txt',
+      })],
+    });
+
+    try {
+      const first = await run(job, { cwd: firstDirectory, recordTo: recordPath });
+      expect(first.outcome.status).toBe('pass');
+      const second = await run(job, { cwd: secondDirectory, recordTo: recordPath, resume: true });
+      expect(second.outcome.status).toBe('pass');
+      expect(await readFile(join(secondDirectory, 'local.txt'), 'utf8')).toBe('here\n');
+    } finally {
+      await rm(firstDirectory, { recursive: true, force: true });
+      await rm(secondDirectory, { recursive: true, force: true });
+    }
+  });
+
+  it('pauses an interrupted deploy without repeating it or asking twice', async () => {
+    const directory = await mkdtemp(join(tmpdir(), 'f42-interrupted-'));
+    const recordPath = join(directory, 'record.jsonl');
+    const callbacks = createCallbackClient();
+    const job = workflow('deploy', {
+      brief: 'Deploy this release.',
+      roles: {},
+      stages: [stage('deploy', {
+        run: ['node', '-e', "require('node:fs').appendFileSync('deployments.txt', 'deployed\\n')"],
+      })],
+    });
+
+    try {
+      const first = await run(job, { cwd: directory, recordTo: recordPath, callbacks });
+      expect(first.outcome.status).toBe('pass');
+      expect(await readFile(join(directory, 'deployments.txt'), 'utf8')).toBe('deployed\n');
+      await retainStageStart(recordPath, 'deploy');
+
+      const resumed = await run(job, { cwd: directory, recordTo: recordPath, resume: true, callbacks });
+      expect(resumed.outcome.status).toBe('paused');
+      expect(callbacks.listPending()).toHaveLength(1);
+      expect(callbacks.listPending()[0]!.decisionText).toContain('deploy');
+      expect(await readFile(join(directory, 'deployments.txt'), 'utf8')).toBe('deployed\n');
+
+      const repeated = await run(job, { cwd: directory, recordTo: recordPath, resume: true, callbacks });
+      expect(repeated.outcome.status).toBe('paused');
+      expect(callbacks.listPending()).toHaveLength(1);
+      expect(await readFile(join(directory, 'deployments.txt'), 'utf8')).toBe('deployed\n');
+
+      const request = callbacks.listPending()[0]!;
+      const answered = await directRouter(callbacks, request, 'operator', () => ({ approved: true }));
+      expect(answered.ok).toBe(true);
+      const reconciled = await run(job, { cwd: directory, recordTo: recordPath, resume: true, callbacks });
+      expect(reconciled.outcome.status).toBe('pass');
+      expect(await readFile(join(directory, 'deployments.txt'), 'utf8')).toBe('deployed\n');
+    } finally {
+      await rm(directory, { recursive: true, force: true });
+    }
+  });
+
+  it('does not carry an interrupted stage into a different workspace', async () => {
+    const firstDirectory = await mkdtemp(join(tmpdir(), 'f42-interrupted-a-'));
+    const secondDirectory = await mkdtemp(join(tmpdir(), 'f42-interrupted-b-'));
+    const recordPath = join(firstDirectory, 'record.jsonl');
+    const callbacks = createCallbackClient();
+    const job = workflow('local-deploy', {
+      brief: 'Deploy in this workspace.',
+      roles: {},
+      stages: [stage('deploy', {
+        run: ['node', '-e', "require('node:fs').writeFileSync('deployed.txt', 'done\\n')"],
+      })],
+    });
+
+    try {
+      expect((await run(job, { cwd: firstDirectory, recordTo: recordPath })).outcome.status).toBe('pass');
+      await retainStageStart(recordPath, 'deploy');
+      const second = await run(job, { cwd: secondDirectory, recordTo: recordPath, resume: true, callbacks });
+      expect(second.outcome.status).toBe('pass');
+      expect(callbacks.listPending()).toHaveLength(0);
+      expect(await readFile(join(secondDirectory, 'deployed.txt'), 'utf8')).toBe('done\n');
+    } finally {
+      await rm(firstDirectory, { recursive: true, force: true });
+      await rm(secondDirectory, { recursive: true, force: true });
+    }
+  });
+
+  it('re-runs an interrupted stage declared retry-safe', async () => {
+    const directory = await mkdtemp(join(tmpdir(), 'f42-retry-safe-'));
+    const recordPath = join(directory, 'record.jsonl');
+    const job = workflow('prepare', {
+      brief: 'Prepare a replaceable file.',
+      roles: {},
+      stages: [stage('prepare', {
+        run: ['node', '-e', "require('node:fs').writeFileSync('prepared.txt', 'ready\\n')"],
+        writes: 'prepared.txt',
+        retrySafe: true,
+      })],
+    });
+
+    try {
+      const first = await run(job, { cwd: directory, recordTo: recordPath });
+      expect(first.outcome.status).toBe('pass');
+      await retainStageStart(recordPath, 'prepare');
+      await writeFile(join(directory, 'prepared.txt'), 'stale\n');
+
+      const resumed = await run(job, { cwd: directory, recordTo: recordPath, resume: true });
+      expect(resumed.outcome.status).toBe('pass');
+      expect(await readFile(join(directory, 'prepared.txt'), 'utf8')).toBe('ready\n');
+    } finally {
+      await rm(directory, { recursive: true, force: true });
+    }
+  });
+
+  it('rejects a retry-safe declaration that is not a boolean', () => {
+    expect(() => workflow('invalid-retry-safe', {
+      brief: 'Test the declaration.',
+      roles: {},
+      stages: [stage('work', {
+        run: ['node', '-e', 'process.exit(0)'],
+        retrySafe: 'yes',
+      } as unknown as Parameters<typeof stage>[1])],
+    })).toThrow(/retrySafe must be a boolean/);
+  });
+
+  it('does not retry an interrupted stage after a person refuses reconciliation', async () => {
+    const directory = await mkdtemp(join(tmpdir(), 'f42-refused-'));
+    const recordPath = join(directory, 'record.jsonl');
+    const callbacks = createCallbackClient();
+    const job = workflow('deploy-refused', {
+      brief: 'Deploy this release.',
+      roles: {},
+      stages: [stage('deploy', {
+        run: ['node', '-e', "require('node:fs').appendFileSync('deployments.txt', 'deployed\\n')"],
+      })],
+    });
+
+    try {
+      expect((await run(job, { cwd: directory, recordTo: recordPath, callbacks })).outcome.status).toBe('pass');
+      await retainStageStart(recordPath, 'deploy');
+      expect((await run(job, { cwd: directory, recordTo: recordPath, resume: true, callbacks })).outcome.status).toBe('paused');
+      const request = callbacks.listPending()[0]!;
+      expect((await directRouter(callbacks, request, 'operator', () => ({ approved: false }))).ok).toBe(true);
+
+      expect((await run(job, { cwd: directory, recordTo: recordPath, resume: true, callbacks })).outcome.status).toBe('fail');
+      expect((await run(job, { cwd: directory, recordTo: recordPath, resume: true, callbacks })).outcome.status).toBe('fail');
+      expect(await readFile(join(directory, 'deployments.txt'), 'utf8')).toBe('deployed\n');
+    } finally {
+      await rm(directory, { recursive: true, force: true });
+    }
+  });
+
+  it('asks again for a later interruption even when the same stage was reconciled before', async () => {
+    const directory = await mkdtemp(join(tmpdir(), 'f42-new-interruption-'));
+    const recordPath = join(directory, 'record.jsonl');
+    const callbacks = createCallbackClient();
+    const job = workflow('repeat-deploy', {
+      brief: 'Deploy this release.',
+      roles: {},
+      stages: [stage('deploy', {
+        run: ['node', '-e', "require('node:fs').appendFileSync('deployments.txt', 'deployed\\n')"],
+      })],
+    });
+
+    try {
+      expect((await run(job, { cwd: directory, recordTo: recordPath, callbacks })).outcome.status).toBe('pass');
+      await retainStageStart(recordPath, 'deploy');
+      expect((await run(job, { cwd: directory, recordTo: recordPath, resume: true, callbacks })).outcome.status).toBe('paused');
+      const firstRequest = callbacks.listPending()[0]!;
+      expect((await directRouter(callbacks, firstRequest, 'operator', () => ({ approved: true }))).ok).toBe(true);
+      expect((await run(job, { cwd: directory, recordTo: recordPath, resume: true, callbacks })).outcome.status).toBe('pass');
+
+      expect((await run(job, { cwd: directory, recordTo: recordPath, callbacks })).outcome.status).toBe('pass');
+      await retainStageStart(recordPath, 'deploy');
+      const later = await run(job, { cwd: directory, recordTo: recordPath, resume: true, callbacks });
+      expect(later.outcome.status).toBe('paused');
+      expect(callbacks.listPending()).toHaveLength(1);
+      expect(callbacks.listPending()[0]!.requestId).not.toBe(firstRequest.requestId);
+      expect(await readFile(join(directory, 'deployments.txt'), 'utf8')).toBe('deployed\ndeployed\n');
+    } finally {
+      await rm(directory, { recursive: true, force: true });
+    }
+  });
 });
+
+async function retainStageStart(recordPath: string, stageName: string): Promise<void> {
+  const lines = (await readFile(recordPath, 'utf8')).trim().split('\n');
+  const index = lines.findIndex((line) => {
+    const event = JSON.parse(line) as { kind: string; node?: string; phase?: string };
+    return event.kind === 'dag:node' && event.node === stageName && event.phase === 'start';
+  });
+  expect(index).toBeGreaterThanOrEqual(0);
+  await writeFile(recordPath, `${lines.slice(0, index + 1).join('\n')}\n`);
+}

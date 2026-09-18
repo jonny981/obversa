@@ -17,8 +17,8 @@ import { LoopError } from '../core/errors.js';
 import { Budget, type BudgetConfig } from '../core/budget.js';
 import { makeRecorder, readStageOutcomes } from './persist.js';
 
-/** Shared state key holding the stage outcomes a resuming run seeded from
- * its record. Workflow layers read it to skip completed stages. */
+/** Shared state key holding the workflow anchors and stage states a resuming
+ * run read from its record. Workflow layers use it to decide what can resume. */
 export const RESUME_STAGE_OUTCOMES = 'obversa:resumed-stage-outcomes';
 import { ensureRunSubdir } from './paths.js';
 import { startSupervisor, newRunId, type Supervisor } from './supervisor.js';
@@ -199,6 +199,7 @@ export async function run(
   }
   const runId = needsRunId ? (options.runId ?? newRunId(title)) : undefined;
   const initialState: Record<string, unknown> = options.state ?? {};
+  delete initialState[RESUME_STAGE_OUTCOMES];
 
   // Persistence sinks observe the same event stream as outside readers.
   const sinks: Array<(event: LoopEvent) => void> = [];
@@ -215,7 +216,7 @@ export async function run(
       thin: options.recordTo === 'auto',
       ...(resumedOutcomes === undefined ? {} : { resume: true }),
     }));
-    if (resumedOutcomes !== undefined && resumedOutcomes.size > 0) {
+    if (resumedOutcomes !== undefined && resumedOutcomes.anchors.size > 0) {
       initialState[RESUME_STAGE_OUTCOMES] = resumedOutcomes;
     }
   }

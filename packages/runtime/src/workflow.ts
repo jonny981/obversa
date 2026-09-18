@@ -1,4 +1,4 @@
-import { createHash } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 
 import { modelIdentity, type TeamSeat } from '@obversa/api';
 import { readFileSync } from 'node:fs';
@@ -15,6 +15,7 @@ import { loop } from './core/loop.js';
 import { reviewPanel } from './core/feedback.js';
 import type { Job, JobContext, Outcome, ConditionInput } from './core/types.js';
 import { RESUME_STAGE_OUTCOMES } from './runtime/runner.js';
+import type { ResumedStageRecords } from './runtime/persist.js';
 
 import { outcomeFromAgentText } from './workflow-agent-response.js';
 import {
@@ -47,6 +48,8 @@ export interface WorkflowStageBase {
   readonly needs?: string | readonly string[];
   readonly sendsBackTo?: string;
   readonly retry?: number;
+  /** An interrupted attempt may run again without a person's reconciliation. */
+  readonly retrySafe?: boolean;
 }
 
 export type WorkflowStage = WorkflowStageBase & {
@@ -712,29 +715,37 @@ function resumeIdentity(name: string, config: WorkflowConfig): string {
   return createHash('sha256').update(JSON.stringify(declared)).digest('hex');
 }
 
-/** Wrap a stage job with the resume guard: a resuming run skips a stage
- * whose recorded completion carries this workflow's identity, re-runs an
- * interrupted or changed stage, and attaches the identity to its own
- * passing completion so the NEXT resume can skip it. */
-function resumeGuard(job: Job, identity: string, _label: string): Job {
+/** Reuse a completed first attempt, or reconcile an unsafe interrupted one. */
+function resumeGuard(job: Job, identity: string, label: string, retrySafe: boolean): Job {
   return async (ctx) => {
-    const resumed = ctx.state[RESUME_STAGE_OUTCOMES] as ReadonlyMap<string, Outcome> | undefined;
-    if (resumed !== undefined) {
-      const recorded = resumed.get(ctx.path.join('/'));
-      const recordedIdentity = (recorded?.data as { resumeIdentity?: unknown } | undefined)?.resumeIdentity;
-      if (recorded !== undefined && recordedIdentity === identity) {
-        return recorded;
-      }
-      if (recorded !== undefined && recorded.status === 'paused') {
-        // A paused gate stays a cheap no-op while its question is still
-        // pending unanswered: exit at once, no re-post, no model call.
-        const request = (recorded.data as { requestId?: string } | undefined);
+    const resumed = ctx.state[RESUME_STAGE_OUTCOMES] as ResumedStageRecords | undefined;
+    const parentPath = ctx.path.slice(0, -1).join('/');
+    const anchor = resumed?.anchors.get(parentPath);
+    const recorded = anchor?.identity === identity && anchor.workspace === ctx.workspace.dir
+      ? resumed?.stages.get(ctx.path.join('/'))
+      : undefined;
+    if (ctx.graph?.attempt === 1 && recorded !== undefined) {
+      if (recorded.kind === 'interrupted') {
+        if (!retrySafe) return reconcileInterrupted(ctx, label, identity, anchor!.recordId, recorded.startLine);
+      } else if (recorded.outcome.status === 'pass'
+          || (recorded.outcome.status === 'fail'
+            && (recorded.outcome.data as { resumeReconciliation?: boolean } | undefined)?.resumeReconciliation === true)) {
+        return recorded.outcome;
+      } else if (recorded.outcome.status === 'paused') {
+        const request = recorded.outcome.data as {
+          requestId?: string;
+          resumeReconciliation?: boolean;
+          input?: { startLine?: number };
+        } | undefined;
         const pending = ctx.callbacks === undefined
           ? []
           : await ctx.callbacks.listPending();
         if (request?.requestId !== undefined
             && pending.some((candidate) => candidate.requestId === request.requestId)) {
-          return recorded;
+          return recorded.outcome;
+        }
+        if (request?.resumeReconciliation === true && request.input?.startLine !== undefined) {
+          return reconcileInterrupted(ctx, label, identity, anchor!.recordId, request.input.startLine);
         }
       }
     }
@@ -743,6 +754,20 @@ function resumeGuard(job: Job, identity: string, _label: string): Job {
       ? { ...outcome, data: { ...(outcome.data ?? {}), resumeIdentity: identity } }
       : outcome;
   };
+}
+
+async function reconcileInterrupted(
+  ctx: JobContext,
+  label: string,
+  identity: string,
+  recordId: string,
+  startLine: number,
+): Promise<Outcome> {
+  const outcome = await approval(`reconcile ${label}`, {
+    question: `Did stage "${label}" finish? Approve to continue without running it again; refuse if it did not finish.`,
+    input: { identity, workspace: ctx.workspace.dir, stage: label, recordId, startLine },
+  })(ctx);
+  return { ...outcome, data: { ...(outcome.data ?? {}), resumeReconciliation: true } };
 }
 
 export function workflow(name: string, config: WorkflowConfig): Job {
@@ -779,6 +804,9 @@ export function workflow(name: string, config: WorkflowConfig): Job {
     }
     retryForStage(stageConfig, incomingTargets.has(stageName));
     optionalFlag(stageConfig.optional);
+    if (stageConfig.retrySafe !== undefined && typeof stageConfig.retrySafe !== 'boolean') {
+      throw new TypeError('retrySafe must be a boolean');
+    }
     writesOf(stageConfig);
   }
   for (const [index, named] of config.stages.entries()) {
@@ -857,7 +885,7 @@ export function workflow(name: string, config: WorkflowConfig): Job {
       panelFamilyTargets.map((candidate) => seatIdentity(seatRole(config.roles, candidate.config.agent)).modelFamily),
     );
     return [named.name, {
-      job: copyJobMeta(resumeGuard(innerStage, stageJobIdentity, named.name), innerStage),
+      job: copyJobMeta(resumeGuard(innerStage, stageJobIdentity, named.name, stageConfig.retrySafe === true), innerStage),
       needs: stageDependencies(config.stages, index),
       ...(named.config.desc === undefined ? {} : { desc: named.config.desc }),
       ...(named.config.gate === undefined ? {} : { gate: named.config.gate }),
@@ -871,11 +899,26 @@ export function workflow(name: string, config: WorkflowConfig): Job {
     nodes,
     ...(Object.keys(maxKickbacks).length ? { maxKickbacks } : {}),
   });
+  const resumeGraph = copyJobMeta(async (ctx: JobContext) => {
+    const prior = (ctx.state[RESUME_STAGE_OUTCOMES] as ResumedStageRecords | undefined)
+      ?.anchors.get([...ctx.path, workflowName].join('/'));
+    ctx.emit({
+      kind: 'workflow:start',
+      ts: Date.now(),
+      path: [...ctx.path, workflowName],
+      identity: stageJobIdentity,
+      workspace: ctx.workspace.dir,
+      recordId: prior?.identity === stageJobIdentity && prior.workspace === ctx.workspace.dir
+        ? prior.recordId ?? randomUUID()
+        : randomUUID(),
+    });
+    return graph(ctx);
+  }, graph);
   const always = config.post?.always;
-  if (!always) return graph;
+  if (!always) return resumeGraph;
   return loop({
     name: `${workflowName}-post`,
-    body: graph,
+    body: resumeGraph,
     until: predicate(() => true, 'workflow complete'),
     max: 1,
     onComplete: async (outcome, ctx) => {

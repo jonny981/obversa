@@ -55,12 +55,21 @@ step that was mid-flight when the worker died runs again only if its
 binding declares it safe to retry; otherwise the run pauses and asks a
 person to reconcile it before it continues, so uncertain work is never
 repeated silently. The file shown above is a plain run's record, written
-where you point `recordTo`; starting a plain run again does not resume it.
-See [the runner](/driving/runner).
+where you point `recordTo`; starting the same workflow again with
+`resume: true` reads this file and carries on from it.
 
-A plain `run()` from the runtime package does not restart anything: it opens
-a fresh record each time it starts, so the examples that call it show the
-shape of a team, not a restart. The restart is the runner's job.
+A plain `run()` opens a fresh record each time it starts. With `resume: true`
+it reads the record at `recordTo` first. For a job built with `workflow()`, a
+stage that finished is skipped. A stage that failed runs again. A gate still
+waiting for a person is observed, and the run exits with the recorded pause,
+so a run started on a schedule asks once and never twice. A stage that was
+mid-flight when the process died runs again only when it carries
+`retrySafe: true`; otherwise the run pauses and asks a person to reconcile
+it. The record applies to the same workflow name, workspace, brief and stage
+list; a changed brief starts again. Any other job passed `resume: true`
+appends to that record and runs again. The supervised runner restarts a
+killed run for you. `resume: true` is how a workflow you start yourself, or a
+schedule starts for you, carries on.
 
 ## Why there is nothing to install beside it
 

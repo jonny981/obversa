@@ -139,7 +139,7 @@ console.log(JSON.stringify(result.outcome, null, 2));
 | A review that sends work back | Control flow you write in the workflow. | Built in: a review role sends the work back to the stage that owns it, with findings, up to a budget. |
 | A person deciding | A signal the workflow waits for. | A person role; the run pauses on the question and the answer arrives through the callbacks client. |
 | More than one provider | Inside your activities, with a client library. | Each role names its engine; a review seat from another provider is one line. |
-| A run that survives a crash | Event history and replay; the run continues from the exact point. | A plain run records to a file and does not resume. The supervised runner restarts a compiled graph from its own record. |
+| A run that survives a crash | Event history and replay; the run continues from the exact point. | A run records to a file; a workflow started again with `resume: true` carries on from that record and repeats nothing that finished. The supervised runner restarts a compiled graph from its own record. |
 | Where it runs | A service you run or rent, plus your workers. | A library, no server. |
 | Languages | Eight SDKs, TypeScript among them. | TypeScript. |
 

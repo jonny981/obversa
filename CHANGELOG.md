@@ -18,10 +18,12 @@ other published package tracks its own version independently of it.
   that state, never the record file, so the teams layer imports only the
   public surface.
   Stages whose passing completion is recorded under the same declared
-  shape are skipped, interrupted stages re-run, a changed brief restarts
-  from the top, and a person gate re-posts at its recorded position. A
-  resume that finds the gate still pending unanswered exits with the
-  still-waiting code at once: it reads the record, observes the pending
+  shape are skipped; a changed brief restarts from the top. For a job built
+  with `workflow()`, a stage that was mid-flight when the process died runs
+  again only when it carries `retrySafe: true`; otherwise the run pauses
+  and asks a person to reconcile it, so uncertain work is never repeated
+  silently. A resume that finds the gate still pending unanswered exits
+  with the still-waiting code at once: it reads the record, observes the pending
   request through the callbacks client, and sends nothing - no model
   call, no second notification. Two processes resuming one record at once
   is out of scope.

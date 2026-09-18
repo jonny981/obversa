@@ -10,23 +10,27 @@ const NOISE: ReadonlySet<LoopEvent['kind']> = new Set([
 
 interface RecorderOptions {
   thin?: boolean;
-  /** Append to the existing record instead of truncating it, and return
-   * the stage outcomes it already holds so a resuming run can skip
-   * completed work. */
+  /** Append to the existing record instead of truncating it. */
   resume?: boolean;
 }
 
-/** The stage outcomes a record already holds, keyed by the job path that
- * produced them. Built from the job:end events of a prior run. */
-export type ResumedStageOutcomes = ReadonlyMap<string, Outcome>;
+export type RecordedStage =
+  | { readonly kind: 'interrupted'; readonly startLine: number }
+  | { readonly kind: 'completed'; readonly outcome: Outcome };
 
-/** Read a record's job:end events into a path-keyed outcome map. A record
- * that does not exist, or one with no job:end events, yields an empty map:
- * resume over nothing is a fresh run. */
-export function readStageOutcomes(path: string): ResumedStageOutcomes {
-  if (!existsSync(path)) return new Map();
-  const outcomes = new Map<string, Outcome>();
-  for (const line of readFileSync(path, 'utf8').split(/\r?\n/)) {
+export interface ResumedStageRecords {
+  readonly anchors: ReadonlyMap<string, { readonly identity: string; readonly workspace: string; readonly recordId: string }>;
+  readonly stages: ReadonlyMap<string, RecordedStage>;
+}
+
+/** Read each workflow's identity, workspace, and latest stage state.
+ * A missing record has no stage state, so resume starts fresh. */
+export function readStageOutcomes(path: string): ResumedStageRecords {
+  const anchors = new Map<string, { identity: string; workspace: string; recordId: string }>();
+  const stages = new Map<string, RecordedStage>();
+  if (!existsSync(path)) return { anchors, stages };
+  const lines = readFileSync(path, 'utf8').split(/\r?\n/);
+  for (const [lineNumber, line] of lines.entries()) {
     if (!line) continue;
     let event: LoopEvent;
     try {
@@ -34,15 +38,23 @@ export function readStageOutcomes(path: string): ResumedStageOutcomes {
     } catch {
       continue;
     }
-    if (event.kind === 'job:end') {
-      outcomes.set(event.path.join('/'), event.outcome);
-    } else if (event.kind === 'dag:node' && event.outcome !== undefined) {
-      // The dag records the node job's own return, which carries the
-      // workflow's resume identity when the declarative guard attached it.
-      outcomes.set([...event.path, event.node].join('/'), event.outcome);
+    if (event.kind === 'workflow:start') {
+      const key = event.path.join('/');
+      const prior = anchors.get(key);
+      if (prior?.identity !== event.identity || prior.workspace !== event.workspace) {
+        const prefix = key ? `${key}/` : '';
+        for (const stage of stages.keys()) {
+          if (stage.startsWith(prefix)) stages.delete(stage);
+        }
+      }
+      anchors.set(key, { identity: event.identity, workspace: event.workspace, recordId: event.recordId });
+    } else if (event.kind === 'dag:node') {
+      const key = [...event.path, event.node].join('/');
+      if (event.phase === 'start') stages.set(key, { kind: 'interrupted', startLine: lineNumber });
+      else if (event.outcome !== undefined) stages.set(key, { kind: 'completed', outcome: event.outcome });
     }
   }
-  return outcomes;
+  return { anchors, stages };
 }
 
 function ensureDir(path: string): void {

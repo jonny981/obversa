@@ -138,7 +138,7 @@ console.log(JSON.stringify(result.outcome, null, 2));
 | A review that sends work back | A subagent can be asked to review; sending work back is direction you give. | Built in: a review role sends the work back to the stage that owns it, with findings, up to a budget. |
 | A person deciding | Permission prompts at tool calls; plan mode. | A person role; the run pauses on the question and the answer arrives through the callbacks client. |
 | More than one provider | The Claude family. | Claude, OpenAI, xAI and OpenCode's providers, one per role. |
-| A run that survives a crash | Transcripts on disk; a subagent can be resumed. | A plain run records to a file and does not resume. The supervised runner restarts a compiled graph from its own record. |
+| A run that survives a crash | Transcripts on disk; a subagent can be resumed. | A run records to a file; a workflow started again with `resume: true` carries on from that record and repeats nothing that finished. The supervised runner restarts a compiled graph from its own record. |
 | Where it runs | Inside Claude Code, on your machine. | A library, no server, on your machine. |
 | How it is written | Markdown with front matter. | TypeScript. |
 

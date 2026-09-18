@@ -274,10 +274,11 @@ Four words carry most of the docs, and each has a page:
 - **It is a library, not a service.** You write a TypeScript file and run
   it with Node. There is no daemon and no dashboard to sign into.
 - **Two kinds of example.** The three teams run real engine plugins and their pages show what a real run printed. The single-mechanism pages run offline against small functions so the shape is the only thing on show.
-- **A plain run does not resume.** Resume belongs to the supervised runner,
-  which drives a graph definition through a host module rather than a
-  `run` file; the [recording](/recording/how-a-run-is-recorded) page says
-  which layer does what, so you are not surprised by it.
+- **A workflow resumes when you pass `resume: true`.** For a job built with
+  `workflow()`, `run()` then carries on from the record at `recordTo`:
+  finished stages are not repeated and a waiting gate is not asked twice. The
+  [recording](/recording/how-a-run-is-recorded) page says what is repeated
+  and what is not.
 
 ## Where to go next
 

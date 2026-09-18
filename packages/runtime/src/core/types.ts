@@ -157,6 +157,8 @@ export interface RevisionRequest {
 export interface GraphPosition {
   dag: string;
   node: string;
+  /** Which run of this node the DAG is executing, starting at 1. */
+  attempt?: number;
   path: readonly string[];
   needs: readonly string[];
   dependents: readonly string[];
@@ -510,6 +512,14 @@ export interface ProofRecord {
 export type ConditionKind = 'start' | 'until' | 'stopOn';
 
 export type LoopEvent =
+  | {
+      kind: 'workflow:start';
+      ts: number;
+      path: string[];
+      identity: string;
+      workspace: string;
+      recordId: string;
+    }
   | {
       kind: 'loop:start';
       ts: number;

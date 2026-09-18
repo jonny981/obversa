@@ -141,7 +141,7 @@ console.log(JSON.stringify(result.outcome, null, 2));
 | A review that sends work back | A guardrail retries the same task; routing back to an earlier step is flow logic you write. | Built in: a review role sends the work back to the stage that owns it, with findings, up to a budget. |
 | A person deciding | `human_input=True`, or the webhook flow that pauses the run. | A person role; the run pauses on the question and the answer arrives through the callbacks client. |
 | More than one provider | Each agent takes its own model; many providers supported. | Each role names its engine; a review seat from another provider is one line. |
-| A run that survives a crash | Checkpointing restores a run mid-flight. | A plain run records to a file and does not resume. The supervised runner restarts a compiled graph from its own record. |
+| A run that survives a crash | Checkpointing restores a run mid-flight. | A run records to a file; a workflow started again with `resume: true` carries on from that record and repeats nothing that finished. The supervised runner restarts a compiled graph from its own record. |
 | Where it runs | A library, with a paid hosted platform on offer. | A library, no server. |
 | Languages | Python. | TypeScript. |
 

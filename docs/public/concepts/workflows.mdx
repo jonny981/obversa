@@ -178,10 +178,15 @@ of your own over the public contract, see
   target the map does not name gets none. When a budget runs out, the run
   fails with the last findings rather than looping, and every request is in
   the record with its count and its limit.
-- **A plain run does not resume.** `run()` starts a fresh record each time.
-  The supervised runner restarts a killed run, and it takes a graph
-  definition with a host module, not a workflow file. See
-  [driving runs](/driving/runner).
+- **A workflow resumes when you pass `resume: true`.** For a job built with
+  `workflow()`, `run()` reads the record at `recordTo` and carries on. A
+  stage that finished is not repeated. A stage that failed runs again. A gate
+  still waiting for a person is observed, and the run exits with the recorded
+  pause instead of asking twice. A stage that was mid-flight when the process
+  died runs again only when it carries `retrySafe: true`; otherwise the run
+  pauses and asks a person to reconcile it. A changed brief starts the
+  workflow again. See
+  [how a run is recorded](/recording/how-a-run-is-recorded).
 
 ## Where definitions live
 
