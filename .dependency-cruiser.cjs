@@ -32,7 +32,7 @@ module.exports = {
       to: {
         couldNotResolve: true,
         // The browser page imports ./surface-client.mjs as a URL; the
-        // surfacer serves that module over HTTP at runtime, so it has no
+        // surface-decision serves that module over HTTP at runtime, so it has no
         // file beside the page source. This exact specifier only.
         pathNot: '^\\./surface-client\\.mjs$',
       },
@@ -45,7 +45,7 @@ module.exports = {
       from: { path: '^examples/' },
       to: {
         couldNotResolve: true,
-        pathNot: '^@obversa/(engine|engine-agent-sdk|engine-anthropic-api|engine-claude-cli|engine-codex|engine-grok-cli|engine-opencode-cli|memory|memory-git|memory-simple|process|runner|runtime|source|surfacer|teams)(/|$)',
+        pathNot: '^@obversa/(api|builtin-workflows|core|engine-anthropic-api|engine-claude-agent-sdk|engine-claude-cli|engine-codex-cli|engine-grok-cli|engine-opencode-cli|memory-git|memory-simple|runner|runtime|surface-decision|surface-diff)(/|$)',
       },
     },
     {

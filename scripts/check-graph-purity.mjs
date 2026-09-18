@@ -371,7 +371,7 @@ function forbiddenReason(specifier, sourceFile) {
   if (specifier === '@obversa/api') {
     return 'only reviewed named imports are allowed';
   }
-  if (specifier.startsWith('@obversa/memory')) {
+  if (specifier.startsWith('@obversa/memory-')) {
     return 'memory adapters are outside the graph core';
   }
 
