@@ -86,6 +86,13 @@
             "pages": [
               "workflows/translate-reflect"
             ]
+          },
+          {
+            "group": "Coming soon",
+            "tag": "Coming soon",
+            "pages": [
+              "coming-soon/more-examples"
+            ]
           }
         ]
       },
@@ -94,7 +101,14 @@
         "pages": [
           "reviewing/callback-gates",
           "reviewing/review-loop",
-          "reviewing/proof-acceptance"
+          "reviewing/proof-acceptance",
+          {
+            "group": "Coming soon",
+            "tag": "Coming soon",
+            "pages": [
+              "coming-soon/preview-gate"
+            ]
+          }
         ]
       },
       {
@@ -117,6 +131,15 @@
             "tag": "Coming soon",
             "pages": [
               "driving/remote-nodes"
+            ]
+          },
+          {
+            "group": "Coming soon",
+            "tag": "Coming soon",
+            "pages": [
+              "coming-soon/fast-and-deliberate",
+              "coming-soon/supervision",
+              "coming-soon/observation-port"
             ]
           }
         ]
@@ -186,7 +209,14 @@
           "packages/engine-claude-agent-sdk",
           "packages/engine-anthropic-api",
           "packages/memory-git",
-          "packages/memory-simple"
+          "packages/memory-simple",
+          {
+            "group": "Coming soon",
+            "tag": "Coming soon",
+            "pages": [
+              "coming-soon/decision-model-engine"
+            ]
+          }
         ]
       }
     ]

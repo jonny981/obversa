@@ -1,0 +1,24 @@
+---
+title: "A decision model as an engine"
+description: "A model that returns one typed choice with its confidence, answering the three places a run already asks for a number."
+---
+
+<Note>
+**Coming soon.** Not in this release. This page says what the feature is,
+so that the shape is public before the code is.
+</Note>
+
+A run already asks for numbers in three places. A branch reads a
+route and a score to choose a path. A confidence gate decides whether a
+result is good enough to pass. An advisor is consulted part-way through and
+its answer changes what happens next.
+
+Today each of those is answered by a model that writes prose, and the
+runtime reads a number back out of the words. That works, and it costs a
+full turn of inference every time.
+
+A decision model answers directly: one choice from a set declared in
+advance, with a confidence attached. The same three places, the same
+contract, without the round trip through prose.
+
+See [Conditions and gates](/graphs/contract).

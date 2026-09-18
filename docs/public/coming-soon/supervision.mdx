@@ -1,0 +1,24 @@
+---
+title: "Supervision while a step runs"
+description: "The attempt's own events feed a fast decision model on a debounce, and the run carries on, stops and retries, or puts the step to a person."
+---
+
+<Note>
+**Coming soon.** Not in this release. This page says what the feature is,
+so that the shape is public before the code is.
+</Note>
+
+Every gate this runtime ships sits between steps. A step finishes,
+something judges the result, and the run moves on. That leaves one case
+unanswered: a step that is going nowhere, half an hour into an hour's
+budget.
+
+A supervised step is watched while it works. Its own events feed a fast
+decision model on a debounce, which answers a few typed questions, and the
+run carries on, stops and retries, or puts the step in front of a person.
+
+The step does not pause to be assessed. The work keeps going while the
+judgement happens beside it, and a run that has lost its way costs a
+fraction of its budget instead of all of it.
+
+See [How a run is recorded](/recording/how-a-run-is-recorded).
