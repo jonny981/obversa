@@ -298,5 +298,11 @@
       "source": "/packages/engine-agent-sdk",
       "destination": "/packages/engine-claude-agent-sdk"
     }
-  ]
+  ],
+  "integrations": {
+    "posthog": {
+      "apiKey": "phc_B2TZ6ACgt3DgnkJ2TgLd6wfv3X3TNF3RRSjUTFNXXd47",
+      "apiHost": "https://eu.i.posthog.com"
+    }
+  }
 }
