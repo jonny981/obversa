@@ -141,6 +141,7 @@ describe('public runtime API', () => {
       'finalResultText',
       'fnJob',
       'formatCostReport',
+      'formatEvent',
       'formatPreflight',
       'fromFile',
       'gateJob',

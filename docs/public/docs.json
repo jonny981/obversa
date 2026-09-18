@@ -54,17 +54,42 @@
         "group": "Examples",
         "pages": [
           "workflows/index",
-          "workflows/writer-and-reviewer",
-          "workflows/review-panel",
-          "workflows/feature-team",
-          "workflows/tournament",
-          "workflows/command-kickback",
-          "workflows/approval",
-          "workflows/team-conversation",
-          "workflows/offline-review",
-          "workflows/safe-change",
-          "workflows/feature-delivery",
-          "workflows/forge-helper"
+          {
+            "group": "Software and product engineering",
+            "pages": [
+              "workflows/writer-and-reviewer",
+              "workflows/review-panel",
+              "workflows/feature-team",
+              "workflows/tournament",
+              "workflows/command-kickback",
+              "workflows/approval",
+              "workflows/team-conversation",
+              "workflows/offline-review",
+              "workflows/safe-change",
+              "workflows/feature-delivery",
+              "workflows/forge-helper",
+              "workflows/backlog-groom-then-rank"
+            ]
+          },
+          {
+            "group": "Business and commercial",
+            "pages": [
+              "workflows/contract-playbook"
+            ]
+          },
+          {
+            "group": "Other",
+            "pages": [
+              "workflows/translate-reflect"
+            ]
+          },
+          {
+            "group": "Coming soon",
+            "tag": "Coming soon",
+            "pages": [
+              "coming-soon/more-examples"
+            ]
+          }
         ]
       },
       {
@@ -72,7 +97,14 @@
         "pages": [
           "reviewing/callback-gates",
           "reviewing/review-loop",
-          "reviewing/proof-acceptance"
+          "reviewing/proof-acceptance",
+          {
+            "group": "Coming soon",
+            "tag": "Coming soon",
+            "pages": [
+              "coming-soon/preview-gate"
+            ]
+          }
         ]
       },
       {
@@ -89,7 +121,23 @@
           "driving/runner",
           "driving/monitor",
           "hosts/cmux",
-          "hosts/review"
+          "hosts/review",
+          {
+            "group": "Remote nodes",
+            "tag": "Coming soon",
+            "pages": [
+              "driving/remote-nodes"
+            ]
+          },
+          {
+            "group": "Coming soon",
+            "tag": "Coming soon",
+            "pages": [
+              "coming-soon/fast-and-deliberate",
+              "coming-soon/supervision",
+              "coming-soon/observation-port"
+            ]
+          }
         ]
       },
       {
@@ -157,7 +205,14 @@
           "packages/engine-claude-agent-sdk",
           "packages/engine-anthropic-api",
           "packages/memory-git",
-          "packages/memory-simple"
+          "packages/memory-simple",
+          {
+            "group": "Coming soon",
+            "tag": "Coming soon",
+            "pages": [
+              "coming-soon/decision-model-engine"
+            ]
+          }
         ]
       }
     ]
@@ -239,5 +294,11 @@
       "source": "/packages/engine-agent-sdk",
       "destination": "/packages/engine-claude-agent-sdk"
     }
-  ]
+  ],
+  "integrations": {
+    "posthog": {
+      "apiKey": "phc_B2TZ6ACgt3DgnkJ2TgLd6wfv3X3TNF3RRSjUTFNXXd47",
+      "apiHost": "https://eu.i.posthog.com"
+    }
+  }
 }

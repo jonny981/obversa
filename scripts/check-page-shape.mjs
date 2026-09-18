@@ -141,6 +141,34 @@ const KNOWN_DEBT = [
     why: 'one fragment: the provider constructed and never used',
   },
   {
+    page: 'coming-soon/fast-and-deliberate.mdx', fault: 'example', owner: 'F81',
+    why: 'the page ships before the code, tagged coming soon, so there is nothing a reader can run yet; the stage that builds the feature brings the example with it',
+  },
+  {
+    page: 'coming-soon/decision-model-engine.mdx', fault: 'example', owner: 'F79',
+    why: 'the page ships before the code, tagged coming soon, so there is nothing a reader can run yet; the stage that builds the feature brings the example with it',
+  },
+  {
+    page: 'coming-soon/supervision.mdx', fault: 'example', owner: 'F82',
+    why: 'the page ships before the code, tagged coming soon, so there is nothing a reader can run yet; the stage that builds the feature brings the example with it',
+  },
+  {
+    page: 'coming-soon/observation-port.mdx', fault: 'example', owner: 'F61',
+    why: 'the page ships before the code, tagged coming soon, so there is nothing a reader can run yet; the stage that builds the feature brings the example with it',
+  },
+  {
+    page: 'coming-soon/preview-gate.mdx', fault: 'example', owner: 'F69',
+    why: 'the page ships before the code, tagged coming soon, so there is nothing a reader can run yet; the stage that builds the feature brings the example with it',
+  },
+  {
+    page: 'coming-soon/more-examples.mdx', fault: 'example', owner: 'F74',
+    why: 'the page ships before the code, tagged coming soon, so there is nothing a reader can run yet; the stage that builds the feature brings the example with it',
+  },
+  {
+    page: 'driving/remote-nodes.mdx', fault: 'example', owner: 'F37',
+    why: 'the page ships before the code, tagged coming soon, so there is nothing a reader can run yet; the stage that builds remote nodes brings the example with it',
+  },
+  {
     page: 'graphs/plan-admission.mdx', fault: 'example', owner: 'D35',
     why: 'a reference page with no quotable call, which is the fault a reference can least afford',
   },

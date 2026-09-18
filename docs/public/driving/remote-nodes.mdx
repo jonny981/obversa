@@ -1,0 +1,51 @@
+---
+title: "Run one step on another machine"
+description: "One step of a run executes on a remote machine while the orchestrator and the record stay on yours, and the change comes back as a commit or a patch."
+---
+
+<Note>
+**Coming soon.** Not in this release. This page describes where the
+runtime is going, so that the shape is public before the code is.
+</Note>
+
+A run is a graph of steps, and the steps are not alike. Most of them are
+cheap: a command that runs your tests, a condition that reads a file, a
+question that waits for a person. One or two are not: the step that builds
+the image, the step that runs the suite that takes an hour, the step that
+needs a machine larger than the one on your desk.
+
+A remote node moves one of those steps and nothing else. One step executes
+on another machine. The orchestrator stays where you started it, the event
+record is written where it always was, and the change the step made comes
+back as a commit or a patch rather than as a filesystem you have to keep
+in sync.
+
+## What stays local
+
+The parts that make a run inspectable do not move.
+
+- **The graph and its decisions.** What runs next, what sends work back,
+  what a review concluded: all of it is decided and recorded locally, so
+  the record of the run is one file on one machine rather than a
+  correlation problem across several.
+- **The approvals.** A question for a person is answered where the person
+  is.
+- **The workspace you can read afterwards.** The remote step's change
+  arrives as a commit, so what it did is reviewable the same way any other
+  change is, by anyone, later, without the machine that made it.
+
+## Why a commit rather than a shared filesystem
+
+A mounted or synchronised filesystem makes the remote step feel local
+until it does not: a partial write during a network stall is a workspace
+nobody can explain afterwards. A commit is atomic, it carries its own
+description, and it is the artefact the rest of this runtime already
+records against. The step either produced one or it did not.
+
+## What it does not do
+
+It does not distribute a run. The graph is not sharded across machines and
+steps do not migrate for load; one named step is given a place to execute
+and everything else is unchanged. A run whose remote machine is
+unreachable fails that step where it stands, with the reason on the
+record, rather than continuing somewhere else quietly.

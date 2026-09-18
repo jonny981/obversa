@@ -1,0 +1,80 @@
+import { claude } from '@obversa/engine-claude-cli';
+import { codex } from '@obversa/engine-codex-cli';
+import {
+  briefFromFile,
+  formatEvent,
+  person,
+  run,
+  stage,
+  workflow,
+  type TeamSeat,
+} from '@obversa/runtime';
+
+interface BacklogGroomEngines {
+  readonly claude: (model: string) => TeamSeat;
+  readonly codex: (model: string) => TeamSeat;
+}
+
+const realEngines: BacklogGroomEngines = { claude, codex };
+
+/**
+ * Backlog grooming, then a person ranks. The raw tickets are whatever the
+ * week left behind: support threads, a sales ask, a one-line wish. One
+ * model turns each into stories with acceptance checks and a model from
+ * another family reads them back against the raw tickets; the same pair
+ * writes down the questions that must be settled before anyone codes.
+ * Then the product owner ranks. Nothing here writes code: the work is
+ * deciding what is worth writing.
+ */
+function createBacklogGroom(engines: BacklogGroomEngines = realEngines) {
+  return workflow('backlog-groom-then-rank', {
+    brief: briefFromFile('briefs/backlog.md'),
+    options: { timeout: '10m' },
+
+    roles: {
+      groom: engines.claude('claude-sonnet-4-5'),
+      'story-review': [engines.codex('gpt-5.6-luna')],
+      owner: person('Which of these go into the next cycle, and in what order?'),
+    },
+
+    stages: [
+      stage('split', {
+        agent: 'groom',
+        writes: 'backlog/stories.md',
+        desc: 'Turn every raw ticket in backlog/raw.md into one or more stories, each with its acceptance checks and the ticket it came from.',
+        gate: 'Every raw ticket is covered by at least one story and a reviewer from another family has accepted the set.',
+        reviewedBy: 'story-review',
+        // Three attempts, not two: the allowance matches how open-ended the
+        // work is. Grooming a backlog has many defensible answers, so a strict
+        // reviewer and a writer need room to meet. Work with one right answer
+        // needs less.
+        retry: 3,
+      }),
+
+      stage('clarify', {
+        agent: 'groom',
+        writes: 'backlog/questions.md',
+        desc: 'For each story, list the questions that must be answered before anyone writes code, with a proposed answer for each.',
+        gate: 'Every story has its questions, or the line "no open questions", and a reviewer has accepted them.',
+        reviewedBy: 'story-review',
+        // Three attempts, not two: the allowance matches how open-ended the
+        // work is. Grooming a backlog has many defensible answers, so a strict
+        // reviewer and a writer need room to meet. Work with one right answer
+        // needs less.
+        retry: 3,
+      }),
+
+      stage('rank', {
+        input: 'owner',
+        desc: 'Put the stories and the open questions in front of the product owner.',
+        gate: 'The owner has ranked the cycle.',
+        sendsBackTo: 'split',
+      }),
+    ],
+  });
+}
+
+const result = await run(createBacklogGroom(), {
+  onEvent: (event) => console.log(formatEvent(event)),
+});
+console.log(JSON.stringify(result.outcome, null, 2));

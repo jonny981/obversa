@@ -41,6 +41,20 @@ other published package tracks its own version independently of it.
   produces no commit and no body.
 
 - **One identity derivation for every harness that runs other providers' models:** `@obversa/api` exports `modelIdentity`, which reads the provider and model family from the model string a harness was given, or refuses a string with no readable family. The OpenCode adapter derives its seat identity through it, and the review gate reads recorded models through the same function, so two seats on one model wearing different tool names cannot pass as a cross-family panel.
+- **Watch a run without writing a formatter:** `@obversa/runtime` exports
+  `formatEvent`, which turns one event from `onEvent` into the line a person
+  reads. Every use-case example prints its run through it.
+- **Use-case examples outside software delivery:** Three complete
+  `workflow()` files under `examples/use-cases/`, one per kind of work:
+  grooming a backlog so a person can rank it, reading a contract against a
+  playbook so a lawyer can send redlines, and translating an article
+  against a glossary so a person can publish it. Each ends at a person, so
+  a run stops before anything is sent or filed, and each page shows what
+  one real run of that file printed, its events and its usage lines
+  included. The grooming run did not finish: a reviewer from another
+  family sent the stories back three times with real problems and the loop
+  reached its allowance and stopped, which is on its page because a loop
+  that halts rather than passing on unfinished work is the loop behaving.
 - **Recorded model families:** The runtime exports `RECORDED_ENGINE_USAGE`,
   the shared state key under which every agent job's engine answer is
   recorded beside its job path, and the declarative panel guard reads

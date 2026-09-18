@@ -2,7 +2,7 @@
 
 import { CONSUMER_EXAMPLES } from './consumer-examples.mjs';
 import assert from 'node:assert/strict';
-import { access, copyFile, mkdtemp, mkdir, readFile, rm, writeFile } from 'node:fs/promises';
+import { access, copyFile, cp, mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { basename, dirname, isAbsolute, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -813,6 +813,10 @@ async function main() {
     await copyFile(join(root, 'examples', 'teams', 'threshold-panel.proof.ts'), join(consumerDirectory, 'teams', 'threshold-panel.proof.ts'));
     await copyFile(join(root, 'examples', 'teams', 'feature-delivery.ts'), join(consumerDirectory, 'teams', 'feature-delivery.ts'));
     await copyFile(join(root, 'examples', 'teams', 'feature-delivery.proof.ts'), join(consumerDirectory, 'teams', 'feature-delivery.proof.ts'));
+    // The use-case examples travel as a tree: each example sits beside its
+    // proof, its brief and its sample inputs, and the proofs read those files
+    // by their own location.
+    await cp(join(root, 'examples', 'use-cases'), join(consumerDirectory, 'use-cases'), { recursive: true });
 
     run('pnpm', ['install', '--prefer-offline', '--ignore-scripts'], {
       cwd: consumerDirectory,

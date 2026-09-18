@@ -478,6 +478,9 @@ larger teams.
 - **`briefFromFile(path)`.** A brief kept as a markdown file beside the code.
   Its body is the brief; front matter may carry `files`, the paths the
   brief expects written.
+- **`formatEvent(event)`.** One event of a run, as the line a person reads.
+  `run` hands every event to `onEvent` as data; pass it through this to watch
+  a run narrate itself without writing a formatter first.
 - **Ready-made recipes** live in [builtin-workflows](/packages/builtin-workflows):
   `writerReviewerPair`, `thresholdPanel` and `featureDelivery`.
 - **`outcomeFromAgentText` from `@obversa/runtime/workflow-support`.**

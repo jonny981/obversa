@@ -81,6 +81,7 @@ export const stageBranches = {
   F71: 'fix/opencode-admission-boot-window',
   F72: 'feat/shared-family-derivation',
   F77: 'fix/kit-fixture-boot-window',
+  F73: 'feat/use-case-examples-one',
   F78: 'fix/stand-in-opencode-frames',
   F66: 'feat/api-polish',
   F83: 'fix/proof-budgets-wait-for-a-condition',
