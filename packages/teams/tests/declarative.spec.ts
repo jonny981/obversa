@@ -11,6 +11,7 @@ import {
   stage,
   workflow,
   type WorkflowStage,
+  type TeamSeat,
 } from '../src/index.js';
 import { pass, revise, scriptedEngine, seat } from './scripted-engine.js';
 import { createCallbackClient } from '@obversa/runtime';
@@ -996,6 +997,30 @@ describe('declarative teams', () => {
       const result = await run(job, { cwd: directory });
       expect(result.outcome.status).toBe('pass');
       expect(reviewer.calls).toHaveLength(2);
+      expect(reviewer.calls[0]).toMatchObject({
+        tools: ['read', 'edit', 'bash'],
+        allowedTools: ['read', 'edit', 'bash'],
+        workspaceMode: 'read',
+      });
+    } finally {
+      await rm(directory, { recursive: true, force: true });
+    }
+  });
+
+  it('refuses a declarative panel reviewer without read tools before the engine runs', async () => {
+    const directory = await mkdtemp(join(tmpdir(), 'obversa-f49-panel-'));
+    const reviewer = scriptedEngine('reviewer', [async () => '{"status":"pass"}']);
+    const reviewerSeat: TeamSeat = {
+      ...seat(reviewer, 'reviewer'),
+      identity: { ...seat(reviewer, 'reviewer').identity, tools: [] },
+    };
+    try {
+      expect(() => workflow('blind-panel', {
+        brief: 'Review the change.',
+        roles: { review: [reviewerSeat] },
+        stages: [stage('review', { panel: 'review', agree: 1 })],
+      })).toThrow(/reviewer.*tools/);
+      expect(reviewer.calls).toHaveLength(0);
     } finally {
       await rm(directory, { recursive: true, force: true });
     }

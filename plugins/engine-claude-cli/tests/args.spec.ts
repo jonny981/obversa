@@ -55,6 +55,11 @@ describe('buildClaudeArgs', () => {
     expect(args[args.indexOf('--tools') + 1]).toBe('');
   });
 
+  it('refuses a read workspace without declared tools', () => {
+    expect(() => buildClaudeArgs({ prompt: 'review', tools: [], workspaceMode: 'read' }, {}))
+      .toThrow('read workspace requires at least one declared tool');
+  });
+
   it('strips Claude Code long-context suffixes before passing --model', () => {
     const args = buildClaudeArgs(
       { prompt: 'go', model: 'claude-fable-5 [1m]' },

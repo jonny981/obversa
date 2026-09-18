@@ -80,16 +80,14 @@ describe('thresholdPanel', () => {
       const reviewers = ['correctness', 'tests', 'scope'].map((name, index) => {
         const engine = scriptedEngine(name, [
           async (request) => {
-            await mkdir(join(request.cwd!, 'reviews'), { recursive: true });
+            expect(request.prompt).not.toContain('Write reviews/');
             const decision = index === 2
               ? pass(`${name} accepted the first implementation`)
               : revise(`${name} requested a repair`, `${name} found a missing requirement`);
-            await writeFile(join(request.cwd!, `reviews/${name}.json`), decision);
             return decision;
           },
-          async (request) => {
+          async () => {
             const decision = pass(`${name} accepted the repair`);
-            await writeFile(join(request.cwd!, `reviews/${name}.json`), decision);
             return decision;
           },
         ]);
@@ -119,7 +117,7 @@ describe('thresholdPanel', () => {
         expect.any(Array),
         expect.any(Array),
       ]);
-      expect(await readFile(join(workspace, 'reviews/correctness.json'), 'utf8')).toContain('"status":"pass"');
+      await expect(readFile(join(workspace, 'reviews/correctness.json'), 'utf8')).rejects.toMatchObject({ code: 'ENOENT' });
     } finally {
       await rm(workspace, { recursive: true, force: true });
     }

@@ -25,6 +25,7 @@ export {
   type EngineConformanceFailure,
   type EngineConformanceFixture,
   type EngineConformanceReport,
+  type EngineAdapterConformanceReport,
   type EngineConformanceScenario,
   type EngineAdmissionConformanceFixture,
   type EngineAdmissionConformanceReport,

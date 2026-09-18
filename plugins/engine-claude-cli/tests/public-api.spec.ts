@@ -29,6 +29,7 @@ describe('@obversa/engine-claude-cli', () => {
       provider: 'anthropic',
       modelFamily: 'claude',
       model: 'claude-sonnet-4-5',
+      tools: ['Read', 'Edit', 'Bash'],
     });
     expect((seat.engine as unknown as { opts: ClaudeCliEngineOptions }).opts.permissionMode)
       .toBe('bypassPermissions');

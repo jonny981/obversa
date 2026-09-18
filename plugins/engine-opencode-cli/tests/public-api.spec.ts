@@ -35,6 +35,7 @@ describe('@obversa/engine-opencode-cli', () => {
       provider: 'opencode',
       modelFamily: 'big',
       model: 'opencode/big-pickle',
+      tools: ['read', 'grep'],
     });
   });
 

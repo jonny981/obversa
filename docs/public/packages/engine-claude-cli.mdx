@@ -37,3 +37,7 @@ Pass the engine instance into the Obversa runtime.
 - Subprocess execution requires a working Claude binary in `PATH` or an explicit `cliBinary` path.
 - The engine depends on local host credentials; it does not take raw API keys in options.
 - The plugin classifies usage limits and rate limits from standard error text.
+- In the `read` and `none` workspace modes the adapter passes Claude a bounded
+  tool list (`Read`, `Grep` and `Glob` for `read`; none for `none`). It
+  disallows `Bash`, `Edit`, `Write`, the sub-agent tools and every MCP tool. A
+  settings file outside the run cannot restore them.

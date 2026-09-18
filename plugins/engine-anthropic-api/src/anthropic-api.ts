@@ -113,6 +113,18 @@ interface MessagesClientLike {
   };
 }
 
+function assertTextOnly(request: Omit<AgentRequest, 'prompt'>): void {
+  if (request.workspaceMode === 'read' || request.workspaceMode === 'write'
+    || (request.tools !== undefined && (!Array.isArray(request.tools) || request.tools.length > 0))
+    || (request.allowedTools !== undefined
+      && (!Array.isArray(request.allowedTools) || request.allowedTools.length > 0))) {
+    throw new EngineError({
+      kind: 'invalid-config',
+      message: 'anthropic-api supports text-only requests without tools or workspace access',
+    });
+  }
+}
+
 export class AnthropicApiEngine implements Engine {
   readonly name = 'anthropic-api';
   private clientPromise?: Promise<MessagesClientLike>;
@@ -149,15 +161,8 @@ export class AnthropicApiEngine implements Engine {
     if (signal.aborted) {
       throw new EngineError({ kind: 'aborted', message: 'anthropic-api admission aborted' });
     }
+    assertTextOnly(request);
     this.apiKey();
-    if ((request.tools !== undefined && (!Array.isArray(request.tools) || request.tools.length > 0))
-      || (request.allowedTools !== undefined
-        && (!Array.isArray(request.allowedTools) || request.allowedTools.length > 0))) {
-      throw new EngineError({
-        kind: 'invalid-config',
-        message: 'anthropic-api admission supports text-only requests without tools',
-      });
-    }
     let selected: EngineSelectionRecord;
     try {
       selected = this.selection(request);
@@ -186,6 +191,7 @@ export class AnthropicApiEngine implements Engine {
     onEvent: EngineEventSink,
     signal: AbortSignal,
   ): Promise<AgentResult> {
+    assertTextOnly(req);
     const preflight = req.purpose === 'preflight';
     const client = await this.client();
     const selection = this.selection(req);

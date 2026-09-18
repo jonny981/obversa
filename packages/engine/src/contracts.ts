@@ -103,6 +103,15 @@ export interface AgentRequest {
   leaf?: boolean;
 }
 
+/** A read-only workspace must expose at least one tool that can read it. */
+export function assertReadAccess(
+  request: Pick<AgentRequest, 'tools' | 'workspaceMode'>,
+): void {
+  if (request.workspaceMode === 'read' && (request.tools?.length ?? 0) === 0) {
+    throw new TypeError('read workspace requires at least one declared tool');
+  }
+}
+
 export interface AgentResult {
   /** Ordered assistant continuations with exactly one marked final part. */
   readonly parts: readonly AgentResultPart[];
