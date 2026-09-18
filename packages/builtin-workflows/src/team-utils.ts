@@ -8,13 +8,13 @@ import type { ReviewerSeat, TeamInput } from './types.js';
 
 export {
   assertDistinctSeats,
-  dag,
   panelReviewers,
   requireNoFiles,
   requireNonEmptyFiles,
   seatIdentity,
   teamAgent,
 } from '@obversa/runtime/workflow-support';
+export { dag } from '@obversa/runtime';
 
 export const DELIVERY_NOTE = 'team-output/brief.md';
 export const APPROVAL_NOTE = 'team-output/approval.md';

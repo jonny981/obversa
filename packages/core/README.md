@@ -7,7 +7,7 @@ whatever the child did: finished, hung, filled a pipe, or ignored a signal.
 npm install @obversa/core
 ```
 
-Node.js 22.12 or later. No dependencies.
+Node.js 22.12 or later. Depends on `@obversa/api`.
 
 ## Why it exists
 

@@ -168,7 +168,7 @@ module.exports = {
       to: { path: '^(packages|plugins)/', pathNot: '^packages/(runner|runtime|api|core)/' },
     },
     {
-      name: 'teams-reaches-runtime-only',
+      name: 'builtin-workflows-reaches-runtime-only',
       comment: '@obversa/builtin-workflows composes recipes over the public runtime and API contracts; it reaches no adapter or plugin',
       severity: 'error',
       from: { path: '^packages/builtin-workflows/' },

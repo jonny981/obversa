@@ -4,7 +4,6 @@ import { join } from 'node:path';
 
 import { agentJob } from './core/job.js';
 import { copyJobMeta } from './core/describe.js';
-import { dag } from './core/dag.js';
 import { LoopError } from './core/errors.js';
 import type { Job, JobContext } from './core/types.js';
 import type { TeamSeat } from '@obversa/api';
@@ -257,5 +256,4 @@ export function panelReviewers(
   });
 }
 
-export { dag };
 export { INVALID_TEAM_DECISION, outcomeFromAgentText } from './workflow-agent-response.js';

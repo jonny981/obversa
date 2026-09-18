@@ -464,6 +464,12 @@ larger teams.
   The parser the teams use on a reviewer's
   reply: the first JSON decision object becomes a pass, or a revise with
   its findings aimed at the step you name.
+- **Workflow support helpers for recipe packages** from
+  `@obversa/runtime/workflow-support`: `seatIdentity`,
+  `assertDistinctSeats`, `requireNonEmptyFiles`, `requireNoFiles`,
+  `teamAgent`, `panelReviewers`, `INVALID_TEAM_DECISION`, and
+  `outcomeFromAgentText`. The subpath also exports the `ReviewerSeat`,
+  `TeamInput`, and `TestCommand` types. Import `dag` from the runtime root.
 
 ### The keys of a stage
 

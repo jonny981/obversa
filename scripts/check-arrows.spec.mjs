@@ -118,7 +118,7 @@ const forbidden = [
   ["packages/runtime/src/runner.mjs", "import '@obversa/runner';\n", "runtime-reaches-interfaces-only"],
   ["packages/runner/src/adapter.mjs", "import '@obversa/memory-simple';\n", "runner-reaches-runtime-and-engine-only"],
   ["packages/runner/src/plugin.mjs", "import '../../../plugins/engine-codex-cli/src/index.mjs';\n", "runner-reaches-runtime-and-engine-only"],
-  ["packages/builtin-workflows/src/adapter.mjs", "import '@obversa/engine-codex-cli';\n", "teams-reaches-runtime-only"],
+  ["packages/builtin-workflows/src/adapter.mjs", "import '@obversa/engine-codex-cli';\n", "builtin-workflows-reaches-runtime-only"],
   ["packages/runner/src/private.mjs", "import '../../runtime/src/index.mjs';\n", "no-cross-package-internal-path"],
   ["packages/surface-decision/src/bad-a.mjs", "import '../../core/src/index.mjs';\n", "no-cross-package-internal-path"],
   ["packages/surface-decision/src/bad-a.mjs", null, "surface-decision-reaches-no-package"],

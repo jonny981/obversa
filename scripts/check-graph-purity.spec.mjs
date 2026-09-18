@@ -44,6 +44,15 @@ test('scans every configured graph source root', () => {
   assert.match(result.stderr, /graph-types\/impure\.ts:.*process/);
 });
 
+test('rejects a clock in a directly named API graph file', () => {
+  const result = runFixture({
+    'api/graph-kernel.ts': 'export const compiledAt = Date.now();',
+  }, ['api/graph-kernel.ts']);
+
+  assert.equal(result.status, 1, result.stdout);
+  assert.match(result.stderr, /graph-kernel\.ts:.*time/);
+});
+
 test('allows graph types to use the pinned topological sorter', () => {
   const result = runFixture({
     'graph/kernel.ts': 'export type NodeId = string;',

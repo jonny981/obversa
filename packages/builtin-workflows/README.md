@@ -10,14 +10,14 @@ npm install @obversa/runtime @obversa/builtin-workflows
 
 ## What you get
 
-- **`workflow`, `stage`, `person`, and `briefFromFile`.** The runtime builds
-  a workflow from named roles and stages.
+- **`writerReviewerPair`, `thresholdPanel`, `featureDelivery`.** The three
+  teams as functions, for a program that builds a team from parts, and
+  `outcomeFromAgentText`, which reads a reviewer's decision out of its text.
+- **The builders they are made of**, `workflow`, `stage`, `person` and
+  `briefFromFile`, come from `@obversa/runtime`. This package ships none of
+  them.
 - **Seats** come from the engine plugins: `claude(model)`, `codex(model)`,
   `opencode(model, { executable })`.
-- **`writerReviewerPair`, `thresholdPanel`, `featureDelivery`.** The three
-  teams as functions, for a program that builds a team from parts.
-- **`outcomeFromAgentText`.** The runtime reads a reviewer's reply as a
-  pass or a revise with findings.
 
 Every stage carries a `desc` and a `gate` sentence that reach the reviewers
 and the record. A stage that promises a file fails by name when the file

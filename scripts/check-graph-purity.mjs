@@ -1,4 +1,4 @@
-import { readdir, readFile } from 'node:fs/promises';
+import { readdir, readFile, stat } from 'node:fs/promises';
 import { basename, dirname, extname, isAbsolute, relative, resolve, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -146,9 +146,17 @@ const effectfulGlobals = new Map([
 ]);
 
 const repositoryRoot = resolve(dirname(fileURLToPath(import.meta.url)), '..');
+const apiGraphFiles = [
+  'graph-kernel.ts', 'graph-plan.ts', 'graph-type.ts', 'graph-contract.ts',
+  'graph-commands.ts', 'json.ts', 'contracts.ts', 'memory-types.ts',
+];
 const scanRoots = (process.argv.length > 2
   ? process.argv.slice(2)
-  : [resolve(repositoryRoot, 'packages/runtime/src/graph')])
+  : [
+      resolve(repositoryRoot, 'packages/runtime/src/graph'),
+      resolve(repositoryRoot, 'packages/runtime/src/graph-types'),
+      ...apiGraphFiles.map((file) => resolve(repositoryRoot, 'packages/api/src', file)),
+    ])
   .map((root) => resolve(root));
 
 const violations = [];
@@ -170,6 +178,10 @@ if (violations.length > 0) {
 }
 
 async function sourceFiles(directory) {
+  if ((await stat(directory)).isFile()) {
+    if (!sourceExtensions.has(extname(directory))) throw new Error(`not a graph source file: ${directory}`);
+    return [directory];
+  }
   const entries = await readdir(directory, { withFileTypes: true });
   const paths = [];
 
@@ -389,7 +401,7 @@ function forbiddenReason(specifier, sourceFile) {
 
   if (specifier.startsWith('.')) {
     const target = resolve(dirname(sourceFile.fileName), specifier);
-    if (!scanRoots.some((root) => isInside(root, target))) {
+    if (!scanRoots.some((root) => isInside(sourceExtensions.has(extname(root)) ? dirname(root) : root, target))) {
       return 'local imports must stay inside the graph root';
     }
     if (!localSourceCandidates(target).some((candidate) => scannedFiles.has(candidate))) {
@@ -487,7 +499,9 @@ function isReferenceIdentifier(node) {
 function report(sourceFile, position, message) {
   const location = sourceFile.getLineAndCharacterOfPosition(position);
   const root = scanRoots.find((candidate) => isInside(candidate, sourceFile.fileName));
-  const path = `${scanRoots.length === 1 ? '' : `${basename(root)}/`}${relative(root, sourceFile.fileName)}`
+  const path = (root === sourceFile.fileName
+    ? basename(root)
+    : `${scanRoots.length === 1 ? '' : `${basename(root)}/`}${relative(root, sourceFile.fileName)}`)
     .split(sep)
     .join('/');
   violations.push(`${path}:${location.line + 1}:${location.character + 1}: ${message}`);

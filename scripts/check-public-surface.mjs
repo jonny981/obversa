@@ -26,6 +26,10 @@ const additionalPublicValues = [
     file: path.join(root, 'packages/core/src/claude-tools.ts'),
     names: ['claudeToolOptions'],
   },
+  {
+    file: path.join(root, 'packages/runtime/src/workflow-support.ts'),
+    names: ['seatIdentity', 'assertDistinctSeats', 'requireNonEmptyFiles', 'requireNoFiles', 'teamAgent', 'panelReviewers', 'INVALID_TEAM_DECISION', 'outcomeFromAgentText'],
+  },
 ];
 const pageText = fs.readdirSync(docs, { recursive: true }).filter((f) => f.endsWith('.mdx')).map((f) => fs.readFileSync(path.join(docs, f), 'utf8')).join('\n');
 function debtEntries(names, owner, page) {
@@ -77,6 +81,8 @@ const REQUIRED_VALUE_EXPORTS = [
   'resolveCommandExecutable',
   'modelIdentity',
   'claudeToolOptions',
+  'seatIdentity', 'assertDistinctSeats', 'requireNonEmptyFiles', 'requireNoFiles',
+  'teamAgent', 'panelReviewers', 'INVALID_TEAM_DECISION', 'outcomeFromAgentText',
 ];
 
 export function exportListNames(list) {

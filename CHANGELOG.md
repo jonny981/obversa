@@ -38,6 +38,8 @@ other published package tracks its own version independently of it.
 
 ### Changed
 
+- **Workflow support stays on its public subpath:** `@obversa/runtime/workflow-support` exports the recipe helpers and their input types; import `dag` from `@obversa/runtime`.
+
 - **One API contract package:** `@obversa/api` owns the engine and memory
   ports, their conformance kits, `EngineError`, and `modelIdentity`. It also
   owns shared graph, event, artifact, workspace, callback, proof, and run

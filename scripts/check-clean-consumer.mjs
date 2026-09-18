@@ -299,7 +299,7 @@ function sourceFromPublicDoc(document) {
 
 function sourceFromProcessDoc(document) {
   const match = /## Run one\n\n```ts\n([\s\S]*?)\n```/.exec(document);
-  if (!match) throw new Error('The process page has no TypeScript example block');
+  if (!match) throw new Error('The core page has no TypeScript example block');
   return `${match[1]}\n`;
 }
 
@@ -724,10 +724,10 @@ async function main() {
     throw new Error('The forge helper page does not match its runnable source');
   }
   if (sourceFromProcessDoc(processDocument) !== runChildExampleSource) {
-    throw new Error('The process page does not match its runnable source');
+    throw new Error('The core page does not match its runnable source');
   }
   if (!/```text\nready\n```/.test(processDocument)) {
-    throw new Error('The process page does not record the runnable output');
+    throw new Error('The core page does not record the runnable output');
   }
 
   const directory = await mkdtemp(join(tmpdir(), 'obversa-consumer-'));
