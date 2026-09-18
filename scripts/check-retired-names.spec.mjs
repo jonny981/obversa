@@ -130,3 +130,24 @@ test('a planted scratch file is read even before it is tracked by Git', () => {
     assert.match(checkRetiredNames(root).join('\n'), /scratch-retired-name\.mjs/);
   });
 });
+
+test('workflow, contribution, security, agent link, and changeset files reject retired names', () => {
+  withTree({
+    '.github/workflows/rename.yml': 'run: pnpm --filter @obversa/memory test\n',
+    'CONTRIBUTING.md': 'Build packages/process before contributing.\n',
+    'CLAUDE.md': 'Use @obversa/engine in examples.\n',
+    'SECURITY.md': 'Inspect packages/source for secrets.\n',
+    '.changeset/rename.md': 'Bump @obversa/teams.\n',
+  }, (root) => {
+    const failures = checkRetiredNames(root).join('\n');
+    for (const file of [
+      '.github/workflows/rename.yml',
+      'CONTRIBUTING.md',
+      'CLAUDE.md',
+      'SECURITY.md',
+      '.changeset/rename.md',
+    ]) {
+      assert.ok(failures.includes(file), file);
+    }
+  });
+});

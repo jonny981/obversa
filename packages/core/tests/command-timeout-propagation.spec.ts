@@ -4,8 +4,8 @@ const processMock = vi.hoisted(() => ({
   runChild: vi.fn(),
 }));
 
-vi.mock('@obversa/core', async () => {
-  const actual = await vi.importActual<typeof import('@obversa/core')>('@obversa/core');
+vi.mock('../src/index.ts', async () => {
+  const actual = await vi.importActual<typeof import('../src/index.ts')>('../src/index.ts');
   return { ...actual, runChild: processMock.runChild };
 });
 
@@ -43,5 +43,6 @@ describe('owned command timeout propagation', () => {
       timedOut: true,
       aborted: false,
     });
+    expect(processMock.runChild).toHaveBeenCalledOnce();
   });
 });

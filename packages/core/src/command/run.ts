@@ -10,7 +10,7 @@ import {
 } from 'node:path';
 import { setTimeout as delay } from 'node:timers/promises';
 
-import { RunChildError, runChild, type RunChildOptions } from '@obversa/core';
+import { RunChildError, runChild, type RunChildOptions } from '../index.js';
 
 import { digestJson, type Sha256Digest } from '@obversa/api';
 import {

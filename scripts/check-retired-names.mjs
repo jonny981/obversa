@@ -1,9 +1,9 @@
-import { readFileSync, readdirSync } from 'node:fs';
+import { existsSync, readFileSync, readdirSync } from 'node:fs';
 import { join, relative, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const ROOT = resolve(fileURLToPath(new URL('..', import.meta.url)));
-const SCAN_DIRS = ['scripts', 'docs', 'examples', 'packages', 'plugins', 'hosts'];
+const SCAN_DIRS = ['scripts', 'docs', 'examples', 'packages', 'plugins', 'hosts', '.github/workflows', '.changeset'];
 const SKIP_DIRS = new Set(['node_modules', 'dist', '.git', '.next', 'coverage']);
 const SELF = new Set(['scripts/check-retired-names.mjs', 'scripts/check-retired-names.spec.mjs']);
 const OLD_DIRS = ['process', 'source', 'surfacer', 'memory', 'engine', 'teams'];
@@ -24,6 +24,7 @@ const NORMALIZED_PATH = /(?:^|[^A-Za-z0-9_-])(?:packages[/.]?(?:process|source|s
 
 function filesUnder(root, directory) {
   const base = join(root, directory);
+  if (!existsSync(base)) return [];
   const entries = readdirSync(base, { withFileTypes: true });
   return entries.flatMap((entry) => {
     const path = join(base, entry.name);
@@ -82,7 +83,8 @@ function splitPathHits(text) {
 export function checkRetiredNames(root = ROOT) {
   const files = SCAN_DIRS.flatMap((directory) => filesUnder(root, directory));
   for (const entry of readdirSync(root, { withFileTypes: true })) {
-    if (entry.isFile() && /^(?:README|AGENTS|CHANGELOG)\.md$|\.(?:json|ya?ml|cjs|mjs)$/.test(entry.name)) {
+    if ((entry.isFile() || entry.name === 'CLAUDE.md' && entry.isSymbolicLink())
+      && /^(?:README|AGENTS|CLAUDE|CONTRIBUTING|SECURITY|CHANGELOG)\.md$|\.(?:json|ya?ml|cjs|mjs)$/.test(entry.name)) {
       files.push(join(root, entry.name));
     }
   }

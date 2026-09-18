@@ -36,8 +36,8 @@ const result = await engine.run(
 
 ## Adapter conformance
 
-Import the framework-free conformance runner and offline mock from
-`@obversa/api/testing`.
+Import the framework-free conformance runner from `@obversa/api/testing`
+and the offline mock from `@obversa/core/testing`.
 
 ## Command adapters
 
