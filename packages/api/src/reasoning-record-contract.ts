@@ -45,4 +45,12 @@ export interface ReasoningRecorder {
    * nothing about why.
    */
   message(outcome: ReasoningOutcome): Promise<ReasoningMessage>;
+  /**
+   * The commit the message landed on. A recorder that is asked for a message
+   * and never told the commit succeeded keeps what it captured, so a commit
+   * that failed can be tried again from the same turns; told the commit
+   * exists, it starts the next iteration empty rather than explaining one
+   * change with another's reasoning.
+   */
+  committed(commit: string): void;
 }

@@ -89,11 +89,20 @@ function floor(stage: string, outcome: ReasoningOutcome, captured: number): Reas
   };
 }
 
-/** True when the event belongs to the stage this record was opened for. */
-function underPath(event: ReasoningEvent, path: readonly string[]): boolean {
-  if (path.length === 0) return true;
+/**
+ * True when the event belongs to the stage this record was opened for.
+ *
+ * With a path, the event's own path starts with it. Without one, the stage
+ * name is the filter: the runtime names a stage's child path with the stage
+ * as its last segment, so that is what an event of this stage looks like.
+ * An empty filter accepting everything was the hole: a record opened with a
+ * stage and no path took a concurrent stage's words and explained one change
+ * with another's reasoning.
+ */
+function belongs(event: ReasoningEvent, stage: string, path: readonly string[]): boolean {
   const where = event.path ?? [];
-  return path.every((segment, index) => where[index] === segment);
+  if (path.length > 0) return path.every((segment, index) => where[index] === segment);
+  return where[where.length - 1] === stage;
 }
 
 export function openReasoningRecord(options: ReasoningRecordOptions): ReasoningRecorder {
@@ -105,7 +114,7 @@ export function openReasoningRecord(options: ReasoningRecordOptions): ReasoningR
     observe(event: ReasoningEvent): void {
       if (!WRITER_TURNS.has(event.kind)) return;
       if (typeof event.delta !== 'string' || event.delta === '') return;
-      if (!underPath(event, path)) return;
+      if (!belongs(event, stage, path)) return;
       const where = event.path ?? [];
       captured.push({ node: where[where.length - 1] ?? stage, text: event.delta });
     },
@@ -122,6 +131,11 @@ export function openReasoningRecord(options: ReasoningRecordOptions): ReasoningR
         }
       }
       return usable(composed) ? composed : floor(stage, outcome, captured.length);
+    },
+    committed(): void {
+      // The words are on a commit now. Keeping them would put this change's
+      // reasoning in the next change's body.
+      captured.length = 0;
     },
   });
 }

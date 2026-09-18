@@ -66,14 +66,20 @@ import { isolated, run } from '@obversa/runtime';
 
 const record = openReasoningRecord({
   stage: 'implement',
-  path: ['delivery', 'implement'],
-  compose: ({ captured, outcome }) => composeMessage(captured, outcome),
+  compose: ({ captured, outcome }) => ({
+    subject: `feat(implement): ${outcome.summary ?? 'the change'}`,
+    body: ['## Why', '', ...captured.map((turn) => turn.text)].join('\n'),
+  }),
 });
 
-const result = await run(isolated(implement, { label: 'implement', record }), {
+await run(isolated(implement, { label: 'implement', record }), {
   onEvent: (event) => record.observe(event),
 });
 ```
+
+The stage names itself, so the record keeps that stage's turns and leaves a
+sibling running beside it alone. Pass a `path` only when a stage's own path
+in the run is not the one its name would find.
 
 A stage that changed nothing produces no commit, so it produces no body.
 

@@ -1,4 +1,5 @@
 import { describe, it, expect, afterAll, vi } from 'vitest';
+import { execFileSync } from 'node:child_process';
 import { existsSync, mkdtempSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -21,6 +22,89 @@ const base: RunOptions = {
 };
 
 describe('isolated() — worktree as a composable Job wrapper', () => {
+  // A recorder that reports what it was asked and what it was told, so a test
+  // can see the seam rather than infer it from a commit body alone.
+  const recorderSpy = (message = { subject: 'feat(build): the change', body: '## Why\n\nbecause' }) => {
+    const seen: string[] = [];
+    const commits: string[] = [];
+    return {
+      seen,
+      commits,
+      asked: () => commits.length,
+      observe(event: { kind: string; path?: readonly string[]; delta?: string }) {
+        if (event.kind === 'engine:text' && typeof event.delta === 'string') seen.push(event.delta);
+      },
+      async message() { return message; },
+      committed(sha: string) { commits.push(sha); },
+    };
+  };
+
+  it('puts the composed message on the commit that carries the change', async () => {
+    const repo = await tmpRepo();
+    const record = recorderSpy();
+    const job = isolated(
+      fnJob('build', async (ctx) => {
+        write(ctx.workspace.dir, 'out.ts', 'built\n');
+        return { status: 'pass', summary: 'built' };
+      }),
+      { label: 'build', record },
+    );
+
+    const { outcome } = await run(job, { ...base, cwd: repo });
+
+    expect(outcome.status).toBe('pass');
+    // The promise is that reasoning is attached to the thing it explains, so
+    // the test asks the way a reader would: blame the changed line, then read
+    // that commit's body. The branch's own tip is the merge, which is why
+    // reading the last commit would have proved nothing.
+    const blamed = execFileSync('git', ['-C', repo, 'blame', '--porcelain', '-L', '1,1', 'out.ts'], { encoding: 'utf8' })
+      .split('\n')[0]!
+      .split(' ')[0]!;
+    const body = execFileSync('git', ['-C', repo, 'log', '-1', '--format=%B', blamed], { encoding: 'utf8' });
+    expect(body).toContain('feat(build): the change');
+    expect(body).toContain('because');
+    // Told the commit exists, so the next iteration does not inherit these turns.
+    expect(record.asked()).toBe(1);
+  });
+
+  it('refuses a stage that asked to record where there is no repository', async () => {
+    const plain = mkdtempSync(join(tmpdir(), 'obversa-isolated-plain-'));
+    const record = recorderSpy();
+    const job = isolated(fnJob('build', async () => ({ status: 'pass', summary: 'built' })), {
+      label: 'build',
+      record,
+    });
+
+    const { outcome } = await run(job, { ...base, cwd: plain });
+
+    // Without a record this runs in place and passes; with one there is no
+    // commit for the reasoning, and dropping the opt-in in silence is the
+    // outcome the design forbids.
+    expect(outcome.status).toBe('fail');
+    expect(outcome.summary).toContain('not a git repository');
+    expect(outcome.summary).toContain('build');
+  });
+
+  it('fails a recording stage that committed its own work, rather than merging it unexplained', async () => {
+    const repo = await tmpRepo();
+    const record = recorderSpy();
+    const job = isolated(
+      fnJob('build', async (ctx) => {
+        write(ctx.workspace.dir, 'out.ts', 'built\n');
+        execFileSync('git', ['-C', ctx.workspace.dir, 'add', '-A']);
+        execFileSync('git', ['-C', ctx.workspace.dir, 'commit', '--quiet', '-m', 'the job committed this itself']);
+        return { status: 'pass', summary: 'built' };
+      }),
+      { label: 'build', record },
+    );
+
+    const { outcome } = await run(job, { ...base, cwd: repo });
+
+    expect(outcome.status).toBe('fail');
+    expect(outcome.summary).toContain('committed its own work');
+    expect(record.asked()).toBe(0);
+  });
+
   it('runs the job in its own worktree and lands work back on pass', async () => {
     const repo = await tmpRepo();
     let ranIn = '';

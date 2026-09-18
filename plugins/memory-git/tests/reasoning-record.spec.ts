@@ -67,6 +67,56 @@ describe('the reasoning record', () => {
     expect(seen).toEqual(['kept', 'also kept']);
   });
 
+  it('filters by the stage name when no path is given', async () => {
+    // The hole: an empty filter accepted everything, so a record opened with
+    // a stage and no path explained this change with a sibling's reasoning.
+    const seen: string[] = [];
+    const record = openReasoningRecord({
+      stage: 'implement',
+      compose: ({ captured }) => {
+        seen.push(...captured.map((entry) => entry.text));
+        return { subject: 'feat(implement): x', body: 'why' };
+      },
+    });
+
+    record.observe(turn('mine', ['delivery', 'implement']));
+    record.observe(turn('the sibling\'s', ['delivery', 'document']));
+    record.observe(turn('mine too', ['other-run', 'implement']));
+    await record.message({ status: 'pass' });
+
+    expect(seen).toEqual(['mine', 'mine too']);
+  });
+
+  it('starts the next iteration empty once its message is on a commit', async () => {
+    const bodies: string[] = [];
+    const record = openReasoningRecord({
+      stage: 'implement',
+      compose: ({ captured }) => {
+        bodies.push(captured.map((entry) => entry.text).join(','));
+        return { subject: 'feat(implement): x', body: 'why' };
+      },
+    });
+
+    record.observe(turn('first'));
+    await record.message({ status: 'pass' });
+    record.committed('abc1234');
+    record.observe(turn('second'));
+    await record.message({ status: 'pass' });
+
+    // Without the reset the second body carried the first iteration's turns.
+    expect(bodies).toEqual(['first', 'second']);
+  });
+
+  it('says so when it observed nothing, rather than composing from an empty run', async () => {
+    // Forgetting to feed the events is a real mistake, and a body that reads
+    // as reasoning when none was captured hides it.
+    const record = openReasoningRecord({ stage: 'implement', compose: () => undefined });
+
+    const message = await record.message({ status: 'pass', summary: 'done' });
+
+    expect(message.body).toContain('0 captured turns');
+  });
+
   it('takes the floor when composition throws, naming the stage and its outcome', async () => {
     const record = openReasoningRecord({
       stage: 'implement',
