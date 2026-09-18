@@ -126,6 +126,7 @@
     "test:example-output": "node --test scripts/check-example-output.spec.mjs",
     "verify:f39": "pnpm verify:f35 && pnpm test:example-output",
     "verify:f83": "pnpm verify:f39 && pnpm test:retired-names && pnpm check:retired-names && pnpm test:proof-path-budgets && pnpm check:proof-path-budgets && pnpm --filter @obversa/surface-diff test",
+    "verify:f62": "pnpm build && pnpm --filter @obversa/memory-git test && pnpm example:reasoning-record && pnpm check:tarballs && pnpm verify:f39 && pnpm docs:validate",
     "verify:f71": "pnpm verify:f39 && pnpm --filter @obversa/engine-opencode-cli test",
     "verify:f72": "pnpm verify:f65 && pnpm --filter @obversa/api test && pnpm --filter @obversa/engine-opencode-cli test && pnpm --filter @obversa/builtin-workflows test",
     "verify:f66": "pnpm test:retired-names && pnpm check:retired-names && pnpm verify:f72 && pnpm --filter @obversa/core test && pnpm test:api-polish && pnpm example:api-polish && node scripts/check-page-shape.mjs",
@@ -171,7 +172,8 @@
     "example:command-kickback": "pnpm --filter @obversa/runtime exec tsx ../../examples/command-kickback.ts",
     "example:approval": "pnpm --filter @obversa/runtime exec tsx ../../examples/approval.ts",
     "example:monitor": "pnpm --filter @obversa/runtime exec tsx ../../examples/monitor.ts",
-    "verify:f68": "pnpm verify:f71 && pnpm check:consumer"
+    "verify:f68": "pnpm verify:f71 && pnpm check:consumer",
+    "example:reasoning-record": "pnpm --filter @obversa/runtime exec tsx ../../examples/reasoning-record.ts"
   },
   "devDependencies": {
     "@arethetypeswrong/cli": "0.18.5",
@@ -182,6 +184,7 @@
     "@obversa/engine-grok-cli": "workspace:^",
     "@obversa/engine-opencode-cli": "workspace:^",
     "@obversa/core": "workspace:^",
+    "@obversa/memory-git": "workspace:^",
     "@obversa/runner": "workspace:^",
     "@obversa/runtime": "workspace:^",
     "@obversa/builtin-workflows": "workspace:^",

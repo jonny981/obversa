@@ -37,6 +37,9 @@ importers:
       '@obversa/engine-opencode-cli':
         specifier: workspace:^
         version: link:plugins/engine-opencode-cli
+      '@obversa/memory-git':
+        specifier: workspace:^
+        version: link:plugins/memory-git
       '@obversa/runner':
         specifier: workspace:^
         version: link:packages/runner
