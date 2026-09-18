@@ -1,7 +1,7 @@
 // F3 composition proof: the review surface really runs on @obversa/surface-decision.
 //
 // This is the F2 completion evidence and the F3 core evidence in one place. It
-// wires source's reviewDiff to surfacer's runSurface exactly as the composition
+// wires surface-diff's reviewDiff to surface-decision's runSurface exactly as the composition
 // root does, opens a real diff on a real loopback surface, and drives it with an
 // HTTP client that plays the browser. It proves:
 //   - the diff opens and its annotations round-trip through the framed handoff,
@@ -9,7 +9,7 @@
 //     carries none of it; unauth GET is 401) and arrives verbatim, unredacted,
 //   - review content survives verbatim through the redacting server,
 //   - the bearer token gates the annotation mutation (unauth 401, cross-origin 403),
-//   - no server code is copied: source calls the injected runSurface port.
+//   - no server code is copied: surface-diff calls the injected runSurface port.
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
@@ -90,7 +90,7 @@ function captureStream() {
 const settledWithin = (promise, ms) =>
   Promise.race([promise.then(() => "settled", () => "settled"), new Promise((resolve) => setTimeout(() => resolve("pending"), ms))]);
 
-test("the review surface runs on surfacer and returns annotations", { timeout: 30_000 }, async () => {
+test("the review surface runs on surface-decision and returns annotations", { timeout: 30_000 }, async () => {
   const repo = makeRepoWithChange();
   const { diffText } = await computeDiff({ mode: "worktree", cwd: repo });
   const anchor = firstNewAnchor(diffText);

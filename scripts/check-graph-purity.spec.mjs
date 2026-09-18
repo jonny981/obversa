@@ -113,7 +113,6 @@ test('rejects forbidden dependencies through static imports and export-from', ()
     'node:process',
     '@obversa/memory-simple',
     '@obversa/memory-git',
-    '@obversa/memory',
     '@obversa/api',
     'execa',
     '../core/job.js',
@@ -134,7 +133,6 @@ test('rejects forbidden dependencies through static imports and export-from', ()
       import process from 'node:process';
       import { openSimpleMemory } from '@obversa/memory-simple';
       import { openGitMemory } from '@obversa/memory-git';
-      import { MEMORY_ROOT } from '@obversa/memory';
       import { MockEngine } from '@obversa/api';
       import { execa } from 'execa';
       import { agentJob } from '../core/job.js';

@@ -5,7 +5,7 @@
 // the framed result carrying the surface identity.
 //
 // Everything resolves from the tarballs and the offline store: the packed
-// source depends on the packed surfacer through one override, install runs
+// surface-diff depends on the packed surface-decision through one override, install runs
 // --offline with scripts ignored, and the command under test is the bin the
 // install linked — never the working tree.
 
@@ -50,30 +50,30 @@ async function main() {
     await mkdir(consumer);
     await mkdir(repository);
 
-    const surfacerTarball = await pack('surfacer', archives);
-    const sourceTarball = await pack('source', archives);
+    const surfaceDecisionTarball = await pack('surface-decision', archives);
+    const surfaceDiffTarball = await pack('surface-diff', archives);
     await writeFile(join(consumer, 'package.json'), `${JSON.stringify({
       name: 'obversa-surface-consumer-proof',
       private: true,
       type: 'module',
-      dependencies: { '@obversa/surface-diff': `file:${sourceTarball}` },
+      dependencies: { '@obversa/surface-diff': `file:${surfaceDiffTarball}` },
       // pnpm pack rewrote the workspace range into a registry version; the
-      // override points that name at the packed surfacer instead, so nothing
+      // override points that name at the packed surface-decision instead, so nothing
       // resolves outside the two tarballs and the offline store.
-      pnpm: { overrides: { '@obversa/surface-decision': `file:${surfacerTarball}` } },
+      pnpm: { overrides: { '@obversa/surface-decision': `file:${surfaceDecisionTarball}` } },
     }, null, 2)}\n`);
     run('pnpm', ['install', '--offline', '--ignore-scripts'], {
       cwd: consumer,
       env: { CI: 'true', COREPACK_ENABLE_DOWNLOAD_PROMPT: '0' },
     });
-    // The isolated linker keeps the transitive surfacer out of the top-level
+    // The isolated linker keeps the transitive surface-decision out of the top-level
     // node_modules; both installed manifests are read from the store layout.
     const hidden = join(consumer, 'node_modules', '.pnpm');
-    const surfacerEntry = (await readdir(hidden)).find((entry) => entry.startsWith('@obversa+surfacer@'));
-    assert.ok(surfacerEntry, 'the packed surfacer installed as a dependency of the packed source');
+    const surfaceDecisionEntry = (await readdir(hidden)).find((entry) => entry.startsWith('@obversa+surface-decision@'));
+    assert.ok(surfaceDecisionEntry, 'the packed surface-decision installed as a dependency of the packed surface-diff');
     for (const manifestPath of [
-      join(consumer, 'node_modules', '@obversa', 'source', 'package.json'),
-      join(hidden, surfacerEntry, 'node_modules', '@obversa', 'surfacer', 'package.json'),
+      join(consumer, 'node_modules', '@obversa', 'surface-diff', 'package.json'),
+      join(hidden, surfaceDecisionEntry, 'node_modules', '@obversa', 'surface-decision', 'package.json'),
     ]) {
       const installed = JSON.parse(await readFile(manifestPath, 'utf8'));
       if (JSON.stringify(installed).includes('workspace:')) {
@@ -82,8 +82,8 @@ async function main() {
     }
     // The command as the install linked it, run under this Node by its real
     // path: the .bin entry is a shell shim, and the bin field names the file.
-    const installedSource = JSON.parse(await readFile(join(consumer, 'node_modules', '@obversa', 'source', 'package.json'), 'utf8'));
-    const command = join(consumer, 'node_modules', '@obversa', 'source', installedSource.bin['obversa-review']);
+    const installedSurfaceDiff = JSON.parse(await readFile(join(consumer, 'node_modules', '@obversa', 'surface-diff', 'package.json'), 'utf8'));
+    const command = join(consumer, 'node_modules', '@obversa', 'surface-diff', installedSurfaceDiff.bin['obversa-review']);
 
     // The linked bin loads and answers --help from the packed tree alone.
     const help = spawnSync(process.execPath, [command, '--help'], { encoding: 'utf8', timeout: 10_000 });
@@ -159,7 +159,7 @@ async function main() {
     const frame = /<<<REVIEW_RESULT_V1>>>([\s\S]*?)<<<END_REVIEW_RESULT_V1>>>/.exec(stdout);
     assert.ok(frame, `a framed result is on stdout; got:\n${stdout.slice(0, 400)}`);
     const result = JSON.parse(frame[1]);
-    const packedVersion = JSON.parse(await readFile(join(consumer, 'node_modules', '@obversa', 'source', 'package.json'), 'utf8')).version;
+    const packedVersion = JSON.parse(await readFile(join(consumer, 'node_modules', '@obversa', 'surface-diff', 'package.json'), 'utf8')).version;
     assert.equal(result.status, 'completed');
     assert.deepEqual(result.surface, { package: '@obversa/surface-diff', version: packedVersion }, 'the frame names the surface package and its resolved version');
     assert.equal(result.payload.decision, 'changes-requested');

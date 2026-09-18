@@ -1,5 +1,5 @@
 // Browser proof of the review surface under the runtime's exact security
-// headers and auth model. A local server mirrors the surfacer contract on the
+// headers and auth model. A local server mirrors the surface-decision contract on the
 // parts that matter — the Content-Security-Policy header (asserted below to be
 // the very string in packages/surface-decision/src/server.mjs, so drift fails this
 // test), a bearer-gated verbatim GET /api/model, a static shell with no diff
@@ -387,9 +387,9 @@ async function keyboardRoute(dt, signal) {
   return { tabs, reached: true, ...reached, ...opened, discardTarget, ...discarded, saveTarget, firstSaveReturned: firstSave.saveReturned, removeTarget, ...removed, ...saved, returned };
 }
 
-test("the runtime's CSP in this proof is the one surfacer serves", async () => {
+test("the runtime's CSP in this proof is the one surface-decision serves", async () => {
   const serverSource = await readFile(SURFACER_SERVER, "utf8");
-  assert.ok(serverSource.includes(`"Content-Security-Policy": "${CSP}"`), "surfacer's CSP changed; update this proof to match");
+  assert.ok(serverSource.includes(`"Content-Security-Policy": "${CSP}"`), "surface-decision's CSP changed; update this proof to match");
 });
 
 test("the review surface renders under the exact CSP with zero violations and file-scoped go-to-source", { skip: CHROME ? false : "Google Chrome is not installed", timeout: BROWSER_TEST_TIMEOUT_MS }, async () => {
@@ -405,7 +405,7 @@ test("the review surface renders under the exact CSP with zero violations and fi
     "/icons.mjs": ["icons.mjs", "text/javascript; charset=utf-8"],
   };
   const results = Promise.withResolvers();
-  // The review's return, as the surfacer would receive it: the submit body,
+  // The review's return, as surface-decision would receive it: the submit body,
   // and the acknowledgement of the operation id the reply carried.
   const submitted = Promise.withResolvers();
   const acked = Promise.withResolvers();

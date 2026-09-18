@@ -261,7 +261,7 @@ export async function reviewDiff({
   // The mode and its range are checked before anything is read or reviewed,
   // a supplied diff included: an unknown mode, or range mode with no range,
   // would otherwise reach the page's completion payload as a value the
-  // surfacer's data contract refuses, after a page had opened.
+  // the surface-decision package's data contract refuses, after a page had opened.
   if (!["worktree", "staged", "range"].includes(mode)) throw new TypeError(`reviewDiff mode must be worktree, staged, or range; got ${String(mode)}`);
   if (mode === "range" && (typeof range !== "string" || range.trim().length === 0)) throw new TypeError("reviewDiff in range mode needs a ref range");
   // A supplied diff is text, and no larger than the git lane would return:

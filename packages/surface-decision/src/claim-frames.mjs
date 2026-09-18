@@ -1,5 +1,5 @@
 // The frame text claimed with each terminal decision, keyed by the decision
-// object itself. Module-private to the surfacer: the server records the
+// object itself. Module-private to the surface-decision package: the server records the
 // frame at the claim, the launcher reads it to write it verbatim, and neither
 // the public decision nor any public export carries the store. A WeakMap
 // holds no reference of its own, so a decision the caller drops takes its

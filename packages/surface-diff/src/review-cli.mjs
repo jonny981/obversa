@@ -1,4 +1,4 @@
-// The review command, importable: parse the arguments, wire the surfacer's
+// The review command, importable: parse the arguments, wire the surface-decision package's
 // launch port and client kit to reviewDiff, run one review, report on
 // stderr, and return the exit code. The bin file calls this unconditionally;
 // a router plugin reaches it through the package's ./bin subpath export.
@@ -21,7 +21,7 @@ import { HELP, parseArgs } from "./review-args.mjs";
  * code is returned, never set here, so an importer stays in charge of its
  * process. Placement is the host's concern: the host injects
  * OBVERSA_SURFACE_BIN (its glue wrapper defaults it to the placement script
- * beside itself), and the surfacer reads it.
+ * beside itself), and the surface-decision package reads it.
  *
  * @param {string[]} argv
  * @returns {Promise<number>} the exit code
@@ -39,7 +39,7 @@ export async function runReviewCommand(argv) {
     return 0;
   }
 
-  // The client kit the page loads, as the surfacer exports it — resolved
+  // The client kit the page loads, as surface-decision exports it — resolved
   // under the `import` condition, the one the browser's module import
   // matches, not the `require` condition a createRequire lookup would follow.
   const clientKitSource = await readFile(

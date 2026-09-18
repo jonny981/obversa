@@ -172,7 +172,7 @@ for the review surface.
    global variable binds every launch to one host, so a skill launched in
    another host would land here instead of where it started. For a workspace
    opened by hand, export `OBVERSA_SURFACE_BIN` as the absolute path of this
-   host's `obversa-surface` in that workspace — the surfacer reads the
+   host's `obversa-surface` in that workspace — the surface-decision package reads the
    variable only, never `PATH` — and outside cmux the surface opens the
    default browser.
 
