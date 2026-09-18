@@ -736,7 +736,21 @@ function restoreRecordedUsage(ctx: JobContext): void {
   const priorUsage = (ctx.state[RESUME_RECORDED_USAGE] as ReadonlyMap<string, readonly RecordedEngineUsage[]> | undefined)
     ?.get(ctx.path.join('/'));
   if (priorUsage?.length) {
-    ctx.state[RECORDED_ENGINE_USAGE] = [...recordedUsage(ctx), ...priorUsage];
+    const current = recordedUsage(ctx);
+    const key = (record: RecordedEngineUsage) => JSON.stringify([record.path, record.role, record.model]);
+    const present = new Map<string, number>();
+    for (const record of current) {
+      const identity = key(record);
+      present.set(identity, (present.get(identity) ?? 0) + 1);
+    }
+    const missing = priorUsage.filter((record) => {
+      const identity = key(record);
+      const count = present.get(identity) ?? 0;
+      if (count === 0) return true;
+      present.set(identity, count - 1);
+      return false;
+    });
+    if (missing.length) ctx.state[RECORDED_ENGINE_USAGE] = [...current, ...missing];
   }
 }
 

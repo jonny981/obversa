@@ -10,6 +10,7 @@ import {
   directRouter,
   passed,
   person,
+  RECORDED_ENGINE_USAGE,
   run,
   stage,
   workflow,
@@ -102,6 +103,37 @@ describe('a declarative workflow with a person gate, run twice on one record', (
       }
       expect(writer.calls).toHaveLength(1);
       expect(reviewer.calls).toHaveLength(reviewerCalls);
+    } finally {
+      await rm(directory, { recursive: true, force: true });
+    }
+  });
+
+  it('does not restore the same recorded answer twice when one state object resumes again', async () => {
+    const directory = await mkdtemp(join(tmpdir(), 'f42-repeated-resume-'));
+    const recordPath = join(directory, 'record.jsonl');
+    const callbacks = createCallbackClient();
+    const state: Record<string, unknown> = {};
+    const writer = scriptedEngine('writer', [async (request) => {
+      await writeFile(join(request.cwd!, 'note.md'), 'written\n');
+      return pass('written');
+    }], { usageModel: 'gpt-5' });
+    const job = workflow('repeated-resume', {
+      brief: { brief: 'Write and approve one note.', files: ['note.md'] },
+      roles: { writer: seat(writer, 'gpt'), approver: person('Approve the note?') },
+      stages: [
+        stage('write', { agent: 'writer', writes: 'note.md' }),
+        stage('approve', { input: 'approver' }),
+      ],
+    });
+
+    try {
+      expect((await run(job, { cwd: directory, recordTo: recordPath, callbacks, state })).outcome.status).toBe('paused');
+      expect(state[RECORDED_ENGINE_USAGE]).toHaveLength(1);
+      expect((await run(job, { cwd: directory, recordTo: recordPath, resume: true, callbacks, state })).outcome.status).toBe('paused');
+      expect(state[RECORDED_ENGINE_USAGE]).toHaveLength(1);
+      expect((await run(job, { cwd: directory, recordTo: recordPath, resume: true, callbacks, state })).outcome.status).toBe('paused');
+      expect(state[RECORDED_ENGINE_USAGE]).toHaveLength(1);
+      expect(writer.calls).toHaveLength(1);
     } finally {
       await rm(directory, { recursive: true, force: true });
     }
