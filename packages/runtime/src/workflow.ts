@@ -767,7 +767,7 @@ function resumeGuard(job: Job, identity: string, label: string, retrySafe: boole
       if (recorded.kind === 'interrupted') {
         if (!retrySafe) {
           restoreRecordedUsage(ctx);
-          return reconcileInterrupted(ctx, label, identity, anchor!.recordId, recorded.startLine);
+          return reconcileInterrupted(ctx, job, label, identity, anchor!.recordId, recorded.startLine);
         }
       } else if (recorded.outcome.status === 'pass'
           && (recorded.outcome.data as { skipped?: boolean } | undefined)?.skipped !== true) {
@@ -788,7 +788,7 @@ function resumeGuard(job: Job, identity: string, label: string, retrySafe: boole
         }
         if (request?.resumeReconciliation === true && request.input?.startLine !== undefined) {
           restoreRecordedUsage(ctx);
-          return reconcileInterrupted(ctx, label, identity, anchor!.recordId, request.input.startLine);
+          return reconcileInterrupted(ctx, job, label, identity, anchor!.recordId, request.input.startLine);
         }
       }
     }
@@ -798,6 +798,7 @@ function resumeGuard(job: Job, identity: string, label: string, retrySafe: boole
 
 async function reconcileInterrupted(
   ctx: JobContext,
+  job: Job,
   label: string,
   identity: string,
   recordId: string,
@@ -807,6 +808,14 @@ async function reconcileInterrupted(
     question: `Did stage "${label}" finish? Approve to continue without running it again; refuse if it did not finish.`,
     input: { identity, workspace: ctx.workspace.dir, stage: label, recordId, startLine },
   })(ctx);
+  if (outcome.status === 'fail' && (outcome.data as { approved?: boolean } | undefined)?.approved === false) {
+    // A crash during this new attempt must not reuse the answer about the old one.
+    ctx.emit({
+      kind: 'dag:node', ts: Date.now(), path: ctx.path.slice(0, -1), node: label,
+      phase: 'start', attempt: (ctx.graph?.attempt ?? 1) + 1,
+    });
+    return job(ctx);
+  }
   return { ...outcome, data: { ...(outcome.data ?? {}), resumeReconciliation: true } };
 }
 

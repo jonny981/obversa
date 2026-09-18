@@ -67,8 +67,10 @@ the same store of pending questions. A run given a fresh in-memory
 client has nothing to read and asks again. A stage that was
 mid-flight when the process died runs again only when it carries
 `retrySafe: true`; otherwise the run pauses and asks a person to reconcile
-it. The record applies to the same workflow name, workspace, brief and stage
-list; a changed brief starts again. Any other job passed `resume: true`
+it. If the person says it did not finish, that stage runs in the same resumed
+run; if it did finish, the stage is not repeated. The record applies to the
+same workflow name, workspace, brief and stage list; a changed brief starts
+again. Any other job passed `resume: true`
 appends to that record and runs again. The supervised runner restarts a
 killed run for you. `resume: true` is how a workflow you start yourself, or a
 schedule starts for you, carries on.

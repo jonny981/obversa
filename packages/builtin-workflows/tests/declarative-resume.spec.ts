@@ -617,7 +617,7 @@ describe('a declarative workflow with a person gate, run twice on one record', (
     })).toThrow(/retrySafe must be a boolean/);
   });
 
-  it('runs an interrupted stage on the next resume after a person says it did not finish', async () => {
+  it('runs an interrupted stage in the same resume when a person says it did not finish', async () => {
     const directory = await mkdtemp(join(tmpdir(), 'f42-refused-'));
     const recordPath = join(directory, 'record.jsonl');
     const callbacks = createCallbackClient();
@@ -641,14 +641,45 @@ describe('a declarative workflow with a person gate, run twice on one record', (
       const request = callbacks.listPending()[0]!;
       expect((await directRouter(callbacks, request, 'operator', () => ({ approved: false }))).ok).toBe(true);
 
-      expect((await run(job, { cwd: directory, recordTo: recordPath, resume: true, callbacks })).outcome.status).toBe('fail');
-      expect(await readFile(join(directory, 'deployments.txt'), 'utf8')).toBe('deployed\n');
       expect((await run(job, { cwd: directory, recordTo: recordPath, resume: true, callbacks })).outcome.status).toBe('pass');
       expect(await readFile(join(directory, 'deployments.txt'), 'utf8')).toBe('deployed\ndeployed\n');
       expect(await readFile(join(directory, 'preparations.txt'), 'utf8')).toBe('prepared\n');
+      expect(callbacks.listPending()).toHaveLength(0);
       expect((await run(job, { cwd: directory, recordTo: recordPath, resume: true, callbacks })).outcome.status).toBe('pass');
       expect(await readFile(join(directory, 'deployments.txt'), 'utf8')).toBe('deployed\ndeployed\n');
       expect(await readFile(join(directory, 'preparations.txt'), 'utf8')).toBe('prepared\n');
+    } finally {
+      await rm(directory, { recursive: true, force: true });
+    }
+  });
+
+  it('asks again if the stage rerun after a refusal was interrupted', async () => {
+    const directory = await mkdtemp(join(tmpdir(), 'f42-refused-rerun-'));
+    const recordPath = join(directory, 'record.jsonl');
+    const callbacks = createCallbackClient();
+    const job = workflow('deploy-refused-rerun', {
+      brief: 'Deploy this release.',
+      roles: {},
+      stages: [stage('deploy', {
+        run: ['node', '-e', "require('node:fs').appendFileSync('deployments.txt', 'deployed\\n')"],
+      })],
+    });
+
+    try {
+      expect((await run(job, { cwd: directory, recordTo: recordPath, callbacks })).outcome.status).toBe('pass');
+      await retainStageStart(recordPath, 'deploy');
+      expect((await run(job, { cwd: directory, recordTo: recordPath, resume: true, callbacks })).outcome.status).toBe('paused');
+      const firstRequest = callbacks.listPending()[0]!;
+      expect((await directRouter(callbacks, firstRequest, 'operator', () => ({ approved: false }))).ok).toBe(true);
+
+      expect((await run(job, { cwd: directory, recordTo: recordPath, resume: true, callbacks })).outcome.status).toBe('pass');
+      expect(await readFile(join(directory, 'deployments.txt'), 'utf8')).toBe('deployed\ndeployed\n');
+      await retainStageStart(recordPath, 'deploy', true);
+
+      expect((await run(job, { cwd: directory, recordTo: recordPath, resume: true, callbacks })).outcome.status).toBe('paused');
+      expect(await readFile(join(directory, 'deployments.txt'), 'utf8')).toBe('deployed\ndeployed\n');
+      expect(callbacks.listPending()).toHaveLength(1);
+      expect(callbacks.listPending()[0]!.requestId).not.toBe(firstRequest.requestId);
     } finally {
       await rm(directory, { recursive: true, force: true });
     }
@@ -687,12 +718,13 @@ describe('a declarative workflow with a person gate, run twice on one record', (
   });
 });
 
-async function retainStageStart(recordPath: string, stageName: string): Promise<void> {
+async function retainStageStart(recordPath: string, stageName: string, latest = false): Promise<void> {
   const lines = (await readFile(recordPath, 'utf8')).trim().split('\n');
-  const index = lines.findIndex((line) => {
+  const matches = (line: string) => {
     const event = JSON.parse(line) as { kind: string; node?: string; phase?: string };
     return event.kind === 'dag:node' && event.node === stageName && event.phase === 'start';
-  });
+  };
+  const index = latest ? lines.findLastIndex(matches) : lines.findIndex(matches);
   expect(index).toBeGreaterThanOrEqual(0);
   await writeFile(recordPath, `${lines.slice(0, index + 1).join('\n')}\n`);
 }
