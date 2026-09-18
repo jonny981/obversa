@@ -28,16 +28,17 @@ other published package tracks its own version independently of it.
 - **Watch a run without writing a formatter:** `@obversa/runtime` exports
   `formatEvent`, which turns one event from `onEvent` into the line a person
   reads. Every use-case example prints its run through it.
-- **Use-case examples outside software delivery:** Seven complete
-  `workflow()` files under `examples/use-cases/`, in three groups: software
-  and product engineering (backlog grooming that a person ranks,
-  architecture then a spike then a team review, product signals pulled
-  from PostHog and filed as work), business and commercial (drafts a person
-  sends, support triage with a confidence gate, contract review against a
-  playbook) and other (a translation reflected on against a glossary).
-  Every one ends at a person, so a run stops before anything is sent or
-  filed; each has a proof that runs it offline, and a page that shows the
-  file whole with what one real run printed.
+- **Use-case examples outside software delivery:** Three complete
+  `workflow()` files under `examples/use-cases/`, one per kind of work:
+  grooming a backlog so a person can rank it, reading a contract against a
+  playbook so a lawyer can send redlines, and translating an article
+  against a glossary so a person can publish it. Each ends at a person, so
+  a run stops before anything is sent or filed, and each page shows what
+  one real run of that file printed, its events and its usage lines
+  included. The grooming run did not finish: a reviewer from another
+  family sent the stories back three times with real problems and the loop
+  reached its allowance and stopped, which is on its page because a loop
+  that halts rather than passing on unfinished work is the loop behaving.
 - **Recorded model families:** The runtime exports `RECORDED_ENGINE_USAGE`,
   the shared state key under which every agent job's engine answer is
   recorded beside its job path, and the declarative panel guard reads

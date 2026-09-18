@@ -68,16 +68,12 @@
               "workflows/safe-change",
               "workflows/feature-delivery",
               "workflows/forge-helper",
-              "workflows/backlog-groom-then-rank",
-              "workflows/architecture-then-spike",
-              "workflows/watch-signals-then-file"
+              "workflows/backlog-groom-then-rank"
             ]
           },
           {
             "group": "Business and commercial",
             "pages": [
-              "workflows/draft-then-send",
-              "workflows/support-triage",
               "workflows/contract-playbook"
             ]
           },
