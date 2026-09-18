@@ -6,15 +6,15 @@ export default defineConfig({
   resolve: {
     alias: [
       {
-        find: '@obversa/engine',
+        find: '@obversa/api/testing',
         replacement: fileURLToPath(
-          new URL('../../packages/engine/src/index.ts', import.meta.url),
+          new URL('../../packages/api/src/testing.ts', import.meta.url),
         ),
       },
       {
-        find: '@obversa/memory',
+        find: '@obversa/api',
         replacement: fileURLToPath(
-          new URL('../../packages/memory/src/index.ts', import.meta.url),
+          new URL('../../packages/api/src/index.ts', import.meta.url),
         ),
       },
     ],

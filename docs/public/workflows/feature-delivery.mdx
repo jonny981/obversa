@@ -42,184 +42,119 @@ In that directory, create `package.json` with `"type": "module"`, then run
 the install command above before running the copied file.
 
 ```bash
-npm install @obversa/runtime @obversa/engine-claude-cli @obversa/engine-codex
+npm install @obversa/runtime @obversa/engine-claude-cli @obversa/engine-codex-cli
 ```
 
 ```ts
 import { claude } from '@obversa/engine-claude-cli';
-import { codex } from '@obversa/engine-codex';
-import {
-  agentJob,
-  approval,
-  commandSucceeds,
-  gateJob,
-  pipeline,
-  reviewPanel,
-  revisionRequest,
-  run,
-  type Engine,
-  type Job,
-  type Outcome,
-} from '@obversa/runtime';
+import { codex } from '@obversa/engine-codex-cli';
+import { run } from '@obversa/runtime';
+import { briefFromFile, person, stage, workflow, type TeamSeat } from '@obversa/runtime';
 
 interface FeatureDeliveryEngines {
-  readonly analyse: Engine;
-  readonly implement: Engine;
-  readonly correctness: Engine;
-  readonly tests: Engine;
-  readonly api: Engine;
+  readonly claude: (model: string) => TeamSeat;
+  readonly codex: (model: string) => TeamSeat;
 }
 
-const FEATURE_BRIEF =
-  'Build a retry helper that retries failed requests, caps attempts, and stops when the caller aborts.';
+const realEngines: FeatureDeliveryEngines = { claude, codex };
 
-const realEngines: FeatureDeliveryEngines = {
-  analyse: claude('claude-sonnet-4-5').engine,
-  implement: codex('gpt-5.6-luna').engine,
-  correctness: claude('claude-sonnet-4-5').engine,
-  tests: codex('gpt-5.6-luna').engine,
-  api: claude('claude-sonnet-4-5').engine,
-};
+/**
+ * A feature, delivered the way a team delivers one. The roles are named once;
+ * every stage is a small block of nouns: who does it, what it writes, who
+ * reads it, where a red result goes back to. Inference happens only where a
+ * role is named; every other stage is a command or a person.
+ */
+function createFeatureDelivery(engines: FeatureDeliveryEngines = realEngines) {
+  return workflow('feature-delivery', {
+    brief: briefFromFile('briefs/triple.md'),
+    options: { timeout: '10m' },
 
-function responseOutcome(text: string, target?: string): Outcome {
-  try {
-    const value = JSON.parse(text) as {
-      status?: unknown;
-      summary?: unknown;
-      findings?: unknown;
-    };
-    if (value.status === 'pass') {
-      return {
-        status: 'pass',
-        summary: typeof value.summary === 'string' ? value.summary : 'accepted',
-      };
-    }
-    if (value.status === 'revise' && target) {
-      const findings = Array.isArray(value.findings)
-        ? value.findings.map((finding) => ({
-            reviewer: 'agent',
-            severity: 'block' as const,
-            evidence: typeof finding === 'string' ? finding : JSON.stringify(finding),
-          }))
-        : [{ reviewer: 'agent', severity: 'block' as const, evidence: 'the reviewer requested a repair' }];
-      return revisionRequest({
-        target,
-        reason: typeof value.summary === 'string' ? value.summary : 'the reviewer requested a repair',
-        findings,
-      });
-    }
-  } catch {
-    // A plain reply is still useful evidence for an analysis stage.
-  }
-  return { status: 'pass', summary: text.trim().slice(0, 280), data: text };
-}
+    roles: {
+      analyse: engines.claude('claude-sonnet-4-5'),
+      implement: engines.codex('gpt-5.6-luna'),
+      'research-review': [engines.codex('gpt-5.6-luna')],
+      'code-review': [engines.claude('claude-sonnet-4-5')],
+      approve: person('Ship this change?'),
+    },
 
-function worker(
-  label: string,
-  engine: Engine,
-  prompt: string,
-  target?: string,
-): Job {
-  return agentJob({
-    label,
-    engine,
-    prompt,
-    consumeFeedback: target !== undefined,
-    outcome: (text) => responseOutcome(text, target),
-  });
-}
+    stages: [
+      stage('research-context', {
+        agent: 'analyse',
+        writes: 'team-output/research-context.md',
+        desc: 'Read the workspace and write down what the change touches.',
+        gate: 'The context note is in the workspace and a reviewer has accepted it.',
+        reviewedBy: 'research-review',
+        retry: 3,
+      }),
 
-function createFeatureDelivery(
-  engines: FeatureDeliveryEngines = realEngines,
-): Job {
-  const analyse = worker(
-    'analyse',
-    engines.analyse,
-    `Read this brief: ${FEATURE_BRIEF}
-Define the accepted criteria for a retry helper:
-- a failed request is retried until it succeeds;
-- retry attempts are capped;
-- an aborted caller stops the retry.
-Write no source or test files. Reply with JSON containing status "pass" and a short summary.`,
-  );
+      stage('research-requirements', {
+        agent: 'analyse',
+        writes: 'team-output/research-requirements.md',
+        desc: 'Turn the brief and the context note into requirements, one REQ-n per line.',
+        gate: 'The requirements note is in the workspace and a reviewer has accepted it.',
+        reviewedBy: 'research-review',
+        retry: 3,
+      }),
 
-  const implement = worker(
-    'implement',
-    engines.implement,
-    `Implement the accepted retry criteria in src/retry.js and test/retry.test.js.
-On the first pass, write tests for retrying and the attempt cap, then write the matching source.
-When review feedback names a missing criterion, add that test and repair the source.
-Run no command; the test stage runs the declared command. Reply with JSON containing status "pass" and a short summary.`,
-    'implement',
-  );
+      stage('plan', {
+        agent: 'analyse',
+        writes: 'team-output/plan.md',
+        desc: 'Write an executable plan from the requirements, one check per REQ-n.',
+        gate: 'Every requirement has a check in the plan.',
+        reviewedBy: 'research-review',
+        retry: 3,
+      }),
 
-  const test = gateJob(
-    'test',
-    commandSucceeds('node', ['--test', 'test/retry.test.js'], {
-      timeoutMs: 30_000,
-      captureOutput: true,
-    }),
-  );
+      stage('tests-first', {
+        agent: 'implement',
+        writes: 'test/triple.test.mjs',
+        desc: 'Write the declared test files from the accepted plan before any implementation exists.',
+        gate: 'Every declared test file exists and covers the plan.',
+        reviewedBy: 'code-review',
+        retry: 3,
+      }),
 
-  const review = reviewPanel({
-    label: 'review-panel',
-    reviewers: [
-      {
-        name: 'correctness',
-        job: worker(
-          'correctness',
-          engines.correctness,
-          `Read src/retry.js against the accepted retry criteria. Check retrying, the attempt cap, and abort handling.
-Reply with JSON: status "pass" when all three are implemented, or status "revise" with a findings array naming each missing criterion.`,
-          'implement',
-        ),
-      },
-      {
-        name: 'tests',
-        job: worker(
-          'tests',
-          engines.tests,
-          `Read test/retry.test.js against the accepted retry criteria.
-Reply with JSON: status "pass" when the tests cover retrying, the attempt cap, and abort handling, or status "revise" with a findings array naming each missing test.`,
-          'implement',
-        ),
-      },
-      {
-        name: 'api',
-        job: worker(
-          'api',
-          engines.api,
-          `Read src/retry.js as a public module. Check that it exports retry and MAX_ATTEMPTS and keeps the function usable with an AbortSignal.
-Reply with JSON: status "pass" when the module shape is correct, or status "revise" with a findings array.`,
-          'implement',
-        ),
-      },
+      stage('implement', {
+        agent: 'implement',
+        writes: 'src/triple.mjs',
+        desc: 'Write the code to the plan and the tests.',
+        gate: 'The source file exists.',
+        retry: 3,
+      }),
+
+      stage('test', {
+        run: ['node', '--test', 'test/triple.test.mjs'],
+        desc: 'Run the tests; a red run goes back to implement with the output.',
+        gate: 'The test command exits 0.',
+        sendsBackTo: 'implement',
+      }),
+
+      stage('review', {
+        panel: 'code-review',
+        agree: 1,
+        desc: 'Read the change and the test result against the plan.',
+        gate: 'At least one reviewer has accepted the change.',
+        sendsBackTo: 'implement',
+      }),
+
+      stage('approve', {
+        input: 'approve',
+        desc: 'Put the verified change in front of a person.',
+        gate: 'A person has said yes.',
+      }),
+
+      stage('close', {
+        agent: 'analyse',
+        writes: ['team-output/evidence.md', 'team-output/learning.md'],
+        desc: 'Write the evidence of the run and what was learned, from the record alone.',
+        gate: 'Both notes are in the workspace.',
+      }),
     ],
-    pass: 2,
-    target: 'implement',
   });
-
-  const approve = approval('approve', {
-    question: 'Approve shipping the retry helper and its tests?',
-    target: 'implement',
-  });
-
-  return pipeline(
-    'feature-delivery',
-    [
-      { name: 'analyse', job: analyse },
-      { name: 'implement', job: implement },
-      { name: 'test', job: test },
-      { name: 'review', job: review },
-      { name: 'approve', job: approve },
-    ],
-    { maxKickbacks: 2 },
-  );
 }
 
-const result = await run(createFeatureDelivery(), { recordTo: 'auto' });
-console.log(JSON.stringify({ status: result.outcome.status }, null, 2));
-if (result.outcome.status === 'fail') process.exitCode = 1;
+const result = await run(createFeatureDelivery());
+console.log(JSON.stringify(result.outcome, null, 2));
 ```
 
 ## Run the workflow

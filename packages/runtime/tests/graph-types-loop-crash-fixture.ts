@@ -1,6 +1,6 @@
 import { join } from 'node:path';
 
-import { engineSelection } from '@obversa/engine';
+import { engineSelection } from '@obversa/api';
 
 import { convergence, type ConvergenceDefinition } from '../src/graph-types/loop.ts';
 import { resolveGraphPlan, type ExecutionTarget } from '../src/graph/plan.ts';

@@ -17,25 +17,25 @@ import {
   EngineError,
   assertReadAccess,
   assistantResult,
-  attemptEnvironment,
   classifyEngineFailure,
   engineSelection,
   reportedUsage,
-  scrubCapture,
   type AgentRequest,
   type AgentResult,
   type Engine,
   type EngineEventSink,
   type EngineSelectionRecord,
   type UsageReceipt,
-} from '@obversa/engine';
+} from '@obversa/api';
 import {
+  attemptEnvironment,
+  scrubCapture,
   DEFAULT_OWNED_COMMAND_LIMITS,
   OwnedCommandError,
   ownedCommandIdentity,
   resolveCommandExecutable,
   runOwnedCommand,
-} from '@obversa/engine/command';
+} from '@obversa/core/command';
 
 const DIAGNOSTIC_MAX = 700;
 const DIAGNOSTIC_HEAD = 180;

@@ -11,23 +11,10 @@ import { engineFailureExclusionKeys, isEngineExcluded, matchesEngineTarget, vali
 import { engineSelection, reportedUsage, validateAgentResult, validateIncompleteResultEvidence } from './result-parts.js';
 import { loadRunDefinition, type RunStorageBinding } from './run-definition.js';
 
-export interface PreflightPauseResult {
-  readonly kind: 'pause';
-  readonly code: 'PREFLIGHT_PAUSED';
-  readonly reason: string;
-  readonly preflightEventId: string;
-}
-export interface PreflightFailureResult {
-  readonly kind: 'fail';
-  readonly code: 'PREFLIGHT_FAILED';
-  readonly message: string;
-}
-export interface RunPreflightState {
-  readonly phase: 'disabled' | 'pending' | 'admitted' | 'paused' | 'failed';
-  readonly pause: PreflightPauseResult | null;
-  readonly resumedPreflightEventId: string | null;
-  readonly unfinishedProbeEventId: string | null;
-}
+import { type PreflightPauseResult, type PreflightFailureResult } from '@obversa/api';
+export { type PreflightPauseResult, type PreflightFailureResult } from '@obversa/api';
+import type { RunPreflightState } from '@obversa/api';
+export type { RunPreflightState } from '@obversa/api';
 export type ProbeStartPayload = {
   readonly laneId: string;
   readonly target: ExecutionTarget;

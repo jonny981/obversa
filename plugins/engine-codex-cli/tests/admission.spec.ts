@@ -8,10 +8,11 @@ import { setTimeout as delay } from 'node:timers/promises';
 import { fileURLToPath } from 'node:url';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
-  engineSelection, finalResultText, runEngineAdmissionConformance,
-  type AgentRequest, type EngineAdmissionConformanceFixture,
+  engineSelection, finalResultText,
+  type AgentRequest,
   type EngineSelectionRecord,
-} from '@obversa/engine';
+} from '@obversa/api';
+import { runEngineAdmissionConformance, type EngineAdmissionConformanceFixture } from '@obversa/api/testing';
 import { CodexEngine } from '../src/index.ts';
 
 const directories: string[] = [];

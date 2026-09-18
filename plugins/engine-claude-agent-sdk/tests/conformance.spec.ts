@@ -1,5 +1,6 @@
 import { expect, it, vi } from 'vitest';
-import { engineSelection, runEngineConformance, type AgentRequest } from '@obversa/engine';
+import { engineSelection, type AgentRequest } from '@obversa/api';
+import { runEngineConformance } from '@obversa/api/testing';
 import { AgentSdkEngine } from '../src/index.ts';
 
 interface QueryInput {

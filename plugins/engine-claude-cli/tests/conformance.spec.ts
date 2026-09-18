@@ -3,7 +3,8 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { expect, it } from 'vitest';
-import { engineSelection, runEngineConformance, type AgentRequest } from '@obversa/engine';
+import { engineSelection, type AgentRequest } from '@obversa/api';
+import { runEngineConformance } from '@obversa/api/testing';
 import { ClaudeCliEngine } from '../src/index.ts';
 
 it.each([['stderr', 0], ['stdout', 0], ['stderr', 2_500]] as const)('runs the full kit through the Claude process boundary with failures on %s (structured-result boot delay %i ms)', async (stream, bootDelayMs) => {

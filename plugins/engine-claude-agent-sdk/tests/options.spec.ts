@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import type { Memory, MemoryCommand } from '@obversa/memory';
+import type { Memory, MemoryCommand } from '@obversa/api';
 import {
   AGENT_SDK_MEMORY_INSTRUCTIONS,
   AGENT_SDK_MEMORY_TOOL_DESCRIPTION,

@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import { EngineError, modelIdentity } from '@obversa/engine';
+import { EngineError, modelIdentity } from '@obversa/api';
 
 import {
   OpenCodeCliEngine,

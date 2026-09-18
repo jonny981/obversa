@@ -3,7 +3,7 @@ import { realpathSync } from 'node:fs';
 import { readFile } from 'node:fs/promises';
 import { isAbsolute, relative, resolve, sep } from 'node:path';
 
-import type { CommandCleanupCapability } from '@obversa/engine/command';
+import type { CommandCleanupCapability } from '@obversa/core/command';
 
 import type { DomainEventEnvelope, JsonObject, Sha256Digest, RunStorageBinding } from '@obversa/runtime';
 

@@ -1,6 +1,14 @@
 {
   "extends": "../../tsconfig.base.json",
   "compilerOptions": {
+    "paths": {
+      "@obversa/api": ["../api/src/index.ts"],
+      "@obversa/core": ["./src/index.ts"],
+      "@obversa/core/command": ["./src/command/run.ts"],
+      "@obversa/core/claude-stream-json": ["./src/claude-stream-json.ts"],
+      "@obversa/core/claude-tools": ["./src/claude-tools.ts"],
+      "@obversa/core/testing": ["./src/testing.ts"]
+    },
     "types": ["node"]
   },
   "include": ["src", "tests", "tsup.config.ts", "vitest.config.ts"]

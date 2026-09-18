@@ -20,6 +20,22 @@
     ".": {
       "types": "./dist/index.d.ts",
       "import": "./dist/index.js"
+    },
+    "./command": {
+      "types": "./dist/command/run.d.ts",
+      "import": "./dist/command.js"
+    },
+    "./claude-stream-json": {
+      "types": "./dist/claude-stream-json.d.ts",
+      "import": "./dist/claude-stream-json.js"
+    },
+    "./claude-tools": {
+      "types": "./dist/claude-tools.d.ts",
+      "import": "./dist/claude-tools.js"
+    },
+    "./testing": {
+      "types": "./dist/testing.d.ts",
+      "import": "./dist/testing.js"
     }
   },
   "files": [
@@ -34,6 +50,9 @@
     "typecheck:ts6": "tsc6 --noEmit -p tsconfig.json",
     "prepack": "pnpm run build",
     "prepublishOnly": "node ../../scripts/check-publish-allowlist.mjs"
+  },
+  "dependencies": {
+    "@obversa/api": "workspace:^"
   },
   "devDependencies": {
     "@types/node": "22.12.0"

@@ -13,13 +13,11 @@ import { delimiter, dirname, isAbsolute, join } from 'node:path';
 import { isDeepStrictEqual } from 'node:util';
 import {
   EngineError,
-  attemptEnvironment,
   assertReadAccess,
   canonicalJson,
   classifyEngineFailure,
   engineSelection,
   reportedUsage,
-  scrubCapture,
   type AgentRequest,
   type AgentResult,
   type AgentResultPart,
@@ -31,14 +29,16 @@ import {
   type JsonValue,
   type UsageReceipt,
   validateAgentResult,
-} from '@obversa/engine';
+} from '@obversa/api';
 import {
+  attemptEnvironment,
+  scrubCapture,
   DEFAULT_OWNED_COMMAND_LIMITS,
   OwnedCommandError,
   ownedCommandIdentity,
   resolveCommandExecutable,
   runOwnedCommand,
-} from '@obversa/engine/command';
+} from '@obversa/core/command';
 
 type PermissionMode =
   | 'default'

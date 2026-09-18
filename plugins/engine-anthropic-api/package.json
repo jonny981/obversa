@@ -37,7 +37,8 @@
   },
   "dependencies": {
     "@anthropic-ai/sdk": "0.105.0",
-    "@obversa/engine": "workspace:^",
+    "@obversa/api": "workspace:^",
+    "@obversa/core": "workspace:^",
     "p-retry": "^8.0.0",
     "p-timeout": "^7.0.1"
   },

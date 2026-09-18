@@ -140,11 +140,11 @@
         "pages": [
           "packages/runtime",
           "packages/runner",
-          "packages/engine",
-          "packages/memory",
-          "packages/process",
-          "packages/teams",
-          "packages/surface-decision"
+          "packages/api",
+          "packages/core",
+          "packages/builtin-workflows",
+          "packages/surface-decision",
+          "packages/surface-diff"
         ]
       },
       {
@@ -163,6 +163,26 @@
     ]
   },
   "redirects": [
+    {
+      "source": "/packages/engine",
+      "destination": "/packages/api"
+    },
+    {
+      "source": "/packages/memory",
+      "destination": "/packages/api"
+    },
+    {
+      "source": "/packages/process",
+      "destination": "/packages/core"
+    },
+    {
+      "source": "/packages/teams",
+      "destination": "/packages/builtin-workflows"
+    },
+    {
+      "source": "/packages/source",
+      "destination": "/packages/surface-diff"
+    },
     {
       "source": "/production-lines",
       "destination": "/workflows"

@@ -7,4 +7,4 @@ export {
   requireFinalResultText,
   validateAgentResult,
   validateIncompleteResultEvidence,
-} from '@obversa/engine';
+} from '@obversa/api';

@@ -342,11 +342,11 @@ import assert from 'node:assert/strict';
 import {
   MEMORY_ROOT,
   type MemoryResult,
-} from '@obversa/memory';
-import { runMemoryConformance } from '@obversa/memory/testing';
+} from '@obversa/api';
+import { runMemoryConformance } from '@obversa/api/testing';
 import { createSimpleMemory } from '@obversa/memory-simple';
 import { openGitMemory } from '@obversa/memory-git';
-import { MockEngine } from '@obversa/engine/testing';
+import { MockEngine } from '@obversa/api/testing';
 import { AgentSdkEngine } from '@obversa/engine-claude-agent-sdk';
 import { AnthropicApiEngine } from '@obversa/engine-anthropic-api';
 import { ClaudeCliEngine } from '@obversa/engine-claude-cli';
@@ -369,7 +369,7 @@ type RunChildCallable = typeof runChild extends (...args: never[]) => unknown ? 
 const _f22ProcessSurface: RunChildCallable = true;
 import { GrokCliEngine } from '@obversa/engine-grok-cli';
 import { OpenCodeCliEngine } from '@obversa/engine-opencode-cli';
-import { runChild } from '@obversa/process';
+import { runChild } from '@obversa/core';
 import {
   GraphValidationError,
   JsonValueError,
@@ -379,7 +379,7 @@ import {
 } from '@obversa/runtime';
 import { commandEnvironment } from '@obversa/runtime/env/command';
 import runtimePackage from '@obversa/runtime/package.json' with { type: 'json' };
-import { featureDelivery, thresholdPanel, writerReviewerPair } from '@obversa/teams';
+import { featureDelivery, thresholdPanel, writerReviewerPair } from '@obversa/builtin-workflows';
 
 const packedTeamBuilders = [featureDelivery, thresholdPanel, writerReviewerPair];
 assert.equal(packedTeamBuilders.length, 3);
@@ -692,7 +692,7 @@ async function main() {
     'utf8',
   );
   const processDocument = await readFile(
-    join(root, 'docs', 'public', 'packages', 'process.mdx'),
+    join(root, 'docs', 'public', 'packages', 'core.mdx'),
     'utf8',
   );
   const runChildExampleSource = await readFile(runChildExamplePath, 'utf8');
@@ -787,6 +787,9 @@ async function main() {
     await copyFile(turnTakingExamplePath, join(consumerDirectory, 'turn-taking.ts'));
     await copyFile(workspaceExamplePath, join(consumerDirectory, 'workspace.ts'));
     await copyFile(featureTeamExamplePath, join(consumerDirectory, 'feature-team.ts'));
+    await copyFile(join(root, 'examples', 'builtin-workflows.ts'), join(consumerDirectory, 'builtin-workflows.ts'));
+    await copyFile(join(root, 'examples', 'surface-diff.ts'), join(consumerDirectory, 'surface-diff.ts'));
+    await copyFile(join(root, 'examples', 'memory.ts'), join(consumerDirectory, 'memory.ts'));
 
     await copyFile(join(root, 'examples', 'write-and-review.ts'), join(consumerDirectory, 'write-and-review.ts'));
     await copyFile(join(root, 'examples', 'one-agent-job.ts'), join(consumerDirectory, 'one-agent-job.ts'));

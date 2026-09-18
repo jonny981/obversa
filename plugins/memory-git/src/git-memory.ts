@@ -10,7 +10,7 @@ import {
   type MemoryPath,
   type MemoryResult,
   type MemorySuccess,
-} from '@obversa/memory';
+} from '@obversa/api';
 import { RunChildError, runChild } from '@obversa/core';
 
 const META_NAME = '.obversa-memory.json';

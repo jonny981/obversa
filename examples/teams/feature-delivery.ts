@@ -1,7 +1,7 @@
 import { claude } from '@obversa/engine-claude-cli';
 import { codex } from '@obversa/engine-codex-cli';
 import { run } from '@obversa/runtime';
-import { fromFile, person, stage, workflow, type TeamSeat } from '@obversa/teams';
+import { briefFromFile, person, stage, workflow, type TeamSeat } from '@obversa/runtime';
 
 interface FeatureDeliveryEngines {
   readonly claude: (model: string) => TeamSeat;
@@ -18,7 +18,7 @@ const realEngines: FeatureDeliveryEngines = { claude, codex };
  */
 function createFeatureDelivery(engines: FeatureDeliveryEngines = realEngines) {
   return workflow('feature-delivery', {
-    brief: fromFile('briefs/triple.md'),
+    brief: briefFromFile('briefs/triple.md'),
     options: { timeout: '10m' },
 
     roles: {

@@ -9,4 +9,4 @@ export {
   type OwnedCommandObserver,
   type OwnedCommandRequest,
   type OwnedCommandResult,
-} from '@obversa/engine/command';
+} from '@obversa/core/command';

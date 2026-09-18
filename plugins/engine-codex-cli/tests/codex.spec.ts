@@ -9,7 +9,7 @@ import {
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
-import { classifyEngineFailure, finalResultText } from '@obversa/engine';
+import { classifyEngineFailure, finalResultText } from '@obversa/api';
 import { buildCodexArgs, CodexEngine } from '../src/index.ts';
 
 const VERSION_ONLY = `if (process.argv.length === 3 && process.argv[2] === '--version') {

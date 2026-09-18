@@ -23,7 +23,7 @@ const engine = new AgentSdkEngine({
 });
 ```
 
-Pass the engine instance to an Obversa runtime. Pass an `@obversa/memory`
+Pass the engine instance to an Obversa runtime. Pass an `@obversa/api` memory
 instance in the constructor when the agent needs the memory tool.
 
 ## License

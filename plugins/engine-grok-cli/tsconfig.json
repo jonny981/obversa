@@ -2,9 +2,9 @@
   "extends": "../../tsconfig.base.json",
   "compilerOptions": {
     "paths": {
-      "@obversa/engine": ["../../packages/engine/src/index.ts"],
-      "@obversa/engine/command": ["../../packages/engine/src/command/run.ts"],
-      "@obversa/engine/testing": ["../../packages/engine/src/testing.ts"]
+      "@obversa/api": ["../../packages/api/src/index.ts"],
+      "@obversa/core/command": ["../../packages/core/src/command/run.ts"],
+      "@obversa/api/testing": ["../../packages/api/src/testing.ts"]
     }
   },
   "include": ["src", "tests", "tsup.config.ts", "vitest.config.ts"]

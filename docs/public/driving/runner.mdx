@@ -475,7 +475,7 @@ report their own usage, separate from the nodes'.
 ## Process cleanup and workspace ownership
 
 The watchdog holds the workspace lease while the worker runs and while
-cleanup executes. Cleanup uses the public `@obversa/engine/command` API and
+cleanup executes. Cleanup uses the public `@obversa/core/command` API and
 its owner markers; on Linux it also finds processes carrying the worker's
 inherited marker, elsewhere it follows the observed process tree, and a
 helper that moves into a new session before it is observed is not swept.

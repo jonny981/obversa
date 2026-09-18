@@ -26,16 +26,16 @@ import {
   digestJson,
   finalResultText,
   type AgentRequest,
-} from '@obversa/engine';
-import type { OwnedCommandResult } from '@obversa/engine/command';
+} from '@obversa/api';
+import type { OwnedCommandResult } from '@obversa/core/command';
 
 const commandState = vi.hoisted(() => ({
   result: undefined as OwnedCommandResult | undefined,
 }));
 
-vi.mock('@obversa/engine/command', async () => {
-  const actual = await vi.importActual<typeof import('@obversa/engine/command')>(
-    '@obversa/engine/command',
+vi.mock('@obversa/core/command', async () => {
+  const actual = await vi.importActual<typeof import('@obversa/core/command')>(
+    '@obversa/core/command',
   );
   return {
     ...actual,

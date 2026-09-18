@@ -25,11 +25,11 @@ import {
   type AgentRequest,
   type EngineStreamEvent,
   type EngineSelectionRecord,
-} from '@obversa/engine';
+} from '@obversa/api';
 import {
   runEngineAdmissionConformance,
   runEngineConformance,
-} from '@obversa/engine/testing';
+} from '@obversa/api/testing';
 import {
   buildGrokArgs,
   GrokCliEngine,

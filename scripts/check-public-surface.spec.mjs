@@ -10,6 +10,7 @@ import {
   buildDebtIndex,
   checkPublicSurface,
   codes,
+  names,
   exportListNames,
   exportedValues,
   exportedTypes,
@@ -49,7 +50,7 @@ test('one-level export-star traversal finds values without type exports', () => 
 });
 
 test('the surface parser refuses a truncated value export list', () => {
-  const values = ['run', 'createGraphExecutor', 'startSupervisedRun', 'resolveCommandExecutable', ...Array.from({ length: 96 }, (_, i) => `value${i}`)];
+  const values = ['run', 'createGraphExecutor', 'startSupervisedRun', 'resolveCommandExecutable', 'modelIdentity', 'claudeToolOptions', ...Array.from({ length: 94 }, (_, i) => `value${i}`)];
   assert.doesNotThrow(() => assertSurfaceShape({ values }));
   assert.throws(
     () => assertSurfaceShape({ values: values.slice(0, 99) }),
@@ -58,10 +59,16 @@ test('the surface parser refuses a truncated value export list', () => {
 });
 
 test('code names come from the named unions, not every uppercase string', () => {
+  assert.ok(codes.includes('INVALID_EVENT'));
   assert.ok(codes.includes('INVALID_PREFLIGHT_CONFIG'));
   assert.ok(codes.includes('WORKSPACE_DRIFT'));
   assert.equal(codes.includes('PATH'), false);
   assert.equal(codes.includes('ERRNO'), false);
+});
+
+test('the moved public helpers stay in the surface check', () => {
+  assert.ok(names.includes('modelIdentity'));
+  assert.ok(names.includes('claudeToolOptions'));
 });
 
 test('a missing documented name is detected through a copied page string', () => {

@@ -1,4 +1,5 @@
 import { isDeepStrictEqual } from 'node:util';
+import type { ProofArtifactReference } from '@obversa/api';
 
 import type {
   ArtifactReference,
@@ -9,7 +10,7 @@ import type {
 import { canonicalJson, digestJson, type JsonObject } from '../graph/value.js';
 import { StorageError } from '../storage/error.js';
 
-export type ProofArtifactReference = ArtifactReference<'proof-packet'>;
+export type { ProofArtifactReference } from '@obversa/api';
 
 /** Write one stable proof packet and refuse a store that reports another identity. */
 export async function writeProofArtifact(

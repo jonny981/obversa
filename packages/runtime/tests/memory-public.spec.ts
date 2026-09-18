@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import { curate } from '../src/memory/index.js';
+import { curate } from '../src/memory.js';
 
 describe('runtime memory helpers', () => {
   it('keeps a grounded prompt when the curator rejects it', async () => {

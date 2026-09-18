@@ -11,22 +11,20 @@ import { z } from 'zod';
 // to the SDK's own `Options['hooks']` makes an SDK shape drift fail typecheck
 // instead of silently at runtime (the options object itself is a cast Record).
 import type { Options as SdkOptions } from '@anthropic-ai/claude-agent-sdk';
-import type { Memory, MemoryCommand } from '@obversa/memory';
+import type { Memory, MemoryCommand } from '@obversa/api';
 import {
   EngineError,
-  claudeToolOptions,
-  attemptEnvironment,
   classifyEngineFailure,
   engineSelection,
-  mapMessage,
-  newAccumulator,
-  scrubCapture,
   validateAgentResult,
   type AgentRequest,
   type AgentResult,
   type Engine,
   type EngineEventSink,
-} from '@obversa/engine';
+} from '@obversa/api';
+import { claudeToolOptions } from '@obversa/core/claude-tools';
+import { mapMessage, newAccumulator } from '@obversa/core/claude-stream-json';
+import { attemptEnvironment, scrubCapture } from '@obversa/core/command';
 
 export interface AgentSdkEngineOptions {
   readonly defaultModel?: string;

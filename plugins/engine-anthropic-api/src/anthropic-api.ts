@@ -21,13 +21,13 @@ import {
   classifyEngineFailure,
   engineSelection,
   reportedUsage,
-  retryAfterHeaderToMs,
   type AgentRequest,
   type AgentResult,
   type Engine,
   type EngineEventSink,
   type EngineSelectionRecord,
-} from '@obversa/engine';
+} from '@obversa/api';
+import { retryAfterHeaderToMs } from '@obversa/core/command';
 
 export interface AnthropicApiEngineOptions {
   readonly defaultModel?: string;

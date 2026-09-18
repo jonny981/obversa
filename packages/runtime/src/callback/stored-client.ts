@@ -1,5 +1,6 @@
 import { randomUUID } from 'node:crypto';
 
+import type { NewCallbackHistoryEvent, StoredCallbackClient } from '@obversa/api';
 import {
   validateNewDomainEvent,
   type NewDomainEvent,
@@ -29,15 +30,12 @@ import {
   validateApprovalSubject,
   type ApprovalRecord,
   type ApprovalSubject,
-  type ApprovalSubjectInput,
 } from './approval.js';
 import {
   createCallbackClient,
   validateCallbackEvent,
   type CallbackClient,
   type CallbackEvent,
-  type ClaimResult,
-  type ReleaseResult,
   type SubmitResult,
 } from './client.js';
 import {
@@ -47,35 +45,7 @@ import {
 
 const CALLBACK_EVENT_TYPE = 'callback:history-recorded';
 
-type CallbackHistoryPayload =
-  | Readonly<{ readonly event: JsonObject }>
-  | Readonly<{
-      readonly event: JsonObject;
-      readonly approvalSubject: ApprovalSubject;
-    }>;
-
-export type NewCallbackHistoryEvent = NewDomainEvent<
-  typeof CALLBACK_EVENT_TYPE,
-  1,
-  CallbackHistoryPayload
->;
-
-export interface StoredCallbackClient {
-  post(request: CallbackRequest, approvalSubject?: ApprovalSubjectInput): Promise<void>;
-  listPending(): Promise<readonly CallbackRequest[]>;
-  claim(requestId: string, routerId: string): Promise<ClaimResult>;
-  submit(
-    requestId: string,
-    claimToken: string,
-    routerId: string,
-    requestDigest: string,
-    response: JsonValue,
-    actor?: JsonObject,
-  ): Promise<SubmitResult>;
-  release(requestId: string, claimToken: string): Promise<ReleaseResult>;
-  supersede(requestId: string, supersededBy: string): Promise<void>;
-  history(requestId?: string): Promise<readonly CallbackEvent[]>;
-}
+export type { NewCallbackHistoryEvent, StoredCallbackClient } from '@obversa/api';
 
 interface StoredState {
   readonly revision: number;

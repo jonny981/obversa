@@ -11,7 +11,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { setTimeout as delay } from 'node:timers/promises';
 
-import { finalResultText } from '@obversa/engine';
+import { finalResultText } from '@obversa/api';
 import { ClaudeCliEngine } from '../src/index.ts';
 
 const ORPHAN_PID_PATH = '__ORPHAN_PID_PATH__';

@@ -3,7 +3,8 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { expect, it } from 'vitest';
-import { engineSelection, runEngineConformance, type AgentRequest } from '@obversa/engine';
+import { engineSelection, type AgentRequest } from '@obversa/api';
+import { runEngineConformance } from '@obversa/api/testing';
 import { CodexEngine } from '../src/index.ts';
 
 it.each([0, 2_500])('runs the full kit through the Codex process boundary (structured-result boot delay %i ms)', async (bootDelayMs) => {

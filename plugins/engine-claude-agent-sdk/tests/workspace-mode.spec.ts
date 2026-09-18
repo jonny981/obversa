@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
-import type { Memory } from '@obversa/memory';
+import type { Memory } from '@obversa/api';
 
 import { AgentSdkEngine, agentSdkToolOptions } from '../src/index.ts';
 

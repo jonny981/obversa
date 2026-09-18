@@ -5,8 +5,8 @@ import {
   EngineIncompleteResultError,
   engineSelection,
   type AgentRequest,
-} from '@obversa/engine';
-import type { Memory } from '@obversa/memory';
+} from '@obversa/api';
+import type { Memory } from '@obversa/api';
 import {
   AgentSdkEngine,
   type AgentSdkEngineOptions,

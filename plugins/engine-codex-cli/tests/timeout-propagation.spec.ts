@@ -1,18 +1,18 @@
 import { describe, expect, it, vi } from 'vitest';
 import { writeFileSync } from 'node:fs';
 
-import { finalResultText } from '@obversa/engine';
+import { finalResultText } from '@obversa/api';
 import type {
   OwnedCommandRequest,
   OwnedCommandResult,
-} from '@obversa/engine/command';
+} from '@obversa/core/command';
 
 const commandMock = vi.hoisted(() => ({
   runOwnedCommand: vi.fn(),
 }));
 
-vi.mock('@obversa/engine/command', async () => {
-  const actual = await vi.importActual<typeof import('@obversa/engine/command')>('@obversa/engine/command');
+vi.mock('@obversa/core/command', async () => {
+  const actual = await vi.importActual<typeof import('@obversa/core/command')>('@obversa/core/command');
   return { ...actual, runOwnedCommand: commandMock.runOwnedCommand };
 });
 

@@ -36,7 +36,7 @@
     "prepublishOnly": "node ../../scripts/check-publish-allowlist.mjs"
   },
   "dependencies": {
-    "@obversa/memory": "workspace:^",
+    "@obversa/api": "workspace:^",
     "@obversa/core": "workspace:^"
   },
   "keywords": [

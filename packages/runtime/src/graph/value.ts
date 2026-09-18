@@ -1,6 +1,7 @@
-import type { JsonObject } from '@obversa/engine';
-
 export {
+  GraphValidationError,
+  type GraphValidationIssue,
+  type RunBrief,
   JsonValueError,
   canonicalJson,
   cloneFrozenJson,
@@ -9,24 +10,4 @@ export {
   type JsonPrimitive,
   type JsonValue,
   type Sha256Digest,
-} from '@obversa/engine';
-
-export type RunBrief = JsonObject;
-
-export interface GraphValidationIssue {
-  readonly code: string;
-  readonly path: string;
-  readonly message: string;
-}
-
-export class GraphValidationError extends Error {
-  readonly issues: readonly GraphValidationIssue[];
-
-  constructor(message: string, issues: readonly GraphValidationIssue[]) {
-    super(message);
-    this.name = 'GraphValidationError';
-    this.issues = Object.freeze(
-      issues.map((issue) => Object.freeze({ ...issue })),
-    );
-  }
-}
+} from '@obversa/api';

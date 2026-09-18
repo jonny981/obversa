@@ -8,7 +8,7 @@ description: Open the current git diff for inline review in a local surface and 
 Run from the repository under review and keep the command running until the
 reviewer submits, cancels, or the session ends:
 
-    npx -y @obversa/source@0 <selected args>
+    npx -y @obversa/surface-diff@0 <selected args>
 
 Pick the arguments from what was asked for: no mode flag reviews the working
 tree; `--staged` only when the staged changes were requested; `--range A..B`

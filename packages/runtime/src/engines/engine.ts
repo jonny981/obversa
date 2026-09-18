@@ -5,8 +5,6 @@ export {
   EngineError,
   EngineIncompleteResultError,
   SUBAGENT_TOOLS,
-  attemptEnvironment,
-  attemptEnvironment as requestEnv,
   isEngine,
   type AgentRequest,
   type AgentResult,
@@ -22,6 +20,7 @@ export {
   type EngineTransportFailure,
   type Usage,
   type UsageReceipt,
-} from '@obversa/engine';
+} from '@obversa/api';
+export { attemptEnvironment, attemptEnvironment as requestEnv } from '@obversa/core/command';
 
-export type EngineName = string;
+export type { EngineName } from '@obversa/api';

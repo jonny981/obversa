@@ -98,11 +98,11 @@ trailers, or generated-by text. The author of a change is you.
 - **Hosts drive, they do not reach in.** A host (`hosts/`) starts and
   supervises runs through the public APIs. It never parses private output
   or imports runtime internals.
-- **Memory adapters implement the port.** They import `@obversa/memory` and
-  may also import `@obversa/process`; they import nothing else from this
+- **Memory adapters implement the port.** They import `@obversa/api` and
+  may also import `@obversa/core`; they import nothing else from this
   repository.
-- **Engine plugins implement the port.** They import `@obversa/engine` and
-  may also import `@obversa/process`; they import nothing else from this
+- **Engine plugins implement the port.** They import `@obversa/api` and
+  may also import `@obversa/core`; they import nothing else from this
   repository.
 - **Engines are keyed by exactly what runs.** An engine binding names the
   adapter, provider, model family, and model. It never names a lane. A

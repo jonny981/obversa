@@ -6,21 +6,21 @@ export default defineConfig({
   resolve: {
     alias: [
       {
-        find: '@obversa/engine/command',
+        find: '@obversa/core/command',
         replacement: fileURLToPath(
-          new URL('../../packages/engine/src/command/run.ts', import.meta.url),
+          new URL('../../packages/core/src/command/run.ts', import.meta.url),
         ),
       },
       {
-        find: '@obversa/engine/testing',
+        find: '@obversa/api/testing',
         replacement: fileURLToPath(
-          new URL('../../packages/engine/src/testing.ts', import.meta.url),
+          new URL('../../packages/api/src/testing.ts', import.meta.url),
         ),
       },
       {
-        find: '@obversa/engine',
+        find: '@obversa/api',
         replacement: fileURLToPath(
-          new URL('../../packages/engine/src/index.ts', import.meta.url),
+          new URL('../../packages/api/src/index.ts', import.meta.url),
         ),
       },
     ],

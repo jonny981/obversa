@@ -3,8 +3,8 @@ import { mkdtemp, realpath, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
-import { EngineError, type EngineSelectionRecord } from '@obversa/engine';
-import { MockEngine } from '@obversa/engine/testing';
+import { EngineError, type EngineSelectionRecord } from '@obversa/api';
+import { MockEngine } from '@obversa/core/testing';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import type { GraphCommand } from '../src/graph/commands.ts';

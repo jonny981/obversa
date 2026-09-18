@@ -4,6 +4,8 @@ export default defineConfig({
   entry: {
     api: 'src/api.ts',
     testing: 'src/testing.ts',
+    memory: 'src/memory.ts',
+    'workflow-support': 'src/workflow-support.ts',
     'env/command': 'src/env/command.ts',
     'storage/local': 'src/storage/local.ts',
   },

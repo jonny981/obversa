@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 
-import type { MemoryPath } from '@obversa/memory';
-import { assertMemoryConformance, runMemoryConformance } from '@obversa/memory/testing';
+import type { MemoryPath } from '@obversa/api';
+import { assertMemoryConformance, runMemoryConformance } from '@obversa/api/testing';
 import { createSimpleMemory } from '../src/index.js';
 
 describe('createSimpleMemory', () => {

@@ -16,6 +16,15 @@ importers:
       '@changesets/cli':
         specifier: 2.29.7
         version: 2.29.7(@types/node@22.12.0)
+      '@obversa/api':
+        specifier: workspace:^
+        version: link:packages/api
+      '@obversa/builtin-workflows':
+        specifier: workspace:^
+        version: link:packages/builtin-workflows
+      '@obversa/core':
+        specifier: workspace:^
+        version: link:packages/core
       '@obversa/engine-claude-cli':
         specifier: workspace:^
         version: link:plugins/engine-claude-cli
@@ -28,18 +37,15 @@ importers:
       '@obversa/engine-opencode-cli':
         specifier: workspace:^
         version: link:plugins/engine-opencode-cli
-      '@obversa/core':
-        specifier: workspace:^
-        version: link:packages/core
       '@obversa/runner':
         specifier: workspace:^
         version: link:packages/runner
       '@obversa/runtime':
         specifier: workspace:^
         version: link:packages/runtime
-      '@obversa/teams':
+      '@obversa/surface-diff':
         specifier: workspace:^
-        version: link:packages/teams
+        version: link:packages/surface-diff
       '@types/node':
         specifier: 22.12.0
         version: 22.12.0
@@ -98,19 +104,30 @@ importers:
         specifier: workspace:*
         version: link:../../packages/surface-diff
 
-  packages/engine:
-    dependencies:
-      '@obversa/core':
-        specifier: workspace:^
-        version: link:../core
+  packages/api:
     devDependencies:
       '@types/node':
         specifier: 22.12.0
         version: 22.12.0
 
-  packages/memory: {}
+  packages/builtin-workflows:
+    dependencies:
+      '@obversa/api':
+        specifier: workspace:^
+        version: link:../api
+      '@obversa/runtime':
+        specifier: workspace:^
+        version: link:../runtime
+    devDependencies:
+      '@types/node':
+        specifier: 22.12.0
+        version: 22.12.0
 
   packages/core:
+    dependencies:
+      '@obversa/api':
+        specifier: workspace:^
+        version: link:../api
     devDependencies:
       '@types/node':
         specifier: 22.12.0
@@ -118,9 +135,12 @@ importers:
 
   packages/runner:
     dependencies:
-      '@obversa/engine':
+      '@obversa/api':
         specifier: workspace:^
-        version: link:../engine
+        version: link:../api
+      '@obversa/core':
+        specifier: workspace:^
+        version: link:../core
       '@obversa/runtime':
         specifier: workspace:^
         version: link:../runtime
@@ -141,12 +161,9 @@ importers:
         specifier: ^2.0.2
         version: 2.0.2
     devDependencies:
-      '@obversa/engine':
+      '@obversa/api':
         specifier: workspace:^
-        version: link:../engine
-      '@obversa/memory':
-        specifier: workspace:^
-        version: link:../memory
+        version: link:../api
       '@types/node':
         specifier: 22.12.0
         version: 22.12.0
@@ -156,6 +173,8 @@ importers:
       execa:
         specifier: ^9.6.1
         version: 9.6.1
+
+  packages/surface-decision: {}
 
   packages/surface-diff:
     dependencies:
@@ -169,48 +188,17 @@ importers:
         specifier: 4.4.3
         version: 4.4.3
 
-  packages/surface-decision: {}
-
-  packages/teams:
-    dependencies:
-      '@obversa/engine':
-        specifier: workspace:^
-        version: link:../engine
-      '@obversa/runtime':
-        specifier: workspace:^
-        version: link:../runtime
-    devDependencies:
-      '@types/node':
-        specifier: 22.12.0
-        version: 22.12.0
-
-  plugins/engine-claude-agent-sdk:
-    dependencies:
-      '@anthropic-ai/claude-agent-sdk':
-        specifier: 0.3.241
-        version: 0.3.241(@anthropic-ai/sdk@0.105.0(zod@4.4.3))(@modelcontextprotocol/sdk@1.30.0(zod@4.4.3))(zod@4.4.3)
-      '@obversa/engine':
-        specifier: workspace:^
-        version: link:../../packages/engine
-      p-timeout:
-        specifier: ^7.0.1
-        version: 7.0.1
-      zod:
-        specifier: ^4.4.3
-        version: 4.4.3
-    devDependencies:
-      '@obversa/memory':
-        specifier: workspace:^
-        version: link:../../packages/memory
-
   plugins/engine-anthropic-api:
     dependencies:
       '@anthropic-ai/sdk':
         specifier: 0.105.0
         version: 0.105.0(zod@4.4.3)
-      '@obversa/engine':
+      '@obversa/api':
         specifier: workspace:^
-        version: link:../../packages/engine
+        version: link:../../packages/api
+      '@obversa/core':
+        specifier: workspace:^
+        version: link:../../packages/core
       p-retry:
         specifier: ^8.0.0
         version: 8.0.0
@@ -218,44 +206,74 @@ importers:
         specifier: ^7.0.1
         version: 7.0.1
 
+  plugins/engine-claude-agent-sdk:
+    dependencies:
+      '@anthropic-ai/claude-agent-sdk':
+        specifier: 0.3.241
+        version: 0.3.241(@anthropic-ai/sdk@0.105.0(zod@4.4.3))(@modelcontextprotocol/sdk@1.30.0(zod@4.4.3))(zod@4.4.3)
+      '@obversa/api':
+        specifier: workspace:^
+        version: link:../../packages/api
+      '@obversa/core':
+        specifier: workspace:^
+        version: link:../../packages/core
+      p-timeout:
+        specifier: ^7.0.1
+        version: 7.0.1
+      zod:
+        specifier: ^4.4.3
+        version: 4.4.3
+
   plugins/engine-claude-cli:
     dependencies:
-      '@obversa/engine':
+      '@obversa/api':
         specifier: workspace:^
-        version: link:../../packages/engine
+        version: link:../../packages/api
+      '@obversa/core':
+        specifier: workspace:^
+        version: link:../../packages/core
 
   plugins/engine-codex-cli:
     dependencies:
-      '@obversa/engine':
+      '@obversa/api':
         specifier: workspace:^
-        version: link:../../packages/engine
+        version: link:../../packages/api
+      '@obversa/core':
+        specifier: workspace:^
+        version: link:../../packages/core
 
   plugins/engine-grok-cli:
     dependencies:
-      '@obversa/engine':
+      '@obversa/api':
         specifier: workspace:^
-        version: link:../../packages/engine
+        version: link:../../packages/api
+      '@obversa/core':
+        specifier: workspace:^
+        version: link:../../packages/core
 
   plugins/engine-opencode-cli:
     dependencies:
-      '@obversa/engine':
+      '@obversa/api':
         specifier: workspace:^
-        version: link:../../packages/engine
+        version: link:../../packages/api
+      '@obversa/core':
+        specifier: workspace:^
+        version: link:../../packages/core
 
   plugins/memory-git:
     dependencies:
-      '@obversa/memory':
+      '@obversa/api':
         specifier: workspace:^
-        version: link:../../packages/memory
+        version: link:../../packages/api
       '@obversa/core':
         specifier: workspace:^
         version: link:../../packages/core
 
   plugins/memory-simple:
     dependencies:
-      '@obversa/memory':
+      '@obversa/api':
         specifier: workspace:^
-        version: link:../../packages/memory
+        version: link:../../packages/api
 
 packages:
 

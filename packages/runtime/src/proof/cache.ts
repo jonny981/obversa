@@ -2,74 +2,31 @@ import {
   canonicalJson,
   cloneFrozenJson,
   digestJson,
-  type JsonObject,
-  type JsonValue,
-  type Sha256Digest,
 } from '../graph/value.js';
-import type { RunStorageBinding } from '../runtime/run-definition.js';
-import { writeProofArtifact, type ProofArtifactReference } from './artifact.js';
-import {
-  resolveAcceptedResult,
-  type AcceptedResultBindingInput,
-  type AcceptedResultResolution,
-} from './acceptance.js';
+import type {
+  AcceptedResultResolution,
+  CachedProofPacket,
+  ProofCache,
+  ProofCacheCurrentBinding,
+  ProofCacheOptions,
+  ProofJob,
+  ProofPacket,
+  ProofPacketSource,
+  ProofSource,
+} from '@obversa/api';
+import { writeProofArtifact } from './artifact.js';
+import { resolveAcceptedResult } from './acceptance.js';
 
-/** Read-only sources must change their revision on every change, without reusing old revisions. */
-export interface ProofSource {
-  readonly id: string;
-  revision(): Promise<string>;
-  /** Return the full JSON value at this revision, bounded by its encoded UTF-8 size. */
-  read(expectedRevision: string, maxBytes: number): Promise<JsonValue>;
-}
-
-export interface ProofJob {
-  readonly id: string;
-  readonly mode: 'read-only' | 'effectful';
-  readonly sourceIds: readonly string[];
-  readonly proofScope: JsonObject;
-}
-
-export interface ProofPacketSource extends JsonObject {
-  readonly id: string;
-  readonly revision: string;
-  readonly digest: Sha256Digest;
-  readonly content: JsonValue;
-}
-
-export interface ProofPacket extends JsonObject {
-  readonly schemaVersion: 1;
-  readonly sources: readonly ProofPacketSource[];
-}
-
-export interface CachedProofPacket {
-  readonly packet: ProofPacket;
-  readonly inputHashes: Readonly<Record<string, Sha256Digest>>;
-  readonly proofArtifact: ProofArtifactReference;
-  readonly proofScope: JsonObject;
-}
-
-export interface ProofCacheOptions {
-  readonly storage: RunStorageBinding;
-  readonly runId: string;
-  readonly sources: readonly ProofSource[];
-  readonly proofJobs: readonly ProofJob[];
-  readonly maxPacketBytes: number;
-}
-
-export interface ProofCache {
-  packet(jobId: string): Promise<CachedProofPacket>;
-  resolveAccepted(
-    jobId: string,
-    position: string,
-    current: ProofCacheCurrentBinding,
-  ): Promise<AcceptedResultResolution>;
-}
-
-/** The host supplies the current graph, verified workspace anchor and reviewer identity. */
-export type ProofCacheCurrentBinding = Omit<
-  AcceptedResultBindingInput,
-  'inputHashes' | 'proofScope' | 'proofArtifact'
->;
+export type {
+  CachedProofPacket,
+  ProofCache,
+  ProofCacheCurrentBinding,
+  ProofCacheOptions,
+  ProofJob,
+  ProofPacket,
+  ProofPacketSource,
+  ProofSource,
+} from '@obversa/api';
 
 function identifier(value: string): void {
   if (typeof value !== 'string' || value.length === 0 || value !== value.trim()

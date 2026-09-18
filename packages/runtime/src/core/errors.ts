@@ -1,4 +1,4 @@
-import { EngineError } from '@obversa/engine';
+import { EngineError } from '@obversa/api';
 
 /**
  * Structured, classified errors so the exit report can say what failed, where in

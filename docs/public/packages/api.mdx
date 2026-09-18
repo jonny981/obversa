@@ -1,0 +1,258 @@
+---
+title: "@obversa/api"
+description: "Shared contracts and validation for engines, memory, graphs and stored records."
+---
+
+An engine runs one fresh agent attempt and returns a structured result or a
+typed failure. This package holds that contract and the memory port, shared
+by the runtime and plugins. It also defines and checks graph plans, stored
+events and artifacts, workspace bindings, callbacks, and proof records.
+The runtime executes graphs and reads or writes those records.
+Command execution belongs to
+[core](/packages/core); memory helpers belong to
+[runtime](/packages/runtime#memory-helpers).
+
+```bash
+npm install @obversa/api @obversa/runtime
+```
+
+## The contract
+
+An `Engine` has a name and a `run` method: one request, one event sink,
+one abort signal, one `AgentResult`. It may also have `admit`, which the
+runtime calls before a run when the plan asks for engine checks: `admit`
+receives the request without its prompt, and returns the identity the
+engine will run under, an `EngineSelectionRecord` with adapter, provider,
+model family, model, executable and capabilities. When the runtime passes
+the identity it saved earlier, an engine that would now run as something
+else refuses. An engine without `admit` is `unsupported` for the check, and
+the plan says whether that blocks the run.
+
+A live check is an ordinary `run` with `purpose: 'preflight'`, no tools, no
+workspace and a leaf request. It proves the seat answers; it does no work.
+
+For a command-line adapter that needs an absolute executable, use
+`resolveCommandExecutable('opencode')` from `@obversa/core/command`. It reads the reader's `PATH` when the
+file runs, so a copied example does not contain a machine-specific path.
+
+## Run one
+
+This file runs a graph whose engine is not ready and shows the check pause
+the run before any dispatch, then the resume once the engine is ready. The
+engine implements both `admit` and `run`; it is in
+`examples/preflight-host.mjs`.
+
+```ts
+import assert from 'node:assert/strict';
+import { existsSync } from 'node:fs';
+import { mkdtemp, readFile, realpath, rm, writeFile } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+
+import {
+  compileGraph,
+  createGraphExecutor,
+  dagGraphType,
+  loadRunDefinition,
+  persistRunDefinition,
+  readRunPreflight,
+  resolveGraphPlan,
+  type DagDefinition,
+  type ExecutionTarget,
+  type RunStoragePolicy,
+} from '@obversa/runtime';
+import { createLocalRunStorage } from '@obversa/runtime/storage/local';
+import { bindRun } from './preflight-host.mjs';
+
+const target = {
+  adapter: 'scripted-local',
+  provider: 'local',
+  modelFamily: 'scripted',
+  model: 'offline-check',
+  tools: [],
+} as const satisfies ExecutionTarget;
+
+const definition = {
+  id: 'preflight-executor',
+  definitionVersion: 1,
+  data: {
+    globalConcurrency: 1,
+    keyedConcurrency: {},
+    stopOnError: true,
+    retryCapPerNode: 0,
+  },
+  nodes: [{
+    id: 'check',
+    data: {
+      kind: 'required',
+      key: null,
+      lane: { id: 'local', requested: target, knownSubstitutions: [] },
+    },
+  }],
+  edges: [],
+} as const satisfies DagDefinition;
+
+const storagePolicy = {
+  schemaVersion: 1,
+  maxEventPayloadBytes: 64_000,
+  maxAppendBatchBytes: 128_000,
+  maxArtifactBytes: 1_000_000,
+  maxTotalArtifactBytesPerRun: 4_000_000,
+  retention: 'until-run-delete',
+  sensitiveContent: {
+    marked: 'reject',
+    exact: 'reject',
+    freeText: 'redact-before-hash',
+  },
+} as const satisfies RunStoragePolicy;
+
+const temporaryRoot = await realpath(await mkdtemp(join(tmpdir(), 'obversa-preflight-executor-')));
+const controlFile = join(temporaryRoot, 'control.txt');
+const runId = 'preflight-executor-run';
+const callsFile = join(temporaryRoot, 'engine-calls.log');
+let report: Record<string, unknown> | undefined;
+
+try {
+  await writeFile(controlFile, 'not-ready\n');
+  await writeFile(callsFile, '');
+  const graph = compileGraph(dagGraphType, definition);
+  const packageIdentity = {
+    source: 'npm:@example/preflight-executor',
+    version: '1.0.0',
+    digest: 'sha256:4444444444444444444444444444444444444444444444444444444444444444',
+  } as const;
+  const plan = resolveGraphPlan(graph.describe(), {
+    package: packageIdentity,
+    admission: { package: packageIdentity, permissions: [] },
+    executionLanes: [{ id: 'local', effective: target }],
+    preflight: {
+      timeoutMs: 2_000,
+      lanes: [{ laneId: 'local', live: 'required', unsupportedStatic: 'block' }],
+    },
+  });
+  const storage = createLocalRunStorage({
+    directory: join(temporaryRoot, 'storage'),
+    namespace: 'preflight-executor-example',
+    policy: storagePolicy,
+  });
+  await persistRunDefinition(storage, {
+    runId,
+    eventId: 'preflight-executor-started',
+    timestamp: new Date().toISOString(),
+    graphDefinition: graph.definition,
+    resolvedPlan: plan,
+    resolvedInputs: { controlFile, callsFile },
+    workspaceBinding: null,
+    hostBinding: null,
+  });
+
+  const loaded = await loadRunDefinition(storage, runId);
+  const makeExecutor = async () => createGraphExecutor({
+    ...await bindRun({
+      definition: loaded.record.payload.definition,
+      scratchDirectory: temporaryRoot,
+    }),
+    runId,
+    storage,
+    preflightScratchDirectory: temporaryRoot,
+  });
+
+  const paused = await (await makeExecutor()).run(new AbortController().signal);
+  if (paused.kind !== 'pause' || !('preflightEventId' in paused)) {
+    throw new Error(`Expected a preflight pause, received ${JSON.stringify(paused)}.`);
+  }
+  assert.equal(paused.code, 'PREFLIGHT_PAUSED');
+  assert.equal((await readRunPreflight(storage, runId)).phase, 'paused');
+
+  let dispatchesBeforeResume = 0;
+  for await (const event of storage.eventStore.read({
+    namespace: storage.record.namespace,
+    streamId: runId,
+  })) {
+    if (event.type === 'graph:node-dispatched') dispatchesBeforeResume += 1;
+  }
+  assert.equal(dispatchesBeforeResume, 0);
+
+  await writeFile(controlFile, 'ready\n');
+  const completed = await (await makeExecutor()).resume(
+    { preflightEventId: paused.preflightEventId },
+    new AbortController().signal,
+  );
+  if (completed.kind !== 'complete') {
+    throw new Error(`Expected completion, received ${JSON.stringify(completed)}.`);
+  }
+  assert.deepEqual(completed.output, { nodes: { check: { checked: 'offline' } } });
+  const finalPreflight = await readRunPreflight(storage, runId);
+  assert.equal(finalPreflight.phase, 'admitted');
+  assert.equal(finalPreflight.resumedPreflightEventId, paused.preflightEventId);
+  const calls = (await readFile(callsFile, 'utf8')).trim().split('\n').filter(Boolean);
+  assert.deepEqual(calls, ['static', 'live:not-ready', 'static', 'live:ready', 'ordinary']);
+
+  report = {
+    pause: { phase: 'paused', code: paused.code, dispatches: dispatchesBeforeResume },
+    resume: {
+      usedReturnedToken: finalPreflight.resumedPreflightEventId === paused.preflightEventId,
+      phase: finalPreflight.phase,
+      result: completed.kind,
+      output: completed.output,
+    },
+    calls,
+  };
+} finally {
+  await rm(temporaryRoot, { recursive: true, force: true });
+}
+
+console.log(JSON.stringify({
+  ...report,
+  temporaryDirectoryRemoved: !existsSync(temporaryRoot),
+}, null, 2));
+```
+
+What it printed is on the [graph executor](/graphs/executor) page.
+
+## Public entry points
+
+| export | what it is |
+| --- | --- |
+| `Engine`, `AgentRequest`, `AgentResult`, `EngineSelectionRecord` | The contract types. |
+| `EngineError` | A typed engine failure: `auth`, `billing`, `quota`, `rate-limit`, `model-unavailable`, `missing-cli`, `invalid-config`, `transient`, `aborted`, and the rest of `EngineFailureKind`. |
+| `canonicalJson`, `digestJson`, `cloneFrozenJson` | JSON helpers the contract uses. |
+| `modelIdentity` | The provider and model family a harness reports for the model it was given, read the same way by every harness that runs other providers' models and by the review gate that reads recorded models back; a string with no readable family is refused. |
+| `@obversa/api/testing` | `runEngineConformance` for the run contract, `runEngineAdmissionConformance` for `admit`, and `runMemoryConformance` for memory adapters. `MockEngine` is in `@obversa/core/testing`. An engine adapter author runs both engine kits; an adapter without `admit` runs the first alone. The run kit exercises the workspace modes `none`, `read` and `write` against the real adapter, never a stand-in. Its report (`EngineAdapterConformanceReport`) lists each unsupported feature under `unsupported`, with its reason. Unsupported features are never counted as passes. |
+| `runWorkspaceProviderConformance`, `assertWorkspaceProviderConformance` from `@obversa/api/testing` | Check a workspace adapter against the same workspace contract the runtime uses. |
+
+`modelIdentity` returns a `ModelIdentity`: the model family and, when the
+input names it, the provider. `provider/model` supplies both; a bare model
+supplies only its family. The family is the lowercase part before the
+model's first hyphen. Whitespace inside the identifier, a second slash,
+an empty provider or model, and an empty or `unknown` family are refused
+with an `EngineError` of kind `invalid-config`.
+
+`TeamSeat` pairs an engine with its declared identity for workflow roles.
+`SUBAGENT_TOOLS` and `CLAUDE_SUBAGENT_TOOLS` are the shared lists of
+sub-agent tool names.
+
+## Memory contract
+
+A `Memory` adapter has one `scope` and one `execute(command)` method.
+`MEMORY_ROOT` is `/memories`; every memory path starts there. Commands are
+`view`, `create`, `str_replace`, `insert`, `delete` and `rename`.
+`MemoryCommand`, `MemoryResult` and `MemoryLimits` describe requests,
+results and limits. The memory conformance kit lives at `@obversa/api/testing`.
+
+Use `ground`, `curate` and `consolidate` from `@obversa/runtime/memory` to
+read declared sources, select context and write a validated result.
+
+## Gotchas
+
+- **Unsupported is not a success.** An engine without `admit` passes a
+  static check only when the lane's policy allows unsupported seats.
+- **A command-line adapter is admitted by path and version,** not by a
+  hash of the executable, and it does not control grandchildren it cannot
+  see. An API-key adapter is admitted locally, with no executable, and its
+  retry layers are off for the check only.
+
+## Source
+
+`packages/api` in the repository. The plugins under `plugins/` implement
+this contract; the [plugins page](/plugins) lists them.

@@ -5,7 +5,7 @@ description: "The exact session, handoff, client kit, launcher and placement rul
 
 This is the reference for `@obversa/surface-decision`. To learn what a surface is and run one, read [surfaces](/concepts/surfaces); come here for the exact rules.
 
-A surface is a small user interface for one decision. The Surfacer is
+A surface is a small user interface for one decision. `@obversa/surface-decision` is
 the package that runs it: one loopback server, one single-decision session, one
 result. It owns no callback state, no routing, and no run records.
 
@@ -120,7 +120,7 @@ never by a bare name; on Linux and Windows the URL is printed instead
 (`xdg-open` runs its own helpers by bare name, and `cmd /c start` would
 take the URL as shell text), and printing the URL is the last resort
 everywhere. Your
-multiplexer supplies the panes; the Surfacer supplies the session. The
+multiplexer supplies the panes; `@obversa/surface-decision` supplies the session. The
 host's placement command is the one the host injected as
 `OBVERSA_SURFACE_BIN`, and it runs only when that value is an absolute
 path. What it receives is a one-time launch URL (single use, valid for

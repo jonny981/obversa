@@ -5,4 +5,4 @@ export {
   type EngineConformanceFixture,
   type EngineConformanceReport,
   type EngineConformanceScenario,
-} from '@obversa/engine/testing';
+} from '@obversa/api/testing';

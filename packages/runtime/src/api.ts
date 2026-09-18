@@ -1,5 +1,22 @@
 /** Public programmatic API for the Obversa graph runtime. */
 
+export {
+  briefFromFile,
+  person,
+  stage,
+  workflow,
+  type BriefSource,
+  type NamedStage,
+  type PersonRole,
+  type WorkflowConfig,
+  type WorkflowOptions,
+  type WorkflowPostContext,
+  type WorkflowRecord,
+  type WorkflowRole,
+  type WorkflowStage,
+} from './workflow.js';
+export type { TeamSeat } from '@obversa/api';
+
 export type {
   JsonPrimitive,
   JsonObject,
