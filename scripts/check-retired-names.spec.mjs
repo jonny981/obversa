@@ -151,3 +151,16 @@ test('workflow, contribution, security, agent link, and changeset files reject r
     }
   });
 });
+
+test('a file holding two retired names reports both, so one pass fixes both', () => {
+  // Reporting the first match only rebuilt the loop this check exists to end:
+  // a reader fixes what is printed, runs again, and is told about the next one.
+  withTree({
+    'examples/two.ts': "import { codex } from '@obversa/engine-codex';\nimport { workflow } from '@obversa/teams';\n",
+  }, (root) => {
+    const line = checkRetiredNames(root).find((failure) => failure.startsWith('examples/two.ts'));
+    assert.ok(line, 'the file is named');
+    assert.match(line, /@obversa\/engine-codex/);
+    assert.match(line, /@obversa\/teams/);
+  });
+});

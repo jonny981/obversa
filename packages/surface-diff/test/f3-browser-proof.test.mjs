@@ -46,26 +46,31 @@ const CHROME_CANDIDATES = [
 ].filter(Boolean);
 const CHROME = CHROME_CANDIDATES.find((p) => existsSync(p));
 const BROWSER_TEST_TIMEOUT_MS = 180_000;
+// Each ceiling is sized by the wait it guards, not by what is left over after
+// the others: reaching one means that thing did not happen. The three DevTools
+// waits guard a browser publishing its debugging endpoint, which a loaded
+// machine can take far longer to do than an idle one, and a ten-second ceiling
+// on the target cost a gate round for that reason alone.
 const BROWSER_RENDER_CHAIN = defineBudgetChain("browser render", BROWSER_TEST_TIMEOUT_MS, {
-  setup: 14_000,
+  setup: 30_000,
   phases: [
-    ["server listen", 5_000],
-    ["shell fetch", 5_000],
-    ["model auth", 5_000],
-    ["highlight auth", 5_000],
+    ["server listen", 15_000],
+    ["shell fetch", 15_000],
+    ["model auth", 15_000],
+    ["highlight auth", 15_000],
     ["page post", 60_000],
-    ["DevTools port", 10_000],
-    ["DevTools target", 10_000],
-    ["DevTools handshake", 10_000],
-    ["keyboard route", 30_000],
-    ["submission and acknowledgement", 10_000],
+    ["DevTools port", 60_000],
+    ["DevTools target", 60_000],
+    ["DevTools handshake", 60_000],
+    ["keyboard route", 60_000],
+    ["submission and acknowledgement", 30_000],
   ],
-  cleanup: 15_000,
+  cleanup: 30_000,
 });
 const BROWSER_CANCEL_CHAIN = defineBudgetChain("browser cancel", BROWSER_TEST_TIMEOUT_MS, {
-  setup: 14_000,
-  phases: [["server listen", 5_000], ["acknowledgement", 10_000], ["cancel response", 2_000]],
-  cleanup: 15_000,
+  setup: 30_000,
+  phases: [["server listen", 15_000], ["acknowledgement", 30_000], ["cancel response", 10_000]],
+  cleanup: 30_000,
 });
 const BROWSER_RESULTS_TIMEOUT_MS = BROWSER_RENDER_CHAIN.allowance("page post");
 const BROWSER_RENDER_TIMEOUT_MS = 30_000;

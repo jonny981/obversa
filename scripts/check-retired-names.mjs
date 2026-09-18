@@ -106,9 +106,12 @@ export function checkRetiredNames(root = ROOT) {
       ['retired package name', OLD_NAME],
       ['retired package archive', OLD_ARCHIVE],
     ]) {
-      const match = pattern.exec(normalized);
+      // Every match, not the first: a file holding two retired names was
+      // reported with one of them, so a reader fixed what was printed, ran
+      // again and was told about the next one. The Set below removes the
+      // repeats.
+      for (const match of normalized.matchAll(pattern)) hits.push(label + ' ' + match[0].trim());
       pattern.lastIndex = 0;
-      if (match) hits.push(label + ' ' + match[0].trim());
     }
     const compact = normalized.replace(/\+\s*\n\s*/g, '+')
       .split('\n').map((line) => line.replace(/[\\'"`\s+{},()$]/g, '')).join('\n');
