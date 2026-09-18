@@ -1,6 +1,6 @@
 ---
 title: "Run one step on another machine"
-description: "One step of a run executes on a remote machine while the orchestrator and the record stay on yours, and the change comes back as a commit."
+description: "One step of a run executes on a remote machine while the orchestrator and the record stay on yours, and the change comes back as a commit or a patch."
 ---
 
 <Note>
@@ -14,7 +14,7 @@ question that waits for a person. One or two are not: the step that builds
 the image, the step that runs the suite that takes an hour, the step that
 needs a machine larger than the one on your desk.
 
-Remote nodes let you move those steps and nothing else. One step executes
+A remote node moves one of those steps and nothing else. One step executes
 on another machine. The orchestrator stays where you started it, the event
 record is written where it always was, and the change the step made comes
 back as a commit or a patch rather than as a filesystem you have to keep
