@@ -172,7 +172,7 @@ test('clean consumer wires the described-team example', async () => {
 test('clean consumer wires the bounded process example', async () => {
   const source = await readFile(new URL('./check-clean-consumer.mjs', import.meta.url), 'utf8');
   assert.match(source, /run-child\.ts/);
-  assert.match(source, /packages', 'process\.mdx'/);
+  assert.match(source, /packages', 'core\.mdx'/);
   assert.match(source, /compiledRunChild/);
   assert.match(source, /directRunChild/);
 });

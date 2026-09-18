@@ -74,6 +74,31 @@ test('retired directories fail as full paths, split join operands, or named conc
   });
 });
 
+test('escaped regex fixtures still name retired paths', () => {
+  withTree({
+    'scripts/split-regex.mjs': "assert.match(source, /packages', 'process\\.mdx'/);\n",
+    'scripts/escaped-regex.mjs': "assert.match(source, /packages\\/source\\/assets\\/app\\.js/);\n",
+  }, (root) => {
+    const failures = checkRetiredNames(root).join('\n');
+    assert.match(failures, /split-regex\.mjs/);
+    assert.match(failures, /escaped-regex\.mjs/);
+  });
+});
+
+test('normalized text catches literal concatenation and template interpolation', () => {
+  withTree({
+    'scripts/concat-literals.mjs': "const cwd = 'packages/' + 'source/src';\n",
+    'scripts/concat-lines.mjs': "const cwd = 'packages/' +\n  'surfacer/src';\n",
+    'scripts/template.mjs': "const cwd = `packages/${'memory'}/package.json`;\n",
+    'scripts/dotted-regex.mjs': "assert.match(source, /packages\\.process\\.mdx/);\n",
+  }, (root) => {
+    const failures = checkRetiredNames(root).join('\n');
+    for (const file of ['concat-literals.mjs', 'concat-lines.mjs', 'template.mjs', 'dotted-regex.mjs']) {
+      assert.match(failures, new RegExp(file.replace('.', '\\.')));
+    }
+  });
+});
+
 test('only the exact old-page redirects and frozen release history are exempt', () => {
   withTree({
     'docs/public/docs.json': JSON.stringify({

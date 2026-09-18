@@ -20,6 +20,7 @@ const REDIRECTS = new Map([
 const OLD_PATH = /(?:^|[^A-Za-z0-9_-])(?:packages\/(?:process|source|surfacer|memory|engine|teams)|plugins\/(?:engine-codex|engine-agent-sdk))(?![A-Za-z0-9_-])/g;
 const OLD_NAME = /(?:@obversa\/(?:process|teams|engine|memory|source|surfacer|engine-codex|engine-agent-sdk)|(?:^|[^A-Za-z0-9_-])(?:engine-codex|engine-agent-sdk))(?![A-Za-z0-9_-])/g;
 const OLD_ARCHIVE = /obversa-(?:process|teams|engine|memory|source|surfacer|engine-codex|engine-agent-sdk)(?:\.tgz|-[0-9]|-\$\{)/g;
+const NORMALIZED_PATH = /(?:^|[^A-Za-z0-9_-])(?:packages[/.]?(?:process|source|surfacer|memory|engine|teams)|plugins[/.]?(?:engine-codex|engine-agent-sdk))(?![A-Za-z0-9_-])/gm;
 
 function filesUnder(root, directory) {
   const base = join(root, directory);
@@ -94,17 +95,24 @@ export function checkRetiredNames(root = ROOT) {
       failures.push(name + ': cannot read: ' + String(error));
       continue;
     }
+    // Regex escapes, quotes, and joined literals still describe locations.
+    // Read those spellings as paths, while keeping each ordinary line separate.
+    const normalized = text.replaceAll('\\/', '/').replaceAll('\\.', '.');
     const hits = [];
     for (const [label, pattern] of [
       ['retired package path', OLD_PATH],
       ['retired package name', OLD_NAME],
       ['retired package archive', OLD_ARCHIVE],
     ]) {
-      const match = pattern.exec(text);
+      const match = pattern.exec(normalized);
       pattern.lastIndex = 0;
       if (match) hits.push(label + ' ' + match[0].trim());
     }
-    hits.push(...splitPathHits(text));
+    const compact = normalized.replace(/\+\s*\n\s*/g, '+')
+      .split('\n').map((line) => line.replace(/[\\'"`\s+{},()$]/g, '')).join('\n');
+    if (NORMALIZED_PATH.test(compact)) hits.push('retired package path in compact text');
+    NORMALIZED_PATH.lastIndex = 0;
+    hits.push(...splitPathHits(normalized));
     if (hits.length) failures.push(name + ': ' + [...new Set(hits)].join('; '));
   }
   return failures;
