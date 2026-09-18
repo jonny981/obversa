@@ -617,16 +617,21 @@ describe('a declarative workflow with a person gate, run twice on one record', (
     })).toThrow(/retrySafe must be a boolean/);
   });
 
-  it('does not retry an interrupted stage after a person refuses reconciliation', async () => {
+  it('runs an interrupted stage on the next resume after a person says it did not finish', async () => {
     const directory = await mkdtemp(join(tmpdir(), 'f42-refused-'));
     const recordPath = join(directory, 'record.jsonl');
     const callbacks = createCallbackClient();
     const job = workflow('deploy-refused', {
       brief: 'Deploy this release.',
       roles: {},
-      stages: [stage('deploy', {
-        run: ['node', '-e', "require('node:fs').appendFileSync('deployments.txt', 'deployed\\n')"],
-      })],
+      stages: [
+        stage('prepare', {
+          run: ['node', '-e', "require('node:fs').appendFileSync('preparations.txt', 'prepared\\n')"],
+        }),
+        stage('deploy', {
+          run: ['node', '-e', "require('node:fs').appendFileSync('deployments.txt', 'deployed\\n')"],
+        }),
+      ],
     });
 
     try {
@@ -637,8 +642,13 @@ describe('a declarative workflow with a person gate, run twice on one record', (
       expect((await directRouter(callbacks, request, 'operator', () => ({ approved: false }))).ok).toBe(true);
 
       expect((await run(job, { cwd: directory, recordTo: recordPath, resume: true, callbacks })).outcome.status).toBe('fail');
-      expect((await run(job, { cwd: directory, recordTo: recordPath, resume: true, callbacks })).outcome.status).toBe('fail');
       expect(await readFile(join(directory, 'deployments.txt'), 'utf8')).toBe('deployed\n');
+      expect((await run(job, { cwd: directory, recordTo: recordPath, resume: true, callbacks })).outcome.status).toBe('pass');
+      expect(await readFile(join(directory, 'deployments.txt'), 'utf8')).toBe('deployed\ndeployed\n');
+      expect(await readFile(join(directory, 'preparations.txt'), 'utf8')).toBe('prepared\n');
+      expect((await run(job, { cwd: directory, recordTo: recordPath, resume: true, callbacks })).outcome.status).toBe('pass');
+      expect(await readFile(join(directory, 'deployments.txt'), 'utf8')).toBe('deployed\ndeployed\n');
+      expect(await readFile(join(directory, 'preparations.txt'), 'utf8')).toBe('prepared\n');
     } finally {
       await rm(directory, { recursive: true, force: true });
     }

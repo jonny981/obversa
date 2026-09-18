@@ -773,9 +773,6 @@ function resumeGuard(job: Job, identity: string, label: string, retrySafe: boole
           && (recorded.outcome.data as { skipped?: boolean } | undefined)?.skipped !== true) {
         restoreRecordedUsage(ctx);
         return recorded.outcome;
-      } else if (recorded.outcome.status === 'fail'
-          && (recorded.outcome.data as { resumeReconciliation?: boolean } | undefined)?.resumeReconciliation === true) {
-        return recorded.outcome;
       } else if (recorded.outcome.status === 'paused') {
         const request = recorded.outcome.data as {
           requestId?: string;
