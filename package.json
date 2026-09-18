@@ -169,7 +169,10 @@
     "example:approval": "pnpm --filter @obversa/runtime exec tsx ../../examples/approval.ts",
     "example:monitor": "pnpm --filter @obversa/runtime exec tsx ../../examples/monitor.ts",
     "verify:f68": "pnpm verify:f71 && pnpm check:consumer",
-    "example:reasoning-record": "pnpm --filter @obversa/runtime exec tsx ../../examples/reasoning-record.ts"
+    "example:reasoning-record": "pnpm --filter @obversa/runtime exec tsx ../../examples/reasoning-record.ts",
+    "check:documented-imports": "node scripts/check-documented-imports.mjs",
+    "verify:f86": "pnpm build && pnpm check:documented-imports && pnpm test:documented-imports && pnpm verify:f39 && pnpm docs:validate",
+    "test:documented-imports": "node --test scripts/check-documented-imports.spec.mjs"
   },
   "devDependencies": {
     "@arethetypeswrong/cli": "0.18.5",
