@@ -1,7 +1,7 @@
 #!/bin/bash
 # Create a cmux workspace whose terminals and agents place Obversa surfaces
 # back into this host. The workspace carries two environment variables, each
-# the absolute path of a placement script beside this command: the surface-decision package
+# the absolute path of a placement script beside this command: the surfacer
 # reads OBVERSA_SURFACE_BIN, Plannotator reads PLANNOTATOR_BROWSER. The
 # binding is per launch host, never global: nothing here writes a profile,
 # a settings file, or anything under the home directory.
