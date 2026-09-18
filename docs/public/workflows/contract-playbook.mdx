@@ -116,7 +116,10 @@ finding.
 ## What a run printed
 
 The output below is from one real run of this file, with the two command
-line tools signed in on the machine. The run stops at the person, which is
+line tools signed in on the machine. The machine that captured this
+also had an extra local search tool available to the first seat, which this
+example does not configure, so those calls are elided and a reader's own run
+will not make them. The run stops at the person, which is
 what every example here does before anything is sent or filed.
 
 ```text
@@ -125,11 +128,7 @@ contract-playbook · node clauses: start
 contract-playbook › clauses • clauses
 contract-playbook › clauses engine:thinking
 contract-playbook › clauses engine:text
-contract-playbook › clauses   tool mcp__plugin_qmd_qmd__query use
-contract-playbook › clauses   tool tool result
-contract-playbook › clauses engine:thinking
-contract-playbook › clauses   tool mcp__plugin_qmd_qmd__query use
-contract-playbook › clauses   tool tool result
+… 4 more event lines …
 contract-playbook › clauses engine:thinking
 contract-playbook › clauses engine:text
 contract-playbook › clauses   tool Read use
@@ -222,7 +221,7 @@ contract-playbook ◂ dag paused
 | --- | --- | --- |
 | clauses | Read contracts/msa.md and list every clause with the playbook rule it meets or breaks, one line each. | Every numbered clause of the contract is on the list. |
 | redline | For each clause that breaks a rule, write the replacement wording the playbook allows, with the rule it comes from. | Every breaking clause has a redline, no redline goes further than its rule, and a checker from another family has accepted the set. |
-| positions | Write the negotiating note: what to hold, what to concede and to what, and what is a walk-away. | Every redline has a position. |
+| positions | Write the negotiating note: what to hold, what to concede and to what, and what is a walk-away. | Every redline has a position, and a reviewer from another family has accepted them. |
 | negotiate | Put the redlines and the positions in front of the lawyer. | The lawyer has decided. |
 
 Where a stage's gate names a file, the package checks the file after the
