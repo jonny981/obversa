@@ -23,6 +23,8 @@
  */
 
 import type { Job, Workspace } from './types.js';
+import type { ReasoningRecorder } from '@obversa/api';
+
 import { childContext } from './context.js';
 import { LoopError } from './errors.js';
 import {
@@ -32,6 +34,8 @@ import {
   mergeBranch,
   stageAll,
   commit,
+  hasStagedChanges,
+  headSha,
   isRepo,
 } from './git.js';
 import { mergeLock, mergeSynthesis } from './merge.js';
@@ -46,6 +50,13 @@ export interface IsolatedOptions {
   label?: string;
   /** On a land-back conflict: 'fail' (default) or 'synthesize'. */
   onConflict?: 'fail' | 'synthesize';
+  /**
+   * A record of why this stage's change exists. It watches the stage's own
+   * events and, when the stage passes with something to commit, supplies the
+   * message for the commit that carries the change. A stage that changed
+   * nothing produces no commit, so it is never asked for one.
+   */
+  record?: ReasoningRecorder;
 }
 
 /** Wrap a Job so it runs in an isolated worktree and lands back on pass. */
@@ -54,6 +65,17 @@ export function isolated(job: Job, opts: IsolatedOptions = {}): Job {
   return async (parent) => {
     const base = parent.workspace;
     if (!(await isRepo({ cwd: base.dir, signal: parent.signal }))) {
+      // A stage that asked to record its reasoning cannot have it: there is
+      // no commit to carry it. Running anyway would drop the opt-in in
+      // silence, which is the one outcome the ruling forbids.
+      if (opts.record) {
+        const message = `isolated("${label}") cannot record its reasoning: ${base.dir} is not a git repository`;
+        return {
+          status: 'fail',
+          summary: message,
+          error: new LoopError({ code: 'CONFIG', message, path: [...parent.path, label] }),
+        };
+      }
       parent.log(
         `isolated("${label}") requested a worktree but ${base.dir} is not a git repo; running in the shared workspace`,
         'warn',
@@ -67,6 +89,9 @@ export function isolated(job: Job, opts: IsolatedOptions = {}): Job {
       base: 'HEAD',
       signal: parent.signal,
     });
+    // Where the fork started, so a job that commits its own work can be told
+    // apart from one that left its changes for this wrapper to commit.
+    const startSha = await headSha({ cwd: wt.dir, signal: parent.signal });
     const wtWs: Workspace = { dir: wt.dir, branch };
     try {
       const ctx = childContext(parent, {
@@ -78,10 +103,36 @@ export function isolated(job: Job, opts: IsolatedOptions = {}): Job {
       if (outcome.status === 'pass') {
         // Capture anything the job left uncommitted, then land it back.
         await stageAll({ cwd: wt.dir, signal: parent.signal });
-        await commit(
-          {
-            subject: `chore(${slug(label)}): worktree changes`,
-          },
+        // The reasoning rides the commit that carries the change: this one.
+        // It is asked for only when there is something staged, so a stage
+        // that changed nothing writes neither a commit nor a body.
+        const staged = await hasStagedChanges({ cwd: wt.dir, signal: parent.signal });
+        // A record attaches to the commit this wrapper makes, so any commit the
+        // job made itself carries no reasoning and must stop the stage. The
+        // question is whether HEAD moved, never whether anything is staged: a
+        // job that commits one file and leaves another has both a commit of its
+        // own and something staged, and reading `staged` would let that commit
+        // merge back unexplained while the body landed on the leftover.
+        if (opts.record) {
+          const head = await headSha({ cwd: wt.dir, signal: parent.signal });
+          if (head !== undefined && head !== startSha) {
+            const message = `isolated("${label}") cannot record its reasoning: the stage committed its own work, `
+              + 'and a record attaches to the commit this wrapper makes';
+            return {
+              status: 'fail',
+              summary: message,
+              error: new LoopError({ code: 'BODY', message, path: [...parent.path, label] }),
+            };
+          }
+        }
+        const message = opts.record && staged
+          ? await opts.record.message({
+            status: outcome.status,
+            ...(outcome.summary === undefined ? {} : { summary: outcome.summary }),
+          })
+          : undefined;
+        const sha = await commit(
+          message ?? { subject: `chore(${slug(label)}): worktree changes` },
           { cwd: wt.dir, signal: parent.signal },
         );
         const merged = await mergeLock(() =>
@@ -118,6 +169,12 @@ export function isolated(job: Job, opts: IsolatedOptions = {}): Job {
             };
           }
         }
+        // Told the work has landed, the recorder starts the next iteration
+        // empty; never told, it keeps the turns for another attempt. This is
+        // after the merge, not after the fork commit: a land-back that fails
+        // leaves the change outside the parent, and a recorder cleared at the
+        // fork commit would compose the retry from nothing.
+        if (opts.record && message && sha !== undefined) opts.record.committed(sha);
         await deleteBranch(base.dir, branch, { signal: parent.signal }).catch(() => {});
       }
       return outcome;
