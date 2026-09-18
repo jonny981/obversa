@@ -111,7 +111,14 @@
           "driving/runner",
           "driving/monitor",
           "hosts/cmux",
-          "hosts/review"
+          "hosts/review",
+          {
+            "group": "Remote nodes",
+            "tag": "Coming soon",
+            "pages": [
+              "driving/remote-nodes"
+            ]
+          }
         ]
       },
       {

@@ -141,6 +141,10 @@ const KNOWN_DEBT = [
     why: 'one fragment: the provider constructed and never used',
   },
   {
+    page: 'driving/remote-nodes.mdx', fault: 'example', owner: 'F37',
+    why: 'the page ships before the code, tagged coming soon, so there is nothing a reader can run yet; the stage that builds remote nodes brings the example with it',
+  },
+  {
     page: 'graphs/plan-admission.mdx', fault: 'example', owner: 'D35',
     why: 'a reference page with no quotable call, which is the fault a reference can least afford',
   },
