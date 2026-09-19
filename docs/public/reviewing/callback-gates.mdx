@@ -31,6 +31,25 @@ without asking a model what the answer meant.
   bytes, proof and workspace state it approved, so a later change cannot
   ride on an old yes.
 
+## Two ways to wait
+
+A gate waits in one of two ways, and the record is the same in both.
+
+Attended: a person is at the run, so the process stays up and waits for the
+answer. This is the mode when `onCallback: 'wait'` is set. It is never the
+default: a run exits unless you ask it to wait, whichever callbacks client
+it is given.
+
+Unattended: nobody is attached, so the run records the question and exits. A
+schedule starts the same file again with `resume: true`. The run reads its
+record first. If the answer has arrived, the step continues. If it has not,
+the run observes the pending gate and exits again with the same recorded
+pause, and asks nothing a second time. The answer arrives through the stored
+callbacks client.
+
+The difference between the modes is only whether the process stays up.
+Nothing in the record says which mode asked the question.
+
 ## See one run
 
 The example asks one approval question, has two routers compete for it,
@@ -160,9 +179,11 @@ about a proposed change, bind the approval to the evidence with
   answer shape and the input make up the request's identity; change any of
   them and a previous answer no longer applies. Changing how it is shown
   does not.
-- **Resume is explicit.** An answer arriving does not restart the run by
-  itself; the host reads the decision and resumes the step. That is what
-  lets a host decide that an approval needs a second look.
+- **Resume is explicit by default.** An answer arriving does not restart an
+  exited run by itself; the host reads the decision and resumes the step.
+  That is what lets a host decide that an approval needs a second look. With
+  `onCallback: 'wait'` the process never exited, so it continues once the
+  answer arrives.
 - **The in-memory client forgets.** It is for tests. The stored client is
   the one whose questions survive a process exit.
 

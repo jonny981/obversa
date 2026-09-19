@@ -307,6 +307,12 @@ try {
   record: finished stages are not repeated, a waiting gate is observed rather
   than asked again, and an interrupted stage runs again only when it carries
   `retrySafe: true`. Any other job appends to that record and runs again.
+  `onCallback: 'wait'` keeps the process up until an answer arrives, instead
+  of exiting with the recorded pause. The default, `'exit'`, records the
+  question and returns, so a schedule can start the same file again until
+  the answer is there. The question, the client and the record are the same
+  in both, so a record written by one mode resumes under the other.
+  Cancelling a waiting WORKFLOW reports the run as aborted and leaves the question in the record, so a later resume can still answer it. A bare `approval()` job returns the recorded pause instead.
 - `monitor: true` on `run` (on by default under `supervise`) serves the
   run's own page on a free loopback port; `RunResult.monitor` carries its
   address and closes it, and `MonitorState` is what `/state` returns. See

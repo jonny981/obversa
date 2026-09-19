@@ -6,7 +6,7 @@ import { readFile, stat } from 'node:fs/promises';
 import { join } from 'node:path';
 
 import { agentJob, RECORDED_ENGINE_USAGE, type RecordedEngineUsage } from './core/job.js';
-import { approval } from './core/approval-job.js';
+import { approval, delegateNodeJob } from './core/approval-job.js';
 import { commandJob, predicate } from './core/condition.js';
 import { copyJobMeta } from './core/describe.js';
 import { dag } from './core/dag.js';
@@ -756,7 +756,7 @@ function restoreRecordedUsage(ctx: JobContext): void {
 
 /** Reuse a completed first attempt, or reconcile an unsafe interrupted one. */
 function resumeGuard(job: Job, identity: string, label: string, retrySafe: boolean): Job {
-  return async (ctx) => {
+  const guarded: Job = async (ctx) => {
     const resumed = ctx.state[RESUME_STAGE_OUTCOMES] as ResumedStageRecords | undefined;
     const parentPath = ctx.path.slice(0, -1).join('/');
     const anchor = resumed?.anchors.get(parentPath);
@@ -767,7 +767,7 @@ function resumeGuard(job: Job, identity: string, label: string, retrySafe: boole
       if (recorded.kind === 'interrupted') {
         if (!retrySafe) {
           restoreRecordedUsage(ctx);
-          return reconcileInterrupted(ctx, job, label, identity, anchor!.recordId, recorded.startLine);
+          return reconcileInterrupted(ctx, guarded, job, label, identity, anchor!.recordId, recorded.startLine);
         }
       } else if (recorded.outcome.status === 'pass'
           && (recorded.outcome.data as { skipped?: boolean } | undefined)?.skipped !== true) {
@@ -782,39 +782,53 @@ function resumeGuard(job: Job, identity: string, label: string, retrySafe: boole
         const pending = ctx.callbacks === undefined
           ? []
           : await ctx.callbacks.listPending();
-        if (request?.requestId !== undefined
+        if (ctx.onCallback !== 'wait' && request?.requestId !== undefined
             && pending.some((candidate) => candidate.requestId === request.requestId)) {
           return recorded.outcome;
         }
         if (request?.resumeReconciliation === true && request.input?.startLine !== undefined) {
           restoreRecordedUsage(ctx);
-          return reconcileInterrupted(ctx, job, label, identity, anchor!.recordId, request.input.startLine);
+          return reconcileInterrupted(ctx, guarded, job, label, identity, anchor!.recordId, request.input.startLine);
         }
       }
     }
-    return job(ctx);
+    return delegateNodeJob(ctx, guarded, job, ctx);
   };
+  return guarded;
 }
 
 async function reconcileInterrupted(
   ctx: JobContext,
+  owner: Job,
   job: Job,
   label: string,
   identity: string,
   recordId: string,
   startLine: number,
 ): Promise<Outcome> {
-  const outcome = await approval(`reconcile ${label}`, {
+  const question = approval(`reconcile ${label}`, {
     question: `Did stage "${label}" finish? Approve to continue without running it again; refuse if it did not finish.`,
     input: { identity, workspace: ctx.workspace.dir, stage: label, recordId, startLine },
-  })(ctx);
+  });
+  const outcome = await delegateNodeJob(ctx, owner, question, {
+    ...ctx,
+    emit(event) {
+      // A crash during the wait must keep the recovery question, not rerun the stage.
+      ctx.emit(event.kind === 'dag:node' && event.outcome?.status === 'paused'
+        ? { ...event, outcome: {
+          ...event.outcome,
+          data: { ...(event.outcome.data ?? {}), resumeReconciliation: true },
+        } }
+        : event);
+    },
+  });
   if (outcome.status === 'fail' && (outcome.data as { approved?: boolean } | undefined)?.approved === false) {
     // A crash during this new attempt must not reuse the answer about the old one.
     ctx.emit({
       kind: 'dag:node', ts: Date.now(), path: ctx.path.slice(0, -1), node: label,
       phase: 'start', attempt: (ctx.graph?.attempt ?? 1) + 1,
     });
-    return job(ctx);
+    return delegateNodeJob(ctx, owner, job, ctx);
   }
   return { ...outcome, data: { ...(outcome.data ?? {}), resumeReconciliation: true } };
 }

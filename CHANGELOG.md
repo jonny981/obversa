@@ -11,6 +11,11 @@ other published package tracks its own version independently of it.
 
 ### Added
 
+- **Gates wait in two ways:** attended, when a person is at the run, the
+  process waits in place for the answer; unattended, the run records the
+  question and exits, and a scheduled `resume: true` carries on when the
+  answer has arrived or exits again with the same recorded pause and asks
+  nothing a second time. The record is the same in both modes.
 - **Webhook notifications:** `@obversa/notify-webhook` posts one message per
   interesting run event to a URL the caller supplies. `webhookNotifier({ url })`
   returns an `onEvent` handler for `run`, and six moments each become one

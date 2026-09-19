@@ -17,6 +17,7 @@
 
 import type { Job, JobContext } from './types.js';
 import { childContext } from './context.js';
+import { delegateNodeJob } from './approval-job.js';
 import { LoopError } from './errors.js';
 import { jobMeta, setMeta } from './describe.js';
 
@@ -88,7 +89,7 @@ export function withEnv(overlay: Record<string, string>, job: Job): Job {
     }
   }
   const wrapper: Job = (ctx) =>
-    job(
+    delegateNodeJob(ctx, wrapper, job,
       // Transparent: same depth and path (no new tree segment, no events of
       // its own), and the loop-feedback fields are carried through so wrapping
       // a loop body does not hide the previous iteration from it.

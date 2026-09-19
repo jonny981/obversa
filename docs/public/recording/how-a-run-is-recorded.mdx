@@ -60,10 +60,11 @@ where you point `recordTo`; starting the same workflow again with
 
 A plain `run()` opens a fresh record each time it starts. With `resume: true`
 it reads the record at `recordTo` first. For a job built with `workflow()`, a
-stage that finished is skipped. A stage that failed runs again. A gate still
-waiting for a person is observed, and the run exits with the recorded pause,
-so a run started on a schedule asks once and never twice when it reads
-the same store of pending questions. A run given a fresh in-memory
+stage that finished is skipped. A stage that failed runs again.
+A gate still waiting for a person is observed. By default the run exits with
+the recorded pause, so a run started on a schedule asks once and never twice
+when it reads the same store of pending questions. With `onCallback: 'wait'`
+the process stays up until an answer arrives. A run given a fresh in-memory
 client has nothing to read and asks again. A stage that was
 mid-flight when the process died runs again only when it carries
 `retrySafe: true`; otherwise the run pauses and asks a person to reconcile
