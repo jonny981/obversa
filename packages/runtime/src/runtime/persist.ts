@@ -117,6 +117,7 @@ export function makeRecorder(
 
 function thinEvent(event: LoopEvent): unknown {
   switch (event.kind) {
+    case 'run:end':
     case 'job:end':
     case 'loop:end':
     case 'loop:review':

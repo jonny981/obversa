@@ -15,8 +15,13 @@ names the file, relative to where you ran the command, so the path can be
 copied straight out of it. Each line is one event, in the
 order it happened.
 
+| Event | What it records |
+| --- | --- |
+| `run:start` | The run began. It carries the run id and record path when the run has them. |
+| `run:end` | The run ended. It carries the same outcome and token usage that `run()` returns. |
 
 ```text
+{"kind":"run:start","ts":1789044650084,"path":[],"recordPath":".obversa/records/offline-review.jsonl"}
 {"kind":"loop:start","ts":1789044650084,"path":["write-config"],"depth":1,"max":4}
 {"kind":"loop:iteration","ts":1789044650084,"path":["write-config"],"iteration":1}
 {"kind":"job:start","ts":1789044650084,"path":["write-config"],"label":"author"}
@@ -25,10 +30,20 @@ order it happened.
 {"kind":"job:start","ts":1789044650084,"path":["write-config"],"label":"review"}
 {"kind":"job:end","ts":1789044650084,"path":["write-config"],"label":"review","outcome":{"status":"fail","summary":"Missing a request timeout.","revision":{"reason":"Missing a request timeout.","findings":[{"reviewer":"correctness","evidence":"No timeout set; a hung upstream call blocks forever."}]}}}
 {"kind":"loop:review","ts":1789044650084,"path":["write-config"],"outcome":{"status":"fail","summary":"Missing a request timeout.","revision":{"reason":"Missing a request timeout.","findings":[{"reviewer":"correctness","evidence":"No timeout set; a hung upstream call blocks forever."}]}},"accepted":true}
+{"kind":"log","ts":1789044650084,"path":[],"level":"warn","message":"review did not pass (Missing a request timeout.); re-entering write-config"}
+{"kind":"loop:iteration","ts":1789044650084,"path":["write-config"],"iteration":2}
+{"kind":"job:start","ts":1789044650084,"path":["write-config"],"label":"author"}
+{"kind":"job:end","ts":1789044650084,"path":["write-config"],"label":"author","outcome":{"status":"pass","summary":"added a timeout after: Missing a request timeout."}}
+{"kind":"loop:condition","ts":1789044650084,"path":["write-config"],"which":"until","iteration":2,"result":{"met":true,"reason":"a draft exists: true"}}
+{"kind":"job:start","ts":1789044650084,"path":["write-config"],"label":"review"}
+{"kind":"job:end","ts":1789044650084,"path":["write-config"],"label":"review","outcome":{"status":"pass","summary":"config is complete"}}
+{"kind":"loop:review","ts":1789044650084,"path":["write-config"],"outcome":{"status":"pass","summary":"config is complete"},"accepted":false}
+{"kind":"loop:end","ts":1789044650084,"path":["write-config"],"outcome":{"status":"pass","summary":"config is complete"},"iterations":2}
+{"kind":"run:end","ts":1789044650084,"path":[],"outcome":{"status":"pass","summary":"config is complete"},"usage":{"inputTokens":0,"outputTokens":0,"cacheReadInputTokens":0,"cacheCreationInputTokens":0,"unmeasuredCalls":0},"recordPath":".obversa/records/offline-review.jsonl"}
 ```
 
-A node started, an engine call returned, a review sent the draft back, a
-node completed: nothing in those lines is a summary. They are the run.
+A node started, a review sent the draft back, the next attempt passed, and the
+run ended: nothing in those lines is a summary. They are the run.
 
 ## One event per step, appended as it happens
 

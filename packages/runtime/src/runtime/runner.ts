@@ -21,7 +21,7 @@ import { makeRecorder, readResumeRecord } from './persist.js';
 export const RESUME_STAGE_OUTCOMES = 'obversa:resumed-stage-outcomes';
 export const RESUME_RECORDED_USAGE = 'obversa:resumed-recorded-usage';
 import { ensureRunSubdir } from './paths.js';
-import { startSupervisor, newRunId, type Supervisor, type UsageTotals } from './supervisor.js';
+import { startSupervisor, newRunId, type Supervisor } from './supervisor.js';
 import { jobMeta } from '../core/describe.js';
 import { currentBranch } from '../core/git.js';
 import type { Environment, EnvHandle } from '../env/environment.js';
@@ -39,6 +39,7 @@ import type {
   LimitPolicy,
   LoopEvent,
   Outcome,
+  UsageTotals,
   Workspace,
   RunCallbacks,
 } from '../core/types.js';
@@ -316,6 +317,13 @@ export async function run(
   // carries it on every path.
   if (started) emit({ kind: 'monitor', ts: Date.now(), path: [], url: started.monitor.url });
 
+  const resultRunId = supervisor?.runId ?? runId;
+  const runIdentity = {
+    ...(resultRunId === undefined ? {} : { runId: resultRunId }),
+    ...(recordPath === undefined ? {} : { recordPath }),
+  };
+  emit({ kind: 'run:start', ts: Date.now(), path: [], ...runIdentity });
+
   // Bring the environment up for the run before the job, so the gate can test
   // the running thing. A failed start fails the run cleanly rather than throwing.
   let environment: EnvHandle | undefined;
@@ -336,13 +344,22 @@ export async function run(
         summary: `environment failed to start: ${error.message}`,
         error,
       };
+      const failStats = stats.snapshot();
+      const failUsage = usageOf(failStats);
+      emit({
+        kind: 'run:end',
+        ts: Date.now(),
+        path: [],
+        outcome: failOutcome,
+        usage: failUsage,
+        ...runIdentity,
+      });
       supervisor?.finish(failOutcome);
       started?.finish(failOutcome);
-      const failStats = stats.snapshot();
       return {
         outcome: failOutcome,
         stats: failStats,
-        usage: usageOf(failStats),
+        usage: failUsage,
         budget: budget
           ? {
               limit: budget.limit,
@@ -350,7 +367,7 @@ export async function run(
               remaining: budget.remaining(),
             }
           : undefined,
-        runId: supervisor?.runId ?? runId,
+        runId: resultRunId,
         recordPath,
         ...(started ? { monitor: started.monitor } : {}),
       };
@@ -399,14 +416,23 @@ export async function run(
     if (environment) await environment.down(controller.signal).catch(() => {});
   }
 
+  const finalStats = stats.snapshot();
+  const finalUsage = usageOf(finalStats);
+  emit({
+    kind: 'run:end',
+    ts: Date.now(),
+    path: [],
+    outcome,
+    usage: finalUsage,
+    ...runIdentity,
+  });
   supervisor?.finish(outcome);
   started?.finish(outcome);
 
-  const finalStats = stats.snapshot();
   return {
     outcome,
     stats: finalStats,
-    usage: usageOf(finalStats),
+    usage: finalUsage,
     budget: budget
       ? {
           limit: budget.limit,
@@ -414,7 +440,7 @@ export async function run(
           remaining: budget.remaining(),
         }
       : undefined,
-    runId: supervisor?.runId ?? runId,
+    runId: resultRunId,
     recordPath,
     ...(started ? { monitor: started.monitor } : {}),
     cost: options.cost

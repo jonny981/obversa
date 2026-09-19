@@ -506,6 +506,16 @@ export interface ProofRecord {
   artifact: ProofArtifact;
 }
 
+/** The token totals a run reports. */
+export interface UsageTotals {
+  readonly inputTokens: number;
+  readonly outputTokens: number;
+  readonly cacheCreationInputTokens?: number;
+  readonly cacheReadInputTokens?: number;
+  /** Calls that reported no usage, so a total can say what it is missing. */
+  readonly unmeasuredCalls?: number;
+}
+
 // ── Events ──────────────────────────────────────────────────────────────────
 // One discriminated union drives streaming, recorders, and the stats collector.
 // Every event carries the loop `path` so consumers can
@@ -514,6 +524,22 @@ export interface ProofRecord {
 export type ConditionKind = 'start' | 'until' | 'stopOn';
 
 export type LoopEvent =
+  | {
+      kind: 'run:start';
+      ts: number;
+      path: [];
+      runId?: string;
+      recordPath?: string;
+    }
+  | {
+      kind: 'run:end';
+      ts: number;
+      path: [];
+      outcome: Outcome;
+      usage: UsageTotals;
+      runId?: string;
+      recordPath?: string;
+    }
   | {
       kind: 'workflow:start';
       ts: number;

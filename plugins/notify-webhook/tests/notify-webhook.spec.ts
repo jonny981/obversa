@@ -103,6 +103,21 @@ describe('a run reaching a real endpoint', () => {
     expect(endpoint.contentTypes.every((type) => type.includes('application/json'))).toBe(true);
   });
 
+  test('run boundary events do not change the existing container messages', async () => {
+    const endpoint = await serverFor();
+    const notifier = webhookNotifier({ url: endpoint.url });
+
+    notifier.onEvent(event({ kind: 'run:start', path: [] }));
+    notifier.onEvent(event({ kind: 'loop:start', path: ['count'] }));
+    notifier.onEvent(event({
+      kind: 'loop:end', path: ['count'], outcome: { status: 'pass', summary: 'counted' },
+    }));
+    notifier.onEvent(event({ kind: 'run:end', path: [], outcome: { status: 'pass', summary: 'counted' } }));
+    await notifier.done();
+
+    expect(endpoint.received.map((message) => message.event)).toEqual(['run-started', 'finished']);
+  });
+
   test('every one of the six moments carries the text an incoming webhook renders', async () => {
     const endpoint = await serverFor();
     // One notifier per moment, because a run announces its start and its end

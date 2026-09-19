@@ -94,6 +94,7 @@ export const stageBranches = {
   F63: 'feat/markdown-corpus-search',
   F91: 'docs/search-markdown-contract',
   F67: 'feat/notify-webhook',
+  F98: 'feat/run-boundary-events',
 };
 
 export function manageStage(args, options = {}) {

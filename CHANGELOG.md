@@ -11,6 +11,13 @@ other published package tracks its own version independently of it.
 
 ### Added
 
+- **Run boundaries are events:** every `run()` emits one root `run:start`
+  before it dispatches work and one root `run:end` on pass or failure. The end
+  event carries the same outcome and token usage as `RunResult`; both events
+  carry the run id and record path when present.
+- **Supervised progress keeps the final result beside the last work stage:**
+  `run:end` sets the live last outcome to the exact run outcome without
+  resetting the last work path to root.
 - **Gates wait in two ways:** attended, when a person is at the run, the
   process waits in place for the answer; unattended, the run records the
   question and exits, and a scheduled `resume: true` carries on when the

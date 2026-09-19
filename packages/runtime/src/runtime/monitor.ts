@@ -15,8 +15,8 @@ import type { Socket } from 'node:net';
 import type { CallbackRequest } from '../callback/gate.js';
 import { jobMeta } from '../core/describe.js';
 import type { JsonObject, JsonValue } from '../graph/value.js';
-import type { Job, JobMeta, LoopEvent, Outcome, RunCallbacks } from '../core/types.js';
-import { runningTotal, type UsageTotals } from './supervisor.js';
+import type { Job, JobMeta, LoopEvent, Outcome, RunCallbacks, UsageTotals } from '../core/types.js';
+import { runningTotal } from './supervisor.js';
 
 export interface RunMonitor {
   /** The page's address: `http://127.0.0.1:<port>/`. */
@@ -109,6 +109,10 @@ class MonitorFold {
   }
 
   apply(event: LoopEvent): void {
+    if (event.kind === 'run:end') {
+      this.status = 'done';
+      this.outcome = outcomeLine(event.outcome);
+    }
     if (event.kind === 'engine:usage') {
       if (event.usage.kind === 'unknown') this.usage.unmeasuredCalls += 1;
       else {

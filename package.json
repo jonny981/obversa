@@ -128,6 +128,7 @@
     "verify:f62": "pnpm build && pnpm --filter @obversa/memory-git test && pnpm example:reasoning-record && pnpm check:tarballs && pnpm verify:f39 && pnpm docs:validate",
     "verify:f63": "pnpm build && pnpm --filter @obversa/search-markdown test && pnpm example:search-markdown && pnpm check:tarballs && node --test scripts/f66-package-shape.spec.mjs && pnpm verify:f39 && pnpm check:consumer && pnpm docs:validate",
     "verify:f91": "pnpm verify:f63",
+    "verify:f98": "pnpm verify:f75 && pnpm --filter @obversa/notify-webhook test && pnpm example:notify-webhook && pnpm test:agent-workflow",
     "verify:f71": "pnpm verify:f39 && pnpm --filter @obversa/engine-opencode-cli test",
     "verify:f72": "pnpm verify:f65 && pnpm --filter @obversa/api test && pnpm --filter @obversa/engine-opencode-cli test && pnpm --filter @obversa/builtin-workflows test",
     "verify:f66": "pnpm test:retired-names && pnpm check:retired-names && pnpm verify:f72 && pnpm --filter @obversa/core test && pnpm test:api-polish && pnpm example:api-polish && node scripts/check-page-shape.mjs",

@@ -306,6 +306,7 @@ export type {
   ProofKind,
   ProofArtifact,
   ProofRecord,
+  UsageTotals,
 } from './core/types.js';
 
 export { loop } from './core/loop.js';
@@ -439,7 +440,7 @@ export type { RecordedStage, ResumedStageRecords } from './runtime/persist.js';
 // A run's events are handed to `onEvent` as data. This turns one of them into
 // the line a person reads, so an example or a host can print a run as it
 // happens without writing its own formatter.
-export { formatEvent, type UsageTotals } from './runtime/supervisor.js';
+export { formatEvent } from './runtime/supervisor.js';
 export type { StatsSnapshot } from './core/stats.js';
 export {
   classifyEngineFailure,

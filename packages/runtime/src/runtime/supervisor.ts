@@ -21,6 +21,7 @@ import type {
   LoopEvent,
   Outcome,
   ProofRecord,
+  UsageTotals,
 } from '../core/types.js';
 
 const NOISE: ReadonlySet<LoopEvent['kind']> = new Set([
@@ -172,6 +173,9 @@ export function startSupervisor(input: {
     if (!NOISE.has(event.kind)) appendBestEffort(eventsPath, event);
 
     switch (event.kind) {
+      case 'run:end':
+        status.live.lastOutcome = outcomeSummary(event.outcome);
+        break;
       case 'loop:iteration':
         status.live.path = event.path;
         status.live.iteration = event.iteration;
@@ -484,21 +488,12 @@ export function toLine(value: string): string {
 }
 
 /**
- * The running totals a caller already holds, to print beside a usage line.
+ * Format one event with optional totals the caller already holds.
  *
- * `StatsSnapshot` accumulates these and the monitor's live status tracks
+ * `StatsSnapshot` accumulates the totals and the monitor's live status tracks
  * them, so nothing here remembers anything: the function stays one event in,
- * one string out. Omitting it prints exactly what it printed before.
+ * one string out. Omitting the totals prints exactly what it printed before.
  */
-export interface UsageTotals {
-  readonly inputTokens: number;
-  readonly outputTokens: number;
-  readonly cacheCreationInputTokens?: number;
-  readonly cacheReadInputTokens?: number;
-  /** Calls that reported no usage, so a total can say what it is missing. */
-  readonly unmeasuredCalls?: number;
-}
-
 export function formatEvent(event: LoopEvent, totals?: UsageTotals): string {
   return toLine(renderEvent(event, totals));
 }
@@ -506,6 +501,10 @@ export function formatEvent(event: LoopEvent, totals?: UsageTotals): string {
 function renderEvent(event: LoopEvent, totals?: UsageTotals): string {
   const at = event.path.length ? `${event.path.join(' › ')} ` : '';
   switch (event.kind) {
+    case 'run:start':
+      return '▸ run';
+    case 'run:end':
+      return `◂ run ${event.outcome.status}${event.outcome.late ? ' late' : ''} (${runningTotal(event.usage)})`;
     case 'loop:start':
       return `${at}▸ loop${event.max ? ` (max ${event.max})` : ''}`;
     case 'dag:start':

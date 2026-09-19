@@ -385,6 +385,10 @@ export function webhookNotifier(options: WebhookNotifierOptions): WebhookNotifie
         monitor = event.url;
         return;
       }
+      // Boundary events are not part of this container-based contract.
+      // Ignore them before depth is learned, or a root boundary silently
+      // suppresses every message from a nested run container.
+      if (event.kind === 'run:start' || event.kind === 'run:end') return;
       if (runDepth === undefined) runDepth = event.path.length;
       if (root === undefined && atRunLevel(event, runDepth)) {
         const endKind = CONTAINER_END.get(event.kind);

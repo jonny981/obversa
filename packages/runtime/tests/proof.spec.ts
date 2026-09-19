@@ -32,9 +32,11 @@ describe('prove', () => {
       },
     });
     expect(events.map((event) => event.kind)).toEqual([
+      'run:start',
       'job:start',
       'proof',
       'job:end',
+      'run:end',
     ]);
   });
 
