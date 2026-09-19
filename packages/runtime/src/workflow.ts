@@ -782,7 +782,7 @@ function resumeGuard(job: Job, identity: string, label: string, retrySafe: boole
         const pending = ctx.callbacks === undefined
           ? []
           : await ctx.callbacks.listPending();
-        if (request?.requestId !== undefined
+        if (ctx.onCallback !== 'wait' && request?.requestId !== undefined
             && pending.some((candidate) => candidate.requestId === request.requestId)) {
           return recorded.outcome;
         }

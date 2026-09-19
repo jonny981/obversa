@@ -7,6 +7,8 @@
  * same store, finds the answer and carries on.
  */
 
+import { setTimeout as delay } from 'node:timers/promises';
+
 import type { CallbackEvent } from '../callback/client.js';
 import { createCallbackGate, type CallbackRequest } from '../callback/gate.js';
 import type { JsonObject, JsonValue } from '../graph/value.js';
@@ -146,6 +148,17 @@ async function decide(ctx: JobContext, label: string, opts: ApprovalOptions): Pr
   }
   if (answer === undefined && opts.answer !== undefined) {
     answer = await answerInProcess(client, request, `${label}:answer`, opts.answer);
+  }
+  while (answer === undefined && ctx.onCallback === 'wait' && !ctx.signal.aborted
+      && (state === 'pending' || state === 'claimed')) {
+    try {
+      // The timer stays referenced: the monitor alone does not keep a run alive.
+      await delay(1_000, undefined, { signal: ctx.signal });
+    } catch (error) {
+      if (!ctx.signal.aborted) throw error;
+      break;
+    }
+    ({ state, answer } = stateOf(await client.history(request.requestId)));
   }
   if (answer === undefined) {
     return { status: 'paused', summary: `waiting for a person: ${opts.question}`, data: request };

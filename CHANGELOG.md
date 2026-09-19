@@ -11,6 +11,12 @@ other published package tracks its own version independently of it.
 
 ### Added
 
+- **Gates wait in two ways:** attended, when a person is at the run, the
+  process waits in place for the answer; unattended, the run records the
+  question and exits, and a scheduled `resume: true` carries on when the
+  answer has arrived or exits again with the same recorded pause and asks
+  nothing a second time. The record is the same in both modes.
+
 - **Workflow resume:** `run(job, { recordTo: path, resume: true })` resumes
   a declarative workflow from its own record instead of truncating it. The
   runtime seeds the recorded completions into the shared run state under

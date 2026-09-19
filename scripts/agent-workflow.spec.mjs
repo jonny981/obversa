@@ -149,6 +149,7 @@ for (const [stage, branch] of [
   ['F73', 'feat/use-case-examples-one'],
   ['F78', 'fix/stand-in-opencode-frames'],
   ['F75', 'feat/usage-totals'],
+  ['F70', 'feat/attended-callbacks'],
   ['F86', 'feat/documented-imports-resolve'],
   ['F66', 'feat/api-polish'],
   ['F83', 'fix/proof-budgets-wait-for-a-condition'],
@@ -244,6 +245,7 @@ for (const [stage, branch] of [
   ['F83', 'feat/factory-v1'],
   ['F86', 'feat/factory-v1'],
   ['F75', 'feat/factory-v1'],
+  ['F70', 'feat/factory-v1'],
   ['F62', 'feat/graph-forms-v1'],
 ]) {
   test(`${stage} refuses the wrong branch ${branch}`, () => {
