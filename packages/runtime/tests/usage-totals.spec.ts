@@ -106,7 +106,14 @@ describe('a run reports what it spent', () => {
       // number rather than by leaving the field out.
       unmeasuredCalls: 0,
     });
-    expect(formatEvent(usage('m', 5, 1), result.usage)).toContain('5/1 tok');
+    // Assert the RUN TOTAL, not the per-call figure. '5/1 tok' is what the
+    // call prints whether or not the second argument is read at all, so an
+    // assertion on it passes with the parameter ignored entirely: it proves
+    // the shape and not the wiring. This is the only part that fails if the
+    // argument is dropped.
+    const busy = await run(fnJob('spend', async () => ({ status: 'pass', summary: 'done' })));
+    const line = formatEvent(usage('m', 5, 1), { ...busy.usage, inputTokens: 1234, outputTokens: 567 });
+    expect(line).toContain('run 1234/567 tok');
   });
 });
 

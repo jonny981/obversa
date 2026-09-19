@@ -481,8 +481,10 @@ larger teams.
 - **`formatEvent(event, totals?)`.** One event of a run, as the line a person
   reads. `run` hands every event to `onEvent` as data; pass it through this to
   watch a run narrate itself without writing a formatter first. Give it the
-  running totals you already hold, from `RunResult.stats` or the monitor's
-  live status, and a usage line also reports what the run has spent so far.
+  running totals you already hold, from `RunResult.usage` or the monitor's
+  `/state`, and a usage line also reports what the run has spent so far.
+  (`RunResult.stats` is a different shape: a per-model breakdown whose fields
+  are named `totalInputTokens` and the rest, which this does not take.)
   Omitting them changes nothing about what it prints. The shape is
   `UsageTotals`: input and output tokens, and optionally what was created in
   and read from cache.
