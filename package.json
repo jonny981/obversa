@@ -171,6 +171,7 @@
     "example:approval": "pnpm --filter @obversa/runtime exec tsx ../../examples/approval.ts",
     "example:monitor": "pnpm --filter @obversa/runtime exec tsx ../../examples/monitor.ts",
     "verify:f42": "pnpm verify:f39 && pnpm --filter @obversa/builtin-workflows test",
+    "verify:f70": "pnpm verify:f42",
     "verify:f68": "pnpm verify:f71 && pnpm check:consumer",
     "example:reasoning-record": "pnpm --filter @obversa/runtime exec tsx ../../examples/reasoning-record.ts",
     "check:documented-imports": "node scripts/check-documented-imports.mjs",

@@ -83,6 +83,8 @@ export interface RunOptions {
    * process exit.
    */
   callbacks?: RunCallbacks;
+  /** Wait for an outside answer, or return paused (the default). */
+  onCallback?: 'wait' | 'exit';
   /**
    * Serve the run's own page on a free loopback port: the declared graph with
    * each step's live state, the returns, the pending questions, the record
@@ -363,6 +365,7 @@ export async function run(
     state: initialState,
     memory: options.memory,
     callbacks,
+    onCallback: options.onCallback ?? 'exit',
     workspace,
     environment,
     budget,

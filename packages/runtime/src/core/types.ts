@@ -201,6 +201,8 @@ export interface JobContext {
    * `run` to keep questions across runs.
    */
   readonly callbacks?: RunCallbacks;
+  /** Wait for an outside answer, or return paused (the default). */
+  readonly onCallback?: 'wait' | 'exit';
   /** Where this job's code lives — the working dir and branch (the substrate). */
   readonly workspace: Workspace;
   /** The running environment for this workspace, when one is up (gate target). */

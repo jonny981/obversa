@@ -26,6 +26,7 @@ import type {
   Workspace,
 } from './types.js';
 import { childContext } from './context.js';
+import { nodeJobContext } from './approval-job.js';
 import { needDecisionsOf, toCondition } from './condition.js';
 import { setMeta, jobMeta, describeConditions } from './describe.js';
 import {
@@ -232,10 +233,11 @@ export function dag(config: DagConfig): Job {
 
     const nodeCtx = (
       name: string,
+      job: Job | undefined,
       workspace?: Workspace,
       environment?: EnvHandle,
     ): JobContext =>
-      childContext(parent, {
+      nodeJobContext(childContext(parent, {
         depth,
         path: [...path, name],
         workspace,
@@ -262,7 +264,7 @@ export function dag(config: DagConfig): Job {
         stageGate: nodes.get(name)!.gate ?? null,
         timeoutMs: nodes.get(name)!.timeoutMs,
         timeoutGraceMs: nodes.get(name)!.timeoutGraceMs,
-      });
+      }), job);
 
     let forkSeq = 0;
 
@@ -278,7 +280,7 @@ export function dag(config: DagConfig): Job {
       node: DagNode,
     ): Promise<Outcome> => {
       const isolated = node.isolate ?? config.isolation === 'worktree';
-      if (!isolated) return node.job(nodeCtx(name));
+      if (!isolated) return node.job(nodeCtx(name, node.job));
 
       const base = parent.workspace;
       if (!(await isRepo({ cwd: base.dir, signal: parent.signal }))) {
@@ -286,7 +288,7 @@ export function dag(config: DagConfig): Job {
           `node "${name}" requested worktree isolation but ${base.dir} is not a git repo; running in the shared workspace`,
           'warn',
         );
-        return node.job(nodeCtx(name));
+        return node.job(nodeCtx(name, node.job));
       }
 
       const branch = `lines/${slug(config.name)}-${slug(name)}-${(forkSeq += 1)}`;
@@ -303,7 +305,7 @@ export function dag(config: DagConfig): Job {
       try {
         if (config.environment)
           envHandle = await config.environment.up(wtWs, parent.signal);
-        const outcome = await node.job(nodeCtx(name, wtWs, envHandle));
+        const outcome = await node.job(nodeCtx(name, node.job, wtWs, envHandle));
         if (outcome.status === 'pass') {
           // Capture anything the node left uncommitted, so nothing is stranded
           // in the worktree, then land it back.
@@ -451,7 +453,7 @@ export function dag(config: DagConfig): Job {
                   phase: 'done',
                 };
               if (node.when) {
-                const conditionCtx = nodeCtx(name);
+                const conditionCtx = nodeCtx(name, undefined);
                 const r = await toCondition(node.when)(conditionCtx, undefined);
                 parent.emit({
                   kind: 'condition:result',

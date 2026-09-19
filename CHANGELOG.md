@@ -11,6 +11,11 @@ other published package tracks its own version independently of it.
 
 ### Added
 
+- **Gates wait in two ways:** attended, when a person is at the run, the
+  process waits in place for the answer; unattended, the run records the
+  question and exits, and a scheduled `resume: true` carries on when the
+  answer has arrived or exits again with the same recorded pause and asks
+  nothing a second time. The record is the same in both modes.
 - **Search a local Markdown corpus before grounding it:**
   `@obversa/search-markdown` returns ranked passages with file paths and line
   ranges. Its read-only `Memory` view lets callers give only the selected files
