@@ -40,6 +40,9 @@ importers:
       '@obversa/memory-git':
         specifier: workspace:^
         version: link:plugins/memory-git
+      '@obversa/notify-webhook':
+        specifier: workspace:^
+        version: link:plugins/notify-webhook
       '@obversa/runner':
         specifier: workspace:^
         version: link:packages/runner
@@ -286,6 +289,7 @@ importers:
       '@obversa/api':
         specifier: workspace:^
         version: link:../../packages/api
+  plugins/notify-webhook: {}
 
 packages:
 

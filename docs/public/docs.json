@@ -207,6 +207,7 @@
           "packages/memory-git",
           "packages/memory-simple",
           "packages/search-markdown",
+          "packages/notify-webhook",
           {
             "group": "Coming soon",
             "tag": "Coming soon",

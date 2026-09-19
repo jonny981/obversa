@@ -1,0 +1,212 @@
+---
+title: "Webhook Notifications"
+description: "@obversa/notify-webhook posts one message per interesting run event to a URL you supply."
+---
+
+Tell somebody what a run is doing without watching it. `@obversa/notify-webhook`
+turns a run's own events into one message each and posts them to a URL you
+supply.
+
+The body carries a `text` field, which is the field a Slack, Discord or Teams
+incoming webhook renders, so those three need no code of their own. Everything
+else in the body is structured, for a relay that wants the parts.
+
+## Requirements
+
+- Node.js 22.12 or later
+- A URL to post to, supplied at run time
+
+## Install
+
+```bash
+pnpm add @obversa/notify-webhook
+```
+
+## What it sends
+
+Six moments, one message each.
+
+| Moment | The run event behind it | What the message carries |
+| --- | --- | --- |
+| `run-started` | `dag:start`, `loop:start` or `workflow:start` | What started |
+| `stage-finished` | `dag:node` reaching `done`, at any depth | The stage and how it ended |
+| `sent-back` | `dag:kickback`, or a `loop:review` that did not pass | The reason the reviewer gave, and in a graph which stage it went back to |
+| `paused` | A stage whose outcome is `paused`, or an ending event with one | The question being asked, and the run's page |
+| `finished` | An ending event whose outcome is `pass` | That it finished; the run's summary is a field on the body, not in the text |
+| `failed` | An ending event with any other outcome | Why it ended that way |
+
+Two of them carry the information rather than a pointer to it. The paused
+message names the run's page, so the person can answer from the message. The
+sent-back message carries what the reviewer said, so the news is the reason
+and not just the fact. It is posted for both shapes a review takes: a graph
+names the stage the work went back to, and a loop sends it back to its own
+body, so it names no stage.
+
+The paused message asks the person's own question, which a person gate carries
+as its own field on the outcome. Any other pause says what it is waiting for in
+its summary, and that is used as it stands.
+
+A stage that is waiting for a person has not finished, so it is reported as
+paused rather than as a stage finishing. That matters where the run stays up
+for the answer instead of ending: the run reports no outcome while it waits, so
+the stage is the only thing that says the wait is happening at all. Where the
+run does end on the wait, the stage message and the run's own outcome are the
+same news, and only the first is sent. A run with two gates is told about
+both.
+
+A run is announced once and ends once, and its own news comes from one place:
+the first graph or loop the run reports, which owns it. That container's own
+ending is the run's ending, at whatever depth it sits. The depth is read from
+the run rather than assumed, because depth is a property of what wraps the job
+and the caller decides that - a workflow's `post.always` wraps the whole graph
+in a loop, which moves every one of that graph's events one level deeper
+without making the run any different. A run that reports no container at all is
+a single job, and that job's end is the run's end, because nothing else would
+report it.
+
+News from inside the run is not filtered by depth. A stage finishing and a
+review sending work back are reported wherever they happen, including in a
+graph that something else is wrapping. Everything else a run emits, including
+every engine token, is ignored.
+
+## Usage
+
+This example runs a small graph offline whose review sends work back once, so
+the interesting messages all appear. It starts its own receiver on a port the
+operating system picks and prints what a channel would have shown; in your own
+run, pass the address of your Slack incoming webhook instead.
+
+```ts
+/**
+ * Tell somebody what the run is doing, without watching it.
+ *
+ * `@obversa/notify-webhook` is an `onEvent` consumer: it turns a run's own
+ * events into one message each and posts them to a URL you supply. The body
+ * carries a `text` field, which is the field a Slack, Discord or Teams
+ * incoming webhook renders, so those three need no code of their own.
+ *
+ * This example runs a small graph offline whose review sends work back once,
+ * so the interesting messages all appear: the run started, a stage finished,
+ * a reviewer returned work with the reason, and the run finished. The URL is
+ * not written down here either: the example starts its own receiver on a port
+ * the operating system picks and prints what a channel would have shown. In
+ * your own run, pass the address of your Slack incoming webhook instead.
+ */
+import { createServer } from 'node:http';
+import type { AddressInfo } from 'node:net';
+
+import { webhookNotifier, type WebhookMessage } from '@obversa/notify-webhook';
+import { dag, fnJob, run, type LoopEvent } from '@obversa/runtime';
+
+/** Stands in for the channel. In a real run this is Slack, and you own the URL. */
+const delivered: WebhookMessage[] = [];
+const channel = createServer((request, response) => {
+  let body = '';
+  request.on('data', (chunk: Buffer) => { body += chunk.toString('utf8'); });
+  request.on('end', () => {
+    delivered.push(JSON.parse(body) as WebhookMessage);
+    response.writeHead(200).end();
+  });
+});
+await new Promise<void>((resolve) => { channel.listen(0, '127.0.0.1', resolve); });
+const url = `http://127.0.0.1:${(channel.address() as AddressInfo).port}/`;
+
+/** The writer. In a real team this is an agent; here it gets it wrong once. */
+let drafts = 0;
+const draft = fnJob('draft', (ctx) => {
+  drafts += 1;
+  return ctx.lastReview ? `rewritten after: ${ctx.lastReview.summary}` : 'first draft';
+});
+
+/** The review. It returns the first draft with a reason, then accepts. */
+const review = fnJob('review', () => (drafts === 1
+  ? { status: 'fail' as const, summary: 'the second claim has no figure behind it', revision: { target: 'draft', reason: 'the second claim has no figure behind it' } }
+  : { status: 'pass' as const, summary: 'both claims carry a figure' }));
+
+const brief = dag({
+  name: 'brief',
+  maxKickbacks: 1,
+  nodes: {
+    draft: { desc: 'Write the brief.', gate: 'A draft exists.', job: draft },
+    review: { needs: 'draft', desc: 'Check every claim carries a figure.', gate: 'The review returned a verdict.', job: review },
+  },
+});
+
+const notifier = webhookNotifier({
+  url,
+  onError: (error) => { console.error(`the channel did not take a message: ${error.message}`); },
+});
+
+// The compiler checks the wiring here: `run` hands it a `LoopEvent` and the
+// notifier reads a `RunEvent`, so this line stops compiling the day an event
+// the notifier reads changes shape.
+const onEvent: (event: LoopEvent) => void = notifier.onEvent;
+const result = await run(brief, { onEvent });
+// Await the posts before the process can exit, or the last message is lost.
+await notifier.done();
+await new Promise<void>((resolve) => { channel.close(() => { resolve(); }); });
+
+console.log(JSON.stringify({
+  run: result.outcome.status,
+  drafts,
+  channel: delivered.map((message) => message.text),
+}, null, 2));
+
+/**
+ * Part of the documentation proof: it must fail when the behaviour it shows
+ * stops happening. A notifier that posted nothing, or that stayed silent when
+ * the reviewer sent work back, would otherwise print a passing run.
+ */
+const faults: string[] = [];
+const sent = delivered.map((message) => message.event);
+if (!sent.includes('run-started')) faults.push('the channel was never told the run started');
+if (!sent.includes('stage-finished')) faults.push('the channel was never told a stage finished');
+if (!sent.includes('sent-back')) faults.push('the channel was never told the reviewer sent work back');
+if (!sent.includes('finished')) faults.push('the channel was never told the run finished');
+const back = delivered.find((message) => message.event === 'sent-back');
+if (back && !back.text.includes('no figure behind it')) faults.push('the sent-back message dropped the reviewer reason');
+if (delivered.some((message) => message.text.trim() === '')) faults.push('a message carried no text for a channel to render');
+if (drafts !== 2) faults.push(`the draft ran ${drafts} times, so the kickback did not happen`);
+if (faults.length) {
+  for (const fault of faults) console.error(fault);
+  process.exitCode = 1;
+}
+```
+
+It prints:
+
+```json
+{
+  "run": "pass",
+  "drafts": 2,
+  "channel": [
+    "Run started: brief.",
+    "Stage finished: draft (pass)",
+    "Stage finished: review (fail)",
+    "Sent back: review returned work to draft\nthe second claim has no figure behind it",
+    "Stage finished: draft (pass)",
+    "Stage finished: review (pass)",
+    "Run finished."
+  ]
+}
+```
+
+## What it does not send
+
+A failure is reported from the event that ends the run, never from the `error`
+event. A loop can emit `error` in one iteration and pass in the next, so
+notifying on it would announce a failure for a run that went on to succeed.
+The ending event carries the same text in its summary.
+
+A resumed run sends nothing of its own, because nothing in a run says it
+resumed: the caller passed `resume: true` and already knows.
+
+## Failure
+
+A notification that cannot be delivered never fails the run. A refused or
+unreachable endpoint reaches `onError` and the run carries on. Messages are
+posted in the order the run made them, so one slow post delays the rest rather
+than letting them overtake it.
+
+Await `done()` after the run. Without it the process can exit before the last
+message is posted.
