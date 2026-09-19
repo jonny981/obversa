@@ -70,6 +70,11 @@ manifest("plugins/memory-simple", {
   exports: { ".": "./src/index.mjs" },
   imports: { "#sneak": "../surface-decision/src/index.mjs" },
 });
+manifest("plugins/notify-webhook", {
+  name: "@obversa/notify-webhook",
+  type: "module",
+  exports: { ".": "./src/index.mjs" },
+});
 for (const name of ["engine-claude-agent-sdk", "engine-anthropic-api", "engine-claude-cli", "engine-codex-cli", "engine-grok-cli", "engine-opencode-cli"]) {
   manifest(`plugins/${name}`, {
     name: `@obversa/${name}`,
@@ -143,6 +148,9 @@ const forbidden = [
   ["examples/bad7.mjs", "import '@obversa/does-not-resolve';\n", "no-unresolvable-example"],
   ["plugins/memory-simple/src/f2.mjs", "import '@obversa/runtime';\n", "memory-plugin-reaches-memory-only"],
   ["plugins/engine-codex-cli/src/f3.mjs", "import '@obversa/builtin-workflows';\n", "engine-plugin-reaches-engine-only"],
+  // The notifier reads run events as plain data, so unlike its siblings it may
+  // not reach api or core either: its rule forbids every package here.
+  ["plugins/notify-webhook/src/f4.mjs", "import '@obversa/api';\n", "notify-plugin-reaches-nothing"],
   ["plugins/engine-claude-agent-sdk/src/f4.mjs", "import '@obversa/runtime';\n", "agent-sdk-plugin-reaches-interfaces-only"],
 ];
 for (const [path, content] of forbidden) if (content !== null) file(path, content);

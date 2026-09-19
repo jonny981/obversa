@@ -58,7 +58,7 @@ Six moments, one message each.
 | `stage-finished` | `dag:node` reaching `done` at the top level | The stage and how it ended |
 | `sent-back` | `dag:kickback` | Who returned the work, to which stage, and the reason |
 | `paused` | A stage whose outcome is `paused`, or an ending event with one | The question being asked, and the run's page |
-| `finished` | An ending event whose outcome is `pass` | The run's summary |
+| `finished` | An ending event whose outcome is `pass` | That it finished; the run's summary is a field on the body, not in the text |
 | `failed` | An ending event with any other outcome | Why it ended that way |
 
 Two of them carry the information rather than a pointer to it. The paused
