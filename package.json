@@ -173,7 +173,8 @@
     "example:reasoning-record": "pnpm --filter @obversa/runtime exec tsx ../../examples/reasoning-record.ts",
     "check:documented-imports": "node scripts/check-documented-imports.mjs",
     "verify:f86": "pnpm build && pnpm verify:f39 && pnpm docs:validate",
-    "test:documented-imports": "node --test scripts/check-documented-imports.spec.mjs"
+    "test:documented-imports": "node --test scripts/check-documented-imports.spec.mjs",
+    "verify:f75": "pnpm build && pnpm --filter @obversa/runtime test && pnpm verify:f39 && pnpm docs:validate"
   },
   "devDependencies": {
     "@arethetypeswrong/cli": "0.18.5",
