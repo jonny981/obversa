@@ -16,6 +16,7 @@ import type { CallbackRequest } from '../callback/gate.js';
 import { jobMeta } from '../core/describe.js';
 import type { JsonObject, JsonValue } from '../graph/value.js';
 import type { Job, JobMeta, LoopEvent, Outcome, RunCallbacks } from '../core/types.js';
+import type { UsageTotals } from './supervisor.js';
 
 export interface RunMonitor {
   /** The page's address: `http://127.0.0.1:<port>/`. */
@@ -54,6 +55,8 @@ export interface MonitorState {
   outcome?: { status: Outcome['status']; summary?: string };
   nodes: Record<string, MonitorNodeState>;
   kickbacks: MonitorKickback[];
+  /** What the run has spent so far, the same shape the line formatter takes. */
+  usage: UsageTotals;
   pending: Array<{ requestId: string; decisionText: string; input: JsonValue }>;
   events: Array<{ kind: string; ts: number; path: string[]; node?: string; label?: string; summary?: string }>;
 }
@@ -83,6 +86,7 @@ class MonitorFold {
   readonly nodes: Record<string, MonitorNodeState> = {};
   readonly kickbacks: MonitorKickback[] = [];
   readonly events: MonitorState['events'] = [];
+  readonly usage = { inputTokens: 0, outputTokens: 0, cacheReadInputTokens: 0, cacheCreationInputTokens: 0, unmeasuredCalls: 0 };
   status: MonitorState['status'] = 'running';
   outcome?: MonitorState['outcome'];
   readonly name?: string;
@@ -103,6 +107,15 @@ class MonitorFold {
   }
 
   apply(event: LoopEvent): void {
+    if (event.kind === 'engine:usage') {
+      if (event.usage.kind === 'unknown') this.usage.unmeasuredCalls += 1;
+      else {
+        this.usage.inputTokens += event.usage.inputTokens;
+        this.usage.outputTokens += event.usage.outputTokens;
+        this.usage.cacheReadInputTokens += event.usage.cacheReadInputTokens ?? 0;
+        this.usage.cacheCreationInputTokens += event.usage.cacheCreationInputTokens ?? 0;
+      }
+    }
     // Only the root dag's nodes are the page's nodes; a nested dag's are its
     // own step's business and show through that step's outcome.
     if (event.kind === 'dag:node' && event.path.length <= 1) {
@@ -234,6 +247,7 @@ export async function startMonitor(opts: { job: Job; callbacks: RunCallbacks; ru
     ...(fold.outcome !== undefined ? { outcome: fold.outcome } : {}),
     nodes: fold.nodes,
     kickbacks: fold.kickbacks,
+    usage: fold.usage,
     pending: await pendingOf(opts.callbacks),
     events: fold.events,
   });

@@ -46,6 +46,16 @@ other published package tracks its own version independently of it.
   produces no commit and no body.
 
 - **One identity derivation for every harness that runs other providers' models:** `@obversa/api` exports `modelIdentity`, which reads the provider and model family from the model string a harness was given, or refuses a string with no readable family. The OpenCode adapter derives its seat identity through it, and the review gate reads recorded models through the same function, so two seats on one model wearing different tool names cannot pass as a cross-family panel.
+- **See what a run is spending while it runs:** a usage line now reports the
+  run's running total beside the call's own, as
+  `<model>: 120/40 tok (run 1200/400 tok, 900 tok from cache)`. Pass the totals
+  you already hold to `formatEvent(event, totals)`; omitting them changes
+  nothing about what it prints. `StatsSnapshot` gains run-wide
+  `totalCacheReadInputTokens` and `totalCacheCreationInputTokens`, kept
+  separate because one is what was served from cache and the other what was
+  paid to build it. A total that is missing calls says so, in the same words
+  a single call uses: `usage unknown on 3 calls`. The monitor's `/state`
+  carries the same totals.
 - **Watch a run without writing a formatter:** `@obversa/runtime` exports
   `formatEvent`, which turns one event from `onEvent` into the line a person
   reads. Every use-case example prints its run through it.

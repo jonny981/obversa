@@ -21,7 +21,7 @@ import { makeRecorder, readResumeRecord } from './persist.js';
 export const RESUME_STAGE_OUTCOMES = 'obversa:resumed-stage-outcomes';
 export const RESUME_RECORDED_USAGE = 'obversa:resumed-recorded-usage';
 import { ensureRunSubdir } from './paths.js';
-import { startSupervisor, newRunId, type Supervisor } from './supervisor.js';
+import { startSupervisor, newRunId, type Supervisor, type UsageTotals } from './supervisor.js';
 import { jobMeta } from '../core/describe.js';
 import { currentBranch } from '../core/git.js';
 import type { Environment, EnvHandle } from '../env/environment.js';
@@ -137,9 +137,27 @@ export interface RunOptions {
   cost?: { prices: PriceTable; baselineModel?: string };
 }
 
+/** The run's totals, in the shape the line formatter takes. */
+function usageOf(snapshot: StatsSnapshot): UsageTotals {
+  return {
+    inputTokens: snapshot.totalInputTokens,
+    outputTokens: snapshot.totalOutputTokens,
+    cacheReadInputTokens: snapshot.totalCacheReadInputTokens,
+    cacheCreationInputTokens: snapshot.totalCacheCreationInputTokens,
+    unmeasuredCalls: snapshot.totalUnmeasuredCalls,
+  };
+}
+
 export interface RunResult {
   outcome: Outcome;
   stats: StatsSnapshot;
+  /**
+   * What the whole run spent, in the shape `formatEvent` takes, so the totals
+   * a run reports can be handed straight back to the line formatter. The same
+   * numbers are in `stats`; this is the summary a person reads rather than the
+   * per-model record.
+   */
+  usage: UsageTotals;
   /** Final token accounting, when a budget was set. */
   budget?: { limit: number; spent: number; remaining: number };
   /** The registry id, when the run was supervised. */
@@ -315,9 +333,11 @@ export async function run(
       };
       supervisor?.finish(failOutcome);
       started?.finish(failOutcome);
+      const failStats = stats.snapshot();
       return {
         outcome: failOutcome,
-        stats: stats.snapshot(),
+        stats: failStats,
+        usage: usageOf(failStats),
         budget: budget
           ? {
               limit: budget.limit,
@@ -380,6 +400,7 @@ export async function run(
   return {
     outcome,
     stats: finalStats,
+    usage: usageOf(finalStats),
     budget: budget
       ? {
           limit: budget.limit,

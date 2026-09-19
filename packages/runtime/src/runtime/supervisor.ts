@@ -73,6 +73,10 @@ export interface RunLive {
   usage: {
     inputTokens: number;
     outputTokens: number;
+    /** What this run has been served from cache, the figure the line reports. */
+    cacheReadInputTokens: number;
+    /** What it paid to build that cache, kept separate on purpose. */
+    cacheCreationInputTokens: number;
     calls: number;
     unknownUsageCalls: number;
   };
@@ -134,6 +138,8 @@ export function startSupervisor(input: {
       usage: {
         inputTokens: 0,
         outputTokens: 0,
+        cacheReadInputTokens: 0,
+        cacheCreationInputTokens: 0,
         calls: 0,
         unknownUsageCalls: 0,
       },
@@ -234,6 +240,8 @@ export function startSupervisor(input: {
         } else {
           status.live.usage.inputTokens += event.usage.inputTokens;
           status.live.usage.outputTokens += event.usage.outputTokens;
+          status.live.usage.cacheReadInputTokens += event.usage.cacheReadInputTokens ?? 0;
+          status.live.usage.cacheCreationInputTokens += event.usage.cacheCreationInputTokens ?? 0;
         }
         break;
       case 'proof': {
@@ -443,19 +451,59 @@ export function readRunProgress(
     startedAt: status.startedAt,
     updatedAt: status.updatedAt,
     blocker: deriveBlocker(status.status, events, status.live),
-    recent: events.slice(-(options?.recent ?? 10)).map(formatEvent),
+    // Not `.map(formatEvent)`: map passes the index as the second argument,
+    // which now lands in `totals`. The compiler caught it, and the same trap
+    // waits for any caller who passes this function by reference.
+    recent: events.slice(-(options?.recent ?? 10)).map((event) => formatEvent(event)),
   };
+}
+
+function runningTotal(totals: UsageTotals): string {
+  // Cache READ only, and named. Creation and read are different things:
+  // creation is what was paid to build the cache, read is what was served
+  // from it. Summing them under one word makes a reader guess which they are
+  // looking at, and a number whose meaning is guessed is worse than none on a
+  // page whose whole subject is being transparent about spend. Both figures
+  // stay on StatsSnapshot in full; this line is a summary, not the record.
+  const read = totals.cacheReadInputTokens ?? 0;
+  const unmeasured = totals.unmeasuredCalls ?? 0;
+  // Shown only when there is one, so an honest complete run stays clean and an
+  // incomplete one says so rather than presenting a total as the whole story.
+  // The words are the ones a single call already prints, "usage unknown", so a
+  // reader who learns the phrase once knows it at both levels instead of
+  // meeting two spellings of one idea and wondering if they differ.
+  const missing = unmeasured > 0 ? `, usage unknown on ${unmeasured} call${unmeasured === 1 ? '' : 's'}` : '';
+  const base = `${totals.inputTokens}/${totals.outputTokens} tok`;
+  // The unit stays on the number: a bare 900 beside a labelled pair reads as
+  // the same kind of thing as the pair, and it is not.
+  return `${base}${read > 0 ? `, ${read} tok from cache` : ''}${missing}`;
 }
 
 export function toLine(value: string): string {
   return value.replace(/[\u0000-\u001f\u007f]+/g, ' ');
 }
 
-export function formatEvent(event: LoopEvent): string {
-  return toLine(renderEvent(event));
+/**
+ * The running totals a caller already holds, to print beside a usage line.
+ *
+ * `StatsSnapshot` accumulates these and the monitor's live status tracks
+ * them, so nothing here remembers anything: the function stays one event in,
+ * one string out. Omitting it prints exactly what it printed before.
+ */
+export interface UsageTotals {
+  readonly inputTokens: number;
+  readonly outputTokens: number;
+  readonly cacheCreationInputTokens?: number;
+  readonly cacheReadInputTokens?: number;
+  /** Calls that reported no usage, so a total can say what it is missing. */
+  readonly unmeasuredCalls?: number;
 }
 
-function renderEvent(event: LoopEvent): string {
+export function formatEvent(event: LoopEvent, totals?: UsageTotals): string {
+  return toLine(renderEvent(event, totals));
+}
+
+function renderEvent(event: LoopEvent, totals?: UsageTotals): string {
   const at = event.path.length ? `${event.path.join(' › ')} ` : '';
   switch (event.kind) {
     case 'loop:start':
@@ -488,10 +536,14 @@ function renderEvent(event: LoopEvent): string {
       return `${at}• ${event.label}: ${event.outcome.status}${event.outcome.late ? ' late' : ''}`;
     case 'engine:tool':
       return `${at}  tool ${event.name} ${event.phase}`;
-    case 'engine:usage':
-      return event.usage.kind === 'unknown'
-        ? `${at}  ${event.model}: usage unknown`
-        : `${at}  ${event.model}: ${event.usage.inputTokens}/${event.usage.outputTokens} tok`;
+    case 'engine:usage': {
+      if (event.usage.kind === 'unknown') return `${at}  ${event.model}: usage unknown`;
+      const call = `${event.usage.inputTokens}/${event.usage.outputTokens} tok`;
+      // A person watching wants both: what this call cost, and what the run
+      // has cost so far. Without the second, a long run is a wall of numbers
+      // that never answers the question being asked.
+      return `${at}  ${event.model}: ${call}${totals ? ` (run ${runningTotal(totals)})` : ''}`;
+    }
     case 'loop:stall':
       return `${at}⏹ stalled after ${event.report.iterations.length} no-progress iterations: ${event.report.reason}`;
     case 'limit:wait':
