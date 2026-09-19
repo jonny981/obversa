@@ -47,6 +47,16 @@ the tool a reader already has installed and authenticated.
   Node.js 22.12 or later and Git installed. Home:
   [The memory-git package](/packages/memory-git).
 
+## Notifications
+
+- **Webhook notifications.** `@obversa/notify-webhook` posts one message per
+  interesting run event to a URL you supply: the run started, a stage
+  finished, a review sent work back with the reason, the run is waiting for a
+  person, and how it ended. The body carries a `text` field, so a Slack,
+  Discord or Teams incoming webhook renders it with no code of its own. A
+  reader needs Node.js 22.12 or later and a URL to post to. Home:
+  [The notify-webhook package](/packages/notify-webhook).
+
 ## Hosts and surfaces
 
 - **The review command.** `@obversa/surface-diff` ships the `obversa-review`

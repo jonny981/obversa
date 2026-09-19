@@ -45,7 +45,7 @@ module.exports = {
       from: { path: '^examples/' },
       to: {
         couldNotResolve: true,
-        pathNot: '^@obversa/(api|builtin-workflows|core|engine-anthropic-api|engine-claude-agent-sdk|engine-claude-cli|engine-codex-cli|engine-grok-cli|engine-opencode-cli|memory-git|memory-simple|runner|runtime|surface-decision|surface-diff)(/|$)',
+        pathNot: '^@obversa/(api|builtin-workflows|core|engine-anthropic-api|engine-claude-agent-sdk|engine-claude-cli|engine-codex-cli|engine-grok-cli|engine-opencode-cli|memory-git|memory-simple|notify-webhook|runner|runtime|surface-decision|surface-diff)(/|$)',
       },
     },
     {

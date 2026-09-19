@@ -88,6 +88,7 @@ export const stageBranches = {
   F66: 'feat/api-polish',
   F83: 'fix/proof-budgets-wait-for-a-condition',
   F62: 'feat/reasoning-record',
+  F67: 'feat/notify-webhook',
 };
 
 export function manageStage(args, options = {}) {

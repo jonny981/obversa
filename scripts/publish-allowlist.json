@@ -11,7 +11,7 @@
     "@obversa/engine-grok-cli",
     "@obversa/engine-opencode-cli",
     "@obversa/memory-git",
-    "@obversa/memory-simple",
+    "@obversa/memory-simple", "@obversa/notify-webhook",
     "@obversa/runner",
     "@obversa/runtime",
     "@obversa/surface-decision",

@@ -11,6 +11,22 @@ other published package tracks its own version independently of it.
 
 ### Added
 
+- **Webhook notifications:** `@obversa/notify-webhook` posts one message per
+  interesting run event to a URL the caller supplies. `webhookNotifier({ url })`
+  returns an `onEvent` handler for `run`, and six moments each become one
+  message: the run started, a stage finished, a review sent work back, the run
+  is waiting for a person, the run finished, the run failed. The body carries a
+  `text` field, which is the field a Slack, Discord or Teams incoming webhook
+  renders, so those three need no code of their own; the rest of the body is
+  structured for a relay. Two messages carry the information rather than a
+  pointer to it: the paused message names the run's page on its own line, and
+  the sent-back message carries the reviewer's reason on its own line. A
+  failure is reported from the event that ends the run and never from the
+  `error` event, because a loop can emit `error` in one iteration and pass in
+  the next. A notification that cannot be delivered reaches `onError` and never
+  fails the run, and messages are posted in the order the run made them. Await
+  `done()` after the run so the last message is not lost.
+
 - **Workflow resume:** `run(job, { recordTo: path, resume: true })` resumes
   a declarative workflow from its own record instead of truncating it. The
   runtime seeds the recorded completions into the shared run state under

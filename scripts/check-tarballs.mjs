@@ -399,6 +399,14 @@ export const EXPECTED_FILES = {
     'package/dist/index.js.map',
     'package/package.json',
   ],
+  '@obversa/notify-webhook': [
+    'package/LICENSE',
+    'package/README.md',
+    'package/dist/index.d.ts',
+    'package/dist/index.js',
+    'package/dist/index.js.map',
+    'package/package.json',
+  ],
   '@obversa/core': [
     'package/LICENSE',
     'package/README.md',

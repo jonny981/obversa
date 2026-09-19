@@ -346,6 +346,7 @@ import {
 import { runMemoryConformance } from '@obversa/api/testing';
 import { createSimpleMemory } from '@obversa/memory-simple';
 import { openGitMemory } from '@obversa/memory-git';
+import { webhookNotifier, type WebhookMessage } from '@obversa/notify-webhook';
 import { MockEngine } from '@obversa/core/testing';
 import { AgentSdkEngine } from '@obversa/engine-claude-agent-sdk';
 import { AnthropicApiEngine } from '@obversa/engine-anthropic-api';
@@ -383,6 +384,21 @@ import { featureDelivery, thresholdPanel, writerReviewerPair } from '@obversa/bu
 
 const packedTeamBuilders = [featureDelivery, thresholdPanel, writerReviewerPair];
 assert.equal(packedTeamBuilders.length, 3);
+
+// The packed notifier turns a run event into one message, with no server and
+// no URL of its own: the endpoint below is a dead loopback port and the stub
+// answers instead of it.
+const packedMessages: WebhookMessage[] = [];
+const packedNotifier = webhookNotifier({
+  url: 'http://127.0.0.1:1/unused',
+  fetch: async (_endpoint, init) => {
+    packedMessages.push(JSON.parse(init.body) as WebhookMessage);
+    return { ok: true, status: 200 };
+  },
+});
+packedNotifier.onEvent({ kind: 'dag:start', ts: 1, path: ['packed'] });
+await packedNotifier.done();
+assert.deepEqual(packedMessages.map((message) => message.text), ['Run started: packed.']);
 
 type Equal<Left, Right> =
   (<Value>() => Value extends Left ? 1 : 2) extends
@@ -794,6 +810,7 @@ async function main() {
     await copyFile(join(root, 'examples', 'write-and-review.ts'), join(consumerDirectory, 'write-and-review.ts'));
     await copyFile(join(root, 'examples', 'one-agent-job.ts'), join(consumerDirectory, 'one-agent-job.ts'));
     await copyFile(join(root, 'examples', 'command-kickback.ts'), join(consumerDirectory, 'command-kickback.ts'));
+    await copyFile(join(root, 'examples', 'notify-webhook.ts'), join(consumerDirectory, 'notify-webhook.ts'));
     await copyFile(join(root, 'examples', 'approval.ts'), join(consumerDirectory, 'approval.ts'));
     await copyFile(join(root, 'examples', 'monitor.ts'), join(consumerDirectory, 'monitor.ts'));
     await copyFile(tournamentExamplePath, join(consumerDirectory, 'tournament.ts'));

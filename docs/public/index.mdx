@@ -249,6 +249,7 @@ mechanisms they are built from.
 | `@obversa/core` | Runs one child process with a deadline and a readable result | `0.1.0` |
 | `@obversa/memory-simple` | Stores memory in one process | `0.1.0` |
 | `@obversa/memory-git` | Stores memory in private Git references | `0.1.0` |
+| `@obversa/notify-webhook` | Posts one message per interesting run event to a URL you supply | `0.1.0` |
 | `@obversa/builtin-workflows` | Three ready-made workflows | `0.1.0` |
 | `@obversa/surface-decision` | Runs one local surface session | `0.1.0` |
 | `@obversa/surface-diff` | Opens a git diff for inline review | `0.1.0` |
@@ -259,8 +260,8 @@ mechanisms they are built from.
 | `@obversa/engine-grok-cli` | Runs one engine attempt through the Grok CLI | `0.1.0` |
 | `@obversa/engine-opencode-cli` | Runs one engine attempt through the OpenCode CLI | `0.1.0` |
 
-The six engine plugins and the two memory adapters have their own pages in
-the Packages group. The runtime version matches the repository release tag.
+The six engine plugins, the two memory adapters and the notifier have their
+own pages in the Packages group. The runtime version matches the repository release tag.
 Other packages keep their own manifest versions.
 
 The packages have one dependency direction. The runtime imports the memory port.
