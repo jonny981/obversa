@@ -16,6 +16,11 @@ other published package tracks its own version independently of it.
   question and exits, and a scheduled `resume: true` carries on when the
   answer has arrived or exits again with the same recorded pause and asks
   nothing a second time. The record is the same in both modes.
+- **Search a local Markdown corpus before grounding it:**
+  `@obversa/search-markdown` returns ranked passages with file paths and line
+  ranges. Its read-only `Memory` view lets callers give only the selected files
+  to `ground`, then pass the bounded result from `curate` into a job. Search is
+  local and lexical, with no index, embedding service, or network call.
 - **Webhook notifications:** `@obversa/notify-webhook` posts one message per
   interesting run event to a URL the caller supplies. `webhookNotifier({ url })`
   returns an `onEvent` handler for `run`, and six moments each become one
@@ -43,7 +48,6 @@ other published package tracks its own version independently of it.
   a workflow's `post.always` still reports its stages; news from inside a run,
   a stage finishing or a review sending work back, is not filtered by depth.
   Await `done()` after the run so the last message is not lost.
-
 - **Workflow resume:** `run(job, { recordTo: path, resume: true })` resumes
   a declarative workflow from its own record instead of truncating it. The
   runtime seeds the recorded completions into the shared run state under

@@ -1,0 +1,10 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "paths": {
+      "@obversa/search-markdown": ["./src/index.ts"],
+      "@obversa/api": ["../../packages/api/src/index.ts"]
+    }
+  },
+  "include": ["src", "tests"]
+}

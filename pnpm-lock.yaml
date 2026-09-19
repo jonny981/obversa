@@ -49,6 +49,9 @@ importers:
       '@obversa/runtime':
         specifier: workspace:^
         version: link:packages/runtime
+      '@obversa/search-markdown':
+        specifier: workspace:^
+        version: link:plugins/search-markdown
       '@obversa/surface-diff':
         specifier: workspace:^
         version: link:packages/surface-diff
@@ -281,6 +284,11 @@ importers:
         specifier: workspace:^
         version: link:../../packages/api
 
+  plugins/search-markdown:
+    dependencies:
+      '@obversa/api':
+        specifier: workspace:^
+        version: link:../../packages/api
   plugins/notify-webhook: {}
 
 packages:

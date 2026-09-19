@@ -60,10 +60,10 @@ for a plugin-only change.
    approval.
 
 7. **Publish through the guarded script.** At the repository tag, run the
-   script once for every name in `scripts/publish-allowlist.json` (16
+   script once for every name in `scripts/publish-allowlist.json` (17
    packages) from a clean `main` checkout at that tag. Seven public packages
-   use `packages/<name>`; nine plugin packages use `plugins/<name>` (six
-   engine adapters, two memory adapters and one notifier):
+   use `packages/<name>`; ten plugin packages use `plugins/<name>` (six
+   engine adapters, two memory adapters, Markdown search and one notifier):
 
    ```bash
    OBVERSA_RELEASE=1 node scripts/release.mjs packages/runtime
