@@ -147,6 +147,13 @@ other published package tracks its own version independently of it.
 
 ### Fixed
 
+- **The reasoning record scrubs its finished message.** The commit subject and
+  body a reasoning record composes, fallback messages included, are scrubbed
+  for recognised credential patterns before the body is truncated. This
+  removes patterns the shared scrubber knows, including a value split across
+  captured chunks. It is not a guarantee that a message carries no private
+  text: the scrubber recognises patterns, it does not read meaning.
+
 - The Claude CLI adapter classifies auth, model-unavailable, transient and
   invalid-config failures instead of reporting them as unknown.
 

@@ -4,6 +4,7 @@ import type {
   ReasoningOutcome,
   ReasoningRecorder,
 } from '@obversa/api';
+import { scrubCapture } from '@obversa/core/command';
 
 /**
  * The reasoning behind a change, written into the body of that change.
@@ -189,8 +190,11 @@ export function openReasoningRecord(options: ReasoningRecordOptions): ReasoningR
           composed = undefined;
         }
       }
-      if (!usable(composed)) return floor(stage, outcome, captured.length);
-      return { subject: composed.subject, body: bounded(composed.body) };
+      const message = usable(composed) ? composed : floor(stage, outcome, captured.length);
+      return {
+        subject: scrubCapture(message.subject, undefined),
+        body: bounded(scrubCapture(message.body, undefined)),
+      };
     },
     committed(): void {
       // The words are on a commit now. Keeping them would put this change's
