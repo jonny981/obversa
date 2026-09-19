@@ -39,6 +39,13 @@ export interface StatsSnapshot {
   models: ModelUsage[];
   totalInputTokens: number;
   totalOutputTokens: number;
+  /**
+   * What the whole run created and read from cache. The per-model breakdown
+   * carried these already; the run-wide totals did not, so nothing could
+   * answer "what did this run read from cache" without summing models by hand.
+   */
+  totalCacheCreationInputTokens: number;
+  totalCacheReadInputTokens: number;
   agentCalls: number;
   errors: ErrorEntry[];
 }
@@ -105,6 +112,8 @@ export class Stats {
       models,
       totalInputTokens: models.reduce((a, m) => a + m.inputTokens, 0),
       totalOutputTokens: models.reduce((a, m) => a + m.outputTokens, 0),
+      totalCacheCreationInputTokens: models.reduce((a, m) => a + (m.cacheCreationInputTokens ?? 0), 0),
+      totalCacheReadInputTokens: models.reduce((a, m) => a + (m.cacheReadInputTokens ?? 0), 0),
       agentCalls: models.reduce((a, m) => a + m.calls, 0),
       errors: this.errors,
     };

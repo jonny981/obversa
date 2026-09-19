@@ -478,9 +478,16 @@ larger teams.
 - **`briefFromFile(path)`.** A brief kept as a markdown file beside the code.
   Its body is the brief; front matter may carry `files`, the paths the
   brief expects written.
-- **`formatEvent(event)`.** One event of a run, as the line a person reads.
-  `run` hands every event to `onEvent` as data; pass it through this to watch
-  a run narrate itself without writing a formatter first.
+- **`formatEvent(event, totals?)`.** One event of a run, as the line a person
+  reads. `run` hands every event to `onEvent` as data; pass it through this to
+  watch a run narrate itself without writing a formatter first. Give it the
+  running totals you already hold, from `RunResult.stats` or the monitor's
+  live status, and a usage line also reports what the run has spent so far.
+  Omitting them changes nothing about what it prints.
+- **`RunResult.usage`.** What the whole run spent, in the shape
+  `formatEvent` takes, so a run's own totals can be handed straight back to
+  the line formatter. The same numbers are in `RunResult.stats` per model;
+  this is the summary a person reads.
 - **Ready-made recipes** live in [builtin-workflows](/packages/builtin-workflows):
   `writerReviewerPair`, `thresholdPanel` and `featureDelivery`.
 - **`outcomeFromAgentText` from `@obversa/runtime/workflow-support`.**

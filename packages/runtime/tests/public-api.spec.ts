@@ -142,6 +142,7 @@ describe('public runtime API', () => {
       'fnJob',
       'formatCostReport',
       'formatEvent',
+      'UsageTotals',
       'formatPreflight',
       'fromFile',
       'gateJob',
