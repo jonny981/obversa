@@ -44,6 +44,19 @@ async function receiver(options: { status?: number } = {}): Promise<{
   };
 }
 
+/**
+ * An address the operating system handed out and nobody is listening on. The
+ * address is generated the same way a live one is, so no endpoint is written
+ * down here either.
+ */
+async function deadAddress(): Promise<string> {
+  const server = createServer();
+  await new Promise<void>((resolve) => { server.listen(0, '127.0.0.1', resolve); });
+  const { port } = server.address() as AddressInfo;
+  await new Promise<void>((resolve) => { server.close(() => { resolve(); }); });
+  return `http://127.0.0.1:${port}/`;
+}
+
 const open: Array<() => Promise<void>> = [];
 afterEach(async () => {
   while (open.length > 0) await open.pop()?.();
@@ -55,7 +68,13 @@ async function serverFor(options: { status?: number } = {}) {
   return made;
 }
 
-function event(partial: Partial<RunEvent> & { kind: string }): RunEvent {
+/**
+ * A run event. The extra properties are deliberate: a real event carries
+ * fields the notifier's own type does not declare, and it must ignore them.
+ */
+function event(
+  partial: Partial<RunEvent> & { kind: string } & Record<string, unknown>,
+): RunEvent {
   return { ts: 1, path: [], ...partial };
 }
 
@@ -239,7 +258,7 @@ describe('a failed post never fails the run', () => {
     const posted: string[] = [];
     let call = 0;
     const notifier = webhookNotifier({
-      url: 'http://127.0.0.1:1/unused',
+      url: await deadAddress(),
       onError: () => {},
       fetch: async (_url, init) => {
         call += 1;
@@ -261,7 +280,7 @@ describe('a failed post never fails the run', () => {
     const arrived: string[] = [];
     let slowOne = true;
     const notifier = webhookNotifier({
-      url: 'http://127.0.0.1:1/unused',
+      url: await deadAddress(),
       fetch: async (_url, init) => {
         const message = JSON.parse(init.body) as WebhookMessage;
         if (slowOne) {
@@ -283,7 +302,7 @@ describe('a failed post never fails the run', () => {
   test('an unreachable endpoint is reported, not thrown', async () => {
     const errors: Error[] = [];
     const notifier = webhookNotifier({
-      url: 'http://127.0.0.1:1/nothing-listens-here',
+      url: await deadAddress(),
       onError: (error) => { errors.push(error); },
     });
     notifier.onEvent(event({ kind: 'workflow:start' }));

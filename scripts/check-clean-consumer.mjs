@@ -338,6 +338,8 @@ function run(command, args, options = {}) {
 
 const consumerSource = `
 import assert from 'node:assert/strict';
+import { createServer } from 'node:http';
+import type { AddressInfo } from 'node:net';
 
 import {
   MEMORY_ROOT,
@@ -385,19 +387,25 @@ import { featureDelivery, thresholdPanel, writerReviewerPair } from '@obversa/bu
 const packedTeamBuilders = [featureDelivery, thresholdPanel, writerReviewerPair];
 assert.equal(packedTeamBuilders.length, 3);
 
-// The packed notifier turns a run event into one message, with no server and
-// no URL of its own: the endpoint below is a dead loopback port and the stub
-// answers instead of it.
+// The packed notifier turns a run event into one message and posts it for
+// real. The address comes from the operating system, so no endpoint is
+// written down here.
 const packedMessages: WebhookMessage[] = [];
+const packedReceiver = createServer((request, response) => {
+  let body = '';
+  request.on('data', (chunk: Buffer) => { body += chunk.toString('utf8'); });
+  request.on('end', () => {
+    packedMessages.push(JSON.parse(body) as WebhookMessage);
+    response.writeHead(200).end();
+  });
+});
+await new Promise<void>((resolve) => { packedReceiver.listen(0, '127.0.0.1', resolve); });
 const packedNotifier = webhookNotifier({
-  url: 'http://127.0.0.1:1/unused',
-  fetch: async (_endpoint, init) => {
-    packedMessages.push(JSON.parse(init.body) as WebhookMessage);
-    return { ok: true, status: 200 };
-  },
+  url: `http://127.0.0.1:${(packedReceiver.address() as AddressInfo).port}/`,
 });
 packedNotifier.onEvent({ kind: 'dag:start', ts: 1, path: ['packed'] });
 await packedNotifier.done();
+await new Promise<void>((resolve) => { packedReceiver.close(() => { resolve(); }); });
 assert.deepEqual(packedMessages.map((message) => message.text), ['Run started: packed.']);
 
 type Equal<Left, Right> =
