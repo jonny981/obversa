@@ -226,9 +226,9 @@ function describe(event: RunEvent): string {
 }
 
 /**
- * The message for one run event, or `undefined` when the event is not one of
- * the notified moments. Exported so the wording can be tested without a
- * server, and so a caller can see exactly what would be posted.
+ * The message wording for one run event, or `undefined` when the event is not
+ * one of the notified moments. Exported so the wording can be tested without a
+ * server. `onEvent` decides which events are actually posted.
  */
 export function messageFor(
   event: RunEvent,

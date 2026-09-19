@@ -137,9 +137,11 @@ const notifier = webhookNotifier({
   onError: (error) => { console.error(`the channel did not take a message: ${error.message}`); },
 });
 
-// The compiler checks the wiring here: `run` hands it a `LoopEvent` and the
-// notifier reads a `RunEvent`, so this line stops compiling the day an event
-// the notifier reads changes shape.
+// The compiler checks the wiring: `run` hands a `LoopEvent` to a handler the
+// notifier declared for its own `RunEvent`, so the two must stay structurally
+// compatible. That catches `kind`, `ts` or `path` changing type or going
+// missing. It does NOT catch a renamed event kind, because kinds are plain
+// strings, nor a payload field disappearing, because every one is optional.
 const onEvent: (event: LoopEvent) => void = notifier.onEvent;
 const result = await run(brief, { onEvent });
 // Await the posts before the process can exit, or the last message is lost.

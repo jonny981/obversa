@@ -92,6 +92,7 @@ export const stageBranches = {
   F88: 'fix/runtime-polish',
   F89: 'fix/reasoning-record-scrub',
   F63: 'feat/markdown-corpus-search',
+  F91: 'docs/search-markdown-contract',
   F67: 'feat/notify-webhook',
 };
 

@@ -157,6 +157,7 @@ for (const [stage, branch] of [
   ['F88', 'fix/runtime-polish'],
   ['F89', 'fix/reasoning-record-scrub'],
   ['F63', 'feat/markdown-corpus-search'],
+  ['F91', 'docs/search-markdown-contract'],
   ['F67', 'feat/notify-webhook'],
 ]) {
   test(`${stage} lands from its assigned branch ${branch}`, () => {
@@ -254,6 +255,7 @@ for (const [stage, branch] of [
   ['F88', 'feat/graph-forms-v1'],
   ['F89', 'feat/graph-forms-v1'],
   ['F63', 'feat/factory-v1'],
+  ['F91', 'feat/factory-v1'],
   ['F67', 'feat/factory-v1'],
 ]) {
   test(`${stage} refuses the wrong branch ${branch}`, () => {

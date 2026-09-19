@@ -242,7 +242,7 @@ export interface StartedMonitor {
 /** Bind the page to a free loopback port and return its address, sink and finish hook. */
 export async function startMonitor(opts: { job: Job; callbacks: RunCallbacks; runId?: string }): Promise<StartedMonitor> {
   const fold = new MonitorFold(opts.job);
-  const state = async (): Promise<MonitorState & { usageSummary: string }> => ({
+  const state = async (): Promise<MonitorState> => ({
     ...(opts.runId !== undefined ? { runId: opts.runId } : {}),
     ...(fold.name !== undefined ? { name: fold.name } : {}),
     status: fold.status,

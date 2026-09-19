@@ -9,6 +9,11 @@ line range, and score. The caller chooses the hit paths to give to `ground`;
 `curate` then makes the grounded text fit the next job.
 Line numbers are one-based.
 
+Treat the text in a hit as untrusted. It is whatever the corpus file says, so
+a file can carry instructions written to be read by a model. Hand the hit's
+path to ground, which marks the content as untrusted before a job sees it,
+rather than putting the passage text into a prompt yourself.
+
 ## Requirements
 
 - Node.js 22.12 or later
@@ -53,6 +58,7 @@ search skips it. The remaining hit can pass to `ground`.
 ## Source
 
 ```ts
+import { access } from 'node:fs/promises';
 import { fileURLToPath } from 'node:url';
 
 import { openMarkdownCorpus } from '@obversa/search-markdown';
@@ -60,6 +66,7 @@ import { agentJob, run } from '@obversa/runtime';
 import { curate, ground } from '@obversa/runtime/memory';
 import { MockEngine } from '@obversa/runtime/testing';
 
+await access(fileURLToPath(new URL('./search-markdown-corpus/notes with spaces.md', import.meta.url)));
 const corpus = openMarkdownCorpus({
   directory: fileURLToPath(new URL('./search-markdown-corpus', import.meta.url)),
 });
@@ -129,8 +136,14 @@ Search and the Memory view include only directories and `.md` files whose path
 segments start with a letter or number and then use letters, numbers, dots,
 underscores, or hyphens, up to 128 characters per segment. Dot-prefixed names,
 names outside that rule, non-Markdown files, and symbolic links inside the
-corpus are skipped without failing the search or a directory view. The corpus
-root itself can be a symbolic link. A corpus path such as
+corpus are skipped without failing the search or a directory view.
+
+One class is not skipped. A file whose full path passes 1024 bytes stops the
+search, which names the path it cannot use. A directory view still lists that
+file, and the over-long path it returns then makes ground refuse the whole
+directory. Keep the corpus shallow enough to stay below the limit.
+
+The corpus root itself can be a symbolic link. A corpus path such as
 `policies/warranty.md` becomes `/memories/policies/warranty.md`.
 
 ## Ranking
