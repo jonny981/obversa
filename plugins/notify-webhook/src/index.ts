@@ -193,16 +193,31 @@ function wayIn(monitor?: string): string {
 }
 
 /**
- * Whether this ending event is the run's own. With a root container it is that
- * container's matching end at the depth it announced itself; with none, the
- * run is one job and its end is the only ending there is.
+ * Whether this event is the run's OWN, rather than something happening inside
+ * it. One predicate, asked by every branch that needs the question: the run
+ * starting, the container that owns it, and the run ending.
+ *
+ * It exists as one function because the alternative kept failing. The start
+ * side and the end side each carried their own depth expression, and four
+ * times in this package a fix corrected one side and left the other reading a
+ * nested event as the run's. There is no second side to forget now.
+ */
+function atRunLevel(event: RunEvent, runDepth: number | undefined): boolean {
+  return event.path.length === runDepth;
+}
+
+/**
+ * Whether this ending event is the run's own: at the run's level, and the end
+ * that the owning container reports. A run with no container is a single job,
+ * and its own `job:end` is the ending.
  */
 function endsTheRun(
   event: RunEvent,
-  root: { readonly endKind: string; readonly depth: number } | undefined,
+  root: { readonly endKind: string } | undefined,
+  runDepth: number | undefined,
 ): boolean {
-  if (root === undefined) return event.kind === 'job:end';
-  return event.kind === root.endKind && event.path.length === root.depth;
+  if (!atRunLevel(event, runDepth)) return false;
+  return event.kind === (root?.endKind ?? 'job:end');
 }
 
 function describe(event: RunEvent): string {
@@ -332,7 +347,7 @@ export function webhookNotifier(options: WebhookNotifierOptions): WebhookNotifie
    * whole graph in a loop, which moves every one of that graph's events one
    * level deeper without changing the run.
    */
-  let root: { readonly endKind: string; readonly depth: number } | undefined;
+  let root: { readonly endKind: string } | undefined;
   /**
    * The depth of the very first event this run reported. The outermost thing
    * always starts first, so this is the run's own level, and a container that
@@ -371,15 +386,15 @@ export function webhookNotifier(options: WebhookNotifierOptions): WebhookNotifie
         return;
       }
       if (runDepth === undefined) runDepth = event.path.length;
-      if (root === undefined && event.path.length === runDepth) {
+      if (root === undefined && atRunLevel(event, runDepth)) {
         const endKind = CONTAINER_END.get(event.kind);
-        if (endKind !== undefined) root = { endKind, depth: event.path.length };
+        if (endKind !== undefined) root = { endKind };
       }
       // An ending event that is not this run's ending is something finishing
       // inside it: an iteration's body job, or a graph nested under the root.
-      if (ENDING_KINDS.has(event.kind) && !endsTheRun(event, root)) return;
+      if (ENDING_KINDS.has(event.kind) && !endsTheRun(event, root, runDepth)) return;
       // A container starting inside the run is not the run starting.
-      if (STARTING_KINDS.has(event.kind) && event.path.length !== runDepth) return;
+      if (STARTING_KINDS.has(event.kind) && !atRunLevel(event, runDepth)) return;
       const message = messageFor(event, monitor);
       if (message === undefined) return;
       // A run starts once and ends once. A workflow reports both its own start

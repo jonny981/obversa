@@ -156,14 +156,18 @@ describe('a run reaching a real endpoint', () => {
     const notifier = webhookNotifier({ url: endpoint.url });
     notifier.onEvent(event({ kind: 'loop:start', path: ['brief-post'] }));
     notifier.onEvent(event({ kind: 'dag:start', path: ['brief-post', 'brief'] }));
-    notifier.onEvent(event({
-      kind: 'dag:node', node: 'draft', phase: 'done',
-      path: ['brief-post', 'brief'], outcome: { status: 'pass' },
-    }));
-    notifier.onEvent(event({
-      kind: 'dag:node', node: 'review', phase: 'done',
-      path: ['brief-post', 'brief'], outcome: { status: 'pass' },
-    }));
+    for (const node of ['draft', 'review']) {
+      // each node's own job, whose end must not be read as the run's
+      notifier.onEvent(event({ kind: 'job:start', path: ['brief-post', 'brief'], label: node }));
+      notifier.onEvent(event({
+        kind: 'job:end', path: ['brief-post', 'brief'], label: node,
+        outcome: { status: 'pass', summary: `${node} done` },
+      }));
+      notifier.onEvent(event({
+        kind: 'dag:node', node, phase: 'done',
+        path: ['brief-post', 'brief'], outcome: { status: 'pass' },
+      }));
+    }
     notifier.onEvent(event({
       kind: 'dag:end', path: ['brief-post', 'brief'], outcome: { status: 'pass' },
     }));
@@ -223,13 +227,23 @@ describe('a run reaching a real endpoint', () => {
     const notifier = webhookNotifier({ url: endpoint.url });
     notifier.onEvent(event({ kind: 'job:start', path: [], label: 'write' }));
     notifier.onEvent(event({ kind: 'loop:start', path: ['write', 'polish'] }));
+    // The loop's own body job, which the first version of this test omitted -
+    // and omitting it is what hid a nested job:end being read as the run's.
+    notifier.onEvent(event({ kind: 'job:start', path: ['write', 'polish'], label: 'tidy' }));
+    notifier.onEvent(event({
+      kind: 'job:end', path: ['write', 'polish'], label: 'tidy',
+      outcome: { status: 'pass', summary: 'tidied' },
+    }));
     notifier.onEvent(event({ kind: 'loop:end', path: ['write', 'polish'], outcome: { status: 'pass' } }));
     notifier.onEvent(event({
-      kind: 'job:end', path: [], label: 'write', outcome: { status: 'pass', summary: 'done' },
+      kind: 'job:end', path: [], label: 'write', outcome: { status: 'fail', summary: 'the outer job failed' },
     }));
     await notifier.done();
 
-    expect(endpoint.received.map((message) => message.event)).toEqual(['finished']);
+    // The run failed. A nested job finishing must not have announced success
+    // and suppressed it.
+    expect(endpoint.received.map((message) => message.event)).toEqual(['failed']);
+    expect(endpoint.received[0]?.text).toBe('Run failed: the outer job failed.');
   });
 
   test('a run ends once however many ending events arrive', async () => {
@@ -253,6 +267,11 @@ describe('a run reaching a real endpoint', () => {
     const notifier = webhookNotifier({ url: endpoint.url });
     notifier.onEvent(event({ kind: 'loop:start', path: ['outer'] }));
     notifier.onEvent(event({ kind: 'loop:start', path: ['outer', 'inner'] }));
+    // the inner loop's own body job, end included
+    notifier.onEvent(event({ kind: 'job:start', path: ['outer', 'inner'], label: 'tick' }));
+    notifier.onEvent(event({
+      kind: 'job:end', path: ['outer', 'inner'], label: 'tick', outcome: { status: 'pass', summary: 'tick' },
+    }));
     notifier.onEvent(event({
       kind: 'loop:end', path: ['outer', 'inner'], outcome: { status: 'fail', summary: 'the inner loop' },
     }));
