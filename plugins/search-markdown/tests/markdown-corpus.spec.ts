@@ -1,4 +1,4 @@
-import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, rm, symlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 
@@ -83,6 +83,46 @@ describe('openMarkdownCorpus', () => {
     ]);
     await expect(opened.search('wind')).resolves.toEqual([]);
     await expect(opened.search('   ')).resolves.toEqual([]);
+  });
+
+  it('searches ordinary names through a symlinked root while hiding dot entries', async () => {
+    const directory = await corpus({
+      '.private/hidden.md': 'Planted searchable phrase.\n',
+      'notes with spaces.md': 'Planted searchable phrase.\n',
+      'included.md': 'Planted searchable phrase.\n',
+    });
+    const linkedDirectory = `${directory}-link`;
+    await symlink(directory, linkedDirectory, 'dir');
+    temporaryDirectories.push(linkedDirectory);
+
+    const expected = [
+      { path: '/memories/included.md' },
+      { path: '/memories/notes with spaces.md' },
+    ];
+    const opened = openMarkdownCorpus({ directory });
+    const linked = openMarkdownCorpus({ directory: linkedDirectory });
+
+    await expect(opened.search('planted searchable phrase')).resolves.toMatchObject(expected);
+    await expect(linked.search('planted searchable phrase')).resolves.toMatchObject(expected);
+    for (const corpus of [opened, linked]) {
+      await expect(corpus.memory.execute({
+        command: 'view',
+        path: '/memories/notes with spaces.md',
+      })).resolves.toMatchObject({
+        ok: true,
+        value: {
+          path: '/memories/notes with spaces.md',
+          text: 'Planted searchable phrase.\n',
+        },
+      });
+    }
+    await expect(opened.memory.execute({
+      command: 'view',
+      path: '/memories/../outside.md',
+    })).resolves.toMatchObject({
+      ok: false,
+      error: { code: 'INVALID_PATH' },
+    });
   });
 
   it('exposes only the files selected by search for grounding', async () => {

@@ -1,5 +1,5 @@
 import { Buffer } from 'node:buffer';
-import { lstat, readdir, readFile } from 'node:fs/promises';
+import { lstat, readdir, readFile, realpath } from 'node:fs/promises';
 import { join, resolve } from 'node:path';
 
 import {
@@ -66,7 +66,7 @@ type Validation<T> = Valid<T> | Invalid;
 
 const DEFAULT_LIMIT = 20;
 const MAX_PATH_BYTES = 1_024;
-const SEGMENT = /^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/;
+const CONTROL_CHARACTER = /[\u0000-\u001f\u007f]/;
 const HEADING = /^ {0,3}#{1,6}(?:\s|$)/;
 const TOKEN = /[\p{L}\p{N}]+/gu;
 const COMMANDS = new Set<MemoryCommandName>([
@@ -84,6 +84,20 @@ function compareText(left: string, right: string): number {
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+function isAddressableSegment(value: string): boolean {
+  return value !== ''
+    && value !== '.'
+    && value !== '..'
+    && !value.includes('/')
+    && !value.includes('\\')
+    && !value.includes('%')
+    && !CONTROL_CHARACTER.test(value);
+}
+
+function isVisibleCorpusEntry(value: string): boolean {
+  return !value.startsWith('.') && isAddressableSegment(value);
 }
 
 function memoryError(
@@ -129,12 +143,12 @@ function validateMemoryPath(value: unknown): Validation<MemoryPath> {
   if (!value.startsWith(`${MEMORY_ROOT}/`)) {
     return { error: memoryError('INVALID_PATH', 'The path must be inside /memories.', value) };
   }
-  if (value.includes('\\') || value.includes('%') || /[\u0000-\u001f\u007f]/.test(value)) {
+  if (value.includes('\\') || value.includes('%') || CONTROL_CHARACTER.test(value)) {
     return { error: memoryError('INVALID_PATH', 'The memory path contains an unsafe character.', value) };
   }
 
   const segments = value.slice(MEMORY_ROOT.length + 1).split('/');
-  if (segments.some((segment) => !SEGMENT.test(segment))) {
+  if (segments.some((segment) => !isAddressableSegment(segment))) {
     return { error: memoryError('INVALID_PATH', 'The memory path contains an invalid segment.', value) };
   }
   return { value: value as MemoryPath };
@@ -152,29 +166,22 @@ function corpusPath(segments: readonly string[]): MemoryPath {
   return value as MemoryPath;
 }
 
-function assertSegment(name: string): void {
-  if (!SEGMENT.test(name)) {
-    throw new TypeError(`Corpus path contains an invalid segment: ${name}`);
-  }
-}
-
 async function markdownFiles(directory: string): Promise<readonly MarkdownFile[]> {
-  const root = await lstat(directory);
+  const rootDirectory = await realpath(directory);
+  const root = await lstat(rootDirectory);
   if (!root.isDirectory()) throw new TypeError('directory must name a directory.');
 
   const files: MarkdownFile[] = [];
   async function walk(segments: readonly string[]): Promise<void> {
-    const entries = await readdir(join(directory, ...segments), { withFileTypes: true });
+    const entries = await readdir(join(rootDirectory, ...segments), { withFileTypes: true });
     entries.sort((left, right) => compareText(left.name, right.name));
     for (const entry of entries) {
+      if (!isVisibleCorpusEntry(entry.name)) continue;
+      const next = [...segments, entry.name];
       if (entry.isDirectory()) {
-        assertSegment(entry.name);
-        const next = [...segments, entry.name];
         await walk(next);
       } else if (entry.isFile() && entry.name.endsWith('.md')) {
-        assertSegment(entry.name);
-        const next = [...segments, entry.name];
-        files.push({ path: corpusPath(next), localPath: join(directory, ...next) });
+        files.push({ path: corpusPath(next), localPath: join(rootDirectory, ...next) });
       }
     }
   }
@@ -358,7 +365,10 @@ class MarkdownCorpusMemory implements Memory {
     if ('error' in checked) return { ok: false, command: 'view', error: checked.error };
     const path = checked.value;
     const segments = pathSegments(path);
-    let localPath = this.directory;
+    if (segments.some((segment) => !isVisibleCorpusEntry(segment))) {
+      return failed('view', 'NOT_FOUND', 'The memory path does not exist.', path);
+    }
+    let localPath = await realpath(this.directory);
 
     for (const segment of segments) {
       localPath = join(localPath, segment);
@@ -376,7 +386,7 @@ class MarkdownCorpusMemory implements Memory {
       const entries = await readdir(localPath, { withFileTypes: true });
       const visible: MemoryDirectoryEntry[] = [];
       for (const entry of entries.sort((left, right) => compareText(left.name, right.name))) {
-        if (!SEGMENT.test(entry.name) || entry.isSymbolicLink()) continue;
+        if (!isVisibleCorpusEntry(entry.name) || entry.isSymbolicLink()) continue;
         if (!entry.isDirectory() && !(entry.isFile() && entry.name.endsWith('.md'))) continue;
         const entryPath = `${path === MEMORY_ROOT ? MEMORY_ROOT : path}/${entry.name}` as MemoryPath;
         visible.push({
