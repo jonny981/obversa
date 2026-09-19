@@ -206,15 +206,6 @@ describe('the messages that carry the information rather than a pointer', () => 
     expect(asItReallyArrives?.summary).toBe('Send the prepared result?');
   });
 
-  test('the question is still recovered when only the summary survives', () => {
-    // A record replay can carry the summary without the payload.
-    const message = messageFor(event({
-      kind: 'dag:node', node: 'approve', phase: 'done', path: ['delivery'],
-      outcome: { status: 'paused', summary: 'waiting for a person: Send it?' },
-    }));
-    expect(message?.text).toBe('Paused: Send it?');
-  });
-
   test('the carried question wins over the summary when they differ', () => {
     const message = messageFor(event({
       kind: 'dag:node', node: 'approve', phase: 'done', path: ['delivery'],
@@ -227,16 +218,12 @@ describe('the messages that carry the information rather than a pointer', () => 
     expect(message?.text).toBe('Paused: Send the prepared result?');
   });
 
-  test('an empty carried question falls back to the summary', () => {
+  test('a blank carried question is not the question', () => {
     const message = messageFor(event({
       kind: 'dag:node', node: 'approve', phase: 'done', path: ['delivery'],
-      outcome: {
-        status: 'paused',
-        summary: 'waiting for a person: Send it?',
-        data: { decisionText: '   ' },
-      },
+      outcome: { status: 'paused', summary: 'the release needs a decision', data: { decisionText: '   ' } },
     }));
-    expect(message?.text).toBe('Paused: Send it?');
+    expect(message?.text).toBe('Paused: the release needs a decision.');
   });
 
   test('a summary that is not a person gate is left alone', () => {
@@ -244,16 +231,6 @@ describe('the messages that carry the information rather than a pointer', () => 
       kind: 'dag:end', outcome: { status: 'paused', summary: 'the token budget ran out' },
     }));
     expect(message?.text).toBe('Paused: the token budget ran out.');
-  });
-
-  test('only the person-gate phrase is stripped, not any leading words and a colon', () => {
-    // A pause from somewhere else can start with its own words and a colon,
-    // and those words are the message.
-    const message = messageFor(event({
-      kind: 'dag:end',
-      outcome: { status: 'paused', summary: 'budget: the token budget ran out' },
-    }));
-    expect(message?.text).toBe('Paused: budget: the token budget ran out.');
   });
 
   test('a run that stays up for the answer still reports finishing after the wait', async () => {

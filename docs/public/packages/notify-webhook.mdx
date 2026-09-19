@@ -40,11 +40,9 @@ message names the run's page, so the person can answer from the message. The
 sent-back message carries what the reviewer said, so the news is the reason
 and not just the fact.
 
-The paused message asks the person's own question. A person gate records its
-outcome as `waiting for a person:` followed by the question, which would read
-`Paused: waiting for a person: ...` when the word `Paused` already says that,
-so the message takes the question the gate carries as its own field and falls
-back to the summary with that phrase removed.
+The paused message asks the person's own question, which a person gate carries
+as its own field on the outcome. Any other pause says what it is waiting for in
+its summary, and that is used as it stands.
 
 A stage that is waiting for a person has not finished, so it is reported as
 paused rather than as a stage finishing. That matters where the run stays up

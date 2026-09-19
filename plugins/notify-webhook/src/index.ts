@@ -167,16 +167,9 @@ function sentence(text: string): string {
 }
 
 /**
- * How a person gate writes its own summary: the question behind a phrase that
- * says the same thing the word Paused already says.
- */
-const WAITING_PREFIX = /^waiting for a person:\s*/i;
-
-/**
  * What the person is actually being asked. A person gate carries the question
- * as its own field, which is better than reading it out of prose; where that
- * field is absent the summary still holds it behind a prefix, and where
- * neither is there the caller gets whatever the outcome did say.
+ * as its own field; any other pause says what it is waiting for in its
+ * summary.
  */
 function questionIn(outcome: RunEventOutcome | undefined): string | undefined {
   const data = outcome?.data;
@@ -184,8 +177,7 @@ function questionIn(outcome: RunEventOutcome | undefined): string | undefined {
     const asked = (data as { decisionText?: unknown }).decisionText;
     if (typeof asked === 'string' && asked.trim() !== '') return asked;
   }
-  const summary = outcome?.summary;
-  return summary === undefined ? undefined : summary.replace(WAITING_PREFIX, '');
+  return outcome?.summary;
 }
 
 /** The run's page on its own line, for a message that asks somebody to act. */

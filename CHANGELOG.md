@@ -24,9 +24,7 @@ other published package tracks its own version independently of it.
   waiting for a person is reported as paused rather than as a stage finishing,
   which is the only message sent about the wait where the run stays up for the
   answer rather than ending on it. The paused message asks the person's own
-  question, taken from the field the gate carries it in, so it does not repeat
-  the runtime's `waiting for a person:` in front of a line that already says
-  `Paused`. A
+  question, taken from the field the gate carries it in. A
   failure is reported from the event that ends the run and never from the
   `error` event, because a loop can emit `error` in one iteration and pass in
   the next. A notification that cannot be delivered reaches `onError` and never
