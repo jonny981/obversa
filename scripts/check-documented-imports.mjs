@@ -19,7 +19,7 @@
  * nothing exports and requires a failure.
  */
 
-import { readFileSync, existsSync, readdirSync } from 'node:fs';
+import { readFileSync, existsSync } from 'node:fs';
 import { readdir } from 'node:fs/promises';
 import { join, dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -30,7 +30,7 @@ const docs = join(root, 'docs/public');
 /** Every `import { a, b } from '@obversa/x'` on a page, with its source line. */
 function importsIn(text) {
   const found = [];
-  for (const match of text.matchAll(/import\s*(?:type\s*)?\{([^}]*)\}\s*from\s*'(@obversa\/[^']+)'/gs)) {
+  for (const match of text.matchAll(/import\s*(?:type\s*)?\{([^}]*)\}\s*from\s*['"](@obversa\/[^'"]+)['"]/gs)) {
     const line = text.slice(0, match.index).split('\n').length;
     const names = match[1]
       .split(',')
@@ -53,39 +53,60 @@ function locate(specifier) {
 }
 
 /**
- * What the built package declares, read from its type declarations.
+ * The names an entry point actually exports, followed through its re-exports.
  *
- * An earlier version imported the built entry to list its runtime exports.
- * That executes the module, so it needs every runtime dependency installed
- * and it fails on a package whose entry pulls in a third-party library. The
- * declarations name both values and types, cost nothing to read, and answer
- * the only question here: does this name exist in what we publish.
+ * Reading every declaration in the directory and searching the joined text
+ * asked whether a name is DECLARED NEARBY, which is the same shape of mistake
+ * as asking whether a name is MENTIONED: a name in a comment, or declared in a
+ * sibling and never exported, counted as provided. This walks the entry's own
+ * `export` statements and follows `export * from` and `export { x } from` into
+ * the files they name.
  */
+function exportsOf(file, seen = new Set()) {
+  const resolved = resolve(file);
+  if (seen.has(resolved) || !existsSync(resolved)) return new Set();
+  seen.add(resolved);
+  const text = readFileSync(resolved, 'utf8');
+  const names = new Set();
+
+  // `export declare function x`, `export interface X`, `export type X`, and
+  // the rest of the forms a declaration file uses to export one name.
+  for (const m of text.matchAll(/^\s*export\s+(?:declare\s+)?(?:abstract\s+)?(?:function|const|let|var|class|interface|type|enum|namespace)\s+([A-Za-z_$][\w$]*)/gm)) {
+    names.add(m[1]);
+  }
+  // `export { a, b as c }` and `export type { d }`, with or without a source.
+  for (const m of text.matchAll(/export\s+(?:type\s+)?\{([^}]*)\}(?:\s*from\s*['"]([^'"]+)['"])?/g)) {
+    for (const part of m[1].split(',')) {
+      const piece = part.trim().replace(/^type\s+/, '');
+      if (!piece) continue;
+      const as = piece.split(/\s+as\s+/);
+      names.add((as[1] ?? as[0]).trim());
+    }
+  }
+  // `export * from './x.js'` brings everything that file exports.
+  for (const m of text.matchAll(/export\s+\*\s+from\s*['"]([^'"]+)['"]/g)) {
+    for (const name of exportsOf(declarationFor(resolved, m[1]), seen)) names.add(name);
+  }
+  return names;
+}
+
+/** The declaration file a relative specifier points at, from a declaration. */
+function declarationFor(from, specifier) {
+  const base = join(dirname(from), specifier.replace(/\.(m?js)$/, ''));
+  for (const suffix of ['.d.ts', '.d.mts', '/index.d.ts', '/index.d.mts']) {
+    if (existsSync(base + suffix)) return base + suffix;
+  }
+  return base + '.d.ts';
+}
+
+/** What the selected entry point provides, or null when it is not built. */
 function provided(dir, subpath) {
   const manifest = JSON.parse(readFileSync(join(dir, 'package.json'), 'utf8'));
   const entry = manifest.exports?.[subpath];
-  if (!entry) return null;
-  // Anchor on the manifest's `types`, not its runtime entry. One package
-  // ships `.` as `./src/index.mjs` with declarations under `dist/src/`, and a
-  // subpath like `./command` declares into `dist/command/`. Following the
-  // runtime entry finds neither, and reports a correct page as broken.
-  const declarations = entry.types;
-  if (!declarations) return null;
-  const built = join(dir, declarations);
-  if (!existsSync(built)) return null;
-  // Every declaration beside it, because an entry file is mostly
-  // `export * from './contracts.js'` and reading it alone reports a
-  // re-exported name as missing.
-  const distDir = dirname(built);
-  const declared = [];
-  if (existsSync(distDir)) {
-    for (const file of readdirSync(distDir)) {
-      if (file.endsWith('.d.ts') || file.endsWith('.d.mts')) {
-        declared.push(readFileSync(join(distDir, file), 'utf8'));
-      }
-    }
-  }
-  return declared.join('\n');
+  if (!entry?.types) return null;
+  const declarations = join(dir, entry.types);
+  if (!existsSync(declarations)) return null;
+  return exportsOf(declarations);
 }
 
 const pages = [];
@@ -110,14 +131,14 @@ for (const page of pages.sort()) {
     }
     const key = `${place.dir}|${place.subpath}`;
     if (!cache.has(key)) cache.set(key, provided(place.dir, place.subpath));
-    const declared = cache.get(key);
-    if (!declared) {
+    const exported = cache.get(key);
+    if (!exported) {
       failures.push(`${page.slice(docs.length + 1)}:${line}: ${specifier} has no built entry point; run the build first`);
       continue;
     }
     for (const name of names) {
       checked += 1;
-      if (new RegExp(`\\b${name}\\b`).test(declared)) continue;
+      if (exported.has(name)) continue;
       failures.push(`${page.slice(docs.length + 1)}:${line}: ${specifier} does not provide ${name}`);
     }
   }
