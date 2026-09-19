@@ -17,6 +17,21 @@ import { LoopError } from './errors.js';
 import { redactSecrets } from './redact.js';
 import type { Job, JobContext, Outcome, RunCallbacks } from './types.js';
 
+// A spread or nested context must not inherit authority to report the node's outcome.
+const NODE_JOBS = new WeakMap<JobContext, Job>();
+
+/** Bind only the actual node job; a condition receives an unbound context. */
+export function nodeJobContext(ctx: JobContext, job: Job | undefined): JobContext {
+  const scoped = { ...ctx };
+  if (job !== undefined) NODE_JOBS.set(scoped, job);
+  return scoped;
+}
+
+/** A transparent wrapper may delegate only when it is itself the node's job. */
+export function delegateNodeJob(ctx: JobContext, owner: Job, job: Job, child: JobContext): Promise<Outcome> {
+  return job(nodeJobContext(child, NODE_JOBS.get(ctx) === owner ? job : undefined));
+}
+
 /** The answer a person gives: yes or no, and a note when there is one. */
 export interface ApprovalAnswer {
   readonly approved: boolean;
@@ -100,7 +115,7 @@ export function approval(label: string, opts: ApprovalOptions): Job {
     ctx.emit({ kind: 'job:start', ts: Date.now(), path, label, timeoutMs: ctx.timeoutMs });
     let outcome: Outcome;
     try {
-      outcome = await decide(ctx, label, opts);
+      outcome = await decide(ctx, label, opts, NODE_JOBS.get(ctx) === job);
     } catch (e) {
       const error = LoopError.from(e, { code: 'BODY', phase: 'body', path: ctx.path, iteration: ctx.iteration });
       outcome = { status: 'fail', summary: error.message, error };
@@ -117,7 +132,7 @@ export function approval(label: string, opts: ApprovalOptions): Job {
   });
 }
 
-async function decide(ctx: JobContext, label: string, opts: ApprovalOptions): Promise<Outcome> {
+async function decide(ctx: JobContext, label: string, opts: ApprovalOptions, ownsNode: boolean): Promise<Outcome> {
   const client: RunCallbacks | undefined = ctx.callbacks;
   if (client === undefined) {
     throw new LoopError({
@@ -149,6 +164,17 @@ async function decide(ctx: JobContext, label: string, opts: ApprovalOptions): Pr
   if (answer === undefined && opts.answer !== undefined) {
     answer = await answerInProcess(client, request, `${label}:answer`, opts.answer);
   }
+  const paused: Outcome = { status: 'paused', summary: `waiting for a person: ${opts.question}`, data: request };
+  if (ownsNode && answer === undefined && ctx.onCallback === 'wait' && !ctx.signal.aborted && ctx.graph !== undefined) {
+    // A killed waiter must resume this question, not reconcile an unknown completion.
+    ctx.emit({
+      kind: 'dag:node', ts: Date.now(), path: ctx.graph.path.slice(0, -1), node: ctx.graph.node,
+      phase: 'done', attempt: ctx.graph.attempt, needs: [...ctx.graph.needs],
+      ...(ctx.graph.desc === undefined ? {} : { desc: ctx.graph.desc }),
+      ...(ctx.graph.gate === undefined ? {} : { gate: ctx.graph.gate }),
+      timeoutMs: ctx.timeoutMs, outcome: paused,
+    });
+  }
   while (answer === undefined && ctx.onCallback === 'wait' && !ctx.signal.aborted
       && (state === 'pending' || state === 'claimed')) {
     try {
@@ -161,7 +187,7 @@ async function decide(ctx: JobContext, label: string, opts: ApprovalOptions): Pr
     ({ state, answer } = stateOf(await client.history(request.requestId)));
   }
   if (answer === undefined) {
-    return { status: 'paused', summary: `waiting for a person: ${opts.question}`, data: request };
+    return paused;
   }
   if (answer.approved) {
     const accepted: ApprovalAnswer = {

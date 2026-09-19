@@ -179,9 +179,11 @@ about a proposed change, bind the approval to the evidence with
   answer shape and the input make up the request's identity; change any of
   them and a previous answer no longer applies. Changing how it is shown
   does not.
-- **Resume is explicit.** An answer arriving does not restart the run by
-  itself; the host reads the decision and resumes the step. That is what
-  lets a host decide that an approval needs a second look.
+- **Resume is explicit by default.** An answer arriving does not restart an
+  exited run by itself; the host reads the decision and resumes the step.
+  That is what lets a host decide that an approval needs a second look. With
+  `onCallback: 'wait'` the process never exited, so it continues once the
+  answer arrives.
 - **The in-memory client forgets.** It is for tests. The stored client is
   the one whose questions survive a process exit.
 

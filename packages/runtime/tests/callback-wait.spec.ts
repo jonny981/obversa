@@ -11,12 +11,15 @@ import {
   approval,
   createCallbackClient,
   createStoredCallbackClient,
-  person,
+  dag,
   run,
   stage,
+  withEnv,
   workflow,
 } from '../src/api.ts';
 import type { CallbackRequest, Job, LoopEvent, RunCallbacks, RunOptions, RunResult } from '../src/api.ts';
+import { readResumeRecord } from '../src/runtime/persist.ts';
+import { delivery, deployment, publicGate } from './callback-wait-delivery-fixture.ts';
 import { createStoredRunFixture, type StoredRunFixture } from './stored-run-fixture.ts';
 
 const WAIT_PROOF = defineBudgetChain('callback wait', 90_000, {
@@ -65,16 +68,19 @@ async function stored() {
 }
 
 /** Observe a real pending history read; never supply or change its events. */
-function observeQuestion(client: RunCallbacks) {
+function observeQuestion(client: RunCallbacks, afterPoll = false) {
+  let historyReads = 0;
   let sawQuestion!: (request: CallbackRequest) => void;
   const question = new Promise<CallbackRequest>((resolve) => { sawQuestion = resolve; });
   const observed: RunCallbacks = {
     ...client,
     async history(requestId) {
       const events = await client.history(requestId);
+      historyReads += 1;
       const requested = events.find((event) => event.kind === 'callback-requested');
       if (requested?.kind === 'callback-requested'
-          && !events.some((event) => event.kind === 'callback-submitted')) {
+          && !events.some((event) => event.kind === 'callback-submitted')
+          && (!afterPoll || historyReads >= 3)) {
         sawQuestion(requested.request);
       }
       return events;
@@ -108,30 +114,205 @@ async function answer(client: RunCallbacks, request: CallbackRequest, approved =
   });
 }
 
-function delivery() {
-  return workflow('delivery', {
-    brief: 'Prepare once and ask before sending.',
-    roles: { reviewer: person('Send the prepared result?') },
-    stages: [
-      stage('prepare', {
-        run: [process.execPath, '-e', "require('node:fs').appendFileSync('prepared.txt', 'prepared\\n')"],
-        writes: 'prepared.txt',
-      }),
-      stage('approve', { input: 'reviewer' }),
-      stage('send', {
-        run: [process.execPath, '-e', "require('node:fs').writeFileSync('sent.txt', 'sent\\n')"],
-        writes: 'sent.txt',
-      }),
-    ],
-  });
-}
-
 async function assertOneQuestion(client: RunCallbacks, requestId: string) {
   const requests = (await client.history()).filter((event) => event.kind === 'callback-requested');
   expect(requests.map((event) => event.request.requestId)).toEqual([requestId]);
 }
 
+async function killWaitingChild(
+  fixture: StoredRunFixture,
+  recordTo: string,
+  options: { signal: NodeJS.Signals; resume?: boolean; job?: 'deploy' | 'public-gate' | 'env-gate' },
+): Promise<CallbackRequest> {
+  const child = fork(new URL('./callback-wait-crash-fixture.ts', import.meta.url), [
+    fixture.directory, fixture.runId, recordTo, cwd, String(options.resume === true), options.job ?? 'delivery',
+  ], { cwd, execArgv: ['--import', import.meta.resolve('tsx')], silent: true });
+  let errors = '';
+  child.stderr!.on('data', (chunk) => { errors += String(chunk); });
+  const closed = once(child, 'close');
+  try {
+    const [message] = await WAIT_PROOF.run('question', () => Promise.race([
+      once(child, 'message'),
+      closed.then(([code]) => { throw new Error(`waiting child exited ${code}: ${errors}`); }),
+    ]));
+    const request = (message as { waiting: CallbackRequest }).waiting;
+    expect(child.kill(options.signal)).toBe(true);
+    expect(await WAIT_PROOF.run('completion', () => closed)).toEqual([null, options.signal]);
+    // Kill even when the checkpoint is missing: the mutation must exercise
+    // an actual interrupted process, not fail waiting for an event it removed.
+    expect((message as { checkpoint: unknown }).checkpoint).toMatchObject({
+      kind: 'dag:node', phase: 'done',
+      outcome: { status: 'paused', data: { requestId: request.requestId } },
+    });
+    return request;
+  } finally {
+    if (child.exitCode === null && child.signalCode === null) child.kill('SIGKILL');
+    await WAIT_PROOF.run('cleanup', () => closed);
+  }
+}
+
 describe('waiting for a callback in the run', () => {
+  it.each([false, true])('keeps a user-authored approval node paused across Ctrl-C withEnv=%s', async (wrapped) => {
+    const fixture = await WAIT_PROOF.run('setup', stored);
+    const recordTo = join(cwd, 'public-gate.jsonl');
+    const request = await killWaitingChild(fixture, recordTo, { signal: 'SIGINT', job: wrapped ? 'env-gate' : 'public-gate' });
+    expect(readResumeRecord(recordTo).outcomes.stages.get('public-gate/approve')).toMatchObject({
+      kind: 'completed', outcome: { status: 'paused', data: { requestId: request.requestId } },
+    });
+    await expect(readFile(join(cwd, 'sent.txt'), 'utf8')).rejects.toMatchObject({ code: 'ENOENT' });
+    const client = await createStoredCallbackClient(fixture.reopen(), fixture.runId);
+    const observed = observeQuestion(client);
+    const resumed = start(publicGate(wrapped), { callbacks: observed.client, recordTo, resume: true, onCallback: 'wait' });
+    expect((await waitingForQuestion(observed, resumed)).requestId).toBe(request.requestId);
+    await assertOneQuestion(client, request.requestId);
+    await answer(client, request);
+    expect((await WAIT_PROOF.run('completion', () => resumed.result)).outcome.status).toBe('pass');
+    expect(await readFile(join(cwd, 'sent.txt'), 'utf8')).toBe('sent\n');
+  }, WAIT_PROOF.budgetMs);
+
+  it.each([false, true])('does not mistake approval inside when for completion of an interrupted command withEnv=%s', async (wrapped) => {
+    const fixture = await WAIT_PROOF.run('setup', stored);
+    const client = await createStoredCallbackClient(fixture.storage, fixture.runId);
+    const observed = observeQuestion(client, true);
+    const recordTo = join(cwd, 'conditional-deploy.jsonl');
+    const job = workflow('conditional-deploy', {
+      brief: 'Ask before deploying.', roles: {},
+      stages: [stage('deploy', {
+        when: async (ctx) => {
+          const gate = approval('allow-deploy', { question: 'Deploy?' });
+          return (await (wrapped ? withEnv({ CALLBACK_TEST: 'condition' }, gate) : gate)(ctx)).status === 'pass';
+        },
+        run: [process.execPath, '-e', "require('node:fs').appendFileSync('deployments.txt', 'deployed\\n')"],
+      })],
+    });
+    const first = start(job, { callbacks: observed.client, recordTo, onCallback: 'wait' });
+    await answer(client, await waitingForQuestion(observed, first));
+    expect((await WAIT_PROOF.run('completion', () => first.result)).outcome.status).toBe('pass');
+    const lines = (await readFile(recordTo, 'utf8')).trim().split('\n');
+    const startLine = lines.findIndex((line) => {
+      const event = JSON.parse(line) as LoopEvent;
+      return event.kind === 'dag:node' && event.node === 'deploy' && event.phase === 'start';
+    });
+    expect(startLine).toBeGreaterThanOrEqual(0);
+    // The command ran, but its completion was not saved before the process died.
+    await writeFile(recordTo, `${lines.slice(0, startLine + 1).join('\n')}\n`);
+    const resumed = start(job, { callbacks: client, recordTo, resume: true });
+    expect((await WAIT_PROOF.run('completion', () => resumed.result)).outcome.status).toBe('paused');
+    expect(await readFile(join(cwd, 'deployments.txt'), 'utf8')).toBe('deployed\n');
+    const [recovery] = await client.listPending();
+    expect(recovery!.decisionText).toContain('Did stage "deploy" finish?');
+    await answer(client, recovery!);
+    expect((await WAIT_PROOF.run('completion', () => start(job, { callbacks: client, recordTo, resume: true }).result))
+      .outcome.status).toBe('pass');
+    expect(await readFile(join(cwd, 'deployments.txt'), 'utf8')).toBe('deployed\n');
+  }, WAIT_PROOF.budgetMs);
+
+  it.each([false, true])('does not inherit checkpoint authority in a nested call (spread=%s) but delegates workflow input', async (spread) => {
+    const client = createCallbackClient();
+    const observed = observeQuestion(client, true);
+    const events: LoopEvent[] = [];
+    const job = dag({ name: 'wrapped', nodes: {
+      deploy: async (ctx) => {
+        const decision = await approval('allow-deploy', { question: 'Deploy?' })(spread ? { ...ctx } : ctx);
+        if (decision.status !== 'pass') return decision;
+        await writeFile(join(ctx.workspace.dir, 'deployments.txt'), 'deployed\n');
+        return { status: 'pass' };
+      },
+    } });
+    const running = start(job, { callbacks: observed.client, onCallback: 'wait', onEvent: (event) => events.push(event) });
+    await answer(client, await waitingForQuestion(observed, running));
+    expect((await WAIT_PROOF.run('completion', () => running.result)).outcome.status).toBe('pass');
+    expect(events.filter((event) => event.kind === 'dag:node' && event.outcome?.status === 'paused')).toEqual([]);
+    expect(await readFile(join(cwd, 'deployments.txt'), 'utf8')).toBe('deployed\n');
+
+    let sawPause!: (event: Extract<LoopEvent, { kind: 'dag:node' }>) => void;
+    const paused = new Promise<Extract<LoopEvent, { kind: 'dag:node' }>>((resolve) => { sawPause = resolve; });
+    const delegated = start(delivery(), {
+      callbacks: client, onCallback: 'wait',
+      onEvent(event) {
+        if (event.kind === 'dag:node' && event.node === 'approve' && event.outcome?.status === 'paused') sawPause(event);
+      },
+    });
+    const event = await WAIT_PROOF.run('question', () => Promise.race([
+      paused,
+      delegated.result.then(() => { throw new Error('workflow ended without reporting its waiting input'); }),
+    ]));
+    const [request] = client.listPending();
+    expect(event).toMatchObject({ outcome: { data: { requestId: request!.requestId } } });
+    await answer(client, request!);
+    expect((await WAIT_PROOF.run('completion', () => delegated.result)).outcome.status).toBe('pass');
+  }, WAIT_PROOF.budgetMs);
+
+  it.each([
+    { signal: 'SIGINT', onCallback: 'exit', approved: true },
+    { signal: 'SIGINT', onCallback: 'wait', approved: false },
+    { signal: 'SIGKILL', onCallback: 'exit', approved: false },
+    { signal: 'SIGKILL', onCallback: 'wait', approved: true },
+  ] as const)('keeps the original gate after $signal and resumes in $onCallback mode', async ({ signal, onCallback, approved }) => {
+    const fixture = await WAIT_PROOF.run('setup', stored);
+    const recordTo = join(cwd, 'delivery.jsonl');
+    const original = await killWaitingChild(fixture, recordTo, { signal });
+    expect(original.decisionText).toBe('Send the prepared result?');
+    await expect(readFile(join(cwd, 'sent.txt'), 'utf8')).rejects.toMatchObject({ code: 'ENOENT' });
+
+    const client = await createStoredCallbackClient(fixture.reopen(), fixture.runId);
+    const observed = observeQuestion(client);
+    const resumed = start(delivery(), {
+      callbacks: observed.client, recordTo, resume: true, onCallback,
+    });
+    let pending: CallbackRequest;
+    if (onCallback === 'wait') {
+      pending = await waitingForQuestion(observed, resumed);
+    } else {
+      expect((await WAIT_PROOF.run('completion', () => resumed.result)).outcome.status).toBe('paused');
+      pending = (await client.listPending())[0]!;
+    }
+    expect(pending.requestId).toBe(original.requestId);
+    expect(pending.decisionText).toBe('Send the prepared result?');
+    await assertOneQuestion(client, original.requestId);
+    await answer(client, original, approved);
+    const finished = onCallback === 'wait' ? resumed : start(delivery(), {
+      callbacks: client, recordTo, resume: true, onCallback,
+    });
+    expect((await WAIT_PROOF.run('completion', () => finished.result)).outcome.status)
+      .toBe(approved ? 'pass' : 'fail');
+    expect(await readFile(join(cwd, 'prepared.txt'), 'utf8')).toBe('prepared\n');
+    if (approved) expect(await readFile(join(cwd, 'sent.txt'), 'utf8')).toBe('sent\n');
+    else await expect(readFile(join(cwd, 'sent.txt'), 'utf8')).rejects.toMatchObject({ code: 'ENOENT' });
+    await assertOneQuestion(client, original.requestId);
+  }, WAIT_PROOF.budgetMs);
+
+  it('emits and records the paused stage before waiting without ending the run', async () => {
+    const client = createCallbackClient();
+    const recordTo = join(cwd, 'delivery.jsonl');
+    const events: LoopEvent[] = [];
+    let sawPause!: (event: Extract<LoopEvent, { kind: 'dag:node' }>) => void;
+    const paused = new Promise<Extract<LoopEvent, { kind: 'dag:node' }>>((resolve) => { sawPause = resolve; });
+    const running = start(delivery(), {
+      callbacks: client, recordTo, onCallback: 'wait',
+      onEvent(event) {
+        events.push(event);
+        if (event.kind === 'dag:node' && event.node === 'approve' && event.outcome?.status === 'paused') sawPause(event);
+      },
+    });
+    const event = await WAIT_PROOF.run('question', () => Promise.race([
+      paused,
+      running.result.then(() => { throw new Error('run ended before the pause was observed'); }),
+    ]));
+    const [request] = client.listPending();
+    expect(event).toMatchObject({
+      path: ['delivery'], node: 'approve', phase: 'done', attempt: 1,
+      outcome: { status: 'paused', data: { requestId: request!.requestId } },
+    });
+    expect((await readFile(recordTo, 'utf8')).trim().split('\n').map((line) => JSON.parse(line)))
+      .toContainEqual(event);
+    expect(events.some((entry) => entry.kind === 'dag:end')).toBe(false);
+    await expect(readFile(join(cwd, 'sent.txt'), 'utf8')).rejects.toMatchObject({ code: 'ENOENT' });
+    await answer(client, request!);
+    expect((await WAIT_PROOF.run('completion', () => running.result)).outcome.status).toBe('pass');
+    expect(events.filter((entry) => entry.kind === 'dag:end')).toHaveLength(1);
+  }, WAIT_PROOF.budgetMs);
+
   it('keeps a standalone process alive until an outside answer arrives', async () => {
     const child = fork(new URL('./callback-wait-child-fixture.ts', import.meta.url), [], {
       cwd,
@@ -284,18 +465,15 @@ describe('waiting for a callback in the run', () => {
   }, WAIT_PROOF.budgetMs);
 
   it.each([
-    { approved: true, executions: 'deployed\n' },
-    { approved: false, executions: 'deployed\ndeployed\n' },
-  ])('waits on a saved recovery question before acting on approved=$approved', async ({ approved, executions }) => {
-    const client = createCallbackClient();
+    { approved: true, executions: 'deployed\n', killed: false },
+    { approved: false, executions: 'deployed\ndeployed\n', killed: false },
+    { approved: true, executions: 'deployed\n', killed: true },
+    { approved: false, executions: 'deployed\ndeployed\n', killed: true },
+  ])('waits on a saved recovery question before acting on approved=$approved, killed=$killed', async ({ approved, executions, killed }) => {
+    const fixture = await WAIT_PROOF.run('setup', stored);
+    const client = await createStoredCallbackClient(fixture.storage, fixture.runId);
     const recordTo = join(cwd, 'deploy.jsonl');
-    const job = workflow('deploy', {
-      brief: 'Deploy the release.',
-      roles: {},
-      stages: [stage('deploy', {
-        run: [process.execPath, '-e', "require('node:fs').appendFileSync('deployments.txt', 'deployed\\n')"],
-      })],
-    });
+    const job = deployment();
     expect((await WAIT_PROOF.run('completion', () => start(job, { callbacks: client, recordTo }).result))
       .outcome.status).toBe('pass');
     const lines = (await readFile(recordTo, 'utf8')).trim().split('\n');
@@ -309,8 +487,13 @@ describe('waiting for a callback in the run', () => {
     expect((await WAIT_PROOF.run('completion', () => start(job, {
       callbacks: client, recordTo, resume: true,
     }).result)).outcome.status).toBe('paused');
-    const [request] = client.listPending();
+    const [request] = await client.listPending();
     expect(request!.decisionText).toContain('Did stage "deploy" finish?');
+
+    if (killed) {
+      expect((await killWaitingChild(fixture, recordTo, { signal: 'SIGKILL', resume: true, job: 'deploy' })).requestId)
+        .toBe(request!.requestId);
+    }
 
     const observed = observeQuestion(client);
     const waiting = start(job, { callbacks: observed.client, recordTo, resume: true, onCallback: 'wait' });
