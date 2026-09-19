@@ -90,6 +90,7 @@ export const stageBranches = {
   F83: 'fix/proof-budgets-wait-for-a-condition',
   F62: 'feat/reasoning-record',
   F88: 'fix/runtime-polish',
+  F63: 'feat/markdown-corpus-search',
 };
 
 export function manageStage(args, options = {}) {
