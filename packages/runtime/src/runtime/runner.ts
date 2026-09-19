@@ -180,6 +180,9 @@ export async function run(
   job: Job,
   options: RunOptions = {},
 ): Promise<RunResult> {
+  if (options.onCallback !== undefined && options.onCallback !== 'wait' && options.onCallback !== 'exit') {
+    throw new TypeError('onCallback must be wait or exit');
+  }
   const paramsInput: unknown = options.params === undefined ? {} : options.params;
   if (
     paramsInput === null

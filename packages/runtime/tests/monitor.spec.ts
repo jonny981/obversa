@@ -2,8 +2,9 @@ import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { request } from 'node:http';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { runInNewContext } from 'node:vm';
 
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { approval, createCallbackClient, dag, fnJob, kickback, pipeline, run } from '../src/api.ts';
 import type { LoopEvent, Outcome, RunResult } from '../src/api.ts';
@@ -17,6 +18,49 @@ const get = async (url: string) => {
   return { status: res.status, type: res.headers.get('content-type') ?? '', body: await res.text() };
 };
 
+/** Host the served script's text writes and polling; layout and clicks need a browser. */
+async function loadMonitorPage(url: string) {
+  const page = await get(url);
+  expect(page.status).toBe(200);
+  const script = page.body.match(/<script>([\s\S]*?)<\/script>/)?.[1];
+  if (script === undefined) throw new Error('the served monitor page has no script');
+  // Only IDs present in the served markup exist. No renderer or usage text is supplied here.
+  const markup = page.body.slice(0, page.body.indexOf('<script>'));
+  const elements = new Map(Array.from(markup.matchAll(/<[^>]+\bid="([^"]+)"[^>]*>/g), ([tag, id]) => [
+    id!,
+    { textContent: '', innerHTML: '', hidden: /\bhidden(?:\s|>|=)/.test(tag), addEventListener() {} },
+  ] as const));
+  let nextPoll: (() => Promise<void>) | undefined;
+  let markReady!: () => void;
+  let rejectReady!: (error: unknown) => void;
+  const ready = new Promise<void>((resolve, reject) => { markReady = resolve; rejectReady = reject; });
+  runInNewContext(script, {
+    document: { getElementById: (id: string) => elements.get(id) ?? null },
+    // Resolve browser-relative URLs, keeping the real response and JSON body unchanged.
+    fetch: (path: string, init?: RequestInit) => fetch(new URL(path, url), init).catch((error) => {
+      rejectReady(error);
+      throw error;
+    }),
+    setTimeout(callback: () => Promise<void>) {
+      nextPoll = callback;
+      markReady();
+      return 1;
+    },
+  });
+  await ready;
+  return {
+    text: (id: string) => elements.get(id)?.textContent ?? '',
+    visibleText: () => [...elements.values()].filter((element) => !element.hidden)
+      .map((element) => element.textContent).join('\n'),
+    async poll() {
+      const callback = nextPoll;
+      nextPoll = undefined;
+      if (callback === undefined) throw new Error('the served script did not schedule another poll');
+      await callback();
+    },
+  };
+}
+
 let home: string;
 let previousHome: string | undefined;
 const opened: RunResult[] = [];
@@ -26,12 +70,65 @@ beforeEach(() => {
   process.env.OBVERSA_HOME = home;
 });
 afterEach(async () => {
+  vi.restoreAllMocks();
   for (const result of opened.splice(0)) await result.monitor?.close();
   if (previousHome === undefined) delete process.env.OBVERSA_HOME; else process.env.OBVERSA_HOME = previousHome;
   rmSync(home, { recursive: true, force: true });
 });
 
 describe('the run monitor', () => {
+  it('rejects page readiness when the first state fetch fails', async () => {
+    const result = await run(fnJob('a', () => {}), { cwd: home, monitor: true });
+    opened.push(result);
+    const url = result.monitor!.url;
+    const realFetch = globalThis.fetch;
+    vi.spyOn(globalThis, 'fetch').mockImplementation((input, init) => {
+      if (String(input) === `${url}state`) return Promise.reject(new Error('initial state fetch failed'));
+      return realFetch(input, init);
+    });
+
+    await expect(loadMonitorPage(url)).rejects.toThrow('initial state fetch failed');
+  });
+
+  it('renders measured usage while running and keeps it after an unknown final call', async () => {
+    const events: LoopEvent[] = [];
+    let page: Awaited<ReturnType<typeof loadMonitorPage>> | undefined;
+    let reportedText = '';
+    let reportedStatus = '';
+    const result = await run(fnJob('spend', async (ctx) => {
+      const monitor = monitorEvents(events)[0];
+      if (monitor === undefined) throw new Error('monitor URL was not emitted');
+      page = await loadMonitorPage(monitor.url);
+      ctx.emit({
+        kind: 'engine:usage', ts: 1, path: [], model: 'measured',
+        usage: { kind: 'reported', inputTokens: 100, outputTokens: 20, cacheReadInputTokens: 30 },
+      });
+      await page.poll();
+      reportedText = page.visibleText();
+      reportedStatus = page.text('status');
+      ctx.emit({
+        kind: 'engine:usage', ts: 2, path: [], model: 'unmeasured', usage: { kind: 'unknown' },
+      });
+      return 'usage run finished';
+    }), { cwd: home, monitor: true, onEvent: (event) => events.push(event) });
+    opened.push(result);
+
+    expect(result.outcome.status, result.outcome.summary).toBe('pass');
+    expect(page).toBeDefined();
+    // Run the same callback the served page scheduled, after /state has become final.
+    await page!.poll();
+    const finalText = page!.visibleText();
+    expect(reportedStatus).toContain('running');
+    expect(reportedText).toContain('100/20 tok');
+    expect(reportedText).toContain('30 tok from cache');
+    expect(reportedText).not.toContain('usage unknown');
+    expect(page!.text('status')).toContain('usage run finished');
+    expect(finalText).toContain('100/20 tok');
+    expect(finalText).toContain('30 tok from cache');
+    expect(finalText).toContain('usage unknown on 1 call');
+    expect(finalText).not.toMatch(/[$£€]|\b(?:USD|GBP|EUR)\b/);
+  });
+
   it('is off by default: no server, no event', async () => {
     const events: LoopEvent[] = [];
     const result = await run(fnJob('quiet', () => {}), { onEvent: (e) => events.push(e) });

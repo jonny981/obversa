@@ -616,6 +616,16 @@ export type LoopEvent =
       desc?: string;
       /** The node's declared acceptance criterion, when present. */
       gate?: string;
+      /**
+       * What the node produced, on a done or a skip. One attempt can emit this
+       * twice: a gate waiting for a person records its pause before it waits, so
+       * a live consumer sees a paused outcome and then, if an answer arrives, the
+       * answered one. A record keeps the latest outcome emitted for the node, so
+       * when a waiting run is killed the stored outcome is the pause itself,
+       * which is what lets a resumed run return that same still-pending question
+       * rather than treating the stage as interrupted and asking a person to
+       * reconcile it.
+       */
       outcome?: Outcome;
       /** Soft timeout in force for this node, when one is configured. */
       timeoutMs?: number;

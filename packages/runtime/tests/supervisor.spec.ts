@@ -42,6 +42,84 @@ afterEach(() => {
 });
 
 describe('run supervision', () => {
+  it('saves the same measured and unknown usage as the monitor and run result', async () => {
+    const runId = 'usage-record-run';
+    const events: LoopEvent[] = [];
+    let reported: ReturnType<typeof readRunStatus>;
+    let reportedState: { usage: unknown; status: string } | undefined;
+    const result = await run(fnJob('spend', async (ctx) => {
+      ctx.emit({
+        kind: 'engine:usage', ts: 1, path: [], model: 'measured',
+        usage: { kind: 'reported', inputTokens: 100, outputTokens: 20, cacheReadInputTokens: 30 },
+      });
+      reported = readRunStatus(runId);
+      const monitor = events.find((event) => event.kind === 'monitor');
+      if (monitor?.kind !== 'monitor') throw new Error('monitor URL was not emitted');
+      const response = await fetch(`${monitor.url}state`);
+      if (!response.ok) throw new Error(`monitor state returned ${response.status}`);
+      reportedState = await response.json();
+      ctx.emit({
+        kind: 'engine:usage', ts: 2, path: [], model: 'unmeasured', usage: { kind: 'unknown' },
+      });
+    }), { cwd: testHome, supervise: true, monitor: true, runId, onEvent: (event) => events.push(event) });
+
+    try {
+      expect(result.outcome.status).toBe('pass');
+      const expectedReported = {
+        inputTokens: 100, outputTokens: 20, cacheReadInputTokens: 30,
+        cacheCreationInputTokens: 0, unmeasuredCalls: 0,
+      };
+      expect(reported?.live.usage).toEqual({ ...expectedReported, calls: 1 });
+      expect(reportedState).toMatchObject({ status: 'running', usage: expectedReported });
+      expect(result.usage).toEqual({
+        inputTokens: 100, outputTokens: 20, cacheReadInputTokens: 30,
+        cacheCreationInputTokens: 0, unmeasuredCalls: 1,
+      });
+      const saved = JSON.parse(readFileSync(join(testHome, 'runs', runId, 'status.json'), 'utf8'));
+      expect(saved.live.usage).toEqual({ ...result.usage, calls: 2 });
+      expect(saved.live.usage).toHaveProperty('unmeasuredCalls', 1);
+      expect(saved.live.usage).not.toHaveProperty('unknownUsageCalls');
+      expect(readRunStatus(runId)?.live.usage).toEqual(saved.live.usage);
+      expect(readRunProgress(runId)?.usage).toEqual(saved.live.usage);
+      const response = await fetch(`${result.monitor!.url}state`);
+      expect(response.status).toBe(200);
+      const state = await response.json();
+      expect(state.status).toBe('done');
+      expect(state.usage).toEqual(result.usage);
+    } finally {
+      await result.monitor?.close();
+    }
+  });
+
+  it('formats recent usage with the totals in the saved status being read', () => {
+    const supervisor = startSupervisor({ runId: 'usage-lines-run', cwd: testHome, title: 'usage' });
+    supervisor.sink({
+      kind: 'engine:usage', ts: 1, path: [], model: 'measured',
+      usage: { kind: 'reported', inputTokens: 100, outputTokens: 20, cacheReadInputTokens: 30 },
+    });
+    const reported = readRunProgress('usage-lines-run', { recent: 2 });
+    expect(reported?.recent).toHaveLength(1);
+    expect(reported!.recent[0]).toContain('measured: 100/20 tok');
+    expect(reported!.recent[0]).toContain('run 100/20 tok');
+    expect(reported!.recent[0]).toContain('30 tok from cache');
+    expect(reported!.recent[0]).not.toContain('usage unknown');
+
+    supervisor.sink({
+      kind: 'engine:usage', ts: 2, path: [], model: 'unmeasured', usage: { kind: 'unknown' },
+    });
+    supervisor.finish({ status: 'pass' });
+    const final = readRunProgress('usage-lines-run', { recent: 2 });
+    expect(final?.recent).toHaveLength(2);
+    expect(final!.recent[0]).toContain('measured: 100/20 tok');
+    expect(final!.recent[1]).toContain('unmeasured: usage unknown');
+    // Both lines describe the saved total at read time, including the later unknown call.
+    for (const line of final!.recent) {
+      expect(line).toContain('run 100/20 tok');
+      expect(line).toContain('30 tok from cache');
+      expect(line).toContain('usage unknown on 1 call');
+    }
+  });
+
   it('records a run shape, live state, and bounded event stream', async () => {
     const result = await run(
       loop({

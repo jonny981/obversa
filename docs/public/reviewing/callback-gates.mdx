@@ -33,7 +33,9 @@ without asking a model what the answer meant.
 
 ## Two ways to wait
 
-A gate waits in one of two ways, and the record is the same in both.
+An approval() gate waits in one of two ways, and the record is the same in
+both. A team review that uses a callback gate is not one of them: it returns a
+pause carrying its question straight away, whichever way the run was started.
 
 Attended: a person is at the run, so the process stays up and waits for the
 answer. This is the mode when `onCallback: 'wait'` is set. It is never the

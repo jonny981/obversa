@@ -1,5 +1,6 @@
 import { fork } from 'node:child_process';
 import { once } from 'node:events';
+import { existsSync } from 'node:fs';
 import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -12,6 +13,7 @@ import {
   createCallbackClient,
   createStoredCallbackClient,
   dag,
+  fnJob,
   run,
   stage,
   withEnv,
@@ -152,6 +154,51 @@ async function killWaitingChild(
 }
 
 describe('waiting for a callback in the run', () => {
+  it.each(['Wait', 'waiting', true, false, null, 0, {}])('rejects onCallback=%j before any run effects', async (onCallback) => {
+    const recordTo = join(cwd, 'invalid-option.jsonl');
+    const environmentFile = join(cwd, 'environment-started.txt');
+    const jobFile = join(cwd, 'job-started.txt');
+    const effects: string[] = [];
+    const events: LoopEvent[] = [];
+    let result: RunResult | undefined;
+    let error: unknown;
+    try {
+      try {
+        result = await run(fnJob('must-not-run', async () => {
+          effects.push('job');
+          await writeFile(jobFile, 'ran');
+        }), {
+          cwd,
+          // JavaScript callers can pass values outside the TypeScript union.
+          onCallback: onCallback as RunOptions['onCallback'],
+          recordTo,
+          monitor: true,
+          onEvent: (event) => events.push(event),
+          environment: {
+            name: 'must-not-start',
+            async up() {
+              effects.push('environment up');
+              await writeFile(environmentFile, 'started');
+              return { env: {}, async down() { effects.push('environment down'); } };
+            },
+          },
+        });
+      } catch (caught) {
+        error = caught;
+      }
+      expect(error).toBeInstanceOf(TypeError);
+      expect(String(error)).toContain('onCallback');
+      expect(result).toBeUndefined();
+      expect(existsSync(recordTo)).toBe(false);
+      expect(existsSync(environmentFile)).toBe(false);
+      expect(existsSync(jobFile)).toBe(false);
+      expect(effects).toEqual([]);
+      expect(events.filter((event) => event.kind === 'monitor')).toEqual([]);
+    } finally {
+      await result?.monitor?.close();
+    }
+  });
+
   it.each([false, true])('keeps a user-authored approval node paused across Ctrl-C withEnv=%s', async (wrapped) => {
     const fixture = await WAIT_PROOF.run('setup', stored);
     const recordTo = join(cwd, 'public-gate.jsonl');

@@ -16,7 +16,7 @@ import type { CallbackRequest } from '../callback/gate.js';
 import { jobMeta } from '../core/describe.js';
 import type { JsonObject, JsonValue } from '../graph/value.js';
 import type { Job, JobMeta, LoopEvent, Outcome, RunCallbacks } from '../core/types.js';
-import type { UsageTotals } from './supervisor.js';
+import { runningTotal, type UsageTotals } from './supervisor.js';
 
 export interface RunMonitor {
   /** The page's address: `http://127.0.0.1:<port>/`. */
@@ -240,7 +240,7 @@ export interface StartedMonitor {
 /** Bind the page to a free loopback port and return its address, sink and finish hook. */
 export async function startMonitor(opts: { job: Job; callbacks: RunCallbacks; runId?: string }): Promise<StartedMonitor> {
   const fold = new MonitorFold(opts.job);
-  const state = async (): Promise<MonitorState> => ({
+  const state = async (): Promise<MonitorState & { usageSummary: string }> => ({
     ...(opts.runId !== undefined ? { runId: opts.runId } : {}),
     ...(fold.name !== undefined ? { name: fold.name } : {}),
     status: fold.status,
@@ -248,6 +248,7 @@ export async function startMonitor(opts: { job: Job; callbacks: RunCallbacks; ru
     nodes: fold.nodes,
     kickbacks: fold.kickbacks,
     usage: fold.usage,
+    usageSummary: runningTotal(fold.usage),
     pending: await pendingOf(opts.callbacks),
     events: fold.events,
   });
@@ -336,7 +337,7 @@ function page(name: string | undefined): string {
 <body>
 <main>
   <h1 id="title">${escapeHtml(title)}</h1>
-  <p class="status" id="status">connecting</p>
+  <p class="status"><span id="status">connecting</span><span id="usage"></span></p>
   <ol class="nodes" id="nodes"></ol>
   <div id="kickbacks"></div>
   <h2 id="pending-title" hidden>Waiting for a person</h2>
@@ -366,6 +367,7 @@ function page(name: string | undefined): string {
     try { s = await (await fetch('state', { cache: 'no-store' })).json(); } catch { el('status').textContent = 'the run has gone'; return; }
     el('title').textContent = (s.name || 'a run') + (s.status === 'done' ? ', ' + (s.outcome ? s.outcome.status : 'done') : ', running');
     el('status').textContent = s.status === 'done' ? (s.outcome && s.outcome.summary ? s.outcome.summary : 'finished') : 'running' + (s.runId ? ' · ' + s.runId : '');
+    el('usage').textContent = ' · ' + s.usageSummary;
     const names = Object.keys(s.nodes);
     el('nodes').innerHTML = names.map((n) => { const v = s.nodes[n]; return '<li><span class="name">' + esc(n) + (v.runs > 1 ? ' <span class="desc">ran ' + v.runs + ' times</span>' : '') + '</span>'
       + '<span>' + (v.desc ? '<div class="desc">' + esc(v.desc) + '</div>' : '') + (v.needs && v.needs.length ? '<div class="needs">needs ' + esc(v.needs.join(', ')) + '</div>' : '') + (v.outcome && v.outcome.summary ? '<div class="summary">' + esc(v.outcome.summary) + '</div>' : '') + '</span>'

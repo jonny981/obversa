@@ -173,35 +173,19 @@ await walk(docs);
 const failures = [];
 let checked = 0;
 const cache = new Map();
+const cachedSurface = (dir, subpath) => {
+  const key = `${dir}|${subpath}`;
+  if (!cache.has(key)) cache.set(key, provided(dir, subpath));
+  return cache.get(key);
+};
 for (const page of pages.sort()) {
-  for (const { specifier, names, line, defaultImport } of importsIn(readFileSync(page, 'utf8'))) {
-    if (defaultImport) {
-      checked += 1;
-      failures.push(`${page.slice(docs.length + 1)}:${line}: ${specifier} has no default export, so \`import ${defaultImport} from\` cannot work`);
-      continue;
-    }
+  const text = readFileSync(page, 'utf8');
+  failures.push(...failuresIn(page.slice(docs.length + 1), text, locate, cachedSurface));
+  for (const { specifier, names } of importsIn(text)) {
+    if (names.length === 0) continue;
     const place = locate(specifier);
-    if (!place) {
-      failures.push(`${page.slice(docs.length + 1)}:${line}: no package in this repository provides ${specifier}`);
-      continue;
-    }
-    const key = `${place.dir}|${place.subpath}`;
-    if (!cache.has(key)) cache.set(key, provided(place.dir, place.subpath));
-    const surface = cache.get(key);
-    if (surface.reason === 'not-exported') {
-      failures.push(`${page.slice(docs.length + 1)}:${line}: ${specifier} is not an export path of that package`);
-      continue;
-    }
-    if (surface.reason === 'not-built') {
-      failures.push(`${page.slice(docs.length + 1)}:${line}: ${specifier} is not built; run the build first`);
-      continue;
-    }
-    const exported = surface.names;
-    for (const name of names) {
-      checked += 1;
-      if (exported.has(name)) continue;
-      failures.push(`${page.slice(docs.length + 1)}:${line}: ${specifier} does not provide ${name}`);
-    }
+    const exported = place ? cachedSurface(place.dir, place.subpath).names : undefined;
+    checked += names.filter((name) => exported?.has(name)).length;
   }
 }
 

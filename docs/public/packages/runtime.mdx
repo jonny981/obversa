@@ -312,7 +312,7 @@ try {
   question and returns, so a schedule can start the same file again until
   the answer is there. The question, the client and the record are the same
   in both, so a record written by one mode resumes under the other.
-  Cancelling a waiting WORKFLOW reports the run as aborted and leaves the question in the record, so a later resume can still answer it. A bare `approval()` job returns the recorded pause instead.
+  Cancelling a waiting workflow reports the run as aborted and leaves the question in the record, so a later resume can still answer it. A bare `approval()` job returns the recorded pause instead.
 - `monitor: true` on `run` (on by default under `supervise`) serves the
   run's own page on a free loopback port; `RunResult.monitor` carries its
   address and closes it, and `MonitorState` is what `/state` returns. See
@@ -365,9 +365,10 @@ try {
 - **`run` starts a fresh record unless you pass `resume: true`.** With
   `resume`, the file at `recordTo` is read first. A job built with
   `workflow()` skips its finished stages; any other job appends to the
-  record and runs again. For a workflow, the record applies to the same
-  name, workspace, brief and stage list; change any of them and the run
-  starts again. The supervised runner in `@obversa/runner` restarts a
+  record and runs again. For a workflow,
+  the record applies to the same name, workspace, brief, stage list and role
+  seats; change any of them and the run starts again.
+  The supervised runner in `@obversa/runner` restarts a
   killed run from a graph definition and a host module.
 - **Every attempt has a budget.** An overrun comes back as a typed result,
   not a hang; read the outcome rather than waiting on it.
@@ -393,9 +394,11 @@ Run the same workflow again with `resume: true` and it reads its record first.
 Stages that finished are skipped. A review that sent work back runs the
 writer again. A gate that was still waiting for a person is observed, and the
 run exits with the recorded pause, so a schedule can start the same file
-until the answer arrives and never asks twice. The record applies to the same
-workflow name, workspace, brief and stage list; change the brief and the run
-starts again. A stage that was mid-flight when the process died runs again
+until the answer arrives and never asks twice.
+The record applies to the same workflow name, workspace, brief, stage list
+and role seats; change the brief, or the model behind a role, and the run
+starts again.
+A stage that was mid-flight when the process died runs again
 only when it carries `retrySafe: true`; otherwise the run pauses and asks a
 person to reconcile it.
 

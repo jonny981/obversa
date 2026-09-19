@@ -1,7 +1,8 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { execFileSync } from 'node:child_process';
-import { readFileSync } from 'node:fs';
+import { execFileSync, spawnSync } from 'node:child_process';
+import { copyFileSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
 import { join, dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -93,3 +94,75 @@ test('a type re-exported from a sibling declaration still resolves', () => {
   const { failed, output } = withPlantedImport("import type { TeamSeat } from '@obversa/api';");
   assert.equal(failed, false, `a re-exported type must resolve: ${output}`);
 });
+
+// These exercise command dispatch and diagnostics, including behaviours already supported.
+for (const fixture of [
+  {
+    name: 'missing package',
+    line: "import { available } from '@obversa/not-a-package';",
+    reason: 'no package in this repository provides @obversa/not-a-package',
+  },
+  {
+    name: 'unexported package path',
+    line: "import { available } from '@obversa/example/private';",
+    reason: '@obversa/example/private is not an export path of that package',
+  },
+  {
+    name: 'missing declaration output',
+    line: "import { available } from '@obversa/example';",
+    built: false,
+    reason: '@obversa/example is not built; run the build first',
+  },
+  {
+    name: 'missing exported name',
+    line: "import { missing } from '@obversa/example';",
+    reason: '@obversa/example does not provide missing',
+  },
+  {
+    name: 'default import',
+    line: "import example from '@obversa/example';",
+    reason: '@obversa/example has no default export, so `import example from` cannot work',
+  },
+  {
+    name: 'valid named import',
+    line: "import { available } from '@obversa/example';",
+  },
+]) {
+  test(`the real command handles ${fixture.name} in an isolated tree`, () => {
+    const directory = mkdtempSync(join(tmpdir(), 'obversa-documented-imports-'));
+    try {
+      const fixtureCheck = join(directory, 'scripts/check-documented-imports.mjs');
+      const fixturePage = join(directory, 'docs/public/case.mdx');
+      const packageDir = join(directory, 'packages/example');
+      mkdirSync(dirname(fixtureCheck), { recursive: true });
+      mkdirSync(dirname(fixturePage), { recursive: true });
+      mkdirSync(join(packageDir, 'dist'), { recursive: true });
+      // The command derives its root from its own filename; copy it without edits.
+      copyFileSync(check, fixtureCheck);
+      writeFileSync(fixturePage, `\`\`\`ts\n${fixture.line}\n\`\`\`\n`);
+      writeFileSync(join(packageDir, 'package.json'), JSON.stringify({
+        name: '@obversa/example',
+        exports: { '.': { types: './dist/index.d.ts' } },
+      }));
+      if (fixture.built !== false) {
+        writeFileSync(join(packageDir, 'dist/index.d.ts'), 'export declare const available: number;\n');
+      }
+
+      const child = spawnSync(process.execPath, [fixtureCheck], {
+        cwd: directory, encoding: 'utf8', timeout: 10_000,
+      });
+      assert.equal(child.error, undefined);
+      assert.equal(child.signal, null);
+      assert.equal(child.status, fixture.reason ? 1 : 0, child.stderr || child.stdout);
+      if (fixture.reason) {
+        assert.ok(child.stderr.includes(`case.mdx:2: ${fixture.reason}`), child.stderr);
+        assert.doesNotMatch(child.stdout, /Every documented import resolves/);
+      } else {
+        assert.equal(child.stderr, '');
+        assert.match(child.stdout, /Every documented import resolves: 1 names across 1 pages\./);
+      }
+    } finally {
+      rmSync(directory, { recursive: true, force: true });
+    }
+  });
+}

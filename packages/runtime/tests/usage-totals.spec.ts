@@ -67,6 +67,29 @@ describe('a person can see what a run is spending', () => {
     expect(formatEvent(unknown, { inputTokens: 10, outputTokens: 5 })).toContain('usage unknown');
   });
 
+  it('keeps the supplied run total beside a call whose usage is unknown', () => {
+    const unknown: LoopEvent = {
+      kind: 'engine:usage', ts: 2, path: ['implement'], model: 'm', usage: { kind: 'unknown' },
+    };
+    const line = formatEvent(unknown, {
+      inputTokens: 100,
+      outputTokens: 20,
+      cacheReadInputTokens: 30,
+      unmeasuredCalls: 1,
+    });
+    expect(line).toContain('m: usage unknown');
+    expect(line).toContain('run 100/20 tok');
+    expect(line).toContain('30 tok from cache');
+    expect(line).toContain('usage unknown on 1 call');
+  });
+
+  it('keeps the unknown-usage line unchanged when no total is supplied', () => {
+    const unknown: LoopEvent = {
+      kind: 'engine:usage', ts: 2, path: ['implement'], model: 'm', usage: { kind: 'unknown' },
+    };
+    expect(formatEvent(unknown)).toBe('implement   m: usage unknown');
+  });
+
   it('carries a run-wide cache total, not only a per-model one', () => {
     const stats = new Stats();
     stats.record(usage('a', 100, 10, { created: 30, read: 70 }));

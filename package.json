@@ -122,6 +122,7 @@
     "test:example-output": "node --test scripts/check-example-output.spec.mjs",
     "verify:f39": "pnpm verify:f35 && pnpm test:example-output",
     "verify:f83": "pnpm verify:f39 && pnpm test:retired-names && pnpm check:retired-names && pnpm test:proof-path-budgets && pnpm check:proof-path-budgets && pnpm --filter @obversa/surface-diff test",
+    "verify:f88": "pnpm verify:f83",
     "verify:f62": "pnpm build && pnpm --filter @obversa/memory-git test && pnpm example:reasoning-record && pnpm check:tarballs && pnpm verify:f39 && pnpm docs:validate",
     "verify:f71": "pnpm verify:f39 && pnpm --filter @obversa/engine-opencode-cli test",
     "verify:f72": "pnpm verify:f65 && pnpm --filter @obversa/api test && pnpm --filter @obversa/engine-opencode-cli test && pnpm --filter @obversa/builtin-workflows test",

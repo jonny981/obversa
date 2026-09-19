@@ -78,7 +78,7 @@ export interface RunLive {
     /** What it paid to build that cache, kept separate on purpose. */
     cacheCreationInputTokens: number;
     calls: number;
-    unknownUsageCalls: number;
+    unmeasuredCalls: number;
   };
 }
 
@@ -141,7 +141,7 @@ export function startSupervisor(input: {
         cacheReadInputTokens: 0,
         cacheCreationInputTokens: 0,
         calls: 0,
-        unknownUsageCalls: 0,
+        unmeasuredCalls: 0,
       },
     },
   };
@@ -236,7 +236,7 @@ export function startSupervisor(input: {
       case 'engine:usage':
         status.live.usage.calls += 1;
         if (event.usage.kind === 'unknown') {
-          status.live.usage.unknownUsageCalls += 1;
+          status.live.usage.unmeasuredCalls += 1;
         } else {
           status.live.usage.inputTokens += event.usage.inputTokens;
           status.live.usage.outputTokens += event.usage.outputTokens;
@@ -454,11 +454,11 @@ export function readRunProgress(
     // Not `.map(formatEvent)`: map passes the index as the second argument,
     // which now lands in `totals`. The compiler caught it, and the same trap
     // waits for any caller who passes this function by reference.
-    recent: events.slice(-(options?.recent ?? 10)).map((event) => formatEvent(event)),
+    recent: events.slice(-(options?.recent ?? 10)).map((event) => formatEvent(event, status.live.usage)),
   };
 }
 
-function runningTotal(totals: UsageTotals): string {
+export function runningTotal(totals: UsageTotals): string {
   // Cache READ only, and named. Creation and read are different things:
   // creation is what was paid to build the cache, read is what was served
   // from it. Summing them under one word makes a reader guess which they are
@@ -537,8 +537,9 @@ function renderEvent(event: LoopEvent, totals?: UsageTotals): string {
     case 'engine:tool':
       return `${at}  tool ${event.name} ${event.phase}`;
     case 'engine:usage': {
-      if (event.usage.kind === 'unknown') return `${at}  ${event.model}: usage unknown`;
-      const call = `${event.usage.inputTokens}/${event.usage.outputTokens} tok`;
+      const call = event.usage.kind === 'unknown'
+        ? 'usage unknown'
+        : `${event.usage.inputTokens}/${event.usage.outputTokens} tok`;
       // A person watching wants both: what this call cost, and what the run
       // has cost so far. Without the second, a long run is a wall of numbers
       // that never answers the question being asked.
