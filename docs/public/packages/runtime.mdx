@@ -483,7 +483,9 @@ larger teams.
   watch a run narrate itself without writing a formatter first. Give it the
   running totals you already hold, from `RunResult.stats` or the monitor's
   live status, and a usage line also reports what the run has spent so far.
-  Omitting them changes nothing about what it prints.
+  Omitting them changes nothing about what it prints. The shape is
+  `UsageTotals`: input and output tokens, and optionally what was created in
+  and read from cache.
 - **`RunResult.usage`.** What the whole run spent, in the shape
   `formatEvent` takes, so a run's own totals can be handed straight back to
   the line formatter. The same numbers are in `RunResult.stats` per model;
