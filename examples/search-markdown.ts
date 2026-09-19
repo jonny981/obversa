@@ -1,3 +1,4 @@
+import { access } from 'node:fs/promises';
 import { fileURLToPath } from 'node:url';
 
 import { openMarkdownCorpus } from '@obversa/search-markdown';
@@ -5,6 +6,7 @@ import { agentJob, run } from '@obversa/runtime';
 import { curate, ground } from '@obversa/runtime/memory';
 import { MockEngine } from '@obversa/runtime/testing';
 
+await access(fileURLToPath(new URL('./search-markdown-corpus/notes with spaces.md', import.meta.url)));
 const corpus = openMarkdownCorpus({
   directory: fileURLToPath(new URL('./search-markdown-corpus', import.meta.url)),
 });
