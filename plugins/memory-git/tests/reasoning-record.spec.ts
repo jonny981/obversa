@@ -1,6 +1,8 @@
 import { describe, expect, it, vi } from 'vitest';
 
-import { openReasoningRecord } from '../src/index.ts';
+import { openReasoningRecord, type CapturedTurn } from '../src/index.ts';
+
+const token = `sk-${'a'.repeat(32)}`;
 
 const turn = (delta: string, path: readonly string[] = ['delivery', 'implement']) => ({
   kind: 'engine:text' as const,
@@ -25,6 +27,49 @@ describe('the reasoning record', () => {
 
     expect(message.subject).toBe('feat(implement): the change');
     expect(message.body).toContain('fails under load');
+  });
+
+  it('scrubs recognised tokens from the finished subject and body', async () => {
+    const record = openReasoningRecord({
+      stage: 'implement',
+      compose: () => ({
+        subject: `feat(implement): retry requests using ${token}`,
+        body: `## Why\n\nUsing ${token} keeps retries within the request budget.`,
+      }),
+    });
+
+    const message = await record.message({ status: 'pass' });
+
+    expect(message).toEqual({
+      subject: 'feat(implement): retry requests using [redacted]',
+      body: '## Why\n\nUsing [redacted] keeps retries within the request budget.',
+    });
+  });
+
+  it('keeps split text and thinking unchanged for composition, then scrubs the joined message', async () => {
+    const seen: CapturedTurn[] = [];
+    const first = 'Chose retries for sk-aaaa';
+    const second = `${'a'.repeat(28)} because calls fail in bursts.`;
+    const record = openReasoningRecord({
+      stage: 'implement',
+      compose: ({ captured }) => {
+        seen.push(...captured);
+        return {
+          subject: 'feat(implement): retry burst failures',
+          body: `## Why\n\n${captured.map((entry) => entry.text).join('')}`,
+        };
+      },
+    });
+
+    record.observe(turn(first));
+    record.observe({ kind: 'engine:thinking', path: ['delivery', 'implement'], delta: second });
+    const message = await record.message({ status: 'pass' });
+
+    expect(seen).toEqual([
+      { node: 'implement', text: first },
+      { node: 'implement', text: second },
+    ]);
+    expect(message.body).toBe('## Why\n\nChose retries for [redacted] because calls fail in bursts.');
   });
 
   it('keeps a sibling stage out of this stage\'s body', async () => {
@@ -135,6 +180,24 @@ describe('the reasoning record', () => {
     expect(message.body).toContain('body truncated');
   });
 
+  it('scrubs a token across the body limit before truncating', async () => {
+    // Six token characters (sk-aaa) precede the cut. Truncating first leaves
+    // too few characters for the recognised pattern to match.
+    const before = `${'Ordinary reasoning. '.padEnd(15_993, 'x')} `;
+    const record = openReasoningRecord({
+      stage: 'implement',
+      compose: () => ({
+        subject: 'feat(implement): retry burst failures',
+        body: `${before}${token} ${'ordinary text after the token. '.repeat(10)}`,
+      }),
+    });
+
+    const message = await record.message({ status: 'pass' });
+
+    expect(message.body).not.toContain('sk-');
+    expect(message.body).toBe(`${before}[redac\n\n[record: body truncated at 16000 characters]`);
+  });
+
   it('refuses a composed subject that is not one line, and says so at the floor', async () => {
     // ReasoningMessage promises one line then the reasoning under it. A
     // subject carrying a newline breaks that silently: everything after the
@@ -217,6 +280,32 @@ describe('the reasoning record', () => {
 
     expect(message.subject).toContain('implement');
     expect(message.body).toContain('deterministic floor');
+  });
+
+  it.each([
+    { selection: 'no composer', compose: undefined },
+    { selection: 'a thrown composer', compose: () => { throw new Error('composition failed'); } },
+    { selection: 'an unusable composition', compose: () => ({ subject: '   ', body: '' }) },
+  ])('scrubs the fallback summary with $selection', async ({ compose }) => {
+    const record = openReasoningRecord({
+      stage: 'implement',
+      ...(compose === undefined ? {} : { compose }),
+    });
+
+    record.observe(turn('calls fail in bursts'));
+    const message = await record.message({ status: 'pass', summary: `configured ${token} for retries` });
+
+    expect(message).toEqual({
+      subject: 'record(implement): configured [redacted] for retries',
+      body: [
+        '## Why',
+        '',
+        'Composition left no message, so this is the deterministic floor: the',
+        'stage ended pass with 1 captured turn. The reasoning for this',
+        'change was not composed, and the outcome above is what the record can',
+        'state.',
+      ].join('\n'),
+    });
   });
 
   it('keeps the captured turns when a caller asks twice', async () => {

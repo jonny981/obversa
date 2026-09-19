@@ -155,6 +155,7 @@ for (const [stage, branch] of [
   ['F83', 'fix/proof-budgets-wait-for-a-condition'],
   ['F62', 'feat/reasoning-record'],
   ['F88', 'fix/runtime-polish'],
+  ['F89', 'fix/reasoning-record-scrub'],
   ['F63', 'feat/markdown-corpus-search'],
   ['F67', 'feat/notify-webhook'],
 ]) {
@@ -251,6 +252,7 @@ for (const [stage, branch] of [
   ['F70', 'feat/factory-v1'],
   ['F62', 'feat/graph-forms-v1'],
   ['F88', 'feat/graph-forms-v1'],
+  ['F89', 'feat/graph-forms-v1'],
   ['F63', 'feat/factory-v1'],
   ['F67', 'feat/factory-v1'],
 ]) {

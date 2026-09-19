@@ -124,6 +124,7 @@
     "verify:f39": "pnpm verify:f35 && pnpm test:example-output",
     "verify:f83": "pnpm verify:f39 && pnpm test:retired-names && pnpm check:retired-names && pnpm test:proof-path-budgets && pnpm check:proof-path-budgets && pnpm --filter @obversa/surface-diff test",
     "verify:f88": "pnpm verify:f83 && node --test scripts/f66-package-shape.spec.mjs",
+    "verify:f89": "pnpm verify:f83 && node --test scripts/f66-package-shape.spec.mjs && node --test scripts/reasoning-record-scrub.spec.mjs",
     "verify:f62": "pnpm build && pnpm --filter @obversa/memory-git test && pnpm example:reasoning-record && pnpm check:tarballs && pnpm verify:f39 && pnpm docs:validate",
     "verify:f63": "pnpm build && pnpm --filter @obversa/search-markdown test && pnpm example:search-markdown && pnpm check:tarballs && node --test scripts/f66-package-shape.spec.mjs && pnpm verify:f39 && pnpm check:consumer && pnpm docs:validate",
     "verify:f71": "pnpm verify:f39 && pnpm --filter @obversa/engine-opencode-cli test",
