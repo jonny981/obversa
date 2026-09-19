@@ -102,6 +102,9 @@ describe('a run reports what it spent', () => {
       outputTokens: 0,
       cacheReadInputTokens: 0,
       cacheCreationInputTokens: 0,
+      // A run with no engine calls has nothing unmeasured, and says so with a
+      // number rather than by leaving the field out.
+      unmeasuredCalls: 0,
     });
     expect(formatEvent(usage('m', 5, 1), result.usage)).toContain('5/1 tok');
   });
