@@ -1,0 +1,124 @@
+---
+title: "Markdown Search"
+description: "@obversa/search-markdown selects ranked passages from a local Markdown corpus for grounding."
+---
+
+`@obversa/search-markdown` searches `.md` files without an index, embedding
+service, or network call. Each hit names the corpus file, matching passage,
+line range, and score. The caller chooses the hit paths to give to `ground`;
+`curate` then makes the grounded text fit the next job.
+Line numbers are one-based.
+
+## Requirements
+
+- Node.js 22.12 or later
+
+## Install
+
+```bash
+pnpm add @obversa/search-markdown @obversa/runtime
+```
+
+## Corpus
+
+Create `search-markdown-corpus/warranty.md` beside the example:
+
+```md
+# Coverage policy
+
+The battery warranty lasts eight years.
+
+Keep the purchase receipt with the installation record.
+```
+
+Create `search-markdown-corpus/charging.md` beside it:
+
+```md
+# Charging
+
+Charge the battery before it reaches ten percent.
+```
+
+## Source
+
+```ts
+import { fileURLToPath } from 'node:url';
+
+import { openMarkdownCorpus } from '@obversa/search-markdown';
+import { agentJob, run } from '@obversa/runtime';
+import { curate, ground } from '@obversa/runtime/memory';
+import { MockEngine } from '@obversa/runtime/testing';
+
+const corpus = openMarkdownCorpus({
+  directory: fileURLToPath(new URL('./search-markdown-corpus', import.meta.url)),
+});
+const hits = await corpus.search('battery warranty', { limit: 1 });
+const paths = [...new Set(hits.map((hit) => hit.path))];
+const grounded = await ground(corpus.memory, {
+  sources: paths.map((path) => ({ path })),
+});
+
+if (!grounded.ok) throw new Error(grounded.error.message);
+
+const context = await curate(grounded.value, {
+  intent: 'Answer the warranty question.',
+  decide: ({ documents }) => ({
+    brief: documents
+      .flatMap((document) => document.text.split('\n'))
+      .find((line) => line.includes('lasts')) ?? '',
+    sources: documents.map((document) => document.path),
+  }),
+});
+
+if (context.mode !== 'curated') throw new Error('The local curator did not return a brief.');
+
+let receivedPrompt = '';
+const engine = new MockEngine((request) => {
+  receivedPrompt = request.prompt;
+  return 'The warranty answer is ready.';
+});
+const result = await run(agentJob({
+  label: 'answer-from-corpus',
+  engine: 'offline',
+  prompt: `Use this brief to answer the question:\n\n${context.brief}`,
+}), {
+  engine: 'offline',
+  engines: { offline: engine },
+});
+
+console.log(JSON.stringify({
+  hits: hits.map((hit) => ({
+    path: hit.path,
+    startLine: hit.passage.startLine,
+    endLine: hit.passage.endLine,
+  })),
+  grounded: grounded.value.documents.map((document) => document.path),
+  brief: context.brief,
+  job: result.outcome.status,
+  briefReachedJob: receivedPrompt.includes(context.brief),
+}, null, 2));
+```
+
+The example uses a deterministic `MockEngine`, so it runs offline. Search finds
+the planted phrase, only its unique hit path reaches `ground`, `curate` writes
+the short brief, and a real `agentJob` receives that brief.
+
+## Read-only Memory view
+
+The corpus exposes `corpus.memory` because `ground` reads through the public
+`Memory` contract. This view is **read-only**. `view` reads the `.md` files;
+all five write commands return an error. Search must not edit the source
+material it is selecting, and the existing writable adapters do not read a
+plain corpus directory.
+
+Corpus directories and `.md` file names use the same safe path segments as
+`MemoryPath`: each segment starts with a letter or number, then uses letters,
+numbers, dots, underscores, or hyphens. A corpus path such as
+`policies/warranty.md` becomes `/memories/policies/warranty.md`.
+
+## Ranking
+
+Search splits each file at headings and paragraph boundaries. An exact phrase
+ranks above passages that contain the query terms separately. More matched
+terms and more occurrences rank next; path and starting line break ties.
+An empty query or a query with no matching passage returns `[]`.

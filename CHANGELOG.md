@@ -11,6 +11,11 @@ other published package tracks its own version independently of it.
 
 ### Added
 
+- **Search a local Markdown corpus before grounding it:**
+  `@obversa/search-markdown` returns ranked passages with file paths and line
+  ranges. Its read-only `Memory` view lets callers give only the selected files
+  to `ground`, then pass the bounded result from `curate` into a job. Search is
+  local and lexical, with no index, embedding service, or network call.
 - **Workflow resume:** `run(job, { recordTo: path, resume: true })` resumes
   a declarative workflow from its own record instead of truncating it. The
   runtime seeds the recorded completions into the shared run state under
