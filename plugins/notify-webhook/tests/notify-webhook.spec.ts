@@ -264,7 +264,14 @@ describe('a run reaching a real endpoint', () => {
     expect(endpoint.received.map((message) => message.event)).toEqual(['run-started', 'finished']);
   });
 
-  test('the run ending twice is reported once', async () => {
+  /**
+   * These two exist for one reason each: to hold the once-only guards. Their
+   * coverage has twice been lost as a side effect of improving something else,
+   * both times found by a mutation rather than a review, so each guard now has
+   * a test that exists for no other purpose and is named for it. Do not fold
+   * them into a test that is about something else.
+   */
+  test('GUARD: a second ending message is dropped', async () => {
     const endpoint = await serverFor();
     const notifier = webhookNotifier({ url: endpoint.url });
     notifier.onEvent(event({ kind: 'dag:start', path: ['brief'] }));
@@ -275,6 +282,16 @@ describe('a run reaching a real endpoint', () => {
     await notifier.done();
 
     expect(endpoint.received.map((message) => message.event)).toEqual(['run-started', 'finished']);
+  });
+
+  test('GUARD: a second run-started message is dropped', async () => {
+    const endpoint = await serverFor();
+    const notifier = webhookNotifier({ url: endpoint.url });
+    notifier.onEvent(event({ kind: 'workflow:start', path: [] }));
+    notifier.onEvent(event({ kind: 'dag:start', path: [] }));
+    await notifier.done();
+
+    expect(endpoint.received.map((message) => message.event)).toEqual(['run-started']);
   });
 
   test('a run is announced once and ended once', async () => {
