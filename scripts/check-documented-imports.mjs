@@ -11,12 +11,15 @@
  * never exported: the broken line was itself the evidence that satisfied the
  * check. This asks whether a name we document exists.
  *
- * Values are checked by importing the built entry point. Types vanish at
- * runtime, so a name absent from the module is looked for in the entry's
- * declaration file before it is called missing.
+ * A name is resolved through the SELECTED ENTRY's export graph: the entry's
+ * own declaration file is read, its `export` statements collected, and
+ * `export * from` and `export { x } from` followed into the files they name.
+ * Nothing is imported and nothing is executed, so this works in a tree whose
+ * dependencies are not installed.
  *
- * Run with --control to prove the check can fail: it adds an import of a name
- * nothing exports and requires a failure.
+ * What it does not do, on purpose: a namespace import (`import * as x`) is
+ * legitimate for any module, and which names a page then uses off it cannot be
+ * known without parsing the page's code, so those are left alone.
  */
 
 import { readFileSync, existsSync } from 'node:fs';
@@ -37,6 +40,14 @@ function importsIn(text) {
       .map((n) => n.trim().replace(/^type\s+/, '').split(/\s+as\s+/)[0].trim())
       .filter(Boolean);
     found.push({ specifier: match[2], names, line });
+  }
+  // A default import of an @obversa package is always wrong: not one of them
+  // has a default export. A namespace import is legitimate, and which names a
+  // page then uses off it cannot be known without parsing the page's code, so
+  // it is left alone rather than guessed at.
+  for (const match of text.matchAll(/import\s+(?!type\b)([A-Za-z_$][\w$]*)\s*(?:,\s*\{[^}]*\})?\s*from\s*['"](@obversa\/[^'"]+)['"]/g)) {
+    const line = text.slice(0, match.index).split('\n').length;
+    found.push({ specifier: match[2], names: [], line, defaultImport: match[1] });
   }
   return found;
 }
@@ -103,10 +114,50 @@ function declarationFor(from, specifier) {
 function provided(dir, subpath) {
   const manifest = JSON.parse(readFileSync(join(dir, 'package.json'), 'utf8'));
   const entry = manifest.exports?.[subpath];
-  if (!entry?.types) return null;
+  // Two different causes, reported differently: a package that does not offer
+  // this path at all, and one that offers it but has not been built. Telling a
+  // reader to run a build when the path simply is not exported sends them to
+  // do something that cannot help.
+  if (!entry?.types) return { reason: 'not-exported' };
   const declarations = join(dir, entry.types);
-  if (!existsSync(declarations)) return null;
-  return exportsOf(declarations);
+  if (!existsSync(declarations)) return { reason: 'not-built' };
+  return { names: exportsOf(declarations) };
+}
+
+/**
+ * The failures in one page's text, so a test can pass a modified string rather
+ * than writing into a tracked page and restoring it. A run killed between the
+ * write and the restore leaves a published page corrupted in the worktree, on
+ * a machine where chains and gates run back to back.
+ */
+export function failuresIn(pageName, text, resolvePackage = locate, surfaceOf = provided) {
+  const failures = [];
+  for (const { specifier, names, line, defaultImport } of importsIn(text)) {
+    if (defaultImport) {
+      failures.push(`${pageName}:${line}: ${specifier} has no default export, so \`import ${defaultImport} from\` cannot work`);
+      continue;
+    }
+    const place = resolvePackage(specifier);
+    if (!place) {
+      failures.push(`${pageName}:${line}: no package in this repository provides ${specifier}`);
+      continue;
+    }
+    const surface = surfaceOf(place.dir, place.subpath);
+    if (surface.reason === 'not-exported') {
+      failures.push(`${pageName}:${line}: ${specifier} is not an export path of that package`);
+      continue;
+    }
+    if (surface.reason === 'not-built') {
+      failures.push(`${pageName}:${line}: ${specifier} is not built; run the build first`);
+      continue;
+    }
+    for (const name of names) {
+      if (!surface.names.has(name)) {
+        failures.push(`${pageName}:${line}: ${specifier} does not provide ${name}`);
+      }
+    }
+  }
+  return failures;
 }
 
 const pages = [];
@@ -123,7 +174,12 @@ const failures = [];
 let checked = 0;
 const cache = new Map();
 for (const page of pages.sort()) {
-  for (const { specifier, names, line } of importsIn(readFileSync(page, 'utf8'))) {
+  for (const { specifier, names, line, defaultImport } of importsIn(readFileSync(page, 'utf8'))) {
+    if (defaultImport) {
+      checked += 1;
+      failures.push(`${page.slice(docs.length + 1)}:${line}: ${specifier} has no default export, so \`import ${defaultImport} from\` cannot work`);
+      continue;
+    }
     const place = locate(specifier);
     if (!place) {
       failures.push(`${page.slice(docs.length + 1)}:${line}: no package in this repository provides ${specifier}`);
@@ -131,11 +187,16 @@ for (const page of pages.sort()) {
     }
     const key = `${place.dir}|${place.subpath}`;
     if (!cache.has(key)) cache.set(key, provided(place.dir, place.subpath));
-    const exported = cache.get(key);
-    if (!exported) {
-      failures.push(`${page.slice(docs.length + 1)}:${line}: ${specifier} has no built entry point; run the build first`);
+    const surface = cache.get(key);
+    if (surface.reason === 'not-exported') {
+      failures.push(`${page.slice(docs.length + 1)}:${line}: ${specifier} is not an export path of that package`);
       continue;
     }
+    if (surface.reason === 'not-built') {
+      failures.push(`${page.slice(docs.length + 1)}:${line}: ${specifier} is not built; run the build first`);
+      continue;
+    }
+    const exported = surface.names;
     for (const name of names) {
       checked += 1;
       if (exported.has(name)) continue;
