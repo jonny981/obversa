@@ -58,7 +58,11 @@ export interface RunEvent {
   readonly to?: string;
   /** What the reviewer said, on a `dag:kickback` event. */
   readonly reason?: string;
-  /** Whether the graph honoured the request, on a `dag:kickback` event. */
+  /**
+   * Whether the work really goes back: on a `dag:kickback`, whether the graph
+   * honoured the request; on a `loop:review`, whether the loop will re-enter
+   * to act on a failing review. Absent means it does.
+   */
   readonly accepted?: boolean;
   /** Why a kickback was refused, on a `dag:kickback` event. */
   readonly note?: string;
@@ -135,18 +139,21 @@ export interface WebhookNotifier {
   done(): Promise<void>;
 }
 
-/** The job tree's top level, where a run's own start and end are reported. */
-function atTopLevel(event: RunEvent): boolean {
-  return event.path.length <= 1;
-}
-
 /**
  * How a run says it began. A graph reports `dag:start`, a loop reports
- * `loop:start` and a declarative workflow reports `workflow:start`. A
- * top-level `job:start` is a loop's body job starting another iteration, not
- * the run, so it is not one of these.
+ * `loop:start` and a declarative workflow reports `workflow:start`.
  */
 const STARTING_KINDS = new Set(['workflow:start', 'dag:start', 'loop:start']);
+
+/**
+ * The containers that own work and report their own ending. A workflow is not
+ * one: it announces a run starting and the event union has no `workflow:end`,
+ * because the graph it compiles to reports the ending.
+ */
+const CONTAINER_END: ReadonlyMap<string, string> = new Map([
+  ['dag:start', 'dag:end'],
+  ['loop:start', 'loop:end'],
+]);
 
 /** The events that end something, so a terminal outcome can be read off them. */
 const ENDING_KINDS = new Set(['dag:end', 'loop:end', 'job:end']);
@@ -185,6 +192,19 @@ function wayIn(monitor?: string): string {
   return monitor === undefined ? '' : `\n${monitor}`;
 }
 
+/**
+ * Whether this ending event is the run's own. With a root container it is that
+ * container's matching end at the depth it announced itself; with none, the
+ * run is one job and its end is the only ending there is.
+ */
+function endsTheRun(
+  event: RunEvent,
+  root: { readonly endKind: string; readonly depth: number } | undefined,
+): boolean {
+  if (root === undefined) return event.kind === 'job:end';
+  return event.kind === root.endKind && event.path.length === root.depth;
+}
+
 function describe(event: RunEvent): string {
   const where = event.path.join(' / ');
   return where === '' ? 'the run' : where;
@@ -201,11 +221,11 @@ export function messageFor(
 ): WebhookMessage | undefined {
   const base = { ts: event.ts, ...(monitor === undefined ? {} : { monitor }) };
 
-  if (STARTING_KINDS.has(event.kind) && atTopLevel(event)) {
+  if (STARTING_KINDS.has(event.kind)) {
     return { ...base, event: 'run-started', text: `Run started: ${describe(event)}.` };
   }
 
-  if (event.kind === 'dag:node' && event.phase === 'done' && atTopLevel(event)) {
+  if (event.kind === 'dag:node' && event.phase === 'done') {
     const stage = event.node ?? 'a stage';
     const status = event.outcome?.status;
     const summary = event.outcome?.summary;
@@ -234,32 +254,45 @@ export function messageFor(
     };
   }
 
-  if (event.kind === 'dag:kickback') {
+  // A review sending work back, in either shape the runtime produces it: a
+  // graph names the stage it goes back to, and a loop sends it back to its own
+  // body, which is why the loop case names no stages. `loop:review` carries
+  // `accepted` for exactly this reason - the runtime's own comment says it
+  // mirrors `dag:kickback`.
+  const loopSentBack = event.kind === 'loop:review'
+    && event.outcome !== undefined
+    && event.outcome.status !== 'pass';
+  if (event.kind === 'dag:kickback' || loopSentBack) {
     const from = event.from ?? 'a reviewer';
     const to = event.to ?? 'an earlier stage';
     const accepted = event.accepted !== false;
-    const reason = event.reason ?? '';
+    const reason = event.reason ?? (loopSentBack ? event.outcome?.summary ?? '' : '');
     // A refused request is still news: somebody asked for another pass and the
     // graph did not run one, and `note` says why.
     // The reviewer's reason is a sentence and the most valuable text in the
     // message, so it goes on its own line rather than after a full stop.
     const said = accepted ? reason : (event.note ?? reason);
-    const opening = accepted
-      ? `Sent back: ${from} returned work to ${to}`
-      : `Sent back refused: ${from} asked ${to} for another pass`;
+    const opening = loopSentBack
+      ? (accepted
+        ? 'Sent back: the review returned the work for another pass'
+        : 'Sent back refused: the review asked for another pass and the loop is done')
+      : (accepted
+        ? `Sent back: ${from} returned work to ${to}`
+        : `Sent back refused: ${from} asked ${to} for another pass`);
     const text = said === '' ? opening : `${opening}\n${said}`;
     return {
       ...base,
       event: 'sent-back',
-      from,
-      to,
+      // A loop review sends work back to the loop's own body rather than to a
+      // named stage, so it names neither end.
+      ...(loopSentBack ? {} : { from, to }),
       accepted,
       ...(reason === '' ? {} : { reason }),
       text: text.trimEnd(),
     };
   }
 
-  if (ENDING_KINDS.has(event.kind) && atTopLevel(event) && event.outcome !== undefined) {
+  if (ENDING_KINDS.has(event.kind) && event.outcome !== undefined) {
     const { status, summary } = event.outcome;
     const which = endingMessageEvent(status);
     const asked = which === 'paused' ? questionIn(event.outcome) : undefined;
@@ -287,12 +320,27 @@ export function webhookNotifier(options: WebhookNotifierOptions): WebhookNotifie
   let monitor: string | undefined;
   let started = false;
   let ended = false;
-  // Whether a loop, a graph or a workflow is running the job tree. When one is,
-  // it reports the run's ending and a top-level job:end is an iteration's body
-  // job finishing, not the run. Without this a five-iteration loop announces
-  // "Run finished." after its first pass and the once-only guard then swallows
-  // the real ending, including a failure.
-  let container = false;
+  /**
+   * The container that owns this run: the first graph or loop to announce
+   * itself, and the depth it announced itself at. Its own end event is the
+   * run's end, wherever that sits in the tree. A run that never reports one is
+   * a single job, and that job's end is the run's end because nothing else
+   * would report it.
+   *
+   * The depth is learned rather than assumed, because depth is a property of
+   * what wraps the job and the caller decides that: `post.always` wraps a
+   * whole graph in a loop, which moves every one of that graph's events one
+   * level deeper without changing the run.
+   */
+  let root: { readonly endKind: string; readonly depth: number } | undefined;
+  /**
+   * The depth of the very first event this run reported. The outermost thing
+   * always starts first, so this is the run's own level, and a container that
+   * announces itself deeper than it is running inside the run rather than
+   * owning it - a loop nested inside a single job, for instance, must not take
+   * the run's ending away from that job.
+   */
+  let runDepth: number | undefined;
   // A stage pause and the run ending paused are the same news reported twice
   // in exit mode. The stage one arrives first and names the stage, so it wins.
   let toldAboutTheWait = false;
@@ -322,8 +370,16 @@ export function webhookNotifier(options: WebhookNotifierOptions): WebhookNotifie
         monitor = event.url;
         return;
       }
-      if (STARTING_KINDS.has(event.kind) && atTopLevel(event)) container = true;
-      if (event.kind === 'job:end' && container) return;
+      if (runDepth === undefined) runDepth = event.path.length;
+      if (root === undefined && event.path.length === runDepth) {
+        const endKind = CONTAINER_END.get(event.kind);
+        if (endKind !== undefined) root = { endKind, depth: event.path.length };
+      }
+      // An ending event that is not this run's ending is something finishing
+      // inside it: an iteration's body job, or a graph nested under the root.
+      if (ENDING_KINDS.has(event.kind) && !endsTheRun(event, root)) return;
+      // A container starting inside the run is not the run starting.
+      if (STARTING_KINDS.has(event.kind) && event.path.length !== runDepth) return;
       const message = messageFor(event, monitor);
       if (message === undefined) return;
       // A run starts once and ends once. A workflow reports both its own start

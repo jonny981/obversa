@@ -25,7 +25,10 @@ other published package tracks its own version independently of it.
   renders, so those three need no code of their own; the rest of the body is
   structured for a relay. Two messages carry the information rather than a
   pointer to it: the paused message names the run's page on its own line, and
-  the sent-back message carries the reviewer's reason on its own line. A stage
+  the sent-back message carries the reviewer's reason on its own line. A review
+  sending work back is posted for both shapes the runtime produces it in: a
+  graph kickback, which names the stage it went back to, and a loop review the
+  loop will act on, which sends the work back to the loop's own body. A stage
   waiting for a person is reported as paused rather than as a stage finishing,
   which is the only message sent about the wait where the run stays up for the
   answer rather than ending on it. The paused message asks the person's own
@@ -33,8 +36,13 @@ other published package tracks its own version independently of it.
   failure is reported from the event that ends the run and never from the
   `error` event, because a loop can emit `error` in one iteration and pass in
   the next. A notification that cannot be delivered reaches `onError` and never
-  fails the run, and messages are posted in the order the run made them. Await
-  `done()` after the run so the last message is not lost.
+  fails the run, and messages are posted in the order the run made them. The
+  run's own news comes from the first graph or loop it reports, whose own
+  ending is the run's ending at whatever depth it sits, so a job finishing
+  inside a loop's iteration is not mistaken for the run and a graph wrapped by
+  a workflow's `post.always` still reports its stages; news from inside a run,
+  a stage finishing or a review sending work back, is not filtered by depth.
+  Await `done()` after the run so the last message is not lost.
 
 - **Workflow resume:** `run(job, { recordTo: path, resume: true })` resumes
   a declarative workflow from its own record instead of truncating it. The

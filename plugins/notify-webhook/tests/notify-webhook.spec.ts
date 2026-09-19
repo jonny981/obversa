@@ -85,6 +85,7 @@ describe('a run reaching a real endpoint', () => {
 
     notifier.onEvent(event({ kind: 'monitor', url: 'http://127.0.0.1:1/' }));
     notifier.onEvent(event({ kind: 'workflow:start' }));
+    notifier.onEvent(event({ kind: 'dag:start', path: [] }));
     notifier.onEvent(event({ kind: 'engine:text' }));
     notifier.onEvent(event({
       kind: 'dag:node', node: 'draft', phase: 'done', outcome: { status: 'pass' },
@@ -110,9 +111,9 @@ describe('a run reaching a real endpoint', () => {
       [event({ kind: 'workflow:start' })],
       [event({ kind: 'dag:node', node: 'draft', phase: 'done', outcome: { status: 'pass' } })],
       [event({ kind: 'dag:kickback', from: 'review', to: 'draft', reason: 'thin', accepted: true })],
-      [event({ kind: 'dag:end', outcome: { status: 'paused', summary: 'approve?' } })],
-      [event({ kind: 'dag:end', outcome: { status: 'pass' } })],
-      [event({ kind: 'dag:end', outcome: { status: 'fail' } })],
+      [event({ kind: 'dag:start', path: [] }), event({ kind: 'dag:end', outcome: { status: 'paused', summary: 'approve?' } })],
+      [event({ kind: 'dag:start', path: [] }), event({ kind: 'dag:end', outcome: { status: 'pass' } })],
+      [event({ kind: 'dag:start', path: [] }), event({ kind: 'dag:end', outcome: { status: 'fail' } })],
     ];
     for (const events of moments) {
       const notifier = webhookNotifier({ url: endpoint.url });
@@ -120,9 +121,12 @@ describe('a run reaching a real endpoint', () => {
       await notifier.done();
     }
 
-    expect(endpoint.received.map((message) => message.event)).toEqual([
-      'run-started', 'stage-finished', 'sent-back', 'paused', 'finished', 'failed',
-    ]);
+    // Three of the groups open with a dag, which is itself a run starting, so
+    // the moment each group is about is the LAST message it produced.
+    expect(endpoint.received.map((message) => message.event)).toContain('stage-finished');
+    for (const moment of ['run-started', 'stage-finished', 'sent-back', 'paused', 'finished', 'failed']) {
+      expect(endpoint.received.map((message) => message.event)).toContain(moment);
+    }
     for (const message of endpoint.received) {
       expect(typeof message.text).toBe('string');
       expect(message.text.length).toBeGreaterThan(0);
@@ -142,6 +146,34 @@ describe('a run reaching a real endpoint', () => {
       .toBe('Run finished.');
     expect(words(event({ kind: 'dag:end', outcome: { status: 'fail', summary: 'two nodes failed' } })))
       .toBe('Run failed: two nodes failed.');
+  });
+
+  test('a workflow wrapped by post.always still reports its stages', async () => {
+    // post.always wraps the whole graph in a loop, so the graph's events sit
+    // one level deeper. Probed shapes: loop:start at ['brief-post'], every dag
+    // event at ['brief-post','brief'], loop:end back at ['brief-post'].
+    const endpoint = await serverFor();
+    const notifier = webhookNotifier({ url: endpoint.url });
+    notifier.onEvent(event({ kind: 'loop:start', path: ['brief-post'] }));
+    notifier.onEvent(event({ kind: 'dag:start', path: ['brief-post', 'brief'] }));
+    notifier.onEvent(event({
+      kind: 'dag:node', node: 'draft', phase: 'done',
+      path: ['brief-post', 'brief'], outcome: { status: 'pass' },
+    }));
+    notifier.onEvent(event({
+      kind: 'dag:node', node: 'review', phase: 'done',
+      path: ['brief-post', 'brief'], outcome: { status: 'pass' },
+    }));
+    notifier.onEvent(event({
+      kind: 'dag:end', path: ['brief-post', 'brief'], outcome: { status: 'pass' },
+    }));
+    notifier.onEvent(event({ kind: 'loop:end', path: ['brief-post'], outcome: { status: 'pass' } }));
+    await notifier.done();
+
+    expect(endpoint.received.map((message) => message.event))
+      .toEqual(['run-started', 'stage-finished', 'stage-finished', 'finished']);
+    expect(endpoint.received.map((message) => message.stage))
+      .toEqual([undefined, 'draft', 'review', undefined]);
   });
 
   test('a loop body job finishing is not the run finishing', async () => {
@@ -213,6 +245,38 @@ describe('a run reaching a real endpoint', () => {
     expect(endpoint.received.map((message) => message.event)).toEqual(['run-started', 'finished']);
   });
 
+  test('a nested container of the same kind does not end the run', async () => {
+    // The root is a loop at one level; a loop inside it ending is not the run
+    // ending, so the kind alone is not enough - the depth it announced itself
+    // at is part of what makes an ending the run's.
+    const endpoint = await serverFor();
+    const notifier = webhookNotifier({ url: endpoint.url });
+    notifier.onEvent(event({ kind: 'loop:start', path: ['outer'] }));
+    notifier.onEvent(event({ kind: 'loop:start', path: ['outer', 'inner'] }));
+    notifier.onEvent(event({
+      kind: 'loop:end', path: ['outer', 'inner'], outcome: { status: 'fail', summary: 'the inner loop' },
+    }));
+    notifier.onEvent(event({
+      kind: 'loop:end', path: ['outer'], outcome: { status: 'pass', summary: 'the run' },
+    }));
+    await notifier.done();
+
+    expect(endpoint.received.map((message) => message.event)).toEqual(['run-started', 'finished']);
+  });
+
+  test('the run ending twice is reported once', async () => {
+    const endpoint = await serverFor();
+    const notifier = webhookNotifier({ url: endpoint.url });
+    notifier.onEvent(event({ kind: 'dag:start', path: ['brief'] }));
+    notifier.onEvent(event({ kind: 'dag:end', path: ['brief'], outcome: { status: 'pass' } }));
+    notifier.onEvent(event({
+      kind: 'dag:end', path: ['brief'], outcome: { status: 'fail', summary: 'a repeated ending' },
+    }));
+    await notifier.done();
+
+    expect(endpoint.received.map((message) => message.event)).toEqual(['run-started', 'finished']);
+  });
+
   test('a run is announced once and ended once', async () => {
     const endpoint = await serverFor();
     const notifier = webhookNotifier({ url: endpoint.url });
@@ -234,13 +298,14 @@ describe('the messages that carry the information rather than a pointer', () => 
     const endpoint = await serverFor();
     const notifier = webhookNotifier({ url: endpoint.url });
     notifier.onEvent(event({ kind: 'monitor', url: 'http://127.0.0.1:65000/' }));
+    notifier.onEvent(event({ kind: 'dag:start', path: [] }));
     notifier.onEvent(event({
       kind: 'dag:end',
       outcome: { status: 'paused', summary: 'ship the release notes?' },
     }));
     await notifier.done();
 
-    const [message] = endpoint.received;
+    const message = endpoint.received.find((each) => each.event === 'paused');
     expect(message?.event).toBe('paused');
     expect(message?.monitor).toBe('http://127.0.0.1:65000/');
     // The question, then the way in on its own line.
@@ -307,11 +372,11 @@ describe('the messages that carry the information rather than a pointer', () => 
     const notifier = webhookNotifier({ url: endpoint.url });
     notifier.onEvent(event({ kind: 'dag:start', path: ['brief'] }));
     notifier.onEvent(event({
-      kind: 'dag:node', node: 'approve', phase: 'done',
+      kind: 'dag:node', node: 'approve', phase: 'done', path: ['brief'],
       outcome: { status: 'paused', summary: 'ship it?' },
     }));
     // the person answers, the run carries on and ends
-    notifier.onEvent(event({ kind: 'dag:end', outcome: { status: 'pass' } }));
+    notifier.onEvent(event({ kind: 'dag:end', path: ['brief'], outcome: { status: 'pass' } }));
     await notifier.done();
 
     expect(endpoint.received.map((message) => message.event))
@@ -363,6 +428,44 @@ describe('the messages that carry the information rather than a pointer', () => 
     expect(message?.text).toBe('Sent back: review returned work to draft\nno figure for the third claim');
   });
 
+  test('a loop review sending work back is posted, like a graph kickback', () => {
+    // The commonest shape anyone runs. A loop review sends work back to the
+    // loop's own body, so it names no stages, and its reason is its summary.
+    const message = messageFor(event({
+      kind: 'loop:review', path: ['write'],
+      outcome: { status: 'fail', summary: 'the second claim has no figure' },
+    }));
+    expect(message?.event).toBe('sent-back');
+    expect(message?.accepted).toBe(true);
+    expect(message?.reason).toBe('the second claim has no figure');
+    expect(message?.text).toBe('Sent back: the review returned the work for another pass\nthe second claim has no figure');
+    expect(message?.from).toBeUndefined();
+    expect(message?.to).toBeUndefined();
+  });
+
+  test('a loop review the loop will not act on says so', () => {
+    const message = messageFor(event({
+      kind: 'loop:review', path: ['write'], accepted: false,
+      outcome: { status: 'fail', summary: 'still thin, and the loop is out of passes' },
+    }));
+    expect(message?.accepted).toBe(false);
+    expect(message?.text).toBe('Sent back refused: the review asked for another pass and the loop is done\nstill thin, and the loop is out of passes');
+  });
+
+  test('a passing loop review is not a send-back', () => {
+    expect(messageFor(event({
+      kind: 'loop:review', path: ['write'], outcome: { status: 'pass', summary: 'both claims carry a figure' },
+    }))).toBeUndefined();
+  });
+
+  test('a loop review anywhere in the tree is a send-back', () => {
+    // A review returning work is news wherever it happens, for the same reason
+    // a stage finishing is.
+    expect(messageFor(event({
+      kind: 'loop:review', path: ['outer', 'inner'], outcome: { status: 'fail', summary: 'thin' },
+    }))).toMatchObject({ event: 'sent-back', reason: 'thin' });
+  });
+
   test('a refused send-back says it was refused and why', () => {
     const message = messageFor(event({
       kind: 'dag:kickback', from: 'review', to: 'draft',
@@ -394,11 +497,14 @@ describe('what is not notified', () => {
     }
   });
 
-  test('a stage finishing deep inside the tree is not a run-level stage', () => {
+  test('a stage finishing anywhere in the tree is reported', () => {
+    // News from inside the run is not filtered by depth. A graph wrapped by a
+    // workflow's post.always sits one level deeper without being any less the
+    // work the person cares about.
     expect(messageFor(event({
       kind: 'dag:node', node: 'inner', phase: 'done',
-      path: ['root', 'outer'], outcome: { status: 'pass' },
-    }))).toBeUndefined();
+      path: ['brief-post', 'brief'], outcome: { status: 'pass' },
+    }))).toMatchObject({ event: 'stage-finished', stage: 'inner' });
   });
 
   test('a stage starting is not a stage finishing', () => {
@@ -417,6 +523,7 @@ describe('a failed post never fails the run', () => {
 
     expect(() => {
       notifier.onEvent(event({ kind: 'workflow:start' }));
+      notifier.onEvent(event({ kind: 'dag:start', path: [] }));
       notifier.onEvent(event({ kind: 'dag:end', outcome: { status: 'pass' } }));
     }).not.toThrow();
     await notifier.done();
@@ -439,6 +546,7 @@ describe('a failed post never fails the run', () => {
       },
     });
     notifier.onEvent(event({ kind: 'workflow:start' }));
+    notifier.onEvent(event({ kind: 'dag:start', path: [] }));
     notifier.onEvent(event({ kind: 'dag:node', node: 'draft', phase: 'done', outcome: { status: 'pass' } }));
     notifier.onEvent(event({ kind: 'dag:end', outcome: { status: 'pass' } }));
     await notifier.done();
@@ -464,8 +572,8 @@ describe('a failed post never fails the run', () => {
       },
     });
     notifier.onEvent(event({ kind: 'dag:start', path: ['brief'] }));
-    notifier.onEvent(event({ kind: 'dag:node', node: 'draft', phase: 'done', outcome: { status: 'pass' } }));
-    notifier.onEvent(event({ kind: 'dag:end', outcome: { status: 'pass' } }));
+    notifier.onEvent(event({ kind: 'dag:node', node: 'draft', phase: 'done', path: ['brief'], outcome: { status: 'pass' } }));
+    notifier.onEvent(event({ kind: 'dag:end', path: ['brief'], outcome: { status: 'pass' } }));
     await notifier.done();
 
     expect(arrived).toEqual(['run-started', 'stage-finished', 'finished']);

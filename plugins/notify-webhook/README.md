@@ -55,8 +55,8 @@ Six moments, one message each.
 | Moment | The run event behind it | What the message carries |
 | --- | --- | --- |
 | `run-started` | `dag:start`, `loop:start` or `workflow:start` | What started |
-| `stage-finished` | `dag:node` reaching `done` at the top level | The stage and how it ended |
-| `sent-back` | `dag:kickback` | Who returned the work, to which stage, and the reason |
+| `stage-finished` | `dag:node` reaching `done`, at any depth | The stage and how it ended |
+| `sent-back` | `dag:kickback`, or a `loop:review` that did not pass | The reason the reviewer gave, and in a graph which stage it went back to |
 | `paused` | A stage whose outcome is `paused`, or an ending event with one | The question being asked, and the run's page |
 | `finished` | An ending event whose outcome is `pass` | That it finished; the run's summary is a field on the body, not in the text |
 | `failed` | An ending event with any other outcome | Why it ended that way |
@@ -64,7 +64,9 @@ Six moments, one message each.
 Two of them carry the information rather than a pointer to it. The paused
 message names the run's page, so the person can answer from the message. The
 sent-back message carries what the reviewer said, so the news is the reason
-and not just the fact.
+and not just the fact. It is posted for both shapes a review takes: a graph
+names the stage the work went back to, and a loop sends it back to its own
+body, so it names no stage.
 
 The paused message asks the person's own question, which a person gate carries
 as its own field on the outcome. Any other pause says what it is waiting for in
@@ -78,11 +80,20 @@ run does end on the wait, the stage message and the run's own outcome are the
 same news, and only the first is sent. A run with two gates is told about
 both.
 
-A run is announced once and ends once. Where a loop, a graph or a workflow is
-running the work, that container reports both, so the jobs finishing inside a
-loop's iterations are not mistaken for the run finishing; a run that is a
-single job with no container around it is reported by that job. Everything else
-a run emits, including every engine token, is ignored.
+A run is announced once and ends once, and its own news comes from one place:
+the first graph or loop the run reports, which owns it. That container's own
+ending is the run's ending, at whatever depth it sits. The depth is read from
+the run rather than assumed, because depth is a property of what wraps the job
+and the caller decides that - a workflow's `post.always` wraps the whole graph
+in a loop, which moves every one of that graph's events one level deeper
+without making the run any different. A run that reports no container at all is
+a single job, and that job's end is the run's end, because nothing else would
+report it.
+
+News from inside the run is not filtered by depth. A stage finishing and a
+review sending work back are reported wherever they happen, including in a
+graph that something else is wrapping. Everything else a run emits, including
+every engine token, is ignored.
 
 ## What it does not send
 
