@@ -47,6 +47,16 @@ describe('a person can see what a run is spending', () => {
     expect(line).not.toContain('1400');
   });
 
+  // The optional argument has one sharp edge: passing the function by
+  // reference to something that supplies a second argument of its own. map
+  // hands it the index, which is a number where totals belong. The compiler
+  // refuses it, and this says so in a test so the reason survives.
+  it('is not passed by reference to map, which would supply the index as totals', () => {
+    const events = [usage('m', 1, 2), usage('m', 3, 4)];
+    const lines = events.map((event) => formatEvent(event));
+    expect(lines.every((line) => !line.includes('(run '))).toBe(true);
+  });
+
   it('prints exactly what it printed before when no total is passed', () => {
     const event = usage('claude-sonnet-4-5', 120, 40);
     expect(formatEvent(event)).toBe('implement   claude-sonnet-4-5: 120/40 tok');

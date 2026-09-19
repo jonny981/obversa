@@ -451,7 +451,10 @@ export function readRunProgress(
     startedAt: status.startedAt,
     updatedAt: status.updatedAt,
     blocker: deriveBlocker(status.status, events, status.live),
-    recent: events.slice(-(options?.recent ?? 10)).map(formatEvent),
+    // Not `.map(formatEvent)`: map passes the index as the second argument,
+    // which now lands in `totals`. The compiler caught it, and the same trap
+    // waits for any caller who passes this function by reference.
+    recent: events.slice(-(options?.recent ?? 10)).map((event) => formatEvent(event)),
   };
 }
 
