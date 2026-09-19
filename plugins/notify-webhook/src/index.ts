@@ -31,6 +31,8 @@
 export interface RunEventOutcome {
   readonly status: string;
   readonly summary?: string;
+  /** The outcome's payload. A person gate puts the question here. */
+  readonly data?: unknown;
 }
 
 /**
@@ -164,6 +166,28 @@ function sentence(text: string): string {
   return /[.!?]$/.test(text.trimEnd()) ? text.trimEnd() : `${text.trimEnd()}.`;
 }
 
+/**
+ * How a person gate writes its own summary: the question behind a phrase that
+ * says the same thing the word Paused already says.
+ */
+const WAITING_PREFIX = /^waiting for a person:\s*/i;
+
+/**
+ * What the person is actually being asked. A person gate carries the question
+ * as its own field, which is better than reading it out of prose; where that
+ * field is absent the summary still holds it behind a prefix, and where
+ * neither is there the caller gets whatever the outcome did say.
+ */
+function questionIn(outcome: RunEventOutcome | undefined): string | undefined {
+  const data = outcome?.data;
+  if (typeof data === 'object' && data !== null && 'decisionText' in data) {
+    const asked = (data as { decisionText?: unknown }).decisionText;
+    if (typeof asked === 'string' && asked.trim() !== '') return asked;
+  }
+  const summary = outcome?.summary;
+  return summary === undefined ? undefined : summary.replace(WAITING_PREFIX, '');
+}
+
 /** The run's page on its own line, for a message that asks somebody to act. */
 function wayIn(monitor?: string): string {
   return monitor === undefined ? '' : `\n${monitor}`;
@@ -198,13 +222,14 @@ export function messageFor(
     // for the answer it is the only message that would ever be sent about the
     // wait.
     if (status === 'paused') {
+      const asked = questionIn(event.outcome);
       return {
         ...base,
         event: 'paused',
         stage,
         status,
-        ...(summary === undefined ? {} : { summary }),
-        text: `Paused: ${sentence(summary ?? stage)}${wayIn(monitor)}`,
+        ...(asked === undefined ? {} : { summary: asked }),
+        text: `Paused: ${sentence(asked ?? stage)}${wayIn(monitor)}`,
       };
     }
     return {
@@ -245,8 +270,9 @@ export function messageFor(
   if (ENDING_KINDS.has(event.kind) && atTopLevel(event) && event.outcome !== undefined) {
     const { status, summary } = event.outcome;
     const which = endingMessageEvent(status);
+    const asked = which === 'paused' ? questionIn(event.outcome) : undefined;
     const text = which === 'paused'
-      ? `Paused: ${sentence(summary ?? describe(event))}${wayIn(monitor)}`
+      ? `Paused: ${sentence(asked ?? describe(event))}${wayIn(monitor)}`
       : which === 'finished'
         ? 'Run finished.'
         : `Run failed: ${sentence(summary ?? describe(event))}`;

@@ -190,6 +190,72 @@ describe('the messages that carry the information rather than a pointer', () => 
     expect(message?.text).toBe('Paused: ship the release notes?\nhttp://127.0.0.1:65000/');
   });
 
+  test('the message asks the question, not the runtime phrase in front of it', () => {
+    // A person gate writes its summary as "waiting for a person: <question>",
+    // which would read "Paused: waiting for a person: ..." — Paused already
+    // says that. The question itself is carried as its own field.
+    const asItReallyArrives = messageFor(event({
+      kind: 'dag:node', node: 'approve', phase: 'done', path: ['delivery'],
+      outcome: {
+        status: 'paused',
+        summary: 'waiting for a person: Send the prepared result?',
+        data: { decisionText: 'Send the prepared result?' },
+      },
+    }));
+    expect(asItReallyArrives?.text).toBe('Paused: Send the prepared result?');
+    expect(asItReallyArrives?.summary).toBe('Send the prepared result?');
+  });
+
+  test('the question is still recovered when only the summary survives', () => {
+    // A record replay can carry the summary without the payload.
+    const message = messageFor(event({
+      kind: 'dag:node', node: 'approve', phase: 'done', path: ['delivery'],
+      outcome: { status: 'paused', summary: 'waiting for a person: Send it?' },
+    }));
+    expect(message?.text).toBe('Paused: Send it?');
+  });
+
+  test('the carried question wins over the summary when they differ', () => {
+    const message = messageFor(event({
+      kind: 'dag:node', node: 'approve', phase: 'done', path: ['delivery'],
+      outcome: {
+        status: 'paused',
+        summary: 'waiting for a person: an older wording of the question?',
+        data: { decisionText: 'Send the prepared result?' },
+      },
+    }));
+    expect(message?.text).toBe('Paused: Send the prepared result?');
+  });
+
+  test('an empty carried question falls back to the summary', () => {
+    const message = messageFor(event({
+      kind: 'dag:node', node: 'approve', phase: 'done', path: ['delivery'],
+      outcome: {
+        status: 'paused',
+        summary: 'waiting for a person: Send it?',
+        data: { decisionText: '   ' },
+      },
+    }));
+    expect(message?.text).toBe('Paused: Send it?');
+  });
+
+  test('a summary that is not a person gate is left alone', () => {
+    const message = messageFor(event({
+      kind: 'dag:end', outcome: { status: 'paused', summary: 'the token budget ran out' },
+    }));
+    expect(message?.text).toBe('Paused: the token budget ran out.');
+  });
+
+  test('only the person-gate phrase is stripped, not any leading words and a colon', () => {
+    // A pause from somewhere else can start with its own words and a colon,
+    // and those words are the message.
+    const message = messageFor(event({
+      kind: 'dag:end',
+      outcome: { status: 'paused', summary: 'budget: the token budget ran out' },
+    }));
+    expect(message?.text).toBe('Paused: budget: the token budget ran out.');
+  });
+
   test('a run that stays up for the answer still reports finishing after the wait', async () => {
     const endpoint = await serverFor();
     const notifier = webhookNotifier({ url: endpoint.url });

@@ -57,7 +57,7 @@ Six moments, one message each.
 | `run-started` | `dag:start`, `loop:start` or `workflow:start` | What started |
 | `stage-finished` | `dag:node` reaching `done` at the top level | The stage and how it ended |
 | `sent-back` | `dag:kickback` | Who returned the work, to which stage, and the reason |
-| `paused` | A stage whose outcome is `paused`, or an ending event with one | What is being asked, and the run's page |
+| `paused` | A stage whose outcome is `paused`, or an ending event with one | The question being asked, and the run's page |
 | `finished` | An ending event whose outcome is `pass` | The run's summary |
 | `failed` | An ending event with any other outcome | Why it ended that way |
 
@@ -65,6 +65,12 @@ Two of them carry the information rather than a pointer to it. The paused
 message names the run's page, so the person can answer from the message. The
 sent-back message carries what the reviewer said, so the news is the reason
 and not just the fact.
+
+The paused message asks the person's own question. A person gate records its
+outcome as `waiting for a person:` followed by the question, which would read
+`Paused: waiting for a person: ...` when the word `Paused` already says that,
+so the message takes the question the gate carries as its own field and falls
+back to the summary with that phrase removed.
 
 A stage that is waiting for a person has not finished, so it is reported as
 paused rather than as a stage finishing. That matters where the run stays up
