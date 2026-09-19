@@ -164,6 +164,11 @@ function sentence(text: string): string {
   return /[.!?]$/.test(text.trimEnd()) ? text.trimEnd() : `${text.trimEnd()}.`;
 }
 
+/** The run's page on its own line, for a message that asks somebody to act. */
+function wayIn(monitor?: string): string {
+  return monitor === undefined ? '' : `\n${monitor}`;
+}
+
 function describe(event: RunEvent): string {
   const where = event.path.join(' / ');
   return where === '' ? 'the run' : where;
@@ -188,6 +193,20 @@ export function messageFor(
     const stage = event.node ?? 'a stage';
     const status = event.outcome?.status;
     const summary = event.outcome?.summary;
+    // A stage that is waiting for a person has not finished. Reporting it as
+    // finished is wrong in both modes, and in the mode where the run stays up
+    // for the answer it is the only message that would ever be sent about the
+    // wait.
+    if (status === 'paused') {
+      return {
+        ...base,
+        event: 'paused',
+        stage,
+        status,
+        ...(summary === undefined ? {} : { summary }),
+        text: `Paused: ${sentence(summary ?? stage)}${wayIn(monitor)}`,
+      };
+    }
     return {
       ...base,
       event: 'stage-finished',
@@ -226,11 +245,8 @@ export function messageFor(
   if (ENDING_KINDS.has(event.kind) && atTopLevel(event) && event.outcome !== undefined) {
     const { status, summary } = event.outcome;
     const which = endingMessageEvent(status);
-    // The run's page goes on its own line, for the same reason the reviewer's
-    // reason does: it is the way in, not a clause.
-    const page = which === 'paused' && monitor !== undefined ? `\n${monitor}` : '';
     const text = which === 'paused'
-      ? `Paused: ${sentence(summary ?? describe(event))}${page}`
+      ? `Paused: ${sentence(summary ?? describe(event))}${wayIn(monitor)}`
       : which === 'finished'
         ? 'Run finished.'
         : `Run failed: ${sentence(summary ?? describe(event))}`;
@@ -246,13 +262,16 @@ export function messageFor(
   return undefined;
 }
 
-const TERMINAL: ReadonlySet<MessageEvent> = new Set(['paused', 'finished', 'failed']);
+const TERMINAL: ReadonlySet<MessageEvent> = new Set(['finished', 'failed']);
 
 export function webhookNotifier(options: WebhookNotifierOptions): WebhookNotifier {
   const post = options.fetch ?? (globalThis.fetch as unknown as FetchLike);
   let monitor: string | undefined;
   let started = false;
   let ended = false;
+  // A stage pause and the run ending paused are the same news reported twice
+  // in exit mode. The stage one arrives first and names the stage, so it wins.
+  let toldAboutTheWait = false;
   // Messages are chained rather than raced, so they arrive in the order the
   // run produced them. Each link catches its own failure, so one failed post
   // never stops the next.
@@ -287,6 +306,11 @@ export function webhookNotifier(options: WebhookNotifierOptions): WebhookNotifie
       if (message.event === 'run-started') {
         if (started) return;
         started = true;
+      }
+      if (message.event === 'paused') {
+        const fromAStage = message.stage !== undefined;
+        if (!fromAStage && toldAboutTheWait) return;
+        if (fromAStage) toldAboutTheWait = true;
       }
       if (TERMINAL.has(message.event)) {
         if (ended) return;

@@ -20,7 +20,10 @@ other published package tracks its own version independently of it.
   renders, so those three need no code of their own; the rest of the body is
   structured for a relay. Two messages carry the information rather than a
   pointer to it: the paused message names the run's page on its own line, and
-  the sent-back message carries the reviewer's reason on its own line. A
+  the sent-back message carries the reviewer's reason on its own line. A stage
+  waiting for a person is reported as paused rather than as a stage finishing,
+  which is the only message sent about the wait where the run stays up for the
+  answer rather than ending on it. A
   failure is reported from the event that ends the run and never from the
   `error` event, because a loop can emit `error` in one iteration and pass in
   the next. A notification that cannot be delivered reaches `onError` and never

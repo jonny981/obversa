@@ -178,6 +178,66 @@ describe('the messages that carry the information rather than a pointer', () => 
     expect(message?.text).toBe('Paused: ship the release notes?\nhttp://127.0.0.1:65000/');
   });
 
+  test('a stage waiting for a person is Paused, not finished', () => {
+    // It has not finished. In the mode where the run stays up for the answer
+    // this is the only message that would ever be sent about the wait.
+    const message = messageFor(event({
+      kind: 'dag:node', node: 'approve', phase: 'done',
+      outcome: { status: 'paused', summary: 'ship the release notes?' },
+    }), 'http://127.0.0.1:65000/');
+    expect(message?.event).toBe('paused');
+    expect(message?.stage).toBe('approve');
+    expect(message?.text).toBe('Paused: ship the release notes?\nhttp://127.0.0.1:65000/');
+  });
+
+  test('a run that stays up for the answer still reports finishing after the wait', async () => {
+    const endpoint = await serverFor();
+    const notifier = webhookNotifier({ url: endpoint.url });
+    notifier.onEvent(event({ kind: 'dag:start', path: ['brief'] }));
+    notifier.onEvent(event({
+      kind: 'dag:node', node: 'approve', phase: 'done',
+      outcome: { status: 'paused', summary: 'ship it?' },
+    }));
+    // the person answers, the run carries on and ends
+    notifier.onEvent(event({ kind: 'dag:end', outcome: { status: 'pass' } }));
+    await notifier.done();
+
+    expect(endpoint.received.map((message) => message.event))
+      .toEqual(['run-started', 'paused', 'finished']);
+  });
+
+  test('a stage pause and the run ending paused are one message, not two', async () => {
+    const endpoint = await serverFor();
+    const notifier = webhookNotifier({ url: endpoint.url });
+    notifier.onEvent(event({
+      kind: 'dag:node', node: 'approve', phase: 'done',
+      outcome: { status: 'paused', summary: 'ship it?' },
+    }));
+    // the mode that exits reports the same wait again as the run's own outcome
+    notifier.onEvent(event({ kind: 'dag:end', outcome: { status: 'paused', summary: 'paused at approve' } }));
+    await notifier.done();
+
+    expect(endpoint.received.map((message) => message.event)).toEqual(['paused']);
+    expect(endpoint.received[0]?.stage).toBe('approve');
+  });
+
+  test('a second gate in one run is told, not swallowed', async () => {
+    const endpoint = await serverFor();
+    const notifier = webhookNotifier({ url: endpoint.url });
+    notifier.onEvent(event({
+      kind: 'dag:node', node: 'approve-spend', phase: 'done',
+      outcome: { status: 'paused', summary: 'approve the spend?' },
+    }));
+    notifier.onEvent(event({
+      kind: 'dag:node', node: 'approve-copy', phase: 'done',
+      outcome: { status: 'paused', summary: 'approve the wording?' },
+    }));
+    await notifier.done();
+
+    expect(endpoint.received.map((message) => message.stage))
+      .toEqual(['approve-spend', 'approve-copy']);
+  });
+
   test('the sent-back message carries what the reviewer said', () => {
     const message = messageFor(event({
       kind: 'dag:kickback', from: 'review', to: 'draft',
