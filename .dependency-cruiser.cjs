@@ -189,6 +189,13 @@ module.exports = {
       to: { path: '^(packages|plugins)/', pathNot: '^(plugins/engine-claude-agent-sdk/|packages/(api|core)/)' },
     },
     {
+      name: 'notify-plugin-reaches-nothing',
+      comment: 'the webhook notifier reads run events as plain data and reaches no package in this repository',
+      severity: 'error',
+      from: { path: '^plugins/notify-webhook/' },
+      to: { path: '^(packages|plugins)/', pathNot: '^plugins/notify-webhook/' },
+    },
+    {
       name: 'engine-plugin-reaches-engine-only',
       comment: 'an engine plugin reaches API contracts and core execution only',
       severity: 'error',

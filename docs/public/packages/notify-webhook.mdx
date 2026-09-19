@@ -52,8 +52,11 @@ run does end on the wait, the stage message and the run's own outcome are the
 same news, and only the first is sent. A run with two gates is told about
 both.
 
-A run is announced once and ends once, whichever combination of events reports
-it. Everything else a run emits, including every engine token, is ignored.
+A run is announced once and ends once. Where a loop, a graph or a workflow is
+running the work, that container reports both, so the jobs finishing inside a
+loop's iterations are not mistaken for the run finishing; a run that is a
+single job with no container around it is reported by that job. Everything else
+a run emits, including every engine token, is ignored.
 
 ## Usage
 

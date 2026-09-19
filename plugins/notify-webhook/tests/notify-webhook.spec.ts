@@ -144,6 +144,75 @@ describe('a run reaching a real endpoint', () => {
       .toBe('Run failed: two nodes failed.');
   });
 
+  test('a loop body job finishing is not the run finishing', async () => {
+    // Every iteration emits job:start and job:end at the top level, carrying
+    // the body job's own outcome. Reading one as the run's ending announces
+    // the run finished after the first pass, and the once-only guard then
+    // swallows the real ending - a failure included.
+    const endpoint = await serverFor();
+    const notifier = webhookNotifier({ url: endpoint.url });
+    notifier.onEvent(event({ kind: 'loop:start', path: ['count'] }));
+    for (const iteration of [1, 2, 3]) {
+      notifier.onEvent(event({ kind: 'loop:iteration', path: ['count'], iteration }));
+      notifier.onEvent(event({ kind: 'job:start', path: ['count'], label: 'tick' }));
+      notifier.onEvent(event({
+        kind: 'job:end', path: ['count'], label: 'tick', outcome: { status: 'pass', summary: 'tick' },
+      }));
+    }
+    notifier.onEvent(event({
+      kind: 'loop:end', path: ['count'],
+      outcome: { status: 'fail', summary: 'never reached the goal' },
+    }));
+    await notifier.done();
+
+    expect(endpoint.received.map((message) => message.event)).toEqual(['run-started', 'failed']);
+    expect(endpoint.received[1]?.text).toBe('Run failed: never reached the goal.');
+  });
+
+  test('a run that is one job still reports its ending', async () => {
+    // With no loop, graph or workflow around it, the job's own end is the
+    // run's end and there is nothing else to report it.
+    const endpoint = await serverFor();
+    const notifier = webhookNotifier({ url: endpoint.url });
+    notifier.onEvent(event({ kind: 'job:start', path: [], label: 'write' }));
+    notifier.onEvent(event({
+      kind: 'job:end', path: [], label: 'write', outcome: { status: 'pass', summary: 'one page written' },
+    }));
+    await notifier.done();
+
+    expect(endpoint.received.map((message) => message.event)).toEqual(['finished']);
+  });
+
+  test('a loop inside a job does not stop the job reporting the run', async () => {
+    // Only a container at the TOP of the tree reports the run's ending. One
+    // nested inside the root job does not, so the root job's end is still the
+    // run's end.
+    const endpoint = await serverFor();
+    const notifier = webhookNotifier({ url: endpoint.url });
+    notifier.onEvent(event({ kind: 'job:start', path: [], label: 'write' }));
+    notifier.onEvent(event({ kind: 'loop:start', path: ['write', 'polish'] }));
+    notifier.onEvent(event({ kind: 'loop:end', path: ['write', 'polish'], outcome: { status: 'pass' } }));
+    notifier.onEvent(event({
+      kind: 'job:end', path: [], label: 'write', outcome: { status: 'pass', summary: 'done' },
+    }));
+    await notifier.done();
+
+    expect(endpoint.received.map((message) => message.event)).toEqual(['finished']);
+  });
+
+  test('a run ends once however many ending events arrive', async () => {
+    const endpoint = await serverFor();
+    const notifier = webhookNotifier({ url: endpoint.url });
+    notifier.onEvent(event({ kind: 'dag:start', path: ['brief'] }));
+    notifier.onEvent(event({ kind: 'dag:end', path: ['brief'], outcome: { status: 'pass' } }));
+    notifier.onEvent(event({
+      kind: 'loop:end', path: ['brief'], outcome: { status: 'fail', summary: 'a second ending' },
+    }));
+    await notifier.done();
+
+    expect(endpoint.received.map((message) => message.event)).toEqual(['run-started', 'finished']);
+  });
+
   test('a run is announced once and ended once', async () => {
     const endpoint = await serverFor();
     const notifier = webhookNotifier({ url: endpoint.url });

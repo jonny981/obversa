@@ -287,6 +287,12 @@ export function webhookNotifier(options: WebhookNotifierOptions): WebhookNotifie
   let monitor: string | undefined;
   let started = false;
   let ended = false;
+  // Whether a loop, a graph or a workflow is running the job tree. When one is,
+  // it reports the run's ending and a top-level job:end is an iteration's body
+  // job finishing, not the run. Without this a five-iteration loop announces
+  // "Run finished." after its first pass and the once-only guard then swallows
+  // the real ending, including a failure.
+  let container = false;
   // A stage pause and the run ending paused are the same news reported twice
   // in exit mode. The stage one arrives first and names the stage, so it wins.
   let toldAboutTheWait = false;
@@ -316,6 +322,8 @@ export function webhookNotifier(options: WebhookNotifierOptions): WebhookNotifie
         monitor = event.url;
         return;
       }
+      if (STARTING_KINDS.has(event.kind) && atTopLevel(event)) container = true;
+      if (event.kind === 'job:end' && container) return;
       const message = messageFor(event, monitor);
       if (message === undefined) return;
       // A run starts once and ends once. A workflow reports both its own start
