@@ -45,7 +45,7 @@ module.exports = {
       from: { path: '^examples/' },
       to: {
         couldNotResolve: true,
-        pathNot: '^@obversa/(api|builtin-workflows|core|engine-anthropic-api|engine-claude-agent-sdk|engine-claude-cli|engine-codex-cli|engine-grok-cli|engine-opencode-cli|memory-git|memory-simple|runner|runtime|search-markdown|surface-decision|surface-diff)(/|$)',
+        pathNot: '^@obversa/(api|builtin-workflows|core|engine-anthropic-api|engine-claude-agent-sdk|engine-claude-cli|engine-codex-cli|engine-grok-cli|engine-opencode-cli|memory-git|memory-simple|notify-webhook|runner|runtime|search-markdown|surface-decision|surface-diff)(/|$)',
       },
     },
     {
@@ -194,6 +194,13 @@ module.exports = {
       severity: 'error',
       from: { path: '^plugins/engine-claude-agent-sdk/' },
       to: { path: '^(packages|plugins)/', pathNot: '^(plugins/engine-claude-agent-sdk/|packages/(api|core)/)' },
+    },
+    {
+      name: 'notify-plugin-reaches-nothing',
+      comment: 'the webhook notifier reads run events as plain data and reaches no package in this repository',
+      severity: 'error',
+      from: { path: '^plugins/notify-webhook/' },
+      to: { path: '^(packages|plugins)/', pathNot: '^plugins/notify-webhook/' },
     },
     {
       name: 'engine-plugin-reaches-engine-only',

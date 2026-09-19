@@ -350,6 +350,8 @@ function run(command, args, options = {}) {
 
 const consumerSource = `
 import assert from 'node:assert/strict';
+import { createServer } from 'node:http';
+import type { AddressInfo } from 'node:net';
 
 import {
   MEMORY_ROOT,
@@ -358,6 +360,7 @@ import {
 import { runMemoryConformance } from '@obversa/api/testing';
 import { createSimpleMemory } from '@obversa/memory-simple';
 import { openGitMemory } from '@obversa/memory-git';
+import { webhookNotifier, type WebhookMessage } from '@obversa/notify-webhook';
 import { MockEngine } from '@obversa/core/testing';
 import { AgentSdkEngine } from '@obversa/engine-claude-agent-sdk';
 import { AnthropicApiEngine } from '@obversa/engine-anthropic-api';
@@ -395,6 +398,27 @@ import { featureDelivery, thresholdPanel, writerReviewerPair } from '@obversa/bu
 
 const packedTeamBuilders = [featureDelivery, thresholdPanel, writerReviewerPair];
 assert.equal(packedTeamBuilders.length, 3);
+
+// The packed notifier turns a run event into one message and posts it for
+// real. The address comes from the operating system, so no endpoint is
+// written down here.
+const packedMessages: WebhookMessage[] = [];
+const packedReceiver = createServer((request, response) => {
+  let body = '';
+  request.on('data', (chunk: Buffer) => { body += chunk.toString('utf8'); });
+  request.on('end', () => {
+    packedMessages.push(JSON.parse(body) as WebhookMessage);
+    response.writeHead(200).end();
+  });
+});
+await new Promise<void>((resolve) => { packedReceiver.listen(0, '127.0.0.1', resolve); });
+const packedNotifier = webhookNotifier({
+  url: 'http://127.0.0.1:' + (packedReceiver.address() as AddressInfo).port + '/',
+});
+packedNotifier.onEvent({ kind: 'dag:start', ts: 1, path: ['packed'] });
+await packedNotifier.done();
+await new Promise<void>((resolve) => { packedReceiver.close(() => { resolve(); }); });
+assert.deepEqual(packedMessages.map((message) => message.text), ['Run started: packed.']);
 
 type Equal<Left, Right> =
   (<Value>() => Value extends Left ? 1 : 2) extends
@@ -821,6 +845,7 @@ async function main() {
     await copyFile(join(root, 'examples', 'write-and-review.ts'), join(consumerDirectory, 'write-and-review.ts'));
     await copyFile(join(root, 'examples', 'one-agent-job.ts'), join(consumerDirectory, 'one-agent-job.ts'));
     await copyFile(join(root, 'examples', 'command-kickback.ts'), join(consumerDirectory, 'command-kickback.ts'));
+    await copyFile(join(root, 'examples', 'notify-webhook.ts'), join(consumerDirectory, 'notify-webhook.ts'));
     await copyFile(join(root, 'examples', 'approval.ts'), join(consumerDirectory, 'approval.ts'));
     await copyFile(join(root, 'examples', 'monitor.ts'), join(consumerDirectory, 'monitor.ts'));
     await copyFile(tournamentExamplePath, join(consumerDirectory, 'tournament.ts'));

@@ -91,6 +91,7 @@ export const stageBranches = {
   F62: 'feat/reasoning-record',
   F63: 'feat/markdown-corpus-search',
   F91: 'docs/search-markdown-contract',
+  F67: 'feat/notify-webhook',
 };
 
 export function manageStage(args, options = {}) {

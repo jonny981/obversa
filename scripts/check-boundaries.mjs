@@ -493,6 +493,15 @@ const packageRules = new Map([
     dependencies: ['@obversa/api'],
     peerDependencies: [],
   }],
+  ['@obversa/notify-webhook', {
+    directory: 'plugins/notify-webhook',
+    kind: 'plugin',
+    version: '0.1.0',
+    // It reads the run events structurally and imports nothing from this
+    // repository, so it needs neither the api nor the core package.
+    dependencies: [],
+    peerDependencies: [],
+  }],
   ['@obversa/memory-git', {
     directory: 'plugins/memory-git',
     kind: 'plugin',

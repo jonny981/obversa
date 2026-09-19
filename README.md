@@ -234,14 +234,16 @@ Write your own against the engine contract; it must pass the conformance kit.
 
 ## What is in this repository
 
-16 publishable packages. `packages/` holds the seven that define the
+17 publishable packages. `packages/` holds the seven that define the
 product: `@obversa/runtime` runs workflows, `@obversa/builtin-workflows`
 provides three ready-made recipes, `@obversa/runner` supervises stored
 runs, `@obversa/api` holds the shared contracts and checks,
 `@obversa/core` runs bounded child processes, and
 `@obversa/surface-decision` and `@obversa/surface-diff` are the local
-review surface. `plugins/` holds the nine adapters: the six engines above,
-two memories, and lexical search over a local Markdown corpus.
+review surface. `plugins/` holds the ten adapters: the six engines above,
+two memories, one in process and one in private Git references, lexical
+search over a local Markdown corpus, and one notifier that posts a run's
+progress to a URL you supply.
 `hosts/` holds the terminal host, which is not published.
 
 ## Requirements

@@ -20,9 +20,10 @@ const expected = new Map([
   ['@obversa/memory-git', 'plugins/memory-git'],
   ['@obversa/memory-simple', 'plugins/memory-simple'],
   ['@obversa/search-markdown', 'plugins/search-markdown'],
+  ['@obversa/notify-webhook', 'plugins/notify-webhook'],
 ]);
 
-test('all sixteen public packages have the accepted names and locations', () => {
+test('all seventeen public packages have the accepted names and locations', () => {
   const allowlist = JSON.parse(readFileSync('scripts/publish-allowlist.json', 'utf8'));
   assert.deepEqual(allowlist.packages, [...expected.keys()].sort());
   for (const [name, directory] of expected) {
