@@ -86,8 +86,9 @@ other published package tracks its own version independently of it.
   `totalCacheReadInputTokens` and `totalCacheCreationInputTokens`, kept
   separate because one is what was served from cache and the other what was
   paid to build it. A total that is missing calls says so, in the same words
-  a single call uses: `usage unknown on 3 calls`. The monitor's `/state`
-  carries the same totals.
+  a single call uses: `usage unknown on 3 calls`.
+  The monitor's `/state` carries the same totals, and `usageSummary` beside
+  them: the line already written out, so nothing formats it twice.
 - **Watch a run without writing a formatter:** `@obversa/runtime` exports
   `formatEvent`, which turns one event from `onEvent` into the line a person
   reads. Every use-case example prints its run through it.

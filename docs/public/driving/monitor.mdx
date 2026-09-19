@@ -102,7 +102,7 @@ through that step's outcome.
 | route | what it does |
 | --- | --- |
 | `GET /` | The page. |
-| `GET /state` | The same state as JSON: `status`, `outcome`, `nodes`, `kickbacks`, `pending`, `events`. The type is `MonitorState`. |
+| `GET /state` | The same state as JSON: `status`, `outcome`, `nodes`, `kickbacks`, `usage`, `usageSummary`, `pending`, `events`. The type is `MonitorState`. |
 | `POST /answer` | Answers one waiting question. The body is JSON: `{ "requestId": "...", "response": { "approved": true, "note": "..." } }`. The answer is claimed and submitted through the run's callbacks client as the router `monitor`. |
 
 Any other route is 404, any other method is 405, and a body that is not

@@ -7,7 +7,7 @@ import { runInNewContext } from 'node:vm';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { approval, createCallbackClient, dag, fnJob, kickback, pipeline, run } from '../src/api.ts';
-import type { LoopEvent, Outcome, RunResult } from '../src/api.ts';
+import type { LoopEvent, MonitorState, Outcome, RunResult } from '../src/api.ts';
 
 type MonitorEvent = Extract<LoopEvent, { kind: 'monitor' }>;
 const monitorEvents = (events: LoopEvent[]): MonitorEvent[] =>
@@ -115,6 +115,9 @@ describe('the run monitor', () => {
 
     expect(result.outcome.status, result.outcome.summary).toBe('pass');
     expect(page).toBeDefined();
+    const state: MonitorState = JSON.parse((await get(`${result.monitor!.url}state`)).body);
+    const usageSummary: string = state.usageSummary;
+    expect(usageSummary).toBe('100/20 tok, 30 tok from cache, usage unknown on 1 call');
     // Run the same callback the served page scheduled, after /state has become final.
     await page!.poll();
     const finalText = page!.visibleText();

@@ -57,6 +57,8 @@ export interface MonitorState {
   kickbacks: MonitorKickback[];
   /** What the run has spent so far, the same shape the line formatter takes. */
   usage: UsageTotals;
+  /** The same spend as one line of text, already formatted; `/state` sends it. */
+  usageSummary: string;
   pending: Array<{ requestId: string; decisionText: string; input: JsonValue }>;
   events: Array<{ kind: string; ts: number; path: string[]; node?: string; label?: string; summary?: string }>;
 }
