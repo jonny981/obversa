@@ -85,9 +85,12 @@ describe('openMarkdownCorpus', () => {
     await expect(opened.search('   ')).resolves.toEqual([]);
   });
 
-  it('searches ordinary names through a symlinked root while hiding dot entries', async () => {
+  it('searches groundable names through a symlinked root while skipping other entries', async () => {
     const directory = await corpus({
       '.private/hidden.md': 'Planted searchable phrase.\n',
+      '_index.md': 'Planted searchable phrase.\n',
+      'café.md': 'Planted searchable phrase.\n',
+      [`${'a'.repeat(126)}.md`]: 'Planted searchable phrase.\n',
       'notes with spaces.md': 'Planted searchable phrase.\n',
       'included.md': 'Planted searchable phrase.\n',
     });
@@ -95,10 +98,7 @@ describe('openMarkdownCorpus', () => {
     await symlink(directory, linkedDirectory, 'dir');
     temporaryDirectories.push(linkedDirectory);
 
-    const expected = [
-      { path: '/memories/included.md' },
-      { path: '/memories/notes with spaces.md' },
-    ];
+    const expected = [{ path: '/memories/included.md' }];
     const opened = openMarkdownCorpus({ directory });
     const linked = openMarkdownCorpus({ directory: linkedDirectory });
 
@@ -107,12 +107,14 @@ describe('openMarkdownCorpus', () => {
     for (const corpus of [opened, linked]) {
       await expect(corpus.memory.execute({
         command: 'view',
-        path: '/memories/notes with spaces.md',
+        path: '/memories',
       })).resolves.toMatchObject({
         ok: true,
         value: {
-          path: '/memories/notes with spaces.md',
-          text: 'Planted searchable phrase.\n',
+          entries: [{
+            name: 'included.md',
+            path: '/memories/included.md',
+          }],
         },
       });
     }

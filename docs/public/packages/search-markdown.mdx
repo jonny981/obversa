@@ -39,6 +39,17 @@ Create `search-markdown-corpus/charging.md` beside it:
 Charge the battery before it reaches ten percent.
 ```
 
+Create `search-markdown-corpus/notes with spaces.md` beside them:
+
+```md
+# Not indexed
+
+Battery warranty battery warranty.
+```
+
+The third file matches the query but its name cannot become a `MemoryPath`, so
+search skips it. The remaining hit can pass to `ground`.
+
 ## Source
 
 ```ts
@@ -52,13 +63,16 @@ import { MockEngine } from '@obversa/runtime/testing';
 const corpus = openMarkdownCorpus({
   directory: fileURLToPath(new URL('./search-markdown-corpus', import.meta.url)),
 });
-const hits = await corpus.search('battery warranty', { limit: 1 });
+const hits = await corpus.search('warranty');
 const paths = [...new Set(hits.map((hit) => hit.path))];
 const grounded = await ground(corpus.memory, {
   sources: paths.map((path) => ({ path })),
 });
 
 if (!grounded.ok) throw new Error(grounded.error.message);
+if (paths.length !== 1 || paths[0] !== '/memories/warranty.md') {
+  throw new Error('Search returned a corpus path that ground must not receive.');
+}
 
 const context = await curate(grounded.value, {
   intent: 'Answer the warranty question.',
@@ -111,9 +125,12 @@ all five write commands return an error. Search must not edit the source
 material it is selecting, and the existing writable adapters do not read a
 plain corpus directory.
 
-Corpus directories and `.md` file names use the same safe path segments as
-`MemoryPath`: each segment starts with a letter or number, then uses letters,
-numbers, dots, underscores, or hyphens. A corpus path such as
+Search and the Memory view include only directories and `.md` files whose path
+segments start with a letter or number and then use letters, numbers, dots,
+underscores, or hyphens, up to 128 characters per segment. Dot-prefixed names,
+names outside that rule, non-Markdown files, and symbolic links inside the
+corpus are skipped without failing the search or a directory view. The corpus
+root itself can be a symbolic link. A corpus path such as
 `policies/warranty.md` becomes `/memories/policies/warranty.md`.
 
 ## Ranking

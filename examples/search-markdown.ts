@@ -8,13 +8,16 @@ import { MockEngine } from '@obversa/runtime/testing';
 const corpus = openMarkdownCorpus({
   directory: fileURLToPath(new URL('./search-markdown-corpus', import.meta.url)),
 });
-const hits = await corpus.search('battery warranty', { limit: 1 });
+const hits = await corpus.search('warranty');
 const paths = [...new Set(hits.map((hit) => hit.path))];
 const grounded = await ground(corpus.memory, {
   sources: paths.map((path) => ({ path })),
 });
 
 if (!grounded.ok) throw new Error(grounded.error.message);
+if (paths.length !== 1 || paths[0] !== '/memories/warranty.md') {
+  throw new Error('Search returned a corpus path that ground must not receive.');
+}
 
 const context = await curate(grounded.value, {
   intent: 'Answer the warranty question.',

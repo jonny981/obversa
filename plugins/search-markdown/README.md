@@ -21,9 +21,12 @@ through the public `Memory` contract. That view is **read-only**: `view` reads
 the corpus, while `create`, `str_replace`, `insert`, `delete`, and `rename`
 return an error. Search must not edit the source material it is selecting.
 
-Corpus directories and `.md` file names use the same safe path segments as
-`MemoryPath`: each segment starts with a letter or number, then uses letters,
-numbers, dots, underscores, or hyphens.
+Search and the Memory view include only directories and `.md` files whose path
+segments start with a letter or number and then use letters, numbers, dots,
+underscores, or hyphens, up to 128 characters per segment. Dot-prefixed names,
+names outside that rule, non-Markdown files, and symbolic links inside the
+corpus are skipped without failing the search or a directory view. The corpus
+root itself can be a symbolic link.
 
 ## Runnable example
 

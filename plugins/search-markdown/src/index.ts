@@ -68,6 +68,9 @@ const DEFAULT_LIMIT = 20;
 const MAX_PATH_BYTES = 1_024;
 const CONTROL_CHARACTER = /[\u0000-\u001f\u007f]/;
 const HEADING = /^ {0,3}#{1,6}(?:\s|$)/;
+// Copy of MEMORY_SEGMENT in packages/runtime/src/memory.ts. The package boundary
+// forbids importing the runtime, so these expressions must not diverge.
+const SEGMENT = /^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/;
 const TOKEN = /[\p{L}\p{N}]+/gu;
 const COMMANDS = new Set<MemoryCommandName>([
   'view',
@@ -86,18 +89,8 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
 }
 
-function isAddressableSegment(value: string): boolean {
-  return value !== ''
-    && value !== '.'
-    && value !== '..'
-    && !value.includes('/')
-    && !value.includes('\\')
-    && !value.includes('%')
-    && !CONTROL_CHARACTER.test(value);
-}
-
 function isVisibleCorpusEntry(value: string): boolean {
-  return !value.startsWith('.') && isAddressableSegment(value);
+  return !value.startsWith('.') && SEGMENT.test(value);
 }
 
 function memoryError(
@@ -148,7 +141,7 @@ function validateMemoryPath(value: unknown): Validation<MemoryPath> {
   }
 
   const segments = value.slice(MEMORY_ROOT.length + 1).split('/');
-  if (segments.some((segment) => !isAddressableSegment(segment))) {
+  if (segments.some((segment) => !SEGMENT.test(segment))) {
     return { error: memoryError('INVALID_PATH', 'The memory path contains an invalid segment.', value) };
   }
   return { value: value as MemoryPath };
