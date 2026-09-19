@@ -46,6 +46,13 @@ export interface StatsSnapshot {
    */
   totalCacheCreationInputTokens: number;
   totalCacheReadInputTokens: number;
+  /**
+   * How many calls reported no usage at all. The per-call line says "usage
+   * unknown" rather than inventing a zero; without this the aggregate quietly
+   * drops those calls and a total that might be missing three of them looks
+   * complete.
+   */
+  totalUnmeasuredCalls: number;
   agentCalls: number;
   errors: ErrorEntry[];
 }
@@ -114,6 +121,7 @@ export class Stats {
       totalOutputTokens: models.reduce((a, m) => a + m.outputTokens, 0),
       totalCacheCreationInputTokens: models.reduce((a, m) => a + (m.cacheCreationInputTokens ?? 0), 0),
       totalCacheReadInputTokens: models.reduce((a, m) => a + (m.cacheReadInputTokens ?? 0), 0),
+      totalUnmeasuredCalls: models.reduce((a, m) => a + m.unknownUsageCalls, 0),
       agentCalls: models.reduce((a, m) => a + m.calls, 0),
       errors: this.errors,
     };

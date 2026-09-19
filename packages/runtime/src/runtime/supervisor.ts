@@ -466,10 +466,17 @@ function runningTotal(totals: UsageTotals): string {
   // page whose whole subject is being transparent about spend. Both figures
   // stay on StatsSnapshot in full; this line is a summary, not the record.
   const read = totals.cacheReadInputTokens ?? 0;
+  const unmeasured = totals.unmeasuredCalls ?? 0;
+  // Shown only when there is one, so an honest complete run stays clean and an
+  // incomplete one says so rather than presenting a total as the whole story.
+  // The words are the ones a single call already prints, "usage unknown", so a
+  // reader who learns the phrase once knows it at both levels instead of
+  // meeting two spellings of one idea and wondering if they differ.
+  const missing = unmeasured > 0 ? `, usage unknown on ${unmeasured} call${unmeasured === 1 ? '' : 's'}` : '';
   const base = `${totals.inputTokens}/${totals.outputTokens} tok`;
   // The unit stays on the number: a bare 900 beside a labelled pair reads as
   // the same kind of thing as the pair, and it is not.
-  return read > 0 ? `${base}, ${read} tok from cache` : base;
+  return `${base}${read > 0 ? `, ${read} tok from cache` : ''}${missing}`;
 }
 
 export function toLine(value: string): string {
@@ -488,6 +495,8 @@ export interface UsageTotals {
   readonly outputTokens: number;
   readonly cacheCreationInputTokens?: number;
   readonly cacheReadInputTokens?: number;
+  /** Calls that reported no usage, so a total can say what it is missing. */
+  readonly unmeasuredCalls?: number;
 }
 
 export function formatEvent(event: LoopEvent, totals?: UsageTotals): string {

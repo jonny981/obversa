@@ -106,3 +106,28 @@ describe('a run reports what it spent', () => {
     expect(formatEvent(usage('m', 5, 1), result.usage)).toContain('5/1 tok');
   });
 });
+
+describe('a total that might be missing calls says so', () => {
+  // The per-call line is honest: an engine that reported nothing prints
+  // "usage unknown" rather than a zero. The aggregate was not, so three
+  // unmeasured calls vanished into a total that looked complete. For a stage
+  // whose whole reason is that nobody trusts us unless usage is visible, a
+  // number that might be missing calls and does not say so is the worst kind.
+  it('counts the calls that reported nothing', () => {
+    const stats = new Stats();
+    stats.record(usage('a', 100, 10));
+    stats.record({ ...usage('b', 0, 0), usage: { kind: 'unknown' } } as LoopEvent);
+    stats.record({ ...usage('c', 0, 0), usage: { kind: 'unknown' } } as LoopEvent);
+    expect(stats.snapshot().totalUnmeasuredCalls).toBe(2);
+  });
+
+  it('shows the unmeasured count on the line only when there is one', () => {
+    const complete = formatEvent(usage('m', 1, 1), { inputTokens: 9, outputTokens: 3, unmeasuredCalls: 0 });
+    expect(complete).not.toContain('unmeasured');
+    const incomplete = formatEvent(usage('m', 1, 1), { inputTokens: 9, outputTokens: 3, unmeasuredCalls: 2 });
+    // The same words a single call prints, so a reader learns the phrase once.
+    expect(incomplete).toContain('usage unknown on 2 calls');
+    const one = formatEvent(usage('m', 1, 1), { inputTokens: 9, outputTokens: 3, unmeasuredCalls: 1 });
+    expect(one).toContain('usage unknown on 1 call');
+  });
+});

@@ -144,6 +144,7 @@ function usageOf(snapshot: StatsSnapshot): UsageTotals {
     outputTokens: snapshot.totalOutputTokens,
     cacheReadInputTokens: snapshot.totalCacheReadInputTokens,
     cacheCreationInputTokens: snapshot.totalCacheCreationInputTokens,
+    unmeasuredCalls: snapshot.totalUnmeasuredCalls,
   };
 }
 

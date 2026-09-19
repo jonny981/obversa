@@ -48,7 +48,9 @@ other published package tracks its own version independently of it.
   nothing about what it prints. `StatsSnapshot` gains run-wide
   `totalCacheReadInputTokens` and `totalCacheCreationInputTokens`, kept
   separate because one is what was served from cache and the other what was
-  paid to build it, and the monitor's live state carries both.
+  paid to build it. A total that is missing calls says so, in the same words
+  a single call uses: `usage unknown on 3 calls`. The monitor's `/state`
+  carries the same totals.
 - **Watch a run without writing a formatter:** `@obversa/runtime` exports
   `formatEvent`, which turns one event from `onEvent` into the line a person
   reads. Every use-case example prints its run through it.
