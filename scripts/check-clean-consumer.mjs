@@ -401,7 +401,7 @@ const packedReceiver = createServer((request, response) => {
 });
 await new Promise<void>((resolve) => { packedReceiver.listen(0, '127.0.0.1', resolve); });
 const packedNotifier = webhookNotifier({
-  url: `http://127.0.0.1:${(packedReceiver.address() as AddressInfo).port}/`,
+  url: 'http://127.0.0.1:' + (packedReceiver.address() as AddressInfo).port + '/',
 });
 packedNotifier.onEvent({ kind: 'dag:start', ts: 1, path: ['packed'] });
 await packedNotifier.done();
