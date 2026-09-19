@@ -70,6 +70,12 @@ manifest("plugins/memory-simple", {
   exports: { ".": "./src/index.mjs" },
   imports: { "#sneak": "../surface-decision/src/index.mjs" },
 });
+manifest("plugins/search-markdown", {
+  name: "@obversa/search-markdown",
+  type: "module",
+  exports: { ".": "./src/index.mjs" },
+  dependencies: { "@obversa/api": "workspace:*" },
+});
 for (const name of ["engine-claude-agent-sdk", "engine-anthropic-api", "engine-claude-cli", "engine-codex-cli", "engine-grok-cli", "engine-opencode-cli"]) {
   manifest(`plugins/${name}`, {
     name: `@obversa/${name}`,
@@ -89,6 +95,7 @@ for (const name of ["api", "core", "runner", "runtime", "surface-diff", "surface
 }
 symlinkSync(join("..", "..", "plugins", "engine-codex-cli"), join(fixture, "node_modules", "@obversa", "engine-codex-cli"));
 symlinkSync(join("..", "..", "plugins", "memory-simple"), join(fixture, "node_modules", "@obversa", "memory-simple"));
+symlinkSync(join("..", "..", "plugins", "search-markdown"), join(fixture, "node_modules", "@obversa", "search-markdown"));
 manifest("node_modules/left-pad", { name: "left-pad", version: "1.0.0", main: "index.js" });
 file("node_modules/left-pad/index.js", "module.exports = (s) => s;\n");
 manifest("node_modules/devtool", { name: "devtool", version: "1.0.0", main: "index.js" });
@@ -106,6 +113,7 @@ file("packages/surface-diff/src/private.mjs", "export const priv = 1;\n");
 file("packages/surface-decision/src/index.mjs", "export const surfacer = 1;\n");
 file("plugins/memory-git/src/index.mjs", "export const gitMemory = 1;\n");
 file("plugins/memory-simple/src/index.mjs", "export const simple = 1;\n");
+file("plugins/search-markdown/src/index.mjs", "export const search = 1;\n");
 for (const name of ["engine-claude-agent-sdk", "engine-anthropic-api", "engine-claude-cli", "engine-codex-cli", "engine-grok-cli", "engine-opencode-cli"]) {
   file(`plugins/${name}/src/index.mjs`, `export const name = ${JSON.stringify(name)};\n`);
 }
@@ -142,6 +150,8 @@ const forbidden = [
   ["packages/surface-diff/src/s.mjs", "import './missing.mjs';\n", "no-unresolvable"],
   ["examples/bad7.mjs", "import '@obversa/does-not-resolve';\n", "no-unresolvable-example"],
   ["plugins/memory-simple/src/f2.mjs", "import '@obversa/runtime';\n", "memory-plugin-reaches-memory-only"],
+  ["plugins/search-markdown/src/f5.mjs", "import '@obversa/runtime';\n", "search-plugin-reaches-api-only"],
+  ["plugins/search-markdown/src/f6.mjs", "import '@obversa/memory-simple';\n", "search-plugin-reaches-api-only"],
   ["plugins/engine-codex-cli/src/f3.mjs", "import '@obversa/builtin-workflows';\n", "engine-plugin-reaches-engine-only"],
   ["plugins/engine-claude-agent-sdk/src/f4.mjs", "import '@obversa/runtime';\n", "agent-sdk-plugin-reaches-interfaces-only"],
 ];
@@ -158,6 +168,7 @@ const allowed = [
   ["packages/surface-diff/src/ok8.mjs", "import '@obversa/surface-decision';\n"],
   ["packages/surface-diff/test/ok2.test.mjs", "import '../src/index.mjs';\n"],
   ["plugins/memory-git/tests/ok3.test.mjs", "import '@obversa/api/testing';\n"],
+  ["plugins/search-markdown/src/ok12.mjs", "import '@obversa/api';\n"],
   ["hosts/cmux/test/ok4.test.mjs", "import 'node:test';\n"],
   ["examples/ok5.mjs", "import '@obversa/runtime';\n"],
   ["scripts/ok6.mjs", "import 'node:fs';\n"],
@@ -166,6 +177,7 @@ const allowed = [
   // root has no symlink for memory-git, so the name is unresolvable here
   // and must still raise nothing.
   ["examples/ok7.mjs", "import '@obversa/memory-git';\n"],
+  ["examples/ok14.mjs", "import '@obversa/search-markdown';\n"],
 ];
 for (const [path, content] of allowed) file(path, content);
 

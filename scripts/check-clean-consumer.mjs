@@ -43,6 +43,18 @@ const expectedDescribedTeamReport = {
   status: 'pass',
 };
 
+const expectedSearchMarkdownReport = {
+  hits: [{
+    path: '/memories/warranty.md',
+    startLine: 3,
+    endLine: 3,
+  }],
+  grounded: ['/memories/warranty.md'],
+  brief: 'The battery warranty lasts eight years.',
+  job: 'pass',
+  briefReachedJob: true,
+};
+
 const expectedPipelineReport = {
   executor: 'complete',
   output: {
@@ -649,6 +661,8 @@ async function main() {
   const safeChangeFileAdapterPath = join(root, 'examples', 'safe-change-file-adapter.ts');
   const describedTeamExamplePath = join(root, 'examples', 'described-team.ts');
   const runChildExamplePath = join(root, 'examples', 'run-child.ts');
+  const searchMarkdownExamplePath = join(root, 'examples', 'search-markdown.ts');
+  const searchMarkdownExampleSource = await readFile(searchMarkdownExamplePath, 'utf8');
   const turnTakingExampleSource = await readFile(turnTakingExamplePath, 'utf8');
   const safeChangeExampleSource = await readFile(safeChangeExamplePath, 'utf8');
   const graphDocument = await readFile(
@@ -695,6 +709,10 @@ async function main() {
     join(root, 'docs', 'public', 'packages', 'core.mdx'),
     'utf8',
   );
+  const searchMarkdownDocument = await readFile(
+    join(root, 'docs', 'public', 'packages', 'search-markdown.mdx'),
+    'utf8',
+  );
   const runChildExampleSource = await readFile(runChildExamplePath, 'utf8');
   if (sourceFromPublicDoc(publicDocument) !== exampleSource) {
     throw new Error('The offline production-line page does not match its runnable source');
@@ -722,6 +740,9 @@ async function main() {
   }
   if (sourceFromPublicDoc(forgeDocument) !== forgeExampleSource) {
     throw new Error('The forge helper page does not match its runnable source');
+  }
+  if (sourceFromPublicDoc(searchMarkdownDocument) !== searchMarkdownExampleSource) {
+    throw new Error('The Markdown search package page does not match its runnable source');
   }
   if (sourceFromProcessDoc(processDocument) !== runChildExampleSource) {
     throw new Error('The core page does not match its runnable source');
@@ -790,6 +811,12 @@ async function main() {
     await copyFile(join(root, 'examples', 'builtin-workflows.ts'), join(consumerDirectory, 'builtin-workflows.ts'));
     await copyFile(join(root, 'examples', 'surface-diff.ts'), join(consumerDirectory, 'surface-diff.ts'));
     await copyFile(join(root, 'examples', 'memory.ts'), join(consumerDirectory, 'memory.ts'));
+    await copyFile(searchMarkdownExamplePath, join(consumerDirectory, 'search-markdown.ts'));
+    await cp(
+      join(root, 'examples', 'search-markdown-corpus'),
+      join(consumerDirectory, 'search-markdown-corpus'),
+      { recursive: true },
+    );
 
     await copyFile(join(root, 'examples', 'write-and-review.ts'), join(consumerDirectory, 'write-and-review.ts'));
     await copyFile(join(root, 'examples', 'one-agent-job.ts'), join(consumerDirectory, 'one-agent-job.ts'));
@@ -850,6 +877,11 @@ async function main() {
     run(process.execPath, [tsc6, '-p', 'tsconfig.json'], { cwd: consumerDirectory });
     await copyFile(runnerHostPath, join(consumerDirectory, 'dist', 'supervised-host.mjs'));
     await copyFile(preflightHostPath, join(consumerDirectory, 'dist', 'preflight-host.mjs'));
+    await cp(
+      join(consumerDirectory, 'search-markdown-corpus'),
+      join(consumerDirectory, 'dist', 'search-markdown-corpus'),
+      { recursive: true },
+    );
 
     run('git', ['init', '--quiet', gitRepository]);
     const output = run(process.execPath, ['dist/consumer.js'], {
@@ -996,6 +1028,12 @@ async function main() {
     const compiledGraph = JSON.parse(
       run(process.execPath, ['dist/custom-graph.js'], { cwd: consumerDirectory }),
     );
+    const compiledSearchMarkdown = JSON.parse(
+      run(process.execPath, ['dist/search-markdown.js'], { cwd: consumerDirectory }),
+    );
+    const directSearchMarkdown = JSON.parse(
+      run('pnpm', ['exec', 'tsx', 'search-markdown.ts'], { cwd: consumerDirectory }),
+    );
     const directGraph = JSON.parse(
       run('pnpm', ['exec', 'tsx', 'custom-graph.ts'], { cwd: consumerDirectory }),
     );
@@ -1104,6 +1142,8 @@ async function main() {
     }
     assert.deepEqual(compiledGraph, expectedGraphReport);
     assert.deepEqual(directGraph, expectedGraphReport);
+    assert.deepEqual(compiledSearchMarkdown, expectedSearchMarkdownReport);
+    assert.deepEqual(directSearchMarkdown, expectedSearchMarkdownReport);
     assert.deepEqual(compiledDescribedTeam, expectedDescribedTeamReport);
     assert.deepEqual(directDescribedTeam, expectedDescribedTeamReport);
     assert.deepEqual(compiledPipeline, expectedPipelineReport);

@@ -500,6 +500,13 @@ const packageRules = new Map([
     dependencies: ['@obversa/api', '@obversa/core'],
     peerDependencies: [],
   }],
+  ['@obversa/search-markdown', {
+    directory: 'plugins/search-markdown',
+    kind: 'plugin',
+    version: '0.1.0',
+    dependencies: ['@obversa/api'],
+    peerDependencies: [],
+  }],
   // Private workspace packages get a rule too, so a sibling import inside
   // them is caught the same way. Surface decision must never depend on the runtime or
   // another package. Surface diff depends on surface decision — the flipped arrow: the
