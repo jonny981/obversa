@@ -147,6 +147,9 @@ describe('run supervision', () => {
     const events = readFileSync(runEventsPath('one-step-run'), 'utf8');
     expect(events).toContain('"kind":"loop:start"');
     expect(events).toContain('"kind":"loop:end"');
+    const recent = readRunProgress('one-step-run', { recent: 20 })?.recent;
+    expect(recent).toContain('▸ run');
+    expect(recent).toContain('◂ run pass (0/0 tok)');
   });
 
   it('reports the last failing gate as the blocker', async () => {

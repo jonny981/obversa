@@ -313,7 +313,7 @@ try {
   the answer is there. The question, the client and the record are the same
   in both, so a record written by one mode resumes under the other.
   Cancelling a waiting workflow reports the run as aborted and leaves the question in the record, so a later resume can still answer it. A bare `approval()` job returns the recorded pause instead.
-- `LoopEvent`: the data handed to `onEvent`. Every run emits one root
+- `LoopEvent`: the data handed to `onEvent`. Every run that begins emits one root
   `run:start` before it dispatches work and one root `run:end` before it
   returns. The end event carries the same `Outcome` and `UsageTotals` as
   `RunResult`; both events carry the run id and record path when present.

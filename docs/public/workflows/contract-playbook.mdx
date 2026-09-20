@@ -116,11 +116,14 @@ finding.
 ## What a run printed
 
 The output below is from one real run of this file, with the two command
-line tools signed in on the machine. The machine that captured this
-also had an extra local search tool available to the first seat, which this
-example does not configure, so those calls are elided and a reader's own run
-will not make them. The run stops at the person, which is
-what every example here does before anything is sent or filed.
+line tools signed in on the machine. The transcript is trimmed at both ends: a
+reader's own run prints a `▸ run` event line before the first stage and — unless
+the process is killed first — a `◂ run` line carrying the outcome and the run's
+token total after the last stage. The machine that captured this also had an
+extra local search tool available to the first seat, which this example does
+not configure, so those calls are elided and a reader's own run will not make
+them. The run stops at the person, which is what every example here does before
+anything is sent or filed.
 
 ```text
 contract-playbook ▸ dag (4 nodes)

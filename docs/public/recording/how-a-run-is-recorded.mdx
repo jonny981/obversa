@@ -20,7 +20,9 @@ order it happened.
 | `run:start` | The run began. It carries the run id and record path when the run has them. |
 | `run:end` | The run ended. It carries the same outcome and token usage that `run()` returns. |
 
-A record holds one pair per attempt, and the last pair is the current one.
+A run appends `run:start` when it begins and `run:end` only if it finishes. A
+record still being written, or one whose run was killed, therefore ends with a
+start and no end, and a resumed record keeps the earlier start as well.
 
 ```text
 {"kind":"run:start","ts":1789044650084,"path":[],"recordPath":".obversa/records/offline-review.jsonl"}

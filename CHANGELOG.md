@@ -11,14 +11,15 @@ other published package tracks its own version independently of it.
 
 ### Added
 
-- **Run boundaries are events:** every `run()` emits one root `run:start`
-  before it dispatches work and one root `run:end` however it ends. The end
-  event carries the same outcome and token usage as `RunResult`; both events
-  carry the run id and record path when present.
+- **Run boundaries are events:** every run that begins emits one root `run:start`
+  before it dispatches work, and one root `run:end` before it returns, however
+  it ends. A run whose process is killed leaves the start without an end. The
+  end event carries the same outcome and token usage as `RunResult`; both
+  events carry the run id and record path when present.
 - **Supervised progress shows the run's own boundaries:** the recent-activity
-  lines a supervised run prints now include `▸ run` when it starts and
-  `◂ run <status>` with its running token total when it ends, beside the loop
-  and stage lines they already carried.
+  lines a supervised run prints include `▸ run` when it starts and
+  `◂ run <status>` with its running token total when it ends, beside its loop
+  and stage lines.
 - **Gates wait in two ways:** attended, when a person is at the run, the
   process waits in place for the answer; unattended, the run records the
   question and exits, and a scheduled `resume: true` carries on when the
