@@ -318,21 +318,21 @@ other published package tracks its own version independently of it.
   family sent the stories back three times with real problems and the loop
   reached its allowance and stopped, which is on its page because a loop
   that halts rather than passing on unfinished work is the loop behaving.
-- **Every engine answer is recorded:** The runtime exports `RECORDED_ENGINE_USAGE`,
-  the shared state key under which every agent job's engine answer is
-  recorded beside its job path, and the declarative panel guard reads
+- **Recorded engine usage:** The runtime exports `RECORDED_ENGINE_USAGE`,
+  the shared state key under which an agent job records each engine usage
+  event beside its job path, and the declarative panel guard reads
   that state.
 - **A panel checks what actually answered:** A panel that requires its reviewers to differ
   in model family from the writers it reviews compares what actually
-  answered against what each seat declared. The runtime records every
-  engine answer beside its job path, and the panel refuses when a recorded
+  answered against what each seat declared. The runtime records each engine
+  usage event beside its job path, and the panel refuses when a recorded
   answer belongs to a family it must differ from, or when an answer carries
   no readable family at all. The refusal names the seats, their declared
   families and the answers.
   An agent job built with `recordAs: { role, stage }` records its answers
   with the seat's role and stage. The gate compares recorded seats, never
   job paths. A refusal is a `LoopError` the record keeps.
-- **Declared access is enforced on every engine:** a seat's workspace mode is
+- **Workspace access ceilings:** a seat's workspace mode is
   a ceiling. An approval never adds a capability the mode withholds, and a
   bypass never exceeds it. An adapter that cannot express the declared access
   refuses before a model runs. Read workspace requests must declare tools;
