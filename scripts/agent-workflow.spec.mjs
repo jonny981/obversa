@@ -160,6 +160,7 @@ for (const [stage, branch] of [
   ['F91', 'docs/search-markdown-contract'],
   ['F67', 'feat/notify-webhook'],
   ['F98', 'feat/run-boundary-events'],
+  ['F97', 'docs/recut-final-1-0-0'],
 ]) {
   test(`${stage} lands from its assigned branch ${branch}`, () => {
     const repository = createRepository({ feature: true, branch });
@@ -259,6 +260,7 @@ for (const [stage, branch] of [
   ['F91', 'feat/factory-v1'],
   ['F67', 'feat/factory-v1'],
   ['F98', 'feat/factory-v1'],
+  ['F97', 'feat/factory-v1'],
 ]) {
   test(`${stage} refuses the wrong branch ${branch}`, () => {
     const repository = createRepository({ feature: true, branch });

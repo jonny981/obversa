@@ -99,7 +99,15 @@ test('normalized text catches literal concatenation and template interpolation',
   });
 });
 
-test('only the exact old-page redirects and frozen release history are exempt', () => {
+test('a retired name under the released heading is caught, not exempt', () => {
+  withTree({
+    'CHANGELOG.md': '## [Unreleased]\n\n## [1.0.0] - 2026-09-15\n@obversa/engine\n',
+  }, (root) => {
+    assert.match(checkRetiredNames(root).join('\n'), /CHANGELOG\.md/);
+  });
+});
+
+test('only the exact old-page redirects are exempt', () => {
   withTree({
     'docs/public/docs.json': JSON.stringify({
       redirects: [
@@ -107,7 +115,7 @@ test('only the exact old-page redirects and frozen release history are exempt', 
         { source: '/packages/source', destination: '/packages/surface-diff' },
       ],
     }),
-    'CHANGELOG.md': '## [Unreleased]\n\n## [1.0.0] - 2026-09-15\n@obversa/engine\n',
+    'CHANGELOG.md': '## [Unreleased]\n\n## [1.0.0] - 2026-09-15\n',
     'docs/public/page.mdx': 'Install @obversa/api.\n',
     'scripts/valid.mjs': "const archive = 'package/assets/app.js'; const plugin = '@obversa/engine-codex-cli';\n",
   }, (root) => assert.deepEqual(checkRetiredNames(root), []));

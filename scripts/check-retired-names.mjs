@@ -35,9 +35,6 @@ function filesUnder(root, directory) {
 
 function textFor(root, file) {
   const name = relative(root, file).replaceAll('\\', '/');
-  if (name === 'CHANGELOG.md') {
-    return readFileSync(file, 'utf8').split(/^## \[1\.0\.0\]/m)[0];
-  }
   if (name === 'docs/public/docs.json') {
     const document = JSON.parse(readFileSync(file, 'utf8'));
     document.redirects = (document.redirects ?? []).filter(
@@ -130,7 +127,7 @@ if (process.argv[1] && fileURLToPath(import.meta.url) === resolve(process.argv[1
       for (const failure of failures) console.error(failure);
       process.exitCode = 1;
     } else {
-      console.log('No retired package names or locations remain outside release history and redirects.');
+      console.log('No retired package names or locations remain.');
     }
   } catch (error) {
     console.error(error);
