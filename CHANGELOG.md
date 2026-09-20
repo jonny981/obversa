@@ -417,7 +417,7 @@ other published package tracks its own version independently of it.
 
 ### Fixed
 
-- **Cross-family seat check:** An OpenCode seat derives its model family from the model name, taking the first hyphen-delimited segment after the provider prefix, so `opencode('anthropic/claude-sonnet-4-5')` declares the family `claude`. In a `workflow()`, a stage's seat and each of its reviewers must declare a different model family from one another, or the workflow is refused before any model runs. This includes seats naming one model through two adapters. The check compares what each seat declares about itself.
+- **Cross-family seat check:** An OpenCode seat derives its model family from the model name, taking the first hyphen-delimited segment after the provider prefix, so `opencode('anthropic/claude-sonnet-4-5')` declares the family `claude`. In a `workflow()`, a stage's seat and each of its reviewers must declare a different model family from one another, or the workflow is refused before any model runs. The check runs for a panel that reviews a writing stage; a panel with none is not checked. This includes seats naming one model through two adapters. The check compares what each seat declares about itself.
 - Public workflow examples resolve their direct-run guard through real paths,
   so a symlinked directory cannot make a copied example exit successfully
   without running or printing its outcome.
