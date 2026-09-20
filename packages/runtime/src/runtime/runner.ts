@@ -305,6 +305,7 @@ export async function run(
     }
     return engine;
   };
+  const rootEngine = options.engine === undefined ? undefined : resolveEngine(options.engine);
 
   // The root workspace is the substrate the whole run reads and writes. Branch
   // resolution is best-effort: a non-git cwd just leaves `branch` undefined.
@@ -375,7 +376,7 @@ export async function run(
   }
 
   const rootCtx: JobContext = {
-    engine: options.engine === undefined ? undefined : resolveEngine(options.engine),
+    engine: rootEngine,
     resolveEngine,
     signal: controller.signal,
     runId,

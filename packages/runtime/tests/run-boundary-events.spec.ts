@@ -78,6 +78,28 @@ describe('run boundary events', () => {
     expect(events.at(-1)).toBe(ended);
   });
 
+  it('rejects an unknown run engine before announcing the run', async () => {
+    const events: LoopEvent[] = [];
+    let ran = false;
+
+    await expect(run(
+      fnJob('never', async () => {
+        ran = true;
+        return { status: 'pass' };
+      }),
+      {
+        engine: 'missing',
+        onEvent: (event) => events.push(event),
+      },
+    )).rejects.toMatchObject({
+      code: 'CONFIG',
+      message: 'unknown engine "missing"',
+    });
+
+    expect(ran).toBe(false);
+    expect(events).toEqual([]);
+  });
+
   it('ends when the environment cannot start and never dispatches the job', async () => {
     const events: LoopEvent[] = [];
     let ran = false;
@@ -100,9 +122,11 @@ describe('run boundary events', () => {
 
     expect(ran).toBe(false);
     expect(result.outcome).toMatchObject({ status: 'fail', summary: 'environment failed to start: no daemon' });
+    const started = oneEvent(events, 'run:start');
     const ended = oneEvent(events, 'run:end');
     expect(ended.outcome).toBe(result.outcome);
     expect(ended.usage).toEqual(result.usage);
+    expect(events.indexOf(started)).toBeLessThan(events.indexOf(ended));
     expect(events.at(-1)).toBe(ended);
   });
 
