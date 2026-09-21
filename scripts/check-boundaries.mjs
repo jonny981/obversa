@@ -16,7 +16,7 @@ import { fileURLToPath } from 'node:url';
 import ts from '@typescript/typescript6';
 // The range parser pnpm uses, at the pinned version, so a dependency value
 // is a range exactly when pnpm would install a version rather than a tag.
-import { validRange } from 'semver';
+import { valid as validVersion, validRange } from 'semver';
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const ignoredDirectories = new Set(['dist', 'node_modules']);
@@ -458,14 +458,12 @@ const packageRules = new Map([
   ['@obversa/runner', {
     directory: 'packages/runner',
     kind: 'host',
-    version: '0.1.0',
     dependencies: ['@obversa/api', '@obversa/core', '@obversa/runtime'],
     peerDependencies: [],
   }],
   ['@obversa/runtime', {
     directory: 'packages/runtime',
     kind: 'runtime',
-    version: '0.1.0',
     dependencies: ['@obversa/core'],
     peerDependencies: ['@obversa/api'],
     peerDependencyVersions: {
@@ -475,21 +473,18 @@ const packageRules = new Map([
   ['@obversa/api', {
     directory: 'packages/api',
     kind: 'interface',
-    version: '0.1.0',
     dependencies: [],
     peerDependencies: [],
   }],
   ['@obversa/core', {
     directory: 'packages/core',
     kind: 'interface',
-    version: '0.1.0',
     dependencies: ['@obversa/api'],
     peerDependencies: [],
   }],
   ['@obversa/obversa', {
     directory: 'packages/obversa',
     kind: 'meta',
-    version: '0.1.0',
     dependencies: [
       '@obversa/api',
       '@obversa/builtin-workflows',
@@ -514,14 +509,12 @@ const packageRules = new Map([
   ['@obversa/memory-simple', {
     directory: 'plugins/memory-simple',
     kind: 'plugin',
-    version: '0.1.0',
     dependencies: ['@obversa/api'],
     peerDependencies: [],
   }],
   ['@obversa/notify-webhook', {
     directory: 'plugins/notify-webhook',
     kind: 'plugin',
-    version: '0.1.0',
     // It reads the run events structurally and imports nothing from this
     // repository, so it needs neither the api nor the core package.
     dependencies: [],
@@ -530,14 +523,12 @@ const packageRules = new Map([
   ['@obversa/memory-git', {
     directory: 'plugins/memory-git',
     kind: 'plugin',
-    version: '0.1.0',
     dependencies: ['@obversa/api', '@obversa/core'],
     peerDependencies: [],
   }],
   ['@obversa/memory-markdown', {
     directory: 'plugins/memory-markdown',
     kind: 'plugin',
-    version: '0.1.0',
     dependencies: ['@obversa/api'],
     peerDependencies: [],
   }],
@@ -546,21 +537,20 @@ const packageRules = new Map([
   // another package. Surface diff depends on surface — the flipped arrow: the
   // review command lives in surface diff and injects surface's launch port itself,
   // so a host keeps placement glue only.
-  ['@obversa/surface', { directory: 'packages/surface', kind: 'surface', version: '0.1.0', dependencies: [], peerDependencies: [] }],
-  ['@obversa/surface-diff', { directory: 'packages/surface-diff', kind: 'surface', version: '0.1.0', dependencies: ['@obversa/surface'], peerDependencies: [] }],
-  ['@obversa/builtin-workflows', { directory: 'packages/builtin-workflows', kind: 'workflow', version: '0.1.0', dependencies: ['@obversa/runtime', '@obversa/api'], peerDependencies: [] }],
+  ['@obversa/surface', { directory: 'packages/surface', kind: 'surface', dependencies: [], peerDependencies: [] }],
+  ['@obversa/surface-diff', { directory: 'packages/surface-diff', kind: 'surface', dependencies: ['@obversa/surface'], peerDependencies: [] }],
+  ['@obversa/builtin-workflows', { directory: 'packages/builtin-workflows', kind: 'workflow', dependencies: ['@obversa/runtime', '@obversa/api'], peerDependencies: [] }],
   ['@obversa/engine-claude-agent-sdk', {
     directory: 'plugins/engine-claude-agent-sdk',
     kind: 'plugin',
-    version: '0.1.0',
     dependencies: ['@obversa/api', '@obversa/core'],
     peerDependencies: [],
   }],
-  ['@obversa/engine-anthropic-api', { directory: 'plugins/engine-anthropic-api', kind: 'plugin', version: '0.1.0', dependencies: ['@obversa/api', '@obversa/core'], peerDependencies: [] }],
-  ['@obversa/engine-claude-cli', { directory: 'plugins/engine-claude-cli', kind: 'plugin', version: '0.1.0', dependencies: ['@obversa/api', '@obversa/core'], peerDependencies: [] }],
-  ['@obversa/engine-codex-cli', { directory: 'plugins/engine-codex-cli', kind: 'plugin', version: '0.1.0', dependencies: ['@obversa/api', '@obversa/core'], peerDependencies: [] }],
-  ['@obversa/engine-grok-cli', { directory: 'plugins/engine-grok-cli', kind: 'plugin', version: '0.1.0', dependencies: ['@obversa/api', '@obversa/core'], peerDependencies: [] }],
-  ['@obversa/engine-opencode-cli', { directory: 'plugins/engine-opencode-cli', kind: 'plugin', version: '0.1.0', dependencies: ['@obversa/api', '@obversa/core'], peerDependencies: [] }],
+  ['@obversa/engine-anthropic-api', { directory: 'plugins/engine-anthropic-api', kind: 'plugin', dependencies: ['@obversa/api', '@obversa/core'], peerDependencies: [] }],
+  ['@obversa/engine-claude-cli', { directory: 'plugins/engine-claude-cli', kind: 'plugin', dependencies: ['@obversa/api', '@obversa/core'], peerDependencies: [] }],
+  ['@obversa/engine-codex-cli', { directory: 'plugins/engine-codex-cli', kind: 'plugin', dependencies: ['@obversa/api', '@obversa/core'], peerDependencies: [] }],
+  ['@obversa/engine-grok-cli', { directory: 'plugins/engine-grok-cli', kind: 'plugin', dependencies: ['@obversa/api', '@obversa/core'], peerDependencies: [] }],
+  ['@obversa/engine-opencode-cli', { directory: 'plugins/engine-opencode-cli', kind: 'plugin', dependencies: ['@obversa/api', '@obversa/core'], peerDependencies: [] }],
 ]);
 const packageNamesByDirectory = new Map(
   [...packageRules].map(([name, rule]) => [rule.directory, name]),
@@ -1229,6 +1219,7 @@ for (const absolute of files) {
   projectConfigs.get(owner).push({ absolute, options });
 }
 
+const manifestVersions = new Map();
 for (const [name, rule] of packageRules) {
   if (!['interface', 'runtime', 'plugin', 'surface', 'host', 'workflow', 'meta'].includes(rule.kind))
     failures.push(`${name}: boundary kind must be interface, runtime, plugin, surface, host, workflow, or meta; found ${rule.kind ?? 'absent'}`);
@@ -1241,8 +1232,9 @@ for (const [name, rule] of packageRules) {
   }
   const manifest = JSON.parse(await readFile(join(directory, 'package.json'), 'utf8'));
   if (manifest.name !== name) failures.push(`${name}: manifest name is ${manifest.name}`);
-  if (manifest.version !== rule.version)
-    failures.push(`${name}: version must be ${rule.version}`);
+  manifestVersions.set(name, manifest.version);
+  if (typeof manifest.version !== 'string' || validVersion(manifest.version) === null)
+    failures.push(`${name}: version must be an exact valid SemVer; found ${JSON.stringify(manifest.version)}`);
   if (rule.private) {
     if (manifest.private !== true) failures.push(`${name}: must be marked private`);
   } else if (manifest.publishConfig?.access !== 'public') {
@@ -1315,6 +1307,16 @@ for (const [name, rule] of packageRules) {
   // or a bundler: each is placed like an import.
   checkArrows(`${rule.directory}/package.json`, name, manifestPathTargets(manifest, manifestAt));
 
+}
+const fixedCorePackages = ['@obversa/api', '@obversa/core', '@obversa/runtime', '@obversa/runner'];
+const fixedCoreVersion = manifestVersions.get(fixedCorePackages[0]);
+const mismatchedFixedCore = fixedCorePackages
+  .filter((name) => manifestVersions.get(name) !== fixedCoreVersion)
+  .map((name) => `${name}@${manifestVersions.get(name) ?? 'absent'}`);
+if (mismatchedFixedCore.length > 0) {
+  failures.push(
+    `fixed core packages must share one version; expected ${fixedCoreVersion ?? 'absent'}, found ${mismatchedFixedCore.join(', ')}`,
+  );
 }
 // The tools that interpret the pinned configurations, and the guard's own
 // parsers, are pinned to exact versions at the root: a content hash only

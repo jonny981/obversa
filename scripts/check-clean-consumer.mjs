@@ -303,6 +303,14 @@ export function checkedAttemptOutput(output, report) {
   return checkedAttemptReport(report);
 }
 
+export function checkedPackedRuntimeVersion(packedVersion, sourceVersion) {
+  assert.equal(
+    packedVersion,
+    sourceVersion,
+    `packed @obversa/runtime version ${packedVersion} does not match source manifest version ${sourceVersion}`,
+  );
+}
+
 function sourceFromPublicDoc(document) {
   const match = /## Source[\s\S]*?```ts\n([\s\S]*?)\n```/.exec(document);
   if (!match) throw new Error('The public page has no TypeScript source block');
@@ -434,7 +442,7 @@ type PublicValidatorTakesOneArgument = Expect<Equal<
 const publicValidatorTakesOneArgument: PublicValidatorTakesOneArgument = true;
 
 assert.equal(MEMORY_ROOT, '/memories');
-assert.equal(runtimePackage.version, '0.1.0');
+assert.equal(runtimePackage.name, '@obversa/runtime');
 assert.equal(commandEnvironment({
   deploy: () => ({ cmd: 'true' }),
   destroy: () => ({ cmd: 'true' }),
@@ -775,6 +783,9 @@ async function main() {
     throw new Error('The core page does not record the runnable output');
   }
 
+  const sourceRuntimeVersion = JSON.parse(
+    await readFile(join(root, 'packages', 'runtime', 'package.json'), 'utf8'),
+  ).version;
   const directory = await mkdtemp(join(tmpdir(), 'obversa-consumer-'));
   const archivesDirectory = join(directory, 'archives');
   const consumerDirectory = join(directory, 'consumer');
@@ -881,6 +892,9 @@ async function main() {
       );
       if (JSON.stringify(installed).includes('workspace:')) {
         throw new Error(`${name} retained a workspace dependency after installation`);
+      }
+      if (name === '@obversa/runtime') {
+        checkedPackedRuntimeVersion(installed.version, sourceRuntimeVersion);
       }
     }
 

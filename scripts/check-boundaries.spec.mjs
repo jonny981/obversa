@@ -311,6 +311,43 @@ function copyTree(root) {
   return realpathSync(copy);
 }
 
+test("package versions can advance while the fixed core group stays equal", { timeout: 300_000 }, () => {
+  const real = new URL("..", import.meta.url).pathname;
+  const root = copyTree(real);
+  try {
+    const guard = () => spawnSync(process.execPath, [path.join(root, "scripts", "check-boundaries.mjs")], { cwd: root, encoding: "utf8" });
+    const setVersion = (directory, version) => {
+      const manifestPath = path.join(root, directory, "package.json");
+      const manifest = JSON.parse(readFileSync(manifestPath, "utf8"));
+      writeFileSync(manifestPath, `${JSON.stringify({ ...manifest, version }, null, 2)}\n`);
+    };
+
+    for (const directory of ["packages/api", "packages/core", "packages/runtime", "packages/runner"]) {
+      setVersion(directory, "0.1.1");
+    }
+    setVersion("plugins/notify-webhook", "0.1.1");
+    const advanced = guard();
+    assert.equal(advanced.status, 0, advanced.stderr);
+
+    setVersion("plugins/notify-webhook", "0.1.1+build.1");
+    const withBuildMetadata = guard();
+    assert.equal(withBuildMetadata.status, 0, withBuildMetadata.stderr);
+
+    setVersion("packages/runner", "0.1.2");
+    const mismatched = guard();
+    assert.notEqual(mismatched.status, 0);
+    assert.match(mismatched.stderr, /fixed core packages must share one version/);
+
+    setVersion("packages/runner", "0.1.1");
+    setVersion("plugins/notify-webhook", "next");
+    const invalid = guard();
+    assert.notEqual(invalid.status, 0);
+    assert.match(invalid.stderr, /@obversa\/notify-webhook: version must be an exact valid SemVer/);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
 test("the guard, run on a disposable copy of the tree, refuses a shipped host import of a file the walk never scans", { timeout: 300_000 }, () => {
   const real = new URL("..", import.meta.url).pathname;
   const root = copyTree(real);

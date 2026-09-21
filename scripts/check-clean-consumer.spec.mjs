@@ -5,7 +5,7 @@ import { spawnSync } from 'node:child_process';
 import * as consumer from './check-clean-consumer.mjs';
 import { CONSUMER_EXAMPLES } from './consumer-examples.mjs';
 import test from 'node:test';
-import { checkedAttemptOutput } from './check-clean-consumer.mjs';
+import { checkedAttemptOutput, checkedPackedRuntimeVersion } from './check-clean-consumer.mjs';
 
 const report = Object.fromEntries(['grok', 'opencode'].map((name) => [name, {
   requested: { executable: `${sep}fixtures${sep}${name}-fixture.mjs` },
@@ -27,6 +27,20 @@ for (const indent of [undefined, 4]) {
 test('attempt report still rejects unsanitized display and relative exported paths', () => {
   assert.throws(() => checkedAttemptOutput(JSON.stringify(report), report));
   assert.throws(() => checkedAttemptOutput(JSON.stringify(display), display));
+});
+
+test('clean consumer compares the packed runtime version with the source manifest captured before packing', async () => {
+  assert.doesNotThrow(() => checkedPackedRuntimeVersion('0.1.1', '0.1.1'));
+  assert.throws(
+    () => checkedPackedRuntimeVersion('0.1.2', '0.1.1'),
+    /packed @obversa\/runtime version 0\.1\.2 does not match source manifest version 0\.1\.1/,
+  );
+
+  const source = await readFile(new URL('./check-clean-consumer.mjs', import.meta.url), 'utf8');
+  const capture = source.indexOf('const sourceRuntimeVersion =');
+  const pack = source.indexOf('await packWorkspacePackages(');
+  assert.ok(capture >= 0 && capture < pack, 'the source runtime version must be captured before packing');
+  assert.match(source, /checkedPackedRuntimeVersion\(installed\.version, sourceRuntimeVersion\)/);
 });
 
 test('clean consumer wires the safe-change production line', async () => {
