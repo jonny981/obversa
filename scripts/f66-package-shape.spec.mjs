@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { test } from 'node:test';
+import { valid as validVersion } from 'semver';
 
 const expected = new Map([
   ['@obversa/api', 'packages/api'],
@@ -26,14 +27,37 @@ const expected = new Map([
 
 const manifestAt = (directory) => JSON.parse(readFileSync(join(directory, 'package.json'), 'utf8'));
 
+function assertExactVersion(version, name) {
+  assert.equal(typeof version, 'string', `${name}: version must be an exact valid SemVer`);
+  assert.notEqual(validVersion(version), null, `${name}: version must be an exact valid SemVer`);
+}
+
 test('all eighteen public packages have the accepted names and locations', () => {
   const allowlist = JSON.parse(readFileSync('scripts/publish-allowlist.json', 'utf8'));
   assert.deepEqual(allowlist.packages, [...expected.keys()].sort());
   for (const [name, directory] of expected) {
     const manifest = manifestAt(directory);
     assert.equal(manifest.name, name, directory);
-    assert.equal(manifest.version, '0.1.0', name);
+    assertExactVersion(manifest.version, name);
   }
+});
+
+test('package versions may advance but remain exact SemVer', () => {
+  assert.doesNotThrow(() => assertExactVersion('0.1.1+build.1', '@obversa/example'));
+  assert.throws(() => assertExactVersion('next', '@obversa/example'), /version must be an exact valid SemVer/);
+  assert.throws(() => assertExactVersion('^0.1.0', '@obversa/example'), /version must be an exact valid SemVer/);
+});
+
+test('release verification reaches package shape, clean consumer, and retired-name checks', () => {
+  const scripts = manifestAt('.').scripts;
+  const releaseWorkflow = readFileSync('.github/workflows/release.yml', 'utf8');
+  assert.equal(scripts['verify:f108'], 'pnpm verify:d15');
+  assert.match(releaseWorkflow, /run: pnpm verify:d15/);
+  assert.match(scripts['verify:d15'], /node --test scripts\/f66-package-shape\.spec\.mjs/);
+  assert.match(scripts['verify:d15'], /pnpm test:retired-names/);
+  assert.match(scripts['verify:d15'], /pnpm check:retired-names/);
+  assert.match(scripts['verify:d1'], /pnpm check:consumer/);
+  assert.match(scripts['check:consumer'], /node --test scripts\/check-clean-consumer\.spec\.mjs/);
 });
 
 test('@obversa/obversa installs every other public package', () => {
