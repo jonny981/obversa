@@ -1,12 +1,19 @@
 name: Release
 
-# A v* tag runs the verification record only. The release owner publishes from
-# the exact gate-passed commit with scripts/release.mjs after approving the
-# destination.
+# The release act is a manual dispatch on main. Before dispatch, create the
+# `release` environment and require Jonny as its reviewer. Verification runs
+# first; the publish job then waits for that approval. `changeset publish`
+# releases every workspace version that is not yet on the registry and tags
+# each published package `name@version`; the job pushes those tags.
+#
+# Credentials: the publish job holds the only OIDC grant (`id-token: write`)
+# for npm trusted publishing. Until a trusted publisher is configured for a
+# package — impossible before its first release — npm falls back to
+# NODE_AUTH_TOKEN if the repository carries that secret. No other job sees
+# either credential.
 
 on:
-  push:
-    tags: ['v*']
+  workflow_dispatch:
 
 permissions:
   contents: read
@@ -32,3 +39,57 @@ jobs:
       - run: corepack enable
       - run: pnpm install --frozen-lockfile
       - run: pnpm verify:d15
+
+  publish:
+    needs: verify
+    if: github.ref_name == 'main'
+    runs-on: ubuntu-latest
+    environment: release
+    permissions:
+      contents: write # push the name@version tags changesets creates
+      id-token: write # npm trusted publishing
+    env:
+      # The explicit release act the prepublishOnly hook requires.
+      OBVERSA_RELEASE: "1"
+      # pnpm packs each tarball itself, then delegates the upload to npm.
+      # npm-path selects the root-pinned devDependency — never whichever npm
+      # is first on PATH — so the checked pin below is the real publisher.
+      npm_config_npm_path: ${{ github.workspace }}/node_modules/.bin/npm
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          registry-url: https://registry.npmjs.org/
+      - run: corepack enable
+      - run: pnpm install --frozen-lockfile
+      # The checkout is fresh: the tarballs pnpm packs need the built output.
+      - run: pnpm --recursive --if-present run build
+      - name: Prove the publish client is the pinned npm on a trusted-publishing-capable Node
+        run: |
+          node -e 'const [maj, min] = process.versions.node.split(".").map(Number); if (maj < 22 || (maj === 22 && min < 14)) throw new Error(`npm trusted publishing needs Node >= 22.14.0, got ${process.versions.node}`)'
+          PINNED=$(node -p "require('./package.json').devDependencies.npm")
+          ACTUAL=$("$npm_config_npm_path" --version)
+          if [ "$ACTUAL" != "$PINNED" ]; then
+            echo "npm-path resolved npm $ACTUAL; expected the pinned $PINNED"
+            exit 1
+          fi
+          echo "publish client: npm $ACTUAL (root devDependency, selected via npm-path) on node $(node --version)"
+      - name: Publish the unpublished workspace versions
+        run: pnpm changeset publish
+        env:
+          # Trusted publishing needs no token. For a package's first release —
+          # before its trusted publisher can exist — npm uses this if the
+          # repository carries the secret; otherwise the OIDC exchange runs.
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+      # Every intended name@version tag — created by changesets during this
+      # run's publish — is pushed by name, never --tags. A registry-confirmed
+      # version whose tag is missing (a retried publish skips them) fails
+      # here with its recovery: tag the commit that published it, never a
+      # moved HEAD.
+      - name: Push every published version's tag
+        run: node scripts/tag-published.mjs
+      - name: Verify every intended name and version reached the registry
+        run: node scripts/verify-published.mjs

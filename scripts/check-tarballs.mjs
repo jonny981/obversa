@@ -43,6 +43,11 @@ function run(args, options = {}) {
 // the review surfaces, and the built-in workflows.
 // Source maps and the public testing entry points ship on purpose.
 export const EXPECTED_FILES = {
+  '@obversa/obversa': [
+    'package/LICENSE',
+    'package/README.md',
+    'package/package.json',
+  ],
   '@obversa/runner': [
     'package/LICENSE',
     'package/README.md',
@@ -108,7 +113,7 @@ export const EXPECTED_FILES = {
     'package/dist/src/review.d.mts',
     'package/dist/src/testing.d.mts',
   ],
-  '@obversa/surface-decision': [
+  '@obversa/surface': [
     'package/LICENSE',
     'package/README.md',
     'package/package.json',
@@ -399,7 +404,7 @@ export const EXPECTED_FILES = {
     'package/dist/index.js.map',
     'package/package.json',
   ],
-  '@obversa/search-markdown': [
+  '@obversa/memory-markdown': [
     'package/LICENSE',
     'package/README.md',
     'package/dist/index.d.ts',

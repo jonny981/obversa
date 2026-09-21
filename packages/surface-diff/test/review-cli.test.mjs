@@ -186,10 +186,10 @@ function consumer(clientExports) {
   write("bin/obversa-review.mjs", readFileSync(COMMAND, "utf8"));
   write("src/review-cli.mjs", readFileSync(fileURLToPath(new URL("../src/review-cli.mjs", import.meta.url)), "utf8"));
   write("src/review-args.mjs", readFileSync(fileURLToPath(new URL("../src/review-args.mjs", import.meta.url)), "utf8"));
-  write("node_modules/@obversa/surface-decision/package.json", JSON.stringify({ name: "@obversa/surface-decision", type: "module", exports: { ".": "./index.mjs", "./client": clientExports } }));
-  write("node_modules/@obversa/surface-decision/index.mjs", "export async function runSurface() { throw new Error('not used by this test'); }\n");
-  write("node_modules/@obversa/surface-decision/client.mjs", "export const kit = 'esm';\n");
-  write("node_modules/@obversa/surface-decision/client.cjs", "module.exports = { kit: 'cjs' };\n");
+  write("node_modules/@obversa/surface/package.json", JSON.stringify({ name: "@obversa/surface", type: "module", exports: { ".": "./index.mjs", "./client": clientExports } }));
+  write("node_modules/@obversa/surface/index.mjs", "export async function runSurface() { throw new Error('not used by this test'); }\n");
+  write("node_modules/@obversa/surface/client.mjs", "export const kit = 'esm';\n");
+  write("node_modules/@obversa/surface/client.cjs", "module.exports = { kit: 'cjs' };\n");
   write("node_modules/@obversa/surface-diff/package.json", JSON.stringify({ name: "@obversa/surface-diff", type: "module", exports: { ".": "./index.mjs" } }));
   write("node_modules/@obversa/surface-diff/index.mjs", [
     "export async function reviewDiff({ clientKitSource }) {",

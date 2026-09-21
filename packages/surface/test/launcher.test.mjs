@@ -192,7 +192,7 @@ test("the frame written is the frame claimed: a toJSON injected after the comple
     const { result } = await pending;
     const frame = frameOf(result);
     assert.equal(typeof frame, "string");
-    assert.equal(Reflect.ownKeys(result).includes("frame"), false, "the public decision carries no hidden field; the frame lives in surface-decision's private record");
+    assert.equal(Reflect.ownKeys(result).includes("frame"), false, "the public decision carries no hidden field; the frame lives in surface's private record");
     assert.deepEqual(Object.keys(await pending).sort(), ["placement", "result", "url"], "runSurface's return is unchanged: no public export hands the frame out");
     assert.equal(captured, frame, "written verbatim");
     assert.match(captured, /"payload":\{"got":7\}/, "the claimed payload, not the hook's answer");

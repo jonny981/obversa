@@ -1,4 +1,4 @@
-// Types only. The surface-decision package serves ./surface-client.mjs over HTTP at runtime,
+// Types only. The surface package serves ./surface-client.mjs over HTTP at runtime,
 // so no JavaScript file sits beside the page source; this declaration gives
 // the compiler the served kit's contract. The dependency-cruiser config and
 // the ESLint ignores carry the same fact for their tools.

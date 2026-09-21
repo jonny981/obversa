@@ -30,7 +30,7 @@
   "dependencies": {
     "acorn": "8.18.0",
     "shiki": "4.4.3",
-    "@obversa/surface-decision": "workspace:*"
+    "@obversa/surface": "workspace:*"
   },
   "bin": {
     "obversa-review": "./bin/obversa-review.mjs"
@@ -46,9 +46,7 @@
     "LICENSE"
   ],
   "publishConfig": {
-    "access": "public",
-    "registry": "http://publish-guard.invalid/",
-    "@obversa:registry": "http://publish-guard.invalid/"
+    "access": "public"
   },
   "obversa": {
     "skills": [

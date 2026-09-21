@@ -1,7 +1,9 @@
 {
   "changelog": "@changesets/cli/changelog",
   "commit": false,
-  "fixed": [],
+  "fixed": [
+    ["@obversa/api", "@obversa/core", "@obversa/runtime", "@obversa/runner"]
+  ],
   "linked": [],
   "access": "public",
   "baseBranch": "main",

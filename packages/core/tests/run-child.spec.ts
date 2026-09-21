@@ -89,10 +89,9 @@ describe('runChild', () => {
         args: ['--input-type=module', '-e', [
           'import { spawn } from "node:child_process";',
           'const survivor = spawn(process.execPath, ["-e", "setInterval(() => {}, 30_000)"], { detached: true, stdio: "inherit" });',
-          'process.stdout.write(`${survivor.pid}\\ndone\\n`);',
-          'setTimeout(() => process.exit(0), 20);',
+          'process.stdout.write(`${survivor.pid}\\ndone\\n`, () => process.exit(0));',
         ].join('')],
-        timeoutMs: 200,
+        timeoutMs: 1_000,
         killGraceMs: 50,
         maxOutputBytes: 1_024,
       });
@@ -100,6 +99,8 @@ describe('runChild', () => {
       const output = new TextDecoder().decode(result.stdout);
       survivorPid = Number(output.match(/^\d+/u)?.[0]);
 
+      expect(Number.isSafeInteger(survivorPid)).toBe(true);
+      expect(isProcessAlive(survivorPid)).toBe(true);
       expect(result).toMatchObject({ exitCode: 0, timedOut: false, aborted: false });
       expect(output).toContain('done');
       expect(elapsedMs).toBeLessThan(1_500);

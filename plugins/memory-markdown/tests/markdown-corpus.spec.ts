@@ -10,7 +10,7 @@ import { openMarkdownCorpus } from '../src/index.js';
 const temporaryDirectories: string[] = [];
 
 async function corpus(files: Readonly<Record<string, string>>): Promise<string> {
-  const directory = await mkdtemp(join(tmpdir(), 'obversa-search-markdown-'));
+  const directory = await mkdtemp(join(tmpdir(), 'obversa-memory-markdown-'));
   temporaryDirectories.push(directory);
   for (const [path, text] of Object.entries(files)) {
     const file = join(directory, path);

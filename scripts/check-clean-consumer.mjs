@@ -366,8 +366,8 @@ import { AgentSdkEngine } from '@obversa/engine-claude-agent-sdk';
 import { AnthropicApiEngine } from '@obversa/engine-anthropic-api';
 import { ClaudeCliEngine } from '@obversa/engine-claude-cli';
 import { CodexEngine } from '@obversa/engine-codex-cli';
-import type { runSurface, startSurface } from '@obversa/surface-decision';
-import type { createSurfaceClient } from '@obversa/surface-decision/client';
+import type { runSurface, startSurface } from '@obversa/surface';
+import type { createSurfaceClient } from '@obversa/surface/client';
 import type { reviewDiff } from '@obversa/surface-diff';
 import type { listTrackedFiles } from '@obversa/surface-diff/testing';
 
@@ -434,7 +434,7 @@ type PublicValidatorTakesOneArgument = Expect<Equal<
 const publicValidatorTakesOneArgument: PublicValidatorTakesOneArgument = true;
 
 assert.equal(MEMORY_ROOT, '/memories');
-assert.equal(runtimePackage.version, '1.0.0');
+assert.equal(runtimePackage.version, '0.1.0');
 assert.equal(commandEnvironment({
   deploy: () => ({ cmd: 'true' }),
   destroy: () => ({ cmd: 'true' }),
@@ -685,7 +685,7 @@ async function main() {
   const safeChangeFileAdapterPath = join(root, 'examples', 'safe-change-file-adapter.ts');
   const describedTeamExamplePath = join(root, 'examples', 'described-team.ts');
   const runChildExamplePath = join(root, 'examples', 'run-child.ts');
-  const searchMarkdownExamplePath = join(root, 'examples', 'search-markdown.ts');
+  const searchMarkdownExamplePath = join(root, 'examples', 'memory-markdown.ts');
   const searchMarkdownExampleSource = await readFile(searchMarkdownExamplePath, 'utf8');
   const turnTakingExampleSource = await readFile(turnTakingExamplePath, 'utf8');
   const safeChangeExampleSource = await readFile(safeChangeExamplePath, 'utf8');
@@ -734,7 +734,7 @@ async function main() {
     'utf8',
   );
   const searchMarkdownDocument = await readFile(
-    join(root, 'docs', 'public', 'packages', 'search-markdown.mdx'),
+    join(root, 'docs', 'public', 'packages', 'memory-markdown.mdx'),
     'utf8',
   );
   const runChildExampleSource = await readFile(runChildExamplePath, 'utf8');
@@ -835,10 +835,10 @@ async function main() {
     await copyFile(join(root, 'examples', 'builtin-workflows.ts'), join(consumerDirectory, 'builtin-workflows.ts'));
     await copyFile(join(root, 'examples', 'surface-diff.ts'), join(consumerDirectory, 'surface-diff.ts'));
     await copyFile(join(root, 'examples', 'memory.ts'), join(consumerDirectory, 'memory.ts'));
-    await copyFile(searchMarkdownExamplePath, join(consumerDirectory, 'search-markdown.ts'));
+    await copyFile(searchMarkdownExamplePath, join(consumerDirectory, 'memory-markdown.ts'));
     await cp(
-      join(root, 'examples', 'search-markdown-corpus'),
-      join(consumerDirectory, 'search-markdown-corpus'),
+      join(root, 'examples', 'memory-markdown-corpus'),
+      join(consumerDirectory, 'memory-markdown-corpus'),
       { recursive: true },
     );
 
@@ -903,8 +903,8 @@ async function main() {
     await copyFile(runnerHostPath, join(consumerDirectory, 'dist', 'supervised-host.mjs'));
     await copyFile(preflightHostPath, join(consumerDirectory, 'dist', 'preflight-host.mjs'));
     await cp(
-      join(consumerDirectory, 'search-markdown-corpus'),
-      join(consumerDirectory, 'dist', 'search-markdown-corpus'),
+      join(consumerDirectory, 'memory-markdown-corpus'),
+      join(consumerDirectory, 'dist', 'memory-markdown-corpus'),
       { recursive: true },
     );
 
@@ -1054,10 +1054,10 @@ async function main() {
       run(process.execPath, ['dist/custom-graph.js'], { cwd: consumerDirectory }),
     );
     const compiledSearchMarkdown = JSON.parse(
-      run(process.execPath, ['dist/search-markdown.js'], { cwd: consumerDirectory }),
+      run(process.execPath, ['dist/memory-markdown.js'], { cwd: consumerDirectory }),
     );
     const directSearchMarkdown = JSON.parse(
-      run('pnpm', ['exec', 'tsx', 'search-markdown.ts'], { cwd: consumerDirectory }),
+      run('pnpm', ['exec', 'tsx', 'memory-markdown.ts'], { cwd: consumerDirectory }),
     );
     const directGraph = JSON.parse(
       run('pnpm', ['exec', 'tsx', 'custom-graph.ts'], { cwd: consumerDirectory }),

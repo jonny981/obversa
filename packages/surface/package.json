@@ -1,5 +1,5 @@
 {
-  "name": "@obversa/surface-decision",
+  "name": "@obversa/surface",
   "version": "0.1.0",
   "description": "One secure local surface session.",
   "type": "module",
@@ -31,9 +31,7 @@
     "LICENSE"
   ],
   "publishConfig": {
-    "access": "public",
-    "registry": "http://publish-guard.invalid/",
-    "@obversa:registry": "http://publish-guard.invalid/"
+    "access": "public"
   },
   "keywords": [
     "agent",

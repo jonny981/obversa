@@ -1,88 +1,114 @@
 # Releasing
 
-This guide describes how the release owner verifies and publishes a
-version of the Obversa packages.
+This guide describes how the release owner verifies and publishes the 18
+Obversa packages.
 
-## The version numbers
+## Versions, changelogs and tags
 
-Each release has one repository tag matching the runtime package version,
-for example `v1.0.1` for runtime `1.0.1`. Every other public package keeps its
-own version in its manifest.
-The package list comes from `scripts/publish-allowlist.json`; the tarball
-check and release script read that same list.
+Changesets manages package versions, package changelogs and package tags. Add a
+changeset with `pnpm changeset`. Run `pnpm changeset version` to apply compatible
+version changes before review.
 
-When only plugin code changes, ship a runtime PATCH release: the runtime
-patch number increases by one and the changed plugin's own version increases
-with it. Republish the runtime at its new version alongside the changed
-plugin. The repository tag and the release heading in `CHANGELOG.md` use the
-new runtime version. Label the changelog entry as a runtime PATCH release
-for a plugin-only change.
+The four core packages share one version through the fixed group in
+`.changeset/config.json`:
 
-## The steps
+- `@obversa/api`
+- `@obversa/core`
+- `@obversa/runtime`
+- `@obversa/runner`
 
-1. **Update the changelog.** Add the release heading and entries to
-   `CHANGELOG.md`. The changelog gate refuses a release without them.
+References between those four packages are exact. `@obversa/runtime` keeps
+`@obversa/api` as a peer dependency.
 
-2. **Set package versions.** Update each allowlisted package manifest. For a
-   plugin-only change, increase `version` in `packages/runtime/package.json`
-   and the changed plugin's `plugins/<name>/package.json`.
+Every other public package versions independently. Before 1.0, a breaking
+public-contract change takes a minor bump. A compatible addition or fix takes a
+patch bump.
 
-   In `scripts/check-boundaries.mjs`, update the `version` values in
-   `packageRules` for those two package names to their respective new versions.
-   In `scripts/check-clean-consumer.mjs`, update the expected runtime version
-   in `assert.equal(runtimePackage.version, ...)` inside `consumerSource`.
-   These explicit expectations must match the release before verification.
-   Keep the expected versions as explicit literals so the checks remain
-   independent of the manifests.
+A core minor needs deliberate preparation because every exact core reference
+must move together. Set all four versions and their internal references, update
+their changelogs and the lockfile, then run the full release checks and the
+packed consumer check. Complete one worked core-minor check before the first
+core minor release. Stock `changeset publish` still performs the publish.
 
-   The workspace root remains private and is never published.
+The publishable set is `scripts/publish-allowlist.json` (18 packages). Eight
+public packages use `packages/<name>`; ten plugin packages use
+`plugins/<name>`. The audit, tarball check, publish workflow and registry check
+all read that list. Publishing a package tags it `name@version`. There is no
+repository-wide release tag.
 
-3. **Verify the exact commit.** Run the stage chain, which includes the
-   tarball check and changelog gate:
+## Release path
 
-   ```bash
-   pnpm verify:d15
-   ```
+`.github/workflows/release.yml` is the guarded path to the npm registry. It runs
+only through a manual dispatch on `main`.
 
-4. **Create one repository tag.** Tag the gate-passed commit with the runtime
-   version set in step 2 and push it. For runtime `1.0.1`:
+Before the first dispatch, create the repository environment `release` and add
+Jonny as its required reviewer. Do not dispatch the workflow until that setup
+is complete.
 
-   ```bash
-   git tag -a v1.0.1 -m 'release v1.0.1'
-   git push origin v1.0.1
-   ```
+1. **Verify the source.** The `verify` job runs `pnpm verify:d15`.
+2. **Approve the release.** The `publish` job enters the configured `release`
+   environment and waits for Jonny's approval.
+3. **Build the publish checkout.** The publish job installs the frozen lockfile
+   and builds the complete workspace. It does not reuse files from the verify
+   job.
+4. **Check the publish client.** The job proves it uses the root-pinned npm
+   devDependency through pnpm's `npm-path` setting. It also checks the Node.js
+   version needed by npm trusted publishing.
+5. **Publish missing versions.** `pnpm changeset publish` runs each package's
+   `prepublishOnly` guard, packs the package and sends it through the pinned npm
+   client. Versions already on the registry are skipped.
+6. **Push only existing intended tags.** The job pushes each allowlisted
+   `name@version` tag as an exact ref. It never creates a missing tag because
+   the registry cannot prove which commit published that version. A missing tag
+   stops the release with instructions to tag the original publish commit.
+7. **Read the registry back.** `scripts/verify-published.mjs` asks the explicit
+   npm registry for every allowlisted name and manifest version.
 
-5. **Read the workflow record.** The `Release` workflow runs `pnpm verify:d15`,
-   including the tarball check and changelog gate. It never publishes packages.
+The publish job carries `id-token: write` for npm trusted publishing. Each npm
+package must name this repository, `release.yml` and the `release` environment
+as its trusted publisher.
 
-6. **Approve the destination.** The release owner names the real npm
-   registry before publishing. No publish command runs without that
-   approval.
+## First publish
 
-7. **Publish through the guarded script.** At the repository tag, run the
-   script once for every name in `scripts/publish-allowlist.json` (17
-   packages) from a clean `main` checkout at that tag. Seven public packages
-   use `packages/<name>`; ten plugin packages use `plugins/<name>` (six
-   engine adapters, two memory adapters, Markdown search and one notifier):
+A trusted publisher cannot be configured before a package exists. The first
+release therefore needs a credential Jonny controls. Set the `NPM_TOKEN`
+repository secret for the guarded workflow, or publish once from a clean `main`
+checkout with Jonny's npm login:
 
-   ```bash
-   OBVERSA_RELEASE=1 node scripts/release.mjs packages/runtime
-   OBVERSA_RELEASE=1 node scripts/release.mjs plugins/engine-codex-cli
-   ```
+```bash
+OBVERSA_RELEASE=1 pnpm changeset publish
+node scripts/tag-published.mjs
+node scripts/verify-published.mjs
+```
 
-   The script checks the repository tag and clean tree, packs one allowlisted
-   package, checks the tree again, and publishes its tarball. It supplies both
-   npm registry keys, pointing to the one approved destination, so the two
-   sentinel values in each package manifest are displaced together.
+The tag script pushes each package tag created by that publish as an explicit
+ref. It never uses `git push --tags`.
 
-## The publish guard
+After the first release, configure trusted publishing for every package and
+disable token publishing for those packages.
 
-Each public manifest carries a never-resolving registry under both `registry`
-and `@obversa:registry`. A directory or tarball publish targets that guard
-unless the caller explicitly overrides both registry keys. The release
-script supplies both matching overrides.
+## If a release fails
 
-## What happens if verification fails
+- **Verification fails.** Do not publish. Fix the failure and run the full
+  release checks again.
+- **Publishing stops partway.** Run the same workflow again. Changesets skips
+  versions already on the registry. Existing intended tags are pushed again.
+- **A package is published without its tag.** Find the commit that published
+  it. Create `name@version` at that commit and push that exact tag ref. Never
+  create the tag at a later `main` commit.
+- **A tag push fails.** Push that existing exact tag ref again.
+- **Registry verification fails.** Do not call the release complete. Check the
+  named package and version, then run the same registry check again.
 
-Do not publish. Fix the failing check, rerun the full stage chain at the same
-scope, and use the same gate-passed commit for the repository tag.
+## Publish guard
+
+Every public package keeps the exact `prepublishOnly` guard and
+`publishConfig.access: public`. A public manifest carries no registry key. The
+audit refuses unlisted public packages, missing guards, registry routes and
+alternate publish directories.
+
+The guard allows a publish only when `OBVERSA_RELEASE=1` is set, the package is
+allowlisted, the tree is clean and the checkout is `main` or the release
+workflow. A tarball publish and a directory publish with `--ignore-scripts` do
+not run the hook. Registry credentials and the configured release environment
+control those deliberate paths.

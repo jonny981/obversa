@@ -184,14 +184,15 @@
         ]
       },
       {
-        "group": "Core packages",
+        "group": "Packages",
         "pages": [
+          "packages/obversa",
           "packages/runtime",
           "packages/runner",
           "packages/api",
           "packages/core",
           "packages/builtin-workflows",
-          "packages/surface-decision",
+          "packages/surface",
           "packages/surface-diff"
         ]
       },
@@ -206,7 +207,7 @@
           "packages/engine-anthropic-api",
           "packages/memory-git",
           "packages/memory-simple",
-          "packages/search-markdown",
+          "packages/memory-markdown",
           "packages/notify-webhook",
           {
             "group": "Coming soon",
@@ -283,10 +284,6 @@
     {
       "source": "/runtime/runner",
       "destination": "/driving/runner"
-    },
-    {
-      "source": "/packages/surfacer",
-      "destination": "/packages/surface-decision"
     },
     {
       "source": "/packages/engine-codex",

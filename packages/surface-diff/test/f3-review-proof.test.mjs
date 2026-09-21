@@ -1,7 +1,7 @@
-// F3 composition proof: the review surface really runs on @obversa/surface-decision.
+// F3 composition proof: the review surface really runs on @obversa/surface.
 //
 // This is the F2 completion evidence and the F3 core evidence in one place. It
-// wires surface-diff's reviewDiff to surface-decision's runSurface exactly as the composition
+// wires surface-diff's reviewDiff to surface's runSurface exactly as the composition
 // root does, opens a real diff on a real loopback surface, and drives it with an
 // HTTP client that plays the browser. It proves:
 //   - the diff opens and its annotations round-trip through the framed handoff,
@@ -19,11 +19,11 @@ import path from "node:path";
 import { Writable } from "node:stream";
 import test from "node:test";
 
-import { parseFramedResult, runSurface } from "@obversa/surface-decision";
+import { parseFramedResult, runSurface } from "@obversa/surface";
 import { computeDiff, parseUnifiedDiff, reviewDiff } from "@obversa/surface-diff";
 
 const clientKitSource = await readFile(
-  new URL("../../surface-decision/src/client.mjs", import.meta.url),
+  new URL("../../surface/src/client.mjs", import.meta.url),
   "utf8",
 );
 
@@ -90,7 +90,7 @@ function captureStream() {
 const settledWithin = (promise, ms) =>
   Promise.race([promise.then(() => "settled", () => "settled"), new Promise((resolve) => setTimeout(() => resolve("pending"), ms))]);
 
-test("the review surface runs on surface-decision and returns annotations", { timeout: 30_000 }, async () => {
+test("the review surface runs on surface and returns annotations", { timeout: 30_000 }, async () => {
   const repo = makeRepoWithChange();
   const { diffText } = await computeDiff({ mode: "worktree", cwd: repo });
   const anchor = firstNewAnchor(diffText);

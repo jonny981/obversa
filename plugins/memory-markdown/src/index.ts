@@ -324,7 +324,7 @@ class MarkdownCorpusMemory implements Memory {
   readonly scope: string;
 
   constructor(private readonly directory: string) {
-    this.scope = `search-markdown:${directory}`;
+    this.scope = `memory-markdown:${directory}`;
   }
 
   async execute(command: MemoryCommand): Promise<MemoryResult> {

@@ -465,11 +465,11 @@ const packageRules = new Map([
   ['@obversa/runtime', {
     directory: 'packages/runtime',
     kind: 'runtime',
-    version: '1.0.0',
+    version: '0.1.0',
     dependencies: ['@obversa/core'],
     peerDependencies: ['@obversa/api'],
     peerDependencyVersions: {
-      '@obversa/api': '>=0.1.0 <0.2.0',
+      '@obversa/api': 'workspace:*',
     },
   }],
   ['@obversa/api', {
@@ -484,6 +484,31 @@ const packageRules = new Map([
     kind: 'interface',
     version: '0.1.0',
     dependencies: ['@obversa/api'],
+    peerDependencies: [],
+  }],
+  ['@obversa/obversa', {
+    directory: 'packages/obversa',
+    kind: 'meta',
+    version: '0.1.0',
+    dependencies: [
+      '@obversa/api',
+      '@obversa/builtin-workflows',
+      '@obversa/core',
+      '@obversa/engine-anthropic-api',
+      '@obversa/engine-claude-agent-sdk',
+      '@obversa/engine-claude-cli',
+      '@obversa/engine-codex-cli',
+      '@obversa/engine-grok-cli',
+      '@obversa/engine-opencode-cli',
+      '@obversa/memory-git',
+      '@obversa/memory-markdown',
+      '@obversa/memory-simple',
+      '@obversa/notify-webhook',
+      '@obversa/runner',
+      '@obversa/runtime',
+      '@obversa/surface',
+      '@obversa/surface-diff',
+    ],
     peerDependencies: [],
   }],
   ['@obversa/memory-simple', {
@@ -509,20 +534,20 @@ const packageRules = new Map([
     dependencies: ['@obversa/api', '@obversa/core'],
     peerDependencies: [],
   }],
-  ['@obversa/search-markdown', {
-    directory: 'plugins/search-markdown',
+  ['@obversa/memory-markdown', {
+    directory: 'plugins/memory-markdown',
     kind: 'plugin',
     version: '0.1.0',
     dependencies: ['@obversa/api'],
     peerDependencies: [],
   }],
   // Private workspace packages get a rule too, so a sibling import inside
-  // them is caught the same way. Surface decision must never depend on the runtime or
-  // another package. Surface diff depends on surface decision — the flipped arrow: the
-  // review command lives in surface diff and injects surface decision's launch port itself,
+  // them is caught the same way. Surface must never depend on the runtime or
+  // another package. Surface diff depends on surface — the flipped arrow: the
+  // review command lives in surface diff and injects surface's launch port itself,
   // so a host keeps placement glue only.
-  ['@obversa/surface-decision', { directory: 'packages/surface-decision', kind: 'surface', version: '0.1.0', dependencies: [], peerDependencies: [] }],
-  ['@obversa/surface-diff', { directory: 'packages/surface-diff', kind: 'surface', version: '0.1.0', dependencies: ['@obversa/surface-decision'], peerDependencies: [] }],
+  ['@obversa/surface', { directory: 'packages/surface', kind: 'surface', version: '0.1.0', dependencies: [], peerDependencies: [] }],
+  ['@obversa/surface-diff', { directory: 'packages/surface-diff', kind: 'surface', version: '0.1.0', dependencies: ['@obversa/surface'], peerDependencies: [] }],
   ['@obversa/builtin-workflows', { directory: 'packages/builtin-workflows', kind: 'workflow', version: '0.1.0', dependencies: ['@obversa/runtime', '@obversa/api'], peerDependencies: [] }],
   ['@obversa/engine-claude-agent-sdk', {
     directory: 'plugins/engine-claude-agent-sdk',
@@ -856,7 +881,7 @@ function crossingPackage(
   if (!file || !repoRoot || !(/^\.\.?\//.test(specifier) || isAbsolute(specifier))) return null;
   // Where the loader lands, by real path from the importing file's real
   // directory: on a case-insensitive disk `../PACKAGES/SURFACER/x` opens
-  // packages/surface-decision/x, so the crossing is judged where the path really
+  // packages/surface/x, so the crossing is judged where the path really
   // lands, and a spelling other than the disk's own (case, a symlink) is
   // refused outright. A target that does not exist keeps its spelling: the
   // compiler's own resolution places it, or reports it.
@@ -1205,8 +1230,8 @@ for (const absolute of files) {
 }
 
 for (const [name, rule] of packageRules) {
-  if (!['interface', 'runtime', 'plugin', 'surface', 'host', 'workflow'].includes(rule.kind))
-    failures.push(`${name}: boundary kind must be interface, runtime, plugin, surface, host, or workflow; found ${rule.kind ?? 'absent'}`);
+  if (!['interface', 'runtime', 'plugin', 'surface', 'host', 'workflow', 'meta'].includes(rule.kind))
+    failures.push(`${name}: boundary kind must be interface, runtime, plugin, surface, host, workflow, or meta; found ${rule.kind ?? 'absent'}`);
   const directory = join(root, rule.directory);
   if (rule.kind === 'runtime' || rule.kind === 'plugin') {
     for (const dependency of [...rule.dependencies, ...rule.peerDependencies]) {
@@ -1231,10 +1256,11 @@ for (const [name, rule] of packageRules) {
   // pnpm promotes publishConfig fields into the packed manifest, so a
   // publishConfig.bin, .exports, .main, .imports, or .types would give the
   // tarball a command or an entry point the checks above never saw. Only
-  // the registry sentinels and access may appear there.
+  // access may appear there. The publish guard refuses registry routes in a
+  // manifest, so the boundary check must not leave a second accepted shape.
   for (const key of Object.keys(manifest.publishConfig ?? {})) {
-    if (!['registry', '@obversa:registry', 'access'].includes(key))
-      failures.push(`${name}: publishConfig.${key} is promoted into the packed manifest by pnpm, past the checks on ${key}; only registry, @obversa:registry, and access are allowed in publishConfig`);
+    if (key !== 'access')
+      failures.push(`${name}: publishConfig.${key} is promoted into the packed manifest by pnpm, past the checks on ${key}; only access is allowed in publishConfig`);
   }
 
   // A sibling is named by key, or installed under an alias by value
@@ -1299,7 +1325,7 @@ const rootPins = {
   // npm is pinned because the release command publishes through it and the
   // publish guard's spec reads its registry rules from it: both resolve this
   // installed copy, never whichever npm is first on PATH.
-  devDependencies: { tsup: '8.5.1', vitest: '4.1.11', '@typescript/typescript6': '6.0.2', typescript: '7.0.2', semver: '7.7.2', npm: '10.9.2', pnpm: '10.15.1', 'dependency-cruiser': '18.2.0', eslint: '10.9.1', 'eslint-plugin-import-x': '4.17.1', 'eslint-import-resolver-typescript': '4.4.5', publint: '0.3.24', '@arethetypeswrong/cli': '0.18.5' },
+  devDependencies: { tsup: '8.5.1', vitest: '4.1.11', '@typescript/typescript6': '6.0.2', typescript: '7.0.2', semver: '7.7.2', npm: '11.19.1', pnpm: '10.15.1', 'dependency-cruiser': '18.2.0', eslint: '10.9.1', 'eslint-plugin-import-x': '4.17.1', 'eslint-import-resolver-typescript': '4.4.5', publint: '0.3.24', '@arethetypeswrong/cli': '0.18.5' },
 };
 if (rootManifest.packageManager !== rootPins.packageManager)
   failures.push(`package.json: packageManager must be ${rootPins.packageManager}; found ${rootManifest.packageManager ?? 'absent'}`);

@@ -1,0 +1,54 @@
+{
+  "name": "@obversa/obversa",
+  "version": "0.1.0",
+  "description": "Install every public Obversa package together.",
+  "author": "Jonny Neill <jonnyneill@hotmail.com>",
+  "license": "MIT",
+  "files": [
+    "README.md",
+    "LICENSE"
+  ],
+  "scripts": {
+    "prepublishOnly": "node ../../scripts/check-publish-allowlist.mjs"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
+  "engines": {
+    "node": ">=22.12.0"
+  },
+  "dependencies": {
+    "@obversa/api": "workspace:^",
+    "@obversa/builtin-workflows": "workspace:^",
+    "@obversa/core": "workspace:^",
+    "@obversa/engine-anthropic-api": "workspace:^",
+    "@obversa/engine-claude-agent-sdk": "workspace:^",
+    "@obversa/engine-claude-cli": "workspace:^",
+    "@obversa/engine-codex-cli": "workspace:^",
+    "@obversa/engine-grok-cli": "workspace:^",
+    "@obversa/engine-opencode-cli": "workspace:^",
+    "@obversa/memory-git": "workspace:^",
+    "@obversa/memory-markdown": "workspace:^",
+    "@obversa/memory-simple": "workspace:^",
+    "@obversa/notify-webhook": "workspace:^",
+    "@obversa/runner": "workspace:^",
+    "@obversa/runtime": "workspace:^",
+    "@obversa/surface": "workspace:^",
+    "@obversa/surface-diff": "workspace:^"
+  },
+  "keywords": [
+    "agent",
+    "graph",
+    "workflow",
+    "runtime",
+    "obversa"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/jonny981/obversa.git"
+  },
+  "homepage": "https://docs.obversa.ai",
+  "bugs": {
+    "url": "https://github.com/jonny981/obversa/issues"
+  }
+}

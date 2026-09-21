@@ -11,11 +11,13 @@
     "@obversa/engine-grok-cli",
     "@obversa/engine-opencode-cli",
     "@obversa/memory-git",
-    "@obversa/memory-simple", "@obversa/notify-webhook",
+    "@obversa/memory-markdown",
+    "@obversa/memory-simple",
+    "@obversa/notify-webhook",
+    "@obversa/obversa",
     "@obversa/runner",
     "@obversa/runtime",
-    "@obversa/search-markdown",
-    "@obversa/surface-decision",
+    "@obversa/surface",
     "@obversa/surface-diff"
   ]
 }

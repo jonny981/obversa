@@ -80,7 +80,7 @@ function isIsoInstant(text) {
 
 // The data contract. A location is its OBSERVABLE OWN DATA: its own
 // enumerable string-keyed data properties and its indexed items, read exactly
-// once, recursively. (The runtime's payload rule in @obversa/surface-decision is the
+// once, recursively. (The runtime's payload rule in @obversa/surface is the
 // looser cousin: the values one JSON serialisation reads, getters and toJSON
 // included; a location needs a stable key, so it takes data properties
 // only.) Hidden internal state —

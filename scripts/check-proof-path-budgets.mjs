@@ -9,7 +9,7 @@ export const DEFAULT_PROOF_PATH_FILES = [
   "packages/runtime/tests/safe-change-recovery.spec.ts",
   "packages/surface-diff/test/f3-browser-proof.test.mjs",
   "packages/surface-diff/test/review-cli.test.mjs",
-  "packages/surface-decision/test/server.test.mjs",
+  "packages/surface/test/server.test.mjs",
 ];
 
 /**

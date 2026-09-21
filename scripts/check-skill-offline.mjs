@@ -150,10 +150,10 @@ async function main() {
       const listing = run('tar', ['-xzOf', tarball, 'package/package.json']);
       return JSON.parse(listing);
     };
-    const surfaceDecisionTarball = join(archives, 'obversa-surface-decision.tgz');
-    run('pnpm', ['--dir', join(root, 'packages', 'surface-decision'), 'pack', '--pack-destination', archives]);
-    const surfaceDecisionManifest = JSON.parse(await readFile(join(root, 'packages', 'surface-decision', 'package.json'), 'utf8'));
-    run('mv', [join(archives, `obversa-surface-decision-${surfaceDecisionManifest.version}.tgz`), surfaceDecisionTarball]);
+    const surfaceDecisionTarball = join(archives, 'obversa-surface.tgz');
+    run('pnpm', ['--dir', join(root, 'packages', 'surface'), 'pack', '--pack-destination', archives]);
+    const surfaceDecisionManifest = JSON.parse(await readFile(join(root, 'packages', 'surface', 'package.json'), 'utf8'));
+    run('mv', [join(archives, `obversa-surface-${surfaceDecisionManifest.version}.tgz`), surfaceDecisionTarball]);
     record(packages, packedManifest(surfaceDiffTarball), surfaceDiffTarball);
     record(packages, packedManifest(surfaceDecisionTarball), surfaceDecisionTarball);
     const queue = Object.entries(packedManifest(surfaceDiffTarball).dependencies ?? {}).filter(([name]) => !name.startsWith('@obversa/'));
@@ -196,7 +196,7 @@ async function main() {
       npm_config_fund: 'false',
       npm_config_update_notifier: 'false',
       // Against this registry stand-in, the pinned npm's exec hangs
-      // mid-install at the quiet log levels (npm 10.9.2: notice and error
+      // mid-install at the quiet log levels (npm 11.19.1: notice and error
       // deadlock; info and silly complete; stdin open or closed makes no
       // difference, nor does the stand-in's keep-alive). The same npx
       // invocation against the real registry completes at the default level

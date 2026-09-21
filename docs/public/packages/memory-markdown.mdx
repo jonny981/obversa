@@ -1,9 +1,9 @@
 ---
-title: "Markdown Search"
-description: "@obversa/search-markdown selects ranked passages from a local Markdown corpus for grounding."
+title: "@obversa/memory-markdown"
+description: "@obversa/memory-markdown selects ranked passages from a local Markdown corpus for grounding."
 ---
 
-`@obversa/search-markdown` searches `.md` files without an index, embedding
+`@obversa/memory-markdown` searches `.md` files without an index, embedding
 service, or network call. Each hit names the corpus file, matching passage,
 line range, and score. The caller chooses the hit paths to give to `ground`;
 `curate` then makes the grounded text fit the next job.
@@ -21,12 +21,12 @@ rather than putting the passage text into a prompt yourself.
 ## Install
 
 ```bash
-pnpm add @obversa/search-markdown @obversa/runtime
+pnpm add @obversa/memory-markdown @obversa/runtime
 ```
 
 ## Corpus
 
-Create `search-markdown-corpus/warranty.md` beside the example:
+Create `memory-markdown-corpus/warranty.md` beside the example:
 
 ```md
 # Coverage policy
@@ -36,7 +36,7 @@ The battery warranty lasts eight years.
 Keep the purchase receipt with the installation record.
 ```
 
-Create `search-markdown-corpus/charging.md` beside it:
+Create `memory-markdown-corpus/charging.md` beside it:
 
 ```md
 # Charging
@@ -44,7 +44,7 @@ Create `search-markdown-corpus/charging.md` beside it:
 Charge the battery before it reaches ten percent.
 ```
 
-Create `search-markdown-corpus/notes with spaces.md` beside them:
+Create `memory-markdown-corpus/notes with spaces.md` beside them:
 
 ```md
 # Not indexed
@@ -61,14 +61,14 @@ search skips it. The remaining hit can pass to `ground`.
 import { access } from 'node:fs/promises';
 import { fileURLToPath } from 'node:url';
 
-import { openMarkdownCorpus } from '@obversa/search-markdown';
+import { openMarkdownCorpus } from '@obversa/memory-markdown';
 import { agentJob, run } from '@obversa/runtime';
 import { curate, ground } from '@obversa/runtime/memory';
 import { MockEngine } from '@obversa/runtime/testing';
 
-await access(fileURLToPath(new URL('./search-markdown-corpus/notes with spaces.md', import.meta.url)));
+await access(fileURLToPath(new URL('./memory-markdown-corpus/notes with spaces.md', import.meta.url)));
 const corpus = openMarkdownCorpus({
-  directory: fileURLToPath(new URL('./search-markdown-corpus', import.meta.url)),
+  directory: fileURLToPath(new URL('./memory-markdown-corpus', import.meta.url)),
 });
 const hits = await corpus.search('warranty');
 const paths = [...new Set(hits.map((hit) => hit.path))];

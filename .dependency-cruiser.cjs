@@ -32,7 +32,7 @@ module.exports = {
       to: {
         couldNotResolve: true,
         // The browser page imports ./surface-client.mjs as a URL; the
-        // surface-decision serves that module over HTTP at runtime, so it has no
+        // surface serves that module over HTTP at runtime, so it has no
         // file beside the page source. This exact specifier only.
         pathNot: '^\\./surface-client\\.mjs$',
       },
@@ -45,7 +45,7 @@ module.exports = {
       from: { path: '^examples/' },
       to: {
         couldNotResolve: true,
-        pathNot: '^@obversa/(api|builtin-workflows|core|engine-anthropic-api|engine-claude-agent-sdk|engine-claude-cli|engine-codex-cli|engine-grok-cli|engine-opencode-cli|memory-git|memory-simple|notify-webhook|runner|runtime|search-markdown|surface-decision|surface-diff)(/|$)',
+        pathNot: '^@obversa/(api|builtin-workflows|core|engine-anthropic-api|engine-claude-agent-sdk|engine-claude-cli|engine-codex-cli|engine-grok-cli|engine-opencode-cli|memory-git|memory-simple|notify-webhook|runner|runtime|memory-markdown|surface|surface-diff)(/|$)',
       },
     },
     {
@@ -139,19 +139,19 @@ module.exports = {
       to: { path: '^(packages|plugins)/', pathNot: '^packages/(core|api)/' },
     },
     {
-      name: 'surface-decision-reaches-no-package',
-      comment: '@obversa/surface-decision reaches no @obversa package',
+      name: 'surface-reaches-no-package',
+      comment: '@obversa/surface reaches no @obversa package',
       severity: 'error',
-      from: { path: '^packages/surface-decision/' },
-      to: { path: '^(packages|plugins)/', pathNot: '^packages/surface-decision/' },
+      from: { path: '^packages/surface/' },
+      to: { path: '^(packages|plugins)/', pathNot: '^packages/surface/' },
     },
     {
-      name: 'surface-diff-reaches-surface-decision-only',
+      name: 'surface-diff-reaches-surface-only',
       comment:
-        '@obversa/surface-diff carries the review command, which injects the surface-decision launch port itself. It reaches nothing else',
+        '@obversa/surface-diff carries the review command, which injects the surface launch port itself. It reaches nothing else',
       severity: 'error',
       from: { path: '^packages/surface-diff/' },
-      to: { path: '^(packages|plugins)/', pathNot: '^packages/(surface-diff|surface-decision)/' },
+      to: { path: '^(packages|plugins)/', pathNot: '^packages/(surface-diff|surface)/' },
     },
     {
       name: 'runtime-reaches-interfaces-only',
@@ -185,8 +185,8 @@ module.exports = {
       name: 'search-plugin-reaches-api-only',
       comment: 'Markdown search implements an API Memory view and reaches no runtime or sibling plugin',
       severity: 'error',
-      from: { path: '^plugins/search-markdown/src/' },
-      to: { path: '^(packages|plugins)/', pathNot: '^(plugins/search-markdown/|packages/api/)' },
+      from: { path: '^plugins/memory-markdown/src/' },
+      to: { path: '^(packages|plugins)/', pathNot: '^(plugins/memory-markdown/|packages/api/)' },
     },
     {
       name: 'agent-sdk-plugin-reaches-interfaces-only',

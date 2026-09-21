@@ -42,7 +42,8 @@ test('each retired public name and package directory is covered', () => {
   for (const name of [
     '@obversa/process', '@obversa/teams', '@obversa/engine', '@obversa/memory',
     '@obversa/source', '@obversa/surfacer', '@obversa/engine-codex',
-    '@obversa/engine-agent-sdk',
+    '@obversa/engine-agent-sdk', '@obversa/surface-decision',
+    '@obversa/search-markdown',
   ]) {
     withTree({ 'scripts/name.mjs': JSON.stringify({ dependency: name }) }, (root) => {
       assert.match(checkRetiredNames(root).join('\n'), /scripts\/name\.mjs/, name);
@@ -52,6 +53,7 @@ test('each retired public name and package directory is covered', () => {
     'packages/process', 'packages/teams', 'packages/engine', 'packages/memory',
     'packages/source', 'packages/surfacer', 'plugins/engine-codex',
     'plugins/engine-agent-sdk', 'packages/source/assets/app.js',
+    'packages/surface-decision', 'plugins/search-markdown',
   ]) {
     withTree({ 'scripts/path.mjs': JSON.stringify({ cwd: path }) }, (root) => {
       assert.match(checkRetiredNames(root).join('\n'), /scripts\/path\.mjs/, path);
@@ -171,4 +173,14 @@ test('a file holding two retired names reports both, so one pass fixes both', ()
     assert.match(line, /@obversa\/engine-codex/);
     assert.match(line, /@obversa\/teams/);
   });
+});
+
+test('the recorded F91 branch name is exempt, but package uses beside it still fail', () => {
+  withTree({
+    'scripts/stage-merge.mjs': "export const stageBranches = { F91: 'docs/search-markdown-contract' };\n",
+  }, (root) => assert.deepEqual(checkRetiredNames(root), []));
+
+  withTree({
+    'scripts/stage-merge.mjs': "export const stageBranches = { F91: 'docs/search-markdown-contract' };\nconst packageName = '@obversa/search-markdown';\n",
+  }, (root) => assert.match(checkRetiredNames(root).join('\n'), /@obversa\/search-markdown/));
 });

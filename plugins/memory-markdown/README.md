@@ -1,13 +1,13 @@
-# @obversa/search-markdown
+# @obversa/memory-markdown
 
-`@obversa/search-markdown` finds matching passages in a local Markdown
+`@obversa/memory-markdown` finds matching passages in a local Markdown
 directory. It returns the file path and line range for each hit, so a caller
 can hand only the selected files to `ground` and then bound them with `curate`.
 
 ## Install
 
 ```bash
-pnpm add @obversa/search-markdown @obversa/runtime
+pnpm add @obversa/memory-markdown @obversa/runtime
 ```
 
 ## Requirements
@@ -39,11 +39,11 @@ The corpus root itself can be a symbolic link.
 From the workspace root, run:
 
 ```bash
-pnpm example:search-markdown
+pnpm example:memory-markdown
 ```
 
 The complete source is on the
-[search-markdown package page](https://docs.obversa.ai/packages/search-markdown).
+[memory-markdown package page](https://docs.obversa.ai/packages/memory-markdown).
 
 ## License
 

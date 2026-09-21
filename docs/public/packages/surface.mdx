@@ -1,18 +1,18 @@
 ---
-title: "@obversa/surface-decision"
-description: "The exact session, handoff, client kit, launcher and placement rules of @obversa/surface-decision, for hosts and pages that must interoperate with one."
+title: "@obversa/surface"
+description: "The exact session, handoff, client kit, launcher and placement rules of @obversa/surface, for hosts and pages that must interoperate with one."
 ---
 
-This is the reference for `@obversa/surface-decision`. To learn what a surface is and run one, read [surfaces](/concepts/surfaces); come here for the exact rules.
+This is the reference for `@obversa/surface`. To learn what a surface is and run one, read [surfaces](/concepts/surfaces); come here for the exact rules.
 
-A surface is a small user interface for one decision. `@obversa/surface-decision` is
+A surface is a small user interface for one decision. `@obversa/surface` is
 the package that runs it: one loopback server, one single-decision session, one
 result. It owns no callback state, no routing, and no run records.
 
 ## The framed result
 
 Everything on this page ends in one framed result on the launcher's stdout.
-This is the real one from a run of `packages/surface-decision/examples/hello-surface.mjs`
+This is the real one from a run of `packages/surface/examples/hello-surface.mjs`
 in which the page's Yes button was clicked:
 
 ```text
@@ -99,7 +99,7 @@ bytes before use. Diagnostics stay on stderr.
 
 ## The client kit
 
-`@obversa/surface-decision/client` is the no-framework browser kit: it reads
+`@obversa/surface/client` is the no-framework browser kit: it reads
 the token from the fragment, removes it from the address bar, keeps the
 lease alive with a heartbeat, wraps every call with the bearer token,
 and acknowledges the terminal decision on submit or cancel.
@@ -109,7 +109,7 @@ and acknowledges the terminal decision on submit or cancel.
 `runSurface` is the one call an app makes: it starts the session,
 places the page, waits for the decision, frames it on stdout, and shuts
 down. Signals interrupt cleanly. The runnable example is
-`packages/surface-decision/examples/hello-surface.mjs`.
+`packages/surface/examples/hello-surface.mjs`.
 
 ## Placement
 
@@ -120,7 +120,7 @@ never by a bare name; on Linux and Windows the URL is printed instead
 (`xdg-open` runs its own helpers by bare name, and `cmd /c start` would
 take the URL as shell text), and printing the URL is the last resort
 everywhere. Your
-multiplexer supplies the panes; `@obversa/surface-decision` supplies the session. The
+multiplexer supplies the panes; `@obversa/surface` supplies the session. The
 host's placement command is the one the host injected as
 `OBVERSA_SURFACE_BIN`, and it runs only when that value is an absolute
 path. What it receives is a one-time launch URL (single use, valid for

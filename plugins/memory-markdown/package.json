@@ -1,5 +1,5 @@
 {
-  "name": "@obversa/search-markdown",
+  "name": "@obversa/memory-markdown",
   "version": "0.1.0",
   "description": "Deterministic lexical search over local Markdown files.",
   "author": "Jonny Neill <jonnyneill@hotmail.com>",
@@ -7,9 +7,7 @@
   "license": "MIT",
   "sideEffects": false,
   "publishConfig": {
-    "access": "public",
-    "registry": "http://publish-guard.invalid/",
-    "@obversa:registry": "http://publish-guard.invalid/"
+    "access": "public"
   },
   "engines": {
     "node": ">=22.12.0"

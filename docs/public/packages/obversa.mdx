@@ -1,0 +1,28 @@
+---
+title: "@obversa/obversa"
+description: "Install every public Obversa package with one dependency."
+---
+
+`@obversa/obversa` installs the runtime, runner, shared contracts, process
+tools, ready-made workflows, surfaces, engines, memory adapters and webhook
+notifications together.
+
+```bash
+npm install @obversa/obversa
+```
+
+The install adds one dependency to your project:
+
+```json
+{
+  "dependencies": {
+    "@obversa/obversa": "^0.1.0"
+  }
+}
+```
+
+Import each tool from its own package name. This package has no runtime API
+of its own, so the individual packages stay separately importable and can
+still be installed without the complete set.
+
+The package table on the [docs home page](/) lists every installed package.

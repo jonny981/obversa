@@ -40,6 +40,9 @@ importers:
       '@obversa/memory-git':
         specifier: workspace:^
         version: link:plugins/memory-git
+      '@obversa/memory-markdown':
+        specifier: workspace:^
+        version: link:plugins/memory-markdown
       '@obversa/notify-webhook':
         specifier: workspace:^
         version: link:plugins/notify-webhook
@@ -49,9 +52,6 @@ importers:
       '@obversa/runtime':
         specifier: workspace:^
         version: link:packages/runtime
-      '@obversa/search-markdown':
-        specifier: workspace:^
-        version: link:plugins/search-markdown
       '@obversa/surface-diff':
         specifier: workspace:^
         version: link:packages/surface-diff
@@ -77,8 +77,8 @@ importers:
         specifier: 4.2.820
         version: 4.2.820(@base-ui/react@1.7.0(@types/react@19.2.18)(react-dom@19.2.8(react@19.2.3))(react@19.2.3))(@types/node@22.12.0)(@types/react@19.2.18)(react-dom@19.2.8(react@19.2.3))(typescript@7.0.2)
       npm:
-        specifier: 10.9.2
-        version: 10.9.2
+        specifier: 11.19.1
+        version: 11.19.1
       openapi-types:
         specifier: 12.1.3
         version: 12.1.3
@@ -135,23 +135,77 @@ importers:
   packages/core:
     dependencies:
       '@obversa/api':
-        specifier: workspace:^
+        specifier: workspace:*
         version: link:../api
     devDependencies:
       '@types/node':
         specifier: 22.12.0
         version: 22.12.0
 
-  packages/runner:
+  packages/obversa:
     dependencies:
       '@obversa/api':
         specifier: workspace:^
         version: link:../api
+      '@obversa/builtin-workflows':
+        specifier: workspace:^
+        version: link:../builtin-workflows
       '@obversa/core':
         specifier: workspace:^
         version: link:../core
+      '@obversa/engine-anthropic-api':
+        specifier: workspace:^
+        version: link:../../plugins/engine-anthropic-api
+      '@obversa/engine-claude-agent-sdk':
+        specifier: workspace:^
+        version: link:../../plugins/engine-claude-agent-sdk
+      '@obversa/engine-claude-cli':
+        specifier: workspace:^
+        version: link:../../plugins/engine-claude-cli
+      '@obversa/engine-codex-cli':
+        specifier: workspace:^
+        version: link:../../plugins/engine-codex-cli
+      '@obversa/engine-grok-cli':
+        specifier: workspace:^
+        version: link:../../plugins/engine-grok-cli
+      '@obversa/engine-opencode-cli':
+        specifier: workspace:^
+        version: link:../../plugins/engine-opencode-cli
+      '@obversa/memory-git':
+        specifier: workspace:^
+        version: link:../../plugins/memory-git
+      '@obversa/memory-markdown':
+        specifier: workspace:^
+        version: link:../../plugins/memory-markdown
+      '@obversa/memory-simple':
+        specifier: workspace:^
+        version: link:../../plugins/memory-simple
+      '@obversa/notify-webhook':
+        specifier: workspace:^
+        version: link:../../plugins/notify-webhook
+      '@obversa/runner':
+        specifier: workspace:^
+        version: link:../runner
       '@obversa/runtime':
         specifier: workspace:^
+        version: link:../runtime
+      '@obversa/surface':
+        specifier: workspace:^
+        version: link:../surface
+      '@obversa/surface-diff':
+        specifier: workspace:^
+        version: link:../surface-diff
+
+  packages/runner:
+    dependencies:
+      '@obversa/api':
+        specifier: workspace:*
+        version: link:../api
+      '@obversa/core':
+        specifier: workspace:*
+        version: link:../core
+      '@obversa/runtime':
+        specifier: workspace:*
         version: link:../runtime
     devDependencies:
       '@types/node':
@@ -161,7 +215,7 @@ importers:
   packages/runtime:
     dependencies:
       '@obversa/core':
-        specifier: workspace:^
+        specifier: workspace:*
         version: link:../core
       p-limit:
         specifier: ^7.3.0
@@ -171,7 +225,7 @@ importers:
         version: 2.0.2
     devDependencies:
       '@obversa/api':
-        specifier: workspace:^
+        specifier: workspace:*
         version: link:../api
       '@types/node':
         specifier: 22.12.0
@@ -183,13 +237,13 @@ importers:
         specifier: ^9.6.1
         version: 9.6.1
 
-  packages/surface-decision: {}
+  packages/surface: {}
 
   packages/surface-diff:
     dependencies:
-      '@obversa/surface-decision':
+      '@obversa/surface':
         specifier: workspace:*
-        version: link:../surface-decision
+        version: link:../surface
       acorn:
         specifier: 8.18.0
         version: 8.18.0
@@ -278,17 +332,18 @@ importers:
         specifier: workspace:^
         version: link:../../packages/core
 
+  plugins/memory-markdown:
+    dependencies:
+      '@obversa/api':
+        specifier: workspace:^
+        version: link:../../packages/api
+
   plugins/memory-simple:
     dependencies:
       '@obversa/api':
         specifier: workspace:^
         version: link:../../packages/api
 
-  plugins/search-markdown:
-    dependencies:
-      '@obversa/api':
-        specifier: workspace:^
-        version: link:../../packages/api
   plugins/notify-webhook: {}
 
 packages:
@@ -4383,9 +4438,9 @@ packages:
     resolution: {integrity: sha512-9qny7Z9DsQU8Ou39ERsPU4OZQlSTP47ShQzuKZ6PRXpYLtIFgl/DEBYEXKlvcEa+9tHVcK8CF81Y2V72qaZhWA==}
     engines: {node: '>=18'}
 
-  npm@10.9.2:
-    resolution: {integrity: sha512-iriPEPIkoMYUy3F6f3wwSZAU93E0Eg6cHwIR6jzzOXWSy+SD/rOODEs74cVONHKSx2obXtuUoyidVEhISrisgQ==}
-    engines: {node: ^18.17.0 || >=20.5.0}
+  npm@11.19.1:
+    resolution: {integrity: sha512-ztsxKxt/kkIaAs+2i0GU6I+DRmUdrNasxTZKJe9TCdSjKxlhah/4r/hl5ygMD6XAg1qZ9c2TNomR4qgOydp10g==}
+    engines: {node: ^20.17.0 || >=22.9.0}
     hasBin: true
     bundledDependencies:
       - '@isaacs/string-locale-compare'
@@ -4393,6 +4448,7 @@ packages:
       - '@npmcli/config'
       - '@npmcli/fs'
       - '@npmcli/map-workspaces'
+      - '@npmcli/metavuln-calculator'
       - '@npmcli/package-json'
       - '@npmcli/promise-spawn'
       - '@npmcli/redact'
@@ -4403,7 +4459,6 @@ packages:
       - cacache
       - chalk
       - ci-info
-      - cli-columns
       - fastest-levenshtein
       - fs-minipass
       - glob
@@ -4417,7 +4472,6 @@ packages:
       - libnpmdiff
       - libnpmexec
       - libnpmfund
-      - libnpmhook
       - libnpmorg
       - libnpmpack
       - libnpmpublish
@@ -4431,7 +4485,6 @@ packages:
       - ms
       - node-gyp
       - nopt
-      - normalize-package-data
       - npm-audit-report
       - npm-install-checks
       - npm-package-arg
@@ -4455,7 +4508,6 @@ packages:
       - treeverse
       - validate-npm-package-name
       - which
-      - write-file-atomic
 
   oauth4webapi@3.8.7:
     resolution: {integrity: sha512-4RxcKxXjuItDFZ20RRPf4YTw3kpeXJyCgJFxVzJ068A7PNJ18st2Dg90tlC1LkSDS0GecroagCLHYEIVUhCAkw==}
@@ -10890,7 +10942,7 @@ snapshots:
       path-key: 4.0.0
       unicorn-magic: 0.3.0
 
-  npm@10.9.2: {}
+  npm@11.19.1: {}
 
   oauth4webapi@3.8.7: {}
 

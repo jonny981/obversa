@@ -1,7 +1,7 @@
 // Browser proof of the review surface under the runtime's exact security
-// headers and auth model. A local server mirrors the surface-decision contract on the
+// headers and auth model. A local server mirrors the surface contract on the
 // parts that matter — the Content-Security-Policy header (asserted below to be
-// the very string in packages/surface-decision/src/server.mjs, so drift fails this
+// the very string in packages/surface/src/server.mjs, so drift fails this
 // test), a bearer-gated verbatim GET /api/model, a static shell with no diff
 // — and serves the real assets and the real client kit. Headless Chrome loads
 // the session URL; a probe registered before app.js counts CSP violations and
@@ -92,8 +92,8 @@ function scheduleCancelTimer(phase, callback, delayMs) {
   })));
 }
 
-const SURFACER_SERVER = new URL("../../surface-decision/src/server.mjs", import.meta.url);
-const CLIENT_KIT = new URL("../../surface-decision/src/client.mjs", import.meta.url);
+const SURFACER_SERVER = new URL("../../surface/src/server.mjs", import.meta.url);
+const CLIENT_KIT = new URL("../../surface/src/client.mjs", import.meta.url);
 // The runtime's headers, verbatim. The CSP is asserted against server.mjs.
 const CSP = "default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; connect-src 'self'; object-src 'none'; base-uri 'none'; frame-ancestors 'none'; form-action 'none'";
 const HEADERS = {
@@ -392,9 +392,9 @@ async function keyboardRoute(dt, signal) {
   return { tabs, reached: true, ...reached, ...opened, discardTarget, ...discarded, saveTarget, firstSaveReturned: firstSave.saveReturned, removeTarget, ...removed, ...saved, returned };
 }
 
-test("the runtime's CSP in this proof is the one surface-decision serves", async () => {
+test("the runtime's CSP in this proof is the one surface serves", async () => {
   const serverSource = await readFile(SURFACER_SERVER, "utf8");
-  assert.ok(serverSource.includes(`"Content-Security-Policy": "${CSP}"`), "surface-decision's CSP changed; update this proof to match");
+  assert.ok(serverSource.includes(`"Content-Security-Policy": "${CSP}"`), "surface's CSP changed; update this proof to match");
 });
 
 test("the review surface renders under the exact CSP with zero violations and file-scoped go-to-source", { skip: CHROME ? false : "Google Chrome is not installed", timeout: BROWSER_TEST_TIMEOUT_MS }, async () => {
@@ -410,13 +410,15 @@ test("the review surface renders under the exact CSP with zero violations and fi
     "/icons.mjs": ["icons.mjs", "text/javascript; charset=utf-8"],
   };
   const results = Promise.withResolvers();
-  // The review's return, as surface-decision would receive it: the submit body,
+  const receivedPaths = [];
+  // The review's return, as surface would receive it: the submit body,
   // and the acknowledgement of the operation id the reply carried.
   const submitted = Promise.withResolvers();
   const acked = Promise.withResolvers();
   const server = createServer((req, res) => {
     for (const [k, v] of Object.entries(HEADERS)) res.setHeader(k, v);
     const url = new URL(req.url, "http://127.0.0.1");
+    if (receivedPaths.length < 64) receivedPaths.push(`${req.method} ${url.pathname}`);
     const send = (status, type, body) => { res.writeHead(status, { "content-type": type }); res.end(body); };
     const json = (handler) => { const chunks = []; req.on("data", (d) => chunks.push(d)); req.on("end", () => handler(JSON.parse(Buffer.concat(chunks).toString() || "{}"))); };
     if (url.pathname === "/results" && req.method === "POST") {
@@ -446,6 +448,8 @@ test("the review surface renders under the exact CSP with zero violations and fi
   const origin = `http://127.0.0.1:${/** @type {import("node:net").AddressInfo} */ (server.address()).port}`;
   const profile = mkdtempSync(path.join(os.tmpdir(), "browser-proof-profile-"));
   let chrome;
+  let chromeState = "running";
+  let chromeStderr = "";
   let report;
   let keys;
   try {
@@ -456,9 +460,33 @@ test("the review surface renders under the exact CSP with zero violations and fi
     // The highlight rules depend on the review's tokens, so no pre-auth route serves them.
     assert.equal((await BROWSER_RENDER_CHAIN.run("highlight auth", () => fetch(`${origin}/highlight.css`))).status, 404);
 
-    chrome = spawn(CHROME, ["--headless=new", "--disable-gpu", "--no-first-run", "--remote-debugging-port=0", `--user-data-dir=${profile}`, `${origin}/#${token}`], { stdio: "ignore" });
+    const browserStopped = Promise.withResolvers();
+    chrome = spawn(CHROME, ["--headless=new", "--disable-gpu", "--no-first-run", "--remote-debugging-port=0", `--user-data-dir=${profile}`, `${origin}/#${token}`], { stdio: ["ignore", "ignore", "pipe"] });
+    chrome.stderr.setEncoding("utf8");
+    chrome.stderr.on("data", (chunk) => { chromeStderr = (chromeStderr + chunk).slice(-8_192); });
+    chrome.once("error", (error) => {
+      chromeState = `spawn error: ${error.message}`;
+      browserStopped.resolve({ kind: "stopped" });
+    });
+    chrome.once("exit", (code, signal) => {
+      chromeState = `exit code ${code ?? "null"}, signal ${signal ?? "none"}`;
+      browserStopped.resolve({ kind: "stopped" });
+    });
     const resultStarted = Date.now();
-    report = await BROWSER_RENDER_CHAIN.run("page post", () => results.promise);
+    try {
+      report = await BROWSER_RENDER_CHAIN.run("page post", async () => {
+        const outcome = await Promise.race([
+          results.promise.then((value) => ({ kind: "results", value })),
+          browserStopped.promise,
+        ]);
+        if (outcome.kind !== "results") throw new Error("Chrome stopped before posting results");
+        return outcome.value;
+      });
+    } catch (error) {
+      const stderr = chromeStderr.replaceAll(token, "[redacted]").trim() || "none";
+      const requests = receivedPaths.join(", ") || "none";
+      throw new Error(`${error.message}; Chrome: ${chromeState}; requests: ${requests}; stderr: ${stderr}`, { cause: error });
+    }
     console.log(`browser page-post wait: ${Date.now() - resultStarted}ms`);
     const dt = await devtools(profile, origin);
     try {

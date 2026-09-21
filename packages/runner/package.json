@@ -15,9 +15,7 @@
   "license": "MIT",
   "sideEffects": false,
   "publishConfig": {
-    "access": "public",
-    "registry": "http://publish-guard.invalid/",
-    "@obversa:registry": "http://publish-guard.invalid/"
+    "access": "public"
   },
   "engines": { "node": ">=22.12.0" },
   "main": "./dist/index.js",
@@ -36,9 +34,9 @@
     "prepublishOnly": "node ../../scripts/check-publish-allowlist.mjs"
   },
   "dependencies": {
-    "@obversa/api": "workspace:^",
-    "@obversa/core": "workspace:^",
-    "@obversa/runtime": "workspace:^"
+    "@obversa/api": "workspace:*",
+    "@obversa/core": "workspace:*",
+    "@obversa/runtime": "workspace:*"
   },
   "devDependencies": { "@types/node": "22.12.0" },
   "repository": { "type": "git", "url": "git+https://github.com/jonny981/obversa.git" },

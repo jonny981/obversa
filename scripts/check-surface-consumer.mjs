@@ -5,7 +5,7 @@
 // the framed result carrying the surface identity.
 //
 // Everything resolves from the tarballs and the offline store: the packed
-// surface-diff depends on the packed surface-decision through one override, install runs
+// surface-diff depends on the packed surface through one override, install runs
 // --offline with scripts ignored, and the command under test is the bin the
 // install linked — never the working tree.
 
@@ -50,7 +50,7 @@ async function main() {
     await mkdir(consumer);
     await mkdir(repository);
 
-    const surfaceDecisionTarball = await pack('surface-decision', archives);
+    const surfaceDecisionTarball = await pack('surface', archives);
     const surfaceDiffTarball = await pack('surface-diff', archives);
     await writeFile(join(consumer, 'package.json'), `${JSON.stringify({
       name: 'obversa-surface-consumer-proof',
@@ -58,22 +58,22 @@ async function main() {
       type: 'module',
       dependencies: { '@obversa/surface-diff': `file:${surfaceDiffTarball}` },
       // pnpm pack rewrote the workspace range into a registry version; the
-      // override points that name at the packed surface-decision instead, so nothing
+      // override points that name at the packed surface instead, so nothing
       // resolves outside the two tarballs and the offline store.
-      pnpm: { overrides: { '@obversa/surface-decision': `file:${surfaceDecisionTarball}` } },
+      pnpm: { overrides: { '@obversa/surface': `file:${surfaceDecisionTarball}` } },
     }, null, 2)}\n`);
     run('pnpm', ['install', '--offline', '--ignore-scripts'], {
       cwd: consumer,
       env: { CI: 'true', COREPACK_ENABLE_DOWNLOAD_PROMPT: '0' },
     });
-    // The isolated linker keeps the transitive surface-decision out of the top-level
+    // The isolated linker keeps the transitive surface out of the top-level
     // node_modules; both installed manifests are read from the store layout.
     const hidden = join(consumer, 'node_modules', '.pnpm');
-    const surfaceDecisionEntry = (await readdir(hidden)).find((entry) => entry.startsWith('@obversa+surface-decision@'));
-    assert.ok(surfaceDecisionEntry, 'the packed surface-decision installed as a dependency of the packed surface-diff');
+    const surfaceDecisionEntry = (await readdir(hidden)).find((entry) => entry.startsWith('@obversa+surface@'));
+    assert.ok(surfaceDecisionEntry, 'the packed surface installed as a dependency of the packed surface-diff');
     for (const manifestPath of [
       join(consumer, 'node_modules', '@obversa', 'surface-diff', 'package.json'),
-      join(hidden, surfaceDecisionEntry, 'node_modules', '@obversa', 'surface-decision', 'package.json'),
+      join(hidden, surfaceDecisionEntry, 'node_modules', '@obversa', 'surface', 'package.json'),
     ]) {
       const installed = JSON.parse(await readFile(manifestPath, 'utf8'));
       if (JSON.stringify(installed).includes('workspace:')) {

@@ -6,21 +6,20 @@ const ROOT = resolve(fileURLToPath(new URL('..', import.meta.url)));
 const SCAN_DIRS = ['scripts', 'docs', 'examples', 'packages', 'plugins', 'hosts', '.github/workflows', '.changeset'];
 const SKIP_DIRS = new Set(['node_modules', 'dist', '.git', '.next', 'coverage']);
 const SELF = new Set(['scripts/check-retired-names.mjs', 'scripts/check-retired-names.spec.mjs']);
-const OLD_DIRS = ['process', 'source', 'surfacer', 'memory', 'engine', 'teams'];
+const OLD_DIRS = ['process', 'source', 'surfacer', 'memory', 'engine', 'teams', 'surface-decision'];
 const REDIRECTS = new Map([
   ['/packages/engine', '/packages/api'],
   ['/packages/memory', '/packages/api'],
   ['/packages/process', '/packages/core'],
   ['/packages/teams', '/packages/builtin-workflows'],
   ['/packages/source', '/packages/surface-diff'],
-  ['/packages/surfacer', '/packages/surface-decision'],
   ['/packages/engine-codex', '/packages/engine-codex-cli'],
   ['/packages/engine-agent-sdk', '/packages/engine-claude-agent-sdk'],
 ]);
-const OLD_PATH = /(?:^|[^A-Za-z0-9_-])(?:packages\/(?:process|source|surfacer|memory|engine|teams)|plugins\/(?:engine-codex|engine-agent-sdk))(?![A-Za-z0-9_-])/g;
-const OLD_NAME = /(?:@obversa\/(?:process|teams|engine|memory|source|surfacer|engine-codex|engine-agent-sdk)|(?:^|[^A-Za-z0-9_-])(?:engine-codex|engine-agent-sdk))(?![A-Za-z0-9_-])/g;
-const OLD_ARCHIVE = /obversa-(?:process|teams|engine|memory|source|surfacer|engine-codex|engine-agent-sdk)(?:\.tgz|-[0-9]|-\$\{)/g;
-const NORMALIZED_PATH = /(?:^|[^A-Za-z0-9_-])(?:packages[/.]?(?:process|source|surfacer|memory|engine|teams)|plugins[/.]?(?:engine-codex|engine-agent-sdk))(?![A-Za-z0-9_-])/gm;
+const OLD_PATH = /(?:^|[^A-Za-z0-9_-])(?:packages\/(?:process|source|surfacer|memory|engine|teams|surface-decision)|plugins\/(?:engine-codex|engine-agent-sdk|search-markdown))(?![A-Za-z0-9_-])/g;
+const OLD_NAME = /(?:@obversa\/(?:process|teams|engine|memory|source|surfacer|engine-codex|engine-agent-sdk|surface-decision|search-markdown)|(?:^|[^A-Za-z0-9_-])(?:engine-codex|engine-agent-sdk))(?![A-Za-z0-9_-])/g;
+const OLD_ARCHIVE = /obversa-(?:process|teams|engine|memory|source|surfacer|engine-codex|engine-agent-sdk|surface-decision|search-markdown)(?:\.tgz|-[0-9]|-\$\{)/g;
+const NORMALIZED_PATH = /(?:^|[^A-Za-z0-9_-])(?:packages[/.]?(?:process|source|surfacer|memory|engine|teams|surface-decision)|plugins[/.]?(?:engine-codex|engine-agent-sdk|search-markdown))(?![A-Za-z0-9_-])/gm;
 
 function filesUnder(root, directory) {
   const base = join(root, directory);

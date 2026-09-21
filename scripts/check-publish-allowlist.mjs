@@ -7,63 +7,58 @@
 //
 // Two modes:
 //   1. Hook mode (default), run as a package's `prepublishOnly` script with the
-//      package directory as cwd: refuse unless every part of the release record
-//      is present — OBVERSA_RELEASE=1 (the explicit human act), the package name
-//      on scripts/publish-allowlist.json, the checkout on `main` with a clean
-//      tree, and HEAD carrying one annotated repository release tag. npm and
-//      pnpm run prepublishOnly when publishing a package DIRECTORY; publishing
-//      a prepared tarball (`npm publish ./x.tgz`) runs no package hook at all,
-//      so the hook is not the only seatbelt (see the registry below).
+//      package directory as cwd: refuse unless OBVERSA_RELEASE=1 is set (the
+//      explicit release act), the package name is on
+//      scripts/publish-allowlist.json, the working tree is clean, and the
+//      checkout is on `main` — or CI (GITHUB_ACTIONS=true), where the release
+//      workflow's protected environment is the release act. npm and pnpm run
+//      prepublishOnly when publishing a package DIRECTORY; publishing a
+//      prepared tarball (`npm publish ./x.tgz`) runs no package hook at all,
+//      so the hook is not the only seatbelt (see the residual below).
 //   2. `--audit`, run from the repository root: every workspace package that is
 //      not private must be on the allowlist, must carry the exact
 //      prepublishOnly hook (without it a direct `npm publish` of the directory
-//      would skip the guard), must name PUBLISH_REGISTRY_SENTINEL as both its
-//      publishConfig.registry and its publishConfig["@obversa:registry"] (see
-//      below), may carry no other registry key and no publishConfig.directory;
-//      every allowlisted name must be a real, non-private workspace package;
-//      the workspace root must stay private; and the release command must
-//      exist.
+//      would skip the guard), must set publishConfig.access to "public" (a
+//      scoped package publishes restricted without it), may carry no registry
+//      key at all (no `registry`, no `*:registry` — a manifest must not name a
+//      registry route; the real registry is the npm default or the caller's
+//      explicit flag) and no publishConfig.directory (pnpm would pack the
+//      manifest inside that directory, which the audit never reads); every
+//      allowlisted name must be a real, non-private workspace package; the
+//      workspace root must stay private; and the release workflow must exist
+//      and name both `changeset publish` and an `environment:` gate — a text
+//      check that the sanctioned path is present, not proof of the GitHub
+//      environment's protection rules, which only a human sees in the repo
+//      settings.
 //
-// The registry seatbelt: every public manifest — and so every tarball packed
-// from it — names a registry that never resolves (PUBLISH_REGISTRY_SENTINEL,
-// a name under the reserved .invalid domain). npm, pnpm, and changesets pick
-// the registry for a scoped name from the scope key first
-// (`@obversa:registry`) and only then from `registry`, and a manifest's
-// publishConfig beats a user's config for both keys, so a plain sentinel
-// alone would be stepped over by a scoped real registry in the manifest or in
-// a standing user config; the audit therefore requires the sentinel under
-// BOTH keys and refuses any other registry key. publishConfig.directory is
-// refused too: pnpm packs the manifest inside that directory, which the
-// audit never reads. A publish that skips the hook, from a directory or from
-// a tarball, is sent to the sentinel and fails. The supported way to the real
-// registry is scripts/release.mjs: it runs checkHook first, packs the one
-// listed public workspace package with pnpm (which rewrites workspace
-// versions), and publishes that tarball with npm, overriding both registry
-// keys on the command line — the one place npm lets a flag beat
-// publishConfig.
+// The release path: `.github/workflows/release.yml` runs `changeset publish`
+// in a protected environment with `id-token: write`. Changesets invokes
+// `pnpm publish` per package, which runs this hook and packs the tarball,
+// then delegates the upload to the pinned npm client selected by pnpm's
+// `npm-path` config. Package tags (`name@version`) come from changesets and
+// scripts/tag-published.mjs; the old hand-managed repository `v<version>`
+// tag, the never-resolving sentinel registry, and scripts/release.mjs are
+// retired.
 //
-// Residual, on purpose, two deliberate acts no script can prevent: a
-// directory publish with `--ignore-scripts` and both registry keys
-// overridden, and a tarball publish with both keys overridden (a tarball
-// runs no hook). This guard exists to stop the accidental publish.
-export const PUBLISH_REGISTRY_SENTINEL = "http://publish-guard.invalid/";
-export const SCOPE_REGISTRY_KEY = "@obversa:registry";
-export const RELEASE_REGISTRY = "https://registry.npmjs.org/";
-export const RELEASE_COMMAND = "scripts/release.mjs";
+// Residual, on purpose, deliberate acts no script can prevent: a tarball
+// publish (no hook runs) and a directory publish with `--ignore-scripts`, by
+// a caller holding publish credentials. The controls for those are
+// authentication — no standing npm token on development machines; trusted
+// publishing scoped to the release workflow and its environment — and the
+// environment approval itself. This guard exists to stop the accidental
+// publish.
 import { execFileSync } from "node:child_process";
 import { readdirSync, readFileSync, existsSync, realpathSync } from "node:fs";
 import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
-import { repositoryVersion } from "./repository-version.mjs";
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), "..");
 const ALLOWLIST_PATH = join(ROOT, "scripts", "publish-allowlist.json");
 
-// The git the guard asks — for the branch, the clean tree, the release tag
-// and its type — by absolute path from the system directories, never the
-// first git on PATH: a fake git there could answer "main", "clean", and
-// "tag" for a dirty, untagged checkout and let a real-registry publish
-// through with both registry keys overridden.
+// The git the guard asks — for the branch and the clean tree — by absolute
+// path from the system directories, never the first git on PATH: a fake git
+// there could answer "main" and "clean" for a dirty checkout and let a
+// real-registry publish through.
 export const GIT_DIRS = ["/usr/bin", "/usr/local/bin", "/opt/homebrew/bin", "/bin"];
 export function gitBin() {
   const found = GIT_DIRS.map((dir) => join(dir, "git")).find((candidate) => existsSync(candidate));
@@ -95,10 +90,11 @@ export function listWorkspacePackages(root = ROOT) {
       const manifest = JSON.parse(readFileSync(manifestPath, "utf8"));
       found.push({
         name: manifest.name,
+        version: typeof manifest.version === "string" ? manifest.version : "",
         private: manifest.private === true,
         dir: join(glob.slice(0, -2), entry.name),
         prepublishOnly: typeof manifest.scripts?.prepublishOnly === "string" ? manifest.scripts.prepublishOnly : "",
-        registry: typeof manifest.publishConfig?.registry === "string" ? manifest.publishConfig.registry : "",
+        access: manifest.publishConfig?.access,
         publishConfig: manifest.publishConfig && typeof manifest.publishConfig === "object" ? manifest.publishConfig : {},
       });
     }
@@ -111,6 +107,17 @@ export function listWorkspacePackages(root = ROOT) {
 // cannot skip. Exact, not a substring: `echo check-publish-allowlist.mjs` or
 // the script with `--audit` would otherwise count as the guard.
 export const HOOK_COMMAND = "node ../../scripts/check-publish-allowlist.mjs";
+
+// The registry every release targets — the value the verifier and the tag
+// step pass explicitly so an ambient user config cannot redirect them.
+export const RELEASE_REGISTRY = "https://registry.npmjs.org/";
+
+// The sanctioned release path is the workflow that runs `changeset publish`
+// behind a protected environment. The audit can only prove the file exists
+// and names both — the environment's protection rules live in GitHub
+// settings no script reads.
+export const RELEASE_WORKFLOW = ".github/workflows/release.yml";
+export const RELEASE_WORKFLOW_MARKERS = ["changeset publish", "environment:"];
 
 export function audit({ root = ROOT, allowlist = readAllowlist() } = {}) {
   const problems = [];
@@ -132,15 +139,12 @@ export function audit({ root = ROOT, allowlist = readAllowlist() } = {}) {
     if (p.prepublishOnly !== HOOK_COMMAND) {
       problems.push(`${p.name} (${p.dir}) is publishable but its scripts.prepublishOnly is not exactly "${HOOK_COMMAND}" (found "${p.prepublishOnly}")`);
     }
-    if (p.registry !== PUBLISH_REGISTRY_SENTINEL) {
-      problems.push(`${p.name} (${p.dir}) is publishable but its publishConfig.registry is not ${PUBLISH_REGISTRY_SENTINEL} (found "${p.registry}"); a tarball publish would reach a real registry without the guard`);
-    }
-    if (p.publishConfig[SCOPE_REGISTRY_KEY] !== PUBLISH_REGISTRY_SENTINEL) {
-      problems.push(`${p.name} (${p.dir}) is publishable but its publishConfig["${SCOPE_REGISTRY_KEY}"] is not ${PUBLISH_REGISTRY_SENTINEL} (found "${p.publishConfig[SCOPE_REGISTRY_KEY] ?? ""}"); the scope key is picked before registry, so a scoped real registry in a manifest or a user config would step over the plain sentinel`);
+    if (p.access !== "public") {
+      problems.push(`${p.name} (${p.dir}) is publishable but its publishConfig.access is not "public" (found ${JSON.stringify(p.access ?? null)}); a scoped package publishes restricted without it`);
     }
     for (const key of Object.keys(p.publishConfig)) {
-      if (/:registry$/.test(key) && key !== SCOPE_REGISTRY_KEY) {
-        problems.push(`${p.name} (${p.dir}) names another registry route in publishConfig["${key}"]; only registry and ${SCOPE_REGISTRY_KEY} are allowed, both set to the sentinel`);
+      if (key === "registry" || /:registry$/.test(key)) {
+        problems.push(`${p.name} (${p.dir}) names a registry route in publishConfig["${key}"]; a publishable manifest carries no registry key — the real registry is the npm default or the caller's explicit flag`);
       }
     }
     if (p.publishConfig.directory !== undefined) {
@@ -161,13 +165,16 @@ export function audit({ root = ROOT, allowlist = readAllowlist() } = {}) {
   } else if (JSON.parse(readFileSync(rootManifestPath, "utf8")).private !== true) {
     problems.push('the workspace root package.json must be "private": true');
   }
-  if (!existsSync(join(root, RELEASE_COMMAND))) problems.push(`${RELEASE_COMMAND} is missing: it is the one guarded way to the real registry`);
+  const workflowPath = join(root, RELEASE_WORKFLOW);
+  if (!existsSync(workflowPath)) {
+    problems.push(`${RELEASE_WORKFLOW} is missing: it is the one guarded way to the real registry`);
+  } else {
+    const workflow = readFileSync(workflowPath, "utf8");
+    for (const marker of RELEASE_WORKFLOW_MARKERS) {
+      if (!workflow.includes(marker)) problems.push(`${RELEASE_WORKFLOW} does not name "${marker}": the guarded publish path requires it`);
+    }
+  }
   return problems;
-}
-
-// The repository release record is one annotated tag shared by every package.
-export function releaseTagFor(version) {
-  return `v${version}`;
 }
 
 function git(cwd, ...args) {
@@ -190,41 +197,20 @@ export function checkHook({ cwd = process.cwd(), env = process.env, allowlist = 
   if (env.OBVERSA_RELEASE !== "1") problems.push(`refusing to publish ${name}: OBVERSA_RELEASE=1 is not set (the explicit release act)`);
   if (!allowlist.has(name)) problems.push(`refusing to publish ${name}: not on scripts/publish-allowlist.json`);
 
-  // The release record: main, a clean tree, and the runtime version's annotated
-  // repository tag at HEAD, shared by every package.
+  // The release record: a clean tree, on `main` for a local publish or in
+  // Actions for the workflow publish (a CI checkout is a detached HEAD by
+  // construction; the protected environment is the authorization there).
   let branch;
   let dirty;
-  let tags;
   try {
     branch = run(cwd, "rev-parse", "--abbrev-ref", "HEAD");
     dirty = run(cwd, "status", "--porcelain");
-    tags = run(cwd, "tag", "--points-at", "HEAD").split("\n").filter(Boolean);
   } catch {
     problems.push(`refusing to publish ${name}: not inside a git repository`);
     return problems;
   }
-  if (branch !== "main") problems.push(`refusing to publish ${name}: releases publish from main (checkout is on ${branch})`);
+  if (env.GITHUB_ACTIONS !== "true" && branch !== "main") problems.push(`refusing to publish ${name}: releases publish from main (checkout is on ${branch})`);
   if (dirty) problems.push(`refusing to publish ${name}: the working tree is not clean`);
-  const releaseTags = tags.filter((tag) => /^v\d+\.\d+\.\d+(?:[-+][0-9A-Za-z.-]+)?$/.test(tag));
-  if (releaseTags.length !== 1) {
-    problems.push(`refusing to publish ${name}: HEAD must carry exactly one annotated repository release tag (found ${releaseTags.join(", ") || "none"})`);
-  } else {
-    const tag = releaseTags[0];
-    const root = run(cwd, "rev-parse", "--show-toplevel");
-    let version;
-    try {
-      version = repositoryVersion(root);
-    } catch (error) {
-      const reason = error.code === "ENOENT" ? "packages/runtime/package.json is missing" : error.message;
-      problems.push(`refusing to publish ${name}: ${reason}`);
-      return problems;
-    }
-    const expectedTag = releaseTagFor(version);
-    if (tag !== expectedTag) problems.push(`refusing to publish ${name}: repository release tag must be ${expectedTag} (found ${tag})`);
-    let type = "";
-    try { type = run(cwd, "cat-file", "-t", tag); } catch { type = ""; }
-    if (type !== "tag") problems.push(`refusing to publish ${name}: ${tag} must be an annotated tag, not a lightweight one`);
-  }
   return problems;
 }
 

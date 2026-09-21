@@ -1,6 +1,6 @@
 {
   "name": "@obversa/runtime",
-  "version": "1.0.0",
+  "version": "0.1.0",
   "description": "Model how your team really works. Durable agent workflows, reviews that send work back, no database needed.",
   "license": "MIT",
   "author": "Jonny Neill <jonnyneill@hotmail.com>",
@@ -40,9 +40,7 @@
     "LICENSE"
   ],
   "publishConfig": {
-    "access": "public",
-    "registry": "http://publish-guard.invalid/",
-    "@obversa:registry": "http://publish-guard.invalid/"
+    "access": "public"
   },
   "scripts": {
     "build": "tsup && tsc -p tsconfig.build.json",
@@ -57,15 +55,15 @@
     "node": ">=22.12.0"
   },
   "dependencies": {
-    "@obversa/core": "workspace:^",
+    "@obversa/core": "workspace:*",
     "p-limit": "^7.3.0",
     "toposort": "^2.0.2"
   },
   "peerDependencies": {
-    "@obversa/api": ">=0.1.0 <0.2.0"
+    "@obversa/api": "workspace:*"
   },
   "devDependencies": {
-    "@obversa/api": "workspace:^",
+    "@obversa/api": "workspace:*",
     "@types/node": "22.12.0",
     "@types/toposort": "^2.0.7",
     "execa": "^9.6.1"

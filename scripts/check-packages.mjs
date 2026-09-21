@@ -100,8 +100,9 @@ export function assertPackedPackage(definition, tarball) {
     'public',
     '--json',
   ]);
-  const report = JSON.parse(dryRun);
-  if (report.name !== definition.name || report.version !== definition.version) {
+  const reports = JSON.parse(dryRun);
+  const report = reports[definition.name];
+  if (report?.name !== definition.name || report?.version !== definition.version) {
     throw new Error(`${definition.name} npm dry-run reported the wrong package identity`);
   }
 

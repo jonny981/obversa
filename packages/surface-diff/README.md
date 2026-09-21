@@ -36,5 +36,5 @@ browser opens the page.
 `@obversa/surface-diff/bin` resolves the runnable command file a router spawns
 under its own Node, shell-free;
 `@obversa/surface-diff/testing` exports the internals the proofs exercise, with
-no stability promise. The surface session itself is `@obversa/surface-decision`,
+no stability promise. The surface session itself is `@obversa/surface`,
 which this package depends on and binds.

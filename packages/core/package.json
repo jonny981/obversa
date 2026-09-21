@@ -7,9 +7,7 @@
   "license": "MIT",
   "sideEffects": false,
   "publishConfig": {
-    "access": "public",
-    "registry": "http://publish-guard.invalid/",
-    "@obversa:registry": "http://publish-guard.invalid/"
+    "access": "public"
   },
   "engines": {
     "node": ">=22.12.0"
@@ -52,7 +50,7 @@
     "prepublishOnly": "node ../../scripts/check-publish-allowlist.mjs"
   },
   "dependencies": {
-    "@obversa/api": "workspace:^"
+    "@obversa/api": "workspace:*"
   },
   "devDependencies": {
     "@types/node": "22.12.0"

@@ -14,7 +14,7 @@ export const CONSUMER_EXAMPLES = Object.freeze([
   'builtin-workflows.ts',
   'surface-diff.ts',
   'memory.ts',
-  'search-markdown.ts',
+  'memory-markdown.ts',
   'described-team.ts',
   'forge-helper.ts',
   'custom-graph.ts',
