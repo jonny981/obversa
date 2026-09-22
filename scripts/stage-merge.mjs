@@ -97,6 +97,7 @@ export const stageBranches = {
   F98: 'feat/run-boundary-events',
   F97: 'docs/recut-final-1-0-0',
   F108: 'feat/release-packages',
+  F109: 'fix/publish-guard-checkout',
 };
 
 export function manageStage(args, options = {}) {

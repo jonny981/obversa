@@ -231,12 +231,33 @@ test("the publish guard asks a git from the system directories, whatever git is 
   writeFileSync(path.join(fakeBin, "git"), "#!/bin/sh\ncase \"$*\" in *rev-parse*) echo main;; *) echo;; esac\n");
   chmodSync(path.join(fakeBin, "git"), 0o755);
   const repoRoot = new URL("..", import.meta.url).pathname;
-  const target = path.join(repoRoot, "packages", "api");
-  const direct = JSON.stringify(checkHook({ cwd: target }));
-  const child = spawnSync(process.execPath, ["-e", "import('./scripts/check-publish-allowlist.mjs').then((m) => console.log(JSON.stringify(m.checkHook({ cwd: process.argv[1] }))))", target], { cwd: repoRoot, encoding: "utf8", env: { ...process.env, PATH: `${fakeBin}${path.delimiter}${process.env.PATH}` } });
-  assert.equal(child.status, 0, child.stderr);
-  assert.equal(child.stdout.trim(), direct, "the same answer with the fake git first on PATH");
-  assert.ok(direct.includes("main") || direct.includes("clean") || direct === "[]", "the real git answered about this checkout");
+  const { root, cwd, git } = makeReleaseRepo();
+  const releaseEnv = { OBVERSA_RELEASE: "1" };
+  const childEnv = { ...process.env, PATH: `${fakeBin}${path.delimiter}${process.env.PATH}` };
+  const allowlist = new Set(["@x/p"]);
+  const childProblems = () => {
+    const child = spawnSync(process.execPath, ["-e", "import('./scripts/check-publish-allowlist.mjs').then((m) => console.log(JSON.stringify(m.checkHook({ cwd: process.argv[1], env: { OBVERSA_RELEASE: '1' }, allowlist: new Set(['@x/p']) }))))", cwd], { cwd: repoRoot, encoding: "utf8", env: childEnv });
+    assert.equal(child.status, 0, child.stderr);
+    return child.stdout.trim();
+  };
+  const assertSameResult = (message) => {
+    const actual = childProblems();
+    assert.equal(actual, JSON.stringify(checkHook({ cwd, env: releaseEnv, allowlist })), message);
+    return actual;
+  };
+  try {
+    assert.equal(assertSameResult("a clean main checkout passes with the fake git first on PATH"), "[]");
+
+    git("checkout", "-q", "-b", "feature");
+    assert.match(assertSameResult("the fake git cannot hide the wrong branch"), /releases publish from main/);
+
+    git("checkout", "-q", "main");
+    writeFileSync(path.join(cwd, "scratch.txt"), "wip\n");
+    assert.match(assertSameResult("the fake git cannot hide a dirty tree"), /working tree is not clean/);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+    rmSync(fakeBin, { recursive: true, force: true });
+  }
 });
 
 // The npm the release workflow publishes with is the root-pinned devDependency,
