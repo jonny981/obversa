@@ -4,8 +4,10 @@ import { chmodSync, mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync 
 import os from "node:os";
 import path from "node:path";
 import test from "node:test";
+import { createServer } from "node:http";
+import { once } from "node:events";
 
-import { GIT_DIRS, HOOK_COMMAND, RELEASE_REGISTRY, RELEASE_WORKFLOW, RELEASE_WORKFLOW_MARKERS, ROOT_BUILD_COMMAND, audit, checkHook, gitBin, listWorkspacePackages } from "./check-publish-allowlist.mjs";
+import { GIT_DIRS, HOOK_COMMAND, RELEASE_WORKFLOW, RELEASE_WORKFLOW_MARKERS, ROOT_BUILD_COMMAND, audit, checkHook, gitBin, listWorkspacePackages } from "./check-publish-allowlist.mjs";
 import { verifyPublished } from "./verify-published.mjs";
 import { tagPublished } from "./tag-published.mjs";
 
@@ -303,28 +305,25 @@ test("the publish client is an exact npm pin at or above the trusted-publishing 
   assert.ok(major > 11 || (major === 11 && (minor > 5 || (minor === 5 && patch >= 1))), `npm ${pinned} is below the trusted-publishing floor 11.5.1`);
 });
 
-// A stand-in npm that answers `view <name>@<version> --registry <r> version`
-// per package: a hit, a missing version (exit 0, empty answer — npm's real
-// shape), a wrong version, a registry error, and one that fails to spawn.
-function makeStubNpm() {
-  const dir = mkdtempSync(path.join(os.tmpdir(), "stub-npm-"));
-  const npm = path.join(dir, "npm");
-  writeFileSync(npm, `#!/bin/sh
-# args: view <name@version> --registry <registry> version
-[ "$4" = "${RELEASE_REGISTRY}" ] || { echo "queried a registry that is not the release registry: $4" >&2; exit 2; }
-case "$2" in
-  "@x/hit@1.0.0"|"@x/published@1.0.0"|"@x/tagged@1.0.0"|"@x/flaky@1.0.0") echo "1.0.0" ;;
-  "@x/wrong@1.0.0") echo "9.9.9" ;;
-  "@x/down@1.0.0") echo "E404 Not Found" >&2; exit 1 ;;
-  *) exit 0 ;; # exit 0 with no answer: npm's shape for a missing version
-esac
-`);
-  chmodSync(npm, 0o755);
-  return { dir, npm };
+async function registryFixture(t) {
+  const server = createServer((request, response) => {
+    const [encodedName, version] = request.url.slice(1).split("/");
+    const name = decodeURIComponent(encodedName);
+    const status = name === "@x/down" ? 503 : name === "@x/missing" || version !== "1.0.0" ? 404 : 200;
+    response.writeHead(status, { "content-type": "application/json" });
+    response.end(JSON.stringify({ name, version: name === "@x/wrong" ? "9.9.9" : version }));
+  });
+  server.listen(0, "127.0.0.1");
+  await once(server, "listening");
+  t.after(() => {
+    server.closeAllConnections();
+    return new Promise((resolve) => server.close(resolve));
+  });
+  return `http://127.0.0.1:${server.address().port}/`;
 }
 
-test("the publish verifier accepts hits and names missing, wrong, and failed registry answers", () => {
-  const { dir, npm } = makeStubNpm();
+test("the publish verifier accepts hits and names missing, wrong, and failed registry answers", async (t) => {
+  const registry = await registryFixture(t);
   const root = makeWorkspace({
     "packages/hit": { name: "@x/hit", version: "1.0.0" },
     "packages/missing": { name: "@x/missing", version: "1.0.0" },
@@ -333,30 +332,29 @@ test("the publish verifier accepts hits and names missing, wrong, and failed reg
   });
   const allowlist = new Set(["@x/hit", "@x/missing", "@x/wrong", "@x/down", "@x/ghost"]);
   try {
-    const problems = verifyPublished({ npm, root, allowlist }).join("\n");
+    const problems = (await verifyPublished({ registry, root, allowlist })).join("\n");
     assert.doesNotMatch(problems, /@x\/hit/);
     assert.match(problems, /@x\/missing@1\.0\.0: not on the registry/);
-    assert.match(problems, /@x\/wrong@1\.0\.0: not on the registry \(registry answered "9\.9\.9"\)/);
-    assert.match(problems, /@x\/down@1\.0\.0: the registry query failed \(E404 Not Found\)/);
+    assert.match(problems, /@x\/wrong@1\.0\.0: not on the registry \(registry document does not match/);
+    assert.match(problems, /@x\/down@1\.0\.0: not on the registry \(HTTP 503\)/);
     assert.match(problems, /@x\/ghost: on the allowlist but not a workspace package/);
   } finally {
-    rmSync(dir, { recursive: true, force: true });
     rmSync(root, { recursive: true, force: true });
   }
 });
 
-test("the publish verifier reports an npm that cannot run at all", () => {
+test("the publish verifier reports an invalid registry URL", async () => {
   const root = makeWorkspace({ "packages/hit": { name: "@x/hit", version: "1.0.0" } });
   try {
-    const problems = verifyPublished({ npm: path.join(root, "no-such-npm"), root, allowlist: new Set(["@x/hit"]) }).join("\n");
-    assert.match(problems, /@x\/hit@1\.0\.0: the registry query could not run/);
+    const problems = (await verifyPublished({ registry: "not a URL", root, allowlist: new Set(["@x/hit"]) })).join("\n");
+    assert.match(problems, /@x\/hit@1\.0\.0: not on the registry \(registry request failed/);
   } finally {
     rmSync(root, { recursive: true, force: true });
   }
 });
 
-test("the tag step pushes each existing registry-confirmed tag by name and refuses the rest", () => {
-  const { dir, npm } = makeStubNpm();
+test("the tag step pushes each existing registry-confirmed tag by name and refuses the rest", async (t) => {
+  const registry = await registryFixture(t);
   const root = makeWorkspace({
     "packages/published": { name: "@x/published", version: "1.0.0" },
     "packages/tagged": { name: "@x/tagged", version: "1.0.0" },
@@ -376,7 +374,7 @@ test("the tag step pushes each existing registry-confirmed tag by name and refus
     return { status: 0, stdout: "", stderr: "" };
   };
   try {
-    const { pushed, problems } = tagPublished({ npm, root, allowlist, run });
+    const { pushed, problems } = await tagPublished({ registry, root, allowlist, run });
     const text = problems.join("\n");
     assert.deepEqual(pushed, ["@x/tagged@1.0.0"], "only the existing tag is pushed");
     assert.ok(calls.some((c) => c === "push origin refs/tags/@x/tagged@1.0.0"), "the intended tag is pushed by name");
@@ -390,7 +388,6 @@ test("the tag step pushes each existing registry-confirmed tag by name and refus
     assert.match(text, /@x\/flaky@1\.0\.0: push failed \(rejected\)/);
     assert.ok(!calls.some((c) => c.startsWith("tag ")), "no tag is ever created");
   } finally {
-    rmSync(dir, { recursive: true, force: true });
     rmSync(root, { recursive: true, force: true });
   }
 });

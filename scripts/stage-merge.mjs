@@ -100,6 +100,7 @@ export const stageBranches = {
   F109: 'fix/publish-guard-checkout',
   F112: 'fix/prepack-build-race',
   F111: 'feat/engine-jev-api',
+  F115: 'fix/exact-published-version',
 };
 
 export function manageStage(args, options = {}) {
