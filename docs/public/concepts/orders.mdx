@@ -20,26 +20,18 @@ or a text file all equally good places for an order to come from.
 
 ## One order, as the feature example carries it
 
-`examples/feature-delivery.ts` delivers one order: a short request a host
-would read from an issue tracker. This is the order, as the example file
-holds it; the analyse stage turns it into accepted criteria before any code
-runs, and everything after works against those.
+`examples/feature-delivery.ts` starts with a request to build a retry helper. The analysis step reads the request and produces acceptance criteria for the implementation and review steps.
 
 ```ts
-// The request this workflow delivers. A host reads it from an issue tracker; the
-// stages below see it only through the criteria the analyse stage accepts.
-const ISSUE =
-  'The checkout client must retry a failed request, must cap how many ' +
-  'times it retries, and must stop retrying when the caller aborts.';
+const FEATURE_BRIEF =
+  'Build a retry helper that retries failed requests, caps attempts, and stops when the caller aborts.';
 ```
 
+With scripted model responses, the example reaches the approval step and waits for a person. The example prints:
 
 ```text
 {
-  "status": "pass",
-  "implementRuns": 2,
-  "reviewRounds": 2,
-  "acceptedKickbacks": 1
+  "status": "paused"
 }
 ```
 

@@ -101,6 +101,7 @@ export const stageBranches = {
   F112: 'fix/prepack-build-race',
   F111: 'feat/engine-jev-api',
   F115: 'fix/exact-published-version',
+  F116: 'docs/orders-example-output',
 };
 
 export function manageStage(args, options = {}) {
