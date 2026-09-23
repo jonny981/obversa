@@ -1,0 +1,54 @@
+name: F114 Linux diagnostic
+
+on:
+  push:
+    branches: [fix/linux-crash-recovery]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: f114-linux-diagnostic
+  cancel-in-progress: false
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Make main available
+        run: git fetch origin main:main
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: corepack enable
+      - name: Record host and install
+        shell: bash
+        run: |
+          mkdir -p "$RUNNER_TEMP/f114"
+          { git rev-parse HEAD; uname -sm; node --version; pnpm --version; } > "$RUNNER_TEMP/f114/host.txt"
+          test "$(uname -m)" = x86_64
+          set +e
+          pnpm install --frozen-lockfile 2>&1 | tee "$RUNNER_TEMP/f114/install.log"
+          result=${PIPESTATUS[0]}
+          echo "$result" > "$RUNNER_TEMP/f114/install.exit"
+          if [ "$result" -ne 0 ]; then exit "$result"; fi
+          pnpm exec node --version >> "$RUNNER_TEMP/f114/host.txt"
+      - name: Full proof without changed test limits
+        shell: bash
+        run: |
+          set +e
+          pnpm verify:d15 2>&1 | tee "$RUNNER_TEMP/f114/proof.log"
+          result=${PIPESTATUS[0]}
+          echo "$result" > "$RUNNER_TEMP/f114/proof.exit"
+          exit "$result"
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: f114-${{ github.sha }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/f114/
+          retention-days: 7
+          if-no-files-found: error

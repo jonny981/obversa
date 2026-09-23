@@ -12,6 +12,29 @@ import {
 import { startSupervisedRun, type SupervisedRunHandle } from '../src/index.js';
 import { createLocalRunStorage } from '@obversa/runtime/storage/local';
 import { cleanupRepos, tmpRepo } from './git-helpers.js';
+import { supervisionStream } from '../src/supervised-record.js';
+
+const commandEvidence = vi.hoisted(() => ({ calls: 0, failures: [] as unknown[] }));
+vi.mock('@obversa/core/command', async (importOriginal) => {
+  const original = await importOriginal<typeof import('@obversa/core/command')>();
+  return {
+    ...original,
+    runOwnedCommand: async (...args: Parameters<typeof original.runOwnedCommand>) => {
+      commandEvidence.calls += 1;
+      try { return await original.runOwnedCommand(...args); }
+      catch (error) {
+        if (error instanceof original.OwnedCommandError && commandEvidence.failures.length < 4) {
+          commandEvidence.failures.push({
+            code: error.code, message: error.message.slice(0, 500),
+            stack: error.stack?.split('\n').slice(0, 6).join('\n').slice(0, 1_500),
+            remainingProcesses: error.remainingProcesses.slice(0, 16),
+          });
+        }
+        throw error;
+      }
+    },
+  };
+});
 
 // Real work: these tests create temporary Git repositories and write files
 // to disk, so this file declares its own time limit; the suite default is a
@@ -56,6 +79,8 @@ function graphFor(form: 'dag' | 'convergence') {
 
 describe.each(['dag', 'convergence'] as const)('supervised %s crash recovery', (form) => {
   it.each([1, 2, 3, 4])('preserves outward effects across D10 boundary %i', async (boundary) => {
+    commandEvidence.calls = 0;
+    commandEvidence.failures.length = 0;
     const root = await realpath(await mkdtemp(join(tmpdir(), 'obversa-supervised-crash-')));
     roots.push(root);
     const runRoot = await realpath(await tmpRepo());
@@ -83,6 +108,31 @@ describe.each(['dag', 'convergence'] as const)('supervised %s crash recovery', (
     });
     handles.push(handle);
     const result = await handle.done;
+    if (result.kind !== (boundary === 3 ? 'pause' : 'complete')) {
+      try {
+        const records = [];
+        for await (const event of createLocalRunStorage(storage).eventStore.read({
+          namespace: storage.namespace, streamId: supervisionStream('crash'),
+        })) {
+          const payload = event.payload as Record<string, unknown>;
+          records.push({
+            type: event.type, revision: event.revision, timestamp: event.timestamp,
+            cleanupSafe: payload.cleanupSafe, leaseRetained: payload.leaseRetained,
+            remainingProcesses: payload.remainingProcesses, restartCount: payload.restartCount,
+            exitCode: payload.exitCode,
+          });
+          if (records.length === 32) break;
+        }
+        // Only this fixed fixture's lifecycle and process identities; no env, prompts or output.
+        console.error('Supervised crash evidence:', JSON.stringify({
+          form, boundary, platform: process.platform, arch: process.arch,
+          node: process.version, commandEvidence, records,
+        }).slice(0, 16_384));
+      } catch {
+        console.error('Supervised crash evidence unavailable:', JSON.stringify({ form, boundary }));
+      }
+    }
+    expect(commandEvidence.calls).toBeGreaterThan(0);
     expect(result, JSON.stringify(result)).toMatchObject({ kind: boundary === 3 ? 'pause' : 'complete' });
     const status = await handle.status();
     expect(status.restartCount).toBe(1);
