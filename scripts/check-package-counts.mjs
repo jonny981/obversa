@@ -12,10 +12,27 @@ function numberWord(number) {
   return NUMBER_WORDS[number] ?? String(number);
 }
 
-function directoryCount(root, directory) {
-  return readdirSync(join(root, directory), { withFileTypes: true })
-    .filter((entry) => entry.isDirectory())
-    .length;
+// A directory under packages/ or plugins/ counts as a public package only
+// when it carries a readable manifest that does not say "private": true. A
+// manifest-less directory is not a package and is reported, not counted.
+function publicPackageNames(root, directory, failures) {
+  const names = [];
+  for (const entry of readdirSync(join(root, directory), { withFileTypes: true })) {
+    if (!entry.isDirectory()) continue;
+    const manifestPath = join(root, directory, entry.name, 'package.json');
+    let manifest;
+    try {
+      manifest = JSON.parse(readFileSync(manifestPath, 'utf8'));
+    } catch {
+      failures.push(`${directory}/${entry.name} has no readable package.json`);
+      continue;
+    }
+    if (manifest.private === true) continue;
+    names.push(typeof manifest.name === 'string' && manifest.name.length > 0
+      ? manifest.name
+      : `${directory}/${entry.name}`);
+  }
+  return names;
 }
 
 function oneLine(text) {
@@ -33,16 +50,26 @@ export function checkPackageCounts(root = ROOT) {
   }
 
   const total = allowlist.packages.length;
-  const packageCount = directoryCount(root, 'packages');
-  const pluginCount = directoryCount(root, 'plugins');
+  const allowlisted = new Set(allowlist.packages);
+  const failures = [];
+  const packageNames = publicPackageNames(root, 'packages', failures);
+  const pluginNames = publicPackageNames(root, 'plugins', failures);
+  const packageCount = packageNames.length;
+  const pluginCount = pluginNames.length;
   const packagesWord = numberWord(packageCount);
   const pluginsWord = numberWord(pluginCount);
   const readme = oneLine(readFileSync(join(root, 'README.md'), 'utf8'));
   const releasing = oneLine(readFileSync(join(root, 'docs/RELEASING.md'), 'utf8'));
-  const failures = [];
 
   if (total !== packageCount + pluginCount) {
-    failures.push(`publish allowlist has ${total} names, but packages/ and plugins/ contain ${packageCount + pluginCount} package directories`);
+    failures.push(`publish allowlist has ${total} names, but packages/ and plugins/ contain ${packageCount + pluginCount} public packages`);
+  }
+  for (const [directory, names] of [['packages', packageNames], ['plugins', pluginNames]]) {
+    for (const name of names) {
+      if (!allowlisted.has(name)) {
+        failures.push(`${name} (${directory}) is a public package missing from the publish allowlist`);
+      }
+    }
   }
   if (!new RegExp(`\\b${total} publishable packages\\.`).test(readme)) {
     failures.push(`README.md must say ${total} publishable packages`);

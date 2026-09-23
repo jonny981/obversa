@@ -391,6 +391,7 @@ const _f16TypeSurfaces: [SurfaceCallable, SurfaceStartCallable, ClientCallable, 
 type RunChildCallable = typeof runChild extends (...args: never[]) => unknown ? true : never;
 const _f22ProcessSurface: RunChildCallable = true;
 import { GrokCliEngine } from '@obversa/engine-grok-cli';
+import { JevApiEngine } from '@obversa/engine-jev-api';
 import { OpenCodeCliEngine } from '@obversa/engine-opencode-cli';
 import { runChild } from '@obversa/core';
 import {
@@ -544,6 +545,7 @@ const engines = {
   'claude-cli': new ClaudeCliEngine({ defaultModel: 'claude-test', cliBinary: '/usr/bin/false', permissionMode: 'auto' }),
   codex: new CodexEngine({ defaultModel: 'gpt-test', cliBinary: '/usr/bin/false', permissionMode: 'plan' }),
   'grok-cli': new GrokCliEngine({ executable: '/usr/bin/false', version: '1.0.5', identity: { provider: 'xai', modelFamily: 'grok-4' }, permissionMode: 'dontAsk' }),
+  'jev-api': new JevApiEngine({ endpoint: 'http://127.0.0.1:9', apiKey: 'test-key' }),
   'opencode-cli': new OpenCodeCliEngine({ executable: '/usr/bin/false', version: '1.18.23', identity: { provider: 'opencode', modelFamily: null } }),
 };
 assert.deepEqual(Object.values(engines).map(({ name }) => name).sort(), [
@@ -552,6 +554,7 @@ assert.deepEqual(Object.values(engines).map(({ name }) => name).sort(), [
   'claude-cli',
   'codex',
   'grok-cli',
+  'jev-api',
   'mock',
   'opencode-cli',
 ]);

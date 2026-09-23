@@ -219,6 +219,7 @@ that wrote the work is not the model that grades it.
 | `@obversa/engine-claude-cli` | the Claude CLI, one process per attempt | Claude CLI, host auth |
 | `@obversa/engine-codex-cli` | the Codex CLI | Codex CLI, host auth |
 | `@obversa/engine-grok-cli` | the Grok CLI | Grok CLI 1.0.5 |
+| `@obversa/engine-jev-api` | the Jev API | a Jev endpoint and API key |
 | `@obversa/engine-opencode-cli` | the OpenCode CLI | OpenCode CLI 1.18.23 |
 | `@obversa/engine-anthropic-api` | the Anthropic API | an API key |
 | `@obversa/engine-claude-agent-sdk` | the Claude Agent SDK | host Claude auth |
@@ -234,17 +235,19 @@ Write your own against the engine contract; it must pass the conformance kit.
 
 ## What is in this repository
 
-18 publishable packages. `packages/` holds the eight that define the
-product: `@obversa/obversa` installs the complete set, `@obversa/runtime`
+19 publishable packages. `packages/` holds the eight that define the
+product: `@obversa/obversa` installs its bundled dependencies, `@obversa/runtime`
 runs workflows, `@obversa/builtin-workflows`
 provides three ready-made recipes, `@obversa/runner` supervises stored
 runs, `@obversa/api` holds the shared contracts and checks,
 `@obversa/core` runs bounded child processes, and
 `@obversa/surface` and `@obversa/surface-diff` are the local
-review surface. `plugins/` holds the ten adapters: the six engines above,
+review surface. `plugins/` holds the eleven adapters: the seven engines above,
 three memory adapters (in process, in private Git references, and over a local
 Markdown corpus), and one notifier that posts a run's
-progress to a URL you supply.
+progress to a URL you supply. Not every available
+engine is bundled — install the Jev engine separately:
+`npm install @obversa/engine-jev-api`.
 `hosts/` holds the terminal host, which is not published.
 
 ## Requirements

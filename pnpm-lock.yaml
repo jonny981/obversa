@@ -34,6 +34,9 @@ importers:
       '@obversa/engine-grok-cli':
         specifier: workspace:^
         version: link:plugins/engine-grok-cli
+      '@obversa/engine-jev-api':
+        specifier: workspace:^
+        version: link:plugins/engine-jev-api
       '@obversa/engine-opencode-cli':
         specifier: workspace:^
         version: link:plugins/engine-opencode-cli
@@ -313,6 +316,12 @@ importers:
       '@obversa/core':
         specifier: workspace:^
         version: link:../../packages/core
+
+  plugins/engine-jev-api:
+    dependencies:
+      '@obversa/api':
+        specifier: workspace:^
+        version: link:../../packages/api
 
   plugins/engine-opencode-cli:
     dependencies:

@@ -1,14 +1,11 @@
 {
-  "name": "@obversa/core",
+  "name": "@obversa/engine-jev-api",
   "version": "0.1.0",
-  "description": "Bounded child-process execution shared by Obversa packages.",
+  "description": "Run one isolated engine attempt as a single Jev decision call over the TypeSafe API.",
   "author": "Jonny Neill <jonnyneill@hotmail.com>",
   "type": "module",
   "license": "MIT",
   "sideEffects": false,
-  "publishConfig": {
-    "access": "public"
-  },
   "engines": {
     "node": ">=22.12.0"
   },
@@ -18,22 +15,6 @@
     ".": {
       "types": "./dist/index.d.ts",
       "import": "./dist/index.js"
-    },
-    "./command": {
-      "types": "./dist/command/run.d.ts",
-      "import": "./dist/command.js"
-    },
-    "./claude-stream-json": {
-      "types": "./dist/claude-stream-json.d.ts",
-      "import": "./dist/claude-stream-json.js"
-    },
-    "./claude-tools": {
-      "types": "./dist/claude-tools.d.ts",
-      "import": "./dist/claude-tools.js"
-    },
-    "./testing": {
-      "types": "./dist/testing.d.ts",
-      "import": "./dist/testing.js"
     }
   },
   "files": [
@@ -41,6 +22,9 @@
     "README.md",
     "LICENSE"
   ],
+  "publishConfig": {
+    "access": "public"
+  },
   "scripts": {
     "build": "tsup && tsc -p tsconfig.build.json",
     "test": "vitest run",
@@ -50,13 +34,9 @@
     "prepublishOnly": "node ../../scripts/check-publish-allowlist.mjs"
   },
   "dependencies": {
-    "@obversa/api": "workspace:*"
-  },
-  "devDependencies": {
-    "@types/node": "22.12.0"
+    "@obversa/api": "workspace:^"
   },
   "keywords": [
-    "process",
     "agent",
     "graph",
     "workflow",

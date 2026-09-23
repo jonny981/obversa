@@ -1,0 +1,11 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "paths": {
+      "@obversa/api": ["../../packages/api/src/index.ts"],
+      "@obversa/api/testing": ["../../packages/api/src/testing.ts"],
+      "@obversa/engine-jev-api": ["./src/index.ts"]
+    }
+  },
+  "include": ["src", "tests", "tsup.config.ts", "vitest.config.ts"]
+}

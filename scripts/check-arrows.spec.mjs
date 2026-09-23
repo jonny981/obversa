@@ -81,7 +81,7 @@ manifest("plugins/notify-webhook", {
   type: "module",
   exports: { ".": "./src/index.mjs" },
 });
-for (const name of ["engine-claude-agent-sdk", "engine-anthropic-api", "engine-claude-cli", "engine-codex-cli", "engine-grok-cli", "engine-opencode-cli"]) {
+for (const name of ["engine-claude-agent-sdk", "engine-anthropic-api", "engine-claude-cli", "engine-codex-cli", "engine-grok-cli", "engine-jev-api", "engine-opencode-cli"]) {
   manifest(`plugins/${name}`, {
     name: `@obversa/${name}`,
     type: "module",
@@ -119,7 +119,7 @@ file("packages/surface/src/index.mjs", "export const surfacer = 1;\n");
 file("plugins/memory-git/src/index.mjs", "export const gitMemory = 1;\n");
 file("plugins/memory-simple/src/index.mjs", "export const simple = 1;\n");
 file("plugins/memory-markdown/src/index.mjs", "export const search = 1;\n");
-for (const name of ["engine-claude-agent-sdk", "engine-anthropic-api", "engine-claude-cli", "engine-codex-cli", "engine-grok-cli", "engine-opencode-cli"]) {
+for (const name of ["engine-claude-agent-sdk", "engine-anthropic-api", "engine-claude-cli", "engine-codex-cli", "engine-grok-cli", "engine-jev-api", "engine-opencode-cli"]) {
   file(`plugins/${name}/src/index.mjs`, `export const name = ${JSON.stringify(name)};\n`);
 }
 file("packages/surface-diff/src/h.test.mjs", "export const t = 1;\n");

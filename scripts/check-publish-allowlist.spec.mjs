@@ -5,11 +5,11 @@ import os from "node:os";
 import path from "node:path";
 import test from "node:test";
 
-import { GIT_DIRS, HOOK_COMMAND, RELEASE_REGISTRY, RELEASE_WORKFLOW, RELEASE_WORKFLOW_MARKERS, audit, checkHook, gitBin, listWorkspacePackages } from "./check-publish-allowlist.mjs";
+import { GIT_DIRS, HOOK_COMMAND, RELEASE_REGISTRY, RELEASE_WORKFLOW, RELEASE_WORKFLOW_MARKERS, ROOT_BUILD_COMMAND, audit, checkHook, gitBin, listWorkspacePackages } from "./check-publish-allowlist.mjs";
 import { verifyPublished } from "./verify-published.mjs";
 import { tagPublished } from "./tag-published.mjs";
 
-function makeWorkspace(packages, { rootManifest = { name: "workspace", private: true }, workflow = null } = {}) {
+function makeWorkspace(packages, { rootManifest = { name: "workspace", private: true, scripts: { build: ROOT_BUILD_COMMAND } }, workflow = null } = {}) {
   const root = mkdtempSync(path.join(os.tmpdir(), "publish-guard-"));
   writeFileSync(path.join(root, "pnpm-workspace.yaml"), "packages:\n  - packages/*\n  - plugins/*\n");
   writeFileSync(path.join(root, "package.json"), JSON.stringify(rootManifest));
@@ -27,7 +27,7 @@ function makeWorkspace(packages, { rootManifest = { name: "workspace", private: 
 // The fixture publishable manifest: allowlisted, hooked, scoped-public, and
 // carrying no registry route — the shape the combined release tree requires.
 const PUBLISHABLE = { scripts: { prepublishOnly: HOOK_COMMAND }, publishConfig: { access: "public" } };
-const WORKFLOW = `jobs:\n  publish:\n    environment: release\n    steps:\n      - run: pnpm changeset publish\n`;
+const WORKFLOW = `jobs:\n  publish:\n    environment: release\n    steps:\n      - run: pnpm build\n      - run: pnpm changeset publish\n`;
 
 test("the live workspace passes the audit against the live allowlist", () => {
   assert.deepEqual(audit(), []);
@@ -49,7 +49,7 @@ test("listWorkspacePackages follows every dir/* glob in pnpm-workspace.yaml", ()
 test("the audit fails closed: an unlisted public package, a missing or wrong hook, a listed private one, and a listed ghost", () => {
   const root = makeWorkspace({
     "packages/pub": { name: "@x/pub", ...PUBLISHABLE },
-    "packages/nohook": { name: "@x/nohook", scripts: { build: "tsup" }, publishConfig: { access: "public" } },
+    "packages/nohook": { name: "@x/nohook", scripts: { build: "tsup" }, main: "./dist/index.js", publishConfig: { access: "public" } },
     // Lookalikes that mention the script but do not run the guard.
     "packages/echo": { name: "@x/echo", scripts: { prepublishOnly: "echo check-publish-allowlist.mjs" }, publishConfig: { access: "public" } },
     "packages/audit": { name: "@x/audit", scripts: { prepublishOnly: "node ../../scripts/check-publish-allowlist.mjs --audit" }, publishConfig: { access: "public" } },
@@ -59,9 +59,10 @@ test("the audit fails closed: an unlisted public package, a missing or wrong hoo
   try {
     const problems = audit({ root, allowlist: new Set(["@x/ok", "@x/nohook", "@x/echo", "@x/audit", "@x/priv", "@x/ghost"]) });
     const text = problems.join("\n");
-    assert.equal(problems.length, 6, text);
+    assert.equal(problems.length, 7, text);
     assert.match(text, /@x\/pub .* not on the allowlist/);
     assert.match(text, /@x\/nohook .*prepublishOnly is not exactly/);
+    assert.match(text, /@x\/nohook .*prepack is not exactly/);
     assert.match(text, /@x\/echo .*prepublishOnly is not exactly/);
     assert.match(text, /@x\/audit .*prepublishOnly is not exactly/);
     assert.match(text, /@x\/priv .* marked private/);
@@ -128,6 +129,36 @@ test("the audit pins the workspace root private, so a version on it cannot make 
   } finally {
     rmSync(publicRoot, { recursive: true, force: true });
     rmSync(privateRoot, { recursive: true, force: true });
+  }
+});
+
+test("the audit requires the root build to create the successful-build record", () => {
+  const root = makeWorkspace({}, {
+    rootManifest: { name: "workspace", private: true, scripts: { build: "pnpm --recursive run build" } },
+    workflow: WORKFLOW,
+  });
+  try {
+    assert.match(audit({ root, allowlist: new Set() }).join("\n"), /root scripts\.build is not exactly/);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("the audit refuses to let a declared dist target lose both its build and proof hook", () => {
+  const root = makeWorkspace({
+    "packages/pub": {
+      name: "@obversa/pub",
+      version: "1.0.0",
+      ...PUBLISHABLE,
+      main: "./dist/index.js",
+    },
+  }, { workflow: WORKFLOW });
+  try {
+    const problems = audit({ root, allowlist: new Set(["@obversa/pub"]) }).join("\n");
+    assert.match(problems, /@obversa\/pub .*declares dist output but has no scripts\.build/);
+    assert.match(problems, /@obversa\/pub .*scripts\.prepack is not exactly/);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
   }
 });
 
@@ -231,12 +262,33 @@ test("the publish guard asks a git from the system directories, whatever git is 
   writeFileSync(path.join(fakeBin, "git"), "#!/bin/sh\ncase \"$*\" in *rev-parse*) echo main;; *) echo;; esac\n");
   chmodSync(path.join(fakeBin, "git"), 0o755);
   const repoRoot = new URL("..", import.meta.url).pathname;
-  const target = path.join(repoRoot, "packages", "api");
-  const direct = JSON.stringify(checkHook({ cwd: target }));
-  const child = spawnSync(process.execPath, ["-e", "import('./scripts/check-publish-allowlist.mjs').then((m) => console.log(JSON.stringify(m.checkHook({ cwd: process.argv[1] }))))", target], { cwd: repoRoot, encoding: "utf8", env: { ...process.env, PATH: `${fakeBin}${path.delimiter}${process.env.PATH}` } });
-  assert.equal(child.status, 0, child.stderr);
-  assert.equal(child.stdout.trim(), direct, "the same answer with the fake git first on PATH");
-  assert.ok(direct.includes("main") || direct.includes("clean") || direct === "[]", "the real git answered about this checkout");
+  const { root, cwd, git } = makeReleaseRepo();
+  const releaseEnv = { OBVERSA_RELEASE: "1" };
+  const childEnv = { ...process.env, PATH: `${fakeBin}${path.delimiter}${process.env.PATH}` };
+  const allowlist = new Set(["@x/p"]);
+  const childProblems = () => {
+    const child = spawnSync(process.execPath, ["-e", "import('./scripts/check-publish-allowlist.mjs').then((m) => console.log(JSON.stringify(m.checkHook({ cwd: process.argv[1], env: { OBVERSA_RELEASE: '1' }, allowlist: new Set(['@x/p']) }))))", cwd], { cwd: repoRoot, encoding: "utf8", env: childEnv });
+    assert.equal(child.status, 0, child.stderr);
+    return child.stdout.trim();
+  };
+  const assertSameResult = (message) => {
+    const actual = childProblems();
+    assert.equal(actual, JSON.stringify(checkHook({ cwd, env: releaseEnv, allowlist })), message);
+    return actual;
+  };
+  try {
+    assert.equal(assertSameResult("a clean main checkout passes with the fake git first on PATH"), "[]");
+
+    git("checkout", "-q", "-b", "feature");
+    assert.match(assertSameResult("the fake git cannot hide the wrong branch"), /releases publish from main/);
+
+    git("checkout", "-q", "main");
+    writeFileSync(path.join(cwd, "scratch.txt"), "wip\n");
+    assert.match(assertSameResult("the fake git cannot hide a dirty tree"), /working tree is not clean/);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+    rmSync(fakeBin, { recursive: true, force: true });
+  }
 });
 
 // The npm the release workflow publishes with is the root-pinned devDependency,

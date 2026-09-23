@@ -377,6 +377,15 @@ export const EXPECTED_FILES = {
     'package/dist/index.js.map',
     'package/package.json',
   ],
+  '@obversa/engine-jev-api': [
+    'package/LICENSE',
+    'package/README.md',
+    'package/dist/index.d.ts',
+    'package/dist/index.js',
+    'package/dist/index.js.map',
+    'package/dist/jev-api.d.ts',
+    'package/package.json',
+  ],
   '@obversa/engine-opencode-cli': [
     'package/LICENSE',
     'package/README.md',

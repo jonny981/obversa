@@ -5,13 +5,13 @@
 
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { copyFileSync, cpSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import { chmodSync, copyFileSync, cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import test from "node:test";
 
 import { allowlistedDirectories, checkTarball, EXPECTED_FILES } from "./check-tarballs.mjs";
-import { assertPackedPackage } from "./check-packages.mjs";
+import { acceptsAlreadyPublishedRefusal, assertDryRunIdentity, assertPackedPackage } from "./check-packages.mjs";
 
 const realPackTests = { skip: process.env.OBVERSA_TEST_REAL_PACK === "1" ? false : "set OBVERSA_TEST_REAL_PACK=1 to run real pack and npm dry-run checks" };
 
@@ -130,7 +130,7 @@ function packageWorkspace(name) {
   const directory = pkg(`${name}/packages/relocated-memory`, {
     name: "@obversa/memory-simple",
     version: "0.1.0",
-    publishConfig: { access: "public", registry: "http://publish-guard.invalid/", "@obversa:registry": "http://publish-guard.invalid/" },
+    publishConfig: { access: "public" },
     exports: { ".": { types: "./dist/index.d.ts", default: "./dist/index.js" } },
   }, {
     "LICENSE": "MIT\n",
@@ -167,11 +167,22 @@ for (const script of ["check-tarballs.mjs", "check-packages.mjs"]) {
 test("the package command follows the allowlist and refuses an added unpinned package", realPackTests, () => {
   const { root } = packageWorkspace("package-allowlist");
   pkg("package-allowlist/packages/new", { name: "@fixture/unpinned" }, {});
-  const check = () => spawnSync(process.execPath, [join(root, "scripts/check-packages.mjs")], { cwd: root, encoding: "utf8" });
+  const fakeBin = join(root, "fake-bin");
+  const fakeNpm = join(fakeBin, "npm");
+  const marker = join(root, "ambient-npm-ran");
+  mkdirSync(fakeBin);
+  writeFileSync(fakeNpm, `#!/bin/sh\ntouch ${JSON.stringify(marker)}\nexit 91\n`);
+  chmodSync(fakeNpm, 0o755);
+  const check = () => spawnSync(process.execPath, [join(root, "scripts/check-packages.mjs")], {
+    cwd: root,
+    encoding: "utf8",
+    env: { ...process.env, PATH: `${fakeBin}:${process.env.PATH}`, npm_config_npm_path: fakeNpm },
+  });
   const allowed = check();
   assert.equal(allowed.status, 0, `${allowed.stdout}\n${allowed.stderr}`);
   assert.match(allowed.stdout, /@obversa\/memory-simple@0\.1\.0 \(6 files\)/);
   assert.doesNotMatch(allowed.stdout, /@fixture\/unpinned/);
+  assert.equal(existsSync(marker), false, "the checker must not run npm from PATH or npm_config_npm_path");
 
   writeFileSync(join(root, "scripts/publish-allowlist.json"), JSON.stringify({ packages: ["@obversa/memory-simple", "@fixture/unpinned"] }));
   const added = check();
@@ -188,6 +199,23 @@ test("the package command checks the version from the workspace manifest", realP
   const result = spawnSync(process.execPath, [join(root, "scripts/check-packages.mjs")], { cwd: root, encoding: "utf8" });
   assert.equal(result.status, 0, `${result.stdout}\n${result.stderr}`);
   assert.match(result.stdout, /@obversa\/memory-simple@0\.2\.3 \(6 files\)/);
+});
+
+test("an exact already-published refusal passes only for the registry's exact version", () => {
+  const definition = { name: "@obversa/api", version: "0.1.0" };
+  const refusal = "You cannot publish over the previously published versions: 0.1.0.";
+
+  assert.equal(acceptsAlreadyPublishedRefusal(definition, refusal, "0.1.0"), true);
+  assert.equal(acceptsAlreadyPublishedRefusal(definition, refusal, "0.1.1"), false);
+  assert.equal(acceptsAlreadyPublishedRefusal(definition, refusal, ""), false);
+  assert.equal(acceptsAlreadyPublishedRefusal(definition, "npm publish failed for another reason", "0.1.0"), false);
+});
+
+test("the pinned npm dry-run response must carry the exact package identity", () => {
+  const definition = { name: "@obversa/api", version: "0.1.0" };
+  assert.doesNotThrow(() => assertDryRunIdentity(definition, '{"@obversa/api":{"name":"@obversa/api","version":"0.1.0"}}'));
+  assert.throws(() => assertDryRunIdentity(definition, '{"@obversa/api":{"name":"@obversa/core","version":"0.1.0"}}'), /wrong package identity/);
+  assert.throws(() => assertDryRunIdentity(definition, '{"@obversa/api":{"name":"@obversa/api","version":"0.1.1"}}'), /wrong package identity/);
 });
 
 test("the packed archive checker reports a missing LICENSE once", () => {

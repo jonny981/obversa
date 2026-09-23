@@ -206,7 +206,7 @@ module.exports = {
       name: 'engine-plugin-reaches-engine-only',
       comment: 'an engine plugin reaches API contracts and core execution only',
       severity: 'error',
-      from: { path: '^plugins/(engine-(?:anthropic-api|claude-cli|codex-cli|grok-cli|opencode-cli))/' },
+      from: { path: '^plugins/(engine-(?:anthropic-api|claude-cli|codex-cli|grok-cli|jev-api|opencode-cli))/' },
       to: { path: '^(packages|plugins)/', pathNot: '^(plugins/$1/|packages/(api|core)/)' },
     },
     {

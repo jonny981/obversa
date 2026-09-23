@@ -18,6 +18,7 @@ const expected = new Map([
   ['@obversa/engine-claude-cli', 'plugins/engine-claude-cli'],
   ['@obversa/engine-codex-cli', 'plugins/engine-codex-cli'],
   ['@obversa/engine-grok-cli', 'plugins/engine-grok-cli'],
+  ['@obversa/engine-jev-api', 'plugins/engine-jev-api'],
   ['@obversa/engine-opencode-cli', 'plugins/engine-opencode-cli'],
   ['@obversa/memory-git', 'plugins/memory-git'],
   ['@obversa/memory-simple', 'plugins/memory-simple'],
@@ -27,18 +28,43 @@ const expected = new Map([
 
 const manifestAt = (directory) => JSON.parse(readFileSync(join(directory, 'package.json'), 'utf8'));
 
+function localTargets(value, targets = []) {
+  if (typeof value === 'string') {
+    if (value.startsWith('./')) targets.push(value.slice(2));
+  } else if (value && typeof value === 'object') {
+    for (const nested of Object.values(value)) localTargets(nested, targets);
+  }
+  return targets;
+}
+
+function declaresDistOutput(manifest) {
+  return [manifest.main, manifest.types, manifest.exports, manifest.bin]
+    .flatMap((value) => localTargets(value))
+    .some((target) => target === 'dist' || target.startsWith('dist/'));
+}
+
 function assertExactVersion(version, name) {
   assert.equal(typeof version, 'string', `${name}: version must be an exact valid SemVer`);
   assert.notEqual(validVersion(version), null, `${name}: version must be an exact valid SemVer`);
 }
 
-test('all eighteen public packages have the accepted names and locations', () => {
+test('all nineteen public packages have the accepted names and locations', () => {
   const allowlist = JSON.parse(readFileSync('scripts/publish-allowlist.json', 'utf8'));
   assert.deepEqual(allowlist.packages, [...expected.keys()].sort());
   for (const [name, directory] of expected) {
     const manifest = manifestAt(directory);
     assert.equal(manifest.name, name, directory);
     assertExactVersion(manifest.version, name);
+  }
+});
+
+test('public packages with declared dist output build and validate it without rebuilding during prepack', () => {
+  for (const directory of expected.values()) {
+    const manifest = manifestAt(directory);
+    const scripts = manifest.scripts ?? {};
+    const buildProofRequired = declaresDistOutput(manifest);
+    assert.equal(typeof scripts.build === 'string', buildProofRequired, directory);
+    assert.equal(scripts.prepack, buildProofRequired ? 'node ../../scripts/check-publish-allowlist.mjs --build-proof' : undefined, directory);
   }
 });
 
@@ -60,9 +86,21 @@ test('release verification reaches package shape, clean consumer, and retired-na
   assert.match(scripts['check:consumer'], /node --test scripts\/check-clean-consumer\.spec\.mjs/);
 });
 
-test('@obversa/obversa installs every other public package', () => {
+test('release builds use the recorded root build and the manual sequence stops on failure', () => {
+  const root = manifestAt('.');
+  const releaseWorkflow = readFileSync('.github/workflows/release.yml', 'utf8');
+  const releasing = readFileSync('docs/RELEASING.md', 'utf8');
+  assert.equal(root.scripts.build, 'node scripts/build-workspace.mjs');
+  assert.match(root.scripts['test:publish-guard'], /scripts\/check-build-proof\.spec\.mjs/);
+  assert.match(releaseWorkflow, /- run: pnpm build/);
+  assert.doesNotMatch(releaseWorkflow, /- run: pnpm --recursive --if-present run build/);
+  assert.match(releasing, /pnpm build && \\\n  OBVERSA_RELEASE=1 pnpm changeset publish && \\\n  node scripts\/tag-published\.mjs && \\\n  node scripts\/verify-published\.mjs/);
+});
+
+test('@obversa/obversa installs every other published package', () => {
   const dependencies = manifestAt('packages/obversa').dependencies;
-  assert.deepEqual(Object.keys(dependencies).sort(), [...expected.keys()].filter((name) => name !== '@obversa/obversa').sort());
+  const notYetPublished = new Set(['@obversa/engine-jev-api']);
+  assert.deepEqual(Object.keys(dependencies).sort(), [...expected.keys()].filter((name) => name !== '@obversa/obversa' && !notYetPublished.has(name)).sort());
 });
 
 test('the four core packages use exact workspace references while API remains a runtime peer', () => {

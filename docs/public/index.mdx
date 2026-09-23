@@ -243,7 +243,7 @@ mechanisms they are built from.
 
 | Package | Purpose | Version |
 | --- | --- | --- |
-| `@obversa/obversa` | Installs every public package together | `0.1.0` |
+| `@obversa/obversa` | Installs the bundled Obversa packages | `0.1.0` |
 | `@obversa/runtime` | Compiles and runs pipeline, review-loop, and DAG graph forms | `0.1.0` |
 | `@obversa/runner` | Supervises stored graph runs in bounded workers | `0.1.0` |
 | `@obversa/api` | Defines every contract: engine, memory, graph, events, artifacts, workspace, callbacks, proofs and run definitions, with their validators | `0.1.0` |
@@ -261,9 +261,12 @@ mechanisms they are built from.
 | `@obversa/engine-codex-cli` | Runs one engine attempt through the Codex CLI | `0.1.0` |
 | `@obversa/engine-grok-cli` | Runs one engine attempt through the Grok CLI | `0.1.0` |
 | `@obversa/engine-opencode-cli` | Runs one engine attempt through the OpenCode CLI | `0.1.0` |
+| `@obversa/engine-jev-api` | Answers decision questions over recorded run state through the Jev API | `0.1.0` |
 
-The six engine plugins, three memory adapters and the notifier have their
-own pages in the Packages group. API, core, runtime and runner share one
+The seven engine plugins, three memory adapters and the notifier have their
+own pages in the Packages group. Not every available engine is
+bundled — install the Jev engine separately: `npm install
+@obversa/engine-jev-api`. API, core, runtime and runner share one
 version. Other packages keep their own manifest versions.
 
 The packages have one dependency direction. The runtime imports the memory port.

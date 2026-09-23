@@ -9,6 +9,7 @@
     "@obversa/engine-claude-cli",
     "@obversa/engine-codex-cli",
     "@obversa/engine-grok-cli",
+    "@obversa/engine-jev-api",
     "@obversa/engine-opencode-cli",
     "@obversa/memory-git",
     "@obversa/memory-markdown",

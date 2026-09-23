@@ -89,6 +89,10 @@ const KNOWN_DEBT = [
     why: 'one fragment: the binding alone',
   },
   {
+    page: 'packages/engine-jev-api.mdx', fault: 'wholefile', owner: 'D35',
+    why: 'one fragment: the binding alone',
+  },
+  {
     page: 'packages/engine-opencode-cli.mdx', fault: 'wholefile', owner: 'D35',
     why: 'one fragment: the binding alone',
   },
