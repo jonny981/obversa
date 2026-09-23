@@ -6,6 +6,7 @@ import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { spawnSync } from 'node:child_process';
 import { allowlistedDirectories, EXPECTED_FILES, withoutChunkHash } from './check-tarballs.mjs';
+import { RELEASE_REGISTRY } from './check-publish-allowlist.mjs';
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 async function workspacePackages() {
@@ -52,6 +53,16 @@ function exportTargets(value, output = []) {
   return output;
 }
 
+export function acceptsAlreadyPublishedRefusal(definition, refusal, publishedVersion) {
+  return refusal.includes(`You cannot publish over the previously published versions: ${definition.version}.`)
+    && publishedVersion === definition.version;
+}
+
+export function readDryRunIdentity(output) {
+  const { name, version } = JSON.parse(output);
+  return { name, version };
+}
+
 export function assertPackedPackage(definition, tarball) {
   const entries = archiveEntries(tarball);
   const failures = [];
@@ -91,19 +102,33 @@ export function assertPackedPackage(definition, tarball) {
     throw new Error(`${definition.name} archive is invalid:\n- ${failures.join('\n- ')}`);
   }
 
-  const dryRun = run('npm', [
-    'publish',
-    tarball,
-    '--dry-run',
-    '--ignore-scripts',
-    '--access',
-    'public',
-    '--json',
-  ]);
-  const reports = JSON.parse(dryRun);
-  const report = reports[definition.name];
-  if (report?.name !== definition.name || report?.version !== definition.version) {
-    throw new Error(`${definition.name} npm dry-run reported the wrong package identity`);
+  try {
+    const dryRun = run('npm', [
+      'publish',
+      tarball,
+      '--dry-run',
+      '--ignore-scripts',
+      '--access',
+      'public',
+      '--json',
+    ]);
+    const report = readDryRunIdentity(dryRun);
+    if (report?.name !== definition.name || report?.version !== definition.version) {
+      throw new Error(`${definition.name} npm dry-run reported the wrong package identity`);
+    }
+  } catch (error) {
+    const refusal = error instanceof Error ? error.message : String(error);
+    const expectedRefusal = `You cannot publish over the previously published versions: ${definition.version}.`;
+    if (!refusal.includes(expectedRefusal)) throw error;
+
+    const publishedVersion = run('npm', [
+      'view',
+      `${definition.name}@${definition.version}`,
+      '--registry',
+      RELEASE_REGISTRY,
+      'version',
+    ]).trim();
+    if (!acceptsAlreadyPublishedRefusal(definition, refusal, publishedVersion)) throw error;
   }
 
   return entries.length;

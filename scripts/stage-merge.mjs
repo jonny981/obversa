@@ -98,6 +98,7 @@ export const stageBranches = {
   F97: 'docs/recut-final-1-0-0',
   F108: 'feat/release-packages',
   F109: 'fix/publish-guard-checkout',
+  F112: 'fix/prepack-build-race',
 };
 
 export function manageStage(args, options = {}) {

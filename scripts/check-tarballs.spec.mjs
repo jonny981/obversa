@@ -11,7 +11,7 @@ import { dirname, join } from "node:path";
 import test from "node:test";
 
 import { allowlistedDirectories, checkTarball, EXPECTED_FILES } from "./check-tarballs.mjs";
-import { assertPackedPackage } from "./check-packages.mjs";
+import { acceptsAlreadyPublishedRefusal, assertPackedPackage, readDryRunIdentity } from "./check-packages.mjs";
 
 const realPackTests = { skip: process.env.OBVERSA_TEST_REAL_PACK === "1" ? false : "set OBVERSA_TEST_REAL_PACK=1 to run real pack and npm dry-run checks" };
 
@@ -188,6 +188,23 @@ test("the package command checks the version from the workspace manifest", realP
   const result = spawnSync(process.execPath, [join(root, "scripts/check-packages.mjs")], { cwd: root, encoding: "utf8" });
   assert.equal(result.status, 0, `${result.stdout}\n${result.stderr}`);
   assert.match(result.stdout, /@obversa\/memory-simple@0\.2\.3 \(6 files\)/);
+});
+
+test("an exact already-published refusal passes only for the registry's exact version", () => {
+  const definition = { name: "@obversa/api", version: "0.1.0" };
+  const refusal = "You cannot publish over the previously published versions: 0.1.0.";
+
+  assert.equal(acceptsAlreadyPublishedRefusal(definition, refusal, "0.1.0"), true);
+  assert.equal(acceptsAlreadyPublishedRefusal(definition, refusal, "0.1.1"), false);
+  assert.equal(acceptsAlreadyPublishedRefusal(definition, refusal, ""), false);
+  assert.equal(acceptsAlreadyPublishedRefusal(definition, "npm publish failed for another reason", "0.1.0"), false);
+});
+
+test("the npm dry-run response carries the package identity directly", () => {
+  assert.deepEqual(readDryRunIdentity('{"name":"@obversa/api","version":"0.1.0"}'), {
+    name: "@obversa/api",
+    version: "0.1.0",
+  });
 });
 
 test("the packed archive checker reports a missing LICENSE once", () => {

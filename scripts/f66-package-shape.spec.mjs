@@ -42,6 +42,11 @@ test('all eighteen public packages have the accepted names and locations', () =>
   }
 });
 
+test('public package manifests have no prepack hook', () => {
+  const rebuilding = [...expected.values()].filter((directory) => manifestAt(directory).scripts?.prepack);
+  assert.deepEqual(rebuilding, []);
+});
+
 test('package versions may advance but remain exact SemVer', () => {
   assert.doesNotThrow(() => assertExactVersion('0.1.1+build.1', '@obversa/example'));
   assert.throws(() => assertExactVersion('next', '@obversa/example'), /version must be an exact valid SemVer/);

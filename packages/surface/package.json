@@ -17,8 +17,7 @@
     "test": "node --test --test-timeout=60000 test/*.test.mjs",
     "typecheck": "tsc -p tsconfig.json && tsc -p tsconfig.browser.json",
     "prepublishOnly": "node ../../scripts/check-publish-allowlist.mjs",
-    "build": "tsc -p tsconfig.build.json && tsc -p tsconfig.build-browser.json",
-    "prepack": "pnpm run build"
+    "build": "tsc -p tsconfig.build.json && tsc -p tsconfig.build-browser.json"
   },
   "engines": {
     "node": ">=22.12.0"

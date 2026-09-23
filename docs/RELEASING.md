@@ -76,6 +76,7 @@ repository secret for the guarded workflow, or publish once from a clean `main`
 checkout with Jonny's npm login:
 
 ```bash
+pnpm build
 OBVERSA_RELEASE=1 pnpm changeset publish
 node scripts/tag-published.mjs
 node scripts/verify-published.mjs
