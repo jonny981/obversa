@@ -16,6 +16,7 @@
   "scripts": {
     "test": "node --test --test-timeout=60000 test/*.test.mjs",
     "typecheck": "tsc -p tsconfig.json && tsc -p tsconfig.browser.json",
+    "prepack": "node ../../scripts/check-publish-allowlist.mjs --build-proof",
     "prepublishOnly": "node ../../scripts/check-publish-allowlist.mjs",
     "build": "tsc -p tsconfig.build.json && tsc -p tsconfig.build-browser.json"
   },

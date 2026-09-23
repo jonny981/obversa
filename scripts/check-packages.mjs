@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 
 import { mkdtemp, readdir, readFile, rm } from 'node:fs/promises';
+import { createRequire } from 'node:module';
 import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -9,6 +10,10 @@ import { allowlistedDirectories, EXPECTED_FILES, withoutChunkHash } from './chec
 import { RELEASE_REGISTRY } from './check-publish-allowlist.mjs';
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '..');
+const require = createRequire(import.meta.url);
+const npmManifestPath = require.resolve('npm/package.json');
+const npmManifest = require('npm/package.json');
+const npmCli = join(dirname(npmManifestPath), npmManifest.bin.npm);
 async function workspacePackages() {
   return Promise.all(allowlistedDirectories(root).map(async (directory) => {
     const { name, version } = JSON.parse(await readFile(join(directory, 'package.json'), 'utf8'));
@@ -58,9 +63,11 @@ export function acceptsAlreadyPublishedRefusal(definition, refusal, publishedVer
     && publishedVersion === definition.version;
 }
 
-export function readDryRunIdentity(output) {
-  const { name, version } = JSON.parse(output);
-  return { name, version };
+export function assertDryRunIdentity(definition, output) {
+  const report = JSON.parse(output)[definition.name];
+  if (report?.name !== definition.name || report?.version !== definition.version) {
+    throw new Error(`${definition.name} npm dry-run reported the wrong package identity`);
+  }
 }
 
 export function assertPackedPackage(definition, tarball) {
@@ -103,7 +110,7 @@ export function assertPackedPackage(definition, tarball) {
   }
 
   try {
-    const dryRun = run('npm', [
+    const dryRun = run(process.execPath, [npmCli,
       'publish',
       tarball,
       '--dry-run',
@@ -112,16 +119,13 @@ export function assertPackedPackage(definition, tarball) {
       'public',
       '--json',
     ]);
-    const report = readDryRunIdentity(dryRun);
-    if (report?.name !== definition.name || report?.version !== definition.version) {
-      throw new Error(`${definition.name} npm dry-run reported the wrong package identity`);
-    }
+    assertDryRunIdentity(definition, dryRun);
   } catch (error) {
     const refusal = error instanceof Error ? error.message : String(error);
     const expectedRefusal = `You cannot publish over the previously published versions: ${definition.version}.`;
     if (!refusal.includes(expectedRefusal)) throw error;
 
-    const publishedVersion = run('npm', [
+    const publishedVersion = run(process.execPath, [npmCli,
       'view',
       `${definition.name}@${definition.version}`,
       '--registry',

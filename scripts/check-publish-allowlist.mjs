@@ -5,7 +5,7 @@
 // cannot stop that — shipped plugins must stay publishable for a standalone
 // runtime consumer — so the guard is an explicit allowlist plus a release gate.
 //
-// Two modes:
+// Three modes:
 //   1. Hook mode (default), run as a package's `prepublishOnly` script with the
 //      package directory as cwd: refuse unless OBVERSA_RELEASE=1 is set (the
 //      explicit release act), the package name is on
@@ -30,6 +30,10 @@
 //      check that the sanctioned path is present, not proof of the GitHub
 //      environment's protection rules, which only a human sees in the repo
 //      settings.
+//   3. `--build-proof`, run as each build-bearing package's read-only prepack
+//      hook: refuse unless `pnpm build` completed on the current enumerated
+//      source/configuration inputs and every recorded workspace output remains
+//      byte-identical. It never builds, cleans or writes package output.
 //
 // The release path: `.github/workflows/release.yml` runs `changeset publish`
 // in a protected environment with `id-token: write`. Changesets invokes
@@ -48,8 +52,9 @@
 // environment approval itself. This guard exists to stop the accidental
 // publish.
 import { execFileSync } from "node:child_process";
-import { readdirSync, readFileSync, existsSync, realpathSync } from "node:fs";
-import { join, dirname } from "node:path";
+import { createHash } from "node:crypto";
+import { existsSync, mkdirSync, readdirSync, readFileSync, realpathSync, renameSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { dirname, join, relative, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), "..");
@@ -93,6 +98,9 @@ export function listWorkspacePackages(root = ROOT) {
         version: typeof manifest.version === "string" ? manifest.version : "",
         private: manifest.private === true,
         dir: join(glob.slice(0, -2), entry.name),
+        buildProofRequired: declaresDistOutput(manifest),
+        build: typeof manifest.scripts?.build === "string" ? manifest.scripts.build : "",
+        prepack: typeof manifest.scripts?.prepack === "string" ? manifest.scripts.prepack : "",
         prepublishOnly: typeof manifest.scripts?.prepublishOnly === "string" ? manifest.scripts.prepublishOnly : "",
         access: manifest.publishConfig?.access,
         publishConfig: manifest.publishConfig && typeof manifest.publishConfig === "object" ? manifest.publishConfig : {},
@@ -107,6 +115,8 @@ export function listWorkspacePackages(root = ROOT) {
 // cannot skip. Exact, not a substring: `echo check-publish-allowlist.mjs` or
 // the script with `--audit` would otherwise count as the guard.
 export const HOOK_COMMAND = "node ../../scripts/check-publish-allowlist.mjs";
+export const BUILD_PROOF_COMMAND = `${HOOK_COMMAND} --build-proof`;
+export const ROOT_BUILD_COMMAND = "node scripts/build-workspace.mjs";
 
 // The registry every release targets — the value the verifier and the tag
 // step pass explicitly so an ambient user config cannot redirect them.
@@ -117,7 +127,7 @@ export const RELEASE_REGISTRY = "https://registry.npmjs.org/";
 // and names both — the environment's protection rules live in GitHub
 // settings no script reads.
 export const RELEASE_WORKFLOW = ".github/workflows/release.yml";
-export const RELEASE_WORKFLOW_MARKERS = ["changeset publish", "environment:"];
+export const RELEASE_WORKFLOW_MARKERS = ["changeset publish", "environment:", "run: pnpm build"];
 
 export function audit({ root = ROOT, allowlist = readAllowlist() } = {}) {
   const problems = [];
@@ -138,6 +148,12 @@ export function audit({ root = ROOT, allowlist = readAllowlist() } = {}) {
     }
     if (p.prepublishOnly !== HOOK_COMMAND) {
       problems.push(`${p.name} (${p.dir}) is publishable but its scripts.prepublishOnly is not exactly "${HOOK_COMMAND}" (found "${p.prepublishOnly}")`);
+    }
+    if (p.buildProofRequired && !p.build) {
+      problems.push(`${p.name} (${p.dir}) declares dist output but has no scripts.build`);
+    }
+    if (p.buildProofRequired && p.prepack !== BUILD_PROOF_COMMAND) {
+      problems.push(`${p.name} (${p.dir}) builds publishable output but its scripts.prepack is not exactly "${BUILD_PROOF_COMMAND}" (found "${p.prepack}")`);
     }
     if (p.access !== "public") {
       problems.push(`${p.name} (${p.dir}) is publishable but its publishConfig.access is not "public" (found ${JSON.stringify(p.access ?? null)}); a scoped package publishes restricted without it`);
@@ -162,8 +178,12 @@ export function audit({ root = ROOT, allowlist = readAllowlist() } = {}) {
   const rootManifestPath = join(root, "package.json");
   if (!existsSync(rootManifestPath)) {
     problems.push("the workspace root has no package.json");
-  } else if (JSON.parse(readFileSync(rootManifestPath, "utf8")).private !== true) {
-    problems.push('the workspace root package.json must be "private": true');
+  } else {
+    const rootManifest = JSON.parse(readFileSync(rootManifestPath, "utf8"));
+    if (rootManifest.private !== true) problems.push('the workspace root package.json must be "private": true');
+    if (rootManifest.scripts?.build !== ROOT_BUILD_COMMAND) {
+      problems.push(`the workspace root scripts.build is not exactly "${ROOT_BUILD_COMMAND}" (found "${rootManifest.scripts?.build ?? ""}")`);
+    }
   }
   const workflowPath = join(root, RELEASE_WORKFLOW);
   if (!existsSync(workflowPath)) {
@@ -179,6 +199,162 @@ export function audit({ root = ROOT, allowlist = readAllowlist() } = {}) {
 
 function git(cwd, ...args) {
   return execFileSync(gitBin(), args, { cwd, encoding: "utf8", stdio: ["ignore", "pipe", "ignore"], windowsHide: true }).trim();
+}
+
+const BUILD_PROOF_PATH = join(".obversa", "build-proof.json");
+const ROOT_BUILD_INPUTS = [
+  "package.json",
+  "pnpm-lock.yaml",
+  "pnpm-workspace.yaml",
+  "scripts/build-workspace.mjs",
+  "scripts/check-publish-allowlist.mjs",
+  "scripts/publish-allowlist.json",
+  "tsconfig.base.json",
+];
+
+function workspacePath(root, path) {
+  return relative(root, path).split(sep).join("/");
+}
+
+function filesUnder(root, directory) {
+  if (!existsSync(directory)) return [];
+  const files = [];
+  for (const entry of readdirSync(directory, { withFileTypes: true })) {
+    const path = join(directory, entry.name);
+    if (entry.isDirectory()) files.push(...filesUnder(root, path));
+    else if (entry.isFile() || entry.isSymbolicLink()) files.push(workspacePath(root, path));
+  }
+  return files;
+}
+
+function hashFiles(root, paths) {
+  return [...new Set(paths)].sort().map((path) => ({
+    path,
+    sha256: createHash("sha256").update(readFileSync(join(root, path))).digest("hex"),
+  }));
+}
+
+function buildPackages(root) {
+  const allowlist = readAllowlist(join(root, "scripts", "publish-allowlist.json"));
+  return listWorkspacePackages(root)
+    .filter((pkg) => !pkg.private && pkg.buildProofRequired && allowlist.has(pkg.name))
+    .sort((left, right) => left.name.localeCompare(right.name));
+}
+
+export function captureBuildInputs(root = ROOT) {
+  const paths = [...ROOT_BUILD_INPUTS];
+  for (const pkg of buildPackages(root)) {
+    const directory = join(root, pkg.dir);
+    paths.push(join(pkg.dir, "package.json"));
+    paths.push(...filesUnder(root, join(directory, "src")));
+    paths.push(...filesUnder(root, join(directory, "bin")));
+    for (const entry of readdirSync(directory, { withFileTypes: true })) {
+      if (!entry.isFile()) continue;
+      if (/^tsconfig.*\.json$/.test(entry.name) || /^tsup\.config\./.test(entry.name)) {
+        paths.push(join(pkg.dir, entry.name));
+      }
+    }
+  }
+  return hashFiles(root, paths);
+}
+
+export function captureBuildOutputs(root = ROOT) {
+  const outputs = {};
+  for (const pkg of buildPackages(root)) {
+    const paths = filesUnder(root, join(root, pkg.dir, "dist"));
+    if (paths.length === 0) throw new Error(`${pkg.name}: dist has no built output`);
+    outputs[pkg.name] = hashFiles(root, paths);
+  }
+  return outputs;
+}
+
+function sameSnapshot(left, right) {
+  return JSON.stringify(left) === JSON.stringify(right);
+}
+
+export function recordWorkspaceBuild({ root = ROOT, runBuild }) {
+  const recordPath = join(root, BUILD_PROOF_PATH);
+  rmSync(recordPath, { force: true });
+  const inputs = captureBuildInputs(root);
+  runBuild();
+  const settledInputs = captureBuildInputs(root);
+  if (!sameSnapshot(inputs, settledInputs)) {
+    throw new Error("build inputs changed while the build was running");
+  }
+  const record = { schemaVersion: 1, inputs, outputs: captureBuildOutputs(root) };
+  mkdirSync(dirname(recordPath), { recursive: true });
+  const temporaryPath = `${recordPath}.${process.pid}.tmp`;
+  writeFileSync(temporaryPath, `${JSON.stringify(record, null, 2)}\n`);
+  renameSync(temporaryPath, recordPath);
+  return record;
+}
+
+function localTargets(value, targets = []) {
+  if (typeof value === "string") {
+    if (value.startsWith("./")) targets.push(value.slice(2));
+  } else if (value && typeof value === "object") {
+    for (const nested of Object.values(value)) localTargets(nested, targets);
+  }
+  return targets;
+}
+
+function declaresDistOutput(manifest) {
+  return [
+    ...localTargets(manifest.main),
+    ...localTargets(manifest.types),
+    ...localTargets(manifest.exports),
+    ...localTargets(manifest.bin),
+  ].some((target) => target === "dist" || target.startsWith("dist/"));
+}
+
+export function checkBuildProof({ root = ROOT, cwd = process.cwd() } = {}) {
+  const manifestPath = join(cwd, "package.json");
+  if (!existsSync(manifestPath)) return [`no package.json in ${cwd}`];
+  const manifest = JSON.parse(readFileSync(manifestPath, "utf8"));
+  const targets = new Set([
+    ...localTargets(manifest.main),
+    ...localTargets(manifest.types),
+    ...localTargets(manifest.exports),
+    ...localTargets(manifest.bin),
+  ]);
+  if (!declaresDistOutput(manifest)) return [];
+
+  const problems = [];
+  if (typeof manifest.scripts?.build !== "string") {
+    problems.push(`${manifest.name} declares dist output but has no scripts.build`);
+  }
+  const packageRoot = resolve(cwd);
+  for (const target of targets) {
+    const path = resolve(packageRoot, target);
+    if (path !== packageRoot && !path.startsWith(`${packageRoot}${sep}`)) {
+      problems.push(`${manifest.name} declared target ${target} leaves the package`);
+    } else if (!existsSync(path) || !statSync(path).isFile()) {
+      problems.push(`${manifest.name} declared target ${target} is missing`);
+    }
+  }
+
+  let record;
+  try {
+    record = JSON.parse(readFileSync(join(root, BUILD_PROOF_PATH), "utf8"));
+  } catch {
+    problems.push(`${manifest.name} has no successful workspace-build record; run pnpm build`);
+    return problems;
+  }
+  if (record?.schemaVersion !== 1 || !Array.isArray(record.inputs) || !record.outputs || typeof record.outputs !== "object") {
+    problems.push(`${manifest.name} has an invalid workspace-build record; run pnpm build`);
+    return problems;
+  }
+  try {
+    if (!sameSnapshot(record.inputs, captureBuildInputs(root))) {
+      problems.push(`${manifest.name} build inputs changed after pnpm build`);
+    }
+    if (!sameSnapshot(record.outputs, captureBuildOutputs(root))) {
+      problems.push(`${manifest.name} built workspace output changed after pnpm build`);
+    }
+  } catch (error) {
+    problems.push(`${manifest.name} built workspace output changed after pnpm build (${error.message})`);
+  }
+  return problems;
 }
 
 export function checkHook({ cwd = process.cwd(), env = process.env, allowlist = readAllowlist(), run = git } = {}) {
@@ -218,12 +394,13 @@ export function checkHook({ cwd = process.cwd(), env = process.env, allowlist = 
 // invoked path in argv, so a symlinked invocation must still count as main.
 const isMain = process.argv[1] && realpathSync(fileURLToPath(import.meta.url)) === realpathSync(process.argv[1]);
 if (isMain) {
-  const problems = process.argv.includes("--audit") ? audit() : checkHook();
+  const buildProof = process.argv.includes("--build-proof");
+  const problems = process.argv.includes("--audit") ? audit() : buildProof ? checkBuildProof() : checkHook();
   if (problems.length) {
-    for (const p of problems) console.error(`publish guard: ${p}`);
+    for (const p of problems) console.error(`${buildProof ? "build proof" : "publish guard"}: ${p}`);
     process.exit(1);
   }
   console.log(process.argv.includes("--audit")
     ? `Publish allowlist audit passed for ${listWorkspacePackages().filter((p) => !p.private).length} publishable packages.`
-    : "publish guard: allowed");
+    : buildProof ? "build proof: current" : "publish guard: allowed");
 }

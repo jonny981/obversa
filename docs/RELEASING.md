@@ -76,10 +76,10 @@ repository secret for the guarded workflow, or publish once from a clean `main`
 checkout with Jonny's npm login:
 
 ```bash
-pnpm build
-OBVERSA_RELEASE=1 pnpm changeset publish
-node scripts/tag-published.mjs
-node scripts/verify-published.mjs
+pnpm build && \
+  OBVERSA_RELEASE=1 pnpm changeset publish && \
+  node scripts/tag-published.mjs && \
+  node scripts/verify-published.mjs
 ```
 
 The tag script pushes each package tag created by that publish as an explicit
@@ -104,9 +104,16 @@ disable token publishing for those packages.
 ## Publish guard
 
 Every public package keeps the exact `prepublishOnly` guard and
-`publishConfig.access: public`. A public manifest carries no registry key. The
-audit refuses unlisted public packages, missing guards, registry routes and
-alternate publish directories.
+`publishConfig.access: public`. Every package that builds output also runs a
+read-only `prepack` check. It refuses missing or changed build output and source
+or build configuration changed after the last successful root `pnpm build`. It
+does not compile, clean or write files. The record covers the workspace source,
+package manifests, TypeScript and tsup configuration, root build configuration,
+lockfile and every built `dist` file. It does not claim to cover arbitrary tool
+environment changes or published assets that no package build reads.
+
+A public manifest carries no registry key. The audit refuses unlisted public
+packages, missing guards, registry routes and alternate publish directories.
 
 The guard allows a publish only when `OBVERSA_RELEASE=1` is set, the package is
 allowlisted, the tree is clean and the checkout is `main` or the release
