@@ -3,14 +3,14 @@ title: "Shipping a reviewed change through GitHub"
 description: "Ship a reviewed change through a code host: push the branch, open one pull request, pass a strict gate, squash the merge."
 ---
 
-Once a change has passed review it still has to reach the code host. This
-file does that step for GitHub, or any host with the same five operations. It pushes the work branch, opens or updates one pull
-request, proves that the change can merge, squashes the work into the base
-branch, and deletes the work branch.
+Once a change has passed review, it still has to reach the code host. This
+file shows that step for GitHub, or any host with the same five operations.
+It pushes the work branch, opens or updates one pull request, proves that the
+change can merge, squashes the work into the base branch, and deletes the work
+branch.
 
-Call this file after a review gate passes. A host supplies the five
-operations, in the same way it supplies memory. The helper is host-side
-code: it imports no runtime package.
+Call it after a review gate passes. A host supplies the five operations, the
+same way it supplies memory. The file is host-side code.
 
 ## The five operations
 
@@ -31,10 +31,10 @@ code: it imports no runtime package.
 
 The gate is a pure function over one status. The change ships only when the
 expected workflow ran and passed on the exact head revision, and the branch
-can merge. Every other case prints `RESULT: FAIL` with the reason on the
-line. A check run counts as passed only when its conclusion is exactly
-`success`. Green checks on other workflows do not ship a change. Green
-checks from an earlier revision do not ship a change either.
+can merge. Every other case returns `RESULT: FAIL` with the reason on the
+same line. A check run counts as passed only when its conclusion is exactly
+`success`. Green checks on other workflows don't ship a change, and neither
+do green checks from an earlier revision.
 
 ## Contract
 
@@ -48,9 +48,8 @@ checks from an earlier revision do not ship a change either.
 
 ## Source
 
-Copy `examples/forge-helper.ts` from the repository.
-
-The example imports no package. It runs offline.
+Copy `examples/forge-helper.ts` from the repository. It imports no package and
+runs offline.
 
 ```ts
 import { execFile } from 'node:child_process';
@@ -504,8 +503,8 @@ void main();
 
 ## Run the example
 
-
-The result is:
+Run it with `pnpm exec tsx forge-helper.ts` in any project that has
+[`tsx` installed](/get-started/installation). The result is:
 
 ```json
 {
@@ -601,32 +600,22 @@ proof that two calls opened one pull request, the merge, the branch
 deletion, the synthesis message, and the operation log. `ghArguments` holds
 the argument list for each operation.
 
-After you copy the source into a project that has `tsx` installed,
-`pnpm exec tsx forge-helper.ts` runs the same example.
-
 ## Failure behavior
 
-The four fixture pull requests print four fail verdicts:
-
-- `RESULT: FAIL because the branch cannot merge`
-- `RESULT: FAIL because the checks are from an earlier revision`
-- `RESULT: FAIL because the expected workflow never ran on the head revision`
-- `RESULT: FAIL because the tests check finished as failure`
-
-The demo ships only on the exact string `RESULT: PASS`. The gate stops the
-ship when the verdict says anything else. The helper writes no files and
-makes no network calls. Run it again from the start at any time.
+Each of the four fixture pull requests fails the gate with its reason, as
+`verdicts` shows above. The demo ships only on the exact string
+`RESULT: PASS` and stops on anything else. It writes no files and makes no
+network calls, so you can run it again from the start at any time.
 
 ## The GitHub adapter
 
-The adapter returns one argument list for each operation. Each list is a
-pure function of its input. A new branch and an open pull request use the
-extra lists in the source.
+The adapter returns one `gh` argument list for each operation. Each list is a
+pure function of its input. A new branch uses `createRefArguments`, and an
+open pull request uses `listArguments` and `editArguments`.
 
-The execution layer is one function with no logic of its own. It runs `gh`
-with the printed list and returns the output. It needs a `gh` login, and
-nothing in this file runs it.
+`runGh` is the execution layer: one function with no logic of its own. It runs
+`gh` with an argument list and returns the output. It needs a `gh` login, and
+nothing in this file calls it.
 
-To use the helper in a process, give the five operations to your host and
-call them after your review gate passes. The mock host in the source shows
-each operation, and the gate stays the same for every host.
+To use it in a process, give your host the five operations. The mock host in
+the source shows each one, and the gate stays the same for every host.

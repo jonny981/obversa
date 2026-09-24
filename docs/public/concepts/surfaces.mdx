@@ -7,20 +7,20 @@ description: "Pause a run and put an interactive micro UI in front of a person, 
 Sometimes a workflow reaches a step no agent should decide alone: approve
 this change, pick one of these two drafts, confirm the migration. You want
 that one question in front of a person, in a browser, and you want the
-answer back in the run. That is what a surface is: a micro UI, one small
+answer back in the run. That's what a surface is: a micro UI, one small
 web page that pauses the run until a person has had their say.
 
 The surface package runs it. You give it the page files and the API the
 page calls. It serves them on a private port on your own machine, opens the
-page, waits for the person, and hands back whatever they gave you. Then it
-is gone. No server to deploy, no accounts, nothing left running.
+page, waits for the person, and hands back whatever they gave you. Then
+it's gone. There's no server to deploy, and nobody needs an account.
 
 ## What you get
 
 - **Disposable by design.** A surface is a short session, not a viewer. It
-  opens for one pause in one run and closes when that pause is over. There
-  is no long-lived page to manage, nothing to redeploy when it changes, and
-  nothing left running when the run moves on.
+  opens for one pause in one run and closes when that pause is over.
+  There's no long-lived page to manage, nothing to redeploy when it
+  changes, and nothing left running when the run moves on.
 - **A pause for a person, not a prompt.** The run stops, the micro UI
   opens, and it waits. What comes back is whatever the page collected: an
   approval, answers to a dozen fields, a whole code review with comments
@@ -28,16 +28,18 @@ is gone. No server to deploy, no accounts, nothing left running.
   looks like.
 - **It always ends, and it ends once.** The person finishes, cancels, the
   time runs out, or you stop it. Every one of those gives you a result, so
-  a run never hangs on a person who walked away.
+  a run never hangs on a person who walked away. Set `sessionTimeoutMs` to
+  how long the question may stand. A page that stops sending its heartbeat
+  ends sooner, when `leaseTimeoutMs` passes.
 - **Private by default.** The page lives on a loopback address with a
-  token in its URL, and every request has to carry it. Nothing on your
-  network can reach it, and a page from another origin cannot call it.
+  token in its URL, and every API request has to carry it. Nothing on your
+  network can reach it, and a page from another origin can't call it.
 - **Your page, your API.** A surface is plain HTML and a few JSON routes
-  you write. There is no framework to learn and nothing to install in the
+  you write. There's no framework to learn and nothing to install in the
   browser.
 - **Secrets stay out.** Answers pass through secret redaction before they
-  reach you, unless you say a specific answer must come through byte for
-  byte, such as a review comment that quotes code.
+  reach you. Complete the session with `verbatim: true` when an answer must
+  arrive exactly as written, such as a review comment that quotes code.
 
 ## Run one
 
@@ -46,7 +48,8 @@ pipeline that analyses, implements, and then stops for a person. A no sends
 the work back to the step that owns the fix, with the person's note as the
 finding, and the work comes round again.
 
-Run it with `pnpm example:approval`.
+Save it as `approval.ts` and run it with `npx tsx`, set up as in
+[Installation](/get-started/installation).
 
 ```ts
 /**
@@ -122,17 +125,18 @@ if (faults.length) {
 }
 ```
 
-The step that waits is `approval`. The question reaches a person through the
-run's callbacks client, and a surface is what puts it in front of them. This
-file answers in place so it runs offline with no model and no network; in a
-team the answer comes back from the page. The
-[callback gates](/reviewing/callback-gates) page shows the step itself.
+The step that waits is `approval`. Its question goes out through the run's
+callbacks client, and a router can open a surface to put it in front of a
+person. This file answers in place, so it runs offline with no model and no
+network. The [callback gates](/reviewing/callback-gates) page shows the step
+itself.
 
 ## The review surface
 
-`@obversa/surface-diff` ships one, built the same way. It opens your git diff in a
-browser, you comment on the lines you care about, you approve or reject, and
-it hands back the decision with every comment anchored to a file and a line.
+`@obversa/surface-diff` ships one, built the same way. It opens your git
+diff in a browser. You comment on the lines you care about and approve or
+request changes, and it hands back the decision with every comment anchored
+to a file and a line.
 
 ```sh
 obversa-review --range main..HEAD
@@ -142,45 +146,44 @@ The [review command](/hosts/review) page has the full result shape.
 
 ## Use cases
 
-- **Code review.** A diff, inline comments, a decision. The example above.
+- **Code review.** A diff, inline comments and a decision, as in
+  `obversa-review` above.
 - **Approval before something irreversible.** Merging, migrating, spending.
-  [Callback gates](/reviewing/callback-gates) is the step that waits;
-  [approval](/workflows/approval) shows one in a team.
+  [Callback gates](/reviewing/callback-gates) is the step that waits.
+  [A person decides](/workflows/approval) shows one in a team.
 - **A choice between agent outputs.** Two drafts, two plans, two patches.
   The page returns the one a person picked.
 - **A form nobody wants to script.** Credentials a machine must not hold, a
   judgement call with six fields.
 
-Same session every time. Only the page changes.
+Each one runs the same session. Only the page changes.
 
 ## Where the page opens
 
-By default the surface opens in your default browser. Inside cmux it opens
-as a split beside your terminal, so the question appears next to the run
-that asked it. The [cmux host](/hosts/cmux) page shows how, and the
-[plugins](/plugins) page lists the hosts.
+On macOS the surface opens in your default browser. On Linux and Windows it
+prints the address for you to open. Inside cmux it opens as a split beside
+your terminal, so the question appears next to the run that asked it. The
+[cmux host](/hosts/cmux) page shows how, and the [plugins](/plugins) page
+lists the hosts.
 
-## Gotchas
+When the decision belongs to a colleague, get it to them another way. The
+page exists only on the machine that started the run, so you can't hand
+them the link.
 
-- **You cannot hand the link to someone else.** The page only exists on
-  the machine that started the run. If the decision belongs to a colleague,
-  it has to reach them another way.
-- **The lease.** A surface waits for a person, and people walk away. Set
-  `leaseTimeoutMs` to how long the question may stand; when it passes, the
-  result says so and the run continues on that.
-- **The acknowledgement.** The browser confirms it received the decision
-  before the session closes. A page that answers and closes itself without
-  the acknowledgement call looks, to the run, like a page that never
-  answered, until the acknowledgement timeout ends it.
-- **Inline scripts.** The page's content policy allows no inline script or
-  style; ship them as files.
-- **Verbatim answers.** If an answer must survive exactly, quoting code for
-  example, complete it with `verbatim: true`. Everything else is redacted,
-  and that is the safe default.
+## Write your own page
+
+The session asks two things of any page you write:
+
+- **Ship scripts and styles as files.** The page's content policy allows no
+  inline script or style.
+- **Make the acknowledgement call before the page closes.** That call is how
+  the browser confirms it received the decision. A page that answers and
+  closes itself without it keeps the run waiting. The run gets the answer
+  only when the acknowledgement timeout runs out.
 
 ## Under the hood
 
 The exact limits, headers, serialisation rules and the framed result format
 are on the [surface decision reference](/packages/surface) page. Nothing
-there is needed to use a surface; it is there when you build a host or a
+there is needed to use a surface. It's there for when you build a host or a
 page that must interoperate with one.

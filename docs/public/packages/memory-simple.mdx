@@ -3,11 +3,11 @@ title: "Simple Memory"
 description: "@obversa/memory-simple provides an in-memory storage adapter for tests and ephemeral runs."
 ---
 
-`@obversa/memory-simple` is an in-memory adapter that stores memory records in JavaScript process memory. It is designed for unit tests, local verification, and short runs that do not require durable storage on disk.
+`@obversa/memory-simple` is a memory adapter that keeps its files inside the Node process. Use it for unit tests, local checks and short runs that don't need storage on disk.
 
 ## Requirements
 
-- Node.js 22.12 or later
+Nothing beyond [Installation](/get-started/installation).
 
 ## Install
 
@@ -38,9 +38,9 @@ const result = await memory.execute({
 
 ## Commands
 
-The adapter supports six memory operations:
-- `create`: Write a new file at a path.
-- `view`: Read file content, with optional line range.
+The adapter supports all six commands of the [memory port](/memory):
+- `create`: Write a file at a path, replacing any file already there.
+- `view`: Read a file, with an optional line range.
 - `str_replace`: Replace unique text inside a file.
 - `insert`: Insert text at a zero-based line index.
 - `delete`: Remove a file from memory.
@@ -48,6 +48,6 @@ The adapter supports six memory operations:
 
 ## Limits
 
-- Data is stored in memory and is discarded when the Node process exits.
+- The data is gone when the Node process exits.
 - Default limits: 64 KB per file, 1 MB total memory per scope, and at most 256 files.
 - Allowed file extensions: `.txt`, `.md`, `.json`, `.py`, `.yaml`, `.yml`.

@@ -5,8 +5,8 @@ import { checkPluginsPage } from './check-plugins-page.mjs';
 
 const front = (description) => `---\ntitle: "Plugins and tools"\ndescription: "${description}"\n---\n\n`;
 
-const goodRow = (name) => `- **${name}.** \`@obversa/${name}\` runs one thing. A reader needs\n  Node.js 22.12 or later. Home: [example.com](https://example.com).\n`;
-const seeRow = (name) => `- **${name}.** \`@obversa/${name}\` runs one thing. A reader needs\n  Node.js 22.12 or later. See [The page](/packages/${name}).\n`;
+const goodRow = (name) => `- **${name}.** \`@obversa/${name}\` runs one thing. You need\n  Git installed. Home: [example.com](https://example.com).\n`;
+const seeRow = (name) => `- **${name}.** \`@obversa/${name}\` runs one thing. You need\n  Git installed. See [The page](/packages/${name}).\n`;
 
 test('a page whose every row meets the contract passes', () => {
   const document = front('One row per tool.') + '\n' + goodRow('one') + goodRow('two');
@@ -30,7 +30,7 @@ test('a row without an install sentence fails', () => {
 });
 
 test('a row without a home link fails', () => {
-  const row = '- **one.** `@obversa/one` runs one thing. A reader needs Node.js 22.12 or later.\n';
+  const row = '- **one.** `@obversa/one` runs one thing. You need Git installed.\n';
   const document = front('One row per tool.') + '\n' + row + goodRow('two');
   assert.ok(checkPluginsPage(document).some((f) => f === 'one: the row does not link the tool\'s own home'));
 });
@@ -47,7 +47,7 @@ test('a See link counts as a home', () => {
 });
 
 test('a wrapped sentence still reads as one line', () => {
-  const row = '- **one.** `@obversa/one` runs one thing. A reader needs\n  Node.js 22.12 or later and a working tool. Home:\n  [example.com](https://example.com).\n';
+  const row = '- **one.** `@obversa/one` runs one thing. You need\n  Git installed and a working tool. Home:\n  [example.com](https://example.com).\n';
   const document = front('One row per tool.') + '\n' + row + goodRow('two');
   assert.deepEqual(checkPluginsPage(document), []);
 });

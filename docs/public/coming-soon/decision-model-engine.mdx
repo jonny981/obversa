@@ -1,21 +1,9 @@
 ---
 title: "A decision model as an engine"
-description: "Use the Jev engine to assess recorded state; your workflow decides what to do with the answers."
+description: "Use the Jev engine to assess recorded run state. Your workflow decides what to do with the answers."
 ---
 
-The [Jev engine](/packages/engine-jev-api) answers structured questions over
-recorded state. Install it separately from the Obversa bundle:
-
-```bash
-npm install @obversa/obversa
-npm install @obversa/engine-jev-api
-```
-
-It requires workspace mode `none`: it does not read or edit workspace files.
-Supply the state and questions, then use the returned assessments in your
-workflow. Routing, thresholds and escalation remain workflow policy, not an
-automatic behaviour of the adapter.
-
-The [Jev package page](/packages/engine-jev-api) describes its request and
-answer shapes. See [Conditions and gates](/graphs/contract) for decisions in
-a graph.
+Use the [Jev engine](/packages/engine-jev-api) to answer structured
+questions over recorded run state, and let your workflow decide what to do
+with the answers. Its package page covers installing it, the request and
+answer shapes, and its limits.

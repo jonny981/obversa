@@ -1,13 +1,12 @@
 ---
 title: "Git Memory"
-description: "@obversa/memory-git stores scoped run memory in private Git references without touching branches."
+description: "@obversa/memory-git keeps scoped run memory in private Git references, and writes a stage's reasoning into the commit that carries its change."
 ---
 
-`@obversa/memory-git` is a memory adapter that stores key documents in private Git references. It isolates memories by scope digest under `refs/obversa/memory/v1`, without modifying the working tree, index, or active branch.
+`@obversa/memory-git` uses Git in two ways: as a store and as a record. `openGitMemory` is a memory adapter that keeps memory files in private Git references, with no commits. Each scope gets its own reference under `refs/obversa/memory/v1`, named by a digest of the scope. The adapter never touches your working tree, index or current branch. `openReasoningRecord` writes why a stage made a change into the body of the commit that carries it.
 
 ## Requirements
 
-- Node.js 22.12 or later
 - Git
 
 ## Install
@@ -40,25 +39,18 @@ const view = await memory.execute({
 
 ## The reasoning record
 
-The same package opens a second thing, and the difference between them is
-where the words land. `openGitMemory` uses Git as a store: a private
-reference per scope, a tree, no commits, and nothing that touches your HEAD
-or your working tree. `openReasoningRecord` uses Git as the record: why a
-change was made, written into the body of the commit that carries it.
+`openReasoningRecord` makes no commit of its own. A stage that opts in already
+runs in its own worktree, and its work is committed there before it merges
+back. The reasoning belongs on that commit. A second commit would be a note
+beside the work, and a note isn't attached to any line. So the record watches
+the stage work and, when there's something to commit, supplies that commit's
+message.
 
-It writes no commit of its own. A stage that opts in already runs in its
-own worktree and is committed there before its work merges back, and that
-commit is the one the reasoning belongs on; a second commit would be a note
-beside the work, and a note is not attached to a line. So the record
-watches the stage work and, when there is something to commit, supplies
-that commit's message.
-
-What it captures is captured while the stage works, because a summary
-written afterwards has already lost the discarded attempt, which is the
-part a later reader cannot reconstruct. Composition has a floor: if the
-call that composes fails or returns nothing usable, the message is still
-built from the outcome, so a change never lands with a body that explains
-nothing.
+The record captures the stage's words while it works. A summary written
+afterwards has already lost the discarded attempts, and those are the part a
+later reader can't reconstruct. If `compose` throws or returns nothing usable,
+the record builds the message from the stage's outcome instead, so a change
+never lands with a body that explains nothing.
 
 ```ts
 import { openReasoningRecord } from '@obversa/memory-git';
@@ -77,24 +69,24 @@ await run(isolated(implement, { label: 'implement', record }), {
 });
 ```
 
-The stage names itself. The record waits for the first turn that carries that
-name, keeps the path it arrived on, and from then on takes turns from that
-path alone: a sibling running beside it is left out, and so is another stage
-of the same name somewhere else in the run. Pass a `path` when you want the
-record bound before it sees anything.
+The `stage` option names the stage. The record waits for the first turn whose
+path carries that name, and binds to the path up to that name. From then on it
+takes only turns under that path. A sibling running beside it is left out, and
+so is a stage of the same name elsewhere in the run. Pass `path` to bind the
+record before it sees anything.
 
-A stage that changed nothing produces no commit, so it produces no body.
+A stage that changed nothing makes no commit, so it gets no body.
 
-Opting in is two wires: the stage takes the record, and the run shows it the
-events. `examples/reasoning-record.ts` runs both together against a real
-repository and reads the reasoning back off the commit that carries the
-change.
+Opting in takes two steps: pass the record to the stage, and pass the run's
+events to `record.observe`. `examples/reasoning-record.ts` does both against a
+real repository, then reads the reasoning back from the commit that carries
+the change.
 
 ## Commands
 
-The adapter supports six memory operations:
-- `create`: Write a new file at a path.
-- `view`: Read file content, with optional line range.
+`openGitMemory` supports all six commands of the [memory port](/memory):
+- `create`: Write a file at a path, replacing any file already there.
+- `view`: Read a file, with an optional line range.
 - `str_replace`: Replace unique text inside a file.
 - `insert`: Insert text at a zero-based line index.
 - `delete`: Remove a file from memory.
@@ -104,4 +96,4 @@ The adapter supports six memory operations:
 
 - Default limits: 64 KB per file, 1 MB total memory per scope, and at most 256 files.
 - Allowed file extensions: `.txt`, `.md`, `.json`, `.py`, `.yaml`, `.yml`.
-- Paths must be relative to the memory root `/memories/` and cannot escape root boundaries.
+- Every path must be inside `/memories`.

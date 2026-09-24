@@ -1,12 +1,16 @@
 ---
 title: "@obversa/runner"
-description: "Supervise a graph in a worker process: check its engines before the first step, pause on a record when a check fails, resume from that pause, and recover after a crash."
+description: "Supervise a graph in a worker process: check its engines before the first step, pause on a record when an engine isn't ready yet, resume from that pause, and recover after a crash."
 ---
 
-Run a stored graph in a worker with a watchdog in your own process. The
-watchdog checks every engine seat before the first step, records a pause
-when a check fails, resumes from that exact pause when you ask, restarts a
-crashed worker within your limits, and never repeats work that finished.
+Run a stored graph in a worker, with a watchdog in your own process. When
+the plan asks for engine checks, the worker checks every engine seat before
+the first step. A check that fails on something that clears, such as a rate
+limit, records a pause, and you can resume the run from that exact pause.
+
+The watchdog restarts a crashed worker within your limits and never repeats
+work that finished. If the watchdog itself dies, decide by hand what happens
+next. Its lock and lease stay until you do.
 
 ```bash
 npm install @obversa/obversa
@@ -14,10 +18,14 @@ npm install @obversa/obversa
 
 ## Run one
 
-This file starts a one-node graph whose engine is not ready, watches the
+This file starts a one-node graph whose engine isn't ready, watches the
 run pause before any dispatch, makes the engine ready, resumes from the
 recorded pause, and prints the result. Its engine and bindings are in
 `examples/preflight-host.mjs`.
+
+Put the host module you pass as `module` inside `runRoot`, the worker root,
+and export `bindRun` from it. The runner loads it, never the runtime. It's
+pinned by byte digest for the life of the run.
 
 ```ts
 import assert from 'node:assert/strict';
@@ -246,33 +254,21 @@ console.log(JSON.stringify({
 }, null, 2));
 ```
 
-What it printed, and what each of the five engine calls was, are on the
-[supervised local runs](/driving/runner) page.
+The [supervised local runs](/driving/runner) page shows what it printed and
+what each of the five engine calls was.
 
 ## Public entry points
 
 | export | what it does |
 | --- | --- |
-| `startSupervisedRun` | Starts a stored graph in a worker with a watchdog in the calling process and returns a handle. |
-| `resumeSupervisedRun` | Reopens one recorded pause: a node pause by `position` and `pauseEventId`, or a preflight pause by `preflightEventId`. |
+| `startSupervisedRun` | Starts a stored graph in a worker with a watchdog in the calling process and returns a handle. Engine checks inside the worker spend its `limits.timeoutMs`. Checks before launch don't. |
+| `resumeSupervisedRun` | Reopens one recorded pause: a node pause by its `position`, or a preflight pause by its `preflightEventId`. |
 | `readSupervisedRunStatus` | Reads a run's recorded progress and worker liveness from any process with the same storage settings. |
 | `SupervisedRunHandle` | `done`, `status()` and `stop()` for a run. |
 | `SupervisedRunError` | A runner failure with a typed code. `done` can also resolve to the graph's own terminal failure, such as `PREFLIGHT_FAILED` when a lane has no admissible seat. |
-| `SupervisedRunOptions`, `ResumeSupervisedRunOptions`, `ResumePreflightSupervisedRunOptions`, `SupervisedRunStatus`, `SupervisedRunUsage` | The option and status types; the preflight resume options carry the run id and the `preflightEventId` alone. |
-
-## Gotchas
-
-- **The host module is loaded by the runner, never by the runtime.** It
-  exports `bindRun`, must sit inside the worker root, and is pinned by byte
-  digest for the life of the run.
-- **A check before the first step spends no run budget.** A check inside
-  the worker does.
-- **Missing usage is not zero.** A call without a receipt is unknown, and
-  the run says so.
-- **A dead watchdog is not recovered automatically.** Its lock and lease
-  remain until a person decides.
+| `SupervisedRunOptions`, `ResumeSupervisedRunOptions`, `ResumePreflightSupervisedRunOptions`, `SupervisedRunStatus`, `SupervisedRunUsage` | The option and status types. The preflight resume options name the pause by run id and `preflightEventId`, with no `position`. `SupervisedRunUsage` reports a call without a receipt as unknown, not zero. |
 
 ## Source
 
 `packages/runner` in the repository. It depends on the public
-`@obversa/runtime` and `@obversa/api` APIs.
+`@obversa/runtime`, `@obversa/api` and `@obversa/core` APIs.

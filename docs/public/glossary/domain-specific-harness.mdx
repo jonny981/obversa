@@ -6,14 +6,13 @@ description: "The loop, tools and rules around a model for one job, written as a
 You can answer this with a file. A domain-specific harness is the loop, the
 tools and the rules that make a general model useful for one job: insurance
 intake, a research desk, a company's own integrations. The model is the
-same one everyone has. The harness is the part that is yours, and most of
+same one everyone has. The harness is the part that's yours, and most of
 it is process: what runs first, what checks it, what happens when the check
 fails, and who signs at the end.
 
-The file below is `examples/teams/feature-delivery.ts`. The phrase comes
-from the observation that products built on a model end
-up owning the process around it rather than the model. What that process
-looks like in code is a workflow:
+Products built on a model end up owning the process around it. In code,
+that process is a workflow. The file below is
+`examples/teams/feature-delivery.ts`:
 
 ```ts
 import { claude } from '@obversa/engine-claude-cli';
@@ -135,19 +134,21 @@ console.log(JSON.stringify(result.outcome, null, 2));
 | The rules | The stages in order, the files each may write, the brief. |
 | The checks | A review role that sends work back with findings, and a person at the end. |
 
-## Things that catch people out
+Claude Code, Codex and the others are the agents the harness drives. Each
+has its own inner loop, which
+[What is an agent harness?](/glossary/agent-harness) covers.
 
-- **It is not an agent.** Claude Code, Codex and the others are the
-  agents, each with its own inner loop. The harness for a job drives them.
-  See [what is an agent harness](/glossary/agent-harness).
-- **The person is part of the harness.** A job that ends in a human
-  decision writes that decision in as a role, so the run pauses there; the
-  answer arrives through the callbacks client.
-- **The record is the audit.** Every step is written as it happens, so the
-  run can be read back later. See [how a run is recorded](/recording/how-a-run-is-recorded).
+The person is part of the harness. Write their decision in as a role, as
+the file does with `approve`. The run pauses at that stage until the answer
+arrives through the callbacks client.
+
+Use the record as your audit. A run that records writes every step as it
+happens, so you can read it back later.
+[How a run is recorded](/recording/how-a-run-is-recorded) shows what a
+record holds.
 
 ## Where to go
 
-[Domain-specific harnesses](/use-cases/domain-specific-harnesses) for the
-use case in full; [a feature team, as a file](/workflows/feature-team) for
-a recorded run.
+[Domain-specific harnesses](/use-cases/domain-specific-harnesses) covers the
+use case in full. The [feature team](/workflows/feature-team) page shows a
+real run.

@@ -25,8 +25,8 @@ All memory paths start with `/memories`. The port accepts these commands:
 | `rename` | Moves a file or directory |
 
 A result has `ok: true` and a typed value, or `ok: false` and a typed error.
-Adapters use the same limits and error codes. A conformance kit checks this
-contract without a network service.
+Adapters use the same error codes. A conformance kit checks this contract
+without a network service.
 
 ## Command examples
 
@@ -87,7 +87,7 @@ await memory.execute({
 });
 ```
 
-`rename` moves a file or a complete directory. It does not replace an existing
+`rename` moves a file or a complete directory. It doesn't replace an existing
 destination.
 
 ```ts
@@ -100,17 +100,17 @@ await memory.execute({
 
 ## Storage limits
 
-The two initial adapters use these default limits:
+`@obversa/memory-simple` and `@obversa/memory-git` use these default limits:
 
 - One file can contain 65,536 bytes.
 - One scope can contain 1,048,576 bytes.
 - One scope can contain 256 files.
 
-The adapters accept `.txt`, `.md`, `.json`, `.py`, `.yaml`, and `.yml` files.
+Both accept `.txt`, `.md`, `.json`, `.py`, `.yaml`, and `.yml` files.
 
-When a write exceeds a scope limit, the adapter removes the file with the
-earliest write time. A read does not change the write time. The adapter does
-not remove the target of the new write.
+When a write takes a scope past a limit, the adapter removes files in order of
+earliest write time until the write fits. A read doesn't change a file's write
+time. The adapter never removes the file being written.
 
 ## Path rules
 
@@ -121,9 +121,7 @@ bytes.
 A scope and all written text must contain complete Unicode characters. The
 adapters reject malformed Unicode instead of replacing incomplete characters.
 
-The memory root cannot be a file. A caller cannot delete or rename the memory
-root. Directory deletion is recursive. A rename does not replace an existing
-path.
+The memory root can't be a file, and you can't delete or rename it.
 
 ## Errors
 
@@ -136,5 +134,5 @@ path.
 | Limits and concurrent writes | `LIMIT_EXCEEDED`, `CONFLICT` |
 | Adapter storage | `UNSAFE_STORAGE`, `STORAGE_ERROR` |
 
-An unsuccessful result contains the command, the error code, and a message.
-Some errors also contain the applicable path and structured details.
+A failed result holds the command, the error code, and a message. Some errors
+also carry the path and structured details.

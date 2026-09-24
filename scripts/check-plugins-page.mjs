@@ -34,7 +34,7 @@ export function checkPluginsPage(document) {
     if (!described) {
       failures.push(`${name}: the row does not say what the tool is`);
     }
-    if (!/A reader needs[^.]+\./.test(flat)) {
+    if (!/You need[^.]+\./.test(flat)) {
       failures.push(`${name}: the row does not say what a reader must have installed`);
     }
     const homeLink = /Home:\s*\[[^\]]+\]\([^)]+\)/.test(flat)

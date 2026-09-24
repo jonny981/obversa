@@ -1,22 +1,22 @@
 ---
 title: "Obversa and Temporal for agent work"
-description: "Temporal is a durable execution runtime with a server and eight SDKs. Obversa is a TypeScript library for agent teams with no server. What each is for, and where each wins."
+description: "Temporal is a durable execution runtime with a server and SDKs in several languages. Obversa is a TypeScript library for agent teams with no server. What each is for, and where each wins."
 ---
 
 Pick Temporal when your agent work must survive anything for days, at
 scale, and you can run or rent its service. Pick Obversa when the work is a
 team of agent tools on one machine, and what you need is the process
 between them written down: roles, reviews that send work back, a person at
-the gate, a record.
+the gate, and a record.
 
-Temporal's own words: "Temporal is a scalable and reliable runtime for
+In Temporal's own words: "Temporal is a scalable and reliable runtime for
 durable function executions called Temporal Workflow Executions." A
-workflow calls activities; every step is an event in a history; a new
-worker replays the history after a crash and continues from the exact
-point. A person is a signal the workflow waits for. Sending rejected work
-back to an earlier step is control flow you write in the workflow.
+workflow calls activities, and every step is an event in a history. After a
+crash, a new worker replays the history and continues from the exact point.
+A person is a signal the workflow waits for. Sending rejected work back to
+an earlier step is control flow you write in the workflow.
 
-Here is the shape Obversa is for, as one file:
+Here's the shape Obversa is for, as one file:
 
 ```ts
 import { claude } from '@obversa/engine-claude-cli';
@@ -132,21 +132,16 @@ console.log(JSON.stringify(result.outcome, null, 2));
 
 ## Side by side
 
-For structured assessments rather than workspace coding, install the
-[Jev engine](/packages/engine-jev-api) separately from the Obversa bundle.
-It uses workspace mode `none` and answers questions over recorded state;
-your workflow chooses how to act on those answers.
-
 | | Temporal | Obversa |
 | --- | --- | --- |
 | Unit of work | A workflow calling activities. | A stage: an engine call, a command, a panel or a person, with the files it may write. |
-| The workers | Your code in activities, which may call any model. | CLI coding engines such as Claude Code, Codex, Grok and OpenCode run one fresh process per call. |
-| A review that sends work back | Control flow you write in the workflow. | Built in: a review role sends the work back to the stage that owns it, with findings, up to a budget. |
-| A person deciding | A signal the workflow waits for. | A person role; the run pauses on the question and the answer arrives through the callbacks client. |
-| More than one provider | Inside your activities, with a client library. | Each role names its engine; a review seat from another provider is one line. |
-| A run that survives a crash | Event history and replay; the run continues from the exact point. | A run records to a file; a workflow started again with `resume: true` carries on from that record and repeats nothing that finished. The supervised runner restarts a compiled graph from its own record. |
+| The workers | Your code in activities, which may call any model. | Engines such as Claude Code, Codex, Grok and OpenCode, with a fresh process for every call, or an API engine. |
+| A review that sends work back | Control flow you write in the workflow. | Built in: a review sends the work back to the stage that owns it, with the findings, up to a limit you set. |
+| A person deciding | A signal the workflow waits for. | A person role. The run pauses on the question, and the answer arrives through the callbacks client. |
+| More than one provider | Inside your activities, with a client library. | Each role names its engine. A review seat from another provider is one line. |
+| A run that survives a crash | Event history and replay. The run continues from the exact point. | A run can record to a file. Started again with `resume: true`, a workflow carries on from that record and repeats nothing that finished. The supervised runner restarts a compiled graph from its own record. |
 | Where it runs | A service you run or rent, plus your workers. | A library, no server. |
-| Languages | Eight SDKs, TypeScript among them. | TypeScript. |
+| Languages | SDKs in several languages, TypeScript among them. | TypeScript. |
 
 ## Where Temporal wins
 
@@ -157,7 +152,7 @@ your workflow chooses how to act on those answers.
 
 ## Where Obversa wins
 
-- There is one machine, the agents are tools on it, and a server would be
+- There's one machine, the agents are tools on it, and a server would be
   more than the job needs.
 - The review that sends work back and the person at the gate should be
   declared, not written as control flow each time.
@@ -165,6 +160,6 @@ your workflow chooses how to act on those answers.
 
 ## Where to go
 
-[A feature team, as a file](/workflows/feature-team) for the file above with
-its recorded run; [what is a meta-harness](/glossary/meta-harness) for the
-layer Obversa is.
+The [feature team](/workflows/feature-team) page shows the file above with a
+real run. [What is a meta-harness?](/glossary/meta-harness) explains the
+layer Obversa works at.

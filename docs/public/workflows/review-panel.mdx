@@ -3,9 +3,9 @@ title: "A review panel with a threshold"
 description: "One model implements, several review at the same time, and the change passes when enough of them accept."
 ---
 
-When one opinion is not enough, ask several at once. This file names a
+When one opinion isn't enough, ask several at once. This file names a
 Claude seat that implements the brief and a panel of two reviewers from
-two other model families; Node runs the test, then both reviewers judge
+two other model families. Node runs the test, then both reviewers judge
 the change at the same time. The change passes when at least `agree` of
 them accept. A panel below that sends the work back to the implementer,
 once.
@@ -14,15 +14,15 @@ once.
 npm install @obversa/obversa
 ```
 
+Set up the project as [Installation](/get-started/installation) describes.
+
 ## The file
 
-The third seat runs through the OpenCode command line tool named `opencode`.
-The adapter requires an absolute executable, so the file resolves `opencode`
-from the reader's `PATH` when it runs. The Claude and Codex adapters resolve
-their own command names.
-
-In that directory, create `package.json` with `"type": "module"`, then run
-the install command above before running the copied file.
+The third seat runs through the OpenCode command line tool, `opencode`.
+Give that seat an absolute command path. The Claude and Codex adapters find
+their own commands, but OpenCode's doesn't.
+`resolveCommandExecutable('opencode')` finds the command on your `PATH`
+when the file runs, then passes that path to `opencode`.
 
 ```ts
 import { claude } from '@obversa/engine-claude-cli';
@@ -91,15 +91,11 @@ console.log(JSON.stringify(result.outcome, null, 2));
 ## What a run printed
 
 From one real run of this file. The Codex reviewer accepted. The OpenCode
-seat returned no decision, and the reason is ours rather than the model's:
-a reviewer is sent the brief and its instructions, and what it may read is
-left to the engine's own default. That default lets a Codex or Claude seat
-open the files and leaves an OpenCode seat with nothing it can read, so
-that seat was asked to judge a change it could not see. The panel records
-an engine error for it rather than a rejection, and sends nothing back to
-the implementer on its account. With `agree: 1` the change passed on the
-one acceptance. Set `agree` to two and the same run would have failed the
-panel, because an error is not an acceptance.
+seat returned no decision. The panel recorded an engine error for it
+rather than a rejection, and sent nothing back to the implementer on its
+account. With `agree: 1` the change passed on the one acceptance. Set
+`agree` to two and the same run would have paused at the panel instead,
+because an error isn't an acceptance.
 
 ```json
 {
@@ -195,26 +191,21 @@ test('double returns twice the input value', () => {
 | review | Have both reviewers read the change and count the acceptances. | At least one reviewer has accepted. |
 
 The reviewers run at the same time, one job each. `agree` is a whole
-number from one to the number of reviewers; the default is all of them. A
-panel below it is a revision request aimed at `implement`, bounded by
-that stage's `retry`.
+number from one to the number of reviewers, and the default is all of
+them. A panel below it is a revision request aimed at `implement`, bounded
+by that stage's `retry`.
 
-## Gotchas
+Keep `agree` at the number of reviewers when one dissent must send the work
+back. Below that, the change can pass despite a dissent. The dissent is
+still on the record.
 
-- **The implementer and every reviewer are different families.** Two
-  reviewers from one family would be one opinion counted twice; the team
-  refuses the shape before any model runs.
-- **A reviewer's decision is its file first.** Each reviewer writes
-  `reviews/<name>.json`; the panel reads that file when the reviewer wrote
-  it this turn, then the first decision object in the reply. A reply with
-  no decision in either is asked for once more, then counts as an engine
-  error, not a rejection.
-- **`agree` equal to the reviewer count means unanimity.** Set it lower
-  and one dissent does not send the work back; the dissent is still on the
-  record.
-- **The OpenCode seat needs an absolute command path.**
-  `resolveCommandExecutable('opencode')` reads the command from your `PATH` when
-  the file runs, then passes that path to `opencode`.
+Pick the implementer and every reviewer from different model families. Two
+reviewers from one family would be one opinion counted twice. The team
+refuses the shape before any model runs.
+
+A reviewer's decision is its reply. The panel reads the first JSON object
+in each one. A reply with no decision is asked for once more. After that it
+counts as an engine error, not a rejection.
 
 ## Source
 

@@ -104,6 +104,7 @@ export const stageBranches = {
   F116: 'docs/orders-example-output',
   F117: 'docs/public-docs-consistency',
   F118: 'fix/feedback-loop-guard',
+  F119: 'docs/tidy-pass',
 };
 
 export function manageStage(args, options = {}) {

@@ -3,8 +3,9 @@ title: "A review that sends work back"
 description: "A reviewer rejects the first draft with a reason, the author gets the reason, and the second draft passes."
 ---
 
-This file shows the review and revision path with no model account. The first review sends the work back. The author receives the reason,
-changes the work, and passes the second review.
+This file runs a review and a revision with no model account. The first
+review sends the work back. The author gets the reason, changes the work,
+and passes the second review.
 
 ## Graph
 
@@ -20,15 +21,14 @@ changes the work, and passes the second review.
 | --- | --- |
 | Input | None |
 | Output | A pass result and the final review summary |
-| Permissions | No file writes and no network access |
+| Permissions | No network access. The only file it writes is its record, `.obversa/records/offline-review.jsonl` |
 | Limit | Four attempts |
 | Evidence | One JSON result on standard output |
 
 ## Source
 
-Copy `examples/offline-review.ts` from the repository.
-
-The example imports only the public package exports.
+Copy `examples/offline-review.ts` from the repository. It imports only public
+package exports.
 
 ```ts
 import { relative } from 'node:path';
@@ -105,9 +105,7 @@ void main();
 
 ## Run the workflow
 
-
-After you copy the source into a project that has `@obversa/runtime` and `tsx`
-installed, run:
+In a project set up as [Installation](/get-started/installation) shows, run:
 
 ```bash
 pnpm exec tsx offline-review.ts
@@ -126,14 +124,14 @@ The result is:
 
 ## Failure behavior
 
-The workflow allows four attempts. If review keeps asking for a revision, the workflow
-ends with an exhausted result and the process exits with code 1.
+The workflow allows four attempts. If the review keeps asking for a revision,
+the workflow ends with an exhausted result and the process exits with code 1.
 
 ## Pause, resume, and retry behavior
 
-This line does not pause and does not store state. Run it again from the start.
-The workflow has no external effect, so a full retry is safe.
+This file doesn't pause. Each run starts from the beginning and overwrites its
+record. It has no effect outside that record, so a full retry is safe.
 
 ## Engine lanes
 
-This line uses function jobs. It does not call an engine.
+This file uses function jobs and calls no engine.

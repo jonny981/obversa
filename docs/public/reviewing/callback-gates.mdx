@@ -4,59 +4,65 @@ description: "Stop the run for one question a person, an agent or a service must
 ---
 
 
-Some steps are not the agent's to decide. Ship this release? Is this the
-migration we meant? Which of these two drafts? On a team those go to a
-person, the work waits, and it carries on when the answer comes back. A
-callback gate is that pause. The workflow asks one question with a fixed
-shape of answer, stops, and continues from that exact step when someone
-answers it.
+Some steps aren't the agent's to decide. Ship this release? Is this the
+migration we meant? Which of these two drafts? On a team, those go to a
+person, and the work waits for the answer. A callback gate is that pause.
+The workflow asks one question with a fixed shape of answer and stops. When
+someone answers, it carries on from that exact step.
 
 The question can go to a person in their browser, to another agent, or to
-a service. The gate does not care who answers; it cares that the answer
-comes back in the shape it asked for, so the workflow can branch on it
-without asking a model what the answer meant.
+a service. Whoever answers, the answer must come back in the shape the gate
+asked for. The workflow then branches on it without asking a model what the
+answer meant.
 
 ## What you get
 
 - **One question, one typed answer.** You state the question and the
   shape of the answer, such as `{ approved: boolean }`. The run records
   the answer and branches on it.
-- **The run survives the wait.** The question is an event in the record,
-  so a process that dies while a person is thinking loses nothing; a fresh
-  process rebuilds the pause and waits for the same answer.
+- **The run survives the wait.** With the stored callbacks client, the
+  question is an event in the run's record, so a process that dies while a
+  person is thinking loses nothing. A fresh process rebuilds the pause and
+  waits for the same answer.
 - **Any answerer.** A router takes the question to whoever answers it: a
   surface in a browser for a person, an engine call for an agent, an API
-  call for a service. Swap the router and the question is unchanged.
+  call for a service. Swap the router and the question stays the same.
 - **Answers bound to what they judged.** An approval can carry the exact
-  bytes, proof and workspace state it approved, so a later change cannot
-  ride on an old yes.
+  bytes, proof and workspace state it approved, so a later change can't
+  reuse an old yes.
 
 ## Two ways to wait
 
-An approval() gate waits in one of two ways, and the record is the same in
-both. A team review that uses a callback gate is not one of them: it returns a
-pause carrying its question straight away, whichever way the run was started.
+An `approval()` step waits in one of two ways, and both record the question
+the same way. A team review that uses a callback gate isn't one of them. It
+returns a pause carrying its question straight away, however the run was
+started.
 
 Attended: a person is at the run, so the process stays up and waits for the
-answer. This is the mode when `onCallback: 'wait'` is set. It is never the
-default: a run exits unless you ask it to wait, whichever callbacks client
-it is given.
+answer. Set `onCallback: 'wait'` for this mode. It's never the default. A run
+exits unless you ask it to wait, whichever callbacks client it's given.
 
 Unattended: nobody is attached, so the run records the question and exits. A
-schedule starts the same file again with `resume: true`. The run reads its
-record first. If the answer has arrived, the step continues. If it has not,
-the run observes the pending gate and exits again with the same recorded
-pause, and asks nothing a second time. The answer arrives through the stored
-callbacks client.
+schedule starts the same file again with `resume: true`, and the run reads
+its record first. If the answer has arrived, the step carries on. If it
+hasn't, the run exits again with the same recorded pause and asks nothing a
+second time.
 
-The difference between the modes is only whether the process stays up.
+The answer arrives through the stored callbacks client, which you make with
+`createStoredCallbackClient`. Pass it to `run()` as `callbacks`. Without it,
+`run()` gives each run a fresh in-memory client, and its questions end with
+the run. [How a run is recorded](/recording/how-a-run-is-recorded) covers
+what else a resumed run skips or repeats.
+
+The only difference between the modes is whether the process stays up.
 Nothing in the record says which mode asked the question.
 
 ## See one run
 
-The example asks one approval question, has two routers compete for it,
-releases it, answers it, and shows the answer surviving a replay of the
-record. It runs offline in under a second.
+`examples/callback-gate.ts` asks one approval question. Two routers compete
+for it. The first claims it and the second is refused. The first releases
+it and the second answers it. A replay of the recorded history then leaves
+nothing pending. It runs offline in under a second.
 
 
 ```text
@@ -81,8 +87,8 @@ record. It runs offline in under a second.
 
 ## Source
 
-The example, byte for byte from `examples/callback-gate.ts`. Copy it
-into a project that has `@obversa/runtime` installed and run it with `tsx`.
+This is `examples/callback-gate.ts`, byte for byte. Copy it into a project
+set up as in [Installation](/get-started/installation), then run it.
 
 ```ts
 import {
@@ -145,54 +151,48 @@ console.log(JSON.stringify({
 
 ## A person's decision as a step
 
-For the common case, one question in a workflow, `approval` wraps the gate:
-it asks through the run's callbacks client, a yes passes the step, a no goes
-back to the step that owns the fix with the person's note as the finding,
-and no answer pauses the run with the request pending. [A person decides](/workflows/approval)
-shows it in a running file. The client, the routers and the stored history
-below are what it stands on, and what a host uses to answer.
+In the common case of one question in a workflow, `approval` wraps the
+gate. It asks through the run's callbacks client. A yes passes the step. A
+no sends the work back to the step you name as its `target`, with the
+person's note as the finding. No answer pauses the run with the request
+pending. [A person decides](/workflows/approval) shows it in a running file.
+It's built on the client, the routers and the stored history on this page.
+A host answers through the same pieces.
 
 ## How it works when it runs
 
-1. The workflow posts the question; the record gains a request event.
-2. A router claims it. Two routers cannot hold one question at once.
-3. The router asks: opens a surface, calls an agent, calls a service.
-4. The router submits the answer; the run checks its shape and records it.
-5. The host resumes the paused step with the answer in hand.
+1. The workflow posts the question, and the record gains a
+   `callback-requested` event.
+2. A router claims it. Two routers can't hold one question at once.
+3. The router asks: it opens a surface, calls an agent or calls a service.
+4. The router submits the answer. The run checks that the required fields
+   are there and have the right types, then records it. Check any deeper
+   rule in your host before it submits.
+5. The host resumes the paused step with the answer in hand. An answer
+   doesn't restart an exited run by itself. The host reads the decision
+   first, so it can decide an approval needs a second look.
 
 If the router dies between claim and answer, the question is still there
-and still claimed; the owner releases it and another router can take it.
+and still claimed. Once the claim is released with its claim token, another
+router can take it.
 
 ## Using it in a workflow
 
 Put a gate where a person must say yes: before a release, before a
-destructive change, before spending money. Give it a surface to open and
-the run pauses with the question on screen beside the terminal; the
-[surfaces](/concepts/surfaces) page shows the page half. For decisions
+destructive change, before spending money. Give it a surface and the run
+pauses with the question open in a browser. The
+[surfaces](/concepts/surfaces) page covers the page itself. For decisions
 about a proposed change, bind the approval to the evidence with
-[proof acceptance](/reviewing/proof-acceptance), so an approval means
-"these bytes", not "whatever is there now".
-
-## Things that catch people out
-
-- **The gate checks shape, not meaning.** Required fields and their types
-  are checked; deeper rules are your host's to check before it submits.
-- **Change the question and it is a new question.** The question text, the
-  answer shape and the input make up the request's identity; change any of
-  them and a previous answer no longer applies. Changing how it is shown
-  does not.
-- **Resume is explicit by default.** An answer arriving does not restart an
-  exited run by itself; the host reads the decision and resumes the step.
-  That is what lets a host decide that an approval needs a second look. With
-  `onCallback: 'wait'` the process never exited, so it continues once the
-  answer arrives.
-- **The in-memory client forgets.** It is for tests. The stored client is
-  the one whose questions survive a process exit.
+[proof acceptance](/reviewing/proof-acceptance).
 
 ## Reference: what the request identity covers
 
 The request digest covers the gate id and version, the question text, the
-response schema and the input. Presentation hints, such as a theme or a
-pane placement, are outside it. An approval gate can additionally bind the
-answer to proof, input artifacts, output bytes, permissions and a workspace
-anchor; the host checks those still match before it acts on the approval.
+response schema and the input. Change any of them and it's a new question,
+so an answer to the old one doesn't carry over. Presentation hints, such as
+a theme or a pane placement, are outside it. Changing only how a question
+is shown keeps it the same question.
+
+An approval gate can also bind the answer to proof, input artifacts, output
+bytes, permissions and a workspace anchor. The host checks those still match
+before it acts on the approval.

@@ -1,23 +1,23 @@
 ---
 title: "Obversa and LangGraph"
-description: "LangGraph is a low-level graph runtime for stateful agents in Python and JavaScript. Obversa is a TypeScript library for agent teams with reviews that send work back and a person at the gate. What each is for, and where each wins."
+description: "LangGraph is a low-level graph runtime for stateful agents in Python and JavaScript. Obversa is a TypeScript library for agent teams with feedback loops and a person at the gate. What each is for, and where each wins."
 ---
 
-Choose by what you are building. The graph runtime fits when you are building the agent itself and want a graph of
-your own nodes with state that survives a crash. Pick Obversa when the
-agents already exist as tools on your machine and what you need is the
-team around them: named roles, a review that sends the work back, a person
-who decides, and a record of every step.
+Choose by what you're building. LangGraph fits when you're building the
+agent itself and want a graph of your own nodes, with state that survives a
+crash. Obversa fits when the agents already exist as tools on your machine
+and what you need is the team around them: named roles, a review that sends
+the work back, a person who decides, and a record of every step.
 
-LangGraph's own words: "A low-level orchestration framework and runtime
-for building, managing, and deploying long-running, stateful agents." A
-node is a function over shared state, and edges say what runs next. A
-review that sends work back is something you build from a conditional
-edge or a jump to an earlier node. A person is an interrupt that a client
-resumes with a value. The checkpointer saves the graph's state at every
-step, in Postgres or SQLite, so a run resumes after a crash.
+In LangGraph's own words, it's "a low-level orchestration framework and
+runtime for building, managing, and deploying long-running, stateful
+agents." A node is a function over shared state, and edges say what runs
+next. You build a review that sends work back from a conditional edge or a
+jump to an earlier node. A person is an interrupt that a client resumes with
+a value. The checkpointer saves the graph's state at every step, in Postgres
+or SQLite, so a run resumes after a crash.
 
-Here is the shape Obversa is for, as one file:
+Here's the shape Obversa is for, as one file:
 
 ```ts
 import { claude } from '@obversa/engine-claude-cli';
@@ -133,37 +133,32 @@ console.log(JSON.stringify(result.outcome, null, 2));
 
 ## Side by side
 
-For structured assessments rather than workspace coding, install the
-[Jev engine](/packages/engine-jev-api) separately from the Obversa bundle.
-It uses workspace mode `none` and answers questions over recorded state;
-your workflow chooses how to act on those answers.
-
 | | LangGraph | Obversa |
 | --- | --- | --- |
 | Unit of work | A node: a function over shared state. | A stage: an engine call, a command, a panel or a person, with the files it may write. |
-| The workers | Model calls you write inside nodes. | CLI coding engines such as Claude Code, Codex, Grok and OpenCode run one fresh process per call. |
-| A review that sends work back | Built from a conditional edge or a jump to an earlier node. | Built in: a review role sends the work back to the stage that owns it, with findings, up to a budget. |
-| A person deciding | `interrupt()` in a node; a client resumes with the answer. | A person role; the run pauses on the question and the answer arrives through the callbacks client. |
-| More than one provider | Different nodes can call different providers; you write the client each time. | Each role names its engine; a review seat from another provider is one line. |
-| A run that survives a crash | The checkpointer, with Postgres or SQLite behind it. | A run records to a file; a workflow started again with `resume: true` carries on from that record and repeats nothing that finished. The supervised runner restarts a compiled graph from its own record. |
+| The workers | Model calls you write inside nodes. | Engines such as Claude Code, Codex, Grok and OpenCode, with a fresh process for every call, or an API engine. |
+| A review that sends work back | Built from a conditional edge or a jump to an earlier node. | Built in: a review sends the work back to the stage that owns it, with the findings, up to a limit you set. |
+| A person deciding | `interrupt()` in a node. A client resumes with the answer. | A person role. The run pauses on the question, and the answer arrives through the callbacks client. |
+| More than one provider | Different nodes can call different providers. You write the client each time. | Each role names its engine. A review seat from another provider is one line. |
+| A run that survives a crash | The checkpointer, with Postgres or SQLite behind it. | A run can record to a file. Started again with `resume: true`, a workflow carries on from that record and repeats nothing that finished. The supervised runner restarts a compiled graph from its own record. |
 | Where it runs | A library you host, with a hosted platform on offer. | A library, no server. |
 | Languages | Python, and JavaScript with TypeScript. | TypeScript. |
 
 ## Where LangGraph wins
 
-- You are writing the agent's inner loop, not driving an existing one.
-- You need crash resume for any graph today, with a database behind it.
+- You're writing the agent's inner loop, not driving an existing one.
+- You want the run's state in Postgres or SQLite.
 - Your team writes Python.
 
 ## Where Obversa wins
 
-- The agents are Claude Code, Codex and their kin, and the work is to give
+- The agents are Claude Code, Codex and their kin, and the job is to give
   them a process with a review that sends work back and a person at the end.
 - You want that process readable as one file, with the record beside it.
 - You want a second opinion from another provider without writing a client.
 
 ## Where to go
 
-[A feature team, as a file](/workflows/feature-team) for the file above with
-its recorded run; [what is a meta-harness](/glossary/meta-harness) for the
-layer Obversa is.
+The [feature team](/workflows/feature-team) page shows the file above with a
+real run. [What is a meta-harness?](/glossary/meta-harness) explains the
+layer Obversa works at.

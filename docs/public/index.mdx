@@ -10,44 +10,39 @@ Model how your team really works: named roles, reviews that send work back, and 
 
 You describe how work should move from a request to a checked result: the
 steps, who does each one, the reviews, and where a person decides. Obversa
-runs that workflow one bounded engine call at a time and records every step.
+runs that workflow one bounded engine call at a time.
 
-Agents are not deterministic, so nothing guarantees that every step of a
+Agents aren't deterministic, so nothing guarantees that every step of a
 process is followed, in the right order, under the right conditions.
 Obversa puts a deterministic process around the inference: many small jobs,
-each with a review cycle. A workflow built into a frontier harness cannot
-be saved, shared or repeated; an Obversa workflow is a file you save, share
-and run again. And it models process at every layer, the organisation, the
-team and the individual.
+each with a review cycle. A workflow built into a frontier harness can't be
+saved, shared or repeated. An Obversa workflow is a file you save, share and
+run again. It models process at every layer: the organisation, the team and
+the individual.
 
 ## Inference at the leaves
 
 Inference belongs mostly at the leaves. Around each inference step you can
 build as much process as you like: deterministic scripts, tools and checks,
-so that the job an agent has to do is clearer, simpler, better bounded and
-cheaper. Squeeze the determinism out of the agents and what is left is a
-set of very specific, focused agents doing narrow tasks.
+so the job an agent has to do is clearer, simpler, better bounded and
+cheaper. Squeeze the determinism out of the agents and what's left is a set
+of very specific, focused agents doing narrow tasks.
 
-That improves quality, and it does something else: a narrow, well-bounded
-task can be done by a small open-weight model tuned to it, as well as a
-frontier model would, at a fraction of the cost.
-
-Process engineers call the method value stream mapping: understand the
-process, then make the steps that add no value cheaper, faster, or cut
-them out. The same idea applies here. Lift every deterministic step out of
-the agents, so their context shrinks to the parts that truly need
-inference.
+That improves quality. It also means a small open-weight model tuned to a
+narrow, well-bounded task can do it as well as a frontier model would, at a
+fraction of the cost. [What Obversa is](/concepts) explains the method.
 
 ## See a team run
 
-Nine named stages, the way a real team delivers a feature: a Claude seat
-writes the context, the requirements and the plan, each until a reviewer
-accepts it; a Codex seat writes the tests before any code and the
-reviewer reads them; the same seat implements until the tests pass and
-the panel accepts; then the change is put to a person; and the evidence
-is written from the record. A red test or a rejected review sends the
-work back to the stage that owns it, with the findings. The file is
-complete; copy it, put your brief in, run it with Node.
+The file below has nine named stages, the way a real team delivers a
+feature. A Claude seat
+writes the context, the requirements and the plan, and a reviewer accepts
+each one before the next begins. A Codex seat writes the tests before any
+code exists, and a reviewer reads them. The same seat then implements until
+the tests pass and the review panel accepts. A person decides whether to
+ship, and the last stage writes up the evidence. A red test or a rejected
+review sends the work back to the stage that owns it, with the findings.
+The file is complete. Write your brief to `briefs/triple.md` and run it.
 
 ```ts
 import { claude } from '@obversa/engine-claude-cli';
@@ -161,18 +156,19 @@ const result = await run(createFeatureDelivery());
 console.log(JSON.stringify(result.outcome, null, 2));
 ```
 
-A writing seat can write anywhere the process can: the seat helpers start
-their engines with permission prompts off, which is what lets a model
-write files. Run it in a directory you are willing to let a model
-change.
+<Warning>
+Run the file in a directory you're happy for a model to change. The Claude
+seat runs with permission prompts off, so it can write anywhere the process
+can.
+</Warning>
 
 Write many small jobs, each with its own review, for the specific research,
 implementation and test tasks in your process, rather than a few large
 ones. A coarse step hands the whole task to one inference and hopes. A
-small step with a review cycle is a process the run can hold to, and the
-team above is the shape to grow, not the size to stop at.
+small step with a review cycle is a process the run can hold to. Treat the
+team above as a starting point, and add steps as your process needs them.
 
-One real run of this file printed:
+A real run of this file stopped at the question for the person:
 
 ```json
 {
@@ -181,77 +177,76 @@ One real run of this file printed:
 }
 ```
 
-Every stage's own words are in that record: what the research seat found,
-what the plan covers, the reviewers' reasons, the test command's exit and
-the question waiting for a person. The full output, the notes the team
-wrote and the files the models left are on the
-[feature delivery](/workflows/feature-team) page,
-and [the examples](/workflows) have the two smaller teams and the single
-mechanisms they are built from.
+The [feature delivery](/workflows/feature-team) page shows everything that
+run printed, stage by stage, with the notes the team wrote and the files the
+models left. [The examples](/workflows) include smaller teams and the single
+mechanisms they're built from.
 
 ## What you can do with it
 
 - **Run a ready-made team on your own files.** A writer and a reviewer, a
-  review panel with a threshold, or feature delivery from brief to approval:
-  one import, your brief, your engines, run.
-  [The runtime workflow builder](/packages/runtime).
+  review panel with a threshold, or feature delivery from brief to approval.
+  Import one, add your brief and engines, and run it.
+  [Ready-made workflows](/packages/builtin-workflows).
 - **Give work a shape in one call.** Steps in order, a graph with parallel
   branches, a loop that revises until it passes, a tournament of
   candidates, a quorum of opinions. [Workflows](/concepts/workflows).
-- **Say what each step does and what done means.** A sentence for each on
-  the node, and the reviewer judges against it.
+- **Say what each step does and what done means.** You write a sentence for
+  each. In a `workflow()`, the agent doing the step gets both in its prompt.
   [Workflows](/concepts/workflows).
 - **Send work back to the step that owns it.** A failed review names the
   step that must fix it, and the work goes back there with the findings.
-  [A review that sends work back](/reviewing/review-loop).
-- **Get a second opinion that is really a second opinion.** The implementer
-  and every reviewer run on different model families, checked before a run.
+  [Sending work back](/concepts/workflows#sending-work-back).
+- **Get a second opinion that's really a second opinion.** Before a run
+  starts, the workflow builder checks that the implementer and every
+  reviewer come from different model families.
   [The runtime workflow builder](/packages/runtime).
 - **Stop for a person.** A callback gate puts one decision in front of
-  someone and the run carries on from that step with the answer.
+  someone, and the run carries on from that step with the answer. With a
+  stored callbacks client and a record, a run nobody is watching exits at
+  the question and carries on when a schedule starts it again.
   [Callback gates](/reviewing/callback-gates).
 - **Approve only what was proved.** An approval is bound to the exact bytes
   and test result it was given. [Proof acceptance](/reviewing/proof-acceptance).
 - **Run a step as a command.** The step passes on the exit code, never on a
   model's report. [Workflows](/concepts/workflows).
 - **Use the engines you have.** Claude, Codex, Grok, OpenCode, the Agent
-  SDK, the Anthropic API, or one you write to the contract. Add
-  [Jev](/packages/engine-jev-api) separately for structured assessments with
-  workspace mode `none`, not workspace editing.
+  SDK, the Anthropic API, or one you write to the contract.
+  [Jev](/packages/engine-jev-api) answers structured questions about a run.
   [Engine contracts](/packages/api).
 - **Define agents and skills in markdown.** The files your team already
   writes become the persona and the skills a step runs with.
-  [Workflows](/concepts/workflows).
 - **Give each step its own worktree.** A change touches only the paths it
   declared, and a mismatch pauses the run.
   [The workspace contract](/workspace/contract).
-- **Keep every step in a file on disk.** Events and artifacts beside each
-  other, no server and no database.
+- **Keep every step in a file on disk.** Events and artifacts sit side by
+  side, with no server or database.
   [How a run is recorded](/recording/how-a-run-is-recorded).
 - **Kill a run and start it again where it stopped.** Nothing finished is
   done twice. [The runner](/packages/runner).
-- **Give the team a memory.** In process or in private git refs, curated
-  and grounded by the steps themselves. [Memory](/memory).
-- **Put a diff in front of a person in their own editor.** Or drive runs
+- **Give the team a memory.** Keep it in process, in private Git refs or in
+  your own Markdown files. The steps curate it and ground their work in it.
+  [Memory](/memory).
+- **Put a diff in front of a person in their own editor**, or drive runs
   from cmux. [Surfaces](/concepts/surfaces).
-- **Let team members talk.** Messages, mentions, and a teammate woken by
-  name, in rooms that are files.
+- **Let team members talk.** Teammates post messages to rooms that are
+  files, and a mention asks the named teammate to take a turn.
   [A team conversation](/workflows/team-conversation).
-- **Set a budget and read the cost.** A cap on an attempt and a cost report
-  for the run. [The runtime](/concepts/runtime).
+- **Set a budget and read the cost.** Cap the tokens a run can spend, and
+  read its cost report. [The runtime](/concepts/runtime).
 
 
 ## Packages
 
 | Package | Purpose | Version |
 | --- | --- | --- |
-| `@obversa/obversa` | Installs the bundled Obversa packages | `0.1.0` |
-| `@obversa/runtime` | Compiles and runs pipeline, review-loop, and DAG graph forms | `0.1.0` |
+| `@obversa/obversa` | Installs every package below except Jev | `0.1.0` |
+| `@obversa/runtime` | Builds and runs workflows as graphs, team conversations or a review loop | `0.1.0` |
 | `@obversa/runner` | Supervises stored graph runs in bounded workers | `0.1.0` |
 | `@obversa/api` | Defines every contract: engine, memory, graph, events, artifacts, workspace, callbacks, proofs and run definitions, with their validators | `0.1.0` |
 | `@obversa/core` | Runs one child process with a deadline and a readable result | `0.1.0` |
 | `@obversa/memory-simple` | Stores memory in one process | `0.1.0` |
-| `@obversa/memory-git` | Stores memory in private Git references | `0.1.0` |
+| `@obversa/memory-git` | Stores memory in private Git references, and writes a stage's reasoning into its commit | `0.1.0` |
 | `@obversa/memory-markdown` | Selects ranked passages from local Markdown files | `0.1.0` |
 | `@obversa/notify-webhook` | Posts one message per interesting run event to a URL you supply | `0.1.0` |
 | `@obversa/builtin-workflows` | Three ready-made workflows | `0.1.0` |
@@ -265,25 +260,23 @@ mechanisms they are built from.
 | `@obversa/engine-opencode-cli` | Runs one engine attempt through the OpenCode CLI | `0.1.0` |
 | `@obversa/engine-jev-api` | Answers decision questions over recorded run state through the Jev API | `0.1.0` |
 
-The seven engine plugins, three memory adapters and the notifier have their
-own pages in the Packages group. Not every available engine is
-bundled. Start with the bundle, then add Jev if you need its assessments:
+The seven engine plugins, three memory adapters and the notifier each have a
+page in the Plugins group. Install the bundle, and add Jev if you need it:
 
 ```bash
 npm install @obversa/obversa
 npm install @obversa/engine-jev-api
 ```
 
-Jev requires workspace mode `none`. API, core, runtime and runner share one
-version. Other packages keep their own manifest versions.
+The api, core, runtime and runner packages always share one version. The
+others each keep their own.
 
-The packages have one dependency direction. The runtime imports the memory port.
-Each memory adapter also imports the memory port. The runtime does not import a
-memory adapter.
+The runtime never imports an engine or a memory adapter. You pass the ones
+you want when you run.
 
 ## Start here
 
-1. [Install the local packages](/get-started/installation).
-2. [Run the first program](/get-started/first-run).
-3. [Copy the feature team](/concepts/workflows) and change the stages to yours.
+1. [Install the packages](/get-started/installation).
+2. [Run your first workflow](/get-started/first-run).
+3. [Copy the feature team](/workflows/feature-team) and change the stages to yours.
 4. [Use Obversa in cmux](/hosts/cmux).

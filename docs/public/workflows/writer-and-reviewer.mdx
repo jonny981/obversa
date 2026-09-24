@@ -5,23 +5,22 @@ description: "One model writes the files your brief names, your test command run
 
 Give one model a brief and another model the job of checking it. This
 file names two roles and three stages: a Claude seat writes a function and
-its test, Node runs the test, and a Codex seat reads the files and the
-test result. A red test or a rejection sends the work back to the writer,
-which runs again with the findings, once. The brief lives beside the file
-as markdown.
+its test, Node runs the test, and a Codex seat reviews the files once the
+test passes. A red test or a rejection sends the work back to the writer,
+which runs again with the findings, once.
 
 ```bash
 npm install @obversa/obversa
 ```
 
+Set up the project as [Installation](/get-started/installation) describes.
+
 ## The file
 
-The brief is `briefs/add.md` beside the file: its body is the task and
+The brief is `briefs/add.md` beside the file. Its body is the task, and
 its front matter names the files the brief expects written. Change those to
-your own and run the file from the directory the work belongs in.
-
-In that directory, create `package.json` with `"type": "module"`, then run
-the install command above before running the copied file.
+your own and run the file from the directory the work belongs in. Paths in
+the file, the test command's among them, are relative to that directory.
 
 ```ts
 import { claude } from '@obversa/engine-claude-cli';
@@ -75,10 +74,22 @@ const result = await run(createWriterReviewerPair());
 console.log(JSON.stringify(result.outcome, null, 2));
 ```
 
+<Warning>
+Run the file in a directory you're happy for a model to change. The Claude
+seat runs with permission prompts off, so it can run any command the process
+can.
+</Warning>
+
+Each seat comes from its plugin: `claude('claude-sonnet-4-5')` and
+`codex('gpt-5.6-luna')` carry the identity the plugin records, and the
+record and the family check read it. The Codex seat runs sandboxed to the
+workspace with approvals off. Each helper takes an options object to choose
+otherwise.
+
 ## What a run printed
 
-The output below is from one real run of this file, with the two command
-line tools signed in on the machine.
+The output below is from one real run of this file, with both command line
+tools signed in.
 
 ```json
 {
@@ -149,12 +160,6 @@ test('add handles negative numbers', () => {
 });
 ```
 
-The reviewer wrote its decision to `reviews/review-1.json`:
-
-```json
-{"status":"pass","summary":"The target implements a pure numeric add function and its Node test passes the exact stage-gate command.","findings":[]}
-```
-
 ## The team's shape
 
 | stage | does | done when |
@@ -163,30 +168,17 @@ The reviewer wrote its decision to `reviews/review-1.json`:
 | test | Run the test command against the written files. | The test command exits 0. |
 | review | Read the code, the test and its result. | The change meets the brief. |
 
-The reviewer runs after the test, so it reads a result and not a promise.
-A red test or a rejection is a revision request aimed at `write`, and the
-`retry` on that stage, one here, bounds how many times the pair goes
-round.
+The reviewer runs only after the test passes. A red test or a rejection is
+a revision request aimed at `write`. The `retry` on that stage (one here)
+bounds how many times the pair goes round.
 
-## Gotchas
+The writer and the reviewer must come from different model families. The
+team refuses to run when they share one, so one model can't approve its own
+work.
 
-- **The two seats must be different model families.** The team refuses to
-  run when the writer and the reviewer share a family, so one model cannot
-  approve its own work.
-- **A seat comes from its plugin.** `claude('claude-sonnet-4-5')` and
-  `codex('gpt-5.6-luna')` carry the identity the plugin records; the record
-  and the family check read it. The Codex seat runs sandboxed to the
-  workspace with approvals off; the Claude seat runs with permission
-  prompts off and can run any command the process can. Each takes an
-  options object to choose otherwise.
-- **A stage writes what it declares.** `writes` names the files the write
-  stage produces; a missing or empty one fails the stage by name, and a
-  write to another declared file is refused. Files the workflow does not
-  declare are not checked.
-- **The test command runs in the workspace.** Its arguments are relative to
-  the directory the file runs in, as the brief's front matter names them.
-- **A writing seat can write anywhere the process can.** Run the file in a
-  directory you are willing to let a model change.
+`writes` names the files the write stage produces. A missing or empty one
+fails the stage by name, and so does a change to another declared file.
+Files the workflow doesn't declare aren't checked.
 
 ## Source
 

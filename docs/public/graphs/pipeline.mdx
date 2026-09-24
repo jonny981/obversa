@@ -7,15 +7,14 @@ description: "Run ordered stages through the durable graph executor."
 that form: each stage is a node, and each edge says which stage must finish
 before another can start.
 
-The graph form only works with frozen data. It folds recorded events into state
+The graph form works only on frozen data. It folds recorded events into state
 and decides what runs next. `createGraphExecutor` stores each dispatch before it
 runs the matching stage.
 
 ## Run the example
 
-
-The command stores and runs a three-stage pipeline through the public executor.
-It prints one JSON report:
+`examples/pipeline.ts` stores and runs a three-stage pipeline through the public
+executor. It prints one JSON report:
 
 ```json
 {
@@ -63,9 +62,9 @@ It prints one JSON report:
 }
 ```
 
-The clean-consumer check compiles and runs the same source from the packed
-package with TypeScript 6 and TypeScript 7. Its source is
-`examples/pipeline.ts`.
+The repository's checks compile this file against the packed packages with
+TypeScript 6 and TypeScript 7, run it, and compare what it prints with this
+report.
 
 ## Define a pipeline
 
@@ -108,14 +107,11 @@ result, and the publish function reads the review result.
 
 If the executor process stops after it records a stage dispatch and before that
 stage completes, a new executor over the same store returns `waiting` with that
-stage's position. Call `resume` with that position after the old process has
-stopped.
+stage's position. The executor doesn't lock the run, so wait until the old
+process has stopped, then call `resume` with that position.
 
-Resume does not write a second dispatch event. Completed earlier stages stay
-complete. The pipeline then continues from that stage.
-
-The executor does not lock the run. Do not call `resume` while the previous
-executor still runs.
+Resume doesn't write a second dispatch event. Earlier stages that completed
+stay complete, and the pipeline carries on from that stage.
 
 This example pipeline sets `globalConcurrency` to 1, so at most one stage is in
 flight and `waiting.positions` has one entry.
@@ -125,14 +121,14 @@ flight and `waiting.positions` has one entry.
 - **Required nodes** block their dependants after failure and fail the pipeline
   after finalizers run.
 - **Optional nodes** can fail without blocking their dependants.
-- **Expected skips** use a completed result with `skipped: true` and do not
+- **Expected skips** use a completed result with `skipped: true` and don't
   block dependants.
 - **Finalizer nodes** have no edges and run after the other nodes settle.
 - **Paused nodes** stop new dispatches and keep the recorded pause reason.
 
 A node with a `lane` object uses the engine route stored in the plan. A node
 without one uses its data function and is data-only.
-Nodes can share a lane id when every copy of its declaration is identical; a
+Nodes can share a lane id when every copy of its declaration is identical. A
 conflicting declaration is rejected. A failed finalizer fails the graph even
 when every worker completed successfully.
 
@@ -145,7 +141,7 @@ when independent branches and declared retries must continue.
 uses the matching cap in `keyedConcurrency`.
 
 Each dispatch receives a stable position such as `dag/review/1`. Its input has
-the completed results of its direct predecessors, keyed by node name. The final
-output maps every completed node name to its returned payload. A failed optional
-node is omitted because it has no completed payload. The example's plan declares
+the completed results of its direct predecessors, keyed by node id. The final
+output maps every completed node's id to its returned payload. A failed optional
+node is left out because it has no completed payload. The example's plan declares
 exactly three dispatches and a maximum concurrency of one.

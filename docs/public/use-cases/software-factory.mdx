@@ -1,17 +1,13 @@
 ---
 title: "Software factory, as a workflow"
-description: "Search calls it a software factory. What ships is a workflow: named roles, a review that sends work back, and a person at the merge, on the engines you already use."
+description: "People call it a software factory. What ships is a workflow: named roles, a review that sends work back, and a person at the merge, on the engines you already use."
 ---
 
-Search calls it a software factory. What ships is a workflow: named roles, a
-review that sends work back, a person at the merge. Obversa is that runtime,
-on the engines you already use.
-
-The factory picture is a belt that turns issues into merged pull requests
-without a person. The teams that make it work do not run a belt. They run a
-process: one agent writes, another reviews, the work goes back when the
-review fails, tests run as commands rather than as agent turns, and a person
-decides at the end. That process is what you write here, as one file.
+People call it a software factory. What ships is a workflow: named roles, a
+review that sends work back, and a person at the merge. Obversa runs that
+workflow on the engines you already use, and you write it as one file.
+[What is a software factory?](/glossary/software-factory) takes the picture
+apart.
 
 ## The file
 
@@ -131,31 +127,26 @@ console.log(JSON.stringify(result.outcome, null, 2));
 
 Every stage names its worker and the files it may write. The review role is
 a seat from another provider. A failed review sends the work back to the
-stage that owns it, with the findings, up to the retry you set. The last
-stage is a person.
+stage that owns it, with the findings, up to the `retry` limit you set. A
+person makes the final decision.
 
-## What a factory search usually wants
+Write the tests as `run` stages, as the `test` stage does. An agent that
+runs and supervises a test suite spends tokens to do what a command does
+for free.
 
-| the search | what you write |
+## What people want from a software factory
+
+| what you want | what you write |
 | --- | --- |
 | Issues in, pull requests out. | A workflow whose first stage reads the issue and whose last stage is a person at the merge. |
 | Many agents on one change. | Named roles, one engine each, from more than one provider. |
 | Quality without a human reading every diff. | A review role that sends work back with findings, and commands for the tests. |
-| Runs that do not lose work. | A record of every step as it happens. A workflow started again with `resume: true` carries on from that record, and the [supervised runner](/driving/runner) restarts a killed run from its own record. |
+| Runs that don't lose work. | A record of every step as it happens. A workflow started again with `resume: true` carries on from that record, and the [supervised runner](/driving/runner) restarts a killed run from its own record. |
 | A place to watch it. | Every run can [serve its own page](/driving/monitor). |
-
-## Things that catch people out
-
-- **A product factory is the same search with a bigger scope.** The answer
-  is the same: a workflow with the reviews and the person written in.
-- **An agent pipeline without a return is a queue.** The step that sends
-  work back is what makes the review count. See [the review loop](/reviewing/review-loop).
-- **The tests are commands.** An agent that runs and supervises a test suite
-  burns tokens to do what a command does for free. Write `run` stages for
-  them.
 
 ## Where to go
 
-[Domain-specific harnesses](/use-cases/domain-specific-harnesses) for the
-same file read as one job's harness; [the review loop](/reviewing/review-loop)
-for how a return works.
+[Domain-specific harnesses](/use-cases/domain-specific-harnesses) reads the
+same file as one job's harness.
+[Sending work back](/concepts/workflows#sending-work-back) shows how it's set
+up.

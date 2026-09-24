@@ -1,37 +1,33 @@
 ---
 title: "The runtime"
-description: "One package runs your workflows, one bounded step at a time, and writes every step to a record you own."
+description: "One package runs your workflows one bounded step at a time, and can write every step to a record you own."
 ---
 
 
-When you hand work to a team, you do not stand over each person. You say
-what the steps are, who takes each one, and you look at the log when it is
-done. The runtime is the part of Obversa that stands over the steps for you.
-It is one package, `@obversa/runtime`, and it does three things: runs the
-workflow you wrote, one bounded step at a time; writes down each step as it
-finishes; and gives every step the engines, memory and workspace you chose.
+When you hand work to a team, you don't stand over each person. You say
+what the steps are and who takes each one, and you look at the log when
+it's done. The runtime is the part of Obversa that stands over the steps
+for you. It's one package, `@obversa/runtime`.
 
 ## What it does for you
 
-- **Runs the shape you wrote.** A pipeline, a review loop, a panel, a
-  tournament or a graph of your own: all run through one executor. The
-  executor never decides what the work means; it decides what runs next
-  and records it.
-- **Bounds every step.** Each attempt has a budget of time and tries. An
-  overrun is a result you can read, not a hang.
-- **Keeps the record.** Every step appends an event to a file; big outputs
-  go in an artifact directory beside it, each named by the hash of its
-  bytes. That record is the run's state, and there is no other.
+- **Runs the shape you wrote.** It runs a pipeline, a review loop, a panel,
+  a tournament or a graph of your own. It decides what runs next, never
+  what the work means.
+- **Enforces your limits.** When an attempt runs out of time or tries, you
+  get a result you can read instead of a hang.
+- **Keeps the record.** When you ask for a record, every step appends an
+  event to it. That record is the run's state, and there is no other.
 - **Stays out of your tools.** The runtime imports no engine and no memory
-  adapter; your program hands it the ones you chose. It runs where your
-  repositories are, with no server and no database.
+  adapter. Your program hands it the ones you chose, and it runs where your
+  repositories are. Hand in an engine for every agent step. The offline
+  examples use plain functions or a mock engine instead.
 
 ## See it run
 
-The smallest example is a three-stage pipeline with no model behind it. It
-prints one report: what completed, in what order, and the digest of the
-plan it ran.
-
+`examples/pipeline.ts` stores a three-stage pipeline and runs it with no
+model behind it. It prints one report: what completed, in what order, and
+the digest of the plan it ran.
 
 ```text
 {
@@ -81,34 +77,22 @@ plan it ran.
 
 ## How a run is kept honest
 
-A run stores the workflow it was given and the plan it resolved from it:
-the engines, the permissions, the contracts. Editing the workflow file
-afterwards changes nothing about a run already started, and a fresh
-executor checks the stored plan before it runs anything. The state of a run
-is only ever rebuilt from its events, so replaying a record never calls an
-engine and never repeats finished work.
+A stored run keeps the workflow it was given and the plan it resolved from
+it: the engines, the permissions, the contracts. To use an edit to the
+workflow, start a new run. A fresh executor checks the stored plan before
+it runs anything. The state of a run is only ever rebuilt from its events,
+so replaying a record never calls an engine and never repeats finished
+work.
 
 ## What the runtime is not
 
-It is a library, not a service. It runs when your program calls it and stops
-when the run ends. Restarting a killed run is a job for the supervised
-runner in the runner package, which starts a fresh worker over the same
-record; the runtime itself will happily start a new record if you ask it
-to. [How a run is recorded](/recording/how-a-run-is-recorded) says which
-layer does what.
-
-## Things that catch people out
-
-- **Frozen plans.** A run does not pick up edits to its workflow; start a
-  new run to use them.
-- **A step that died mid-flight is uncertain.** On restart it runs again
-  only if its binding says it is safe to retry; otherwise the run pauses
-  for a person. That is the safe default, and it is loud on purpose.
-- **Engines are yours to supply.** Nothing runs without an engine plugin
-  in the program; the examples use a mock so they run offline.
+It's a library, not a service. It runs when your program calls it and stops
+when the run ends. The runner package's supervised run restarts a killed
+run for you. [How a run is recorded](/recording/how-a-run-is-recorded) says
+which layer does what.
 
 ## Where to look things up
 
-Every export, type and option is on the [runtime package](/packages/runtime)
-page. The [graph executor](/graphs/executor) page has the exact recovery
-rules.
+The [runtime package](/packages/runtime) page is the reference for its
+exports, types and options. The [graph executor](/graphs/executor) page has
+the exact recovery rules.

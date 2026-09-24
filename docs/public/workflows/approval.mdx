@@ -3,22 +3,19 @@ title: "A person decides"
 description: "Put a question to a person as a step: a yes passes, a no goes back to the step that owns the fix with the note as the finding, and with nobody answering the run pauses and carries on from the answer."
 ---
 
-Some steps are not the agent's to decide. Ship this change? Is this the
+Some steps aren't the agent's to decide. Ship this change? Is this the
 migration we meant? On a team those go to a person, the work waits, and it
 carries on when the answer comes back. `approval` is that step. It asks one
-question through the run's callbacks client and does one of three things: a
-yes passes the step; a no goes back to the step that owns the fix with the
-person's note as the finding, and the work comes round again; and with
-nobody answering, the run pauses with the question pending and, when it
-runs again with the same client, carries on from the answer.
+question through the run's callbacks client. A yes passes the step. A no
+goes back to the step that owns the fix, with the person's note as the
+finding, and the work comes round again. With nobody answering, the run
+pauses with the question pending, and carries on from the answer when it
+runs again with the same client.
 
 ## The file
 
-Everything here runs offline. The writer is a small function that leaves
-the header row out once, so the refusal has something to send back; in a
-real team it is an agent seat. The person answers from this file: in a real
-team the answer arrives through the callbacks client, from a surface in a
-browser, another agent or a service.
+Here the writer is a function that leaves the header row out once, and the
+person answers from the file itself.
 
 ```ts
 /**
@@ -108,51 +105,43 @@ if (faults.length) {
 ```
 
 The person said no to the first attempt and yes to the second. `implement`
-ran twice: the refusal went back there as a revision request with the note
-as its one finding, the writer ran again with the note in hand, and the
+ran twice. The refusal went back there as a revision request with the note
+as its one finding. The writer ran again with the note in hand, and the
 question was asked again about the new attempt.
 
 ## How the question is asked
 
 - **The question is about what came before.** By default the request's
-  input is the outcomes of the steps this one depends on, so a change
-  upstream after a feedback loop returns work is a new question and the same question about
-  the same thing is the same request. Give `input` to say otherwise.
+  input is the outcomes of the steps this one depends on. So a changed
+  attempt upstream is a new question, and the same question about the same
+  thing is the same request. Give `input` to say otherwise. Use the
+  proof-bound gate in [proof acceptance](/reviewing/proof-acceptance) when
+  an approval must name the exact files it approved.
 - **A no needs a home, and a budget.** With `target`, a refusal goes back
-  to that step with the note as the finding; the graph's `maxKickbacks`
+  to that step with the note as the finding. The graph's `maxKickbacks`
   must allow it, or the run fails with the note instead. Without a target,
   a refusal fails the step with the note as its summary.
 - **Nobody answering is a pause, not a failure.** Without `answer`, the step
   posts the request and returns `paused` with the request as its data. A
-  router claims the request and submits `{ approved, note? }`; run the job
+  router claims the request and submits `{ approved, note? }`. Run the job
   again with the same client and the step finds the answer in the client's
-  history.
-- **The client is the run's.** `run` takes `callbacks`, the in-memory
-  client or the stored one (`RunCallbacks` names either); every job sees it
+  history. The steps ahead of the question do their work again first,
+  because a plain `run` starts a fresh record. To resume a paused run at the
+  step it stopped on, use the [supervised runner](/driving/runner). It
+  drives a graph definition through a host module, not a file like this one.
+- **The client is the run's.** `run` takes `callbacks`: the in-memory
+  client or the stored one (`RunCallbacks` names either). Every job sees it
   as `ctx.callbacks`. The default is one in memory that lives for that
-  run. Pass the stored client over a directory and a paused run finds its
-  answer after a restart: the next run over the same store reads it from
-  the history. One approval label per workflow: two steps with the same
-  label ask the same question and supersede each other.
+  run. Pass the [stored client](/reviewing/callback-gates) over a directory
+  and a paused run finds its answer after a restart, because the next run
+  over the same store reads it from the history. Use one approval label per
+  workflow. Two steps with the same label ask the same question and
+  supersede each other.
 - **A question nobody can answer fails plainly.** After asking, the step
-  reads the request's state; if it is neither pending nor answered, the
-  step fails with a summary that says so instead of waiting for nothing.
-  Asking a question again makes it the live one, so the ordinary case,
-  the same question after a feedback loop returns work, never gets there.
-
-## Things that catch people out
-
-- **The in-memory client forgets.** A run that must survive a process exit
-  needs the stored client. See [callback gates](/reviewing/callback-gates).
-- **Running again runs the earlier steps again.** `run` starts a fresh
-  record, so the steps ahead of the question do their work again before
-  the question finds its answer. The supervised runner resumes a paused
-  run at the step it stopped on, but it drives a graph definition through
-  a host module, not a file like this one; see
-  [driving runs](/driving/runner).
-- **An approval bound to bytes is a different tool.** `approval` asks about
-  outcomes. For an approval that must name the exact files it approved,
-  use the proof-bound gate in [proof acceptance](/reviewing/proof-acceptance).
+  reads the request's state. If it's neither pending nor answered, the step
+  fails with a summary that says so instead of waiting for nothing. Asking
+  a question again makes it the live one, so the same question asked again
+  after work comes back never gets there.
 
 ## Source
 

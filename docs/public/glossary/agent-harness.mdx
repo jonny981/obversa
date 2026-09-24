@@ -1,18 +1,23 @@
 ---
 title: "What is an agent harness?"
-description: "The software around a model that turns it into an agent: the loop, the tools, the memory and the guardrails. Claude Code, Codex and their kin are agent harnesses; Obversa drives them as engines."
+description: "The software around a model that turns it into an agent: the loop, the tools, the memory and the guardrails. Claude Code, Codex and their kin are agent harnesses. Obversa drives them as engines."
 ---
 
-You do not write an agent harness to use Obversa; you point Obversa at one.
+You don't write an agent harness to use Obversa. You point Obversa at one.
 An agent harness is the software around a model that turns it into an
 agent: the loop that reads the model's answer and acts on it, the tools it
 may call, the memory it keeps between turns, and the guardrails. Claude
 Code, Codex, OpenCode and Grok's CLI are agent harnesses.
 
 Obversa treats each of those as an engine. One bounded call to an engine is
-one step, and the step's result is what the workflow reads. The file below
-uses a stand-in engine from the testing module so it runs offline; a real
-team names a seat helper such as `claude()` or `codex()` instead:
+one step, and the step's result is what the workflow reads. Each call starts
+fresh, so nothing leaks from one step to the next except what the workflow
+hands over. [Plugins and tools](/plugins) says how each engine runs a
+request.
+
+The file below uses a stand-in engine from the testing module, so it runs
+offline. In a real team, a seat helper such as `claude()` or `codex()` takes
+its place:
 
 ```ts
 import { agentJob, run } from '@obversa/runtime';
@@ -40,21 +45,18 @@ console.log(result.outcome.status);
 | --- | --- | --- |
 | The model | The weights behind an API. | The provider. |
 | The agent harness | The loop, tools, memory and guardrails around one model. | Claude Code, Codex, OpenCode, Grok CLI. |
-| The workflow | Several harnesses given roles, with reviews, returns and a person at the gate. | Obversa. |
+| The workflow | Several harnesses given roles, with reviews that send work back and a person at the gate. | Obversa. |
 
-## Things that catch people out
+The word "harness" names both the inner and the outer layer. Harness
+engineering usually means building the inner loop. Obversa is the layer
+above it, which [What is a meta-harness?](/glossary/meta-harness) covers.
 
-- **A harness does not review itself well.** A second seat from a different
-  provider catches what the first agrees with. The workflow is where that
-  second seat is declared.
-- **Each call is fresh.** Every engine call runs in a new process, so
-  nothing leaks from one step to the next except what the workflow hands
-  over. See [engine plugins](/plugins).
-- **The name is shared.** Harness engineering, in this crowd, means
-  building the inner loop. Obversa is the layer above it. See
-  [what is a meta-harness](/glossary/meta-harness).
+In the workflow, give each review to a harness running another model
+family. A harness shouldn't review its own work. The workflow builder
+refuses a reviewer from the same model family as the writer it reviews.
 
 ## Where to go
 
-[Plugins and tools](/plugins) for the harnesses Obversa drives today;
-[one agent, one job](/packages/runtime) for the runtime's smallest call.
+[Plugins and tools](/plugins) lists the harnesses Obversa drives. The
+[runtime package](/packages/runtime) covers the smallest call, one agent
+with one job.

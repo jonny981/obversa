@@ -8,21 +8,21 @@ description: "One step of a run executes on a remote machine while the orchestra
 runtime is going, so that the shape is public before the code is.
 </Note>
 
-A run is a graph of steps, and the steps are not alike. Most of them are
+A run is a graph of steps, and the steps aren't alike. Most of them are
 cheap: a command that runs your tests, a condition that reads a file, a
-question that waits for a person. One or two are not: the step that builds
+question that waits for a person. One or two aren't: the step that builds
 the image, the step that runs the suite that takes an hour, the step that
 needs a machine larger than the one on your desk.
 
 A remote node moves one of those steps and nothing else. One step executes
-on another machine. The orchestrator stays where you started it, the event
-record is written where it always was, and the change the step made comes
-back as a commit or a patch rather than as a filesystem you have to keep
-in sync.
+on another machine. The orchestrator stays where you started it, and the
+event record is written where it always was. The change the step made
+comes back as a commit or a patch, not as a filesystem you have to keep in
+sync.
 
 ## What stays local
 
-The parts that make a run inspectable do not move.
+The parts that make a run inspectable don't move.
 
 - **The graph and its decisions.** What runs next, what sends work back,
   what a review concluded: all of it is decided and recorded locally, so
@@ -37,15 +37,15 @@ The parts that make a run inspectable do not move.
 ## Why a commit rather than a shared filesystem
 
 A mounted or synchronised filesystem makes the remote step feel local
-until it does not: a partial write during a network stall is a workspace
-nobody can explain afterwards. A commit is atomic, it carries its own
-description, and it is the artefact the rest of this runtime already
-records against. The step either produced one or it did not.
+until it doesn't: a partial write during a network stall leaves a
+workspace nobody can explain afterwards. A commit is atomic, it carries
+its own description, and it's the artefact the rest of this runtime
+already records against. The step either produced one or it didn't.
 
 ## What it does not do
 
-It does not distribute a run. The graph is not sharded across machines and
-steps do not migrate for load; one named step is given a place to execute
+It doesn't distribute a run. The graph isn't sharded across machines, and
+steps don't migrate for load. One named step is given a place to execute,
 and everything else is unchanged. A run whose remote machine is
 unreachable fails that step where it stands, with the reason on the
-record, rather than continuing somewhere else quietly.
+record, rather than quietly carrying on somewhere else.

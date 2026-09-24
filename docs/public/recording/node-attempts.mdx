@@ -3,25 +3,28 @@ title: "Safe node attempts"
 description: "Run one bounded engine turn with explicit identity, results, usage, and handled-exit cleanup."
 ---
 
-An engine-backed node attempt is one fresh engine call doing one piece of work.
-Command adapters use one fresh CLI process; data-only attempts use no engine
-process. The runtime records what was requested, what actually ran, what came back,
-and whether token usage was reported or unknown.
+Run one piece of work as one bounded engine turn, and get an honest record
+of it. The runtime records what was requested, what actually ran, what came
+back, and whether token usage was reported or unknown.
 
-The graph executor connects attempts to graph dispatch. Hosts coordinate
-checks against installed CLIs and process cleanup after runner death.
+An engine-backed node attempt is one fresh engine call. Command adapters use
+one fresh CLI process, and data-only attempts use no engine process. The
+graph executor connects attempts to graph dispatch.
 
 ## Run the example
 
 
-The report prints the stub executable paths relative to the temporary directory.
-The exported `attemptReport` keeps the absolute paths from the adapter results.
-The example uses local scripted executables. It does not call a model or the
-network. Grok returns a native structured result. OpenCode returns one marked
-text part, which the job-owned parser reads. Both adapter results pass through
-the public result validator before their final parts are used. OpenCode
-deliberately omits a valid usage receipt, so the runtime keeps its usage as
-`unknown` instead of zero.
+`examples/safe-node-attempt.ts` runs the Grok and OpenCode adapters against
+local scripted executables. It doesn't call a model or the network. Grok
+returns a native structured result. OpenCode returns one marked text part,
+which the job's own parser reads. Both adapter results pass through the
+public result validator before their final parts are used. OpenCode
+deliberately leaves out a valid usage receipt, so the runtime keeps its
+usage as `unknown` instead of zero.
+
+The report prints the stub executable paths relative to the temporary
+directory. The exported `attemptReport` keeps the absolute paths from the
+adapter results.
 
 ## Source
 
@@ -214,7 +217,7 @@ console.log(JSON.stringify(attemptReport, (key, value: unknown) => (
 ```
 
 The output records both requested and effective identities. If a CLI reports a
-different model, the two records stay separate instead of hiding the change.
+different model, the two records stay separate and the change stays visible.
 Each identity records the adapter, adapter version, provider, model family,
 model, capabilities, and `executable`. Command adapters record the absolute
 path they selected. An engine with no child executable uses `null`. The path
@@ -240,22 +243,22 @@ Child processes inherit these values unless they replace their environment.
 
 A successful result has ordered parts and exactly one final part. A stopped or
 truncated turn can keep the parts it produced, including no parts at all, but
-it remains a failed attempt.
+it's still a failed attempt.
 
 Usage has two states. `reported` means the engine supplied a valid receipt.
-`unknown` means it did not. Unknown usage never becomes a fake zero.
+`unknown` means it didn't. Unknown usage never becomes a fake zero.
 
 ## Declare access before the process starts
 
 `tools` lists the built-in capabilities the CLI may expose. `allowedTools`
-holds the narrower permission rules approved by the host. The selected adapter
-rejects a rule it cannot express before it starts the process.
+holds the narrower permission rules approved by the host. An adapter that
+can't express the declared access refuses the request before it starts the
+process, so no model runs.
 
 The workspace mode is a ceiling. An approval never adds a capability the mode
-withholds, and a bypass never exceeds it. An adapter that cannot express
-the declared access refuses the request before any model runs. A reviewer with
-no way to read the work is refused rather than run. A review can rest only on
-material the seat could open.
+withholds, and a bypass never goes past it. A reviewer with no way to read
+the work is refused rather than run. A review can rest only on material the
+seat could open.
 
 The example uses `workspaceMode: 'none'` and exposes no tools. An evidence-only
 job can use `workspaceMode: 'read'` with declared read tools. A writing job must
@@ -274,7 +277,7 @@ durable events to keep later graph work away from that model.
 `timeoutMs` is the work deadline. At that point a command adapter starts
 stopping its process tree. `timeoutGraceMs` is teardown time: the adapter asks
 the processes to stop, waits for that grace, then force-stops any that remain.
-The grace does not start more model work.
+The grace doesn't start more model work.
 
 A marked final result returned inside the final-result deadline stays separate
 from a later transport failure. If process cleanup makes the adapter return
@@ -282,9 +285,9 @@ after that deadline, the attempt fails with `TIMEOUT` and its parsed `result`
 stays `null`. The record still keeps the returned parts, reported usage,
 effective engine, and transport failure as evidence. After the deadline, the
 runtime waits up to seven more seconds for that cleanup evidence. This fixed
-wait cannot turn the attempt into a success.
+wait can't turn the attempt into a success.
 
 The command-adapter kit cleans its process tree on normal completion, timeout,
 abort, and other handled exits. The runtime waits for that cleanup before it
-records the attempt. Recovery after the supervising process dies, and checks
-against installed CLIs, are separate host responsibilities.
+records the attempt. Hosts own two things themselves: recovery after the
+supervising process dies, and checks against the CLIs actually installed.

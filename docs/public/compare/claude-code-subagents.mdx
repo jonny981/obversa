@@ -1,21 +1,22 @@
 ---
 title: "Obversa and Claude Code subagents"
-description: "Claude Code subagents split one session's work across specialised Claude assistants. Obversa drives Claude Code, Codex, Grok and OpenCode as a team from a TypeScript file, with reviews that send work back and a person at the gate. What each is for, and where each wins."
+description: "Claude Code subagents split one session's work across specialised Claude assistants. Obversa drives Claude Code, Codex, Grok and OpenCode as a team from a TypeScript file, with feedback loops and a person at the gate. What each is for, and where each wins."
 ---
 
-Choose by where the work lives. Subagents fit when you are inside that one session and want to hand
-parts of a task to specialised assistants with their own tools and
-prompts. Pick Obversa when the work needs more than one family of agent, a
-review that sends work back with findings, a person who decides, and a
-record you can read after the run.
+Choose by where the work lives. Subagents fit when you're inside one
+Claude Code session and want to hand parts of a task to specialised
+assistants with their own tools and prompts. Obversa fits when the work
+needs more than one family of model, a review that sends work back with
+findings, a person who decides, and a record you can read after the run.
 
-Claude Code's own words: "Subagents are specialized AI assistants that
+In Claude Code's own words: "Subagents are specialized AI assistants that
 handle specific types of tasks." A subagent is a markdown file with a name,
 a description, its tools and its model. It runs inside your Claude Code
-session, under the session's permission mode, and its transcript is kept
-on disk so it can be resumed. The model is one of the Claude family.
+session and can declare its own permission mode, which the session's mode
+can override. Its transcript is kept on disk, so it can be resumed. The
+model is one of the Claude family.
 
-Here is the shape Obversa is for, as one file:
+Here's the shape Obversa is for, as one file:
 
 ```ts
 import { claude } from '@obversa/engine-claude-cli';
@@ -131,25 +132,20 @@ console.log(JSON.stringify(result.outcome, null, 2));
 
 ## Side by side
 
-For structured assessments rather than workspace coding, install the
-[Jev engine](/packages/engine-jev-api) separately from the Obversa bundle.
-It uses workspace mode `none` and answers questions over recorded state;
-your workflow chooses how to act on those answers.
-
 | | Claude Code subagents | Obversa |
 | --- | --- | --- |
 | Unit of work | A subagent: a prompt, tools and a model, invoked from the session. | A stage: an engine call, a command, a panel or a person, with the files it may write. |
-| The workers | Claude models, inside Claude Code. | CLI coding engines such as Claude Code, Codex, Grok and OpenCode run one fresh process per call. |
-| A review that sends work back | A subagent can be asked to review; sending work back is direction you give. | Built in: a review role sends the work back to the stage that owns it, with findings, up to a budget. |
-| A person deciding | Permission prompts at tool calls; plan mode. | A person role; the run pauses on the question and the answer arrives through the callbacks client. |
+| The workers | Claude models, inside Claude Code. | Engines such as Claude Code, Codex, Grok and OpenCode, with a fresh process for every call, or an API engine. |
+| A review that sends work back | A subagent can be asked to review. Sending work back is direction you give. | Built in: a review sends the work back to the stage that owns it, with the findings, up to a limit you set. |
+| A person deciding | Permission prompts at tool calls, and plan mode. | A person role. The run pauses on the question, and the answer arrives through the callbacks client. |
 | More than one provider | The Claude family. | Claude, OpenAI, xAI and OpenCode's providers, one per role. |
-| A run that survives a crash | Transcripts on disk; a subagent can be resumed. | A run records to a file; a workflow started again with `resume: true` carries on from that record and repeats nothing that finished. The supervised runner restarts a compiled graph from its own record. |
+| A run that survives a crash | Transcripts on disk. A subagent can be resumed. | A run can record to a file. Started again with `resume: true`, a workflow carries on from that record and repeats nothing that finished. The supervised runner restarts a compiled graph from its own record. |
 | Where it runs | Inside Claude Code, on your machine. | A library, no server, on your machine. |
 | How it is written | Markdown with front matter. | TypeScript. |
 
 ## Where Claude Code subagents win
 
-- You are already in Claude Code and the task is one session's work.
+- You're already in Claude Code and the task is one session's work.
 - The permission checks at every tool call are the safety net you want,
   with nothing more to install.
 - One model family is enough.
@@ -158,12 +154,12 @@ your workflow chooses how to act on those answers.
 
 - A review should come from a different family than the one that wrote the
   work.
-- The process, reviews and returns included, should be a file under
-  version control, and the run a record beside it.
+- The process, reviews included, should be a file under version control,
+  with the run's record beside it.
 - The last word should be a person's, asked as a step.
 
 ## Where to go
 
-[A feature team, as a file](/workflows/feature-team) for the file above with
-its recorded run; [what is a meta-harness](/glossary/meta-harness) for the
-layer Obversa is.
+The [feature team](/workflows/feature-team) page shows the file above with a
+real run. [What is a meta-harness?](/glossary/meta-harness) explains the
+layer Obversa works at.

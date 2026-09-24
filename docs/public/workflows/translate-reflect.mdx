@@ -4,22 +4,26 @@ description: "One model translates with the glossary open, a second reads it as 
 ---
 
 A translation that is reflected on rather than shipped from one call.
-One model translates the article with the glossary open; a model from
+One model translates the article with the glossary open. A model from
 another family reads the translation the way an editor would and sends it
-back with what to change, not a score; the translator then writes down
-how every glossary term was rendered and where the glossary and natural
-French pulled apart. The person who knows the readers decides the nuance
-and says publish.
+back with what to change. The translator then writes down how every
+glossary term was rendered, and where the glossary and natural French
+pulled apart. The person who knows the readers decides the nuance and says
+publish.
 
 ```bash
 npm install @obversa/obversa
 ```
 
-In that directory, create `package.json` with `"type": "module"`, put the
-brief and the sample inputs from `examples/use-cases/other/`
-beside it, then run the copied file.
+Set up the project as [Installation](/get-started/installation) shows, and put
+the brief and the sample inputs from `examples/use-cases/other/` beside the
+copied file before you run it.
 
 ## The file
+
+The brief's front matter names the source and the glossary as workspace
+files. So every seat knows they exist, and the translating seat can't write
+them.
 
 ```ts
 import { claude } from '@obversa/engine-claude-cli';
@@ -98,21 +102,16 @@ const result = await run(createTranslateReflect(), {
 console.log(JSON.stringify(result.outcome, null, 2));
 ```
 
-Every event of the run prints as one line as it happens, the usage lines
-included, and the outcome prints last as JSON.
-
 The run stops at `nuance` with the translation in `fr/article.md` and the
 terms note in `fr/terms.md`. A no goes back to `translate` with the
-editor's note as the finding.
+editor's note as the finding. The brief holds the translator to the glossary
+even where another word reads better. It asks for each such place in the
+terms note, so the editor decides with the trade-off in front of them.
 
 ## What a run printed
 
-The output below is from one real run of this file, with the two command
-line tools signed in on the machine. The transcript is trimmed at both ends: a
-reader's own run prints a `▸ run` event line before the first stage and — unless
-the process is killed first — a `◂ run` line carrying the outcome and the run's
-token total after the last stage. The run stops at the person, which is what
-every example here does before anything is sent or filed.
+The output below is from one real run of this file, with the Claude and Codex
+CLIs signed in, trimmed at both ends.
 
 ```text
 translate-reflect ▸ dag (3 nodes)
@@ -212,20 +211,16 @@ translate-reflect ◂ dag paused
 | terms | List every glossary term, where it appears, and how it was rendered; flag each place where the glossary and natural French pulled apart. | Every glossary term is on the list. |
 | nuance | Put the translation and the terms note in front of the person who knows the readers. | A person has said publish. |
 
-Where a stage's gate names a file, the package checks the file after the
-job. Where it names an exit code, the command decides. Where it names a
-reviewer, the reviewer's decision decides. Where it names a person, the
-run pauses until the person answers. A model's own report of its work
-never passes a stage.
+The package doesn't check the "done when" sentences itself. `terms` has no
+reviewer, so only its own seat judges whether every glossary term is on the
+list. [The keys of a stage](/packages/runtime#the-keys-of-a-stage) list what
+the package does check.
 
-## Gotchas
-
-- **The glossary wins, and the note says where it cost.** The brief holds the translator to the glossary even where another word reads better, and asks for each such place in `fr/terms.md`, so the person decides with the trade-off in front of them.
-- **The reviewer reflects, it does not score.** Its findings are sentences about what to change; the translator runs again with them until the reviewer accepts or the retries run out.
-- **The source and the glossary are workspace files the brief names.** Both are in the brief's front matter, so every seat knows they exist and the translating seat cannot write them.
+The reviewer answers with what to change, not a score. The translator runs
+again with those findings until the reviewer accepts or the retries run out.
 
 ## Source
 
-The file is `examples/use-cases/other/translate-reflect.ts`; its proof, brief and
-sample inputs sit beside it. The [runtime package page](/packages/runtime)
-lists every input.
+The file is `examples/use-cases/other/translate-reflect.ts`. Its proof, brief
+and sample inputs sit beside it. The [runtime package page](/packages/runtime)
+lists every stage and workflow key.

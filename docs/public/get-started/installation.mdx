@@ -3,24 +3,22 @@ title: "Installation"
 description: "Add Obversa to your own project and write your first file."
 ---
 
-Obversa is a set of packages you import. You do not clone anything, and there
-is no service to stand up.
+Obversa is a set of packages you import. There's nothing to clone and no
+service to run.
 
 ## Requirements
 
-Node.js 22.12 or later, and two lines of setup in your project, because
-every Obversa package is an ES module and a workflow is a TypeScript file.
-Your project needs `"type": "module"` in its `package.json`, and the file
-runs through `tsx`:
+You need Node.js 22.12 or later. Every Obversa package is an ES module and a
+workflow is a TypeScript file, so your project needs `"type": "module"` in
+its `package.json` and `tsx` to run the file:
 
 ```bash
 npm pkg set type=module
 npm install --save-dev tsx
 ```
 
-Node 22.12 can also read the file without `tsx`, using
-`node --experimental-strip-types`. The flag is required at that version and
-stops being experimental in Node 22.18.
+Node can also run the file without `tsx`. From Node 22.12, pass
+`--experimental-strip-types`. From Node 22.18, you don't need the flag.
 
 ## Add it to your project
 
@@ -28,26 +26,25 @@ stops being experimental in Node 22.18.
 npm install @obversa/obversa
 ```
 
-The bundle includes the runtime, runner, shared contracts, workflow helpers,
-surfaces, six engine adapters, three memory adapters and webhook notifications.
-Import each tool from its own package name; the bundle has no API of its own.
-CLI engines still need their command line tool installed and authenticated.
+The bundle installs every package except Jev: the runtime and runner, the
+shared contracts, the ready-made workflows, the surfaces, six engine
+plugins, three memory adapters and the webhook notifier. It has no API of
+its own, so import each tool from its own package. The CLI engines also need
+their command line tool installed and signed in.
 
-The [Jev engine](/packages/engine-jev-api) is a separate install:
+[Jev](/packages/engine-jev-api) installs separately:
 
 ```bash
 npm install @obversa/engine-jev-api
 ```
 
-Jev answers structured questions over recorded state with workspace mode `none`.
-It does not read or edit a workspace; your workflow decides how to act on its
-answers. See [Plugins and tools](/plugins) for engine requirements.
+[Plugins and tools](/plugins) lists what each engine needs.
 
 ## Write a file
 
 A workflow is a TypeScript file that imports the runtime and describes the
-work. Nothing else is involved: no configuration file, no scaffolding step,
-no directory layout to adopt.
+work. There's no configuration file, no scaffolding step and no directory
+layout to adopt.
 
 ```ts
 /**
@@ -84,15 +81,15 @@ console.log(JSON.stringify({ status: result.outcome.status }, null, 2));
 if (result.outcome.status !== 'pass') process.exitCode = 1;
 ```
 
-Run it the way you run any TypeScript file in your project.
+Save it as `write-and-review.ts` and run `npx tsx write-and-review.ts`.
 
 ## Next
 
-[First run](/get-started/first-run) takes a real example apart. The
-[the examples](/workflows) has complete files to copy.
+[First run](/get-started/first-run) takes a real team apart.
+[The examples](/workflows) are complete files you can copy.
 
 ## Contributing
 
-Working on Obversa itself is the one case that needs a checkout, and
+Working on Obversa itself needs a checkout.
 [AGENTS.md](https://github.com/jonny981/obversa/blob/main/AGENTS.md) in the
 repository covers it.

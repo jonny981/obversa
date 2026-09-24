@@ -3,12 +3,11 @@ title: "@obversa/engine-claude-agent-sdk"
 description: "@obversa/engine-claude-agent-sdk runs engine requests through the Claude Agent SDK."
 ---
 
-`@obversa/engine-claude-agent-sdk` is an engine plugin that runs requests through the Claude Agent SDK. Each request runs as a clean query call, using existing host Claude Code authentication.
+`@obversa/engine-claude-agent-sdk` is an engine plugin that runs requests through the Claude Agent SDK. Each request is a fresh SDK `query()` call, so every step starts with a clean context.
 
 ## Requirements
 
-- Node.js 22.12 or later
-- Host Claude Code authentication
+- Claude Code signed in on the machine that runs the engine
 
 ## Install
 
@@ -18,7 +17,7 @@ npm install @obversa/obversa
 
 ## Identity
 
-The plugin serves the Anthropic provider. It reports `provider: 'anthropic'`, with the model passed in the request or configured in options.
+The plugin reports `provider: 'anthropic'`. It runs the model the request names, or `defaultModel` when the request names none.
 
 ## Usage
 
@@ -30,7 +29,7 @@ const engine = new AgentSdkEngine({
 });
 ```
 
-To enable memory access, pass an instance of the `Memory` contract from `@obversa/api` in the constructor:
+To give the agent memory, pass any adapter that implements the `Memory` contract from `@obversa/api` to the constructor:
 
 ```ts
 import { AgentSdkEngine } from '@obversa/engine-claude-agent-sdk';
@@ -49,10 +48,9 @@ const engine = new AgentSdkEngine({
 
 ## Limits
 
-- Requires local Claude Code host authentication; it does not accept raw API keys.
-- Each call runs in-process via SDK query sessions rather than separate OS child processes.
-- Memory integration attaches an MCP memory tool into the query context.
-- In the `read` and `none` workspace modes the adapter passes Claude a bounded
-  tool list (`Read`, `Grep` and `Glob` for `read`; none for `none`). It
-  disallows `Bash`, `Edit`, `Write`, the sub-agent tools and every MCP tool. A
-  settings file outside the run cannot restore them.
+- The plugin has no API key option.
+- Memory reaches Claude as an MCP tool.
+- In the `read` workspace mode, Claude gets only the `Read`, `Grep` and `Glob`
+  tools the request names. In the `none` mode it gets no tools. Both modes block
+  `Bash`, `Edit`, `Write`, the sub-agent tools and every MCP tool. A settings
+  file outside the run can't restore them.

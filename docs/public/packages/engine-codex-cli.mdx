@@ -3,12 +3,11 @@ title: "@obversa/engine-codex-cli"
 description: "@obversa/engine-codex-cli runs engine requests through a fresh Codex CLI process."
 ---
 
-`@obversa/engine-codex-cli` is an engine plugin that runs requests through the `codex` command-line interface. It provides an OpenAI-backed engine for verification and review seats.
+`@obversa/engine-codex-cli` is an engine plugin that runs requests through the `codex` command-line tool. Use it to put an OpenAI model in a verification or review seat.
 
 ## Requirements
 
-- Node.js 22.12 or later
-- A local Codex CLI installation with existing authentication
+- The Codex CLI installed and signed in
 
 ## Install
 
@@ -18,7 +17,7 @@ npm install @obversa/obversa
 
 ## Identity
 
-The plugin serves the OpenAI provider. It reports `provider: 'openai'` and uses `request.model` or `options.defaultModel`. When neither is set, the CLI runs without an explicit model flag.
+The plugin reports `provider: 'openai'`. It runs the model the request names, or `defaultModel` when the request names none. With neither set, the CLI runs without a model flag.
 
 ## Usage
 
@@ -30,10 +29,10 @@ const engine = new CodexEngine({
 });
 ```
 
-Pass the engine instance into the Obversa runtime.
-
 ## Limits
 
-- The engine runs in a read-only sandbox by default; write permissions require `permissionMode: 'bypassPermissions'`.
-- Subprocess execution requires a working Codex binary in `PATH` or an explicit `cliBinary` path.
-- Large prompts pass through standard input, and final output is read from a temporary file.
+- Without a workspace mode or a `sandbox` option, Codex runs in its read-only
+  sandbox. The `write` workspace mode or `sandbox: 'workspace-write'` lets it
+  write. `permissionMode: 'bypassPermissions'` turns the sandbox off.
+- The `codex` command must be on your `PATH`, or you pass its path as `cliBinary`.
+- The prompt goes through standard input, and the final message is read from a temporary file.

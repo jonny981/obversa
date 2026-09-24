@@ -130,21 +130,25 @@ console.log(JSON.stringify(result.outcome, null, 2));
 | Reads the model's answer and calls tools. | Decides which harness runs next, with which files. |
 | Keeps memory inside one session. | Keeps the record across every step and every seat. |
 | Stops when its own task is done. | Sends the work back when the review says no. |
-| Has no idea a person exists. | Pauses on a question; the answer arrives through the callbacks client. |
+| Has no idea a person exists. | Pauses on a question. The answer arrives through the callbacks client. |
 
-## Things that catch people out
+The outer layer is a written-down process. The engines do all the thinking,
+one bounded call at a time.
 
-- **The outer layer is not another agent.** It is a process, written down.
-  Nothing in it thinks; the engines do the thinking, one bounded call at a
-  time.
-- **A second provider is the point.** A review by the same family that
-  wrote the work agrees with it more often. The outer layer is where a seat
-  from another provider is declared.
-- **The record is the product's memory, not the model's.** Every step is a
-  line in a file, readable after the run. See [how a run is recorded](/recording/how-a-run-is-recorded).
+The record outlives the run. A run that records writes every step as a line
+in a file you can read afterwards.
+[How a run is recorded](/recording/how-a-run-is-recorded) shows what the
+file holds.
+
+Give the review to a seat from another model family. Models score their own
+writing higher than other models' writing, even where people rate the two
+as equal
+([Panickssery, Bowman and Feng, 2024](https://arxiv.org/abs/2404.13076)).
+You declare that reviewer in the outer layer. The workflow builder refuses
+one from the writer's own family.
 
 ## Where to go
 
-[What is an agent harness](/glossary/agent-harness) for the inner layer;
-[domain-specific harnesses](/use-cases/domain-specific-harnesses) for a
-whole job written this way.
+[What is an agent harness?](/glossary/agent-harness) covers the inner
+layer. [Domain-specific harnesses](/use-cases/domain-specific-harnesses)
+shows a whole job written this way.

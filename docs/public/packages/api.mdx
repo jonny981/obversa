@@ -4,12 +4,11 @@ description: "Shared contracts and validation for engines, memory, graphs and st
 ---
 
 An engine runs one fresh agent attempt and returns a structured result or a
-typed failure. This package holds that contract and the memory port, shared
-by the runtime and plugins. It also defines and checks graph plans, stored
-events and artifacts, workspace bindings, callbacks, and proof records.
-The runtime executes graphs and reads or writes those records.
-Command execution belongs to
-[core](/packages/core); memory helpers belong to
+typed failure. This package holds that contract and the memory port, which
+the runtime and plugins share. It also defines and checks graph plans,
+stored events and artifacts, workspace bindings, callbacks and proof
+records. The runtime executes graphs and reads or writes those records.
+Command execution belongs to [core](/packages/core), and memory helpers to
 [runtime](/packages/runtime#memory-helpers).
 
 ```bash
@@ -20,26 +19,32 @@ npm install @obversa/obversa
 
 An `Engine` has a name and a `run` method: one request, one event sink,
 one abort signal, one `AgentResult`. It may also have `admit`, which the
-runtime calls before a run when the plan asks for engine checks: `admit`
-receives the request without its prompt, and returns the identity the
-engine will run under, an `EngineSelectionRecord` with adapter, provider,
-model family, model, executable and capabilities. When the runtime passes
-the identity it saved earlier, an engine that would now run as something
-else refuses. An engine without `admit` is `unsupported` for the check, and
-the plan says whether that blocks the run.
+runtime calls before a run when the plan asks for engine checks. `admit`
+receives the request without its prompt. It returns the identity the engine
+will run under: an `EngineSelectionRecord` with adapter, adapter version,
+provider, model family, model, executable and capabilities. When the runtime
+passes the identity it saved earlier, an engine that would run as
+something else refuses. An engine without `admit` is `unsupported` for the
+check, and the plan says whether that blocks the run.
+
+A command-line adapter is admitted by path and version, not by a hash of
+the executable. It doesn't control grandchildren it can't see. An API-key
+adapter is admitted locally, with no executable.
 
 A live check is an ordinary `run` with `purpose: 'preflight'`, no tools, no
-workspace and a leaf request. It proves the seat answers; it does no work.
+workspace and a leaf request. It proves the seat answers. It does no work.
+An API-key adapter's retry layers are off for this check only.
 
 For a command-line adapter that needs an absolute executable, use
-`resolveCommandExecutable('opencode')` from `@obversa/core/command`. It reads the reader's `PATH` when the
-file runs, so a copied example does not contain a machine-specific path.
+`resolveCommandExecutable('opencode')` from `@obversa/core/command`. It reads
+your `PATH` when the file runs, so a copied example doesn't contain a
+machine-specific path.
 
 ## Run one
 
-This file runs a graph whose engine is not ready and shows the check pause
+This file runs a graph whose engine isn't ready. It shows the check pause
 the run before any dispatch, then the resume once the engine is ready. The
-engine implements both `admit` and `run`; it is in
+engine implements both `admit` and `run`, and it's in
 `examples/preflight-host.mjs`.
 
 ```ts
@@ -208,7 +213,7 @@ console.log(JSON.stringify({
 }, null, 2));
 ```
 
-What it printed is on the [graph executor](/graphs/executor) page.
+The [graph executor](/graphs/executor) page shows what it printed.
 
 ## Public entry points
 
@@ -217,13 +222,13 @@ What it printed is on the [graph executor](/graphs/executor) page.
 | `Engine`, `AgentRequest`, `AgentResult`, `EngineSelectionRecord` | The contract types. |
 | `EngineError` | A typed engine failure: `auth`, `billing`, `quota`, `rate-limit`, `model-unavailable`, `missing-cli`, `invalid-config`, `transient`, `aborted`, and the rest of `EngineFailureKind`. |
 | `canonicalJson`, `digestJson`, `cloneFrozenJson` | JSON helpers the contract uses. |
-| `modelIdentity` | The provider and model family a harness reports for the model it was given, read the same way by every harness that runs other providers' models and by the review gate that reads recorded models back; a string with no readable family is refused. |
-| `@obversa/api/testing` | `runEngineConformance` for the run contract, `runEngineAdmissionConformance` for `admit`, and `runMemoryConformance` for memory adapters. `MockEngine` is in `@obversa/core/testing`. An engine adapter author runs both engine kits; an adapter without `admit` runs the first alone. The run kit exercises the workspace modes `none`, `read` and `write` against the real adapter, never a stand-in. Its report (`EngineAdapterConformanceReport`) lists each unsupported feature under `unsupported`, with its reason. Unsupported features are never counted as passes. |
+| `modelIdentity` | The provider and model family a harness reports for the model it was given. Every harness that runs other providers' models, and the review gate that reads recorded models back, derives the identity through this function. |
+| `@obversa/api/testing` | `runEngineConformance` for the run contract, `runEngineAdmissionConformance` for `admit`, and `runMemoryConformance` for memory adapters. `MockEngine` is in `@obversa/core/testing`. An engine adapter author runs both engine kits. An adapter without `admit` runs the first alone. The run kit exercises the workspace modes `none`, `read` and `write` against the real adapter, never a stand-in. Its report (`EngineAdapterConformanceReport`) lists each unsupported feature under `unsupported`, with its reason. Unsupported features are never counted as passes. |
 | `runWorkspaceProviderConformance`, `assertWorkspaceProviderConformance` from `@obversa/api/testing` | Check a workspace adapter against the same workspace contract the runtime uses. |
 
 `modelIdentity` returns a `ModelIdentity`: the model family and, when the
-input names it, the provider. `provider/model` supplies both; a bare model
-supplies only its family. The family is the lowercase part before the
+input names it, the provider. `provider/model` supplies both, and a bare
+model supplies only its family. The family is the lowercase part before the
 model's first hyphen. Whitespace inside the identifier, a second slash,
 an empty provider or model, and an empty or `unknown` family are refused
 with an `EngineError` of kind `invalid-config`.
@@ -235,24 +240,12 @@ sub-agent tool names.
 ## Memory contract
 
 A `Memory` adapter has one `scope` and one `execute(command)` method.
-`MEMORY_ROOT` is `/memories`; every memory path starts there. Commands are
-`view`, `create`, `str_replace`, `insert`, `delete` and `rename`.
+`MEMORY_ROOT` is `/memories`, and every memory path starts there. Commands
+are `view`, `create`, `str_replace`, `insert`, `delete` and `rename`.
 `MemoryCommand`, `MemoryResult` and `MemoryLimits` describe requests,
-results and limits. The memory conformance kit lives at `@obversa/api/testing`.
-
-Use `ground`, `curate` and `consolidate` from `@obversa/runtime/memory` to
-read declared sources, select context and write a validated result.
-
-## Gotchas
-
-- **Unsupported is not a success.** An engine without `admit` passes a
-  static check only when the lane's policy allows unsupported seats.
-- **A command-line adapter is admitted by path and version,** not by a
-  hash of the executable, and it does not control grandchildren it cannot
-  see. An API-key adapter is admitted locally, with no executable, and its
-  retry layers are off for the check only.
+results and limits.
 
 ## Source
 
 `packages/api` in the repository. The plugins under `plugins/` implement
-this contract; the [plugins page](/plugins) lists them.
+this contract, and the [plugins page](/plugins) lists them.

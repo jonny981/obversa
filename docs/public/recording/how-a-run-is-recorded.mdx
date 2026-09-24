@@ -1,28 +1,27 @@
 ---
 title: "How a run is recorded"
-description: "Every step appends events to a file as it happens, and a run under the supervised runner keeps a durable record it restarts from where it stopped."
+description: "A run appends each event to its record as it happens, and a stopped run can carry on from that record."
 ---
 
-A run leaves a record as it works: a file of events and a directory of
-artifacts. This page says what each holds. A run under the supervised
-runner keeps a record of its own, in a store that holds the run's
-definition beside its events, and restarts from that.
+A run leaves a record as it works. A plain `run()` appends its events to one
+file, where you point `recordTo`. A run under the supervised runner keeps its
+own store and restarts from it. The store holds the run's definition, its
+events and a directory of artifacts.
 
 ## What a record looks like
 
 Run `examples/offline-review.ts`, then open the file it wrote. The report
-names the file, relative to where you ran the command, so the path can be
-copied straight out of it. Each line is one event, in the
-order it happened.
+names the file relative to where you ran the command, so you can copy the
+path straight from it. Each line is one event, in the order it happened.
 
 | Event | What it records |
 | --- | --- |
 | `run:start` | The run began. It carries the run id and record path when the run has them. |
 | `run:end` | The run ended. It carries the same outcome and token usage that `run()` returns. |
 
-A run appends `run:start` when it begins and `run:end` only if it finishes. A
-record still being written, or one whose run was killed, therefore ends with a
-start and no end, and a resumed record keeps the earlier start as well.
+A run appends `run:start` when it begins and `run:end` only if it finishes.
+So a record still being written has a start and no end, and so does one
+whose run was killed. A resumed record keeps the earlier start as well.
 
 ```text
 {"kind":"run:start","ts":1789044650084,"path":[],"recordPath":".obversa/records/offline-review.jsonl"}
@@ -46,58 +45,58 @@ start and no end, and a resumed record keeps the earlier start as well.
 {"kind":"run:end","ts":1789044650084,"path":[],"outcome":{"status":"pass","summary":"config is complete"},"usage":{"inputTokens":0,"outputTokens":0,"cacheReadInputTokens":0,"cacheCreationInputTokens":0,"unmeasuredCalls":0},"recordPath":".obversa/records/offline-review.jsonl"}
 ```
 
-A node started, a review sent the draft back, the next attempt passed, and the
-run ended: nothing in those lines is a summary. They are the run.
+In those lines, the author writes a config, the review sends it back for a
+missing timeout, the second attempt passes, and the run ends.
 
 ## One event per step, appended as it happens
 
-Every step a run takes is one event, appended to the file the moment the
-step finishes: a node started, an engine call returned, a review sent work
-back, a gate opened. An event that has landed is never rewritten, so a later
-step cannot change what an earlier one recorded.
+Each event is appended to the file the moment it happens: a node started,
+an engine call returned, a review sent work back, a gate paused for an
+answer. An event that has landed is never rewritten, so a later step can't
+change what an earlier one recorded.
 
 ## Why events and artifacts are the whole record
 
-A reader with the event file can replay the run to any point, because every
-decision, outcome and engine call is in it. Anything too large for an event,
-a diff, a test log, a proof, sits in the artifact directory, and the event
-that produced it cites the file and its digest. There is no second state to
-keep in step, because there is no second state.
+The event file holds every decision and outcome, and each engine call with
+its usage. It leaves out the model's streamed text. In the supervised
+runner's store, the run's state is rebuilt from its events, and anything too
+large for an event sits in the artifact directory. The event carries a small
+reference to it, with its digest.
 
 ## Which layer restarts a killed run
 
-The runner package's supervised run does. It starts a run in a bounded
-worker, and when the worker dies it starts another against the run's own
-store, which holds the run's definition beside its events; the new worker
-reads that store and carries on. Steps that finished are never repeated. A
-step that was mid-flight when the worker died runs again only if its
-binding declares it safe to retry; otherwise the run pauses and asks a
-person to reconcile it before it continues, so uncertain work is never
-repeated silently. The file shown above is a plain run's record, written
-where you point `recordTo`; starting the same workflow again with
-`resume: true` reads this file and carries on from it.
+The runner package's supervised run does. It starts the run in a bounded
+worker. When the worker dies, it starts another against the run's own store.
+The new worker reads that store and carries on. Steps that finished are
+never repeated. A step that was mid-flight when the worker died runs again
+only if its binding declares it safe to retry; otherwise the run pauses and
+asks a person to reconcile it before it continues, so uncertain work is
+never repeated silently.
 
-A plain `run()` opens a fresh record each time it starts. With `resume: true`
-it reads the record at `recordTo` first. For a job built with `workflow()`, a
-stage that finished is skipped. A stage that failed runs again.
-A gate still waiting for a person is observed. By default the run exits with
-the recorded pause, so a run started on a schedule asks once and never twice
-when it reads the same store of pending questions. With `onCallback: 'wait'`
-the process stays up until an answer arrives. A run given a fresh in-memory
-client has nothing to read and asks again. A stage that was
-mid-flight when the process died runs again only when it carries
-`retrySafe: true`; otherwise the run pauses and asks a person to reconcile
-it. If the person says it did not finish, that stage runs in the same resumed
-run; if it did finish, the stage is not repeated.
-The record applies to the same workflow name, workspace, brief and stage
-list, and to the seat each role names. So a changed brief starts again, and
-so does changing the model behind a role, or the question a person role asks.
-Any other job passed `resume: true`
-appends to that record and runs again. The supervised runner restarts a
-killed run for you. `resume: true` is how a workflow you start yourself, or a
-schedule starts for you, carries on.
+The file shown above is the record of a plain `run()`. A plain run opens a
+fresh record each time it starts. With `resume: true`, it reads the record
+at `recordTo` first. For a job built with `workflow()`:
+
+- **A stage that finished** is skipped.
+- **A stage that failed** runs again.
+- **A gate still waiting for a person** isn't asked twice, as long as the
+  resumed run reads the same store of pending questions. A run given a fresh
+  in-memory client has nothing to read, so it asks again.
+  [Callback gates](/reviewing/callback-gates) covers how a run waits for the
+  answer.
+- **A stage that was mid-flight** when the process died runs again only when
+  it carries `retrySafe: true`. Otherwise the run pauses and asks a person to
+  reconcile it. If the person says it didn't finish, the stage runs in the
+  same resumed run. If it did finish, the stage isn't repeated.
+
+The record applies only to the same workflow name, workspace, brief and
+stage list, and to the seat each role names. Change the brief, the model
+behind a role, or the question a person role asks, and the run starts again.
+Any other job given `resume: true` appends to the record and runs again.
+`resume: true` is how a workflow carries on when you start it yourself or a
+schedule starts it for you.
 
 ## Why there is nothing to install beside it
 
-The record is a file and a directory the runtime already writes. Reading
-them, and restarting from them, needs no database and no server.
+The record is plain files the runtime already writes. Reading them and
+restarting from them needs no database and no server.

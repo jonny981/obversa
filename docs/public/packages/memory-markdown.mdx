@@ -3,20 +3,20 @@ title: "@obversa/memory-markdown"
 description: "@obversa/memory-markdown selects ranked passages from a local Markdown corpus for grounding."
 ---
 
-`@obversa/memory-markdown` searches `.md` files without an index, embedding
-service, or network call. Each hit names the corpus file, matching passage,
-line range, and score. The caller chooses the hit paths to give to `ground`;
-`curate` then makes the grounded text fit the next job.
-Line numbers are one-based.
+`@obversa/memory-markdown` searches a directory of `.md` files with no index,
+embedding service or network call. Each hit names the corpus file, the
+matching passage, its line range (counted from 1) and a score. You choose which
+hit paths to give to `ground`, and `curate` then fits the grounded text to the
+next job.
 
-Treat the text in a hit as untrusted. It is whatever the corpus file says, so
-a file can carry instructions written to be read by a model. Hand the hit's
-path to ground, which marks the content as untrusted before a job sees it,
-rather than putting the passage text into a prompt yourself.
+Treat the text in a hit as untrusted. It's whatever the corpus file says, so a
+file can carry instructions aimed at a model. Pass the hit's path to `ground`
+instead of putting the passage text into a prompt yourself. `ground` marks the
+content as untrusted before a job sees it.
 
 ## Requirements
 
-- Node.js 22.12 or later
+Nothing beyond [Installation](/get-started/installation).
 
 ## Install
 
@@ -52,8 +52,8 @@ Create `memory-markdown-corpus/notes with spaces.md` beside them:
 Battery warranty battery warranty.
 ```
 
-The third file matches the query but its name cannot become a `MemoryPath`, so
-search skips it. The remaining hit can pass to `ground`.
+The third file matches the query, but its name can't become a `MemoryPath`, so
+search skips it. The one remaining hit can go to `ground`.
 
 ## Source
 
@@ -120,35 +120,36 @@ console.log(JSON.stringify({
 }, null, 2));
 ```
 
-The example uses a deterministic `MockEngine`, so it runs offline. Search finds
-the planted phrase, only its unique hit path reaches `ground`, `curate` writes
-the short brief, and a real `agentJob` receives that brief.
+The file uses the deterministic `MockEngine`, so it runs offline. Search finds
+`warranty` in one file, and only that file's path reaches `ground`. `curate`
+returns a short brief, and a real `agentJob` receives it.
 
 ## Read-only Memory view
 
 The corpus exposes `corpus.memory` because `ground` reads through the public
-`Memory` contract. This view is **read-only**. `view` reads the `.md` files;
-all five write commands return an error. Search must not edit the source
-material it is selecting, and the existing writable adapters do not read a
-plain corpus directory.
+`Memory` contract. This view is **read-only**. `view` reads the `.md` files,
+and all five write commands return an error. Search must never edit the
+material it selects from, and the writable adapters don't read a plain
+directory of files.
 
-Search and the Memory view include only directories and `.md` files whose path
-segments start with a letter or number and then use letters, numbers, dots,
-underscores, or hyphens, up to 128 characters per segment. Dot-prefixed names,
-names outside that rule, non-Markdown files, and symbolic links inside the
-corpus are skipped without failing the search or a directory view.
+Search and the Memory view include only directories and `.md` files whose
+names follow one rule. Each path segment starts with a letter or number, then
+uses letters, numbers, dots, underscores or hyphens. A segment can be up to
+128 characters long. Dot-prefixed names, names outside that rule,
+non-Markdown files and symbolic links inside the corpus are skipped without
+failing the search or a directory view.
 
-One class is not skipped. A file whose full path passes 1024 bytes stops the
-search, which names the path it cannot use. A directory view still lists that
-file, and the over-long path it returns then makes ground refuse the whole
-directory. Keep the corpus shallow enough to stay below the limit.
+One case isn't skipped. A file whose full path is longer than 1024 bytes stops
+the search, and the error names that path. A directory view still lists the
+file, and that over-long path then makes `ground` refuse the whole directory.
+Keep the corpus shallow enough to stay under the limit.
 
 The corpus root itself can be a symbolic link. A corpus path such as
 `policies/warranty.md` becomes `/memories/policies/warranty.md`.
 
 ## Ranking
 
-Search splits each file at headings and paragraph boundaries. An exact phrase
-ranks above passages that contain the query terms separately. More matched
-terms and more occurrences rank next; path and starting line break ties.
-An empty query or a query with no matching passage returns `[]`.
+Search splits each file at headings and paragraph breaks. A passage with the
+exact phrase ranks above one that has the query terms apart. More matched terms
+and more occurrences rank next. Path, then starting line, breaks ties. An empty
+query, or one with no matching passage, returns `[]`.

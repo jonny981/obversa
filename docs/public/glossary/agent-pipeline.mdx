@@ -5,8 +5,9 @@ description: "The smallest team shape that holds up: steps in order, a review th
 
 You can write one in a page. The smallest team shape that holds up has
 three parts: steps in order, a review that sends work back to the step that
-owns the fix, and a person who decides at the end. Without the return, the
-review is decoration. Without the person, nothing merges on a human's say.
+owns the fix, and a person who decides at the end. The review matters
+because it can send work back, and the person is there so that a human
+decides what merges.
 
 Here it is offline, with small functions in place of engines so the shape
 is the only thing on show:
@@ -108,26 +109,29 @@ if (faults.length) {
 }
 ```
 
+The panel fails the first attempt on purpose, so the work really goes back.
+A panel that always passes would prove nothing. If the work ever stops
+going back, the file exits with code 1.
+
 ## The three parts
 
 | part | in the file |
 | --- | --- |
 | Steps in order | `pipeline` with five named steps. |
 | A review that sends work back | `reviewPanel` with three reviewers, passing on two, `target: 'implement'`. |
-| A person at the merge | `approval` with a question. This file answers it in place with `answer`, so it never pauses; in a real team the answer arrives through the callbacks client. |
+| A person at the merge | `approval` with a question. This file answers it in place with `answer`, so it never pauses. In a real team, the answer arrives through the callbacks client. |
 
-## Things that catch people out
+Set `maxKickbacks` on the pipeline to cap how often work goes back, as this
+file does. When the budget runs out, the run fails with the last findings
+instead of looping.
 
-- **A panel that always passes proves nothing.** The example fails its
-  first attempt on purpose, so the return is exercised and the run's exit
-  code tells you when it stops happening.
-- **The budget is finite.** `maxKickbacks` caps how often work goes back;
-  when it runs out the run fails with the last findings rather than looping.
-- **The person's answer is a pause, not a failure.** With nobody answering,
-  the run pauses with the question pending. See [a person decides](/workflows/approval).
+When nobody has answered, the run pauses. The question stays pending until
+someone does. [A person decides](/workflows/approval) shows how the answer
+comes back.
 
 ## Where to go
 
-[A feature team, as a file](/workflows/feature-team) for the same shape on
-real engines with a recorded run; [the review loop](/reviewing/review-loop)
-for how a return is wired.
+The [feature team](/workflows/feature-team) page shows the same shape on
+real engines, with a real run.
+[Sending work back](/concepts/workflows#sending-work-back) shows how it's set
+up.

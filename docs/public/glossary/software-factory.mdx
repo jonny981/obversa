@@ -4,10 +4,9 @@ description: "A software factory is the picture of issues going in and merged pu
 ---
 
 You run a workflow. A software factory is the picture: issues in, merged
-pull requests out, agents doing the work in between. The teams that make
-the picture real do not run a belt. They run a process in which one agent
-writes, another reviews, the work goes back when the review fails, tests
-run as commands, and a person decides at the end.
+pull requests out, agents doing the work in between. In practice it's a
+process: one agent writes, another reviews, the work goes back when the
+review fails, tests run as commands, and a person decides at the end.
 
 That process is one file:
 
@@ -132,17 +131,15 @@ console.log(JSON.stringify(result.outcome, null, 2));
 | Nothing needs a human. | A person at the merge, asked a question the run waits on. |
 | It runs all day. | A record of every step as it happens. A workflow started again with `resume: true` carries on from that record, and the [supervised runner](/driving/runner) restarts a killed run from its own record. |
 
-## Things that catch people out
+Sending work back is what makes a review count. A pipeline that never sends
+work back is a queue.
 
-- **Product factory is the same picture with a larger scope.** The file is
-  the same shape.
-- **A pipeline with no return is a queue.** The step that sends work back
-  is what makes a review count. See [the review loop](/reviewing/review-loop).
-- **Tests are commands.** An agent that runs a test suite spends tokens to
-  do what a command does for free. Write them as `run` stages.
+A product factory is the same picture with a larger scope. The file has the
+same shape.
 
 ## Where to go
 
-[Software factory, as a workflow](/use-cases/software-factory) for the use
-case; [what is an agent pipeline with a review and a person](/glossary/agent-pipeline)
-for the smallest version of the shape.
+[Software factory, as a workflow](/use-cases/software-factory) covers the
+use case.
+[What is an agent pipeline with a review and a person?](/glossary/agent-pipeline)
+shows the smallest version of the shape.

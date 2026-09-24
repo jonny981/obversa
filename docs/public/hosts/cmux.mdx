@@ -3,17 +3,18 @@ title: "Obversa in cmux"
 description: "Host glue for cmux: the correct editor opens on the correct worktrees, and local web surfaces open in splits beside the terminal."
 ---
 
-The cmux glue is not an npm package: it is five small scripts and one
-Command Palette entry. One command installs them.
+Install the cmux glue with one command. It's five small scripts and one
+Command Palette entry, not an npm package.
 
 ```bash
 curl -fsSL https://obversa.ai/install/cmux.sh | bash
 ```
 
-It writes only into `~/.obversa/cmux`, prints every path before it writes,
-and never edits an existing cmux configuration: if you already have one it
-copies it aside and prints the entry for you to add. macOS only today,
-because the default-browser fallback uses `open`.
+The installer puts the scripts in `~/.obversa/cmux/bin`. If you have no
+cmux configuration, it writes `~/.config/cmux/cmux.json` with the palette
+entry. It never edits a configuration you already have: it copies it aside
+and prints the entry for you to add. It runs on macOS only, because the
+default-browser fallback uses `open`.
 
 Prefer to have an agent do it? Paste this:
 
@@ -27,7 +28,7 @@ Prefer to have an agent do it? Paste this:
 > review to the wrong host.
 
 Obversa is a guest in whichever host you use. cmux is the first. The glue is
-setup rather than a product, and there is no host fork and no new UI.
+setup rather than a product, and there's no host fork and no new UI.
 
 ## What you get
 
@@ -36,7 +37,7 @@ setup rather than a product, and there is no host fork and no new UI.
 - A local web surface opens in a browser split beside the terminal.
 - The Plannotator review page opens in a split. Every other link keeps
   your default browser.
-- Callback Gate surfaces use the same door when a router launches them.
+- Callback gate surfaces open the same way when a router launches them.
 
 ## The two-root workspace
 
@@ -46,7 +47,7 @@ projects share. Neither root appears inside the other.
 
 The glue generates one editor workspace file with both roots and opens
 it. The file lives outside both trees, so no worktree carries host
-state. Your editor stays your editor.
+state.
 
 ## Surfaces in splits
 
@@ -56,58 +57,53 @@ Outside cmux, the same command opens your default browser. The fallback
 keeps every script usable in a plain terminal.
 
 The URL a surface hands the glue is a one-time launch URL that opens the
-session (single use, valid for a minute; the page URL with its token is
-never placed in a process argument), and it is still the one door to the
-review, so every
-command the glue runs (`cmux`, macOS's `open`, the `python3` that reads
-the cmux tree, and the few coreutils the cmux route needs) runs by
-absolute path from a fixed list of system directories (`/usr/bin`,
-`/bin`, `/usr/local/bin`, `/opt/homebrew/bin`), never by a bare name
-looked up on `PATH`. A host may name other directories in
-`OBVERSA_SYSTEM_BIN_DIRS` (colon-separated). On Linux the glue does not
-run `xdg-open`, which runs its own helpers by bare name: the URL is
-printed on stderr for you to open, as it is on any platform with no
-opener found, and nothing else receives it.
+session. It's single use and valid for a minute, and the page URL with its
+token never goes into a process argument. That launch URL still opens the
+review, so every command the glue uses runs by absolute path from a fixed
+list of system directories (`/usr/bin`, `/bin`, `/usr/local/bin`,
+`/opt/homebrew/bin`), never by a bare name looked up on `PATH`. That
+covers `cmux`, macOS's `open`, the `python3` that reads the cmux tree, and
+the few coreutils the cmux route needs. A host may name other directories
+in `OBVERSA_SYSTEM_BIN_DIRS` (colon-separated). On Linux the glue doesn't
+run `xdg-open`, because `xdg-open` runs its own helpers by bare name. The
+URL is printed on stderr for you to open instead, as it is on any platform
+with no opener found, and nothing else receives it.
 
 ## One route for Plannotator
 
 Plannotator opens its review page through one environment variable,
-`PLANNOTATOR_BROWSER`, and the workspace launcher below binds it to the
-glue script for the workspaces it creates. Only the review page routes
-into a cmux split; no other tool reads the variable, so no other link
-changes behavior.
+`PLANNOTATOR_BROWSER`. The workspace launcher below binds it to the glue
+script for the workspaces it creates. Only the review page routes into a
+cmux split. No other tool reads the variable, so no other link changes
+behavior.
 
 ## Set up
 
-The glue is a handful of scripts in `hosts/cmux/bin/` plus one Command
-Palette entry. It targets macOS today: the default-browser fallback uses
-`open`.
-
-If you would rather do it by hand, the scripts are in `hosts/cmux/bin` in
-the repository, and the palette entry names the launcher by absolute path.
+If you'd rather do it by hand, the scripts are in `hosts/cmux/bin` in the
+repository, and the palette entry names the launcher by absolute path.
 
 1. Run **Order Workspace** from the Command Palette. The first run shows
    the cmux trust prompt.
 2. A project-local `.cmux/cmux.json` overrides the global entry, so a
    repository can carry its own and the pair never conflicts.
 3. Set the Shared root once: `export OBVERSA_SHARED_ROOT=<shared worktree>`.
-4. Create workspaces through the host's launcher, which binds both
-   placement variables — `OBVERSA_SURFACE_BIN` for Obversa surfaces and
-   `PLANNOTATOR_BROWSER` for Plannotator — to this checkout's scripts for
+4. Create workspaces through the host's launcher. It binds both placement
+   variables, `OBVERSA_SURFACE_BIN` for Obversa surfaces and
+   `PLANNOTATOR_BROWSER` for Plannotator, to the glue's own scripts for
    every terminal and agent in the workspace:
 
    ```sh
    obversa-cmux-workspace <repository-directory>
    ```
 
-   The binding is per launch host, never global: do not put either
-   variable in a shell profile or an agent client's settings, and remove
-   an old global `PLANNOTATOR_BROWSER` entry from `~/.claude/settings.json`
-   if one is there — a global binding sends every launch to one host, so a
-   review started in another host would land in this one instead of where
-   it started. In a workspace opened without the launcher, export
+   The binding is per launch host, never global. Don't put either variable
+   in a shell profile or an agent client's settings. If
+   `~/.claude/settings.json` has an old global `PLANNOTATOR_BROWSER` entry,
+   remove it. A global binding sends every launch to one host, so a review
+   started in another host would land in this one instead of where it
+   started. In a workspace opened without the launcher, export
    `OBVERSA_SURFACE_BIN` as the absolute path of `obversa-surface` in that
-   workspace; outside cmux, surfaces open in the default browser.
+   workspace. Outside cmux, surfaces open in the default browser.
 5. Apply with `cmux reload-config`.
 
 ## Use
@@ -135,7 +131,7 @@ workspace.
 
 ## Your host stays yours
 
-The glue adds one Command Palette entry, three scripts, and nothing
+The glue adds one Command Palette entry, five scripts, and nothing
 else. cmux supplies the panes, the layout, and the keybindings. Obversa
 supplies the workspace file and the surface placement. Remove the glue
 and cmux is exactly as it was.

@@ -5,29 +5,29 @@ description: "An order is the change you want made: the ticket, with what the te
 
 
 Someone asks for a change: a passkey login, a report export with a header
-row, a landing page redesign. On a team that is a ticket, and the ticket
-carries what the person doing the work needs: what is wanted, why, the
+row, a landing page redesign. On a team, that's a ticket. The ticket
+carries what the person doing the work needs: what's wanted, why, the
 designs, the constraints, and what "done" looks like. An order is that
 ticket. A workflow is what the team does with it.
 
 ## What the runtime does with an order
 
-Nothing, on purpose. The runtime runs workflows and records what they do;
-it has no order type, no ticket store and no opinion about where your
-tickets live. Your application decides what an order contains, where it is
+Nothing, on purpose. The runtime runs workflows and records what they do.
+It has no order type, no ticket store and no opinion about where your
+tickets live. Your application decides what an order contains, where it's
 kept, and which workflow runs on it. That keeps Linear, GitHub, a document
 or a text file all equally good places for an order to come from.
 
 ## One order, as the feature example carries it
 
-`examples/feature-delivery.ts` starts with a request to build a retry helper. The analysis step reads the request and produces acceptance criteria for the implementation and review steps.
+`examples/feature-delivery.ts` starts with a request to build a retry helper. The analysis step reads the request and defines its acceptance criteria.
 
 ```ts
 const FEATURE_BRIEF =
   'Build a retry helper that retries failed requests, caps attempts, and stops when the caller aborts.';
 ```
 
-With scripted model responses, the example reaches the approval step and waits for a person. The example prints:
+With scripted model responses, the run reaches the approval step and waits for a person. The file prints:
 
 ```text
 {
@@ -37,38 +37,39 @@ With scripted model responses, the example reaches the approval step and waits f
 
 ## What travels with one
 
-Four things, and the record links them so a reader can understand a result
+Four things, and the record links them, so you can understand a result
 without reading an agent's conversation:
 
 - **Context.** The requirements, designs and constraints the work needs.
 - **The workflow.** The steps that carry it out, as code.
 - **The output.** The files and artifacts the work made or changed.
 - **The evidence.** The checks, reviews and decisions that accepted the
-  output, each bound to the exact bytes it judged.
+  output. [Proof acceptance](/reviewing/proof-acceptance) can bind a review
+  or an approval to the exact bytes it judged.
 
 ## One order at a time
 
-Keep an order small enough to follow from request to result. One order
-moves through its workflow without waiting for others, gets its reviews
-and its human decisions on the way, and closes when its evidence says the
-requirements are met. A large piece of work is several orders, each with a
-short path to feedback.
+Keep an order small enough to follow from request to result. An order
+moves through its workflow without waiting for others. It gets its reviews
+and a person's decisions on the way, and it closes when its evidence says
+the requirements are met. A large piece of work is several orders, each
+with a short path to feedback.
 
 ## An order's route
 
 Some orders need more than one workflow: a payment feature might pass
 through implementation, a security review and a release. The route is that
 list. Your application expresses it as a graph whose nodes start the
-workflows, so the dependencies decide the order and independent workflows
-run together.
+workflows. The dependencies decide what runs first, and independent
+workflows run together.
 
 ## Where the work happens
 
 An order's workflow can run in its own copy of the repository, so two
 writers never collide. The runtime's [workspace contract](/workspace/contract)
-captures, verifies, leases and forks one Git repository for that; the
+captures, verifies, leases and forks one Git repository for that. The
 [cmux host](/hosts/cmux) opens the order's project worktree beside a shared
-one for reusable context.
+one that holds reusable context.
 
 ## Read next
 

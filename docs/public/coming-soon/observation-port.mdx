@@ -10,12 +10,12 @@ so that the shape is public before the code is.
 
 A run already knows everything worth watching: which step is
 running, what each one decided, what a reviewer sent back, what the whole
-thing has spent. Today a host reads that by holding the run and folding its
+thing has spent. A host reads that by holding the run and folding its
 events itself.
 
 An observation port makes it a contract instead: a stream of the run's
-events, and a published shape for the state they fold into. Our own view
-becomes one consumer of it rather than the only way to see a run, and a
-view built against the shape keeps working when ours changes.
+events, and a published shape for the state they fold into. The run's own
+page becomes one consumer of it, and a view built against the shape keeps
+working when that page changes.
 
 See [Watch a run in the browser](/driving/monitor).

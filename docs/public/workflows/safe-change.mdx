@@ -3,14 +3,14 @@ title: "A file change approved byte for byte"
 description: "Approve exact file bytes, keep a complete backup, and reconcile an interrupted write."
 ---
 
-This file combines protected source records into destination files.
+This example combines protected source records into destination files.
 It captures the sources, checks every mapping, and waits for approval of the
 exact proposed output. It saves a complete backup before it writes a target.
 
-The example uses four synthetic source kinds: document, current record,
-discussion comment, and historical entry. Each complete source record is one
-protected fact. That fact includes its metadata and exact body text.
-The fixture uses scripted proposal and review data and calls no model.
+It uses four synthetic source kinds: document, current record, discussion
+comment, and historical entry. Each complete source record, with its metadata
+and exact body text, is one protected fact. The proposal and the review are
+scripted, and no model is called.
 
 ## Graph
 
@@ -48,8 +48,8 @@ files with mode `0600`.
 
 The mapping must preserve each complete source record in an active
 destination. A change that drops metadata or alters a protected body is
-refused. The recipe does not extract semantic facts from prose or decide
-which facts can be discarded.
+refused. The example doesn't extract facts from prose or decide which facts
+can be discarded.
 
 ## Approval and writes
 
@@ -60,20 +60,20 @@ the executor is stopped.
 
 Before each write, the file adapter checks stored approval, live source
 hashes, the target's version and active status, and the verified backup.
-Models can propose or review data; the deterministic adapter applies it.
-The runnable fixture's `approve()` helper supplies a scripted answer. A real
-host must collect its decision through the stored callback client.
+Models can propose or review data. The deterministic adapter applies it.
+The fixture's `approve()` function supplies a scripted answer. A real host
+must collect its decision through the stored callback client.
 
-The backup retains the original source and target file bytes, including all
-record fields needed to restore them. Artifact hashes protect these bytes.
-The recipe checks the backup before use. It provides no automatic restore.
+The backup keeps the original source and target file bytes, including every
+record field needed to restore them. Artifact hashes protect these bytes.
+The example checks the backup before use. There's no automatic restore.
 
 Each file merge has one stable action identity taken from its original
 stored node attempt. The target's content, revision, and action witness are
 saved together through one file replacement. The witness identifies the
 write that produced the content.
 
-The recipe appends intent and result events to each target's own stream.
+The example appends intent and result events to each target's own stream.
 It keeps source event histories separate. It never imports a source's event
 history into a target stream or the executor's run stream.
 
@@ -85,20 +85,19 @@ Changing the file back and calling resume does not clear that mismatch.
 
 A readback that cannot run fails the graph. An action that fails before an
 uncertain outward result also fails it. If a write succeeds but its response
-is lost, the recipe reads the target before deciding whether it completed.
+is lost, the example reads the target before deciding whether it completed.
 
 After a process crash leaves an action's outcome unknown, the executor
-pauses that attempt for reconciliation. On resume, the recipe checks the
+pauses that attempt for reconciliation. On resume, the example checks the
 saved intent, exact target bytes, and action witness. A matching completed
 write returns its evidence without another application. Unknown or
 mismatched state stays paused. Resume alone never authorizes a repeated write.
 
-This adapter assumes one writer owns the synthetic record directory.
-An external service requires its own conditional-write and action-status
-contract. The file example makes no guarantee about an arbitrary remote API.
+The adapter assumes one writer owns the synthetic record directory.
+An external service needs its own conditional-write and action-status
+contract. The example makes no guarantee about any remote API.
 
 ## Run the workflow
-
 
 The example writes only to its temporary directory and removes it when done.
 The report is:
@@ -109,11 +108,12 @@ The report is:
 
 ## Source
 
-This one is three files that sit beside each other:
+The example is three files that sit side by side.
 `safe-change-recipe.ts` drives the stored graph,
 `safe-change-file-adapter.ts` reads and changes records, and
-`safe-change.ts` runs the fixture below. Keep them together. They import
-public runtime exports and nothing else.
+`safe-change.ts`, shown below, runs the fixture. Keep them together. Apart
+from each other and Node's built-in modules, they import only public runtime
+exports.
 
 ```ts
 import assert from 'node:assert/strict';
@@ -168,6 +168,6 @@ export const safeChangeReport = report;
 console.log(JSON.stringify(safeChangeReport, null, 2));
 ```
 
-The clean-consumer check compiles all three files against the packed runtime
-with TypeScript 6 and TypeScript 7. It runs the compiled and direct TypeScript
-forms and compares their reports with this page.
+The test suite compiles all three files against the packed runtime with
+TypeScript 6 and TypeScript 7. It runs both the compiled files and the
+TypeScript sources, and checks their report against this page.

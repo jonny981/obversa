@@ -1,27 +1,27 @@
 ---
 title: "First run"
-description: "Two files to run first: a real writer-and-reviewer team on your own files, and an offline feature team that shows work going back to the step that owns it."
+description: "Three files to run first: a real writer-and-reviewer team on your own files, an offline feature team that sends work back to the step that owns it, and the smallest job that runs an engine."
 ---
 
-Two files are worth running first. The first is a real team: a Claude
-seat writes a function and its test, Node runs the test, and a Codex seat
-reviews the result. The second runs with no model and no network and shows
-the mechanism a team is built on: a review that sends work back to the
-step that owns it.
+Start with these three files. The first is a real team: a Claude seat
+writes a function and its test, Node runs the test, and a Codex seat
+reviews the result. The second runs with no model and no network, and shows
+the mechanism a team is built on: a review that sends work back to the step
+that owns it. The third is the smallest job that runs an engine.
 
 ## A real team on your own files
 
-You need the two command line tools signed in, then:
+You need the Claude and Codex command line tools installed and signed in.
+Then install the bundle:
 
 ```bash
 npm install @obversa/obversa
 ```
 
-Copy this file into the directory the work belongs in, save it with a
-`.ts` name, and run it with `npx tsx` and that name. The directory needs
-`"type": "module"` in its `package.json`; see
-[installation](/get-started/installation). Paths inside the file, the brief
-among them, are read from the directory you run the command in.
+Save this file with a `.ts` name in the directory the work belongs in, and
+run it with `npx tsx`, set up as in [Installation](/get-started/installation).
+Paths inside the file, including the brief at `briefs/add.md`, are read from
+the directory you run it in.
 
 ```ts
 import { claude } from '@obversa/engine-claude-cli';
@@ -75,40 +75,16 @@ const result = await run(createWriterReviewerPair());
 console.log(JSON.stringify(result.outcome, null, 2));
 ```
 
-One real run printed:
-
-```json
-{
-  "status": "pass",
-  "summary": "dag \"writer-reviewer-pair\": all 3 node(s) green",
-  "data": {
-    "writer": {
-      "status": "pass",
-      "summary": "Created pure add(a, b) function in src/add.mjs and comprehensive test suite in test/add.test.mjs. All 5 tests pass, covering positive numbers, negative numbers, mixed signs, zero, and decimals."
-    },
-    "test": {
-      "status": "pass",
-      "summary": "`node` exited 0"
-    },
-    "reviewer": {
-      "status": "pass",
-      "summary": "The required pure add function and Node test are present and pass."
-    }
-  }
-}
-```
-
-The writer's files and the reviewer's decision, as they were left in the
-workspace, are on the [writer and reviewer](/workflows/writer-and-reviewer)
-page. Change the brief, the file list and the test command and it is your
-own work.
+The [writer and reviewer](/workflows/writer-and-reviewer) page shows what a
+real run printed, the files the writer left and the reviewer's decision.
+Change the brief, the file list and the test command, and it's your own
+work.
 
 ## Without a model
 
-This file is a feature team in five named steps with a review panel of
-three that passes on two, and a person who decides at the end. Every step
-is a small function that returns one line, so the shape is the only thing
-on show, and it runs anywhere Node runs.
+This file runs anywhere Node runs, with no model and no network. It's a
+feature team in five steps, with a review panel of three that passes on two
+and a person who decides at the end.
 
 ```ts
 /**
@@ -217,16 +193,14 @@ It prints:
 ```
 
 `implement` ran twice. Two of the three reviewers failed the first attempt,
-the panel named `implement` as the step that owns the fix, and the work
-went back there with their findings instead of the run starting over. The
-second attempt passed, and the person at the end said yes. That is the
-thing to look at: the right step did its work again with the reason in
-hand.
+so the panel sent the work back to `implement`, the step that owns the fix,
+with their findings. The run didn't start over. The second attempt passed,
+and the person at the end said yes.
 
 ## One agent job
 
-The smallest thing that runs an engine: one job, one prompt, a scripted
-engine that answers without a network call.
+This is the smallest thing that runs an engine: one job, one prompt, and a
+scripted engine that answers without a network call.
 
 ```ts
 import { agentJob, run } from '@obversa/runtime';
@@ -258,5 +232,6 @@ Swap the scripted engine for a plugin and the same job runs a real model.
 
 ## Where next
 
-[Workflows](/concepts/workflows) is the shape of the work. [The examples](/workflows)
-have the two other teams and the single mechanisms they are built from.
+[Workflows](/concepts/workflows) explains how to shape the work.
+[The examples](/workflows) include more teams and the single mechanisms
+they're built from.

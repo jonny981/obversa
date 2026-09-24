@@ -3,21 +3,20 @@ title: "Feature delivery"
 description: "One brief to a change a person is asked to ship, in nine small steps: research with its own reviews, a plan, tests first, an implementation held to green tests and a panel, a person's decision, evidence."
 ---
 
-Hand a brief to a team and get back a change ready for a person to ship,
-the way a real team delivers a feature: research first, each note
-reviewed; a plan that is reviewed; tests before code; an implementation
-that runs again with the reviewers' findings until the tests pass and the
-panel accepts; then the question to a person, and the evidence written
-from the record. Inference sits at the leaves; everything between the
-leaves is a check the run can hold to. The whole team is one file that
+Hand a brief to a team and get back a change ready for a person to ship.
+The team works the way a real team delivers a feature. Research comes
+first, with each note reviewed, then a reviewed plan and tests before code.
+The implementation runs again with the reviewers' findings until the tests
+pass and the panel accepts. Then a person is asked, and the last stage
+writes the evidence. Inference sits at the leaves, and everything between
+the leaves is a check the run can hold to. The whole team is one file that
 reads top to bottom.
 
 ```bash
 npm install @obversa/obversa
 ```
 
-In that directory, create `package.json` with `"type": "module"`, then run
-the install command above before running the copied file.
+Set up the project as [Installation](/get-started/installation) describes.
 
 ## The file
 
@@ -133,16 +132,19 @@ const result = await run(createFeatureDelivery());
 console.log(JSON.stringify(result.outcome, null, 2));
 ```
 
-A writing seat can write anywhere the process can: the seat helpers start
-their engines with permission prompts off, which is what lets a model
-write files. Run it in a directory you are willing to let a model change.
-`recordTo` writes every event of the run to a file as it happens.
+<Warning>
+Run the file in a directory you're happy for a model to change. The Claude
+seat runs with permission prompts off, so it can write anywhere the process
+can.
+</Warning>
 
 ## What a run printed
 
 From one real run of this file. The run stops at `approve` with the
-question on the record, because a person answers it, not the file; that
-is where a team hands over. Everything before it ran on real engines.
+question on the record, because a person answers it, not the file. That's
+where a team hands over. Everything before it ran on real engines. Use a
+stored callbacks client to carry the answer into the next run.
+[A person decides](/workflows/approval) explains how.
 
 ```json
 {
@@ -232,8 +234,8 @@ is where a team hands over. Everything before it ran on real engines.
 
 The notes the team left in `team-output/`, in the order they were
 written: the requirements and the plan. The context note is in the same
-directory; the evidence and the learning are written by the last stage,
-after the person's answer.
+directory. The last stage writes the evidence and the learning after the
+person's answer.
 
 ```md
 # Requirements: Triple Function Implementation
@@ -321,7 +323,7 @@ Implement a pure `triple(value)` function that multiplies a number by 3, with co
 ✓ Correct directory structure (`src/` and `test/`)
 ```
 
-The files the models wrote. The tests came first, from the plan; the
+The files the models wrote. The tests came first, from the plan. The
 second version is the one the review accepted.
 
 ```js
@@ -364,9 +366,9 @@ export function triple(value) {
 ## The team's shape
 
 Nine stages, each needing the one before it. A reviewed stage runs again
-with the reviewer's findings until the review accepts, a red test or a
-rejected review sends the work back to the stage it names, and each
-stage that repeats carries its own `retry`.
+with the reviewer's findings until the review accepts. A red test or a
+rejected review sends the work back to the stage it names. Each stage that
+repeats carries its own `retry`.
 
 | step | does | done when |
 | --- | --- | --- |
@@ -380,38 +382,27 @@ stage that repeats carries its own `retry`.
 | approve | Put the verified change in front of a person. | A person has said yes. |
 | close | Write the evidence of the run and what was learned, from the record alone. | Both notes are in the workspace. |
 
-Where a stage's gate names a file, the package checks the file after the
-job. Where it names an exit code, the command decides. Where it names a
-reviewer, the reviewer's decision decides. A model's own report of its
-work never passes a stage.
+Where a stage declares `writes`, the package checks those files after the
+job. Where it runs a command, the exit code decides. Where a panel reviews
+it, the reviewers' decision decides. A model's report of its own work
+never passes a stage by itself.
 
-## Gotchas
+`writes` names the files a stage may write. A stage that changes any other
+declared file fails by name, so `tests-first` can't write the
+implementation. Its tests may be red until `implement` turns them green.
 
-- **Tests come first and may be red.** The tests-first stage writes the
-  test file from the plan before any implementation exists; its review
-  asks whether a red test is red for a stated reason, and the implement
-  stage is what turns it green.
-- **A stage writes what it declares and nothing else.** `writes` names the
-  files a stage may write; a stage that touches another declared file
-  fails by name, so the tests-first stage cannot write the implementation.
-- **A note that comes back unchanged fails.** A writer sent its review's
-  findings must rewrite the note; the same bytes again end the stage with
-  a plain summary instead of a second identical review.
-- **Every reviewer is a different model family from the writer it reads.**
-  The research notes and the plan, written by the Claude seat, are reviewed
-  by a Codex seat; the tests and the code, written by the Codex seat, are
-  reviewed by a Claude seat. The workflow is refused before any model runs
-  if a panel shares a family with the stage it reviews.
-- **A reviewer's decision is its file.** Each reviewer writes
-  `reviews/<name>.json`; the team reads that file first and the reply
-  second. A reply with no decision in either is asked for once more, then
-  the review stops with a plain summary rather than a rejection of the
-  work.
-- **A person's answer is not in the file.** The run pauses at `approve`
-  with the question pending. [A person decides](/workflows/approval) shows
-  how a stored callbacks client carries the answer into the next run.
-- **A writing seat can write anywhere the process can.** Run the file in a
-  directory you are willing to let a model change.
+Keep each reviewer and the writer it reads in different model families.
+Here the Claude seat writes the research notes and the plan, and a Codex
+seat reviews them. The Codex seat writes the tests and the code, and a
+Claude seat reviews them. The workflow is refused before any model runs if
+a panel shares a family with the stage it reviews.
+
+A reviewer's decision is its reply. A reply with no decision is asked for
+once more. Then the run pauses with an engine error, not a rejection of the
+work.
+
+A writer sent findings must rewrite its note. If the same bytes come back,
+the stage ends with a plain summary instead of a second identical review.
 
 ## Source
 

@@ -3,9 +3,10 @@ title: "@obversa/obversa"
 description: "Install the bundled Obversa packages with one dependency."
 ---
 
-`@obversa/obversa` installs the runtime, runner, shared contracts, process
-tools, ready-made workflows, surfaces, the bundled engine adapters, memory
-adapters and webhook notifications together.
+`@obversa/obversa` installs these packages together: the runtime, the
+runner, the shared contracts, the process tools, the ready-made workflows,
+the surfaces, the memory adapters, webhook notifications and every engine
+adapter except Jev.
 
 ```bash
 npm install @obversa/obversa
@@ -21,19 +22,14 @@ The install adds one dependency to your project:
 }
 ```
 
-Not every available engine is bundled. The Jev
-engine is not bundled — install it separately:
+Install [Jev](/packages/engine-jev-api) separately:
 
 ```bash
 npm install @obversa/engine-jev-api
 ```
 
-Jev assesses recorded state with workspace mode `none`; it does not read or edit
-workspace files. See [the Jev engine](/packages/engine-jev-api).
-
-Import each tool from its own package name. This package has no runtime API
-of its own, so the individual packages stay separately importable and can
-still be installed without the bundle.
+The bundle has no API of its own. Import each tool from its own package. You
+can also install any package on its own, without the bundle.
 
 The package table on the [docs home page](/) lists every public package,
-including ones this package does not install.
+Jev included.

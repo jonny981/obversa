@@ -24,6 +24,13 @@ Use the installed runtime package in your own TypeScript file. The
 reviewer, so it needs no model account. It writes a temporary record,
 reopens it within the program and removes its temporary files before exit.
 
+This page compiles `teamGraphType`, which uses the stored graph executor and
+host bindings. That path doesn't create or merge worktrees or run callable
+review functions for you. So a team result isn't proof that a merge or
+review happened. For a callable job with its own workspace and review
+behavior, use `team(config)` as the
+[team form contract](/graphs/contract#team-form-contract) describes.
+
 ```ts
 import {
   compileGraph, createGraphExecutor, loadRunDefinition, persistRunDefinition,
@@ -52,7 +59,7 @@ const definition: TeamDefinition = {
 ```
 
 The writer sends its question in its successful turn result. `mentions`
-contains member IDs; the runtime does not look for names in the text:
+holds member IDs. The runtime doesn't look for names in the text:
 
 ```ts
   const nodes = {
@@ -81,13 +88,20 @@ The reviewer receives the saved question. Its reply mentions `writer`,
 which gives the writer another turn with that reply. The example checks
 that the writer's final answer contains the reply before it prints success.
 
+To ask for an answer, end the turn. A message is saved with its member's
+successful result, not while an engine is still speaking. The reply then
+queues the member again. A failed or unfinished turn sends nothing.
+
+A mention requests a later turn and never interrupts one already running.
+Several pending mentions for the same member share one queued turn and keep
+their triggering messages.
+
 ## Output
 
 The saved messages, dispatch order and final answers come from the run's
 record and result. The fresh executor adds no events when it reads the
-completed conversation. This is an offline demonstration that reopens
-storage within one program, not a command that leaves a record behind or
-resumes across separate invocations.
+completed conversation. The example reopens storage inside one program. It
+leaves no record behind and doesn't resume across separate processes.
 
 ```json
 {
@@ -122,38 +136,12 @@ resumes across separate invocations.
 }
 ```
 
-## Gotchas
-
-1. **A message sends when the turn ends.** It is saved with the member's
-   successful result, not while an engine is still speaking. A member that
-   needs an answer ends its turn. The reply queues it again. A failed or
-   unfinished turn sends nothing.
-2. **A mention waits for active work.** It requests a later turn; it never
-   interrupts one already running. The active batch settles before another
-   batch starts. Several pending mentions for the same member share one
-   queued turn and keep their triggering messages.
-3. **The conversation has limits.** Set a turn cap for each member and a
-   message-tail limit for its input. A requested turn beyond the cap fails
-   with `TEAM_TURN_LIMIT`, not a successful answer. The host's ordinary
-   input and output byte limits also apply.
-4. **Room membership is not a filesystem sandbox.** It controls accepted
-   posts and the input supplied to each member. The operator's full record
-   contains every room. Keep that record and the room-file directory outside
-   member workspaces and use the host's access controls. Processes sharing
-   unrestricted filesystem access can read the same files.
-5. **Choose the execution path explicitly.** `team(config)` is a callable
-   job with its own workspace and review behavior. The compiled
-   `teamGraphType` uses the stored graph executor and host bindings. It does
-   not create or merge worktrees or run callable review functions for you.
-   A team result is not proof that a merge or review happened. See the
-   [callable team contract](/graphs/contract#team-form-contract).
-
 ## Team fields
 
 `teamGraphType` is the workflow shape passed to `compileGraph`.
 `TeamDefinition` contains an `id`, a `definitionVersion`, team `data`,
-member `nodes` and an empty `edges` array. Messages request turns; edges do
-not connect members.
+member `nodes` and an empty `edges` array. Messages request turns. Edges
+don't connect members.
 
 ### Team data
 
@@ -166,7 +154,7 @@ not connect members.
 
 All three limits, including `tailMessages` below, must be positive safe
 integers. The member count multiplied by `maxTurnsPerMember` must also be a
-safe integer.
+safe integer. The host's ordinary input and output byte limits also apply.
 
 ### Members
 
@@ -184,14 +172,22 @@ Each node's `id` is the member's address. Its data is a `TeamNodeData` value:
 `TeamCommunication.rooms` is a list of `TeamRoom` values. Each room has a
 unique `id` and a `members` list of distinct node IDs. List every member for
 a run-wide room, one team's members for a team room, or two members for a
-direct message. Membership is part of the saved definition; a member cannot
+direct message. Membership is part of the saved definition. A member can't
 change it during the run.
+
+<Warning>
+Keep the run record and the directory for [room files](#room-files) outside
+member workspaces, and use the host's access controls. Room membership
+controls which posts are accepted and what input each member receives. It
+isn't a filesystem sandbox. The operator's full record contains every room.
+Processes that share unrestricted filesystem access can read the same files.
+</Warning>
 
 `TeamCommunication.tailMessages` sets how many recent messages from each
 permitted room enter a member's next input. A pending message that requested
 the turn is included even when it falls outside that tail. Messages present
-in both groups appear once, in saved order. The tail limit is therefore not
-a limit on all messages in an input; the input-byte budget still applies.
+in both groups appear once, in saved order. So the tail limit doesn't cap
+every message in an input. The input-byte budget still applies.
 
 ### Turn results
 
@@ -234,16 +230,16 @@ never receives a turn has `result: null`.
 
 After active turns settle, `TEAM_NODE_FAILED` reports any failed member,
 even when another member is paused. Without a failed member, a paused member
-keeps the run paused until the host uses the executor's existing resume
-contract. `TEAM_TURN_LIMIT` reports a queued member whose turn cap is exhausted.
+keeps the run paused until the host calls the executor's `resume`.
+`TEAM_TURN_LIMIT` reports a queued member whose turn cap is exhausted.
 
 ## Room files
 
 `projectTeamRooms` reads a saved team run and rebuilds its room files.
 Supply the run's `storage`, its `runId` and the operator's output
 `directory`. The result contains the last read `revision` and a list of
-`{ roomId, path }` entries. Use that list to find each file; do not construct
-its filename from the room name.
+`{ roomId, path }` entries. Use that list to find each file. Don't build its
+filename from the room name.
 
 Each file contains one readable line per accepted message: sender, message
 ID, mentions, a colon and the text. An empty room has an empty file. A run
@@ -251,9 +247,9 @@ without communication returns no files. Newlines and terminal control
 characters are printed as escapes. People and tools can tail these files
 like an ordinary text chat.
 
-The helper changes no stored events. A rebuild replaces its own files and
-leaves unrelated files alone. Each file replacement is atomic; the set of
-room files is not replaced as one operation. The returned revision says
+`projectTeamRooms` changes no stored events. A rebuild replaces its own files
+and leaves unrelated files alone. Each file replacement is atomic, but the set
+of room files isn't replaced as one operation. The returned revision says
 what was read, not that the run stopped changing during the write. Deleting
 a room file does not delete its messages from the record.
 

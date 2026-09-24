@@ -1,20 +1,20 @@
 ---
 title: "Graph executor"
-description: "Run a stored graph one recorded decision at a time: check the engines first, pause on a record when a check fails, resume from that exact record, and recover after a process stops."
+description: "Run a stored graph one recorded decision at a time: check the engines first, pause on a record when an engine isn't ready yet, resume from that exact record, and recover after a process stops."
 ---
 
 The graph executor turns a stored run into work. Your graph makes the
-decisions; the executor records each one before any node runs, runs each
-node inside the safe attempt lifecycle, and records what came back. When
-the plan carries a preflight policy it checks every engine seat before the
-first dispatch, and a failed check pauses the run on a record you resume
-from later.
+decisions. The executor records each one before any node runs, runs each
+node inside the [safe attempt lifecycle](/recording/node-attempts), and
+records what came back. When the plan carries a preflight policy, the
+executor checks every engine seat before the first dispatch. A failed check
+can pause the run on a record you resume from later.
 
 ## The file
 
-This file stores a one-node graph, runs the executor against a scripted
-local engine that is not ready, sees the run pause before any dispatch,
-makes the engine ready, and resumes with the exact pause event the first
+This file stores a one-node graph and runs the executor against a scripted
+local engine that isn't ready. The run pauses before any dispatch. The file
+then makes the engine ready and resumes with the exact pause event the first
 run returned. The engine and its bindings are in
 `examples/preflight-host.mjs`.
 
@@ -218,12 +218,21 @@ console.log(JSON.stringify({
 
 ## How a dispatch runs
 
+<Note>
+When the plan carries a preflight policy, pass `createGraphExecutor` a
+`preflightScratchDirectory`. That path and each node binding's
+`scratchDirectory` must be absolute, real and normalized.
+</Note>
+
 1. The executor loads the run definition and the frozen plan from storage
    and checks that the supplied graph matches them.
-2. When the plan carries a preflight policy, it checks every engine seat:
-   a static check of the seat's identity, and where the lane requires it,
-   one tool-free live call. A failed check pauses the run with
-   `PREFLIGHT_PAUSED` before anything is dispatched.
+2. When the plan carries a preflight policy, it checks every engine seat.
+   Each seat gets a static check of its identity and, where the lane
+   requires it, one tool-free live call with no workspace. The live call
+   proves the seat answers and does no work. A failed check either pauses
+   the run with `PREFLIGHT_PAUSED` or retires the engine, as
+   [the next section](#fallback-and-what-a-failure-retires) explains.
+   Nothing is dispatched before the checks finish.
 3. It folds the run's recorded events into graph state and asks the graph
    for its next command.
 4. It records the whole dispatch decision, then `node-attempt-started`
@@ -232,7 +241,21 @@ console.log(JSON.stringify({
    `node-completed`, `node-paused` or `node-failed`, then asks the graph
    again.
 
-Node behaviour is keyed by node id: a data-only node gets a function, an
+Set the lane's `unsupportedStatic` policy to say whether an engine without
+`admit` blocks the run or is allowed. The static check of such an engine
+comes back `unsupported`, never as a success receipt. Usage from the checks
+is kept separate from usage from nodes. Missing usage counts as unknown,
+not zero.
+
+`preflightScratchDirectory` is optional in the type, so TypeScript won't
+catch a missing path. `await createGraphExecutor(...)` rejects with a
+`GraphExecutionError` whose code is `INVALID_PREFLIGHT_CONFIG` when the plan
+needs the path and it's missing or malformed. A relative or symlinked
+binding path rejects with the same code and message inside `run()` and
+`resume()`, when its lane is checked. The error doesn't say which path
+failed, so handle the code at both call sites.
+
+Node behaviour is keyed by node id. A data-only node gets a function. An
 engine-backed node gets a prompt builder that receives that dispatch's
 typed input. The node uses the lane in the stored plan, and the engine
 binding joins that plan target to the full engine identity.
@@ -241,123 +264,101 @@ binding joins that plan target to the full engine identity.
 
 The host chooses the lane order once. The executor tries the effective
 target and at most one live fallback. Only a failure that means the lane is
-dead can move to the fallback; a rate limit, a timeout, a policy pause or a
-denied action does not run again elsewhere.
+dead moves to the fallback. A rate limit, a timeout, a policy pause or a
+denied action doesn't run again elsewhere.
 
-Each dead-lane event records the selected identity and the engine's
-reported identity when available. What the failure retires depends on what
-it proves: bad credentials retire every model on that adapter and
-provider, because the credential is theirs; a missing model, exhausted
-credit or an exhausted quota retire that provider and model; a missing
-command-line tool or an invalid configuration retire the adapter; a rate
-limit or a transport error retire nothing. The retirement is keyed on the
-seat that was selected, never on an identity the engine claimed in its
-output. An old auth record with no provider recovers one from its lane,
-and an ambiguous recovery refuses before any work with
+Each dead-lane event records the selected identity and, when available,
+the identity the engine reported. What the failure retires depends on what
+it proves. Bad credentials retire every model on that adapter and
+provider, because the credential is theirs. A missing model, exhausted
+credit or an exhausted quota retire that provider and model, and also the
+provider and model the engine reported, if they differ. A missing
+command-line tool or an invalid configuration retire the adapter. A rate
+limit or a transport error retire nothing. When a recorded auth failure
+names no provider, the executor recovers one from the lane. If that
+recovery is ambiguous, the executor refuses before any work with
 `ENGINE_IDENTITY_UNRESOLVED`. Later dispatches skip whatever was retired.
+
 During a run, if every declared target of a lane is dead, the executor
-records `ENGINE_UNAVAILABLE` as a normal node failure so the graph can
+records `ENGINE_UNAVAILABLE` as a normal node failure, so the graph can
 retry, fail or recover in its usual way. Before the first step, when the
 plan carries a preflight policy and every target of a lane is excluded or
-blocked by its checks, the run ends instead with `PREFLIGHT_FAILED`: a
-terminal failure written to the record as `preflight:failed`, returned by
-`run()` as `{ kind: 'fail', code: 'PREFLIGHT_FAILED' }`, and still terminal
-on a fresh executor. Nothing was dispatched, and there is no pause to
+blocked by its checks, the run ends with `PREFLIGHT_FAILED` instead. That
+failure is terminal. The record holds `preflight:failed`, `run()` returns
+`{ kind: 'fail', code: 'PREFLIGHT_FAILED' }`, and a fresh executor still
+treats the run as failed. Nothing was dispatched, and there's no pause to
 resume from.
 
 An action-policy wait records `node-paused` with its reason and request.
-A denied action records `node-failed` with `DENIED`; an aborted attempt,
-`ABORTED`. A result too large for the event stream records a small
-`node-failed` with `RESULT_TOO_LARGE`, so the dispatch never stays in
-flight.
+A denied action records `node-failed` with `DENIED`, and an aborted attempt
+records it with `ABORTED`. A result too large for the event stream records
+a small `node-failed` with `RESULT_TOO_LARGE`, so the dispatch never stays
+in flight.
 
 ## Engine identity records
 
 Every engine call records a `graph:engine-attempt-recorded` event before
-fallback routing or the node's result: node id, position, sequence,
-requested identity and reported effective identity. The sequence starts at
-1 for each position and continues across fallback calls and resume.
-Recovery of a started, unfinished engine node adds a record with both
-identities null, which records uncertainty rather than a count of calls.
+fallback routing or the node's result. The event holds the node id,
+position, sequence, requested identity and reported effective identity. The
+sequence starts at 1 for each position and continues across fallback calls
+and resume. When resume recovers an engine node that started and never
+finished, it adds a record with both identities null. That record marks
+uncertainty, not a count of calls.
 
-A receipt that cannot be saved makes `run()` reject and stops the affected
-attempt before fallback or completion. Other attempts in the same batch can
-continue. The records describe what the bound engine reported; they do not
+If a receipt can't be saved, `run()` rejects and the affected attempt stops
+before fallback or completion. Other attempts in the same batch can
+continue. The records describe what the bound engine reported. They don't
 see inside an adapter.
 
 ## Resume after a process stops
 
-A fresh executor returns `waiting` when a dispatch has no result, with the
-open positions. Call `resume` with one exact position, only after the
-earlier process has stopped; the executor does not lock the run between
-processes. If two dispatches were open, the result after the first resume
-is `waiting` again with the sibling's position.
+A fresh executor returns `waiting`, with the open positions, when a
+dispatch has no result. Call `resume` with one exact position, and only
+after the earlier process has stopped, because the executor doesn't lock
+the run between processes. If two dispatches were open, the first resume
+returns `waiting` again with the other position.
 
 - **Node code did not start.** The executor runs the attempt at its
   recorded position.
 - **A retry is safe.** With `retrySafe: true` saved in the start record,
   resume records `node-resumed` and runs the same attempt again.
 - **The result is not known.** With `retrySafe` false, resume records a
-  pause with a `reconcile-attempt` request naming the attempt, and does not
+  pause with a `reconcile-attempt` request naming the attempt, and doesn't
   call node code.
 - **The node is paused.** Resume records `node-resumed` and offers the same
   attempt again.
 
-For a preflight pause, call `resume` with `{ preflightEventId }` from the
-pause the first run returned. The static checks run again, live receipts
-that still apply are reused, and a stale id is refused with
-`RESUME_EVENT_MISMATCH` naming both ids. The saved `retrySafe` value and
-the saved plan govern recovery; a change in the live binding does not
+For a preflight pause, call `resume` with the `{ preflightEventId }` from
+the pause the first run returned. The static checks run again, and live
+receipts that still apply are reused. A stale id is refused with
+`RESUME_EVENT_MISMATCH`, which names both ids. The saved `retrySafe` value
+and the saved plan govern recovery. A change in the live binding doesn't
 rewrite an earlier record.
 
 ## When a check was interrupted
 
 A live check is an engine call, and the process can die in the middle of
-it. The record then holds an open probe, and a fresh executor's `run()`
-fails with `PROTOCOL`, naming the probe and telling you what to do: verify
-that the old worker and its engine process are gone, then call
-`interruptRunPreflight(storage, runId)`. It closes the open probe as
-`interrupted` with one expected-revision append, writes a preflight pause,
-and returns that pause, whose `preflightEventId` the next resume takes; it
-returns `null` when no probe is open, and the existing pause when one is
-already recorded. It never retries and never calls an engine.
+it. The record then holds an open probe. A fresh executor's `run()` fails
+with `PROTOCOL`, names the probe and tells you what to do: check that the
+old worker and its engine process are gone, then call
+`interruptRunPreflight(storage, runId)`. That call closes the open probe as
+`interrupted` and writes a preflight pause, in one write that fails if
+anything else wrote to the record first. It returns the pause, and you pass
+its `preflightEventId` to the next resume. It returns `null` when no probe
+is open, and the existing pause when one is already recorded. It never
+retries and never calls an engine.
 
-Call it only when you own the run and have verified the worker is gone. If
-the old engine call is still alive, the record says interrupted while the
-call keeps spending, and whatever that call would have proved is lost.
-
-## Gotchas
-
-- **A check is not a run.** The live check is one tool-free call with no
-  workspace. It proves the seat answers; it does no work.
-- **An engine without `admit` is `unsupported`,** and the lane's
-  `unsupportedStatic` policy says whether that blocks the run or is allowed.
-  Unsupported is never a success receipt.
-- **Checks need scratch directories, and two places refuse.** When the
-  plan carries a preflight policy, `createGraphExecutor` requires
-  `preflightScratchDirectory`, an absolute, real, normalized path; the
-  option is optional in the type, so `await createGraphExecutor(...)`
-  rejects with a `GraphExecutionError` whose code is
-  `INVALID_PREFLIGHT_CONFIG` when the plan needs it and it is missing or
-  malformed. Each node binding's own `scratchDirectory` is checked the same
-  way when its lane is checked, which happens inside `run()` and `resume()`,
-  and a relative or symlinked path there rejects with the same code and
-  message. Handle the code at both call sites; it does not say which path
-  failed. The policy itself must name every resolved lane once and keep
-  `timeoutMs` between 1 and 2147483647 milliseconds, or `resolveGraphPlan`
-  rejects it before the plan is frozen.
-- **Usage from checks is separate from usage from nodes,** and missing
-  usage is not zero.
+Call it only when you own the run and have checked that the worker is gone.
+If the old engine call is still alive, the record says interrupted while
+the call keeps spending, and you lose whatever that call would have proved.
 
 ## Source
 
-The file is `examples/preflight-executor.ts`, with its engine and bindings
-in `examples/preflight-host.mjs`. The executor's options and result types
-are exported by `@obversa/runtime`; `readRunPreflight` reads the preflight
-record of a stored run without touching an engine, and
-`interruptRunPreflight` closes a check the process died in the middle of.
-The types are `GraphExecutorResult` for what `run()` and `resume()` return
-(`complete`, `pause`, `fail` or `waiting`), `RunPreflightPolicy` for the
-plan's checks, `RunPreflightState` for what `readRunPreflight` returns, and
+The file is `examples/preflight-executor.ts`. `@obversa/runtime` exports the
+executor's options and result types, and `readRunPreflight` reads the
+preflight record of a stored run without touching an engine. The types are
+`GraphExecutorResult` for what `run()` and `resume()` return (`complete`,
+`pause`, `fail` or `waiting`), `RunPreflightPolicy` for the plan's checks,
+`RunPreflightState` for what `readRunPreflight` returns, and
 `PreflightPauseResult` and `PreflightFailureResult` for the two ways the
-checks end a run early.
+checks stop a run early.

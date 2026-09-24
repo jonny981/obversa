@@ -1,14 +1,12 @@
 ---
 title: "Three candidates, one winner"
-description: "Three isolated attempts at one task, a judge that scores every finished candidate, and only the winner lands on the branch."
+description: "Three isolated attempts at one task, a judge that scores every candidate that passed, and only the winner lands on the branch."
 ---
 
-When one attempt is not enough, run three and keep the best. This file
+When one attempt isn't enough, run three and keep the best. This file
 gives three candidates the same task, each in its own worktree of a Git
-repository. Each writes its implementation and a test, and runs the test.
-A judge scores every candidate that passed. The winner is merged back onto
-the branch. The losers are discarded with their worktrees, and the file
-proves that nothing of theirs is left behind.
+repository. Only the winner lands, and the file proves that the losers
+leave nothing behind.
 
 The candidates here are functions, so the file runs offline and always
 gives the same answer. Put an engine in the candidate job and the shape is
@@ -22,8 +20,12 @@ a tournament of models.
    runs the test with Node. A failed test fails the candidate.
 3. The judge reads each passing candidate's source and scores it: one
    point for passing, one for a named attempts cap, one for stopping when
-   the caller aborts.
-4. The highest score lands on `main`. The candidate branches are deleted.
+   the caller aborts. The source on disk is the evidence, not the
+   candidate's outcome data. A candidate that throws is never scored, so it
+   can't win whatever its source looks like.
+4. The highest score lands on `main`. A tie goes to the first candidate, so
+   give the judge enough resolution to separate the attempts you care about.
+   The candidate branches are deleted.
 
 ## The file
 
@@ -198,24 +200,15 @@ console.log(JSON.stringify({ ...report, temporaryDirectoryRemoved: !existsSync(t
 }
 ```
 
-The third candidate wins: it is the only one with both the attempts cap and
+The third candidate wins. It's the only one with both the attempts cap and
 the abort check, so it scores three. Its source is what `src/retry.ts`
-holds on `main` afterwards. The branch list is empty because a losing
-candidate's branch and worktree are removed when the tournament ends.
-
-## Gotchas
-
-- **Every candidate must pass its own test to be scored.** A candidate that
-  throws scores zero, whatever its source looks like. The judge only reads
-  the workspaces of candidates whose job passed.
-- **The judge reads files, not claims.** The score comes from the candidate's
-  source on disk. A candidate's outcome data is not the evidence.
-- **Ties go to the first candidate.** Give the judge enough resolution to
-  separate the attempts you care about.
+holds on `main` afterwards. The branch list is empty because the tournament
+removes every candidate's worktree and branch when it ends.
 
 ## Source
 
-The file is `examples/tournament.ts`. The `tournament` helper is exported
-by `@obversa/runtime`; its options are `name`, `n`, `candidate` (a function
-from the candidate index to a job) and `judge` (a function from an outcome
-and its context to a number).
+The file is `examples/tournament.ts`. The `tournament` function is exported
+by `@obversa/runtime`. Its options are `name`, `n`, `candidate` (a function
+from the candidate index to a job), `judge` (a function from an outcome and
+its context to a number) and `concurrency` (how many candidates run at
+once, all of them by default).

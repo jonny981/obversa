@@ -3,7 +3,8 @@ title: "Memory adapters"
 description: "Select in-process memory or memory stored in private Git references."
 ---
 
-The runtime accepts the `Memory` port. Your program selects and creates the adapter.
+The runtime accepts the `Memory` port and imports no adapter itself. Your
+program selects and creates the adapter.
 
 ## In-process adapter
 
@@ -53,21 +54,18 @@ const memory = await openGitMemory({
 });
 ```
 
-The adapter stores each scope in a private Git reference. It does not change
+The adapter stores each scope in a private Git reference. It doesn't change
 the current branch, the index, or the worktree.
 
 Delete and eviction remove a path from that private reference. The older Git
-object can remain in the repository until Git removes unused objects. Git
+object can stay in the repository until Git removes unused objects. Git
 mirror clones, mirror pushes, and bundles made with `--all` copy the private
-reference and its plain-text contents. Backups can also retain it. Do not treat
-the reference as local-only, and do not treat deletion as immediate secure
-erasure.
+reference and its plain-text contents, and backups can keep it too. Don't
+treat the reference as local-only, and don't treat deletion as immediate,
+secure erasure.
 
 Pass the selected adapter to the runtime:
 
 ```ts
 await run(job, { memory });
 ```
-
-The runtime imports only the `@obversa/api` memory contract. It does not select or create a
-storage adapter.

@@ -3,15 +3,17 @@ title: "Jev API Engine"
 description: "@obversa/engine-jev-api answers decision questions over recorded run state through the Jev API."
 ---
 
-`@obversa/engine-jev-api` is an engine plugin that makes one Jev decision call
-per attempt over the TypeSafe API. A Jev call reads structured state your
-workflow already recorded and answers the questions you put to it; the adapter
-returns those answers as the attempt's structured result.
+`@obversa/engine-jev-api` is an engine plugin for Jev, which answers structured
+questions about state your run already recorded. Use it for assessments, such
+as whether to send work back, which stage should take it, or how ready a change
+is to land. Each attempt makes one Jev decision call over the TypeSafe API and
+returns Jev's answers as its structured result.
+
+Jev runs with workspace mode `none`. It never reads or edits files.
 
 ## Requirements
 
-- Node.js 22.12 or later
-- A Jev endpoint and API key, supplied through adapter options
+- A Jev endpoint and API key, passed as the `endpoint` and `apiKey` options
 
 ## Install
 
@@ -20,8 +22,7 @@ npm install @obversa/obversa
 npm install @obversa/engine-jev-api
 ```
 
-The Jev engine is not included in the bundle. It requires workspace mode `none`;
-give it recorded state to assess, not workspace files to read or edit.
+`@obversa/obversa` doesn't include the Jev engine, so it's a separate install.
 
 ## Request shape
 
@@ -57,24 +58,23 @@ The prompt is a JSON document of the shape `{state, questions}`:
 }
 ```
 
-`state` is whatever your run recorded. Each entry in `questions` names a type —
-`noul`, `choice`, or `score` — with instructions and criteria. `choice`
-criteria map each option to its description; `score` criteria are the array of
-labels the score indexes; `noul` criteria describe what true and false mean.
+`state` is whatever your run recorded. Each entry in `questions` names a type
+(`noul`, `choice` or `score`), with instructions and criteria. For a `noul`
+(true or false) question, the criteria say what true and false mean. For
+`choice`, they map each option to its description. For `score`, they're the
+array of labels the score indexes.
 
-The adapter does not validate the answer objects; it returns them unchanged.
-The shapes described here are what the provider has been observed to return,
-not types the adapter checks: `noul` answers have been observed carrying a
-probability with no separate `confidence` field, while `choice` and `score`
-answers have been observed carrying a `confidence` (and may carry
-`probabilities`).
+The adapter returns the answer objects unchanged and doesn't check their
+shape. What follows is what the provider has been seen to return, not a type
+the adapter guarantees. A `noul` answer carries a probability and no separate
+`confidence` field. `choice` and `score` answers carry a `confidence`, and may
+carry `probabilities`.
 
-The adapter validates the document shape — that it parses to an object, that
-`questions` is a non-empty object, and that every question names one of the
-three types — before any network call. A missing or `null` `state` is sent as
-an empty object; `questions` is required. It does not inspect `criteria`;
-criteria are forwarded to the provider unchanged. Malformed input fails as
-`invalid-config`.
+Before any network call, the adapter checks that the prompt parses to an
+object, that `questions` is a non-empty object, and that every question names
+one of the three types. Malformed input fails as `invalid-config`. A missing or
+`null` `state` is sent as an empty object. The adapter doesn't inspect
+`criteria`. It forwards them to the provider unchanged.
 
 ## Usage
 
@@ -92,33 +92,32 @@ const engine = new JevApiEngine({
 });
 ```
 
-The structured result value is the raw `answers` object, so a binding's
+The result's structured value is the `answers` object itself, so a binding's
 `parseResult` reads `part.value.send_back` directly.
 
 ## Unsupported requests
 
 These request fields fail as `invalid-config` before any network call:
 
-- `system` or `systemMode` — Jev requests carry no system prompt
-- `env` — credentials come from adapter configuration, not the request
-- `maxTokens` — Jev has no server-side token cap
-- `workspaceMode` other than `none` — Jev performs no filesystem access
-- a non-empty `tools` list — the adapter declares no tools
+- `system` or `systemMode`: Jev requests carry no system prompt
+- `env`: the key comes from the `apiKey` option, not the request
+- `maxTokens`: Jev has no server-side token cap
+- a `workspaceMode` other than `none`
+- a non-empty `tools` list: the adapter declares no tools
 
 ## Limits
 
-- One HTTP request per attempt. The adapter never retries on its own; retry
-  safety belongs to the node binding.
-- The bearer key comes from adapter configuration at construction; a
-  `request.env` field is refused. Provider response data — including error
-  bodies — is recorded in the result and in error details.
-- `timeoutMs`, plus `timeoutGraceMs` when set, bounds the whole call —
-  connection and response body read. Exceeding the deadline fails as
-  `timeout`; a caller abort fails as `aborted`.
-- `maxOutputBytes`, when supplied on the request, caps the response body the
-  adapter reads. It applies only when set and is not a general memory bound.
+- One HTTP request per attempt. The adapter never retries by itself. Retry
+  safety belongs to the node's binding.
+- Provider response data, including error bodies, is recorded in the result
+  and in error details.
+- `timeoutMs`, plus `timeoutGraceMs` when set, bounds the whole call, from
+  connecting to reading the response body. Past that deadline the call fails
+  as `timeout`. A caller abort fails as `aborted`.
+- `maxOutputBytes`, when set on the request, caps the response body the adapter
+  reads. It isn't a general memory limit.
 - A low-confidence answer completes like any other result. Thresholds and
-  routing are the caller's policy, not the adapter's.
-- When the API does not echo a model — or echoes one that is not readable —
-  the recorded effective model and model family are both `null`, and the
-  answers are still returned.
+  routing are up to your workflow.
+- If the API doesn't echo a model, or echoes one that can't be read, the
+  recorded effective model and model family are both `null`. The answers are
+  still returned.

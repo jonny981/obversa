@@ -1,13 +1,13 @@
 ---
 title: "Contract review against a playbook"
-description: "Every clause mapped to the playbook rule it meets or breaks, redlines in the wording the playbook allows and checked by a second model, a negotiating note; a lawyer decides what is sent."
+description: "Every clause mapped to the playbook rule it meets or breaks, redlines in the wording the playbook allows and checked by a second model, and a negotiating note. A lawyer decides what is sent."
 ---
 
 The brief is the playbook: what you accept, what you push back on and
-with what wording, what you never sign. One model maps every clause of
+with what wording, and what you never sign. One model maps every clause of
 the contract to the rule it meets or breaks, writes the redlines in the
-playbook's wording, and writes the negotiating note; a model from another
-family checks each redline against the playbook and sends the set back
+playbook's wording, and writes the negotiating note. A model from another
+family checks each redline against the playbook. It sends the set back
 when a clause is missing or a redline goes further than its rule. The
 lawyer decides what is sent to the other side.
 
@@ -15,11 +15,19 @@ lawyer decides what is sent to the other side.
 npm install @obversa/obversa
 ```
 
-In that directory, create `package.json` with `"type": "module"`, put the
-brief and the sample inputs from `examples/use-cases/business/`
-beside it, then run the copied file.
+Set up the project as [Installation](/get-started/installation) shows, and put
+the brief and the sample inputs from `examples/use-cases/business/` beside the
+copied file before you run it.
 
 ## The file
+
+Write every rule you want applied in `briefs/playbook.md`. Everything a
+seat knows about what's acceptable comes from that file. Only the rules
+written there are applied.
+
+`files: ["contracts/msa.md"]` in the brief's front matter names the contract
+as a workspace file. It tells every seat the file exists and forbids the
+`review` seat from writing it.
 
 ```ts
 import { claude } from '@obversa/engine-claude-cli';
@@ -106,24 +114,16 @@ const result = await run(createContractPlaybook(), {
 console.log(JSON.stringify(result.outcome, null, 2));
 ```
 
-Every event of the run prints as one line as it happens, the usage lines
-included, and the outcome prints last as JSON.
-
 The run stops at `negotiate` with the redlines and the positions in
 `review/`. A no goes back to `redline` with the lawyer's note as the
 finding.
 
 ## What a run printed
 
-The output below is from one real run of this file, with the two command
-line tools signed in on the machine. The transcript is trimmed at both ends: a
-reader's own run prints a `▸ run` event line before the first stage and — unless
-the process is killed first — a `◂ run` line carrying the outcome and the run's
-token total after the last stage. The machine that captured this also had an
-extra local search tool available to the first seat, which this example does
-not configure, so those calls are elided and a reader's own run will not make
-them. The run stops at the person, which is what every example here does before
-anything is sent or filed.
+The output below is from one real run of this file, with the Claude and Codex
+CLIs signed in, trimmed at both ends. The first seat on that machine also had
+a local search tool that this file doesn't configure. Those calls are cut, and
+your own run won't make them.
 
 ```text
 contract-playbook ▸ dag (4 nodes)
@@ -227,20 +227,13 @@ contract-playbook ◂ dag paused
 | positions | Write the negotiating note: what to hold, what to concede and to what, and what is a walk-away. | Every redline has a position, and a reviewer from another family has accepted them. |
 | negotiate | Put the redlines and the positions in front of the lawyer. | The lawyer has decided. |
 
-Where a stage's gate names a file, the package checks the file after the
-job. Where it names an exit code, the command decides. Where it names a
-reviewer, the reviewer's decision decides. Where it names a person, the
-run pauses until the person answers. A model's own report of its work
-never passes a stage.
-
-## Gotchas
-
-- **The checker holds the redlines to the playbook, both ways.** A never-sign clause with no redline sends the set back, and so does a redline that asks for more than its rule allows.
-- **The contract is a workspace file the brief names.** `files: ["contracts/msa.md"]` in the brief's front matter tells every seat the file exists and forbids the review seat from writing it.
-- **The playbook is the whole brief.** Everything a seat knows about what is acceptable comes from `briefs/playbook.md`; a rule that is not written there is not applied.
+The package doesn't check the "done when" sentences itself. `clauses` has no
+reviewer, so only its own seat judges whether every clause is on the list.
+[The keys of a stage](/packages/runtime#the-keys-of-a-stage) list what the
+package does check.
 
 ## Source
 
-The file is `examples/use-cases/business/contract-playbook.ts`; its proof, brief and
-sample inputs sit beside it. The [runtime package page](/packages/runtime)
-lists every input.
+The file is `examples/use-cases/business/contract-playbook.ts`. Its proof,
+brief and sample inputs sit beside it. The
+[runtime package page](/packages/runtime) lists every stage and workflow key.

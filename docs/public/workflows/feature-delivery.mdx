@@ -1,12 +1,12 @@
 ---
 title: "A feature from written issue to approval"
-description: "Take one written issue through analysis, implementation, a real test run, a review panel, a bounded repair, and a person approval."
+description: "Take one written issue through analysis, implementation, a real test run, a review panel, a feedback loop, and a person's approval."
 ---
 
 This file takes one change from a written request to a person who can approve
 it. Model seats analyse the work, write the source and tests, and review the
-result. A command gate runs the tests before the review panel and a bounded
-repair sends rejected work back to `implement`.
+result. A command gate runs the tests before the review panel. A rejection
+sends the work back to `implement`, at most twice.
 
 ## Graph
 
@@ -16,10 +16,10 @@ repair sends rejected work back to `implement`.
 3. The `test` stage runs the tests as a command gate. The workflow advances
    only when the command exits 0, never on a self-report.
 4. The `review` stage asks three model seats to read the source and tests.
-   Two accepts pass the panel; a failed panel sends its findings back to
-   `implement` within the feedback-loop budget.
-5. The `approve` stage pauses for a person. The answer is recorded beside the
-   run record, and a refusal fails the workflow.
+   Two accepts pass the panel. A failed panel sends its findings back to
+   `implement`, within the feedback-loop budget.
+5. The `approve` stage pauses for a person. A refusal sends the work back to
+   `implement` with the person's note.
 
 ## Contract
 
@@ -29,17 +29,16 @@ repair sends rejected work back to `implement`.
 | Output | A result and a recorded approval decision |
 | Permissions | Model seats write inside the run workspace. The test stage starts one `node --test` child process |
 | Limit | Two returns through the feedback loop |
-| Evidence | One JSON result on standard output and one JSONL run record read back before exit |
+| Evidence | One JSON result on standard output and one JSONL run record under `.obversa/records/` |
 
 ## Source
 
-Copy `examples/feature-delivery.ts` from the repository.
+Copy `examples/feature-delivery.ts` from the repository. It imports only public
+package exports and takes its Claude and Codex seats straight from the engine
+packages, so it needs no other local file.
 
-The example imports only public package exports. It uses Claude and Codex seat
-helpers directly, so copying this file does not require a second local module.
-
-In that directory, create `package.json` with `"type": "module"`, then run
-the install command above before running the copied file.
+Set up the project as [Installation](/get-started/installation) shows. The
+bundle brings the runtime and both engine plugins:
 
 ```bash
 npm install @obversa/obversa
@@ -224,7 +223,7 @@ if (result.outcome.status === 'fail') process.exitCode = 1;
 
 ## Run the workflow
 
-The result is:
+`pnpm exec tsx feature-delivery.ts` runs it. The result is:
 
 ```json
 {
@@ -232,26 +231,24 @@ The result is:
 }
 ```
 
-The run pauses at `approve` until a person answers through the run's callback
-client. `recordTo: 'auto'` writes the event record beside the run workspace.
-
-After you copy the source into a project that has `@obversa/runtime`, both
-engine plugins and `tsx` installed, `pnpm exec tsx feature-delivery.ts` runs
-the same workflow.
+`paused` means the run stopped at `approve` with its question pending.
+`recordTo: 'auto'` writes the event record under `.obversa/records/` in the
+run's workspace.
 
 ## Failure behavior
 
 The feedback loop allows two returns. If the panel keeps rejecting the work, the
-budget is spent and the review's failed verdict stands. A refused approval
-fails the workflow. The workflow never advances past a failing test command.
+budget is spent and the review's failed verdict stands. A refused approval also
+sends the work back, and fails the workflow once the budget is spent. The
+workflow never advances past a failing test command.
 
 ## Pause, resume, and retry behavior
 
 The approval stage pauses until a person answers. The event record keeps the
-stage results and the answer so a host can inspect the decision.
+stage results and the answer, so a host can inspect the decision.
 
 ## Engine lanes
 
 The file uses Claude for analysis, correctness and API review, and Codex for
-implementation and test review. The command gate remains a local check, and
-the person gate remains a callback handled by the host.
+implementation and test review. The command gate is a local check, and the
+person gate is a callback the host handles.

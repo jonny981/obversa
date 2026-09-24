@@ -5,119 +5,59 @@ description: "Give your agents the shape of a real team: named roles, reviews th
 
 
 Think about how a change gets made on a good team. Someone writes it.
-Someone else reads it, and if it is wrong, sends it back to the person who
+Someone else reads it, and if it's wrong, sends it back to the person who
 wrote it with a note saying what to fix. A hard call gets a second opinion.
 The big decisions go to a person who can say no. And when a laptop dies
 halfway through, nobody starts the week again, because the work so far is
 written down.
 
-Obversa lets you run your agents that way. You describe the work as steps,
-say who does each one, where the reviews are, and where a person decides.
-Obversa runs it, one bounded engine call at a time, and writes down every
-step as it happens. A graph driven by the supervised runner can be killed
-and started again, and it carries on from the record with nothing already
-finished done twice.
+Obversa lets you run your agents that way. You describe the work as steps:
+who does each one, where the reviews are, and where a person decides.
+Obversa runs it one bounded engine call at a time, and can write every step
+down as it happens. Kill a run under the [supervised runner](/driving/runner)
+and start it again, and it carries on from its record. Nothing that finished
+runs twice.
 
 ## Why it exists
 
-Agents are not deterministic. Left to themselves, there is no guarantee
-that every step of a process is followed, in the right order, under the
-right conditions. Obversa puts a deterministic process around the
-inference: many small jobs, each with a review cycle, so the research, the
-implementation and the tests are each checked before the next step runs.
+Agents aren't deterministic. Left to themselves, there's no guarantee that
+every step of a process is followed, in the right order, under the right
+conditions. Obversa puts a deterministic process around the inference: many
+small jobs, each with a review cycle, so the research, the implementation
+and the tests are each checked before the next step runs.
 
-The workflows built into a frontier harness cannot be saved, shared or
-repeated. An Obversa workflow is a file. You save it, share it, and run it
-again, and it runs the same way each time.
+The workflows built into a frontier harness can't be saved, shared or
+repeated. An Obversa workflow is a file. You save it, share it and run it
+again, and the process runs the same way each time.
 
 It models process at every layer: the organisation, the team and the
-individual. Agent frameworks give you one clever session; workflow engines
-give you durable steps and a server. Neither gives you a team with a
-process, and that is the layer Obversa owns.
+individual.
 
 ## Inference at the leaves
 
 Inference belongs mostly at the leaves. Around each inference step you can
 build as much process as you like: deterministic scripts, tools and checks,
-so that the job an agent has to do is clearer, simpler, better bounded and
-cheaper. Squeeze the determinism out of the agents and what is left is a
-set of very specific, focused agents doing narrow tasks.
+so the job an agent has to do is clearer, simpler, better bounded and
+cheaper. Squeeze the determinism out of the agents and what's left is a set
+of very specific, focused agents doing narrow tasks.
 
-That improves quality, and it does something else: a narrow, well-bounded
-task can be done by a small open-weight model tuned to it, as well as a
-frontier model would, at a fraction of the cost.
+That improves quality. It also means a small open-weight model tuned to a
+narrow, well-bounded task can do it as well as a frontier model would, at a
+fraction of the cost.
 
-Process engineers call the method value stream mapping: understand the
-process, then make the steps that add no value cheaper, faster, or cut
-them out. The same idea applies here. Lift every deterministic step out of
-the agents, so their context shrinks to the parts that truly need
-inference.
+Process engineers call this value stream mapping: understand the process,
+then make the steps that add no value cheaper or faster, or cut them out.
+Here that means lifting every deterministic step out of the agents, so their
+context shrinks to the parts that truly need inference.
 
-
-## What you can do with it
-
-- **Run a ready-made team on your own files.** A writer and a reviewer, a
-  review panel with a threshold, or feature delivery from brief to approval:
-  one import, your brief, your engines, run.
-  [The runtime workflow builder](/packages/runtime).
-- **Give work a shape in one call.** Steps in order, a graph with parallel
-  branches, a loop that revises until it passes, a tournament of
-  candidates, a quorum of opinions. [Workflows](/concepts/workflows).
-- **Say what each step does and what done means.** A sentence for each on
-  the node, and the reviewer judges against it.
-  [Workflows](/concepts/workflows).
-- **Send work back to the step that owns it.** A failed review names the
-  step that must fix it, and the work goes back there with the findings.
-  [A review that sends work back](/reviewing/review-loop).
-- **Get a second opinion that is really a second opinion.** The implementer
-  and every reviewer run on different model families, checked before a run.
-  [The runtime workflow builder](/packages/runtime).
-- **Stop for a person.** A callback gate puts one decision in front of
-  someone and the run carries on from that step with the answer.
-  [Callback gates](/reviewing/callback-gates).
-  A run nobody is watching exits at the question and carries on when a
-  schedule starts it again with the answer in its record.
-- **Approve only what was proved.** An approval is bound to the exact bytes
-  and test result it was given. [Proof acceptance](/reviewing/proof-acceptance).
-- **Run a step as a command.** The step passes on the exit code, never on a
-  model's report. [Workflows](/concepts/workflows).
-- **Use the engines you have.** Claude, Codex, Grok, OpenCode, the Agent
-  SDK, the Anthropic API, or one you write to the contract. Add
-  [Jev](/packages/engine-jev-api) separately for structured assessments with
-  workspace mode `none`, not workspace editing.
-  [Engine contracts](/packages/api).
-- **Define agents and skills in markdown.** The files your team already
-  writes become the persona and the skills a step runs with.
-  [Workflows](/concepts/workflows).
-- **Give each step its own worktree.** A change touches only the paths it
-  declared, and a mismatch pauses the run.
-  [The workspace contract](/workspace/contract).
-- **Keep every step in a file on disk.** Events and artifacts beside each
-  other, no server and no database.
-  [How a run is recorded](/recording/how-a-run-is-recorded).
-- **Kill a run and start it again where it stopped.** Nothing finished is
-  done twice. [The runner](/packages/runner).
-- **Give the team a memory.** In process or in private git refs, curated
-  and grounded by the steps themselves. [Memory](/memory).
-- **Put a diff in front of a person in their own editor.** Or drive runs
-  from cmux. [Surfaces](/concepts/surfaces).
-- **Let team members talk.** Messages, mentions, and a teammate woken by
-  name, in rooms that are files.
-  [A team conversation](/workflows/team-conversation).
-- **Set a budget and read the cost.** A cap on an attempt and a cost report
-  for the run. [The runtime](/concepts/runtime).
-
+The [home page](/) lists what you can build with it.
 
 ## See a team run
 
-Nine named stages, the way a real team delivers a feature: a Claude seat
-writes the context, the requirements and the plan, each until a reviewer
-accepts it; a Codex seat writes the tests before any code and the
-reviewer reads them; the same seat implements until the tests pass and
-the panel accepts; then the change is put to a person; and the evidence
-is written from the record. A red test or a rejected review sends the
-work back to the stage that owns it, with the findings. The file is
-complete; copy it, put your brief in, run it with Node.
+Here's a whole team as one file: nine stages, from research to a person's
+decision, with reviews that send work back to the stage that owns the fix.
+The [home page](/) walks through it, and the
+[feature delivery](/workflows/feature-team) page shows a real run.
 
 ```ts
 import { claude } from '@obversa/engine-claude-cli';
@@ -231,61 +171,40 @@ const result = await run(createFeatureDelivery());
 console.log(JSON.stringify(result.outcome, null, 2));
 ```
 
-A writing seat can write anywhere the process can: the seat helpers start
-their engines with permission prompts off, which is what lets a model
-write files. Run it in a directory you are willing to let a model
-change.
+<Warning>
+Run the file in a directory you're happy for a model to change. The Claude
+seat runs with permission prompts off, so it can write anywhere the process
+can.
+</Warning>
 
-Write many small jobs, each with its own review, for the specific research,
-implementation and test tasks in your process, rather than a few large
-ones. A coarse step hands the whole task to one inference and hopes. A
-small step with a review cycle is a process the run can hold to, and the
-team above is the shape to grow, not the size to stop at.
-
-One real run of this file printed:
-
-```json
-{
-  "status": "paused",
-  "summary": "waiting for a person: Ship this change?"
-}
-```
-
-Every stage's own words are in that record: what the research seat found,
-what the plan covers, the reviewers' reasons, the test command's exit and
-the question waiting for a person. The full output, the notes the team
-wrote and the files the models left are on the
-[feature delivery](/workflows/feature-team) page,
-and [the examples](/workflows) have the two smaller teams and the single
-mechanisms they are built from.
-
-## The words you will meet
+## The words you'll meet
 
 Four words carry most of the docs, and each has a page:
 
-- A **workflow** is the shape of the work: the steps and what depends on
+- **A workflow** is the shape of the work: the steps and what depends on
   what. [Workflows](/concepts/workflows).
-- An **order** is the change you want made; the workflow works on it.
+- **An order** is the change you want made. The workflow works on it.
   [Orders](/concepts/orders).
-- A **review** is a step that judges another step's result and can send it
-  back. [Reviews](/reviewing/callback-gates).
-- The **record** is the file of events a run writes as it goes. A run under
-  the supervised runner keeps its own durable record and restarts from it.
+- **A review** is a step that judges another step's result and can send it
+  back. [Sending work back](/concepts/workflows#sending-work-back).
+- **The record** is the file of events a run writes as it goes, when you ask
+  for one. A run under the supervised runner keeps its own durable record
+  and restarts from it.
   [How a run is recorded](/recording/how-a-run-is-recorded).
 
 ## Things to know before you start
 
-- **It is a library, not a service.** You write a TypeScript file and run
-  it with Node. There is no daemon and no dashboard to sign into.
-- **Two kinds of example.** The three teams run real engine plugins and their pages show what a real run printed. The single-mechanism pages run offline against small functions so the shape is the only thing on show.
+- **It's a library you import.** You write a TypeScript file and run it with
+  Node. There's no daemon to run and no dashboard to sign into.
+- **Two kinds of example.** Some examples run real engine plugins, and their
+  pages show what a real run printed. The rest run offline against small
+  functions, so the shape is the only thing on show.
 - **A workflow resumes when you pass `resume: true`.** For a job built with
-  `workflow()`, `run()` then carries on from the record at `recordTo`:
-  finished stages are not repeated and a waiting gate in the same store is not asked twice. The
-  [recording](/recording/how-a-run-is-recorded) page says what is repeated
-  and what is not.
+  `workflow()`, `run()` then carries on from the record at `recordTo`.
+  Finished stages aren't repeated, and a waiting gate in the same store isn't
+  asked twice. [How a run is recorded](/recording/how-a-run-is-recorded)
+  says what repeats and what doesn't.
 
 ## Where to go next
 
-Install it and run the first example in five minutes:
-[get started](/get-started/installation). The [README](https://github.com/jonny981/obversa)
-has the same story in one screen.
+[Install it](/get-started/installation) and run your first workflow.

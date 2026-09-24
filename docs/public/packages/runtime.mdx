@@ -1,46 +1,45 @@
 ---
 title: "runtime package"
-description: "The package that runs your workflows and keeps their record: what you write, what you call, and every export by what you do with it."
+description: "The package that runs your workflows and keeps their record: what you write, what you call, and its exports by what you do with them."
 ---
 
 
-`@obversa/runtime` is the package you install to run a workflow. You write
-the workflow as TypeScript, hand it the engines and storage you chose, and
-call it. It runs the steps one bounded engine call at a time and appends
-every step to a record on disk.
+`@obversa/runtime` is the package that runs a workflow. You write the
+workflow as TypeScript, hand it the engines and storage you chose, and call
+it. It runs the steps and, given a `recordTo` path, appends every event to a
+record on disk.
 
 ```bash
 npm install @obversa/obversa
 ```
 
-Node.js 22.12 or later. Nothing else to install: no database, no service to
-keep running. A run can serve its own page while it works; see
-[watch a run in the browser](/driving/monitor).
+It needs no database and no service to keep running.
 
 ## Two ways in
 
 **Write a workflow and run it.** The job API is the everyday one: name the
 steps, say what each needs, put a review where it belongs, and call `run`.
-`dag` is the general shape (nodes keyed by name, each with `needs` as one
-name or a list, an optional `desc` saying what it does, an optional `gate`
-saying what done means, an optional `when`, and a `job`; `desc` and `gate`
-reach the plan, the record and the node reviewer's input); `pipeline` is its
-shorthand for steps that go in one direction; `loop`, `sequence` and
-`parallel` are the other shorthands. Reviews go in with `reviewPanel`,
-`tournament`, `quorum` and `kickback`. A person's decision goes in with a
-callback gate.
+`dag` is the general shape. Its nodes are keyed by name. Each has a `job`,
+and can have `needs` (one name or a list), a `desc` saying what it does, a
+`gate` saying what done means, and a `when`. `desc` and `gate` go into the
+plan and the record. An agent step built with `graphContext: true` also gets
+`desc` in its prompt. In a `workflow()`, the writing seat gets both.
+`pipeline` is the shorthand
+for steps that go in one direction, and `loop`, `sequence` and `parallel`
+are the others. Reviews go in with `reviewPanel`, `tournament`, `quorum` and
+`kickback`. A person's decision goes in with a callback gate.
 
 **Compile a graph and drive it yourself.** Under the job API sits the
-graph contract: `compileGraph` with a graph form (`dagGraphType` is the
-built-in one), `createGraphExecutor` to run it against stored events, and
-`resolveGraphPlan` to see exactly what will run. This is the layer a host
-uses to supervise, pause and resume runs, and the layer you build on to
-write a workflow shape of your own.
+graph contract: `compileGraph` with a graph form (the runtime ships
+`dagGraphType`, `teamGraphType` and `convergence`), `createGraphExecutor` to
+run it against stored events, and `resolveGraphPlan` to see exactly what will
+run. A host uses this layer to supervise, pause and resume runs. You build on
+it to write a workflow shape of your own.
 
 ## See it run
 
-The smallest example stores a three-stage pipeline and drives it through
-the graph executor. It runs offline.
+This example stores a three-node pipeline and drives it through the graph
+executor. It runs offline.
 
 
 ```ts
@@ -255,22 +254,21 @@ try {
 **Define the work**
 
 - `dag`, `pipeline`, `sequence`, `parallel`, `loop`: the shapes a workflow
-  takes; each returns a job you can run or nest.
+  takes. Each returns a job you can run or nest.
 - `fnJob`, `agentJob`, `defineAgent`, `defineAgentFromMarkdown`: the steps,
   from a plain function to a named agent with a brief. A `fnJob` function
   returns a full outcome, a one-line summary (a pass) or nothing (a pass
-  with the label as its summary); a throw is a fail carrying the error.
-  `FnJobResult` names what it may return.
-  `recordAs: { role, stage }` on `agentJob` tags the answers it records with
-  the seat's role and stage, so a review gate compares recorded seats
-  rather than paths. A job the workflow does not build as a writer or a
-  reviewer carries no tag and stands outside that gate.
+  with the label as its summary). A throw is a fail carrying the error.
+  `FnJobResult` names what it may return. `recordAs: { role, stage }` on
+  `agentJob` tags the answers it records with the seat's role (`writer` or
+  `reviewer`) and stage, so a review gate compares recorded seats rather
+  than paths.
 - `jobMeta`, `copyJobMeta`, `renderPlan`: inspect a job's described shape,
   carry that shape onto a wrapper that keeps the job's behaviour, and render
-  the plan for a reader or host.
-- `commandJob`: a command as a step, pass on exit 0 and fail with the output
-  as the evidence otherwise; `target` names the step that owns the fix.
-- `commandSucceeds`: a condition met when a command exits 0; a launch failure
+  the plan for a person or a host.
+- `commandJob`: a command as a step. It passes on exit 0 and otherwise fails
+  with the output as the evidence. `target` names the step that owns the fix.
+- `commandSucceeds`: a condition met when a command exits 0. A launch failure
   leaves the condition unmet.
 - `gateJob`: turn a condition into a job that passes when it is met and fails
   with its evidence otherwise.
@@ -279,10 +277,10 @@ try {
 - `passed`, `failed`: conditions for a node's `when` that read a named
   dependency's outcome, so a command's exit code chooses the branch. The
   node `failed` decides on must be `optional: true`, or its red result
-  would block the branch before the condition is read; `dag` refuses the
+  would block the branch before the condition is read. `dag` refuses the
   graph otherwise and says which node to mark.
 - `agentCheck`: a condition that asks an engine for a scored check before the
-  graph continues; its confidence and evidence stay in the decision record.
+  graph continues. Its confidence and evidence stay in the decision record.
 - `isolated`: run a step in its own worktree and branch.
 
 **Review inside it**
@@ -292,56 +290,60 @@ try {
 - `kickback`, `revisionRequest`: a reviewer sends the work back to a named
   stage with its findings. These are the API names for that feedback loop.
 - `RECORDED_ENGINE_USAGE`, `RecordedEngineUsage`: the state key under which a
-  run records which model family answered each engine call an agent job made,
-  beside the job path that made the call. When the job was built with
-  `recordAs`, the entry also carries the seat's role (`writer` or `reviewer`)
-  and stage. The declarative review gate reads those tags and compares the
-  families that answered as writers with those that answered as reviewers.
+  run records which model answered each engine call an agent job made, beside
+  the job path that made the call and any `recordAs` tag. The declarative
+  review gate compares the families that answered as writers with those that
+  answered as reviewers.
 
 **Run it**
 
 - `run`: run a job from a fresh record. `callbacks` is the client the run's
-  questions go through, in memory or stored (`RunCallbacks` names either);
-  every job sees it as `ctx.callbacks`. `resume: true` reads the record at
-  `recordTo` first. For a job built with `workflow()` it carries on from that
-  record: finished stages are not repeated, a waiting gate is observed rather
-  than asked again, and an interrupted stage runs again only when it carries
-  `retrySafe: true`. Any other job appends to that record and runs again.
-  `onCallback: 'wait'` keeps the process up until an answer arrives, instead
-  of exiting with the recorded pause. The default, `'exit'`, records the
-  question and returns, so a schedule can start the same file again until
-  the answer is there. The question, the client and the record are the same
-  in both, so a record written by one mode resumes under the other.
-  Cancelling a waiting workflow reports the run as aborted and leaves the question in the record, so a later resume can still answer it. A bare `approval()` job returns the recorded pause instead.
+  questions go through, in memory or stored (`RunCallbacks` names either).
+  Every job sees it as `ctx.callbacks`. `resume: true` reads the record at
+  `recordTo` first. A job built with `workflow()` carries on from that
+  record, and any other job appends to it and runs again.
+  [How a run is recorded](/recording/how-a-run-is-recorded) says what a
+  resumed workflow repeats and what it doesn't. `onCallback: 'wait'` keeps
+  the process up until an answer arrives, instead of exiting with the
+  recorded pause. The default, `'exit'`, records the question and returns,
+  so a schedule can start the same file again until the answer is there. A
+  record written in one mode resumes in the other. Cancelling a waiting
+  workflow reports the run as aborted and leaves the question in the record,
+  so a later resume can still answer it. A bare `approval()` job returns the
+  recorded pause instead. To catch an attempt that runs past its time
+  budget, read the outcome. It comes back as a typed result, not a hang.
 - `LoopEvent`: the data handed to `onEvent`. Every run that begins emits one root
   `run:start` before it dispatches work and one root `run:end` before it
   returns. The end event carries the same `Outcome` and `UsageTotals` as
-  `RunResult`; both events carry the run id and record path when present.
-- `monitor: true` on `run` (on by default under `supervise`) serves the
-  run's own page on a free loopback port; `RunResult.monitor` carries its
-  address and closes it, and `MonitorState` is what `/state` returns. See
+  `RunResult`. Both events carry the run id and record path when present.
+- `monitor: true` on `run` serves the run's own page on a free loopback port.
+  It's on by default under `supervise`. `RunResult.monitor` carries the
+  page's address and closes it, and `/state` returns a `MonitorState`. See
   [watch a run in the browser](/driving/monitor).
 - `compileGraph`, `dagGraphType`, `createGraphExecutor`, `resolveGraphPlan`,
   `persistRunDefinition`: the graph layer, for hosts and for shapes of your
   own.
 - `readRunPreflight`, `interruptRunPreflight`: read a stored run's engine
   checks without calling an engine, and close a check the process died in
-  the middle of; `validateDomainEventId` checks an event id before you pass
+  the middle of. `validateDomainEventId` checks an event id before you pass
   it to a resume. Their types: `RunPreflightPolicy`, `RunPreflightState`,
   `PreflightPauseResult`, `PreflightFailureResult`, and `GraphExecutorResult`
   for what the executor returns.
-
-- `RESUME_STAGE_OUTCOMES`: the state key under which a resumed run carries the outcomes its stages reached before it paused; the declarative layer reads it so a gate that was already pending is observed rather than asked a second time.
+- `RESUME_STAGE_OUTCOMES`: the state key under which a resumed run carries
+  the outcomes its stages reached before it paused. The declarative layer
+  reads it, so a gate that was already pending is observed rather than asked
+  a second time.
 
 **Ask a person**
 
-- `approval`: a person's decision as a step; a yes passes, a no goes back
-  to the step that owns the fix with the note as the finding, no answer
-  pauses the run. `ApprovalOptions` is what it takes and `ApprovalAnswer`
-  what the person gives.
+- `approval`: a person's decision as a step. A yes passes. A no sends the
+  work back to the step named by `target`, with the note as the finding
+  (without `target`, a no fails the step). No answer pauses the run.
+  `ApprovalOptions` is what it takes and `ApprovalAnswer` what the person
+  gives.
 - `createCallbackGate`, `createCallbackClient`, `createStoredCallbackClient`,
-  `replayCallbackClient`, `directRouter`: a question with a typed answer,
-  recorded so it survives a restart.
+  `replayCallbackClient`, `directRouter`: a question with a typed answer. The
+  stored client keeps the question across a process exit.
 - `createApprovalCallbackGate`, `approvalSubjectDigest`, `resolveApproval`:
   an approval bound to the exact bytes it approves.
 
@@ -354,8 +356,9 @@ try {
 
 **Choose engines, memory and workspace**
 
-- `withEnv`, the engine and memory contracts, and the workspace provider:
-  the runtime imports no adapter; your program supplies the instances.
+- `withEnv`: pin environment variables for a job and every job beneath it.
+- The engine and memory contracts, and the workspace provider: the runtime
+  imports no adapter, so your program supplies the instances.
 
 **Test**
 
@@ -364,51 +367,22 @@ try {
 - `@obversa/runtime/storage/local`: `createLocalRunStorage`, the on-disk
   event and artifact stores the examples use.
 
-## Things that catch people out
-
-- **`run` starts a fresh record unless you pass `resume: true`.** With
-  `resume`, the file at `recordTo` is read first. A job built with
-  `workflow()` skips its finished stages; any other job appends to the
-  record and runs again. For a workflow,
-  the record applies to the same name, workspace, brief, stage list and role
-  seats; change any of them and the run starts again.
-  The supervised runner in `@obversa/runner` restarts a
-  killed run from a graph definition and a host module.
-- **Every attempt has a budget.** An overrun comes back as a typed result,
-  not a hang; read the outcome rather than waiting on it.
-- **The runtime imports no engine.** Nothing runs until your program hands
-  it one; the examples use a mock so they run offline.
-
 ## Where to go
 
-[What Obversa is](/concepts/index) if you are deciding; [workflows](/concepts/workflows)
-to learn the shape; [the examples](/workflows) for complete programs
-to copy; the [runner](/packages/runner) for supervised, restartable runs.
+Read [What Obversa is](/concepts/index) if you're deciding, and
+[workflows](/concepts/workflows) to learn the shape.
+[The examples](/workflows) are complete programs you can copy. Use the
+[runner](/packages/runner) for supervised runs. It restarts a killed run
+from a graph definition and a host module.
 
 ## Declare roles and stages
 
-Write the team as one file that reads top to bottom: the brief, the
-roles, the stages in order. Each stage says who does it, what it writes,
-who reads it and where the work goes back to. The package compiles that
-into the runtime's graph, so a review that fails sends the work back, a
-command decides on its exit code, a person's answer is waited for, and
-every step is on the record.
-
-Run the same workflow again with `resume: true` and it reads its record first.
-Stages that finished are skipped. A review that sent work back runs the
-writer again. A gate that was still waiting for a person is observed, and the
-run exits with the recorded pause, so a schedule can start the same file
-until the answer arrives and never asks twice.
-The record applies to the same workflow name, workspace, brief, stage list
-and role seats; change the brief, or the model behind a role, and the run
-starts again.
-A stage that was mid-flight when the process died runs again
-only when it carries `retrySafe: true`; otherwise the run pauses and asks a
-person to reconcile it.
-
-```bash
-npm install @obversa/obversa
-```
+Write the team as one file that reads top to bottom: the brief, the roles,
+the stages in order. Each stage says who does it, what it writes, who reads
+it and where the work goes back to. The runtime compiles that into its
+graph. A review that fails sends the work back, a command decides on its
+exit code, a person's answer is waited for, and every step is on the record.
+Run the team from your own file. The package ships no command.
 
 ### The smallest team
 
@@ -467,8 +441,20 @@ const result = await run(createWriterReviewerPair());
 console.log(JSON.stringify(result.outcome, null, 2));
 ```
 
-A real run of this file, and the files it left behind, are on the
-[writer and reviewer](/workflows/writer-and-reviewer) page. The
+<Warning>
+Run a team in a directory you're happy for a model to change. A Claude seat
+runs with permission prompts off, so it can run any command the process
+can.
+</Warning>
+
+Each seat starts its engine unattended, and the two plugins differ. A Codex
+seat runs sandboxed to the workspace with approvals off. A Claude seat
+doesn't use the mode that only accepts edits, because that mode would block
+the commands a headless run needs. Both take an options object to choose
+otherwise.
+
+The [writer and reviewer](/workflows/writer-and-reviewer) page shows a real
+run of this file and the files it left. The
 [review panel](/workflows/review-panel) and
 [feature delivery](/workflows/feature-team) pages do the same for the two
 larger teams.
@@ -479,7 +465,7 @@ larger teams.
   team, as a job for `run`. Stages run in the order written, each after
   the one before it.
 - **`stage(name, { ... })`.** One step. Exactly one of `agent`, `run`,
-  `panel` or `input` says what kind of step it is; the other keys say what
+  `panel` or `input` says what kind of step it is. The other keys say what
   it writes, who reads it and where the work goes back to.
 - **Seats from the engine plugins.** `claude('claude-sonnet-4-5')` from
   `@obversa/engine-claude-cli`, `codex('gpt-5.6-luna')` from
@@ -489,52 +475,60 @@ larger teams.
 - **`person(question)`.** A role a person fills: the stage that names it
   puts the question to a person and waits for the answer.
 - **`briefFromFile(path)`.** A brief kept as a markdown file beside the code.
-  Its body is the brief; front matter may carry `files`, the paths the
+  Its body is the brief. Front matter may carry `files`, the paths the
   brief expects written.
 - **`formatEvent(event, totals?)`.** One event of a run, as the line a person
-  reads. `run` hands every event to `onEvent` as data; pass it through this to
-  watch a run narrate itself without writing a formatter first. Give it the
-  running totals you already hold, from `RunResult.usage` or the monitor's
-  `/state`, and a usage line also reports what the run has spent so far.
-  (`RunResult.stats` is a different shape: a per-model breakdown whose fields
-  are named `totalInputTokens` and the rest, which this does not take.)
-  Omitting them changes nothing about what it prints. The shape is
-  `UsageTotals`: input and output tokens, and optionally what was created in
-  and read from cache.
+  reads. `run` hands every event to `onEvent` as data. Pass each one through
+  `formatEvent` to print a run as it happens, without writing a formatter.
+  Give it the running totals you already hold, from `RunResult.usage` or the
+  monitor's `/state`, and a usage line also reports what the run has spent
+  so far. The totals are a `UsageTotals`: input and output tokens, and
+  optionally what was created in and read from cache.
 - **`RunResult.usage`.** What the whole run spent, in the shape
-  `formatEvent` takes, so a run's own totals can be handed straight back to
-  the line formatter. The same numbers are in `RunResult.stats` per model;
-  this is the summary a person reads.
+  `formatEvent` takes, so you can hand a run's own totals straight back to
+  it. `RunResult.stats` has the same numbers per model, in a different shape
+  (`totalInputTokens` and the rest) that `formatEvent` doesn't take.
 - **Ready-made recipes** live in [builtin-workflows](/packages/builtin-workflows):
   `writerReviewerPair`, `thresholdPanel` and `featureDelivery`.
-- **`outcomeFromAgentText` from `@obversa/runtime/workflow-support`.**
-  The parser the teams use on a reviewer's
-  reply: the first JSON decision object becomes a pass, or a revise with
-  its findings aimed at the step you name.
+- **`outcomeFromAgentText` from `@obversa/runtime/workflow-support`.** The
+  parser the teams use on a reviewer's reply. The first JSON decision object
+  becomes a pass, or a revise with its findings aimed at the step you name.
 - **Workflow support helpers for recipe packages** from
   `@obversa/runtime/workflow-support`: `seatIdentity`,
   `assertDistinctSeats`, `requireNonEmptyFiles`, `requireNoFiles`,
-  `teamAgent`, `panelReviewers`, `INVALID_TEAM_DECISION`, and
-  `outcomeFromAgentText`. The subpath also exports the `ReviewerSeat`,
-  `TeamInput`, and `TestCommand` types. Import `dag` from the runtime root.
+  `teamAgent`, `panelReviewers` and `INVALID_TEAM_DECISION`. The subpath
+  also exports the `ReviewerSeat`, `TeamInput` and `TestCommand` types.
+  Import `dag` from the runtime root.
 
 ### The keys of a stage
 
 | key | what it means |
 | --- | --- |
 | `agent` | The role that does the work. The stage must say what it `writes`. |
-| `run` | A command, one string with no quoting or an array. Exit 0 passes; a red run goes back to `sendsBackTo` with the output as the finding. It may change the files it `writes` and no other declared file; a change to another declared file fails the stage by name. Files nobody declared are not watched. |
-| `panel` | A role that is a list of seats. `agree` is how many must accept; the default is all of them. |
+| `run` | A command, one string with no quoting or an array. Exit 0 passes. A red run goes back to `sendsBackTo` with the output as the finding. It may change the files it `writes` and no other declared file. A change to another declared file fails the stage by name. Files nobody declared aren't watched. |
+| `panel` | A role that is a list of seats. `agree` is how many must accept. The default is all of them. |
 | `input` | A person role. The stage asks the question and waits. |
-| `writes` | The files this stage writes, relative to the workspace. It writes those and no other declared file. For an agent stage a missing or empty one fails the stage by name; a command stage is judged by its exit code. |
-| `desc`, `gate` | What the stage does and what must be true for it to count. Both reach the reviewers and the record. |
-| `reviewedBy` | A panel role that reads this stage's work. A rejection runs the stage again with the findings; a note written back unchanged fails plainly. The stage and its review are one step, so a run that dies part-way through the review runs the whole step again. It does not resume inside the review. |
-| `sendsBackTo` | The earlier stage a rejection or a red run goes back to. A stage cannot send back to itself; use `reviewedBy`. |
+| `writes` | The files this stage writes, relative to the workspace. It writes those and no other declared file. For an agent stage, a missing or empty one fails the stage by name. A command stage is judged by its exit code. |
+| `desc`, `gate` | What the stage does and what must be true for it to count. Both go into the writing seat's prompt, the plan and the record. |
+| `reviewedBy` | A panel role that reads this stage's work. A rejection runs the stage again with the findings. A stage that returns the rejected note unchanged fails. The stage and its review are one step, so a run that dies part-way through the review runs the whole step again. It doesn't resume inside the review. |
+| `sendsBackTo` | The earlier stage a rejection or a red run goes back to. A stage can't send back to itself. Use `reviewedBy` for that. A stage takes `reviewedBy` or `sendsBackTo`, not both. |
 | `retry` | How many times this stage may run again: the review restarts of a reviewed stage, or the feedback-loop budget of a stage others send back to. Default 1. It belongs to the stage that repeats. |
 | `retrySafe` | `true` when the stage may run again after an interruption without a person reconciling it. Off unless set. |
 | `when` | A condition read before the stage runs: `passed(name)`, `failed(name)`, or an async predicate over `ctx`. A stage whose `when` is not met is recorded as skipped and counts as passed for the stages after it. |
-| `optional` | A red run of this stage does not fail the workflow or block the stages after it. `failed(name)` on a later stage is allowed only when the named stage is optional; on a required stage a red run stops the workflow, so there is no other path to choose. |
+| `optional` | A red run of this stage doesn't fail the workflow or block the stages after it. `failed(name)` on a later stage is allowed only when the named stage is optional. On a required stage a red run stops the workflow, so there's no other path to choose. |
 | `needs` | One or more earlier stage names this stage also depends on, beside the one before it. A condition can then read a stage further back through `passed`, `failed` or `ctx.needs`. A name that is not an earlier stage is an error when the workflow is built. |
+
+Pick each reviewer from a model family other than the writer's. Every seat
+of a `reviewedBy` panel, and of a panel that sends work back to an agent
+stage, must report a different model family from that stage's seat.
+Otherwise the workflow is refused before any model runs.
+
+The panel also checks the model names recorded for tagged writer and
+reviewer answers, before and after review. It checks every recorded writer
+answer, retries included. The recorded sides must differ in family from
+each other and from the families the other side declares. An unreadable
+family fails the review. Untagged advisor and `agentCheck` answers are
+outside this check.
 
 ### The keys of a workflow
 
@@ -543,41 +537,19 @@ larger teams.
 | `brief` | The work, as text or `briefFromFile`. Every model in the team reads it. |
 | `roles` | Every seat and person, named once. Stages refer to the names. |
 | `stages` | The steps, in order. Each needs the one before it. |
-| `options.timeout` | A duration such as `'10m'`, applied to every stage. |
+| `options.timeout` | A duration such as `'10m'`, applied to each agent and review stage. A command stage keeps its own ten-minute limit. |
 | `post.always` | Runs after the graph settles, with the record. |
 
-The workspace is the directory the file runs in.
-
-### Gotchas
-
-- **It ships no command.** You import a workflow and run it from your own
-  file.
-- **A seat starts its engine unattended, and the two plugins differ.** A
-  Codex seat runs sandboxed to the workspace with approvals off. A Claude
-  seat runs with permission prompts off, which lets it run any command the
-  process can, because the mode that only accepts edits blocks the commands
-  a headless run needs. Both take an options object to choose otherwise.
-  Run a team in a directory you are willing to let a model change.
-- **A reviewer declares a different model family from the writer.** Every
-  seat of a `reviewedBy` panel, and of a panel that sends work back to an
-  agent stage, must report a different model family from that stage's seat,
-  or the workflow is refused before any model runs. The panel also checks
-  the model names recorded for tagged writer and reviewer answers, before
-  and after review. Every recorded writer answer is checked, including
-  retries. The recorded sides must have different families from each other
-  and from the opposing declarations. An unreadable family fails the
-  review. Untagged advisor and `agentCheck` answers are outside this check.
-- **`reviewedBy` and `sendsBackTo` are two different returns.** The first
-  runs the same stage again; the second goes back to an earlier one. A
-  stage uses one or the other.
-
+The workspace is the directory the file runs in. To resume from a record,
+keep the name, workspace, brief, stage list and role seats the same. Change
+any of them and the run starts again.
 
 ## Memory helpers
 
 `@obversa/runtime/memory` exports `ground`, `curate` and `consolidate`,
 with their input, option and result types. `ground` reads declared sources
-into a bounded prompt; `curate` selects grounded sources with a supplied
-function; `consolidate` writes a validated result with a supplied function.
+into a bounded prompt. `curate` selects grounded sources and `consolidate`
+writes a validated result, each with a function you supply.
 The `Memory` port, commands and result types belong to `@obversa/api`.
 
 ### Memory example

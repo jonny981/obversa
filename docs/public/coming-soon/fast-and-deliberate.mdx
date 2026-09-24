@@ -1,6 +1,6 @@
 ---
 title: "Fast and deliberate, side by side"
-description: "A fast typed decision runs first; the work goes to an agentic seat only when the confidence is under the gate or the decision asks for it."
+description: "Proposed: a fast typed decision runs first, and the work goes to an agentic seat only when its confidence is under the gate or the decision asks for it."
 ---
 
 <Note>
@@ -8,10 +8,9 @@ description: "A fast typed decision runs first; the work goes to an agentic seat
 so that the shape is public before the code is.
 </Note>
 
-The [Jev engine](/packages/engine-jev-api) provides structured assessments
-without a workspace. This page describes a proposed combined workflow,
-not a missing engine. Routing, confidence thresholds and escalation remain
-workflow policy; the Jev adapter does not provide them automatically.
+The [Jev engine](/packages/engine-jev-api) answers typed questions, but it
+doesn't route work to a deliberate seat on its own. This page proposes
+that routing.
 
 Most decisions in a run are small. Is this ticket the kind the
 policy answers? Has this note actually changed since the reviewer read it?
@@ -20,11 +19,9 @@ inference for each one, which is why gates like these are usually left out
 of a workflow rather than written into it.
 
 A fast decision model answers that kind of question with a typed choice and
-a confidence. A step can ask it first and hand the work to the deliberate
-seat only when the confidence falls under the gate, or when the decision
-itself says the question needs thinking about.
+a confidence. A step would ask it first, and hand the work to the
+deliberate seat only when the confidence falls under the gate, or when the
+decision itself says the question needs thinking about.
 
-The point is what becomes affordable. A typed call can run on every item; a
-full agentic turn cannot, so it ends up running on none of them.
-
-See [Conditions and gates](/graphs/contract).
+The point is what becomes affordable. A typed call can run on every item.
+A full agentic turn can't, so it ends up running on none of them.

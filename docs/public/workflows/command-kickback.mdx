@@ -5,16 +5,15 @@ description: "Run the tests as a node with no inference, send a red result back 
 
 Not every step needs a model. A test suite, a build, a lint, a check
 against a deployed system: each is a command, and a command is a node like
-any other. It costs no tokens, it cannot be argued with, and its result can
-do two things an agent's cannot be trusted to do alone: send the work back
-to the step that owns it with the evidence attached, or decide which path
-the run takes next.
+any other. It costs no tokens, and its result doesn't depend on a model's
+judgement. That result can do two things you can't trust an agent's to do
+alone: send the work back to the step that owns it with the evidence
+attached, or decide which path the run takes next.
 
 ## The file
 
-Everything here runs offline. The writer is a small function that gets
-`add` wrong once, so the feedback loop has something to do; in a real team it is
-an agent seat. The tests and the size check are commands.
+The writer here is a function that gets `add` wrong once, so the red test
+has something to send back.
 
 ```ts
 /**
@@ -141,6 +140,10 @@ if (faults.length) {
 }
 ```
 
+Pass a command as an array when an argument has spaces or quotes of its
+own. Each entry is one argument. The string form splits on spaces and
+refuses a quote.
+
 ## What it printed
 
 ```json
@@ -155,42 +158,35 @@ if (faults.length) {
 
 ## The two forms
 
+Send work back when the same writer should fix it. Decide the path when a
+different step should take over. The file shows both.
+
 - **A command that sends work back.** `commandJob(label, command, { target })`
-  runs the command; when it exits non-zero, the step returns a revision
-  request aimed at `target`, carrying the command's captured output as the
+  runs the command. When it exits non-zero, the step returns a revision
+  request aimed at `target`, with the command's captured output as the
   finding. The writer at `target` runs again with that output in hand, and
   the steps that depend on it run again. No agent reads the test output to
-  decide that; the exit code did.
+  decide that. The exit code does.
 - **A command that decides the path.** Two steps both need the command
   node, and each carries a `when`: `passed('size')` on one, `failed('size')`
-  on the other. One runs when the command exited 0, the other when it did
-  not. The deciding node is `optional: true`, so its red result blocks
-  nothing and the branches decide; without that, a red result would block
-  every step that needs it, and the `failed` branch could never run. The
-  step whose condition is not met is skipped and recorded as skipped; the
-  graph stays a graph.
+  on the other. One runs when the command exited 0, the other when it
+  didn't. The deciding node is `optional: true`, so its red result blocks
+  nothing and the branches decide. Without that, a red result would block
+  every step that needs it, and the `failed` branch could never run. The dag
+  refuses that shape and says why. The step whose condition isn't met is
+  skipped and recorded as skipped. Leave `when` off any branch that must
+  run, because a skip doesn't fail the run.
 
 `passed` and `failed` read the named dependency's outcome through
 `ctx.needs`, the outcomes of the steps this node needs, by name. A name the
-node does not need is a configuration error, not a quiet false. `failed`
-means the command ran and failed; a dependency that never got to decide
+node doesn't need is a configuration error, not a quiet false. `failed`
+means the command ran and failed. A dependency that never got to decide
 meets neither, so a branch runs only on a decision.
 
-## Gotchas
-
-- **A feedback loop and a decision are different tools.** Send work back when
-  the same writer should fix it; decide the path when a different step
-  should take over. The example shows both so the difference is visible.
-- **A skipped branch is green.** An unmet `when` records a skip and does
-  not fail the run. If a branch must run, do not give it a `when`.
-- **The feedback-loop budget is per target.** `maxKickbacks` as a map gives the
-  writer its own count of returns; when it is spent, the run fails with the
-  last output as its reason rather than looping.
-- **A decision node is optional.** `failed(name)` can only fire when `name`
-  is `optional: true`; the dag refuses the shape without it and says so.
-- **A command with a quote in it goes in as an array.** The string form
-  splits on spaces and refuses a quote; give one argument per entry when an
-  argument has spaces or quotes of its own.
+`maxKickbacks` limits how many times work can go back. A number is one
+count for the whole graph. To give each target its own count, set it to a
+map. When a count is spent, the run fails with the last output as its reason
+instead of looping.
 
 ## Source
 

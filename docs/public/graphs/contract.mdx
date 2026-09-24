@@ -3,22 +3,21 @@ title: "Outside graph types"
 description: "Define, validate, and inspect a pure graph type."
 ---
 
-`@obversa/runtime` lets a package define a graph type that the runtime does not ship.
+`@obversa/runtime` lets a package define a graph type that the runtime doesn't ship.
 Write graph behavior as pure code. The contract gives the graph type frozen data
-and graph lookups. It does not give file, model, process, clock, or storage
+and graph lookups. It doesn't give file, model, process, clock, or storage
 services.
 
-An outside graph type is trusted package code. It can import and use effects by
-itself. The conformance kit checks public behavior. It does not stop effects.
+An outside graph type is trusted package code, so it can import modules and
+cause side effects on its own. The conformance kit checks public behavior. It
+doesn't stop side effects.
 
 ## Start with the example
 
-The checked-in example defines a two-step graph, runs the public conformance
-kit, compiles its definition, and resolves its plan.
-
-
-Copy `examples/custom-graph.ts` when you start a graph type. The
-example uses only `@obversa/runtime` public exports.
+`examples/custom-graph.ts`, shown in full below, defines a two-step graph, runs
+the public conformance kit, compiles its definition, and resolves its plan.
+Copy it when you start a graph type. It uses only public exports of
+`@obversa/runtime`.
 
 ## Source
 
@@ -197,18 +196,18 @@ A `GraphDefinition` is JSON data with these fields:
 - Edges with stable `id`, `source`, `target`, and `data` values.
 
 `compileGraph(graphType, definition)` validates the definition before it calls
-the graph type. It returns a frozen copy with a canonical JSON value and a
-SHA-256 digest.
+the graph type. The compiled graph's `definition` field holds a frozen copy of
+the definition, with its canonical JSON and a SHA-256 digest.
 
 Invalid definitions throw `GraphValidationError`. Common errors include empty
 identifiers, duplicate node or edge identifiers, and an edge that names a node
-that does not exist. No node can run from this graph layer.
+that doesn't exist. No node can run from this graph layer.
 
 ## Implement `GraphType`
 
 A graph type has a stable `kind`, a positive `version`, and one `compile`
 method. `compile` receives the validated, frozen definition and a
-`GraphKernel`. The kernel gives graph data and neighbor lookups. It does not
+`GraphKernel`. The kernel gives graph data and neighbor lookups. It doesn't
 give runtime services.
 
 `compile` returns these pure operations:
@@ -220,58 +219,58 @@ give runtime services.
 | `decide(state)` | Ordered dispatch, pause, complete, or fail commands. |
 | `describe()` | The stable graph description for a host. |
 
-A form may also return the pure optional operation
+`compile` can also return an optional pure operation,
 `validateNodeResult(nodeId: NodeId, result: JsonValue): GraphValidationIssue | null`.
-Before saving a completion, the executor calls it with a declared node ID and
-copied, frozen result data. `null` accepts the result; an issue with string
-`code`, `path` and `message` fields records `node-failed` with `RESULT_INVALID`.
-`compileGraph` checks and freezes the returned issue. A malformed return or an
-exception from the implementation propagates as an error. Forms that omit the
-operation keep their existing behavior.
+Before the executor saves a completion, it calls this with a declared node ID
+and a frozen copy of the result. `null` accepts the result. An issue with
+string `code`, `path` and `message` fields records `node-failed` with
+`RESULT_INVALID`. `compileGraph` checks and freezes the returned issue. A
+malformed return, or an exception from your code, propagates as an error. A
+graph type that leaves it out skips this check.
 
 `decide` returns zero or more dispatch commands, or exactly one `pause`,
 `complete`, or `fail` command. A dispatch asks the executor to start new work.
-An empty decision means start nothing new. The executor accepts it only while a recorded
-attempt is still in flight. Without in-flight work, the executor fails instead
-of asking for the same empty decision forever.
+An empty decision means start nothing new. The executor accepts it only while a
+recorded attempt is still in flight. Without in-flight work, the executor fails
+instead of asking for the same empty decision forever.
 
 `position` is the stable logical identity and location of one requested node
 occurrence. Positions must be unique within one decision. The same node can
 appear more than once when each occurrence has a different position.
 
-After a dispatch occurrence is recorded in the event history, `decide` must
-not return it again. A later event can make the same node dispatchable as a new
-occurrence with its own position.
+Once the event history records a dispatch, `decide` must not return it again.
+A later event can make the same node dispatchable as a new occurrence with its
+own position.
 
-The input state and event are copied and frozen before `reduce` or `decide`
-receives them. These methods must return JSON data. The same definition and
-events must give the same state and commands.
+`reduce` and `decide` receive frozen copies of their inputs. They must return
+JSON data. The same definition and events must give the same state and
+commands.
 
 `GraphBindings<Requirements>` maps a precise graph requirement to a host
 binding type. A `required` memory requirement maps to a required `Memory`
 binding. An `unused` memory requirement maps to a type with no memory binding.
-This graph layer does not create, inject, or execute a binding.
+This graph layer doesn't create, inject, or execute a binding.
 
 ## Describe the graph
 
-`describe()` declares data for a host to inspect before execution. It includes
-phases, nodes, edges, input and output contracts, policies, execution lanes,
-requested permissions, and bounds.
+`describe()` declares data for a host to inspect before anything runs. It
+includes phases, nodes, edges, input and output contracts, policies, execution
+lanes, requested permissions, and bounds.
 
 Each bound is either known or unknown. Use a known bound only when the graph
-can calculate the value. Use an unknown bound with a reason when it cannot.
-Do not invent a maximum or concurrency value.
+can calculate the value. Use an unknown bound with a reason when it can't.
+Don't invent a maximum or concurrency value.
 
 The description must name every definition node once in a phase. Its `nodes`
-list preserves definition node declaration order. The compiler supplies the
-`edges` list in definition edge declaration order. Each node lane must exist
-in `executionLanes`. A node's `phaseId` must name the same phase that lists
-that node.
+list keeps the definition's node order. `compileGraph` supplies the `edges`
+list in the definition's edge order. Each node's lane must exist in
+`executionLanes`. A node's `phaseId` must name the same phase that lists that
+node.
 
 ## Validate a description
 
 Use `validateGraphDescription(unknown)` to validate a graph description that
-you received outside `compileGraph`. It returns a frozen validated description.
+didn't come from `compileGraph`. It returns a frozen validated description.
 Invalid data, including JSON nested more than 256 levels, throws
 `GraphValidationError`.
 
@@ -284,29 +283,30 @@ state and command after every event prefix.
 The kit compiles the graph type in separate instances and calls each operation
 more than once. It checks that the initial state, every event-prefix state,
 every ordered command, and the declared bounds stay the same. It also checks
-invalid definitions and preserves the caller's definition and events.
+that invalid definitions fail, and that your graph code leaves the caller's
+definition and events unchanged.
 
 The kit counts all dispatch commands in the supplied trace and the largest
 dispatch set in one decision. A declared dispatch maximum or fan-out maximum
-cannot be below those observed values. The trace does not show which attempts
-overlap at runtime, so the kit does not infer `maxConcurrency`. The graph must
+can't be below those observed values. The trace doesn't show which attempts
+overlap at runtime, so the kit doesn't infer `maxConcurrency`. The graph must
 declare that cap from its own rules or report it as unknown.
 
-Each expected decision contains only new requests. The kit rejects a dispatch
-position that appears again in a later expected decision. The executor applies the same
-check to durable dispatch events before it starts work.
+Each expected decision must hold only new requests. The kit rejects a dispatch
+position that appears again in a later expected decision. The executor applies
+the same check to recorded dispatch events before it starts work.
 
 When the final expected decision is exactly `complete`, the observed total must
-meet a known dispatch minimum; partial, empty, paused, and failed endings do not
-prove a minimum.
+meet a known dispatch minimum. A partial, empty, paused, or failed ending
+doesn't prove a minimum.
 
 ## Team form contract
 
 `team(config)` returns a `Job`: callable work for several agents with one
-task and separate answers. It does not use the stored graph executor or
-acquire replay by being passed to `run()`. For saved room messages and
-turns requested by mentions, compile `teamGraphType` as shown in
-[Team conversation](/workflows/team-conversation).
+task and separate answers. It doesn't use the stored graph executor, and
+passing it to `run()` doesn't give it replay. For saved room messages and
+turns requested by mentions, compile `teamGraphType` as
+[Team conversation](/workflows/team-conversation) shows.
 
 The authoring shape is:
 
@@ -350,33 +350,34 @@ interface TeamResult {
 declare function team(config: TeamConfig): Job;
 ```
 
-In a Git workspace, each agent receives the task and its standing brief in
-a separate worktree through `isolated()`. Passing changes merge into the
-caller's branch under the existing merge lock. Outside a Git repository,
-that wrapper warns and runs in the shared workspace. A passing team result
-is therefore not proof that a Git merge occurred. No second merge or lease
-mechanism is added.
+In a Git workspace, each agent gets the task and its standing brief in its
+own worktree through `isolated()`. When an agent passes, its changes merge
+into your branch under the merge lock that all `isolated()` jobs share.
+Outside a Git repository, `isolated()` warns and runs in the shared
+workspace, so a passing team result doesn't prove that a Git merge happened.
+`team()` adds no merge or lease of its own.
 
-The callable team returns each member's separate answer. `review` reuses an
-existing review panel or callback gate. Each review keeps that panel's or
-gate's own contract.
+The callable team returns each member's separate answer. `review` takes a
+review panel or a callback gate. A team's callback gate pauses with its
+question and doesn't post it to the callbacks client, as
+[Callback gates](/reviewing/callback-gates) explains.
 
-An existing review panel receives the completed team result as its previous
-outcome, so its reviewers can inspect the member outcomes and task.
+A review panel receives the completed team result as its previous outcome,
+so its reviewers can see the task and each member's outcome.
 
-The team returns the existing `Outcome` shape. Its `data` field contains a
-`TeamResult`; a review revision, failure, pause, or error remains on the outer
-`Outcome` so a team can be placed in a larger graph without an adapter.
+The team returns the usual `Outcome` shape, with a `TeamResult` in its `data`
+field. A review revision, failure, pause, or error stays on the outer
+`Outcome`, so you can place a team in a larger graph without an adapter.
 
-A callback review creates the request through `createCallbackGate` and returns
-`paused`. The nested review outcome contains that request in its `data` field.
-The host posts and answers it through the existing callback client, then
-controls resumption of the paused work.
+A callback review returns `paused`, and the nested review outcome holds its
+request in its `data` field. The team doesn't post that request to the
+callbacks client and never reads an answer to it, so an answer doesn't
+resume the team.
 
 The team status is `pass` only when every agent passes and the configured review
 passes. A member failure or review failure returns `fail` with all member
 results preserved. A member or review pause returns `paused` with its reason
-preserved. An integration conflict returns `fail`.
+preserved. A merge conflict returns `fail`.
 
 The callable team validates these rules before it runs:
 
@@ -384,10 +385,10 @@ The callable team validates these rules before it runs:
 - **Roster:** `agents` contains at least one member with a unique `name`.
 - **Role:** every member has a non-empty `role` and `brief`.
 - **Engine:** every member has an engine binding.
-- **Review:** a configured review uses the existing panel or callback contract.
+- **Review:** a configured review follows the panel or callback contract.
 
 ## Limits
 
-This contract does not schedule nodes, store runs, provide built-in graph
-forms, or execute work on another machine. A host and later runtime layers do
-those jobs.
+This contract doesn't schedule nodes, store runs, provide built-in graph
+forms, or execute work on another machine. The
+[graph executor](/graphs/executor) runs nodes and stores runs.

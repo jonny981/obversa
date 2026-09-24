@@ -4,8 +4,9 @@ description: "Review a Git diff in a browser and return a decision with line-anc
 ---
 
 `@obversa/surface-diff` opens a Git diff for inline review. The reviewer
-returns a decision and annotations tied to lines in the diff. The command
-writes the result as framed JSON on stdout and diagnostics on stderr.
+returns a decision and annotations tied to lines in the diff. Its
+`obversa-review` command writes the result as framed JSON on stdout, and
+diagnostics on stderr.
 
 ## Install
 
@@ -13,7 +14,7 @@ writes the result as framed JSON on stdout and diagnostics on stderr.
 npm install @obversa/obversa
 ```
 
-Node.js 22.12 or later and Git are required.
+You need Git.
 
 ## Review a diff
 
@@ -26,14 +27,14 @@ obversa-review --range main..HEAD
 obversa-review --no-open
 ```
 
-The default reviews working-tree changes. `--staged` reviews the index;
+The default reviews working-tree changes. `--staged` reviews the index, and
 `--range` reviews the named Git range. `--no-open` prints the review URL
 instead of opening it.
 
 The default result frame starts with `<<<REVIEW_RESULT_V1>>>` and ends
 with `<<<END_REVIEW_RESULT_V1>>>`. Exit 0 means the reviewer returned,
-including a decision that requests changes. Exit 1 means the session did
-not complete or the command failed; exit 2 means the arguments were invalid.
+including a decision that requests changes. Exit 1 means the session didn't
+complete or the command failed. Exit 2 means the arguments were invalid.
 
 ## Public entry points
 
@@ -49,9 +50,9 @@ session ownership, host placement and browser fallback behavior.
 
 ## Offline example
 
-This complete file parses a fixed Git diff and checks the line numbers and
-changed text. It runs offline and does not open a browser. The command
-above adds the interactive review session.
+This file parses a fixed Git diff and checks the line numbers and changed
+text. It runs offline and doesn't open a browser. The command above adds the
+interactive review session.
 
 `examples/surface-diff.ts`, in full:
 

@@ -3,12 +3,11 @@ title: "Anthropic API Engine"
 description: "@obversa/engine-anthropic-api runs engine requests directly through the Anthropic Messages API."
 ---
 
-`@obversa/engine-anthropic-api` is an engine plugin that connects directly to the Anthropic Messages API. It provides token-level streaming and direct API communication without spawning a command-line subprocess.
+`@obversa/engine-anthropic-api` is an engine plugin that calls the Anthropic Messages API directly. It streams tokens as they arrive and starts no command-line process.
 
 ## Requirements
 
-- Node.js 22.12 or later
-- An Anthropic API key (`ANTHROPIC_API_KEY` environment variable or `apiKey` option)
+- An Anthropic API key, in the `ANTHROPIC_API_KEY` environment variable or the `apiKey` option
 
 ## Install
 
@@ -18,7 +17,7 @@ npm install @obversa/obversa
 
 ## Identity
 
-The plugin serves the Anthropic provider. It reports `provider: 'anthropic'`, defaulting to `claude-haiku-4-5-20251001` unless another model is requested.
+The plugin reports `provider: 'anthropic'`. It runs the model the request names. Without one it uses `defaultModel`, and without that `claude-haiku-4-5-20251001`.
 
 ## Usage
 
@@ -33,6 +32,8 @@ const engine = new AnthropicApiEngine({
 
 ## Limits
 
-- This engine makes direct network API calls and does not spawn local worker tools or execute bash commands directly.
-- It ignores `AgentRequest.env` because no subprocess is spawned.
-- Transient server errors (HTTP 5xx, timeouts) are retried automatically, while rate limits (HTTP 429) return typed limit errors with reset timings.
+- It takes text-only requests. A request that asks for tools or workspace access fails as `invalid-config`.
+- It ignores `AgentRequest.env`, because there's no process to pass it to.
+- Server errors (HTTP 5xx) and connection errors, including timeouts, are
+  retried. A rate limit (HTTP 429) fails as a `rate-limit` error, carrying the
+  API's `retry-after` wait when it sends one.

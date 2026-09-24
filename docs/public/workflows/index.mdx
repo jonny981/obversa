@@ -1,11 +1,11 @@
 ---
 title: "Examples"
-description: "Teams you can run on your own work today, inside and outside software delivery, and the single mechanisms they are built from."
+description: "Teams you can run on your own work, inside and outside software delivery, and the mechanisms they're built from, one at a time."
 ---
 
-Install two packages, write one file, and a team of models writes code,
-runs your tests and reviews the result before you see it. Each team below
-is a complete file: copy it, put your brief and your engines in, run it.
+Install Obversa, write one file, and a team of models writes code, runs
+your tests and reviews the result before you see it. Each team below is a
+complete file: copy it, put your brief and your engines in, run it.
 
 The smallest team, whole. A Claude seat writes the files the brief names,
 Node runs the test, and a Codex seat reviews the result:
@@ -62,81 +62,75 @@ const result = await run(createWriterReviewerPair());
 console.log(JSON.stringify(result.outcome, null, 2));
 ```
 
-What that printed on one real run, and the files the two models wrote, are
-on [its page](/workflows/writer-and-reviewer).
+[Its page](/workflows/writer-and-reviewer) shows what one real run printed
+and the files the writer left.
 
 ## Teams you run on your own work
 
 - [A writer and a reviewer](/workflows/writer-and-reviewer). One model
-  writes the files your brief names and a model from a different family
-  reads them. Your test command runs in between. A rejection sends the
-  work back once.
-- [A review panel with a threshold](/workflows/review-panel). One model
-  implements, several review at the same time, and the change passes when
-  enough of them accept. Every seat is a different model family.
-- [Feature delivery](/workflows/feature-team). Nine stages: research and
-  a plan, each reviewed; tests before code; an implementation that runs
-  again with the reviewers' findings; a person's decision; evidence. Work
-  goes back to the stage that owns it.
+  writes, your test runs, and a model from another family reviews.
+- [A review panel with a threshold](/workflows/review-panel). Several
+  reviewers from different model families, and the change passes when
+  enough of them accept.
+- [Feature delivery](/workflows/feature-team). Nine stages from a brief to
+  a person's decision. Tests come before code, and work goes back to the
+  stage that owns it.
 
 Each team is a graph of named steps. Every step carries a `desc` sentence
 saying what it does and a `gate` sentence saying what must be true for it
-to count, and both reach the reviewer's input and the run record.
+to count. Both go into the run record, and a writing seat reads them in its
+prompt.
 
 ## Teams outside a software change
 
-The same form, for the work most teams do that is not a pull request.
-Each file is built to stop at a person, so nothing is sent or filed without
-one; each is a complete file with its brief and sample inputs beside it under
+The same form, for the work most teams do that isn't a pull request. Each
+file stops at a person, so nothing is sent or filed without one. Each is a
+complete file, with its brief and sample inputs beside it under
 `examples/use-cases/`.
 
 Each page carries one real run. Two reached their person. The third stopped
 earlier, when its reviewer sent the work back a third time and the loop ran
-out of attempts rather than pass on stories nobody had agreed.
+out of attempts instead of passing stories nobody had agreed.
 
 Software and product engineering:
 
 - [Backlog grooming, then a person ranks](/workflows/backlog-groom-then-rank).
-  Raw tickets become stories with acceptance checks and the questions to
-  settle first, each read by a second model; the product owner ranks.
+  Raw tickets become stories a second model checks, and the product owner
+  ranks them.
 
 Business and commercial:
 
-- [A contract against a playbook](/workflows/contract-playbook). Every
-  clause mapped to accept, push back or never, the redlines written from
-  the playbook's own wording, a negotiating note saying what to hold and
-  what to concede; the lawyer decides what goes back.
+- [A contract against a playbook](/workflows/contract-playbook). Each
+  clause checked against a playbook, with redlines and a negotiating note,
+  and a lawyer decides what goes back.
 
 Other:
 
 - [Translate, then reflect on the translation](/workflows/translate-reflect).
-  An article rendered into French against a glossary, then a terms table
-  saying where the glossary and natural French pulled apart; a person
-  publishes.
+  An article translated into French against a glossary, with a table of
+  the terms where the two pulled apart. A person decides whether to publish.
 
 ## Mechanisms shown one at a time
 
-These files run offline against the public packages and nothing else.
+All but one of these files run offline, with no model.
 
 - [Three candidates, one winner](/workflows/tournament). Three isolated
-  attempts at one task, a deterministic judge, the winner lands and the
-  losers leave nothing behind.
-- [A command decides the path](/workflows/command-kickback). The tests run
-  as a node with no inference; a red run goes straight back to the writer
-  with the output attached, and a second command's exit code chooses which
-  review runs next.
-- [A person decides](/workflows/approval). A question to a person as a
-  step: a no goes back to the writer with the note as the finding, a yes
-  passes, and with nobody answering the run pauses and carries on from the
-  answer.
+  attempts at one task, a judge that scores them, and only the winner
+  lands.
+- [A command decides the path](/workflows/command-kickback). A test
+  command sends a red run back to the writer, and another command's exit
+  code picks which review runs.
+- [A person decides](/workflows/approval). A yes-or-no question to a
+  person as a step. A no sends the work back with the person's note, and
+  an unanswered question pauses the run.
 - [A review that sends work back](/workflows/offline-review). A reviewer
-  rejects the first draft with a reason and the second draft passes.
-- [A file change approved byte for byte](/workflows/safe-change). Source
-  records are captured, every mapping checked, exact output bytes approved,
-  each target backed up before a merge, and a mismatch pauses the run.
+  rejects the first draft with a reason, and the second draft passes.
+- [A file change approved byte for byte](/workflows/safe-change). Exact
+  output bytes are approved, each target is backed up before a merge, and
+  a mismatch pauses the run.
 - [A feature from written issue to approval](/workflows/feature-delivery).
-  One issue through analysis, implementation, a real test run, a review
-  panel, a bounded repair, and an approval bound to the exact bytes.
+  One issue through analysis, implementation, a test run, a review panel
+  and a person's approval. Claude and Codex seats do the model work.
 - [Shipping a reviewed change through GitHub](/workflows/forge-helper).
-  Push the branch, open one pull request, pass a strict gate on the exact
-  head revision, squash the merge, delete the branch.
+  One pull request, a strict gate on the exact head revision, and a squash
+  merge.

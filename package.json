@@ -138,6 +138,7 @@
     "verify:f116": "pnpm build && node --test --test-name-pattern=F116 scripts/agent-workflow.spec.mjs && pnpm docs:validate",
     "verify:f117": "pnpm build && node --test --test-name-pattern=F117 scripts/agent-workflow.spec.mjs && pnpm docs:validate",
     "verify:f118": "pnpm verify:d15",
+    "verify:f119": "pnpm build && node --test --test-name-pattern=F119 scripts/agent-workflow.spec.mjs && pnpm docs:validate",
     "verify:f71": "pnpm verify:f39 && pnpm --filter @obversa/engine-opencode-cli test",
     "verify:f72": "pnpm verify:f65 && pnpm --filter @obversa/api test && pnpm --filter @obversa/engine-opencode-cli test && pnpm --filter @obversa/builtin-workflows test",
     "verify:f66": "pnpm test:retired-names && pnpm check:retired-names && pnpm verify:f72 && pnpm --filter @obversa/core test && pnpm test:api-polish && pnpm example:api-polish && node scripts/check-page-shape.mjs",

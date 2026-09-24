@@ -12,9 +12,6 @@ seats. It returns a job for `run` from `@obversa/runtime`.
 npm install @obversa/obversa
 ```
 
-Install the engine plugins whose seats you want to use. Node.js 22.12 or
-later is required.
-
 ## Choose a recipe
 
 | function | what it runs | configuration |
@@ -24,33 +21,30 @@ later is required.
 | `featureDelivery` | Research, requirements, planning, tests, implementation, review, approval, evidence and learning steps. | `FeatureDeliveryConfig`: `analyse`, `implement`, `reviewers`, `reviewThreshold`, `approve`, `testFiles`, optional `maxKickbacks`. |
 
 Every configuration includes `TeamInput`: `brief`, `workspace`, `files`
-and `test`. The `TestCommand` record names a `command`, its `args` and an
-optional `timeoutMs`. A `ReviewerSeat` names a reviewer, its `seat` and an
+and `test`. The `TestCommand` record has a `command`, its `args` and an
+optional `timeoutMs`. A `ReviewerSeat` has a `name`, a `seat` and an
 optional review `scope`. The `TeamSeat` contract belongs to `@obversa/api`.
-
-Complete runnable files are in `examples/teams/writer-reviewer-pair.ts`,
-`examples/teams/threshold-panel.ts` and `examples/teams/feature-delivery.ts`.
 
 ## Write your own stages
 
 Use `workflow`, `stage`, `person` and `briefFromFile` from
 `@obversa/runtime` when you want to declare your own roles and stages.
 The [runtime package page](/packages/runtime#declare-roles-and-stages)
-contains the complete example and field reference. These builders are not
-exports of `@obversa/builtin-workflows`.
+has the complete example and field reference. `@obversa/builtin-workflows`
+doesn't export these builders.
 
 ## Review decisions
 
 `outcomeFromAgentText` reads a reviewer's JSON decision and turns it into a
 pass or findings for the named target. `INVALID_TEAM_DECISION` identifies
-an invalid decision. Both are re-exported from
+an invalid decision. The package re-exports both from
 `@obversa/runtime/workflow-support`.
 
 ## Offline example
 
-This complete file runs the writer, a real Node check and the reviewer
-offline. The scripted engines write and inspect one temporary file. The
-example checks the outcome and removes its workspace.
+This file runs the writer, a real Node check and the reviewer offline. The
+scripted engines write and inspect one temporary file. The file checks the
+outcome and removes its workspace.
 
 `examples/builtin-workflows.ts`, in full:
 

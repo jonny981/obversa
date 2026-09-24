@@ -1,24 +1,24 @@
 ---
 title: "Obversa and CrewAI"
-description: "CrewAI pairs agents with tasks in Python and runs them as a crew. Obversa drives existing agent tools as a team in TypeScript, with reviews that send work back and a person at the gate. What each is for, and where each wins."
+description: "CrewAI pairs agents with tasks in Python and runs them as a crew. Obversa drives existing agent tools as a team in TypeScript, with feedback loops and a person at the gate. What each is for, and where each wins."
 ---
 
 Pick CrewAI when you want to describe agents by role, goal and backstory in
 Python and let a crew work through tasks. Pick Obversa when the agents are
-tools you already run, Claude Code or Codex or their kin, and what you need
-is the process around them: who does what, who reviews it, where the work
-goes back, and who signs.
+tools you already run, like Claude Code or Codex, and what you need is the
+process around them: who does what, who reviews it, where the work goes
+back, and who signs off.
 
-CrewAI's own words: "CrewAI is the leading open-source framework for
+In CrewAI's own words: "CrewAI is the leading open-source framework for
 orchestrating autonomous AI agents and building complex workflows." An
-agent has a role, a goal and a backstory; a task has a description, an
+agent has a role, a goal and a backstory. A task has a description, an
 expected output and the agent that does it. A task guardrail retries the
 same task when its output fails a check. A person is `human_input=True` on
 a task, or a webhook flow that pauses the run until a decision comes back.
-Checkpointing captures the crew's state, memory and event history so a run
+Checkpointing captures the crew's state, memory and event history, so a run
 can be restored.
 
-Here is the shape Obversa is for, as one file:
+Here's the shape Obversa is for, as one file:
 
 ```ts
 import { claude } from '@obversa/engine-claude-cli';
@@ -134,19 +134,14 @@ console.log(JSON.stringify(result.outcome, null, 2));
 
 ## Side by side
 
-For structured assessments rather than workspace coding, install the
-[Jev engine](/packages/engine-jev-api) separately from the Obversa bundle.
-It uses workspace mode `none` and answers questions over recorded state;
-your workflow chooses how to act on those answers.
-
 | | CrewAI | Obversa |
 | --- | --- | --- |
 | Unit of work | An agent with a task. | A stage: an engine call, a command, a panel or a person, with the files it may write. |
-| The workers | Model calls the framework makes for each agent. | CLI coding engines such as Claude Code, Codex, Grok and OpenCode run one fresh process per call. |
-| A review that sends work back | A guardrail retries the same task; routing back to an earlier step is flow logic you write. | Built in: a review role sends the work back to the stage that owns it, with findings, up to a budget. |
-| A person deciding | `human_input=True`, or the webhook flow that pauses the run. | A person role; the run pauses on the question and the answer arrives through the callbacks client. |
-| More than one provider | Each agent takes its own model; many providers supported. | Each role names its engine; a review seat from another provider is one line. |
-| A run that survives a crash | Checkpointing restores a run mid-flight. | A run records to a file; a workflow started again with `resume: true` carries on from that record and repeats nothing that finished. The supervised runner restarts a compiled graph from its own record. |
+| The workers | Model calls the framework makes for each agent. | Engines such as Claude Code, Codex, Grok and OpenCode, with a fresh process for every call, or an API engine. |
+| A review that sends work back | A guardrail retries the same task. Routing back to an earlier step is flow logic you write. | Built in: a review sends the work back to the stage that owns it, with the findings, up to a limit you set. |
+| A person deciding | `human_input=True`, or the webhook flow that pauses the run. | A person role. The run pauses on the question, and the answer arrives through the callbacks client. |
+| More than one provider | Each agent takes its own model. Many providers supported. | Each role names its engine. A review seat from another provider is one line. |
+| A run that survives a crash | Checkpointing restores a run mid-flight. | A run can record to a file. Started again with `resume: true`, a workflow carries on from that record and repeats nothing that finished. The supervised runner restarts a compiled graph from its own record. |
 | Where it runs | A library, with a paid hosted platform on offer. | A library, no server. |
 | Languages | Python. | TypeScript. |
 
@@ -154,7 +149,6 @@ your workflow chooses how to act on those answers.
 
 - You want agents written as roles with goals, and the framework to make
   the model calls.
-- You need a restorable run with its memory captured, today.
 - Your team writes Python.
 
 ## Where Obversa wins
@@ -167,6 +161,6 @@ your workflow chooses how to act on those answers.
 
 ## Where to go
 
-[A feature team, as a file](/workflows/feature-team) for the file above with
-its recorded run; [what is a meta-harness](/glossary/meta-harness) for the
-layer Obversa is.
+The [feature team](/workflows/feature-team) page shows the file above with a
+real run. [What is a meta-harness?](/glossary/meta-harness) explains the
+layer Obversa works at.

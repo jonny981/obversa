@@ -6,9 +6,9 @@ description: "A workflow is the shape of the work: the steps, who does each one,
 
 Every team has a way work moves. A ticket gets read, someone builds it,
 someone tests it, a few people review it, and a lead says ship. Nobody draws
-that on a whiteboard before each ticket; it is just how the team works. A
+that on a whiteboard before each ticket. It's just how the team works. A
 workflow is that shape, written down once so the runtime can run it for
-your agents, every time, the same way.
+your agents the same way every time.
 
 You write a workflow in TypeScript, in one file, with the steps in the order
 they run and the reviews where they belong. The runtime runs it one bounded
@@ -19,7 +19,7 @@ is also the record you get back.
 
 - **Steps.** Each step is a job: an agent call, a script, a check. A step
   has a name, and the record carries whose work each step was.
-- **Order and dependencies.** A pipeline runs steps one after another. A
+- **Sequence and dependencies.** A pipeline runs steps one after another. A
   graph runs independent steps together and waits where one depends on
   another. Both are one call.
 - **Reviews.** A review is a step that judges another step's result. A
@@ -29,18 +29,18 @@ is also the record you get back.
 - **Decisions for a person.** A callback gate stops the run, puts one
   question in front of someone, and continues from that step with the
   answer.
-- **Limits.** Every attempt has a budget, and a review loop has a maximum
-  number of times it may send work back. An overrun is a result you can
-  read, not a hang.
+- **Limits.** An attempt can carry a time budget, and work goes back only
+  as many times as you allow. An overrun is a result you can read, not a
+  hang.
 
 ## Say what each step is for, beside the code
 
 A step can carry two sentences next to its job: `desc`, what the step does,
-and `gate`, what done means for it. Both are optional. Both travel into the
-plan the runtime prints, into the record, and into the input the step's
-reviewer receives, so a reviewer judges the work against the sentence the
-author wrote beside the code. A criterion written beside the code is much
-harder to write vaguely. `needs` takes a single name when a step has one
+and `gate`, what done means for it. Both are optional. Both go into the
+plan the runtime prints and into the record. An agent step built with
+`graphContext: true` also gets `desc` in its prompt. In a `workflow()`, the
+writing seat gets both. A criterion written beside the code is much harder
+to write vaguely. `needs` takes a single name when a step has one
 dependency, which is the common case.
 
 ```ts
@@ -108,11 +108,10 @@ The plan the runtime renders shows both sentences under each step:
 
 ## A feature team, in one file
 
-Five named stages. The review is a panel of three that passes on two, and
-when it fails, the work goes back to the implement stage rather than to
+The file has five named stages. The review is a panel of three that passes
+on two. When it fails, the work goes back to the implement stage, not to
 the start of the run. The whole file is on the
-[first run](/get-started/first-run) page; copy it from there.
-
+[first run](/get-started/first-run) page. Copy it from there.
 
 Run it and the panel fails the first attempt, implement runs again, and the
 second attempt passes:
@@ -124,9 +123,9 @@ second attempt passes:
 }
 ```
 
-The stages here are small functions so the shape is the only thing on
-show. In a real team each one calls an engine, and the file does not change
-shape when it does.
+The stages in that file are small functions, so the shape is the only thing
+on show. In a real team each one calls an engine, and the file doesn't
+change shape when it does.
 
 ## What happens when it runs
 
@@ -134,10 +133,44 @@ The runtime reads the workflow, runs the first step it can, and appends an
 event when the step finishes. Then the next. A review that fails a step
 appends the findings and the name of the stage to fix, and the runtime runs
 that stage again with them. A gate that waits for a person appends the
-pause, and the run stops there until the answer arrives. Every one of those
-events is a line in a file on disk, and
-[how a run is recorded](/recording/how-a-run-is-recorded) says what the
-file holds and how a killed run restarts from it.
+pause, and the run stops there until the answer arrives. With `recordTo`
+set, each of those events is a line in a file on disk. To carry on a
+stopped run built with `workflow()`, run it again with `resume: true`, and
+it picks up from the record at `recordTo`.
+[How a run is recorded](/recording/how-a-run-is-recorded) says what the
+file holds and which stages run again.
+
+## Sending work back
+
+Work goes back to the step that owns the fix when a review, a command or a
+person says no. You name that step as the `target`:
+
+- **A review panel** needs a `target`, or a failing panel fails the run
+  instead of returning the work. The five-stage file on
+  [first run](/get-started/first-run) sets it. A panel passes when enough
+  reviewers accept, so one that passes on two of three still passes when
+  one reviewer fails. To let one voice send the work back, set the pass
+  count to the number of reviewers.
+- **A command** sends its captured output back when it goes red, with no
+  agent in between: `commandJob(label, command, { target })`.
+- **A person** answers one question with
+  `approval(label, { question, target })`. A no goes back to `target` with
+  the person's note as the finding. [A person decides](/workflows/approval)
+  shows it.
+
+`maxKickbacks` sets how many times work can go back. Without it, a graph or
+pipeline never sends work back. `workflow()` sets it for you from each
+target's `retry`. A number is one budget for the whole graph. A map,
+`{ plan: 3, 'tests-first': 3 }`, gives each target its own, so a review that
+spends its budget on one step can't starve another. A target the map
+doesn't name gets none. When a budget runs out, the run fails with the last
+findings instead of looping, and every request is in the record with its
+count and its limit.
+
+A command can also choose the path instead of sending work back. A node's
+`when` reads the outcome of a step it needs with `passed(name)` or
+`failed(name)`, so a command's exit code decides which branch runs.
+[A command decides the path](/workflows/command-kickback) shows both.
 
 ## Shapes you can start from
 
@@ -148,48 +181,13 @@ file holds and how a killed run restarts from it.
 - A **tournament** for several candidates and one winner.
 - A **graph** for anything with parallel branches.
 
-The [the examples](/workflows) has complete programs for the common
-shapes; copy one and change the parts that name your team. To write a shape
-of your own over the public contract, see
+[The examples](/workflows) are complete programs for the common shapes.
+Copy one and change the parts that name your team. To write a shape of your
+own over the public contract, see
 [writing workflow shapes](/graphs/contract).
-
-## Things that catch people out
-
-- **One dissent does not send work back.** A panel that passes on two of
-  three passes when only one reviewer fails. If one voice must be enough,
-  set the pass count to the number of reviewers.
-- **A reviewer needs a target to send work back.** Without `target`, a
-  failing panel fails the run rather than returning the work. The example
-  above sets it.
-- **A command can send work back, and a command can choose the path.**
-  `commandJob(label, command, { target })` returns a red command's captured
-  output to the step named as a revision request, no agent in between; and
-  a node's `when` can read the outcome of a step it needs with
-  `passed(name)` or `failed(name)`, so a command's exit code decides which
-  branch runs. [A command decides the path](/workflows/command-kickback)
-  shows both.
-- **A person can be a step.** `approval(label, { question, target })` asks
-  one question; a no goes back to `target` with the note as the finding.
-  [A person decides](/workflows/approval) shows it.
-- **Feedback loops have a return budget, per target if you say so.** `maxKickbacks` caps
-  how many times work can go back. A number is one budget for the whole
-  graph. A map, `{ plan: 3, 'tests-first': 3 }`, gives each target its own,
-  so a review that spends its budget on one step cannot starve another; a
-  target the map does not name gets none. When a budget runs out, the run
-  fails with the last findings rather than looping, and every request is in
-  the record with its count and its limit.
-- **A workflow resumes when you pass `resume: true`.** For a job built with
-  `workflow()`, `run()` reads the record at `recordTo` and carries on. A
-  stage that finished is not repeated. A stage that failed runs again. A gate
-  still waiting for a person is observed, and the run exits with the recorded
-  pause instead of asking twice. A stage that was mid-flight when the process
-  died runs again only when it carries `retrySafe: true`; otherwise the run
-  pauses and asks a person to reconcile it. A changed brief starts the
-  workflow again. See
-  [how a run is recorded](/recording/how-a-run-is-recorded).
 
 ## Where definitions live
 
 A workflow is source code. Keep it in the repository it works on, in a
-shared repository, or in a package; version it, review it, and share it
-like anything else you write.
+shared repository, or in a package. Version it, review it and share it like
+anything else you write.

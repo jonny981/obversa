@@ -3,9 +3,9 @@ title: "Workspace example"
 description: "Capture, verify, lease, and fork a temporary Git repository."
 ---
 
-This file exercises the Git workspace provider without touching any
-repository you care about: it makes its own temporary one, forks a child
-worktree from it, and deletes both at the end.
+This file tries the Git workspace provider without touching any repository
+you care about. It makes its own temporary repository, forks a child worktree
+from it, and deletes both at the end.
 
 ## The file
 
@@ -57,14 +57,14 @@ limits.
 2. **Anchor:** It captures the repository and verifies the anchor before use.
 3. **Lease and fork:** It acquires one writer lease and creates a child
    worktree from the captured revision.
-4. **Child state:** It reads the child `HEAD` and `README.md`. The command fails
-   if the revision or file contents differ from the captured repository.
+4. **Child state:** It reads the child `HEAD` and `README.md`. It throws if the
+   revision or file contents differ from the captured repository.
 5. **Cleanup:** A `finally` block removes the temporary root. That root contains
    both the repository and its sibling worktree directory.
 
 ## Report
 
-The command prints one JSON object with three fields:
+The file prints one JSON object with three fields:
 
 - **`revision`:** The revision read from the child worktree.
 - **`anchor`:** The captured-anchor digest returned by the acquired lease.

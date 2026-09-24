@@ -1,23 +1,23 @@
 ---
 title: "Backlog grooming, then a person ranks"
-description: "Raw tickets in, stories with acceptance checks and the questions to settle first out, each read by a second model; then the product owner ranks."
+description: "Raw tickets in, stories with acceptance checks and the questions to settle first out, each read by a second model. Then the product owner ranks."
 ---
 
 Hand the week's raw tickets to a team and get back stories a developer
-could pick up: each with its acceptance checks and the ticket it came
-from, each read back against the raw tickets by a model from another
-family, and beside them the questions that must be settled before anyone
-writes code. Then the person who owns the product ranks. Nothing here
-writes code: the work is deciding what is worth writing, and the run stops
+could pick up. Each story has its acceptance checks and the ticket it came
+from, and a model from another family reads it back against the raw
+tickets. Beside the stories are the questions to settle before anyone
+writes code. Then the person who owns the product ranks them. Nothing here
+writes code. The work is deciding what's worth writing, and the run stops
 at the person.
 
 ```bash
 npm install @obversa/obversa
 ```
 
-In that directory, create `package.json` with `"type": "module"`, put the
-brief and the sample inputs from `examples/use-cases/engineering/`
-beside it, then run the copied file.
+Set up the project as [Installation](/get-started/installation) shows, and put
+the brief and the sample inputs from `examples/use-cases/engineering/` beside
+the copied file before you run it.
 
 ## The file
 
@@ -104,36 +104,37 @@ const result = await run(createBacklogGroom(), {
 console.log(JSON.stringify(result.outcome, null, 2));
 ```
 
-Every event of the run prints as one line as it happens, the usage lines
-included, and the outcome prints last as JSON.
+Every event prints as one line as it happens, usage lines included. The
+outcome prints last, as JSON.
 
-The run stops at `rank` with the question on the record. The stories
-and the questions are in `backlog/` for the owner to read; an answer
-through the run's callbacks client carries on from there, and a no goes
-back to `split` with the owner's note as the finding.
+The run stops at `rank` with the question pending. The stories and the
+questions are in `backlog/` for the owner to read. A no goes back to `split`
+with the owner's note as the finding.
+
+Priority is the owner's call. The brief tells the models not to decide it,
+so any story order in `stories.md` would only be a model's guess.
 
 ## What a run printed
 
-The output below is from one real run of this file, with the two command line
-tools signed in on the machine. The transcript is trimmed at both ends: a
-reader's own run prints a `▸ run` event line before the first stage and — unless
-the process is killed first — a `◂ run` line carrying the outcome and the run's
-token total after the last stage. This run did not finish, and it is here
-because of that rather than in spite of it.
+The output below is from one real run of this file, with the Claude and Codex
+CLIs signed in. The transcript is trimmed at both ends. Your own run prints a
+`▸ run` line before the first stage. After the last stage it prints a `◂ run`
+line with the outcome and the run's token total, unless the process is killed
+first. This run didn't finish, and that's why it's here.
 
-The reviewer is a model from another family. Three times it read the stories
-and sent them back with a real problem: a dark-mode story that said every
-screen renders "correctly" without saying which screens or what proves it, and
-an export story that had quietly become two, finishing a yearly export and
-running one every month. Each round the writer fixed what it was told and the
-reviewer found something else true. On the third the loop reached its
-allowance and stopped.
+The reviewer sent the stories back three times, each time with a real
+problem. One was a dark-mode story that said every screen renders "correctly"
+without saying which screens or what proves it. Another was an export story
+that had quietly become two: finishing a yearly export, and running one every
+month. Each round the writer fixed what it was told, and the reviewer found
+another real problem. On the third round the loop reached its allowance and
+stopped.
 
-Nothing was published. A grooming loop that stops with the work unfinished is
-doing its job; one that runs out of attempts and passes the stories on anyway
-would not be. The allowance is the thing to match to the work: three rounds
-suit a job with a few defensible answers, and splitting a backlog of vague
-tickets is not that job.
+Nothing reached the owner. A grooming loop that stops with the work
+unfinished is doing its job. One that runs out of attempts and passes the
+stories on anyway isn't. Match the allowance to the work. Three rounds suit a
+job with a few defensible answers, and splitting a backlog of vague tickets
+isn't that job.
 
 ```text
 backlog-groom-then-rank ▸ dag (3 nodes)
@@ -211,20 +212,21 @@ backlog-groom-then-rank ◂ dag fail
 | clarify | For each story, list the questions that must be answered before anyone writes code, with a proposed answer for each. | Every story has its questions, or the line "no open questions", and a reviewer has accepted them. |
 | rank | Put the stories and the open questions in front of the product owner. | The owner has ranked the cycle. |
 
-Where a stage's gate names a file, the package checks the file after the
-job. Where it names an exit code, the command decides. Where it names a
-reviewer, the reviewer's decision decides. Where it names a person, the
-run pauses until the person answers. A model's own report of its work
-never passes a stage.
+The "done when" column holds each stage's `gate`. The writing seat reads
+these sentences in its prompt, but the package doesn't check them. It checks what each stage
+declares: a file in `writes` that's missing or empty fails the stage, a
+reviewed stage passes only when its reviewer accepts, and a person stage
+pauses until the person answers. So a model's own report of its work never
+passes a stage here.
 
-## Gotchas
-
-- **The reviewer reads the raw tickets, not just the stories.** The review's gate is coverage: a raw ticket with no story sends the split back, which is what happens in the proof.
-- **Priority is not the model's to decide.** The brief says so and the workflow ends at a person; a story order that appeared in `stories.md` would be a model's guess dressed as a decision.
-- **A note that comes back unchanged fails.** A split sent back with findings must change; the same bytes again end the stage rather than run a second identical review.
+A raw ticket with no story sends the split back, because the reviewer reads
+the raw tickets as well as the stories. That's what happens in
+`backlog-groom-then-rank.proof.ts`. A split sent back with findings must
+change. If the same bytes come back, the stage ends instead of running a
+second identical review.
 
 ## Source
 
-The file is `examples/use-cases/engineering/backlog-groom-then-rank.ts`; its proof, brief and
-sample inputs sit beside it. The [runtime package page](/packages/runtime)
-lists every input.
+The file is `examples/use-cases/engineering/backlog-groom-then-rank.ts`. Its
+proof, brief and sample inputs sit beside it. The
+[runtime package page](/packages/runtime) lists every stage and workflow key.

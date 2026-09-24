@@ -7,16 +7,16 @@ The runtime keeps durable history in two ports. An `EventStore` appends small JS
 events. An `ArtifactStore` saves larger byte content and returns a small
 reference for an event to carry.
 
-This guide stays at the storage layer. It does not execute graph work, resume a
-stopped run, list runs, or manage a workspace.
+This page stays at the storage layer. It doesn't run graph work, resume a
+stopped run, list runs or manage a workspace.
 
 ## Run the example
 
 
-The example writes one 65 KB synthetic artifact and appends one event that
-contains its 194-byte reference. It creates a fresh storage binding over the
-same directory, reads the event and artifact, and folds the same state. It also
-runs both public storage conformance kits.
+`examples/durable-storage.ts` writes one 65 KB synthetic artifact and appends
+one event that carries its 194-byte reference. It then opens a fresh storage
+binding over the same directory, reads the event and the artifact back, and
+folds the same state. It also runs both public storage conformance kits.
 
 ## Source
 
@@ -187,17 +187,17 @@ record is stored with the run and checked again when the run is loaded.
 
 The record contains only safe JSON: namespace, provider identity, provider
 configuration digest, and resolved policy. A provider digest can bind safe
-adapter settings, but it must not contain a secret value or secret-derived
-hash. The local provider digest binds the resolved absolute storage root and
-its numeric limits. Moving the same stored bytes to another root produces a
-different live record, so loading the run fails instead of silently reading a
-different storage address.
+adapter settings. It must never contain a secret value or a hash derived
+from one. The local provider digest binds the resolved absolute storage root
+and its numeric limits. Moving the same stored bytes to another root produces
+a different live record, so loading the run fails instead of silently
+reading from a different storage address.
 
 Every event operation names a namespace and stream. Every artifact operation
 names a namespace and run. Two namespaces can share one physical provider
 without reading or changing each other's data. Both ports use the same storage
-identity rule: 1 to 128 ASCII characters, starting with a letter or digit;
-later characters may also be dots, underscores, or hyphens.
+identity rule: 1 to 128 ASCII characters, starting with a letter or digit,
+then letters, digits, dots, underscores or hyphens.
 
 ## Keep wrappers strict and payloads opaque
 
@@ -205,9 +205,9 @@ The runtime rejects unknown fields in wrappers it owns. These wrappers include e
 envelopes, artifact references, receipts, run-start records, and stored storage
 records.
 
-Graph, host, and workspace payloads are opaque. Opaque means the runtime preserves
-their JSON or bytes without assigning meaning to their fields. Code that owns
-an opaque payload must validate any nested value it uses. The example calls
+Graph, host, and workspace payloads are opaque. The runtime keeps their JSON
+or bytes without reading meaning into their fields. Code that owns an opaque
+payload must validate any nested value it uses. The example calls
 `validateArtifactReference` before it reads the reference inside its event.
 
 ## Set limits before the first write
@@ -220,7 +220,7 @@ an opaque payload must validate any nested value it uses. The example calls
 | `maxTotalArtifactBytesPerRun` | Unique admitted artifact digests for one run. |
 
 The local stores reject a value over a limit before it becomes visible. A
-second receipt for the same digest does not charge the artifact bytes again.
+second receipt for the same digest doesn't charge the artifact bytes again.
 Accepted artifacts stay until `deleteRun` removes that run.
 
 `ArtifactStore.deleteRun` removes only the artifacts in its scope. It leaves
@@ -228,16 +228,16 @@ the event stream and its artifact references in history, so later reads through
 those references fail closed. Hosts must coordinate event and artifact cleanup.
 
 Call `preflightAppend` with the exact event batch before a run writes its
-artifacts. Call `preflightWrite` once with the complete same-run artifact batch;
-it returns the references that later writes must issue. Both calls are
-side-effect-free. They do not reserve a stream revision or artifact quota, so
+artifacts. Call `preflightWrite` once with the complete same-run artifact
+batch. It returns the references that later writes must issue. Neither call
+changes anything. They don't reserve a stream revision or artifact quota, so
 the real append or write checks again and can still lose a later race.
 
 A provider-internal crash before artifact admission can leave temporary or
-blob bytes. They are not readable and do not count against the run quota. A
+blob bytes. They aren't readable and don't count against the run quota. A
 process crash or competing run start after admission can leave a verified,
 quota-charged artifact without an event reference. Hosts must handle cleanup
-and reconciliation. The storage contract does not promise a transaction across
+and reconciliation. The storage contract doesn't promise a transaction across
 two independent ports.
 
 ## Handle secrets by content mode
@@ -247,19 +247,19 @@ Set `contentMode` to describe how the bytes are used:
 - `exact` and `state` bytes reject a configured known secret. JSON state also
   checks decoded keys and values, including `application/*+json`. The store
   never changes these bytes.
-- `free-text` bytes can replace configured known secrets before the store
-  calculates the digest and byte size. The replacement is checked again and
-  the write fails if it would create another configured secret.
+- `free-text` bytes can have configured known secrets replaced before the
+  store calculates the digest and byte size. The replacement is checked again,
+  and the write fails if it would create another configured secret.
 - `sensitive: true` rejects the artifact instead of storing it.
 
 The local artifact store checks receipt metadata and its exact serialized
 admission record too. The local event store checks the complete event and
 segment metadata, not only the payload.
 
-The known secret values belong in the live local-store options. They do not
-belong in a stored storage record or digest. Rotating those values does not
-make committed events or artifacts unreadable; the replacement set applies to
-later writes.
+The known secret values belong in the live local-store options. They don't
+belong in a stored storage record or digest. Rotating those values doesn't
+make committed events or artifacts unreadable. The replacement set applies
+to later writes.
 
 ## Expect conflicts and verify reads
 
@@ -284,6 +284,6 @@ provider instances to `runEventStoreConformance` and
 revision conflicts, namespace and run isolation, size limits, secret handling,
 content addressing, provider preflight, policy identity, and read integrity.
 
-The storage ports record and reopen data. The executor consumes a stored run
-definition and explicitly resumes an unfinished node. This behavior does not
-belong in a storage provider.
+A storage provider only records and reopens data. The executor reads a stored
+run definition and resumes an unfinished node when asked to, so that work
+doesn't belong in a provider.
