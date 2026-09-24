@@ -103,6 +103,7 @@ export const stageBranches = {
   F115: 'fix/exact-published-version',
   F116: 'docs/orders-example-output',
   F117: 'docs/public-docs-consistency',
+  F118: 'fix/feedback-loop-guard',
 };
 
 export function manageStage(args, options = {}) {

@@ -311,6 +311,40 @@ function copyTree(root) {
   return realpathSync(copy);
 }
 
+test("feedback-loop capability prose passes while retired names in the same file still fail", { timeout: 300_000 }, () => {
+  const root = copyTree(worktree);
+  const page = path.join(root, "docs", "public", "concepts", "workflows.mdx");
+  const retired = "loo" + "ps";
+  try {
+    const guard = (text) => {
+      writeFileSync(page, text);
+      return spawnSync(process.execPath, [path.join(root, "scripts", "check-boundaries.mjs")], { cwd: root, encoding: "utf8" });
+    };
+    for (const prose of ["Feedback loops have a return budget.", "feedback-loops", "FEEDBACK LOOPS", "feedback\nloops"]) {
+      const result = guard(prose);
+      assert.equal(result.status, 0, `${prose}: ${result.stderr}`);
+    }
+    for (const [text, refusal] of [
+      [retired, "retired product name"],
+      [retired.toUpperCase(), "retired product name"],
+      ["Lo" + "OpS", "retired product name"],
+      [`Feedback loops are bounded. ${retired} is the old product.`, "retired product name"],
+      [`${retired} is the old product. Feedback loops are bounded.`, "retired product name"],
+      [`Feedback loops and feedback-loops are bounded. ${retired.toUpperCase()} is the old product.`, "retired product name"],
+      [`Feedback loops use @${retired}-adk/core`, "retired package name"],
+      [`Feedback loops use ${retired.toUpperCase()}_STATE`, "retired environment prefix"],
+      [`Feedback loops use .${retired}/state`, "retired state directory"],
+      [`notfeedback ${retired}`, "retired product name"],
+    ]) {
+      const result = guard(text);
+      assert.notEqual(result.status, 0, text);
+      assert.ok(result.stderr.includes(`docs/public/concepts/workflows.mdx: contains ${refusal}`), result.stderr);
+    }
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
 test("package versions can advance while the fixed core group stays equal", { timeout: 300_000 }, () => {
   const real = new URL("..", import.meta.url).pathname;
   const root = copyTree(real);

@@ -992,6 +992,7 @@ const forbidden = [
   {
     name: 'retired product name',
     pattern: new RegExp(`\\b${'loo' + 'ps'}\\b`, 'i'),
+    allowedPhrase: new RegExp(`\\bfeedback(?:\\s+|-)${'loo' + 'ps'}\\b`, 'gi'),
   },
   {
     name: 'retired environment prefix',
@@ -1445,7 +1446,8 @@ for (const absolute of files) {
   }
   const text = buffer.toString('utf8');
   for (const rule of forbidden) {
-    if (rule.pattern.test(text)) failures.push(`${path}: contains ${rule.name}`);
+    const checked = rule.allowedPhrase ? text.replace(rule.allowedPhrase, ' ') : text;
+    if (rule.pattern.test(checked)) failures.push(`${path}: contains ${rule.name}`);
   }
 
   // Package arrows are dependency-cruiser's job now (check:arrows and its
