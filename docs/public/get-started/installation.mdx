@@ -25,19 +25,23 @@ stops being experimental in Node 22.18.
 ## Add it to your project
 
 ```bash
-npm install @obversa/runtime
+npm install @obversa/obversa
 ```
 
-That is the runtime and its public contract. Add an engine when you want a
-real model to do the work, and a memory adapter when you want the work
-remembered:
+The bundle includes the runtime, runner, shared contracts, workflow helpers,
+surfaces, six engine adapters, three memory adapters and webhook notifications.
+Import each tool from its own package name; the bundle has no API of its own.
+CLI engines still need their command line tool installed and authenticated.
+
+The [Jev engine](/packages/engine-jev-api) is a separate install:
 
 ```bash
-npm install @obversa/engine-claude-cli @obversa/memory-simple
+npm install @obversa/engine-jev-api
 ```
 
-Every package is on the [packages](/packages/runtime) pages, with what each
-one is for.
+Jev answers structured questions over recorded state with workspace mode `none`.
+It does not read or edit a workspace; your workflow decides how to act on its
+answers. See [Plugins and tools](/plugins) for engine requirements.
 
 ## Write a file
 

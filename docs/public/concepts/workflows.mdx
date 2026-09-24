@@ -171,7 +171,7 @@ of your own over the public contract, see
 - **A person can be a step.** `approval(label, { question, target })` asks
   one question; a no goes back to `target` with the note as the finding.
   [A person decides](/workflows/approval) shows it.
-- **Kickbacks are counted, per target if you say so.** `maxKickbacks` caps
+- **Feedback loops have a return budget, per target if you say so.** `maxKickbacks` caps
   how many times work can go back. A number is one budget for the whole
   graph. A map, `{ plan: 3, 'tests-first': 3 }`, gives each target its own,
   so a review that spends its budget on one step cannot starve another; a

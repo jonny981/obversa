@@ -13,7 +13,7 @@ the run takes next.
 ## The file
 
 Everything here runs offline. The writer is a small function that gets
-`add` wrong once, so the kickback has something to do; in a real team it is
+`add` wrong once, so the feedback loop has something to do; in a real team it is
 an agent seat. The tests and the size check are commands.
 
 ```ts
@@ -178,12 +178,12 @@ meets neither, so a branch runs only on a decision.
 
 ## Gotchas
 
-- **A kickback and a decision are different tools.** Send work back when
+- **A feedback loop and a decision are different tools.** Send work back when
   the same writer should fix it; decide the path when a different step
   should take over. The example shows both so the difference is visible.
 - **A skipped branch is green.** An unmet `when` records a skip and does
   not fail the run. If a branch must run, do not give it a `when`.
-- **The kickback budget is per target.** `maxKickbacks` as a map gives the
+- **The feedback-loop budget is per target.** `maxKickbacks` as a map gives the
   writer its own count of returns; when it is spent, the run fails with the
   last output as its reason rather than looping.
 - **A decision node is optional.** `failed(name)` can only fire when `name`

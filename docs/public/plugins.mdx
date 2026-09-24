@@ -9,8 +9,20 @@ package pages under [Packages](/packages/runtime) stay the reference.
 
 ## Engines
 
-Each engine plugin runs one bounded engine request through one tool. Pick
-the tool a reader already has installed and authenticated.
+Each engine plugin runs one bounded request through a CLI, SDK or API. Install
+the bundle first:
+
+```bash
+npm install @obversa/obversa
+```
+
+The CLI engines also need their command line tools installed and authenticated.
+Jev is installed separately; choose it for structured assessments, not workspace
+coding:
+
+```bash
+npm install @obversa/engine-jev-api
+```
 
 - **Claude Code.** `@obversa/engine-claude-cli` runs engine requests
   through a fresh Claude CLI process. A reader needs Node.js 22.12 or
@@ -36,6 +48,12 @@ the tool a reader already has installed and authenticated.
   through the Claude Agent SDK, using the host's Claude Code
   authentication. A reader needs Node.js 22.12 or later. Home:
   [github.com/anthropics/claude-agent-sdk](https://github.com/anthropics/claude-agent-sdk).
+
+- **Jev API.** `@obversa/engine-jev-api` answers structured questions over
+  recorded state. A reader needs Node.js 22.12 or later, a Jev endpoint and
+  an API key. Use workspace mode `none`; it does not read or edit workspace
+  files. Routing and thresholds remain workflow policy. See
+  [The Jev engine](/packages/engine-jev-api).
 
 ## Memory
 

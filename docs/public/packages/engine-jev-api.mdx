@@ -16,8 +16,12 @@ returns those answers as the attempt's structured result.
 ## Install
 
 ```bash
-pnpm add @obversa/engine-jev-api
+npm install @obversa/obversa
+npm install @obversa/engine-jev-api
 ```
+
+The Jev engine is not included in the bundle. It requires workspace mode `none`;
+give it recorded state to assess, not workspace files to read or edit.
 
 ## Request shape
 

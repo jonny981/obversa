@@ -215,7 +215,9 @@ mechanisms they are built from.
 - **Run a step as a command.** The step passes on the exit code, never on a
   model's report. [Workflows](/concepts/workflows).
 - **Use the engines you have.** Claude, Codex, Grok, OpenCode, the Agent
-  SDK, the Anthropic API, or one you write to the contract.
+  SDK, the Anthropic API, or one you write to the contract. Add
+  [Jev](/packages/engine-jev-api) separately for structured assessments with
+  workspace mode `none`, not workspace editing.
   [Engine contracts](/packages/api).
 - **Define agents and skills in markdown.** The files your team already
   writes become the persona and the skills a step runs with.
@@ -265,8 +267,14 @@ mechanisms they are built from.
 
 The seven engine plugins, three memory adapters and the notifier have their
 own pages in the Packages group. Not every available engine is
-bundled — install the Jev engine separately: `npm install
-@obversa/engine-jev-api`. API, core, runtime and runner share one
+bundled. Start with the bundle, then add Jev if you need its assessments:
+
+```bash
+npm install @obversa/obversa
+npm install @obversa/engine-jev-api
+```
+
+Jev requires workspace mode `none`. API, core, runtime and runner share one
 version. Other packages keep their own manifest versions.
 
 The packages have one dependency direction. The runtime imports the memory port.

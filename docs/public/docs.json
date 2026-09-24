@@ -209,14 +209,7 @@
           "packages/memory-git",
           "packages/memory-simple",
           "packages/memory-markdown",
-          "packages/notify-webhook",
-          {
-            "group": "Coming soon",
-            "tag": "Coming soon",
-            "pages": [
-              "coming-soon/decision-model-engine"
-            ]
-          }
+          "packages/notify-webhook"
         ]
       }
     ]

@@ -102,6 +102,7 @@ export const stageBranches = {
   F111: 'feat/engine-jev-api',
   F115: 'fix/exact-published-version',
   F116: 'docs/orders-example-output',
+  F117: 'docs/public-docs-consistency',
 };
 
 export function manageStage(args, options = {}) {

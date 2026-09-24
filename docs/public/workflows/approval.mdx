@@ -116,7 +116,7 @@ question was asked again about the new attempt.
 
 - **The question is about what came before.** By default the request's
   input is the outcomes of the steps this one depends on, so a change
-  upstream after a kickback is a new question and the same question about
+  upstream after a feedback loop returns work is a new question and the same question about
   the same thing is the same request. Give `input` to say otherwise.
 - **A no needs a home, and a budget.** With `target`, a refusal goes back
   to that step with the note as the finding; the graph's `maxKickbacks`
@@ -138,7 +138,7 @@ question was asked again about the new attempt.
   reads the request's state; if it is neither pending nor answered, the
   step fails with a summary that says so instead of waiting for nothing.
   Asking a question again makes it the live one, so the ordinary case,
-  the same question after a kickback, never gets there.
+  the same question after a feedback loop returns work, never gets there.
 
 ## Things that catch people out
 

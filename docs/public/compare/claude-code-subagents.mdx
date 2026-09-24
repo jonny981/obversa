@@ -131,10 +131,15 @@ console.log(JSON.stringify(result.outcome, null, 2));
 
 ## Side by side
 
+For structured assessments rather than workspace coding, install the
+[Jev engine](/packages/engine-jev-api) separately from the Obversa bundle.
+It uses workspace mode `none` and answers questions over recorded state;
+your workflow chooses how to act on those answers.
+
 | | Claude Code subagents | Obversa |
 | --- | --- | --- |
 | Unit of work | A subagent: a prompt, tools and a model, invoked from the session. | A stage: an engine call, a command, a panel or a person, with the files it may write. |
-| The workers | Claude models, inside Claude Code. | Claude Code, Codex, Grok and OpenCode, driven as engines, one fresh process per call. |
+| The workers | Claude models, inside Claude Code. | CLI coding engines such as Claude Code, Codex, Grok and OpenCode run one fresh process per call. |
 | A review that sends work back | A subagent can be asked to review; sending work back is direction you give. | Built in: a review role sends the work back to the stage that owns it, with findings, up to a budget. |
 | A person deciding | Permission prompts at tool calls; plan mode. | A person role; the run pauses on the question and the answer arrives through the callbacks client. |
 | More than one provider | The Claude family. | Claude, OpenAI, xAI and OpenCode's providers, one per role. |

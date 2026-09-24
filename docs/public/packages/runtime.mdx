@@ -10,7 +10,7 @@ call it. It runs the steps one bounded engine call at a time and appends
 every step to a record on disk.
 
 ```bash
-npm install @obversa/runtime
+npm install @obversa/obversa
 ```
 
 Node.js 22.12 or later. Nothing else to install: no database, no service to
@@ -290,7 +290,7 @@ try {
 - `reviewPanel`, `quorum`, `tournament`: several reviewers or several
   candidates, with the threshold you set.
 - `kickback`, `revisionRequest`: a reviewer sends the work back to a named
-  stage with its findings.
+  stage with its findings. These are the API names for that feedback loop.
 - `RECORDED_ENGINE_USAGE`, `RecordedEngineUsage`: the state key under which a
   run records which model family answered each engine call an agent job made,
   beside the job path that made the call. When the job was built with
@@ -407,7 +407,7 @@ only when it carries `retrySafe: true`; otherwise the run pauses and asks a
 person to reconcile it.
 
 ```bash
-npm install @obversa/runtime @obversa/engine-claude-cli @obversa/engine-codex-cli
+npm install @obversa/obversa
 ```
 
 ### The smallest team
@@ -530,7 +530,7 @@ larger teams.
 | `desc`, `gate` | What the stage does and what must be true for it to count. Both reach the reviewers and the record. |
 | `reviewedBy` | A panel role that reads this stage's work. A rejection runs the stage again with the findings; a note written back unchanged fails plainly. The stage and its review are one step, so a run that dies part-way through the review runs the whole step again. It does not resume inside the review. |
 | `sendsBackTo` | The earlier stage a rejection or a red run goes back to. A stage cannot send back to itself; use `reviewedBy`. |
-| `retry` | How many times this stage may run again: the review restarts of a reviewed stage, or the kickback budget of a stage others send back to. Default 1. It belongs to the stage that repeats. |
+| `retry` | How many times this stage may run again: the review restarts of a reviewed stage, or the feedback-loop budget of a stage others send back to. Default 1. It belongs to the stage that repeats. |
 | `retrySafe` | `true` when the stage may run again after an interruption without a person reconciling it. Off unless set. |
 | `when` | A condition read before the stage runs: `passed(name)`, `failed(name)`, or an async predicate over `ctx`. A stage whose `when` is not met is recorded as skipped and counts as passed for the stages after it. |
 | `optional` | A red run of this stage does not fail the workflow or block the stages after it. `failed(name)` on a later stage is allowed only when the named stage is optional; on a required stage a red run stops the workflow, so there is no other path to choose. |

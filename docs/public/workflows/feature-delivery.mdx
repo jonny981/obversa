@@ -17,7 +17,7 @@ repair sends rejected work back to `implement`.
    only when the command exits 0, never on a self-report.
 4. The `review` stage asks three model seats to read the source and tests.
    Two accepts pass the panel; a failed panel sends its findings back to
-   `implement` within the kickback budget.
+   `implement` within the feedback-loop budget.
 5. The `approve` stage pauses for a person. The answer is recorded beside the
    run record, and a refusal fails the workflow.
 
@@ -28,7 +28,7 @@ repair sends rejected work back to `implement`.
 | Input | One written issue |
 | Output | A result and a recorded approval decision |
 | Permissions | Model seats write inside the run workspace. The test stage starts one `node --test` child process |
-| Limit | Two kickbacks |
+| Limit | Two returns through the feedback loop |
 | Evidence | One JSON result on standard output and one JSONL run record read back before exit |
 
 ## Source
@@ -42,7 +42,7 @@ In that directory, create `package.json` with `"type": "module"`, then run
 the install command above before running the copied file.
 
 ```bash
-npm install @obversa/runtime @obversa/engine-claude-cli @obversa/engine-codex-cli
+npm install @obversa/obversa
 ```
 
 ```ts
@@ -241,7 +241,7 @@ the same workflow.
 
 ## Failure behavior
 
-The workflow allows two kickbacks. If the panel keeps rejecting the work, the
+The feedback loop allows two returns. If the panel keeps rejecting the work, the
 budget is spent and the review's failed verdict stands. A refused approval
 fails the workflow. The workflow never advances past a failing test command.
 

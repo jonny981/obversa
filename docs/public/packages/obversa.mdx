@@ -28,6 +28,9 @@ engine is not bundled — install it separately:
 npm install @obversa/engine-jev-api
 ```
 
+Jev assesses recorded state with workspace mode `none`; it does not read or edit
+workspace files. See [the Jev engine](/packages/engine-jev-api).
+
 Import each tool from its own package name. This package has no runtime API
 of its own, so the individual packages stay separately importable and can
 still be installed without the bundle.

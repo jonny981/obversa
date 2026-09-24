@@ -134,10 +134,15 @@ console.log(JSON.stringify(result.outcome, null, 2));
 
 ## Side by side
 
+For structured assessments rather than workspace coding, install the
+[Jev engine](/packages/engine-jev-api) separately from the Obversa bundle.
+It uses workspace mode `none` and answers questions over recorded state;
+your workflow chooses how to act on those answers.
+
 | | CrewAI | Obversa |
 | --- | --- | --- |
 | Unit of work | An agent with a task. | A stage: an engine call, a command, a panel or a person, with the files it may write. |
-| The workers | Model calls the framework makes for each agent. | Claude Code, Codex, Grok and OpenCode, driven as engines, one fresh process per call. |
+| The workers | Model calls the framework makes for each agent. | CLI coding engines such as Claude Code, Codex, Grok and OpenCode run one fresh process per call. |
 | A review that sends work back | A guardrail retries the same task; routing back to an earlier step is flow logic you write. | Built in: a review role sends the work back to the stage that owns it, with findings, up to a budget. |
 | A person deciding | `human_input=True`, or the webhook flow that pauses the run. | A person role; the run pauses on the question and the answer arrives through the callbacks client. |
 | More than one provider | Each agent takes its own model; many providers supported. | Each role names its engine; a review seat from another provider is one line. |
