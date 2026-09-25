@@ -1,151 +1,174 @@
 ---
-title: "@obversa/surface"
-description: "The exact session, handoff, client kit, launcher and placement rules of @obversa/surface, for hosts and pages that must interoperate with one."
+title: "Surface"
+description: "@obversa/surface: one loopback server, one session for one decision, one framed result."
 ---
 
-This is the reference for `@obversa/surface`. To learn what a surface is and
-run one, read [surfaces](/concepts/surfaces). Come here for the exact rules.
-
-A surface is a small user interface for one decision. `@obversa/surface` is
-the package that runs it: one loopback server, one session for one decision,
-one result. It owns no callback state, no routing and no run records.
+`@obversa/surface` runs a surface: a small page for one decision, served
+from one loopback server for one session, returning one result. It owns no
+callback state, no routing and no run records. To learn what a surface is
+and run one, read [Surfaces](/concepts/surfaces); this page is the exact
+rules a host or a page must keep to work with one.
 
 ## Install
 
-```bash
-npm install @obversa/obversa
+<CodeGroup>
+
+```bash npm
+npm install @obversa/surface
 ```
 
-Import the surface tools from `@obversa/surface`.
-
-## The framed result
-
-A session ends in one framed result on the launcher's stdout. This one
-comes from a run of `packages/surface/examples/hello-surface.mjs` in the
-repository, in which the page's Yes button was clicked:
-
-```text
-<<<HELLO_SURFACE_RESULT_V1>>>
-{"schemaVersion":1,"app":"hello-surface","surface":null,"status":"completed","operationId":"a4bad94c-7192-45e2-98e3-30e4faa7cc4c","createdAt":"2026-09-10T12:14:13.659Z","payload":{"value":true},"detail":null}
-<<<END_HELLO_SURFACE_RESULT_V1>>>
+```bash pnpm
+pnpm add @obversa/surface
 ```
 
-The frame lines bound the JSON, so a caller can find it in mixed output.
+</CodeGroup>
+
+Included in `@obversa/obversa`.
+
+## Quickstart
+
+`runSurface` is the one call an app makes: it starts the session, places
+the page, waits for the decision, frames it on stdout and shuts down. The
+result comes back between app-named frame lines, so a caller finds it in
+mixed output:
+
+```text Framed result
+<<<REVIEW_RESULT_V1>>>
+{"schemaVersion":1,"app":"review","status":"completed","operationId":"…","payload":{…}}
+<<<END_REVIEW_RESULT_V1>>>
+```
+
 `status` says how the session ended: `completed`, `cancelled`, `timed_out`
 or `interrupted`. `payload` is the completed value after redaction, and
-`operationId` is the id the browser acknowledged.
+`operationId` the id the browser acknowledged. `parseFramedResult` pulls
+one framed result out of captured stdout, and `frameResult` writes one.
+`obversa-review` from [Surface Diff](/packages/surface-diff) is a surface
+built this way.
 
-## The session
+## Start a session
 
 `startSurface` binds an ephemeral port on 127.0.0.1. The page URL carries a
-session token in its fragment. Every API request must send that token as a
-bearer token, checked in constant time. A request with a wrong Host is
-refused, and so is a state-changing request with a wrong Origin. JSON bodies
-are bounded and responses carry strict security headers. Response values
-pass secret redaction by default. A handler that returns `{ verbatim: true }`
-sends its content byte-exact, as a completion with the verbatim option does.
+session token in its fragment; every API request must send it as a bearer
+token, checked in constant time. A request with a wrong `Host` is refused,
+and so is a state-changing request with a wrong `Origin`. JSON bodies are
+bounded and responses carry strict security headers. A session ends exactly
+once: the app completes it with a payload, the user cancels, the lease or
+session times out, or the caller interrupts. The browser acknowledges the
+decision, a timeout covers a browser that never does, and
+`waitForDecision()` gives the caller the one result.
 
-A session ends exactly once: the app completes it with a payload, the user
-cancels it, the lease or session times out, or the caller interrupts it. The
-browser acknowledges the decision, and a timeout covers a browser that never
-does. `waitForDecision()` gives the caller the one result.
+## Complete with a payload
 
 Payloads pass secret redaction unless the app completes with an explicit
-verbatim opt-in. That's for content that must not be redacted, such as
-review annotations that quote code (the review still trims and caps them
-before completing). A payload is its observable own data: the values of its
-own enumerable string-keyed properties and array items, recursively, as one
-JSON serialisation reads them (a getter's answer or the result of a callable
-`toJSON` included). That is exactly what the caller receives. Hidden
-internal state (a Map's entries, a URL's address) isn't data, so it's
-neither carried nor promised. An object with its prototype removed is
-carried as its observable data. A review location is stricter: the contract
-keys an anchor by own data properties only, so an accessor or a `toJSON`
-there is no location.
+verbatim opt-in, for content that must not be rewritten, such as review
+annotations that quote code. A payload is its observable own data: the
+values of its own enumerable string-keyed properties and array items,
+recursively, as one JSON serialisation reads them. That is exactly what the
+caller receives. A payload JSON can't carry whole is refused and the
+session stays open: a cycle, a BigInt, a function, a symbol, `undefined`, a
+non-finite number, negative zero, a non-enumerable or symbol-keyed
+property, a hole or extra property in an array, a Proxy, or an object whose
+prototype is neither Object's nor none. One exception: a value whose
+`toJSON` is callable (a Date, for instance) is replaced by what `toJSON`
+returns before anything else looks at it, and that return must pass the
+same rule.
 
 When two authenticated requests race to complete, exactly one succeeds and
-the other receives a conflict. A request whose body is still arriving when
-the session closes is refused before its handler runs. A completion is
-serialised exactly once, when it is claimed, and the caller receives the
-plain snapshot of that serialisation. A payload that JSON can't carry whole
-is refused with an error, and the session stays open. That covers a cycle, a
-BigInt, a function, a symbol, an undefined value, a non-finite number,
-negative zero, a non-enumerable or symbol-keyed property, a hole or extra
-property in an array, a Proxy, and an object whose prototype is neither
-Object's nor none (such as a Map, a RegExp, an Error or a class instance,
-whose meaning isn't in its own data). So the browser is never told a session
-completed that the caller will never receive, and a value that would
-serialise differently later can't change the frame.
+the other gets a conflict. A completion is serialised once, when it's
+claimed, and the caller receives that plain snapshot. Once a handler has
+completed the session, its response is the fixed acknowledgement (`ok` and
+the operation id), sent the moment the completion is claimed, so a
+connected browser holds its operation id before the caller learns of the
+completion. The acknowledgement timeout starts when that answer has gone
+out, or at the disconnect if the connection closed first; when it elapses,
+the caller learns of a completion the browser never received. The session
+never waits without a bound.
 
-One exception is deliberate and takes precedence. A value whose `toJSON`
-property is callable (own or inherited, a Date for instance) is replaced by
-whatever `toJSON` returns before anything else looks at it. That return value
-is what is checked and carried. This holds even when the holder is a Proxy
-or has a foreign prototype: only what `toJSON` returned is traversed, and it
-must pass the same rule.
+`terminalPayload(status)` lets a session that ends without the app's
+completion still carry an outcome payload the caller can route. It passes
+redaction unless `terminalPayloadVerbatim` is set. Without the hook, those
+statuses carry a null payload.
 
-Once a handler has completed the session, its response is the fixed
-acknowledgement (`ok` and the operation id). A body or status it returns
-after completing isn't used. That answer goes out the moment the completion
-is claimed. So a connected browser holds its operation id before the caller
-can learn of the completion, even when the handler keeps running or never
-returns. The acknowledgement timeout starts when that answer has gone out.
-If the browser's connection closes before the answer arrives, the timeout
-starts at the disconnect instead. When it elapses, the caller learns of a
-completion that browser never received. The session never waits without a
-bound. A cancel is answered the same way, before the caller learns of it.
+## Hand over files
 
-An app can pass `terminalPayload(status)` to `startSurface`, so a session
-that ends without the app's completion (cancelled, timed out or interrupted)
-still carries an outcome payload the caller can route. That payload passes
-redaction unless the app also sets `terminalPayloadVerbatim`. An app needs
-that when the payload carries identity fields that redaction would rewrite.
-Without a hook, those statuses carry a null payload.
+Content that must move as files travels through a private temporary
+directory (0700, files 0600) with SHA-256 hashes in the manifest, so the
+consumer verifies the bytes before use: `createPrivateTransfer` makes one
+and `removeTransfer` cleans it up. Diagnostics stay on stderr.
 
-## The handoff
+## Place the page
 
-The result returns through app-named frames on stdout, so one caller
-can run several surfaces and demultiplex them. Content that must move
-as files travels through a private temporary directory (0700, files
-0600) with SHA-256 hashes in the manifest, so the consumer can verify the
-bytes before use. Diagnostics stay on stderr.
+`openSurfaceUrl` opens the page in the selected host's native pane, trying
+three places in order:
 
-## The client kit
-
-`@obversa/surface/client` is the no-framework browser kit: it reads
-the token from the fragment, removes it from the address bar, keeps the
-lease alive with a heartbeat, wraps every call with the bearer token,
-and acknowledges the terminal decision on submit or cancel.
-
-## The launcher
-
-`runSurface` is the one call an app makes: it starts the session,
-places the page, waits for the decision, frames it on stdout, and shuts
-down. Signals interrupt cleanly.
-
-## Placement
-
-`openSurfaceUrl` opens the page in the selected host's native pane. Your
-multiplexer supplies the panes, and `@obversa/surface` supplies the session.
-It tries three places in order:
-
-1. **The host's placement command.** This is the command the host injected
-   as `OBVERSA_SURFACE_BIN`, and it runs only when that value is an absolute
-   path. A cmux workspace made by the [host glue](/hosts/cmux) sets it. A
-   relative or bare value is reported on stderr and skipped, because a bare
-   name looked up on `PATH` would hand the launch URL to whatever executable
-   sat first on it. An unset value skips host placement altogether.
-2. **The platform browser, on macOS only.** It runs by its system path
-   (`/usr/bin/open`), never by a bare name. Linux and Windows skip this
-   step, because `xdg-open` runs its own helpers by bare name and
-   `cmd /c start` would take the URL as shell text.
-3. **Printing the URL.** This is the last resort everywhere.
+1. **The host's placement command**, the value of `OBVERSA_SURFACE_BIN`,
+   and only when it's an absolute path. A relative or bare value is
+   reported on stderr and skipped, because a bare name looked up on `PATH`
+   would hand the launch URL to whatever executable sat first on it.
+2. **The platform browser, on macOS only**, by its system path
+   (`/usr/bin/open`). Linux and Windows skip this step, because `xdg-open`
+   runs its own helpers by bare name and `cmd /c start` would take the URL
+   as shell text.
+3. **Printing the URL**, the last resort everywhere.
 
 The placement command receives a one-time launch URL: single use, valid for
-a minute, and answering with one redirect to the page. It never receives the
-page URL with the session's token in it, since any local process can read a
-process argument. A placement command that exits reports whether it
-succeeded. One that is still running five seconds after launch (a browser
-that keeps the tab's process) is taken to have opened the page. That's an
-assumption, so a command that fails only after those five seconds isn't
-reported as a failure.
+a minute, answering with one redirect to the page. It never receives the
+page URL with the token in it. A command still running five seconds after
+launch is taken to have opened the page.
+
+## Build the page
+
+`@obversa/surface/client` exports `createSurfaceClient`, the no-framework
+browser kit: it reads the token from the fragment, removes it from the
+address bar, keeps the lease alive with a heartbeat, wraps every call with
+the bearer token, and acknowledges the terminal decision on submit or
+cancel.
+
+## Options
+
+### `sessionTimeoutMs`, `leaseTimeoutMs`, `ackTimeoutMs`
+
+The three bounds on a session: how long it may live in all (default
+14,400,000 ms, four hours), how long the browser may go without a heartbeat
+before the lease lapses (300,000 ms), and how long the caller waits for the
+browser's acknowledgement (30,000 ms).
+
+### The rest
+
+| Field | Type | Default | Description |
+| --- | --- | --- | --- |
+| `app` | `string` | required | The app name; it names the frame markers. A missing name throws `TypeError`. |
+| `assets` | directory | none | Static files the page is served from. |
+| `api` | handlers | `{}` | The session API the page calls. A handler that returns `{ verbatim: true }` sends its content byte-exact. |
+| `surface` | identity | none | The `surface` field of the result: package and resolved version. |
+| `terminalPayload` | `(status) => payload` | none | The payload for a session that ends without the app's completion. |
+| `terminalPayloadVerbatim` | `boolean` | `false` | Skip redaction on that payload. |
+| `open` | `boolean` | `true` | `runSurface` only: place the page with `openSurfaceUrl`. |
+| `stdout`, `ready` | stream, callback | `process.stdout`, none | `runSurface` only: where the frame goes, and a hook when the page is up. |
+
+## Errors
+
+- **`TypeError`** from `startSurface` when `app` is missing.
+- **A refused completion** leaves the session open: a payload JSON can't
+  carry whole, or a second completion racing the first (a conflict).
+
+## API
+
+- **`runSurface(options)`**: start, place, wait, frame, shut down.
+  [Quickstart](#quickstart).
+- **`startSurface(options)`**: the session alone. [Start a session](#start-a-session).
+- **`frameResult`**, **`parseFramedResult`**, **`terminalResult`**,
+  **`TERMINAL_STATUSES`**: the framed result. [Quickstart](#quickstart).
+- **`createPrivateTransfer`**, **`removeTransfer`**: files to the caller.
+  [Hand over files](#hand-over-files).
+- **`openSurfaceUrl`**: placement. [Place the page](#place-the-page).
+- **`redactText`**, **`sanitizeValue`**, **`safeText`**,
+  **`assertExactKeys`**: the helpers the session applies to responses.
+  **`httpError(message, statusCode)`**: an error carrying an HTTP status.
+- **`@obversa/surface/client`**: `createSurfaceClient`. [Build the page](#build-the-page).
+
+## Next steps
+
+- [Surfaces](/concepts/surfaces): what a surface is and why it ends once.
+- [Review a diff in a host pane](/hosts/review): a surface in use.
+- [Obversa in cmux](/hosts/cmux): the host placement command.

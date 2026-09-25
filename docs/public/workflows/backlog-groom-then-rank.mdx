@@ -1,27 +1,182 @@
 ---
-title: "Backlog grooming, then a person ranks"
-description: "Raw tickets in, stories with acceptance checks and the questions to settle first out, each read by a second model. Then the product owner ranks."
+title: "Backlog Grooming, Then a Person Ranks"
+sidebarTitle: "Backlog Grooming"
+description: "Raw tickets become stories with acceptance checks, a second model reads them back, and the product owner ranks."
 ---
 
-Hand the week's raw tickets to a team and get back stories a developer
-could pick up. Each story has its acceptance checks and the ticket it came
-from, and a model from another family reads it back against the raw
-tickets. Beside the stories are the questions to settle before anyone
-writes code. Then the person who owns the product ranks them. Nothing here
-writes code. The work is deciding what's worth writing, and the run stops
-at the person.
+The week leaves a backlog behind: support threads, a sales ask, a one-line
+wish from the founder. Before anyone codes, someone has to turn each into a
+story a developer could pick up, with acceptance checks and the questions
+to settle first. On most teams that's an afternoon nobody wants.
 
-```bash
-npm install @obversa/obversa
+You want stories you can trust: every raw ticket covered, every story
+checked against the ticket it came from by someone who wasn't the writer,
+and the open questions written down instead of discovered mid-sprint. You
+want to keep the one decision that is yours, the order.
+
+Obversa gives the grooming to two models and keeps the ranking for you. One
+model turns the tickets into stories and lists the questions; a model from
+another family reads them back against the raw tickets and fails the set
+when a ticket is missed or a story is vague; then the run stops for the
+product owner. This file is a three-stage team: split, clarify, rank.
+Nothing in it writes code. The work is deciding what's worth writing.
+
+## Run it
+
+Set the project up as [Installation](/get-started/installation) describes,
+put `briefs/backlog.md` and `backlog/raw.md` from
+`examples/use-cases/engineering/` beside the file, sign in to Claude Code and
+Codex, and run it:
+
+```bash Terminal
+npx tsx backlog-groom-then-rank.ts
 ```
 
-Set up the project as [Installation](/get-started/installation) shows, and put
-the brief and the sample inputs from `examples/use-cases/engineering/` beside
-the copied file before you run it.
+Every event prints as one line as it happens, usage lines included, and the
+outcome prints last as JSON. The output below is from one real run,
+trimmed at both ends: your own run prints a `▸ run` line before the first
+stage, and a `◂ run` line with the outcome and the token total after the
+last, unless the process is killed first.
+
+```text Events
+backlog-groom-then-rank ▸ dag (3 nodes)
+backlog-groom-then-rank · node split: start
+backlog-groom-then-rank › split › split-review ▸ loop (max 4)
+backlog-groom-then-rank › split › split-review · iteration 1
+backlog-groom-then-rank › split › split-review • split
+backlog-groom-then-rank › split › split-review engine:thinking
+backlog-groom-then-rank › split › split-review engine:text
+backlog-groom-then-rank › split › split-review   tool Read use
+backlog-groom-then-rank › split › split-review   tool tool result
+backlog-groom-then-rank › split › split-review engine:thinking
+backlog-groom-then-rank › split › split-review engine:text
+backlog-groom-then-rank › split › split-review   tool Write use
+backlog-groom-then-rank › split › split-review   tool tool result
+backlog-groom-then-rank › split › split-review engine:thinking
+backlog-groom-then-rank › split › split-review   tool Read use
+backlog-groom-then-rank › split › split-review   tool tool result
+backlog-groom-then-rank › split › split-review engine:thinking
+backlog-groom-then-rank › split › split-review   tool Bash use
+backlog-groom-then-rank › split › split-review   tool tool result
+backlog-groom-then-rank › split › split-review engine:thinking
+… 60 more event lines …
+backlog-groom-then-rank › split › split-review   tool Edit use
+backlog-groom-then-rank › split › split-review   tool tool result
+backlog-groom-then-rank › split › split-review engine:thinking
+backlog-groom-then-rank › split › split-review engine:text
+backlog-groom-then-rank › split › split-review   claude-sonnet-4-5-20250929: 334000/2636 tok
+backlog-groom-then-rank › split › split-review • split: fail
+backlog-groom-then-rank › split › split-review · until met: split writes: true
+backlog-groom-then-rank › split › split-review › review-panel • split
+backlog-groom-then-rank › split › split-review › review-panel • split-1
+backlog-groom-then-rank › split › split-review › review-panel engine:text
+backlog-groom-then-rank › split › split-review › review-panel   gpt-5.6-luna: 192268/2663 tok
+backlog-groom-then-rank › split › split-review › review-panel • split-1: fail
+backlog-groom-then-rank › split › split-review › review-panel • split: fail
+backlog-groom-then-rank › split › split-review · review: fail
+review did not pass (Review panel: 0/1 reviewer(s) cleared. - split-1 [block]: backlog/stories.md:40-45 combines completing within two minutes with avoiding timeout errors; these are two distinct user outcomes and should be separate story sections, both sourced from “Export takes forever”.); re-entering split-review
+backlog-groom-then-rank › split › split-review ◂ exhausted (3 iter)
+backlog-groom-then-rank · node split: done (exhausted)
+backlog-groom-then-rank · node clarify: done (aborted)
+backlog-groom-then-rank · node rank: done (aborted)
+backlog-groom-then-rank ◂ dag fail
+```
+
+```json Output
+{
+  "status": "fail",
+  "summary": "dag \"backlog-groom-then-rank\": 2 required node(s) did not complete",
+  "data": {
+    "split": {
+      "status": "exhausted",
+      "summary": "review rejected 3× (maxReviewRestarts)",
+      "data": {
+        "response": "Fixed. Removed the scheduling language from \"Fast export for large invoice volumes\" and replaced it with a concrete performance check. The acceptance checks now verify export reliability and speed for the stated use case, without implying automated scheduling that wasn't requested."
+      }
+    },
+    "clarify": {
+      "status": "aborted",
+      "summary": "blocked by a failed dependency"
+    },
+    "rank": {
+      "status": "aborted",
+      "summary": "blocked by a failed dependency"
+    }
+  }
+}
+```
+
+This run didn't finish, and that's why it's here. The reviewer failed the
+stories three times, each time with a real problem: a dark-mode story that
+said every screen renders "correctly" without saying which screens or what
+proves it; an export story that had quietly become two, finishing a yearly
+export and running one every month. Each round the writer fixed what it was
+told, and the reviewer found another real problem. On the third round the
+loop reached its allowance and stopped, and nothing reached the owner.
+
+A grooming loop that stops with the work unfinished is doing its job. One
+that runs out of attempts and passes the stories on anyway isn't. Match the
+allowance to the work: three rounds suit a job with a few defensible
+answers, and splitting a backlog of vague tickets isn't that job.
 
 ## The file
 
-```ts
+One model grooms, a model from another family reviews, and the owner is a
+person:
+
+```ts examples/use-cases/engineering/backlog-groom-then-rank.ts (excerpt) {2-4,12-13,18}
+    roles: {
+      groom: engines.claude('claude-sonnet-4-5'),
+      'story-review': [engines.codex('gpt-5.6-luna')],
+      owner: person('Which of these go into the next cycle, and in what order?'),
+    },
+
+    stages: [
+      stage('split', {
+        agent: 'groom',
+        writes: 'backlog/stories.md',
+        desc: 'Turn every raw ticket in backlog/raw.md into one or more stories, each with its acceptance checks and the ticket it came from.',
+        gate: 'Every raw ticket is covered by at least one story and a reviewer from another family has accepted the set.',
+        reviewedBy: 'story-review',
+        // Three attempts, not two: the allowance matches how open-ended the
+        // work is. Grooming a backlog has many defensible answers, so a strict
+        // reviewer and a writer need room to meet. Work with one right answer
+        // needs less.
+        retry: 3,
+      }),
+```
+
+`clarify` follows the same shape and writes `backlog/questions.md`: for each
+story, the questions that must be answered before anyone writes code, with a
+proposed answer for each. Then the run stops at the owner:
+
+```ts examples/use-cases/engineering/backlog-groom-then-rank.ts (excerpt) {5}
+      stage('rank', {
+        input: 'owner',
+        desc: 'Put the stories and the open questions in front of the product owner.',
+        gate: 'The owner has ranked the cycle.',
+        sendsBackTo: 'split',
+      }),
+```
+
+The stories and the questions are in `backlog/` for the owner to read. A no
+goes to `split` with the owner's note as the finding. Priority is the
+owner's call: the brief tells the models not to decide it, so any story
+order in `stories.md` would only be a model's guess.
+
+The "done when" sentences are each stage's `gate`. The writing seat reads
+them in its prompt, but the package doesn't check them. It checks what each
+stage declares: a file in `writes` that's missing or empty fails the stage,
+a reviewed stage passes only when its reviewer accepts, and a person stage
+pauses until the person answers. A raw ticket with no story fails the split,
+because the reviewer reads the raw tickets as well as the stories; that's
+what happens in `backlog-groom-then-rank.proof.ts`. A split sent findings
+must change: if the same bytes come back, the stage ends instead of running
+a second identical review.
+
+<Accordion title="Full file">
+
+```ts examples/use-cases/engineering/backlog-groom-then-rank.ts
 import { claude } from '@obversa/engine-claude-cli';
 import { codex } from '@obversa/engine-codex-cli';
 import {
@@ -104,129 +259,24 @@ const result = await run(createBacklogGroom(), {
 console.log(JSON.stringify(result.outcome, null, 2));
 ```
 
-Every event prints as one line as it happens, usage lines included. The
-outcome prints last, as JSON.
-
-The run stops at `rank` with the question pending. The stories and the
-questions are in `backlog/` for the owner to read. A no goes back to `split`
-with the owner's note as the finding.
-
-Priority is the owner's call. The brief tells the models not to decide it,
-so any story order in `stories.md` would only be a model's guess.
-
-## What a run printed
-
-The output below is from one real run of this file, with the Claude and Codex
-CLIs signed in. The transcript is trimmed at both ends. Your own run prints a
-`▸ run` line before the first stage. After the last stage it prints a `◂ run`
-line with the outcome and the run's token total, unless the process is killed
-first. This run didn't finish, and that's why it's here.
-
-The reviewer sent the stories back three times, each time with a real
-problem. One was a dark-mode story that said every screen renders "correctly"
-without saying which screens or what proves it. Another was an export story
-that had quietly become two: finishing a yearly export, and running one every
-month. Each round the writer fixed what it was told, and the reviewer found
-another real problem. On the third round the loop reached its allowance and
-stopped.
-
-Nothing reached the owner. A grooming loop that stops with the work
-unfinished is doing its job. One that runs out of attempts and passes the
-stories on anyway isn't. Match the allowance to the work. Three rounds suit a
-job with a few defensible answers, and splitting a backlog of vague tickets
-isn't that job.
-
-```text
-backlog-groom-then-rank ▸ dag (3 nodes)
-backlog-groom-then-rank · node split: start
-backlog-groom-then-rank › split › split-review ▸ loop (max 4)
-backlog-groom-then-rank › split › split-review · iteration 1
-backlog-groom-then-rank › split › split-review • split
-backlog-groom-then-rank › split › split-review engine:thinking
-backlog-groom-then-rank › split › split-review engine:text
-backlog-groom-then-rank › split › split-review   tool Read use
-backlog-groom-then-rank › split › split-review   tool tool result
-backlog-groom-then-rank › split › split-review engine:thinking
-backlog-groom-then-rank › split › split-review engine:text
-backlog-groom-then-rank › split › split-review   tool Write use
-backlog-groom-then-rank › split › split-review   tool tool result
-backlog-groom-then-rank › split › split-review engine:thinking
-backlog-groom-then-rank › split › split-review   tool Read use
-backlog-groom-then-rank › split › split-review   tool tool result
-backlog-groom-then-rank › split › split-review engine:thinking
-backlog-groom-then-rank › split › split-review   tool Bash use
-backlog-groom-then-rank › split › split-review   tool tool result
-backlog-groom-then-rank › split › split-review engine:thinking
-… 60 more event lines …
-backlog-groom-then-rank › split › split-review   tool Edit use
-backlog-groom-then-rank › split › split-review   tool tool result
-backlog-groom-then-rank › split › split-review engine:thinking
-backlog-groom-then-rank › split › split-review engine:text
-backlog-groom-then-rank › split › split-review   claude-sonnet-4-5-20250929: 334000/2636 tok
-backlog-groom-then-rank › split › split-review • split: fail
-backlog-groom-then-rank › split › split-review · until met: split writes: true
-backlog-groom-then-rank › split › split-review › review-panel • split
-backlog-groom-then-rank › split › split-review › review-panel • split-1
-backlog-groom-then-rank › split › split-review › review-panel engine:text
-backlog-groom-then-rank › split › split-review › review-panel   gpt-5.6-luna: 192268/2663 tok
-backlog-groom-then-rank › split › split-review › review-panel • split-1: fail
-backlog-groom-then-rank › split › split-review › review-panel • split: fail
-backlog-groom-then-rank › split › split-review · review: fail
-review did not pass (Review panel: 0/1 reviewer(s) cleared. - split-1 [block]: backlog/stories.md:40-45 combines completing within two minutes with avoiding timeout errors; these are two distinct user outcomes and should be separate story sections, both sourced from “Export takes forever”.); re-entering split-review
-backlog-groom-then-rank › split › split-review ◂ exhausted (3 iter)
-backlog-groom-then-rank · node split: done (exhausted)
-backlog-groom-then-rank · node clarify: done (aborted)
-backlog-groom-then-rank · node rank: done (aborted)
-backlog-groom-then-rank ◂ dag fail
-```
-
-```json
-{
-  "status": "fail",
-  "summary": "dag \"backlog-groom-then-rank\": 2 required node(s) did not complete",
-  "data": {
-    "split": {
-      "status": "exhausted",
-      "summary": "review rejected 3× (maxReviewRestarts)",
-      "data": {
-        "response": "Fixed. Removed the scheduling language from \"Fast export for large invoice volumes\" and replaced it with a concrete performance check. The acceptance checks now verify export reliability and speed for the stated use case, without implying automated scheduling that wasn't requested."
-      }
-    },
-    "clarify": {
-      "status": "aborted",
-      "summary": "blocked by a failed dependency"
-    },
-    "rank": {
-      "status": "aborted",
-      "summary": "blocked by a failed dependency"
-    }
-  }
-}
-```
+</Accordion>
 
 ## The team's shape
 
-| step | does | done when |
-| --- | --- | --- |
-| split | Turn every raw ticket in backlog/raw.md into one or more stories, each with its acceptance checks and the ticket it came from. | Every raw ticket is covered by at least one story and a reviewer from another family has accepted the set. |
-| clarify | For each story, list the questions that must be answered before anyone writes code, with a proposed answer for each. | Every story has its questions, or the line "no open questions", and a reviewer has accepted them. |
-| rank | Put the stories and the open questions in front of the product owner. | The owner has ranked the cycle. |
+```mermaid
+flowchart LR
+  raw[("backlog/raw.md")] --> split["split: Claude, reviewed by Codex"]
+  split -->|"retry: 3"| split
+  split --> clarify["clarify: Claude, reviewed by Codex"]
+  clarify -.-> rank{{"rank: the product owner"}}
+  rank -->|sendsBackTo| split
+```
 
-The "done when" column holds each stage's `gate`. The writing seat reads
-these sentences in its prompt, but the package doesn't check them. It checks what each stage
-declares: a file in `writes` that's missing or empty fails the stage, a
-reviewed stage passes only when its reviewer accepts, and a person stage
-pauses until the person answers. So a model's own report of its work never
-passes a stage here.
+## Next steps
 
-A raw ticket with no story sends the split back, because the reviewer reads
-the raw tickets as well as the stories. That's what happens in
-`backlog-groom-then-rank.proof.ts`. A split sent back with findings must
-change. If the same bytes come back, the stage ends instead of running a
-second identical review.
-
-## Source
-
-The file is `examples/use-cases/engineering/backlog-groom-then-rank.ts`. Its
-proof, brief and sample inputs sit beside it. The
-[runtime package page](/packages/runtime) lists every stage and workflow key.
+- [Feature delivery](/workflows/feature-team): what happens to a story once
+  it's ranked and picked up.
+- [A person decides](/patterns/approval): the owner's question as a step,
+  and how the answer reaches a paused run.
+- [Feedback loops](/concepts/feedback-loops): why the loop stopped at three,
+  and how to set the allowance.

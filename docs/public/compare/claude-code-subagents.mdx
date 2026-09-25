@@ -1,165 +1,68 @@
 ---
-title: "Obversa and Claude Code subagents"
-description: "Claude Code subagents split one session's work across specialised Claude assistants. Obversa drives Claude Code, Codex, Grok and OpenCode as a team from a TypeScript file, with feedback loops and a person at the gate. What each is for, and where each wins."
+title: "Obversa and Claude Code Subagents"
+sidebarTitle: "Claude Code Subagents"
+description: "Subagents are more Claude inside one session. Obversa is for when the reviewer has to be someone else, and a person still ships."
 ---
 
-Choose by where the work lives. Subagents fit when you're inside one
-Claude Code session and want to hand parts of a task to specialised
-assistants with their own tools and prompts. Obversa fits when the work
-needs more than one family of model, a review that sends work back with
-findings, a person who decides, and a record you can read after the run.
+Pick subagents for one Claude Code session's work; pick Obversa when the
+reviewer has to be someone else and a person still ships. In
+Claude Code's own words, subagents are "specialized AI assistants that
+handle specific types of tasks": a markdown file with a name, a
+description, its tools and its model, running inside your Claude Code
+session, with its transcript kept on disk so it can be resumed. Obversa is
+a TypeScript library that runs Claude Code and other coding agents as a
+team, with a reviewer from a different model family, a person who decides,
+and a record you can read after the run. Both can be true at once: a
+subagent can review, and Obversa is for when the reviewer has to be someone
+else.
 
-In Claude Code's own words: "Subagents are specialized AI assistants that
-handle specific types of tasks." A subagent is a markdown file with a name,
-a description, its tools and its model. It runs inside your Claude Code
-session and can declare its own permission mode, which the session's mode
-can override. Its transcript is kept on disk, so it can be resumed. The
-model is one of the Claude family.
+## What each is for
 
-Here's the shape Obversa is for, as one file:
-
-```ts
-import { claude } from '@obversa/engine-claude-cli';
-import { codex } from '@obversa/engine-codex-cli';
-import { run } from '@obversa/runtime';
-import { briefFromFile, person, stage, workflow, type TeamSeat } from '@obversa/runtime';
-
-interface FeatureDeliveryEngines {
-  readonly claude: (model: string) => TeamSeat;
-  readonly codex: (model: string) => TeamSeat;
-}
-
-const realEngines: FeatureDeliveryEngines = { claude, codex };
-
-/**
- * A feature, delivered the way a team delivers one. The roles are named once;
- * every stage is a small block of nouns: who does it, what it writes, who
- * reads it, where a red result goes back to. Inference happens only where a
- * role is named; every other stage is a command or a person.
- */
-function createFeatureDelivery(engines: FeatureDeliveryEngines = realEngines) {
-  return workflow('feature-delivery', {
-    brief: briefFromFile('briefs/triple.md'),
-    options: { timeout: '10m' },
-
-    roles: {
-      analyse: engines.claude('claude-sonnet-4-5'),
-      implement: engines.codex('gpt-5.6-luna'),
-      'research-review': [engines.codex('gpt-5.6-luna')],
-      'code-review': [engines.claude('claude-sonnet-4-5')],
-      approve: person('Ship this change?'),
-    },
-
-    stages: [
-      stage('research-context', {
-        agent: 'analyse',
-        writes: 'team-output/research-context.md',
-        desc: 'Read the workspace and write down what the change touches.',
-        gate: 'The context note is in the workspace and a reviewer has accepted it.',
-        reviewedBy: 'research-review',
-        retry: 3,
-      }),
-
-      stage('research-requirements', {
-        agent: 'analyse',
-        writes: 'team-output/research-requirements.md',
-        desc: 'Turn the brief and the context note into requirements, one REQ-n per line.',
-        gate: 'The requirements note is in the workspace and a reviewer has accepted it.',
-        reviewedBy: 'research-review',
-        retry: 3,
-      }),
-
-      stage('plan', {
-        agent: 'analyse',
-        writes: 'team-output/plan.md',
-        desc: 'Write an executable plan from the requirements, one check per REQ-n.',
-        gate: 'Every requirement has a check in the plan.',
-        reviewedBy: 'research-review',
-        retry: 3,
-      }),
-
-      stage('tests-first', {
-        agent: 'implement',
-        writes: 'test/triple.test.mjs',
-        desc: 'Write the declared test files from the accepted plan before any implementation exists.',
-        gate: 'Every declared test file exists and covers the plan.',
-        reviewedBy: 'code-review',
-        retry: 3,
-      }),
-
-      stage('implement', {
-        agent: 'implement',
-        writes: 'src/triple.mjs',
-        desc: 'Write the code to the plan and the tests.',
-        gate: 'The source file exists.',
-        retry: 3,
-      }),
-
-      stage('test', {
-        run: ['node', '--test', 'test/triple.test.mjs'],
-        desc: 'Run the tests; a red run goes back to implement with the output.',
-        gate: 'The test command exits 0.',
-        sendsBackTo: 'implement',
-      }),
-
-      stage('review', {
-        panel: 'code-review',
-        agree: 1,
-        desc: 'Read the change and the test result against the plan.',
-        gate: 'At least one reviewer has accepted the change.',
-        sendsBackTo: 'implement',
-      }),
-
-      stage('approve', {
-        input: 'approve',
-        desc: 'Put the verified change in front of a person.',
-        gate: 'A person has said yes.',
-      }),
-
-      stage('close', {
-        agent: 'analyse',
-        writes: ['team-output/evidence.md', 'team-output/learning.md'],
-        desc: 'Write the evidence of the run and what was learned, from the record alone.',
-        gate: 'Both notes are in the workspace.',
-      }),
-    ],
-  });
-}
-
-const result = await run(createFeatureDelivery());
-console.log(JSON.stringify(result.outcome, null, 2));
-```
-
-## Side by side
-
-| | Claude Code subagents | Obversa |
+| The job | Claude Code subagents | Obversa |
 | --- | --- | --- |
 | Unit of work | A subagent: a prompt, tools and a model, invoked from the session. | A stage: an engine call, a command, a panel or a person, with the files it may write. |
-| The workers | Claude models, inside Claude Code. | Engines such as Claude Code, Codex, Grok and OpenCode, with a fresh process for every call, or an API engine. |
-| A review that sends work back | A subagent can be asked to review. Sending work back is direction you give. | Built in: a review sends the work back to the stage that owns it, with the findings, up to a limit you set. |
+| The workers | Claude models, inside Claude Code. | Engines such as Claude Code, Codex, Grok and OpenCode, a fresh process per call, or an API engine. |
+| A review that fails a step | A subagent can be asked to review; what happens next is direction you give. | Built in: the findings go to the stage that owns the fix, which runs again, up to a limit you set. |
 | A person deciding | Permission prompts at tool calls, and plan mode. | A person role. The run pauses on the question, and the answer arrives through the callbacks client. |
 | More than one provider | The Claude family. | Claude, OpenAI, xAI and OpenCode's providers, one per role. |
-| A run that survives a crash | Transcripts on disk. A subagent can be resumed. | A run can record to a file. Started again with `resume: true`, a workflow carries on from that record and repeats nothing that finished. The supervised runner restarts a compiled graph from its own record. |
+| A run that survives a crash | Transcripts on disk; a subagent can be resumed. | A run records to a file and carries on from it with `resume: true`; the supervised runner restarts a killed run from its own record. |
 | Where it runs | Inside Claude Code, on your machine. | A library, no server, on your machine. |
 | How it is written | Markdown with front matter. | TypeScript. |
 
-## Where Claude Code subagents win
+## Where each wins
 
-- You're already in Claude Code and the task is one session's work.
-- The permission checks at every tool call are the safety net you want,
-  with nothing more to install.
-- One model family is enough.
+- **Subagents, when you're already in Claude Code** and the task is one
+  session's work.
+- **Subagents, when the permission checks at every tool call** are the
+  safety net you want, with nothing more to install.
+- **Subagents, when one model family is enough.**
+- **Obversa, when the review should come from a different family** than the
+  one that wrote the work; `workflow()` refuses a reviewer from the writer's
+  family before any model runs.
+- **Obversa, when the process should be a file under version control**,
+  reviews included, with the run's record beside it.
+- **Obversa, when the last word should be a person's**, asked as a step.
 
-## Where Obversa wins
+## Together
 
-- A review should come from a different family than the one that wrote the
-  work.
-- The process, reviews included, should be a file under version control,
-  with the run's record beside it.
-- The last word should be a person's, asked as a step.
+Obversa runs Claude Code as a seat, so the session you already use becomes
+one role in a team, and a different model reads its work:
 
-## Where to go
+```ts examples/teams/writer-reviewer-pair.ts (excerpt) {2-3}
+    roles: {
+      write: engines.claude('claude-sonnet-4-5'),
+      review: [engines.codex('gpt-5.6-luna')],
+    },
+```
 
-The [feature team](/workflows/feature-team) page shows the file above with a
-real run. [What is a meta-harness?](/glossary/meta-harness) explains the
-layer Obversa works at.
+The Claude seat is the same Claude Code you run by hand, started fresh for
+each call with the stage's brief.
+
+## Next steps
+
+- [Feature delivery](/workflows/feature-team): the nine-stage team with a
+  real run.
+- [A writer and a reviewer](/patterns/writer-and-reviewer): the cross-family
+  pair on its own.
+- [Claude CLI Engine](/packages/engine-claude-cli): how Obversa runs Claude
+  Code as a seat.

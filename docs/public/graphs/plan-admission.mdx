@@ -1,87 +1,114 @@
 ---
-title: "Plan admission"
-description: "Bind a graph description to a host admission record, and freeze what the run may use: package, permissions, lanes, and the engine checks that run before the first step."
+title: "Plan Admission"
+description: "Bind a graph description to a host's admission record and freeze what the run may use."
 ---
 
-Use `resolveGraphPlan(description, resolution)` after you compile a graph.
-It returns a frozen plan, canonical JSON, and a SHA-256 digest.
+Freeze what a run may use before it starts: the package, the permissions,
+the engine lane for every seat, and the checks that run before the first
+step. Use `resolveGraphPlan(description, resolution)` after you compile a
+graph; it returns a frozen plan, its canonical JSON and a SHA-256 digest.
+For what the plan is resolved from, read [Outside graph types](/graphs/contract);
+for what runs under it, the [graph executor](/graphs/executor). The plan is
+data: it can't execute code or grant a permission.
 
-The plan is data. It can't execute code or grant a permission.
+The smallest resolution names the package once, admits it with no
+permissions, and resolves no lanes:
 
-## Host admission
+```ts examples/custom-graph.ts (excerpt) {6-8}
+const identity = {
+  source: 'npm:@example/draft-review',
+  version: '1.0.0',
+  digest: 'sha256:1111111111111111111111111111111111111111111111111111111111111111',
+} as const;
+const resolution: PlanResolution = {
+  package: identity,
+  admission: { package: identity, permissions: [] },
+  executionLanes: [],
+};
+```
 
-The host provides a `PlanResolution`. It contains:
+`resolveGraphPlan(compiled.describe(), resolution)` then produces the plan.
+A `PlanResolution` needs:
 
-- The graph package source, version, and digest.
-- The same package identity in the host admission record.
-- The permissions that the host admits.
-- One effective execution target for each declared execution lane.
-- An optional ordered fallback list for each lane. An omitted list means no
+- **The graph package's source, version and digest**, and the same
+  identity in the host admission record. They must match exactly.
+- **The permissions the host admits.**
+- **One effective execution target for each declared lane**, with an
+  optional ordered fallback list per lane. An omitted list means no
   fallback.
-- An optional preflight policy: a `timeoutMs` for the checks that run
-  before the first step, and one entry per lane with `live: 'required'`
-  or `'skip'` and `unsupportedStatic: 'block'` or `'allow'`. An omitted
-  policy means no checks.
+- **An optional preflight policy**: a `timeoutMs` for the checks before the
+  first step, and one entry per lane with `live: 'required'` or `'skip'`
+  and `unsupportedStatic: 'block'` or `'allow'`. An omitted policy means no
+  checks.
 
-The package identity in the resolution and admission record must match exactly.
+## Admit permissions
+
 The graph package asks for permissions in `describe()`. Each requested
-permission must match an admitted permission by name and JSON scope. If it
-doesn't match, `resolveGraphPlan` throws `GraphValidationError` with
-`PERMISSION_NOT_ADMITTED`.
-
-Extra admitted permissions don't become graph permissions. The resolved plan
-keeps requested and admitted permissions as separate lists.
+permission must match an admitted permission by name and JSON scope;
+otherwise `resolveGraphPlan` throws `GraphValidationError` with
+`PERMISSION_NOT_ADMITTED`. Extra admitted permissions don't become graph
+permissions: the resolved plan keeps requested and admitted permissions as
+separate lists.
 
 When a preflight policy is present, every resolved lane needs exactly one
-entry, and no entry may name a lane that doesn't exist. `timeoutMs` must be a
-whole number of milliseconds from 1 to 2147483647. `resolveGraphPlan` rejects
-a policy that breaks either rule before it freezes the plan.
+entry, no entry may name a lane that doesn't exist, and `timeoutMs` must be
+a whole number of milliseconds from 1 to 2147483647. A policy that breaks
+either rule is rejected before the plan is frozen.
 
 ## Resolve execution lanes
 
-Each described lane names a requested adapter, provider, model family, model,
-and tools. A graph can also declare known substitutions.
+Each described lane names a requested adapter, provider, model family,
+model and tools, and a graph can declare known substitutions. The host
+resolves every described lane exactly once. An effective target must equal
+the requested target or one declared substitution; unknown, missing or
+extra lane resolutions are rejected.
 
-The host resolves every described lane exactly once. An effective target must
-equal the requested target or one declared substitution. `resolveGraphPlan`
-rejects unknown, missing, or extra lane resolutions.
+The resolved plan records the requested target, the effective target and
+the fallback order. A change to an adapter, provider, model family, model,
+tools, allowed substitution, fallback order or preflight policy changes the
+plan digest.
 
-The resolved plan records the requested target, effective target, and fallback
-order. A change to an adapter, provider, model family, model, tools, allowed
-substitution, fallback order, or preflight policy changes the plan digest.
+## Snapshot the plan
 
-## Plan snapshot
+Resolve the plan before a host starts work. The returned snapshot is frozen:
+its package identity, permissions, lanes, policies, preflight policy and
+bounds stay in the snapshot its digest identifies. Run parameters aren't
+part of the plan or its digest; the run record keeps resolved inputs as part
+of the frozen run.
 
-Resolve the plan before a host starts work. The returned plan snapshot is
-frozen. Its package identity, permissions, lanes, policies, preflight policy,
-and bounds stay in the snapshot that its digest identifies.
-
-Run parameters aren't part of the resolved plan or its digest. The run record
-keeps resolved inputs as part of the frozen run.
-
-## Run parameters
-
-`run(job, { params })` accepts a JSON object. If `params` is `undefined`, the
-run uses a frozen empty object. `run` rejects `null`, arrays, and other
+`run(job, { params })` accepts a JSON object. If `params` is `undefined`,
+the run uses a frozen empty object. `run` rejects `null`, arrays and other
 non-object values with `JsonValueError` before work or environment setup
-starts.
+starts. For a valid object it clones and freezes `params` before work
+starts, and the root job and each child job receive the same frozen object
+as `ctx.params`, so a later change to your object can't change it. A nested
+value that isn't JSON also throws `JsonValueError`, with `path` pointing at
+the value.
 
-For a valid object, `run` clones and freezes `params` before work starts. The
-root job and each child job receive the same frozen object as `ctx.params`. A
-later change to your `params` object can't change `ctx.params`. A nested value
-that isn't JSON also throws `JsonValueError`, and the error's `path` points to
-that value.
+## Failure
 
-## Trusted package boundary
-
-An [outside graph type](/graphs/contract) is trusted package code. The
-conformance kit isn't a security sandbox.
-
-The host owns package discovery, signature checks, and sandboxing. The graph
-contract only validates the package identity, admission record, and plan data
-that the host provides.
+- **`PERMISSION_NOT_ADMITTED`**: a requested permission has no admitted
+  match by name and JSON scope.
+- **Rejected before the plan is frozen**: a package identity that differs
+  between the resolution and the admission record, a lane resolution that
+  is unknown, missing or extra, or a preflight policy with a bad entry or
+  timeout.
+- **`JsonValueError`** from `run` for `params` that aren't a JSON object.
 
 ## Limits
 
-Plan admission doesn't schedule nodes, store runs, provide built-in graph
-forms, or execute work on another machine.
+- **The conformance kit isn't a security sandbox.** An outside graph type
+  is trusted package code. The host owns package discovery, signature
+  checks and sandboxing; the contract validates only the package identity,
+  admission record and plan data the host provides.
+- **Plan admission doesn't schedule nodes, store runs, provide built-in
+  forms or execute work on another machine.**
+
+## Next steps
+
+- [Graph executor](/graphs/executor): what runs under the frozen plan, and
+  the checks the preflight policy turns on.
+- [Supervised local runs](/driving/runner): a worker that checks every seat
+  before the first step.
+- [Outside graph types](/graphs/contract): the description a plan is
+  resolved from.

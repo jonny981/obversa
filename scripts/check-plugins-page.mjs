@@ -5,11 +5,11 @@ export function checkPluginsPage(document) {
   const failures = [];
   const frontmatter = /^---\n([\s\S]*?)\n---/.exec(document);
   if (!frontmatter) {
-    return ['plugins.mdx has no frontmatter'];
+    return ['packages/index.mdx has no frontmatter'];
   }
   const description = /description:\s*"([^"]*)"/.exec(frontmatter[1]);
   if (!description) {
-    failures.push('plugins.mdx has no description');
+    failures.push('packages/index.mdx has no description');
   } else {
     const text = description[1];
     if (/[0-9]/.test(text)) {
@@ -24,7 +24,7 @@ export function checkPluginsPage(document) {
     .map((block) => block.trim())
     .filter((block) => /^- \*\*[^*]+\.\*\*/.test(block));
   if (rows.length < 2) {
-    failures.push('plugins.mdx has no tool rows');
+    failures.push('packages/index.mdx has no tool rows');
     return failures;
   }
   for (const row of rows) {
@@ -49,7 +49,7 @@ export function checkPluginsPage(document) {
 if (process.argv[1] && import.meta.url === new URL(`file://${process.argv[1]}`).href) {
   try {
     const root = process.cwd();
-    const document = readFileSync(join(root, 'docs/public/plugins.mdx'), 'utf8');
+    const document = readFileSync(join(root, 'docs/public/packages/index.mdx'), 'utf8');
     const failures = checkPluginsPage(document);
     if (failures.length) {
       for (const failure of failures) console.error(failure);

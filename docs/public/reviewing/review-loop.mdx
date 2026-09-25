@@ -1,41 +1,162 @@
 ---
-title: "Review loop"
-description: "Record a bounded generation, review, and repair cycle."
+title: "Review Loop"
+description: "A draft, a done check, independent reviewers and a repair node, as a graph form with a quorum."
 ---
 
-`convergence` sends a draft through a done check and then to independent
-reviewers. When reviewers return findings, a repair node gets them and the
-draft goes round again. The loop ends when enough reviewers accept it or a
-limit runs out.
+Build a draft, review and repair cycle as a stored graph, with a quorum of
+independent reviewers and the writer kept out of it. Use `convergence` when
+the loop must be a graph form the executor records and resumes; for the
+same idea inside a `workflow()`, a stage with `reviewedBy` is shorter. This
+is the eval loop as a form: reviewers decide whether the draft goes to
+repair or the loop ends.
 
-It's a pure graph form. It folds recorded form events into state and returns
-the next command. The form has one generator, one done check, one repair
-node, and one or more review seats. A review seat is an independent reviewer
-node.
+The definition names one generator, one done check, one repair node and the
+review seats:
 
-## Run the example
+```ts examples/review-loop.ts (excerpt) {5-8,14-19}
+const definition: ConvergenceDefinition = {
+  id: 'release-review',
+  definitionVersion: 1,
+  data: {
+    maxIterations: 2,
+    maxReviewRestarts: 1,
+    quorum: 2,
+    requireDiversity: true,
+    skippableSeats: [],
+    seatConcurrency: 2,
+    retryCapPerNode: 0,
+  },
+  nodes: [
+    { id: 'draft', data: { role: 'generator' } },
+    { id: 'done-check', data: { role: 'evaluator' } },
+    {
+      id: 'claude-review',
+      data: { role: 'seat', lane: claudeLane, evidencePaths: ['draft'] },
+    },
+    {
+      id: 'codex-review',
+      data: { role: 'seat', lane: codexLane, evidencePaths: ['draft'] },
+    },
+    { id: 'repair', data: { role: 'repair' } },
+  ],
+  edges: [],
+};
+```
 
+`convergence` sends the draft through the done check and then to the
+reviewers. When reviewers return findings, the repair node gets them and
+the draft goes round again. The loop ends when enough reviewers accept or
+a limit runs out. A review loop needs:
 
-`examples/review-loop.ts` scripts the events for two passing reviews from
-different providers and model families. It doesn't call an engine. It prints
-this report:
+- **`quorum`**, how many seats must accept.
+- **`maxIterations` and `maxReviewRestarts`**, the cycle and repair limits.
+- **One node per role**: `generator`, `evaluator`, `repair`, and a `seat`
+  per reviewer with its `lane`, the engine identity it runs under.
 
-```json
+## Compile and decide
+
+The form is pure: it folds recorded events into state and returns the next
+command. Compile it, fold the events, and ask what runs next:
+
+```ts examples/review-loop.ts (excerpt) {1-2}
+const graph = compileGraph(convergence, definition);
+const state = events.reduce(graph.reduce, graph.initialState());
+const plan = resolveGraphPlan(graph.describe(), resolution);
+```
+
+The example scripts the events for two passing reviews from different
+providers and model families, and calls no engine. Run it with
+`npx tsx review-loop.ts`:
+
+```json Output
 {"decision":{"kind":"complete","output":{"iterations":1,"restarts":0,"seats":{"claude-review":"accepted","codex-review":"accepted"},"findings":[]}},"events":10,"planDigest":"sha256:499b4c4187dfb574d3a22653145a0b3289c7c6ed25eb106eb981ae86f4136aa1","bounds":{"dispatches":{"min":{"kind":"known","value":4},"max":{"kind":"known","value":11}},"maxConcurrency":{"kind":"known","value":2},"maxFanOut":{"kind":"known","value":2}}}
 ```
 
-The repository's checks compile the file with TypeScript 6 and 7, run it,
-and compare its output with this report.
+One iteration, no repair, both seats accepted and no findings: the decision
+is `complete`. `planDigest` is the digest of the plan the form resolved,
+and `bounds` are the dispatch counts the plan describes.
 
-## Define a review loop
+## Exclude the writer
 
-This fragment is from `examples/review-loop.ts`.
+For engine calls the graph executor manages, a reviewer can't count toward
+the quorum if its reported provider or model family matches any writer or
+repair call, even when `requireDiversity` is false, and even for a cached
+pass after a repair. A reviewer without a reported provider and model
+family can't count. With `requireDiversity`, no two seats in the quorum can
+share a provider or a model family either.
 
-```ts
+The definition must keep every writer and repair target, including declared
+substitutions, separate from every review target and substitution by both
+provider and model family. Different adapters, models or lane names don't
+remove a conflict. Skippable seats follow the same rule.
+
+The check rests on what the engine reported. A call that died before
+reporting counts as all of its declared targets, and the executor records
+an unknown identity when it recovers an unfinished engine attempt. The
+runtime doesn't verify the provider behind an engine's report, and calls
+made inside an adapter or wrapper aren't recorded separately. Data-only
+nodes have no engine identity, so their results don't establish provider
+separation for work done outside the runtime's engine calls.
+
+## Read the records
+
+- **Node records.** The form accepts dispatch, completion, failure, pause
+  and resume records for each node attempt.
+- **Engine records.** Each call through the executor records its requested
+  and reported adapter, provider, model family and model in an
+  `engine-attempt-recorded` event. A primary call and a fallback call have
+  separate records. A call without a reported identity records
+  `effective: null`.
+- **Rejected engine records.** For scripted events, the loop status records
+  invalid receipts in `engineReceiptRejections`, each with code
+  `INVALID_ENGINE_RECEIPT`, the node id, position, sequence and reason. The
+  field is absent until a receipt is rejected, and a rejection leaves
+  accepted identities and the quorum unchanged.
+- **Review records.** A seat pass includes its confidence, input hashes and
+  workspace fingerprint. Evaluator evidence names one proof artifact digest;
+  every seat dispatch receives it and every seat result must echo it. A
+  missing or changed digest makes the result invalid and dispatches the
+  seat again while its retry limit permits, and its findings can't enter
+  repair inputs or finding counts. `evidencePaths` names the input hashes
+  that can invalidate a seat; leave it out and every input hash counts.
+- **Repair and policy records.** Findings can send the form to its repair
+  node; a later cycle keeps valid seat passes and reruns invalid seats. New
+  evaluator evidence invalidates each seat whose named input hash changed.
+  A producer can also invalidate an in-flight seat or record a limit pause.
+
+## Failure
+
+- **`ABORTED`** pauses the run. **`ENGINE_UNAVAILABLE`** skips a declared
+  skippable seat and pauses for a required one. Other node failures use the
+  declared retry cap before a required seat pauses as unresolved.
+- **A stored plan from another version is refused.** The convergence graph
+  type is at version 3, and a stored plan records the type version it was
+  compiled from. `createGraphExecutor` refuses a mismatch with
+  `STORED_GRAPH_MISMATCH` before a node starts, and doesn't convert the
+  plan. Start a new run to use a plan compiled from the current version.
+- **An evaluator without valid review evidence** returns `fail` with
+  `CONVERGENCE_REVIEW_EVIDENCE_INVALID` and dispatches no seat. Reopening
+  the run keeps that failure. Correct the evaluator and start a new run.
+
+## Limits
+
+- **`maxIterations`, `maxReviewRestarts` and `retryCapPerNode`** bound the
+  dispatch count the plan describes. **`seatConcurrency`** sets the review
+  batch size.
+- **The output of a `complete` decision** gives the cycle count
+  (`iterations`), the repair count (`restarts`), the result for each seat,
+  and any blocking findings from seats outside the accepted quorum.
+
+<Accordion title="Full file">
+
+```ts examples/review-loop.ts
 import {
   compileGraph,
   convergence,
+  resolveGraphPlan,
   type ConvergenceDefinition,
+  type ConvergenceEvent,
+  type PlanResolution,
 } from '@obversa/runtime';
 
 const claudeLane = {
@@ -81,86 +202,136 @@ const definition: ConvergenceDefinition = {
   edges: [],
 };
 
+const reviewEvidence = {
+  inputHashes: { draft: 'sha256:release-draft' },
+  workspaceFingerprint: 'sha256:release-workspace',
+  proofArtifactDigest: 'sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
+} as const;
+
+const claudeReport = {
+  adapter: 'mock', provider: 'anthropic', modelFamily: 'claude', model: 'mock-claude',
+};
+const codexReport = {
+  adapter: 'mock', provider: 'openai', modelFamily: 'gpt', model: 'mock-gpt',
+};
+
+const events: readonly ConvergenceEvent[] = [
+  {
+    type: 'node-dispatched',
+    version: 1,
+    payload: { nodeId: 'draft', position: 'convergence/1/draft/1' },
+  },
+  {
+    type: 'node-completed',
+    version: 1,
+    payload: {
+      nodeId: 'draft',
+      position: 'convergence/1/draft/1',
+      result: { summary: 'release draft' },
+    },
+  },
+  {
+    type: 'node-dispatched',
+    version: 1,
+    payload: { nodeId: 'done-check', position: 'convergence/1/done-check/1' },
+  },
+  {
+    type: 'node-completed',
+    version: 1,
+    payload: {
+      nodeId: 'done-check',
+      position: 'convergence/1/done-check/1',
+      result: { gateMet: true, ...reviewEvidence },
+    },
+  },
+  {
+    type: 'node-dispatched',
+    version: 1,
+    payload: { nodeId: 'claude-review', position: 'review/1/claude-review/1' },
+  },
+  {
+    type: 'node-dispatched',
+    version: 1,
+    payload: { nodeId: 'codex-review', position: 'review/1/codex-review/1' },
+  },
+  {
+    type: 'engine-attempt-recorded',
+    version: 1,
+    payload: {
+      nodeId: 'claude-review', position: 'review/1/claude-review/1', sequence: 1,
+      requested: claudeReport, effective: claudeReport,
+    },
+  },
+  {
+    type: 'engine-attempt-recorded',
+    version: 1,
+    payload: {
+      nodeId: 'codex-review', position: 'review/1/codex-review/1', sequence: 1,
+      requested: codexReport, effective: codexReport,
+    },
+  },
+  {
+    type: 'node-completed',
+    version: 1,
+    payload: {
+      nodeId: 'claude-review',
+      position: 'review/1/claude-review/1',
+      result: {
+        verdict: 'pass',
+        confidence: 0.91,
+        ...reviewEvidence,
+        findings: [],
+      },
+    },
+  },
+  {
+    type: 'node-completed',
+    version: 1,
+    payload: {
+      nodeId: 'codex-review',
+      position: 'review/1/codex-review/1',
+      result: {
+        verdict: 'pass',
+        confidence: 0.9,
+        ...reviewEvidence,
+        findings: [],
+      },
+    },
+  },
+];
+
+const identity = {
+  source: 'npm:@example/release-review',
+  version: '1.0.0',
+  digest: 'sha256:7777777777777777777777777777777777777777777777777777777777777777',
+} as const;
+const resolution: PlanResolution = {
+  package: identity,
+  admission: { package: identity, permissions: [] },
+  executionLanes: [
+    { id: claudeLane.id, effective: claudeLane.requested, fallbacks: [] },
+    { id: codexLane.id, effective: codexLane.requested, fallbacks: [] },
+  ],
+};
 const graph = compileGraph(convergence, definition);
+const state = events.reduce(graph.reduce, graph.initialState());
+const plan = resolveGraphPlan(graph.describe(), resolution);
+
+console.log(JSON.stringify({
+  decision: graph.decide(state)[0],
+  events: events.length,
+  planDigest: plan.digest,
+  bounds: plan.plan.bounds,
+}));
 ```
 
-## Recorded behaviour
+</Accordion>
 
-- **Node records:** The form accepts dispatch, completion, failure, pause, and
-  resume records for each node attempt.
-- **Engine records:** Each call through the graph executor records its
-  requested and reported adapter, provider, model family, and model in an
-  `engine-attempt-recorded` event. A primary call and a fallback call have
-  separate records. A call without a reported identity records
-  `effective: null`.
-- **Rejected engine records:** For scripted events, the loop status records
-  invalid receipts in `engineReceiptRejections`. Each record has code
-  `INVALID_ENGINE_RECEIPT`, the node ID, position, sequence, and reason.
-  The field is absent until a receipt is rejected. A rejection leaves accepted
-  engine identities and the review quorum unchanged.
-- **Review records:** A seat pass includes its confidence, input hashes, and
-  workspace fingerprint. Evaluator evidence also names one proof artifact
-  digest. Every seat dispatch receives that digest, and every seat result must
-  echo it. A missing or changed digest makes that result invalid and dispatches
-  the seat again while its retry limit permits. Findings from that result can't
-  enter repair inputs or finding counts. The seat's engine record supplies
-  its provider and model family. `evidencePaths` names the input hashes that can
-  invalidate that seat. Leave it out and every input hash counts. The form
-  checks whether the accepted passes meet the quorum. With `requireDiversity`,
-  no two seats in that quorum can share a provider or a model family.
-- **Repair records:** Findings can send the form to its repair node. A later
-  cycle keeps valid seat passes and reruns invalid seats.
-- **Policy records:** New evaluator evidence invalidates each seat whose named
-  input hash changed. A producer can also invalidate an in-flight seat or record
-  a limit pause.
+## Next steps
 
-The form consumes the graph executor's upper-case failure codes. `ABORTED`
-pauses the run. `ENGINE_UNAVAILABLE` skips a declared skippable seat and pauses
-for a required seat. Other node failures use the declared retry cap before the
-required seat pauses as unresolved.
-
-## Excluding the writer
-
-For engine calls managed by the graph executor, a reviewer can't count toward
-the quorum if its reported provider or model family matches any writer or
-repair call. This check applies even when `requireDiversity` is false. It
-also applies to a cached pass after a repair. A reviewer without a reported
-provider and model family can't count toward the quorum.
-
-The definition must keep every writer and repair target, including all
-declared substitutions, separate from every review target and substitution
-by both provider and model family. Different adapters, models or lane names
-don't remove a conflict. Skippable seats follow the same rule.
-
-The check rests on what the engine reported. A call that died before
-reporting counts as all of its declared targets. The executor records an
-unknown identity when it recovers an unfinished engine attempt. The run can
-resume and complete with reviewers outside the writer's declared set. The
-runtime doesn't independently verify the provider behind an engine's report.
-Calls made inside an engine adapter or wrapper aren't recorded separately.
-The runtime uses only the identity that engine reports.
-
-Data-only nodes have no engine identity. Their results don't establish
-provider separation for work done outside the runtime's engine calls.
-
-## Stored plans and evaluator failures
-
-The convergence graph type is at version 3, and a stored plan records the
-type version it was compiled from. `createGraphExecutor` refuses a stored
-plan that doesn't match the compiled graph with `STORED_GRAPH_MISMATCH`,
-before a node starts. It doesn't convert the stored plan. Start a new run to
-use a plan compiled from the current version.
-
-When the evaluator completes without valid review evidence, the form returns
-`fail` with code `CONVERGENCE_REVIEW_EVIDENCE_INVALID`. It dispatches no review
-seat. Reopening the run keeps that failure. Correct the evaluator and start a
-new run.
-
-## Limits and output
-
-`maxIterations`, `maxReviewRestarts`, and `retryCapPerNode` bound the dispatch
-count the plan describes. `seatConcurrency` sets the review batch size.
-
-The output of a `complete` decision gives the cycle count (`iterations`), the
-repair count (`restarts`), the result for each review seat, and any blocking
-findings from seats outside the accepted quorum.
+- [A review panel with a threshold](/patterns/review-panel): the same idea
+  inside a `workflow()`, with `agree` as the threshold.
+- [Outside graph types](/graphs/contract): the contract this form is built
+  on, and how to write a form of your own.
+- [Graph executor](/graphs/executor): the failure codes the form consumes
+  and the recovery rules.

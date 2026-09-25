@@ -4,18 +4,18 @@ import { listWorkspacePackages, readAllowlist } from './check-publish-allowlist.
 
 try {
   const root = process.cwd();
-  const document = readFileSync(join(root, 'docs/public/index.mdx'), 'utf8');
+  const document = readFileSync(join(root, 'docs/public/packages/index.mdx'), 'utf8');
   const section = document.split(/^## Packages\s*$/m)[1]?.split(/^## /m)[0] ?? '';
   const rows = section.split(/\r?\n/)
     .map((line) => line.trim())
     .filter((line) => line.includes('|'))
     .slice(2)
     .map((line) => line.replace(/^\||\|$/g, '').split('|').map((cell) => cell.trim().replace(/^`|`$/g, '')));
-  if (rows.length === 0) throw new Error('docs/public/index.mdx package table is missing');
+  if (rows.length === 0) throw new Error('docs/public/packages/index.mdx package table is missing');
   const packages = listWorkspacePackages(root);
   const named = new Set();
   for (const row of rows) {
-    if (row.length !== 3) throw new Error('docs/public/index.mdx package table must have three columns');
+    if (row.length !== 3) throw new Error('docs/public/packages/index.mdx package table must have three columns');
     const [name, , documentedVersion] = row;
     named.add(name);
     const definition = packages.find((entry) => entry.name === name);

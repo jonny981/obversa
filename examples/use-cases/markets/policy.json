@@ -1,0 +1,5 @@
+{
+  "note": "This example's routing policy. The numbers are illustrative and not a recommendation.",
+  "minConfidence": 0.75,
+  "minEvidenceProbability": 0.7
+}

@@ -1,40 +1,100 @@
 ---
 title: "Claude CLI Engine"
-description: "@obversa/engine-claude-cli runs engine requests through a fresh Claude CLI process."
+description: "@obversa/engine-claude-cli: Claude Code as a seat, one fresh process per call."
 ---
 
-`@obversa/engine-claude-cli` is an engine plugin that runs engine requests through the `claude` command-line tool. Each attempt runs in a fresh process, so every step starts with a clean context.
-
-## Requirements
-
-- The Claude CLI installed and signed in
+`@obversa/engine-claude-cli` runs Claude Code as an engine: every request is
+one fresh `claude` process, so every step starts with a clean context and
+nothing leaks from one step to the next. Use it for the Claude seats in a
+team.
 
 ## Install
 
-```bash
-npm install @obversa/obversa
+<CodeGroup>
+
+```bash npm
+npm install @obversa/engine-claude-cli
 ```
+
+```bash pnpm
+pnpm add @obversa/engine-claude-cli
+```
+
+</CodeGroup>
+
+Included in `@obversa/obversa`.
+
+## Requirements
+
+- Claude Code installed and signed in. The `claude` command must be on your
+  `PATH`, or you pass its path as `cliBinary`. The plugin has no API key
+  option.
 
 ## Identity
 
-The plugin reports `provider: 'anthropic'`. It runs the model the request names, or `defaultModel` when the request names none.
+The plugin reports `provider: 'anthropic'` and model family `claude`. It
+runs the model the request names, or `defaultModel` when the request names
+none.
 
-## Usage
+## Quickstart
 
-```ts
-import { ClaudeCliEngine } from '@obversa/engine-claude-cli';
+`claude(model)` is the seat helper a `workflow()` role takes:
 
-const engine = new ClaudeCliEngine({
-  defaultModel: 'claude-sonnet-4-5',
-});
+```ts examples/teams/writer-reviewer-pair.ts (excerpt) {2}
+    roles: {
+      write: engines.claude('claude-sonnet-4-5'),
+      review: [engines.codex('gpt-5.6-luna')],
+    },
 ```
 
-## Limits
+The seat starts Claude Code unattended and able to write files. It doesn't
+use the mode that only accepts edits, because that mode would block the
+commands a headless run needs; pass `ClaudeSeatOptions` to choose another
+`permissionMode`. `new ClaudeCliEngine(options)` is the same engine without
+the seat identity, for a job or a graph binding you assemble yourself.
 
-- The `claude` command must be on your `PATH`, or you pass its path as `cliBinary`.
-- The plugin has no API key option.
-- When a run fails, the plugin reads what the CLI printed to spot a usage limit or a rate limit.
-- In the `read` workspace mode, Claude gets only the `Read`, `Grep` and `Glob`
-  tools the request names. In the `none` mode it gets no tools. Both modes block
-  `Bash`, `Edit`, `Write`, the sub-agent tools and every MCP tool. A settings
-  file outside the run can't restore them.
+<Warning>
+Run a Claude seat in a directory you're happy for a model to change. It
+runs with permission prompts off, so it can run any command the process
+can.
+</Warning>
+
+## Options
+
+### `permissionMode`
+
+`default`, `acceptEdits`, `bypassPermissions`, `plan`, `dontAsk` or `auto`,
+passed to the CLI. In the `read` workspace mode Claude gets only the
+`Read`, `Grep` and `Glob` tools the request names; in `none` it gets no
+tools. Both modes block `Bash`, `Edit`, `Write`, the sub-agent tools and
+every MCP tool, and a settings file outside the run can't restore them.
+
+### The rest
+
+| Field | Type | Default | Description |
+| --- | --- | --- | --- |
+| `defaultModel` | `string` | none | The model when the request names none. |
+| `cliBinary` | `string` | `claude` on `PATH` | The executable to run. |
+| `cliArgs` | `readonly string[]` | none | Extra arguments for every call. |
+
+## Errors
+
+- **`EngineError` of kind `missing-cli`** when the executable can't run.
+- **A usage or rate limit** is read from what the CLI printed when a run
+  fails, so the failure is typed as a limit rather than a plain error.
+
+## API
+
+- **`claude(model, options?)`**: a `TeamSeat` for a workflow role.
+  [Quickstart](#quickstart).
+- **`ClaudeCliEngine`**: the engine class. **`ClaudeCliEngineOptions`**,
+  **`ClaudeSeat`**, **`ClaudeSeatOptions`**: its types.
+- **`buildClaudeArgs`**, **`classifyCliLimit`**, **`parseResetAt`**: the
+  argument builder and the limit readers, exported for tests.
+
+## Next steps
+
+- [A writer and a reviewer](/patterns/writer-and-reviewer): a Claude seat
+  writing and a Codex seat reviewing, with a real run.
+- [Claude Agent SDK Engine](/packages/engine-claude-agent-sdk): the same
+  sign-in through the SDK instead of the CLI.

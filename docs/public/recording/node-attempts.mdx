@@ -1,34 +1,221 @@
 ---
-title: "Safe node attempts"
-description: "Run one bounded engine turn with explicit identity, results, usage, and handled-exit cleanup."
+title: "Safe Node Attempts"
+description: "Run one bounded engine turn and record what was asked, what ran, what came back and what it cost."
 ---
 
 Run one piece of work as one bounded engine turn, and get an honest record
-of it. The runtime records what was requested, what actually ran, what came
-back, and whether token usage was reported or unknown.
+of it: what was requested, what ran, what came back, and whether token
+usage was reported or unknown. Use this page when you bind engines to
+nodes yourself or write an engine plugin. For where these records live,
+read [Events and artifacts](/recording/events-and-artifacts); for what a
+resumed run repeats, [The record](/concepts/record).
 
-An engine-backed node attempt is one fresh engine call. Command adapters use
-one fresh CLI process, and data-only attempts use no engine process. The
-graph executor connects attempts to graph dispatch.
+An engine-backed node attempt is one fresh engine call. Command adapters
+use one fresh CLI process, and data-only attempts use no engine process.
+The graph executor connects attempts to graph dispatch. The request names
+the work and its bounds:
 
-## Run the example
+```ts examples/safe-node-attempt.ts (excerpt) {11-14,16-17}
+function request(
+  directory: string,
+  model: string,
+  jsonSchema: JsonValue,
+): AgentRequest {
+  return {
+    prompt: 'Return the structured answer.',
+    system: 'Follow the result contract.',
+    model,
+    jsonSchema,
+    tools: [],
+    allowedTools: [],
+    cwd: directory,
+    workspaceMode: 'none',
+    leaf: true,
+    timeoutMs: 5_000,
+    timeoutGraceMs: 200,
+    maxOutputBytes: 64 * 1_024,
+    maxMemoryBytes: 256 * 1_024 * 1_024,
+  };
+}
+```
 
+A request needs:
 
-`examples/safe-node-attempt.ts` runs the Grok and OpenCode adapters against
-local scripted executables. It doesn't call a model or the network. Grok
-returns a native structured result. OpenCode returns one marked text part,
-which the job's own parser reads. Both adapter results pass through the
-public result validator before their final parts are used. OpenCode
-deliberately leaves out a valid usage receipt, so the runtime keeps its
-usage as `unknown` instead of zero.
+- **`prompt` and `model`**, what to ask and which model to ask.
+- **`tools`, `allowedTools` and `workspaceMode`**, the access the process
+  may have.
+- **`timeoutMs`, `maxOutputBytes` and `maxMemoryBytes`**, the bounds one
+  turn runs inside.
+
+## Run an adapter
+
+Each adapter runs one attempt and returns a result the public validator
+checks before its parts are used:
+
+```ts examples/safe-node-attempt.ts (excerpt) {1,4,12,15}
+  const grok = validateAgentResult(await new GrokCliEngine({
+    executable: grokExecutable,
+    version: '1.0.5',
+    identity: { provider: 'xai', modelFamily: 'grok-4' },
+    permissionMode: 'dontAsk',
+  }).run(
+    request(directory, 'grok-4-example', RESULT_SCHEMA),
+    () => {},
+    new AbortController().signal,
+  ));
+
+  const opencode = validateAgentResult(await new OpenCodeCliEngine({
+    executable: openCodeExecutable,
+    version: '1.18.23',
+    identity: { provider: 'opencode', modelFamily: null },
+  }).run(
+    request(directory, 'opencode/big-pickle', RESULT_SCHEMA),
+    () => {},
+    new AbortController().signal,
+  ));
+```
+
+The example runs the Grok and OpenCode adapters against local scripted
+executables, with no model and no network. Grok returns a native structured
+result; OpenCode returns one marked text part, which the job's own parser
+reads. OpenCode's fixture leaves out a valid usage receipt on purpose, so
+the runtime keeps its usage as `unknown` instead of zero. Run it with
+`npx tsx safe-node-attempt.ts`:
+
+```json Output
+{
+  "grok": {
+    "requested": {
+      "adapter": "grok-cli",
+      "adapterVersion": "1.0.5",
+      "provider": "xai",
+      "modelFamily": "grok-4",
+      "model": "grok-4-example",
+      "executable": "grok-fixture.mjs",
+      "capabilities": []
+    },
+    "effective": {
+      "adapter": "grok-cli",
+      "adapterVersion": "1.0.5",
+      "provider": "xai",
+      "modelFamily": "grok-4",
+      "model": "grok-4-example",
+      "executable": "grok-fixture.mjs",
+      "capabilities": []
+    },
+    "final": {
+      "answer": 42
+    },
+    "usage": "reported"
+  },
+  "opencode": {
+    "requested": {
+      "adapter": "opencode-cli",
+      "adapterVersion": "1.18.23",
+      "provider": "opencode",
+      "modelFamily": "big",
+      "model": "opencode/big-pickle",
+      "executable": "opencode-fixture.mjs",
+      "capabilities": []
+    },
+    "effective": {
+      "adapter": "opencode-cli",
+      "adapterVersion": "1.18.23",
+      "provider": "opencode",
+      "modelFamily": "big",
+      "model": "opencode/big-pickle",
+      "executable": "opencode-fixture.mjs",
+      "capabilities": []
+    },
+    "final": {
+      "answer": 42
+    },
+    "usage": "unknown"
+  },
+  "temporaryDirectoryRemoved": true
+}
+```
 
 The report prints the stub executable paths relative to the temporary
-directory. The exported `attemptReport` keeps the absolute paths from the
-adapter results.
+directory; the exported `attemptReport` keeps the absolute paths. Both
+requested and effective identities are recorded. If a CLI reports a
+different model, the two records stay separate and the change stays
+visible. Each identity records the adapter, adapter version, provider,
+model family, model, capabilities and `executable`: the absolute path a
+command adapter selected, or `null` for an engine with no child process.
+The path identifies the selected wrapper, not its resolved target or file
+digest. When no Claude or Codex binary is configured, those plugins search
+the inherited `PATH` once and record the absolute path they select.
 
-## Source
+## Declare access
 
-```ts
+`tools` lists the built-in capabilities the CLI may expose. `allowedTools`
+holds the narrower permission rules approved by the host. An adapter that
+can't express the declared access refuses the request before it starts the
+process, so no model runs.
+
+The workspace mode is a ceiling. An approval never adds a capability the
+mode withholds, and a bypass never goes past it. A reviewer with no way to
+read the work is refused rather than run, so a review rests only on
+material the seat could open. The example uses `workspaceMode: 'none'` and
+exposes no tools. An evidence-only job can use `workspaceMode: 'read'` with
+declared read tools. A writing job must name its write access and gets a
+separate scratch directory for temporary data.
+
+An action decision is made before an effect: `allow` runs it, `wait` pauses
+it, and `deny` records a refusal without running it.
+
+## Read results and usage
+
+A successful result has ordered parts and exactly one final part. A stopped
+or truncated turn can keep the parts it produced, including no parts at
+all, but it's still a failed attempt.
+
+Usage has two states. `reported` means the engine supplied a valid receipt.
+`unknown` means it didn't. Unknown usage never becomes a fake zero.
+
+Command adapters set three environment variables before they start a
+process, and children inherit them unless they replace their environment:
+
+- **`OBVERSA_HEADLESS=1`** tells hooks and child tools that the attempt is
+  unattended, so they must not open interactive or desktop prompts.
+- **`OBVERSA_RUN_ID`** identifies the run that owns the process.
+- **`OBVERSA_ATTEMPT_ID`** identifies the exact attempt and lets cleanup
+  find descendants that detach from their parent process.
+
+## Failure
+
+- **Fallback.** One attempt can use one declared fallback after a model
+  becomes unavailable. The failed model stays in the attempt record. Both
+  lanes share one clock, so a fallback receives only the time left by the
+  first lane. The graph executor uses durable events to keep later graph
+  work away from that model.
+- **`TIMEOUT`.** `timeoutMs` is the work deadline; at that point a command
+  adapter starts stopping its process tree. `timeoutGraceMs` is teardown
+  time: the adapter asks the processes to stop, waits that long, then
+  force-stops any that remain. The grace doesn't start more model work. A
+  marked final result returned inside the deadline stays separate from a
+  later transport failure. If cleanup makes the adapter return after the
+  deadline, the attempt fails with `TIMEOUT` and its parsed `result` stays
+  `null`, while the record keeps the returned parts, reported usage,
+  effective engine and transport failure as evidence. The runtime waits up
+  to seven more seconds for that cleanup evidence, and the wait can't turn
+  the attempt into a success.
+- **Cleanup.** The command-adapter kit cleans its process tree on normal
+  completion, timeout, abort and other handled exits, and the runtime waits
+  for that cleanup before it records the attempt. `temporaryDirectoryRemoved`
+  in the output covers only the example's fixture files; the package test
+  suite checks child-process cleanup separately.
+
+## Limits
+
+- **Hosts own two things.** Recovery after the supervising process dies,
+  and checks against the CLIs installed on the machine. The
+  [supervised runner](/driving/runner) does both.
+
+<Accordion title="Full file">
+
+```ts examples/safe-node-attempt.ts
 import assert from 'node:assert/strict';
 import { chmod, mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { existsSync } from 'node:fs';
@@ -216,78 +403,12 @@ console.log(JSON.stringify(attemptReport, (key, value: unknown) => (
 ), 2));
 ```
 
-The output records both requested and effective identities. If a CLI reports a
-different model, the two records stay separate and the change stays visible.
-Each identity records the adapter, adapter version, provider, model family,
-model, capabilities, and `executable`. Command adapters record the absolute
-path they selected. An engine with no child executable uses `null`. The path
-identifies the selected wrapper, not its resolved target or file digest. When
-no Claude or Codex binary is configured, those plugins search the inherited
-`PATH` once and record the absolute path they select.
-`temporaryDirectoryRemoved` covers only this example's fixture files. The
-package test suite separately checks child-process cleanup on handled exits.
+</Accordion>
 
-## Headless process markers
+## Next steps
 
-Command adapters set three environment variables before they start a process:
-
-- **`OBVERSA_HEADLESS=1`** tells hooks and child tools that the attempt is
-  unattended, so they must not open interactive or desktop prompts.
-- **`OBVERSA_RUN_ID`** identifies the run that owns the process.
-- **`OBVERSA_ATTEMPT_ID`** identifies the exact node attempt and lets cleanup
-  find descendants that detach from their parent process.
-
-Child processes inherit these values unless they replace their environment.
-
-## Keep results and usage honest
-
-A successful result has ordered parts and exactly one final part. A stopped or
-truncated turn can keep the parts it produced, including no parts at all, but
-it's still a failed attempt.
-
-Usage has two states. `reported` means the engine supplied a valid receipt.
-`unknown` means it didn't. Unknown usage never becomes a fake zero.
-
-## Declare access before the process starts
-
-`tools` lists the built-in capabilities the CLI may expose. `allowedTools`
-holds the narrower permission rules approved by the host. An adapter that
-can't express the declared access refuses the request before it starts the
-process, so no model runs.
-
-The workspace mode is a ceiling. An approval never adds a capability the mode
-withholds, and a bypass never goes past it. A reviewer with no way to read
-the work is refused rather than run. A review can rest only on material the
-seat could open.
-
-The example uses `workspaceMode: 'none'` and exposes no tools. An evidence-only
-job can use `workspaceMode: 'read'` with declared read tools. A writing job must
-name its write access and gets a separate scratch directory for temporary data.
-
-An action decision is made before an effect. `allow` runs it, `wait` pauses it,
-and `deny` records a refusal without running it.
-
-## Keep fallback and cleanup visible
-
-One attempt can use one declared fallback after a model becomes unavailable.
-The failed model stays in the attempt record. Both lanes share one clock, so a
-fallback receives only the time left by the first lane. The graph executor uses
-durable events to keep later graph work away from that model.
-
-`timeoutMs` is the work deadline. At that point a command adapter starts
-stopping its process tree. `timeoutGraceMs` is teardown time: the adapter asks
-the processes to stop, waits for that grace, then force-stops any that remain.
-The grace doesn't start more model work.
-
-A marked final result returned inside the final-result deadline stays separate
-from a later transport failure. If process cleanup makes the adapter return
-after that deadline, the attempt fails with `TIMEOUT` and its parsed `result`
-stays `null`. The record still keeps the returned parts, reported usage,
-effective engine, and transport failure as evidence. After the deadline, the
-runtime waits up to seven more seconds for that cleanup evidence. This fixed
-wait can't turn the attempt into a success.
-
-The command-adapter kit cleans its process tree on normal completion, timeout,
-abort, and other handled exits. The runtime waits for that cleanup before it
-records the attempt. Hosts own two things themselves: recovery after the
-supervising process dies, and checks against the CLIs actually installed.
+- [Supervised local runs](/driving/runner): the watchdog that checks engines
+  before the first step and restarts a killed worker.
+- [Events and artifacts](/recording/events-and-artifacts): the stores an
+  attempt's events and parts land in.
+- [API](/packages/api): the engine contract every adapter implements.

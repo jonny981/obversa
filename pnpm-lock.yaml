@@ -25,6 +25,12 @@ importers:
       '@obversa/core':
         specifier: workspace:^
         version: link:packages/core
+      '@obversa/engine-anthropic-api':
+        specifier: workspace:^
+        version: link:plugins/engine-anthropic-api
+      '@obversa/engine-claude-agent-sdk':
+        specifier: workspace:^
+        version: link:plugins/engine-claude-agent-sdk
       '@obversa/engine-claude-cli':
         specifier: workspace:^
         version: link:plugins/engine-claude-cli
@@ -46,6 +52,9 @@ importers:
       '@obversa/memory-markdown':
         specifier: workspace:^
         version: link:plugins/memory-markdown
+      '@obversa/memory-simple':
+        specifier: workspace:^
+        version: link:plugins/memory-simple
       '@obversa/notify-webhook':
         specifier: workspace:^
         version: link:plugins/notify-webhook

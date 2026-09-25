@@ -1,0 +1,62 @@
+---
+title: "Do I Need Temporal to Survive a Crash?"
+sidebarTitle: "Durable Execution"
+description: "Not for a run on one machine: a recorded run carries on from its file. Temporal keeps work alive across many workers for days, on a service."
+---
+
+Not for a run on one machine. A recorded Obversa run started again with
+`resume: true` carries on from its file and does not repeat a finished
+step, with nothing to install and no server running. Temporal answers a
+bigger question: it replays an event history on a service you run or rent
+and keeps multi-day work alive across many workers and machines. If that
+is your problem, you need Temporal or something like it. If your problem
+is a team of coding agents on your laptop that should not start the week
+again after a crash, you don't.
+
+## In Obversa
+
+The record is an event store and an artifact store with a written policy.
+Reading a run back is folding its events, and nothing else:
+
+```ts examples/durable-storage.ts (excerpt) {48,56}
+async function foldStoredState(binding: RunStorageBinding, runId: string) {
+  const stream = { namespace: binding.record.namespace, streamId: runId };
+  const scope = { namespace: binding.record.namespace, runId };
+  let eventCount = 0;
+  let artifactBytes = 0;
+  let lastArtifactDigest: string | null = null;
+
+  for await (const event of binding.eventStore.read(stream)) {
+    if (
+      event.type !== 'example:artifact-recorded'
+      || !isJsonObject(event.payload)
+    ) {
+      throw new Error(`Unexpected stored event ${event.type}.`);
+    }
+    const reference = validateArtifactReference(event.payload.artifact);
+    const bytes = await binding.artifactStore.read(scope, reference);
+    eventCount += 1;
+    artifactBytes += bytes.byteLength;
+    lastArtifactDigest = reference.digest;
+  }
+
+  return { eventCount, artifactBytes, lastArtifactDigest };
+}
+```
+
+Every event is appended as it happens, and every artifact is stored by
+digest, so the state of a run is only ever rebuilt from what was written.
+Replaying a record never calls an engine.
+
+## Agent harness
+
+An agent harness is the software around one model that makes it an agent:
+its loop, tools and memory. Claude Code and Codex are harnesses, and the
+workflow inside one dies with its session. Durability here is about the
+run across those harnesses, not inside one. [What is an agent
+harness?](/glossary/agent-harness) has the term.
+
+## Next steps
+
+- [Obversa and Temporal](/compare/temporal): what each is for, and where each wins.
+- [The record](/concepts/record): the event log as the single source of truth.

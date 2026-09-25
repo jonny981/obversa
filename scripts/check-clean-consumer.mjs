@@ -311,30 +311,35 @@ export function checkedPackedRuntimeVersion(packedVersion, sourceVersion) {
   );
 }
 
-function sourceFromPublicDoc(document) {
-  const match = /## Source[\s\S]*?```ts\n([\s\S]*?)\n```/.exec(document);
-  if (!match) throw new Error('The public page has no TypeScript source block');
-  return `${match[1]}\n`;
-}
-
-function sourceFromProcessDoc(document) {
-  const match = /## Run one\n\n```ts\n([\s\S]*?)\n```/.exec(document);
-  if (!match) throw new Error('The core page has no TypeScript example block');
-  return `${match[1]}\n`;
+/**
+ * The whole-file block on a page: a `ts` fence whose title is
+ * `examples/<file>` with anything after it except "(excerpt)". A fence that
+ * names the same file and ends "(excerpt)" is a cut of the file, not the
+ * file, and never satisfies this check.
+ */
+export function sourceFromPublicDoc(document, file) {
+  const escaped = file.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  const pattern = new RegExp(
+    '^[ \\t]*```ts examples/' + escaped + '([^\\n]*)\\n([\\s\\S]*?)\\n[ \\t]*```', 'gm');
+  for (const match of document.matchAll(pattern)) {
+    if (match[1].includes('(excerpt)')) continue;
+    return `${match[2]}\n`;
+  }
+  throw new Error(`The public page has no whole-file block titled examples/${file}`);
 }
 
 export function checkedTeamConversationPage(document, source, output) {
-  assert.equal(sourceFromPublicDoc(document), source,
+  assert.equal(sourceFromPublicDoc(document, 'team-conversation.ts'), source,
     'The team conversation page must match its complete runnable source.');
-  const introduction = document.slice(0, document.indexOf('## Source'));
-  const blocks = [...introduction.matchAll(/```ts\n([\s\S]*?)\n```/g)];
+  const blocks = [...document.matchAll(
+    /^[ \t]*```ts examples\/team-conversation\.ts \(excerpt\)[^\n]*\n([\s\S]*?)\n[ \t]*```/gm)];
   assert.equal(blocks.length, 3, 'The team conversation page must have three short TypeScript blocks.');
   for (const [index, name] of ['imports', 'definition', 'posts'].entries()) {
     const region = new RegExp(`^[ \\t]*// #region ${name}\\n([\\s\\S]*?)\\n[ \\t]*// #endregion ${name}$`, 'm').exec(source);
     assert.ok(region, `The ${name} source region must have both markers.`);
     assert.equal(blocks[index][1], region[1], `The ${name} short block must match its source region.`);
   }
-  const match = /## Output[\s\S]*?```json\r?\n([\s\S]*?)```/.exec(document);
+  const match = /^[ \t]*```json Output\r?\n([\s\S]*?)```/m.exec(document);
   assert.ok(match, 'The team conversation page must include its printed report.');
   assert.deepEqual(JSON.parse(output), JSON.parse(match[1]),
     'The team conversation page must match its printed report.');
@@ -667,7 +672,7 @@ async function main() {
   const teamConversationPath = join(root, 'examples', 'team-conversation.ts');
   const teamConversationSource = await readFile(teamConversationPath, 'utf8');
   const teamConversationDocument = await readFile(
-    join(root, 'docs', 'public', 'workflows', 'team-conversation.mdx'), 'utf8',
+    join(root, 'docs', 'public', 'patterns', 'team-conversation.mdx'), 'utf8',
   );
   const reviewLoopExamplePath = join(root, 'examples', 'review-loop.ts');
   const callbackGateExamplePath = join(root, 'examples', 'callback-gate.ts');
@@ -704,14 +709,6 @@ async function main() {
     join(root, 'docs', 'public', 'graphs', 'contract.mdx'),
     'utf8',
   );
-  const publicDocument = await readFile(
-    join(root, 'docs', 'public', 'workflows', 'offline-review.mdx'),
-    'utf8',
-  );
-  const featureDocument = await readFile(
-    join(root, 'docs', 'public', 'workflows', 'feature-delivery.mdx'),
-    'utf8',
-  );
   const forgeDocument = await readFile(
     join(root, 'docs', 'public', 'workflows', 'forge-helper.mdx'),
     'utf8',
@@ -737,7 +734,7 @@ async function main() {
     'utf8',
   );
   const safeChangeDocument = await readFile(
-    join(root, 'docs', 'public', 'workflows', 'safe-change.mdx'),
+    join(root, 'docs', 'public', 'patterns', 'safe-change.mdx'),
     'utf8',
   );
   const processDocument = await readFile(
@@ -749,40 +746,34 @@ async function main() {
     'utf8',
   );
   const runChildExampleSource = await readFile(runChildExamplePath, 'utf8');
-  if (sourceFromPublicDoc(publicDocument) !== exampleSource) {
-    throw new Error('The offline production-line page does not match its runnable source');
-  }
-  if (sourceFromPublicDoc(graphDocument) !== graphExampleSource) {
+  if (sourceFromPublicDoc(graphDocument, 'custom-graph.ts') !== graphExampleSource) {
     throw new Error('The outside graph contract page does not match its runnable source');
   }
-  if (sourceFromPublicDoc(storageDocument) !== storageExampleSource) {
+  if (sourceFromPublicDoc(storageDocument, 'durable-storage.ts') !== storageExampleSource) {
     throw new Error('The storage page does not match its runnable source');
   }
-  if (sourceFromPublicDoc(attemptDocument) !== attemptExampleSource) {
+  if (sourceFromPublicDoc(attemptDocument, 'safe-node-attempt.ts') !== attemptExampleSource) {
     throw new Error('The node-attempt page does not match its runnable source');
   }
-  if (sourceFromPublicDoc(callbackGateDocument) !== callbackGateExampleSource) {
+  if (sourceFromPublicDoc(callbackGateDocument, 'callback-gate.ts') !== callbackGateExampleSource) {
     throw new Error('The callback-gate page does not match its runnable source');
   }
-  if (sourceFromPublicDoc(proofAcceptanceDocument) !== proofBoundApprovalExampleSource) {
+  if (sourceFromPublicDoc(proofAcceptanceDocument, 'proof-bound-approval.ts') !== proofBoundApprovalExampleSource) {
     throw new Error('The proof-acceptance page does not match its runnable source');
   }
-  if (sourceFromPublicDoc(safeChangeDocument) !== safeChangeExampleSource) {
+  if (sourceFromPublicDoc(safeChangeDocument, 'safe-change.ts') !== safeChangeExampleSource) {
     throw new Error('The safe-change page does not match its runnable source');
   }
-  if (sourceFromPublicDoc(featureDocument) !== featureExampleSource) {
-    throw new Error('The feature-delivery production-line page does not match its runnable source');
-  }
-  if (sourceFromPublicDoc(forgeDocument) !== forgeExampleSource) {
+  if (sourceFromPublicDoc(forgeDocument, 'forge-helper.ts') !== forgeExampleSource) {
     throw new Error('The forge helper page does not match its runnable source');
   }
-  if (sourceFromPublicDoc(searchMarkdownDocument) !== searchMarkdownExampleSource) {
+  if (sourceFromPublicDoc(searchMarkdownDocument, 'memory-markdown.ts') !== searchMarkdownExampleSource) {
     throw new Error('The Markdown search package page does not match its runnable source');
   }
-  if (sourceFromProcessDoc(processDocument) !== runChildExampleSource) {
+  if (sourceFromPublicDoc(processDocument, 'run-child.ts') !== runChildExampleSource) {
     throw new Error('The core page does not match its runnable source');
   }
-  if (!/```text\nready\n```/.test(processDocument)) {
+  if (!/```text Output\nready\n```/.test(processDocument)) {
     throw new Error('The core page does not record the runnable output');
   }
 
@@ -849,6 +840,12 @@ async function main() {
     await copyFile(join(root, 'examples', 'builtin-workflows.ts'), join(consumerDirectory, 'builtin-workflows.ts'));
     await copyFile(join(root, 'examples', 'surface-diff.ts'), join(consumerDirectory, 'surface-diff.ts'));
     await copyFile(join(root, 'examples', 'memory.ts'), join(consumerDirectory, 'memory.ts'));
+    await copyFile(join(root, 'examples', 'memory-git.ts'), join(consumerDirectory, 'memory-git.ts'));
+    await copyFile(join(root, 'examples', 'memory-simple.ts'), join(consumerDirectory, 'memory-simple.ts'));
+    await copyFile(join(root, 'examples', 'reasoning-record.ts'), join(consumerDirectory, 'reasoning-record.ts'));
+    await copyFile(join(root, 'examples', 'engine-anthropic-api-binding.ts'), join(consumerDirectory, 'engine-anthropic-api-binding.ts'));
+    await copyFile(join(root, 'examples', 'engine-jev-api-binding.ts'), join(consumerDirectory, 'engine-jev-api-binding.ts'));
+    await copyFile(join(root, 'examples', 'engine-claude-agent-sdk-binding.ts'), join(consumerDirectory, 'engine-claude-agent-sdk-binding.ts'));
     await copyFile(searchMarkdownExamplePath, join(consumerDirectory, 'memory-markdown.ts'));
     await cp(
       join(root, 'examples', 'memory-markdown-corpus'),
@@ -883,6 +880,8 @@ async function main() {
     // proof, its brief and its sample inputs, and the proofs read those files
     // by their own location.
     await cp(join(root, 'examples', 'use-cases'), join(consumerDirectory, 'use-cases'), { recursive: true });
+    // markets travels inside the use-cases tree: the proof reads its fixtures
+    // (briefs, sessions, observations, evidence, policy.json) beside its source.
 
     run('pnpm', ['install', '--prefer-offline', '--ignore-scripts'], {
       cwd: consumerDirectory,
@@ -1192,7 +1191,7 @@ async function main() {
     assert.deepEqual(directPipeline, expectedPipelineReport);
     assert.deepEqual(compiledReviewLoop, expectedReviewLoopReport);
     assert.deepEqual(directReviewLoop, expectedReviewLoopReport);
-    const reviewLoopReport = reviewLoopDocument.match(/```json\r?\n([\s\S]*?)```/);
+    const reviewLoopReport = reviewLoopDocument.match(/```json Output\r?\n([\s\S]*?)```/);
     assert.ok(reviewLoopReport, 'The review-loop page must include its JSON report');
     assert.deepEqual(
       JSON.parse(reviewLoopReport[1]),
@@ -1206,16 +1205,16 @@ async function main() {
     assert.deepEqual(compiledProofCache, expectedProofCacheReport);
     assert.deepEqual(directProofCache, expectedProofCacheReport);
     const safeChangePageReport = safeChangeDocument
-      .match(/## Run the workflow[\s\S]*?```json\r?\n([\s\S]*?)```/);
+      .match(/```json Output\r?\n([\s\S]*?)```/);
     assert.ok(safeChangePageReport, 'The safe-change page must include its JSON report');
     assert.deepEqual(compiledSafeChange, JSON.parse(safeChangePageReport[1]));
     assert.deepEqual(directSafeChange, compiledSafeChange);
-    const proofCacheReport = proofAcceptanceDocument.split('## Read-only proof cache')[1]
-      ?.match(/```json\r?\n([\s\S]*?)```/);
+    const proofCacheReport = proofAcceptanceDocument.split('## Share evidence')[1]
+      ?.match(/```json Output\r?\n([\s\S]*?)```/);
     assert.ok(proofCacheReport, 'The proof page must include its cache report');
     assert.deepEqual(JSON.parse(proofCacheReport[1]), compiledProofCache);
     const forgePageReport = forgeDocument
-      .match(/## Run the example[\s\S]*?```json\r?\n([\s\S]*?)```/);
+      .match(/## Run it[\s\S]*?```json Output\r?\n([\s\S]*?)```/);
     assert.ok(forgePageReport, 'The forge helper page must include its JSON report');
     assert.deepEqual(forgeHelper, JSON.parse(forgePageReport[1]));
     assert.deepEqual(directForgeHelper, forgeHelper);

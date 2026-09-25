@@ -1,0 +1,159 @@
+---
+title: "Evals in an Agent Workflow"
+sidebarTitle: "Evals"
+description: "Checks that decide the next step: a test, a judge, a panel, a tournament, a score."
+---
+
+Put a check between an attempt and the next step, and let the check decide
+what happens: the step runs again with the findings, the run takes another
+branch, or the run stops. That is what an eval is here. It runs inside the
+workflow, on this attempt, and its result is the next step, not a report
+on the side. Use one wherever a model's first answer isn't the last word.
+
+| Kind | Decides | Page |
+| --- | --- | --- |
+| Code eval: a command stage | Exit 0 passes; red carries the output to the writer, or picks a branch | [A command decides the path](/patterns/command-kickback) |
+| LLM-as-judge: a review seat from another model family | Pass or fail with findings; fail runs the writer again | [A writer and a reviewer](/patterns/writer-and-reviewer) |
+| Panel eval: several judges and a threshold | Passes when `agree` of them accept | [A review panel with a threshold](/patterns/review-panel) |
+| Tournament: an eval that picks a winner | A function scores each candidate; the highest lands | [Three candidates, one winner](/patterns/tournament) |
+| Scored eval: `agentCheck` and confidence conditions | A gate opens when a score clears a threshold you set | [Outside graph types](/graphs/contract) |
+
+## Run a test
+
+A command is the plainest eval: no model, no tokens, and no argument about
+the verdict. Its exit code decides:
+
+```ts examples/command-kickback.ts (excerpt) {11}
+const test = commandJob(
+  'test',
+  [
+    process.execPath,
+    '--input-type=module',
+    '-e',
+    `import { add } from ${JSON.stringify(source)};
+     if (add(2, 2) !== 4) { console.error('add(2, 2) returned ' + add(2, 2)); process.exit(1); }`,
+  ],
+  { target: 'implement' },
+);
+```
+
+A red run carries the command's captured output to `implement` as the
+finding, and the writer runs again with it. A command's result can also
+choose the branch that runs next, through `passed(name)` and
+`failed(name)` on the steps that depend on it. Some people call a test
+run a code eval. Here it's a test.
+
+## Ask a judge
+
+An LLM-as-judge reads the writer's result and returns a decision with
+findings. In a `workflow()`, the judge is a review seat from a different
+model family than the writer, and the team is refused before any model runs
+when they share one:
+
+```ts examples/teams/writer-reviewer-pair.ts (excerpt) {2-3,6}
+      stage('review', {
+        panel: 'review',
+        agree: 1,
+        desc: 'Read the code, the test and its result.',
+        gate: 'The change meets the brief.',
+        sendsBackTo: 'write',
+      }),
+```
+
+The judge's decision is its reply: the panel reads the first JSON object in
+it. A rejection goes to `write` with the findings, as many times as that
+stage's `retry` allows. A reply with no decision is asked for once more,
+then counted as an engine error, not a rejection.
+
+## Ask several
+
+A panel is a judge eval with a threshold. Several reviewers read at once,
+and `agree` says how many must accept:
+
+```ts examples/teams/threshold-panel.ts (excerpt) {3-6}
+    roles: {
+      implement: engines.claude('claude-sonnet-4-5'),
+      review: [
+        engines.codex('gpt-5.6-luna'),
+        engines.opencode('opencode/big-pickle'),
+      ],
+    },
+```
+
+Set `agree` to the number of reviewers when one dissent must be enough to
+fail the step. Below that, the change can pass despite a dissent, and the
+dissent is still on the record. The judges decide whether the writer runs
+again.
+
+## Pick a winner
+
+A tournament runs the same task several times, in a worktree each, and a
+judge function scores every candidate that passed:
+
+```ts examples/tournament.ts (excerpt)
+const score = async (outcome: Outcome, ctx: JobContext): Promise<number> => {
+  if (outcome.status !== 'pass') return 0;
+  const source = await readFile(join(ctx.workspace.dir, 'src/retry.ts'), 'utf8');
+  let points = 1;
+  if (/MAX_ATTEMPTS\s*=\s*\d+/.test(source)) points += 1;
+  if (/signal\?\.aborted/.test(source)) points += 1;
+  return points;
+};
+```
+
+The judge reads the files on disk, not the candidate's report of itself.
+The highest score lands and the rest leave nothing behind.
+
+## Score a condition
+
+A scored eval gates a step on a number. `agentCheck` asks an engine one
+question about the evidence and reads back a verdict with a confidence, or
+a score per dimension you name, and the gate opens when the result clears
+the threshold you set. `confidenceCondition` reads a confidence the job
+wrote in its own text, and `minConfidence` reads the one on the last
+outcome. All three are conditions on the graph, so a `when` or an `until`
+can hold a step to them. No example file shows one yet; the
+[graph contract](/graphs/contract) lists them.
+
+## Evals vs trace scoring
+
+| Scoring traces after the fact | Evals here |
+| --- | --- |
+| Runs over a dataset or a trace, after the run | Runs inside the run, on this attempt |
+| Produces a score for a person to read | Produces the next step: run again, branch, or stop |
+| The run has already finished | The writer runs again with the findings before the run moves on |
+
+Both have a place. A dataset tells you how a prompt did last week; an eval
+here stops a bad attempt from becoming the next step today.
+
+## Three shapes, one umbrella
+
+A feedback loop is the umbrella: a check fails a step, the findings travel,
+the step runs again. Three shapes have their own names, and each lives on
+its own page: the evaluator-optimizer pair on
+[A writer and a reviewer](/patterns/writer-and-reviewer), the eval loop on
+[A review panel with a threshold](/patterns/review-panel), and the
+refinement loop on [Translate and reflect](/workflows/translate-reflect).
+[Feedback loops](/concepts/feedback-loops) sets them side by side.
+
+## Limits
+
+- **Confidence isn't correctness.** A judge's confidence is the model's own
+  number. A high score clears a gate; it doesn't prove the work is right.
+  Put a test or a person behind the gates that matter most.
+- **A judge is a model.** Its verdict rests on the material the seat could
+  open, and the runtime uses the identity the engine reports. Cross-family
+  review reduces a model approving its own habits; it doesn't remove
+  judgement from the loop.
+- **Every eval costs its limit.** A judge, a panel and a scored condition
+  each spend a call per round. The `retry` or `maxKickbacks` on the target
+  caps the rounds, and the run fails with the last findings when it's spent.
+
+## Next steps
+
+- [Callback gates](/reviewing/callback-gates): when the check is a person,
+  and the run waits for the answer.
+- [Review loop](/reviewing/review-loop): a draft, review and repair cycle as
+  a graph form, with a quorum and the writer excluded from it.
+- [Proof-bound acceptance and approval](/reviewing/proof-acceptance): reuse
+  a verdict only while every byte it judged still matches.

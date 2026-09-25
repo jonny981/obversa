@@ -1,86 +1,55 @@
 ---
 title: "Surfaces"
-description: "Pause a run and put an interactive micro UI in front of a person, then carry on with what they tell you."
+description: "One question on a local web page. The run waits for the answer, then the page is gone."
 ---
 
+Put one question in front of a person in their browser, pause the run until
+they answer, and carry on with what they said. Use it when a step is a
+person's call: approve this change, pick one of two drafts, confirm the
+migration. The question itself is a [callback gate](/reviewing/callback-gates);
+a surface is the page it opens on.
 
-Sometimes a workflow reaches a step no agent should decide alone: approve
-this change, pick one of these two drafts, confirm the migration. You want
-that one question in front of a person, in a browser, and you want the
-answer back in the run. That's what a surface is: a micro UI, one small
-web page that pauses the run until a person has had their say.
+## Motivation
 
-The surface package runs it. You give it the page files and the API the
-page calls. It serves them on a private port on your own machine, opens the
-page, waits for the person, and hands back whatever they gave you. Then
-it's gone. There's no server to deploy, and nobody needs an account.
+Some steps no agent should decide alone, and a prompt in a terminal is a
+poor place to read a diff or fill six fields. A surface is a small web page
+the run opens for that one pause. The `@obversa/surface` package serves your
+page files and the JSON routes they call on a private port on your own
+machine, opens the page, waits for the person, and hands back whatever they
+gave you. Then it's gone. There's no server to deploy and nobody needs an
+account.
 
-## What you get
+## Properties
 
-- **Disposable by design.** A surface is a short session, not a viewer. It
-  opens for one pause in one run and closes when that pause is over.
-  There's no long-lived page to manage, nothing to redeploy when it
-  changes, and nothing left running when the run moves on.
-- **A pause for a person, not a prompt.** The run stops, the micro UI
-  opens, and it waits. What comes back is whatever the page collected: an
-  approval, answers to a dozen fields, a whole code review with comments
-  anchored to lines. You decide what the page asks and what the answer
-  looks like.
+- **Disposable by design.** A surface opens for one pause in one run and
+  closes when that pause is over, so there's no long-lived page to manage
+  and nothing left running when the run moves on.
+- **A pause, not a prompt.** The run stops, the page opens, and it waits.
+  What comes back is whatever the page collected: an approval, a dozen
+  fields, a whole code review with comments anchored to lines. You decide
+  what the page asks and what the answer looks like.
 - **It always ends, and it ends once.** The person finishes, cancels, the
-  time runs out, or you stop it. Every one of those gives you a result, so
-  a run never hangs on a person who walked away. Set `sessionTimeoutMs` to
-  how long the question may stand. A page that stops sending its heartbeat
-  ends sooner, when `leaseTimeoutMs` passes.
-- **Private by default.** The page lives on a loopback address with a
-  token in its URL, and every API request has to carry it. Nothing on your
-  network can reach it, and a page from another origin can't call it.
-- **Your page, your API.** A surface is plain HTML and a few JSON routes
-  you write. There's no framework to learn and nothing to install in the
-  browser.
+  time runs out, or you stop it. Each gives you a result, so a run never
+  hangs on a person who walked away. `sessionTimeoutMs` sets how long the
+  question may stand. A page that stops sending its heartbeat ends sooner,
+  when `leaseTimeoutMs` passes.
+- **Private by default.** The page lives on a loopback address with a token
+  in its URL, and every API request has to carry it. Nothing on your network
+  can reach it, and a page from another origin can't call it.
+- **Your page, your API.** Plain HTML and a few JSON routes you write. No
+  framework to learn, nothing to install in the browser.
 - **Secrets stay out.** Answers pass through secret redaction before they
   reach you. Complete the session with `verbatim: true` when an answer must
   arrive exactly as written, such as a review comment that quotes code.
 
-## Run one
+## Example
 
-Most surfaces are opened by a workflow, not by hand. This is the shape: a
-pipeline that analyses, implements, and then stops for a person. A no sends
-the work back to the step that owns the fix, with the person's note as the
-finding, and the work comes round again.
+Most surfaces are opened by a workflow, not by hand. The step that waits is
+`approval`. Its question goes out through the run's callbacks client, and a
+router can open a surface to put it in front of a person. This one answers
+in place, so it runs offline:
 
-Save it as `approval.ts` and run it with `npx tsx`, set up as in
-[Installation](/get-started/installation).
-
-```ts
-/**
- * A person decides.
- *
- * The last step of a delivery is a question to a person: ship this change?
- * `approval` asks it through the run's callbacks client. A yes passes the
- * step. A no goes back to the step that owns the fix with the person's note
- * as the finding, and the work comes round again. With nobody answering, the
- * run pauses with the question pending and carries on, when it runs again
- * with the same client, from the answer. This runs offline, with no model and
- * no network: the writer is a small function that leaves the header row out
- * once, and the person answers from this file.
- */
-import { approval, fnJob, pipeline, run, type CallbackRequest } from '@obversa/runtime';
-
-const analyse = fnJob('analyse', () => 'the ticket asks for a report export with a header row');
-
-/** The writer. In a real team this is an agent; here it forgets the header once. */
-let implementRuns = 0;
-const implement = fnJob('implement', () => {
-  implementRuns += 1;
-  return implementRuns === 1 ? 'report.csv, rows only' : 'report.csv, header and rows';
-});
-
-/**
- * The person. The question is about what came before (the outcome of
- * `implement`), so a second attempt is a new question. In a real team the
- * answer arrives through the callbacks client; here it is decided in place.
- */
-const decisions: string[] = [];
+```ts examples/approval.ts (excerpt) {2-3}
 const approve = approval('approve', {
   question: 'Ship this change?',
   target: 'implement',
@@ -92,83 +61,37 @@ const approve = approval('approve', {
       : { approved: false, note: 'the ticket asked for a header row' };
   },
 });
+```
 
-export const shipIt = pipeline(
-  'ship-it',
-  [
-    { name: 'analyse', job: analyse },
-    { name: 'implement', job: implement },
-    { name: 'approve', job: approve },
-  ],
-  { maxKickbacks: 1 },
-);
+The writer leaves the header row out once. The person says no, with a note,
+and `implement` runs again with that note as the finding. The second
+attempt has the header, and the person says yes:
 
-const result = await run(shipIt);
-console.log(JSON.stringify({
-  status: result.outcome.status,
-  implementRuns,
-  decisions,
-}, null, 2));
-
-/**
- * Part of the documentation proof: it must fail when the behaviour it shows
- * stops happening. A refusal that quietly stopped sending the work back would
- * still print a passing run, and `implement` running once is the tell.
- */
-const faults: string[] = [];
-if (result.outcome.status !== 'pass') faults.push(`the run ended ${result.outcome.status}`);
-if (implementRuns !== 2) faults.push(`implement ran ${implementRuns} time(s), so the refusal did not send the work back exactly once`);
-if (decisions.join(',') !== 'no,yes') faults.push(`the person decided [${decisions.join(', ')}], not a no and then a yes`);
-if (faults.length) {
-  for (const fault of faults) console.error(fault);
-  process.exitCode = 1;
+```text Example record
+{
+  "status": "pass",
+  "implementRuns": 2,
+  "decisions": [
+    "no",
+    "yes"
+  ]
 }
 ```
 
-The step that waits is `approval`. Its question goes out through the run's
-callbacks client, and a router can open a surface to put it in front of a
-person. This file answers in place, so it runs offline with no model and no
-network. The [callback gates](/reviewing/callback-gates) page shows the step
-itself.
-
-## The review surface
-
-`@obversa/surface-diff` ships one, built the same way. It opens your git
-diff in a browser. You comment on the lines you care about and approve or
-request changes, and it hands back the decision with every comment anchored
-to a file and a line.
-
-```sh
-obversa-review --range main..HEAD
-```
-
-The [review command](/hosts/review) page has the full result shape.
-
 ## Use cases
 
-- **Code review.** A diff, inline comments and a decision, as in
-  `obversa-review` above.
+- **Code review.** A diff, inline comments and a decision. `@obversa/surface-diff`
+  ships this one: `obversa-review --range main..HEAD` opens your git diff in
+  a browser and hands back the decision with every comment anchored to a
+  file and a line.
 - **Approval before something irreversible.** Merging, migrating, spending.
-  [Callback gates](/reviewing/callback-gates) is the step that waits.
-  [A person decides](/workflows/approval) shows one in a team.
-- **A choice between agent outputs.** Two drafts, two plans, two patches.
-  The page returns the one a person picked.
+  [A person decides](/patterns/approval) shows one in a team.
+- **A choice between agent outputs.** Two drafts, two plans, two patches. The
+  page returns the one a person picked.
 - **A form nobody wants to script.** Credentials a machine must not hold, a
   judgement call with six fields.
 
 Each one runs the same session. Only the page changes.
-
-## Where the page opens
-
-On macOS the surface opens in your default browser. On Linux and Windows it
-prints the address for you to open. Inside cmux it opens as a split beside
-your terminal, so the question appears next to the run that asked it. The
-[cmux host](/hosts/cmux) page shows how, and the [plugins](/plugins) page
-lists the hosts.
-
-When the decision belongs to a colleague, get it to them another way. The
-page exists only on the machine that started the run, so you can't hand
-them the link.
 
 ## Write your own page
 
@@ -178,12 +101,22 @@ The session asks two things of any page you write:
   inline script or style.
 - **Make the acknowledgement call before the page closes.** That call is how
   the browser confirms it received the decision. A page that answers and
-  closes itself without it keeps the run waiting. The run gets the answer
-  only when the acknowledgement timeout runs out.
+  closes without it keeps the run waiting until the acknowledgement timeout
+  runs out.
 
-## Under the hood
+## Limits
 
-The exact limits, headers, serialisation rules and the framed result format
-are on the [surface decision reference](/packages/surface) page. Nothing
-there is needed to use a surface. It's there for when you build a host or a
-page that must interoperate with one.
+- **The page opens on the machine that started the run.** On macOS it opens
+  in your default browser. On Linux and Windows it prints the address for
+  you to open. Inside cmux it opens as a split beside your terminal.
+- **You can't hand a colleague the link.** The page exists only on that
+  machine. When the decision belongs to someone else, get it to them
+  another way.
+
+## Next steps
+
+| Goal | Page |
+| --- | --- |
+| Watch a run's progress in a browser | [Watch a run in the browser](/driving/monitor) |
+| Open the question beside the run that asked it | [Obversa in cmux](/hosts/cmux) |
+| Review a diff with inline comments in a host pane | [Review a diff in a host pane](/hosts/review) |

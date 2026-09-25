@@ -1,99 +1,163 @@
 ---
 title: "Git Memory"
-description: "@obversa/memory-git keeps scoped run memory in private Git references, and writes a stage's reasoning into the commit that carries its change."
+description: "@obversa/memory-git: memory in private Git references, and a stage's reasoning written into the commit that carries its change."
 ---
 
-`@obversa/memory-git` uses Git in two ways: as a store and as a record. `openGitMemory` is a memory adapter that keeps memory files in private Git references, with no commits. Each scope gets its own reference under `refs/obversa/memory/v1`, named by a digest of the scope. The adapter never touches your working tree, index or current branch. `openReasoningRecord` writes why a stage made a change into the body of the commit that carries it.
-
-## Requirements
-
-- Git
+`@obversa/memory-git` keeps memory files in a private Git reference, so they
+outlive the process and never land in the working tree, and it can write a
+stage's reasoning into the body of the commit that carries the stage's
+change. Use it when memory must survive a restart, and when a later reader
+should find why a change was made on the change itself. The idea is on
+[Memory](/concepts/memory).
 
 ## Install
 
-```bash
-npm install @obversa/obversa
+<CodeGroup>
+
+```bash npm
+npm install @obversa/memory-git
 ```
 
-## Usage
-
-```ts
-import { openGitMemory } from '@obversa/memory-git';
-
-const memory = await openGitMemory({
-  repositoryPath: process.cwd(),
-  scope: 'example-run',
-});
-
-await memory.execute({
-  command: 'create',
-  path: '/memories/notes.md',
-  text: 'Keep the result small.\n',
-});
-
-const view = await memory.execute({
-  command: 'view',
-  path: '/memories/notes.md',
-});
+```bash pnpm
+pnpm add @obversa/memory-git
 ```
 
-## The reasoning record
+</CodeGroup>
 
-`openReasoningRecord` makes no commit of its own. A stage that opts in already
-runs in its own worktree, and its work is committed there before it merges
-back. The reasoning belongs on that commit. A second commit would be a note
-beside the work, and a note isn't attached to any line. So the record watches
-the stage work and, when there's something to commit, supplies that commit's
-message.
+Included in `@obversa/obversa`.
 
-The record captures the stage's words while it works. A summary written
-afterwards has already lost the discarded attempts, and those are the part a
-later reader can't reconstruct. If `compose` throws or returns nothing usable,
-the record builds the message from the stage's outcome instead, so a change
-never lands with a body that explains nothing.
+## Requirements
 
-```ts
-import { openReasoningRecord } from '@obversa/memory-git';
-import { isolated, run } from '@obversa/runtime';
+- Git installed, on your `PATH`.
+- A Git repository to hold the reference.
 
-const record = openReasoningRecord({
-  stage: 'implement',
-  compose: ({ captured, outcome }) => ({
-    subject: `feat(implement): ${outcome.summary ?? 'the change'}`,
-    body: ['## Why', '', ...captured.map((turn) => turn.text)].join('\n'),
-  }),
-});
+## Quickstart
 
-await run(isolated(implement, { label: 'implement', record }), {
-  onEvent: (event) => record.observe(event),
-});
+Open memory over a repository, write a note and read it back:
+
+```ts examples/memory-git.ts (excerpt) {1-4}
+  const memory = await openGitMemory({
+    repositoryPath,
+    scope: 'memory-git-example',
+  });
+  await memory.execute({
+    command: 'create',
+    path: '/memories/notes.md',
+    text: 'This note survives a process restart.\n',
+  });
+  const result = await memory.execute({
+    command: 'view',
+    path: '/memories/notes.md',
+  });
 ```
 
-The `stage` option names the stage. The record waits for the first turn whose
-path carries that name, and binds to the path up to that name. From then on it
-takes only turns under that path. A sibling running beside it is left out, and
-so is a stage of the same name elsewhere in the run. Pass `path` to bind the
-record before it sees anything.
+Each scope lives in a private reference under `refs/obversa/memory/v1`;
+the current branch, the index and the worktree are untouched. The adapter
+supports all six commands of the [memory port](/memory): `view`, `create`,
+`str_replace`, `insert`, `delete` and `rename`. Run the whole file with
+`npx tsx memory-git.ts`; it creates a temporary repository and removes it:
 
-A stage that changed nothing makes no commit, so it gets no body.
+```text Output
+This note survives a process restart.
+```
 
-Opting in takes two steps: pass the record to the stage, and pass the run's
-events to `record.observe`. `examples/reasoning-record.ts` does both against a
-real repository, then reads the reasoning back from the commit that carries
-the change.
+## Record the reasoning
 
-## Commands
+`openReasoningRecord` puts why a stage changed something into the commit
+that carries the change. It makes no commit of its own: a stage that opts in
+already runs in its own worktree through `isolated()`, and its work is
+committed there before it merges back. The record watches the stage while
+it works and, when there's something to commit, supplies that commit's
+message:
 
-`openGitMemory` supports all six commands of the [memory port](/memory):
-- `create`: Write a file at a path, replacing any file already there.
-- `view`: Read a file, with an optional line range.
-- `str_replace`: Replace unique text inside a file.
-- `insert`: Insert text at a zero-based line index.
-- `delete`: Remove a file from memory.
-- `rename`: Move a file to a new path within the memory root.
+```ts examples/reasoning-record.ts (excerpt) {2,3,8-9}
+  const record = openReasoningRecord({
+    stage: 'implement',
+    compose: ({ captured }) => ({
+      // The subject deliberately does not repeat the writer's words. If it
+      // did, the check at the end of this file would be satisfied by the
+      // subject line alone and would say nothing about whether the reasoning
+      // was captured at all.
+      subject: 'feat(implement): set the retry count',
+      body: ['## Why', '', ...captured.map((turn) => turn.text)].join('\n'),
+    }),
+  });
+```
 
-## Limits
+`compose` receives the turns captured while the stage worked and returns
+the commit's subject and body. Capturing as it goes keeps the discarded
+attempts, the part a later reader can't reconstruct from a summary written
+afterwards. If `compose` throws or returns nothing usable, the record builds
+the message from the stage's outcome instead, so a change never lands with
+a body that explains nothing. Opting in takes two steps: pass the record to
+the stage, and pass the run's events to `record.observe`:
 
-- Default limits: 64 KB per file, 1 MB total memory per scope, and at most 256 files.
-- Allowed file extensions: `.txt`, `.md`, `.json`, `.py`, `.yaml`, `.yml`.
-- Every path must be inside `/memories`.
+```ts examples/reasoning-record.ts (excerpt) {8}
+  const stage = isolated(
+    loop({
+      name: 'write',
+      max: 2,
+      body: agentJob({ label: 'author', engine: 'offline', prompt: 'Set the retry count.' }),
+      until: predicate(() => wrote, 'the feature file exists'),
+    }),
+    { label: 'implement', record },
+  );
+```
+
+The `stage` option names the stage. The record waits for the first turn
+whose path carries that name and binds to the path up to it; from then on it
+takes only turns under that path, so a sibling or a same-named stage
+elsewhere is left out. Pass `path` to bind the record before it sees
+anything. A stage that changed nothing makes no commit, so it gets no body.
+Run `npx tsx reasoning-record.ts` to see the reasoning read back from the
+commit:
+
+```text Output
+feat(implement): set the retry count
+
+## Why
+
+Chose three retries because the upstream call fails in bursts of two.
+```
+
+## Options
+
+### `openGitMemory`
+
+| Field | Type | Default | Description |
+| --- | --- | --- | --- |
+| `repositoryPath` | `string` | required | The repository that holds the reference. |
+| `scope` | `string` | required | The memory scope; one reference per scope. |
+| `limits` | `Partial<MemoryLimits>` | 64 KB per file, 1 MB and 256 files per scope | Smaller limits for a smaller budget. |
+
+### `openReasoningRecord`
+
+| Field | Type | Default | Description |
+| --- | --- | --- | --- |
+| `stage` | `string` | required | The stage whose turns to capture. |
+| `compose` | `({ captured }) => { subject, body }` | required | Build the commit message from the captured turns. |
+| `path` | `string` | none | Bind the record to a path before it sees a turn. |
+
+## Errors
+
+- **The port's error codes**, listed on [Memory port](/memory#failure).
+- **Deletion isn't secure erasure.** Delete and eviction remove a path from
+  the private reference, but the older Git object can stay until Git
+  removes unused objects, and mirror clones, mirror pushes and `--all`
+  bundles copy the reference and its plain-text contents. Don't treat the
+  reference as local-only.
+
+## API
+
+- **`openGitMemory(options)`**: a `Memory` over a private Git reference.
+  [Quickstart](#quickstart).
+- **`openReasoningRecord(options)`**: a `ReasoningRecorder` for
+  `isolated()`. [Record the reasoning](#record-the-reasoning).
+- **Types**: `GitMemoryOptions`, `ReasoningRecordOptions`, `ComposeInput`,
+  `CapturedTurn`.
+
+## Next steps
+
+- [Memory adapters](/memory/adapters): the three adapters side by side.
+- [Memory](/concepts/memory): why a commit body is the right place for the
+  why.

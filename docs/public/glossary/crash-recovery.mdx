@@ -1,0 +1,53 @@
+---
+title: "What Happens When an Agent Crashes Halfway?"
+sidebarTitle: "Crash Recovery"
+description: "A killed run starts again from its record. Finished steps stay finished; an unfinished one pauses for a person unless it said it was safe to retry."
+---
+
+You get the work back from the last step that finished, not from the start
+and not from the model's memory of what it was doing. A run under the
+supervised runner writes each step to a record as it happens. Kill the
+process, start it again, and a replacement worker reads the record and
+carries on. Steps that finished are never repeated. A step that was
+mid-flight when the worker died runs again only if its binding declares it
+safe to retry; otherwise the run pauses and asks a person to reconcile it,
+so uncertain work is never repeated silently.
+
+## In Obversa
+
+The runner starts the worker with a restart budget and a time limit, and a
+crashed worker is replaced inside them:
+
+```ts examples/supervised-run.ts (excerpt) {9-10}
+  handle = await startSupervisedRun({
+    directory, runRoot, module: './host.mjs', storage,
+    workspace: createGitWorktreeProvider({ repositoryPath: runRoot }),
+    definition: {
+      runId: 'example', graphDefinition: graph.definition, resolvedPlan,
+      resolvedInputs: { message: 'An offline supervised run.' },
+    },
+    limits: { timeoutMs: 20_000, maxDispatches: 2 },
+    restart: { maxRestarts: 1, initialBackoffMs: 100, maxBackoffMs: 1_000 },
+    teardownGraceMs: 100,
+  });
+```
+
+`restart.maxRestarts` caps how many replacement workers the run gets, with
+a backoff between them. `readSupervisedRunStatus` reads the run's phase and
+whether a worker is alive from any process that shares the storage, so you
+can see what happened without taking the run over. Starting a run again is
+not an approval: a question that was waiting for a person is still waiting.
+
+## Durable execution
+
+Durable execution is the phrase for systems such as Temporal that replay
+an event history on a service and keep a process alive for days across
+many workers. Obversa is a library with no server: the record is a file on
+one machine, and a run carries on from it. [Do I need Temporal to survive a
+crash?](/glossary/durable-execution) draws the line.
+
+## Next steps
+
+- [Supervised local runs](/driving/runner): the guide, with the crash-boundary
+  table and the whole example.
+- [The record](/concepts/record): what a restarted run skips and repeats.

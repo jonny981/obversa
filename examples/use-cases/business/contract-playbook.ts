@@ -22,7 +22,7 @@ const realEngines: ContractPlaybookEngines = { claude, codex };
  * accept, what we push back on, what we never sign. One model maps every
  * clause of the contract to the rule it meets or breaks, writes the
  * redlines, and is read by a model from another family that checks each
- * redline against the playbook and sends the work back when one is missing
+ * redline against the playbook and returns the work when one is missing
  * or goes further than the playbook allows. A lawyer decides what is sent.
  */
 function createContractPlaybook(engines: ContractPlaybookEngines = realEngines) {

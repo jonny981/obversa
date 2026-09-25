@@ -1,77 +1,126 @@
 ---
 title: "Webhook Notifications"
-description: "@obversa/notify-webhook posts one message per interesting run event to a URL you supply."
+description: "@obversa/notify-webhook: one message per interesting run event, posted to a URL you supply."
 ---
 
-Tell somebody what a run is doing without watching it. `@obversa/notify-webhook`
-turns a run's own events into one message each and posts them to a URL you
-supply.
-
-Each message body has a `text` field. Slack, Discord and Teams incoming
-webhooks render that field, so those three need no code of their own.
-Everything else in the body is structured, for a relay that wants the parts.
-
-## Requirements
-
-- A URL to post to, supplied at run time
+`@obversa/notify-webhook` tells somebody what a run is doing without them
+watching it: it turns the run's own events into one message each and posts
+them to a URL you supply. Each body has a `text` field, so a Slack, Discord
+or Teams incoming webhook shows it with no code of your own; the rest of
+the body is structured, for a relay that wants the parts.
 
 ## Install
 
-```bash
-npm install @obversa/obversa
+<CodeGroup>
+
+```bash npm
+npm install @obversa/notify-webhook
 ```
 
-## What it sends
+```bash pnpm
+pnpm add @obversa/notify-webhook
+```
 
-Six moments, one message each.
+</CodeGroup>
+
+Included in `@obversa/obversa`.
+
+## Requirements
+
+A URL to post to, supplied at run time.
+
+## Quickstart
+
+Make the notifier, hand its `onEvent` to `run`, and await `done()` before
+the process exits:
+
+```ts examples/notify-webhook.ts (excerpt) {1,11,14}
+const notifier = webhookNotifier({
+  url,
+  onError: (error) => { console.error(`the channel did not take a message: ${error.message}`); },
+});
+
+// The compiler checks the wiring: `run` hands a `LoopEvent` to a handler the
+// notifier declared for its own `RunEvent`, so the two must stay structurally
+// compatible. That catches `kind`, `ts` or `path` changing type or going
+// missing. It does NOT catch a renamed event kind, because kinds are plain
+// strings, nor a payload field disappearing, because every one is optional.
+const onEvent: (event: LoopEvent) => void = notifier.onEvent;
+const result = await run(brief, { onEvent });
+// Await the posts before the process can exit, or the last message is lost.
+await notifier.done();
+```
+
+The example starts its own receiver in place of a channel and runs
+offline; in your own run, pass your incoming webhook's address as `url`.
+Run it with `npx tsx notify-webhook.ts`:
+
+```json Output
+{
+  "run": "pass",
+  "drafts": 2,
+  "channel": [
+    "Run started: brief.",
+    "Stage finished: draft (pass)",
+    "Stage finished: review (fail)",
+    "Sent back: review returned work to draft\nthe second claim has no figure behind it",
+    "Stage finished: draft (pass)",
+    "Stage finished: review (pass)",
+    "Run finished."
+  ]
+}
+```
+
+## Read what it sends
+
+Six moments, one message each:
 
 | Moment | The run event behind it | What the message carries |
 | --- | --- | --- |
 | `run-started` | `dag:start`, `loop:start` or `workflow:start` | What started |
 | `stage-finished` | `dag:node` reaching `done`, at any depth | The stage and how it ended |
-| `sent-back` | `dag:kickback`, or a `loop:review` that did not pass | The reason the reviewer gave, and in a graph which stage it went back to |
+| `sent-back` | `dag:kickback`, or a `loop:review` that did not pass | The reason the reviewer gave, and in a graph which stage the work went to |
 | `paused` | A stage whose outcome is `paused`, or an ending event with one | The question being asked, and the run's page if it has one |
-| `finished` | An ending event whose outcome is `pass` | That it finished. The run's summary is a field on the body, not in the text |
+| `finished` | An ending event whose outcome is `pass` | That it finished; the run's summary is a field on the body, not in the text |
 | `failed` | An ending event with any other outcome | Why it ended that way |
 
-Two messages carry more than the fact that something happened. The paused
-message names [the run's page](/driving/monitor) when the run serves one, so
-the person can open it and answer. The sent-back message carries what the
-reviewer said, so it explains why. It's posted for both shapes a review takes.
-In a graph it names the stage the work went back to. A loop sends work back to
-its own body, so that message names no stage.
+The paused message names [the run's page](/driving/monitor) when the run
+serves one, so the person can open it and answer, and asks the person's own
+question when an `approval()` gate carries one. The sent-back message
+carries what the reviewer said; in a graph it names the stage the work went
+to, and a loop names no stage because it sends work to its own body. A
+stage that's waiting for a person hasn't finished, so it's reported as
+paused, and a run with two gates gets a paused message for each.
 
-The paused message asks the person's own question, which an `approval()` gate
-carries in its own field on the outcome. Any other pause says what it's
-waiting for in its summary, and the message uses that as it stands.
+A run is announced once and ends once: the first graph or loop the run
+reports owns it, and that container's ending is the run's, at whatever
+depth it sits. News from inside the run isn't filtered by depth. Everything
+else a run emits, every engine token included, is ignored. `messageFor(event,
+monitor?)` is the mapping from one run event to a `WebhookMessage`
+(`{ ts, monitor?, event, text }`), or `undefined` for an event with no
+message.
 
-A stage that's waiting for a person hasn't finished, so the notifier reports it
-as paused. That matters when the run stays up for the answer instead of
-ending. The run reports no outcome while it waits, so the stage's message is
-the only sign of the wait. When the run does end on the wait, the stage message
-and the run's own outcome are the same news, and only the stage message is
-sent. A run with two gates gets a paused message for each.
+## Options
 
-A run is announced once and ends once. Its own news comes from the first graph
-or loop the run reports, which owns the run. That container's own ending is the
-run's ending, at whatever depth it sits. The notifier reads the depth from the
-run instead of assuming it, because the depth depends on what wraps the job. A
-workflow's `post.always`, for example, wraps the whole graph in a loop. That
-moves every one of the graph's events one level deeper without changing the
-run. A run that reports no graph or loop is a single job, and that job's end is
-the run's end, since nothing else reports one.
+| Field | Type | Default | Description |
+| --- | --- | --- | --- |
+| `url` | `string` | required | Where to post. |
+| `fetch` | `FetchLike` | global `fetch` | The HTTP client, injectable for tests. |
+| `onError` | `(error: Error) => void` | none | Called when a post is refused or the endpoint is unreachable. |
 
-News from inside the run isn't filtered by depth. A stage finishing and a
-review sending work back are reported wherever they happen, including inside a
-graph that something else wraps. Everything else a run emits, including every
-engine token, is ignored.
+## Errors
 
-## Usage
+- **A notification that can't be delivered never fails the run.** The error
+  reaches `onError` and the run carries on.
+- **Order is kept.** Messages are posted in the order the run made them, so
+  one slow post holds back the rest instead of letting them overtake it.
+- **A failure is reported from the ending event, never from `error`.** A
+  loop can emit `error` in one iteration and pass in the next. **A resumed
+  run sends no message of its own**, because no run event says it resumed.
 
-The file below runs offline and starts its own receiver in place of a channel.
-In your own run, pass your Slack incoming webhook's address as `url`.
+<Accordion title="Full file">
 
-```ts
+```ts examples/notify-webhook.ts
 /**
  * Tell somebody what the run is doing, without watching it.
  *
@@ -80,7 +129,7 @@ In your own run, pass your Slack incoming webhook's address as `url`.
  * carries a `text` field, which is the field a Slack, Discord or Teams
  * incoming webhook renders, so those three need no code of their own.
  *
- * This example runs a small graph offline whose review sends work back once,
+ * This example runs a small graph offline whose review returns the work once,
  * so the interesting messages all appear: the run started, a stage finished,
  * a reviewer returned work with the reason, and the run finished. The URL is
  * not written down here either: the example starts its own receiver on a port
@@ -170,40 +219,19 @@ if (faults.length) {
 }
 ```
 
-It prints:
+</Accordion>
 
-```json
-{
-  "run": "pass",
-  "drafts": 2,
-  "channel": [
-    "Run started: brief.",
-    "Stage finished: draft (pass)",
-    "Stage finished: review (fail)",
-    "Sent back: review returned work to draft\nthe second claim has no figure behind it",
-    "Stage finished: draft (pass)",
-    "Stage finished: review (pass)",
-    "Run finished."
-  ]
-}
-```
+## API
 
-## What it does not send
+- **`webhookNotifier(options)`**: a `WebhookNotifier` with `onEvent` and
+  `done()`. [Quickstart](#quickstart).
+- **`messageFor(event, monitor?)`**: one event to one message.
+  [Read what it sends](#read-what-it-sends).
+- **Types**: `WebhookNotifierOptions`, `WebhookMessage`, `MessageEvent`,
+  `RunEvent`, `RunEventOutcome`, `FetchLike`.
 
-A failure is reported from the event that ends the run, never from the `error`
-event. A loop can emit `error` in one iteration and pass in the next, so
-notifying on it would announce a failure for a run that went on to succeed.
-The ending event carries the same text in its summary.
+## Next steps
 
-A resumed run sends no message of its own, because no run event says a run
-resumed. The caller passed `resume: true`, so it already knows.
-
-## Failure
-
-A notification that can't be delivered never fails the run. A refused or
-unreachable endpoint reaches `onError`, and the run carries on. Messages are
-posted in the order the run made them, so one slow post holds back the rest
-instead of letting them overtake it.
-
-Await `done()` after the run. Without it, the process can exit before the last
-message is posted.
+- [Watch a run in the browser](/driving/monitor): the page a paused message
+  links to.
+- [Running](/concepts/running): the events every run emits.

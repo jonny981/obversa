@@ -6,7 +6,7 @@
  * carries a `text` field, which is the field a Slack, Discord or Teams
  * incoming webhook renders, so those three need no code of their own.
  *
- * This example runs a small graph offline whose review sends work back once,
+ * This example runs a small graph offline whose review returns the work once,
  * so the interesting messages all appear: the run started, a stage finished,
  * a reviewer returned work with the reason, and the run finished. The URL is
  * not written down here either: the example starts its own receiver on a port

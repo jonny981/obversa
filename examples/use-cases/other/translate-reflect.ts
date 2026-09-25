@@ -20,7 +20,7 @@ const realEngines: TranslateEngines = { claude, codex };
 /**
  * Translate, reflect, glossary, and the last part is you. One model
  * translates the article with the glossary open; a model from another
- * family reads the translation the way an editor would and sends it back
+ * family reads the translation the way an editor would and returns it
  * with what to change, not a score; the translator writes down how every
  * glossary term was rendered and where the glossary and natural French
  * pulled apart. The person who knows the readers decides the nuance and

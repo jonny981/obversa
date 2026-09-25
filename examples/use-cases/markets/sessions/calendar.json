@@ -1,0 +1,10 @@
+{
+  "venue": "example-venue",
+  "timeZone": "Etc/UTC",
+  "note": "A fictional venue. These sessions illustrate the shape; no real exchange's hours are claimed.",
+  "sessions": [
+    { "date": "2030-01-06", "open": "09:00", "close": "16:00" },
+    { "date": "2030-01-07", "closed": true, "reason": "venue holiday" },
+    { "date": "2030-01-08", "open": "09:00", "close": "12:00", "shortened": true }
+  ]
+}

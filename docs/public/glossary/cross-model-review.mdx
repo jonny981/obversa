@@ -1,0 +1,65 @@
+---
+title: "Should Another Model Review the Code?"
+sidebarTitle: "Cross-Model Review"
+description: "Yes. Obversa refuses a writer and a reviewer from the same model family when the team is built, and checks the recorded answers again before the reviewers run."
+---
+
+Yes. A model reading its own family's work tends to approve its own
+habits, so the reviewer should come from a different family, and the
+check should be the runtime's, not a review you have to remember to do.
+In a `workflow()`, each engine declares its provider and model family, and
+a team whose reviewer shares the writer's family is refused when the team
+is built. Before the reviewers run, the runtime checks again on the
+recorded answers: the family the writer's engine reported must differ from
+each reviewer's, and an answer whose family can't be read fails the panel
+too. A model's accept is still not a person shipping the change.
+
+## In Obversa
+
+The writer is a Claude seat and the reviewer is a Codex seat, and the
+review stage names where a rejection goes:
+
+```ts examples/teams/writer-reviewer-pair.ts (excerpt) {2-3,20-26}
+    roles: {
+      write: engines.claude('claude-sonnet-4-5'),
+      review: [engines.codex('gpt-5.6-luna')],
+    },
+
+    stages: [
+      stage('write', {
+        agent: 'write',
+        writes: ['src/add.mjs', 'test/add.test.mjs'],
+        desc: 'Write the function and its test from the brief.',
+        gate: 'The files named in the brief exist in the workspace.',
+        retry: 1,
+      }),
+      stage('test', {
+        run: ['node', '--test', 'test/add.test.mjs'],
+        desc: 'Run the test command against the written files.',
+        gate: 'The test command exits 0.',
+        sendsBackTo: 'write',
+      }),
+      stage('review', {
+        panel: 'review',
+        agree: 1,
+        desc: 'Read the code, the test and its result.',
+        gate: 'The change meets the brief.',
+        sendsBackTo: 'write',
+      }),
+```
+
+The reviewer reads the code, the test and its result, and a rejection
+puts its findings in front of `write`, which runs again with them. In a
+graph form, the review loop's `requireDiversity` asks for the same thing
+across its review seats.
+
+## Review panel
+
+One reviewer is a second opinion. Several reviewers with a threshold are a
+panel, and [How many reviewers have to
+accept?](/glossary/review-panel) says how the count works.
+
+## Next steps
+
+- [A writer and a reviewer](/patterns/writer-and-reviewer): the pair on its own, with a real run.
+- [Evals in an agent workflow](/reviewing/evals): a judge from another family as one kind of eval.

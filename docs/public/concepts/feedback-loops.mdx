@@ -1,0 +1,101 @@
+---
+title: "Feedback Loops"
+description: "A check fails a step, the findings travel, and the step runs again, up to a limit."
+---
+
+When a review or a test fails a step, the findings go to the step that owns
+the fix and it runs again with them, until it passes or the limit you set
+runs out. Use it wherever a model's first attempt is not the last word. For
+a step where a person, not a check, has the say, use a
+[callback gate](/reviewing/callback-gates).
+
+## Motivation
+
+Left alone, a model is the only judge of its own work. A loop that never
+stops is the other failure, and both waste a budget. A feedback loop puts a
+check between the attempt and the next step, names who fixes what the check
+found, and caps the rounds. The writer's job stays narrow: fix these
+findings, not start again. The record keeps every round, its findings and
+the count against the limit, so you can read why a run stopped.
+
+## Parts
+
+- **The check.** A reviewer on another model, a panel of them, a test
+  command, or a person. Each returns a pass or a fail with findings.
+- **The target.** The step that owns the fix. A fail carries the findings
+  to it, and it runs again with them, not from the start of the run.
+- **The limit.** How many times a target may run again. When it runs out,
+  the run fails with the last findings instead of looping.
+
+## Shapes
+
+- **One reviewer.** A model from a different family reads the writer's
+  result and passes or fails it. Anthropic calls the pattern
+  evaluator-optimizer.
+  [A writer and a reviewer](/patterns/writer-and-reviewer) is that case.
+- **A panel with a threshold.** Several reviewers read at once and the step
+  passes on the count you set. Set the pass count to the number of
+  reviewers when one voice must be enough. Some people call this an eval
+  loop. [A review panel with a threshold](/patterns/review-panel) is that
+  case.
+- **A tournament with a judge.** Several candidates run in their own
+  worktrees, a function scores each, and only the winner lands. The rest
+  leave nothing behind. [Three candidates, one winner](/patterns/tournament).
+- **A command whose exit code decides.** A test runs; red carries its
+  output to the target, or picks the branch that runs next. No model in
+  between. [A command decides the path](/patterns/command-kickback).
+- **A person's decision.** Yes passes the step. No carries the person's note
+  to the target as the finding. Silence pauses the run. [A person decides](/patterns/approval).
+- **A draft refined over rounds.** Translate, reflect, revise, then a person
+  reads the result. That page calls it a refinement loop.
+  [Translate and reflect](/workflows/translate-reflect).
+
+## Example
+
+The offline feature team names the target and the threshold on the panel:
+
+```ts examples/feature-team.ts (excerpt) {8-9}
+const review = reviewPanel({
+  label: 'review',
+  reviewers: [
+    { name: 'correctness', job: checks.correctness },
+    { name: 'safety', job: checks.safety },
+    { name: 'scope', job: checks.scope },
+  ],
+  pass: 2, // two of three agree and the step passes
+  target: 'implement', // a failing panel returns the work here
+});
+```
+
+Two of the three reviewers fail the first attempt, so their findings go to
+`implement`, which runs again. The second attempt passes on two of three:
+
+```text Example record
+{
+  "status": "pass",
+  "implementRuns": 2
+}
+```
+
+## Limits
+
+- **A panel needs a target.** Without one, a failing panel fails the run
+  instead of running a step again.
+- **`maxKickbacks` sets the limit.** Without it, a graph or pipeline never
+  runs a step again on a fail. `workflow()` sets it for you from each
+  target's `retry`, which defaults to 1. A number is one budget for the
+  whole graph. A map, `{ plan: 3, 'tests-first': 3 }`, gives each target
+  its own, so a review that spends its budget on one step can't starve
+  another. A target the map doesn't name gets none.
+- **Every round is recorded.** Each request to run again is in the record
+  with its count and its limit.
+
+## Next steps
+
+| Goal | Page |
+| --- | --- |
+| Learn what counts as an eval here, and what doesn't | [Evals](/reviewing/evals) |
+| Put a person's question in the run | [Callback gates](/reviewing/callback-gates) |
+| Run a draft, review and repair cycle as a graph | [Review loop](/reviewing/review-loop) |
+| Bind an approval to the exact bytes it judged | [Proof-bound acceptance and approval](/reviewing/proof-acceptance) |
+| Show a person the built thing, not a diff | [Preview gate](/coming-soon/preview-gate) (coming soon) |

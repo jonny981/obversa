@@ -1,53 +1,80 @@
 ---
 title: "Simple Memory"
-description: "@obversa/memory-simple provides an in-memory storage adapter for tests and ephemeral runs."
+description: "@obversa/memory-simple: the memory port in one process, for tests and short runs."
 ---
 
-`@obversa/memory-simple` is a memory adapter that keeps its files inside the Node process. Use it for unit tests, local checks and short runs that don't need storage on disk.
-
-## Requirements
-
-Nothing beyond [Installation](/get-started/installation).
+`@obversa/memory-simple` keeps memory files in one process, with the same
+commands, limits and error codes as every other adapter. Use it in tests
+and in runs that don't need memory to outlive the process; for memory that
+survives a restart, use [Git Memory](/packages/memory-git).
 
 ## Install
 
-```bash
-npm install @obversa/obversa
+<CodeGroup>
+
+```bash npm
+npm install @obversa/memory-simple
 ```
 
-## Usage
+```bash pnpm
+pnpm add @obversa/memory-simple
+```
 
-```ts
-import { createSimpleMemory } from '@obversa/memory-simple';
+</CodeGroup>
 
-const memory = createSimpleMemory({
-  scope: 'example-run',
-});
+Included in `@obversa/obversa`.
 
+## Requirements
+
+Nothing beyond Node.js.
+
+## Quickstart
+
+Create the adapter with a scope, write a note and read it back:
+
+```ts examples/memory-simple.ts (excerpt) {1}
+const memory = createSimpleMemory({ scope: 'memory-simple-example' });
 await memory.execute({
   command: 'create',
   path: '/memories/notes.md',
   text: 'Keep the result small.\n',
 });
-
 const result = await memory.execute({
   command: 'view',
   path: '/memories/notes.md',
 });
 ```
 
-## Commands
-
 The adapter supports all six commands of the [memory port](/memory):
-- `create`: Write a file at a path, replacing any file already there.
-- `view`: Read a file, with an optional line range.
-- `str_replace`: Replace unique text inside a file.
-- `insert`: Insert text at a zero-based line index.
-- `delete`: Remove a file from memory.
-- `rename`: Move a file to a new path.
+`view`, `create`, `str_replace`, `insert`, `delete` and `rename`. Pass it to
+`run(job, { memory })` and every job reads it as `ctx.memory`. Run the
+whole file with `npx tsx memory-simple.ts`:
 
-## Limits
+```text Output
+Keep the result small.
+```
 
-- The data is gone when the Node process exits.
-- Default limits: 64 KB per file, 1 MB total memory per scope, and at most 256 files.
-- Allowed file extensions: `.txt`, `.md`, `.json`, `.py`, `.yaml`, `.yml`.
+## Options
+
+| Field | Type | Default | Description |
+| --- | --- | --- | --- |
+| `scope` | `string` | required | The memory scope. |
+| `limits` | `Partial<MemoryLimits>` | 64 KB per file, 1 MB and 256 files per scope | `maxFileBytes`, `maxTotalBytes`, `maxFiles`, for a smaller budget. |
+
+## Errors
+
+- **The port's error codes**, listed on [Memory port](/memory#failure).
+- **A write past a limit** removes the earliest-written files until it fits,
+  never the file being written.
+
+## API
+
+- **`createSimpleMemory(options)`**: a `Memory` in one process.
+  [Quickstart](#quickstart).
+- **`SimpleMemoryOptions`**: its options.
+
+## Next steps
+
+- [Memory adapters](/memory/adapters): the three adapters side by side.
+- [Memory mechanics](/memory/mechanics): `ground`, `curate` and
+  `consolidate` over this adapter.

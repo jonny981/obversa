@@ -1,0 +1,6 @@
+{
+  "note": "What the person decided about each summary. Kept ones enter memory.",
+  "p-101": { "approved": true },
+  "p-102": { "approved": false, "note": "A survey with synthetic payloads; not for the lab's memory. Keep the link in the reading list." },
+  "p-103": { "approved": true }
+}

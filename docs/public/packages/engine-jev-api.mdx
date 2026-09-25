@@ -1,34 +1,84 @@
 ---
 title: "Jev API Engine"
-description: "@obversa/engine-jev-api answers decision questions over recorded run state through the Jev API."
+description: "@obversa/engine-jev-api: typed questions about state your run already recorded, answered by Jev over the TypeSafe API."
 ---
 
-`@obversa/engine-jev-api` is an engine plugin for Jev, which answers structured
-questions about state your run already recorded. Use it for assessments, such
-as whether to send work back, which stage should take it, or how ready a change
-is to land. Each attempt makes one Jev decision call over the TypeSafe API and
-returns Jev's answers as its structured result.
-
-Jev runs with workspace mode `none`. It never reads or edits files.
-
-## Requirements
-
-- A Jev endpoint and API key, passed as the `endpoint` and `apiKey` options
+`@obversa/engine-jev-api` asks Jev structured questions about state your
+run already recorded: should the writer run again, which stage should take it,
+how ready is this change to land. Each attempt is one Jev decision call over
+the TypeSafe API, and the answers come back as the structured result. Jev
+runs with workspace mode `none`; it never reads or edits files.
 
 ## Install
 
-```bash
-npm install @obversa/obversa
+<CodeGroup>
+
+```bash npm
 npm install @obversa/engine-jev-api
 ```
 
-`@obversa/obversa` doesn't include the Jev engine, so it's a separate install.
+```bash pnpm
+pnpm add @obversa/engine-jev-api
+```
 
-## Request shape
+</CodeGroup>
 
-The prompt is a JSON document of the shape `{state, questions}`:
+Not in `@obversa/obversa`; install it on its own.
 
-```json
+## Requirements
+
+- A Jev endpoint and API key, passed as the `endpoint` and `apiKey` options.
+
+## Identity
+
+The plugin reports `provider: 'typesafe'`, with the model family read from
+the model name. It sends the model the request names, or `model` from its
+options, or `jev-latest`. If the API doesn't echo a model, or echoes one that
+can't be read, the recorded effective model and family are both `null`, and
+the answers are still returned.
+
+## Quickstart
+
+Construct the engine with the endpoint and key, and ask it what it will run
+as, with no network call:
+
+```ts examples/engine-jev-api-binding.ts {4-7,9}
+import { JevApiEngine } from '@obversa/engine-jev-api';
+
+// The key is a placeholder. `admit` checks the request and sends nothing.
+const engine = new JevApiEngine({
+  endpoint: 'https://api.typesafe.ai/v1/systemone',
+  apiKey: 'example-key',
+});
+
+const identity = await engine.admit({ workspaceMode: 'none' }, new AbortController().signal);
+console.log(JSON.stringify(identity, null, 2));
+```
+
+`admit` returns the identity the engine reports before any request. Run it
+with `npx tsx engine-jev-api-binding.ts`:
+
+```json Output
+{
+  "adapter": "jev-api",
+  "adapterVersion": null,
+  "provider": "typesafe",
+  "modelFamily": "jev",
+  "model": "jev-latest",
+  "executable": null,
+  "capabilities": []
+}
+```
+
+In a run, read the key from your environment instead of a literal. The
+result's structured value is the `answers` object itself, so a binding's
+`parseResult` reads `part.value.send_back` directly.
+
+## Ask a question
+
+The prompt is a JSON document of the shape `{ state, questions }`:
+
+```json Request
 {
   "state": { "diff": "..." },
   "questions": {
@@ -58,66 +108,63 @@ The prompt is a JSON document of the shape `{state, questions}`:
 }
 ```
 
-`state` is whatever your run recorded. Each entry in `questions` names a type
-(`noul`, `choice` or `score`), with instructions and criteria. For a `noul`
-(true or false) question, the criteria say what true and false mean. For
-`choice`, they map each option to its description. For `score`, they're the
-array of labels the score indexes.
+`state` is whatever your run recorded. Each question names a type: `noul`
+(true or false), whose criteria say what true and false mean; `choice`,
+whose criteria map each option to its description; or `score`, whose
+criteria are the array of labels the score indexes. Before any network
+call, the adapter checks that the prompt parses to an object, that
+`questions` is a non-empty object, and that every question names one of the
+three types. A missing or `null` `state` is sent as an empty object; the
+adapter forwards `criteria` unchanged.
 
 The adapter returns the answer objects unchanged and doesn't check their
-shape. What follows is what the provider has been seen to return, not a type
-the adapter guarantees. A `noul` answer carries a probability and no separate
-`confidence` field. `choice` and `score` answers carry a `confidence`, and may
-carry `probabilities`.
+shape. What the provider has been seen to return: a `noul` answer carries a
+probability and no separate `confidence`; `choice` and `score` answers carry
+a `confidence`, and may carry `probabilities`. `parseJevDocument` reads a
+prompt into the request shape before it's sent.
 
-Before any network call, the adapter checks that the prompt parses to an
-object, that `questions` is a non-empty object, and that every question names
-one of the three types. Malformed input fails as `invalid-config`. A missing or
-`null` `state` is sent as an empty object. The adapter doesn't inspect
-`criteria`. It forwards them to the provider unchanged.
+## Options
 
-## Usage
+| Field | Type | Default | Description |
+| --- | --- | --- | --- |
+| `endpoint` | `string` | required | The POST target, such as `https://api.typesafe.ai/v1/systemone`. |
+| `apiKey` | `string` | required | The bearer credential. |
+| `model` | `string` | `'jev-latest'` | The wire model when the request names none. |
+| `adapterVersion` | `string` | none | The package version recorded in the requested identity. |
+| `fetch` | `typeof fetch` | global `fetch` | Injectable for tests. |
 
-```ts
-import { JevApiEngine } from '@obversa/engine-jev-api';
+## Errors
 
-const apiKey = process.env.TYPESAFE_API_KEY;
-if (!apiKey) {
-  throw new Error('TYPESAFE_API_KEY is not set');
-}
-
-const engine = new JevApiEngine({
-  endpoint: 'https://api.typesafe.ai/v1/systemone',
-  apiKey,
-});
-```
-
-The result's structured value is the `answers` object itself, so a binding's
-`parseResult` reads `part.value.send_back` directly.
-
-## Unsupported requests
-
-These request fields fail as `invalid-config` before any network call:
-
-- `system` or `systemMode`: Jev requests carry no system prompt
-- `env`: the key comes from the `apiKey` option, not the request
-- `maxTokens`: Jev has no server-side token cap
-- a `workspaceMode` other than `none`
-- a non-empty `tools` list: the adapter declares no tools
+- **`invalid-config`** before any network call, for a malformed prompt or a
+  request field Jev can't take: `system` or `systemMode` (Jev carries no
+  system prompt), `env` (the key comes from the option), `maxTokens` (no
+  server-side cap), a `workspaceMode` other than `none`, or a non-empty
+  `tools` list.
+- **`timeout`** when `timeoutMs`, plus `timeoutGraceMs` when set, elapses
+  across the whole call, from connecting to reading the body. **`aborted`**
+  on a caller abort.
+- **Provider response data**, error bodies included, is recorded in the
+  result and in error details.
 
 ## Limits
 
-- One HTTP request per attempt. The adapter never retries by itself. Retry
-  safety belongs to the node's binding.
-- Provider response data, including error bodies, is recorded in the result
-  and in error details.
-- `timeoutMs`, plus `timeoutGraceMs` when set, bounds the whole call, from
-  connecting to reading the response body. Past that deadline the call fails
-  as `timeout`. A caller abort fails as `aborted`.
-- `maxOutputBytes`, when set on the request, caps the response body the adapter
+- **One HTTP request per attempt.** The adapter never retries by itself;
+  retry safety belongs to the node's binding.
+- **`maxOutputBytes`** on the request caps the response body the adapter
   reads. It isn't a general memory limit.
-- A low-confidence answer completes like any other result. Thresholds and
-  routing are up to your workflow.
-- If the API doesn't echo a model, or echoes one that can't be read, the
-  recorded effective model and model family are both `null`. The answers are
-  still returned.
+- **A low-confidence answer completes like any other result.** Thresholds
+  and routing are up to your workflow.
+
+## API
+
+- **`JevApiEngine`**: the engine class. **`JevApiEngineOptions`**: its
+  options. [Quickstart](#quickstart).
+- **`parseJevDocument`**: read a prompt into the request shape.
+  [Ask a question](#ask-a-question).
+
+## Next steps
+
+- [Evals in an agent workflow](/reviewing/evals): scored conditions, and
+  what a confidence does and doesn't mean.
+- [Fast and deliberate, side by side](/coming-soon/fast-and-deliberate):
+  the routing a typed decision will feed.

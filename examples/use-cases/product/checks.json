@@ -1,0 +1,9 @@
+{
+  "note": "The recorded Jev checks the offline run replays, one per seat's view. A live run asks Jev instead.",
+  "r-1/claude": { "stance": { "choice": "bet", "confidence": 0.86 } },
+  "r-1/codex": { "stance": { "choice": "bet", "confidence": 0.81 } },
+  "r-1/opencode": { "stance": { "choice": "bet", "confidence": 0.78 } },
+  "r-2/claude": { "stance": { "choice": "pass", "confidence": 0.74 } },
+  "r-2/codex": { "stance": { "choice": "needs-research", "confidence": 0.52 } },
+  "r-2/opencode": { "stance": { "choice": "pass", "confidence": 0.69 } }
+}

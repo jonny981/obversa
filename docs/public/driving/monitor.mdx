@@ -1,15 +1,122 @@
 ---
-title: "Watch a run in the browser"
-description: "Every run can serve its own page on a free local port: the declared steps with their live state, the work sent back, the questions waiting for a person, and the tail of the record. The page's one control answers a waiting question."
+title: "Watch a Run in the Browser"
+sidebarTitle: "Watch in the Browser"
+description: "A run serves its own page on a local port: each step's state, the findings, the questions waiting, and the tail of the record."
 ---
 
-Turn the page on and the run binds a free port on the loopback address. It
-folds the run's own events into the state of each declared step, and
-serves that state as a page and as JSON. Nothing on the page starts, stops
-or edits the run. Its one control answers a question the run is waiting
-on, through the same callbacks client any router uses.
+Turn one option on and the run serves a page about itself while it works:
+each declared step with its live state, the findings that made a step run
+again, the questions waiting for a person, and the tail of the record. Use
+it to watch a long run without tailing a log. To answer questions with a
+page of your own, use a [surface](/concepts/surfaces); this page's one
+control answers a waiting question through the same callbacks client.
 
-```ts
+The smallest use turns the page on and reads the address from the record:
+
+```ts examples/monitor.ts (excerpt) {3,5}
+let address: string | undefined;
+const result = await run(digest, {
+  monitor: true,
+  onEvent: (event: LoopEvent) => {
+    if (event.kind === 'monitor') address = event.url;
+  },
+});
+```
+
+`monitor: true` binds a free port on the loopback address and folds the
+run's own events into the state of each declared step, served as a page
+and as JSON. The address is written once as a `monitor` event, so it's in
+the record and in any `onEvent` sink; the run never prints it.
+`result.monitor` carries the same `url` and a `close()`. The page needs:
+
+- **`monitor: true`** on a plain `run`; the default is off. Under
+  `supervise` it's on unless you pass `monitor: false`.
+- **A process that stays up** for as long as you want to watch. The server
+  doesn't keep the process alive: a script that finishes exits as it would
+  without the page, and the page goes with it.
+
+## Read the state
+
+The example runs two plain steps offline, reads the page's state as JSON
+once the run is done, and closes the page:
+
+```ts examples/monitor.ts (excerpt) {3,15}
+const state = address === undefined
+  ? undefined
+  : (await (await fetch(`${address}state`)).json()) as {
+    status: string;
+    outcome?: { status: string };
+    nodes: Record<string, { phase: string }>;
+  };
+console.log(JSON.stringify({
+  address,
+  run: result.outcome.status,
+  page: state?.status,
+  steps: state ? Object.fromEntries(Object.entries(state.nodes).map(([name, node]) => [name, node.phase])) : undefined,
+}, null, 2));
+await result.monitor?.close();
+```
+
+Run it with `npx tsx monitor.ts`. Open the printed address while a longer
+run is going to watch it move:
+
+```json Output
+{
+  "address": "http://127.0.0.1:53511/",
+  "run": "pass",
+  "page": "done",
+  "steps": {
+    "gather": "done",
+    "summarise": "done"
+  }
+}
+```
+
+The page said `done` after the run and both steps were done. The page
+shows:
+
+- **Each declared step**, in order, with what it needs, its `desc`, and its
+  phase: declared, running, done with its outcome, or skipped. A step that
+  ran more than once says how many times.
+- **Findings that made a step run again**: which step returned them, to
+  which step, why, and how much of that step's budget is used.
+- **Questions waiting for a person**, each with a Yes, a No and a note.
+- **The tail of the record**, the last forty of the two hundred events the
+  page keeps in memory. Read the record file for all of them.
+
+The page polls once a second and stops when the run is done. Only the steps
+of the outermost graph appear; a graph nested inside a step shows through
+that step's outcome.
+
+## Answer a waiting question
+
+| Route | What it does |
+| --- | --- |
+| `GET /` | The page. |
+| `GET /state` | The same state as JSON: `status`, `outcome`, `nodes`, `kickbacks`, `usage`, `usageSummary`, `pending`, `events`. The type is `MonitorState`. |
+| `POST /answer` | Answers one waiting question. The body is JSON: `{ "requestId": "...", "response": { "approved": true, "note": "..." } }`. The answer is claimed and submitted through the run's callbacks client as the router `monitor`. |
+
+Nothing on the page starts, stops or edits the run. Any other route is 404,
+any other method 405, and a body that isn't JSON 400. A request whose
+`Host` isn't the bound address is refused, and `/answer` takes only
+`application/json`, so a page from another origin can't post to it.
+
+<Warning>
+Keep the page off on a shared host. It carries no token, so anyone on the
+machine the run is on can answer a waiting question.
+</Warning>
+
+## Failure
+
+- **A run that never started** still binds the port. Call
+  `result.monitor.close()` anyway.
+- **An environment that fails to come up** fails the run, and the page
+  shows that final state. A process that stays up keeps serving the final
+  state until `close()` is called.
+
+<Accordion title="Full file">
+
+```ts examples/monitor.ts
 /**
  * Watch a run in the browser.
  *
@@ -70,58 +177,12 @@ if (faults.length) {
 }
 ```
 
-The address is written once as a `monitor` event, so it's in the record
-and in any `onEvent` sink. The run never prints it. `result.monitor`
-carries the same `url` and a `close()`.
+</Accordion>
 
-## When it is on
+## Next steps
 
-- `monitor: true` turns it on for a plain `run`. The default is off.
-- Under `supervise` it's on unless you pass `monitor: false`.
-
-<Warning>
-Keep the page off on a shared host. It carries no token, so anyone on the
-machine the run is on can answer a waiting question.
-</Warning>
-
-The server doesn't keep the process alive. A script that finishes its run
-exits as it would without the page, and the page goes with it. A process
-that stays up keeps serving the final state until `close()` is called.
-
-Call `result.monitor.close()` even when the run never started, because the
-page still binds the port. If the environment fails to come up, the run
-fails and the page shows that final state.
-
-## What the page shows
-
-- **Each declared step**, in order, with what it needs, its `desc`, and its
-  phase: declared, running, done with its outcome, or skipped. A step that
-  ran more than once says how many times.
-- **Work sent back**: which step sent it, to which step, why, and how much
-  of that step's budget is used.
-- **Questions waiting for a person**, each with a Yes, a No and a note.
-- **The tail of the record**, the last forty of the two hundred events the
-  page keeps in memory. Read the record file for all of them.
-
-The page polls once a second and stops when the run is done. Only the
-steps of the outermost graph appear. A graph nested inside a step shows
-through that step's outcome.
-
-## The routes
-
-| route | what it does |
-| --- | --- |
-| `GET /` | The page. |
-| `GET /state` | The same state as JSON: `status`, `outcome`, `nodes`, `kickbacks`, `usage`, `usageSummary`, `pending`, `events`. The type is `MonitorState`. |
-| `POST /answer` | Answers one waiting question. The body is JSON: `{ "requestId": "...", "response": { "approved": true, "note": "..." } }`. The answer is claimed and submitted through the run's callbacks client as the router `monitor`. |
-
-Any other route is 404, any other method is 405, and a body that isn't
-JSON is 400. A request whose `Host` isn't the bound address is refused.
-`/answer` takes only `application/json`, so a page from another origin
-can't post to it.
-
-## Where to go
-
-See [Supervised local runs](/driving/runner) for a run that survives a
-crash, and [how a run is recorded](/recording/how-a-run-is-recorded) for
-the record the page is folded from.
+- [Supervised local runs](/driving/runner): a run that survives a crash,
+  with the page on by default.
+- [The record](/concepts/record): the event log the page is folded from.
+- [Obversa in cmux](/hosts/cmux): open a page beside the terminal that
+  started the run.

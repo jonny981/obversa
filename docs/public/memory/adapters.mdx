@@ -1,71 +1,131 @@
 ---
-title: "Memory adapters"
-description: "Select in-process memory or memory stored in private Git references."
+title: "Memory Adapters"
+description: "Keep memory in one process, in private Git references, or in a read-only Markdown corpus."
 ---
 
-The runtime accepts the `Memory` port and imports no adapter itself. Your
-program selects and creates the adapter.
+Pick where memory files live and hand the adapter to the run; the runtime
+imports none of them, so your program selects and creates the one you want.
+Use `@obversa/memory-simple` for tests and short runs, `@obversa/memory-git`
+when memory must outlive the process, and `@obversa/memory-markdown` to
+search your own Markdown files as a read-only corpus. The port they
+implement is on [Memory port](/memory).
 
-## In-process adapter
+The in-process adapter keeps its data in one process:
 
-Use `@obversa/memory-simple` for tests and short runs. Its data stays in one
-process.
-
-```ts
+```ts examples/memory-simple.ts {3}
 import { createSimpleMemory } from '@obversa/memory-simple';
 
-const memory = createSimpleMemory({ scope: 'example-run' });
-
+const memory = createSimpleMemory({ scope: 'memory-simple-example' });
 await memory.execute({
   command: 'create',
   path: '/memories/notes.md',
   text: 'Keep the result small.\n',
 });
-
 const result = await memory.execute({
   command: 'view',
   path: '/memories/notes.md',
 });
+
+if (!result.ok || result.command !== 'view' || result.value.kind !== 'file') {
+  throw new Error('The in-process memory could not read its note.');
+}
+console.log(result.value.text);
 ```
 
-Set smaller limits when a run has a smaller memory budget:
+`createSimpleMemory` needs a `scope`, and takes `limits` to shrink the
+defaults when a run has a smaller memory budget: `maxFileBytes`,
+`maxTotalBytes` and `maxFiles`. Run it with `npx tsx memory-simple.ts`:
 
-```ts
-const memory = createSimpleMemory({
-  scope: 'example-run',
-  limits: {
-    maxFileBytes: 8_192,
-    maxTotalBytes: 65_536,
-    maxFiles: 32,
-  },
-});
+```text Output
+Keep the result small.
 ```
 
-## Git adapter
+The note came back exactly as written.
 
-Use `@obversa/memory-git` when memory must stay after the process exits.
+## Keep memory in Git
 
-```ts
+`openGitMemory` stores each scope in a private Git reference under
+`refs/obversa/memory/v1`, and doesn't change the current branch, the index
+or the worktree:
+
+```ts examples/memory-git.ts {12-15}
+import { execFileSync } from 'node:child_process';
+import { mkdtemp, rm } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+
 import { openGitMemory } from '@obversa/memory-git';
 
-const memory = await openGitMemory({
-  repositoryPath: process.cwd(),
-  scope: 'example-run',
-});
+const repositoryPath = await mkdtemp(join(tmpdir(), 'obversa-memory-git-example-'));
+
+try {
+  execFileSync('git', ['init', '--quiet', repositoryPath]);
+  const memory = await openGitMemory({
+    repositoryPath,
+    scope: 'memory-git-example',
+  });
+  await memory.execute({
+    command: 'create',
+    path: '/memories/notes.md',
+    text: 'This note survives a process restart.\n',
+  });
+  const result = await memory.execute({
+    command: 'view',
+    path: '/memories/notes.md',
+  });
+
+  if (!result.ok || result.command !== 'view' || result.value.kind !== 'file') {
+    throw new Error('Git memory could not read its note.');
+  }
+  console.log(result.value.text);
+} finally {
+  await rm(repositoryPath, { recursive: true, force: true });
+}
 ```
 
-The adapter stores each scope in a private Git reference. It doesn't change
-the current branch, the index, or the worktree.
+The example creates a temporary repository and removes it. Run it with
+`npx tsx memory-git.ts`, with Git installed:
 
-Delete and eviction remove a path from that private reference. The older Git
-object can stay in the repository until Git removes unused objects. Git
-mirror clones, mirror pushes, and bundles made with `--all` copy the private
-reference and its plain-text contents, and backups can keep it too. Don't
-treat the reference as local-only, and don't treat deletion as immediate,
-secure erasure.
-
-Pass the selected adapter to the runtime:
-
-```ts
-await run(job, { memory });
+```text Output
+This note survives a process restart.
 ```
+
+Delete and eviction remove a path from the private reference. The older Git
+object can stay in the repository until Git removes unused objects, and
+mirror clones, mirror pushes and bundles made with `--all` copy the private
+reference and its plain-text contents; backups can keep it too. Don't treat
+the reference as local-only, and don't treat deletion as immediate, secure
+erasure.
+
+## Search a Markdown corpus
+
+`openMarkdownCorpus` from `@obversa/memory-markdown` opens a directory of
+your own Markdown files and finds the passages that match, each with its
+path and line range. Its `memory` property is a read-only view of the port:
+`view` reads the corpus, and every writing command returns an error, so a
+search can't edit what it selects. [Memory mechanics](/memory/mechanics)
+shows the corpus feeding `ground` and `curate`.
+
+## Pass the adapter
+
+`run(job, { memory })` puts the adapter on every job's context, so a job
+reads `ctx.memory` and calls `execute` on it. The runtime never selects an
+adapter for you.
+
+## Failure
+
+- **Every adapter returns the same error codes**, listed on
+  [Memory port](/memory), so a job handles them the same way whichever
+  store is behind it.
+- **A write past a limit** removes the earliest-written files until it fits,
+  never the file being written. Set smaller `limits` on the simple adapter
+  when a run's budget is smaller.
+
+## Next steps
+
+- [Memory mechanics](/memory/mechanics): ground, curate and consolidate
+  over any adapter.
+- [Git Memory](/packages/memory-git): the package page, with the reasoning
+  record that writes why a stage changed something into its commit.
+- [Markdown Memory](/packages/memory-markdown): the package page and its
+  search options.

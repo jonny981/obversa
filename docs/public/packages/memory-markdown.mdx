@@ -1,63 +1,122 @@
 ---
-title: "@obversa/memory-markdown"
-description: "@obversa/memory-markdown selects ranked passages from a local Markdown corpus for grounding."
+title: "Markdown Memory"
+description: "@obversa/memory-markdown: search a folder of Markdown files with no index or service, and hand the hits to ground through a read-only memory view."
 ---
 
-`@obversa/memory-markdown` searches a directory of `.md` files with no index,
-embedding service or network call. Each hit names the corpus file, the
-matching passage, its line range (counted from 1) and a score. You choose which
-hit paths to give to `ground`, and `curate` then fits the grounded text to the
-next job.
-
-Treat the text in a hit as untrusted. It's whatever the corpus file says, so a
-file can carry instructions aimed at a model. Pass the hit's path to `ground`
-instead of putting the passage text into a prompt yourself. `ground` marks the
-content as untrusted before a job sees it.
-
-## Requirements
-
-Nothing beyond [Installation](/get-started/installation).
+`@obversa/memory-markdown` searches a directory of `.md` files with no
+index, embedding service or network call, and gives the selected files to
+`ground` through a read-only view of the memory port. Use it when a team
+should read from your own notes, policies or handbook without a step being
+able to edit them. Each hit names the file, the matching passage, its line
+range (counted from 1) and a score.
 
 ## Install
 
-```bash
-npm install @obversa/obversa
+<CodeGroup>
+
+```bash npm
+npm install @obversa/memory-markdown
 ```
 
-## Corpus
-
-Create `memory-markdown-corpus/warranty.md` beside the example:
-
-```md
-# Coverage policy
-
-The battery warranty lasts eight years.
-
-Keep the purchase receipt with the installation record.
+```bash pnpm
+pnpm add @obversa/memory-markdown
 ```
 
-Create `memory-markdown-corpus/charging.md` beside it:
+</CodeGroup>
 
-```md
-# Charging
+Included in `@obversa/obversa`.
 
-Charge the battery before it reaches ten percent.
+## Requirements
+
+A directory of Markdown files. Nothing else.
+
+## Quickstart
+
+Open the corpus, search it, and pass the hit paths to `ground`:
+
+```ts examples/memory-markdown.ts (excerpt) {1-3,4,6}
+const corpus = openMarkdownCorpus({
+  directory: fileURLToPath(new URL('./memory-markdown-corpus', import.meta.url)),
+});
+const hits = await corpus.search('warranty');
+const paths = [...new Set(hits.map((hit) => hit.path))];
+const grounded = await ground(corpus.memory, {
+  sources: paths.map((path) => ({ path })),
+});
 ```
 
-Create `memory-markdown-corpus/notes with spaces.md` beside them:
+Treat the text in a hit as untrusted: it's whatever the corpus file says,
+so a file can carry instructions aimed at a model. Pass the hit's path to
+`ground` instead of putting the passage text into a prompt yourself, and
+`ground` marks the content as untrusted before a job sees it. The example
+searches a three-file corpus beside it, grounds the one file that matches,
+curates a brief and gives it to an offline agent. Run it with
+`npx tsx memory-markdown.ts`:
 
-```md
-# Not indexed
-
-Battery warranty battery warranty.
+```json Output
+{
+  "hits": [
+    {
+      "path": "/memories/warranty.md",
+      "startLine": 3,
+      "endLine": 3
+    }
+  ],
+  "grounded": [
+    "/memories/warranty.md"
+  ],
+  "brief": "The battery warranty lasts eight years.",
+  "job": "pass",
+  "briefReachedJob": true
+}
 ```
 
-The third file matches the query, but its name can't become a `MemoryPath`, so
-search skips it. The one remaining hit can go to `ground`.
+## Build the corpus
 
-## Source
+The example's corpus is three files beside it. `warranty.md` holds the
+coverage policy, `charging.md` a charging note, and `notes with spaces.md`
+matches the query but has a name that can't become a memory path, so search
+skips it and only one hit reaches `ground`. Search and the memory view
+include only directories and `.md` files whose names follow one rule: each
+segment starts with a letter or number, then uses letters, numbers, dots,
+underscores or hyphens, up to 128 characters. Dot-prefixed names, names
+outside that rule, non-Markdown files and symbolic links inside the corpus
+are skipped without failing the search or a directory view. The corpus
+root itself can be a symbolic link, and a corpus path such as
+`policies/warranty.md` becomes `/memories/policies/warranty.md`.
 
-```ts
+## Read through the port
+
+`corpus.memory` is a read-only `Memory`: `view` reads the `.md` files, and
+all five writing commands return an error, because search must never edit
+the material it selects from, and the writable adapters don't read a plain
+directory of files.
+
+## Rank the hits
+
+Search splits each file at headings and paragraph breaks. A passage with
+the exact phrase ranks above one that has the query terms apart; more
+matched terms and more occurrences rank next; path, then starting line,
+break ties. An empty query, or one with no matching passage, returns `[]`.
+
+## Options
+
+| Field | Type | Default | Description |
+| --- | --- | --- | --- |
+| `directory` | `string` | required | The directory of Markdown files. |
+| `limit` | `number` | none | `search(query, { limit })`: at most this many hits. |
+
+## Errors
+
+- **A file whose full path is longer than 1024 bytes** stops the search,
+  and the error names the path. A directory view still lists the file, and
+  that over-long path then makes `ground` refuse the whole directory. Keep
+  the corpus shallow enough to stay under the limit.
+- **A writing command on `corpus.memory`** returns a memory error.
+
+<Accordion title="Full file">
+
+```ts examples/memory-markdown.ts
 import { access } from 'node:fs/promises';
 import { fileURLToPath } from 'node:url';
 
@@ -120,36 +179,17 @@ console.log(JSON.stringify({
 }, null, 2));
 ```
 
-The file uses the deterministic `MockEngine`, so it runs offline. Search finds
-`warranty` in one file, and only that file's path reaches `ground`. `curate`
-returns a short brief, and a real `agentJob` receives it.
+</Accordion>
 
-## Read-only Memory view
+## API
 
-The corpus exposes `corpus.memory` because `ground` reads through the public
-`Memory` contract. This view is **read-only**. `view` reads the `.md` files,
-and all five write commands return an error. Search must never edit the
-material it selects from, and the writable adapters don't read a plain
-directory of files.
+- **`openMarkdownCorpus({ directory })`**: a `MarkdownCorpus` with `search`
+  and `memory`. [Quickstart](#quickstart).
+- **Types**: `MarkdownCorpus`, `MarkdownSearchHit`, `MarkdownPassage`,
+  `MarkdownSearchOptions`, `OpenMarkdownCorpusOptions`.
 
-Search and the Memory view include only directories and `.md` files whose
-names follow one rule. Each path segment starts with a letter or number, then
-uses letters, numbers, dots, underscores or hyphens. A segment can be up to
-128 characters long. Dot-prefixed names, names outside that rule,
-non-Markdown files and symbolic links inside the corpus are skipped without
-failing the search or a directory view.
+## Next steps
 
-One case isn't skipped. A file whose full path is longer than 1024 bytes stops
-the search, and the error names that path. A directory view still lists the
-file, and that over-long path then makes `ground` refuse the whole directory.
-Keep the corpus shallow enough to stay under the limit.
-
-The corpus root itself can be a symbolic link. A corpus path such as
-`policies/warranty.md` becomes `/memories/policies/warranty.md`.
-
-## Ranking
-
-Search splits each file at headings and paragraph breaks. A passage with the
-exact phrase ranks above one that has the query terms apart. More matched terms
-and more occurrences rank next. Path, then starting line, breaks ties. An empty
-query, or one with no matching passage, returns `[]`.
+- [Memory mechanics](/memory/mechanics): `ground` and `curate`, which the
+  hits feed.
+- [Memory adapters](/memory/adapters): the three adapters side by side.

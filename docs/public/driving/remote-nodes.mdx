@@ -1,51 +1,43 @@
 ---
-title: "Run one step on another machine"
-description: "One step of a run executes on a remote machine while the orchestrator and the record stay on yours, and the change comes back as a commit or a patch."
+title: "Run One Step on Another Machine"
+sidebarTitle: "Remote Nodes"
+tag: "Coming soon"
+description: "Coming soon: One step of a run executes on a remote machine while the runtime and the record stay on yours, and the change comes back as a commit or a patch."
 ---
 
 <Note>
-**Coming soon.** Not in this release. This page describes where the
-runtime is going, so that the shape is public before the code is.
+**Coming soon.** Not in this release. This page says what the feature is,
+so that the shape is public before the code is.
 </Note>
 
-A run is a graph of steps, and the steps aren't alike. Most of them are
-cheap: a command that runs your tests, a condition that reads a file, a
-question that waits for a person. One or two aren't: the step that builds
-the image, the step that runs the suite that takes an hour, the step that
-needs a machine larger than the one on your desk.
+Move the one step that needs a bigger machine, and keep everything else
+where you can read it. Most steps in a run are cheap. One or two aren't:
+the image build, the suite that takes an hour, the step that needs more
+than the machine on your desk.
 
-A remote node moves one of those steps and nothing else. One step executes
-on another machine. The orchestrator stays where you started it, and the
-event record is written where it always was. The change the step made
-comes back as a commit or a patch, not as a filesystem you have to keep in
-sync.
+A remote node will move one of those steps and nothing else. The step
+executes on another machine; the runtime stays where you started it, and
+the event record is written where it always was. The change comes back as
+a commit or a patch, not as a filesystem to keep in sync.
 
 ## What stays local
 
-The parts that make a run inspectable don't move.
+- **The graph and its decisions**, recorded locally, so the record stays
+  one file on one machine.
+- **The approvals.** A person answers where the person is.
+- **The change**, as a commit: atomic, with its own description, reviewable
+  without the machine that made it.
 
-- **The graph and its decisions.** What runs next, what sends work back,
-  what a review concluded: all of it is decided and recorded locally, so
-  the record of the run is one file on one machine rather than a
-  correlation problem across several.
-- **The approvals.** A question for a person is answered where the person
-  is.
-- **The workspace you can read afterwards.** The remote step's change
-  arrives as a commit, so what it did is reviewable the same way any other
-  change is, by anyone, later, without the machine that made it.
+## Limits
 
-## Why a commit rather than a shared filesystem
+- **It won't distribute a run.** One named step is given a place to
+  execute; steps don't migrate for load.
+- **An unreachable machine fails the step where it stands**, with the
+  reason on the record.
 
-A mounted or synchronised filesystem makes the remote step feel local
-until it doesn't: a partial write during a network stall leaves a
-workspace nobody can explain afterwards. A commit is atomic, it carries
-its own description, and it's the artefact the rest of this runtime
-already records against. The step either produced one or it didn't.
+## Next steps
 
-## What it does not do
-
-It doesn't distribute a run. The graph isn't sharded across machines, and
-steps don't migrate for load. One named step is given a place to execute,
-and everything else is unchanged. A run whose remote machine is
-unreachable fails that step where it stands, with the reason on the
-record, rather than quietly carrying on somewhere else.
+- [Supervised local runs](/driving/runner): the worker and watchdog a remote
+  step would report to.
+- [Workspace](/concepts/workspace): the captured checkout a remote change
+  lands back on.

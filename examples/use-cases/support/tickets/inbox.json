@@ -1,0 +1,26 @@
+[
+  {
+    "id": "t-101",
+    "from": "a customer",
+    "subject": "Can't log in",
+    "body": "I forgot my password and the reset link never arrived. How do I get back in?"
+  },
+  {
+    "id": "t-102",
+    "from": "a customer",
+    "subject": "Export format",
+    "body": "Is the export one file or several? I need to load it into a spreadsheet and I'm not sure which tab to use."
+  },
+  {
+    "id": "t-103",
+    "from": "a customer",
+    "subject": "Charged twice",
+    "body": "You charged my card twice this month. I want the second charge refunded today or I'm cancelling and telling everyone."
+  },
+  {
+    "id": "t-104",
+    "from": "a customer",
+    "subject": "Team seats",
+    "body": "We have twelve people now. Do seats over ten cost the same, and can we pay yearly?"
+  }
+]

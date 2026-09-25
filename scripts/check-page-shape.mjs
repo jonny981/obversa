@@ -13,7 +13,7 @@
  */
 import { execFileSync } from 'node:child_process';
 
-import { CONSUMER_EXAMPLES, REAL_ENGINE_EXAMPLES } from './consumer-examples.mjs';
+import { CONSUMER_EXAMPLES, PROOF_RUN_EXAMPLES, REAL_ENGINE_EXAMPLES } from './consumer-examples.mjs';
 import { reachableScripts } from './check-spec-coverage.mjs';
 import { readFileSync, readdirSync } from 'node:fs';
 import { join } from 'node:path';
@@ -49,96 +49,16 @@ const COMMANDS_ARE_THE_CONTENT = new Set(['get-started/installation.mdx']);
  */
 const KNOWN_DEBT = [
   {
-    page: 'plugins.mdx', fault: 'example', owner: 'D35',
-    why: 'a list of the tools we ship with nothing to copy; the package-page rewrite gives it one engine binding a reader can paste',
+    page: 'packages/engine-eve.mdx', fault: 'example', owner: 'F124',
+    why: 'the page ships before the code, tagged coming soon, so there is nothing a reader can run yet; the stage that builds the eve engine plugin brings the example with it',
   },
   {
-    page: 'hosts/cmux.mdx', fault: 'example', owner: 'D35',
-    why: 'the page tells a reader which commands to run and never shows the configuration they run against',
+    page: 'packages/engine-mastra.mdx', fault: 'example', owner: 'F125',
+    why: 'the page ships before the code, tagged coming soon, so there is nothing a reader can run yet; the stage that builds the mastra engine plugin brings the example with it',
   },
   {
-    page: 'hosts/cmux.mdx', fault: 'opening', owner: 'D35',
-    why: 'it opens by saying what Obversa is, to a reader who came to set up a host',
-  },
-  {
-    page: 'recording/node-attempts.mdx', fault: 'opening', owner: 'D35',
-    why: 'it opens by defining a safe node attempt rather than by saying what the reader can now do',
-  },
-  {
-    page: 'workflows/forge-helper.mdx', fault: 'opening', owner: 'D35',
-    why: 'it opens by defining a forge; the everyday case, you have a reviewed change and want it merged, comes first',
-  },
-  {
-    page: 'packages/engine-claude-agent-sdk.mdx', fault: 'wholefile', owner: 'D35',
-    why: 'two fragments: a binding and a call, with no run around them',
-  },
-  {
-    page: 'packages/engine-anthropic-api.mdx', fault: 'wholefile', owner: 'D35',
-    why: 'one fragment: the binding alone',
-  },
-  {
-    page: 'packages/engine-claude-cli.mdx', fault: 'wholefile', owner: 'D35',
-    why: 'one fragment: the binding alone',
-  },
-  {
-    page: 'packages/engine-codex-cli.mdx', fault: 'wholefile', owner: 'D35',
-    why: 'one fragment: the binding alone',
-  },
-  {
-    page: 'packages/engine-grok-cli.mdx', fault: 'wholefile', owner: 'D35',
-    why: 'one fragment: the binding alone',
-  },
-  {
-    page: 'packages/engine-jev-api.mdx', fault: 'wholefile', owner: 'D35',
-    why: 'one fragment: the binding alone',
-  },
-  {
-    page: 'packages/engine-opencode-cli.mdx', fault: 'wholefile', owner: 'D35',
-    why: 'one fragment: the binding alone',
-  },
-  {
-    page: 'packages/memory-git.mdx', fault: 'wholefile', owner: 'D35',
-    why: 'one fragment: openGitMemory called with nothing run against it',
-  },
-  {
-    page: 'packages/memory-simple.mdx', fault: 'wholefile', owner: 'D35',
-    why: 'one fragment: createSimpleMemory called with nothing run against it',
-  },
-  {
-    page: 'packages/surface.mdx', fault: 'wholefile', owner: 'D35',
-    why: 'names examples/hello-surface.mjs twice, a file that does not exist; the package page gets a whole file that runs',
-  },
-  {
-    page: 'concepts/orders.mdx', fault: 'wholefile', owner: 'D47',
-    why: 'a span of feature-delivery.ts: the order alone, its imports elsewhere',
-  },
-  {
-    page: 'graphs/contract.mdx', fault: 'wholefile', owner: 'D47',
-    why: 'the second block is the contract types imported and unused; custom-graph.ts already shows the whole',
-  },
-  {
-    page: 'graphs/pipeline.mdx', fault: 'wholefile', owner: 'D47',
-    why: 'one fragment: an import with nothing after it',
-  },
-  {
-    page: 'memory/adapters.mdx', fault: 'wholefile', owner: 'D47',
-    why: 'four fragments: two constructions and two calls, no file',
-  },
-  {
-    page: 'memory/index.mdx', fault: 'wholefile', owner: 'D47',
-    why: 'seven memory.execute fragments, one per command; one whole file runs them all',
-  },
-  {
-    page: 'memory/mechanics.mdx', fault: 'wholefile', owner: 'D47',
-    why: 'three fragments of consolidate and its result',
-  },
-  {
-    page: 'reviewing/review-loop.mdx', fault: 'wholefile', owner: 'D47',
-    why: 'one fragment: an import with nothing after it; review-loop.ts exists and runs',
-  },
-  {
-    page: 'workflows/team-conversation.mdx', fault: 'wholefile', owner: 'D47',
-    why: 'three spans of team-conversation.ts beside the whole file; the spans go, the whole stays',
+    page: 'packages/engine-langgraph.mdx', fault: 'example', owner: 'F126',
+    why: 'the page ships before the code, tagged coming soon, so there is nothing a reader can run yet; the stage that builds the langgraph engine plugin brings the example with it',
   },
   {
     page: 'workspace/contract.mdx', fault: 'wholefile', owner: 'D47',
@@ -165,16 +85,8 @@ const KNOWN_DEBT = [
     why: 'the page ships before the code, tagged coming soon, so there is nothing a reader can run yet; the stage that builds the feature brings the example with it',
   },
   {
-    page: 'coming-soon/more-examples.mdx', fault: 'example', owner: 'F74',
-    why: 'the page ships before the code, tagged coming soon, so there is nothing a reader can run yet; the stage that builds the feature brings the example with it',
-  },
-  {
     page: 'driving/remote-nodes.mdx', fault: 'example', owner: 'F37',
     why: 'the page ships before the code, tagged coming soon, so there is nothing a reader can run yet; the stage that builds remote nodes brings the example with it',
-  },
-  {
-    page: 'graphs/plan-admission.mdx', fault: 'example', owner: 'D35',
-    why: 'a reference page with no quotable call, which is the fault a reference can least afford',
   },
 ];
 
@@ -308,7 +220,10 @@ function definesItsOwnTitle(title, line) {
  * exists on no file compiles nowhere and drifts the day the API moves. So
  * every TypeScript block on a page is one whole file under `examples/`, byte
  * for byte, and that file is one the chain runs (an `example:*` script) and
- * compiles against the packed packages (the clean consumer's list). This was
+ * compiles against the packed packages (the clean consumer's list). An
+ * excerpt is allowed when the block's title names its file and ends
+ * "(excerpt)", and it must be a contiguous run of that file's lines, so it
+ * still compiles and runs as part of the file. This was
  * asked for by name: "All examples must be in full and be able to compile and
  * run."
  */
@@ -353,13 +268,15 @@ export function examplesRunByTheChain(root) {
   return ran;
 }
 
+const EXCERPT = /examples\/([A-Za-z0-9_./-]+\.(?:ts|mjs))\s+\(excerpt\)/;
+
 function fencedBlocks(text) {
-  return [...text.matchAll(/^[ \t]*```([a-zA-Z0-9]*)[^\n]*\n([\s\S]*?)^[ \t]*```/gm)]
-    .map((m) => ({ lang: m[1], body: m[2].replace(/\n+$/, '') }));
+  return [...text.matchAll(/^[ \t]*```([a-zA-Z0-9]*)([^\n]*)\n([\s\S]*?)^[ \t]*```/gm)]
+    .map((m) => ({ lang: m[1], meta: m[2].trim(), body: m[3].replace(/\n+$/, '') }));
 }
 
 /** Files a chain cannot run because they need signed-in model CLIs, each with its reason. */
-export function realEngineExamples(entries = REAL_ENGINE_EXAMPLES) {
+export function realEngineExamples(entries = [...REAL_ENGINE_EXAMPLES, ...PROOF_RUN_EXAMPLES]) {
   const files = new Set();
   for (const entry of entries) {
     if (!entry.file || !entry.why) throw new Error(`a real-engine example entry needs a file and a why: ${JSON.stringify(entry)}`);
@@ -368,19 +285,44 @@ export function realEngineExamples(entries = REAL_ENGINE_EXAMPLES) {
   return files;
 }
 
+/** Whether the body's lines appear in the file's lines as one consecutive slice. */
+function isContiguousRun(content, body) {
+  const lines = content.split('\n');
+  const slice = body.split('\n');
+  outer: for (let i = 0; i + slice.length <= lines.length; i++) {
+    for (let j = 0; j < slice.length; j++) if (lines[i + j] !== slice[j]) continue outer;
+    return true;
+  }
+  return false;
+}
+
 export function wholeFileFaults(name, text, { examples, ran, compiled, realEngine = realEngineExamples() }) {
   const faults = [];
   for (const block of fencedBlocks(text)) {
     if (!WHOLE_FILE_LANGS.has(block.lang)) continue;
     const first = (block.body.split('\n')[0] ?? '').slice(0, 60);
+    const excerpt = block.meta.match(EXCERPT);
     let file;
-    for (const [rel, content] of examples) if (content === block.body) { file = rel; break; }
-    if (file === undefined) {
-      faults.push(`${name}: a ${block.lang} block is not a whole file under examples/ (it starts "${first}")`);
-      continue;
+    if (excerpt) {
+      file = excerpt[1];
+      const content = examples.get(file);
+      if (content === undefined) {
+        faults.push(`${name}: an excerpt names examples/${file}, which does not exist`);
+        continue;
+      }
+      if (!isContiguousRun(content, block.body)) {
+        faults.push(`${name}: an excerpt of examples/${file} is not a contiguous run of its lines (it starts "${first}")`);
+        continue;
+      }
+    } else {
+      for (const [rel, content] of examples) if (content === block.body) { file = rel; break; }
+      if (file === undefined) {
+        faults.push(`${name}: a ${block.lang} block is not a whole file under examples/ (it starts "${first}")`);
+        continue;
+      }
     }
-    if (!ran.has(file) && !realEngine.has(file)) faults.push(`${name}: quotes examples/${file} whole, but no example:* script runs it`);
-    if (!compiled.has(file)) faults.push(`${name}: quotes examples/${file} whole, but the clean consumer does not compile it`);
+    if (!ran.has(file) && !realEngine.has(file)) faults.push(`${name}: quotes examples/${file}, but no example:* script runs it`);
+    if (!compiled.has(file)) faults.push(`${name}: quotes examples/${file}, but the clean consumer does not compile it`);
   }
   // A page that names a file under examples/ in its prose names one that exists.
   const prose = text.replace(/```[\s\S]*?```/g, '');

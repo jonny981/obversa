@@ -1,42 +1,96 @@
 ---
 title: "Grok CLI Engine"
-description: "@obversa/engine-grok-cli runs isolated engine attempts through a fresh Grok CLI process."
+description: "@obversa/engine-grok-cli: one isolated engine attempt through a fresh Grok CLI process."
 ---
 
-`@obversa/engine-grok-cli` is an engine plugin that runs one isolated engine attempt through the `grok` command-line tool.
-
-## Requirements
-
-- Grok CLI 1.0.5
-- Grok credentials, passed in the `environment` or `authFile` option
+`@obversa/engine-grok-cli` runs one isolated engine attempt through the
+`grok` command-line tool, in a fresh process with a clean environment, so
+your own sign-in isn't used. Use it to put an xAI model in a seat, with
+credentials you pass in.
 
 ## Install
 
-```bash
-npm install @obversa/obversa
+<CodeGroup>
+
+```bash npm
+npm install @obversa/engine-grok-cli
 ```
+
+```bash pnpm
+pnpm add @obversa/engine-grok-cli
+```
+
+</CodeGroup>
+
+Included in `@obversa/obversa`.
+
+## Requirements
+
+- Grok CLI 1.0.5, at an absolute path you pass as `executable`.
+- Grok credentials, passed in the `environment` or `authFile` option.
 
 ## Identity
 
-You name the provider and model family in the `identity` option, such as `{ provider: 'xai', modelFamily: 'grok-4' }`. The plugin records them as given.
+You name the provider and model family in the `identity` option, such as
+`{ provider: 'xai', modelFamily: 'grok-4' }`, and the plugin records them as
+given. Before its first attempt it runs `grok --version` and refuses to run
+if the version differs from `version`.
 
-## Usage
+## Quickstart
 
-```ts
-import { GrokCliEngine } from '@obversa/engine-grok-cli';
+Construct the engine with the executable, its version and the identity it
+serves, then run one request:
 
-const engine = new GrokCliEngine({
-  executable: '/absolute/path/to/grok',
-  version: '1.0.5',
-  identity: { provider: 'xai', modelFamily: 'grok-4' },
-  permissionMode: 'dontAsk',
-});
+```ts examples/safe-node-attempt.ts (excerpt) {2-5}
+  const grok = validateAgentResult(await new GrokCliEngine({
+    executable: grokExecutable,
+    version: '1.0.5',
+    identity: { provider: 'xai', modelFamily: 'grok-4' },
+    permissionMode: 'dontAsk',
+  }).run(
+    request(directory, 'grok-4-example', RESULT_SCHEMA),
+    () => {},
+    new AbortController().signal,
+  ));
 ```
 
-## Limits
+The example runs against a scripted executable, so it needs no account.
+Each attempt gets its own temporary home directory, with only the tools and
+permissions the request declares. Grok returns a native structured result,
+which the public validator checks before its parts are used.
 
-- `executable` must be an absolute path.
-- Before its first attempt, the engine runs `grok --version` and refuses to run
-  if the version differs from `version`.
-- Each attempt gets its own temporary home directory, with only the tools and
-  permissions the request declares.
+## Options
+
+### `environment` and `authFile`
+
+The child runs with a clean environment. `environment` names the exact
+values copied into it, and `authFile` the credentials file the CLI reads.
+Nothing from your own shell reaches the process unless you name it.
+
+### The rest
+
+| Field | Type | Default | Description |
+| --- | --- | --- | --- |
+| `executable` | `string` | required | Absolute path to the Grok CLI. |
+| `version` | `string` | required | The version the CLI must report. |
+| `identity` | `{ provider, modelFamily }` | required | What this instance serves; either may be `null`. |
+| `permissionMode` | `PermissionMode` | none | The CLI's permission mode. |
+
+## Errors
+
+- **A version that differs from `version`** refuses the run before the first
+  attempt.
+- **A relative, empty or malformed `executable`** is refused.
+- **`EngineError`** kinds as the [API](/packages/api#errors) lists them.
+
+## API
+
+- **`GrokCliEngine`**: the engine class. [Quickstart](#quickstart).
+- **`GrokCliEngineOptions`**, **`GrokCliIdentity`**: its types.
+- **`buildGrokArgs`**: the argument builder, exported for tests.
+
+## Next steps
+
+- [Safe node attempts](/recording/node-attempts): the whole example, with
+  the OpenCode engine beside it and the output.
+- [API](/packages/api): the engine contract this plugin implements.

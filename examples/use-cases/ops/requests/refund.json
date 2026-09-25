@@ -1,0 +1,8 @@
+{
+  "kind": "refund",
+  "orderId": "ord-88213",
+  "customer": "cust-4471",
+  "amount": "48.00",
+  "currency": "EUR",
+  "reason": "Item arrived damaged; photos on the ticket."
+}

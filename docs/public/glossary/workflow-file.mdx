@@ -1,0 +1,58 @@
+---
+title: "Should Team Rules Live in AGENTS.md?"
+sidebarTitle: "Workflow File"
+description: "The rules that shape a session belong there. The team, who does what and what happens on a no, belongs in a workflow file you can run."
+---
+
+Put the rules that shape a session there, and put the team somewhere you
+can run. An `AGENTS.md` is read by one harness in one session, and it goes
+stale without anyone noticing. The team is a different thing: which stage
+gets which engine, the files it may write, who reviews it, and where a no
+goes. In Obversa that is a TypeScript file. Claude Code, Codex, Grok and
+OpenCode are seats in it, each engine call is a fresh process, and the
+file runs the same way every time. Obversa does not load that file as a
+prompt inside one harness, and it does not review your instructions file
+for you.
+
+## In Obversa
+
+Five stages, a panel that passes on two of three, and a person at the
+end, in the file that runs them:
+
+```ts examples/feature-team.ts (excerpt) {8-10,21}
+const review = reviewPanel({
+  label: 'review',
+  reviewers: [
+    { name: 'correctness', job: checks.correctness },
+    { name: 'safety', job: checks.safety },
+    { name: 'scope', job: checks.scope },
+  ],
+  pass: 2, // two of three agree and the step passes
+  target: 'implement', // a failing panel returns the work here
+});
+
+export const featureDelivery = pipeline(
+  'feature-delivery',
+  [
+    { name: 'analyse', job: analyse },
+    { name: 'implement', job: implement },
+    { name: 'test', job: testStage },
+    { name: 'review', job: review },
+    { name: 'approve', job: approve },
+  ],
+  { maxKickbacks: 2 },
+);
+```
+
+`target` names where a failing panel returns the work, and `maxKickbacks`
+caps how many times. Save the file, share it, and run it again.
+
+## Agent harness
+
+The harness is the thing an `AGENTS.md` shapes. Obversa runs harnesses as
+seats. [What is an agent harness?](/glossary/agent-harness) has the term.
+
+## Next steps
+
+- [Workflows](/concepts/workflows): the team as a file, and what an order carries.
+- [Feature team, offline](/workflows/feature-team-offline): this file with its run.

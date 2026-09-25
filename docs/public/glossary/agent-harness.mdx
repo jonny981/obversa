@@ -1,25 +1,24 @@
 ---
-title: "What is an agent harness?"
-description: "The software around a model that turns it into an agent: the loop, the tools, the memory and the guardrails. Claude Code, Codex and their kin are agent harnesses. Obversa drives them as engines."
+title: "What Is an Agent Harness?"
+sidebarTitle: "Agent Harness"
+description: "The software around a model that turns it into an agent. Claude Code, Codex and their kin are agent harnesses; Obversa runs them as a team."
 ---
 
-You don't write an agent harness to use Obversa. You point Obversa at one.
-An agent harness is the software around a model that turns it into an
-agent: the loop that reads the model's answer and acts on it, the tools it
-may call, the memory it keeps between turns, and the guardrails. Claude
-Code, Codex, OpenCode and Grok's CLI are agent harnesses.
+Point Obversa at an agent harness; you don't write one to use it. An agent
+harness is the software around a model that turns it into an agent: the
+loop that reads the model's answer and acts on it, the tools it may call,
+the memory it keeps between turns, and the guardrails. Claude Code, Codex,
+OpenCode and Grok's CLI are agent harnesses. The layer that runs several of
+them as a team is the neighbour term, [a meta-harness](/glossary/meta-harness).
 
-Obversa treats each of those as an engine. One bounded call to an engine is
-one step, and the step's result is what the workflow reads. Each call starts
-fresh, so nothing leaks from one step to the next except what the workflow
-hands over. [Plugins and tools](/plugins) says how each engine runs a
-request.
+## In Obversa
 
-The file below uses a stand-in engine from the testing module, so it runs
-offline. In a real team, a seat helper such as `claude()` or `codex()` takes
-its place:
+Each harness is an engine, one bounded call to it is one step, and the
+step's result is what the workflow reads. Each call starts fresh, so
+nothing leaks from one step to the next except what the workflow hands
+over. The smallest use binds one engine to one job:
 
-```ts
+```ts examples/one-agent-job.ts {4,8}
 import { agentJob, run } from '@obversa/runtime';
 import { MockEngine } from '@obversa/runtime/testing';
 
@@ -39,24 +38,27 @@ const result = await run(job, {
 console.log(result.outcome.status);
 ```
 
+The engine here is a stand-in from the testing module, so the file runs
+offline. In a real team, `engines.claude('claude-sonnet-4-5')` or
+`engines.codex('gpt-5.6-luna')` takes its place, and
+[Plugins and tools](/packages) says how each one runs a request.
+
 ## Inner and outer
 
-| layer | what it is | where it lives |
+| Layer | What it is | Where it lives |
 | --- | --- | --- |
 | The model | The weights behind an API. | The provider. |
 | The agent harness | The loop, tools, memory and guardrails around one model. | Claude Code, Codex, OpenCode, Grok CLI. |
-| The workflow | Several harnesses given roles, with reviews that send work back and a person at the gate. | Obversa. |
+| The workflow | Several harnesses given roles, with reviews that run a step again and a person at the gate. | Obversa. |
 
 The word "harness" names both the inner and the outer layer. Harness
 engineering usually means building the inner loop. Obversa is the layer
-above it, which [What is a meta-harness?](/glossary/meta-harness) covers.
+above it. In a workflow, give each review to a harness running another
+model family: `workflow()` refuses a reviewer from the same family as the
+writer it reviews.
 
-In the workflow, give each review to a harness running another model
-family. A harness shouldn't review its own work. The workflow builder
-refuses a reviewer from the same model family as the writer it reviews.
+## Next steps
 
-## Where to go
-
-[Plugins and tools](/plugins) lists the harnesses Obversa drives. The
-[runtime package](/packages/runtime) covers the smallest call, one agent
-with one job.
+- [What is a meta-harness?](/glossary/meta-harness): the outer layer.
+- [Plugins and tools](/packages): the harnesses Obversa drives.
+- [Installation](/get-started/installation): the file above, run for real.

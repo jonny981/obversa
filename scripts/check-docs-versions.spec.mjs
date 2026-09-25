@@ -13,7 +13,7 @@ test('docs versions follow each package manifest, including plugins', () => {
     writeFileSync(join(root, 'pnpm-workspace.yaml'), "packages:\n  - 'packages/*'\n  - 'plugins/*'\n");
     mkdirSync(join(root, 'scripts'), { recursive: true });
     writeFileSync(join(root, 'scripts/publish-allowlist.json'), JSON.stringify({ packages: ['@obversa/runtime', '@obversa/memory-git'] }));
-    mkdirSync(join(root, 'docs/public'), { recursive: true });
+    mkdirSync(join(root, 'docs/public/packages'), { recursive: true });
     for (const [directory, name, version] of [
       ['packages/runtime', '@obversa/runtime', '1.2.3'],
       ['plugins/memory-git', '@obversa/memory-git', '0.4.5'],
@@ -21,7 +21,7 @@ test('docs versions follow each package manifest, including plugins', () => {
       mkdirSync(join(root, directory), { recursive: true });
       writeFileSync(join(root, directory, 'package.json'), JSON.stringify({ name, version }));
     }
-    const page = join(root, 'docs/public/index.mdx');
+    const page = join(root, 'docs/public/packages/index.mdx');
     const table = '## Packages\n\n| Package | Purpose | Version |\n| --- | --- | --- |\n'
       + '| `@obversa/runtime` | Runtime | `1.2.3` |\n'
       + '| `@obversa/memory-git` | Memory | `0.4.5` |\n';

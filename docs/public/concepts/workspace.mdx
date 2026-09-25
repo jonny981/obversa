@@ -1,0 +1,84 @@
+---
+title: "Workspace"
+description: "A Git worktree per writer, captured and verified, so two writers never collide."
+---
+
+Give each writer its own Git worktree, captured before the work and checked
+after it, so two steps never write the same files and you can see when
+something else changed them. Use it when more than one step edits a
+repository, or when a step must not trust a checkout it didn't make. For
+where a step's files end up in the record, see
+[events and artifacts](/recording/events-and-artifacts).
+
+## Motivation
+
+Two coding agents in one checkout write over each other, and a run that
+starts on a checkout someone else has edited builds on sand. A Git worktree
+per writer is the fix people already use by hand. The workspace contract
+does it inside the run: it records what the repository looked like, refuses
+to fork if that changed, gives one writer at a time the right to fork, and
+lands the work back when the step passes.
+
+## Lifecycle
+
+- **Capture.** `capture()` records the repository's revision and the state
+  of its files, as an anchor. Pass Git pathspecs to limit it to the files
+  a step may touch.
+- **Verify.** `verify(anchor)` reads the repository again and reports any
+  changed revision or path. A write you didn't make shows up here, and you
+  decide whether the run pauses.
+- **Lease.** `acquireLease()` gives one writer the right to fork that
+  anchor. The lease lives in a private Git ref, so a second writer is
+  refused until the first releases it, and a delayed release can't remove a
+  later owner's record.
+- **Fork.** `fork(anchor, child, token)` creates a child branch and worktree
+  beside the repository, at the anchor's revision. A fork without a valid
+  lease, or after the anchor changed, fails with a named kind instead of
+  running on stale files.
+- **Land back.** `isolated(job)` wraps any step in that cycle: it runs the
+  step in its own worktree on a fork branch and, on pass, commits what the
+  step left and merges the branch back, one merge at a time across the
+  process. The worktree is removed and a cleanly merged branch is deleted,
+  so parallel steps leave nothing behind.
+
+## Example
+
+Capture, verify, lease and fork a fresh repository, then read the child:
+
+```ts examples/workspace.ts (excerpt) {2-3,5,7}
+  const workspace = createGitWorktreeProvider({ repositoryPath: directory });
+  const anchor = await workspace.capture();
+  const verified = await workspace.verify(anchor);
+  if (!verified.ok) throw new Error('workspace changed before fork');
+  const lease = await workspace.acquireLease('example', 'workspace-example', anchor);
+  if (!lease.ok) throw new Error('lease was not acquired');
+  const fork = await workspace.fork(anchor, 'example-child', lease.token);
+  await workspace.releaseLease(lease.token);
+  if (!fork.ok) throw new Error(`fork failed: ${fork.kind}`);
+```
+
+The child worktree sits at the anchor's revision with the same files, on
+its own branch. The file prints that revision, the digest of the anchor the
+lease covered, and the branch:
+
+```text Example record
+{"revision":"fab2254b3c8a179cca6aa5063a85d94600d820d5","anchor":"359e3253fb56170c93f1da438494b8da49bf72b3014cbc57e7a9ff711bbdc3c8","branch":"refs/heads/obversa/example-child"}
+```
+
+## Limits
+
+- **One repository.** The built-in provider captures one Git repository.
+- **Not a sandbox.** Nothing stops a program outside the run from writing
+  to the checkout. Verify reports that it happened; it doesn't prevent it.
+- **You decide what a drift means.** Verify reports changed paths. Pausing
+  the run, and recording any branch or merge, is your program's call. The
+  graph executor doesn't capture, verify or lease a workspace for you.
+- **No orphan cleanup.** The provider can retry an incomplete fork, but it
+  doesn't remove abandoned child refs or worktrees.
+
+## Next steps
+
+| Goal | Page |
+| --- | --- |
+| Read the contract: scoped capture, leases, fork failure kinds, where child worktrees live | [Workspace contract](/workspace/contract) |
+| Run the whole cycle in a disposable repository | [Workspace example](/workspace/example) |

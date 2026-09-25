@@ -1,69 +1,50 @@
 ---
 title: "Workflows"
-description: "A workflow is the shape of the work: the steps, who does each one, where the reviews are, and where a person decides."
+description: "The shape of the work: steps, reviews and decisions, as a TypeScript file."
 ---
 
+Write down once how work moves on your team, and the runtime runs it for
+your agents the same way every time: the steps, who does each one, where
+the reviews are, and where a person decides. Use it when more than one job
+has to happen in order, with a check between. For one job with one prompt,
+`agentJob` on its own is enough.
+
+## Motivation
 
 Every team has a way work moves. A ticket gets read, someone builds it,
-someone tests it, a few people review it, and a lead says ship. Nobody draws
-that on a whiteboard before each ticket. It's just how the team works. A
-workflow is that shape, written down once so the runtime can run it for
-your agents the same way every time.
+someone tests it, a few people review it, and a lead says ship. Nobody
+draws that on a whiteboard before each ticket. It's just how the team works.
+A workflow is that shape written down, in a TypeScript file you version,
+review and share like anything else you write, and the runtime runs it the
+same way each time.
 
-You write a workflow in TypeScript, in one file, with the steps in the order
-they run and the reviews where they belong. The runtime runs it one bounded
-step at a time and records each step as it finishes, so the shape you wrote
-is also the record you get back.
+## Parts
 
-## What a workflow is made of
-
-- **Steps.** Each step is a job: an agent call, a script, a check. A step
-  has a name, and the record carries whose work each step was.
-- **Sequence and dependencies.** A pipeline runs steps one after another. A
-  graph runs independent steps together and waits where one depends on
-  another. Both are one call.
-- **Reviews.** A review is a step that judges another step's result. A
-  panel passes on the count you set. A reviewer that fails a step names
-  the stage that must fix it, and the work goes back there with the
-  findings.
+- **Steps.** Each step is a job: an agent call, a command, a check. The
+  record carries whose work each step was.
+- **Sequence and dependencies.** A pipeline runs steps in order. A graph
+  runs independent steps together and waits where one depends on another.
+  Both are one call.
+- **Reviews.** A review judges another step's result. A panel passes on the
+  count you set. When a review fails a step, the findings go to the stage
+  that owns the fix, which runs again with them.
+  [Feedback loops](/concepts/feedback-loops) covers the shapes.
 - **Decisions for a person.** A callback gate stops the run, puts one
-  question in front of someone, and continues from that step with the
-  answer.
-- **Limits.** An attempt can carry a time budget, and work goes back only
-  as many times as you allow. An overrun is a result you can read, not a
-  hang.
+  question in front of someone, and carries on from that step with the
+  answer. No model interprets it.
+- **Limits.** An attempt can carry a time budget, and a step runs again
+  only as many times as you allow. No step can hang the run or burn the
+  budget, and the record says why it stopped.
 
-## Say what each step is for, beside the code
+## Descriptions and gates
 
-A step can carry two sentences next to its job: `desc`, what the step does,
-and `gate`, what done means for it. Both are optional. Both go into the
-plan the runtime prints and into the record. An agent step built with
-`graphContext: true` also gets `desc` in its prompt. In a `workflow()`, the
-writing seat gets both. A criterion written beside the code is much harder
-to write vaguely. `needs` takes a single name when a step has one
-dependency, which is the common case.
+A step carries two sentences beside its job: `desc`, what it does, and
+`gate`, what done means. Both go into the plan and the record. An agent
+step built with `graphContext: true` also gets `desc` in its prompt; in a
+`workflow()`, the writing seat gets both. A criterion written beside the
+code is hard to write vaguely:
 
-```ts
-/**
- * A small team in DAG form. Each stage says what it does and what done means.
- * It runs offline, so the example needs no model or network.
- */
-import {
-  dag,
-  fnJob,
-  jobMeta,
-  renderPlan,
-  run,
-  type Outcome,
-} from '@obversa/runtime';
-
-function stage(name: string, summary: string) {
-  return fnJob(name, async (): Promise<Outcome> => ({
-    status: 'pass',
-    summary,
-  }));
-}
-
+```ts examples/described-team.ts (excerpt) {4-5,9-11}
 const describedTeam = dag({
   name: 'described-team',
   nodes: {
@@ -86,108 +67,72 @@ const describedTeam = dag({
     },
   },
 });
-
-const result = await run(describedTeam);
-const report = {
-  plan: renderPlan(jobMeta(describedTeam)).join('\n'),
-  status: result.outcome.status,
-};
-console.log(JSON.stringify(report, null, 2));
-
-if (result.outcome.status !== 'pass') process.exitCode = 1;
 ```
 
 The plan the runtime renders shows both sentences under each step:
 
-```text
+```text Example record
 {
   "plan": "dag \"described-team\" (3 nodes)\n  - brief\n      desc: Turn the request into a short delivery brief.\n      gate: The brief names the user, outcome, and constraints.\n      fn \"brief\"\n  - build (needs brief)\n      desc: Build the smallest useful change from the brief.\n      gate: The change meets the brief and its checks pass.\n      fn \"build\"\n  - review (needs build)\n      desc: Check the change before it reaches the user.\n      gate: The change is safe to release and easy to explain.\n      fn \"review\"",
   "status": "pass"
 }
 ```
 
-## A feature team, in one file
+## Orders
 
-The file has five named stages. The review is a panel of three that passes
-on two. When it fails, the work goes back to the implement stage, not to
-the start of the run. The whole file is on the
-[first run](/get-started/first-run) page. Copy it from there.
+Someone asks for a change: a passkey login, a report export with a header
+row. On a team that's a ticket: what's wanted, why, the constraints, and
+what done looks like. An order is that ticket, and a workflow is what the
+team does with it. In `examples/feature-delivery.ts` the order is one line:
+build a retry helper that retries failed requests, caps attempts, and stops
+when the caller aborts.
 
-Run it and the panel fails the first attempt, implement runs again, and the
-second attempt passes:
+The runtime has no order type, no ticket store and no opinion about where
+your tickets live. Your application decides what an order holds, where it's
+kept and which workflow runs on it, so it can come from Linear, GitHub or a
+text file.
 
-```text
-{
-  "status": "pass",
-  "implementRuns": 2
-}
-```
+### Lifecycle
 
-The stages in that file are small functions, so the shape is the only thing
-on show. In a real team each one calls an engine, and the file doesn't
-change shape when it does.
+An order moves through its workflow without waiting for others, gets its
+reviews and a person's decisions on the way, and closes when its evidence
+says the requirements are met. Some orders need more than one workflow. A
+payment feature is three in a row: implement it, review it for security,
+release it. Your application starts each when the one before finishes, and
+runs independent ones together.
 
-## What happens when it runs
+#### Properties
 
-The runtime reads the workflow, runs the first step it can, and appends an
-event when the step finishes. Then the next. A review that fails a step
-appends the findings and the name of the stage to fix, and the runtime runs
-that stage again with them. A gate that waits for a person appends the
-pause, and the run stops there until the answer arrives. With `recordTo`
-set, each of those events is a line in a file on disk. To carry on a
-stopped run built with `workflow()`, run it again with `resume: true`, and
-it picks up from the record at `recordTo`.
-[How a run is recorded](/recording/how-a-run-is-recorded) says what the
-file holds and which stages run again.
+Four things travel with an order, linked in the record, so a result reads
+without the agent's conversation:
 
-## Sending work back
+- **Context.** The requirements, designs and constraints the work needs.
+- **The workflow.** The steps that carry it out, as code.
+- **The output.** The files and artifacts the work made or changed.
+- **The evidence.** The checks, reviews and decisions that accepted the
+  output. [Proof acceptance](/reviewing/proof-acceptance) binds a review or
+  an approval to the exact bytes it judged.
 
-Work goes back to the step that owns the fix when a review, a command or a
-person says no. You name that step as the `target`:
+### Best practice
 
-- **A review panel** needs a `target`, or a failing panel fails the run
-  instead of returning the work. The five-stage file on
-  [first run](/get-started/first-run) sets it. A panel passes when enough
-  reviewers accept, so one that passes on two of three still passes when
-  one reviewer fails. To let one voice send the work back, set the pass
-  count to the number of reviewers.
-- **A command** sends its captured output back when it goes red, with no
-  agent in between: `commandJob(label, command, { target })`.
-- **A person** answers one question with
-  `approval(label, { question, target })`. A no goes back to `target` with
-  the person's note as the finding. [A person decides](/workflows/approval)
-  shows it.
+Keep an order small enough to follow from request to result. A report
+export is three orders: the endpoint, the CSV writer, the download button.
+Each is reviewed and approved on its own, so a finding lands on a few
+files.
 
-`maxKickbacks` sets how many times work can go back. Without it, a graph or
-pipeline never sends work back. `workflow()` sets it for you from each
-target's `retry`. A number is one budget for the whole graph. A map,
-`{ plan: 3, 'tests-first': 3 }`, gives each target its own, so a review that
-spends its budget on one step can't starve another. A target the map
-doesn't name gets none. When a budget runs out, the run fails with the last
-findings instead of looping, and every request is in the record with its
-count and its limit.
+### Working directory
 
-A command can also choose the path instead of sending work back. A node's
-`when` reads the outcome of a step it needs with `passed(name)` or
-`failed(name)`, so a command's exit code decides which branch runs.
-[A command decides the path](/workflows/command-kickback) shows both.
+An order's workflow can run in its own worktree, so two writers never
+collide. The [workspace contract](/workspace/contract) captures, verifies,
+leases and forks one Git repository for that.
 
-## Shapes you can start from
+## Next steps
 
-- A **pipeline** for work that goes in one direction.
-- A **review loop** for draft, review, and revise until it passes or runs
-  out of tries.
-- A **panel** for several reviewers and a threshold.
-- A **tournament** for several candidates and one winner.
-- A **graph** for anything with parallel branches.
-
-[The examples](/workflows) are complete programs for the common shapes.
-Copy one and change the parts that name your team. To write a shape of your
-own over the public contract, see
-[writing workflow shapes](/graphs/contract).
-
-## Where definitions live
-
-A workflow is source code. Keep it in the repository it works on, in a
-shared repository, or in a package. Version it, review it and share it like
-anything else you write.
+| Goal | Page |
+| --- | --- |
+| Copy a complete software delivery team | [Feature delivery](/workflows/feature-team), [Shipping through GitHub](/workflows/forge-helper), [Backlog grooming](/workflows/backlog-groom-then-rank) |
+| See a team outside software | [Contract review](/workflows/contract-playbook), [Translate and reflect](/workflows/translate-reflect) |
+| Read the contract a shape is built on | [Outside graph types](/graphs/contract) |
+| Use the shape that ships | [Built-in pipeline](/graphs/pipeline) |
+| Check a plan before it runs | [Plan admission](/graphs/plan-admission) |
+| Run a compiled graph | [Graph executor](/graphs/executor) |

@@ -1,0 +1,11 @@
+{
+  "asOf": "2030-03-31",
+  "currency": "EUR",
+  "invoices": [
+    { "id": "inv-2001", "customer": "Halvorsen Byg", "contact": "accounts@halvorsen.example", "amount": "1200.00", "due": "2030-03-10", "paid": "2030-03-08" },
+    { "id": "inv-2002", "customer": "Ostrava Kitchens", "contact": "finance@ostrava.example", "amount": "4380.00", "due": "2030-03-19" },
+    { "id": "inv-2003", "customer": "Bellweather Fit-Out", "contact": "ap@bellweather.example", "amount": "9150.00", "due": "2030-02-19", "dispute": "Customer says twelve units were delivered, not fifteen." },
+    { "id": "inv-2004", "customer": "Pinecrest Studios", "contact": "hello@pinecrest.example", "amount": "760.00", "due": "2030-03-28" },
+    { "id": "inv-2005", "customer": "Marlow & Sons", "contact": "accounts@marlow.example", "amount": "2300.00", "due": "2030-04-15" }
+  ]
+}

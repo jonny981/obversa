@@ -1,19 +1,19 @@
 ---
-title: "Review a diff in a host pane"
-description: "obversa-review opens a git diff for inline review in a browser pane beside the terminal and returns the annotations to the caller."
+title: "Review a Diff"
+sidebarTitle: "Review a Diff"
+description: "obversa-review opens a git diff in a browser pane beside the terminal and returns the comments as structured output."
 ---
 
-`obversa-review` opens a git diff as a review page in a browser pane
-beside the terminal. You read the diff, attach comments to lines, and
-return them. The command writes the annotations to stdout as structured
-output, so a script or an agent reads them without a screen.
+Read a git diff in a browser pane beside your terminal, attach comments to
+lines, and hand them back to the script or agent that asked, as one JSON
+object on stdout. Use it when a person's review has to feed a run without
+anyone copying comments around. For a run's own progress page, see
+[Watch a run in the browser](/driving/monitor).
 
-## Use
+`obversa-review` reviews one of three diffs. Run it inside the repository,
+or point it at one with `--cwd`:
 
-The command reviews one of three diffs. Run it inside the repository, or
-point it at one with `--cwd`.
-
-```sh
+```bash Terminal
 # Review the working tree (git diff).
 obversa-review
 
@@ -24,72 +24,50 @@ obversa-review --staged
 obversa-review --range main..HEAD
 ```
 
-The three are one choice: naming two modes on one command line (`--range
-main..HEAD --staged`) is a usage error, whatever their order.
+The three are one choice: naming two on one command line, such as
+`--range main..HEAD --staged`, is a usage error whatever their order. The
+working tree diff is `git diff`, so untracked files don't appear. Other
+flags:
 
-A diff that holds an unresolved merge conflict is refused whole with a
-message naming the conflicted path. Git describes such a path as a
-combined diff, which a review could only show as a missing file, so the
-command never opens a page that looks clean over a conflicted tree.
-
-Other flags:
-
-- `--cwd <dir>` runs against another repository directory.
-- `--no-open` doesn't place the pane. The command prints the page URL
+- **`--cwd <dir>`** runs against another repository directory.
+- **`--no-open`** doesn't place the pane. The command prints the page URL
   on stderr, and you open it yourself.
-- `--app <name>` overrides the surface app name. The name sets the frame
-  markers on stdout (see below).
+- **`--app <name>`** overrides the surface app name, which sets the frame
+  markers on stdout.
 
-The working tree diff is `git diff`, so untracked files don't appear.
+## Read and comment
 
-The diff, the code around each hunk, and the file list are captured
-twice. The review is accepted only when both captures agree on every
-line, every file read, and the file list. If the repository changes
-between them, the command tries the pair again, three attempts in all,
-and then stops with `The repository changed while the review was being
-captured; retry when it is quiet`. A change that's made and undone the
-same way during both captures isn't detected. The command takes no lock
-on the repository.
+The page shows the diff with syntax highlighting by file type, and a file
+tree with two views: **Changes** lists the changed files with file-type
+icons, `+`/`−` line counts and a status letter; **All files** lists every
+tracked file. Click a changed file to scroll to its diff. Collapsed
+**N unmodified lines** bands sit between hunks; click one to see the code
+around a hunk, or **Expand full file** on a file header to open every band
+in that file. Full-file context is available in the working tree and staged
+modes, not in range mode. For JavaScript files (`.js`, `.mjs`, `.cjs`),
+click an identifier to jump to the line that defines it when that line is
+in the diff; otherwise the tooltip names its line number.
+
+A `+` button on every diff line writes a comment on that line, and you can
+remove a comment before you return. **Return** ends the review with the
+comments you wrote, or with none. **Cancel** ends it with no comments and a
+`cancelled` decision.
 
 The page is placed through `OBVERSA_SURFACE_BIN`, the absolute path a host
-injects. The cmux workspace launcher sets it, so in cmux the page opens in
-a split beside the terminal. With the variable unset, the page opens in
-your default browser. [How placement works](/hosts/cmux).
+injects. The [cmux workspace launcher](/hosts/cmux) sets it, so in cmux the
+page opens in a split beside the terminal. With the variable unset, the
+page opens in your default browser.
 
-## What the page offers
-
-- The diff, with syntax highlighting by file type.
-- A file tree with two views. **Changes** lists the changed files with
-  file-type icons, `+`/`−` line counts, and a status letter. **All
-  files** lists every tracked file in the repository. Click a changed
-  file to scroll to its diff.
-- Collapsed **N unmodified lines** bands between hunks. Click one to see
-  the unchanged code around a hunk. **Expand full file** on a file header
-  opens every band in that file. Full-file context is available in the
-  working tree and staged modes, not in range mode.
-- Go to definition for JavaScript files (`.js`, `.mjs`, `.cjs`). Click an
-  identifier to jump to the line that defines it, when that line is in
-  the diff. When the definition is not shown, the tooltip names its line
-  number.
-- A `+` button on every diff line. Click it to write a comment on that
-  line. You can remove a comment before you return.
-- **Return** ends the review with the comments you wrote, or with none.
-  **Cancel** ends it with no comments and a `cancelled` decision.
-
-## What comes back
+## Read the result
 
 The command writes one framed JSON object to stdout, so a caller captures
-it with a pipe. The one-line summary goes to stderr. For the default app
-name the markers are `<<<REVIEW_RESULT_V1>>>` and
-`<<<END_REVIEW_RESULT_V1>>>`. The marker name is the app name in upper
-case, with punctuation replaced by `_`.
+it with a pipe, and the one-line summary goes to stderr. For the default
+app name the markers are `<<<REVIEW_RESULT_V1>>>` and
+`<<<END_REVIEW_RESULT_V1>>>`; the marker name is the app name in upper
+case, punctuation replaced by `_`. The payload is the surface result, the
+one shape every Obversa review surface returns:
 
-The payload is the surface result: the one result shape every Obversa
-review surface returns, whatever it shows. The `surface` field names the
-package that answered and the version that was resolved, on every status,
-so a consumer can always say which surface produced the frame.
-
-```json
+```json Example result
 {
   "schemaVersion": 1,
   "app": "review",
@@ -124,53 +102,79 @@ so a consumer can always say which surface produced the frame.
 }
 ```
 
-An annotation may carry a `thread`: an ordered list of replies, each an
-author and a body, shaped and bounded like the annotation itself. A
-responder agent appends to it with `appendToThread(annotation, entry)` from
-`@obversa/surface-diff`. The call returns a new annotation and never
-changes the one you pass in. A thread submitted with the review comes back
-in the framed result, so the next round sees the conversation so far.
+- **`surface`** names the package that answered and the version that was
+  resolved, on every status, so a consumer can always say which surface
+  produced the frame.
+- **`surfaceId`** names this review session. **`gateId`** names the
+  callback gate that opened it, or `null` when you ran the command
+  directly.
+- **`decision`** agrees with the annotations: `changes-requested` carries
+  at least one, `approved` none. A submission that says otherwise is
+  refused and the page stays open, so a decision is never rewritten on the
+  reviewer's behalf. `cancelled` and `timed-out` are set only by the
+  session's own ending.
+- **Each annotation has an `anchor`**: `target` is the repository-relative
+  path as it appears in the diff, `side` is `old` for a deleted line or
+  `new` for an added or unchanged line, and `position` is the line number
+  on that side. An anchor is those three plain values and nothing else; one
+  with an extra, hidden or computed field is refused. `body` is the comment
+  text with surrounding whitespace removed, `author` the reviewer,
+  `createdAt` when the comment was written.
+- **A `thread`** is an ordered list of replies, each an author and a body,
+  bounded like the annotation. A responder agent appends to it with
+  `appendToThread(annotation, entry)` from `@obversa/surface-diff`, which
+  returns a new annotation and never changes the one you pass in. A thread
+  submitted with the review comes back in the framed result, so the next
+  round sees the conversation so far.
 
-- `surfaceId` names this review session. `gateId` names the callback gate
-  that opened it, or `null` when you ran the command directly.
-- `decision` agrees with the annotations: `changes-requested` carries at
-  least one, and `approved` carries none. A submission that says otherwise
-  is refused and the page stays open, so a decision is never rewritten on
-  the reviewer's behalf. `cancelled` and `timed-out` are set only by the
-  session's own ending, never by a submission.
-- Each annotation has an `anchor`: `target` is the repository-relative file
-  path as it appears in the diff, `side` is `old` for a deleted line or `new`
-  for an added or unchanged line, and `position` is the line number on that
-  side. An anchor is those three plain values and nothing else. One with an
-  extra, hidden, or computed field is refused. `body` is the comment text
-  with surrounding whitespace removed. `author` is the reviewer, and
-  `createdAt` is when the comment was written.
+## Failure
 
-The bounds are fixed. A review returns at most 500 annotations. Each body
-is cut at 4000 characters. An annotation must anchor to a line that
-appears in the diff, and the server drops any other.
+- **A conflicted diff is refused whole**, with a message naming the
+  conflicted path. Git describes such a path as a combined diff, which a
+  review could only show as a missing file, so the command never opens a
+  page that looks clean over a conflicted tree.
+- **A repository that changes during capture** is retried. The diff, the
+  code around each hunk and the file list are captured twice, and the
+  review is accepted only when both captures agree on every line, every
+  file read and the file list. After three attempts the command stops with
+  `The repository changed while the review was being captured; retry when
+  it is quiet`. A change made and undone the same way during both captures
+  isn't detected, and the command takes no lock on the repository.
+- **`status`** is `completed` when the reviewer returns. `cancelled`,
+  `timed_out` and `interrupted` carry a short `detail` and a payload with
+  the same `surfaceId` and `gateId`, whose `decision` is `cancelled` or
+  `timed-out` with no annotations, so a gate can still route the outcome.
+  The exit code is 0 for `completed`, 1 for every other status, and 2 for
+  a bad argument.
 
-`status` is `completed` when the reviewer returns. `cancelled`, `timed_out`,
-and `interrupted` carry a short `detail` and a payload with the same
-`surfaceId` and `gateId`. That payload's `decision` is `cancelled` or
-`timed-out`, and it has no annotations, so a gate can still route the
-outcome. The exit code is 0 for `completed`, 1 for every other status, and
-2 for a bad argument.
+## Limits
+
+- **500 annotations** at most per review. **4000 characters** per body.
+- **An annotation must anchor to a line in the diff.** The server drops
+  any other.
+- **Comment bodies come back as written**, apart from the trimming and the
+  length cap. The secret redaction the surface server applies to other
+  responses doesn't apply to them, because a comment can quote code.
 
 ## Security
 
-The page runs on [the surface decision package](/packages/surface): one loopback server,
-one session token, one result. The static page names nothing under review:
-not the diff, not the ref, not even the highlight rules, which are built
-from the tokens the diff contains. The page fetches the diff, its label, and
-those rules from the session API with the bearer token. A local process
-that finds the port without the token sees a shell that's the same for
-every review. The
-address the page fetches from is a path on the session's own origin or an
-absolute `http` or `https` URL. A path that would leave the origin once
-parsed is refused. Nothing in a diff line can execute. The page has no
-inline script, a strict Content Security Policy allows scripts and styles
-from the session origin only, and every line is rendered as text. Apart
-from the trimming and the length cap, comment bodies come back as written.
-The secret redaction the surface server applies to other responses doesn't
-apply to them, because a comment can quote code.
+The page runs on [the surface package](/packages/surface): one loopback
+server, one session token, one result. The static page names nothing under
+review: not the diff, not the ref, not even the highlight rules, which are
+built from the tokens the diff contains. The page fetches the diff, its
+label and those rules from the session API with the bearer token, so a
+local process that finds the port without the token sees a shell that's
+the same for every review. The address the page fetches from is a path on
+the session's own origin or an absolute `http` or `https` URL; a path that
+would leave the origin once parsed is refused. Nothing in a diff line can
+execute: the page has no inline script, a strict Content Security Policy
+allows scripts and styles from the session origin only, and every line is
+rendered as text.
+
+## Next steps
+
+- [Obversa in cmux](/hosts/cmux): the launcher that places the page in a
+  split.
+- [Surfaces](/concepts/surfaces): the session every review page runs on.
+- [Surface Diff](/packages/surface-diff): the package, its options and
+  `appendToThread`.

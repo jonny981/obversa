@@ -108,13 +108,13 @@ console.log(JSON.stringify({
 
 /**
  * Part of the documentation proof: it must fail when the behaviour it shows
- * stops happening. A test node that quietly stopped sending work back would
+ * stops happening. A test node that quietly stopped returning the work would
  * still print a passing run, and `implement` running once is the tell; a
  * decision that stopped choosing would run both reviews or neither.
  */
 const faults: string[] = [];
 if (result.outcome.status !== 'pass') faults.push(`the run ended ${result.outcome.status}`);
-if (implementRuns !== 2) faults.push(`implement ran ${implementRuns} time(s), so the red test did not send the work back exactly once`);
+if (implementRuns !== 2) faults.push(`implement ran ${implementRuns} time(s), so the red test did not run implement again exactly once`);
 if (reviewed.join(',') !== 'quick-review') faults.push(`the reviews that ran were [${reviewed.join(', ')}], not the one the size command chose`);
 if (faults.length) {
   for (const fault of faults) console.error(fault);

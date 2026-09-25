@@ -1,57 +1,194 @@
 ---
-title: "Shipping a reviewed change through GitHub"
-description: "Ship a reviewed change through a code host: push the branch, open one pull request, pass a strict gate, squash the merge."
+title: "Shipping a Reviewed Change Through GitHub"
+sidebarTitle: "Shipping Through GitHub"
+description: "Push the branch, open one pull request, pass a strict gate on the exact head revision, squash the merge."
 ---
 
-Once a change has passed review, it still has to reach the code host. This
-file shows that step for GitHub, or any host with the same five operations.
-It pushes the work branch, opens or updates one pull request, proves that the
-change can merge, squashes the work into the base branch, and deletes the work
-branch.
+The change has passed its reviews. Now it has to reach the code host, and
+that is where hand-run processes go wrong: a second pull request for the
+same branch, a merge on green checks from an earlier commit, a work branch
+left behind.
 
-Call it after a review gate passes. A host supplies the five operations, the
-same way it supplies memory. The file is host-side code.
+You want the last mile to be as strict as the reviews were. One pull
+request per branch. A merge only when the checks you named ran and passed
+on the exact revision you're merging. The reasoning that produced the
+change carried into the merge message, so it ships with the code.
 
-## The five operations
+Obversa keeps that step as plain code a process calls after its review gate
+passes. This file is that step for GitHub, or any host with the same five
+operations: it pushes the work branch, opens or updates one pull request,
+proves the change can merge, squashes the work into the base branch, and
+deletes the work branch. A mock host proves it offline, and a GitHub adapter
+prints the `gh` argument list for each operation.
 
-1. **Push the branch.** `pushBranch` points the work branch at the head
-   revision. A second call with the same head does nothing.
-2. **Open one pull request.** `openOrUpdatePullRequest` opens one pull
-   request for the branch, or updates the open one. The body is a synthesis
-   of the commit bodies.
-3. **Read the status.** `readPullRequestStatus` reads the merge state, the
-   head revision, and the check runs.
-4. **Squash the merge.** `squashMerge` squashes the pull request into the
-   base branch. The message is the same synthesis, so the reasoning that
-   produced the change is the reasoning that ships it.
-5. **Delete the branch.** `deleteBranch` deletes the work branch after the
-   merge.
+## Run it
 
-## The gate
+The file imports no package and runs offline. Copy it into a project with
+`tsx` installed, as [Installation](/get-started/installation) describes:
 
-The gate is a pure function over one status. The change ships only when the
-expected workflow ran and passed on the exact head revision, and the branch
-can merge. Every other case returns `RESULT: FAIL` with the reason on the
-same line. A check run counts as passed only when its conclusion is exactly
-`success`. Green checks on other workflows don't ship a change, and neither
-do green checks from an earlier revision.
+```bash Terminal
+npx tsx forge-helper.ts
+```
 
-## Contract
+```json Output
+{
+  "verdicts": {
+    "unmergeable": "RESULT: FAIL because the branch cannot merge",
+    "staleChecks": "RESULT: FAIL because the checks are from an earlier revision",
+    "missingWorkflow": "RESULT: FAIL because the expected workflow never ran on the head revision",
+    "failedCheck": "RESULT: FAIL because the tests check finished as failure"
+  },
+  "ship": {
+    "verdict": "RESULT: PASS",
+    "pullRequest": 5,
+    "onePullRequest": true,
+    "merged": true,
+    "branchDeleted": true,
+    "mergeMessage": "Add a request timeout so that a hung call cannot block the client.\n\nStop the retry loop when the caller aborts the request.",
+    "operations": [
+      "read pull request 1",
+      "read pull request 2",
+      "read pull request 3",
+      "read pull request 4",
+      "push feature/timeout-retry 8c4f21e (created)",
+      "push feature/timeout-retry 8c4f21e (up to date)",
+      "pull request 5 (created)",
+      "pull request 5 (updated)",
+      "read pull request 5",
+      "squash merge 5",
+      "delete branch feature/timeout-retry"
+    ]
+  },
+  "ghArguments": {
+    "pushBranch": [
+      "gh",
+      "api",
+      "repos/example/checkout/git/refs/heads/feature/timeout-retry",
+      "-X",
+      "PATCH",
+      "-f",
+      "sha=8c4f21e"
+    ],
+    "openOrUpdatePullRequest": [
+      "gh",
+      "pr",
+      "create",
+      "--repo",
+      "example/checkout",
+      "--base",
+      "main",
+      "--head",
+      "feature/timeout-retry",
+      "--title",
+      "Ship the checkout client change",
+      "--body-file",
+      "-"
+    ],
+    "readPullRequestStatus": [
+      "gh",
+      "pr",
+      "view",
+      "5",
+      "--repo",
+      "example/checkout",
+      "--json",
+      "mergeable,headRefOid,statusCheckRollup"
+    ],
+    "squashMerge": [
+      "gh",
+      "pr",
+      "merge",
+      "5",
+      "--repo",
+      "example/checkout",
+      "--squash",
+      "--subject",
+      "Ship the checkout client change",
+      "--body-file",
+      "-"
+    ],
+    "deleteBranch": [
+      "gh",
+      "api",
+      "repos/example/checkout/git/refs/heads/feature/timeout-retry",
+      "-X",
+      "DELETE"
+    ]
+  }
+}
+```
 
-| Item | Value |
-| --- | --- |
-| Input | One reviewed change: a branch, a head revision, and commit bodies |
-| Output | The verdicts for four fixture pull requests, and one change shipped through the mock host |
-| Permissions | No file writes and no network access |
-| Limit | The gate ships nothing except an exact-revision pass |
-| Evidence | One JSON report on standard output |
+The report has three parts. `verdicts` holds the gate's verdict for each of
+four fixture pull requests, and every one fails with its reason on the
+line. `ship` holds the shipped change: the pull request number, the proof
+that two calls opened one pull request, the merge, the branch deletion, the
+synthesis message and the operation log. `ghArguments` holds the argument
+list the GitHub adapter would pass to `gh` for each operation. The file
+writes no files and makes no network calls, so run it again whenever you
+like.
 
-## Source
+## The file
 
-Copy `examples/forge-helper.ts` from the repository. It imports no package and
-runs offline.
+A host supplies five operations, the same way it supplies memory:
 
-```ts
+```ts examples/forge-helper.ts (excerpt)
+export interface ForgeHost {
+  /** Point the branch at the head. A second call with the same head does nothing. */
+  pushBranch(input: PushInput): Promise<{ head: string }>;
+  /** Open one pull request for the branch, or update the open one. */
+  openOrUpdatePullRequest(input: PullRequestInput): Promise<{ number: number; head: string }>;
+  /** Read the merge state, the head revision, and the check runs. */
+  readPullRequestStatus(input: { repo: string; number: number }): Promise<PullRequestStatus>;
+  /** Squash the pull request into the base branch with the given message. */
+  squashMerge(input: { repo: string; number: number; message: string }): Promise<{ merged: boolean }>;
+  /** Delete the work branch after the merge. */
+  deleteBranch(input: { repo: string; branch: string }): Promise<{ deleted: boolean }>;
+}
+```
+
+The pull request body and the squash message come from the same join of the
+commit bodies, so the reasoning that produced the change is the reasoning
+that ships it. The gate is a pure function over one status:
+
+```ts examples/forge-helper.ts (excerpt) {2-3,9-10,13-14}
+export function gateVerdict(status: PullRequestStatus, expectedWorkflow: string): string {
+  const runs = status.checks.filter((check) => check.workflow === expectedWorkflow);
+  const onHead = runs.filter((check) => check.revision === status.head);
+  if (onHead.length === 0) {
+    return runs.length > 0
+      ? 'RESULT: FAIL because the checks are from an earlier revision'
+      : 'RESULT: FAIL because the expected workflow never ran on the head revision';
+  }
+  if (!status.mergeable) {
+    return 'RESULT: FAIL because the branch cannot merge';
+  }
+  const failed = onHead.find((check) => check.conclusion !== CHECK_PASS_CONCLUSION);
+  if (failed) {
+    return `RESULT: FAIL because the ${expectedWorkflow} check finished as ${failed.conclusion}`;
+  }
+  return 'RESULT: PASS';
+}
+```
+
+The change ships only when the expected workflow ran and passed on the
+exact head revision, and the branch can merge. A check run counts as passed
+only when its conclusion is exactly `success`. Green checks on other
+workflows don't ship a change, and neither do green checks from an earlier
+revision. The demo ships only on the exact string `RESULT: PASS` and stops
+on anything else.
+
+The GitHub adapter returns one `gh` argument list per operation, each a pure
+function of its input; a new branch uses `createRefArguments`, an open pull
+request `listArguments` and `editArguments`. `runGh` is the execution layer,
+one function with no logic of its own, that runs `gh` with a list and
+returns the output. It needs a `gh` login, and nothing in this file calls
+it. To use the step in a process, give your host the five operations; the
+mock host in the file shows each one, and the gate stays the same for every
+host.
+
+<Accordion title="Full file">
+
+```ts examples/forge-helper.ts
 import { execFile } from 'node:child_process';
 
 // A forge is a code host such as GitHub. This file is the shipping step that
@@ -501,121 +638,25 @@ async function main(): Promise<void> {
 void main();
 ```
 
-## Run the example
+</Accordion>
 
-Run it with `pnpm exec tsx forge-helper.ts` in any project that has
-[`tsx` installed](/get-started/installation). The result is:
+## The shape
 
-```json
-{
-  "verdicts": {
-    "unmergeable": "RESULT: FAIL because the branch cannot merge",
-    "staleChecks": "RESULT: FAIL because the checks are from an earlier revision",
-    "missingWorkflow": "RESULT: FAIL because the expected workflow never ran on the head revision",
-    "failedCheck": "RESULT: FAIL because the tests check finished as failure"
-  },
-  "ship": {
-    "verdict": "RESULT: PASS",
-    "pullRequest": 5,
-    "onePullRequest": true,
-    "merged": true,
-    "branchDeleted": true,
-    "mergeMessage": "Add a request timeout so that a hung call cannot block the client.\n\nStop the retry loop when the caller aborts the request.",
-    "operations": [
-      "read pull request 1",
-      "read pull request 2",
-      "read pull request 3",
-      "read pull request 4",
-      "push feature/timeout-retry 8c4f21e (created)",
-      "push feature/timeout-retry 8c4f21e (up to date)",
-      "pull request 5 (created)",
-      "pull request 5 (updated)",
-      "read pull request 5",
-      "squash merge 5",
-      "delete branch feature/timeout-retry"
-    ]
-  },
-  "ghArguments": {
-    "pushBranch": [
-      "gh",
-      "api",
-      "repos/example/checkout/git/refs/heads/feature/timeout-retry",
-      "-X",
-      "PATCH",
-      "-f",
-      "sha=8c4f21e"
-    ],
-    "openOrUpdatePullRequest": [
-      "gh",
-      "pr",
-      "create",
-      "--repo",
-      "example/checkout",
-      "--base",
-      "main",
-      "--head",
-      "feature/timeout-retry",
-      "--title",
-      "Ship the checkout client change",
-      "--body-file",
-      "-"
-    ],
-    "readPullRequestStatus": [
-      "gh",
-      "pr",
-      "view",
-      "5",
-      "--repo",
-      "example/checkout",
-      "--json",
-      "mergeable,headRefOid,statusCheckRollup"
-    ],
-    "squashMerge": [
-      "gh",
-      "pr",
-      "merge",
-      "5",
-      "--repo",
-      "example/checkout",
-      "--squash",
-      "--subject",
-      "Ship the checkout client change",
-      "--body-file",
-      "-"
-    ],
-    "deleteBranch": [
-      "gh",
-      "api",
-      "repos/example/checkout/git/refs/heads/feature/timeout-retry",
-      "-X",
-      "DELETE"
-    ]
-  }
-}
+```mermaid
+flowchart LR
+  push[["pushBranch"]] --> open[["openOrUpdatePullRequest"]]
+  open --> status[["readPullRequestStatus"]]
+  status --> gate{"gateVerdict"}
+  gate -->|"RESULT: PASS"| merge[["squashMerge"]]
+  merge --> delete[["deleteBranch"]]
+  gate -->|"RESULT: FAIL, reason"| stop((stop))
 ```
 
-The report has three parts. `verdicts` holds the verdict for each fixture
-pull request. `ship` holds the shipped change: the pull request number, the
-proof that two calls opened one pull request, the merge, the branch
-deletion, the synthesis message, and the operation log. `ghArguments` holds
-the argument list for each operation.
+## Next steps
 
-## Failure behavior
-
-Each of the four fixture pull requests fails the gate with its reason, as
-`verdicts` shows above. The demo ships only on the exact string
-`RESULT: PASS` and stops on anything else. It writes no files and makes no
-network calls, so you can run it again from the start at any time.
-
-## The GitHub adapter
-
-The adapter returns one `gh` argument list for each operation. Each list is a
-pure function of its input. A new branch uses `createRefArguments`, and an
-open pull request uses `listArguments` and `editArguments`.
-
-`runGh` is the execution layer: one function with no logic of its own. It runs
-`gh` with an argument list and returns the output. It needs a `gh` login, and
-nothing in this file calls it.
-
-To use it in a process, give your host the five operations. The mock host in
-the source shows each one, and the gate stays the same for every host.
+- [Feature delivery](/workflows/feature-team): the team whose reviewed
+  change this step ships.
+- [Proof-bound acceptance and approval](/reviewing/proof-acceptance): bind
+  the approval before this step to the exact bytes it judged.
+- [Memory](/concepts/memory): how a stage's reasoning lands in the commit
+  that this step squashes.

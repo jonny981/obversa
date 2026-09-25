@@ -18,16 +18,6 @@ export const FIRST_PAGE_CLAIMS = Object.freeze([
     phrases: [
       'deterministic process around the inference',
       'process at every layer',
-      'Inference belongs mostly at the leaves',
-      'fraction of the cost',
-      'small jobs, each with',
-    ],
-  },
-  {
-    page: 'concepts/index.mdx',
-    phrases: [
-      'deterministic process around the inference',
-      'process at every layer',
       'saved, shared',
       'Inference belongs mostly at the leaves',
       'fraction of the cost',

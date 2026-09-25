@@ -1,39 +1,103 @@
 ---
 title: "Anthropic API Engine"
-description: "@obversa/engine-anthropic-api runs engine requests directly through the Anthropic Messages API."
+description: "@obversa/engine-anthropic-api: text-only requests straight to the Anthropic Messages API, no process."
 ---
 
-`@obversa/engine-anthropic-api` is an engine plugin that calls the Anthropic Messages API directly. It streams tokens as they arrive and starts no command-line process.
-
-## Requirements
-
-- An Anthropic API key, in the `ANTHROPIC_API_KEY` environment variable or the `apiKey` option
+`@obversa/engine-anthropic-api` calls the Anthropic Messages API directly:
+it streams tokens as they arrive and starts no command-line process. Use it
+for a seat that only needs text, a judge or a scorer, where a coding agent's
+tools and workspace would be wasted.
 
 ## Install
 
-```bash
-npm install @obversa/obversa
+<CodeGroup>
+
+```bash npm
+npm install @obversa/engine-anthropic-api
 ```
+
+```bash pnpm
+pnpm add @obversa/engine-anthropic-api
+```
+
+</CodeGroup>
+
+Included in `@obversa/obversa`.
+
+## Requirements
+
+- An Anthropic API key, in the `ANTHROPIC_API_KEY` environment variable or
+  the `apiKey` option.
 
 ## Identity
 
-The plugin reports `provider: 'anthropic'`. It runs the model the request names. Without one it uses `defaultModel`, and without that `claude-haiku-4-5-20251001`.
+The plugin reports `provider: 'anthropic'`, with the model family read from
+the model name. It runs the model the request names; without one it uses
+`defaultModel`, and without that `claude-haiku-4-5-20251001`.
 
-## Usage
+## Quickstart
 
-```ts
+Construct the engine and ask it what it will run as, with no network call:
+
+```ts examples/engine-anthropic-api-binding.ts {4-7,9}
 import { AnthropicApiEngine } from '@obversa/engine-anthropic-api';
 
+// The key is a placeholder. `admit` reads it and sends nothing.
 const engine = new AnthropicApiEngine({
   defaultModel: 'claude-haiku-4-5-20251001',
-  apiKey: process.env.ANTHROPIC_API_KEY,
+  apiKey: 'example-key',
 });
+
+const identity = await engine.admit({ workspaceMode: 'none' }, new AbortController().signal);
+console.log(JSON.stringify(identity, null, 2));
 ```
 
-## Limits
+`admit` returns the identity the engine reports before any request: the
+adapter, provider, model family, model and capabilities. Run it with
+`npx tsx engine-anthropic-api-binding.ts`:
 
-- It takes text-only requests. A request that asks for tools or workspace access fails as `invalid-config`.
-- It ignores `AgentRequest.env`, because there's no process to pass it to.
-- Server errors (HTTP 5xx) and connection errors, including timeouts, are
-  retried. A rate limit (HTTP 429) fails as a `rate-limit` error, carrying the
+```json Output
+{
+  "adapter": "anthropic-api",
+  "adapterVersion": null,
+  "provider": "anthropic",
+  "modelFamily": null,
+  "model": "claude-haiku-4-5-20251001",
+  "executable": null,
+  "capabilities": []
+}
+```
+
+In a run, leave `apiKey` out and set `ANTHROPIC_API_KEY`, then pass the
+engine to `run()` in `engines` or bind it to a graph node.
+
+## Options
+
+| Field | Type | Default | Description |
+| --- | --- | --- | --- |
+| `defaultModel` | `string` | `'claude-haiku-4-5-20251001'` | The wire model when the request names none. |
+| `apiKey` | `string` | `process.env.ANTHROPIC_API_KEY` | The API key. |
+
+## Errors
+
+- **A missing key** fails with a message that names both places to put it,
+  and points at the agent-sdk and claude-cli engines, which use the host's
+  Claude sign-in instead.
+- **A request that asks for tools or workspace access** fails as
+  `invalid-config`: the engine takes text-only requests. It ignores
+  `AgentRequest.env`, because there's no process to pass it to.
+- **Server errors (HTTP 5xx) and connection errors**, timeouts included, are
+  retried. **A rate limit (HTTP 429)** fails as `rate-limit`, carrying the
   API's `retry-after` wait when it sends one.
+
+## API
+
+- **`AnthropicApiEngine`**: the engine class. **`AnthropicApiEngineOptions`**:
+  its options. [Quickstart](#quickstart).
+
+## Next steps
+
+- [Evals in an agent workflow](/reviewing/evals): the judge and scorer seats
+  this engine suits.
+- [Claude Agent SDK Engine](/packages/engine-claude-agent-sdk): Claude with
+  tools and memory, through the host's sign-in.

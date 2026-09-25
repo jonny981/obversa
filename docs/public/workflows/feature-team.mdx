@@ -1,26 +1,240 @@
 ---
-title: "Feature delivery"
-description: "One brief to a change a person is asked to ship, in nine small steps: research with its own reviews, a plan, tests first, an implementation held to green tests and a panel, a person's decision, evidence."
+title: "Feature Delivery"
+description: "One brief to a change a person is asked to ship, in nine small steps with a review at each."
 ---
 
-Hand a brief to a team and get back a change ready for a person to ship.
-The team works the way a real team delivers a feature. Research comes
-first, with each note reviewed, then a reviewed plan and tests before code.
-The implementation runs again with the reviewers' findings until the tests
-pass and the panel accepts. Then a person is asked, and the last stage
-writes the evidence. Inference sits at the leaves, and everything between
-the leaves is a check the run can hold to. The whole team is one file that
-reads top to bottom.
+A ticket lands: add a function, with tests, to a small library. On a good
+team nobody opens the editor first. Someone reads the code the change
+touches, writes down what's needed, and a colleague checks the note. The
+tests come before the code. The code is held to the tests and a review.
+Then a lead is asked whether it ships.
 
-```bash
-npm install @obversa/obversa
+You want the same shape from your coding agents, without standing over
+each step, and without a model marking its own homework. You want to read
+at the end what was decided and why.
+
+Obversa makes that one file. Each stage names who does it, what it writes,
+who reads it and where a red result goes. Inference sits at the leaves, and
+everything between the leaves is a check the run can hold to. This file is
+a nine-stage team: a Claude seat researches and plans with a Codex reviewer
+on each note, a Codex seat writes the tests and then the code with a Claude
+reviewer on each, a test command and a panel hold the implementation to
+green, a person is asked to ship, and the last stage writes the evidence.
+
+## Run it
+
+Set the project up as [Installation](/get-started/installation) describes,
+put `briefs/triple.md` beside the file, sign in to Claude Code and Codex,
+and run it from the directory the work belongs in:
+
+```bash Terminal
+npx tsx feature-delivery.ts
 ```
 
-Set up the project as [Installation](/get-started/installation) describes.
+```json Output
+{
+  "status": "paused",
+  "summary": "waiting for a person: Ship this change?",
+  "data": {
+    "research-context": {
+      "status": "pass",
+      "summary": "Review panel: 1/1 reviewer(s) cleared."
+    },
+    "research-requirements": {
+      "status": "pass",
+      "summary": "Review panel: 1/1 reviewer(s) cleared."
+    },
+    "plan": {
+      "status": "pass",
+      "summary": "Review panel: 1/1 reviewer(s) cleared."
+    },
+    "tests-first": {
+      "status": "pass",
+      "summary": "Review panel: 1/1 reviewer(s) cleared."
+    },
+    "implement": {
+      "status": "pass",
+      "summary": "Implemented pure named export `triple(value)` in `src/triple.mjs`."
+    },
+    "test": {
+      "status": "pass",
+      "summary": "`node` exited 0"
+    },
+    "review": {
+      "status": "pass",
+      "summary": "Review panel: 1/1 reviewer(s) cleared.",
+      "data": {
+        "findings": [],
+        "escalatedFindings": [],
+        "errors": [],
+        "results": [
+          {
+            "kind": "verdict",
+            "name": "review-1",
+            "met": true,
+            "reason": "Complete implementation meets all requirements. The triple function is pure, handles all numeric types correctly, and has comprehensive test coverage using Node.js built-in test utilities. All 12 requirements (REQ-1 through REQ-12) are satisfied."
+          }
+        ],
+        "passed": 1,
+        "required": 1,
+        "severityCounts": {}
+      }
+    },
+    "approve": {
+      "status": "paused",
+      "summary": "waiting for a person: Ship this change?",
+      "data": {
+        "requestId": "approve#1#14c929c64692d531f625b23edfed5c9fef79d0016e5b15634d828f1ad1d2d70a",
+        "gateId": "approve",
+        "gateVersion": 1,
+        "digest": "14c929c64692d531f625b23edfed5c9fef79d0016e5b15634d828f1ad1d2d70a",
+        "decisionText": "Ship this change?",
+        "responseSchema": {
+          "type": "object",
+          "properties": {
+            "approved": {
+              "type": "boolean"
+            },
+            "note": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "approved"
+          ]
+        },
+        "input": {
+          "review": "Review panel: 1/1 reviewer(s) cleared."
+        },
+        "presentation": {}
+      }
+    },
+    "close": {
+      "status": "aborted",
+      "summary": "blocked by a failed dependency"
+    }
+  }
+}
+```
+
+Everything before `approve` ran on real engines and passed. The run stopped
+at `approve` with the question on the record, because a person answers it,
+not the file, and `close` waits behind it. Use a stored callbacks client to
+carry the answer into the next run; [A person decides](/patterns/approval)
+shows how.
+
+<Warning>
+Run the file in a directory you're happy for a model to change. The Claude
+seat runs with permission prompts off, so it can write anywhere the process
+can.
+</Warning>
 
 ## The file
 
-```ts
+The roles are named once. Two Claude seats and two Codex seats, crossed so
+that every reviewer reads a writer from the other family, and a person for
+the last word:
+
+```ts examples/teams/feature-delivery.ts (excerpt) {5-11}
+  return workflow('feature-delivery', {
+    brief: briefFromFile('briefs/triple.md'),
+    options: { timeout: '10m' },
+
+    roles: {
+      analyse: engines.claude('claude-sonnet-4-5'),
+      implement: engines.codex('gpt-5.6-luna'),
+      'research-review': [engines.codex('gpt-5.6-luna')],
+      'code-review': [engines.claude('claude-sonnet-4-5')],
+      approve: person('Ship this change?'),
+    },
+```
+
+Research comes first. Three stages read the workspace, turn the brief into
+requirements, one `REQ-n` per line, and write a plan with one check per
+requirement. Each note is reviewed by the Codex seat before the next stage
+begins, and a writer sent findings runs again with them up to three times:
+
+```ts examples/teams/feature-delivery.ts (excerpt) {6-7}
+      stage('research-context', {
+        agent: 'analyse',
+        writes: 'team-output/research-context.md',
+        desc: 'Read the workspace and write down what the change touches.',
+        gate: 'The context note is in the workspace and a reviewer has accepted it.',
+        reviewedBy: 'research-review',
+        retry: 3,
+      }),
+```
+
+Then the tests, then the code, then the checks. `writes` names the files a
+stage may produce, so `tests-first` can't write the implementation; its
+tests may be red until `implement` turns them green. A red test run and a
+rejected review both go to `implement` with the findings:
+
+```ts examples/teams/feature-delivery.ts (excerpt) {3,19,22,30}
+      stage('tests-first', {
+        agent: 'implement',
+        writes: 'test/triple.test.mjs',
+        desc: 'Write the declared test files from the accepted plan before any implementation exists.',
+        gate: 'Every declared test file exists and covers the plan.',
+        reviewedBy: 'code-review',
+        retry: 3,
+      }),
+
+      stage('implement', {
+        agent: 'implement',
+        writes: 'src/triple.mjs',
+        desc: 'Write the code to the plan and the tests.',
+        gate: 'The source file exists.',
+        retry: 3,
+      }),
+
+      stage('test', {
+        run: ['node', '--test', 'test/triple.test.mjs'],
+        desc: 'Run the tests; a red run goes back to implement with the output.',
+        gate: 'The test command exits 0.',
+        sendsBackTo: 'implement',
+      }),
+
+      stage('review', {
+        panel: 'code-review',
+        agree: 1,
+        desc: 'Read the change and the test result against the plan.',
+        gate: 'At least one reviewer has accepted the change.',
+        sendsBackTo: 'implement',
+      }),
+
+      stage('approve', {
+        input: 'approve',
+        desc: 'Put the verified change in front of a person.',
+        gate: 'A person has said yes.',
+      }),
+```
+
+Where a stage declares `writes`, the package checks those files after the
+job. Where it runs a command, the exit code decides. Where a panel reviews
+it, the reviewers' decision decides. A model's report of its own work never
+passes a stage by itself. `workflow()` refuses the team before any model
+runs if a panel shares a family with the stage it reviews. A reviewer's
+decision is its reply; a reply with no decision is asked for once more,
+then the run pauses with an engine error, not a rejection. A writer sent
+findings must change its note: if the same bytes come back, the stage ends
+with a plain summary instead of a second identical review.
+
+<Accordion title="The brief">
+
+```text briefs/triple.md
+---
+files: ["src/triple.mjs"]
+---
+
+Deliver a pure triple(value) function in src/triple.mjs with a Node test in test/triple.test.mjs.
+```
+
+</Accordion>
+
+<Accordion title="Full file">
+
+```ts examples/teams/feature-delivery.ts
 import { claude } from '@obversa/engine-claude-cli';
 import { codex } from '@obversa/engine-codex-cli';
 import { run } from '@obversa/runtime';
@@ -132,112 +346,31 @@ const result = await run(createFeatureDelivery());
 console.log(JSON.stringify(result.outcome, null, 2));
 ```
 
-<Warning>
-Run the file in a directory you're happy for a model to change. The Claude
-seat runs with permission prompts off, so it can write anywhere the process
-can.
-</Warning>
+</Accordion>
 
-## What a run printed
+## The team's shape
 
-From one real run of this file. The run stops at `approve` with the
-question on the record, because a person answers it, not the file. That's
-where a team hands over. Everything before it ran on real engines. Use a
-stored callbacks client to carry the answer into the next run.
-[A person decides](/workflows/approval) explains how.
-
-```json
-{
-  "status": "paused",
-  "summary": "waiting for a person: Ship this change?",
-  "data": {
-    "research-context": {
-      "status": "pass",
-      "summary": "Review panel: 1/1 reviewer(s) cleared."
-    },
-    "research-requirements": {
-      "status": "pass",
-      "summary": "Review panel: 1/1 reviewer(s) cleared."
-    },
-    "plan": {
-      "status": "pass",
-      "summary": "Review panel: 1/1 reviewer(s) cleared."
-    },
-    "tests-first": {
-      "status": "pass",
-      "summary": "Review panel: 1/1 reviewer(s) cleared."
-    },
-    "implement": {
-      "status": "pass",
-      "summary": "Implemented pure named export `triple(value)` in `src/triple.mjs`."
-    },
-    "test": {
-      "status": "pass",
-      "summary": "`node` exited 0"
-    },
-    "review": {
-      "status": "pass",
-      "summary": "Review panel: 1/1 reviewer(s) cleared.",
-      "data": {
-        "findings": [],
-        "escalatedFindings": [],
-        "errors": [],
-        "results": [
-          {
-            "kind": "verdict",
-            "name": "review-1",
-            "met": true,
-            "reason": "Complete implementation meets all requirements. The triple function is pure, handles all numeric types correctly, and has comprehensive test coverage using Node.js built-in test utilities. All 12 requirements (REQ-1 through REQ-12) are satisfied."
-          }
-        ],
-        "passed": 1,
-        "required": 1,
-        "severityCounts": {}
-      }
-    },
-    "approve": {
-      "status": "paused",
-      "summary": "waiting for a person: Ship this change?",
-      "data": {
-        "requestId": "approve#1#14c929c64692d531f625b23edfed5c9fef79d0016e5b15634d828f1ad1d2d70a",
-        "gateId": "approve",
-        "gateVersion": 1,
-        "digest": "14c929c64692d531f625b23edfed5c9fef79d0016e5b15634d828f1ad1d2d70a",
-        "decisionText": "Ship this change?",
-        "responseSchema": {
-          "type": "object",
-          "properties": {
-            "approved": {
-              "type": "boolean"
-            },
-            "note": {
-              "type": "string"
-            }
-          },
-          "required": [
-            "approved"
-          ]
-        },
-        "input": {
-          "review": "Review panel: 1/1 reviewer(s) cleared."
-        },
-        "presentation": {}
-      }
-    },
-    "close": {
-      "status": "aborted",
-      "summary": "blocked by a failed dependency"
-    }
-  }
-}
+```mermaid
+flowchart LR
+  research["research: Claude, reviewed by Codex"] --> plan["plan: Claude, reviewed by Codex"]
+  plan --> tests["tests-first: Codex, reviewed by Claude"]
+  tests --> implement["implement: Codex"]
+  implement --> test[["test: node --test"]]
+  test -->|exit 0| review["review: Claude panel"]
+  test -->|sendsBackTo| implement
+  review -->|sendsBackTo| implement
+  review -.->|agree: 1| approve{{"approve: Ship this change?"}}
 ```
 
-The notes the team left in `team-output/`, in the order they were
-written: the requirements and the plan. The context note is in the same
-directory. The last stage writes the evidence and the learning after the
-person's answer.
+## What the run did
 
-```md
+The notes the team left in `team-output/`, in the order they were written.
+The context note is in the same directory, and the last stage writes the
+evidence and the learning after the person's answer.
+
+<Accordion title="The notes the team wrote">
+
+```text team-output/research-requirements.md
 # Requirements: Triple Function Implementation
 
 ## Functional Requirements
@@ -273,7 +406,7 @@ person's answer.
 **REQ-12** Test code shall be placed in the `test/` directory.
 ```
 
-```md
+```text team-output/plan.md
 # Implementation Plan: Triple Function
 
 ## Overview
@@ -323,10 +456,12 @@ Implement a pure `triple(value)` function that multiplies a number by 3, with co
 ✓ Correct directory structure (`src/` and `test/`)
 ```
 
-The files the models wrote. The tests came first, from the plan. The
-second version is the one the review accepted.
+</Accordion>
 
-```js
+The files the models wrote. The tests came first, from the plan, and the
+second version of the code is the one the review accepted:
+
+```js test/triple.test.mjs
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 
@@ -357,54 +492,17 @@ test('triple returns the same result for repeated calls with the same input', ()
 });
 ```
 
-```js
+```js src/triple.mjs
 export function triple(value) {
   return value * 3;
 }
 ```
 
-## The team's shape
+## Next steps
 
-Nine stages, each needing the one before it. A reviewed stage runs again
-with the reviewer's findings until the review accepts. A red test or a
-rejected review sends the work back to the stage it names. Each stage that
-repeats carries its own `retry`.
-
-| step | does | done when |
-| --- | --- | --- |
-| research-context | Read the workspace and write down what the change touches. | The context note is in the workspace and a reviewer has accepted it. |
-| research-requirements | Turn the brief and the context note into requirements, one REQ-n per line. | The requirements note is in the workspace and a reviewer has accepted it. |
-| plan | Write an executable plan from the requirements, one check per REQ-n. | Every requirement has a check in the plan. |
-| tests-first | Write the declared test files from the accepted plan before any implementation exists. | Every declared test file exists and covers the plan. |
-| implement | Write the code to the plan and the tests. | The source file exists. |
-| test | Run the tests; a red run goes back to implement with the output. | The test command exits 0. |
-| review | Read the change and the test result against the plan. | At least one reviewer has accepted the change. |
-| approve | Put the verified change in front of a person. | A person has said yes. |
-| close | Write the evidence of the run and what was learned, from the record alone. | Both notes are in the workspace. |
-
-Where a stage declares `writes`, the package checks those files after the
-job. Where it runs a command, the exit code decides. Where a panel reviews
-it, the reviewers' decision decides. A model's report of its own work
-never passes a stage by itself.
-
-`writes` names the files a stage may write. A stage that changes any other
-declared file fails by name, so `tests-first` can't write the
-implementation. Its tests may be red until `implement` turns them green.
-
-Keep each reviewer and the writer it reads in different model families.
-Here the Claude seat writes the research notes and the plan, and a Codex
-seat reviews them. The Codex seat writes the tests and the code, and a
-Claude seat reviews them. The workflow is refused before any model runs if
-a panel shares a family with the stage it reviews.
-
-A reviewer's decision is its reply. A reply with no decision is asked for
-once more. Then the run pauses with an engine error, not a rejection of the
-work.
-
-A writer sent findings must rewrite its note. If the same bytes come back,
-the stage ends with a plain summary instead of a second identical review.
-
-## Source
-
-The file is `examples/teams/feature-delivery.ts`. The
-[runtime package page](/packages/runtime) lists every input.
+- [Feature team, offline](/workflows/feature-team-offline): the same shape
+  in five stages with no model, to read before you spend a token.
+- [Shipping through GitHub](/workflows/forge-helper): what happens to the
+  change after the person says yes.
+- [Feedback loops](/concepts/feedback-loops): why a red test or a rejected
+  review runs the implementer again, and what stops it.

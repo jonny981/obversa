@@ -1,20 +1,31 @@
 ---
-title: "@obversa/obversa"
-description: "Install the bundled Obversa packages with one dependency."
+title: "Obversa"
+description: "@obversa/obversa: one dependency that installs the runtime, the runner, the contracts, the workflows, the surfaces, the memory adapters and every engine adapter except Jev."
 ---
 
-`@obversa/obversa` installs these packages together: the runtime, the
-runner, the shared contracts, the process tools, the ready-made workflows,
-the surfaces, the memory adapters, webhook notifications and every engine
-adapter except Jev.
+`@obversa/obversa` is the bundle: one dependency that installs every public
+package except the Jev engine, so a project gets the runtime, the runner,
+the contracts, the process tools, the ready-made workflows, the surfaces,
+the memory adapters, webhook notifications and the engine adapters at once.
+It has no API of its own; import each tool from its own package.
 
-```bash
+## Install
+
+<CodeGroup>
+
+```bash npm
 npm install @obversa/obversa
 ```
 
+```bash pnpm
+pnpm add @obversa/obversa
+```
+
+</CodeGroup>
+
 The install adds one dependency to your project:
 
-```json
+```json package.json
 {
   "dependencies": {
     "@obversa/obversa": "^0.1.0"
@@ -22,14 +33,46 @@ The install adds one dependency to your project:
 }
 ```
 
-Install [Jev](/packages/engine-jev-api) separately:
+## Quickstart
 
-```bash
+After the bundle is installed, import from the member package you need. The
+smallest run imports two names from the runtime:
+
+```ts examples/one-agent-job.ts (excerpt) {1-2}
+import { agentJob, run } from '@obversa/runtime';
+import { MockEngine } from '@obversa/runtime/testing';
+
+const engine = new MockEngine(() => 'ready');
+```
+
+Every package on the [API reference](/packages) page says "Included in
+`@obversa/obversa`" where the bundle installs it, so you can also install
+any one of them on its own.
+
+## What it installs
+
+| Package | Page |
+| --- | --- |
+| `@obversa/runtime`, `@obversa/runner`, `@obversa/api`, `@obversa/core` | [Runtime](/packages/runtime), [Runner](/packages/runner), [API](/packages/api), [Core](/packages/core) |
+| `@obversa/builtin-workflows` | [Built-in Workflows](/packages/builtin-workflows) |
+| `@obversa/surface`, `@obversa/surface-diff` | [Surface](/packages/surface), [Surface Diff](/packages/surface-diff) |
+| `@obversa/engine-claude-cli`, `@obversa/engine-codex-cli`, `@obversa/engine-grok-cli`, `@obversa/engine-opencode-cli` | [Claude CLI Engine](/packages/engine-claude-cli), [Codex CLI Engine](/packages/engine-codex-cli), [Grok CLI Engine](/packages/engine-grok-cli), [OpenCode CLI Engine](/packages/engine-opencode-cli) |
+| `@obversa/engine-claude-agent-sdk`, `@obversa/engine-anthropic-api` | [Claude Agent SDK Engine](/packages/engine-claude-agent-sdk), [Anthropic API Engine](/packages/engine-anthropic-api) |
+| `@obversa/memory-git`, `@obversa/memory-simple`, `@obversa/memory-markdown` | [Git Memory](/packages/memory-git), [Simple Memory](/packages/memory-simple), [Markdown Memory](/packages/memory-markdown) |
+| `@obversa/notify-webhook` | [Webhook Notifications](/packages/notify-webhook) |
+
+## Jev is separate
+
+The [Jev API Engine](/packages/engine-jev-api) isn't in the bundle. It
+needs its own endpoint and key, so install it when you use it:
+
+```bash Terminal
 npm install @obversa/engine-jev-api
 ```
 
-The bundle has no API of its own. Import each tool from its own package. You
-can also install any package on its own, without the bundle.
+## Next steps
 
-The package table on the [docs home page](/) lists every public package,
-Jev included.
+- [Installation](/get-started/installation): set a project up and run the
+  first file.
+- [API reference](/packages): every export a user calls, and the page that
+  teaches it.

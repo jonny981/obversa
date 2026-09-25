@@ -1,0 +1,47 @@
+---
+title: "Where Does a Person Approve the Change?"
+sidebarTitle: "Human Approval"
+description: "Yes passes. A no runs the step that owns the fix again. Silence waits."
+---
+
+As a step in the workflow, where the run stops and waits. `approval` asks
+one question through the run's callbacks client. A yes passes the step. A
+no runs the step that owns the fix again, with the person's note as the
+finding. With nobody answering, the run
+pauses with the question pending and carries on, when it runs again with
+the same client, from the answer. Resuming the run is not an approval,
+and Obversa does not merge the change.
+
+## In Obversa
+
+The question, the step a no goes back to, and the answer:
+
+```ts examples/approval.ts (excerpt) {2-3,8-9}
+const approve = approval('approve', {
+  question: 'Ship this change?',
+  target: 'implement',
+  answer: (request: CallbackRequest) => {
+    const approved = JSON.stringify(request.input).includes('header');
+    decisions.push(approved ? 'yes' : 'no');
+    return approved
+      ? { approved: true }
+      : { approved: false, note: 'the ticket asked for a header row' };
+  },
+});
+```
+
+`target` names the step that owns the fix. In a real team the answer
+arrives through the callbacks client; this file decides in place so it
+runs offline. A stored approval applies only while the bytes it covered
+still match; change a byte and the decision waits for a fresh answer.
+
+## Review panel
+
+A panel is models deciding; approval is a person deciding. They sit in the
+same workflow, usually in that order. [How many reviewers have to
+accept?](/glossary/review-panel) covers the panel.
+
+## Next steps
+
+- [A person decides](/patterns/approval): the pattern with its run.
+- [Proof-bound acceptance and approval](/reviewing/proof-acceptance): the byte rule.

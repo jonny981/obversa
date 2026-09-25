@@ -1,0 +1,125 @@
+---
+title: "Running"
+description: "Runs workflows."
+---
+
+The runtime runs the workflow you wrote, one bounded step at a time, and
+writes down what happened. Use `run()` from `@obversa/runtime` for a run
+you start and watch. Use the [supervised runner](/driving/runner) when a run
+must restart on its own after a crash.
+
+## Motivation
+
+When you hand work to a team, you don't stand over each person. You agree
+the steps and who takes each one, and at the end the team reviews the
+result together, with a sign-off from the tech lead or the product manager.
+The runtime is the project manager: it hands each step to the right person,
+keeps the order, and writes down what happened.
+
+## Responsibilities
+
+- **Runs the shape you wrote.** A pipeline, a review loop, a panel, a
+  tournament or a graph of your own. It decides what runs next, never what
+  the work means.
+- **Enforces your limits.** No step can burn your budget or hang the run.
+  When one runs out of time or attempts, the run stops cleanly, and the
+  record says why. Give it a `fallbackEngine` chain and an engine that dies
+  hands the call to the next one in the chain.
+- **Manages the event log**, which keeps an append-only record of what
+  happened in a run. This is the single source of truth for run state.
+- **Stays out of your tools.** The runtime imports no engine and no memory
+  adapter. Your program hands it the ones you chose, and it runs where your
+  repositories are. Hand in an engine for every agent step; the offline
+  examples use plain functions or a mock engine instead.
+
+The smallest run hands one job and one engine to `run()`:
+
+```ts examples/one-agent-job.ts (excerpt) {2-3}
+const result = await run(job, {
+  engine: 'offline',
+  engines: { offline: engine },
+});
+
+console.log(result.outcome.status);
+```
+
+`run()` looks up the engine named `offline` in the map you passed, runs the
+job through it, and returns the outcome: a status, a summary, and the data
+each step left.
+
+## Lifecycle
+
+A stored run keeps the workflow it was given and the plan it resolved from
+it: the engines, the permissions, the contracts. A fresh executor checks the
+stored plan before it runs anything, so an edit to the workflow can't slip
+into a run that started before it. To use the edit, start a new run. The
+state of a run is only ever rebuilt from its events, so replaying a record
+never calls an engine and never repeats finished work.
+
+`examples/pipeline.ts` stores a three-stage pipeline and runs it with no
+model behind it. It prints what completed, in what order, and the digest of
+the plan it ran:
+
+```text Example record
+{
+  "executor": "complete",
+  "output": {
+    "nodes": {
+      "draft": {
+        "article": "ready"
+      },
+      "review": {
+        "approved": true
+      },
+      "publish": {
+        "published": true
+      }
+    }
+  },
+  "dispatches": 3,
+  "order": [
+    "draft",
+    "review",
+    "publish"
+  ],
+  "planDigest": "sha256:ebbf122994643028c5222a0afaf8d7a99a257716e00f0e255b15f315e4b862ed",
+  "bounds": {
+    "dispatches": {
+      "min": {
+        "kind": "known",
+        "value": 3
+      },
+      "max": {
+        "kind": "known",
+        "value": 3
+      }
+    },
+    "maxConcurrency": {
+      "kind": "known",
+      "value": 1
+    },
+    "maxFanOut": {
+      "kind": "known",
+      "value": 1
+    }
+  }
+}
+```
+
+## Limits
+
+- **It's a library, not a service.** It runs when your program calls it and
+  stops when the run ends. The runner package's supervised run restarts a
+  killed run for you; [The record](/concepts/record) says which layer does
+  what.
+- **One machine.** A run's steps run where you started it.
+
+## Next steps
+
+| Goal | Page |
+| --- | --- |
+| Restart a killed run from its record | [Supervised local runs](/driving/runner) |
+| Run one step on another machine | [Remote nodes](/driving/remote-nodes) (coming soon) |
+| Pair a fast seat with a deliberate one | [Fast and deliberate](/coming-soon/fast-and-deliberate) (coming soon) |
+| Watch a step while it runs | [Supervision](/coming-soon/supervision) (coming soon) |
+| Read a run from outside the process | [Observation port](/coming-soon/observation-port) (coming soon) |

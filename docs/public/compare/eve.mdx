@@ -1,0 +1,80 @@
+---
+title: "Obversa and eve"
+sidebarTitle: "eve"
+description: "eve builds one durable backend agent. Obversa runs a team of coding agents through a process with reviews, a panel, a tournament and a person."
+---
+
+eve is Vercel's open-source framework for durable backend AI agents: in its
+own words, "Like Next.js for agents. Build durable agents with one folder."
+A session is one durable workflow of turns and steps, with tools, skills,
+schedules, hooks, channels, subagents, approvals and evals around it.
+Obversa is a TypeScript library that runs the coding agents you already
+have, Claude Code, Codex and their kin, as a team through a process: named
+roles, a review that fails a step and runs it again with findings, a panel
+with a threshold, a tournament, a person's decision, a plain-file record and
+a worktree per writer. Both are TypeScript, both resume after a crash, and
+both put a person in the loop; the table says where that overlap ends.
+
+## What each is for
+
+| The job | eve | Obversa |
+| --- | --- | --- |
+| What runs the model | eve's own agent loop, through an AI SDK model or the Vercel AI Gateway by default. Codex appears as a ChatGPT login helper, not as an engine. | Claude Code, Codex, Grok and OpenCode as engines, a fresh process per call, or an API engine. |
+| Unit of work | A session, a turn, a step: a step is a durable checkpoint, by default one model call and its tool calls. A workflow tool fixes the order of `"use step"` functions inside one tool. | A stage: an engine call, a command, a panel or a person, with the files it may write, in a declared order. |
+| Named roles | Declared subagents, each in its own folder with its own instructions, tools and model; the parent model or a workflow tool decides who gets the work. | Roles named in the file, one engine each, with the stage each owns. |
+| A review that fails a step | A workflow can call a `reviewer` subagent and get findings back into its own code; what happens next is code you write. | Built in: the findings go to the stage that owns the fix, which runs again, up to a limit you set. |
+| A panel, a tournament | Score thresholds on eval judge assertions, one evaluator per call, after the run. `agentRouter()` picks a specialist before work starts. | A panel that passes on `agree` of its reviewers; a tournament whose judge scores finished candidates and lands one. |
+| A person deciding | Approvals as a tool policy and `ctx.ask` in a workflow tool; the run parks at `session.waiting` until a person answers. The answer returns to the call that asked. | A person role. The run pauses on the question; a no goes to the step that owns the fix with the note as its finding. |
+| Evals | `eve eval` drives fresh sessions against a live agent server and grades them after the fact, with gate and soft assertions. `evaluate` and `auto()` run checks inside a turn. | Checks that decide the next step inside the run: a test, a judge, a panel, a tournament, a scored condition. |
+| A run that survives a crash | Each session is one durable workflow; completed steps never re-run, and a step interrupted mid-execution re-runs. Local and self-hosted state is on disk under `.eve/.workflow-data`. | A run records to a plain file and carries on from it with `resume: true`; the supervised runner restarts a killed run from its own record. |
+| Memory | Memory slots with `defineMemoryProvider`; a built-in file memory; providers from Supermemory, Upstash and Kybernesis. | A `Memory` port with in-process, Git and Markdown adapters, and `ground`, `curate` and `consolidate` over it. |
+| Workspace | One sandbox per agent rooted at `/workspace`; copies of the root share it. A worktree per agent: not in the docs. | A Git worktree per writer, captured and verified, with one writer's lease. |
+| Where it runs | A Node server, `eve dev` or `eve start`, self-hosted or on Vercel. | A library, no server. |
+| Language | TypeScript on Node.js 24. | TypeScript. |
+
+## Where each wins
+
+- **eve, when you're building the agent itself**: its loop, tools, skills,
+  schedules, channels and the sessions people talk to it through.
+- **eve, when the agent has to run as a service** that people reach over
+  chat, email, GitHub or an API, with sessions that wait for days at no
+  compute cost.
+- **eve, when memory should come from a provider** such as Supermemory or
+  Upstash through one slot.
+- **Obversa, when the agents already exist as tools on your machine** and
+  the job is the process around them.
+- **Obversa, when a review must fail a step and run it again** with the
+  findings, a panel must agree, or a judge must pick one of several
+  candidates. eve's docs show none of those as built in.
+- **Obversa, when each writer needs its own worktree** and a reviewer from
+  a different model family than the writer.
+- **Obversa, when the record should be a file you can read** with no server
+  running.
+
+## Together
+
+An eve agent as an Obversa engine is [coming soon](/packages/engine-eve).
+Each role in a team names its engine, and that is where an eve agent will
+go:
+
+```ts examples/teams/feature-delivery.ts (excerpt) {2-3}
+    roles: {
+      analyse: engines.claude('claude-sonnet-4-5'),
+      implement: engines.codex('gpt-5.6-luna'),
+      'research-review': [engines.codex('gpt-5.6-luna')],
+      'code-review': [engines.claude('claude-sonnet-4-5')],
+      approve: person('Ship this change?'),
+    },
+```
+
+Until then, the two meet the other way round: eve's MCP channel lets a
+client such as Claude Code hand durable work to an eve agent, and Obversa
+runs Claude Code as a seat.
+
+## Next steps
+
+- [Feature delivery](/workflows/feature-team): the nine-stage team with a
+  real run.
+- [Evals in an agent workflow](/reviewing/evals): what an eval is here,
+  against scoring a run afterwards.
+- [eve Engine](/packages/engine-eve): the coming engine.

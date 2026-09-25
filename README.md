@@ -58,7 +58,7 @@ the requirements and the plan, each reviewed; another writes the tests
 before any code, then implements until the tests pass and a reviewer from
 a different model family accepts; then the change is put to a person; and
 the evidence is written from the record. A red test or a rejected review
-sends the work back to the stage that owns it, with the findings. The
+runs the stage that owns it again, with the findings. The
 file is complete; copy it, put your brief in, run it with Node.
 
 ```bash
@@ -204,8 +204,8 @@ test step passes on the command's exit code, never on a model's report,
 and a reviewer's decision is the file it writes.
 [Feature delivery](https://docs.obversa.ai/workflows/feature-team) shows
 what a real run of this file printed and the files the models wrote; a
-[writer and reviewer](https://docs.obversa.ai/workflows/writer-and-reviewer)
-and a [review panel](https://docs.obversa.ai/workflows/review-panel) are the
+[writer and reviewer](https://docs.obversa.ai/patterns/writer-and-reviewer)
+and a [review panel](https://docs.obversa.ai/patterns/review-panel) are the
 other two recipes in the built-in workflows package.
 
 ## Engines

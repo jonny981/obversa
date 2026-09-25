@@ -1,0 +1,6 @@
+{
+  "note": "The verifiable gates. Each is a rule a script can check, and every excluded applicant is recorded with the rule.",
+  "minYearsInSupport": 2,
+  "requiredSkill": "written-support",
+  "workRegions": ["EU", "UK"]
+}

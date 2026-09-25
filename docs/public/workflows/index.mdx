@@ -1,136 +1,139 @@
 ---
 title: "Examples"
-description: "Teams you can run on your own work, inside and outside software delivery, and the mechanisms they're built from, one at a time."
+description: "Complete teams you can run on your own work, grouped by field."
 ---
 
-Install Obversa, write one file, and a team of models writes code, runs
-your tests and reviews the result before you see it. Each team below is a
-complete file: copy it, put your brief and your engines in, run it.
+Copy a complete team, put your brief and your coding agents in, and run it.
+Each example is a TypeScript file under `examples/` in the repository, with
+its brief and sample inputs beside it, and each page shows what one real
+run printed. For one mechanism on its own, read [Patterns](/patterns/writer-and-reviewer).
 
-The smallest team, whole. A Claude seat writes the files the brief names,
-Node runs the test, and a Codex seat reviews the result:
+## Run one
 
-```ts
-import { claude } from '@obversa/engine-claude-cli';
-import { codex } from '@obversa/engine-codex-cli';
-import { run } from '@obversa/runtime';
-import { briefFromFile, stage, workflow, type TeamSeat } from '@obversa/runtime';
+1. Set the project up as [Installation](/get-started/installation)
+   describes.
+2. Copy the file and the folder beside it, its brief and sample inputs,
+   into the directory the work belongs in.
+3. Sign in to the coding agents the file names, Claude Code and Codex in
+   most of them.
+4. Run it with `npx tsx <file>.ts`.
 
-interface WriterReviewerEngines {
-  readonly claude: (model: string) => TeamSeat;
-  readonly codex: (model: string) => TeamSeat;
-}
+Each file reads its brief and inputs relative to the directory you run it
+in, so keep the layout the repository uses:
 
-const realEngines: WriterReviewerEngines = { claude, codex };
-
-function createWriterReviewerPair(engines: WriterReviewerEngines = realEngines) {
-  return workflow('writer-reviewer-pair', {
-    brief: briefFromFile('briefs/add.md'),
-    options: { timeout: '10m' },
-
-    roles: {
-      write: engines.claude('claude-sonnet-4-5'),
-      review: [engines.codex('gpt-5.6-luna')],
-    },
-
-    stages: [
-      stage('write', {
-        agent: 'write',
-        writes: ['src/add.mjs', 'test/add.test.mjs'],
-        desc: 'Write the function and its test from the brief.',
-        gate: 'The files named in the brief exist in the workspace.',
-        retry: 1,
-      }),
-      stage('test', {
-        run: ['node', '--test', 'test/add.test.mjs'],
-        desc: 'Run the test command against the written files.',
-        gate: 'The test command exits 0.',
-        sendsBackTo: 'write',
-      }),
-      stage('review', {
-        panel: 'review',
-        agree: 1,
-        desc: 'Read the code, the test and its result.',
-        gate: 'The change meets the brief.',
-        sendsBackTo: 'write',
-      }),
-    ],
-  });
-}
-
-const result = await run(createWriterReviewerPair());
-console.log(JSON.stringify(result.outcome, null, 2));
+```text examples/
+examples/
+  feature-team.ts
+  forge-helper.ts
+  teams/
+    feature-delivery.ts
+    briefs/triple.md
+  use-cases/
+    engineering/
+      backlog-groom-then-rank.ts
+      briefs/backlog.md
+      backlog/raw.md
+    business/
+      contract-playbook.ts
+      briefs/playbook.md
+      contracts/msa.md
+    other/
+      translate-reflect.ts
+      briefs/translation.md
+      glossary/en-fr.md
+      source/article.md
 ```
 
-[Its page](/workflows/writer-and-reviewer) shows what one real run printed
-and the files the writer left.
+The offline feature team runs with no model at all. Start there to see the
+shape before you spend a token.
 
-## Teams you run on your own work
+## Software delivery
 
-- [A writer and a reviewer](/workflows/writer-and-reviewer). One model
-  writes, your test runs, and a model from another family reviews.
-- [A review panel with a threshold](/workflows/review-panel). Several
-  reviewers from different model families, and the change passes when
-  enough of them accept.
-- [Feature delivery](/workflows/feature-team). Nine stages from a brief to
-  a person's decision. Tests come before code, and work goes back to the
-  stage that owns it.
+- **[Feature team, offline](/workflows/feature-team-offline).** Five stages
+  and a panel of three, every job a small function. The shape with nothing
+  else on show.
+- **[Feature delivery](/workflows/feature-team).** Nine stages from a brief
+  to a person's decision: research with its own reviews, a plan, tests
+  before code, and an implementation held to green tests and a panel.
+- **[Shipping through GitHub](/workflows/forge-helper).** After the review
+  passes: push the branch, open one pull request, pass a strict gate on the
+  exact head revision, squash the merge.
+- **[Backlog grooming](/workflows/backlog-groom-then-rank).** Raw tickets
+  become stories with acceptance checks, a second model reads them back,
+  and the product owner ranks.
 
-Each team is a graph of named steps. Every step carries a `desc` sentence
-saying what it does and a `gate` sentence saying what must be true for it
-to count. Both go into the run record, and a writing seat reads them in its
-prompt.
+## Business
 
-## Teams outside a software change
+- **[Contract review](/workflows/contract-playbook).** Every clause mapped to
+  the playbook rule it meets or breaks, redlines in the playbook's wording,
+  and a lawyer decides what is sent.
 
-The same form, for the work most teams do that isn't a pull request. Each
-file stops at a person, so nothing is sent or filed without one. Each is a
-complete file, with its brief and sample inputs beside it under
-`examples/use-cases/`.
+## Other fields
 
-Each page carries one real run. Two reached their person. The third stopped
-earlier, when its reviewer sent the work back a third time and the loop ran
-out of attempts instead of passing stories nobody had agreed.
+- **[Translate and reflect](/workflows/translate-reflect).** An article
+  translated against a glossary, read back by an editor on another model,
+  and a person decides the nuance.
 
-Software and product engineering:
+## Markets
 
-- [Backlog grooming, then a person ranks](/workflows/backlog-groom-then-rank).
-  Raw tickets become stories a second model checks, and the product owner
-  ranks them.
+- **[Market session advice](/workflows/markets/market-session-advice).** A session host reads recorded observations, a typed assessment routes each, an uncertain one is researched, and a person is asked where action would be considered.
 
-Business and commercial:
+## Sales
 
-- [A contract against a playbook](/workflows/contract-playbook). Each
-  clause checked against a playbook, with redlines and a negotiating note,
-  and a lawyer decides what goes back.
+- **[Draft, then send](/workflows/sales/draft-then-send).** A model drafts one note per warm contact, a person decides on each, and the record keeps what was sent, what was refused and why, and what is still waiting.
 
-Other:
+## Support
 
-- [Translate, then reflect on the translation](/workflows/translate-reflect).
-  An article translated into French against a glossary, with a table of
-  the terms where the two pulled apart. A person decides whether to publish.
+- **[Triage with escalation](/workflows/support/triage-with-escalation).** A typed classification routes each ticket, every ticket gets a drafted reply, the routine ones are answered, and the rest stop on a question for a person with the draft beside them.
 
-## Mechanisms shown one at a time
+## Research
 
-All but one of these files run offline, with no model.
+- **[Literature watch](/workflows/research/literature-watch).** A model summarises the supplied papers, a person decides which summaries enter the lab's memory, and a question is answered from the kept notes alone.
 
-- [Three candidates, one winner](/workflows/tournament). Three isolated
-  attempts at one task, a judge that scores them, and only the winner
-  lands.
-- [A command decides the path](/workflows/command-kickback). A test
-  command sends a red run back to the writer, and another command's exit
-  code picks which review runs.
-- [A person decides](/workflows/approval). A yes-or-no question to a
-  person as a step. A no sends the work back with the person's note, and
-  an unanswered question pauses the run.
-- [A review that sends work back](/workflows/offline-review). A reviewer
-  rejects the first draft with a reason, and the second draft passes.
-- [A file change approved byte for byte](/workflows/safe-change). Exact
-  output bytes are approved, each target is backed up before a merge, and
-  a mismatch pauses the run.
-- [A feature from written issue to approval](/workflows/feature-delivery).
-  One issue through analysis, implementation, a test run, a review panel
-  and a person's approval. Claude and Codex seats do the model work.
-- [Shipping a reviewed change through GitHub](/workflows/forge-helper).
-  One pull request, a strict gate on the exact head revision, and a squash
-  merge.
+## Finance
+
+- **[Invoice chase](/workflows/finance/invoice-chase).** A command reads the ledger, a model drafts a chaser per overdue invoice, the mailer sends the plain ones, and a disputed one stops on a question for a person with the draft beside it.
+
+## Editorial
+
+- **[Writer, grader, cap](/workflows/editorial/writer-grader-cap).** One model drafts a post, a grader from another family returns findings against the house style, the writer runs again up to a limit, and an editor decides whether it is published.
+
+## Hiring
+
+- **[Shortlist](/workflows/hiring/shortlist).** A script applies the filters and records each exclusion's rule, two rankers from different model families rank the rest against the brief, a judge lands the better ranking, and a person decides who is shortlisted.
+
+## Knowledge
+
+- **[Vault curator](/workflows/knowledge/vault-curator).** A model proposes where each inbox note belongs and a cleaned version, a person decides what is filed and where, and a question is answered by searching the vault and citing the passages.
+
+## Ops
+
+- **[Approve the payload](/workflows/ops/approve-the-exact-payload).** A person's yes is recorded against the digest of the request's bytes; the same bytes are sent, and a payload that differs by one field asks again.
+- **[Handoff that resumes](/workflows/ops/handoff-that-resumes).** A run stops after its first stage, the next worker is given only the record, and it carries on from the exact state; the finished stage never runs again.
+
+## Product
+
+- **[Shape Up cycle](/workflows/product/shape-up-cycle).** One cycle composed of workflows: requests shaped into pitches, a betting table of three seats each checked by Jev, a person's bets, a build inside the appetite, and a cool-down, with the hill read from the record.
+
+## Next steps
+
+| Goal | Page |
+| --- | --- |
+| See the shape with no model | [Feature team, offline](/workflows/feature-team-offline) |
+| Deliver a feature from a brief | [Feature delivery](/workflows/feature-team) |
+| Ship a reviewed change | [Shipping through GitHub](/workflows/forge-helper) |
+| Turn tickets into stories | [Backlog grooming](/workflows/backlog-groom-then-rank) |
+| Review a contract | [Contract review](/workflows/contract-playbook) |
+| Translate with a glossary | [Translate and reflect](/workflows/translate-reflect) |
+| Read a market session with a person deciding | [Market session advice](/workflows/markets/market-session-advice) |
+| Send outreach a person has read | [Draft, then send](/workflows/sales/draft-then-send) |
+| Answer routine tickets, hold the rest for a person | [Triage with escalation](/workflows/support/triage-with-escalation) |
+| Keep a lab's memory curated by a person | [Literature watch](/workflows/research/literature-watch) |
+| Chase overdue invoices, a person on disputes | [Invoice chase](/workflows/finance/invoice-chase) |
+| Publish a post a strict grader has passed | [Writer, grader, cap](/workflows/editorial/writer-grader-cap) |
+| Shortlist applicants behind verifiable gates | [Shortlist](/workflows/hiring/shortlist) |
+| Keep a notes vault a person curates | [Vault curator](/workflows/knowledge/vault-curator) |
+| Approve the exact bytes a request will send | [Approve the payload](/workflows/ops/approve-the-exact-payload) |
+| Pick up a stopped run from its record | [Handoff that resumes](/workflows/ops/handoff-that-resumes) |
+| Run one Shape Up cycle end to end | [Shape Up cycle](/workflows/product/shape-up-cycle) |
+| Build a team from one mechanism | [Patterns](/patterns/writer-and-reviewer) |

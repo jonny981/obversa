@@ -1,0 +1,4 @@
+{
+  "note": "This example's routing policy for the table's checks. The number is illustrative and not a recommendation.",
+  "minConfidence": 0.7
+}

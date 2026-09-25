@@ -1,0 +1,5 @@
+{
+  "note": "What the person decided on the last pass. A contact with no entry is still waiting.",
+  "brightwater": { "approved": true },
+  "carraway": { "approved": false, "note": "Too long, and it hints at a date. Cut it to the question about the person step." }
+}

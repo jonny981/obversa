@@ -85,7 +85,7 @@ try {
   const reviewerCalls = calls.filter((call) => call.role === 'codex');
   assert.equal(writerCalls.length, 2, 'the writer runs once and applies the review once');
   assert.equal(reviewerCalls.length, 2, 'the reviewer revises once and accepts once');
-  assert.match(reviewerCalls[0]!.reply, /"status":"revise"/, 'the first review sends the work back');
+  assert.match(reviewerCalls[0]!.reply, /"status":"revise"/, 'the first review returns the work');
   assert.match(reviewerCalls[1]!.reply, /"status":"pass"/, 'the second review accepts');
 
   assert.match(await readFile(join(workspace, 'src/add.mjs'), 'utf8'), /add =/);

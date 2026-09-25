@@ -1,0 +1,117 @@
+---
+title: "The Record"
+description: "The append-only event log a run writes, and the single source of truth a stopped run carries on from."
+---
+
+Every step of a run is appended to an event log the moment it happens, so a
+run that stops carries on from the file, not from a model's memory of what
+it did. Use `recordTo` when a plain `run()` must outlive its process. Use
+the [supervised runner](/driving/runner) when the run should restart on its
+own after a crash.
+A handoff you ask the model to write can drop the rules. This file is
+appended as the steps happen.
+
+## Motivation
+
+When a chat dies halfway through, the handoff note a model writes is a
+summary, and the discarded attempt is the part it forgets. The record is
+written by the runtime, one event per step, and no model summarises it.
+That makes it durable: a fresh process reads it and knows what finished,
+what failed, and which question is still waiting for a person. Nothing that
+finished runs twice, so a crash costs the step in flight, not the run.
+
+## Parts
+
+- **Events.** One line per event, appended as it happens: a step started, an
+  engine call returned with its usage, a review failed with its findings, a
+  gate paused for an answer. A line that has landed is never rewritten, so a
+  later step can't change what an earlier one recorded. This is the single
+  source of truth for run state.
+- **Artifacts.** In the runner's store, anything too large for an event
+  sits in a directory beside the log. The event carries a small reference
+  to it with its digest, so the log stays small and the artifact can be
+  checked against it.
+- **The store.** A plain `run()` appends to the file at `recordTo`. A run
+  under the supervised runner keeps its own store: the run's definition, its
+  events and its artifact directory. Both are plain files, with no database
+  and no server.
+
+## Lifecycle
+
+A run appends `run:start` when it begins and `run:end` only if it finishes,
+with the same outcome and token usage that `run()` returns. A record still
+being written has a start and no end, and so does one whose process was
+killed. A resumed record keeps the earlier start too. Between them, every
+step, review, pause and engine call is a line.
+
+`examples/offline-review.ts` writes its record to
+`.obversa/records/offline-review.jsonl`. In it, a writer drafts a config, the
+review fails it for a missing timeout, the writer runs again with that
+finding, and the second review passes:
+
+```text Example record
+{"kind":"run:start","ts":1790363702222,"path":[],"recordPath":".obversa/records/offline-review.jsonl"}
+{"kind":"loop:start","ts":1790363702222,"path":["write-config"],"depth":1,"max":4}
+{"kind":"loop:iteration","ts":1790363702223,"path":["write-config"],"iteration":1}
+{"kind":"job:start","ts":1790363702223,"path":["write-config"],"label":"author"}
+{"kind":"job:end","ts":1790363702223,"path":["write-config"],"label":"author","outcome":{"status":"pass","summary":"wrote the base config"}}
+{"kind":"loop:condition","ts":1790363702223,"path":["write-config"],"which":"until","iteration":1,"result":{"met":true,"reason":"a draft exists: true"}}
+{"kind":"job:start","ts":1790363702223,"path":["write-config"],"label":"review"}
+{"kind":"job:end","ts":1790363702223,"path":["write-config"],"label":"review","outcome":{"status":"fail","summary":"Missing a request timeout.","revision":{"reason":"Missing a request timeout.","findings":[{"reviewer":"correctness","evidence":"No timeout set; a hung upstream call blocks forever."}]}}}
+{"kind":"loop:review","ts":1790363702223,"path":["write-config"],"outcome":{"status":"fail","summary":"Missing a request timeout.","revision":{"reason":"Missing a request timeout.","findings":[{"reviewer":"correctness","evidence":"No timeout set; a hung upstream call blocks forever."}]}},"accepted":true}
+{"kind":"log","ts":1790363702223,"path":[],"level":"warn","message":"review did not pass (Missing a request timeout.); re-entering write-config"}
+{"kind":"loop:iteration","ts":1790363702223,"path":["write-config"],"iteration":2}
+{"kind":"job:start","ts":1790363702223,"path":["write-config"],"label":"author"}
+{"kind":"job:end","ts":1790363702224,"path":["write-config"],"label":"author","outcome":{"status":"pass","summary":"added a timeout after: Missing a request timeout."}}
+{"kind":"loop:condition","ts":1790363702224,"path":["write-config"],"which":"until","iteration":2,"result":{"met":true,"reason":"a draft exists: true"}}
+{"kind":"job:start","ts":1790363702224,"path":["write-config"],"label":"review"}
+{"kind":"job:end","ts":1790363702224,"path":["write-config"],"label":"review","outcome":{"status":"pass","summary":"config is complete"}}
+{"kind":"loop:review","ts":1790363702224,"path":["write-config"],"outcome":{"status":"pass","summary":"config is complete"},"accepted":false}
+{"kind":"loop:end","ts":1790363702224,"path":["write-config"],"outcome":{"status":"pass","summary":"config is complete"},"iterations":2}
+{"kind":"run:end","ts":1790363702224,"path":[],"outcome":{"status":"pass","summary":"config is complete"},"usage":{"inputTokens":0,"outputTokens":0,"cacheReadInputTokens":0,"cacheCreationInputTokens":0,"unmeasuredCalls":0},"recordPath":".obversa/records/offline-review.jsonl"}
+```
+
+## Recovery
+
+The runner package's supervised run restarts a killed run. It starts the
+run in a bounded worker. When the worker dies, it starts another against the
+run's own store, and the new worker reads that store and carries on. Steps
+that finished are never repeated. A step that was mid-flight when the worker
+died runs again only if its binding declares it safe to retry; otherwise the
+run pauses and asks a person to reconcile it before it continues, so
+uncertain work is never repeated silently.
+
+A plain `run()` opens a fresh record each time it starts. With
+`resume: true`, it reads the record at `recordTo` first. For a job built
+with `workflow()`, what happens to each stage depends on where it stopped:
+
+| Stage when the process died | On resume |
+| --- | --- |
+| Finished | Skipped |
+| Failed | Runs again |
+| Waiting for a person | Not asked twice, as long as the run reads the same store of pending questions. A fresh in-memory client has nothing to read, so it asks again. |
+| Mid-flight, `retrySafe: true` | Runs again |
+| Mid-flight, not marked safe | The run pauses and asks a person. If they say it didn't finish, the stage runs in the same resumed run. If it did, it isn't repeated. |
+
+`resume: true` is how a workflow carries on when you start it yourself or a
+schedule starts it for you. [Callback gates](/reviewing/callback-gates)
+covers how a run waits for the answer.
+
+## Limits
+
+- **The record leaves out the model's streamed text.** It holds every
+  decision and outcome, and each engine call with its usage.
+- **A resume applies to the same workflow.** Same name, workspace, brief and
+  stage list, and the same seat behind each role. Change the brief, the
+  model behind a role, or the question a person role asks, and the run
+  starts again.
+- **Only `workflow()` skips finished stages.** Any other job given
+  `resume: true` appends to the record and runs again.
+
+## Next steps
+
+| Goal | Page |
+| --- | --- |
+| Read every event kind and how artifacts are stored | [Events and artifacts](/recording/events-and-artifacts) |
+| Mark a step safe to run again after a crash | [Safe node attempts](/recording/node-attempts) |
+| Restart a killed run without touching it | [Supervised local runs](/driving/runner) |

@@ -1,0 +1,64 @@
+---
+title: "How Many Reviewers Have to Accept?"
+sidebarTitle: "Review Panel"
+description: "As many as you say with agree. Leave it out and every reviewer must accept."
+---
+
+As many as you say. A review stage names its reviewers and `agree`, the
+number that must accept for the stage to pass. Leave `agree` out and every
+reviewer must accept. Below the number, the findings go to the stage that
+owns the fix, which runs again with them, as many times as its `retry`
+allows. Obversa does not merge on the pass; a person or the next stage
+does.
+
+## In Obversa
+
+Two reviewers from two families read the same change at once, and one
+acceptance is enough here:
+
+```ts examples/teams/threshold-panel.ts (excerpt) {3-6,23-25}
+    roles: {
+      implement: engines.claude('claude-sonnet-4-5'),
+      review: [
+        engines.codex('gpt-5.6-luna'),
+        engines.opencode('opencode/big-pickle'),
+      ],
+    },
+
+    stages: [
+      stage('implement', {
+        agent: 'implement',
+        writes: ['src/double.mjs', 'test/double.test.mjs'],
+        desc: 'Write the function and its test from the brief.',
+        gate: 'The files named in the brief exist in the workspace.',
+        retry: 1,
+      }),
+      stage('test', {
+        run: ['node', '--test', 'test/double.test.mjs'],
+        desc: 'Run the test command against the written files.',
+        gate: 'The test command exits 0.',
+        sendsBackTo: 'implement',
+      }),
+      stage('review', {
+        panel: 'review',
+        agree: 1,
+        desc: 'Have both reviewers read the change and count the acceptances.',
+        gate: 'At least one reviewer has accepted.',
+        sendsBackTo: 'implement',
+      }),
+```
+
+Set `agree` to the number of reviewers when one dissent must be enough to
+fail the step. Below that, the change can pass despite a dissent, and the
+dissent is still on the record.
+
+## Cross-model review
+
+The panel's reviewers are checked against the writer's family before the
+run starts, the same way a single reviewer is. [Should another model
+review the code?](/glossary/cross-model-review) has the rule.
+
+## Next steps
+
+- [A review panel with a threshold](/patterns/review-panel): the pattern with a real run.
+- [Review loop](/reviewing/review-loop): a quorum over review seats in a graph form.

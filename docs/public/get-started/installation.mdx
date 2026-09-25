@@ -1,95 +1,99 @@
 ---
 title: "Installation"
-description: "Add Obversa to your own project and write your first file."
+description: "Add Obversa to a project and run the smallest file."
 ---
 
-Obversa is a set of packages you import. There's nothing to clone and no
-service to run.
+Obversa is a library you import: add the packages to a Node project, write
+a TypeScript file, and run it. There's nothing to clone, no service to run
+and no account to sign into.
 
-## Requirements
+## Prerequisites
 
-You need Node.js 22.12 or later. Every Obversa package is an ES module and a
-workflow is a TypeScript file, so your project needs `"type": "module"` in
-its `package.json` and `tsx` to run the file:
+You need:
 
-```bash
+- **Node.js 22.12 or later.**
+- **npm or pnpm.**
+- **A coding agent signed in**, such as Claude Code or Codex, for a run that
+  calls a real model. The file below runs without one.
+
+Every Obversa package is an ES module, so the project needs
+`"type": "module"` in its `package.json`, and `tsx` runs a TypeScript file
+directly:
+
+```bash Terminal
 npm pkg set type=module
 npm install --save-dev tsx
 ```
 
-Node can also run the file without `tsx`. From Node 22.12, pass
-`--experimental-strip-types`. From Node 22.18, you don't need the flag.
+## Install
 
-## Add it to your project
+Install the bundle:
 
-```bash
+<CodeGroup>
+
+```bash npm
 npm install @obversa/obversa
 ```
 
-The bundle installs every package except Jev: the runtime and runner, the
-shared contracts, the ready-made workflows, the surfaces, six engine
-plugins, three memory adapters and the webhook notifier. It has no API of
-its own, so import each tool from its own package. The CLI engines also need
-their command line tool installed and signed in.
-
-[Jev](/packages/engine-jev-api) installs separately:
-
-```bash
-npm install @obversa/engine-jev-api
+```bash pnpm
+pnpm add @obversa/obversa
 ```
 
-[Plugins and tools](/plugins) lists what each engine needs.
+</CodeGroup>
 
-## Write a file
+The bundle installs every package except the Jev engine, which installs on
+its own. It has no API of its own, so import each tool from its own package.
+[Plugins and tools](/packages) lists what each engine needs on your machine.
 
-A workflow is a TypeScript file that imports the runtime and describes the
-work. There's no configuration file, no scaffolding step and no directory
-layout to adopt.
+## The smallest file
 
-```ts
-/**
- * The first file a reader writes.
- *
- * Two steps and a dependency between them, in the shape every larger workflow
- * uses: nodes with names, each saying what it is for, and `needs` saying what
- * has to happen first. It runs offline with no model, so the shape is the only
- * thing on show.
- */
-import { dag, fnJob, run, type Outcome } from '@obversa/runtime';
+One agent job, with a scripted engine in place of a model:
 
-const draft = fnJob('draft', async (): Promise<Outcome> => ({
-  status: 'pass',
-  summary: 'wrote the first version',
-}));
+```ts examples/one-agent-job.ts
+import { agentJob, run } from '@obversa/runtime';
+import { MockEngine } from '@obversa/runtime/testing';
 
-const review = fnJob('review', async (ctx): Promise<Outcome> => ({
-  status: 'pass',
-  summary: `read ${ctx.lastOutcome?.summary ?? 'the draft'}`,
-}));
+const engine = new MockEngine(() => 'ready');
 
-export const writeAndReview = dag({
-  name: 'write-and-review',
-  nodes: {
-    draft: { desc: 'Write the first version', job: draft },
-    review: { desc: 'Read it and say whether it stands', needs: 'draft', job: review },
-  },
+const job = agentJob({
+  label: 'prepare-item',
+  engine: 'offline',
+  prompt: 'Prepare the item.',
 });
 
-const result = await run(writeAndReview);
-console.log(JSON.stringify({ status: result.outcome.status }, null, 2));
+const result = await run(job, {
+  engine: 'offline',
+  engines: { offline: engine },
+});
 
-if (result.outcome.status !== 'pass') process.exitCode = 1;
+console.log(result.outcome.status);
 ```
 
-Save it as `write-and-review.ts` and run `npx tsx write-and-review.ts`.
+`run()` hands the prompt to the engine named `offline`, which is the
+`MockEngine` you passed in, and returns the job's outcome. Swap the scripted
+engine for a plugin such as `claude` from `@obversa/engine-claude-cli`, and
+the same job runs a real model.
 
-## Next
+## Run it
 
-[First run](/get-started/first-run) takes a real team apart.
-[The examples](/workflows) are complete files you can copy.
+Save the file as `one-agent-job.ts` and run it:
 
-## Contributing
+```bash Terminal
+npx tsx one-agent-job.ts
+```
 
-Working on Obversa itself needs a checkout.
-[AGENTS.md](https://github.com/jonny981/obversa/blob/main/AGENTS.md) in the
-repository covers it.
+```text Output
+pass
+```
+
+The job passed: the engine answered, and the run ended with that outcome.
+
+## Next steps
+
+- [First run](/get-started/first-run): three files that show the shapes a
+  team is built from, offline first.
+- [Examples](/workflows): complete teams you can copy, with what each run
+  printed.
+- [Contributing](https://github.com/jonny981/obversa/blob/main/AGENTS.md):
+  working on Obversa itself needs a checkout, and the contributor guide
+  covers it.

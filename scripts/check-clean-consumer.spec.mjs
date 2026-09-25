@@ -54,7 +54,6 @@ test('clean consumer proves the feature-delivery production line and its failure
   const source = await readFile(new URL('./check-clean-consumer.mjs', import.meta.url), 'utf8');
   // The compile list lives in consumer-examples.mjs, read by this check and the page-shape check.
   assert.ok(CONSUMER_EXAMPLES.includes('feature-delivery.ts'));
-  assert.match(source, /'feature-delivery\.mdx'/);
   assert.match(source, /featureProofSource/);
   assert.match(source, /feature-delivery\.proof\.ts/);
   assert.match(source, /join\(consumerDirectory, 'feature-delivery\.ts'\)/);
@@ -137,7 +136,7 @@ test('team conversation example requires the reply to queue another writer turn'
 test('team page checks the whole runnable source and actual printed report', async (t) => {
   assert.equal(typeof consumer.checkedTeamConversationPage, 'function');
   const source = await readFile(new URL('../examples/team-conversation.ts', import.meta.url), 'utf8');
-  const page = await readFile(new URL('../docs/public/workflows/team-conversation.mdx', import.meta.url), 'utf8');
+  const page = await readFile(new URL('../docs/public/patterns/team-conversation.mdx', import.meta.url), 'utf8');
   const run = spawnSync(process.execPath, ['--import', 'tsx', new URL('../examples/team-conversation.ts', import.meta.url).pathname], {
     encoding: 'utf8', timeout: 30_000, killSignal: 'SIGKILL',
   });
@@ -147,20 +146,17 @@ test('team page checks the whole runnable source and actual printed report', asy
   const wrong = { ...JSON.parse(run.stdout), replayAddedEvents: true };
   assert.throws(() => consumer.checkedTeamConversationPage(page, source, JSON.stringify(wrong)), /printed report/);
 
-  const sourceHeading = page.indexOf('## Source');
-  assert.ok(sourceHeading > 0);
-  const introduction = page.slice(0, sourceHeading);
-  const completeSource = page.slice(sourceHeading);
-  const blocks = [...introduction.matchAll(/```ts\n([\s\S]*?)\n```/g)];
-  assert.equal(blocks.length, 3, 'The page must have exactly three short TypeScript blocks.');
+  const excerptPattern = /^[ \t]*```ts examples\/team-conversation\.ts \(excerpt\)[^\n]*\n[\s\S]*?\n[ \t]*```/gm;
+  const blocks = [...page.matchAll(excerptPattern)];
+  assert.equal(blocks.length, 3, 'The page must have exactly three excerpt blocks.');
   for (const [index, name] of ['imports', 'definition', 'posts'].entries()) {
     await t.test(`rejects a changed ${name} short block while complete source and output match`, () => {
       const block = blocks[index];
-      const changedIntroduction = introduction.slice(0, block.index)
-        + block[0].replace('```ts\n', `\`\`\`ts\n// Changed ${name} short block.\n`)
-        + introduction.slice(block.index + block[0].length);
+      const changedPage = page.slice(0, block.index)
+        + block[0].replace('\n', `\n// Changed ${name} short block.\n`)
+        + page.slice(block.index + block[0].length);
       assert.throws(
-        () => consumer.checkedTeamConversationPage(changedIntroduction + completeSource, source, run.stdout),
+        () => consumer.checkedTeamConversationPage(changedPage, source, run.stdout),
         new RegExp(`${name}.*short|short.*${name}`),
       );
     });
@@ -168,10 +164,10 @@ test('team page checks the whole runnable source and actual printed report', asy
   await t.test('rejects a missing imports marker even when the complete source copy matches', () => {
     const withoutMarker = source.replace('// #region imports\n', '');
     assert.notEqual(withoutMarker, source, 'The control must remove the imports marker.');
-    const matchedCompleteSource = completeSource.replace(source.trimEnd(), withoutMarker.trimEnd());
-    assert.notEqual(matchedCompleteSource, completeSource);
+    const matchedPage = page.replace(source.trimEnd(), withoutMarker.trimEnd());
+    assert.notEqual(matchedPage, page);
     assert.throws(
-      () => consumer.checkedTeamConversationPage(introduction + matchedCompleteSource, withoutMarker, run.stdout),
+      () => consumer.checkedTeamConversationPage(matchedPage, withoutMarker, run.stdout),
       /imports source region/,
     );
   });
@@ -191,6 +187,17 @@ test('clean consumer wires the bounded process example', async () => {
   assert.match(source, /directRunChild/);
 });
 
+test('the core page source is the titled whole-file block', () => {
+  const source = "import { runChild } from '@obversa/core';\n";
+  const titled = `## Run one\n\n\`\`\`ts examples/run-child.ts\n${source}\`\`\`\n`;
+  assert.equal(consumer.sourceFromPublicDoc(titled, 'run-child.ts'), `${source}`);
+  const untitled = `## Run one\n\n\`\`\`ts\n${source}\`\`\`\n`;
+  assert.throws(
+    () => consumer.sourceFromPublicDoc(untitled, 'run-child.ts'),
+    /no whole-file block titled examples\/run-child\.ts/,
+  );
+});
+
 test('a rename that moves several examples is reported in one run, not one per run', async () => {
   const source = await readFile(new URL('./check-clean-consumer.mjs', import.meta.url), 'utf8');
   // The preflight runs before the first read and is driven by the compile
@@ -200,4 +207,49 @@ test('a rename that moves several examples is reported in one run, not one per r
   // And it must collect rather than stop: the loop pushes onto `missing`
   // instead of throwing on the first one.
   assert.match(source, /missing\.push\(path\)/);
+});
+
+/**
+ * The whole-file block shape pages moved to: a `ts` fence titled
+ * `examples/<file>`, with "(excerpt)" marking the short cuts of it.
+ */
+const teamSource = "// #region imports\nimport { team } from './team.js';\n// #endregion imports\n\n// #region definition\nconst def = team();\n// #endregion definition\n\n// #region posts\nconst posts = [];\n// #endregion posts\n";
+
+const teamRegions = {
+  imports: "import { team } from './team.js';",
+  definition: 'const def = team();',
+  posts: 'const posts = [];',
+};
+
+function teamDocument({ whole = teamSource.replace(/\n$/, ''), excerpts = ['imports', 'definition', 'posts'], output = '{"ok":true}' } = {}) {
+  const excerptBlocks = excerpts.map((name) =>
+    `\`\`\`ts examples/team-conversation.ts (excerpt)\n${teamRegions[name]}\n\`\`\`\n`).join('\n');
+  return `---\ntitle: "x"\n---\n\nProse.\n\n${excerptBlocks}\n<Accordion title="Full file">\n\n\`\`\`ts examples/team-conversation.ts\n${whole}\n\`\`\`\n\n</Accordion>\n\n\`\`\`json Output\n${output}\n\`\`\`\n`;
+}
+
+test('sourceFromPublicDoc finds a titled whole-file block inside an accordion and ignores excerpts of it', () => {
+  const document = '```ts examples/x.ts (excerpt)\nconst part = 1;\n```\n\n<Accordion title="Full file">\n\n```ts examples/x.ts\nconst part = 1;\nconst rest = 2;\n```\n\n</Accordion>\n';
+  assert.equal(consumer.sourceFromPublicDoc(document, 'x.ts'), 'const part = 1;\nconst rest = 2;\n');
+});
+
+test('sourceFromPublicDoc throws when only an excerpt-titled block exists', () => {
+  const document = '```ts examples/x.ts (excerpt)\nconst part = 1;\n```\n';
+  assert.throws(() => consumer.sourceFromPublicDoc(document, 'x.ts'), /no whole-file block titled examples\/x\.ts/);
+});
+
+test('checkedTeamConversationPage passes on the titled whole-file, three excerpts and a titled output block', () => {
+  consumer.checkedTeamConversationPage(teamDocument(), teamSource, '{"ok":true}');
+});
+
+test('checkedTeamConversationPage rejects a whole-file block that differs from the source by one byte', () => {
+  const wrong = teamSource.replace('const def', 'const dex').replace(/\n$/, '');
+  assert.throws(
+    () => consumer.checkedTeamConversationPage(teamDocument({ whole: wrong }), teamSource, '{"ok":true}'),
+    /complete runnable source/);
+});
+
+test('checkedTeamConversationPage rejects a page with only two excerpt blocks', () => {
+  assert.throws(
+    () => consumer.checkedTeamConversationPage(teamDocument({ excerpts: ['imports', 'definition'] }), teamSource, '{"ok":true}'),
+    /three short TypeScript blocks/);
 });

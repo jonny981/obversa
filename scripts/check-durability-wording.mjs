@@ -11,7 +11,7 @@ const CORE = 'Steps that finished are never repeated. A step that was mid-flight
 const FILES = [
   { path: 'README.md', name: 'the README' },
   { path: 'AGENTS.md', name: 'the contributor guide' },
-  { path: 'docs/public/recording/how-a-run-is-recorded.mdx', name: 'the record page' },
+  { path: 'docs/public/concepts/record.mdx', name: 'the record page' },
 ];
 
 const OPENING = 'Steps that finished are never repeated.';

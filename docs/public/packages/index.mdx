@@ -1,0 +1,178 @@
+---
+title: "API Reference"
+description: "Every export a user calls, the package it comes from, and the page that teaches it."
+---
+
+Find the export you need, the package it comes from, and the page that
+shows it running. Every package needs Node.js 22.12 or later; the tool rows
+below say what else each one needs.
+
+## Exports
+
+| Export | Package | What it's for | Page |
+| --- | --- | --- | --- |
+| `workflow`, `stage`, `person`, `briefFromFile` | `@obversa/runtime` | Declare a team | [Runtime](/packages/runtime#declare-a-team) |
+| `formatEvent` | `@obversa/runtime` | Print one run event | [Runtime](/packages/runtime#declare-a-team) |
+| `pipeline`, `dag`, `sequence`, `parallel`, `loop` | `@obversa/runtime` | The shapes a workflow takes | [Runtime](/packages/runtime#build-a-graph) |
+| `fnJob`, `agentJob`, `commandJob`, `gateJob`, `prove` | `@obversa/runtime` | The steps | [Runtime](/packages/runtime#build-a-graph) |
+| `isolated`, `writeScope` | `@obversa/runtime` | A step in its own worktree | [Workspace](/concepts/workspace) |
+| `passed`, `failed`, `all`, `any`, `not`, `predicate`, `quorum` | `@obversa/runtime` | Conditions on a step | [A command decides the path](/patterns/command-kickback) |
+| `agentCheck`, `confidenceCondition`, `minConfidence` | `@obversa/runtime` | Scored conditions | [Evals](/reviewing/evals#score-a-condition) |
+| `reviewPanel` | `@obversa/runtime` | Several reviewers, a threshold | [A review panel with a threshold](/patterns/review-panel) |
+| `tournament` | `@obversa/runtime` | Candidates, a judge, one winner | [Three candidates, one winner](/patterns/tournament) |
+| `kickback`, `revisionRequest` | `@obversa/runtime` | Fail a step with findings | [Feedback loops](/concepts/feedback-loops) |
+| `approval` | `@obversa/runtime` | A person's decision as a step | [A person decides](/patterns/approval) |
+| `createCallbackGate`, `createCallbackClient`, `createStoredCallbackClient`, `replayCallbackClient`, `directRouter` | `@obversa/runtime` | A question with a typed answer | [Callback gates](/reviewing/callback-gates) |
+| `createApprovalCallbackGate`, `resolveApproval`, `writeProofArtifact`, `createAcceptedResultRecord`, `resolveAcceptedResult`, `createProofCache` | `@obversa/runtime` | Bind a decision to exact bytes | [Proof-bound acceptance and approval](/reviewing/proof-acceptance) |
+| `run` | `@obversa/runtime` | Run a job and record it | [Running](/concepts/running) |
+| `team`, `teamGraphType`, `projectTeamRooms` | `@obversa/runtime` | Named members who talk | [Team conversation](/patterns/team-conversation) |
+| `compileGraph`, `resolveGraphPlan`, `dagGraphType`, `convergence` | `@obversa/runtime` | Graph forms and plans | [Outside graph types](/graphs/contract) |
+| `persistRunDefinition`, `loadRunDefinition`, `createGraphExecutor` | `@obversa/runtime` | Store and execute a graph | [Graph executor](/graphs/executor) |
+| `readRunPreflight`, `interruptRunPreflight`, `preflight` | `@obversa/runtime` | Engine checks before the first step | [Graph executor](/graphs/executor) |
+| `createLocalRunStorage` | `@obversa/runtime/storage/local` | The on-disk event and artifact store | [Events and artifacts](/recording/events-and-artifacts) |
+| `createGitWorktreeProvider` | `@obversa/runtime` | Capture, verify, lease, fork | [Workspace contract](/workspace/contract) |
+| `ground`, `curate`, `consolidate` | `@obversa/runtime/memory` | Memory through your own functions | [Memory mechanics](/memory/mechanics) |
+| `MockEngine`, `defineGraphDefinition`, `runGraphTypeConformance` | `@obversa/runtime/testing` | Run offline, prove a form | [Runtime](/packages/runtime#api) |
+| `outcomeFromAgentText`, `assertDistinctSeats` | `@obversa/runtime/workflow-support` | Read a reviewer's reply, check families | [Runtime](/packages/runtime#api) |
+| `startSupervisedRun`, `resumeSupervisedRun`, `readSupervisedRunStatus` | `@obversa/runner` | A run under a watchdog | [Supervised local runs](/driving/runner) |
+| `validateAgentResult`, `finalResultPart`, `modelIdentity` | `@obversa/api` | The engine contract | [Safe node attempts](/recording/node-attempts) |
+| `runEngineConformance`, `runMemoryConformance` | `@obversa/api/testing` | Check an adapter | [API](/packages/api#api) |
+| `runChild` | `@obversa/core` | One child process to a deadline | [Core](/packages/core) |
+| `resolveCommandExecutable`, `runOwnedCommand` | `@obversa/core/command` | Find and run a tool | [Core](/packages/core#run-an-owned-command) |
+| `writerReviewerPair`, `thresholdPanel`, `featureDelivery` | `@obversa/builtin-workflows` | Ready-made teams | [Built-in Workflows](/packages/builtin-workflows) |
+| `runSurface`, `startSurface`, `openSurfaceUrl`, `parseFramedResult` | `@obversa/surface` | One page for one decision | [Surface](/packages/surface) |
+| `reviewDiff`, `parseUnifiedDiff`, `appendToThread` | `@obversa/surface-diff` | Review a diff in a browser | [Surface Diff](/packages/surface-diff) |
+| `claude`, `ClaudeCliEngine` | `@obversa/engine-claude-cli` | Claude Code as a seat | [Claude CLI Engine](/packages/engine-claude-cli) |
+| `codex`, `CodexEngine` | `@obversa/engine-codex-cli` | Codex as a seat | [Codex CLI Engine](/packages/engine-codex-cli) |
+| `GrokCliEngine` | `@obversa/engine-grok-cli` | Grok CLI as an engine | [Grok CLI Engine](/packages/engine-grok-cli) |
+| `opencode`, `OpenCodeCliEngine` | `@obversa/engine-opencode-cli` | OpenCode as a seat | [OpenCode CLI Engine](/packages/engine-opencode-cli) |
+| `AgentSdkEngine` | `@obversa/engine-claude-agent-sdk` | The Claude Agent SDK as an engine | [Claude Agent SDK Engine](/packages/engine-claude-agent-sdk) |
+| `AnthropicApiEngine` | `@obversa/engine-anthropic-api` | The Anthropic API as an engine | [Anthropic API Engine](/packages/engine-anthropic-api) |
+| `JevApiEngine` | `@obversa/engine-jev-api` | Typed questions about a run | [Jev API Engine](/packages/engine-jev-api) |
+| `openGitMemory`, `openReasoningRecord` | `@obversa/memory-git` | Memory in Git, reasoning in commits | [Git Memory](/packages/memory-git) |
+| `createSimpleMemory` | `@obversa/memory-simple` | Memory in one process | [Simple Memory](/packages/memory-simple) |
+| `openMarkdownCorpus` | `@obversa/memory-markdown` | Search your Markdown files | [Markdown Memory](/packages/memory-markdown) |
+| `webhookNotifier` | `@obversa/notify-webhook` | A message per run event | [Webhook Notifications](/packages/notify-webhook) |
+
+Import from the package named in the row:
+
+```ts examples/teams/writer-reviewer-pair.ts (excerpt)
+import { claude } from '@obversa/engine-claude-cli';
+import { codex } from '@obversa/engine-codex-cli';
+import { run } from '@obversa/runtime';
+import { briefFromFile, stage, workflow, type TeamSeat } from '@obversa/runtime';
+```
+
+## Tools
+
+Each row says what the tool is, what you need installed, and where its home
+is.
+
+- **Claude Code.** `@obversa/engine-claude-cli` runs each request in a fresh
+  Claude Code process. You need Claude Code installed and signed in. Home:
+  [claude.com/code](https://claude.com/code).
+- **Codex CLI.** `@obversa/engine-codex-cli` runs each request in a fresh
+  Codex CLI process. You need the Codex CLI installed and signed in. Home:
+  [github.com/openai/codex](https://github.com/openai/codex).
+- **OpenCode CLI.** `@obversa/engine-opencode-cli` runs each request in a
+  fresh OpenCode process with a clean environment, so your own sign-in isn't
+  used. You need OpenCode 1.18.23 installed, and you pass your provider's
+  credentials through the engine's `auth` or `environment` option. Home:
+  [opencode.ai](https://opencode.ai).
+- **Grok CLI.** `@obversa/engine-grok-cli` runs each request in a fresh Grok
+  CLI process with a clean environment, so your own sign-in isn't used. You
+  need Grok CLI 1.0.5 installed, and you pass your credentials through the
+  engine's `environment` or `authFile` option. Home:
+  [docs.x.ai/build/cli/headless-scripting](https://docs.x.ai/build/cli/headless-scripting).
+- **Anthropic API.** `@obversa/engine-anthropic-api` sends each request to
+  the Anthropic API. You need an Anthropic API key. Home:
+  [console.anthropic.com](https://console.anthropic.com).
+- **Claude Agent SDK.** `@obversa/engine-claude-agent-sdk` runs each request
+  through the Claude Agent SDK. You need Claude Code signed in on the same
+  machine, because the SDK uses its sign-in. Home:
+  [github.com/anthropics/claude-agent-sdk](https://github.com/anthropics/claude-agent-sdk).
+- **Jev API.** `@obversa/engine-jev-api` answers structured questions about a
+  run's recorded state. It never reads or edits files. You need a Jev
+  endpoint and an API key. See [Jev API Engine](/packages/engine-jev-api).
+- **In-process memory.** `@obversa/memory-simple` keeps memory inside one
+  process. You need nothing else. Home:
+  [Simple Memory](/packages/memory-simple).
+- **Git-backed memory.** `@obversa/memory-git` stores memory in private Git
+  references, so nothing lands in the working tree, and can write a stage's
+  reasoning into the commit that carries its change. You need Git installed.
+  Home: [Git Memory](/packages/memory-git).
+- **Markdown search.** `@obversa/memory-markdown` selects ranked passages
+  from a local folder of Markdown files and gives `ground` the selected
+  files through a read-only memory view. You need nothing else. Home:
+  [Markdown Memory](/packages/memory-markdown).
+- **Webhook notifications.** `@obversa/notify-webhook` posts one message per
+  interesting run event to a URL you supply; the body carries a `text`
+  field, so a Slack, Discord or Teams incoming webhook shows it with no code
+  of its own. You need a URL to post to. Home:
+  [Webhook Notifications](/packages/notify-webhook).
+- **The review command.** `@obversa/surface-diff` ships `obversa-review`,
+  which opens a diff for inline review. You need Git. See
+  [Review a diff in a host pane](/hosts/review).
+- **The cmux host.** The cmux glue opens surfaces as browser splits beside
+  the terminal and one editor window with the two worktrees. You need cmux
+  installed. Home: [Obversa in cmux](/hosts/cmux).
+- **Plannotator.** Plannotator opens its review page in a split through the
+  `PLANNOTATOR_BROWSER` variable the workspace launcher sets. You need
+  Plannotator installed. Home:
+  [github.com/backnotprop/plannotator](https://github.com/backnotprop/plannotator).
+
+## Packages
+
+| Package | Purpose | Version |
+| --- | --- | --- |
+| `@obversa/obversa` | Installs every package below except Jev | `0.1.0` |
+| `@obversa/runtime` | Builds and runs workflows as graphs, team conversations or a review loop | `0.1.0` |
+| `@obversa/runner` | Supervises stored graph runs in bounded workers | `0.1.0` |
+| `@obversa/api` | Defines every contract: engine, memory, graph, events, artifacts, workspace, callbacks, proofs and run definitions, with their validators | `0.1.0` |
+| `@obversa/core` | Runs one child process with a deadline and a readable result | `0.1.0` |
+| `@obversa/memory-simple` | Stores memory in one process | `0.1.0` |
+| `@obversa/memory-git` | Stores memory in private Git references, and writes a stage's reasoning into its commit | `0.1.0` |
+| `@obversa/memory-markdown` | Selects ranked passages from local Markdown files | `0.1.0` |
+| `@obversa/notify-webhook` | Posts one message per interesting run event to a URL you supply | `0.1.0` |
+| `@obversa/builtin-workflows` | Three ready-made workflows | `0.1.0` |
+| `@obversa/surface` | Runs one local surface session | `0.1.0` |
+| `@obversa/surface-diff` | Opens a git diff for inline review | `0.1.0` |
+| `@obversa/engine-claude-agent-sdk` | Runs one engine attempt through the Agent SDK | `0.1.0` |
+| `@obversa/engine-anthropic-api` | Runs one engine attempt through the Anthropic API | `0.1.0` |
+| `@obversa/engine-claude-cli` | Runs one engine attempt through the Claude CLI | `0.1.0` |
+| `@obversa/engine-codex-cli` | Runs one engine attempt through the Codex CLI | `0.1.0` |
+| `@obversa/engine-grok-cli` | Runs one engine attempt through the Grok CLI | `0.1.0` |
+| `@obversa/engine-opencode-cli` | Runs one engine attempt through the OpenCode CLI | `0.1.0` |
+| `@obversa/engine-jev-api` | Answers decision questions over recorded run state through the Jev API | `0.1.0` |
+
+The api, core, runtime and runner packages share one version. The runtime
+never imports an engine or a memory adapter: you pass the ones you want when
+you run.
+
+## Pages
+
+**Packages.** [Obversa](/packages/obversa), [Runtime](/packages/runtime),
+[Runner](/packages/runner), [API](/packages/api), [Core](/packages/core),
+[Built-in Workflows](/packages/builtin-workflows),
+[Surface](/packages/surface), [Surface Diff](/packages/surface-diff).
+
+**Engines.** [Claude CLI](/packages/engine-claude-cli),
+[Codex CLI](/packages/engine-codex-cli), [Grok CLI](/packages/engine-grok-cli),
+[OpenCode CLI](/packages/engine-opencode-cli),
+[Claude Agent SDK](/packages/engine-claude-agent-sdk),
+[Anthropic API](/packages/engine-anthropic-api),
+[Jev API](/packages/engine-jev-api). Coming soon:
+[eve](/packages/engine-eve), [Mastra](/packages/engine-mastra),
+[LangGraph](/packages/engine-langgraph).
+
+**Memory and notifications.** [Git Memory](/packages/memory-git),
+[Simple Memory](/packages/memory-simple),
+[Markdown Memory](/packages/memory-markdown),
+[Webhook Notifications](/packages/notify-webhook).
+
+## Next steps
+
+- [Installation](/get-started/installation): set a project up and run the
+  first file.
+- [Runtime](/packages/runtime): the package most files import from.
+- [Examples](/workflows): complete teams that use these exports.

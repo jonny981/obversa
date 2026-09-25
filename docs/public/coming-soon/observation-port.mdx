@@ -1,6 +1,8 @@
 ---
-title: "An observation port on every workflow"
-description: "A stream of a run's events and a published shape for its state, so a view can be ours or yours."
+title: "An Observation Port on Every Workflow"
+sidebarTitle: "Observation Port"
+tag: "Coming soon"
+description: "Coming soon: a stream of a run's events and a published shape for its state."
 ---
 
 <Note>
@@ -8,14 +10,20 @@ description: "A stream of a run's events and a published shape for its state, so
 so that the shape is public before the code is.
 </Note>
 
-A run already knows everything worth watching: which step is
-running, what each one decided, what a reviewer sent back, what the whole
-thing has spent. A host reads that by holding the run and folding its
-events itself.
+Build your own view of a run against a published contract, instead of
+holding the run and folding its events yourself. A run already knows
+everything worth watching: which step is running, what each one decided,
+what a reviewer found, what the whole thing has spent. Today a host reads
+that by holding the run and folding the events itself.
 
-An observation port makes it a contract instead: a stream of the run's
-events, and a published shape for the state they fold into. The run's own
-page becomes one consumer of it, and a view built against the shape keeps
+An observation port will make it a contract: a stream of the run's events,
+and a published shape for the state they fold into. The run's own page
+becomes one consumer of it, and a view built against the shape keeps
 working when that page changes.
 
-See [Watch a run in the browser](/driving/monitor).
+## Next steps
+
+- [Watch a run in the browser](/driving/monitor): the page that would
+  become one consumer of the port.
+- [Events and artifacts](/recording/events-and-artifacts): the events the
+  stream would carry.

@@ -1,56 +1,119 @@
 ---
-title: "@obversa/engine-claude-agent-sdk"
-description: "@obversa/engine-claude-agent-sdk runs engine requests through the Claude Agent SDK."
+title: "Claude Agent SDK Engine"
+description: "@obversa/engine-claude-agent-sdk: Claude through the Agent SDK, one fresh query() per request, with memory as a tool."
 ---
 
-`@obversa/engine-claude-agent-sdk` is an engine plugin that runs requests through the Claude Agent SDK. Each request is a fresh SDK `query()` call, so every step starts with a clean context.
-
-## Requirements
-
-- Claude Code signed in on the machine that runs the engine
+`@obversa/engine-claude-agent-sdk` runs requests through the Claude Agent
+SDK: each request is a fresh SDK `query()` call, so every step starts with a
+clean context. Use it instead of the [Claude CLI engine](/packages/engine-claude-cli)
+when you want Claude to reach a memory adapter as a tool, or when the SDK's
+process model suits your host better.
 
 ## Install
 
-```bash
-npm install @obversa/obversa
+<CodeGroup>
+
+```bash npm
+npm install @obversa/engine-claude-agent-sdk
 ```
+
+```bash pnpm
+pnpm add @obversa/engine-claude-agent-sdk
+```
+
+</CodeGroup>
+
+Included in `@obversa/obversa`.
+
+## Requirements
+
+- Claude Code signed in on the machine that runs the engine. The SDK uses
+  its sign-in, and the plugin has no API key option.
 
 ## Identity
 
-The plugin reports `provider: 'anthropic'`. It runs the model the request names, or `defaultModel` when the request names none.
+The plugin reports `provider: 'anthropic'`, with the model family read from
+the model name. It runs the model the request names, or `defaultModel` when
+the request names none.
 
-## Usage
+## Quickstart
 
-```ts
+Construct the engine with a default model:
+
+```ts examples/engine-claude-agent-sdk-binding.ts {5-7}
+import type { Engine } from '@obversa/api';
 import { AgentSdkEngine } from '@obversa/engine-claude-agent-sdk';
 
-const engine = new AgentSdkEngine({
+// The SDK engine has no `admit`: it reports its identity when it runs.
+const engine: Engine = new AgentSdkEngine({
   defaultModel: 'claude-sonnet-4-5',
 });
+
+console.log(JSON.stringify({
+  name: engine.name,
+  admits: typeof engine.admit === 'function',
+}, null, 2));
 ```
 
-To give the agent memory, pass any adapter that implements the `Memory` contract from `@obversa/api` to the constructor:
+This engine has no `admit`, so it reports its identity when it runs, not
+before; a plan that asks for engine checks treats it as `unsupported` and
+says whether that blocks the run. Run it with
+`npx tsx engine-claude-agent-sdk-binding.ts`:
 
-```ts
-import { AgentSdkEngine } from '@obversa/engine-claude-agent-sdk';
-import { openGitMemory } from '@obversa/memory-git';
-
-const memory = await openGitMemory({
-  repositoryPath: process.cwd(),
-  scope: 'run-1',
-});
-
-const engine = new AgentSdkEngine({
-  defaultModel: 'claude-sonnet-4-5',
-  memory,
-});
+```json Output
+{
+  "name": "agent-sdk",
+  "admits": false
+}
 ```
 
-## Limits
+Pass the engine to `run()` in `engines`, or bind it to a graph node.
 
-- The plugin has no API key option.
-- Memory reaches Claude as an MCP tool.
-- In the `read` workspace mode, Claude gets only the `Read`, `Grep` and `Glob`
-  tools the request names. In the `none` mode it gets no tools. Both modes block
-  `Bash`, `Edit`, `Write`, the sub-agent tools and every MCP tool. A settings
-  file outside the run can't restore them.
+## Give Claude memory
+
+Pass any adapter that implements the `Memory` contract from `@obversa/api`
+as the `memory` option, such as `openGitMemory` from
+[Git Memory](/packages/memory-git), and Claude reaches it as an MCP tool.
+`AGENT_SDK_MEMORY_TOOL_DESCRIPTION` is the tool's description, and
+`AGENT_SDK_MEMORY_INSTRUCTIONS` the warning that memory content is
+untrusted data. `agentSdkMemoryAllowedTools` and `agentSdkMemoryToolResult`
+are the pieces that wire the tool to a `Memory` adapter.
+
+## Options
+
+### `permissionMode`
+
+`default`, `acceptEdits`, `bypassPermissions`, `plan`, `dontAsk` or `auto`.
+In the `read` workspace mode Claude gets only the `Read`, `Grep` and `Glob`
+tools the request names; in `none` it gets no tools. Both modes block
+`Bash`, `Edit`, `Write`, the sub-agent tools and every MCP tool, and a
+settings file outside the run can't restore them.
+
+### The rest
+
+| Field | Type | Default | Description |
+| --- | --- | --- | --- |
+| `defaultModel` | `string` | none | The model when the request names none. |
+| `minToolIntervalMs` | `number` | none | A floor on the time between tool calls. |
+| `memory` | `Memory` | none | The adapter Claude reaches as a tool. |
+
+## Errors
+
+- **`EngineError`** kinds as the [API](/packages/api#errors) lists them.
+
+## API
+
+- **`AgentSdkEngine`**: the engine class. **`AgentSdkEngineOptions`**: its
+  options. [Quickstart](#quickstart).
+- **`agentSdkToolOptions`**, **`agentSdkPermissionOptions`**,
+  **`agentSdkSystemPrompt`**: how a request becomes SDK options.
+- **`agentSdkMemoryAllowedTools`**, **`agentSdkMemoryToolResult`**,
+  **`AGENT_SDK_MEMORY_INSTRUCTIONS`**, **`AGENT_SDK_MEMORY_TOOL_DESCRIPTION`**:
+  the memory tool. [Give Claude memory](#give-claude-memory).
+- **`toolPacer`**: the pacing behind `minToolIntervalMs`.
+
+## Next steps
+
+- [Claude CLI Engine](/packages/engine-claude-cli): the same sign-in through
+  the CLI, with the seat helper for `workflow()`.
+- [Git Memory](/packages/memory-git): the adapter in the snippet above.

@@ -1,6 +1,8 @@
 ---
-title: "Fast and deliberate, side by side"
-description: "Proposed: a fast typed decision runs first, and the work goes to an agentic seat only when its confidence is under the gate or the decision asks for it."
+title: "Fast and Deliberate, Side by Side"
+sidebarTitle: "Fast and Deliberate"
+tag: "Coming soon"
+description: "Coming soon: A fast typed decision runs first, and the work goes to a deliberate seat only when its confidence is under the gate or the decision asks for it."
 ---
 
 <Note>
@@ -8,20 +10,26 @@ description: "Proposed: a fast typed decision runs first, and the work goes to a
 so that the shape is public before the code is.
 </Note>
 
-The [Jev engine](/packages/engine-jev-api) answers typed questions, but it
-doesn't route work to a deliberate seat on its own. This page proposes
-that routing.
-
-Most decisions in a run are small. Is this ticket the kind the
-policy answers? Has this note actually changed since the reviewer read it?
-Is the reply ready to send? Asking a full agentic seat costs a turn of
+Ask a fast model the small questions and keep the deliberate seat for the
+ones that need it. Most decisions in a run are small. Is this ticket the
+kind the policy answers? Has this note changed since the reviewer read it?
+Is the reply ready to send? Asking a full coding agent costs a turn of
 inference for each one, which is why gates like these are usually left out
 of a workflow rather than written into it.
 
 A fast decision model answers that kind of question with a typed choice and
-a confidence. A step would ask it first, and hand the work to the
-deliberate seat only when the confidence falls under the gate, or when the
-decision itself says the question needs thinking about.
+a confidence. A step will ask it first, and hand the work to the deliberate
+seat only when the confidence falls under the gate, or when the decision
+itself says the question needs thinking about. The
+[Jev engine](/packages/engine-jev-api) answers typed questions today; it
+doesn't yet route work to a deliberate seat on its own.
 
-The point is what becomes affordable. A typed call can run on every item.
-A full agentic turn can't, so it ends up running on none of them.
+The point is what becomes affordable. A typed call can run on every item. A
+full agent turn can't, so it ends up running on none of them.
+
+## Next steps
+
+- [Evals in an agent workflow](/reviewing/evals): the scored conditions a
+  fast decision would feed.
+- [Jev API Engine](/packages/engine-jev-api): the engine that answers
+  typed questions about a run.

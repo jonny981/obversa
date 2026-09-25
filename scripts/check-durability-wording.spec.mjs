@@ -18,7 +18,7 @@ function treeWith(overrides = {}) {
   const files = {
     'README.md': `Some opening prose.\n\n${CORE}\n`,
     'AGENTS.md': `A guide.\n\n${CORE}\n`,
-    'docs/public/recording/how-a-run-is-recorded.mdx': `---\ntitle: "x"\n---\n\n${CORE}\n`,
+    'docs/public/concepts/record.mdx': `---\ntitle: "x"\n---\n\n${CORE}\n`,
     ...overrides,
   };
   for (const [name, body] of Object.entries(files)) {
@@ -58,7 +58,7 @@ test('a file that drops the claim is reported as missing it', () => {
 });
 
 test('each of the three files is checked, not just the first', () => {
-  for (const [file, name] of [['README.md', /README/], ['AGENTS.md', /contributor guide/], ['docs/public/recording/how-a-run-is-recorded.mdx', /record page/]]) {
+  for (const [file, name] of [['README.md', /README/], ['AGENTS.md', /contributor guide/], ['docs/public/concepts/record.mdx', /record page/]]) {
     run({ [file]: 'nothing here\n' }, (failures) => {
       assert.equal(failures.length, 1, `${file}: ${failures.join('; ')}`);
       assert.match(failures[0], name);

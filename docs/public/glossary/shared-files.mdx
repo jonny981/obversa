@@ -1,0 +1,40 @@
+---
+title: "How Do Two Agents Share One File?"
+sidebarTitle: "Shared Files"
+description: "They do not. A stage names the files it may write, and parallel attempts run in separate worktrees."
+---
+
+They don't, by design. A writing stage names the files it may write, and
+a file it changed that the workflow declared for another stage fails the
+stage. Attempts that must not touch each other run in separate worktrees,
+and only the winner lands. Obversa does not lock a file between two
+processes you started outside a workflow, and a file the workflow never
+declared is not part of the check.
+
+## In Obversa
+
+The write stage declares its two files, and nothing else is its to change:
+
+```ts examples/teams/writer-reviewer-pair.ts (excerpt) {3}
+      stage('write', {
+        agent: 'write',
+        writes: ['src/add.mjs', 'test/add.test.mjs'],
+        desc: 'Write the function and its test from the brief.',
+        gate: 'The files named in the brief exist in the workspace.',
+        retry: 1,
+      }),
+```
+
+Declared writes are what the reviewer and the test stage read, and what
+the record shows the stage produced.
+
+## Workflow file
+
+The declarations live in the workflow file, beside the roles and the
+stages. [Should team rules live in AGENTS.md?](/glossary/workflow-file) says
+what belongs there.
+
+## Next steps
+
+- [Workspace](/concepts/workspace): a worktree per writer, captured and verified.
+- [Three candidates, one winner](/patterns/tournament): parallel attempts in their own worktrees.

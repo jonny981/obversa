@@ -1,165 +1,35 @@
 ---
-title: "@obversa/runner"
-description: "Supervise a graph in a worker process: check its engines before the first step, pause on a record when an engine isn't ready yet, resume from that pause, and recover after a crash."
+title: "Runner"
+description: "@obversa/runner: start a stored graph in a worker under a watchdog, read its progress, and resume a recorded pause."
 ---
 
-Run a stored graph in a worker, with a watchdog in your own process. When
-the plan asks for engine checks, the worker checks every engine seat before
-the first step. A check that fails on something that clears, such as a rate
-limit, records a pause, and you can resume the run from that exact pause.
+`@obversa/runner` starts a stored graph in a worker process and makes the
+calling process its watchdog: it checks the engines before the first step,
+restarts the worker after a crash within the limits you set, and resumes a
+paused run from its exact record. The guide is
+[Supervised local runs](/driving/runner); this page is the surface.
 
-The watchdog restarts a crashed worker within your limits and never repeats
-work that finished. If the watchdog itself dies, decide by hand what happens
-next. Its lock and lease stay until you do.
+## Install
 
-```bash
-npm install @obversa/obversa
+<CodeGroup>
+
+```bash npm
+npm install @obversa/runner
 ```
 
-## Run one
+```bash pnpm
+pnpm add @obversa/runner
+```
 
-This file starts a one-node graph whose engine isn't ready, watches the
-run pause before any dispatch, makes the engine ready, resumes from the
-recorded pause, and prints the result. Its engine and bindings are in
-`examples/preflight-host.mjs`.
+</CodeGroup>
 
-Put the host module you pass as `module` inside `runRoot`, the worker root,
-and export `bindRun` from it. The runner loads it, never the runtime. It's
-pinned by byte digest for the life of the run.
+Included in `@obversa/obversa`.
 
-```ts
-import assert from 'node:assert/strict';
-import { execFile } from 'node:child_process';
-import { createHash } from 'node:crypto';
-import { existsSync } from 'node:fs';
-import { createRequire } from 'node:module';
-import { mkdir, mkdtemp, readFile, realpath, rm, symlink, writeFile } from 'node:fs/promises';
-import { tmpdir } from 'node:os';
-import { dirname, join, relative } from 'node:path';
-import { promisify } from 'node:util';
+## Quickstart
 
-import {
-  compileGraph,
-  createGitWorktreeProvider,
-  dagGraphType,
-  readRunPreflight,
-  resolveGraphPlan,
-  type DagDefinition,
-  type RunStoragePolicy,
-} from '@obversa/runtime';
-import { createLocalRunStorage } from '@obversa/runtime/storage/local';
-import {
-  resumeSupervisedRun,
-  startSupervisedRun,
-  type SupervisedRunHandle,
-} from '@obversa/runner';
+Start one graph under the watchdog and wait for its result:
 
-const git = promisify(execFile);
-const temporaryRoot = await realpath(await mkdtemp(join(tmpdir(), 'obversa-preflight-supervised-')));
-const runRoot = join(temporaryRoot, 'workspace');
-const controlFile = join(temporaryRoot, 'control.txt');
-const callsFile = join(temporaryRoot, 'engine-calls.log');
-const runnerDirectory = join(temporaryRoot, 'runner');
-const runId = 'preflight-supervised-run';
-let handle: SupervisedRunHandle | undefined;
-let startupAttempted = false;
-let report: Record<string, unknown> | undefined;
-
-const target = {
-  adapter: 'scripted-local',
-  provider: 'local',
-  modelFamily: 'scripted',
-  model: 'offline-check',
-  tools: [],
-} as const;
-
-const definition = {
-  id: 'preflight-supervised',
-  definitionVersion: 1,
-  data: {
-    globalConcurrency: 1,
-    keyedConcurrency: {},
-    stopOnError: true,
-    retryCapPerNode: 0,
-  },
-  nodes: [{
-    id: 'check',
-    data: {
-      kind: 'required',
-      key: null,
-      lane: { id: 'local', requested: target, knownSubstitutions: [] },
-    },
-  }],
-  edges: [],
-} as const satisfies DagDefinition;
-
-const storagePolicy = {
-  schemaVersion: 1,
-  maxEventPayloadBytes: 64_000,
-  maxAppendBatchBytes: 128_000,
-  maxArtifactBytes: 1_000_000,
-  maxTotalArtifactBytesPerRun: 4_000_000,
-  retention: 'until-run-delete',
-  sensitiveContent: {
-    marked: 'reject',
-    exact: 'reject',
-    freeText: 'redact-before-hash',
-  },
-} as const satisfies RunStoragePolicy;
-
-try {
-  await writeFile(controlFile, 'not-ready\n');
-  await writeFile(callsFile, '');
-  assert.equal(relative(runRoot, controlFile).startsWith('..'), true);
-
-  await mkdir(runRoot);
-  const hostBytes = await readFile(new URL('./preflight-host.mjs', import.meta.url));
-  await writeFile(join(runRoot, 'host.mjs'), hostBytes);
-  await writeFile(join(runRoot, '.gitignore'), 'node_modules/\n');
-  await git('git', ['init', '-q', '-b', 'main'], { cwd: runRoot });
-  await git('git', ['add', 'host.mjs', '.gitignore'], { cwd: runRoot });
-  await git('git', [
-    '-c', 'user.name=Example',
-    '-c', 'user.email=example@example.com',
-    '-c', 'commit.gpgsign=false',
-    'commit', '-qm', 'chore: initialize disposable preflight example',
-  ], { cwd: runRoot });
-
-  await mkdir(join(runRoot, 'node_modules/@obversa'), { recursive: true });
-  await symlink(
-    dirname(createRequire(join(process.cwd(), 'package.json')).resolve('@obversa/runtime/package.json')),
-    join(runRoot, 'node_modules/@obversa/runtime'),
-    'junction',
-  );
-
-  const graph = compileGraph(dagGraphType, definition);
-  const packageIdentity = {
-    source: 'file:host.mjs',
-    version: '1.0.0',
-    digest: `sha256:${createHash('sha256').update(hostBytes).digest('hex')}`,
-  } as const;
-  const resolvedPlan = resolveGraphPlan(graph.describe(), {
-    package: packageIdentity,
-    admission: { package: packageIdentity, permissions: [] },
-    executionLanes: [{ id: 'local', effective: target }],
-    preflight: {
-      timeoutMs: 2_000,
-      lanes: [{ laneId: 'local', live: 'required', unsupportedStatic: 'block' }],
-    },
-  });
-  const storage = {
-    directory: join(temporaryRoot, 'storage'),
-    namespace: 'preflight-supervised-example',
-    policy: storagePolicy,
-  } as const;
-  const workspace = createGitWorktreeProvider({ repositoryPath: runRoot });
-  const restart = {
-    maxRestarts: 1,
-    initialBackoffMs: 100,
-    maxBackoffMs: 1_000,
-  } as const;
-
-  startupAttempted = true;
+```ts examples/preflight-supervised-run.ts (excerpt) {1,4,13-15}
   handle = await startSupervisedRun({
     directory: runnerDirectory,
     runRoot,
@@ -176,28 +46,41 @@ try {
     restart,
     teardownGraceMs: 100,
   });
-  const paused = await handle.done;
-  if (paused.kind !== 'pause' || paused.code !== 'PREFLIGHT_PAUSED' || paused.preflightEventId === undefined) {
-    throw new Error(`Expected a preflight pause, received ${JSON.stringify(paused)}.`);
-  }
-  const pausedStatus = await handle.status();
-  assert.equal(pausedStatus.phase, 'paused');
-  assert.equal(pausedStatus.cleanupVerified, true);
-  assert.equal(pausedStatus.leaseRetained, false);
+```
 
-  const runStorage = createLocalRunStorage(storage);
-  let dispatchesBeforeResume = 0;
-  for await (const event of runStorage.eventStore.read({
-    namespace: storage.namespace,
-    streamId: runId,
-  })) {
-    if (event.type === 'graph:node-dispatched') dispatchesBeforeResume += 1;
-  }
-  assert.equal(dispatchesBeforeResume, 0);
+`startSupervisedRun` returns a `SupervisedRunHandle` with `done`,
+`status()` and `stop()`. `done` resolves to a `SupervisedRunResult`:
+`complete`, `pause` or `fail`. The host module named by `module` exports
+`bindRun`, which returns the compiled graph and the node and engine
+bindings; `examples/preflight-host.mjs` is one.
 
-  await writeFile(controlFile, 'ready\n');
-  await handle.stop();
-  handle = undefined;
+## Read progress
+
+`readSupervisedRunStatus` reads a run's recorded progress from any process
+with the same storage settings, without taking ownership of the run:
+
+```ts examples/supervised-run.ts (excerpt) {3-5}
+  const result = await handle.done;
+  assert.equal(result.kind, 'complete', JSON.stringify(result));
+  const status = await readSupervisedRunStatus({ storage, runId: 'example' });
+  assert.equal(status.phase, 'completed');
+  assert.equal(status.workerAlive, false);
+  assert.deepEqual(status.active, []);
+```
+
+A `SupervisedRunStatus` carries the run phase, worker liveness, inspected
+processes, the restart count, backoff, elapsed and remaining time, and
+pause reasons. `cleanupVerified` is `null` before a terminal result, `true`
+when cleanup was verified, `false` when it couldn't be; `leaseRetained`
+reports a lease still held after a terminal failure. Read both before
+treating the workspace as released.
+
+## Resume a pause
+
+`resumeSupervisedRun` reopens one recorded pause. For a preflight pause,
+pass the `preflightEventId`; for a node pause, the exact `position`:
+
+```ts examples/preflight-supervised-run.ts (excerpt) {1,9}
   handle = await resumeSupervisedRun({
     directory: runnerDirectory,
     runRoot,
@@ -208,67 +91,69 @@ try {
     runId,
     preflightEventId: paused.preflightEventId,
   });
-  const completed = await handle.done;
-  if (completed.kind !== 'complete') {
-    throw new Error(`Expected completion, received ${JSON.stringify(completed)}.`);
-  }
-  assert.deepEqual(completed.output, { nodes: { check: { checked: 'offline' } } });
-  const completedStatus = await handle.status();
-  assert.equal(completedStatus.phase, 'completed');
-  assert.equal(completedStatus.cleanupVerified, true);
-  assert.equal(completedStatus.leaseRetained, false);
-  const finalPreflight = await readRunPreflight(runStorage, runId);
-  assert.equal(finalPreflight.phase, 'admitted');
-  assert.equal(finalPreflight.resumedPreflightEventId, paused.preflightEventId);
-  const calls = (await readFile(callsFile, 'utf8')).trim().split('\n').filter(Boolean);
-  assert.deepEqual(calls, ['static', 'live:not-ready', 'static', 'live:ready', 'ordinary']);
-
-  report = {
-    pause: { phase: pausedStatus.phase, code: paused.code, dispatches: dispatchesBeforeResume },
-    resume: {
-      usedReturnedToken: finalPreflight.resumedPreflightEventId === paused.preflightEventId,
-      phase: completedStatus.phase,
-      result: completed.kind,
-      output: completed.output,
-    },
-    calls,
-    controlOutsideCapturedWorkspace: relative(runRoot, controlFile).startsWith('..'),
-  };
-} finally {
-  // Preserve the lock and lease if cleanup cannot be verified.
-  if (handle !== undefined) {
-    await handle.stop();
-    const status = await handle.status();
-    assert.equal(status.cleanupVerified, true, 'Retain the directory when cleanup is unverified.');
-    assert.equal(status.leaseRetained, false, 'Retain the directory while its workspace lease is held.');
-  }
-  // Startup can fail before returning a handle while retaining ownership.
-  if (!startupAttempted || handle !== undefined) {
-    await rm(temporaryRoot, { recursive: true, force: true });
-  }
-}
-
-console.log(JSON.stringify({
-  ...report,
-  temporaryDirectoryRemoved: !existsSync(temporaryRoot),
-}, null, 2));
 ```
 
-The [supervised local runs](/driving/runner) page shows what it printed and
-what each of the five engine calls was.
+The definition, host module and limits come from the stored run. Resume
+writes no second start event and repeats no finished occurrence.
 
-## Public entry points
+## Options
 
-| export | what it does |
-| --- | --- |
-| `startSupervisedRun` | Starts a stored graph in a worker with a watchdog in the calling process and returns a handle. Engine checks inside the worker spend its `limits.timeoutMs`. Checks before launch don't. |
-| `resumeSupervisedRun` | Reopens one recorded pause: a node pause by its `position`, or a preflight pause by its `preflightEventId`. |
-| `readSupervisedRunStatus` | Reads a run's recorded progress and worker liveness from any process with the same storage settings. |
-| `SupervisedRunHandle` | `done`, `status()` and `stop()` for a run. |
-| `SupervisedRunError` | A runner failure with a typed code. `done` can also resolve to the graph's own terminal failure, such as `PREFLIGHT_FAILED` when a lane has no admissible seat. |
-| `SupervisedRunOptions`, `ResumeSupervisedRunOptions`, `ResumePreflightSupervisedRunOptions`, `SupervisedRunStatus`, `SupervisedRunUsage` | The option and status types. The preflight resume options name the pause by run id and `preflightEventId`, with no `position`. `SupervisedRunUsage` reports a call without a receipt as unknown, not zero. |
+### `limits` and `restart`
 
-## Source
+`limits.timeoutMs` covers worker execution and restart backoff across
+pauses and resumes; it counts from the stored run timestamp, freezes at each
+settled pause, and resumes at the next launch. `limits.maxDispatches`
+counts recorded dispatches across workers. `restart.maxRestarts` caps
+replacement workers, with backoff from `initialBackoffMs` to
+`maxBackoffMs`. A run over a limit ends with `fail`.
 
-`packages/runner` in the repository. It depends on the public
-`@obversa/runtime`, `@obversa/api` and `@obversa/core` APIs.
+### `module` and `environmentVariables`
+
+`module` is a relative specifier inside `runRoot`; a path outside it after
+symlinks resolve is refused with `HOST_MODULE`, and changed bytes between
+imports fail with `HOST_MODULE_CHANGED`. The worker inherits only `PATH`,
+`HOME`, `TMPDIR`, `TMP`, `TEMP`, `SystemRoot`, `USERPROFILE` and `PATHEXT`;
+list any other variable name in `environmentVariables` and the runner
+copies its value when set, storing neither name nor value.
+
+### The rest
+
+| Field | Type | Default | Description |
+| --- | --- | --- | --- |
+| `directory` | `string` | required | The runner's working directory. |
+| `runRoot` | `string` | required | The root the host module must live under. |
+| `storage` | `LocalRunStorageOptions` | required | The on-disk store the run definition and events go to. |
+| `workspace` | `WorkspaceProvider` | required | The provider whose lease the watchdog holds. |
+| `definition` | run id, graph definition, resolved plan, resolved inputs | required | The stored definition, minus the fields the runner persists itself. |
+| `teardownGraceMs` | `number` | required | Time processes get to stop before they are killed. |
+| `runId`, `position` | `string` | required on resume | Which pause to reopen. `preflightEventId` replaces `position` for a preflight pause. |
+
+## Errors
+
+- **`SupervisedRunError`** is the runner's own error class. The codes on a
+  `fail` result: `STOPPED`, `PREFLIGHT_FAILED`, `OUTPUT_LIMIT`,
+  `TERMINAL_ARTIFACT`, `RUN_STORAGE`, `PROCESS_LOCKED`, `HOST_MODULE`,
+  `HOST_MODULE_CHANGED`, `DAG_NODE_FAILED`; on a `pause`: `PREFLIGHT_PAUSED`,
+  `WORKSPACE_DRIFT`, `WORKSPACE_ANCHOR_MISSING`, `WORKSPACE_ANCHOR_INVALID`,
+  `WORKSPACE_ANCHOR_WRITE`, `RESUME_EVENT_MISMATCH`. What each means is on
+  [Supervised local runs](/driving/runner#failure).
+
+## API
+
+- **`startSupervisedRun(options)`**: start a worker under the calling
+  process's supervision. [Quickstart](#quickstart).
+- **`resumeSupervisedRun(options)`**: reopen one recorded pause.
+  [Resume a pause](#resume-a-pause).
+- **`readSupervisedRunStatus({ storage, runId })`**: read recorded progress
+  from another process. [Read progress](#read-progress).
+- **`SupervisedRunError`**: the error class. [Errors](#errors).
+- **Types**: `SupervisedRunOptions`, `ResumeSupervisedRunOptions`,
+  `ResumePreflightSupervisedRunOptions`, `ReadSupervisedRunStatusOptions`,
+  `SupervisedRunHandle`, `SupervisedRunResult`, `SupervisedRunStatus`,
+  `SupervisedRunUsage`, `SupervisedRunBindings`, `SupervisedHostContext`.
+
+## Next steps
+
+- [Supervised local runs](/driving/runner): the guide, with the whole
+  example and its output.
+- [The record](/concepts/record): what a restarted run skips and repeats.

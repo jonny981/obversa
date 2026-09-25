@@ -1,165 +1,69 @@
 ---
-title: "Obversa and Temporal for agent work"
-description: "Temporal is a durable execution runtime with a server and SDKs in several languages. Obversa is a TypeScript library for agent teams with no server. What each is for, and where each wins."
+title: "Obversa and Temporal for Agent Work"
+sidebarTitle: "Temporal"
+description: "Temporal keeps a process alive for days on a service. Obversa keeps a team of coding tools honest on one machine, and picks up after a crash from a file."
 ---
 
-Pick Temporal when your agent work must survive anything for days, at
-scale, and you can run or rent its service. Pick Obversa when the work is a
-team of agent tools on one machine, and what you need is the process
-between them written down: roles, reviews that send work back, a person at
-the gate, and a record.
+Pick Temporal when a process must survive anything for days on a service;
+pick Obversa when the work is a team of coding tools on one machine and
+the process between them should be written down. Temporal, in its own
+words, is "a scalable and reliable runtime for durable function executions
+called Temporal Workflow Executions." A workflow calls activities, every step is an event in
+a history, and after a crash a new worker replays the history and continues
+from the exact point. Obversa is a TypeScript library for a team of coding
+agents on one machine: named roles, a review that runs a step again, a
+person at the gate, and a record on disk that a stopped run carries on from
+without repeating a finished step.
 
-In Temporal's own words: "Temporal is a scalable and reliable runtime for
-durable function executions called Temporal Workflow Executions." A
-workflow calls activities, and every step is an event in a history. After a
-crash, a new worker replays the history and continues from the exact point.
-A person is a signal the workflow waits for. Sending rejected work back to
-an earlier step is control flow you write in the workflow.
+## What each is for
 
-Here's the shape Obversa is for, as one file:
-
-```ts
-import { claude } from '@obversa/engine-claude-cli';
-import { codex } from '@obversa/engine-codex-cli';
-import { run } from '@obversa/runtime';
-import { briefFromFile, person, stage, workflow, type TeamSeat } from '@obversa/runtime';
-
-interface FeatureDeliveryEngines {
-  readonly claude: (model: string) => TeamSeat;
-  readonly codex: (model: string) => TeamSeat;
-}
-
-const realEngines: FeatureDeliveryEngines = { claude, codex };
-
-/**
- * A feature, delivered the way a team delivers one. The roles are named once;
- * every stage is a small block of nouns: who does it, what it writes, who
- * reads it, where a red result goes back to. Inference happens only where a
- * role is named; every other stage is a command or a person.
- */
-function createFeatureDelivery(engines: FeatureDeliveryEngines = realEngines) {
-  return workflow('feature-delivery', {
-    brief: briefFromFile('briefs/triple.md'),
-    options: { timeout: '10m' },
-
-    roles: {
-      analyse: engines.claude('claude-sonnet-4-5'),
-      implement: engines.codex('gpt-5.6-luna'),
-      'research-review': [engines.codex('gpt-5.6-luna')],
-      'code-review': [engines.claude('claude-sonnet-4-5')],
-      approve: person('Ship this change?'),
-    },
-
-    stages: [
-      stage('research-context', {
-        agent: 'analyse',
-        writes: 'team-output/research-context.md',
-        desc: 'Read the workspace and write down what the change touches.',
-        gate: 'The context note is in the workspace and a reviewer has accepted it.',
-        reviewedBy: 'research-review',
-        retry: 3,
-      }),
-
-      stage('research-requirements', {
-        agent: 'analyse',
-        writes: 'team-output/research-requirements.md',
-        desc: 'Turn the brief and the context note into requirements, one REQ-n per line.',
-        gate: 'The requirements note is in the workspace and a reviewer has accepted it.',
-        reviewedBy: 'research-review',
-        retry: 3,
-      }),
-
-      stage('plan', {
-        agent: 'analyse',
-        writes: 'team-output/plan.md',
-        desc: 'Write an executable plan from the requirements, one check per REQ-n.',
-        gate: 'Every requirement has a check in the plan.',
-        reviewedBy: 'research-review',
-        retry: 3,
-      }),
-
-      stage('tests-first', {
-        agent: 'implement',
-        writes: 'test/triple.test.mjs',
-        desc: 'Write the declared test files from the accepted plan before any implementation exists.',
-        gate: 'Every declared test file exists and covers the plan.',
-        reviewedBy: 'code-review',
-        retry: 3,
-      }),
-
-      stage('implement', {
-        agent: 'implement',
-        writes: 'src/triple.mjs',
-        desc: 'Write the code to the plan and the tests.',
-        gate: 'The source file exists.',
-        retry: 3,
-      }),
-
-      stage('test', {
-        run: ['node', '--test', 'test/triple.test.mjs'],
-        desc: 'Run the tests; a red run goes back to implement with the output.',
-        gate: 'The test command exits 0.',
-        sendsBackTo: 'implement',
-      }),
-
-      stage('review', {
-        panel: 'code-review',
-        agree: 1,
-        desc: 'Read the change and the test result against the plan.',
-        gate: 'At least one reviewer has accepted the change.',
-        sendsBackTo: 'implement',
-      }),
-
-      stage('approve', {
-        input: 'approve',
-        desc: 'Put the verified change in front of a person.',
-        gate: 'A person has said yes.',
-      }),
-
-      stage('close', {
-        agent: 'analyse',
-        writes: ['team-output/evidence.md', 'team-output/learning.md'],
-        desc: 'Write the evidence of the run and what was learned, from the record alone.',
-        gate: 'Both notes are in the workspace.',
-      }),
-    ],
-  });
-}
-
-const result = await run(createFeatureDelivery());
-console.log(JSON.stringify(result.outcome, null, 2));
-```
-
-## Side by side
-
-| | Temporal | Obversa |
+| The job | Temporal | Obversa |
 | --- | --- | --- |
 | Unit of work | A workflow calling activities. | A stage: an engine call, a command, a panel or a person, with the files it may write. |
-| The workers | Your code in activities, which may call any model. | Engines such as Claude Code, Codex, Grok and OpenCode, with a fresh process for every call, or an API engine. |
-| A review that sends work back | Control flow you write in the workflow. | Built in: a review sends the work back to the stage that owns it, with the findings, up to a limit you set. |
+| The workers | Your code in activities, which may call any model. | Engines such as Claude Code, Codex, Grok and OpenCode, a fresh process per call, or an API engine. |
+| A review that fails a step | Control flow you write in the workflow. | Built in: the findings go to the stage that owns the fix, which runs again, up to a limit you set. |
 | A person deciding | A signal the workflow waits for. | A person role. The run pauses on the question, and the answer arrives through the callbacks client. |
 | More than one provider | Inside your activities, with a client library. | Each role names its engine. A review seat from another provider is one line. |
-| A run that survives a crash | Event history and replay. The run continues from the exact point. | A run can record to a file. Started again with `resume: true`, a workflow carries on from that record and repeats nothing that finished. The supervised runner restarts a compiled graph from its own record. |
+| A run that survives a crash | Event history and replay on a service; the run continues from the exact point. | A run records to a file and carries on from it with `resume: true`; the supervised runner restarts a killed run from its own record. Finished steps never run twice. |
 | Where it runs | A service you run or rent, plus your workers. | A library, no server. |
 | Languages | SDKs in several languages, TypeScript among them. | TypeScript. |
 
-## Where Temporal wins
+## Where each wins
 
-- Durable execution is the requirement: multi-day runs, many workers,
-  replay after any failure.
-- You already run Temporal for other work.
-- You need a language other than TypeScript.
+- **Temporal, when durable execution is the requirement**: multi-day runs,
+  many workers, replay after any failure, across machines.
+- **Temporal, when you already run it** for other work, or need a language
+  other than TypeScript.
+- **Obversa, when there's one machine**, the agents are tools on it, and a
+  server would be more than the job needs.
+- **Obversa, when the review and the person should be declared**, not
+  written as control flow each time.
+- **Obversa, when the team is a file you can read** with the record beside
+  it.
 
-## Where Obversa wins
+## Together
 
-- There's one machine, the agents are tools on it, and a server would be
-  more than the job needs.
-- The review that sends work back and the person at the gate should be
-  declared, not written as control flow each time.
-- The team should be readable as one file with the record beside it.
+An Obversa run is a program with an exit code, so a Temporal activity can
+start one and wait for it, and an Obversa stage can run any program as a
+command:
 
-## Where to go
+```ts examples/teams/writer-reviewer-pair.ts (excerpt) {2}
+      stage('test', {
+        run: ['node', '--test', 'test/add.test.mjs'],
+        desc: 'Run the test command against the written files.',
+        gate: 'The test command exits 0.',
+        sendsBackTo: 'write',
+      }),
+```
 
-The [feature team](/workflows/feature-team) page shows the file above with a
-real run. [What is a meta-harness?](/glossary/meta-harness) explains the
-layer Obversa works at.
+Keep the days-long, many-worker process in Temporal, and let one activity
+run the coding team as an Obversa file with its own record.
+
+## Next steps
+
+- [Feature delivery](/workflows/feature-team): the nine-stage team with a
+  real run.
+- [The record](/concepts/record): how a stopped run carries on from the
+  file, and what it repeats.
+- [Supervised local runs](/driving/runner): the watchdog that restarts a
+  killed run.

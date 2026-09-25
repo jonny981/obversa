@@ -1,38 +1,90 @@
 ---
-title: "@obversa/engine-codex-cli"
-description: "@obversa/engine-codex-cli runs engine requests through a fresh Codex CLI process."
+title: "Codex CLI Engine"
+description: "@obversa/engine-codex-cli: Codex as a seat, one fresh process per call."
 ---
 
-`@obversa/engine-codex-cli` is an engine plugin that runs requests through the `codex` command-line tool. Use it to put an OpenAI model in a verification or review seat.
-
-## Requirements
-
-- The Codex CLI installed and signed in
+`@obversa/engine-codex-cli` runs Codex as an engine: every request is one
+fresh `codex` process. Use it to put an OpenAI model in a writing,
+verification or review seat, and in particular as the reviewer of a Claude
+seat, since a `workflow()` needs the two from different families.
 
 ## Install
 
-```bash
-npm install @obversa/obversa
+<CodeGroup>
+
+```bash npm
+npm install @obversa/engine-codex-cli
 ```
+
+```bash pnpm
+pnpm add @obversa/engine-codex-cli
+```
+
+</CodeGroup>
+
+Included in `@obversa/obversa`.
+
+## Requirements
+
+- The Codex CLI installed and signed in. The `codex` command must be on
+  your `PATH`, or you pass its path as `cliBinary`.
 
 ## Identity
 
-The plugin reports `provider: 'openai'`. It runs the model the request names, or `defaultModel` when the request names none. With neither set, the CLI runs without a model flag.
+The plugin reports `provider: 'openai'` and model family `gpt`. It runs the
+model the request names, or `defaultModel` when the request names none;
+with neither set, the CLI runs without a model flag.
 
-## Usage
+## Quickstart
 
-```ts
-import { CodexEngine } from '@obversa/engine-codex-cli';
+`codex(model)` is the seat helper a `workflow()` role takes:
 
-const engine = new CodexEngine({
-  defaultModel: 'gpt-5.4',
-});
+```ts examples/teams/writer-reviewer-pair.ts (excerpt) {3}
+    roles: {
+      write: engines.claude('claude-sonnet-4-5'),
+      review: [engines.codex('gpt-5.6-luna')],
+    },
 ```
 
-## Limits
+The seat runs Codex sandboxed to the workspace with approvals off. Pass
+`CodexSeatOptions` (`sandbox`, `approvalPolicy`) to choose otherwise.
+`new CodexEngine(options)` is the same engine without the seat identity.
+The prompt goes through standard input, and the final message is read from
+a temporary file.
 
-- Without a workspace mode or a `sandbox` option, Codex runs in its read-only
-  sandbox. The `write` workspace mode or `sandbox: 'workspace-write'` lets it
-  write. `permissionMode: 'bypassPermissions'` turns the sandbox off.
-- The `codex` command must be on your `PATH`, or you pass its path as `cliBinary`.
-- The prompt goes through standard input, and the final message is read from a temporary file.
+## Options
+
+### `sandbox`
+
+Without a workspace mode or a `sandbox` option, Codex runs in its
+`read-only` sandbox. The `write` workspace mode or `sandbox:
+'workspace-write'` lets it write. `permissionMode: 'bypassPermissions'`
+turns the sandbox off.
+
+### The rest
+
+| Field | Type | Default | Description |
+| --- | --- | --- | --- |
+| `defaultModel` | `string` | none | The model when the request names none. |
+| `cliBinary` | `string` | `codex` on `PATH` | The executable to run. |
+| `cliArgs` | `readonly string[]` | none | Extra arguments for every call. |
+| `approvalPolicy` | `'on-request' \| 'never'` | none | Codex's approval policy. |
+| `permissionMode` | as Claude's | none | `bypassPermissions` turns the sandbox off. |
+
+## Errors
+
+- **`EngineError` of kind `missing-cli`** when the executable can't run.
+
+## API
+
+- **`codex(model, options?)`**: a `TeamSeat` for a workflow role.
+  [Quickstart](#quickstart).
+- **`CodexEngine`**: the engine class. **`CodexEngineOptions`**,
+  **`CodexSeat`**, **`CodexSeatOptions`**: its types.
+- **`buildCodexArgs`**: the argument builder, exported for tests.
+
+## Next steps
+
+- [A review panel with a threshold](/patterns/review-panel): a Codex seat
+  and an OpenCode seat reviewing a Claude seat.
+- [Runtime](/packages/runtime#declare-a-team): the roles a seat fills.

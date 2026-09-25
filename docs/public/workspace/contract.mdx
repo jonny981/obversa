@@ -1,82 +1,85 @@
 ---
-title: "Workspace contract"
-description: "Capture, verify, and fork one Git workspace through the public contract."
+title: "Workspace Contract"
+description: "Capture, verify, lease and fork one Git repository through the public contract."
 ---
 
-Use `WorkspaceProvider` to capture, verify, and fork a workspace. The
-built-in provider, from `createGitWorktreeProvider`, works with a single Git
-repository.
+Capture what a Git repository looks like, check it hasn't changed, take the
+one writer's lease, and fork a worktree at that exact revision. Use
+`WorkspaceProvider` when a run must not trust a checkout it didn't make,
+and when two writers must never collide. For the idea, read
+[Workspace](/concepts/workspace); for the whole cycle in a disposable
+repository, [Workspace example](/workspace/example). The built-in provider,
+`createGitWorktreeProvider`, works with a single Git repository.
+
+The safe order is capture, verify, acquire the lease, record the planned
+child branch yourself, then fork:
+
+```ts examples/workspace.ts (excerpt) {2-3,5,7-8}
+  const workspace = createGitWorktreeProvider({ repositoryPath: directory });
+  const anchor = await workspace.capture();
+  const verified = await workspace.verify(anchor);
+  if (!verified.ok) throw new Error('workspace changed before fork');
+  const lease = await workspace.acquireLease('example', 'workspace-example', anchor);
+  if (!lease.ok) throw new Error('lease was not acquired');
+  const fork = await workspace.fork(anchor, 'example-child', lease.token);
+  await workspace.releaseLease(lease.token);
+  if (!fork.ok) throw new Error(`fork failed: ${fork.kind}`);
+```
+
+A provider needs:
+
+- **`repositoryPath`**, the one Git repository it captures.
+- **An owner and a scope name** for the lease, and the anchor it covers.
+- **A child identifier** for the fork, a safe Git branch and directory name.
 
 ## Capture and verify
 
-Capture records the repository revision and file state. Verify reads the
-repository again and reports changed revisions or paths. You can pause a run
-when verification names paths changed by a write you didn't make.
+`capture()` records the repository revision and the file state, as an
+anchor. `verify(anchor)` reads the repository again and reports changed
+revisions or paths, so you can pause a run when it names paths changed by a
+write you didn't make. Capture reads file states and the content fingerprint
+at the same time; a write between those reads can mix evidence from two
+moments, so keep the workspace still during capture. A dirty file's state
+keeps one digest per line, so a large dirty file can produce a large anchor.
 
-The safe order is capture, verify, acquire the lease, record the planned child
-branch yourself, then fork it.
+Pass Git pathspecs to `capture(scope)` to limit the file states stored in
+the anchor; the anchor stores the scope and `verify` uses the same
+pathspecs. The provider doesn't check that a pathspec matches a file, so a
+scope with no matches stores no file states. The scope doesn't limit
+`HEAD`: a commit outside the scope still invalidates the anchor. `verify`
+compares the repository identity, `HEAD` and stored file states, not the
+anchor fingerprint, so ignored files you select explicitly can change the
+fingerprint without appearing in the stored states, and verification can
+miss changes to them.
 
-Capture reads file states and the content fingerprint at the same time. A
-write between those reads can mix evidence from two moments, so keep the
-workspace still during capture. A dirty file's state keeps one digest per
-line, so a large dirty file can produce a large anchor.
+## Take the lease
 
-```ts
-import { createGitWorktreeProvider } from '@obversa/runtime';
+A lease allows one writer for one repository. It records the owner, scope,
+a digest of the workspace anchor and the acquisition token, and `fork`
+accepts only the token for the exact anchor being forked. The Git provider
+stores the complete record in Git itself, with one private ref pointing at
+it. Acquisition creates the ref only when it doesn't exist and writes a
+complete record before it publishes the ref. Release requires the token and
+removes the ref only if it still points to the same record, so a delayed
+release or a recovery can't remove a later owner's record.
 
-const workspace = createGitWorktreeProvider({ repositoryPath: process.cwd() });
-const anchor = await workspace.capture();
-const verified = await workspace.verify(anchor);
-if (!verified.ok) throw new Error('Workspace changed before use.');
+`recoverIncompleteLease()` can remove an unreadable stored record, or a
+readable incomplete record after its age limit. A failed Git blob read
+marks the record as corrupt, so recovery can remove its ref even when the
+unread record held a completed lease. Recovery never removes a completed
+lease it can read.
 
-const lease = await workspace.acquireLease('example-runner', 'repository', anchor);
-if (!lease.ok) throw new Error(`Lease unavailable: ${lease.kind}`);
+## Fork a child worktree
 
-try {
-  const child = await workspace.fork(anchor, 'example-child', lease.token);
-  if (!child.ok) throw new Error(`Fork failed: ${child.kind}`);
-  console.log(child.branchRef, child.worktreePath);
-} finally {
-  await workspace.releaseLease(lease.token);
-}
-```
+The Git provider creates child worktrees beside the repository, outside its
+working tree: for `/work/project`, child `review-1` is created at
+`/work/project.obversa-worktrees/review-1`, and you can't choose another
+location. A successful fork returns a full capture of the child worktree;
+its anchor has `scope: null`, even when the parent anchor had a scope.
 
-## Scoped capture
+## Failure
 
-Pass Git path selectors, called pathspecs, to `capture(scope)` to limit the
-file states stored in the anchor. The anchor stores the scope. `verify` uses
-the same pathspecs.
-
-The provider doesn't check that a pathspec matches a file, so a scope with no
-matches stores no file states. The scope doesn't limit `HEAD`. A commit
-outside the scope still invalidates the anchor.
-
-`verify` compares the repository identity, `HEAD`, and stored file states. It
-doesn't compare the anchor fingerprint. Ignored files that you select
-explicitly can change that fingerprint without appearing in the stored file
-states, so verification can miss changes to them.
-
-## Leases
-
-A lease allows one writer for one repository. It records the owner, scope, a
-digest of the workspace anchor, and the acquisition token. Fork accepts only
-the token for the exact anchor being forked.
-
-The Git provider stores the complete record in Git itself, and one private
-Git ref points to that record. Acquisition creates the ref only when it
-doesn't exist. Release requires the token, then removes the ref only if it
-still points to the same record. A delayed release or recovery can't remove a
-later owner's record.
-
-Recovery (`recoverIncompleteLease()`) can remove an unreadable stored record.
-A failed Git blob read marks the record as corrupt, so recovery can remove its
-ref. This can happen even when the unread record contains a completed lease.
-
-Recovery doesn't remove a completed lease that it can read. It can remove a
-readable incomplete record after its age limit. Acquisition writes a complete
-record before it publishes the ref.
-
-## Fork failure kinds
+A fork that doesn't happen says why:
 
 | Kind | Meaning |
 | --- | --- |
@@ -87,27 +90,26 @@ record before it publishes the ref.
 | `exists` | The child branch or worktree already exists. |
 | `incomplete` | The branch exists, but its worktree was not created. A retry can finish it. |
 
-## Child worktree location
-
-The Git provider creates child worktrees beside the repository, outside its
-working tree. For `/work/project`, child `review-1` is created at
-`/work/project.obversa-worktrees/review-1`. You can't choose another location.
-
-A successful fork returns a full capture of the child worktree. Its anchor has
-`scope: null`, even when the parent anchor had a scope.
-
 ## Limits
 
 - **One repository.** The built-in provider captures one Git repository. A
   multi-repository provider is not included.
-- **Caller-owned run control.** Verify reports drift. The caller decides when
-  to pause a run and records any branch or merge events.
+- **Caller-owned run control.** Verify reports drift. The caller decides
+  when to pause a run and records any branch or merge events.
 - **No automatic executor binding.** The graph executor does not capture,
-  verify, or lease a workspace for the caller.
-- **No forced lease takeover.** A readable completed lease remains held until
-  its owner releases it.
+  verify or lease a workspace for the caller.
+- **No forced lease takeover.** A readable completed lease remains held
+  until its owner releases it.
 - **No orphan cleanup.** The provider can retry an incomplete fork, but it
   doesn't remove abandoned child refs or worktrees.
+- **Cancellation reaches the snapshot helpers only.** The provider's own Git
+  calls for leases, refs and worktrees don't use the signal.
 
-The provider passes its cancellation signal to snapshot helpers. Its own Git
-calls for leases, refs, and worktrees don't use that signal.
+## Next steps
+
+- [Workspace example](/workspace/example): the whole cycle run in a
+  temporary repository, with the report it prints.
+- [Workspace](/concepts/workspace): why a worktree per writer, and
+  `isolated()` for a step that lands its work back.
+- [Supervised local runs](/driving/runner): the watchdog that holds the
+  lease while a worker runs.

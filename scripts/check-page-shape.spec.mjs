@@ -4,7 +4,7 @@ import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import test from 'node:test';
 
-import { checkPageShape, buildDebtIndex, realEngineExamples } from './check-page-shape.mjs';
+import { checkPageShape, buildDebtIndex, realEngineExamples, wholeFileFaults } from './check-page-shape.mjs';
 
 const debt = (entries) => new Map(entries.map((e) => [`${e.page}::${e.fault}`, e]));
 
@@ -300,6 +300,18 @@ test('a real-engine example that no chain runs is accepted when it is named with
   } finally { rmSync(dir, { recursive: true, force: true }); }
 });
 
+test('a proof-run example with no engine is counted as run when it is named with a reason', () => {
+  const named = realEngineExamples([{ file: 'x.ts', why: 'proof runs it' }]);
+  assert.ok(named.has('x.ts'));
+  const faults = wholeFileFaults('a.mdx', `Run it.\n\n\`\`\`ts\n${whole}\`\`\`\n`, {
+    examples: new Map([['x.ts', whole]]),
+    ran: new Set(),
+    compiled: new Set(['x.ts']),
+    realEngine: named,
+  });
+  assert.equal(faults.filter((fault) => /no example:\* script runs it/.test(fault)).length, 0, faults.join('; '));
+});
+
 test('a js block is left alone, because pages show the files a real run wrote as js', () => {
   runWithExamples({
     pages: { 'a.mdx': page('Teams', `Run the team.\n\n\`\`\`ts\n${whole}\`\`\`\n\nThe writer left this behind:\n\n\`\`\`js\nexport const add = (a, b) => a + b;\n\`\`\`\n`) },
@@ -315,4 +327,48 @@ test('prose that names an example file which does not exist is reported', () => 
     assert.equal(failures.length, 1, failures.join('; '));
     assert.match(failures[0], /names examples\/gone\.mjs, which does not exist/);
   });
+});
+
+test('an excerpt block that is a contiguous run of its file passes', () => {
+  runWithExamples({
+    pages: { 'a.mdx': page('Teams', 'Run the team.\n\n```ts examples/whole.ts (excerpt)\nconsole.log(await run(() => 1));\n```\n') },
+    examples: { 'whole.ts': whole }, scripts: ran, compiled: ['whole.ts'],
+  }, (failures) => assert.deepEqual(failures, []));
+});
+
+test('an excerpt block that is not a contiguous run of its file is reported', () => {
+  runWithExamples({
+    pages: { 'a.mdx': page('Teams', 'Run the team.\n\n```ts examples/whole.ts (excerpt)\nimport { run } from \'@obversa/runtime\';\nconsole.log(await run(() => 1));\n```\n') },
+    examples: { 'whole.ts': whole }, scripts: ran, compiled: ['whole.ts'],
+  }, (failures) => {
+    assert.equal(failures.length, 1, failures.join('; '));
+    assert.match(failures[0], /not a contiguous run of its lines/);
+  });
+});
+
+test('an excerpt whose file is not on the consumer list is reported', () => {
+  runWithExamples({
+    pages: { 'a.mdx': page('Teams', 'Run the team.\n\n```ts examples/whole.ts (excerpt)\nconsole.log(await run(() => 1));\n```\n') },
+    examples: { 'whole.ts': whole }, scripts: ran, compiled: [],
+  }, (failures) => {
+    assert.equal(failures.length, 1, failures.join('; '));
+    assert.match(failures[0], /the clean consumer does not compile it/);
+  });
+});
+
+test('an excerpt that names a file which does not exist is reported', () => {
+  runWithExamples({
+    pages: { 'a.mdx': page('Teams', 'Run the team.\n\n```ts examples/gone.ts (excerpt)\nconsole.log(await run(() => 1));\n```\n') },
+    examples: { 'whole.ts': whole }, scripts: ran, compiled: ['whole.ts'],
+  }, (failures) => {
+    assert.equal(failures.length, 1, failures.join('; '));
+    assert.match(failures[0], /an excerpt names examples\/gone\.ts, which does not exist/);
+  });
+});
+
+test('an excerpt title with a highlight marker after it still counts as an excerpt', () => {
+  runWithExamples({
+    pages: { 'a.mdx': page('Teams', 'Run the team.\n\n```ts examples/whole.ts (excerpt) {1}\nconsole.log(await run(() => 1));\n```\n') },
+    examples: { 'whole.ts': whole }, scripts: ran, compiled: ['whole.ts'],
+  }, (failures) => assert.deepEqual(failures, []));
 });

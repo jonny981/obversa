@@ -91,7 +91,7 @@ a single job, and that job's end is the run's end, because nothing else would
 report it.
 
 News from inside the run is not filtered by depth. A stage finishing and a
-review sending work back are reported wherever they happen, including in a
+review failing a step are reported wherever they happen, including in a
 graph that something else is wrapping. Everything else a run emits, including
 every engine token, is ignored.
 
@@ -115,7 +115,7 @@ than letting them overtake it.
 ## Example
 
 [`examples/notify-webhook.ts`](../../examples/notify-webhook.ts) runs a small
-graph offline whose review sends work back once, and prints what a channel
+graph offline whose review fails the draft once, and prints what a channel
 would have shown:
 
 ```bash

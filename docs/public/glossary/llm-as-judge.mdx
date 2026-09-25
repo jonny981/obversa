@@ -1,0 +1,43 @@
+---
+title: "Can an LLM Judge Replace a Person?"
+sidebarTitle: "LLM as Judge"
+description: "It can fail a step and pick a winner; it cannot ship the change. A judge score is not an approval."
+---
+
+It can decide a step; it should not decide the ship. In Obversa a model
+can review another model's work and fail it, and a judge can score
+several candidates and pick one. Neither is an approval. The tournament's
+judge in the shipped example is a function that reads the files on disk,
+not a model, and a review seat can be a model from another family. Obversa
+does not calibrate an LLM judge or run a benchmark, and a high score clears
+a gate without proving the work is right.
+
+## In Obversa
+
+The judge scores what is on disk, and a candidate that failed its test
+scores nothing:
+
+```ts examples/tournament.ts (excerpt) {2-3}
+const score = async (outcome: Outcome, ctx: JobContext): Promise<number> => {
+  if (outcome.status !== 'pass') return 0;
+  const source = await readFile(join(ctx.workspace.dir, 'src/retry.ts'), 'utf8');
+  let points = 1;
+  if (/MAX_ATTEMPTS\s*=\s*\d+/.test(source)) points += 1;
+  if (/signal\?\.aborted/.test(source)) points += 1;
+  return points;
+};
+```
+
+The highest score lands and the rest leave nothing behind. Put a test or a
+person behind the gates that matter most.
+
+## Human approval
+
+The last word belongs to a person as a step, not to a score. [Where does a
+person approve the change?](/glossary/human-approval) says how that step
+works.
+
+## Next steps
+
+- [Three candidates, one winner](/patterns/tournament): the judge with a real run.
+- [Evals in an agent workflow](/reviewing/evals): every kind of check that decides the next step.

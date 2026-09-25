@@ -1,49 +1,122 @@
 ---
 title: "OpenCode CLI Engine"
-description: "@obversa/engine-opencode-cli runs isolated engine attempts through a fresh OpenCode CLI process."
+description: "@obversa/engine-opencode-cli: one isolated engine attempt through a fresh OpenCode CLI process, for any provider OpenCode runs."
 ---
 
-`@obversa/engine-opencode-cli` is an engine plugin that runs one isolated engine attempt through the `opencode` command-line tool. It sets the attempt's tools and permissions, and reads back its result.
-
-## Requirements
-
-- OpenCode CLI 1.18.23
-- Any credentials your model's provider needs, passed in the `auth` or `environment` option
+`@obversa/engine-opencode-cli` runs one isolated engine attempt through the
+`opencode` command-line tool, in a fresh process with a clean environment,
+so your own sign-in isn't used. Use it to put a model from any provider
+OpenCode runs into a seat, which gives a review panel a third model family.
 
 ## Install
 
-```bash
-npm install @obversa/obversa
+<CodeGroup>
+
+```bash npm
+npm install @obversa/engine-opencode-cli
 ```
+
+```bash pnpm
+pnpm add @obversa/engine-opencode-cli
+```
+
+</CodeGroup>
+
+Included in `@obversa/obversa`.
+
+## Requirements
+
+- OpenCode CLI 1.18.23, at an absolute path you pass as `executable`. The
+  plugin refuses any other version.
+- Any credentials your model's provider needs, passed in the `auth` or
+  `environment` option.
 
 ## Identity
 
 The plugin reports the provider and model family of the model each request
-names. It reads them from the `provider/model` string with
-[`modelIdentity`](/packages/api), so `anthropic/claude-sonnet-4-5` is reported
-as provider `anthropic` and model family `claude`. The `identity` you pass to
-the constructor is a claim about what the instance serves. A request whose
+names, read from the `provider/model` string with
+[`modelIdentity`](/packages/api): `anthropic/claude-sonnet-4-5` is reported
+as provider `anthropic` and family `claude`. The `identity` you pass to the
+constructor is a claim about what the instance serves, and a request whose
 model disagrees with it is refused before anything runs.
 
-## Usage
+## Quickstart
 
-```ts
-import { OpenCodeCliEngine } from '@obversa/engine-opencode-cli';
+`opencode(model, { executable })` is the seat helper a `workflow()` role
+takes, and `resolveCommandExecutable` finds the absolute path when the file
+runs:
 
-const engine = new OpenCodeCliEngine({
-  executable: '/absolute/path/to/opencode',
-  version: '1.18.23',
-  identity: { provider: 'anthropic', modelFamily: 'claude' },
-});
+```ts examples/teams/threshold-panel.ts (excerpt) {4-6}
+const realEngines: ThresholdPanelEngines = {
+  claude,
+  codex,
+  opencode: (model) => opencode(model, {
+    executable: resolveCommandExecutable('opencode'),
+  }),
+};
 ```
 
-## Limits
+`new OpenCodeCliEngine(options)` is the same engine without the seat
+identity:
 
-- `executable` must be an absolute path.
-- The plugin refuses to run any OpenCode version other than `1.18.23`.
-- Structured results depend on the model following an instruction the plugin
-  adds: start the final answer with the line `OBVERSA_STRUCTURED_RESULT_V1`,
-  then one JSON value.
-- The plugin refuses to run while a managed OpenCode config file exists in the
-  system config locations. `managedConfigDirectories` adds more directories to
-  that check.
+```ts examples/safe-node-attempt.ts (excerpt) {2-4}
+  const opencode = validateAgentResult(await new OpenCodeCliEngine({
+    executable: openCodeExecutable,
+    version: '1.18.23',
+    identity: { provider: 'opencode', modelFamily: null },
+  }).run(
+    request(directory, 'opencode/big-pickle', RESULT_SCHEMA),
+    () => {},
+    new AbortController().signal,
+  ));
+```
+
+Structured results depend on the model following an instruction the plugin
+adds: start the final answer with the line `OBVERSA_STRUCTURED_RESULT_V1`,
+then one JSON value. The job's own parser reads that marked text part.
+
+## Options
+
+### `auth` and `environment`
+
+The child runs with a clean environment. `auth` is provider-keyed
+credential data copied into it, and `environment` the exact values copied
+in. Nothing from your own shell reaches the process unless you name it.
+
+### `managedConfigDirectories`
+
+The plugin refuses to run while a managed OpenCode config file exists in
+the system config locations. This option adds directories to that check.
+
+### The rest
+
+| Field | Type | Default | Description |
+| --- | --- | --- | --- |
+| `executable` | `string` | required | Absolute path to the OpenCode CLI. |
+| `version` | `string` | required | The version the CLI must report, `1.18.23`. |
+| `identity` | `OpenCodeCliIdentity` | required | What this instance serves. |
+| `tools` | `readonly string[]` | none | `OpenCodeSeatOptions` only: the tools the seat may use. |
+
+## Errors
+
+- **A version other than `1.18.23`** refuses the run.
+- **A request whose model disagrees with `identity`** is refused before
+  anything runs.
+- **A managed config file** in a system config location refuses the run.
+- **`EngineError`** kinds as the [API](/packages/api#errors) lists them.
+
+## API
+
+- **`opencode(model, options)`**: a `TeamSeat` for a workflow role.
+  [Quickstart](#quickstart).
+- **`OpenCodeCliEngine`**: the engine class. **`OpenCodeCliEngineOptions`**,
+  **`OpenCodeCliIdentity`**, **`OpenCodeSeat`**, **`OpenCodeSeatOptions`**,
+  **`OpenCodeInvocation`**: its types.
+- **`buildOpenCodeInvocation`**: the invocation builder, exported for tests.
+
+## Next steps
+
+- [A review panel with a threshold](/patterns/review-panel): an OpenCode
+  seat on a panel with Codex, with a real run.
+- [Safe node attempts](/recording/node-attempts): the offline example in
+  full.

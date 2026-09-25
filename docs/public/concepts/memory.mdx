@@ -1,0 +1,116 @@
+---
+title: "Memory"
+description: "Files a step can open again later, behind one small port."
+---
+
+Give your steps files they can open again in a later run, through one small
+port that any store can implement, so what a run learned outlives the chat
+that learned it. Use it when a step needs what an earlier run wrote: the
+project's constraints, a summary of last week's session, a decision and its
+reason. For what happened in this run, read [the record](/concepts/record)
+instead; memory is what you choose to keep.
+
+## Motivation
+
+A model forgets everything between sessions, and the note it writes on the
+way out is a summary. Memory here is plainer than that: files under
+`/memories`, read and written through one contract, with the reading step
+told that the contents are data, not instructions. Your program decides
+which files a step sees, so a step's context holds the few files that
+matter and nothing stale.
+
+## Parts
+
+- **The port.** `@obversa/api` defines one storage-neutral `Memory`
+  interface: a `scope` and one `execute` method that takes a command,
+  `view`, `create`, `str_replace`, `insert`, `delete` or `rename`, on a
+  path under `/memories`. A result is `ok: true` with a typed value, or
+  `ok: false` with one of a fixed set of error codes, so a step handles
+  every adapter the same way.
+- **The adapters.** `@obversa/memory-simple` keeps files in one process, for
+  tests and short runs. `@obversa/memory-git` keeps each scope in a private
+  Git reference, with no commits and no change to your branch, index or
+  worktree, so memory outlives the process. `@obversa/memory-markdown` opens
+  a directory of your own Markdown files as a read-only corpus, finds the
+  passages that match, and returns each with its path and line range. The
+  runtime imports none of them; pass the one you chose to `run()` as
+  `memory`, and every job in the run reads it from its context.
+- **The mechanics.** `@obversa/runtime/memory` gives three functions that
+  work over the port and choose no engine. `ground` reads the sources you
+  name into one prompt, headed by a warning that the text is untrusted data.
+  `curate` calls a function you supply to pick which of those documents
+  apply and write a short brief. `consolidate` folds several files and an
+  earlier summary into one target and writes it once. Each has a size limit,
+  so a step's memory never crowds out its task.
+- **The reason in the commit.** A stage that runs in its own worktree with
+  `isolated(step, { record })` can carry an `openReasoningRecord` from
+  `@obversa/memory-git`. It captures what the writer said while it worked
+  and puts the why into the body of the commit that carries the change,
+  making no commit of its own. Blame a line later and the reason is there.
+
+## Example
+
+One grounded document and a curate step that picks it:
+
+```ts examples/memory.ts
+import { curate, type GroundedMemory } from '@obversa/runtime/memory';
+
+const grounded: GroundedMemory = {
+  documents: [
+    {
+      path: '/memories/project.md',
+      text: 'Keep the public API small.',
+      truncated: false,
+    },
+  ],
+  missing: [],
+  prompt: '',
+};
+
+const result = await curate(grounded, {
+  intent: 'Prepare the next task.',
+  decide: async () => ({
+    brief: 'Use the project constraint.',
+    sources: ['/memories/project.md'],
+  }),
+});
+
+if (result.mode !== 'curated') throw new Error('Memory curation did not complete.');
+console.log(JSON.stringify({ mode: result.mode, sources: result.sources }, null, 2));
+```
+
+`curate` hands the grounded documents to your `decide` function, checks
+that every source it names exists, and returns the brief with the paths it
+rests on. In a team, `decide` is an engine call, and the brief is what the
+next step reads instead of the whole corpus:
+
+```text Example record
+{
+  "mode": "curated",
+  "sources": [
+    "/memories/project.md"
+  ]
+}
+```
+
+## Limits
+
+- **One file holds 65,536 bytes, one scope 1,048,576 bytes and 256 files**,
+  in the simple and Git adapters by default. Past a limit, the adapter
+  removes the earliest-written files until the write fits, never the file
+  being written.
+- **Six file types.** `.txt`, `.md`, `.json`, `.py`, `.yaml` and `.yml`.
+- **The Markdown corpus is read-only.** `view` reads it; every writing
+  command returns an error, so a search can't edit what it selects.
+- **A Git reference travels with the repository.** Mirror clones, mirror
+  pushes and `--all` bundles copy it in plain text, and a deleted path stays
+  in Git's objects until Git removes unused ones. Don't treat deletion as
+  secure erasure.
+
+## Next steps
+
+| Goal | Page |
+| --- | --- |
+| Read every command, its result and its error codes | [Memory port](/memory) |
+| Choose and configure an adapter | [Memory adapters](/memory/adapters) |
+| Ground, curate and consolidate with your own functions | [Memory mechanics](/memory/mechanics) |

@@ -1,0 +1,13 @@
+{
+  "id": "obs-002",
+  "session": "2030-01-06",
+  "symbol": "EXV-A",
+  "observedAt": "2030-01-06T11:40:00Z",
+  "change": { "pricePercent": -2.6, "volumeRatio": 2.4 },
+  "evidence": ["evidence/EXV-A/news.md", "evidence/EXV-A/filings.md"],
+  "recordedAssessment": {
+    "advice": { "choice": "hold", "confidence": 0.52 },
+    "evidence": { "probability": 0.41 },
+    "research": { "choice": "news" }
+  }
+}

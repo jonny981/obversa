@@ -1,251 +1,220 @@
 ---
-title: "@obversa/api"
-description: "Shared contracts and validation for engines, memory, graphs and stored records."
+title: "API"
+description: "@obversa/api: the engine and memory contracts, the graph plan, and the validators for every stored record."
 ---
 
-An engine runs one fresh agent attempt and returns a structured result or a
-typed failure. This package holds that contract and the memory port, which
-the runtime and plugins share. It also defines and checks graph plans,
-stored events and artifacts, workspace bindings, callbacks and proof
-records. The runtime executes graphs and reads or writes those records.
-Command execution belongs to [core](/packages/core), and memory helpers to
-[runtime](/packages/runtime#memory-helpers).
+`@obversa/api` holds the contracts the runtime and the plugins share: what
+an engine is, what a memory adapter is, how a graph plan is resolved, and
+the shape of every stored event, artifact, callback and proof record. Import
+it to write an engine or memory adapter, or to validate records a host
+reads. Command execution belongs to [Core](/packages/core), memory helpers
+to [Runtime](/packages/runtime).
 
-```bash
-npm install @obversa/obversa
+## Install
+
+<CodeGroup>
+
+```bash npm
+npm install @obversa/api
 ```
 
-## The contract
+```bash pnpm
+pnpm add @obversa/api
+```
 
-An `Engine` has a name and a `run` method: one request, one event sink,
-one abort signal, one `AgentResult`. It may also have `admit`, which the
-runtime calls before a run when the plan asks for engine checks. `admit`
-receives the request without its prompt. It returns the identity the engine
-will run under: an `EngineSelectionRecord` with adapter, adapter version,
-provider, model family, model, executable and capabilities. When the runtime
-passes the identity it saved earlier, an engine that would run as
-something else refuses. An engine without `admit` is `unsupported` for the
-check, and the plan says whether that blocks the run.
+</CodeGroup>
+
+Included in `@obversa/obversa`.
+
+## Quickstart
+
+Validate an engine's result before you read its parts:
+
+```ts examples/safe-node-attempt.ts (excerpt) {1}
+  const grok = validateAgentResult(await new GrokCliEngine({
+    executable: grokExecutable,
+    version: '1.0.5',
+    identity: { provider: 'xai', modelFamily: 'grok-4' },
+    permissionMode: 'dontAsk',
+  }).run(
+    request(directory, 'grok-4-example', RESULT_SCHEMA),
+    () => {},
+    new AbortController().signal,
+  ));
+```
+
+`validateAgentResult` checks an `AgentResult` against the contract and
+returns it; `finalResultPart` and `finalResultText` read the one final
+part. The whole file is on [Safe node attempts](/recording/node-attempts).
+
+## Implement an engine
+
+An `Engine` has a name and a `run` method: one `AgentRequest`, one event
+sink, one abort signal, one `AgentResult`. It may also have `admit`, which
+the runtime calls before a run when the plan asks for engine checks;
+`admit` receives the request without its prompt and returns an
+`EngineSelectionRecord`, the identity the engine will run under (adapter,
+adapter version, provider, model family, model, executable, capabilities).
+An engine that would run as something else refuses. An engine without
+`admit` is `unsupported` for the check, and the plan says whether that
+blocks the run.
 
 A command-line adapter is admitted by path and version, not by a hash of
-the executable. It doesn't control grandchildren it can't see. An API-key
-adapter is admitted locally, with no executable.
+the executable, and doesn't control grandchildren it can't see. An API-key
+adapter is admitted locally with no executable. A live check is an ordinary
+`run` with `purpose: 'preflight'`, no tools, no workspace and a leaf
+request; it proves the seat answers and does no work.
 
-A live check is an ordinary `run` with `purpose: 'preflight'`, no tools, no
-workspace and a leaf request. It proves the seat answers. It does no work.
-An API-key adapter's retry layers are off for this check only.
+`modelIdentity(model)` reads the provider and model family from a model
+string: `provider/model` supplies both, a bare model only its family (the
+lowercase part before the first hyphen). Whitespace, a second slash, an
+empty provider or model, or an empty or `unknown` family is refused with an
+`EngineError` of kind `invalid-config`. Every harness that runs other
+providers' models derives its identity through it. `classifyEngineFailure`
+turns a failure message into an `EngineFailureKind`, and
+`LANE_DEAD_FAILURES` names the kinds a fallback treats as lasting.
 
-For a command-line adapter that needs an absolute executable, use
-`resolveCommandExecutable('opencode')` from `@obversa/core/command`. It reads
-your `PATH` when the file runs, so a copied example doesn't contain a
-machine-specific path.
-
-## Run one
-
-This file runs a graph whose engine isn't ready. It shows the check pause
-the run before any dispatch, then the resume once the engine is ready. The
-engine implements both `admit` and `run`, and it's in
-`examples/preflight-host.mjs`.
-
-```ts
-import assert from 'node:assert/strict';
-import { existsSync } from 'node:fs';
-import { mkdtemp, readFile, realpath, rm, writeFile } from 'node:fs/promises';
-import { tmpdir } from 'node:os';
-import { join } from 'node:path';
-
-import {
-  compileGraph,
-  createGraphExecutor,
-  dagGraphType,
-  loadRunDefinition,
-  persistRunDefinition,
-  readRunPreflight,
-  resolveGraphPlan,
-  type DagDefinition,
-  type ExecutionTarget,
-  type RunStoragePolicy,
-} from '@obversa/runtime';
-import { createLocalRunStorage } from '@obversa/runtime/storage/local';
-import { bindRun } from './preflight-host.mjs';
-
-const target = {
-  adapter: 'scripted-local',
-  provider: 'local',
-  modelFamily: 'scripted',
-  model: 'offline-check',
-  tools: [],
-} as const satisfies ExecutionTarget;
-
-const definition = {
-  id: 'preflight-executor',
-  definitionVersion: 1,
-  data: {
-    globalConcurrency: 1,
-    keyedConcurrency: {},
-    stopOnError: true,
-    retryCapPerNode: 0,
-  },
-  nodes: [{
-    id: 'check',
-    data: {
-      kind: 'required',
-      key: null,
-      lane: { id: 'local', requested: target, knownSubstitutions: [] },
-    },
-  }],
-  edges: [],
-} as const satisfies DagDefinition;
-
-const storagePolicy = {
-  schemaVersion: 1,
-  maxEventPayloadBytes: 64_000,
-  maxAppendBatchBytes: 128_000,
-  maxArtifactBytes: 1_000_000,
-  maxTotalArtifactBytesPerRun: 4_000_000,
-  retention: 'until-run-delete',
-  sensitiveContent: {
-    marked: 'reject',
-    exact: 'reject',
-    freeText: 'redact-before-hash',
-  },
-} as const satisfies RunStoragePolicy;
-
-const temporaryRoot = await realpath(await mkdtemp(join(tmpdir(), 'obversa-preflight-executor-')));
-const controlFile = join(temporaryRoot, 'control.txt');
-const runId = 'preflight-executor-run';
-const callsFile = join(temporaryRoot, 'engine-calls.log');
-let report: Record<string, unknown> | undefined;
-
-try {
-  await writeFile(controlFile, 'not-ready\n');
-  await writeFile(callsFile, '');
-  const graph = compileGraph(dagGraphType, definition);
-  const packageIdentity = {
-    source: 'npm:@example/preflight-executor',
-    version: '1.0.0',
-    digest: 'sha256:4444444444444444444444444444444444444444444444444444444444444444',
-  } as const;
-  const plan = resolveGraphPlan(graph.describe(), {
-    package: packageIdentity,
-    admission: { package: packageIdentity, permissions: [] },
-    executionLanes: [{ id: 'local', effective: target }],
-    preflight: {
-      timeoutMs: 2_000,
-      lanes: [{ laneId: 'local', live: 'required', unsupportedStatic: 'block' }],
-    },
-  });
-  const storage = createLocalRunStorage({
-    directory: join(temporaryRoot, 'storage'),
-    namespace: 'preflight-executor-example',
-    policy: storagePolicy,
-  });
-  await persistRunDefinition(storage, {
-    runId,
-    eventId: 'preflight-executor-started',
-    timestamp: new Date().toISOString(),
-    graphDefinition: graph.definition,
-    resolvedPlan: plan,
-    resolvedInputs: { controlFile, callsFile },
-    workspaceBinding: null,
-    hostBinding: null,
-  });
-
-  const loaded = await loadRunDefinition(storage, runId);
-  const makeExecutor = async () => createGraphExecutor({
-    ...await bindRun({
-      definition: loaded.record.payload.definition,
-      scratchDirectory: temporaryRoot,
-    }),
-    runId,
-    storage,
-    preflightScratchDirectory: temporaryRoot,
-  });
-
-  const paused = await (await makeExecutor()).run(new AbortController().signal);
-  if (paused.kind !== 'pause' || !('preflightEventId' in paused)) {
-    throw new Error(`Expected a preflight pause, received ${JSON.stringify(paused)}.`);
-  }
-  assert.equal(paused.code, 'PREFLIGHT_PAUSED');
-  assert.equal((await readRunPreflight(storage, runId)).phase, 'paused');
-
-  let dispatchesBeforeResume = 0;
-  for await (const event of storage.eventStore.read({
-    namespace: storage.record.namespace,
-    streamId: runId,
-  })) {
-    if (event.type === 'graph:node-dispatched') dispatchesBeforeResume += 1;
-  }
-  assert.equal(dispatchesBeforeResume, 0);
-
-  await writeFile(controlFile, 'ready\n');
-  const completed = await (await makeExecutor()).resume(
-    { preflightEventId: paused.preflightEventId },
-    new AbortController().signal,
-  );
-  if (completed.kind !== 'complete') {
-    throw new Error(`Expected completion, received ${JSON.stringify(completed)}.`);
-  }
-  assert.deepEqual(completed.output, { nodes: { check: { checked: 'offline' } } });
-  const finalPreflight = await readRunPreflight(storage, runId);
-  assert.equal(finalPreflight.phase, 'admitted');
-  assert.equal(finalPreflight.resumedPreflightEventId, paused.preflightEventId);
-  const calls = (await readFile(callsFile, 'utf8')).trim().split('\n').filter(Boolean);
-  assert.deepEqual(calls, ['static', 'live:not-ready', 'static', 'live:ready', 'ordinary']);
-
-  report = {
-    pause: { phase: 'paused', code: paused.code, dispatches: dispatchesBeforeResume },
-    resume: {
-      usedReturnedToken: finalPreflight.resumedPreflightEventId === paused.preflightEventId,
-      phase: finalPreflight.phase,
-      result: completed.kind,
-      output: completed.output,
-    },
-    calls,
-  };
-} finally {
-  await rm(temporaryRoot, { recursive: true, force: true });
-}
-
-console.log(JSON.stringify({
-  ...report,
-  temporaryDirectoryRemoved: !existsSync(temporaryRoot),
-}, null, 2));
-```
-
-The [graph executor](/graphs/executor) page shows what it printed.
-
-## Public entry points
-
-| export | what it is |
-| --- | --- |
-| `Engine`, `AgentRequest`, `AgentResult`, `EngineSelectionRecord` | The contract types. |
-| `EngineError` | A typed engine failure: `auth`, `billing`, `quota`, `rate-limit`, `model-unavailable`, `missing-cli`, `invalid-config`, `transient`, `aborted`, and the rest of `EngineFailureKind`. |
-| `canonicalJson`, `digestJson`, `cloneFrozenJson` | JSON helpers the contract uses. |
-| `modelIdentity` | The provider and model family a harness reports for the model it was given. Every harness that runs other providers' models, and the review gate that reads recorded models back, derives the identity through this function. |
-| `@obversa/api/testing` | `runEngineConformance` for the run contract, `runEngineAdmissionConformance` for `admit`, and `runMemoryConformance` for memory adapters. `MockEngine` is in `@obversa/core/testing`. An engine adapter author runs both engine kits. An adapter without `admit` runs the first alone. The run kit exercises the workspace modes `none`, `read` and `write` against the real adapter, never a stand-in. Its report (`EngineAdapterConformanceReport`) lists each unsupported feature under `unsupported`, with its reason. Unsupported features are never counted as passes. |
-| `runWorkspaceProviderConformance`, `assertWorkspaceProviderConformance` from `@obversa/api/testing` | Check a workspace adapter against the same workspace contract the runtime uses. |
-
-`modelIdentity` returns a `ModelIdentity`: the model family and, when the
-input names it, the provider. `provider/model` supplies both, and a bare
-model supplies only its family. The family is the lowercase part before the
-model's first hyphen. Whitespace inside the identifier, a second slash,
-an empty provider or model, and an empty or `unknown` family are refused
-with an `EngineError` of kind `invalid-config`.
-
-`TeamSeat` pairs an engine with its declared identity for workflow roles.
-`SUBAGENT_TOOLS` and `CLAUDE_SUBAGENT_TOOLS` are the shared lists of
-sub-agent tool names.
-
-## Memory contract
+## Implement a memory adapter
 
 A `Memory` adapter has one `scope` and one `execute(command)` method.
-`MEMORY_ROOT` is `/memories`, and every memory path starts there. Commands
-are `view`, `create`, `str_replace`, `insert`, `delete` and `rename`.
-`MemoryCommand`, `MemoryResult` and `MemoryLimits` describe requests,
-results and limits.
+`MEMORY_ROOT` is `/memories`, and every path starts there. `MemoryCommand`,
+`MemoryResult`, `MemoryLimits` and `MemoryErrorCode` describe the requests,
+results, limits and errors; the commands and codes are on
+[Memory port](/memory). `runMemoryConformance` from `@obversa/api/testing`
+checks an adapter without a network service.
 
-## Source
+## Resolve a plan
 
-`packages/api` in the repository. The plugins under `plugins/` implement
-this contract, and the [plugins page](/plugins) lists them.
+`resolveGraphPlan(description, resolution)` binds a graph description to a
+host's admission record and freezes what the run may use:
+
+```ts examples/custom-graph.ts (excerpt) {6-8}
+const identity = {
+  source: 'npm:@example/draft-review',
+  version: '1.0.0',
+  digest: 'sha256:1111111111111111111111111111111111111111111111111111111111111111',
+} as const;
+const resolution: PlanResolution = {
+  package: identity,
+  admission: { package: identity, permissions: [] },
+  executionLanes: [],
+};
+```
+
+`compileGraphDefinition` validates a definition's data, and
+`validateGraphDescription` a description that didn't come from
+`compileGraph`. [Plan admission](/graphs/plan-admission) is the guide.
+
+## Validate stored records
+
+Every stored shape has a validator that returns it frozen or throws:
+`validateRunDefinition`, `validateRunStartRecord`, `validateRunStorageRecord`,
+`validateRunStoragePolicy`, `validateDomainEventEnvelope`,
+`validateDomainEventBatch`, `validateNewDomainEvent`, `validateDomainEventId`,
+`validateEventStreamRef`, `validateStreamRevision`, `validateStorageId`,
+`validateArtifactReference`, `validateNewArtifact`, `validateArtifactScope`,
+`validateCallbackRequest`, `validateCallbackResponse`, `validateCallbackEvent`,
+`validateAcceptedResultRecord`, `validateApprovalRecord`,
+`validateApprovalSubject`, `validateActionDecision`, `validateResolvedPlan`,
+`validateIncompleteResultEvidence`. The example reads an artifact
+reference back out of an event before trusting it:
+
+```ts examples/durable-storage.ts (excerpt)
+    const reference = validateArtifactReference(event.payload.artifact);
+```
+
+`canonicalJson`, `digestJson` and `cloneFrozenJson` are the JSON helpers the
+contract uses; `findKnownSecretInEvents` finds a configured secret in an
+event batch before it's written.
+
+## Bind an approval
+
+`createCallbackGate(definition)` turns a gate definition into a request
+with a content identity, and `createApprovalCallbackGate(definition,
+subject)` puts the subject digest in first, so the question is about exact
+bytes:
+
+```ts examples/proof-bound-approval.ts (excerpt) {1}
+  const request = createApprovalCallbackGate(approvalDefinition, approvalSubject);
+  const callbacks = await createStoredCallbackClient(storage, runId);
+  await callbacks.post(request, approvalSubject);
+```
+
+`approvalSubjectDigest`, `snapshotApprovalSubject`,
+`assertApprovalPermissionsAdmitted` and `acceptedResultMatches` are the
+pieces under [Proof-bound acceptance and approval](/reviewing/proof-acceptance).
+`callbackRequestDigest` gives a definition's digest without creating a
+request.
+
+## Options
+
+The contract's option types are on the pages that use them: `AgentRequest`
+on [Safe node attempts](/recording/node-attempts), `PlanResolution` on
+[Plan admission](/graphs/plan-admission), `RunStoragePolicy` on
+[Events and artifacts](/recording/events-and-artifacts). This package adds
+no options of its own.
+
+## Errors
+
+- **`EngineError`** carries a `kind` from `EngineFailureKind`: `auth`,
+  `billing`, `quota`, `rate-limit`, `model-unavailable`, `missing-cli`,
+  `invalid-config`, `transient`, `aborted` and the rest of the union.
+  `EngineIncompleteResultError` is a failed turn that still produced
+  measured evidence.
+- **`GraphValidationError`**: an invalid definition, description or plan.
+- **`GraphExecutionError`** with a `GraphExecutionErrorCode`: `ABORTED`,
+  `DUPLICATE_POSITION`, `EMPTY_DECISION`, `ENGINE_IDENTITY_UNRESOLVED`,
+  `INVALID_EVENT`, `INVALID_PREFLIGHT_CONFIG`, `MISSING_ENGINE_BINDING`,
+  `MISSING_MEMORY`, `MISSING_NODE_BINDING`, `PROTOCOL`,
+  `RESUME_EVENT_MISMATCH`, `STORED_GRAPH_MISMATCH`.
+- **`StorageError`** with a `StorageErrorCode`: `INVALID_STORED_VALUE`,
+  `UNSUPPORTED_ENVELOPE_VERSION`, `REVISION_CONFLICT`, `DUPLICATE_EVENT_ID`,
+  `CORRUPT_EVENT_STREAM`, `ARTIFACT_NOT_FOUND`, `ARTIFACT_NOT_ADMITTED`,
+  `ARTIFACT_INTEGRITY`, `STORAGE_LIMIT_EXCEEDED`, `SENSITIVE_CONTENT`,
+  `KNOWN_SECRET`, `UNSAFE_STORAGE_PATH`.
+- **`ApprovalSubjectError`**: a permission outside the stored plan
+  (`SUBJECT_MISMATCH`).
+- **`JsonValueError`**: a value that isn't JSON, with `path`.
+- **`MemoryErrorCode`** on a memory result: the fifteen codes on
+  [Memory port](/memory#failure).
+
+## API
+
+**Engines.** `Engine`, `AgentRequest`, `AgentResult`, `AgentResultPart`,
+`EngineSelectionRecord`, `EngineFailureKind`, `isEngine`, `engineSelection`,
+`assistantResult`, `reportedUsage`, `finalResultPart`, `finalResultText`,
+`requireFinalResultText`, `validateAgentResult`, `modelIdentity`,
+`classifyEngineFailure`, `LANE_DEAD_FAILURES`, `assertReadAccess`,
+`TeamSeat`, `SUBAGENT_TOOLS`, `CLAUDE_SUBAGENT_TOOLS`.
+
+**Memory.** `Memory`, `MemoryCommand`, `MemoryResult`, `MemoryLimits`,
+`MemoryError`, `MemoryErrorCode`, `MEMORY_ROOT`.
+
+**Graphs and plans.** `compileGraphDefinition`, `resolveGraphPlan`,
+`validateGraphDescription`, `validateResolvedPlan`, `GraphDefinition`,
+`GraphType`, `GraphDescription`, `PlanResolution`.
+
+**Callbacks and proof.** `createCallbackGate`, `createApprovalCallbackGate`,
+`callbackRequestDigest`, `approvalSubjectDigest`, `snapshotApprovalSubject`,
+`assertApprovalPermissionsAdmitted`, `acceptedResultMatches`.
+
+**Stored records.** The `validate*` functions above, `canonicalJson`,
+`digestJson`, `cloneFrozenJson`, `findKnownSecretInEvents`.
+
+**Subpaths.** `@obversa/api/testing`: `runEngineConformance`,
+`runEngineAdmissionConformance`, `runMemoryConformance`,
+`runEventStoreConformance`, `runArtifactStoreConformance`,
+`runWorkspaceProviderConformance` and their `assert*` forms.
+`@obversa/api/run-definition-support`: `runDefinitionSupport`.
+`@obversa/api/accepted-result-support`: `acceptedResultSupport`.
+`@obversa/api/approval-support`: `bindingFromSubject`, `hasExactFields`,
+`isObject`.
+
+## Next steps
+
+- [Safe node attempts](/recording/node-attempts): the engine contract in
+  a running file.
+- [Plugins and tools](/packages): the adapters that implement these
+  contracts.
+- [Events and artifacts](/recording/events-and-artifacts): the storage
+  ports and their conformance kits.

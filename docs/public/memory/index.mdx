@@ -1,129 +1,74 @@
 ---
-title: "Memory port"
-description: "Use one small command contract for runtime memory."
+title: "Memory Port"
+description: "One command contract for reading and writing memory files, whatever stores them."
 ---
 
-`@obversa/api` defines one storage-neutral memory port. The port has a
-scope and one `execute` method.
+Read and write memory files through one small contract, and switch the
+store without touching the step that uses it. Use the `Memory` port from
+`@obversa/api` when a job needs files it can open again in a later run; the
+runtime accepts any adapter that implements it. For what memory is for,
+read [Memory](/concepts/memory); for the adapters that ship,
+[Memory adapters](/memory/adapters).
 
-```ts
-interface Memory {
-  readonly scope: string;
-  execute(command: MemoryCommand): Promise<MemoryResult>;
-}
-```
+The port has a `scope` and one `execute` method that takes a command. The
+smallest use creates a file and reads it back:
 
-All memory paths start with `/memories`. The port accepts these commands:
-
-| Command | Result |
-| --- | --- |
-| `view` | Reads a file, a line range, or a directory |
-| `create` | Creates or replaces a file |
-| `str_replace` | Replaces one unique text value |
-| `insert` | Inserts text at a zero-based line slot |
-| `delete` | Deletes a file or directory |
-| `rename` | Moves a file or directory |
-
-A result has `ok: true` and a typed value, or `ok: false` and a typed error.
-Adapters use the same error codes. A conformance kit checks this contract
-without a network service.
-
-## Command examples
-
-Use `viewRange: [start, end]` to read selected lines. Line numbers in a view
-start at 1. Use `-1` as the end to read the rest of the file.
-
-```ts
-await memory.execute({
-  command: 'view',
-  path: '/memories/notes.md',
-  viewRange: [2, -1],
-});
-```
-
-`create` makes a file. It replaces the file if the path exists.
-
-```ts
+```ts examples/memory-simple.ts (excerpt) {2-3,7}
+const memory = createSimpleMemory({ scope: 'memory-simple-example' });
 await memory.execute({
   command: 'create',
   path: '/memories/notes.md',
-  text: 'First note.\n',
+  text: 'Keep the result small.\n',
 });
-```
-
-`str_replace` changes one text match. It fails if it finds zero matches or
-more than one non-overlapping match.
-
-```ts
-await memory.execute({
-  command: 'str_replace',
+const result = await memory.execute({
+  command: 'view',
   path: '/memories/notes.md',
-  oldText: 'First',
-  newText: 'Updated',
 });
 ```
 
-`insertLine` is a zero-based slot. Use `0` to insert before the first line.
-Use `1` to insert after the first line.
+Every path starts with `/memories`. A result has `ok: true` and a typed
+value, or `ok: false` and a typed error with the command, the error code and
+a message; some errors also carry the path and structured details. Every
+adapter uses the same error codes, and a conformance kit checks the
+contract without a network service. A command needs:
 
-An insert rewrites the file with `\n` line endings. A full view and a text
-replacement preserve the stored line endings.
+- **`command`**, one of the six below.
+- **`path`**, under `/memories`, or `oldPath` and `newPath` for `rename`.
+- **The command's own fields**: `text`, `viewRange`, `oldText` and
+  `newText`, or `insertLine`.
 
-```ts
-await memory.execute({
-  command: 'insert',
-  path: '/memories/notes.md',
-  insertLine: 1,
-  text: 'Second note.',
-});
-```
+## Run a command
 
-`delete` removes one file or a directory and all files below it.
+| Command | Result |
+| --- | --- |
+| `view` | Reads a file, a line range, or a directory. `viewRange: [start, end]` reads selected lines; line numbers start at 1, and `-1` as the end reads the rest of the file. |
+| `create` | Creates a file, or replaces it if the path exists. |
+| `str_replace` | Replaces one unique text value. It fails on zero matches or more than one non-overlapping match. |
+| `insert` | Inserts text at a zero-based line slot. `insertLine: 0` inserts before the first line, `1` after it. An insert rewrites the file with `\n` line endings; a full view and a text replacement preserve the stored line endings. |
+| `delete` | Deletes a file, or a directory and every file below it. |
+| `rename` | Moves a file or a complete directory. It doesn't replace an existing destination. |
 
-```ts
-await memory.execute({
-  command: 'delete',
-  path: '/memories/archive',
-});
-```
+## Set storage limits
 
-`rename` moves a file or a complete directory. It doesn't replace an existing
-destination.
+`@obversa/memory-simple` and `@obversa/memory-git` use these defaults:
 
-```ts
-await memory.execute({
-  command: 'rename',
-  oldPath: '/memories/notes.md',
-  newPath: '/memories/archive/notes.md',
-});
-```
+- **One file** can contain 65,536 bytes.
+- **One scope** can contain 1,048,576 bytes and 256 files.
+- **File types**: `.txt`, `.md`, `.json`, `.py`, `.yaml` and `.yml`.
 
-## Storage limits
+When a write takes a scope past a limit, the adapter removes files in order
+of earliest write time until the write fits. A read doesn't change a file's
+write time, and the adapter never removes the file being written.
 
-`@obversa/memory-simple` and `@obversa/memory-git` use these default limits:
+## Name a path
 
-- One file can contain 65,536 bytes.
-- One scope can contain 1,048,576 bytes.
-- One scope can contain 256 files.
+A path can contain letters, numbers, periods, underscores and hyphens. Each
+segment can contain 128 characters, and a complete path 1,024 bytes. A scope
+and all written text must be complete Unicode: the adapters reject
+malformed Unicode instead of replacing incomplete characters. The memory
+root can't be a file, and you can't delete or rename it.
 
-Both accept `.txt`, `.md`, `.json`, `.py`, `.yaml`, and `.yml` files.
-
-When a write takes a scope past a limit, the adapter removes files in order of
-earliest write time until the write fits. A read doesn't change a file's write
-time. The adapter never removes the file being written.
-
-## Path rules
-
-A path can contain letters, numbers, periods, underscores, and hyphens. Each
-path segment can contain 128 characters. A complete path can contain 1,024
-bytes.
-
-A scope and all written text must contain complete Unicode characters. The
-adapters reject malformed Unicode instead of replacing incomplete characters.
-
-The memory root can't be a file, and you can't delete or rename it.
-
-## Errors
+## Failure
 
 | Area | Error codes |
 | --- | --- |
@@ -134,5 +79,10 @@ The memory root can't be a file, and you can't delete or rename it.
 | Limits and concurrent writes | `LIMIT_EXCEEDED`, `CONFLICT` |
 | Adapter storage | `UNSAFE_STORAGE`, `STORAGE_ERROR` |
 
-A failed result holds the command, the error code, and a message. Some errors
-also carry the path and structured details.
+## Next steps
+
+- [Memory adapters](/memory/adapters): the in-process store, the Git
+  store, and how to pass one to `run()`.
+- [Memory mechanics](/memory/mechanics): `ground`, `curate` and
+  `consolidate` over the port.
+- [API](/packages/api): the `Memory` contract and the conformance kit.

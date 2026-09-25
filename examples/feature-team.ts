@@ -12,7 +12,7 @@ import { approval, fnJob, pipeline, reviewPanel, run, type Outcome } from '@obve
 /** The work itself. In a real team each of these calls an engine. */
 const analyse = fnJob('analyse', () => 'the ticket asks for a report export with a header row');
 
-/** Fails its first attempt so the panel has something to send back. */
+/** Fails its first attempt so the panel has something to return. */
 let implementRuns = 0;
 const implement = fnJob('implement', () => {
   implementRuns += 1;
@@ -54,7 +54,7 @@ const review = reviewPanel({
     { name: 'scope', job: checks.scope },
   ],
   pass: 2, // two of three agree and the step passes
-  target: 'implement', // a failing panel sends the work back here
+  target: 'implement', // a failing panel returns the work here
 });
 
 export const featureDelivery = pipeline(
@@ -78,7 +78,7 @@ console.log(JSON.stringify({
 /**
  * The example is part of the documentation proof, so it has to fail the build
  * when the behaviour it shows stops happening. Printing alone would not: a
- * panel that quietly stopped sending work back would still print a passing
+ * panel that quietly stopped returning the work would still print a passing
  * run, and `implement` running once is the tell.
  */
 const faults: string[] = [];
@@ -86,7 +86,7 @@ if (result.outcome.status !== 'pass') {
   faults.push(`the run ended ${result.outcome.status}, so the second attempt never satisfied the panel`);
 }
 if (implementRuns !== 2) {
-  faults.push(`implement ran ${implementRuns} time(s), so the panel did not send the work back exactly once`);
+  faults.push(`implement ran ${implementRuns} time(s), so the panel did not run implement again exactly once`);
 }
 if (faults.length) {
   for (const fault of faults) console.error(fault);

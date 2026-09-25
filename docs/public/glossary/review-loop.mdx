@@ -1,0 +1,47 @@
+---
+title: "When Should an Agent Eval Loop Stop?"
+sidebarTitle: "Review Loop"
+description: "When enough reviewers accept, or when the limit you set runs out. Never when the model says it is done."
+---
+
+When enough reviewers accept, or when the limit you set runs out, and not
+before or after. A loop that runs until a model says it is done never
+stops on its own. Here the loop has a quorum and a cap: a draft goes
+through a done check and independent reviewers, a repair step takes the
+findings, and the loop ends when the quorum accepts or `maxIterations` is
+spent. In the feature team, the feedback loop allows two returns and then
+the failed verdict stands. This loop is not a benchmark eval; it decides
+what happens next on this run.
+
+## In Obversa
+
+The limits are part of the definition, not a prompt:
+
+```ts examples/review-loop.ts (excerpt) {5-8}
+const definition: ConvergenceDefinition = {
+  id: 'release-review',
+  definitionVersion: 1,
+  data: {
+    maxIterations: 2,
+    maxReviewRestarts: 1,
+    quorum: 2,
+    requireDiversity: true,
+    skippableSeats: [],
+    seatConcurrency: 2,
+    retryCapPerNode: 0,
+  },
+```
+
+`quorum` is how many seats must accept, `requireDiversity` refuses two
+seats from one family, and `maxIterations` ends the loop whatever the
+seats say.
+
+## LLM as judge
+
+The seats in the loop are judges. What a judge may and may not decide is
+on [Can an LLM judge replace a person?](/glossary/llm-as-judge).
+
+## Next steps
+
+- [Review loop](/reviewing/review-loop): the mechanics, the records and the failure codes.
+- [Feedback loops](/concepts/feedback-loops): the umbrella, and the three shapes under it.

@@ -1,62 +1,35 @@
 ---
-title: "@obversa/surface-diff"
-description: "Review a Git diff in a browser and return a decision with line-anchored annotations."
+title: "Surface Diff"
+description: "@obversa/surface-diff: review a Git diff in a browser and get back a decision with line-anchored comments."
 ---
 
-`@obversa/surface-diff` opens a Git diff for inline review. The reviewer
-returns a decision and annotations tied to lines in the diff. Its
-`obversa-review` command writes the result as framed JSON on stdout, and
-diagnostics on stderr.
+`@obversa/surface-diff` opens a Git diff for review in a browser and returns
+a decision with comments anchored to lines. Its `obversa-review` command
+writes the result as framed JSON on stdout, with diagnostics on stderr, so a
+script or an agent reads a person's review without a screen. The guide is
+[Review a diff in a host pane](/hosts/review); this page is the package.
 
 ## Install
 
-```bash
-npm install @obversa/obversa
+<CodeGroup>
+
+```bash npm
+npm install @obversa/surface-diff
 ```
 
-You need Git.
-
-## Review a diff
-
-Run from the repository you want to review:
-
-```bash
-obversa-review
-obversa-review --staged
-obversa-review --range main..HEAD
-obversa-review --no-open
+```bash pnpm
+pnpm add @obversa/surface-diff
 ```
 
-The default reviews working-tree changes. `--staged` reviews the index, and
-`--range` reviews the named Git range. `--no-open` prints the review URL
-instead of opening it.
+</CodeGroup>
 
-The default result frame starts with `<<<REVIEW_RESULT_V1>>>` and ends
-with `<<<END_REVIEW_RESULT_V1>>>`. Exit 0 means the reviewer returned,
-including a decision that requests changes. Exit 1 means the session didn't
-complete or the command failed. Exit 2 means the arguments were invalid.
+Included in `@obversa/obversa`. You need Git.
 
-## Public entry points
+## Quickstart
 
-| entry | what it provides |
-| --- | --- |
-| `@obversa/surface-diff` | `reviewDiff`, `computeDiff`, `parseUnifiedDiff`, page generation and the review request/result checks. |
-| `@obversa/surface-diff/bin` | The command file, for a host to resolve and run under Node. |
-| `@obversa/surface-diff/testing` | Diff highlighting, navigation and context helpers used by the package's checks. |
+Parse a unified diff and read the changed lines with their numbers:
 
-The browser session and result framing come from
-[@obversa/surface](/packages/surface). See that page for
-session ownership, host placement and browser fallback behavior.
-
-## Offline example
-
-This file parses a fixed Git diff and checks the line numbers and changed
-text. It runs offline and doesn't open a browser. The command above adds the
-interactive review session.
-
-`examples/surface-diff.ts`, in full:
-
-```ts
+```ts examples/surface-diff.ts {3,15,20-23}
 import assert from 'node:assert/strict';
 
 import { parseUnifiedDiff } from '@obversa/surface-diff';
@@ -84,6 +57,116 @@ assert.deepEqual(file.hunks[0]!.lines, [
 console.log(JSON.stringify({ path: file.path, lines: file.hunks[0]!.lines }, null, 2));
 ```
 
-## Source
+`parseUnifiedDiff` returns the files, each with its hunks and lines, each
+line typed `add`, `del` or `context` with its old and new numbers. Run it
+with `npx tsx surface-diff.ts`; it opens no browser:
 
-`packages/surface-diff` in the repository.
+```json Output
+{
+  "path": "answer.txt",
+  "lines": [
+    {
+      "type": "del",
+      "oldNumber": 1,
+      "newNumber": null,
+      "text": "41"
+    },
+    {
+      "type": "add",
+      "oldNumber": null,
+      "newNumber": 1,
+      "text": "42"
+    }
+  ]
+}
+```
+
+## Review a diff
+
+Run the command from the repository you want to review:
+
+```bash Terminal
+obversa-review
+obversa-review --staged
+obversa-review --range main..HEAD
+obversa-review --no-open
+```
+
+The default reviews working-tree changes, `--staged` the index, `--range`
+the named Git range. `--no-open` prints the review URL instead of placing
+the page. The result frame starts with `<<<REVIEW_RESULT_V1>>>` and ends
+with `<<<END_REVIEW_RESULT_V1>>>`; `--app <name>` changes the app name and
+so the markers. Exit 0 means the reviewer returned, a decision that
+requests changes included; 1 means the session didn't complete or the
+command failed; 2 means the arguments were invalid.
+
+## Call it from code
+
+`reviewDiff(options)` is the command's function: it computes the diff,
+builds the page, launches a surface and returns the framed result.
+`diffArgs` builds the Git arguments for a mode and `computeDiff` runs them
+and returns the text, `buildIndexHtml` builds the page, and
+`buildSurfaceRequest` the request the session opens with, copying
+`surfaceId` and `gateId` so a consumer routes the result.
+`validateAnnotation` and `normalizeResult` check a submission against the
+contract, and `appendToThread(annotation, entry)` adds a reply to an
+annotation's thread without changing the one you pass in. The bounds are
+constants: `MAX_ANNOTATIONS` (500), `MAX_BODY` (4000 characters),
+`MAX_THREAD` (100), with `DECISIONS`, `SIDES`, `AUTHOR_KINDS`, `FAMILIES`
+and `TRANSPORTS` naming the allowed values.
+
+## Options
+
+### `mode` and `range`
+
+`mode` is `worktree` (default), `staged` or `range`; `range` needs
+`range: 'A..B'`. Naming two modes is a usage error.
+
+### The rest
+
+| Field | Type | Default | Description |
+| --- | --- | --- | --- |
+| `cwd` | `string` | `process.cwd()` | The repository directory. |
+| `diffText` | `string` | none | A diff you supply instead of one from Git. |
+| `app` | `string` | `'review'` | The app name, which names the frame markers. |
+| `launchSurface` | function | required | The port that starts the surface session; the command supplies `@obversa/surface`. |
+| `clientKitSource` | `string` | required | The browser client kit source the page embeds. |
+| `open` | `boolean` | `true` | Place the page; `false` prints the URL. |
+| `gate` | binding | none | The callback gate that opened the review, carried as `gateId`. |
+| `ready` | callback | none | Called when the page is up. |
+| `git` | port | the Git port | Injectable for tests. |
+
+## Errors
+
+- **`TypeError`** from `reviewDiff` when `launchSurface` or
+  `clientKitSource` is missing.
+- **A conflicted diff** is refused whole with a message naming the path.
+- **A repository that changes during capture** stops after three attempts
+  with `The repository changed while the review was being captured; retry
+  when it is quiet`.
+- **A submission whose decision disagrees with its annotations** is refused
+  and the page stays open.
+
+## API
+
+- **`reviewDiff(options)`**: the review as a function. [Call it from code](#call-it-from-code).
+- **`parseUnifiedDiff`**, **`computeDiff`**, **`diffArgs`**: the diff.
+  [Quickstart](#quickstart).
+- **`buildIndexHtml`**, **`buildSurfaceRequest`**, **`isSurfaceRequest`**,
+  **`isGateBinding`**, **`isTransport`**, **`ASSETS_DIR`**: the page and
+  its request.
+- **`validateAnnotation`**, **`normalizeResult`**, **`appendToThread`**,
+  **`anchorKey`**, **`buildAnchorSet`**, **`outputAnchors`**: the result
+  contract.
+- **Constants**: `MAX_ANNOTATIONS`, `MAX_BODY`, `MAX_THREAD`, `DECISIONS`,
+  `SIDES`, `AUTHOR_KINDS`, `FAMILIES`, `TRANSPORTS`.
+- **`@obversa/surface-diff/bin`**: the command file, for a host to resolve
+  and run under Node. **`@obversa/surface-diff/testing`**: `highlightModel`,
+  `contextModel`, `navModel`, `createHighlightRegistry`, `registryToCss`,
+  `listTrackedFiles`.
+
+## Next steps
+
+- [Review a diff in a host pane](/hosts/review): the page, the result shape
+  and the flags in full.
+- [Surface](/packages/surface): the session and framing underneath.

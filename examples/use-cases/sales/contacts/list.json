@@ -1,0 +1,23 @@
+{
+  "sender": "Priya, Alder & Finch partnerships",
+  "contacts": [
+    {
+      "id": "brightwater",
+      "name": "Sam Okafor",
+      "company": "Brightwater Labs",
+      "notes": "Met at the harbour meetup. Runs a four-person data team; asked whether our review step works on notebooks."
+    },
+    {
+      "id": "carraway",
+      "name": "Lena Voss",
+      "company": "Carraway Tools",
+      "notes": "Replied to the newsletter. Wants to see the person-in-the-loop step before showing her team."
+    },
+    {
+      "id": "dunmore",
+      "name": "Theo Adeyemi",
+      "company": "Dunmore Freight",
+      "notes": "Introduced by a mutual contact. Cares about the record: who approved what and when."
+    }
+  ]
+}

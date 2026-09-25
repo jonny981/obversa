@@ -1,15 +1,34 @@
 ---
-title: "Workspace example"
-description: "Capture, verify, lease, and fork a temporary Git repository."
+title: "Workspace Example"
+description: "Capture, verify, lease and fork a temporary Git repository, then read the child back."
 ---
 
-This file tries the Git workspace provider without touching any repository
-you care about. It makes its own temporary repository, forks a child worktree
-from it, and deletes both at the end.
+Try the Git workspace provider without touching a repository you care
+about: the file makes its own temporary repository, forks a child worktree
+from it, checks the child, and deletes both at the end. Use it to see the
+whole cycle once before you wire the provider into a run. The API and its
+limits are on the [workspace contract](/workspace/contract).
+
+## Run it
+
+Set the project up as [Installation](/get-started/installation) describes
+and run the file. It needs Git and nothing else:
+
+```bash Terminal
+npx tsx workspace.ts
+```
+
+```json Output
+{"revision":"8f90610ab0110e48db8af969bb943a4b35c12d4d","anchor":"429bfc13ff3c6337385d1eea32d580acc7cb1d7cf038d3c8ada19eb28af9fe36","branch":"refs/heads/obversa/example-child"}
+```
+
+`revision` is the `HEAD` read from the child worktree, `anchor` the digest
+of the captured anchor the lease covered, and `branch` the Git ref of the
+child branch.
 
 ## The file
 
-```ts
+```ts examples/workspace.ts
 import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -48,24 +67,22 @@ try {
 }
 ```
 
-See the [workspace contract](/workspace/contract) for the API and its
-limits.
+The file checks five things, and throws at the first that fails:
 
-## What the example checks
-
-1. **Repository:** It creates a Git repository with a committed `README.md`.
-2. **Anchor:** It captures the repository and verifies the anchor before use.
-3. **Lease and fork:** It acquires one writer lease and creates a child
+1. **Repository.** It creates a Git repository with a committed
+   `README.md`.
+2. **Anchor.** It captures the repository and verifies the anchor before
+   use.
+3. **Lease and fork.** It acquires one writer lease and creates a child
    worktree from the captured revision.
-4. **Child state:** It reads the child `HEAD` and `README.md`. It throws if the
-   revision or file contents differ from the captured repository.
-5. **Cleanup:** A `finally` block removes the temporary root. That root contains
+4. **Child state.** It reads the child `HEAD` and `README.md`, and throws if
+   the revision or the file contents differ from the captured repository.
+5. **Cleanup.** A `finally` block removes the temporary root, which holds
    both the repository and its sibling worktree directory.
 
-## Report
+## Next steps
 
-The file prints one JSON object with three fields:
-
-- **`revision`:** The revision read from the child worktree.
-- **`anchor`:** The captured-anchor digest returned by the acquired lease.
-- **`branch`:** The Git ref for the child branch.
+- [Workspace contract](/workspace/contract): scoped capture, leases, the
+  fork failure kinds and where child worktrees live.
+- [Workspace](/concepts/workspace): `isolated()`, the step wrapper that
+  runs this cycle and lands the work back on pass.

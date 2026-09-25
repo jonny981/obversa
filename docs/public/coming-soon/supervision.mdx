@@ -1,6 +1,8 @@
 ---
-title: "Supervision while a step runs"
-description: "The attempt's own events feed a fast decision model on a debounce, and the run carries on, stops and retries, or puts the step to a person."
+title: "Supervision While a Step Runs"
+sidebarTitle: "Supervision"
+tag: "Coming soon"
+description: "Coming soon: The attempt's own events feed a fast decision model on a debounce, and the run carries on, stops and retries, or puts the step to a person."
 ---
 
 <Note>
@@ -8,18 +10,21 @@ description: "The attempt's own events feed a fast decision model on a debounce,
 so that the shape is public before the code is.
 </Note>
 
-Every gate this runtime ships sits between steps. A step finishes,
-something judges the result, and the run moves on. That leaves one case
-unanswered: a step that's going nowhere, half an hour into an hour's
-budget.
+Catch a step that has lost its way while it runs, instead of an hour later
+when its budget is gone. Every gate that ships today sits between steps: a
+step finishes, something judges the result, and the run moves on. That
+leaves one case unanswered, a step that is going nowhere half an hour into
+an hour's budget.
 
-A supervised step is watched while it works. Its own events feed a fast
-decision model on a debounce, which answers a few typed questions. Then
-the run carries on, stops and retries, or puts the step in front of a
-person.
-
-The step doesn't pause to be assessed. The work keeps going while the
-judgement happens beside it, and a run that has lost its way costs a
+A supervised step will be watched while it works. Its own events feed a
+fast decision model on a debounce, which answers a few typed questions.
+Then the run carries on, stops and retries, or puts the step in front of a
+person. The step doesn't pause to be assessed. The work keeps going while
+the judgement happens beside it, and a run that has lost its way costs a
 fraction of its budget instead of all of it.
 
-See [How a run is recorded](/recording/how-a-run-is-recorded).
+## Next steps
+
+- [The record](/concepts/record): the events a supervisor would read.
+- [Supervised local runs](/driving/runner): the watchdog that restarts a
+  killed run today.

@@ -1,0 +1,6 @@
+{
+  "note": "What the person decided about each proposal. A decision may move the note to a different path.",
+  "n-01.md": { "approved": true },
+  "n-02.md": { "approved": false, "note": "A link dump. Keep it in the browser, not the vault." },
+  "n-03.md": { "approved": true, "path": "ideas/reading-group-by-impact.md" }
+}

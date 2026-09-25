@@ -1,408 +1,69 @@
 ---
-title: "runtime package"
-description: "The package that runs your workflows and keeps their record: what you write, what you call, and its exports by what you do with them."
+title: "Runtime"
+description: "@obversa/runtime: declare a team or a graph, review inside it, ask a person, run it and record every step."
 ---
 
+`@obversa/runtime` is the package you import to write and run a workflow:
+the shapes (`workflow`, `pipeline`, `dag`, `loop`), the steps, the reviews,
+the person's question, `run()` and the record it writes. It imports no
+engine or memory adapter; your program supplies the instances.
 
-`@obversa/runtime` is the package that runs a workflow. You write the
-workflow as TypeScript, hand it the engines and storage you chose, and call
-it. It runs the steps and, given a `recordTo` path, appends every event to a
-record on disk.
+## Install
 
-```bash
-npm install @obversa/obversa
+<CodeGroup>
+
+```bash npm
+npm install @obversa/runtime
 ```
 
-It needs no database and no service to keep running.
+```bash pnpm
+pnpm add @obversa/runtime
+```
 
-## Two ways in
+</CodeGroup>
 
-**Write a workflow and run it.** The job API is the everyday one: name the
-steps, say what each needs, put a review where it belongs, and call `run`.
-`dag` is the general shape. Its nodes are keyed by name. Each has a `job`,
-and can have `needs` (one name or a list), a `desc` saying what it does, a
-`gate` saying what done means, and a `when`. `desc` and `gate` go into the
-plan and the record. An agent step built with `graphContext: true` also gets
-`desc` in its prompt. In a `workflow()`, the writing seat gets both.
-`pipeline` is the shorthand
-for steps that go in one direction, and `loop`, `sequence` and `parallel`
-are the others. Reviews go in with `reviewPanel`, `tournament`, `quorum` and
-`kickback`. A person's decision goes in with a callback gate.
+Included in `@obversa/obversa`.
 
-**Compile a graph and drive it yourself.** Under the job API sits the
-graph contract: `compileGraph` with a graph form (the runtime ships
-`dagGraphType`, `teamGraphType` and `convergence`), `createGraphExecutor` to
-run it against stored events, and `resolveGraphPlan` to see exactly what will
-run. A host uses this layer to supervise, pause and resume runs. You build on
-it to write a workflow shape of your own.
+## Quickstart
 
-## See it run
+One agent, one job, one run. The engine is a stand-in from the testing
+module, so the file runs offline:
 
-This example stores a three-node pipeline and drives it through the graph
-executor. It runs offline.
+```ts examples/one-agent-job.ts {6-10,12}
+import { agentJob, run } from '@obversa/runtime';
+import { MockEngine } from '@obversa/runtime/testing';
 
+const engine = new MockEngine(() => 'ready');
 
-```ts
-import { mkdtemp, realpath, rm } from 'node:fs/promises';
-import { tmpdir } from 'node:os';
-import { join } from 'node:path';
-
-import {
-  compileGraph,
-  createGraphExecutor,
-  dagGraphType,
-  persistRunDefinition,
-  resolveGraphPlan,
-  type DagDefinition,
-  type GraphNodeBinding,
-  type PlanResolution,
-  type RunStoragePolicy,
-} from '@obversa/runtime';
-import { defineGraphDefinition } from '@obversa/runtime/testing';
-import { createLocalRunStorage } from '@obversa/runtime/storage/local';
-
-const definition: DagDefinition = defineGraphDefinition({
-  id: 'release-pipeline',
-  definitionVersion: 1,
-  data: {
-    globalConcurrency: 1,
-    keyedConcurrency: {},
-    stopOnError: true,
-    retryCapPerNode: 0,
-  },
-  nodes: [
-    { id: 'draft', data: { kind: 'required', key: null } },
-    { id: 'review', data: { kind: 'required', key: null } },
-    { id: 'publish', data: { kind: 'required', key: null } },
-  ],
-  edges: [
-    { id: 'draft-to-review', source: 'draft', target: 'review', data: {} },
-    { id: 'review-to-publish', source: 'review', target: 'publish', data: {} },
-  ],
+const job = agentJob({
+  label: 'prepare-item',
+  engine: 'offline',
+  prompt: 'Prepare the item.',
 });
 
-const packageIdentity = {
-  source: 'npm:@example/release-pipeline',
-  version: '1.0.0',
-  digest: 'sha256:3333333333333333333333333333333333333333333333333333333333333333',
-} as const;
-const resolution: PlanResolution = {
-  package: packageIdentity,
-  admission: { package: packageIdentity, permissions: [] },
-  executionLanes: [],
-};
-const graph = compileGraph(dagGraphType, definition);
-const plan = resolveGraphPlan(graph.describe(), resolution);
+const result = await run(job, {
+  engine: 'offline',
+  engines: { offline: engine },
+});
 
-const storagePolicy = {
-  schemaVersion: 1,
-  maxEventPayloadBytes: 64_000,
-  maxAppendBatchBytes: 128_000,
-  maxArtifactBytes: 1_000_000,
-  maxTotalArtifactBytesPerRun: 4_000_000,
-  retention: 'until-run-delete',
-  sensitiveContent: {
-    marked: 'reject',
-    exact: 'reject',
-    freeText: 'redact-before-hash',
-  },
-} as const satisfies RunStoragePolicy;
-
-function nodeBinding(
-  root: string,
-  runData: NonNullable<GraphNodeBinding['runData']>,
-): GraphNodeBinding {
-  return {
-    prompt: null,
-    scratchDirectory: root,
-    workspace: { mode: 'none', directory: null, allowedPaths: [] },
-    trustedCaller: {},
-    permissions: [],
-    policy: {
-      inputBytes: 10_000,
-      outputBytes: 10_000,
-      timeoutMs: 5_000,
-      teardownGraceMs: 100,
-      memoryBytes: 10_000_000,
-      filesChanged: 0,
-      linesChanged: 0,
-      callTokens: null,
-    },
-    resultContract: null,
-    runData,
-    parseResult: null,
-    tokenBudget: null,
-    decideAction: async () => ({ kind: 'allow' }),
-  };
-}
-
-const temporaryRoot = await realpath(await mkdtemp(join(tmpdir(), 'obversa-pipeline-')));
-const order: string[] = [];
-try {
-  const storage = createLocalRunStorage({
-    directory: join(temporaryRoot, 'storage'),
-    namespace: 'pipeline-example',
-    policy: storagePolicy,
-  });
-  await persistRunDefinition(storage, {
-    runId: 'release-pipeline-run',
-    eventId: 'release-pipeline-started',
-    timestamp: '2026-01-01T00:00:00.000Z',
-    graphDefinition: graph.definition,
-    resolvedPlan: plan,
-    resolvedInputs: {},
-    workspaceBinding: null,
-    hostBinding: null,
-  });
-
-  const executor = await createGraphExecutor({
-    runId: 'release-pipeline-run',
-    graph,
-    storage,
-    nodes: {
-      draft: nodeBinding(temporaryRoot, async () => {
-        order.push('draft');
-        return { article: 'ready' };
-      }),
-      review: nodeBinding(temporaryRoot, async ({ input }) => {
-        order.push('review');
-        const draft = (input as {
-          readonly results: { readonly draft: { readonly article: string } };
-        }).results.draft;
-        return { approved: draft.article === 'ready' };
-      }),
-      publish: nodeBinding(temporaryRoot, async ({ input }) => {
-        order.push('publish');
-        const review = (input as {
-          readonly results: { readonly review: { readonly approved: boolean } };
-        }).results.review;
-        return { published: review.approved };
-      }),
-    },
-    engines: [],
-  });
-  const result = await executor.run(new AbortController().signal);
-  const storedEvents = [];
-  for await (const event of storage.eventStore.read({
-    namespace: storage.record.namespace,
-    streamId: 'release-pipeline-run',
-  })) storedEvents.push(event);
-
-  console.log(JSON.stringify({
-    executor: result.kind,
-    output: result.kind === 'complete' ? result.output : null,
-    dispatches: storedEvents.filter(
-      (event) => event.type === 'graph:node-dispatched',
-    ).length,
-    order,
-    planDigest: plan.digest,
-    bounds: plan.plan.bounds,
-  }, null, 2));
-} finally {
-  await rm(temporaryRoot, { recursive: true, force: true });
-}
+console.log(result.outcome.status);
 ```
 
-```text
-{
-  "executor": "complete",
-  "output": {
-    "nodes": {
-      "draft": {
-        "article": "ready"
-      },
-      "review": {
-        "approved": true
-      },
-      "publish": {
-        "published": true
-      }
-    }
-  },
-  "dispatches": 3,
-  "order": [
-    "draft",
-    "review",
-    "publish"
-  ],
-  "planDigest": "sha256:ebbf122994643028c5222a0afaf8d7a99a257716e00f0e255b15f315e4b862ed",
-  "bounds": {
-    "dispatches": {
-      "min": {
-        "kind": "known",
-        "value": 3
-      },
-      "max": {
-        "kind": "known",
-        "value": 3
-      }
-    },
-    "maxConcurrency": {
-      "kind": "known",
-      "value": 1
-    },
-    "maxFanOut": {
-      "kind": "known",
-      "value": 1
-    }
-  }
-}
+`agentJob` makes a step from a prompt and an engine name. `run` runs it
+with the engines you pass and returns the outcome. Run it with
+`npx tsx one-agent-job.ts`:
+
+```text Output
+pass
 ```
 
-## Exports by what you do with them
+## Declare a team
 
-**Define the work**
+`workflow(name, { brief, roles, stages })` is the team, in a file: the
+brief, the roles named once, the stages in order. Each stage says who does
+it, what it writes, who reads it and where a red result goes:
 
-- `dag`, `pipeline`, `sequence`, `parallel`, `loop`: the shapes a workflow
-  takes. Each returns a job you can run or nest.
-- `fnJob`, `agentJob`, `defineAgent`, `defineAgentFromMarkdown`: the steps,
-  from a plain function to a named agent with a brief. A `fnJob` function
-  returns a full outcome, a one-line summary (a pass) or nothing (a pass
-  with the label as its summary). A throw is a fail carrying the error.
-  `FnJobResult` names what it may return. `recordAs: { role, stage }` on
-  `agentJob` tags the answers it records with the seat's role (`writer` or
-  `reviewer`) and stage, so a review gate compares recorded seats rather
-  than paths.
-- `jobMeta`, `copyJobMeta`, `renderPlan`: inspect a job's described shape,
-  carry that shape onto a wrapper that keeps the job's behaviour, and render
-  the plan for a person or a host.
-- `commandJob`: a command as a step. It passes on exit 0 and otherwise fails
-  with the output as the evidence. `target` names the step that owns the fix.
-- `commandSucceeds`: a condition met when a command exits 0. A launch failure
-  leaves the condition unmet.
-- `gateJob`: turn a condition into a job that passes when it is met and fails
-  with its evidence otherwise.
-- `fromFile`: read a markdown file as text for an agent's system message or
-  skill instructions.
-- `passed`, `failed`: conditions for a node's `when` that read a named
-  dependency's outcome, so a command's exit code chooses the branch. The
-  node `failed` decides on must be `optional: true`, or its red result
-  would block the branch before the condition is read. `dag` refuses the
-  graph otherwise and says which node to mark.
-- `agentCheck`: a condition that asks an engine for a scored check before the
-  graph continues. Its confidence and evidence stay in the decision record.
-- `isolated`: run a step in its own worktree and branch.
-
-**Review inside it**
-
-- `reviewPanel`, `quorum`, `tournament`: several reviewers or several
-  candidates, with the threshold you set.
-- `kickback`, `revisionRequest`: a reviewer sends the work back to a named
-  stage with its findings. These are the API names for that feedback loop.
-- `RECORDED_ENGINE_USAGE`, `RecordedEngineUsage`: the state key under which a
-  run records which model answered each engine call an agent job made, beside
-  the job path that made the call and any `recordAs` tag. The declarative
-  review gate compares the families that answered as writers with those that
-  answered as reviewers.
-
-**Run it**
-
-- `run`: run a job from a fresh record. `callbacks` is the client the run's
-  questions go through, in memory or stored (`RunCallbacks` names either).
-  Every job sees it as `ctx.callbacks`. `resume: true` reads the record at
-  `recordTo` first. A job built with `workflow()` carries on from that
-  record, and any other job appends to it and runs again.
-  [How a run is recorded](/recording/how-a-run-is-recorded) says what a
-  resumed workflow repeats and what it doesn't. `onCallback: 'wait'` keeps
-  the process up until an answer arrives, instead of exiting with the
-  recorded pause. The default, `'exit'`, records the question and returns,
-  so a schedule can start the same file again until the answer is there. A
-  record written in one mode resumes in the other. Cancelling a waiting
-  workflow reports the run as aborted and leaves the question in the record,
-  so a later resume can still answer it. A bare `approval()` job returns the
-  recorded pause instead. To catch an attempt that runs past its time
-  budget, read the outcome. It comes back as a typed result, not a hang.
-- `LoopEvent`: the data handed to `onEvent`. Every run that begins emits one root
-  `run:start` before it dispatches work and one root `run:end` before it
-  returns. The end event carries the same `Outcome` and `UsageTotals` as
-  `RunResult`. Both events carry the run id and record path when present.
-- `monitor: true` on `run` serves the run's own page on a free loopback port.
-  It's on by default under `supervise`. `RunResult.monitor` carries the
-  page's address and closes it, and `/state` returns a `MonitorState`. See
-  [watch a run in the browser](/driving/monitor).
-- `compileGraph`, `dagGraphType`, `createGraphExecutor`, `resolveGraphPlan`,
-  `persistRunDefinition`: the graph layer, for hosts and for shapes of your
-  own.
-- `readRunPreflight`, `interruptRunPreflight`: read a stored run's engine
-  checks without calling an engine, and close a check the process died in
-  the middle of. `validateDomainEventId` checks an event id before you pass
-  it to a resume. Their types: `RunPreflightPolicy`, `RunPreflightState`,
-  `PreflightPauseResult`, `PreflightFailureResult`, and `GraphExecutorResult`
-  for what the executor returns.
-- `RESUME_STAGE_OUTCOMES`: the state key under which a resumed run carries
-  the outcomes its stages reached before it paused. The declarative layer
-  reads it, so a gate that was already pending is observed rather than asked
-  a second time.
-
-**Ask a person**
-
-- `approval`: a person's decision as a step. A yes passes. A no sends the
-  work back to the step named by `target`, with the note as the finding
-  (without `target`, a no fails the step). No answer pauses the run.
-  `ApprovalOptions` is what it takes and `ApprovalAnswer` what the person
-  gives.
-- `createCallbackGate`, `createCallbackClient`, `createStoredCallbackClient`,
-  `replayCallbackClient`, `directRouter`: a question with a typed answer. The
-  stored client keeps the question across a process exit.
-- `createApprovalCallbackGate`, `approvalSubjectDigest`, `resolveApproval`:
-  an approval bound to the exact bytes it approves.
-
-**Keep the evidence**
-
-- `writeProofArtifact`: one stable proof packet, addressed by its digest.
-- `createAcceptedResultRecord`, `resolveAcceptedResult`,
-  `acceptedResultMatches`: a result bound to the inputs, proof, graph and
-  workspace it was judged on.
-
-**Choose engines, memory and workspace**
-
-- `withEnv`: pin environment variables for a job and every job beneath it.
-- The engine and memory contracts, and the workspace provider: the runtime
-  imports no adapter, so your program supplies the instances.
-
-**Test**
-
-- `@obversa/runtime/testing`: graph definition helpers and mock engines,
-  so a workflow runs offline in a test.
-- `@obversa/runtime/storage/local`: `createLocalRunStorage`, the on-disk
-  event and artifact stores the examples use.
-
-## Where to go
-
-Read [What Obversa is](/concepts/index) if you're deciding, and
-[workflows](/concepts/workflows) to learn the shape.
-[The examples](/workflows) are complete programs you can copy. Use the
-[runner](/packages/runner) for supervised runs. It restarts a killed run
-from a graph definition and a host module.
-
-## Declare roles and stages
-
-Write the team as one file that reads top to bottom: the brief, the roles,
-the stages in order. Each stage says who does it, what it writes, who reads
-it and where the work goes back to. The runtime compiles that into its
-graph. A review that fails sends the work back, a command decides on its
-exit code, a person's answer is waited for, and every step is on the record.
-Run the team from your own file. The package ships no command.
-
-### The smallest team
-
-A Claude seat writes the files the brief names, Node runs the test, and a
-Codex seat reads the result. A rejection sends the work back to the writer.
-
-```ts
-import { claude } from '@obversa/engine-claude-cli';
-import { codex } from '@obversa/engine-codex-cli';
-import { run } from '@obversa/runtime';
-import { briefFromFile, stage, workflow, type TeamSeat } from '@obversa/runtime';
-
-interface WriterReviewerEngines {
-  readonly claude: (model: string) => TeamSeat;
-  readonly codex: (model: string) => TeamSeat;
-}
-
-const realEngines: WriterReviewerEngines = { claude, codex };
-
-function createWriterReviewerPair(engines: WriterReviewerEngines = realEngines) {
+```ts examples/teams/writer-reviewer-pair.ts (excerpt) {2,5-8,11,13,18,22}
   return workflow('writer-reviewer-pair', {
     brief: briefFromFile('briefs/add.md'),
     options: { timeout: '10m' },
@@ -426,159 +87,337 @@ function createWriterReviewerPair(engines: WriterReviewerEngines = realEngines) 
         gate: 'The test command exits 0.',
         sendsBackTo: 'write',
       }),
-      stage('review', {
-        panel: 'review',
-        agree: 1,
-        desc: 'Read the code, the test and its result.',
-        gate: 'The change meets the brief.',
-        sendsBackTo: 'write',
-      }),
-    ],
-  });
-}
-
-const result = await run(createWriterReviewerPair());
-console.log(JSON.stringify(result.outcome, null, 2));
 ```
 
-<Warning>
-Run a team in a directory you're happy for a model to change. A Claude seat
-runs with permission prompts off, so it can run any command the process
-can.
-</Warning>
+`stage(name, config)` is one step; exactly one of `agent`, `run`, `panel`
+or `input` says what kind. Seats come from the engine plugins:
+`claude('claude-sonnet-4-5')` from `@obversa/engine-claude-cli`,
+`codex('gpt-5.6-luna')` from `@obversa/engine-codex-cli`,
+`opencode(model, { executable })` from `@obversa/engine-opencode-cli`.
+`person(question)` is a role a person fills. `briefFromFile(path)` reads a
+Markdown file as the brief; its front matter may carry `files`, the paths
+the brief expects written. `formatEvent(event, totals?)` turns one run
+event into the line a person reads, and `RunResult.usage` is what the run
+spent in the shape it takes. Every seat of a `reviewedBy` panel must report
+a different model family from the stage's writer, or the team is refused
+before any model runs. The whole file and a real run are on
+[A writer and a reviewer](/patterns/writer-and-reviewer).
 
-Each seat starts its engine unattended, and the two plugins differ. A Codex
-seat runs sandboxed to the workspace with approvals off. A Claude seat
-doesn't use the mode that only accepts edits, because that mode would block
-the commands a headless run needs. Both take an options object to choose
-otherwise.
+## Build a graph
 
-The [writer and reviewer](/workflows/writer-and-reviewer) page shows a real
-run of this file and the files it left. The
-[review panel](/workflows/review-panel) and
-[feature delivery](/workflows/feature-team) pages do the same for the two
-larger teams.
+Under `workflow()` sit the shapes: `pipeline` for stages in order, `dag`
+for a dependency graph, `sequence` and `parallel` for the two plain cases,
+`loop` for a body that runs until a condition holds. Each returns a `Job`
+you can run or nest. The steps are `fnJob` for a function, `agentJob` for a
+prompt to an engine, `commandJob` for a command whose exit code decides:
 
-### What you get
+```ts examples/feature-team.ts (excerpt) {10}
+export const featureDelivery = pipeline(
+  'feature-delivery',
+  [
+    { name: 'analyse', job: analyse },
+    { name: 'implement', job: implement },
+    { name: 'test', job: testStage },
+    { name: 'review', job: review },
+    { name: 'approve', job: approve },
+  ],
+  { maxKickbacks: 2 },
+);
+```
 
-- **`workflow(name, { brief, roles, stages, options?, post? })`.** The
-  team, as a job for `run`. Stages run in the order written, each after
-  the one before it.
-- **`stage(name, { ... })`.** One step. Exactly one of `agent`, `run`,
-  `panel` or `input` says what kind of step it is. The other keys say what
-  it writes, who reads it and where the work goes back to.
-- **Seats from the engine plugins.** `claude('claude-sonnet-4-5')` from
-  `@obversa/engine-claude-cli`, `codex('gpt-5.6-luna')` from
-  `@obversa/engine-codex-cli`, `opencode(model, { executable })` from
-  `@obversa/engine-opencode-cli`. Each carries the identity the plugin
-  records and starts the engine able to write files.
-- **`person(question)`.** A role a person fills: the stage that names it
-  puts the question to a person and waits for the answer.
-- **`briefFromFile(path)`.** A brief kept as a markdown file beside the code.
-  Its body is the brief. Front matter may carry `files`, the paths the
-  brief expects written.
-- **`formatEvent(event, totals?)`.** One event of a run, as the line a person
-  reads. `run` hands every event to `onEvent` as data. Pass each one through
-  `formatEvent` to print a run as it happens, without writing a formatter.
-  Give it the running totals you already hold, from `RunResult.usage` or the
-  monitor's `/state`, and a usage line also reports what the run has spent
-  so far. The totals are a `UsageTotals`: input and output tokens, and
-  optionally what was created in and read from cache.
-- **`RunResult.usage`.** What the whole run spent, in the shape
-  `formatEvent` takes, so you can hand a run's own totals straight back to
-  it. `RunResult.stats` has the same numbers per model, in a different shape
-  (`totalInputTokens` and the rest) that `formatEvent` doesn't take.
-- **Ready-made recipes** live in [builtin-workflows](/packages/builtin-workflows):
-  `writerReviewerPair`, `thresholdPanel` and `featureDelivery`.
-- **`outcomeFromAgentText` from `@obversa/runtime/workflow-support`.** The
-  parser the teams use on a reviewer's reply. The first JSON decision object
-  becomes a pass, or a revise with its findings aimed at the step you name.
-- **Workflow support helpers for recipe packages** from
-  `@obversa/runtime/workflow-support`: `seatIdentity`,
-  `assertDistinctSeats`, `requireNonEmptyFiles`, `requireNoFiles`,
-  `teamAgent`, `panelReviewers` and `INVALID_TEAM_DECISION`. The subpath
-  also exports the `ReviewerSeat`, `TeamInput` and `TestCommand` types.
-  Import `dag` from the runtime root.
+A `fnJob` function returns a full outcome, a one-line summary (a pass) or
+nothing (a pass with the label as its summary); a throw is a fail carrying
+the error. `commandJob` passes on exit 0 and otherwise fails with the
+output as evidence, and `target` names the step that owns the fix.
+`passed(name)` and `failed(name)` are conditions for a node's `when` that
+read a named dependency's outcome, so an exit code chooses the branch; the
+node `failed` reads must be `optional: true`. `isolated(job)` runs a step
+in its own worktree and branch and lands the change on pass. `jobMeta`,
+`copyJobMeta` and `renderPlan` read a job's declared shape and render it.
 
-### The keys of a stage
+## Review inside it
 
-| key | what it means |
+`reviewPanel` runs several reviewers on one attempt and passes on a
+threshold; a failing panel returns the findings to `target`, which runs
+again:
+
+```ts examples/feature-team.ts (excerpt) {8-9}
+const review = reviewPanel({
+  label: 'review',
+  reviewers: [
+    { name: 'correctness', job: checks.correctness },
+    { name: 'safety', job: checks.safety },
+    { name: 'scope', job: checks.scope },
+  ],
+  pass: 2, // two of three agree and the step passes
+  target: 'implement', // a failing panel returns the work here
+});
+```
+
+`tournament` runs `n` candidates, each in its own worktree, and a `judge`
+scores the finished ones; the highest lands:
+
+```ts examples/tournament.ts (excerpt) {2-3,10}
+  const result = await run(
+    tournament({
+      name: 'retry-implementation',
+      n: ANGLES.length,
+      candidate: (i) => fnJob(`candidate-${i}`, async (ctx) => {
+        await writeFile(join(ctx.workspace.dir, 'src/retry.ts'), TASK[1] + ANGLES[i]!);
+        await writeFile(join(ctx.workspace.dir, 'candidate.test.ts'), CANDIDATE_TEST);
+        await runNodeTest(ctx);
+        return { status: 'pass' as const, data: { candidate: i } };
+      }),
+      judge: score,
+    }),
+    { cwd: repo },
+  );
+```
+
+`kickback(to, reason)` and `revisionRequest(input)` build the outcome a
+reviewer returns to fail a step with findings aimed at a named stage.
+`quorum(k, ...conditions)` is met when `k` of its inputs hold. `agentCheck`
+asks an engine a scored question as a condition; `confidenceCondition` and
+`minConfidence` read a confidence and gate on it. `RECORDED_ENGINE_USAGE`
+is the state key under which a run records which model answered each
+engine call, so the review gate compares writers with reviewers by family.
+
+## Ask a person
+
+`approval(label, { question, target?, answer? })` is a person's decision as
+a step. Yes passes; no goes to `target` with the note as the finding, or
+fails the step when there's no target; no answer pauses the run:
+
+```ts examples/approval.ts (excerpt) {2-3}
+const approve = approval('approve', {
+  question: 'Ship this change?',
+  target: 'implement',
+  answer: (request: CallbackRequest) => {
+    const approved = JSON.stringify(request.input).includes('header');
+    decisions.push(approved ? 'yes' : 'no');
+    return approved
+      ? { approved: true }
+      : { approved: false, note: 'the ticket asked for a header row' };
+  },
+});
+```
+
+Under it sit the callback gates: `createCallbackGate` makes a question with
+an identity, `createCallbackClient` holds it for one run,
+`createStoredCallbackClient` keeps it across a process exit,
+`replayCallbackClient` rebuilds pending questions from a history, and
+`directRouter` is the smallest router. `createApprovalCallbackGate`,
+`approvalSubjectDigest` and `resolveApproval` bind an approval to the exact
+bytes it approves. [Callback gates](/reviewing/callback-gates) is the guide.
+
+## Run it
+
+`run(job, options)` runs a job from a fresh record and returns a
+`RunResult`: the `outcome`, the `usage`, and `monitor` when the page is on.
+Turn the page on and read its address from the record:
+
+```ts examples/monitor.ts (excerpt) {3,5}
+let address: string | undefined;
+const result = await run(digest, {
+  monitor: true,
+  onEvent: (event: LoopEvent) => {
+    if (event.kind === 'monitor') address = event.url;
+  },
+});
+```
+
+Every run emits one root `run:start` before it dispatches work and one
+`run:end` before it returns, both as `LoopEvent`s to `onEvent`. Cancelling a
+waiting workflow reports the run as aborted and leaves the question in the
+record, so a later resume can still answer it. An attempt that runs past
+its time budget comes back as a typed outcome, not a hang.
+
+## Keep the evidence
+
+`writeProofArtifact` stores one proof packet addressed by its digest, and
+`createAcceptedResultRecord`, `resolveAcceptedResult` and
+`acceptedResultMatches` bind a result to the inputs, proof, graph and
+workspace it was judged on:
+
+```ts examples/proof-bound-approval.ts (excerpt) {1}
+  const proofArtifact = await writeProofArtifact(
+    storage.artifactStore,
+    { namespace: storage.record.namespace, runId },
+    {
+      inputs: { proposal: digest('1') },
+      result: { passed: true, tests: 21 },
+    },
+  );
+```
+
+`createProofCache` shares declared read-only evidence between workers.
+[Proof-bound acceptance and approval](/reviewing/proof-acceptance) is the
+guide.
+
+## Store and execute
+
+For hosts and for shapes of your own: `compileGraph` validates a definition
+against a graph type, `resolveGraphPlan` freezes what the run may use,
+`persistRunDefinition` stores it, and `createGraphExecutor` runs it one
+recorded decision at a time:
+
+```ts examples/custom-graph.ts (excerpt) {1,3}
+const compiled = compileGraph(graphType, definition);
+const state = events.reduce(compiled.reduce, compiled.initialState());
+const plan = resolveGraphPlan(compiled.describe(), resolution);
+```
+
+`dagGraphType`, `convergence` and `teamGraphType` are the forms that ship.
+`loadRunDefinition` reads a stored run back; `readRunPreflight` and
+`interruptRunPreflight` read and close a run's engine checks;
+`validateDomainEventId` checks an event id before a resume.
+`createLocalRunStorage` from `@obversa/runtime/storage/local` is the
+on-disk event and artifact store the examples use, and
+`createGitWorktreeProvider` the workspace provider. The guides are
+[Outside graph types](/graphs/contract) and [Graph executor](/graphs/executor).
+
+## Options
+
+### `recordTo` and `resume`
+
+`recordTo` appends every event as one JSON line to the file you name, or
+under `.obversa/records` with `'auto'`. `resume: true` reads that record
+first: a job built with `workflow()` carries on from it and repeats no
+finished stage; any other job appends to it and runs again. To resume,
+keep the workflow's name, workspace, brief, stage list and role seats the
+same; change any and the run starts again. [The record](/concepts/record)
+says what a resumed run repeats.
+
+### `callbacks` and `onCallback`
+
+`callbacks` is the client the run's questions go through, in memory (the
+default, fresh per run) or stored. `onCallback: 'wait'` keeps the process
+up until an answer arrives; the default `'exit'` records the question and
+returns, so a schedule can start the same file again until the answer is
+there. A record written in one mode resumes in the other.
+
+### `engine` and `engines`
+
+`engines` is the map of ready-made engine instances by name, and `engine`
+the one a job or condition uses when it names none. The runtime imports no
+adapter, so both are yours to supply. `withEnv(job, env)` pins environment
+variables for a job and every job beneath it.
+
+### The rest
+
+| Field | Type | Default | Description |
+| --- | --- | --- | --- |
+| `signal` | `AbortSignal` | none | Abort the run from outside. |
+| `cwd` | `string` | `process.cwd()` | The run's root working directory. |
+| `environment` | `Environment` | none | An environment brought up for the run's root workspace. |
+| `onEvent` | `(event: LoopEvent) => void` | none | Where every run event goes. |
+| `params` | `RunBrief` | none | A frozen JSON object every job reads as `ctx.params`. |
+| `state` | `Record<string, unknown>` | none | Seed for the shared mutable run state. |
+| `memory` | `Memory` | none | The memory adapter every job sees as `ctx.memory`. |
+| `monitor` | `boolean` | off; on under `supervise` | Serve the run's own page on a loopback port. |
+| `budget` | `number` or `BudgetConfig` | none | Cap on total tokens; `{ limit, headroom?, soft? }`. |
+| `supervise` | `boolean` | `false` | Register under `~/.obversa/runs/<runId>` for outside inspection. |
+| `runId` | `string` | generated | The registry id, `[a-z0-9][a-z0-9-]*`. |
+| `onLimit` | `LimitPolicy` | `'auto'` | What a rate limit, quota or budget does: `auto`, `wait`, `exit` or `fail`. |
+| `maxWaitMs` | `number` | `300000` | Ceiling on one interruptible limit wait. |
+| `cost` | `{ prices, baselineModel? }` | none | Price the measured usage; `baselineModel` adds the counterfactual. |
+
+### Stage keys
+
+| Key | What it means |
 | --- | --- |
 | `agent` | The role that does the work. The stage must say what it `writes`. |
-| `run` | A command, one string with no quoting or an array. Exit 0 passes. A red run goes back to `sendsBackTo` with the output as the finding. It may change the files it `writes` and no other declared file. A change to another declared file fails the stage by name. Files nobody declared aren't watched. |
-| `panel` | A role that is a list of seats. `agree` is how many must accept. The default is all of them. |
+| `run` | A command, one string with no quoting or an array. Exit 0 passes. A red run goes to `sendsBackTo` with the output as the finding. It may change the files it `writes` and no other declared file. |
+| `panel` | A role that is a list of seats. `agree` is how many must accept; the default is all of them. |
 | `input` | A person role. The stage asks the question and waits. |
-| `writes` | The files this stage writes, relative to the workspace. It writes those and no other declared file. For an agent stage, a missing or empty one fails the stage by name. A command stage is judged by its exit code. |
+| `writes` | The files this stage writes, relative to the workspace. For an agent stage, a missing or empty one fails the stage by name. |
 | `desc`, `gate` | What the stage does and what must be true for it to count. Both go into the writing seat's prompt, the plan and the record. |
-| `reviewedBy` | A panel role that reads this stage's work. A rejection runs the stage again with the findings. A stage that returns the rejected note unchanged fails. The stage and its review are one step, so a run that dies part-way through the review runs the whole step again. It doesn't resume inside the review. |
-| `sendsBackTo` | The earlier stage a rejection or a red run goes back to. A stage can't send back to itself. Use `reviewedBy` for that. A stage takes `reviewedBy` or `sendsBackTo`, not both. |
-| `retry` | How many times this stage may run again: the review restarts of a reviewed stage, or the feedback-loop budget of a stage others send back to. Default 1. It belongs to the stage that repeats. |
-| `retrySafe` | `true` when the stage may run again after an interruption without a person reconciling it. Off unless set. |
-| `when` | A condition read before the stage runs: `passed(name)`, `failed(name)`, or an async predicate over `ctx`. A stage whose `when` is not met is recorded as skipped and counts as passed for the stages after it. |
-| `optional` | A red run of this stage doesn't fail the workflow or block the stages after it. `failed(name)` on a later stage is allowed only when the named stage is optional. On a required stage a red run stops the workflow, so there's no other path to choose. |
-| `needs` | One or more earlier stage names this stage also depends on, beside the one before it. A condition can then read a stage further back through `passed`, `failed` or `ctx.needs`. A name that is not an earlier stage is an error when the workflow is built. |
+| `reviewedBy` | A panel role that reads this stage's work. A rejection runs the stage again with the findings; the same bytes back fails the stage. The stage and its review are one step, so a run that dies mid-review runs the whole step again. |
+| `sendsBackTo` | The earlier stage a rejection or a red run goes to. A stage takes `reviewedBy` or `sendsBackTo`, not both. |
+| `retry` | How many times this stage may run again. Default 1. It belongs to the stage that repeats. |
+| `retrySafe` | `true` when the stage may run again after an interruption without a person reconciling it. |
+| `when` | A condition read before the stage runs: `passed(name)`, `failed(name)`, or a predicate over `ctx`. A stage whose `when` is not met is recorded as skipped and counts as passed. |
+| `optional` | A red run of this stage doesn't fail the workflow. `failed(name)` on a later stage needs the named stage optional. |
+| `needs` | Earlier stage names this stage also depends on, so a condition can read further back. |
 
-Pick each reviewer from a model family other than the writer's. Every seat
-of a `reviewedBy` panel, and of a panel that sends work back to an agent
-stage, must report a different model family from that stage's seat.
-Otherwise the workflow is refused before any model runs.
+### Workflow keys
 
-The panel also checks the model names recorded for tagged writer and
-reviewer answers, before and after review. It checks every recorded writer
-answer, retries included. The recorded sides must differ in family from
-each other and from the families the other side declares. An unreadable
-family fails the review. Untagged advisor and `agentCheck` answers are
-outside this check.
-
-### The keys of a workflow
-
-| key | what it means |
+| Key | What it means |
 | --- | --- |
 | `brief` | The work, as text or `briefFromFile`. Every model in the team reads it. |
-| `roles` | Every seat and person, named once. Stages refer to the names. |
+| `roles` | Every seat and person, named once. |
 | `stages` | The steps, in order. Each needs the one before it. |
 | `options.timeout` | A duration such as `'10m'`, applied to each agent and review stage. A command stage keeps its own ten-minute limit. |
 | `post.always` | Runs after the graph settles, with the record. |
 
-The workspace is the directory the file runs in. To resume from a record,
-keep the name, workspace, brief, stage list and role seats the same. Change
-any of them and the run starts again.
+## Errors
 
-## Memory helpers
+- **`LoopError`** carries a `code`: `ENGINE`, `TIMEOUT`, `ABORTED`,
+  `VALIDATION`, `WRITE_BOUNDARY`, `CONFIG`, `BUDGET`, `RATE_LIMIT`, `QUOTA`,
+  `BODY` or `UNKNOWN`, and a `phase`: `start`, `body`, `until`, `stopOn`,
+  `review` or `engine`.
+- **`WorkspacePolicyError`**: `INVALID_WORKSPACE_POLICY`,
+  `NOT_GIT_REPOSITORY`, `GIT_INSPECTION_FAILED`, `ABORTED`.
+- **`EngineIdentityUnresolvedError`**: a recorded auth failure names no
+  provider and the lane can't supply one.
+- **Re-exported from `@obversa/api`**: `EngineError`,
+  `EngineIncompleteResultError`, `GraphValidationError`,
+  `GraphExecutionError`, `StorageError`, `ApprovalSubjectError`,
+  `JsonValueError`. Their codes are on [API](/packages/api#errors).
 
-`@obversa/runtime/memory` exports `ground`, `curate` and `consolidate`,
-with their input, option and result types. `ground` reads declared sources
-into a bounded prompt. `curate` selects grounded sources and `consolidate`
-writes a validated result, each with a function you supply.
-The `Memory` port, commands and result types belong to `@obversa/api`.
+## API
 
-### Memory example
+**Declare a team.** `workflow`, `stage`, `person`, `briefFromFile`,
+`formatEvent`, `defineJob` (returns the job it's given, so a file's default
+export keeps the exact `Job` type), `defineAgent`, `defineAgentFromMarkdown`,
+`defineSkill`, `fromFile`.
 
-`examples/memory.ts`, in full:
+**Build a graph.** `dag`, `pipeline`, `sequence`, `parallel`, `loop`,
+`fnJob`, `agentJob`, `commandJob`, `commandSucceeds`, `gateJob`, `prove`,
+`isolated`, `writeScope`, `team`, `jobMeta`, `copyJobMeta`, `renderPlan`,
+`assertGraph`, `withEnv`.
 
-```ts
-import { curate, type GroundedMemory } from '@obversa/runtime/memory';
+**Conditions.** `passed`, `failed`, `all`, `any`, `not`, `always`, `never`,
+`predicate`, `toCondition`, `describeConditions`, `bodyPassed`, `quorum`,
+`sampled`, `ratchet`, `agentCheck`, `confidenceCondition`, `minConfidence`,
+`confidenceFromText`, `lastDecisionLine`, `lastGateBrief`, `reviewContext`.
 
-const grounded: GroundedMemory = {
-  documents: [
-    {
-      path: '/memories/project.md',
-      text: 'Keep the public API small.',
-      truncated: false,
-    },
-  ],
-  missing: [],
-  prompt: '',
-};
+**Review.** `reviewPanel`, `tournament`, `kickback`, `revisionRequest`,
+`RECORDED_ENGINE_USAGE`, `RESUME_STAGE_OUTCOMES`.
 
-const result = await curate(grounded, {
-  intent: 'Prepare the next task.',
-  decide: async () => ({
-    brief: 'Use the project constraint.',
-    sources: ['/memories/project.md'],
-  }),
-});
+**Ask a person.** `approval`, `createCallbackGate`, `createCallbackClient`,
+`createStoredCallbackClient`, `replayCallbackClient`, `directRouter`,
+`callbackRequestDigest`, `createApprovalCallbackGate`,
+`approvalSubjectDigest`, `resolveApproval`.
 
-if (result.mode !== 'curated') throw new Error('Memory curation did not complete.');
-console.log(JSON.stringify({ mode: result.mode, sources: result.sources }, null, 2));
-```
+**Run.** `run`, `EXIT_PAUSED`, `exitCodeFor`, `costReport`,
+`formatCostReport`, `preflight`, `preflightEngine`, `formatPreflight`,
+`fallbackEngine`, `classifyEngineFailure`, `LANE_DEAD_FAILURES`,
+`finalResultPart`, `finalResultText`, `validateAgentResult`.
+
+**Evidence.** `writeProofArtifact`, `createAcceptedResultRecord`,
+`resolveAcceptedResult`, `acceptedResultMatches`, `createProofCache`.
+
+**Graph layer.** `compileGraph`, `resolveGraphPlan`, `validateGraphDescription`,
+`persistRunDefinition`, `loadRunDefinition`, `createGraphExecutor`,
+`readRunPreflight`, `interruptRunPreflight`, `dagGraphType`, `convergence`,
+`teamGraphType`, `projectTeamRooms`, `createGitWorktreeProvider`, and the
+`validate*` functions for stored records, re-exported from `@obversa/api`.
+
+**Subpaths.** `@obversa/runtime/testing`: `MockEngine`, `MockEnvironment`,
+`mockVerdict`, `defineGraphDefinition`, `createGraphEventTrace`, and the
+conformance kits. `@obversa/runtime/memory`: `ground`, `curate`,
+`consolidate`. `@obversa/runtime/workflow-support`: `outcomeFromAgentText`,
+`INVALID_TEAM_DECISION`, `seatIdentity`, `assertDistinctSeats`,
+`requireNonEmptyFiles`, `requireNoFiles`, `teamAgent`, `panelReviewers`.
+`@obversa/runtime/env/command`: `commandEnvironment`.
+`@obversa/runtime/storage/local`: `createLocalRunStorage`.
+
+## Next steps
+
+- [Workflows](/concepts/workflows): the idea behind `workflow()` and the
+  stages.
+- [Feature team, offline](/workflows/feature-team-offline): `pipeline`,
+  `reviewPanel` and `approval` in a file with no model.
+- [Running](/concepts/running): what `run()` records and what a resumed run
+  repeats.

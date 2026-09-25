@@ -58,12 +58,12 @@ console.log(JSON.stringify({
 
 /**
  * Part of the documentation proof: it must fail when the behaviour it shows
- * stops happening. A refusal that quietly stopped sending the work back would
+ * stops happening. A refusal that quietly stopped returning the work would
  * still print a passing run, and `implement` running once is the tell.
  */
 const faults: string[] = [];
 if (result.outcome.status !== 'pass') faults.push(`the run ended ${result.outcome.status}`);
-if (implementRuns !== 2) faults.push(`implement ran ${implementRuns} time(s), so the refusal did not send the work back exactly once`);
+if (implementRuns !== 2) faults.push(`implement ran ${implementRuns} time(s), so the refusal did not run implement again exactly once`);
 if (decisions.join(',') !== 'no,yes') faults.push(`the person decided [${decisions.join(', ')}], not a no and then a yes`);
 if (faults.length) {
   for (const fault of faults) console.error(fault);
