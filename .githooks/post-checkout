@@ -1,0 +1,6 @@
+#!/bin/sh
+# Run this clone's own post-checkout hook, if it has one. That hook lives
+# outside the repository, so a contributor without one is unaffected.
+local_hook="$(git rev-parse --git-common-dir)/hooks/post-checkout"
+[ -x "$local_hook" ] && exec "$local_hook" "$@"
+exit 0
