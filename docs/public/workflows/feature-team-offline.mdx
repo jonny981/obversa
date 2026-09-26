@@ -1,12 +1,11 @@
 ---
 title: "Feature Team, Offline"
-description: "Five stages, a panel of three that passes on two, and a person at the end, with no model behind any of them."
+description: "A review fails, the writer runs again, and a person decides. No model."
 ---
 
-You've read that a team of coding agents can review its own work and run a
-step again when the review fails. Before you sign anything in, you want to
-see that mechanism move: a panel that says no, the writer that runs again,
-the second attempt that passes.
+A panel says no, the writer runs again, and the second attempt passes, with
+no model and no account. Before you sign anything in, you want to see that
+mechanism move.
 
 You want it in a minute, on any machine, with no account and no token
 spent, and you want to be sure the shape you're looking at is the shape a
@@ -95,11 +94,11 @@ the first attempt would fail the build, not print a passing run.
 
 ```ts examples/feature-team.ts
 /**
- * A feature team, as one file.
+ * A feature team.
  *
- * Five named stages, a review panel of three that passes on two, work that
- * goes back to the stage that owns it when the panel fails, and a person who
- * decides at the end. It runs offline, with no model and no network: every
+ * Five named stages, a review panel of three that passes on two, a writer
+ * that runs again when the panel fails, and a person who decides at the
+ * end. It runs offline, with no model and no network: every
  * job here is a small function, so the shape of the team is the only thing
  * on show.
  */

@@ -1,9 +1,9 @@
 /**
- * A feature team, as one file.
+ * A feature team.
  *
- * Five named stages, a review panel of three that passes on two, work that
- * goes back to the stage that owns it when the panel fails, and a person who
- * decides at the end. It runs offline, with no model and no network: every
+ * Five named stages, a review panel of three that passes on two, a writer
+ * that runs again when the panel fails, and a person who decides at the
+ * end. It runs offline, with no model and no network: every
  * job here is a small function, so the shape of the team is the only thing
  * on show.
  */
