@@ -385,7 +385,7 @@ const shaping = workflow('shaping', {
       desc: 'Uphill: shape each request into a pitch with its five parts.',
       gate: 'Every pitch has a problem, the request\'s appetite, a solution, rabbit holes and no-gos.',
       reviewedBy: 'review',
-      retry: 2,
+      refine: 2,
     }),
   ],
 });
@@ -446,7 +446,7 @@ makes the bet. `optional: true` on the bet means a pass on one pitch
 doesn't stop the cycle.
 
 The build is a workflow per bet: the pitch is the brief, the appetite is
-the stage's time limit, `retry` is the rounds, a scope stage writes down
+the stage's time limit, `refine` is the rounds, a scope stage writes down
 what was cut, and a check fails a change that names a no-go:
 
 ```ts examples/use-cases/product/shape-up-cycle.ts (excerpt) {4-5,10-14,17-18,24-27}
@@ -463,7 +463,7 @@ function buildFor(request: Request) {
         desc: `Uphill, then downhill: build ${pitch} inside its appetite.`,
         gate: 'The change stays inside the pitch\'s no-gos and clear of its rabbit holes.',
         reviewedBy: 'review',
-        retry: 2,
+        refine: 2,
       }),
       stage('scope', {
         agent: 'build',
@@ -668,7 +668,7 @@ const shaping = workflow('shaping', {
       desc: 'Uphill: shape each request into a pitch with its five parts.',
       gate: 'Every pitch has a problem, the request\'s appetite, a solution, rabbit holes and no-gos.',
       reviewedBy: 'review',
-      retry: 2,
+      refine: 2,
     }),
   ],
 });
@@ -764,7 +764,7 @@ const table = dag({
 });
 
 // 3. The build, inside the appetite: the pitch is the brief, the appetite
-// is the stage's time limit, retry is the rounds, scope is written down,
+// is the stage's time limit, refine is the rounds, scope is written down,
 // and a check fails a change that names a no-go.
 function buildFor(request: Request) {
   const pitch = request.id;
@@ -779,7 +779,7 @@ function buildFor(request: Request) {
         desc: `Uphill, then downhill: build ${pitch} inside its appetite.`,
         gate: 'The change stays inside the pitch\'s no-gos and clear of its rabbit holes.',
         reviewedBy: 'review',
-        retry: 2,
+        refine: 2,
       }),
       stage('scope', {
         agent: 'build',
@@ -873,7 +873,7 @@ console.log(JSON.stringify({
 
 ```mermaid
 flowchart TD
-  requests[("requests/*.md")] --> shaping["shaping: Claude writes, Codex reviews, retry 2"]
+  requests[("requests/*.md")] --> shaping["shaping: Claude writes, Codex reviews, refine 2"]
   shaping --> pitches[("pitches/*.md")]
   pitches --> table
   subgraph table ["betting table, per pitch"]

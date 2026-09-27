@@ -162,7 +162,7 @@ judges whether every glossary term is on the list. Then the run stops:
         // work is. A translation that honours a glossary and still reads
         // naturally has many defensible answers, so reviewer and writer need
         // room to meet.
-        retry: 3,
+        refine: 3,
       }),
 
       stage('terms', {
@@ -238,7 +238,7 @@ function createTranslateReflect(engines: TranslateEngines = realEngines) {
         // work is. A translation that honours a glossary and still reads
         // naturally has many defensible answers, so reviewer and writer need
         // room to meet.
-        retry: 3,
+        refine: 3,
       }),
 
       stage('terms', {
@@ -271,7 +271,7 @@ console.log(JSON.stringify(result.outcome, null, 2));
 ```mermaid
 flowchart LR
   source[("source/article.md, glossary/en-fr.md")] --> translate["translate: Claude, read by Codex as editor"]
-  translate -->|"retry: 3"| translate
+  translate -->|"refine: 3"| translate
   translate --> terms["terms: Claude"]
   terms -.-> nuance{{"nuance: the person who knows the readers"}}
   nuance -->|sendsBackTo| translate

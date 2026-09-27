@@ -81,7 +81,7 @@ it, what it writes, who reads it and where a red result goes:
         writes: ['src/add.mjs', 'test/add.test.mjs'],
         desc: 'Write the function and its test from the brief.',
         gate: 'The files named in the brief exist in the workspace.',
-        retry: 1,
+        refine: 1,
       }),
       stage('test', {
         run: ['node', '--test', 'test/add.test.mjs'],
@@ -336,7 +336,7 @@ variables for a job and every job beneath it.
 | `desc`, `gate` | What the stage does and what must be true for it to count. Both go into the writing seat's prompt, the plan and the record. |
 | `reviewedBy` | A panel role that reads this stage's work. A rejection runs the stage again with the findings; the same bytes back fails the stage. The stage and its review are one step, so a run that dies mid-review runs the whole step again. |
 | `sendsBackTo` | The earlier stage a rejection or a red run goes to. A stage takes `reviewedBy` or `sendsBackTo`, not both. |
-| `retry` | How many times this stage may run again. Default 1. It belongs to the stage that repeats. |
+| `refine` | How many more rounds this stage gets: a count, default 1, or `judge(seat, { cap, questions })` so a seat decides between a review's verdict and the next round, with `cap` as the backstop. It belongs to the stage that repeats. |
 | `retrySafe` | `true` when the stage may run again after an interruption without a person reconciling it. |
 | `when` | A condition read before the stage runs: `passed(name)`, `failed(name)`, or a predicate over `ctx`. A stage whose `when` is not met is recorded as skipped and counts as passed. |
 | `optional` | A red run of this stage doesn't fail the workflow. `failed(name)` on a later stage needs the named stage optional. |
@@ -384,7 +384,7 @@ export keeps the exact `Job` type), `defineAgent`, `defineAgentFromMarkdown`,
 `sampled`, `ratchet`, `agentCheck`, `confidenceCondition`, `minConfidence`,
 `confidenceFromText`, `lastDecisionLine`, `lastGateBrief`, `reviewContext`.
 
-**Review.** `reviewPanel`, `tournament`, `kickback`, `revisionRequest`,
+**Review.** `reviewPanel`, `tournament`, `kickback`, `revisionRequest`, `judge`, `isJudge`, `stopQuestions`,
 `RECORDED_ENGINE_USAGE`, `RESUME_STAGE_OUTCOMES`.
 
 **Ask a person.** `approval`, `createCallbackGate`, `createCallbackClient`,

@@ -91,7 +91,9 @@ Two of the three reviewers fail the first attempt, so their findings go to
   instead of running a step again.
 - **`maxKickbacks` sets the limit.** Without it, a graph or pipeline never
   runs a step again on a fail. `workflow()` sets it for you from each
-  target's `retry`, which defaults to 1. A number is one budget for the
+  target's `refine`, which defaults to 1; a target with
+  `refine: judge(seat, { cap, questions })` asks the judge before each
+  round and never runs past its cap. A number is one budget for the
   whole graph. A map, `{ plan: 3, 'tests-first': 3 }`, gives each target
   its own, so a review that spends its budget on one step can't starve
   another. A target the map doesn't name gets none.

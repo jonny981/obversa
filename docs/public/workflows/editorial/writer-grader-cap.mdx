@@ -200,7 +200,7 @@ families, an editor, and two stages:
         // The limit. A draft that has not passed after three tries ends
         // the run with the grader's last findings, and the editor is not
         // asked. Raise it for a longer piece; lower it for a caption.
-        retry: 3,
+        refine: 3,
       }),
 
       stage('publish', {
@@ -214,7 +214,7 @@ families, an editor, and two stages:
 ```
 
 `reviewedBy: 'grade'` puts the Codex seat on every draft, and a rejection
-runs the `draft` stage again with the findings in hand. `retry: 3` is the
+runs the `draft` stage again with the findings in hand. `refine: 3` is the
 limit: a draft that has not passed after three tries ends the run with the
 grader's last findings, and the editor is never asked. `workflow()` refuses
 the team before any model runs if the writer and the grader share a family.
@@ -276,7 +276,7 @@ function createEditorial(engines: EditorialEngines = realEngines) {
         // The limit. A draft that has not passed after three tries ends
         // the run with the grader's last findings, and the editor is not
         // asked. Raise it for a longer piece; lower it for a caption.
-        retry: 3,
+        refine: 3,
       }),
 
       stage('publish', {
@@ -312,7 +312,7 @@ console.log(JSON.stringify(result.outcome, null, 2));
 flowchart LR
   brief[("briefs/post.md, style/house.md")] --> draft["draft: Claude, posts/draft.md"]
   draft --> grade["grade: Codex, findings by line and rule"]
-  grade -->|"findings, up to retry: 3"| draft
+  grade -->|"findings, up to refine: 3"| draft
   grade -.->|holds| publish{{"publish: the editor"}}
   publish -->|sendsBackTo| draft
 ```

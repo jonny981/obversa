@@ -7,7 +7,7 @@ description: "As many as you say with agree. Leave it out and every reviewer mus
 As many as you say. A review stage names its reviewers and `agree`, the
 number that must accept for the stage to pass. Leave `agree` out and every
 reviewer must accept. Below the number, the findings go to the stage that
-owns the fix, which runs again with them, as many times as its `retry`
+owns the fix, which runs again with them, as many times as its `refine`
 allows. Obversa does not merge on the pass; a person or the next stage
 does.
 
@@ -31,7 +31,7 @@ acceptance is enough here:
         writes: ['src/double.mjs', 'test/double.test.mjs'],
         desc: 'Write the function and its test from the brief.',
         gate: 'The files named in the brief exist in the workspace.',
-        retry: 1,
+        refine: 1,
       }),
       stage('test', {
         run: ['node', '--test', 'test/double.test.mjs'],

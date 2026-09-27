@@ -62,7 +62,7 @@ when they share one:
 
 The judge's decision is its reply: the panel reads the first JSON object in
 it. A rejection goes to `write` with the findings, as many times as that
-stage's `retry` allows. A reply with no decision is asked for once more,
+stage's `refine` allows. A reply with no decision is asked for once more,
 then counted as an engine error, not a rejection.
 
 ## Ask several
@@ -146,7 +146,7 @@ refinement loop on [Translate and reflect](/workflows/translate-reflect).
   review reduces a model approving its own habits; it doesn't remove
   judgement from the loop.
 - **Every eval costs its limit.** A judge, a panel and a scored condition
-  each spend a call per round. The `retry` or `maxKickbacks` on the target
+  each spend a call per round. The `refine` or `maxKickbacks` on the target
   caps the rounds, and the run fails with the last findings when it's spent.
 
 ## Next steps

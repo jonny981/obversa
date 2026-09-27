@@ -142,7 +142,7 @@ person:
         // work is. Grooming a backlog has many defensible answers, so a strict
         // reviewer and a writer need room to meet. Work with one right answer
         // needs less.
-        retry: 3,
+        refine: 3,
       }),
 ```
 
@@ -227,7 +227,7 @@ function createBacklogGroom(engines: BacklogGroomEngines = realEngines) {
         // work is. Grooming a backlog has many defensible answers, so a strict
         // reviewer and a writer need room to meet. Work with one right answer
         // needs less.
-        retry: 3,
+        refine: 3,
       }),
 
       stage('clarify', {
@@ -240,7 +240,7 @@ function createBacklogGroom(engines: BacklogGroomEngines = realEngines) {
         // work is. Grooming a backlog has many defensible answers, so a strict
         // reviewer and a writer need room to meet. Work with one right answer
         // needs less.
-        retry: 3,
+        refine: 3,
       }),
 
       stage('rank', {
@@ -266,7 +266,7 @@ console.log(JSON.stringify(result.outcome, null, 2));
 ```mermaid
 flowchart LR
   raw[("backlog/raw.md")] --> split["split: Claude, reviewed by Codex"]
-  split -->|"retry: 3"| split
+  split -->|"refine: 3"| split
   split --> clarify["clarify: Claude, reviewed by Codex"]
   clarify -.-> rank{{"rank: the product owner"}}
   rank -->|sendsBackTo| split

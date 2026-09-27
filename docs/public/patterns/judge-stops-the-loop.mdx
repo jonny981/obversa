@@ -7,7 +7,7 @@ description: "A small model reads the findings and the rounds so far and says wh
 Let a judge decide when a review loop stops, instead of a count. Use it
 when the work is refined over rounds and the right number of rounds is not
 known in advance: a page, a plan, a shortlist. When a fixed number of
-rounds is enough, `retry` on the stage is the plain way, and
+rounds is enough, `refine: 3` on the stage is the plain way, and
 [a writer and a reviewer](/patterns/writer-and-reviewer) shows it.
 
 The judge is a small decision model, not the reviewer. It answers typed
@@ -93,9 +93,13 @@ why to stop:
     },
 ```
 
-`stopQuestions()` is exported from the example so another loop can reuse
-the set, and a loop with a different question passes its own in the same
-shape. The judge engine takes `{ state, questions }` as its prompt and
+In `workflow()` the same loop is one field on the reviewed stage:
+`refine: judge(seat, { cap: 6, questions })`, with `stopQuestions()` from
+`@obversa/runtime` as the default set; a `dag()` takes the same `judge()`
+value on `maxKickbacks`. There a judge that says stop lets the review stand
+in `workflow()`, and on a bare `dag()` it rejects the kickback and leaves
+the requesting step's outcome as it was. A custom question set routes on
+its `stop_reason` when it has one, and on the cap otherwise. The judge engine takes `{ state, questions }` as its prompt and
 returns one answer per question; the
 [Jev API engine](/packages/engine-jev-api) page has the shape.
 

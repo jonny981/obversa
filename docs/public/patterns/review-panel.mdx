@@ -47,7 +47,7 @@ One implementer and a panel of two reviewers from two other model families.
         writes: ['src/double.mjs', 'test/double.test.mjs'],
         desc: 'Write the function and its test from the brief.',
         gate: 'The files named in the brief exist in the workspace.',
-        retry: 1,
+        refine: 1,
       }),
       stage('test', {
         run: ['node', '--test', 'test/double.test.mjs'],
@@ -72,7 +72,7 @@ default is all of them. Set it to the number of reviewers when one dissent
 must be enough to fail the step; below that, the change can pass despite a
 dissent, and the dissent is still on the record. A panel below the
 threshold carries its findings to `implement`, which runs again with them,
-as many times as that stage's `retry` allows.
+as many times as that stage's `refine` allows.
 
 `workflow()` refuses the team before any model runs if a reviewer shares a
 model family with the seat it reviews, or two reviewers share one: two
@@ -222,7 +222,7 @@ function createThresholdPanel(engines: ThresholdPanelEngines = realEngines) {
         writes: ['src/double.mjs', 'test/double.test.mjs'],
         desc: 'Write the function and its test from the brief.',
         gate: 'The files named in the brief exist in the workspace.',
-        retry: 1,
+        refine: 1,
       }),
       stage('test', {
         run: ['node', '--test', 'test/double.test.mjs'],

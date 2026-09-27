@@ -43,7 +43,7 @@ Codex seat, and the test between them is a command:
         writes: ['src/add.mjs', 'test/add.test.mjs'],
         desc: 'Write the function and its test from the brief.',
         gate: 'The files named in the brief exist in the workspace.',
-        retry: 1,
+        refine: 1,
       }),
       stage('test', {
         run: ['node', '--test', 'test/add.test.mjs'],
@@ -67,7 +67,7 @@ the stage: a missing or empty file fails it by name, and so does a change to
 another declared file. Node runs the test, and a red run carries its output
 to `write`, which runs again with it. The reviewer reads the code, the test
 and its result only after the test passes, and a rejection goes the same
-way. `retry: 1` on the writer bounds how many times the pair goes round.
+way. `refine: 1` on the writer bounds how many times the pair goes round.
 The two seats must come from different model families; `workflow()`
 refuses the team before any model runs when they share one, so a model
 never approves its own work.
@@ -191,7 +191,7 @@ function createWriterReviewerPair(engines: WriterReviewerEngines = realEngines) 
         writes: ['src/add.mjs', 'test/add.test.mjs'],
         desc: 'Write the function and its test from the brief.',
         gate: 'The files named in the brief exist in the workspace.',
-        retry: 1,
+        refine: 1,
       }),
       stage('test', {
         run: ['node', '--test', 'test/add.test.mjs'],
