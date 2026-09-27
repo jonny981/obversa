@@ -963,6 +963,12 @@ const scanRoots = [
   '.githooks',
 ];
 const requiredScanRoots = ['hosts', 'plugins'];
+// Files the forbidden-word rules skip entirely: a run record copied in
+// byte-for-byte as a test fixture is read, never authored, so recorded
+// outcome text inside it is data.
+const forbiddenExempt = new Set([
+  'packages/runtime/tests/fixtures/public-docs-writer.record.jsonl',
+]);
 // The host JavaScript that must be import-scanned, by name, so a rename or a
 // scan gap cannot leave the composition root unchecked.
 const requiredScannedFiles = [
@@ -1242,9 +1248,14 @@ for (const [name, rule] of packageRules) {
   } else if (manifest.publishConfig?.access !== 'public') {
     failures.push(`${name}: publishConfig.access must be public`);
   }
-  // The review command is @obversa/surface-diff's one bin;
-  // no other package exposes a command.
-  const allowedBins = name === '@obversa/surface-diff' ? { 'obversa-review': './bin/obversa-review.mjs' } : undefined;
+  // The review command is @obversa/surface-diff's one bin and the record
+  // renderer is @obversa/runtime's; no other package exposes a command.
+  const allowedBins =
+    name === '@obversa/surface-diff'
+      ? { 'obversa-review': './bin/obversa-review.mjs' }
+      : name === '@obversa/runtime'
+        ? { 'obversa-record': './dist/bin/record.js' }
+        : undefined;
   if (JSON.stringify(manifest.bin) !== JSON.stringify(allowedBins))
     failures.push(`${name}: bin must be ${JSON.stringify(allowedBins) ?? 'absent'}; found ${JSON.stringify(manifest.bin) ?? 'absent'}`);
   // pnpm promotes publishConfig fields into the packed manifest, so a
@@ -1445,6 +1456,10 @@ for (const absolute of files) {
     continue;
   }
   const text = buffer.toString('utf8');
+  // Record fixtures are byte-for-byte copies of real runs: their recorded
+  // outcome text is data, not authored prose, so the forbidden-word rules
+  // do not apply to them.
+  if (forbiddenExempt.has(path)) continue;
   for (const rule of forbidden) {
     const checked = rule.allowedPhrase ? text.replace(rule.allowedPhrase, ' ') : text;
     if (rule.pattern.test(checked)) failures.push(`${path}: contains ${rule.name}`);
