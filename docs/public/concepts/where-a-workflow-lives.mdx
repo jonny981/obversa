@@ -1,0 +1,83 @@
+---
+title: "Where a Workflow Lives"
+sidebarTitle: "Where it lives"
+description: "Runs from wherever you keep it."
+---
+
+Keep a workflow in a central collection, in the repository it works on, or
+inside a service. It runs the same way from each. Use a central collection
+when the same team serves many repositories, the repository itself when the
+workflow is about that code alone, and a service when the workflow is part
+of what the service does at run time.
+
+## Motivation
+
+A team you run every week outlives any one repository: the same writer,
+reviewer and sign-off serve your docs today and a client's codebase
+tomorrow. A workflow is a TypeScript file and `run()` is a library call, so
+where the file sits is your choice, and the repository it works on is an
+argument.
+
+## Three homes
+
+- **A central collection.** A repository of its own holds your workflows,
+  their briefs and their records, and each run is pointed at the
+  repository it works on. This is the home for the teams you reuse.
+- **Inside the repository.** The workflow sits beside the code it changes
+  and runs from that directory. This is the home for a workflow about one
+  codebase, and the shape the [first run](/get-started/first-run) shows.
+- **Inside a service.** The service imports the workflow and calls `run()`
+  when its own logic says so. The workflow file exports the team and does
+  nothing on import, so a terminal launcher and a service share one file.
+
+## Point at a repository
+
+`run(job, { cwd })` runs every stage in that directory. The path is
+absolute; the engines refuse a relative one. Leave `cwd` out and the run
+uses the directory you started it from, which is what "run it from the
+directory the work belongs in" means on the first-run page.
+
+```ts examples/tournament.ts (excerpt)
+  const result = await run(
+    tournament({
+      name: 'retry-implementation',
+      n: ANGLES.length,
+      candidate: (i) => fnJob(`candidate-${i}`, async (ctx) => {
+        await writeFile(join(ctx.workspace.dir, 'src/retry.ts'), TASK[1] + ANGLES[i]!);
+        await writeFile(join(ctx.workspace.dir, 'candidate.test.ts'), CANDIDATE_TEST);
+        await runNodeTest(ctx);
+        return { status: 'pass' as const, data: { candidate: i } };
+      }),
+      judge: score,
+    }),
+    { cwd: repo },
+  );
+```
+
+The file lives in this repository, and the candidates write into `repo`, a
+repository the example created somewhere else. The
+[built-in teams](/packages/builtin-workflows) take the same directory as
+their `workspace` argument.
+
+A brief loaded by path is read from the directory you started in, not from
+beside the workflow file. Pin it to the file with a URL:
+`briefFromFile(new URL('./briefs/add.md', import.meta.url))`.
+
+## The supervised runner
+
+The [supervised runner](/driving/runner) is stricter than `run()`. Its
+`runRoot` must be the top level of the repository the workspace provider
+captures, and the host module file must sit inside that root. A provider
+for another repository is refused with `WORKSPACE_ROOT` before any run is
+stored. The host file can import everything else from wherever the
+workflow lives, so a central collection keeps a small host file in each
+repository it supervises.
+
+## Next steps
+
+- [Running](/concepts/running): what `run()` does with the file, one
+  bounded step at a time.
+- [Supervised local runs](/driving/runner): the watchdog, and the root and
+  host rules it adds.
+- [Workspace](/concepts/workspace): a worktree per writer inside the
+  repository a run is pointed at.
