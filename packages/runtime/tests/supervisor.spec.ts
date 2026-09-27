@@ -404,11 +404,18 @@ describe('formatEvent renders every event kind as a line a person can read', () 
     expect(formatEvent({ kind: 'engine:thinking', ts: 1, path: ['dag'], delta: 'weighing the options' })).toBe('');
   });
 
-  it('engine:tool is the console\'s own line: tool, name, phase', () => {
-    // The line from the brief's example ("tool Read use") at root path: no
-    // target, because the event carries none.
+  it('engine:tool is the console\'s own line: tool, name, phase, and the target when the event carries one', () => {
+    // No target: the event carries none, so the line stays exactly what it
+    // was before F132 (the brief's own example, "tool Read use").
     expect(formatEvent({ kind: 'engine:tool', ts: 1, path: [], name: 'Read', phase: 'use' })).toBe('  tool Read use');
     expect(formatEvent({ kind: 'engine:tool', ts: 1, path: ['dag'], name: 'Read', phase: 'result' })).toBe('dag   tool Read result');
+    // A target: it follows the phase on the same line.
+    expect(formatEvent({
+      kind: 'engine:tool', ts: 1, path: [], name: 'Read', phase: 'use', target: 'src/a.ts',
+    })).toBe('  tool Read use src/a.ts');
+    expect(formatEvent({
+      kind: 'engine:tool', ts: 1, path: ['dag'], name: 'Bash', phase: 'use', target: 'npm test',
+    })).toBe('dag   tool Bash use npm test');
   });
 
   it('engine:usage, log, error', () => {

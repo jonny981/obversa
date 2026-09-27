@@ -13,6 +13,7 @@ import type {
   Usage,
   UsageReceipt,
 } from '@obversa/api';
+import { toolTarget } from './tool-target.js';
 
 export interface Accumulator {
   parts: AgentResultPart[];
@@ -68,7 +69,13 @@ export function mapMessage(
           block.type === 'tool_use' &&
           typeof block.name === 'string'
         ) {
-          onEvent({ type: 'tool', name: block.name, phase: 'use' });
+          const target = toolTarget(block.input);
+          onEvent({
+            type: 'tool',
+            name: block.name,
+            phase: 'use',
+            ...(target === undefined ? {} : { target }),
+          });
         }
       }
       if (assistantText) {

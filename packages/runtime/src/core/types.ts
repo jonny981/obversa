@@ -722,6 +722,8 @@ export type LoopEvent =
       path: string[];
       name: string;
       phase: 'use' | 'result';
+      /** The file, command, URL or pattern the tool acted on, when known. */
+      target?: string;
     }
   | {
       kind: 'engine:usage';

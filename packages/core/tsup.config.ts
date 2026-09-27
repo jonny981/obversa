@@ -6,6 +6,7 @@ export default defineConfig({
     command: 'src/command/run.ts',
     'claude-stream-json': 'src/claude-stream-json.ts',
     'claude-tools': 'src/claude-tools.ts',
+    'tool-target': 'src/tool-target.ts',
     testing: 'src/testing.ts',
   },
   format: ['esm'],

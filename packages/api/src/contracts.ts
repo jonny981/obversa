@@ -143,7 +143,18 @@ export type EngineIncompleteResultEvidence = Omit<AgentResult, 'parts'> & {
 export type EngineStreamEvent =
   | { type: 'text'; delta: string }
   | { type: 'thinking'; delta: string }
-  | { type: 'tool'; name: string; phase: 'use' | 'result' }
+  | {
+      type: 'tool';
+      name: string;
+      phase: 'use' | 'result';
+      /**
+       * The file, command, URL or pattern the tool acted on, when its input
+       * names one. Optional: an adapter that cannot see the tool's input at
+       * this phase, or a tool with none of those arguments, reports nothing
+       * rather than a guess.
+       */
+      target?: string;
+    }
   | { type: 'usage'; usage: UsageReceipt; model: string };
 
 export type EngineEventSink = (event: EngineStreamEvent) => void;

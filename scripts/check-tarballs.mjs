@@ -433,6 +433,8 @@ export const EXPECTED_FILES = {
     'package/LICENSE',
     'package/README.md',
     'package/dist/chunk-*.js',
+    'package/dist/chunk-*.js',
+    'package/dist/chunk-*.js.map',
     'package/dist/chunk-*.js.map',
     'package/dist/claude-stream-json.d.ts',
     'package/dist/claude-stream-json.js',
@@ -453,6 +455,9 @@ export const EXPECTED_FILES = {
     'package/dist/testing.d.ts',
     'package/dist/testing.js',
     'package/dist/testing.js.map',
+    'package/dist/tool-target.d.ts',
+    'package/dist/tool-target.js',
+    'package/dist/tool-target.js.map',
     'package/package.json',
   ],
   '@obversa/builtin-workflows': [

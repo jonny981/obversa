@@ -164,6 +164,35 @@ describe('message-map', () => {
     ]);
   });
 
+  it('maps a tool-use block\'s input to a target, and reports none for a tool with no such argument', () => {
+    const { events } = collect([
+      {
+        type: 'assistant',
+        message: {
+          content: [
+            { type: 'tool_use', name: 'Read', input: { file_path: 'src/a.ts' } },
+            { type: 'tool_use', name: 'AskUser', input: { question: 'proceed?' } },
+          ],
+        },
+      },
+    ]);
+    const tools = events.filter((e) => e.type === 'tool');
+    expect(tools).toEqual([
+      { type: 'tool', name: 'Read', phase: 'use', target: 'src/a.ts' },
+      { type: 'tool', name: 'AskUser', phase: 'use' },
+    ]);
+  });
+
+  it('reports no target on a tool-result block, which carries no input', () => {
+    const { events } = collect([
+      {
+        type: 'user',
+        message: { content: [{ type: 'tool_result', name: 'Read' }] },
+      },
+    ]);
+    expect(events).toEqual([{ type: 'tool', name: 'Read', phase: 'result' }]);
+  });
+
   it('is defensive against malformed messages', () => {
     expect(() =>
       collect([

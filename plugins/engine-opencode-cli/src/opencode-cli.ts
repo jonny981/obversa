@@ -50,6 +50,7 @@ import {
   resolveCommandExecutable,
   runOwnedCommand,
 } from '@obversa/core/command';
+import { toolTarget } from '@obversa/core/tool-target';
 
 const SUPPORTED_VERSION = '1.18.23';
 const VERSION_TIMEOUT_MS = 10_000;
@@ -983,8 +984,11 @@ function consumeLine(
       if (state.status !== 'completed' && state.status !== 'error') {
         throw new TypeError('OpenCode tool terminal state must be completed or error');
       }
-      onEvent({ type: 'tool', name, phase: 'use' });
-      onEvent({ type: 'tool', name, phase: 'result' });
+      // One already-parsed frame carries both phases, so the same input is
+      // available for each; nothing here waits for a later message to learn it.
+      const target = toolTarget(state.input);
+      onEvent({ type: 'tool', name, phase: 'use', ...(target === undefined ? {} : { target }) });
+      onEvent({ type: 'tool', name, phase: 'result', ...(target === undefined ? {} : { target }) });
       return;
     }
     if (type === 'step_start') {

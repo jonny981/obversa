@@ -1447,8 +1447,8 @@ describe('OpenCode CLI adapter', () => {
 
     const tools = await run('tool-events');
     expect(tools.events.filter((event) => event.type === 'tool')).toEqual([
-      { type: 'tool', name: 'read', phase: 'use' },
-      { type: 'tool', name: 'read', phase: 'result' },
+      { type: 'tool', name: 'read', phase: 'use', target: 'README.md' },
+      { type: 'tool', name: 'read', phase: 'result', target: 'README.md' },
     ]);
     await expect(run('tool-error-then-final')).resolves.toMatchObject({
       result: { parts: [{ kind: 'assistant', text: 'answer', final: true }] },

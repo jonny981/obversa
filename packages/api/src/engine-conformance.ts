@@ -329,17 +329,29 @@ export async function runEngineConformance(
       scenario: 'tool-events',
       async run() {
         const { events } = await openAndRun(fixture, 'tool-events');
-        const tools = events.filter((event) => event.type === 'tool');
+        const tools = events.filter(
+          (event): event is Extract<EngineStreamEvent, { type: 'tool' }> => event.type === 'tool',
+        );
         const expectedTool = fixture.request.tools?.[0];
         check(
           typeof expectedTool === 'string' && expectedTool.length > 0,
           'Tool conformance requires one declared request tool.',
         );
+        // `target` is optional and additive: an engine that names one, and
+        // one that does not, are both conforming, so the required shape is
+        // compared on its own rather than an exact match on the whole event.
         check(
-          isDeepStrictEqual(tools, [
-            { type: 'tool', name: expectedTool, phase: 'use' },
-            { type: 'tool', name: expectedTool, phase: 'result' },
-          ]),
+          tools.every((tool) => tool.target === undefined || typeof tool.target === 'string'),
+          'Engine reported a non-string tool target.',
+        );
+        check(
+          isDeepStrictEqual(
+            tools.map(({ type, name, phase }) => ({ type, name, phase })),
+            [
+              { type: 'tool', name: expectedTool, phase: 'use' },
+              { type: 'tool', name: expectedTool, phase: 'result' },
+            ],
+          ),
           'Engine lost or reordered visible tool observations.',
         );
       },

@@ -542,7 +542,7 @@ function renderEvent(event: LoopEvent, totals?: UsageTotals): string {
       // job:end line instead, and the record keeps neither.
       return '';
     case 'engine:tool':
-      return `${at}  tool ${event.name} ${event.phase}`;
+      return `${at}  tool ${event.name} ${event.phase}${event.target ? ` ${event.target}` : ''}`;
     case 'engine:usage': {
       const call = event.usage.kind === 'unknown'
         ? 'usage unknown'

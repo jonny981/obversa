@@ -1247,4 +1247,17 @@ describe('Grok CLI adapter', () => {
 
     expect(report).toEqual({ ok: true, cases: 20, failures: [], unsupported: [] });
   }, 30_000);
+
+  it('maps a tool_use block\'s input to a target', async () => {
+    const events: EngineStreamEvent[] = [];
+    await new GrokCliEngine({
+      ...options(),
+      environment: { OBVERSA_TEST_GROK_SCENARIO: 'tool-events' },
+    }).run(request(), (event) => events.push(event), new AbortController().signal);
+    const tools = events.filter((event) => event.type === 'tool');
+    expect(tools).toEqual([
+      { type: 'tool', name: 'read_file', phase: 'use', target: 'README.md' },
+      { type: 'tool', name: 'read_file', phase: 'result' },
+    ]);
+  });
 });

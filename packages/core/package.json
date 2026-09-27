@@ -31,6 +31,10 @@
       "types": "./dist/claude-tools.d.ts",
       "import": "./dist/claude-tools.js"
     },
+    "./tool-target": {
+      "types": "./dist/tool-target.d.ts",
+      "import": "./dist/tool-target.js"
+    },
     "./testing": {
       "types": "./dist/testing.d.ts",
       "import": "./dist/testing.js"

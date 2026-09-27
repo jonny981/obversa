@@ -39,6 +39,7 @@ import {
   resolveCommandExecutable,
   runOwnedCommand,
 } from '@obversa/core/command';
+import { toolTarget } from '@obversa/core/tool-target';
 
 type PermissionMode =
   | 'default'
@@ -561,7 +562,8 @@ function consumeAssistant(
       const id = nonEmptyText(block.id, 'Grok tool id');
       const name = nonEmptyText(block.name, 'Grok tool name');
       accumulator.toolNames.set(id, name);
-      onEvent({ type: 'tool', name, phase: 'use' });
+      const target = toolTarget(block.input);
+      onEvent({ type: 'tool', name, phase: 'use', ...(target === undefined ? {} : { target }) });
     }
   }
   if (text.length > 0) {

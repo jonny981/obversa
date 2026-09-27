@@ -279,6 +279,7 @@ async function runAdvisorConsult(
           path: [...ctx.path],
           name: event.name,
           phase: event.phase,
+          ...(event.target !== undefined ? { target: event.target } : {}),
         });
       }
     },
@@ -401,6 +402,7 @@ export function agentJob(config: AgentJobConfig): Job {
                     path,
                     name: e.name,
                     phase: e.phase,
+                    ...(e.target !== undefined ? { target: e.target } : {}),
                   });
                   break;
                 case 'usage':
