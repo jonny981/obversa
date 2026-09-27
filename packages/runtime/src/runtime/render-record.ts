@@ -206,18 +206,17 @@ export function summarizeRecord(events: readonly LoopEvent[]): RecordSummary {
         }
         case 'engine:tool': {
           if (event.phase === 'use') {
-            const target = (event as { target?: unknown }).target;
             const existing = run.tools.find((t) => t.name === event.name);
             if (existing) {
               existing.count += 1;
-              if (typeof target === 'string' && !existing.targets.includes(target)) {
-                existing.targets.push(target);
+              if (event.target !== undefined && !existing.targets.includes(event.target)) {
+                existing.targets.push(event.target);
               }
             } else {
               run.tools.push({
                 name: event.name,
                 count: 1,
-                targets: typeof target === 'string' ? [target] : [],
+                targets: event.target !== undefined ? [event.target] : [],
               });
             }
           }
@@ -234,7 +233,7 @@ export function summarizeRecord(events: readonly LoopEvent[]): RecordSummary {
                 : (event.outcome?.status ?? 'no end recorded');
             const summary = event.outcome?.summary ? firstLine(event.outcome.summary) : '';
             const label = [...event.path.slice(rootDepth + 1), event.node].join('/');
-            run.lines.push({ kind: event.kind, text: `${label}: ${status}${summary ? ` — ${summary}` : ''}` });
+            run.lines.push({ kind: event.kind, text: `${label}: ${status}${summary ? `, ${summary}` : ''}` });
           }
           break;
         case 'log':
@@ -371,11 +370,15 @@ export function renderRecord(events: readonly LoopEvent[], options?: RenderRecor
   if (summary.startedAt !== null && summary.endedAt === null) {
     out.push(`- Started ${headerTime(summary.startedAt)}. No end recorded.`);
   } else if (summary.startedAt !== null && summary.endedAt !== null) {
-    const status = summary.outcome?.status ?? 'no outcome';
-    const tail = summary.outcome?.summary ? ` — ${fit(firstLine(summary.outcome.summary), width)}` : '';
     out.push(
-      `- Started ${headerTime(summary.startedAt)}, ended ${headerTime(summary.endedAt)} after ${formatDuration(summary.endedAt - summary.startedAt)}: ${status}${tail}.`,
+      `- Started ${headerTime(summary.startedAt)}, ended ${headerTime(summary.endedAt)} after ${formatDuration(summary.endedAt - summary.startedAt)}.`,
     );
+    if (summary.outcome) {
+      const text = summary.outcome.summary
+        ? `${summary.outcome.status}. ${fit(firstLine(summary.outcome.summary), width)}`
+        : `${summary.outcome.status}.`;
+      out.push(`- Outcome: ${text}`);
+    }
   }
 
   const usageParts = [`${commas(summary.usage.inputTokens)} in, ${commas(summary.usage.outputTokens)} out`];
@@ -403,7 +406,7 @@ export function renderRecord(events: readonly LoopEvent[], options?: RenderRecor
         out.push('');
       }
       const status = run.endedAt === null ? 'no end recorded' : (run.outcome?.status ?? 'no outcome');
-      const parts = [`### Run ${run.attempt} — ${status}`];
+      const parts = [`### Run ${run.attempt}: ${status}`];
       if (run.startedAt !== null && run.endedAt !== null) {
         parts.push(formatDuration(run.endedAt - run.startedAt));
       }
