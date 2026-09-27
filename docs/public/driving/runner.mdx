@@ -56,7 +56,10 @@ example copies it into the disposable repository it creates and the runner
 loads that copy.
 
 The module must stay inside the worker root after symlinks resolve; a path
-outside it is refused with `HOST_MODULE`. The runner stores the module's
+outside it is refused with `HOST_MODULE`. The worker root must be the top
+level of the repository the workspace provider captures; a provider for
+another repository is refused with `WORKSPACE_ROOT` before any run is
+stored. The runner stores the module's
 path and byte digest and checks the digest before and after each import.
 Changed bytes fail with `HOST_MODULE_CHANGED`. The digest covers the module
 file alone, not what it imports.
