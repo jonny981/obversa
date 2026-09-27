@@ -26,20 +26,22 @@ const docs: ReadonlyArray<readonly [string, string]> = [
   ],
 ];
 
-function fenced(source: string, lang: string): string[] {
-  const blocks: string[] = [];
-  const open = '```' + lang + '\n';
-  let at = 0;
-  for (;;) {
-    const start = source.indexOf(open, at);
-    if (start === -1) return blocks;
-    const end = source.indexOf('\n```', start + open.length);
+/**
+ * Every fenced block in `lang`, with the title the docs give a block after
+ * its language (a file path, "Output", "Request"), or none for a bare fence.
+ */
+function fenced(source: string, lang: string): Array<{ title: string | undefined; body: string }> {
+  const blocks: Array<{ title: string | undefined; body: string }> = [];
+  const opener = new RegExp('^```' + lang + '(?: ([^\\n]*))?\\n', 'gm');
+  for (const match of source.matchAll(opener)) {
+    const start = match.index + match[0].length;
+    const end = source.indexOf('\n```', start);
     if (end === -1) {
-      throw new Error(`a ${lang} fence at offset ${start} is never closed`);
+      throw new Error(`a ${lang} fence at offset ${match.index} is never closed`);
     }
-    blocks.push(source.slice(start + open.length, end));
-    at = end;
+    blocks.push({ title: match[1]?.trim() || undefined, body: source.slice(start, end) });
   }
+  return blocks;
 }
 
 function withoutImports(block: string): string {
@@ -53,7 +55,7 @@ function withoutImports(block: string): string {
 describe('public TypeScript snippets', () => {
   for (const [name, source] of docs) {
     it(`${name} ts blocks appear verbatim in the compiled fixture`, () => {
-      const blocks = fenced(source, 'ts');
+      const blocks = fenced(source, 'ts').map((fence) => fence.body);
       expect(blocks.length).toBeGreaterThan(0);
       for (const block of blocks) {
         for (const line of block.split('\n').filter((l) => l.startsWith('import '))) {
@@ -68,7 +70,11 @@ describe('public TypeScript snippets', () => {
 describe('public JSON examples', () => {
   for (const [name, source] of docs) {
     it(`${name} json blocks parse through parseJevDocument with wire-shaped criteria`, () => {
-      const blocks = fenced(source, 'json');
+      // A block titled Output shows what the engine printed, not a document
+      // the engine reads; every other json block is a Jev document.
+      const blocks = fenced(source, 'json')
+        .filter((fence) => fence.title === undefined || !fence.title.startsWith('Output'))
+        .map((fence) => fence.body);
       expect(blocks.length).toBeGreaterThan(0);
       for (const block of blocks) {
         const document = parseJevDocument(block);

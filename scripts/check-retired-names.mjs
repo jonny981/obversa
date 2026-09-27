@@ -39,7 +39,10 @@ function textFor(root, file) {
     document.redirects = (document.redirects ?? []).filter(
       (redirect) => REDIRECTS.get(redirect.source) !== redirect.destination,
     );
-    return JSON.stringify(document);
+    // One value per line: the compact pass below strips quotes and commas
+    // within a line, and a single-line document would glue one value to the
+    // next key ("/packages" followed by "source" reads as a retired path).
+    return JSON.stringify(document, null, 2);
   }
   const bytes = readFileSync(file);
   return bytes.includes(0) ? '' : bytes.toString('utf8');
