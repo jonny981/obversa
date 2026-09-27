@@ -317,9 +317,16 @@ describe('the run monitor', () => {
       },
     }), { monitor: true });
     opened.push(result);
-    const state = JSON.parse((await get(`${result.monitor!.url}state`)).body) as { kickbacks: Array<{ from: string; to: string; accepted: boolean }>; nodes: Record<string, { runs: number }> };
+    const state = JSON.parse((await get(`${result.monitor!.url}state`)).body) as MonitorState & { nodes: Record<string, { runs: number }> };
     expect(state.kickbacks).toEqual([expect.objectContaining({ from: 'review', to: 'implement', accepted: true })]);
     expect(state.nodes.implement!.runs).toBe(2);
+    // The record panel carries the same kickback as one line with its reason,
+    // and only one: the DAG emits a `dag:kickback` event exactly once per
+    // occurrence, so nothing here folds it into two lines for one event.
+    const kickbackLines = state.events.filter((e) => e.line.includes('kickback'));
+    expect(kickbackLines).toHaveLength(1);
+    expect(kickbackLines[0]!.line).toContain('missing header');
+    expect(kickbackLines[0]!.line.includes('\n')).toBe(false);
   });
 
   it('refuses to be framed by any origin, on the page and on the state', async () => {
@@ -379,5 +386,9 @@ describe('the run monitor', () => {
     expect(pendingHtml).toContain('src/index.ts');
     expect(pendingHtml).toContain('abc123');
     expect(pendingHtml).toContain('<a href="https://example.invalid/pr/1"');
+    // The input and its link read before a person reaches the yes/no
+    // buttons, never after: a reviewer sees what they're approving first.
+    expect(pendingHtml.indexOf('src/index.ts')).toBeLessThan(pendingHtml.indexOf('<form'));
+    expect(pendingHtml.indexOf('<a href="https://example.invalid/pr/1"')).toBeLessThan(pendingHtml.indexOf('<form'));
   });
 });
