@@ -9,12 +9,10 @@ describe('toolTarget', () => {
     expect(toolTarget({ path: 'docs/' })).toBe('docs/');
   });
 
-  it('takes the first words of a command, cut short of a later secret', () => {
-    const secretToken = 's3cr3t-token'.repeat(6);
-    const withSecret = `echo start-of-command ${secretToken}`;
-    const target = toolTarget({ command: withSecret });
-    expect(target).toBe(`${withSecret.slice(0, 80)}…`);
-    expect(target).not.toContain(secretToken);
+  it('takes the first two words of a command, so an argument that is a secret never reaches a line', () => {
+    expect(toolTarget({ command: 'echo start-of-command s3cr3t-token' })).toBe('echo start-of-command');
+    expect(toolTarget({ command: '  git   commit -m "x"' })).toBe('git commit');
+    expect(toolTarget({ command: 'ls' })).toBe('ls');
   });
 
   it('takes the url, cut at its query string', () => {

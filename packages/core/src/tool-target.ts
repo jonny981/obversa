@@ -30,10 +30,14 @@ export function toolTarget(input: unknown): string | undefined {
   for (const key of TARGET_KEYS) {
     const value = record[key];
     if (typeof value !== 'string' || value === '') continue;
-    // A command's later words can carry a secret (a token passed as an
-    // argument), so it is cut short like everything else rather than shown
-    // in full; a URL's query string can carry one too, so that goes first.
-    const base = key === 'url' ? (value.split('?')[0] ?? value) : value;
+    // A command's arguments can carry a secret (a token passed on the
+    // line), so only its first two words are kept: the program and what it
+    // was asked to do. A URL's query string can carry one too, so it goes.
+    const base = key === 'url'
+      ? (value.split('?')[0] ?? value)
+      : key === 'command'
+        ? value.trim().split(/\s+/).slice(0, 2).join(' ')
+        : value;
     return cut(base, MAX_TARGET_LENGTH);
   }
   return undefined;
