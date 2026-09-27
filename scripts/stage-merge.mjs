@@ -109,6 +109,7 @@ export const stageBranches = {
   F129: 'feat/judge-stops-the-loop',
   F127: 'feat/f127-run-page',
   F133: 'docs/judge-stops-the-loop',
+  F128: 'feat/render-record',
   F132: 'feat/f132-tool-target',
 };
 

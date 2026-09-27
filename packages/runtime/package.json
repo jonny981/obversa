@@ -6,6 +6,9 @@
   "author": "Jonny Neill <jonnyneill@hotmail.com>",
   "type": "module",
   "main": "./dist/api.js",
+  "bin": {
+    "obversa-record": "./dist/bin/record.js"
+  },
   "types": "./dist/api.d.ts",
   "exports": {
     ".": {

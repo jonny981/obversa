@@ -441,6 +441,20 @@ export type { RecordedStage, ResumedStageRecords } from './runtime/persist.js';
 // the line a person reads, so an example or a host can print a run as it
 // happens without writing its own formatter.
 export { formatEvent } from './runtime/supervisor.js';
+export {
+  renderRecord,
+  summarizeRecord,
+  type RecordSummary,
+  type RecordNodeSummary,
+  type RecordNodeRun,
+  type RecordKickback,
+  type RecordEngineCall,
+  type RecordToolUse,
+  type RecordLine,
+  type RecordOutcome,
+  type RecordUsage,
+  type RenderRecordOptions,
+} from './runtime/render-record.js';
 export type { StatsSnapshot } from './core/stats.js';
 export {
   classifyEngineFailure,

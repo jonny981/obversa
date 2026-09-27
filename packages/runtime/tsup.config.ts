@@ -8,6 +8,7 @@ export default defineConfig({
     'workflow-support': 'src/workflow-support.ts',
     'env/command': 'src/env/command.ts',
     'storage/local': 'src/storage/local.ts',
+    'bin/record': 'src/bin/record.ts',
   },
   format: ['esm'],
   target: 'node22',
