@@ -16,7 +16,7 @@ import type { CallbackRequest } from '../callback/gate.js';
 import { jobMeta } from '../core/describe.js';
 import type { JsonObject, JsonValue } from '../graph/value.js';
 import type { Job, JobMeta, LoopEvent, Outcome, RunCallbacks, UsageTotals } from '../core/types.js';
-import { runningTotal } from './supervisor.js';
+import { formatEvent, runningTotal } from './supervisor.js';
 
 export interface RunMonitor {
   /** The page's address: `http://127.0.0.1:<port>/`. */
@@ -60,7 +60,14 @@ export interface MonitorState {
   /** The same spend as one line of text, already formatted; `/state` sends it. */
   usageSummary: string;
   pending: Array<{ requestId: string; decisionText: string; input: JsonValue }>;
-  events: Array<{ kind: string; ts: number; path: string[]; node?: string; label?: string; summary?: string }>;
+  /**
+   * The record, already in the one line `formatEvent` would print for it: the
+   * console and this page must never disagree about what an event says, so
+   * neither keeps its own partial fields to re-render from. An event with
+   * nothing worth telling a person (thinking with no text yet) contributes no
+   * line at all, rather than a row that says only its own kind.
+   */
+  events: Array<{ ts: number; line: string }>;
 }
 
 const EVENT_TAIL = 200;
@@ -139,14 +146,13 @@ class MonitorFold {
         count: event.count, limit: event.limit, ...(event.note !== undefined ? { note: event.note } : {}),
       });
     }
-    const line: MonitorState['events'][number] = { kind: event.kind, ts: event.ts, path: [...event.path] };
-    if ('node' in event && typeof event.node === 'string') line.node = event.node;
-    if ('label' in event && typeof event.label === 'string') line.label = event.label;
-    if ('outcome' in event && event.outcome && typeof event.outcome === 'object' && 'summary' in event.outcome && typeof event.outcome.summary === 'string') {
-      line.summary = event.outcome.summary;
+    // Usage above is folded first, so a usage line's running total already
+    // includes this call, the same way the console's tail totals do.
+    const line = formatEvent(event, this.usage);
+    if (line !== '') {
+      this.events.push({ ts: event.ts, line });
+      if (this.events.length > EVENT_TAIL) this.events.splice(0, this.events.length - EVENT_TAIL);
     }
-    this.events.push(line);
-    if (this.events.length > EVENT_TAIL) this.events.splice(0, this.events.length - EVENT_TAIL);
   }
 
   finish(outcome: Outcome): void {
@@ -355,6 +361,15 @@ function page(name: string | undefined): string {
 (() => {
   const el = (id) => document.getElementById(id);
   const esc = (s) => String(s).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+  // What the question is about: the raw input, and a link when it names one,
+  // so a reviewer can open the thing being approved instead of taking the
+  // question's word for it.
+  function aboutHtml(input) {
+    if (input === null || input === undefined) return '';
+    const url = input && typeof input === 'object' && !Array.isArray(input) && typeof input.url === 'string' ? input.url : null;
+    const link = url ? '<p><a href="' + esc(url) + '" target="_blank" rel="noopener">' + esc(url) + '</a></p>' : '';
+    return '<pre>' + esc(JSON.stringify(input, null, 2)) + '</pre>' + link;
+  }
   async function answer(requestId, approved) {
     const box = document.querySelector('[data-note="' + CSS.escape(requestId) + '"]');
     const note = box && box.value ? box.value : '';
@@ -380,8 +395,8 @@ function page(name: string | undefined): string {
       + '<span class="phase" data-phase="' + esc(v.phase) + '" data-status="' + esc(v.outcome ? v.outcome.status : '') + '">' + esc(v.phase === 'done' && v.outcome ? v.outcome.status : v.phase) + '</span></li>'; }).join('');
     el('kickbacks').innerHTML = s.kickbacks.map((k) => '<p class="kick">' + esc(k.from) + ' sent work back to ' + esc(k.to) + (k.accepted ? '' : ' (not accepted' + (k.note ? ': ' + esc(k.note) : '') + ')') + ': ' + esc(k.reason) + ' (' + k.count + ' of ' + k.limit + ')</p>').join('');
     el('pending-title').hidden = s.pending.length === 0;
-    el('pending').innerHTML = s.pending.map((p) => '<div><p>' + esc(p.decisionText) + '</p><form onsubmit="return false"><input data-note="' + esc(p.requestId) + '" placeholder="a note, if any"><button class="yes" data-answer="yes" data-request="' + esc(p.requestId) + '">Yes</button><button data-answer="no" data-request="' + esc(p.requestId) + '">No</button></form></div>').join('');
-    el('record').textContent = s.events.slice(-40).map((e) => new Date(e.ts).toISOString().slice(11, 19) + '  ' + e.kind.padEnd(14) + (e.node || e.label || '') + (e.summary ? '  ' + e.summary : '')).join('\\n');
+    el('pending').innerHTML = s.pending.map((p) => '<div><p>' + esc(p.decisionText) + '</p>' + aboutHtml(p.input) + '<form onsubmit="return false"><input data-note="' + esc(p.requestId) + '" placeholder="a note, if any"><button class="yes" data-answer="yes" data-request="' + esc(p.requestId) + '">Yes</button><button data-answer="no" data-request="' + esc(p.requestId) + '">No</button></form></div>').join('');
+    el('record').textContent = s.events.slice(-40).map((e) => new Date(e.ts).toISOString().slice(11, 19) + '  ' + e.line).join('\\n');
     if (s.status !== 'done') setTimeout(render, 1000);
   }
   render();
