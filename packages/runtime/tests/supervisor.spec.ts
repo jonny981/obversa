@@ -316,3 +316,116 @@ describe('run supervision', () => {
     expect(readRunStatus('../escape')).toBeUndefined();
   });
 });
+
+// The run monitor's record panel prints exactly this function's output (see
+// monitor.ts), so a line proved here is a line proved for both the console
+// and the browser. Every LoopEvent kind gets a case, so a kind added later
+// without one falls into `default` here rather than going unnoticed.
+describe('formatEvent renders every event kind as a line a person can read', () => {
+  it('run:start and run:end', () => {
+    expect(formatEvent({ kind: 'run:start', ts: 1, path: [] })).toBe('▸ run');
+    expect(formatEvent({
+      kind: 'run:end', ts: 1, path: [], outcome: { status: 'pass' }, usage: { inputTokens: 1, outputTokens: 1 },
+    })).toBe('◂ run pass (1/1 tok)');
+  });
+
+  it('workflow:start (no dedicated case, so it falls through to its bare kind)', () => {
+    expect(formatEvent({
+      kind: 'workflow:start', ts: 1, path: ['a'], identity: 'writer', workspace: '/tmp/w', recordId: 'r1',
+    })).toBe('a workflow:start');
+  });
+
+  it('loop:start, loop:iteration, loop:condition, condition:result, loop:review, loop:end', () => {
+    expect(formatEvent({ kind: 'loop:start', ts: 1, path: ['loop'], depth: 0, max: 3 })).toBe('loop ▸ loop (max 3)');
+    expect(formatEvent({ kind: 'loop:iteration', ts: 1, path: ['loop'], iteration: 2 })).toBe('loop · iteration 2');
+    expect(formatEvent({
+      kind: 'loop:condition', ts: 1, path: ['loop'], which: 'until', result: { met: true, reason: 'done' },
+    })).toBe('loop · until met: done');
+    expect(formatEvent({
+      kind: 'condition:result', ts: 1, path: ['loop'], label: 'check', iteration: 1, result: { met: false, reason: 'not yet' },
+    })).toBe('loop · check not met: not yet');
+    expect(formatEvent({ kind: 'loop:review', ts: 1, path: ['loop'], outcome: { status: 'pass' } })).toBe('loop · review: pass');
+    expect(formatEvent({
+      kind: 'loop:end', ts: 1, path: ['loop'], outcome: { status: 'pass' }, iterations: 3,
+    })).toBe('loop ◂ pass (3 iter)');
+  });
+
+  it('loop:stall, limit:wait, limit:pause', () => {
+    expect(formatEvent({
+      kind: 'loop:stall', ts: 1, path: ['loop'], iteration: 2,
+      report: { window: 2, iterations: [1, 2], reason: 'no progress', evidence: [] },
+    })).toBe('loop ⏹ stalled after 2 no-progress iterations: no progress');
+    expect(formatEvent({
+      kind: 'limit:wait', ts: 1, path: [], code: 'RATE_LIMIT', waitMs: 5000, resumeAt: 6000,
+    })).toBe('⏸ limit RATE_LIMIT: waiting 5s');
+    expect(formatEvent({
+      kind: 'limit:pause', ts: 1, path: [], code: 'QUOTA', reason: 'out of budget',
+    })).toBe('⏸ paused (QUOTA): out of budget');
+  });
+
+  it('dag:start, dag:node, dag:end, monitor', () => {
+    expect(formatEvent({ kind: 'dag:start', ts: 1, path: ['dag'], depth: 0, nodes: ['a', 'b'] })).toBe('dag ▸ dag (2 nodes)');
+    expect(formatEvent({
+      kind: 'dag:node', ts: 1, path: ['dag'], node: 'implement', phase: 'start',
+    })).toBe('dag · node implement: start');
+    expect(formatEvent({ kind: 'dag:end', ts: 1, path: ['dag'], outcome: { status: 'pass' } })).toBe('dag ◂ dag pass');
+    // No dedicated case: the address goes out as its own `monitor` event, not
+    // through this line-per-event formatter.
+    expect(formatEvent({ kind: 'monitor', ts: 1, path: [], url: 'http://127.0.0.1:1/' })).toBe('monitor');
+  });
+
+  it('dag:kickback, job:start, advisor:consult, proof', () => {
+    expect(formatEvent({
+      kind: 'dag:kickback', ts: 1, path: ['dag'], from: 'review', to: 'implement',
+      reason: 'missing header', accepted: true, count: 1, limit: 2,
+    })).toBe('dag ↩ kickback accepted review -> implement [1/2]: missing header');
+    expect(formatEvent({ kind: 'job:start', ts: 1, path: ['dag'], label: 'implement' })).toBe('dag • implement');
+    expect(formatEvent({
+      kind: 'advisor:consult', ts: 1, path: ['dag'], label: 'implement', call: 1, question: 'why?', reply: 'because',
+    })).toBe('dag ◇ advisor implement #1: why?');
+    expect(formatEvent({
+      kind: 'proof', ts: 1, path: ['dag'], name: 'test-output', artifact: { kind: 'json', title: 'Result' },
+    })).toBe('dag ◈ proof test-output: Result');
+  });
+
+  it('job:end carries the summary when the outcome has one, not just the status', () => {
+    expect(formatEvent({
+      kind: 'job:end', ts: 1, path: ['dag'], label: 'implement', outcome: { status: 'pass' },
+    })).toBe('dag • implement: pass');
+    expect(formatEvent({
+      kind: 'job:end', ts: 1, path: ['dag'], label: 'implement', outcome: { status: 'pass', summary: 'wrote it' },
+    })).toBe('dag • implement: pass — wrote it');
+  });
+
+  it('engine:text is the first line of the delta, cut at about 100 characters', () => {
+    expect(formatEvent({ kind: 'engine:text', ts: 1, path: ['dag'], delta: 'hello world' })).toBe('dag   hello world');
+    const long = 'x'.repeat(150);
+    const cut = formatEvent({ kind: 'engine:text', ts: 1, path: [], delta: long });
+    expect(cut).toBe(`  ${'x'.repeat(100)}…`);
+    // Only the first line: a second line of a multi-line reply never leaks in.
+    expect(formatEvent({ kind: 'engine:text', ts: 1, path: [], delta: 'first\nsecond' })).toBe('  first');
+  });
+
+  it('engine:thinking produces no row unless it actually carries text', () => {
+    expect(formatEvent({ kind: 'engine:thinking', ts: 1, path: ['dag'], delta: '' })).toBe('');
+    expect(formatEvent({ kind: 'engine:thinking', ts: 1, path: ['dag'], delta: '   ' })).toBe('');
+    expect(formatEvent({
+      kind: 'engine:thinking', ts: 1, path: ['dag'], delta: 'weighing the options',
+    })).toBe('dag   thinking: weighing the options');
+  });
+
+  it('engine:tool is the console\'s own line: tool, name, phase', () => {
+    // The line from the brief's example ("tool Read use") at root path: no
+    // target, because the event carries none.
+    expect(formatEvent({ kind: 'engine:tool', ts: 1, path: [], name: 'Read', phase: 'use' })).toBe('  tool Read use');
+    expect(formatEvent({ kind: 'engine:tool', ts: 1, path: ['dag'], name: 'Read', phase: 'result' })).toBe('dag   tool Read result');
+  });
+
+  it('engine:usage, log, error', () => {
+    expect(formatEvent({
+      kind: 'engine:usage', ts: 1, path: ['dag'], model: 'm', usage: { kind: 'reported', inputTokens: 5, outputTokens: 2 },
+    })).toBe('dag   m: 5/2 tok');
+    expect(formatEvent({ kind: 'log', ts: 1, path: ['dag'], level: 'info', message: 'hello' })).toBe('dag hello');
+    expect(formatEvent({ kind: 'error', ts: 1, path: ['dag'], code: 'X', message: 'bad' })).toBe('dag ✗ X: bad');
+  });
+});

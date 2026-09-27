@@ -487,6 +487,12 @@ export function toLine(value: string): string {
   return value.replace(/[\u0000-\u001f\u007f]+/g, ' ');
 }
 
+/** The first line of a delta, trimmed and cut to `maxLen`; `''` when it has none. */
+function firstLine(delta: string, maxLen = 100): string {
+  const line = (delta.split('\n')[0] ?? '').trim();
+  return line.length > maxLen ? `${line.slice(0, maxLen)}…` : line;
+}
+
 /**
  * Format one event with optional totals the caller already holds.
  *
@@ -531,8 +537,21 @@ function renderEvent(event: LoopEvent, totals?: UsageTotals): string {
       return `${at}◇ advisor ${event.label} #${event.call}: ${event.question}`;
     case 'proof':
       return `${at}◈ proof ${event.name}: ${event.artifact.title ?? event.artifact.path ?? event.artifact.kind}`;
-    case 'job:end':
-      return `${at}• ${event.label}: ${event.outcome.status}${event.outcome.late ? ' late' : ''}`;
+    case 'job:end': {
+      const summary = event.outcome.summary ? ` — ${event.outcome.summary}` : '';
+      return `${at}• ${event.label}: ${event.outcome.status}${event.outcome.late ? ' late' : ''}${summary}`;
+    }
+    case 'engine:text': {
+      const line = firstLine(event.delta);
+      return line === '' ? '' : `${at}  ${line}`;
+    }
+    case 'engine:thinking': {
+      // Thinking is chatter unless it actually says something: an empty or
+      // whitespace-only delta produces no line, so it never shows as a bare
+      // "engine:thinking" row with nothing beside it.
+      const line = firstLine(event.delta);
+      return line === '' ? '' : `${at}  thinking: ${line}`;
+    }
     case 'engine:tool':
       return `${at}  tool ${event.name} ${event.phase}`;
     case 'engine:usage': {

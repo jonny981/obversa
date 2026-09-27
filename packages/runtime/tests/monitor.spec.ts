@@ -6,7 +6,7 @@ import { runInNewContext } from 'node:vm';
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-import { approval, createCallbackClient, dag, fnJob, kickback, pipeline, run } from '../src/api.ts';
+import { approval, createCallbackClient, dag, fnJob, formatEvent, kickback, pipeline, run } from '../src/api.ts';
 import type { LoopEvent, MonitorState, Outcome, RunResult } from '../src/api.ts';
 
 type MonitorEvent = Extract<LoopEvent, { kind: 'monitor' }>;
@@ -37,10 +37,23 @@ async function loadMonitorPage(url: string) {
   runInNewContext(script, {
     document: { getElementById: (id: string) => elements.get(id) ?? null },
     // Resolve browser-relative URLs, keeping the real response and JSON body unchanged.
-    fetch: (path: string, init?: RequestInit) => fetch(new URL(path, url), init).catch((error) => {
-      rejectReady(error);
-      throw error;
-    }),
+    fetch: (path: string, init?: RequestInit) => {
+      const response = fetch(new URL(path, url), init).catch((error) => {
+        rejectReady(error);
+        throw error;
+      });
+      // A finished or paused run's first render never calls `setTimeout` (it
+      // has nothing left to poll for), so that alone can't be "ready" here: a
+      // person opening the link after the run has already stopped is exactly
+      // the case a review approval needs to render for. Two `setImmediate`
+      // turns land after every microtask the script's own `await`s (the
+      // fetch, then its `.json()`) can still have queued, so by then its
+      // synchronous DOM writes are done either way.
+      // The rejection itself is already routed to `rejectReady` above; this
+      // chain only needs to stay quiet about it, not handle it again.
+      if (path === 'state') response.then(() => setImmediate(() => setImmediate(markReady)), () => {});
+      return response;
+    },
     setTimeout(callback: () => Promise<void>) {
       nextPoll = callback;
       markReady();
@@ -50,6 +63,9 @@ async function loadMonitorPage(url: string) {
   await ready;
   return {
     text: (id: string) => elements.get(id)?.textContent ?? '',
+    // Some panels (the record, the pending card) are set via innerHTML rather
+    // than textContent, so a check on their markup needs the raw HTML.
+    html: (id: string) => elements.get(id)?.innerHTML ?? '',
     visibleText: () => [...elements.values()].filter((element) => !element.hidden)
       .map((element) => element.textContent).join('\n'),
     async poll() {
@@ -324,5 +340,45 @@ describe('the run monitor', () => {
     expect((await get(`${url}state`)).status).toBe(200);
     await result.monitor!.close();
     await expect(fetch(`${url}state`)).rejects.toThrow();
+  });
+
+  it('keeps only the field the record panel\'s line needs, in the console\'s own words, and drops a row with nothing to say', async () => {
+    const events: LoopEvent[] = [];
+    const result = await run(fnJob('chat', (ctx) => {
+      ctx.emit({ kind: 'engine:tool', ts: 10, path: [], name: 'Read', phase: 'use' });
+      ctx.emit({ kind: 'engine:text', ts: 11, path: [], delta: 'hello there' });
+      // Thinking with nothing in it yet: no row for it at all.
+      ctx.emit({ kind: 'engine:thinking', ts: 12, path: [], delta: '' });
+      ctx.emit({ kind: 'engine:thinking', ts: 13, path: [], delta: 'weighing it' });
+      return 'done';
+    }), { cwd: home, monitor: true, onEvent: (e) => events.push(e) });
+    opened.push(result);
+    const state: MonitorState = JSON.parse((await get(`${monitorEvents(events)[0]!.url}state`)).body);
+    // Exactly the fields the display uses: a timestamp and the line, nothing
+    // it would have to keep re-deriving into its own separate rendering.
+    for (const row of state.events) expect(Object.keys(row).sort()).toEqual(['line', 'ts']);
+    const lines = state.events.map((row) => row.line);
+    expect(lines).toContain(formatEvent({ kind: 'engine:tool', ts: 10, path: [], name: 'Read', phase: 'use' }));
+    expect(lines).toContain(formatEvent({ kind: 'engine:text', ts: 11, path: [], delta: 'hello there' }));
+    expect(lines).toContain(formatEvent({ kind: 'engine:thinking', ts: 13, path: [], delta: 'weighing it' }));
+    expect(lines.some((line) => line.trim() === 'engine:thinking' || line === '')).toBe(false);
+  });
+
+  it('shows the approval question\'s input, and links to it when the input carries a url', async () => {
+    const client = createCallbackClient();
+    const result = await run(
+      approval('approve', {
+        question: 'Ship this?',
+        input: { file: 'src/index.ts', sha: 'abc123', url: 'https://example.invalid/pr/1' },
+      }),
+      { monitor: true, callbacks: client },
+    );
+    opened.push(result);
+    expect(result.outcome.status).toBe('paused');
+    const page = await loadMonitorPage(result.monitor!.url);
+    const pendingHtml = page.html('pending');
+    expect(pendingHtml).toContain('src/index.ts');
+    expect(pendingHtml).toContain('abc123');
+    expect(pendingHtml).toContain('<a href="https://example.invalid/pr/1"');
   });
 });
