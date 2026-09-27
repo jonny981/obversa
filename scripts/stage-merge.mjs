@@ -105,6 +105,7 @@ export const stageBranches = {
   F117: 'docs/public-docs-consistency',
   F118: 'fix/feedback-loop-guard',
   F119: 'docs/tidy-pass',
+  F131: 'docs/where-a-workflow-lives',
 };
 
 export function manageStage(args, options = {}) {
