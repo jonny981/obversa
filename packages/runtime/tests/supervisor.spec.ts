@@ -394,24 +394,14 @@ describe('formatEvent renders every event kind as a line a person can read', () 
     })).toBe('dag • implement: pass');
     expect(formatEvent({
       kind: 'job:end', ts: 1, path: ['dag'], label: 'implement', outcome: { status: 'pass', summary: 'wrote it' },
-    })).toBe('dag • implement: pass — wrote it');
+    })).toBe('dag • implement: pass  wrote it');
   });
 
-  it('engine:text is the first line of the delta, cut at about 100 characters', () => {
-    expect(formatEvent({ kind: 'engine:text', ts: 1, path: ['dag'], delta: 'hello world' })).toBe('dag   hello world');
-    const long = 'x'.repeat(150);
-    const cut = formatEvent({ kind: 'engine:text', ts: 1, path: [], delta: long });
-    expect(cut).toBe(`  ${'x'.repeat(100)}…`);
-    // Only the first line: a second line of a multi-line reply never leaks in.
-    expect(formatEvent({ kind: 'engine:text', ts: 1, path: [], delta: 'first\nsecond' })).toBe('  first');
-  });
-
-  it('engine:thinking produces no row unless it actually carries text', () => {
+  it('engine:text and engine:thinking produce no row: each event is a streamed chunk, and the summary carries the text', () => {
+    expect(formatEvent({ kind: 'engine:text', ts: 1, path: ['dag'], delta: 'hello world' })).toBe('');
+    expect(formatEvent({ kind: 'engine:text', ts: 1, path: [], delta: 'first\nsecond' })).toBe('');
     expect(formatEvent({ kind: 'engine:thinking', ts: 1, path: ['dag'], delta: '' })).toBe('');
-    expect(formatEvent({ kind: 'engine:thinking', ts: 1, path: ['dag'], delta: '   ' })).toBe('');
-    expect(formatEvent({
-      kind: 'engine:thinking', ts: 1, path: ['dag'], delta: 'weighing the options',
-    })).toBe('dag   thinking: weighing the options');
+    expect(formatEvent({ kind: 'engine:thinking', ts: 1, path: ['dag'], delta: 'weighing the options' })).toBe('');
   });
 
   it('engine:tool is the console\'s own line: tool, name, phase', () => {

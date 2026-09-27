@@ -347,7 +347,6 @@ describe('the run monitor', () => {
     const result = await run(fnJob('chat', (ctx) => {
       ctx.emit({ kind: 'engine:tool', ts: 10, path: [], name: 'Read', phase: 'use' });
       ctx.emit({ kind: 'engine:text', ts: 11, path: [], delta: 'hello there' });
-      // Thinking with nothing in it yet: no row for it at all.
       ctx.emit({ kind: 'engine:thinking', ts: 12, path: [], delta: '' });
       ctx.emit({ kind: 'engine:thinking', ts: 13, path: [], delta: 'weighing it' });
       return 'done';
@@ -359,8 +358,8 @@ describe('the run monitor', () => {
     for (const row of state.events) expect(Object.keys(row).sort()).toEqual(['line', 'ts']);
     const lines = state.events.map((row) => row.line);
     expect(lines).toContain(formatEvent({ kind: 'engine:tool', ts: 10, path: [], name: 'Read', phase: 'use' }));
-    expect(lines).toContain(formatEvent({ kind: 'engine:text', ts: 11, path: [], delta: 'hello there' }));
-    expect(lines).toContain(formatEvent({ kind: 'engine:thinking', ts: 13, path: [], delta: 'weighing it' }));
+    // Streamed text and thinking chunks never become rows: a person reads the step's summary instead.
+    expect(lines.some((line) => line.includes('hello there') || line.includes('weighing it'))).toBe(false);
     expect(lines.some((line) => line.trim() === 'engine:thinking' || line === '')).toBe(false);
   });
 
