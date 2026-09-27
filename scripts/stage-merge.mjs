@@ -111,6 +111,9 @@ export const stageBranches = {
   F133: 'docs/judge-stops-the-loop',
   F128: 'feat/render-record',
   F132: 'feat/f132-tool-target',
+  F134: 'fix/record-lines',
+  F135: 'docs/what-a-person-sees',
+  F130: 'feat/f130-refine-judge',
 };
 
 export function manageStage(args, options = {}) {

@@ -115,8 +115,8 @@ describe('renderRecord on a real record', () => {
     );
     const duration = formatDuration((writeDone?.ts ?? 0) - (writeStart?.ts ?? 0));
     const startClock = new Date(writeStart?.ts ?? 0).toISOString().slice(11, 19);
-    expect(markdown).toContain(`### Run 1 — pass, ${duration}, started ${startClock}`);
-    expect(markdown).toContain('### Run 3 — no end recorded, started ');
+    expect(markdown).toContain(`### Run 1: pass, ${duration}, started ${startClock}`);
+    expect(markdown).toContain('### Run 3: no end recorded, started ');
   });
 
   it('prints the kickback before the run it caused', () => {
@@ -144,6 +144,10 @@ describe('renderRecord on a real record', () => {
     expect(markdown).toContain(
       '\nDone. The page now reads as you would explain it to a colleague. Key changes:\n',
     );
+  });
+
+  it('uses no em dashes', () => {
+    expect(markdown).not.toContain('—');
   });
 
   it('keeps lines inside the width except pauses and kickbacks', () => {
@@ -227,8 +231,34 @@ describe('renderRecord on a synthetic record', () => {
   it('renders a top-level skip as skipped and a nested skip as a line', () => {
     const markdown = renderRecord(events);
     expect(markdown).toContain('\n## cleanup\n');
-    expect(markdown).toContain('### Run 1 — skipped, ');
-    expect(markdown).toContain('- inner/step: skipped — the gate did not need it');
+    expect(markdown).toContain('### Run 1: skipped, ');
+    expect(markdown).toContain('- inner/step: skipped, the gate did not need it');
+  });
+
+  it('uses no em dashes', () => {
+    expect(renderRecord(events)).not.toContain('—');
+  });
+});
+
+describe('engine tool targets', () => {
+  const ts = 1790525353006;
+  const events = [
+    { kind: 'dag:start', ts, path: ['t'], depth: 1, nodes: ['write'] },
+    { kind: 'dag:node', ts: ts + 1, path: ['t'], node: 'write', phase: 'start', attempt: 1 },
+    { kind: 'engine:tool', ts: ts + 2, path: ['t', 'write'], name: 'Read', phase: 'use', target: 'src/a.ts' },
+    { kind: 'engine:tool', ts: ts + 3, path: ['t', 'write'], name: 'Read', phase: 'use', target: 'src/b.ts' },
+    { kind: 'engine:tool', ts: ts + 4, path: ['t', 'write'], name: 'Read', phase: 'use', target: 'src/a.ts' },
+    { kind: 'engine:tool', ts: ts + 5, path: ['t', 'write'], name: 'Edit', phase: 'use' },
+    { kind: 'dag:node', ts: ts + 6, path: ['t'], node: 'write', phase: 'done', attempt: 1, outcome: { status: 'pass' } },
+  ] as unknown as LoopEvent[];
+
+  it('dedupes targets in first-seen order and prints them on the tool line', () => {
+    const summary = summarizeRecord(events);
+    expect(summary.nodes[0]!.runs[0]!.tools).toEqual([
+      { name: 'Read', count: 3, targets: ['src/a.ts', 'src/b.ts'] },
+      { name: 'Edit', count: 1, targets: [] },
+    ]);
+    expect(renderRecord(events)).toContain('- Read ×3: src/a.ts, src/b.ts, Edit ×1');
   });
 });
 
@@ -255,7 +285,9 @@ describe('summarizeRecord with a run:end', () => {
     });
     const markdown = renderRecord(events);
     expect(markdown).toContain(
-      `after ${formatDuration(5000)}: pass — all done.`,
+      `after ${formatDuration(5000)}.`,
+    );
+    expect(markdown).toContain('- Outcome: pass. all done',
     );
   });
 });

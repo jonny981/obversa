@@ -1,0 +1,89 @@
+---
+title: "Read a Record"
+description: "Prints a run's record as a page a person scans, or as JSON for a page of your own."
+---
+
+`obversa-record` prints a run's record as Markdown you scan in a minute:
+each step's runs, what they cost, and where a step ran again. The record
+itself stays JSON lines for machines. Use the command after a run, or on
+one that was killed, to see what happened without opening the file. To
+watch a run while it works, use [the run's page](/driving/monitor).
+
+Point it at the file a run wrote with `recordTo`:
+
+```bash Terminal
+npx obversa-record records/public-docs-writer.jsonl
+```
+
+`--json` prints the same structure as JSON for a page of your own. Both
+come from `@obversa/runtime`: `summarizeRecord(events)` returns the
+structure and `renderRecord(events)` the Markdown, so a host can print a
+record without the command.
+
+## Layout
+
+- **The header** carries the run's name, when it started and ended, its
+  outcome, and the tokens in and out, with how many were read from cache. A
+  run that was killed says so: no end recorded.
+- **A section per step**, in the order the steps first ran. A step that ran
+  again after a review has a numbered run for each time, and the findings
+  that made it run again sit above that run: which step returned them, why,
+  and the count against the step's limit.
+- **Each run** shows its outcome and how long it took, the first line of
+  what the step said, each model call with its tokens, and the tool calls
+  folded to one line: the tool, how many times, and the files or commands
+  it touched when the engine reports them.
+- **A pause** is its own line, with the question a person is being asked,
+  or the reason a limit stopped the run.
+- **Anything else** in the record prints as a line with its kind, so
+  nothing is hidden.
+
+The output below is the header and the first step of a run of the writer,
+reader and judge team over a docs page. The run was killed during the
+writer's third round:
+
+```text Output
+# public-docs-writer
+
+- Started 2026-09-27 16:09:13 UTC. No end recorded.
+- Tokens: 1,911,281 in, 17,845 out, 1,761,466 read from cache.
+- Monitor: http://127.0.0.1:54312/
+
+## write
+
+### Run 1: pass, 3m 0s, started 16:09:13
+
+Done. The page now reads as you would explain it to a colleague. Key changes:
+
+- claude-sonnet-4-5-20250929: 802,624 in, 7,903 out
+- Read ×3, Edit ×3, bash ×1
+
+Kickback from route, 1 of 6: round 1: the judge says another round is worth it (0.63); 6 block, 4 should, 0 nit
+
+### Run 2: pass, 1m 22s, started 16:13:25
+
+Fixed all 10 findings. The page now uses words a person would say: reject instead of fail, approve i…
+
+- claude-sonnet-4-5-20250929: 791,430 in, 2,876 out
+- Read ×1, Edit ×6
+
+Kickback from route, 2 of 6: round 2: the judge says another round is worth it (0.63); 3 block, 7 should, 0 nit
+
+### Run 3: no end recorded, started 16:16:10
+
+- Read ×1, Edit ×4
+```
+
+The header says no end was recorded, and the third run of `write` has a
+start and no end: that is where the run was killed. The two lines that
+begin `Kickback` are the route returning the draft to the writer, with the
+judge's reason and the count against the writer's limit of six.
+
+## Next steps
+
+- [The record](/concepts/record): the event log this page is read from, and
+  what a resumed run repeats.
+- [Watch a run in the browser](/driving/monitor): the same lines, live,
+  while the run works.
+- [Runtime](/packages/runtime): `renderRecord` and `summarizeRecord` for a
+  page of your own.

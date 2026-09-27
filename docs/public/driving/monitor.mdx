@@ -80,13 +80,68 @@ shows:
   ran more than once says how many times.
 - **Findings that made a step run again**: which step returned them, to
   which step, why, and how much of that step's budget is used.
-- **Questions waiting for a person**, each with a Yes, a No and a note.
+- **Questions waiting for a person**, each with what it is about, a Yes, a
+  No and a note.
 - **The tail of the record**, the last forty of the two hundred events the
   page keeps in memory. Read the record file for all of them.
 
 The page polls once a second and stops when the run is done. Only the steps
 of the outermost graph appear; a graph nested inside a step shows through
 that step's outcome.
+
+## The record panel
+
+The panel prints the record the way the console does, one line per event,
+through the same `formatEvent` the console uses, so the browser and the
+terminal never disagree about a run. A line starts with the time and the
+step's path, then says what happened:
+
+- **A tool call** names the tool, the phase and what it acted on: the file
+  for a read or an edit, the first two words of a command, the URL of a
+  fetch. Claude Code, the Claude Agent SDK, Grok and OpenCode report the
+  target. Codex and the Anthropic API report no tool calls at all, so a step
+  on one of those seats shows none.
+- **A step's end** carries its summary, so you read what the step concluded
+  without opening the record.
+- **A step that runs again** gets one line: which step returned the
+  findings, which step runs again, why, and how much of that step's limit
+  is used.
+- **Streamed text and thinking** never appear as rows. They arrive as
+  fragments, and the step's summary says what the model concluded.
+
+This is the panel during a run of the writer, reader and judge team over a
+docs page, at the point the route returned the draft to the writer:
+
+```text Example record panel
+16:13:25  public-docs-writer › route • route: fail  round 1: the judge says another round is worth it (0.63); 6 block, 4 should, 0 nit
+16:13:25  public-docs-writer · node route: done (fail)
+16:13:25  public-docs-writer · node approve: done (aborted)
+16:13:25  public-docs-writer ↩ kickback accepted route -> write [1/6]: round 1: the judge says another round is worth it (0.63); 6 block, 4 should, 0 nit
+16:13:25  public-docs-writer · node write: start
+16:13:25  public-docs-writer › write • write
+```
+
+The route's line ends with its summary, the judge's reason. The kickback
+line says the draft went from `route` back to `write`, the first of six
+rounds the writer is allowed, and the next line is the writer starting
+again.
+
+## The approval card
+
+When a step asks a person a question, the card shows what they are
+approving before it asks for the answer:
+
+- **The question**, in the words the step wrote it.
+- **The input**, the thing the question is about. For the approval steps in
+  the examples, that is the file and the sha of its bytes, so the yes covers
+  exactly the bytes the reviewer saw. A changed file is a new question.
+- **A link**, when the input carries a `url`, so the reviewer opens the diff
+  or the page the question is about.
+
+Below those sit a field for a note and the Yes and No buttons. A no with a
+note sends the note to the step the question names as its target, and that
+step runs again with it. A question with no target fails its step, with the
+note as the reason.
 
 ## Answer a waiting question
 
