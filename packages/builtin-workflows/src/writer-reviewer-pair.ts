@@ -19,7 +19,7 @@ export function writerReviewerPair(config: PairConfig) {
     'writer',
     config.writer,
     config,
-    `Write the expected files from the brief. ${expectedFilesPrompt(config.files)} On a retry, apply the review findings before writing again.`,
+    `Write the expected files from the brief. ${expectedFilesPrompt(config.files)} On a refine round, apply the review findings before writing again.`,
     'writer',
   );
   const checkedWriter = requireNonEmptyFiles(

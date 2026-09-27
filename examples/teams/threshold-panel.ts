@@ -38,7 +38,7 @@ function createThresholdPanel(engines: ThresholdPanelEngines = realEngines) {
         writes: ['src/double.mjs', 'test/double.test.mjs'],
         desc: 'Write the function and its test from the brief.',
         gate: 'The files named in the brief exist in the workspace.',
-        retry: 1,
+        refine: 1,
       }),
       stage('test', {
         run: ['node', '--test', 'test/double.test.mjs'],

@@ -342,6 +342,15 @@ export {
   type ReviewContextConfig,
   type RevisionRequestInput,
 } from './core/feedback.js';
+export {
+  judge,
+  isJudge,
+  stopQuestions,
+  type Judge,
+  type JudgeAnswer,
+  type JudgeQuestion,
+  type JudgeQuestions,
+} from './core/judge.js';
 
 export { copyJobMeta, jobMeta, renderPlan, describeConditions } from './core/describe.js';
 export {

@@ -338,7 +338,7 @@ describe('a declarative workflow with a person gate, run twice on one record', (
       brief: { brief: 'Write a note for approval.', files: ['note.md'] },
       roles: { writer: seat(writer, 'writer'), approver: person('Approve the note?') },
       stages: [
-        stage('write', { agent: 'writer', writes: 'note.md', retry: 1 }),
+        stage('write', { agent: 'writer', writes: 'note.md', refine: 1 }),
         stage('approve', { input: 'approver', sendsBackTo: 'write' }),
       ],
     });

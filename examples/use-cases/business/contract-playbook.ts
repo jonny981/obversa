@@ -50,7 +50,7 @@ function createContractPlaybook(engines: ContractPlaybookEngines = realEngines) 
         desc: 'For each clause that breaks a rule, write the replacement wording the playbook allows, with the rule it comes from.',
         gate: 'Every breaking clause has a redline, no redline goes further than its rule, and a checker from another family has accepted the set.',
         reviewedBy: 'playbook-check',
-        retry: 3,
+        refine: 3,
       }),
 
       stage('positions', {
@@ -63,7 +63,7 @@ function createContractPlaybook(engines: ContractPlaybookEngines = realEngines) 
         // Deciding what to hold, what to concede and what is a walk-away is
         // the most judgement-heavy step here, and it had none while listing
         // clauses had three.
-        retry: 3,
+        refine: 3,
       }),
 
       stage('negotiate', {

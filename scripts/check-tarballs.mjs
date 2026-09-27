@@ -192,6 +192,7 @@ export const EXPECTED_FILES = {
     'package/dist/core/guards.d.ts',
     'package/dist/core/isolated.d.ts',
     'package/dist/core/job.d.ts',
+    'package/dist/core/judge.d.ts',
     'package/dist/core/limits.d.ts',
     'package/dist/core/loop.d.ts',
     'package/dist/core/merge.d.ts',

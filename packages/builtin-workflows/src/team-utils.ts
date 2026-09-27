@@ -1,6 +1,7 @@
 import {
   commandSucceeds,
   gateJob,
+  isJudge,
   type Job,
   type KickbackBudget,
 } from '@obversa/runtime';
@@ -65,6 +66,8 @@ export function assertKickbacks(maxKickbacks: KickbackBudget): void {
     throw new TypeError('maxKickbacks must be a non-negative integer or target budget map');
   }
   for (const limit of Object.values(maxKickbacks)) {
+    // A judge validates its own cap in `judge()`; nothing more to check here.
+    if (isJudge(limit)) continue;
     if (!Number.isInteger(limit) || limit < 0) {
       throw new TypeError('maxKickbacks must be a non-negative integer or target budget map');
     }

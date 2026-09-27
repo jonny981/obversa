@@ -50,7 +50,7 @@ function createEditorial(engines: EditorialEngines = realEngines) {
         // The limit. A draft that has not passed after three tries ends
         // the run with the grader's last findings, and the editor is not
         // asked. Raise it for a longer piece; lower it for a caption.
-        retry: 3,
+        refine: 3,
       }),
 
       stage('publish', {

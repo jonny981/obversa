@@ -109,7 +109,7 @@ const shaping = workflow('shaping', {
       desc: 'Uphill: shape each request into a pitch with its five parts.',
       gate: 'Every pitch has a problem, the request\'s appetite, a solution, rabbit holes and no-gos.',
       reviewedBy: 'review',
-      retry: 2,
+      refine: 2,
     }),
   ],
 });
@@ -220,7 +220,7 @@ function buildFor(request: Request) {
         desc: `Uphill, then downhill: build ${pitch} inside its appetite.`,
         gate: 'The change stays inside the pitch\'s no-gos and clear of its rabbit holes.',
         reviewedBy: 'review',
-        retry: 2,
+        refine: 2,
       }),
       stage('scope', {
         agent: 'build',

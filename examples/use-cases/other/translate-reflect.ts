@@ -48,7 +48,7 @@ function createTranslateReflect(engines: TranslateEngines = realEngines) {
         // work is. A translation that honours a glossary and still reads
         // naturally has many defensible answers, so reviewer and writer need
         // room to meet.
-        retry: 3,
+        refine: 3,
       }),
 
       stage('terms', {

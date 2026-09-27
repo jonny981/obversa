@@ -433,7 +433,7 @@ export function featureDelivery(config: FeatureDeliveryConfig) {
           `Read ${PLAN_NOTE} and the tests in ${config.testFiles.join(', ')}. Write the implementation files only.`,
           expectedFilesPrompt(config.files.filter((file) => !testFiles.has(file))),
           ctx.lastGate?.output ? `The latest test command output is:\n${ctx.lastGate.output}` : undefined,
-          'On a retry, apply every complete review finding before writing again.',
+          'On a refine round, apply every complete review finding before writing again.',
         ].filter(Boolean).join('\n'),
         'implement',
       ),

@@ -51,14 +51,14 @@ function workflowInput() {
         desc: 'Record the context.',
         gate: 'The context note exists.',
         reviewedBy: 'review',
-        retry: 3,
+        refine: 3,
       }),
       stage('implement', {
         agent: 'implement',
         writes: 'src/triple.mjs',
         desc: 'Write the source.',
         gate: 'The source exists.',
-        retry: 3,
+        refine: 3,
       }),
       stage('test', {
         run: ['node', '--test', 'test/triple.test.mjs'],
@@ -386,7 +386,7 @@ describe('declarative teams', () => {
     }
   });
 
-  it('keeps a reviewed stage bounded by its declared retry count', () => {
+  it('keeps a reviewed stage bounded by its declared refine count', () => {
     const job = workflow('feature-delivery', workflowInput());
     const nodes = (nodeMeta(job).nodes ?? []) as Array<Record<string, unknown>>;
     const reviewed = nodeMeta(nodes[0]!.job);
@@ -396,7 +396,7 @@ describe('declarative teams', () => {
 
   it('defaults a reviewed stage to one review restart', () => {
     const input = workflowInput();
-    const job = workflow('default-review-retry', {
+    const job = workflow('default-review-refine', {
       ...input,
       stages: [stage('note', {
         agent: 'analyse',
@@ -1203,9 +1203,9 @@ describe('declarative teams', () => {
   it('rejects reviewedBy on non-agent stages', () => {
     const reviewer = seat(scriptedEngine('reviewer', [async () => 'accepted']), 'grok');
     const stages = [
-      stage('run', { run: ['true'], reviewedBy: 'review', retry: 1 } as WorkflowStage),
-      stage('panel', { panel: 'review', reviewedBy: 'review', retry: 1 } as WorkflowStage),
-      stage('input', { input: 'approve', reviewedBy: 'review', retry: 1 } as WorkflowStage),
+      stage('run', { run: ['true'], reviewedBy: 'review', refine: 1 } as WorkflowStage),
+      stage('panel', { panel: 'review', reviewedBy: 'review', refine: 1 } as WorkflowStage),
+      stage('input', { input: 'approve', reviewedBy: 'review', refine: 1 } as WorkflowStage),
     ];
 
     for (const invalidStage of stages) {
@@ -1330,7 +1330,7 @@ describe('declarative teams', () => {
     }
   });
 
-  it('rejects invalid stage links and retry placement before building jobs', () => {
+  it('rejects invalid stage links and refine placement before building jobs', () => {
     const cases: Array<[string, ReturnType<typeof workflowInput>['stages']]> = [
       ['duplicate', [stage('same', { run: ['true'] }), stage('same', { run: ['true'] })]],
       ['self', [stage('same', { run: ['true'], sendsBackTo: 'same' })]],
@@ -1350,7 +1350,7 @@ describe('declarative teams', () => {
           sendsBackTo: 'first',
         }),
       ]],
-      ['retry', [stage('note', { run: ['true'], retry: 1 })]],
+      ['refine', [stage('note', { run: ['true'], refine: 1 })]],
     ];
 
     for (const [name, stages] of cases) {
@@ -1390,7 +1390,7 @@ describe('declarative teams', () => {
         agent: 'writer',
         writes: 'team-output/note.md',
         reviewedBy: 'review',
-        retry: 2,
+        refine: 2,
       })],
     });
 

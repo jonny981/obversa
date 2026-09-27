@@ -45,7 +45,7 @@ function createReport(engines: ReportEngines = realEngines) {
         writes: 'report/draft.md',
         desc: 'The report a customer could read, from the facts alone.',
         gate: 'report/draft.md names every incident id in report/facts.md.',
-        retry: 1,
+        refine: 1,
       }),
       stage('check', {
         run: [process.execPath, 'tools/check-report.mjs'],

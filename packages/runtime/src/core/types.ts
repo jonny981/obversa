@@ -16,7 +16,7 @@
  */
 
 import type { Engine, EngineRef, UsageReceipt } from '../engines/engine.js';
-import type { Memory } from '@obversa/api';
+import type { Memory, TeamSeat } from '@obversa/api';
 import type { LoopError } from './errors.js';
 import type { Budget } from './budget.js';
 import type { EnvHandle, Environment } from '../env/environment.js';
@@ -448,7 +448,42 @@ export interface DagNode {
   acceptsKickbackTo?: string[];
 }
 
-export type KickbackBudget = number | Readonly<Record<string, number>>;
+/**
+ * One question put to a judge, in the judge engine's own shape: `noul` asks
+ * for a probability, `choice` asks for one of the named criteria, `score`
+ * asks for a 0..1 rating per named criterion. `instructions` is what the
+ * judge reads; `criteria` are the standards it answers against.
+ */
+export type JudgeQuestion =
+  | { readonly type: 'noul'; readonly instructions: string; readonly criteria: { readonly true: string; readonly false: string } }
+  | { readonly type: 'choice'; readonly instructions: string; readonly criteria: Readonly<Record<string, string>> }
+  | { readonly type: 'score'; readonly instructions: string; readonly criteria: readonly string[] };
+
+export type JudgeQuestions = Readonly<Record<string, JudgeQuestion>>;
+
+/** One answer, in whichever of these fields its question type fills. */
+export interface JudgeAnswer {
+  readonly noul?: number;
+  readonly probability?: number;
+  readonly choice?: string;
+  readonly probabilities?: Readonly<Record<string, number>>;
+}
+
+/**
+ * A judge, in place of a plain round count, on a `workflow()` stage's
+ * `refine` or a `dag()`'s `maxKickbacks`: a seat that answers typed
+ * questions about the work and the rounds so far, between a review's
+ * verdict and the send-back. `cap` is the hard backstop — reached or not,
+ * it always stops the rounds. Built with `judge()`, never by hand.
+ */
+export interface Judge {
+  readonly kind: 'judge';
+  readonly seat: TeamSeat;
+  readonly cap: number;
+  readonly questions: JudgeQuestions;
+}
+
+export type KickbackBudget = number | Readonly<Record<string, number | Judge>>;
 
 export interface DagConfig {
   name: string;
@@ -733,6 +768,17 @@ export type LoopEvent =
       usage: UsageReceipt;
       role?: 'writer' | 'reviewer';
       stage?: string;
+    }
+  | {
+      // A judge's answer, between a review's verdict and the send-back: what
+      // it was asked, what it answered, and the reason it chose (or 'unknown'
+      // when its reply did not parse). Emitted whether the answer sends the
+      // work back or lets it stand.
+      kind: 'refine:judge';
+      ts: number;
+      path: string[];
+      answers: Readonly<Record<string, JudgeAnswer>>;
+      reason: string;
     }
   | {
       kind: 'log';

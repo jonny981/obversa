@@ -36,7 +36,7 @@ function createFeatureDelivery(engines: FeatureDeliveryEngines = realEngines) {
         desc: 'Read the workspace and write down what the change touches.',
         gate: 'The context note is in the workspace and a reviewer has accepted it.',
         reviewedBy: 'research-review',
-        retry: 3,
+        refine: 3,
       }),
 
       stage('research-requirements', {
@@ -45,7 +45,7 @@ function createFeatureDelivery(engines: FeatureDeliveryEngines = realEngines) {
         desc: 'Turn the brief and the context note into requirements, one REQ-n per line.',
         gate: 'The requirements note is in the workspace and a reviewer has accepted it.',
         reviewedBy: 'research-review',
-        retry: 3,
+        refine: 3,
       }),
 
       stage('plan', {
@@ -54,7 +54,7 @@ function createFeatureDelivery(engines: FeatureDeliveryEngines = realEngines) {
         desc: 'Write an executable plan from the requirements, one check per REQ-n.',
         gate: 'Every requirement has a check in the plan.',
         reviewedBy: 'research-review',
-        retry: 3,
+        refine: 3,
       }),
 
       stage('tests-first', {
@@ -63,7 +63,7 @@ function createFeatureDelivery(engines: FeatureDeliveryEngines = realEngines) {
         desc: 'Write the declared test files from the accepted plan before any implementation exists.',
         gate: 'Every declared test file exists and covers the plan.',
         reviewedBy: 'code-review',
-        retry: 3,
+        refine: 3,
       }),
 
       stage('implement', {
@@ -71,7 +71,7 @@ function createFeatureDelivery(engines: FeatureDeliveryEngines = realEngines) {
         writes: 'src/triple.mjs',
         desc: 'Write the code to the plan and the tests.',
         gate: 'The source file exists.',
-        retry: 3,
+        refine: 3,
       }),
 
       stage('test', {

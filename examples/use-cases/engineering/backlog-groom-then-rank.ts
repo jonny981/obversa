@@ -48,7 +48,7 @@ function createBacklogGroom(engines: BacklogGroomEngines = realEngines) {
         // work is. Grooming a backlog has many defensible answers, so a strict
         // reviewer and a writer need room to meet. Work with one right answer
         // needs less.
-        retry: 3,
+        refine: 3,
       }),
 
       stage('clarify', {
@@ -61,7 +61,7 @@ function createBacklogGroom(engines: BacklogGroomEngines = realEngines) {
         // work is. Grooming a backlog has many defensible answers, so a strict
         // reviewer and a writer need room to meet. Work with one right answer
         // needs less.
-        retry: 3,
+        refine: 3,
       }),
 
       stage('rank', {

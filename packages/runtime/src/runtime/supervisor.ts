@@ -552,6 +552,8 @@ function renderEvent(event: LoopEvent, totals?: UsageTotals): string {
       // that never answers the question being asked.
       return `${at}  ${event.model}: ${call}${totals ? ` (run ${runningTotal(totals)})` : ''}`;
     }
+    case 'refine:judge':
+      return `${at}◆ ${event.reason}`;
     case 'loop:stall':
       return `${at}⏹ stalled after ${event.report.iterations.length} no-progress iterations: ${event.report.reason}`;
     case 'limit:wait':

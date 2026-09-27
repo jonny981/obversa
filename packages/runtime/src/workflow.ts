@@ -12,8 +12,9 @@ import { copyJobMeta } from './core/describe.js';
 import { dag } from './core/dag.js';
 import { LoopError } from './core/errors.js';
 import { loop } from './core/loop.js';
-import { reviewPanel } from './core/feedback.js';
-import type { Job, JobContext, Outcome, ConditionInput } from './core/types.js';
+import { reviewPanel, revisionFromOutcome } from './core/feedback.js';
+import { askJudge, countBySeverity, hasBlockFinding, isJudge, type JudgeRound, type JudgeState } from './core/judge.js';
+import type { Job, JobContext, Judge, Outcome, ConditionInput } from './core/types.js';
 import { RESUME_RECORDED_USAGE, RESUME_STAGE_OUTCOMES } from './runtime/runner.js';
 import type { ResumedStageRecords } from './runtime/persist.js';
 
@@ -47,7 +48,13 @@ export interface WorkflowStageBase {
   readonly optional?: boolean;
   readonly needs?: string | readonly string[];
   readonly sendsBackTo?: string;
-  readonly retry?: number;
+  /**
+   * How many more rounds a reviewed stage or a kickback target gets: a plain
+   * count, or `judge(seat, { cap, questions })` to let a seat decide between
+   * a review's verdict and the send-back, with `cap` as the hard backstop
+   * that stops it regardless of what the judge says.
+   */
+  readonly refine?: number | Judge;
   /** An interrupted attempt may run again without a person's reconciliation. */
   readonly retrySafe?: boolean;
 }
@@ -178,10 +185,15 @@ function writesOf(config: WorkflowStage): string[] {
   return writes;
 }
 
-function retryCount(retry: number | undefined, label: string): number {
-  if (retry === undefined) return 0;
-  if (!Number.isSafeInteger(retry) || retry < 0) throw new TypeError(`${label} must be a non-negative integer`);
-  return retry;
+function refineCount(refine: number | undefined, label: string): number {
+  if (refine === undefined) return 0;
+  if (!Number.isSafeInteger(refine) || refine < 0) throw new TypeError(`${label} must be a non-negative integer`);
+  return refine;
+}
+
+/** The numeric cap, whichever shape `refine` was given. */
+function refineCap(refine: number | Judge): number {
+  return isJudge(refine) ? refine.cap : refine;
 }
 
 function optionalFlag(optional: unknown): boolean | undefined {
@@ -190,15 +202,17 @@ function optionalFlag(optional: unknown): boolean | undefined {
   return optional;
 }
 
-function retryOf(config: WorkflowStage): number {
-  return config.retry === undefined ? 1 : retryCount(config.retry, 'retry');
+function refineOf(config: WorkflowStage): number | Judge {
+  if (config.refine === undefined) return 1;
+  if (isJudge(config.refine)) return config.refine;
+  return refineCount(config.refine, 'refine');
 }
 
-function retryForStage(config: WorkflowStage, receivesKickback: boolean): number {
-  if ('reviewedBy' in config && config.reviewedBy) return retryOf(config);
-  if (receivesKickback) return retryOf(config);
-  if (config.retry !== undefined) {
-    throw new TypeError('retry must be on a reviewed stage or a kickback target');
+function refineForStage(config: WorkflowStage, receivesKickback: boolean): number | Judge {
+  if ('reviewedBy' in config && config.reviewedBy) return refineOf(config);
+  if (receivesKickback) return refineOf(config);
+  if (config.refine !== undefined) {
+    throw new TypeError('refine must be on a reviewed stage or a kickback target');
   }
   return 0;
 }
@@ -571,6 +585,76 @@ function unchangedNoteGuard(
   };
 }
 
+/** Lines added or removed since the previous round (a set difference, not a true diff — cheap and enough to show trend). */
+function lineDiffCount(before: string | undefined, after: string): number {
+  if (before === undefined) return after.split('\n').length;
+  const a = new Set(before.split('\n'));
+  const b = new Set(after.split('\n'));
+  let changed = 0;
+  for (const line of a) if (!b.has(line)) changed += 1;
+  for (const line of b) if (!a.has(line)) changed += 1;
+  return changed;
+}
+
+/**
+ * Wrap a reviewer panel so a judge sits between its verdict and the
+ * send-back. A block finding always goes back on its own — the judge is
+ * never asked about one, so the loop's own `maxReviewRestarts` (the judge's
+ * cap) is the only thing bounding it, same as a plain numeric `refine`.
+ * Otherwise the judge sees the use case, the latest findings, every round
+ * so far, and the file being refined when the stage declares one, and its
+ * answer either lets the review stand (a synthesised pass) or sends it back
+ * with its reasoning folded into the existing rejection.
+ */
+function judgedReview(brief: BriefSource, config: WorkflowStage, cfgJudge: Judge, panel: Job): Job {
+  const useCase = /^Use case:\s*([\s\S]*?)\n\s*\n/m.exec(brief.brief)?.[1]?.replace(/\s+/g, ' ').trim();
+  const file = writesOf(config)[0];
+  const history: JudgeRound[] = [];
+  let previousDraft: string | undefined;
+  return async (ctx) => {
+    let draft: string | undefined;
+    let changedLines: number | undefined;
+    if (file !== undefined) {
+      try {
+        draft = await readFile(join(ctx.workspace.dir, file), 'utf8');
+        changedLines = lineDiffCount(previousDraft, draft);
+      } catch {
+        // Not written yet (a first, failed attempt): state omits the file.
+      }
+      previousDraft = draft;
+    }
+    const panelOutcome: Outcome = await panel({
+      ...ctx,
+      depth: ctx.depth + 1,
+      path: [...ctx.path, 'review-panel'],
+    });
+    if (panelOutcome.status === 'pass') return panelOutcome;
+    const findings = revisionFromOutcome(panelOutcome)?.findings ?? [];
+    if (hasBlockFinding(findings)) return panelOutcome;
+    const round = history.length + 1;
+    const state: JudgeState = {
+      ...(useCase !== undefined ? { useCase } : {}),
+      ...(file !== undefined ? { file } : {}),
+      ...(draft !== undefined ? { draft } : {}),
+      latestFindings: findings,
+      rounds: history,
+      round,
+      cap: cfgJudge.cap,
+    };
+    const { decision } = await askJudge(cfgJudge, state, ctx, ctx.path);
+    history.push({
+      round,
+      findings,
+      counts: countBySeverity(findings),
+      ...(changedLines !== undefined ? { changedLines } : {}),
+    });
+    if (!decision.again) {
+      return { status: 'pass', confidence: panelOutcome.confidence, summary: decision.reason, data: panelOutcome.data };
+    }
+    return { ...panelOutcome, summary: `${panelOutcome.summary} (${decision.reason})` };
+  };
+}
+
 function stageJob(
   brief: BriefSource,
   named: NamedStage,
@@ -591,7 +675,20 @@ function stageJob(
     if (config.reviewedBy === undefined) return job;
     const reviewers = panelRole(roles, config.reviewedBy);
     const panel = reviewerPanel(brief, named, reviewers, files, declaredFiles, undefined);
-    const retry = retryOf(config);
+    const refine = refineOf(config);
+    const cap = refineCap(refine);
+    // Review events use a child path. The jobs' role tags, not their paths,
+    // separate the recorded sides. The outcome passes through. A judge
+    // instead of a plain count sits between the panel's verdict and the
+    // re-entry; `judgedReview` is what does that, so the plain path here
+    // stays exactly what it was.
+    const review: Job = isJudge(refine)
+      ? judgedReview(brief, config, refine, panel)
+      : async (ctx) => panel({
+        ...ctx,
+        depth: ctx.depth + 1,
+        path: [...ctx.path, 'review-panel'],
+      });
     const reviewLoop = loop({
       name: `${named.name}-review`,
       body: job,
@@ -607,15 +704,9 @@ function stageJob(
         }
         return true;
       }, `${named.name} writes`),
-      // Review events use a child path. The jobs' role tags, not their
-      // paths, separate the recorded sides. The outcome passes through.
-      review: async (ctx) => panel({
-        ...ctx,
-        depth: ctx.depth + 1,
-        path: [...ctx.path, 'review-panel'],
-      }),
-      max: retry + 1,
-      maxReviewRestarts: retry,
+      review,
+      max: cap + 1,
+      maxReviewRestarts: cap,
       noProgress: { window: 2, gate: true },
     });
     return copyJobMeta(
@@ -865,7 +956,7 @@ export function workflow(name: string, config: WorkflowConfig): Job {
     if (reviewedBy !== undefined && stageConfig.sendsBackTo !== undefined) {
       throw new TypeError(`stage ${stageName} cannot use both reviewedBy and sendsBackTo`);
     }
-    retryForStage(stageConfig, incomingTargets.has(stageName));
+    refineForStage(stageConfig, incomingTargets.has(stageName));
     optionalFlag(stageConfig.optional);
     if (stageConfig.retrySafe !== undefined && typeof stageConfig.retrySafe !== 'boolean') {
       throw new TypeError('retrySafe must be a boolean');
@@ -904,14 +995,19 @@ export function workflow(name: string, config: WorkflowConfig): Job {
     }
   }
   const timeoutMs = duration(config.options?.timeout);
-  const maxKickbacks: Record<string, number> = {};
+  // Per target, not per sender: `refine` lives on the target's own config, so
+  // every sender to the same target resolves the exact same value here. A
+  // judge is used as-is (dag() consults it); a plain count keeps the prior
+  // max-of-candidates behaviour, though it is always the same number too.
+  const maxKickbacks: Record<string, number | Judge> = {};
   for (const named of config.stages) {
     if (named.config.sendsBackTo !== undefined) {
       const target = config.stages.find((candidate) => candidate.name === named.config.sendsBackTo)!;
-      maxKickbacks[named.config.sendsBackTo] = Math.max(
-        maxKickbacks[named.config.sendsBackTo] ?? 0,
-        retryOf(target.config),
-      );
+      const refine = refineOf(target.config);
+      const existing = maxKickbacks[named.config.sendsBackTo];
+      maxKickbacks[named.config.sendsBackTo] = isJudge(refine)
+        ? refine
+        : Math.max(isJudge(existing) ? 0 : (existing ?? 0), refine);
     }
   }
   const stageJobIdentity = resumeIdentity(workflowName, config);

@@ -1,9 +1,16 @@
 import { describe, it, expect } from 'vitest';
 
-import { run, dag, fnJob, jobMeta, kickback, renderPlan } from '../src/api.ts';
-import type { LoopEvent, Outcome, RunOptions } from '../src/api.ts';
+import { judge, run, dag, fnJob, jobMeta, kickback, renderPlan, revisionRequest } from '../src/api.ts';
+import type { LoopEvent, Outcome, RunOptions, TeamSeat } from '../src/api.ts';
 import { formatEvent } from '../src/runtime/supervisor.ts';
 import { MockEngine } from '../src/testing.ts';
+
+function judgeSeat(responder: () => string): TeamSeat {
+  return {
+    engine: new MockEngine(responder),
+    identity: { adapter: 'mock', provider: 'mock', modelFamily: 'judge', model: 'judge', tools: [] },
+  };
+}
 
 const mockOpts: RunOptions = {
   engine: 'mock',
@@ -478,5 +485,99 @@ describe('a decision node', () => {
     expect(outcome.status).toBe('pass');
     expect(ran).toEqual(['triage']);
     expect(outcome.data).toMatchObject({ triage: { summary: expect.stringContaining('2 failing') } });
+  });
+});
+
+describe('a judge as a dag() maxKickbacks budget', () => {
+  it('sends the work back while the judge says continue, and rejects on its stop the same way a spent cap would', async () => {
+    // A bare dag() has no reviewer concept to reverse: unlike workflow()'s
+    // review loop (which can synthesise a pass), the judge saying stop here
+    // only rejects the kickback, exactly like a spent numeric cap does — the
+    // requesting node's own outcome (a fail, from its own revisionRequest)
+    // stands, so the dag still ends `fail`.
+    let judgeCalls = 0;
+    let round = 0;
+    const events: LoopEvent[] = [];
+    const { outcome } = await run(dag({
+      name: 'judged-kickback',
+      maxKickbacks: {
+        implement: judge(judgeSeat(() => {
+          judgeCalls += 1;
+          return JSON.stringify({ stop_reason: { choice: judgeCalls < 2 ? 'continue' : 'holds' } });
+        }), { cap: 5 }),
+      },
+      nodes: {
+        implement: fnJob('implement', async () => { round += 1; return { status: 'pass', summary: `round ${round}` }; }),
+        review: {
+          needs: ['implement'],
+          job: fnJob('review', () => revisionRequest({
+            target: 'implement', reason: 'needs a pass', findings: [{ evidence: 'x', severity: 'should-fix' }],
+          })),
+        },
+      },
+    }), { ...mockOpts, onEvent: (event) => events.push(event) });
+
+    expect(outcome.status).toBe('fail');
+    // One accepted kickback (the judge said continue), one rejected (the
+    // judge said holds) — implement never gets a third run.
+    expect(round).toBe(2);
+    expect(judgeCalls).toBe(2);
+    const kickbacks = kbEvents(events);
+    expect(kickbacks).toHaveLength(2);
+    expect(kickbacks[0]).toMatchObject({ accepted: true, reason: expect.stringContaining('the judge says another round is worth it') });
+    expect(kickbacks[1]).toMatchObject({ accepted: false, note: 'the judge chose holds' });
+    const judgeEvents = events.filter((e): e is Extract<LoopEvent, { kind: 'refine:judge' }> => e.kind === 'refine:judge');
+    expect(judgeEvents).toHaveLength(2);
+  });
+
+  it('never asks the judge about a block finding: it always goes back, up to the cap', async () => {
+    let judgeCalls = 0;
+    let round = 0;
+    const events: LoopEvent[] = [];
+    const { outcome } = await run(dag({
+      name: 'judged-kickback-block',
+      maxKickbacks: {
+        implement: judge(judgeSeat(() => { judgeCalls += 1; return JSON.stringify({ stop_reason: { choice: 'holds' } }); }), { cap: 2 }),
+      },
+      nodes: {
+        implement: fnJob('implement', async () => { round += 1; return { status: 'pass', summary: `round ${round}` }; }),
+        review: {
+          needs: ['implement'],
+          job: fnJob('review', () => round < 2
+            ? revisionRequest({ target: 'implement', reason: 'a block finding', findings: [{ evidence: 'x', severity: 'block' }] })
+            : { status: 'pass' }),
+        },
+      },
+    }), { ...mockOpts, onEvent: (event) => events.push(event) });
+
+    expect(outcome.status).toBe('pass');
+    expect(round).toBe(2);
+    expect(judgeCalls).toBe(0);
+    expect(kbEvents(events)).toHaveLength(1);
+    expect(kbEvents(events)[0]!.accepted).toBe(true);
+    expect(events.some((e) => e.kind === 'refine:judge')).toBe(false);
+  });
+
+  it('the cap stops it even when the judge always says continue', async () => {
+    let judgeCalls = 0;
+    let round = 0;
+    const { outcome } = await run(dag({
+      name: 'judged-kickback-cap',
+      maxKickbacks: {
+        implement: judge(judgeSeat(() => { judgeCalls += 1; return JSON.stringify({ stop_reason: { choice: 'continue' } }); }), { cap: 2 }),
+      },
+      nodes: {
+        implement: fnJob('implement', async () => { round += 1; return { status: 'pass', summary: `round ${round}` }; }),
+        review: {
+          needs: ['implement'],
+          job: fnJob('review', () => revisionRequest({ target: 'implement', reason: 'still not there', findings: [{ evidence: 'x', severity: 'should-fix' }] })),
+        },
+      },
+    }), mockOpts);
+
+    // The review keeps asking for another pass forever; the cap is what ends it.
+    expect(outcome.status).toBe('fail');
+    expect(judgeCalls).toBe(2);
+    expect(round).toBe(3);
   });
 });

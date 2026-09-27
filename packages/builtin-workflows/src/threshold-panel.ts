@@ -24,7 +24,7 @@ export function thresholdPanel(config: PanelConfig) {
     'implement',
     config.implement,
     config,
-    `Write the expected files from the brief. ${expectedFilesPrompt(config.files)} On a retry, apply the review findings before writing again.`,
+    `Write the expected files from the brief. ${expectedFilesPrompt(config.files)} On a refine round, apply the review findings before writing again.`,
     'implement',
   );
   const checkedImplement = requireNonEmptyFiles(
