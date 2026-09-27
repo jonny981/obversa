@@ -492,7 +492,7 @@ describe('a judge as a dag() maxKickbacks budget', () => {
   it('sends the work back while the judge says continue, and rejects on its stop the same way a spent cap would', async () => {
     // A bare dag() has no reviewer concept to reverse: unlike workflow()'s
     // review loop (which can synthesise a pass), the judge saying stop here
-    // only rejects the kickback, exactly like a spent numeric cap does — the
+    // only rejects the kickback, exactly like a spent numeric cap does, the
     // requesting node's own outcome (a fail, from its own revisionRequest)
     // stands, so the dag still ends `fail`.
     let judgeCalls = 0;
@@ -519,7 +519,7 @@ describe('a judge as a dag() maxKickbacks budget', () => {
 
     expect(outcome.status).toBe('fail');
     // One accepted kickback (the judge said continue), one rejected (the
-    // judge said holds) — implement never gets a third run.
+    // judge said holds), implement never gets a third run.
     expect(round).toBe(2);
     expect(judgeCalls).toBe(2);
     const kickbacks = kbEvents(events);

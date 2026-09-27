@@ -585,7 +585,7 @@ function unchangedNoteGuard(
   };
 }
 
-/** Lines added or removed since the previous round (a set difference, not a true diff — cheap and enough to show trend). */
+/** Lines added or removed since the previous round (a set difference, not a true diff, cheap and enough to show trend). */
 function lineDiffCount(before: string | undefined, after: string): number {
   if (before === undefined) return after.split('\n').length;
   const a = new Set(before.split('\n'));
@@ -598,7 +598,7 @@ function lineDiffCount(before: string | undefined, after: string): number {
 
 /**
  * Wrap a reviewer panel so a judge sits between its verdict and the
- * send-back. A block finding always goes back on its own — the judge is
+ * send-back. A block finding always goes back on its own, the judge is
  * never asked about one, so the loop's own `maxReviewRestarts` (the judge's
  * cap) is the only thing bounding it, same as a plain numeric `refine`.
  * Otherwise the judge sees the use case, the latest findings, every round

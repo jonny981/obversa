@@ -88,7 +88,7 @@ describe('judgeDecision', () => {
 
   it('stops on any choice other than "continue", not just the four documented ones', () => {
     // judgeDecision does not validate the choice against the question's own
-    // criteria keys — a custom question set can name whatever it likes, and
+    // criteria keys, a custom question set can name whatever it likes, and
     // anything but "continue" (or a missing/unparsed choice) reads as a stop.
     expect(judgeDecision({ stop_reason: { choice: 'converged' } })).toEqual({
       again: false,

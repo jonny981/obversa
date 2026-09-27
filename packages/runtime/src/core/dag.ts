@@ -180,7 +180,7 @@ export function dag(config: DagConfig): Job {
   const routeKickbacks = config.maxKickbacks !== undefined
     && (perTargetBudget || maxKickbacks > 0);
   // Every round a target has been asked to redo work, kept only for a judge's
-  // own state — a plain numeric budget never needs this history.
+  // own state, a plain numeric budget never needs this history.
   const judgeHistory = new Map<string, JudgeRound[]>();
 
   // Static graph relations for routing cross-stage feedback (kickback). All pure

@@ -473,7 +473,7 @@ export interface JudgeAnswer {
  * A judge, in place of a plain round count, on a `workflow()` stage's
  * `refine` or a `dag()`'s `maxKickbacks`: a seat that answers typed
  * questions about the work and the rounds so far, between a review's
- * verdict and the send-back. `cap` is the hard backstop — reached or not,
+ * verdict and the send-back. `cap` is the hard backstop, reached or not,
  * it always stops the rounds. Built with `judge()`, never by hand.
  */
 export interface Judge {

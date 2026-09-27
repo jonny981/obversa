@@ -4,11 +4,8 @@
  * a `workflow()` stage's `refine` and on a `dag()`'s `maxKickbacks`, between
  * a review's verdict and the send-back.
  *
- * The default question set and the routing rule below are ported from a
- * proven pattern (`obversa-workflows/public-docs-writer`, and its evidence:
- * six real runs where the `stop_reason` choice moved with the rounds while
- * the noul (probability) answers sat flat) — this file makes that pattern a
- * runtime primitive instead of hand-wired DAG nodes.
+ * The default question set and the routing rule below make a loop that was
+ * first hand-wired as dag nodes into a runtime primitive.
  */
 
 import { agentJob } from './job.js';
@@ -93,7 +90,7 @@ export function hasBlockFinding(findings: readonly FeedbackFinding[] | undefined
 
 const SEVERITIES: readonly FeedbackActionSeverity[] = ['block', 'should-fix', 'nice-to-have', 'approve'];
 
-/** Every finding, counted by severity — the judge reads numbers, not a list to recount itself. */
+/** Every finding, counted by severity, the judge reads numbers, not a list to recount itself. */
 export function countBySeverity(findings: readonly FeedbackFinding[]): Record<FeedbackActionSeverity, number> {
   const counts = Object.fromEntries(SEVERITIES.map((severity) => [severity, 0])) as Record<FeedbackActionSeverity, number>;
   for (const finding of findings) counts[normalizeFeedbackSeverity(finding.severity)] += 1;
@@ -130,14 +127,14 @@ export interface JudgeDecision {
 }
 
 /**
- * Route on the judge's answers. Evidence from six real runs: the noul
- * (probability) answers sat flat across rounds while the chosen `stop_reason`
- * moved with them — so that choice is read first, and a clear yes/no from
- * `holds`/`worth_doing`/`worth_another_round` is the fallback for when the
- * choice does not parse. Neither the cap nor a block finding is checked
+ * Route on the judge's answers. The chosen `stop_reason` is read first: in
+ * use it moves with the rounds while the probability answers stay flat, so it
+ * is the answer that discriminates. A clear yes or no from `holds`,
+ * `worth_doing` or `worth_another_round` is the fallback when the choice does
+ * not parse. Neither the cap nor a block finding is checked
  * here: the caller enforces the cap itself (a loop's own `maxReviewRestarts`,
  * or a dag's own kickback budget), and a block finding never reaches this
- * function — it always goes back without asking the judge.
+ * function, it always goes back without asking the judge.
  */
 export function judgeDecision(answers: Readonly<Record<string, JudgeAnswer>>): JudgeDecision {
   const worth = answers.worth_another_round?.noul ?? answers.worth_another_round?.probability;
@@ -167,7 +164,7 @@ export function judgeDecision(answers: Readonly<Record<string, JudgeAnswer>>): J
  * none agent turn over `state` and `cfg.questions`, parses the reply as the
  * judge engine's own `{ [question]: JudgeAnswer }` shape, and emits
  * `refine:judge` so a person reading the record sees what it answered and
- * why. A reply that fails to parse becomes an empty answers object —
+ * why. A reply that fails to parse becomes an empty answers object ,
  * `judgeDecision` reads that as `stop_reason: 'unknown'`, which is not a
  * chosen stop, so the caller's own cap is what ends the rounds.
  */
