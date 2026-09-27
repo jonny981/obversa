@@ -49,6 +49,8 @@ export const CONSUMER_EXAMPLES = Object.freeze([
   'approval.ts',
   'monitor.ts',
   'tournament.ts',
+  'judge-stops-the-loop.ts',
+  'judge-stops-the-loop.proof.ts',
   'teams/writer-reviewer-pair.ts',
   'teams/writer-reviewer-pair.proof.ts',
   'teams/threshold-panel.ts',
@@ -95,6 +97,7 @@ export const CONSUMER_EXAMPLES = Object.freeze([
  */
 export const REAL_ENGINE_EXAMPLES = Object.freeze([
   { file: 'feature-delivery.ts', why: 'Claude and Codex run the analysis, implementation and review jobs; the page carries one real run' },
+  { file: 'judge-stops-the-loop.ts', why: 'a Claude seat rewrites the page and a Codex seat reads it, with Jev or a recorded replay as the judge; the page carries the proof run' },
   { file: 'teams/writer-reviewer-pair.ts', why: 'a Claude seat writes and a Codex seat reviews; the page carries one real run' },
   { file: 'teams/threshold-panel.ts', why: 'Claude implements, Codex and OpenCode review; the page carries one real run' },
   { file: 'teams/feature-delivery.ts', why: 'Claude analyses and approves, Codex implements, Claude reviews; the page carries one real run' },

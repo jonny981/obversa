@@ -860,6 +860,8 @@ async function main() {
     await copyFile(join(root, 'examples', 'approval.ts'), join(consumerDirectory, 'approval.ts'));
     await copyFile(join(root, 'examples', 'monitor.ts'), join(consumerDirectory, 'monitor.ts'));
     await copyFile(tournamentExamplePath, join(consumerDirectory, 'tournament.ts'));
+    await copyFile(join(root, 'examples', 'judge-stops-the-loop.ts'), join(consumerDirectory, 'judge-stops-the-loop.ts'));
+    await copyFile(join(root, 'examples', 'judge-stops-the-loop.proof.ts'), join(consumerDirectory, 'judge-stops-the-loop.proof.ts'));
     await copyFile(describedTeamExamplePath, join(consumerDirectory, 'described-team.ts'));
     await copyFile(runnerExamplePath, join(consumerDirectory, 'supervised-run.ts'));
     await copyFile(runnerHostPath, join(consumerDirectory, 'supervised-host.mjs'));
