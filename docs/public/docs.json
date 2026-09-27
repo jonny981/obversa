@@ -159,6 +159,7 @@
       {
         "group": "Recording Runs",
         "pages": [
+          "recording/read-a-record",
           "recording/events-and-artifacts",
           "recording/node-attempts"
         ]
