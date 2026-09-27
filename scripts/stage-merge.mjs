@@ -115,6 +115,7 @@ export const stageBranches = {
   F135: 'docs/what-a-person-sees',
   F130: 'feat/f130-refine-judge',
   F136: 'docs/refine-judge',
+  F137: 'release/0.2.0',
 };
 
 export function manageStage(args, options = {}) {

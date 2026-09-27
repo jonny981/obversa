@@ -1,6 +1,6 @@
 {
   "name": "@obversa/engine-anthropic-api",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Run engine requests through the Anthropic Messages API.",
   "author": "Jonny Neill <jonnyneill@hotmail.com>",
   "type": "module",

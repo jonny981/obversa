@@ -1,6 +1,6 @@
 {
   "name": "@obversa/memory-simple",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "In-process memory for tests and short runs.",
   "author": "Jonny Neill <jonnyneill@hotmail.com>",
   "type": "module",

@@ -1,6 +1,6 @@
 {
   "name": "@obversa/runner",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "Bounded supervision for Obversa runs.",
   "keywords": [
     "agent",
@@ -17,14 +17,23 @@
   "publishConfig": {
     "access": "public"
   },
-  "engines": { "node": ">=22.12.0" },
+  "engines": {
+    "node": ">=22.12.0"
+  },
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
   "exports": {
-    ".": { "types": "./dist/index.d.ts", "import": "./dist/index.js" },
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    },
     "./package.json": "./package.json"
   },
-  "files": ["dist", "README.md", "LICENSE"],
+  "files": [
+    "dist",
+    "README.md",
+    "LICENSE"
+  ],
   "scripts": {
     "build": "tsup && tsc -p tsconfig.build.json",
     "test": "vitest run",
@@ -38,8 +47,15 @@
     "@obversa/core": "workspace:*",
     "@obversa/runtime": "workspace:*"
   },
-  "devDependencies": { "@types/node": "22.12.0" },
-  "repository": { "type": "git", "url": "git+https://github.com/jonny981/obversa.git" },
+  "devDependencies": {
+    "@types/node": "22.12.0"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/jonny981/obversa.git"
+  },
   "homepage": "https://docs.obversa.ai",
-  "bugs": { "url": "https://github.com/jonny981/obversa/issues" }
+  "bugs": {
+    "url": "https://github.com/jonny981/obversa/issues"
+  }
 }
