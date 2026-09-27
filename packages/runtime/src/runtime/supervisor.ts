@@ -531,8 +531,16 @@ function renderEvent(event: LoopEvent, totals?: UsageTotals): string {
       return `${at}◇ advisor ${event.label} #${event.call}: ${event.question}`;
     case 'proof':
       return `${at}◈ proof ${event.name}: ${event.artifact.title ?? event.artifact.path ?? event.artifact.kind}`;
-    case 'job:end':
-      return `${at}• ${event.label}: ${event.outcome.status}${event.outcome.late ? ' late' : ''}`;
+    case 'job:end': {
+      const summary = event.outcome.summary ? `  ${event.outcome.summary}` : '';
+      return `${at}• ${event.label}: ${event.outcome.status}${event.outcome.late ? ' late' : ''}${summary}`;
+    }
+    case 'engine:text':
+    case 'engine:thinking':
+      // Each of these is a streamed chunk, not a message: printed one per
+      // event they read as fragments. A person gets the step's summary on its
+      // job:end line instead, and the record keeps neither.
+      return '';
     case 'engine:tool':
       return `${at}  tool ${event.name} ${event.phase}`;
     case 'engine:usage': {
