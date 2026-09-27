@@ -106,6 +106,7 @@ export const stageBranches = {
   F118: 'fix/feedback-loop-guard',
   F119: 'docs/tidy-pass',
   F131: 'docs/where-a-workflow-lives',
+  F129: 'feat/judge-stops-the-loop',
   F127: 'feat/f127-run-page',
 };
 
