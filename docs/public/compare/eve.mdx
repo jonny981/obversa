@@ -54,17 +54,13 @@ both put a person in the loop; the table says where that overlap ends.
 ## Together
 
 An eve agent as an Obversa engine is [coming soon](/packages/engine-eve).
-Each role in a team names its engine, and that is where an eve agent will
+Each seat in a team names its engine, and that is where an eve agent will
 go:
 
-```ts examples/teams/feature-delivery.ts (excerpt) {2-3}
-    roles: {
-      analyse: engines.claude('claude-sonnet-4-5'),
-      implement: engines.codex('gpt-5.6-luna'),
-      'research-review': [engines.codex('gpt-5.6-luna')],
-      'code-review': [engines.claude('claude-sonnet-4-5')],
-      approve: person('Ship this change?'),
-    },
+```ts examples/teams/feature-delivery.ts (excerpt)
+const writer = claude('claude-sonnet-4-5');
+const implementer = codex('gpt-5.6-luna');
+const secondReviewer = opencode('opencode/big-pickle', { executable: resolveCommandExecutable('opencode') });
 ```
 
 Until then, the two meet the other way round: eve's MCP channel lets a
@@ -73,8 +69,8 @@ runs Claude Code as a seat.
 
 ## Next steps
 
-- [Feature delivery](/workflows/feature-team): the nine-stage team with a
-  real run.
+- [Feature delivery](/workflows/feature-team): the flagship team, from a
+  ticket to a change a person is asked to ship.
 - [Evals in an agent workflow](/reviewing/evals): what an eval is here,
   against scoring a run afterwards.
 - [eve Engine](/packages/engine-eve): the coming engine.

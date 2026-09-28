@@ -26,6 +26,7 @@ function treeWith({ readme, example }) {
 }
 
 const wholeFile = "Intro.\n\n```ts\n" + FEATURE + "```\n";
+const contiguousExcerpt = "Intro.\n\n```ts examples/teams/feature-delivery.ts (excerpt)\nconst team = { name: 'feature' };\n\nawait run(team);\n```\n";
 
 function run(files, assertions) {
   const dir = treeWith(files);
@@ -39,11 +40,34 @@ test('a complete example file quoted byte for byte passes', () => {
   });
 });
 
-test('a partial example file fails', () => {
+test('a titled excerpt that is a contiguous run of its file passes', () => {
+  run({ readme: contiguousExcerpt, example: FEATURE }, ({ problems, files }) => {
+    assert.deepEqual(problems, []);
+    assert.equal(files, 1);
+  });
+});
+
+test('a titled excerpt whose lines are not one run of its file fails', () => {
+  const skipsALine = "Intro.\n\n```ts examples/teams/feature-delivery.ts (excerpt)\nconst team = { name: 'feature' };\nawait run(team);\n```\n";
+  run({ readme: skipsALine, example: FEATURE }, ({ problems }) => {
+    assert.equal(problems.length, 1, problems.join('; '));
+    assert.match(problems[0], /not a contiguous run of its lines/);
+  });
+});
+
+test('a titled excerpt of a file that does not exist fails', () => {
+  const missing = "Intro. See examples/teams/feature-delivery.ts.\n\n```ts examples/teams/other.ts (excerpt)\nawait run(team);\n```\n";
+  run({ readme: missing, example: FEATURE }, ({ problems }) => {
+    assert.equal(problems.length, 1, problems.join('; '));
+    assert.match(problems[0], /names examples\/teams\/other\.ts, which does not exist/);
+  });
+});
+
+test('an untitled partial example file fails', () => {
   run({ readme: "Intro.\n\n```ts\nconst team = { name: 'feature' };\n```\n", example: FEATURE }, ({ problems }) => {
     assert.equal(problems.length, 2, problems.join('; '));
     assert.ok(problems.some((problem) => /not a complete example file/.test(problem)));
-    assert.ok(problems.some((problem) => /does not quote the expected example file/.test(problem)));
+    assert.ok(problems.some((problem) => /does not name the expected example file/.test(problem)));
   });
 });
 
@@ -52,7 +76,7 @@ test('an invented block fails', () => {
   run({ readme: invented, example: FEATURE }, ({ problems }) => {
     assert.equal(problems.length, 2, problems.join('; '));
     assert.ok(problems.some((problem) => /not a complete example file/.test(problem)));
-    assert.ok(problems.some((problem) => /does not quote the expected example file/.test(problem)));
+    assert.ok(problems.some((problem) => /does not name the expected example file/.test(problem)));
   });
 });
 
@@ -61,10 +85,16 @@ test('a shell block is a command and is not held to an example', () => {
     ({ problems }) => assert.deepEqual(problems, []));
 });
 
-test('the expected feature delivery file must be quoted', () => {
+test('the expected feature delivery file must be named', () => {
   run({ readme: 'Intro.\n', example: FEATURE }, ({ problems }) => {
     assert.equal(problems.length, 1, problems.join('; '));
-    assert.match(problems[0], /does not quote the expected example file/);
+    assert.match(problems[0], /does not name the expected example file/);
+  });
+});
+
+test('naming the expected file in prose is enough', () => {
+  run({ readme: 'The team is examples/teams/feature-delivery.ts.\n', example: FEATURE }, ({ problems }) => {
+    assert.deepEqual(problems, []);
   });
 });
 

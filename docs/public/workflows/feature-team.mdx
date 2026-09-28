@@ -1,127 +1,203 @@
 ---
 title: "Feature Delivery"
-description: "One brief to a change a person is asked to ship, in nine small steps with a review at each."
+description: "A ticket typed before a model reads it, a plan reviewed across families, two implementations racing on the tests, a judged review, and a person's yes on the exact bytes."
 ---
 
-A ticket lands: add a function, with tests, to a small library. On a good
-team nobody opens the editor first. Someone reads the code the change
-touches, writes down what's needed, and a colleague checks the note. The
-tests come before the code. The code is held to the tests and a review.
-Then a lead is asked whether it ships.
+A ticket lands: add a function, with a test, to a small library. On a good
+team nobody opens the editor first. Someone decides what kind of ticket it
+is and how much care it needs. For a feature, someone writes down what's
+needed and a colleague checks the note. Two people might try the change,
+and the tests decide whose version stands. A reviewer reads it, and if the
+notes are small, someone senior says when the polishing can stop. Then a
+lead is asked whether it ships, and the ticket is closed with a note that
+says what happened.
 
 You want the same shape from your coding agents, without standing over
-each step, and without a model marking its own homework. You want to read
+each step, and without a model marking its own homework. You want the
+expensive seats to see only the work that needs them, and you want to read
 at the end what was decided and why.
 
-Obversa makes that one file. Each stage names who does it, what it writes,
-who reads it and where a red result goes. Inference sits at the leaves, and
-everything between the leaves is a check the run can hold to. This file is
-a nine-stage team: a Claude seat researches and plans with a Codex reviewer
-on each note, a Codex seat writes the tests and then the code with a Claude
-reviewer on each, a test command and a panel hold the implementation to
-green, a person is asked to ship, and the last stage writes the evidence.
+Obversa makes that one file. A small decision model types the ticket as a
+bug or a feature before any expensive seat reads it. For a feature, a
+Claude seat writes the requirements and the plan and a Codex seat reviews
+them. Two seats, Claude and Codex, each implement in their own worktree,
+and the test command picks the winner; a red test sends the loser's fix
+back. A panel of two seats reviews the change, at least one from a family
+that did not write it, and a judge says when another round has stopped
+being worth it. A person approves
+the exact bytes by their sha. The closing note is written from the record
+alone.
 
 ## Run it
 
-Set the project up as [Installation](/get-started/installation) describes,
-put `briefs/triple.md` beside the file, sign in to Claude Code and Codex,
-and run it from the directory the work belongs in:
+Set the project up as [Installation](/get-started/installation) describes.
+Put `briefs/ticket.md` beside the file, with `test/triple.test.mjs` in
+place and `jev.json` for the offline judge and triage, sign in to Claude
+Code and Codex and install OpenCode, and run it from a Git repository you
+are happy for the seats to change. `JEV=live` asks Jev for the triage and
+the judge instead of replaying `jev.json`; it needs `TYPESAFE_ENDPOINT` and
+`TYPESAFE_API_KEY` in the environment:
 
 ```bash Terminal
 npx tsx feature-delivery.ts
 ```
 
-```json Output
+The output below is the proof's offline run. The seats are scripted and the
+judge is recorded, so the words are the script's and the shape is the
+run's:
+
+```text Output, from the offline proof
+▸ run
+feature-delivery ▸ dag (7 nodes)
+feature-delivery · node triage: start
+feature-delivery › triage • triage
+feature-delivery › triage • triage: pass  {"kind":{"choice":"feature"},"risk":{"score":0.4}}
+feature-delivery · node triage: done (pass)
+feature-delivery › research · when met: triage chose a feature: true
+feature-delivery · node research: start
+feature-delivery › research › research workflow:start
+feature-delivery › research › research ▸ dag (1 nodes)
+feature-delivery › research › research · node plan: start
+feature-delivery › research › research › plan › plan-review ▸ loop (max 3)
+feature-delivery › research › research › plan › plan-review · iteration 1
+feature-delivery › research › research › plan › plan-review • plan
+
+feature-delivery › research › research › plan › plan-review   stand-in: 3/1 tok
+feature-delivery › research › research › plan › plan-review • plan: fail  The engine response was not a valid team decision JSON object.
+feature-delivery › research › research › plan › plan-review · until met: plan writes: true
+feature-delivery › research › research › plan › plan-review › review-panel • plan
+feature-delivery › research › research › plan › plan-review › review-panel • plan-1
+
+feature-delivery › research › research › plan › plan-review › review-panel   gpt-5.6-luna: 42/7 tok
+feature-delivery › research › research › plan › plan-review › review-panel • plan-1: fail  missing a check
+feature-delivery › research › research › plan › plan-review › review-panel • plan: fail  Review panel: 0/1 reviewer(s) cleared. - plan-1 [should-fix]: no check named
+feature-delivery › research › research › plan › plan-review · review: fail
+review did not pass (Review panel: 0/1 reviewer(s) cleared. - plan-1 [should-fix]: no check named); re-entering plan-review
+feature-delivery › research › research › plan › plan-review · iteration 2
+feature-delivery › research › research › plan › plan-review • plan
+
+feature-delivery › research › research › plan › plan-review   stand-in: 3/1 tok
+feature-delivery › research › research › plan › plan-review • plan: fail  The engine response was not a valid team decision JSON object.
+feature-delivery › research › research › plan › plan-review · until met: plan writes: true
+feature-delivery › research › research › plan › plan-review › review-panel • plan
+feature-delivery › research › research › plan › plan-review › review-panel • plan-1
+
+feature-delivery › research › research › plan › plan-review › review-panel   gpt-5.6-luna: 42/7 tok
+feature-delivery › research › research › plan › plan-review › review-panel • plan-1: pass  plan covers it
+feature-delivery › research › research › plan › plan-review › review-panel • plan: pass  Review panel: 1/1 reviewer(s) cleared.
+feature-delivery › research › research › plan › plan-review · review: pass
+feature-delivery › research › research › plan › plan-review ◂ pass (2 iter)
+feature-delivery › research › research · node plan: done (pass)
+feature-delivery › research › research ◂ dag pass
+feature-delivery · node research: done (pass)
+feature-delivery · node implement: start
+feature-delivery › implement › implement • implement
+feature-delivery › implement › implement › #0 • candidate-0
+feature-delivery › implement › implement › #0 • candidate-0
+
+feature-delivery › implement › implement › #0   stand-in: 3/1 tok
+feature-delivery › implement › implement › #0 • candidate-0: pass  the candidate produced nothing
+feature-delivery › implement › implement › #0 • candidate-0: fail  candidate-0 did not produce a non-empty file: src/triple.mjs
+implement candidate 0: score -1
+feature-delivery › implement › implement › #1 • candidate-1
+feature-delivery › implement › implement › #1 • candidate-1
+
+feature-delivery › implement › implement › #1   gpt-5.6-luna: 42/7 tok
+feature-delivery › implement › implement › #1 • candidate-1: pass  implemented the plan
+feature-delivery › implement › implement › #1 • candidate-1-test
+feature-delivery › implement › implement › #1 · candidate-1-test met: `node` exited 0
+feature-delivery › implement › implement › #1 • candidate-1-test: pass  `node` exited 0
+feature-delivery › implement › implement › #1 • candidate-1: pass  `node` exited 0
+implement candidate 1: score 1
+feature-delivery › implement › implement • implement: pass  tournament "implement": landed candidate 1 (score 1) of 2
+feature-delivery · node implement: done (pass)
+feature-delivery · node test: start
+feature-delivery › test • test
+feature-delivery › test · test met: `node` exited 0
+feature-delivery › test • test: pass  `node` exited 0
+feature-delivery · node test: done (pass)
+feature-delivery · node review: start
+feature-delivery › review • review
+feature-delivery › review • review
+
+feature-delivery › review   gpt-5.6-luna: 42/7 tok
+feature-delivery › review • review: fail  variable name is unclear
+feature-delivery › review • review
+
+feature-delivery › review   opencode/big-pickle: 6/7 tok
+feature-delivery › review • review: fail  name is unclear
+feature-delivery › review • review: fail  Review panel: 0/2 reviewer(s) cleared. - codex [should-fix]: name the parameter - opencode [should-fix]: triple could be clearer
+feature-delivery · node review: done (fail)
+feature-delivery · node approve: done (aborted)
+feature-delivery · node close: done (aborted)
+feature-delivery › refine-judge • refine:judge
+feature-delivery › refine-judge • refine:judge: pass  {"stop_reason":{"choice":"continue"}}
+feature-delivery ◆ the judge says another round is worth it
+feature-delivery ↩ kickback accepted review -> implement [1/4]: Review panel: 0/2 reviewer(s) cleared. (the judge says another round is worth it)
+feature-delivery · node implement: start
+feature-delivery › implement › implement • implement
+feature-delivery › implement › implement › #0 • candidate-0
+feature-delivery › implement › implement › #0 • candidate-0
+
+feature-delivery › implement › implement › #0   stand-in: 3/1 tok
+feature-delivery › implement › implement › #0 • candidate-0: pass  the candidate produced nothing
+feature-delivery › implement › implement › #0 • candidate-0: fail  candidate-0 did not produce a non-empty file: src/triple.mjs
+implement candidate 0: score -1
+feature-delivery › implement › implement › #1 • candidate-1
+feature-delivery › implement › implement › #1 • candidate-1
+
+feature-delivery › implement › implement › #1   gpt-5.6-luna: 42/7 tok
+feature-delivery › implement › implement › #1 • candidate-1: pass  {"status":"revise","summary":"variable name is unclear","findings":[{"severity":"should-fix","evidence":"name the parameter"}]}
+feature-delivery › implement › implement › #1 • candidate-1-test
+feature-delivery › implement › implement › #1 · candidate-1-test met: `node` exited 0
+feature-delivery › implement › implement › #1 • candidate-1-test: pass  `node` exited 0
+feature-delivery › implement › implement › #1 • candidate-1: pass  `node` exited 0
+implement candidate 1: score 1
+feature-delivery › implement › implement • implement: pass  tournament "implement": landed candidate 1 (score 1) of 2
+feature-delivery · node implement: done (pass)
+feature-delivery · node test: start
+feature-delivery › test • test
+feature-delivery › test · test met: `node` exited 0
+feature-delivery › test • test: pass  `node` exited 0
+feature-delivery · node test: done (pass)
+feature-delivery · node review: start
+feature-delivery › review • review
+feature-delivery › review • review
+
+feature-delivery › review   gpt-5.6-luna: 42/7 tok
+feature-delivery › review • review: pass  the rename covers it
+feature-delivery › review • review
+
+feature-delivery › review   opencode/big-pickle: 6/7 tok
+feature-delivery › review • review: fail  name is unclear
+feature-delivery › review • review: pass  Review panel: 1/2 reviewer(s) cleared. - opencode [should-fix]: triple could be clearer
+feature-delivery · node review: done (pass)
+feature-delivery · node approve: start
+feature-delivery › approve • approve
+feature-delivery › approve • approve: pass  approved: Ship src/triple.mjs as it now stands (sha256 1f6e7373cafe)? A no with a note sends it back to implement.
+feature-delivery · node approve: done (pass)
+feature-delivery · node close: start
+feature-delivery › close • close
+
+feature-delivery › close   stand-in: 3/1 tok
+feature-delivery › close • close: pass  the candidate produced nothing
+feature-delivery · node close: done (pass)
+feature-delivery ◂ dag pass
+◂ run pass (279/61 tok, 186 tok from cache)
 {
-  "status": "paused",
-  "summary": "waiting for a person: Ship this change?",
-  "data": {
-    "research-context": {
-      "status": "pass",
-      "summary": "Review panel: 1/1 reviewer(s) cleared."
-    },
-    "research-requirements": {
-      "status": "pass",
-      "summary": "Review panel: 1/1 reviewer(s) cleared."
-    },
-    "plan": {
-      "status": "pass",
-      "summary": "Review panel: 1/1 reviewer(s) cleared."
-    },
-    "tests-first": {
-      "status": "pass",
-      "summary": "Review panel: 1/1 reviewer(s) cleared."
-    },
-    "implement": {
-      "status": "pass",
-      "summary": "Implemented pure named export `triple(value)` in `src/triple.mjs`."
-    },
-    "test": {
-      "status": "pass",
-      "summary": "`node` exited 0"
-    },
-    "review": {
-      "status": "pass",
-      "summary": "Review panel: 1/1 reviewer(s) cleared.",
-      "data": {
-        "findings": [],
-        "escalatedFindings": [],
-        "errors": [],
-        "results": [
-          {
-            "kind": "verdict",
-            "name": "review-1",
-            "met": true,
-            "reason": "Complete implementation meets all requirements. The triple function is pure, handles all numeric types correctly, and has comprehensive test coverage using Node.js built-in test utilities. All 12 requirements (REQ-1 through REQ-12) are satisfied."
-          }
-        ],
-        "passed": 1,
-        "required": 1,
-        "severityCounts": {}
-      }
-    },
-    "approve": {
-      "status": "paused",
-      "summary": "waiting for a person: Ship this change?",
-      "data": {
-        "requestId": "approve#1#14c929c64692d531f625b23edfed5c9fef79d0016e5b15634d828f1ad1d2d70a",
-        "gateId": "approve",
-        "gateVersion": 1,
-        "digest": "14c929c64692d531f625b23edfed5c9fef79d0016e5b15634d828f1ad1d2d70a",
-        "decisionText": "Ship this change?",
-        "responseSchema": {
-          "type": "object",
-          "properties": {
-            "approved": {
-              "type": "boolean"
-            },
-            "note": {
-              "type": "string"
-            }
-          },
-          "required": [
-            "approved"
-          ]
-        },
-        "input": {
-          "review": "Review panel: 1/1 reviewer(s) cleared."
-        },
-        "presentation": {}
-      }
-    },
-    "close": {
-      "status": "aborted",
-      "summary": "blocked by a failed dependency"
-    }
-  }
+  "status": "pass",
+  "summary": "dag \"feature-delivery\": all 7 node(s) green",
+  "recordPath": "records/feature-delivery.jsonl"
 }
 ```
 
-Everything before `approve` ran on real engines and passed. The run stopped
-at `approve` with the question on the record, because a person answers it,
-not the file, and `close` waits behind it. Use a stored callbacks client to
-carry the answer into the next run; [A person decides](/patterns/approval)
-shows how.
+Triage called the ticket a feature, so the plan was written and reviewed:
+one round of findings, then the panel accepted it. The tournament ran two
+candidates; one wrote nothing and failed its own check, the other passed
+the test and landed. The review panel returned the first cut over a naming
+finding, the judge said another round was worth it, and the second cut
+cleared. The person's yes named the sha of the file as it stood, and the
+closing note was written from the record.
 
 <Warning>
 Run the file in a directory you're happy for a model to change. The Claude
@@ -131,103 +207,175 @@ can.
 
 ## The file
 
-The roles are named once. Two Claude seats and two Codex seats, crossed so
-that every reviewer reads a writer from the other family, and a person for
-the last word:
+Three seats from three model families, so whichever candidate wins, at
+least one reviewer is from another family:
 
-```ts examples/teams/feature-delivery.ts (excerpt) {5-11}
-  return workflow('feature-delivery', {
-    brief: briefFromFile('briefs/triple.md'),
-    options: { timeout: '10m' },
+```ts examples/teams/feature-delivery.ts (excerpt)
+const writer = claude('claude-sonnet-4-5');
+const implementer = codex('gpt-5.6-luna');
+const secondReviewer = opencode('opencode/big-pickle', { executable: resolveCommandExecutable('opencode') });
+```
 
-    roles: {
-      analyse: engines.claude('claude-sonnet-4-5'),
-      implement: engines.codex('gpt-5.6-luna'),
-      'research-review': [engines.codex('gpt-5.6-luna')],
-      'code-review': [engines.claude('claude-sonnet-4-5')],
-      approve: person('Ship this change?'),
+The fourth seat is Jev, a small decision model that answers typed
+questions. Under `JEV=live` it is the real engine, wrapped so a step gets
+text back; otherwise `jev.json` beside the file replays one recorded answer
+per call, one list for triage and one for the judge.
+
+Triage is a typed question over the ticket, answered before any expensive
+seat runs. Its answer routes the rest:
+
+```ts examples/teams/feature-delivery.ts (excerpt) {2-3,10}
+/** A cheap typed decision: bug or feature, and how risky. The expensive seats never see it. */
+const triage: Job = agentJob({
+  label: 'triage', engine: jev.engine, model: jev.identity.model, workspaceMode: 'none', tools: [], leaf: true,
+  prompt: JSON.stringify({
+    state: { ticket: brief },
+    questions: {
+      kind: { type: 'choice', instructions: 'Is this ticket a bug fix or a feature?', criteria: { bug: 'Fixes broken behaviour.', feature: 'Adds behaviour that did not exist.' } },
+      risk: { type: 'score', instructions: 'How risky is this change?', criteria: ['blast radius', 'reversibility'] },
     },
+  }),
+  outcome: (text) => ({ status: 'pass', summary: text.slice(0, 120), data: JSON.parse(text) }),
+});
 ```
 
-Research comes first. Three stages read the workspace, turn the brief into
-requirements, one `REQ-n` per line, and write a plan with one check per
-requirement. Each note is reviewed by the Codex seat before the next stage
-begins, and a writer sent findings runs again with them up to three times:
+For a feature, the plan is a `workflow()` nested in the graph: a Claude seat
+writes the requirements and the plan, a Codex seat reviews them, and the
+writer goes again up to twice:
 
-```ts examples/teams/feature-delivery.ts (excerpt) {6-7}
-      stage('research-context', {
-        agent: 'analyse',
-        writes: 'team-output/research-context.md',
-        desc: 'Read the workspace and write down what the change touches.',
-        gate: 'The context note is in the workspace and a reviewer has accepted it.',
-        reviewedBy: 'research-review',
-        refine: 3,
-      }),
+```ts examples/teams/feature-delivery.ts (excerpt) {3,5}
+/** A feature only: requirements and a plan, one Claude writer, one Codex panel, refined up to twice. */
+const research = workflow('research', {
+  brief,
+  roles: { analyse: writer, review: [implementer] },
+  stages: [{
+    name: 'plan', config: {
+      agent: 'analyse', writes: 'team-output/plan.md', reviewedBy: 'review', refine: 2,
+      desc: 'Write requirements and a plan from the ticket, one check per requirement.',
+      gate: 'The plan is in the workspace and the panel has accepted it.',
+    },
+  }],
+});
 ```
 
-Then the tests, then the code, then the checks. `writes` names the files a
-stage may produce, so `tests-first` can't write the implementation; its
-tests may be red until `implement` turns them green. A red test run and a
-rejected review both go to `implement` with the findings:
+The implementation is a tournament. Each candidate runs in its own
+worktree, writes `src/triple.mjs` from the plan and runs the test; the
+candidate that passes wins and its work lands:
 
-```ts examples/teams/feature-delivery.ts (excerpt) {3,19,22,30}
-      stage('tests-first', {
-        agent: 'implement',
-        writes: 'test/triple.test.mjs',
-        desc: 'Write the declared test files from the accepted plan before any implementation exists.',
-        gate: 'Every declared test file exists and covers the plan.',
-        reviewedBy: 'code-review',
-        refine: 3,
-      }),
-
-      stage('implement', {
-        agent: 'implement',
-        writes: 'src/triple.mjs',
-        desc: 'Write the code to the plan and the tests.',
-        gate: 'The source file exists.',
-        refine: 3,
-      }),
-
-      stage('test', {
-        run: ['node', '--test', 'test/triple.test.mjs'],
-        desc: 'Run the tests; a red run goes back to implement with the output.',
-        gate: 'The test command exits 0.',
-        sendsBackTo: 'implement',
-      }),
-
-      stage('review', {
-        panel: 'code-review',
-        agree: 1,
-        desc: 'Read the change and the test result against the plan.',
-        gate: 'At least one reviewer has accepted the change.',
-        sendsBackTo: 'implement',
-      }),
-
-      stage('approve', {
-        input: 'approve',
-        desc: 'Put the verified change in front of a person.',
-        gate: 'A person has said yes.',
-      }),
+```ts examples/teams/feature-delivery.ts (excerpt) {2,17,19-23}
+/** Two candidates, two worktrees, one command deciding: the tournament helper the runtime ships. */
+const candidate = (seat: TeamSeat, i: number) => fnJob(`candidate-${i}`, async (ctx) => {
+  const plan = existsSync(join(ctx.workspace.dir, 'team-output/plan.md'))
+    ? await readFile(join(ctx.workspace.dir, 'team-output/plan.md'), 'utf8')
+    : brief;
+  // A retried round forks from HEAD, which already carries a prior round's
+  // landed file. Remove it first so a candidate that writes nothing fails
+  // this attempt instead of silently passing on an old implementation.
+  await rm(join(ctx.workspace.dir, 'src/triple.mjs'), { force: true });
+  const write = agentJob({
+    label: `candidate-${i}`, engine: seat.engine, model: seat.identity.model,
+    tools: ['Write'], allowedTools: ['Write'], workspaceMode: 'write', leaf: true,
+    prompt: `${plan}\n\nWrite src/triple.mjs only.`,
+  });
+  const written = await requireNonEmptyFiles(`candidate-${i}`, write, ctx.workspace.dir, ['src/triple.mjs'])(ctx);
+  if (written.status !== 'pass') return written;
+  return commandJob(`candidate-${i}-test`, ['node', '--test', 'test/triple.test.mjs'])(ctx);
+});
+const implement = tournament({
+  name: 'implement', n: 2, concurrency: 1,
+  candidate: (i) => candidate(i === 0 ? writer : implementer, i),
+  judge: (outcome) => (outcome.status === 'pass' ? 1 : 0),
+});
 ```
 
-Where a stage declares `writes`, the package checks those files after the
-job. Where it runs a command, the exit code decides. Where a panel reviews
-it, the reviewers' decision decides. A model's report of its own work never
-passes a stage by itself. `workflow()` refuses the team before any model
-runs if a panel shares a family with the stage it reviews. A reviewer's
-decision is its reply; a reply with no decision is asked for once more,
-then the run pauses with an engine error, not a rejection. A writer sent
-findings must change its note: if the same bytes come back, the stage ends
-with a plain summary instead of a second identical review.
+The review is a panel of the Codex seat and the OpenCode seat, and one
+acceptance is enough. A rejection names `implement` as the step that owns
+the fix, with each finding tagged block or should-fix:
+
+```ts examples/teams/feature-delivery.ts (excerpt) {4,8-9,13-14}
+/** Codex and OpenCode, agreeing once is enough; a block always goes back, otherwise Jev decides. */
+const reviewer = (seat: TeamSeat): Job => agentJob({
+  label: 'review', engine: seat.engine, model: seat.identity.model, tools: [seat.identity.adapter === 'opencode-cli' ? 'read' : 'Read'], workspaceMode: 'read', leaf: true,
+  prompt: 'Read src/triple.mjs against the plan. Reply as one JSON object: {"status":"pass"|"revise","summary":"...","findings":[{"severity":"block"|"should-fix","evidence":"..."}]}.',
+  outcome: (text) => {
+    const decision = JSON.parse(text.slice(text.indexOf('{'))) as { status: string; summary: string; findings?: { severity: 'block' | 'should-fix'; evidence: string }[] };
+    return decision.status === 'pass'
+      ? { status: 'pass', summary: decision.summary }
+      : revisionRequest({ target: 'implement', reason: decision.summary, findings: decision.findings });
+  },
+});
+const review = reviewPanel({
+  label: 'review', target: 'implement', pass: 1, concurrency: 1,
+  reviewers: [{ name: 'codex', job: reviewer(implementer) }, { name: 'opencode', job: reviewer(secondReviewer) }],
+});
+```
+
+The approval reads the file as it stands, puts its sha in the question, and
+sends a no back to `implement` with the person's note. In the offline run
+the answer comes from `approve.json`; without that file the run pauses until
+a person answers:
+
+```ts examples/teams/feature-delivery.ts (excerpt) {2-4,6}
+const approve: Job = async (ctx) => {
+  const bytes = await readFile(join(ctx.workspace.dir, 'src/triple.mjs'));
+  const sha256 = createHash('sha256').update(bytes).digest('hex');
+  const recorded = existsSync('approve.json') ? JSON.parse(await readFile('approve.json', 'utf8')) : undefined;
+  return approval('approve', {
+    question: `Ship src/triple.mjs as it now stands (sha256 ${sha256.slice(0, 12)})? A no with a note sends it back to implement.`,
+    input: { file: 'src/triple.mjs', sha256 }, target: 'implement',
+    ...(recorded ? { answer: () => recorded } : {}),
+  })(ctx);
+};
+```
+
+The graph puts the seven steps in order. Research runs only when triage
+chose a feature. Research and review run in their own worktrees, so a
+rejected review is discarded rather than merged and the next round of the
+tournament forks from an untouched branch. A red test or a rejected review
+goes back to `implement`, and Jev, capped at four rounds, says whether the
+next round is worth it; a finding tagged block goes back without asking:
+
+```ts examples/teams/feature-delivery.ts (excerpt) {7-9,12,19}
+const team = dag({
+  name: 'feature-delivery',
+  nodes: {
+    triage,
+    // Isolated so its commit lands on HEAD: the tournament's own worktrees
+    // fork from HEAD, and need the plan committed there to read it.
+    research: { needs: 'triage', optional: true, isolate: true, when: predicate((ctx) => (ctx.needs?.triage?.data as { kind?: { choice?: string } })?.kind?.choice === 'feature', 'triage chose a feature'), job: research },
+    implement: { needs: ['triage', 'research'], job: implement },
+    test: { needs: 'implement', job: commandJob('test', ['node', '--test', 'test/triple.test.mjs'], { target: 'implement' }) },
+    // Isolated for the same reason as research: on a reject the worktree is
+    // discarded rather than merged, so a second kickback into `implement`
+    // forks its own tournament round from an untouched HEAD.
+    review: { needs: 'test', isolate: true, job: review },
+    approve: { needs: 'review', job: approve },
+    close: { needs: 'approve', job: close },
+  },
+  // A block finding always goes back on its own; otherwise Jev, capped at 4
+  // rounds, says when another pass on `implement` stops being worth it.
+  maxKickbacks: { implement: judge(jev, { cap: 4 }) },
+});
+```
+
+Every step says what it does and where a rejection sends the work:
+
+| Step | Done when |
+| --- | --- |
+| `triage` | Jev has typed the ticket as a bug or a feature. |
+| `research` | Runs for a feature only; the panel has accepted the plan. |
+| `implement` | The tournament has a passing candidate to land. |
+| `test` | The test command exits 0 against the landed candidate. |
+| `review` | Codex or OpenCode has accepted the change. |
+| `approve` | A person has said yes to the sha that landed. |
+| `close` | The evidence note is in the workspace, from the record alone. |
 
 <Accordion title="The brief">
 
-```text briefs/triple.md
----
-files: ["src/triple.mjs"]
----
+The ticket the proof writes to `briefs/ticket.md`:
 
-Deliver a pure triple(value) function in src/triple.mjs with a Node test in test/triple.test.mjs.
+```text briefs/ticket.md
+Deliver a pure triple(value) function in src/triple.mjs. A Node test for it is at test/triple.test.mjs. This is a feature: no existing triple function exists yet.
 ```
 
 </Accordion>
@@ -235,115 +383,210 @@ Deliver a pure triple(value) function in src/triple.mjs with a Node test in test
 <Accordion title="Full file">
 
 ```ts examples/teams/feature-delivery.ts
+import { createHash } from 'node:crypto';
+import { existsSync } from 'node:fs';
+import { readFile, rm } from 'node:fs/promises';
+import { join } from 'node:path';
+
+import { resolveCommandExecutable } from '@obversa/core/command';
 import { claude } from '@obversa/engine-claude-cli';
 import { codex } from '@obversa/engine-codex-cli';
-import { run } from '@obversa/runtime';
-import { briefFromFile, person, stage, workflow, type TeamSeat } from '@obversa/runtime';
-
-interface FeatureDeliveryEngines {
-  readonly claude: (model: string) => TeamSeat;
-  readonly codex: (model: string) => TeamSeat;
-}
-
-const realEngines: FeatureDeliveryEngines = { claude, codex };
+import { JevApiEngine } from '@obversa/engine-jev-api';
+import { opencode } from '@obversa/engine-opencode-cli';
+import {
+  agentJob,
+  approval,
+  briefFromFile,
+  commandJob,
+  dag,
+  finalResultPart,
+  fnJob,
+  formatEvent,
+  judge,
+  predicate,
+  reviewPanel,
+  revisionRequest,
+  run,
+  tournament,
+  workflow,
+  type Engine,
+  type Job,
+  type TeamSeat,
+} from '@obversa/runtime';
+import { requireNoFiles, requireNonEmptyFiles } from '@obversa/runtime/workflow-support';
 
 /**
- * A feature, delivered the way a team delivers one. The roles are named once;
- * every stage is a small block of nouns: who does it, what it writes, who
- * reads it, where a red result goes back to. Inference happens only where a
- * role is named; every other stage is a command or a person.
+ * A ticket, delivered the way a team delivers one: a cheap typed decision
+ * routes it before an expensive seat sees it; the requirements and the plan
+ * are cross-model reviewed; two seats implement in their own worktrees and a
+ * command picks the winner; a red test sends the loser's fix back; a panel
+ * reviews the change with a judge standing between its verdict and another
+ * round; a person approves the exact bytes; the last note comes from the
+ * record alone. Composed as a `dag()` of the runtime's own pieces;
+ * `research` is the one part small enough to stay a nested `workflow()`.
  */
-function createFeatureDelivery(engines: FeatureDeliveryEngines = realEngines) {
-  return workflow('feature-delivery', {
-    brief: briefFromFile('briefs/triple.md'),
-    options: { timeout: '10m' },
+const writer = claude('claude-sonnet-4-5');
+const implementer = codex('gpt-5.6-luna');
+const secondReviewer = opencode('opencode/big-pickle', { executable: resolveCommandExecutable('opencode') });
 
-    roles: {
-      analyse: engines.claude('claude-sonnet-4-5'),
-      implement: engines.codex('gpt-5.6-luna'),
-      'research-review': [engines.codex('gpt-5.6-luna')],
-      'code-review': [engines.claude('claude-sonnet-4-5')],
-      approve: person('Ship this change?'),
+/** Jev, wrapped so `agentJob` gets text back: its answer is a structured part. */
+function jevSeat(): TeamSeat {
+  const endpoint = process.env.TYPESAFE_ENDPOINT;
+  const apiKey = process.env.TYPESAFE_API_KEY;
+  if (!endpoint || !apiKey) throw new Error('JEV=live needs TYPESAFE_ENDPOINT and TYPESAFE_API_KEY');
+  const api = new JevApiEngine({ endpoint, apiKey });
+  const engine: Engine = {
+    name: 'jev-api',
+    async run(request, onEvent, signal) {
+      const result = await api.run(request, onEvent, signal);
+      const part = finalResultPart(result);
+      if (part.kind !== 'structured') return result;
+      return { ...result, parts: [{ kind: 'assistant', text: JSON.stringify(part.value), final: true }] };
     },
-
-    stages: [
-      stage('research-context', {
-        agent: 'analyse',
-        writes: 'team-output/research-context.md',
-        desc: 'Read the workspace and write down what the change touches.',
-        gate: 'The context note is in the workspace and a reviewer has accepted it.',
-        reviewedBy: 'research-review',
-        refine: 3,
-      }),
-
-      stage('research-requirements', {
-        agent: 'analyse',
-        writes: 'team-output/research-requirements.md',
-        desc: 'Turn the brief and the context note into requirements, one REQ-n per line.',
-        gate: 'The requirements note is in the workspace and a reviewer has accepted it.',
-        reviewedBy: 'research-review',
-        refine: 3,
-      }),
-
-      stage('plan', {
-        agent: 'analyse',
-        writes: 'team-output/plan.md',
-        desc: 'Write an executable plan from the requirements, one check per REQ-n.',
-        gate: 'Every requirement has a check in the plan.',
-        reviewedBy: 'research-review',
-        refine: 3,
-      }),
-
-      stage('tests-first', {
-        agent: 'implement',
-        writes: 'test/triple.test.mjs',
-        desc: 'Write the declared test files from the accepted plan before any implementation exists.',
-        gate: 'Every declared test file exists and covers the plan.',
-        reviewedBy: 'code-review',
-        refine: 3,
-      }),
-
-      stage('implement', {
-        agent: 'implement',
-        writes: 'src/triple.mjs',
-        desc: 'Write the code to the plan and the tests.',
-        gate: 'The source file exists.',
-        refine: 3,
-      }),
-
-      stage('test', {
-        run: ['node', '--test', 'test/triple.test.mjs'],
-        desc: 'Run the tests; a red run goes back to implement with the output.',
-        gate: 'The test command exits 0.',
-        sendsBackTo: 'implement',
-      }),
-
-      stage('review', {
-        panel: 'code-review',
-        agree: 1,
-        desc: 'Read the change and the test result against the plan.',
-        gate: 'At least one reviewer has accepted the change.',
-        sendsBackTo: 'implement',
-      }),
-
-      stage('approve', {
-        input: 'approve',
-        desc: 'Put the verified change in front of a person.',
-        gate: 'A person has said yes.',
-      }),
-
-      stage('close', {
-        agent: 'analyse',
-        writes: ['team-output/evidence.md', 'team-output/learning.md'],
-        desc: 'Write the evidence of the run and what was learned, from the record alone.',
-        gate: 'Both notes are in the workspace.',
-      }),
-    ],
-  });
+  };
+  return { engine, identity: { adapter: 'jev-api', provider: 'jev', modelFamily: 'jev', model: 'jev', tools: [] } };
 }
+/**
+ * Offline, a recorded answer replaces Jev so the example runs with no key:
+ * `jev.json` is `{ triage: [...], judge: [...] }`, one ordered list per
+ * purpose (the judge's own prompt, built by `askJudge`, is the only one
+ * carrying a `cap`), each read round-robin and repeating its last entry.
+ */
+async function recordedJev(): Promise<TeamSeat> {
+  const scripts = JSON.parse(await readFile('jev.json', 'utf8')) as Record<string, unknown[]>;
+  const seen: Record<string, number> = {};
+  const engine: Engine = {
+    name: 'jev-recorded',
+    async run(request) {
+      const purpose = request.prompt.includes('"cap"') ? 'judge' : 'triage';
+      const list = scripts[purpose] ?? [];
+      const i = seen[purpose] ?? 0;
+      seen[purpose] = i + 1;
+      const text = JSON.stringify(list[Math.min(i, list.length - 1)]);
+      const selection = { adapter: 'jev-recorded', adapterVersion: null, provider: 'jev', modelFamily: 'jev', model: 'jev', executable: null, capabilities: [] };
+      return { parts: [{ kind: 'assistant', text, final: true }], usage: { kind: 'unknown' }, requested: selection, effective: selection };
+    },
+  };
+  return { engine, identity: { adapter: 'jev-recorded', provider: 'jev', modelFamily: 'jev', model: 'jev', tools: [] } };
+}
+const jev = process.env.JEV === 'live' ? jevSeat() : await recordedJev();
 
-const result = await run(createFeatureDelivery());
-console.log(JSON.stringify(result.outcome, null, 2));
+const { brief } = briefFromFile('briefs/ticket.md');
+
+/** A cheap typed decision: bug or feature, and how risky. The expensive seats never see it. */
+const triage: Job = agentJob({
+  label: 'triage', engine: jev.engine, model: jev.identity.model, workspaceMode: 'none', tools: [], leaf: true,
+  prompt: JSON.stringify({
+    state: { ticket: brief },
+    questions: {
+      kind: { type: 'choice', instructions: 'Is this ticket a bug fix or a feature?', criteria: { bug: 'Fixes broken behaviour.', feature: 'Adds behaviour that did not exist.' } },
+      risk: { type: 'score', instructions: 'How risky is this change?', criteria: ['blast radius', 'reversibility'] },
+    },
+  }),
+  outcome: (text) => ({ status: 'pass', summary: text.slice(0, 120), data: JSON.parse(text) }),
+});
+
+/** A feature only: requirements and a plan, one Claude writer, one Codex panel, refined up to twice. */
+const research = workflow('research', {
+  brief,
+  roles: { analyse: writer, review: [implementer] },
+  stages: [{
+    name: 'plan', config: {
+      agent: 'analyse', writes: 'team-output/plan.md', reviewedBy: 'review', refine: 2,
+      desc: 'Write requirements and a plan from the ticket, one check per requirement.',
+      gate: 'The plan is in the workspace and the panel has accepted it.',
+    },
+  }],
+});
+
+/** Two candidates, two worktrees, one command deciding: the tournament helper the runtime ships. */
+const candidate = (seat: TeamSeat, i: number) => fnJob(`candidate-${i}`, async (ctx) => {
+  const plan = existsSync(join(ctx.workspace.dir, 'team-output/plan.md'))
+    ? await readFile(join(ctx.workspace.dir, 'team-output/plan.md'), 'utf8')
+    : brief;
+  // A retried round forks from HEAD, which already carries a prior round's
+  // landed file. Remove it first so a candidate that writes nothing fails
+  // this attempt instead of silently passing on an old implementation.
+  await rm(join(ctx.workspace.dir, 'src/triple.mjs'), { force: true });
+  const write = agentJob({
+    label: `candidate-${i}`, engine: seat.engine, model: seat.identity.model,
+    tools: ['Write'], allowedTools: ['Write'], workspaceMode: 'write', leaf: true,
+    prompt: `${plan}\n\nWrite src/triple.mjs only.`,
+  });
+  const written = await requireNonEmptyFiles(`candidate-${i}`, write, ctx.workspace.dir, ['src/triple.mjs'])(ctx);
+  if (written.status !== 'pass') return written;
+  return commandJob(`candidate-${i}-test`, ['node', '--test', 'test/triple.test.mjs'])(ctx);
+});
+const implement = tournament({
+  name: 'implement', n: 2, concurrency: 1,
+  candidate: (i) => candidate(i === 0 ? writer : implementer, i),
+  judge: (outcome) => (outcome.status === 'pass' ? 1 : 0),
+});
+
+/** Codex and OpenCode, agreeing once is enough; a block always goes back, otherwise Jev decides. */
+const reviewer = (seat: TeamSeat): Job => agentJob({
+  label: 'review', engine: seat.engine, model: seat.identity.model, tools: [seat.identity.adapter === 'opencode-cli' ? 'read' : 'Read'], workspaceMode: 'read', leaf: true,
+  prompt: 'Read src/triple.mjs against the plan. Reply as one JSON object: {"status":"pass"|"revise","summary":"...","findings":[{"severity":"block"|"should-fix","evidence":"..."}]}.',
+  outcome: (text) => {
+    const decision = JSON.parse(text.slice(text.indexOf('{'))) as { status: string; summary: string; findings?: { severity: 'block' | 'should-fix'; evidence: string }[] };
+    return decision.status === 'pass'
+      ? { status: 'pass', summary: decision.summary }
+      : revisionRequest({ target: 'implement', reason: decision.summary, findings: decision.findings });
+  },
+});
+const review = reviewPanel({
+  label: 'review', target: 'implement', pass: 1, concurrency: 1,
+  reviewers: [{ name: 'codex', job: reviewer(implementer) }, { name: 'opencode', job: reviewer(secondReviewer) }],
+});
+
+const approve: Job = async (ctx) => {
+  const bytes = await readFile(join(ctx.workspace.dir, 'src/triple.mjs'));
+  const sha256 = createHash('sha256').update(bytes).digest('hex');
+  const recorded = existsSync('approve.json') ? JSON.parse(await readFile('approve.json', 'utf8')) : undefined;
+  return approval('approve', {
+    question: `Ship src/triple.mjs as it now stands (sha256 ${sha256.slice(0, 12)})? A no with a note sends it back to implement.`,
+    input: { file: 'src/triple.mjs', sha256 }, target: 'implement',
+    ...(recorded ? { answer: () => recorded } : {}),
+  })(ctx);
+};
+
+const recordPath = 'records/feature-delivery.jsonl';
+const close: Job = async (ctx) => {
+  const record = existsSync(recordPath) ? await readFile(recordPath, 'utf8') : '';
+  const write = agentJob({
+    label: 'close', engine: writer.engine, model: writer.identity.model,
+    tools: ['Write'], allowedTools: ['Write'], workspaceMode: 'write', leaf: true,
+    prompt: `Write team-output/evidence.md: one paragraph of evidence for this run, using only this record, inventing nothing it does not show:\n\n${record}`,
+  });
+  return requireNoFiles('close', requireNonEmptyFiles('close', write, ctx.workspace.dir, ['team-output/evidence.md']), ctx.workspace.dir, ['src/triple.mjs', 'team-output/plan.md'], 'body')(ctx);
+};
+
+const team = dag({
+  name: 'feature-delivery',
+  nodes: {
+    triage,
+    // Isolated so its commit lands on HEAD: the tournament's own worktrees
+    // fork from HEAD, and need the plan committed there to read it.
+    research: { needs: 'triage', optional: true, isolate: true, when: predicate((ctx) => (ctx.needs?.triage?.data as { kind?: { choice?: string } })?.kind?.choice === 'feature', 'triage chose a feature'), job: research },
+    implement: { needs: ['triage', 'research'], job: implement },
+    test: { needs: 'implement', job: commandJob('test', ['node', '--test', 'test/triple.test.mjs'], { target: 'implement' }) },
+    // Isolated for the same reason as research: on a reject the worktree is
+    // discarded rather than merged, so a second kickback into `implement`
+    // forks its own tournament round from an untouched HEAD.
+    review: { needs: 'test', isolate: true, job: review },
+    approve: { needs: 'review', job: approve },
+    close: { needs: 'approve', job: close },
+  },
+  // A block finding always goes back on its own; otherwise Jev, capped at 4
+  // rounds, says when another pass on `implement` stops being worth it.
+  maxKickbacks: { implement: judge(jev, { cap: 4 }) },
+});
+
+// Only `workflow()` skips a finished stage on `--resume` today, so
+// `research`'s plan stage does and every other node here runs again in full.
+const resume = process.argv.includes('--resume');
+const result = await run(team, { recordTo: recordPath, resume, onEvent: (event) => console.log(formatEvent(event)) });
+console.log(JSON.stringify({ status: result.outcome.status, summary: result.outcome.summary, recordPath }, null, 2));
 ```
 
 </Accordion>
@@ -352,157 +595,58 @@ console.log(JSON.stringify(result.outcome, null, 2));
 
 ```mermaid
 flowchart LR
-  research["research: Claude, reviewed by Codex"] --> plan["plan: Claude, reviewed by Codex"]
-  plan --> tests["tests-first: Codex, reviewed by Claude"]
-  tests --> implement["implement: Codex"]
+  triage["triage: Jev types the ticket"] -->|feature| research["research: Claude plans, Codex reviews"]
+  triage -->|bug| implement
+  research --> implement["implement: Claude and Codex race, the test picks"]
   implement --> test[["test: node --test"]]
-  test -->|exit 0| review["review: Claude panel"]
-  test -->|sendsBackTo| implement
-  review -->|sendsBackTo| implement
-  review -.->|agree: 1| approve{{"approve: Ship this change?"}}
+  test -->|exit 0| review["review: Codex and OpenCode, one yes is enough"]
+  test -->|red| implement
+  review -->|"findings, Jev says whether to go again, cap 4"| implement
+  review -.->|accepted| approve{{"approve: ship these bytes?"}}
+  approve --> close["close: Claude writes the evidence from the record"]
 ```
 
 ## What the run did
 
-The notes the team left in `team-output/`, in the order they were written.
-The context note is in the same directory, and the last stage writes the
-evidence and the learning after the person's answer.
+This is the proof's scripted run, so the plan, the code and the notes are
+the script's; the shape of the run is the file's.
 
-<Accordion title="The notes the team wrote">
-
-```text team-output/research-requirements.md
-# Requirements: Triple Function Implementation
-
-## Functional Requirements
-
-**REQ-1** The function shall accept a numeric value as input and return that value multiplied by 3.
-
-**REQ-2** The function shall be pure: given the same input, it shall always return the same output with no side effects.
-
-**REQ-3** The function shall be exported as a named export `triple` from `src/triple.mjs`.
-
-**REQ-4** The function shall handle zero, negative numbers, and decimal values correctly.
-
-## Test Requirements
-
-**REQ-5** A test suite shall exist at `test/triple.test.mjs` using Node.js built-in test utilities.
-
-**REQ-6** Tests shall verify basic multiplication behavior (e.g., `triple(2)` returns `6`).
-
-**REQ-7** Tests shall cover edge cases: zero input, negative numbers, and decimal values.
-
-## Implementation Constraints
-
-**REQ-8** The implementation shall have no external runtime dependencies.
-
-**REQ-9** The function shall perform no I/O operations, mutations, or state modifications.
-
-**REQ-10** The implementation shall use ES module syntax (`.mjs` extension).
-
-## Directory Structure
-
-**REQ-11** Source code shall be placed in the `src/` directory.
-
-**REQ-12** Test code shall be placed in the `test/` directory.
-```
+The plan went round once: the Codex reviewer asked for a check on the
+requirement, and the second draft named one:
 
 ```text team-output/plan.md
-# Implementation Plan: Triple Function
-
-## Overview
-Implement a pure `triple(value)` function that multiplies a number by 3, with comprehensive test coverage using Node.js built-in test utilities.
-
-## Implementation Steps
-
-### Step 1: Create Source File
-**Action:** Write `src/triple.mjs` with a pure function that multiplies input by 3.
-
-**Checks:**
-- **REQ-3:** Verify `triple` is exported as a named export from `src/triple.mjs`
-- **REQ-1:** Verify function accepts numeric value and returns `value * 3`
-- **REQ-2:** Verify function is pure (same input → same output, no side effects)
-- **REQ-4:** Verify implementation handles zero, negative numbers, and decimals correctly
-- **REQ-8:** Verify no external runtime dependencies are imported
-- **REQ-9:** Verify function performs no I/O operations, mutations, or state modifications
-- **REQ-10:** Verify ES module syntax is used (`.mjs` extension, `export` keyword)
-- **REQ-11:** Verify file is placed in `src/` directory
-
-### Step 2: Create Test File
-**Action:** Write `test/triple.test.mjs` using Node.js built-in test utilities.
-
-**Checks:**
-- **REQ-5:** Verify test suite exists at `test/triple.test.mjs` using `node:test` and `node:assert`
-- **REQ-6:** Verify tests include basic multiplication cases (e.g., `triple(2) === 6`)
-- **REQ-7:** Verify tests cover edge cases: zero input, negative numbers, decimal values
-- **REQ-10:** Verify ES module syntax is used (`.mjs` extension, `import` keyword)
-- **REQ-12:** Verify file is placed in `test/` directory
-
-### Step 3: Verification
-**Action:** Run the test suite to confirm all requirements are met.
-
-**Checks:**
-- All tests pass when running `node test/triple.test.mjs`
-- Function behavior matches specification for all input types
-- No runtime errors or warnings
-
-## Success Criteria
-✓ `src/triple.mjs` exports a pure `triple` function
-✓ Function correctly multiplies input by 3 for all numeric types
-✓ `test/triple.test.mjs` uses Node.js built-in test utilities
-✓ Test suite covers basic cases and edge cases
-✓ All tests pass
-✓ No external dependencies
-✓ ES module syntax used throughout
-✓ Correct directory structure (`src/` and `test/`)
+REQ-1: triple multiplies by 3. Check: source exists.
 ```
 
-</Accordion>
+Two candidates ran. The Claude candidate wrote nothing and failed its own
+check for a non-empty file; the Codex candidate passed the test and landed.
+The panel returned the first cut over the parameter's name, the judge
+answered continue, and the renamed second cut cleared the review. The
+approval named the sha of the file as it stood:
 
-The files the models wrote. The tests came first, from the plan, and the
-second version of the code is the one the review accepted:
+```js src/triple.mjs
+export const triple = (value) => value * 3; // named clearly
+```
 
 ```js test/triple.test.mjs
 import assert from 'node:assert/strict';
-import { test } from 'node:test';
-
+import test from 'node:test';
 import { triple } from '../src/triple.mjs';
-
-test('triple multiplies a positive number by three', () => {
-  assert.equal(triple(2), 6);
-});
-
-test('triple returns zero for zero', () => {
-  assert.equal(triple(0), 0);
-});
-
-test('triple multiplies a negative number by three', () => {
-  assert.equal(triple(-4), -12);
-});
-
-test('triple multiplies a decimal number by three', () => {
-  assert.equal(triple(1.5), 4.5);
-});
-
-test('triple returns the same result for repeated calls with the same input', () => {
-  const input = 7;
-
-  assert.equal(triple(input), 21);
-  assert.equal(triple(input), 21);
-  assert.equal(input, 7);
-});
+test('triple returns three times the input', () => assert.equal(triple(3), 9));
 ```
 
-```js src/triple.mjs
-export function triple(value) {
-  return value * 3;
-}
+The closing seat read the record and wrote the evidence, touching neither
+the code nor the plan:
+
+```text team-output/evidence.md
+Triage read the ticket and called it a feature. Research iterated once before the panel cleared the plan. The tournament ran two candidates in their own worktrees; Codex's passed the test and landed, Claude's produced nothing. The review panel rejected the first cut on a naming finding, a judge said another round was worth it, and Codex's rename cleared the second review. The exact bytes were approved by sha.
 ```
 
 ## Next steps
 
-- [Feature team, offline](/workflows/feature-team-offline): the same shape
-  in five stages with no model, to read before you spend a token.
+- [Feature team, offline](/workflows/feature-team-offline): the same job in
+  five stages with no model, to read before you spend a token.
 - [Shipping through GitHub](/workflows/forge-helper): what happens to the
   change after the person says yes.
-- [Feedback loops](/concepts/feedback-loops): why a red test or a rejected
-  review runs the implementer again, and what stops it.
+- [A judge stops the loop](/patterns/judge-stops-the-loop): the questions
+  the judge answers between a review and the next round.

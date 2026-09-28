@@ -16,20 +16,20 @@ neighbour term, [an agent pipeline with a review and a person](/glossary/agent-p
 The process is one file. Named roles, one engine each, from more than one
 provider, and a person for the last word:
 
-```ts examples/teams/feature-delivery.ts (excerpt) {2-3,6}
-    roles: {
-      analyse: engines.claude('claude-sonnet-4-5'),
-      implement: engines.codex('gpt-5.6-luna'),
-      'research-review': [engines.codex('gpt-5.6-luna')],
-      'code-review': [engines.claude('claude-sonnet-4-5')],
-      approve: person('Ship this change?'),
-    },
+```ts examples/teams/feature-delivery.ts (excerpt)
+const writer = claude('claude-sonnet-4-5');
+const implementer = codex('gpt-5.6-luna');
+const secondReviewer = opencode('opencode/big-pickle', { executable: resolveCommandExecutable('opencode') });
 ```
 
-Nine stages follow, from a brief to a change a person is asked to ship,
-with a test command and a review panel holding the implementation to green.
-The whole file and a real run are on [Feature delivery](/workflows/feature-team),
-and [Shipping through GitHub](/workflows/forge-helper) is the step after the
+Seven steps follow, from a ticket to a change a person is asked to ship: a
+cheap model types the ticket, a plan is reviewed by another model family,
+two seats implement in their own worktrees and the tests pick the winner,
+a test command and a review panel hold the code to green with a judge
+saying when another round stops being worth it, and the person approves
+the exact bytes. The whole file and what a run of it did are on
+[Feature delivery](/workflows/feature-team), and
+[Shipping through GitHub](/workflows/forge-helper) is the step after the
 person says yes: push, one pull request, a strict gate, a squash merge.
 
 ## What people want
@@ -48,8 +48,8 @@ picture with a larger scope, and the file has the same shape.
 
 ## Next steps
 
-- [Feature delivery](/workflows/feature-team): the nine-stage team with a
-  real run.
+- [Feature delivery](/workflows/feature-team): the flagship team, from a
+  ticket to a change a person is asked to ship.
 - [Shipping through GitHub](/workflows/forge-helper): the merge step after
   the person's yes.
 - [What is an agent pipeline with a review and a person?](/glossary/agent-pipeline):

@@ -270,7 +270,8 @@ export function examplesRunByTheChain(root) {
 
 const EXCERPT = /examples\/([A-Za-z0-9_./-]+\.(?:ts|mjs))\s+\(excerpt\)/;
 
-function fencedBlocks(text) {
+/** Every fenced block: its language, the title after it, and its body. The README check reads blocks the same way. */
+export function fencedBlocks(text) {
   return [...text.matchAll(/^[ \t]*```([a-zA-Z0-9]*)([^\n]*)\n([\s\S]*?)^[ \t]*```/gm)]
     .map((m) => ({ lang: m[1], meta: m[2].trim(), body: m[3].replace(/\n+$/, '') }));
 }
@@ -285,8 +286,8 @@ export function realEngineExamples(entries = [...REAL_ENGINE_EXAMPLES, ...PROOF_
   return files;
 }
 
-/** Whether the body's lines appear in the file's lines as one consecutive slice. */
-function isContiguousRun(content, body) {
+/** Whether the body's lines appear in the file's lines as one consecutive slice. The README check holds its excerpts to the same rule. */
+export function isContiguousRun(content, body) {
   const lines = content.split('\n');
   const slice = body.split('\n');
   outer: for (let i = 0; i + slice.length <= lines.length; i++) {

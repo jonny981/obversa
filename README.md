@@ -40,24 +40,11 @@ Claude Code, Codex, Grok and OpenCode.
 ## First run
 
 A Claude seat writes a function and its test from a brief, Node runs the
-test, and a Codex seat reads the change. The whole team is this file,
-`examples/teams/writer-reviewer-pair.ts`, with its brief at
-`briefs/add.md` beside it:
+test, and a Codex seat reads the change. The team is
+`examples/teams/writer-reviewer-pair.ts`, with its brief at `briefs/add.md`
+beside it. This is the part you write:
 
-```ts
-import { claude } from '@obversa/engine-claude-cli';
-import { codex } from '@obversa/engine-codex-cli';
-import { run } from '@obversa/runtime';
-import { briefFromFile, stage, workflow, type TeamSeat } from '@obversa/runtime';
-
-interface WriterReviewerEngines {
-  readonly claude: (model: string) => TeamSeat;
-  readonly codex: (model: string) => TeamSeat;
-}
-
-const realEngines: WriterReviewerEngines = { claude, codex };
-
-function createWriterReviewerPair(engines: WriterReviewerEngines = realEngines) {
+```ts examples/teams/writer-reviewer-pair.ts (excerpt)
   return workflow('writer-reviewer-pair', {
     brief: briefFromFile('briefs/add.md'),
     options: { timeout: '10m' },
@@ -90,14 +77,11 @@ function createWriterReviewerPair(engines: WriterReviewerEngines = realEngines) 
       }),
     ],
   });
-}
-
-const result = await run(createWriterReviewerPair());
-console.log(JSON.stringify(result.outcome, null, 2));
 ```
 
-Run it from the directory the work belongs in, with the Claude Code and
-Codex command line tools signed in:
+Copy the file, put the brief beside it, and run it from the directory the
+work belongs in, with the Claude Code and Codex command line tools signed
+in:
 
 ```bash
 npx tsx writer-reviewer-pair.ts
@@ -114,104 +98,19 @@ real run printed.
 
 ## Feature delivery
 
-A ticket comes in. The team you would want reads the code and writes the
-requirements and a plan, each reviewed before the next step; writes the
-tests first, then the code until the tests pass and a reviewer from another
-model family accepts; puts the change in front of a person; and writes the
-evidence from the record. That team is `examples/teams/feature-delivery.ts`:
+A ticket comes in. A small decision model types it as a bug or a feature
+before an expensive seat reads it. For a feature, a Claude seat writes the
+requirements and a plan and a Codex seat reviews them. Two seats implement
+in their own worktrees and the test picks the winner; a red test sends the
+work back. A panel reviews the change, a judge says when another round
+stops being worth it, a person approves the exact bytes by their sha, and
+the closing note is written from the record. That team is
+`examples/teams/feature-delivery.ts`, in five parts.
 
-```ts
-import { createHash } from 'node:crypto';
-import { existsSync } from 'node:fs';
-import { readFile, rm } from 'node:fs/promises';
-import { join } from 'node:path';
+Triage first. Jev, the small decision model, types the ticket before any
+expensive seat runs, and its answer decides whether a plan gets written:
 
-import { resolveCommandExecutable } from '@obversa/core/command';
-import { claude } from '@obversa/engine-claude-cli';
-import { codex } from '@obversa/engine-codex-cli';
-import { JevApiEngine } from '@obversa/engine-jev-api';
-import { opencode } from '@obversa/engine-opencode-cli';
-import {
-  agentJob,
-  approval,
-  briefFromFile,
-  commandJob,
-  dag,
-  finalResultPart,
-  fnJob,
-  formatEvent,
-  judge,
-  predicate,
-  reviewPanel,
-  revisionRequest,
-  run,
-  tournament,
-  workflow,
-  type Engine,
-  type Job,
-  type TeamSeat,
-} from '@obversa/runtime';
-import { requireNoFiles, requireNonEmptyFiles } from '@obversa/runtime/workflow-support';
-
-/**
- * A ticket, delivered the way a team delivers one: a cheap typed decision
- * routes it before an expensive seat sees it; the requirements and the plan
- * are cross-model reviewed; two seats implement in their own worktrees and a
- * command picks the winner; a red test sends the loser's fix back; a panel
- * reviews the change with a judge standing between its verdict and another
- * round; a person approves the exact bytes; the last note comes from the
- * record alone. Composed as a `dag()` of the runtime's own pieces;
- * `research` is the one part small enough to stay a nested `workflow()`.
- */
-const writer = claude('claude-sonnet-4-5');
-const implementer = codex('gpt-5.6-luna');
-const secondReviewer = opencode('opencode/big-pickle', { executable: resolveCommandExecutable('opencode') });
-
-/** Jev, wrapped so `agentJob` gets text back: its answer is a structured part. */
-function jevSeat(): TeamSeat {
-  const endpoint = process.env.TYPESAFE_ENDPOINT;
-  const apiKey = process.env.TYPESAFE_API_KEY;
-  if (!endpoint || !apiKey) throw new Error('JEV=live needs TYPESAFE_ENDPOINT and TYPESAFE_API_KEY');
-  const api = new JevApiEngine({ endpoint, apiKey });
-  const engine: Engine = {
-    name: 'jev-api',
-    async run(request, onEvent, signal) {
-      const result = await api.run(request, onEvent, signal);
-      const part = finalResultPart(result);
-      if (part.kind !== 'structured') return result;
-      return { ...result, parts: [{ kind: 'assistant', text: JSON.stringify(part.value), final: true }] };
-    },
-  };
-  return { engine, identity: { adapter: 'jev-api', provider: 'jev', modelFamily: 'jev', model: 'jev', tools: [] } };
-}
-/**
- * Offline, a recorded answer replaces Jev so the example runs with no key:
- * `jev.json` is `{ triage: [...], judge: [...] }`, one ordered list per
- * purpose (the judge's own prompt, built by `askJudge`, is the only one
- * carrying a `cap`), each read round-robin and repeating its last entry.
- */
-async function recordedJev(): Promise<TeamSeat> {
-  const scripts = JSON.parse(await readFile('jev.json', 'utf8')) as Record<string, unknown[]>;
-  const seen: Record<string, number> = {};
-  const engine: Engine = {
-    name: 'jev-recorded',
-    async run(request) {
-      const purpose = request.prompt.includes('"cap"') ? 'judge' : 'triage';
-      const list = scripts[purpose] ?? [];
-      const i = seen[purpose] ?? 0;
-      seen[purpose] = i + 1;
-      const text = JSON.stringify(list[Math.min(i, list.length - 1)]);
-      const selection = { adapter: 'jev-recorded', adapterVersion: null, provider: 'jev', modelFamily: 'jev', model: 'jev', executable: null, capabilities: [] };
-      return { parts: [{ kind: 'assistant', text, final: true }], usage: { kind: 'unknown' }, requested: selection, effective: selection };
-    },
-  };
-  return { engine, identity: { adapter: 'jev-recorded', provider: 'jev', modelFamily: 'jev', model: 'jev', tools: [] } };
-}
-const jev = process.env.JEV === 'live' ? jevSeat() : await recordedJev();
-
-const { brief } = briefFromFile('briefs/ticket.md');
-
-/** A cheap typed decision: bug or feature, and how risky. The expensive seats never see it. */
+```ts examples/teams/feature-delivery.ts (excerpt)
 const triage: Job = agentJob({
   label: 'triage', engine: jev.engine, model: jev.identity.model, workspaceMode: 'none', tools: [], leaf: true,
   prompt: JSON.stringify({
@@ -223,60 +122,33 @@ const triage: Job = agentJob({
   }),
   outcome: (text) => ({ status: 'pass', summary: text.slice(0, 120), data: JSON.parse(text) }),
 });
+```
 
-/** A feature only: requirements and a plan, one Claude writer, one Codex panel, refined up to twice. */
-const research = workflow('research', {
-  brief,
-  roles: { analyse: writer, review: [implementer] },
-  stages: [{
-    name: 'plan', config: {
-      agent: 'analyse', writes: 'team-output/plan.md', reviewedBy: 'review', refine: 2,
-      desc: 'Write requirements and a plan from the ticket, one check per requirement.',
-      gate: 'The plan is in the workspace and the panel has accepted it.',
-    },
-  }],
-});
+Two seats implement in their own worktrees, and the test picks the winner:
 
-/** Two candidates, two worktrees, one command deciding: the tournament helper the runtime ships. */
-const candidate = (seat: TeamSeat, i: number) => fnJob(`candidate-${i}`, async (ctx) => {
-  const plan = existsSync(join(ctx.workspace.dir, 'team-output/plan.md'))
-    ? await readFile(join(ctx.workspace.dir, 'team-output/plan.md'), 'utf8')
-    : brief;
-  // A retried round forks from HEAD, which already carries a prior round's
-  // landed file. Remove it first so a candidate that writes nothing fails
-  // this attempt instead of silently passing on an old implementation.
-  await rm(join(ctx.workspace.dir, 'src/triple.mjs'), { force: true });
-  const write = agentJob({
-    label: `candidate-${i}`, engine: seat.engine, model: seat.identity.model,
-    tools: ['Write'], allowedTools: ['Write'], workspaceMode: 'write', leaf: true,
-    prompt: `${plan}\n\nWrite src/triple.mjs only.`,
-  });
-  const written = await requireNonEmptyFiles(`candidate-${i}`, write, ctx.workspace.dir, ['src/triple.mjs'])(ctx);
-  if (written.status !== 'pass') return written;
-  return commandJob(`candidate-${i}-test`, ['node', '--test', 'test/triple.test.mjs'])(ctx);
-});
+```ts examples/teams/feature-delivery.ts (excerpt)
 const implement = tournament({
   name: 'implement', n: 2, concurrency: 1,
   candidate: (i) => candidate(i === 0 ? writer : implementer, i),
   judge: (outcome) => (outcome.status === 'pass' ? 1 : 0),
 });
+```
 
-/** Codex and OpenCode, agreeing once is enough; a block always goes back, otherwise Jev decides. */
-const reviewer = (seat: TeamSeat): Job => agentJob({
-  label: 'review', engine: seat.engine, model: seat.identity.model, tools: [seat.identity.adapter === 'opencode-cli' ? 'read' : 'Read'], workspaceMode: 'read', leaf: true,
-  prompt: 'Read src/triple.mjs against the plan. Reply as one JSON object: {"status":"pass"|"revise","summary":"...","findings":[{"severity":"block"|"should-fix","evidence":"..."}]}.',
-  outcome: (text) => {
-    const decision = JSON.parse(text.slice(text.indexOf('{'))) as { status: string; summary: string; findings?: { severity: 'block' | 'should-fix'; evidence: string }[] };
-    return decision.status === 'pass'
-      ? { status: 'pass', summary: decision.summary }
-      : revisionRequest({ target: 'implement', reason: decision.summary, findings: decision.findings });
-  },
-});
+A panel of the Codex seat and the OpenCode seat reviews the change. One
+acceptance is enough, and a rejection goes back to `implement` with the
+findings:
+
+```ts examples/teams/feature-delivery.ts (excerpt)
 const review = reviewPanel({
   label: 'review', target: 'implement', pass: 1, concurrency: 1,
   reviewers: [{ name: 'codex', job: reviewer(implementer) }, { name: 'opencode', job: reviewer(secondReviewer) }],
 });
+```
 
+A person approves the exact bytes. The sha is in the question, and a no
+with a note goes back to `implement`:
+
+```ts examples/teams/feature-delivery.ts (excerpt)
 const approve: Job = async (ctx) => {
   const bytes = await readFile(join(ctx.workspace.dir, 'src/triple.mjs'));
   const sha256 = createHash('sha256').update(bytes).digest('hex');
@@ -287,18 +159,13 @@ const approve: Job = async (ctx) => {
     ...(recorded ? { answer: () => recorded } : {}),
   })(ctx);
 };
+```
 
-const recordPath = 'records/feature-delivery.jsonl';
-const close: Job = async (ctx) => {
-  const record = existsSync(recordPath) ? await readFile(recordPath, 'utf8') : '';
-  const write = agentJob({
-    label: 'close', engine: writer.engine, model: writer.identity.model,
-    tools: ['Write'], allowedTools: ['Write'], workspaceMode: 'write', leaf: true,
-    prompt: `Write team-output/evidence.md: one paragraph of evidence for this run, using only this record, inventing nothing it does not show:\n\n${record}`,
-  });
-  return requireNoFiles('close', requireNonEmptyFiles('close', write, ctx.workspace.dir, ['team-output/evidence.md']), ctx.workspace.dir, ['src/triple.mjs', 'team-output/plan.md'], 'body')(ctx);
-};
+The graph puts the seven steps in order. Research runs for a feature only.
+A red test or a rejected review goes back to `implement`, and Jev, capped
+at four rounds, says when another pass stops being worth it:
 
+```ts examples/teams/feature-delivery.ts (excerpt)
 const team = dag({
   name: 'feature-delivery',
   nodes: {
@@ -319,17 +186,10 @@ const team = dag({
   // rounds, says when another pass on `implement` stops being worth it.
   maxKickbacks: { implement: judge(jev, { cap: 4 }) },
 });
-
-// Only `workflow()` skips a finished stage on `--resume` today, so
-// `research`'s plan stage does and every other node here runs again in full.
-const resume = process.argv.includes('--resume');
-const result = await run(team, { recordTo: recordPath, resume, onEvent: (event) => console.log(formatEvent(event)) });
-console.log(JSON.stringify({ status: result.outcome.status, summary: result.outcome.summary, recordPath }, null, 2));
 ```
 
-Every node says what it does and where a rejection sends the work back. A
-red test or a rejected review kicks back to `implement`, and re-running it
-re-runs everything downstream of it in turn.
+Every node says what it does and where a rejection sends the work back,
+and re-running a node re-runs everything downstream of it in turn.
 
 | node | done when |
 | --- | --- |
@@ -341,8 +201,10 @@ re-runs everything downstream of it in turn.
 | approve | A person has said yes to the exact sha256 that landed. |
 | close | The evidence note is in the workspace, from the record alone. |
 
+The whole file, with the seats, the nested research workflow and the
+closing note, is `examples/teams/feature-delivery.ts`.
 [Feature delivery](https://docs.obversa.ai/workflows/feature-team) shows
-what a real run of this file printed and the files the models wrote.
+what a run of it printed and the files the models wrote.
 
 ## The parts
 
@@ -409,6 +271,15 @@ the patterns, examples by field, and how Obversa sits beside LangGraph,
 CrewAI, Temporal, Claude Code subagents and eve.
 
 ## Working on Obversa
+
+19 publishable packages. `packages/` holds the eight that define the
+product: `@obversa/runtime` runs a workflow, `@obversa/api` holds the
+engine and memory contracts, `@obversa/core` runs bounded child processes,
+`@obversa/runner` supervises stored runs, `@obversa/builtin-workflows`
+ships three ready-made teams, `@obversa/obversa` is the install above,
+and `@obversa/surface` with `@obversa/surface-diff` is the local review
+page. `plugins/` holds the eleven adapters: the seven engines above, three
+memories, and a notifier that posts run events to a URL.
 
 [AGENTS.md](AGENTS.md) is the guide for anyone who changes this
 repository: setup, the checks, and the rules every change follows.

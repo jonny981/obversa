@@ -119,6 +119,7 @@ export const stageBranches = {
   F138: 'docs/readme',
   F143: 'docs/two-forms',
   F139: 'feat/f139-flagship-example',
+  F148: 'fix/readme-package-counts',
 };
 
 export function manageStage(args, options = {}) {
