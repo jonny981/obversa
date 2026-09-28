@@ -18,6 +18,87 @@ A workflow is that shape written down, in a TypeScript file you version,
 review and share like anything else you write, and the runtime runs it the
 same way each time.
 
+## Two forms
+
+`workflow()` is the short form: a brief, named roles, and a list of stages,
+each an agent, a command, a review panel or a person. The first run is one:
+
+```ts examples/teams/writer-reviewer-pair.ts (excerpt)
+  return workflow('writer-reviewer-pair', {
+    brief: briefFromFile('briefs/add.md'),
+    options: { timeout: '10m' },
+
+    roles: {
+      write: engines.claude('claude-sonnet-4-5'),
+      review: [engines.codex('gpt-5.6-luna')],
+    },
+
+    stages: [
+      stage('write', {
+        agent: 'write',
+        writes: ['src/add.mjs', 'test/add.test.mjs'],
+        desc: 'Write the function and its test from the brief.',
+        gate: 'The files named in the brief exist in the workspace.',
+        refine: 1,
+      }),
+      stage('test', {
+        run: ['node', '--test', 'test/add.test.mjs'],
+        desc: 'Run the test command against the written files.',
+        gate: 'The test command exits 0.',
+        sendsBackTo: 'write',
+      }),
+      stage('review', {
+        panel: 'review',
+        agree: 1,
+        desc: 'Read the code, the test and its result.',
+        gate: 'The change meets the brief.',
+        sendsBackTo: 'write',
+      }),
+    ],
+  });
+```
+
+`dag()` is the full form, and it is what `workflow()` compiles to. A node is
+any job: a seat, a command, a person, a whole `workflow()`, or a plain
+function of your own that reads what earlier nodes produced and decides what
+runs next. A Shape Up cycle as one run is a dag whose nodes are workflows:
+
+```ts examples/use-cases/product/shape-up-cycle.ts (excerpt)
+const cycle = dag({
+  name: 'shape-up-cycle',
+  concurrency: 1,
+  nodes: {
+    shaping,
+    table: { needs: 'shaping', job: table },
+    ...builds,
+    cooldown: { needs: Object.keys(builds), job: cooldown },
+  },
+});
+```
+
+A plain function is a node with `fnJob`. This one writes a file and reads
+the last review's summary from the context:
+
+```ts examples/command-kickback.ts (excerpt)
+const implement = fnJob('implement', (ctx) => {
+  implementRuns += 1;
+  writeFileSync(
+    source,
+    implementRuns === 1
+      ? 'export const add = (a, b) => a - b;\n'
+      : 'export const add = (a, b) => a + b;\n',
+  );
+  return ctx.lastReview
+    ? `second attempt, after the tests said: ${ctx.lastReview.summary}`
+    : 'first attempt';
+});
+```
+
+Anything you can write as a function that returns an outcome is a node: a
+call to your own service, a check against your database, a branch on a
+value. Start with `workflow()`; reach for `dag()` when a step needs your own
+code, a branch, a tournament, or a team inside a team.
+
 ## Parts
 
 - **Steps.** Each step is a job: an agent call, a command, a check. The

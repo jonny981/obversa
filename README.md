@@ -356,8 +356,12 @@ what a real run of this file printed and the files the models wrote.
 - **A person approves the exact change.** The run stops and asks, and the
   yes is bound to the bytes the person saw; a changed byte asks again.
   [A person decides](https://docs.obversa.ai/patterns/approval).
-- **The record.** An append-only event log is the run's only state. Start a
-  killed run again and it carries on from the last finished step;
+- **The record.** An append-only event log is the run's only state. Under
+  the supervised runner a killed run starts a fresh worker that reads the
+  record and carries on. Steps that finished are never repeated. A step that
+  was mid-flight when the worker died runs again only if its binding declares
+  it safe to retry; otherwise the run pauses and asks a person to reconcile
+  it before it continues, so uncertain work is never repeated silently.
   `obversa-record <path>` prints a record as a page a person scans.
   [The record](https://docs.obversa.ai/concepts/record),
   [read a record](https://docs.obversa.ai/recording/read-a-record).
