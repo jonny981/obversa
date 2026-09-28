@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
-import { existsSync } from 'node:fs';
+import { createHash } from 'node:crypto';
+import { existsSync, readFileSync } from 'node:fs';
 import { mkdir, mkdtemp, readFile, rm, symlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join, resolve, dirname } from 'node:path';
@@ -11,7 +12,7 @@ const repo = (() => {
   // The repo root is the nearest directory with a package.json: the
   // repository and the throwaway consumer have different depths.
   let dir = here;
-  for (let i = 0; i < 4; i += 1) {
+  for (let i = 0; i < 5; i += 1) {
     if (existsSync(join(dir, 'package.json'))) return dir;
     dir = resolve(dir, '..');
   }
@@ -19,92 +20,228 @@ const repo = (() => {
 })();
 const standIn = join(repo, 'scripts', 'stand-in-cli.mjs');
 
-const pass = (summary: string): string => JSON.stringify({ status: 'pass', summary });
+const ticket = 'Deliver a pure triple(value) function in src/triple.mjs. A Node test for it is at test/triple.test.mjs. This is a feature: no existing triple function exists yet.\n';
+const testFile = [
+  "import assert from 'node:assert/strict';",
+  "import test from 'node:test';",
+  "import { triple } from '../src/triple.mjs';",
+  "test('triple returns three times the input', () => assert.equal(triple(3), 9));",
+  '',
+].join('\n');
 
-// The stand-in executables live beside the workspace, not inside it: a read-only
-// reviewer's workspace guard refuses a symlink under the workspace that resolves
-// outside it, and the stand-in is a symlink to a script in the repository.
-const root = await mkdtemp(join(tmpdir(), 'obversa-team-feature-proof-'));
-const workspace = join(root, 'workspace');
-const bin = join(root, 'bin');
-try {
-  await mkdir(join(workspace, 'briefs'), { recursive: true });
-  await mkdir(workspace, { recursive: true });
+// The judge only needs to be asked once here: review clears on its second
+// attempt, so the loop never asks a second time. The second entry is a safe
+// fallback (stop the loop) if an unexpected extra round ever reaches it.
+const jev = {
+  triage: [{ kind: { choice: 'feature' }, risk: { score: 0.4 } }],
+  judge: [{ stop_reason: { choice: 'continue' } }, { stop_reason: { choice: 'holds' } }],
+};
+
+const evidence = "Triage read the ticket and called it a feature. Research iterated once before the panel cleared the plan. The tournament ran two candidates in their own worktrees; Codex's passed the test and landed, Claude's produced nothing. The review panel rejected the first cut on a naming finding, a judge said another round was worth it, and Codex's rename cleared the second review. The exact bytes were approved by sha.\n";
+
+// Claude writes the plan (twice, once per research round) and, round-robin,
+// lands on this same third entry for every later claude call: the tournament's
+// candidate-0 (designed to lose) and the close step both read it. It writes
+// only evidence.md, never src/triple.mjs, so candidate-0 always fails its own
+// "did you produce anything" check and close never touches the shipped file.
+const standInScript = {
+  claude: [
+    { writes: { 'team-output/plan.md': 'REQ-1: triple multiplies by 3.\n' }, reply: 'wrote the plan' },
+    { writes: { 'team-output/plan.md': 'REQ-1: triple multiplies by 3. Check: source exists.\n' }, reply: 'revised the plan' },
+    { writes: { 'team-output/evidence.md': evidence }, reply: 'the candidate produced nothing' },
+  ],
+  codex: [
+    { reply: JSON.stringify({ status: 'revise', summary: 'missing a check', findings: [{ severity: 'should-fix', evidence: 'no check named' }] }) },
+    { reply: JSON.stringify({ status: 'pass', summary: 'plan covers it' }) },
+    { writes: { 'src/triple.mjs': 'export const triple = (value) => value * 3;\n' }, reply: 'implemented the plan' },
+    {
+      writes: { 'src/triple.mjs': 'export const triple = (value) => value * 3; // named clearly\n' },
+      reply: JSON.stringify({ status: 'revise', summary: 'variable name is unclear', findings: [{ severity: 'should-fix', evidence: 'name the parameter' }] }),
+    },
+    { reply: JSON.stringify({ status: 'pass', summary: 'the rename covers it' }) },
+  ],
+  opencode: [
+    { reply: JSON.stringify({ status: 'revise', summary: 'name is unclear', findings: [{ severity: 'should-fix', evidence: 'triple could be clearer' }] }) },
+  ],
+};
+
+interface RecordedEvent {
+  readonly kind: string;
+  readonly node?: string;
+  readonly phase?: string;
+  readonly attempt?: number;
+  readonly label?: string;
+  readonly from?: string;
+  readonly to?: string;
+  readonly accepted?: boolean;
+  readonly count?: number;
+  readonly limit?: number;
+  readonly answers?: unknown;
+  readonly outcome?: { status: string; summary?: string; data?: unknown };
+}
+
+async function seedWorkspace(dir: string, bin: string): Promise<void> {
+  await mkdir(join(dir, 'briefs'), { recursive: true });
+  await mkdir(join(dir, 'src'), { recursive: true });
+  await mkdir(join(dir, 'test'), { recursive: true });
   await mkdir(bin, { recursive: true });
-  await writeFile(join(workspace, 'briefs/triple.md'), '---\nfiles: ["src/triple.mjs"]\n---\n\nDeliver a pure triple(value) function in src/triple.mjs with a Node test in test/triple.test.mjs.\n');
-  await writeFile(
-    join(workspace, '.obversa-stand-in.json'),
-    JSON.stringify({
-      claude: [
-        { writes: { 'team-output/research-context.md': 'The workspace context is recorded.\n' }, reply: pass('analysis note written') },
-        { writes: { 'team-output/research-requirements.md': 'REQ-1: Export triple.\nREQ-2: Test triple.\n' }, reply: pass('requirements written') },
-        { writes: { 'team-output/plan.md': 'REQ-1: Source exports triple. Check: source exists.\nREQ-2: Test covers triple. Check: command exits 0.\n' }, reply: pass('plan written') },
-        { writes: {}, reply: pass('tests reviewed') },
-        { writes: {}, reply: pass('review accepted') },
-      ],
-      codex: [
-        { writes: {}, reply: pass('research accepted') },
-        { writes: {}, reply: pass('requirements accepted') },
-        { writes: {}, reply: pass('plan accepted') },
-        { writes: { 'test/triple.test.mjs': "import assert from 'node:assert/strict';\nimport test from 'node:test';\nimport { triple } from '../src/triple.mjs';\ntest('triple returns three times the input', () => assert.equal(triple(3), 9));\n" }, reply: pass('tests written first') },
-        { writes: { 'src/triple.mjs': 'export const triple = (value) => value * 10;\n' }, reply: pass('first implementation written') },
-        { writes: { 'src/triple.mjs': 'export const triple = (value) => value * 3;\n' }, reply: pass('implementation repaired') },
-      ],
-    }, null, 2) + '\n',
-  );
-  const callsLog = join(workspace, '.obversa-stand-in-calls.log');
-  for (const name of ['claude', 'codex', 'opencode']) {
-    await symlink(standIn, join(bin, name));
-  }
+  await writeFile(join(dir, 'briefs/ticket.md'), ticket);
+  await writeFile(join(dir, 'test/triple.test.mjs'), testFile);
+  await writeFile(join(dir, 'jev.json'), JSON.stringify(jev, null, 2));
+  await writeFile(join(dir, 'approve.json'), '{"approved": true}\n');
+  await writeFile(join(dir, '.obversa-stand-in.json'), JSON.stringify(standInScript, null, 2));
+  for (const name of ['claude', 'codex', 'opencode']) await symlink(standIn, join(bin, name));
+  const git = (...args: string[]) => spawnSync('git', args, { cwd: dir, encoding: 'utf8' });
+  git('init', '-q', '-b', 'main');
+  git('config', 'user.name', 'Example');
+  git('config', 'user.email', 'example@example.com');
+  git('config', 'commit.gpgsign', 'false');
+  git('add', '-A');
+  git('commit', '-q', '-m', 'chore: seed the ticket');
+}
 
-  // The workflow ends at the approve stage, where a person answers. Until
-  // F42 gives a second process that route, the proof asserts to the pause.
-  // Inside a fresh consumer there is no packages/runtime/tsconfig.json; tsx then
-  // reads the nearest tsconfig, which is the consumer's own.
+function runExample(dir: string, bin: string, extraArgs: readonly string[] = []) {
   const repoTsconfig = join(repo, 'packages', 'runtime', 'tsconfig.json');
   const tsconfigArgs = existsSync(repoTsconfig) ? ['--tsconfig', repoTsconfig] : [];
   const compiled = join(here, 'feature-delivery.js');
   const child = existsSync(compiled)
-    ? { file: process.execPath, args: [compiled] }
-    : { file: join(repo, 'node_modules', '.bin', 'tsx'), args: [...tsconfigArgs, join(here, 'feature-delivery.ts')] };
-  const started = Date.now();
-  const run = spawnSync(child.file, child.args, {
-    cwd: workspace,
-    env: {
-      ...process.env,
-      PATH: `${bin}:${process.env.PATH ?? ''}`,
-    },
+    ? { file: process.execPath, args: [compiled, ...extraArgs] }
+    : { file: join(repo, 'node_modules', '.bin', 'tsx'), args: [...tsconfigArgs, join(here, 'feature-delivery.ts'), ...extraArgs] };
+  return spawnSync(child.file, child.args, {
+    cwd: dir,
+    env: { ...process.env, PATH: `${bin}:${process.env.PATH ?? ''}` },
     encoding: 'utf8',
     timeout: 120_000,
   });
-  const elapsed = Date.now() - started;
+}
 
-  const mode = existsSync(compiled) ? 'compiled-from-dist' : existsSync(repoTsconfig) ? 'repo-tsx' : 'consumer-tsx';
-  assert.equal(run.status, 0, `the example child ${child.file} ${child.args.join(' ')} exited ${run.status ?? `signal ${run.signal}`} after ${elapsed}ms in ${mode} mode
-  spawn error: ${run.error ?? 'none'}
+function readRecord(dir: string): RecordedEvent[] {
+  return readFileSync(join(dir, 'records/feature-delivery.jsonl'), 'utf8')
+    .trim().split('\n').map((line) => JSON.parse(line) as RecordedEvent);
+}
+function doneNode(record: RecordedEvent[], node: string, attempt: number): RecordedEvent {
+  const found = record.find((e) => e.kind === 'dag:node' && e.phase === 'done' && e.node === node && e.attempt === attempt);
+  assert.ok(found, `no dag:node done event for "${node}" attempt ${attempt}`);
+  return found!;
+}
+
+const root = await mkdtemp(join(tmpdir(), 'obversa-feature-delivery-proof-'));
+const workspace = join(root, 'workspace');
+const bin = join(root, 'bin');
+try {
+  await seedWorkspace(workspace, bin);
+
+  const run = runExample(workspace, bin);
+  const mode = existsSync(join(here, 'feature-delivery.js')) ? 'compiled-from-dist'
+    : existsSync(join(repo, 'packages', 'runtime', 'tsconfig.json')) ? 'repo-tsx' : 'consumer-tsx';
+  assert.equal(run.status, 0, `the example child exited ${run.status ?? `signal ${run.signal}`} in ${mode} mode
   stdout: ${run.stdout}
   stderr: ${run.stderr}`);
   const printed = JSON.parse(run.stdout.slice(run.stdout.lastIndexOf('\n{') + 1));
-  assert.equal(printed.status, 'paused');
+  assert.equal(printed.status, 'pass');
+  assert.match(printed.summary, /all 7 node\(s\) green/);
 
-  const calls = (await readFile(callsLog, 'utf8')).trim().split('\n').map((line) => JSON.parse(line) as { role: string; reply: string; writes: Record<string, string> });
-  const implementerCalls = calls.filter((call) => call.role === 'codex').filter((call) => 'src/triple.mjs' in call.writes);
-  assert.equal(implementerCalls.length, 2, 'the implementer runs once and repairs once');
-  assert.match(implementerCalls[0]!.writes['src/triple.mjs'] ?? '', /value \* 10/, 'the first draft fails the test');
-  assert.match(implementerCalls[1]!.writes['src/triple.mjs'] ?? '', /value \* 3/, 'the repair passes the test');
-  assert.equal(calls.filter((call) => call.role === 'claude').length, 5, 'three analysis notes and two reviews');
+  // 1. Triage chose feature, so research and the rest of the pipeline ran.
+  const record = readRecord(workspace);
+  const triage = doneNode(record, 'triage', 1);
+  assert.equal(triage.outcome!.status, 'pass');
+  assert.match(triage.outcome!.summary ?? '', /"choice":"feature"/);
 
-  assert.match(await readFile(join(workspace, 'src/triple.mjs'), 'utf8'), /triple = \(value\) => value \* 3/);
-  assert.match(await readFile(join(workspace, 'team-output/plan.md'), 'utf8'), /REQ-2/);
-  assert.ok(await readFile(join(workspace, 'test/triple.test.mjs'), 'utf8'), 'the test file exists');
+  // 2. Research (the nested workflow()) accepted the plan on its second round.
+  const loopIterations = record.filter((e) => e.kind === 'loop:iteration');
+  assert.equal(loopIterations.length, 2, 'research refines the plan once before the panel clears it');
+  const research = doneNode(record, 'research', 1);
+  assert.equal(research.outcome!.status, 'pass');
+
+  // 3. The tournament ran two candidates; the test-passing one won, twice
+  // (once per implement attempt, since round 1's review sends it back).
+  const implement1 = doneNode(record, 'implement', 1);
+  const implement2 = doneNode(record, 'implement', 2);
+  for (const node of [implement1, implement2]) {
+    assert.equal(node.outcome!.status, 'pass');
+    assert.match(node.outcome!.summary ?? '', /landed candidate 1 \(score 1\) of 2/);
+  }
+  const candidateEnds = record.filter((e) => e.kind === 'job:end' && (e.label === 'candidate-0' || e.label === 'candidate-1'));
+  assert.ok(candidateEnds.some((e) => e.label === 'candidate-0' && e.outcome!.status === 'fail'), "Claude's candidate never produces src/triple.mjs, so it always loses");
+  assert.ok(candidateEnds.filter((e) => e.label === 'candidate-1' && e.outcome!.status === 'pass').length >= 2, "Codex's candidate wins both rounds");
+
+  // 4. review ran twice: rejected round 1, cleared round 2 (pass:1 needs only
+  // one of the two reviewers).
+  const review1 = doneNode(record, 'review', 1);
+  const review2 = doneNode(record, 'review', 2);
+  assert.equal(review1.outcome!.status, 'fail');
+  assert.equal(review2.outcome!.status, 'pass');
+
+  // The visible `judge(jev, { cap: 4 })` on the panel's kickback target was
+  // consulted for real: it answered once, said the round was worth it, and
+  // the dag accepted exactly the one kickback that produced.
+  const judgeCalls = record.filter((e) => e.kind === 'refine:judge');
+  assert.equal(judgeCalls.length, 1, 'review only fails once, so the judge is asked once');
+  assert.equal((judgeCalls[0]!.answers as { stop_reason: { choice: string } }).stop_reason.choice, 'continue');
+  const kickbacks = record.filter((e) => e.kind === 'dag:kickback');
+  assert.equal(kickbacks.length, 1);
+  assert.equal(kickbacks[0]!.from, 'review');
+  assert.equal(kickbacks[0]!.to, 'implement');
+  assert.equal(kickbacks[0]!.accepted, true);
+  assert.equal(kickbacks[0]!.count, 1);
+  assert.equal(kickbacks[0]!.limit, 4);
+
+  // 5. Approval carries the sha256 of the exact bytes that landed.
+  const shippedBytes = await readFile(join(workspace, 'src/triple.mjs'));
+  const sha256 = createHash('sha256').update(shippedBytes).digest('hex');
+  const approve = doneNode(record, 'approve', 2);
+  assert.equal(approve.outcome!.status, 'pass');
+  assert.ok((approve.outcome!.summary ?? '').includes(sha256.slice(0, 12)), "the approval question names the landed file's own sha256");
+
+  // 6. Close wrote its evidence from the record alone, and never touched the
+  // shipped file or the plan while doing it.
+  const close = doneNode(record, 'close', 2);
+  assert.equal(close.outcome!.status, 'pass');
+  const closeEvidence = await readFile(join(workspace, 'team-output/evidence.md'), 'utf8');
+  assert.equal(closeEvidence, evidence);
+
+  const calls = (await readFile(join(workspace, '.obversa-stand-in-calls.log'), 'utf8')).trim().split('\n').map((line) => JSON.parse(line) as { role: string });
+  const byRole = (role: string) => calls.filter((c) => c.role === role).length;
+
+  // 7. Resume. `research` is the one node here built with `workflow()`; every
+  // other node — triage, the tournament, test, review, approve, close — is a
+  // bare `dag()` node or a plain job, and per docs/public/concepts/record.mdx
+  // ("Only workflow() skips finished stages. Any other job given resume:
+  // true appends to the record and runs again"), a bare dag() has no
+  // per-node resume tracking at all. This run already finished; --resume
+  // still reruns the whole graph from triage, appending a second run:start
+  // through run:end block rather than skipping anything, which is the
+  // opposite of an assumption that the tournament would not run again after
+  // a kill. That assumption does not hold for dag(): it has no stage-level
+  // "finished" bookkeeping to resume from, unlike workflow(). A resumed
+  // isolated node can also collide with a branch a rejected earlier attempt
+  // left behind (dag.ts only deletes an isolated node's fork branch on a
+  // successful merge), a second, separate reason a dag() resume is not safe
+  // to treat like a workflow() resume.
+  const resumed = runExample(workspace, bin, ['--resume']);
+  const resumedRecord = readRecord(workspace);
+  assert.equal(resumedRecord.filter((e) => e.kind === 'run:start').length, 2, 'resume appends to the same record rather than starting a fresh file');
+  assert.equal(resumedRecord.filter((e) => e.kind === 'job:start' && e.label === 'triage').length, 2, 'triage, already finished, runs again on resume: a bare dag() does not skip it');
+  const implementStartsAfterResume = resumedRecord.filter((e) => e.kind === 'job:start' && e.label === 'implement').length;
+  assert.ok(implementStartsAfterResume >= 3, 'the tournament, already landed, is attempted again on resume rather than being skipped');
 
   console.log(JSON.stringify({
     status: printed.status,
-    stages: 9,
-    implementationIterations: 2,
+    triage: 'feature',
+    researchRounds: 2,
+    tournamentRounds: 2,
     reviewRounds: 2,
-    kickbacks: 1,
-    pausedAt: 'approve',
+    judgeAnswers: judgeCalls.map((e) => (e.answers as { stop_reason: { choice: string } }).stop_reason.choice),
+    kickbacks: kickbacks.length,
+    approvedSha256: sha256.slice(0, 12),
+    calls: { claude: byRole('claude'), codex: byRole('codex'), opencode: byRole('opencode') },
+    resume: {
+      exit: resumed.status,
+      runStarts: 2,
+      triageRanAgain: true,
+      tournamentRanAgain: true,
+      note: 'dag() has no per-node resume skip; only workflow() does (docs/public/concepts/record.mdx)',
+    },
     mode,
   }, null, 2));
 } finally {

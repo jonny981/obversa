@@ -998,11 +998,15 @@ async function main() {
     assert.equal(compiledTeamPanel.testCommandsRun, 2);
     assert.equal(compiledTeamPanel.threshold, '1 of 2');
     assert.deepEqual(compiledTeamPanel.reviewerCalls, [1, 1]);
-    assert.equal(compiledTeamFeature.status, 'paused');
-    assert.equal(compiledTeamFeature.stages, 9);
-    assert.equal(compiledTeamFeature.implementationIterations, 2);
+    assert.equal(compiledTeamFeature.status, 'pass');
+    assert.equal(compiledTeamFeature.triage, 'feature');
+    assert.equal(compiledTeamFeature.researchRounds, 2);
+    assert.equal(compiledTeamFeature.tournamentRounds, 2);
     assert.equal(compiledTeamFeature.reviewRounds, 2);
+    assert.deepEqual(compiledTeamFeature.judgeAnswers, ['continue']);
     assert.equal(compiledTeamFeature.kickbacks, 1);
+    assert.equal(compiledTeamFeature.resume.triageRanAgain, true);
+    assert.equal(compiledTeamFeature.resume.tournamentRanAgain, true);
     // The compiled mode is the one that proves the package: a repo-mode green
     // must never stand in for it.
     assert.equal(compiledTeamPair.mode, 'compiled-from-dist');
