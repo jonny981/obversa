@@ -6,7 +6,7 @@
 </p>
 
 <p align="center">
-  <strong>Model real teamwork.</strong>
+  <strong>Model how your team really works.</strong>
 </p>
 
 <p align="center">
@@ -17,53 +17,108 @@
   <a href="https://github.com/jonny981/obversa/actions/workflows/ci.yml"><img src="https://github.com/jonny981/obversa/actions/workflows/ci.yml/badge.svg" alt="CI"></a>
 </p>
 
-Agent frameworks give you one clever session. When it dies, it starts over.
-Workflow engines give you durable steps and a server to run them on. Neither
-gives you a team: named roles, a review that returns work to whoever owns it, a
-vote when one opinion is not enough, and a person to answer to.
+Obversa runs the coding agents you already use, Claude Code, Codex and the
+rest, as a team, from a TypeScript file: who writes, who reviews, and when a
+person signs off. When a reviewer asks for changes or a test fails, the
+writer gets the notes and tries again. A judge can say when another round
+stops being worth it. A person approves the exact bytes before anything
+leaves. Every step goes on a record, so a killed run carries on from where
+it stopped. No server, no database.
 
-That is the layer Obversa owns. You describe the work the way you would describe
-it to people, and the runtime runs it one bounded engine call at a time.
-
-A domain-specific harness is a workflow for one job: the tools, the rules and
-the checks that make a model useful in one field. Obversa is the runtime you
-write that harness in, on the models you already use. The reviews and the
-person at the gate are part of the file.
-
-Every step appends events to a file on disk, with its artifacts beside them.
-That record is the whole story: no server, no database.
-
-If you searched for a software factory, a product factory or an agent
-pipeline: what you write here is a workflow with a review that sends work
-back and a person at the merge.
-
-`@obversa/runner` supervises a run in its own worker. After a crash it starts
-a fresh worker that reads its own record and carries on. Steps that finished are
-never repeated. A step that was mid-flight when the worker died runs again
-only if its binding declares it safe to retry; otherwise the run pauses and
-asks a person to reconcile it before it continues, so uncertain work is never
-repeated silently. That is a separate layer with its own call, not something
-a plain `run()` does by itself, and
-[the runner's page](https://docs.obversa.ai/packages/runner) has it.
+## Install
 
 ```bash
-npm install @obversa/runtime   # Node >= 22.12
+npm install @obversa/obversa
 ```
 
-## A feature, as one file
+Node.js 22.12 or later. `@obversa/obversa` installs the runtime and every
+plugin but the Jev engine, which is `npm install @obversa/engine-jev-api`.
+The engines drive the command line tools you already have signed in:
+Claude Code, Codex, Grok and OpenCode.
+[The packages](https://docs.obversa.ai/packages) lists each with its page.
 
-Install the runtime and two engine plugins, and this file delivers a
-change with a team of models: one seat researches the brief and writes
-the requirements and the plan, each reviewed; another writes the tests
-before any code, then implements until the tests pass and a reviewer from
-a different model family accepts; then the change is put to a person; and
-the evidence is written from the record. A red test or a rejected review
-runs the stage that owns it again, with the findings. The
-file is complete; copy it, put your brief in, run it with Node.
+## First run
+
+A Claude seat writes a function and its test from a brief, Node runs the
+test, and a Codex seat reads the change. The whole team is this file,
+`examples/teams/writer-reviewer-pair.ts`, with its brief at
+`briefs/add.md` beside it:
+
+```ts
+import { claude } from '@obversa/engine-claude-cli';
+import { codex } from '@obversa/engine-codex-cli';
+import { run } from '@obversa/runtime';
+import { briefFromFile, stage, workflow, type TeamSeat } from '@obversa/runtime';
+
+interface WriterReviewerEngines {
+  readonly claude: (model: string) => TeamSeat;
+  readonly codex: (model: string) => TeamSeat;
+}
+
+const realEngines: WriterReviewerEngines = { claude, codex };
+
+function createWriterReviewerPair(engines: WriterReviewerEngines = realEngines) {
+  return workflow('writer-reviewer-pair', {
+    brief: briefFromFile('briefs/add.md'),
+    options: { timeout: '10m' },
+
+    roles: {
+      write: engines.claude('claude-sonnet-4-5'),
+      review: [engines.codex('gpt-5.6-luna')],
+    },
+
+    stages: [
+      stage('write', {
+        agent: 'write',
+        writes: ['src/add.mjs', 'test/add.test.mjs'],
+        desc: 'Write the function and its test from the brief.',
+        gate: 'The files named in the brief exist in the workspace.',
+        refine: 1,
+      }),
+      stage('test', {
+        run: ['node', '--test', 'test/add.test.mjs'],
+        desc: 'Run the test command against the written files.',
+        gate: 'The test command exits 0.',
+        sendsBackTo: 'write',
+      }),
+      stage('review', {
+        panel: 'review',
+        agree: 1,
+        desc: 'Read the code, the test and its result.',
+        gate: 'The change meets the brief.',
+        sendsBackTo: 'write',
+      }),
+    ],
+  });
+}
+
+const result = await run(createWriterReviewerPair());
+console.log(JSON.stringify(result.outcome, null, 2));
+```
+
+Run it from the directory the work belongs in, with the Claude Code and
+Codex command line tools signed in:
 
 ```bash
-npm install @obversa/runtime @obversa/api @obversa/engine-claude-cli @obversa/engine-codex-cli
+npx tsx writer-reviewer-pair.ts
 ```
+
+The `write` stage names the files it may write and fails by name when one
+is missing. The `test` stage passes on the command's exit code, never on a
+model's report; a red run goes back to `write` with the output. The
+`review` stage is a reviewer from a different model family, and the runtime
+refuses the team before any model runs if the reviewer shares the writer's
+family. `refine: 1` on the writer is how many more rounds it gets.
+[First run](https://docs.obversa.ai/get-started/first-run) shows what a
+real run printed.
+
+## Feature delivery
+
+A ticket comes in. The team you would want reads the code and writes the
+requirements and a plan, each reviewed before the next step; writes the
+tests first, then the code until the tests pass and a reviewer from another
+model family accepts; puts the change in front of a person; and writes the
+evidence from the record. That team is `examples/teams/feature-delivery.ts`:
 
 ```ts
 import { claude } from '@obversa/engine-claude-cli';
@@ -177,15 +232,10 @@ const result = await run(createFeatureDelivery());
 console.log(JSON.stringify(result.outcome, null, 2));
 ```
 
-The roles are named once, from the seat helpers the engine plugins export,
-and every stage refers to a role by name. The implementer and every
-reviewer must be different model families, and the runtime refuses the
-team before any model runs if they are not.
-
-The team is a graph of nine named stages. Every step carries a sentence
-saying what it does and a sentence saying what must be true for it to
-count, and both reach the reviewers and the run record. Each step that
-repeats carries its own `retry`.
+Every stage says what it does and what must be true for it to count, and
+both reach the reviewers and the record. A red test or a rejected review
+runs the stage that owns the fix again with the findings, up to the
+`refine` on that stage.
 
 | stage | done when |
 | --- | --- |
@@ -199,179 +249,75 @@ repeats carries its own `retry`.
 | approve | A person has said yes. |
 | close | Both notes are in the workspace. |
 
-A step that promises a file fails by name when the file is missing. The
-test step passes on the command's exit code, never on a model's report,
-and a reviewer's decision is the file it writes.
 [Feature delivery](https://docs.obversa.ai/workflows/feature-team) shows
-what a real run of this file printed and the files the models wrote; a
-[writer and reviewer](https://docs.obversa.ai/patterns/writer-and-reviewer)
-and a [review panel](https://docs.obversa.ai/patterns/review-panel) are the
-other two recipes in the built-in workflows package.
+what a real run of this file printed and the files the models wrote.
+
+## The parts
+
+- **A review loop that knows when to stop.** A failed review or test sends
+  the findings to the step that owns the fix, and it runs again. Give a
+  stage `refine: judge(seat, { cap: 6 })` instead of a count and a small
+  model reads the findings and the rounds so far and says whether another
+  round is worth it; the cap is the backstop.
+  [Feedback loops](https://docs.obversa.ai/concepts/feedback-loops),
+  [a judge stops the loop](https://docs.obversa.ai/patterns/judge-stops-the-loop).
+- **A person approves the exact change.** The run stops and asks, and the
+  yes is bound to the bytes the person saw; a changed byte asks again.
+  [A person decides](https://docs.obversa.ai/patterns/approval).
+- **The record.** An append-only event log is the run's only state. Start a
+  killed run again and it carries on from the last finished step;
+  `obversa-record <path>` prints a record as a page a person scans.
+  [The record](https://docs.obversa.ai/concepts/record),
+  [read a record](https://docs.obversa.ai/recording/read-a-record).
+- **A worktree per writer.** Writers that run at the same time never touch
+  each other's files, and only the winner lands.
+  [Workspace](https://docs.obversa.ai/concepts/workspace).
+- **A run you can watch.** A local page shows each step, the record in the
+  console's words, and the questions waiting for you.
+  [Watch a run](https://docs.obversa.ai/driving/monitor).
+- **Memory.** Files a step can open again later, behind a small port with
+  three adapters: in process, in private Git references, over local
+  Markdown. [Memory](https://docs.obversa.ai/memory).
 
 ## Engines
 
-An engine binding names the adapter, the provider, the model family and the
-model. A review seat can be required to differ from the writer, so the model
-that wrote the work is not the model that grades it.
+A seat names the tool, the provider, the model family and the model. A
+reviewer can be required to come from a different family than the writer,
+so the model that wrote the work is never the model that grades it.
 
 | package | drives | needs |
 | --- | --- | --- |
-| `@obversa/engine-claude-cli` | the Claude CLI, one process per attempt | Claude CLI, host auth |
-| `@obversa/engine-codex-cli` | the Codex CLI | Codex CLI, host auth |
-| `@obversa/engine-grok-cli` | the Grok CLI | Grok CLI 1.0.5 |
-| `@obversa/engine-jev-api` | the Jev API | a Jev endpoint and API key |
-| `@obversa/engine-opencode-cli` | the OpenCode CLI | OpenCode CLI 1.18.23 |
+| `@obversa/engine-claude-cli` | Claude Code, one fresh process per attempt | Claude Code, signed in |
+| `@obversa/engine-codex-cli` | Codex | Codex, signed in |
+| `@obversa/engine-grok-cli` | Grok | the Grok command line tool |
+| `@obversa/engine-opencode-cli` | OpenCode | the OpenCode command line tool |
+| `@obversa/engine-claude-agent-sdk` | the Claude Agent SDK | Claude auth |
 | `@obversa/engine-anthropic-api` | the Anthropic API | an API key |
-| `@obversa/engine-claude-agent-sdk` | the Claude Agent SDK | host Claude auth |
+| `@obversa/engine-jev-api` | Jev, typed decisions over recorded state | a Jev endpoint and API key |
 
-Write your own against the engine contract; it must pass the conformance kit.
+Write your own against the engine contract in `@obversa/api`; it must pass
+the conformance kit.
 
-## Where to go
+## Where a workflow lives
 
-- **Site:** [obversa.ai](https://obversa.ai)
-- **Docs:** [docs.obversa.ai](https://docs.obversa.ai)
-- **Your first run:** [get started](https://docs.obversa.ai/get-started/first-run)
-- **Contributing:** [AGENTS.md](AGENTS.md)
-
-## What is in this repository
-
-19 publishable packages. `packages/` holds the eight that define the
-product: `@obversa/obversa` installs its bundled dependencies, `@obversa/runtime`
-runs workflows, `@obversa/builtin-workflows`
-provides three ready-made recipes, `@obversa/runner` supervises stored
-runs, `@obversa/api` holds the shared contracts and checks,
-`@obversa/core` runs bounded child processes, and
-`@obversa/surface` and `@obversa/surface-diff` are the local
-review surface. `plugins/` holds the eleven adapters: the seven engines above,
-three memory adapters (in process, in private Git references, and over a local
-Markdown corpus), and one notifier that posts a run's
-progress to a URL you supply. Not every available
-engine is bundled — install the Jev engine separately:
-`npm install @obversa/engine-jev-api`.
-`hosts/` holds the terminal host, which is not published.
-
-## Requirements
-
-- Node.js 22.12 or later
-- pnpm 10.15.1
-
-## Install the workspace
-
-From an Obversa checkout, run:
-
-```bash
-corepack enable
-pnpm install --frozen-lockfile
-pnpm build
-```
-
-The install activates this repository's commit hooks for the checkout. See
-[AGENTS.md](AGENTS.md) for what the hooks need before your first commit.
-
-## Run the offline workflow
-
-The first example uses deterministic function jobs. It does not use a model or
-network service.
-
-```bash
-pnpm example:offline
-```
-
-The full form, if the shortcut is not available:
-
-```bash
-pnpm --filter @obversa/runtime exec tsx ../../examples/offline-review.ts
-```
-
-Expected result:
-
-```json
-{
-  "status": "pass",
-  "attempts": 2,
-  "summary": "config is complete"
-}
-```
-
-## Define an outside graph type
-
-The graph contract lets a package define a pure graph type without importing
-runtime implementation modules. It validates a graph definition, reduces
-recorded events, makes graph commands, and describes a stable plan for a host.
-
-Run the checked-in example from the workspace root:
-
-```bash
-pnpm example:graph
-```
-
-The example is `examples/custom-graph.ts`. It defines a graph type,
-checks it with the public conformance kit, and prints its resolved plan bounds.
-
-`validateGraphDescription(unknown)` returns a frozen valid description or
-throws `GraphValidationError`. The conformance kit checks repeatable graph
-behavior from independent compiled instances.
-
-Read [the graph contract](docs/public/graphs/contract.mdx) and
-[plan admission](docs/public/graphs/plan-admission.mdx) before a host uses a
-graph package.
-
-## Store events and artifacts
-
-The runtime storage ports keep small JSON events separate from larger byte
-content. Run the offline local-storage example from the workspace root:
-
-```bash
-pnpm example:storage
-```
-
-The example writes one large synthetic artifact, appends one small reference,
-reopens the stores through a fresh binding, folds the same state, and runs the
-event-store and artifact-store conformance kits.
-
-Read [Events and artifacts](docs/public/recording/events-and-artifacts.mdx) for
-the storage contract, limits, secret handling, conflict behavior, and integrity
-checks. This storage layer does not execute graph work or recover a stopped
-run.
-
-## Run safe node attempts
-
-The runtime adapters run one fresh CLI process for one bounded node attempt. The
-offline example uses scripted Grok and OpenCode executables, validates both
-structured results, keeps missing usage as `unknown`, and removes its temporary
-fixture files.
-
-```bash
-pnpm example:attempt
-```
-
-Read [Safe node attempts](docs/public/recording/node-attempts.mdx) for result
-parts, declared capabilities, workspace access, fallback, and cleanup limits.
+Keep a workflow in a central collection and point each run at a repository
+with `run(job, { cwd })`, keep it beside the code it works on, or import it
+from a service and call `run()` when the service decides. It runs the same
+way from each.
+[Where a workflow lives](https://docs.obversa.ai/concepts/where-a-workflow-lives).
 
 ## Documentation
 
-The public documentation is in [`docs/public`](docs/public). It includes the
-first-run guide, the memory contract, the guides to writing a workflow shape
-and to what a run records, the examples,
-[cmux host setup](docs/public/hosts/cmux.mdx), and
-[reviewing a diff in a host pane](docs/public/hosts/review.mdx).
+[docs.obversa.ai](https://docs.obversa.ai): the first run, the concepts,
+the patterns, examples by field, and how Obversa sits beside LangGraph,
+CrewAI, Temporal, Claude Code subagents and eve.
 
-Validate the documentation from the workspace root:
+## Working on Obversa
 
-```bash
-pnpm docs:validate
-```
-
-## Development
-
-```bash
-pnpm typecheck
-pnpm typecheck:ts6
-pnpm test
-pnpm build
-```
+[AGENTS.md](AGENTS.md) is the guide for anyone who changes this
+repository: setup, the checks, and the rules every change follows.
 
 ## License
 
-Obversa uses the [MIT License](LICENSE). Report security problems as described
-in the [security policy](SECURITY.md).
+Obversa uses the [MIT License](LICENSE). Report security problems as
+described in the [security policy](SECURITY.md).
