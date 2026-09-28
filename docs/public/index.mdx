@@ -59,7 +59,8 @@ agents, so their context shrinks to the parts that truly need inference.
 
 - **[Workflows](/concepts/workflows).** The team as a TypeScript file: the
   steps, who does each one, where the reviews are, and where a person
-  decides.
+  decides. `workflow()` is the short form; `dag()` is where your own code,
+  a branch, a tournament or a team inside a team go.
 - **[Feedback loops](/concepts/feedback-loops).** A review or a test fails a
   step, and the step runs again with the findings, up to a limit you set.
 - **[The record](/concepts/record).** An append-only event log of the run,
