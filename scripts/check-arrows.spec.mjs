@@ -218,6 +218,53 @@ test("no rule fires outside the forbidden files", () => {
   assert.deepEqual(stray, [], "only the forbidden fixtures may raise violations");
 });
 
+function assertDependencyOnlyMeta(directory) {
+  const entries = readdirSync(directory, { withFileTypes: true });
+  const changelog = entries.find((entry) => entry.name === "CHANGELOG.md");
+  if (changelog) assert.ok(changelog.isFile(), "dependency-only meta changelog must be a regular file");
+  assert.deepEqual(
+    entries.map((entry) => entry.name).filter((entry) => entry !== "node_modules" && entry !== "CHANGELOG.md").sort(),
+    ["LICENSE", "README.md", "package.json"],
+    "meta package stays dependency-only; add a cruise root if it gains a file",
+  );
+  const manifest = JSON.parse(readFileSync(join(directory, "package.json"), "utf8"));
+  for (const entrypoint of ["main", "module", "exports", "bin", "types", "typings"]) {
+    assert.equal(manifest[entrypoint], undefined, `meta package stays dependency-only; add a cruise root if it gains ${entrypoint}`);
+  }
+}
+
+test("dependency-only meta permits a release changelog but no source or entrypoints", (t) => {
+  const directory = mkdtempSync(join(tmpdir(), "obversa-meta-inventory-"));
+  t.after(() => rmSync(directory, { recursive: true, force: true }));
+  for (const name of ["LICENSE", "README.md", "package.json"]) {
+    writeFileSync(join(directory, name), name === "package.json" ? "{}" : "fixture");
+  }
+  mkdirSync(join(directory, "node_modules"));
+  assertDependencyOnlyMeta(directory);
+  writeFileSync(join(directory, "CHANGELOG.md"), "# 0.1.1\n\nUpdate internal dependency ranges.\n");
+  assertDependencyOnlyMeta(directory);
+  writeFileSync(join(directory, "index.mjs"), "export const value = 1;\n");
+  assert.throws(() => assertDependencyOnlyMeta(directory), /dependency-only/);
+  rmSync(join(directory, "index.mjs"));
+  mkdirSync(join(directory, "src"));
+  assert.throws(() => assertDependencyOnlyMeta(directory), /dependency-only/);
+  rmSync(join(directory, "src"), { recursive: true });
+  for (const entrypoint of ["main", "module", "exports", "bin", "types", "typings"]) {
+    writeFileSync(join(directory, "package.json"), JSON.stringify({ [entrypoint]: "./index.mjs" }));
+    assert.throws(() => assertDependencyOnlyMeta(directory), /dependency-only/);
+  }
+  writeFileSync(join(directory, "package.json"), "{}");
+  rmSync(join(directory, "CHANGELOG.md"));
+  mkdirSync(join(directory, "CHANGELOG.md"));
+  assert.throws(() => assertDependencyOnlyMeta(directory), /dependency-only/);
+  rmSync(join(directory, "CHANGELOG.md"), { recursive: true });
+  symlinkSync("README.md", join(directory, "CHANGELOG.md"));
+  assert.throws(() => assertDependencyOnlyMeta(directory), /dependency-only/);
+  rmSync(join(directory, "CHANGELOG.md"));
+  rmSync(join(directory, "README.md"));
+  assert.throws(() => assertDependencyOnlyMeta(directory), /dependency-only/);
+});
+
 test("the live cruise roots cover every workspace package", () => {
   // The check:arrows command lists its roots by hand; a package added to the
   // workspace without a root here would silently escape the cruiser. The
@@ -233,15 +280,7 @@ test("the live cruise roots cover every workspace package", () => {
   const rules = readFileSync(join(repoRoot, ".dependency-cruiser.cjs"), "utf8");
   for (const member of members) {
     if (member === "packages/obversa") {
-      assert.deepEqual(
-        readdirSync(join(repoRoot, member)).filter((entry) => entry !== "node_modules").sort(),
-        ["LICENSE", "README.md", "package.json"],
-        `${member} stays dependency-only; add a cruise root if it gains a file`,
-      );
-      const metaManifest = JSON.parse(readFileSync(join(repoRoot, member, "package.json"), "utf8"));
-      for (const entrypoint of ["main", "module", "exports", "bin", "types", "typings"]) {
-        assert.equal(metaManifest[entrypoint], undefined, `${member} stays dependency-only; add a cruise root if it gains ${entrypoint}`);
-      }
+      assertDependencyOnlyMeta(join(repoRoot, member));
       continue;
     }
     assert.ok(roots.some((root) => root.startsWith(`${member}/`)), `${member} has no cruise root in check:arrows`);
