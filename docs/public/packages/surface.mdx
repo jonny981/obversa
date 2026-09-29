@@ -144,6 +144,7 @@ browser's acknowledgement (30,000 ms).
 | `terminalPayload` | `(status) => payload` | none | The payload for a session that ends without the app's completion. |
 | `terminalPayloadVerbatim` | `boolean` | `false` | Skip redaction on that payload. |
 | `open` | `boolean` | `true` | `runSurface` only: place the page with `openSurfaceUrl`. |
+| `signal` | `AbortSignal` | none | `runSurface` only: interrupt the session when the caller cancels. |
 | `stdout`, `ready` | stream, callback | `process.stdout`, none | `runSurface` only: where the frame goes, and a hook when the page is up. |
 
 ## Errors

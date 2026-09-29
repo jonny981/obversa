@@ -423,3 +423,24 @@ test("an interrupt that arrives while a completion's answer is in flight release
     await surface.stop();
   }
 });
+
+
+test("the caller's abort signal interrupts its waiting surface", async () => {
+  const directory = mkdtempSync(path.join(os.tmpdir(), "launcher-abort-"));
+  writeFileSync(path.join(directory, "index.html"), "<!doctype html><title>Review</title>");
+  const controller = new AbortController();
+  let captured = "";
+  const { result } = await runSurface({
+    app: "caller-abort",
+    open: false,
+    signal: controller.signal,
+    ready: () => controller.abort(),
+    stdout: { write: (text) => { captured += text; } },
+    assets: { directory, files: { "/": ["index.html", "text/html; charset=utf-8"] } },
+    sessionTimeoutMs: 200,
+    leaseTimeoutMs: 200,
+    ackTimeoutMs: 1,
+  });
+  assert.equal(result.status, "interrupted");
+  assert.equal(parseFramedResult(captured, "caller-abort").status, "interrupted");
+});

@@ -1,20 +1,21 @@
 ---
-title: "A Judge Stops the Loop"
-sidebarTitle: "Judge Stops the Loop"
-description: "A small model reads the findings and the rounds so far and says when another round stops being worth it."
+title: "Know When to Stop"
+description: "A judge reads the review notes and decides whether another round is worth it."
 ---
 
-Let a judge decide when a review loop stops, instead of a count. Use it
-when the work is refined over rounds and the right number of rounds is not
-known in advance: a page, a plan, a shortlist. When a fixed number of
-rounds is enough, `refine: 3` on the stage is the plain way, and
-[a writer and a reviewer](/patterns/writer-and-reviewer) shows it.
+Give a small decision model the job of deciding whether another revision
+would improve the work. Use it for a page, a plan or a shortlist when you
+can't know how many rounds it will need.
 
-The judge is a small decision model, not the reviewer. It answers typed
-questions about what the reviewer found and how the rounds have gone, one
-cheap call per round, and the question it answers is whether the work has
-reached the point of diminishing returns. A count stays as the safety cap,
-so the loop always ends.
+The reviewer says what needs fixing. The judge reads those notes and the
+history of revisions, then decides whether another round is worth doing.
+When another revision is needed, the workflow carries the feedback to the
+writer and runs the next round.
+You set a cap so the work can't go round forever. Put a person's decision
+where the process needs one; this example asks before publication.
+If a fixed number of rounds is enough,
+[get a second opinion](/patterns/writer-and-reviewer)
+and set the writer's revision limit.
 
 ## Shape
 
@@ -95,13 +96,26 @@ why to stop:
 
 In `workflow()` the same loop is one field on the reviewed stage:
 `refine: judge(seat, { cap: 6, questions })`, with `stopQuestions()` from
-`@obversa/runtime` as the default set; a `dag()` takes the same `judge()`
-value on `maxKickbacks`. There a judge that says stop lets the review stand
-in `workflow()`, and on a bare `dag()` it rejects the kickback and leaves
-the requesting step's outcome as it was. A custom question set routes on
-its `stop_reason` when it has one, and on the cap otherwise. The judge engine takes `{ state, questions }` as its prompt and
-returns one answer per question; the
-[Jev API engine](/packages/engine-jev-api) page has the shape.
+`@obversa/runtime` as the default set. A `dag()` takes the same `judge()`
+value on `maxKickbacks`. A stop means the same thing at both levels. When
+the judge chooses `holds` or `over_polishing`, the work is good enough as
+it stands, and it stands as a pass carrying the judge's reason. When it
+chooses `product_decision`, it asks a person as described below. Every other
+chosen stop, including `not_converging`, leaves the review's failure in place. A custom
+question set that wants a reason of its own to let the work stand names
+that choice `holds` or `over_polishing`. The judge engine takes
+`{ state, questions }` as its prompt and returns one answer per question;
+the [Jev API engine](/packages/engine-jev-api) page has the shape.
+
+The built-in `stopQuestions()` also offers `product_decision`: the work
+needs a person's judgement before review can continue. Pass an `interaction`
+binding to `judge()` to open your review surface. Its request includes the
+work and the review history. The person's structured feedback and composed
+prompt return to the judge, which decides again. The writer does not run
+just to deliver that answer. Without an interaction handler, answer through
+the run's stored callbacks client. This gets an answer while the work is
+being revised. A later human review can still require you to approve the
+finished work.
 
 ## What the run did
 

@@ -332,11 +332,11 @@ test("the publish verifier accepts hits and names missing, wrong, and failed reg
   });
   const allowlist = new Set(["@x/hit", "@x/missing", "@x/wrong", "@x/down", "@x/ghost"]);
   try {
-    const problems = (await verifyPublished({ registry, root, allowlist })).join("\n");
+    const problems = (await verifyPublished({ registry, root, allowlist, retry: { totalMs: 0 } })).join("\n");
     assert.doesNotMatch(problems, /@x\/hit/);
     assert.match(problems, /@x\/missing@1\.0\.0: not on the registry/);
     assert.match(problems, /@x\/wrong@1\.0\.0: not on the registry \(registry document does not match/);
-    assert.match(problems, /@x\/down@1\.0\.0: not on the registry \(HTTP 503\)/);
+    assert.match(problems, /@x\/down@1\.0\.0: not on the registry \(HTTP 503, waited 0s across 1 attempt\(s\)\)/);
     assert.match(problems, /@x\/ghost: on the allowlist but not a workspace package/);
   } finally {
     rmSync(root, { recursive: true, force: true });
@@ -346,7 +346,7 @@ test("the publish verifier accepts hits and names missing, wrong, and failed reg
 test("the publish verifier reports an invalid registry URL", async () => {
   const root = makeWorkspace({ "packages/hit": { name: "@x/hit", version: "1.0.0" } });
   try {
-    const problems = (await verifyPublished({ registry: "not a URL", root, allowlist: new Set(["@x/hit"]) })).join("\n");
+    const problems = (await verifyPublished({ registry: "not a URL", root, allowlist: new Set(["@x/hit"]), retry: { totalMs: 0 } })).join("\n");
     assert.match(problems, /@x\/hit@1\.0\.0: not on the registry \(registry request failed/);
   } finally {
     rmSync(root, { recursive: true, force: true });
@@ -374,7 +374,7 @@ test("the tag step pushes each existing registry-confirmed tag by name and refus
     return { status: 0, stdout: "", stderr: "" };
   };
   try {
-    const { pushed, problems } = await tagPublished({ registry, root, allowlist, run });
+    const { pushed, problems } = await tagPublished({ registry, root, allowlist, run, retry: { totalMs: 0 } });
     const text = problems.join("\n");
     assert.deepEqual(pushed, ["@x/tagged@1.0.0"], "only the existing tag is pushed");
     assert.ok(calls.some((c) => c === "push origin refs/tags/@x/tagged@1.0.0"), "the intended tag is pushed by name");

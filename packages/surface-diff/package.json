@@ -1,6 +1,6 @@
 {
   "name": "@obversa/surface-diff",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Open a git diff for inline review.",
   "type": "module",
   "exports": {

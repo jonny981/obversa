@@ -166,6 +166,16 @@ export function validateCallbackResponse(
     return { ok: false, reason: 'a callback response must be an object' };
   }
   const record = response as Record<string, unknown>;
+  if (schema.allOf !== undefined) {
+    if (!Array.isArray(schema.allOf) || !schema.allOf.every((candidate) => candidate !== null && typeof candidate === 'object' && !Array.isArray(candidate) && validateCallbackResponse(response, candidate as JsonObject).ok)) {
+      return { ok: false, reason: 'the response does not match every required response shape' };
+    }
+  }
+  if (schema.anyOf !== undefined) {
+    if (!Array.isArray(schema.anyOf) || !schema.anyOf.some((candidate) => candidate !== null && typeof candidate === 'object' && !Array.isArray(candidate) && validateCallbackResponse(response, candidate as JsonObject).ok)) {
+      return { ok: false, reason: 'the response does not match any permitted response shape' };
+    }
+  }
   const properties = schema.properties;
   if (properties !== undefined
     && (typeof properties !== 'object' || properties === null || Array.isArray(properties))) {
@@ -195,6 +205,13 @@ export function validateCallbackResponse(
       const allowed = Array.isArray(expected) ? expected : [expected];
       if (!allowed.some((type) => hasJsonType(field, type))) {
         return { ok: false, reason: `the response field "${key}" must be ${String(expected)}` };
+      }
+      const constraints = declared as { pattern?: unknown; enum?: unknown };
+      if (typeof field === 'string' && typeof constraints.pattern === 'string' && !new RegExp(constraints.pattern).test(field)) {
+        return { ok: false, reason: `the response field "${key}" does not match its required pattern` };
+      }
+      if (Array.isArray(constraints.enum) && !constraints.enum.includes(field)) {
+        return { ok: false, reason: `the response field "${key}" must be one of its declared choices` };
       }
     }
   }

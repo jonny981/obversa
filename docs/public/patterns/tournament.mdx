@@ -1,16 +1,16 @@
 ---
-title: "Three Candidates, One Winner"
-sidebarTitle: "Tournament"
-description: "Several attempts at one task in their own worktrees, a judge that scores each, and only the winner lands."
+title: "Compare Different Approaches"
+description: "Try several approaches, score each with a function, and keep the highest-scoring pass."
 ---
 
-Run the same task more than once and keep the attempt that scores highest.
-Use it when a task has several defensible answers and you'd rather compare
-than iterate: an implementation with a few plausible designs, a draft with
-a few angles. When one attempt and a reviewer will do, use
-[a writer and a reviewer](/patterns/writer-and-reviewer). A tournament is an
-eval that picks a winner: the judge is a function over the files each
-candidate left, not a model's opinion.
+Try a few approaches to the same task and compare the results before
+choosing one. Use it for a draft with several possible angles or a problem
+with more than one plausible solution.
+
+Each candidate works in its own worktree. A scoring function chooses the
+highest-scoring candidate that passes, and only that candidate's work is
+merged. If a single attempt and a reviewer are enough,
+[get a second opinion](/patterns/writer-and-reviewer).
 
 ## Shape
 

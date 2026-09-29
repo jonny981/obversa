@@ -1,14 +1,22 @@
+import { readFile } from 'node:fs/promises';
+
 import { claude } from '@obversa/engine-claude-cli';
 import { codex } from '@obversa/engine-codex-cli';
+import { JevApiEngine } from '@obversa/engine-jev-api';
 import {
   briefFromFile,
+  finalResultPart,
   formatEvent,
+  judge,
   person,
   run,
   stage,
   workflow,
+  type Engine,
+  type JudgeAnswer,
   type TeamSeat,
 } from '@obversa/runtime';
+import { MockEngine } from '@obversa/runtime/testing';
 
 interface BacklogGroomEngines {
   readonly claude: (model: string) => TeamSeat;
@@ -16,6 +24,35 @@ interface BacklogGroomEngines {
 }
 
 const realEngines: BacklogGroomEngines = { claude, codex };
+
+/**
+ * The judge that decides whether the stories go round again: Jev over the
+ * TypeSafe API when JUDGE=jev, otherwise the answers recorded in judge.json
+ * beside the brief, one set per round, so the file runs offline. Jev answers
+ * with a structured part and a stage wants text, so the seat wraps the
+ * answers as JSON.
+ */
+async function judgeSeat(): Promise<TeamSeat> {
+  const identity = { adapter: 'jev-api', provider: 'typesafe', modelFamily: 'jev', model: 'jev-latest', tools: [] };
+  if (process.env.JUDGE === 'jev') {
+    const endpoint = process.env.TYPESAFE_ENDPOINT;
+    const apiKey = process.env.TYPESAFE_API_KEY;
+    if (!endpoint || !apiKey) throw new Error('JUDGE=jev needs TYPESAFE_ENDPOINT and TYPESAFE_API_KEY');
+    const api = new JevApiEngine({ endpoint, apiKey });
+    const engine = {
+      name: 'jev-api',
+      async run(request, onEvent, signal) {
+        const result = await api.run(request, onEvent, signal);
+        const part = finalResultPart(result);
+        return part.kind === 'structured' ? { ...result, parts: [{ kind: 'assistant', text: JSON.stringify(part.value), final: true }] } : result;
+      },
+    } as Engine;
+    return { engine, identity };
+  }
+  const answers = JSON.parse(await readFile('judge.json', 'utf8')) as Record<string, JudgeAnswer>[];
+  let round = 0;
+  return { engine: new MockEngine(() => JSON.stringify(answers[Math.min(round++, answers.length - 1)])), identity: { ...identity, adapter: 'recorded' } };
+}
 
 /**
  * Backlog grooming, then a person ranks. The raw tickets are whatever the
@@ -26,7 +63,7 @@ const realEngines: BacklogGroomEngines = { claude, codex };
  * Then the product owner ranks. Nothing here writes code: the work is
  * deciding what is worth writing.
  */
-function createBacklogGroom(engines: BacklogGroomEngines = realEngines) {
+function createBacklogGroom(jev: TeamSeat, engines: BacklogGroomEngines = realEngines) {
   return workflow('backlog-groom-then-rank', {
     brief: briefFromFile('briefs/backlog.md'),
     options: { timeout: '10m' },
@@ -44,11 +81,11 @@ function createBacklogGroom(engines: BacklogGroomEngines = realEngines) {
         desc: 'Turn every raw ticket in backlog/raw.md into one or more stories, each with its acceptance checks and the ticket it came from.',
         gate: 'Every raw ticket is covered by at least one story and a reviewer from another family has accepted the set.',
         reviewedBy: 'story-review',
-        // Three attempts, not two: the allowance matches how open-ended the
-        // work is. Grooming a backlog has many defensible answers, so a strict
-        // reviewer and a writer need room to meet. Work with one right answer
-        // needs less.
-        refine: 3,
+        // The judge. After a round the reviewer did not pass, Jev reads the
+        // findings and the rounds so far and says whether another round is
+        // worth it; a finding tagged block goes back without asking. The
+        // cap is the backstop: three rounds at most, whatever the judge says.
+        refine: judge(jev, { cap: 3 }),
       }),
 
       stage('clarify', {
@@ -74,7 +111,8 @@ function createBacklogGroom(engines: BacklogGroomEngines = realEngines) {
   });
 }
 
-const result = await run(createBacklogGroom(), {
+const result = await run(createBacklogGroom(await judgeSeat()), {
   onEvent: (event) => console.log(formatEvent(event)),
+  recordTo: 'records/backlog-groom-then-rank.jsonl',
 });
 console.log(JSON.stringify(result.outcome, null, 2));

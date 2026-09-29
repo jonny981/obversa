@@ -1260,8 +1260,8 @@ process.stdout.write(JSON.stringify(await handle.done));
   it('elapsed budget keeps execution spent across repeated genuine paused resumes', async () => {
     const { options } = await fixture();
     const approvalFile = join(options.directory, 'approval');
-    const paused = { ...options, limits: { ...options.limits, timeoutMs: 9_000 },
-      definition: { ...options.definition, resolvedInputs: { wait: true, waitNode: 'last', approvalFile, delayMs: 3_500 } } };
+    const paused = { ...options, limits: { ...options.limits, timeoutMs: 12_000 },
+      definition: { ...options.definition, resolvedInputs: { wait: true, waitNode: 'last', approvalFile, delayMs: 10_000, delayNode: 'last', nodeTimeoutMs: 30_000 } } };
     await expect((await startFixture(paused)).done).resolves.toMatchObject({ kind: 'pause' });
     const workspace = { ...options.workspace, releaseLease: async (token: string) => {
       await delay(1_000);
@@ -1271,8 +1271,22 @@ process.stdout.write(JSON.stringify(await handle.done));
       await expect((await resumeFixture({ ...paused, workspace })).done).resolves.toMatchObject({ kind: 'pause' });
     }
     const before = await runner.readSupervisedRunStatus({ storage: options.storage, runId: 'fixture' });
-    expect(before.remainingTimeoutMs).toBeGreaterThan(800);
-    expect(before.remainingTimeoutMs).toBeLessThan(3_500);
+    const storage = createLocalRunStorage(options.storage);
+    const records = await readSupervision(storage, 'fixture');
+    const at = (type: string) => records.filter((event) => event.type === type).map((event) => Date.parse(event.timestamp));
+    const launches = at('runner:worker-launching');
+    const pauses = at('runner:paused');
+    expect(launches).toHaveLength(3);
+    expect(pauses).toHaveLength(3);
+    const startedAt = Date.parse((await runtime.loadRunDefinition(storage, 'fixture')).record.timestamp);
+    // Spent is the time a worker was running: from the run's start to its
+    // first pause, then from each launch to its pause. The gaps while the
+    // run sat paused are not charged, and nothing is refilled on resume.
+    const spent = (pauses[0]! - startedAt) + (pauses[1]! - launches[1]!) + (pauses[2]! - launches[2]!);
+    expect(before.elapsedMs).toBe(spent);
+    expect(before.remainingTimeoutMs).toBe(12_000 - spent);
+    expect(spent).toBeGreaterThanOrEqual(2_000);
+    expect(pauses[2]! - startedAt).toBeGreaterThan(spent);
     await writeFile(approvalFile, 'allow');
     const resumed = await resumeFixture(paused);
     await nodeStarted(options.directory, 'last');

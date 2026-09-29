@@ -3,12 +3,13 @@ import { readFile } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-import { pass, revise, sourceDir, withExample } from '../proof-host.js';
+import { pass, recordEvents, revise, shouldFix, sourceDir, withExample } from '../proof-host.js';
 
 const here = dirname(fileURLToPath(import.meta.url));
 const samples = sourceDir(here);
 const brief = await readFile(join(samples, 'briefs/playbook.md'), 'utf8');
 const contract = await readFile(join(samples, 'contracts/msa.md'), 'utf8');
+const judgeJson = await readFile(join(samples, 'judge.json'), 'utf8');
 
 const clauses = [
   '1. Term: push back (auto-renewal; 30-day notice)',
@@ -46,14 +47,15 @@ Replacement: struck; exclusivity of any kind is never signed.
 `;
 
 // The checker sends the redlines back once: two never-sign clauses had no
-// redline. The second set covers every push-back and never clause, the
+// redline, a block the judge is never asked about. On the second set the
+// checker has only a taste note, and the judge stops the loop; the
 // positions note follows and is checked in its turn, and the run stops at the
 // lawyer. The note is reviewed because deciding what to concede is the most
 // judgement-heavy step here; it used to be the only unreviewed one.
 await withExample({
   here,
   example: 'contract-playbook',
-  files: { 'briefs/playbook.md': brief, 'contracts/msa.md': contract },
+  files: { 'briefs/playbook.md': brief, 'contracts/msa.md': contract, 'judge.json': judgeJson },
   seats: {
     claude: [
       { writes: { 'review/clauses.md': clauses }, reply: pass('seven clauses mapped: one accept, four push back, two never') },
@@ -63,7 +65,7 @@ await withExample({
     ],
     codex: [
       { reply: revise('two never-sign clauses have no redline', 'clause 4 (uncapped indemnity) is marked never in clauses.md and absent from redlines.md', 'clause 6 (exclusivity) is marked never and absent') },
-      { reply: pass('every push-back and never clause has a redline, and none goes past its rule') },
+      { reply: shouldFix('one redline could be tighter', 'clause 3: the fallback sentence on the liability redline could go; the twelve-month term already meets the rule') },
       { reply: pass('every redline has a position, and the two walk-aways match the never-sign rules') },
     ],
   },
@@ -79,12 +81,21 @@ await withExample({
   assert.match(await run.read('review/positions.md'), /walk-away/);
   assert.match(run.stdout, /tok/, 'the run prints its usage lines');
 
+  const events = await recordEvents(run, 'records/contract-playbook.jsonl');
+  const judged = events.filter((event) => event.kind === 'refine:judge');
+  assert.equal(judged.length, 1, 'the judge is asked once: a block went back on its own');
+  assert.equal(judged[0]!.reason, 'the judge chose holds');
+  assert.ok((judged[0]!.path as string[]).includes('redline'), 'the judged round is the redline stage');
+
   console.log(JSON.stringify({
     status: 'pass',
     stages: 4,
     clauses: 7,
     redlineRounds: 2,
     checkerKickbacks: 1,
+    judge: ['holds'],
+    cap: 3,
+    blockWentBackWithoutTheJudge: true,
     pausedAt: 'negotiate',
     mode: run.mode,
   }, null, 2));

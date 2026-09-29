@@ -17,91 +17,108 @@ who knows the audience, not by a model.
 Obversa makes that a refinement loop with a person at the end. One model
 translates with the glossary open. A model from another family reads the
 translation the way an editor would and fails it with what to change, not a
-score. The translator runs again with those findings until the editor
-accepts. Then the translator writes down how every glossary term was
-rendered and where the glossary and natural French pulled apart, and the
-run stops for the person who knows the readers. This file is a three-stage
-team: translate, terms, nuance.
+score. The translator runs again with those findings, and after each round
+a judge, Jev, reads the findings and the rounds so far and says whether
+another round is worth it, up to a cap of three. Then the translator writes
+down how every glossary term was rendered and where the glossary and
+natural French pulled apart, and the run stops for the person who knows the
+readers. This file is a three-stage team: translate, terms, nuance.
 
 ## Run it
 
 Set the project up as [Installation](/get-started/installation) describes,
-put `briefs/translation.md`, `source/article.md` and `glossary/en-fr.md`
-from `examples/use-cases/other/` beside the file, sign in to Claude Code and
-Codex, and run it:
+put `briefs/translation.md`, `source/article.md`, `glossary/en-fr.md` and
+`judge.json` from `examples/use-cases/other/` beside the file, sign in to
+Claude Code and Codex, and run it. Without `JUDGE=jev` the judge replays the
+answers in `judge.json`; with it, and a TypeSafe endpoint and key in the
+environment, the judge is Jev:
 
 ```bash Terminal
 npx tsx translate-reflect.ts
 ```
 
 Every event prints as one line as it happens, and the outcome prints last
-as JSON. The output below is from one real run, trimmed at both ends:
+as JSON. The output below is the proof's offline run, with scripted seats
+standing in for the models and a recorded judge, so the words are the
+script's and the shape is the run's:
 
-```text Events
+```text Output, from the offline proof
+▸ run
+translate-reflect workflow:start
 translate-reflect ▸ dag (3 nodes)
 translate-reflect · node translate: start
 translate-reflect › translate › translate-review ▸ loop (max 4)
 translate-reflect › translate › translate-review · iteration 1
 translate-reflect › translate › translate-review • translate
-translate-reflect › translate › translate-review engine:thinking
-translate-reflect › translate › translate-review engine:text
-translate-reflect › translate › translate-review   tool Read use
-translate-reflect › translate › translate-review   tool tool result
-translate-reflect › translate › translate-review   tool Read use
-translate-reflect › translate › translate-review   tool tool result
-translate-reflect › translate › translate-review engine:thinking
-translate-reflect › translate › translate-review engine:text
-translate-reflect › translate › translate-review   tool Write use
-translate-reflect › translate › translate-review   tool tool result
-translate-reflect › translate › translate-review engine:thinking
-translate-reflect › translate › translate-review engine:text
-translate-reflect › translate › translate-review   tool Bash use
-translate-reflect › translate › translate-review   tool tool result
-translate-reflect › translate › translate-review engine:thinking
-… 43 more event lines …
-translate-reflect › terms   tool tool result
-translate-reflect › terms engine:thinking
-translate-reflect › terms   tool Write use
-translate-reflect › terms   tool tool result
-translate-reflect › terms engine:thinking
-translate-reflect › terms   tool Bash use
-translate-reflect › terms   tool tool result
-translate-reflect › terms engine:thinking
-translate-reflect › terms   tool Bash use
-translate-reflect › terms   tool tool result
-translate-reflect › terms engine:thinking
-translate-reflect › terms engine:text
-translate-reflect › terms   claude-sonnet-4-5-20250929: 557355/2860 tok
-translate-reflect › terms • terms: pass
+
+translate-reflect › translate › translate-review   stand-in: 3/1 tok
+translate-reflect › translate › translate-review • translate: pass  translated; three paragraphs kept
+translate-reflect › translate › translate-review · until met: translate writes: true
+translate-reflect › translate › translate-review › review-panel • translate
+translate-reflect › translate › translate-review › review-panel • translate-1
+
+translate-reflect › translate › translate-review › review-panel   gpt-5.6-luna: 42/7 tok
+translate-reflect › translate › translate-review › review-panel • translate-1: fail  two glossary terms are rendered with the words the glossary rules out
+translate-reflect › translate › translate-review › review-panel • translate: fail  Review panel: 0/1 reviewer(s) cleared. - translate-1 [should-fix]: "s'expédie" and "l'expédie" where the glossary says "envoyer" - translate-1 [should-fix]: "rappels de paiement" where the glossary says "relance de paiement"
+translate-reflect › translate › translate-review › refine-judge • refine:judge
+
+translate-reflect › translate › translate-review › refine-judge   jev-latest: 10/5 tok
+translate-reflect › translate › translate-review › refine-judge • refine:judge: pass  {"holds":{"type":"noul","noul":0.2},"worth_doing":{"type":"noul","noul":0.8},"worth_another_round":{"type":"noul","noul":0.72},"stop_reason":{"type":"choice","choice":"continue","confidence":0.6}}
+translate-reflect › translate › translate-review ◆ the judge says another round is worth it (0.72)
+translate-reflect › translate › translate-review · review: fail
+review did not pass (Review panel: 0/1 reviewer(s) cleared. - translate-1 [should-fix]: "s'expédie" and "l'expédie" where the glossary says "envoyer" - translate-1 [should-fix]: "rappels de paiement" where the glossary says "relance de paiement" (the judge says another round is worth it (0.72))); re-entering translate-review
+translate-reflect › translate › translate-review · iteration 2
+translate-reflect › translate › translate-review • translate
+
+translate-reflect › translate › translate-review   stand-in: 3/1 tok
+translate-reflect › translate › translate-review • translate: pass  "envoyer" and "relance" now follow the glossary
+translate-reflect › translate › translate-review · until met: translate writes: true
+translate-reflect › translate › translate-review › review-panel • translate
+translate-reflect › translate › translate-review › review-panel • translate-1
+
+translate-reflect › translate › translate-review › review-panel   gpt-5.6-luna: 42/7 tok
+translate-reflect › translate › translate-review › review-panel • translate-1: fail  one taste note
+translate-reflect › translate › translate-review › review-panel • translate: fail  Review panel: 0/1 reviewer(s) cleared. - translate-1 [should-fix]: "le jour venu" is fine; "le jour dit" sat closer to the source, taste only
+translate-reflect › translate › translate-review › refine-judge • refine:judge
+
+translate-reflect › translate › translate-review › refine-judge   jev-latest: 10/5 tok
+translate-reflect › translate › translate-review › refine-judge • refine:judge: pass  {"holds":{"type":"noul","noul":0.9},"worth_doing":{"type":"noul","noul":0.2},"worth_another_round":{"type":"noul","noul":0.1},"stop_reason":{"type":"choice","choice":"holds","confidence":0.8}}
+translate-reflect › translate › translate-review ◆ the judge chose holds
+translate-reflect › translate › translate-review · review: pass
+translate-reflect › translate › translate-review ◂ pass (2 iter)
+translate-reflect · node translate: done (pass)
+translate-reflect · node terms: start
+translate-reflect › terms • terms
+
+translate-reflect › terms   stand-in: 3/1 tok
+translate-reflect › terms • terms: pass  six terms listed, two flagged
 translate-reflect · node terms: done (pass)
 translate-reflect · node nuance: start
 translate-reflect › nuance • nuance
-translate-reflect › nuance • nuance: paused
+translate-reflect › nuance • nuance: paused  waiting for a person: Publish this translation?
 translate-reflect · node nuance: done (paused)
 translate-reflect ◂ dag paused
-```
-
-```json Output
+◂ run paused (113/27 tok, 60 tok from cache)
 {
   "status": "paused",
   "summary": "waiting for a person: Publish this translation?",
   "data": {
     "translate": {
       "status": "pass",
-      "summary": "Review panel: 1/1 reviewer(s) cleared."
+      "summary": "the judge chose holds"
     },
     "terms": {
       "status": "pass",
-      "summary": "All 6 glossary terms catalogued across 13 occurrences. Two divergences noted: 'Drafts' capitalised per UI convention vs natural lowercase; 'Envoyer' as infinitive button label vs French imperative preference."
+      "summary": "six terms listed, two flagged"
     },
     "nuance": {
       "status": "paused",
       "summary": "waiting for a person: Publish this translation?",
       "data": {
-        "requestId": "nuance#1#1173ebffeb1e9c76c8e75c9bbdb9e4e92850c7d08f0b6c3587172eecc2a93732",
+        "requestId": "nuance#1#96d1d7a327bebf6ef8c69c45e1b7c7ec6a695e9920c36b42e9db13d3f4685629",
         "gateId": "nuance",
         "gateVersion": 1,
-        "digest": "1173ebffeb1e9c76c8e75c9bbdb9e4e92850c7d08f0b6c3587172eecc2a93732",
+        "digest": "96d1d7a327bebf6ef8c69c45e1b7c7ec6a695e9920c36b42e9db13d3f4685629",
         "decisionText": "Publish this translation?",
         "responseSchema": {
           "type": "object",
@@ -118,7 +135,7 @@ translate-reflect ◂ dag paused
           ]
         },
         "input": {
-          "terms": "All 6 glossary terms catalogued across 13 occurrences. Two divergences noted: 'Drafts' capitalised per UI convention vs natural lowercase; 'Envoyer' as infinitive button label vs French imperative preference."
+          "terms": "six terms listed, two flagged"
         },
         "presentation": {}
       }
@@ -127,9 +144,14 @@ translate-reflect ◂ dag paused
 }
 ```
 
-The run stopped at `nuance` with the translation in `fr/article.md` and the
-terms note in `fr/terms.md`, waiting for the person. A no goes to
-`translate` with the editor's note as the finding.
+Two translations, two reads, two answers from the judge. The first
+translation rendered two glossary terms with the words the glossary rules
+out; the reviewer named them, and the judge said another round was worth
+it. The second followed the glossary and drew one taste note, and the judge
+said the translation holds. The run stopped at `nuance` with the
+translation in `fr/article.md` and the terms note in `fr/terms.md`, waiting
+for the person. A no goes to `translate` with the editor's note as the
+finding.
 
 ## The file
 
@@ -147,9 +169,12 @@ person decides with the trade-off in front of them.
     },
 ```
 
-The translation is reviewed by the Codex seat, reading as an editor, with
-three attempts to meet. The terms note has no reviewer, so only its own seat
-judges whether every glossary term is on the list. Then the run stops:
+The translation is reviewed by the Codex seat, reading as an editor. When
+the reviewer does not accept it, `refine: judge(jev, { cap: 3 })` asks the
+judge whether another round is worth it, and the cap ends the loop after
+three rounds whatever the judge says. The terms note has no reviewer, so
+only its own seat judges whether every glossary term is on the list. Then
+the run stops:
 
 ```ts examples/use-cases/other/translate-reflect.ts (excerpt) {6,11,25}
       stage('translate', {
@@ -158,11 +183,11 @@ judges whether every glossary term is on the list. Then the run stops:
         desc: 'Translate source/article.md into French for a reader in France, in the tone the brief names, rendering every term in glossary/en-fr.md as the glossary says.',
         gate: 'The translation is complete and a reviewer from another family, reading it as an editor would, has accepted it.',
         reviewedBy: 'reflect',
-        // Three attempts, not two: the allowance matches how open-ended the
-        // work is. A translation that honours a glossary and still reads
-        // naturally has many defensible answers, so reviewer and writer need
-        // room to meet.
-        refine: 3,
+        // The judge. After a round the reflection did not pass, Jev reads the
+        // findings and the rounds so far and says whether another round is
+        // worth it; a finding tagged block goes back without asking. The
+        // cap is the backstop: three rounds at most, whatever the judge says.
+        refine: judge(jev, { cap: 3 }),
       }),
 
       stage('terms', {
@@ -178,6 +203,8 @@ judges whether every glossary term is on the list. Then the run stops:
         gate: 'A person has said publish.',
         sendsBackTo: 'translate',
       }),
+    ],
+  });
 ```
 
 The "done when" sentences are each stage's `gate`. The package doesn't
@@ -188,17 +215,25 @@ its reviewer accepts, and a person stage pauses until the person answers.
 <Accordion title="Full file">
 
 ```ts examples/use-cases/other/translate-reflect.ts
+import { readFile } from 'node:fs/promises';
+
 import { claude } from '@obversa/engine-claude-cli';
 import { codex } from '@obversa/engine-codex-cli';
+import { JevApiEngine } from '@obversa/engine-jev-api';
 import {
   briefFromFile,
+  finalResultPart,
   formatEvent,
+  judge,
   person,
   run,
   stage,
   workflow,
+  type Engine,
+  type JudgeAnswer,
   type TeamSeat,
 } from '@obversa/runtime';
+import { MockEngine } from '@obversa/runtime/testing';
 
 interface TranslateEngines {
   readonly claude: (model: string) => TeamSeat;
@@ -208,15 +243,45 @@ interface TranslateEngines {
 const realEngines: TranslateEngines = { claude, codex };
 
 /**
- * Translate, reflect, glossary, and the last part is you. One model
+ * The judge that decides whether the translation goes round again: Jev over the
+ * TypeSafe API when JUDGE=jev, otherwise the answers recorded in judge.json
+ * beside the brief, one set per round, so the file runs offline. Jev answers
+ * with a structured part and a stage wants text, so the seat wraps the
+ * answers as JSON.
+ */
+async function judgeSeat(): Promise<TeamSeat> {
+  const identity = { adapter: 'jev-api', provider: 'typesafe', modelFamily: 'jev', model: 'jev-latest', tools: [] };
+  if (process.env.JUDGE === 'jev') {
+    const endpoint = process.env.TYPESAFE_ENDPOINT;
+    const apiKey = process.env.TYPESAFE_API_KEY;
+    if (!endpoint || !apiKey) throw new Error('JUDGE=jev needs TYPESAFE_ENDPOINT and TYPESAFE_API_KEY');
+    const api = new JevApiEngine({ endpoint, apiKey });
+    const engine = {
+      name: 'jev-api',
+      async run(request, onEvent, signal) {
+        const result = await api.run(request, onEvent, signal);
+        const part = finalResultPart(result);
+        return part.kind === 'structured' ? { ...result, parts: [{ kind: 'assistant', text: JSON.stringify(part.value), final: true }] } : result;
+      },
+    } as Engine;
+    return { engine, identity };
+  }
+  const answers = JSON.parse(await readFile('judge.json', 'utf8')) as Record<string, JudgeAnswer>[];
+  let round = 0;
+  return { engine: new MockEngine(() => JSON.stringify(answers[Math.min(round++, answers.length - 1)])), identity: { ...identity, adapter: 'recorded' } };
+}
+
+/**
+ * Translate, reflect, a judge, glossary, and the last part is you. One model
  * translates the article with the glossary open; a model from another
  * family reads the translation the way an editor would and returns it
- * with what to change, not a score; the translator writes down how every
+ * with what to change, not a score; the judge decides when another round
+ * is worth it, with the cap as the backstop; the translator writes down how every
  * glossary term was rendered and where the glossary and natural French
  * pulled apart. The person who knows the readers decides the nuance and
  * says publish.
  */
-function createTranslateReflect(engines: TranslateEngines = realEngines) {
+function createTranslateReflect(jev: TeamSeat, engines: TranslateEngines = realEngines) {
   return workflow('translate-reflect', {
     brief: briefFromFile('briefs/translation.md'),
     options: { timeout: '10m' },
@@ -234,11 +299,11 @@ function createTranslateReflect(engines: TranslateEngines = realEngines) {
         desc: 'Translate source/article.md into French for a reader in France, in the tone the brief names, rendering every term in glossary/en-fr.md as the glossary says.',
         gate: 'The translation is complete and a reviewer from another family, reading it as an editor would, has accepted it.',
         reviewedBy: 'reflect',
-        // Three attempts, not two: the allowance matches how open-ended the
-        // work is. A translation that honours a glossary and still reads
-        // naturally has many defensible answers, so reviewer and writer need
-        // room to meet.
-        refine: 3,
+        // The judge. After a round the reflection did not pass, Jev reads the
+        // findings and the rounds so far and says whether another round is
+        // worth it; a finding tagged block goes back without asking. The
+        // cap is the backstop: three rounds at most, whatever the judge says.
+        refine: judge(jev, { cap: 3 }),
       }),
 
       stage('terms', {
@@ -258,8 +323,9 @@ function createTranslateReflect(engines: TranslateEngines = realEngines) {
   });
 }
 
-const result = await run(createTranslateReflect(), {
+const result = await run(createTranslateReflect(await judgeSeat()), {
   onEvent: (event) => console.log(formatEvent(event)),
+  recordTo: 'records/translate-reflect.jsonl',
 });
 console.log(JSON.stringify(result.outcome, null, 2));
 ```
@@ -271,17 +337,33 @@ console.log(JSON.stringify(result.outcome, null, 2));
 ```mermaid
 flowchart LR
   source[("source/article.md, glossary/en-fr.md")] --> translate["translate: Claude, read by Codex as editor"]
-  translate -->|"refine: 3"| translate
-  translate --> terms["terms: Claude"]
+  translate -->|findings| judge["judge: Jev"]
+  judge -->|"continue, up to cap: 3"| translate
+  judge --> terms["terms: Claude"]
   terms -.-> nuance{{"nuance: the person who knows the readers"}}
   nuance -->|sendsBackTo| translate
 ```
+
+## When the loop stops
+
+A translation that honours a glossary and still reads naturally has many
+defensible answers, so the reviewer and the translator need room to meet,
+and no count says how much. After each round the reviewer did not accept,
+the judge reads the use case from the brief, the reviewer's findings and
+every round so far, and answers whether the translation holds, whether the
+findings are worth acting on, and whether another round is worth it. The
+loop goes round again on continue and stops when the judge chooses a
+reason to stop. A finding tagged block goes back without asking, and the
+cap of three stands whatever the judge says. The judge's recorded answers
+for the offline run are in `judge.json`, one set per round.
+[A judge stops the loop](/patterns/judge-stops-the-loop) has the questions
+and the rule.
 
 ## Next steps
 
 - [A writer and a reviewer](/patterns/writer-and-reviewer): the translator
   and editor pair on its own.
+- [A judge stops the loop](/patterns/judge-stops-the-loop): the judge's
+  questions, and the same loop as plain graph nodes.
 - [A person decides](/patterns/approval): the publish question as a step,
   and how the answer reaches a paused run.
-- [Feedback loops](/concepts/feedback-loops): the allowance of three, and
-  the other shapes a review can take.

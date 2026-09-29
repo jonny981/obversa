@@ -64,6 +64,7 @@ export function childContext(
     state: parent.state,
     memory: parent.memory,
     callbacks: parent.callbacks,
+    interactionCheckpoint: parent.interactionCheckpoint,
     onCallback: parent.onCallback,
     // A child inherits the parent's workspace by default; a concurrency
     // boundary forks it into an isolated worktree by passing `workspace`.

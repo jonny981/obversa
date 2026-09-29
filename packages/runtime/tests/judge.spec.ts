@@ -66,18 +66,47 @@ describe('judgeDecision', () => {
   it('routes on the chosen stop_reason first', () => {
     expect(judgeDecision({ stop_reason: { choice: 'over_polishing' } })).toEqual({
       again: false,
+      stop: 'ship',
       reason: 'the judge chose over_polishing',
     });
     expect(judgeDecision({ stop_reason: { choice: 'continue' } }).again).toBe(true);
   });
 
+  it('ships on holds or over_polishing, fails on not_converging', () => {
+    // holds and over_polishing: the work is good enough as it stands, ship it.
+    expect(judgeDecision({ stop_reason: { choice: 'holds' } })).toEqual({
+      again: false,
+      stop: 'ship',
+      reason: 'the judge chose holds',
+    });
+    expect(judgeDecision({ stop_reason: { choice: 'over_polishing' } }).stop).toBe('ship');
+    // not_converging: another round will not fix it, the requesting side's own
+    // failure stands rather than shipping silently.
+    expect(judgeDecision({ stop_reason: { choice: 'not_converging' } })).toEqual({
+      again: false,
+      stop: 'fail',
+      reason: 'the judge chose not_converging',
+    });
+  });
+
   it('falls back to a clear holds/worth_doing/worth_another_round answer when the choice is unknown', () => {
     expect(judgeDecision({ holds: { noul: 0.9 } })).toEqual({
       again: false,
+      stop: 'ship',
       reason: 'the judge says it holds (0.90)',
     });
-    expect(judgeDecision({ worth_doing: { noul: 0.1 } }).again).toBe(false);
-    expect(judgeDecision({ worth_another_round: { noul: 0.1 } }).again).toBe(false);
+    expect(judgeDecision({ worth_doing: { noul: 0.1 } })).toEqual({
+      again: false,
+      stop: 'ship',
+      reason: 'the judge says the findings are not worth doing (0.10)',
+    });
+    // worth_another_round alone cannot tell over-polishing from a stall (its
+    // own criteria blend both), so the conservative fallback is fail, not ship.
+    expect(judgeDecision({ worth_another_round: { noul: 0.1 } })).toEqual({
+      again: false,
+      stop: 'fail',
+      reason: 'the judge says another round is not worth it (0.10)',
+    });
   });
 
   it('defaults to another round when nothing in the reply resolves a stop', () => {
@@ -86,17 +115,23 @@ describe('judgeDecision', () => {
     expect(judgeDecision({})).toEqual({ again: true, reason: 'the judge says another round is worth it' });
   });
 
-  it('stops on any choice other than "continue", not just the four documented ones', () => {
+  it('stops on any choice other than "continue", not just the four documented ones, but only ships on holds or over_polishing', () => {
     // judgeDecision does not validate the choice against the question's own
     // criteria keys, a custom question set can name whatever it likes, and
     // anything but "continue" (or a missing/unparsed choice) reads as a stop.
+    // An unrecognised choice is not known to mean "ship", so it fails safe.
     expect(judgeDecision({ stop_reason: { choice: 'converged' } })).toEqual({
       again: false,
+      stop: 'fail',
       reason: 'the judge chose converged',
     });
   });
 
   it('accepts the probability field as well as noul, for an engine that answers that way', () => {
-    expect(judgeDecision({ holds: { probability: 0.7 } }).again).toBe(false);
+    expect(judgeDecision({ holds: { probability: 0.7 } })).toEqual({
+      again: false,
+      stop: 'ship',
+      reason: 'the judge says it holds (0.70)',
+    });
   });
 });

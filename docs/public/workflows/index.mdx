@@ -3,10 +3,18 @@ title: "Examples"
 description: "Complete teams you can run on your own work, grouped by field."
 ---
 
-Copy a complete team, put your brief and your coding agents in, and run it.
-Each example is a TypeScript file under `examples/` in the repository, with
-its brief and sample inputs beside it, and each page shows what one real
-run printed. For one mechanism on its own, read [Patterns](/patterns/writer-and-reviewer).
+Choose a workflow for the result you want: a reviewed article, an answer
+from research papers, a support reply or a software change.
+
+Each combines familiar patterns into a complete process. An editorial
+workflow pairs a writer with a reviewer and an editor. A support workflow
+classifies a ticket and asks a person about cases that need judgement.
+The [pattern collection](/patterns) explains those parts separately, so
+you can use them in a process of your own.
+
+Each example is a TypeScript file under `examples/` in the repository,
+with its brief and sample inputs beside it. The pages show how to run the
+files and what their recorded runs produced.
 
 ## Run one
 
@@ -96,7 +104,7 @@ shape before you spend a token.
 
 ## Editorial
 
-- **[Writer, grader, cap](/workflows/editorial/writer-grader-cap).** One model drafts a post, a grader from another family returns findings against the house style, the writer runs again up to a limit, and an editor decides whether it is published.
+- **[Writer, grader, judge](/workflows/editorial/writer-grader-cap).** One model drafts a post, a grader from another family returns findings against the house style, a judge says when another round stops being worth it, and an editor decides whether it is published.
 
 ## Hiring
 
@@ -130,10 +138,10 @@ shape before you spend a token.
 | Answer routine tickets, hold the rest for a person | [Triage with escalation](/workflows/support/triage-with-escalation) |
 | Keep a lab's memory curated by a person | [Literature watch](/workflows/research/literature-watch) |
 | Chase overdue invoices, a person on disputes | [Invoice chase](/workflows/finance/invoice-chase) |
-| Publish a post a strict grader has passed | [Writer, grader, cap](/workflows/editorial/writer-grader-cap) |
+| Publish a post a strict grader has passed | [Writer, grader, judge](/workflows/editorial/writer-grader-cap) |
 | Shortlist applicants behind verifiable gates | [Shortlist](/workflows/hiring/shortlist) |
 | Keep a notes vault a person curates | [Vault curator](/workflows/knowledge/vault-curator) |
 | Approve the exact bytes a request will send | [Approve the payload](/workflows/ops/approve-the-exact-payload) |
 | Pick up a stopped run from its record | [Handoff that resumes](/workflows/ops/handoff-that-resumes) |
 | Run one Shape Up cycle end to end | [Shape Up cycle](/workflows/product/shape-up-cycle) |
-| Build a team from one mechanism | [Patterns](/patterns/writer-and-reviewer) |
+| Build a workflow from familiar patterns | [Patterns](/patterns) |

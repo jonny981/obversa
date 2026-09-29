@@ -14,6 +14,7 @@ import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { spawn, spawnSync } from 'node:child_process';
 import test from 'node:test';
+import { buildCiProof, CI_PROOF_PATH } from './ci-proof.mjs';
 import { manageStage } from './stage-merge.mjs';
 
 const projectRoot = resolve(dirname(fileURLToPath(import.meta.url)), '..');
@@ -660,6 +661,7 @@ function createRepository({ feature = false, instructions, branch = 'feat/graph-
   git(main, 'config', 'user.email', 'test@example.com');
   git(main, 'config', 'commit.gpgsign', 'false');
   git(main, 'config', 'core.hooksPath', '.test-hooks');
+  writeFileSync(join(main, '.gitignore'), '.obversa/\n');
   writeFileSync(join(main, 'README.md'), 'fixture\n');
 
   if (instructions === 'linked' || instructions === 'copied') {
@@ -682,6 +684,8 @@ function commitFile(worktree, path, contents, message) {
   writeFileSync(join(worktree, path), contents);
   git(worktree, 'add', path);
   git(worktree, 'commit', '--no-gpg-sign', '-m', message);
+  mkdirSync(join(worktree, '.obversa'), { recursive: true });
+  writeFileSync(join(worktree, CI_PROOF_PATH), `${JSON.stringify(buildCiProof(worktree))}\n`);
 }
 
 function branchHeads({ feature, main }) {

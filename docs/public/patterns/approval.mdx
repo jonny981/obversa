@@ -1,16 +1,14 @@
 ---
-title: "A Person Decides"
-description: "One question to a person as a step. Yes passes, no goes to the step that owns the fix with the note, and silence pauses the run."
+title: "Ask a Person"
+description: "Pause for a person's answer and keep their decision with the work."
 ---
 
-Put a person's yes or no into the run as a step, so the work waits for the
-answer and carries on from it. Use it before anything irreversible: a
-release, a migration, money leaving an account. When the judgement can be
-a model's, use [a review panel with a threshold](/patterns/review-panel)
-instead and keep the person for the last word. This is human-in-the-loop as
-a step that can say no, not a slide: yes passes the step, no carries the
-person's note to the step that owns the fix, and no answer pauses the run
-until one arrives.
+Ask a person when the next decision needs their judgement. Use it before
+publishing a report, applying a migration or sending a payment.
+
+The run records the question and waits for an answer. A yes lets it
+continue. A no can return the work with the person's notes. When the
+decision can be made by models, [ask a panel](/patterns/review-panel).
 
 ## Shape
 

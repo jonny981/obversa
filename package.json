@@ -84,6 +84,8 @@
     "check:packages": "node scripts/check-packages.mjs",
     "check:consumer": "node --test scripts/check-clean-consumer.spec.mjs && node scripts/check-clean-consumer.mjs",
     "check:commit": "node scripts/check-commit-policy.mjs",
+    "ci:local": "node scripts/ci-local-lock.mjs && pnpm install --frozen-lockfile && pnpm verify:d2 && pnpm check:tarballs && node scripts/write-ci-proof.mjs",
+    "test:ci-local": "node --test scripts/check-ci-local.spec.mjs scripts/ci-local-lock.spec.mjs scripts/ci-proof.spec.mjs scripts/stage-merge-ci-proof.spec.mjs",
     "check:publish": "node scripts/check-publish-allowlist.mjs --audit",
     "test:commit-policy": "node --test scripts/check-commit-policy.spec.mjs",
     "test:publish-guard": "node --test scripts/check-publish-allowlist.spec.mjs scripts/check-build-proof.spec.mjs scripts/exact-published-version.spec.mjs",
@@ -94,7 +96,7 @@
     "stage:claim": "node scripts/stage-merge.mjs claim",
     "stage:finish": "node scripts/stage-merge.mjs finish",
     "stage:release": "node scripts/stage-merge.mjs release",
-    "verify:d1": "pnpm check:agent-instructions && pnpm build && pnpm check:lint && pnpm test:lint && pnpm test:skill-install && pnpm check:boundaries && pnpm test:boundaries && pnpm check:publish && pnpm test:publish-guard && pnpm test:agent-workflow && pnpm test:commit-policy && pnpm typecheck && pnpm typecheck:ts6 && pnpm test && pnpm check:packages && pnpm check:readme-examples && pnpm example:feature-team && pnpm example:tournament && pnpm example:described-team && pnpm example:write-and-review && pnpm example:one-agent-job && pnpm docs:validate && pnpm example:packages && pnpm example:offline && pnpm example:feature && pnpm example:forge && pnpm example:safe-change && pnpm example:engine-bindings && pnpm check:consumer",
+    "verify:d1": "pnpm check:agent-instructions && pnpm build && pnpm check:lint && pnpm test:lint && pnpm test:skill-install && pnpm check:boundaries && pnpm test:boundaries && pnpm check:publish && pnpm test:publish-guard && pnpm test:agent-workflow && pnpm test:ci-local && pnpm test:commit-policy && pnpm typecheck && pnpm typecheck:ts6 && pnpm test && pnpm check:packages && pnpm check:readme-examples && pnpm example:feature-team && pnpm example:tournament && pnpm example:described-team && pnpm example:write-and-review && pnpm example:one-agent-job && pnpm docs:validate && pnpm example:packages && pnpm example:offline && pnpm example:feature && pnpm example:forge && pnpm example:safe-change && pnpm example:engine-bindings && pnpm check:consumer",
     "verify:d2": "pnpm verify:d1 && pnpm test:graph-purity && pnpm check:graph-purity && pnpm example:graph",
     "verify:d3": "pnpm verify:d2 && pnpm example:storage",
     "verify:d4": "pnpm verify:d3 && pnpm example:attempt",
@@ -207,7 +209,10 @@
     "verify:f67": "pnpm build && node --test scripts/f66-package-shape.spec.mjs && pnpm --filter @obversa/notify-webhook test && pnpm example:notify-webhook && pnpm check:boundaries && pnpm check:tarballs && pnpm check:consumer && pnpm verify:f39 && pnpm docs:validate",
     "verify:f86": "pnpm build && pnpm verify:f39 && pnpm docs:validate",
     "test:documented-imports": "node --test scripts/check-documented-imports.spec.mjs",
-    "verify:f75": "pnpm build && pnpm --filter @obversa/runtime test && pnpm verify:f39 && pnpm docs:validate"
+    "verify:f75": "pnpm build && pnpm --filter @obversa/runtime test && pnpm verify:f39 && pnpm docs:validate",
+    "example:human-feedback": "node scripts/check-example-output.mjs pnpm exec tsx examples/human-feedback.proof.ts",
+    "test:human-feedback": "node --import tsx --test scripts/f155-human-feedback.spec.mjs",
+    "verify:f155": "pnpm verify:d2 && pnpm test:human-feedback && pnpm example:human-feedback && pnpm check:tarballs"
   },
   "devDependencies": {
     "@arethetypeswrong/cli": "0.18.5",
@@ -228,6 +233,7 @@
     "@obversa/runtime": "workspace:^",
     "@obversa/memory-markdown": "workspace:^",
     "@obversa/builtin-workflows": "workspace:^",
+    "@obversa/surface": "workspace:^",
     "@obversa/surface-diff": "workspace:^",
     "@types/node": "22.12.0",
     "@typescript/typescript6": "6.0.2",

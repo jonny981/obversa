@@ -9,6 +9,8 @@
  */
 
 import { agentJob } from './job.js';
+import { DEFAULT_INTERACTION, jsonSnapshot, requestInteraction, type InteractionBinding, type InteractionResponse } from './interaction.js';
+import type { Outcome } from './types.js';
 import { normalizeFeedbackSeverity } from './feedback.js';
 import type {
   FeedbackActionSeverity,
@@ -55,12 +57,13 @@ export function stopQuestions(what = 'the draft'): JudgeQuestions {
     },
     stop_reason: {
       type: 'choice',
-      instructions: 'Are we at the point of diminishing returns? If so, which kind; if not, continue.',
+      instructions: 'If a person must settle a product decision, choose product_decision. Otherwise, are we at the point of diminishing returns? If so, which kind; if not, continue.',
       criteria: {
         holds: `${what} holds for this use case.`,
         over_polishing: 'The remaining findings are taste, nits or edge cases past the bar.',
         not_converging: 'The same class of finding keeps returning, so another round will not fix it.',
         continue: 'Another round is worth it.',
+        product_decision: 'A person must settle a product decision before this review can continue.',
       },
     },
   };
@@ -72,11 +75,11 @@ export function stopQuestions(what = 'the draft'): JudgeQuestions {
  * `cap` is the hard backstop on rounds regardless of what the judge says,
  * and `questions` defaults to `stopQuestions()`.
  */
-export function judge(seat: Judge['seat'], opts: { cap: number; questions?: JudgeQuestions }): Judge {
+export function judge(seat: Judge['seat'], opts: { cap: number; questions?: JudgeQuestions; interaction?: InteractionBinding }): Judge {
   if (!Number.isSafeInteger(opts.cap) || opts.cap < 1) {
     throw new TypeError('judge cap must be a positive integer');
   }
-  return { kind: 'judge', seat, cap: opts.cap, questions: opts.questions ?? stopQuestions() };
+  return { kind: 'judge', seat, cap: opts.cap, questions: opts.questions ?? stopQuestions(), ...(opts.interaction ? { interaction: opts.interaction } : {}) };
 }
 
 export function isJudge(value: unknown): value is Judge {
@@ -108,6 +111,7 @@ export interface JudgeRound {
 
 /** What the judge sees. `cap` rides along so it can reason about how much room is left. */
 export interface JudgeState {
+  readonly productFeedback?: readonly InteractionResponse[];
   readonly useCase?: string;
   /** The file being refined, relative to the workspace, when there is one. */
   readonly file?: string;
@@ -124,6 +128,15 @@ export interface JudgeDecision {
   readonly again: boolean;
   /** Always names the judge, so a kickback or a stop is traceable to it. */
   readonly reason: string;
+  /**
+   * What a stop means, when `again` is false. `ship`: the work holds as it
+   * is, so it stands as a pass carrying the judge's reason. `fail`: another
+   * round will not fix it, so the run stops there and the requesting side's
+   * own failure stands. `product_decision` asks a person, then returns the
+   * feedback to this judge without advancing the review round. Absent when
+   * `again` is true.
+   */
+  readonly stop?: 'ship' | 'fail' | 'product_decision';
 }
 
 /**
@@ -135,23 +148,38 @@ export interface JudgeDecision {
  * here: the caller enforces the cap itself (a loop's own `maxReviewRestarts`,
  * or a dag's own kickback budget), and a block finding never reaches this
  * function, it always goes back without asking the judge.
+ *
+ * `product_decision` pauses for rich feedback and another judgment of the
+ * same work. For a terminal stop, `holds` and `over_polishing` say the work
+ * is good enough as it stands, so it ships as a pass; other stops, including
+ * `not_converging` and any choice a custom question set invents of its own,
+ * says the run should not ship silently, so it stops there and the
+ * requesting side's failure stands. The same split applies to the
+ * probability fallback: a clear `holds` or a clear "not worth doing" ships
+ * the work; an unclear "another round is not worth it" fails instead of
+ * shipping, since its own criteria already blend polish with a stall and
+ * cannot tell the two apart.
  */
 export function judgeDecision(answers: Readonly<Record<string, JudgeAnswer>>): JudgeDecision {
   const worth = answers.worth_another_round?.noul ?? answers.worth_another_round?.probability;
   const doing = answers.worth_doing?.noul ?? answers.worth_doing?.probability;
   const holds = answers.holds?.noul ?? answers.holds?.probability;
   const reason = answers.stop_reason?.choice ?? 'unknown';
+  if (reason === 'product_decision') return { again: false, stop: 'product_decision', reason: 'the judge requested a product decision' };
+  if (reason === 'holds' || reason === 'over_polishing') {
+    return { again: false, stop: 'ship', reason: `the judge chose ${reason}` };
+  }
   if (reason !== 'unknown' && reason !== 'continue') {
-    return { again: false, reason: `the judge chose ${reason}` };
+    return { again: false, stop: 'fail', reason: `the judge chose ${reason}` };
   }
   if (typeof holds === 'number' && holds >= 0.5) {
-    return { again: false, reason: `the judge says it holds (${holds.toFixed(2)})` };
+    return { again: false, stop: 'ship', reason: `the judge says it holds (${holds.toFixed(2)})` };
   }
   if (typeof doing === 'number' && doing < 0.5) {
-    return { again: false, reason: `the judge says the findings are not worth doing (${doing.toFixed(2)})` };
+    return { again: false, stop: 'ship', reason: `the judge says the findings are not worth doing (${doing.toFixed(2)})` };
   }
   if (typeof worth === 'number' && worth < 0.5) {
-    return { again: false, reason: `the judge says another round is not worth it (${worth.toFixed(2)})` };
+    return { again: false, stop: 'fail', reason: `the judge says another round is not worth it (${worth.toFixed(2)})` };
   }
   return {
     again: true,
@@ -198,4 +226,31 @@ export async function askJudge(
   const decision = judgeDecision(answers);
   ctx.emit({ kind: 'refine:judge', ts: Date.now(), path: [...path], answers, reason: decision.reason });
   return { answers, decision };
+}
+
+/** Resume only the deliberate product question; every returned answer goes back to this judge. */
+export async function consultJudge(
+  cfg: Judge,
+  initialState: JudgeState,
+  ctx: JobContext,
+  path: readonly string[],
+  options: { readonly identity: string; readonly pending: boolean; readonly save: (state: JudgeState) => void },
+): Promise<{ state: JudgeState; decision: JudgeDecision } | { state: JudgeState; paused: Outcome }> {
+  let state = initialState;
+  let pending = options.pending;
+  for (;;) {
+    if (pending) {
+      options.save(state);
+      const answer = await requestInteraction(cfg.interaction ?? DEFAULT_INTERACTION,
+        'What product decision should guide this review?', jsonSnapshot({
+          requester: { path, identity: options.identity, engine: cfg.seat.identity, round: state.round },
+          material: state,
+        }), ctx);
+      if ('paused' in answer) return { state, paused: answer.paused };
+      state = { ...state, productFeedback: [...(state.productFeedback ?? []), answer.response] };
+    }
+    const { decision } = await askJudge(cfg, state, ctx, path);
+    if (decision.stop !== 'product_decision') return { state, decision };
+    pending = true;
+  }
 }

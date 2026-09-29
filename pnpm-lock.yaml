@@ -64,6 +64,9 @@ importers:
       '@obversa/runtime':
         specifier: workspace:^
         version: link:packages/runtime
+      '@obversa/surface':
+        specifier: workspace:^
+        version: link:packages/surface
       '@obversa/surface-diff':
         specifier: workspace:^
         version: link:packages/surface-diff

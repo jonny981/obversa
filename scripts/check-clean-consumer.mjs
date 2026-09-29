@@ -862,6 +862,9 @@ async function main() {
     await copyFile(tournamentExamplePath, join(consumerDirectory, 'tournament.ts'));
     await copyFile(join(root, 'examples', 'judge-stops-the-loop.ts'), join(consumerDirectory, 'judge-stops-the-loop.ts'));
     await copyFile(join(root, 'examples', 'judge-stops-the-loop.proof.ts'), join(consumerDirectory, 'judge-stops-the-loop.proof.ts'));
+    await copyFile(join(root, 'examples', 'human-feedback.ts'), join(consumerDirectory, 'human-feedback.ts'));
+    await copyFile(join(root, 'examples', 'human-feedback.proof.ts'), join(consumerDirectory, 'human-feedback.proof.ts'));
+    await cp(join(root, 'examples', 'human-feedback'), join(consumerDirectory, 'human-feedback'), { recursive: true });
     await copyFile(describedTeamExamplePath, join(consumerDirectory, 'described-team.ts'));
     await copyFile(runnerExamplePath, join(consumerDirectory, 'supervised-run.ts'));
     await copyFile(runnerHostPath, join(consumerDirectory, 'supervised-host.mjs'));
@@ -920,6 +923,7 @@ async function main() {
     run(process.execPath, [tsc6, '-p', 'tsconfig.json'], { cwd: consumerDirectory });
     await copyFile(runnerHostPath, join(consumerDirectory, 'dist', 'supervised-host.mjs'));
     await copyFile(preflightHostPath, join(consumerDirectory, 'dist', 'preflight-host.mjs'));
+    await cp(join(consumerDirectory, 'human-feedback', 'assets'), join(consumerDirectory, 'dist', 'human-feedback', 'assets'), { recursive: true });
     await cp(
       join(consumerDirectory, 'memory-markdown-corpus'),
       join(consumerDirectory, 'dist', 'memory-markdown-corpus'),
@@ -932,6 +936,9 @@ async function main() {
       env: { CONSUMER_GIT_REPOSITORY: gitRepository },
     }).trim();
     const report = JSON.parse(output.split(/\r?\n/).at(-1));
+    assert.deepEqual(JSON.parse(run(process.execPath, ['dist/human-feedback.proof.js'], { cwd: consumerDirectory })), {
+      status: 'pass', drafts: 3, feedbackRounds: 2, explicitApproval: true,
+    });
     const productionLine = JSON.parse(
       run(process.execPath, ['dist/offline-review.js'], { cwd: consumerDirectory }),
     );

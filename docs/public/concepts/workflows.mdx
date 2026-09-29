@@ -21,7 +21,8 @@ same way each time.
 ## Two forms
 
 `workflow()` is the short form: a brief, named roles, and a list of stages,
-each an agent, a command, a review panel or a person. The first run is one:
+each an agent, a command, a review panel, a person, or a plain function. The
+first run is one:
 
 ```ts examples/teams/writer-reviewer-pair.ts (excerpt)
   return workflow('writer-reviewer-pair', {

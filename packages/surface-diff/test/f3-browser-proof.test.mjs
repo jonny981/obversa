@@ -580,12 +580,24 @@ test("a page that cannot load its review cancels the session instead of holding 
     "/icons.mjs": ["icons.mjs", "text/javascript; charset=utf-8"],
   };
   const seen = [];
+  const traceStarted = Date.now();
+  const trace = [];
+  let droppedTraceEvents = 0;
+  const note = (event) => {
+    if (trace.length < 256) trace.push({ ms: Date.now() - traceStarted, event });
+    else droppedTraceEvents += 1;
+  };
   let cancelSeen = false;
+  let cancelReplySent = false;
+  let cancelReplyFinished = false;
+  let ackBodyReceived = false;
+  let heartbeats = 0;
   let heartbeatsAfterCancel = 0;
   const acked = Promise.withResolvers();
   const server = createServer((req, res) => {
     for (const [k, v] of Object.entries(HEADERS)) res.setHeader(k, v);
     const url = new URL(req.url, "http://127.0.0.1");
+    note(`${req.method} ${url.pathname}`);
     const send = (status, type, body) => { res.writeHead(status, { "content-type": type }); res.end(body); };
     if (url.pathname.startsWith("/api/")) {
       if (req.headers.authorization !== `Bearer ${token}`) return send(401, "application/json", JSON.stringify({ error: "Authentication required" }));
@@ -593,13 +605,20 @@ test("a page that cannot load its review cancels the session instead of holding 
       if (url.pathname === "/api/model") return send(500, "application/json", JSON.stringify({ error: "the model is unavailable" }));
       if (url.pathname === "/api/cancel") {
         cancelSeen = true;
-        scheduleCancelTimer("cancel response", () => send(200, "application/json", JSON.stringify({ ok: true, status: "cancelled", operationId: "op-cancel" })), 1000);
+        res.once("finish", () => { cancelReplyFinished = true; note("cancel response finished on server"); });
+        scheduleCancelTimer("cancel response", () => {
+          note("cancel response timer fired");
+          send(200, "application/json", JSON.stringify({ ok: true, status: "cancelled", operationId: "op-cancel" }));
+          cancelReplySent = true;
+          note("cancel response end called");
+        }, 1000);
         return;
       }
+      if (url.pathname === "/api/heartbeat") heartbeats += 1;
       if (url.pathname === "/api/heartbeat" && cancelSeen) heartbeatsAfterCancel += 1;
       if (url.pathname === "/api/ack") {
         const chunks = []; req.on("data", (d) => chunks.push(d));
-        req.on("end", () => { send(200, "application/json", JSON.stringify({ ok: true, status: "cancelled" })); acked.resolve(JSON.parse(Buffer.concat(chunks).toString())); });
+        req.on("end", () => { ackBodyReceived = true; note("acknowledgement body received"); send(200, "application/json", JSON.stringify({ ok: true, status: "cancelled" })); acked.resolve(JSON.parse(Buffer.concat(chunks).toString())); });
         return;
       }
       if (url.pathname === "/api/heartbeat") return send(200, "application/json", JSON.stringify({ ok: true }));
@@ -611,16 +630,30 @@ test("a page that cannot load its review cancels the session instead of holding 
     if (asset) return send(200, asset[1], readFileSync(path.join(ASSETS_DIR, asset[0]), "utf8"));
     send(404, "text/plain", "not found");
   });
+  note("server listen started");
   await BROWSER_CANCEL_CHAIN.run("server listen", () => /** @type {Promise<void>} */ (new Promise((r) => server.listen(0, "127.0.0.1", () => r()))));
+  note("server listen finished");
   const origin = `http://127.0.0.1:${/** @type {import("node:net").AddressInfo} */ (server.address()).port}`;
   const profile = mkdtempSync(path.join(os.tmpdir(), "browser-proof-cancel-"));
   let chrome;
   let ack;
   try {
+    note("Chrome spawn requested");
     chrome = spawn(CHROME, ["--headless=new", "--disable-gpu", "--no-first-run", `--user-data-dir=${profile}`, `${origin}/#${token}`], { stdio: "ignore" });
+    chrome.once("spawn", () => note("Chrome spawned"));
+    chrome.once("exit", (code, signal) => note(`Chrome exited: code ${code ?? "null"}, signal ${signal ?? "none"}`));
     const acknowledgementStarted = Date.now();
+    note("acknowledgement wait started");
     ack = await BROWSER_CANCEL_CHAIN.run("acknowledgement", () => acked.promise);
+    note("acknowledgement wait finished");
     console.log(`browser cancel acknowledgement: ${Date.now() - acknowledgementStarted}ms`);
+  } catch (error) {
+    console.error("browser cancel failure before cleanup:", JSON.stringify({
+      trace, droppedTraceEvents, cancelSeen, cancelReplySent, cancelReplyFinished,
+      ackBodyReceived, heartbeats, heartbeatsAfterCancel,
+      chrome: { spawned: chrome?.pid !== undefined, exitCode: chrome?.exitCode ?? null, signalCode: chrome?.signalCode ?? null },
+    }));
+    throw error;
   } finally {
     await BROWSER_CANCEL_CHAIN.run("cleanup", async () => {
       chrome?.kill("SIGKILL");

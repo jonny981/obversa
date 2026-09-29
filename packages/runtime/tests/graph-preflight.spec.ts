@@ -151,7 +151,8 @@ async function fixture(input: {
     package: packageIdentity, admission: { package: packageIdentity, permissions: [] },
     executionLanes: lanes.map((lane) => ({ id: lane.id, effective: lane.targets[0]!, fallbacks: lane.targets.slice(1) })),
     ...(input.enabled === false ? {} : { preflight: {
-      timeoutMs: input.timeoutMs ?? 100,
+      // Far above the honest duration of a fixture probe. The tests that prove the bound pass their own small value.
+      timeoutMs: input.timeoutMs ?? 5_000,
       lanes: lanes.map((lane) => ({ laneId: lane.id, live: lane.live ?? 'required', unsupportedStatic: lane.unsupported ?? 'block' })),
     } }),
   });
@@ -308,16 +309,21 @@ describe('preflight policy and routing', () => {
     'stores a %s live failure and exclusion before the declared fallback', async (failure) => {
       const f = await fixture({ provider: null });
       f.engines[0]!.liveHook = async () => { throw new EngineError({ kind: failure, message: 'typed fixture failure' }); };
-      f.engines[1]!.liveHook = async () => {
-        const events = (await f.state()).events;
-        const factIndex = events.findIndex((event) => event.type === 'graph:model-unavailable');
-        expect(events[factIndex - 1]!.type).toBe('preflight:probe-finished');
-        expect((events[factIndex]!.payload as JsonObject).failure).toBe(failure);
-        return assistantResult({ text: 'ok', requested: toolFree(f.engines[1]!.measured), usage });
-      };
       expect(await (await f.executor()).run(signal())).toMatchObject({ kind: 'complete' });
       expect(f.calls.filter((call) => call.kind === 'live').map((call) => call.target)).toEqual([primary, backup]);
       expect(f.calls.find((call) => call.kind === 'normal')!.target).toEqual(backup);
+      // The order is read from the log after the run, never from inside the
+      // fallback's probe: a storage read inside a bounded live probe is a
+      // clock a loaded runner can lose.
+      const events = (await f.state()).events;
+      const factIndex = events.findIndex((event) => event.type === 'graph:model-unavailable');
+      expect(factIndex).toBeGreaterThan(0);
+      expect(events[factIndex - 1]!.type).toBe('preflight:probe-finished');
+      expect((events[factIndex]!.payload as JsonObject).failure).toBe(failure);
+      const backupProbe = events.findIndex((event) => event.type === 'preflight:probe-started'
+        && (event.payload as JsonObject).stage === 'live'
+        && canonicalJson((event.payload as JsonObject).target as JsonValue) === key(backup));
+      expect(backupProbe).toBeGreaterThan(factIndex);
     },
   );
 

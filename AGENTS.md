@@ -79,6 +79,10 @@ touched. Tests are the source of truth: a change is not done until the
 relevant suites pass, and a red test is always worth understanding before
 you push past it.
 
+Run `pnpm ci:local` before landing: it runs the whole CI job, in the same
+order CI runs it. `stage:finish` refuses to land a branch without a
+matching proof from that run.
+
 ## The rules every change follows
 
 **Commits.** Use [Conventional Commits](https://www.conventionalcommits.org):

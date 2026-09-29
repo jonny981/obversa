@@ -1,6 +1,6 @@
 {
   "name": "@obversa/cmux-host",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "private": true,
   "description": "The cmux host: placement glue that opens Obversa surfaces in cmux panes.",
   "type": "module",

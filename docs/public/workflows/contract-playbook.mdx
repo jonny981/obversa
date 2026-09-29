@@ -19,85 +19,113 @@ Obversa makes the playbook the brief and the lawyer a step. One model maps
 every clause to the rule it meets or breaks, writes the redlines in the
 playbook's wording, and writes the negotiating note. A model from another
 family checks each redline against the playbook and fails the set when a
-clause is missing or a redline goes further than its rule. Then the run
-stops for the lawyer. This file is a four-stage team: clauses, redline,
-positions, negotiate.
+clause is missing or a redline goes further than its rule. A judge, Jev,
+says when another round on the redlines is worth it, up to a cap of three.
+Then the run stops for the lawyer. This file is a four-stage team: clauses,
+redline, positions, negotiate.
 
 ## Run it
 
 Set the project up as [Installation](/get-started/installation) describes,
-put `briefs/playbook.md` and `contracts/msa.md` from
+put `briefs/playbook.md`, `contracts/msa.md` and `judge.json` from
 `examples/use-cases/business/` beside the file, sign in to Claude Code and
-Codex, and run it:
+Codex, and run it. Without `JUDGE=jev` the judge replays the answers in
+`judge.json`; with it, and a TypeSafe endpoint and key in the environment,
+the judge is Jev:
 
 ```bash Terminal
 npx tsx contract-playbook.ts
 ```
 
 Every event prints as one line as it happens, and the outcome prints last
-as JSON. The output below is from one real run, trimmed at both ends. The
-first seat on that machine also had a local search tool that this file
-doesn't configure; those calls are cut, and your own run won't make them.
+as JSON. The output below is the proof's offline run, with scripted seats
+standing in for the models and a recorded judge, so the words are the
+script's and the shape is the run's:
 
-```text Events
+```text Output, from the offline proof
+▸ run
+contract-playbook workflow:start
 contract-playbook ▸ dag (4 nodes)
 contract-playbook · node clauses: start
 contract-playbook › clauses • clauses
-contract-playbook › clauses engine:thinking
-contract-playbook › clauses engine:text
-… 4 more event lines …
-contract-playbook › clauses engine:thinking
-contract-playbook › clauses engine:text
-contract-playbook › clauses   tool Read use
-contract-playbook › clauses   tool tool result
-contract-playbook › clauses engine:thinking
-contract-playbook › clauses engine:text
-contract-playbook › clauses   tool Write use
-contract-playbook › clauses   tool tool result
-contract-playbook › clauses engine:thinking
-contract-playbook › clauses   tool Bash use
-… 128 more event lines …
-contract-playbook › positions › positions-review   tool tool result
-contract-playbook › positions › positions-review engine:thinking
-contract-playbook › positions › positions-review engine:text
-contract-playbook › positions › positions-review   claude-sonnet-4-5-20250929: 1544326/6105 tok
-contract-playbook › positions › positions-review • positions: fail
+
+contract-playbook › clauses   stand-in: 3/1 tok
+contract-playbook › clauses • clauses: pass  seven clauses mapped: one accept, four push back, two never
+contract-playbook · node clauses: done (pass)
+contract-playbook · node redline: start
+contract-playbook › redline › redline-review ▸ loop (max 4)
+contract-playbook › redline › redline-review · iteration 1
+contract-playbook › redline › redline-review • redline
+
+contract-playbook › redline › redline-review   stand-in: 3/1 tok
+contract-playbook › redline › redline-review • redline: pass  four redlines written from the playbook wording
+contract-playbook › redline › redline-review · until met: redline writes: true
+contract-playbook › redline › redline-review › review-panel • redline
+contract-playbook › redline › redline-review › review-panel • redline-1
+
+contract-playbook › redline › redline-review › review-panel   gpt-5.6-luna: 42/7 tok
+contract-playbook › redline › redline-review › review-panel • redline-1: fail  two never-sign clauses have no redline
+contract-playbook › redline › redline-review › review-panel • redline: fail  Review panel: 0/1 reviewer(s) cleared. - redline-1 [block]: clause 4 (uncapped indemnity) is marked never in clauses.md and absent from redlines.md - redline-1 [block]: clause 6 (exclusivity) is marked never and absent
+contract-playbook › redline › redline-review · review: fail
+review did not pass (Review panel: 0/1 reviewer(s) cleared. - redline-1 [block]: clause 4 (uncapped indemnity) is marked never in clauses.md and absent from redlines.md - redline-1 [block]: clause 6 (exclusivity) is marked never and absent); re-entering redline-review
+contract-playbook › redline › redline-review · iteration 2
+contract-playbook › redline › redline-review • redline
+
+contract-playbook › redline › redline-review   stand-in: 3/1 tok
+contract-playbook › redline › redline-review • redline: pass  six redlines: the two never-sign clauses are struck with a fallback offered on the indemnity
+contract-playbook › redline › redline-review · until met: redline writes: true
+contract-playbook › redline › redline-review › review-panel • redline
+contract-playbook › redline › redline-review › review-panel • redline-1
+
+contract-playbook › redline › redline-review › review-panel   gpt-5.6-luna: 42/7 tok
+contract-playbook › redline › redline-review › review-panel • redline-1: fail  one redline could be tighter
+contract-playbook › redline › redline-review › review-panel • redline: fail  Review panel: 0/1 reviewer(s) cleared. - redline-1 [should-fix]: clause 3: the fallback sentence on the liability redline could go; the twelve-month term already meets the rule
+contract-playbook › redline › redline-review › refine-judge • refine:judge
+
+contract-playbook › redline › redline-review › refine-judge   jev-latest: 10/5 tok
+contract-playbook › redline › redline-review › refine-judge • refine:judge: pass  {"holds":{"type":"noul","noul":0.9},"worth_doing":{"type":"noul","noul":0.2},"worth_another_round":{"type":"noul","noul":0.1},"stop_reason":{"type":"choice","choice":"holds","confidence":0.8}}
+contract-playbook › redline › redline-review ◆ the judge chose holds
+contract-playbook › redline › redline-review · review: pass
+contract-playbook › redline › redline-review ◂ pass (2 iter)
+contract-playbook · node redline: done (pass)
+contract-playbook · node positions: start
+contract-playbook › positions › positions-review ▸ loop (max 4)
+contract-playbook › positions › positions-review · iteration 1
+contract-playbook › positions › positions-review • positions
+
+contract-playbook › positions › positions-review   stand-in: 3/1 tok
+contract-playbook › positions › positions-review • positions: pass  positions written: two walk-aways, two concessions
 contract-playbook › positions › positions-review · until met: positions writes: true
 contract-playbook › positions › positions-review › review-panel • positions
 contract-playbook › positions › positions-review › review-panel • positions-1
-contract-playbook › positions › positions-review › review-panel engine:text
-contract-playbook › positions › positions-review › review-panel   gpt-5.6-luna: 90370/1942 tok
-contract-playbook › positions › positions-review › review-panel • positions-1: pass
-contract-playbook › positions › positions-review › review-panel • positions: pass
+
+contract-playbook › positions › positions-review › review-panel   gpt-5.6-luna: 42/7 tok
+contract-playbook › positions › positions-review › review-panel • positions-1: pass  every redline has a position, and the two walk-aways match the never-sign rules
+contract-playbook › positions › positions-review › review-panel • positions: pass  Review panel: 1/1 reviewer(s) cleared.
 contract-playbook › positions › positions-review · review: pass
-contract-playbook › positions › positions-review ◂ pass (2 iter)
+contract-playbook › positions › positions-review ◂ pass (1 iter)
 contract-playbook · node positions: done (pass)
 contract-playbook · node negotiate: start
 contract-playbook › negotiate • negotiate
-contract-playbook › negotiate • negotiate: paused
+contract-playbook › negotiate • negotiate: paused  waiting for a person: Send these redlines to the other side?
 contract-playbook · node negotiate: done (paused)
 contract-playbook ◂ dag paused
-```
-
-```json Output
+◂ run paused (148/30 tok, 90 tok from cache)
 {
   "status": "paused",
   "summary": "waiting for a person: Send these redlines to the other side?",
   "data": {
     "clauses": {
       "status": "pass",
-      "summary": "All 7 contract clauses reviewed against playbook. 1 accepted (governing law), 4 require pushback (term auto-renewal, payment terms and price increases, liability cap too low, data processing without proper controls), 2 are never-sign blockers (uncapped indemnity, exclusivity requirement)."
+      "summary": "seven clauses mapped: one accept, four push back, two never"
     },
     "redline": {
       "status": "pass",
-      "summary": "Review panel: 1/1 reviewer(s) cleared."
+      "summary": "the judge chose holds"
     },
     "positions": {
       "status": "pass",
-      "summary": "Review panel: 1/1 reviewer(s) cleared.",
-      "data": {
-        "response": "Done. Fixed all six issues in review/positions.md:\n\n**Changes made:**\n\n1. **Clause 1 (Term)** - line 30: Changed from allowing 45 days notice concession to requiring both renewal by written agreement AND 60 days notice with no concession.\n\n2. **Clause 2 (Payment)** - lines 35-39: Changed from allowing 21 days concession to requiring 30 days minimum with no concession.\n\n3. **Clause 2 (Price)** - lines 43-48: Changed from allowing 7% cap and 60 days notice to requiring 5% or CPI (whichever is lower) and 90 days notice with no concession.\n\n4. **Clause 3 (Liability)** - lines 52-57: Changed from allowing nine or six months concession to requiring twelve months with no concession.\n\n5. **Clause 5 (Data)** - lines 61-66: Changed from allowing 60 days deletion to requiring 30 days deletion with no concession.\n\n6. **Negotiation Strategy** - lines 70-76: Rewrote to state all six redlines are required as written with no middle ground, removing the previous strategy that suggested accepting concessions.\n\nAll positions now match playbook requirements exactly."
-      }
+      "summary": "Review panel: 1/1 reviewer(s) cleared."
     },
     "negotiate": {
       "status": "paused",
@@ -132,9 +160,14 @@ contract-playbook ◂ dag paused
 }
 ```
 
-The run stopped at `negotiate` with the redlines and the positions in
-`review/`, waiting for the lawyer. A no goes to `redline` with the lawyer's
-note as the finding.
+Seven clauses mapped, two rounds of redlines, one answer from the judge.
+The first set of redlines left out the two clauses the playbook never
+signs; the checker tagged that a block, and the set went back without the
+judge being asked, because a block always does. The second set covered
+every clause and drew one taste note, and the judge said the redlines hold.
+The negotiating note passed its check first time. The run stopped at
+`negotiate` with the redlines and the positions in `review/`, waiting for
+the lawyer. A no goes to `redline` with the lawyer's note as the finding.
 
 ## The file
 
@@ -154,16 +187,23 @@ exists, and the `review` seat may not write it.
 
 The clause list has no reviewer, so only its own seat judges whether every
 clause is on it. The redlines and the negotiating note are each checked by
-the Codex seat, with three attempts to meet:
+the Codex seat. On the redlines, `refine: judge(jev, { cap: 3 })` asks the
+judge whether another round is worth it each time the checker fails the
+set, with the cap as the backstop; the negotiating note keeps a plain count
+of three, so the two shapes sit side by side:
 
-```ts examples/use-cases/business/contract-playbook.ts (excerpt) {6-7,15,20,24,27}
+```ts examples/use-cases/business/contract-playbook.ts (excerpt) {6,11,19,24,31}
       stage('redline', {
         agent: 'review',
         writes: 'review/redlines.md',
         desc: 'For each clause that breaks a rule, write the replacement wording the playbook allows, with the rule it comes from.',
         gate: 'Every breaking clause has a redline, no redline goes further than its rule, and a checker from another family has accepted the set.',
         reviewedBy: 'playbook-check',
-        refine: 3,
+        // The judge. After a round the checker did not pass, Jev reads the
+        // findings and the rounds so far and says whether another round is
+        // worth it; a finding tagged block goes back without asking. The
+        // cap is the backstop: three rounds at most, whatever the judge says.
+        refine: judge(jev, { cap: 3 }),
       }),
 
       stage('positions', {
@@ -195,17 +235,25 @@ its reviewer accepts, and a person stage pauses until the person answers.
 <Accordion title="Full file">
 
 ```ts examples/use-cases/business/contract-playbook.ts
+import { readFile } from 'node:fs/promises';
+
 import { claude } from '@obversa/engine-claude-cli';
 import { codex } from '@obversa/engine-codex-cli';
+import { JevApiEngine } from '@obversa/engine-jev-api';
 import {
   briefFromFile,
+  finalResultPart,
   formatEvent,
+  judge,
   person,
   run,
   stage,
   workflow,
+  type Engine,
+  type JudgeAnswer,
   type TeamSeat,
 } from '@obversa/runtime';
+import { MockEngine } from '@obversa/runtime/testing';
 
 interface ContractPlaybookEngines {
   readonly claude: (model: string) => TeamSeat;
@@ -215,6 +263,35 @@ interface ContractPlaybookEngines {
 const realEngines: ContractPlaybookEngines = { claude, codex };
 
 /**
+ * The judge that decides whether the redlines go round again: Jev over the
+ * TypeSafe API when JUDGE=jev, otherwise the answers recorded in judge.json
+ * beside the brief, one set per round, so the file runs offline. Jev answers
+ * with a structured part and a stage wants text, so the seat wraps the
+ * answers as JSON.
+ */
+async function judgeSeat(): Promise<TeamSeat> {
+  const identity = { adapter: 'jev-api', provider: 'typesafe', modelFamily: 'jev', model: 'jev-latest', tools: [] };
+  if (process.env.JUDGE === 'jev') {
+    const endpoint = process.env.TYPESAFE_ENDPOINT;
+    const apiKey = process.env.TYPESAFE_API_KEY;
+    if (!endpoint || !apiKey) throw new Error('JUDGE=jev needs TYPESAFE_ENDPOINT and TYPESAFE_API_KEY');
+    const api = new JevApiEngine({ endpoint, apiKey });
+    const engine = {
+      name: 'jev-api',
+      async run(request, onEvent, signal) {
+        const result = await api.run(request, onEvent, signal);
+        const part = finalResultPart(result);
+        return part.kind === 'structured' ? { ...result, parts: [{ kind: 'assistant', text: JSON.stringify(part.value), final: true }] } : result;
+      },
+    } as Engine;
+    return { engine, identity };
+  }
+  const answers = JSON.parse(await readFile('judge.json', 'utf8')) as Record<string, JudgeAnswer>[];
+  let round = 0;
+  return { engine: new MockEngine(() => JSON.stringify(answers[Math.min(round++, answers.length - 1)])), identity: { ...identity, adapter: 'recorded' } };
+}
+
+/**
  * Contract review against a playbook. The brief is the playbook: what we
  * accept, what we push back on, what we never sign. One model maps every
  * clause of the contract to the rule it meets or breaks, writes the
@@ -222,7 +299,7 @@ const realEngines: ContractPlaybookEngines = { claude, codex };
  * redline against the playbook and returns the work when one is missing
  * or goes further than the playbook allows. A lawyer decides what is sent.
  */
-function createContractPlaybook(engines: ContractPlaybookEngines = realEngines) {
+function createContractPlaybook(jev: TeamSeat, engines: ContractPlaybookEngines = realEngines) {
   return workflow('contract-playbook', {
     brief: briefFromFile('briefs/playbook.md'),
     options: { timeout: '15m' },
@@ -247,7 +324,11 @@ function createContractPlaybook(engines: ContractPlaybookEngines = realEngines) 
         desc: 'For each clause that breaks a rule, write the replacement wording the playbook allows, with the rule it comes from.',
         gate: 'Every breaking clause has a redline, no redline goes further than its rule, and a checker from another family has accepted the set.',
         reviewedBy: 'playbook-check',
-        refine: 3,
+        // The judge. After a round the checker did not pass, Jev reads the
+        // findings and the rounds so far and says whether another round is
+        // worth it; a finding tagged block goes back without asking. The
+        // cap is the backstop: three rounds at most, whatever the judge says.
+        refine: judge(jev, { cap: 3 }),
       }),
 
       stage('positions', {
@@ -273,8 +354,9 @@ function createContractPlaybook(engines: ContractPlaybookEngines = realEngines) 
   });
 }
 
-const result = await run(createContractPlaybook(), {
+const result = await run(createContractPlaybook(await judgeSeat()), {
   onEvent: (event) => console.log(formatEvent(event)),
+  recordTo: 'records/contract-playbook.jsonl',
 });
 console.log(JSON.stringify(result.outcome, null, 2));
 ```
@@ -287,16 +369,32 @@ console.log(JSON.stringify(result.outcome, null, 2));
 flowchart LR
   msa[("contracts/msa.md")] --> clauses["clauses: Claude"]
   clauses --> redline["redline: Claude, checked by Codex"]
-  redline --> positions["positions: Claude, checked by Codex"]
+  redline -->|findings| judge["judge: Jev"]
+  judge -->|"continue, up to cap: 3"| redline
+  judge --> positions["positions: Claude, checked by Codex, refine: 3"]
   positions -.-> negotiate{{"negotiate: the lawyer"}}
   negotiate -->|sendsBackTo| redline
 ```
+
+## When the loop stops
+
+Two rules end the redline rounds, and the run shows both. A finding the
+checker tags block, here a never-sign clause with no redline, goes back to
+the writer on its own; the judge is not asked, because a block is never a
+matter of judgement. When the checker fails the set with lesser findings,
+the judge reads the use case from the brief, the findings and every round
+so far, and says whether another round is worth it. The loop goes round
+again on continue and stops when the judge chooses a reason to stop. The
+cap of three stands whatever the judge says. The judge's recorded answer
+for the offline run is in `judge.json`.
+[A judge stops the loop](/patterns/judge-stops-the-loop) has the questions
+and the rule.
 
 ## Next steps
 
 - [A person decides](/patterns/approval): the lawyer's question as a step,
   and how the answer reaches a paused run.
+- [A judge stops the loop](/patterns/judge-stops-the-loop): the judge's
+  questions, and the same loop as plain graph nodes.
 - [A writer and a reviewer](/patterns/writer-and-reviewer): the writer and
   checker pair on its own.
-- [Workflows](/concepts/workflows): the brief as the order, and what
-  travels with it.

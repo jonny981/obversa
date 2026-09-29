@@ -5,3 +5,44 @@
 code, pre, kbd, samp, pre code {
   font-family: "IBM Plex Mono", ui-monospace, Menlo, monospace;
 }
+
+
+.comparison-table {
+  max-width: 100%;
+  isolation: isolate;
+}
+
+.comparison-table [data-table-wrapper] {
+  --page-padding: 0px;
+}
+
+.comparison-table table {
+  width: 2140px;
+  table-layout: fixed;
+}
+
+.comparison-table th,
+.comparison-table td {
+  min-width: 220px;
+  vertical-align: top;
+}
+
+.comparison-table th:first-child,
+.comparison-table td:first-child {
+  width: 160px;
+  min-width: 160px;
+  position: sticky;
+  left: 0;
+  z-index: 20;
+  background: white;
+}
+
+.dark .comparison-table th:first-child,
+.dark .comparison-table td:first-child {
+  background: #0a0a0a;
+}
+
+.comparison-table [data-component-part="scroll-area-viewport"]:focus-visible {
+  outline: 2px solid currentColor;
+  outline-offset: 2px;
+}

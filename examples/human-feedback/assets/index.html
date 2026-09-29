@@ -1,0 +1,52 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Review the proposal</title>
+  <link rel="stylesheet" href="/style.css">
+  <script type="module" src="/app.js"></script>
+</head>
+<body>
+  <header><span class="brand">obversa</span><span>Human review</span></header>
+  <main>
+    <section class="intro">
+      <h1>Review the proposal</h1>
+      <p id="question">Loading the work…</p>
+    </section>
+    <form id="review" hidden>
+      <div class="workspace">
+        <section aria-labelledby="proposal-heading">
+          <h2 id="proposal-heading">The proposal</h2>
+          <label for="title">Title</label>
+          <input id="title" name="title" required>
+          <div id="sections"></div>
+        </section>
+        <aside aria-labelledby="direction-heading">
+          <h2 id="direction-heading">Set the direction</h2>
+          <fieldset>
+            <legend>Who should this help first?</legend>
+            <label class="choice"><input type="radio" name="audience" value="first-time visitors" required>First-time visitors</label>
+            <label class="choice"><input type="radio" name="audience" value="returning users">Returning users</label>
+          </fieldset>
+          <p class="hint">Choose the audience. You can also edit the title and leave notes beside the passages you want changed.</p>
+          <button id="preview" type="submit">Review your feedback</button>
+          <button id="clear" type="button" class="quiet">Clear feedback</button>
+          <section id="preview-panel" hidden aria-labelledby="feedback-heading">
+            <h2 id="feedback-heading">What the agent will receive</h2>
+            <pre id="prompt" tabindex="0"></pre>
+            <button id="send" type="button">Send feedback</button>
+            <p class="hint">The agent will revise the proposal and bring it back for another review.</p>
+          </section>
+        </aside>
+      </div>
+      <footer>
+        <p id="approval-hint">Happy with this version? Approve it to continue the workflow.</p>
+        <div class="actions"><button id="cancel" type="button" class="quiet">Close without approving</button><button id="approve" type="button" class="approve">Approve this version</button></div>
+      </footer>
+    </form>
+    <p id="error" role="alert" hidden></p>
+    <section id="done" hidden tabindex="-1"><h2 id="done-title"></h2><p id="done-detail"></p></section>
+  </main>
+</body>
+</html>

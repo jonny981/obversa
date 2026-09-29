@@ -52,7 +52,9 @@ async function fixture(t, respond, { tagExists = true } = {}) {
     return new Promise((resolve) => server.close(resolve));
   });
   const registry = `http://127.0.0.1:${server.address().port}/`;
-  const options = { root, registry, tagExists };
+  // A zero-length retry window keeps these fixtures at one request each: the
+  // retry loop itself has its own test below.
+  const options = { root, registry, tagExists, retry: { totalMs: 0 } };
   return {
     requests,
     run: async () => {
@@ -128,3 +130,41 @@ for (const [label, respond] of [
     assert.deepEqual(f.requests, [exactPath, exactPath]);
   });
 }
+
+test('readPublishedVersionWithRetry keeps polling a still-propagating publish and succeeds once the registry catches up', async (t) => {
+  const { readPublishedVersionWithRetry } = await import('./read-published-version.mjs');
+  let requests = 0;
+  const server = createServer((request, response) => {
+    requests += 1;
+    if (requests < 3) {
+      response.writeHead(404, { 'content-type': 'application/json' });
+      response.end(JSON.stringify({ error: 'package metadata has not propagated' }));
+    } else {
+      document(response, { name, version });
+    }
+  });
+  server.listen(0, '127.0.0.1');
+  await once(server, 'listening');
+  t.after(() => new Promise((resolve) => server.close(resolve)));
+  const registry = `http://127.0.0.1:${server.address().port}/`;
+
+  const result = await readPublishedVersionWithRetry(registry, name, version, { totalMs: 500, intervalMs: 10 });
+  assert.deepEqual(result, { published: true });
+  assert.equal(requests, 3);
+});
+
+test('readPublishedVersionWithRetry gives up at its deadline and says how long it waited', async (t) => {
+  const { readPublishedVersionWithRetry } = await import('./read-published-version.mjs');
+  const server = createServer((_request, response) => {
+    response.writeHead(404, { 'content-type': 'application/json' });
+    response.end(JSON.stringify({ error: 'never propagates' }));
+  });
+  server.listen(0, '127.0.0.1');
+  await once(server, 'listening');
+  t.after(() => new Promise((resolve) => server.close(resolve)));
+  const registry = `http://127.0.0.1:${server.address().port}/`;
+
+  const result = await readPublishedVersionWithRetry(registry, name, version, { totalMs: 1_200, intervalMs: 50 });
+  assert.equal(result.published, false);
+  assert.match(result.reason, /waited 1s across \d+ attempt\(s\)/);
+});

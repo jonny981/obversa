@@ -1,8 +1,13 @@
 import { appendFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname } from 'node:path';
 
+import type { UsageReceipt } from '../engines/engine.js';
 import type { RecordedEngineUsage } from '../core/job.js';
-import type { LoopEvent, Outcome } from '../core/types.js';
+import type { JsonObject } from '../graph/value.js';
+import { cloneFrozenJson } from '../graph/value.js';
+import type { LoopEvent, Outcome, RecordedStage, ResumedStageRecords } from '../core/types.js';
+
+export type { RecordedStage, ResumedStageRecords } from '../core/types.js';
 
 const NOISE: ReadonlySet<LoopEvent['kind']> = new Set([
   'engine:text',
@@ -15,26 +20,20 @@ interface RecorderOptions {
   resume?: boolean;
 }
 
-export type RecordedStage =
-  | { readonly kind: 'interrupted'; readonly startLine: number }
-  | { readonly kind: 'completed'; readonly outcome: Outcome };
-
-export interface ResumedStageRecords {
-  readonly anchors: ReadonlyMap<string, { readonly identity: string; readonly workspace: string; readonly recordId: string }>;
-  readonly stages: ReadonlyMap<string, RecordedStage>;
-}
-
 /** Read the latest stage state and the engine answers recorded for each stage.
  * A missing record has no stage state, so resume starts fresh. */
 export function readResumeRecord(path: string): {
+  readonly receipts: readonly UsageReceipt[];
   readonly outcomes: ResumedStageRecords;
   readonly usage: ReadonlyMap<string, readonly RecordedEngineUsage[]>;
 } {
+  const receipts: UsageReceipt[] = [];
+  const interactions = new Map<string, { identity: string; workspace: string; data: JsonObject }>();
   const anchors = new Map<string, { identity: string; workspace: string; recordId: string }>();
   const stages = new Map<string, RecordedStage>();
   const usage = new Map<string, RecordedEngineUsage[]>();
   const started = new Set<string>();
-  if (!existsSync(path)) return { outcomes: { anchors, stages }, usage };
+  if (!existsSync(path)) return { outcomes: { anchors, stages, interactions }, usage, receipts };
   const lines = readFileSync(path, 'utf8').split(/\r?\n/);
   for (const [lineNumber, line] of lines.entries()) {
     if (!line) continue;
@@ -44,11 +43,19 @@ export function readResumeRecord(path: string): {
     } catch {
       continue;
     }
-    if (event.kind === 'workflow:start') {
+    if (event.kind === 'engine:usage') receipts.push(event.usage);
+    if (event.kind === 'interaction:checkpoint') {
+      const key = event.path.join('/');
+      if (event.data === null) interactions.delete(key);
+      else interactions.set(key, { identity: event.identity, workspace: event.workspace, data: cloneFrozenJson(event.data) });
+    } else if (event.kind === 'workflow:start') {
       const key = event.path.join('/');
       const prior = anchors.get(key);
       if (prior?.identity !== event.identity || prior.workspace !== event.workspace) {
         const prefix = key ? `${key}/` : '';
+        for (const stage of interactions.keys()) {
+          if (stage.startsWith(prefix)) interactions.delete(stage);
+        }
         for (const stage of stages.keys()) {
           if (stage.startsWith(prefix)) stages.delete(stage);
         }
@@ -87,7 +94,7 @@ export function readResumeRecord(path: string): {
       }
     }
   }
-  return { outcomes: { anchors, stages }, usage };
+  return { outcomes: { anchors, stages, interactions }, usage, receipts };
 }
 
 function ensureDir(path: string): void {

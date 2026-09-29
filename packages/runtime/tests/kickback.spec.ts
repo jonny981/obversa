@@ -489,14 +489,14 @@ describe('a decision node', () => {
 });
 
 describe('a judge as a dag() maxKickbacks budget', () => {
-  it('sends the work back while the judge says continue, and rejects on its stop the same way a spent cap would', async () => {
-    // A bare dag() has no reviewer concept to reverse: unlike workflow()'s
-    // review loop (which can synthesise a pass), the judge saying stop here
-    // only rejects the kickback, exactly like a spent numeric cap does, the
-    // requesting node's own outcome (a fail, from its own revisionRequest)
-    // stands, so the dag still ends `fail`.
+  it('sends the work back while the judge says continue, then ships the work on holds: the requesting node becomes a pass and its own dependents run', async () => {
+    // F141: a stop means the same thing at both levels. holds and
+    // over_polishing say the work is good enough as it stands, so review's
+    // own failing outcome is replaced with a pass carrying the judge's
+    // reason, and close (which needs review) gets to run.
     let judgeCalls = 0;
     let round = 0;
+    const closeRuns: number[] = [];
     const events: LoopEvent[] = [];
     const { outcome } = await run(dag({
       name: 'judged-kickback',
@@ -514,20 +514,63 @@ describe('a judge as a dag() maxKickbacks budget', () => {
             target: 'implement', reason: 'needs a pass', findings: [{ evidence: 'x', severity: 'should-fix' }],
           })),
         },
+        close: {
+          needs: ['review'],
+          job: fnJob('close', async () => { closeRuns.push(round); return { status: 'pass' }; }),
+        },
       },
     }), { ...mockOpts, onEvent: (event) => events.push(event) });
 
-    expect(outcome.status).toBe('fail');
-    // One accepted kickback (the judge said continue), one rejected (the
+    expect(outcome.status).toBe('pass');
+    // One accepted kickback (the judge said continue), one shipped (the
     // judge said holds), implement never gets a third run.
     expect(round).toBe(2);
     expect(judgeCalls).toBe(2);
+    expect(closeRuns).toEqual([2]);
+    expect(outcome.data).toMatchObject({ review: { status: 'pass', summary: 'the judge chose holds' } });
     const kickbacks = kbEvents(events);
     expect(kickbacks).toHaveLength(2);
     expect(kickbacks[0]).toMatchObject({ accepted: true, reason: expect.stringContaining('the judge says another round is worth it') });
     expect(kickbacks[1]).toMatchObject({ accepted: false, note: 'the judge chose holds' });
     const judgeEvents = events.filter((e): e is Extract<LoopEvent, { kind: 'refine:judge' }> => e.kind === 'refine:judge');
     expect(judgeEvents).toHaveLength(2);
+  });
+
+  it('fails instead on not_converging: the requesting node\'s own failure stands and its dependents never run', async () => {
+    let judgeCalls = 0;
+    let round = 0;
+    const closeRuns: number[] = [];
+    const events: LoopEvent[] = [];
+    const { outcome } = await run(dag({
+      name: 'judged-kickback-not-converging',
+      maxKickbacks: {
+        implement: judge(judgeSeat(() => {
+          judgeCalls += 1;
+          return JSON.stringify({ stop_reason: { choice: judgeCalls < 2 ? 'continue' : 'not_converging' } });
+        }), { cap: 5 }),
+      },
+      nodes: {
+        implement: fnJob('implement', async () => { round += 1; return { status: 'pass', summary: `round ${round}` }; }),
+        review: {
+          needs: ['implement'],
+          job: fnJob('review', () => revisionRequest({
+            target: 'implement', reason: 'needs a pass', findings: [{ evidence: 'x', severity: 'should-fix' }],
+          })),
+        },
+        close: {
+          needs: ['review'],
+          job: fnJob('close', async () => { closeRuns.push(round); return { status: 'pass' }; }),
+        },
+      },
+    }), { ...mockOpts, onEvent: (event) => events.push(event) });
+
+    expect(outcome.status).toBe('fail');
+    expect(round).toBe(2);
+    expect(judgeCalls).toBe(2);
+    expect(closeRuns).toEqual([]);
+    const kickbacks = kbEvents(events);
+    expect(kickbacks).toHaveLength(2);
+    expect(kickbacks[1]).toMatchObject({ accepted: false, note: 'the judge chose not_converging' });
   });
 
   it('never asks the judge about a block finding: it always goes back, up to the cap', async () => {

@@ -86,6 +86,23 @@ export interface ExampleRun {
 export const pass = (summary: string): string => JSON.stringify({ status: 'pass', summary });
 export const revise = (summary: string, ...findings: string[]): string =>
   JSON.stringify({ status: 'revise', summary, findings: findings.map((evidence) => ({ evidence })) });
+export const shouldFix = (summary: string, ...findings: string[]): string =>
+  JSON.stringify({ status: 'revise', summary, findings: findings.map((evidence) => ({ evidence, severity: 'should-fix' })) });
+
+/**
+ * The record a run wrote, parsed: one decoded event per non-blank line of
+ * the JSONL at `path` (read through `run.read`, so the workspace root).
+ */
+export async function recordEvents(
+  run: ExampleRun,
+  path: string,
+): Promise<Array<{ kind: string; reason?: string; answers?: Record<string, { choice?: string }> } & Record<string, unknown>>> {
+  const text = await run.read(path);
+  return text
+    .split(/\r?\n/)
+    .filter((line) => line.trim() !== '')
+    .map((line) => JSON.parse(line) as { kind: string; reason?: string; answers?: Record<string, { choice?: string }> } & Record<string, unknown>);
+}
 
 /**
  * Where a proof's brief and sample inputs are: beside the proof's source.
@@ -174,6 +191,9 @@ export async function withExample(options: ProofOptions, check: (run: ExampleRun
   spawn error: ${result.error ?? 'none'}
   stdout: ${result.stdout}
   stderr: ${result.stderr}`);
+    }
+    if (process.env.OBVERSA_PROOF_STDOUT) {
+      await writeFile(process.env.OBVERSA_PROOF_STDOUT, result.stdout);
     }
     const printedAt = result.stdout.lastIndexOf('\n{');
     if (printedAt === -1) throw new Error(`the example ${where} printed no outcome\n  stdout: ${result.stdout}`);

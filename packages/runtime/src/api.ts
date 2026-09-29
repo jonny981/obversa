@@ -505,3 +505,5 @@ import type { Job } from './core/types.js';
 export function defineJob(job: Job): Job {
   return job;
 }
+
+export { humanReview, type HumanReviewOptions, type InteractionBinding, type InteractionResponse } from './core/interaction.js';

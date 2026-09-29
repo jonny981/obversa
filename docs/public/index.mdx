@@ -1,26 +1,58 @@
 ---
-title: "Obversa"
+title: "Documentation"
 description: "Durable workflows for agent teams in TypeScript: named roles, evals that decide the next step, and a person's approval where you want one."
 ---
 
 {/* The pinned Mint font schema has heading and body settings, with no code
     setting. style.css loads IBM Plex Mono for code through Google Fonts. */}
 
-Obversa turns the coding agents you already run into a team: one writes, a
-different model reviews, and a person decides what ships.
+Obversa lets you build teams of agents around the way people work: writing, reviewing, making decisions and asking for help.
 
-Think about how a change gets made on a good team. Someone writes it.
-Someone else reads it, and if it's wrong, the writer goes again with a note
-saying what to fix. A hard call gets a second opinion. The big decisions go
-to a person who can say no. And when a laptop dies halfway through, nobody
-starts the week again, because the work so far is written down.
+One agent writes a draft. Another reads it and returns notes. A judge
+decides whether another revision is worth doing, and the workflow sends
+the feedback back to the writer. A person makes the calls
+you leave to them. These patterns fit an article, a
+research brief or a support reply as well as a software change.
 
-Obversa lets you run Claude Code, Codex and the rest that way. You describe
-the work as steps: who does each one, where the reviews are, and where a
-person decides. Obversa runs it one bounded engine call at a time, and can
-write every step down as it happens. Kill a run under the
-[supervised runner](/driving/runner) and start it again, and it carries on
-from its record. Nothing that finished runs twice.
+Put that process in a TypeScript file. Use Claude Code, Codex, Grok or
+OpenCode with the CLIs you already have signed in, or give a role an API
+engine. Tests run as commands. The workflow sends their failures and the
+review notes back to the writer, and keeps the run in a plain-file record.
+No server or database is required.
+
+## Familiar patterns
+
+Start with a part of the work you want to organise:
+
+- **[Get a second opinion](/patterns/writer-and-reviewer).** A different
+  model reviews the work and the writer revises it with the notes.
+- **[Know when to stop](/patterns/judge-stops-the-loop).** A judge reads
+  the review history and decides whether another revision is worth doing.
+- **[Ask a panel](/patterns/review-panel).** Several reviewers read the
+  work, with a threshold for agreement and each opinion kept in the result.
+- **[Ask a person](/patterns/approval).** Put a decision in front of a
+  person and pause until they answer.
+- **[Automate the routine work](/patterns/command-kickback).** Let a
+  command's result decide whether a model needs to revise its work.
+- **[Pick up unfinished work](/concepts/record).** Resume a recorded
+  `workflow()` without repeating its finished stages.
+
+[Browse the patterns](/patterns) for more ways to work together. The
+[complete workflows](/workflows) combine them around real use cases,
+including research, editorial work, support and software delivery.
+
+The [feature team](/workflows/feature-team) gives Jev the decision about
+another revision. `judge()` from `@obversa/runtime` puts that decision
+inside the workflow, with a cap on the number of returns to the writer:
+
+```ts examples/teams/feature-delivery.ts (excerpt)
+  maxKickbacks: { implement: judge(jev, { cap: 4 }) },
+```
+
+Blocking findings go back within the cap. For other findings, the judge
+weighs whether another round is worth doing. [Know when to stop](/patterns/judge-stops-the-loop)
+shows the same pattern in a writing workflow. Add a person's decision
+where your process needs one.
 
 ## Motivation
 
@@ -82,50 +114,9 @@ Install the bundle:
 npm install @obversa/obversa
 ```
 
-Then say who writes, who reviews, and what a red test does:
-
-```ts examples/teams/writer-reviewer-pair.ts (excerpt) {5-8,22,29}
-  return workflow('writer-reviewer-pair', {
-    brief: briefFromFile('briefs/add.md'),
-    options: { timeout: '10m' },
-
-    roles: {
-      write: engines.claude('claude-sonnet-4-5'),
-      review: [engines.codex('gpt-5.6-luna')],
-    },
-
-    stages: [
-      stage('write', {
-        agent: 'write',
-        writes: ['src/add.mjs', 'test/add.test.mjs'],
-        desc: 'Write the function and its test from the brief.',
-        gate: 'The files named in the brief exist in the workspace.',
-        refine: 1,
-      }),
-      stage('test', {
-        run: ['node', '--test', 'test/add.test.mjs'],
-        desc: 'Run the test command against the written files.',
-        gate: 'The test command exits 0.',
-        sendsBackTo: 'write',
-      }),
-      stage('review', {
-        panel: 'review',
-        agree: 1,
-        desc: 'Read the code, the test and its result.',
-        gate: 'The change meets the brief.',
-        sendsBackTo: 'write',
-      }),
-    ],
-  });
-```
-
-A Claude seat writes the function and its test from the brief. Node runs
-the test, and a red run puts the output in front of the write stage, which
-runs again with it. A reviewer on a different model, Codex here, reads the
-code and the result, and a rejection goes the same way. `workflow()`
-refuses a writer and a reviewer from the same model family before the run
-starts. The whole file and a real run are on
-[A writer and a reviewer](/patterns/writer-and-reviewer).
+[Installation](/get-started/installation) covers the tools and sign-in
+needed by each engine. [First run](/get-started/first-run) walks through a
+complete file and its output.
 
 ## Next steps
 
@@ -139,8 +130,8 @@ starts. The whole file and a real run are on
   <Card title="Examples" href="/workflows">
     Complete teams by field, with what each run printed.
   </Card>
-  <Card title="Patterns" href="/patterns/writer-and-reviewer">
-    One mechanism at a time: a reviewer, a panel, a tournament, a person.
+  <Card title="Patterns" href="/patterns">
+    Familiar ways to review work, make decisions and hand over a task.
   </Card>
   <Card title="Evals and Gates" href="/reviewing/evals">
     The checks that decide the next step, and the person at the gate.

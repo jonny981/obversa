@@ -10,6 +10,7 @@ import {
 import { join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { assertCommitRange } from './check-commit-policy.mjs';
+import { assertFreshCiProof } from './ci-proof.mjs';
 import { configureGitHooks } from './configure-git-hooks.mjs';
 
 const leaseRef = 'refs/obversa/stage-merge';
@@ -120,6 +121,16 @@ export const stageBranches = {
   F143: 'docs/two-forms',
   F139: 'feat/f139-flagship-example',
   F148: 'fix/readme-package-counts',
+  F146: 'feat/f146-ci-local',
+  F140: 'feat/judge-in-four-examples',
+  F141: 'feat/f141-judge-stop-ruling',
+  F142: 'feat/f142-fn-stage',
+  F147: 'fix/preflight-spec-sequencing',
+  F152: 'fix/runner-budget-spec',
+  F153: 'docs/search-indexing',
+  F154: 'docs/human-patterns',
+  F155: 'feat/judge-product-decision',
+  F156: 'release/0.2.1',
 };
 
 export function manageStage(args, options = {}) {
@@ -136,6 +147,7 @@ export function manageStage(args, options = {}) {
   if (command === 'finish') {
     return finish(context, {
       assertCommitRange: options.assertCommitRange ?? assertCommitRange,
+      assertFreshCiProof: options.assertFreshCiProof ?? assertFreshCiProof,
       beforeLeaseDelete: options.beforeLeaseDelete,
       configureGitHooks: options.configureGitHooks ?? configureGitHooks,
     });
@@ -250,6 +262,7 @@ function finish(context, dependencies) {
 
   dependencies.assertCommitRange(`${mainHead}..${featureHead}`, { cwd: context.worktree });
   git(context.worktree, 'diff', '--check', `${mainHead}..${featureHead}`);
+  dependencies.assertFreshCiProof(context.worktree);
   git(mainWorktree, 'merge', '--ff-only', featureHead);
 
   const mergedHead = git(mainWorktree, 'rev-parse', 'HEAD').trim();

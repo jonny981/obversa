@@ -3,12 +3,13 @@ import { readFile } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-import { pass, revise, sourceDir, withExample } from '../proof-host.js';
+import { pass, recordEvents, shouldFix, sourceDir, withExample } from '../proof-host.js';
 
 const here = dirname(fileURLToPath(import.meta.url));
 const samples = sourceDir(here);
 const brief = await readFile(join(samples, 'briefs/post.md'), 'utf8');
 const style = await readFile(join(samples, 'style/house.md'), 'utf8');
+const judgeJson = await readFile(join(samples, 'judge.json'), 'utf8');
 
 const firstDraft = [
   'Every change we ship is read twice before a person sees it, and that second read is what makes our review the best in the business.',
@@ -38,12 +39,14 @@ const thirdDraft = [
 ].join('\n');
 
 // The grader returns the draft twice: a superlative, then a number the
-// brief never gave. The third draft holds, and the run stops for the
-// editor. Three writer turns, three grader turns, within the limit.
+// brief never gave, then only a taste note. The judge sends the first two
+// back as worth another round and stops the loop on the third; the run
+// stops for the editor. Three writer turns, three grader turns, three
+// judged rounds, within the cap.
 await withExample({
   here,
   example: 'writer-grader-cap',
-  files: { 'briefs/post.md': brief, 'style/house.md': style },
+  files: { 'briefs/post.md': brief, 'style/house.md': style, 'judge.json': judgeJson },
   seats: {
     claude: [
       { writes: { 'posts/draft.md': firstDraft }, reply: pass('draft written') },
@@ -51,9 +54,9 @@ await withExample({
       { writes: { 'posts/draft.md': thirdDraft }, reply: pass('the number is gone; the closing line stands') },
     ],
     codex: [
-      { reply: revise('one rule broken', 'line 1: "the best in the business" breaks rule 3, no superlatives') },
-      { reply: revise('one rule broken', 'line 3: "40 percent" breaks rule 4; the brief gives no number') },
-      { reply: pass('every rule holds: one idea per sentence, what the reader gets first, no superlatives, no numbers, the tools named, a plain closing line') },
+      { reply: shouldFix('one rule broken', 'line 1: "the best in the business" breaks rule 3, no superlatives') },
+      { reply: shouldFix('one rule broken', 'line 3: "40 percent" breaks rule 4; the brief gives no number') },
+      { reply: shouldFix('one taste note', 'line 5: the closing line could name Codex; taste, not a rule') },
     ],
   },
 }, async (run) => {
@@ -67,12 +70,20 @@ await withExample({
   assert.doesNotMatch(draft, /40 percent/, 'the invented number is gone');
   assert.match(draft, /Try it on your next change/);
 
+  const judged = (await recordEvents(run, 'records/writer-grader-cap.jsonl')).filter((event) => event.kind === 'refine:judge');
+  assert.deepEqual(judged.map((event) => event.reason), [
+    'the judge says another round is worth it (0.72)',
+    'the judge says another round is worth it (0.61)',
+    'the judge chose holds',
+  ]);
+  assert.deepEqual(judged.map((event) => event.answers?.stop_reason?.choice), ['continue', 'continue', 'holds']);
+
   console.log(JSON.stringify({
     status: 'pass',
     stages: 2,
     drafts: 3,
-    graderKickbacks: 2,
-    limit: 3,
+    judge: ['continue', 'continue', 'holds'],
+    cap: 3,
     pausedAt: 'publish',
     mode: run.mode,
   }, null, 2));

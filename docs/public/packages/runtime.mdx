@@ -186,6 +186,27 @@ engine call, so the review gate compares writers with reviewers by family.
 
 ## Ask a person
 
+`humanReview(name, { question, input, interaction })` makes a review step
+that keeps what you changed, what you wrote and whether you approved.
+Use it as a loop's `review`. Its response
+contains `feedback`, a composed `prompt`, and an explicit `decision`:
+`changes-requested` sends work back; only `approved` passes. The writer's
+`consumeFeedback: true` includes the full response on its next turn.
+[Surfaces](/concepts/surfaces#refine-together) shows an interactive example.
+
+`interaction` names the handler with `id`, declares `responseSchema`, and
+optionally supplies an async `answer(request, signal)` function. That
+function can open a surface and return its payload. Return `undefined` if
+the person cancels. Without a handler, answer through the run's stored
+callbacks client.
+
+An `agentJob` can also declare `interaction`. To ask a question, that agent
+returns JSON with an `interaction` object containing `question` and `input`.
+The answer's `feedback` and `prompt` return to the same model in a fresh
+turn with the saved task context. This asks for input; it does not require
+an approval decision. `person(question, { interaction })` uses the same
+rich response in a workflow input stage.
+
 `approval(label, { question, target?, answer? })` is a person's decision as
 a step. Yes passes; no goes to `target` with the note as the finding, or
 fails the step when there's no target; no answer pauses the run:
@@ -332,6 +353,7 @@ variables for a job and every job beneath it.
 | `run` | A command, one string with no quoting or an array. Exit 0 passes. A red run goes to `sendsBackTo` with the output as the finding. It may change the files it `writes` and no other declared file. |
 | `panel` | A role that is a list of seats. `agree` is how many must accept; the default is all of them. |
 | `input` | A person role. The stage asks the question and waits. |
+| `fn` | A plain function job: regular code, not another agent or command. The same `writes` rule as `run`; a fail with no target of its own goes to `sendsBackTo`. |
 | `writes` | The files this stage writes, relative to the workspace. For an agent stage, a missing or empty one fails the stage by name. |
 | `desc`, `gate` | What the stage does and what must be true for it to count. Both go into the writing seat's prompt, the plan and the record. |
 | `reviewedBy` | A panel role that reads this stage's work. A rejection runs the stage again with the findings; the same bytes back fails the stage. The stage and its review are one step, so a run that dies mid-review runs the whole step again. |

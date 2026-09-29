@@ -19,7 +19,8 @@ pnpm add @obversa/surface
 - `runSurface({...})` — the one launcher: it starts the session, places
   the page in the selected host, reports the url through `ready`, waits
   for the single decision, frames it on stdout, and shuts down. Signals
-  interrupt cleanly. `examples/hello-surface.mjs` runs it end to end.
+  interrupt cleanly. Pass `signal: AbortSignal` to interrupt it when its
+  caller cancels. `examples/hello-surface.mjs` runs it end to end.
 - `startSurface({ app, assets, api, ... })` — one loopback server on an
   ephemeral 127.0.0.1 port. The page URL carries a fragment token. Every
   API request must send it as a bearer token, checked in constant time.

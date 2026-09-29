@@ -1,17 +1,16 @@
 ---
-title: "A Command Decides the Path"
-sidebarTitle: "Command Decides the Path"
-description: "Run the tests as a step with no model. Red goes to the writer with the output attached, or the exit code picks the branch that runs next."
+title: "Automate the Routine Work"
+description: "A command checks the work and its result decides what runs next."
 ---
 
-Let a command's exit code decide what happens next, with no model in
-between. Use it for the steps that already have a right answer: a test
-suite, a build, a lint, a check against a deployed system. Where the
-judgement needs a reader, use [a writer and a reviewer](/patterns/writer-and-reviewer).
-A command stage is a code eval: it costs no tokens, and its result can do
-two things a model's report can't be trusted to do alone. It can carry the
-evidence to the step that owns the fix, and it can choose which path the run
-takes.
+Run the checks directly and give the writer their output when the work
+needs another pass. Use it for tests, builds, format checks or commands
+that check a deployed system.
+
+The command's exit code decides what happens next. It can return the work
+to the writer or select the next part of the workflow, without a model
+interpreting the result. When the check needs judgement,
+[get a second opinion](/patterns/writer-and-reviewer).
 
 ## Shape
 

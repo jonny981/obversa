@@ -36,6 +36,8 @@ import { LoopError, type LoopPhase } from './errors.js';
 import { isLimitError, waitMsFor } from './limits.js';
 import { ProgressTracker, resolveNoProgress } from './progress.js';
 import { workspaceFingerprint } from './git.js';
+import { checkpointInteraction, interactionDeclaration, interactionIdentity, jsonSnapshot, outcomeSnapshot, savedInteraction } from './interaction.js';
+import type { ProgressSample } from './progress.js';
 
 const VALID_STATUS = new Set<Outcome['status']>([
   'pass',
@@ -92,9 +94,15 @@ export function loop(config: LoopConfig): Job {
     const depth = parent.depth + 1;
     const ts = () => Date.now();
 
-    let lastReview: Outcome | undefined;
-    let lastGate: ConditionResult | undefined;
-    let iteration = 0;
+    const checkpointPath = [...path, '@interaction-loop'];
+    const identity = interactionIdentity({ config, params: parent.params });
+    const saved = savedInteraction(parent, checkpointPath, identity);
+    let checkpointed = saved !== undefined;
+    let resumePhase = saved?.phase as 'body' | 'review' | undefined;
+    let lastReview = (saved?.lastReview as unknown as Outcome | undefined) ?? parent.lastReview;
+    let lastGate = saved?.lastGate as unknown as ConditionResult | undefined;
+    let iteration = typeof saved?.iteration === 'number' ? saved.iteration : 0;
+    if (resumePhase === 'body') iteration -= 1;
     const ctxAt = (iter: number, lastOutcome?: Outcome): JobContext =>
       childContext(parent, {
         depth,
@@ -111,6 +119,7 @@ export function loop(config: LoopConfig): Job {
       outcome: Outcome,
       iterations: number,
     ): Promise<Outcome> => {
+      if (checkpointed && outcome.status !== 'paused' && outcome.status !== 'aborted') checkpointInteraction(parent, checkpointPath, identity, null);
       parent.emit({ kind: 'loop:end', ts: ts(), path, outcome, iterations });
       if (config.onComplete) {
         try {
@@ -167,7 +176,7 @@ export function loop(config: LoopConfig): Job {
       ]);
 
       // 1. start gate
-      if (start) {
+      if (start && !saved) {
         const r = await gate(start, 'start', ctxAt(0), undefined);
         parent.emit({
           kind: 'loop:condition',
@@ -184,15 +193,30 @@ export function loop(config: LoopConfig): Job {
           );
       }
 
-      let last: Outcome | undefined;
-      let consecutiveErrors = 0;
-      let consecutiveReviewFails = 0;
+      let last = saved?.last as unknown as Outcome | undefined;
+      let consecutiveErrors = Number(saved?.consecutiveErrors ?? 0);
+      let consecutiveReviewFails = Number(saved?.consecutiveReviewFails ?? 0);
       // Per-invocation, so a re-run of the same Job (a kickback, a nested loop's
       // second pass) starts with a clean novelty set.
       const tracker = noProgress
         ? new ProgressTracker(noProgress)
         : undefined;
+      const samples = [...((saved?.samples ?? []) as unknown as ProgressSample[])];
+      for (const sample of samples) tracker?.record(sample);
       let warnedInert = false;
+      const checkpointContext = (ctx: JobContext, phase: 'body' | 'review'): JobContext => ({
+        ...ctx,
+        interactionCheckpoint() {
+          checkpointed = true;
+          parent.interactionCheckpoint?.();
+          checkpointInteraction(parent, checkpointPath, identity, jsonSnapshot({
+            phase, iteration, consecutiveErrors, consecutiveReviewFails, samples,
+            ...(last ? { last: outcomeSnapshot(last) } : {}),
+            ...(lastReview ? { lastReview: outcomeSnapshot(lastReview) } : {}),
+            ...(lastGate ? { lastGate: Object.fromEntries(Object.entries(lastGate).filter(([, value]) => value !== undefined)) } : {}),
+          }));
+        },
+      });
 
       type ConvergenceAttempt = {
         conv: ConditionResult;
@@ -258,7 +282,7 @@ export function loop(config: LoopConfig): Job {
 
         let reviewOutcome: Outcome;
         try {
-          reviewOutcome = await config.review(ctxAt(at, bodyOutcome));
+          reviewOutcome = await config.review(checkpointContext(ctxAt(at, bodyOutcome), 'review'));
         } catch (e) {
           throw LoopError.from(e, {
             code: 'VALIDATION',
@@ -346,7 +370,7 @@ export function loop(config: LoopConfig): Job {
         return { conv, turnReview: reviewOutcome };
       };
 
-      if (config.checkFirst) {
+      if (config.checkFirst && !saved) {
         await yieldToLoop();
         if (parent.signal.aborted)
           return finish(
@@ -365,7 +389,7 @@ export function loop(config: LoopConfig): Job {
             { status: 'aborted', summary: 'aborted by signal' },
             iteration,
           );
-        if (config.max != null && iteration >= config.max) {
+        if (resumePhase !== 'review' && config.max != null && iteration >= config.max) {
           return finish(
             {
               status: 'exhausted',
@@ -379,17 +403,19 @@ export function loop(config: LoopConfig): Job {
           );
         }
 
-        iteration += 1;
+        const resumingReview = resumePhase === 'review';
+        resumePhase = undefined;
+        if (!resumingReview) iteration += 1;
         const ctx = ctxAt(iteration, last);
         // The review outcome of THIS turn, when one ran and rejected — feeds the
         // no-progress sample (its confidence/summary gated the continuation).
         let turnReview: Outcome | undefined;
-        parent.emit({ kind: 'loop:iteration', ts: ts(), path, iteration });
+        if (!resumingReview) parent.emit({ kind: 'loop:iteration', ts: ts(), path, iteration });
 
         // run the body (fresh context this turn)
         let bodyThrew = false;
         try {
-          last = await config.body(ctx);
+          if (!resumingReview) last = await config.body(checkpointContext(ctx, 'body'));
           consecutiveErrors = 0;
         } catch (e) {
           bodyThrew = true;
@@ -507,7 +533,7 @@ export function loop(config: LoopConfig): Job {
           );
         }
 
-        if (config.onIteration) {
+        if (config.onIteration && !resumingReview) {
           try {
             await config.onIteration(last, ctx);
           } catch (e) {
@@ -521,7 +547,7 @@ export function loop(config: LoopConfig): Job {
         }
 
         // hard early-exit
-        if (stopOn) {
+        if (stopOn && !resumingReview) {
           const r = await gate(stopOn, 'stopOn', ctx, last);
           parent.emit({
             kind: 'loop:condition',
@@ -579,7 +605,7 @@ export function loop(config: LoopConfig): Job {
               });
             }
           }
-          const report = tracker.record({
+          const sample: ProgressSample = {
             iteration,
             fingerprint,
             signal: signalValue,
@@ -592,7 +618,9 @@ export function loop(config: LoopConfig): Job {
             reason: turnReview
               ? (turnReview.summary ?? 'review rejected')
               : conv.reason,
-          });
+          };
+          samples.push(Object.fromEntries(Object.entries(sample).filter(([, value]) => value !== undefined)) as unknown as ProgressSample);
+          const report = tracker.record(sample);
           if (!warnedInert && tracker.isInert()) {
             warnedInert = true;
             parent.log(
@@ -654,7 +682,7 @@ export function loop(config: LoopConfig): Job {
     }
   };
 
-  return setMeta(job, {
+  return interactionDeclaration(setMeta(job, {
     kind: 'loop',
     name: config.name,
     max: config.max,
@@ -666,7 +694,7 @@ export function loop(config: LoopConfig): Job {
     review: !!config.review,
     maxReviewRestarts: config.maxReviewRestarts,
     body: jobMeta(config.body),
-  });
+  }), config);
 }
 
 /** Sleep that resolves early (does not reject) when the signal aborts. */

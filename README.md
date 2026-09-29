@@ -17,13 +17,19 @@
   <a href="https://github.com/jonny981/obversa/actions/workflows/ci.yml"><img src="https://github.com/jonny981/obversa/actions/workflows/ci.yml/badge.svg" alt="CI"></a>
 </p>
 
-Obversa runs the coding agents you already use, Claude Code, Codex and the
-rest, as a team, from a TypeScript file: who writes, who reviews, and when a
-person signs off. When a reviewer asks for changes or a test fails, the
-writer gets the notes and tries again. A judge can say when another round
-stops being worth it. A person approves the exact bytes before anything
-leaves. Every step goes on a record, so a killed run carries on from where
-it stopped. No server, no database.
+Obversa lets you describe how a team works and run it with agents, code
+and people. One agent writes, another reviews, and a judge decides whether
+another revision is worth doing. The workflow carries the feedback back
+to the writer. A person makes the calls you leave to them.
+
+Put that process in a TypeScript file. Use the agent CLIs you already
+have signed in, or give a role an API engine. Tests run as commands,
+reviews return their notes, and the run keeps its record in a plain file.
+
+Use the same patterns to review a research brief, shape an article,
+answer a support ticket or deliver a feature. Notes go back to the
+writer. A check decides whether work continues. A recorded workflow can
+continue from its file after an interruption. No server, no database.
 
 ## Install
 
@@ -33,215 +39,176 @@ npm install @obversa/obversa
 
 Node.js 22.12 or later. `@obversa/obversa` installs the runtime and every
 plugin but the Jev engine, which is `npm install @obversa/engine-jev-api`.
-The engines drive the command line tools you already have signed in:
-Claude Code, Codex, Grok and OpenCode.
-[The packages](https://docs.obversa.ai/packages) lists each with its page.
+Use Claude Code, Codex, Grok or OpenCode with the command line tools you
+already have signed in, or use an API engine.
+[Installation](https://docs.obversa.ai/get-started/installation) covers
+setup. [First run](https://docs.obversa.ai/get-started/first-run) walks
+through a complete file.
 
-## First run
+## Familiar patterns
 
-A Claude seat writes a function and its test from a brief, Node runs the
-test, and a Codex seat reads the change. The team is
-`examples/teams/writer-reviewer-pair.ts`, with its brief at `briefs/add.md`
-beside it. This is the part you write:
+These are the parts of a process you recognise from working with people.
+Each snippet comes from a runnable example. Follow its link for the full
+file, inputs and result.
 
-```ts examples/teams/writer-reviewer-pair.ts (excerpt)
-  return workflow('writer-reviewer-pair', {
-    brief: briefFromFile('briefs/add.md'),
-    options: { timeout: '10m' },
+### Get a second opinion
 
+A writer drafts a post and a different model reads it against the house
+style. The writer gets the review notes and revises the draft. In the
+[editorial example](https://docs.obversa.ai/workflows/editorial/writer-grader-cap),
+Claude writes, Codex reviews, and a person is the editor:
+
+```ts examples/use-cases/editorial/writer-grader-cap.ts (excerpt)
     roles: {
       write: engines.claude('claude-sonnet-4-5'),
-      review: [engines.codex('gpt-5.6-luna')],
+      grade: [engines.codex('gpt-5.6-luna')],
+      editor: person('Publish this post?'),
     },
+```
 
-    stages: [
-      stage('write', {
+`stage()` from `@obversa/runtime` gives the writer a reviewer and a budget
+for revisions:
+
+```ts examples/use-cases/editorial/writer-grader-cap.ts (excerpt)
+      stage('draft', {
         agent: 'write',
-        writes: ['src/add.mjs', 'test/add.test.mjs'],
-        desc: 'Write the function and its test from the brief.',
-        gate: 'The files named in the brief exist in the workspace.',
-        refine: 1,
+        writes: 'posts/draft.md',
+        desc: 'Write the post from the brief, in the house style.',
+        gate: 'The draft holds against every rule in style/house.md, as read by a grader from another model family.',
+        reviewedBy: 'grade',
+        // The limit. A draft that has not passed after three tries ends
+        // the run with the grader's last findings, and the editor is not
+        // asked. Raise it for a longer piece; lower it for a caption.
+        refine: 3,
       }),
-      stage('test', {
-        run: ['node', '--test', 'test/add.test.mjs'],
-        desc: 'Run the test command against the written files.',
-        gate: 'The test command exits 0.',
-        sendsBackTo: 'write',
-      }),
+```
+
+In `workflow()`, the reviewer has to come from a different model family
+from the writer. [Get a second opinion](https://docs.obversa.ai/patterns/writer-and-reviewer)
+explains the review loop.
+
+### Know when to stop
+
+A review can suggest changes that make little difference to the result.
+Give a decision model the job of weighing those notes against the
+purpose of the work and the revisions so far. `judge()` from
+`@obversa/runtime` sets that stopping rule inside a `dag()` workflow:
+
+```ts examples/teams/feature-delivery.ts (excerpt)
+  maxKickbacks: { implement: judge(jev, { cap: 4 }) },
+```
+
+Here Jev makes the judgement, with a hard cap of four returns to the
+writer. A blocking finding goes back to the writer without
+asking the judge, and it still counts toward the cap. [Know when to stop](https://docs.obversa.ai/patterns/judge-stops-the-loop)
+shows the questions and a complete writing example.
+
+### Ask a panel
+
+Give the work to several reviewers and decide how many must agree. Each
+opinion stays in the result, including dissent. A `workflow()` review
+stage names the panel and the number of approvals it needs:
+
+```ts examples/teams/threshold-panel.ts (excerpt)
       stage('review', {
         panel: 'review',
         agree: 1,
-        desc: 'Read the code, the test and its result.',
-        gate: 'The change meets the brief.',
-        sendsBackTo: 'write',
+        desc: 'Have both reviewers read the change and count the acceptances.',
+        gate: 'At least one reviewer has accepted.',
+        sendsBackTo: 'implement',
       }),
-    ],
-  });
 ```
 
-Copy the file, put the brief beside it, and run it from the directory the
-work belongs in, with the Claude Code and Codex command line tools signed
-in:
+This example needs one approval from its two reviewers. Set `agree` to
+two when both must accept. [Ask a panel](https://docs.obversa.ai/patterns/review-panel)
+shows the full team and what happens when a reviewer cannot answer.
 
-```bash
-npx tsx writer-reviewer-pair.ts
+### Ask a person
+
+A model's review can be enough to request another draft. Publishing may
+need an editor's decision. The editorial workflow asks the person named
+in its `editor` role after the model review passes:
+
+```ts examples/use-cases/editorial/writer-grader-cap.ts (excerpt)
+      stage('publish', {
+        input: 'editor',
+        desc: 'Put the graded draft in front of the editor.',
+        gate: 'The editor has said publish.',
+        sendsBackTo: 'draft',
+      }),
 ```
 
-The `write` stage names the files it may write and fails by name when one
-is missing. The `test` stage passes on the command's exit code, never on a
-model's report; a red run goes back to `write` with the output. The
-`review` stage is a reviewer from a different model family, and the runtime
-refuses the team before any model runs if the reviewer shares the writer's
-family. `refine: 1` on the writer is how many more rounds it gets.
-[First run](https://docs.obversa.ai/get-started/first-run) shows what a
-real run printed.
+With no answer the run pauses. A refusal with notes goes to the writer.
+Approval completes this example; a separate action would publish the
+post. [Ask a person](https://docs.obversa.ai/patterns/approval) shows how
+the question and answer become part of the run.
 
-## Feature delivery
+### Automate the routine work
 
-A ticket comes in. A small decision model types it as a bug or a feature
-before an expensive seat reads it. For a feature, a Claude seat writes the
-requirements and a plan and a Codex seat reviews them. Two seats implement
-in their own worktrees and the test picks the winner; a red test sends the
-work back. A panel reviews the change, a judge says when another round
-stops being worth it, a person approves the exact bytes by their sha, and
-the closing note is written from the record. That team is
-`examples/teams/feature-delivery.ts`, in five parts.
+Let a script check the facts while a model writes the report. The weekly
+report example uses a command to check that the draft includes every
+incident. Its exit code decides whether the writer tries again:
 
-Triage first. Jev, the small decision model, types the ticket before any
-expensive seat runs, and its answer decides whether a plan gets written:
+```ts examples/use-cases/ops/handoff-that-resumes.ts (excerpt)
+      stage('check', {
+        run: [process.execPath, 'tools/check-report.mjs'],
+        desc: 'Fail the draft if an incident from the facts is missing.',
+        gate: 'The check exits 0.',
+        sendsBackTo: 'draft',
+      }),
+```
 
-```ts examples/teams/feature-delivery.ts (excerpt)
-const triage: Job = agentJob({
-  label: 'triage', engine: jev.engine, model: jev.identity.model, workspaceMode: 'none', tools: [], leaf: true,
-  prompt: JSON.stringify({
-    state: { ticket: brief },
-    questions: {
-      kind: { type: 'choice', instructions: 'Is this ticket a bug fix or a feature?', criteria: { bug: 'Fixes broken behaviour.', feature: 'Adds behaviour that did not exist.' } },
-      risk: { type: 'score', instructions: 'How risky is this change?', criteria: ['blast radius', 'reversibility'] },
-    },
-  }),
-  outcome: (text) => ({ status: 'pass', summary: text.slice(0, 120), data: JSON.parse(text) }),
+The workflow runs the command directly. The model spends its turn on the
+draft. [Automate the routine work](https://docs.obversa.ai/patterns/command-kickback)
+shows the same pattern with a test command.
+
+### Pick up unfinished work
+
+A weekly report stops after gathering its facts. The next worker opens
+the saved record and continues with the draft, without gathering those
+facts again. `run()` from `@obversa/runtime` resumes the same workflow:
+
+```ts examples/use-cases/ops/handoff-that-resumes.ts (excerpt)
+const second = await run(createReport(), {
+  recordTo: record,
+  resume: true,
+  onEvent: watch('worker-2', worker2),
 });
 ```
 
-Two seats implement in their own worktrees, and the test picks the winner:
+For stages declared with `workflow()`, the recovery rule is:
 
-```ts examples/teams/feature-delivery.ts (excerpt)
-const implement = tournament({
-  name: 'implement', n: 2, concurrency: 1,
-  candidate: (i) => candidate(i === 0 ? writer : implementer, i),
-  judge: (outcome) => (outcome.status === 'pass' ? 1 : 0),
-});
-```
+Steps that finished are never repeated. A step that was mid-flight when the
+worker died runs again only if its binding declares it safe to retry; otherwise
+the run pauses and asks a person to reconcile it before it continues, so
+uncertain work is never repeated silently.
+[The complete example](https://docs.obversa.ai/workflows/ops/handoff-that-resumes)
+shows which stages each worker ran.
 
-A panel of the Codex seat and the OpenCode seat reviews the change. One
-acceptance is enough, and a rejection goes back to `implement` with the
-findings:
+The [pattern collection](https://docs.obversa.ai/patterns) also covers
+comparing different approaches, bringing a team together, and preparing
+context before handing over a task. Patterns can be combined inside a
+larger workflow.
 
-```ts examples/teams/feature-delivery.ts (excerpt)
-const review = reviewPanel({
-  label: 'review', target: 'implement', pass: 1, concurrency: 1,
-  reviewers: [{ name: 'codex', job: reviewer(implementer) }, { name: 'opencode', job: reviewer(secondReviewer) }],
-});
-```
+## Complete workflows
 
-A person approves the exact bytes. The sha is in the question, and a no
-with a note goes back to `implement`:
+A real use case combines these patterns around an outcome:
 
-```ts examples/teams/feature-delivery.ts (excerpt)
-const approve: Job = async (ctx) => {
-  const bytes = await readFile(join(ctx.workspace.dir, 'src/triple.mjs'));
-  const sha256 = createHash('sha256').update(bytes).digest('hex');
-  const recorded = existsSync('approve.json') ? JSON.parse(await readFile('approve.json', 'utf8')) : undefined;
-  return approval('approve', {
-    question: `Ship src/triple.mjs as it now stands (sha256 ${sha256.slice(0, 12)})? A no with a note sends it back to implement.`,
-    input: { file: 'src/triple.mjs', sha256 }, target: 'implement',
-    ...(recorded ? { answer: () => recorded } : {}),
-  })(ctx);
-};
-```
-
-The graph puts the seven steps in order. Research runs for a feature only.
-A red test or a rejected review goes back to `implement`, and Jev, capped
-at four rounds, says when another pass stops being worth it:
-
-```ts examples/teams/feature-delivery.ts (excerpt)
-const team = dag({
-  name: 'feature-delivery',
-  nodes: {
-    triage,
-    // Isolated so its commit lands on HEAD: the tournament's own worktrees
-    // fork from HEAD, and need the plan committed there to read it.
-    research: { needs: 'triage', optional: true, isolate: true, when: predicate((ctx) => (ctx.needs?.triage?.data as { kind?: { choice?: string } })?.kind?.choice === 'feature', 'triage chose a feature'), job: research },
-    implement: { needs: ['triage', 'research'], job: implement },
-    test: { needs: 'implement', job: commandJob('test', ['node', '--test', 'test/triple.test.mjs'], { target: 'implement' }) },
-    // Isolated for the same reason as research: on a reject the worktree is
-    // discarded rather than merged, so a second kickback into `implement`
-    // forks its own tournament round from an untouched HEAD.
-    review: { needs: 'test', isolate: true, job: review },
-    approve: { needs: 'review', job: approve },
-    close: { needs: 'approve', job: close },
-  },
-  // A block finding always goes back on its own; otherwise Jev, capped at 4
-  // rounds, says when another pass on `implement` stops being worth it.
-  maxKickbacks: { implement: judge(jev, { cap: 4 }) },
-});
-```
-
-Every node says what it does and where a rejection sends the work back,
-and re-running a node re-runs everything downstream of it in turn.
-
-| node | done when |
+| Workflow | How the team works |
 | --- | --- |
-| triage | Jev has typed the ticket as a bug or a feature. |
-| research | Only runs for a feature; the panel has accepted the plan. |
-| implement | The tournament has a passing candidate to land. |
-| test | The test command exits 0 against the landed candidate. |
-| review | At least one of Codex and OpenCode has accepted the change. |
-| approve | A person has said yes to the exact sha256 that landed. |
-| close | The evidence note is in the workspace, from the record alone. |
+| [Review an article](https://docs.obversa.ai/workflows/editorial/writer-grader-cap) | A writer drafts, a different model reviews, and an editor decides whether it is ready to publish. |
+| [Read research papers](https://docs.obversa.ai/workflows/research/literature-watch) | A model summarises supplied papers, a person selects the notes to keep, and those notes inform an answer. |
+| [Handle support tickets](https://docs.obversa.ai/workflows/support/triage-with-escalation) | Classify each ticket, draft a reply, and refer uncertain or sensitive cases to a person. |
+| [Prepare a shortlist](https://docs.obversa.ai/workflows/hiring/shortlist) | Apply rules in code, compare rankings from two models, and ask a person to choose the shortlist. |
+| [Deliver a feature](https://docs.obversa.ai/workflows/feature-team) | Plan, implement, test, review and ask a person to approve the change. |
 
-The whole file, with the seats, the nested research workflow and the
-closing note, is `examples/teams/feature-delivery.ts`.
-[Feature delivery](https://docs.obversa.ai/workflows/feature-team) shows
-what a run of it printed and the files the models wrote.
-
-## The parts
-
-- **A review loop that knows when to stop.** A failed review or test sends
-  the findings to the step that owns the fix, and it runs again. Give a
-  stage `refine: judge(seat, { cap: 6 })` instead of a count and a small
-  model reads the findings and the rounds so far and says whether another
-  round is worth it; the cap is the backstop.
-  [Feedback loops](https://docs.obversa.ai/concepts/feedback-loops),
-  [a judge stops the loop](https://docs.obversa.ai/patterns/judge-stops-the-loop).
-- **A person approves the exact change.** The run stops and asks, and the
-  yes is bound to the bytes the person saw; a changed byte asks again.
-  [A person decides](https://docs.obversa.ai/patterns/approval).
-- **The record.** An append-only event log is the run's only state. Under
-  the supervised runner a killed run starts a fresh worker that reads the
-  record and carries on. Steps that finished are never repeated. A step that
-  was mid-flight when the worker died runs again only if its binding declares
-  it safe to retry; otherwise the run pauses and asks a person to reconcile
-  it before it continues, so uncertain work is never repeated silently.
-  `obversa-record <path>` prints a record as a page a person scans.
-  [The record](https://docs.obversa.ai/concepts/record),
-  [read a record](https://docs.obversa.ai/recording/read-a-record).
-- **A worktree per writer.** Writers that run at the same time never touch
-  each other's files, and only the winner lands.
-  [Workspace](https://docs.obversa.ai/concepts/workspace).
-- **A run you can watch.** A local page shows each step, the record in the
-  console's words, and the questions waiting for you.
-  [Watch a run](https://docs.obversa.ai/driving/monitor).
-- **Memory.** Files a step can open again later, behind a small port with
-  three adapters: in process, in private Git references, over local
-  Markdown. [Memory](https://docs.obversa.ai/memory).
+The feature delivery file is `examples/teams/feature-delivery.ts`.
+[Browse the workflows](https://docs.obversa.ai/workflows) for the full
+files and examples from other fields.
 
 ## Engines
 
-A seat names the tool, the provider, the model family and the model. A
-reviewer can be required to come from a different family than the writer,
-so the model that wrote the work is never the model that grades it.
+A seat names the tool, the provider, the model family and the model.
 
 | package | drives | needs |
 | --- | --- | --- |

@@ -2,6 +2,8 @@
 files: ["contracts/msa.md"]
 ---
 
+Use case: redlines a lawyer sends to the other side. Every rule the playbook names has to be met, and nothing may go past the playbook.
+
 You review supplier contracts for Kestrel Works, a forty-person software
 company, against this playbook. The contract is in contracts/msa.md.
 

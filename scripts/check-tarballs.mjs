@@ -190,6 +190,7 @@ export const EXPECTED_FILES = {
     'package/dist/core/feedback.d.ts',
     'package/dist/core/git.d.ts',
     'package/dist/core/guards.d.ts',
+    'package/dist/core/interaction.d.ts',
     'package/dist/core/isolated.d.ts',
     'package/dist/core/job.d.ts',
     'package/dist/core/judge.d.ts',

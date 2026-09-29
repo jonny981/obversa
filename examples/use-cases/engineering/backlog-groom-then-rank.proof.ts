@@ -3,12 +3,13 @@ import { readFile } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-import { pass, revise, sourceDir, withExample } from '../proof-host.js';
+import { pass, recordEvents, shouldFix, sourceDir, withExample } from '../proof-host.js';
 
 const here = dirname(fileURLToPath(import.meta.url));
 const samples = sourceDir(here);
 const brief = await readFile(join(samples, 'briefs/backlog.md'), 'utf8');
 const raw = await readFile(join(samples, 'backlog/raw.md'), 'utf8');
+const judgeJson = await readFile(join(samples, 'judge.json'), 'utf8');
 
 const story = (title: string, from: string, sentence: string, ...checks: string[]): string =>
   `## ${title}\n\nFrom: ${from}\n\n${sentence}\n\n${checks.map((check) => `- ${check}`).join('\n')}\n\n`;
@@ -20,13 +21,14 @@ const threeStories = [
 ].join('');
 const fourStories = `${threeStories}${story('Dark mode', 'Dark mode pls', 'A user switches the app to a dark theme that follows the system setting by default.', 'Every screen has a dark variant with readable contrast', 'The choice is remembered per user')}`;
 
-// The reviewer sends the first split back: one raw ticket has no story. The
-// second split covers all four, the questions are written and accepted, and
-// the run stops at the owner.
+// The reviewer sends the first split back with one finding the judge says
+// is worth another round; the second split covers all four and the
+// reviewer's remaining note is taste, so the judge stops the loop. The
+// questions are written and accepted, and the run stops at the owner.
 await withExample({
   here,
   example: 'backlog-groom-then-rank',
-  files: { 'briefs/backlog.md': brief, 'backlog/raw.md': raw },
+  files: { 'briefs/backlog.md': brief, 'backlog/raw.md': raw, 'judge.json': judgeJson },
   seats: {
     claude: [
       { writes: { 'backlog/stories.md': threeStories }, reply: pass('three stories from four tickets') },
@@ -34,8 +36,8 @@ await withExample({
       { writes: { 'backlog/questions.md': '## Download an invoice as a PDF\n\n- Is the PDF also emailed to the client? Proposed: no, download only, for now.\n\n## Export trial sign-ups\n\n- Who may run it? Proposed: admins only.\n\n## Yearly export finishes for large accounts\n\n- no open questions\n\n## Dark mode\n\n- Follow the system setting or a manual switch? Proposed: both, system by default.\n' }, reply: pass('questions written with proposed answers') },
     ],
     codex: [
-      { reply: revise('one raw ticket has no story', 'the "Dark mode pls" ticket is not covered by any story') },
-      { reply: pass('every raw ticket has a story with checks') },
+      { reply: shouldFix('one raw ticket has no story', 'the "Dark mode pls" ticket is not covered by any story') },
+      { reply: shouldFix('one taste note', 'the PDF story could name the file size limit in its checks; nice to have') },
       { reply: pass('every story has its questions or says it has none') },
     ],
   },
@@ -51,12 +53,20 @@ await withExample({
   assert.match(await run.read('backlog/questions.md'), /no open questions/);
   assert.match(run.stdout, /tok/, 'the run prints its usage lines');
 
+  const judged = (await recordEvents(run, 'records/backlog-groom-then-rank.jsonl')).filter((event) => event.kind === 'refine:judge');
+  assert.deepEqual(judged.map((event) => event.reason), [
+    'the judge says another round is worth it (0.80)',
+    'the judge chose holds',
+  ]);
+
   console.log(JSON.stringify({
     status: 'pass',
     stages: 3,
     rawTickets: 4,
     stories: 4,
     reviewKickbacks: 1,
+    judge: ['continue', 'holds'],
+    cap: 3,
     pausedAt: 'rank',
     mode: run.mode,
   }, null, 2));

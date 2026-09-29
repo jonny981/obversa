@@ -1,13 +1,16 @@
 ---
 title: "Surfaces"
-description: "One question on a local web page. The run waits for the answer, then the page is gone."
+description: "Review work in a browser. Your choices, edits and comments become feedback for the agent."
 ---
 
-Put one question in front of a person in their browser, pause the run until
-they answer, and carry on with what they said. Use it when a step is a
-person's call: approve this change, pick one of two drafts, confirm the
-migration. The question itself is a [callback gate](/reviewing/callback-gates);
-a surface is the page it opens on.
+Read the work, mark what needs changing, and send it back. A surface lets
+you give an agent feedback through a web page: edit a title, comment on a
+passage, choose an audience, or compare alternatives. The page collects
+those actions and composes the prompt for the agent.
+
+A [callback gate](/reviewing/callback-gates) records the request and its
+answer. The surface is the page you interact with. You choose what it shows
+and what feedback it collects.
 
 ## Motivation
 
@@ -42,10 +45,62 @@ account.
   reach you. Complete the session with `verbatim: true` when an answer must
   arrive exactly as written, such as a review comment that quotes code.
 
-## Example
+## Refine together
 
-Most surfaces are opened by a workflow, not by hand. The step that waits is
-`approval`. Its question goes out through the run's callbacks client, and a
+Put `humanReview` on a loop's `review` field. Sending feedback runs the
+writing step again with your changes and notes. Approving the displayed
+version completes the loop. The writing step can be one agent or a loop
+that includes agent reviewers.
+
+```mermaid
+flowchart LR
+  work["Agent writes or revises"] --> review["You review in the browser"]
+  review -->|"Send feedback"| work
+  review -->|"Approve this version"| next["Workflow continues"]
+```
+
+The [human feedback example](https://github.com/jonny981/obversa/blob/main/examples/human-feedback.ts)
+lets you edit the title, pick an audience and leave comments on individual
+passages. It shows the composed prompt before you send it. Each revision
+opens another review:
+
+```ts examples/human-feedback/workflow.ts (excerpt)
+    review: humanReview('editor', {
+      question: 'What would you change before this is ready?',
+      input: (ctx) => JSON.parse(String(ctx.lastOutcome?.data)),
+      interaction: { id: 'proposal-review', responseSchema, answer },
+    }),
+```
+
+`input` supplies the work being reviewed. `answer` opens the page with
+`runSurface` and returns its result. The result keeps both the structured
+`feedback` and its composed `prompt`. The writer uses `consumeFeedback: true`
+to receive them on its next turn.
+
+Human review adds a required `decision`: `changes-requested` or `approved`.
+You are approving this version. A model passing its review does not approve
+it for you. Neither does reaching the round limit, cancelling or timing out.
+Without an answer, the workflow pauses. Resume it to reopen the pending review.
+
+Run the example from a source checkout with a signed-in Codex CLI and
+`OBVERSA_MODEL` set to the model you want:
+
+```bash
+pnpm exec tsx examples/human-feedback.ts
+```
+
+Add `--resume` to continue its recorded run. The offline proof scripts the
+model replies and sends two rounds of feedback through real HTTP sessions
+before approving the third draft:
+
+```bash
+pnpm example:human-feedback
+```
+
+## Simple approval
+
+For a yes or no with a note, use `approval`. Its question goes out through
+the run's callbacks client, and a
 router can open a surface to put it in front of a person. This one answers
 in place, so it runs offline:
 

@@ -43,7 +43,8 @@ import { mergeLock, mergeSynthesis } from './merge.js';
 import type { EnvHandle } from '../env/environment.js';
 import { LoopError } from './errors.js';
 import { revisionFromOutcome } from './feedback.js';
-import { askJudge, countBySeverity, hasBlockFinding, isJudge, type JudgeRound, type JudgeState } from './judge.js';
+import { consultJudge, countBySeverity, hasBlockFinding, isJudge, type JudgeRound, type JudgeState } from './judge.js';
+import { checkpointInteraction, interactionDeclaration, interactionIdentity, jsonSnapshot, outcomeSnapshot, savedInteraction, type InteractionResponse } from './interaction.js';
 import { DEFAULT_FANOUT_CONCURRENCY } from './concurrency.js';
 
 /** Sanitise a name into a git-ref-safe slug. */
@@ -181,7 +182,7 @@ export function dag(config: DagConfig): Job {
     && (perTargetBudget || maxKickbacks > 0);
   // Every round a target has been asked to redo work, kept only for a judge's
   // own state, a plain numeric budget never needs this history.
-  const judgeHistory = new Map<string, JudgeRound[]>();
+  const identity = interactionIdentity(config);
 
   // Static graph relations for routing cross-stage feedback (kickback). All pure
   // functions of the declared `needs` edges, computed once. `dependents` is the
@@ -222,15 +223,20 @@ export function dag(config: DagConfig): Job {
     const path = [...parent.path, config.name];
     const depth = parent.depth + 1;
     const ts = () => Date.now();
-    const targetCounts = new Map<string, number>();
+    const checkpointPath = [...path, '@judge-kickback'];
+    const saved = savedInteraction(parent, checkpointPath, identity);
+    let pending = saved?.pending as unknown as { from: string; count: number; state: JudgeState } | undefined;
+    const targetCounts = new Map<string, number>(Object.entries(saved?.targetCounts ?? {}) as [string, number][]);
+    const judgeHistory = new Map<string, JudgeRound[]>(Object.entries(saved?.history ?? {}) as [string, JudgeRound[]][]);
+    const productFeedback = new Map<string, readonly InteractionResponse[]>(Object.entries(saved?.productFeedback ?? {}) as unknown as [string, InteractionResponse[]][]);
     parent.emit({ kind: 'dag:start', ts: ts(), path, depth, nodes: names });
 
     const limit = pLimit(limitN);
-    const results = new Map<string, Outcome>();
-    const memo = new Map<string, Promise<Outcome>>();
+    const results = new Map<string, Outcome>(Object.entries(saved?.results ?? {}) as unknown as [string, Outcome][]);
+    const memo = new Map<string, Promise<Outcome>>([...results].map(([name, outcome]) => [name, Promise.resolve(outcome)]));
     // How many times each node has run (1 on the first pass, +1 per kickback
     // re-run). Stamped onto its dag:node events so records can tell rounds apart.
-    const attempts = new Map<string, number>();
+    const attempts = new Map<string, number>(Object.entries(saved?.attempts ?? {}) as [string, number][]);
     let stopped = false;
     // When a node is kicked back to, the reason rides into its next run as
     // `lastReview` — the same channel a loop's failed `review` uses, so the next
@@ -536,8 +542,8 @@ export function dag(config: DagConfig): Job {
     // provably terminates. An omitted budget or numeric zero keeps the default
     // single-pass path; a target map still records rejected requests at zero.
     if (routeKickbacks) {
-      let used = 0;
-      const rejected = new Set<string>();
+      let used = Number(saved?.used ?? 0);
+      const rejected = new Set<string>((saved?.rejected ?? []) as string[]);
       const emitKickback = (
         from: string,
         to: string,
@@ -577,7 +583,7 @@ export function dag(config: DagConfig): Job {
         const request = revisionFromOutcome(results.get(from)!)!;
         const to = request.target!;
         const { reason } = request;
-        const count = (targetCounts.get(to) ?? 0) + 1;
+        const count = pending?.from === from ? pending.count : (targetCounts.get(to) ?? 0) + 1;
         targetCounts.set(to, count);
         const limit = targetLimit(to);
 
@@ -607,20 +613,63 @@ export function dag(config: DagConfig): Job {
         let effectiveReason = reason;
         if (cfgJudge !== undefined && withinBudget && !hasBlockFinding(requestFindings)) {
           const history = judgeHistory.get(to) ?? [];
-          const state: JudgeState = {
+          const state: JudgeState = pending?.from === from ? pending.state : {
+            ...(productFeedback.has(to) ? { productFeedback: productFeedback.get(to) } : {}),
             latestFindings: requestFindings,
             rounds: history,
             round: count,
             cap: cfgJudge.cap,
           };
-          const { decision } = await askJudge(cfgJudge, state, parent, path);
+          const result = await consultJudge(cfgJudge, state, parent, path, {
+            identity: interactionIdentity({ identity, from, to }), pending: pending?.from === from,
+            save: (questionState) => checkpointInteraction(parent, checkpointPath, identity, jsonSnapshot({
+              pending: { from, count, state: questionState },
+              results: Object.fromEntries([...results].map(([name, outcome]) => [name, outcomeSnapshot(outcome)])),
+              attempts: Object.fromEntries(attempts), targetCounts: Object.fromEntries(targetCounts),
+              history: Object.fromEntries(judgeHistory), productFeedback: Object.fromEntries(productFeedback), used, rejected: [...rejected],
+            })),
+          });
+          if ('paused' in result) { record(from, result.paused, 'done'); break; }
+          checkpointInteraction(parent, checkpointPath, identity, null);
+          pending = undefined;
+          productFeedback.set(to, result.state.productFeedback ?? []);
+          const { decision } = result;
           judgeHistory.set(to, [
             ...history,
             { round: count, findings: requestFindings, counts: countBySeverity(requestFindings) },
           ]);
           if (!decision.again) {
-            rejected.add(from);
             emitKickback(from, to, `${reason} (${decision.reason})`, false, count, limit, decision.reason);
+            if (decision.stop === 'ship') {
+              // Holds or over-polishing: the work stands. `from`'s own
+              // failure is replaced with a pass carrying the judge's reason,
+              // and everything downstream of it (blocked by that failure in
+              // the wave that already ran) gets to run fresh against it.
+              const shipped = record(from, {
+                status: 'pass',
+                confidence: results.get(from)!.confidence,
+                summary: decision.reason,
+                data: results.get(from)!.data,
+              }, 'done');
+              // `memo` holds the settled promise every dependant already
+              // awaits or will await; without this, `from`'s stale failing
+              // promise still answers for it and nothing downstream unblocks.
+              memo.set(from, Promise.resolve(shipped));
+              const unblocked = dirtyFrom(from);
+              unblocked.delete(from);
+              for (const d of unblocked) {
+                memo.delete(d);
+                results.delete(d);
+                rejected.delete(d);
+              }
+              stopped = false;
+              await Promise.all(names.map(run));
+              continue;
+            }
+            // not_converging (or a caller-supplied question set with no
+            // stop kind): another round will not fix it, so `from`'s own
+            // failure stands, same as a plain numeric budget running out.
+            rejected.add(from);
             continue;
           }
           effectiveReason = `${reason} (${decision.reason})`;
@@ -715,7 +764,7 @@ export function dag(config: DagConfig): Job {
     return outcome;
   };
 
-  return setMeta(job, {
+  return interactionDeclaration(setMeta(job, {
     kind: 'dag',
     name: config.name,
     ...(config.maxKickbacks !== undefined
@@ -738,7 +787,7 @@ export function dag(config: DagConfig): Job {
         job: jobMeta(nodeJob),
       };
     }),
-  });
+  }), config);
 }
 
 /** Run jobs strictly in order; stop at the first non-pass. Sugar over `dag`. */

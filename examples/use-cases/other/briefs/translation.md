@@ -2,6 +2,8 @@
 files: ["source/article.md", "glossary/en-fr.md"]
 ---
 
+Use case: a product update read once by a customer in France. It has to read as French written for them, and keep every glossary term.
+
 Translate source/article.md, a product update from Ledgerline, into French
 for freelancers in France. Warm, direct, "vous". Keep the paragraphs.
 Render every term in glossary/en-fr.md exactly as the glossary says, even

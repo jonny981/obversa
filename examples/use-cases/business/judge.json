@@ -1,0 +1,8 @@
+[
+  {
+    "holds": { "type": "noul", "noul": 0.9 },
+    "worth_doing": { "type": "noul", "noul": 0.2 },
+    "worth_another_round": { "type": "noul", "noul": 0.1 },
+    "stop_reason": { "type": "choice", "choice": "holds", "confidence": 0.8 }
+  }
+]

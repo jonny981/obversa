@@ -195,7 +195,7 @@ export async function bindRun({ definition, scratchDirectory }) {
         if (input.crashOnce && (await readFile(join(scratchDirectory, `${id}.started`), 'utf8')).trim().split('\n').length === 1) {
           process.kill(process.pid, 'SIGKILL');
         }
-        if (input.delayMs) await delay(input.delayMs, undefined, { signal });
+        if (input.delayMs && (input.delayNode === undefined || input.delayNode === id)) await delay(input.delayMs, undefined, { signal });
         if (input.reportWorkerEnvironment) {
           return { node: id, value: {
             parentSecret: process.env.OBVERSA_TEST_PARENT_SECRET ?? null,

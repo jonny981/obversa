@@ -20,7 +20,7 @@ import type { Memory, TeamSeat } from '@obversa/api';
 import type { LoopError } from './errors.js';
 import type { Budget } from './budget.js';
 import type { EnvHandle, Environment } from '../env/environment.js';
-import type { JsonValue, RunBrief } from '../graph/value.js';
+import type { JsonObject, JsonValue, RunBrief } from '../graph/value.js';
 import type {
   CallbackEvent,
   ClaimResult,
@@ -28,6 +28,19 @@ import type {
   SubmitResult,
 } from '../callback/client.js';
 import type { CallbackRequest } from '../callback/gate.js';
+
+export type InteractionResponse = JsonObject & {
+  readonly feedback: JsonValue;
+  readonly prompt: string;
+  readonly decision?: 'approved' | 'changes-requested';
+}
+
+export interface InteractionBinding {
+  readonly id: string;
+  readonly responseSchema: JsonObject;
+  /** Return no answer when the page is cancelled, interrupted or times out. */
+  readonly answer?: (request: CallbackRequest, signal: AbortSignal) => Promise<InteractionResponse | undefined>;
+}
 
 /**
  * The client a run's questions go through: the in-memory `CallbackClient`,
@@ -100,6 +113,16 @@ export interface Outcome {
    * `revisionRequest({ target, findings })` or `kickback(to, reason)`.
    */
   revision?: RevisionRequest;
+}
+
+export type RecordedStage =
+  | { readonly kind: 'interrupted'; readonly startLine: number }
+  | { readonly kind: 'completed'; readonly outcome: Outcome };
+
+export interface ResumedStageRecords {
+  readonly interactions: ReadonlyMap<string, { identity: string; workspace: string; data: JsonObject }>;
+  readonly anchors: ReadonlyMap<string, { readonly identity: string; readonly workspace: string; readonly recordId: string }>;
+  readonly stages: ReadonlyMap<string, RecordedStage>;
 }
 
 export type LogLevel = 'debug' | 'info' | 'warn' | 'error';
@@ -201,6 +224,8 @@ export interface JobContext {
    * `run` to keep questions across runs.
    */
   readonly callbacks?: RunCallbacks;
+  /** @internal Save enclosing work before a deliberate interactive pause. */
+  readonly interactionCheckpoint?: () => void;
   /** Wait for an outside answer, or return paused (the default). */
   readonly onCallback?: 'wait' | 'exit';
   /** Where this job's code lives — the working dir and branch (the substrate). */
@@ -481,6 +506,7 @@ export interface Judge {
   readonly seat: TeamSeat;
   readonly cap: number;
   readonly questions: JudgeQuestions;
+  readonly interaction?: InteractionBinding;
 }
 
 export type KickbackBudget = number | Readonly<Record<string, number | Judge>>;
@@ -779,6 +805,14 @@ export type LoopEvent =
       path: string[];
       answers: Readonly<Record<string, JudgeAnswer>>;
       reason: string;
+    }
+  | {
+      kind: 'interaction:checkpoint';
+      ts: number;
+      path: string[];
+      identity: string;
+      workspace: string;
+      data: import('../graph/value.js').JsonObject | null;
     }
   | {
       kind: 'log';

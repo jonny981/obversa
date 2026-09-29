@@ -1,16 +1,16 @@
 ---
-title: "A Review Panel with a Threshold"
-sidebarTitle: "Review Panel"
-description: "Several models review at once, and the change passes when enough of them accept."
+title: "Ask a Panel"
+description: "Several models review the same work; you choose how many must accept."
 ---
 
-Ask several reviewers at once and decide how many have to say yes. Use it
-when one opinion isn't enough: a change that touches money, a migration, a
-public API. When one reviewer will do, use
-[a writer and a reviewer](/patterns/writer-and-reviewer). Each reviewer is
-an LLM-as-judge over the change, and the panel with its threshold is what
-some people call an eval loop: the judges decide whether the writer runs
-again.
+Ask several models to review the same work, then choose how many must
+agree before it can continue. Use it for a research conclusion, a plan, or
+a change where one review isn't enough.
+
+Each reviewer gives its own answer. The result keeps those answers,
+including dissent when enough reviewers accept. If the panel rejects the
+work, the writer gets its notes for another attempt. For a review by a
+single model, [get a second opinion](/patterns/writer-and-reviewer).
 
 ## Shape
 

@@ -1,6 +1,6 @@
 {
   "name": "@obversa/engine-grok-cli",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "description": "Run one isolated engine attempt through a fresh Grok CLI process.",
   "author": "Jonny Neill <jonnyneill@hotmail.com>",
   "type": "module",

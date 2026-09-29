@@ -125,25 +125,25 @@ is.
 
 | Package | Purpose | Version |
 | --- | --- | --- |
-| `@obversa/obversa` | Installs every package below except Jev | `0.1.1` |
-| `@obversa/runtime` | Builds and runs workflows as graphs, team conversations or a review loop | `0.2.0` |
-| `@obversa/runner` | Supervises stored graph runs in bounded workers | `0.2.0` |
-| `@obversa/api` | Defines every contract: engine, memory, graph, events, artifacts, workspace, callbacks, proofs and run definitions, with their validators | `0.2.0` |
-| `@obversa/core` | Runs one child process with a deadline and a readable result | `0.2.0` |
-| `@obversa/memory-simple` | Stores memory in one process | `0.1.1` |
-| `@obversa/memory-git` | Stores memory in private Git references, and writes a stage's reasoning into its commit | `0.1.1` |
-| `@obversa/memory-markdown` | Selects ranked passages from local Markdown files | `0.1.1` |
+| `@obversa/obversa` | Installs every package below except Jev | `0.1.2` |
+| `@obversa/runtime` | Builds and runs workflows as graphs, team conversations or a review loop | `0.2.1` |
+| `@obversa/runner` | Supervises stored graph runs in bounded workers | `0.2.1` |
+| `@obversa/api` | Defines every contract: engine, memory, graph, events, artifacts, workspace, callbacks, proofs and run definitions, with their validators | `0.2.1` |
+| `@obversa/core` | Runs one child process with a deadline and a readable result | `0.2.1` |
+| `@obversa/memory-simple` | Stores memory in one process | `0.1.2` |
+| `@obversa/memory-git` | Stores memory in private Git references, and writes a stage's reasoning into its commit | `0.1.2` |
+| `@obversa/memory-markdown` | Selects ranked passages from local Markdown files | `0.1.2` |
 | `@obversa/notify-webhook` | Posts one message per interesting run event to a URL you supply | `0.1.0` |
-| `@obversa/builtin-workflows` | Three ready-made workflows | `0.1.1` |
-| `@obversa/surface` | Runs one local surface session | `0.1.0` |
-| `@obversa/surface-diff` | Opens a git diff for inline review | `0.1.0` |
-| `@obversa/engine-claude-agent-sdk` | Runs one engine attempt through the Agent SDK | `0.1.1` |
-| `@obversa/engine-anthropic-api` | Runs one engine attempt through the Anthropic API | `0.1.1` |
-| `@obversa/engine-claude-cli` | Runs one engine attempt through the Claude CLI | `0.1.1` |
-| `@obversa/engine-codex-cli` | Runs one engine attempt through the Codex CLI | `0.1.1` |
-| `@obversa/engine-grok-cli` | Runs one engine attempt through the Grok CLI | `0.1.1` |
-| `@obversa/engine-opencode-cli` | Runs one engine attempt through the OpenCode CLI | `0.1.1` |
-| `@obversa/engine-jev-api` | Answers decision questions over recorded run state through the Jev API | `0.1.1` |
+| `@obversa/builtin-workflows` | Three ready-made workflows | `0.1.2` |
+| `@obversa/surface` | Runs one local surface session | `0.1.1` |
+| `@obversa/surface-diff` | Opens a git diff for inline review | `0.1.1` |
+| `@obversa/engine-claude-agent-sdk` | Runs one engine attempt through the Agent SDK | `0.1.2` |
+| `@obversa/engine-anthropic-api` | Runs one engine attempt through the Anthropic API | `0.1.2` |
+| `@obversa/engine-claude-cli` | Runs one engine attempt through the Claude CLI | `0.1.2` |
+| `@obversa/engine-codex-cli` | Runs one engine attempt through the Codex CLI | `0.1.2` |
+| `@obversa/engine-grok-cli` | Runs one engine attempt through the Grok CLI | `0.1.2` |
+| `@obversa/engine-opencode-cli` | Runs one engine attempt through the OpenCode CLI | `0.1.2` |
+| `@obversa/engine-jev-api` | Answers decision questions over recorded run state through the Jev API | `0.1.2` |
 
 The api, core, runtime and runner packages share one version. The runtime
 never imports an engine or a memory adapter: you pass the ones you want when

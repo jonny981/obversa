@@ -1,15 +1,15 @@
 ---
-title: "Approve Exact File Bytes"
-sidebarTitle: "Safe Change"
-description: "Approve the exact bytes a change will write, back the target up first, and pause when the readback differs."
+title: "Check Before Acting"
+description: "Approve exact file bytes, back up the target, and check what was written."
 ---
 
-Approve the exact bytes a change will write, and let nothing else through.
-Use it when a step edits files whose contents are facts you can't lose: a
-migration of records, a merge of protected sources into a destination. When
-a person's yes is enough on its own, use [a person decides](/patterns/approval);
-this pattern binds that yes to the proposed output, so a changed byte makes
-the old approval void.
+Let a person approve the file you intend to write, then check that the
+saved file matches. Use it when changing records or other files whose
+contents you need to protect.
+
+The example ties approval to the proposed bytes, backs up the destination,
+and pauses if the saved file differs. When the decision doesn't need a
+check of the exact file contents, [ask a person](/patterns/approval).
 
 ## Shape
 

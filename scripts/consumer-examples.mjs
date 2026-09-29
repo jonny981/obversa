@@ -51,6 +51,11 @@ export const CONSUMER_EXAMPLES = Object.freeze([
   'tournament.ts',
   'judge-stops-the-loop.ts',
   'judge-stops-the-loop.proof.ts',
+  'human-feedback.ts',
+  'human-feedback.proof.ts',
+  'human-feedback/workflow.ts',
+  'human-feedback/surface.ts',
+  'human-feedback/feedback.ts',
   'teams/writer-reviewer-pair.ts',
   'teams/writer-reviewer-pair.proof.ts',
   'teams/threshold-panel.ts',
@@ -117,11 +122,11 @@ export const REAL_ENGINE_EXAMPLES = Object.freeze([
 ]);
 
 /**
- * Example files that run no engine and are run by their proof against a
- * stand-in for a command they call, so no `example:*` script runs the file
- * itself. The page-shape check counts a file here as run, and each entry
- * says which proof runs it and what stands in.
+ * Example files exercised by their proof with a scripted external boundary,
+ * so no `example:*` script runs the file itself. The page-shape check counts
+ * a file here as run; each entry names the proof and what stands in.
  */
 export const PROOF_RUN_EXAMPLES = Object.freeze([
+  { file: 'human-feedback/workflow.ts', why: 'human-feedback.proof.ts runs this workflow with scripted model replies and real callback and HTTP surface sessions' },
   { file: 'use-cases/ops/approve-the-exact-payload.ts', why: 'runs no engine; approve-the-exact-payload.proof.ts runs it offline with a stand-in for curl' },
 ]);

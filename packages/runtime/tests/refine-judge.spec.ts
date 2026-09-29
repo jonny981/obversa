@@ -164,11 +164,31 @@ describe('refine: judge()', () => {
       }],
       cap: 3,
     });
-    await runTeam(job, events);
+    const result = await runTeam(job, events);
     const judgeEvents = events.filter((e): e is Extract<LoopEvent, { kind: 'refine:judge' }> => e.kind === 'refine:judge');
     expect(judgeEvents).toHaveLength(1);
     expect(judgeEvents[0]!.answers.stop_reason).toEqual({ choice: 'not_converging' });
     expect(judgeEvents[0]!.reason).toBe('the judge chose not_converging');
+    // F141: not_converging does not ship the review's rejection as a pass.
+    // Another round would not fix it, so the stage stops there and fails.
+    expect(result.outcome.status).toBe('fail');
+  });
+
+  it('ships on holds, ships on over_polishing, fails on not_converging: the stage stops instead of trying again', async () => {
+    for (const [choice, expectedStatus] of [
+      ['holds', 'pass'],
+      ['over_polishing', 'pass'],
+      ['not_converging', 'fail'],
+    ] as const) {
+      const events: LoopEvent[] = [];
+      const { job } = scriptedTeam({
+        reviewerReplies: [REVISE()],
+        judgeReplies: [{ stop_reason: { choice } }],
+        cap: 5,
+      });
+      const result = await runTeam(job, events);
+      expect(result.outcome.status, `stop_reason: ${choice}`).toBe(expectedStatus);
+    }
   });
 
   it('uses the default question set (stopQuestions) reaching the judge verbatim when none is given', async () => {

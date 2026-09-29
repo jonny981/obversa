@@ -256,7 +256,10 @@ export async function run(
       thin: options.recordTo === 'auto',
       ...(resumed === undefined ? {} : { resume: true }),
     }));
-    if (resumed !== undefined && resumed.outcomes.anchors.size > 0) {
+    if (resumed !== undefined) {
+      if (resumed.outcomes.interactions.size > 0) {
+        for (const receipt of resumed.receipts) budget?.addUsage(receipt);
+      }
       initialState[RESUME_STAGE_OUTCOMES] = resumed.outcomes;
       initialState[RESUME_RECORDED_USAGE] = resumed.usage;
     }

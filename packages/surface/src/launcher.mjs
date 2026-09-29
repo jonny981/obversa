@@ -31,21 +31,29 @@ function writeFrame(stdout, text) {
  *   open?: boolean,
  *   stdout?: import("node:stream").Writable | { write(text: string): unknown },
  *   ready?: (info: { url: string, origin: string, port: number }) => void,
+ *   signal?: AbortSignal,
+ *   api?: NonNullable<Parameters<typeof startSurface>[0]>['api'],
  * } & Record<string, any>} options
  */
-export async function runSurface({ open = true, stdout = process.stdout, ready, ...surfaceOptions }) {
+export async function runSurface({ open = true, stdout = process.stdout, ready, signal, ...surfaceOptions }) {
   const surface = await startSurface(surfaceOptions);
+  const abort = () => surface.interrupt("caller abort");
+  signal?.addEventListener("abort", abort, { once: true });
+  if (signal?.aborted) abort();
   const handlers = ["SIGINT", "SIGTERM"].map((signal) => {
     const handler = () => surface.interrupt(signal);
     process.on(signal, handler);
     return /** @type {[NodeJS.Signals, () => void]} */ ([signal, handler]);
   });
-  const release = () => { for (const [signal, handler] of handlers.splice(0)) process.off(signal, handler); };
+  const release = () => {
+    signal?.removeEventListener("abort", abort);
+    for (const [signal, handler] of handlers.splice(0)) process.off(signal, handler);
+  };
   try {
     // The placement command receives the one-time launch URL, never the
     // token-bearing page URL: a process argument is readable by any local
     // process, and the launch code is single-use and short-lived.
-    const placement = open
+    const placement = open && !signal?.aborted
       ? await openSurfaceUrl(surface.launchUrl)
       : { opened: false, via: "disabled" };
     ready?.({ url: surface.url, origin: surface.origin, port: surface.port });

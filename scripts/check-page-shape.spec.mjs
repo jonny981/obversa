@@ -74,6 +74,24 @@ test('the installation page is allowed to be commands, and it is named rather th
     (failures) => assert.deepEqual(failures, []));
 });
 
+test('the product comparison uses a table instead of a code example', () => {
+  const table = '| Work | Obversa | Other |\n| --- | --- | --- |\n| Run | Library | Server |\n';
+  run({ 'compare/index.mdx': page('Compare agent workflows', 'Choose how to organise the work.\n\n' + table) },
+    (failures) => assert.deepEqual(failures, []));
+});
+
+test('the comparison still needs its table and other pages still need code', () => {
+  const table = '| Work | Obversa | Other |\n| --- | --- | --- |\n| Run | Library | Server |\n';
+  run({
+    'compare/index.mdx': page('Compare agent workflows', 'Choose how to organise the work.\n'),
+    'concepts/workflows.mdx': page('Workflows', 'Run these steps.\n\n' + table),
+  }, (failures) => {
+    assert.equal(failures.length, 2);
+    assert.ok(failures.some((failure) => failure.startsWith('compare/index.mdx: no example')));
+    assert.ok(failures.some((failure) => failure.startsWith('concepts/workflows.mdx: no example')));
+  });
+});
+
 test('an opening that defines the title is reported', () => {
   run({ 'a.mdx': page('Forge helper', 'A forge is a code host such as GitHub.\n\n```ts\nconst x = 1;\n```\n') },
     (failures) => {

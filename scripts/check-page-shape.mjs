@@ -342,7 +342,9 @@ export function checkPageShape(root, { allowNoExample = new Set(), debt = buildD
     const name = path.slice(join(root, 'docs', 'public').length + 1);
     const text = readFileSync(path, 'utf8');
     const langs = [...text.matchAll(/^\s*```([a-zA-Z0-9]*)/gm)].map((m) => m[1]);
-    const exempt = COMMANDS_ARE_THE_CONTENT.has(name) || allowNoExample.has(name) || forgiven(name, 'example');
+    // The comparison teaches through its table, rather than a code example.
+    const comparison = name === 'compare/index.mdx' && /^\|.+\|\r?\n\|(?:\s*:?-{3,}:?\s*\|){2,}\r?\n\|.+\|/m.test(text);
+    const exempt = comparison || COMMANDS_ARE_THE_CONTENT.has(name) || allowNoExample.has(name) || forgiven(name, 'example');
     if (!langs.some((lang) => EXAMPLE.has(lang)) && !exempt) {
       failures.push(langs.length
         ? `${name}: its only blocks are commands, so it never shows the reader the thing it tells them to run`
@@ -380,7 +382,7 @@ if (process.argv[1] && import.meta.url === new URL(`file://${process.argv[1]}`).
   } else {
     const owed = KNOWN_DEBT.length;
     console.log(owed
-      ? `Every documentation page carries an example and opens with what a reader can do, apart from ${owed} named in the list, each with the stage that owns its fix.`
-      : 'Every documentation page carries an example and opens with what a reader can do.');
+      ? `Documentation page checks passed, with ${owed} named exemptions, each with the stage that owns its fix.`
+      : 'Documentation page checks passed.');
   }
 }

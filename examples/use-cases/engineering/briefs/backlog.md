@@ -2,6 +2,8 @@
 files: ["backlog/raw.md"]
 ---
 
+Use case: stories a product owner ranks and a developer picks up. Every raw ticket has to be covered, and every acceptance check has to be testable.
+
 You groom the backlog for Ledgerline, a small invoicing app for freelancers.
 The raw tickets are in backlog/raw.md, one per heading, as they arrived.
 

@@ -18,7 +18,7 @@ import { realpathSync } from "node:fs";
 import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 import { RELEASE_REGISTRY, gitBin, listWorkspacePackages, readAllowlist } from "./check-publish-allowlist.mjs";
-import { readPublishedVersion } from "./read-published-version.mjs";
+import { readPublishedVersionWithRetry } from "./read-published-version.mjs";
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), "..");
 
@@ -28,7 +28,7 @@ function git(run, cwd, ...args) {
 }
 
 // A retried publish can skip existing versions, so read the registry, not its log.
-export async function tagPublished({ registry = RELEASE_REGISTRY, root = ROOT, allowlist = readAllowlist(), run = spawnSync, remote = "origin" } = {}) {
+export async function tagPublished({ registry = RELEASE_REGISTRY, root = ROOT, allowlist = readAllowlist(), run = spawnSync, remote = "origin", retry } = {}) {
   const byName = new Map(listWorkspacePackages(root).map((p) => [p.name, p]));
   const problems = [];
   const pushed = [];
@@ -39,7 +39,7 @@ export async function tagPublished({ registry = RELEASE_REGISTRY, root = ROOT, a
       continue;
     }
     const tag = `${name}@${p.version}`;
-    const { published, reason } = await readPublishedVersion(registry, name, p.version);
+    const { published, reason } = await readPublishedVersionWithRetry(registry, name, p.version, retry);
     if (!published) {
       problems.push(`${tag}: not on the registry (${reason}); there is nothing to push`);
       continue;

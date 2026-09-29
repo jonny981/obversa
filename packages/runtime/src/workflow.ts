@@ -5,17 +5,18 @@ import { readFileSync } from 'node:fs';
 import { readFile, stat } from 'node:fs/promises';
 import { join } from 'node:path';
 
-import { agentJob, RECORDED_ENGINE_USAGE, type RecordedEngineUsage } from './core/job.js';
+import { agentJob, fnJob, RECORDED_ENGINE_USAGE, type RecordedEngineUsage } from './core/job.js';
 import { approval, delegateNodeJob } from './core/approval-job.js';
 import { commandJob, predicate } from './core/condition.js';
 import { copyJobMeta } from './core/describe.js';
 import { dag } from './core/dag.js';
 import { LoopError } from './core/errors.js';
 import { loop } from './core/loop.js';
-import { reviewPanel, revisionFromOutcome } from './core/feedback.js';
-import { askJudge, countBySeverity, hasBlockFinding, isJudge, type JudgeRound, type JudgeState } from './core/judge.js';
+import { kickback, reviewPanel, revisionFromOutcome } from './core/feedback.js';
+import { consultJudge, countBySeverity, hasBlockFinding, isJudge, type JudgeRound, type JudgeState } from './core/judge.js';
 import type { Job, JobContext, Judge, Outcome, ConditionInput } from './core/types.js';
 import { RESUME_RECORDED_USAGE, RESUME_STAGE_OUTCOMES } from './runtime/runner.js';
+import { checkpointInteraction, interactionDeclaration, hasSavedInteraction, humanReview, interactionIdentity, jsonSnapshot, outcomeSnapshot, requestInteraction, savedInteraction, type InteractionBinding, type InteractionResponse } from './core/interaction.js';
 import type { ResumedStageRecords } from './runtime/persist.js';
 
 import { outcomeFromAgentText } from './workflow-agent-response.js';
@@ -36,6 +37,7 @@ export interface BriefSource {
 export interface PersonRole {
   readonly kind: 'person';
   readonly question: string;
+  readonly interaction?: InteractionBinding;
 }
 
 export type WorkflowRole = TeamSeat | readonly TeamSeat[] | PersonRole;
@@ -61,10 +63,11 @@ export interface WorkflowStageBase {
 
 export type WorkflowStage = WorkflowStageBase & {
 } & (
-  | { readonly agent: string; readonly reviewedBy?: string; readonly run?: never; readonly panel?: never; readonly input?: never; }
-  | { readonly run: string | readonly string[]; readonly agent?: never; readonly panel?: never; readonly input?: never; }
-  | { readonly panel: string; readonly agree?: number; readonly agent?: never; readonly run?: never; readonly input?: never; }
-  | { readonly input: string; readonly agent?: never; readonly run?: never; readonly panel?: never; }
+  | { readonly agent: string; readonly reviewedBy?: string; readonly run?: never; readonly panel?: never; readonly input?: never; readonly fn?: never; }
+  | { readonly run: string | readonly string[]; readonly agent?: never; readonly panel?: never; readonly input?: never; readonly fn?: never; }
+  | { readonly panel: string; readonly agree?: number; readonly agent?: never; readonly run?: never; readonly input?: never; readonly fn?: never; }
+  | { readonly input: string; readonly agent?: never; readonly run?: never; readonly panel?: never; readonly fn?: never; }
+  | { readonly fn: Job; readonly agent?: never; readonly run?: never; readonly panel?: never; readonly input?: never; }
 );
 
 export interface NamedStage {
@@ -154,8 +157,8 @@ export function briefFromFile(path: string | URL): BriefSource {
   return parseFrontMatter(readFileSync(path, 'utf8'));
 }
 
-export function person(question: string): PersonRole {
-  return { kind: 'person', question: text(question, 'person question') };
+export function person(question: string, options: { interaction?: InteractionBinding } = {}): PersonRole {
+  return { kind: 'person', question: text(question, 'person question'), ...options };
 }
 
 export function stage(name: string, config: WorkflowStage): NamedStage {
@@ -404,6 +407,7 @@ function recordedFamilyGate(
     try {
       const all = recordedUsage(ctx);
       const beforeLength = all.length;
+      const resumingInteraction = hasSavedInteraction(ctx, ctx.path);
       const writerSide = (records: readonly RecordedEngineUsage[]) => records.filter(
         (record) => record.role === 'writer'
           && record.stage !== undefined
@@ -420,7 +424,7 @@ function recordedFamilyGate(
       const current = recordedUsage(ctx);
       const after = current.slice(beforeLength);
       const afterWriters = writerSide(after);
-      if (writerRunsInsidePanel && afterWriters.length === 0) {
+      if (writerRunsInsidePanel && afterWriters.length === 0 && !resumingInteraction) {
         throw new LoopError({
           code: 'BODY',
           phase: 'review',
@@ -428,7 +432,7 @@ function recordedFamilyGate(
         });
       }
       assertRecordedFamilies(afterWriters, reviewerDeclarations);
-      const reviewerSide = after.filter((record) => record.role === 'reviewer');
+      const reviewerSide = (resumingInteraction ? current : after).filter((record) => record.role === 'reviewer' && record.stage === panelStage);
       if (reviewerSide.length === 0) {
         throw new LoopError({
           code: 'BODY',
@@ -551,6 +555,33 @@ function guardedAgent(
   };
 }
 
+/**
+ * A plain function between the declarative stages: regular code, not
+ * another agent or command. Same write guards as `run:`; a fail with no
+ * revision of its own picks up `sendsBackTo` as its target, the way
+ * `commandJob`'s own `target` option does for `run:`.
+ */
+function guardedFn(fn: Job, named: NamedStage, declaredFiles: readonly string[]): Job {
+  const writes = writesOf(named.config);
+  const target = named.config.sendsBackTo;
+  const body: Job = fnJob(named.name, async (ctx) => {
+    const outcome = await fn(ctx);
+    if (outcome.status === 'fail' && target !== undefined && revisionFromOutcome(outcome)?.target === undefined) {
+      return kickback(target, outcome.summary ?? `${named.name} failed`, {
+        confidence: outcome.confidence,
+        data: outcome.data,
+        error: outcome.error,
+      });
+    }
+    return outcome;
+  });
+  const forbidden = declaredFiles.filter((file) => !writes.includes(file));
+  return async (ctx) => {
+    const required = writes.length ? requireNonEmptyFiles(named.name, body, ctx.workspace.dir, writes) : body;
+    return requireNoFiles(named.name, required, ctx.workspace.dir, forbidden, 'body')(ctx);
+  };
+}
+
 function unchangedNoteGuard(
   label: string,
   job: Job,
@@ -611,7 +642,11 @@ function judgedReview(brief: BriefSource, config: WorkflowStage, cfgJudge: Judge
   const file = writesOf(config)[0];
   const history: JudgeRound[] = [];
   let previousDraft: string | undefined;
+  let productFeedback: readonly InteractionResponse[] = [];
+  const identity = interactionIdentity({ brief, config, cfgJudge });
   return async (ctx) => {
+    const checkpointPath = [...ctx.path, '@judge-review'];
+    let saved = savedInteraction(ctx, checkpointPath, identity);
     let draft: string | undefined;
     let changedLines: number | undefined;
     if (file !== undefined) {
@@ -623,7 +658,13 @@ function judgedReview(brief: BriefSource, config: WorkflowStage, cfgJudge: Judge
       }
       previousDraft = draft;
     }
-    const panelOutcome: Outcome = await panel({
+    if (saved && (saved.state as unknown as JudgeState).draft !== draft) saved = undefined;
+    if (saved) {
+      history.splice(0, history.length, ...(saved.state as unknown as JudgeState).rounds);
+      productFeedback = (saved.state as unknown as JudgeState).productFeedback ?? [];
+      previousDraft = draft;
+    }
+    const panelOutcome: Outcome = saved ? saved.panel as unknown as Outcome : await panel({
       ...ctx,
       depth: ctx.depth + 1,
       path: [...ctx.path, 'review-panel'],
@@ -632,7 +673,8 @@ function judgedReview(brief: BriefSource, config: WorkflowStage, cfgJudge: Judge
     const findings = revisionFromOutcome(panelOutcome)?.findings ?? [];
     if (hasBlockFinding(findings)) return panelOutcome;
     const round = history.length + 1;
-    const state: JudgeState = {
+    const state: JudgeState = saved ? saved.state as unknown as JudgeState : {
+      ...(productFeedback.length ? { productFeedback } : {}),
       ...(useCase !== undefined ? { useCase } : {}),
       ...(file !== undefined ? { file } : {}),
       ...(draft !== undefined ? { draft } : {}),
@@ -641,7 +683,14 @@ function judgedReview(brief: BriefSource, config: WorkflowStage, cfgJudge: Judge
       round,
       cap: cfgJudge.cap,
     };
-    const { decision } = await askJudge(cfgJudge, state, ctx, ctx.path);
+    const result = await consultJudge(cfgJudge, state, ctx, ctx.path, {
+      identity, pending: saved !== undefined,
+      save: (questionState) => checkpointInteraction(ctx, checkpointPath, identity, jsonSnapshot({ state: questionState, panel: outcomeSnapshot(panelOutcome) })),
+    });
+    if ('paused' in result) return result.paused;
+    checkpointInteraction(ctx, checkpointPath, identity, null);
+    productFeedback = result.state.productFeedback ?? [];
+    const { decision } = result;
     history.push({
       round,
       findings,
@@ -649,6 +698,11 @@ function judgedReview(brief: BriefSource, config: WorkflowStage, cfgJudge: Judge
       ...(changedLines !== undefined ? { changedLines } : {}),
     });
     if (!decision.again) {
+      if (decision.stop === 'fail') {
+        // Not converging: another round will not fix it, so the stage stops
+        // here instead of trying again, and the review's own failure stands.
+        throw new LoopError({ code: 'VALIDATION', phase: 'review', path: ctx.path, message: decision.reason });
+      }
       return { status: 'pass', confidence: panelOutcome.confidence, summary: decision.reason, data: panelOutcome.data };
     }
     return { ...panelOutcome, summary: `${panelOutcome.summary} (${decision.reason})` };
@@ -673,6 +727,21 @@ function stageJob(
       ? guarded
       : unchangedNoteGuard(named.name, guarded, writes);
     if (config.reviewedBy === undefined) return job;
+    const reviewRole = role(roles, config.reviewedBy);
+    if (!Array.isArray(reviewRole) && 'kind' in reviewRole && reviewRole.kind === 'person') {
+      if (!reviewRole.interaction) throw new TypeError('a human reviewer needs an interaction binding');
+      const humanLoop = loop({
+        name: `${named.name}-review`, body: job, max: refineCap(refineOf(config)) + 1,
+        review: humanReview(named.name, {
+          question: reviewRole.question, interaction: reviewRole.interaction,
+          input: async (ctx) => Object.fromEntries(await Promise.all(writes.map(async (file) => [file, await readFile(join(ctx.workspace.dir, file), 'utf8')]))),
+        }),
+      });
+      return interactionDeclaration(copyJobMeta(async (ctx) => {
+        const outcome = await humanLoop(ctx);
+        return outcome.status === 'exhausted' ? { ...outcome, status: 'fail' as const } : outcome;
+      }, humanLoop), { humanLoop });
+    }
     const reviewers = panelRole(roles, config.reviewedBy);
     const panel = reviewerPanel(brief, named, reviewers, files, declaredFiles, undefined);
     const refine = refineOf(config);
@@ -740,9 +809,26 @@ function stageJob(
   }
   if ('input' in config && config.input !== undefined) {
     const personRole = inputRole(roles, config.input);
-    return approval(named.name, { question: personRole.question, target: config.sendsBackTo });
+    if (!personRole.interaction) return approval(named.name, { question: personRole.question, target: config.sendsBackTo });
+    return async (ctx) => {
+      const identity = interactionIdentity({ brief, named, personRole });
+      const checkpointPath = [...ctx.path, '@person-interaction'];
+      const input = jsonSnapshot({ requester: { path: ctx.path, identity }, material: brief });
+      const result = await requestInteraction(personRole.interaction!, personRole.question, input, {
+        ...ctx, interactionCheckpoint() {
+          ctx.interactionCheckpoint?.();
+          checkpointInteraction(ctx, checkpointPath, identity, input);
+        },
+      });
+      if ('paused' in result) return result.paused;
+      checkpointInteraction(ctx, checkpointPath, identity, null);
+      return { status: 'pass', summary: result.response.prompt, data: result.response };
+    };
   }
-  throw new TypeError(`stage ${named.name} must declare agent, run, panel or input`);
+  if ('fn' in config && config.fn !== undefined) {
+    return guardedFn(config.fn, named, declaredFiles);
+  }
+  throw new TypeError(`stage ${named.name} must declare agent, run, panel, input or fn`);
 }
 
 function workflowRecord(outcome: Outcome): WorkflowRecord {
@@ -778,23 +864,6 @@ function panelReviewFiles(stages: readonly NamedStage[], index: number): string[
       : writesOf(preceding.config);
 }
 
-/** A canonical, digestable view of a declared value: primitives pass
- * through, plain objects sort their keys, functions serialize as their
- * source, so a changed predicate changes the digest. */
-function canonicalForDigest(value: unknown): unknown {
-  if (typeof value === 'function') return `fn:${value.toString()}`;
-  if (Array.isArray(value)) return value.map(canonicalForDigest);
-  if (value !== null && typeof value === 'object') {
-    return Object.fromEntries(
-      Object.keys(value as Record<string, unknown>).sort().map((key) => [
-        key,
-        canonicalForDigest((value as Record<string, unknown>)[key]),
-      ]),
-    );
-  }
-  return value;
-}
-
 /** The workflow's resume identity: one digest over everything a change to
  * which means the recorded completions no longer describe this workflow.
  * Restart-from-the-top on any change is the honest default. The digest
@@ -809,7 +878,7 @@ function resumeIdentity(name: string, config: WorkflowConfig): string {
     brief: config.brief,
     stages: config.stages.map((named) => ({
       name: named.name,
-      config: canonicalForDigest(named.config),
+      config: interactionIdentity(named.config),
     })),
     roles: Object.fromEntries(Object.entries(config.roles).map(([key, value]) => [
       key,
@@ -854,6 +923,10 @@ function resumeGuard(job: Job, identity: string, label: string, retrySafe: boole
     const recorded = anchor?.identity === identity && anchor.workspace === ctx.workspace.dir
       ? resumed?.stages.get(ctx.path.join('/'))
       : undefined;
+    if (anchor?.identity === identity && anchor.workspace === ctx.workspace.dir && hasSavedInteraction(ctx, ctx.path)) {
+      restoreRecordedUsage(ctx);
+      return delegateNodeJob(ctx, guarded, job, ctx);
+    }
     if (ctx.graph?.attempt === 1 && recorded !== undefined) {
       if (recorded.kind === 'interrupted') {
         if (!retrySafe) {
@@ -885,7 +958,7 @@ function resumeGuard(job: Job, identity: string, label: string, retrySafe: boole
     }
     return delegateNodeJob(ctx, guarded, job, ctx);
   };
-  return guarded;
+  return interactionDeclaration(guarded, { identity, label, job });
 }
 
 async function reconcileInterrupted(
@@ -966,10 +1039,12 @@ export function workflow(name: string, config: WorkflowConfig): Job {
   for (const [index, named] of config.stages.entries()) {
     const stageConfig = named.config;
     if ('agent' in stageConfig && stageConfig.agent !== undefined && stageConfig.reviewedBy !== undefined) {
-      assertDistinctSeats([
+      const reviewer = role(config.roles, stageConfig.reviewedBy);
+      if (Array.isArray(reviewer)) assertDistinctSeats([
         seatRole(config.roles, stageConfig.agent),
         ...panelRole(config.roles, stageConfig.reviewedBy),
       ]);
+      else if (!('kind' in reviewer) || reviewer.kind !== 'person') throw new TypeError('reviewedBy must name a reviewer panel or person');
     }
     if ('panel' in stageConfig && stageConfig.panel !== undefined) {
       const preceding = precedingAgent(config.stages, index);

@@ -10,11 +10,11 @@ import { realpathSync } from "node:fs";
 import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 import { RELEASE_REGISTRY, listWorkspacePackages, readAllowlist } from "./check-publish-allowlist.mjs";
-import { readPublishedVersion } from "./read-published-version.mjs";
+import { readPublishedVersionWithRetry } from "./read-published-version.mjs";
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), "..");
 
-export async function verifyPublished({ registry = RELEASE_REGISTRY, root = ROOT, allowlist = readAllowlist() } = {}) {
+export async function verifyPublished({ registry = RELEASE_REGISTRY, root = ROOT, allowlist = readAllowlist(), retry } = {}) {
   const byName = new Map(listWorkspacePackages(root).map((p) => [p.name, p]));
   const problems = [];
   for (const name of allowlist) {
@@ -27,7 +27,7 @@ export async function verifyPublished({ registry = RELEASE_REGISTRY, root = ROOT
       problems.push(`${name}: the manifest has no version to verify`);
       continue;
     }
-    const { published, reason } = await readPublishedVersion(registry, name, p.version);
+    const { published, reason } = await readPublishedVersionWithRetry(registry, name, p.version, retry);
     if (!published) {
       problems.push(`${name}@${p.version}: not on the registry (${reason})`);
     }

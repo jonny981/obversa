@@ -1,15 +1,15 @@
 ---
-title: "A Writer and a Reviewer"
-sidebarTitle: "Writer and Reviewer"
-description: "One model writes, your test runs, and a model from another family reviews."
+title: "Get a Second Opinion"
+sidebarTitle: "Second Opinion"
+description: "A different model reviews the work and gives the writer notes to act on."
 ---
 
-Give one model a brief and a model from a different family the job of
-checking it. Use it when one reviewer is enough and the test command does
-most of the judging. When one opinion isn't enough, use
-[a review panel with a threshold](/patterns/review-panel). Anthropic calls
-this shape evaluator-optimizer: one model produces, another evaluates, and
-the producer runs again with the evaluation in hand.
+Let another model review a draft before you call it done. Use it when a
+second opinion can catch what the writer missed. The writer gets the notes
+and tries again, within the revision limit you set.
+
+In `workflow()`, the reviewer must come from a different model family than
+the writer. If the decision needs several views, [ask a panel](/patterns/review-panel).
 
 ## Shape
 
