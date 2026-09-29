@@ -76,10 +76,11 @@ for revisions:
         desc: 'Write the post from the brief, in the house style.',
         gate: 'The draft holds against every rule in style/house.md, as read by a grader from another model family.',
         reviewedBy: 'grade',
-        // The limit. A draft that has not passed after three tries ends
-        // the run with the grader's last findings, and the editor is not
-        // asked. Raise it for a longer piece; lower it for a caption.
-        refine: 3,
+        // The judge. After a round the grader did not pass, Jev reads the
+        // findings and the rounds so far and says whether another round is
+        // worth it; a finding tagged block goes back without asking. The
+        // cap is the backstop: three rounds at most, whatever the judge says.
+        refine: judge(jev, { cap: 3 }),
       }),
 ```
 
