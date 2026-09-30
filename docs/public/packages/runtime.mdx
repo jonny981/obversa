@@ -305,11 +305,13 @@ on-disk event and artifact store the examples use, and
 
 `recordTo` appends every event as one JSON line to the file you name, or
 under `.obversa/records` with `'auto'`. `resume: true` reads that record
-first: a job built with `workflow()` carries on from it and repeats no
-finished stage; any other job appends to it and runs again. To resume,
-keep the workflow's name, workspace, brief, stage list and role seats the
-same; change any and the run starts again. [The record](/concepts/record)
-says what a resumed run repeats.
+first: a `workflow()` or a `dag()` carries on from it and repeats no
+finished step; a `loop()` or a plain job appends to it and runs again. A
+graph that runs more than once, such as a loop's body, skips finished steps
+only the first time. To resume, keep the graph's name, workspace and
+shape the same (for a workflow, its brief, stage list and role seats too);
+change any and the run starts again. [The record](/concepts/record) says
+what a resumed run repeats.
 
 ### `callbacks` and `onCallback`
 

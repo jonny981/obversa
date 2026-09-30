@@ -131,6 +131,7 @@ export const stageBranches = {
   F154: 'docs/human-patterns',
   F155: 'feat/judge-product-decision',
   F156: 'release/0.2.1',
+  F144: 'feat/dag-resume-b',
 };
 
 export function manageStage(args, options = {}) {

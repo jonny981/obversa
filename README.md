@@ -177,7 +177,7 @@ const second = await run(createReport(), {
 });
 ```
 
-For stages declared with `workflow()`, the recovery rule is:
+For steps declared with `workflow()` or `dag()`, the recovery rule is:
 
 Steps that finished are never repeated. A step that was mid-flight when the
 worker died runs again only if its binding declares it safe to retry; otherwise

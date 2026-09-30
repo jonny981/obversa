@@ -582,8 +582,6 @@ const team = dag({
   maxKickbacks: { implement: judge(jev, { cap: 4 }) },
 });
 
-// Only `workflow()` skips a finished stage on `--resume` today, so
-// `research`'s plan stage does and every other node here runs again in full.
 const resume = process.argv.includes('--resume');
 const result = await run(team, { recordTo: recordPath, resume, onEvent: (event) => console.log(formatEvent(event)) });
 console.log(JSON.stringify({ status: result.outcome.status, summary: result.outcome.summary, recordPath }, null, 2));

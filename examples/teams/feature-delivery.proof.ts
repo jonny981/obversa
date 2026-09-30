@@ -67,6 +67,8 @@ const standInScript = {
 
 interface RecordedEvent {
   readonly kind: string;
+  readonly path?: readonly string[];
+  readonly identity?: string;
   readonly node?: string;
   readonly phase?: string;
   readonly attempt?: number;
@@ -203,27 +205,35 @@ try {
   const calls = (await readFile(join(workspace, '.obversa-stand-in-calls.log'), 'utf8')).trim().split('\n').map((line) => JSON.parse(line) as { role: string });
   const byRole = (role: string) => calls.filter((c) => c.role === role).length;
 
-  // 7. Resume. `research` is the one node here built with `workflow()`; every
-  // other node — triage, the tournament, test, review, approve, close — is a
-  // bare `dag()` node or a plain job, and per docs/public/concepts/record.mdx
-  // ("Only workflow() skips finished stages. Any other job given resume:
-  // true appends to the record and runs again"), a bare dag() has no
-  // per-node resume tracking at all. This run already finished; --resume
-  // still reruns the whole graph from triage, appending a second run:start
-  // through run:end block rather than skipping anything, which is the
-  // opposite of an assumption that the tournament would not run again after
-  // a kill. That assumption does not hold for dag(): it has no stage-level
-  // "finished" bookkeeping to resume from, unlike workflow(). A resumed
-  // isolated node can also collide with a branch a rejected earlier attempt
-  // left behind (dag.ts only deletes an isolated node's fork branch on a
-  // successful merge), a second, separate reason a dag() resume is not safe
-  // to treat like a workflow() resume.
+  // 7. Resume. A finished node is reused on --resume the way a finished
+  // workflow stage is: the record's pass stands in for running it again.
   const resumed = runExample(workspace, bin, ['--resume']);
+  assert.equal(resumed.status, 0, `the resumed example exited ${resumed.status ?? `signal ${resumed.signal}`}
+  stdout: ${resumed.stdout}
+  stderr: ${resumed.stderr}`);
   const resumedRecord = readRecord(workspace);
-  assert.equal(resumedRecord.filter((e) => e.kind === 'run:start').length, 2, 'resume appends to the same record rather than starting a fresh file');
-  assert.equal(resumedRecord.filter((e) => e.kind === 'job:start' && e.label === 'triage').length, 2, 'triage, already finished, runs again on resume: a bare dag() does not skip it');
-  const implementStartsAfterResume = resumedRecord.filter((e) => e.kind === 'job:start' && e.label === 'implement').length;
-  assert.ok(implementStartsAfterResume >= 3, 'the tournament, already landed, is attempted again on resume rather than being skipped');
+  const runStarts = resumedRecord.map((e, i) => (e.kind === 'run:start' ? i : -1)).filter((i) => i >= 0);
+  assert.equal(runStarts.length, 2, 'resume appends to the same record rather than starting a fresh file');
+  const secondRun = resumedRecord.slice(runStarts[1]!);
+  assert.equal(
+    secondRun.filter((e) => e.kind === 'job:start').length,
+    0,
+    'a resumed run starts no job: triage, the tournament, test, review, approve, close and research\'s stages are all reused',
+  );
+  for (const node of ['triage', 'research', 'implement', 'test', 'review', 'approve', 'close']) {
+    const done = secondRun.find((e) => e.kind === 'dag:node' && e.node === node && e.phase === 'done');
+    assert.equal(done?.outcome?.status, 'pass', `"${node}" has no recorded pass in the resumed run`);
+  }
+  // Across both runs, triage's job started once and implement's once per
+  // attempt of the first run (review sent it back once): none in the resumed run.
+  const jobStarts = (label: string) => resumedRecord.filter((e) => e.kind === 'job:start' && e.label === label).length;
+  assert.equal(jobStarts('triage'), 1, 'triage started once across the first run and the resumed run');
+  assert.equal(jobStarts('implement'), 2, 'implement started once per first-run attempt and not again on resume');
+  const runEnd = secondRun.find((e) => e.kind === 'run:end');
+  assert.equal(runEnd?.outcome?.status, 'pass', 'the resumed run did not pass');
+  const anchors = resumedRecord.filter((e) => e.kind === 'workflow:start' && e.path?.join('/') === 'feature-delivery');
+  assert.equal(anchors.length, 2, 'one resume anchor per run:start');
+  assert.equal(anchors[0]!.identity, anchors[1]!.identity, 'the resumed run matched the same declared shape');
 
   console.log(JSON.stringify({
     status: printed.status,
@@ -238,9 +248,10 @@ try {
     resume: {
       exit: resumed.status,
       runStarts: 2,
-      triageRanAgain: true,
-      tournamentRanAgain: true,
-      note: 'dag() has no per-node resume skip; only workflow() does (docs/public/concepts/record.mdx)',
+      triageStarts: jobStarts('triage'),
+      implementStarts: jobStarts('implement'),
+      resumedJobStarts: secondRun.filter((e) => e.kind === 'job:start').length,
+      note: 'finished nodes are reused on resume, like finished workflow stages',
     },
     mode,
   }, null, 2));
