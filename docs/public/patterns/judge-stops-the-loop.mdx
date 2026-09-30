@@ -32,6 +32,15 @@ flowchart LR
 
 ## The stopping rule
 
+The judge's seat is `jev()` from
+[`@obversa/engine-jev-api`](/packages/engine-jev-api), one line like any
+other seat. Offline, `recordedJudge` from `@obversa/runtime/testing` stands
+in for it and replays the answers in `judge.json`:
+
+```ts examples/judge-stops-the-loop.ts (excerpt)
+const judgeSeat = process.env.JUDGE === 'jev' ? jev() : recordedJudge('judge.json');
+```
+
 The judge sits on the `write` stage. The reader reviews the page, and
 `refine` names the judge and its cap:
 
@@ -40,7 +49,7 @@ The judge sits on the `write` stage. The reader reviews the page, and
       agent: 'write',
       writes: file,
       reviewedBy: 'read',
-      refine: judge(jev, { cap: 3 }),
+      refine: judge(judgeSeat, { cap: 3 }),
       desc: 'Rewrite the page so a person reads it once and knows what to do. On a later round, change only the sentences the findings name.',
       gate: 'The reader finds nothing that fails, or the judge says the page holds for this use case.',
     }),
@@ -113,8 +122,8 @@ printed:
 Two rounds: the first reader pass found two blocks, so the page went back
 without asking the judge. The second found one `nice-to-have`, and the
 judge chose `holds`. The record holds each round's findings and the judge's
-answers. With `JUDGE=jev` and a TypeSafe key in the environment, the same
-file asks Jev instead of replaying.
+answers. With `JUDGE=jev`, and `TYPESAFE_ENDPOINT` and `TYPESAFE_API_KEY`
+in the environment, the same file asks Jev instead of replaying.
 
 ## Next steps
 

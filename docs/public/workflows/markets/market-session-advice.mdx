@@ -400,7 +400,7 @@ import { readdir, readFile, appendFile, mkdir, writeFile } from 'node:fs/promise
 import { join } from 'node:path';
 
 import { claude } from '@obversa/engine-claude-cli';
-import { JevApiEngine } from '@obversa/engine-jev-api';
+import { jev } from '@obversa/engine-jev-api';
 import {
   agentJob,
   approval,
@@ -409,7 +409,6 @@ import {
   formatEvent,
   predicate,
   run,
-  type Engine,
   type JobContext,
   type Outcome,
 } from '@obversa/runtime';
@@ -582,16 +581,10 @@ const policy = await readJson<Policy>('policy.json');
 // The assessment seat is Jev when configured, and otherwise replays the
 // assessment recorded with each observation, so the file runs offline.
 const research = claude('claude-sonnet-4-5');
-let assess: Engine;
 let current: Observation | undefined;
-if (process.env.MARKET_ASSESS_ENGINE === 'jev') {
-  const endpoint = process.env.TYPESAFE_ENDPOINT;
-  const apiKey = process.env.TYPESAFE_API_KEY;
-  if (!endpoint || !apiKey) throw new Error('MARKET_ASSESS_ENGINE=jev needs TYPESAFE_ENDPOINT and TYPESAFE_API_KEY');
-  assess = new JevApiEngine({ endpoint, apiKey });
-} else {
-  assess = new MockEngine(() => JSON.stringify(current?.recordedAssessment ?? null));
-}
+const assess = process.env.MARKET_ASSESS_ENGINE === 'jev'
+  ? jev().engine
+  : new MockEngine(() => JSON.stringify(current?.recordedAssessment ?? null));
 
 interface SessionReport {
   readonly date: string;

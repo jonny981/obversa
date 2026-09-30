@@ -4,7 +4,7 @@ import { join } from 'node:path';
 import { resolveCommandExecutable } from '@obversa/core/command';
 import { claude } from '@obversa/engine-claude-cli';
 import { codex } from '@obversa/engine-codex-cli';
-import { JevApiEngine } from '@obversa/engine-jev-api';
+import { jev } from '@obversa/engine-jev-api';
 import { opencode } from '@obversa/engine-opencode-cli';
 import {
   agentJob,
@@ -82,15 +82,12 @@ const seats: Record<string, TeamSeat> = {
 
 // The check on each view is Jev when configured, and otherwise a replay of
 // the assessment recorded for that seat's view, so the cycle runs offline.
-let jev: Engine;
+let check: Engine;
 if (process.env.SHAPE_UP_JEV === '1') {
-  const endpoint = process.env.TYPESAFE_ENDPOINT;
-  const apiKey = process.env.TYPESAFE_API_KEY;
-  if (!endpoint || !apiKey) throw new Error('SHAPE_UP_JEV=1 needs TYPESAFE_ENDPOINT and TYPESAFE_API_KEY');
-  jev = new JevApiEngine({ endpoint, apiKey });
+  check = jev().engine;
 } else {
   const recorded = JSON.parse(await readFile('checks.json', 'utf8')) as Record<string, Check>;
-  jev = new MockEngine((request) => {
+  check = new MockEngine((request) => {
     const { state } = JSON.parse(request.prompt) as { state: { pitch: string; seat: string } };
     return JSON.stringify(recorded[`${state.pitch}/${state.seat}`] ?? null);
   });
@@ -285,7 +282,7 @@ const onEvent = (event: LoopEvent): void => {
 };
 
 const result = await run(cycle, {
-  engines: { ...Object.fromEntries(Object.entries(seats).map(([name, seat]) => [name, seat.engine])), jev },
+  engines: { ...Object.fromEntries(Object.entries(seats).map(([name, seat]) => [name, seat.engine])), jev: check },
   recordTo: 'records/shape-up-cycle.jsonl',
   runId: 'shape-up-cycle',
   onEvent,

@@ -73,6 +73,7 @@ export {
   mockVerdict,
   type MockResponder,
 } from './engines/mock.js';
+export { recordedJudge } from './engines/recorded-judge.js';
 export {
   MockEnvironment,
   type MockEnvOptions,

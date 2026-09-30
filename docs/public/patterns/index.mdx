@@ -27,7 +27,7 @@ The [feature team](/workflows/feature-team) gives Jev the decision about
 another revision. `judge()` from `@obversa/runtime` sets the stopping rule:
 
 ```ts examples/teams/feature-delivery.ts (excerpt)
-  maxKickbacks: { implement: judge(jev, { cap: 4 }) },
+  maxKickbacks: { implement: judge(judgeSeat, { cap: 4 }) },
 ```
 
 Blocking findings go back within the cap. The judge weighs the other

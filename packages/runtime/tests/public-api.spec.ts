@@ -294,6 +294,7 @@ describe('public runtime API', () => {
       'createGraphEventTrace',
       'defineGraphDefinition',
       'mockVerdict',
+      'recordedJudge',
       'runArtifactStoreConformance',
       'runEngineConformance',
       'runEventStoreConformance',

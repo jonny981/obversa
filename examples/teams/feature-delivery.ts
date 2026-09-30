@@ -6,7 +6,7 @@ import { join } from 'node:path';
 import { resolveCommandExecutable } from '@obversa/core/command';
 import { claude } from '@obversa/engine-claude-cli';
 import { codex } from '@obversa/engine-codex-cli';
-import { JevApiEngine } from '@obversa/engine-jev-api';
+import { jev } from '@obversa/engine-jev-api';
 import { opencode } from '@obversa/engine-opencode-cli';
 import {
   agentJob,
@@ -14,7 +14,6 @@ import {
   briefFromFile,
   commandJob,
   dag,
-  finalResultPart,
   fnJob,
   formatEvent,
   judge,
@@ -24,10 +23,10 @@ import {
   run,
   tournament,
   workflow,
-  type Engine,
   type Job,
   type TeamSeat,
 } from '@obversa/runtime';
+import { recordedJudge } from '@obversa/runtime/testing';
 import { requireNoFiles, requireNonEmptyFiles } from '@obversa/runtime/workflow-support';
 
 /**
@@ -44,53 +43,18 @@ const writer = claude('claude-sonnet-4-5');
 const implementer = codex('gpt-5.6-luna');
 const secondReviewer = opencode('opencode/big-pickle', { executable: resolveCommandExecutable('opencode') });
 
-/** Jev, wrapped so `agentJob` gets text back: its answer is a structured part. */
-function jevSeat(): TeamSeat {
-  const endpoint = process.env.TYPESAFE_ENDPOINT;
-  const apiKey = process.env.TYPESAFE_API_KEY;
-  if (!endpoint || !apiKey) throw new Error('JEV=live needs TYPESAFE_ENDPOINT and TYPESAFE_API_KEY');
-  const api = new JevApiEngine({ endpoint, apiKey });
-  const engine: Engine = {
-    name: 'jev-api',
-    async run(request, onEvent, signal) {
-      const result = await api.run(request, onEvent, signal);
-      const part = finalResultPart(result);
-      if (part.kind !== 'structured') return result;
-      return { ...result, parts: [{ kind: 'assistant', text: JSON.stringify(part.value), final: true }] };
-    },
-  };
-  return { engine, identity: { adapter: 'jev-api', provider: 'jev', modelFamily: 'jev', model: 'jev', tools: [] } };
-}
-/**
- * Offline, a recorded answer replaces Jev so the example runs with no key:
- * `jev.json` is `{ triage: [...], judge: [...] }`, one ordered list per
- * purpose (the judge's own prompt, built by `askJudge`, is the only one
- * carrying a `cap`), each read round-robin and repeating its last entry.
- */
-async function recordedJev(): Promise<TeamSeat> {
-  const scripts = JSON.parse(await readFile('jev.json', 'utf8')) as Record<string, unknown[]>;
-  const seen: Record<string, number> = {};
-  const engine: Engine = {
-    name: 'jev-recorded',
-    async run(request) {
-      const purpose = request.prompt.includes('"cap"') ? 'judge' : 'triage';
-      const list = scripts[purpose] ?? [];
-      const i = seen[purpose] ?? 0;
-      seen[purpose] = i + 1;
-      const text = JSON.stringify(list[Math.min(i, list.length - 1)]);
-      const selection = { adapter: 'jev-recorded', adapterVersion: null, provider: 'jev', modelFamily: 'jev', model: 'jev', executable: null, capabilities: [] };
-      return { parts: [{ kind: 'assistant', text, final: true }], usage: { kind: 'unknown' }, requested: selection, effective: selection };
-    },
-  };
-  return { engine, identity: { adapter: 'jev-recorded', provider: 'jev', modelFamily: 'jev', model: 'jev', tools: [] } };
-}
-const jev = process.env.JEV === 'live' ? jevSeat() : await recordedJev();
+// Offline, recorded answers stand in for Jev so the example runs with no key:
+// triage.json and judge.json each hold one answer object per call, and the
+// last one repeats. `JEV=live` asks Jev for both.
+const live = process.env.JEV === 'live';
+const triageSeat = live ? jev() : recordedJudge('triage.json');
+const judgeSeat = live ? jev() : recordedJudge('judge.json');
 
 const { brief } = briefFromFile('briefs/ticket.md');
 
 /** A cheap typed decision: bug or feature, and how risky. The expensive seats never see it. */
 const triage: Job = agentJob({
-  label: 'triage', engine: jev.engine, model: jev.identity.model, workspaceMode: 'none', tools: [], leaf: true,
+  label: 'triage', engine: triageSeat.engine, model: triageSeat.identity.model, workspaceMode: 'none', tools: [], leaf: true,
   prompt: JSON.stringify({
     state: { ticket: brief },
     questions: {
@@ -194,7 +158,7 @@ const team = dag({
   },
   // A block finding always goes back on its own; otherwise Jev, capped at 4
   // rounds, says when another pass on `implement` stops being worth it.
-  maxKickbacks: { implement: judge(jev, { cap: 4 }) },
+  maxKickbacks: { implement: judge(judgeSeat, { cap: 4 }) },
 });
 
 // Only `workflow()` skips a finished stage on `--resume` today, so

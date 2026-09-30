@@ -87,7 +87,8 @@ async function seedWorkspace(dir: string, bin: string): Promise<void> {
   await mkdir(bin, { recursive: true });
   await writeFile(join(dir, 'briefs/ticket.md'), ticket);
   await writeFile(join(dir, 'test/triple.test.mjs'), testFile);
-  await writeFile(join(dir, 'jev.json'), JSON.stringify(jev, null, 2));
+  await writeFile(join(dir, 'triage.json'), JSON.stringify(jev.triage, null, 2));
+  await writeFile(join(dir, 'judge.json'), JSON.stringify(jev.judge, null, 2));
   await writeFile(join(dir, 'approve.json'), '{"approved": true}\n');
   await writeFile(join(dir, '.obversa-stand-in.json'), JSON.stringify(standInScript, null, 2));
   for (const name of ['claude', 'codex', 'opencode']) await symlink(standIn, join(bin, name));
@@ -172,7 +173,7 @@ try {
   assert.equal(review1.outcome!.status, 'fail');
   assert.equal(review2.outcome!.status, 'pass');
 
-  // The visible `judge(jev, { cap: 4 })` on the panel's kickback target was
+  // The visible `judge(judgeSeat, { cap: 4 })` on the panel's kickback target was
   // consulted for real: it answered once, said the round was worth it, and
   // the dag accepted exactly the one kickback that produced.
   const judgeCalls = record.filter((e) => e.kind === 'refine:judge');

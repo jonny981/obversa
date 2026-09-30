@@ -132,6 +132,7 @@ export const stageBranches = {
   F155: 'feat/judge-product-decision',
   F156: 'release/0.2.1',
   F145: 'docs/judge-page-runtime',
+  F149: 'feat/jev-seat',
 };
 
 export function manageStage(args, options = {}) {

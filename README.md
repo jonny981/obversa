@@ -80,7 +80,7 @@ for revisions:
         // findings and the rounds so far and says whether another round is
         // worth it; a finding tagged block goes back without asking. The
         // cap is the backstop: three rounds at most, whatever the judge says.
-        refine: judge(jev, { cap: 3 }),
+        refine: judge(judgeSeat, { cap: 3 }),
       }),
 ```
 
@@ -96,7 +96,7 @@ purpose of the work and the revisions so far. `judge()` from
 `@obversa/runtime` sets that stopping rule inside a `dag()` workflow:
 
 ```ts examples/teams/feature-delivery.ts (excerpt)
-  maxKickbacks: { implement: judge(jev, { cap: 4 }) },
+  maxKickbacks: { implement: judge(judgeSeat, { cap: 4 }) },
 ```
 
 Here Jev makes the judgement, with a hard cap of four returns to the

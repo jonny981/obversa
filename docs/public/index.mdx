@@ -46,7 +46,7 @@ another revision. `judge()` from `@obversa/runtime` puts that decision
 inside the workflow, with a cap on the number of returns to the writer:
 
 ```ts examples/teams/feature-delivery.ts (excerpt)
-  maxKickbacks: { implement: judge(jev, { cap: 4 }) },
+  maxKickbacks: { implement: judge(judgeSeat, { cap: 4 }) },
 ```
 
 Blocking findings go back within the cap. For other findings, the judge

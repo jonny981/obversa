@@ -28,6 +28,7 @@ Not in `@obversa/obversa`; install it on its own.
 ## Requirements
 
 - A Jev endpoint and API key, passed as the `endpoint` and `apiKey` options.
+  `jev()` also reads them from `TYPESAFE_ENDPOINT` and `TYPESAFE_API_KEY`.
 
 ## Identity
 
@@ -73,6 +74,22 @@ with `npx tsx engine-jev-api-binding.ts`:
 In a run, read the key from your environment instead of a literal. The
 result's structured value is the `answers` object itself, so a binding's
 `parseResult` reads `part.value.send_back` directly.
+
+## A seat for a team
+
+In a workflow, `jev()` builds the seat in one line, as `claude(model)` does
+for Claude. It reads the endpoint and key from `TYPESAFE_ENDPOINT` and
+`TYPESAFE_API_KEY`, or from its `endpoint` and `apiKey` options. It throws
+when either is missing, and the message names both variables. The model
+defaults to `jev-latest`. The seat returns the answers object as assistant
+text, the JSON of that object, so an `agentJob` and the runtime's `judge`
+read it as they read any seat's reply. Offline, `recordedJudge` from
+`@obversa/runtime/testing` stands in for it and replays recorded answers
+from a JSON file:
+
+```ts examples/judge-stops-the-loop.ts (excerpt)
+const judgeSeat = process.env.JUDGE === 'jev' ? jev() : recordedJudge('judge.json');
+```
 
 ## Ask a question
 
@@ -159,6 +176,8 @@ prompt into the request shape before it's sent.
 
 - **`JevApiEngine`**: the engine class. **`JevApiEngineOptions`**: its
   options. [Quickstart](#quickstart).
+- **`jev`**: the seat for a team workflow or a judge. **`JevSeat`** and
+  **`JevSeatOptions`**: its types. [A seat for a team](#a-seat-for-a-team).
 - **`parseJevDocument`**: read a prompt into the request shape.
   [Ask a question](#ask-a-question).
 

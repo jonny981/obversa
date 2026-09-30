@@ -4,7 +4,13 @@
 // including the import line — so every public snippet compiles against the
 // real exports under the published package specifier.
 
+import type { TeamSeat } from '@obversa/api';
 import { JevApiEngine } from '@obversa/engine-jev-api';
+import { jev } from '@obversa/engine-jev-api';
+
+// The runtime's recorded seat, declared by type only: a plugin never imports
+// the runtime, and this fixture is compiled, not run.
+declare function recordedJudge(path: string): TeamSeat;
 
 {
 const apiKey = process.env.TYPESAFE_API_KEY;
@@ -42,4 +48,9 @@ const engine = new JevApiEngine({
 
 const identity = await engine.admit({ workspaceMode: 'none' }, new AbortController().signal);
 console.log(JSON.stringify(identity, null, 2));
+}
+
+{
+const judgeSeat = process.env.JUDGE === 'jev' ? jev() : recordedJudge('judge.json');
+void judgeSeat;
 }

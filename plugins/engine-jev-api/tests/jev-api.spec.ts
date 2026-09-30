@@ -10,7 +10,7 @@
 import { createServer, type Server } from 'node:http';
 import type { AddressInfo } from 'node:net';
 
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import {
   EngineError,
@@ -24,7 +24,7 @@ import {
   type EngineConformanceFixture,
 } from '@obversa/api/testing';
 
-import { JevApiEngine, parseJevDocument } from '../src/jev-api.js';
+import { JevApiEngine, jev, parseJevDocument } from '../src/jev-api.js';
 
 const API_KEY = 'test-key-not-a-credential';
 const QUESTIONS = {
@@ -540,6 +540,66 @@ describe('sanitized review cases', () => {
     expect(stubServer.calls).toHaveLength(1);
     expect(stubServer.calls[0]!.body).toMatchObject({ state, questions: QUESTIONS });
     expect(result.parts[0]).toEqual({ kind: 'structured', value: answers, final: true });
+  });
+});
+
+describe('the jev() seat', () => {
+  afterEach(() => {
+    vi.unstubAllEnvs();
+  });
+
+  it('reports the jev-api identity, with jev-latest as the default model', () => {
+    expect(jev(undefined, { endpoint: 'http://x', apiKey: API_KEY }).identity).toEqual({
+      adapter: 'jev-api',
+      provider: 'typesafe',
+      modelFamily: 'jev',
+      model: 'jev-latest',
+      tools: [],
+    });
+  });
+
+  it('reads the model family from the model it is given', () => {
+    expect(jev('sonar-2', { endpoint: 'http://x', apiKey: API_KEY }).identity).toMatchObject({
+      modelFamily: 'sonar',
+      model: 'sonar-2',
+    });
+  });
+
+  it('returns the answers as assistant text and sends its own model', async () => {
+    const stubServer = await stub();
+    const answers = { which_stage: { type: 'choice', choice: 'none', confidence: 0.8 } };
+    stubServer.respond(200, { model: 'jev-fixture', answers });
+    const seat = jev('jev-fixture', { endpoint: stubServer.url, apiKey: API_KEY });
+    const selection = await seat.engine.admit!({ workspaceMode: 'none' }, new AbortController().signal);
+    expect(selection.model).toBe('jev-fixture');
+    const result = await seat.engine.run(
+      { prompt: prompt(), workspaceMode: 'none' },
+      () => {},
+      new AbortController().signal,
+    );
+    expect(result.parts).toEqual([{ kind: 'assistant', text: JSON.stringify(answers), final: true }]);
+    expect(stubServer.calls[0]!.body).toMatchObject({ model: 'jev-fixture' });
+    expect(stubServer.calls[0]!.authorization).toBe(`Bearer ${API_KEY}`);
+  });
+
+  it('reads the endpoint and key from the environment', async () => {
+    const stubServer = await stub();
+    stubServer.respond(200, { answers: { send_back: { type: 'noul', noul: 0.1 } } });
+    vi.stubEnv('TYPESAFE_ENDPOINT', stubServer.url);
+    vi.stubEnv('TYPESAFE_API_KEY', API_KEY);
+    await jev().engine.run({ prompt: prompt(), workspaceMode: 'none' }, () => {}, new AbortController().signal);
+    expect(stubServer.calls).toHaveLength(1);
+    expect(stubServer.calls[0]!.authorization).toBe(`Bearer ${API_KEY}`);
+  });
+
+  it.each([
+    ['neither', undefined, undefined],
+    ['no key', 'http://x', undefined],
+    ['no endpoint', undefined, API_KEY],
+  ])('throws at construction with %s, naming both variables', (_label, endpoint, apiKey) => {
+    vi.stubEnv('TYPESAFE_ENDPOINT', endpoint ?? '');
+    vi.stubEnv('TYPESAFE_API_KEY', apiKey ?? '');
+    expect(() => jev()).toThrowError(/TYPESAFE_ENDPOINT and TYPESAFE_API_KEY/);
   });
 });
 

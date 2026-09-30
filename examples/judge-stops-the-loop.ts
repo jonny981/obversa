@@ -5,22 +5,20 @@ import { join } from 'node:path';
 
 import { claude } from '@obversa/engine-claude-cli';
 import { codex } from '@obversa/engine-codex-cli';
-import { JevApiEngine } from '@obversa/engine-jev-api';
+import { jev } from '@obversa/engine-jev-api';
 import {
   approval,
   briefFromFile,
-  finalResultPart,
   formatEvent,
   judge,
   run,
   stage,
   workflow,
   type ApprovalAnswer,
-  type Engine,
   type Job,
   type Outcome,
-  type TeamSeat,
 } from '@obversa/runtime';
+import { recordedJudge } from '@obversa/runtime/testing';
 
 /**
  * A loop whose stopping rule is a judge, not a count. Claude rewrites the
@@ -38,44 +36,10 @@ import {
 const writer = claude('claude-sonnet-4-5');
 const reader = codex('gpt-5.6-luna');
 
-/** Jev, wrapped so the runtime gets text back: its answer is a structured part. */
-function jevSeat(): TeamSeat {
-  const endpoint = process.env.TYPESAFE_ENDPOINT;
-  const apiKey = process.env.TYPESAFE_API_KEY;
-  if (!endpoint || !apiKey) throw new Error('JUDGE=jev needs TYPESAFE_ENDPOINT and TYPESAFE_API_KEY');
-  const api = new JevApiEngine({ endpoint, apiKey });
-  const engine: Engine = {
-    name: 'jev-api',
-    async run(request, onEvent, signal) {
-      const result = await api.run(request, onEvent, signal);
-      const part = finalResultPart(result);
-      if (part.kind !== 'structured') return result;
-      return { ...result, parts: [{ kind: 'assistant', text: JSON.stringify(part.value), final: true }] };
-    },
-  };
-  return { engine, identity: { adapter: 'jev-api', provider: 'jev', modelFamily: 'jev', model: 'jev', tools: [] } };
-}
-
-/**
- * Offline, the judge replays the answers recorded in judge.json, one answer
- * object for each round it is asked, repeating the last, so the example runs
- * with no key. `JUDGE=jev` asks Jev instead.
- */
-async function recordedJev(): Promise<TeamSeat> {
-  const answers = JSON.parse(await readFile('judge.json', 'utf8')) as unknown[];
-  let round = 0;
-  const engine: Engine = {
-    name: 'jev-recorded',
-    async run() {
-      const text = JSON.stringify(answers[Math.min(round++, answers.length - 1)]);
-      const selection = { adapter: 'jev-recorded', adapterVersion: null, provider: 'jev', modelFamily: 'jev', model: 'jev', executable: null, capabilities: [] };
-      return { parts: [{ kind: 'assistant', text, final: true }], usage: { kind: 'unknown' }, requested: selection, effective: selection };
-    },
-  };
-  return { engine, identity: { adapter: 'jev-recorded', provider: 'jev', modelFamily: 'jev', model: 'jev', tools: [] } };
-}
-
-const jev = process.env.JUDGE === 'jev' ? jevSeat() : await recordedJev();
+// Offline, the judge replays the answers recorded in judge.json, one answer
+// object for each round it is asked, repeating the last, so the example runs
+// with no key. `JUDGE=jev` asks Jev instead.
+const judgeSeat = process.env.JUDGE === 'jev' ? jev() : recordedJudge('judge.json');
 
 // ── The team ────────────────────────────────────────────────────────────────
 
@@ -110,7 +74,7 @@ const team = workflow('judge-stops-the-loop', {
       agent: 'write',
       writes: file,
       reviewedBy: 'read',
-      refine: judge(jev, { cap: 3 }),
+      refine: judge(judgeSeat, { cap: 3 }),
       desc: 'Rewrite the page so a person reads it once and knows what to do. On a later round, change only the sentences the findings name.',
       gate: 'The reader finds nothing that fails, or the judge says the page holds for this use case.',
     }),

@@ -18,6 +18,7 @@ import { isDeepStrictEqual } from 'node:util';
 import {
   EngineError,
   engineSelection,
+  finalResultPart,
   modelIdentity,
   reportedUsage,
   validateAgentResult,
@@ -237,6 +238,58 @@ export class JevApiEngine implements Engine {
       raw: parsed,
     });
   }
+}
+
+export interface JevSeatOptions {
+  /** POST target. Defaults to `TYPESAFE_ENDPOINT`. */
+  readonly endpoint?: string;
+  /** Bearer credential. Defaults to `TYPESAFE_API_KEY`. */
+  readonly apiKey?: string;
+}
+
+export interface JevSeat {
+  readonly engine: Engine;
+  readonly identity: {
+    readonly adapter: 'jev-api';
+    readonly provider: 'typesafe';
+    readonly modelFamily: string;
+    readonly model: string;
+    readonly tools: readonly string[];
+  };
+}
+
+/**
+ * Create the Jev seat used by team workflows and the runtime's `judge`. The
+ * answers object comes back as assistant text, the JSON of that object, so a
+ * job reads it as it reads any seat's reply.
+ */
+export function jev(model: string = DEFAULT_MODEL, options: JevSeatOptions = {}): JevSeat {
+  const endpoint = options.endpoint ?? process.env.TYPESAFE_ENDPOINT;
+  const apiKey = options.apiKey ?? process.env.TYPESAFE_API_KEY;
+  if (!endpoint || !apiKey) {
+    throw invalid('jev() needs TYPESAFE_ENDPOINT and TYPESAFE_API_KEY, or the endpoint and apiKey options');
+  }
+  const api = new JevApiEngine({ endpoint, apiKey, model });
+  const engine: Engine = {
+    name: api.name,
+    admit: (request, signal, expectedSelection) => api.admit(request, signal, expectedSelection),
+    async run(request, onEvent, signal) {
+      const result = await api.run(request, onEvent, signal);
+      const part = finalResultPart(result);
+      if (part.kind !== 'structured') return result;
+      return { ...result, parts: [{ kind: 'assistant', text: JSON.stringify(part.value), final: true }] };
+    },
+  };
+  return {
+    engine,
+    identity: {
+      adapter: 'jev-api',
+      provider: PROVIDER,
+      modelFamily: modelIdentity(model).modelFamily,
+      model,
+      tools: [],
+    },
+  };
 }
 
 async function readBounded(

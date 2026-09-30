@@ -358,7 +358,7 @@ variables for a job and every job beneath it.
 | `desc`, `gate` | What the stage does and what must be true for it to count. Both go into the writing seat's prompt, the plan and the record. |
 | `reviewedBy` | A panel role that reads this stage's work. A rejection runs the stage again with the findings; the same bytes back fails the stage. The stage and its review are one step, so a run that dies mid-review runs the whole step again. |
 | `sendsBackTo` | The earlier stage a rejection or a red run goes to. A stage takes `reviewedBy` or `sendsBackTo`, not both. |
-| `refine` | How many more rounds this stage gets: a count, default 1, or `judge(seat, { cap, questions })` so a seat decides between a review's verdict and the next round, with `cap` as the backstop. It belongs to the stage that repeats. |
+| `refine` | How many more rounds this stage gets: a count, default 1, or `judge(seat, { cap, questions })` so a seat, such as `jev()` from [`@obversa/engine-jev-api`](/packages/engine-jev-api), decides between a review's verdict and the next round, with `cap` as the backstop. It belongs to the stage that repeats. |
 | `retrySafe` | `true` when the stage may run again after an interruption without a person reconciling it. |
 | `when` | A condition read before the stage runs: `passed(name)`, `failed(name)`, or a predicate over `ctx`. A stage whose `when` is not met is recorded as skipped and counts as passed. |
 | `optional` | A red run of this stage doesn't fail the workflow. `failed(name)` on a later stage needs the named stage optional. |
@@ -430,8 +430,9 @@ export keeps the exact `Job` type), `defineAgent`, `defineAgentFromMarkdown`,
 `validate*` functions for stored records, re-exported from `@obversa/api`.
 
 **Subpaths.** `@obversa/runtime/testing`: `MockEngine`, `MockEnvironment`,
-`mockVerdict`, `defineGraphDefinition`, `createGraphEventTrace`, and the
-conformance kits. `@obversa/runtime/memory`: `ground`, `curate`,
+`mockVerdict`, `recordedJudge` (replays a judge's recorded answers from a
+JSON file, in place of `jev()`), `defineGraphDefinition`,
+`createGraphEventTrace`, and the conformance kits. `@obversa/runtime/memory`: `ground`, `curate`,
 `consolidate`. `@obversa/runtime/workflow-support`: `outcomeFromAgentText`,
 `INVALID_TEAM_DECISION`, `seatIdentity`, `assertDistinctSeats`,
 `requireNonEmptyFiles`, `requireNoFiles`, `teamAgent`, `panelReviewers`.
