@@ -60,6 +60,18 @@ try {
     '',
     'Rewrite docs/getting-started.md so a person reads it once and knows what to do. Keep the front matter and the code block exactly as they are.',
     '',
+    '## For the reader',
+    '',
+    'You did not write the page, and you change nothing. The front matter, code blocks and link targets are out of scope: the writer keeps them as they are, so a finding on them cannot be acted on.',
+    '',
+    'The use case sets the bar. Ask one question of every sentence: would a reader of this kind of page, described above, read it once and know what to do?',
+    '',
+    'What fails: a word the reader has never met used without the sentence saying what it is; a line that gives the mechanism where the reader wanted what they get; a claim the page does not support; a figure of speech a person would not use; a sentence a person would stumble over aloud.',
+    '',
+    'Report only the sentences that fail for this audience, worst first. Do not fill a list: three findings that matter beat ten that do not. "Nothing fails" is a good report when it is true; then the status is pass.',
+    '',
+    'Give each finding a severity. "block": a person would not understand it, or it claims something false. "should-fix": a person would say it differently. "nice-to-have": taste. In the evidence, quote the sentence, say in a few words why, and give the plainest rewrite a person would say. No praise.',
+    '',
   ].join('\n'));
   await writeFile(join(workspace, 'docs/getting-started.md'), [
     '---',
@@ -73,22 +85,9 @@ try {
     '```',
     '',
   ].join('\n'));
-  // The scripted answers follow the shape of a real run of this team over a docs
-  // page (record 2026-09-27T16-09-12-984Z). Its judge answered, round 1:
-  //   {"holds":{"type":"noul","noul":0.05},"worth_doing":{"type":"noul","noul":0.79},"worth_another_round":{"type":"noul","noul":0.63},"stop_reason":{"type":"choice","choice":"continue","confidence":0.54,"probabilities":{"not_converging":0.03,"continue":0.66,"over_polishing":0.16,"holds":0.15}}}
-  // and round 2:
-  //   {"holds":{"type":"noul","noul":0.07},"worth_doing":{"type":"noul","noul":0.79},"worth_another_round":{"type":"noul","noul":0.63},"stop_reason":{"type":"choice","choice":"continue","confidence":0.51,"probabilities":{"over_polishing":0.14,"holds":0.07,"not_converging":0.15,"continue":0.64}}}
-  // The record's kickback lines:
-  //   route -> write: "round 1: the judge says another round is worth it (0.63); 6 block, 4 should, 0 nit" (1 of 6)
-  //   route -> write: "round 2: the judge says another round is worth it (0.63); 3 block, 7 should, 0 nit" (2 of 6)
-  // Here the judge chooses `holds` on round 2, so the proof shows the stop as well as the round that went back.
+  // The judge is asked only when a round has no block: here, round 2, where
+  // the one finding left is taste and the judge chooses `holds`.
   await writeFile(join(workspace, 'judge.json'), `${JSON.stringify([
-    {
-      holds: { type: 'noul', noul: 0.1 },
-      worth_doing: { type: 'noul', noul: 0.8 },
-      worth_another_round: { type: 'noul', noul: 0.7 },
-      stop_reason: { type: 'choice', choice: 'continue', confidence: 0.5 },
-    },
     {
       holds: { type: 'noul', noul: 0.9 },
       worth_doing: { type: 'noul', noul: 0.2 },
@@ -101,17 +100,29 @@ try {
     join(workspace, '.obversa-stand-in.json'),
     `${JSON.stringify({
       claude: [
-        { writes: { 'docs/getting-started.md': draft1 }, reply: 'Rewrote the page from the brief.' },
-        { writes: { 'docs/getting-started.md': draft2 }, reply: 'Changed the two sentences the findings named.' },
+        { writes: { 'docs/getting-started.md': draft1 }, reply: '{"status":"pass","summary":"Rewrote the page from the brief."}' },
+        { writes: { 'docs/getting-started.md': draft2 }, reply: '{"status":"pass","summary":"Changed the two sentences the findings named."}' },
       ],
       codex: [
         {
-          reply: [
-            '[block] "Bootstrap the toolchain with the CLI." "Bootstrap" and "toolchain" are words the reader has not met. Rewrite: "Install the tool with one command."',
-            '[block] "The daemon supervises execution." "Daemon" and "supervises" name the mechanism, not what the reader gets. Rewrite: "The runner keeps the work going if your terminal closes."',
-          ].join('\n'),
+          reply: JSON.stringify({
+            status: 'revise',
+            summary: 'Two sentences use words the reader has not met.',
+            findings: [
+              { severity: 'block', evidence: '"Bootstrap the toolchain with the CLI." "Bootstrap" and "toolchain" are words the reader has not met. Rewrite: "Install the tool with one command."' },
+              { severity: 'block', evidence: '"The daemon supervises execution." "Daemon" and "supervises" name the mechanism, not what the reader gets. Rewrite: "The runner keeps the work going if your terminal closes."' },
+            ],
+          }),
         },
-        { reply: 'Nothing fails.' },
+        {
+          reply: JSON.stringify({
+            status: 'revise',
+            summary: 'One sentence could be shorter.',
+            findings: [
+              { severity: 'nice-to-have', evidence: '"The runner keeps the work going if your terminal closes." A matter of taste. Rewrite: "The work goes on if your terminal closes."' },
+            ],
+          }),
+        },
       ],
     }, null, 2)}\n`,
   );
@@ -147,58 +158,46 @@ try {
   stderr: ${run.stderr}`);
   const printed = JSON.parse(run.stdout.slice(run.stdout.lastIndexOf('\n{') + 1));
   assert.equal(printed.status, 'pass');
-  assert.equal(printed.rounds, 2);
   assert.equal(printed.approved, true);
-  assert.match(printed.stop, /^round 2: the judge stopped it, reason holds/);
+  assert.equal(printed.stop, 'the judge chose holds');
 
   const calls = (await readFile(callsLog, 'utf8')).trim().split('\n').map((line) => JSON.parse(line) as { role: string; reply: string });
   const claudeCalls = calls.filter((call) => call.role === 'claude');
   const codexCalls = calls.filter((call) => call.role === 'codex');
   assert.equal(claudeCalls.length, 2, 'the writer runs twice: the draft, then the two sentences the findings named');
   assert.equal(codexCalls.length, 2, 'the reader reads both drafts');
-  assert.equal(codexCalls[1]!.reply, 'Nothing fails.');
 
   interface RecordedEvent {
     readonly kind: string;
     readonly label?: string;
-    readonly from?: string;
-    readonly to?: string;
+    readonly path?: readonly string[];
     readonly reason?: string;
     readonly accepted?: boolean;
-    readonly count?: number;
-    readonly limit?: number;
+    readonly answers?: { readonly stop_reason?: { readonly choice?: string } };
     readonly outcome?: { status: string; summary?: string; data?: unknown };
   }
   const record = (await readFile(join(workspace, 'records/judge-stops-the-loop.jsonl'), 'utf8'))
     .trim().split('\n').map((line) => JSON.parse(line) as RecordedEvent);
-  const kickbacks = record.filter((event) => event.kind === 'dag:kickback');
+  const writerRuns = record.filter((event) => event.kind === 'job:start' && event.label === 'write' && event.path?.at(-1) === 'write-review');
+  assert.equal(writerRuns.length, 2, 'the record shows two writer runs');
+  const kickbacks = record.filter((event) => event.kind === 'loop:review' && event.accepted === true);
   assert.equal(kickbacks.length, 1, 'the one round with blocks goes back once');
-  assert.equal(kickbacks[0]!.from, 'route');
-  assert.equal(kickbacks[0]!.to, 'write');
-  assert.equal(kickbacks[0]!.accepted, true);
-  assert.equal(kickbacks[0]!.count, 1);
-  assert.equal(kickbacks[0]!.limit, 3);
-  assert.equal(kickbacks[0]!.reason, 'round 1: 2 block findings always go back; 2 block, 0 should, 0 nit');
-  const jobEnds = record.filter((event) => event.kind === 'job:end');
-  const judgeAnswers = jobEnds.filter((event) => event.label === 'judge')
-    .map((event) => (JSON.parse(String(event.outcome!.data)) as { stop_reason: { choice: string } }).stop_reason.choice);
-  assert.deepEqual(judgeAnswers, ['continue', 'holds'], 'the judge answered once per round: continue, then holds');
-  const routeEnds = jobEnds.filter((event) => event.label === 'route');
-  assert.equal(routeEnds[routeEnds.length - 1]!.outcome!.status, 'pass');
-  assert.match(routeEnds[routeEnds.length - 1]!.outcome!.summary ?? '', /^round 2: the judge stopped it, reason holds/);
-  const approveEnds = jobEnds.filter((event) => event.label === 'approve');
-  assert.equal(approveEnds.length, 1);
-  assert.equal(approveEnds[0]!.outcome!.status, 'pass');
+  assert.match(kickbacks[0]!.outcome!.summary ?? '', /\[block\]/, 'the round that went back carried block findings');
+  const judged = record.filter((event) => event.kind === 'refine:judge');
+  assert.deepEqual(judged.map((event) => event.answers?.stop_reason?.choice), ['holds'], 'the judge is asked once, on the round with no block, and chooses holds');
+  assert.equal(judged[0]!.reason, 'the judge chose holds');
+  const approveEnds = record.filter((event) => event.kind === 'job:end' && event.label === 'approve');
+  assert.equal(approveEnds.length, 2, 'one approval: the approve stage and the approval it calls each log one end');
+  assert.ok(approveEnds.every((event) => event.outcome!.status === 'pass'), 'the approval passes');
 
   assert.equal(await readFile(join(workspace, 'docs/getting-started.md'), 'utf8'), draft2);
 
   console.log(JSON.stringify({
     status: printed.status,
-    writerRuns: 2,
-    readerRuns: 2,
-    judgeAnswers,
-    kickbacks: 1,
-    kickbackReason: kickbacks[0]!.reason,
+    writerRuns: writerRuns.length,
+    readerRuns: codexCalls.length,
+    kickbacks: kickbacks.length,
+    judgeReasons: judged.map((event) => event.reason),
     stop: printed.stop,
     approved: true,
     mode,
