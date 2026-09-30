@@ -471,6 +471,8 @@ export interface DagNode {
    * rejected. Only consulted when the dag's `maxKickbacks` is set.
    */
   acceptsKickbackTo?: string[];
+  /** An interrupted attempt may run again on resume without a person's reconciliation. */
+  retrySafe?: boolean;
 }
 
 /**

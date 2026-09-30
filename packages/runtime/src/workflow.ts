@@ -1,4 +1,4 @@
-import { createHash, randomUUID } from 'node:crypto';
+import { createHash } from 'node:crypto';
 
 import { modelIdentity, type TeamSeat } from '@obversa/api';
 import { readFileSync } from 'node:fs';
@@ -6,18 +6,17 @@ import { readFile, stat } from 'node:fs/promises';
 import { join } from 'node:path';
 
 import { agentJob, fnJob, RECORDED_ENGINE_USAGE, type RecordedEngineUsage } from './core/job.js';
-import { approval, delegateNodeJob } from './core/approval-job.js';
+import { approval } from './core/approval-job.js';
 import { commandJob, predicate } from './core/condition.js';
 import { copyJobMeta } from './core/describe.js';
 import { dag } from './core/dag.js';
+import { RESUME_IDENTITY } from './core/resume.js';
 import { LoopError } from './core/errors.js';
 import { loop } from './core/loop.js';
 import { kickback, reviewPanel, revisionFromOutcome } from './core/feedback.js';
 import { consultJudge, countBySeverity, hasBlockFinding, isJudge, type JudgeRound, type JudgeState } from './core/judge.js';
-import type { Job, JobContext, Judge, Outcome, ConditionInput } from './core/types.js';
-import { RESUME_RECORDED_USAGE, RESUME_STAGE_OUTCOMES } from './runtime/runner.js';
+import type { ConditionInput, DagConfig, Job, JobContext, Judge, Outcome } from './core/types.js';
 import { checkpointInteraction, interactionDeclaration, hasSavedInteraction, humanReview, interactionIdentity, jsonSnapshot, outcomeSnapshot, requestInteraction, savedInteraction, type InteractionBinding, type InteractionResponse } from './core/interaction.js';
-import type { ResumedStageRecords } from './runtime/persist.js';
 
 import { outcomeFromAgentText } from './workflow-agent-response.js';
 import {
@@ -892,111 +891,6 @@ function resumeIdentity(name: string, config: WorkflowConfig): string {
   return createHash('sha256').update(JSON.stringify(declared)).digest('hex');
 }
 
-function restoreRecordedUsage(ctx: JobContext): void {
-  const priorUsage = (ctx.state[RESUME_RECORDED_USAGE] as ReadonlyMap<string, readonly RecordedEngineUsage[]> | undefined)
-    ?.get(ctx.path.join('/'));
-  if (priorUsage?.length) {
-    const current = recordedUsage(ctx);
-    const key = (record: RecordedEngineUsage) => JSON.stringify([record.path, record.role, record.model]);
-    const present = new Map<string, number>();
-    for (const record of current) {
-      const identity = key(record);
-      present.set(identity, (present.get(identity) ?? 0) + 1);
-    }
-    const missing = priorUsage.filter((record) => {
-      const identity = key(record);
-      const count = present.get(identity) ?? 0;
-      if (count === 0) return true;
-      present.set(identity, count - 1);
-      return false;
-    });
-    if (missing.length) ctx.state[RECORDED_ENGINE_USAGE] = [...current, ...missing];
-  }
-}
-
-/** Reuse a completed first attempt, or reconcile an unsafe interrupted one. */
-function resumeGuard(job: Job, identity: string, label: string, retrySafe: boolean): Job {
-  const guarded: Job = async (ctx) => {
-    const resumed = ctx.state[RESUME_STAGE_OUTCOMES] as ResumedStageRecords | undefined;
-    const parentPath = ctx.path.slice(0, -1).join('/');
-    const anchor = resumed?.anchors.get(parentPath);
-    const recorded = anchor?.identity === identity && anchor.workspace === ctx.workspace.dir
-      ? resumed?.stages.get(ctx.path.join('/'))
-      : undefined;
-    if (anchor?.identity === identity && anchor.workspace === ctx.workspace.dir && hasSavedInteraction(ctx, ctx.path)) {
-      restoreRecordedUsage(ctx);
-      return delegateNodeJob(ctx, guarded, job, ctx);
-    }
-    if (ctx.graph?.attempt === 1 && recorded !== undefined) {
-      if (recorded.kind === 'interrupted') {
-        if (!retrySafe) {
-          restoreRecordedUsage(ctx);
-          return reconcileInterrupted(ctx, guarded, job, label, identity, anchor!.recordId, recorded.startLine);
-        }
-      } else if (recorded.outcome.status === 'pass'
-          && (recorded.outcome.data as { skipped?: boolean } | undefined)?.skipped !== true) {
-        restoreRecordedUsage(ctx);
-        return recorded.outcome;
-      } else if (recorded.outcome.status === 'paused') {
-        const request = recorded.outcome.data as {
-          requestId?: string;
-          resumeReconciliation?: boolean;
-          input?: { startLine?: number };
-        } | undefined;
-        const pending = ctx.callbacks === undefined
-          ? []
-          : await ctx.callbacks.listPending();
-        if (ctx.onCallback !== 'wait' && request?.requestId !== undefined
-            && pending.some((candidate) => candidate.requestId === request.requestId)) {
-          return recorded.outcome;
-        }
-        if (request?.resumeReconciliation === true && request.input?.startLine !== undefined) {
-          restoreRecordedUsage(ctx);
-          return reconcileInterrupted(ctx, guarded, job, label, identity, anchor!.recordId, request.input.startLine);
-        }
-      }
-    }
-    return delegateNodeJob(ctx, guarded, job, ctx);
-  };
-  return interactionDeclaration(guarded, { identity, label, job });
-}
-
-async function reconcileInterrupted(
-  ctx: JobContext,
-  owner: Job,
-  job: Job,
-  label: string,
-  identity: string,
-  recordId: string,
-  startLine: number,
-): Promise<Outcome> {
-  const question = approval(`reconcile ${label}`, {
-    question: `Did stage "${label}" finish? Approve to continue without running it again; refuse if it did not finish.`,
-    input: { identity, workspace: ctx.workspace.dir, stage: label, recordId, startLine },
-  });
-  const outcome = await delegateNodeJob(ctx, owner, question, {
-    ...ctx,
-    emit(event) {
-      // A crash during the wait must keep the recovery question, not rerun the stage.
-      ctx.emit(event.kind === 'dag:node' && event.outcome?.status === 'paused'
-        ? { ...event, outcome: {
-          ...event.outcome,
-          data: { ...(event.outcome.data ?? {}), resumeReconciliation: true },
-        } }
-        : event);
-    },
-  });
-  if (outcome.status === 'fail' && (outcome.data as { approved?: boolean } | undefined)?.approved === false) {
-    // A crash during this new attempt must not reuse the answer about the old one.
-    ctx.emit({
-      kind: 'dag:node', ts: Date.now(), path: ctx.path.slice(0, -1), node: label,
-      phase: 'start', attempt: (ctx.graph?.attempt ?? 1) + 1,
-    });
-    return delegateNodeJob(ctx, owner, job, ctx);
-  }
-  return { ...outcome, data: { ...(outcome.data ?? {}), resumeReconciliation: true } };
-}
-
 export function workflow(name: string, config: WorkflowConfig): Job {
   const workflowName = text(name, 'workflow name');
   const brief = briefValue(config.brief);
@@ -1119,7 +1013,8 @@ export function workflow(name: string, config: WorkflowConfig): Job {
       panelFamilyTargets.map((candidate) => seatIdentity(seatRole(config.roles, candidate.config.agent)).modelFamily),
     );
     return [named.name, {
-      job: copyJobMeta(resumeGuard(innerStage, stageJobIdentity, named.name, stageConfig.retrySafe === true), innerStage),
+      job: innerStage,
+      ...(named.config.retrySafe === undefined ? {} : { retrySafe: named.config.retrySafe }),
       needs: stageDependencies(config.stages, index),
       ...(named.config.desc === undefined ? {} : { desc: named.config.desc }),
       ...(named.config.gate === undefined ? {} : { gate: named.config.gate }),
@@ -1128,31 +1023,18 @@ export function workflow(name: string, config: WorkflowConfig): Job {
       ...(timeoutMs === undefined ? {} : { timeoutMs }),
     }];
   }));
-  const graph = dag({
+  const graphConfig: DagConfig & { [RESUME_IDENTITY]: string } = {
     name: workflowName,
     nodes,
+    [RESUME_IDENTITY]: stageJobIdentity,
     ...(Object.keys(maxKickbacks).length ? { maxKickbacks } : {}),
-  });
-  const resumeGraph = copyJobMeta(async (ctx: JobContext) => {
-    const prior = (ctx.state[RESUME_STAGE_OUTCOMES] as ResumedStageRecords | undefined)
-      ?.anchors.get([...ctx.path, workflowName].join('/'));
-    ctx.emit({
-      kind: 'workflow:start',
-      ts: Date.now(),
-      path: [...ctx.path, workflowName],
-      identity: stageJobIdentity,
-      workspace: ctx.workspace.dir,
-      recordId: prior?.identity === stageJobIdentity && prior.workspace === ctx.workspace.dir
-        ? prior.recordId ?? randomUUID()
-        : randomUUID(),
-    });
-    return graph(ctx);
-  }, graph);
+  };
+  const graph = dag(graphConfig);
   const always = config.post?.always;
-  if (!always) return resumeGraph;
+  if (!always) return graph;
   return loop({
     name: `${workflowName}-post`,
-    body: resumeGraph,
+    body: graph,
     until: predicate(() => true, 'workflow complete'),
     max: 1,
     onComplete: async (outcome, ctx) => {

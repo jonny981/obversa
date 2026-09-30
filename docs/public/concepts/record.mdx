@@ -82,16 +82,17 @@ run pauses and asks a person to reconcile it before it continues, so
 uncertain work is never repeated silently.
 
 A plain `run()` opens a fresh record each time it starts. With
-`resume: true`, it reads the record at `recordTo` first. For a job built
-with `workflow()`, what happens to each stage depends on where it stopped:
+`resume: true`, it reads the record at `recordTo` first. For a `workflow()`
+stage or a `dag()` node, what happens depends on where it stopped:
 
-| Stage when the process died | On resume |
+| Step when the process died | On resume |
 | --- | --- |
 | Finished | Skipped |
 | Failed | Runs again |
 | Waiting for a person | Not asked twice, as long as the run reads the same store of pending questions. A fresh in-memory client has nothing to read, so it asks again. |
 | Mid-flight, `retrySafe: true` | Runs again |
-| Mid-flight, not marked safe | The run pauses and asks a person. If they say it didn't finish, the stage runs in the same resumed run. If it did, it isn't repeated. |
+| Mid-flight in the shared workspace, not marked safe | The run pauses and asks a person. If they say it didn't finish, the step runs in the same resumed run. If it did, it isn't repeated. |
+| A `dag()` node mid-flight in its own worktree, not marked safe | None of its work landed, so the run pauses and asks a person. If they approve, the node runs again from the start in a new worktree. If they refuse, the run stops, and they can recover the work by hand from the worktree the attempt left behind. |
 
 `resume: true` is how a workflow carries on when you start it yourself or a
 schedule starts it for you. [Callback gates](/reviewing/callback-gates)
@@ -104,9 +105,13 @@ covers how a run waits for the answer.
 - **A resume applies to the same workflow.** Same name, workspace, brief and
   stage list, and the same seat behind each role. Change the brief, the
   model behind a role, or the question a person role asks, and the run
-  starts again.
-- **Only `workflow()` skips finished stages.** Any other job given
-  `resume: true` appends to the record and runs again.
+  starts again. For a `dag()`, the shape is its name, node names, needs,
+  conditions, kickback limits, concurrency, which nodes are optional, and
+  which nodes run in their own worktree.
+- **`workflow()` and `dag()` skip finished steps.** A `loop()` or a plain
+  job given `resume: true` appends to the record and runs again. A graph
+  that runs more than once in a run, such as the body of a loop, skips
+  finished steps only the first time.
 
 ## Next steps
 

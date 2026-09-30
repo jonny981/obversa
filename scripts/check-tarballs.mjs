@@ -201,6 +201,7 @@ export const EXPECTED_FILES = {
     'package/dist/core/process.d.ts',
     'package/dist/core/progress.d.ts',
     'package/dist/core/redact.d.ts',
+    'package/dist/core/resume.d.ts',
     'package/dist/core/stats.d.ts',
     'package/dist/core/team.d.ts',
     'package/dist/core/text.d.ts',

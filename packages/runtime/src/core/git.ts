@@ -602,6 +602,19 @@ export async function removeWorktree(
   }));
 }
 
+/** True when `branch` resolves as a local branch ref. */
+export async function branchExists(
+  repoDir: string,
+  branch: string,
+  opts: { signal?: AbortSignal } = {},
+): Promise<boolean> {
+  const r = await git(['rev-parse', '--verify', `refs/heads/${branch}`], {
+    cwd: repoDir,
+    signal: opts.signal,
+  });
+  return r.exitCode === 0;
+}
+
 /** Delete a branch ref (used to clean up a merged fork branch). */
 export async function deleteBranch(
   repoDir: string,

@@ -13,6 +13,8 @@
  *   - an unmet `when` gate *skips* the node, which counts as green.
  */
 
+import { randomUUID } from 'node:crypto';
+
 import pLimit from 'p-limit';
 import toposort from 'toposort';
 
@@ -24,6 +26,7 @@ import type {
   JobContext,
   Judge,
   Outcome,
+  ResumedStageRecords,
   Workspace,
 } from './types.js';
 import { childContext } from './context.js';
@@ -36,6 +39,7 @@ import {
   commit,
   addWorktree,
   removeWorktree,
+  branchExists,
   deleteBranch,
   mergeBranch,
 } from './git.js';
@@ -46,6 +50,7 @@ import { revisionFromOutcome } from './feedback.js';
 import { consultJudge, countBySeverity, hasBlockFinding, isJudge, type JudgeRound, type JudgeState } from './judge.js';
 import { checkpointInteraction, interactionDeclaration, interactionIdentity, jsonSnapshot, outcomeSnapshot, savedInteraction, type InteractionResponse } from './interaction.js';
 import { DEFAULT_FANOUT_CONCURRENCY } from './concurrency.js';
+import { dagResumeIdentity, resumeGuard, RESUME_IDENTITY, RESUME_STAGE_OUTCOMES } from './resume.js';
 
 /** Sanitise a name into a git-ref-safe slug. */
 function slug(s: string): string {
@@ -127,6 +132,11 @@ export function dag(config: DagConfig): Job {
       }
       edges.push([dep, name]); // dep must precede name
     }
+    if (node.retrySafe !== undefined && typeof node.retrySafe !== 'boolean')
+      throw new LoopError({
+        code: 'CONFIG',
+        message: `dag "${config.name}": retrySafe of node "${name}" must be a boolean`,
+      });
     // A `when` that reads a dependency's outcome (`passed(x)`, `failed(x)`,
     // however composed) must name one of this node's needs, and a branch on
     // `failed(x)` is reached only when x is optional: a required x that
@@ -180,9 +190,14 @@ export function dag(config: DagConfig): Job {
   };
   const routeKickbacks = config.maxKickbacks !== undefined
     && (perTargetBudget || maxKickbacks > 0);
+  // The declared shape a resumed run's record must match.
+  const resumeIdentity = (config as DagConfig & { [RESUME_IDENTITY]?: string })[RESUME_IDENTITY]
+    ?? dagResumeIdentity(config);
   // Every round a target has been asked to redo work, kept only for a judge's
-  // own state, a plain numeric budget never needs this history.
-  const identity = interactionIdentity(config);
+  // own state, a plain numeric budget never needs this history. A `workflow()`
+  // gives its brief and roles only through the resume identity, so the saved
+  // state digests it too.
+  const identity = interactionIdentity({ config, resumeIdentity });
 
   // Static graph relations for routing cross-stage feedback (kickback). All pure
   // functions of the declared `needs` edges, computed once. `dependents` is the
@@ -229,6 +244,23 @@ export function dag(config: DagConfig): Job {
     const targetCounts = new Map<string, number>(Object.entries(saved?.targetCounts ?? {}) as [string, number][]);
     const judgeHistory = new Map<string, JudgeRound[]>(Object.entries(saved?.history ?? {}) as [string, JudgeRound[]][]);
     const productFeedback = new Map<string, readonly InteractionResponse[]>(Object.entries(saved?.productFeedback ?? {}) as unknown as [string, InteractionResponse[]][]);
+    // The resume anchor: a dag records it at start, so a resumed run can
+    // match its finished nodes against the same declared shape. Only the
+    // graph's first invocation in a run takes it: a later loop pass, or a rerun
+    // of the node that holds this graph, runs every node again.
+    const anchors = (parent.state[RESUME_STAGE_OUTCOMES] as ResumedStageRecords | undefined)?.anchors;
+    const prior = anchors?.get(path.join('/'));
+    if (anchors instanceof Map) anchors.delete(path.join('/'));
+    parent.emit({
+      kind: 'workflow:start',
+      ts: ts(),
+      path,
+      identity: resumeIdentity,
+      workspace: parent.workspace.dir,
+      recordId: prior?.identity === resumeIdentity && prior.workspace === parent.workspace.dir
+        ? prior.recordId ?? randomUUID()
+        : randomUUID(),
+    });
     parent.emit({ kind: 'dag:start', ts: ts(), path, depth, nodes: names });
 
     const limit = pLimit(limitN);
@@ -292,29 +324,24 @@ export function dag(config: DagConfig): Job {
     let forkSeq = 0;
 
     /**
-     * Run a node, in its own worktree when isolated. On pass the node's work is
+     * Run an isolated node in its own worktree. On pass the node's work is
      * captured (any uncommitted remainder is committed in the worktree) and
      * landed back into the parent branch (`--no-ff`, serialised). A merge
      * conflict fails the node unless synthesis is enabled. The worktree is
      * always removed; a cleanly-merged fork branch is deleted.
      */
-    const runNodeJob = async (
+    const forkNodeJob = async (
       name: string,
       node: DagNode,
     ): Promise<Outcome> => {
-      const isolated = node.isolate ?? config.isolation === 'worktree';
-      if (!isolated) return node.job(nodeCtx(name, node.job));
-
       const base = parent.workspace;
-      if (!(await isRepo({ cwd: base.dir, signal: parent.signal }))) {
-        parent.log(
-          `node "${name}" requested worktree isolation but ${base.dir} is not a git repo; running in the shared workspace`,
-          'warn',
-        );
-        return node.job(nodeCtx(name, node.job));
+      // An interrupted or conflicted earlier run can leave its fork branch
+      // behind, and a new run counts forks from zero again, so skip any name
+      // that is already taken.
+      let branch = `lines/${slug(config.name)}-${slug(name)}-${(forkSeq += 1)}`;
+      while (await branchExists(base.dir, branch, { signal: parent.signal })) {
+        branch = `lines/${slug(config.name)}-${slug(name)}-${(forkSeq += 1)}`;
       }
-
-      const branch = `lines/${slug(config.name)}-${slug(name)}-${(forkSeq += 1)}`;
       const wt = await addWorktree(base.dir, {
         branch,
         base: 'HEAD',
@@ -390,6 +417,34 @@ export function dag(config: DagConfig): Job {
           signal: parent.signal,
         }).catch(() => {});
       }
+    };
+
+    /**
+     * Run a node, in its own worktree when isolated. On resume the guard
+     * reuses a recorded outcome or asks about an interrupted attempt first;
+     * for an isolated node it wraps the fork itself, so neither makes a
+     * worktree.
+     */
+    const runNodeJob = async (
+      name: string,
+      node: DagNode,
+    ): Promise<Outcome> => {
+      const retrySafe = node.retrySafe === true;
+      const shared = resumeGuard(node.job, resumeIdentity, name, retrySafe, prior);
+      const isolated = node.isolate ?? config.isolation === 'worktree';
+      if (!isolated) return shared(nodeCtx(name, shared));
+
+      const base = parent.workspace;
+      if (!(await isRepo({ cwd: base.dir, signal: parent.signal }))) {
+        parent.log(
+          `node "${name}" requested worktree isolation but ${base.dir} is not a git repo; running in the shared workspace`,
+          'warn',
+        );
+        return shared(nodeCtx(name, shared));
+      }
+
+      const fork = resumeGuard(() => forkNodeJob(name, node), resumeIdentity, name, retrySafe, prior, true);
+      return fork(nodeCtx(name, fork));
     };
 
     const record = (

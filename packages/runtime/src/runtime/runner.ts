@@ -17,9 +17,10 @@ import { LoopError } from '../core/errors.js';
 import { Budget, type BudgetConfig } from '../core/budget.js';
 import { makeRecorder, readResumeRecord } from './persist.js';
 
+import { RESUME_RECORDED_USAGE, RESUME_STAGE_OUTCOMES } from '../core/resume.js';
+
 /** Run-owned keys holding the workflow state read from its record. */
-export const RESUME_STAGE_OUTCOMES = 'obversa:resumed-stage-outcomes';
-export const RESUME_RECORDED_USAGE = 'obversa:resumed-recorded-usage';
+export { RESUME_RECORDED_USAGE, RESUME_STAGE_OUTCOMES };
 import { ensureRunSubdir } from './paths.js';
 import { startSupervisor, newRunId, type Supervisor } from './supervisor.js';
 import { jobMeta } from '../core/describe.js';
