@@ -215,6 +215,7 @@ export const EXPECTED_FILES = {
     'package/dist/engines/message-map.d.ts',
     'package/dist/engines/mock.d.ts',
     'package/dist/engines/preflight.d.ts',
+    'package/dist/engines/recorded-judge.d.ts',
     'package/dist/env/command.d.ts',
     'package/dist/env/command.js',
     'package/dist/env/command.js.map',
