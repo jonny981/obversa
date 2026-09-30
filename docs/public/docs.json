@@ -64,85 +64,44 @@
         "pages": [
           "workflows/index",
           {
-            "group": "Software Delivery",
+            "group": "Product development",
             "pages": [
-              "workflows/feature-team-offline",
               "workflows/feature-team",
               "workflows/forge-helper",
-              "workflows/backlog-groom-then-rank"
-            ]
-          },
-          {
-            "group": "Business",
-            "pages": [
-              "workflows/contract-playbook"
-            ]
-          },
-          {
-            "group": "Other Fields",
-            "pages": [
-              "workflows/translate-reflect"
-            ]
-          },
-          {
-            "group": "Markets",
-            "pages": [
-              "workflows/markets/market-session-advice"
-            ]
-          },
-          {
-            "group": "Sales",
-            "pages": [
-              "workflows/sales/draft-then-send"
-            ]
-          },
-          {
-            "group": "Support",
-            "pages": [
-              "workflows/support/triage-with-escalation"
-            ]
-          },
-          {
-            "group": "Research",
-            "pages": [
-              "workflows/research/literature-watch"
+              "workflows/backlog-groom-then-rank",
+              "workflows/product/shape-up-cycle"
             ]
           },
           {
             "group": "Finance",
             "pages": [
+              "workflows/markets/market-session-advice",
               "workflows/finance/invoice-chase"
             ]
           },
           {
-            "group": "Editorial",
+            "group": "Business operations",
             "pages": [
-              "workflows/editorial/writer-grader-cap"
-            ]
-          },
-          {
-            "group": "Hiring",
-            "pages": [
-              "workflows/hiring/shortlist"
-            ]
-          },
-          {
-            "group": "Knowledge",
-            "pages": [
-              "workflows/knowledge/vault-curator"
-            ]
-          },
-          {
-            "group": "Ops",
-            "pages": [
+              "workflows/contract-playbook",
+              "workflows/sales/draft-then-send",
+              "workflows/support/triage-with-escalation",
+              "workflows/hiring/shortlist",
               "workflows/ops/approve-the-exact-payload",
               "workflows/ops/handoff-that-resumes"
             ]
           },
           {
-            "group": "Product",
+            "group": "Research and knowledge",
             "pages": [
-              "workflows/product/shape-up-cycle"
+              "workflows/research/literature-watch",
+              "workflows/knowledge/vault-curator"
+            ]
+          },
+          {
+            "group": "Writing and content",
+            "pages": [
+              "workflows/editorial/writer-grader-cap",
+              "workflows/translate-reflect"
             ]
           }
         ]
@@ -432,6 +391,10 @@
     {
       "source": "/concepts/index",
       "destination": "/"
+    },
+    {
+      "source": "/workflows/feature-team-offline",
+      "destination": "/workflows/feature-team"
     }
   ],
   "integrations": {
