@@ -22,88 +22,67 @@ and set the writer's revision limit.
 ```mermaid
 flowchart LR
   write["write: Claude seat"] -->|the page| read["read: Codex seat"]
-  read -->|findings, tagged| judge["judge: Jev"]
-  judge -->|answers| route{route}
-  route -->|a block, or continue| write
-  route -->|holds, or over-polishing| approve["approve: a person"]
+  read -->|a block| write
+  read -->|other findings| judge{"judge: Jev"}
+  judge -->|continue| write
+  judge -->|holds, or over-polishing| approve["approve: a person"]
+  read -->|nothing fails| approve
   approve --> done((pass))
 ```
 
 ## The stopping rule
 
-The reader tags each finding `[block]`, `[should]` or `[nit]`. The route
-reads the judge's answers and decides:
+The judge sits on the `write` stage. The reader reviews the page, and
+`refine` names the judge and its cap:
 
-```ts examples/judge-stops-the-loop.ts (excerpt) {13-19,20-21,25}
-const route = fnJob('route', (ctx): Outcome => {
-  const raw = String(ctx.needs?.judge?.data ?? '');
-  let answers: Record<string, JudgeAnswer> = {};
-  try { answers = JSON.parse(raw) as typeof answers; } catch { /* an unreadable answer routes as "run again" */ }
-  const worth = answers.worth_another_round?.noul ?? answers.worth_another_round?.probability;
-  const doing = answers.worth_doing?.noul ?? answers.worth_doing?.probability;
-  const holds = answers.holds?.noul ?? answers.holds?.probability;
-  const reason = answers.stop_reason?.choice ?? 'unknown';
-  const round = ctx.graph?.attempt ?? 1;
-  const latest = history[history.length - 1];
-  const tally = latest ? `${latest.counts.block} block, ${latest.counts.should} should, ${latest.counts.nit} nit` : 'no findings recorded';
-  const blocks = latest?.counts.block ?? 0;
-  if (blocks > 0 && round < maxRounds) {
-    return revisionRequest({
-      target: 'write',
-      reason: `round ${round}: ${blocks} block finding${blocks === 1 ? '' : 's'} always go back; ${tally}`,
-      findings: [{ evidence: latest?.findings ?? '', severity: 'block' }],
-    });
-  }
-  const chosenStop = reason !== 'unknown' && reason !== 'continue';
-  if (chosenStop) return { status: 'pass', summary: `round ${round}: the judge stopped it, reason ${reason} (holds ${String(holds)}, worth doing ${String(doing)}, another round ${String(worth)}); ${tally}`, data: answers };
-  if (typeof holds === 'number' && holds >= 0.5) return { status: 'pass', summary: `round ${round}: the judge says the draft holds (${holds.toFixed(2)}); ${tally}`, data: answers };
-  if (typeof doing === 'number' && doing < 0.5) return { status: 'pass', summary: `round ${round}: the judge says the findings are not worth doing for this use case (${doing.toFixed(2)}); ${tally}`, data: answers };
-  if (typeof worth === 'number' && worth < 0.5) return { status: 'pass', summary: `round ${round}: the judge says another round is not worth it (${worth.toFixed(2)}); ${tally}`, data: answers };
-  if (round >= maxRounds) return { status: 'pass', summary: `round ${round}: the safety cap of ${maxRounds} rounds; the judge still wanted another (${String(worth)}); ${tally}`, data: answers };
-  return revisionRequest({
-    target: 'write',
-    reason: `round ${round}: the judge says another round is worth it (${String(worth)}); ${tally}`,
-    findings: [{ evidence: latest?.findings ?? '', severity: 'block' }],
-  });
-});
+```ts examples/judge-stops-the-loop.ts (excerpt)
+    stage('write', {
+      agent: 'write',
+      writes: file,
+      reviewedBy: 'read',
+      refine: judge(jev, { cap: 3 }),
+      desc: 'Rewrite the page so a person reads it once and knows what to do. On a later round, change only the sentences the findings name.',
+      gate: 'The reader finds nothing that fails, or the judge says the page holds for this use case.',
+    }),
 ```
 
-A block is a false claim or a sentence the reader would not understand, and
-it always goes back, whatever the judge says. Otherwise the judge's chosen
-reason decides. The cap in `maxKickbacks` is the last word: a run cannot
-loop past it.
+The brief tells the reader to tag each finding `block`, `should-fix` or
+`nice-to-have`. A block is a false claim or a sentence a person would not
+understand. A block always goes back to the writer, and the judge is not
+asked. For any other finding, the judge's chosen reason decides whether the
+page goes back or stands. The cap is the last word: with a cap of 3 the
+writer gets at most three more rounds after its first draft, whatever
+the judge says.
+
+The approval is a plain function. It reads the page, puts its sha256 in the
+question and sends a person's no back to the writer.
 
 ## The questions
 
 The judge sees the use case from the brief, the draft, the latest findings
-and every round so far with its counts and the size of each change. The
-default question set asks whether the draft holds, whether the findings are
-worth acting on for this use case, whether another round is worth it, and
-why to stop:
+and every earlier round it was asked about, with that round's counts and the
+size of its change. A round that went back for a block is not in that list. The
+default question set is `stopQuestions()` from
+[`@obversa/runtime`](/packages/runtime). It asks four questions:
 
-```ts examples/judge-stops-the-loop.ts (excerpt)
-    stop_reason: {
-      type: 'choice',
-      instructions: 'Are we at the point of diminishing returns? If so, which kind; if not, continue.',
-      criteria: {
-        holds: `${what} holds for this use case.`,
-        over_polishing: 'The remaining findings are taste, nits or edge cases past the bar.',
-        not_converging: 'The same class of finding keeps returning, so another round will not fix it.',
-        continue: 'Another round is worth it.',
-      },
-    },
-```
+- **`holds`.** For this use case, does the draft hold as it stands?
+- **`worth_doing`.** For this use case, are the latest findings worth
+  acting on?
+- **`worth_another_round`.** Given the whole history, is another round
+  worth it?
+- **`stop_reason`.** Are we at the point of diminishing returns? The judge
+  chooses `holds`, `over_polishing`, `not_converging`, `continue` or
+  `product_decision`.
 
-In `workflow()` the same loop is one field on the reviewed stage:
-`refine: judge(seat, { cap: 6, questions })`, with `stopQuestions()` from
-`@obversa/runtime` as the default set. A `dag()` takes the same `judge()`
-value on `maxKickbacks`. A stop means the same thing at both levels. When
-the judge chooses `holds` or `over_polishing`, the work is good enough as
-it stands, and it stands as a pass carrying the judge's reason. When it
-chooses `product_decision`, it asks a person as described below. Every other
-chosen stop, including `not_converging`, leaves the review's failure in place. A custom
-question set that wants a reason of its own to let the work stand names
-that choice `holds` or `over_polishing`. The judge engine takes
+Pass your own set as `judge(seat, { cap, questions })` when this wording
+does not fit your use case. A `dag()` takes the same `judge()` value on
+`maxKickbacks`. A stop means the same thing at both levels. When the judge
+chooses `holds` or `over_polishing`, the work is good enough as it stands,
+and it stands as a pass carrying the judge's reason. When it chooses
+`product_decision`, it asks a person as described below. Every other chosen
+stop, including `not_converging`, leaves the review's failure in place. A
+custom question set that wants a reason of its own to let the work stand
+names that choice `holds` or `over_polishing`. The judge engine takes
 `{ state, questions }` as its prompt and returns one answer per question;
 the [Jev API engine](/packages/engine-jev-api) page has the shape.
 
@@ -126,17 +105,16 @@ printed:
 ```json Output
 {
   "status": "pass",
-  "rounds": 2,
-  "stop": "round 2: the judge stopped it, reason holds (holds 0.9, worth doing 0.2, another round 0.1); 0 block, 0 should, 0 nit",
+  "stop": "the judge chose holds",
   "approved": true
 }
 ```
 
 Two rounds: the first reader pass found two blocks, so the page went back
-with them; the second found nothing, and the judge chose `holds`. The
-record holds each round's findings and each of the judge's answers. With
-`JUDGE=jev` and a TypeSafe key in the environment, the same file asks Jev
-instead of replaying.
+without asking the judge. The second found one `nice-to-have`, and the
+judge chose `holds`. The record holds each round's findings and the judge's
+answers. With `JUDGE=jev` and a TypeSafe key in the environment, the same
+file asks Jev instead of replaying.
 
 ## Next steps
 

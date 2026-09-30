@@ -1,6 +1,6 @@
 ---
 title: "Installation"
-description: "Add Obversa to a project and run the smallest file."
+description: "Install Obversa and prepare your project to run an agent workflow."
 ---
 
 Obversa is a library you import: add the packages to a Node project, write
@@ -14,7 +14,7 @@ You need:
 - **Node.js 22.12 or later.**
 - **npm or pnpm.**
 - **A coding agent signed in**, such as Claude Code or Codex, for a run that
-  calls a real model. The file below runs without one.
+  calls a model.
 
 Every Obversa package is an ES module, so the project needs
 `"type": "module"` in its `package.json`, and `tsx` runs a TypeScript file
@@ -45,53 +45,10 @@ The bundle installs every package except the Jev engine, which installs on
 its own. It has no API of its own, so import each tool from its own package.
 [Plugins and tools](/packages) lists what each engine needs on your machine.
 
-## The smallest file
-
-One agent job, with a scripted engine in place of a model:
-
-```ts examples/one-agent-job.ts
-import { agentJob, run } from '@obversa/runtime';
-import { MockEngine } from '@obversa/runtime/testing';
-
-const engine = new MockEngine(() => 'ready');
-
-const job = agentJob({
-  label: 'prepare-item',
-  engine: 'offline',
-  prompt: 'Prepare the item.',
-});
-
-const result = await run(job, {
-  engine: 'offline',
-  engines: { offline: engine },
-});
-
-console.log(result.outcome.status);
-```
-
-`run()` hands the prompt to the engine named `offline`, which is the
-`MockEngine` you passed in, and returns the job's outcome. Swap the scripted
-engine for a plugin such as `claude` from `@obversa/engine-claude-cli`, and
-the same job runs a real model.
-
-## Run it
-
-Save the file as `one-agent-job.ts` and run it:
-
-```bash Terminal
-npx tsx one-agent-job.ts
-```
-
-```text Output
-pass
-```
-
-The job passed: the engine answered, and the run ended with that outcome.
-
 ## Next steps
 
-- [First run](/get-started/first-run): three files that show the shapes a
-  team is built from, offline first.
+- [First run](/get-started/first-run): have Claude write a function, run its
+  tests, and ask Codex to review it.
 - [Examples](/workflows): complete teams you can copy, with what each run
   printed.
 - [Contributing](https://github.com/jonny981/obversa/blob/main/AGENTS.md):

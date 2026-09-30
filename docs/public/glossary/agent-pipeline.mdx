@@ -33,9 +33,9 @@ export const featureDelivery = pipeline(
 its target, so a failing review runs the implementer again with the
 findings. `approve` is a person's question. `maxKickbacks` caps how often
 the review can do that; when the budget runs out, the run fails with the
-last findings instead of looping. The whole file runs offline, and it exits
-with code 1 if the work ever stops going back:
-[Feature team, offline](/workflows/feature-team-offline).
+last findings instead of looping. The excerpt comes from a scripted test
+of the workflow shape. [Feature delivery](/workflows/feature-team) uses
+Claude and Codex for the work.
 
 ## The three parts
 
@@ -43,12 +43,10 @@ with code 1 if the work ever stops going back:
 | --- | --- |
 | Steps in order | `pipeline` with five named steps. |
 | A review that runs a step again | `reviewPanel` with three reviewers, `pass: 2`, `target: 'implement'`. |
-| A person at the end | `approval` with a question. The offline file answers it in place; in a real team the answer arrives through the callbacks client, and the run pauses until it does. |
+| A person at the end | `approval` with a question. The test supplies an answer; in a real team the answer arrives through the callbacks client, and the run pauses until it does. |
 
 ## Next steps
 
-- [Feature team, offline](/workflows/feature-team-offline): the file above
-  with its run.
 - [Feature delivery](/workflows/feature-team): the same shape on real
   engines.
 - [A person decides](/patterns/approval): how the answer comes back to a
