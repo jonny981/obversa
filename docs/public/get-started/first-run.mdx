@@ -1,56 +1,14 @@
 ---
 title: "First Run"
-description: "Three files to run: an offline team, one agent job, and a real writer and reviewer."
+description: "Have Claude write a function, run its tests, and ask Codex to review it."
 ---
 
-Three runs show the shapes a team is built from: a review that fails a step
-and the step runs again, an engine behind one job, and two real models in
-two roles. The first two run with no model and no network. Set the project
-up as [Installation](/get-started/installation) describes, copy each file in,
-and run it with `npx tsx`.
+Run a writer and reviewer on a small coding task. Claude writes the function
+and its test. Node runs the test, then Codex reviews the result.
 
-## An offline feature team
+Set up your project as [Installation](/get-started/installation) describes.
 
-Five named stages: analyse, implement, test, a review panel of three that
-passes on two, and a person who decides at the end. Every job is a small
-function, so the shape is the only thing on show. The file is on
-[Feature team, offline](/workflows/feature-team-offline). Copy it and run
-it:
-
-```bash Terminal
-npx tsx feature-team.ts
-```
-
-```text Output
-{
-  "status": "pass",
-  "implementRuns": 2
-}
-```
-
-`implement` ran twice. Two of the three reviewers failed the first attempt,
-so the panel's findings went to `implement`, the step that owns the fix, and
-it ran again. The run didn't start over. The second attempt passed, and the
-person at the end said yes.
-
-## One agent job
-
-The smallest thing that runs an engine: one job, one prompt, and a scripted
-engine that answers without a network call. The file is on
-[Installation](/get-started/installation#the-smallest-file). Run it:
-
-```bash Terminal
-npx tsx one-agent-job.ts
-```
-
-```text Output
-pass
-```
-
-The engine named `offline` answered, and the job passed. Swap the scripted
-engine for a plugin and the same job runs a real model.
-
-## A real team
+## Run the team
 
 You need the Claude Code and Codex command line tools installed and signed
 in. A Claude seat writes a function and its test from the brief at
@@ -113,7 +71,7 @@ needs your own code, a branch or a team inside a team, the same team is a
 ## Next steps
 
 - [Workflows](/concepts/workflows): how the steps, reviews and decisions in
-  these files fit together.
+  the workflow fit together.
 - [Feedback loops](/concepts/feedback-loops): what happens when a review or
   a test says no.
 - [Examples](/workflows): complete teams by field, with what each run
