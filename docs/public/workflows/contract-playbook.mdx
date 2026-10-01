@@ -21,7 +21,7 @@ playbook's wording, and writes the negotiating note. A model from another
 family checks each redline against the playbook and fails the set when a
 clause is missing or a redline goes further than its rule. A judge, Jev,
 says when another round on the redlines is worth it, up to a cap of three.
-Then the run stops for the lawyer. This file is a four-stage team: clauses,
+Then the run waits for the lawyer. This file is a four-stage team: clauses,
 redline, positions, negotiate.
 
 ## Run it
@@ -37,12 +37,18 @@ the judge is Jev:
 npx tsx contract-playbook.ts
 ```
 
+When the run reaches the lawyer, it waits and prints a page to answer on.
+The lawyer answers there, and the run finishes. Keep the process running
+until then: if it stops, the next run starts again from the first stage.
+
 Every event prints as one line as it happens, and the outcome prints last
 as JSON. The output below is the proof's offline run, with scripted seats
-standing in for the models and a recorded judge, so the words are the
-script's and the shape is the run's:
+standing in for the models, a recorded judge, and the proof answering as
+the lawyer on the page, so the words are the script's and the shape is the
+run's:
 
 ```text Output, from the offline proof
+Answer the lawyer's question on http://127.0.0.1:63983/
 ▸ run
 contract-playbook workflow:start
 contract-playbook ▸ dag (4 nodes)
@@ -81,10 +87,9 @@ contract-playbook › redline › redline-review › review-panel   gpt-5.6-luna
 contract-playbook › redline › redline-review › review-panel • redline-1: fail  one redline could be tighter
 contract-playbook › redline › redline-review › review-panel • redline: fail  Review panel: 0/1 reviewer(s) cleared. - redline-1 [should-fix]: clause 3: the fallback sentence on the liability redline could go; the twelve-month term already meets the rule
 contract-playbook › redline › redline-review › refine-judge • refine:judge
-
-contract-playbook › redline › redline-review › refine-judge   jev-latest: 10/5 tok
 contract-playbook › redline › redline-review › refine-judge • refine:judge: pass  {"holds":{"type":"noul","noul":0.9},"worth_doing":{"type":"noul","noul":0.2},"worth_another_round":{"type":"noul","noul":0.1},"stop_reason":{"type":"choice","choice":"holds","confidence":0.8}}
 contract-playbook › redline › redline-review ◆ the judge chose holds
+contract-playbook › redline › redline-review › @judge-review interaction:checkpoint
 contract-playbook › redline › redline-review · review: pass
 contract-playbook › redline › redline-review ◂ pass (2 iter)
 contract-playbook · node redline: done (pass)
@@ -107,13 +112,14 @@ contract-playbook › positions › positions-review ◂ pass (1 iter)
 contract-playbook · node positions: done (pass)
 contract-playbook · node negotiate: start
 contract-playbook › negotiate • negotiate
-contract-playbook › negotiate • negotiate: paused  waiting for a person: Send these redlines to the other side?
 contract-playbook · node negotiate: done (paused)
-contract-playbook ◂ dag paused
-◂ run paused (148/30 tok, 90 tok from cache)
+contract-playbook › negotiate • negotiate: pass  approved: Send these redlines to the other side?
+contract-playbook · node negotiate: done (pass)
+contract-playbook ◂ dag pass
+◂ run pass (138/25 tok, 90 tok from cache)
 {
-  "status": "paused",
-  "summary": "waiting for a person: Send these redlines to the other side?",
+  "status": "pass",
+  "summary": "dag \"contract-playbook\": all 4 node(s) green",
   "data": {
     "clauses": {
       "status": "pass",
@@ -128,32 +134,10 @@ contract-playbook ◂ dag paused
       "summary": "Review panel: 1/1 reviewer(s) cleared."
     },
     "negotiate": {
-      "status": "paused",
-      "summary": "waiting for a person: Send these redlines to the other side?",
+      "status": "pass",
+      "summary": "approved: Send these redlines to the other side?",
       "data": {
-        "requestId": "negotiate#1#8cf706409cc45450f55cea668f1ab7a7c224e4efb2740004a63b091e92c22264",
-        "gateId": "negotiate",
-        "gateVersion": 1,
-        "digest": "8cf706409cc45450f55cea668f1ab7a7c224e4efb2740004a63b091e92c22264",
-        "decisionText": "Send these redlines to the other side?",
-        "responseSchema": {
-          "type": "object",
-          "properties": {
-            "approved": {
-              "type": "boolean"
-            },
-            "note": {
-              "type": "string"
-            }
-          },
-          "required": [
-            "approved"
-          ]
-        },
-        "input": {
-          "positions": "Review panel: 1/1 reviewer(s) cleared."
-        },
-        "presentation": {}
+        "approved": true
       }
     }
   }
@@ -165,9 +149,9 @@ The first set of redlines left out the two clauses the playbook never
 signs; the checker tagged that a block, and the set went back without the
 judge being asked, because a block always does. The second set covered
 every clause and drew one taste note, and the judge said the redlines hold.
-The negotiating note passed its check first time. The run stopped at
-`negotiate` with the redlines and the positions in `review/`, waiting for
-the lawyer. A no goes to `redline` with the lawyer's note as the finding.
+The negotiating note passed its check first time. The run waited at
+`negotiate` with the redlines and the positions in `review/`, and the
+lawyer's yes on the page finished it. A no goes to `redline` with the lawyer's note as the finding.
 
 ## The file
 
@@ -230,7 +214,7 @@ of three, so the two shapes sit side by side:
 The "done when" sentences are each stage's `gate`. The package doesn't
 check them itself; it checks what each stage declares. A file in `writes`
 that's missing or empty fails the stage, a reviewed stage passes only when
-its reviewer accepts, and a person stage pauses until the person answers.
+its reviewer accepts, and a person stage waits until the person answers.
 
 <Accordion title="Full file">
 
@@ -327,10 +311,16 @@ function createContractPlaybook(judgeSeat: TeamSeat, engines: ContractPlaybookEn
   });
 }
 
+// The run waits for the lawyer and prints the address of a page to answer
+// on. The wait lives in this process: stop it before the lawyer answers,
+// and the next run starts again from the first stage.
 const result = await run(createContractPlaybook(judgeSeat), {
-  onEvent: (event) => console.log(formatEvent(event)),
+  onCallback: 'wait',
+  monitor: true,
+  onEvent: (event) => console.log(event.kind === 'monitor' ? `Answer the lawyer's question on ${event.url}` : formatEvent(event)),
   recordTo: 'records/contract-playbook.jsonl',
 });
+await result.monitor?.close();
 console.log(JSON.stringify(result.outcome, null, 2));
 ```
 

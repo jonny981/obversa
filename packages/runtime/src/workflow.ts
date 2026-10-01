@@ -294,6 +294,7 @@ function reviewerPanel(
           panelInput(brief, files, ctx.workspace.dir),
           reviewTarget(named, targetFiles),
           { role: 'reviewer', stage: named.name },
+          named.config,
         )[index]!;
         return requireNoFiles(
           `${named.name}-${definition.name}`,

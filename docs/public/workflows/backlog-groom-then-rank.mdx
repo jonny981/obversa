@@ -19,7 +19,7 @@ model turns the tickets into stories and lists the questions; a model from
 another family reads them back against the raw tickets and fails the set
 when a ticket is missed or a story is vague; a judge, Jev, says when
 another round on the stories is worth it, up to a cap of three; then the
-run stops for the product owner. This file is a three-stage team: split,
+run waits for the product owner. This file is a three-stage team: split,
 clarify, rank. Nothing in it writes code. The work is deciding what's worth
 writing.
 
@@ -36,12 +36,18 @@ the judge is Jev:
 npx tsx backlog-groom-then-rank.ts
 ```
 
+When the run reaches the owner, it waits and prints a page to answer on.
+The owner answers there, and the run finishes. Keep the process running
+until then: if it stops, the next run starts again from the first stage.
+
 Every event prints as one line as it happens, usage lines included, and the
 outcome prints last as JSON. The output below is the proof's offline run,
-with scripted seats standing in for the models and a recorded judge, so the
-words are the script's and the shape is the run's:
+with scripted seats standing in for the models, a recorded judge, and the
+proof answering as the owner on the page, so the words are the script's and
+the shape is the run's:
 
 ```text Output, from the offline proof
+Answer the owner's question on http://127.0.0.1:63953/
 ▸ run
 backlog-groom-then-rank workflow:start
 backlog-groom-then-rank ▸ dag (3 nodes)
@@ -60,10 +66,9 @@ backlog-groom-then-rank › split › split-review › review-panel   gpt-5.6-lu
 backlog-groom-then-rank › split › split-review › review-panel • split-1: fail  one raw ticket has no story
 backlog-groom-then-rank › split › split-review › review-panel • split: fail  Review panel: 0/1 reviewer(s) cleared. - split-1 [should-fix]: the "Dark mode pls" ticket is not covered by any story
 backlog-groom-then-rank › split › split-review › refine-judge • refine:judge
-
-backlog-groom-then-rank › split › split-review › refine-judge   jev-latest: 10/5 tok
 backlog-groom-then-rank › split › split-review › refine-judge • refine:judge: pass  {"holds":{"type":"noul","noul":0.2},"worth_doing":{"type":"noul","noul":0.8},"worth_another_round":{"type":"noul","noul":0.8},"stop_reason":{"type":"choice","choice":"continue","confidence":0.6}}
 backlog-groom-then-rank › split › split-review ◆ the judge says another round is worth it (0.80)
+backlog-groom-then-rank › split › split-review › @judge-review interaction:checkpoint
 backlog-groom-then-rank › split › split-review · review: fail
 review did not pass (Review panel: 0/1 reviewer(s) cleared. - split-1 [should-fix]: the "Dark mode pls" ticket is not covered by any story (the judge says another round is worth it (0.80))); re-entering split-review
 backlog-groom-then-rank › split › split-review · iteration 2
@@ -79,10 +84,9 @@ backlog-groom-then-rank › split › split-review › review-panel   gpt-5.6-lu
 backlog-groom-then-rank › split › split-review › review-panel • split-1: fail  one taste note
 backlog-groom-then-rank › split › split-review › review-panel • split: fail  Review panel: 0/1 reviewer(s) cleared. - split-1 [should-fix]: the PDF story could name the file size limit in its checks; nice to have
 backlog-groom-then-rank › split › split-review › refine-judge • refine:judge
-
-backlog-groom-then-rank › split › split-review › refine-judge   jev-latest: 10/5 tok
 backlog-groom-then-rank › split › split-review › refine-judge • refine:judge: pass  {"holds":{"type":"noul","noul":0.9},"worth_doing":{"type":"noul","noul":0.2},"worth_another_round":{"type":"noul","noul":0.1},"stop_reason":{"type":"choice","choice":"holds","confidence":0.8}}
 backlog-groom-then-rank › split › split-review ◆ the judge chose holds
+backlog-groom-then-rank › split › split-review › @judge-review interaction:checkpoint
 backlog-groom-then-rank › split › split-review · review: pass
 backlog-groom-then-rank › split › split-review ◂ pass (2 iter)
 backlog-groom-then-rank · node split: done (pass)
@@ -105,13 +109,14 @@ backlog-groom-then-rank › clarify › clarify-review ◂ pass (1 iter)
 backlog-groom-then-rank · node clarify: done (pass)
 backlog-groom-then-rank · node rank: start
 backlog-groom-then-rank › rank • rank
-backlog-groom-then-rank › rank • rank: paused  waiting for a person: Which of these go into the next cycle, and in what order?
 backlog-groom-then-rank · node rank: done (paused)
-backlog-groom-then-rank ◂ dag paused
-◂ run paused (155/34 tok, 90 tok from cache)
+backlog-groom-then-rank › rank • rank: pass  approved: Which of these go into the next cycle, and in what order?
+backlog-groom-then-rank · node rank: done (pass)
+backlog-groom-then-rank ◂ dag pass
+◂ run pass (135/24 tok, 90 tok from cache)
 {
-  "status": "paused",
-  "summary": "waiting for a person: Which of these go into the next cycle, and in what order?",
+  "status": "pass",
+  "summary": "dag \"backlog-groom-then-rank\": all 3 node(s) green",
   "data": {
     "split": {
       "status": "pass",
@@ -122,32 +127,11 @@ backlog-groom-then-rank ◂ dag paused
       "summary": "Review panel: 1/1 reviewer(s) cleared."
     },
     "rank": {
-      "status": "paused",
-      "summary": "waiting for a person: Which of these go into the next cycle, and in what order?",
+      "status": "pass",
+      "summary": "approved: Which of these go into the next cycle, and in what order?",
       "data": {
-        "requestId": "rank#1#c5abb5a7d022cf7b259b1320bb4a68333fe82f444eda923ef07ae80b55480eae",
-        "gateId": "rank",
-        "gateVersion": 1,
-        "digest": "c5abb5a7d022cf7b259b1320bb4a68333fe82f444eda923ef07ae80b55480eae",
-        "decisionText": "Which of these go into the next cycle, and in what order?",
-        "responseSchema": {
-          "type": "object",
-          "properties": {
-            "approved": {
-              "type": "boolean"
-            },
-            "note": {
-              "type": "string"
-            }
-          },
-          "required": [
-            "approved"
-          ]
-        },
-        "input": {
-          "clarify": "Review panel: 1/1 reviewer(s) cleared."
-        },
-        "presentation": {}
+        "approved": true,
+        "note": "Ship the PDF download first, then the export fix."
       }
     }
   }
@@ -159,7 +143,7 @@ The first set of stories left the founder's one-line wish uncovered; the
 reviewer named the ticket, and the judge said another round was worth it.
 The second set covered every ticket and drew one taste note, and the judge
 said the stories hold. The questions passed their review first time, and
-the run stopped for the owner.
+the run waited for the owner. The owner's yes on the page finished it.
 
 A grooming loop that stops with the work unfinished is doing its job. One
 that runs out of rounds and passes the stories on anyway isn't. Splitting a
@@ -196,7 +180,7 @@ person:
 
 `clarify` follows the same shape and writes `backlog/questions.md`: for each
 story, the questions that must be answered before anyone writes code, with a
-proposed answer for each. Then the run stops at the owner:
+proposed answer for each. Then the run waits for the owner:
 
 ```ts examples/use-cases/engineering/backlog-groom-then-rank.ts (excerpt) {5}
       stage('rank', {
@@ -216,7 +200,7 @@ The "done when" sentences are each stage's `gate`. The writing seat reads
 them in its prompt, but the package doesn't check them. It checks what each
 stage declares: a file in `writes` that's missing or empty fails the stage,
 a reviewed stage passes only when its reviewer accepts, and a person stage
-pauses until the person answers. A raw ticket with no story fails the split,
+waits until the person answers. A raw ticket with no story fails the split,
 because the reviewer reads the raw tickets as well as the stories; that's
 what happens in `backlog-groom-then-rank.proof.ts`. A split sent findings
 must change: if the same bytes come back, the stage ends instead of running
@@ -311,10 +295,16 @@ function createBacklogGroom(judgeSeat: TeamSeat, engines: BacklogGroomEngines = 
   });
 }
 
+// The run waits for the owner and prints the address of a page to answer
+// on. The wait lives in this process: stop it before the owner answers, and
+// the next run starts again from the first stage.
 const result = await run(createBacklogGroom(judgeSeat), {
-  onEvent: (event) => console.log(formatEvent(event)),
+  onCallback: 'wait',
+  monitor: true,
+  onEvent: (event) => console.log(event.kind === 'monitor' ? `Answer the owner's question on ${event.url}` : formatEvent(event)),
   recordTo: 'records/backlog-groom-then-rank.jsonl',
 });
+await result.monitor?.close();
 console.log(JSON.stringify(result.outcome, null, 2));
 ```
 

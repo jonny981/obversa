@@ -79,8 +79,14 @@ function createTranslateReflect(judgeSeat: TeamSeat, engines: TranslateEngines =
   });
 }
 
+// The run waits for the editor and prints the address of a page to answer
+// on. The wait lives in this process: stop it before the editor answers,
+// and the next run starts again from the first stage.
 const result = await run(createTranslateReflect(judgeSeat), {
-  onEvent: (event) => console.log(formatEvent(event)),
+  onCallback: 'wait',
+  monitor: true,
+  onEvent: (event) => console.log(event.kind === 'monitor' ? `Answer the editor's question on ${event.url}` : formatEvent(event)),
   recordTo: 'records/translate-reflect.jsonl',
 });
+await result.monitor?.close();
 console.log(JSON.stringify(result.outcome, null, 2));
