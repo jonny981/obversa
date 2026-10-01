@@ -24,11 +24,13 @@ const fourStories = `${threeStories}${story('Dark mode', 'Dark mode pls', 'A use
 // The reviewer sends the first split back with one finding the judge says
 // is worth another round; the second split covers all four and the
 // reviewer's remaining note is taste, so the judge stops the loop. The
-// questions are written and accepted, and the run stops at the owner.
+// questions are written and accepted, and the run waits for the owner,
+// who answers on the run's page.
 await withExample({
   here,
   example: 'backlog-groom-then-rank',
   files: { 'briefs/backlog.md': brief, 'backlog/raw.md': raw, 'judge.json': judgeJson },
+  answer: { approved: true, note: 'Ship the PDF download first, then the export fix.' },
   seats: {
     claude: [
       { writes: { 'backlog/stories.md': threeStories }, reply: pass('three stories from four tickets') },
@@ -42,9 +44,10 @@ await withExample({
     ],
   },
 }, async (run) => {
-  assert.equal(run.printed.status, 'paused', `the run stops at the owner: ${run.stdout}`);
-  assert.equal(run.printed.data?.rank?.status, 'paused');
-  assert.match(run.printed.summary ?? '', /next cycle/);
+  assert.match(run.stdout, /http:\/\/127\.0\.0\.1:\d+\//, 'the run prints the page to answer on');
+  assert.equal(run.question, 'Which of these go into the next cycle, and in what order?', 'the page shows the owner the question');
+  assert.equal(run.printed.status, 'pass', `the owner's answer finishes the run: ${run.stdout}`);
+  assert.equal(run.printed.data?.rank?.status, 'pass');
   assert.equal(run.seatCalls.filter((call) => call.role === 'claude').length, 3, 'split twice, clarify once');
   assert.equal(run.seatCalls.filter((call) => call.role === 'codex').length, 3, 'two reviews of the split, one of the questions');
   const stories = await run.read('backlog/stories.md');
@@ -53,11 +56,16 @@ await withExample({
   assert.match(await run.read('backlog/questions.md'), /no open questions/);
   assert.match(run.stdout, /tok/, 'the run prints its usage lines');
 
-  const judged = (await recordEvents(run, 'records/backlog-groom-then-rank.jsonl')).filter((event) => event.kind === 'refine:judge');
+  const record = await recordEvents(run, 'records/backlog-groom-then-rank.jsonl');
+  const judged = record.filter((event) => event.kind === 'refine:judge');
   assert.deepEqual(judged.map((event) => event.reason), [
     'the judge says another round is worth it (0.80)',
     'the judge chose holds',
   ]);
+  const rank = record.filter((event) => event.kind === 'dag:node' && event.node === 'rank' && event.phase === 'done');
+  assert.deepEqual(rank.map((event) => (event.outcome as { status: string }).status), ['paused', 'pass'], 'the run pauses at the owner, then the answer passes the step');
+  const starts = record.filter((event) => event.kind === 'dag:node' && event.phase === 'start').map((event) => event.node);
+  assert.deepEqual(starts, ['split', 'clarify', 'rank'], 'each stage starts once: the answer repeats no finished work');
 
   console.log(JSON.stringify({
     status: 'pass',
@@ -67,7 +75,7 @@ await withExample({
     reviewKickbacks: 1,
     judge: ['continue', 'holds'],
     cap: 3,
-    pausedAt: 'rank',
+    answeredOnPage: 'rank',
     mode: run.mode,
   }, null, 2));
 });

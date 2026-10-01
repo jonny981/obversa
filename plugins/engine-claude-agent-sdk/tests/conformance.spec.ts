@@ -65,8 +65,9 @@ it('runs the full kit at the SDK query boundary', async () => {
       observe() {
         const options = provider.state.calls.at(-1)!.options;
         const tools = options.tools ?? [];
+        // The same setting sources Claude Code loads, in every mode.
+        expect(options.settingSources).toEqual(['user', 'project', 'local']);
         if (!tools.includes('Edit')) {
-          expect(options.settingSources).toEqual(['project']);
           expect(options.strictMcpConfig).toBe(true);
           expect(options.disallowedTools).toContain('mcp__*');
         }

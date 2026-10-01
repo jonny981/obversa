@@ -137,6 +137,10 @@ export const stageBranches = {
   F157: 'release/0.2.2',
   F166: 'feat/engine-mastra',
   F158: 'fix/engines-read-instructions',
+  F160: 'fix/reviewers-get-stage-gate',
+  F161: 'fix/team-callback-review',
+  F162: 'fix/approval-examples-answer',
+  F163: 'fix/engines-use-normal-login',
 };
 
 export function manageStage(args, options = {}) {

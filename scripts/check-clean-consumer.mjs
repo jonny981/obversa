@@ -191,7 +191,7 @@ const expectedAttemptReport = {
   grok: {
     requested: {
       adapter: 'grok-cli',
-      adapterVersion: '1.0.5',
+      adapterVersion: '1.0.44',
       provider: 'xai',
       modelFamily: 'grok-4',
       model: 'grok-4-example',
@@ -199,7 +199,7 @@ const expectedAttemptReport = {
     },
     effective: {
       adapter: 'grok-cli',
-      adapterVersion: '1.0.5',
+      adapterVersion: '1.0.44',
       provider: 'xai',
       modelFamily: 'grok-4',
       model: 'grok-4-example',
@@ -549,7 +549,7 @@ const engines = {
   'anthropic-api': new AnthropicApiEngine({ defaultModel: 'claude-test', apiKey: 'test-key' }),
   'claude-cli': new ClaudeCliEngine({ defaultModel: 'claude-test', cliBinary: '/usr/bin/false', permissionMode: 'auto' }),
   codex: new CodexEngine({ defaultModel: 'gpt-test', cliBinary: '/usr/bin/false', permissionMode: 'plan' }),
-  'grok-cli': new GrokCliEngine({ executable: '/usr/bin/false', version: '1.0.5', identity: { provider: 'xai', modelFamily: 'grok-4' }, permissionMode: 'dontAsk' }),
+  'grok-cli': new GrokCliEngine({ executable: '/usr/bin/false', version: '1.0.44', identity: { provider: 'xai', modelFamily: 'grok-4' }, permissionMode: 'dontAsk' }),
   'jev-api': new JevApiEngine({ endpoint: 'http://127.0.0.1:9', apiKey: 'test-key' }),
   'opencode-cli': new OpenCodeCliEngine({ executable: '/usr/bin/false', version: '1.18.23', identity: { provider: 'opencode', modelFamily: null } }),
 };

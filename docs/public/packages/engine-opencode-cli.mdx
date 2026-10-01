@@ -1,12 +1,20 @@
 ---
 title: "OpenCode CLI Engine"
-description: "@obversa/engine-opencode-cli: one isolated engine attempt through a fresh OpenCode CLI process, for any provider OpenCode runs."
+description: "@obversa/engine-opencode-cli: one engine attempt through a fresh OpenCode CLI process, with your own OpenCode login, for any provider OpenCode runs."
 ---
 
-`@obversa/engine-opencode-cli` runs one isolated engine attempt through the
-`opencode` command-line tool, in a fresh process with a clean environment,
-so your own sign-in isn't used. Use it to put a model from any provider
-OpenCode runs into a seat, which gives a review panel a third model family.
+`@obversa/engine-opencode-cli` runs one engine attempt through the
+`opencode` command-line tool, in a fresh process. Use it to put a model
+from any provider OpenCode runs into a seat, which gives a review panel a
+third model family.
+
+The plugin runs OpenCode the way you run it: with your own home folder,
+your OpenCode config folder, your OpenCode login and your OpenCode
+settings, the same as every other engine. OpenCode loads the repository's
+instruction files under its own rules. The plugin adds only what the step
+needs, through OpenCode's own config: the tools and permission rules the
+step declares, with every other tool turned off, no autoupdate and no
+sharing.
 
 ## Install
 
@@ -26,10 +34,16 @@ Included in `@obversa/obversa`.
 
 ## Requirements
 
-- OpenCode CLI 1.18.23, at an absolute path you pass as `executable`. The
-  plugin refuses any other version.
-- Any credentials your model's provider needs, passed in the `auth` or
-  `environment` option.
+- OpenCode CLI 1.18.23, the version the plugin is tested with, at an
+  absolute path you pass as `executable`. The plugin refuses any other
+  version.
+- OpenCode signed in to your model's provider, or login data you pass in
+  `auth`.
+- A model on a paid login. OpenCode's free models refuse any run that turns
+  a tool off, with the message "OpenCode's free tier can only be used from
+  within OpenCode". The plugin turns off every tool a step doesn't declare,
+  so a free model can't serve a step. A model on your paid OpenCode login
+  can.
 
 ## Identity
 
@@ -79,14 +93,11 @@ then one JSON value. The job's own parser reads that marked text part.
 
 ### `auth` and `environment`
 
-The child runs with a clean environment. `auth` is provider-keyed
-credential data copied into it, and `environment` the exact values copied
-in. Nothing from your own shell reaches the process unless you name it.
-
-### `managedConfigDirectories`
-
-The plugin refuses to run while a managed OpenCode config file exists in
-the system config locations. This option adds directories to that check.
+The child gets your own environment, so OpenCode uses your own login.
+`auth` is provider-keyed login data that OpenCode uses instead of the
+logins you stored with `opencode auth login`. `opencode(model, options)`
+takes the same `auth` option. `environment` sets more values on top of
+your environment. Names that start with `OPENCODE_` are refused.
 
 ### The rest
 
@@ -96,13 +107,15 @@ the system config locations. This option adds directories to that check.
 | `version` | `string` | required | The version the CLI must report, `1.18.23`. |
 | `identity` | `OpenCodeCliIdentity` | required | What this instance serves. |
 | `tools` | `readonly string[]` | none | `OpenCodeSeatOptions` only: the tools the seat may use. |
+| `auth` | `JsonObject` | none | Login data to use instead of yours. Also an `OpenCodeSeatOptions` field. |
 
 ## Errors
 
 - **A version other than `1.18.23`** refuses the run.
 - **A request whose model disagrees with `identity`** is refused before
   anything runs.
-- **A managed config file** in a system config location refuses the run.
+- **A symlink in the workspace that points outside it** refuses a step
+  that can read or change files.
 - **`EngineError`** kinds as the [API](/packages/api#errors) lists them.
 
 ## API

@@ -1,16 +1,9 @@
 import {
-  existsSync,
-  mkdtempSync,
-  mkdirSync,
   readdirSync,
   realpathSync,
-  rmSync,
   statSync,
 } from 'node:fs';
-import { tmpdir, userInfo } from 'node:os';
 import {
-  delimiter,
-  dirname,
   isAbsolute,
   join,
   relative,
@@ -68,8 +61,11 @@ const STEP_FINISH_REASONS = new Set([
   'error',
   'unknown',
 ]);
+// The step runs as its own agent, so no agent in the person's config merges
+// into the step's tool and permission settings.
+const STEP_AGENT = 'obversa-step';
 const BASE_SYSTEM_PROMPT =
-  'Execute one isolated Obversa node attempt. Follow only this system prompt and the user prompt. Use only the declared tools and permissions.';
+  'Execute one Obversa node attempt. Use only the declared tools and permissions.';
 const STRUCTURED_RESULT_INSTRUCTION = [
   'Your final answer must be one completed text part beginning with exactly:',
   'OBVERSA_STRUCTURED_RESULT_V1',
@@ -126,19 +122,17 @@ export interface OpenCodeCliEngineOptions {
   readonly executable: string;
   readonly version: string;
   readonly identity: OpenCodeCliIdentity;
-  /** Exact host-selected values copied into the clean child environment. */
+  /** Values set on top of the person's own environment. */
   readonly environment?: Readonly<Record<string, string>>;
-  /** Exact provider-keyed OpenCode auth data copied into the child environment. */
+  /** Provider-keyed OpenCode login data to use instead of the person's own login. */
   readonly auth?: JsonObject;
-  /** Extra directories the managed-config check also reads, beyond the real
-   * system paths. Production callers pass none; a caller must pass a
-   * directory deliberately, so an ambient environment variable cannot. */
-  readonly managedConfigDirectories?: readonly string[];
 }
 
 export interface OpenCodeSeatOptions {
   readonly executable: string;
   readonly tools?: readonly string[];
+  /** Provider-keyed OpenCode login data to use instead of the person's own login. */
+  readonly auth?: JsonObject;
 }
 
 export interface OpenCodeSeat {
@@ -161,6 +155,7 @@ export function opencode(modelName: string, options: OpenCodeSeatOptions): OpenC
       executable: options.executable,
       version: SUPPORTED_VERSION,
       identity: { provider: selected.provider, modelFamily },
+      ...(options.auth === undefined ? {} : { auth: options.auth }),
     }),
     identity: {
       adapter: 'opencode-cli',
@@ -176,7 +171,6 @@ export interface OpenCodeInvocation {
   readonly args: readonly string[];
   readonly stdin: string;
   readonly environment: Readonly<Record<string, string>>;
-  readonly configDirectory: string;
 }
 
 interface TextObservation {
@@ -330,12 +324,7 @@ function selectedEnvironment(
         `OpenCode environment value ${name} must be a string without NUL`,
       );
     }
-    if (
-      name === 'HOME'
-      || name === 'TMPDIR'
-      || name.startsWith('XDG_')
-      || name.startsWith('OPENCODE_')
-    ) {
+    if (name.startsWith('OPENCODE_')) {
       throw new TypeError(`OpenCode environment cannot replace ${name}`);
     }
     selected[name] = value;
@@ -408,54 +397,7 @@ function authValue(value: JsonObject | undefined): JsonObject {
   return checked;
 }
 
-/** The managed-config files a machine may control, from the real system
- * locations plus any extra directories the caller supplies. Production
- * callers pass no extras; tests pass their fixture directory. */
-function managedConfigSources(extraDirectories: readonly string[] = []): readonly string[] {
-  const systemDirectory = process.platform === 'darwin'
-    ? '/Library/Application Support/opencode'
-    : process.platform === 'win32'
-      ? 'C:\\ProgramData\\opencode'
-      : '/etc/opencode';
-  const directories = [systemDirectory, ...extraDirectories];
-  const sources = directories.flatMap((directory) => [
-    join(directory, 'opencode.json'),
-    join(directory, 'opencode.jsonc'),
-  ]);
-  if (process.platform === 'darwin') {
-    let user = 'user';
-    try {
-      user = userInfo().username || user;
-    } catch {
-      // Match OpenCode's fixed fallback without trusting HOME or USER.
-    }
-    sources.push(
-      join(
-        '/Library/Managed Preferences',
-        user,
-        'ai.opencode.managed.plist',
-      ),
-      '/Library/Managed Preferences/ai.opencode.managed.plist',
-    );
-  }
-  return Object.freeze(sources);
-}
-
-/** The first managed-config file that exists on disk, or undefined. Pure: it
- * reads only the source list it is given. */
-function findManagedConfig(sources: readonly string[]): string | undefined {
-  return sources.find((candidate) => existsSync(candidate));
-}
-
-/** Refuse to run when a managed config file exists, naming the exact file. */
-function assertNoManagedConfig(sources: readonly string[]): void {
-  const source = findManagedConfig(sources);
-  if (source !== undefined) {
-    throw new TypeError(`managed OpenCode config is not isolated: ${source}`);
-  }
-}
-
-function assertWorkspaceSymlinksContained(
+function assertSymlinksStayInWorkspace(
   workspace: string,
   capabilities: readonly string[],
 ): void {
@@ -505,14 +447,7 @@ function assertWorkspaceSymlinksContained(
             `OpenCode symlink ${path} resolves outside the workspace`,
           );
         }
-        if (directoryTarget) {
-          if (target === workspace) {
-            throw new TypeError(
-              `OpenCode symlink ${path} resolves to the workspace root`,
-            );
-          }
-          pending.push(target);
-        }
+        if (directoryTarget) pending.push(target);
       } else if (entry.isDirectory()) {
         pending.push(path);
       }
@@ -702,19 +637,12 @@ function configFor(
   return cloneFrozenJson({
     share: 'disabled',
     autoupdate: false,
-    snapshot: false,
     model: selectedModel.value,
     small_model: selectedModel.value,
-    enabled_providers: [selectedModel.provider],
-    default_agent: 'build',
-    plugin: [],
-    instructions: [],
-    mcp: {},
-    lsp: false,
-    formatter: false,
+    default_agent: STEP_AGENT,
     tools: built.tools,
     permission: built.permission,
-    agent: { build: agent },
+    agent: { [STEP_AGENT]: agent },
   });
 }
 
@@ -731,7 +659,6 @@ function serializedConfig(value: JsonObject): string {
 export function buildOpenCodeInvocation(
   request: AgentRequest,
   options: OpenCodeCliEngineOptions,
-  rawDirectory: string,
 ): OpenCodeInvocation {
   if (typeof request.cwd !== 'string' || !isAbsolute(request.cwd)) {
     throw new TypeError('OpenCode request cwd must be an absolute path');
@@ -746,9 +673,6 @@ export function buildOpenCodeInvocation(
     throw new TypeError(
       'OpenCode request environment is not allowed; select values in the constructor environment',
     );
-  }
-  if (!isAbsolute(rawDirectory)) {
-    throw new TypeError('OpenCode isolation directory must be an absolute path');
   }
   if (typeof options.executable !== 'string' || !isAbsolute(options.executable)) {
     throw new TypeError('OpenCode executable must be an absolute path');
@@ -770,50 +694,21 @@ export function buildOpenCodeInvocation(
       `OpenCode provider ${selectedModel.provider} cannot expose websearch`,
     );
   }
-  const directory = realpathSync(rawDirectory);
-  const home = join(directory, 'home');
-  const dataHome = join(directory, 'xdg-data');
-  const configHome = join(directory, 'xdg-config');
-  const cacheHome = join(directory, 'xdg-cache');
-  const stateHome = join(directory, 'xdg-state');
-  const temporary = join(directory, 'tmp');
-  for (const path of [home, dataHome, configHome, cacheHome, stateHome, temporary]) {
-    mkdirSync(path, { recursive: true, mode: 0o700 });
-  }
-
   const selected = selectedEnvironment(options.environment);
   const auth = authValue(options.auth);
   const config = configFor(request, selectedModel, built);
   const configContent = serializedConfig(config);
   const attempt = attemptEnvironment({ ...request, env: undefined }) ?? {};
-  const path = selected.PATH ?? [
-    dirname(process.execPath),
-    dirname(options.executable),
-    '/usr/bin',
-    '/bin',
-    '/usr/sbin',
-    '/sbin',
-  ].filter((value, index, values) => values.indexOf(value) === index)
-    .join(delimiter);
+  // Set on top of the person's own environment, so OpenCode reads its normal
+  // home, config folder and login unless the host passed another login.
   const environment = Object.freeze({
     ...selected,
     ...attempt,
-    PATH: path,
-    HOME: home,
-    XDG_DATA_HOME: dataHome,
-    XDG_CONFIG_HOME: configHome,
-    XDG_CACHE_HOME: cacheHome,
-    XDG_STATE_HOME: stateHome,
-    TMPDIR: temporary,
-    OPENCODE_CONFIG_DIR: join(configHome, 'opencode'),
     OPENCODE_CONFIG_CONTENT: configContent,
-    OPENCODE_AUTH_CONTENT: canonicalJson(auth),
-    OPENCODE_DISABLE_PROJECT_CONFIG: '1',
-    OPENCODE_PURE: '1',
-    OPENCODE_DISABLE_DEFAULT_PLUGINS: '1',
-    OPENCODE_DISABLE_EXTERNAL_SKILLS: '1',
+    ...(Object.keys(auth).length === 0
+      ? {}
+      : { OPENCODE_AUTH_CONTENT: canonicalJson(auth) }),
     OPENCODE_DISABLE_AUTOUPDATE: '1',
-    OPENCODE_DISABLE_LSP_DOWNLOAD: '1',
     OPENCODE_DISABLE_SHARE: '1',
   });
   return Object.freeze({
@@ -821,7 +716,6 @@ export function buildOpenCodeInvocation(
       'run',
       '--format',
       'json',
-      '--pure',
       '--model',
       selectedModel.value,
       '--dir',
@@ -829,7 +723,6 @@ export function buildOpenCodeInvocation(
     ]),
     stdin: request.prompt,
     environment,
-    configDirectory: configHome,
   });
 }
 
@@ -1178,8 +1071,6 @@ function transportFailure(
   return Object.freeze({ kind, message, exitCode });
 }
 
-export { assertNoManagedConfig, findManagedConfig, managedConfigSources };
-
 export class OpenCodeCliEngine implements Engine {
   readonly name = 'opencode-cli';
   readonly #executable: string;
@@ -1216,9 +1107,6 @@ export class OpenCodeCliEngine implements Engine {
     this.#environment = selectedEnvironment(options.environment);
     this.#auth = authValue(options.auth);
     this.#authRedactions = authRedactions(this.#auth);
-    const managedConfigDirectories = Object.freeze([
-      ...(options.managedConfigDirectories ?? []),
-    ]);
     this.#options = Object.freeze({
       executable: this.#executable,
       version: this.#version,
@@ -1227,9 +1115,6 @@ export class OpenCodeCliEngine implements Engine {
         ? {}
         : { environment: this.#environment }),
       ...(Object.keys(this.#auth).length === 0 ? {} : { auth: this.#auth }),
-      ...(managedConfigDirectories.length === 0
-        ? {}
-        : { managedConfigDirectories }),
     });
   }
 
@@ -1242,7 +1127,6 @@ export class OpenCodeCliEngine implements Engine {
     let normalized: AgentRequest;
     let selected: EngineSelectionRecord;
     try {
-      assertNoManagedConfig(managedConfigSources(this.#options.managedConfigDirectories));
       const selectedModel = model(request.model);
       const selectedProvider = providerForModel(selectedModel, this.#identity);
       const selectedFamily = familyForModel(selectedModel, this.#identity);
@@ -1251,7 +1135,7 @@ export class OpenCodeCliEngine implements Engine {
         throw new TypeError('OpenCode request cwd must be an absolute path');
       }
       const cwd = realpathSync(request.cwd);
-      assertWorkspaceSymlinksContained(cwd, capabilities);
+      assertSymlinksStayInWorkspace(cwd, capabilities);
       normalized = { ...request, cwd, prompt: '' };
       const timeout = request.timeoutMs ?? DEFAULT_OWNED_COMMAND_LIMITS.timeoutMs;
       const grace = request.timeoutGraceMs ?? DEFAULT_OWNED_COMMAND_LIMITS.teardownGraceMs;
@@ -1276,40 +1160,7 @@ export class OpenCodeCliEngine implements Engine {
         && !isDeepStrictEqual(engineSelection(expectedSelection), selected)) {
         throw new TypeError('OpenCode expected selection does not match its configured path and request');
       }
-      let validationDirectory: string;
-      try {
-        validationDirectory = mkdtempSync(join(tmpdir(), 'lines-opencode-admission-'));
-      } catch {
-        throw loopError(
-          'unknown',
-          'OpenCode admission temporary configuration could not be created',
-        );
-      }
-
-      let validationFailed = false;
-      let validationFailure: unknown;
-      try {
-        buildOpenCodeInvocation(normalized, this.#options, validationDirectory);
-      } catch (error) {
-        validationFailed = true;
-        validationFailure = error instanceof TypeError || error instanceof EngineError
-          ? error
-          : loopError(
-              'unknown',
-              'OpenCode admission temporary configuration could not be prepared',
-            );
-      }
-      try {
-        rmSync(validationDirectory, { recursive: true, force: true });
-      } catch {
-        if (!validationFailed) {
-          throw loopError(
-            'unknown',
-            'OpenCode admission temporary configuration could not be removed',
-          );
-        }
-      }
-      if (validationFailed) throw validationFailure;
+      buildOpenCodeInvocation(normalized, this.#options);
     } catch (error) {
       if (error instanceof EngineError) throw error;
       const diagnostic = error instanceof Error ? error.message : 'invalid request';
@@ -1328,32 +1179,13 @@ export class OpenCodeCliEngine implements Engine {
   }
 
   async #observeVersion(request: AgentRequest, signal: AbortSignal): Promise<string> {
-    let directory: string;
     try {
-      directory = mkdtempSync(join(tmpdir(), 'lines-opencode-version-'));
-    } catch {
-      throw loopError(
-        'unknown',
-        'OpenCode version temporary configuration could not be created',
-      );
-    }
-
-    let version: string | undefined;
-    let versionFailed = false;
-    let versionFailure: unknown;
-    try {
-      const invocation = buildOpenCodeInvocation(request, this.#options, directory);
-      // Close the window between the admission check and this spawn: the
-      // workspace walk above takes real time and a machine-managed config
-      // can arrive inside it. The between-admission-and-spawn case in the
-      // plugin's spec demonstrates the arrival on the run path.
-      assertNoManagedConfig(managedConfigSources(this.#options.managedConfigDirectories));
+      const invocation = buildOpenCodeInvocation(request, this.#options);
       const command = await runOwnedCommand({
         executable: this.#executable,
         args: ['--version'],
         cwd: request.cwd!,
         env: invocation.environment,
-        inheritParentEnv: false,
         stdin: '',
         ...ownedCommandIdentity({
           adapter: 'opencode-cli', runId: request.attempt?.runId,
@@ -1374,25 +1206,8 @@ export class OpenCodeCliEngine implements Engine {
       if (observed !== SUPPORTED_VERSION) {
         throw loopError('invalid-config', 'OpenCode observed version does not match its supported version');
       }
-      version = observed;
+      return observed;
     } catch (error) {
-      versionFailed = true;
-      versionFailure = error;
-    }
-
-    try {
-      rmSync(directory, { recursive: true, force: true });
-    } catch {
-      if (!versionFailed) {
-        throw loopError(
-          'unknown',
-          'OpenCode version temporary configuration could not be removed',
-        );
-      }
-    }
-
-    if (versionFailed) {
-      const error = versionFailure;
       if (error instanceof EngineError) throw error;
       if (signal.aborted) throw loopError('aborted', 'OpenCode version check was aborted');
       if (error instanceof OwnedCommandError) {
@@ -1413,8 +1228,6 @@ export class OpenCodeCliEngine implements Engine {
       }
       throw loopError('unknown', 'OpenCode version check could not complete');
     }
-
-    return version!;
   }
 
   async run(
@@ -1432,9 +1245,8 @@ export class OpenCodeCliEngine implements Engine {
       throw new TypeError('OpenCode request cwd must be an absolute path');
     }
     const cwd = realpathSync(request.cwd);
-    assertWorkspaceSymlinksContained(cwd, capabilities);
+    assertSymlinksStayInWorkspace(cwd, capabilities);
     const normalized: AgentRequest = { ...request, cwd };
-    const directory = mkdtempSync(join(tmpdir(), 'lines-opencode-'));
     const accumulator: OpenCodeAccumulator = {
       frames: [],
       seenParts: new Map(),
@@ -1472,22 +1284,12 @@ export class OpenCodeCliEngine implements Engine {
     const startedAt = Date.now();
 
     try {
-      const invocation = buildOpenCodeInvocation(
-        normalized,
-        this.#options,
-        directory,
-      );
-      // Close the window between the admission check and this spawn: a
-      // machine-managed config can arrive after admission passes. The
-      // between-admission-and-spawn case in the plugin's spec
-      // demonstrates the arrival.
-      assertNoManagedConfig(managedConfigSources(this.#options.managedConfigDirectories));
+      const invocation = buildOpenCodeInvocation(normalized, this.#options);
       const command = await runOwnedCommand({
         executable: this.#executable,
         args: invocation.args,
         cwd,
         env: invocation.environment,
-        inheritParentEnv: false,
         stdin: invocation.stdin,
         ...owner,
         ...DEFAULT_OWNED_COMMAND_LIMITS,
@@ -1696,8 +1498,6 @@ export class OpenCodeCliEngine implements Engine {
         throw loopError('unknown', 'OpenCode model process could not start');
       }
       throw error;
-    } finally {
-      rmSync(directory, { recursive: true, force: true });
     }
   }
 }

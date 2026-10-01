@@ -4,7 +4,8 @@ import { mkdir, mkdtemp, readFile, readdir, rm, symlink, writeFile } from 'node:
 import { tmpdir } from 'node:os';
 import { join, resolve, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { spawnSync } from 'node:child_process';
+
+import { runAnswering } from './use-cases/proof-host.js';
 
 const here = dirname(fileURLToPath(import.meta.url));
 const repo = (() => {
@@ -130,8 +131,8 @@ try {
     await symlink(standIn, join(bin, name));
   }
 
-  // The workflow ends at the approve stage, where a person answers. Until
-  // F42 gives a second process that route, the proof asserts to the pause.
+  // The workflow ends at the approve stage, where the run waits for a person
+  // and prints a page to answer on. The proof answers there.
   // Inside a fresh consumer there is no packages/runtime/tsconfig.json; tsx then
   // reads the nearest tsconfig, which is the consumer's own.
   const repoTsconfig = join(repo, 'packages', 'runtime', 'tsconfig.json');
@@ -141,14 +142,14 @@ try {
     ? { file: process.execPath, args: [compiled] }
     : { file: join(repo, 'node_modules', '.bin', 'tsx'), args: [...tsconfigArgs, join(here, 'feature-delivery.ts')] };
   const started = Date.now();
-  const run = spawnSync(child.file, child.args, {
+  const run = await runAnswering(child.file, child.args, {
     cwd: workspace,
     env: {
       ...process.env,
       PATH: `${bin}:${process.env.PATH ?? ''}`,
     },
-    encoding: 'utf8',
-    timeout: 120_000,
+    timeoutMs: 120_000,
+    answer: { approved: true },
   });
   const elapsed = Date.now() - started;
 
@@ -158,7 +159,9 @@ try {
   stdout: ${run.stdout}
   stderr: ${run.stderr}`);
   const printed = JSON.parse(run.stdout.slice(run.stdout.lastIndexOf('\n{') + 1));
-  assert.equal(printed.status, 'paused');
+  assert.match(run.stdout, /http:\/\/127\.0\.0\.1:\d+\//, 'the run prints the page to answer on');
+  assert.equal(run.question, 'Approve shipping the retry helper and its tests?', 'the page shows the question');
+  assert.equal(printed.status, 'pass', `the answer finishes the run: ${run.stdout}`);
 
   const calls = (await readFile(callsLog, 'utf8')).trim().split('\n').map((line) => JSON.parse(line) as { role: string; writes: Record<string, string> });
   const implementRuns = calls.filter((call) => 'src/retry.js' in call.writes).length;
@@ -169,21 +172,23 @@ try {
   const reviews = await readdir(join(workspace, 'reviews'));
   assert.ok(reviews.includes('correctness-first.json') && reviews.includes('tests-first.json') && reviews.includes('api.json'), `reviews: ${reviews.join(', ')}`);
 
-  // The example writes its record beside the workspace; the pause is in it.
+  // The example writes its record beside the workspace. The question was
+  // read off the page while pending, so the run was still going; the record
+  // shows the one approval passing and the run ending in a pass.
   const recordRoot = join(workspace, '.obversa', 'records');
   const record = (await readdir(recordRoot)).filter((name) => name.endsWith('.jsonl')).map((name) => join(recordRoot, name))[0]!;
-  const events = (await readFile(record, 'utf8')).trim().split('\n').map((line) => JSON.parse(line) as { kind?: string; path?: string[]; outcome?: { status?: string } });
-  assert.ok(events.some((event) => event.kind === 'job:end' && event.path?.includes('approve')
-    && (event as { outcome?: { status?: string } }).outcome?.status === 'paused'), 'the pause is in the record');
-  assert.ok(events.some((event) => event.kind === 'dag:end'
-    && (event as { outcome?: { status?: string } }).outcome?.status === 'paused'), 'the run recorded its paused end');
+  const events = (await readFile(record, 'utf8')).trim().split('\n').map((line) => JSON.parse(line) as { kind?: string; label?: string; path?: string[]; outcome?: { status?: string } });
+  const approvals = events.filter((event) => event.kind === 'job:start' && event.label === 'approve');
+  assert.equal(approvals.length, 1, 'the approval starts once: waiting for the answer starts nothing again');
+  assert.ok(events.some((event) => event.kind === 'job:end' && event.label === 'approve' && event.outcome?.status === 'pass'), 'the answer passes the approval');
+  assert.ok(events.some((event) => event.kind === 'run:end' && event.outcome?.status === 'pass'), 'the run recorded its passing end');
 
   console.log(JSON.stringify({
     status: printed.status,
     implementRuns,
     reviewRounds: 2,
     filesWritten: ['src/retry.js', 'test/retry.test.js', 'reviews/correctness-first.json', 'reviews/tests-first.json', 'reviews/api.json'],
-    pausedAt: 'approve',
+    answeredOnPage: 'approve',
     mode,
   }, null, 2));
 } finally {

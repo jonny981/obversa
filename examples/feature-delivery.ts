@@ -169,6 +169,17 @@ Reply with JSON: status "pass" when the module shape is correct, or status "revi
   );
 }
 
-const result = await run(createFeatureDelivery(), { recordTo: 'auto' });
+// The run waits for a person at approve and prints the address of a page
+// to answer on. The wait lives in this process: stop it before the person
+// answers, and the next run starts again from the first step.
+const result = await run(createFeatureDelivery(), {
+  recordTo: 'auto',
+  onCallback: 'wait',
+  monitor: true,
+  onEvent: (event) => {
+    if (event.kind === 'monitor') console.log(`Answer the approval on ${event.url}`);
+  },
+});
+await result.monitor?.close();
 console.log(JSON.stringify({ status: result.outcome.status }, null, 2));
 if (result.outcome.status === 'fail') process.exitCode = 1;

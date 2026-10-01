@@ -123,6 +123,13 @@ plugin pins the executable it expects. Each plugin records the identity it
 serves, with the provider and the model family, so that a review panel can
 ask for a second opinion from a different provider.
 
+An engine runs its CLI the way the person runs it: with their own login,
+their own settings and the repository's instruction files. The plugin adds
+only what the step needs, through the CLI's own flags: the tools the step
+may use, read-only enforcement where the step only reads, and one fresh
+process per attempt. It never points the CLI at an empty home folder to
+hide the person's setup.
+
 Start from an existing one. `plugins/engine-grok-cli` is a good size.
 Read its README and its tests before you write yours.
 Your plugin must pass the engine conformance kit. Your plugin must run one

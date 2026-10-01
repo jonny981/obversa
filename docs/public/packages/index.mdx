@@ -76,14 +76,13 @@ is.
   Codex CLI process. You need the Codex CLI installed and signed in. Home:
   [github.com/openai/codex](https://github.com/openai/codex).
 - **OpenCode CLI.** `@obversa/engine-opencode-cli` runs each request in a
-  fresh OpenCode process with a clean environment, so your own sign-in isn't
-  used. You need OpenCode 1.18.23 installed, and you pass your provider's
-  credentials through the engine's `auth` or `environment` option. Home:
+  fresh OpenCode process, with your own OpenCode login and settings. You
+  need OpenCode 1.18.23 installed and signed in to your model's provider,
+  and a model on a paid login. Home:
   [opencode.ai](https://opencode.ai).
 - **Grok CLI.** `@obversa/engine-grok-cli` runs each request in a fresh Grok
-  CLI process with a clean environment, so your own sign-in isn't used. You
-  need Grok CLI 1.0.5 installed, and you pass your credentials through the
-  engine's `environment` or `authFile` option. Home:
+  CLI process, with your own Grok login and settings. You need Grok CLI
+  1.0.44 installed and signed in. Home:
   [docs.x.ai/build/cli/headless-scripting](https://docs.x.ai/build/cli/headless-scripting).
 - **Anthropic API.** `@obversa/engine-anthropic-api` sends each request to
   the Anthropic API. You need an Anthropic API key. Home:

@@ -10,13 +10,15 @@
  * it printed, what each seat was asked and what each command was called
  * with. The stand-ins sit beside the workspace, not inside it, because a
  * read-only reviewer's workspace guard refuses a symlink that resolves
- * outside the workspace.
+ * outside the workspace. With `answer` set, the host also plays the person:
+ * it answers the run's question on the page the example prints.
  */
-import { spawnSync } from 'node:child_process';
+import { spawn, spawnSync } from 'node:child_process';
 import { existsSync } from 'node:fs';
 import { chmod, mkdir, mkdtemp, readFile, rm, symlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { dirname, join, resolve, sep } from 'node:path';
+import { setTimeout as delay } from 'node:timers/promises';
 
 /** One scripted answer from a model seat: the files it writes, then its reply. */
 export interface SeatCall {
@@ -42,6 +44,8 @@ export interface ProofOptions {
   readonly commands?: Readonly<Record<string, CommandStandIn>>;
   /** Extra environment for the example's process. */
   readonly env?: Readonly<Record<string, string>>;
+  /** The answer a person gives on the run's page, once the run waits for one. */
+  readonly answer?: Readonly<Record<string, unknown>>;
 }
 
 export interface RecordedSeatCall {
@@ -79,6 +83,8 @@ export interface ExampleRun {
   readonly commandCalls: readonly RecordedCommandCall[];
   readonly mode: ProofMode;
   readonly elapsedMs: number;
+  /** The question the page showed and the host answered, when it answered one. */
+  readonly question?: string;
   read(path: string): Promise<string>;
   exists(path: string): boolean;
 }
@@ -178,12 +184,14 @@ export async function withExample(options: ProofOptions, check: (run: ExampleRun
       : { file: join(repo, 'node_modules', '.bin', 'tsx'), args: [...tsconfigArgs, join(options.here, `${options.example}.ts`)] };
     const mode: ProofMode = existsSync(compiled) ? 'compiled-from-dist' : existsSync(repoTsconfig) ? 'repo-tsx' : 'consumer-tsx';
     const started = Date.now();
-    const result = spawnSync(child.file, child.args, {
+    const spawnOptions = {
       cwd: workspace,
       env: { ...process.env, ...options.env, PATH: `${bin}:${process.env.PATH ?? ''}` },
-      encoding: 'utf8',
-      timeout: 120_000,
-    });
+      timeoutMs: 120_000,
+    };
+    const result: SpawnedRun = options.answer === undefined
+      ? spawnSync(child.file, child.args, { ...spawnOptions, encoding: 'utf8', timeout: spawnOptions.timeoutMs })
+      : await runAnswering(child.file, child.args, { ...spawnOptions, answer: options.answer });
     const elapsedMs = Date.now() - started;
     const where = `${child.file} ${child.args.join(' ')} in ${mode} mode`;
     if (result.status !== 0) {
@@ -215,6 +223,7 @@ export async function withExample(options: ProofOptions, check: (run: ExampleRun
       commandCalls,
       mode,
       elapsedMs,
+      ...(result.question === undefined ? {} : { question: result.question }),
       read: (path) => readFile(join(workspace, path), 'utf8'),
       exists: (path) => existsSync(join(workspace, path)),
     });
@@ -226,4 +235,83 @@ export async function withExample(options: ProofOptions, check: (run: ExampleRun
 async function readLines<T>(path: string): Promise<T[]> {
   if (!existsSync(path)) return [];
   return (await readFile(path, 'utf8')).split('\n').filter(Boolean).map((line) => JSON.parse(line) as T);
+}
+
+/** What a spawned example left behind: how it ended, what it printed, and the question answered, if one was. */
+export interface SpawnedRun {
+  readonly status: number | null;
+  readonly signal: NodeJS.Signals | null;
+  readonly error?: Error;
+  readonly stdout: string;
+  readonly stderr: string;
+  readonly question?: string;
+}
+
+/** The page address an example prints when its run serves one. */
+const PAGE = /http:\/\/127\.0\.0\.1:\d+\//;
+
+/**
+ * Run an example the way a person meets it. Spawn it, find the page address
+ * it prints, poll the page until a question is pending, answer it there with
+ * the same request the page's own buttons send, and wait for the process to
+ * end. A run that ends before it asks anything is returned unanswered.
+ */
+export async function runAnswering(
+  file: string,
+  args: readonly string[],
+  options: { cwd: string; env: NodeJS.ProcessEnv; timeoutMs: number; answer: Readonly<Record<string, unknown>> },
+): Promise<SpawnedRun> {
+  const child = spawn(file, [...args], { cwd: options.cwd, env: options.env, stdio: ['ignore', 'pipe', 'pipe'] });
+  let stdout = '';
+  let stderr = '';
+  child.stdout.setEncoding('utf8').on('data', (chunk: string) => { stdout += chunk; });
+  child.stderr.setEncoding('utf8').on('data', (chunk: string) => { stderr += chunk; });
+  let exited = false;
+  const ended = new Promise<{ status: number | null; signal: NodeJS.Signals | null; error?: Error }>((resolve) => {
+    child.once('error', (error) => { exited = true; resolve({ status: null, signal: null, error }); });
+    child.once('close', (status, signal) => { exited = true; resolve({ status, signal }); });
+  });
+  const timer = setTimeout(() => child.kill('SIGKILL'), options.timeoutMs);
+  let question: string | undefined;
+  try {
+    while (!exited && question === undefined) {
+      const page = PAGE.exec(stdout)?.[0];
+      if (page !== undefined) {
+        try {
+          question = await answerOnPage(page, options.answer);
+        } catch (error) {
+          // The run may end between a look at the page and the next; only a
+          // page that refuses while the run is still going is a failure.
+          await Promise.race([ended, delay(1_000)]);
+          if (!exited) throw error;
+        }
+      }
+      if (question === undefined) await Promise.race([ended, delay(50)]);
+    }
+  } catch (error) {
+    child.kill('SIGKILL');
+    await ended;
+    clearTimeout(timer);
+    throw new Error(`answering on the page failed: ${error instanceof Error ? error.message : String(error)}
+  stdout: ${stdout}
+  stderr: ${stderr}`);
+  }
+  const end = await ended;
+  clearTimeout(timer);
+  return { ...end, stdout, stderr, ...(question === undefined ? {} : { question }) };
+}
+
+/** Answer the first pending question on the page and return its text, or nothing while none is pending. */
+async function answerOnPage(page: string, response: Readonly<Record<string, unknown>>): Promise<string | undefined> {
+  const state = await (await fetch(`${page}state`)).json() as { pending: Array<{ requestId: string; decisionText: string }> };
+  const asked = state.pending[0];
+  if (asked === undefined) return undefined;
+  const reply = await fetch(`${page}answer`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ requestId: asked.requestId, response }),
+  });
+  const result = await reply.json() as { ok: boolean; reason?: string };
+  if (!result.ok) throw new Error(`the page refused the answer to "${asked.decisionText}": ${result.reason ?? reply.status}`);
+  return asked.decisionText;
 }

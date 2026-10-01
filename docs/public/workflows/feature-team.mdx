@@ -42,12 +42,18 @@ the triage and the judge instead of replaying those files; it needs
 npx tsx feature-delivery.ts
 ```
 
-The output below is the proof's offline run. The seats are scripted and the
-judge is recorded, so the words are the script's and the shape is the
-run's:
+When the run reaches the approval, it waits and prints a page to answer on.
+The person answers there, and the run finishes. Keep the process running
+until then: only the running process can take the answer.
+
+The output below is the proof's offline run. The seats are scripted, the
+judge is recorded, and the proof answers the approval on the page, so the
+words are the script's and the shape is the run's:
 
 ```text Output, from the offline proof
+Answer the approval on http://127.0.0.1:64242/
 ▸ run
+feature-delivery workflow:start
 feature-delivery ▸ dag (7 nodes)
 feature-delivery · node triage: start
 feature-delivery › triage • triage
@@ -133,6 +139,7 @@ feature-delivery · node close: done (aborted)
 feature-delivery › refine-judge • refine:judge
 feature-delivery › refine-judge • refine:judge: pass  {"stop_reason":{"choice":"continue"}}
 feature-delivery ◆ the judge says another round is worth it
+feature-delivery › @judge-kickback interaction:checkpoint
 feature-delivery ↩ kickback accepted review -> implement [1/4]: Review panel: 0/2 reviewer(s) cleared. (the judge says another round is worth it)
 feature-delivery · node implement: start
 feature-delivery › implement › implement • implement
@@ -196,8 +203,8 @@ one round of findings, then the panel accepted it. The tournament ran two
 candidates; one wrote nothing and failed its own check, the other passed
 the test and landed. The review panel returned the first cut over a naming
 finding, the judge said another round was worth it, and the second cut
-cleared. The person's yes named the sha of the file as it stood, and the
-closing note was written from the record.
+cleared. The person's yes, given on the page, named the sha of the file as
+it stood, and the closing note was written from the record.
 
 <Warning>
 Run the file in a directory you're happy for a model to change. The Claude
@@ -318,9 +325,9 @@ const review = reviewPanel({
 ```
 
 The approval reads the file as it stands, puts its sha in the question, and
-sends a no back to `implement` with the person's note. In the offline run
-the answer comes from `approve.json`; without that file the run pauses until
-a person answers:
+sends a no back to `implement` with the person's note. With `approve.json`
+beside the file, the answer comes from it. Without that file the run waits
+and a person answers on its page, as in the offline run:
 
 ```ts examples/teams/feature-delivery.ts (excerpt) {2-4,6}
 const approve: Job = async (ctx) => {
@@ -553,8 +560,18 @@ const team = dag({
   maxKickbacks: { implement: judge(judgeSeat, { cap: 4 }) },
 });
 
+// Without approve.json the run waits for the person and prints the address
+// of a page to answer on. The wait lives in this process: stop it before the
+// person answers, and the question goes with it.
 const resume = process.argv.includes('--resume');
-const result = await run(team, { recordTo: recordPath, resume, onEvent: (event) => console.log(formatEvent(event)) });
+const result = await run(team, {
+  recordTo: recordPath,
+  resume,
+  onCallback: 'wait',
+  monitor: true,
+  onEvent: (event) => console.log(event.kind === 'monitor' ? `Answer the approval on ${event.url}` : formatEvent(event)),
+});
+await result.monitor?.close();
 console.log(JSON.stringify({ status: result.outcome.status, summary: result.outcome.summary, recordPath }, null, 2));
 ```
 
