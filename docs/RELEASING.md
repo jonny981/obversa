@@ -1,6 +1,6 @@
 # Releasing
 
-This guide describes how the release owner verifies and publishes the 19
+This guide describes how the release owner verifies and publishes the 20
 Obversa packages.
 
 ## Versions, changelogs and tags
@@ -30,8 +30,8 @@ their changelogs and the lockfile, then run the full release checks and the
 packed consumer check. Complete one worked core-minor check before the first
 core minor release. Stock `changeset publish` still performs the publish.
 
-The publishable set is `scripts/publish-allowlist.json` (19 packages). Eight
-public packages use `packages/<name>`; eleven plugin packages use
+The publishable set is `scripts/publish-allowlist.json` (20 packages). Eight
+public packages use `packages/<name>`; twelve plugin packages use
 `plugins/<name>`. The audit, tarball check, publish workflow and registry check
 all read that list. Publishing a package tags it `name@version`. There is no
 repository-wide release tag.

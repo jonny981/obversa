@@ -19,6 +19,7 @@ const expected = new Map([
   ['@obversa/engine-codex-cli', 'plugins/engine-codex-cli'],
   ['@obversa/engine-grok-cli', 'plugins/engine-grok-cli'],
   ['@obversa/engine-jev-api', 'plugins/engine-jev-api'],
+  ['@obversa/engine-mastra', 'plugins/engine-mastra'],
   ['@obversa/engine-opencode-cli', 'plugins/engine-opencode-cli'],
   ['@obversa/memory-git', 'plugins/memory-git'],
   ['@obversa/memory-simple', 'plugins/memory-simple'],
@@ -48,7 +49,7 @@ function assertExactVersion(version, name) {
   assert.notEqual(validVersion(version), null, `${name}: version must be an exact valid SemVer`);
 }
 
-test('all nineteen public packages have the accepted names and locations', () => {
+test('all twenty public packages have the accepted names and locations', () => {
   const allowlist = JSON.parse(readFileSync('scripts/publish-allowlist.json', 'utf8'));
   assert.deepEqual(allowlist.packages, [...expected.keys()].sort());
   for (const [name, directory] of expected) {
@@ -99,7 +100,7 @@ test('release builds use the recorded root build and the manual sequence stops o
 
 test('@obversa/obversa installs every other published package', () => {
   const dependencies = manifestAt('packages/obversa').dependencies;
-  const notYetPublished = new Set(['@obversa/engine-jev-api']);
+  const notYetPublished = new Set(['@obversa/engine-jev-api', '@obversa/engine-mastra']);
   assert.deepEqual(Object.keys(dependencies).sort(), [...expected.keys()].filter((name) => name !== '@obversa/obversa' && !notYetPublished.has(name)).sort());
 });
 

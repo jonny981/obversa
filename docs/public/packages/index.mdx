@@ -49,6 +49,7 @@ below say what else each one needs.
 | `AgentSdkEngine` | `@obversa/engine-claude-agent-sdk` | The Claude Agent SDK as an engine | [Claude Agent SDK Engine](/packages/engine-claude-agent-sdk) |
 | `AnthropicApiEngine` | `@obversa/engine-anthropic-api` | The Anthropic API as an engine | [Anthropic API Engine](/packages/engine-anthropic-api) |
 | `JevApiEngine` | `@obversa/engine-jev-api` | Typed questions about a run | [Jev API Engine](/packages/engine-jev-api) |
+| `mastra`, `MastraEngine` | `@obversa/engine-mastra` | A Mastra agent as a seat | [Mastra Engine](/packages/engine-mastra) |
 | `openGitMemory`, `openReasoningRecord` | `@obversa/memory-git` | Memory in Git, reasoning in commits | [Git Memory](/packages/memory-git) |
 | `createSimpleMemory` | `@obversa/memory-simple` | Memory in one process | [Simple Memory](/packages/memory-simple) |
 | `openMarkdownCorpus` | `@obversa/memory-markdown` | Search your Markdown files | [Markdown Memory](/packages/memory-markdown) |
@@ -94,6 +95,10 @@ is.
 - **Jev API.** `@obversa/engine-jev-api` answers structured questions about a
   run's recorded state. It never reads or edits files. You need a Jev
   endpoint and an API key. See [Jev API Engine](/packages/engine-jev-api).
+- **Mastra.** `@obversa/engine-mastra` runs an agent you built with Mastra,
+  one call to the agent's own `generate` per request. You need
+  `@mastra/core` and whatever your agent needs, such as its model
+  provider's key. See [Mastra Engine](/packages/engine-mastra).
 - **In-process memory.** `@obversa/memory-simple` keeps memory inside one
   process. You need nothing else. Home:
   [Simple Memory](/packages/memory-simple).
@@ -125,7 +130,7 @@ is.
 
 | Package | Purpose | Version |
 | --- | --- | --- |
-| `@obversa/obversa` | Installs every package below except Jev | `0.1.2` |
+| `@obversa/obversa` | Installs every package below except Jev and Mastra | `0.1.2` |
 | `@obversa/runtime` | Builds and runs workflows as graphs, team conversations or a review loop | `0.2.2` |
 | `@obversa/runner` | Supervises stored graph runs in bounded workers | `0.2.2` |
 | `@obversa/api` | Defines every contract: engine, memory, graph, events, artifacts, workspace, callbacks, proofs and run definitions, with their validators | `0.2.2` |
@@ -144,6 +149,7 @@ is.
 | `@obversa/engine-grok-cli` | Runs one engine attempt through the Grok CLI | `0.1.2` |
 | `@obversa/engine-opencode-cli` | Runs one engine attempt through the OpenCode CLI | `0.1.2` |
 | `@obversa/engine-jev-api` | Answers decision questions over recorded run state through the Jev API | `0.1.3` |
+| `@obversa/engine-mastra` | Runs one engine attempt through a Mastra agent you built | `0.1.0` |
 
 The api, core, runtime and runner packages share one version. The runtime
 never imports an engine or a memory adapter: you pass the ones you want when
@@ -161,8 +167,8 @@ you run.
 [OpenCode CLI](/packages/engine-opencode-cli),
 [Claude Agent SDK](/packages/engine-claude-agent-sdk),
 [Anthropic API](/packages/engine-anthropic-api),
-[Jev API](/packages/engine-jev-api). Coming soon:
-[eve](/packages/engine-eve), [Mastra](/packages/engine-mastra),
+[Jev API](/packages/engine-jev-api), [Mastra](/packages/engine-mastra).
+Coming soon: [eve](/packages/engine-eve),
 [LangGraph](/packages/engine-langgraph).
 
 **Memory and notifications.** [Git Memory](/packages/memory-git),

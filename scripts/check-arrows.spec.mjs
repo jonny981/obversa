@@ -36,7 +36,7 @@ function manifest(path, body) {
 // The workspace skeleton. Package directories reuse the real names because
 // the arrow-matrix rules are written against them.
 manifest(".", { name: "fixture-root", private: true });
-manifest("packages/api", { name: "@obversa/api", type: "module", exports: { ".": "./src/index.mjs", "./testing": "./src/testing.mjs" }, devDependencies: { devtool: "1.0.0" } });
+manifest("packages/api", { name: "@obversa/api", type: "module", exports: { ".": "./src/index.mjs", "./testing": "./src/testing.mjs" }, peerDependencies: { peertool: "^1.0.0" }, devDependencies: { devtool: "1.0.0", peertool: "1.0.0" } });
 manifest("packages/core", { name: "@obversa/core", type: "module", exports: { ".": "./src/index.mjs" }, dependencies: { "@obversa/api": "workspace:*" } });
 manifest("packages/runtime", {
   name: "@obversa/runtime",
@@ -81,7 +81,7 @@ manifest("plugins/notify-webhook", {
   type: "module",
   exports: { ".": "./src/index.mjs" },
 });
-for (const name of ["engine-claude-agent-sdk", "engine-anthropic-api", "engine-claude-cli", "engine-codex-cli", "engine-grok-cli", "engine-jev-api", "engine-opencode-cli"]) {
+for (const name of ["engine-claude-agent-sdk", "engine-anthropic-api", "engine-claude-cli", "engine-codex-cli", "engine-grok-cli", "engine-jev-api", "engine-mastra", "engine-opencode-cli"]) {
   manifest(`plugins/${name}`, {
     name: `@obversa/${name}`,
     type: "module",
@@ -105,6 +105,8 @@ manifest("node_modules/left-pad", { name: "left-pad", version: "1.0.0", main: "i
 file("node_modules/left-pad/index.js", "module.exports = (s) => s;\n");
 manifest("node_modules/devtool", { name: "devtool", version: "1.0.0", main: "index.js" });
 file("node_modules/devtool/index.js", "module.exports = 1;\n");
+manifest("node_modules/peertool", { name: "peertool", version: "1.0.0", main: "index.js" });
+file("node_modules/peertool/index.js", "module.exports = 1;\n");
 
 // Clean targets.
 file("packages/api/src/index.mjs", "export const engine = 1;\n");
@@ -119,7 +121,7 @@ file("packages/surface/src/index.mjs", "export const surfacer = 1;\n");
 file("plugins/memory-git/src/index.mjs", "export const gitMemory = 1;\n");
 file("plugins/memory-simple/src/index.mjs", "export const simple = 1;\n");
 file("plugins/memory-markdown/src/index.mjs", "export const search = 1;\n");
-for (const name of ["engine-claude-agent-sdk", "engine-anthropic-api", "engine-claude-cli", "engine-codex-cli", "engine-grok-cli", "engine-jev-api", "engine-opencode-cli"]) {
+for (const name of ["engine-claude-agent-sdk", "engine-anthropic-api", "engine-claude-cli", "engine-codex-cli", "engine-grok-cli", "engine-jev-api", "engine-mastra", "engine-opencode-cli"]) {
   file(`plugins/${name}/src/index.mjs`, `export const name = ${JSON.stringify(name)};\n`);
 }
 file("packages/surface-diff/src/h.test.mjs", "export const t = 1;\n");
@@ -186,6 +188,9 @@ const allowed = [
   // and must still raise nothing.
   ["examples/ok7.mjs", "import '@obversa/memory-git';\n"],
   ["examples/ok14.mjs", "import '@obversa/memory-markdown';\n"],
+  // A peer dependency is also a dev dependency so the package's own tests can
+  // install it; production code may import it.
+  ["packages/api/src/ok15.mjs", "import 'peertool';\n"],
 ];
 for (const [path, content] of allowed) file(path, content);
 
