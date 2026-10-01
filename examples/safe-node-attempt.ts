@@ -24,7 +24,7 @@ const RESULT_SCHEMA = {
 
 const GROK_FIXTURE = `#!/usr/bin/env node
 if (process.argv.length === 3 && process.argv[2] === '--version') {
-  process.stdout.write('grok 1.0.5\\n');
+  process.stdout.write('grok 1.0.44\\n');
   process.exit(0);
 }
 process.stdout.write(JSON.stringify({
@@ -130,7 +130,7 @@ try {
 
   const grok = validateAgentResult(await new GrokCliEngine({
     executable: grokExecutable,
-    version: '1.0.5',
+    version: '1.0.44',
     identity: { provider: 'xai', modelFamily: 'grok-4' },
     permissionMode: 'dontAsk',
   }).run(

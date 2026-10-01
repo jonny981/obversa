@@ -1,5 +1,4 @@
 import {
-  existsSync,
   lstatSync,
   mkdtempSync,
   mkdirSync,
@@ -9,7 +8,7 @@ import {
   writeFileSync,
 } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { delimiter, dirname, isAbsolute, join } from 'node:path';
+import { isAbsolute, join } from 'node:path';
 import { isDeepStrictEqual } from 'node:util';
 import {
   EngineError,
@@ -55,12 +54,11 @@ const VERSION_TEARDOWN_MS = 1_000;
 const VERSION_OUTPUT_BYTES = 4_096;
 const GROK_VERSION = /^grok ([0-9]+\.[0-9]+\.[0-9]+)(?: \([0-9a-f]+\))?(?: \[[A-Za-z0-9._-]+\])?$/u;
 const BASE_SYSTEM_PROMPT =
-  'Execute one isolated Obversa node attempt. Follow only this system prompt and the user prompt. Use only the declared tools and permissions.';
+  'Execute one Obversa node attempt. Use only the declared tools and permissions.';
 const WEB_TOOLS = new Set(['web_search', 'web_fetch', 'websearch', 'webfetch']);
 const READ_ONLY_TOOLS = new Set([
   'read_file',
   'grep',
-  'glob',
   'list_dir',
   'web_search',
   'web_fetch',
@@ -70,60 +68,24 @@ const PERMISSION_TOOLS: Readonly<Record<string, readonly string[]>> = {
   Bash: ['run_terminal_command'],
   Edit: ['search_replace'],
   Write: ['search_replace'],
-  Read: ['read_file', 'list_dir', 'grep', 'glob'],
-  Grep: ['grep', 'glob', 'list_dir'],
+  Read: ['read_file', 'list_dir', 'grep'],
+  Grep: ['grep', 'list_dir'],
   WebFetch: ['web_fetch'],
   MCPTool: ['use_tool'],
 };
-const PROJECT_EXTENSION_PATHS = [
-  'Agents.md',
-  'Claude.md',
-  'CLAUDE.md',
-  'CLAUDE.local.md',
-  'AGENT.md',
-  'AGENTS.md',
-  '.grok/config.toml',
-  '.grok/lsp.json',
-  '.grok/commands',
-  '.grok/hooks',
-  '.grok/plugins',
-  '.grok/rules',
-  '.grok/skills',
-  '.grok/agents',
-  '.grok/personas',
-  '.grok/roles',
-  '.grok/workflows',
-  '.agents/skills',
-  '.agents/commands',
-  '.claude/commands',
-  '.claude/hooks',
-  '.claude/plugins',
-  '.claude/rules',
-  '.claude/skills',
-  '.claude/settings.json',
-  '.claude/settings.local.json',
-  '.cursor/hooks.json',
-  '.cursor/commands',
-  '.cursor/mcp.json',
-  '.cursor/plugins',
-  '.cursor/rules',
-  '.cursor/skills',
-  '.mcp.json',
-] as const;
-const COMPATIBILITY_ENV = Object.freeze({
-  GROK_CLAUDE_SKILLS_ENABLED: 'false',
-  GROK_CLAUDE_RULES_ENABLED: 'false',
-  GROK_CLAUDE_AGENTS_ENABLED: 'false',
-  GROK_CLAUDE_MCPS_ENABLED: 'false',
-  GROK_CLAUDE_HOOKS_ENABLED: 'false',
-  GROK_CLAUDE_SESSIONS_ENABLED: 'false',
-  GROK_CURSOR_SKILLS_ENABLED: 'false',
-  GROK_CURSOR_RULES_ENABLED: 'false',
-  GROK_CURSOR_AGENTS_ENABLED: 'false',
-  GROK_CURSOR_MCPS_ENABLED: 'false',
-  GROK_CURSOR_HOOKS_ENABLED: 'false',
-  GROK_CURSOR_SESSIONS_ENABLED: 'false',
-});
+// The tool id `--tools` takes, where it differs from the name Grok reports.
+const TOOL_FLAG_IDS: Readonly<Record<string, string>> = {
+  run_terminal_command: 'run_terminal_cmd',
+};
+// The tool names Grok reports in its start frame, where they differ from the
+// declared capability.
+const REPORTED_TOOLS: Readonly<Record<string, readonly string[]>> = {
+  task: [
+    'kill_command_or_subagent',
+    'get_command_or_subagent_output',
+    'spawn_subagent',
+  ],
+};
 
 export interface GrokCliIdentity {
   readonly provider: string | null;
@@ -135,8 +97,9 @@ export interface GrokCliEngineOptions {
   readonly version: string;
   readonly identity: GrokCliIdentity;
   readonly permissionMode?: PermissionMode;
-  /** Exact host-selected values copied into Grok's otherwise clean environment. */
+  /** Values set on top of the person's own environment. */
   readonly environment?: Readonly<Record<string, string>>;
+  /** A Grok login file to use instead of the person's own login. */
   readonly authFile?: string;
 }
 
@@ -249,25 +212,6 @@ function assertReadOnlyCapabilities(
   }
 }
 
-function assertNoProjectExtensions(rawDirectory: string): string {
-  const directory = realpathSync(rawDirectory);
-  let current = directory;
-  while (true) {
-    for (const relative of PROJECT_EXTENSION_PATHS) {
-      if (existsSync(join(current, relative))) {
-        throw new TypeError(
-          `Grok project extension ${relative} is not allowed in an isolated attempt`,
-        );
-      }
-    }
-    if (existsSync(join(current, '.git'))) break;
-    const parent = dirname(current);
-    if (parent === current) break;
-    current = parent;
-  }
-  return directory;
-}
-
 function trustedSystemPrompt(request: AgentRequest): string {
   if (request.systemMode === 'replace') {
     if (request.system === undefined) {
@@ -278,33 +222,6 @@ function trustedSystemPrompt(request: AgentRequest): string {
   return request.system === undefined
     ? BASE_SYSTEM_PROMPT
     : `${BASE_SYSTEM_PROMPT}\n\n${request.system}`;
-}
-
-function grokConfig(workspace: string): string {
-  return [
-    '[session]',
-    'load_envrc = false',
-    '',
-    '[skills]',
-    `ignore = [${JSON.stringify(join(workspace, '.grok', 'skills'))}]`,
-    '',
-    '[compat.claude]',
-    'skills = false',
-    'rules = false',
-    'agents = false',
-    'mcps = false',
-    'hooks = false',
-    'sessions = false',
-    '',
-    '[compat.cursor]',
-    'skills = false',
-    'rules = false',
-    'agents = false',
-    'mcps = false',
-    'hooks = false',
-    'sessions = false',
-    '',
-  ].join('\n');
 }
 
 function authRedactions(contents: string | null): Readonly<Record<string, string>> {
@@ -350,53 +267,42 @@ function scrubAuthValues(
   return scrubbed;
 }
 
-function isolatedEnvironment(
-  directory: string,
-  executable: string,
+function reportedTools(capabilities: readonly string[]): readonly string[] {
+  return capabilities.flatMap((capability) =>
+    REPORTED_TOOLS[capability] ?? [capability],
+  );
+}
+
+/**
+ * The values set on top of the person's own environment. Grok reads its
+ * normal home folder and login unless the host chose another login file:
+ * then a temporary Grok home holds a copy of only that file, because Grok's
+ * sandbox reads no login outside its home.
+ */
+function childEnvironment(
+  directory: string | undefined,
   request: AgentRequest,
   capabilities: readonly string[],
   selected: Readonly<Record<string, string>>,
   authContents: string | null,
 ): Readonly<Record<string, string>> {
-  const home = join(directory, 'home');
-  const grokHome = join(directory, 'grok-home');
-  const temporary = join(directory, 'tmp');
-  for (const path of [home, grokHome, temporary]) {
-    mkdirSync(path, { recursive: true, mode: 0o700 });
-  }
   const attempt = attemptEnvironment({ ...request, env: undefined }) ?? {};
-  writeFileSync(join(grokHome, 'config.toml'), grokConfig(request.cwd!), {
-    encoding: 'utf8',
-    mode: 0o600,
-  });
+  let grokHome: Record<string, string> = {};
   if (authContents !== null) {
-    writeFileSync(join(grokHome, 'auth.json'), authContents, {
+    const home = join(directory!, 'grok-home');
+    mkdirSync(home, { recursive: true, mode: 0o700 });
+    writeFileSync(join(home, 'auth.json'), authContents, {
       encoding: 'utf8',
       mode: 0o600,
     });
+    grokHome = { GROK_HOME: home };
   }
-  const path = selected.PATH ?? [
-    dirname(process.execPath),
-    dirname(executable),
-    '/usr/bin',
-    '/bin',
-    '/usr/sbin',
-    '/sbin',
-  ].filter((value, index, values) => values.indexOf(value) === index)
-    .join(delimiter);
   return Object.freeze({
     ...selected,
     ...attempt,
-    PATH: path,
-    HOME: home,
-    GROK_HOME: grokHome,
-    TMPDIR: temporary,
+    ...grokHome,
     GROK_SUBAGENTS:
       request.leaf === false && hasTool(capabilities, 'task') ? '1' : '0',
-    GROK_WORKFLOWS: '0',
-    GROK_MEMORY: '0',
-    GROK_MANAGED_MCPS_ENABLED: '0',
-    ...COMPATIBILITY_ENV,
   });
 }
 
@@ -429,6 +335,9 @@ export function buildGrokArgs(
   }
   const structured = request.jsonSchema !== undefined;
   const subagentsAllowed = request.leaf === false && hasTool(tools, 'task');
+  // Grok reads an empty `--tools` list as every tool, so a step with no tools
+  // allows one and then removes it with `--disallowed-tools`.
+  const noTools = tools.length === 0;
   const args = [
     '--prompt-file',
     promptFile,
@@ -443,12 +352,13 @@ export function buildGrokArgs(
     '--sandbox',
     sandboxProfile(request),
     '--tools',
-    tools.join(','),
+    noTools ? 'read_file' : tools.map((tool) => TOOL_FLAG_IDS[tool] ?? tool).join(','),
     '--verbatim',
     '--no-auto-update',
   ];
   for (const rule of rules) args.push('--allow', rule);
   const disallowedTools = [
+    ...(noTools ? ['read_file'] : []),
     ...(hasTool(tools, 'search_tool') ? [] : ['search_tool']),
     ...(hasTool(tools, 'use_tool') ? [] : ['use_tool']),
     ...(subagentsAllowed ? [] : ['Agent']),
@@ -468,7 +378,6 @@ export function buildGrokArgs(
   }
   if (!subagentsAllowed) args.push('--no-subagents');
   if (!hasWebTool(tools)) args.push('--disable-web-search');
-  args.push('--no-memory');
   return args;
 }
 
@@ -602,6 +511,15 @@ function consumeLine(
       throw new TypeError('Grok emitted data after its terminal result');
     }
     const frame = object(JSON.parse(line), 'Grok stream frame');
+    // Grok prints a start frame with an empty session id and no tools when it
+    // fails before a session starts, such as when it is not signed in. Its
+    // result frame then carries the reason.
+    if (
+      frame.type === 'system'
+      && frame.session_id === ''
+      && (frame.tools === undefined
+        || (Array.isArray(frame.tools) && frame.tools.length === 0))
+    ) return;
     if (frame.type === 'system') {
       if (
         typeof frame.model === 'string'
@@ -611,26 +529,23 @@ function consumeLine(
         accumulator.model = nonEmptyText(frame.model, 'Grok init model');
       }
       if (Array.isArray(frame.tools)) {
-        const capabilities = Object.freeze(frame.tools.map((tool, index) =>
+        const reported = frame.tools.map((tool, index) =>
           nonEmptyText(tool, `Grok init tools[${index}]`),
-        ));
-        const undeclared = capabilities.find(
-          (capability) => !expectedCapabilities.includes(capability),
         );
+        const expected = reportedTools(expectedCapabilities);
+        const undeclared = reported.find((tool) => !expected.includes(tool));
         if (undeclared !== undefined) {
           throw new TypeError(
             `Grok init reported undeclared capability ${undeclared}`,
           );
         }
-        const missing = expectedCapabilities.find(
-          (capability) => !capabilities.includes(capability),
-        );
+        const missing = expected.find((tool) => !reported.includes(tool));
         if (missing !== undefined) {
           throw new TypeError(
             `Grok init omitted declared capability ${missing}`,
           );
         }
-        accumulator.capabilities = capabilities;
+        accumulator.capabilities = expectedCapabilities;
       }
     } else if (frame.type === 'assistant') {
       consumeAssistant(
@@ -789,12 +704,7 @@ export class GrokCliEngine implements Engine {
       if (typeof value !== 'string' || value.includes('\0')) {
         throw new TypeError(`Grok environment value ${name} must be a string without NUL`);
       }
-      if (
-        name === 'HOME'
-        || name === 'GROK_HOME'
-        || name === 'TMPDIR'
-        || name.startsWith('GROK_')
-      ) {
+      if (name.startsWith('GROK_')) {
         throw new TypeError(`Grok environment cannot replace ${name}`);
       }
       selectedEnvironment[name] = value;
@@ -849,7 +759,7 @@ export class GrokCliEngine implements Engine {
       if (typeof request.cwd !== 'string' || !isAbsolute(request.cwd)) {
         throw new TypeError('Grok request cwd must be an absolute path');
       }
-      const cwd = assertNoProjectExtensions(request.cwd);
+      const cwd = realpathSync(request.cwd);
       normalized = { ...request, cwd, prompt: '' };
       const capabilities = requestedCapabilities(normalized);
       buildGrokArgs(normalized, this.#options, join(cwd, 'prompt.md'));
@@ -906,17 +816,17 @@ export class GrokCliEngine implements Engine {
     let directory: string | undefined;
     let primary: EngineError | undefined;
     try {
-      directory = mkdtempSync(join(tmpdir(), 'lines-grok-version-'));
-      const environment = isolatedEnvironment(
-        directory, this.#executable, request, capabilities,
-        this.#environment, this.#authContents,
+      if (this.#authContents !== null) {
+        directory = mkdtempSync(join(tmpdir(), 'lines-grok-version-'));
+      }
+      const environment = childEnvironment(
+        directory, request, capabilities, this.#environment, this.#authContents,
       );
       const command = await runOwnedCommand({
         executable: this.#executable,
         args: ['--version'],
         cwd: request.cwd!,
         env: environment,
-        inheritParentEnv: false,
         stdin: '',
         ...ownedCommandIdentity({
           adapter: 'grok-cli', runId: request.attempt?.runId,
@@ -984,9 +894,7 @@ export class GrokCliEngine implements Engine {
     const requested = await this.admit(staticRequest, signal);
     const model = requested.model!;
     const capabilities = requested.capabilities;
-    const cwd = assertNoProjectExtensions(
-      typeof request.cwd === 'string' ? request.cwd : '',
-    );
+    const cwd = realpathSync(request.cwd!);
     const normalizedRequest: AgentRequest = { ...request, cwd };
     const directory = mkdtempSync(join(tmpdir(), 'lines-grok-'));
     const promptFile = join(directory, 'prompt.md');
@@ -1014,9 +922,8 @@ export class GrokCliEngine implements Engine {
     });
 
     try {
-      const environment = isolatedEnvironment(
+      const environment = childEnvironment(
         directory,
-        this.#executable,
         normalizedRequest,
         capabilities,
         this.#environment,
@@ -1028,7 +935,6 @@ export class GrokCliEngine implements Engine {
         args: buildGrokArgs(normalizedRequest, this.#options, promptFile),
         cwd,
         env: environment,
-        inheritParentEnv: false,
         stdin: '',
         ...owner,
         ...DEFAULT_OWNED_COMMAND_LIMITS,

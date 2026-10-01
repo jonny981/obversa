@@ -47,9 +47,10 @@ it.each([['stderr', 0], ['stdout', 0], ['stderr', 2_500]] as const)('runs the fu
             .map((line) => JSON.parse(line) as { kind: string; args: string[] }).filter((call) => call.kind === 'model');
           const args = models.at(-1)?.args ?? [];
           const tools = args[args.indexOf('--tools') + 1]?.split(',') ?? [];
+          // Claude Code loads the person's own settings in every mode.
+          expect(args).not.toContain('--setting-sources');
           if (!tools.includes('Edit')) {
             expect(args).toContain('--strict-mcp-config');
-            expect(args[args.indexOf('--setting-sources') + 1]).toBe('');
             expect(args[args.indexOf('--disallowedTools') + 1]).toContain('mcp__*');
           }
           return { modelCalls: models.length, canRead: tools.includes('Read'), canWrite: tools.includes('Edit') || tools.includes('Bash') };

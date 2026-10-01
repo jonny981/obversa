@@ -5,7 +5,6 @@ import {
   mkdirSync,
   mkdtempSync,
   readFileSync,
-  readdirSync,
   realpathSync,
   rmSync,
   symlinkSync,
@@ -37,16 +36,17 @@ import {
 } from '@obversa/api/testing';
 import {
   buildOpenCodeInvocation,
+  opencode,
   OpenCodeCliEngine,
   type OpenCodeCliEngineOptions,
 } from '../src/index.ts';
-import {
-  assertNoManagedConfig,
-  findManagedConfig,
-  managedConfigSources,
-} from '../src/opencode-cli.ts';
 
 const roots: string[] = [];
+
+function personOpenCodeVariables(): string[] {
+  return Object.keys(process.env).filter((name) =>
+    name.startsWith('OPENCODE_') && process.env[name] !== undefined);
+}
 const fixtureSource = fileURLToPath(
   new URL('fixtures/opencode-cli.mjs', import.meta.url),
 );
@@ -115,7 +115,6 @@ describe('OpenCode static admission', () => {
         ...options(executable()),
         identity: { provider: 'anthropic', modelFamily: 'opencode' },
       },
-      temporaryDirectory('lines-opencode-family-'),
     )).toThrow(/model family identity opencode does not match model family claude/);
   });
 
@@ -128,9 +127,8 @@ describe('OpenCode static admission', () => {
     expect(fixture.calls()[0]).toMatchObject({
       kind: 'version', executable: fixture.bin, args: ['--version'], stdin: '',
       config: { tools: { '*': false, read: true, grep: true }, model: input.model },
+      home: process.env.HOME,
     });
-    expect(existsSync(fixture.calls()[0]!.home)).toBe(false);
-    expect(existsSync(fixture.calls()[0]!.configDirectory)).toBe(false);
     expect(await fixture.engine.admit(admissionRequest(input), new AbortController().signal, selected))
       .toEqual(selected);
     const result = await fixture.engine.run(input, () => {}, new AbortController().signal);
@@ -233,12 +231,11 @@ describe('OpenCode static admission', () => {
     expect(fixture.calls().map((call) => call.kind)).toEqual(['version']);
   });
 
-  it('keeps version timeout typed and releases its temporary configuration', async () => {
+  it('keeps version timeout typed', async () => {
     const fixture = admissionFixture({ OBVERSA_TEST_OPENCODE_VERSION_MODE: 'hang' });
     await expect(fixture.engine.admit(admissionRequest(request({ timeoutMs: 500 })), new AbortController().signal))
       .rejects.toMatchObject({ kind: 'timeout' });
     expect(fixture.calls().map((call) => call.kind)).toEqual(['version']);
-    expect(existsSync(fixture.calls()[0]!.home)).toBe(false);
   });
 
   it('keeps version abort typed and allows an explicit later admission', async () => {
@@ -258,7 +255,6 @@ describe('OpenCode static admission', () => {
     again.abort();
     await secondRejected;
     expect(fixture.calls().map((call) => call.kind)).toEqual(['version', 'version']);
-    expect(fixture.calls().every((call) => !existsSync(call.home))).toBe(true);
   });
 
   it('refuses an already aborted request before starting a version process', async () => {
@@ -301,53 +297,13 @@ describe('OpenCode static admission', () => {
     expect(fixture.calls()).toEqual([]);
   });
 
-  it('applies managed config and normal-tool project guards before a version process', async () => {
-    const managed = temporaryDirectory('lines-opencode-managed-admission-');
-    const fixture = admissionFixture({}, [managed]);
-    const input = request();
-    writeFileSync(join(managed, 'opencode.json'), '{}');
-    await expect(fixture.engine.admit(admissionRequest(input), new AbortController().signal))
-      .rejects.toMatchObject({ kind: 'invalid-config' });
-    expect(fixture.calls()).toEqual([]);
-    rmSync(join(managed, 'opencode.json'));
-    mkdirSync(join(input.cwd!, 'src'));
-    writeFileSync(join(input.cwd!, 'src', 'AGENTS.md'), 'fixture instruction');
-    await expect(fixture.engine.admit(admissionRequest(input), new AbortController().signal))
-      .rejects.toMatchObject({ kind: 'invalid-config' });
-    expect(fixture.calls()).toEqual([]);
-    const noFiles = { ...input, tools: [], allowedTools: [], workspaceMode: 'none' as const };
-    await expect(fixture.engine.admit(admissionRequest(noFiles), new AbortController().signal))
-      .resolves.toMatchObject({ capabilities: [] });
-    expect(fixture.calls().map((call) => call.kind)).toEqual(['version']);
-  });
-
-  it('lists both managed config file names for a supplied directory', () => {
-    const managed = temporaryDirectory('lines-opencode-managed-list-');
-    expect(managedConfigSources([managed])).toEqual(
-      expect.arrayContaining([
-        join(managed, 'opencode.json'),
-        join(managed, 'opencode.jsonc'),
-      ]),
-    );
-  });
-
-  it('ignores the retired test environment variable', () => {
-    const managed = temporaryDirectory('lines-opencode-managed-ignored-');
-    writeFileSync(join(managed, 'opencode.json'), '{}');
-    vi.stubEnv('OPENCODE_TEST_MANAGED_CONFIG_DIR', managed);
-    const sources = managedConfigSources();
-    expect(sources.some((source) => source.startsWith(managed))).toBe(false);
-  });
-
-  it.each([0, 2_500])('keeps the project guard active for a run after successful admission (boot delay %i ms)', async (bootDelayMs) => {
+  it.each([0, 2_500])('rechecks the workspace symlinks for a run after successful admission (boot delay %i ms)', async (bootDelayMs) => {
     const fixture = admissionFixture({
       OBVERSA_TEST_OPENCODE_BOOT_DELAY_MS: String(bootDelayMs),
     });
     const input = request();
-    writeFileSync(join(input.cwd!, 'AGENTS.md'), 'allowed root instructions');
     await fixture.engine.admit(admissionRequest(input), new AbortController().signal);
-    mkdirSync(join(input.cwd!, 'src'));
-    writeFileSync(join(input.cwd!, 'src', 'AGENTS.md'), 'nested instructions');
+    symlinkSync(temporaryDirectory('lines-opencode-outside-'), join(input.cwd!, 'outside'));
     await expect(fixture.engine.run(input, () => {}, new AbortController().signal))
       .rejects.toMatchObject({ kind: 'invalid-config' });
     expect(fixture.calls().map((call) => call.kind)).toEqual(['version']);
@@ -366,169 +322,6 @@ describe('OpenCode static admission', () => {
     await expect(fixture.engine.admit(admissionRequest(request(overrides)), new AbortController().signal))
       .rejects.toMatchObject({ kind: 'invalid-config' });
     expect(fixture.calls()).toEqual([]);
-  });
-
-  it('classifies validation-directory creation failure as unknown without a version process', async () => {
-    const fixture = admissionFixture();
-    const input = admissionRequest(request());
-    const blocked = join(temporaryDirectory('lines-opencode-invalid-tmp-'), 'not-a-directory');
-    writeFileSync(blocked, 'fixture');
-    vi.stubEnv('TMPDIR', blocked);
-
-    let failure: unknown;
-    try { await fixture.engine.admit(input, new AbortController().signal); }
-    catch (error) { failure = error; }
-    expect(failure).toBeInstanceOf(EngineError);
-    expect(failure).toMatchObject({ kind: 'unknown' });
-    expect(String(failure)).not.toContain(blocked);
-    expect(fixture.calls()).toEqual([]);
-  });
-
-  it('classifies validation cleanup failure as unknown without starting version observation', async () => {
-    const fixture = admissionFixture();
-    const input = admissionRequest(request());
-    const parent = temporaryDirectory('lines-opencode-admission-parent-');
-    const attempt = { ...input.attempt! };
-    let validationDirectory: string | undefined;
-    Object.defineProperty(attempt, 'label', {
-      enumerable: true,
-      get() {
-        validationDirectory = admissionValidationDirectory(parent);
-        blockDirectoryCleanup(validationDirectory);
-        return 'reviewer';
-      },
-    });
-    vi.stubEnv('TMPDIR', parent);
-
-    let failure: unknown;
-    try {
-      await fixture.engine.admit({ ...input, attempt }, new AbortController().signal);
-    } catch (error) {
-      failure = error;
-    } finally {
-      releaseDirectoryCleanup(validationDirectory);
-    }
-    expect(failure).toBeInstanceOf(EngineError);
-    expect(failure).toMatchObject({ kind: 'unknown' });
-    expect(String(failure)).not.toContain(parent);
-    expect(fixture.calls()).toEqual([]);
-  });
-
-  it('preserves invalid request configuration when validation cleanup also fails', async () => {
-    const fixture = admissionFixture();
-    const input = admissionRequest(request());
-    const parent = temporaryDirectory('lines-opencode-admission-parent-');
-    const attempt = {
-      ...input.attempt!,
-      path: {
-        join() {
-          throw new TypeError('synthetic invalid OpenCode attempt path');
-        },
-      } as never,
-    };
-    let validationDirectory: string | undefined;
-    Object.defineProperty(attempt, 'label', {
-      enumerable: true,
-      get() {
-        validationDirectory = admissionValidationDirectory(parent);
-        blockDirectoryCleanup(validationDirectory);
-        return 'reviewer';
-      },
-    });
-    vi.stubEnv('TMPDIR', parent);
-
-    let failure: unknown;
-    try {
-      await fixture.engine.admit({ ...input, attempt }, new AbortController().signal);
-    } catch (error) {
-      failure = error;
-    } finally {
-      releaseDirectoryCleanup(validationDirectory);
-    }
-    expect(failure).toBeInstanceOf(EngineError);
-    expect(failure).toMatchObject({ kind: 'invalid-config' });
-    expect(String(failure)).toContain('synthetic invalid OpenCode attempt path');
-    expect(String(failure)).not.toContain(parent);
-    expect(fixture.calls()).toEqual([]);
-  });
-
-  it('classifies version-directory creation failure as unknown after validation cleanup', async () => {
-    const fixture = admissionFixture();
-    const input = admissionRequest(request());
-    const parent = temporaryDirectory('lines-opencode-admission-parent-');
-    const blocked = join(temporaryDirectory('lines-opencode-invalid-tmp-'), 'not-a-directory');
-    writeFileSync(blocked, 'fixture');
-    const attempt = { ...input.attempt! };
-    let validationDirectory: string | undefined;
-    Object.defineProperty(attempt, 'label', {
-      enumerable: true,
-      get() {
-        validationDirectory = admissionValidationDirectory(parent);
-        if (!existsSync(join(validationDirectory, 'home'))
-          || !existsSync(join(validationDirectory, 'xdg-config'))
-          || !existsSync(join(validationDirectory, 'tmp'))) {
-          throw new Error('OpenCode validation setup did not complete');
-        }
-        vi.stubEnv('TMPDIR', blocked);
-        return 'reviewer';
-      },
-    });
-    vi.stubEnv('TMPDIR', parent);
-
-    let failure: unknown;
-    try { await fixture.engine.admit({ ...input, attempt }, new AbortController().signal); }
-    catch (error) { failure = error; }
-    expect(validationDirectory).toBeDefined();
-    expect(existsSync(validationDirectory!)).toBe(false);
-    expect(failure).toBeInstanceOf(EngineError);
-    expect(failure).toMatchObject({ kind: 'unknown' });
-    expect(String(failure)).not.toContain(blocked);
-    expect(fixture.calls()).toEqual([]);
-  });
-
-  it.each([0, 2_500])('classifies successful version cleanup failure as unknown without retaining its path (boot delay %i ms)', async (bootDelayMs) => {
-    const fixture = admissionFixture({
-      OBVERSA_TEST_OPENCODE_VERSION_BLOCK_CLEANUP: '1',
-      OBVERSA_TEST_OPENCODE_BOOT_DELAY_MS: String(bootDelayMs),
-    });
-    let failure: unknown;
-    let versionDirectory: string | undefined;
-    try {
-      await fixture.engine.admit(admissionRequest(request()), new AbortController().signal);
-    } catch (error) {
-      failure = error;
-    } finally {
-      const call = fixture.calls()[0];
-      versionDirectory = call === undefined ? undefined : dirname(call.home);
-      releaseDirectoryCleanup(versionDirectory);
-    }
-    expect(fixture.calls().map((call) => call.kind)).toEqual(['version']);
-    expect(failure).toBeInstanceOf(EngineError);
-    expect(failure).toMatchObject({ kind: 'unknown' });
-    expect(String(failure)).not.toContain(versionDirectory!);
-  }, 15_000);
-
-  it('preserves the version command failure when version cleanup also fails', async () => {
-    const fixture = admissionFixture({
-      OBVERSA_TEST_OPENCODE_VERSION_BLOCK_CLEANUP: '1',
-      OBVERSA_TEST_OPENCODE_VERSION_MODE: 'exit',
-    });
-    let failure: unknown;
-    let versionDirectory: string | undefined;
-    try {
-      await fixture.engine.admit(admissionRequest(request()), new AbortController().signal);
-    } catch (error) {
-      failure = error;
-    } finally {
-      const call = fixture.calls()[0];
-      versionDirectory = call === undefined ? undefined : dirname(call.home);
-      releaseDirectoryCleanup(versionDirectory);
-    }
-    expect(fixture.calls().map((call) => call.kind)).toEqual(['version']);
-    expect(failure).toBeInstanceOf(EngineError);
-    expect(failure).toMatchObject({ kind: 'invalid-config' });
-    expect(String(failure)).toContain('OpenCode version command did not succeed');
-    expect(String(failure)).not.toContain(versionDirectory!);
   });
 
   it('passes the separate admission kit with actual executable markers', async () => {
@@ -634,7 +427,6 @@ interface AdmissionInvocation {
   args: string[];
   stdin: string | null;
   home: string;
-  configDirectory: string;
   config: { tools: Record<string, boolean>; model: string };
 }
 
@@ -649,10 +441,7 @@ function admissionInvocations(path: string): AdmissionInvocation[] {
     .filter(Boolean).map((line) => JSON.parse(line) as AdmissionInvocation);
 }
 
-function admissionFixture(
-  environment: Record<string, string> = {},
-  managedConfigDirectories: readonly string[] = [],
-) {
+function admissionFixture(environment: Record<string, string> = {}) {
   const bin = executable();
   const log = join(temporaryDirectory('lines-opencode-admission-log-'), 'calls.jsonl');
   const selectedEnvironment = {
@@ -666,7 +455,6 @@ function admissionFixture(
     engine: new OpenCodeCliEngine({
       ...options(bin),
       environment: selectedEnvironment,
-      managedConfigDirectories,
     }),
     calls: () => admissionInvocations(log),
   };
@@ -684,44 +472,17 @@ function admissionSelection(input: AgentRequest, bin: string): EngineSelectionRe
   });
 }
 
-function admissionValidationDirectory(parent: string): string {
-  const names = readdirSync(parent)
-    .filter((name) => name.startsWith('lines-opencode-admission-'));
-  if (names.length !== 1) {
-    throw new Error(`expected one OpenCode admission directory, found ${names.length}`);
-  }
-  return join(parent, names[0]!);
-}
-
-function blockDirectoryCleanup(directory: string): void {
-  const barrier = join(directory, 'cleanup-barrier');
-  mkdirSync(barrier);
-  writeFileSync(join(barrier, 'retained'), 'fixture');
-  chmodSync(barrier, 0o000);
-}
-
-function releaseDirectoryCleanup(directory: string | undefined): void {
-  if (directory === undefined || !existsSync(directory)) return;
-  const barrier = join(directory, 'cleanup-barrier');
-  if (existsSync(barrier)) chmodSync(barrier, 0o700);
-  rmSync(directory, { recursive: true, force: true });
-}
-
 function invocationConfig(value: ReturnType<typeof buildOpenCodeInvocation>) {
   return JSON.parse(value.environment.OPENCODE_CONFIG_CONTENT ?? '') as {
     share: string;
     autoupdate: boolean;
     model: string;
     small_model: string;
-    enabled_providers: string[];
-    plugin: unknown[];
-    mcp: Record<string, unknown>;
-    lsp: boolean;
-    formatter: boolean;
+    default_agent: string;
     tools: Record<string, boolean>;
     permission: Record<string, unknown>;
     agent: {
-      build: {
+      'obversa-step': {
         prompt: string;
         tools: Record<string, boolean>;
         permission: Record<string, unknown>;
@@ -752,24 +513,21 @@ function parseStructuredResult(
 }
 
 describe('OpenCode CLI adapter', () => {
-  it('builds one exact isolated OpenCode 1.18.23 invocation', async () => {
-    const root = temporaryDirectory('lines-opencode-invocation-');
+  it('builds one exact OpenCode 1.18.23 invocation', async () => {
     const input = request();
-    const invocation = buildOpenCodeInvocation(input, options('/bin/echo'), root);
+    const invocation = buildOpenCodeInvocation(input, options('/bin/echo'));
     const config = invocationConfig(invocation);
 
     expect(invocation.args).toEqual([
       'run',
       '--format',
       'json',
-      '--pure',
       '--model',
       'fixture-provider/fixture-model',
       '--dir',
       input.cwd,
     ]);
     expect(invocation.stdin).toBe('Review the candidate.');
-    expect(invocation.configDirectory).toBe(join(root, 'xdg-config'));
     expect(invocation.args).not.toEqual(expect.arrayContaining([
       '--auto',
       '--share',
@@ -779,27 +537,27 @@ describe('OpenCode CLI adapter', () => {
       '--attach',
       '--agent',
     ]));
+    // Only the step's settings, no autoupdate and no share. Home folders,
+    // the config folder, plugins, skills and the login stay the person's own.
+    expect(Object.keys(invocation.environment)
+      .filter((name) => !name.startsWith('OBVERSA_')).sort()).toEqual([
+      'OPENCODE_CONFIG_CONTENT',
+      'OPENCODE_DISABLE_AUTOUPDATE',
+      'OPENCODE_DISABLE_SHARE',
+    ]);
     expect(invocation.environment).toMatchObject({
-      OPENCODE_DISABLE_PROJECT_CONFIG: '1',
-      OPENCODE_PURE: '1',
-      OPENCODE_DISABLE_DEFAULT_PLUGINS: '1',
-      OPENCODE_DISABLE_EXTERNAL_SKILLS: '1',
-      OPENCODE_DISABLE_CLAUDE_CODE: '1',
       OPENCODE_DISABLE_AUTOUPDATE: '1',
-      OPENCODE_DISABLE_LSP_DOWNLOAD: '1',
       OPENCODE_DISABLE_SHARE: '1',
-      OPENCODE_AUTH_CONTENT: '{}',
     });
-    expect(config).toMatchObject({
+    expect(config).toEqual({
       share: 'disabled',
       autoupdate: false,
       model: 'fixture-provider/fixture-model',
       small_model: 'fixture-provider/fixture-model',
-      enabled_providers: ['fixture-provider'],
-      plugin: [],
-      mcp: {},
-      lsp: false,
-      formatter: false,
+      default_agent: 'obversa-step',
+      tools: config.tools,
+      permission: config.permission,
+      agent: { 'obversa-step': config.agent['obversa-step'] },
     });
     expect(config.tools).toEqual({ '*': false, read: true, grep: true });
     expect(Object.keys(config.permission)[0]).toBe('*');
@@ -808,63 +566,45 @@ describe('OpenCode CLI adapter', () => {
       read: { '*': 'deny', 'src/**': 'allow' },
       grep: 'allow',
     });
-    expect(config.agent.build.tools).toEqual(config.tools);
-    expect(config.agent.build.permission).toEqual(config.permission);
-    expect(config.agent.build.prompt).toContain('Follow the fixture rules.');
+    expect(config.agent['obversa-step'].tools).toEqual(config.tools);
+    expect(config.agent['obversa-step'].permission).toEqual(config.permission);
+    expect(config.agent['obversa-step'].prompt).toContain('Follow the fixture rules.');
   });
 
-  it('runs with stdin, isolated homes, explicit auth, and no parent state', async () => {
-    const parentHome = temporaryDirectory('lines-opencode-parent-home-');
-    const poisonedConfig = join(parentHome, 'config', 'opencode');
-    mkdirSync(poisonedConfig, { recursive: true });
-    writeFileSync(
-      join(poisonedConfig, 'opencode.json'),
-      '{"plugin":["poison"],"model":"poison/model"}',
-    );
+  it('runs with stdin and the person\'s own home, config folders, login and environment', async () => {
+    const personHome = temporaryDirectory('lines-opencode-person-home-');
     const recordPath = join(
       temporaryDirectory('lines-opencode-record-'),
       'call.json',
     );
-    vi.stubEnv('HOME', parentHome);
-    vi.stubEnv('XDG_CONFIG_HOME', join(parentHome, 'config'));
-    vi.stubEnv('OPENCODE_CONFIG_CONTENT', '{"plugin":["poison"]}');
-    vi.stubEnv('OPENCODE_AUTH_CONTENT', '{"fixture":{"key":"poison"}}');
-    vi.stubEnv('OBVERSA_POISONED_PARENT_SECRET', 'must-not-cross');
-    const auth = {
-      fixture: { type: 'api', key: 'selected-auth' },
-    } as const;
+    vi.stubEnv('HOME', personHome);
+    vi.stubEnv('XDG_CONFIG_HOME', join(personHome, 'config'));
+    vi.stubEnv('XDG_DATA_HOME', join(personHome, 'data'));
+    vi.stubEnv('XDG_CACHE_HOME', join(personHome, 'cache'));
+    vi.stubEnv('XDG_STATE_HOME', join(personHome, 'state'));
+    vi.stubEnv('OBVERSA_TEST_OPENCODE_PARENT_VALUE', 'set-by-the-person');
+    vi.stubEnv('OPENCODE_CONFIG_DIR', join(personHome, 'opencode'));
     const input = request();
     const selectedOptions = options();
 
-    const engine = new OpenCodeCliEngine({
+    const result = await new OpenCodeCliEngine({
       ...selectedOptions,
-      auth,
       environment: {
         OBVERSA_TEST_OPENCODE_RECORD: recordPath,
         OBVERSA_TEST_OPENCODE_SCENARIO: 'ordered-parts',
         OBVERSA_TEST_OPENCODE_SELECTED: 'selected-by-host',
       },
-    });
-    (auth.fixture as { key: string }).key = 'changed-after-selection';
-    const result = await engine.run(
-      input,
-      () => {},
-      new AbortController().signal,
-    );
+    }).run(input, () => {}, new AbortController().signal);
     const call = JSON.parse(readFileSync(recordPath, 'utf8')) as {
       args: string[];
       cwd: string;
       prompt: string;
       attempt: { attemptId: string; runId: string; headless: string };
-      environment: Record<string, string | boolean | null>;
-    };
-    const config = JSON.parse(String(call.environment.config)) as {
-      model: string;
-      plugin: unknown[];
+      environment: Record<string, unknown>;
     };
 
     expect(call.args).toEqual([
-      'run', '--format', 'json', '--pure', '--model',
+      'run', '--format', 'json', '--model',
       'fixture-provider/fixture-model', '--dir', input.cwd,
     ]);
     expect(call.cwd).toBe(input.cwd);
@@ -875,30 +615,23 @@ describe('OpenCode CLI adapter', () => {
       headless: '1',
     });
     expect(call.environment).toMatchObject({
+      home: personHome,
+      configHome: join(personHome, 'config'),
+      dataHome: join(personHome, 'data'),
+      cacheHome: join(personHome, 'cache'),
+      stateHome: join(personHome, 'state'),
+      configDir: join(personHome, 'opencode'),
       selected: 'selected-by-host',
       requestSecret: null,
-      parentSecret: null,
-      projectConfigDisabled: '1',
-      pure: '1',
-      defaultPluginsDisabled: '1',
-      externalSkillsDisabled: '1',
-      claudeCodeDisabled: '1',
-      autoUpdateDisabled: '1',
-      lspDownloadDisabled: '1',
-      shareDisabled: '1',
-      poisonedConfigVisible: false,
+      parentValue: 'set-by-the-person',
+      auth: '',
     });
-    expect(call.environment.home).not.toBe(parentHome);
-    expect(call.environment.configHome).not.toBe(join(parentHome, 'config'));
-    expect(call.environment.auth).toBe(
-      '{"fixture":{"key":"selected-auth","type":"api"}}',
-    );
-    expect(config).toMatchObject({
-      model: 'fixture-provider/fixture-model',
-      plugin: [],
-    });
-    expect(existsSync(String(call.environment.home))).toBe(false);
-    expect(existsSync(String(call.environment.configHome))).toBe(false);
+    expect(call.environment.opencodeVariables).toEqual([...new Set([
+      ...personOpenCodeVariables(),
+      'OPENCODE_CONFIG_CONTENT',
+      'OPENCODE_DISABLE_AUTOUPDATE',
+      'OPENCODE_DISABLE_SHARE',
+    ])].sort());
     expect(result.parts).toEqual([
       { kind: 'assistant', text: 'draft', final: false },
       { kind: 'assistant', text: 'answer', final: true },
@@ -907,79 +640,75 @@ describe('OpenCode CLI adapter', () => {
     expect(result.effective.executable).toBe(selectedOptions.executable);
   });
 
-  it('refuses a managed config that appears between admission and spawn', async () => {
-    const managed = temporaryDirectory('lines-opencode-managed-');
+  it('uses a selected login instead of the person\'s own login', async () => {
     const recordPath = join(
       temporaryDirectory('lines-opencode-record-'),
       'call.json',
     );
-    const admissionLog = join(
-      temporaryDirectory('lines-opencode-admission-record-'),
-      'calls.jsonl',
-    );
-    // The fixture's version process seeds the managed config, so admission
-    // passes and only the spawn-path guard can refuse the run.
-    await expect(new OpenCodeCliEngine({
+    const auth = {
+      fixture: { type: 'api', key: 'selected-auth' },
+    } as const;
+    const engine = new OpenCodeCliEngine({
       ...options(),
-      managedConfigDirectories: [managed],
-      environment: {
-        OBVERSA_TEST_OPENCODE_ADMISSION_RECORD: admissionLog,
-        OBVERSA_TEST_OPENCODE_SEED_CONFIG: managed,
-        OBVERSA_TEST_OPENCODE_RECORD: recordPath,
-      },
-    }).run(request(), () => {}, new AbortController().signal)).rejects.toThrow(
-      'managed OpenCode config',
-    );
-    expect(readFileSync(admissionLog, 'utf8')).toContain('"kind":"version"');
-    expect(existsSync(recordPath)).toBe(false);
-  });
-
-  it('refuses a machine-managed config present at construction before spawn', async () => {
-    const managed = temporaryDirectory('lines-opencode-managed-');
-    const recordPath = join(
-      temporaryDirectory('lines-opencode-record-'),
-      'call.json',
-    );
-    writeFileSync(join(managed, 'opencode.json'), '{"tools":{"bash":true}}');
-
-    await expect(new OpenCodeCliEngine({
-      ...options(),
-      managedConfigDirectories: [managed],
+      auth,
       environment: { OBVERSA_TEST_OPENCODE_RECORD: recordPath },
-    }).run(request(), () => {}, new AbortController().signal)).rejects.toThrow(
-      'managed OpenCode config',
-    );
-    expect(existsSync(recordPath)).toBe(false);
+    });
+    (auth.fixture as { key: string }).key = 'changed-after-selection';
+    await engine.run(request(), () => {}, new AbortController().signal);
+    const call = JSON.parse(readFileSync(recordPath, 'utf8')) as {
+      environment: Record<string, unknown>;
+    };
+
+    expect(call.environment).toMatchObject({
+      home: process.env.HOME ?? null,
+      auth: '{"fixture":{"key":"selected-auth","type":"api"}}',
+    });
   });
 
-  it.each(['AGENTS.md', 'CLAUDE.md', 'CONTEXT.md'])(
-    'refuses nested %s instructions for a read-capable attempt',
+  it('passes a seat\'s selected login to its engine', async () => {
+    const recordPath = join(
+      temporaryDirectory('lines-opencode-record-'),
+      'call.json',
+    );
+    vi.stubEnv('OBVERSA_TEST_OPENCODE_RECORD', recordPath);
+    const seat = opencode('fixture-provider/fixture-model', {
+      executable: executable(),
+      auth: { fixture: { type: 'api', key: 'seat-auth' } },
+    });
+    await seat.engine.run(request(), () => {}, new AbortController().signal);
+    const call = JSON.parse(readFileSync(recordPath, 'utf8')) as {
+      environment: Record<string, unknown>;
+    };
+
+    expect(call.environment.auth).toBe('{"fixture":{"key":"seat-auth","type":"api"}}');
+  });
+
+  it.each(['AGENTS.md', 'CLAUDE.md', 'CONTEXT.md', 'agents.md', '.git/AGENTS.md'])(
+    'runs a read-capable attempt in a repository with nested src/%s',
     async (name) => {
       const workspace = temporaryDirectory('lines-opencode-instructions-');
-      const nested = join(workspace, 'src');
-      mkdirSync(nested);
-      writeFileSync(join(nested, name), 'ambient instructions');
-      writeFileSync(join(nested, 'work.ts'), 'export {};');
+      const target = join(workspace, 'src', name);
+      mkdirSync(dirname(target), { recursive: true });
+      writeFileSync(target, 'project file');
+      writeFileSync(join(workspace, 'src', 'work.ts'), 'export {};');
       const recordPath = join(
         temporaryDirectory('lines-opencode-record-'),
         'call.json',
       );
 
-      await expect(new OpenCodeCliEngine({
+      await new OpenCodeCliEngine({
         ...options(),
         environment: { OBVERSA_TEST_OPENCODE_RECORD: recordPath },
       }).run(request({
         cwd: workspace,
         tools: ['read'],
         allowedTools: ['Read(src/**)'],
-      }), () => {}, new AbortController().signal)).rejects.toThrow(
-        'project instruction',
-      );
-      expect(existsSync(recordPath)).toBe(false);
+      }), () => {}, new AbortController().signal);
+      expect(existsSync(recordPath)).toBe(true);
     },
   );
 
-  it('allows a root instruction when project config loading is disabled', async () => {
+  it('runs with the repository\'s root instruction file', async () => {
     const workspace = temporaryDirectory('lines-opencode-root-instructions-');
     writeFileSync(join(workspace, 'AGENTS.md'), 'root instructions');
 
@@ -999,23 +728,13 @@ describe('OpenCode CLI adapter', () => {
     });
   });
 
-  it('refuses instructions under .git and external directory symlinks before spawn', async () => {
-    const gitWorkspace = temporaryDirectory('lines-opencode-git-instructions-');
-    mkdirSync(join(gitWorkspace, '.git'));
-    writeFileSync(join(gitWorkspace, '.git', 'AGENTS.md'), 'git instructions');
+  it('refuses external directory symlinks before spawn', async () => {
     const linkedWorkspace = temporaryDirectory('lines-opencode-link-instructions-');
     const target = temporaryDirectory('lines-opencode-link-target-');
     writeFileSync(join(target, 'AGENTS.md'), 'linked instructions');
     symlinkSync(target, join(linkedWorkspace, 'link'));
     const engine = new OpenCodeCliEngine(options());
 
-    await expect(engine.run(request({
-      cwd: gitWorkspace,
-      tools: ['read'],
-      allowedTools: ['Read(.git/**)'],
-    }), () => {}, new AbortController().signal)).rejects.toThrow(
-      'project instruction',
-    );
     await expect(engine.run(request({
       cwd: linkedWorkspace,
       tools: ['read'],
@@ -1050,7 +769,7 @@ describe('OpenCode CLI adapter', () => {
     });
   });
 
-  it('refuses a nested directory symlink back to the workspace root', async () => {
+  it('allows a nested directory symlink back to the workspace root', async () => {
     const workspace = temporaryDirectory('lines-opencode-root-link-');
     writeFileSync(join(workspace, 'AGENTS.md'), 'root instructions');
     writeFileSync(join(workspace, 'file'), 'contents');
@@ -1060,17 +779,15 @@ describe('OpenCode CLI adapter', () => {
       'call.json',
     );
 
-    await expect(new OpenCodeCliEngine({
+    await new OpenCodeCliEngine({
       ...options(),
       environment: { OBVERSA_TEST_OPENCODE_RECORD: recordPath },
     }).run(request({
       cwd: workspace,
       tools: ['read'],
       allowedTools: ['Read(nested/file)'],
-    }), () => {}, new AbortController().signal)).rejects.toThrow(
-      'workspace root',
-    );
-    expect(existsSync(recordPath)).toBe(false);
+    }), () => {}, new AbortController().signal);
+    expect(existsSync(recordPath)).toBe(true);
   });
 
   it.each([
@@ -1103,35 +820,10 @@ describe('OpenCode CLI adapter', () => {
     expect(existsSync(recordPath)).toBe(false);
   });
 
-  it('refuses lower-case nested project instructions before spawn', async () => {
-    const workspace = temporaryDirectory('lines-opencode-lower-instructions-');
-    const nested = join(workspace, 'src');
-    mkdirSync(nested);
-    writeFileSync(join(nested, 'agents.md'), 'ambient instructions');
-    const recordPath = join(
-      temporaryDirectory('lines-opencode-record-'),
-      'call.json',
-    );
-
-    await expect(new OpenCodeCliEngine({
-      ...options(),
-      environment: { OBVERSA_TEST_OPENCODE_RECORD: recordPath },
-    }).run(request({
-      cwd: workspace,
-      tools: ['read'],
-      allowedTools: ['Read(src/**)'],
-    }), () => {}, new AbortController().signal)).rejects.toThrow(
-      'project instruction',
-    );
-    expect(existsSync(recordPath)).toBe(false);
-  });
-
   it('maps none, read, write, web, and subagent permissions without ambient allows', () => {
-    const root = temporaryDirectory('lines-opencode-permissions-');
     const none = invocationConfig(buildOpenCodeInvocation(
       request({ tools: [], allowedTools: [], workspaceMode: 'none' }),
       options('/bin/echo'),
-      root,
     ));
     expect(none.tools).toEqual({ '*': false });
     expect(none.permission).toEqual({ '*': 'deny' });
@@ -1149,7 +841,6 @@ describe('OpenCode CLI adapter', () => {
         leaf: false,
       }),
       options('/bin/echo'),
-      root,
     ));
     expect(write.tools).toEqual({
       '*': false,
@@ -1168,7 +859,6 @@ describe('OpenCode CLI adapter', () => {
   });
 
   it('keeps web and todo tools independent from filesystem access', () => {
-    const root = temporaryDirectory('lines-opencode-non-filesystem-');
     const none = invocationConfig(buildOpenCodeInvocation(
       request({
         tools: ['webfetch', 'todowrite'],
@@ -1176,7 +866,6 @@ describe('OpenCode CLI adapter', () => {
         workspaceMode: 'none',
       }),
       options('/bin/echo'),
-      root,
     ));
     expect(none.tools).toEqual({
       '*': false,
@@ -1191,7 +880,6 @@ describe('OpenCode CLI adapter', () => {
         workspaceMode: 'read',
       }),
       options('/bin/echo'),
-      root,
     ));
     expect(read.tools).toEqual({ '*': false, read: true, webfetch: true });
   });
@@ -1199,14 +887,14 @@ describe('OpenCode CLI adapter', () => {
   it('refuses a read workspace whose only capability is web access', () => {
     expect(() => buildOpenCodeInvocation(
       request({ tools: ['webfetch'], allowedTools: ['WebFetch'], workspaceMode: 'read' }),
-      options('/bin/echo'), temporaryDirectory('opencode-web-only-'),
+      options('/bin/echo'),
     )).toThrow(/read/);
   });
 
   it.each(['none', 'read'] as const)('refuses delegation that can escape %s workspace access', (workspaceMode) => {
     expect(() => buildOpenCodeInvocation(
       request({ tools: ['task', ...(workspaceMode === 'read' ? ['read'] : [])], allowedTools: ['Task'], workspaceMode, leaf: false }),
-      options('/bin/echo'), temporaryDirectory('opencode-restricted-task-'),
+      options('/bin/echo'),
     )).toThrow(/workspace|capability/);
   });
 
@@ -1226,7 +914,6 @@ describe('OpenCode CLI adapter', () => {
         ...options('/bin/echo'),
         identity: { provider: null, modelFamily: null },
       },
-      temporaryDirectory('lines-opencode-pattern-rule-'),
     )).toThrow('does not accept patterns');
   });
 
@@ -1375,7 +1062,6 @@ describe('OpenCode CLI adapter', () => {
     expect(() => buildOpenCodeInvocation(
       request(),
       options('opencode'),
-      temporaryDirectory('lines-opencode-builder-'),
     )).toThrow('absolute');
     expect(() => new OpenCodeCliEngine({
       ...options('/bin/echo'),

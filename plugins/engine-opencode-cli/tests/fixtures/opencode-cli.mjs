@@ -2,13 +2,9 @@
 
 import {
   appendFileSync,
-  chmodSync,
-  existsSync,
-  mkdirSync,
   readFileSync,
   writeFileSync,
 } from 'node:fs';
-import { dirname, join } from 'node:path';
 import { setTimeout as delay } from 'node:timers/promises';
 
 const bootDelayMs = Number(process.env.OBVERSA_TEST_OPENCODE_BOOT_DELAY_MS ?? 0);
@@ -25,21 +21,12 @@ function recordAdmissionInvocation(kind, stdin) {
     args,
     stdin,
     home: process.env.HOME,
-    configDirectory: process.env.OPENCODE_CONFIG_DIR,
     config: JSON.parse(process.env.OPENCODE_CONFIG_CONTENT ?? '{}'),
   })}\n`);
 }
 
 if (args.length === 1 && args[0] === '--version') {
   recordAdmissionInvocation('version', readFileSync(0, 'utf8'));
-  const seed = process.env.OBVERSA_TEST_OPENCODE_SEED_CONFIG;
-  if (seed) writeFileSync(join(seed, 'opencode.json'), '{"tools":{"bash":true}}');
-  if (process.env.OBVERSA_TEST_OPENCODE_VERSION_BLOCK_CLEANUP === '1') {
-    const barrier = join(dirname(process.env.HOME), 'cleanup-barrier');
-    mkdirSync(barrier);
-    writeFileSync(join(barrier, 'retained'), 'fixture');
-    chmodSync(barrier, 0o000);
-  }
   const mode = process.env.OBVERSA_TEST_OPENCODE_VERSION_MODE;
   if (mode === 'fail-once') {
     const log = process.env.OBVERSA_TEST_OPENCODE_ADMISSION_RECORD;
@@ -151,26 +138,15 @@ if (recordPath) {
       configHome: process.env.XDG_CONFIG_HOME ?? null,
       cacheHome: process.env.XDG_CACHE_HOME ?? null,
       stateHome: process.env.XDG_STATE_HOME ?? null,
+      configDir: process.env.OPENCODE_CONFIG_DIR ?? null,
       temporary: process.env.TMPDIR ?? null,
+      opencodeVariables: Object.keys(process.env)
+        .filter((name) => name.startsWith('OPENCODE_')).sort(),
       config,
       auth,
       selected: process.env.OBVERSA_TEST_OPENCODE_SELECTED ?? null,
       requestSecret: process.env.OBVERSA_TEST_OPENCODE_REQUEST_SECRET ?? null,
-      parentSecret: process.env.OBVERSA_POISONED_PARENT_SECRET ?? null,
-      projectConfigDisabled: process.env.OPENCODE_DISABLE_PROJECT_CONFIG ?? null,
-      pure: process.env.OPENCODE_PURE ?? null,
-      defaultPluginsDisabled: process.env.OPENCODE_DISABLE_DEFAULT_PLUGINS ?? null,
-      externalSkillsDisabled: process.env.OPENCODE_DISABLE_EXTERNAL_SKILLS ?? null,
-      claudeCodeDisabled: process.env.OPENCODE_DISABLE_CLAUDE_CODE ?? null,
-      autoUpdateDisabled: process.env.OPENCODE_DISABLE_AUTOUPDATE ?? null,
-      lspDownloadDisabled: process.env.OPENCODE_DISABLE_LSP_DOWNLOAD ?? null,
-      shareDisabled: process.env.OPENCODE_DISABLE_SHARE ?? null,
-      poisonedConfigVisible:
-        existsSync(`${process.env.XDG_CONFIG_HOME ?? ''}/opencode/opencode.json`)
-        && readFileSync(
-          `${process.env.XDG_CONFIG_HOME}/opencode/opencode.json`,
-          'utf8',
-        ).includes('poison'),
+      parentValue: process.env.OBVERSA_TEST_OPENCODE_PARENT_VALUE ?? null,
     },
   }));
 }

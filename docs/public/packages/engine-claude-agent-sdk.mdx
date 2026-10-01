@@ -25,10 +25,17 @@ pnpm add @obversa/engine-claude-agent-sdk
 
 Included in `@obversa/obversa`.
 
+Each query runs the way Claude Code runs for you: with your own login,
+your own settings and the repository's instruction files, the same as
+every other engine. The plugin loads the setting sources Claude Code loads
+(`user`, `project` and `local`), and adds only what the step needs.
+
 ## Requirements
 
 - Claude Code signed in on the machine that runs the engine. The SDK uses
   its sign-in, and the plugin has no API key option.
+- The plugin is tested with Claude Agent SDK 0.3.241, the version it
+  depends on.
 
 ## Identity
 
@@ -86,8 +93,8 @@ are the pieces that wire the tool to a `Memory` adapter.
 `default`, `acceptEdits`, `bypassPermissions`, `plan`, `dontAsk` or `auto`.
 In the `read` workspace mode Claude gets only the `Read`, `Grep` and `Glob`
 tools the request names; in `none` it gets no tools. Both modes block
-`Bash`, `Edit`, `Write`, the sub-agent tools and every MCP tool, and a
-settings file outside the run can't restore them.
+`Bash`, `Edit`, `Write`, the sub-agent tools and every MCP tool. The SDK
+still loads your own settings, and they can't restore those tools.
 
 ### The rest
 

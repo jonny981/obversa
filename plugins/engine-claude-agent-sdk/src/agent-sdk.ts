@@ -256,7 +256,10 @@ export class AgentSdkEngine implements Engine {
       systemPrompt: agentSdkSystemPrompt(req),
       cwd: req.cwd,
       ...toolOptions,
-      ...(restricted ? { settingSources: [], strictMcpConfig: true } : {}),
+      // The sources Claude Code itself loads, so both Claude engines read the
+      // person's settings and the repository's instruction files.
+      settingSources: ['user', 'project', 'local'],
+      ...(restricted ? { strictMcpConfig: true } : {}),
       mcpServers: memoryServer ? { [MEMORY_SERVER]: memoryServer } : undefined,
       // The SDK's `env` REPLACES the subprocess environment entirely, the
       // opposite of execa's merge semantics, so spread `process.env` under the

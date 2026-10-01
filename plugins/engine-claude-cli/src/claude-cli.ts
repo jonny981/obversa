@@ -273,7 +273,7 @@ export function buildClaudeArgs(
   // A leaf agent may not spawn sub-agents, so disallow the spawn tool (wins over any allowlist).
   if (tools.disallowedTools?.length)
     args.push('--disallowedTools', tools.disallowedTools.join(','));
-  if (restricted) args.push('--strict-mcp-config', '--setting-sources', '');
+  if (restricted) args.push('--strict-mcp-config');
   if (opts.permissionMode) args.push('--permission-mode', opts.permissionMode);
   if (opts.cliArgs?.length) args.push(...opts.cliArgs);
   return args;

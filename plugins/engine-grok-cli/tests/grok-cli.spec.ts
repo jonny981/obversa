@@ -65,7 +65,7 @@ function executable(): string {
 function options(bin = executable()): GrokCliEngineOptions {
   return {
     executable: bin,
-    version: '1.0.5',
+    version: '1.0.44',
     identity: {
       provider: 'xai',
       modelFamily: 'grok-4',
@@ -129,7 +129,7 @@ interface FixtureInvocation {
   readonly promptFilePresent: boolean;
   readonly home: string | null;
   readonly grokHome: string | null;
-  readonly parentSecret: string | null;
+  readonly parentValue: string | null;
 }
 
 function invocations(path: string): FixtureInvocation[] {
@@ -151,6 +151,18 @@ function cleanupVersionRoots(path: string): void {
   }
 }
 
+function personGrokVariables(): Record<string, string> {
+  return Object.fromEntries(Object.entries(process.env)
+    .filter((entry): entry is [string, string] =>
+      entry[0].startsWith('GROK_') && entry[1] !== undefined));
+}
+
+function fixtureAuthFile(): string {
+  const authFile = join(temporaryDirectory('lines-grok-auth-'), 'auth.json');
+  writeFileSync(authFile, '{"fixture":"selected-auth"}', { mode: 0o600 });
+  return authFile;
+}
+
 function admissionRequest(input: AgentRequest): Omit<AgentRequest, 'prompt'> {
   const { prompt: _prompt, ...rest } = input;
   return rest;
@@ -158,13 +170,13 @@ function admissionRequest(input: AgentRequest): Omit<AgentRequest, 'prompt'> {
 
 function admissionSelection(bin: string, input: AgentRequest): EngineSelectionRecord {
   return engineSelection({
-    adapter: 'grok-cli', adapterVersion: '1.0.5', provider: 'xai', modelFamily: 'grok-4',
+    adapter: 'grok-cli', adapterVersion: '1.0.44', provider: 'xai', modelFamily: 'grok-4',
     executable: bin, model: input.model, capabilities: input.tools ?? [],
   });
 }
 
 describe('Grok CLI adapter', () => {
-  it('maps one request to an exact fresh 1.0.5 headless invocation', async () => {
+  it('maps one request to an exact fresh 1.0.44 headless invocation', async () => {
     const recordPath = join(temporaryDirectory('lines-grok-record-'), 'call.json');
     const events: EngineStreamEvent[] = [];
     const input = request();
@@ -188,14 +200,11 @@ describe('Grok CLI adapter', () => {
       prompt: string;
       attempt: { attemptId: string; runId: string; headless: string };
       environment: {
-        home: string;
-        grokHome: string;
-        config: string;
+        home: string | null;
+        grokHome: string | null;
+        grokVariables: Record<string, string>;
         auth: string | null;
         subagents: string | null;
-        parentSecret: string | null;
-        poisonedHookVisible: boolean;
-        compatDisabled: boolean;
       };
     };
 
@@ -220,10 +229,10 @@ describe('Grok CLI adapter', () => {
     expect(call.args).toEqual(expect.arrayContaining([
       '--verbatim',
       '--no-auto-update',
-      '--no-memory',
       '--no-subagents',
       '--disable-web-search',
     ]));
+    expect(call.args).not.toContain('--no-memory');
     expect(valuesAfter(call.args, '--disallowed-tools')).toEqual([
       'search_tool,use_tool,Agent',
     ]);
@@ -237,21 +246,16 @@ describe('Grok CLI adapter', () => {
       runId: 'run-1',
       headless: '1',
     });
-    expect(call.environment).toMatchObject({
-      parentSecret: null,
-      poisonedHookVisible: false,
-      compatDisabled: true,
-      auth: null,
-      subagents: '0',
+    expect(call.environment).toMatchObject({ auth: null, subagents: '0' });
+    // Grok runs with the person's own home folder, Grok home and login.
+    expect(call.environment.home).toBe(process.env.HOME);
+    expect(call.environment.grokHome).toBe(process.env.GROK_HOME ?? null);
+    // The plugin sets only the subagent switch. Memory, managed MCP servers,
+    // workflows and Claude or Cursor settings stay as the person set them.
+    expect(call.environment.grokVariables).toEqual({
+      ...personGrokVariables(),
+      GROK_SUBAGENTS: '0',
     });
-    expect(call.environment.config).toContain('load_envrc = false');
-    expect(call.environment.config).toContain('[compat.claude]');
-    expect(call.environment.config).toContain('[compat.cursor]');
-    expect(call.environment.config).toContain('skills = false');
-    expect(call.environment.home).not.toBe(process.env.HOME);
-    expect(call.environment.grokHome).not.toBe(process.env.GROK_HOME);
-    expect(existsSync(call.environment.home)).toBe(false);
-    expect(existsSync(call.environment.grokHome)).toBe(false);
 
     expect(result.parts).toEqual([
       { kind: 'assistant', text: 'draft', final: false },
@@ -266,7 +270,7 @@ describe('Grok CLI adapter', () => {
     });
     expect(result.requested).toEqual({
       adapter: 'grok-cli',
-      adapterVersion: '1.0.5',
+      adapterVersion: '1.0.44',
       provider: 'xai',
       modelFamily: 'grok-4',
       model: 'grok-4-fixture',
@@ -303,13 +307,13 @@ describe('Grok CLI adapter', () => {
   });
 
   it.each([
-    'grok 1.0.5 (5115b46bc909) [stable]\n',
-    'grok 1.0.5\n',
+    'grok 1.0.44 (5b807183dd79) [stable]\n',
+    'grok 1.0.44\n',
   ])('observes the version without a prompt file or model request (%j)', async (stdout) => {
     const bin = executable();
     const calls = join(temporaryDirectory('lines-grok-admission-'), 'calls.jsonl');
     const input = request();
-    vi.stubEnv('OBVERSA_POISONED_PARENT_SECRET', 'must-not-cross');
+    vi.stubEnv('OBVERSA_TEST_GROK_PARENT_VALUE', 'set-by-the-person');
     const engine = new GrokCliEngine({
       ...options(bin),
       environment: { OBVERSA_TEST_GROK_CALLS: calls, OBVERSA_TEST_GROK_VERSION_STDOUT: stdout },
@@ -318,12 +322,9 @@ describe('Grok CLI adapter', () => {
     expect(selected).toEqual(admissionSelection(bin, input));
     expect(invocations(calls)).toEqual([expect.objectContaining({
       kind: 'version', program: realpathSync(bin), args: ['--version'], stdin: '',
-      cwd: input.cwd, promptFilePresent: false, parentSecret: null,
+      cwd: input.cwd, promptFilePresent: false, parentValue: 'set-by-the-person',
+      home: process.env.HOME, grokHome: process.env.GROK_HOME ?? null,
     })]);
-    const observed = invocations(calls)[0]!;
-    expect(observed.home).not.toBe(process.env.HOME);
-    expect(existsSync(observed.home!)).toBe(false);
-    expect(existsSync(observed.grokHome!)).toBe(false);
   });
 
   it('retains an explicit symlink path through admission, replacement and run', async () => {
@@ -381,7 +382,7 @@ describe('Grok CLI adapter', () => {
   it.each([
     ['wrong-version', 'grok 1.0.6 (5115b46bc909) [stable]\n'],
     ['unparseable', 'scripted-secret-output-not-a-version\n'],
-    ['extra-lines', 'grok 1.0.5\nscripted-secret-output-not-a-version\n'],
+    ['extra-lines', 'grok 1.0.44\nscripted-secret-output-not-a-version\n'],
   ] as const)('refuses %s version output without exposing captured bytes', async (_label, stdout) => {
     const calls = join(temporaryDirectory('lines-grok-admission-'), 'calls.jsonl');
     const engine = new GrokCliEngine({
@@ -420,7 +421,7 @@ describe('Grok CLI adapter', () => {
   it('maps a successful version cleanup failure to an unknown EngineError', async () => {
     const calls = join(temporaryDirectory('lines-grok-admission-'), 'calls.jsonl');
     const engine = new GrokCliEngine({
-      ...options(), environment: {
+      ...options(), authFile: fixtureAuthFile(), environment: {
         OBVERSA_TEST_GROK_CALLS: calls,
         OBVERSA_TEST_GROK_VERSION_MODE: 'cleanup-success',
       },
@@ -442,7 +443,7 @@ describe('Grok CLI adapter', () => {
   it('preserves a failed version error when cleanup also fails', async () => {
     const calls = join(temporaryDirectory('lines-grok-admission-'), 'calls.jsonl');
     const engine = new GrokCliEngine({
-      ...options(), environment: {
+      ...options(), authFile: fixtureAuthFile(), environment: {
         OBVERSA_TEST_GROK_CALLS: calls,
         OBVERSA_TEST_GROK_VERSION_MODE: 'cleanup-error',
       },
@@ -467,8 +468,11 @@ describe('Grok CLI adapter', () => {
     const input = request();
     const root = temporaryDirectory('lines-grok-missing-tmp-');
     const calls = join(temporaryDirectory('lines-grok-admission-'), 'calls.jsonl');
+    const authFile = fixtureAuthFile();
     vi.stubEnv('TMPDIR', join(root, 'missing'));
-    const engine = new GrokCliEngine({ ...options(bin), environment: { OBVERSA_TEST_GROK_CALLS: calls } });
+    const engine = new GrokCliEngine({
+      ...options(bin), authFile, environment: { OBVERSA_TEST_GROK_CALLS: calls },
+    });
     let error: unknown;
     try {
       await engine.admit(admissionRequest(input), new AbortController().signal);
@@ -554,18 +558,30 @@ describe('Grok CLI adapter', () => {
     expect(invocations(calls)).toEqual([]);
   });
 
-  it('rechecks project guards after admission before a normal model call', async () => {
-    const cwd = temporaryDirectory('lines-grok-admitted-project-');
-    const calls = join(temporaryDirectory('lines-grok-admission-'), 'calls.jsonl');
-    const engine = new GrokCliEngine({ ...options(), environment: { OBVERSA_TEST_GROK_CALLS: calls } });
-    const input = request({ cwd });
-    await engine.admit(admissionRequest(input), new AbortController().signal);
-    writeFileSync(join(cwd, 'AGENTS.md'), 'scripted project instructions');
-    await expect(engine.admit(admissionRequest(input), new AbortController().signal))
-      .rejects.toMatchObject({ name: 'EngineError', kind: 'invalid-config' });
-    await expect(engine.run(input, () => {}, new AbortController().signal))
-      .rejects.toMatchObject({ name: 'EngineError', kind: 'invalid-config' });
-    expect(invocations(calls).map((call) => call.kind)).toEqual(['version']);
+  it.each([
+    'AGENTS.md',
+    'CLAUDE.md',
+    '.grok/config.toml',
+    '.grok/hooks/hook.json',
+    '.claude/settings.json',
+    '.mcp.json',
+  ])('runs in a repository that has its own %s', async (relative) => {
+    const cwd = temporaryDirectory('lines-grok-project-');
+    const target = join(cwd, relative);
+    mkdirSync(dirname(target), { recursive: true });
+    writeFileSync(target, 'project file');
+    const recordPath = join(temporaryDirectory('lines-grok-record-'), 'call.json');
+
+    const result = await new GrokCliEngine({
+      ...options(),
+      environment: {
+        OBVERSA_TEST_GROK_RECORD: recordPath,
+        OBVERSA_TEST_GROK_SCENARIO: 'invocation',
+      },
+    }).run(request({ cwd }), () => {}, new AbortController().signal);
+
+    expect(existsSync(recordPath)).toBe(true);
+    expect(result.parts.at(-1)).toMatchObject({ text: 'answer', final: true });
   });
 
   it('reports missing-cli when the admitted executable is removed before run', async () => {
@@ -642,14 +658,14 @@ describe('Grok CLI adapter', () => {
       .toEqual([realpathSync(bin), realpathSync(bin)]);
   });
 
-  it('admits declared web and subagents but never substitutes Grok memory', () => {
+  it('admits declared web and subagents and leaves Grok memory to the person', () => {
     const promptFile = '/tmp/lines-grok-prompt.md';
     const restricted = buildGrokArgs(request(), options('/bin/echo'), promptFile);
     expect(restricted).toEqual(expect.arrayContaining([
       '--disable-web-search',
       '--no-subagents',
-      '--no-memory',
     ]));
+    expect(restricted).not.toContain('--no-memory');
 
     const expanded = buildGrokArgs(request({
       tools: ['read_file', 'web_search', 'task'],
@@ -659,7 +675,7 @@ describe('Grok CLI adapter', () => {
     }), options('/bin/echo'), promptFile);
     expect(expanded).not.toContain('--disable-web-search');
     expect(expanded).not.toContain('--no-subagents');
-    expect(expanded).toContain('--no-memory');
+    expect(expanded).not.toContain('--no-memory');
     expect(() => buildGrokArgs(
       { ...request(), memory: {} } as AgentRequest & { memory: unknown },
       options('/bin/echo'),
@@ -781,6 +797,31 @@ describe('Grok CLI adapter', () => {
     ]);
   });
 
+  it('reads the subagent tools Grok reports for a declared task capability', async () => {
+    const result = await new GrokCliEngine({
+      ...options(),
+      environment: { OBVERSA_TEST_GROK_SCENARIO: 'invocation' },
+    }).run(
+      request({ tools: ['task'], allowedTools: [], workspaceMode: 'write', leaf: false }),
+      () => {},
+      new AbortController().signal,
+    );
+
+    expect(result.effective.capabilities).toEqual(['task']);
+  });
+
+  it('reports a Grok sign-in failure behind its empty start frame', async () => {
+    await expect(new GrokCliEngine({
+      ...options(),
+      environment: { OBVERSA_TEST_GROK_SCENARIO: 'not-signed-in' },
+    }).run(request(), () => {}, new AbortController().signal))
+      .rejects.toMatchObject({
+        name: 'EngineError',
+        kind: 'auth',
+        message: expect.stringContaining('Not signed in'),
+      });
+  });
+
   it('separates declared tools from scoped permission rules', () => {
     const args = buildGrokArgs(request({
       tools: ['read_file', 'grep'],
@@ -796,11 +837,18 @@ describe('Grok CLI adapter', () => {
 
   it('maps every workspace mode and blocks write tools in read-only work', () => {
     const promptFile = '/tmp/lines-grok-prompt.md';
-    expect(valuesAfter(buildGrokArgs(
+    const none = buildGrokArgs(
       request({ workspaceMode: 'none', tools: [], allowedTools: [] }),
       options('/bin/echo'),
       promptFile,
-    ), '--sandbox')).toEqual(['strict']);
+    );
+    expect(valuesAfter(none, '--sandbox')).toEqual(['strict']);
+    // Grok reads an empty tool list as every tool, so no tools is one tool
+    // allowed and then removed.
+    expect(valuesAfter(none, '--tools')).toEqual(['read_file']);
+    expect(valuesAfter(none, '--disallowed-tools')).toEqual([
+      'read_file,search_tool,use_tool,Agent',
+    ]);
     expect(valuesAfter(buildGrokArgs(
       request({ workspaceMode: 'write' }),
       options('/bin/echo'),
@@ -851,7 +899,7 @@ describe('Grok CLI adapter', () => {
       tools: ['read_file', 'search_replace', 'run_terminal_command'],
       allowedTools: ['Read(src/**)', 'Edit(src/**)', 'Write(src/**)', 'Bash(node:*)'],
     }), options('/bin/echo'), '/tmp/fixture-prompt.md');
-    expect(valuesAfter(args, '--tools')).toEqual(['read_file,search_replace,run_terminal_command']);
+    expect(valuesAfter(args, '--tools')).toEqual(['read_file,search_replace,run_terminal_cmd']);
     expect(valuesAfter(args, '--allow')).toEqual(['Read(src/**)', 'Edit(src/**)', 'Write(src/**)', 'Bash(node:*)']);
   });
 
@@ -872,21 +920,29 @@ describe('Grok CLI adapter', () => {
     expect(existsSync(effectPath)).toBe(false);
   });
 
-  it('uses a fresh home and ignores a poisoned parent environment', async () => {
-    const parentHome = temporaryDirectory('lines-grok-parent-home-');
-    const hooks = join(parentHome, '.grok', 'hooks');
-    mkdirSync(hooks, { recursive: true });
-    writeFileSync(join(hooks, 'poison.json'), '{"poison":true}');
+  it('rejects an undeclared init capability on a start frame with an empty session id', async () => {
+    await expect(new GrokCliEngine({
+      ...options(),
+      environment: { OBVERSA_TEST_GROK_SCENARIO: 'extra-capability-empty-session' },
+    }).run(
+      request(),
+      () => {},
+      new AbortController().signal,
+    )).rejects.toThrow('undeclared capability');
+  });
+
+  it('runs Grok with the person\'s own home and environment', async () => {
+    const personHome = temporaryDirectory('lines-grok-person-home-');
     const recordPath = join(temporaryDirectory('lines-grok-record-'), 'call.json');
-    vi.stubEnv('HOME', parentHome);
-    vi.stubEnv('GROK_HOME', join(parentHome, '.grok'));
-    vi.stubEnv('OBVERSA_POISONED_PARENT_SECRET', 'must-not-cross');
+    vi.stubEnv('HOME', personHome);
+    vi.stubEnv('GROK_HOME', join(personHome, '.grok'));
+    vi.stubEnv('OBVERSA_TEST_GROK_PARENT_VALUE', 'set-by-the-person');
 
     await new GrokCliEngine({
       ...options(),
       environment: {
-          OBVERSA_TEST_GROK_RECORD: recordPath,
-          OBVERSA_TEST_GROK_SCENARIO: 'invocation',
+        OBVERSA_TEST_GROK_RECORD: recordPath,
+        OBVERSA_TEST_GROK_SCENARIO: 'invocation',
       },
     }).run(
       request(),
@@ -895,22 +951,22 @@ describe('Grok CLI adapter', () => {
     );
     const call = JSON.parse(readFileSync(recordPath, 'utf8')) as {
       environment: {
-        parentSecret: string | null;
-        poisonedHookVisible: boolean;
+        home: string | null;
+        grokHome: string | null;
+        parentValue: string | null;
       };
     };
 
-    expect(call.environment).toEqual(
-      expect.objectContaining({
-        parentSecret: null,
-        poisonedHookVisible: false,
-      }),
-    );
+    expect(call.environment).toMatchObject({
+      home: personHome,
+      grokHome: join(personHome, '.grok'),
+      parentValue: 'set-by-the-person',
+    });
   });
 
-  it('passes only environment values selected when the engine is created', async () => {
+  it('sets the host\'s environment values on top of the person\'s own', async () => {
     const recordPath = join(temporaryDirectory('lines-grok-record-'), 'call.json');
-    vi.stubEnv('OBVERSA_POISONED_PARENT_SECRET', 'must-not-cross');
+    vi.stubEnv('OBVERSA_TEST_GROK_PARENT_VALUE', 'set-by-the-person');
 
     await new GrokCliEngine({
       ...options(),
@@ -928,14 +984,14 @@ describe('Grok CLI adapter', () => {
       environment: {
         selected: string | null;
         requestSecret: string | null;
-        parentSecret: string | null;
+        parentValue: string | null;
       };
     };
 
     expect(call.environment).toMatchObject({
       selected: 'selected-by-host',
       requestSecret: null,
-      parentSecret: null,
+      parentValue: 'set-by-the-person',
     });
   });
 
@@ -947,7 +1003,7 @@ describe('Grok CLI adapter', () => {
     )).rejects.toThrow('constructor environment');
   });
 
-  it('copies only an explicitly selected login file into the clean home', async () => {
+  it('uses a selected login file instead of the person\'s own login', async () => {
     const authFile = join(temporaryDirectory('lines-grok-auth-'), 'auth.json');
     const auth = '{"fixture":"selected-auth"}';
     writeFileSync(authFile, auth, { mode: 0o600 });
@@ -969,10 +1025,23 @@ describe('Grok CLI adapter', () => {
       new AbortController().signal,
     );
     const call = JSON.parse(readFileSync(recordPath, 'utf8')) as {
-      environment: { auth: string | null };
+      environment: {
+        auth: string | null;
+        home: string | null;
+        grokHome: string | null;
+        grokVariables: Record<string, string>;
+      };
     };
 
     expect(call.environment.auth).toBe(auth);
+    expect(call.environment.home).toBe(process.env.HOME);
+    expect(call.environment.grokHome).not.toBe(process.env.GROK_HOME ?? null);
+    expect(call.environment.grokVariables).toEqual({
+      ...personGrokVariables(),
+      GROK_HOME: call.environment.grokHome,
+      GROK_SUBAGENTS: '0',
+    });
+    expect(existsSync(call.environment.grokHome!)).toBe(false);
   });
 
   it.each([
@@ -1023,75 +1092,6 @@ describe('Grok CLI adapter', () => {
     expect(error).toBeInstanceOf(Error);
     expect((error as Error).message).not.toContain(token);
     expect((error as Error).message).toContain('[redacted]');
-  });
-
-  it('rejects native project hooks and config before spawn', async () => {
-    const cwd = temporaryDirectory('lines-grok-poisoned-project-');
-    mkdirSync(join(cwd, '.grok', 'hooks'), { recursive: true });
-    writeFileSync(join(cwd, '.grok', 'config.toml'), '[mcp_servers.poison]\n');
-    writeFileSync(join(cwd, '.grok', 'hooks', 'poison.json'), '{}');
-    const recordPath = join(temporaryDirectory('lines-grok-record-'), 'call.json');
-
-    await expect(new GrokCliEngine({
-      ...options(),
-      environment: {
-        OBVERSA_TEST_GROK_RECORD: recordPath,
-        OBVERSA_TEST_GROK_SCENARIO: 'invocation',
-      },
-    }).run(
-      request({
-        cwd,
-      }),
-      () => {},
-      new AbortController().signal,
-    )).rejects.toThrow('project extension');
-    expect(existsSync(recordPath)).toBe(false);
-  });
-
-  it('rejects a project language-server command before spawn', async () => {
-    const cwd = temporaryDirectory('lines-grok-poisoned-lsp-');
-    mkdirSync(join(cwd, '.grok'), { recursive: true });
-    writeFileSync(join(cwd, '.grok', 'lsp.json'), '{"fixture":"spawn"}');
-    const recordPath = join(temporaryDirectory('lines-grok-record-'), 'call.json');
-
-    await expect(new GrokCliEngine({
-      ...options(),
-      environment: {
-        OBVERSA_TEST_GROK_RECORD: recordPath,
-        OBVERSA_TEST_GROK_SCENARIO: 'invocation',
-      },
-    }).run(
-      request({ cwd }),
-      () => {},
-      new AbortController().signal,
-    )).rejects.toThrow('.grok/lsp.json');
-    expect(existsSync(recordPath)).toBe(false);
-  });
-
-  it.each([
-    'AGENTS.md',
-    '.grok/commands/poison.md',
-    '.grok/roles/poison.toml',
-    '.agents/commands/poison.md',
-  ])('rejects ambient project input %s before spawn', async (relative) => {
-    const cwd = temporaryDirectory('lines-grok-poisoned-project-');
-    const target = join(cwd, relative);
-    mkdirSync(dirname(target), { recursive: true });
-    writeFileSync(target, 'poison');
-    const recordPath = join(temporaryDirectory('lines-grok-record-'), 'call.json');
-
-    await expect(new GrokCliEngine({
-      ...options(),
-      environment: {
-        OBVERSA_TEST_GROK_RECORD: recordPath,
-        OBVERSA_TEST_GROK_SCENARIO: 'invocation',
-      },
-    }).run(
-      request({ cwd }),
-      () => {},
-      new AbortController().signal,
-    )).rejects.toThrow('project extension');
-    expect(existsSync(recordPath)).toBe(false);
   });
 
   it('requires an absolute executable, a version, and an explicit model', async () => {
@@ -1188,7 +1188,7 @@ describe('Grok CLI adapter', () => {
     const bin = executable();
     const calls = join(temporaryDirectory('grok-workspace-'), 'calls.jsonl');
     const selected = (capabilities: string[], effective = false) => engineSelection({
-      adapter: 'grok-cli', adapterVersion: '1.0.5', provider: 'xai', modelFamily: 'grok-4',
+      adapter: 'grok-cli', adapterVersion: '1.0.44', provider: 'xai', modelFamily: 'grok-4',
       model: effective ? 'grok-4-fixture-effective' : 'grok-4-fixture', executable: bin, capabilities,
     });
     const report = await runEngineConformance({
@@ -1199,7 +1199,7 @@ describe('Grok CLI adapter', () => {
       }),
       requested: {
         adapter: 'grok-cli',
-        adapterVersion: '1.0.5',
+        adapterVersion: '1.0.44',
         provider: 'xai',
         modelFamily: 'grok-4',
         model: 'grok-4-fixture',
@@ -1208,7 +1208,7 @@ describe('Grok CLI adapter', () => {
       },
       effective: {
         adapter: 'grok-cli',
-        adapterVersion: '1.0.5',
+        adapterVersion: '1.0.44',
         provider: 'xai',
         modelFamily: 'grok-4',
         model: 'grok-4-fixture-effective',
@@ -1225,7 +1225,9 @@ describe('Grok CLI adapter', () => {
           const models = readFileSync(calls, 'utf8').split('\n').filter(Boolean)
             .map((line) => JSON.parse(line) as { kind: string; args: string[] }).filter((call) => call.kind === 'model');
           const args = models.at(-1)?.args ?? [];
-          const tools = args[args.indexOf('--tools') + 1]?.split(',') ?? [];
+          const removed = valuesAfter(args, '--disallowed-tools').flatMap((value) => value.split(','));
+          const tools = valuesAfter(args, '--tools').flatMap((value) => value.split(','))
+            .filter((tool) => !removed.includes(tool));
           return { modelCalls: models.length, canRead: tools.includes('read_file'), canWrite: tools.includes('search_replace') };
         },
       },

@@ -31,7 +31,7 @@ function recordInvocation(kind) {
       : false,
     home: process.env.HOME ?? null,
     grokHome: grokHome ?? null,
-    parentSecret: process.env.OBVERSA_POISONED_PARENT_SECRET ?? null,
+    parentValue: process.env.OBVERSA_TEST_GROK_PARENT_VALUE ?? null,
   })}\n`);
 }
 
@@ -56,7 +56,7 @@ if (args.length === 1 && args[0] === '--version') {
     process.exit(0);
   }
   process.stdout.write(process.env.OBVERSA_TEST_GROK_VERSION_STDOUT
-    ?? 'grok 1.0.5 (5115b46bc909) [stable]\n');
+    ?? 'grok 1.0.44 (5b807183dd79) [stable]\n');
   if (mode === 'cleanup-success' || mode === 'cleanup-error') {
     const locked = join(process.env.GROK_HOME, 'locked');
     mkdirSync(locked);
@@ -114,38 +114,35 @@ if (process.env.OBVERSA_TEST_GROK_RECORD) {
       headless: process.env.OBVERSA_HEADLESS ?? null,
     },
     environment: {
-      home: process.env.HOME ?? '',
-      grokHome: process.env.GROK_HOME ?? '',
-      config: process.env.GROK_HOME
-        ? readFileSync(`${process.env.GROK_HOME}/config.toml`, 'utf8')
-        : '',
+      home: process.env.HOME ?? null,
+      grokHome: process.env.GROK_HOME ?? null,
+      grokVariables: Object.fromEntries(Object.entries(process.env)
+        .filter(([name]) => name.startsWith('GROK_'))),
       auth: process.env.GROK_HOME
         && existsSync(`${process.env.GROK_HOME}/auth.json`)
         ? readFileSync(`${process.env.GROK_HOME}/auth.json`, 'utf8')
         : null,
       selected: process.env.OBVERSA_TEST_GROK_SELECTED ?? null,
       requestSecret: process.env.OBVERSA_TEST_GROK_REQUEST_SECRET ?? null,
-      parentSecret: process.env.OBVERSA_POISONED_PARENT_SECRET ?? null,
+      parentValue: process.env.OBVERSA_TEST_GROK_PARENT_VALUE ?? null,
       subagents: process.env.GROK_SUBAGENTS ?? null,
-      poisonedHookVisible: existsSync(
-        `${process.env.GROK_HOME ?? ''}/hooks/poison.json`,
-      ),
-      compatDisabled: [
-        'GROK_CLAUDE_SKILLS_ENABLED',
-        'GROK_CLAUDE_RULES_ENABLED',
-        'GROK_CLAUDE_AGENTS_ENABLED',
-        'GROK_CLAUDE_MCPS_ENABLED',
-        'GROK_CLAUDE_HOOKS_ENABLED',
-        'GROK_CURSOR_SKILLS_ENABLED',
-        'GROK_CURSOR_RULES_ENABLED',
-        'GROK_CURSOR_AGENTS_ENABLED',
-        'GROK_CURSOR_MCPS_ENABLED',
-        'GROK_CURSOR_HOOKS_ENABLED',
-      ].every((name) => process.env[name] === 'false'),
     },
   }));
 }
 
+if (scenario === 'not-signed-in') {
+  // Grok 1.0.44 prints an empty start frame before it reports the failure.
+  emit({
+    type: 'system', subtype: 'init', session_id: '', model: 'unknown', cwd: '',
+    permissionMode: 'default', tools: [], uuid: 'fixture-placeholder-init',
+  });
+  emit({
+    type: 'result', subtype: 'error_during_execution', is_error: true,
+    errors: ['Not signed in. Run grok login.'], session_id: '',
+    uuid: 'fixture-not-signed-in',
+  });
+  process.exit(1);
+}
 if (scenario === 'auth') {
   process.stderr.write('401 unauthorized: run grok login\n');
   process.exit(1);
@@ -240,13 +237,24 @@ if (structured) {
 emit({
   type: 'system',
   subtype: 'init',
-  session_id: 'fixture-session',
+  session_id: scenario === 'extra-capability-empty-session' ? '' : 'fixture-session',
   model: effectiveModel,
   cwd: value('--cwd') ?? process.cwd(),
   permissionMode: value('--permission-mode') ?? 'default',
+  // Grok 1.0.44 takes `run_terminal_cmd` and reports `run_terminal_command`,
+  // and reports `task` as its three subagent tools.
   tools: [
-    ...(value('--tools') ?? '').split(',').filter(Boolean),
-    ...(scenario === 'extra-capability' ? ['write_file'] : []),
+    ...(value('--tools') ?? '').split(',').filter(Boolean)
+      .filter((tool) => !(value('--disallowed-tools') ?? '').split(',').includes(tool))
+      .flatMap((tool) =>
+      tool === 'run_terminal_cmd'
+        ? ['run_terminal_command']
+        : tool === 'task'
+          ? ['kill_command_or_subagent', 'get_command_or_subagent_output', 'spawn_subagent']
+          : [tool]),
+    ...(scenario === 'extra-capability' || scenario === 'extra-capability-empty-session'
+      ? ['write_file']
+      : []),
   ],
   uuid: 'fixture-init',
 });
