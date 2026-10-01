@@ -1,7 +1,7 @@
 {
   "name": "@obversa/engine-grok-cli",
   "version": "0.1.2",
-  "description": "Run one isolated engine attempt through a fresh Grok CLI process.",
+  "description": "Run one engine attempt through a fresh Grok CLI process, with your own Grok login.",
   "author": "Jonny Neill <jonnyneill@hotmail.com>",
   "type": "module",
   "license": "MIT",

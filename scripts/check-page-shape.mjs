@@ -53,10 +53,6 @@ const KNOWN_DEBT = [
     why: 'the page ships before the code, tagged coming soon, so there is nothing a reader can run yet; the stage that builds the eve engine plugin brings the example with it',
   },
   {
-    page: 'packages/engine-mastra.mdx', fault: 'example', owner: 'F125',
-    why: 'the page ships before the code, tagged coming soon, so there is nothing a reader can run yet; the stage that builds the mastra engine plugin brings the example with it',
-  },
-  {
     page: 'packages/engine-langgraph.mdx', fault: 'example', owner: 'F126',
     why: 'the page ships before the code, tagged coming soon, so there is nothing a reader can run yet; the stage that builds the langgraph engine plugin brings the example with it',
   },

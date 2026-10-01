@@ -50,6 +50,7 @@ below say what else each one needs.
 | `AgentSdkEngine` | `@obversa/engine-claude-agent-sdk` | The Claude Agent SDK as an engine | [Claude Agent SDK Engine](/packages/engine-claude-agent-sdk) |
 | `AnthropicApiEngine` | `@obversa/engine-anthropic-api` | The Anthropic API as an engine | [Anthropic API Engine](/packages/engine-anthropic-api) |
 | `JevApiEngine` | `@obversa/engine-jev-api` | Typed questions about a run | [Jev API Engine](/packages/engine-jev-api) |
+| `mastra`, `MastraEngine` | `@obversa/engine-mastra` | A Mastra agent as a seat | [Mastra Engine](/packages/engine-mastra) |
 | `openGitMemory`, `openReasoningRecord` | `@obversa/memory-git` | Memory in Git, reasoning in commits | [Git Memory](/packages/memory-git) |
 | `createSimpleMemory` | `@obversa/memory-simple` | Memory in one process | [Simple Memory](/packages/memory-simple) |
 | `openMarkdownCorpus` | `@obversa/memory-markdown` | Search your Markdown files | [Markdown Memory](/packages/memory-markdown) |
@@ -79,14 +80,13 @@ is.
   Devin process with your own sign-in and settings. You need the Devin CLI
   installed and signed in. See [Devin CLI Engine](/packages/engine-devin-cli).
 - **OpenCode CLI.** `@obversa/engine-opencode-cli` runs each request in a
-  fresh OpenCode process with a clean environment, so your own sign-in isn't
-  used. You need OpenCode 1.18.23 installed, and you pass your provider's
-  credentials through the engine's `auth` or `environment` option. Home:
+  fresh OpenCode process, with your own OpenCode login and settings. You
+  need OpenCode 1.18.23 installed and signed in to your model's provider,
+  and a model on a paid login. Home:
   [opencode.ai](https://opencode.ai).
 - **Grok CLI.** `@obversa/engine-grok-cli` runs each request in a fresh Grok
-  CLI process with a clean environment, so your own sign-in isn't used. You
-  need Grok CLI 1.0.5 installed, and you pass your credentials through the
-  engine's `environment` or `authFile` option. Home:
+  CLI process, with your own Grok login and settings. You need Grok CLI
+  1.0.44 installed and signed in. Home:
   [docs.x.ai/build/cli/headless-scripting](https://docs.x.ai/build/cli/headless-scripting).
 - **Anthropic API.** `@obversa/engine-anthropic-api` sends each request to
   the Anthropic API. You need an Anthropic API key. Home:
@@ -98,6 +98,10 @@ is.
 - **Jev API.** `@obversa/engine-jev-api` answers structured questions about a
   run's recorded state. It never reads or edits files. You need a Jev
   endpoint and an API key. See [Jev API Engine](/packages/engine-jev-api).
+- **Mastra.** `@obversa/engine-mastra` runs an agent you built with Mastra,
+  one call to the agent's own `generate` per request. You need
+  `@mastra/core` and whatever your agent needs, such as its model
+  provider's key. See [Mastra Engine](/packages/engine-mastra).
 - **In-process memory.** `@obversa/memory-simple` keeps memory inside one
   process. You need nothing else. Home:
   [Simple Memory](/packages/memory-simple).
@@ -129,7 +133,7 @@ is.
 
 | Package | Purpose | Version |
 | --- | --- | --- |
-| `@obversa/obversa` | Installs every package below except Jev | `0.1.2` |
+| `@obversa/obversa` | Installs every package below except Jev and Mastra | `0.1.2` |
 | `@obversa/runtime` | Builds and runs workflows as graphs, team conversations or a review loop | `0.2.2` |
 | `@obversa/runner` | Supervises stored graph runs in bounded workers | `0.2.2` |
 | `@obversa/api` | Defines every contract: engine, memory, graph, events, artifacts, workspace, callbacks, proofs and run definitions, with their validators | `0.2.2` |
@@ -149,6 +153,7 @@ is.
 | `@obversa/engine-grok-cli` | Runs one engine attempt through the Grok CLI | `0.1.2` |
 | `@obversa/engine-opencode-cli` | Runs one engine attempt through the OpenCode CLI | `0.1.2` |
 | `@obversa/engine-jev-api` | Answers decision questions over recorded run state through the Jev API | `0.1.3` |
+| `@obversa/engine-mastra` | Runs one engine attempt through a Mastra agent you built | `0.1.0` |
 
 The api, core, runtime and runner packages share one version. The runtime
 never imports an engine or a memory adapter: you pass the ones you want when
@@ -167,8 +172,8 @@ you run.
 [OpenCode CLI](/packages/engine-opencode-cli),
 [Claude Agent SDK](/packages/engine-claude-agent-sdk),
 [Anthropic API](/packages/engine-anthropic-api),
-[Jev API](/packages/engine-jev-api). Coming soon:
-[eve](/packages/engine-eve), [Mastra](/packages/engine-mastra),
+[Jev API](/packages/engine-jev-api), [Mastra](/packages/engine-mastra).
+Coming soon: [eve](/packages/engine-eve),
 [LangGraph](/packages/engine-langgraph).
 
 **Memory and notifications.** [Git Memory](/packages/memory-git),

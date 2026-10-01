@@ -21,7 +21,7 @@ score. The translator runs again with those findings, and after each round
 a judge, Jev, reads the findings and the rounds so far and says whether
 another round is worth it, up to a cap of three. Then the translator writes
 down how every glossary term was rendered and where the glossary and
-natural French pulled apart, and the run stops for the person who knows the
+natural French pulled apart, and the run waits for the person who knows the
 readers. This file is a three-stage team: translate, terms, nuance.
 
 ## Run it
@@ -37,12 +37,18 @@ environment, the judge is Jev:
 npx tsx translate-reflect.ts
 ```
 
+When the run reaches the editor, it waits and prints a page to answer on.
+The editor answers there, and the run finishes. Keep the process running
+until then: if it stops, the next run starts again from the first stage.
+
 Every event prints as one line as it happens, and the outcome prints last
 as JSON. The output below is the proof's offline run, with scripted seats
-standing in for the models and a recorded judge, so the words are the
-script's and the shape is the run's:
+standing in for the models, a recorded judge, and the proof answering as
+the editor on the page, so the words are the script's and the shape is the
+run's:
 
 ```text Output, from the offline proof
+Answer the editor's question on http://127.0.0.1:64008/
 ▸ run
 translate-reflect workflow:start
 translate-reflect ▸ dag (3 nodes)
@@ -61,10 +67,9 @@ translate-reflect › translate › translate-review › review-panel   gpt-5.6-
 translate-reflect › translate › translate-review › review-panel • translate-1: fail  two glossary terms are rendered with the words the glossary rules out
 translate-reflect › translate › translate-review › review-panel • translate: fail  Review panel: 0/1 reviewer(s) cleared. - translate-1 [should-fix]: "s'expédie" and "l'expédie" where the glossary says "envoyer" - translate-1 [should-fix]: "rappels de paiement" where the glossary says "relance de paiement"
 translate-reflect › translate › translate-review › refine-judge • refine:judge
-
-translate-reflect › translate › translate-review › refine-judge   jev-latest: 10/5 tok
 translate-reflect › translate › translate-review › refine-judge • refine:judge: pass  {"holds":{"type":"noul","noul":0.2},"worth_doing":{"type":"noul","noul":0.8},"worth_another_round":{"type":"noul","noul":0.72},"stop_reason":{"type":"choice","choice":"continue","confidence":0.6}}
 translate-reflect › translate › translate-review ◆ the judge says another round is worth it (0.72)
+translate-reflect › translate › translate-review › @judge-review interaction:checkpoint
 translate-reflect › translate › translate-review · review: fail
 review did not pass (Review panel: 0/1 reviewer(s) cleared. - translate-1 [should-fix]: "s'expédie" and "l'expédie" where the glossary says "envoyer" - translate-1 [should-fix]: "rappels de paiement" where the glossary says "relance de paiement" (the judge says another round is worth it (0.72))); re-entering translate-review
 translate-reflect › translate › translate-review · iteration 2
@@ -80,10 +85,9 @@ translate-reflect › translate › translate-review › review-panel   gpt-5.6-
 translate-reflect › translate › translate-review › review-panel • translate-1: fail  one taste note
 translate-reflect › translate › translate-review › review-panel • translate: fail  Review panel: 0/1 reviewer(s) cleared. - translate-1 [should-fix]: "le jour venu" is fine; "le jour dit" sat closer to the source, taste only
 translate-reflect › translate › translate-review › refine-judge • refine:judge
-
-translate-reflect › translate › translate-review › refine-judge   jev-latest: 10/5 tok
 translate-reflect › translate › translate-review › refine-judge • refine:judge: pass  {"holds":{"type":"noul","noul":0.9},"worth_doing":{"type":"noul","noul":0.2},"worth_another_round":{"type":"noul","noul":0.1},"stop_reason":{"type":"choice","choice":"holds","confidence":0.8}}
 translate-reflect › translate › translate-review ◆ the judge chose holds
+translate-reflect › translate › translate-review › @judge-review interaction:checkpoint
 translate-reflect › translate › translate-review · review: pass
 translate-reflect › translate › translate-review ◂ pass (2 iter)
 translate-reflect · node translate: done (pass)
@@ -95,13 +99,14 @@ translate-reflect › terms • terms: pass  six terms listed, two flagged
 translate-reflect · node terms: done (pass)
 translate-reflect · node nuance: start
 translate-reflect › nuance • nuance
-translate-reflect › nuance • nuance: paused  waiting for a person: Publish this translation?
 translate-reflect · node nuance: done (paused)
-translate-reflect ◂ dag paused
-◂ run paused (113/27 tok, 60 tok from cache)
+translate-reflect › nuance • nuance: pass  approved: Publish this translation?
+translate-reflect · node nuance: done (pass)
+translate-reflect ◂ dag pass
+◂ run pass (93/17 tok, 60 tok from cache)
 {
-  "status": "paused",
-  "summary": "waiting for a person: Publish this translation?",
+  "status": "pass",
+  "summary": "dag \"translate-reflect\": all 3 node(s) green",
   "data": {
     "translate": {
       "status": "pass",
@@ -112,32 +117,10 @@ translate-reflect ◂ dag paused
       "summary": "six terms listed, two flagged"
     },
     "nuance": {
-      "status": "paused",
-      "summary": "waiting for a person: Publish this translation?",
+      "status": "pass",
+      "summary": "approved: Publish this translation?",
       "data": {
-        "requestId": "nuance#1#96d1d7a327bebf6ef8c69c45e1b7c7ec6a695e9920c36b42e9db13d3f4685629",
-        "gateId": "nuance",
-        "gateVersion": 1,
-        "digest": "96d1d7a327bebf6ef8c69c45e1b7c7ec6a695e9920c36b42e9db13d3f4685629",
-        "decisionText": "Publish this translation?",
-        "responseSchema": {
-          "type": "object",
-          "properties": {
-            "approved": {
-              "type": "boolean"
-            },
-            "note": {
-              "type": "string"
-            }
-          },
-          "required": [
-            "approved"
-          ]
-        },
-        "input": {
-          "terms": "six terms listed, two flagged"
-        },
-        "presentation": {}
+        "approved": true
       }
     }
   }
@@ -148,9 +131,9 @@ Two translations, two reads, two answers from the judge. The first
 translation rendered two glossary terms with the words the glossary rules
 out; the reviewer named them, and the judge said another round was worth
 it. The second followed the glossary and drew one taste note, and the judge
-said the translation holds. The run stopped at `nuance` with the
-translation in `fr/article.md` and the terms note in `fr/terms.md`, waiting
-for the person. A no goes to `translate` with the editor's note as the
+said the translation holds. The run waited at `nuance` with the
+translation in `fr/article.md` and the terms note in `fr/terms.md`, and the
+editor's yes on the page finished it. A no goes to `translate` with the editor's note as the
 finding.
 
 ## The file
@@ -174,7 +157,7 @@ the reviewer does not accept it, `refine: judge(judgeSeat, { cap: 3 })` asks the
 judge whether another round is worth it, and the cap ends the loop after
 three rounds whatever the judge says. The terms note has no reviewer, so
 only its own seat judges whether every glossary term is on the list. Then
-the run stops:
+the run waits for the editor:
 
 ```ts examples/use-cases/other/translate-reflect.ts (excerpt) {6,11,25}
       stage('translate', {
@@ -210,7 +193,7 @@ the run stops:
 The "done when" sentences are each stage's `gate`. The package doesn't
 check them itself; it checks what each stage declares. A file in `writes`
 that's missing or empty fails the stage, a reviewed stage passes only when
-its reviewer accepts, and a person stage pauses until the person answers.
+its reviewer accepts, and a person stage waits until the person answers.
 
 <Accordion title="Full file">
 
@@ -296,10 +279,16 @@ function createTranslateReflect(judgeSeat: TeamSeat, engines: TranslateEngines =
   });
 }
 
+// The run waits for the editor and prints the address of a page to answer
+// on. The wait lives in this process: stop it before the editor answers,
+// and the next run starts again from the first stage.
 const result = await run(createTranslateReflect(judgeSeat), {
-  onEvent: (event) => console.log(formatEvent(event)),
+  onCallback: 'wait',
+  monitor: true,
+  onEvent: (event) => console.log(event.kind === 'monitor' ? `Answer the editor's question on ${event.url}` : formatEvent(event)),
   recordTo: 'records/translate-reflect.jsonl',
 });
+await result.monitor?.close();
 console.log(JSON.stringify(result.outcome, null, 2));
 ```
 

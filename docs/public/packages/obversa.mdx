@@ -1,10 +1,10 @@
 ---
 title: "Obversa"
-description: "@obversa/obversa: one dependency that installs the runtime, the runner, the contracts, the workflows, the surfaces, the memory adapters and every engine adapter except Jev."
+description: "@obversa/obversa: one dependency that installs the runtime, the runner, the contracts, the workflows, the surfaces, the memory adapters and every engine adapter except Jev and Mastra."
 ---
 
 `@obversa/obversa` is the bundle: one dependency that installs every public
-package except the Jev engine, so a project gets the runtime, the runner,
+package except the Jev and Mastra engines, so a project gets the runtime, the runner,
 the contracts, the process tools, the ready-made workflows, the surfaces,
 the memory adapters, webhook notifications and the engine adapters at once.
 It has no API of its own; import each tool from its own package.
@@ -61,13 +61,20 @@ any one of them on its own.
 | `@obversa/memory-git`, `@obversa/memory-simple`, `@obversa/memory-markdown` | [Git Memory](/packages/memory-git), [Simple Memory](/packages/memory-simple), [Markdown Memory](/packages/memory-markdown) |
 | `@obversa/notify-webhook` | [Webhook Notifications](/packages/notify-webhook) |
 
-## Jev is separate
+## Jev and Mastra are separate
 
 The [Jev API Engine](/packages/engine-jev-api) isn't in the bundle. It
 needs its own endpoint and key, so install it when you use it:
 
 ```bash Terminal
 npm install @obversa/engine-jev-api
+```
+
+The [Mastra Engine](/packages/engine-mastra) isn't in the bundle either.
+It runs an agent you built with Mastra, so install it beside Mastra:
+
+```bash Terminal
+npm install @obversa/engine-mastra @mastra/core
 ```
 
 ## Next steps

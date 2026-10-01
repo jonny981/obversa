@@ -14,7 +14,6 @@ try {
   } else {
     assert.equal(args[0], 'run');
     assert.equal(args[args.indexOf('--format') + 1], 'json');
-    assert.ok(args.includes('--pure'));
     prompt = '';
     for await (const chunk of process.stdin) prompt += chunk;
   }

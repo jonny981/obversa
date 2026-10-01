@@ -90,8 +90,14 @@ function createContractPlaybook(judgeSeat: TeamSeat, engines: ContractPlaybookEn
   });
 }
 
+// The run waits for the lawyer and prints the address of a page to answer
+// on. The wait lives in this process: stop it before the lawyer answers,
+// and the next run starts again from the first stage.
 const result = await run(createContractPlaybook(judgeSeat), {
-  onEvent: (event) => console.log(formatEvent(event)),
+  onCallback: 'wait',
+  monitor: true,
+  onEvent: (event) => console.log(event.kind === 'monitor' ? `Answer the lawyer's question on ${event.url}` : formatEvent(event)),
   recordTo: 'records/contract-playbook.jsonl',
 });
+await result.monitor?.close();
 console.log(JSON.stringify(result.outcome, null, 2));

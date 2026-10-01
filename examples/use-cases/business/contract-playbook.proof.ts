@@ -49,13 +49,14 @@ Replacement: struck; exclusivity of any kind is never signed.
 // The checker sends the redlines back once: two never-sign clauses had no
 // redline, a block the judge is never asked about. On the second set the
 // checker has only a taste note, and the judge stops the loop; the
-// positions note follows and is checked in its turn, and the run stops at the
-// lawyer. The note is reviewed because deciding what to concede is the most
+// positions note follows and is checked in its turn, and the run waits for
+// the lawyer, who answers on the run's page. The note is reviewed because deciding what to concede is the most
 // judgement-heavy step here; it used to be the only unreviewed one.
 await withExample({
   here,
   example: 'contract-playbook',
   files: { 'briefs/playbook.md': brief, 'contracts/msa.md': contract, 'judge.json': judgeJson },
+  answer: { approved: true },
   seats: {
     claude: [
       { writes: { 'review/clauses.md': clauses }, reply: pass('seven clauses mapped: one accept, four push back, two never') },
@@ -70,9 +71,10 @@ await withExample({
     ],
   },
 }, async (run) => {
-  assert.equal(run.printed.status, 'paused', `the run stops at the lawyer: ${run.stdout}`);
-  assert.equal(run.printed.data?.negotiate?.status, 'paused');
-  assert.match(run.printed.summary ?? '', /Send these redlines/);
+  assert.match(run.stdout, /http:\/\/127\.0\.0\.1:\d+\//, 'the run prints the page to answer on');
+  assert.equal(run.question, 'Send these redlines to the other side?', 'the page shows the lawyer the question');
+  assert.equal(run.printed.status, 'pass', `the lawyer's answer finishes the run: ${run.stdout}`);
+  assert.equal(run.printed.data?.negotiate?.status, 'pass');
   assert.equal(run.seatCalls.filter((call) => call.role === 'claude').length, 4, 'clauses once, redlines twice, positions once');
   assert.equal(run.seatCalls.filter((call) => call.role === 'codex').length, 3, 'the checker reads both sets of redlines, then the positions note');
   const redlines = await run.read('review/redlines.md');
@@ -86,6 +88,10 @@ await withExample({
   assert.equal(judged.length, 1, 'the judge is asked once: a block went back on its own');
   assert.equal(judged[0]!.reason, 'the judge chose holds');
   assert.ok((judged[0]!.path as string[]).includes('redline'), 'the judged round is the redline stage');
+  const negotiate = events.filter((event) => event.kind === 'dag:node' && event.node === 'negotiate' && event.phase === 'done');
+  assert.deepEqual(negotiate.map((event) => (event.outcome as { status: string }).status), ['paused', 'pass'], 'the run pauses at the lawyer, then the answer passes the step');
+  const starts = events.filter((event) => event.kind === 'dag:node' && event.phase === 'start').map((event) => event.node);
+  assert.deepEqual(starts, ['clauses', 'redline', 'positions', 'negotiate'], 'each stage starts once: the answer repeats no finished work');
 
   console.log(JSON.stringify({
     status: 'pass',
@@ -96,7 +102,7 @@ await withExample({
     judge: ['holds'],
     cap: 3,
     blockWentBackWithoutTheJudge: true,
-    pausedAt: 'negotiate',
+    answeredOnPage: 'negotiate',
     mode: run.mode,
   }, null, 2));
 });

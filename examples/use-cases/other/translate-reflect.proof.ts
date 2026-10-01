@@ -22,13 +22,14 @@ const terms = '| English | Where | Rendered | Note |\n| --- | --- | --- | --- |\
 // The reviewer reflects twice: two glossary terms rendered with the words
 // the glossary rules out, then only a taste note. The judge sends the first
 // back as worth another round and stops on the taste note; the terms note
-// records where the glossary cost naturalness, and the run stops at the
+// records where the glossary cost naturalness, and the run reaches the
 // editor with the note still open, which is the point: a judge stopped it,
-// not the reviewer.
+// not the reviewer. The editor answers on the run's page.
 await withExample({
   here,
   example: 'translate-reflect',
   files: { 'briefs/translation.md': brief, 'source/article.md': article, 'glossary/en-fr.md': glossary, 'judge.json': judgeJson },
+  answer: { approved: true },
   seats: {
     claude: [
       { writes: { 'fr/article.md': literal }, reply: pass('translated; three paragraphs kept') },
@@ -41,9 +42,10 @@ await withExample({
     ],
   },
 }, async (run) => {
-  assert.equal(run.printed.status, 'paused', `the run stops at the editor: ${run.stdout}`);
-  assert.equal(run.printed.data?.nuance?.status, 'paused');
-  assert.match(run.printed.summary ?? '', /Publish this translation/);
+  assert.match(run.stdout, /http:\/\/127\.0\.0\.1:\d+\//, 'the run prints the page to answer on');
+  assert.equal(run.question, 'Publish this translation?', 'the page shows the editor the question');
+  assert.equal(run.printed.status, 'pass', `the editor's answer finishes the run: ${run.stdout}`);
+  assert.equal(run.printed.data?.nuance?.status, 'pass');
   assert.equal(run.seatCalls.filter((call) => call.role === 'claude').length, 3, 'translate twice, terms once');
   assert.equal(run.seatCalls.filter((call) => call.role === 'codex').length, 2, 'the reviewer reflects on both versions');
   const translation = await run.read('fr/article.md');
@@ -52,11 +54,16 @@ await withExample({
   assert.match(await run.read('fr/terms.md'), /relance/, 'the terms note is on disk');
   assert.match(run.stdout, /tok/, 'the run prints its usage lines');
 
-  const judged = (await recordEvents(run, 'records/translate-reflect.jsonl')).filter((event) => event.kind === 'refine:judge');
+  const record = await recordEvents(run, 'records/translate-reflect.jsonl');
+  const judged = record.filter((event) => event.kind === 'refine:judge');
   assert.deepEqual(judged.map((event) => event.reason), [
     'the judge says another round is worth it (0.72)',
     'the judge chose holds',
   ]);
+  const nuance = record.filter((event) => event.kind === 'dag:node' && event.node === 'nuance' && event.phase === 'done');
+  assert.deepEqual(nuance.map((event) => (event.outcome as { status: string }).status), ['paused', 'pass'], 'the run pauses at the editor, then the answer passes the step');
+  const starts = record.filter((event) => event.kind === 'dag:node' && event.phase === 'start').map((event) => event.node);
+  assert.deepEqual(starts, ['translate', 'terms', 'nuance'], 'each stage starts once: the answer repeats no finished work');
 
   console.log(JSON.stringify({
     status: 'pass',
@@ -66,7 +73,7 @@ await withExample({
     glossaryTerms: 6,
     judge: ['continue', 'holds'],
     cap: 3,
-    pausedAt: 'nuance',
+    answeredOnPage: 'nuance',
     mode: run.mode,
   }, null, 2));
 });

@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 
-import { CONSUMER_EXAMPLES } from './consumer-examples.mjs';
+import { CONSUMER_EXAMPLES, MASTRA_EXAMPLES } from './consumer-examples.mjs';
 import assert from 'node:assert/strict';
 import { access, copyFile, cp, mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
@@ -191,7 +191,7 @@ const expectedAttemptReport = {
   grok: {
     requested: {
       adapter: 'grok-cli',
-      adapterVersion: '1.0.5',
+      adapterVersion: '1.0.44',
       provider: 'xai',
       modelFamily: 'grok-4',
       model: 'grok-4-example',
@@ -199,7 +199,7 @@ const expectedAttemptReport = {
     },
     effective: {
       adapter: 'grok-cli',
-      adapterVersion: '1.0.5',
+      adapterVersion: '1.0.44',
       provider: 'xai',
       modelFamily: 'grok-4',
       model: 'grok-4-example',
@@ -549,7 +549,7 @@ const engines = {
   'anthropic-api': new AnthropicApiEngine({ defaultModel: 'claude-test', apiKey: 'test-key' }),
   'claude-cli': new ClaudeCliEngine({ defaultModel: 'claude-test', cliBinary: '/usr/bin/false', permissionMode: 'auto' }),
   codex: new CodexEngine({ defaultModel: 'gpt-test', cliBinary: '/usr/bin/false', permissionMode: 'plan' }),
-  'grok-cli': new GrokCliEngine({ executable: '/usr/bin/false', version: '1.0.5', identity: { provider: 'xai', modelFamily: 'grok-4' }, permissionMode: 'dontAsk' }),
+  'grok-cli': new GrokCliEngine({ executable: '/usr/bin/false', version: '1.0.44', identity: { provider: 'xai', modelFamily: 'grok-4' }, permissionMode: 'dontAsk' }),
   'jev-api': new JevApiEngine({ endpoint: 'http://127.0.0.1:9', apiKey: 'test-key' }),
   'opencode-cli': new OpenCodeCliEngine({ executable: '/usr/bin/false', version: '1.18.23', identity: { provider: 'opencode', modelFamily: null } }),
 };
@@ -608,7 +608,7 @@ const tsconfig = {
     outDir: 'dist',
     types: ['node'],
   },
-  include: ['consumer.ts', ...CONSUMER_EXAMPLES],
+  include: ['consumer.ts', ...CONSUMER_EXAMPLES.filter((example) => !MASTRA_EXAMPLES.includes(example))],
 };
 
 /**
@@ -796,7 +796,8 @@ async function main() {
       name: 'obversa-packed-consumer-proof',
       private: true,
       type: 'module',
-      dependencies,
+      // The Mastra engine takes Mastra as a peer: a project installs both.
+      dependencies: { ...dependencies, '@mastra/core': '1.74.0' },
       devDependencies: {
         '@types/node': '22.12.0',
         tsx: '4.22.4',
@@ -863,6 +864,8 @@ async function main() {
     await copyFile(tournamentExamplePath, join(consumerDirectory, 'tournament.ts'));
     await copyFile(join(root, 'examples', 'judge-stops-the-loop.ts'), join(consumerDirectory, 'judge-stops-the-loop.ts'));
     await copyFile(join(root, 'examples', 'judge-stops-the-loop.proof.ts'), join(consumerDirectory, 'judge-stops-the-loop.proof.ts'));
+    await copyFile(join(root, 'examples', 'engine-mastra.ts'), join(consumerDirectory, 'engine-mastra.ts'));
+    await copyFile(join(root, 'examples', 'engine-mastra.proof.ts'), join(consumerDirectory, 'engine-mastra.proof.ts'));
     await copyFile(join(root, 'examples', 'human-feedback.ts'), join(consumerDirectory, 'human-feedback.ts'));
     await copyFile(join(root, 'examples', 'human-feedback.proof.ts'), join(consumerDirectory, 'human-feedback.proof.ts'));
     await cp(join(root, 'examples', 'human-feedback'), join(consumerDirectory, 'human-feedback'), { recursive: true });
@@ -922,6 +925,13 @@ async function main() {
     run(process.execPath, [tsc7, '-p', 'tsconfig.json'], { cwd: consumerDirectory });
     const tsc6 = join(root, 'node_modules', '@typescript', 'typescript6', 'bin', 'tsc6');
     run(process.execPath, [tsc6, '-p', 'tsconfig.json'], { cwd: consumerDirectory });
+    await writeFile(join(consumerDirectory, 'tsconfig.mastra.json'), `${JSON.stringify({
+      extends: './tsconfig.json',
+      compilerOptions: { skipLibCheck: true },
+      include: MASTRA_EXAMPLES,
+    }, null, 2)}\n`);
+    run(process.execPath, [tsc7, '-p', 'tsconfig.mastra.json'], { cwd: consumerDirectory });
+    run(process.execPath, [tsc6, '-p', 'tsconfig.mastra.json'], { cwd: consumerDirectory });
     await copyFile(runnerHostPath, join(consumerDirectory, 'dist', 'supervised-host.mjs'));
     await copyFile(preflightHostPath, join(consumerDirectory, 'dist', 'preflight-host.mjs'));
     await cp(join(consumerDirectory, 'human-feedback', 'assets'), join(consumerDirectory, 'dist', 'human-feedback', 'assets'), { recursive: true });
@@ -939,6 +949,10 @@ async function main() {
     const report = JSON.parse(output.split(/\r?\n/).at(-1));
     assert.deepEqual(JSON.parse(run(process.execPath, ['dist/human-feedback.proof.js'], { cwd: consumerDirectory })), {
       status: 'pass', drafts: 3, feedbackRounds: 2, explicitApproval: true,
+    });
+    assert.deepEqual(JSON.parse(run(process.execPath, ['dist/engine-mastra.proof.js'], { cwd: consumerDirectory })), {
+      status: 'pass', writerRuns: 2, readerRuns: 2, kickbacks: 1,
+      judgeReasons: ['the judge chose holds'], stop: 'the judge chose holds', mode: 'compiled-from-dist',
     });
     const productionLine = JSON.parse(
       run(process.execPath, ['dist/offline-review.js'], { cwd: consumerDirectory }),

@@ -1,7 +1,7 @@
 {
   "name": "@obversa/engine-opencode-cli",
   "version": "0.1.2",
-  "description": "Run one isolated engine attempt through a fresh OpenCode CLI process.",
+  "description": "Run one engine attempt through a fresh OpenCode CLI process, with your own OpenCode login.",
   "author": "Jonny Neill <jonnyneill@hotmail.com>",
   "type": "module",
   "license": "MIT",

@@ -24,11 +24,17 @@ pnpm add @obversa/engine-claude-cli
 
 Included in `@obversa/obversa`.
 
+Each process runs Claude Code the way you run it: with your own login,
+your own settings and the repository's instruction files, the same as
+every other engine. The plugin adds only what the step needs, through
+Claude Code's own flags.
+
 ## Requirements
 
-- Claude Code installed and signed in. The `claude` command must be on your
-  `PATH`, or you pass its path as `cliBinary`. The plugin has no API key
-  option.
+- Claude Code installed and signed in. The plugin accepts any version the
+  CLI reports. It was run by hand against Claude Code 2.1.286. Its unit
+  tests use a stand-in CLI. The `claude` command must be on your `PATH`,
+  or you pass its path as `cliBinary`. The plugin has no API key option.
 
 ## Identity
 
@@ -67,7 +73,8 @@ can.
 passed to the CLI. In the `read` workspace mode Claude gets only the
 `Read`, `Grep` and `Glob` tools the request names; in `none` it gets no
 tools. Both modes block `Bash`, `Edit`, `Write`, the sub-agent tools and
-every MCP tool, and a settings file outside the run can't restore them.
+every MCP tool. Claude Code still loads your own settings, and they can't
+restore those tools.
 
 ### The rest
 

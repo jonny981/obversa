@@ -33,7 +33,7 @@ Validate an engine's result before you read its parts:
 ```ts examples/safe-node-attempt.ts (excerpt) {1}
   const grok = validateAgentResult(await new GrokCliEngine({
     executable: grokExecutable,
-    version: '1.0.5',
+    version: '1.0.44',
     identity: { provider: 'xai', modelFamily: 'grok-4' },
     permissionMode: 'dontAsk',
   }).run(

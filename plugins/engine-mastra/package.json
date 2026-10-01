@@ -1,0 +1,62 @@
+{
+  "name": "@obversa/engine-mastra",
+  "version": "0.1.0",
+  "description": "Run a Mastra agent as one Obversa engine.",
+  "author": "Jonny Neill <jonnyneill@hotmail.com>",
+  "type": "module",
+  "license": "MIT",
+  "sideEffects": false,
+  "publishConfig": {
+    "access": "public"
+  },
+  "engines": {
+    "node": ">=22.13.0"
+  },
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "files": [
+    "dist",
+    "README.md",
+    "LICENSE"
+  ],
+  "scripts": {
+    "build": "tsup && tsc -p tsconfig.build.json",
+    "test": "vitest run",
+    "typecheck": "tsc --noEmit -p tsconfig.json",
+    "typecheck:ts6": "tsc6 --noEmit -p tsconfig.json",
+    "prepack": "node ../../scripts/check-publish-allowlist.mjs --build-proof",
+    "prepublishOnly": "node ../../scripts/check-publish-allowlist.mjs"
+  },
+  "dependencies": {
+    "@obversa/api": "workspace:^",
+    "@obversa/core": "workspace:^"
+  },
+  "peerDependencies": {
+    "@mastra/core": "^1.74.0"
+  },
+  "devDependencies": {
+    "@mastra/core": "1.74.0"
+  },
+  "keywords": [
+    "agent",
+    "graph",
+    "workflow",
+    "runtime",
+    "obversa",
+    "mastra"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/jonny981/obversa.git"
+  },
+  "homepage": "https://docs.obversa.ai",
+  "bugs": {
+    "url": "https://github.com/jonny981/obversa/issues"
+  }
+}

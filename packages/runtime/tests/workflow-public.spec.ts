@@ -8,7 +8,7 @@ import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
 
 import { approval, briefFromFile, createStoredCallbackClient, person, run, stage, workflow } from '../src/api.js';
-import type { ApprovalAnswer, Outcome, TeamSeat } from '../src/api.js';
+import type { AgentRequest, ApprovalAnswer, Outcome, TeamSeat } from '../src/api.js';
 import { MockEngine } from '../src/testing.js';
 import { createStoredRunFixture } from './stored-run-fixture.js';
 import { storedQuestionJob } from './workflow-stored-question-fixture.js';
@@ -88,6 +88,66 @@ describe('the public workflow builder', () => {
       await rm(directory, { recursive: true, force: true });
     }
   }, 60_000);
+});
+
+describe('workflow reviewers', () => {
+  it('get the reviewed stage\'s task and gate, on the first request and on the retry after an invalid decision', async () => {
+    const directory = await mkdtemp(join(tmpdir(), 'reviewer-gate-'));
+    try {
+      const writer = (file: string) => mockSeat(new MockEngine((req) => {
+        writeFileSync(join(req.cwd!, file), 'written');
+        return JSON.stringify({ status: 'pass', summary: `wrote ${file}` });
+      }), `${file}-writer`);
+      const requests: Record<string, AgentRequest[]> = { draft: [], check: [] };
+      const reviewer = (name: 'draft' | 'check'): TeamSeat => ({
+        engine: new MockEngine((req) => {
+          requests[name]!.push(req);
+          return requests[name]!.length === 1 ? 'not a decision' : JSON.stringify({ status: 'pass', summary: 'meets the gate' });
+        }),
+        identity: { adapter: 'mock', provider: 'mock', modelFamily: `${name}-reviewer`, model: `${name}-reviewer`, tools: ['Read'] },
+      });
+      const job = workflow('reviewed-stages', {
+        brief: 'Write a draft and a summary of it.',
+        roles: {
+          drafter: writer('draft.md'),
+          summariser: writer('summary.md'),
+          draftReviewers: [reviewer('draft')],
+          checkReviewers: [reviewer('check')],
+        },
+        stages: [
+          stage('draft', {
+            agent: 'drafter', writes: 'draft.md', reviewedBy: 'draftReviewers',
+            desc: 'Write the first draft from the brief.',
+            gate: 'The draft answers every question in the brief.',
+          }),
+          stage('summarise', { agent: 'summariser', writes: 'summary.md' }),
+          stage('check', {
+            panel: 'checkReviewers',
+            desc: 'Read the summary against the draft.',
+            gate: 'The summary states nothing the draft does not.',
+          }),
+        ],
+      });
+      const result = await run(job, { cwd: directory });
+      expect(result.outcome.status).toBe('pass');
+      const expected = {
+        draft: { own: ['Task: Write the first draft from the brief.', 'Gate: The draft answers every question in the brief.'], other: 'The summary states nothing the draft does not.' },
+        check: { own: ['Task: Read the summary against the draft.', 'Gate: The summary states nothing the draft does not.'], other: 'The draft answers every question in the brief.' },
+      };
+      for (const name of ['draft', 'check'] as const) {
+        const sent = requests[name]!;
+        expect(sent).toHaveLength(2);
+        expect(sent[1]!.prompt).toContain('Your previous response was not a valid decision.');
+        for (const request of sent) {
+          for (const line of expected[name].own) expect(request.prompt).toContain(line);
+          expect(request.prompt).not.toContain(expected[name].other);
+          expect(request.workspaceMode).toBe('read');
+        }
+      }
+    } finally {
+      await rm(directory, { recursive: true, force: true });
+    }
+  });
 });
 
 describe('a plain-function stage', () => {

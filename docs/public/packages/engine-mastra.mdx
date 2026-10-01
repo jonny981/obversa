@@ -1,26 +1,185 @@
 ---
 title: "Mastra Engine"
-tag: "Coming soon"
-description: "Coming soon: a Mastra agent as one Obversa engine."
+description: "@obversa/engine-mastra: put an agent you built with Mastra on an Obversa team, as one engine."
 ---
 
-<Note>
-**Coming soon.** Not in this release. This page says what the plugin is, so
-that the shape is public before the code is.
-</Note>
+Build the agent in Mastra, then put it on a team with Obversa.
+`@obversa/engine-mastra` makes a Mastra agent one engine: a node the runtime
+can review, send back with findings, pause, resume and record. The agent's
+tools, memory and workflows stay Mastra's.
 
-Put an agent built with Mastra into a seat, and the team around it stays
-the same. A Mastra agent becomes one Obversa engine: one node the runtime
-can review, run again with findings, resume and record, with the agent's
-internals, its tools, workflows and memory, left Mastra's.
+## Install
 
-A binding will name the Mastra agent the way `claude('claude-sonnet-4-5')`
-names a Claude seat, and a `workflow()` role will take it like any other
-engine.
+<CodeGroup>
+
+```bash npm
+npm install @obversa/engine-mastra @mastra/core
+```
+
+```bash pnpm
+pnpm add @obversa/engine-mastra @mastra/core
+```
+
+</CodeGroup>
+
+Not in `@obversa/obversa`; install it on its own, beside Mastra.
+
+## Requirements
+
+- Node.js 22.13 or later, which `@mastra/core` needs.
+- `@mastra/core` 1.74 or a later 1.x release.
+- Whatever your agent needs to run, such as its model provider's key.
+
+## A seat for a team
+
+Build the agent the way you already do. This one has its own instructions,
+its own model and its own tool, which saves a file:
+
+```ts examples/engine-mastra.ts (excerpt)
+const saveFile = createTool({
+  id: 'save-file',
+  description: 'Save the whole text of a file, at a path relative to the working directory.',
+  inputSchema: {
+    type: 'object',
+    properties: { path: { type: 'string' }, text: { type: 'string' } },
+    required: ['path', 'text'],
+    additionalProperties: false,
+  },
+  execute: async (input) => {
+    const { path, text } = input as { path: string; text: string };
+    await mkdir(dirname(path), { recursive: true });
+    await writeFile(path, text);
+    return { saved: path };
+  },
+});
+
+const agent = new Agent({
+  id: 'page-writer',
+  name: 'Page writer',
+  instructions: 'You rewrite documentation pages so a person reads them once and knows what to do. Save the page with the saveFile tool, then reply with the JSON the prompt asks for.',
+  // Offline, the model replays the turns recorded in writer.json, so the
+  // example runs with no key. `WRITER_MODEL=anthropic/claude-sonnet-4-5`
+  // gives the agent that model instead, with the provider's key set.
+  model: process.env.WRITER_MODEL ?? replayedModel('writer.json'),
+  tools: { saveFile },
+});
+```
+
+`mastra(agent)` makes it a seat, the way `claude('claude-sonnet-4-5')` makes
+a Claude seat. Give the seat a role in a `workflow()`. Here the Mastra agent
+writes, Codex reviews, and a judge decides whether another round runs:
+
+```ts examples/engine-mastra.ts (excerpt)
+const writer = mastra(agent);
+const reader = codex('gpt-5.6-luna');
+const judgeSeat = recordedJudge('judge.json');
+
+const brief = briefFromFile('briefs/page.md');
+const file = brief.files?.[0];
+if (file === undefined) throw new Error('briefs/page.md names no file in its front matter');
+
+const team = workflow('mastra-writer', {
+  brief,
+  roles: { write: writer, read: [reader] },
+  stages: [
+    stage('write', {
+      agent: 'write',
+      writes: file,
+      reviewedBy: 'read',
+      refine: judge(judgeSeat, { cap: 3 }),
+      desc: 'Rewrite the page so a person reads it once and knows what to do. On a later round, change only the sentences the findings name.',
+      gate: 'The reader finds nothing that fails, or the judge says the page holds for this use case.',
+    }),
+  ],
+});
+```
+
+## What crosses the boundary
+
+Each attempt is one call to the agent's own `generate`. The engine sends
+three things:
+
+- **The prompt** of the request.
+- **The system text**, when the request has some. It goes to Mastra's
+  `system` option, or to its `instructions` option when the request
+  replaces the system prompt.
+- **An abort signal** that fires when the run aborts or the request's
+  timeout passes.
+
+It returns three things:
+
+- **The agent's final text**, as the result.
+- **The usage Mastra reports**, or `unknown` when Mastra reports none.
+- **The seat's identity**: adapter `mastra`, with the provider and model the
+  agent is built with.
+
+## What stays Mastra's
+
+The agent's tools, memory and any Mastra workflow inside it stay Mastra's.
+The engine does not turn Mastra tools into Obversa tools, and it passes no
+working directory to the agent.
+
+So a step's declared Obversa tools and read-only mode do not limit a Mastra
+agent. It uses the tools it was built with, wherever those tools act. In the
+example, the agent's own tool saves the page into the directory the run
+starts in.
+
+The review, send-back, pause, resume and record around the agent work as
+for any engine. A Mastra seat declares no Obversa tools, so the runtime
+does not accept it as a reviewer: a reviewer must declare a tool that reads
+the workspace.
+
+## Identity
+
+The seat reads the provider and model from the model the agent is built
+with: a `provider/model` string, a language model object, an
+OpenAI-compatible config, or a fallback list, where it reads the first
+enabled entry. The model family is the model name after its last `/`, up to
+its first hyphen, so `claude-sonnet-4-5` is the family `claude`.
+
+When the agent chooses its model with a function, the seat cannot read it
+before the run, and `mastra()` throws. Name the model yourself:
+`mastra(agent, { model: 'openai/gpt-5' })`.
+
+## Errors
+
+- **A rate limit**: a thrown error with status 429. The provider's
+  `retry-after` header, when there is one, is kept.
+- **Everything else** goes through the shared classification, so a quota,
+  authentication or billing message is typed as one.
+- **`aborted`** when the run aborts, and **`timeout`** when the request's
+  `timeoutMs`, plus `timeoutGraceMs` when set, passes.
+
+## What the run did
+
+Run offline, with the agent's model replaying its turns from `writer.json`,
+a stand-in for the Codex command line tool, and the judge's answers
+replayed from `judge.json`, the example printed:
+
+```json Output
+{
+  "status": "pass",
+  "stop": "the judge chose holds"
+}
+```
+
+Two rounds. In each, the Mastra agent called its own `saveFile` tool, then
+replied. The first reader pass found two blocks, so the page went back to
+the agent. The second found one `nice-to-have`, and the judge chose
+`holds`. The record holds both runs of the agent with the usage Mastra
+reported for each.
+
+## API
+
+- **`mastra`**: the seat for a team workflow. **`MastraSeat`** and
+  **`MastraSeatOptions`**: its types. [A seat for a team](#a-seat-for-a-team).
+- **`MastraEngine`**: the engine the seat holds.
+- **`MastraAgent`**: the part of a Mastra `Agent` the engine reads and
+  calls.
 
 ## Next steps
 
-- [Product comparison](/compare): the workflow around each agent.
-
-- [API](/packages/api): the engine contract the plugin will implement.
 - [Runtime](/packages/runtime#declare-a-team): the roles a seat fills.
+- [Know when to stop](/patterns/judge-stops-the-loop): the
+  stopping rule this example uses.
+- [API](/packages/api): the engine contract the plugin implements.

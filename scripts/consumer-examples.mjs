@@ -52,6 +52,8 @@ export const CONSUMER_EXAMPLES = Object.freeze([
   'tournament.ts',
   'judge-stops-the-loop.ts',
   'judge-stops-the-loop.proof.ts',
+  'engine-mastra.ts',
+  'engine-mastra.proof.ts',
   'human-feedback.ts',
   'human-feedback.proof.ts',
   'human-feedback/workflow.ts',
@@ -95,6 +97,13 @@ export const CONSUMER_EXAMPLES = Object.freeze([
 ]);
 
 /**
+ * Example files that import `@mastra/core`. Its 1.74 type declarations do not
+ * compile with library checks on, so the clean consumer compiles these in a
+ * second project with `skipLibCheck` set, and every other file with it off.
+ */
+export const MASTRA_EXAMPLES = Object.freeze(['engine-mastra.ts']);
+
+/**
  * Example files that run real engine plugins. The chain compiles them (they
  * are on the list above) but never runs them, because a run needs signed-in
  * model CLIs; each was run for real once by the stage that wrote it, and the
@@ -131,4 +140,5 @@ export const REAL_ENGINE_EXAMPLES = Object.freeze([
 export const PROOF_RUN_EXAMPLES = Object.freeze([
   { file: 'human-feedback/workflow.ts', why: 'human-feedback.proof.ts runs this workflow with scripted model replies and real callback and HTTP surface sessions' },
   { file: 'use-cases/ops/approve-the-exact-payload.ts', why: 'runs no engine; approve-the-exact-payload.proof.ts runs it offline with a stand-in for curl' },
+  { file: 'engine-mastra.ts', why: 'engine-mastra.proof.ts runs it offline: the Mastra agent\'s model replays recorded turns, a stand-in plays the Codex CLI and the judge replays recorded answers' },
 ]);

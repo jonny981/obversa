@@ -15,7 +15,7 @@ describe('@obversa/engine-grok-cli', () => {
     };
     const options: GrokCliEngineOptions = {
       executable: '/usr/bin/false',
-      version: '1.0.5',
+      version: '1.0.44',
       identity,
       permissionMode: 'dontAsk',
     };
