@@ -1,5 +1,4 @@
 import {
-  existsSync,
   lstatSync,
   mkdtempSync,
   mkdirSync,
@@ -75,41 +74,6 @@ const PERMISSION_TOOLS: Readonly<Record<string, readonly string[]>> = {
   WebFetch: ['web_fetch'],
   MCPTool: ['use_tool'],
 };
-const PROJECT_EXTENSION_PATHS = [
-  'Agents.md',
-  'Claude.md',
-  'CLAUDE.md',
-  'CLAUDE.local.md',
-  'AGENT.md',
-  'AGENTS.md',
-  '.grok/config.toml',
-  '.grok/lsp.json',
-  '.grok/commands',
-  '.grok/hooks',
-  '.grok/plugins',
-  '.grok/rules',
-  '.grok/skills',
-  '.grok/agents',
-  '.grok/personas',
-  '.grok/roles',
-  '.grok/workflows',
-  '.agents/skills',
-  '.agents/commands',
-  '.claude/commands',
-  '.claude/hooks',
-  '.claude/plugins',
-  '.claude/rules',
-  '.claude/skills',
-  '.claude/settings.json',
-  '.claude/settings.local.json',
-  '.cursor/hooks.json',
-  '.cursor/commands',
-  '.cursor/mcp.json',
-  '.cursor/plugins',
-  '.cursor/rules',
-  '.cursor/skills',
-  '.mcp.json',
-] as const;
 const COMPATIBILITY_ENV = Object.freeze({
   GROK_CLAUDE_SKILLS_ENABLED: 'false',
   GROK_CLAUDE_RULES_ENABLED: 'false',
@@ -247,25 +211,6 @@ function assertReadOnlyCapabilities(
   if (!tools.some((tool) => READ_ONLY_TOOLS.has(tool.toLowerCase()) && !WEB_TOOLS.has(tool.toLowerCase()))) {
     throw new TypeError('Grok read workspace requires a file-reading capability');
   }
-}
-
-function assertNoProjectExtensions(rawDirectory: string): string {
-  const directory = realpathSync(rawDirectory);
-  let current = directory;
-  while (true) {
-    for (const relative of PROJECT_EXTENSION_PATHS) {
-      if (existsSync(join(current, relative))) {
-        throw new TypeError(
-          `Grok project extension ${relative} is not allowed in an isolated attempt`,
-        );
-      }
-    }
-    if (existsSync(join(current, '.git'))) break;
-    const parent = dirname(current);
-    if (parent === current) break;
-    current = parent;
-  }
-  return directory;
 }
 
 function trustedSystemPrompt(request: AgentRequest): string {
@@ -849,7 +794,7 @@ export class GrokCliEngine implements Engine {
       if (typeof request.cwd !== 'string' || !isAbsolute(request.cwd)) {
         throw new TypeError('Grok request cwd must be an absolute path');
       }
-      const cwd = assertNoProjectExtensions(request.cwd);
+      const cwd = realpathSync(request.cwd);
       normalized = { ...request, cwd, prompt: '' };
       const capabilities = requestedCapabilities(normalized);
       buildGrokArgs(normalized, this.#options, join(cwd, 'prompt.md'));
@@ -984,7 +929,7 @@ export class GrokCliEngine implements Engine {
     const requested = await this.admit(staticRequest, signal);
     const model = requested.model!;
     const capabilities = requested.capabilities;
-    const cwd = assertNoProjectExtensions(
+    const cwd = realpathSync(
       typeof request.cwd === 'string' ? request.cwd : '',
     );
     const normalizedRequest: AgentRequest = { ...request, cwd };
