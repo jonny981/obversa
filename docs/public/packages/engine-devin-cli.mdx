@@ -1,0 +1,161 @@
+---
+title: "Devin CLI Engine"
+description: "@obversa/engine-devin-cli: Devin as a seat, one fresh process per call."
+---
+
+`@obversa/engine-devin-cli` runs Devin as an engine: every request is one
+fresh `devin -p` process. Use it to put a Devin model in a writing,
+checking or review seat.
+
+## Install
+
+<CodeGroup>
+
+```bash npm
+npm install @obversa/engine-devin-cli
+```
+
+```bash pnpm
+pnpm add @obversa/engine-devin-cli
+```
+
+</CodeGroup>
+
+Not in `@obversa/obversa`; install it on its own.
+
+## Requirements
+
+- The Devin CLI installed and signed in with your own account. The `devin`
+  command must be on your `PATH`, or you pass its path as `cliBinary`.
+
+## Quickstart
+
+`devin(model?)` is the seat helper a `workflow()` role takes, as
+`claude(model)` is for Claude. This file runs the seat once on a read-only
+question:
+
+```ts examples/engine-devin-cli-seat.ts
+import { finalResultText } from '@obversa/api';
+import { devin } from '@obversa/engine-devin-cli';
+
+// Without a model, Devin runs the default model from your own Devin settings.
+const seat = devin();
+
+const result = await seat.engine.run({
+  prompt: 'What does a.js export?',
+  model: seat.identity.model,
+  tools: [...seat.identity.tools],
+  workspaceMode: 'read',
+  cwd: process.cwd(),
+}, () => {}, new AbortController().signal);
+
+console.log(finalResultText(result));
+console.log(`model: ${result.effective.model}`);
+```
+
+Run it with `npx tsx engine-devin-cli-seat.ts` in a git repository that holds
+an `a.js` with two exports. One run printed:
+
+```text Output
+Two named exports, no default:
+
+- **`a`** — a constant set to `1`
+- **`hello`** — a function that returns `"hi"`
+model: swe-2-max
+```
+
+The answer is Devin's own text, as Devin wrote it. In a workflow, write
+`devin('swe-2-max')` to name the model. `devin models list` prints the
+models your account can use.
+
+## How it runs Devin
+
+Devin runs as you run it yourself: with your home folder, your Devin login
+and your Devin settings. It reads the same instruction files and rules it
+reads when you start it yourself. The plugin adds only these flags:
+
+| Flag | Why |
+| --- | --- |
+| `-p` | Run once and exit. |
+| `--prompt-file` | The prompt goes in a temporary file, so a long prompt fits. |
+| `--export` | Devin writes the conversation to a temporary file, and the plugin reads the answer from it. |
+| `--permission-mode` | Set from the step's workspace mode. See [Workspace modes](#workspace-modes). |
+| `--respect-workspace-trust false` | Print mode cannot show Devin's folder trust prompt. Without this flag, Devin refuses every folder you have not opened in Devin before. |
+| `--model` | Only when the seat or the request names a model. |
+
+Each attempt is a new process. The plugin never continues or resumes an
+earlier Devin conversation.
+
+## Identity
+
+The plugin reports `provider: 'cognition'`. The model family is the first
+part of the model name: `swe-2-max` gives `swe`, and `claude-opus-5-5-max`
+gives `claude`. The result's effective record names the model Devin reports
+for the run, so a seat with no model still records which model answered.
+Without a model, the seat records the model as `default`.
+
+Devin reports token counts in its conversation file, and the result carries
+them. If Devin reports none, usage is `unknown`.
+
+## Workspace modes
+
+| Workspace mode | Devin permission mode | What Devin does without asking |
+| --- | --- | --- |
+| `read` | `auto` | Runs the tools Devin treats as read-only. |
+| `write` | `accept-edits` | Runs those tools and edits files in the workspace. |
+| `none` | refused | Devin has no mode without a folder. |
+
+A step that names no workspace mode runs as `read`. The plugin never passes
+`smart` or `dangerous`.
+
+In print mode Devin cannot ask you. When Devin wants a tool that its
+permission mode does not approve, it refuses the tool and does not wait. If
+Devin then ends without an answer, the attempt fails with
+`EngineIncompleteResultError`. The message names the permission mode and
+repeats Devin's warning.
+
+## What Devin cannot do through the plugin
+
+- **No list of named tools.** Devin has no flag that limits a step to named
+  tools. The permission mode is the only limit, and a seat's `tools` list is
+  recorded, not enforced.
+- **No step without a folder.** `workspaceMode: 'none'` and `tools: []` fail
+  with `invalid-config` before Devin starts.
+- **No system prompt.** Devin has no flag for one, so a request's `system`
+  text goes at the top of the prompt.
+- **No structured result.** The final message is text. A request's
+  `jsonSchema` is not sent to Devin.
+- **No live events.** The plugin reads the conversation after Devin exits,
+  so text and tool events arrive together at the end.
+- **No folder trust check.** The plugin skips it, for the reason in the
+  table above.
+
+## Options
+
+| Field | Type | Default | Description |
+| --- | --- | --- | --- |
+| `defaultModel` | `string` | none | The model when the request names none. Without one, Devin uses your default. |
+| `cliBinary` | `string` | `devin` on `PATH` | The executable to run. |
+
+## Errors
+
+- **`EngineError` of kind `missing-cli`** when the executable can't run.
+- **`EngineError` of kind `invalid-config`** for a step without a folder, a
+  step with `tools: []`, or a `devin --version` output the plugin cannot
+  read.
+- **`EngineIncompleteResultError`** when Devin exits without a final answer.
+- **Other `EngineError` kinds**, such as `auth` or `rate-limit`, are read
+  from Devin's own error message.
+
+## API
+
+- **`devin(model?)`**: a `TeamSeat` for a workflow role.
+  [Quickstart](#quickstart).
+- **`DevinCliEngine`**: the engine class. **`DevinCliEngineOptions`** and
+  **`DevinSeat`**: its types.
+- **`buildDevinArgs`**: the argument builder, exported for tests.
+
+## Next steps
+
+- [Runtime](/packages/runtime#declare-a-team): the roles a seat fills.
+- [Codex CLI Engine](/packages/engine-codex-cli): another CLI seat.

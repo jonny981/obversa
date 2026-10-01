@@ -846,6 +846,7 @@ async function main() {
     await copyFile(join(root, 'examples', 'engine-anthropic-api-binding.ts'), join(consumerDirectory, 'engine-anthropic-api-binding.ts'));
     await copyFile(join(root, 'examples', 'engine-jev-api-binding.ts'), join(consumerDirectory, 'engine-jev-api-binding.ts'));
     await copyFile(join(root, 'examples', 'engine-claude-agent-sdk-binding.ts'), join(consumerDirectory, 'engine-claude-agent-sdk-binding.ts'));
+    await copyFile(join(root, 'examples', 'engine-devin-cli-seat.ts'), join(consumerDirectory, 'engine-devin-cli-seat.ts'));
     await copyFile(searchMarkdownExamplePath, join(consumerDirectory, 'memory-markdown.ts'));
     await cp(
       join(root, 'examples', 'memory-markdown-corpus'),

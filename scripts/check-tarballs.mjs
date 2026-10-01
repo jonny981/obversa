@@ -378,6 +378,16 @@ export const EXPECTED_FILES = {
     'package/dist/index.js.map',
     'package/package.json',
   ],
+  '@obversa/engine-devin-cli': [
+    'package/LICENSE',
+    'package/README.md',
+    'package/dist/atif.d.ts',
+    'package/dist/devin-cli.d.ts',
+    'package/dist/index.d.ts',
+    'package/dist/index.js',
+    'package/dist/index.js.map',
+    'package/package.json',
+  ],
   '@obversa/engine-grok-cli': [
     'package/LICENSE',
     'package/README.md',

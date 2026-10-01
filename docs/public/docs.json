@@ -213,6 +213,7 @@
             "pages": [
               "packages/engine-claude-cli",
               "packages/engine-codex-cli",
+              "packages/engine-devin-cli",
               "packages/engine-grok-cli",
               "packages/engine-opencode-cli",
               "packages/engine-claude-agent-sdk",

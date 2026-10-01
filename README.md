@@ -215,6 +215,7 @@ A seat names the tool, the provider, the model family and the model.
 | --- | --- | --- |
 | `@obversa/engine-claude-cli` | Claude Code, one fresh process per attempt | Claude Code, signed in |
 | `@obversa/engine-codex-cli` | Codex | Codex, signed in |
+| `@obversa/engine-devin-cli` | Devin | Devin, signed in |
 | `@obversa/engine-grok-cli` | Grok | the Grok command line tool |
 | `@obversa/engine-opencode-cli` | OpenCode | the OpenCode command line tool |
 | `@obversa/engine-claude-agent-sdk` | the Claude Agent SDK | Claude auth |
@@ -240,13 +241,13 @@ CrewAI, Temporal, Claude Code subagents and eve.
 
 ## Working on Obversa
 
-19 publishable packages. `packages/` holds the eight that define the
+20 publishable packages. `packages/` holds the eight that define the
 product: `@obversa/runtime` runs a workflow, `@obversa/api` holds the
 engine and memory contracts, `@obversa/core` runs bounded child processes,
 `@obversa/runner` supervises stored runs, `@obversa/builtin-workflows`
 ships three ready-made teams, `@obversa/obversa` is the install above,
 and `@obversa/surface` with `@obversa/surface-diff` is the local review
-page. `plugins/` holds the eleven adapters: the seven engines above, three
+page. `plugins/` holds the twelve adapters: the eight engines above, three
 memories, and a notifier that posts run events to a URL.
 
 [AGENTS.md](AGENTS.md) is the guide for anyone who changes this

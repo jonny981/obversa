@@ -1,6 +1,6 @@
 # Releasing
 
-This guide describes how the release owner verifies and publishes the 19
+This guide describes how the release owner verifies and publishes the 20
 Obversa packages.
 
 ## Versions, changelogs and tags
@@ -8,6 +8,10 @@ Obversa packages.
 Changesets manages package versions, package changelogs and package tags. Add a
 changeset with `pnpm changeset`. Run `pnpm changeset version` to apply compatible
 version changes before review.
+
+A new package sets its first version in its own manifest, with its first
+changelog entry written by hand, and no changeset. A changeset would move the
+version past that first number before the first publish.
 
 The four core packages share one version through the fixed group in
 `.changeset/config.json`:
@@ -30,8 +34,8 @@ their changelogs and the lockfile, then run the full release checks and the
 packed consumer check. Complete one worked core-minor check before the first
 core minor release. Stock `changeset publish` still performs the publish.
 
-The publishable set is `scripts/publish-allowlist.json` (19 packages). Eight
-public packages use `packages/<name>`; eleven plugin packages use
+The publishable set is `scripts/publish-allowlist.json` (20 packages). Eight
+public packages use `packages/<name>`; twelve plugin packages use
 `plugins/<name>`. The audit, tarball check, publish workflow and registry check
 all read that list. Publishing a package tags it `name@version`. There is no
 repository-wide release tag.

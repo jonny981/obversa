@@ -37,6 +37,9 @@ importers:
       '@obversa/engine-codex-cli':
         specifier: workspace:^
         version: link:plugins/engine-codex-cli
+      '@obversa/engine-devin-cli':
+        specifier: workspace:^
+        version: link:plugins/engine-devin-cli
       '@obversa/engine-grok-cli':
         specifier: workspace:^
         version: link:plugins/engine-grok-cli
@@ -312,6 +315,15 @@ importers:
         version: link:../../packages/core
 
   plugins/engine-codex-cli:
+    dependencies:
+      '@obversa/api':
+        specifier: workspace:^
+        version: link:../../packages/api
+      '@obversa/core':
+        specifier: workspace:^
+        version: link:../../packages/core
+
+  plugins/engine-devin-cli:
     dependencies:
       '@obversa/api':
         specifier: workspace:^

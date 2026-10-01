@@ -45,6 +45,7 @@ export const CONSUMER_EXAMPLES = Object.freeze([
   'notify-webhook.ts',
   'engine-anthropic-api-binding.ts',
   'engine-claude-agent-sdk-binding.ts',
+  'engine-devin-cli-seat.ts',
   'engine-jev-api-binding.ts',
   'approval.ts',
   'monitor.ts',
@@ -101,6 +102,7 @@ export const CONSUMER_EXAMPLES = Object.freeze([
  * a file here as run for that reason, and each entry says so.
  */
 export const REAL_ENGINE_EXAMPLES = Object.freeze([
+  { file: 'engine-devin-cli-seat.ts', why: 'a Devin seat answers a read-only question in the folder it runs in; the page carries one real run' },
   { file: 'feature-delivery.ts', why: 'Claude and Codex run the analysis, implementation and review jobs; the page carries one real run' },
   { file: 'judge-stops-the-loop.ts', why: 'a Claude seat rewrites the page and a Codex seat reads it, with Jev or a recorded replay as the judge; the page carries the proof run' },
   { file: 'teams/writer-reviewer-pair.ts', why: 'a Claude seat writes and a Codex seat reviews; the page carries one real run' },

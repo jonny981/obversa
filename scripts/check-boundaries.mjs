@@ -549,6 +549,7 @@ const packageRules = new Map([
   ['@obversa/engine-anthropic-api', { directory: 'plugins/engine-anthropic-api', kind: 'plugin', dependencies: ['@obversa/api', '@obversa/core'], peerDependencies: [] }],
   ['@obversa/engine-claude-cli', { directory: 'plugins/engine-claude-cli', kind: 'plugin', dependencies: ['@obversa/api', '@obversa/core'], peerDependencies: [] }],
   ['@obversa/engine-codex-cli', { directory: 'plugins/engine-codex-cli', kind: 'plugin', dependencies: ['@obversa/api', '@obversa/core'], peerDependencies: [] }],
+  ['@obversa/engine-devin-cli', { directory: 'plugins/engine-devin-cli', kind: 'plugin', dependencies: ['@obversa/api', '@obversa/core'], peerDependencies: [] }],
   ['@obversa/engine-grok-cli', { directory: 'plugins/engine-grok-cli', kind: 'plugin', dependencies: ['@obversa/api', '@obversa/core'], peerDependencies: [] }],
   ['@obversa/engine-jev-api', { directory: 'plugins/engine-jev-api', kind: 'plugin', dependencies: ['@obversa/api'], peerDependencies: [] }],
   ['@obversa/engine-opencode-cli', { directory: 'plugins/engine-opencode-cli', kind: 'plugin', dependencies: ['@obversa/api', '@obversa/core'], peerDependencies: [] }],

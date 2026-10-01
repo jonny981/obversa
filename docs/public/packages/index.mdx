@@ -44,6 +44,7 @@ below say what else each one needs.
 | `reviewDiff`, `parseUnifiedDiff`, `appendToThread` | `@obversa/surface-diff` | Review a diff in a browser | [Surface Diff](/packages/surface-diff) |
 | `claude`, `ClaudeCliEngine` | `@obversa/engine-claude-cli` | Claude Code as a seat | [Claude CLI Engine](/packages/engine-claude-cli) |
 | `codex`, `CodexEngine` | `@obversa/engine-codex-cli` | Codex as a seat | [Codex CLI Engine](/packages/engine-codex-cli) |
+| `devin`, `DevinCliEngine` | `@obversa/engine-devin-cli` | Devin as a seat | [Devin CLI Engine](/packages/engine-devin-cli) |
 | `GrokCliEngine` | `@obversa/engine-grok-cli` | Grok CLI as an engine | [Grok CLI Engine](/packages/engine-grok-cli) |
 | `opencode`, `OpenCodeCliEngine` | `@obversa/engine-opencode-cli` | OpenCode as a seat | [OpenCode CLI Engine](/packages/engine-opencode-cli) |
 | `AgentSdkEngine` | `@obversa/engine-claude-agent-sdk` | The Claude Agent SDK as an engine | [Claude Agent SDK Engine](/packages/engine-claude-agent-sdk) |
@@ -74,6 +75,9 @@ is.
 - **Codex CLI.** `@obversa/engine-codex-cli` runs each request in a fresh
   Codex CLI process. You need the Codex CLI installed and signed in. Home:
   [github.com/openai/codex](https://github.com/openai/codex).
+- **Devin CLI.** `@obversa/engine-devin-cli` runs each request in a fresh
+  Devin process with your own sign-in and settings. You need the Devin CLI
+  installed and signed in. See [Devin CLI Engine](/packages/engine-devin-cli).
 - **OpenCode CLI.** `@obversa/engine-opencode-cli` runs each request in a
   fresh OpenCode process with a clean environment, so your own sign-in isn't
   used. You need OpenCode 1.18.23 installed, and you pass your provider's
@@ -141,6 +145,7 @@ is.
 | `@obversa/engine-anthropic-api` | Runs one engine attempt through the Anthropic API | `0.1.2` |
 | `@obversa/engine-claude-cli` | Runs one engine attempt through the Claude CLI | `0.1.2` |
 | `@obversa/engine-codex-cli` | Runs one engine attempt through the Codex CLI | `0.1.2` |
+| `@obversa/engine-devin-cli` | Runs one engine attempt through the Devin CLI | `0.1.0` |
 | `@obversa/engine-grok-cli` | Runs one engine attempt through the Grok CLI | `0.1.2` |
 | `@obversa/engine-opencode-cli` | Runs one engine attempt through the OpenCode CLI | `0.1.2` |
 | `@obversa/engine-jev-api` | Answers decision questions over recorded run state through the Jev API | `0.1.3` |
@@ -157,7 +162,8 @@ you run.
 [Surface](/packages/surface), [Surface Diff](/packages/surface-diff).
 
 **Engines.** [Claude CLI](/packages/engine-claude-cli),
-[Codex CLI](/packages/engine-codex-cli), [Grok CLI](/packages/engine-grok-cli),
+[Codex CLI](/packages/engine-codex-cli),
+[Devin CLI](/packages/engine-devin-cli), [Grok CLI](/packages/engine-grok-cli),
 [OpenCode CLI](/packages/engine-opencode-cli),
 [Claude Agent SDK](/packages/engine-claude-agent-sdk),
 [Anthropic API](/packages/engine-anthropic-api),
