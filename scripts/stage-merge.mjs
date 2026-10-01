@@ -135,6 +135,7 @@ export const stageBranches = {
   F144: 'feat/dag-resume-b',
   F149: 'feat/jev-seat',
   F157: 'release/0.2.2',
+  F162: 'fix/approval-examples-answer',
 };
 
 export function manageStage(args, options = {}) {

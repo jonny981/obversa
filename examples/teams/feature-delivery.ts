@@ -161,6 +161,16 @@ const team = dag({
   maxKickbacks: { implement: judge(judgeSeat, { cap: 4 }) },
 });
 
+// Without approve.json the run waits for the person and prints the address
+// of a page to answer on. The wait lives in this process: stop it before the
+// person answers, and the question goes with it.
 const resume = process.argv.includes('--resume');
-const result = await run(team, { recordTo: recordPath, resume, onEvent: (event) => console.log(formatEvent(event)) });
+const result = await run(team, {
+  recordTo: recordPath,
+  resume,
+  onCallback: 'wait',
+  monitor: true,
+  onEvent: (event) => console.log(event.kind === 'monitor' ? `Answer the approval on ${event.url}` : formatEvent(event)),
+});
+await result.monitor?.close();
 console.log(JSON.stringify({ status: result.outcome.status, summary: result.outcome.summary, recordPath }, null, 2));

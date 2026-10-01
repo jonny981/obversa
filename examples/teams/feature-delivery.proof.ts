@@ -7,6 +7,8 @@ import { join, resolve, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { spawnSync } from 'node:child_process';
 
+import { runAnswering } from '../use-cases/proof-host.js';
+
 const here = dirname(fileURLToPath(import.meta.url));
 const repo = (() => {
   // The repo root is the nearest directory with a package.json: the
@@ -91,7 +93,6 @@ async function seedWorkspace(dir: string, bin: string): Promise<void> {
   await writeFile(join(dir, 'test/triple.test.mjs'), testFile);
   await writeFile(join(dir, 'triage.json'), JSON.stringify(jev.triage, null, 2));
   await writeFile(join(dir, 'judge.json'), JSON.stringify(jev.judge, null, 2));
-  await writeFile(join(dir, 'approve.json'), '{"approved": true}\n');
   await writeFile(join(dir, '.obversa-stand-in.json'), JSON.stringify(standInScript, null, 2));
   for (const name of ['claude', 'codex', 'opencode']) await symlink(standIn, join(bin, name));
   const git = (...args: string[]) => spawnSync('git', args, { cwd: dir, encoding: 'utf8' });
@@ -103,13 +104,17 @@ async function seedWorkspace(dir: string, bin: string): Promise<void> {
   git('commit', '-q', '-m', 'chore: seed the ticket');
 }
 
-function runExample(dir: string, bin: string, extraArgs: readonly string[] = []) {
+function exampleChild(extraArgs: readonly string[] = []) {
   const repoTsconfig = join(repo, 'packages', 'runtime', 'tsconfig.json');
   const tsconfigArgs = existsSync(repoTsconfig) ? ['--tsconfig', repoTsconfig] : [];
   const compiled = join(here, 'feature-delivery.js');
-  const child = existsSync(compiled)
+  return existsSync(compiled)
     ? { file: process.execPath, args: [compiled, ...extraArgs] }
     : { file: join(repo, 'node_modules', '.bin', 'tsx'), args: [...tsconfigArgs, join(here, 'feature-delivery.ts'), ...extraArgs] };
+}
+
+function runExample(dir: string, bin: string, extraArgs: readonly string[] = []) {
+  const child = exampleChild(extraArgs);
   return spawnSync(child.file, child.args, {
     cwd: dir,
     env: { ...process.env, PATH: `${bin}:${process.env.PATH ?? ''}` },
@@ -134,7 +139,14 @@ const bin = join(root, 'bin');
 try {
   await seedWorkspace(workspace, bin);
 
-  const run = runExample(workspace, bin);
+  // The run waits for the person's yes; the proof gives it on the run's page.
+  const child = exampleChild();
+  const run = await runAnswering(child.file, child.args, {
+    cwd: workspace,
+    env: { ...process.env, PATH: `${bin}:${process.env.PATH ?? ''}` },
+    timeoutMs: 120_000,
+    answer: { approved: true },
+  });
   const mode = existsSync(join(here, 'feature-delivery.js')) ? 'compiled-from-dist'
     : existsSync(join(repo, 'packages', 'runtime', 'tsconfig.json')) ? 'repo-tsx' : 'consumer-tsx';
   assert.equal(run.status, 0, `the example child exited ${run.status ?? `signal ${run.signal}`} in ${mode} mode
@@ -189,12 +201,20 @@ try {
   assert.equal(kickbacks[0]!.count, 1);
   assert.equal(kickbacks[0]!.limit, 4);
 
-  // 5. Approval carries the sha256 of the exact bytes that landed.
+  // 5. The run waits at approve and prints a page. The proof reads the
+  // question there while it is pending, so the run was still going and the
+  // step had not ended. The question carries the sha256 of the exact bytes
+  // that landed, and the yes given on the page passes the step.
   const shippedBytes = await readFile(join(workspace, 'src/triple.mjs'));
   const sha256 = createHash('sha256').update(shippedBytes).digest('hex');
+  assert.match(run.stdout, /http:\/\/127\.0\.0\.1:\d+\//, 'the run prints the page to answer on');
+  assert.ok(run.question?.includes(sha256.slice(0, 12)), `the page shows the question with the landed file's own sha256: ${run.question}`);
   const approve = doneNode(record, 'approve', 2);
   assert.equal(approve.outcome!.status, 'pass');
-  assert.ok((approve.outcome!.summary ?? '').includes(sha256.slice(0, 12)), "the approval question names the landed file's own sha256");
+  assert.ok((approve.outcome!.summary ?? '').includes(sha256.slice(0, 12)), "the approval names the landed file's own sha256");
+  const nodeStarts = (node: string) => record.filter((e) => e.kind === 'dag:node' && e.phase === 'start' && e.node === node).length;
+  assert.equal(nodeStarts('approve'), 1, 'approve starts once: waiting for the answer starts nothing again');
+  assert.equal(nodeStarts('review'), 2, 'review starts once per implement attempt, not again for the answer');
 
   // 6. Close wrote its evidence from the record alone, and never touched the
   // shipped file or the plan while doing it.
@@ -235,6 +255,24 @@ try {
   const anchors = resumedRecord.filter((e) => e.kind === 'workflow:start' && e.path?.join('/') === 'feature-delivery');
   assert.equal(anchors.length, 2, 'one resume anchor per run:start');
   assert.equal(anchors[0]!.identity, anchors[1]!.identity, 'the resumed run matched the same declared shape');
+
+  // 8. With approve.json beside the file, the answer comes from it. A fresh
+  // run with that file and nobody on the page ends on its own: a question
+  // left pending would keep it waiting until the timeout. The file's note is
+  // on the approval, so the file gave the answer.
+  const fileWorkspace = join(root, 'with-approve-json');
+  const fileBin = join(root, 'with-approve-json-bin');
+  await seedWorkspace(fileWorkspace, fileBin);
+  const fileNote = 'approved from approve.json';
+  await writeFile(join(fileWorkspace, 'approve.json'), `${JSON.stringify({ approved: true, note: fileNote })}\n`);
+  const fromFile = runExample(fileWorkspace, fileBin);
+  assert.equal(fromFile.status, 0, `the run with approve.json exited ${fromFile.status ?? `signal ${fromFile.signal}`}
+  stdout: ${fromFile.stdout}
+  stderr: ${fromFile.stderr}`);
+  assert.equal(JSON.parse(fromFile.stdout.slice(fromFile.stdout.lastIndexOf('\n{') + 1)).status, 'pass');
+  const fileApprove = doneNode(readRecord(fileWorkspace), 'approve', 2);
+  assert.equal(fileApprove.outcome!.status, 'pass');
+  assert.deepEqual(fileApprove.outcome!.data, { approved: true, note: fileNote }, 'the answer is the one in approve.json');
 
   console.log(JSON.stringify({
     status: printed.status,

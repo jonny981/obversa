@@ -84,8 +84,14 @@ function createBacklogGroom(judgeSeat: TeamSeat, engines: BacklogGroomEngines = 
   });
 }
 
+// The run waits for the owner and prints the address of a page to answer
+// on. The wait lives in this process: stop it before the owner answers, and
+// the next run starts again from the first stage.
 const result = await run(createBacklogGroom(judgeSeat), {
-  onEvent: (event) => console.log(formatEvent(event)),
+  onCallback: 'wait',
+  monitor: true,
+  onEvent: (event) => console.log(event.kind === 'monitor' ? `Answer the owner's question on ${event.url}` : formatEvent(event)),
   recordTo: 'records/backlog-groom-then-rank.jsonl',
 });
+await result.monitor?.close();
 console.log(JSON.stringify(result.outcome, null, 2));
