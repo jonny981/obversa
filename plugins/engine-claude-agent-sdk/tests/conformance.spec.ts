@@ -66,7 +66,7 @@ it('runs the full kit at the SDK query boundary', async () => {
         const options = provider.state.calls.at(-1)!.options;
         const tools = options.tools ?? [];
         if (!tools.includes('Edit')) {
-          expect(options.settingSources).toEqual([]);
+          expect(options.settingSources).toEqual(['project']);
           expect(options.strictMcpConfig).toBe(true);
           expect(options.disallowedTools).toContain('mcp__*');
         }

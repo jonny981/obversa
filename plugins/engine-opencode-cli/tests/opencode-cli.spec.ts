@@ -301,7 +301,7 @@ describe('OpenCode static admission', () => {
     expect(fixture.calls()).toEqual([]);
   });
 
-  it('applies managed config and normal-tool project guards before a version process', async () => {
+  it('applies the managed config guard before a version process and admits nested instructions', async () => {
     const managed = temporaryDirectory('lines-opencode-managed-admission-');
     const fixture = admissionFixture({}, [managed]);
     const input = request();
@@ -312,12 +312,9 @@ describe('OpenCode static admission', () => {
     rmSync(join(managed, 'opencode.json'));
     mkdirSync(join(input.cwd!, 'src'));
     writeFileSync(join(input.cwd!, 'src', 'AGENTS.md'), 'fixture instruction');
+    writeFileSync(join(input.cwd!, 'src', 'CLAUDE.md'), 'fixture instruction');
     await expect(fixture.engine.admit(admissionRequest(input), new AbortController().signal))
-      .rejects.toMatchObject({ kind: 'invalid-config' });
-    expect(fixture.calls()).toEqual([]);
-    const noFiles = { ...input, tools: [], allowedTools: [], workspaceMode: 'none' as const };
-    await expect(fixture.engine.admit(admissionRequest(noFiles), new AbortController().signal))
-      .resolves.toMatchObject({ capabilities: [] });
+      .resolves.toMatchObject({ capabilities: expect.any(Array) });
     expect(fixture.calls().map((call) => call.kind)).toEqual(['version']);
   });
 
@@ -339,15 +336,14 @@ describe('OpenCode static admission', () => {
     expect(sources.some((source) => source.startsWith(managed))).toBe(false);
   });
 
-  it.each([0, 2_500])('keeps the project guard active for a run after successful admission (boot delay %i ms)', async (bootDelayMs) => {
+  it.each([0, 2_500])('keeps the symlink guard active for a run after successful admission (boot delay %i ms)', async (bootDelayMs) => {
     const fixture = admissionFixture({
       OBVERSA_TEST_OPENCODE_BOOT_DELAY_MS: String(bootDelayMs),
     });
     const input = request();
-    writeFileSync(join(input.cwd!, 'AGENTS.md'), 'allowed root instructions');
     await fixture.engine.admit(admissionRequest(input), new AbortController().signal);
     mkdirSync(join(input.cwd!, 'src'));
-    writeFileSync(join(input.cwd!, 'src', 'AGENTS.md'), 'nested instructions');
+    symlinkSync(temporaryDirectory('lines-opencode-link-target-'), join(input.cwd!, 'src', 'link'));
     await expect(fixture.engine.run(input, () => {}, new AbortController().signal))
       .rejects.toMatchObject({ kind: 'invalid-config' });
     expect(fixture.calls().map((call) => call.kind)).toEqual(['version']);
@@ -784,12 +780,12 @@ describe('OpenCode CLI adapter', () => {
       OPENCODE_PURE: '1',
       OPENCODE_DISABLE_DEFAULT_PLUGINS: '1',
       OPENCODE_DISABLE_EXTERNAL_SKILLS: '1',
-      OPENCODE_DISABLE_CLAUDE_CODE: '1',
       OPENCODE_DISABLE_AUTOUPDATE: '1',
       OPENCODE_DISABLE_LSP_DOWNLOAD: '1',
       OPENCODE_DISABLE_SHARE: '1',
       OPENCODE_AUTH_CONTENT: '{}',
     });
+    expect(invocation.environment).not.toHaveProperty('OPENCODE_DISABLE_CLAUDE_CODE');
     expect(config).toMatchObject({
       share: 'disabled',
       autoupdate: false,
@@ -882,7 +878,7 @@ describe('OpenCode CLI adapter', () => {
       pure: '1',
       defaultPluginsDisabled: '1',
       externalSkillsDisabled: '1',
-      claudeCodeDisabled: '1',
+      claudeCodeDisabled: null,
       autoUpdateDisabled: '1',
       lspDownloadDisabled: '1',
       shareDisabled: '1',
@@ -952,36 +948,14 @@ describe('OpenCode CLI adapter', () => {
     expect(existsSync(recordPath)).toBe(false);
   });
 
-  it.each(['AGENTS.md', 'CLAUDE.md', 'CONTEXT.md'])(
-    'refuses nested %s instructions for a read-capable attempt',
-    async (name) => {
-      const workspace = temporaryDirectory('lines-opencode-instructions-');
-      const nested = join(workspace, 'src');
-      mkdirSync(nested);
-      writeFileSync(join(nested, name), 'ambient instructions');
-      writeFileSync(join(nested, 'work.ts'), 'export {};');
-      const recordPath = join(
-        temporaryDirectory('lines-opencode-record-'),
-        'call.json',
-      );
-
-      await expect(new OpenCodeCliEngine({
-        ...options(),
-        environment: { OBVERSA_TEST_OPENCODE_RECORD: recordPath },
-      }).run(request({
-        cwd: workspace,
-        tools: ['read'],
-        allowedTools: ['Read(src/**)'],
-      }), () => {}, new AbortController().signal)).rejects.toThrow(
-        'project instruction',
-      );
-      expect(existsSync(recordPath)).toBe(false);
-    },
-  );
-
-  it('allows a root instruction when project config loading is disabled', async () => {
-    const workspace = temporaryDirectory('lines-opencode-root-instructions-');
-    writeFileSync(join(workspace, 'AGENTS.md'), 'root instructions');
+  it('runs where the workspace and a subfolder hold AGENTS.md and CLAUDE.md', async () => {
+    const workspace = temporaryDirectory('lines-opencode-instructions-');
+    const nested = join(workspace, 'src');
+    mkdirSync(nested);
+    for (const directory of [workspace, nested]) {
+      writeFileSync(join(directory, 'AGENTS.md'), 'project instructions');
+      writeFileSync(join(directory, 'CLAUDE.md'), 'project instructions');
+    }
 
     const result = await new OpenCodeCliEngine({
       ...options(),
@@ -999,23 +973,13 @@ describe('OpenCode CLI adapter', () => {
     });
   });
 
-  it('refuses instructions under .git and external directory symlinks before spawn', async () => {
-    const gitWorkspace = temporaryDirectory('lines-opencode-git-instructions-');
-    mkdirSync(join(gitWorkspace, '.git'));
-    writeFileSync(join(gitWorkspace, '.git', 'AGENTS.md'), 'git instructions');
+  it('refuses external directory symlinks before spawn', async () => {
     const linkedWorkspace = temporaryDirectory('lines-opencode-link-instructions-');
     const target = temporaryDirectory('lines-opencode-link-target-');
     writeFileSync(join(target, 'AGENTS.md'), 'linked instructions');
     symlinkSync(target, join(linkedWorkspace, 'link'));
     const engine = new OpenCodeCliEngine(options());
 
-    await expect(engine.run(request({
-      cwd: gitWorkspace,
-      tools: ['read'],
-      allowedTools: ['Read(.git/**)'],
-    }), () => {}, new AbortController().signal)).rejects.toThrow(
-      'project instruction',
-    );
     await expect(engine.run(request({
       cwd: linkedWorkspace,
       tools: ['read'],
@@ -1099,29 +1063,6 @@ describe('OpenCode CLI adapter', () => {
       workspaceMode: tool === 'read' ? 'read' : 'write',
     }), () => {}, new AbortController().signal)).rejects.toThrow(
       'outside the workspace',
-    );
-    expect(existsSync(recordPath)).toBe(false);
-  });
-
-  it('refuses lower-case nested project instructions before spawn', async () => {
-    const workspace = temporaryDirectory('lines-opencode-lower-instructions-');
-    const nested = join(workspace, 'src');
-    mkdirSync(nested);
-    writeFileSync(join(nested, 'agents.md'), 'ambient instructions');
-    const recordPath = join(
-      temporaryDirectory('lines-opencode-record-'),
-      'call.json',
-    );
-
-    await expect(new OpenCodeCliEngine({
-      ...options(),
-      environment: { OBVERSA_TEST_OPENCODE_RECORD: recordPath },
-    }).run(request({
-      cwd: workspace,
-      tools: ['read'],
-      allowedTools: ['Read(src/**)'],
-    }), () => {}, new AbortController().signal)).rejects.toThrow(
-      'project instruction',
     );
     expect(existsSync(recordPath)).toBe(false);
   });
