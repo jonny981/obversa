@@ -77,6 +77,13 @@ jobs:
             exit 1
           fi
           echo "publish client: npm $ACTUAL (root devDependency, selected via npm-path) on node $(node --version)"
+      # Changesets makes annotated tags (`git tag -m`), which need a tagger,
+      # and it discards git's error when one fails, so a checkout without an
+      # identity uploads every package and tags none.
+      - name: Give git a tagger identity for the release tags
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898341+github-actions[bot]@users.noreply.github.com"
       - name: Publish the unpublished workspace versions
         run: pnpm changeset publish
         env:

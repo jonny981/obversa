@@ -1,5 +1,13 @@
 # @obversa/runtime
 
+## 0.2.2
+
+### Patch Changes
+
+- `run(job, { resume: true })` now skips a `dag()`'s finished nodes from the record, as it already did for a `workflow()`'s stages. A node can declare `retrySafe: true` to run again after an interruption without a person's answer. An interrupted node that ran in its own worktree asks before any new worktree exists: approve runs it again from the start, refuse stops the run, and its leftover worktree is never merged. `recordedJudge(path)` from `@obversa/runtime/testing` replays recorded judge answers for proofs and offline runs.
+  - @obversa/api@0.2.2
+  - @obversa/core@0.2.2
+
 ## 0.2.1
 
 ### Patch Changes
