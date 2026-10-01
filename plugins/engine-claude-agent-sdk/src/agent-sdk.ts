@@ -256,7 +256,7 @@ export class AgentSdkEngine implements Engine {
       systemPrompt: agentSdkSystemPrompt(req),
       cwd: req.cwd,
       ...toolOptions,
-      ...(restricted ? { settingSources: [], strictMcpConfig: true } : {}),
+      ...(restricted ? { settingSources: ['project'], strictMcpConfig: true } : {}),
       mcpServers: memoryServer ? { [MEMORY_SERVER]: memoryServer } : undefined,
       // The SDK's `env` REPLACES the subprocess environment entirely, the
       // opposite of execa's merge semantics, so spread `process.env` under the

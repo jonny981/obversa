@@ -49,7 +49,7 @@ it.each([['stderr', 0], ['stdout', 0], ['stderr', 2_500]] as const)('runs the fu
           const tools = args[args.indexOf('--tools') + 1]?.split(',') ?? [];
           if (!tools.includes('Edit')) {
             expect(args).toContain('--strict-mcp-config');
-            expect(args[args.indexOf('--setting-sources') + 1]).toBe('');
+            expect(args[args.indexOf('--setting-sources') + 1]).toBe('project');
             expect(args[args.indexOf('--disallowedTools') + 1]).toContain('mcp__*');
           }
           return { modelCalls: models.length, canRead: tools.includes('Read'), canWrite: tools.includes('Edit') || tools.includes('Bash') };

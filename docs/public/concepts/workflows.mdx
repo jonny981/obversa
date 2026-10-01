@@ -122,9 +122,10 @@ code, a branch, a tournament, or a team inside a team.
 
 A step carries two sentences beside its job: `desc`, what it does, and
 `gate`, what done means. Both go into the plan and the record. An agent
-step built with `graphContext: true` also gets `desc` in its prompt; in a
-`workflow()`, the writing seat gets both. A criterion written beside the
-code is hard to write vaguely:
+step built with `graphContext: true` also gets `desc` in its prompt. In a
+`workflow()`, the writing seat gets both. So does each agent reviewer,
+from the stage that declares it. A criterion written beside the code is
+hard to write vaguely:
 
 ```ts examples/described-team.ts (excerpt) {4-5,9-11}
 const describedTeam = dag({
