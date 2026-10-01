@@ -1,14 +1,16 @@
-import type { CallbackGateDefinition } from '../callback/gate.js';
+import type { CallbackGateDefinition, CallbackRequest } from '../callback/gate.js';
 import { createCallbackGate } from '../callback/gate.js';
 import type { EngineRef } from '../engines/engine.js';
+import type { JsonObject, JsonValue } from '../graph/value.js';
 import { childContext } from './context.js';
 import { setMeta } from './describe.js';
 import { LoopError } from './errors.js';
+import { jsonSnapshot, outcomeSnapshot } from './interaction.js';
 import { agentJob } from './job.js';
 import { isolated } from './isolated.js';
 import { parallel } from './dag.js';
 import { reviewPanel, type ReviewPanelConfig } from './feedback.js';
-import type { Job, Outcome } from './types.js';
+import type { Job, Outcome, RunCallbacks } from './types.js';
 
 export interface TeamAgent {
   name: string;
@@ -37,6 +39,8 @@ export interface TeamResult {
   task: string;
   agents: readonly TeamAgentResult[];
   integrated: boolean;
+  /** The callback review's question, while it waits for an answer. */
+  requestId?: string;
   review?: Outcome;
 }
 
@@ -111,11 +115,34 @@ function teamMeta(config: TeamConfig) {
   };
 }
 
+/** The submitted answer to the request, or undefined while nobody has answered. */
+async function answerOf(client: RunCallbacks, request: CallbackRequest): Promise<JsonValue | undefined> {
+  const history = await client.history(request.requestId);
+  const submitted = history.findLast((event) => event.kind === 'callback-submitted');
+  return submitted?.kind === 'callback-submitted' ? submitted.response : undefined;
+}
+
+/** An answer with `approved: false` fails the review; any other answer passes it. */
+function reviewOf(request: CallbackRequest, answer: JsonValue): Outcome {
+  const record: JsonObject = answer !== null && typeof answer === 'object' && !Array.isArray(answer) ? answer as JsonObject : {};
+  if (record.approved === false) {
+    const note = typeof record.note === 'string' && record.note !== '' ? record.note : `refused: ${request.decisionText}`;
+    return { status: 'fail', summary: note, data: answer };
+  }
+  return { status: 'pass', summary: `approved: ${request.decisionText}`, data: answer };
+}
+
 export function team(config: TeamConfig): Job {
   validateConfig(config);
   const panel = config.review?.kind === 'panel' ? reviewPanel(config.review.config) : undefined;
-  const callback = config.review?.kind === 'callback' ? createCallbackGate(config.review.definition) : undefined;
+  const definition = config.review?.kind === 'callback' ? config.review.definition : undefined;
+  // Check the definition before any member runs; each call asks its own question below.
+  if (definition) createCallbackGate(definition);
   const job: Job = async (ctx) => {
+    const client = ctx.callbacks;
+    if (definition && !client) {
+      throw new LoopError({ code: 'CONFIG', message: 'a team callback review needs the run callbacks client' });
+    }
     const memberJobs = config.agents.map((agent) =>
       isolated(
         agentJob({
@@ -154,14 +181,34 @@ export function team(config: TeamConfig): Job {
       return { ...members, data: reviewed };
     }
 
-    if (callback) {
-      const request = callback;
-      const review: Outcome = {
-        status: 'paused',
-        summary: `Team review "${request.gateId}" is waiting for a callback`,
-        data: request,
-      };
-      return { ...review, data: { ...result, review } };
+    if (definition && client) {
+      // The place, the loop iteration and the members' work key the question,
+      // so a team run again, or a second team, asks a new one.
+      const request = createCallbackGate({
+        ...definition,
+        input: jsonSnapshot({
+          requester: { path: ctx.path, iteration: ctx.iteration },
+          material: definition.input,
+          team: { task: config.task, agents: agents.map((agent) => ({ ...agent, outcome: outcomeSnapshot(agent.outcome) })) },
+        }),
+      });
+      let answer = await answerOf(client, request);
+      if (answer === undefined) {
+        await client.post(request);
+        answer = await answerOf(client, request);
+      }
+      if (answer === undefined) {
+        const review: Outcome = {
+          status: 'paused',
+          summary: `Team review "${request.gateId}" is waiting for a callback`,
+          data: request,
+        };
+        return { ...review, data: { ...result, requestId: request.requestId, review } };
+      }
+      const review = reviewOf(request, answer);
+      const reviewed: TeamResult = { ...result, review };
+      if (review.status !== 'pass') return { ...review, data: reviewed };
+      return { ...members, data: reviewed };
     }
 
     return { ...members, data: result };

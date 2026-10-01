@@ -83,8 +83,9 @@ The answer arrives through the stored callbacks client, made with
 it, `run()` gives each run a fresh in-memory client, and its questions end
 with the run. Nothing in the record says which mode asked the question.
 
-A team review that uses a callback gate isn't one of the two: it returns a
-pause carrying its question straight away, however the run was started.
+A team review that uses a callback gate waits only unattended. It posts its
+question and pauses straight away, even with `onCallback: 'wait'`. Start the
+run again with `resume: true` after the answer arrives.
 
 ## Replay the history
 
