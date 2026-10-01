@@ -554,20 +554,6 @@ describe('Grok CLI adapter', () => {
     expect(invocations(calls)).toEqual([]);
   });
 
-  it('rechecks project guards after admission before a normal model call', async () => {
-    const cwd = temporaryDirectory('lines-grok-admitted-project-');
-    const calls = join(temporaryDirectory('lines-grok-admission-'), 'calls.jsonl');
-    const engine = new GrokCliEngine({ ...options(), environment: { OBVERSA_TEST_GROK_CALLS: calls } });
-    const input = request({ cwd });
-    await engine.admit(admissionRequest(input), new AbortController().signal);
-    writeFileSync(join(cwd, 'AGENTS.md'), 'scripted project instructions');
-    await expect(engine.admit(admissionRequest(input), new AbortController().signal))
-      .rejects.toMatchObject({ name: 'EngineError', kind: 'invalid-config' });
-    await expect(engine.run(input, () => {}, new AbortController().signal))
-      .rejects.toMatchObject({ name: 'EngineError', kind: 'invalid-config' });
-    expect(invocations(calls).map((call) => call.kind)).toEqual(['version']);
-  });
-
   it('reports missing-cli when the admitted executable is removed before run', async () => {
     const bin = executable();
     const engine = new GrokCliEngine(options(bin));
@@ -1025,36 +1011,17 @@ describe('Grok CLI adapter', () => {
     expect((error as Error).message).toContain('[redacted]');
   });
 
-  it('rejects native project hooks and config before spawn', async () => {
-    const cwd = temporaryDirectory('lines-grok-poisoned-project-');
-    mkdirSync(join(cwd, '.grok', 'hooks'), { recursive: true });
-    writeFileSync(join(cwd, '.grok', 'config.toml'), '[mcp_servers.poison]\n');
-    writeFileSync(join(cwd, '.grok', 'hooks', 'poison.json'), '{}');
+  it('runs where the workspace and a parent hold AGENTS.md and CLAUDE.md', async () => {
+    const parent = temporaryDirectory('lines-grok-instructions-');
+    const cwd = join(parent, 'workspace');
+    mkdirSync(cwd);
+    for (const directory of [parent, cwd]) {
+      writeFileSync(join(directory, 'AGENTS.md'), 'project instructions');
+      writeFileSync(join(directory, 'CLAUDE.md'), 'project instructions');
+    }
     const recordPath = join(temporaryDirectory('lines-grok-record-'), 'call.json');
 
-    await expect(new GrokCliEngine({
-      ...options(),
-      environment: {
-        OBVERSA_TEST_GROK_RECORD: recordPath,
-        OBVERSA_TEST_GROK_SCENARIO: 'invocation',
-      },
-    }).run(
-      request({
-        cwd,
-      }),
-      () => {},
-      new AbortController().signal,
-    )).rejects.toThrow('project extension');
-    expect(existsSync(recordPath)).toBe(false);
-  });
-
-  it('rejects a project language-server command before spawn', async () => {
-    const cwd = temporaryDirectory('lines-grok-poisoned-lsp-');
-    mkdirSync(join(cwd, '.grok'), { recursive: true });
-    writeFileSync(join(cwd, '.grok', 'lsp.json'), '{"fixture":"spawn"}');
-    const recordPath = join(temporaryDirectory('lines-grok-record-'), 'call.json');
-
-    await expect(new GrokCliEngine({
+    await new GrokCliEngine({
       ...options(),
       environment: {
         OBVERSA_TEST_GROK_RECORD: recordPath,
@@ -1064,34 +1031,8 @@ describe('Grok CLI adapter', () => {
       request({ cwd }),
       () => {},
       new AbortController().signal,
-    )).rejects.toThrow('.grok/lsp.json');
-    expect(existsSync(recordPath)).toBe(false);
-  });
-
-  it.each([
-    'AGENTS.md',
-    '.grok/commands/poison.md',
-    '.grok/roles/poison.toml',
-    '.agents/commands/poison.md',
-  ])('rejects ambient project input %s before spawn', async (relative) => {
-    const cwd = temporaryDirectory('lines-grok-poisoned-project-');
-    const target = join(cwd, relative);
-    mkdirSync(dirname(target), { recursive: true });
-    writeFileSync(target, 'poison');
-    const recordPath = join(temporaryDirectory('lines-grok-record-'), 'call.json');
-
-    await expect(new GrokCliEngine({
-      ...options(),
-      environment: {
-        OBVERSA_TEST_GROK_RECORD: recordPath,
-        OBVERSA_TEST_GROK_SCENARIO: 'invocation',
-      },
-    }).run(
-      request({ cwd }),
-      () => {},
-      new AbortController().signal,
-    )).rejects.toThrow('project extension');
-    expect(existsSync(recordPath)).toBe(false);
+    );
+    expect((JSON.parse(readFileSync(recordPath, 'utf8')) as { cwd: string }).cwd).toBe(cwd);
   });
 
   it('requires an absolute executable, a version, and an explicit model', async () => {

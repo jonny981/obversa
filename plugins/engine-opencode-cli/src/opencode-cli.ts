@@ -455,18 +455,17 @@ function assertNoManagedConfig(sources: readonly string[]): void {
   }
 }
 
-function assertNoProjectInstructions(
+function assertWorkspaceSymlinksContained(
   workspace: string,
   capabilities: readonly string[],
 ): void {
   if (!capabilities.some((capability) => FILESYSTEM_CAPABILITIES.has(capability))) {
     return;
   }
-  const instructionNames = new Set(['agents.md', 'claude.md', 'context.md']);
-  const pending = [{ directory: workspace, root: true }];
+  const pending = [workspace];
   const visited = new Set<string>();
   while (pending.length > 0) {
-    const { directory, root } = pending.pop()!;
+    const directory = pending.pop()!;
     let resolvedDirectory: string;
     let entries: ReturnType<typeof readdirSync>;
     try {
@@ -476,18 +475,13 @@ function assertNoProjectInstructions(
       entries = readdirSync(resolvedDirectory, { withFileTypes: true });
     } catch (error) {
       throw new TypeError(
-        `OpenCode could not inspect project instructions under ${directory}: ${
+        `OpenCode could not inspect the workspace under ${directory}: ${
           error instanceof Error ? error.message : String(error)
         }`,
       );
     }
     for (const entry of entries) {
       const path = join(resolvedDirectory, entry.name);
-      if (!root && instructionNames.has(entry.name.toLowerCase())) {
-        throw new TypeError(
-          `OpenCode project instruction ${path} is not isolated`,
-        );
-      }
       if (entry.isSymbolicLink()) {
         let target: string;
         let directoryTarget: boolean;
@@ -517,10 +511,10 @@ function assertNoProjectInstructions(
               `OpenCode symlink ${path} resolves to the workspace root`,
             );
           }
-          pending.push({ directory: target, root: false });
+          pending.push(target);
         }
       } else if (entry.isDirectory()) {
-        pending.push({ directory: path, root: false });
+        pending.push(path);
       }
     }
   }
@@ -818,7 +812,6 @@ export function buildOpenCodeInvocation(
     OPENCODE_PURE: '1',
     OPENCODE_DISABLE_DEFAULT_PLUGINS: '1',
     OPENCODE_DISABLE_EXTERNAL_SKILLS: '1',
-    OPENCODE_DISABLE_CLAUDE_CODE: '1',
     OPENCODE_DISABLE_AUTOUPDATE: '1',
     OPENCODE_DISABLE_LSP_DOWNLOAD: '1',
     OPENCODE_DISABLE_SHARE: '1',
@@ -1258,7 +1251,7 @@ export class OpenCodeCliEngine implements Engine {
         throw new TypeError('OpenCode request cwd must be an absolute path');
       }
       const cwd = realpathSync(request.cwd);
-      assertNoProjectInstructions(cwd, capabilities);
+      assertWorkspaceSymlinksContained(cwd, capabilities);
       normalized = { ...request, cwd, prompt: '' };
       const timeout = request.timeoutMs ?? DEFAULT_OWNED_COMMAND_LIMITS.timeoutMs;
       const grace = request.timeoutGraceMs ?? DEFAULT_OWNED_COMMAND_LIMITS.teardownGraceMs;
@@ -1439,7 +1432,7 @@ export class OpenCodeCliEngine implements Engine {
       throw new TypeError('OpenCode request cwd must be an absolute path');
     }
     const cwd = realpathSync(request.cwd);
-    assertNoProjectInstructions(cwd, capabilities);
+    assertWorkspaceSymlinksContained(cwd, capabilities);
     const normalized: AgentRequest = { ...request, cwd };
     const directory = mkdtempSync(join(tmpdir(), 'lines-opencode-'));
     const accumulator: OpenCodeAccumulator = {

@@ -230,7 +230,8 @@ turns requested by mentions, compile `teamGraphType` as
 
 The result, `TeamResult` in the outcome's `data`, holds the task, each
 member's `name`, `role` and `outcome`, whether the work was `integrated`,
-and the review's outcome where there was one.
+and the review's outcome where there was one. While a callback review
+waits, it also holds the question's `requestId`.
 
 In a Git workspace, each agent gets the task and its standing brief in its
 own worktree through `isolated()`, and when an agent passes its changes
@@ -239,9 +240,16 @@ Outside a Git repository, `isolated()` warns and runs in the shared
 workspace, so a passing team result doesn't prove a merge happened; `team()`
 adds no merge or lease of its own. `review` takes a review panel or a
 callback gate. A panel receives the completed team result as its previous
-outcome, so its reviewers see the task and each member's outcome. A team's
-callback gate pauses with its question and doesn't post it to the callbacks
-client, so an answer doesn't resume the team.
+outcome, so its reviewers see the task and each member's outcome. A callback
+gate posts its question to the run's callbacks client and pauses the team
+until someone answers. The question's `input` holds the gate's own `input`,
+where the team sits in the graph, and the task with each member's outcome.
+So a team that runs again, for example in the next turn of a loop, asks a
+new question, and two teams never share an answer. Start the run again with
+`recordTo` and `resume: true` over the same stored callbacks client. Members
+that finished don't run again, and the team reads the answer. An answer with `approved` set to `false`
+fails the review, with its `note` as the summary when it has one. Any other
+answer passes the review.
 
 The team returns the usual `Outcome`, with a `TeamResult` in its `data`.
 The status is `pass` only when every agent passes and the configured review
