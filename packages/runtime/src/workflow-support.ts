@@ -213,10 +213,13 @@ export function panelReviewers(
   input: TeamInput,
   reviewTarget?: string,
   recordAs?: { readonly role: 'writer' | 'reviewer'; readonly stage: string },
+  stage?: { readonly desc?: string; readonly gate?: string },
 ): Array<{ name: string; scope?: string; job: Job }> {
   return reviewers.map((reviewer) => {
     const instructions = [
       `Review target: ${reviewTarget ?? 'the supplied files and test evidence'}.`,
+      stage?.desc ? `Task: ${stage.desc}` : undefined,
+      stage?.gate ? `Gate: ${stage.gate}` : undefined,
       'Judge only that target against this stage gate; do not require files from another stage.',
       reviewer.scope ? `Scope: ${reviewer.scope}` : undefined,
     ].filter(Boolean).join('\n');
