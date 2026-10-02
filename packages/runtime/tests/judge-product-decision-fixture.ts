@@ -13,6 +13,11 @@ export interface ProductScenario {
   readonly brief?: string;
   readonly stageName?: string;
   readonly blockFirst?: boolean;
+  /**
+   * Two findings a round (one marked REAL, one a taste note) for two rounds,
+   * then a pass; the judge acts on the REAL one and skips the other.
+   */
+  readonly perFinding?: boolean;
 }
 export interface ProductCall {
   readonly kind: 'writer' | 'reviewer' | 'judge' | 'downstream';
@@ -28,14 +33,25 @@ function seat(engine: MockEngine, model: string, tools: readonly string[] = []):
 export function productDecisionJob(kind: ProductCaller, cwd: string, scenario: ProductScenario): Job {
   const record = (call: ProductCall) => appendFileSync(join(cwd, 'calls.jsonl'), `${JSON.stringify(call)}\n`);
   const name = scenario.stageName ?? 'write';
-  const writer = () => {
-    record({ kind: 'writer' });
+  const writer = (prompt?: string) => {
+    record({ kind: 'writer', ...(prompt !== undefined ? { prompt } : {}) });
     writeFileSync(join(cwd, 'page.md'), `draft ${productCalls(cwd).filter((call) => call.kind === 'writer').length}`);
     return { status: 'pass' as const, summary: 'wrote the page' };
   };
-  const review = () => {
-    const first = !productCalls(cwd).some((call) => call.kind === 'reviewer');
-    record({ kind: 'reviewer' });
+  const review = (prompt?: string) => {
+    const reviews = productCalls(cwd).filter((call) => call.kind === 'reviewer').length;
+    const first = reviews === 0;
+    record({ kind: 'reviewer', ...(prompt !== undefined ? { prompt } : {}) });
+    if (scenario.perFinding) {
+      if (reviews >= 2) return { status: 'pass', summary: 'nothing left', findings: [] };
+      return {
+        status: 'revise', summary: 'Two findings',
+        findings: [
+          { severity: 'should-fix' as const, evidence: `REAL: the page must choose one audience (round ${reviews + 1})` },
+          { severity: 'nice-to-have' as const, evidence: `taste: a warmer tone (round ${reviews + 1})` },
+        ],
+      };
+    }
     return {
       status: 'revise', summary: 'Choose the audience',
       findings: [{ severity: scenario.blockFirst && first ? 'block' as const : 'should-fix' as const, evidence: 'The page must choose one audience.' }],
@@ -44,7 +60,14 @@ export function productDecisionJob(kind: ProductCaller, cwd: string, scenario: P
   const judgeEngine = new MockEngine((request: AgentRequest) => {
     const count = productCalls(cwd).filter((call) => call.kind === 'judge').length;
     record({ kind: 'judge', prompt: request.prompt });
-    return JSON.stringify({ stop_reason: { choice: scenario.choices[Math.min(count, scenario.choices.length - 1)] } });
+    const answers: Record<string, unknown> = { stop_reason: { choice: scenario.choices[Math.min(count, scenario.choices.length - 1)] } };
+    if (scenario.perFinding) {
+      const { questions } = JSON.parse(request.prompt) as { questions: Record<string, { instructions: string; criteria: Record<string, string> }> };
+      for (const [id, question] of Object.entries(questions)) {
+        if ('act' in question.criteria) answers[id] = { choice: question.instructions.includes('REAL') ? 'act' : 'skip', reason: 'judged' };
+      }
+    }
+    return JSON.stringify(answers);
   });
   const refine = judge(seat(judgeEngine, 'judge-mock'), { cap: scenario.cap });
   const interaction = { id: 'rich-review', responseSchema: {} };
@@ -65,8 +88,8 @@ export function productDecisionJob(kind: ProductCaller, cwd: string, scenario: P
     return workflow('product-review', {
       brief: scenario.brief ?? 'Use case: a useful page for one audience.\n\nWrite the page.',
       roles: {
-        writer: seat(new MockEngine(() => JSON.stringify(writer())), 'writer-mock', ['Write']),
-        reviewer: [seat(new MockEngine(() => JSON.stringify(review())), 'reviewer-mock', ['Read'])],
+        writer: seat(new MockEngine((request) => JSON.stringify(writer(request.prompt))), 'writer-mock', ['Write']),
+        reviewer: [seat(new MockEngine((request) => JSON.stringify(review(request.prompt))), 'reviewer-mock', ['Read'])],
       },
       stages: [stage(name, { agent: 'writer', writes: 'page.md', reviewedBy: 'reviewer', refine })],
     });
@@ -75,9 +98,10 @@ export function productDecisionJob(kind: ProductCaller, cwd: string, scenario: P
     name: 'product-review',
     maxKickbacks: { [name]: refine },
     nodes: {
-      [name]: fnJob(name, async () => writer()),
+      [name]: fnJob(name, async (ctx) => writer(JSON.stringify(ctx.lastReview?.revision?.findings ?? null))),
       review: { needs: [name], desc: scenario.brief ?? 'Choose the audience', job: fnJob('review', async () => {
         const result = review();
+        if (result.status === 'pass') return { status: 'pass' as const };
         return revisionRequest({ target: name, reason: result.summary, findings: result.findings });
       }) },
       downstream: { needs: ['review'], job: fnJob('downstream', async () => {

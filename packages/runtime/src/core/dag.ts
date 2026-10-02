@@ -47,7 +47,7 @@ import { mergeLock, mergeSynthesis } from './merge.js';
 import type { EnvHandle } from '../env/environment.js';
 import { LoopError } from './errors.js';
 import { revisionFromOutcome } from './feedback.js';
-import { consultJudge, countBySeverity, hasBlockFinding, isJudge, type JudgeRound, type JudgeState } from './judge.js';
+import { consultJudge, countBySeverity, hasBlockFinding, isJudge, judgedFindings, type JudgeRound, type JudgeState, type SkippedFinding } from './judge.js';
 import { checkpointInteraction, interactionDeclaration, interactionIdentity, jsonSnapshot, outcomeSnapshot, savedInteraction, type InteractionResponse } from './interaction.js';
 import { DEFAULT_FANOUT_CONCURRENCY } from './concurrency.js';
 import { dagResumeIdentity, resumeGuard, RESUME_IDENTITY, RESUME_STAGE_OUTCOMES } from './resume.js';
@@ -243,6 +243,11 @@ export function dag(config: DagConfig): Job {
     let pending = saved?.pending as unknown as { from: string; count: number; state: JudgeState } | undefined;
     const targetCounts = new Map<string, number>(Object.entries(saved?.targetCounts ?? {}) as [string, number][]);
     const judgeHistory = new Map<string, JudgeRound[]>(Object.entries(saved?.history ?? {}) as [string, JudgeRound[]][]);
+    // The findings a target's judge skipped, kept across rounds, and the same
+    // list by the node that sent the work back, which reads it on its next
+    // run as `ctx.skippedFindings`.
+    const skippedBySender = new Map<string, readonly SkippedFinding[]>();
+    const judgeSkipped = new Map<string, SkippedFinding[]>(Object.entries(saved?.skipped ?? {}) as unknown as [string, SkippedFinding[]][]);
     const productFeedback = new Map<string, readonly InteractionResponse[]>(Object.entries(saved?.productFeedback ?? {}) as unknown as [string, InteractionResponse[]][]);
     // The resume anchor: a dag records it at start, so a resumed run can
     // match its finished nodes against the same declared shape. Only the
@@ -298,6 +303,7 @@ export function dag(config: DagConfig): Job {
         workspace,
         environment,
         lastReview: pendingKickback.get(name),
+        skippedFindings: skippedBySender.get(name),
         needs: Object.freeze(Object.fromEntries(
           normalizeNeeds(nodes.get(name)!.needs)
             .filter((n) => results.has(n))
@@ -666,11 +672,14 @@ export function dag(config: DagConfig): Job {
         const cfgJudge = targetJudge(to);
         const withinBudget = perTargetBudget ? count <= limit : used < limit;
         let effectiveReason = reason;
+        let effectiveFindings = request.findings;
         if (cfgJudge !== undefined && withinBudget && !hasBlockFinding(requestFindings)) {
           const history = judgeHistory.get(to) ?? [];
+          const skipped = judgeSkipped.get(to) ?? [];
           const state: JudgeState = pending?.from === from ? pending.state : {
             ...(productFeedback.has(to) ? { productFeedback: productFeedback.get(to) } : {}),
             latestFindings: requestFindings,
+            ...(skipped.length ? { skipped } : {}),
             rounds: history,
             round: count,
             cap: cfgJudge.cap,
@@ -681,7 +690,7 @@ export function dag(config: DagConfig): Job {
               pending: { from, count, state: questionState },
               results: Object.fromEntries([...results].map(([name, outcome]) => [name, outcomeSnapshot(outcome)])),
               attempts: Object.fromEntries(attempts), targetCounts: Object.fromEntries(targetCounts),
-              history: Object.fromEntries(judgeHistory), productFeedback: Object.fromEntries(productFeedback), used, rejected: [...rejected],
+              history: Object.fromEntries(judgeHistory), skipped: Object.fromEntries(judgeSkipped), productFeedback: Object.fromEntries(productFeedback), used, rejected: [...rejected],
             })),
           });
           if ('paused' in result) { record(from, result.paused, 'done'); break; }
@@ -689,6 +698,9 @@ export function dag(config: DagConfig): Job {
           pending = undefined;
           productFeedback.set(to, result.state.productFeedback ?? []);
           const { decision } = result;
+          const judged = judgedFindings(requestFindings, decision, result.state.skipped ?? [], count);
+          judgeSkipped.set(to, judged.skipped);
+          skippedBySender.set(from, judged.skipped);
           judgeHistory.set(to, [
             ...history,
             { round: count, findings: requestFindings, counts: countBySeverity(requestFindings) },
@@ -728,6 +740,7 @@ export function dag(config: DagConfig): Job {
             continue;
           }
           effectiveReason = `${reason} (${decision.reason})`;
+          if (request.findings) effectiveFindings = judged.acted;
         }
 
         if (perTargetBudget ? count > limit : used >= limit) {
@@ -760,7 +773,7 @@ export function dag(config: DagConfig): Job {
         pendingKickback.set(to, {
           status: 'fail',
           summary: `Kicked back from "${from}": ${effectiveReason}`,
-          revision: { ...request, reason: effectiveReason, source: request.source ?? from },
+          revision: { ...request, reason: effectiveReason, ...(effectiveFindings ? { findings: effectiveFindings } : {}), source: request.source ?? from },
         });
         stopped = false; // a prior stopOnError must not block the re-run
         await Promise.all(names.map(run));

@@ -1,16 +1,17 @@
 ---
 title: "Know When to Stop"
-description: "A judge reads the review notes and decides whether another round is worth it."
+description: "A judge reads each review note and decides which ones are worth another round."
 ---
 
 Give a small decision model the job of deciding whether another revision
 would improve the work. Use it for a page, a plan or a shortlist when you
 can't know how many rounds it will need.
 
-The reviewer says what needs fixing. The judge reads those notes and the
-history of revisions, then decides whether another round is worth doing.
-When another revision is needed, the workflow carries the feedback to the
-writer and runs the next round.
+The reviewer says what needs fixing. The judge reads each note and the
+history of revisions, then decides for each note whether to act on it or
+skip it. When it acts on at least one note, the workflow carries those notes
+to the writer and runs the next round. When it skips them all, the work
+stands.
 You set a cap so the work can't go round forever. Put a person's decision
 where the process needs one; this example asks before publication.
 If a fixed number of rounds is enough,
@@ -24,8 +25,8 @@ flowchart LR
   write["write: Claude seat"] -->|the page| read["read: Codex seat"]
   read -->|a block| write
   read -->|other findings| judge{"judge: Jev"}
-  judge -->|continue| write
-  judge -->|holds, or over-polishing| approve["approve: a person"]
+  judge -->|the findings it acts on| write
+  judge -->|skips every finding| approve["approve: a person"]
   read -->|nothing fails| approve
   approve --> done((pass))
 ```
@@ -58,23 +59,39 @@ The judge sits on the `write` stage. The reader reviews the page, and
 The brief tells the reader to tag each finding `block`, `should-fix` or
 `nice-to-have`. A block is a false claim or a sentence a person would not
 understand. A block always goes back to the writer, and the judge is not
-asked. For any other finding, the judge's chosen reason decides whether the
-page goes back or stands. When the judge chooses `continue`, the page goes
-back, even if its other answers lean toward a stop. Those other answers
-decide only when the reply has no chosen reason, such as from a question
-set without `stop_reason`. The cap is the last word: with a cap of 3,
-each run of the stage gives the writer at most three rounds with the
-reader, its first draft included, whatever the judge says.
+asked. In that round, every finding goes back with the block.
+
+In a round with no block, the judge decides each finding on its own: `act`
+or `skip`, with a one-line reason. A taste note does not cost a round, and a
+real finding is not waved through because the rest of the list was trivial.
+
+- **The judge acts on at least one finding.** The page goes back. The writer
+  gets only the findings the judge acts on, each with the judge's reason.
+- **The judge skips every finding.** The page stands as a pass, with the
+  judge's reason.
+- **The reader's next round.** The reader is told which findings the judge
+  skipped and why, so it does not raise them again.
+
+The cap is the last word: with a cap of 3, each run of the stage gives the
+writer at most three rounds with the reader, its first draft included,
+whatever the judge says.
 
 The approval is a plain function. It reads the page, puts its sha256 in the
 question and sends a person's no back to the writer.
 
 ## The questions
 
-The judge sees the use case from the brief, the draft, the latest findings
-and every earlier round it was asked about, with that round's counts and the
-size of its change. A round that went back for a block is not in that list. The
-default question set is `stopQuestions()` from
+The judge sees the use case from the brief, the draft, the latest findings,
+the findings it skipped in earlier rounds with its reasons, and every earlier
+round it was asked about, with that round's counts and the size of its
+change. A round that went back for a block is not in that list.
+
+For each finding in the round, the judge gets one `choice` question, keyed
+`finding-1`, `finding-2` and so on in the order of the round's findings. It
+chooses `act` or `skip`. When an answer carries no reason of its own, the
+reason is the text of the chosen option. The judge
+answers these in the same call as the questions about the whole round. The
+default set of those is `stopQuestions()` from
 [`@obversa/runtime`](/packages/runtime). It asks four questions:
 
 - **`holds`.** For this use case, does the draft hold as it stands?
@@ -86,17 +103,31 @@ default question set is `stopQuestions()` from
   chooses `holds`, `over_polishing`, `not_converging`, `continue` or
   `product_decision`.
 
+The answers about each finding decide the route. When any finding is
+`act`, another round runs within the cap. When every finding is `skip`, the
+work stands as a pass. This holds whatever the round answers say, so a
+chosen `not_converging` neither drops a finding the judge acts on nor fails
+a round whose findings it skips. The one exception is `product_decision`:
+the judge asks a person as described below. A finding the judge does not
+answer follows the round answer: it goes back when that answer is
+`continue`, and it is skipped when that answer is `holds` or
+`over_polishing`.
+
+A `dag()` takes the same `judge()` value on `maxKickbacks`. The target that
+the work goes back to gets only the findings the judge acts on, and a stop
+means the same thing at both levels.
+
 Pass your own set as `judge(seat, { cap, questions })` when this wording
-does not fit your use case. A `dag()` takes the same `judge()` value on
-`maxKickbacks`. A stop means the same thing at both levels. When the judge
-chooses `holds` or `over_polishing`, the work is good enough as it stands,
-and it stands as a pass carrying the judge's reason. When it chooses
-`product_decision`, it asks a person as described below. Every other chosen
-stop, including `not_converging`, leaves the review's failure in place. A
-custom question set that wants a reason of its own to let the work stand
-names that choice `holds` or `over_polishing`. The judge engine takes
-`{ state, questions }` as its prompt and returns one answer per question;
-the [Jev API engine](/packages/engine-jev-api) page has the shape.
+does not fit your use case. With your own set, the judge is not asked about
+each finding, and the whole round goes back or stands on one answer. When
+the judge chooses `holds` or `over_polishing`, the work stands as a pass
+carrying the judge's reason. Every other chosen stop leaves the review's
+failure in place. A custom question set that wants a reason of its own to
+let the work stand names that choice `holds` or `over_polishing`. Add
+`perFinding: true` to ask about each finding with your own set as well. The
+judge engine takes `{ state, questions }` as its prompt and returns one
+answer per question; the [Jev API engine](/packages/engine-jev-api) page has
+the shape.
 
 The built-in `stopQuestions()` also offers `product_decision`: the work
 needs a person's judgement before review can continue. Pass an `interaction`
@@ -117,16 +148,28 @@ printed:
 ```json Output
 {
   "status": "pass",
-  "stop": "the judge chose holds",
+  "stop": "the judge skipped every finding",
   "approved": true
 }
 ```
 
-Two rounds: the first reader pass found two blocks, so the page went back
-without asking the judge. The second found one `nice-to-have`, and the
-judge chose `holds`. The record holds each round's findings and the judge's
-answers. Each answer also says whether the page went back or stopped, which
-answer decided that, and for a stop, whether the step passed or failed.
+Three rounds. The first reader pass found two blocks, so the page went back
+without asking the judge. The second found a `should-fix` (the page never
+says where to run the command) and a `nice-to-have`. The judge acted on the
+first and skipped the second, so the writer got only the first. The third
+pass found one `nice-to-have`, and the judge skipped it, so the page stood.
+
+The record holds each round's findings and the judge's answers. Each answer
+also says whether the page went back or stopped, which answer decided that,
+and for a stop, whether the step passed or failed. It lists each finding's
+id with the judge's decision and reason, for example:
+
+```json
+[
+  { "id": "finding-1", "decision": "act", "reason": "A reader of this kind of work would stumble on, misread or distrust what this finding names, so the builder should fix it." },
+  { "id": "finding-2", "decision": "skip", "reason": "It is taste, an edge case, or polish past the bar the use case sets, so fixing it would not change what a reader gets." }
+]
+```
 With `JUDGE=jev`, and `TYPESAFE_ENDPOINT` and `TYPESAFE_API_KEY` in the
 environment, the same file asks Jev instead of replaying.
 
