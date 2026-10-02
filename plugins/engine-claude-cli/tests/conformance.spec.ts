@@ -47,13 +47,17 @@ it.each([['stderr', 0], ['stdout', 0], ['stderr', 2_500]] as const)('runs the fu
             .map((line) => JSON.parse(line) as { kind: string; args: string[] }).filter((call) => call.kind === 'model');
           const args = models.at(-1)?.args ?? [];
           const tools = args[args.indexOf('--tools') + 1]?.split(',') ?? [];
-          // Claude Code loads the person's own settings in every mode.
-          expect(args).not.toContain('--setting-sources');
+          // Clean mode loads only the repository's settings and no MCP servers of the person's.
+          const ownSetup = !args.includes('--setting-sources');
+          if (!ownSetup) {
+            expect(args[args.indexOf('--setting-sources') + 1]).toBe('project');
+            expect(args).toContain('--strict-mcp-config');
+          }
           if (!tools.includes('Edit')) {
             expect(args).toContain('--strict-mcp-config');
             expect(args[args.indexOf('--disallowedTools') + 1]).toContain('mcp__*');
           }
-          return { modelCalls: models.length, canRead: tools.includes('Read'), canWrite: tools.includes('Edit') || tools.includes('Bash') };
+          return { modelCalls: models.length, canRead: tools.includes('Read'), canWrite: tools.includes('Edit') || tools.includes('Bash'), ownSetup };
         },
       },
       open(scenario) {
@@ -63,10 +67,11 @@ it.each([['stderr', 0], ['stdout', 0], ['stderr', 2_500]] as const)('runs the fu
         return new ClaudeCliEngine({
           cliBinary: scenario === 'missing-cli' ? join(dir, 'absent') : bin,
           permissionMode: 'bypassPermissions',
+          clean: scenario === 'clean-mode',
         });
       },
     });
-    expect(report).toMatchObject({ ok: true, cases: 18, failures: [] });
+    expect(report).toMatchObject({ ok: true, cases: 19, failures: [] });
     expect(report.unsupported.map((item) => item.case)).toEqual(['tool-events', 'billing']);
   } finally {
     rmSync(dir, { recursive: true, force: true });

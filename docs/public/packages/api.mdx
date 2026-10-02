@@ -65,6 +65,20 @@ adapter is admitted locally with no executable. A live check is an ordinary
 `run` with `purpose: 'preflight'`, no tools, no workspace and a leaf
 request; it proves the seat answers and does no work.
 
+`runEngineConformance` checks an engine through its real process or
+provider boundary. A feature the engine lacks goes in `unsupported` with
+its reason; the report lists it and doesn't count it as a failure. One case
+is about [your setup](/packages/engines): the kit runs a read step once
+with the engine's `clean` option off and once with it on. Clean is the
+default, so the fixture opens the engine with `clean: false` for the
+`workspace-read` scenario. The fixture's `observe()` reports `ownSetup`
+from the arguments or options the engine really passed. The case checks the
+run with `clean: false` passed no clean-mode switches, the clean run passed
+them, and both stayed read-only. An engine
+with no clean mode declares `clean-mode` in `unsupported`. So does an
+engine that loads none of your setup and always runs clean: it has no
+`clean` option, so the kit has no second run to compare.
+
 `modelIdentity(model)` reads the provider and model family from a model
 string: `provider/model` supplies both, a bare model only its family (the
 lowercase part before the first hyphen). Whitespace, a second slash, an

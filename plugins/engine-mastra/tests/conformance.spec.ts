@@ -25,6 +25,7 @@ it('runs the full kit at the agent generate boundary', async () => {
       'late-final': 'The agent runs in process, so no process exit can follow its final text.',
       cancellation: 'The engine emits its one observation after generate settles, so the kit cannot abort from an event; mastra.spec.ts aborts a call in flight.',
       'missing-cli': 'The agent runs in process; there is no executable.',
+      'clean-mode': 'The agent is the one your code builds and loads none of the person\'s own setup, so it always runs clean.',
     },
     parseStructuredResult: (part) => JSON.parse(part.kind === 'assistant' ? part.text : 'null'),
     workspace: {
@@ -77,5 +78,5 @@ it('runs the full kit at the agent generate boundary', async () => {
     },
   });
   expect(report).toMatchObject({ ok: true, cases: 15, failures: [] });
-  expect(report.unsupported.map((item) => item.case)).toEqual(['ordered-parts', 'tool-events', 'late-final', 'cancellation', 'missing-cli']);
+  expect(report.unsupported.map((item) => item.case)).toEqual(['ordered-parts', 'tool-events', 'late-final', 'cancellation', 'missing-cli', 'clean-mode']);
 });
