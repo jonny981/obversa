@@ -12,7 +12,7 @@ when a run should use your own setup, the way you run the tool yourself.
 On every engine that can run clean, `clean` is on by default, so a workflow
 behaves the same for everyone who runs it. Set `clean: false` to run on your
 own setup. Grok has no clean mode, so it always runs on your setup unless
-you pass `authFile`. The API and Mastra engines load no setup and have no
+you pass `authFile`. The API, Mastra and OpenAI Agents SDK engines load no setup and have no
 `clean` option. [The engines](#the-engines) table shows each one.
 
 ## What a clean run leaves out
@@ -62,6 +62,7 @@ create a file, and no file in the repository changed.
 | [Anthropic API](/packages/engine-anthropic-api) | No setup to load | Always clean | Refuses a read step | Refuses a read step |
 | [Jev API](/packages/engine-jev-api) | No setup to load | Always clean | Refuses a read step | Refuses a read step |
 | [Mastra](/packages/engine-mastra) | No setup to load | Always clean | Not enforced: your agent's tools decide | Not enforced: your agent's tools decide |
+| [OpenAI Agents SDK](/packages/engine-openai-agents) | No setup to load | Always clean | Not enforced: your agent's tools decide | Not enforced: your agent's tools decide |
 
 ## Where an engine falls short
 
