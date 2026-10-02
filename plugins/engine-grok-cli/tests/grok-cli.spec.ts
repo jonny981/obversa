@@ -1094,6 +1094,15 @@ describe('Grok CLI adapter', () => {
     expect((error as Error).message).toContain('[redacted]');
   });
 
+  it('refuses clean mode with the reason, and builds without clean or with clean: false', () => {
+    expect(() => new GrokCliEngine({ ...options(), clean: true }))
+      .toThrow('Grok has no clean mode: its strict sandbox reads no login outside its own home folder');
+    expect(() => new GrokCliEngine({ ...options(), clean: false })).not.toThrow();
+    // Grok has no default to flip: without `clean` it always runs on the
+    // person's setup, whatever the other engines default to.
+    expect(() => new GrokCliEngine(options())).not.toThrow();
+  });
+
   it('requires an absolute executable, a version, and an explicit model', async () => {
     expect(() => new GrokCliEngine(options('grok'))).toThrow('absolute');
     expect(() => new GrokCliEngine({
@@ -1192,6 +1201,9 @@ describe('Grok CLI adapter', () => {
       model: effective ? 'grok-4-fixture-effective' : 'grok-4-fixture', executable: bin, capabilities,
     });
     const report = await runEngineConformance({
+      unsupported: {
+        'clean-mode': 'Grok\'s strict sandbox reads no login outside its own home folder, so a run cannot leave the person\'s setup out and keep their login.',
+      },
       request: request({
         system: undefined,
         tools: ['read_file'],
@@ -1247,7 +1259,8 @@ describe('Grok CLI adapter', () => {
       },
     });
 
-    expect(report).toEqual({ ok: true, cases: 20, failures: [], unsupported: [] });
+    expect(report).toMatchObject({ ok: true, cases: 20, failures: [] });
+    expect(report.unsupported.map((item) => item.case)).toEqual(['clean-mode']);
   }, 30_000);
 
   it('maps a tool_use block\'s input to a target', async () => {

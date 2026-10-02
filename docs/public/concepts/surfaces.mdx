@@ -82,6 +82,14 @@ You are approving this version. A model passing its review does not approve
 it for you. Neither does reaching the round limit, cancelling or timing out.
 Without an answer, the workflow pauses. Resume it to reopen the pending review.
 
+A [judge](/patterns/judge-stops-the-loop) can also ask you for a product
+decision through a page like this. Pass `interaction` to `judge()`. After you
+answer, the work goes back to the writer with your feedback, your composed
+prompt and the findings you answered. The reviewers then check the new
+draft, and the judge looks at the result. You are not asked the same
+question again before the writer has used your answer. You are asked only
+while the round limit leaves the writer a round to use your answer.
+
 Run the example from a source checkout with a signed-in Codex CLI and
 `OBVERSA_MODEL` set to the model you want:
 

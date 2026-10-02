@@ -211,6 +211,7 @@
           {
             "group": "Plugins",
             "pages": [
+              "packages/engines",
               "packages/engine-claude-cli",
               "packages/engine-codex-cli",
               "packages/engine-devin-cli",

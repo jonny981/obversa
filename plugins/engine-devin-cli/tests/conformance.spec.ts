@@ -41,20 +41,24 @@ it('runs the full kit through the Devin process boundary', async () => {
         },
         observe() {
           const models = readFileSync(calls, 'utf8').split('\n').filter(Boolean)
-            .map((line) => JSON.parse(line) as { kind: string; args: string[] }).filter((call) => call.kind === 'model');
+            .map((line) => JSON.parse(line) as { kind: string; args: string[]; config: string | null })
+            .filter((call) => call.kind === 'model');
           const args = models.at(-1)?.args ?? [];
           const mode = args[args.indexOf('--permission-mode') + 1];
           if (models.length > 0) expect(['auto', 'accept-edits']).toContain(mode);
-          return { modelCalls: models.length, canRead: true, canWrite: mode === 'accept-edits' };
+          // A clean run reads an empty config file in place of the person's own.
+          const ownSetup = !args.includes('--config');
+          expect(models.at(-1)?.config ?? null).toBe(ownSetup ? null : '{}\n');
+          return { modelCalls: models.length, canRead: true, canWrite: mode === 'accept-edits', ownSetup };
         },
       },
       open(scenario) {
         writeFileSync(calls, '');
         env.OBVERSA_ENGINE_CONFORMANCE_SCENARIO = scenario;
-        return new DevinCliEngine({ cliBinary: scenario === 'missing-cli' ? join(dir, 'absent') : bin });
+        return new DevinCliEngine({ cliBinary: scenario === 'missing-cli' ? join(dir, 'absent') : bin, clean: scenario === 'clean-mode' });
       },
     });
-    expect(report).toMatchObject({ ok: true, cases: 20, failures: [] });
+    expect(report).toMatchObject({ ok: true, cases: 21, failures: [] });
     expect(report.unsupported.map((item) => item.case)).toEqual(['cancellation']);
   } finally {
     rmSync(dir, { recursive: true, force: true });

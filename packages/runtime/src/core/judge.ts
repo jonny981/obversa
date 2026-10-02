@@ -11,7 +11,7 @@
 import { agentJob } from './job.js';
 import { DEFAULT_INTERACTION, jsonSnapshot, requestInteraction, type InteractionBinding, type InteractionResponse } from './interaction.js';
 import type { Outcome } from './types.js';
-import { normalizeFeedbackSeverity } from './feedback.js';
+import { normalizeFeedbackSeverity, revisionRequest } from './feedback.js';
 import type {
   FeedbackActionSeverity,
   FeedbackFinding,
@@ -132,9 +132,10 @@ export interface JudgeDecision {
    * What a stop means, when `again` is false. `ship`: the work holds as it
    * is, so it stands as a pass carrying the judge's reason. `fail`: another
    * round will not fix it, so the run stops there and the requesting side's
-   * own failure stands. `product_decision` asks a person, then returns the
-   * feedback to this judge without advancing the review round. Absent when
-   * `again` is true.
+   * own failure stands. `product_decision` asks a person, then sends the work
+   * back to the builder with their answer as another round; the judge is
+   * asked again only after that round is reviewed. Absent when `again` is
+   * true.
    */
   readonly stop?: 'ship' | 'fail' | 'product_decision';
 }
@@ -149,9 +150,9 @@ export interface JudgeDecision {
  * or a dag's own kickback budget), and a block finding never reaches this
  * function, it always goes back without asking the judge.
  *
- * `product_decision` pauses for rich feedback and another judgment of the
- * same work. For a terminal stop, `holds` and `over_polishing` say the work
- * is good enough as it stands, so it ships as a pass; other stops, including
+ * `product_decision` pauses for a person's answer, which goes to the builder
+ * as the next round. For a terminal stop, `holds` and `over_polishing` say
+ * the work is good enough as it stands, so it ships as a pass; other stops, including
  * `not_converging` and any choice a custom question set invents of its own,
  * says the run should not ship silently, so it stops there and the
  * requesting side's failure stands. The same split applies to the
@@ -228,29 +229,45 @@ export async function askJudge(
   return { answers, decision };
 }
 
-/** Resume only the deliberate product question; every returned answer goes back to this judge. */
+/**
+ * Ask the judge, or resume its pending product question. When the judge
+ * chooses `product_decision`, a person is asked, and their answer comes back
+ * as `answer` for the caller to send to the builder; the judge is not asked
+ * again until that round has been built and reviewed. With `roundLeft`
+ * false, no builder round remains for an answer, so the person is not asked
+ * and the `product_decision` decision comes back as it is.
+ */
 export async function consultJudge(
   cfg: Judge,
-  initialState: JudgeState,
+  state: JudgeState,
   ctx: JobContext,
   path: readonly string[],
-  options: { readonly identity: string; readonly pending: boolean; readonly save: (state: JudgeState) => void },
-): Promise<{ state: JudgeState; decision: JudgeDecision } | { state: JudgeState; paused: Outcome }> {
-  let state = initialState;
-  let pending = options.pending;
-  for (;;) {
-    if (pending) {
-      options.save(state);
-      const answer = await requestInteraction(cfg.interaction ?? DEFAULT_INTERACTION,
-        'What product decision should guide this review?', jsonSnapshot({
-          requester: { path, identity: options.identity, engine: cfg.seat.identity, round: state.round },
-          material: state,
-        }), ctx);
-      if ('paused' in answer) return { state, paused: answer.paused };
-      state = { ...state, productFeedback: [...(state.productFeedback ?? []), answer.response] };
-    }
+  options: { readonly identity: string; readonly pending: boolean; readonly roundLeft?: boolean; readonly save: (state: JudgeState) => void },
+): Promise<{ state: JudgeState; decision: JudgeDecision } | { state: JudgeState; paused: Outcome } | { state: JudgeState; answer: InteractionResponse }> {
+  if (!options.pending) {
     const { decision } = await askJudge(cfg, state, ctx, path);
-    if (decision.stop !== 'product_decision') return { state, decision };
-    pending = true;
+    if (decision.stop !== 'product_decision' || options.roundLeft === false) return { state, decision };
   }
+  options.save(state);
+  const answer = await requestInteraction(cfg.interaction ?? DEFAULT_INTERACTION,
+    'What product decision should guide this review?', jsonSnapshot({
+      requester: { path, identity: options.identity, engine: cfg.seat.identity, round: state.round },
+      material: state,
+    }), ctx);
+  if ('paused' in answer) return { state, paused: answer.paused };
+  return { state: { ...state, productFeedback: [...(state.productFeedback ?? []), answer.response] }, answer: answer.response };
+}
+
+/**
+ * The next round's feedback after a person answers a product decision: it
+ * says it is their decision, quotes their prompt, lists the review findings
+ * it answers, and carries their whole response as structured feedback.
+ */
+export function productDecisionFeedback(
+  answer: InteractionResponse,
+  findings: readonly FeedbackFinding[],
+  over: { readonly target?: string; readonly source?: string } = {},
+): Outcome {
+  const reason = `A person made a product decision about the findings below. Apply it in this round. Their decision: "${answer.prompt}"`;
+  return revisionRequest({ ...over, reason, findings: [...findings] }, { data: answer });
 }

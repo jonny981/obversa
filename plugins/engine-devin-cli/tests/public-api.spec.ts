@@ -13,7 +13,7 @@ describe('@obversa/engine-devin-cli', () => {
 
     expect(new DevinCliEngine(options).name).toBe('devin-cli');
     expect(buildDevinArgs({ prompt: 'review', tools: ['read'] }, options, {
-      promptFile: '/tmp/prompt', exportFile: '/tmp/export',
+      promptFile: '/tmp/prompt', exportFile: '/tmp/export', configFile: '/tmp/config.json',
     })).toContain('swe-2-max');
   });
 
@@ -30,13 +30,22 @@ describe('@obversa/engine-devin-cli', () => {
     });
   });
 
-  it('creates a seat that leaves the model to the person\'s Devin settings', () => {
+  it('creates a seat that leaves the model to Devin', () => {
     const seat = devin();
 
     expect(seat.identity).toMatchObject({ adapter: 'devin-cli', provider: 'cognition', model: 'default' });
     expect(buildDevinArgs({ prompt: 'review', model: seat.identity.model, tools: ['read'] }, {}, {
-      promptFile: '/tmp/prompt', exportFile: '/tmp/export',
+      promptFile: '/tmp/prompt', exportFile: '/tmp/export', configFile: '/tmp/config.json',
     })).not.toContain('--model');
+  });
+
+  it('passes clean mode to the engine, and leaves the default to the engine', () => {
+    const opts = (seat: ReturnType<typeof devin>) =>
+      (seat.engine as unknown as { opts: { clean?: boolean } }).opts;
+
+    expect(opts(devin('swe-2-max', { clean: true })).clean).toBe(true);
+    expect(opts(devin(undefined, { clean: true })).clean).toBe(true);
+    expect(opts(devin('swe-2-max')).clean).toBeUndefined();
   });
 
   it('refuses an empty model name', () => {

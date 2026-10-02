@@ -65,21 +65,23 @@ it('runs the full kit at the SDK query boundary', async () => {
       observe() {
         const options = provider.state.calls.at(-1)!.options;
         const tools = options.tools ?? [];
-        // The same setting sources Claude Code loads, in every mode.
-        expect(options.settingSources).toEqual(['user', 'project', 'local']);
+        // The same setting sources Claude Code loads, or only the repository's in clean mode.
+        const ownSetup = options.settingSources?.includes('user') === true;
+        expect(options.settingSources).toEqual(ownSetup ? ['user', 'project', 'local'] : ['project']);
+        if (!ownSetup) expect(options.strictMcpConfig).toBe(true);
         if (!tools.includes('Edit')) {
           expect(options.strictMcpConfig).toBe(true);
           expect(options.disallowedTools).toContain('mcp__*');
         }
-        return { modelCalls: provider.state.calls.length, canRead: tools.includes('Read'), canWrite: tools.includes('Edit') || tools.includes('Bash') };
+        return { modelCalls: provider.state.calls.length, canRead: tools.includes('Read'), canWrite: tools.includes('Edit') || tools.includes('Bash'), ownSetup };
       },
     },
     open(scenario) {
       provider.state.scenario = scenario;
       provider.state.calls = [];
-      return new AgentSdkEngine({ permissionMode: 'bypassPermissions' });
+      return new AgentSdkEngine({ permissionMode: 'bypassPermissions', clean: scenario === 'clean-mode' });
     },
   });
-  expect(report).toMatchObject({ ok: true, cases: 17, failures: [] });
+  expect(report).toMatchObject({ ok: true, cases: 18, failures: [] });
   expect(report.unsupported.map((item) => item.case)).toEqual(['tool-events', 'missing-cli', 'billing']);
 });

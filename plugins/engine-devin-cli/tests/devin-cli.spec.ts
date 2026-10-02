@@ -17,7 +17,7 @@ import { DevinCliEngine, buildDevinArgs, devin } from '../src/index.ts';
 const source = fileURLToPath(new URL('./fixtures/devin-cli.mjs', import.meta.url));
 const directories: string[] = [];
 const signal = () => new AbortController().signal;
-const files = { promptFile: '/tmp/prompt.md', exportFile: '/tmp/conversation.json' };
+const files = { promptFile: '/tmp/prompt.md', exportFile: '/tmp/conversation.json', configFile: '/tmp/config.json' };
 
 interface Invocation {
   kind: 'version' | 'model';
@@ -62,7 +62,8 @@ describe('Devin arguments', () => {
     expect(buildDevinArgs({ prompt: 'x', tools: ['read'], workspaceMode: 'read', model: 'swe-2-max' }, {}, files))
       .toEqual([
         '-p', '--prompt-file', files.promptFile, '--export', files.exportFile,
-        '--permission-mode', 'auto', '--respect-workspace-trust', 'false', '--model', 'swe-2-max',
+        '--permission-mode', 'auto', '--respect-workspace-trust', 'false',
+        '--config', files.configFile, '--model', 'swe-2-max',
       ]);
   });
 
@@ -80,6 +81,17 @@ describe('Devin arguments', () => {
       .toBe('gpt-6-sol-low');
     expect(buildDevinArgs({ prompt: 'x', tools: ['read'] }, {}, files)).not.toContain('--model');
     expect(buildDevinArgs({ prompt: 'x', tools: ['read'], model: 'default' }, {}, files)).not.toContain('--model');
+  });
+
+  it('runs clean by default, and on the person\'s own setup with clean: false', () => {
+    for (const opts of [{}, { clean: true }]) {
+      expect(flag(buildDevinArgs({ prompt: 'x', tools: ['read'] }, opts, files), '--config')).toBe('/tmp/config.json');
+    }
+    expect(buildDevinArgs({ prompt: 'x', tools: ['read'] }, { clean: false }, files)).not.toContain('--config');
+    const withoutConfig = { promptFile: files.promptFile, exportFile: files.exportFile };
+    expect(() => buildDevinArgs({ prompt: 'x', tools: ['read'] }, {}, withoutConfig)).toThrow(
+      expect.objectContaining({ kind: 'invalid-config', message: 'devin clean mode requires an empty config file' }),
+    );
   });
 
   it.each<[string, AgentRequest]>([
@@ -160,7 +172,7 @@ describe.runIf(process.platform !== 'win32')('Devin process', () => {
     expect(result.usage).toEqual({ kind: 'unknown' });
   });
 
-  it('runs a seat with no model on the person\'s default and records the model Devin reports', async () => {
+  it('runs a seat that leaves the model to Devin and records the model Devin reports', async () => {
     const f = fixture();
     const seat = devin();
     const engine = new DevinCliEngine({ cliBinary: f.bin });

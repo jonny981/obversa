@@ -1,0 +1,124 @@
+---
+title: "A Clean Run or Your Setup"
+description: "Engines run clean by default, with your login and the repository's setup; turn clean off to run on your own setup, and see where each engine falls short."
+---
+
+An engine runs clean by default: your own setup stays out, your login and
+the repository's setup stay in. Set `clean: false` on an engine or a seat
+when a run should use your own setup, the way you run the tool yourself.
+
+## The default
+
+On every engine that can run clean, `clean` is on by default, so a workflow
+behaves the same for everyone who runs it. Set `clean: false` to run on your
+own setup. Grok has no clean mode, so it always runs on your setup unless
+you pass `authFile`. The API and Mastra engines load no setup and have no
+`clean` option. [The engines](#the-engines) table shows each one.
+
+## What a clean run leaves out
+
+- **Your own setup stays out.** Your personal settings, hooks, plugins,
+  skills, MCP servers and global instruction files, such as
+  `~/.claude/CLAUDE.md`, don't load.
+- **The repository's setup still applies.** Its `AGENTS.md`, `CLAUDE.md`
+  and project config are part of the code the run works on.
+- **Your login stays.** The run still uses your own sign-in and
+  subscription.
+
+Not every CLI can leave all of your setup out.
+[Where an engine falls short](#where-an-engine-falls-short) says what stays
+in.
+
+## Turn it off
+
+The option has the same name on every engine. Clean is the default; this is
+how to run on your own setup instead:
+
+- **Claude CLI.** `claude(model, { clean: false })` or
+  `new ClaudeCliEngine({ clean: false })`.
+- **Claude Agent SDK.** `new AgentSdkEngine({ clean: false })`.
+- **Codex CLI.** `codex(model, { clean: false })` or
+  `new CodexEngine({ clean: false })`.
+- **OpenCode CLI.** `opencode(model, { executable, clean: false })` or
+  `new OpenCodeCliEngine({ ...options, clean: false })`.
+- **Devin CLI.** `devin(model, { clean: false })` or
+  `new DevinCliEngine({ clean: false })`.
+- **Grok CLI.** Always runs on your setup; `clean: true` throws an error
+  that says why. Grok has no clean mode.
+
+## The engines
+
+"Read-only held" means a step in the `read` workspace mode was asked to
+create a file, and no file in the repository changed.
+
+| Engine | Runs on your setup | Clean mode | Read-only held, your setup | Read-only held, clean |
+| --- | --- | --- | --- | --- |
+| [Claude CLI](/packages/engine-claude-cli#clean) | Yes | Yes | The model's tools held; your hooks can write | Yes |
+| [Claude Agent SDK](/packages/engine-claude-agent-sdk#clean) | Yes | Yes | The model's tools held; your hooks can write | Yes |
+| [Codex CLI](/packages/engine-codex-cli#clean) | Yes | Yes | Yes | Yes |
+| [Devin CLI](/packages/engine-devin-cli#options) | Yes | Yes | Yes | Yes |
+| [OpenCode CLI](/packages/engine-opencode-cli#clean) | Yes | Yes | Not proven: the proof needs a paid model | Not proven: the proof needs a paid model |
+| [Grok CLI](/packages/engine-grok-cli#clean) | Yes | No | Yes | No clean mode |
+| [Anthropic API](/packages/engine-anthropic-api) | No setup to load | Always clean | Refuses a read step | Refuses a read step |
+| [Jev API](/packages/engine-jev-api) | No setup to load | Always clean | Refuses a read step | Refuses a read step |
+| [Mastra](/packages/engine-mastra) | No setup to load | Always clean | Not enforced: your agent's tools decide | Not enforced: your agent's tools decide |
+
+## Where an engine falls short
+
+- **Claude CLI and Claude Agent SDK.** On your own setup, your own hooks
+  still run during a read-only step, and a hook that writes files still
+  writes. Clean mode also leaves out the repository's own MCP servers.
+- **Codex CLI.** Your own skills and command rules still load in clean
+  mode.
+- **Devin CLI.** Your own MCP servers, skills and personal rules can still
+  load in clean mode: clean mode replaces only your Devin settings file.
+- **OpenCode CLI.** Your own skills in `~/.claude/skills` and
+  `~/.agents/skills` still load in clean mode. OpenCode's switch that skips
+  them also skips the repository's own skills. Clean mode moves the whole
+  config folder, so commands the step runs lose their settings in it too.
+  Free models refuse a tool-limited run, so the proof needs a paid model.
+- **Grok CLI.** No clean mode: Grok's strict sandbox reads no login outside
+  its own home folder.
+
+## Check it on your own machine
+
+From a clone of the repository, build the packages and run the proof. It
+runs each installed CLI the ordinary way, with your own logins, so it
+spends a little of each subscription. It isn't part of CI.
+
+```bash
+pnpm build
+node scripts/prove-engines.mjs
+```
+
+Each run gets a fresh scratch repository. In each mode, one read-only step
+is asked to create a file, and a second one reads a word back from a file.
+A write-mode run on your own setup is the control: it shows the same
+prompt does make the engine write when writing is allowed.
+
+The proof prints one table, with one row for each engine in each mode:
+
+- **Engine.** The engine the row is about. Its first row shows the
+  version of its CLI.
+- **Run.** The mode: your setup or clean, and read or write.
+- **Answered.** Whether the engine replied with the word from the file.
+- **Files changed.** Whether the step asked to create a file changed any
+  file in its scratch repository. `-` means that step failed without
+  changing a file, so it shows nothing about read-only.
+- **Note.** Which files a step changed, or why a step failed.
+
+```text
+Engine     | Run                         | Answered | Files changed | Note
+-----------|-----------------------------|----------|---------------|------------------------------
+Codex CLI  | version codex-cli 1.2.3     |          |               |
+Codex CLI  | your setup, read            | yes      | no            |
+Codex CLI  | clean, read                 | yes      | no            |
+Codex CLI  | your setup, write (control) | yes      | yes           | write step changed created.txt
+```
+
+## Next steps
+
+- [Claude CLI Engine](/packages/engine-claude-cli): the `clean` option and
+  the read workspace mode.
+- [API](/packages/api#implement-an-engine): how the conformance kit checks
+  an engine's clean mode.

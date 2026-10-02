@@ -24,10 +24,11 @@ pnpm add @obversa/engine-claude-cli
 
 Included in `@obversa/obversa`.
 
-Each process runs Claude Code the way you run it: with your own login,
-your own settings and the repository's instruction files, the same as
-every other engine. The plugin adds only what the step needs, through
-Claude Code's own flags.
+Each process runs Claude Code [clean](#clean) by default: with your own
+login and the repository's settings and instruction files, but without your
+own settings, hooks, plugins, skills and MCP servers. Set `clean: false` to
+run it the way you run it, with your own settings too. The plugin adds only
+what the step needs, through Claude Code's own flags.
 
 ## Requirements
 
@@ -73,8 +74,23 @@ can.
 passed to the CLI. In the `read` workspace mode Claude gets only the
 `Read`, `Grep` and `Glob` tools the request names; in `none` it gets no
 tools. Both modes block `Bash`, `Edit`, `Write`, the sub-agent tools and
-every MCP tool. Claude Code still loads your own settings, and they can't
-restore those tools.
+every MCP tool. With `clean: false` Claude Code also loads your own
+settings, and they can't restore those tools. Your own hooks run too,
+though, and a hook can write files; a clean run leaves your hooks out.
+
+### `clean`
+
+`true` runs Claude Code with `--setting-sources project` and
+`--strict-mcp-config`. Your own settings, hooks, plugins, skills, MCP
+servers and `~/.claude/CLAUDE.md` stay out. The repository's settings and
+instruction files still apply, and the run keeps your login.
+`ClaudeSeatOptions` takes the same `clean` option.
+
+Its row in the [engines table](/packages/engines#the-engines): runs on your
+setup, clean mode available, read-only held in clean mode. On your own
+setup the model's tools stay read-only, but your own hooks still run and
+can change files. Clean mode also leaves out the repository's own MCP
+servers, because the switch that keeps yours out keeps every server out.
 
 ### The rest
 
@@ -83,6 +99,7 @@ restore those tools.
 | `defaultModel` | `string` | none | The model when the request names none. |
 | `cliBinary` | `string` | `claude` on `PATH` | The executable to run. |
 | `cliArgs` | `readonly string[]` | none | Extra arguments for every call. |
+| `clean` | `boolean` | [See the default](/packages/engines#the-default) | On by default: your own setup stays out. `false` runs on your own setup. [`clean`](#clean). |
 
 ## Errors
 

@@ -15,6 +15,7 @@ it('runs the full kit at the Messages API boundary', async () => {
       'tool-events': 'This adapter has no tool execution.',
       'late-final': 'Messages API has no successful final message followed by a process exit.',
       'missing-cli': 'Messages API has no executable.',
+      'clean-mode': 'This adapter calls the API directly and loads none of the person\'s own setup, so it always runs clean.',
     },
     parseStructuredResult: (part) => JSON.parse(part.kind === 'assistant' ? part.text : 'null'),
     workspace: {
@@ -71,5 +72,5 @@ it('runs the full kit at the Messages API boundary', async () => {
     },
   });
   expect(report).toMatchObject({ ok: true, cases: 15, failures: [] });
-  expect(report.unsupported.map((item) => item.case)).toEqual(['ordered-parts', 'unknown-usage', 'tool-events', 'late-final', 'missing-cli']);
+  expect(report.unsupported.map((item) => item.case)).toEqual(['ordered-parts', 'unknown-usage', 'tool-events', 'late-final', 'missing-cli', 'clean-mode']);
 });
