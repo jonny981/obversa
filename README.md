@@ -38,9 +38,12 @@ npm install @obversa/obversa
 ```
 
 Node.js 22.12 or later. `@obversa/obversa` installs the runtime and every
-plugin but two engines, which you install on their own:
-`npm install @obversa/engine-jev-api` for Jev and
-`npm install @obversa/engine-mastra @mastra/core` for a Mastra agent.
+plugin but four engines, which you install on their own:
+`npm install @obversa/engine-jev-api` for Jev,
+`npm install @obversa/engine-devin-cli` for Devin,
+`npm install @obversa/engine-mastra @mastra/core` for a Mastra agent and
+`npm install @obversa/engine-openai-agents @openai/agents zod` for an
+OpenAI Agents SDK agent.
 Use Claude Code, Codex, Grok or OpenCode with the command line tools you
 already have signed in, or use an API engine.
 [Installation](https://docs.obversa.ai/get-started/installation) covers
@@ -224,6 +227,7 @@ A seat names the tool, the provider, the model family and the model.
 | `@obversa/engine-anthropic-api` | the Anthropic API | an API key |
 | `@obversa/engine-jev-api` | Jev, typed decisions over recorded state | a Jev endpoint and API key |
 | `@obversa/engine-mastra` | an agent you built with Mastra | `@mastra/core` and what your agent needs |
+| `@obversa/engine-openai-agents` | an agent you built with the OpenAI Agents SDK | `@openai/agents`, `zod` and what your agent needs |
 
 Write your own against the engine contract in `@obversa/api`; it must pass
 the conformance kit.
@@ -244,13 +248,13 @@ CrewAI, Temporal, Claude Code subagents and eve.
 
 ## Working on Obversa
 
-21 publishable packages. `packages/` holds the eight that define the
+22 publishable packages. `packages/` holds the eight that define the
 product: `@obversa/runtime` runs a workflow, `@obversa/api` holds the
 engine and memory contracts, `@obversa/core` runs bounded child processes,
 `@obversa/runner` supervises stored runs, `@obversa/builtin-workflows`
 ships three ready-made teams, `@obversa/obversa` is the install above,
 and `@obversa/surface` with `@obversa/surface-diff` is the local review
-page. `plugins/` holds the thirteen adapters: the nine engines above, three
+page. `plugins/` holds the fourteen adapters: the ten engines above, three
 memories, and a notifier that posts run events to a URL.
 
 [AGENTS.md](AGENTS.md) is the guide for anyone who changes this

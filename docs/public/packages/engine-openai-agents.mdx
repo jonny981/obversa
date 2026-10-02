@@ -1,0 +1,207 @@
+---
+title: "OpenAI Agents Engine"
+description: "@obversa/engine-openai-agents: put an agent you built with the OpenAI Agents SDK on an Obversa team, as one engine."
+---
+
+Build the agent with the OpenAI Agents SDK, then put it on a team with
+Obversa. `@obversa/engine-openai-agents` makes an OpenAI Agents SDK agent one
+engine: a node the runtime can review, send back with findings, pause,
+resume and record. The agent's tools, handoffs and guardrails stay the
+SDK's.
+
+## Install
+
+<CodeGroup>
+
+```bash npm
+npm install @obversa/engine-openai-agents @openai/agents zod
+```
+
+```bash pnpm
+pnpm add @obversa/engine-openai-agents @openai/agents zod
+```
+
+</CodeGroup>
+
+Not in `@obversa/obversa`; install it on its own, beside the SDK.
+
+## Requirements
+
+- Node.js 22.12 or later.
+- `@openai/agents` 0.18, with `zod` 4, which the SDK needs beside it.
+- Whatever your agent needs to run, such as an OpenAI API key.
+
+## A seat for a team
+
+Build the agent the way you already do. This one has its own instructions,
+its own model and its own tool, which saves a file:
+
+```ts examples/engine-openai-agents.ts (excerpt)
+const saveFile = tool({
+  name: 'save_file',
+  description: 'Save the whole text of a file, at a path relative to the working directory.',
+  parameters: {
+    type: 'object',
+    properties: { path: { type: 'string' }, text: { type: 'string' } },
+    required: ['path', 'text'],
+    additionalProperties: false,
+  },
+  execute: async (input) => {
+    const { path, text } = input as { path: string; text: string };
+    await mkdir(dirname(path), { recursive: true });
+    await writeFile(path, text);
+    return `saved ${path}`;
+  },
+});
+
+// Offline, the model replays the turns recorded in writer.json, so the
+// example runs with no key. `WRITER_MODEL=gpt-5` gives the agent that OpenAI
+// model instead, with `OPENAI_API_KEY` set.
+const liveModel = process.env.WRITER_MODEL;
+
+const agent = new Agent({
+  name: 'Page writer',
+  instructions: 'You rewrite documentation pages so a person reads them once and knows what to do. Save the page with the save_file tool, then reply with the JSON the prompt asks for.',
+  model: liveModel ?? replayedModel('writer.json'),
+  tools: [saveFile],
+});
+```
+
+`openaiAgent(agent)` makes it a seat, the way `claude('claude-sonnet-4-5')`
+makes a Claude seat. Give the seat a role in a `workflow()`. Here the agent
+writes, Codex reviews, and a judge decides whether another round runs:
+
+```ts examples/engine-openai-agents.ts (excerpt)
+// The replayed model is an object, whose name the SDK does not expose, so
+// the seat is told which model to record. A model name needs no option.
+const writer = openaiAgent(agent, liveModel === undefined ? { model: 'replayed/replayed-writer' } : {});
+const reader = codex('gpt-5.6-luna');
+const judgeSeat = recordedJudge('judge.json');
+
+const brief = briefFromFile('briefs/page.md');
+const file = brief.files?.[0];
+if (file === undefined) throw new Error('briefs/page.md names no file in its front matter');
+
+const team = workflow('openai-agents-writer', {
+  brief,
+  roles: { write: writer, read: [reader] },
+  stages: [
+    stage('write', {
+      agent: 'write',
+      writes: file,
+      reviewedBy: 'read',
+      refine: judge(judgeSeat, { cap: 3 }),
+      desc: 'Rewrite the page so a person reads it once and knows what to do. On a later round, change only the sentences the findings name.',
+      gate: 'The reader finds nothing that fails, or the judge says the page holds for this use case.',
+    }),
+  ],
+});
+```
+
+## What crosses the boundary
+
+Each attempt is one call to the SDK's runner for the agent. The engine sends
+three things:
+
+- **The prompt** of the request.
+- **The system text**, when the request has some. It goes as one system
+  message before the prompt, or, when the request replaces the system
+  prompt, as the instructions of a copy of the agent.
+- **An abort signal** that fires when the run aborts or the request's
+  timeout passes.
+
+It returns three things:
+
+- **The agent's final output**, as the result. A final output that is not
+  text is returned as JSON.
+- **The usage the SDK reports**, or `unknown` when the SDK counted no model
+  request.
+- **The seat's identity**: adapter `openai-agents`, with the provider and
+  model the agent is built with.
+
+By default the engine calls the SDK's own `run`. To run the agent with a
+`Runner` you configured, pass it: `openaiAgent(agent, { runner })`.
+
+## What stays the SDK's
+
+The agent's tools, handoffs and guardrails stay the SDK's. The engine does
+not turn the agent's tools into Obversa tools, and it passes no working
+directory to the agent.
+
+The engine passes no session. The SDK takes a session as an option of each
+run, not as part of the agent, so each attempt starts without session
+history. To give the agent a session, pass a runner that adds it to the
+options the engine gives:
+`openaiAgent(agent, { runner: { run: (a, input, options) => run(a, input, { ...options, session }) } })`,
+with `run` from `@openai/agents`.
+
+So a step's declared Obversa tools and read-only mode do not limit the
+agent. It uses the tools it was built with, wherever those tools act. In
+the example, the agent's own tool saves the page into the directory the run
+starts in.
+
+An agent that hands off to another agent is still one engine attempt. The
+review, send-back, pause, resume and record around the agent work as for
+any engine. An OpenAI agent seat declares no Obversa tools, so the runtime
+does not accept it as a reviewer: a reviewer must declare a tool that reads
+the workspace.
+
+## Identity
+
+The seat reads the model name the agent is built with. The SDK sends a
+model name to its default model provider, OpenAI, so the provider is
+`openai`. An agent with no model has the SDK's default model. The model
+family is the model name up to its first hyphen, so `gpt-5` is the family
+`gpt`.
+
+When the agent holds a model object, the SDK does not expose the model's
+name, and `openaiAgent()` throws. Name the model yourself:
+`openaiAgent(agent, { model: 'openai/gpt-5' })`. Do the same when the model
+is set somewhere else, such as on a `Runner`.
+
+## Errors
+
+- **A rate limit**: a thrown error with status 429. The provider's
+  `retry-after` header, when there is one, is kept.
+- **A quota**: a 429 with the error code `insufficient_quota`.
+- **Everything else** goes through the shared classification, so an
+  authentication or billing message is typed as one.
+- **`invalid-config`** when the run stops to wait for a tool approval: the
+  engine cannot give the approval.
+- **`aborted`** when the run aborts, and **`timeout`** when the request's
+  `timeoutMs`, plus `timeoutGraceMs` when set, passes.
+
+## What the run did
+
+Run offline, with the agent's model replaying its turns from
+`writer.json`, a stand-in for the Codex command line tool, and the judge's
+answers replayed from `judge.json`, the example printed:
+
+```json Output
+{
+  "status": "pass",
+  "stop": "the judge chose holds"
+}
+```
+
+Two rounds. In each, the agent called its own `save_file` tool, then
+replied. The first reader pass found two blocks, so the page went back to
+the agent. The second found one `nice-to-have`, and the judge chose
+`holds`. The record holds both runs of the agent with the usage the SDK
+reported for each.
+
+## API
+
+- **`openaiAgent`**: the seat for a team workflow. **`OpenAIAgentSeat`** and
+  **`OpenAIAgentSeatOptions`**: its types.
+  [A seat for a team](#a-seat-for-a-team).
+- **`OpenAIAgentsEngine`**: the engine the seat holds.
+- **`OpenAIAgentsRunner`**: the part of the SDK's runner the engine calls.
+  The SDK's `Runner` fits it.
+
+## Next steps
+
+- [Runtime](/packages/runtime#declare-a-team): the roles a seat fills.
+- [Know when to stop](/patterns/judge-stops-the-loop): the
+  stopping rule this example uses.
+- [API](/packages/api): the engine contract the plugin implements.

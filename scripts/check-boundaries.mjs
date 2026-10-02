@@ -553,6 +553,7 @@ const packageRules = new Map([
   ['@obversa/engine-grok-cli', { directory: 'plugins/engine-grok-cli', kind: 'plugin', dependencies: ['@obversa/api', '@obversa/core'], peerDependencies: [] }],
   ['@obversa/engine-jev-api', { directory: 'plugins/engine-jev-api', kind: 'plugin', dependencies: ['@obversa/api'], peerDependencies: [] }],
   ['@obversa/engine-mastra', { directory: 'plugins/engine-mastra', kind: 'plugin', dependencies: ['@obversa/api', '@obversa/core'], peerDependencies: [] }],
+  ['@obversa/engine-openai-agents', { directory: 'plugins/engine-openai-agents', kind: 'plugin', dependencies: ['@obversa/api', '@obversa/core'], peerDependencies: [] }],
   ['@obversa/engine-opencode-cli', { directory: 'plugins/engine-opencode-cli', kind: 'plugin', dependencies: ['@obversa/api', '@obversa/core'], peerDependencies: [] }],
 ]);
 const packageNamesByDirectory = new Map(
