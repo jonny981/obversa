@@ -69,8 +69,10 @@ outcome data. A candidate that throws is never scored, so it can't win
 whatever its source looks like. The highest score lands on `main`; a tie
 goes to the first candidate, so give the judge enough resolution to
 separate the attempts you care about. Every candidate's worktree and branch
-is removed when the tournament ends. `concurrency` sets how many candidates
-run at once, all of them by default.
+is removed when the tournament ends, except a winner that can't merge: its
+branch stays so the work isn't lost. The outcome's `discarded` lists each
+deleted branch that held work, with its last commit. `concurrency` sets
+how many candidates run at once, all of them by default.
 
 ## What the run did
 

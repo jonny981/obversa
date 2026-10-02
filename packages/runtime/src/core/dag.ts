@@ -38,11 +38,10 @@ import {
   stageAll,
   commit,
   addWorktree,
-  removeWorktree,
   branchExists,
-  deleteBranch,
   mergeBranch,
 } from './git.js';
+import { closeFork } from './isolated.js';
 import { mergeLock, mergeSynthesis } from './merge.js';
 import type { EnvHandle } from '../env/environment.js';
 import { LoopError } from './errors.js';
@@ -328,16 +327,17 @@ export function dag(config: DagConfig): Job {
      * captured (any uncommitted remainder is committed in the worktree) and
      * landed back into the parent branch (`--no-ff`, serialised). A merge
      * conflict fails the node unless synthesis is enabled. The worktree is
-     * always removed; a cleanly-merged fork branch is deleted.
+     * always removed, and then the fork branch is deleted; a branch that held
+     * commits that never landed is named in the outcome's `discarded`.
      */
     const forkNodeJob = async (
       name: string,
       node: DagNode,
     ): Promise<Outcome> => {
       const base = parent.workspace;
-      // An interrupted or conflicted earlier run can leave its fork branch
-      // behind, and a new run counts forks from zero again, so skip any name
-      // that is already taken.
+      // An interrupted earlier run leaves its fork branch behind for recovery,
+      // and a new run counts forks from zero again, so skip any name that is
+      // already taken.
       let branch = `lines/${slug(config.name)}-${slug(name)}-${(forkSeq += 1)}`;
       while (await branchExists(base.dir, branch, { signal: parent.signal })) {
         branch = `lines/${slug(config.name)}-${slug(name)}-${(forkSeq += 1)}`;
@@ -352,7 +352,7 @@ export function dag(config: DagConfig): Job {
       // the worktree, torn down with it. A failed start propagates and the node
       // is recorded as failed; the worktree is still cleaned up in `finally`.
       let envHandle: EnvHandle | undefined;
-      try {
+      const attempt = async (): Promise<Outcome> => {
         if (config.environment)
           envHandle = await config.environment.up(wtWs, parent.signal);
         const outcome = await node.job(nodeCtx(name, node.job, wtWs, envHandle));
@@ -405,18 +405,24 @@ export function dag(config: DagConfig): Job {
               };
             }
           }
-          await deleteBranch(base.dir, branch, { signal: parent.signal }).catch(
-            () => {},
-          );
         }
         return outcome;
+      };
+      let outcome: Outcome;
+      let discarded: { branch: string; sha: string } | undefined;
+      // A node that throws may have committed work that never landed, and nothing
+      // would record its sha, so its branch is kept rather than deleted.
+      let threw = true;
+      try {
+        outcome = await attempt();
+        threw = false;
       } finally {
         if (envHandle)
           await envHandle.down(parent.signal).catch(() => {});
-        await removeWorktree(base.dir, wt.dir, {
-          signal: parent.signal,
-        }).catch(() => {});
+        if (threw) parent.log(`kept the branch ${wt.branch}: node "${name}" threw before its work could land`, 'warn');
+        discarded = await closeFork(parent, base.dir, wt, threw);
       }
+      return discarded ? { ...outcome, discarded: [discarded] } : outcome;
     };
 
     /**

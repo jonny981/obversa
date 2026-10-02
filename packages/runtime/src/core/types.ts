@@ -113,6 +113,12 @@ export interface Outcome {
    * `revisionRequest({ target, findings })` or `kickback(to, reason)`.
    */
   revision?: RevisionRequest;
+  /**
+   * Fork branches this step deleted while they still held commits that never
+   * landed, each with the sha of its last commit. Present only when such work
+   * was thrown away, so the record says what was lost.
+   */
+  discarded?: ReadonlyArray<{ readonly branch: string; readonly sha: string }>;
 }
 
 export type RecordedStage =

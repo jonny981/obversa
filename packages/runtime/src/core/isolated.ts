@@ -13,8 +13,12 @@
  * branch merges back (`--no-ff`). Land-back merges are serialised across all
  * `isolated()` jobs in the process, so concurrent dispatch cannot race the parent
  * index/HEAD. A conflict fails, or is synthesised when asked. The worktree
- * is always removed; a cleanly-merged fork branch is deleted. A non-repo workspace
- * degrades to running in place (a warning, no isolation).
+ * is always removed, and then the fork branch is deleted. When that branch
+ * held commits that never landed, the outcome's `discarded` names it and its
+ * last commit. A process that dies mid-attempt leaves its worktree and
+ * branch for a person to recover; a cleanup git refuses leaves them too, with
+ * a warning in the log. A non-repo workspace degrades to running in place (a
+ * warning, no isolation).
  *
  * NOTE: dag's own runNodeJob holds parallel worktree/land-back logic (plus per-team
  * environments). The two should be unified (dag delegating to `isolated()`) once
@@ -22,7 +26,7 @@
  * both deliberately, to avoid destabilising the dag path.
  */
 
-import type { Job, Workspace } from './types.js';
+import type { Job, JobContext, Outcome, Workspace } from './types.js';
 import type { ReasoningRecorder } from '@obversa/api';
 
 import { childContext } from './context.js';
@@ -37,6 +41,8 @@ import {
   hasStagedChanges,
   headSha,
   isRepo,
+  unlandedTip,
+  type WorktreeHandle,
 } from './git.js';
 import { mergeLock, mergeSynthesis } from './merge.js';
 
@@ -57,6 +63,36 @@ export interface IsolatedOptions {
    * nothing produces no commit, so it is never asked for one.
    */
   record?: ReasoningRecorder;
+}
+
+/**
+ * Finish with a fork once its step has ended: remove its worktree, then delete
+ * its branch unless `keepBranch` is set. Returns the branch and its last commit
+ * when the deleted branch held commits that never landed. Cleanup runs even
+ * after the run was stopped. A cleanup that fails is logged as a warning and
+ * never changes the step's outcome.
+ */
+export async function closeFork(
+  parent: JobContext,
+  repoDir: string,
+  fork: WorktreeHandle,
+  keepBranch = false,
+): Promise<{ branch: string; sha: string } | undefined> {
+  const reason = (error: unknown) => (error instanceof Error ? error.message : String(error));
+  try {
+    await removeWorktree(repoDir, fork.dir);
+  } catch (error) {
+    parent.log(`could not remove the worktree ${fork.dir}: ${reason(error)}`, 'warn');
+  }
+  if (keepBranch) return undefined;
+  try {
+    const sha = await unlandedTip(repoDir, fork.branch);
+    await deleteBranch(repoDir, fork.branch);
+    return sha === undefined ? undefined : { branch: fork.branch, sha };
+  } catch (error) {
+    parent.log(`could not delete the branch ${fork.branch}: ${reason(error)}`, 'warn');
+    return undefined;
+  }
 }
 
 /** Wrap a Job so it runs in an isolated worktree and lands back on pass. */
@@ -93,7 +129,7 @@ export function isolated(job: Job, opts: IsolatedOptions = {}): Job {
     // apart from one that left its changes for this wrapper to commit.
     const startSha = await headSha({ cwd: wt.dir, signal: parent.signal });
     const wtWs: Workspace = { dir: wt.dir, branch };
-    try {
+    const attempt = async (): Promise<Outcome> => {
       const ctx = childContext(parent, {
         workspace: wtWs,
         depth: parent.depth + 1,
@@ -175,11 +211,21 @@ export function isolated(job: Job, opts: IsolatedOptions = {}): Job {
         // leaves the change outside the parent, and a recorder cleared at the
         // fork commit would compose the retry from nothing.
         if (opts.record && message && sha !== undefined) opts.record.committed(sha);
-        await deleteBranch(base.dir, branch, { signal: parent.signal }).catch(() => {});
       }
       return outcome;
+    };
+    let outcome: Outcome;
+    let discarded: { branch: string; sha: string } | undefined;
+    // A step that throws may have committed work that never landed, and nothing
+    // would record its sha, so its branch is kept rather than deleted.
+    let threw = true;
+    try {
+      outcome = await attempt();
+      threw = false;
     } finally {
-      await removeWorktree(base.dir, wt.dir, { signal: parent.signal }).catch(() => {});
+      if (threw) parent.log(`kept the branch ${wt.branch}: the step threw before its work could land`, 'warn');
+      discarded = await closeFork(parent, base.dir, wt, threw);
     }
+    return discarded ? { ...outcome, discarded: [discarded] } : outcome;
   };
 }
