@@ -1,7 +1,7 @@
 import { finalResultText } from '@obversa/api';
 import { devin } from '@obversa/engine-devin-cli';
 
-// Without a model, Devin runs the default model from your own Devin settings.
+// Without a model, Devin runs its own default model, or the one your Devin settings choose with clean: false.
 const seat = devin();
 
 const result = await seat.engine.run({

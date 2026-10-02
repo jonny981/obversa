@@ -39,6 +39,8 @@ import {
 
 const DIAGNOSTIC_MAX = 700;
 const DIAGNOSTIC_HEAD = 180;
+/** Whether a run leaves out the person's own setup when `clean` is not set. */
+const CLEAN_BY_DEFAULT = true;
 
 export interface CodexEngineOptions {
   readonly defaultModel?: string;
@@ -53,11 +55,19 @@ export interface CodexEngineOptions {
     | 'plan'
     | 'dontAsk'
     | 'auto';
+  /**
+   * Run without the person's own `config.toml` (their settings, MCP servers
+   * and plugins) and their `AGENTS.md` in the Codex home folder. The
+   * repository's instruction files still apply, and the run keeps the
+   * person's login. On by default; `false` runs on the person's own setup.
+   */
+  readonly clean?: boolean;
 }
 
 export interface CodexSeatOptions {
   readonly sandbox?: CodexEngineOptions['sandbox'];
   readonly approvalPolicy?: CodexEngineOptions['approvalPolicy'];
+  readonly clean?: boolean;
 }
 
 export interface CodexSeat {
@@ -79,6 +89,7 @@ export function codex(model: string, options: CodexSeatOptions = {}): CodexSeat 
       defaultModel: model,
       sandbox: options.sandbox,
       approvalPolicy: options.approvalPolicy ?? 'never',
+      ...(options.clean === undefined ? {} : { clean: options.clean }),
     }),
     identity: {
       adapter: 'codex',
@@ -190,6 +201,7 @@ export function buildCodexArgs(
     'never',
     '--json',
   ];
+  if (opts.clean ?? CLEAN_BY_DEFAULT) args.push('--ignore-user-config');
 
   if (opts.permissionMode === 'bypassPermissions') {
     args.push('--dangerously-bypass-approvals-and-sandbox');

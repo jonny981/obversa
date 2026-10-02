@@ -796,8 +796,9 @@ async function main() {
       name: 'obversa-packed-consumer-proof',
       private: true,
       type: 'module',
-      // The Mastra engine takes Mastra as a peer: a project installs both.
-      dependencies: { ...dependencies, '@mastra/core': '1.74.0' },
+      // The Mastra engine takes Mastra as a peer, and the OpenAI Agents engine
+      // takes the OpenAI Agents SDK, which takes zod: a project installs each.
+      dependencies: { ...dependencies, '@mastra/core': '1.74.0', '@openai/agents': '0.18.0', zod: '4.4.3' },
       devDependencies: {
         '@types/node': '22.12.0',
         tsx: '4.22.4',
@@ -866,6 +867,8 @@ async function main() {
     await copyFile(join(root, 'examples', 'judge-stops-the-loop.proof.ts'), join(consumerDirectory, 'judge-stops-the-loop.proof.ts'));
     await copyFile(join(root, 'examples', 'engine-mastra.ts'), join(consumerDirectory, 'engine-mastra.ts'));
     await copyFile(join(root, 'examples', 'engine-mastra.proof.ts'), join(consumerDirectory, 'engine-mastra.proof.ts'));
+    await copyFile(join(root, 'examples', 'engine-openai-agents.ts'), join(consumerDirectory, 'engine-openai-agents.ts'));
+    await copyFile(join(root, 'examples', 'engine-openai-agents.proof.ts'), join(consumerDirectory, 'engine-openai-agents.proof.ts'));
     await copyFile(join(root, 'examples', 'human-feedback.ts'), join(consumerDirectory, 'human-feedback.ts'));
     await copyFile(join(root, 'examples', 'human-feedback.proof.ts'), join(consumerDirectory, 'human-feedback.proof.ts'));
     await cp(join(root, 'examples', 'human-feedback'), join(consumerDirectory, 'human-feedback'), { recursive: true });
@@ -951,6 +954,10 @@ async function main() {
       status: 'pass', drafts: 3, feedbackRounds: 2, explicitApproval: true,
     });
     assert.deepEqual(JSON.parse(run(process.execPath, ['dist/engine-mastra.proof.js'], { cwd: consumerDirectory })), {
+      status: 'pass', writerRuns: 2, readerRuns: 2, kickbacks: 1,
+      judgeReasons: ['the judge chose holds'], stop: 'the judge chose holds', mode: 'compiled-from-dist',
+    });
+    assert.deepEqual(JSON.parse(run(process.execPath, ['dist/engine-openai-agents.proof.js'], { cwd: consumerDirectory })), {
       status: 'pass', writerRuns: 2, readerRuns: 2, kickbacks: 1,
       judgeReasons: ['the judge chose holds'], stop: 'the judge chose holds', mode: 'compiled-from-dist',
     });

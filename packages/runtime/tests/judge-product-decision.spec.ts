@@ -72,7 +72,36 @@ describe('the judge can request a product decision', () => {
   });
 
   describe.each(['workflow', 'dag'] as const)('%s caller', (kind) => {
-    it.each(['holds', 'over_polishing', 'not_converging', 'continue'])('returns straight to the judge after an answer, then applies %s', async (ruling) => {
+    it('sends one answer to the builder before the judge is asked again, even when the judge always asks', async () => {
+      const fixture = await setup();
+      // A workflow stage's cap of 3 allows three writer rounds; a dag's
+      // kickback cap of 2 allows the first run plus two kickbacks.
+      const scenario = { choices: ['product_decision'], cap: kind === 'workflow' ? 3 : 2 };
+      expect(await worker(kind, fixture, scenario, false)).toMatchObject({ status: 'paused' });
+      const [first] = await fixture.callbacks.listPending();
+      await answer(fixture.callbacks, first!, 'Write for new users.');
+      expect(await worker(kind, fixture, scenario, true)).toMatchObject({ status: 'paused' });
+      expect(choices(fixture.cwd)).toEqual(['writer', 'reviewer', 'judge', 'writer', 'reviewer', 'judge']);
+      const builder = productCalls(fixture.cwd)[3]!.prompt!;
+      expect(builder).toContain("A person made a product decision");
+      expect(builder).toContain('"Write for new users."');
+      expect(builder).toContain('The page must choose one audience.');
+      expect(builder).toContain('"audience":"Write for new users."');
+      const [second] = await fixture.callbacks.listPending();
+      expect(second!.requestId).not.toBe(first!.requestId);
+      const states = judgeStates(fixture.cwd);
+      expect(states[1].round).toBe(states[0].round + 1);
+      expect(states[1].productFeedback).toMatchObject([{ feedback: { audience: 'Write for new users.' }, prompt: 'Write for new users.' }]);
+      await answer(fixture.callbacks, second!, 'Assume they have no account yet.');
+      expect(await worker(kind, fixture, scenario, true)).not.toMatchObject({ status: 'paused' });
+      expect(await fixture.callbacks.listPending()).toEqual([]);
+      // The answer reaches the writer in the last round the cap allows. A
+      // workflow stage judges that round's review too, without asking anyone.
+      expect(choices(fixture.cwd)).toEqual(['writer', 'reviewer', 'judge', 'writer', 'reviewer', 'judge', 'writer', 'reviewer', ...(kind === 'workflow' ? ['judge'] : [])]);
+      expect(productCalls(fixture.cwd)[6]!.prompt).toContain('"Assume they have no account yet."');
+    }, 30_000);
+
+    it.each(['holds', 'over_polishing', 'not_converging', 'continue'])('sends the answer to the builder, reviews and judges the result, then applies %s', async (ruling) => {
       const fixture = await setup();
       const scenario = { choices: ['product_decision', ruling, 'holds'], cap: 3 };
       expect(await worker(kind, fixture, scenario, false)).toMatchObject({ status: 'paused' });
@@ -87,35 +116,19 @@ describe('the judge can request a product decision', () => {
       await answer(fixture.callbacks, request!, 'Write for new users.');
       const outcome = await worker(kind, fixture, scenario, true);
       expect(outcome).toMatchObject({ status: ruling === 'not_converging' ? 'fail' : 'pass' });
-      expect(choices(fixture.cwd).slice(0, 4)).toEqual(['writer', 'reviewer', 'judge', 'judge']);
+      expect(choices(fixture.cwd).slice(0, 6)).toEqual(['writer', 'reviewer', 'judge', 'writer', 'reviewer', 'judge']);
+      expect(productCalls(fixture.cwd)[3]!.prompt).toContain('"Write for new users."');
       const states = judgeStates(fixture.cwd);
-      expect(states[1].latestFindings).toEqual(states[0].latestFindings);
-      expect(states[1].round).toBe(states[0].round);
+      expect(states[1].round).toBe(states[0].round + 1);
+      expect(states[1].rounds).toHaveLength(1);
       expect(states[1].productFeedback).toMatchObject([{ feedback: { audience: 'Write for new users.' }, prompt: 'Write for new users.' }]);
-      expect(choices(fixture.cwd).filter((call) => call === 'writer')).toHaveLength(ruling === 'continue' ? 2 : 1);
+      expect(choices(fixture.cwd).filter((call) => call === 'writer')).toHaveLength(ruling === 'continue' ? 3 : 2);
       if (kind === 'dag') expect(choices(fixture.cwd).filter((call) => call === 'downstream')).toHaveLength(ruling === 'not_converging' ? 0 : 1);
     }, 30_000);
 
-    it('asks a fresh question when the judge needs another answer and preserves the answer history', async () => {
+    it('counts the answered round against the cap and keeps review history across the pause', async () => {
       const fixture = await setup();
-      const scenario = { choices: ['product_decision', 'product_decision', 'holds'], cap: 3 };
-      expect(await worker(kind, fixture, scenario, false)).toMatchObject({ status: 'paused' });
-      const [first] = await fixture.callbacks.listPending();
-      await answer(fixture.callbacks, first!, 'Write for new users.');
-      expect(await worker(kind, fixture, scenario, true)).toMatchObject({ status: 'paused' });
-      const [second] = await fixture.callbacks.listPending();
-      expect(second!.requestId).not.toBe(first!.requestId);
-      expect(choices(fixture.cwd)).toEqual(['writer', 'reviewer', 'judge', 'judge']);
-      expect(await worker(kind, fixture, scenario, true)).toMatchObject({ status: 'paused' });
-      expect(choices(fixture.cwd)).toEqual(['writer', 'reviewer', 'judge', 'judge']);
-      await answer(fixture.callbacks, second!, 'Assume they have no account yet.');
-      expect(await worker(kind, fixture, scenario, true)).toMatchObject({ status: 'pass' });
-      expect(judgeStates(fixture.cwd)[2].productFeedback).toMatchObject([{ prompt: 'Write for new users.' }, { prompt: 'Assume they have no account yet.' }]);
-    }, 30_000);
-
-    it('preserves spent revisions and review history across the pause', async () => {
-      const fixture = await setup();
-      const scenario = { choices: ['continue', 'product_decision', 'continue'], cap: 2 };
+      const scenario = { choices: ['continue', 'product_decision', 'continue'], cap: kind === 'workflow' ? 3 : 2 };
       expect(await worker(kind, fixture, scenario, false)).toMatchObject({ status: 'paused' });
       expect(choices(fixture.cwd)).toEqual(['writer', 'reviewer', 'judge', 'writer', 'reviewer', 'judge']);
       const [request] = await fixture.callbacks.listPending();
@@ -123,13 +136,33 @@ describe('the judge can request a product decision', () => {
       const outcome = await worker(kind, fixture, scenario, true) as Outcome;
       if (kind === 'workflow') expect((outcome.data as Record<string, Outcome>).write?.status).toBe('exhausted');
       else expect(outcome.status).toBe('fail');
-      expect(choices(fixture.cwd).filter((call) => call === 'writer')).toHaveLength(kind === 'workflow' ? 2 : 3);
+      // The answered round is the last one the cap allows: it runs the writer
+      // with the answer, and its failing review spends the cap.
+      expect(choices(fixture.cwd).slice(6)).toEqual(kind === 'workflow' ? ['writer', 'reviewer', 'judge'] : ['writer', 'reviewer']);
+      expect(productCalls(fixture.cwd)[6]!.prompt).toContain('"Keep the audience fixed."');
       const states = judgeStates(fixture.cwd);
-      expect(states).toHaveLength(3);
-      expect(states[2].round).toBe(2);
-      expect(states[2].cap).toBe(2);
-      expect(states[2].rounds).toEqual(states[1].rounds);
-      expect(states[2].rounds).toHaveLength(1);
+      expect(states[1].round).toBe(2);
+      expect(states[1].cap).toBe(scenario.cap);
+      expect(states[1].rounds).toHaveLength(1);
+      expect(await fixture.callbacks.listPending()).toEqual([]);
+    }, 30_000);
+
+    it('does not ask a person when no writer round remains under the cap', async () => {
+      const fixture = await setup();
+      const scenario = { choices: ['continue', 'product_decision'], cap: 2 };
+      const outcome = await worker(kind, fixture, scenario, false) as Outcome;
+      expect(choices(fixture.cwd)).toEqual(['writer', 'reviewer', 'judge', 'writer', 'reviewer', 'judge']);
+      if (kind === 'workflow') {
+        // A workflow stage's last review is judged, but no writer round is
+        // left for an answer, so the review's rejection stands.
+        expect((outcome.data as Record<string, Outcome>).write?.status).toBe('exhausted');
+        expect(await fixture.callbacks.listPending()).toEqual([]);
+      } else {
+        // A dag asks the judge only while a kickback remains, so here the
+        // person is asked, and their answer has a kickback to go to.
+        expect(outcome).toMatchObject({ status: 'paused' });
+        expect(await fixture.callbacks.listPending()).toHaveLength(1);
+      }
     }, 30_000);
 
     it('recovers the pending product question after a waiting process is killed', async () => {
@@ -141,7 +174,8 @@ describe('the judge can request a product decision', () => {
       expect((await fixture.callbacks.listPending()).map((item) => item.requestId)).toEqual([request.requestId]);
       await answer(fixture.callbacks, request, 'Use the beginner audience.');
       expect(await worker(kind, fixture, scenario, true)).toMatchObject({ status: 'pass' });
-      expect(choices(fixture.cwd).slice(0, 4)).toEqual(['writer', 'reviewer', 'judge', 'judge']);
+      expect(choices(fixture.cwd)).toEqual(['writer', 'reviewer', 'judge', 'writer', 'reviewer', 'judge', ...(kind === 'dag' ? ['downstream'] : [])]);
+      expect(productCalls(fixture.cwd)[3]!.prompt).toContain('"Use the beginner audience."');
     }, 30_000);
 
     it('does not attach an old answer to a changed definition or a different stage', async () => {

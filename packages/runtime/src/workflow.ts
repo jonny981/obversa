@@ -14,7 +14,7 @@ import { RESUME_IDENTITY } from './core/resume.js';
 import { LoopError } from './core/errors.js';
 import { loop } from './core/loop.js';
 import { kickback, reviewPanel, revisionFromOutcome } from './core/feedback.js';
-import { consultJudge, countBySeverity, hasBlockFinding, isJudge, type JudgeRound, type JudgeState } from './core/judge.js';
+import { consultJudge, countBySeverity, hasBlockFinding, isJudge, productDecisionFeedback, type JudgeRound, type JudgeState } from './core/judge.js';
 import type { ConditionInput, DagConfig, Job, JobContext, Judge, Outcome } from './core/types.js';
 import { checkpointInteraction, interactionDeclaration, hasSavedInteraction, humanReview, interactionIdentity, jsonSnapshot, outcomeSnapshot, requestInteraction, savedInteraction, type InteractionBinding, type InteractionResponse } from './core/interaction.js';
 
@@ -683,20 +683,29 @@ function judgedReview(brief: BriefSource, config: WorkflowStage, cfgJudge: Judge
       round,
       cap: cfgJudge.cap,
     };
+    // The loop re-enters after a failing review only while
+    // `ctx.iteration < cap` (its `maxReviewRestarts`); an iteration whose
+    // review did not run also counts, so this errs towards not asking.
     const result = await consultJudge(cfgJudge, state, ctx, ctx.path, {
-      identity, pending: saved !== undefined,
+      identity, pending: saved !== undefined, roundLeft: ctx.iteration < cfgJudge.cap,
       save: (questionState) => checkpointInteraction(ctx, checkpointPath, identity, jsonSnapshot({ state: questionState, panel: outcomeSnapshot(panelOutcome) })),
     });
     if ('paused' in result) return result.paused;
     checkpointInteraction(ctx, checkpointPath, identity, null);
     productFeedback = result.state.productFeedback ?? [];
-    const { decision } = result;
     history.push({
       round,
       findings,
       counts: countBySeverity(findings),
       ...(changedLines !== undefined ? { changedLines } : {}),
     });
+    // A person's answer goes back to the builder as the next round; the
+    // judge sees the result only after that round has been reviewed.
+    if ('answer' in result) return productDecisionFeedback(result.answer, findings);
+    const { decision } = result;
+    // No builder round remains for a person's answer, so the review's
+    // rejection stands and the stage stops at its cap.
+    if (decision.stop === 'product_decision') return panelOutcome;
     if (!decision.again) {
       if (decision.stop === 'fail') {
         // Not converging: another round will not fix it, so the stage stops

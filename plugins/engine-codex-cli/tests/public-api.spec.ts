@@ -49,4 +49,12 @@ describe('@obversa/engine-codex-cli', () => {
       approvalPolicy: 'never',
     });
   });
+
+  it('passes clean mode to the engine, and leaves the default to the engine', () => {
+    const opts = (seat: ReturnType<typeof codex>) =>
+      (seat.engine as unknown as { opts: CodexEngineOptions }).opts;
+
+    expect(opts(codex('gpt-5.6-luna', { clean: true })).clean).toBe(true);
+    expect(opts(codex('gpt-5.6-luna')).clean).toBeUndefined();
+  });
 });
