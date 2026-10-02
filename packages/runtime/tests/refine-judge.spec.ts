@@ -89,7 +89,7 @@ describe('refine: judge()', () => {
     expect(judgeCalls).toHaveLength(2);
     const judgeEvents = events.filter((e): e is Extract<LoopEvent, { kind: 'refine:judge' }> => e.kind === 'refine:judge');
     expect(judgeEvents).toHaveLength(2);
-    expect(judgeEvents[0]!.reason).toBe('the judge says another round is worth it');
+    expect(judgeEvents[0]!.reason).toBe('the judge chose continue');
     expect(judgeEvents[1]!.reason).toBe('the judge chose holds');
   });
 
@@ -110,6 +110,46 @@ describe('refine: judge()', () => {
     // though every one of them said "continue".
     expect(judgeCalls).toHaveLength(2);
     expect(judgeCalls.every((call) => JSON.parse(call.prompt).questions !== undefined)).toBe(true);
+  });
+
+  it('runs another round on a chosen continue even when worth_another_round is below one half, up to the cap', async () => {
+    const events: LoopEvent[] = [];
+    const { job, judgeCalls, reviewCalls } = scriptedTeam({
+      reviewerReplies: [REVISE()],
+      judgeReplies: [{
+        holds: { noul: 0.2 },
+        worth_doing: { noul: 0.8 },
+        worth_another_round: { noul: 0.49 },
+        stop_reason: { choice: 'continue' },
+      }],
+      cap: 3,
+    });
+    const result = await runTeam(job, events);
+    const stageOutcome = (result.outcome.data as Record<string, Outcome>).write;
+    expect(stageOutcome?.status).toBe('exhausted');
+    // A cap of 3 is three rounds in all, the first draft included. The old
+    // routing stopped after the first round, on worth_another_round alone.
+    expect(reviewCalls).toHaveLength(3);
+    expect(judgeCalls).toHaveLength(3);
+    const judgeEvents = events.filter((e): e is Extract<LoopEvent, { kind: 'refine:judge' }> => e.kind === 'refine:judge');
+    expect(judgeEvents.map((e) => e.route)).toEqual(['again', 'again', 'again']);
+    expect(judgeEvents[0]).toMatchObject({ reason: 'the judge chose continue', rule: 'stop_reason: continue' });
+    expect(judgeEvents[0]!.status).toBeUndefined();
+  });
+
+  it('the judge event says the route, the rule and the status a stop gives the node', async () => {
+    for (const [reply, rule, status] of [
+      [{ stop_reason: { choice: 'holds' } }, 'stop_reason: holds', 'pass'],
+      [{ stop_reason: { choice: 'not_converging' } }, 'stop_reason: not_converging', 'fail'],
+      [{ worth_another_round: { noul: 0.3 } }, 'worth_another_round: 0.30', 'fail'],
+    ] as const) {
+      const events: LoopEvent[] = [];
+      const { job } = scriptedTeam({ reviewerReplies: [REVISE()], judgeReplies: [reply], cap: 3 });
+      await runTeam(job, events);
+      const judgeEvents = events.filter((e): e is Extract<LoopEvent, { kind: 'refine:judge' }> => e.kind === 'refine:judge');
+      expect(judgeEvents).toHaveLength(1);
+      expect(judgeEvents[0], rule).toMatchObject({ route: 'stop', rule, status });
+    }
   });
 
   it('a block finding goes back even when the judge says stop', async () => {

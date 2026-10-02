@@ -553,7 +553,7 @@ function renderEvent(event: LoopEvent, totals?: UsageTotals): string {
       return `${at}  ${event.model}: ${call}${totals ? ` (run ${runningTotal(totals)})` : ''}`;
     }
     case 'refine:judge':
-      return `${at}◆ ${event.reason}`;
+      return `${at}◆ ${event.route}${event.status ? ` as ${event.status}` : ''} on ${event.rule}: ${event.reason}`;
     case 'loop:stall':
       return `${at}⏹ stalled after ${event.report.iterations.length} no-progress iterations: ${event.report.reason}`;
     case 'limit:wait':

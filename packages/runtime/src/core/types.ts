@@ -805,14 +805,25 @@ export type LoopEvent =
     }
   | {
       // A judge's answer, between a review's verdict and the send-back: what
-      // it was asked, what it answered, and the reason it chose (or 'unknown'
-      // when its reply did not parse). Emitted whether the answer sends the
-      // work back or lets it stand.
+      // it answered and which way the runtime went. Emitted whether the
+      // answer sends the work back or lets it stand.
       kind: 'refine:judge';
       ts: number;
       path: string[];
       answers: Readonly<Record<string, JudgeAnswer>>;
       reason: string;
+      // `again` sends the work back for another round, unless the cap is
+      // spent; `stop` ends the rounds.
+      route: 'again' | 'stop';
+      // The answer that decided the route: the chosen reason
+      // (`stop_reason: continue`), the probability answer it fell back to
+      // (`worth_another_round: 0.49`), or `no clear answer`.
+      rule: string;
+      // The status a stop gives the node: `pass` when the work stands,
+      // `fail` when the review's failure stands. Absent on `again`, and on
+      // `stop_reason: product_decision`, which asks a person and then asks
+      // the judge again.
+      status?: 'pass' | 'fail';
     }
   | {
       kind: 'interaction:checkpoint';

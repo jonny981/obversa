@@ -46,7 +46,7 @@ import { mergeLock, mergeSynthesis } from './merge.js';
 import type { EnvHandle } from '../env/environment.js';
 import { LoopError } from './errors.js';
 import { revisionFromOutcome } from './feedback.js';
-import { consultJudge, countBySeverity, hasBlockFinding, isJudge, type JudgeRound, type JudgeState } from './judge.js';
+import { consultJudge, countBySeverity, hasBlockFinding, isJudge, productDecisionFeedback, type JudgeRound, type JudgeState } from './judge.js';
 import { checkpointInteraction, interactionDeclaration, interactionIdentity, jsonSnapshot, outcomeSnapshot, savedInteraction, type InteractionResponse } from './interaction.js';
 import { DEFAULT_FANOUT_CONCURRENCY } from './concurrency.js';
 import { dagResumeIdentity, resumeGuard, RESUME_IDENTITY, RESUME_STAGE_OUTCOMES } from './resume.js';
@@ -672,6 +672,7 @@ export function dag(config: DagConfig): Job {
         const cfgJudge = targetJudge(to);
         const withinBudget = perTargetBudget ? count <= limit : used < limit;
         let effectiveReason = reason;
+        let productDecision: Outcome | undefined;
         if (cfgJudge !== undefined && withinBudget && !hasBlockFinding(requestFindings)) {
           const history = judgeHistory.get(to) ?? [];
           const state: JudgeState = pending?.from === from ? pending.state : {
@@ -694,12 +695,18 @@ export function dag(config: DagConfig): Job {
           checkpointInteraction(parent, checkpointPath, identity, null);
           pending = undefined;
           productFeedback.set(to, result.state.productFeedback ?? []);
-          const { decision } = result;
           judgeHistory.set(to, [
             ...history,
             { round: count, findings: requestFindings, counts: countBySeverity(requestFindings) },
           ]);
-          if (!decision.again) {
+          if ('answer' in result) {
+            // A person's answer goes back to the target as this round's
+            // feedback; the judge sees the result only after it is reviewed.
+            productDecision = productDecisionFeedback(result.answer, requestFindings, { target: to, source: request.source ?? from });
+            effectiveReason = `${reason} (a person answered the judge's product decision)`;
+          }
+          const decision = 'decision' in result ? result.decision : undefined;
+          if (decision?.again === false) {
             emitKickback(from, to, `${reason} (${decision.reason})`, false, count, limit, decision.reason);
             if (decision.stop === 'ship') {
               // Holds or over-polishing: the work stands. `from`'s own
@@ -733,7 +740,7 @@ export function dag(config: DagConfig): Job {
             rejected.add(from);
             continue;
           }
-          effectiveReason = `${reason} (${decision.reason})`;
+          if (decision) effectiveReason = `${reason} (${decision.reason})`;
         }
 
         if (perTargetBudget ? count > limit : used >= limit) {
@@ -763,7 +770,7 @@ export function dag(config: DagConfig): Job {
           results.delete(d);
           rejected.delete(d); // a re-run earns a fresh verdict
         }
-        pendingKickback.set(to, {
+        pendingKickback.set(to, productDecision ?? {
           status: 'fail',
           summary: `Kicked back from "${from}": ${effectiveReason}`,
           revision: { ...request, reason: effectiveReason, source: request.source ?? from },

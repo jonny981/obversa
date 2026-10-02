@@ -3,11 +3,12 @@
 `@obversa/engine-claude-cli` runs Obversa engine requests through a fresh
 Claude CLI process.
 
-The plugin runs Claude Code the way you run it: with your own login, your
-own settings and the repository's instruction files, the same as every
-other Obversa engine. It adds only what the step needs, through Claude
-Code's own flags: the tools the step may use, and no MCP servers for a step
-that only reads or has no workspace.
+The plugin runs Claude Code clean by default: with your own login and the
+repository's settings and instruction files, but without your own
+settings, hooks, plugins, skills and MCP servers. Set `clean: false` to run
+it the way you run it, with your own settings too. It adds only what the
+step needs, through Claude Code's own flags: the tools the step may use,
+and no MCP servers for a step that only reads or has no workspace.
 
 ## Requirements
 

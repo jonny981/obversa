@@ -211,6 +211,7 @@
           {
             "group": "Plugins",
             "pages": [
+              "packages/engines",
               "packages/engine-claude-cli",
               "packages/engine-codex-cli",
               "packages/engine-devin-cli",
@@ -220,6 +221,7 @@
               "packages/engine-anthropic-api",
               "packages/engine-jev-api",
               "packages/engine-mastra",
+              "packages/engine-openai-agents",
               "packages/engine-eve",
               "packages/engine-langgraph",
               "packages/memory-git",

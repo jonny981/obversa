@@ -59,7 +59,7 @@ await withExample({
   const record = await recordEvents(run, 'records/backlog-groom-then-rank.jsonl');
   const judged = record.filter((event) => event.kind === 'refine:judge');
   assert.deepEqual(judged.map((event) => event.reason), [
-    'the judge says another round is worth it (0.80)',
+    'the judge chose continue',
     'the judge chose holds',
   ]);
   const rank = record.filter((event) => event.kind === 'dag:node' && event.node === 'rank' && event.phase === 'done');

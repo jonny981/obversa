@@ -54,6 +54,8 @@ export const CONSUMER_EXAMPLES = Object.freeze([
   'judge-stops-the-loop.proof.ts',
   'engine-mastra.ts',
   'engine-mastra.proof.ts',
+  'engine-openai-agents.ts',
+  'engine-openai-agents.proof.ts',
   'human-feedback.ts',
   'human-feedback.proof.ts',
   'human-feedback/workflow.ts',
@@ -141,4 +143,5 @@ export const PROOF_RUN_EXAMPLES = Object.freeze([
   { file: 'human-feedback/workflow.ts', why: 'human-feedback.proof.ts runs this workflow with scripted model replies and real callback and HTTP surface sessions' },
   { file: 'use-cases/ops/approve-the-exact-payload.ts', why: 'runs no engine; approve-the-exact-payload.proof.ts runs it offline with a stand-in for curl' },
   { file: 'engine-mastra.ts', why: 'engine-mastra.proof.ts runs it offline: the Mastra agent\'s model replays recorded turns, a stand-in plays the Codex CLI and the judge replays recorded answers' },
+  { file: 'engine-openai-agents.ts', why: 'engine-openai-agents.proof.ts runs it offline: the agent\'s model replays recorded turns, a stand-in plays the Codex CLI and the judge replays recorded answers' },
 ]);

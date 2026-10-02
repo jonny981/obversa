@@ -68,8 +68,32 @@ describe('judgeDecision', () => {
       again: false,
       stop: 'ship',
       reason: 'the judge chose over_polishing',
+      rule: 'stop_reason: over_polishing',
     });
     expect(judgeDecision({ stop_reason: { choice: 'continue' } }).again).toBe(true);
+  });
+
+  it('runs another round on a chosen continue, whatever the probability answers say', () => {
+    // The probability answers sit flat across rounds; the chosen reason is the
+    // one that moves, so a chosen continue is the judge's answer.
+    expect(judgeDecision({
+      stop_reason: { choice: 'continue' },
+      worth_another_round: { noul: 0.49 },
+    })).toEqual({ again: true, reason: 'the judge chose continue', rule: 'stop_reason: continue' });
+    expect(judgeDecision({
+      stop_reason: { choice: 'continue' },
+      holds: { noul: 0.9 },
+      worth_doing: { noul: 0.1 },
+    }).again).toBe(true);
+  });
+
+  it('names the rule that decided it', () => {
+    expect(judgeDecision({ stop_reason: { choice: 'holds' }, holds: { noul: 0.1 } }).rule).toBe('stop_reason: holds');
+    expect(judgeDecision({ holds: { noul: 0.9 } }).rule).toBe('holds: 0.90');
+    expect(judgeDecision({ worth_doing: { noul: 0.1 } }).rule).toBe('worth_doing: 0.10');
+    expect(judgeDecision({ worth_another_round: { noul: 0.49 } }).rule).toBe('worth_another_round: 0.49');
+    expect(judgeDecision({ worth_another_round: { noul: 0.8 } }).rule).toBe('worth_another_round: 0.80');
+    expect(judgeDecision({}).rule).toBe('no clear answer');
   });
 
   it('ships on holds or over_polishing, fails on not_converging', () => {
@@ -78,6 +102,7 @@ describe('judgeDecision', () => {
       again: false,
       stop: 'ship',
       reason: 'the judge chose holds',
+      rule: 'stop_reason: holds',
     });
     expect(judgeDecision({ stop_reason: { choice: 'over_polishing' } }).stop).toBe('ship');
     // not_converging: another round will not fix it, the requesting side's own
@@ -86,6 +111,7 @@ describe('judgeDecision', () => {
       again: false,
       stop: 'fail',
       reason: 'the judge chose not_converging',
+      rule: 'stop_reason: not_converging',
     });
   });
 
@@ -94,11 +120,13 @@ describe('judgeDecision', () => {
       again: false,
       stop: 'ship',
       reason: 'the judge says it holds (0.90)',
+      rule: 'holds: 0.90',
     });
     expect(judgeDecision({ worth_doing: { noul: 0.1 } })).toEqual({
       again: false,
       stop: 'ship',
       reason: 'the judge says the findings are not worth doing (0.10)',
+      rule: 'worth_doing: 0.10',
     });
     // worth_another_round alone cannot tell over-polishing from a stall (its
     // own criteria blend both), so the conservative fallback is fail, not ship.
@@ -106,13 +134,14 @@ describe('judgeDecision', () => {
       again: false,
       stop: 'fail',
       reason: 'the judge says another round is not worth it (0.10)',
+      rule: 'worth_another_round: 0.10',
     });
   });
 
   it('defaults to another round when nothing in the reply resolves a stop', () => {
     // An empty answers object is what an unreadable judge reply becomes
     // (askJudge's own JSON.parse failure path), and it must not force a stop.
-    expect(judgeDecision({})).toEqual({ again: true, reason: 'the judge says another round is worth it' });
+    expect(judgeDecision({})).toEqual({ again: true, reason: 'the judge says another round is worth it', rule: 'no clear answer' });
   });
 
   it('stops on any choice other than "continue", not just the four documented ones, but only ships on holds or over_polishing', () => {
@@ -124,6 +153,7 @@ describe('judgeDecision', () => {
       again: false,
       stop: 'fail',
       reason: 'the judge chose converged',
+      rule: 'stop_reason: converged',
     });
   });
 
@@ -132,6 +162,7 @@ describe('judgeDecision', () => {
       again: false,
       stop: 'ship',
       reason: 'the judge says it holds (0.70)',
+      rule: 'holds: 0.70',
     });
   });
 });
