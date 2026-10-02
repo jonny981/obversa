@@ -530,7 +530,7 @@ describe('a judge as a dag() maxKickbacks budget', () => {
     expect(outcome.data).toMatchObject({ review: { status: 'pass', summary: 'the judge chose holds' } });
     const kickbacks = kbEvents(events);
     expect(kickbacks).toHaveLength(2);
-    expect(kickbacks[0]).toMatchObject({ accepted: true, reason: expect.stringContaining('the judge says another round is worth it') });
+    expect(kickbacks[0]).toMatchObject({ accepted: true, reason: expect.stringContaining('the judge chose continue') });
     expect(kickbacks[1]).toMatchObject({ accepted: false, note: 'the judge chose holds' });
     const judgeEvents = events.filter((e): e is Extract<LoopEvent, { kind: 'refine:judge' }> => e.kind === 'refine:judge');
     expect(judgeEvents).toHaveLength(2);

@@ -59,9 +59,12 @@ The brief tells the reader to tag each finding `block`, `should-fix` or
 `nice-to-have`. A block is a false claim or a sentence a person would not
 understand. A block always goes back to the writer, and the judge is not
 asked. For any other finding, the judge's chosen reason decides whether the
-page goes back or stands. The cap is the last word: with a cap of 3 the
-writer gets at most three more rounds after its first draft, whatever
-the judge says.
+page goes back or stands. When the judge chooses `continue`, the page goes
+back, even if its other answers lean toward a stop. Those other answers
+decide only when the reply has no chosen reason, such as from a question
+set without `stop_reason`. The cap is the last word: with a cap of 3,
+each run of the stage gives the writer at most three rounds with the
+reader, its first draft included, whatever the judge says.
 
 The approval is a plain function. It reads the page, puts its sha256 in the
 question and sends a person's no back to the writer.
@@ -122,8 +125,10 @@ printed:
 Two rounds: the first reader pass found two blocks, so the page went back
 without asking the judge. The second found one `nice-to-have`, and the
 judge chose `holds`. The record holds each round's findings and the judge's
-answers. With `JUDGE=jev`, and `TYPESAFE_ENDPOINT` and `TYPESAFE_API_KEY`
-in the environment, the same file asks Jev instead of replaying.
+answers. Each answer also says whether the page went back or stopped, which
+answer decided that, and for a stop, whether the step passed or failed.
+With `JUDGE=jev`, and `TYPESAFE_ENDPOINT` and `TYPESAFE_API_KEY` in the
+environment, the same file asks Jev instead of replaying.
 
 ## Next steps
 

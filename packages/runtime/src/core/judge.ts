@@ -137,17 +137,25 @@ export interface JudgeDecision {
    * `again` is true.
    */
   readonly stop?: 'ship' | 'fail' | 'product_decision';
+  /**
+   * The answer that decided the route: the chosen reason (`stop_reason:
+   * continue`), the probability answer it fell back to
+   * (`worth_another_round: 0.49`), or `no clear answer`.
+   */
+  readonly rule: string;
 }
 
 /**
- * Route on the judge's answers. The chosen `stop_reason` is read first: in
- * use it moves with the rounds while the probability answers stay flat, so it
- * is the answer that discriminates. A clear yes or no from `holds`,
- * `worth_doing` or `worth_another_round` is the fallback when the choice does
- * not parse. Neither the cap nor a block finding is checked
- * here: the caller enforces the cap itself (a loop's own `maxReviewRestarts`,
- * or a dag's own kickback budget), and a block finding never reaches this
- * function, it always goes back without asking the judge.
+ * Route on the judge's answers. The chosen `stop_reason` decides when there is
+ * one: in use it moves with the rounds while the probability answers stay
+ * flat, so it is the answer that discriminates. A chosen `continue` runs
+ * another round whatever the probability answers say. A clear yes or no from
+ * `holds`, `worth_doing` or `worth_another_round` decides only when there is
+ * no choice: a question set without `stop_reason`, or a reply that did not
+ * parse. Neither the cap nor a block finding is checked here: the caller
+ * enforces the cap itself (a loop's own `maxReviewRestarts`, or a dag's own
+ * kickback budget), and a block finding never reaches this function, it
+ * always goes back without asking the judge.
  *
  * `product_decision` pauses for rich feedback and another judgment of the
  * same work. For a terminal stop, `holds` and `over_polishing` say the work
@@ -164,26 +172,26 @@ export function judgeDecision(answers: Readonly<Record<string, JudgeAnswer>>): J
   const worth = answers.worth_another_round?.noul ?? answers.worth_another_round?.probability;
   const doing = answers.worth_doing?.noul ?? answers.worth_doing?.probability;
   const holds = answers.holds?.noul ?? answers.holds?.probability;
-  const reason = answers.stop_reason?.choice ?? 'unknown';
-  if (reason === 'product_decision') return { again: false, stop: 'product_decision', reason: 'the judge requested a product decision' };
-  if (reason === 'holds' || reason === 'over_polishing') {
-    return { again: false, stop: 'ship', reason: `the judge chose ${reason}` };
-  }
-  if (reason !== 'unknown' && reason !== 'continue') {
-    return { again: false, stop: 'fail', reason: `the judge chose ${reason}` };
+  const choice = answers.stop_reason?.choice;
+  if (choice !== undefined) {
+    const rule = `stop_reason: ${choice}`;
+    if (choice === 'continue') return { again: true, reason: 'the judge chose continue', rule };
+    if (choice === 'product_decision') return { again: false, stop: 'product_decision', reason: 'the judge requested a product decision', rule };
+    return { again: false, stop: choice === 'holds' || choice === 'over_polishing' ? 'ship' : 'fail', reason: `the judge chose ${choice}`, rule };
   }
   if (typeof holds === 'number' && holds >= 0.5) {
-    return { again: false, stop: 'ship', reason: `the judge says it holds (${holds.toFixed(2)})` };
+    return { again: false, stop: 'ship', reason: `the judge says it holds (${holds.toFixed(2)})`, rule: `holds: ${holds.toFixed(2)}` };
   }
   if (typeof doing === 'number' && doing < 0.5) {
-    return { again: false, stop: 'ship', reason: `the judge says the findings are not worth doing (${doing.toFixed(2)})` };
+    return { again: false, stop: 'ship', reason: `the judge says the findings are not worth doing (${doing.toFixed(2)})`, rule: `worth_doing: ${doing.toFixed(2)}` };
   }
   if (typeof worth === 'number' && worth < 0.5) {
-    return { again: false, stop: 'fail', reason: `the judge says another round is not worth it (${worth.toFixed(2)})` };
+    return { again: false, stop: 'fail', reason: `the judge says another round is not worth it (${worth.toFixed(2)})`, rule: `worth_another_round: ${worth.toFixed(2)}` };
   }
   return {
     again: true,
     reason: `the judge says another round is worth it${typeof worth === 'number' ? ` (${worth.toFixed(2)})` : ''}`,
+    rule: typeof worth === 'number' ? `worth_another_round: ${worth.toFixed(2)}` : 'no clear answer',
   };
 }
 
@@ -193,8 +201,8 @@ export function judgeDecision(answers: Readonly<Record<string, JudgeAnswer>>): J
  * judge engine's own `{ [question]: JudgeAnswer }` shape, and emits
  * `refine:judge` so a person reading the record sees what it answered and
  * why. A reply that fails to parse becomes an empty answers object ,
- * `judgeDecision` reads that as `stop_reason: 'unknown'`, which is not a
- * chosen stop, so the caller's own cap is what ends the rounds.
+ * `judgeDecision` reads that as no clear answer, which runs another round,
+ * so the caller's own cap is what ends the rounds.
  */
 export async function askJudge(
   cfg: Judge,
@@ -220,11 +228,15 @@ export async function askJudge(
         answers = parsed as Record<string, JudgeAnswer>;
       }
     } catch {
-      // Left empty: an unreadable answer routes as "unknown", not a crash.
+      // Left empty: an unreadable answer routes as no clear answer, not a crash.
     }
   }
   const decision = judgeDecision(answers);
-  ctx.emit({ kind: 'refine:judge', ts: Date.now(), path: [...path], answers, reason: decision.reason });
+  const status = decision.stop === 'ship' ? 'pass' : decision.stop === 'fail' ? 'fail' : undefined;
+  ctx.emit({
+    kind: 'refine:judge', ts: Date.now(), path: [...path], answers, reason: decision.reason,
+    route: decision.again ? 'again' : 'stop', rule: decision.rule, ...(status ? { status } : {}),
+  });
   return { answers, decision };
 }
 
