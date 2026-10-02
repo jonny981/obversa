@@ -22,9 +22,11 @@ import { devin } from '@obversa/engine-devin-cli';
 const seat = devin('swe-2-max');
 ```
 
-Without a model, `devin()` runs the default model from your Devin settings.
+Without a model, Devin runs its own default model, or the one your Devin settings choose with `clean: false`.
 
-Devin runs with your own environment, Devin login and Devin settings. A
+Devin runs clean by default: with your own environment and Devin login,
+but with an empty config file in place of your Devin settings. Set
+`clean: false` to run with your Devin settings too. A
 read-only step runs with `--permission-mode auto`, and a step that may write
 runs with `--permission-mode accept-edits`. Devin has no mode without a
 folder and no flag for a list of named tools. The plugin passes

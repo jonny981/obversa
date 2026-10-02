@@ -30,6 +30,7 @@ export type EngineConformanceScenario =
   | 'transient'
   | 'timeout'
   | 'invalid-config'
+  | 'clean-mode'
   | 'read-access'
   | 'workspace-none'
   | 'workspace-read'
@@ -37,6 +38,18 @@ export type EngineConformanceScenario =
 
 type WorkspaceMode = NonNullable<AgentRequest['workspaceMode']>;
 type FeatureScenario = Exclude<EngineConformanceScenario, 'read-access' | `workspace-${WorkspaceMode}`>;
+
+interface WorkspaceObservation {
+  readonly modelCalls: number;
+  readonly canRead: boolean;
+  readonly canWrite: boolean;
+  /**
+   * False when the last run passed the engine's clean-mode switches, true
+   * when it ran on the person's own setup. Required unless the fixture
+   * declares `clean-mode` unsupported.
+   */
+  readonly ownSetup?: boolean;
+}
 
 export interface EngineConformanceFixture {
   readonly request: AgentRequest;
@@ -51,15 +64,7 @@ export interface EngineConformanceFixture {
       readonly effective?: EngineSelectionRecord;
     }>;
     /** Observe actual process arguments or provider options, never the input request. */
-    observe(): {
-      readonly modelCalls: number;
-      readonly canRead: boolean;
-      readonly canWrite: boolean;
-    } | Promise<{
-      readonly modelCalls: number;
-      readonly canRead: boolean;
-      readonly canWrite: boolean;
-    }>;
+    observe(): WorkspaceObservation | Promise<WorkspaceObservation>;
   };
   /** Parse a final assistant part when the backend has no native schema mode. */
   readonly parseStructuredResult?: (
@@ -73,6 +78,12 @@ export interface EngineConformanceFixture {
    * the reported model, so two seats on one model cannot pass as two families.
    */
   readonly identityFromModel?: boolean;
+  /**
+   * `clean-mode` asks for the engine with its `clean` option on, and
+   * `workspace-read` with it off (`clean: false`, since clean is the
+   * default). An engine without a clean mode declares `clean-mode` in
+   * `unsupported`.
+   */
   open(scenario: EngineConformanceScenario): Engine | Promise<Engine>;
 }
 
@@ -458,6 +469,34 @@ export async function runEngineConformance(
           'Workspace result changed the effective engine identity or capabilities.');
       },
     })),
+    {
+      name: 'clean mode leaves out the person\'s setup and stays read-only',
+      scenario: 'clean-mode',
+      async run() {
+        const probe = fixture.workspace?.modes.read;
+        check(probe?.outcome === 'supported' && typeof fixture.workspace.observe === 'function',
+          'Clean mode is checked through a supported read workspace and its observer.');
+        const runRead = async (scenario: 'workspace-read' | 'clean-mode') => {
+          const engine = await fixture.open(scenario);
+          const result = validateAgentResult(await engine.run(
+            { ...probe.request, workspaceMode: 'read' }, () => {}, new AbortController().signal,
+          ));
+          const observed = await fixture.workspace.observe();
+          check(observed.modelCalls > 0, 'Clean mode fixture never reached the model boundary.');
+          check(typeof observed.ownSetup === 'boolean',
+            'Clean mode requires the observer to report ownSetup.');
+          check(observed.canRead && !observed.canWrite,
+            `Read workspace exposed incorrect access ${scenario === 'clean-mode' ? 'in' : 'outside'} clean mode.`);
+          check(isDeepStrictEqual(result.requested, probe.requested ?? fixture.requested),
+            'Clean mode result changed the requested engine identity or capabilities.');
+          return observed.ownSetup;
+        };
+        check(await runRead('workspace-read') === true,
+          'Without clean mode the engine did not load the person\'s own setup.');
+        check(await runRead('clean-mode') === false,
+          'Clean mode still loaded the person\'s own setup.');
+      },
+    },
   ];
 
   const failures: EngineConformanceFailure[] = [];

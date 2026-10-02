@@ -37,6 +37,31 @@ describe('Agent SDK workspace access', () => {
     }
   });
 
+  it.each([
+    { clean: true, settingSources: ['project'], strictMcpConfig: true },
+    { clean: false, settingSources: ['user', 'project', 'local'], strictMcpConfig: undefined },
+  ] as const)('loads the setup sources for clean: $clean', async ({ clean, settingSources, strictMcpConfig }) => {
+    sdk.query.mockClear();
+    await new AgentSdkEngine({ clean }).run({
+      prompt: 'Inspect the supplied work.', tools: ['Read', 'Edit'], workspaceMode: 'write',
+    }, () => {}, new AbortController().signal);
+
+    const options = (sdk.query.mock.calls[0]?.[0] as { options: Record<string, unknown> }).options;
+    expect(options.settingSources).toEqual(settingSources);
+    expect(options.strictMcpConfig).toBe(strictMcpConfig);
+  });
+
+  it('runs clean by default', async () => {
+    sdk.query.mockClear();
+    await new AgentSdkEngine({}).run({
+      prompt: 'Inspect the supplied work.', tools: ['Read', 'Edit'], workspaceMode: 'write',
+    }, () => {}, new AbortController().signal);
+
+    const options = (sdk.query.mock.calls[0]?.[0] as { options: Record<string, unknown> }).options;
+    expect(options.settingSources).toEqual(['project']);
+    expect(options.strictMcpConfig).toBe(true);
+  });
+
   it('refuses a read request with no declared reading tool', () => {
     expect(() => agentSdkToolOptions({
       tools: ['Edit', 'Bash'],

@@ -46,17 +46,22 @@ it.each([0, 2_500])('runs the full kit through the Codex process boundary (struc
           const args = models.at(-1)?.args ?? [];
           const sandbox = args[args.indexOf('-s') + 1];
           expect(args).not.toContain('--dangerously-bypass-approvals-and-sandbox');
-          return { modelCalls: models.length, canRead: sandbox === 'read-only' || sandbox === 'workspace-write', canWrite: sandbox === 'workspace-write' };
+          return {
+            modelCalls: models.length,
+            canRead: sandbox === 'read-only' || sandbox === 'workspace-write',
+            canWrite: sandbox === 'workspace-write',
+            ownSetup: !args.includes('--ignore-user-config'),
+          };
         },
       },
       open(scenario) {
         writeFileSync(calls, '');
         env.OBVERSA_ENGINE_CONFORMANCE_SCENARIO = scenario;
         env.OBVERSA_TEST_CODEX_BOOT_DELAY_MS = String(scenario === 'structured-result' ? bootDelayMs : 0);
-        return new CodexEngine({ cliBinary: scenario === 'missing-cli' ? join(dir, 'absent') : bin });
+        return new CodexEngine({ cliBinary: scenario === 'missing-cli' ? join(dir, 'absent') : bin, clean: scenario === 'clean-mode' });
       },
     });
-    expect(report).toMatchObject({ ok: true, cases: 17, failures: [] });
+    expect(report).toMatchObject({ ok: true, cases: 18, failures: [] });
     expect(report.unsupported.map((item) => item.case)).toEqual(['ordered-parts', 'tool-events', 'cancellation']);
   } finally {
     rmSync(dir, { recursive: true, force: true });

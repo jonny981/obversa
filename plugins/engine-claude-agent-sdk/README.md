@@ -1,11 +1,12 @@
 # @obversa/engine-claude-agent-sdk
 
 `@obversa/engine-claude-agent-sdk` runs Obversa engine requests through the Claude
-Agent SDK. It uses your own Claude Code login, and it loads the same
-settings Claude Code loads (`user`, `project` and `local`), the same as
-every other Obversa engine. It adds only what the step needs: the tools the
-step may use, and no MCP servers for a step that only reads or has no
-workspace.
+Agent SDK. It uses your own Claude Code login, and it runs clean by
+default: it loads only the repository's settings (`project`), without your
+own settings, hooks, plugins, skills and MCP servers. Set `clean: false` to
+load the same settings Claude Code loads (`user`, `project` and `local`).
+It adds only what the step needs: the tools the step may use, and no MCP
+servers for a step that only reads or has no workspace.
 
 It is tested with Claude Agent SDK 0.3.241, the version it depends on.
 

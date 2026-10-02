@@ -123,12 +123,15 @@ plugin pins the executable it expects. Each plugin records the identity it
 serves, with the provider and the model family, so that a review panel can
 ask for a second opinion from a different provider.
 
-An engine runs its CLI the way the person runs it: with their own login,
-their own settings and the repository's instruction files. The plugin adds
+An engine runs its CLI clean by default: with the person's own login and
+the repository's own setup (its instruction files and project config), and
+without the person's own user-level settings, hooks, plugins, skills and
+MCP servers, so a workflow behaves the same for everyone who runs it.
+`clean: false` runs the CLI exactly as the person runs it. The plugin adds
 only what the step needs, through the CLI's own flags: the tools the step
 may use, read-only enforcement where the step only reads, and one fresh
-process per attempt. It never points the CLI at an empty home folder to
-hide the person's setup.
+process per attempt. It never copies the person's login. A CLI that cannot
+run clean says so on its page and in the engines table.
 
 Start from an existing one. `plugins/engine-grok-cli` is a good size.
 Read its README and its tests before you write yours.
