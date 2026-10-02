@@ -37,15 +37,27 @@ import { readDevinExport, type DevinConversation } from './atif.js';
 
 const ADAPTER = 'devin-cli';
 const PROVIDER = 'cognition';
-/** The model a seat records when it leaves the choice to the person's Devin settings. */
+/** The model a seat records when it leaves the choice of model to Devin. */
 const DEFAULT_MODEL = 'default';
 const DIAGNOSTIC_MAX = 700;
+/** Whether a run leaves out the person's own setup when `clean` is not set. */
+const CLEAN_BY_DEFAULT = true;
+/** The settings a clean-mode run reads in place of the person's Devin config file. */
+const CLEAN_CONFIG = '{}\n';
 
 export interface DevinCliEngineOptions {
-  /** Model for requests that name none. Without one, Devin uses the person's default. */
+  /** Model for requests that name none. Without a model, Devin runs its own default model, or the one your Devin settings choose with `clean: false`. */
   readonly defaultModel?: string;
   /** Absolute path or bare command name; `devin` by default. */
   readonly cliBinary?: string;
+  /**
+   * Run with an empty Devin config file in place of the person's own
+   * `~/.config/devin/config.json`. Their own MCP servers and skills still
+   * load, because Devin has no switch to leave them out. The repository's
+   * instruction files still apply, and the run keeps the person's login.
+   * On by default; `false` runs on the person's own setup.
+   */
+  readonly clean?: boolean;
 }
 
 export interface DevinSeat {
@@ -59,15 +71,22 @@ export interface DevinSeat {
   };
 }
 
+export interface DevinSeatOptions {
+  readonly clean?: boolean;
+}
+
 /**
  * Create the Devin seat used by declarative team workflows. Without a model,
- * Devin runs the default model from the person's own Devin settings and the
- * seat records the model as `default`.
+ * Devin runs its own default model, or the one your Devin settings choose with
+ * `clean: false`, and the seat records the model as `default`.
  */
-export function devin(model?: string): DevinSeat {
+export function devin(model?: string, options: DevinSeatOptions = {}): DevinSeat {
   if (model !== undefined && !model.trim()) throw new TypeError('devin model must not be empty');
   return {
-    engine: new DevinCliEngine(model === undefined ? {} : { defaultModel: model }),
+    engine: new DevinCliEngine({
+      ...(model === undefined ? {} : { defaultModel: model }),
+      ...(options.clean === undefined ? {} : { clean: options.clean }),
+    }),
     identity: {
       adapter: ADAPTER,
       provider: PROVIDER,
@@ -95,10 +114,14 @@ function permissionMode(req: AgentRequest): 'auto' | 'accept-edits' {
 export function buildDevinArgs(
   req: AgentRequest,
   opts: DevinCliEngineOptions,
-  files: { readonly promptFile: string; readonly exportFile: string },
+  files: { readonly promptFile: string; readonly exportFile: string; readonly configFile?: string },
 ): string[] {
+  const clean = opts.clean ?? CLEAN_BY_DEFAULT;
   try {
     assertReadAccess(req);
+    if (clean && files.configFile === undefined) {
+      throw new TypeError('devin clean mode requires an empty config file');
+    }
     if (req.tools?.length === 0) {
       throw new TypeError('devin cannot turn its tools off; choose an engine that supports tools: []');
     }
@@ -121,6 +144,7 @@ export function buildDevinArgs(
     // Print mode cannot show Devin's folder trust prompt; without this flag
     // every folder the person has not opened in Devin before refuses to run.
     '--respect-workspace-trust', 'false',
+    ...(clean ? ['--config', files.configFile!] : []),
     ...(model === undefined ? [] : ['--model', model]),
   ];
 }
@@ -137,7 +161,7 @@ function requestedSelection(req: AgentRequest, opts: DevinCliEngineOptions): Eng
 }
 
 function assertDevinConfiguration(req: AgentRequest, opts: DevinCliEngineOptions): void {
-  buildDevinArgs(req, opts, { promptFile: 'prompt', exportFile: 'export' });
+  buildDevinArgs(req, opts, { promptFile: 'prompt', exportFile: 'export', configFile: 'config' });
   try {
     const env = attemptEnvironment(req) ?? {};
     const limits = {
@@ -298,6 +322,7 @@ export class DevinCliEngine implements Engine {
     const dir = mkdtempSync(join(tmpdir(), 'obversa-devin-'));
     const promptFile = join(dir, 'prompt.md');
     const exportFile = join(dir, 'conversation.json');
+    const configFile = join(dir, 'config.json');
     const env = attemptEnvironment(req);
     try {
       // Devin has no system prompt flag, so system text leads the prompt.
@@ -306,9 +331,12 @@ export class DevinCliEngine implements Engine {
         req.system ? `${req.system}\n\n---\n\n${req.prompt}` : req.prompt,
         { encoding: 'utf8', mode: 0o600 },
       );
+      if (this.opts.clean ?? CLEAN_BY_DEFAULT) {
+        writeFileSync(configFile, CLEAN_CONFIG, { encoding: 'utf8', mode: 0o600 });
+      }
       const sub = await runOwnedCommand({
         executable,
-        args: buildDevinArgs(req, this.opts, { promptFile, exportFile }),
+        args: buildDevinArgs(req, this.opts, { promptFile, exportFile, configFile }),
         cwd: req.cwd ?? process.cwd(),
         env: env ?? {},
         stdin: '',

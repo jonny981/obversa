@@ -1,7 +1,7 @@
 /** Local Git helpers used by workspace-aware jobs. */
 
 import { createHash } from 'node:crypto';
-import { mkdtempSync } from 'node:fs';
+import { mkdtempSync, rmSync } from 'node:fs';
 import { lstat, readFile, readlink, realpath } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join, relative, resolve } from 'node:path';
@@ -18,7 +18,7 @@ async function git(
   args: string[],
   { cwd, signal }: GitOpts,
   input?: string,
-): Promise<{ stdout: string; exitCode: number }> {
+): Promise<{ stdout: string; stderr: string; exitCode: number }> {
   const r = await runRuntimeProcess({
     executable: 'git',
     args,
@@ -28,6 +28,7 @@ async function git(
   });
   return {
     stdout: processText(r.stdout).replace(/\r?\n$/u, ''),
+    stderr: processText(r.stderr).trim(),
     exitCode: r.exitCode ?? 1,
   };
 }
@@ -570,7 +571,8 @@ export interface WorktreeHandle {
 /**
  * Fork an isolated worktree on a new branch from `base` (default HEAD). Each
  * concurrent writer gets its own working dir and branch, so siblings never
- * collide on files or the index.
+ * collide on files or the index. When git cannot add the worktree, the
+ * folder made for it is removed again.
  */
 export async function addWorktree(
   repoDir: string,
@@ -581,11 +583,16 @@ export async function addWorktree(
     const r = await git(
       ['worktree', 'add', '-b', opts.branch, dir, opts.base ?? 'HEAD'],
       { cwd: repoDir, signal: opts.signal },
-    );
-    if (r.exitCode !== 0)
+    ).catch((error: unknown) => {
+      rmSync(dir, { recursive: true, force: true });
+      throw error;
+    });
+    if (r.exitCode !== 0) {
+      rmSync(dir, { recursive: true, force: true });
       throw new Error(
         `git worktree add failed (exit ${r.exitCode}): ${r.stdout}`.trim(),
       );
+    }
     return { dir, branch: opts.branch };
   });
 }
@@ -596,10 +603,12 @@ export async function removeWorktree(
   dir: string,
   opts: { signal?: AbortSignal } = {},
 ): Promise<void> {
-  await withWorktreeQueue(repoDir, opts.signal, () => git(['worktree', 'remove', '--force', dir], {
+  const r = await withWorktreeQueue(repoDir, opts.signal, () => git(['worktree', 'remove', '--force', dir], {
     cwd: repoDir,
     signal: opts.signal,
   }));
+  if (r.exitCode !== 0)
+    throw new Error(`git worktree remove failed (exit ${r.exitCode}): ${r.stderr}`.trim());
 }
 
 /** True when `branch` resolves as a local branch ref. */
@@ -615,13 +624,38 @@ export async function branchExists(
   return r.exitCode === 0;
 }
 
-/** Delete a branch ref (used to clean up a merged fork branch). */
+/** Delete a branch ref (used to clean up a fork branch). */
 export async function deleteBranch(
   repoDir: string,
   branch: string,
   opts: { signal?: AbortSignal } = {},
 ): Promise<void> {
-  await git(['branch', '-D', branch], { cwd: repoDir, signal: opts.signal });
+  const r = await git(['branch', '-D', branch], { cwd: repoDir, signal: opts.signal });
+  if (r.exitCode !== 0)
+    throw new Error(`git branch -D failed (exit ${r.exitCode}): ${r.stderr}`.trim());
+}
+
+/**
+ * The sha of `branch`'s last commit when the branch holds commits that HEAD
+ * at `repoDir` does not, else undefined. A branch that cannot be read is
+ * undefined too: there is nothing to record.
+ */
+export async function unlandedTip(
+  repoDir: string,
+  branch: string,
+  opts: { signal?: AbortSignal } = {},
+): Promise<string | undefined> {
+  const tip = await git(['rev-parse', '--verify', `refs/heads/${branch}^{commit}`], {
+    cwd: repoDir,
+    signal: opts.signal,
+  });
+  if (tip.exitCode !== 0) return undefined;
+  const sha = tip.stdout.trim();
+  const landed = await git(['merge-base', '--is-ancestor', sha, 'HEAD'], {
+    cwd: repoDir,
+    signal: opts.signal,
+  });
+  return landed.exitCode === 0 ? undefined : sha;
 }
 
 export interface MergeResult {

@@ -38,8 +38,36 @@ lands the work back when the step passes.
 - **Land back.** `isolated(job)` wraps any step in that cycle: it runs the
   step in its own worktree on a fork branch and, on pass, commits what the
   step left and merges the branch back, one merge at a time across the
-  process. The worktree is removed and a cleanly merged branch is deleted,
-  so parallel steps leave nothing behind.
+  process. When the step ends, its worktree is removed and its branch
+  deleted.
+
+## What a run leaves behind
+
+Nothing, in most cases. When a step that runs in its own worktree ends, the
+run removes the worktree and deletes the step's branch. This holds for
+`isolated()`, for a `dag()` node with `isolate: true` or the dag's
+`isolation: 'worktree'`, and for each `tournament()` candidate. It holds
+when the step passes, fails, is sent back by a review, or loses a
+tournament.
+
+Three things stay:
+
+- **An interrupted attempt.** If the process stops while a step runs in its
+  worktree, the worktree and its branch stay, so a person can recover the
+  work by hand. [The record](/concepts/record) says what a resume does with
+  that step.
+- **A winner that could not merge.** If a tournament's winning candidate
+  can't merge, its branch stays so the work isn't lost. Its worktree is
+  removed.
+- **A step that threw.** If a step throws instead of returning an outcome,
+  it may have committed work that never landed, so its branch stays and the
+  run logs a warning naming it. Its worktree is removed.
+
+When the run deletes a branch that holds commits that never landed, the
+step's outcome lists the branch and its last commit in `discarded`. Until
+Git prunes that commit, `git branch <name> <sha>` brings the branch back.
+If a removal or a deletion fails, the run logs a warning, and the step's
+outcome stays the same.
 
 ## Example
 

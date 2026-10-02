@@ -98,7 +98,8 @@ export function productDecisionJob(kind: ProductCaller, cwd: string, scenario: P
     name: 'product-review',
     maxKickbacks: { [name]: refine },
     nodes: {
-      [name]: fnJob(name, async (ctx) => writer(JSON.stringify(ctx.lastReview?.revision?.findings ?? null))),
+      [name]: agentJob({ label: name, model: 'writer-mock', prompt: 'Write the page.', consumeFeedback: true,
+        engine: new MockEngine((request) => writer(request.prompt).summary) }),
       review: { needs: [name], desc: scenario.brief ?? 'Choose the audience', job: fnJob('review', async () => {
         const result = review();
         if (result.status === 'pass') return { status: 'pass' as const };

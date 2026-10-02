@@ -11,7 +11,7 @@ import {
   writeFileSync,
 } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { delimiter, dirname, join } from 'node:path';
+import { basename, delimiter, dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { setTimeout as delay } from 'node:timers/promises';
 
@@ -115,6 +115,7 @@ describe('OpenCode static admission', () => {
         ...options(executable()),
         identity: { provider: 'anthropic', modelFamily: 'opencode' },
       },
+      emptyConfig,
     )).toThrow(/model family identity opencode does not match model family claude/);
   });
 
@@ -367,6 +368,9 @@ function executable(): string {
   return target;
 }
 
+// The empty folder OpenCode reads as its config home when a run is clean.
+const emptyConfig = '/tmp/empty-config';
+
 function options(bin = executable()): OpenCodeCliEngineOptions {
   return {
     executable: bin,
@@ -515,7 +519,7 @@ function parseStructuredResult(
 describe('OpenCode CLI adapter', () => {
   it('builds one exact OpenCode 1.18.23 invocation', async () => {
     const input = request();
-    const invocation = buildOpenCodeInvocation(input, options('/bin/echo'));
+    const invocation = buildOpenCodeInvocation(input, options('/bin/echo'), emptyConfig);
     const config = invocationConfig(invocation);
 
     expect(invocation.args).toEqual([
@@ -537,15 +541,20 @@ describe('OpenCode CLI adapter', () => {
       '--attach',
       '--agent',
     ]));
-    // Only the step's settings, no autoupdate and no share. Home folders,
-    // the config folder, plugins, skills and the login stay the person's own.
+    // Only the step's settings, no autoupdate and no share, and an empty
+    // config folder in place of the person's own. Home folders and the login
+    // stay the person's own.
     expect(Object.keys(invocation.environment)
       .filter((name) => !name.startsWith('OBVERSA_')).sort()).toEqual([
       'OPENCODE_CONFIG_CONTENT',
+      'OPENCODE_CONFIG_DIR',
       'OPENCODE_DISABLE_AUTOUPDATE',
       'OPENCODE_DISABLE_SHARE',
+      'XDG_CONFIG_HOME',
     ]);
     expect(invocation.environment).toMatchObject({
+      XDG_CONFIG_HOME: emptyConfig,
+      OPENCODE_CONFIG_DIR: join(emptyConfig, 'opencode'),
       OPENCODE_DISABLE_AUTOUPDATE: '1',
       OPENCODE_DISABLE_SHARE: '1',
     });
@@ -585,7 +594,7 @@ describe('OpenCode CLI adapter', () => {
     vi.stubEnv('OBVERSA_TEST_OPENCODE_PARENT_VALUE', 'set-by-the-person');
     vi.stubEnv('OPENCODE_CONFIG_DIR', join(personHome, 'opencode'));
     const input = request();
-    const selectedOptions = options();
+    const selectedOptions = { ...options(), clean: false };
 
     const result = await new OpenCodeCliEngine({
       ...selectedOptions,
@@ -663,6 +672,69 @@ describe('OpenCode CLI adapter', () => {
       home: process.env.HOME ?? null,
       auth: '{"fixture":{"key":"selected-auth","type":"api"}}',
     });
+  });
+
+  it('runs clean by default, and on the person\'s own setup with clean: false', () => {
+    const byDefault = buildOpenCodeInvocation(request(), options('/bin/echo'), '/tmp/empty-config');
+    const own = buildOpenCodeInvocation(request(), { ...options('/bin/echo'), clean: false }, '/tmp/empty-config');
+
+    expect(byDefault.environment.XDG_CONFIG_HOME).toBe('/tmp/empty-config');
+    expect(own.environment).not.toHaveProperty('XDG_CONFIG_HOME');
+  });
+
+  it('moves only the config folder in clean mode, and refuses clean mode without one', () => {
+    const clean = buildOpenCodeInvocation(request(), { ...options('/bin/echo'), clean: true }, '/tmp/empty-config');
+    const own = buildOpenCodeInvocation(request(), { ...options('/bin/echo'), clean: false }, '/tmp/empty-config');
+
+    expect(clean.environment.XDG_CONFIG_HOME).toBe('/tmp/empty-config');
+    expect(clean.environment.OPENCODE_CONFIG_DIR).toBe('/tmp/empty-config/opencode');
+    expect(Object.keys(clean.environment).filter((name) => !name.startsWith('OBVERSA_')).sort()).toEqual([
+      'OPENCODE_CONFIG_CONTENT',
+      'OPENCODE_CONFIG_DIR',
+      'OPENCODE_DISABLE_AUTOUPDATE',
+      'OPENCODE_DISABLE_SHARE',
+      'XDG_CONFIG_HOME',
+    ]);
+    expect(own.environment).not.toHaveProperty('XDG_CONFIG_HOME');
+    expect(own.environment).not.toHaveProperty('OPENCODE_CONFIG_DIR');
+    // OpenCode's switch for skipping skills under `~/.claude` and `~/.agents`
+    // also skips the repository's own, so clean mode keeps the scan on.
+    expect(clean.environment).not.toHaveProperty('OPENCODE_DISABLE_EXTERNAL_SKILLS');
+    expect(clean.environment).not.toHaveProperty('OPENCODE_DISABLE_CLAUDE_CODE_SKILLS');
+    expect(clean.environment).not.toHaveProperty('OPENCODE_DISABLE_CLAUDE_CODE');
+    expect(() => buildOpenCodeInvocation(request(), { ...options('/bin/echo'), clean: true }))
+      .toThrow('OpenCode clean mode requires an absolute empty config folder');
+  });
+
+  it('gives each clean-mode process its own empty config folder and removes it afterwards', async () => {
+    const calls = join(temporaryDirectory('lines-opencode-clean-'), 'calls.jsonl');
+    const seat = opencode('fixture-provider/fixture-model', { executable: executable(), clean: true });
+    vi.stubEnv('OBVERSA_TEST_OPENCODE_ADMISSION_RECORD', calls);
+    await seat.engine.run(request(), () => {}, new AbortController().signal);
+    const recorded = readFileSync(calls, 'utf8').split('\n').filter(Boolean)
+      .map((line) => JSON.parse(line) as { kind: string; configHome?: string; globalInstructions?: string | null });
+
+    expect(recorded.map((call) => call.kind)).toEqual(['version', 'model']);
+    expect(recorded.map((call) => call.globalInstructions)).toEqual(['', '']);
+    const [version, model] = recorded.map((call) => call.configHome!);
+    expect(version).not.toBe(model);
+    expect(existsSync(version!)).toBe(false);
+    expect(existsSync(model!)).toBe(false);
+  });
+
+  it('leaves out a config folder the person names in OPENCODE_CONFIG_DIR in clean mode', async () => {
+    const personHome = temporaryDirectory('lines-opencode-person-home-');
+    const recordPath = join(temporaryDirectory('lines-opencode-record-'), 'call.json');
+    vi.stubEnv('OPENCODE_CONFIG_DIR', join(personHome, 'opencode'));
+    vi.stubEnv('OBVERSA_TEST_OPENCODE_RECORD', recordPath);
+    const seat = opencode('fixture-provider/fixture-model', { executable: executable(), clean: true });
+    await seat.engine.run(request(), () => {}, new AbortController().signal);
+    const call = JSON.parse(readFileSync(recordPath, 'utf8')) as {
+      environment: { configHome: string; configDir: string };
+    };
+
+    expect(call.environment.configDir).not.toBe(join(personHome, 'opencode'));
+    expect(call.environment.configDir).toBe(join(call.environment.configHome, 'opencode'));
   });
 
   it('passes a seat\'s selected login to its engine', async () => {
@@ -824,6 +896,7 @@ describe('OpenCode CLI adapter', () => {
     const none = invocationConfig(buildOpenCodeInvocation(
       request({ tools: [], allowedTools: [], workspaceMode: 'none' }),
       options('/bin/echo'),
+      emptyConfig,
     ));
     expect(none.tools).toEqual({ '*': false });
     expect(none.permission).toEqual({ '*': 'deny' });
@@ -841,6 +914,7 @@ describe('OpenCode CLI adapter', () => {
         leaf: false,
       }),
       options('/bin/echo'),
+      emptyConfig,
     ));
     expect(write.tools).toEqual({
       '*': false,
@@ -866,6 +940,7 @@ describe('OpenCode CLI adapter', () => {
         workspaceMode: 'none',
       }),
       options('/bin/echo'),
+      emptyConfig,
     ));
     expect(none.tools).toEqual({
       '*': false,
@@ -880,6 +955,7 @@ describe('OpenCode CLI adapter', () => {
         workspaceMode: 'read',
       }),
       options('/bin/echo'),
+      emptyConfig,
     ));
     expect(read.tools).toEqual({ '*': false, read: true, webfetch: true });
   });
@@ -888,6 +964,7 @@ describe('OpenCode CLI adapter', () => {
     expect(() => buildOpenCodeInvocation(
       request({ tools: ['webfetch'], allowedTools: ['WebFetch'], workspaceMode: 'read' }),
       options('/bin/echo'),
+      emptyConfig,
     )).toThrow(/read/);
   });
 
@@ -895,6 +972,7 @@ describe('OpenCode CLI adapter', () => {
     expect(() => buildOpenCodeInvocation(
       request({ tools: ['task', ...(workspaceMode === 'read' ? ['read'] : [])], allowedTools: ['Task'], workspaceMode, leaf: false }),
       options('/bin/echo'),
+      emptyConfig,
     )).toThrow(/workspace|capability/);
   });
 
@@ -914,6 +992,7 @@ describe('OpenCode CLI adapter', () => {
         ...options('/bin/echo'),
         identity: { provider: null, modelFamily: null },
       },
+      emptyConfig,
     )).toThrow('does not accept patterns');
   });
 
@@ -1062,6 +1141,7 @@ describe('OpenCode CLI adapter', () => {
     expect(() => buildOpenCodeInvocation(
       request(),
       options('opencode'),
+      emptyConfig,
     )).toThrow('absolute');
     expect(() => new OpenCodeCliEngine({
       ...options('/bin/echo'),
@@ -1616,10 +1696,21 @@ describe('OpenCode CLI adapter', () => {
         },
         observe() {
           const models = readFileSync(calls, 'utf8').split('\n').filter(Boolean)
-            .map((line) => JSON.parse(line) as { kind: string; config: { tools: Record<string, boolean> } })
+            .map((line) => JSON.parse(line) as {
+              kind: string; config: { tools: Record<string, boolean> };
+              configHome?: string; globalInstructions?: string | null;
+            })
             .filter((call) => call.kind === 'model');
-          const tools = models.at(-1)?.config.tools ?? {};
-          return { modelCalls: models.length, canRead: tools.read === true, canWrite: tools.edit === true || tools.bash === true };
+          const last = models.at(-1);
+          const tools = last?.config.tools ?? {};
+          // A clean run points OpenCode at the engine's own empty config folder,
+          // whose empty AGENTS.md stands in for the person's global instructions.
+          // Any other config home, the person's own included, is their setup.
+          const clean = last?.configHome !== undefined
+            && basename(last.configHome).startsWith('obversa-opencode-config-');
+          if (clean) expect(last?.globalInstructions).toBe('');
+          const ownSetup = !clean;
+          return { modelCalls: models.length, canRead: tools.read === true, canWrite: tools.edit === true || tools.bash === true, ownSetup };
         },
       },
       open(scenario) {
@@ -1634,12 +1725,13 @@ describe('OpenCode CLI adapter', () => {
           ...options(binForScenario),
           identity: { provider: derived.provider ?? null, modelFamily: derived.modelFamily },
           environment: { OBVERSA_ENGINE_CONFORMANCE_SCENARIO: scenario, OBVERSA_TEST_OPENCODE_ADMISSION_RECORD: calls },
+          clean: scenario === 'clean-mode',
         });
       },
     });
 
-    expect(report).toEqual({ ok: true, cases: 21, failures: [], unsupported: [] });
-  // Twenty-one cases, each a fresh fake process: a loaded single-worker machine
+    expect(report).toEqual({ ok: true, cases: 22, failures: [], unsupported: [] });
+  // Twenty-two cases, each a fresh fake process: a loaded single-worker machine
   // needs more than the default five seconds, so the window is stated here.
   }, 30_000);
 
