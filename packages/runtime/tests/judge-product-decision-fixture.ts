@@ -28,8 +28,8 @@ function seat(engine: MockEngine, model: string, tools: readonly string[] = []):
 export function productDecisionJob(kind: ProductCaller, cwd: string, scenario: ProductScenario): Job {
   const record = (call: ProductCall) => appendFileSync(join(cwd, 'calls.jsonl'), `${JSON.stringify(call)}\n`);
   const name = scenario.stageName ?? 'write';
-  const writer = () => {
-    record({ kind: 'writer' });
+  const writer = (prompt: string) => {
+    record({ kind: 'writer', prompt });
     writeFileSync(join(cwd, 'page.md'), `draft ${productCalls(cwd).filter((call) => call.kind === 'writer').length}`);
     return { status: 'pass' as const, summary: 'wrote the page' };
   };
@@ -65,7 +65,7 @@ export function productDecisionJob(kind: ProductCaller, cwd: string, scenario: P
     return workflow('product-review', {
       brief: scenario.brief ?? 'Use case: a useful page for one audience.\n\nWrite the page.',
       roles: {
-        writer: seat(new MockEngine(() => JSON.stringify(writer())), 'writer-mock', ['Write']),
+        writer: seat(new MockEngine((request) => JSON.stringify(writer(request.prompt))), 'writer-mock', ['Write']),
         reviewer: [seat(new MockEngine(() => JSON.stringify(review())), 'reviewer-mock', ['Read'])],
       },
       stages: [stage(name, { agent: 'writer', writes: 'page.md', reviewedBy: 'reviewer', refine })],
@@ -75,7 +75,8 @@ export function productDecisionJob(kind: ProductCaller, cwd: string, scenario: P
     name: 'product-review',
     maxKickbacks: { [name]: refine },
     nodes: {
-      [name]: fnJob(name, async () => writer()),
+      [name]: agentJob({ label: name, model: 'writer-mock', prompt: 'Write the page.', consumeFeedback: true,
+        engine: new MockEngine((request) => writer(request.prompt).summary) }),
       review: { needs: [name], desc: scenario.brief ?? 'Choose the audience', job: fnJob('review', async () => {
         const result = review();
         return revisionRequest({ target: name, reason: result.summary, findings: result.findings });
