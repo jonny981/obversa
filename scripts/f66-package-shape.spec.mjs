@@ -77,11 +77,11 @@ test('package versions may advance but remain exact SemVer', () => {
   assert.throws(() => assertExactVersion('^0.1.0', '@obversa/example'), /version must be an exact valid SemVer/);
 });
 
-test('release verification reaches package shape, clean consumer, and retired-name checks', () => {
+test('the proof chain reaches package shape, clean consumer, and retired-name checks, and the release checks its commit', () => {
   const scripts = manifestAt('.').scripts;
   const releaseWorkflow = readFileSync('.github/workflows/release.yml', 'utf8');
   assert.equal(scripts['verify:f108'], 'pnpm verify:d15');
-  assert.match(releaseWorkflow, /run: pnpm verify:d15/);
+  assert.match(releaseWorkflow, /run: node scripts\/check-release-commit\.mjs/);
   assert.match(scripts['verify:d15'], /node --test scripts\/f66-package-shape\.spec\.mjs/);
   assert.match(scripts['verify:d15'], /pnpm test:retired-names/);
   assert.match(scripts['verify:d15'], /pnpm check:retired-names/);

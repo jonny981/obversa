@@ -91,7 +91,7 @@
     "test:ci-local": "node --test scripts/check-ci-local.spec.mjs scripts/ci-local-lock.spec.mjs scripts/ci-proof.spec.mjs scripts/stage-merge-ci-proof.spec.mjs",
     "check:publish": "node scripts/check-publish-allowlist.mjs --audit",
     "test:commit-policy": "node --test scripts/check-commit-policy.spec.mjs",
-    "test:publish-guard": "node --test scripts/check-publish-allowlist.spec.mjs scripts/check-build-proof.spec.mjs scripts/exact-published-version.spec.mjs",
+    "test:publish-guard": "node --test scripts/check-publish-allowlist.spec.mjs scripts/check-build-proof.spec.mjs scripts/exact-published-version.spec.mjs scripts/check-release-commit.spec.mjs",
     "test:boundaries": "node --test scripts/check-boundaries.spec.mjs && node --test scripts/check-retired-paths.spec.mjs && node --test scripts/check-spec-coverage.spec.mjs && node scripts/check-spec-coverage.mjs && pnpm test:arrows",
     "test:agent-workflow": "node --test scripts/agent-workflow.spec.mjs",
     "test:proof-path-budgets": "node --test scripts/check-proof-path-budgets.spec.mjs",

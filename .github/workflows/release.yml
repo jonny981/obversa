@@ -2,7 +2,10 @@ name: Release
 
 # The release act is a manual dispatch on main. Before dispatch, create the
 # `release` environment and require Jonny as its reviewer. Verification runs
-# first; the publish job then waits for that approval. `changeset publish`
+# first; the publish job then waits for that approval. Verification checks the
+# release commit instead of running the proof chain again: its parent passed
+# CI on GitHub, and it changes only versions, changelogs, the package table and
+# deleted changesets (scripts/check-release-commit.mjs). `changeset publish`
 # releases every workspace version that is not yet on the registry and tags
 # each published package `name@version`; the job pushes those tags.
 #
@@ -27,18 +30,20 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: read
+      actions: read # read the parent commit's CI run
     steps:
       - uses: actions/checkout@v4
         with:
-          fetch-depth: 0
-      - name: Make the main ref available to the page-shape check
-        run: git fetch origin main:main || true
+          fetch-depth: 2 # the release commit and its parent
       - uses: actions/setup-node@v4
         with:
           node-version: 22
       - run: corepack enable
       - run: pnpm install --frozen-lockfile
-      - run: pnpm verify:d15
+      - name: Check the release commit changes only release files and its parent passed CI
+        run: node scripts/check-release-commit.mjs
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
 
   publish:
     needs: verify

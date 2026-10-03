@@ -16,23 +16,15 @@ const ROOT = join(dirname(fileURLToPath(import.meta.url)), "..");
 
 export async function verifyPublished({ registry = RELEASE_REGISTRY, root = ROOT, allowlist = readAllowlist(), retry } = {}) {
   const byName = new Map(listWorkspacePackages(root).map((p) => [p.name, p]));
-  const problems = [];
-  for (const name of allowlist) {
+  // Every registry read runs at once; problems keep the allowlist order.
+  const problems = await Promise.all([...allowlist].map(async (name) => {
     const p = byName.get(name);
-    if (!p) {
-      problems.push(`${name}: on the allowlist but not a workspace package`);
-      continue;
-    }
-    if (!p.version) {
-      problems.push(`${name}: the manifest has no version to verify`);
-      continue;
-    }
+    if (!p) return `${name}: on the allowlist but not a workspace package`;
+    if (!p.version) return `${name}: the manifest has no version to verify`;
     const { published, reason } = await readPublishedVersionWithRetry(registry, name, p.version, retry);
-    if (!published) {
-      problems.push(`${name}@${p.version}: not on the registry (${reason})`);
-    }
-  }
-  return problems;
+    return published ? null : `${name}@${p.version}: not on the registry (${reason})`;
+  }));
+  return problems.filter(Boolean);
 }
 
 const isMain = process.argv[1] && realpathSync(fileURLToPath(import.meta.url)) === realpathSync(process.argv[1]);

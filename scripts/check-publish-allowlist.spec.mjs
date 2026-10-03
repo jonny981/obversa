@@ -353,6 +353,67 @@ test("the publish verifier reports an invalid registry URL", async () => {
   }
 });
 
+// A registry that answers no request until every expected request has
+// arrived: a step that reads one package after another never completes a read.
+async function allAtOnceRegistry(t, expected) {
+  const waiting = [];
+  const server = createServer((request, response) => {
+    waiting.push({ request, response });
+    if (waiting.length < expected) return;
+    for (const { request: r, response: w } of waiting) {
+      const [encodedName, version] = r.url.slice(1).split("/");
+      w.writeHead(200, { "content-type": "application/json" });
+      w.end(JSON.stringify({ name: decodeURIComponent(encodedName), version }));
+    }
+  });
+  server.listen(0, "127.0.0.1");
+  await once(server, "listening");
+  t.after(() => {
+    server.closeAllConnections();
+    return new Promise((resolve) => server.close(resolve));
+  });
+  return `http://127.0.0.1:${server.address().port}/`;
+}
+
+const CONCURRENT = {
+  "packages/one": { name: "@x/one", version: "1.0.0" },
+  "packages/two": { name: "@x/two", version: "1.0.0" },
+  "plugins/three": { name: "@x/three", version: "1.0.0" },
+};
+
+test("the tag step reads the registry for every package at once and keeps the allowlist order", { timeout: 30_000 }, async (t) => {
+  const registry = await allAtOnceRegistry(t, 3);
+  const root = makeWorkspace(CONCURRENT);
+  const calls = [];
+  const run = (command, args) => {
+    calls.push(args.join(" "));
+    return { status: 0, stdout: "", stderr: "" };
+  };
+  try {
+    const allowlist = new Set(["@x/two", "@x/one", "@x/three"]);
+    const { pushed, problems } = await tagPublished({ registry, root, allowlist, run, retry: { totalMs: 0 }, pushPauseMs: 0 });
+    assert.deepEqual(problems, []);
+    assert.deepEqual(pushed, ["@x/two@1.0.0", "@x/one@1.0.0", "@x/three@1.0.0"]);
+    assert.deepEqual(calls.filter((c) => c.startsWith("push ")), [
+      "push origin refs/tags/@x/two@1.0.0",
+      "push origin refs/tags/@x/one@1.0.0",
+      "push origin refs/tags/@x/three@1.0.0",
+    ]);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("the publish verifier reads the registry for every package at once", { timeout: 30_000 }, async (t) => {
+  const registry = await allAtOnceRegistry(t, 3);
+  const root = makeWorkspace(CONCURRENT);
+  try {
+    assert.deepEqual(await verifyPublished({ registry, root, allowlist: new Set(["@x/one", "@x/two", "@x/three"]), retry: { totalMs: 0 } }), []);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
 test("the tag step tries a failed push again, so a one-off server error does not fail the release", async (t) => {
   const registry = await registryFixture(t);
   const root = makeWorkspace({ "packages/tagged": { name: "@x/tagged", version: "1.0.0" } });

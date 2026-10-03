@@ -37,14 +37,18 @@ export async function tagPublished({ registry = RELEASE_REGISTRY, root = ROOT, a
   const byName = new Map(listWorkspacePackages(root).map((p) => [p.name, p]));
   const problems = [];
   const pushed = [];
-  for (const name of allowlist) {
+  // Every registry read runs at once; tags are then pushed one by one in allowlist order.
+  const reads = await Promise.all([...allowlist].map(async (name) => {
     const p = byName.get(name);
+    if (!p?.version) return { name, p };
+    return { name, p, ...(await readPublishedVersionWithRetry(registry, name, p.version, retry)) };
+  }));
+  for (const { name, p, published, reason } of reads) {
     if (!p?.version) {
       problems.push(`${name}: ${p ? "the manifest has no version" : "on the allowlist but not a workspace package"}`);
       continue;
     }
     const tag = `${name}@${p.version}`;
-    const { published, reason } = await readPublishedVersionWithRetry(registry, name, p.version, retry);
     if (!published) {
       problems.push(`${tag}: not on the registry (${reason}); there is nothing to push`);
       continue;

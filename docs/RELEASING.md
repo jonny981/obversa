@@ -49,7 +49,8 @@ Before the first dispatch, create the repository environment `release` and add
 Jonny as its required reviewer. Do not dispatch the workflow until that setup
 is complete.
 
-1. **Verify the source.** The `verify` job runs `pnpm verify:d15`.
+1. **Check the release commit.** The `verify` job runs
+   `node scripts/check-release-commit.mjs`. See the next section.
 2. **Approve the release.** The `publish` job enters the configured `release`
    environment and waits for Jonny's approval.
 3. **Build the publish checkout.** The publish job installs the frozen lockfile
@@ -74,6 +75,42 @@ The publish job carries `id-token: write` for npm trusted publishing. Each npm
 package must name this repository, `release.yml` and the `release` environment
 as its trusted publisher.
 
+## The release commit check
+
+The release workflow publishes a release commit. A release commit holds only
+what `pnpm changeset version` and the docs package table write. The check
+passes only when all of these are true:
+
+- **One parent.** The commit is not a merge.
+- **Only release files.** The commit changes only these paths:
+  - `version` and workspace dependency versions in
+    `packages/*/package.json` and `plugins/*/package.json`. Every other field
+    stays the same.
+  - `packages/*/CHANGELOG.md` and `plugins/*/CHANGELOG.md`.
+  - `docs/public/packages/index.mdx`, the package table.
+  - Deleted `.changeset/*.md` files. The check refuses a changeset that is
+    added or changed.
+- **The parent passed CI.** GitHub has a completed, successful run of the `CI`
+  workflow on the parent commit. The check reads it through the GitHub API with
+  the token in `GITHUB_TOKEN` or `GH_TOKEN`.
+
+The release commit does not need a second run of the proof chain. Every change
+reaches `main` only after the whole CI job passes on its exact tree. The parent
+passed CI, and the release commit changes no code.
+
+Each failure names the path, the field or the reason. A release commit that
+fails the check never reaches the `publish` job.
+
+CI runs on each push to `main`, and a newer push cancels a run that is not
+finished. Push the commit that holds the code and the changesets, and wait for
+its CI run to pass. Then make the release commit on top of it and push that.
+
+To run the check yourself before you push:
+
+```bash
+GH_TOKEN=<token> node scripts/check-release-commit.mjs HEAD
+```
+
 ## First publish
 
 A trusted publisher cannot be configured before a package exists. The first
@@ -96,8 +133,13 @@ disable token publishing for those packages.
 
 ## If a release fails
 
-- **Verification fails.** Do not publish. Fix the failure and run the full
-  release checks again.
+- **The release commit check refuses.** Do not publish. If the release
+  commit changes code, land the code change through a normal stage first, so
+  that it passes CI on `main`. Then run `pnpm changeset version` again on top
+  of it and dispatch the release on the new release commit. If the parent has
+  no successful CI run, wait for its run to pass, or re-run a cancelled one.
+  If CI never ran on the parent, push the parent on its own and let CI pass,
+  then make the release commit again.
 - **Publishing stops partway.** Run the same workflow again. Changesets skips
   versions already on the registry. Existing intended tags are pushed again.
 - **A package is published without its tag.** Find the commit that published
