@@ -126,6 +126,36 @@ describe('the judge can request a product decision', () => {
       if (kind === 'dag') expect(choices(fixture.cwd).filter((call) => call === 'downstream')).toHaveLength(ruling === 'not_converging' ? 0 : 1);
     }, 30_000);
 
+    it('keeps the per-finding decisions and the skipped list across a pending product decision', async () => {
+      const fixture = await setup();
+      const scenario = { choices: ['continue', 'product_decision', 'continue'], cap: 4, perFinding: true };
+      expect(await worker(kind, fixture, scenario, false)).toMatchObject({ status: 'paused' });
+      expect(choices(fixture.cwd)).toEqual(['writer', 'reviewer', 'judge', 'writer', 'reviewer', 'judge']);
+      const [request] = await fixture.callbacks.listPending();
+      await answer(fixture.callbacks, request!, 'Write for new users.');
+      expect(await worker(kind, fixture, scenario, true)).toMatchObject({ status: 'pass' });
+      expect(choices(fixture.cwd)).toEqual([
+        // The person's answer goes straight to the builder; the judge is not asked again first.
+        'writer', 'reviewer', 'judge', 'writer', 'reviewer', 'judge', 'writer', 'reviewer',
+        ...(kind === 'dag' ? ['downstream'] : []),
+      ]);
+      const writers = productCalls(fixture.cwd).filter((call) => call.kind === 'writer').map((call) => call.prompt!);
+      expect(writers[1]).toContain('REAL: the page must choose one audience (round 1)');
+      expect(writers[1]).not.toContain('taste: a warmer tone');
+      expect(writers[2]).toContain('REAL: the page must choose one audience (round 2)');
+      expect(writers[2]).not.toContain('taste: a warmer tone');
+      const states = judgeStates(fixture.cwd);
+      expect(states[0].skipped).toBeUndefined();
+      expect(states[1].skipped).toMatchObject([{ finding: { evidence: 'taste: a warmer tone (round 1)' }, reason: 'judged' }]);
+      // After the person's answer the builder runs and the review passes, so the judge was asked twice.
+      expect(states).toHaveLength(2);
+      if (kind === 'workflow') {
+        const lastReview = productCalls(fixture.cwd).filter((call) => call.kind === 'reviewer').at(-1)!.prompt!;
+        expect(lastReview).toContain('taste: a warmer tone (round 1)');
+        expect(lastReview).toContain('taste: a warmer tone (round 2)');
+      }
+    }, 30_000);
+
     it('counts the answered round against the cap and keeps review history across the pause', async () => {
       const fixture = await setup();
       const scenario = { choices: ['continue', 'product_decision', 'continue'], cap: kind === 'workflow' ? 3 : 2 };

@@ -1,6 +1,7 @@
 import { existsSync, readFileSync } from 'node:fs';
 import { createHash } from 'node:crypto';
 import { join } from 'node:path';
+import type { TeamSeat } from '@obversa/api';
 import type {
   ConditionInput,
   ConditionResult,
@@ -12,6 +13,7 @@ import type {
   Job,
   JobContext,
   Outcome,
+  PanelSynthesisEntry,
   RevisionRequest,
   RevisionRerun,
 } from './types.js';
@@ -59,13 +61,20 @@ export function isRequiredFeedbackSeverity(
 }
 
 function findingLine(finding: FeedbackFinding): string {
-  const reviewer = finding.reviewer ? `${finding.reviewer} ` : '';
+  const raisedBy = finding.raisedBy && finding.raisedBy.length > 1
+    ? finding.raisedBy.join(', ')
+    : finding.reviewer;
+  const reviewer = raisedBy ? `${raisedBy} ` : '';
   const severity = normalizeFeedbackSeverity(finding.severity);
   const decision = finding.decision ? ` Decision: ${finding.decision}.` : '';
   const recommendation = finding.recommendation
     ? ` Recommendation: ${oneLine(finding.recommendation)}`
     : '';
-  return `- ${reviewer}[${severity}]: ${oneLine(finding.evidence)}${decision}${recommendation}`;
+  const disputed = finding.disputed
+    ? ` Disputed: ${(finding.votes ?? []).map((vote) => `${vote.reviewer} ${vote.vote} (${oneLine(vote.reason)})`).join('; ')}.`
+    : '';
+  const judge = finding.judgeReason ? ` Why the judge sent it back: ${oneLine(finding.judgeReason)}` : '';
+  return `- ${reviewer}[${severity}]: ${oneLine(finding.evidence)}${decision}${recommendation}${disputed}${judge}`;
 }
 
 function defaultReason(findings: FeedbackFinding[] | undefined): string {
@@ -161,6 +170,8 @@ export function graphPositionBlock(
 type ReviewTarget = {
   name?: string;
   scope?: string;
+  /** The seat behind this reviewer. A synthesising panel asks it the cross-review round. */
+  seat?: TeamSeat;
   /** Stable reviewer criteria version. Required when passes are persisted. */
   cacheVersion?: string;
   /** Workspace paths whose content can invalidate this reviewer's persisted pass. */
@@ -185,7 +196,38 @@ export interface ReviewPanelConfig {
   /** When set, a failing panel emits a targeted revision request for dag routing. */
   target?: string;
   rerun?: RevisionRerun;
+  /**
+   * Synthesise the reviews into one before anything reads them. Off unless
+   * set, and only with more than one reviewer. A seat merges the findings
+   * that name the same problem: this seat, or with `true` the first
+   * reviewer's seat. Then each reviewer answers the merged findings it did
+   * not raise, once, and the votes drop, replace or dispute findings by rule.
+   * A passing reviewer's findings go through the same steps. Every reviewer
+   * must name its `seat`.
+   */
+  synthesise?: TeamSeat | true;
+  /**
+   * What the reviewers were asked to review: the brief and the files. A
+   * synthesising panel gives it to each reviewer in the cross-review round,
+   * which runs as a fresh turn.
+   */
+  context?: string;
 }
+
+/** What a synthesising panel hands its synthesis step. */
+export interface PanelSynthesisInput {
+  readonly label: string;
+  readonly merger: TeamSeat;
+  /** Every finding, with the panel reviewer who raised it, in reviewer order. */
+  readonly raised: readonly { readonly reviewer: string; readonly finding: FeedbackFinding }[];
+  /** The reviewers that gave a verdict, in reviewer order. */
+  readonly voters: readonly { readonly name: string; readonly seat: TeamSeat }[];
+  readonly concurrency: number;
+  /** `ReviewPanelConfig.context`. */
+  readonly context?: string;
+}
+
+export type PanelSynthesis = (input: PanelSynthesisInput, ctx: JobContext) => Promise<PanelSynthesisEntry[]>;
 
 interface ReviewVerdict {
   kind: 'verdict';
@@ -324,10 +366,19 @@ function outputFromInfrastructureError(error: LoopError): string | undefined {
   return typeof output === 'string' ? output : undefined;
 }
 
+/** The findings a passing reviewer's reply carried, kept in its outcome's `data`. */
+function passNotes(outcome: Outcome): FeedbackFinding[] | undefined {
+  const data = outcome.data as { findings?: unknown } | undefined;
+  return outcome.status === 'pass' && Array.isArray(data?.findings) && data.findings.length
+    ? data.findings as FeedbackFinding[]
+    : undefined;
+}
+
 async function runReviewer(
   reviewer: ReviewTarget,
   index: number,
   ctx: JobContext,
+  keepPassNotes = false,
 ): Promise<ReviewResult> {
   const name = reviewer.name ?? `reviewer-${index + 1}`;
   const reviewerCtx: JobContext = {
@@ -355,7 +406,8 @@ async function runReviewer(
         confidence: outcome.confidence,
         reason: outcome.summary ?? outcome.status,
         scope: reviewer.scope,
-        findings: revisionFromOutcome(outcome)?.findings,
+        findings: revisionFromOutcome(outcome)?.findings
+          ?? (keepPassNotes ? passNotes(outcome) : undefined),
       };
     }
     const result: ConditionResult = await toCondition(reviewer.review)(
@@ -408,6 +460,7 @@ async function runPersistedReviewer(
   ctx: JobContext,
   cache: PersistedReviewPasses,
   minConfidence: number,
+  keepPassNotes: boolean,
 ): Promise<PersistedReviewRun> {
   const name = reviewer.name!;
   const identity = reviewerCacheIdentity(
@@ -440,7 +493,7 @@ async function runPersistedReviewer(
   }
 
   delete cache[name];
-  const result = await runReviewer(reviewer, index, ctx);
+  const result = await runReviewer(reviewer, index, ctx, keepPassNotes);
   if (
     before === undefined ||
     result.kind !== 'verdict' ||
@@ -474,6 +527,7 @@ async function settlePersistedReviewers(
   cache: PersistedReviewPasses,
   minConfidence: number,
   concurrency: number,
+  keepPassNotes: boolean,
 ): Promise<ReviewResult[]> {
   // A reused seat can become stale while the other reviewers are running.
   // Finish the initial fan-out before checking every reuse against its evidence.
@@ -503,6 +557,7 @@ async function settlePersistedReviewers(
         ctx,
         cache,
         minConfidence,
+        keepPassNotes,
       ),
     }),
   );
@@ -588,7 +643,12 @@ function findingSeverityCounts(
   return counts;
 }
 
-export function reviewPanel(config: ReviewPanelConfig): Job {
+/**
+ * The review panel, given the step that synthesises it. `reviewPanel` from
+ * the package passes that step; the panel calls it only when `synthesise`
+ * is set and there is more than one reviewer.
+ */
+export function reviewPanelWith(config: ReviewPanelConfig, synthesis?: PanelSynthesis): Job {
   const label = config.label ?? 'review-panel';
   // A panel with no reviewers would pass vacuously (0/0), letting unreviewed work
   // through a gate meant to enforce review. Reject it at construction.
@@ -609,6 +669,13 @@ export function reviewPanel(config: ReviewPanelConfig): Job {
         `reviewPanel "${label}": pass must be an integer from 1 to ` +
         `${config.reviewers.length} (got ${config.pass})`,
     });
+  const synthesising = config.synthesise !== undefined && config.reviewers.length > 1;
+  if (synthesising && (!synthesis || config.reviewers.some((reviewer) => reviewer.seat === undefined)))
+    throw new LoopError({
+      code: 'CONFIG',
+      message: `reviewPanel "${label}": synthesise needs every reviewer's seat`,
+    });
+  const merger = config.synthesise === true ? config.reviewers[0]!.seat : config.synthesise;
   const concurrency = config.concurrency ?? REVIEW_PANEL_DEFAULT_CONCURRENCY;
   if (!Number.isInteger(concurrency) || concurrency <= 0)
     throw new LoopError({
@@ -678,6 +745,7 @@ export function reviewPanel(config: ReviewPanelConfig): Job {
             ctx,
             cache,
             config.persistPasses!.minConfidence,
+            synthesising,
           ),
       );
       results = await settlePersistedReviewers(
@@ -687,12 +755,13 @@ export function reviewPanel(config: ReviewPanelConfig): Job {
         cache,
         config.persistPasses.minConfidence,
         concurrency,
+        synthesising,
       );
     } else {
       results = await mapWithConcurrency(
         config.reviewers,
         concurrency,
-        (reviewer, i) => runReviewer(reviewer, i, ctx),
+        (reviewer, i) => runReviewer(reviewer, i, ctx, synthesising),
       );
     }
     if (cacheKey && cache && !Object.keys(cache).length)
@@ -709,8 +778,33 @@ export function reviewPanel(config: ReviewPanelConfig): Job {
       config.pass === undefined || config.pass === 'all'
         ? results.length
         : config.pass;
+    // Synthesis takes every verdict's findings, a passing reviewer's notes
+    // too, and gives back each one merged and voted on; a dropped finding
+    // stays only in the record.
+    const synthesised = synthesising
+      ? await synthesis!({
+        label,
+        merger: merger!,
+        // A reviewer that passed the work found nothing that blocks it, so
+        // a note it sends with no severity reads as nice-to-have.
+        raised: verdicts.flatMap((r) =>
+          (r.met
+            ? r.findings?.length
+              ? reviewFindings({ ...r, findings: r.findings.map((finding) => ({ ...finding, severity: finding.severity ?? 'nice-to-have' })) })
+              : []
+            : reviewFindings(r))
+            .map((finding) => ({ reviewer: r.name, finding }))),
+        voters: results.flatMap((r, i) =>
+          r.kind === 'verdict' ? [{ name: r.name, seat: config.reviewers[i]!.seat! }] : []),
+        concurrency,
+        ...(config.context === undefined ? {} : { context: config.context }),
+      }, { ...ctx, reviewerGate: criterionFor(ctx) })
+      : undefined;
+    const dropped = synthesised?.filter((entry) => entry.result === 'dropped') ?? [];
     const rawFindings = [
-      ...verdicts.filter((r) => !r.met).flatMap(reviewFindings),
+      ...(synthesised
+        ? synthesised.filter((entry) => entry.result !== 'dropped').map((entry) => entry.finding)
+        : verdicts.filter((r) => !r.met).flatMap(reviewFindings)),
       ...errors.flatMap((r) => r.findings ?? []),
     ];
     const findings = rawFindings.filter((f) =>
@@ -752,6 +846,7 @@ export function reviewPanel(config: ReviewPanelConfig): Job {
       passed: passedCount,
       required,
       severityCounts: findingSeverityCounts(findings),
+      ...(synthesised ? { synthesis: synthesised } : {}),
     };
     const blockedByInfrastructure =
       blockingErrors.length > 0 || (
@@ -778,7 +873,9 @@ export function reviewPanel(config: ReviewPanelConfig): Job {
             message: first.reason,
           }),
       };
-    } else if (!findings.length && escalatedFindings.length) {
+    } else if (!findings.length && (escalatedFindings.length || dropped.length)) {
+      // Nothing left to send back: every finding is out of scope, or the
+      // other reviewers' votes dropped it.
       outcome = { status: 'pass', summary, confidence, data };
     } else {
       outcome = revisionRequest(

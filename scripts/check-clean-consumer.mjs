@@ -886,6 +886,8 @@ async function main() {
     await copyFile(join(root, 'examples', 'teams', 'writer-reviewer-pair.proof.ts'), join(consumerDirectory, 'teams', 'writer-reviewer-pair.proof.ts'));
     await copyFile(join(root, 'examples', 'teams', 'threshold-panel.ts'), join(consumerDirectory, 'teams', 'threshold-panel.ts'));
     await copyFile(join(root, 'examples', 'teams', 'threshold-panel.proof.ts'), join(consumerDirectory, 'teams', 'threshold-panel.proof.ts'));
+    await copyFile(join(root, 'examples', 'teams', 'review-battery.ts'), join(consumerDirectory, 'teams', 'review-battery.ts'));
+    await copyFile(join(root, 'examples', 'teams', 'review-battery.proof.ts'), join(consumerDirectory, 'teams', 'review-battery.proof.ts'));
     await copyFile(join(root, 'examples', 'teams', 'feature-delivery.ts'), join(consumerDirectory, 'teams', 'feature-delivery.ts'));
     await copyFile(join(root, 'examples', 'teams', 'feature-delivery.proof.ts'), join(consumerDirectory, 'teams', 'feature-delivery.proof.ts'));
     // The use-case examples travel as a tree: each example sits beside its

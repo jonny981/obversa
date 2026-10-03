@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 
-import { judge, run, dag, fnJob, jobMeta, kickback, renderPlan, revisionRequest } from '../src/api.ts';
+import { agentJob, judge, run, dag, fnJob, jobMeta, kickback, renderPlan, reviewPanel, revisionRequest } from '../src/api.ts';
 import type { LoopEvent, Outcome, RunOptions, TeamSeat } from '../src/api.ts';
 import { formatEvent } from '../src/runtime/supervisor.ts';
 import { MockEngine } from '../src/testing.ts';
@@ -622,5 +622,115 @@ describe('a judge as a dag() maxKickbacks budget', () => {
     expect(outcome.status).toBe('fail');
     expect(judgeCalls).toBe(2);
     expect(round).toBe(3);
+  });
+
+  it('sends the target only the findings the judge acts on, and ships when it skips them all', async () => {
+    // Act on a finding marked REAL, skip the rest; the second round has only taste notes left.
+    const decide = (request: { prompt: string }) => {
+      const { questions } = JSON.parse(request.prompt) as { questions: Record<string, { instructions: string; criteria: Record<string, string> }> };
+      return JSON.stringify(Object.fromEntries(Object.entries(questions)
+        .filter(([, question]) => 'act' in question.criteria)
+        .map(([id, question]) => [id, question.instructions.includes('REAL') ? { choice: 'act', reason: 'it breaks the build' } : { choice: 'skip' }])));
+    };
+    const seen: Outcome[] = [];
+    let round = 0;
+    const events: LoopEvent[] = [];
+    const { outcome } = await run(dag({
+      name: 'judged-per-finding',
+      maxKickbacks: {
+        implement: judge({ engine: new MockEngine(decide), identity: { adapter: 'mock', provider: 'mock', modelFamily: 'judge', model: 'judge', tools: [] } }, { cap: 3 }),
+      },
+      nodes: {
+        implement: fnJob('implement', async (ctx) => {
+          round += 1;
+          if (ctx.lastReview) seen.push(ctx.lastReview);
+          return { status: 'pass', summary: `round ${round}` };
+        }),
+        review: {
+          needs: ['implement'],
+          job: fnJob('review', () => revisionRequest({
+            target: 'implement',
+            reason: 'needs a pass',
+            findings: [
+              ...(round === 1 ? [{ evidence: 'REAL: the build fails', severity: 'should-fix' as const }] : []),
+              { evidence: 'taste: rename a variable', severity: 'nice-to-have' },
+            ],
+          })),
+        },
+      },
+    }), { ...mockOpts, onEvent: (event) => events.push(event) });
+
+    expect(outcome.status).toBe('pass');
+    expect(round).toBe(2);
+    expect(seen).toHaveLength(1);
+    expect(seen[0]!.revision!.findings).toEqual([
+      { evidence: 'REAL: the build fails', severity: 'should-fix', judgeReason: 'it breaks the build' },
+    ]);
+    const judgeEvents = events.filter((e): e is Extract<LoopEvent, { kind: 'refine:judge' }> => e.kind === 'refine:judge');
+    expect(judgeEvents.map((e) => e.rule)).toEqual(['findings: 1 act, 1 skip', 'findings: 0 act, 1 skip']);
+    expect(judgeEvents[1]!.findings).toEqual([
+      { id: 'finding-1', decision: 'skip', reason: expect.any(String) },
+    ]);
+    expect(outcome.data).toMatchObject({ review: { status: 'pass', summary: 'the judge skipped every finding' } });
+  });
+  it('tells the review node\'s reviewers what the judge skipped, on the context and in an agent\'s prompt', async () => {
+    // Act on the finding marked REAL, skip the taste note.
+    const decide = (request: { prompt: string }) => {
+      const { questions } = JSON.parse(request.prompt) as { questions: Record<string, { instructions: string; criteria: Record<string, string> }> };
+      return JSON.stringify(Object.fromEntries(Object.entries(questions)
+        .filter(([, question]) => 'act' in question.criteria)
+        .map(([id, question]) => [id, question.instructions.includes('REAL') ? { choice: 'act' } : { choice: 'skip', reason: 'a matter of taste' }])));
+    };
+    const reviewerPrompts: string[] = [];
+    const reviewerEngine = new MockEngine((request) => {
+      reviewerPrompts.push(request.prompt);
+      return 'checked';
+    });
+    const seenSkipped: unknown[] = [];
+    let round = 0;
+    const { outcome } = await run(dag({
+      name: 'judged-review-panel',
+      maxKickbacks: {
+        implement: judge({ engine: new MockEngine(decide), identity: { adapter: 'mock', provider: 'mock', modelFamily: 'judge', model: 'judge', tools: [] } }, { cap: 3 }),
+      },
+      nodes: {
+        implement: fnJob('implement', async () => {
+          round += 1;
+          return { status: 'pass', summary: `round ${round}` };
+        }),
+        review: {
+          needs: ['implement'],
+          job: reviewPanel({
+            label: 'review',
+            target: 'implement',
+            reviewers: [{
+              name: 'checker',
+              job: async (ctx) => {
+                seenSkipped.push(ctx.skippedFindings);
+                await agentJob({ prompt: 'Check the work.', engine: reviewerEngine })(ctx);
+                return round === 1
+                  ? revisionRequest({ findings: [
+                    { evidence: 'REAL: the build fails', severity: 'should-fix' },
+                    { evidence: 'taste: rename a variable', severity: 'nice-to-have' },
+                  ] })
+                  : { status: 'pass', summary: 'clean' };
+              },
+            }],
+          }),
+        },
+      },
+    }), mockOpts);
+
+    expect(outcome.status).toBe('pass');
+    expect(round).toBe(2);
+    expect(seenSkipped).toEqual([
+      undefined,
+      [{ round: 1, finding: { reviewer: 'checker', evidence: 'taste: rename a variable', severity: 'nice-to-have' }, reason: 'a matter of taste' }],
+    ]);
+    expect(reviewerPrompts).toHaveLength(2);
+    expect(reviewerPrompts[0]).not.toContain('taste: rename a variable');
+    expect(reviewerPrompts[1]).toContain('Do not raise them again');
+    expect(reviewerPrompts[1]).toContain('- taste: rename a variable (skipped: a matter of taste)');
+    expect(reviewerPrompts[1]).not.toContain('REAL: the build fails');
   });
 });

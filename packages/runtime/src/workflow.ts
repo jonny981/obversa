@@ -13,8 +13,9 @@ import { dag } from './core/dag.js';
 import { RESUME_IDENTITY } from './core/resume.js';
 import { LoopError } from './core/errors.js';
 import { loop } from './core/loop.js';
-import { kickback, reviewPanel, revisionFromOutcome } from './core/feedback.js';
-import { consultJudge, countBySeverity, hasBlockFinding, isJudge, productDecisionFeedback, type JudgeRound, type JudgeState } from './core/judge.js';
+import { kickback, revisionFromOutcome } from './core/feedback.js';
+import { reviewPanel } from './core/synthesis.js';
+import { consultJudge, countBySeverity, hasBlockFinding, isJudge, judgedFindings, productDecisionFeedback, type JudgeRound, type JudgeState, type SkippedFinding } from './core/judge.js';
 import type { ConditionInput, DagConfig, Job, JobContext, Judge, Outcome } from './core/types.js';
 import { checkpointInteraction, interactionDeclaration, hasSavedInteraction, humanReview, interactionIdentity, jsonSnapshot, outcomeSnapshot, requestInteraction, savedInteraction, type InteractionBinding, type InteractionResponse } from './core/interaction.js';
 
@@ -60,13 +61,20 @@ export interface WorkflowStageBase {
   readonly retrySafe?: boolean;
 }
 
+/**
+ * `synthesise` merges a review panel's reviews into one before anything
+ * reads them, on a `reviewedBy` panel or a `panel:` stage: a seat merges
+ * the findings that name the same problem (this seat, or with `true` the
+ * first reviewer's seat), then each reviewer votes once on the merged
+ * findings it did not raise. A panel of one reviewer is left as it is.
+ */
 export type WorkflowStage = WorkflowStageBase & {
 } & (
-  | { readonly agent: string; readonly reviewedBy?: string; readonly run?: never; readonly panel?: never; readonly input?: never; readonly fn?: never; }
-  | { readonly run: string | readonly string[]; readonly agent?: never; readonly panel?: never; readonly input?: never; readonly fn?: never; }
-  | { readonly panel: string; readonly agree?: number; readonly agent?: never; readonly run?: never; readonly input?: never; readonly fn?: never; }
-  | { readonly input: string; readonly agent?: never; readonly run?: never; readonly panel?: never; readonly fn?: never; }
-  | { readonly fn: Job; readonly agent?: never; readonly run?: never; readonly panel?: never; readonly input?: never; }
+  | { readonly agent: string; readonly reviewedBy?: string; readonly synthesise?: TeamSeat | true; readonly run?: never; readonly panel?: never; readonly input?: never; readonly fn?: never; }
+  | { readonly run: string | readonly string[]; readonly synthesise?: never; readonly agent?: never; readonly panel?: never; readonly input?: never; readonly fn?: never; }
+  | { readonly panel: string; readonly agree?: number; readonly synthesise?: TeamSeat | true; readonly agent?: never; readonly run?: never; readonly input?: never; readonly fn?: never; }
+  | { readonly input: string; readonly synthesise?: never; readonly agent?: never; readonly run?: never; readonly panel?: never; readonly fn?: never; }
+  | { readonly fn: Job; readonly synthesise?: never; readonly agent?: never; readonly run?: never; readonly panel?: never; readonly input?: never; }
 );
 
 export interface NamedStage {
@@ -273,6 +281,7 @@ function reviewerPanel(
   targetFiles: readonly string[] | undefined,
   target?: string,
   agree?: number,
+  synthesise?: TeamSeat | true,
 ): Job {
   const pass = agree === undefined ? 'all' : (() => {
     if (!Number.isSafeInteger(agree) || agree < 1 || agree > seats.length) {
@@ -285,9 +294,19 @@ function reviewerPanel(
     label: named.name,
     pass,
     target,
+    ...(synthesise === undefined ? {} : {
+      synthesise,
+      // The brief and target each reviewer's own prompt carries.
+      context: [
+        `Work brief: ${brief.brief}`,
+        `Review target: ${reviewTarget(named, targetFiles)}.`,
+        named.config.desc ? `Task: ${named.config.desc}` : undefined,
+      ].filter(Boolean).join('\n'),
+    }),
     reviewers: definitions.map((definition, index) => ({
       name: definition.name,
       scope: definition.scope,
+      seat: definition.seat,
       job: async (ctx) => {
         const reviewer = panelReviewers(
           definitions,
@@ -632,15 +651,20 @@ function lineDiffCount(before: string | undefined, after: string): number {
  * send-back. A block finding always goes back on its own, the judge is
  * never asked about one, so the loop's own `maxReviewRestarts` (the judge's
  * cap) is the only thing bounding it, same as a plain numeric `refine`.
- * Otherwise the judge sees the use case, the latest findings, every round
- * so far, and the file being refined when the stage declares one, and its
- * answer either lets the review stand (a synthesised pass) or sends it back
- * with its reasoning folded into the existing rejection.
+ * Otherwise the judge sees the use case, the latest findings, the findings
+ * it skipped before, every round so far, and the file being refined when
+ * the stage declares one, and its answer either lets the review stand (a
+ * synthesised pass) or sends it back with its reasoning folded into the
+ * existing rejection. When it decides each finding, the send-back carries
+ * only the findings it acts on, and the findings it skips go to the next
+ * round's reviewers as `ctx.skippedFindings`.
  */
-function judgedReview(brief: BriefSource, config: WorkflowStage, cfgJudge: Judge, panel: Job): Job {
+function judgedReview(brief: BriefSource, named: NamedStage, cfgJudge: Judge, panel: Job): Job {
+  const config = named.config;
   const useCase = /^Use case:\s*([\s\S]*?)\n\s*\n/m.exec(brief.brief)?.[1]?.replace(/\s+/g, ' ').trim();
   const file = writesOf(config)[0];
   const history: JudgeRound[] = [];
+  let skipped: readonly SkippedFinding[] = [];
   let previousDraft: string | undefined;
   let productFeedback: readonly InteractionResponse[] = [];
   const identity = interactionIdentity({ brief, config, cfgJudge });
@@ -662,12 +686,14 @@ function judgedReview(brief: BriefSource, config: WorkflowStage, cfgJudge: Judge
     if (saved) {
       history.splice(0, history.length, ...(saved.state as unknown as JudgeState).rounds);
       productFeedback = (saved.state as unknown as JudgeState).productFeedback ?? [];
+      skipped = (saved.state as unknown as JudgeState).skipped ?? [];
       previousDraft = draft;
     }
     const panelOutcome: Outcome = saved ? saved.panel as unknown as Outcome : await panel({
       ...ctx,
       depth: ctx.depth + 1,
       path: [...ctx.path, 'review-panel'],
+      ...(skipped.length ? { skippedFindings: skipped } : {}),
     });
     if (panelOutcome.status === 'pass') return panelOutcome;
     const findings = revisionFromOutcome(panelOutcome)?.findings ?? [];
@@ -679,6 +705,7 @@ function judgedReview(brief: BriefSource, config: WorkflowStage, cfgJudge: Judge
       ...(file !== undefined ? { file } : {}),
       ...(draft !== undefined ? { draft } : {}),
       latestFindings: findings,
+      ...(skipped.length ? { skipped } : {}),
       rounds: history,
       round,
       cap: cfgJudge.cap,
@@ -701,8 +728,15 @@ function judgedReview(brief: BriefSource, config: WorkflowStage, cfgJudge: Judge
     });
     // A person's answer goes back to the builder as the next round; the
     // judge sees the result only after that round has been reviewed.
-    if ('answer' in result) return productDecisionFeedback(result.answer, findings);
+    if ('answer' in result) {
+      // The judge decided each finding before asking: the answer goes with the acted ones only.
+      const answered = judgedFindings(findings, { findings: result.state.decided }, result.state.skipped ?? [], round);
+      skipped = answered.skipped;
+      return productDecisionFeedback(result.answer, answered.acted);
+    }
     const { decision } = result;
+    const judged = judgedFindings(findings, decision, result.state.skipped ?? [], round);
+    skipped = judged.skipped;
     // No builder round remains for a person's answer, so the review's
     // rejection stands and the stage stops at its cap.
     if (decision.stop === 'product_decision') return panelOutcome;
@@ -714,7 +748,15 @@ function judgedReview(brief: BriefSource, config: WorkflowStage, cfgJudge: Judge
       }
       return { status: 'pass', confidence: panelOutcome.confidence, summary: decision.reason, data: panelOutcome.data };
     }
-    return { ...panelOutcome, summary: `${panelOutcome.summary} (${decision.reason})` };
+    // The panel's own summary lists every finding; when the judge decided
+    // each one, the one-line reason stands in for it so the builder reads
+    // only the findings it acts on.
+    const revision = revisionFromOutcome(panelOutcome);
+    return {
+      ...panelOutcome,
+      summary: `${decision.findings && revision ? revision.reason : panelOutcome.summary} (${decision.reason})`,
+      ...(revision ? { revision: { ...revision, findings: judged.acted } } : {}),
+    };
   };
 }
 
@@ -752,7 +794,7 @@ function stageJob(
       }, humanLoop), { humanLoop });
     }
     const reviewers = panelRole(roles, config.reviewedBy);
-    const panel = reviewerPanel(brief, named, reviewers, files, declaredFiles, undefined);
+    const panel = reviewerPanel(brief, named, reviewers, files, declaredFiles, undefined, undefined, undefined, config.synthesise);
     const refine = refineOf(config);
     const cap = refineCap(refine);
     // Review events use a child path. The jobs' role tags, not their paths,
@@ -761,7 +803,7 @@ function stageJob(
     // re-entry; `judgedReview` is what does that, so the plain path here
     // stays exactly what it was.
     const review: Job = isJudge(refine)
-      ? judgedReview(brief, config, refine, panel)
+      ? judgedReview(brief, named, refine, panel)
       : async (ctx) => panel({
         ...ctx,
         depth: ctx.depth + 1,
@@ -813,7 +855,7 @@ function stageJob(
   }
   if ('panel' in config && config.panel !== undefined) {
     const reviewers = panelRole(roles, config.panel);
-    const panel = reviewerPanel(brief, named, reviewers, files, declaredFiles, targetFiles, config.sendsBackTo, config.agree);
+    const panel = reviewerPanel(brief, named, reviewers, files, declaredFiles, targetFiles, config.sendsBackTo, config.agree, config.synthesise);
     return copyJobMeta(recordedFamilyGate(panel, reviewers, familyTargetStageNames, familyTargetFamilies, false), panel);
   }
   if ('input' in config && config.input !== undefined) {
@@ -934,6 +976,14 @@ export function workflow(name: string, config: WorkflowConfig): Job {
       throw new TypeError(`stage ${stageName} cannot use both reviewedBy and sendsBackTo`);
     }
     refineForStage(stageConfig, incomingTargets.has(stageName));
+    if (stageConfig.synthesise !== undefined) {
+      const panelStage = 'panel' in stageConfig && stageConfig.panel !== undefined;
+      const reviewRole = reviewedBy === undefined ? undefined : role(config.roles, reviewedBy);
+      if (!panelStage && !Array.isArray(reviewRole)) {
+        throw new TypeError(`synthesise is for a stage reviewed by a panel or a panel stage: ${stageName}`);
+      }
+      if (stageConfig.synthesise !== true) seatIdentity(stageConfig.synthesise);
+    }
     optionalFlag(stageConfig.optional);
     if (stageConfig.retrySafe !== undefined && typeof stageConfig.retrySafe !== 'boolean') {
       throw new TypeError('retrySafe must be a boolean');

@@ -554,6 +554,11 @@ function renderEvent(event: LoopEvent, totals?: UsageTotals): string {
     }
     case 'refine:judge':
       return `${at}◆ ${event.route}${event.status ? ` as ${event.status}` : ''} on ${event.rule}: ${event.reason}`;
+    case 'review:synthesis': {
+      const count = (result: string) => event.entries.filter((entry) => entry.result === result).length;
+      const merged = event.entries.filter((entry) => (entry.finding.raisedBy?.length ?? 0) > 1).length;
+      return `${at}◆ ${event.label} synthesised ${event.entries.length} finding(s): ${merged} raised by more than one reviewer, ${count('dropped')} dropped, ${count('disputed')} disputed, ${count('better fix')} with a better fix`;
+    }
     case 'loop:stall':
       return `${at}⏹ stalled after ${event.report.iterations.length} no-progress iterations: ${event.report.reason}`;
     case 'limit:wait':

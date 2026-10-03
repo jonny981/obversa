@@ -19,9 +19,11 @@ import type {
   JudgeAnswer,
   JudgeQuestions,
   JobContext,
+  JudgeQuestion,
+  SkippedFinding,
 } from './types.js';
 
-export type { Judge, JudgeAnswer, JudgeQuestion, JudgeQuestions } from './types.js';
+export type { Judge, JudgeAnswer, JudgeQuestion, JudgeQuestions, SkippedFinding } from './types.js';
 
 /**
  * The default question set: does the work hold for this use case, are the
@@ -73,13 +75,55 @@ export function stopQuestions(what = 'the draft'): JudgeQuestions {
  * A judge for `refine` or `maxKickbacks`: `seat` runs with workspace mode
  * none (it reads no file itself; everything it needs rides in the prompt),
  * `cap` is the hard backstop on rounds regardless of what the judge says,
- * and `questions` defaults to `stopQuestions()`.
+ * and `questions` defaults to `stopQuestions()`. `perFinding` asks the judge
+ * to act on or skip each finding as well; it defaults to true with the
+ * default questions and to false with a caller's own.
  */
-export function judge(seat: Judge['seat'], opts: { cap: number; questions?: JudgeQuestions; interaction?: InteractionBinding }): Judge {
+export function judge(seat: Judge['seat'], opts: { cap: number; questions?: JudgeQuestions; perFinding?: boolean; interaction?: InteractionBinding }): Judge {
   if (!Number.isSafeInteger(opts.cap) || opts.cap < 1) {
     throw new TypeError('judge cap must be a positive integer');
   }
-  return { kind: 'judge', seat, cap: opts.cap, questions: opts.questions ?? stopQuestions(), ...(opts.interaction ? { interaction: opts.interaction } : {}) };
+  return {
+    kind: 'judge', seat, cap: opts.cap, questions: opts.questions ?? stopQuestions(),
+    perFinding: opts.perFinding ?? opts.questions === undefined,
+    ...(opts.interaction ? { interaction: opts.interaction } : {}),
+  };
+}
+
+/** What `act` and `skip` mean in each per-finding question. */
+const FINDING_CRITERIA = {
+  act: 'A reader of this kind of work would stumble on, misread or distrust what this finding names, so the builder should fix it.',
+  skip: 'It is taste, an edge case, or polish past the bar the use case sets, so fixing it would not change what a reader gets.',
+} as const;
+
+/**
+ * A finding's id within its round: `finding-1` for the first finding in the
+ * round's list, and so on. The list is saved with a pending question, so the
+ * ids stay the same after a resume.
+ */
+export function findingId(index: number): string {
+  return `finding-${index + 1}`;
+}
+
+/** One `choice` question per finding, keyed by the finding's id. */
+export function findingQuestions(findings: readonly FeedbackFinding[]): JudgeQuestions {
+  const questions: Record<string, JudgeQuestion> = {};
+  for (const [index, finding] of findings.entries()) {
+    const recommendation = finding.recommendation ? ` Recommendation: ${finding.recommendation}` : '';
+    questions[findingId(index)] = {
+      type: 'choice',
+      instructions: `Read this one finding. For this use case, should the builder act on it in another round, or skip it? Give a one-line reason. Finding [${normalizeFeedbackSeverity(finding.severity)}]: ${finding.evidence}${recommendation}`,
+      criteria: FINDING_CRITERIA,
+    };
+  }
+  return questions;
+}
+
+/** The judge's decision on one finding. */
+export interface FindingDecision {
+  readonly id: string;
+  readonly decision: 'act' | 'skip';
+  readonly reason: string;
 }
 
 export function isJudge(value: unknown): value is Judge {
@@ -118,6 +162,10 @@ export interface JudgeState {
   /** That file's current content, when there is one. */
   readonly draft?: string;
   readonly latestFindings: readonly FeedbackFinding[];
+  /** Findings the judge skipped in earlier rounds, with its reasons. */
+  readonly skipped?: readonly SkippedFinding[];
+  /** The judge's decision on each finding of the round it sent to a person, so the answer reaches the builder with only the findings worth acting on. */
+  readonly decided?: readonly FindingDecision[];
   readonly rounds: readonly JudgeRound[];
   readonly round: number;
   readonly cap: number;
@@ -141,9 +189,12 @@ export interface JudgeDecision {
   /**
    * The answer that decided the route: the chosen reason (`stop_reason:
    * continue`), the probability answer it fell back to
-   * (`worth_another_round: 0.49`), or `no clear answer`.
+   * (`worth_another_round: 0.49`), the count of findings acted on and
+   * skipped (`findings: 1 act, 2 skip`), or `no clear answer`.
    */
   readonly rule: string;
+  /** The decision on each finding, when the judge decides each finding. */
+  readonly findings?: readonly FindingDecision[];
 }
 
 /**
@@ -168,8 +219,47 @@ export interface JudgeDecision {
  * the work; an unclear "another round is not worth it" fails instead of
  * shipping, since its own criteria already blend polish with a stall and
  * cannot tell the two apart.
+ *
+ * With `findingIds`, the round answer routes as above only to settle
+ * `product_decision`; the answer for each finding decides the rest (see
+ * `decideEachFinding`).
  */
-export function judgeDecision(answers: Readonly<Record<string, JudgeAnswer>>): JudgeDecision {
+export function judgeDecision(answers: Readonly<Record<string, JudgeAnswer>>, findingIds?: readonly string[]): JudgeDecision {
+  const round = roundDecision(answers);
+  if (!findingIds?.length) return round;
+  return decideEachFinding(answers, findingIds, round);
+}
+
+/**
+ * Route on the judge's answer for each finding. `product_decision` stands as
+ * the round answer gives it. Otherwise any finding the judge acts on runs
+ * another round, and a round with none ships as a pass, whatever the round
+ * answer says: a chosen `not_converging` does not drop acted findings, and
+ * it does not fail a round whose findings are all skipped. A finding the
+ * judge did not answer, or answered with neither choice, follows the round
+ * answer: it goes back when that answer runs another round, and is skipped
+ * when that answer ships. When the judge answered no finding at all, the
+ * round answer routes alone, with the same reason and rule as before.
+ */
+function decideEachFinding(answers: Readonly<Record<string, JudgeAnswer>>, findingIds: readonly string[], round: JudgeDecision): JudgeDecision {
+  const findings = findingIds.map((id): FindingDecision => {
+    const answer = answers[id];
+    const choice = answer?.choice;
+    const reason = typeof answer?.reason === 'string' && answer.reason.trim() ? answer.reason.trim() : undefined;
+    if (choice === 'act' || choice === 'skip') return { id, decision: choice, reason: reason ?? FINDING_CRITERIA[choice] };
+    return { id, decision: round.again ? 'act' : 'skip', reason: `no answer for this finding; ${round.reason}` };
+  });
+  const answered = findings.some(({ id }) => answers[id]?.choice === 'act' || answers[id]?.choice === 'skip');
+  // A judge that answered no finding decided nothing about them: every finding stands, as with whole-round judging.
+  if (!answered) return round;
+  if (round.stop === 'product_decision') return { ...round, findings };
+  const acted = findings.filter((finding) => finding.decision === 'act').length;
+  const rule = `findings: ${acted} act, ${findings.length - acted} skip`;
+  if (acted) return { again: true, reason: `the judge acts on ${acted} of ${findings.length} findings`, rule, findings };
+  return { again: false, stop: 'ship', reason: 'the judge skipped every finding', rule, findings };
+}
+
+function roundDecision(answers: Readonly<Record<string, JudgeAnswer>>): JudgeDecision {
   const worth = answers.worth_another_round?.noul ?? answers.worth_another_round?.probability;
   const doing = answers.worth_doing?.noul ?? answers.worth_doing?.probability;
   const holds = answers.holds?.noul ?? answers.holds?.probability;
@@ -201,9 +291,10 @@ export function judgeDecision(answers: Readonly<Record<string, JudgeAnswer>>): J
  * none agent turn over `state` and `cfg.questions`, parses the reply as the
  * judge engine's own `{ [question]: JudgeAnswer }` shape, and emits
  * `refine:judge` so a person reading the record sees what it answered and
- * why. A reply that fails to parse becomes an empty answers object ,
- * `judgeDecision` reads that as no clear answer, which runs another round,
- * so the caller's own cap is what ends the rounds.
+ * why. When the judge decides each finding, the questions also carry one
+ * per finding in `state.latestFindings`. A reply that fails to parse becomes
+ * an empty answers object , `judgeDecision` reads that as no clear answer,
+ * which runs another round, so the caller's own cap is what ends the rounds.
  */
 export async function askJudge(
   cfg: Judge,
@@ -211,6 +302,7 @@ export async function askJudge(
   ctx: JobContext,
   path: readonly string[],
 ): Promise<{ answers: Readonly<Record<string, JudgeAnswer>>; decision: JudgeDecision }> {
+  const perFinding = cfg.perFinding && state.latestFindings.length > 0;
   const judgeJob = agentJob({
     label: 'refine:judge',
     engine: cfg.seat.engine,
@@ -218,7 +310,7 @@ export async function askJudge(
     workspaceMode: 'none',
     tools: [],
     leaf: true,
-    prompt: JSON.stringify({ state, questions: cfg.questions }),
+    prompt: JSON.stringify({ state, questions: perFinding ? { ...cfg.questions, ...findingQuestions(state.latestFindings) } : cfg.questions }),
   });
   const outcome = await judgeJob({ ...ctx, depth: ctx.depth + 1, path: [...path, 'refine-judge'] });
   let answers: Record<string, JudgeAnswer> = {};
@@ -232,11 +324,12 @@ export async function askJudge(
       // Left empty: an unreadable answer routes as no clear answer, not a crash.
     }
   }
-  const decision = judgeDecision(answers);
+  const decision = judgeDecision(answers, perFinding ? state.latestFindings.map((_, index) => findingId(index)) : undefined);
   const status = decision.stop === 'ship' ? 'pass' : decision.stop === 'fail' ? 'fail' : undefined;
   ctx.emit({
     kind: 'refine:judge', ts: Date.now(), path: [...path], answers, reason: decision.reason,
     route: decision.again ? 'again' : 'stop', rule: decision.rule, ...(status ? { status } : {}),
+    ...(decision.findings ? { findings: decision.findings } : {}),
   });
   return { answers, decision };
 }
@@ -256,18 +349,21 @@ export async function consultJudge(
   path: readonly string[],
   options: { readonly identity: string; readonly pending: boolean; readonly roundLeft?: boolean; readonly save: (state: JudgeState) => void },
 ): Promise<{ state: JudgeState; decision: JudgeDecision } | { state: JudgeState; paused: Outcome } | { state: JudgeState; answer: InteractionResponse }> {
+  let asked = state;
   if (!options.pending) {
     const { decision } = await askJudge(cfg, state, ctx, path);
     if (decision.stop !== 'product_decision' || options.roundLeft === false) return { state, decision };
+    // Kept with the question, so a resumed run still knows which findings the judge would act on.
+    if (decision.findings) asked = { ...state, decided: decision.findings };
   }
-  options.save(state);
+  options.save(asked);
   const answer = await requestInteraction(cfg.interaction ?? DEFAULT_INTERACTION,
     'What product decision should guide this review?', jsonSnapshot({
       requester: { path, identity: options.identity, engine: cfg.seat.identity, round: state.round },
-      material: state,
+      material: asked,
     }), ctx);
-  if ('paused' in answer) return { state, paused: answer.paused };
-  return { state: { ...state, productFeedback: [...(state.productFeedback ?? []), answer.response] }, answer: answer.response };
+  if ('paused' in answer) return { state: asked, paused: answer.paused };
+  return { state: { ...asked, productFeedback: [...(asked.productFeedback ?? []), answer.response] }, answer: answer.response };
 }
 
 /**
@@ -282,4 +378,27 @@ export function productDecisionFeedback(
 ): Outcome {
   const reason = `A person made a product decision about the findings below. Apply it in this round. Their decision: "${answer.prompt}"`;
   return revisionRequest({ ...over, reason, findings: [...findings] }, { data: answer });
+}
+
+/**
+ * What the judge's decisions on a round's findings send on: the findings it
+ * acts on, each carrying its reason, and the skipped list grown by this
+ * round's skips. A round the judge did not decide each finding of sends
+ * every finding and skips none.
+ */
+export function judgedFindings(
+  findings: readonly FeedbackFinding[],
+  decision: Pick<JudgeDecision, 'findings'>,
+  skipped: readonly SkippedFinding[],
+  round: number,
+): { acted: FeedbackFinding[]; skipped: SkippedFinding[] } {
+  if (!decision.findings) return { acted: [...findings], skipped: [...skipped] };
+  const acted: FeedbackFinding[] = [];
+  const next = [...skipped];
+  for (const [index, finding] of findings.entries()) {
+    const item = decision.findings[index]!;
+    if (item.decision === 'act') acted.push({ ...finding, judgeReason: item.reason });
+    else if (!next.some((entry) => entry.finding.evidence === finding.evidence)) next.push({ round, finding, reason: item.reason });
+  }
+  return { acted, skipped: next };
 }

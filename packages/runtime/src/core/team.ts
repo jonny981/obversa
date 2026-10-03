@@ -9,7 +9,8 @@ import { jsonSnapshot, outcomeSnapshot } from './interaction.js';
 import { agentJob } from './job.js';
 import { isolated } from './isolated.js';
 import { parallel } from './dag.js';
-import { reviewPanel, type ReviewPanelConfig } from './feedback.js';
+import type { ReviewPanelConfig } from './feedback.js';
+import { reviewPanel } from './synthesis.js';
 import type { Job, Outcome, RunCallbacks } from './types.js';
 
 export interface TeamAgent {

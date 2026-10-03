@@ -287,6 +287,8 @@ export type {
   FeedbackDecision,
   FeedbackFinding,
   FeedbackSeverity,
+  FindingVote,
+  PanelSynthesisEntry,
   RevisionRequest,
   RevisionRerun,
   GraphPosition,
@@ -335,8 +337,8 @@ export {
   RECORDED_ENGINE_USAGE,
   type RecordedEngineUsage,
 } from './core/job.js';
+export { reviewPanel } from './core/synthesis.js';
 export {
-  reviewPanel,
   reviewContext,
   type ReviewPanelConfig,
   type ReviewContextConfig,
@@ -350,6 +352,7 @@ export {
   type JudgeAnswer,
   type JudgeQuestion,
   type JudgeQuestions,
+  type SkippedFinding,
 } from './core/judge.js';
 
 export { copyJobMeta, jobMeta, renderPlan, describeConditions } from './core/describe.js';

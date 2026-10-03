@@ -65,6 +65,8 @@ export const CONSUMER_EXAMPLES = Object.freeze([
   'teams/writer-reviewer-pair.proof.ts',
   'teams/threshold-panel.ts',
   'teams/threshold-panel.proof.ts',
+  'teams/review-battery.ts',
+  'teams/review-battery.proof.ts',
   'teams/feature-delivery.ts',
   'teams/feature-delivery.proof.ts',
   'use-cases/proof-host.ts',
@@ -143,5 +145,6 @@ export const PROOF_RUN_EXAMPLES = Object.freeze([
   { file: 'human-feedback/workflow.ts', why: 'human-feedback.proof.ts runs this workflow with scripted model replies and real callback and HTTP surface sessions' },
   { file: 'use-cases/ops/approve-the-exact-payload.ts', why: 'runs no engine; approve-the-exact-payload.proof.ts runs it offline with a stand-in for curl' },
   { file: 'engine-mastra.ts', why: 'engine-mastra.proof.ts runs it offline: the Mastra agent\'s model replays recorded turns, a stand-in plays the Codex CLI and the judge replays recorded answers' },
+  { file: 'teams/review-battery.ts', why: 'review-battery.proof.ts runs it offline: a stand-in plays the Claude, Codex and OpenCode CLIs and the judge replays recorded answers' },
   { file: 'engine-openai-agents.ts', why: 'engine-openai-agents.proof.ts runs it offline: the agent\'s model replays recorded turns, a stand-in plays the Codex CLI and the judge replays recorded answers' },
 ]);

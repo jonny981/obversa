@@ -20,6 +20,8 @@ export interface ContextOverride {
   lastOutcome?: Outcome;
   lastReview?: Outcome;
   lastGate?: ConditionResult;
+  /** The findings a judge skipped, for the review that sent the work back. */
+  skippedFindings?: JobContext['skippedFindings'];
   /** The outcomes of a dag node's `needs`, set by the dag for that node only. */
   needs?: Readonly<Record<string, Outcome>>;
   /** Override the workspace (a worktree fork at a concurrency boundary). */
@@ -96,6 +98,9 @@ export function childContext(
     lastOutcome: over.lastOutcome,
     lastReview: over.lastReview,
     lastGate: over.lastGate,
+    // Inherited, so every reviewer inside the review that sent work back
+    // hears what the judge skipped.
+    skippedFindings: over.skippedFindings ?? parent.skippedFindings,
     // Not inherited: a nested job sees its own dag node's needs, never an ancestor's.
     needs: over.needs,
   };

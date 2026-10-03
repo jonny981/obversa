@@ -41,6 +41,12 @@ the count against the limit, so you can read why a run stopped.
   reviewers when one voice must be enough. Some people call this an eval
   loop. [A review panel with a threshold](/patterns/review-panel) is that
   case.
+- **A panel whose reviews become one.** With `synthesise` set, a seat
+  merges the findings that name the same problem, each reviewer votes once
+  on the findings it did not raise, and a finding most of them reject is
+  dropped, unless it is a block. A judge then decides each finding that is
+  left: act on it or skip it.
+  [Ask a panel](/patterns/review-panel) shows the whole process.
 - **A tournament with a judge.** Several candidates run in their own
   worktrees, a function scores each, and only the winner lands. The rest
   leave nothing behind. [Three candidates, one winner](/patterns/tournament).
@@ -50,9 +56,14 @@ the count against the limit, so you can read why a run stopped.
 - **A person's decision.** Yes passes the step. No carries the person's note
   to the target as the finding. Silence pauses the run. [A person decides](/patterns/approval).
 - **A judge that says when to stop.** A small model reads what the
-  reviewer found and how the rounds have gone, and answers whether the
-  work is at the point of diminishing returns. A block finding always goes
-  back; the judge decides the rest.
+  reviewer found and how the rounds have gone, and decides each finding:
+  act on it or skip it. The builder gets only the findings it acts on, each
+  with the judge's reason. When the judge gives no reason of its own, as
+  with `jev()`, the reason is what the option it chose means. The review
+  that sent the work back is told what the judge skipped and why: an agent
+  reviewer reads the list in its prompt, and your own review code reads it
+  as `ctx.skippedFindings`. When the judge skips every finding, the work
+  stands. A block finding always goes back without the judge.
   [A judge stops the loop](/patterns/judge-stops-the-loop).
 - **A draft refined over rounds.** Translate, reflect, revise, then a person
   reads the result. That page calls it a refinement loop.
@@ -92,8 +103,8 @@ Two of the three reviewers fail the first attempt, so their findings go to
 - **`maxKickbacks` sets the limit.** Without it, a graph or pipeline never
   runs a step again on a fail. `workflow()` sets it for you from each
   target's `refine`, which defaults to 1; a target with
-  `refine: judge(seat, { cap, questions })` asks the judge before each
-  round and never runs past its cap. A number is one budget for the
+  `refine: judge(seat, { cap })` asks the judge before each round, sends
+  back only the findings it acts on, and never runs past its cap. A number is one budget for the
   whole graph. A map, `{ plan: 3, 'tests-first': 3 }`, gives each target
   its own, so a review that spends its budget on one step can't starve
   another. A target the map doesn't name gets none.

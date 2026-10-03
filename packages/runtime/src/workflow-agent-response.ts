@@ -61,7 +61,10 @@ export function outcomeFromAgentText(text: string, target?: string): Outcome {
     };
   }
   if (decision.status === 'pass') {
-    return { status: 'pass', summary: decision.summary };
+    // A pass can carry notes; a synthesising review panel reads them.
+    return decision.findings?.length
+      ? { status: 'pass', summary: decision.summary, data: { findings: [...decision.findings] } }
+      : { status: 'pass', summary: decision.summary };
   }
   return revisionRequest({
     target,

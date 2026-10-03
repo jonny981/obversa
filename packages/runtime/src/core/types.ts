@@ -170,6 +170,42 @@ export interface FeedbackFinding {
   scope?: string;
   evidence: string;
   recommendation?: string;
+  /** Every panel reviewer who raised this finding, set when a panel synthesises its reviews. */
+  raisedBy?: string[];
+  /** The other reviewers' answers in a synthesising panel's cross-review round. */
+  votes?: FindingVote[];
+  /** Kept although the cross-review round did not settle it: a tie, a block most voters disagree with, or a finding whose dissenters do not outnumber the reviewers who raised or backed it. */
+  disputed?: boolean;
+  /** Why a judge sent this finding back, when a judge decided it. */
+  judgeReason?: string;
+}
+
+/** One reviewer's answer on a finding another reviewer raised. */
+export interface FindingVote {
+  reviewer: string;
+  vote: 'agree' | 'disagree' | 'better fix';
+  /** One line. */
+  reason: string;
+  /** The fix the reviewer would make instead, for `better fix`. */
+  fix?: string;
+}
+
+/**
+ * What a synthesising panel did with one finding after the merge and the
+ * cross-review round. `kept` and `better fix` go on; `disputed` goes on
+ * marked; `dropped` stays only in the record, with the voters' reasons.
+ */
+export interface PanelSynthesisEntry {
+  result: 'kept' | 'better fix' | 'disputed' | 'dropped';
+  finding: FeedbackFinding;
+}
+
+/** A finding a judge skipped, kept across rounds so reviewers do not raise it again. */
+export interface SkippedFinding {
+  /** The review round the finding was skipped in. */
+  readonly round: number;
+  readonly finding: FeedbackFinding;
+  readonly reason: string;
 }
 
 export type RevisionRerun = 'target-and-dependents';
@@ -275,6 +311,12 @@ export interface JobContext {
   readonly lastOutcome?: Outcome;
   /** The most recent failed-review outcome, so a restart can act on it. */
   readonly lastReview?: Outcome;
+  /**
+   * The findings a judge skipped in earlier rounds, with its reasons. Set on
+   * the review that sent the work back, and on every job inside it. An agent
+   * job adds them to its prompt and asks the agent not to raise them again.
+   */
+  readonly skippedFindings?: readonly SkippedFinding[];
   /**
    * The previous iteration's explicit `until`-gate evaluation (met or not),
    * including its diagnostic `output`. Undefined when the loop has no explicit
@@ -500,6 +542,8 @@ export interface JudgeAnswer {
   readonly probability?: number;
   readonly choice?: string;
   readonly probabilities?: Readonly<Record<string, number>>;
+  /** A one-line reason, when the judge gives one with its answer. */
+  readonly reason?: string;
 }
 
 /**
@@ -514,6 +558,12 @@ export interface Judge {
   readonly seat: TeamSeat;
   readonly cap: number;
   readonly questions: JudgeQuestions;
+  /**
+   * Ask the judge to act on or skip each finding, and send the builder only
+   * the ones it acts on. True by default; false by default for a caller's
+   * own question set, which then routes on the whole round.
+   */
+  readonly perFinding: boolean;
   readonly interaction?: InteractionBinding;
 }
 
@@ -824,6 +874,22 @@ export type LoopEvent =
       // `stop_reason: product_decision`, which asks a person and then asks
       // the judge again.
       status?: 'pass' | 'fail';
+      // When the judge decides each finding: every finding of the round, by
+      // its id, with `act` (sent back to the builder) or `skip` and why.
+      findings?: readonly { readonly id: string; readonly decision: 'act' | 'skip'; readonly reason: string }[];
+    }
+  | {
+      // A review panel's synthesis: each finding after the merge and the
+      // cross-review round, including the ones the votes dropped.
+      kind: 'review:synthesis';
+      ts: number;
+      path: string[];
+      label: string;
+      entries: PanelSynthesisEntry[];
+      /** The merger failed or sent no readable reply, so no findings were merged. */
+      mergeFailed?: true;
+      /** Reviewers asked to vote that failed or sent no readable reply. A finding shown to one of them is never dropped by the others' votes. */
+      noVotesFrom?: string[];
     }
   | {
       kind: 'interaction:checkpoint';
