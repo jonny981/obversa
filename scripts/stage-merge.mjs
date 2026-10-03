@@ -135,6 +135,7 @@ export const stageBranches = {
   F144: 'feat/dag-resume-b',
   F149: 'feat/jev-seat',
   F157: 'release/0.2.2',
+  F178: 'release/0.2.4',
   F168: 'feat/clean-mode',
   F169: 'fix/product-decision-reaches-builder',
   F171: 'feat/engine-openai-agents',
