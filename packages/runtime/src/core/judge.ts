@@ -402,4 +402,3 @@ export function judgedFindings(
   }
   return { acted, skipped: next };
 }
-
