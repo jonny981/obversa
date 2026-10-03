@@ -137,7 +137,7 @@ function same(left: unknown, right: unknown): boolean {
 }
 function selection(value: unknown, path: string): EngineSelectionRecord {
   const item = object(value, path);
-  exact(item, ['adapter', 'adapterVersion', 'provider', 'modelFamily', 'model', 'executable', 'capabilities'], path);
+  exact(item, ['adapter', 'adapterVersion', 'provider', 'modelFamily', 'model', 'executable', 'capabilities'], path, ['effort']);
   const result = checked(path, () => engineSelection(item as unknown as EngineSelectionRecord));
   if (!same(item, result)) invalid(path, 'Selection normalization would change stored identity.');
   return result;

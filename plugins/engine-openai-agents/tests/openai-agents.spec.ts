@@ -214,6 +214,16 @@ describe('openai agent engine run', () => {
     expect(runner.calls).toHaveLength(0);
   });
 
+  it('refuses effort on the seat and on a step, naming why, and never calls the runner', async () => {
+    const why = "openai-agents cannot take effort: the agent you pass decides how its model runs; set it on the agent's modelSettings";
+    expect(() => openaiAgent(agent, { effort: 'high' })).toThrow(why);
+    const runner = standIn(async () => result('ok'));
+    const error = await failure(run(runner, { ...request, effort: 'high' }));
+    expect(error.kind).toBe('invalid-config');
+    expect(error.message).toBe(why);
+    expect(runner.calls).toHaveLength(0);
+  });
+
   it('stops the run at the request timeout', async () => {
     const runner = standIn(async (_agent, _input, options) => {
       await new Promise((resolve) => options.signal.addEventListener('abort', resolve, { once: true }));

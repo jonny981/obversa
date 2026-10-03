@@ -48,6 +48,13 @@ describe('engine result records', () => {
     })).toThrow('selection.executable must be an absolute path or null');
   });
 
+  it('records the effort a selection was asked for, and none when unset', () => {
+    expect(engineSelection({ adapter: 'scripted', effort: 'high' }).effort).toBe('high');
+    expect('effort' in engineSelection({ adapter: 'scripted' })).toBe(false);
+    expect(() => engineSelection({ adapter: 'scripted', effort: ' ' }))
+      .toThrow('selection.effort must be a non-empty string');
+  });
+
   it('preserves ordered assistant continuations and one marked final part', () => {
     const validated = validateAgentResult(result([
       { kind: 'assistant', text: 'first', final: false },

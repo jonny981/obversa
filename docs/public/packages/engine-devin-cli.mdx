@@ -141,6 +141,7 @@ repeats Devin's warning.
 | --- | --- | --- | --- |
 | `defaultModel` | `string` | none | The model when the request names none. Without one, Devin runs its own default model, or the one your Devin settings choose with `clean: false`. |
 | `cliBinary` | `string` | `devin` on `PATH` | The executable to run. |
+| `effort` | `string` | none | Not supported: the Devin CLI has no effort switch, so setting it throws. A step that sets `effort` fails the same way. Also a `DevinSeatOptions` field. |
 | `clean` | `boolean` | [See the default](/packages/engines#the-default) | On by default: your own Devin settings stay out. `false` uses them. Also an option of `devin(model, options)`. |
 
 By default Devin runs with `--config` pointed at an empty config file
@@ -157,15 +158,15 @@ to leave them out.
 
 - **`EngineError` of kind `missing-cli`** when the executable can't run.
 - **`EngineError` of kind `invalid-config`** for a step without a folder, a
-  step with `tools: []`, or a `devin --version` output the plugin cannot
-  read.
+  step with `tools: []`, a step that sets `effort`, or a `devin --version`
+  output the plugin cannot read.
 - **`EngineIncompleteResultError`** when Devin exits without a final answer.
 - **Other `EngineError` kinds**, such as `auth` or `rate-limit`, are read
   from Devin's own error message.
 
 ## API
 
-- **`devin(model?)`**: a `TeamSeat` for a workflow role.
+- **`devin(model?, options?)`**: a `TeamSeat` for a workflow role.
   [Quickstart](#quickstart).
 - **`DevinCliEngine`**: the engine class. **`DevinCliEngineOptions`** and
   **`DevinSeat`**: its types.

@@ -56,6 +56,11 @@ export interface CodexEngineOptions {
     | 'dontAsk'
     | 'auto';
   /**
+   * Passed as `codex exec -c model_reasoning_effort=<level>`, over the
+   * person's own Codex config; a request's own `effort` wins.
+   */
+  readonly effort?: string;
+  /**
    * Run without the person's own `config.toml` (their settings, MCP servers
    * and plugins) and their `AGENTS.md` in the Codex home folder. The
    * repository's instruction files still apply, and the run keeps the
@@ -67,6 +72,7 @@ export interface CodexEngineOptions {
 export interface CodexSeatOptions {
   readonly sandbox?: CodexEngineOptions['sandbox'];
   readonly approvalPolicy?: CodexEngineOptions['approvalPolicy'];
+  readonly effort?: string;
   readonly clean?: boolean;
 }
 
@@ -89,6 +95,7 @@ export function codex(model: string, options: CodexSeatOptions = {}): CodexSeat 
       defaultModel: model,
       sandbox: options.sandbox,
       approvalPolicy: options.approvalPolicy ?? 'never',
+      ...(options.effort === undefined ? {} : { effort: options.effort }),
       ...(options.clean === undefined ? {} : { clean: options.clean }),
     }),
     identity: {
@@ -217,6 +224,8 @@ export function buildCodexArgs(
 
   if (req.cwd) args.push('-C', req.cwd);
   if (model) args.push('-m', model);
+  const effort = req.effort ?? opts.effort;
+  if (effort !== undefined) args.push('-c', `model_reasoning_effort=${effort}`);
   if (opts.cliArgs?.length) args.push(...opts.cliArgs);
   args.push('-o', outFile, '-');
   return args;
@@ -341,7 +350,8 @@ export class CodexEngine implements Engine {
     try {
       expected = expectedSelection === undefined ? undefined : engineSelection(expectedSelection);
       proposed = engineSelection({ adapter: 'codex', provider: 'openai',
-        model: req.model ?? this.opts.defaultModel ?? 'codex', capabilities: req.tools ?? [] });
+        model: req.model ?? this.opts.defaultModel ?? 'codex', capabilities: req.tools ?? [],
+        effort: req.effort ?? this.opts.effort });
     } catch {
       throw new EngineError({ kind: 'invalid-config', message: 'invalid Codex selection' });
     }

@@ -136,6 +136,7 @@ export const stageBranches = {
   F149: 'feat/jev-seat',
   F157: 'release/0.2.2',
   F178: 'release/0.2.4',
+  F174: 'feat/engine-effort',
   F168: 'feat/clean-mode',
   F169: 'fix/product-decision-reaches-builder',
   F171: 'feat/engine-openai-agents',

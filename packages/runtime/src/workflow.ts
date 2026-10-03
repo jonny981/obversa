@@ -62,7 +62,7 @@ export interface WorkflowStageBase {
 
 export type WorkflowStage = WorkflowStageBase & {
 } & (
-  | { readonly agent: string; readonly reviewedBy?: string; readonly run?: never; readonly panel?: never; readonly input?: never; readonly fn?: never; }
+  | { readonly agent: string; readonly reviewedBy?: string; readonly effort?: string; readonly run?: never; readonly panel?: never; readonly input?: never; readonly fn?: never; }
   | { readonly run: string | readonly string[]; readonly agent?: never; readonly panel?: never; readonly input?: never; readonly fn?: never; }
   | { readonly panel: string; readonly agree?: number; readonly agent?: never; readonly run?: never; readonly input?: never; readonly fn?: never; }
   | { readonly input: string; readonly agent?: never; readonly run?: never; readonly panel?: never; readonly fn?: never; }
@@ -535,11 +535,13 @@ function guardedAgent(
   if (!writes.length) throw new TypeError(`agent stage ${named.name} must declare writes`);
   const target = named.config.sendsBackTo;
   const reviewedBy = 'reviewedBy' in named.config ? named.config.reviewedBy : undefined;
+  const effort = 'effort' in named.config ? named.config.effort : undefined;
   const identity = seatIdentity(seat);
   const agent = agentJob({
     label: named.name,
     engine: seat.engine,
     model: identity.model,
+    ...(effort === undefined ? {} : { effort }),
     tools: [...identity.tools],
     allowedTools: [...identity.tools],
     workspaceMode: 'write',

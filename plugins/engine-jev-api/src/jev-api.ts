@@ -48,7 +48,11 @@ export interface JevApiEngineOptions {
   readonly model?: string;
   /** Injectable for tests; defaults to global fetch. */
   readonly fetch?: typeof fetch;
+  /** Unsupported: the Jev service decides how hard it works, so setting it throws. */
+  readonly effort?: string;
 }
+
+const NO_EFFORT = 'jev cannot take effort: the Jev service decides how hard it works; leave effort unset';
 
 interface JevDocument {
   readonly state: JsonValue;
@@ -113,6 +117,7 @@ function assertRequestShape(request: Omit<AgentRequest, 'prompt'>): void {
   if ((request.tools?.length ?? 0) > 0) {
     throw invalid('jev declares no tools; a non-empty tools list cannot be honoured');
   }
+  if (request.effort !== undefined) throw invalid(NO_EFFORT);
 }
 
 export class JevApiEngine implements Engine {
@@ -126,6 +131,7 @@ export class JevApiEngine implements Engine {
     if (typeof options.apiKey !== 'string' || options.apiKey === '') {
       throw invalid('jev engine requires an apiKey from adapter configuration');
     }
+    if (options.effort !== undefined) throw invalid(NO_EFFORT);
     this.#options = options;
   }
 
@@ -245,6 +251,8 @@ export interface JevSeatOptions {
   readonly endpoint?: string;
   /** Bearer credential. Defaults to `TYPESAFE_API_KEY`. */
   readonly apiKey?: string;
+  /** Unsupported: the Jev service decides how hard it works, so setting it throws. */
+  readonly effort?: string;
 }
 
 export interface JevSeat {
@@ -269,7 +277,10 @@ export function jev(model: string = DEFAULT_MODEL, options: JevSeatOptions = {})
   if (!endpoint || !apiKey) {
     throw invalid('jev() needs TYPESAFE_ENDPOINT and TYPESAFE_API_KEY, or the endpoint and apiKey options');
   }
-  const api = new JevApiEngine({ endpoint, apiKey, model });
+  const api = new JevApiEngine({
+    endpoint, apiKey, model,
+    ...(options.effort === undefined ? {} : { effort: options.effort }),
+  });
   const engine: Engine = {
     name: api.name,
     admit: (request, signal, expectedSelection) => api.admit(request, signal, expectedSelection),

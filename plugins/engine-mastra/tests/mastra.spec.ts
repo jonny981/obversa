@@ -130,6 +130,15 @@ describe('mastra engine run', () => {
     expect(Object.keys(agent.calls[0]!.options)).toEqual(['abortSignal']);
   });
 
+  it('refuses effort on the seat and on a step, naming why', async () => {
+    const why = 'mastra cannot take effort: the Mastra agent you pass decides how its model runs; set it on the agent';
+    const agent = standIn(async () => ({ text: 'ok' }));
+    expect(() => mastra(agent, { effort: 'high' })).toThrow(why);
+    const error = await failure(run(agent, { ...request, effort: 'high' }));
+    expect(error).toMatchObject({ kind: 'invalid-config', message: why });
+    expect(agent.calls).toEqual([]);
+  });
+
   it('reports the usage Mastra reports', async () => {
     const { result, events } = await run(standIn(async () => ({
       text: 'ok',

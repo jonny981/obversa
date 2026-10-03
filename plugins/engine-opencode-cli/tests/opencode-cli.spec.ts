@@ -138,6 +138,26 @@ describe('OpenCode static admission', () => {
     expect(fixture.calls().map((call) => call.kind)).toEqual(['version', 'model']);
   });
 
+  it('passes and records the effort as --variant, and the seat passes its own', async () => {
+    const fixture = admissionFixture();
+    const engine = new OpenCodeCliEngine({
+      ...options(fixture.bin), environment: fixture.environment, effort: 'low',
+    });
+    const input = request({ effort: 'high' });
+    const result = await engine.run(input, () => {}, new AbortController().signal);
+    expect(result.requested).toEqual(engineSelection({
+      ...admissionSelection(input, fixture.bin), effort: 'high',
+    }));
+    expect(result.effective.effort).toBe('high');
+    const model = fixture.calls().find((call) => call.kind === 'model')!;
+    expect(model.args[model.args.indexOf('--variant') + 1]).toBe('high');
+    const seat = opencode('fixture-provider/fixture-model', { executable: fixture.bin, effort: 'max' });
+    expect((await seat.engine.admit(admissionRequest(request()), new AbortController().signal)).effort)
+      .toBe('max');
+    const plain = await fixture.engine.admit(admissionRequest(request()), new AbortController().signal);
+    expect('effort' in plain).toBe(false);
+  });
+
   it('validates each request instead of caching its selection', async () => {
     const fixture = admissionFixture();
     const first = request();
@@ -532,6 +552,11 @@ describe('OpenCode CLI adapter', () => {
       input.cwd,
     ]);
     expect(invocation.stdin).toBe('Review the candidate.');
+    expect(buildOpenCodeInvocation(input, { ...options('/bin/echo'), effort: 'low' }, emptyConfig).args)
+      .toEqual(['run', '--format', 'json', '--model', 'fixture-provider/fixture-model',
+        '--variant', 'low', '--dir', input.cwd]);
+    expect(buildOpenCodeInvocation({ ...input, effort: 'max' }, { ...options('/bin/echo'), effort: 'low' }, emptyConfig)
+      .args).toContain('max');
     expect(invocation.args).not.toEqual(expect.arrayContaining([
       '--auto',
       '--share',

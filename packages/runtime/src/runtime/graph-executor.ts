@@ -829,10 +829,11 @@ export async function createGraphExecutor(
     }
   };
   const staticRequestFor = async (
-    target: ExecutionTarget, contextNodeId: string | null,
+    target: ExecutionTarget, contextNodeId: string | null, effort: string | undefined,
   ): Promise<Omit<AgentRequest, 'prompt' | 'attempt'>> => {
+    const effortField = effort === undefined ? {} : { effort };
     if (contextNodeId === null) return {
-      model: target.model, tools: [...target.tools], cwd: scratch!,
+      model: target.model, ...effortField, tools: [...target.tools], cwd: scratch!,
       timeoutMs: preflightPolicy!.timeoutMs, leaf: true,
     };
     const binding = options.nodes[contextNodeId];
@@ -847,7 +848,7 @@ export async function createGraphExecutor(
     }
     const permissions = cloneFrozenJson([...binding.permissions]);
     return {
-      model: target.model, tools: [...target.tools], allowedTools: [...permissions],
+      model: target.model, ...effortField, tools: [...target.tools], allowedTools: [...permissions],
       ...(binding.resultContract === null ? {} : { jsonSchema: cloneFrozenJson(binding.resultContract.schema) }),
       ...(policy.callTokens === null ? {} : { maxTokens: policy.callTokens.tokens }),
       cwd: workspace.directory === null ? nodeScratch : await realpath(workspace.directory),
@@ -969,7 +970,7 @@ export async function createGraphExecutor(
           selection: binding.selection, contextNodeId, expectedSelection };
         const start = preflightEvent(options.runId, 'preflight:probe-started', payload, cause);
         // Validate caller configuration before recording a call that has not begun.
-        const configuration = await staticRequestFor(target, contextNodeId);
+        const configuration = await staticRequestFor(target, contextNodeId, binding.selection.effort);
         if (signal.aborted) fail('ABORTED', 'The graph run was aborted.');
         await enqueueAppend(start);
         const request = { ...configuration, attempt: probeAttempt(stream.namespace, options.runId, start.eventId) };
@@ -999,7 +1000,8 @@ export async function createGraphExecutor(
       const start = preflightEvent(options.runId, 'preflight:probe-started', payload, cause);
       await enqueueAppend(start);
       let observation = await preflightEngine(binding.engine, {
-        model: live.target.model, timeoutMs: preflightPolicy.timeoutMs, cwd: scratch,
+        model: live.target.model, ...(normal.effort === undefined ? {} : { effort: normal.effort }),
+        timeoutMs: preflightPolicy.timeoutMs, cwd: scratch,
         attempt: probeAttempt(stream.namespace, options.runId, start.eventId), signal,
       });
       const requested = observation.evidence?.kind === 'complete' ? observation.evidence.result.requested : null;

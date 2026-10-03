@@ -63,7 +63,11 @@ export interface OpenAIAgentSeatOptions {
    * runner can add run options the engine does not pass, such as a session.
    */
   readonly runner?: OpenAIAgentsRunner;
+  /** Unsupported: the agent you pass decides how its model runs, so setting it throws. Set it on the agent's `modelSettings`. */
+  readonly effort?: string;
 }
+
+const NO_EFFORT = "openai-agents cannot take effort: the agent you pass decides how its model runs; set it on the agent's modelSettings";
 
 export interface OpenAIAgentSeat {
   readonly engine: OpenAIAgentsEngine;
@@ -78,6 +82,7 @@ export interface OpenAIAgentSeat {
 
 /** Create the seat for an OpenAI Agents SDK agent in a declarative team workflow. */
 export function openaiAgent(agent: AnyAgent, options: OpenAIAgentSeatOptions = {}): OpenAIAgentSeat {
+  if (options.effort !== undefined) throw new TypeError(NO_EFFORT);
   const configured = options.model !== undefined
     ? splitModel(options.model)
     : configuredModel(agent.model);
@@ -185,6 +190,7 @@ export class OpenAIAgentsEngine implements Engine {
   ): Promise<AgentResult> {
     try {
       assertReadAccess(req);
+      if (req.effort !== undefined) throw new TypeError(NO_EFFORT);
     } catch (cause) {
       throw new EngineError({ kind: 'invalid-config', message: (cause as Error).message, cause });
     }

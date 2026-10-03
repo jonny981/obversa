@@ -352,6 +352,7 @@ variables for a job and every job beneath it.
 | Key | What it means |
 | --- | --- |
 | `agent` | The role that does the work. The stage must say what it `writes`. |
+| `effort` | For an agent stage, the reasoning effort for this stage only, over the seat's own. See [Engines](/packages/engines#reasoning-effort). |
 | `run` | A command, one string with no quoting or an array. Exit 0 passes. A red run goes to `sendsBackTo` with the output as the finding. It may change the files it `writes` and no other declared file. |
 | `panel` | A role that is a list of seats. `agree` is how many must accept; the default is all of them. |
 | `input` | A person role. The stage asks the question and waits. |

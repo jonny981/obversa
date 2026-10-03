@@ -4,7 +4,7 @@ import {
   type AgentRequest,
 } from '@obversa/api';
 import { runEngineAdmissionConformance, type EngineAdmissionConformanceFixture } from '@obversa/api/testing';
-import { AnthropicApiEngine } from '../src/index.ts';
+import { AnthropicApiEngine, type AnthropicApiEngineOptions } from '../src/index.ts';
 
 const request: AgentRequest = {
   prompt: 'Return a short answer.',
@@ -28,11 +28,11 @@ function staticRequest(): Omit<AgentRequest, 'prompt'> {
 function harness(): {
   fixture: EngineAdmissionConformanceFixture;
   bodies: unknown[];
-  open: () => AnthropicApiEngine;
+  open: (options?: AnthropicApiEngineOptions) => AnthropicApiEngine;
 } {
   const bodies: unknown[] = [];
-  function open(): AnthropicApiEngine {
-    const engine = new AnthropicApiEngine({ apiKey: 'test-key', defaultModel: 'default-model' });
+  function open(options: AnthropicApiEngineOptions = {}): AnthropicApiEngine {
+    const engine = new AnthropicApiEngine({ apiKey: 'test-key', defaultModel: 'default-model', ...options });
     (engine as unknown as { clientPromise: Promise<unknown> }).clientPromise = Promise.resolve({
       messages: {
         stream(body: unknown) {
@@ -149,5 +149,20 @@ describe('API static admission', () => {
       model: 'request-model', messages: [{ role: 'user', content: request.prompt }],
     }));
     expect(bodies[0]).not.toHaveProperty('tools');
+    expect(bodies[0]).not.toHaveProperty('output_config');
+    expect(result.requested).not.toHaveProperty('effort');
+  });
+
+  it('sends the engine effort as output_config.effort, a request effort over it, and records it', async () => {
+    const { open, bodies } = harness();
+    const engine = open({ effort: 'low' });
+    const fromEngine = await engine.run(request, () => {}, signal());
+    expect(bodies[0]).toEqual(expect.objectContaining({ output_config: { effort: 'low' } }));
+    expect(fromEngine.requested).toEqual(engineSelection({ ...selected, effort: 'low' }));
+    expect(await engine.admit({ ...staticRequest(), effort: 'max' }, signal()))
+      .toEqual(engineSelection({ ...selected, effort: 'max' }));
+    const fromRequest = await engine.run({ ...request, effort: 'max' }, () => {}, signal());
+    expect(bodies[1]).toEqual(expect.objectContaining({ output_config: { effort: 'max' } }));
+    expect(fromRequest.effective.effort).toBe('max');
   });
 });

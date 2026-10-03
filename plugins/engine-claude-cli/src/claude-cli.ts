@@ -46,6 +46,8 @@ export interface ClaudeCliEngineOptions {
     | 'plan'
     | 'dontAsk'
     | 'auto';
+  /** Passed as `claude --effort <level>`; a request's own `effort` wins. */
+  readonly effort?: string;
   /**
    * Run without the person's own settings, hooks, plugins, skills, MCP
    * servers and `~/.claude/CLAUDE.md`. The repository's settings and
@@ -68,6 +70,7 @@ export interface ClaudeSeat {
 
 export interface ClaudeSeatOptions {
   readonly permissionMode?: ClaudeCliEngineOptions['permissionMode'];
+  readonly effort?: string;
   readonly clean?: boolean;
 }
 
@@ -78,6 +81,7 @@ export function claude(model: string, options: ClaudeSeatOptions = {}): ClaudeSe
     engine: new ClaudeCliEngine({
       defaultModel: model,
       permissionMode: options.permissionMode ?? 'bypassPermissions',
+      ...(options.effort === undefined ? {} : { effort: options.effort }),
       ...(options.clean === undefined ? {} : { clean: options.clean }),
     }),
     identity: {
@@ -274,6 +278,8 @@ export function buildClaudeArgs(
   const model = modelFor(req, opts);
   const args = ['-p', '--output-format', 'stream-json', '--verbose'];
   if (model) args.push('--model', model);
+  const effort = req.effort ?? opts.effort;
+  if (effort !== undefined) args.push('--effort', effort);
   if (req.system)
     args.push(
       req.systemMode === 'replace' ? '--system-prompt' : '--append-system-prompt',
@@ -416,7 +422,8 @@ export class ClaudeCliEngine implements Engine {
     try {
       expected = expectedSelection === undefined ? undefined : engineSelection(expectedSelection);
       proposed = engineSelection({ adapter: 'claude-cli', provider: 'anthropic',
-        model: modelFor(req, this.opts) ?? null, capabilities: req.tools ?? [] });
+        model: modelFor(req, this.opts) ?? null, capabilities: req.tools ?? [],
+        effort: req.effort ?? this.opts.effort });
     } catch {
       throw new EngineError({ kind: 'invalid-config', message: 'invalid Claude selection' });
     }

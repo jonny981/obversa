@@ -57,6 +57,8 @@ export interface EngineSelectionRecord {
   readonly model: string | null;
   readonly executable: string | null;
   readonly capabilities: readonly string[];
+  /** The reasoning effort the engine was asked to use, when one was set. */
+  readonly effort?: string;
 }
 
 export interface ExecutionTarget {
@@ -101,6 +103,12 @@ export interface AgentRequest {
   system?: string;
   systemMode?: 'append' | 'replace';
   model?: string;
+  /**
+   * How hard the model thinks, in the engine's own levels, for this step. It
+   * overrides the engine's own `effort` option. Unset leaves the engine's
+   * choice, or the tool's own default.
+   */
+  effort?: string;
   maxTokens?: number;
   jsonSchema?: JsonValue;
   tools?: string[];
