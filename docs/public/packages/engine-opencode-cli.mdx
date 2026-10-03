@@ -128,6 +128,7 @@ skips the repository's own skills.
 | `identity` | `OpenCodeCliIdentity` | required | What this instance serves. |
 | `tools` | `readonly string[]` | none | `OpenCodeSeatOptions` only: the tools the seat may use. |
 | `auth` | `JsonObject` | none | Login data to use instead of yours. Also an `OpenCodeSeatOptions` field. |
+| `effort` | `string` | none | Passed as `--variant <level>`, OpenCode's provider-specific reasoning effort. A request's `effort` wins. Also an `OpenCodeSeatOptions` field. See [Reasoning effort](/packages/engines#reasoning-effort). |
 | `clean` | `boolean` | [See the default](/packages/engines#the-default) | On by default: your own setup stays out. `false` runs on your own setup. Also an `OpenCodeSeatOptions` field. [`clean`](#clean). |
 
 ## Errors

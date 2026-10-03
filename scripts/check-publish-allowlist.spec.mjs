@@ -353,6 +353,31 @@ test("the publish verifier reports an invalid registry URL", async () => {
   }
 });
 
+test("the tag step tries a failed push again, so a one-off server error does not fail the release", async (t) => {
+  const registry = await registryFixture(t);
+  const root = makeWorkspace({ "packages/tagged": { name: "@x/tagged", version: "1.0.0" } });
+  const calls = [];
+  let pushes = 0;
+  const run = (command, args) => {
+    calls.push(args.join(" "));
+    if (args[0] === "push") {
+      pushes += 1;
+      return pushes === 1
+        ? { status: 1, stdout: "", stderr: "remote: fatal error in commit_refs" }
+        : { status: 0, stdout: "", stderr: "" };
+    }
+    return { status: 0, stdout: "", stderr: "" };
+  };
+  try {
+    const { pushed, problems } = await tagPublished({ registry, root, allowlist: new Set(["@x/tagged"]), run, retry: { totalMs: 0 }, pushPauseMs: 0 });
+    assert.deepEqual(problems, []);
+    assert.deepEqual(pushed, ["@x/tagged@1.0.0"]);
+    assert.equal(calls.filter((c) => c === "push origin refs/tags/@x/tagged@1.0.0").length, 2, "pushed again after the failure, then stopped");
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
 test("the tag step pushes each existing registry-confirmed tag by name and refuses the rest", async (t) => {
   const registry = await registryFixture(t);
   const root = makeWorkspace({
@@ -374,9 +399,10 @@ test("the tag step pushes each existing registry-confirmed tag by name and refus
     return { status: 0, stdout: "", stderr: "" };
   };
   try {
-    const { pushed, problems } = await tagPublished({ registry, root, allowlist, run, retry: { totalMs: 0 } });
+    const { pushed, problems } = await tagPublished({ registry, root, allowlist, run, retry: { totalMs: 0 }, pushPauseMs: 0 });
     const text = problems.join("\n");
     assert.deepEqual(pushed, ["@x/tagged@1.0.0"], "only the existing tag is pushed");
+    assert.equal(calls.filter((c) => c === "push origin refs/tags/@x/flaky@1.0.0").length, 3, "a push that keeps failing is tried three times before it is reported");
     assert.ok(calls.some((c) => c === "push origin refs/tags/@x/tagged@1.0.0"), "the intended tag is pushed by name");
     assert.ok(!calls.some((c) => c.includes("--tags")), "never a blanket --tags push");
     // Regression: registry-present plus a missing local tag must never run

@@ -103,6 +103,9 @@ function validateSelection(
     model: nullableText(value.model, `${field}.model`),
     executable: nullableExecutable(value.executable, `${field}.executable`),
     capabilities: Object.freeze(capabilities),
+    ...(value.effort === undefined
+      ? {}
+      : { effort: nonEmptyText(value.effort, `${field}.effort`) }),
   });
 }
 
@@ -184,6 +187,7 @@ export function engineSelection(input: {
   model?: string | null;
   executable?: string | null;
   capabilities?: readonly string[];
+  effort?: string;
 }): EngineSelectionRecord {
   return validateSelection({
     adapter: input.adapter,
@@ -193,6 +197,7 @@ export function engineSelection(input: {
     model: input.model ?? null,
     executable: input.executable ?? null,
     capabilities: input.capabilities ?? [],
+    ...(input.effort === undefined ? {} : { effort: input.effort }),
   }, 'selection');
 }
 

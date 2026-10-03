@@ -140,6 +140,10 @@ agent. It uses the tools it was built with, wherever those tools act. In
 the example, the agent's own tool saves the page into the directory the run
 starts in.
 
+How hard the model thinks stays the SDK's too: set it in the agent's
+`modelSettings`. The seat's `effort` option and a step's `effort` are not
+supported, and setting either throws an error that says so.
+
 An agent that hands off to another agent is still one engine attempt. The
 review, send-back, pause, resume and record around the agent work as for
 any engine. An OpenAI agent seat declares no Obversa tools, so the runtime
@@ -168,6 +172,8 @@ is set somewhere else, such as on a `Runner`.
   authentication or billing message is typed as one.
 - **`invalid-config`** when the run stops to wait for a tool approval: the
   engine cannot give the approval.
+- **`invalid-config`** when a step sets `effort`: the agent decides how
+  its model runs.
 - **`aborted`** when the run aborts, and **`timeout`** when the request's
   `timeoutMs`, plus `timeoutGraceMs` when set, passes.
 

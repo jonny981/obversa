@@ -96,6 +96,7 @@ setup, no clean mode, read-only held on your setup.
 | `version` | `string` | required | The version the CLI must report. |
 | `identity` | `{ provider, modelFamily }` | required | What this instance serves; either may be `null`. |
 | `permissionMode` | `PermissionMode` | none | The CLI's permission mode. |
+| `effort` | `string` | none | Passed as `--reasoning-effort <level>`. A request's `effort` wins. See [Reasoning effort](/packages/engines#reasoning-effort). |
 | `clean` | `boolean` | [See the default](/packages/engines#the-default) | `true` throws: Grok has no clean mode. [`clean`](#clean). |
 
 ## Errors

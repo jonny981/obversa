@@ -251,4 +251,21 @@ describe.runIf(process.platform !== 'win32')('Devin process', () => {
     expect((error as EngineError).kind).toBe('invalid-config');
     expect(existsSync(f.calls)).toBe(false);
   });
+
+  it('refuses effort on the seat and the engine, naming why', () => {
+    const why = 'devin has no reasoning effort switch, so it cannot take effort; leave effort unset';
+    expect(() => devin('swe-2-max', { effort: 'high' })).toThrow(why);
+    expect(() => new DevinCliEngine({ effort: 'high' })).toThrow(why);
+  });
+
+  it('refuses a step that sets effort before any process starts', async () => {
+    const f = fixture();
+    const error = await f.engine.run({ ...f.request, effort: 'high' }, () => {}, signal())
+      .catch((caught: unknown) => caught);
+    expect(error).toMatchObject({
+      kind: 'invalid-config',
+      message: 'devin has no reasoning effort switch, so it cannot take effort; leave effort unset',
+    });
+    expect(existsSync(f.calls)).toBe(false);
+  });
 });

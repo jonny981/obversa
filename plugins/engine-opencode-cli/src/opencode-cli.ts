@@ -134,6 +134,11 @@ export interface OpenCodeCliEngineOptions {
   /** Provider-keyed OpenCode login data to use instead of the person's own login. */
   readonly auth?: JsonObject;
   /**
+   * Passed as `opencode run --variant <level>`, OpenCode's provider-specific
+   * reasoning effort; a request's own `effort` wins.
+   */
+  readonly effort?: string;
+  /**
    * Run with an empty OpenCode config folder in place of the person's own:
    * no settings, plugins, agents, MCP servers or global instruction files of
    * theirs. The repository's own config and instruction files still apply,
@@ -148,6 +153,7 @@ export interface OpenCodeSeatOptions {
   readonly tools?: readonly string[];
   /** Provider-keyed OpenCode login data to use instead of the person's own login. */
   readonly auth?: JsonObject;
+  readonly effort?: string;
   readonly clean?: boolean;
 }
 
@@ -172,6 +178,7 @@ export function opencode(modelName: string, options: OpenCodeSeatOptions): OpenC
       version: SUPPORTED_VERSION,
       identity: { provider: selected.provider, modelFamily },
       ...(options.auth === undefined ? {} : { auth: options.auth }),
+      ...(options.effort === undefined ? {} : { effort: options.effort }),
       ...(options.clean === undefined ? {} : { clean: options.clean }),
     }),
     identity: {
@@ -755,6 +762,7 @@ export function buildOpenCodeInvocation(
     OPENCODE_DISABLE_AUTOUPDATE: '1',
     OPENCODE_DISABLE_SHARE: '1',
   });
+  const effort = request.effort ?? options.effort;
   return Object.freeze({
     args: Object.freeze([
       'run',
@@ -762,6 +770,7 @@ export function buildOpenCodeInvocation(
       'json',
       '--model',
       selectedModel.value,
+      ...(effort === undefined ? [] : ['--variant', effort]),
       '--dir',
       request.cwd,
     ]),
@@ -1159,6 +1168,7 @@ export class OpenCodeCliEngine implements Engine {
         ? {}
         : { environment: this.#environment }),
       ...(Object.keys(this.#auth).length === 0 ? {} : { auth: this.#auth }),
+      ...(options.effort === undefined ? {} : { effort: options.effort }),
       ...(options.clean === undefined ? {} : { clean: options.clean }),
     });
   }
@@ -1211,6 +1221,7 @@ export class OpenCodeCliEngine implements Engine {
         adapter: 'opencode-cli', adapterVersion: this.#version,
         provider: selectedProvider, modelFamily: selectedFamily,
         model: selectedModel.value, executable: this.#executable, capabilities,
+        effort: request.effort ?? this.#options.effort,
       });
       if (expectedSelection !== undefined
         && !isDeepStrictEqual(engineSelection(expectedSelection), selected)) {

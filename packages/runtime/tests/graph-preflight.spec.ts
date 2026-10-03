@@ -231,6 +231,23 @@ describe('graph executor preflight', () => {
     expect((await f.state()).state.phase).toBe('admitted');
   });
 
+  it('passes the selection effort to static, live and normal requests', async () => {
+    const f = await fixture({ lanes: [{ id: 'lane', targets: [primary] }] });
+    const engine = f.engines[0]!;
+    const echo = (request: { readonly effort?: string }, value: EngineSelectionRecord) =>
+      engineSelection({ ...value, ...(request.effort === undefined ? {} : { effort: request.effort }) });
+    engine.admitHook = async (request) => echo(request, engine.measured);
+    engine.liveHook = async (request) => assistantResult({ text: 'ok', requested: echo(request, toolFree(engine.measured)), usage });
+    engine.normalHook = async (request) => {
+      const requested = echo(request, engine.measured);
+      return { parts: [{ kind: 'structured', value: { ok: true }, final: true }], usage, requested, effective: requested };
+    };
+    const engines = f.options.engines.map((binding) => ({ ...binding, selection: engineSelection({ ...binding.selection, effort: 'high' }) }));
+    expect(await (await f.executor({ engines })).run(signal())).toMatchObject({ kind: 'complete' });
+    expect(f.calls.map((call) => call.kind)).toEqual(['static', 'live', 'normal']);
+    expect(f.calls.map((call) => call.request.effort)).toEqual(['high', 'high', 'high']);
+  });
+
   it('checks every real normal context and the unused lane before live', async () => {
     const other = { ...primary, adapter: 'other', model: 'other-model' };
     const f = await fixture({ lanes: [{ id: 'lane', targets: [primary, backup] }, { id: 'unused', targets: [other] }],

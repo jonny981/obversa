@@ -121,6 +121,7 @@ servers, because the switch that keeps yours out keeps every server out.
 | `defaultModel` | `string` | none | The model when the request names none. |
 | `minToolIntervalMs` | `number` | none | A floor on the time between tool calls. |
 | `memory` | `Memory` | none | The adapter Claude reaches as a tool. |
+| `effort` | `string` | none | Passed as the SDK's `effort` option. A request's `effort` wins. See [Reasoning effort](/packages/engines#reasoning-effort). |
 | `clean` | `boolean` | [See the default](/packages/engines#the-default) | On by default: your own setup stays out. `false` runs on your own setup. [`clean`](#clean). |
 
 ## Errors

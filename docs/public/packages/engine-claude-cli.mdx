@@ -99,6 +99,7 @@ servers, because the switch that keeps yours out keeps every server out.
 | `defaultModel` | `string` | none | The model when the request names none. |
 | `cliBinary` | `string` | `claude` on `PATH` | The executable to run. |
 | `cliArgs` | `readonly string[]` | none | Extra arguments for every call. |
+| `effort` | `string` | none | Passed as `--effort <level>`. A request's `effort` wins. Also a `ClaudeSeatOptions` field. See [Reasoning effort](/packages/engines#reasoning-effort). |
 | `clean` | `boolean` | [See the default](/packages/engines#the-default) | On by default: your own setup stays out. `false` runs on your own setup. [`clean`](#clean). |
 
 ## Errors
