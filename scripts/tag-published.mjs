@@ -28,7 +28,12 @@ function git(run, cwd, ...args) {
 }
 
 // A retried publish can skip existing versions, so read the registry, not its log.
-export async function tagPublished({ registry = RELEASE_REGISTRY, root = ROOT, allowlist = readAllowlist(), run = spawnSync, remote = "origin", retry } = {}) {
+// GitHub sometimes rejects one ref of a run with a server error ("fatal
+// error in commit_refs") while the next push of the same tag goes through, so
+// a failed push is tried again before it counts as a failure.
+const PUSH_ATTEMPTS = 3;
+
+export async function tagPublished({ registry = RELEASE_REGISTRY, root = ROOT, allowlist = readAllowlist(), run = spawnSync, remote = "origin", retry, pushPauseMs = 5000 } = {}) {
   const byName = new Map(listWorkspacePackages(root).map((p) => [p.name, p]));
   const problems = [];
   const pushed = [];
@@ -48,7 +53,11 @@ export async function tagPublished({ registry = RELEASE_REGISTRY, root = ROOT, a
       problems.push(`${tag}: published but the tag does not exist locally — a retried publish skipped creating it. Tag the commit that published this version, never a moved HEAD: git tag ${tag} <publish-commit> && git push ${remote} refs/tags/${tag}`);
       continue;
     }
-    const push = git(run, root, "push", remote, `refs/tags/${tag}`);
+    let push = git(run, root, "push", remote, `refs/tags/${tag}`);
+    for (let attempt = 1; !push.ok && attempt < PUSH_ATTEMPTS; attempt += 1) {
+      await new Promise((resolve) => setTimeout(resolve, pushPauseMs));
+      push = git(run, root, "push", remote, `refs/tags/${tag}`);
+    }
     if (!push.ok) {
       problems.push(`${tag}: push failed (${push.out})`);
       continue;
