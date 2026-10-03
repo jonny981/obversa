@@ -1,6 +1,6 @@
 {
   "name": "@obversa/engine-claude-cli",
-  "version": "0.1.3",
+  "version": "0.1.4",
   "description": "Run engine requests through a fresh Claude CLI process.",
   "author": "Jonny Neill <jonnyneill@hotmail.com>",
   "type": "module",
