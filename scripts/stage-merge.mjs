@@ -137,6 +137,7 @@ export const stageBranches = {
   F157: 'release/0.2.2',
   F176: 'feat/panel-synthesis',
   F178: 'release/0.2.4',
+  F181: 'release/0.2.5',
   F174: 'feat/engine-effort',
   F168: 'feat/clean-mode',
   F169: 'fix/product-decision-reaches-builder',
