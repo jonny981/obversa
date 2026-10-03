@@ -1,0 +1,5 @@
+---
+"@obversa/runtime": patch
+---
+
+A judge needs no cap. With `judge(seat)`, the judge ends the rounds itself, and a run ends when the judge stops it or the review passes. When the judge decides each finding, which it does by default, acting on any finding runs another round and skipping every finding passes; only a `product_decision` answer still asks a person. When it judges whole rounds only, or answers no finding, its whole-round answer routes: `holds` or `over_polishing` passes, `not_converging` fails, and `product_decision` asks a person. A cap is an optional backstop. After the last review it allows, the judge is asked once more and told it is the last round, so its answer, not the cap, decides how the run ends. If it lets the work stand, the step passes and its open findings are on the outcome as `openFindings`. Any other answer fails with the cap named in the reason, and a person asked at that point has their answer recorded, but no further round runs. This holds for a `workflow()` stage's `refine` and a `dag()`'s `maxKickbacks` alike.

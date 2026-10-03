@@ -15,7 +15,7 @@ import { LoopError } from './core/errors.js';
 import { loop } from './core/loop.js';
 import { kickback, revisionFromOutcome } from './core/feedback.js';
 import { reviewPanel } from './core/synthesis.js';
-import { consultJudge, countBySeverity, hasBlockFinding, isJudge, judgedFindings, productDecisionFeedback, type JudgeRound, type JudgeState, type SkippedFinding } from './core/judge.js';
+import { consultJudge, countBySeverity, hasBlockFinding, isJudge, judgedFindings, lastRoundAnswered, productDecisionFeedback, type JudgeRound, type JudgeState, type SkippedFinding } from './core/judge.js';
 import type { ConditionInput, DagConfig, Job, JobContext, Judge, Outcome } from './core/types.js';
 import { checkpointInteraction, interactionDeclaration, hasSavedInteraction, humanReview, interactionIdentity, jsonSnapshot, outcomeSnapshot, requestInteraction, savedInteraction, type InteractionBinding, type InteractionResponse } from './core/interaction.js';
 
@@ -52,9 +52,10 @@ export interface WorkflowStageBase {
   readonly sendsBackTo?: string;
   /**
    * How many more rounds a reviewed stage or a kickback target gets: a plain
-   * count, or `judge(seat, { cap, questions })` to let a seat decide between
-   * a review's verdict and the send-back, with `cap` as the hard backstop
-   * that stops it regardless of what the judge says.
+   * count, or `judge(seat)` to let a seat decide between a review's verdict
+   * and the send-back. With no cap, the rounds end when the judge stops them
+   * or the review passes. `judge(seat, { cap })` adds a backstop: after the
+   * last review the cap allows, the judge's answer decides the outcome.
    */
   readonly refine?: number | Judge;
   /** An interrupted attempt may run again without a person's reconciliation. */
@@ -201,8 +202,8 @@ function refineCount(refine: number | undefined, label: string): number {
   return refine;
 }
 
-/** The numeric cap, whichever shape `refine` was given. */
-function refineCap(refine: number | Judge): number {
+/** The numeric cap, whichever shape `refine` was given; none for a judge with no cap. */
+function refineCap(refine: number | Judge): number | undefined {
   return isJudge(refine) ? refine.cap : refine;
 }
 
@@ -652,7 +653,9 @@ function lineDiffCount(before: string | undefined, after: string): number {
  * Wrap a reviewer panel so a judge sits between its verdict and the
  * send-back. A block finding always goes back on its own, the judge is
  * never asked about one, so the loop's own `maxReviewRestarts` (the judge's
- * cap) is the only thing bounding it, same as a plain numeric `refine`.
+ * cap, when it has one) is the only thing bounding it, same as a plain
+ * numeric `refine`. After the last review the cap allows, the stage fails
+ * on a block, and otherwise the judge's answer decides the outcome.
  * Otherwise the judge sees the use case, the latest findings, the findings
  * it skipped before, every round so far, and the file being refined when
  * the stage declares one, and its answer either lets the review stand (a
@@ -699,7 +702,14 @@ function judgedReview(brief: BriefSource, named: NamedStage, cfgJudge: Judge, pa
     });
     if (panelOutcome.status === 'pass') return panelOutcome;
     const findings = revisionFromOutcome(panelOutcome)?.findings ?? [];
-    if (hasBlockFinding(findings)) return panelOutcome;
+    // The loop re-enters after a failing review only while
+    // `ctx.iteration < cap` (its `maxReviewRestarts`); an iteration whose
+    // review did not run also counts, so this errs towards ending.
+    const lastRound = cfgJudge.cap !== undefined && ctx.iteration >= cfgJudge.cap;
+    if (hasBlockFinding(findings)) {
+      if (!lastRound) return panelOutcome;
+      throw new LoopError({ code: 'VALIDATION', phase: 'review', path: ctx.path, message: `a block finding is open after the last round the cap of ${cfgJudge.cap} allows` });
+    }
     const round = history.length + 1;
     const state: JudgeState = saved ? saved.state as unknown as JudgeState : {
       ...(productFeedback.length ? { productFeedback } : {}),
@@ -710,13 +720,11 @@ function judgedReview(brief: BriefSource, named: NamedStage, cfgJudge: Judge, pa
       ...(skipped.length ? { skipped } : {}),
       rounds: history,
       round,
-      cap: cfgJudge.cap,
+      ...(cfgJudge.cap !== undefined ? { cap: cfgJudge.cap } : {}),
+      ...(lastRound ? { lastRound: true } : {}),
     };
-    // The loop re-enters after a failing review only while
-    // `ctx.iteration < cap` (its `maxReviewRestarts`); an iteration whose
-    // review did not run also counts, so this errs towards not asking.
     const result = await consultJudge(cfgJudge, state, ctx, ctx.path, {
-      identity, pending: saved !== undefined, roundLeft: ctx.iteration < cfgJudge.cap,
+      identity, pending: saved !== undefined,
       save: (questionState) => checkpointInteraction(ctx, checkpointPath, identity, jsonSnapshot({ state: questionState, panel: outcomeSnapshot(panelOutcome) })),
     });
     if ('paused' in result) return result.paused;
@@ -731,6 +739,8 @@ function judgedReview(brief: BriefSource, named: NamedStage, cfgJudge: Judge, pa
     // A person's answer goes back to the builder as the next round; the
     // judge sees the result only after that round has been reviewed.
     if ('answer' in result) {
+      // No build round is left for the answer: the stage stops here.
+      if (lastRound) throw new LoopError({ code: 'VALIDATION', phase: 'review', path: ctx.path, message: lastRoundAnswered(result.state, result.answer) });
       // The judge decided each finding before asking: the answer goes with the acted ones only.
       const answered = judgedFindings(findings, { findings: result.state.decided }, result.state.skipped ?? [], round);
       skipped = answered.skipped;
@@ -739,16 +749,16 @@ function judgedReview(brief: BriefSource, named: NamedStage, cfgJudge: Judge, pa
     const { decision } = result;
     const judged = judgedFindings(findings, decision, result.state.skipped ?? [], round);
     skipped = judged.skipped;
-    // No builder round remains for a person's answer, so the review's
-    // rejection stands and the stage stops at its cap.
-    if (decision.stop === 'product_decision') return panelOutcome;
     if (!decision.again) {
       if (decision.stop === 'fail') {
-        // Not converging: another round will not fix it, so the stage stops
-        // here instead of trying again, and the review's own failure stands.
+        // Not converging, or any answer but a ship after the last round the
+        // cap allows: the stage stops here, and the review's failure stands.
         throw new LoopError({ code: 'VALIDATION', phase: 'review', path: ctx.path, message: decision.reason });
       }
-      return { status: 'pass', confidence: panelOutcome.confidence, summary: decision.reason, data: panelOutcome.data };
+      return {
+        status: 'pass', confidence: panelOutcome.confidence, summary: decision.reason, data: panelOutcome.data,
+        ...(lastRound ? { openFindings: findings } : {}),
+      };
     }
     // The panel's own summary lists every finding; when the judge decided
     // each one, the one-line reason stands in for it so the builder reads
@@ -783,8 +793,9 @@ function stageJob(
     const reviewRole = role(roles, config.reviewedBy);
     if (!Array.isArray(reviewRole) && 'kind' in reviewRole && reviewRole.kind === 'person') {
       if (!reviewRole.interaction) throw new TypeError('a human reviewer needs an interaction binding');
+      const humanCap = refineCap(refineOf(config));
       const humanLoop = loop({
-        name: `${named.name}-review`, body: job, max: refineCap(refineOf(config)) + 1,
+        name: `${named.name}-review`, body: job, max: humanCap === undefined ? undefined : humanCap + 1,
         review: humanReview(named.name, {
           question: reviewRole.question, interaction: reviewRole.interaction,
           input: async (ctx) => Object.fromEntries(await Promise.all(writes.map(async (file) => [file, await readFile(join(ctx.workspace.dir, file), 'utf8')]))),
@@ -827,7 +838,7 @@ function stageJob(
         return true;
       }, `${named.name} writes`),
       review,
-      max: cap + 1,
+      max: cap === undefined ? undefined : cap + 1,
       maxReviewRestarts: cap,
       noProgress: { window: 2, gate: true },
     });

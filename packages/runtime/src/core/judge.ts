@@ -74,17 +74,19 @@ export function stopQuestions(what = 'the draft'): JudgeQuestions {
 /**
  * A judge for `refine` or `maxKickbacks`: `seat` runs with workspace mode
  * none (it reads no file itself; everything it needs rides in the prompt),
- * `cap` is the hard backstop on rounds regardless of what the judge says,
- * and `questions` defaults to `stopQuestions()`. `perFinding` asks the judge
- * to act on or skip each finding as well; it defaults to true with the
- * default questions and to false with a caller's own.
+ * and `questions` defaults to `stopQuestions()`. With no `cap`, the rounds
+ * end when the judge stops them or the review passes. A `cap` is an
+ * optional backstop: after the last review it allows, the judge is asked
+ * once more, and only a stop that lets the work stand passes. `perFinding`
+ * asks the judge to act on or skip each finding as well; it defaults to true
+ * with the default questions and to false with a caller's own.
  */
-export function judge(seat: Judge['seat'], opts: { cap: number; questions?: JudgeQuestions; perFinding?: boolean; interaction?: InteractionBinding }): Judge {
-  if (!Number.isSafeInteger(opts.cap) || opts.cap < 1) {
+export function judge(seat: Judge['seat'], opts: { cap?: number; questions?: JudgeQuestions; perFinding?: boolean; interaction?: InteractionBinding } = {}): Judge {
+  if (opts.cap !== undefined && (!Number.isSafeInteger(opts.cap) || opts.cap < 1)) {
     throw new TypeError('judge cap must be a positive integer');
   }
   return {
-    kind: 'judge', seat, cap: opts.cap, questions: opts.questions ?? stopQuestions(),
+    kind: 'judge', seat, ...(opts.cap !== undefined ? { cap: opts.cap } : {}), questions: opts.questions ?? stopQuestions(),
     perFinding: opts.perFinding ?? opts.questions === undefined,
     ...(opts.interaction ? { interaction: opts.interaction } : {}),
   };
@@ -153,7 +155,10 @@ export interface JudgeRound {
   readonly changedLines?: number;
 }
 
-/** What the judge sees. `cap` rides along so it can reason about how much room is left. */
+/**
+ * What the judge sees. `cap` rides along so it can reason about how much
+ * room is left; it is absent when the judge has no cap.
+ */
 export interface JudgeState {
   readonly productFeedback?: readonly InteractionResponse[];
   readonly useCase?: string;
@@ -168,7 +173,9 @@ export interface JudgeState {
   readonly decided?: readonly FindingDecision[];
   readonly rounds: readonly JudgeRound[];
   readonly round: number;
-  readonly cap: number;
+  readonly cap?: number;
+  /** This round's review is the last one the cap allows: no build round follows it. */
+  readonly lastRound?: true;
 }
 
 export interface JudgeDecision {
@@ -182,8 +189,9 @@ export interface JudgeDecision {
    * round will not fix it, so the run stops there and the requesting side's
    * own failure stands. `product_decision` asks a person, then sends the work
    * back to the builder with their answer as another round; the judge is
-   * asked again only after that round is reviewed. Absent when `again` is
-   * true.
+   * asked again only after that round is reviewed. After the last round a
+   * cap allows, no round follows the answer and the run fails. Absent when
+   * `again` is true.
    */
   readonly stop?: 'ship' | 'fail' | 'product_decision';
   /**
@@ -204,10 +212,10 @@ export interface JudgeDecision {
  * another round whatever the probability answers say. A clear yes or no from
  * `holds`, `worth_doing` or `worth_another_round` decides only when there is
  * no choice: a question set without `stop_reason`, or a reply that did not
- * parse. Neither the cap nor a block finding is checked here: the caller
- * enforces the cap itself (a loop's own `maxReviewRestarts`, or a dag's own
- * kickback budget), and a block finding never reaches this function, it
- * always goes back without asking the judge.
+ * parse. Neither the cap nor a block finding is checked here: `askJudge`
+ * turns a decision after the last review the cap allows into a stop, and a
+ * block finding never reaches this function, it always goes back without
+ * asking the judge.
  *
  * `product_decision` pauses for a person's answer, which goes to the builder
  * as the next round. For a terminal stop, `holds` and `over_polishing` say
@@ -287,14 +295,31 @@ function roundDecision(answers: Readonly<Record<string, JudgeAnswer>>): JudgeDec
 }
 
 /**
+ * The line the judge reads about the round limit: none with no cap, and the
+ * last round when no build round follows this review. Absent otherwise.
+ */
+function roundLimit(state: JudgeState): string | undefined {
+  if (state.cap === undefined) return 'No round limit: the rounds end when you stop them or the review passes.';
+  if (state.lastRound) return `This is the last round the cap of ${state.cap} allows: no build round follows, so your answer decides how this ends.`;
+  return undefined;
+}
+
+/**
  * Ask the judge, and record its answer. Runs `cfg.seat` as a workspace-mode-
  * none agent turn over `state` and `cfg.questions`, parses the reply as the
  * judge engine's own `{ [question]: JudgeAnswer }` shape, and emits
  * `refine:judge` so a person reading the record sees what it answered and
- * why. When the judge decides each finding, the questions also carry one
- * per finding in `state.latestFindings`. A reply that fails to parse becomes
- * an empty answers object , `judgeDecision` reads that as no clear answer,
- * which runs another round, so the caller's own cap is what ends the rounds.
+ * why. The state it sends carries `limit`, a line about the round limit,
+ * when there is no cap or this is the last round. When the judge decides
+ * each finding, the questions also carry one per finding in
+ * `state.latestFindings`. A reply that fails to parse becomes an empty
+ * answers object, and `judgeDecision` reads that as no clear answer, which
+ * runs another round.
+ *
+ * After the last review the cap allows (`state.lastRound`), only a stop
+ * that lets the work stand passes, and it records the open findings; a
+ * `product_decision` still asks a person; anything else is a stop that
+ * fails, with the cap named in the reason.
  */
 export async function askJudge(
   cfg: Judge,
@@ -303,6 +328,7 @@ export async function askJudge(
   path: readonly string[],
 ): Promise<{ answers: Readonly<Record<string, JudgeAnswer>>; decision: JudgeDecision }> {
   const perFinding = cfg.perFinding && state.latestFindings.length > 0;
+  const limit = roundLimit(state);
   const judgeJob = agentJob({
     label: 'refine:judge',
     engine: cfg.seat.engine,
@@ -310,7 +336,10 @@ export async function askJudge(
     workspaceMode: 'none',
     tools: [],
     leaf: true,
-    prompt: JSON.stringify({ state, questions: perFinding ? { ...cfg.questions, ...findingQuestions(state.latestFindings) } : cfg.questions }),
+    prompt: JSON.stringify({
+      state: limit === undefined ? state : { ...state, limit },
+      questions: perFinding ? { ...cfg.questions, ...findingQuestions(state.latestFindings) } : cfg.questions,
+    }),
   });
   const outcome = await judgeJob({ ...ctx, depth: ctx.depth + 1, path: [...path, 'refine-judge'] });
   let answers: Record<string, JudgeAnswer> = {};
@@ -324,12 +353,16 @@ export async function askJudge(
       // Left empty: an unreadable answer routes as no clear answer, not a crash.
     }
   }
-  const decision = judgeDecision(answers, perFinding ? state.latestFindings.map((_, index) => findingId(index)) : undefined);
+  const decided = judgeDecision(answers, perFinding ? state.latestFindings.map((_, index) => findingId(index)) : undefined);
+  const decision: JudgeDecision = state.lastRound && decided.stop !== 'ship' && decided.stop !== 'product_decision'
+    ? { ...decided, again: false, stop: 'fail', reason: `${decided.reason}; this was the last round the cap of ${state.cap} allows` }
+    : decided;
   const status = decision.stop === 'ship' ? 'pass' : decision.stop === 'fail' ? 'fail' : undefined;
   ctx.emit({
     kind: 'refine:judge', ts: Date.now(), path: [...path], answers, reason: decision.reason,
     route: decision.again ? 'again' : 'stop', rule: decision.rule, ...(status ? { status } : {}),
     ...(decision.findings ? { findings: decision.findings } : {}),
+    ...(state.lastRound && decision.stop === 'ship' ? { openFindings: state.latestFindings } : {}),
   });
   return { answers, decision };
 }
@@ -338,21 +371,21 @@ export async function askJudge(
  * Ask the judge, or resume its pending product question. When the judge
  * chooses `product_decision`, a person is asked, and their answer comes back
  * as `answer` for the caller to send to the builder; the judge is not asked
- * again until that round has been built and reviewed. With `roundLeft`
- * false, no builder round remains for an answer, so the person is not asked
- * and the `product_decision` decision comes back as it is.
+ * again until that round has been built and reviewed. After the last review
+ * the cap allows, the person is still asked, and the caller records their
+ * answer and fails, since no build round follows (`lastRoundAnswered`).
  */
 export async function consultJudge(
   cfg: Judge,
   state: JudgeState,
   ctx: JobContext,
   path: readonly string[],
-  options: { readonly identity: string; readonly pending: boolean; readonly roundLeft?: boolean; readonly save: (state: JudgeState) => void },
+  options: { readonly identity: string; readonly pending: boolean; readonly save: (state: JudgeState) => void },
 ): Promise<{ state: JudgeState; decision: JudgeDecision } | { state: JudgeState; paused: Outcome } | { state: JudgeState; answer: InteractionResponse }> {
   let asked = state;
   if (!options.pending) {
     const { decision } = await askJudge(cfg, state, ctx, path);
-    if (decision.stop !== 'product_decision' || options.roundLeft === false) return { state, decision };
+    if (decision.stop !== 'product_decision') return { state, decision };
     // Kept with the question, so a resumed run still knows which findings the judge would act on.
     if (decision.findings) asked = { ...state, decided: decision.findings };
   }
@@ -364,6 +397,15 @@ export async function consultJudge(
     }), ctx);
   if ('paused' in answer) return { state: asked, paused: answer.paused };
   return { state: { ...asked, productFeedback: [...(asked.productFeedback ?? []), answer.response] }, answer: answer.response };
+}
+
+/**
+ * Why the run stops when a person answers a product decision after the last
+ * review the cap allows: their answer is recorded here, and no build round
+ * follows to apply it.
+ */
+export function lastRoundAnswered(state: JudgeState, answer: InteractionResponse): string {
+  return `the judge requested a product decision after the last round the cap of ${state.cap} allows; a person answered "${answer.prompt}", and no build round follows to apply it`;
 }
 
 /**

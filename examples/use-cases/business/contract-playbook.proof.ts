@@ -100,7 +100,6 @@ await withExample({
     redlineRounds: 2,
     checkerKickbacks: 1,
     judge: ['holds'],
-    cap: 3,
     blockWentBackWithoutTheJudge: true,
     answeredOnPage: 'negotiate',
     mode: run.mode,

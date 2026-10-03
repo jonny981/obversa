@@ -42,7 +42,7 @@ const thirdDraft = [
 // brief never gave, then only a taste note. The judge sends the first two
 // back as worth another round and stops the loop on the third; the run
 // stops for the editor. Three writer turns, three grader turns, three
-// judged rounds, within the cap.
+// judged rounds.
 await withExample({
   here,
   example: 'writer-grader-cap',
@@ -83,7 +83,6 @@ await withExample({
     stages: 2,
     drafts: 3,
     judge: ['continue', 'continue', 'holds'],
-    cap: 3,
     pausedAt: 'publish',
     mode: run.mode,
   }, null, 2));

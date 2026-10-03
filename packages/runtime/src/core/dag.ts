@@ -46,7 +46,7 @@ import { mergeLock, mergeSynthesis } from './merge.js';
 import type { EnvHandle } from '../env/environment.js';
 import { LoopError } from './errors.js';
 import { revisionFromOutcome } from './feedback.js';
-import { consultJudge, countBySeverity, hasBlockFinding, isJudge, judgedFindings, productDecisionFeedback, type JudgeRound, type JudgeState, type SkippedFinding } from './judge.js';
+import { consultJudge, countBySeverity, hasBlockFinding, isJudge, judgedFindings, lastRoundAnswered, productDecisionFeedback, type JudgeRound, type JudgeState, type SkippedFinding } from './judge.js';
 import { checkpointInteraction, interactionDeclaration, interactionIdentity, jsonSnapshot, outcomeSnapshot, savedInteraction, type InteractionResponse } from './interaction.js';
 import { DEFAULT_FANOUT_CONCURRENCY } from './concurrency.js';
 import { dagResumeIdentity, resumeGuard, RESUME_IDENTITY, RESUME_STAGE_OUTCOMES } from './resume.js';
@@ -175,14 +175,15 @@ export function dag(config: DagConfig): Job {
   const maxKickbacks = config.maxKickbacks ?? 0;
   const perTargetBudget = typeof maxKickbacks !== 'number';
   // A judge's own `cap` stands in for the plain number everywhere the budget
-  // is a hard integer limit; `targetJudge` is the extra, smart-routing layer
-  // consulted only when the numeric cap has not already settled the request.
+  // is a hard integer limit, and a judge with no cap sets no limit;
+  // `targetJudge` is the extra, smart-routing layer consulted on every
+  // request without a block finding, the one after its cap included.
   const targetJudge = (target: string): Judge | undefined => {
     if (typeof maxKickbacks === 'number') return undefined;
     const budget = maxKickbacks[target];
     return isJudge(budget) ? budget : undefined;
   };
-  const targetLimit = (target: string): number => {
+  const targetLimit = (target: string): number | undefined => {
     if (typeof maxKickbacks === 'number') return maxKickbacks;
     const budget = maxKickbacks[target] ?? 0;
     return isJudge(budget) ? budget.cap : budget;
@@ -605,8 +606,9 @@ export function dag(config: DagConfig): Job {
 
     // Cross-stage feedback: a node may return a `kickback` asking an earlier
     // node to redo work. We re-run the target + its dependents (the cycle lives
-    // in execution, the graph stays acyclic), bounded by `maxKickbacks` so it
-    // provably terminates. An omitted budget or numeric zero keeps the default
+    // in execution, the graph stays acyclic). A numeric `maxKickbacks` or a
+    // judge's `cap` bounds the re-runs; a judge with no cap re-runs until it
+    // stops the rounds or the review passes. An omitted budget or numeric zero keeps the default
     // single-pass path; a target map still records rejected requests at zero.
     if (routeKickbacks) {
       let used = Number(saved?.used ?? 0);
@@ -617,7 +619,7 @@ export function dag(config: DagConfig): Job {
         reason: string,
         accepted: boolean,
         count: number,
-        limit: number,
+        limit: number | undefined,
         note?: string,
       ) =>
         parent.emit({
@@ -629,7 +631,7 @@ export function dag(config: DagConfig): Job {
           reason,
           accepted,
           count,
-          limit,
+          ...(limit !== undefined ? { limit } : {}),
           note,
         });
       for (;;) {
@@ -673,14 +675,16 @@ export function dag(config: DagConfig): Job {
 
         // A judge stands between the review's verdict and the send-back,
         // but never for a block finding: that always goes back on its own,
-        // up to the cap above, the same as a plain numeric budget.
+        // up to the cap above, the same as a plain numeric budget. The
+        // request after the cap's last kickback is the last round's review:
+        // the judge is still asked, and no kickback follows its answer.
         const requestFindings = request.findings ?? [];
         const cfgJudge = targetJudge(to);
-        const withinBudget = perTargetBudget ? count <= limit : used < limit;
+        const lastRound = limit !== undefined && count > limit;
         let effectiveReason = reason;
         let effectiveFindings = request.findings;
         let productDecision: Outcome | undefined;
-        if (cfgJudge !== undefined && withinBudget && !hasBlockFinding(requestFindings)) {
+        if (cfgJudge !== undefined && !hasBlockFinding(requestFindings)) {
           const history = judgeHistory.get(to) ?? [];
           const skipped = judgeSkipped.get(to) ?? [];
           const state: JudgeState = pending?.from === from ? pending.state : {
@@ -689,7 +693,8 @@ export function dag(config: DagConfig): Job {
             ...(skipped.length ? { skipped } : {}),
             rounds: history,
             round: count,
-            cap: cfgJudge.cap,
+            ...(cfgJudge.cap !== undefined ? { cap: cfgJudge.cap } : {}),
+            ...(lastRound ? { lastRound: true } : {}),
           };
           const result = await consultJudge(cfgJudge, state, parent, path, {
             identity: interactionIdentity({ identity, from, to }), pending: pending?.from === from,
@@ -708,6 +713,24 @@ export function dag(config: DagConfig): Job {
             ...history,
             { round: count, findings: requestFindings, counts: countBySeverity(requestFindings) },
           ]);
+          // After the last round the cap allows, `from`'s failure stands with
+          // its findings, and its outcome says why the run stopped there.
+          const stopAtCap = (why: string) => {
+            const failed = results.get(from)!;
+            memo.set(from, Promise.resolve(record(from, {
+              ...failed,
+              summary: `${failed.summary ?? reason} (${why})`,
+              revision: { ...request, reason: `${reason} (${why})` },
+            }, 'done')));
+            rejected.add(from);
+          };
+          if ('answer' in result && lastRound) {
+            // No kickback is left for the answer: the review's own failure stands.
+            const why = lastRoundAnswered(result.state, result.answer);
+            emitKickback(from, to, reason, false, count, limit, why);
+            stopAtCap(why);
+            continue;
+          }
           if ('answer' in result) {
             // A person's answer goes back to the target as this round's
             // feedback; the judge sees the result only after it is reviewed.
@@ -738,6 +761,7 @@ export function dag(config: DagConfig): Job {
                 confidence: results.get(from)!.confidence,
                 summary: decision.reason,
                 data: results.get(from)!.data,
+                ...(lastRound ? { openFindings: requestFindings } : {}),
               }, 'done');
               // `memo` holds the settled promise every dependant already
               // awaits or will await; without this, `from`'s stale failing
@@ -755,16 +779,18 @@ export function dag(config: DagConfig): Job {
               continue;
             }
             // not_converging (or a caller-supplied question set with no
-            // stop kind): another round will not fix it, so `from`'s own
-            // failure stands, same as a plain numeric budget running out.
-            rejected.add(from);
+            // stop kind, or any answer but a ship after the last round the
+            // cap allows): `from`'s own failure stands, same as a plain
+            // numeric budget running out.
+            if (lastRound) stopAtCap(decision.reason);
+            else rejected.add(from);
             continue;
           }
           if (decision) effectiveReason = `${reason} (${decision.reason})`;
           if (judged && request.findings) effectiveFindings = judged.acted;
         }
 
-        if (perTargetBudget ? count > limit : used >= limit) {
+        if (limit !== undefined && (perTargetBudget ? count > limit : used >= limit)) {
           // Budget spent. Reject and stop: the unresolved kickback leaves the
           // kicking node's own outcome to stand.
           emitKickback(

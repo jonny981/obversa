@@ -27,7 +27,8 @@ import { recordedJudge } from '@obversa/runtime/testing';
  * block, should-fix or nice-to-have. A block always goes back to the writer.
  * Otherwise Jev decides each finding: act on it or skip it. The writer gets
  * only the findings Jev acts on, and the reader is told what was skipped.
- * When Jev skips every finding, the page stands. The cap is the last word.
+ * When Jev skips every finding, the page stands. With no cap, the rounds end
+ * when Jev stops them or the reader passes the page.
  * A person then approves the exact bytes, with their sha in the question.
  */
 
@@ -74,7 +75,7 @@ const team = workflow('judge-stops-the-loop', {
       agent: 'write',
       writes: file,
       reviewedBy: 'read',
-      refine: judge(judgeSeat, { cap: 3 }),
+      refine: judge(judgeSeat),
       desc: 'Rewrite the page so a person reads it once and knows what to do. On a later round, change only the sentences the findings name.',
       gate: 'The reader finds nothing that fails, or the judge says the page holds for this use case.',
     }),

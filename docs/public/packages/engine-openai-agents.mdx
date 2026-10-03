@@ -90,7 +90,7 @@ const team = workflow('openai-agents-writer', {
       agent: 'write',
       writes: file,
       reviewedBy: 'read',
-      refine: judge(judgeSeat, { cap: 3 }),
+      refine: judge(judgeSeat),
       desc: 'Rewrite the page so a person reads it once and knows what to do. On a later round, change only the sentences the findings name.',
       gate: 'The reader finds nothing that fails, or the judge says the page holds for this use case.',
     }),

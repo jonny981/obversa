@@ -341,6 +341,7 @@ export function loop(config: LoopConfig): Job {
                 reviewOutcome.summary ??
                 (bodyOutcome ? bodyOutcome.summary : conv.reason),
               data: bodyOutcome?.data,
+              ...(reviewOutcome.openFindings ? { openFindings: reviewOutcome.openFindings } : {}),
             },
           };
         }

@@ -19,7 +19,7 @@ translates with the glossary open. A model from another family reads the
 translation the way an editor would and fails it with what to change, not a
 score. The translator runs again with those findings, and after each round
 a judge, Jev, reads the findings and the rounds so far and says whether
-another round is worth it, up to a cap of three. Then the translator writes
+another round is worth it. Then the translator writes
 down how every glossary term was rendered and where the glossary and
 natural French pulled apart, and the run waits for the person who knows the
 readers. This file is a three-stage team: translate, terms, nuance.
@@ -53,7 +53,7 @@ Answer the editor's question on http://127.0.0.1:64008/
 translate-reflect workflow:start
 translate-reflect ▸ dag (3 nodes)
 translate-reflect · node translate: start
-translate-reflect › translate › translate-review ▸ loop (max 4)
+translate-reflect › translate › translate-review ▸ loop
 translate-reflect › translate › translate-review · iteration 1
 translate-reflect › translate › translate-review • translate
 
@@ -153,9 +153,9 @@ person decides with the trade-off in front of them.
 ```
 
 The translation is reviewed by the Codex seat, reading as an editor. When
-the reviewer does not accept it, `refine: judge(judgeSeat, { cap: 3 })` asks the
-judge whether another round is worth it, and the cap ends the loop after
-three rounds whatever the judge says. The terms note has no reviewer, so
+the reviewer does not accept it, `refine: judge(judgeSeat)` asks the judge
+whether another round is worth it. With no cap, the loop ends when the
+judge stops it or the reviewer accepts the translation. The terms note has no reviewer, so
 only its own seat judges whether every glossary term is on the list. Then
 the run waits for the editor:
 
@@ -168,9 +168,9 @@ the run waits for the editor:
         reviewedBy: 'reflect',
         // The judge. After a round the reflection did not pass, Jev reads the
         // findings and the rounds so far and says whether another round is
-        // worth it; a finding tagged block goes back without asking. The
-        // cap is the backstop: three rounds at most, whatever the judge says.
-        refine: judge(judgeSeat, { cap: 3 }),
+        // worth it; a finding tagged block goes back without asking. With no
+        // cap, the rounds end when the judge stops them or the review passes.
+        refine: judge(judgeSeat),
       }),
 
       stage('terms', {
@@ -232,7 +232,7 @@ const judgeSeat = process.env.JUDGE === 'jev' ? jev() : recordedJudge('judge.jso
  * translates the article with the glossary open; a model from another
  * family reads the translation the way an editor would and returns it
  * with what to change, not a score; the judge decides when another round
- * is worth it, with the cap as the backstop; the translator writes down how every
+ * is worth it, until it stops them or the review passes; the translator writes down how every
  * glossary term was rendered and where the glossary and natural French
  * pulled apart. The person who knows the readers decides the nuance and
  * says publish.
@@ -257,9 +257,9 @@ function createTranslateReflect(judgeSeat: TeamSeat, engines: TranslateEngines =
         reviewedBy: 'reflect',
         // The judge. After a round the reflection did not pass, Jev reads the
         // findings and the rounds so far and says whether another round is
-        // worth it; a finding tagged block goes back without asking. The
-        // cap is the backstop: three rounds at most, whatever the judge says.
-        refine: judge(judgeSeat, { cap: 3 }),
+        // worth it; a finding tagged block goes back without asking. With no
+        // cap, the rounds end when the judge stops them or the review passes.
+        refine: judge(judgeSeat),
       }),
 
       stage('terms', {
@@ -300,7 +300,7 @@ console.log(JSON.stringify(result.outcome, null, 2));
 flowchart LR
   source[("source/article.md, glossary/en-fr.md")] --> translate["translate: Claude, read by Codex as editor"]
   translate -->|findings| judge["judge: Jev"]
-  judge -->|"continue, up to cap: 3"| translate
+  judge -->|continue| translate
   judge --> terms["terms: Claude"]
   terms -.-> nuance{{"nuance: the person who knows the readers"}}
   nuance -->|sendsBackTo| translate
@@ -315,8 +315,11 @@ the judge reads the use case from the brief, the reviewer's findings and
 every round so far, and answers whether the translation holds, whether the
 findings are worth acting on, and whether another round is worth it. The
 loop goes round again on continue and stops when the judge chooses a
-reason to stop. A finding tagged block goes back without asking, and the
-cap of three stands whatever the judge says. The judge's recorded answers
+reason to stop. A finding tagged block goes back without asking. With no
+cap, a run ends when the judge stops it or the review passes. To bound the
+rounds as well, pass `judge(judgeSeat, { cap: 3 })`: after the last review
+the cap allows, the judge is asked once more, and the run fails unless it
+lets the translation stand. The judge's recorded answers
 for the offline run are in `judge.json`, one set per round.
 [A judge stops the loop](/patterns/judge-stops-the-loop) has the questions
 and the rule.

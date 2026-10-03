@@ -19,10 +19,11 @@ import { recordedJudge } from '@obversa/runtime/testing';
  * other model families read it at the same time. Their reviews become one:
  * the first reviewer's seat merges the findings that name the same problem,
  * then each reviewer votes once on the findings it did not raise, and a
- * finding most of them reject is dropped, unless it is a block. A judge then
+ * finding is dropped when the reviewers who reject it outnumber those who
+ * raised or backed it, unless it is a block. A judge then
  * decides each finding that is left: act on it or skip it. The writer gets
  * only the findings the judge acts on. When the judge skips every finding,
- * the page stands. The cap is the last word.
+ * the page stands. With no cap, the judge or the reviewers end the rounds.
  */
 
 // ── The seats ───────────────────────────────────────────────────────────────
@@ -58,7 +59,7 @@ const team = workflow('review-battery', {
       writes: file,
       reviewedBy: 'review',
       synthesise: true,
-      refine: judge(judgeSeat, { cap: 3 }),
+      refine: judge(judgeSeat),
       desc: 'Rewrite the page so a person reads it once and knows what to set. On a later round, change only the sentences the findings name.',
       gate: 'Every reviewer passes, or the judge skips every finding that is left.',
     }),

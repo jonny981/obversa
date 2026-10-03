@@ -65,6 +65,8 @@ is complete.
    `name@version` tag as an exact ref. It never creates a missing tag because
    the registry cannot prove which commit published that version. A missing tag
    stops the release with instructions to tag the original publish commit.
+   A push that fails is tried twice more, five seconds apart, before it stops
+   the release.
 7. **Read the registry back.** `scripts/verify-published.mjs` asks the explicit
    npm registry for every allowlisted name and manifest version.
 
@@ -101,7 +103,10 @@ disable token publishing for those packages.
 - **A package is published without its tag.** Find the commit that published
   it. Create `name@version` at that commit and push that exact tag ref. Never
   create the tag at a later `main` commit.
-- **A tag push fails.** Push that existing exact tag ref again.
+- **A tag push fails three times.** The tag exists only on the runner, so it
+  is gone when the job ends. The package is published. Create the annotated
+  tag at the commit the release's other tags point at, then push that exact
+  tag ref.
 - **Registry verification fails.** Do not call the release complete. Check the
   named package and version, then run the same registry check again.
 

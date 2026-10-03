@@ -108,8 +108,9 @@ export interface Outcome {
    * single channel for it. When `revision.target` is set, the enclosing `dag`
    * re-runs that node and its transitive dependents with `revision.reason`
    * threaded in as `lastReview`, bounded by `DagConfig.maxKickbacks` (default
-   * 0 — ignored). The re-run happens in execution only; the graph stays acyclic
-   * and the re-run budget guarantees termination. Produce one with
+   * 0 — ignored). The re-run happens in execution only; the graph stays acyclic.
+   * A numeric budget or a judge's `cap` bounds the re-runs; a judge with no
+   * cap re-runs until it stops the rounds or the review passes. Produce one with
    * `revisionRequest({ target, findings })` or `kickback(to, reason)`.
    */
   revision?: RevisionRequest;
@@ -119,6 +120,11 @@ export interface Outcome {
    * was thrown away, so the record says what was lost.
    */
   discarded?: ReadonlyArray<{ readonly branch: string; readonly sha: string }>;
+  /**
+   * The review findings still open when a judge let the work stand after
+   * the last review its cap allows.
+   */
+  openFindings?: readonly FeedbackFinding[];
 }
 
 export type RecordedStage =
@@ -550,13 +556,15 @@ export interface JudgeAnswer {
  * A judge, in place of a plain round count, on a `workflow()` stage's
  * `refine` or a `dag()`'s `maxKickbacks`: a seat that answers typed
  * questions about the work and the rounds so far, between a review's
- * verdict and the send-back. `cap` is the hard backstop, reached or not,
- * it always stops the rounds. Built with `judge()`, never by hand.
+ * verdict and the send-back. With no `cap`, the rounds end when the judge
+ * stops them or the review passes. A `cap` is an optional backstop: after
+ * the last review it allows, the judge is asked once more and its answer
+ * decides the outcome. Built with `judge()`, never by hand.
  */
 export interface Judge {
   readonly kind: 'judge';
   readonly seat: TeamSeat;
-  readonly cap: number;
+  readonly cap?: number;
   readonly questions: JudgeQuestions;
   /**
    * Ask the judge to act on or skip each finding, and send the builder only
@@ -797,8 +805,8 @@ export type LoopEvent =
       accepted: boolean;
       /** The one-based request count for this target in this DAG run. */
       count: number;
-      /** The configured limit for this target, including the numeric form. */
-      limit: number;
+      /** The configured limit for this target, including the numeric form. Absent for a judge with no cap. */
+      limit?: number;
       note?: string;
     }
   | {
@@ -862,8 +870,8 @@ export type LoopEvent =
       path: string[];
       answers: Readonly<Record<string, JudgeAnswer>>;
       reason: string;
-      // `again` sends the work back for another round, unless the cap is
-      // spent; `stop` ends the rounds.
+      // `again` sends the work back for another round; `stop` ends the
+      // rounds. After the last review a cap allows, every route is `stop`.
       route: 'again' | 'stop';
       // The answer that decided the route: the chosen reason
       // (`stop_reason: continue`), the probability answer it fell back to
@@ -871,12 +879,17 @@ export type LoopEvent =
       rule: string;
       // The status a stop gives the node: `pass` when the work stands,
       // `fail` when the review's failure stands. Absent on `again`, and on
-      // `stop_reason: product_decision`, which asks a person and then asks
-      // the judge again.
+      // `stop_reason: product_decision`, which asks a person. Their answer
+      // goes to the builder, and the judge is asked again once that round
+      // is reviewed. After the last round a cap allows, no build round and
+      // no judge call follow: the answer is recorded and the run fails.
       status?: 'pass' | 'fail';
       // When the judge decides each finding: every finding of the round, by
       // its id, with `act` (sent back to the builder) or `skip` and why.
       findings?: readonly { readonly id: string; readonly decision: 'act' | 'skip'; readonly reason: string }[];
+      // The findings still open when the judge lets the work stand after
+      // the last review its cap allows.
+      openFindings?: readonly FeedbackFinding[];
     }
   | {
       // A review panel's synthesis: each finding after the merge and the

@@ -187,7 +187,7 @@ try {
   assert.equal(review1.outcome!.status, 'fail');
   assert.equal(review2.outcome!.status, 'pass');
 
-  // The visible `judge(judgeSeat, { cap: 4 })` on the panel's kickback target was
+  // The visible `judge(judgeSeat)` on the panel's kickback target was
   // consulted for real: it answered once, said the round was worth it, and
   // the dag accepted exactly the one kickback that produced.
   const judgeCalls = record.filter((e) => e.kind === 'refine:judge');
@@ -199,7 +199,7 @@ try {
   assert.equal(kickbacks[0]!.to, 'implement');
   assert.equal(kickbacks[0]!.accepted, true);
   assert.equal(kickbacks[0]!.count, 1);
-  assert.equal(kickbacks[0]!.limit, 4);
+  assert.equal(kickbacks[0]!.limit, undefined, 'a judge with no cap sets no limit');
 
   // 5. The run waits at approve and prints a page. The proof reads the
   // question there while it is pending, so the run was still going and the

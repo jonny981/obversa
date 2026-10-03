@@ -74,7 +74,6 @@ await withExample({
     stories: 4,
     reviewKickbacks: 1,
     judge: ['continue', 'holds'],
-    cap: 3,
     answeredOnPage: 'rank',
     mode: run.mode,
   }, null, 2));

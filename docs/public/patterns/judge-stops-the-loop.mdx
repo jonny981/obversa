@@ -12,8 +12,9 @@ history of revisions, then decides for each note whether to act on it or
 skip it. When it acts on at least one note, the workflow carries those notes
 to the writer and runs the next round. When it skips them all, the work
 stands.
-You set a cap so the work can't go round forever. Put a person's decision
-where the process needs one; this example asks before publication.
+With no cap, a run ends when the judge stops it or the review passes. You
+can add a cap as a backstop. Put a person's decision where the process
+needs one; this example asks before publication.
 If a fixed number of rounds is enough,
 [get a second opinion](/patterns/writer-and-reviewer)
 and set the writer's revision limit.
@@ -43,14 +44,14 @@ const judgeSeat = process.env.JUDGE === 'jev' ? jev() : recordedJudge('judge.jso
 ```
 
 The judge sits on the `write` stage. The reader reviews the page, and
-`refine` names the judge and its cap:
+`refine` names the judge:
 
 ```ts examples/judge-stops-the-loop.ts (excerpt)
     stage('write', {
       agent: 'write',
       writes: file,
       reviewedBy: 'read',
-      refine: judge(judgeSeat, { cap: 3 }),
+      refine: judge(judgeSeat),
       desc: 'Rewrite the page so a person reads it once and knows what to do. On a later round, change only the sentences the findings name.',
       gate: 'The reader finds nothing that fails, or the judge says the page holds for this use case.',
     }),
@@ -72,19 +73,43 @@ real finding is not waved through because the rest of the list was trivial.
 - **The reader's next round.** The reader is told which findings the judge
   skipped and why, so it does not raise them again.
 
-The cap is the last word: with a cap of 3, each run of the stage gives the
-writer at most three rounds with the reader, its first draft included,
-whatever the judge says.
+With no cap, the rounds end when the judge stops them or the reader finds
+nothing that fails. A block goes back every round, without the judge, until
+the reader stops raising it.
 
 The approval is a plain function. It reads the page, puts its sha256 in the
 question and sends a person's no back to the writer.
 
 With several reviewers, set `synthesise` on the stage as well. The panel
 then merges the findings that name the same problem, lets each reviewer
-vote once on the findings it did not raise, and drops what most of them
-reject, unless it is a block. The judge decides each finding on that one
+vote once on the findings it did not raise, and drops a finding when the
+reviewers who reject it outnumber those who raised or backed it, unless it
+is a block. The judge decides each finding on that one
 list, with who raised it and how the others voted.
 [Ask a panel](/patterns/review-panel) shows it.
+
+## A cap as a backstop
+
+To bound the rounds as well, pass a cap: `judge(judgeSeat, { cap: 3 })`.
+On a `workflow()` stage, a cap of 3 gives the writer at most three rounds
+with the reader, its first draft included. On a `dag()`'s `maxKickbacks`, a
+cap of 3 allows three returns to the target.
+
+When the last review the cap allows does not pass, the judge is asked once
+more and told that this is the last round. Its answer decides the outcome:
+
+- **`holds` or `over_polishing`.** The work stands as a pass with the
+  judge's reason. The findings still open are on the outcome as
+  `openFindings`, and in the judge's entry in the record.
+- **`product_decision`.** A person is asked, and their answer is recorded.
+  No build round follows to apply it, so the run fails, and the reason
+  quotes their answer.
+- **`continue`, `not_converging` or no clear answer.** The run fails, and
+  the reason names the cap.
+
+When the judge decides each finding, skipping every finding lets the work
+stand, and acting on any finding fails the run. A block in the last round
+fails the run without asking the judge.
 
 ## The questions
 
@@ -111,7 +136,7 @@ default set of those is `stopQuestions()` from
   `product_decision`.
 
 The answers about each finding decide the route. When any finding is
-`act`, another round runs within the cap. When every finding is `skip`, the
+`act`, another round runs. When every finding is `skip`, the
 work stands as a pass. This holds whatever the round answers say, so a
 chosen `not_converging` neither drops a finding the judge acts on nor fails
 a round whose findings it skips. The one exception is `product_decision`:
@@ -124,7 +149,7 @@ A `dag()` takes the same `judge()` value on `maxKickbacks`. The target that
 the work goes back to gets only the findings the judge acts on, and a stop
 means the same thing at both levels.
 
-Pass your own set as `judge(seat, { cap, questions })` when this wording
+Pass your own set as `judge(seat, { questions })` when this wording
 does not fit your use case. With your own set, the judge is not asked about
 each finding, and the whole round goes back or stands on one answer. When
 the judge chooses `holds` or `over_polishing`, the work stands as a pass
@@ -141,14 +166,11 @@ needs a person's judgement before review can continue. Pass an `interaction`
 binding to `judge()` to open your review surface. Its request includes the
 work and the review history. After the person answers, the work goes back
 to the writer. The writer gets the person's structured feedback, their
-composed prompt and the findings they answered. That round counts against
-`cap` like any other round. The review then runs on the new draft, and only
-after that does the judge decide again. A person is asked only while `cap`
-leaves a round for the writer. In a `workflow()` stage, the judge also sees
-the last review `cap` allows. If it asks for a product decision there,
-nobody is asked, and the review's rejection stands as it does at the cap.
-A `dag()` asks its judge only while a kickback remains, so a person it asks
-always has a round to answer into. Without an interaction handler,
+composed prompt and the findings they answered. With a cap, that round
+counts against it like any other round. The review then runs on the new
+draft, and only after that does the judge decide again. After the last
+review a cap allows, a person is still asked and their answer is recorded,
+but no round follows to apply it, so the run fails. Without an interaction handler,
 answer through the run's stored callbacks client. This gets an answer while
 the work is being revised. A later human review can still require you to
 approve the finished work.
