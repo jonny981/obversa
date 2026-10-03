@@ -822,6 +822,34 @@ describe('Grok CLI adapter', () => {
       });
   });
 
+  it('passes the engine effort as --reasoning-effort, and a request effort over it', () => {
+    const promptFile = '/tmp/lines-grok-prompt.md';
+    const fromEngine = buildGrokArgs(request(), { ...options('/bin/echo'), effort: 'low' }, promptFile);
+    expect(valuesAfter(fromEngine, '--reasoning-effort')).toEqual(['low']);
+    const fromRequest = buildGrokArgs(
+      request({ effort: 'high' }), { ...options('/bin/echo'), effort: 'low' }, promptFile,
+    );
+    expect(valuesAfter(fromRequest, '--reasoning-effort')).toEqual(['high']);
+    expect(buildGrokArgs(request(), options('/bin/echo'), promptFile))
+      .not.toContain('--reasoning-effort');
+  });
+
+  it('records the effort it passed in the requested and effective selections', async () => {
+    const recordPath = join(temporaryDirectory('lines-grok-effort-'), 'call.json');
+    const result = await new GrokCliEngine({
+      ...options(),
+      effort: 'low',
+      environment: {
+        OBVERSA_TEST_GROK_RECORD: recordPath,
+        OBVERSA_TEST_GROK_SCENARIO: 'invocation',
+      },
+    }).run(request(), () => {}, new AbortController().signal);
+    const call = JSON.parse(readFileSync(recordPath, 'utf8')) as { args: string[] };
+    expect(valuesAfter(call.args, '--reasoning-effort')).toEqual(['low']);
+    expect(result.requested.effort).toBe('low');
+    expect(result.effective.effort).toBe('low');
+  });
+
   it('separates declared tools from scoped permission rules', () => {
     const args = buildGrokArgs(request({
       tools: ['read_file', 'grep'],

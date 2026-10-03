@@ -13,7 +13,7 @@ import {
   type EngineSelectionRecord,
 } from '@obversa/api';
 import { runEngineAdmissionConformance, type EngineAdmissionConformanceFixture } from '@obversa/api/testing';
-import { ClaudeCliEngine } from '../src/index.ts';
+import { ClaudeCliEngine, claude } from '../src/index.ts';
 
 const directories: string[] = [];
 const fixtureSource = fileURLToPath(new URL('./fixtures/claude-cli.mjs', import.meta.url));
@@ -78,6 +78,29 @@ describe.runIf(process.platform !== 'win32')('Claude static admission', () => {
     expect(result.requested).toEqual(f.selected());
     expect(result.effective).toEqual(f.selected());
     expect(invocations(f.calls).map((call) => call.kind)).toEqual(['version', 'model']);
+  });
+
+  it('records the effort it passed, and records none when unset', async () => {
+    const f = fixture();
+    const result = await new ClaudeCliEngine({ cliBinary: f.a, effort: 'low' })
+      .run({ ...f.request, effort: 'high' }, () => {}, signal());
+    expect(result.requested).toEqual(engineSelection({ ...f.selected(), effort: 'high' }));
+    expect(result.effective.effort).toBe('high');
+    const model = invocations(f.calls).find((call) => call.kind === 'model')!;
+    expect(model.args[model.args.indexOf('--effort') + 1]).toBe('high');
+    const plain = await new ClaudeCliEngine({ cliBinary: f.a }).run(f.request, () => {}, signal());
+    expect('effort' in plain.requested).toBe(false);
+    expect('effort' in plain.effective).toBe(false);
+  });
+
+  it('the claude() seat passes its effort to the CLI', async () => {
+    const f = fixture();
+    vi.stubEnv('PATH', `${f.aDir}${delimiter}${process.env.PATH ?? ''}`);
+    const seat = claude('claude-test', { effort: 'medium' });
+    expect((await seat.engine.admit(withoutPrompt(f.request), signal())).effort).toBe('medium');
+    await seat.engine.run(f.request, () => {}, signal());
+    const model = invocations(f.calls).find((call) => call.kind === 'model')!;
+    expect(model.args[model.args.indexOf('--effort') + 1]).toBe('medium');
   });
 
   it('passes all separate admission-kit cases with real process markers', async () => {

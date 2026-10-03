@@ -254,6 +254,15 @@ describe('durable preflight records', () => {
     expect(loaded.admissionCompletedAtRevision).toBe(9);
   });
 
+  it('reads back an admitted selection that records the effort it ran with', async () => {
+    const f = await fixture({ live: 'skip' });
+    const withEffort = engineSelection({ ...f.selections[0]!, effort: 'high' });
+    await f.staticDone(0, { kind: 'admitted', selection: withEffort });
+    const loaded = await snapshot(f);
+    expect(loaded.state.phase).toBe('admitted');
+    expect(loaded.probes[0]!.payload.outcome).toEqual({ kind: 'admitted', selection: withEffort });
+  });
+
   it('accepts null context only for an unused lane', async () => {
     const f = await fixture({ live: 'skip', nodes: [] });
     await f.staticDone();

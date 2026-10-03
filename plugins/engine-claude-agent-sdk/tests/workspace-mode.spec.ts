@@ -37,6 +37,24 @@ describe('Agent SDK workspace access', () => {
     }
   });
 
+  it('passes the engine effort to the SDK, a request effort over it, and records it', async () => {
+    sdk.query.mockClear();
+    const engine = new AgentSdkEngine({ effort: 'low' });
+    const result = await engine.run({ prompt: 'fixture', effort: 'max' }, () => {}, new AbortController().signal);
+    expect(sdk.query.mock.calls[0]?.[0]).toMatchObject({ options: { effort: 'max' } });
+    expect(result.requested.effort).toBe('max');
+    expect(result.effective.effort).toBe('max');
+    await engine.run({ prompt: 'fixture' }, () => {}, new AbortController().signal);
+    expect(sdk.query.mock.calls[1]?.[0]).toMatchObject({ options: { effort: 'low' } });
+  });
+
+  it('passes no effort when none is set', async () => {
+    sdk.query.mockClear();
+    const result = await new AgentSdkEngine().run({ prompt: 'fixture' }, () => {}, new AbortController().signal);
+    expect('effort' in (sdk.query.mock.calls[0]?.[0] as { options: object }).options).toBe(false);
+    expect('effort' in result.requested).toBe(false);
+  });
+
   it.each([
     { clean: true, settingSources: ['project'], strictMcpConfig: true },
     { clean: false, settingSources: ['user', 'project', 'local'], strictMcpConfig: undefined },

@@ -555,6 +555,20 @@ describe('node attempt lifecycle', () => {
     expect(result.effectiveEngine?.model).toBe('effective-model');
   });
 
+  it('passes the selection effort to the engine and records it', async () => {
+    const withEffort = engineSelection({ ...primarySelection, effort: 'high' });
+    const run = vi.fn(async (request: AgentRequest) =>
+      success('done', engineSelection({ ...primarySelection, ...(request.effort === undefined ? {} : { effort: request.effort }) })));
+    const record = await executeNodeAttempt(prepared({
+      engineRoute: [lane(engine('primary', run), withEffort)],
+    }), new AbortController().signal);
+
+    expect(run.mock.calls[0]?.[0].effort).toBe('high');
+    expect(record.status).toBe('completed');
+    expect(record.requestedEngine?.effort).toBe('high');
+    expect(record.effectiveEngine?.effort).toBe('high');
+  });
+
   it('records a dead model before starting exactly one declared fallback', async () => {
     const order: string[] = [];
     const primary = engine('primary', async () => {

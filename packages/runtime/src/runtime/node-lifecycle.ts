@@ -571,6 +571,7 @@ function requestFor(
   return {
     prompt,
     ...(lane.selection.model === null ? {} : { model: lane.selection.model }),
+    ...(lane.selection.effort === undefined ? {} : { effort: lane.selection.effort }),
     ...(policy.callTokens === null ? {} : { maxTokens: policy.callTokens.tokens }),
     tools: [...lane.selection.capabilities],
     allowedTools: [...grantedPermissions],

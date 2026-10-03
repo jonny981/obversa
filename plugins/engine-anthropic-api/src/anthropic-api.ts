@@ -32,6 +32,8 @@ import { retryAfterHeaderToMs } from '@obversa/core/command';
 export interface AnthropicApiEngineOptions {
   readonly defaultModel?: string;
   readonly apiKey?: string;
+  /** Sent as the Messages API's `output_config.effort`; a request's own `effort` wins. */
+  readonly effort?: string;
 }
 
 /**
@@ -143,13 +145,14 @@ export class AnthropicApiEngine implements Engine {
     return apiKey;
   }
 
-  private selection(request: Pick<AgentRequest, 'model'>): EngineSelectionRecord {
+  private selection(request: Pick<AgentRequest, 'model' | 'effort'>): EngineSelectionRecord {
     return engineSelection({
       adapter: 'anthropic-api',
       provider: 'anthropic',
       model: request.model ?? this.opts.defaultModel ?? 'claude-haiku-4-5-20251001',
       executable: null,
       capabilities: [],
+      effort: request.effort ?? this.opts.effort,
     });
   }
 
@@ -211,6 +214,7 @@ export class AnthropicApiEngine implements Engine {
             max_tokens: maxTokens,
             system: req.system,
             messages: [{ role: 'user', content: req.prompt }],
+            ...(selection.effort === undefined ? {} : { output_config: { effort: selection.effort } }),
           },
           { signal: controller.signal, ...(preflight ? { maxRetries: 0 } : {}) },
         );

@@ -10,7 +10,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
 import { classifyEngineFailure, finalResultText } from '@obversa/api';
-import { buildCodexArgs, CodexEngine } from '../src/index.ts';
+import { buildCodexArgs, codex, CodexEngine } from '../src/index.ts';
 
 const VERSION_ONLY = `if (process.argv.length === 3 && process.argv[2] === '--version') {
   process.stdout.write('codex-cli 0.153.2\\n');
@@ -81,6 +81,27 @@ describe('buildCodexArgs', () => {
     expect(args[args.indexOf('-m') + 1]).toBe('gpt-5.4');
   });
 
+  it('passes the engine effort as model_reasoning_effort, and a request effort over it', () => {
+    const effortValue = (args: string[]) =>
+      args.filter((arg, i) => args[i - 1] === '-c' && arg.startsWith('model_reasoning_effort='));
+    expect(effortValue(buildCodexArgs({ prompt: 'go' }, { effort: 'low' }, '/tmp/out.txt')))
+      .toEqual(['model_reasoning_effort=low']);
+    expect(effortValue(buildCodexArgs({ prompt: 'go', effort: 'xhigh' }, { effort: 'low' }, '/tmp/out.txt')))
+      .toEqual(['model_reasoning_effort=xhigh']);
+    expect(buildCodexArgs({ prompt: 'go' }, {}, '/tmp/out.txt').join(' '))
+      .not.toContain('model_reasoning_effort');
+  });
+
+  it('allows its own effort switch in a workspace mode, where extra CLI arguments are refused', () => {
+    const args = buildCodexArgs(
+      { prompt: 'review', tools: ['Read'], workspaceMode: 'read', effort: 'medium' },
+      {},
+      '/tmp/out.txt',
+    );
+    expect(args[args.indexOf('model_reasoning_effort=medium') - 1]).toBe('-c');
+    expect(args).toContain('read-only');
+  });
+
   it.each(['default', 'acceptEdits', 'plan', 'dontAsk', 'auto'] as const)(
     'keeps %s permission mode read-only',
     (permissionMode) => {
@@ -122,6 +143,40 @@ writeFileSync(out, 'stub final');
     expect(finalResultText(result)).toBe('stub final');
     expect(result.requested.executable).toBe(bin);
     expect(readFileSync(stdinFile, 'utf8')).toBe('system rules\n\n---\n\ndo the work');
+  });
+
+  it('records the effort the codex() seat passed, and none when unset', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'lines-codex-effort-'));
+    const bin = join(dir, 'codex');
+    const argsFile = join(dir, 'args.json');
+    writeFileSync(
+      bin,
+      `#!/usr/bin/env node
+${VERSION_ONLY}
+import { writeFileSync } from 'node:fs';
+
+const args = process.argv.slice(2);
+writeFileSync(${JSON.stringify(argsFile)}, JSON.stringify(args));
+writeFileSync(args[args.indexOf('-o') + 1], 'stub final');
+`,
+    );
+    chmodSync(bin, 0o755);
+    const previous = process.env.PATH;
+    process.env.PATH = `${dir}:${previous ?? ''}`;
+    try {
+      const seat = codex('gpt-test', { effort: 'low' });
+      const result = await seat.engine.run({ prompt: 'go' }, () => {}, new AbortController().signal);
+      expect(result.requested.effort).toBe('low');
+      expect(result.effective.effort).toBe('low');
+      const args = JSON.parse(readFileSync(argsFile, 'utf8')) as string[];
+      expect(args[args.indexOf('model_reasoning_effort=low') - 1]).toBe('-c');
+      const plain = await new CodexEngine({ cliBinary: bin })
+        .run({ prompt: 'go' }, () => {}, new AbortController().signal);
+      expect('effort' in plain.requested).toBe(false);
+    } finally {
+      process.env.PATH = previous;
+      rmSync(dir, { recursive: true, force: true });
+    }
   });
 
   it('rejects an explicit empty tool set before spawning Codex', async () => {

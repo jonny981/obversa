@@ -47,7 +47,11 @@ export interface MastraSeatOptions {
    * built with.
    */
   readonly model?: string;
+  /** Unsupported: the Mastra agent you pass decides how its model runs, so setting it throws. */
+  readonly effort?: string;
 }
+
+const NO_EFFORT = 'mastra cannot take effort: the Mastra agent you pass decides how its model runs; set it on the agent';
 
 export interface MastraSeat {
   readonly engine: MastraEngine;
@@ -62,6 +66,7 @@ export interface MastraSeat {
 
 /** Create the seat for a Mastra agent in a declarative team workflow. */
 export function mastra(agent: MastraAgent, options: MastraSeatOptions = {}): MastraSeat {
+  if (options.effort !== undefined) throw new TypeError(NO_EFFORT);
   const configured = options.model !== undefined
     ? splitModel(options.model)
     : configuredModel(agent.model);
@@ -184,6 +189,7 @@ export class MastraEngine implements Engine {
   ): Promise<AgentResult> {
     try {
       assertReadAccess(req);
+      if (req.effort !== undefined) throw new TypeError(NO_EFFORT);
     } catch (cause) {
       throw new EngineError({ kind: 'invalid-config', message: (cause as Error).message, cause });
     }

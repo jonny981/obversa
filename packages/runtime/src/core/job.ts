@@ -95,6 +95,12 @@ export interface AgentJobConfig {
   engine?: EngineRef;
   /** Bare model id — passed straight through to the engine. */
   model?: string;
+  /**
+   * Reasoning effort for this step, in the engine's own levels, over the
+   * engine's own `effort` option. An engine without the setting refuses it.
+   * A fallback route does not inherit it; give the route its own `effort`.
+   */
+  effort?: string;
   maxTokens?: number;
   tools?: string[];
   allowedTools?: string[];
@@ -167,6 +173,7 @@ export interface AdvisorConfig {
 export interface AgentRoute {
   engine?: EngineRef;
   model?: string;
+  effort?: string;
   timeoutMs?: number;
   timeoutGraceMs?: number;
 }
@@ -356,6 +363,7 @@ export function agentJob(config: AgentJobConfig): Job {
       {
         engine: config.engine,
         model: config.model ?? config.agent?.model,
+        effort: config.effort,
         timeoutMs: defaultTimeoutMs,
         timeoutGraceMs: defaultTimeoutGraceMs,
       },
@@ -409,6 +417,7 @@ export function agentJob(config: AgentJobConfig): Job {
               prompt,
               system,
               model: originalSelection?.model ?? routeModel,
+              ...(route.effort === undefined ? {} : { effort: route.effort }),
               maxTokens: config.maxTokens,
               tools: config.tools ?? config.agent?.tools,
               allowedTools: config.allowedTools,

@@ -192,6 +192,16 @@ describe('AgentDef', () => {
     expect(req.model).toBe('sonnet');
   });
 
+  it('agentJob hands its effort to the engine request, and none when unset', async () => {
+    const repo = await tmpRepo();
+    const cap = capturing();
+    const opts: RunOptions = { engine: 'mock', engines: { mock: cap.engine }, cwd: repo };
+    await run(agentJob({ prompt: 'go', effort: 'high' }), opts);
+    expect(cap.req().effort).toBe('high');
+    await run(agentJob({ prompt: 'go' }), opts);
+    expect('effort' in cap.req()).toBe(false);
+  });
+
   it('agentCheck takes a persona from an AgentDef, keeping the validator contract last', async () => {
     const repo = await tmpRepo();
     let seenSystem = '';
@@ -589,6 +599,29 @@ describe('AgentDef', () => {
 
     expect(outcome.status).toBe('pass');
     expect(fallbackModel).toBeUndefined();
+  });
+
+  it('fallback routes do not inherit the step effort, and pass their own', async () => {
+    const repo = await tmpRepo();
+    const primary: Engine = {
+      name: 'primary',
+      async run() {
+        throw new LoopError({ code: 'RATE_LIMIT', message: 'throttled' });
+      },
+    };
+    const efforts: Array<string | undefined> = [];
+    const fallback = new MockEngine((req) => {
+      efforts.push(req.effort);
+      return 'fallback ok';
+    });
+    const opts: RunOptions = { engine: 'primary', engines: { primary, fallback }, cwd: repo };
+
+    await run(agentJob({ prompt: 'go', engine: 'primary', effort: 'max', fallback: { engine: 'fallback' } }), opts);
+    await run(agentJob({
+      prompt: 'go', engine: 'primary', effort: 'max', fallback: { engine: 'fallback', effort: 'low' },
+    }), opts);
+
+    expect(efforts).toEqual([undefined, 'low']);
   });
 
   it('agentJob does not spill non-provider failures to a fallback route', async () => {
