@@ -1,7 +1,12 @@
+import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+
 import { describe, it, expect } from 'vitest';
 
 import { agentJob, judge, run, dag, fnJob, jobMeta, kickback, renderPlan, reviewPanel, revisionRequest } from '../src/api.ts';
 import type { LoopEvent, Outcome, RunOptions, TeamSeat } from '../src/api.ts';
+import { readResumeRecord } from '../src/runtime/persist.ts';
 import { formatEvent } from '../src/runtime/supervisor.ts';
 import { MockEngine } from '../src/testing.ts';
 
@@ -601,7 +606,7 @@ describe('a judge as a dag() maxKickbacks budget', () => {
     expect(events.some((e) => e.kind === 'refine:judge')).toBe(false);
   });
 
-  it('the cap stops it even when the judge always says continue', async () => {
+  it('the cap stops it even when the judge always says continue: the review after the last kickback is judged and fails', async () => {
     let judgeCalls = 0;
     let round = 0;
     const { outcome } = await run(dag({
@@ -620,7 +625,7 @@ describe('a judge as a dag() maxKickbacks budget', () => {
 
     // The review keeps asking for another pass forever; the cap is what ends it.
     expect(outcome.status).toBe('fail');
-    expect(judgeCalls).toBe(2);
+    expect(judgeCalls).toBe(3);
     expect(round).toBe(3);
   });
 
@@ -732,5 +737,152 @@ describe('a judge as a dag() maxKickbacks budget', () => {
     expect(reviewerPrompts[1]).toContain('Do not raise them again');
     expect(reviewerPrompts[1]).toContain('- taste: rename a variable (skipped: a matter of taste)');
     expect(reviewerPrompts[1]).not.toContain('REAL: the build fails');
+  });
+});
+
+describe('a judge as a dag() maxKickbacks budget, with no cap or at its cap', () => {
+  const shouldFix = [{ evidence: 'say who the page is for', severity: 'should-fix' as const }];
+  const judgedDag = (name: string, choices: readonly string[], cap: number | undefined, findings: (round: number) => { evidence: string; severity: 'block' | 'should-fix' }[] = () => shouldFix) => {
+    const calls: string[] = [];
+    let round = 0;
+    const job = dag({
+      name,
+      maxKickbacks: {
+        implement: judge(judgeSeat(() => {
+          const choice = choices[Math.min(calls.length, choices.length - 1)]!;
+          calls.push(choice);
+          return JSON.stringify({ stop_reason: { choice } });
+        }), cap === undefined ? {} : { cap }),
+      },
+      nodes: {
+        implement: fnJob('implement', async () => { round += 1; return { status: 'pass', summary: `round ${round}` }; }),
+        review: {
+          needs: ['implement'],
+          job: fnJob('review', () => revisionRequest({ target: 'implement', reason: 'needs a pass', findings: findings(round) })),
+        },
+      },
+    });
+    return { job, calls, rounds: () => round };
+  };
+
+  it('with no cap, runs until the judge stops it: continue twice, then holds, is three builds and a pass', async () => {
+    const events: LoopEvent[] = [];
+    const { job, calls, rounds } = judgedDag('no-cap-holds', ['continue', 'continue', 'holds'], undefined);
+    const { outcome } = await run(job, { ...mockOpts, onEvent: (event) => events.push(event) });
+    expect(outcome.status).toBe('pass');
+    expect(rounds()).toBe(3);
+    expect(calls).toHaveLength(3);
+    expect(kbEvents(events).map((e) => e.accepted)).toEqual([true, true, false]);
+    expect(kbEvents(events)[0]!.limit).toBeUndefined();
+  });
+
+  it('with no cap, fails when the judge says not_converging', async () => {
+    const { job, calls, rounds } = judgedDag('no-cap-not-converging', ['continue', 'not_converging'], undefined);
+    const { outcome } = await run(job, mockOpts);
+    expect(outcome.status).toBe('fail');
+    expect(rounds()).toBe(2);
+    expect(calls).toHaveLength(2);
+  });
+
+  it('with no cap, sends a block finding back each round without the judge', async () => {
+    let round = 0;
+    let judgeCalls = 0;
+    const { outcome } = await run(dag({
+      name: 'no-cap-block',
+      maxKickbacks: { implement: judge(judgeSeat(() => { judgeCalls += 1; return JSON.stringify({ stop_reason: { choice: 'holds' } }); })) },
+      nodes: {
+        implement: fnJob('implement', async () => { round += 1; return { status: 'pass' }; }),
+        review: {
+          needs: ['implement'],
+          job: fnJob('review', () => round < 4
+            ? revisionRequest({ target: 'implement', reason: 'a block finding', findings: [{ evidence: 'x', severity: 'block' }] })
+            : { status: 'pass' }),
+        },
+      },
+    }), mockOpts);
+    expect(outcome.status).toBe('pass');
+    expect(round).toBe(4);
+    expect(judgeCalls).toBe(0);
+  });
+
+  it('at a cap of 1, asks the judge about the last review, and holds makes the node pass with the open findings recorded', async () => {
+    const events: LoopEvent[] = [];
+    const prompts: string[] = [];
+    let round = 0;
+    let judgeCalls = 0;
+    const { outcome } = await run(dag({
+      name: 'cap-holds',
+      maxKickbacks: {
+        implement: judge({
+          engine: new MockEngine((request) => {
+            prompts.push(request.prompt);
+            judgeCalls += 1;
+            return JSON.stringify({ stop_reason: { choice: judgeCalls < 2 ? 'continue' : 'holds' } });
+          }),
+          identity: { adapter: 'mock', provider: 'mock', modelFamily: 'judge', model: 'judge', tools: [] },
+        }, { cap: 1, questions: { stop_reason: { type: 'choice', instructions: 'Stop?', criteria: { holds: 'It holds.', continue: 'Go again.' } } } }),
+      },
+      nodes: {
+        implement: fnJob('implement', async () => { round += 1; return { status: 'pass' }; }),
+        review: { needs: ['implement'], job: fnJob('review', () => revisionRequest({ target: 'implement', reason: 'needs a pass', findings: shouldFix })) },
+      },
+    }), { ...mockOpts, onEvent: (event) => events.push(event) });
+    expect(outcome.status).toBe('pass');
+    expect(round).toBe(2);
+    expect(judgeCalls).toBe(2);
+    expect(outcome.data).toMatchObject({ review: { status: 'pass', summary: 'the judge chose holds', openFindings: shouldFix } });
+    const first = JSON.parse(prompts[0]!).state as Record<string, unknown>;
+    const last = JSON.parse(prompts[1]!).state as Record<string, unknown>;
+    expect(first.lastRound).toBeUndefined();
+    expect(last).toMatchObject({ cap: 1, lastRound: true });
+    expect(last.limit).toBe('This is the last round the cap of 1 allows: no build round follows, so your answer decides how this ends.');
+    const judgeEvents = events.filter((e): e is Extract<LoopEvent, { kind: 'refine:judge' }> => e.kind === 'refine:judge');
+    expect(judgeEvents[1]).toMatchObject({ route: 'stop', status: 'pass', openFindings: shouldFix });
+  });
+
+  it('keeps the open findings the judge let stand in a compact record and in what resume reads back', async () => {
+    const cwd = mkdtempSync(join(tmpdir(), 'obversa-kickback-record-'));
+    try {
+      const { job } = judgedDag('cap-holds-record', ['continue', 'holds'], 1);
+      const { outcome, recordPath } = await run(job, { ...mockOpts, cwd, recordTo: 'auto' });
+      expect(outcome.status).toBe('pass');
+      const reviewEnd = readFileSync(recordPath!, 'utf8').trim().split('\n')
+        .map((line) => JSON.parse(line) as LoopEvent)
+        .filter((event): event is Extract<LoopEvent, { kind: 'dag:node' }> => event.kind === 'dag:node' && event.node === 'review' && event.outcome !== undefined)
+        .at(-1);
+      expect(reviewEnd?.outcome).toMatchObject({ status: 'pass', openFindings: shouldFix });
+      const resumed = readResumeRecord(recordPath!).outcomes.stages.get('cap-holds-record/review');
+      expect(resumed).toMatchObject({ kind: 'completed', outcome: { status: 'pass', openFindings: shouldFix } });
+    } finally {
+      rmSync(cwd, { recursive: true, force: true });
+    }
+  });
+
+  it('at a cap of 1, fails with the cap named when the judge says continue after the last review', async () => {
+    const events: LoopEvent[] = [];
+    const { job, calls, rounds } = judgedDag('cap-continue', ['continue'], 1);
+    const { outcome } = await run(job, { ...mockOpts, onEvent: (event) => events.push(event) });
+    expect(outcome.status).toBe('fail');
+    expect(rounds()).toBe(2);
+    expect(calls).toHaveLength(2);
+    const kickbacks = kbEvents(events);
+    expect(kickbacks.map((e) => e.accepted)).toEqual([true, false]);
+    expect(kickbacks[1]!.note).toContain('the cap of 1');
+    // The failed review's own outcome says why the run stopped, and keeps its findings.
+    const review = (outcome.data as Record<string, Outcome>).review!;
+    expect(review.status).toBe('fail');
+    expect(review.summary).toContain('the last round the cap of 1 allows');
+    expect(review.revision?.reason).toContain('the last round the cap of 1 allows');
+    expect(review.revision?.findings).toEqual(shouldFix);
+  });
+
+  it('at a cap of 1, fails a block finding in the last round without asking the judge', async () => {
+    const events: LoopEvent[] = [];
+    const { job, calls, rounds } = judgedDag('cap-block', ['continue'], 1, (round) => round < 2 ? shouldFix : [{ evidence: 'the build fails', severity: 'block' }]);
+    const { outcome } = await run(job, { ...mockOpts, onEvent: (event) => events.push(event) });
+    expect(outcome.status).toBe('fail');
+    expect(rounds()).toBe(2);
+    expect(calls).toHaveLength(1);
+    expect(kbEvents(events).map((e) => e.accepted)).toEqual([true, false]);
   });
 });

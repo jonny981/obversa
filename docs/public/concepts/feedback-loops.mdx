@@ -26,9 +26,11 @@ the count against the limit, so you can read why a run stopped.
   to it, and it runs again with them, not from the start of the run.
 - **The stopping rule.** A count of how many times a target may run
   again, or a judge that reads the findings and the rounds so far and says
-  whether another round is worth it. With a judge, the count is the safety
-  cap. When either runs out, the run stops with the last findings instead of
-  looping.
+  whether another round is worth it. A judge needs no count: the run ends
+  when it stops the rounds or the review passes. When a count runs out, the
+  run stops with the last findings instead of looping. A judge can take an
+  optional cap as a backstop; after the last review the cap allows, the
+  judge's answer decides how the run ends.
 
 ## Shapes
 
@@ -97,13 +99,16 @@ Two of the three reviewers fail the first attempt, so their findings go to
 - **`maxKickbacks` sets the limit.** Without it, a graph or pipeline never
   runs a step again on a fail. `workflow()` sets it for you from each
   target's `refine`, which defaults to 1; a target with
-  `refine: judge(seat, { cap })` asks the judge before each round, sends
-  back only the findings it acts on, and never runs past its cap. A number is one budget for the
+  `refine: judge(seat)` asks the judge before each round and sends back
+  only the findings it acts on. With no cap, its rounds end when the judge
+  stops them or the review passes. With `judge(seat, { cap })`, the judge
+  is asked once more after the last review the cap allows, and its answer
+  decides how the run ends. A number is one budget for the
   whole graph. A map, `{ plan: 3, 'tests-first': 3 }`, gives each target
   its own, so a review that spends its budget on one step can't starve
   another. A target the map doesn't name gets none.
 - **Every round is recorded.** Each request to run again is in the record
-  with its count and its limit.
+  with its count, and with its limit when the budget has one.
 
 ## Next steps
 

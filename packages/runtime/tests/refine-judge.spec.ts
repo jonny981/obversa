@@ -33,7 +33,7 @@ function workDir(): string {
 function scriptedTeam(opts: {
   readonly reviewerReplies: readonly unknown[];
   readonly judgeReplies: readonly unknown[];
-  readonly cap: number;
+  readonly cap?: number;
   readonly questions?: JudgeQuestions;
   readonly perFinding?: boolean;
   readonly brief?: string;
@@ -65,7 +65,7 @@ function scriptedTeam(opts: {
         writes: 'page.md',
         reviewedBy: 'reviewer',
         refine: judge(seat(judgeEngine, 'judge-mock'), {
-          cap: opts.cap,
+          ...(opts.cap !== undefined ? { cap: opts.cap } : {}),
           questions: opts.questions,
           ...(opts.perFinding !== undefined ? { perFinding: opts.perFinding } : {}),
         }),
@@ -133,7 +133,7 @@ describe('refine: judge()', () => {
     expect(judgeEvents[1]!.reason).toBe('the judge chose holds');
   });
 
-  it('stops at the cap with the judge still saying continue', async () => {
+  it('fails at the cap with the judge still saying continue', async () => {
     const events: LoopEvent[] = [];
     const { job, judgeCalls } = scriptedTeam({
       reviewerReplies: [REVISE()],
@@ -141,14 +141,14 @@ describe('refine: judge()', () => {
       cap: 2,
     });
     const result = await runTeam(job, events);
-    // dag() does not treat a required node ending `exhausted` as a failure
-    // (only `fail`/`aborted`), so the workflow's own top-level status is
-    // still `pass`; the review loop's own outcome is where the cap shows.
+    expect(result.outcome.status).toBe('fail');
     const stageOutcome = (result.outcome.data as Record<string, Outcome>).write;
-    expect(stageOutcome?.status).toBe('exhausted');
-    // The cap is the last word: exactly `cap` consultations, never more, even
-    // though every one of them said "continue".
+    expect(stageOutcome?.status).toBe('fail');
+    // Exactly `cap` consultations, never more: the last one is told it is
+    // the last round, and its continue fails the stage.
     expect(judgeCalls).toHaveLength(2);
+    expect(JSON.parse(judgeCalls[0]!.prompt).state.lastRound).toBeUndefined();
+    expect(JSON.parse(judgeCalls[1]!.prompt).state.lastRound).toBe(true);
     expect(judgeCalls.every((call) => JSON.parse(call.prompt).questions !== undefined)).toBe(true);
   });
 
@@ -166,13 +166,13 @@ describe('refine: judge()', () => {
     });
     const result = await runTeam(job, events);
     const stageOutcome = (result.outcome.data as Record<string, Outcome>).write;
-    expect(stageOutcome?.status).toBe('exhausted');
+    expect(stageOutcome?.status).toBe('fail');
     // A cap of 3 is three rounds in all, the first draft included. The old
     // routing stopped after the first round, on worth_another_round alone.
     expect(reviewCalls).toHaveLength(3);
     expect(judgeCalls).toHaveLength(3);
     const judgeEvents = events.filter((e): e is Extract<LoopEvent, { kind: 'refine:judge' }> => e.kind === 'refine:judge');
-    expect(judgeEvents.map((e) => e.route)).toEqual(['again', 'again', 'again']);
+    expect(judgeEvents.map((e) => e.route)).toEqual(['again', 'again', 'stop']);
     expect(judgeEvents[0]).toMatchObject({ reason: 'the judge chose continue', rule: 'stop_reason: continue' });
     expect(judgeEvents[0]!.status).toBeUndefined();
   });
@@ -379,7 +379,7 @@ describe('refine: judge() decides each finding', () => {
       cap: 2,
     });
     const result = await runTeam(job, events);
-    expect((result.outcome.data as Record<string, Outcome>).write?.status).toBe('exhausted');
+    expect((result.outcome.data as Record<string, Outcome>).write?.status).toBe('fail');
     expect(judgeCalls).toHaveLength(2);
     expect(writerCalls).toHaveLength(2);
     expect(writerCalls[1]!.prompt).toContain(REAL.evidence);
@@ -451,5 +451,102 @@ describe('refine: judge() decides each finding', () => {
     expect(checkCalls[0]!.prompt).not.toContain(TONE.evidence);
     expect(checkCalls[1]!.prompt).toContain(TONE.evidence);
     expect(checkCalls[1]!.prompt).toContain('a matter of taste');
+  });
+});
+
+describe('refine: judge() with no cap', () => {
+  it('runs until the judge stops it: continue twice, then holds, is three builds and a pass', async () => {
+    const events: LoopEvent[] = [];
+    const { job, writerCalls, judgeCalls } = scriptedTeam({
+      reviewerReplies: [REVISE()],
+      judgeReplies: [{ stop_reason: { choice: 'continue' } }, { stop_reason: { choice: 'continue' } }, { stop_reason: { choice: 'holds' } }],
+    });
+    const result = await runTeam(job, events);
+    expect(result.outcome.status).toBe('pass');
+    expect((result.outcome.data as Record<string, Outcome>).write).toMatchObject({ status: 'pass', summary: 'the judge chose holds' });
+    expect(writerCalls).toHaveLength(3);
+    expect(judgeCalls).toHaveLength(3);
+    const state = JSON.parse(judgeCalls[0]!.prompt).state as Record<string, unknown>;
+    expect('cap' in state).toBe(false);
+    expect(state.limit).toBe('No round limit: the rounds end when you stop them or the review passes.');
+  });
+
+  it('fails when the judge says not_converging', async () => {
+    const { job, writerCalls, judgeCalls } = scriptedTeam({
+      reviewerReplies: [REVISE()],
+      judgeReplies: [{ stop_reason: { choice: 'continue' } }, { stop_reason: { choice: 'not_converging' } }],
+    });
+    const result = await runTeam(job, []);
+    expect(result.outcome.status).toBe('fail');
+    expect((result.outcome.data as Record<string, Outcome>).write?.status).toBe('fail');
+    expect(writerCalls).toHaveLength(2);
+    expect(judgeCalls).toHaveLength(2);
+  });
+
+  it('sends a block finding back each round without the judge until the review passes', async () => {
+    const { job, writerCalls, judgeCalls } = scriptedTeam({
+      reviewerReplies: [REVISE('block'), REVISE('block'), REVISE('block'), PASS],
+      judgeReplies: [{ stop_reason: { choice: 'holds' } }],
+    });
+    const result = await runTeam(job, []);
+    expect(result.outcome.status).toBe('pass');
+    expect(writerCalls).toHaveLength(4);
+    expect(judgeCalls).toHaveLength(0);
+  });
+});
+
+describe('refine: judge() at its cap', () => {
+  it('asks the judge about the last review, and holds makes the stage pass with the open findings recorded', async () => {
+    const events: LoopEvent[] = [];
+    const { job, writerCalls, judgeCalls } = scriptedTeam({
+      reviewerReplies: [revise(TONE)],
+      judgeReplies: [{ stop_reason: { choice: 'holds' } }],
+      cap: 1,
+      perFinding: false,
+    });
+    const result = await runTeam(job, events);
+    expect(result.outcome.status).toBe('pass');
+    expect((result.outcome.data as Record<string, Outcome>).write).toMatchObject({
+      status: 'pass', summary: 'the judge chose holds', openFindings: [{ ...TONE, reviewer: expect.any(String) }],
+    });
+    expect(writerCalls).toHaveLength(1);
+    expect(judgeCalls).toHaveLength(1);
+    const state = JSON.parse(judgeCalls[0]!.prompt).state as Record<string, unknown>;
+    expect(state).toMatchObject({ cap: 1, lastRound: true });
+    expect(state.limit).toBe('This is the last round the cap of 1 allows: no build round follows, so your answer decides how this ends.');
+    const [event] = judgeEventsOf(events);
+    expect(event).toMatchObject({ route: 'stop', status: 'pass', openFindings: [{ ...TONE, reviewer: expect.any(String) }] });
+  });
+
+  it('fails with the cap named when the judge says continue after the last review', async () => {
+    const events: LoopEvent[] = [];
+    const { job, writerCalls, judgeCalls } = scriptedTeam({
+      reviewerReplies: [REVISE()],
+      judgeReplies: [{ stop_reason: { choice: 'continue' } }],
+      cap: 1,
+    });
+    const result = await runTeam(job, events);
+    expect(result.outcome.status).toBe('fail');
+    const stageOutcome = (result.outcome.data as Record<string, Outcome>).write;
+    expect(stageOutcome?.status).toBe('fail');
+    expect(stageOutcome?.summary).toContain('the cap of 1');
+    expect(writerCalls).toHaveLength(1);
+    expect(judgeCalls).toHaveLength(1);
+    expect(judgeEventsOf(events)[0]).toMatchObject({ route: 'stop', status: 'fail', reason: expect.stringContaining('the cap of 1') });
+  });
+
+  it('fails a block finding in the last round without asking the judge', async () => {
+    const { job, writerCalls, judgeCalls } = scriptedTeam({
+      reviewerReplies: [REVISE('block')],
+      judgeReplies: [{ stop_reason: { choice: 'holds' } }],
+      cap: 1,
+    });
+    const result = await runTeam(job, []);
+    expect(result.outcome.status).toBe('fail');
+    const stageOutcome = (result.outcome.data as Record<string, Outcome>).write;
+    expect(stageOutcome?.status).toBe('fail');
+    expect(stageOutcome?.summary).toContain('the cap of 1');
+    expect(writerCalls).toHaveLength(1);
+    expect(judgeCalls).toHaveLength(0);
   });
 });

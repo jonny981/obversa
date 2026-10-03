@@ -140,7 +140,7 @@ feature-delivery › refine-judge • refine:judge
 feature-delivery › refine-judge • refine:judge: pass  {"stop_reason":{"choice":"continue"}}
 feature-delivery ◆ again on stop_reason: continue: the judge chose continue
 feature-delivery › @judge-kickback interaction:checkpoint
-feature-delivery ↩ kickback accepted review -> implement [1/4]: Review panel: 0/2 reviewer(s) cleared. (the judge chose continue)
+feature-delivery ↩ kickback accepted review -> implement [1]: Review panel: 0/2 reviewer(s) cleared. (the judge chose continue)
 feature-delivery · node implement: start
 feature-delivery › implement › implement • implement
 feature-delivery › implement › implement › #0 • candidate-0
@@ -346,8 +346,9 @@ The graph puts the seven steps in order. Research runs only when triage
 chose a feature. Research and review run in their own worktrees, so a
 rejected review is discarded rather than merged and the next round of the
 tournament forks from an untouched branch. A red test or a rejected review
-goes back to `implement`, and Jev, capped at four rounds, says whether the
-next round is worth it; a finding tagged block goes back without asking:
+goes back to `implement`, and Jev says whether the next round is worth it;
+a finding tagged block goes back without asking. With no cap, the rounds end
+when Jev stops them or the review passes:
 
 ```ts examples/teams/feature-delivery.ts (excerpt) {7-9,12,19}
 const team = dag({
@@ -366,9 +367,9 @@ const team = dag({
     approve: { needs: 'review', job: approve },
     close: { needs: 'approve', job: close },
   },
-  // A block finding always goes back on its own; otherwise Jev, capped at 4
-  // rounds, says when another pass on `implement` stops being worth it.
-  maxKickbacks: { implement: judge(judgeSeat, { cap: 4 }) },
+  // A block finding always goes back on its own; otherwise Jev says when
+  // another pass on `implement` stops being worth it.
+  maxKickbacks: { implement: judge(judgeSeat) },
 });
 ```
 
@@ -555,9 +556,9 @@ const team = dag({
     approve: { needs: 'review', job: approve },
     close: { needs: 'approve', job: close },
   },
-  // A block finding always goes back on its own; otherwise Jev, capped at 4
-  // rounds, says when another pass on `implement` stops being worth it.
-  maxKickbacks: { implement: judge(judgeSeat, { cap: 4 }) },
+  // A block finding always goes back on its own; otherwise Jev says when
+  // another pass on `implement` stops being worth it.
+  maxKickbacks: { implement: judge(judgeSeat) },
 });
 
 // Without approve.json the run waits for the person and prints the address
@@ -587,7 +588,7 @@ flowchart LR
   implement --> test[["test: node --test"]]
   test -->|exit 0| review["review: Codex and OpenCode, one yes is enough"]
   test -->|red| implement
-  review -->|"findings, Jev says whether to go again, cap 4"| implement
+  review -->|"findings, Jev says whether to go again"| implement
   review -.->|accepted| approve{{"approve: ship these bytes?"}}
   approve --> close["close: Claude writes the evidence from the record"]
 ```

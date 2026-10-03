@@ -32,6 +32,16 @@ describe('judge()', () => {
     expect(judge(seat(), { cap: 1, perFinding: false }).perFinding).toBe(false);
   });
 
+  it('needs no cap', () => {
+    const j = judge(seat());
+    expect(j).toMatchObject({ kind: 'judge', perFinding: true });
+    expect(j.cap).toBeUndefined();
+    expect('cap' in j).toBe(false);
+    const questions = { holds: { type: 'noul' as const, instructions: 'x', criteria: { true: 'a', false: 'b' } } };
+    expect(judge(seat(), { questions, perFinding: true })).toMatchObject({ questions, perFinding: true });
+    expect(judge(seat(), { cap: undefined }).cap).toBeUndefined();
+  });
+
   it('rejects a non-positive or non-integer cap', () => {
     expect(() => judge(seat(), { cap: 0 })).toThrow(/positive integer/);
     expect(() => judge(seat(), { cap: -1 })).toThrow(/positive integer/);

@@ -156,9 +156,9 @@ const team = dag({
     approve: { needs: 'review', job: approve },
     close: { needs: 'approve', job: close },
   },
-  // A block finding always goes back on its own; otherwise Jev, capped at 4
-  // rounds, says when another pass on `implement` stops being worth it.
-  maxKickbacks: { implement: judge(judgeSeat, { cap: 4 }) },
+  // A block finding always goes back on its own; otherwise Jev says when
+  // another pass on `implement` stops being worth it.
+  maxKickbacks: { implement: judge(judgeSeat) },
 });
 
 // Without approve.json the run waits for the person and prints the address

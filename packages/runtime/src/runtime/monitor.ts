@@ -44,7 +44,7 @@ export interface MonitorKickback {
   reason: string;
   accepted: boolean;
   count: number;
-  limit: number;
+  limit?: number;
   note?: string;
 }
 
@@ -143,7 +143,7 @@ class MonitorFold {
     if (event.kind === 'dag:kickback' && event.path.length <= 1) {
       this.kickbacks.push({
         from: event.from, to: event.to, reason: event.reason, accepted: event.accepted,
-        count: event.count, limit: event.limit, ...(event.note !== undefined ? { note: event.note } : {}),
+        count: event.count, ...(event.limit !== undefined ? { limit: event.limit } : {}), ...(event.note !== undefined ? { note: event.note } : {}),
       });
     }
     // Usage above is folded first, so a usage line's running total already
@@ -393,7 +393,7 @@ function page(name: string | undefined): string {
     el('nodes').innerHTML = names.map((n) => { const v = s.nodes[n]; return '<li><span class="name">' + esc(n) + (v.runs > 1 ? ' <span class="desc">ran ' + v.runs + ' times</span>' : '') + '</span>'
       + '<span>' + (v.desc ? '<div class="desc">' + esc(v.desc) + '</div>' : '') + (v.needs && v.needs.length ? '<div class="needs">needs ' + esc(v.needs.join(', ')) + '</div>' : '') + (v.outcome && v.outcome.summary ? '<div class="summary">' + esc(v.outcome.summary) + '</div>' : '') + '</span>'
       + '<span class="phase" data-phase="' + esc(v.phase) + '" data-status="' + esc(v.outcome ? v.outcome.status : '') + '">' + esc(v.phase === 'done' && v.outcome ? v.outcome.status : v.phase) + '</span></li>'; }).join('');
-    el('kickbacks').innerHTML = s.kickbacks.map((k) => '<p class="kick">' + esc(k.from) + ' sent work back to ' + esc(k.to) + (k.accepted ? '' : ' (not accepted' + (k.note ? ': ' + esc(k.note) : '') + ')') + ': ' + esc(k.reason) + ' (' + k.count + ' of ' + k.limit + ')</p>').join('');
+    el('kickbacks').innerHTML = s.kickbacks.map((k) => '<p class="kick">' + esc(k.from) + ' sent work back to ' + esc(k.to) + (k.accepted ? '' : ' (not accepted' + (k.note ? ': ' + esc(k.note) : '') + ')') + ': ' + esc(k.reason) + ' (' + k.count + (k.limit === undefined ? '' : ' of ' + k.limit) + ')</p>').join('');
     el('pending-title').hidden = s.pending.length === 0;
     el('pending').innerHTML = s.pending.map((p) => '<div><p>' + esc(p.decisionText) + '</p>' + aboutHtml(p.input) + '<form onsubmit="return false"><input data-note="' + esc(p.requestId) + '" placeholder="a note, if any"><button class="yes" data-answer="yes" data-request="' + esc(p.requestId) + '">Yes</button><button data-answer="no" data-request="' + esc(p.requestId) + '">No</button></form></div>').join('');
     el('record').textContent = s.events.slice(-40).map((e) => new Date(e.ts).toISOString().slice(11, 19) + '  ' + e.line).join('\\n');

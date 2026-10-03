@@ -146,8 +146,10 @@ refinement loop on [Translate and reflect](/workflows/translate-reflect).
   review reduces a model approving its own habits; it doesn't remove
   judgement from the loop.
 - **Every eval costs its limit.** A judge, a panel and a scored condition
-  each spend a call per round. The `refine` or `maxKickbacks` on the target
-  caps the rounds, and the run fails with the last findings when it's spent.
+  each spend a call per round. A count in `refine` or `maxKickbacks` on the
+  target caps the rounds, and the run fails with the last findings when it's
+  spent. A judge with no cap spends a call each round until it stops the
+  rounds or the review passes; give it a `cap` to bound the cost.
 
 ## Next steps
 

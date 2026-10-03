@@ -72,7 +72,6 @@ await withExample({
     reflections: 2,
     glossaryTerms: 6,
     judge: ['continue', 'holds'],
-    cap: 3,
     answeredOnPage: 'nuance',
     mode: run.mode,
   }, null, 2));

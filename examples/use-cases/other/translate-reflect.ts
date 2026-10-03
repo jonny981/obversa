@@ -32,7 +32,7 @@ const judgeSeat = process.env.JUDGE === 'jev' ? jev() : recordedJudge('judge.jso
  * translates the article with the glossary open; a model from another
  * family reads the translation the way an editor would and returns it
  * with what to change, not a score; the judge decides when another round
- * is worth it, with the cap as the backstop; the translator writes down how every
+ * is worth it, until it stops them or the review passes; the translator writes down how every
  * glossary term was rendered and where the glossary and natural French
  * pulled apart. The person who knows the readers decides the nuance and
  * says publish.
@@ -57,9 +57,9 @@ function createTranslateReflect(judgeSeat: TeamSeat, engines: TranslateEngines =
         reviewedBy: 'reflect',
         // The judge. After a round the reflection did not pass, Jev reads the
         // findings and the rounds so far and says whether another round is
-        // worth it; a finding tagged block goes back without asking. The
-        // cap is the backstop: three rounds at most, whatever the judge says.
-        refine: judge(judgeSeat, { cap: 3 }),
+        // worth it; a finding tagged block goes back without asking. With no
+        // cap, the rounds end when the judge stops them or the review passes.
+        refine: judge(judgeSeat),
       }),
 
       stage('terms', {

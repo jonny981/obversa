@@ -21,9 +21,8 @@ Obversa makes the grader a stage and the stopping rule a judge. A Claude
 seat writes the draft. A Codex seat, a different model family, reads it
 against the style guide and returns findings; the writer runs again with
 them. After each round, Jev, a small decision model, reads the findings and
-the rounds so far and says whether another round is worth it, with a cap
-of three as the backstop. When the draft holds, the run stops for the
-editor's yes. This file is two stages, a draft with its grader and the
+the rounds so far and says whether another round is worth it. When the
+draft holds, the run stops for the editor's yes. This file is two stages, a draft with its grader and the
 editor's decision, and every draft, every finding and every answer from the
 judge is on the record.
 
@@ -47,7 +46,7 @@ in for the models, so the words are the script's and the shape is the run's.
 writer-grader-cap workflow:start
 writer-grader-cap ▸ dag (2 nodes)
 writer-grader-cap · node draft: start
-writer-grader-cap › draft › draft-review ▸ loop (max 4)
+writer-grader-cap › draft › draft-review ▸ loop
 writer-grader-cap › draft › draft-review · iteration 1
 writer-grader-cap › draft › draft-review • draft
 
@@ -181,9 +180,9 @@ reviews every change with a second model before a person reads it. Under
 
 The grader reads the draft against the style guide and the brief, and
 returns findings, each naming the line and the rule it breaks. The writer
-runs again with the findings until a judge says the draft holds, up to the
-cap the file sets. A grader that passes a draft is saying it holds against
-every rule, not that it likes it.
+runs again with the findings until a judge says the draft holds. A grader
+that passes a draft is saying it holds against every rule, not that it
+likes it.
 
 The editor decides whether the post is published. Nothing is published by
 anyone else.
@@ -252,8 +251,8 @@ families, an editor, a judge on the draft stage, and two stages:
         // The judge. After a round the grader did not pass, Jev reads the
         // findings and the rounds so far and says whether another round is
         // worth it; a finding tagged block goes back without asking. The
-        // cap is the backstop: three rounds at most, whatever the judge says.
-        refine: judge(judgeSeat, { cap: 3 }),
+        // rounds end when Jev stops them or the grader passes the draft.
+        refine: judge(judgeSeat),
       }),
 
       stage('publish', {
@@ -267,10 +266,10 @@ families, an editor, a judge on the draft stage, and two stages:
 ```
 
 `reviewedBy: 'grade'` puts the Codex seat on every draft. When the grader
-does not pass a draft, `refine: judge(judgeSeat, { cap: 3 })` asks the judge
-before the writer runs again, and the cap ends the loop after three rounds
-whatever the judge says: the run stops with the grader's last findings, and
-the editor is never asked. `workflow()` refuses the team before any model
+does not pass a draft, `refine: judge(judgeSeat)` asks the judge before the
+writer runs again. The rounds end when the judge stops them or the grader
+passes the draft. There is no round limit unless you set one.
+`workflow()` refuses the team before any model
 runs if the writer and the grader share a family. The `publish` stage is
 the editor's question; a no goes to `draft` with the editor's note as the
 finding.
@@ -314,11 +313,11 @@ const judgeSeat = process.env.JUDGE === 'jev' ? jev() : recordedJudge('judge.jso
  * A writer, a strict grader from another model family, a judge, and an
  * editor. The writer drafts the post. The grader reads it against the house
  * style and returns findings that name the line and the rule; the writer
- * runs again with them. The judge decides when another round is worth it,
- * with the cap as the backstop. When the grader passes the draft, the run
- * stops for the editor, who decides whether it is published. A draft the
- * grader never passes ends the run with the last findings, and nothing is
- * published.
+ * runs again with them. The judge decides when another round is worth it.
+ * When the grader passes the draft, or the judge lets it stand, the run
+ * stops for the editor, who decides whether it is published. When the judge
+ * ends the rounds without letting the draft stand, the run fails and nothing
+ * is published.
  */
 function createEditorial(judgeSeat: TeamSeat, engines: EditorialEngines = realEngines) {
   return workflow('writer-grader-cap', {
@@ -341,8 +340,8 @@ function createEditorial(judgeSeat: TeamSeat, engines: EditorialEngines = realEn
         // The judge. After a round the grader did not pass, Jev reads the
         // findings and the rounds so far and says whether another round is
         // worth it; a finding tagged block goes back without asking. The
-        // cap is the backstop: three rounds at most, whatever the judge says.
-        refine: judge(judgeSeat, { cap: 3 }),
+        // rounds end when Jev stops them or the grader passes the draft.
+        refine: judge(judgeSeat),
       }),
 
       stage('publish', {
@@ -380,7 +379,7 @@ flowchart LR
   brief[("briefs/post.md, style/house.md")] --> draft["draft: Claude, posts/draft.md"]
   draft --> grade["grade: Codex, findings by line and rule"]
   grade -->|findings| judge["judge: Jev"]
-  judge -->|"continue, up to cap: 3"| draft
+  judge -->|continue| draft
   judge -.->|holds| publish{{"publish: the editor"}}
   publish -->|sendsBackTo| draft
 ```
@@ -403,9 +402,15 @@ reads the use case from the brief, the grader's findings and every round so
 far, and answers whether the draft holds, whether the findings are worth
 acting on, and whether another round is worth it. The loop goes round again
 on continue, and stops when the judge chooses a reason to stop: the draft
-holds, the rest is polish, or the same findings keep coming back. Two things
-the judge never decides. A finding tagged block goes back on its own, and the
-cap of three stands whatever the judge says, so the loop always ends.
+holds, the rest is polish, or the same findings keep coming back. A finding
+tagged block goes back on its own, without the judge.
+
+To bound the rounds as well, pass a cap as a backstop:
+`judge(judgeSeat, { cap: 3 })`. When the third draft does not pass, the
+judge is asked once more and told it is the last round. If it lets the
+draft stand, the draft goes to the editor, with the open findings on the
+record. Any other answer fails the run, and the reason names the cap, so
+the editor is never asked.
 [A judge stops the loop](/patterns/judge-stops-the-loop) has the questions
 and the rule.
 

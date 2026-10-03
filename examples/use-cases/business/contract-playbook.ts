@@ -62,9 +62,9 @@ function createContractPlaybook(judgeSeat: TeamSeat, engines: ContractPlaybookEn
         reviewedBy: 'playbook-check',
         // The judge. After a round the checker did not pass, Jev reads the
         // findings and the rounds so far and says whether another round is
-        // worth it; a finding tagged block goes back without asking. The
-        // cap is the backstop: three rounds at most, whatever the judge says.
-        refine: judge(judgeSeat, { cap: 3 }),
+        // worth it; a finding tagged block goes back without asking. With no
+        // cap, the rounds end when the judge stops them or the review passes.
+        refine: judge(judgeSeat),
       }),
 
       stage('positions', {

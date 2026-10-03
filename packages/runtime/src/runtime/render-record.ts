@@ -25,7 +25,7 @@ export interface RecordKickback {
   readonly to: string;
   readonly reason: string;
   readonly count: number;
-  readonly limit: number;
+  readonly limit?: number;
   readonly accepted: boolean;
   readonly note?: string;
 }
@@ -286,7 +286,7 @@ export function summarizeRecord(events: readonly LoopEvent[]): RecordSummary {
             to: event.to,
             reason: event.reason,
             count: event.count,
-            limit: event.limit,
+            ...(event.limit !== undefined ? { limit: event.limit } : {}),
             accepted: true,
             note: event.note,
           };
@@ -401,7 +401,7 @@ export function renderRecord(events: readonly LoopEvent[], options?: RenderRecor
       out.push('');
       if (run.kickback) {
         out.push(
-          `Kickback from ${run.kickback.from}, ${run.kickback.count} of ${run.kickback.limit}: ${run.kickback.reason}`,
+          `Kickback from ${run.kickback.from}, ${run.kickback.count}${run.kickback.limit === undefined ? '' : ` of ${run.kickback.limit}`}: ${run.kickback.reason}`,
         );
         out.push('');
       }

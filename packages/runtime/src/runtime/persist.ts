@@ -159,6 +159,7 @@ function thinOutcome(outcome: Outcome): Outcome {
   if (outcome.stall !== undefined) thin.stall = outcome.stall;
   if (outcome.revision !== undefined) thin.revision = outcome.revision;
   if (outcome.discarded !== undefined) thin.discarded = outcome.discarded;
+  if (outcome.openFindings !== undefined) thin.openFindings = outcome.openFindings;
   return thin;
 }
 

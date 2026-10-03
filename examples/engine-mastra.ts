@@ -22,7 +22,7 @@ import { recordedJudge } from '@obversa/runtime/testing';
  * keeps its own instructions, model and tool: it saves the page with the
  * saveFile tool it was built with. Codex reads each draft and tags its
  * findings. A block always goes back to the writer; otherwise a judge decides
- * whether another round runs, and the cap is the last word.
+ * whether another round runs, until it stops the rounds or the review passes.
  */
 
 // ── The Mastra agent ────────────────────────────────────────────────────────
@@ -73,7 +73,7 @@ const team = workflow('mastra-writer', {
       agent: 'write',
       writes: file,
       reviewedBy: 'read',
-      refine: judge(judgeSeat, { cap: 3 }),
+      refine: judge(judgeSeat),
       desc: 'Rewrite the page so a person reads it once and knows what to do. On a later round, change only the sentences the findings name.',
       gate: 'The reader finds nothing that fails, or the judge says the page holds for this use case.',
     }),

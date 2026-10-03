@@ -84,8 +84,8 @@ for revisions:
         // The judge. After a round the grader did not pass, Jev reads the
         // findings and the rounds so far and says whether another round is
         // worth it; a finding tagged block goes back without asking. The
-        // cap is the backstop: three rounds at most, whatever the judge says.
-        refine: judge(judgeSeat, { cap: 3 }),
+        // rounds end when Jev stops them or the grader passes the draft.
+        refine: judge(judgeSeat),
       }),
 ```
 
@@ -101,12 +101,14 @@ purpose of the work and the revisions so far. `judge()` from
 `@obversa/runtime` sets that stopping rule inside a `dag()` workflow:
 
 ```ts examples/teams/feature-delivery.ts (excerpt)
-  maxKickbacks: { implement: judge(judgeSeat, { cap: 4 }) },
+  maxKickbacks: { implement: judge(judgeSeat) },
 ```
 
-Here Jev makes the judgement, with a hard cap of four returns to the
-writer. A blocking finding goes back to the writer without
-asking the judge, and it still counts toward the cap. [Know when to stop](https://docs.obversa.ai/patterns/judge-stops-the-loop)
+Here Jev makes the judgement, and the returns to the writer end when Jev
+stops them or the review passes. A blocking finding goes back to the writer
+without asking the judge. To bound the returns as well, pass
+`judge(judgeSeat, { cap: 4 })`: after the last review the cap allows, Jev is
+asked once more, and the run fails unless Jev lets the work stand. [Know when to stop](https://docs.obversa.ai/patterns/judge-stops-the-loop)
 shows the questions and a complete writing example.
 
 ### Ask a panel

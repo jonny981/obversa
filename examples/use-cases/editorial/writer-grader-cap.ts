@@ -34,11 +34,11 @@ const judgeSeat = process.env.JUDGE === 'jev' ? jev() : recordedJudge('judge.jso
  * A writer, a strict grader from another model family, a judge, and an
  * editor. The writer drafts the post. The grader reads it against the house
  * style and returns findings that name the line and the rule; the writer
- * runs again with them. The judge decides when another round is worth it,
- * with the cap as the backstop. When the grader passes the draft, the run
- * stops for the editor, who decides whether it is published. A draft the
- * grader never passes ends the run with the last findings, and nothing is
- * published.
+ * runs again with them. The judge decides when another round is worth it.
+ * When the grader passes the draft, or the judge lets it stand, the run
+ * stops for the editor, who decides whether it is published. When the judge
+ * ends the rounds without letting the draft stand, the run fails and nothing
+ * is published.
  */
 function createEditorial(judgeSeat: TeamSeat, engines: EditorialEngines = realEngines) {
   return workflow('writer-grader-cap', {
@@ -61,8 +61,8 @@ function createEditorial(judgeSeat: TeamSeat, engines: EditorialEngines = realEn
         // The judge. After a round the grader did not pass, Jev reads the
         // findings and the rounds so far and says whether another round is
         // worth it; a finding tagged block goes back without asking. The
-        // cap is the backstop: three rounds at most, whatever the judge says.
-        refine: judge(judgeSeat, { cap: 3 }),
+        // rounds end when Jev stops them or the grader passes the draft.
+        refine: judge(judgeSeat),
       }),
 
       stage('publish', {
