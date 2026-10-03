@@ -126,6 +126,11 @@ export interface OpenCodeCliEngineOptions {
   readonly environment?: Readonly<Record<string, string>>;
   /** Provider-keyed OpenCode login data to use instead of the person's own login. */
   readonly auth?: JsonObject;
+  /**
+   * Passed as `opencode run --variant <level>`, OpenCode's provider-specific
+   * reasoning effort; a request's own `effort` wins.
+   */
+  readonly effort?: string;
 }
 
 export interface OpenCodeSeatOptions {
@@ -133,6 +138,7 @@ export interface OpenCodeSeatOptions {
   readonly tools?: readonly string[];
   /** Provider-keyed OpenCode login data to use instead of the person's own login. */
   readonly auth?: JsonObject;
+  readonly effort?: string;
 }
 
 export interface OpenCodeSeat {
@@ -156,6 +162,7 @@ export function opencode(modelName: string, options: OpenCodeSeatOptions): OpenC
       version: SUPPORTED_VERSION,
       identity: { provider: selected.provider, modelFamily },
       ...(options.auth === undefined ? {} : { auth: options.auth }),
+      ...(options.effort === undefined ? {} : { effort: options.effort }),
     }),
     identity: {
       adapter: 'opencode-cli',
@@ -711,6 +718,7 @@ export function buildOpenCodeInvocation(
     OPENCODE_DISABLE_AUTOUPDATE: '1',
     OPENCODE_DISABLE_SHARE: '1',
   });
+  const effort = request.effort ?? options.effort;
   return Object.freeze({
     args: Object.freeze([
       'run',
@@ -718,6 +726,7 @@ export function buildOpenCodeInvocation(
       'json',
       '--model',
       selectedModel.value,
+      ...(effort === undefined ? [] : ['--variant', effort]),
       '--dir',
       request.cwd,
     ]),
@@ -1115,6 +1124,7 @@ export class OpenCodeCliEngine implements Engine {
         ? {}
         : { environment: this.#environment }),
       ...(Object.keys(this.#auth).length === 0 ? {} : { auth: this.#auth }),
+      ...(options.effort === undefined ? {} : { effort: options.effort }),
     });
   }
 
@@ -1155,6 +1165,7 @@ export class OpenCodeCliEngine implements Engine {
         adapter: 'opencode-cli', adapterVersion: this.#version,
         provider: selectedProvider, modelFamily: selectedFamily,
         model: selectedModel.value, executable: this.#executable, capabilities,
+        effort: request.effort ?? this.#options.effort,
       });
       if (expectedSelection !== undefined
         && !isDeepStrictEqual(engineSelection(expectedSelection), selected)) {

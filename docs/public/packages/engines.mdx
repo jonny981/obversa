@@ -1,0 +1,41 @@
+---
+title: "Engines"
+description: "Options every engine takes under the same name, and what each engine does with them."
+---
+
+## Reasoning effort
+
+`effort` sets how hard the model thinks. Every engine takes it under the
+same name. Set it on a seat or an engine for every step, or on one
+`agentJob` or workflow agent stage for that step only. A step's `effort`
+wins over the seat's. A fallback route does not take the step's `effort`;
+give the route its own.
+
+Each tool has its own levels, so the engine passes the level you give it
+unchanged. When you leave `effort` unset, the engine passes nothing and the
+tool's own default applies, such as the level in your own Codex config.
+
+An engine with no effort setting refuses `effort` with an error that says
+why. When an engine runs with an `effort`, the
+[node attempt record](/recording/node-attempts) names it in the engine's
+requested and effective identities, next to the model. An excerpt of one
+identity:
+
+```json
+{
+  "model": "gpt-5.6-luna",
+  "effort": "low"
+}
+```
+
+| Engine | Takes `effort` | How the engine passes it |
+| --- | --- | --- |
+| [Claude CLI](/packages/engine-claude-cli#the-rest) | Yes | `claude --effort <level>` |
+| [Claude Agent SDK](/packages/engine-claude-agent-sdk#the-rest) | Yes | The SDK's `effort` option |
+| [Codex CLI](/packages/engine-codex-cli#the-rest) | Yes | `codex exec -c model_reasoning_effort=<level>` |
+| [Grok CLI](/packages/engine-grok-cli#the-rest) | Yes | `grok --reasoning-effort <level>` |
+| [OpenCode CLI](/packages/engine-opencode-cli#the-rest) | Yes | `opencode run --variant <level>` |
+| [Anthropic API](/packages/engine-anthropic-api#options) | Yes | The Messages API's `output_config.effort` |
+| [Devin CLI](/packages/engine-devin-cli#options) | No | The Devin CLI has no effort switch. |
+| [Jev API](/packages/engine-jev-api#options) | No | The Jev service decides how hard it works. |
+| [Mastra](/packages/engine-mastra#what-stays-mastras) | No | The Mastra agent you pass decides. Set it on the agent. |

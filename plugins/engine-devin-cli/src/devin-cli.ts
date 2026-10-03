@@ -40,12 +40,20 @@ const PROVIDER = 'cognition';
 /** The model a seat records when it leaves the choice to the person's Devin settings. */
 const DEFAULT_MODEL = 'default';
 const DIAGNOSTIC_MAX = 700;
+const NO_EFFORT = 'devin has no reasoning effort switch, so it cannot take effort; leave effort unset';
 
 export interface DevinCliEngineOptions {
   /** Model for requests that name none. Without one, Devin uses the person's default. */
   readonly defaultModel?: string;
   /** Absolute path or bare command name; `devin` by default. */
   readonly cliBinary?: string;
+  /** Unsupported: the Devin CLI has no reasoning effort switch, so setting it throws. */
+  readonly effort?: string;
+}
+
+export interface DevinSeatOptions {
+  /** Unsupported: the Devin CLI has no reasoning effort switch, so setting it throws. */
+  readonly effort?: string;
 }
 
 export interface DevinSeat {
@@ -64,10 +72,13 @@ export interface DevinSeat {
  * Devin runs the default model from the person's own Devin settings and the
  * seat records the model as `default`.
  */
-export function devin(model?: string): DevinSeat {
+export function devin(model?: string, options: DevinSeatOptions = {}): DevinSeat {
   if (model !== undefined && !model.trim()) throw new TypeError('devin model must not be empty');
   return {
-    engine: new DevinCliEngine(model === undefined ? {} : { defaultModel: model }),
+    engine: new DevinCliEngine({
+      ...(model === undefined ? {} : { defaultModel: model }),
+      ...(options.effort === undefined ? {} : { effort: options.effort }),
+    }),
     identity: {
       adapter: ADAPTER,
       provider: PROVIDER,
@@ -105,6 +116,7 @@ export function buildDevinArgs(
     if (req.workspaceMode === 'none') {
       throw new TypeError('devin has no mode without workspace access; choose read or write');
     }
+    if ((req.effort ?? opts.effort) !== undefined) throw new TypeError(NO_EFFORT);
   } catch (cause) {
     throw new EngineError({
       kind: 'invalid-config',
@@ -198,7 +210,9 @@ export class DevinCliEngine implements Engine {
   readonly name = ADAPTER;
   private executable: string | undefined;
   private version: Promise<string> | undefined;
-  constructor(private readonly opts: DevinCliEngineOptions = {}) {}
+  constructor(private readonly opts: DevinCliEngineOptions = {}) {
+    if (opts.effort !== undefined) throw new TypeError(NO_EFFORT);
+  }
 
   private commandExecutable(expected?: EngineSelectionRecord): string {
     const configured = this.opts.cliBinary ?? 'devin';

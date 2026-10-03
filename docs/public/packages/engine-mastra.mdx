@@ -124,6 +124,10 @@ agent. It uses the tools it was built with, wherever those tools act. In the
 example, the agent's own tool saves the page into the directory the run
 starts in.
 
+How hard the model thinks stays Mastra's too: set it on the agent. The
+seat's `effort` option and a step's `effort` are not supported, and setting
+either throws an error that says so.
+
 The review, send-back, pause, resume and record around the agent work as
 for any engine. A Mastra seat declares no Obversa tools, so the runtime
 does not accept it as a reviewer: a reviewer must declare a tool that reads

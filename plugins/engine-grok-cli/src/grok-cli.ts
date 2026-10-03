@@ -101,6 +101,8 @@ export interface GrokCliEngineOptions {
   readonly environment?: Readonly<Record<string, string>>;
   /** A Grok login file to use instead of the person's own login. */
   readonly authFile?: string;
+  /** Passed as `grok --reasoning-effort <level>`; a request's own `effort` wins. */
+  readonly effort?: string;
 }
 
 interface GrokAccumulator {
@@ -356,6 +358,8 @@ export function buildGrokArgs(
     '--verbatim',
     '--no-auto-update',
   ];
+  const effort = request.effort ?? options.effort;
+  if (effort !== undefined) args.push('--reasoning-effort', effort);
   for (const rule of rules) args.push('--allow', rule);
   const disallowedTools = [
     ...(noTools ? ['read_file'] : []),
@@ -736,6 +740,7 @@ export class GrokCliEngine implements Engine {
         ? {}
         : { environment: this.#environment }),
       ...(this.#authFile === null ? {} : { authFile: this.#authFile }),
+      ...(options.effort === undefined ? {} : { effort: options.effort }),
     });
   }
 
@@ -781,6 +786,7 @@ export class GrokCliEngine implements Engine {
         adapter: 'grok-cli', adapterVersion: this.#version,
         provider: this.#identity.provider, modelFamily: this.#identity.modelFamily,
         model, executable: this.#executable, capabilities,
+        effort: request.effort ?? this.#options.effort,
       });
       if (expectedSelection !== undefined
         && !isDeepStrictEqual(engineSelection(expectedSelection), selected)) {
@@ -1009,6 +1015,7 @@ export class GrokCliEngine implements Engine {
           : accumulator.model,
         executable: this.#executable,
         capabilities: observedCapabilities,
+        effort: requested.effort,
       });
       const succeeded = terminal !== null && (
         structured

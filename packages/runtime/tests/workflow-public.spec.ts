@@ -150,6 +150,33 @@ describe('workflow reviewers', () => {
   });
 });
 
+describe('an agent stage with effort', () => {
+  it('passes the stage effort to its seat for that stage only', async () => {
+    const directory = await mkdtemp(join(tmpdir(), 'stage-effort-'));
+    try {
+      const efforts: (string | undefined)[] = [];
+      const writer = mockSeat(new MockEngine((req) => {
+        efforts.push(req.effort);
+        writeFileSync(join(req.cwd!, req.prompt.includes('may write only: a.txt') ? 'a.txt' : 'b.txt'), 'x');
+        return JSON.stringify({ status: 'pass', summary: 'wrote it' });
+      }), 'writer-mock');
+      const job = workflow('stage-effort', {
+        brief: 'write two files',
+        roles: { writer },
+        stages: [
+          stage('first', { agent: 'writer', writes: 'a.txt', effort: 'low' }),
+          stage('second', { agent: 'writer', writes: 'b.txt' }),
+        ],
+      });
+      const result = await run(job, { cwd: directory });
+      expect(result.outcome.status).toBe('pass');
+      expect(efforts).toEqual(['low', undefined]);
+    } finally {
+      await rm(directory, { recursive: true, force: true });
+    }
+  });
+});
+
 describe('a plain-function stage', () => {
   it('runs between an agent stage and a command stage with the mock engine, and its outcome is on the record', async () => {
     const directory = await mkdtemp(join(tmpdir(), 'f142-fn-between-'));

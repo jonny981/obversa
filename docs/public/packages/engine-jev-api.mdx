@@ -149,14 +149,15 @@ prompt into the request shape before it's sent.
 | `model` | `string` | `'jev-latest'` | The wire model when the request names none. |
 | `adapterVersion` | `string` | none | The package version recorded in the requested identity. |
 | `fetch` | `typeof fetch` | global `fetch` | Injectable for tests. |
+| `effort` | `string` | none | Not supported: the Jev service decides how hard it works, so setting it throws. A step that sets `effort` fails the same way. Also a `JevSeatOptions` field. |
 
 ## Errors
 
 - **`invalid-config`** before any network call, for a malformed prompt or a
   request field Jev can't take: `system` or `systemMode` (Jev carries no
   system prompt), `env` (the key comes from the option), `maxTokens` (no
-  server-side cap), a `workspaceMode` other than `none`, or a non-empty
-  `tools` list.
+  server-side cap), `effort` (the service decides how hard it works), a
+  `workspaceMode` other than `none`, or a non-empty `tools` list.
 - **`timeout`** when `timeoutMs`, plus `timeoutGraceMs` when set, elapses
   across the whole call, from connecting to reading the body. **`aborted`**
   on a caller abort.

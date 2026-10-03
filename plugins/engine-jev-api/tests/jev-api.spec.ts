@@ -322,6 +322,22 @@ describe('the wire call', () => {
     expect(stubServer.calls).toHaveLength(0);
   });
 
+  it('refuses effort on the seat, the engine and a step, naming why, before any request', async () => {
+    const why = 'jev cannot take effort: the Jev service decides how hard it works; leave effort unset';
+    expect(() => jev('jev-fixture', { endpoint: 'http://x', apiKey: API_KEY, effort: 'high' }))
+      .toThrowError(expect.objectContaining({ kind: 'invalid-config', message: why }));
+    expect(() => new JevApiEngine({ endpoint: 'http://x', apiKey: API_KEY, effort: 'high' }))
+      .toThrowError(expect.objectContaining({ kind: 'invalid-config', message: why }));
+    const stubServer = await stub();
+    const error = await failureOf(() => engine(stubServer.url).run(
+      request({ effort: 'high' }),
+      () => {},
+      new AbortController().signal,
+    ));
+    expect(error).toMatchObject({ kind: 'invalid-config', message: why });
+    expect(stubServer.calls).toHaveLength(0);
+  });
+
   it('completes with a low-confidence answer and records it', async () => {
     const stubServer = await stub();
     // noul carries a bare probability and no confidence field — the

@@ -108,6 +108,7 @@ your environment. Names that start with `OPENCODE_` are refused.
 | `identity` | `OpenCodeCliIdentity` | required | What this instance serves. |
 | `tools` | `readonly string[]` | none | `OpenCodeSeatOptions` only: the tools the seat may use. |
 | `auth` | `JsonObject` | none | Login data to use instead of yours. Also an `OpenCodeSeatOptions` field. |
+| `effort` | `string` | none | Passed as `--variant <level>`, OpenCode's provider-specific reasoning effort. A request's `effort` wins. Also an `OpenCodeSeatOptions` field. See [Reasoning effort](/packages/engines#reasoning-effort). |
 
 ## Errors
 

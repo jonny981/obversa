@@ -143,6 +143,14 @@ different model, the two records stay separate and the change stays
 visible. Each identity records the adapter, adapter version, provider,
 model family, model, capabilities and `executable`: the absolute path a
 command adapter selected, or `null` for an engine with no child process.
+When the engine runs with an `effort`, each identity also records it.
+A host that writes an engine's selection itself names the `effort` in
+the selection, the same way it names the model. The runtime passes that
+`effort` to the engine with each request, preflight checks included. An
+`effort` set on the engine itself still applies to a request that names
+none, so an engine built with its own `effort` under a selection that names
+a different one, or none, reports a different requested identity, and the
+attempt fails. Name the effort in one place: the selection.
 The path identifies the selected wrapper, not its resolved target or file
 digest. When no Claude or Codex binary is configured, those plugins search
 the inherited `PATH` once and record the absolute path they select.

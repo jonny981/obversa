@@ -37,6 +37,8 @@ export interface AgentSdkEngineOptions {
     | 'auto';
   readonly minToolIntervalMs?: number;
   readonly memory?: Memory;
+  /** Passed as the SDK's `effort` query option; a request's own `effort` wins. */
+  readonly effort?: string;
 }
 
 const MEMORY_SERVER = 'obversa-memory';
@@ -215,12 +217,14 @@ export class AgentSdkEngine implements Engine {
     const { query } = await import('@anthropic-ai/claude-agent-sdk');
 
     const model = req.model ?? this.opts.defaultModel;
+    const effort = req.effort ?? this.opts.effort;
     const acc = newAccumulator(model);
     const effectiveSelection = () => engineSelection({
       adapter: 'agent-sdk',
       provider: 'anthropic',
       model: acc.model,
       capabilities: Array.isArray(toolOptions.tools) ? toolOptions.tools : [],
+      effort,
     });
     const env = attemptEnvironment(req);
     const abort = new AbortController();
@@ -253,6 +257,8 @@ export class AgentSdkEngine implements Engine {
 
     const options = {
       model,
+      // Passed as given: the SDK checks the level.
+      ...(effort === undefined ? {} : { effort: effort as SdkOptions['effort'] }),
       systemPrompt: agentSdkSystemPrompt(req),
       cwd: req.cwd,
       ...toolOptions,
@@ -306,12 +312,14 @@ export class AgentSdkEngine implements Engine {
           provider: 'anthropic',
           model: model ?? null,
           capabilities: req.tools ?? [],
+          effort,
         });
         const effective = engineSelection({
           adapter: 'agent-sdk',
           provider: 'anthropic',
           model: acc.model,
           capabilities: Array.isArray(toolOptions.tools) ? toolOptions.tools : [],
+          effort,
         });
         onEvent({
           type: 'usage',
@@ -385,13 +393,9 @@ export class AgentSdkEngine implements Engine {
       provider: 'anthropic',
       model: model ?? null,
       capabilities: req.tools ?? [],
+      effort,
     });
-    const effective = engineSelection({
-      adapter: 'agent-sdk',
-      provider: 'anthropic',
-      model: acc.model,
-      capabilities: Array.isArray(toolOptions.tools) ? toolOptions.tools : [],
-    });
+    const effective = effectiveSelection();
     const late =
       typeof req.timeoutMs === 'number' && Date.now() - startedAt > req.timeoutMs;
     return validateAgentResult({

@@ -30,6 +30,8 @@ export interface PreflightResult {
 
 export interface PreflightOptions {
   model?: string;
+  /** The reasoning effort the probe asks the engine to use. Unset passes none. */
+  effort?: string;
   /** Hard limit on waiting for the probe. Default 60s. */
   timeoutMs?: number;
   signal?: AbortSignal;
@@ -96,6 +98,7 @@ export async function preflightEngine(
     try {
       pending = Promise.resolve(engine.run({
         prompt: PROBE_PROMPT, model: opts.model,
+        ...(opts.effort === undefined ? {} : { effort: opts.effort }),
         purpose: 'preflight', tools: [], allowedTools: [], workspaceMode: 'none',
         maxTokens: 16, timeoutMs, leaf: true,
         ...(opts.cwd === undefined ? {} : { cwd: opts.cwd }),

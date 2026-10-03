@@ -70,6 +70,7 @@ turns the sandbox off.
 | `cliArgs` | `readonly string[]` | none | Extra arguments for every call. |
 | `approvalPolicy` | `'on-request' \| 'never'` | none | Codex's approval policy. |
 | `permissionMode` | as Claude's | none | `bypassPermissions` turns the sandbox off. |
+| `effort` | `string` | none | Passed as `-c model_reasoning_effort=<level>`, over your own Codex config. Allowed in a workspace mode, unlike `cliArgs`. A request's `effort` wins. Also a `CodexSeatOptions` field. See [Reasoning effort](/packages/engines#reasoning-effort). |
 
 ## Errors
 

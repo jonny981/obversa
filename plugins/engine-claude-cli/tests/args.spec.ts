@@ -68,6 +68,18 @@ describe('buildClaudeArgs', () => {
     expect(args[args.indexOf('--model') + 1]).toBe('claude-fable-5');
   });
 
+  it('passes the engine effort as --effort, and a request effort over it', () => {
+    const fromEngine = buildClaudeArgs({ prompt: 'go' }, { effort: 'low' });
+    expect(fromEngine[fromEngine.indexOf('--effort') + 1]).toBe('low');
+    const fromRequest = buildClaudeArgs({ prompt: 'go', effort: 'max' }, { effort: 'low' });
+    expect(fromRequest[fromRequest.indexOf('--effort') + 1]).toBe('max');
+    expect(fromRequest.filter((arg) => arg === '--effort')).toHaveLength(1);
+  });
+
+  it('passes no --effort when none is set', () => {
+    expect(buildClaudeArgs({ prompt: 'go' }, {})).not.toContain('--effort');
+  });
+
   it('appends caller cliArgs', () => {
     const args = buildClaudeArgs(
       { prompt: 'go' },
