@@ -1,6 +1,6 @@
 {
   "name": "@obversa/engine-mastra",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Run a Mastra agent as one Obversa engine.",
   "author": "Jonny Neill <jonnyneill@hotmail.com>",
   "type": "module",

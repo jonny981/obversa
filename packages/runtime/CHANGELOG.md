@@ -1,5 +1,16 @@
 # @obversa/runtime
 
+## 0.2.5
+
+### Patch Changes
+
+- 909029f: Every engine takes `effort`, the reasoning level a step runs at, under that one name: on the engine, on an `agentJob`, on a workflow agent stage, and on each request. An engine whose tool has a setting passes the level through it unchanged; an engine whose tool has none refuses the option with a clear error instead of ignoring it. The level a step asked for is recorded with its identity, so a record shows the effort each attempt ran at.
+- 2720fd4: A judge needs no cap. With `judge(seat)`, the judge ends the rounds itself, and a run ends when the judge stops it or the review passes. When the judge decides each finding, which it does by default, acting on any finding runs another round and skipping every finding passes; only a `product_decision` answer still asks a person. When it judges whole rounds only, or answers no finding, its whole-round answer routes: `holds` or `over_polishing` passes, `not_converging` fails, and `product_decision` asks a person. A cap is an optional backstop. After the last review it allows, the judge is asked once more and told it is the last round, so its answer, not the cap, decides how the run ends. If it lets the work stand, the step passes and its open findings are on the outcome as `openFindings`. Any other answer fails with the cap named in the reason, and a person asked at that point has their answer recorded, but no further round runs. This holds for a `workflow()` stage's `refine` and a `dag()`'s `maxKickbacks` alike.
+- f6ed5e7: A review panel can merge its reviews into one list before anyone acts on them. Set `synthesise` on a `workflow()` stage with several reviewers, a `panel:` stage, or `reviewPanel()`. Findings that name the same problem become one finding with the strongest severity, crediting every reviewer who raised it. Each reviewer then votes once on the others' findings: agree, disagree, or a better fix. A finding is dropped when the reviewers who disagree outnumber those who raised it, agreed, or offered a better fix; a better fix most voters back replaces the original; a tie stays marked disputed for the judge. A passing reviewer's findings are kept. The record shows who raised each finding, who agreed, and what was dropped and why.
+- Updated dependencies [909029f]
+  - @obversa/api@0.2.5
+  - @obversa/core@0.2.5
+
 ## 0.2.4
 
 ### Patch Changes

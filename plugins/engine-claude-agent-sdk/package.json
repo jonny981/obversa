@@ -1,6 +1,6 @@
 {
   "name": "@obversa/engine-claude-agent-sdk",
-  "version": "0.1.4",
+  "version": "0.1.5",
   "description": "Run engine requests through the Claude Agent SDK.",
   "author": "Jonny Neill <jonnyneill@hotmail.com>",
   "type": "module",
