@@ -5,6 +5,10 @@
  *
  * It composes over the worktree primitives, no new machinery. Only one branch is ever
  * merged (the winner, off an unchanged HEAD), so there is no conflict to resolve.
+ * Every worktree is removed and every branch deleted, except a winner that
+ * failed to merge, which keeps its branch so the work is not lost. The
+ * outcome's `discarded` names each deleted branch that held work, with its
+ * last commit.
  */
 
 import pLimit from 'p-limit';
@@ -14,13 +18,12 @@ import { childContext } from './context.js';
 import {
   isRepo,
   addWorktree,
-  removeWorktree,
-  deleteBranch,
   mergeBranch,
   stageAll,
   commit,
 } from './git.js';
 import { LoopError } from './errors.js';
+import { closeFork } from './isolated.js';
 
 function slug(s: string): string {
   return s.replace(/[^A-Za-z0-9._-]+/g, '-').replace(/(^-+|-+$)/g, '') || 'x';
@@ -143,17 +146,13 @@ export function tournament(config: TournamentConfig): Job {
     }
 
     // Tear down every worktree; delete loser branches and the merged winner.
+    const discarded: Array<{ branch: string; sha: string }> = [];
     for (const a of attempts) {
-      await removeWorktree(base.dir, a.dir, { signal: parent.signal }).catch(
-        () => {},
-      );
-      if (a !== winner || landed)
-        await deleteBranch(base.dir, a.branch, {
-          signal: parent.signal,
-        }).catch(() => {});
+      const thrownAway = await closeFork(parent, base.dir, a, a === winner && !landed);
+      if (thrownAway) discarded.push(thrownAway);
     }
 
-    const outcome: Outcome = paused
+    const decided: Outcome = paused
       ? { ...paused.outcome }
       : winner
       ? {
@@ -173,6 +172,7 @@ export function tournament(config: TournamentConfig): Job {
           summary: `tournament "${config.name}": no candidate passed`,
           data: { scores: attempts.map((a) => ({ i: a.i, score: a.score })) },
         };
+    const outcome: Outcome = discarded.length ? { ...decided, discarded } : decided;
     parent.emit({ kind: 'job:end', ts: Date.now(), path, label: config.name, outcome });
     return outcome;
   };

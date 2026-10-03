@@ -154,7 +154,7 @@ function fixture(
   /** What every engine in this fixture reports it ran, identity cases included. */
   selection: { readonly requested: EngineSelectionRecord; readonly effective: EngineSelectionRecord } = { requested, effective },
 ): EngineConformanceFixture {
-  let access = { modelCalls: 0, canRead: false, canWrite: false };
+  let access = { modelCalls: 0, canRead: false, canWrite: false, ownSetup: true };
   const workspaceRequest = { prompt: 'workspace probe' };
   return {
     request: {
@@ -175,18 +175,22 @@ function fixture(
       observe: () => access,
     },
     open(scenario) {
-      if (!scenario.startsWith('workspace-')) return open(scenario);
-      access = { modelCalls: 0, canRead: false, canWrite: false };
+      if (!scenario.startsWith('workspace-') && scenario !== 'clean-mode') return open(scenario);
+      const ownSetup = scenario !== 'clean-mode';
+      access = { modelCalls: 0, canRead: false, canWrite: false, ownSetup };
       return {
         name: 'workspace-fixture',
         async run(request) {
-          access = { modelCalls: 1, canRead: request.workspaceMode !== 'none', canWrite: request.workspaceMode === 'write' };
+          access = { modelCalls: 1, canRead: request.workspaceMode !== 'none', canWrite: request.workspaceMode === 'write', ownSetup };
           return result(selection);
         },
       };
     },
   };
 }
+
+/** For the cases about workspace modes alone. */
+const noClean = { 'clean-mode': 'Not under test in this case.' } as const;
 
 describe('public engine conformance kit', () => {
   it('cannot declare a mandatory workspace case unsupported', async () => {
@@ -198,7 +202,7 @@ describe('public engine conformance kit', () => {
   });
 
   it('fails all workspace cases when the adapter supplies no boundary observer', async () => {
-    const report = await runEngineConformance({ ...fixture(), workspace: undefined } as never);
+    const report = await runEngineConformance({ ...fixture(), workspace: undefined, unsupported: noClean } as never);
     expect(report.ok).toBe(false);
     expect(report.failures.map((failure) => failure.case)).toEqual(['workspace none', 'workspace read', 'workspace write']);
   });
@@ -207,6 +211,7 @@ describe('public engine conformance kit', () => {
     const base = fixture();
     const report = await runEngineConformance({
       ...base,
+      unsupported: noClean,
       workspace: {
         modes: {
           none: { request: base.request, outcome: 'refused' },
@@ -230,6 +235,7 @@ describe('public engine conformance kit', () => {
     const base = fixture();
     await runEngineConformance({
       ...base,
+      unsupported: noClean,
       workspace: {
         modes: {
           none: { request: { ...base.request, prompt: 'workspace probe', tools: [] }, outcome: 'supported' },
@@ -301,6 +307,73 @@ describe('public engine conformance kit', () => {
     });
   });
 
+  it('passes an engine without a clean mode that declares it unsupported', async () => {
+    const opened: string[] = [];
+    const base = fixture();
+    const report = await runEngineConformance({
+      ...base,
+      unsupported: { 'clean-mode': 'This CLI cannot keep its login without the person\'s home folder.' },
+      open(scenario) {
+        opened.push(scenario);
+        return base.open(scenario);
+      },
+    });
+
+    expect(opened).not.toContain('clean-mode');
+    expect(report).toEqual({
+      ok: true,
+      cases: 20,
+      failures: [],
+      unsupported: [{ case: 'clean-mode', reason: 'This CLI cannot keep its login without the person\'s home folder.' }],
+    });
+  });
+
+  it.each([
+    ['still loads the person\'s setup', { ownSetup: true }, 'Clean mode still loaded the person\'s own setup.'],
+    ['grants writes', { canWrite: true }, 'Read workspace exposed incorrect access in clean mode.'],
+    ['reports no setup observation', { ownSetup: undefined }, 'Clean mode requires the observer to report ownSetup.'],
+  ] as const)('fails a clean mode that %s', async (_name, override, message) => {
+    const base = fixture();
+    let clean = false;
+    const report = await runEngineConformance({
+      ...base,
+      workspace: {
+        ...base.workspace,
+        async observe() {
+          const observed = await base.workspace.observe();
+          return clean ? { ...observed, ...override } : observed;
+        },
+      },
+      open(scenario) {
+        clean = scenario === 'clean-mode';
+        return base.open(scenario);
+      },
+    });
+
+    expect(report.ok).toBe(false);
+    expect(report.failures).toEqual([
+      { case: 'clean mode leaves out the person\'s setup and stays read-only', message },
+    ]);
+  });
+
+  it('fails an engine that ignores the person\'s setup without clean mode', async () => {
+    const base = fixture();
+    const report = await runEngineConformance({
+      ...base,
+      workspace: {
+        ...base.workspace,
+        async observe() {
+          return { ...(await base.workspace.observe()), ownSetup: false };
+        },
+      },
+    });
+
+    expect(report.failures).toEqual([{
+      case: 'clean mode leaves out the person\'s setup and stays read-only',
+      message: 'Without clean mode the engine did not load the person\'s own setup.',
+    }]);
+  });
+
   it('passes the identity case when the reported family is the one its model derives', async () => {
     // The acceptance control for the identity case: without a fixture that
     // reports an identity of its own, the case is exercised only by an
@@ -318,7 +391,7 @@ describe('public engine conformance kit', () => {
       identityFromModel: true,
     });
 
-    expect(report).toEqual({ ok: true, cases: 21, failures: [], unsupported: [] });
+    expect(report).toEqual({ ok: true, cases: 22, failures: [], unsupported: [] });
   });
 
   it('fails the identity case when the reported family is not the one its model derives', async () => {
@@ -345,7 +418,7 @@ describe('public engine conformance kit', () => {
   it('passes a conforming engine across results, usage, tools, stops, and failures', async () => {
     const report = await runEngineConformance(fixture());
 
-    expect(report).toEqual({ ok: true, cases: 20, failures: [], unsupported: [] });
+    expect(report).toEqual({ ok: true, cases: 21, failures: [], unsupported: [] });
     await expect(assertEngineConformance(fixture())).resolves.toBeUndefined();
   });
 
@@ -380,7 +453,7 @@ describe('public engine conformance kit', () => {
       },
     });
 
-    expect(report).toEqual({ ok: true, cases: 20, failures: [], unsupported: [] });
+    expect(report).toEqual({ ok: true, cases: 21, failures: [], unsupported: [] });
   });
 
   it('reports a named failure from a deliberately dishonest usage adapter', async () => {

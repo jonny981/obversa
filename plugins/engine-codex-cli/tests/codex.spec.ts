@@ -30,6 +30,13 @@ describe('buildCodexArgs', () => {
     expect(args).not.toContain('review this');
   });
 
+  it('runs clean by default, and on the person\'s own setup with clean: false', () => {
+    for (const opts of [{}, { clean: true }]) {
+      expect(buildCodexArgs({ prompt: 'go' }, opts, '/tmp/out.txt')).toContain('--ignore-user-config');
+    }
+    expect(buildCodexArgs({ prompt: 'go' }, { clean: false }, '/tmp/out.txt')).not.toContain('--ignore-user-config');
+  });
+
   it('uses write-capable unattended mode only for bypassPermissions', () => {
     const args = buildCodexArgs(
       { prompt: 'edit files', cwd: '/repo' },

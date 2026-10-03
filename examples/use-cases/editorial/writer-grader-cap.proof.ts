@@ -72,8 +72,8 @@ await withExample({
 
   const judged = (await recordEvents(run, 'records/writer-grader-cap.jsonl')).filter((event) => event.kind === 'refine:judge');
   assert.deepEqual(judged.map((event) => event.reason), [
-    'the judge says another round is worth it (0.72)',
-    'the judge says another round is worth it (0.61)',
+    'the judge chose continue',
+    'the judge chose continue',
     'the judge chose holds',
   ]);
   assert.deepEqual(judged.map((event) => event.answers?.stop_reason?.choice), ['continue', 'continue', 'holds']);

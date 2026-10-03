@@ -3,9 +3,10 @@
 `@obversa/engine-opencode-cli` runs one Obversa engine attempt through a
 fresh OpenCode CLI process.
 
-The plugin runs OpenCode the way you run it: with your own home folder,
-your OpenCode config folder, your OpenCode login and your OpenCode
-settings, the same as every other Obversa engine. It adds only what the
+The plugin runs OpenCode clean by default: with your own home folder and
+your OpenCode login, but with an empty config folder in place of yours, so
+your OpenCode settings stay out. Set `clean: false` to run it the way you
+run it, with your own config folder too. It adds only what the
 step needs, through OpenCode's own config: the tools and permission rules
 the step declares, with every other tool turned off, no autoupdate and no
 sharing.

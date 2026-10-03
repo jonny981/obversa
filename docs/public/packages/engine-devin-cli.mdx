@@ -38,7 +38,7 @@ question:
 import { finalResultText } from '@obversa/api';
 import { devin } from '@obversa/engine-devin-cli';
 
-// Without a model, Devin runs the default model from your own Devin settings.
+// Without a model, Devin runs its own default model, or the one your Devin settings choose with clean: false.
 const seat = devin();
 
 const result = await seat.engine.run({
@@ -70,9 +70,13 @@ models your account can use.
 
 ## How it runs Devin
 
-Devin runs as you run it yourself: with your home folder, your Devin login
-and your Devin settings. It reads the same instruction files and rules it
-reads when you start it yourself. The plugin adds only these flags:
+Devin runs clean by default: with your home folder and your Devin login,
+but with an empty config file in place of your Devin settings. With
+`clean: false` it runs as you run it yourself, with your Devin settings
+too. Either way it reads the repository's own instruction files and rules.
+Your own MCP servers, skills and personal rules can still load in clean
+mode; [the engines table](/packages/engines) has the detail. The plugin adds
+only these flags:
 
 | Flag | Why |
 | --- | --- |
@@ -82,6 +86,7 @@ reads when you start it yourself. The plugin adds only these flags:
 | `--permission-mode` | Set from the step's workspace mode. See [Workspace modes](#workspace-modes). |
 | `--respect-workspace-trust false` | Print mode cannot show Devin's folder trust prompt. Without this flag, Devin refuses every folder you have not opened in Devin before. |
 | `--model` | Only when the seat or the request names a model. |
+| `--config` | Only in [clean mode](#options), the default: an empty config file in place of yours. |
 
 Each attempt is a new process. The plugin never continues or resumes an
 earlier Devin conversation.
@@ -134,9 +139,20 @@ repeats Devin's warning.
 
 | Field | Type | Default | Description |
 | --- | --- | --- | --- |
-| `defaultModel` | `string` | none | The model when the request names none. Without one, Devin uses your default. |
+| `defaultModel` | `string` | none | The model when the request names none. Without one, Devin runs its own default model, or the one your Devin settings choose with `clean: false`. |
 | `cliBinary` | `string` | `devin` on `PATH` | The executable to run. |
 | `effort` | `string` | none | Not supported: the Devin CLI has no effort switch, so setting it throws. A step that sets `effort` fails the same way. Also a `DevinSeatOptions` field. |
+| `clean` | `boolean` | [See the default](/packages/engines#the-default) | On by default: your own Devin settings stay out. `false` uses them. Also an option of `devin(model, options)`. |
+
+By default Devin runs with `--config` pointed at an empty config file
+for each attempt, so your own Devin settings file
+(`~/.config/devin/config.json`) stays out. The repository's instruction
+files and rules still apply, and the run keeps your login.
+
+Its row in the [engines table](/packages/engines#the-engines): runs on your
+setup, clean mode available, read-only held in both modes. Your own MCP
+servers and skills still load in clean mode, because Devin has no switch
+to leave them out.
 
 ## Errors
 

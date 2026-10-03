@@ -65,7 +65,8 @@ function findingLine(finding: FeedbackFinding): string {
   const recommendation = finding.recommendation
     ? ` Recommendation: ${oneLine(finding.recommendation)}`
     : '';
-  return `- ${reviewer}[${severity}]: ${oneLine(finding.evidence)}${decision}${recommendation}`;
+  const judge = finding.judgeReason ? ` Why the judge sent it back: ${oneLine(finding.judgeReason)}` : '';
+  return `- ${reviewer}[${severity}]: ${oneLine(finding.evidence)}${decision}${recommendation}${judge}`;
 }
 
 function defaultReason(findings: FeedbackFinding[] | undefined): string {

@@ -350,6 +350,7 @@ export {
   type JudgeAnswer,
   type JudgeQuestion,
   type JudgeQuestions,
+  type SkippedFinding,
 } from './core/judge.js';
 
 export { copyJobMeta, jobMeta, renderPlan, describeConditions } from './core/describe.js';

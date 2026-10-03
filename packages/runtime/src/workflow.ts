@@ -14,7 +14,7 @@ import { RESUME_IDENTITY } from './core/resume.js';
 import { LoopError } from './core/errors.js';
 import { loop } from './core/loop.js';
 import { kickback, reviewPanel, revisionFromOutcome } from './core/feedback.js';
-import { consultJudge, countBySeverity, hasBlockFinding, isJudge, type JudgeRound, type JudgeState } from './core/judge.js';
+import { consultJudge, countBySeverity, hasBlockFinding, isJudge, judgedFindings, productDecisionFeedback, type JudgeRound, type JudgeState, type SkippedFinding } from './core/judge.js';
 import type { ConditionInput, DagConfig, Job, JobContext, Judge, Outcome } from './core/types.js';
 import { checkpointInteraction, interactionDeclaration, hasSavedInteraction, humanReview, interactionIdentity, jsonSnapshot, outcomeSnapshot, requestInteraction, savedInteraction, type InteractionBinding, type InteractionResponse } from './core/interaction.js';
 
@@ -634,15 +634,20 @@ function lineDiffCount(before: string | undefined, after: string): number {
  * send-back. A block finding always goes back on its own, the judge is
  * never asked about one, so the loop's own `maxReviewRestarts` (the judge's
  * cap) is the only thing bounding it, same as a plain numeric `refine`.
- * Otherwise the judge sees the use case, the latest findings, every round
- * so far, and the file being refined when the stage declares one, and its
- * answer either lets the review stand (a synthesised pass) or sends it back
- * with its reasoning folded into the existing rejection.
+ * Otherwise the judge sees the use case, the latest findings, the findings
+ * it skipped before, every round so far, and the file being refined when
+ * the stage declares one, and its answer either lets the review stand (a
+ * synthesised pass) or sends it back with its reasoning folded into the
+ * existing rejection. When it decides each finding, the send-back carries
+ * only the findings it acts on, and the findings it skips go to the next
+ * round's reviewers as `ctx.skippedFindings`.
  */
-function judgedReview(brief: BriefSource, config: WorkflowStage, cfgJudge: Judge, panel: Job): Job {
+function judgedReview(brief: BriefSource, named: NamedStage, cfgJudge: Judge, panel: Job): Job {
+  const config = named.config;
   const useCase = /^Use case:\s*([\s\S]*?)\n\s*\n/m.exec(brief.brief)?.[1]?.replace(/\s+/g, ' ').trim();
   const file = writesOf(config)[0];
   const history: JudgeRound[] = [];
+  let skipped: readonly SkippedFinding[] = [];
   let previousDraft: string | undefined;
   let productFeedback: readonly InteractionResponse[] = [];
   const identity = interactionIdentity({ brief, config, cfgJudge });
@@ -664,12 +669,14 @@ function judgedReview(brief: BriefSource, config: WorkflowStage, cfgJudge: Judge
     if (saved) {
       history.splice(0, history.length, ...(saved.state as unknown as JudgeState).rounds);
       productFeedback = (saved.state as unknown as JudgeState).productFeedback ?? [];
+      skipped = (saved.state as unknown as JudgeState).skipped ?? [];
       previousDraft = draft;
     }
     const panelOutcome: Outcome = saved ? saved.panel as unknown as Outcome : await panel({
       ...ctx,
       depth: ctx.depth + 1,
       path: [...ctx.path, 'review-panel'],
+      ...(skipped.length ? { skippedFindings: skipped } : {}),
     });
     if (panelOutcome.status === 'pass') return panelOutcome;
     const findings = revisionFromOutcome(panelOutcome)?.findings ?? [];
@@ -681,24 +688,41 @@ function judgedReview(brief: BriefSource, config: WorkflowStage, cfgJudge: Judge
       ...(file !== undefined ? { file } : {}),
       ...(draft !== undefined ? { draft } : {}),
       latestFindings: findings,
+      ...(skipped.length ? { skipped } : {}),
       rounds: history,
       round,
       cap: cfgJudge.cap,
     };
+    // The loop re-enters after a failing review only while
+    // `ctx.iteration < cap` (its `maxReviewRestarts`); an iteration whose
+    // review did not run also counts, so this errs towards not asking.
     const result = await consultJudge(cfgJudge, state, ctx, ctx.path, {
-      identity, pending: saved !== undefined,
+      identity, pending: saved !== undefined, roundLeft: ctx.iteration < cfgJudge.cap,
       save: (questionState) => checkpointInteraction(ctx, checkpointPath, identity, jsonSnapshot({ state: questionState, panel: outcomeSnapshot(panelOutcome) })),
     });
     if ('paused' in result) return result.paused;
     checkpointInteraction(ctx, checkpointPath, identity, null);
     productFeedback = result.state.productFeedback ?? [];
-    const { decision } = result;
     history.push({
       round,
       findings,
       counts: countBySeverity(findings),
       ...(changedLines !== undefined ? { changedLines } : {}),
     });
+    // A person's answer goes back to the builder as the next round; the
+    // judge sees the result only after that round has been reviewed.
+    if ('answer' in result) {
+      // The judge decided each finding before asking: the answer goes with the acted ones only.
+      const answered = judgedFindings(findings, { findings: result.state.decided }, result.state.skipped ?? [], round);
+      skipped = answered.skipped;
+      return productDecisionFeedback(result.answer, answered.acted);
+    }
+    const { decision } = result;
+    const judged = judgedFindings(findings, decision, result.state.skipped ?? [], round);
+    skipped = judged.skipped;
+    // No builder round remains for a person's answer, so the review's
+    // rejection stands and the stage stops at its cap.
+    if (decision.stop === 'product_decision') return panelOutcome;
     if (!decision.again) {
       if (decision.stop === 'fail') {
         // Not converging: another round will not fix it, so the stage stops
@@ -707,7 +731,15 @@ function judgedReview(brief: BriefSource, config: WorkflowStage, cfgJudge: Judge
       }
       return { status: 'pass', confidence: panelOutcome.confidence, summary: decision.reason, data: panelOutcome.data };
     }
-    return { ...panelOutcome, summary: `${panelOutcome.summary} (${decision.reason})` };
+    // The panel's own summary lists every finding; when the judge decided
+    // each one, the one-line reason stands in for it so the builder reads
+    // only the findings it acts on.
+    const revision = revisionFromOutcome(panelOutcome);
+    return {
+      ...panelOutcome,
+      summary: `${decision.findings && revision ? revision.reason : panelOutcome.summary} (${decision.reason})`,
+      ...(revision ? { revision: { ...revision, findings: judged.acted } } : {}),
+    };
   };
 }
 
@@ -754,7 +786,7 @@ function stageJob(
     // re-entry; `judgedReview` is what does that, so the plain path here
     // stays exactly what it was.
     const review: Job = isJudge(refine)
-      ? judgedReview(brief, config, refine, panel)
+      ? judgedReview(brief, named, refine, panel)
       : async (ctx) => panel({
         ...ctx,
         depth: ctx.depth + 1,

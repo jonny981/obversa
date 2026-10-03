@@ -415,6 +415,15 @@ export const EXPECTED_FILES = {
     'package/dist/mastra.d.ts',
     'package/package.json',
   ],
+  '@obversa/engine-openai-agents': [
+    'package/LICENSE',
+    'package/README.md',
+    'package/dist/index.d.ts',
+    'package/dist/index.js',
+    'package/dist/index.js.map',
+    'package/dist/openai-agents.d.ts',
+    'package/package.json',
+  ],
   '@obversa/engine-opencode-cli': [
     'package/LICENSE',
     'package/README.md',

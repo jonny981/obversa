@@ -32,6 +32,9 @@ import {
   runOwnedCommand,
 } from '@obversa/core/command';
 
+/** Whether a run leaves out the person's own setup when `clean` is not set. */
+const CLEAN_BY_DEFAULT = true;
+
 export interface ClaudeCliEngineOptions {
   readonly defaultModel?: string;
   readonly cliBinary?: string;
@@ -45,6 +48,13 @@ export interface ClaudeCliEngineOptions {
     | 'auto';
   /** Passed as `claude --effort <level>`; a request's own `effort` wins. */
   readonly effort?: string;
+  /**
+   * Run without the person's own settings, hooks, plugins, skills, MCP
+   * servers and `~/.claude/CLAUDE.md`. The repository's settings and
+   * instruction files still apply, and the run keeps the person's login.
+   * On by default; `false` runs on the person's own setup.
+   */
+  readonly clean?: boolean;
 }
 
 export interface ClaudeSeat {
@@ -61,6 +71,7 @@ export interface ClaudeSeat {
 export interface ClaudeSeatOptions {
   readonly permissionMode?: ClaudeCliEngineOptions['permissionMode'];
   readonly effort?: string;
+  readonly clean?: boolean;
 }
 
 /** Create the Claude seat used by declarative team workflows. */
@@ -71,6 +82,7 @@ export function claude(model: string, options: ClaudeSeatOptions = {}): ClaudeSe
       defaultModel: model,
       permissionMode: options.permissionMode ?? 'bypassPermissions',
       ...(options.effort === undefined ? {} : { effort: options.effort }),
+      ...(options.clean === undefined ? {} : { clean: options.clean }),
     }),
     identity: {
       adapter: 'claude-cli',
@@ -279,7 +291,11 @@ export function buildClaudeArgs(
   // A leaf agent may not spawn sub-agents, so disallow the spawn tool (wins over any allowlist).
   if (tools.disallowedTools?.length)
     args.push('--disallowedTools', tools.disallowedTools.join(','));
-  if (restricted) args.push('--strict-mcp-config');
+  // Only the repository's settings. The person's own MCP servers load
+  // whatever the setting sources say, so clean mode also needs strict MCP.
+  const clean = opts.clean ?? CLEAN_BY_DEFAULT;
+  if (clean) args.push('--setting-sources', 'project');
+  if (restricted || clean) args.push('--strict-mcp-config');
   if (opts.permissionMode) args.push('--permission-mode', opts.permissionMode);
   if (opts.cliArgs?.length) args.push(...opts.cliArgs);
   return args;

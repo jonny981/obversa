@@ -41,4 +41,12 @@ describe('@obversa/engine-claude-cli', () => {
     expect((seat.engine as unknown as { opts: ClaudeCliEngineOptions }).opts.permissionMode)
       .toBe('plan');
   });
+
+  it('passes clean mode to the engine, and leaves the default to the engine', () => {
+    const opts = (seat: ReturnType<typeof claude>) =>
+      (seat.engine as unknown as { opts: ClaudeCliEngineOptions }).opts;
+
+    expect(opts(claude('claude-sonnet-4-5', { clean: true })).clean).toBe(true);
+    expect(opts(claude('claude-sonnet-4-5')).clean).toBeUndefined();
+  });
 });

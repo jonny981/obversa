@@ -1,8 +1,13 @@
 import {
+  mkdirSync,
+  mkdtempSync,
   readdirSync,
   realpathSync,
+  rmSync,
   statSync,
+  writeFileSync,
 } from 'node:fs';
+import { tmpdir } from 'node:os';
 import {
   isAbsolute,
   join,
@@ -46,6 +51,8 @@ import {
 import { toolTarget } from '@obversa/core/tool-target';
 
 const SUPPORTED_VERSION = '1.18.23';
+/** Whether a run leaves out the person's own setup when `clean` is not set. */
+const CLEAN_BY_DEFAULT = true;
 const VERSION_TIMEOUT_MS = 10_000;
 const VERSION_TEARDOWN_MS = 1_000;
 const VERSION_OUTPUT_BYTES = 4_096;
@@ -131,6 +138,14 @@ export interface OpenCodeCliEngineOptions {
    * reasoning effort; a request's own `effort` wins.
    */
   readonly effort?: string;
+  /**
+   * Run with an empty OpenCode config folder in place of the person's own:
+   * no settings, plugins, agents, MCP servers or global instruction files of
+   * theirs. The repository's own config and instruction files still apply,
+   * and OpenCode's data folder, which holds the login, stays the person's.
+   * On by default; `false` runs on the person's own setup.
+   */
+  readonly clean?: boolean;
 }
 
 export interface OpenCodeSeatOptions {
@@ -139,6 +154,7 @@ export interface OpenCodeSeatOptions {
   /** Provider-keyed OpenCode login data to use instead of the person's own login. */
   readonly auth?: JsonObject;
   readonly effort?: string;
+  readonly clean?: boolean;
 }
 
 export interface OpenCodeSeat {
@@ -163,6 +179,7 @@ export function opencode(modelName: string, options: OpenCodeSeatOptions): OpenC
       identity: { provider: selected.provider, modelFamily },
       ...(options.auth === undefined ? {} : { auth: options.auth }),
       ...(options.effort === undefined ? {} : { effort: options.effort }),
+      ...(options.clean === undefined ? {} : { clean: options.clean }),
     }),
     identity: {
       adapter: 'opencode-cli',
@@ -663,10 +680,31 @@ function serializedConfig(value: JsonObject): string {
   return encoded;
 }
 
+/**
+ * An empty OpenCode config folder for one clean-mode process. The empty
+ * `AGENTS.md` stops OpenCode reading `~/.claude/CLAUDE.md` as the person's
+ * global instructions, which it does when its config folder has none.
+ */
+function createCleanConfigHome(): string {
+  const home = mkdtempSync(join(tmpdir(), 'obversa-opencode-config-'));
+  mkdirSync(join(home, 'opencode'), { mode: 0o700 });
+  writeFileSync(join(home, 'opencode', 'AGENTS.md'), '', { mode: 0o600 });
+  return home;
+}
+
+/**
+ * Build one OpenCode invocation. In clean mode `configHome` is the empty
+ * folder OpenCode reads as its config home in place of the person's own.
+ */
 export function buildOpenCodeInvocation(
   request: AgentRequest,
   options: OpenCodeCliEngineOptions,
+  configHome?: string,
 ): OpenCodeInvocation {
+  const clean = options.clean ?? CLEAN_BY_DEFAULT;
+  if (clean && (typeof configHome !== 'string' || !isAbsolute(configHome))) {
+    throw new TypeError('OpenCode clean mode requires an absolute empty config folder');
+  }
   if (typeof request.cwd !== 'string' || !isAbsolute(request.cwd)) {
     throw new TypeError('OpenCode request cwd must be an absolute path');
   }
@@ -707,10 +745,16 @@ export function buildOpenCodeInvocation(
   const configContent = serializedConfig(config);
   const attempt = attemptEnvironment({ ...request, env: undefined }) ?? {};
   // Set on top of the person's own environment, so OpenCode reads its normal
-  // home, config folder and login unless the host passed another login.
+  // home, config folder and login unless the host passed another login, or
+  // clean mode moved the config folder. Clean mode leaves
+  // OPENCODE_DISABLE_EXTERNAL_SKILLS unset: it skips the repository's
+  // `.claude/skills` and `.agents/skills` as well as the person's own.
   const environment = Object.freeze({
     ...selected,
     ...attempt,
+    // OPENCODE_CONFIG_DIR as well, so a config folder the person names in
+    // their own environment does not load either.
+    ...(clean ? { XDG_CONFIG_HOME: configHome!, OPENCODE_CONFIG_DIR: join(configHome!, 'opencode') } : {}),
     OPENCODE_CONFIG_CONTENT: configContent,
     ...(Object.keys(auth).length === 0
       ? {}
@@ -1125,7 +1169,19 @@ export class OpenCodeCliEngine implements Engine {
         : { environment: this.#environment }),
       ...(Object.keys(this.#auth).length === 0 ? {} : { auth: this.#auth }),
       ...(options.effort === undefined ? {} : { effort: options.effort }),
+      ...(options.clean === undefined ? {} : { clean: options.clean }),
     });
+  }
+
+  /** A fresh empty config folder in clean mode, removed after its one process. */
+  async #withConfigHome<Value>(action: (configHome?: string) => Promise<Value>): Promise<Value> {
+    if (!(this.#options.clean ?? CLEAN_BY_DEFAULT)) return action();
+    const configHome = createCleanConfigHome();
+    try {
+      return await action(configHome);
+    } finally {
+      rmSync(configHome, { recursive: true, force: true });
+    }
   }
 
   async admit(
@@ -1171,7 +1227,8 @@ export class OpenCodeCliEngine implements Engine {
         && !isDeepStrictEqual(engineSelection(expectedSelection), selected)) {
         throw new TypeError('OpenCode expected selection does not match its configured path and request');
       }
-      buildOpenCodeInvocation(normalized, this.#options);
+      // Checks the request only; no process starts, so no folder is made.
+      buildOpenCodeInvocation(normalized, this.#options, join(tmpdir(), 'obversa-opencode-config'));
     } catch (error) {
       if (error instanceof EngineError) throw error;
       const diagnostic = error instanceof Error ? error.message : 'invalid request';
@@ -1191,12 +1248,11 @@ export class OpenCodeCliEngine implements Engine {
 
   async #observeVersion(request: AgentRequest, signal: AbortSignal): Promise<string> {
     try {
-      const invocation = buildOpenCodeInvocation(request, this.#options);
-      const command = await runOwnedCommand({
+      const command = await this.#withConfigHome((configHome) => runOwnedCommand({
         executable: this.#executable,
         args: ['--version'],
         cwd: request.cwd!,
-        env: invocation.environment,
+        env: buildOpenCodeInvocation(request, this.#options, configHome).environment,
         stdin: '',
         ...ownedCommandIdentity({
           adapter: 'opencode-cli', runId: request.attempt?.runId,
@@ -1206,7 +1262,7 @@ export class OpenCodeCliEngine implements Engine {
         teardownGraceMs: Math.min(request.timeoutGraceMs ?? VERSION_TEARDOWN_MS, VERSION_TEARDOWN_MS),
         maxOutputBytes: Math.min(request.maxOutputBytes ?? VERSION_OUTPUT_BYTES, VERSION_OUTPUT_BYTES),
         maxMemoryBytes: request.maxMemoryBytes ?? DEFAULT_OWNED_COMMAND_LIMITS.maxMemoryBytes,
-      }, signal);
+      }, signal));
       if (command.aborted || signal.aborted) throw loopError('aborted', 'OpenCode version check was aborted');
       if (command.timedOut) throw loopError('timeout', 'OpenCode version check timed out');
       if (command.exitCode !== 0) throw loopError('invalid-config', 'OpenCode version command did not succeed');
@@ -1295,42 +1351,44 @@ export class OpenCodeCliEngine implements Engine {
     const startedAt = Date.now();
 
     try {
-      const invocation = buildOpenCodeInvocation(normalized, this.#options);
-      const command = await runOwnedCommand({
-        executable: this.#executable,
-        args: invocation.args,
-        cwd,
-        env: invocation.environment,
-        stdin: invocation.stdin,
-        ...owner,
-        ...DEFAULT_OWNED_COMMAND_LIMITS,
-        timeoutMs:
-          request.timeoutMs ?? DEFAULT_OWNED_COMMAND_LIMITS.timeoutMs,
-        teardownGraceMs:
-          request.timeoutGraceMs ?? DEFAULT_OWNED_COMMAND_LIMITS.teardownGraceMs,
-        maxOutputBytes:
-          request.maxOutputBytes ?? DEFAULT_OWNED_COMMAND_LIMITS.maxOutputBytes,
-        maxMemoryBytes:
-          request.maxMemoryBytes ?? DEFAULT_OWNED_COMMAND_LIMITS.maxMemoryBytes,
-      }, commandSignal, {
-        onStdout(chunk) {
-          buffer += decoder.decode(chunk, { stream: true });
-          let newline: number;
-          while ((newline = buffer.indexOf('\n')) >= 0) {
-            consumeLine(
-              buffer.slice(0, newline),
-              accumulator,
-              onEvent,
-              structured,
-              capabilities,
-            );
-            buffer = buffer.slice(newline + 1);
-            if (accumulator.protocolError !== null) {
-              parserAbort.abort();
-              return;
+      const command = await this.#withConfigHome((configHome) => {
+        const invocation = buildOpenCodeInvocation(normalized, this.#options, configHome);
+        return runOwnedCommand({
+          executable: this.#executable,
+          args: invocation.args,
+          cwd,
+          env: invocation.environment,
+          stdin: invocation.stdin,
+          ...owner,
+          ...DEFAULT_OWNED_COMMAND_LIMITS,
+          timeoutMs:
+            request.timeoutMs ?? DEFAULT_OWNED_COMMAND_LIMITS.timeoutMs,
+          teardownGraceMs:
+            request.timeoutGraceMs ?? DEFAULT_OWNED_COMMAND_LIMITS.teardownGraceMs,
+          maxOutputBytes:
+            request.maxOutputBytes ?? DEFAULT_OWNED_COMMAND_LIMITS.maxOutputBytes,
+          maxMemoryBytes:
+            request.maxMemoryBytes ?? DEFAULT_OWNED_COMMAND_LIMITS.maxMemoryBytes,
+        }, commandSignal, {
+          onStdout(chunk) {
+            buffer += decoder.decode(chunk, { stream: true });
+            let newline: number;
+            while ((newline = buffer.indexOf('\n')) >= 0) {
+              consumeLine(
+                buffer.slice(0, newline),
+                accumulator,
+                onEvent,
+                structured,
+                capabilities,
+              );
+              buffer = buffer.slice(newline + 1);
+              if (accumulator.protocolError !== null) {
+                parserAbort.abort();
+                return;
+              }
             }
-          }
-        },
+          },
+        });
       });
       buffer += decoder.decode();
       if (buffer.trim().length > 0) {

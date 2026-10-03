@@ -2,9 +2,11 @@
 
 import {
   appendFileSync,
+  existsSync,
   readFileSync,
   writeFileSync,
 } from 'node:fs';
+import { join } from 'node:path';
 import { setTimeout as delay } from 'node:timers/promises';
 
 const bootDelayMs = Number(process.env.OBVERSA_TEST_OPENCODE_BOOT_DELAY_MS ?? 0);
@@ -22,7 +24,19 @@ function recordAdmissionInvocation(kind, stdin) {
     stdin,
     home: process.env.HOME,
     config: JSON.parse(process.env.OPENCODE_CONFIG_CONTENT ?? '{}'),
+    ...configHomeRecord(),
   })}\n`);
+}
+
+/** The config folder a clean-mode run points OpenCode at, and its global instructions. */
+function configHomeRecord() {
+  const configHome = process.env.XDG_CONFIG_HOME;
+  if (configHome === undefined) return {};
+  const instructions = join(configHome, 'opencode', 'AGENTS.md');
+  return {
+    configHome,
+    globalInstructions: existsSync(instructions) ? readFileSync(instructions, 'utf8') : null,
+  };
 }
 
 if (args.length === 1 && args[0] === '--version') {

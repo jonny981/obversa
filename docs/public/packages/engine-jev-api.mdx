@@ -9,6 +9,9 @@ how ready is this change to land. Each attempt is one Jev decision call over
 the TypeSafe API, and the answers come back as the structured result. Jev
 runs with workspace mode `none`; it never reads or edits files.
 
+It loads none of your own setup, so it always runs clean and has no `clean` option. Its
+row in the [engines table](/packages/engines#the-engines) says the same.
+
 ## Install
 
 <CodeGroup>

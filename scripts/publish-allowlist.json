@@ -12,6 +12,7 @@
     "@obversa/engine-grok-cli",
     "@obversa/engine-jev-api",
     "@obversa/engine-mastra",
+    "@obversa/engine-openai-agents",
     "@obversa/engine-opencode-cli",
     "@obversa/memory-git",
     "@obversa/memory-markdown",

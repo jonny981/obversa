@@ -26,6 +26,9 @@ import { claudeToolOptions } from '@obversa/core/claude-tools';
 import { mapMessage, newAccumulator } from '@obversa/core/claude-stream-json';
 import { attemptEnvironment, scrubCapture } from '@obversa/core/command';
 
+/** Whether a run leaves out the person's own setup when `clean` is not set. */
+const CLEAN_BY_DEFAULT = true;
+
 export interface AgentSdkEngineOptions {
   readonly defaultModel?: string;
   readonly permissionMode?:
@@ -39,6 +42,13 @@ export interface AgentSdkEngineOptions {
   readonly memory?: Memory;
   /** Passed as the SDK's `effort` query option; a request's own `effort` wins. */
   readonly effort?: string;
+  /**
+   * Run without the person's own settings, hooks, plugins, skills, MCP
+   * servers and `~/.claude/CLAUDE.md`. The repository's settings and
+   * instruction files still apply, and the run keeps the person's login.
+   * On by default; `false` runs on the person's own setup.
+   */
+  readonly clean?: boolean;
 }
 
 const MEMORY_SERVER = 'obversa-memory';
@@ -213,6 +223,7 @@ export class AgentSdkEngine implements Engine {
   ): Promise<AgentResult> {
     const toolOptions = agentSdkToolOptions(req, this.opts.memory);
     const restricted = req.workspaceMode === 'none' || req.workspaceMode === 'read';
+    const clean = this.opts.clean ?? CLEAN_BY_DEFAULT;
     // Lazy import so installs/runs that never touch this engine don't pay for it.
     const { query } = await import('@anthropic-ai/claude-agent-sdk');
 
@@ -262,10 +273,12 @@ export class AgentSdkEngine implements Engine {
       systemPrompt: agentSdkSystemPrompt(req),
       cwd: req.cwd,
       ...toolOptions,
-      // The sources Claude Code itself loads, so both Claude engines read the
-      // person's settings and the repository's instruction files.
-      settingSources: ['user', 'project', 'local'],
-      ...(restricted ? { strictMcpConfig: true } : {}),
+      // With `clean: false`, the sources Claude Code itself loads, so both
+      // Claude engines read the person's settings and the repository's
+      // instruction files. A clean run, the default, keeps only the
+      // repository's, and no MCP servers of the person's.
+      settingSources: clean ? ['project'] : ['user', 'project', 'local'],
+      ...(restricted || clean ? { strictMcpConfig: true } : {}),
       mcpServers: memoryServer ? { [MEMORY_SERVER]: memoryServer } : undefined,
       // The SDK's `env` REPLACES the subprocess environment entirely, the
       // opposite of execa's merge semantics, so spread `process.env` under the

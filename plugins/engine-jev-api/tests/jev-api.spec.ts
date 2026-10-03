@@ -662,6 +662,7 @@ describe('engine conformance kit', () => {
         'missing-cli': 'the adapter is an HTTP client with no executable to lose',
         'model-unavailable': 'unclassified until an observed provider error body exists',
         'quota': 'unclassified until an observed provider error body exists',
+        'clean-mode': 'the adapter is an HTTP client that loads none of the person\'s own setup, so it always runs clean',
       },
       workspace: {
         modes: {

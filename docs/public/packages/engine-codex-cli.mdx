@@ -61,6 +61,21 @@ Without a workspace mode or a `sandbox` option, Codex runs in its
 'workspace-write'` lets it write. `permissionMode: 'bypassPermissions'`
 turns the sandbox off.
 
+### `clean`
+
+`true` runs Codex with `--ignore-user-config`. Your own `config.toml` stays
+out, with your settings, MCP servers and plugins, and so does the
+`AGENTS.md` in your Codex home folder. The repository's instruction files
+still apply, and the run keeps your login. With your own settings out,
+Codex runs its own default model unless the seat or request names one.
+`CodexSeatOptions` takes the same `clean` option.
+
+Its row in the [engines table](/packages/engines#the-engines): runs on your
+setup, clean mode available, read-only held in both modes. Your own skills
+and command rules still load in clean mode: Codex has no switch that
+leaves out your skills, and its switch for rules also leaves out the
+repository's.
+
 ### The rest
 
 | Field | Type | Default | Description |
@@ -71,6 +86,7 @@ turns the sandbox off.
 | `approvalPolicy` | `'on-request' \| 'never'` | none | Codex's approval policy. |
 | `permissionMode` | as Claude's | none | `bypassPermissions` turns the sandbox off. |
 | `effort` | `string` | none | Passed as `-c model_reasoning_effort=<level>`, over your own Codex config. Allowed in a workspace mode, unlike `cliArgs`. A request's `effort` wins. Also a `CodexSeatOptions` field. See [Reasoning effort](/packages/engines#reasoning-effort). |
+| `clean` | `boolean` | [See the default](/packages/engines#the-default) | On by default: your own setup stays out. `false` runs on your own setup. [`clean`](#clean). |
 
 ## Errors
 

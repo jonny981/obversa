@@ -8,10 +8,11 @@ description: "@obversa/engine-opencode-cli: one engine attempt through a fresh O
 from any provider OpenCode runs into a seat, which gives a review panel a
 third model family.
 
-The plugin runs OpenCode the way you run it: with your own home folder,
-your OpenCode config folder, your OpenCode login and your OpenCode
-settings, the same as every other engine. OpenCode loads the repository's
-instruction files under its own rules. The plugin adds only what the step
+The plugin runs OpenCode [clean](#clean) by default: with your own home
+folder and your OpenCode login, but with an empty config folder in place of
+yours, so your OpenCode settings stay out. Set `clean: false` to run it the
+way you run it, with your own config folder too. OpenCode loads the
+repository's instruction files under its own rules. The plugin adds only what the step
 needs, through OpenCode's own config: the tools and permission rules the
 step declares, with every other tool turned off, no autoupdate and no
 sharing.
@@ -99,6 +100,25 @@ logins you stored with `opencode auth login`. `opencode(model, options)`
 takes the same `auth` option. `environment` sets more values on top of
 your environment. Names that start with `OPENCODE_` are refused.
 
+### `clean`
+
+`true` points OpenCode at a new config folder for each OpenCode process,
+holding only an empty `AGENTS.md`, and removes it afterwards. Your own settings, plugins, agents, MCP servers and
+global instruction files stay out, `~/.claude/CLAUDE.md` included. The
+repository's own config and instruction files still apply. OpenCode's data
+folder, which holds your login, stays yours.
+`opencode(model, options)` takes the same `clean` option.
+
+Its row in the [engines table](/packages/engines#the-engines): runs on your
+setup, clean mode available, read-only not proven, because the proof needs a paid model and free
+models refuse a tool-limited run. Clean
+mode moves the whole config folder (`XDG_CONFIG_HOME`), so commands the
+step runs also start without their settings in it, such as the GitHub
+CLI's login. A config folder you set in `OPENCODE_CONFIG_DIR` stays out
+too. Your own skills in `~/.claude/skills` and `~/.agents/skills`
+still load in clean mode, because OpenCode's switch that skips them also
+skips the repository's own skills.
+
 ### The rest
 
 | Field | Type | Default | Description |
@@ -109,6 +129,7 @@ your environment. Names that start with `OPENCODE_` are refused.
 | `tools` | `readonly string[]` | none | `OpenCodeSeatOptions` only: the tools the seat may use. |
 | `auth` | `JsonObject` | none | Login data to use instead of yours. Also an `OpenCodeSeatOptions` field. |
 | `effort` | `string` | none | Passed as `--variant <level>`, OpenCode's provider-specific reasoning effort. A request's `effort` wins. Also an `OpenCodeSeatOptions` field. See [Reasoning effort](/packages/engines#reasoning-effort). |
+| `clean` | `boolean` | [See the default](/packages/engines#the-default) | On by default: your own setup stays out. `false` runs on your own setup. Also an `OpenCodeSeatOptions` field. [`clean`](#clean). |
 
 ## Errors
 

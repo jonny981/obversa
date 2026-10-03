@@ -221,6 +221,7 @@
               "packages/engine-anthropic-api",
               "packages/engine-jev-api",
               "packages/engine-mastra",
+              "packages/engine-openai-agents",
               "packages/engine-eve",
               "packages/engine-langgraph",
               "packages/memory-git",

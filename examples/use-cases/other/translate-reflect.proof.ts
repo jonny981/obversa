@@ -57,7 +57,7 @@ await withExample({
   const record = await recordEvents(run, 'records/translate-reflect.jsonl');
   const judged = record.filter((event) => event.kind === 'refine:judge');
   assert.deepEqual(judged.map((event) => event.reason), [
-    'the judge says another round is worth it (0.72)',
+    'the judge chose continue',
     'the judge chose holds',
   ]);
   const nuance = record.filter((event) => event.kind === 'dag:node' && event.node === 'nuance' && event.phase === 'done');

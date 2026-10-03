@@ -113,6 +113,12 @@ export interface Outcome {
    * `revisionRequest({ target, findings })` or `kickback(to, reason)`.
    */
   revision?: RevisionRequest;
+  /**
+   * Fork branches this step deleted while they still held commits that never
+   * landed, each with the sha of its last commit. Present only when such work
+   * was thrown away, so the record says what was lost.
+   */
+  discarded?: ReadonlyArray<{ readonly branch: string; readonly sha: string }>;
 }
 
 export type RecordedStage =
@@ -164,6 +170,16 @@ export interface FeedbackFinding {
   scope?: string;
   evidence: string;
   recommendation?: string;
+  /** Why a judge sent this finding back, when a judge decided it. */
+  judgeReason?: string;
+}
+
+/** A finding a judge skipped, kept across rounds so reviewers do not raise it again. */
+export interface SkippedFinding {
+  /** The review round the finding was skipped in. */
+  readonly round: number;
+  readonly finding: FeedbackFinding;
+  readonly reason: string;
 }
 
 export type RevisionRerun = 'target-and-dependents';
@@ -269,6 +285,12 @@ export interface JobContext {
   readonly lastOutcome?: Outcome;
   /** The most recent failed-review outcome, so a restart can act on it. */
   readonly lastReview?: Outcome;
+  /**
+   * The findings a judge skipped in earlier rounds, with its reasons. Set on
+   * the review that sent the work back, and on every job inside it. An agent
+   * job adds them to its prompt and asks the agent not to raise them again.
+   */
+  readonly skippedFindings?: readonly SkippedFinding[];
   /**
    * The previous iteration's explicit `until`-gate evaluation (met or not),
    * including its diagnostic `output`. Undefined when the loop has no explicit
@@ -494,6 +516,8 @@ export interface JudgeAnswer {
   readonly probability?: number;
   readonly choice?: string;
   readonly probabilities?: Readonly<Record<string, number>>;
+  /** A one-line reason, when the judge gives one with its answer. */
+  readonly reason?: string;
 }
 
 /**
@@ -508,6 +532,12 @@ export interface Judge {
   readonly seat: TeamSeat;
   readonly cap: number;
   readonly questions: JudgeQuestions;
+  /**
+   * Ask the judge to act on or skip each finding, and send the builder only
+   * the ones it acts on. True by default; false by default for a caller's
+   * own question set, which then routes on the whole round.
+   */
+  readonly perFinding: boolean;
   readonly interaction?: InteractionBinding;
 }
 
@@ -799,14 +829,28 @@ export type LoopEvent =
     }
   | {
       // A judge's answer, between a review's verdict and the send-back: what
-      // it was asked, what it answered, and the reason it chose (or 'unknown'
-      // when its reply did not parse). Emitted whether the answer sends the
-      // work back or lets it stand.
+      // it answered and which way the runtime went. Emitted whether the
+      // answer sends the work back or lets it stand.
       kind: 'refine:judge';
       ts: number;
       path: string[];
       answers: Readonly<Record<string, JudgeAnswer>>;
       reason: string;
+      // `again` sends the work back for another round, unless the cap is
+      // spent; `stop` ends the rounds.
+      route: 'again' | 'stop';
+      // The answer that decided the route: the chosen reason
+      // (`stop_reason: continue`), the probability answer it fell back to
+      // (`worth_another_round: 0.49`), or `no clear answer`.
+      rule: string;
+      // The status a stop gives the node: `pass` when the work stands,
+      // `fail` when the review's failure stands. Absent on `again`, and on
+      // `stop_reason: product_decision`, which asks a person and then asks
+      // the judge again.
+      status?: 'pass' | 'fail';
+      // When the judge decides each finding: every finding of the round, by
+      // its id, with `act` (sent back to the builder) or `skip` and why.
+      findings?: readonly { readonly id: string; readonly decision: 'act' | 'skip'; readonly reason: string }[];
     }
   | {
       kind: 'interaction:checkpoint';

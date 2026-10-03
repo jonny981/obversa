@@ -103,6 +103,13 @@ export interface GrokCliEngineOptions {
   readonly authFile?: string;
   /** Passed as `grok --reasoning-effort <level>`; a request's own `effort` wins. */
   readonly effort?: string;
+  /**
+   * Grok has no clean mode, so `true` throws. Its strict sandbox reads no
+   * login outside its own home folder, so a run cannot leave the person's
+   * Grok home out and keep their login. Grok runs on the person's setup
+   * unless `authFile` is set, so it has no default to flip.
+   */
+  readonly clean?: boolean;
 }
 
 interface GrokAccumulator {
@@ -684,6 +691,11 @@ export class GrokCliEngine implements Engine {
   readonly #options: GrokCliEngineOptions;
 
   constructor(options: GrokCliEngineOptions) {
+    if (options.clean === true) {
+      throw new TypeError(
+        'Grok has no clean mode: its strict sandbox reads no login outside its own home folder, so a run cannot leave your Grok setup out and keep your login',
+      );
+    }
     grokPermissionMode(options);
     if (typeof options.executable !== 'string' || !isAbsolute(options.executable)) {
       throw new TypeError('Grok executable must be an absolute path');

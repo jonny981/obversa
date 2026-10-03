@@ -25,10 +25,10 @@ import { recordedJudge } from '@obversa/runtime/testing';
  * page the brief names; Codex, from another model family, reads every
  * sentence as a person would and reports what fails, each finding tagged
  * block, should-fix or nice-to-have. A block always goes back to the writer.
- * Otherwise Jev answers typed questions about the draft and the rounds so
- * far, and its chosen reason decides whether another round runs. The cap is
- * the last word. A person then approves the exact bytes, with their sha in
- * the question.
+ * Otherwise Jev decides each finding: act on it or skip it. The writer gets
+ * only the findings Jev acts on, and the reader is told what was skipped.
+ * When Jev skips every finding, the page stands. The cap is the last word.
+ * A person then approves the exact bytes, with their sha in the question.
  */
 
 // ── The seats ───────────────────────────────────────────────────────────────

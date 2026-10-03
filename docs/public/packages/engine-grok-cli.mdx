@@ -7,7 +7,8 @@ description: "@obversa/engine-grok-cli: one engine attempt through a fresh Grok 
 command-line tool, in a fresh process. Use it to put an xAI model in a seat.
 
 The plugin runs Grok the way you run it: with your own home folder, your
-Grok login and your Grok settings, the same as every other engine. Grok
+Grok login and your Grok settings. Grok has no [clean mode](#clean), so it
+doesn't run clean by default the way the other command-line engines do. Grok
 loads the repository's instruction files under its own rules, such as
 whether you trust the project. The plugin adds only what the step needs,
 through Grok's own flags: the tools and permission rules the step declares,
@@ -78,6 +79,15 @@ plugin copies that file into a temporary Grok home folder for each attempt,
 because Grok's sandbox reads no login outside its home folder. Grok then
 reads no settings from your own Grok home folder.
 
+### `clean`
+
+Grok has no clean mode, so `clean: true` throws an error that says why.
+Grok's strict sandbox reads no login outside its own home folder, so a run
+can't leave your Grok home out and keep your own login.
+
+Its row in the [engines table](/packages/engines#the-engines): runs on your
+setup, no clean mode, read-only held on your setup.
+
 ### The rest
 
 | Field | Type | Default | Description |
@@ -87,6 +97,7 @@ reads no settings from your own Grok home folder.
 | `identity` | `{ provider, modelFamily }` | required | What this instance serves; either may be `null`. |
 | `permissionMode` | `PermissionMode` | none | The CLI's permission mode. |
 | `effort` | `string` | none | Passed as `--reasoning-effort <level>`. A request's `effort` wins. See [Reasoning effort](/packages/engines#reasoning-effort). |
+| `clean` | `boolean` | [See the default](/packages/engines#the-default) | `true` throws: Grok has no clean mode. [`clean`](#clean). |
 
 ## Errors
 

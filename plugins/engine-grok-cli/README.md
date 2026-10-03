@@ -4,8 +4,8 @@
 Grok CLI process.
 
 The plugin runs Grok the way you run it: with your own home folder, your
-Grok login and your Grok settings, the same as every other Obversa engine.
-Grok loads the repository's instruction files under its own rules, such as
+Grok login and your Grok settings. Grok has no clean mode, so it doesn't
+run clean by default the way the other command-line engines do. Grok loads the repository's instruction files under its own rules, such as
 whether you trust the project. The plugin adds only what the step needs,
 through Grok's own flags: the tools and permission rules the step declares,
 read-only enforcement where the step only reads, subagents only when the

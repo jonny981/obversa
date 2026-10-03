@@ -10,6 +10,7 @@ const valueAfter = (flag) => {
 };
 const version = args.length === 1 && args[0] === '--version';
 const promptFile = valueAfter('--prompt-file');
+const configFile = valueAfter('--config');
 const calls = process.env.OBVERSA_TEST_DEVIN_CALLS;
 if (calls) appendFileSync(calls, `${JSON.stringify({
   kind: version ? 'version' : 'model',
@@ -19,6 +20,7 @@ if (calls) appendFileSync(calls, `${JSON.stringify({
   cwd: process.cwd(),
   pid: process.pid,
   prompt: promptFile === undefined ? null : readFileSync(promptFile, 'utf8'),
+  config: configFile === undefined ? null : readFileSync(configFile, 'utf8'),
   env: {
     HOME: process.env.HOME ?? null,
     OBVERSA_TEST_PERSON: process.env.OBVERSA_TEST_PERSON ?? null,

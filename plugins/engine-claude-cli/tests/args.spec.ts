@@ -15,6 +15,23 @@ describe('buildClaudeArgs', () => {
     expect(args).not.toContain('--permission-mode');
   });
 
+  it('loads only the repository\'s settings and no MCP servers of its own in clean mode', () => {
+    const args = buildClaudeArgs({ prompt: 'go', workspaceMode: 'write' }, { clean: true });
+    expect(args[args.indexOf('--setting-sources') + 1]).toBe('project');
+    expect(args.filter((arg) => arg === '--strict-mcp-config')).toHaveLength(1);
+    const restricted = buildClaudeArgs({ prompt: 'go', tools: ['Read'], workspaceMode: 'read' }, { clean: true });
+    expect(restricted.filter((arg) => arg === '--strict-mcp-config')).toHaveLength(1);
+  });
+
+  it('runs clean by default, and on the person\'s own setup with clean: false', () => {
+    const byDefault = buildClaudeArgs({ prompt: 'go', workspaceMode: 'write' }, {});
+    expect(byDefault[byDefault.indexOf('--setting-sources') + 1]).toBe('project');
+    expect(byDefault.filter((arg) => arg === '--strict-mcp-config')).toHaveLength(1);
+    const own = buildClaudeArgs({ prompt: 'go', workspaceMode: 'write' }, { clean: false });
+    expect(own).not.toContain('--setting-sources');
+    expect(own).not.toContain('--strict-mcp-config');
+  });
+
   it('passes --permission-mode when set', () => {
     const args = buildClaudeArgs(
       { prompt: 'go' },
