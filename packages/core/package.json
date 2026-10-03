@@ -1,6 +1,6 @@
 {
   "name": "@obversa/core",
-  "version": "0.2.3",
+  "version": "0.2.4",
   "description": "Bounded child-process execution shared by Obversa packages.",
   "author": "Jonny Neill <jonnyneill@hotmail.com>",
   "type": "module",
