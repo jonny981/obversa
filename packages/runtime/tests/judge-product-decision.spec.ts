@@ -231,12 +231,12 @@ describe('the judge can request a product decision', () => {
       expect(choices(fixture.cwd).filter((call) => call === 'writer')).toHaveLength(2);
     }, 30_000);
 
-    it('leaves a block on its existing revision route before asking the judge', async () => {
+    it('asks the judge about a block, and the judge can ask for a product decision on it', async () => {
       const fixture = await setup();
       const scenario = { choices: ['product_decision'], cap: 3, blockFirst: true };
       const result = await run(productDecisionJob(kind, fixture.cwd, scenario), { cwd: fixture.cwd, recordTo: fixture.recordTo, callbacks: fixture.callbacks });
       expect(result.outcome.status).toBe('paused');
-      expect(choices(fixture.cwd)).toEqual(['writer', 'reviewer', 'writer', 'reviewer', 'judge']);
+      expect(choices(fixture.cwd)).toEqual(['writer', 'reviewer', 'judge']);
     });
   });
 });

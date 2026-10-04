@@ -65,7 +65,8 @@ the count against the limit, so you can read why a run stopped.
   that sent the work back is told what the judge skipped and why: an agent
   reviewer reads the list in its prompt, and your own review code reads it
   as `ctx.skippedFindings`. When the judge skips every finding, the work
-  stands. A block finding always goes back without the judge.
+  stands. The judge decides a block finding too. A block goes back without
+  a judge only when there is no judge.
   [A judge stops the loop](/patterns/judge-stops-the-loop).
 - **A draft refined over rounds.** Translate, reflect, revise, then a person
   reads the result. That page calls it a refinement loop.

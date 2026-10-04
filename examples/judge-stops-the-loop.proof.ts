@@ -101,10 +101,19 @@ try {
     '```',
     '',
   ].join('\n'));
-  // The judge is asked only when a round has no block, and decides each
-  // finding. Round 2: it acts on the missing folder (finding-1) and skips the
-  // taste note (finding-2). Round 3: it skips the one taste note left.
+  // The judge is asked every round, and decides each finding. Round 1: it
+  // acts on both blocks. Round 2: it acts on the missing folder (finding-1)
+  // and skips the taste note (finding-2). Round 3: it skips the one taste
+  // note left.
   await writeFile(join(workspace, 'judge.json'), `${JSON.stringify([
+    {
+      holds: { type: 'noul', noul: 0.1 },
+      worth_doing: { type: 'noul', noul: 0.9 },
+      worth_another_round: { type: 'noul', noul: 0.9 },
+      stop_reason: { type: 'choice', choice: 'continue', confidence: 0.8 },
+      'finding-1': { type: 'choice', choice: 'act', confidence: 0.9 },
+      'finding-2': { type: 'choice', choice: 'act', confidence: 0.9 },
+    },
     {
       holds: { type: 'noul', noul: 0.3 },
       worth_doing: { type: 'noul', noul: 0.7 },
@@ -201,7 +210,7 @@ try {
   const calls = (await readFile(callsLog, 'utf8')).trim().split('\n').map((line) => JSON.parse(line) as { role: string; reply: string });
   const claudeCalls = calls.filter((call) => call.role === 'claude');
   const codexCalls = calls.filter((call) => call.role === 'codex');
-  assert.equal(claudeCalls.length, 3, 'the writer runs three times: the draft, the two blocks, then the one finding the judge acted on');
+  assert.equal(claudeCalls.length, 3, 'the writer runs three times: the draft, the two blocks the judge acted on, then the one finding it acted on next');
   assert.equal(codexCalls.length, 3, 'the reader reads all three drafts');
 
   interface RecordedEvent {
@@ -212,7 +221,7 @@ try {
     readonly accepted?: boolean;
     readonly answers?: { readonly stop_reason?: { readonly choice?: string } };
     readonly findings?: readonly { readonly id: string; readonly decision: string; readonly reason: string }[];
-    readonly outcome?: { status: string; summary?: string; data?: unknown; revision?: { findings?: readonly { evidence: string }[] } };
+    readonly outcome?: { status: string; summary?: string; data?: unknown; revision?: { findings?: readonly { evidence: string; severity?: string }[] } };
   }
   const record = (await readFile(join(workspace, 'records/judge-stops-the-loop.jsonl'), 'utf8'))
     .trim().split('\n').map((line) => JSON.parse(line) as RecordedEvent);
@@ -220,16 +229,17 @@ try {
   assert.equal(writerRuns.length, 3, 'the record shows three writer runs');
   const kickbacks = record.filter((event) => event.kind === 'loop:review' && event.accepted === true);
   assert.equal(kickbacks.length, 2, 'the round with blocks goes back, then the round with a finding the judge acted on');
-  assert.match(kickbacks[0]!.outcome!.summary ?? '', /\[block\]/, 'the first round that went back carried block findings');
+  assert.deepEqual(kickbacks[0]!.outcome!.revision?.findings?.map((finding) => finding.severity), ['block', 'block'], 'the first round that went back carried the two block findings');
   assert.deepEqual(kickbacks[1]!.outcome!.revision?.findings?.map((finding) => finding.evidence), [whereToRun],
     'the second send-back carries only the finding the judge acted on');
   const judged = record.filter((event) => event.kind === 'refine:judge');
   assert.deepEqual(judged.map((event) => event.findings?.map(({ id, decision }) => `${id}: ${decision}`)), [
+    ['finding-1: act', 'finding-2: act'],
     ['finding-1: act', 'finding-2: skip'],
     ['finding-1: skip'],
-  ], 'the judge is asked on the two rounds with no block, and decides each finding');
+  ], 'the judge is asked on every round, the one with blocks included, and decides each finding');
   assert.ok(judged.flatMap((event) => event.findings ?? []).every((finding) => finding.reason.length > 0), 'every decision has a reason');
-  assert.equal(judged[1]!.reason, 'the judge skipped every finding');
+  assert.equal(judged[2]!.reason, 'the judge skipped every finding');
   const approveEnds = record.filter((event) => event.kind === 'job:end' && event.label === 'approve');
   assert.equal(approveEnds.length, 2, 'one approval: the approve stage and the approval it calls each log one end');
   assert.ok(approveEnds.every((event) => event.outcome!.status === 'pass'), 'the approval passes');

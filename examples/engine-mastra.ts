@@ -21,8 +21,8 @@ import { recordedJudge } from '@obversa/runtime/testing';
  * A writer built with Mastra, on a team built with Obversa. The Mastra agent
  * keeps its own instructions, model and tool: it saves the page with the
  * saveFile tool it was built with. Codex reads each draft and tags its
- * findings. A block always goes back to the writer; otherwise a judge decides
- * whether another round runs, until it stops the rounds or the review passes.
+ * findings. A judge decides each finding, a block included, and whether
+ * another round runs, until it stops the rounds or the review passes.
  */
 
 // ── The Mastra agent ────────────────────────────────────────────────────────

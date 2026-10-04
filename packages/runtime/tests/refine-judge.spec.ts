@@ -192,22 +192,6 @@ describe('refine: judge()', () => {
     }
   });
 
-  it('a block finding goes back even when the judge says stop', async () => {
-    const events: LoopEvent[] = [];
-    const { job, judgeCalls } = scriptedTeam({
-      reviewerReplies: [REVISE('block'), PASS],
-      judgeReplies: [{ stop_reason: { choice: 'holds' } }],
-      cap: 3,
-    });
-    const result = await runTeam(job, events);
-    expect(result.outcome.status).toBe('pass');
-    // The judge is never consulted about a block finding: it always goes
-    // back on its own, so no refine:judge event should carry round one.
-    expect(judgeCalls).toHaveLength(0);
-    const judgeEvents = events.filter((e) => e.kind === 'refine:judge');
-    expect(judgeEvents).toHaveLength(0);
-  });
-
   it('the custom question set reaches the judge verbatim', async () => {
     // Not just for reviewing code: a caller for a different use case (a
     // trading digest) writes its own wording, but keeps the `stop_reason`
@@ -353,22 +337,28 @@ describe('refine: judge() decides each finding', () => {
     ]);
   });
 
-  it('a block finding still goes back without the judge, every finding of that round with it', async () => {
+  it('asks the judge about a block, and a block it acts on goes back with its reason', async () => {
     const events: LoopEvent[] = [];
-    const block = { severity: 'block', evidence: 'the page is empty' } as const;
+    const block = { severity: 'block', evidence: 'REAL: the page is empty' } as const;
     const { job, writerCalls, judgeCalls } = scriptedTeam({
-      reviewerReplies: [revise(REAL, TONE), revise(block, TITLE), PASS],
+      reviewerReplies: [revise(block, TITLE), PASS],
       judgeReplies: [perFinding()],
-      cap: 4,
     });
     const result = await runTeam(job, events);
     expect(result.outcome.status).toBe('pass');
-    // Asked about round one only; round two has a block.
     expect(judgeCalls).toHaveLength(1);
-    expect(writerCalls).toHaveLength(3);
-    expect(writerCalls[1]!.prompt).not.toContain(TONE.evidence);
-    expect(writerCalls[2]!.prompt).toContain(block.evidence);
-    expect(writerCalls[2]!.prompt).toContain(TITLE.evidence);
+    // The block keeps its severity in what the judge sees, and its question sets the higher bar.
+    const sent = JSON.parse(judgeCalls[0]!.prompt) as { state: { latestFindings: { severity: string }[] }; questions: Record<string, { instructions: string; criteria: Record<string, string> }> };
+    expect(sent.state.latestFindings[0]).toMatchObject({ severity: 'block' });
+    const [blockId, titleId] = findingQuestions(judgeCalls[0]!);
+    expect(sent.questions[blockId!]!.instructions).toContain(`Finding [block]: ${block.evidence}`);
+    expect(sent.questions[blockId!]!.instructions).toContain('Skip it only when the case it names is outside how the work is really used');
+    expect(sent.questions[titleId!]!.instructions).not.toContain('Skip it only when');
+    expect(writerCalls).toHaveLength(2);
+    expect(writerCalls[1]!.prompt).toContain(block.evidence);
+    expect(writerCalls[1]!.prompt).toContain('a reader cannot tell who the page is for');
+    expect(writerCalls[1]!.prompt).not.toContain(TITLE.evidence);
+    expect(judgeEventsOf(events)[0]).toMatchObject({ route: 'again', rule: 'findings: 1 act, 1 skip' });
   });
 
   it('the cap still ends the loop while the judge keeps acting on a finding', async () => {
@@ -483,15 +473,37 @@ describe('refine: judge() with no cap', () => {
     expect(judgeCalls).toHaveLength(2);
   });
 
-  it('sends a block finding back each round without the judge until the review passes', async () => {
-    const { job, writerCalls, judgeCalls } = scriptedTeam({
-      reviewerReplies: [REVISE('block'), REVISE('block'), REVISE('block'), PASS],
-      judgeReplies: [{ stop_reason: { choice: 'holds' } }],
+  it('stops a reviewer that blocks every round on a new rare case when the judge skips the blocks', async () => {
+    const events: LoopEvent[] = [];
+    const rare = (what: string) => ({ severity: 'block', evidence: `rare: ${what}` }) as const;
+    const real = { severity: 'block', evidence: 'REAL: the page never says who it is for' } as const;
+    const { job, writerCalls, reviewCalls, judgeCalls } = scriptedTeam({
+      reviewerReplies: [
+        revise(real, rare('a field limited to a list of values')),
+        revise(rare('a schema nested in allOf')),
+        revise(rare('a schema nested in anyOf')),
+        revise(rare('anyOf inside allOf')),
+        revise(rare('a schema nested in oneOf')),
+        PASS,
+      ],
+      judgeReplies: [perFinding()],
     });
-    const result = await runTeam(job, []);
+    const result = await runTeam(job, events);
     expect(result.outcome.status).toBe('pass');
-    expect(writerCalls).toHaveLength(4);
-    expect(judgeCalls).toHaveLength(0);
+    expect((result.outcome.data as Record<string, Outcome>).write).toMatchObject({ status: 'pass', summary: 'the judge skipped every finding' });
+    expect(writerCalls).toHaveLength(2);
+    expect(reviewCalls).toHaveLength(2);
+    expect(judgeCalls).toHaveLength(2);
+    // The next round's reviewers are told which block was skipped, and why.
+    expect(reviewCalls[1]!.prompt).toContain('rare: a field limited to a list of values');
+    expect(reviewCalls[1]!.prompt).toContain('a matter of taste');
+    const judgeEvents = judgeEventsOf(events);
+    expect(judgeEvents.map((e) => e.rule)).toEqual(['findings: 1 act, 1 skip', 'findings: 0 act, 1 skip']);
+    expect(judgeEvents[0]!.findings).toEqual([
+      { id: 'finding-1', decision: 'act', reason: 'a reader cannot tell who the page is for' },
+      { id: 'finding-2', decision: 'skip', reason: 'a matter of taste' },
+    ]);
+    expect(judgeEvents[1]).toMatchObject({ route: 'stop', status: 'pass', findings: [{ id: 'finding-1', decision: 'skip', reason: 'a matter of taste' }] });
   });
 });
 
@@ -535,18 +547,50 @@ describe('refine: judge() at its cap', () => {
     expect(judgeEventsOf(events)[0]).toMatchObject({ route: 'stop', status: 'fail', reason: expect.stringContaining('the cap of 1') });
   });
 
-  it('fails a block finding in the last round without asking the judge', async () => {
+  it('asks the judge about a block in the last round, and a skip lets the work stand with it recorded as open', async () => {
+    const events: LoopEvent[] = [];
+    const block = { severity: 'block', evidence: 'rare: a schema nested in anyOf' } as const;
     const { job, writerCalls, judgeCalls } = scriptedTeam({
-      reviewerReplies: [REVISE('block')],
-      judgeReplies: [{ stop_reason: { choice: 'holds' } }],
+      reviewerReplies: [revise(block)],
+      judgeReplies: [perFinding()],
       cap: 1,
     });
-    const result = await runTeam(job, []);
-    expect(result.outcome.status).toBe('fail');
-    const stageOutcome = (result.outcome.data as Record<string, Outcome>).write;
-    expect(stageOutcome?.status).toBe('fail');
-    expect(stageOutcome?.summary).toContain('the cap of 1');
+    const result = await runTeam(job, events);
+    expect(result.outcome.status).toBe('pass');
+    expect((result.outcome.data as Record<string, Outcome>).write).toMatchObject({
+      status: 'pass', summary: 'the judge skipped every finding', openFindings: [{ ...block, reviewer: expect.any(String) }],
+    });
     expect(writerCalls).toHaveLength(1);
-    expect(judgeCalls).toHaveLength(0);
+    expect(judgeCalls).toHaveLength(1);
+    expect(JSON.parse(judgeCalls[0]!.prompt).state).toMatchObject({ cap: 1, lastRound: true });
+    expect(judgeEventsOf(events)[0]).toMatchObject({
+      route: 'stop', status: 'pass', findings: [{ decision: 'skip', reason: 'a matter of taste' }], openFindings: [{ ...block, reviewer: expect.any(String) }],
+    });
+  });
+
+});
+
+describe('refine: a plain number', () => {
+  it('sends a block finding back without a judge', async () => {
+    const writerCalls: AgentRequest[] = [];
+    const replies = [REVISE('block'), PASS];
+    let reviews = 0;
+    const writer = new MockEngine((req) => {
+      writerCalls.push(req);
+      writeFileSync(join(req.cwd!, 'page.md'), `draft ${writerCalls.length}`);
+      return JSON.stringify({ status: 'pass', summary: 'wrote it' });
+    });
+    const reviewer = new MockEngine(() => JSON.stringify(replies[Math.min(reviews++, replies.length - 1)]));
+    const job = workflow('refine-number', {
+      brief: 'Use case: a reader gets a clear, short page.\n\nWrite the page.',
+      roles: { writer: seat(writer, 'writer-mock', ['Write']), reviewer: [seat(reviewer, 'reviewer-mock', ['Read'])] },
+      stages: [stage('write', { agent: 'writer', writes: 'page.md', reviewedBy: 'reviewer', refine: 2 })],
+    });
+    const events: LoopEvent[] = [];
+    const result = await runTeam(job as ReturnType<typeof scriptedTeam>['job'], events);
+    expect(result.outcome.status).toBe('pass');
+    expect(writerCalls).toHaveLength(2);
+    expect(writerCalls[1]!.prompt).toContain('fix this');
+    expect(judgeEventsOf(events)).toHaveLength(0);
   });
 });

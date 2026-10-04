@@ -26,6 +26,16 @@ type KickbackEvent = Extract<LoopEvent, { kind: 'dag:kickback' }>;
 const kbEvents = (es: LoopEvent[]): KickbackEvent[] =>
   es.filter((e): e is KickbackEvent => e.kind === 'dag:kickback');
 
+/** A judge that acts on each finding marked REAL and skips the rest, each with a reason. */
+const decideBlocks = (request: { prompt: string }): string => {
+  const { questions } = JSON.parse(request.prompt) as { questions: Record<string, { instructions: string; criteria: Record<string, string> }> };
+  return JSON.stringify(Object.fromEntries(Object.entries(questions)
+    .filter(([, question]) => 'act' in question.criteria)
+    .map(([id, question]) => [id, question.instructions.includes('REAL')
+      ? { choice: 'act', reason: 'it breaks the build' }
+      : { choice: 'skip', reason: 'outside how the work is really used' }])));
+};
+
 describe('dag kickback (cross-stage feedback)', () => {
   it('keeps an optional node skipped and green when a kickback reruns its dependencies', async () => {
     let optionalCalls = 0;
@@ -578,21 +588,26 @@ describe('a judge as a dag() maxKickbacks budget', () => {
     expect(kickbacks[1]).toMatchObject({ accepted: false, note: 'the judge chose not_converging' });
   });
 
-  it('never asks the judge about a block finding: it always goes back, up to the cap', async () => {
+  it('asks the judge about a block finding, and a block it acts on goes back with its reason', async () => {
     let judgeCalls = 0;
     let round = 0;
+    const seen: Outcome[] = [];
     const events: LoopEvent[] = [];
     const { outcome } = await run(dag({
       name: 'judged-kickback-block',
       maxKickbacks: {
-        implement: judge(judgeSeat(() => { judgeCalls += 1; return JSON.stringify({ stop_reason: { choice: 'holds' } }); }), { cap: 2 }),
+        implement: judge({ engine: new MockEngine((request) => { judgeCalls += 1; return decideBlocks(request); }), identity: { adapter: 'mock', provider: 'mock', modelFamily: 'judge', model: 'judge', tools: [] } }, { cap: 2 }),
       },
       nodes: {
-        implement: fnJob('implement', async () => { round += 1; return { status: 'pass', summary: `round ${round}` }; }),
+        implement: fnJob('implement', async (ctx) => {
+          round += 1;
+          if (ctx.lastReview) seen.push(ctx.lastReview);
+          return { status: 'pass', summary: `round ${round}` };
+        }),
         review: {
           needs: ['implement'],
           job: fnJob('review', () => round < 2
-            ? revisionRequest({ target: 'implement', reason: 'a block finding', findings: [{ evidence: 'x', severity: 'block' }] })
+            ? revisionRequest({ target: 'implement', reason: 'a block finding', findings: [{ evidence: 'REAL: the build fails', severity: 'block' }] })
             : { status: 'pass' }),
         },
       },
@@ -600,10 +615,11 @@ describe('a judge as a dag() maxKickbacks budget', () => {
 
     expect(outcome.status).toBe('pass');
     expect(round).toBe(2);
-    expect(judgeCalls).toBe(0);
-    expect(kbEvents(events)).toHaveLength(1);
-    expect(kbEvents(events)[0]!.accepted).toBe(true);
-    expect(events.some((e) => e.kind === 'refine:judge')).toBe(false);
+    expect(judgeCalls).toBe(1);
+    expect(seen[0]!.revision!.findings).toEqual([{ evidence: 'REAL: the build fails', severity: 'block', judgeReason: 'it breaks the build' }]);
+    expect(kbEvents(events).map((e) => e.accepted)).toEqual([true]);
+    const judgeEvents = events.filter((e): e is Extract<LoopEvent, { kind: 'refine:judge' }> => e.kind === 'refine:judge');
+    expect(judgeEvents.map((e) => e.rule)).toEqual(['findings: 1 act, 0 skip']);
   });
 
   it('the cap stops it even when the judge always says continue: the review after the last kickback is judged and fails', async () => {
@@ -784,25 +800,67 @@ describe('a judge as a dag() maxKickbacks budget, with no cap or at its cap', ()
     expect(calls).toHaveLength(2);
   });
 
-  it('with no cap, sends a block finding back each round without the judge', async () => {
+  it('with no cap, stops a review that blocks every round on a new rare case when the judge skips the blocks', async () => {
+    const rare = ['a field limited to a list of values', 'a schema nested in allOf', 'a schema nested in anyOf', 'anyOf inside allOf', 'a schema nested in oneOf'];
     let round = 0;
     let judgeCalls = 0;
+    const seenSkipped: unknown[] = [];
+    const events: LoopEvent[] = [];
     const { outcome } = await run(dag({
       name: 'no-cap-block',
-      maxKickbacks: { implement: judge(judgeSeat(() => { judgeCalls += 1; return JSON.stringify({ stop_reason: { choice: 'holds' } }); })) },
+      maxKickbacks: {
+        implement: judge({ engine: new MockEngine((request) => { judgeCalls += 1; return decideBlocks(request); }), identity: { adapter: 'mock', provider: 'mock', modelFamily: 'judge', model: 'judge', tools: [] } }),
+      },
       nodes: {
         implement: fnJob('implement', async () => { round += 1; return { status: 'pass' }; }),
         review: {
           needs: ['implement'],
-          job: fnJob('review', () => round < 4
+          job: fnJob('review', async (ctx) => {
+            seenSkipped.push(ctx.skippedFindings);
+            return round <= rare.length
+              ? revisionRequest({ target: 'implement', reason: 'a block finding', findings: [
+                ...(round === 1 ? [{ evidence: 'REAL: the build fails', severity: 'block' as const }] : []),
+                { evidence: `rare: ${rare[round - 1]}`, severity: 'block' },
+              ] })
+              : { status: 'pass' };
+          }),
+        },
+      },
+    }), { ...mockOpts, onEvent: (event) => events.push(event) });
+    expect(outcome.status).toBe('pass');
+    expect(outcome.data).toMatchObject({ review: { status: 'pass', summary: 'the judge skipped every finding' } });
+    expect(round).toBe(2);
+    expect(judgeCalls).toBe(2);
+    // The next round's review is told which block was skipped, and why.
+    expect(seenSkipped).toEqual([
+      undefined,
+      [{ round: 1, finding: { evidence: 'rare: a field limited to a list of values', severity: 'block' }, reason: 'outside how the work is really used' }],
+    ]);
+    const judgeEvents = events.filter((e): e is Extract<LoopEvent, { kind: 'refine:judge' }> => e.kind === 'refine:judge');
+    expect(judgeEvents.map((e) => e.rule)).toEqual(['findings: 1 act, 1 skip', 'findings: 0 act, 1 skip']);
+    expect(judgeEvents[1]).toMatchObject({ route: 'stop', status: 'pass', findings: [{ id: 'finding-1', decision: 'skip', reason: 'outside how the work is really used' }] });
+  });
+
+  it('with a plain number, sends a block finding back without a judge', async () => {
+    let round = 0;
+    const events: LoopEvent[] = [];
+    const { outcome } = await run(dag({
+      name: 'number-block',
+      maxKickbacks: { implement: 2 },
+      nodes: {
+        implement: fnJob('implement', async () => { round += 1; return { status: 'pass' }; }),
+        review: {
+          needs: ['implement'],
+          job: fnJob('review', () => round < 2
             ? revisionRequest({ target: 'implement', reason: 'a block finding', findings: [{ evidence: 'x', severity: 'block' }] })
             : { status: 'pass' }),
         },
       },
-    }), mockOpts);
+    }), { ...mockOpts, onEvent: (event) => events.push(event) });
     expect(outcome.status).toBe('pass');
-    expect(round).toBe(4);
-    expect(judgeCalls).toBe(0);
+    expect(round).toBe(2);
+    expect(kbEvents(events).map((e) => e.accepted)).toEqual([true]);
+    expect(events.some((e) => e.kind === 'refine:judge')).toBe(false);
   });
 
   it('at a cap of 1, asks the judge about the last review, and holds makes the node pass with the open findings recorded', async () => {
@@ -876,13 +934,30 @@ describe('a judge as a dag() maxKickbacks budget, with no cap or at its cap', ()
     expect(review.revision?.findings).toEqual(shouldFix);
   });
 
-  it('at a cap of 1, fails a block finding in the last round without asking the judge', async () => {
+  it('at a cap of 1, asks the judge about a block in the last round, and a skip lets the work stand with it recorded as open', async () => {
+    const block = { evidence: 'rare: a schema nested in anyOf', severity: 'block' as const };
+    let round = 0;
+    let judgeCalls = 0;
     const events: LoopEvent[] = [];
-    const { job, calls, rounds } = judgedDag('cap-block', ['continue'], 1, (round) => round < 2 ? shouldFix : [{ evidence: 'the build fails', severity: 'block' }]);
-    const { outcome } = await run(job, { ...mockOpts, onEvent: (event) => events.push(event) });
-    expect(outcome.status).toBe('fail');
-    expect(rounds()).toBe(2);
-    expect(calls).toHaveLength(1);
+    const { outcome } = await run(dag({
+      name: 'cap-block',
+      maxKickbacks: {
+        implement: judge({ engine: new MockEngine((request) => { judgeCalls += 1; return decideBlocks(request); }), identity: { adapter: 'mock', provider: 'mock', modelFamily: 'judge', model: 'judge', tools: [] } }, { cap: 1 }),
+      },
+      nodes: {
+        implement: fnJob('implement', async () => { round += 1; return { status: 'pass' }; }),
+        review: {
+          needs: ['implement'],
+          job: fnJob('review', () => revisionRequest({ target: 'implement', reason: 'needs a pass', findings: round < 2 ? [{ evidence: 'REAL: the build fails', severity: 'block' }] : [block] })),
+        },
+      },
+    }), { ...mockOpts, onEvent: (event) => events.push(event) });
+    expect(outcome.status).toBe('pass');
+    expect(round).toBe(2);
+    expect(judgeCalls).toBe(2);
+    expect(outcome.data).toMatchObject({ review: { status: 'pass', summary: 'the judge skipped every finding', openFindings: [block] } });
     expect(kbEvents(events).map((e) => e.accepted)).toEqual([true, false]);
+    const judgeEvents = events.filter((e): e is Extract<LoopEvent, { kind: 'refine:judge' }> => e.kind === 'refine:judge');
+    expect(judgeEvents[1]).toMatchObject({ route: 'stop', status: 'pass', openFindings: [block] });
   });
 });

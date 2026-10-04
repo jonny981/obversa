@@ -250,7 +250,7 @@ families, an editor, a judge on the draft stage, and two stages:
         reviewedBy: 'grade',
         // The judge. After a round the grader did not pass, Jev reads the
         // findings and the rounds so far and says whether another round is
-        // worth it; a finding tagged block goes back without asking. The
+        // worth it, for a finding tagged block too. The
         // rounds end when Jev stops them or the grader passes the draft.
         refine: judge(judgeSeat),
       }),
@@ -339,7 +339,7 @@ function createEditorial(judgeSeat: TeamSeat, engines: EditorialEngines = realEn
         reviewedBy: 'grade',
         // The judge. After a round the grader did not pass, Jev reads the
         // findings and the rounds so far and says whether another round is
-        // worth it; a finding tagged block goes back without asking. The
+        // worth it, for a finding tagged block too. The
         // rounds end when Jev stops them or the grader passes the draft.
         refine: judge(judgeSeat),
       }),
@@ -402,8 +402,8 @@ reads the use case from the brief, the grader's findings and every round so
 far, and answers whether the draft holds, whether the findings are worth
 acting on, and whether another round is worth it. The loop goes round again
 on continue, and stops when the judge chooses a reason to stop: the draft
-holds, the rest is polish, or the same findings keep coming back. A finding
-tagged block goes back on its own, without the judge.
+holds, the rest is polish, or the same findings keep coming back. The judge
+decides a finding tagged block too.
 
 To bound the rounds as well, pass a cap as a backstop:
 `judge(judgeSeat, { cap: 3 })`. When the third draft does not pass, the

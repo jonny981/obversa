@@ -172,7 +172,7 @@ person:
         reviewedBy: 'story-review',
         // The judge. After a round the reviewer did not pass, Jev reads the
         // findings and the rounds so far and says whether another round is
-        // worth it; a finding tagged block goes back without asking. With no
+        // worth it, for a finding tagged block too. With no
         // cap, the rounds end when the judge stops them or the review passes.
         refine: judge(judgeSeat),
       }),
@@ -267,7 +267,7 @@ function createBacklogGroom(judgeSeat: TeamSeat, engines: BacklogGroomEngines = 
         reviewedBy: 'story-review',
         // The judge. After a round the reviewer did not pass, Jev reads the
         // findings and the rounds so far and says whether another round is
-        // worth it; a finding tagged block goes back without asking. With no
+        // worth it, for a finding tagged block too. With no
         // cap, the rounds end when the judge stops them or the review passes.
         refine: judge(judgeSeat),
       }),
@@ -329,8 +329,8 @@ the use case from the brief, the reviewer's findings and every round so far,
 and answers whether the stories hold, whether the findings are worth acting
 on, and whether another round is worth it. The loop goes round again on
 continue and stops when the judge chooses a reason to stop: the stories
-hold, the rest is polish, or the same findings keep coming back. A finding
-tagged block goes back without asking. With no cap, a run ends when the
+hold, the rest is polish, or the same findings keep coming back. The judge
+decides a finding tagged block too. With no cap, a run ends when the
 judge stops it or the review passes. To bound the rounds as well, pass
 `judge(judgeSeat, { cap: 3 })`: after the last review the cap allows, the
 judge is asked once more, and the run fails unless it lets the stories

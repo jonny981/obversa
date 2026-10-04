@@ -15,7 +15,7 @@ import { LoopError } from './core/errors.js';
 import { loop } from './core/loop.js';
 import { kickback, revisionFromOutcome } from './core/feedback.js';
 import { reviewPanel } from './core/synthesis.js';
-import { consultJudge, countBySeverity, hasBlockFinding, isJudge, judgedFindings, lastRoundAnswered, productDecisionFeedback, type JudgeRound, type JudgeState, type SkippedFinding } from './core/judge.js';
+import { consultJudge, countBySeverity, isJudge, judgedFindings, lastRoundAnswered, productDecisionFeedback, type JudgeRound, type JudgeState, type SkippedFinding } from './core/judge.js';
 import type { ConditionInput, DagConfig, Job, JobContext, Judge, Outcome } from './core/types.js';
 import { checkpointInteraction, interactionDeclaration, hasSavedInteraction, humanReview, interactionIdentity, jsonSnapshot, outcomeSnapshot, requestInteraction, savedInteraction, type InteractionBinding, type InteractionResponse } from './core/interaction.js';
 
@@ -651,12 +651,9 @@ function lineDiffCount(before: string | undefined, after: string): number {
 
 /**
  * Wrap a reviewer panel so a judge sits between its verdict and the
- * send-back. A block finding always goes back on its own, the judge is
- * never asked about one, so the loop's own `maxReviewRestarts` (the judge's
- * cap, when it has one) is the only thing bounding it, same as a plain
- * numeric `refine`. After the last review the cap allows, the stage fails
- * on a block, and otherwise the judge's answer decides the outcome.
- * Otherwise the judge sees the use case, the latest findings, the findings
+ * send-back, for every finding, a block included. After the last review
+ * the cap allows, the judge's answer decides the outcome. The judge sees
+ * the use case, the latest findings, the findings
  * it skipped before, every round so far, and the file being refined when
  * the stage declares one, and its answer either lets the review stand (a
  * synthesised pass) or sends it back with its reasoning folded into the
@@ -706,10 +703,6 @@ function judgedReview(brief: BriefSource, named: NamedStage, cfgJudge: Judge, pa
     // `ctx.iteration < cap` (its `maxReviewRestarts`); an iteration whose
     // review did not run also counts, so this errs towards ending.
     const lastRound = cfgJudge.cap !== undefined && ctx.iteration >= cfgJudge.cap;
-    if (hasBlockFinding(findings)) {
-      if (!lastRound) return panelOutcome;
-      throw new LoopError({ code: 'VALIDATION', phase: 'review', path: ctx.path, message: `a block finding is open after the last round the cap of ${cfgJudge.cap} allows` });
-    }
     const round = history.length + 1;
     const state: JudgeState = saved ? saved.state as unknown as JudgeState : {
       ...(productFeedback.length ? { productFeedback } : {}),

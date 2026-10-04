@@ -1,5 +1,13 @@
 [
   {
+    "holds": { "type": "noul", "noul": 0.1 },
+    "worth_doing": { "type": "noul", "noul": 0.9 },
+    "worth_another_round": { "type": "noul", "noul": 0.9 },
+    "stop_reason": { "type": "choice", "choice": "continue", "confidence": 0.8 },
+    "finding-1": { "type": "choice", "choice": "act", "confidence": 0.9 },
+    "finding-2": { "type": "choice", "choice": "act", "confidence": 0.9 }
+  },
+  {
     "holds": { "type": "noul", "noul": 0.9 },
     "worth_doing": { "type": "noul", "noul": 0.2 },
     "worth_another_round": { "type": "noul", "noul": 0.1 },

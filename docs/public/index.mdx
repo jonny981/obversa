@@ -49,9 +49,9 @@ inside the workflow:
   maxKickbacks: { implement: judge(judgeSeat) },
 ```
 
-Blocking findings go back without asking the judge. For other findings, the
-judge weighs whether another round is worth doing, and the run ends when it
-stops the rounds or the review passes. [Know when to stop](/patterns/judge-stops-the-loop)
+The judge weighs every finding, a blocking one included, and decides
+whether another round is worth doing. The run ends when it stops the rounds
+or the review passes. [Know when to stop](/patterns/judge-stops-the-loop)
 shows the same pattern in a writing workflow. Add a person's decision
 where your process needs one.
 

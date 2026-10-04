@@ -307,7 +307,7 @@ acceptance is enough. A rejection names `implement` as the step that owns
 the fix, with each finding tagged block or should-fix:
 
 ```ts examples/teams/feature-delivery.ts (excerpt) {4,8-9,13-14}
-/** Codex and OpenCode, agreeing once is enough; a block always goes back, otherwise Jev decides. */
+/** Codex and OpenCode, agreeing once is enough; Jev decides each finding, a block included. */
 const reviewer = (seat: TeamSeat): Job => agentJob({
   label: 'review', engine: seat.engine, model: seat.identity.model, tools: [seat.identity.adapter === 'opencode-cli' ? 'read' : 'Read'], workspaceMode: 'read', leaf: true,
   prompt: 'Read src/triple.mjs against the plan. Reply as one JSON object: {"status":"pass"|"revise","summary":"...","findings":[{"severity":"block"|"should-fix","evidence":"..."}]}.',
@@ -346,8 +346,8 @@ The graph puts the seven steps in order. Research runs only when triage
 chose a feature. Research and review run in their own worktrees, so a
 rejected review is discarded rather than merged and the next round of the
 tournament forks from an untouched branch. A red test or a rejected review
-goes back to `implement`, and Jev says whether the next round is worth it;
-a finding tagged block goes back without asking. With no cap, the rounds end
+goes back to `implement`, and Jev says whether the next round is worth it,
+for a finding tagged block too. With no cap, the rounds end
 when Jev stops them or the review passes:
 
 ```ts examples/teams/feature-delivery.ts (excerpt) {7-9,12,19}
@@ -367,8 +367,8 @@ const team = dag({
     approve: { needs: 'review', job: approve },
     close: { needs: 'approve', job: close },
   },
-  // A block finding always goes back on its own; otherwise Jev says when
-  // another pass on `implement` stops being worth it.
+  // Jev decides each finding, a block included, and says when another
+  // pass on `implement` stops being worth it.
   maxKickbacks: { implement: judge(judgeSeat) },
 });
 ```
@@ -502,7 +502,7 @@ const implement = tournament({
   judge: (outcome) => (outcome.status === 'pass' ? 1 : 0),
 });
 
-/** Codex and OpenCode, agreeing once is enough; a block always goes back, otherwise Jev decides. */
+/** Codex and OpenCode, agreeing once is enough; Jev decides each finding, a block included. */
 const reviewer = (seat: TeamSeat): Job => agentJob({
   label: 'review', engine: seat.engine, model: seat.identity.model, tools: [seat.identity.adapter === 'opencode-cli' ? 'read' : 'Read'], workspaceMode: 'read', leaf: true,
   prompt: 'Read src/triple.mjs against the plan. Reply as one JSON object: {"status":"pass"|"revise","summary":"...","findings":[{"severity":"block"|"should-fix","evidence":"..."}]}.',
@@ -556,8 +556,8 @@ const team = dag({
     approve: { needs: 'review', job: approve },
     close: { needs: 'approve', job: close },
   },
-  // A block finding always goes back on its own; otherwise Jev says when
-  // another pass on `implement` stops being worth it.
+  // Jev decides each finding, a block included, and says when another
+  // pass on `implement` stops being worth it.
   maxKickbacks: { implement: judge(judgeSeat) },
 });
 

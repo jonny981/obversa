@@ -102,7 +102,7 @@ const implement = tournament({
   judge: (outcome) => (outcome.status === 'pass' ? 1 : 0),
 });
 
-/** Codex and OpenCode, agreeing once is enough; a block always goes back, otherwise Jev decides. */
+/** Codex and OpenCode, agreeing once is enough; Jev decides each finding, a block included. */
 const reviewer = (seat: TeamSeat): Job => agentJob({
   label: 'review', engine: seat.engine, model: seat.identity.model, tools: [seat.identity.adapter === 'opencode-cli' ? 'read' : 'Read'], workspaceMode: 'read', leaf: true,
   prompt: 'Read src/triple.mjs against the plan. Reply as one JSON object: {"status":"pass"|"revise","summary":"...","findings":[{"severity":"block"|"should-fix","evidence":"..."}]}.',
@@ -156,8 +156,8 @@ const team = dag({
     approve: { needs: 'review', job: approve },
     close: { needs: 'approve', job: close },
   },
-  // A block finding always goes back on its own; otherwise Jev says when
-  // another pass on `implement` stops being worth it.
+  // Jev decides each finding, a block included, and says when another
+  // pass on `implement` stops being worth it.
   maxKickbacks: { implement: judge(judgeSeat) },
 });
 

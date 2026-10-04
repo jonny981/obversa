@@ -24,8 +24,7 @@ flowchart LR
   review -->|every finding| merge["merge: the first reviewer's seat"]
   merge -->|one finding per problem| cross["cross-review: each reviewer votes once"]
   cross -->|votes applied by rule| left{"what is left"}
-  left -->|a block| write
-  left -->|other findings| judge{"judge: Jev decides each finding"}
+  left -->|findings| judge{"judge: Jev decides each finding"}
   judge -->|the findings it acts on| write
   judge -->|it skips every finding| done((pass))
   left -->|nothing| done
@@ -98,15 +97,16 @@ Each round runs these steps in order.
    marked `disputed`. Votes also never drop a finding shown to a reviewer
    whose seat failed or sent no readable reply in this step. It stays,
    marked `disputed`.
-5. **Judge.** A `block` goes straight back to the writer, and the judge is
-   not asked. Otherwise the judge reads each finding that is left, with who
-   raised it and how the others voted. It decides each one, `act` or
+5. **Judge.** When a judge is set, it decides every finding that is left,
+   a `block` included. It reads each one with who raised it and how the
+   others voted. It decides each one, `act` or
    `skip`, with a one-line reason. The writer gets only the findings the
    judge acts on, each with the judge's reason. The next round's reviewers
    are told which findings it skipped and why. When the judge acts on any
    finding, another round runs. When it skips every finding, the page
    stands as a pass. With no cap on the judge, the rounds end when it skips
-   every finding or every reviewer passes.
+   every finding or every reviewer passes. A `block` goes straight back to
+   the writer without a judge only when there is no judge.
    [Know when to stop](/patterns/judge-stops-the-loop) has the judge's
    questions.
 

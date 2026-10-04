@@ -60,7 +60,7 @@ function createEditorial(judgeSeat: TeamSeat, engines: EditorialEngines = realEn
         reviewedBy: 'grade',
         // The judge. After a round the grader did not pass, Jev reads the
         // findings and the rounds so far and says whether another round is
-        // worth it; a finding tagged block goes back without asking. The
+        // worth it, for a finding tagged block too. The
         // rounds end when Jev stops them or the grader passes the draft.
         refine: judge(judgeSeat),
       }),

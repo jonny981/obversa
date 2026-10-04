@@ -30,9 +30,9 @@ another revision. `judge()` from `@obversa/runtime` sets the stopping rule:
   maxKickbacks: { implement: judge(judgeSeat) },
 ```
 
-Blocking findings go back without asking the judge. The judge weighs the
-other findings against the work and its revision history, and the run ends
-when it stops the rounds or the review passes. [Know when to stop](/patterns/judge-stops-the-loop)
+The judge weighs every finding, a blocking one included, against the work
+and its revision history, and the run ends when it stops the rounds or the
+review passes. [Know when to stop](/patterns/judge-stops-the-loop)
 shows the questions and a complete writing example.
 
 The [literature watch](/workflows/research/literature-watch) combines

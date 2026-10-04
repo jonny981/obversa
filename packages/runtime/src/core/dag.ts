@@ -46,7 +46,7 @@ import { mergeLock, mergeSynthesis } from './merge.js';
 import type { EnvHandle } from '../env/environment.js';
 import { LoopError } from './errors.js';
 import { revisionFromOutcome } from './feedback.js';
-import { consultJudge, countBySeverity, hasBlockFinding, isJudge, judgedFindings, lastRoundAnswered, productDecisionFeedback, type JudgeRound, type JudgeState, type SkippedFinding } from './judge.js';
+import { consultJudge, countBySeverity, isJudge, judgedFindings, lastRoundAnswered, productDecisionFeedback, type JudgeRound, type JudgeState, type SkippedFinding } from './judge.js';
 import { checkpointInteraction, interactionDeclaration, interactionIdentity, jsonSnapshot, outcomeSnapshot, savedInteraction, type InteractionResponse } from './interaction.js';
 import { DEFAULT_FANOUT_CONCURRENCY } from './concurrency.js';
 import { dagResumeIdentity, resumeGuard, RESUME_IDENTITY, RESUME_STAGE_OUTCOMES } from './resume.js';
@@ -177,7 +177,8 @@ export function dag(config: DagConfig): Job {
   // A judge's own `cap` stands in for the plain number everywhere the budget
   // is a hard integer limit, and a judge with no cap sets no limit;
   // `targetJudge` is the extra, smart-routing layer consulted on every
-  // request without a block finding, the one after its cap included.
+  // request, a request with a block finding and the one after its cap
+  // included.
   const targetJudge = (target: string): Judge | undefined => {
     if (typeof maxKickbacks === 'number') return undefined;
     const budget = maxKickbacks[target];
@@ -674,8 +675,7 @@ export function dag(config: DagConfig): Job {
         }
 
         // A judge stands between the review's verdict and the send-back,
-        // but never for a block finding: that always goes back on its own,
-        // up to the cap above, the same as a plain numeric budget. The
+        // for every finding, a block included. The
         // request after the cap's last kickback is the last round's review:
         // the judge is still asked, and no kickback follows its answer.
         const requestFindings = request.findings ?? [];
@@ -684,7 +684,7 @@ export function dag(config: DagConfig): Job {
         let effectiveReason = reason;
         let effectiveFindings = request.findings;
         let productDecision: Outcome | undefined;
-        if (cfgJudge !== undefined && !hasBlockFinding(requestFindings)) {
+        if (cfgJudge !== undefined) {
           const history = judgeHistory.get(to) ?? [];
           const skipped = judgeSkipped.get(to) ?? [];
           const state: JudgeState = pending?.from === from ? pending.state : {

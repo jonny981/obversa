@@ -107,15 +107,25 @@ export function findingId(index: number): string {
   return `finding-${index + 1}`;
 }
 
-/** One `choice` question per finding, keyed by the finding's id. */
+/** What `act` and `skip` mean for a finding tagged block: the bar to skip it is higher. */
+const BLOCK_CRITERIA = {
+  act: 'The case this finding names is part of how the work is really used, so the builder should fix it.',
+  skip: 'The case it names is outside how the work is really used, or the same class of finding keeps returning after it was answered.',
+} as const;
+
+/** One `choice` question per finding, keyed by the finding's id. A block's question sets the higher bar. */
 export function findingQuestions(findings: readonly FeedbackFinding[]): JudgeQuestions {
   const questions: Record<string, JudgeQuestion> = {};
   for (const [index, finding] of findings.entries()) {
+    const severity = normalizeFeedbackSeverity(finding.severity);
     const recommendation = finding.recommendation ? ` Recommendation: ${finding.recommendation}` : '';
+    const bar = severity === 'block'
+      ? 'It is tagged block, so the bar to skip it is higher. Skip it only when the case it names is outside how the work is really used, or the same class of finding keeps returning after it was answered; otherwise act.'
+      : 'For this use case, should the builder act on it in another round, or skip it?';
     questions[findingId(index)] = {
       type: 'choice',
-      instructions: `Read this one finding. For this use case, should the builder act on it in another round, or skip it? Give a one-line reason. Finding [${normalizeFeedbackSeverity(finding.severity)}]: ${finding.evidence}${recommendation}`,
-      criteria: FINDING_CRITERIA,
+      instructions: `Read this one finding. ${bar} Give a one-line reason. Finding [${severity}]: ${finding.evidence}${recommendation}`,
+      criteria: severity === 'block' ? BLOCK_CRITERIA : FINDING_CRITERIA,
     };
   }
   return questions;
@@ -130,11 +140,6 @@ export interface FindingDecision {
 
 export function isJudge(value: unknown): value is Judge {
   return typeof value === 'object' && value !== null && (value as { kind?: unknown }).kind === 'judge';
-}
-
-/** A finding tagged block, by any reviewer, in this round's findings. */
-export function hasBlockFinding(findings: readonly FeedbackFinding[] | undefined): boolean {
-  return (findings ?? []).some((finding) => normalizeFeedbackSeverity(finding.severity) === 'block');
 }
 
 const SEVERITIES: readonly FeedbackActionSeverity[] = ['block', 'should-fix', 'nice-to-have', 'approve'];
@@ -212,10 +217,9 @@ export interface JudgeDecision {
  * another round whatever the probability answers say. A clear yes or no from
  * `holds`, `worth_doing` or `worth_another_round` decides only when there is
  * no choice: a question set without `stop_reason`, or a reply that did not
- * parse. Neither the cap nor a block finding is checked here: `askJudge`
- * turns a decision after the last review the cap allows into a stop, and a
- * block finding never reaches this function, it always goes back without
- * asking the judge.
+ * parse. The cap is not checked here: `askJudge` turns a decision after
+ * the last review the cap allows into a stop. A block finding is decided
+ * here like any other.
  *
  * `product_decision` pauses for a person's answer, which goes to the builder
  * as the next round. For a terminal stop, `holds` and `over_polishing` say
@@ -230,12 +234,14 @@ export interface JudgeDecision {
  *
  * With `findingIds`, the round answer routes as above only to settle
  * `product_decision`; the answer for each finding decides the rest (see
- * `decideEachFinding`).
+ * `decideEachFinding`). `questions` are the questions each finding was
+ * asked; a choice with no reason of its own records the text of the chosen
+ * option from its finding's question.
  */
-export function judgeDecision(answers: Readonly<Record<string, JudgeAnswer>>, findingIds?: readonly string[]): JudgeDecision {
+export function judgeDecision(answers: Readonly<Record<string, JudgeAnswer>>, findingIds?: readonly string[], questions?: JudgeQuestions): JudgeDecision {
   const round = roundDecision(answers);
   if (!findingIds?.length) return round;
-  return decideEachFinding(answers, findingIds, round);
+  return decideEachFinding(answers, findingIds, round, questions);
 }
 
 /**
@@ -249,12 +255,16 @@ export function judgeDecision(answers: Readonly<Record<string, JudgeAnswer>>, fi
  * when that answer ships. When the judge answered no finding at all, the
  * round answer routes alone, with the same reason and rule as before.
  */
-function decideEachFinding(answers: Readonly<Record<string, JudgeAnswer>>, findingIds: readonly string[], round: JudgeDecision): JudgeDecision {
+function decideEachFinding(answers: Readonly<Record<string, JudgeAnswer>>, findingIds: readonly string[], round: JudgeDecision, questions?: JudgeQuestions): JudgeDecision {
   const findings = findingIds.map((id): FindingDecision => {
     const answer = answers[id];
     const choice = answer?.choice;
     const reason = typeof answer?.reason === 'string' && answer.reason.trim() ? answer.reason.trim() : undefined;
-    if (choice === 'act' || choice === 'skip') return { id, decision: choice, reason: reason ?? FINDING_CRITERIA[choice] };
+    if (choice === 'act' || choice === 'skip') {
+      const question = questions?.[id];
+      const criteria = question?.type === 'choice' ? question.criteria : FINDING_CRITERIA;
+      return { id, decision: choice, reason: reason ?? criteria[choice] ?? FINDING_CRITERIA[choice] };
+    }
     return { id, decision: round.again ? 'act' : 'skip', reason: `no answer for this finding; ${round.reason}` };
   });
   const answered = findings.some(({ id }) => answers[id]?.choice === 'act' || answers[id]?.choice === 'skip');
@@ -328,6 +338,7 @@ export async function askJudge(
   path: readonly string[],
 ): Promise<{ answers: Readonly<Record<string, JudgeAnswer>>; decision: JudgeDecision }> {
   const perFinding = cfg.perFinding && state.latestFindings.length > 0;
+  const eachFinding = perFinding ? findingQuestions(state.latestFindings) : undefined;
   const limit = roundLimit(state);
   const judgeJob = agentJob({
     label: 'refine:judge',
@@ -338,7 +349,7 @@ export async function askJudge(
     leaf: true,
     prompt: JSON.stringify({
       state: limit === undefined ? state : { ...state, limit },
-      questions: perFinding ? { ...cfg.questions, ...findingQuestions(state.latestFindings) } : cfg.questions,
+      questions: eachFinding ? { ...cfg.questions, ...eachFinding } : cfg.questions,
     }),
   });
   const outcome = await judgeJob({ ...ctx, depth: ctx.depth + 1, path: [...path, 'refine-judge'] });
@@ -353,7 +364,7 @@ export async function askJudge(
       // Left empty: an unreadable answer routes as no clear answer, not a crash.
     }
   }
-  const decided = judgeDecision(answers, perFinding ? state.latestFindings.map((_, index) => findingId(index)) : undefined);
+  const decided = judgeDecision(answers, eachFinding ? Object.keys(eachFinding) : undefined, eachFinding);
   const decision: JudgeDecision = state.lastRound && decided.stop !== 'ship' && decided.stop !== 'product_decision'
     ? { ...decided, again: false, stop: 'fail', reason: `${decided.reason}; this was the last round the cap of ${state.cap} allows` }
     : decided;

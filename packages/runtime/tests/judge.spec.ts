@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import { countBySeverity, hasBlockFinding, isJudge, judge, judgeDecision, stopQuestions } from '../src/core/judge.ts';
+import { countBySeverity, findingQuestions, isJudge, judge, judgeDecision, stopQuestions } from '../src/core/judge.ts';
 import { MockEngine } from '../src/testing.ts';
 import type { FeedbackFinding, TeamSeat } from '../src/api.ts';
 
@@ -55,17 +55,6 @@ describe('isJudge', () => {
     expect(isJudge(3)).toBe(false);
     expect(isJudge(undefined)).toBe(false);
     expect(isJudge({ kind: 'not-a-judge' })).toBe(false);
-  });
-});
-
-describe('hasBlockFinding', () => {
-  it('is true only when a finding is tagged block', () => {
-    expect(hasBlockFinding(undefined)).toBe(false);
-    expect(hasBlockFinding([])).toBe(false);
-    expect(hasBlockFinding([{ evidence: 'x', severity: 'should-fix' }])).toBe(false);
-    expect(hasBlockFinding([{ evidence: 'x', severity: 'should-fix' }, { evidence: 'y', severity: 'block' }])).toBe(true);
-    // A finding with no declared severity normalises to block (feedback.ts's own default).
-    expect(hasBlockFinding([{ evidence: 'x' }])).toBe(true);
   });
 });
 
@@ -199,6 +188,21 @@ describe('judgeDecision for each finding', () => {
       { id: 'finding-a', decision: 'act', reason: 'a reader would misread it' },
       { id: 'finding-b', decision: 'skip', reason: expect.stringMatching(/\S/) },
     ]);
+  });
+
+  it('a choice with no reason records the text of the chosen option from that finding\'s question, a block\'s included', () => {
+    const findings = [
+      { reviewer: 'r', severity: 'block' as const, evidence: 'a rare case' },
+      { reviewer: 'r', severity: 'should-fix' as const, evidence: 'a typo' },
+    ];
+    const questions = findingQuestions(findings);
+    const ids = Object.keys(questions);
+    const reasons = (choice: 'act' | 'skip') => judgeDecision({ [ids[0]!]: { choice }, [ids[1]!]: { choice } }, ids, questions)
+      .findings?.map((finding) => finding.reason);
+    const criteria = (id: string) => (questions[id] as { criteria: Record<string, string> }).criteria;
+    expect(reasons('skip')).toEqual([criteria(ids[0]!).skip, criteria(ids[1]!).skip]);
+    expect(reasons('act')).toEqual([criteria(ids[0]!).act, criteria(ids[1]!).act]);
+    expect(criteria(ids[0]!).skip).toMatch(/outside how the work is really used/);
   });
 
   it('ships as a pass when every finding is skipped, even on a chosen continue', () => {

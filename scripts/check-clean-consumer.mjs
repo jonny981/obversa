@@ -957,11 +957,11 @@ async function main() {
     });
     assert.deepEqual(JSON.parse(run(process.execPath, ['dist/engine-mastra.proof.js'], { cwd: consumerDirectory })), {
       status: 'pass', writerRuns: 2, readerRuns: 2, kickbacks: 1,
-      judgeReasons: ['the judge chose holds'], stop: 'the judge chose holds', mode: 'compiled-from-dist',
+      judgeReasons: ['the judge acts on 2 of 2 findings', 'the judge chose holds'], stop: 'the judge chose holds', mode: 'compiled-from-dist',
     });
     assert.deepEqual(JSON.parse(run(process.execPath, ['dist/engine-openai-agents.proof.js'], { cwd: consumerDirectory })), {
       status: 'pass', writerRuns: 2, readerRuns: 2, kickbacks: 1,
-      judgeReasons: ['the judge chose holds'], stop: 'the judge chose holds', mode: 'compiled-from-dist',
+      judgeReasons: ['the judge acts on 2 of 2 findings', 'the judge chose holds'], stop: 'the judge chose holds', mode: 'compiled-from-dist',
     });
     const productionLine = JSON.parse(
       run(process.execPath, ['dist/offline-review.js'], { cwd: consumerDirectory }),
