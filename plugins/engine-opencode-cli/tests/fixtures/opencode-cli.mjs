@@ -482,6 +482,27 @@ if (scenario === 'edit-tool-aliases') {
   emit('step_finish', { part: finishPart('fixture-step-finish') });
   process.exit(0);
 }
+if (scenario === 'undeclared-tool-turned-down') {
+  emit('tool_use', {
+    part: {
+      id: 'fixture-tool-turned-down',
+      sessionID: 'fixture-session',
+      messageID: 'fixture-message',
+      type: 'tool',
+      callID: 'fixture-call-turned-down',
+      tool: 'bash',
+      state: {
+        status: 'error',
+        input: { command: 'echo escaped' },
+        error: 'The user rejected permission to use this specific tool call.',
+        time: { start: 1, end: 2 },
+      },
+    },
+  });
+  emit('text', { part: textPart('fixture-answer', 'answer') });
+  emit('step_finish', { part: finishPart('fixture-step-finish') });
+  process.exit(0);
+}
 if (scenario === 'tool-error-then-final') {
   emit('tool_use', {
     part: {
