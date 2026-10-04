@@ -59,7 +59,7 @@ create a file, and no file in the repository changed.
 | [Claude Agent SDK](/packages/engine-claude-agent-sdk#clean) | Yes | Yes | The model's tools held; your hooks can write | Yes |
 | [Codex CLI](/packages/engine-codex-cli#clean) | Yes | Yes | Yes | Yes |
 | [Devin CLI](/packages/engine-devin-cli#options) | Yes | Yes | Yes | Yes |
-| [OpenCode CLI](/packages/engine-opencode-cli#clean) | Yes | Yes | Not proven: the proof needs a paid model | Not proven: the proof needs a paid model |
+| [OpenCode CLI](/packages/engine-opencode-cli#clean) | Yes | Yes | Yes | Yes |
 | [Grok CLI](/packages/engine-grok-cli#clean) | Yes | No | Yes | No clean mode |
 | [Anthropic API](/packages/engine-anthropic-api) | No setup to load | Always clean | Refuses a read step | Refuses a read step |
 | [Jev API](/packages/engine-jev-api) | No setup to load | Always clean | Refuses a read step | Refuses a read step |
@@ -79,7 +79,6 @@ create a file, and no file in the repository changed.
   `~/.agents/skills` still load in clean mode. OpenCode's switch that skips
   them also skips the repository's own skills. Clean mode moves the whole
   config folder, so commands the step runs lose their settings in it too.
-  Free models refuse a tool-limited run, so the proof needs a paid model.
 - **Grok CLI.** No clean mode: Grok's strict sandbox reads no login outside
   its own home folder.
 
