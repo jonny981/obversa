@@ -1,5 +1,14 @@
 # @obversa/runtime
 
+## 0.2.8
+
+### Patch Changes
+
+- afdce94: A workflow stage can check the brief was met before its reviews. Set `goal` to a seat, ideally from another model family than the builder's, on a stage a panel reviews. Each round, the seat reads the brief, the stage's `desc` and `gate`, and the work, and marks each requirement met or unmet with evidence. Any unmet requirement goes straight back to the builder with its evidence: the reviewers do not run that round, and a judge does not decide it, so a requirement in the brief is never skipped as polish. The check runs every round, because a fix for a reviewer can break a requirement. Each round adds a `goal:check` event to the record with every requirement, its verdict and its evidence. In a `dag()`, `goalCheck(seat, { target, text })` is the same check as one node between the build and the review, and a judge on its target does not decide the unmet requirements.
+- afdce94: A judge decides every finding, a block included, so a run with no cap always has someone deciding when to stop. A reviewer that tags every finding `block` cannot keep the rounds going on its own. The judge skips a block only when the case it names is outside how the work is really used, or the same class of finding keeps returning after it was answered; otherwise it acts on it. A skipped block appears in the `refine:judge` event with the judge's reason, and the next round's reviewers are told it was skipped and why. At a cap, a block in the last round goes to the judge too, and a skip lets the work stand with the block recorded in `openFindings`. Without a judge nothing changes: a plain number on `refine` or `maxKickbacks` still sends a block back.
+  - @obversa/api@0.2.8
+  - @obversa/core@0.2.8
+
 ## 0.2.7
 
 ### Patch Changes
