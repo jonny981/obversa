@@ -146,6 +146,7 @@ export const stageBranches = {
   F193: 'perf/release-job-no-npm-wait',
   F165: 'fix/opencode-free-models',
   F194: 'fix/grok-engine-answers',
+  F195: 'fix/proc-scan-skips-exited',
   F178: 'release/0.2.4',
   F181: 'release/0.2.5',
   F174: 'feat/engine-effort',
