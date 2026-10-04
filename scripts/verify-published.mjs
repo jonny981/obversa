@@ -1,6 +1,6 @@
 // Post-publish verification: every allowlisted package's manifest version
-// must resolve on the release registry. The release workflow runs it after
-// `changeset publish`; the same check closes a manual publish.
+// must resolve on the release registry. The person releasing runs it after
+// the release job passes; the same check closes a manual publish.
 //
 // The registry is passed explicitly — an ambient user npmrc could name
 // another destination, and this check exists to prove the real one answered.

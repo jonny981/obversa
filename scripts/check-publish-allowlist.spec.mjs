@@ -478,3 +478,68 @@ test("the tag step pushes each existing registry-confirmed tag by name and refus
     rmSync(root, { recursive: true, force: true });
   }
 });
+
+// A registry that records every request and answers 404 until a path has
+// been asked `visibleAfter` times: a version npm is still replicating.
+async function recordingRegistry(t, visibleAfter = Infinity) {
+  const requests = [];
+  const server = createServer((request, response) => {
+    requests.push(request.url);
+    const [encodedName, version] = request.url.slice(1).split("/");
+    const seen = requests.filter((url) => url === request.url).length;
+    response.writeHead(seen > visibleAfter ? 200 : 404, { "content-type": "application/json" });
+    response.end(JSON.stringify({ name: decodeURIComponent(encodedName), version }));
+  });
+  server.listen(0, "127.0.0.1");
+  await once(server, "listening");
+  t.after(() => {
+    server.closeAllConnections();
+    return new Promise((resolve) => server.close(resolve));
+  });
+  return { registry: `http://127.0.0.1:${server.address().port}/`, requests };
+}
+
+const gitWithTags = (calls) => (command, args) => {
+  calls.push(args.join(" "));
+  return { status: 0, stdout: "", stderr: "" };
+};
+
+test("the tag step pushes a tag this run's publish created without reading the registry", async (t) => {
+  const { registry, requests } = await recordingRegistry(t);
+  const root = makeWorkspace({ "packages/fresh": { name: "@x/fresh", version: "1.0.0" } });
+  const calls = [];
+  try {
+    const { pushed, problems } = await tagPublished({ registry, root, allowlist: new Set(["@x/fresh"]), run: gitWithTags(calls), tagsBefore: new Set(), retry: { totalMs: 0 }, pushPauseMs: 0 });
+    assert.deepEqual(problems, []);
+    assert.deepEqual(pushed, ["@x/fresh@1.0.0"]);
+    assert.deepEqual(requests, [], "no registry read for a tag this run created");
+    assert.ok(calls.includes("push origin refs/tags/@x/fresh@1.0.0"));
+    assert.ok(!calls.some((c) => c.startsWith("tag ")), "no tag is ever created");
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("the tag step still waits for the registry before it pushes a tag that existed before the publish", async (t) => {
+  const { registry, requests } = await recordingRegistry(t, 2);
+  const root = makeWorkspace({
+    "packages/fresh": { name: "@x/fresh", version: "1.0.0" },
+    "packages/older": { name: "@x/older", version: "1.0.0" },
+  });
+  const calls = [];
+  const olderPath = `/${encodeURIComponent("@x/older")}/1.0.0`;
+  let olderReadsAtFreshPush;
+  const run = (command, args) => {
+    if (args.join(" ") === "push origin refs/tags/@x/fresh@1.0.0") olderReadsAtFreshPush = requests.filter((url) => url === olderPath).length;
+    return gitWithTags(calls)(command, args);
+  };
+  try {
+    const { pushed, problems } = await tagPublished({ registry, root, allowlist: new Set(["@x/older", "@x/fresh"]), run, tagsBefore: new Set(["@x/older@1.0.0"]), retry: { totalMs: 5_000, intervalMs: 10 }, pushPauseMs: 0 });
+    assert.deepEqual(problems, []);
+    assert.deepEqual(pushed, ["@x/fresh@1.0.0", "@x/older@1.0.0"]);
+    assert.ok(olderReadsAtFreshPush <= 2, "the fresh tag is pushed while the registry does not show the older version yet");
+    assert.deepEqual(requests, [olderPath, olderPath, olderPath], "read until the registry shows the version, and only for the older tag");
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});

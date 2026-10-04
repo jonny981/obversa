@@ -143,6 +143,7 @@ export const stageBranches = {
   F177: 'feat/goal-check',
   F191: 'fix/exhausted-fails-its-graph',
   F187: 'feat/feature-team-full-process',
+  F193: 'perf/release-job-no-npm-wait',
   F165: 'fix/opencode-free-models',
   F178: 'release/0.2.4',
   F181: 'release/0.2.5',
