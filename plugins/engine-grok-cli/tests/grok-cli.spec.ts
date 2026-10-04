@@ -960,6 +960,23 @@ describe('Grok CLI adapter', () => {
     )).rejects.toThrow('undeclared capability');
   });
 
+  it('answers when Grok lists a tool of the person\'s own MCP server the step denies', async () => {
+    const result = await new GrokCliEngine({
+      ...options(),
+      environment: { OBVERSA_TEST_GROK_SCENARIO: 'mcp-tool-listed' },
+    }).run(request(), () => {}, new AbortController().signal);
+    expect(result.parts.at(-1)).toMatchObject({ kind: 'assistant', final: true });
+    expect(result.effective.capabilities).toEqual(['read_file', 'grep']);
+  });
+
+  it('rejects a server-named tool from a server Grok did not list', async () => {
+    await expect(new GrokCliEngine({
+      ...options(),
+      environment: { OBVERSA_TEST_GROK_SCENARIO: 'unlisted-server-tool' },
+    }).run(request(), () => {}, new AbortController().signal))
+      .rejects.toThrow('undeclared capability other__exec');
+  });
+
   it('runs Grok with the person\'s own home and environment', async () => {
     const personHome = temporaryDirectory('lines-grok-person-home-');
     const recordPath = join(temporaryDirectory('lines-grok-record-'), 'call.json');

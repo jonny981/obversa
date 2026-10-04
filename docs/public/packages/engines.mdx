@@ -81,7 +81,10 @@ create a file, and no file in the repository changed.
   config folder, so commands the step runs lose their settings in it too.
   Free models refuse a tool-limited run, so the proof needs a paid model.
 - **Grok CLI.** No clean mode: Grok's strict sandbox reads no login outside
-  its own home folder.
+  its own home folder. Your own MCP servers start in every run; a step that
+  declares no MCP tool keeps their tools from the model. Grok's workspace
+  sandbox lets a write step also change files in Grok's own home folder,
+  `~/.grok`, and in temporary folders.
 
 ## Check it on your own machine
 
