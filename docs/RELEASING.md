@@ -49,13 +49,13 @@ Before the first dispatch, create the repository environment `release` and add
 Jonny as its required reviewer. Do not dispatch the workflow until that setup
 is complete.
 
-1. **Check the release commit.** The `verify` job runs
-   `node scripts/check-release-commit.mjs`. See the next section.
-2. **Approve the release.** The `publish` job enters the configured `release`
-   environment and waits for Jonny's approval.
-3. **Build the publish checkout.** The publish job installs the frozen lockfile
-   and builds the complete workspace. It does not reuse files from the verify
-   job.
+The workflow has one job, `publish`. It runs these steps in order:
+
+1. **Approve the release.** The job enters the configured `release`
+   environment and waits for the required reviewer's approval.
+2. **Check the release commit.** After it installs the frozen lockfile, the job
+   runs `node scripts/check-release-commit.mjs`. See the next section.
+3. **Build the publish checkout.** The job builds the complete workspace.
 4. **Check the publish client.** The job proves it uses the root-pinned npm
    devDependency through pnpm's `npm-path` setting. It also checks the Node.js
    version needed by npm trusted publishing.
@@ -63,13 +63,27 @@ is complete.
    `prepublishOnly` guard, packs the package and sends it through the pinned npm
    client. Versions already on the registry are skipped.
 6. **Push only existing intended tags.** The job pushes each allowlisted
-   `name@version` tag as an exact ref. It never creates a missing tag because
-   the registry cannot prove which commit published that version. A missing tag
-   stops the release with instructions to tag the original publish commit.
-   A push that fails is tried twice more, five seconds apart, before it stops
-   the release.
-7. **Read the registry back.** `scripts/verify-published.mjs` asks the explicit
-   npm registry for every allowlisted name and manifest version.
+   `name@version` tag as an exact ref. Before the publish, the job lists the
+   tags that exist. A tag that is not in that list was created by this run's
+   publish, so the job pushes it at once. The job pushes any other tag only
+   when the registry shows its version. The job never creates a missing tag
+   because the registry cannot prove which commit published that version. A
+   missing tag stops the release with instructions to tag the original publish
+   commit. A push that fails is tried twice more, five seconds apart, before it
+   stops the release.
+
+The job does not wait for npm to show the new versions. npm can take several
+minutes to show a version after a publish. When the job passes, confirm the
+release: read every allowlisted name and manifest version back from the
+explicit npm registry.
+
+```bash
+node scripts/verify-published.mjs
+```
+
+The check asks again every five seconds, for up to ten minutes, for each
+version that npm does not show yet. The release is complete only when every
+version reads back.
 
 The publish job carries `id-token: write` for npm trusted publishing. Each npm
 package must name this repository, `release.yml` and the `release` environment
@@ -99,7 +113,7 @@ reaches `main` only after the whole CI job passes on its exact tree. The parent
 passed CI, and the release commit changes no code.
 
 Each failure names the path, the field or the reason. A release commit that
-fails the check never reaches the `publish` job.
+fails the check stops the job before anything builds or publishes.
 
 CI runs on each push to `main`, and a newer push cancels a run that is not
 finished. Push the commit that holds the code and the changesets, and wait for
