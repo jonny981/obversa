@@ -75,6 +75,17 @@ function decideLimit(error: LoopError, ctx: JobContext): LimitAction {
 }
 const yieldToLoop = (): Promise<void> => new Promise((r) => setImmediate(r));
 
+/**
+ * The last rejected review's revision, kept on an exhausted outcome so it says
+ * what was still wrong. Its target is dropped: a loop that ran out sends
+ * nothing back.
+ */
+function lastFindings(review: Outcome | undefined): Pick<Outcome, 'revision'> {
+  if (!review?.revision) return {};
+  const { target: _target, rerun: _rerun, ...revision } = review.revision;
+  return { revision };
+}
+
 export function loop(config: LoopConfig): Job {
   if (!config.name)
     throw new LoopError({
@@ -196,6 +207,8 @@ export function loop(config: LoopConfig): Job {
       let last = saved?.last as unknown as Outcome | undefined;
       let consecutiveErrors = Number(saved?.consecutiveErrors ?? 0);
       let consecutiveReviewFails = Number(saved?.consecutiveReviewFails ?? 0);
+      // The last review this loop rejected, for an exhausted outcome's findings.
+      let rejectedReview: Outcome | undefined;
       // Per-invocation, so a re-run of the same Job (a kickback, a nested loop's
       // second pass) starts with a clean novelty set.
       const tracker = noProgress
@@ -350,6 +363,7 @@ export function loop(config: LoopConfig): Job {
         // cross-contaminate) and bound the restart cycle.
         consecutiveReviewFails += 1;
         lastReview = reviewOutcome;
+        rejectedReview = reviewOutcome;
         parent.log(
           `review did not pass (${reviewOutcome.summary ?? reviewOutcome.status}); re-entering ${config.name}`,
           'warn',
@@ -365,6 +379,7 @@ export function loop(config: LoopConfig): Job {
                 ? { late: true }
                 : {}),
               data: bodyOutcome?.data,
+              ...lastFindings(reviewOutcome),
             },
           };
         }
@@ -399,6 +414,7 @@ export function loop(config: LoopConfig): Job {
               confidence: last?.confidence,
               ...(last?.late ? { late: true } : {}),
               data: last?.data,
+              ...lastFindings(rejectedReview),
             },
             iteration,
           );
@@ -649,6 +665,7 @@ export function loop(config: LoopConfig): Job {
                 ...(last.late ? { late: true } : {}),
                 data: last.data,
                 stall: report,
+                ...lastFindings(rejectedReview),
               },
               iteration,
             );

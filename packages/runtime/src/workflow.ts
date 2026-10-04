@@ -17,7 +17,7 @@ import { kickback, revisionFromOutcome } from './core/feedback.js';
 import { reviewPanel } from './core/synthesis.js';
 import { consultJudge, countBySeverity, isJudge, judgedFindings, lastRoundAnswered, productDecisionFeedback, type JudgeRound, type JudgeState, type SkippedFinding } from './core/judge.js';
 import type { ConditionInput, DagConfig, Job, JobContext, Judge, Outcome } from './core/types.js';
-import { checkpointInteraction, interactionDeclaration, hasSavedInteraction, humanReview, interactionIdentity, jsonSnapshot, outcomeSnapshot, requestInteraction, savedInteraction, type InteractionBinding, type InteractionResponse } from './core/interaction.js';
+import { checkpointInteraction, hasSavedInteraction, humanReview, interactionIdentity, jsonSnapshot, outcomeSnapshot, requestInteraction, savedInteraction, type InteractionBinding, type InteractionResponse } from './core/interaction.js';
 
 import { goalCheckJob } from './goal.js';
 import { outcomeFromAgentText } from './workflow-agent-response.js';
@@ -800,17 +800,13 @@ function stageJob(
     if (!Array.isArray(reviewRole) && 'kind' in reviewRole && reviewRole.kind === 'person') {
       if (!reviewRole.interaction) throw new TypeError('a human reviewer needs an interaction binding');
       const humanCap = refineCap(refineOf(config));
-      const humanLoop = loop({
+      return loop({
         name: `${named.name}-review`, body: job, max: humanCap === undefined ? undefined : humanCap + 1,
         review: humanReview(named.name, {
           question: reviewRole.question, interaction: reviewRole.interaction,
           input: async (ctx) => Object.fromEntries(await Promise.all(writes.map(async (file) => [file, await readFile(join(ctx.workspace.dir, file), 'utf8')]))),
         }),
       });
-      return interactionDeclaration(copyJobMeta(async (ctx) => {
-        const outcome = await humanLoop(ctx);
-        return outcome.status === 'exhausted' ? { ...outcome, status: 'fail' as const } : outcome;
-      }, humanLoop), { humanLoop });
     }
     const reviewers = panelRole(roles, config.reviewedBy);
     const panel = reviewerPanel(brief, named, reviewers, files, declaredFiles, undefined, undefined, undefined, config.synthesise);
