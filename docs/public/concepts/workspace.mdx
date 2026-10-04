@@ -63,6 +63,9 @@ Three things stay:
   it may have committed work that never landed, so its branch stays and the
   run logs a warning naming it. Its worktree is removed.
 
+A later run never reuses a branch that one of these left behind. It skips
+that branch name, takes another, and leaves the old branch as it is.
+
 When the run deletes a branch that holds commits that never landed, the
 step's outcome lists the branch and its last commit in `discarded`. Until
 Git prunes that commit, `git branch <name> <sha>` brings the branch back.

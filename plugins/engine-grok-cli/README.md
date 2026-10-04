@@ -26,6 +26,16 @@ pnpm add @obversa/engine-grok-cli
 ## Use
 
 ```ts
+import { grok } from '@obversa/engine-grok-cli';
+
+const seat = grok('grok-4', { executable: '/absolute/path/to/grok' });
+```
+
+`grok(model, options)` is the seat a workflow role takes. It reads with
+`read_file`, `grep` and `list_dir` unless you pass `tools`, and takes
+`version` and `effort` too. The engine on its own:
+
+```ts
 import { GrokCliEngine } from '@obversa/engine-grok-cli';
 
 const engine = new GrokCliEngine({

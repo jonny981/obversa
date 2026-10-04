@@ -16,6 +16,7 @@ import {
   canonicalJson,
   classifyEngineFailure,
   engineSelection,
+  modelIdentity,
   reportedUsage,
   type AgentRequest,
   type AgentResult,
@@ -72,6 +73,17 @@ const PERMISSION_TOOLS: Readonly<Record<string, readonly string[]>> = {
   Grep: ['grep', 'list_dir'],
   WebFetch: ['web_fetch'],
   MCPTool: ['use_tool'],
+};
+// The permission rule for a Grok tool named as a rule. A workflow role gives
+// the seat's tools to the engine as its permission rules too.
+const TOOL_RULES: Readonly<Record<string, string>> = {
+  read_file: 'Read',
+  list_dir: 'Read',
+  grep: 'Grep',
+  search_replace: 'Edit',
+  run_terminal_command: 'Bash',
+  web_fetch: 'WebFetch',
+  use_tool: 'MCPTool',
 };
 // The tool id `--tools` takes, where it differs from the name Grok reports.
 const TOOL_FLAG_IDS: Readonly<Record<string, string>> = {
@@ -163,12 +175,14 @@ function permissionRules(request: AgentRequest): readonly string[] {
   if (new Set(rules).size !== rules.length) {
     throw new TypeError('allowedTools must be unique');
   }
-  for (const rule of rules) {
+  // Two tools can share a rule, as `read_file` and `list_dir` share `Read`.
+  const mapped = [...new Set(rules.map((rule) => TOOL_RULES[rule] ?? rule))];
+  for (const rule of mapped) {
     if (!PERMISSION_RULE.test(rule)) {
       throw new TypeError(`Grok cannot represent permission rule ${rule}`);
     }
   }
-  return Object.freeze(rules);
+  return Object.freeze(mapped);
 }
 
 function grokPermissionMode(options: GrokCliEngineOptions): 'dontAsk' {
@@ -675,6 +689,47 @@ function transportFailure(
     kind,
     message: diagnostic || 'Grok transport failed after its final result',
     exitCode,
+  };
+}
+
+export interface GrokSeatOptions {
+  /** Absolute path to the Grok CLI. */
+  readonly executable: string;
+  /** The version the CLI must report. Default `1.0.44`, the tested version. */
+  readonly version?: string;
+  /** Default `read_file`, `grep` and `list_dir`. */
+  readonly tools?: readonly string[];
+  readonly effort?: string;
+}
+
+export interface GrokSeat {
+  readonly engine: GrokCliEngine;
+  readonly identity: {
+    readonly adapter: 'grok-cli';
+    readonly provider: 'xai';
+    readonly modelFamily: string;
+    readonly model: string;
+    readonly tools: readonly string[];
+  };
+}
+
+/** Create the Grok seat used by declarative team workflows. */
+export function grok(model: string, options: GrokSeatOptions): GrokSeat {
+  const { modelFamily } = modelIdentity(model);
+  return {
+    engine: new GrokCliEngine({
+      executable: options.executable,
+      version: options.version ?? '1.0.44',
+      identity: { provider: 'xai', modelFamily },
+      ...(options.effort === undefined ? {} : { effort: options.effort }),
+    }),
+    identity: {
+      adapter: 'grok-cli',
+      provider: 'xai',
+      modelFamily,
+      model,
+      tools: options.tools ?? ['read_file', 'grep', 'list_dir'],
+    },
   };
 }
 

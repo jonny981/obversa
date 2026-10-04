@@ -112,6 +112,36 @@ describe('tournament (branch-and-select)', () => {
     expect(outcome.status).toBe('fail');
   });
 
+  it('skips a candidate name an interrupted earlier run left behind, and keeps that branch', async () => {
+    const repo = await tmpRepo();
+    // What a run that died mid-attempt leaves: a candidate branch, checked out
+    // in its own worktree, with work committed on it.
+    const leftDir = tmpBareDir();
+    await execa('git', ['worktree', 'add', '-b', 'lines/rerun-cand-0', leftDir, 'HEAD'], { cwd: repo });
+    write(leftDir, 'old.txt', 'old\n');
+    await execa('git', ['add', '-A'], { cwd: leftDir });
+    await execa('git', ['commit', '-m', 'old attempt'], { cwd: leftDir });
+    const { stdout: leftSha } = await execa('git', ['rev-parse', 'lines/rerun-cand-0'], { cwd: repo });
+
+    const job = tournament({
+      name: 'rerun',
+      n: 2,
+      candidate: (i) =>
+        fnJob(`cand-${i}`, async (ctx) => {
+          write(ctx.workspace.dir, 'result.txt', `candidate ${i}\n`);
+          return { status: 'pass', data: { score: i } };
+        }),
+      judge: (o) => (o.data as { score: number }).score,
+    });
+    const { outcome } = await run(job, { ...base, cwd: repo });
+
+    expect(outcome.status).toBe('pass');
+    expect(readFileSync(join(repo, 'result.txt'), 'utf8')).toBe('candidate 1\n');
+    expect(existsSync(join(repo, 'old.txt'))).toBe(false);
+    const { stdout: after } = await execa('git', ['rev-parse', 'lines/rerun-cand-0'], { cwd: repo });
+    expect(after).toBe(leftSha);
+  });
+
   it('requires a git repo', async () => {
     const bare = tmpBareDir();
     const job = tournament({

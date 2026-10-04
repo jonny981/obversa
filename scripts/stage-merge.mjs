@@ -138,6 +138,7 @@ export const stageBranches = {
   F176: 'feat/panel-synthesis',
   F182: 'perf/release-in-minutes',
   F183: 'fix/run-page-answers-any-question',
+  F186: 'fix/fork-names-parser-grok-seat',
   F178: 'release/0.2.4',
   F181: 'release/0.2.5',
   F174: 'feat/engine-effort',
