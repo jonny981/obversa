@@ -5,11 +5,12 @@
 // reads its script from a file named .obversa-stand-in.json in its working
 // directory, so no environment variable has to survive the adapter's clean
 // child environment: JSON, per role, an ordered list of calls, each
-// { "writes": { "path": "content" }, "reply": "text" }. It writes the files
-// into its cwd, prints the reply in that role's line protocol, appends one
-// line per call to .obversa-stand-in-calls.log beside the script, and exits
-// 0. Past the end of the list it repeats the last entry.
-import { appendFileSync, mkdirSync, readFileSync, rmdirSync, writeFileSync } from 'node:fs';
+// { "writes": { "path": "content" }, "deletes": ["path"], "reply": "text" }.
+// It writes and deletes the files in its cwd, prints the reply in that role's
+// line protocol, appends one line per call to .obversa-stand-in-calls.log
+// beside the script, with the prompt it read on stdin, and exits 0. Past the
+// end of the list it repeats the last entry.
+import { appendFileSync, mkdirSync, readFileSync, rmdirSync, rmSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 
 const args = process.argv.slice(2);
@@ -60,6 +61,8 @@ if (args.length === 1 && args[0] === '--version') {
   process.exit(0);
 }
 
+// Every adapter writes the prompt to stdin and closes it.
+const prompt = process.stdin.isTTY ? '' : readFileSync(0, 'utf8');
 const entry = withCallsLock(() => {
   const chosen = call();
   appendFileSync(callsLog, `${JSON.stringify({
@@ -68,6 +71,7 @@ const entry = withCallsLock(() => {
     writes: chosen.writes ?? {},
     cwd: process.cwd(),
     args,
+    prompt,
   })}\n`);
   return chosen;
 });
@@ -75,6 +79,7 @@ for (const [path, content] of Object.entries(entry.writes ?? {})) {
   mkdirSync(dirname(path), { recursive: true });
   writeFileSync(path, content);
 }
+for (const path of entry.deletes ?? []) rmSync(path, { force: true });
 
 if (role === 'claude') {
   process.stdout.write(`${JSON.stringify({

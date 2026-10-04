@@ -891,6 +891,7 @@ async function main() {
     await copyFile(join(root, 'examples', 'teams', 'review-battery.proof.ts'), join(consumerDirectory, 'teams', 'review-battery.proof.ts'));
     await copyFile(join(root, 'examples', 'teams', 'feature-delivery.ts'), join(consumerDirectory, 'teams', 'feature-delivery.ts'));
     await copyFile(join(root, 'examples', 'teams', 'feature-delivery.proof.ts'), join(consumerDirectory, 'teams', 'feature-delivery.proof.ts'));
+    await copyFile(join(root, 'examples', 'teams', 'feature-team-backlog.ts'), join(consumerDirectory, 'teams', 'feature-team-backlog.ts'));
     // The use-case examples travel as a tree: each example sits beside its
     // proof, its brief and its sample inputs, and the proofs read those files
     // by their own location.
@@ -1031,15 +1032,11 @@ async function main() {
     assert.equal(compiledTeamPanel.threshold, '1 of 2');
     assert.deepEqual(compiledTeamPanel.reviewerCalls, [1, 1]);
     assert.equal(compiledTeamFeature.status, 'pass');
-    assert.equal(compiledTeamFeature.triage, 'feature');
-    assert.equal(compiledTeamFeature.researchRounds, 2);
-    assert.equal(compiledTeamFeature.tournamentRounds, 2);
-    assert.equal(compiledTeamFeature.reviewRounds, 2);
-    assert.deepEqual(compiledTeamFeature.judgeAnswers, ['continue']);
-    assert.equal(compiledTeamFeature.kickbacks, 1);
-    assert.equal(compiledTeamFeature.resume.exit, 0);
-    assert.equal(compiledTeamFeature.resume.runStarts, 2);
-    assert.equal(compiledTeamFeature.resume.resumedJobStarts, 0);
+    assert.equal(compiledTeamFeature.rounds, 3);
+    assert.deepEqual(compiledTeamFeature.goalChecks, ['unmet', 'met', 'met']);
+    assert.deepEqual(compiledTeamFeature.synthesis, ['kept', 'disputed']);
+    assert.deepEqual(compiledTeamFeature.judge, ['act', 'skip']);
+    assert.deepEqual(compiledTeamFeature.backlog, ['001-triple.md pass', '002-double.md pass']);
     // The compiled mode is the one that proves the package: a repo-mode green
     // must never stand in for it.
     assert.equal(compiledTeamPair.mode, 'compiled-from-dist');
