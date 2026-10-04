@@ -22,55 +22,104 @@ const repo = (() => {
 })();
 const standIn = join(repo, 'scripts', 'stand-in-cli.mjs');
 
-const ticket = 'Deliver a pure triple(value) function in src/triple.mjs. A Node test for it is at test/triple.test.mjs. This is a feature: no existing triple function exists yet.\n';
-const testFile = [
-  "import assert from 'node:assert/strict';",
-  "import test from 'node:test';",
-  "import { triple } from '../src/triple.mjs';",
-  "test('triple returns three times the input', () => assert.equal(triple(3), 9));",
+const ticket = [
+  '---',
+  'files: ["src/triple.mjs", "test/triple.test.mjs"]',
+  '---',
+  '',
+  'Add triple(value) to src/triple.mjs.',
+  '',
+  '- triple returns three times its input.',
+  '- triple throws a TypeError when its input is not a number.',
+  '',
+  'The test is test/triple.test.mjs.',
   '',
 ].join('\n');
+const nodeTest = (name: string, body: string) => [
+  "import assert from 'node:assert/strict';",
+  "import test from 'node:test';",
+  `import { ${name} } from '../src/${name}.mjs';`,
+  body,
+  '',
+].join('\n');
+const tripleTest = nodeTest('triple', "test('triple returns three times its input', () => assert.equal(triple(3), 9));");
 
-// The judge only needs to be asked once here: review clears on its second
-// attempt, so the loop never asks a second time. The second entry is a safe
-// fallback (stop the loop) if an unexpected extra round ever reaches it.
-const jev = {
-  triage: [{ kind: { choice: 'feature' }, risk: { score: 0.4 } }],
-  judge: [{ stop_reason: { choice: 'continue' } }, { stop_reason: { choice: 'holds' } }],
-};
+const reply = (value: unknown) => JSON.stringify(value);
+const pass = (summary: string) => reply({ status: 'pass', summary });
+const met = (requirement: string, evidence: string) => ({ requirement, verdict: 'met', evidence });
+const triples = met('triple returns three times its input', 'src/triple.mjs returns value * 3; test/triple.test.mjs passes');
+const throws = met('triple throws a TypeError when its input is not a number', 'src/triple.mjs:2 throws a TypeError');
 
-const evidence = "Triage read the ticket and called it a feature. Research iterated once before the panel cleared the plan. The tournament ran two candidates in their own worktrees; Codex's passed the test and landed, Claude's produced nothing. The review panel rejected the first cut on a naming finding, a judge said another round was worth it, and Codex's rename cleared the second review. The exact bytes were approved by sha.\n";
+const doubles = 'export const triple = (value) => value * 2;\n';
+const noCheck = 'export const triple = (value) => value * 3;\n';
+const plainError = [
+  'export function triple(value) {',
+  "  if (typeof value !== 'number') throw new TypeError('triple expects a number');",
+  '  return value * 3;',
+  '}',
+  '',
+].join('\n');
+const namedError = plainError.replace("'triple expects a number'", '`triple expects a number, got ${typeof value}`');
 
-// Claude writes the plan (twice, once per research round) and, round-robin,
-// lands on this same third entry for every later claude call: the tournament's
-// candidate-0 (designed to lose) and the close step both read it. It writes
-// only evidence.md, never src/triple.mjs, so candidate-0 always fails its own
-// "did you produce anything" check and close never touches the shipped file.
-const standInScript = {
+const message = 'The TypeError does not say what the caller passed.';
+const messageAgain = 'A caller who passes a string is not told what it passed.';
+const comment = 'triple has no comment saying what it does.';
+const act = 'A caller needs to know what it passed to fix the call.';
+const skip = 'A comment on a three-line function is taste.';
+
+// The stand-in replays each command line tool's calls in order. Claude is
+// the builder and the first reviewer, so it also merges the reviews; Codex
+// is the goal check and the second reviewer; OpenCode runs Gemini, the
+// third reviewer.
+//
+// Round 1: the first build doubles, the test goes red, and the second
+// build passes the test. The goal check finds the TypeError missing, so
+// the round goes back with no review and no judge.
+// Round 2: the goal check passes. The reviewers review at the same time:
+// Claude and Codex raise the same problem in other words, and Gemini, in
+// a pass, raises a comment. Claude's seat merges the first two; each
+// reviewer votes on what it did not raise. The judge acts on the merged
+// finding and skips the comment.
+// Round 3: the goal check and all three reviewers pass.
+const featureScript = {
   claude: [
-    { writes: { 'team-output/plan.md': 'REQ-1: triple multiplies by 3.\n' }, reply: 'wrote the plan' },
-    { writes: { 'team-output/plan.md': 'REQ-1: triple multiplies by 3. Check: source exists.\n' }, reply: 'revised the plan' },
-    { writes: { 'team-output/evidence.md': evidence }, reply: 'the candidate produced nothing' },
+    { writes: { 'src/triple.mjs': doubles }, reply: 'wrote src/triple.mjs' },
+    { writes: { 'src/triple.mjs': noCheck }, reply: 'fixed the multiplier the test named' },
+    { writes: { 'src/triple.mjs': plainError }, reply: 'added the TypeError' },
+    { reply: reply({ status: 'revise', summary: 'The error message is too thin.', findings: [{ severity: 'should-fix', evidence: message, recommendation: 'Name the value in the message.' }] }) },
+    { reply: reply({ groups: [{ ids: ['f1', 'f2'], evidence: 'f1', fix: 'f2' }] }) },
+    { reply: reply({ votes: [{ id: 'm2', vote: 'disagree', reason: 'The function is three lines; a comment repeats them.' }] }) },
+    { writes: { 'src/triple.mjs': namedError }, reply: 'named the type in the message' },
+    { reply: pass('The change meets the ticket.') },
   ],
   codex: [
-    { reply: JSON.stringify({ status: 'revise', summary: 'missing a check', findings: [{ severity: 'should-fix', evidence: 'no check named' }] }) },
-    { reply: JSON.stringify({ status: 'pass', summary: 'plan covers it' }) },
-    { writes: { 'src/triple.mjs': 'export const triple = (value) => value * 3;\n' }, reply: 'implemented the plan' },
-    {
-      writes: { 'src/triple.mjs': 'export const triple = (value) => value * 3; // named clearly\n' },
-      reply: JSON.stringify({ status: 'revise', summary: 'variable name is unclear', findings: [{ severity: 'should-fix', evidence: 'name the parameter' }] }),
-    },
-    { reply: JSON.stringify({ status: 'pass', summary: 'the rename covers it' }) },
+    { reply: reply({ requirements: [triples, { requirement: 'triple throws a TypeError when its input is not a number', verdict: 'unmet', evidence: 'src/triple.mjs has no check on its input' }] }) },
+    { reply: reply({ requirements: [triples, throws] }) },
+    { reply: reply({ status: 'revise', summary: 'One gap in the error.', findings: [{ severity: 'should-fix', evidence: messageAgain, recommendation: 'Say what it got: triple expects a number, got string.' }] }) },
+    { reply: reply({ votes: [{ id: 'm2', vote: 'agree', reason: 'A comment helps a new reader.' }] }) },
+    { reply: reply({ requirements: [triples, throws] }) },
+    { reply: pass('The change meets the ticket.') },
   ],
   opencode: [
-    { reply: JSON.stringify({ status: 'revise', summary: 'name is unclear', findings: [{ severity: 'should-fix', evidence: 'triple could be clearer' }] }) },
+    { reply: reply({ status: 'pass', summary: 'One note.', findings: [{ severity: 'nice-to-have', evidence: comment, recommendation: 'Add a one-line comment above it.' }] }) },
+    { reply: reply({ votes: [{ id: 'm1', vote: 'agree', reason: 'The message should name what it got.' }] }) },
+    { reply: pass('The change meets the ticket.') },
   ],
 };
+
+// The judge is asked once, after round 2. It decides each finding left
+// after the vote, in the order the synthesis lists them.
+const judgeAnswers = [{
+  holds: { type: 'noul', noul: 0.3 },
+  worth_doing: { type: 'noul', noul: 0.8 },
+  worth_another_round: { type: 'noul', noul: 0.8 },
+  stop_reason: { type: 'choice', choice: 'continue', confidence: 0.8 },
+  'finding-1': { type: 'choice', choice: 'act', confidence: 0.9, reason: act },
+  'finding-2': { type: 'choice', choice: 'skip', confidence: 0.8, reason: skip },
+}];
 
 interface RecordedEvent {
   readonly kind: string;
-  readonly path?: readonly string[];
-  readonly identity?: string;
   readonly node?: string;
   readonly phase?: string;
   readonly attempt?: number;
@@ -78,221 +127,284 @@ interface RecordedEvent {
   readonly from?: string;
   readonly to?: string;
   readonly accepted?: boolean;
-  readonly count?: number;
-  readonly limit?: number;
-  readonly answers?: unknown;
+  readonly requirements?: readonly { requirement: string; verdict: string }[];
+  readonly entries?: readonly { result: string; finding: { evidence: string; raisedBy?: readonly string[]; votes?: readonly { reviewer: string; vote: string }[] } }[];
+  readonly findings?: readonly { decision: string; reason: string }[];
   readonly outcome?: { status: string; summary?: string; data?: unknown };
 }
 
-async function seedWorkspace(dir: string, bin: string): Promise<void> {
-  await mkdir(join(dir, 'briefs'), { recursive: true });
-  await mkdir(join(dir, 'src'), { recursive: true });
-  await mkdir(join(dir, 'test'), { recursive: true });
+interface Seeded {
+  readonly dir: string;
+  readonly bin: string;
+}
+
+async function seed(name: string, files: Readonly<Record<string, string>>, script: unknown): Promise<Seeded> {
+  const dir = join(root, name);
+  const bin = join(root, `${name}-bin`);
   await mkdir(bin, { recursive: true });
-  await writeFile(join(dir, 'briefs/ticket.md'), ticket);
-  await writeFile(join(dir, 'test/triple.test.mjs'), testFile);
-  await writeFile(join(dir, 'triage.json'), JSON.stringify(jev.triage, null, 2));
-  await writeFile(join(dir, 'judge.json'), JSON.stringify(jev.judge, null, 2));
-  await writeFile(join(dir, '.obversa-stand-in.json'), JSON.stringify(standInScript, null, 2));
-  for (const name of ['claude', 'codex', 'opencode']) await symlink(standIn, join(bin, name));
+  for (const [path, content] of Object.entries({
+    ...files,
+    'judge.json': `${JSON.stringify(judgeAnswers, null, 2)}\n`,
+    '.obversa-stand-in.json': `${JSON.stringify(script, null, 2)}\n`,
+  })) {
+    await mkdir(dirname(join(dir, path)), { recursive: true });
+    await writeFile(join(dir, path), content);
+  }
+  // The stand-ins sit beside the workspace, not inside it: a read-only
+  // reviewer's workspace guard refuses a symlink under the workspace that
+  // resolves outside it.
+  for (const tool of ['claude', 'codex', 'opencode']) await symlink(standIn, join(bin, tool));
+  // Each ticket runs in a worktree forked from HEAD, so the seats' script
+  // has to be committed for the worktree to have it.
   const git = (...args: string[]) => spawnSync('git', args, { cwd: dir, encoding: 'utf8' });
   git('init', '-q', '-b', 'main');
   git('config', 'user.name', 'Example');
   git('config', 'user.email', 'example@example.com');
   git('config', 'commit.gpgsign', 'false');
   git('add', '-A');
-  git('commit', '-q', '-m', 'chore: seed the ticket');
+  git('commit', '-q', '-m', 'chore: seed the work');
+  return { dir, bin };
 }
 
-function exampleChild(extraArgs: readonly string[] = []) {
+function child(stem: string, extraArgs: readonly string[]) {
   const repoTsconfig = join(repo, 'packages', 'runtime', 'tsconfig.json');
   const tsconfigArgs = existsSync(repoTsconfig) ? ['--tsconfig', repoTsconfig] : [];
-  const compiled = join(here, 'feature-delivery.js');
+  const compiled = join(here, `${stem}.js`);
   return existsSync(compiled)
     ? { file: process.execPath, args: [compiled, ...extraArgs] }
-    : { file: join(repo, 'node_modules', '.bin', 'tsx'), args: [...tsconfigArgs, join(here, 'feature-delivery.ts'), ...extraArgs] };
+    : { file: join(repo, 'node_modules', '.bin', 'tsx'), args: [...tsconfigArgs, join(here, `${stem}.ts`), ...extraArgs] };
 }
 
-function runExample(dir: string, bin: string, extraArgs: readonly string[] = []) {
-  const child = exampleChild(extraArgs);
-  return spawnSync(child.file, child.args, {
-    cwd: dir,
-    env: { ...process.env, PATH: `${bin}:${process.env.PATH ?? ''}` },
-    encoding: 'utf8',
-    timeout: 120_000,
-  });
+const envFor = (seeded: Seeded) => ({ ...process.env, PATH: `${seeded.bin}:${process.env.PATH ?? ''}` });
+
+function runExample(seeded: Seeded, stem: string, extraArgs: readonly string[] = []) {
+  const { file, args } = child(stem, extraArgs);
+  const ran = spawnSync(file, args, { cwd: seeded.dir, env: envFor(seeded), encoding: 'utf8', timeout: 120_000 });
+  assert.equal(ran.status, 0, `${stem} ${extraArgs.join(' ')} exited ${ran.status ?? `signal ${ran.signal}`}
+  stdout: ${ran.stdout}
+  stderr: ${ran.stderr}`);
+  return ran;
 }
 
-function readRecord(dir: string): RecordedEvent[] {
-  return readFileSync(join(dir, 'records/feature-delivery.jsonl'), 'utf8')
+const printed = (stdout: string) => JSON.parse(stdout.slice(stdout.lastIndexOf('\n{') + 1)) as Record<string, unknown>;
+
+function readRecord(dir: string, name: string): RecordedEvent[] {
+  return readFileSync(join(dir, 'records', `${name}.jsonl`), 'utf8')
     .trim().split('\n').map((line) => JSON.parse(line) as RecordedEvent);
 }
-function doneNode(record: RecordedEvent[], node: string, attempt: number): RecordedEvent {
-  const found = record.find((e) => e.kind === 'dag:node' && e.phase === 'done' && e.node === node && e.attempt === attempt);
-  assert.ok(found, `no dag:node done event for "${node}" attempt ${attempt}`);
-  return found!;
+
+/** Where a node's run starts in the record, one index per attempt. */
+const nodeStarts = (record: RecordedEvent[], node: string) =>
+  record.flatMap((e, at) => (e.kind === 'dag:node' && e.phase === 'start' && e.node === node ? [at] : []));
+const reviewerStarts = (record: RecordedEvent[]) =>
+  record.flatMap((e, at) => (e.kind === 'job:start' && e.label?.startsWith('review-') ? [at] : []));
+
+const sha256 = async (path: string) => createHash('sha256').update(await readFile(path)).digest('hex');
+
+/** What the stand-in was sent, in order, for one command line tool. The log lands with the change. */
+const prompts = (dir: string, role: string) => readFileSync(join(dir, '.obversa-stand-in-calls.log'), 'utf8')
+  .trim().split('\n').map((line) => JSON.parse(line) as { role: string; prompt: string })
+  .filter((call) => call.role === role).map((call) => call.prompt);
+
+/** The seven steps, in order, from the record of one ticket. */
+async function assertSevenSteps(seeded: Seeded, attended: boolean) {
+  const record = readRecord(seeded.dir, 'feature-delivery');
+  const builds = nodeStarts(record, 'build');
+  assert.equal(builds.length, 3, 'the builder builds three rounds: the goal check sends one back, the judge one');
+  const roundOf = (at: number) => builds.filter((start) => start < at).length;
+
+  // 1 and 2. Build and checks. In round 1 the test goes red once and the
+  // builder runs again with its output, with no model in between.
+  const tests = record.filter((e) => e.kind === 'job:end' && e.label === 'test');
+  assert.deepEqual(tests.map((e) => e.outcome!.status), ['fail', 'pass', 'pass', 'pass']);
+  const red = record.filter((e) => e.kind === 'loop:review' && e.outcome!.status !== 'pass');
+  assert.equal(red.length, 1, 'one red test in the whole run');
+  assert.equal(red[0]!.accepted, true, 'the red test goes back to the builder');
+  assert.match(red[0]!.outcome!.summary ?? '', /exited 1[\s\S]*command output/, "the builder gets the test's output");
+
+  // What the builder was sent each time. The first build has the ticket
+  // alone; each later one has what sent the work back.
+  const toBuilder = prompts(seeded.dir, 'claude').filter((prompt) => prompt.includes('Make the change in src/triple.mjs'));
+  assert.equal(toBuilder.length, 4, 'four builds: the first, after the red test, after the goal check, after the judge');
+  assert.ok(!toBuilder[0]!.includes('Feedback to address'), 'the first build has nothing to address');
+  assert.ok(toBuilder[1]!.includes('not ok 1 - triple returns three times its input') && toBuilder[1]!.includes('6 !== 9'), `the retry has the red test's output: ${toBuilder[1]}`);
+
+  // 3. Goal check. It runs every round before any reviewer starts. Round 1
+  // finds the TypeError unmet and no reviewer runs that round.
+  const goals = record.flatMap((e, at) => (e.kind === 'goal:check' ? [{ at, e }] : []));
+  assert.deepEqual(goals.map(({ at }) => roundOf(at)), [1, 2, 3], 'one goal check per round');
+  assert.deepEqual(goals.map(({ e }) => e.requirements!.map((r) => r.verdict)), [['met', 'unmet'], ['met', 'met'], ['met', 'met']]);
+  const reviews = reviewerStarts(record);
+  assert.equal(reviews.filter((at) => roundOf(at) === 1).length, 0, 'no reviewer runs in a round the goal check sends back');
+  for (const { at } of goals.slice(1)) {
+    const round = reviews.filter((start) => roundOf(start) === roundOf(at));
+    assert.equal(round.length, 3, `three reviewers in round ${roundOf(at)}`);
+    assert.ok(round.every((start) => start > at), `the goal check ran before the reviews in round ${roundOf(at)}`);
+  }
+  assert.ok(toBuilder[2]!.includes('triple throws a TypeError when its input is not a number: src/triple.mjs has no check on its input'), `the next round has the unmet requirement: ${toBuilder[2]}`);
+  const kickbacks = record.filter((e) => e.kind === 'dag:kickback');
+  assert.deepEqual(kickbacks.map((e) => [e.from, e.to, e.accepted]), [['goal', 'build', true], ['review', 'build', true]]);
+
+  // 4 and 5. Review battery and synthesis. Claude and Codex named the same
+  // problem, merged into one; Gemini's comment is disputed by the vote.
+  const syntheses = record.filter((e) => e.kind === 'review:synthesis');
+  assert.equal(syntheses.length, 1, 'round 3 has no findings to merge');
+  const [merged, disputed] = syntheses[0]!.entries!;
+  assert.equal(merged!.result, 'kept');
+  assert.deepEqual(merged!.finding.raisedBy, ['claude', 'codex']);
+  assert.equal(merged!.finding.evidence, message);
+  assert.equal(disputed!.result, 'disputed');
+  assert.deepEqual(disputed!.finding.raisedBy, ['gemini']);
+  assert.deepEqual(disputed!.finding.votes!.map((v) => `${v.reviewer} ${v.vote}`), ['claude disagree', 'codex agree']);
+
+  // 6. Judge. Asked once, after the synthesis, never about the goal check.
+  // It acts on the merged finding and skips the comment.
+  const judges = record.flatMap((e, at) => (e.kind === 'refine:judge' ? [{ at, e }] : []));
+  assert.equal(judges.length, 1, 'the judge is asked about the review only');
+  assert.ok(judges[0]!.at > record.indexOf(syntheses[0]!), 'the judge reads the synthesised list');
+  assert.deepEqual(judges[0]!.e.findings!.map((f) => [f.decision, f.reason]), [['act', act], ['skip', skip]]);
+  assert.ok(toBuilder[3]!.includes(message) && toBuilder[3]!.includes(act), `the builder gets the finding the judge acts on: ${toBuilder[3]}`);
+  assert.ok(!toBuilder[3]!.includes(comment) && !toBuilder[3]!.includes(skip), `the builder never sees the finding the judge skips: ${toBuilder[3]}`);
+
+  // 7. Approval. Attended, a person approves the exact bytes that landed.
+  const landed = await sha256(join(seeded.dir, 'src/triple.mjs'));
+  assert.equal(await readFile(join(seeded.dir, 'src/triple.mjs'), 'utf8'), namedError, 'the round 3 change landed');
+  const approve = record.filter((e) => e.kind === 'dag:node' && e.phase === 'done' && e.node === 'approve');
+  if (!attended) {
+    assert.equal(approve.length, 0, 'unattended, nobody is asked');
+    return { landed };
+  }
+  // In rounds 1 and 2 an earlier node failed, so approve ended without asking.
+  const approved = approve.filter((e) => e.outcome!.status === 'pass');
+  assert.equal(approved.length, 1, 'the person is asked once, in the last round');
+  assert.equal(nodeStarts(record, 'approve').length, 1, 'approve starts once');
+  // The question names every file that landed, the ticket's or not, with
+  // its bytes, and every file the run deleted.
+  const git = (...args: string[]) => spawnSync('git', args, { cwd: seeded.dir, encoding: 'utf8' }).stdout.trim().split('\n');
+  const [seedCommit] = git('rev-list', '--max-parents=0', 'HEAD');
+  const shipped = await Promise.all(git('diff', '--name-status', '--no-renames', seedCommit!, 'HEAD').map(async (line) => {
+    const [status, path] = line.split('\t');
+    return status === 'D' ? `${path} (deleted)` : `${path} (sha256 ${(await sha256(join(seeded.dir, path!))).slice(0, 12)})`;
+  }));
+  assert.equal(approved[0]!.outcome!.summary, `approved: Ship these bytes? ${shipped.join(', ')}`, 'the approval names every landed file and its bytes');
+  assert.ok(nodeStarts(record, 'approve')[0]! > reviews.at(-1)!, 'the approval comes after the last review');
+  return { landed, question: approved[0]!.outcome!.summary!, approval: approved[0]!.outcome!.data };
 }
 
 const root = await mkdtemp(join(tmpdir(), 'obversa-feature-delivery-proof-'));
-const workspace = join(root, 'workspace');
-const bin = join(root, 'bin');
 try {
-  await seedWorkspace(workspace, bin);
+  const featureFiles = { 'briefs/ticket.md': ticket, 'test/triple.test.mjs': tripleTest };
 
-  // The run waits for the person's yes; the proof gives it on the run's page.
-  const child = exampleChild();
-  const run = await runAnswering(child.file, child.args, {
-    cwd: workspace,
-    env: { ...process.env, PATH: `${bin}:${process.env.PATH ?? ''}` },
-    timeoutMs: 120_000,
-    answer: { approved: true },
+  // Attended. The run waits for the person's yes; the proof gives it on the
+  // run's page and reads the question there while it is pending.
+  const attended = await seed('attended', featureFiles, featureScript);
+  const { file, args } = child('feature-delivery', []);
+  const asked = await runAnswering(file, args, { cwd: attended.dir, env: envFor(attended), timeoutMs: 120_000, answer: { approved: true } });
+  assert.equal(asked.status, 0, `the attended run exited ${asked.status ?? `signal ${asked.signal}`}
+  stdout: ${asked.stdout}
+  stderr: ${asked.stderr}`);
+  assert.equal(printed(asked.stdout).status, 'pass');
+  const attendedSteps = await assertSevenSteps(attended, true);
+  assert.ok(asked.question?.includes(attendedSteps.landed.slice(0, 12)), `the page asked about the landed bytes: ${asked.question}`);
+
+  // Attended, with approve.json beside the file: the answer comes from it,
+  // and nobody has to be on the page. Here the first build also deletes a
+  // file the ticket does not name, and the approval still names it.
+  const recorded = await seed('approve-json', {
+    ...featureFiles,
+    'src/legacy.mjs': 'export const legacy = true;\n',
+    'approve.json': `${JSON.stringify({ approved: true, note: 'approved from approve.json' })}\n`,
+  }, { ...featureScript, claude: [{ ...featureScript.claude[0], deletes: ['src/legacy.mjs'] }, ...featureScript.claude.slice(1)] });
+  assert.equal(printed(runExample(recorded, 'feature-delivery').stdout).status, 'pass');
+  const recordedSteps = await assertSevenSteps(recorded, true);
+  assert.deepEqual(recordedSteps.approval, { approved: true, note: 'approved from approve.json' });
+  assert.ok(!existsSync(join(recorded.dir, 'src/legacy.mjs')), 'the deletion landed');
+  assert.ok(recordedSteps.question.includes('src/legacy.mjs (deleted)'), `the approval names the deletion: ${recordedSteps.question}`);
+
+  // A file edited in the worktree while the question waits is not what the
+  // person approved: the yes fails the run, and nothing lands.
+  const edited = await seed('edited', featureFiles, featureScript);
+  const editedAnswer = await runAnswering(file, args, {
+    cwd: edited.dir, env: envFor(edited), timeoutMs: 120_000, answer: { approved: true },
+    beforeAnswer: async () => {
+      const worktrees = spawnSync('git', ['worktree', 'list', '--porcelain'], { cwd: edited.dir, encoding: 'utf8' }).stdout
+        .split('\n').filter((line) => line.startsWith('worktree ')).map((line) => line.slice('worktree '.length));
+      assert.equal(worktrees.length, 2, `one worktree for the ticket: ${worktrees.join(', ')}`);
+      await writeFile(join(worktrees[1]!, 'src/triple.mjs'), `${namedError}export const extra = true;\n`);
+    },
   });
-  const mode = existsSync(join(here, 'feature-delivery.js')) ? 'compiled-from-dist'
-    : existsSync(join(repo, 'packages', 'runtime', 'tsconfig.json')) ? 'repo-tsx' : 'consumer-tsx';
-  assert.equal(run.status, 0, `the example child exited ${run.status ?? `signal ${run.signal}`} in ${mode} mode
-  stdout: ${run.stdout}
-  stderr: ${run.stderr}`);
-  const printed = JSON.parse(run.stdout.slice(run.stdout.lastIndexOf('\n{') + 1));
-  assert.equal(printed.status, 'pass');
-  assert.match(printed.summary, /all 7 node\(s\) green/);
+  assert.equal(editedAnswer.status, 0, `the edited run exited ${editedAnswer.status ?? `signal ${editedAnswer.signal}`}
+  stdout: ${editedAnswer.stdout}
+  stderr: ${editedAnswer.stderr}`);
+  assert.ok(editedAnswer.question?.startsWith('Ship these bytes?'), `the person was asked: ${editedAnswer.question}`);
+  assert.equal(printed(editedAnswer.stdout).status, 'fail', 'a yes to bytes that changed fails the run');
+  assert.ok(!existsSync(join(edited.dir, 'src/triple.mjs')), 'the edited change does not land');
+  const editedApprove = readRecord(edited.dir, 'feature-delivery')
+    .filter((e) => e.kind === 'dag:node' && e.phase === 'done' && e.node === 'approve').at(-1);
+  assert.equal(editedApprove?.outcome?.summary, 'the files changed after the approval was asked for; nothing lands');
 
-  // 1. Triage chose feature, so research and the rest of the pipeline ran.
-  const record = readRecord(workspace);
-  const triage = doneNode(record, 'triage', 1);
-  assert.equal(triage.outcome!.status, 'pass');
-  assert.match(triage.outcome!.summary ?? '', /"choice":"feature"/);
+  // A no from the person fails the run, and the change does not land.
+  const refused = await seed('refused', { ...featureFiles, 'approve.json': `${JSON.stringify({ approved: false, note: 'not this week' })}\n` }, featureScript);
+  assert.equal(printed(runExample(refused, 'feature-delivery').stdout).status, 'fail');
+  assert.ok(!existsSync(join(refused.dir, 'src/triple.mjs')), 'a refused change does not land');
 
-  // 2. Research (the nested workflow()) accepted the plan on its second round.
-  const loopIterations = record.filter((e) => e.kind === 'loop:iteration');
-  assert.equal(loopIterations.length, 2, 'research refines the plan once before the panel clears it');
-  const research = doneNode(record, 'research', 1);
-  assert.equal(research.outcome!.status, 'pass');
+  // Unattended. The same team, and the change lands without asking.
+  const unattended = await seed('unattended', featureFiles, featureScript);
+  assert.equal(printed(runExample(unattended, 'feature-delivery', ['--unattended']).stdout).status, 'pass');
+  await assertSevenSteps(unattended, false);
 
-  // 3. The tournament ran two candidates; the test-passing one won, twice
-  // (once per implement attempt, since round 1's review sends it back).
-  const implement1 = doneNode(record, 'implement', 1);
-  const implement2 = doneNode(record, 'implement', 2);
-  for (const node of [implement1, implement2]) {
-    assert.equal(node.outcome!.status, 'pass');
-    assert.match(node.outcome!.summary ?? '', /landed candidate 1 \(score 1\) of 2/);
+  // The backlog. Two tickets, each delivered in its own worktree; each
+  // passes on its first round, lands, and moves to done. The stand-in's
+  // calls run on across tickets: ticket 1 takes each list's first entries
+  // and ticket 2 the next ones. Each ticket's record shows one build and
+  // one test run, so a retry in ticket 1 cannot use ticket 2's entries
+  // unseen.
+  const doubleTicket = ticket.replaceAll('triple', 'double').replace('three times', 'twice');
+  const backlog = await seed('backlog', {
+    'backlog/001-triple.md': ticket,
+    'backlog/002-double.md': doubleTicket,
+    'test/triple.test.mjs': tripleTest,
+    'test/double.test.mjs': nodeTest('double', "test('double returns twice its input', () => assert.equal(double(3), 6));"),
+  }, {
+    claude: [
+      { writes: { 'src/triple.mjs': namedError }, reply: 'added triple' },
+      { reply: pass('The change meets the ticket.') },
+      { writes: { 'src/double.mjs': namedError.replaceAll('triple', 'double').replace('* 3', '* 2') }, reply: 'added double' },
+      { reply: pass('The change meets the ticket.') },
+    ],
+    codex: [
+      { reply: reply({ requirements: [triples, throws] }) },
+      { reply: pass('The change meets the ticket.') },
+      { reply: reply({ requirements: [met('double returns twice its input', 'src/double.mjs returns value * 2'), met('double throws a TypeError when its input is not a number', 'src/double.mjs:2 throws one')] }) },
+      { reply: pass('The change meets the ticket.') },
+    ],
+    opencode: [{ reply: pass('The change meets the ticket.') }],
+  });
+  const backlogRun = printed(runExample(backlog, 'feature-team-backlog', ['--unattended']).stdout) as { delivered: { ticket: string; status: string }[] };
+  assert.deepEqual(backlogRun.delivered.map((d) => [d.ticket, d.status]), [['001-triple.md', 'pass'], ['002-double.md', 'pass']]);
+  for (const name of ['001-triple', '002-double']) {
+    assert.ok(existsSync(join(backlog.dir, 'backlog/done', `${name}.md`)), `${name} moved to done`);
+    const record = readRecord(backlog.dir, name);
+    assert.equal(nodeStarts(record, 'build').length, 1, `${name}: one build`);
+    assert.deepEqual(record.filter((e) => e.kind === 'job:end' && e.label === 'test').map((e) => e.outcome!.status), ['pass'], `${name}: its own test passed the first time`);
+    assert.equal(record.filter((e) => e.kind === 'goal:check').length, 1, `${name}: one goal check`);
+    assert.equal(record.filter((e) => e.kind === 'run:end').at(-1)?.outcome?.status, 'pass', `${name}: the run passed`);
   }
-  const candidateEnds = record.filter((e) => e.kind === 'job:end' && (e.label === 'candidate-0' || e.label === 'candidate-1'));
-  assert.ok(candidateEnds.some((e) => e.label === 'candidate-0' && e.outcome!.status === 'fail'), "Claude's candidate never produces src/triple.mjs, so it always loses");
-  assert.ok(candidateEnds.filter((e) => e.label === 'candidate-1' && e.outcome!.status === 'pass').length >= 2, "Codex's candidate wins both rounds");
-
-  // 4. review ran twice: rejected round 1, cleared round 2 (pass:1 needs only
-  // one of the two reviewers).
-  const review1 = doneNode(record, 'review', 1);
-  const review2 = doneNode(record, 'review', 2);
-  assert.equal(review1.outcome!.status, 'fail');
-  assert.equal(review2.outcome!.status, 'pass');
-
-  // The visible `judge(judgeSeat)` on the panel's kickback target was
-  // consulted for real: it answered once, said the round was worth it, and
-  // the dag accepted exactly the one kickback that produced.
-  const judgeCalls = record.filter((e) => e.kind === 'refine:judge');
-  assert.equal(judgeCalls.length, 1, 'review only fails once, so the judge is asked once');
-  assert.equal((judgeCalls[0]!.answers as { stop_reason: { choice: string } }).stop_reason.choice, 'continue');
-  const kickbacks = record.filter((e) => e.kind === 'dag:kickback');
-  assert.equal(kickbacks.length, 1);
-  assert.equal(kickbacks[0]!.from, 'review');
-  assert.equal(kickbacks[0]!.to, 'implement');
-  assert.equal(kickbacks[0]!.accepted, true);
-  assert.equal(kickbacks[0]!.count, 1);
-  assert.equal(kickbacks[0]!.limit, undefined, 'a judge with no cap sets no limit');
-
-  // 5. The run waits at approve and prints a page. The proof reads the
-  // question there while it is pending, so the run was still going and the
-  // step had not ended. The question carries the sha256 of the exact bytes
-  // that landed, and the yes given on the page passes the step.
-  const shippedBytes = await readFile(join(workspace, 'src/triple.mjs'));
-  const sha256 = createHash('sha256').update(shippedBytes).digest('hex');
-  assert.match(run.stdout, /http:\/\/127\.0\.0\.1:\d+\//, 'the run prints the page to answer on');
-  assert.ok(run.question?.includes(sha256.slice(0, 12)), `the page shows the question with the landed file's own sha256: ${run.question}`);
-  const approve = doneNode(record, 'approve', 2);
-  assert.equal(approve.outcome!.status, 'pass');
-  assert.ok((approve.outcome!.summary ?? '').includes(sha256.slice(0, 12)), "the approval names the landed file's own sha256");
-  const nodeStarts = (node: string) => record.filter((e) => e.kind === 'dag:node' && e.phase === 'start' && e.node === node).length;
-  assert.equal(nodeStarts('approve'), 1, 'approve starts once: waiting for the answer starts nothing again');
-  assert.equal(nodeStarts('review'), 2, 'review starts once per implement attempt, not again for the answer');
-
-  // 6. Close wrote its evidence from the record alone, and never touched the
-  // shipped file or the plan while doing it.
-  const close = doneNode(record, 'close', 2);
-  assert.equal(close.outcome!.status, 'pass');
-  const closeEvidence = await readFile(join(workspace, 'team-output/evidence.md'), 'utf8');
-  assert.equal(closeEvidence, evidence);
-
-  const calls = (await readFile(join(workspace, '.obversa-stand-in-calls.log'), 'utf8')).trim().split('\n').map((line) => JSON.parse(line) as { role: string });
-  const byRole = (role: string) => calls.filter((c) => c.role === role).length;
-
-  // 7. Resume. A finished node is reused on --resume the way a finished
-  // workflow stage is: the record's pass stands in for running it again.
-  const resumed = runExample(workspace, bin, ['--resume']);
-  assert.equal(resumed.status, 0, `the resumed example exited ${resumed.status ?? `signal ${resumed.signal}`}
-  stdout: ${resumed.stdout}
-  stderr: ${resumed.stderr}`);
-  const resumedRecord = readRecord(workspace);
-  const runStarts = resumedRecord.map((e, i) => (e.kind === 'run:start' ? i : -1)).filter((i) => i >= 0);
-  assert.equal(runStarts.length, 2, 'resume appends to the same record rather than starting a fresh file');
-  const secondRun = resumedRecord.slice(runStarts[1]!);
-  assert.equal(
-    secondRun.filter((e) => e.kind === 'job:start').length,
-    0,
-    'a resumed run starts no job: triage, the tournament, test, review, approve, close and research\'s stages are all reused',
-  );
-  for (const node of ['triage', 'research', 'implement', 'test', 'review', 'approve', 'close']) {
-    const done = secondRun.find((e) => e.kind === 'dag:node' && e.node === node && e.phase === 'done');
-    assert.equal(done?.outcome?.status, 'pass', `"${node}" has no recorded pass in the resumed run`);
-  }
-  // Across both runs, triage's job started once and implement's once per
-  // attempt of the first run (review sent it back once): none in the resumed run.
-  const jobStarts = (label: string) => resumedRecord.filter((e) => e.kind === 'job:start' && e.label === label).length;
-  assert.equal(jobStarts('triage'), 1, 'triage started once across the first run and the resumed run');
-  assert.equal(jobStarts('implement'), 2, 'implement started once per first-run attempt and not again on resume');
-  const runEnd = secondRun.find((e) => e.kind === 'run:end');
-  assert.equal(runEnd?.outcome?.status, 'pass', 'the resumed run did not pass');
-  const anchors = resumedRecord.filter((e) => e.kind === 'workflow:start' && e.path?.join('/') === 'feature-delivery');
-  assert.equal(anchors.length, 2, 'one resume anchor per run:start');
-  assert.equal(anchors[0]!.identity, anchors[1]!.identity, 'the resumed run matched the same declared shape');
-
-  // 8. With approve.json beside the file, the answer comes from it. A fresh
-  // run with that file and nobody on the page ends on its own: a question
-  // left pending would keep it waiting until the timeout. The file's note is
-  // on the approval, so the file gave the answer.
-  const fileWorkspace = join(root, 'with-approve-json');
-  const fileBin = join(root, 'with-approve-json-bin');
-  await seedWorkspace(fileWorkspace, fileBin);
-  const fileNote = 'approved from approve.json';
-  await writeFile(join(fileWorkspace, 'approve.json'), `${JSON.stringify({ approved: true, note: fileNote })}\n`);
-  const fromFile = runExample(fileWorkspace, fileBin);
-  assert.equal(fromFile.status, 0, `the run with approve.json exited ${fromFile.status ?? `signal ${fromFile.signal}`}
-  stdout: ${fromFile.stdout}
-  stderr: ${fromFile.stderr}`);
-  assert.equal(JSON.parse(fromFile.stdout.slice(fromFile.stdout.lastIndexOf('\n{') + 1)).status, 'pass');
-  const fileApprove = doneNode(readRecord(fileWorkspace), 'approve', 2);
-  assert.equal(fileApprove.outcome!.status, 'pass');
-  assert.deepEqual(fileApprove.outcome!.data, { approved: true, note: fileNote }, 'the answer is the one in approve.json');
+  for (const file of ['src/triple.mjs', 'src/double.mjs']) assert.ok(existsSync(join(backlog.dir, file)), `${file} landed`);
+  const log = spawnSync('git', ['log', '--merges', '--format=%s'], { cwd: backlog.dir, encoding: 'utf8' }).stdout.trim().split('\n');
+  assert.equal(log.length, 2, 'each ticket landed as its own merge');
 
   console.log(JSON.stringify({
-    status: printed.status,
-    triage: 'feature',
-    researchRounds: 2,
-    tournamentRounds: 2,
-    reviewRounds: 2,
-    judgeAnswers: judgeCalls.map((e) => (e.answers as { stop_reason: { choice: string } }).stop_reason.choice),
-    kickbacks: kickbacks.length,
-    approvedSha256: sha256.slice(0, 12),
-    calls: { claude: byRole('claude'), codex: byRole('codex'), opencode: byRole('opencode') },
-    resume: {
-      exit: resumed.status,
-      runStarts: 2,
-      triageStarts: jobStarts('triage'),
-      implementStarts: jobStarts('implement'),
-      resumedJobStarts: secondRun.filter((e) => e.kind === 'job:start').length,
-      note: 'finished nodes are reused on resume, like finished workflow stages',
-    },
-    mode,
+    status: 'pass',
+    rounds: 3,
+    goalChecks: ['unmet', 'met', 'met'],
+    synthesis: ['kept', 'disputed'],
+    judge: ['act', 'skip'],
+    approvedSha256: attendedSteps.landed.slice(0, 12),
+    unattended: 'landed without asking',
+    backlog: backlogRun.delivered.map((d) => `${d.ticket} ${d.status}`),
+    mode: existsSync(join(here, 'feature-delivery.js')) ? 'compiled-from-dist'
+      : existsSync(join(repo, 'packages', 'runtime', 'tsconfig.json')) ? 'repo-tsx' : 'consumer-tsx',
   }, null, 2));
 } finally {
   await rm(root, { recursive: true, force: true });

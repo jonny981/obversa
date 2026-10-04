@@ -46,7 +46,7 @@ another revision. `judge()` from `@obversa/runtime` puts that decision
 inside the workflow:
 
 ```ts examples/teams/feature-delivery.ts (excerpt)
-  maxKickbacks: { implement: judge(judgeSeat) },
+      maxKickbacks: { build: judge(judgeSeat) },
 ```
 
 The judge weighs every finding, a blocking one included, and decides

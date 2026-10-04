@@ -28,7 +28,7 @@ The [feature team](/workflows/feature-team) gives Jev the decision about
 another revision. `judge()` from `@obversa/runtime` sets the stopping rule:
 
 ```ts examples/teams/feature-delivery.ts (excerpt)
-  maxKickbacks: { implement: judge(judgeSeat) },
+      maxKickbacks: { build: judge(judgeSeat) },
 ```
 
 The judge weighs every finding, a blocking one included, against the work
@@ -38,8 +38,8 @@ shows the questions and a complete writing example.
 
 The [literature watch](/workflows/research/literature-watch) combines
 summaries, a person's selection and a question answered from the kept
-notes. [Feature delivery](/workflows/feature-team) combines triage,
-competing attempts, review and approval. Start with the patterns that fit
+notes. [Feature delivery](/workflows/feature-team) combines tests, a goal
+check, a review battery, a judge and approval. Start with the patterns that fit
 your work and combine them around the result you need.
 
 ## Next steps
