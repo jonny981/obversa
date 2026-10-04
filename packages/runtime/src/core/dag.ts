@@ -6,7 +6,8 @@
  * before any work runs.
  *
  * Failure policy (ours, not the libs'):
- *   - a required node failing blocks its dependents (they don't run);
+ *   - a required node failing (or ending `exhausted`) blocks its dependents
+ *     (they don't run) and fails the DAG;
  *   - with `stopOnError` (default) the first required failure stops scheduling
  *     anything not already in flight;
  *   - `optional` nodes never fail the DAG nor block dependents;
@@ -828,10 +829,20 @@ export function dag(config: DagConfig): Job {
       }
     }
 
+    // A node that ran out of rounds or stalled never passed: it fails the
+    // graph like a plain failure.
     const requiredFailed = names.filter(
       (n) =>
-        results.get(n)?.status === 'fail' && nodes.get(n)!.optional !== true,
+        (results.get(n)?.status === 'fail' || results.get(n)?.status === 'exhausted')
+        && nodes.get(n)!.optional !== true,
     );
+    const ranOut = requiredFailed
+      .filter((n) => results.get(n)!.status === 'exhausted')
+      .map((n) => {
+        const o = results.get(n)!;
+        return `; "${n}" ${o.stall ? 'stalled' : 'ran out of rounds'}: ${o.revision?.reason ?? o.summary ?? 'no reason given'}`;
+      })
+      .join('');
     const requiredAborted = names.filter(
       (n) =>
         results.get(n)?.status === 'aborted' && nodes.get(n)!.optional !== true,
@@ -865,7 +876,7 @@ export function dag(config: DagConfig): Job {
       outcome = {
         status: 'fail',
         ...(late ? { late: true } : {}),
-        summary: `dag "${config.name}": ${requiredFailed.length + requiredAborted.length} required node(s) did not complete`,
+        summary: `dag "${config.name}": ${requiredFailed.length + requiredAborted.length} required node(s) did not complete${ranOut}`,
         data,
       };
     } else {

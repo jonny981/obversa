@@ -1,6 +1,6 @@
 {
   "name": "@obversa/runner",
-  "version": "0.2.8",
+  "version": "0.2.9",
   "description": "Bounded supervision for Obversa runs.",
   "keywords": [
     "agent",

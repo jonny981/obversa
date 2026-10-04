@@ -141,6 +141,7 @@ export const stageBranches = {
   F186: 'fix/fork-names-parser-grok-seat',
   F184: 'feat/judge-rules-on-blocks',
   F177: 'feat/goal-check',
+  F191: 'fix/exhausted-fails-its-graph',
   F187: 'feat/feature-team-full-process',
   F178: 'release/0.2.4',
   F181: 'release/0.2.5',
