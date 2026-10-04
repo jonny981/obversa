@@ -541,6 +541,10 @@ function renderEvent(event: LoopEvent, totals?: UsageTotals): string {
       // event they read as fragments. A person gets the step's summary on its
       // job:end line instead, and the record keeps neither.
       return '';
+    case 'interaction:checkpoint':
+      // State a resume reads back, saved as rounds advance: the record keeps
+      // it, and a person reads the steps and send-backs it follows instead.
+      return '';
     case 'engine:tool':
       return `${at}  tool ${event.name} ${event.phase}${event.target ? ` ${event.target}` : ''}`;
     case 'engine:usage': {
@@ -553,7 +557,7 @@ function renderEvent(event: LoopEvent, totals?: UsageTotals): string {
       return `${at}  ${event.model}: ${call}${totals ? ` (run ${runningTotal(totals)})` : ''}`;
     }
     case 'refine:judge':
-      return `${at}◆ ${event.route}${event.status ? ` as ${event.status}` : ''} on ${event.rule}: ${event.reason}`;
+      return `${at}◆ ${event.target} round ${event.round}: ${event.route}${event.status ? ` as ${event.status}` : ''} on ${event.rule}: ${event.reason}`;
     case 'review:synthesis': {
       const count = (result: string) => event.entries.filter((entry) => entry.result === result).length;
       const merged = event.entries.filter((entry) => (entry.finding.raisedBy?.length ?? 0) > 1).length;

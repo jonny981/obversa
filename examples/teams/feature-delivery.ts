@@ -148,12 +148,12 @@ const team = dag({
     // fork from HEAD, and need the plan committed there to read it.
     research: { needs: 'triage', optional: true, isolate: true, when: predicate((ctx) => (ctx.needs?.triage?.data as { kind?: { choice?: string } })?.kind?.choice === 'feature', 'triage chose a feature'), job: research },
     implement: { needs: ['triage', 'research'], job: implement },
-    test: { needs: 'implement', job: commandJob('test', ['node', '--test', 'test/triple.test.mjs'], { target: 'implement' }) },
+    test: { needs: 'implement', acceptsKickbackTo: ['implement'], job: commandJob('test', ['node', '--test', 'test/triple.test.mjs'], { target: 'implement' }) },
     // Isolated for the same reason as research: on a reject the worktree is
     // discarded rather than merged, so a second kickback into `implement`
     // forks its own tournament round from an untouched HEAD.
-    review: { needs: 'test', isolate: true, job: review },
-    approve: { needs: 'review', job: approve },
+    review: { needs: 'test', isolate: true, acceptsKickbackTo: ['implement'], job: review },
+    approve: { needs: 'review', acceptsKickbackTo: ['implement'], job: approve },
     close: { needs: 'approve', job: close },
   },
   // Jev decides each finding, a block included, and says when another

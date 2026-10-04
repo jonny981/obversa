@@ -28,16 +28,20 @@ function config(overrides: Partial<FeatureDeliveryConfig> = {}): FeatureDelivery
     await writeFile(join(request.cwd!, output), text);
     return pass('accepted');
   }]);
+  let testWrites = 0;
+  let sourceWrites = 0;
   const implement = scriptedEngine('implement', [async (request) => {
     if (request.prompt.includes('write the declared tests first')) {
+      testWrites += 1;
       await mkdir(join(request.cwd!, 'test'), { recursive: true });
       await writeFile(
         join(request.cwd!, 'test/result.test.mjs'),
-        "import assert from 'node:assert/strict';\nimport test from 'node:test';\ntest('result is 11', () => assert.equal(11, 11));\n",
+        `import assert from 'node:assert/strict';\nimport test from 'node:test';\ntest('result is 11', () => assert.equal(11, 11)); // revision ${testWrites}\n`,
       );
     } else {
+      sourceWrites += 1;
       await mkdir(join(request.cwd!, 'src'), { recursive: true });
-      await writeFile(join(request.cwd!, 'src/result.mjs'), 'export const result = 11;\n');
+      await writeFile(join(request.cwd!, 'src/result.mjs'), `export const result = 11; // revision ${sourceWrites}\n`);
     }
     return pass('accepted');
   }]);
@@ -332,7 +336,7 @@ describe('featureDelivery D48 contract', () => {
       }
       await writeFile(
         join(request.cwd!, 'test/result.test.mjs'),
-        "import assert from 'node:assert/strict';\nimport test from 'node:test';\nimport { result } from '../src/result.mjs';\ntest('result is 11', () => assert.equal(result, 11));\n",
+        `import assert from 'node:assert/strict';\nimport test from 'node:test';\nimport { result } from '../src/result.mjs';\ntest('result is 11', () => assert.equal(result, 11)); // revision ${Math.min(testsFirstCalls, 3)}\n`,
       );
       return pass(testsFirstCalls >= 3 ? 'implementation written' : 'tests written');
     }]);
@@ -463,7 +467,7 @@ describe('featureDelivery D48 contract', () => {
       const data = result.outcome.data as Record<string, { summary?: string }> | undefined;
 
       expect(data?.['research-requirements']?.summary).toBe(
-        'research-requirements returned the rejected note unchanged',
+        'research-requirements returned the reviewed work unchanged after feedback',
       );
       expect(requirementWrites).toBe(2);
       expect(requirementReviews).toBe(1);
@@ -510,7 +514,7 @@ describe('featureDelivery D48 contract', () => {
       })), { cwd: workspace });
       const data = result.outcome.data as Record<string, { summary?: string }> | undefined;
 
-      expect(data?.plan?.summary).toBe('plan returned the rejected note unchanged');
+      expect(data?.plan?.summary).toBe('plan returned the reviewed work unchanged after feedback');
       expect(planWrites).toBe(2);
       expect(planReviews).toBe(1);
     } finally {

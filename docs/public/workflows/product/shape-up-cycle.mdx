@@ -446,7 +446,7 @@ makes the bet. `optional: true` on the bet means a pass on one pitch
 doesn't stop the cycle.
 
 The build is a workflow per bet: the pitch is the brief, the appetite is
-the stage's time limit, `refine` is the rounds, a scope stage writes down
+the stage's time limit, `refine` is the rounds of rework, a scope stage writes down
 what was cut, and a check fails a change that names a no-go:
 
 ```ts examples/use-cases/product/shape-up-cycle.ts (excerpt) {4-5,10-14,17-18,24-27}
@@ -761,7 +761,7 @@ const table = dag({
 });
 
 // 3. The build, inside the appetite: the pitch is the brief, the appetite
-// is the stage's time limit, refine is the rounds, scope is written down,
+// is the stage's time limit, refine is the rounds of rework, scope is written down,
 // and a check fails a change that names a no-go.
 function buildFor(request: Request) {
   const pitch = request.id;

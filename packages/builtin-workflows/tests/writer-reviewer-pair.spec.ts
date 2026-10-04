@@ -24,10 +24,11 @@ async function writePairFiles(
   cwd: string,
   sourceFile = 'src/result.mjs',
   testFile = 'test/result.test.mjs',
+  revision = 1,
 ): Promise<void> {
   await mkdir(join(cwd, 'src'), { recursive: true });
   await mkdir(join(cwd, 'test'), { recursive: true });
-  await writeFile(join(cwd, sourceFile), 'export const result = 42;\n');
+  await writeFile(join(cwd, sourceFile), `export const result = 42; // revision ${revision}\n`);
   await writeFile(
     join(cwd, testFile),
     `import assert from 'node:assert/strict';\nimport test from 'node:test';\nimport { result } from '../${sourceFile}';\ntest('result is written', () => assert.equal(result, 42));\n`,
@@ -44,7 +45,7 @@ describe('writerReviewerPair', () => {
           return pass('writer wrote the requested files');
         },
         async (request) => {
-          await writePairFiles(request.cwd!, 'src/retry.mjs', 'test/retry.test.mjs');
+          await writePairFiles(request.cwd!, 'src/retry.mjs', 'test/retry.test.mjs', 2);
           return pass('writer applied the review');
         },
       ]);
@@ -125,7 +126,7 @@ describe('writerReviewerPair', () => {
           return pass('writer wrote the requested files');
         },
         async (request) => {
-          await writePairFiles(request.cwd!);
+          await writePairFiles(request.cwd!, undefined, undefined, 2);
           return pass('writer applied the review');
         },
       ]);

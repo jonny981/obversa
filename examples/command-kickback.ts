@@ -70,6 +70,7 @@ export const commandKickback = dag({
     },
     test: {
       needs: 'implement',
+      acceptsKickbackTo: ['implement'],
       desc: 'Run the tests; a red run goes back to implement with the output.',
       gate: 'The test command exits 0.',
       job: test,

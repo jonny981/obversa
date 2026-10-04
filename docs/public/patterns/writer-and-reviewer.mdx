@@ -67,7 +67,9 @@ the stage: a missing or empty file fails it by name, and so does a change to
 another declared file. Node runs the test, and a red run carries its output
 to `write`, which runs again with it. The reviewer reads the code, the test
 and its result only after the test passes, and a rejection goes the same
-way. `refine: 1` on the writer bounds how many times the pair goes round.
+way. `refine: 1` on the writer allows one
+[refinement](/concepts/feedback-loops#counting-rounds): the first build
+and one more.
 When the rounds run out before the reviewer passes the work, the run fails
 with the last findings.
 The two seats must come from different model families; `workflow()`

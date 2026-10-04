@@ -34,7 +34,7 @@ export interface PipelineStage {
   needs?: string[];
   /** Per-stage isolation override (dag's per-node `isolate`). */
   isolate?: boolean;
-  /** Kickback allowlist for this stage (dag's per-node `acceptsKickbackTo`). */
+  /** The stages this stage may send work back to (dag's per-node `acceptsKickbackTo`). */
   acceptsKickbackTo?: string[];
 }
 

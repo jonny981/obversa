@@ -66,8 +66,9 @@ builder left out a file the stage writes, too. The reviewers run only when
 every requirement is met and every file the stage writes is there.
 
 A round that stops at the goal check counts toward the round limit like
-any other round. With `refine: 3`, the builder gets three rounds in all,
-whichever check sends each one back.
+any other round. With `refine: 3`, the builder gets three
+[refinements](/concepts/feedback-loops#counting-rounds), four rounds in
+all, whichever check sends each one back.
 
 The goal seat replies with one JSON object:
 
@@ -114,14 +115,15 @@ const graph = dag({
         return `wrote draft ${builds}`;
       }),
     },
-    goal: { needs: 'build', job: goalCheck(checker, { target: 'build', text: brief }) },
+    goal: { needs: 'build', acceptsKickbackTo: ['build'], job: goalCheck(checker, { target: 'build', text: brief }) },
     review: { needs: 'goal', job: fnJob('review', () => 'reads well') },
   },
 });
 ```
 
 The send-back takes the same route as any other node's, so `maxKickbacks`
-limits it. A judge on `maxKickbacks` for the target does not decide it.
+limits it, and the goal node lists `build` in `acceptsKickbackTo`. A judge
+on `maxKickbacks` for the target does not decide it.
 The judge still decides what the review node sends back.
 
 ## What the run did

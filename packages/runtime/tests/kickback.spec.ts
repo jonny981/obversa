@@ -56,6 +56,7 @@ describe('dag kickback (cross-stage feedback)', () => {
         },
         review: {
           needs: ['optional'],
+          acceptsKickbackTo: ['a'],
           job: fnJob('review', async () => {
             ran.push('review');
             reviewCalls += 1;
@@ -111,6 +112,7 @@ describe('dag kickback (cross-stage feedback)', () => {
                 : { status: 'pass' };
             }),
             needs: ['b'],
+            acceptsKickbackTo: ['a'],
           },
         },
       }),
@@ -145,6 +147,7 @@ describe('dag kickback (cross-stage feedback)', () => {
               return kickback('a', `still wrong (run ${cRuns})`);
             }),
             needs: ['a'],
+            acceptsKickbackTo: ['a'],
           },
         },
       }),
@@ -164,7 +167,7 @@ describe('dag kickback (cross-stage feedback)', () => {
     expect(formatEvent(rejected[0]!)).toContain('kickback rejected c -> a');
   });
 
-  it('rejects a kickback to a non-ancestor', async () => {
+  it('fails a node that sends work back to a target it does not declare, naming both nodes', async () => {
     let bRuns = 0;
     const events: LoopEvent[] = [];
 
@@ -187,11 +190,56 @@ describe('dag kickback (cross-stage feedback)', () => {
     const kb = kbEvents(events);
     expect(kb).toHaveLength(1);
     expect(kb[0]).toMatchObject({ accepted: false });
-    expect(kb[0]!.note).toMatch(/not an ancestor/);
-    expect(outcome.status).toBe('fail'); // b's own fail stands
+    const message = 'dag "d": node "b" sent work back to "a", which it does not declare in acceptsKickbackTo';
+    expect(kb[0]!.note).toBe(message);
+    expect(outcome.status).toBe('fail');
+    expect((outcome.data as Record<string, Outcome>).b).toMatchObject({ status: 'fail', summary: message, error: { code: 'CONFIG' } });
   });
 
-  it('respects acceptsKickbackTo: rejects a target outside the allow-list', async () => {
+  it.each([
+    ['an omitted budget', {}],
+    ['a zero budget', { maxKickbacks: 0 }],
+    ['a zero budget for the target', { maxKickbacks: { write: 0 } }],
+  ])('fails a send-back to an undeclared target with %s, naming both nodes', async (_label, budget) => {
+    const events: LoopEvent[] = [];
+    const { outcome } = await run(
+      dag({
+        name: 'd',
+        ...budget,
+        nodes: {
+          write: fnJob('write', async () => ({ status: 'pass' })),
+          review: { needs: 'write', job: fnJob('review', async () => kickback('write', 'fix it')) },
+        },
+      }),
+      { ...mockOpts, onEvent: (e) => events.push(e) },
+    );
+
+    const message = 'dag "d": node "review" sent work back to "write", which it does not declare in acceptsKickbackTo';
+    expect(kbEvents(events)).toEqual([expect.objectContaining({ from: 'review', to: 'write', accepted: false, count: 1, limit: 0, note: message })]);
+    expect(outcome.status).toBe('fail');
+    expect((outcome.data as Record<string, Outcome>).review).toMatchObject({ status: 'fail', summary: message, error: { code: 'CONFIG' } });
+  });
+
+  it('refuses a graph whose node declares a target that is not a node it depends on', () => {
+    expect(() => dag({
+      name: 'd',
+      maxKickbacks: 1,
+      nodes: {
+        a: fnJob('a', async () => ({ status: 'pass' })),
+        b: { job: fnJob('b', async () => ({ status: 'pass' })), acceptsKickbackTo: ['a'] },
+      },
+    })).toThrow('dag "d": node "b" declares it sends work back to "a", which is not one of the nodes it depends on');
+    expect(() => dag({
+      name: 'd',
+      maxKickbacks: 1,
+      nodes: {
+        a: fnJob('a', async () => ({ status: 'pass' })),
+        b: { needs: 'a', job: fnJob('b', async () => ({ status: 'pass' })), acceptsKickbackTo: ['nowhere'] },
+      },
+    })).toThrow('dag "d": node "b" declares it sends work back to "nowhere", which is not a node in this dag');
+  });
+
+  it('respects acceptsKickbackTo: fails a send-back to a target outside the list', async () => {
     let cRuns = 0;
     const events: LoopEvent[] = [];
 
@@ -222,7 +270,7 @@ describe('dag kickback (cross-stage feedback)', () => {
     const kb = kbEvents(events);
     expect(kb).toHaveLength(1);
     expect(kb[0]).toMatchObject({ accepted: false });
-    expect(kb[0]!.note).toMatch(/does not accept/);
+    expect(kb[0]!.note).toBe('dag "d": node "c" sent work back to "a", which it does not declare in acceptsKickbackTo');
     expect(outcome.status).toBe('fail');
   });
 
@@ -241,6 +289,7 @@ describe('dag kickback (cross-stage feedback)', () => {
               return kickback('a', 'ignored when no budget');
             }),
             needs: ['a'],
+            acceptsKickbackTo: ['a'],
           },
         },
       }),
@@ -268,6 +317,7 @@ describe('dag kickback (cross-stage feedback)', () => {
         }),
         reviewA: {
           needs: ['a'],
+          acceptsKickbackTo: ['a'],
           job: fnJob('review-a', async () => {
             reviewARuns += 1;
             return kickback('a', `redo a (${reviewARuns})`);
@@ -279,6 +329,7 @@ describe('dag kickback (cross-stage feedback)', () => {
         }),
         reviewB: {
           needs: ['b'],
+          acceptsKickbackTo: ['b'],
           job: fnJob('review-b', async () => {
             reviewBRuns += 1;
             return reviewBRuns === 1 ? kickback('b', 'redo b') : { status: 'pass' };
@@ -352,6 +403,7 @@ describe('dag kickback (cross-stage feedback)', () => {
         }),
         'tests-review': {
           needs: ['tests-first'],
+          acceptsKickbackTo: ['tests-first'],
           job: fnJob('tests-review', async () => {
             testsReviewRuns += 1;
             return capturedReview;
@@ -408,7 +460,7 @@ describe('a gate job with a target', () => {
             return { status: 'pass', summary: `attempt ${implementRuns}` };
           }),
           test: {
-            needs: ['implement'],
+            needs: ['implement'], acceptsKickbackTo: ['implement'],
             job: gateJob(
               'test',
               commandSucceeds(process.execPath, [
@@ -524,7 +576,7 @@ describe('a judge as a dag() maxKickbacks budget', () => {
       nodes: {
         implement: fnJob('implement', async () => { round += 1; return { status: 'pass', summary: `round ${round}` }; }),
         review: {
-          needs: ['implement'],
+          needs: ['implement'], acceptsKickbackTo: ['implement'],
           job: fnJob('review', () => revisionRequest({
             target: 'implement', reason: 'needs a pass', findings: [{ evidence: 'x', severity: 'should-fix' }],
           })),
@@ -567,7 +619,7 @@ describe('a judge as a dag() maxKickbacks budget', () => {
       nodes: {
         implement: fnJob('implement', async () => { round += 1; return { status: 'pass', summary: `round ${round}` }; }),
         review: {
-          needs: ['implement'],
+          needs: ['implement'], acceptsKickbackTo: ['implement'],
           job: fnJob('review', () => revisionRequest({
             target: 'implement', reason: 'needs a pass', findings: [{ evidence: 'x', severity: 'should-fix' }],
           })),
@@ -605,7 +657,7 @@ describe('a judge as a dag() maxKickbacks budget', () => {
           return { status: 'pass', summary: `round ${round}` };
         }),
         review: {
-          needs: ['implement'],
+          needs: ['implement'], acceptsKickbackTo: ['implement'],
           job: fnJob('review', () => round < 2
             ? revisionRequest({ target: 'implement', reason: 'a block finding', findings: [{ evidence: 'REAL: the build fails', severity: 'block' }] })
             : { status: 'pass' }),
@@ -633,7 +685,7 @@ describe('a judge as a dag() maxKickbacks budget', () => {
       nodes: {
         implement: fnJob('implement', async () => { round += 1; return { status: 'pass', summary: `round ${round}` }; }),
         review: {
-          needs: ['implement'],
+          needs: ['implement'], acceptsKickbackTo: ['implement'],
           job: fnJob('review', () => revisionRequest({ target: 'implement', reason: 'still not there', findings: [{ evidence: 'x', severity: 'should-fix' }] })),
         },
       },
@@ -668,7 +720,7 @@ describe('a judge as a dag() maxKickbacks budget', () => {
           return { status: 'pass', summary: `round ${round}` };
         }),
         review: {
-          needs: ['implement'],
+          needs: ['implement'], acceptsKickbackTo: ['implement'],
           job: fnJob('review', () => revisionRequest({
             target: 'implement',
             reason: 'needs a pass',
@@ -720,7 +772,7 @@ describe('a judge as a dag() maxKickbacks budget', () => {
           return { status: 'pass', summary: `round ${round}` };
         }),
         review: {
-          needs: ['implement'],
+          needs: ['implement'], acceptsKickbackTo: ['implement'],
           job: reviewPanel({
             label: 'review',
             target: 'implement',
@@ -773,7 +825,7 @@ describe('a judge as a dag() maxKickbacks budget, with no cap or at its cap', ()
       nodes: {
         implement: fnJob('implement', async () => { round += 1; return { status: 'pass', summary: `round ${round}` }; }),
         review: {
-          needs: ['implement'],
+          needs: ['implement'], acceptsKickbackTo: ['implement'],
           job: fnJob('review', () => revisionRequest({ target: 'implement', reason: 'needs a pass', findings: findings(round) })),
         },
       },
@@ -814,7 +866,7 @@ describe('a judge as a dag() maxKickbacks budget, with no cap or at its cap', ()
       nodes: {
         implement: fnJob('implement', async () => { round += 1; return { status: 'pass' }; }),
         review: {
-          needs: ['implement'],
+          needs: ['implement'], acceptsKickbackTo: ['implement'],
           job: fnJob('review', async (ctx) => {
             seenSkipped.push(ctx.skippedFindings);
             return round <= rare.length
@@ -850,7 +902,7 @@ describe('a judge as a dag() maxKickbacks budget, with no cap or at its cap', ()
       nodes: {
         implement: fnJob('implement', async () => { round += 1; return { status: 'pass' }; }),
         review: {
-          needs: ['implement'],
+          needs: ['implement'], acceptsKickbackTo: ['implement'],
           job: fnJob('review', () => round < 2
             ? revisionRequest({ target: 'implement', reason: 'a block finding', findings: [{ evidence: 'x', severity: 'block' }] })
             : { status: 'pass' }),
@@ -882,7 +934,7 @@ describe('a judge as a dag() maxKickbacks budget, with no cap or at its cap', ()
       },
       nodes: {
         implement: fnJob('implement', async () => { round += 1; return { status: 'pass' }; }),
-        review: { needs: ['implement'], job: fnJob('review', () => revisionRequest({ target: 'implement', reason: 'needs a pass', findings: shouldFix })) },
+        review: { needs: ['implement'], acceptsKickbackTo: ['implement'], job: fnJob('review', () => revisionRequest({ target: 'implement', reason: 'needs a pass', findings: shouldFix })) },
       },
     }), { ...mockOpts, onEvent: (event) => events.push(event) });
     expect(outcome.status).toBe('pass');
@@ -893,7 +945,7 @@ describe('a judge as a dag() maxKickbacks budget, with no cap or at its cap', ()
     const last = JSON.parse(prompts[1]!).state as Record<string, unknown>;
     expect(first.lastRound).toBeUndefined();
     expect(last).toMatchObject({ cap: 1, lastRound: true });
-    expect(last.limit).toBe('This is the last round the cap of 1 allows: no build round follows, so your answer decides how this ends.');
+    expect(last.limit).toBe('This is the last round the cap of 1 allows (1 refinement after the first build): no build round follows, so your answer decides how this ends.');
     const judgeEvents = events.filter((e): e is Extract<LoopEvent, { kind: 'refine:judge' }> => e.kind === 'refine:judge');
     expect(judgeEvents[1]).toMatchObject({ route: 'stop', status: 'pass', openFindings: shouldFix });
   });
@@ -947,7 +999,7 @@ describe('a judge as a dag() maxKickbacks budget, with no cap or at its cap', ()
       nodes: {
         implement: fnJob('implement', async () => { round += 1; return { status: 'pass' }; }),
         review: {
-          needs: ['implement'],
+          needs: ['implement'], acceptsKickbackTo: ['implement'],
           job: fnJob('review', () => revisionRequest({ target: 'implement', reason: 'needs a pass', findings: round < 2 ? [{ evidence: 'REAL: the build fails', severity: 'block' }] : [block] })),
         },
       },

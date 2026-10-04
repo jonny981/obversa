@@ -40,10 +40,26 @@ function snapshotValue(value: unknown, seen = new Set<object>()): unknown {
 export function jsonSnapshot(value: unknown): JsonObject {
   return cloneFrozenJson(snapshotValue(value) as JsonValue) as JsonObject;
 }
-/** Save only JSON outcome fields; runtime Error objects are not continuation data. */
+/**
+ * Save only JSON outcome fields; runtime Error objects are not continuation
+ * data, at any depth: a passed nested graph's data holds its nodes' outcomes,
+ * a failed optional node's error included. The rest is converted as the
+ * record writes it, so a Date is saved as its ISO string.
+ */
 export function outcomeSnapshot(outcome: Outcome): JsonObject {
-  const { error: _error, ...fields } = outcome;
-  return jsonSnapshot(Object.fromEntries(Object.entries(fields).filter(([, value]) => value !== undefined)));
+  return jsonSnapshot(JSON.parse(JSON.stringify(withoutErrors(outcome))));
+}
+function withoutErrors(value: unknown, seen = new Set<object>()): unknown {
+  if (value === null || typeof value !== 'object') return value;
+  const proto = Object.getPrototypeOf(value);
+  if (seen.has(value) || (!Array.isArray(value) && proto !== Object.prototype && proto !== null)) return value;
+  seen.add(value);
+  try {
+    if (Array.isArray(value)) return value.map((item) => withoutErrors(item, seen));
+    return Object.fromEntries(Object.entries(value)
+      .filter(([, item]) => item !== undefined && !(item instanceof Error))
+      .map(([key, item]) => [key, withoutErrors(item, seen)]));
+  } finally { seen.delete(value); }
 }
 export function savedInteraction(ctx: JobContext, path: readonly string[], identity: string): JsonObject | undefined {
   const saved = (ctx.state['obversa:resumed-stage-outcomes'] as ResumedStageRecords | undefined)?.interactions.get(path.join('/'));
@@ -51,15 +67,19 @@ export function savedInteraction(ctx: JobContext, path: readonly string[], ident
 }
 export function hasSavedInteraction(ctx: JobContext, path: readonly string[]): boolean {
   const prefix = `${path.join('/')}/`;
-  return [...((ctx.state['obversa:resumed-stage-outcomes'] as ResumedStageRecords | undefined)?.interactions.keys() ?? [])].some((key) => key.startsWith(prefix));
+  return [...((ctx.state['obversa:resumed-stage-outcomes'] as ResumedStageRecords | undefined)?.interactions ?? [])]
+    .some(([key, saved]) => key.startsWith(prefix) && saved.progress !== true);
 }
-export function checkpointInteraction(ctx: JobContext, path: readonly string[], identity: string, data: JsonObject | null): void {
+/** `progress` marks a graph's rounds so far, saved as they advance: a resume
+ * reads them back, but they do not make the steps around the graph continue
+ * without the question an interrupted step asks. */
+export function checkpointInteraction(ctx: JobContext, path: readonly string[], identity: string, data: JsonObject | null, progress = false): void {
   const restored = (ctx.state['obversa:resumed-stage-outcomes'] as ResumedStageRecords | undefined)?.interactions;
   if (restored instanceof Map) {
     if (data === null) restored.delete(path.join('/'));
-    else restored.set(path.join('/'), { identity, workspace: ctx.workspace.dir, data: jsonSnapshot(data) });
+    else restored.set(path.join('/'), { identity, workspace: ctx.workspace.dir, data: jsonSnapshot(data), ...(progress ? { progress } : {}) });
   }
-  ctx.emit({ kind: 'interaction:checkpoint', ts: Date.now(), path: [...path], identity, workspace: ctx.workspace.dir, data: data === null ? null : jsonSnapshot(data) });
+  ctx.emit({ kind: 'interaction:checkpoint', ts: Date.now(), path: [...path], identity, workspace: ctx.workspace.dir, data: data === null ? null : jsonSnapshot(data), ...(progress ? { progress: true as const } : {}) });
 }
 export function interactionResponse(value: unknown): InteractionResponse {
   const response = cloneFrozenJson(value as JsonValue) as JsonObject;

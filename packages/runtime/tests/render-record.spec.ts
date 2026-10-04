@@ -20,6 +20,20 @@ const distBin = join(here, '..', 'dist', 'bin', 'record.js');
 
 const fixture = readRecordFile(fixturePath);
 
+describe('summarizeRecord with saved rounds', () => {
+  it('shows no step and no line for the state a resume reads back', () => {
+    const events: LoopEvent[] = [
+      { kind: 'dag:start', ts: 1, path: ['rounds'], depth: 1, nodes: ['write'] },
+      { kind: 'dag:node', ts: 2, path: ['rounds'], node: 'write', phase: 'start', attempt: 1 },
+      { kind: 'dag:node', ts: 3, path: ['rounds'], node: 'write', phase: 'done', attempt: 1, outcome: { status: 'pass' } },
+      { kind: 'interaction:checkpoint', ts: 4, path: ['rounds', '@judge-kickback'], identity: 'x', workspace: '/w', data: { used: 1 } },
+    ];
+    const summary = summarizeRecord(events);
+    expect(summary.nodes.map((n) => n.node)).toEqual(['write']);
+    expect(renderRecord(events)).not.toContain('checkpoint');
+  });
+});
+
 describe('summarizeRecord on a real record', () => {
   const summary = summarizeRecord(fixture.events);
 

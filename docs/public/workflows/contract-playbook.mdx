@@ -74,7 +74,7 @@ contract-playbook › redline › redline-review › review-panel • redline-1:
 contract-playbook › redline › redline-review › review-panel • redline: fail  Review panel: 0/1 reviewer(s) cleared. - redline-1 [block]: clause 4 (uncapped indemnity) is marked never in clauses.md and absent from redlines.md - redline-1 [block]: clause 6 (exclusivity) is marked never and absent
 contract-playbook › redline › redline-review › refine-judge • refine:judge
 contract-playbook › redline › redline-review › refine-judge • refine:judge: pass  {"holds":{"type":"noul","noul":0.1},"worth_doing":{"type":"noul","noul":0.9},"worth_another_round":{"type":"noul","noul":0.9},"stop_reason":{"type":"choice","choice":"continue","confidence":0.8},"finding-1":{"type":"choice","choice":"act","confidence":0.9},"finding-2":{"type":"ch
-contract-playbook › redline › redline-review ◆ again on findings: 2 act, 0 skip: the judge acts on 2 of 2 findings
+contract-playbook › redline › redline-review ◆ redline round 1: again on findings: 2 act, 0 skip: the judge acts on 2 of 2 findings
 contract-playbook › redline › redline-review › @judge-review interaction:checkpoint
 contract-playbook › redline › redline-review · review: fail
 review did not pass (Review panel: 0/1 reviewer(s) cleared. (the judge acts on 2 of 2 findings)); re-entering redline-review
@@ -92,7 +92,7 @@ contract-playbook › redline › redline-review › review-panel • redline-1:
 contract-playbook › redline › redline-review › review-panel • redline: fail  Review panel: 0/1 reviewer(s) cleared. - redline-1 [should-fix]: clause 3: the fallback sentence on the liability redline could go; the twelve-month term already meets the rule
 contract-playbook › redline › redline-review › refine-judge • refine:judge
 contract-playbook › redline › redline-review › refine-judge • refine:judge: pass  {"holds":{"type":"noul","noul":0.9},"worth_doing":{"type":"noul","noul":0.2},"worth_another_round":{"type":"noul","noul":0.1},"stop_reason":{"type":"choice","choice":"holds","confidence":0.8}}
-contract-playbook › redline › redline-review ◆ stop as pass on stop_reason: holds: the judge chose holds
+contract-playbook › redline › redline-review ◆ redline round 2: stop as pass on stop_reason: holds: the judge chose holds
 contract-playbook › redline › redline-review › @judge-review interaction:checkpoint
 contract-playbook › redline › redline-review · review: pass
 contract-playbook › redline › redline-review ◂ pass (2 iter)
@@ -201,7 +201,7 @@ side:
         desc: 'Write the negotiating note: what to hold, what to concede and to what, and what is a walk-away.',
         gate: 'Every redline has a position, and a reviewer from another family has accepted them.',
         reviewedBy: 'playbook-check',
-        // Three attempts: the allowance matches how open-ended the work is.
+        // Three refinements: the allowance matches how open-ended the work is.
         // Deciding what to hold, what to concede and what is a walk-away is
         // the most judgement-heavy step here, and it had none while listing
         // clauses had three.
@@ -299,7 +299,7 @@ function createContractPlaybook(judgeSeat: TeamSeat, engines: ContractPlaybookEn
         desc: 'Write the negotiating note: what to hold, what to concede and to what, and what is a walk-away.',
         gate: 'Every redline has a position, and a reviewer from another family has accepted them.',
         reviewedBy: 'playbook-check',
-        // Three attempts: the allowance matches how open-ended the work is.
+        // Three refinements: the allowance matches how open-ended the work is.
         // Deciding what to hold, what to concede and what is a walk-away is
         // the most judgement-heavy step here, and it had none while listing
         // clauses had three.
@@ -354,9 +354,10 @@ case it names is outside how the work is really used, or when the same
 class of finding keeps returning after it was answered. The loop goes round
 again on continue and stops when the judge chooses a reason to stop. With
 no cap, a run ends when the judge stops it or the review passes. To bound
-the rounds as well, pass `judge(judgeSeat, { cap: 3 })`: after the last
-review the cap allows, the judge is asked once more, and the run fails
-unless it lets the redlines stand. The judge's recorded answer
+the rounds as well, pass `judge(judgeSeat, { cap: 3 })`: it allows three
+[refinements](/concepts/feedback-loops#counting-rounds), the judge reads
+the review of the last draft too, and the run fails unless it lets the
+redlines stand. The judge's recorded answer
 for the offline run is in `judge.json`.
 [A judge stops the loop](/patterns/judge-stops-the-loop) has the questions
 and the rule.

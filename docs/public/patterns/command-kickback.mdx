@@ -60,6 +60,7 @@ export const commandKickback = dag({
     },
     test: {
       needs: 'implement',
+      acceptsKickbackTo: ['implement'],
       desc: 'Run the tests; a red run goes back to implement with the output.',
       gate: 'The test command exits 0.',
       job: test,
@@ -101,8 +102,12 @@ because a skip doesn't fail the run. `failed` means the command ran and
 failed; a dependency that never got to decide meets neither condition.
 
 `maxKickbacks` limits how many times the writer runs again. A number is one
-count for the whole graph; a map gives each target its own. When a count is
+count for the whole graph; a map gives each target its own number of
+[refinements](/concepts/feedback-loops#counting-rounds). When a count is
 spent, the run fails with the last output as its reason instead of looping.
+The `test` node lists `implement` in `acceptsKickbackTo`: a node names
+every step it can send work back to, and a send-back anywhere else fails it
+with an error that names both steps.
 
 ## What the run did
 
@@ -199,6 +204,7 @@ export const commandKickback = dag({
     },
     test: {
       needs: 'implement',
+      acceptsKickbackTo: ['implement'],
       desc: 'Run the tests; a red run goes back to implement with the output.',
       gate: 'The test command exits 0.',
       job: test,

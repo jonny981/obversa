@@ -151,7 +151,7 @@ describe('human review decides completion', () => {
       body: agentJob({ engine: new MockEngine(() => 'finished'), prompt: 'Write it.', consumeFeedback: true }),
       review: humanReview('audience', { question: 'Ready?', input: { draft: 'finished' }, interaction: { ...binding, async answer() { return { ...feedback, decision: 'changes-requested' }; } } }),
     }), { cwd });
-    expect(result.outcome.status).toBe('exhausted');
+    expect(result.outcome.status).toBe('fail');
   });
 
   it('resumes the same human review without rerunning the completed writer', async () => {

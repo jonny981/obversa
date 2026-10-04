@@ -37,15 +37,16 @@ export const featureDelivery = pipeline(
     { name: 'analyse', job: analyse },
     { name: 'implement', job: implement },
     { name: 'test', job: testStage },
-    { name: 'review', job: review },
+    { name: 'review', job: review, acceptsKickbackTo: ['implement'] },
     { name: 'approve', job: approve },
   ],
   { maxKickbacks: 2 },
 );
 ```
 
-`target` names where a failing panel returns the work, and `maxKickbacks`
-caps how many times. Save the file, share it, and run it again.
+`target` names where a failing panel returns the work, `acceptsKickbackTo`
+declares that target on the `review` stage, and `maxKickbacks` caps how
+many times. Save the file, share it, and run it again.
 
 ## Agent harness
 

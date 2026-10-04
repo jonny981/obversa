@@ -43,9 +43,9 @@ describe('judge()', () => {
   });
 
   it('rejects a non-positive or non-integer cap', () => {
-    expect(() => judge(seat(), { cap: 0 })).toThrow(/positive integer/);
-    expect(() => judge(seat(), { cap: -1 })).toThrow(/positive integer/);
-    expect(() => judge(seat(), { cap: 1.5 })).toThrow(/positive integer/);
+    expect(() => judge(seat(), { cap: 0 })).toThrow(/whole number of refinements, 1 or more/);
+    expect(() => judge(seat(), { cap: -1 })).toThrow(/whole number of refinements, 1 or more/);
+    expect(() => judge(seat(), { cap: 1.5 })).toThrow(/whole number of refinements, 1 or more/);
   });
 });
 

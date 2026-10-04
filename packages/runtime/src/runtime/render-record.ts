@@ -162,6 +162,8 @@ export function summarizeRecord(events: readonly LoopEvent[]): RecordSummary {
 
   for (const event of events) {
     if (startedAt === null) startedAt = event.ts;
+    // State a resume reads back; it is no step and no line of its own.
+    if (event.kind === 'interaction:checkpoint') continue;
 
     if (event.kind === 'dag:node' && event.path.length === rootDepth) {
       const run = runFor(event.node, event.attempt ?? 1);

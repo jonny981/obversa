@@ -132,7 +132,7 @@ export type RecordedStage =
   | { readonly kind: 'completed'; readonly outcome: Outcome };
 
 export interface ResumedStageRecords {
-  readonly interactions: ReadonlyMap<string, { identity: string; workspace: string; data: JsonObject }>;
+  readonly interactions: ReadonlyMap<string, { identity: string; workspace: string; data: JsonObject; progress?: boolean }>;
   readonly anchors: ReadonlyMap<string, { readonly identity: string; readonly workspace: string; readonly recordId: string }>;
   readonly stages: ReadonlyMap<string, RecordedStage>;
 }
@@ -453,7 +453,11 @@ export interface LoopConfig {
   checkFirst?: boolean;
   /** Hard early-exit per iteration; one or many checks. Met => `aborted`. */
   stopOn?: ConditionInput;
-  /** Iteration cap. Reached without passing => `exhausted`. */
+  /**
+   * Iteration cap. Reached without passing => `exhausted`, except that a
+   * `review` that rejects the last round `max` allows ends the loop `fail`
+   * with that review's findings.
+   */
   max?: number;
   /**
    * The third hard stop, alongside `max` and `budget`: end the loop `exhausted`
@@ -468,9 +472,11 @@ export interface LoopConfig {
   noProgress?: NoProgressInput;
   /**
    * Runs when `until` is met. If it returns `pass`, the loop completes.
-   * Any other status re-enters the loop — this is the "review fails, run the
-   * main loop again" behaviour, and `review` may itself be a `loop(...)`. The
-   * failed review outcome is exposed to the next iteration as `ctx.lastReview`.
+   * Any other status re-enters the loop while rounds remain — this is the
+   * "review fails, run the main loop again" behaviour, and `review` may itself
+   * be a `loop(...)`. A review that rejects the last round `max` allows ends
+   * the loop `fail` with its findings. The failed review outcome is exposed to
+   * the next iteration as `ctx.lastReview`.
    */
   review?: Job;
   /**
@@ -529,12 +535,21 @@ export interface DagNode {
   /** Extra hard-timeout window after `timeoutMs` for completed-but-late leaves. */
   timeoutGraceMs?: number;
   /**
-   * Restrict which upstream nodes this node may kick work back to. When set, a
-   * `kickback` whose `to` is not in this list is rejected (logged, not run); when
-   * unset, any ancestor is a valid target. A kickback to a non-ancestor is always
-   * rejected. Only consulted when the dag's `maxKickbacks` is set.
+   * The nodes this node may send work back to, declared when the graph is
+   * built; each must be one of the nodes it depends on. A send-back to a
+   * node not in this list fails this node with an error that names both,
+   * whatever the dag's `maxKickbacks`.
    */
   acceptsKickbackTo?: string[];
+  /**
+   * The file this node builds, relative to the workspace. A judge of work
+   * sent back to this node reads it as it stands, and each earlier round it
+   * was asked about records how many lines that round changed. A writer sent
+   * back to this node that leaves this file as it was returns the work
+   * unchanged, whatever else it writes. Nothing checks that the node writes
+   * it.
+   */
+  file?: string;
   /** An interrupted attempt may run again on resume without a person's reconciliation. */
   retrySafe?: boolean;
 }
@@ -567,9 +582,10 @@ export interface JudgeAnswer {
  * `refine` or a `dag()`'s `maxKickbacks`: a seat that answers typed
  * questions about the work and the rounds so far, between a review's
  * verdict and the send-back. With no `cap`, the rounds end when the judge
- * stops them or the review passes. A `cap` is an optional backstop: after
- * the last review it allows, the judge is asked once more and its answer
- * decides the outcome. Built with `judge()`, never by hand.
+ * stops them or the review passes. A `cap` is an optional backstop:
+ * `cap: N` allows at most N refinements after the first build, and the
+ * judge's answer about the review of the last build decides the outcome.
+ * Built with `judge()`, never by hand.
  */
 export interface Judge {
   readonly kind: 'judge';
@@ -616,10 +632,13 @@ export interface DagConfig {
   onConflict?: 'fail' | 'synthesize';
   /**
    * Re-run budget for cross-stage feedback. A number keeps the graph-wide
-   * counter. A map gives each target node its own counter. Default 0 means
-   * kickbacks are ignored and behaviour is unchanged.
+   * counter: that many send-backs in all. A map gives each target node its
+   * own: `{ target: N }` allows N refinements, so at most N+1 runs of it.
+   * Default 0 means kickbacks are ignored and behaviour is unchanged.
    */
   maxKickbacks?: KickbackBudget;
+  /** What the work is for, in a sentence or two. A judge in `maxKickbacks` reads it. */
+  useCase?: string;
 }
 
 /** Per-node disposition within a DAG run. */
@@ -878,6 +897,11 @@ export type LoopEvent =
       kind: 'refine:judge';
       ts: number;
       path: string[];
+      // The node or stage the judge decides about: the one a send-back
+      // would rebuild.
+      target: string;
+      // The round whose review the judge read; round 1 is the first build.
+      round: number;
       answers: Readonly<Record<string, JudgeAnswer>>;
       reason: string;
       // `again` sends the work back for another round; `stop` ends the
@@ -932,6 +956,12 @@ export type LoopEvent =
       identity: string;
       workspace: string;
       data: import('../graph/value.js').JsonObject | null;
+      /**
+       * Set when the data is a graph's rounds so far, saved as they advance,
+       * and not a step waiting on a person. A resume does not run the steps
+       * around it again without asking.
+       */
+      progress?: true;
     }
   | {
       kind: 'log';

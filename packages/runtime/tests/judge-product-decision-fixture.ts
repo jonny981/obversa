@@ -100,8 +100,9 @@ export function productDecisionJob(kind: ProductCaller, cwd: string, scenario: P
     nodes: {
       [name]: agentJob({ label: name, model: 'writer-mock', prompt: 'Write the page.', consumeFeedback: true,
         engine: new MockEngine((request) => writer(request.prompt).summary) }),
-      review: { needs: [name], desc: scenario.brief ?? 'Choose the audience', job: fnJob('review', async () => {
-        const result = review();
+      review: { needs: [name], acceptsKickbackTo: [name], desc: scenario.brief ?? 'Choose the audience', job: fnJob('review', async (ctx) => {
+        // A review node reads what the judge skipped from its context.
+        const result = review(ctx.skippedFindings?.map((skipped) => skipped.finding.evidence).join('\n'));
         if (result.status === 'pass') return { status: 'pass' as const };
         return revisionRequest({ target: name, reason: result.summary, findings: result.findings });
       }) },

@@ -144,11 +144,12 @@ describe('refine: judge()', () => {
     expect(result.outcome.status).toBe('fail');
     const stageOutcome = (result.outcome.data as Record<string, Outcome>).write;
     expect(stageOutcome?.status).toBe('fail');
-    // Exactly `cap` consultations, never more: the last one is told it is
-    // the last round, and its continue fails the stage.
-    expect(judgeCalls).toHaveLength(2);
-    expect(JSON.parse(judgeCalls[0]!.prompt).state.lastRound).toBeUndefined();
-    expect(JSON.parse(judgeCalls[1]!.prompt).state.lastRound).toBe(true);
+    // A cap of 2 is two refinements, so three builds and three
+    // consultations, never more: the last one is told it is the last
+    // round, and its continue fails the stage.
+    expect(judgeCalls).toHaveLength(3);
+    expect(JSON.parse(judgeCalls[1]!.prompt).state.lastRound).toBeUndefined();
+    expect(JSON.parse(judgeCalls[2]!.prompt).state.lastRound).toBe(true);
     expect(judgeCalls.every((call) => JSON.parse(call.prompt).questions !== undefined)).toBe(true);
   });
 
@@ -167,12 +168,13 @@ describe('refine: judge()', () => {
     const result = await runTeam(job, events);
     const stageOutcome = (result.outcome.data as Record<string, Outcome>).write;
     expect(stageOutcome?.status).toBe('fail');
-    // A cap of 3 is three rounds in all, the first draft included. The old
-    // routing stopped after the first round, on worth_another_round alone.
-    expect(reviewCalls).toHaveLength(3);
-    expect(judgeCalls).toHaveLength(3);
+    // A cap of 3 is three refinements after the first draft, four rounds
+    // in all. The old routing stopped after the first round, on
+    // worth_another_round alone.
+    expect(reviewCalls).toHaveLength(4);
+    expect(judgeCalls).toHaveLength(4);
     const judgeEvents = events.filter((e): e is Extract<LoopEvent, { kind: 'refine:judge' }> => e.kind === 'refine:judge');
-    expect(judgeEvents.map((e) => e.route)).toEqual(['again', 'again', 'stop']);
+    expect(judgeEvents.map((e) => e.route)).toEqual(['again', 'again', 'again', 'stop']);
     expect(judgeEvents[0]).toMatchObject({ reason: 'the judge chose continue', rule: 'stop_reason: continue' });
     expect(judgeEvents[0]!.status).toBeUndefined();
   });
@@ -370,8 +372,8 @@ describe('refine: judge() decides each finding', () => {
     });
     const result = await runTeam(job, events);
     expect((result.outcome.data as Record<string, Outcome>).write?.status).toBe('fail');
-    expect(judgeCalls).toHaveLength(2);
-    expect(writerCalls).toHaveLength(2);
+    expect(judgeCalls).toHaveLength(3);
+    expect(writerCalls).toHaveLength(3);
     expect(writerCalls[1]!.prompt).toContain(REAL.evidence);
     expect(writerCalls[1]!.prompt).not.toContain(TONE.evidence);
   });
@@ -512,7 +514,7 @@ describe('refine: judge() at its cap', () => {
     const events: LoopEvent[] = [];
     const { job, writerCalls, judgeCalls } = scriptedTeam({
       reviewerReplies: [revise(TONE)],
-      judgeReplies: [{ stop_reason: { choice: 'holds' } }],
+      judgeReplies: [{ stop_reason: { choice: 'continue' } }, { stop_reason: { choice: 'holds' } }],
       cap: 1,
       perFinding: false,
     });
@@ -521,12 +523,14 @@ describe('refine: judge() at its cap', () => {
     expect((result.outcome.data as Record<string, Outcome>).write).toMatchObject({
       status: 'pass', summary: 'the judge chose holds', openFindings: [{ ...TONE, reviewer: expect.any(String) }],
     });
-    expect(writerCalls).toHaveLength(1);
-    expect(judgeCalls).toHaveLength(1);
-    const state = JSON.parse(judgeCalls[0]!.prompt).state as Record<string, unknown>;
-    expect(state).toMatchObject({ cap: 1, lastRound: true });
-    expect(state.limit).toBe('This is the last round the cap of 1 allows: no build round follows, so your answer decides how this ends.');
-    const [event] = judgeEventsOf(events);
+    // A cap of 1 is one refinement: two builds, and the judge reads both reviews.
+    expect(writerCalls).toHaveLength(2);
+    expect(judgeCalls).toHaveLength(2);
+    expect(JSON.parse(judgeCalls[0]!.prompt).state.lastRound).toBeUndefined();
+    const state = JSON.parse(judgeCalls[1]!.prompt).state as Record<string, unknown>;
+    expect(state).toMatchObject({ round: 2, cap: 1, lastRound: true });
+    expect(state.limit).toBe('This is the last round the cap of 1 allows (1 refinement after the first build): no build round follows, so your answer decides how this ends.');
+    const event = judgeEventsOf(events)[1];
     expect(event).toMatchObject({ route: 'stop', status: 'pass', openFindings: [{ ...TONE, reviewer: expect.any(String) }] });
   });
 
@@ -542,16 +546,16 @@ describe('refine: judge() at its cap', () => {
     const stageOutcome = (result.outcome.data as Record<string, Outcome>).write;
     expect(stageOutcome?.status).toBe('fail');
     expect(stageOutcome?.summary).toContain('the cap of 1');
-    expect(writerCalls).toHaveLength(1);
-    expect(judgeCalls).toHaveLength(1);
-    expect(judgeEventsOf(events)[0]).toMatchObject({ route: 'stop', status: 'fail', reason: expect.stringContaining('the cap of 1') });
+    expect(writerCalls).toHaveLength(2);
+    expect(judgeCalls).toHaveLength(2);
+    expect(judgeEventsOf(events)[1]).toMatchObject({ route: 'stop', status: 'fail', reason: expect.stringContaining('the cap of 1') });
   });
 
   it('asks the judge about a block in the last round, and a skip lets the work stand with it recorded as open', async () => {
     const events: LoopEvent[] = [];
     const block = { severity: 'block', evidence: 'rare: a schema nested in anyOf' } as const;
     const { job, writerCalls, judgeCalls } = scriptedTeam({
-      reviewerReplies: [revise(block)],
+      reviewerReplies: [revise(REAL), revise(block)],
       judgeReplies: [perFinding()],
       cap: 1,
     });
@@ -560,10 +564,10 @@ describe('refine: judge() at its cap', () => {
     expect((result.outcome.data as Record<string, Outcome>).write).toMatchObject({
       status: 'pass', summary: 'the judge skipped every finding', openFindings: [{ ...block, reviewer: expect.any(String) }],
     });
-    expect(writerCalls).toHaveLength(1);
-    expect(judgeCalls).toHaveLength(1);
-    expect(JSON.parse(judgeCalls[0]!.prompt).state).toMatchObject({ cap: 1, lastRound: true });
-    expect(judgeEventsOf(events)[0]).toMatchObject({
+    expect(writerCalls).toHaveLength(2);
+    expect(judgeCalls).toHaveLength(2);
+    expect(JSON.parse(judgeCalls[1]!.prompt).state).toMatchObject({ cap: 1, lastRound: true });
+    expect(judgeEventsOf(events)[1]).toMatchObject({
       route: 'stop', status: 'pass', findings: [{ decision: 'skip', reason: 'a matter of taste' }], openFindings: [{ ...block, reviewer: expect.any(String) }],
     });
   });

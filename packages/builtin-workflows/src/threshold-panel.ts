@@ -63,6 +63,7 @@ export function thresholdPanel(config: PanelConfig) {
         desc: 'Have every reviewer read the change at the same time and count the acceptances.',
         gate: 'At least the threshold number of reviewers have accepted.',
         needs: ['test'],
+        acceptsKickbackTo: ['implement'],
       },
     },
   });

@@ -75,9 +75,8 @@ describe('the judge can request a product decision', () => {
   describe.each(['workflow', 'dag'] as const)('%s caller', (kind) => {
     it('sends one answer to the builder before the judge is asked again, even when the judge always asks', async () => {
       const fixture = await setup();
-      // A workflow stage's cap of 3 allows three writer rounds; a dag's
-      // kickback cap of 2 allows the first run plus two kickbacks.
-      const scenario = { choices: ['product_decision'], cap: kind === 'workflow' ? 3 : 2 };
+      // A cap of 2 allows two refinements: the first build and two more.
+      const scenario = { choices: ['product_decision'], cap: 2 };
       expect(await worker(kind, fixture, scenario, false)).toMatchObject({ status: 'paused' });
       const [first] = await fixture.callbacks.listPending();
       await answer(fixture.callbacks, first!, 'Write for new users.');
@@ -158,16 +157,15 @@ describe('the judge can request a product decision', () => {
       expect(states[1].skipped).toMatchObject([{ finding: { evidence: 'taste: a warmer tone (round 1)' }, reason: 'judged' }]);
       // After the person's answer the builder runs and the review passes, so the judge was asked twice.
       expect(states).toHaveLength(2);
-      if (kind === 'workflow') {
-        const lastReview = productCalls(fixture.cwd).filter((call) => call.kind === 'reviewer').at(-1)!.prompt!;
-        expect(lastReview).toContain('taste: a warmer tone (round 1)');
-        expect(lastReview).toContain('taste: a warmer tone (round 2)');
-      }
+      // The review after the resumed answer hears every finding the judge skipped.
+      const lastReview = productCalls(fixture.cwd).filter((call) => call.kind === 'reviewer').at(-1)!.prompt!;
+      expect(lastReview).toContain('taste: a warmer tone (round 1)');
+      expect(lastReview).toContain('taste: a warmer tone (round 2)');
     }, 30_000);
 
     it('counts the answered round against the cap and keeps review history across the pause', async () => {
       const fixture = await setup();
-      const scenario = { choices: ['continue', 'product_decision', 'continue'], cap: kind === 'workflow' ? 3 : 2 };
+      const scenario = { choices: ['continue', 'product_decision', 'continue'], cap: 2 };
       expect(await worker(kind, fixture, scenario, false)).toMatchObject({ status: 'paused' });
       expect(choices(fixture.cwd)).toEqual(['writer', 'reviewer', 'judge', 'writer', 'reviewer', 'judge']);
       const [request] = await fixture.callbacks.listPending();
@@ -187,9 +185,8 @@ describe('the judge can request a product decision', () => {
 
     it('asks a person after the last review the cap allows, records the answer, and runs no further build round', async () => {
       const fixture = await setup();
-      // Two writer rounds either way: a workflow stage's cap of 2, or a dag's
-      // first run plus one kickback.
-      const scenario = { choices: ['continue', 'product_decision'], cap: kind === 'workflow' ? 2 : 1 };
+      // A cap of 1 allows one refinement: two writer rounds.
+      const scenario = { choices: ['continue', 'product_decision'], cap: 1 };
       expect(await worker(kind, fixture, scenario, false)).toMatchObject({ status: 'paused' });
       expect(choices(fixture.cwd)).toEqual(['writer', 'reviewer', 'judge', 'writer', 'reviewer', 'judge']);
       expect(judgeStates(fixture.cwd)[1]).toMatchObject({ cap: scenario.cap, lastRound: true });

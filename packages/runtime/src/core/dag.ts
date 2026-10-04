@@ -30,7 +30,7 @@ import type {
   ResumedStageRecords,
   Workspace,
 } from './types.js';
-import { childContext } from './context.js';
+import { childContext, NODE_FILE } from './context.js';
 import { nodeJobContext } from './approval-job.js';
 import { needDecisionsOf, toCondition } from './condition.js';
 import { setMeta, jobMeta, describeConditions } from './describe.js';
@@ -47,10 +47,37 @@ import { mergeLock, mergeSynthesis } from './merge.js';
 import type { EnvHandle } from '../env/environment.js';
 import { LoopError } from './errors.js';
 import { revisionFromOutcome } from './feedback.js';
-import { consultJudge, countBySeverity, isJudge, judgedFindings, lastRoundAnswered, productDecisionFeedback, type JudgeRound, type JudgeState, type SkippedFinding } from './judge.js';
+import { consultJudge, isJudge, judgedFindings, judgeRound, judgeState, lastRoundAnswered, productDecisionFeedback, readJudgedFile, type JudgeRound, type JudgeState, type SkippedFinding } from './judge.js';
 import { checkpointInteraction, interactionDeclaration, interactionIdentity, jsonSnapshot, outcomeSnapshot, savedInteraction, type InteractionResponse } from './interaction.js';
 import { DEFAULT_FANOUT_CONCURRENCY } from './concurrency.js';
-import { dagResumeIdentity, resumeGuard, RESUME_IDENTITY, RESUME_STAGE_OUTCOMES } from './resume.js';
+import { dagResumeIdentity, restoreRecordedUsage, resumeGuard, RESUME_IDENTITY, RESUME_STAGE_OUTCOMES } from './resume.js';
+import { roundRule } from './rounds.js';
+
+/**
+ * Internal context key: what a graph keeps, for one run, about the rounds of
+ * the node it runs. A node that runs its own review rounds (a reviewed
+ * `workflow()` stage) reads and adds to it, so its own reviews and the
+ * send-backs to it share one count of builds and one judge history. Not
+ * exported from the package.
+ */
+export const TARGET_ROUNDS = Symbol('obversa:target-rounds');
+
+/** One node's rounds in one run of a graph, under `TARGET_ROUNDS`. */
+export interface TargetRounds {
+  /** The node's builds after its first, in this run. */
+  builds: number;
+  /**
+   * Save the rounds so far between two of the node's own rounds, with the
+   * feedback its next build reads. A resume that runs the node again starts
+   * from that build.
+   */
+  save(feedback: Outcome): void;
+  rounds: readonly JudgeRound[];
+  skipped: readonly SkippedFinding[];
+  productFeedback: readonly InteractionResponse[];
+  /** The node's file as its judge last read it. */
+  previousDraft: string | undefined;
+}
 
 /** Sanitise a name into a git-ref-safe slug. */
 function slug(s: string): string {
@@ -231,6 +258,32 @@ export function dag(config: DagConfig): Job {
     }
     return seen;
   };
+  // A node declares, when the graph is built, the nodes it may send work
+  // back to; each must be a node it depends on.
+  for (const [name, node] of nodes) {
+    const declared = node.acceptsKickbackTo;
+    if (declared === undefined) continue;
+    if (!Array.isArray(declared) || declared.some((target) => typeof target !== 'string')) {
+      throw new LoopError({
+        code: 'CONFIG',
+        message: `dag "${config.name}": acceptsKickbackTo of node "${name}" must be a list of node names`,
+      });
+    }
+    for (const target of declared) {
+      if (!nodes.has(target)) {
+        throw new LoopError({
+          code: 'CONFIG',
+          message: `dag "${config.name}": node "${name}" declares it sends work back to "${target}", which is not a node in this dag`,
+        });
+      }
+      if (!ancestorsOf(name).has(target)) {
+        throw new LoopError({
+          code: 'CONFIG',
+          message: `dag "${config.name}": node "${name}" declares it sends work back to "${target}", which is not one of the nodes it depends on`,
+        });
+      }
+    }
+  }
   const limitN =
     config.concurrency && config.concurrency > 0
       ? config.concurrency
@@ -240,17 +293,6 @@ export function dag(config: DagConfig): Job {
     const path = [...parent.path, config.name];
     const depth = parent.depth + 1;
     const ts = () => Date.now();
-    const checkpointPath = [...path, '@judge-kickback'];
-    const saved = savedInteraction(parent, checkpointPath, identity);
-    let pending = saved?.pending as unknown as { from: string; count: number; state: JudgeState } | undefined;
-    const targetCounts = new Map<string, number>(Object.entries(saved?.targetCounts ?? {}) as [string, number][]);
-    const judgeHistory = new Map<string, JudgeRound[]>(Object.entries(saved?.history ?? {}) as [string, JudgeRound[]][]);
-    // The findings a target's judge skipped, kept across rounds, and the same
-    // list by the node that sent the work back, which reads it on its next
-    // run as `ctx.skippedFindings`.
-    const skippedBySender = new Map<string, readonly SkippedFinding[]>();
-    const judgeSkipped = new Map<string, SkippedFinding[]>(Object.entries(saved?.skipped ?? {}) as unknown as [string, SkippedFinding[]][]);
-    const productFeedback = new Map<string, readonly InteractionResponse[]>(Object.entries(saved?.productFeedback ?? {}) as unknown as [string, InteractionResponse[]][]);
     // The resume anchor: a dag records it at start, so a resumed run can
     // match its finished nodes against the same declared shape. Only the
     // graph's first invocation in a run takes it: a later loop pass, or a rerun
@@ -258,6 +300,21 @@ export function dag(config: DagConfig): Job {
     const anchors = (parent.state[RESUME_STAGE_OUTCOMES] as ResumedStageRecords | undefined)?.anchors;
     const prior = anchors?.get(path.join('/'));
     if (anchors instanceof Map) anchors.delete(path.join('/'));
+    // The saved rounds belong to the same invocation: a later loop pass
+    // starts its rounds afresh, even after a pass that failed.
+    const checkpointPath = [...path, '@judge-kickback'];
+    const saved = prior === undefined ? undefined : savedInteraction(parent, checkpointPath, identity);
+    let pending = saved?.pending as unknown as { from: string; count: number; state: JudgeState } | undefined;
+    const targetCounts = new Map<string, number>(Object.entries(saved?.targetCounts ?? {}) as [string, number][]);
+    const judgeHistory = new Map<string, JudgeRound[]>(Object.entries(saved?.history ?? {}) as [string, JudgeRound[]][]);
+    // Each target's file as its judge last read it, so each round of the
+    // judge's history records how many lines that round changed.
+    const judgeDrafts = new Map<string, string>(Object.entries(saved?.drafts ?? {}) as [string, string][]);
+    // The findings a target's judge skipped, kept across rounds. Every node
+    // that declares it sends work back to the target reads them on its next
+    // run as `ctx.skippedFindings`.
+    const judgeSkipped = new Map<string, SkippedFinding[]>(Object.entries(saved?.skipped ?? {}) as unknown as [string, SkippedFinding[]][]);
+    const productFeedback = new Map<string, readonly InteractionResponse[]>(Object.entries(saved?.productFeedback ?? {}) as unknown as [string, InteractionResponse[]][]);
     parent.emit({
       kind: 'workflow:start',
       ts: ts(),
@@ -270,17 +327,77 @@ export function dag(config: DagConfig): Job {
     });
     parent.emit({ kind: 'dag:start', ts: ts(), path, depth, nodes: names });
 
-    const limit = pLimit(limitN);
+    const concurrency = pLimit(limitN);
     const results = new Map<string, Outcome>(Object.entries(saved?.results ?? {}) as unknown as [string, Outcome][]);
     const memo = new Map<string, Promise<Outcome>>([...results].map(([name, outcome]) => [name, Promise.resolve(outcome)]));
+    // A step the saved rounds reuse does not run again: its recorded model
+    // answers come back from the record, as a reused step's do.
+    for (const name of results.keys()) restoreRecordedUsage({ state: parent.state, path: [...path, name] });
     // How many times each node has run (1 on the first pass, +1 per kickback
     // re-run). Stamped onto its dag:node events so records can tell rounds apart.
     const attempts = new Map<string, number>(Object.entries(saved?.attempts ?? {}) as [string, number][]);
     let stopped = false;
     // When a node is kicked back to, the reason rides into its next run as
     // `lastReview` — the same channel a loop's failed `review` uses, so the next
-    // worker receives it. Empty in the common (no-kickback) case.
-    const pendingKickback = new Map<string, Outcome>();
+    // worker receives it. Cleared once the node has run, so a later re-run
+    // never reads an old send-back. Empty in the common (no-kickback) case.
+    // A node's first run reads the feedback the dag itself was given, such as
+    // the enclosing loop's rejection when the dag is a loop's body.
+    const pendingKickback = new Map<string, Outcome>(Object.entries(saved?.kickbacks ?? {}) as unknown as [string, Outcome][]);
+    const feedbackFor = (name: string): Outcome | undefined =>
+      pendingKickback.get(name) ?? (attempts.get(name) === 1 ? parent.lastReview : undefined);
+    const skippedFor = (name: string): readonly SkippedFinding[] | undefined => {
+      const skipped = (nodes.get(name)!.acceptsKickbackTo ?? []).flatMap((target) => judgeSkipped.get(target) ?? []);
+      return skipped.length ? skipped : undefined;
+    };
+    // A node that runs its own review rounds counts them here, with the
+    // send-backs to it, and its judge reads and adds to the same history.
+    const targetRounds = (name: string): TargetRounds => ({
+      get builds() { return targetCounts.get(name) ?? 0; },
+      set builds(value) { if (value !== (targetCounts.get(name) ?? 0)) targetCounts.set(name, value); },
+      save(feedback) {
+        pendingKickback.set(name, feedback);
+        saveRounds();
+      },
+      get rounds() { return judgeHistory.get(name) ?? []; },
+      set rounds(value) { judgeHistory.set(name, [...value]); },
+      get skipped() { return judgeSkipped.get(name) ?? []; },
+      set skipped(value) { judgeSkipped.set(name, [...value]); },
+      get productFeedback() { return productFeedback.get(name) ?? []; },
+      set productFeedback(value) { productFeedback.set(name, value); },
+      get previousDraft() { return judgeDrafts.get(name); },
+      set previousDraft(value) { if (value === undefined) judgeDrafts.delete(name); else judgeDrafts.set(name, value); },
+    });
+    // How many runs of each node finished: a node that paused, was aborted or
+    // was still running runs again on a resume, as the same attempt.
+    const finished = new Map(attempts);
+    const ran = new Set<string>();
+    let used = Number(saved?.used ?? 0);
+    const rejected = new Set<string>((saved?.rejected ?? []) as string[]);
+    // The rounds so far belong to this run. Once a node has been sent back to
+    // or judged, the graph saves them, with the passed outcomes, whenever a
+    // node finishes, a send-back is accepted, or the graph pauses. A resume
+    // after a pause, an abort, a crash or a failure counts on from the same round, with
+    // the same judge history. A node that did not pass runs again on the
+    // resume, as the same attempt.
+    let checkpointed = saved !== undefined;
+    // A skipped node is not kept: the resume asks its condition again.
+    const kept = (o: Outcome): boolean =>
+      o.status === 'pass' && (o.data as { skipped?: boolean } | undefined)?.skipped !== true;
+    const saveRounds = (): void => {
+      if (targetCounts.size === 0 && judgeHistory.size === 0) return;
+      checkpointed = true;
+      checkpointInteraction(parent, checkpointPath, identity, jsonSnapshot({
+        results: Object.fromEntries([...results].filter(([, o]) => kept(o)).map(([name, o]) => [name, outcomeSnapshot(o)])),
+        attempts: Object.fromEntries([...finished].map(([name, n]) => {
+          const outcome = results.get(name);
+          return [name, outcome === undefined || kept(outcome) || outcome.status === 'paused' || outcome.status === 'aborted' ? n : n - 1];
+        })),
+        kickbacks: Object.fromEntries([...pendingKickback].map(([name, o]) => [name, outcomeSnapshot(o)])),
+        targetCounts: Object.fromEntries(targetCounts),
+        history: Object.fromEntries(judgeHistory), skipped: Object.fromEntries(judgeSkipped), productFeedback: Object.fromEntries(productFeedback), drafts: Object.fromEntries(judgeDrafts), used, rejected: [...rejected],
+      }), true);
+    };
 
     // Each node runs under its own name in the path, so a nested job (e.g. a
     // loop) is uniquely addressable for stats/logs even across same-named siblings.
@@ -299,13 +416,13 @@ export function dag(config: DagConfig): Job {
       workspace?: Workspace,
       environment?: EnvHandle,
     ): JobContext =>
-      nodeJobContext(childContext(parent, {
+      Object.assign(nodeJobContext(childContext(parent, {
         depth,
         path: [...path, name],
         workspace,
         environment,
-        lastReview: pendingKickback.get(name),
-        skippedFindings: skippedBySender.get(name),
+        lastReview: feedbackFor(name),
+        skippedFindings: skippedFor(name),
         needs: Object.freeze(Object.fromEntries(
           normalizeNeeds(nodes.get(name)!.needs)
             .filter((n) => results.has(n))
@@ -327,7 +444,11 @@ export function dag(config: DagConfig): Job {
         stageGate: nodes.get(name)!.gate ?? null,
         timeoutMs: nodes.get(name)!.timeoutMs,
         timeoutGraceMs: nodes.get(name)!.timeoutGraceMs,
-      }), job);
+      }), job), {
+        [TARGET_ROUNDS]: targetRounds(name),
+        // Set or clear: a nested node with no `file` never checks an ancestor's.
+        [NODE_FILE]: nodes.get(name)!.file,
+      });
 
     let forkSeq = 0;
 
@@ -443,9 +564,10 @@ export function dag(config: DagConfig): Job {
     const runNodeJob = async (
       name: string,
       node: DagNode,
+      restored: boolean,
     ): Promise<Outcome> => {
       const retrySafe = node.retrySafe === true;
-      const shared = resumeGuard(node.job, resumeIdentity, name, retrySafe, prior);
+      const shared = resumeGuard(node.job, resumeIdentity, name, retrySafe, prior, false, restored);
       const isolated = node.isolate ?? config.isolation === 'worktree';
       if (!isolated) return shared(nodeCtx(name, shared));
 
@@ -458,7 +580,7 @@ export function dag(config: DagConfig): Job {
         return shared(nodeCtx(name, shared));
       }
 
-      const fork = resumeGuard(() => forkNodeJob(name, node), resumeIdentity, name, retrySafe, prior, true);
+      const fork = resumeGuard(() => forkNodeJob(name, node), resumeIdentity, name, retrySafe, prior, true, restored);
       return fork(nodeCtx(name, fork));
     };
 
@@ -468,6 +590,12 @@ export function dag(config: DagConfig): Job {
       phase: 'done' | 'skip',
     ): Outcome => {
       results.set(name, outcome);
+      // A paused or aborted node has not finished with its send-back: it
+      // reads it again when it runs again.
+      if (outcome.status !== 'paused' && outcome.status !== 'aborted') {
+        pendingKickback.delete(name);
+        finished.set(name, attempts.get(name) ?? 1);
+      }
       parent.emit({
         kind: 'dag:node',
         ts: ts(),
@@ -479,6 +607,7 @@ export function dag(config: DagConfig): Job {
         attempt: attempts.get(name),
         timeoutMs: nodes.get(name)!.timeoutMs,
       });
+      if (outcome.status !== 'paused' && outcome.status !== 'aborted') saveRounds();
       // A paused node is a deliberate halt, not a failure: stop scheduling nodes
       // even when `stopOnError` is false or the node is optional.
       if (phase === 'done' && outcome.status === 'paused') {
@@ -506,6 +635,12 @@ export function dag(config: DagConfig): Job {
         // This node's run count: 1 the first time, +1 each kickback re-run (the
         // memo/results were cleared for the dirty subgraph, so run() re-enters).
         attempts.set(name, (attempts.get(name) ?? 0) + 1);
+        // A later attempt that the saved rounds resume: its first run here.
+        const restored = (finished.get(name) ?? 0) > 0 && !ran.has(name);
+        ran.add(name);
+        // A node that runs again, a failed one on a resume included, earns a
+        // fresh verdict; its target's rounds and judge history stay.
+        rejected.delete(name);
         // Whole node is guarded: a throw anywhere (dep resolution, `when`, the
         // job) becomes a recorded outcome, so the DAG always reaches `dag:end`.
         try {
@@ -535,7 +670,7 @@ export function dag(config: DagConfig): Job {
 
           // `when` + the job both run inside the concurrency limit, so an
           // agentCheck gate counts against the cap (it's real backend load).
-          const result = await limit(
+          const result = await concurrency(
             async (): Promise<{ outcome: Outcome; phase: 'done' | 'skip' }> => {
               if (parent.signal.aborted || stopped)
                 return {
@@ -576,7 +711,7 @@ export function dag(config: DagConfig): Job {
                 attempt: attempts.get(name),
                 timeoutMs: node.timeoutMs,
               });
-              return { outcome: await runNodeJob(name, node), phase: 'done' };
+              return { outcome: await runNodeJob(name, node, restored), phase: 'done' };
             },
           );
           return record(name, result.outcome, result.phase);
@@ -612,30 +747,51 @@ export function dag(config: DagConfig): Job {
     // judge's `cap` bounds the re-runs; a judge with no cap re-runs until it
     // stops the rounds or the review passes. An omitted budget or numeric zero keeps the default
     // single-pass path; a target map still records rejected requests at zero.
-    if (routeKickbacks) {
-      let used = Number(saved?.used ?? 0);
-      const rejected = new Set<string>((saved?.rejected ?? []) as string[]);
-      const emitKickback = (
-        from: string,
-        to: string,
-        reason: string,
-        accepted: boolean,
-        count: number,
-        limit: number | undefined,
-        note?: string,
-      ) =>
-        parent.emit({
-          kind: 'dag:kickback',
-          ts: ts(),
-          path,
-          from,
-          to,
-          reason,
-          accepted,
-          count,
-          ...(limit !== undefined ? { limit } : {}),
-          note,
-        });
+    // The judge saves its own state when it pauses to ask a question.
+    let judgePaused = false;
+    const emitKickback = (
+      from: string,
+      to: string,
+      reason: string,
+      accepted: boolean,
+      count: number,
+      limit: number | undefined,
+      note?: string,
+    ) =>
+      parent.emit({
+        kind: 'dag:kickback',
+        ts: ts(),
+        path,
+        from,
+        to,
+        reason,
+        accepted,
+        count,
+        ...(limit !== undefined ? { limit } : {}),
+        note,
+      });
+    // A node sends work back only to a target it declares in
+    // `acceptsKickbackTo` (checked against the graph when it is built).
+    // Any other target is an error that fails the sender, whatever the budget.
+    const undeclared = (from: string, to: string, reason: string, count: number, limit: number | undefined): boolean => {
+      if (nodes.get(from)!.acceptsKickbackTo?.includes(to)) return false;
+      const message = `dag "${config.name}": node "${from}" sent work back to "${to}", which it does not declare in acceptsKickbackTo`;
+      rejected.add(from);
+      emitKickback(from, to, reason, false, count, limit, message);
+      memo.set(from, Promise.resolve(record(from, {
+        status: 'fail',
+        summary: message,
+        error: new LoopError({ code: 'CONFIG', path: [...path, from], message }),
+      }, 'done')));
+      return true;
+    };
+    if (!routeKickbacks) {
+      for (const from of order) {
+        const request = results.get(from) && revisionFromOutcome(results.get(from)!);
+        if (request?.target === undefined) continue;
+        undeclared(from, request.target, request.reason, (targetCounts.get(request.target) ?? 0) + 1, targetLimit(request.target));
+      }
+    } else {
       for (;;) {
         // A pause outranks a pending kickback. Nothing may run past it.
         if (names.some((n) => results.get(n)?.status === 'paused')) break;
@@ -654,26 +810,17 @@ export function dag(config: DagConfig): Job {
         const request = revisionFromOutcome(results.get(from)!)!;
         const to = request.target!;
         const { reason } = request;
+        // The round is the target's build under review: one more than its
+        // builds before it, the send-backs to it that were carried out and
+        // the rounds it ran on its own reviews. A request the judge lets
+        // stand, or a second reviewer of the same build, is the same round.
         const count = pending?.from === from ? pending.count : (targetCounts.get(to) ?? 0) + 1;
-        targetCounts.set(to, count);
         const limit = targetLimit(to);
 
-        // Validate the target: it must exist, be an ancestor, and (if the node
-        // declares `acceptsKickbackTo`) be an allowed target. An invalid target
-        // is rejected once and never reconsidered unless the node itself re-runs.
-        const allow = nodes.get(from)!.acceptsKickbackTo;
-        const note = !nodes.has(to)
-          ? `unknown node "${to}"`
-          : !ancestorsOf(from).has(to)
-            ? `"${to}" is not an ancestor of "${from}"`
-            : allow && !allow.includes(to)
-              ? `"${from}" does not accept kickback to "${to}"`
-              : undefined;
-        if (note) {
-          rejected.add(from);
-          emitKickback(from, to, reason, false, count, limit, note);
-          continue;
-        }
+        if (undeclared(from, to, reason, count, limit)) continue;
+        // The one round rule: a numeric budget for the whole graph counts the
+        // send-backs it has accepted; a target's own budget counts its rounds.
+        const round = roundRule(perTargetBudget ? count : used + 1, limit);
 
         // A judge stands between the review's verdict and the send-back,
         // for every finding, a block included. The
@@ -682,42 +829,39 @@ export function dag(config: DagConfig): Job {
         const requestFindings = request.findings ?? [];
         // A revision that skips the judge (an unmet requirement) goes straight back.
         const cfgJudge = request.skipJudge ? undefined : targetJudge(to);
-        const lastRound = limit !== undefined && count > limit;
+        const { lastRound } = round;
         let effectiveReason = reason;
         let effectiveFindings = request.findings;
         let productDecision: Outcome | undefined;
         if (cfgJudge !== undefined) {
           const history = judgeHistory.get(to) ?? [];
-          const skipped = judgeSkipped.get(to) ?? [];
-          const state: JudgeState = pending?.from === from ? pending.state : {
-            ...(productFeedback.has(to) ? { productFeedback: productFeedback.get(to) } : {}),
-            latestFindings: requestFindings,
-            ...(skipped.length ? { skipped } : {}),
-            rounds: history,
-            round: count,
-            ...(cfgJudge.cap !== undefined ? { cap: cfgJudge.cap } : {}),
-            ...(lastRound ? { lastRound: true } : {}),
-          };
-          const result = await consultJudge(cfgJudge, state, parent, path, {
-            identity: interactionIdentity({ identity, from, to }), pending: pending?.from === from,
+          const work = { ...(config.useCase !== undefined ? { useCase: config.useCase } : {}), ...(nodes.get(to)!.file !== undefined ? { file: nodes.get(to)!.file } : {}) };
+          const { draft, changedLines } = await readJudgedFile(parent.workspace.dir, work.file, judgeDrafts.get(to));
+          const state: JudgeState = pending?.from === from ? pending.state : judgeState({
+            work, draft, productFeedback: productFeedback.get(to) ?? [], latestFindings: requestFindings, skipped: judgeSkipped.get(to) ?? [], rounds: history, round: round.judge,
+          });
+          // The judge runs as part of the node that sent the work back:
+          // inside that node's timeout and the graph's concurrency limit.
+          const result = await concurrency(() => consultJudge(cfgJudge, state, nodeCtx(from, undefined), [...path, from], {
+            target: to, identity: interactionIdentity({ identity, from, to }), pending: pending?.from === from,
             save: (questionState) => checkpointInteraction(parent, checkpointPath, identity, jsonSnapshot({
               pending: { from, count, state: questionState },
               results: Object.fromEntries([...results].map(([name, outcome]) => [name, outcomeSnapshot(outcome)])),
               attempts: Object.fromEntries(attempts), targetCounts: Object.fromEntries(targetCounts),
-              history: Object.fromEntries(judgeHistory), skipped: Object.fromEntries(judgeSkipped), productFeedback: Object.fromEntries(productFeedback), used, rejected: [...rejected],
+              history: Object.fromEntries(judgeHistory), skipped: Object.fromEntries(judgeSkipped), productFeedback: Object.fromEntries(productFeedback), drafts: Object.fromEntries(judgeDrafts), used, rejected: [...rejected],
             })),
-          });
-          if ('paused' in result) { record(from, result.paused, 'done'); break; }
-          checkpointInteraction(parent, checkpointPath, identity, null);
+          }));
+          if ('paused' in result) { judgePaused = true; record(from, result.paused, 'done'); break; }
           pending = undefined;
           productFeedback.set(to, result.state.productFeedback ?? []);
-          judgeHistory.set(to, [
-            ...history,
-            { round: count, findings: requestFindings, counts: countBySeverity(requestFindings) },
-          ]);
-          // After the last round the cap allows, `from`'s failure stands with
-          // its findings, and its outcome says why the run stopped there.
-          const stopAtCap = (why: string) => {
+          judgeHistory.set(to, [...history, judgeRound(count, requestFindings, changedLines)]);
+          if (draft === undefined) judgeDrafts.delete(to); else judgeDrafts.set(to, draft);
+          // The decision replaces the saved question: a resume keeps the round.
+          saveRounds();
+          // When the judge stops the rounds, or after the last round the cap
+          // allows, `from`'s failure stands with its findings, and its outcome
+          // says why the run stopped there.
+          const stopWith = (why: string) => {
             const failed = results.get(from)!;
             memo.set(from, Promise.resolve(record(from, {
               ...failed,
@@ -730,7 +874,7 @@ export function dag(config: DagConfig): Job {
             // No kickback is left for the answer: the review's own failure stands.
             const why = lastRoundAnswered(result.state, result.answer);
             emitKickback(from, to, reason, false, count, limit, why);
-            stopAtCap(why);
+            stopWith(why);
             continue;
           }
           if ('answer' in result) {
@@ -739,7 +883,6 @@ export function dag(config: DagConfig): Job {
             // The judge decided each finding before asking: the answer goes with the acted ones only.
             const answered = judgedFindings(requestFindings, { findings: result.state.decided }, result.state.skipped ?? [], count);
             judgeSkipped.set(to, answered.skipped);
-            skippedBySender.set(from, answered.skipped);
             productDecision = productDecisionFeedback(result.answer, answered.acted, { target: to, source: request.source ?? from });
             effectiveReason = `${reason} (a person answered the judge's product decision)`;
           }
@@ -747,10 +890,7 @@ export function dag(config: DagConfig): Job {
           // Per-finding decisions: skipped findings are remembered for the next
           // round's reviewers, and only the acted ones go to the builder.
           const judged = decision ? judgedFindings(requestFindings, decision, result.state.skipped ?? [], count) : undefined;
-          if (judged) {
-            judgeSkipped.set(to, judged.skipped);
-            skippedBySender.set(from, judged.skipped);
-          }
+          if (judged) judgeSkipped.set(to, judged.skipped);
           if (decision?.again === false) {
             emitKickback(from, to, `${reason} (${decision.reason})`, false, count, limit, decision.reason);
             if (decision.stop === 'ship') {
@@ -784,15 +924,14 @@ export function dag(config: DagConfig): Job {
             // stop kind, or any answer but a ship after the last round the
             // cap allows): `from`'s own failure stands, same as a plain
             // numeric budget running out.
-            if (lastRound) stopAtCap(decision.reason);
-            else rejected.add(from);
+            stopWith(decision.reason);
             continue;
           }
           if (decision) effectiveReason = `${reason} (${decision.reason})`;
           if (judged && request.findings) effectiveFindings = judged.acted;
         }
 
-        if (limit !== undefined && (perTargetBudget ? count > limit : used >= limit)) {
+        if (!round.another) {
           // Budget spent. Reject and stop: the unresolved kickback leaves the
           // kicking node's own outcome to stand.
           emitKickback(
@@ -812,6 +951,7 @@ export function dag(config: DagConfig): Job {
         }
 
         used += 1;
+        targetCounts.set(to, count);
         emitKickback(from, to, effectiveReason, true, count, limit);
         const dirty = dirtyFrom(to);
         for (const d of dirty) {
@@ -824,6 +964,7 @@ export function dag(config: DagConfig): Job {
           summary: `Kicked back from "${from}": ${effectiveReason}`,
           revision: { ...request, reason: effectiveReason, ...(effectiveFindings ? { findings: effectiveFindings } : {}), source: request.source ?? from },
         });
+        saveRounds();
         stopped = false; // a prior stopOnError must not block the re-run
         await Promise.all(names.map(run));
       }
@@ -873,11 +1014,15 @@ export function dag(config: DagConfig): Job {
     } else if (requiredFailed.length > 0 || requiredAborted.length > 0) {
       // a real failure (direct, or a required node left undone by an upstream
       // failure) is a fail (exit 1), distinct from a cancellation (exit 130).
+      // A required node's error that a retry cannot fix fails the dag with
+      // it, so a loop around the dag stops as it would around that node.
+      const fatal = requiredFailed.map((n) => results.get(n)!.error).find((error) => error !== undefined && !error.retryable);
       outcome = {
         status: 'fail',
         ...(late ? { late: true } : {}),
-        summary: `dag "${config.name}": ${requiredFailed.length + requiredAborted.length} required node(s) did not complete${ranOut}`,
+        summary: `dag "${config.name}": ${requiredFailed.length + requiredAborted.length} required node(s) did not complete${ranOut}${fatal ? `; ${fatal.message}` : ''}`,
         data,
+        ...(fatal ? { error: fatal } : {}),
       };
     } else {
       outcome = {
@@ -886,6 +1031,13 @@ export function dag(config: DagConfig): Job {
         summary: `dag "${config.name}": all ${names.length} node(s) green`,
         data,
       };
+    }
+    // A paused, aborted or failed graph keeps its rounds, so a resume counts
+    // on from them and never builds past the limit; a graph that passed is
+    // done with them.
+    if (outcome.status === 'paused' && !judgePaused) saveRounds();
+    else if (outcome.status === 'pass' && checkpointed) {
+      checkpointInteraction(parent, checkpointPath, identity, null);
     }
     parent.emit({ kind: 'dag:end', ts: ts(), path, outcome });
     return outcome;

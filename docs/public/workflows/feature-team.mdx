@@ -136,9 +136,9 @@ feature-delivery › review • review: fail  Review panel: 0/2 reviewer(s) clea
 feature-delivery · node review: done (fail)
 feature-delivery · node approve: done (aborted)
 feature-delivery · node close: done (aborted)
-feature-delivery › refine-judge • refine:judge
-feature-delivery › refine-judge • refine:judge: pass  {"stop_reason":{"choice":"continue"}}
-feature-delivery ◆ again on stop_reason: continue: the judge chose continue
+feature-delivery › review › refine-judge • refine:judge
+feature-delivery › review › refine-judge • refine:judge: pass  {"stop_reason":{"choice":"continue"}}
+feature-delivery › review ◆ implement round 1: again on stop_reason: continue: the judge chose continue
 feature-delivery › @judge-kickback interaction:checkpoint
 feature-delivery ↩ kickback accepted review -> implement [1]: Review panel: 0/2 reviewer(s) cleared. (the judge chose continue)
 feature-delivery · node implement: start
@@ -359,12 +359,12 @@ const team = dag({
     // fork from HEAD, and need the plan committed there to read it.
     research: { needs: 'triage', optional: true, isolate: true, when: predicate((ctx) => (ctx.needs?.triage?.data as { kind?: { choice?: string } })?.kind?.choice === 'feature', 'triage chose a feature'), job: research },
     implement: { needs: ['triage', 'research'], job: implement },
-    test: { needs: 'implement', job: commandJob('test', ['node', '--test', 'test/triple.test.mjs'], { target: 'implement' }) },
+    test: { needs: 'implement', acceptsKickbackTo: ['implement'], job: commandJob('test', ['node', '--test', 'test/triple.test.mjs'], { target: 'implement' }) },
     // Isolated for the same reason as research: on a reject the worktree is
     // discarded rather than merged, so a second kickback into `implement`
     // forks its own tournament round from an untouched HEAD.
-    review: { needs: 'test', isolate: true, job: review },
-    approve: { needs: 'review', job: approve },
+    review: { needs: 'test', isolate: true, acceptsKickbackTo: ['implement'], job: review },
+    approve: { needs: 'review', acceptsKickbackTo: ['implement'], job: approve },
     close: { needs: 'approve', job: close },
   },
   // Jev decides each finding, a block included, and says when another
@@ -548,12 +548,12 @@ const team = dag({
     // fork from HEAD, and need the plan committed there to read it.
     research: { needs: 'triage', optional: true, isolate: true, when: predicate((ctx) => (ctx.needs?.triage?.data as { kind?: { choice?: string } })?.kind?.choice === 'feature', 'triage chose a feature'), job: research },
     implement: { needs: ['triage', 'research'], job: implement },
-    test: { needs: 'implement', job: commandJob('test', ['node', '--test', 'test/triple.test.mjs'], { target: 'implement' }) },
+    test: { needs: 'implement', acceptsKickbackTo: ['implement'], job: commandJob('test', ['node', '--test', 'test/triple.test.mjs'], { target: 'implement' }) },
     // Isolated for the same reason as research: on a reject the worktree is
     // discarded rather than merged, so a second kickback into `implement`
     // forks its own tournament round from an untouched HEAD.
-    review: { needs: 'test', isolate: true, job: review },
-    approve: { needs: 'review', job: approve },
+    review: { needs: 'test', isolate: true, acceptsKickbackTo: ['implement'], job: review },
+    approve: { needs: 'review', acceptsKickbackTo: ['implement'], job: approve },
     close: { needs: 'approve', job: close },
   },
   // Jev decides each finding, a block included, and says when another
