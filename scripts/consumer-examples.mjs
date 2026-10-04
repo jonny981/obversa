@@ -52,6 +52,7 @@ export const CONSUMER_EXAMPLES = Object.freeze([
   'tournament.ts',
   'judge-stops-the-loop.ts',
   'judge-stops-the-loop.proof.ts',
+  'goal-check.ts',
   'engine-mastra.ts',
   'engine-mastra.proof.ts',
   'engine-openai-agents.ts',

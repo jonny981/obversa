@@ -50,6 +50,7 @@
         "pages": [
           "patterns/index",
           "patterns/writer-and-reviewer",
+          "patterns/check-the-brief",
           "patterns/review-panel",
           "patterns/judge-stops-the-loop",
           "patterns/tournament",

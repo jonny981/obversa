@@ -19,6 +19,7 @@ import { consultJudge, countBySeverity, isJudge, judgedFindings, lastRoundAnswer
 import type { ConditionInput, DagConfig, Job, JobContext, Judge, Outcome } from './core/types.js';
 import { checkpointInteraction, interactionDeclaration, hasSavedInteraction, humanReview, interactionIdentity, jsonSnapshot, outcomeSnapshot, requestInteraction, savedInteraction, type InteractionBinding, type InteractionResponse } from './core/interaction.js';
 
+import { goalCheckJob } from './goal.js';
 import { outcomeFromAgentText } from './workflow-agent-response.js';
 import {
   assertDistinctSeats,
@@ -68,14 +69,20 @@ export interface WorkflowStageBase {
  * the findings that name the same problem (this seat, or with `true` the
  * first reviewer's seat), then each reviewer votes once on the merged
  * findings it did not raise. A panel of one reviewer is left as it is.
+ *
+ * `goal` checks the brief was met before the reviews, on a stage a panel
+ * reviews: each round, this seat reads the brief, the stage's `desc` and
+ * `gate`, and the work, and marks each requirement met or unmet. Any unmet
+ * requirement sends the round back to the builder with its evidence; the
+ * reviewers do not run that round, and a judge does not decide it.
  */
 export type WorkflowStage = WorkflowStageBase & {
 } & (
-  | { readonly agent: string; readonly reviewedBy?: string; readonly effort?: string; readonly synthesise?: TeamSeat | true; readonly run?: never; readonly panel?: never; readonly input?: never; readonly fn?: never; }
-  | { readonly run: string | readonly string[]; readonly synthesise?: never; readonly agent?: never; readonly panel?: never; readonly input?: never; readonly fn?: never; }
-  | { readonly panel: string; readonly agree?: number; readonly synthesise?: TeamSeat | true; readonly agent?: never; readonly run?: never; readonly input?: never; readonly fn?: never; }
-  | { readonly input: string; readonly synthesise?: never; readonly agent?: never; readonly run?: never; readonly panel?: never; readonly fn?: never; }
-  | { readonly fn: Job; readonly synthesise?: never; readonly agent?: never; readonly run?: never; readonly panel?: never; readonly input?: never; }
+  | { readonly agent: string; readonly reviewedBy?: string; readonly effort?: string; readonly synthesise?: TeamSeat | true; readonly goal?: TeamSeat; readonly run?: never; readonly panel?: never; readonly input?: never; readonly fn?: never; }
+  | { readonly run: string | readonly string[]; readonly synthesise?: never; readonly goal?: never; readonly agent?: never; readonly panel?: never; readonly input?: never; readonly fn?: never; }
+  | { readonly panel: string; readonly agree?: number; readonly synthesise?: TeamSeat | true; readonly goal?: never; readonly agent?: never; readonly run?: never; readonly input?: never; readonly fn?: never; }
+  | { readonly input: string; readonly synthesise?: never; readonly goal?: never; readonly agent?: never; readonly run?: never; readonly panel?: never; readonly fn?: never; }
+  | { readonly fn: Job; readonly synthesise?: never; readonly goal?: never; readonly agent?: never; readonly run?: never; readonly panel?: never; readonly input?: never; }
 );
 
 export interface NamedStage {
@@ -659,9 +666,11 @@ function lineDiffCount(before: string | undefined, after: string): number {
  * synthesised pass) or sends it back with its reasoning folded into the
  * existing rejection. When it decides each finding, the send-back carries
  * only the findings it acts on, and the findings it skips go to the next
- * round's reviewers as `ctx.skippedFindings`.
+ * round's reviewers as `ctx.skippedFindings`. `before`, when set, runs
+ * ahead of the panel each round, and a result that is not a pass is the
+ * round's outcome with no review and no judge.
  */
-function judgedReview(brief: BriefSource, named: NamedStage, cfgJudge: Judge, panel: Job): Job {
+function judgedReview(brief: BriefSource, named: NamedStage, cfgJudge: Judge, panel: Job, before?: Job): Job {
   const config = named.config;
   const useCase = /^Use case:\s*([\s\S]*?)\n\s*\n/m.exec(brief.brief)?.[1]?.replace(/\s+/g, ' ').trim();
   const file = writesOf(config)[0];
@@ -682,15 +691,19 @@ function judgedReview(brief: BriefSource, named: NamedStage, cfgJudge: Judge, pa
       } catch {
         // Not written yet (a first, failed attempt): state omits the file.
       }
-      previousDraft = draft;
     }
     if (saved && (saved.state as unknown as JudgeState).draft !== draft) saved = undefined;
     if (saved) {
       history.splice(0, history.length, ...(saved.state as unknown as JudgeState).rounds);
       productFeedback = (saved.state as unknown as JudgeState).productFeedback ?? [];
       skipped = (saved.state as unknown as JudgeState).skipped ?? [];
-      previousDraft = draft;
     }
+    // A saved question means `before` passed in this round: it does not run again.
+    if (!saved && before) {
+      const checked = await before(ctx);
+      if (checked.status !== 'pass') return checked;
+    }
+    if (file !== undefined) previousDraft = draft;
     const panelOutcome: Outcome = saved ? saved.panel as unknown as Outcome : await panel({
       ...ctx,
       depth: ctx.depth + 1,
@@ -803,33 +816,61 @@ function stageJob(
     const panel = reviewerPanel(brief, named, reviewers, files, declaredFiles, undefined, undefined, undefined, config.synthesise);
     const refine = refineOf(config);
     const cap = refineCap(refine);
+    const missingWrites = async (dir: string): Promise<string[]> => {
+      const missing: string[] = [];
+      for (const file of writesOf(config)) {
+        try {
+          const details = await stat(join(dir, file));
+          if (!details.isFile() || details.size === 0) missing.push(file);
+        } catch {
+          missing.push(file);
+        }
+      }
+      return missing;
+    };
+    // The goal check runs first every round, a round with a missing file
+    // included. An unmet requirement goes straight back to the builder: no
+    // review and no judge that round. The reviewers still wait for every
+    // declared file.
+    const goal = config.goal === undefined ? undefined : goalCheckJob(`${named.name}-goal`, config.goal, {
+      text: brief.brief,
+      ...(config.desc === undefined ? {} : { desc: config.desc }),
+      ...(config.gate === undefined ? {} : { gate: config.gate }),
+      work: reviewTarget(named),
+    }, undefined, (ctx) => ctx.iteration);
+    const goalGate: Job | undefined = goal === undefined ? undefined : async (ctx) => {
+      const goalCtx = { ...ctx, depth: ctx.depth + 1, path: [...ctx.path, 'goal-check'] };
+      const checked = await requireNoFiles(`${named.name}-goal`, goal, ctx.workspace.dir, declaredFiles)(goalCtx);
+      if (checked.status !== 'pass') return checked;
+      const missing = await missingWrites(ctx.workspace.dir);
+      if (missing.length > 0) return { status: 'fail', summary: `${named.name} did not write: ${missing.join(', ')}` };
+      return checked;
+    };
     // Review events use a child path. The jobs' role tags, not their paths,
     // separate the recorded sides. The outcome passes through. A judge
     // instead of a plain count sits between the panel's verdict and the
     // re-entry; `judgedReview` is what does that, so the plain path here
-    // stays exactly what it was.
-    const review: Job = isJudge(refine)
-      ? judgedReview(brief, named, refine, panel)
+    // stays exactly what it was. With a judge, the goal check runs inside
+    // its round, so a run that resumes at the judge's question does not
+    // check the goal again.
+    const reviewed: Job = isJudge(refine)
+      ? judgedReview(brief, named, refine, panel, goalGate)
       : async (ctx) => panel({
         ...ctx,
         depth: ctx.depth + 1,
         path: [...ctx.path, 'review-panel'],
       });
+    const review: Job = goalGate === undefined || isJudge(refine) ? reviewed : async (ctx) => {
+      const checked = await goalGate(ctx);
+      return checked.status === 'pass' ? reviewed(ctx) : checked;
+    };
     const reviewLoop = loop({
       name: `${named.name}-review`,
       body: job,
-      until: predicate(async (ctx) => {
-        const writes = writesOf(config);
-        for (const file of writes) {
-          try {
-            const details = await stat(join(ctx.workspace.dir, file));
-            if (!details.isFile() || details.size === 0) return false;
-          } catch {
-            return false;
-          }
-        }
-        return true;
-      }, `${named.name} writes`),
+      until: predicate(
+        async (ctx) => goal !== undefined || (await missingWrites(ctx.workspace.dir)).length === 0,
+        `${named.name} writes`,
+      ),
       review,
       max: cap === undefined ? undefined : cap + 1,
       maxReviewRestarts: cap,
@@ -982,6 +1023,15 @@ export function workflow(name: string, config: WorkflowConfig): Job {
       throw new TypeError(`stage ${stageName} cannot use both reviewedBy and sendsBackTo`);
     }
     refineForStage(stageConfig, incomingTargets.has(stageName));
+    if (stageConfig.goal !== undefined) {
+      const reviewRole = reviewedBy === undefined ? undefined : role(config.roles, reviewedBy);
+      if (!('agent' in stageConfig) || !Array.isArray(reviewRole)) {
+        throw new TypeError(`goal is for an agent stage reviewed by a panel: ${stageName}`);
+      }
+      if (seatIdentity(stageConfig.goal).tools.length === 0) {
+        throw new TypeError(`the goal seat on ${stageName} must declare read tools`);
+      }
+    }
     if (stageConfig.synthesise !== undefined) {
       const panelStage = 'panel' in stageConfig && stageConfig.panel !== undefined;
       const reviewRole = reviewedBy === undefined ? undefined : role(config.roles, reviewedBy);

@@ -214,6 +214,14 @@ export interface SkippedFinding {
   readonly reason: string;
 }
 
+/** One requirement a goal check found in the brief, with its verdict and the evidence for it. */
+export interface GoalRequirement {
+  readonly requirement: string;
+  readonly verdict: 'met' | 'unmet';
+  /** For `met`, a file and line or a test that shows it; for `unmet`, what is missing. */
+  readonly evidence: string;
+}
+
 export type RevisionRerun = 'target-and-dependents';
 
 export interface RevisionRequest {
@@ -223,6 +231,8 @@ export interface RevisionRequest {
   rerun?: RevisionRerun;
   source?: string;
   decision?: FeedbackDecision;
+  /** `true` when no judge decides this revision: it always goes back to its target, within the budget. */
+  skipJudge?: true;
 }
 
 export interface GraphPosition {
@@ -903,6 +913,17 @@ export type LoopEvent =
       mergeFailed?: true;
       /** Reviewers asked to vote that failed or sent no readable reply. A finding shown to one of them is never dropped by the others' votes. */
       noVotesFrom?: string[];
+    }
+  | {
+      // A goal check's verdict on each requirement of the brief, one event
+      // per round. Any `unmet` requirement sends the round back before the
+      // reviews run.
+      kind: 'goal:check';
+      ts: number;
+      path: string[];
+      label: string;
+      round: number;
+      requirements: readonly GoalRequirement[];
     }
   | {
       kind: 'interaction:checkpoint';

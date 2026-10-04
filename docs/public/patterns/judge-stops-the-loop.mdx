@@ -78,6 +78,12 @@ alone how long the run goes on, because the judge still weighs each block.
 A block is sent back without a judge only when there is no judge: a plain
 number on `refine` or `maxKickbacks`.
 
+When the stage also sets `goal`, a goal check runs before the reader,
+every round. A requirement of the brief that it finds unmet goes straight
+back to the writer. The reader does not run that round, and the judge is
+not asked, because a requirement in the brief is never skipped as polish.
+[Check the brief was met](/patterns/check-the-brief) shows it.
+
 The approval is a plain function. It reads the page, puts its sha256 in the
 question and sends a person's no back to the writer.
 
@@ -152,7 +158,8 @@ answer follows the round answer: it goes back when that answer is
 
 A `dag()` takes the same `judge()` value on `maxKickbacks`. The target that
 the work goes back to gets only the findings the judge acts on, and a stop
-means the same thing at both levels.
+means the same thing at both levels. The unmet requirements a `goalCheck()`
+node sends back go to the target without the judge.
 
 Pass your own set as `judge(seat, { questions })` when this wording
 does not fit your use case. With your own set, the judge is not asked about

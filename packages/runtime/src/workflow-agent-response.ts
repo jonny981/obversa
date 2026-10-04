@@ -10,7 +10,7 @@ interface AgentDecision {
 export const INVALID_TEAM_DECISION = 'The engine response was not a valid team decision JSON object.';
 
 /** The balanced `{...}` that opens at `start`, or undefined when it never closes. */
-function objectAt(text: string, start: number): string | undefined {
+export function objectAt(text: string, start: number): string | undefined {
   let depth = 0;
   let inString = false;
   let escaped = false;

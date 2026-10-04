@@ -60,7 +60,11 @@ and puts a judge on `refine`:
 
 ## The steps
 
-Each round runs these steps in order.
+Each round runs these steps in order. When the stage sets `goal`, a goal
+check runs before them, every round. When it finds a requirement of the
+brief unmet, the round goes back to the writer, and none of these steps
+run. The judge never decides an unmet requirement.
+[Check the brief was met](/patterns/check-the-brief) shows it.
 
 1. **Review.** The three reviewers read the page at the same time. Each one
    passes it or asks for a revision, and tags each finding `block`,

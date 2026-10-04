@@ -338,6 +338,7 @@ export {
   type RecordedEngineUsage,
 } from './core/job.js';
 export { reviewPanel } from './core/synthesis.js';
+export { goalCheck, type GoalRequirement } from './goal.js';
 export {
   reviewContext,
   type ReviewPanelConfig,

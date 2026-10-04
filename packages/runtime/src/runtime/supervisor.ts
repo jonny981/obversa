@@ -559,6 +559,10 @@ function renderEvent(event: LoopEvent, totals?: UsageTotals): string {
       const merged = event.entries.filter((entry) => (entry.finding.raisedBy?.length ?? 0) > 1).length;
       return `${at}◆ ${event.label} synthesised ${event.entries.length} finding(s): ${merged} raised by more than one reviewer, ${count('dropped')} dropped, ${count('disputed')} disputed, ${count('better fix')} with a better fix`;
     }
+    case 'goal:check': {
+      const met = event.requirements.filter((requirement) => requirement.verdict === 'met').length;
+      return `${at}◆ ${event.label} round ${event.round}: ${met} of ${event.requirements.length} requirements met`;
+    }
     case 'loop:stall':
       return `${at}⏹ stalled after ${event.report.iterations.length} no-progress iterations: ${event.report.reason}`;
     case 'limit:wait':

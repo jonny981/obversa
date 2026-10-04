@@ -865,6 +865,7 @@ async function main() {
     await copyFile(tournamentExamplePath, join(consumerDirectory, 'tournament.ts'));
     await copyFile(join(root, 'examples', 'judge-stops-the-loop.ts'), join(consumerDirectory, 'judge-stops-the-loop.ts'));
     await copyFile(join(root, 'examples', 'judge-stops-the-loop.proof.ts'), join(consumerDirectory, 'judge-stops-the-loop.proof.ts'));
+    await copyFile(join(root, 'examples', 'goal-check.ts'), join(consumerDirectory, 'goal-check.ts'));
     await copyFile(join(root, 'examples', 'engine-mastra.ts'), join(consumerDirectory, 'engine-mastra.ts'));
     await copyFile(join(root, 'examples', 'engine-mastra.proof.ts'), join(consumerDirectory, 'engine-mastra.proof.ts'));
     await copyFile(join(root, 'examples', 'engine-openai-agents.ts'), join(consumerDirectory, 'engine-openai-agents.ts'));

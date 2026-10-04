@@ -679,7 +679,8 @@ export function dag(config: DagConfig): Job {
         // request after the cap's last kickback is the last round's review:
         // the judge is still asked, and no kickback follows its answer.
         const requestFindings = request.findings ?? [];
-        const cfgJudge = targetJudge(to);
+        // A revision that skips the judge (an unmet requirement) goes straight back.
+        const cfgJudge = request.skipJudge ? undefined : targetJudge(to);
         const lastRound = limit !== undefined && count > limit;
         let effectiveReason = reason;
         let effectiveFindings = request.findings;
