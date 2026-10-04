@@ -142,6 +142,7 @@ export const stageBranches = {
   F184: 'feat/judge-rules-on-blocks',
   F177: 'feat/goal-check',
   F191: 'fix/exhausted-fails-its-graph',
+  F188: 'feat/one-round-rule',
   F178: 'release/0.2.4',
   F181: 'release/0.2.5',
   F174: 'feat/engine-effort',
