@@ -59,7 +59,8 @@ export interface MonitorState {
   usage: UsageTotals;
   /** The same spend as one line of text, already formatted; `/state` sends it. */
   usageSummary: string;
-  pending: Array<{ requestId: string; decisionText: string; input: JsonValue }>;
+  /** Each waiting question, with the response schema an answer to it must match. */
+  pending: Array<{ requestId: string; decisionText: string; input: JsonValue; responseSchema: JsonObject }>;
   /**
    * The record, already in the one line `formatEvent` would print for it: the
    * console and this page must never disagree about what an event says, so
@@ -163,7 +164,7 @@ class MonitorFold {
 
 async function pendingOf(client: RunCallbacks): Promise<MonitorState['pending']> {
   const pending = await client.listPending();
-  return pending.map((request) => ({ requestId: request.requestId, decisionText: request.decisionText, input: request.input }));
+  return pending.map((request) => ({ requestId: request.requestId, decisionText: request.decisionText, input: request.input, responseSchema: request.responseSchema }));
 }
 
 const BODY_LIMIT = 64 * 1024;
@@ -341,7 +342,9 @@ function page(name: string | undefined): string {
   form { display: flex; gap: .5rem; flex-wrap: wrap; align-items: center; margin-top: .5rem; }
   button { font: inherit; padding: .4rem .8rem; border-radius: 4px; border: 1px solid var(--line); background: var(--panel); color: var(--ink); cursor: pointer; }
   button.yes { background: var(--mark); color: #071209; border-color: var(--mark); }
-  input { font: inherit; padding: .4rem .6rem; border-radius: 4px; border: 1px solid var(--line); background: var(--panel); color: var(--ink); min-width: 18rem; }
+  input, textarea, select { font: inherit; padding: .4rem .6rem; border-radius: 4px; border: 1px solid var(--line); background: var(--panel); color: var(--ink); min-width: 18rem; }
+  form.fields { flex-direction: column; align-items: flex-start; } label { display: flex; flex-direction: column; gap: .25rem; color: var(--muted); }
+  textarea { width: min(40rem, 80vw); }
   pre { font: .8rem/1.5 ui-monospace, Menlo, monospace; color: var(--muted); background: var(--panel); padding: .8rem 1rem; border-radius: 4px; overflow-x: auto; max-height: 20rem; }
   @media (max-width: 640px) { ol.nodes li { grid-template-columns: 1fr; gap: .2rem; } .phase { text-align: left; } }
 </style>
@@ -370,24 +373,125 @@ function page(name: string | undefined): string {
     const link = url ? '<p><a href="' + esc(url) + '" target="_blank" rel="noopener">' + esc(url) + '</a></p>' : '';
     return '<pre>' + esc(JSON.stringify(input, null, 2)) + '</pre>' + link;
   }
-  async function answer(requestId, approved) {
-    const box = document.querySelector('[data-note="' + CSS.escape(requestId) + '"]');
-    const note = box && box.value ? box.value : '';
-    const response = note ? { approved, note } : { approved };
+  // Each question says the shape of its answer. An approval (only approved
+  // required) gets Yes and No; any other schema gets its required fields.
+  // An answer must also match every allOf part, so their fields count too.
+  function shapeOf(schema) {
+    const shape = { required: [], properties: {} };
+    if (!schema || typeof schema !== 'object') return shape;
+    const parts = (Array.isArray(schema.allOf) ? schema.allOf.map(shapeOf) : []).concat({
+      required: Array.isArray(schema.required) ? schema.required.filter((f) => typeof f === 'string') : [],
+      properties: schema.properties && typeof schema.properties === 'object' ? schema.properties : {},
+    });
+    for (const part of parts) {
+      for (const f of part.required) if (!shape.required.includes(f)) shape.required.push(f);
+      for (const [f, rules] of Object.entries(part.properties)) shape.properties[f] = Object.assign({}, shape.properties[f], rules);
+    }
+    return shape;
+  }
+  // Every anyOf an answer must match: the schema's own, then those inside its allOf parts.
+  function anyOfsOf(schema) {
+    if (!schema || typeof schema !== 'object') return [];
+    const own = (Array.isArray(schema.anyOf) ? schema.anyOf : []).filter((c) => c && typeof c === 'object' && !Array.isArray(c));
+    return (own.length ? [own] : []).concat(Array.isArray(schema.allOf) ? schema.allOf.flatMap(anyOfsOf) : []);
+  }
+  // An answer must match one part of each anyOf, so a choice is one part from each,
+  // and the schema it must match is then the whole schema with those parts.
+  function choicesOf(schema) {
+    const anyOfs = anyOfsOf(schema);
+    return anyOfs.length ? anyOfs.reduce((picks, parts) => picks.flatMap((pick) => parts.map((part) => pick.concat([part]))), [[]]) : [];
+  }
+  const chosen = (schema, choice) => (choicesOf(schema)[choice] ? { allOf: [schema].concat(choicesOf(schema)[choice]) } : schema);
+  // A part is named by its title, else by the fields it requires and the values it fixes.
+  function partName(part) {
+    if (typeof part.title === 'string') return part.title;
+    const shape = shapeOf(part);
+    const fixed = Object.entries(shape.properties).flatMap(([f, rules]) => { const one = oneValue(rules); return one ? [f + ': ' + (typeof one.value === 'string' ? one.value : JSON.stringify(one.value))] : []; });
+    return shape.required.concat(fixed).join(', ');
+  }
+  const choiceName = (pick, index) => pick.map(partName).filter(Boolean).join('; ') || 'option ' + (index + 1);
+  const oneValue = (rules) => (rules && 'const' in rules ? { value: rules.const } : rules && Array.isArray(rules.enum) && rules.enum.length === 1 ? { value: rules.enum[0] } : undefined);
+  const requiredOf = (schema) => shapeOf(schema).required;
+  const isApproval = (schema) => requiredOf(schema).join() === 'approved';
+  const typesOf = (field) => (field && field.type !== undefined ? [].concat(field.type) : []);
+  // The empty value a field accepts: an empty object when it accepts any value.
+  function emptyFor(field) {
+    const type = typesOf(field)[0];
+    return type === 'string' ? '' : type === 'array' ? [] : type === 'null' ? null : type === 'boolean' ? false : type === 'number' || type === 'integer' ? 0 : {};
+  }
+  // A field is filled in when its schema allows one value. A decision's feedback is
+  // also filled in when it only names a type, with that type's empty value. Otherwise the person types it.
+  function filledFor(schema, field) {
+    const property = shapeOf(schema).properties[field] || {};
+    const one = oneValue(property);
+    if (one) return one;
+    if (field !== 'feedback' || !requiredOf(schema).includes('prompt')) return undefined;
+    const rules = Object.keys(property).filter((k) => k !== 'title' && k !== 'description');
+    return rules.length === 0 || rules.join() === 'type' ? { value: emptyFor(property) } : undefined;
+  }
+  const asked = (schema) => requiredOf(schema).filter((f) => !filledFor(schema, f));
+  // What a person typed, as the field's type: text for a string or untyped field, JSON for the rest.
+  function valueFor(field, text) {
+    const types = typesOf(field);
+    if (types.length === 0 || types.includes('string')) return text;
+    try { return JSON.parse(text); } catch { return text; }
+  }
+  // The response a non-approval form posts; read(field) is the text typed into that field,
+  // and choice is the anyOf part the person picked.
+  function responseFor(original, read, choice) {
+    const schema = chosen(original, choice);
+    const properties = shapeOf(schema).properties;
+    const response = {};
+    for (const field of requiredOf(schema)) { const filled = filledFor(schema, field); response[field] = filled ? filled.value : valueFor(properties[field], read(field)); }
+    return response;
+  }
+  function formHtml(p) {
+    const id = esc(p.requestId);
+    if (isApproval(p.responseSchema)) return '<form onsubmit="return false"><input name="note" placeholder="a note, if any"><button class="yes" data-answer="yes" data-request="' + id + '">Yes</button><button data-answer="no" data-request="' + id + '">No</button></form>';
+    // With a choice of shapes, the form shows every field any choice asks for, and sends the chosen one's.
+    const choices = choicesOf(p.responseSchema);
+    const shapes = choices.length ? choices.map((_, i) => chosen(p.responseSchema, i)) : [p.responseSchema];
+    const properties = Object.assign({}, ...shapes.map((s) => shapeOf(s).properties));
+    const fields = [...new Set(shapes.flatMap(asked))];
+    const pick = choices.length ? '<label>Answer with<select data-choice>' + choices.map((c, i) => '<option value="' + i + '">' + esc(choiceName(c, i)) + '</option>').join('') + '</select></label>' : '';
+    return '<form class="fields" onsubmit="return false">' + pick + fields.map((f) => f === 'prompt'
+      ? '<label>Your decision<textarea name="prompt" rows="4"></textarea></label>'
+      : '<label>' + esc(f) + '<input name="' + esc(f) + '"' + (properties[f] && Array.isArray(properties[f].enum) ? ' placeholder="one of: ' + esc(properties[f].enum.join(', ')) + '"' : '') + '></label>').join('')
+      + '<button class="yes" data-request="' + id + '">Send</button></form>';
+  }
+  let schemas = new Map();
+  // A refused answer's reason, kept on screen until the person sends again or the question goes.
+  let refusal;
+  async function answer(requestId, response) {
+    refusal = undefined;
     const res = await fetch('answer', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ requestId, response }) });
     const result = await res.json().catch(() => ({ ok: false, reason: 'no answer from the run' }));
-    el('status').textContent = result.ok ? 'answered' : 'the answer was refused: ' + (result.reason || res.status);
+    if (!result.ok) refusal = { requestId, text: 'the answer was refused: ' + (result.reason || res.status) };
+    el('status').textContent = result.ok ? 'answered' : refusal.text;
     render();
   }
   el('pending').addEventListener('click', (event) => {
-    const button = event.target.closest('button[data-answer]');
-    if (button) answer(button.getAttribute('data-request'), button.getAttribute('data-answer') === 'yes');
+    const button = event.target.closest('button[data-request]');
+    if (!button) return;
+    const requestId = button.getAttribute('data-request');
+    const form = button.closest('form');
+    const read = (field) => { const box = form.elements.namedItem(field); return box ? box.value : ''; };
+    const choice = button.getAttribute('data-answer');
+    if (choice) {
+      const approved = choice === 'yes';
+      const note = read('note');
+      answer(requestId, note ? { approved, note } : { approved });
+    } else {
+      const picked = form.querySelector('select[data-choice]');
+      answer(requestId, responseFor(schemas.get(requestId), read, picked ? Number(picked.value) : 0));
+    }
   });
   async function render() {
     let s;
     try { s = await (await fetch('state', { cache: 'no-store' })).json(); } catch { el('status').textContent = 'the run has gone'; return; }
     el('title').textContent = (s.name || 'a run') + (s.status === 'done' ? ', ' + (s.outcome ? s.outcome.status : 'done') : ', running');
-    el('status').textContent = s.status === 'done' ? (s.outcome && s.outcome.summary ? s.outcome.summary : 'finished') : 'running' + (s.runId ? ' · ' + s.runId : '');
+    if (refusal && !s.pending.some((p) => p.requestId === refusal.requestId)) refusal = undefined;
+    el('status').textContent = refusal ? refusal.text : s.status === 'done' ? (s.outcome && s.outcome.summary ? s.outcome.summary : 'finished') : 'running' + (s.runId ? ' · ' + s.runId : '');
     el('usage').textContent = ' · ' + s.usageSummary;
     const names = Object.keys(s.nodes);
     el('nodes').innerHTML = names.map((n) => { const v = s.nodes[n]; return '<li><span class="name">' + esc(n) + (v.runs > 1 ? ' <span class="desc">ran ' + v.runs + ' times</span>' : '') + '</span>'
@@ -395,7 +499,18 @@ function page(name: string | undefined): string {
       + '<span class="phase" data-phase="' + esc(v.phase) + '" data-status="' + esc(v.outcome ? v.outcome.status : '') + '">' + esc(v.phase === 'done' && v.outcome ? v.outcome.status : v.phase) + '</span></li>'; }).join('');
     el('kickbacks').innerHTML = s.kickbacks.map((k) => '<p class="kick">' + esc(k.from) + ' sent work back to ' + esc(k.to) + (k.accepted ? '' : ' (not accepted' + (k.note ? ': ' + esc(k.note) : '') + ')') + ': ' + esc(k.reason) + ' (' + k.count + (k.limit === undefined ? '' : ' of ' + k.limit) + ')</p>').join('');
     el('pending-title').hidden = s.pending.length === 0;
-    el('pending').innerHTML = s.pending.map((p) => '<div><p>' + esc(p.decisionText) + '</p>' + aboutHtml(p.input) + '<form onsubmit="return false"><input data-note="' + esc(p.requestId) + '" placeholder="a note, if any"><button class="yes" data-answer="yes" data-request="' + esc(p.requestId) + '">Yes</button><button data-answer="no" data-request="' + esc(p.requestId) + '">No</button></form></div>').join('');
+    schemas = new Map(s.pending.map((p) => [p.requestId, p.responseSchema]));
+    // A card stays while its question waits, so neither a poll nor another question
+    // arriving or going wipes what a person is typing into it.
+    const box = el('pending');
+    const shown = new Set();
+    for (const card of [...box.children]) {
+      const id = card.getAttribute('data-question');
+      if (schemas.has(id)) shown.add(id); else card.remove();
+    }
+    for (const p of s.pending) {
+      if (!shown.has(p.requestId)) box.insertAdjacentHTML('beforeend', '<div data-question="' + esc(p.requestId) + '"><p>' + esc(p.decisionText) + '</p>' + aboutHtml(p.input) + formHtml(p) + '</div>');
+    }
     el('record').textContent = s.events.slice(-40).map((e) => new Date(e.ts).toISOString().slice(11, 19) + '  ' + e.line).join('\\n');
     if (s.status !== 'done') setTimeout(render, 1000);
   }

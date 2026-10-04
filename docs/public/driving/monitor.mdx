@@ -80,8 +80,8 @@ shows:
   ran more than once says how many times.
 - **Findings that made a step run again**: which step returned them, to
   which step, why, and how much of that step's budget is used.
-- **Questions waiting for a person**, each with what it is about, a Yes, a
-  No and a note.
+- **Questions waiting for a person**, each with what it is about and a
+  form for the answer that the question asks for.
 - **The tail of the record**, the last forty of the two hundred events the
   page keeps in memory. Read the record file for all of them.
 
@@ -143,13 +143,36 @@ note sends the note to the step the question names as its target, and that
 step runs again with it. A question with no target fails its step, with the
 note as the reason.
 
+## Other questions
+
+The card builds each answer from the shape the question asks for. That
+shape is the question's `responseSchema`, and `/state` sends it with each
+waiting question.
+
+- **A judge's product decision** gets a box for your written decision and a
+  Send button. Write the decision the work should follow. The page sends it
+  as the answer's `prompt`. The page fills in `feedback` when the question
+  accepts an empty one or allows only one value. Otherwise the card asks
+  you for it too.
+  [The judge page](/patterns/judge-stops-the-loop) says what the run does
+  with it.
+- **Any other question** gets one labelled field for each field the answer
+  needs, and a Send button.
+- **A question that accepts more than one shape of answer** also gets an
+  **Answer with** list. Pick a shape, fill in its fields, and send. The page
+  sends only the fields of the shape you picked.
+
+When the run refuses an answer, the page says why, and what you typed stays
+in the form. The reason stays on the page until you send again or the
+question is answered.
+
 ## Answer a waiting question
 
 | Route | What it does |
 | --- | --- |
 | `GET /` | The page. |
-| `GET /state` | The same state as JSON: `status`, `outcome`, `nodes`, `kickbacks`, `usage`, `usageSummary`, `pending`, `events`. The type is `MonitorState`. |
-| `POST /answer` | Answers one waiting question. The body is JSON: `{ "requestId": "...", "response": { "approved": true, "note": "..." } }`. The answer is claimed and submitted through the run's callbacks client as the router `monitor`. |
+| `GET /state` | The same state as JSON: `status`, `outcome`, `nodes`, `kickbacks`, `usage`, `usageSummary`, `pending`, `events`. Each entry in `pending` has its `requestId`, `decisionText`, `input` and `responseSchema`. The type is `MonitorState`. |
+| `POST /answer` | Answers one waiting question. The body is JSON: `{ "requestId": "...", "response": { ... } }`, with a `response` that matches the question's `responseSchema`, for example `{ "approved": true, "note": "..." }` for an approval or `{ "prompt": "...", "feedback": {} }` for a product decision. The answer is claimed and submitted through the run's callbacks client as the router `monitor`. |
 
 Nothing on the page starts, stops or edits the run. Any other route is 404,
 any other method 405, and a body that isn't JSON 400. A request whose

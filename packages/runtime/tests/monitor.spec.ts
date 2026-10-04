@@ -6,8 +6,9 @@ import { runInNewContext } from 'node:vm';
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-import { approval, createCallbackClient, dag, fnJob, formatEvent, kickback, pipeline, run } from '../src/api.ts';
-import type { LoopEvent, MonitorState, Outcome, RunResult } from '../src/api.ts';
+import { agentJob, approval, createCallbackClient, createCallbackGate, dag, fnJob, formatEvent, humanReview, judge, kickback, pipeline, revisionRequest, run } from '../src/api.ts';
+import type { JsonObject, LoopEvent, MonitorState, Outcome, RunResult } from '../src/api.ts';
+import { MockEngine } from '../src/testing.ts';
 
 type MonitorEvent = Extract<LoopEvent, { kind: 'monitor' }>;
 const monitorEvents = (events: LoopEvent[]): MonitorEvent[] =>
@@ -18,6 +19,40 @@ const get = async (url: string) => {
   return { status: res.status, type: res.headers.get('content-type') ?? '', body: await res.text() };
 };
 
+/**
+ * An element of the served page: its own markup, plus the cards the script
+ * adds to its end one at a time, each of which the script can remove.
+ */
+function fakeElement(hidden: boolean, listen: (type: string, listener: (event: unknown) => void) => void) {
+  let own = '';
+  type Card = { html: string; getAttribute(name: string): string | null; remove(): void };
+  const cards: Card[] = [];
+  return {
+    textContent: '', hidden,
+    get innerHTML() { return own + cards.map((card) => card.html).join(''); },
+    set innerHTML(html: string) { own = html; cards.length = 0; },
+    get children() { return [...cards]; },
+    insertAdjacentHTML(position: string, html: string) {
+      if (position !== 'beforeend') throw new Error(`the page inserted at ${position}`);
+      const card: Card = {
+        html,
+        getAttribute: (name) => new RegExp(`^<[^>]*\\b${name}="([^"]*)"`).exec(card.html)?.[1] ?? null,
+        remove: () => { cards.splice(cards.indexOf(card), 1); },
+      };
+      cards.push(card);
+    },
+    addEventListener: listen,
+    /** Put `html` just before a question's first button, wherever the script wrote that question's form. */
+    typeInto(requestId: string, html: string) {
+      const at = `data-request="${requestId}"`;
+      const card = cards.find((c) => c.html.includes(at));
+      if (card) card.html = card.html.replace(at, `${html}${at}`);
+      else if (own.includes(at)) own = own.replace(at, `${html}${at}`);
+      else throw new Error(`no form for ${requestId}`);
+    },
+  };
+}
+
 /** Host the served script's text writes and polling; layout and clicks need a browser. */
 async function loadMonitorPage(url: string) {
   const page = await get(url);
@@ -26,10 +61,13 @@ async function loadMonitorPage(url: string) {
   if (script === undefined) throw new Error('the served monitor page has no script');
   // Only IDs present in the served markup exist. No renderer or usage text is supplied here.
   const markup = page.body.slice(0, page.body.indexOf('<script>'));
+  const listeners = new Map<string, (event: unknown) => void>();
   const elements = new Map(Array.from(markup.matchAll(/<[^>]+\bid="([^"]+)"[^>]*>/g), ([tag, id]) => [
     id!,
-    { textContent: '', innerHTML: '', hidden: /\bhidden(?:\s|>|=)/.test(tag), addEventListener() {} },
+    fakeElement(/\bhidden(?:\s|>|=)/.test(tag), (type, listener) => listeners.set(`${id}:${type}`, listener)),
   ] as const));
+  const posted: string[] = [];
+  let answered: Promise<unknown> | undefined;
   let nextPoll: (() => Promise<void>) | undefined;
   let markReady!: () => void;
   let rejectReady!: (error: unknown) => void;
@@ -52,6 +90,7 @@ async function loadMonitorPage(url: string) {
       // The rejection itself is already routed to `rejectReady` above; this
       // chain only needs to stay quiet about it, not handle it again.
       if (path === 'state') response.then(() => setImmediate(() => setImmediate(markReady)), () => {});
+      if (path === 'answer') { posted.push(String(init?.body)); answered = response; }
       return response;
     },
     setTimeout(callback: () => Promise<void>) {
@@ -68,6 +107,30 @@ async function loadMonitorPage(url: string) {
     html: (id: string) => elements.get(id)?.innerHTML ?? '',
     visibleText: () => [...elements.values()].filter((element) => !element.hidden)
       .map((element) => element.textContent).join('\n'),
+    /** Stand in for a person's typing into a pending question's form, so a check can see whether a poll rewrites it. */
+    type(requestId: string, html: string) { elements.get('pending')!.typeInto(requestId, html); },
+    /**
+     * Click a button in a pending question's form, with `fields` as what the
+     * person typed into the form's named fields, and return the body the
+     * page posted once the page has read the answer. `choice` is the
+     * option a person picked from the form's list of answer shapes, if any.
+     */
+    async click(requestId: string, fields: Record<string, string>, answer?: 'yes' | 'no', choice?: string) {
+      const form = {
+        elements: { namedItem: (name: string) => (name in fields ? { value: fields[name] } : null) },
+        querySelector: (selector: string) => (selector === 'select[data-choice]' && choice !== undefined ? { value: choice } : null),
+      };
+      const button = {
+        getAttribute: (name: string) => (name === 'data-request' ? requestId : name === 'data-answer' ? answer ?? null : null),
+        closest: (selector: string) => (selector === 'form' ? form : null),
+      };
+      const before = posted.length;
+      listeners.get('pending:click')!({ target: { closest: (selector: string) => (selector.startsWith('button') ? button : null) } });
+      if (posted.length === before) throw new Error('the page posted no answer');
+      await answered;
+      await new Promise((resolve) => setImmediate(() => setImmediate(resolve)));
+      return JSON.parse(posted.at(-1)!) as { requestId: string; response: JsonObject };
+    },
     async poll() {
       const callback = nextPoll;
       nextPoll = undefined;
@@ -75,6 +138,39 @@ async function loadMonitorPage(url: string) {
       await callback();
     },
   };
+}
+
+/** Wait for `read` to give a value, checking every 20ms for up to five seconds. */
+async function until<T>(read: () => T | undefined | Promise<T | undefined>): Promise<T> {
+  for (let tries = 0; tries < 250; tries += 1) {
+    const value = await read();
+    if (value !== undefined) return value;
+    await new Promise((resolve) => setTimeout(resolve, 20));
+  }
+  throw new Error('gave up waiting');
+}
+
+/**
+ * A page and a review that always sends it back, with a judge that asks a
+ * person for a product decision after the first review and lets the work
+ * stand after the next. `prompts` collects what the writer is asked.
+ */
+function productDecisionReview(prompts: string[]) {
+  let judged = 0;
+  const judgeEngine = new MockEngine(() => JSON.stringify({ stop_reason: { choice: judged++ === 0 ? 'product_decision' : 'holds' } }));
+  return dag({
+    name: 'product-review',
+    maxKickbacks: { write: judge({ engine: judgeEngine, identity: { adapter: 'mock', provider: 'mock', modelFamily: 'judge-mock', model: 'judge-mock', tools: [] } }) },
+    nodes: {
+      write: agentJob({
+        label: 'write', model: 'writer-mock', prompt: 'Write the page.', consumeFeedback: true,
+        engine: new MockEngine((request) => { prompts.push(request.prompt); return 'wrote the page'; }),
+      }),
+      review: { needs: ['write'], job: fnJob('review', () => revisionRequest({
+        target: 'write', reason: 'Choose the audience', findings: [{ severity: 'should-fix', evidence: 'The page must choose one audience.' }],
+      })) },
+    },
+  });
 }
 
 let home: string;
@@ -390,5 +486,206 @@ describe('the run monitor', () => {
     // buttons, never after: a reviewer sees what they're approving first.
     expect(pendingHtml.indexOf('src/index.ts')).toBeLessThan(pendingHtml.indexOf('<form'));
     expect(pendingHtml.indexOf('<a href="https://example.invalid/pr/1"')).toBeLessThan(pendingHtml.indexOf('<form'));
+  });
+  it('sends each question\'s response schema in /state', async () => {
+    const client = createCallbackClient();
+    const result = await run(approval('approve', { question: 'Ship?', input: { change: 'abc' } }), { monitor: true, callbacks: client });
+    opened.push(result);
+    const state: MonitorState = JSON.parse((await get(`${result.monitor!.url}state`)).body);
+    expect(state.pending).toHaveLength(1);
+    expect(state.pending[0]!.responseSchema).toEqual(client.listPending()[0]!.responseSchema);
+    expect(state.pending[0]!.responseSchema.required).toEqual(['approved']);
+  });
+
+  it('lets a person answer a judge\'s product decision with a written decision, and the run goes on with it', async () => {
+    const events: LoopEvent[] = [];
+    const prompts: string[] = [];
+    const running = run(productDecisionReview(prompts), { cwd: home, monitor: true, onCallback: 'wait', onEvent: (e) => events.push(e) });
+    const url = await until(() => monitorEvents(events)[0]?.url);
+    const pending = await until(async () => {
+      const state: MonitorState = JSON.parse((await get(`${url}state`)).body);
+      return state.pending[0];
+    });
+    expect(pending.decisionText).toBe('What product decision should guide this review?');
+    expect(pending.responseSchema.required).toEqual(expect.arrayContaining(['prompt', 'feedback']));
+    const page = await loadMonitorPage(url);
+    const card = page.html('pending');
+    expect(card).toContain('<textarea name="prompt"');
+    expect(card).not.toContain('data-answer="yes"');
+    // A poll while the question still waits leaves the card, and what a person typed into it, alone.
+    page.type(pending.requestId, '<!-- typed -->');
+    await page.poll();
+    expect(page.html('pending')).toContain('<!-- typed -->');
+    // A blank decision is refused, and the reason and the form both outlast the next poll.
+    await page.click(pending.requestId, { prompt: '   ' });
+    expect(page.text('status')).toMatch(/^the answer was refused: /);
+    await page.poll();
+    expect(page.text('status')).toMatch(/^the answer was refused: /);
+    expect(page.html('pending')).toContain('<!-- typed -->');
+    const body = await page.click(pending.requestId, { prompt: 'Write for new users.' });
+    expect(body).toEqual({ requestId: pending.requestId, response: { prompt: 'Write for new users.', feedback: {} } });
+    expect(page.text('status')).toBe('answered');
+    const result = await running;
+    opened.push(result);
+    expect(result.outcome.status, result.outcome.summary).toBe('pass');
+    expect(prompts).toHaveLength(2);
+    expect(prompts[1]).toContain('Write for new users.');
+  });
+
+  it('shows any other schema\'s required fields as labelled inputs and posts what a person typed', async () => {
+    const client = createCallbackClient();
+    const result = await run(fnJob('a', () => {}), { monitor: true, callbacks: client });
+    opened.push(result);
+    const request = createCallbackGate({
+      gateId: 'ticket', gateVersion: 1, decisionText: 'Which ticket, and how many people?', input: null,
+      responseSchema: { type: 'object', properties: { ticket: { type: 'string' }, people: { type: 'integer' } }, required: ['ticket', 'people'] },
+    });
+    await client.post(request);
+    const page = await loadMonitorPage(result.monitor!.url);
+    const card = page.html('pending');
+    expect(card).toMatch(/<label>ticket<input name="ticket"/);
+    expect(card).toMatch(/<label>people<input name="people"/);
+    const body = await page.click(request.requestId, { ticket: 'ABC-1', people: '3' });
+    expect(body.response).toEqual({ ticket: 'ABC-1', people: 3 });
+    expect(page.text('status')).toBe('answered');
+    expect(client.listPending()).toHaveLength(0);
+  });
+
+  it('asks for the required fields a schema states inside allOf, with their types', async () => {
+    const client = createCallbackClient();
+    const result = await run(fnJob('a', () => {}), { monitor: true, callbacks: client });
+    opened.push(result);
+    const request = createCallbackGate({
+      gateId: 'ticket', gateVersion: 1, decisionText: 'Which ticket, and how many people?', input: null,
+      responseSchema: { allOf: [{ properties: { ticket: { type: 'string' } }, required: ['ticket'] }, { allOf: [{ properties: { people: { type: 'integer' } }, required: ['people'] }] }] },
+    });
+    await client.post(request);
+    const page = await loadMonitorPage(result.monitor!.url);
+    const card = page.html('pending');
+    expect(card).toMatch(/<label>ticket<input name="ticket"/);
+    expect(card).toMatch(/<label>people<input name="people"/);
+    const body = await page.click(request.requestId, { ticket: 'ABC-1', people: '3' });
+    expect(body.response).toEqual({ ticket: 'ABC-1', people: 3 });
+    expect(page.text('status')).toBe('answered');
+    expect(client.listPending()).toHaveLength(0);
+  });
+
+  it('lets a person pick one of the answer shapes a schema accepts and fill in its fields', async () => {
+    const client = createCallbackClient();
+    const result = await run(fnJob('a', () => {}), { monitor: true, callbacks: client });
+    opened.push(result);
+    const request = createCallbackGate({
+      gateId: 'ticket-or-reason', gateVersion: 1, decisionText: 'Which ticket, or why is there none?', input: null,
+      responseSchema: { type: 'object', properties: { ticket: { type: 'string' }, reason: { type: 'string' } }, anyOf: [{ required: ['ticket'] }, { required: ['reason'] }] },
+    });
+    await client.post(request);
+    const page = await loadMonitorPage(result.monitor!.url);
+    const card = page.html('pending');
+    expect(card).toMatch(/<select data-choice><option value="0">ticket<\/option><option value="1">reason<\/option><\/select>/);
+    expect(card).toMatch(/<label>ticket<input name="ticket"/);
+    expect(card).toMatch(/<label>reason<input name="reason"/);
+    const body = await page.click(request.requestId, { ticket: '', reason: 'No ticket yet.' }, undefined, '1');
+    expect(body.response).toEqual({ reason: 'No ticket yet.' });
+    expect(page.text('status')).toBe('answered');
+    expect(client.listPending()).toHaveLength(0);
+  });
+
+  it('lets a person answer a human review whose own schema asks for one of two fields', async () => {
+    const client = createCallbackClient();
+    const result = await run(humanReview('ship', {
+      question: 'Ship this?', input: { change: 'abc' },
+      interaction: { id: 'ship', responseSchema: { type: 'object', properties: { ticket: { type: 'string' }, reason: { type: 'string' } }, anyOf: [{ required: ['ticket'] }, { required: ['reason'] }] } },
+    }), { monitor: true, callbacks: client });
+    opened.push(result);
+    expect(result.outcome.status).toBe('paused');
+    const page = await loadMonitorPage(result.monitor!.url);
+    const card = page.html('pending');
+    expect(card).toContain('<option value="0">decision: approved; ticket</option>');
+    expect(card).toMatch(/<label>ticket<input name="ticket"/);
+    expect(card).toMatch(/<label>reason<input name="reason"/);
+    const requestId = client.listPending()[0]!.requestId;
+    const body = await page.click(requestId, { ticket: 'ABC-1' }, undefined, '0');
+    expect(body.response).toEqual({ ticket: 'ABC-1', feedback: {}, prompt: '', decision: 'approved' });
+    expect(page.text('status')).toBe('answered');
+    expect(client.listPending()).toHaveLength(0);
+  });
+
+  it('keeps what a person typed into one question while another question arrives or goes', async () => {
+    const client = createCallbackClient();
+    const events: LoopEvent[] = [];
+    let finish!: () => void;
+    const held = new Promise<void>((resolve) => { finish = resolve; });
+    const running = run(fnJob('a', () => held), { monitor: true, callbacks: client, onEvent: (e) => events.push(e) });
+    const url = await until(() => monitorEvents(events)[0]?.url);
+    const ask = async (gateId: string) => {
+      const request = createCallbackGate({
+        gateId, gateVersion: 1, decisionText: `Which ${gateId}?`, input: null,
+        responseSchema: { type: 'object', properties: { ticket: { type: 'string' } }, required: ['ticket'] },
+      });
+      await client.post(request);
+      return request;
+    };
+    const first = await ask('first');
+    const second = await ask('second');
+    const page = await loadMonitorPage(url);
+    page.type(first.requestId, '<!-- typed -->');
+    const third = await ask('third');
+    await page.poll();
+    expect(page.html('pending')).toContain('<!-- typed -->');
+    expect(page.html('pending')).toContain(`data-request="${third.requestId}"`);
+    const claim = await client.claim(second.requestId, 'someone else');
+    if (!claim.ok) throw new Error(claim.kind);
+    expect((await client.submit(second.requestId, claim.claimToken, 'someone else', second.digest, { ticket: 'B' })).ok).toBe(true);
+    await page.poll();
+    expect(page.html('pending')).toContain('<!-- typed -->');
+    expect(page.html('pending')).not.toContain(`data-request="${second.requestId}"`);
+    expect(page.html('pending').indexOf('<!-- typed -->')).toBeLessThan(page.html('pending').indexOf(`data-request="${third.requestId}"`));
+    finish();
+    opened.push(await running);
+  });
+
+  it('fills a decision\'s feedback with the empty value its schema accepts', async () => {
+    const client = createCallbackClient();
+    const result = await run(fnJob('a', () => {}), { monitor: true, callbacks: client });
+    opened.push(result);
+    const request = createCallbackGate({
+      gateId: 'decide', gateVersion: 1, decisionText: 'Which audience?', input: null,
+      responseSchema: { type: 'object', properties: { prompt: { type: 'string' }, feedback: { type: 'string' } }, required: ['feedback', 'prompt'] },
+    });
+    await client.post(request);
+    const page = await loadMonitorPage(result.monitor!.url);
+    expect(page.html('pending')).not.toContain('name="feedback"');
+    const body = await page.click(request.requestId, { prompt: 'New users.' });
+    expect(body.response).toEqual({ prompt: 'New users.', feedback: '' });
+    expect(page.text('status')).toBe('answered');
+  });
+
+  it('asks a person for a decision\'s feedback when its schema allows only some values', async () => {
+    const client = createCallbackClient();
+    const result = await run(fnJob('a', () => {}), { monitor: true, callbacks: client });
+    opened.push(result);
+    const request = createCallbackGate({
+      gateId: 'decide', gateVersion: 1, decisionText: 'Which audience?', input: null,
+      responseSchema: { type: 'object', properties: { prompt: { type: 'string' }, feedback: { type: 'string', enum: ['accept', 'revise'] } }, required: ['feedback', 'prompt'] },
+    });
+    await client.post(request);
+    const page = await loadMonitorPage(result.monitor!.url);
+    expect(page.html('pending')).toMatch(/<label>feedback<input name="feedback" placeholder="one of: accept, revise"/);
+    const body = await page.click(request.requestId, { prompt: 'New users.', feedback: 'revise' });
+    expect(body.response).toEqual({ prompt: 'New users.', feedback: 'revise' });
+    expect(page.text('status')).toBe('answered');
+    expect(client.listPending()).toHaveLength(0);
+  });
+
+  it('answers an approval with its yes and the note a person wrote', async () => {
+    const client = createCallbackClient();
+    const result = await run(approval('approve', { question: 'Ship?', input: { change: 'abc' } }), { monitor: true, callbacks: client });
+    opened.push(result);
+    const page = await loadMonitorPage(result.monitor!.url);
+    expect(page.html('pending')).not.toContain('<textarea');
+    const requestId = client.listPending()[0]!.requestId;
+    const body = await page.click(requestId, { note: 'looks right' }, 'yes');
+    expect(body.response).toEqual({ approved: true, note: 'looks right' });
+    expect(page.text('status')).toBe('answered');
   });
 });
