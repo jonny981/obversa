@@ -39,7 +39,8 @@ try {
     JSON.stringify({
       claude: [
         { writes: files, reply: '{"status":"pass","summary":"writer wrote the files"}' },
-        { writes: files, reply: '{"status":"pass","summary":"writer applied the review"}' },
+        // The repair changes the function, as a writer applying a review does.
+        { writes: { ...files, 'src/add.mjs': '/** Adds two numbers. */\nexport const add = (a, b) => a + b;\n' }, reply: '{"status":"pass","summary":"writer applied the review"}' },
       ],
       codex: [
         { writes: { 'reviews/review-1.json': '{"status":"revise"}\n' }, reply: '{"status":"revise","summary":"review requested one repair","findings":[{"severity":"block","evidence":"the implementation needs one repair"}]}' },
