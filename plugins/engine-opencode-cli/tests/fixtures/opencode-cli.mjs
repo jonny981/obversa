@@ -102,7 +102,7 @@ function finishPart(id, tokens = {}) {
     messageID: 'fixture-message',
     type: 'step-finish',
     reason: 'stop',
-    cost: 0,
+    cost: Number(process.env.OBVERSA_TEST_OPENCODE_STEP_COST_USD ?? 0),
     tokens: {
       input: 2,
       output: 5,
@@ -293,6 +293,17 @@ if (scenario === 'timeout') {
 if (scenario === 'invalid-config') {
   process.stdout.write('{"type":"text","truncated":');
   process.exit(1);
+}
+if (scenario === 'hang-after-step' || scenario === 'fail-after-step') {
+  // One step that spent tokens, then no answer: the text tells a test the step is in.
+  emit('step_finish', { part: { ...finishPart('fixture-step-finish'), reason: 'tool-calls' } });
+  emit('text', { part: textPart('fixture-ready', 'fixture-ready') });
+  if (scenario === 'fail-after-step') {
+    emit('error', { error: apiError('503 service unavailable', 503, true) });
+    process.exit(1);
+  }
+  setInterval(() => {}, 1_000);
+  await new Promise(() => {});
 }
 if (scenario === 'hang' || scenario === 'cancellation') {
   emit('text', { part: textPart('fixture-ready', 'fixture-ready') });

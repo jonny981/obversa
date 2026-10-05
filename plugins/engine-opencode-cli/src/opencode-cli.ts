@@ -27,6 +27,7 @@ import {
   type AgentRequest,
   type AgentResult,
   type AgentResultPart,
+  type CostReceipt,
   type Engine,
   type EngineEventSink,
   type EngineFailureKind,
@@ -215,6 +216,9 @@ interface OpenCodeAccumulator {
   outputTokens: number;
   cacheCreationInputTokens: number;
   cacheReadInputTokens: number;
+  /** The dollars OpenCode reported across the steps, while every step reported a number. */
+  costUsd: number;
+  costValid: boolean;
 }
 
 interface PermissionBuild {
@@ -858,6 +862,22 @@ function consumeUsage(
   } catch {
     accumulator.usageValid = false;
   }
+  if (typeof part.cost === 'number' && Number.isFinite(part.cost) && part.cost >= 0) {
+    accumulator.costUsd += part.cost;
+  } else {
+    accumulator.costValid = false;
+  }
+}
+
+/**
+ * The dollars OpenCode reported for the attempt. OpenCode writes 0 when it
+ * has no price for the model or the provider bills a plan, so a total of 0
+ * is no figure rather than a free call.
+ */
+function reportedCost(accumulator: OpenCodeAccumulator): { cost: CostReceipt } | Record<string, never> {
+  return accumulator.costValid && accumulator.stepCount > 0 && accumulator.costUsd > 0
+    ? { cost: { kind: 'reported', usd: accumulator.costUsd } }
+    : {};
 }
 
 function consumeLine(
@@ -1328,6 +1348,8 @@ export class OpenCodeCliEngine implements Engine {
       outputTokens: 0,
       cacheCreationInputTokens: 0,
       cacheReadInputTokens: 0,
+      costUsd: 0,
+      costValid: true,
     };
     const decoder = new TextDecoder();
     let buffer = '';
@@ -1401,8 +1423,16 @@ export class OpenCodeCliEngine implements Engine {
           `OpenCode returned an invalid JSON protocol: ${scrub(accumulator.protocolError.message)}`,
         );
       }
+      // A call that ends with no answer still spent the tokens it reported.
+      const reportSpent = () => onEvent({
+        type: 'usage',
+        usage: usage(accumulator),
+        model: requested.model ?? 'unknown',
+        ...reportedCost(accumulator),
+      });
       const aborted = command.aborted || signal.aborted;
       if (aborted && accumulator.stopReason !== 'stop') {
+        reportSpent();
         throw loopError('aborted', 'OpenCode attempt was aborted');
       }
 
@@ -1422,6 +1452,7 @@ export class OpenCodeCliEngine implements Engine {
         accumulator.stopReason === 'error'
         || accumulator.stopReason === 'content-filter'
       ) {
+        reportSpent();
         throw loopError(
           'unknown',
           `OpenCode ended with ${accumulator.stopReason}`,
@@ -1434,12 +1465,14 @@ export class OpenCodeCliEngine implements Engine {
           type: 'usage',
           usage: measuredUsage,
           model: effective.model ?? 'unknown',
+          ...reportedCost(accumulator),
         });
         throw new EngineIncompleteResultError(
           'OpenCode output ended at the token limit',
           validateIncompleteResultEvidence({
             parts,
             usage: measuredUsage,
+            ...reportedCost(accumulator),
             requested,
             effective,
             stopReason: 'length',
@@ -1460,6 +1493,7 @@ export class OpenCodeCliEngine implements Engine {
       }
       const markedFinal = accumulator.stopReason === 'stop';
       if (!markedFinal) {
+        reportSpent();
         if (!failed) {
           throw loopError(
             'invalid-config',
@@ -1481,6 +1515,7 @@ export class OpenCodeCliEngine implements Engine {
 
       if (parts.length === 0) {
         if (failed) {
+          reportSpent();
           const kind = command.timedOut
             ? 'timeout'
             : nativeKind ?? classifyEngineFailure(new Error(stderr));
@@ -1499,12 +1534,14 @@ export class OpenCodeCliEngine implements Engine {
           type: 'usage',
           usage: measuredUsage,
           model: effective.model ?? 'unknown',
+          ...reportedCost(accumulator),
         });
         throw new EngineIncompleteResultError(
           'OpenCode completed without a final text part',
           validateIncompleteResultEvidence({
             parts,
             usage: measuredUsage,
+            ...reportedCost(accumulator),
             requested,
             effective,
             stopReason: 'stop',
@@ -1519,6 +1556,7 @@ export class OpenCodeCliEngine implements Engine {
         type: 'usage',
         usage: measuredUsage,
         model: effective.model ?? 'unknown',
+        ...reportedCost(accumulator),
       });
       const late = request.timeoutMs !== undefined
         && Date.now() - startedAt > request.timeoutMs;
@@ -1533,6 +1571,7 @@ export class OpenCodeCliEngine implements Engine {
       return validateAgentResult({
         parts,
         usage: measuredUsage,
+        ...reportedCost(accumulator),
         requested,
         effective,
         ...(accumulator.stopReason === null

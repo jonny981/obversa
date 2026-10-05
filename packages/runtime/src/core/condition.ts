@@ -12,6 +12,7 @@
  */
 
 import type {
+  CommandRun,
   Condition,
   ConditionInput,
   ConditionResult,
@@ -191,6 +192,14 @@ export function commandSucceeds(
   } = {},
 ): Condition {
   return setLabel(async (ctx) => {
+    const startedAt = Date.now();
+    const ran = (exitCode: number | null, timedOut = false): CommandRun => ({
+      command,
+      args: [...args],
+      exitCode,
+      durationMs: Date.now() - startedAt,
+      ...(timedOut ? { timedOut: true as const } : {}),
+    });
     try {
       const env = resolveEnv(ctx, opts.env);
       const r = await runRuntimeProcess({
@@ -205,7 +214,7 @@ export function commandSucceeds(
       const stderr = processText(r.stderr);
       const all = `${stdout}${stderr}`;
       if (r.exitCode === 0 && !r.timedOut) {
-        return { met: true, reason: `\`${command}\` exited 0` };
+        return { met: true, reason: `\`${command}\` exited 0`, command: ran(0) };
       }
       const baseReason = r.timedOut
         ? `\`${command}\` timed out after ${opts.timeoutMs} ms`
@@ -226,11 +235,13 @@ export function commandSucceeds(
           `exit: ${r.exitCode ?? '(command did not run)'}\n\n` +
           `stdout:\n${scrubCapture(stdout, env, 4000)}\n\n` +
           `stderr:\n${scrubCapture(stderr, env, 4000)}`,
+        command: ran(r.exitCode, r.timedOut),
       };
     } catch (e) {
       return {
         met: false,
         reason: `\`${command}\` failed to run: ${e instanceof Error ? e.message : String(e)}`,
+        command: ran(null),
       };
     }
   }, `${command}${args.length ? ` ${args.join(' ')}` : ''}`);
@@ -721,6 +732,9 @@ export function agentCheck(config: AgentCheckConfig): Condition {
               path: [...ctx.path],
               model: e.model,
               usage: e.usage,
+              ...(e.cost === undefined ? {} : { cost: e.cost }),
+              ...(e.billing === undefined ? {} : { billing: e.billing }),
+              ...(e.failed === undefined ? {} : { failed: e.failed }),
             });
           }
         },
@@ -871,6 +885,7 @@ export function gateJob(
           summary: r.reason,
         };
     if (r.output !== undefined && outcome.data === undefined) outcome.data = r.output;
+    if (r.command !== undefined) outcome.command = r.command;
     ctx.emit({
       kind: 'job:end',
       ts: Date.now(),

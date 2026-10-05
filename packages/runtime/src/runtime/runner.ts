@@ -4,7 +4,10 @@
  * state, and the stats collector. Hosts observe via `onEvent`.
  */
 
-import { join } from 'node:path';
+import { createHash } from 'node:crypto';
+import { readFileSync } from 'node:fs';
+import { join, resolve } from 'node:path';
+import { fileURLToPath } from 'node:url';
 
 import type {
   Engine,
@@ -12,10 +15,11 @@ import type {
 } from '../engines/engine.js';
 import { isEngine } from '../engines/engine.js';
 import { Stats, type StatsSnapshot } from '../core/stats.js';
-import { costReport, type CostReport, type PriceTable } from '../core/cost.js';
+import { costReport, SHIPPED_PRICES, type CostReport, type PriceTable } from '../core/cost.js';
 import { LoopError } from '../core/errors.js';
 import { Budget, type BudgetConfig } from '../core/budget.js';
 import { makeRecorder, readResumeRecord } from './persist.js';
+import { pricedEngine, RecordTotals } from './record-totals.js';
 
 import { RESUME_RECORDED_USAGE, RESUME_STAGE_OUTCOMES } from '../core/resume.js';
 
@@ -47,6 +51,11 @@ import type {
 
 /** Default ceiling on an interruptible limit-wait: 5 minutes. */
 const DEFAULT_MAX_WAIT_MS = 300_000;
+
+/** Default interval between `heartbeat` events: 60 seconds. */
+const DEFAULT_HEARTBEAT_MS = 60_000;
+
+const STOP_SIGNALS = ['SIGINT', 'SIGTERM'] as const;
 
 /**
  * Exit code for a `paused` run: EX_TEMPFAIL (sysexits.h). Distinct from `fail`
@@ -135,10 +144,44 @@ export interface RunOptions {
   maxWaitMs?: number;
   /**
    * Price the run's measured token usage (`RunResult.cost`). Prices are
-   * caller-supplied — the library hardcodes none. `baselineModel` adds the
+   * caller-supplied: this report does not read the shipped price table that
+   * the per-call `cost` on each `engine:usage` event uses. `baselineModel` adds the
    * reconstructed counterfactual: the same token stream at that model's rates.
    */
   cost?: { prices: PriceTable; baselineModel?: string };
+  /**
+   * Prices laid over the table the runtime ships, for the estimated cost on
+   * each engine call. An entry here replaces the shipped entry with the same
+   * name, and a new name adds an entry.
+   */
+  prices?: PriceTable;
+  /**
+   * The workflow file this run comes from: a path, or a file URL such as the
+   * launcher's `import.meta.url`. `run:start` records its path and SHA-256.
+   */
+  source?: string | URL;
+  /**
+   * Milliseconds between `heartbeat` events while the run is going. Default
+   * 60000; 0 writes none.
+   */
+  heartbeatMs?: number;
+}
+
+/** The absolute path and SHA-256 of the run's `source` file. */
+function sourceRecord(source: string | URL): { path: string; sha256: string } {
+  let path: string;
+  try {
+    path = source instanceof URL || source.startsWith('file:') ? fileURLToPath(source) : resolve(source);
+  } catch (error) {
+    throw new TypeError(`source must be a file path or a file URL: ${error instanceof Error ? error.message : String(error)}`);
+  }
+  let bytes: Buffer;
+  try {
+    bytes = readFileSync(path);
+  } catch (error) {
+    throw new TypeError(`source ${path} cannot be read: ${error instanceof Error ? error.message : String(error)}`);
+  }
+  return { path, sha256: createHash('sha256').update(bytes).digest('hex') };
 }
 
 /** The run's totals, in the shape the line formatter takes. */
@@ -194,7 +237,14 @@ export async function run(
     throw new JsonValueError('', 'run brief must be a JSON object');
   }
   const params = cloneFrozenJson(paramsInput as RunBrief);
+  const heartbeatMs = options.heartbeatMs ?? DEFAULT_HEARTBEAT_MS;
+  if (!Number.isSafeInteger(heartbeatMs) || heartbeatMs < 0) {
+    throw new TypeError('heartbeatMs must be a non-negative integer');
+  }
+  const source = options.source === undefined ? undefined : sourceRecord(options.source);
   const stats = new Stats();
+  const prices: PriceTable = { ...SHIPPED_PRICES, ...options.prices };
+  const totals = new RecordTotals(prices);
   const controller = new AbortController();
   if (options.signal) {
     if (options.signal.aborted) controller.abort();
@@ -251,16 +301,20 @@ export async function run(
     options.recordTo === 'auto'
       ? join(ensureRunSubdir(dir, 'records'), `${runId!}.jsonl`)
       : options.recordTo;
+  let session: number | undefined;
   if (recordPath) {
     const resumed = options.resume === true ? readResumeRecord(recordPath) : undefined;
+    session = (resumed?.sessions ?? 0) + 1;
     sinks.push(makeRecorder(recordPath, {
       thin: options.recordTo === 'auto',
+      session,
       ...(resumed === undefined ? {} : { resume: true }),
     }));
     if (resumed !== undefined) {
       if (resumed.outcomes.interactions.size > 0) {
         for (const receipt of resumed.receipts) budget?.addUsage(receipt);
       }
+      for (const call of resumed.calls) totals.restore(call);
       initialState[RESUME_STAGE_OUTCOMES] = resumed.outcomes;
       initialState[RESUME_RECORDED_USAGE] = resumed.usage;
     }
@@ -285,15 +339,30 @@ export async function run(
     sinks.push(started.sink);
   }
 
-  const emit = (event: LoopEvent) => {
+  const emit = (raw: LoopEvent) => {
+    const event = totals.stamp(raw);
     stats.record(event);
-    if (budget && event.kind === 'engine:usage') budget.addUsage(event.usage);
+    // A failed call counts the tokens it reported. One with no tokens is in
+    // the record but not the budget, so a rejected call does not stop the run
+    // from trying a fallback.
+    if (budget && event.kind === 'engine:usage' && (event.failed === undefined || event.usage.kind === 'reported')) {
+      budget.addUsage(event.usage);
+    }
     options.onEvent?.(event);
     for (const sink of sinks) sink(event);
   };
+  const priced = new WeakMap<Engine, Engine>();
+  const withCost = (engine: Engine): Engine => {
+    let wrapped = priced.get(engine);
+    if (wrapped === undefined) {
+      wrapped = pricedEngine(engine, prices);
+      priced.set(engine, wrapped);
+    }
+    return wrapped;
+  };
   const resolveEngine = (ref?: EngineRef): Engine => {
     const selected = ref ?? options.engine;
-    if (isEngine(selected)) return selected;
+    if (isEngine(selected)) return withCost(selected);
     if (selected === undefined) {
       throw new LoopError({
         code: 'CONFIG',
@@ -307,7 +376,7 @@ export async function run(
         message: `unknown engine "${selected}"`,
       });
     }
-    return engine;
+    return withCost(engine);
   };
   const rootEngine = options.engine === undefined ? undefined : resolveEngine(options.engine);
 
@@ -327,7 +396,36 @@ export async function run(
     ...(resultRunId === undefined ? {} : { runId: resultRunId }),
     ...(recordPath === undefined ? {} : { recordPath }),
   };
-  emit({ kind: 'run:start', ts: Date.now(), path: [], ...runIdentity });
+  emit({
+    kind: 'run:start',
+    ts: Date.now(),
+    path: [],
+    ...runIdentity,
+    ...(session === undefined ? {} : { session }),
+    ...(source === undefined ? {} : { source }),
+  });
+
+  // A record that ends with neither run:end nor run:abort stopped near its
+  // last heartbeat.
+  const heartbeat = heartbeatMs > 0
+    ? setInterval(() => emit({ kind: 'heartbeat', ts: Date.now(), path: [] }), heartbeatMs)
+    : undefined;
+  heartbeat?.unref();
+  // On a stop signal the record says so before the process goes. This
+  // listener runs first and then removes itself, so a listener that acts
+  // only when it is the last one (the child-process cleanup) still acts.
+  // When no listener is left at all, the signal is raised again so the
+  // process stops as it would have without this run.
+  const onSignal = new Map(STOP_SIGNALS.map((signal) => [signal, () => {
+    emit({ kind: 'run:abort', ts: Date.now(), path: [], signal });
+    process.off(signal, onSignal.get(signal)!);
+    if (process.listenerCount(signal) === 0) process.kill(process.pid, signal);
+  }]));
+  for (const [signal, listener] of onSignal) process.prependListener(signal, listener);
+  const stopWatching = () => {
+    if (heartbeat !== undefined) clearInterval(heartbeat);
+    for (const [signal, listener] of onSignal) process.off(signal, listener);
+  };
 
   // Bring the environment up for the run before the job, so the gate can test
   // the running thing. A failed start fails the run cleanly rather than throwing.
@@ -351,12 +449,15 @@ export async function run(
       };
       const failStats = stats.snapshot();
       const failUsage = usageOf(failStats);
+      stopWatching();
       emit({
         kind: 'run:end',
         ts: Date.now(),
         path: [],
         outcome: failOutcome,
         usage: failUsage,
+        cost: totals.totals(),
+        totalUsage: totals.usage(),
         ...runIdentity,
       });
       supervisor?.finish(failOutcome);
@@ -419,6 +520,7 @@ export async function run(
   } finally {
     // Tear the environment down whatever happened (best-effort).
     if (environment) await environment.down(controller.signal).catch(() => {});
+    stopWatching();
   }
 
   const finalStats = stats.snapshot();
@@ -429,6 +531,8 @@ export async function run(
     path: [],
     outcome,
     usage: finalUsage,
+    cost: totals.totals(),
+    totalUsage: totals.usage(),
     ...runIdentity,
   });
   supervisor?.finish(outcome);

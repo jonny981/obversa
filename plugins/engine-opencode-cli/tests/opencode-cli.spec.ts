@@ -1343,6 +1343,50 @@ describe('OpenCode CLI adapter', () => {
     });
   });
 
+  it('records the dollar figure OpenCode reports, and no figure for a reported zero', async () => {
+    const run = async (costUsd: string) => {
+      const events: EngineStreamEvent[] = [];
+      const result = await new OpenCodeCliEngine({
+        ...options(),
+        environment: { OBVERSA_TEST_OPENCODE_STEP_COST_USD: costUsd },
+      }).run(request(), (event) => events.push(event), new AbortController().signal);
+      return { result, usage: events.find((event) => event.type === 'usage') };
+    };
+
+    const priced = await run('0.002');
+    expect(priced.result.cost).toEqual({ kind: 'reported', usd: 0.002 });
+    expect(priced.usage).toMatchObject({ cost: { kind: 'reported', usd: 0.002 } });
+    // OpenCode writes 0 when it has no price, which is no figure.
+    expect((await run('0')).result.cost).toBeUndefined();
+  });
+
+  it.each(['length-finish', 'empty-stop-finish'])(
+    'keeps the dollar figure OpenCode reports when a %s attempt is incomplete',
+    async (scenario) => {
+      const events: EngineStreamEvent[] = [];
+      let error: unknown;
+      try {
+        await new OpenCodeCliEngine({
+          ...options(),
+          environment: {
+            OBVERSA_TEST_OPENCODE_SCENARIO: scenario,
+            OBVERSA_TEST_OPENCODE_STEP_COST_USD: '0.002',
+          },
+        }).run(request(), (event) => events.push(event), new AbortController().signal);
+      } catch (caught) {
+        error = caught;
+      }
+
+      expect(error).toBeInstanceOf(EngineIncompleteResultError);
+      if (error instanceof EngineIncompleteResultError) {
+        expect(error.evidence.cost).toEqual({ kind: 'reported', usd: 0.002 });
+      }
+      expect(events.find((event) => event.type === 'usage')).toMatchObject({
+        cost: { kind: 'reported', usd: 0.002 },
+      });
+    },
+  );
+
   it('keeps a final result separate from a later transport failure', async () => {
     const result = await new OpenCodeCliEngine({
       ...options(),
@@ -1531,6 +1575,38 @@ describe('OpenCode CLI adapter', () => {
       new AbortController().signal,
     )).rejects.toMatchObject({ kind: 'timeout' });
   });
+
+  it.each(['hang-after-step', 'fail-after-step', 'error-finish'])(
+    'counts the tokens and dollars an attempt spent when it ends with no answer (%s)',
+    async (scenario) => {
+      const controller = new AbortController();
+      const events: EngineStreamEvent[] = [];
+      await expect(new OpenCodeCliEngine({
+        ...options(),
+        environment: {
+          OBVERSA_TEST_OPENCODE_SCENARIO: scenario,
+          OBVERSA_TEST_OPENCODE_STEP_COST_USD: '0.002',
+        },
+      }).run(request(), (event) => {
+        events.push(event);
+        // The hanging attempt is stopped once its step is in.
+        if (scenario === 'hang-after-step' && event.type === 'text') controller.abort();
+      }, controller.signal)).rejects.toBeInstanceOf(EngineError);
+
+      expect(events.filter((event) => event.type === 'usage')).toEqual([{
+        type: 'usage',
+        usage: {
+          kind: 'reported',
+          inputTokens: 6,
+          outputTokens: 7,
+          cacheCreationInputTokens: 1,
+          cacheReadInputTokens: 3,
+        },
+        model: 'fixture-provider/fixture-model',
+        cost: { kind: 'reported', usd: 0.002 },
+      }]);
+    },
+  );
 
   it.each(['invocation', 'structured'] as const)('starts cleanup at the work deadline and keeps a completed result (%s)', async (mode) => {
     const marker = join(temporaryDirectory('lines-opencode-final-'), 'written');

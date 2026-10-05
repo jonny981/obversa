@@ -669,7 +669,7 @@ describe('a judge as a dag() maxKickbacks budget', () => {
     expect(round).toBe(2);
     expect(seen).toHaveLength(1);
     expect(seen[0]!.revision!.findings).toEqual([
-      { evidence: 'REAL: the build fails', severity: 'should-fix', judgeReason: 'it breaks the build' },
+      { evidence: 'REAL: the build fails', severity: 'should-fix', judgeReason: 'it breaks the build', id: 'finding-1' },
     ]);
     const judgeEvents = events.filter((e): e is Extract<LoopEvent, { kind: 'refine:judge' }> => e.kind === 'refine:judge');
     expect(judgeEvents.map((e) => e.rule)).toEqual(['findings: 1 act, 1 skip', 'findings: 0 act, 1 skip']);

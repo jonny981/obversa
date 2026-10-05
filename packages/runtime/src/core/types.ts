@@ -16,6 +16,7 @@
  */
 
 import type { Engine, EngineRef, UsageReceipt } from '../engines/engine.js';
+import type { Billing, CostReceipt } from '@obversa/api';
 import type { Memory, TeamSeat } from '@obversa/api';
 import type { LoopError } from './errors.js';
 import type { Budget } from './budget.js';
@@ -125,6 +126,21 @@ export interface Outcome {
    * the last review its cap allows.
    */
   openFindings?: readonly FeedbackFinding[];
+  /** Present on a `commandJob` outcome: the command it ran and how it ended. */
+  command?: CommandRun;
+}
+
+/** One command a `commandJob` ran, pass or fail. */
+export interface CommandRun {
+  /** The executable, exactly as given. */
+  readonly command: string;
+  /** Every argument, one per entry. */
+  readonly args: readonly string[];
+  /** The exit code, or null when the command did not run or did not exit. */
+  readonly exitCode: number | null;
+  readonly durationMs: number;
+  /** True when the command ran past its timeout and was stopped. */
+  readonly timedOut?: true;
 }
 
 export type RecordedStage =
@@ -184,6 +200,8 @@ export interface FeedbackFinding {
   disputed?: boolean;
   /** Why a judge sent this finding back, when a judge decided it. */
   judgeReason?: string;
+  /** The finding's id in its review round (`finding-2`), set when a judge decided each finding. */
+  id?: string;
 }
 
 /** One reviewer's answer on a finding another reviewer raised. */
@@ -392,6 +410,8 @@ export interface ConditionResult {
    * `loop:condition` events and to the next loop body via `ctx.lastGate`.
    */
   output?: string;
+  /** The command a command check ran and how it ended. */
+  command?: CommandRun;
 }
 
 /**
@@ -643,6 +663,27 @@ export interface UsageTotals {
   readonly unmeasuredCalls?: number;
 }
 
+/** The dollars a set of engine calls cost, summed from each call's `cost`. */
+export interface CostTotals {
+  /** Every reported and estimated figure added up. */
+  readonly usd: number;
+  /** The part of `usd` the engines reported. */
+  readonly reportedUsd: number;
+  /** The part of `usd` estimated from the price table. */
+  readonly estimatedUsd: number;
+  /** Calls with no figure, which `usd` leaves out. */
+  readonly unknownCalls: number;
+  /** The models of those calls, each named once. */
+  readonly unknownModels: readonly string[];
+}
+
+/** One file a round changed, in lines added and removed. */
+export interface RoundFileChange {
+  readonly path: string;
+  readonly added: number;
+  readonly removed: number;
+}
+
 // ── Events ──────────────────────────────────────────────────────────────────
 // One discriminated union drives streaming, recorders, and the stats collector.
 // Every event carries the loop `path` so consumers can
@@ -657,6 +698,10 @@ export type LoopEvent =
       path: [];
       runId?: string;
       recordPath?: string;
+      /** 1 for a fresh record, one more on each resume of it. Set when the run writes a record. */
+      session?: number;
+      /** The workflow file the run named as its `source`, with its SHA-256. */
+      source?: { readonly path: string; readonly sha256: string };
     }
   | {
       kind: 'run:end';
@@ -664,9 +709,22 @@ export type LoopEvent =
       path: [];
       outcome: Outcome;
       usage: UsageTotals;
+      /** The dollars the run's engine calls cost, in this session and every earlier session of the record. */
+      cost?: CostTotals;
+      /** The tokens of the run's engine calls, in this session and every earlier session of the record. `usage` counts this session only. */
+      totalUsage?: UsageTotals;
       runId?: string;
       recordPath?: string;
     }
+  | {
+      /** The process got SIGINT or SIGTERM while the run was going. */
+      kind: 'run:abort';
+      ts: number;
+      path: [];
+      signal: 'SIGINT' | 'SIGTERM';
+    }
+  /** The run is still going; written at the run's `heartbeatMs` interval. */
+  | { kind: 'heartbeat'; ts: number; path: [] }
   | {
       kind: 'workflow:start';
       ts: number;
@@ -706,6 +764,10 @@ export type LoopEvent =
       ts: number;
       path: string[];
       outcome: Outcome;
+      /** The tokens of this round's engine calls: the build and its review. */
+      usage?: UsageTotals;
+      /** The dollars of this round's engine calls. */
+      cost?: CostTotals;
       /**
        * Whether the loop will re-enter to act on a failing review (the review's
        * revision was accepted), vs give up because it exhausted its iterations or
@@ -788,6 +850,12 @@ export type LoopEvent =
        * from the original and correlate it with the revision that caused it.
        */
       attempt?: number;
+      /** On a done after a start: the time from that start to the attempt's first done. */
+      durationMs?: number;
+      /** On a done after a start: the tokens of the node's engine calls in this attempt. */
+      usage?: UsageTotals;
+      /** On a done after a start: the dollars of the node's engine calls in this attempt. */
+      cost?: CostTotals;
     }
   | { kind: 'dag:end'; ts: number; path: string[]; outcome: Outcome }
   /** The run's monitor page is up at `url`; emitted once, before the job starts. */
@@ -840,6 +908,8 @@ export type LoopEvent =
       path: string[];
       label: string;
       outcome: Outcome;
+      /** The time since the matching `job:start`. */
+      durationMs?: number;
     }
   | { kind: 'engine:text'; ts: number; path: string[]; delta: string }
   | { kind: 'engine:thinking'; ts: number; path: string[]; delta: string }
@@ -858,6 +928,12 @@ export type LoopEvent =
       path: string[];
       model: string;
       usage: UsageReceipt;
+      /** What the call cost: the engine's figure, an estimate from the price table, or unknown. */
+      cost?: CostReceipt;
+      /** How the call was paid for. */
+      billing?: Billing;
+      /** The call failed. The run's token budget counts its tokens when it reported them. */
+      failed?: true;
       role?: 'writer' | 'reviewer';
       stage?: string;
     }
@@ -903,6 +979,23 @@ export type LoopEvent =
       mergeFailed?: true;
       /** Reviewers asked to vote that failed or sent no readable reply. A finding shown to one of them is never dropped by the others' votes. */
       noVotesFrom?: string[];
+    }
+  | {
+      // What one build round changed in a git workspace: after each build
+      // round of a `workflow()` refine loop (`round` is the loop's
+      // iteration), and after each node run a `dag()` kickback causes
+      // (`node` is set, and `round` is the node's attempt).
+      kind: 'round:change';
+      ts: number;
+      path: string[];
+      node?: string;
+      round: number;
+      /** Each file that changed since the round began. A binary file counts 0 lines. */
+      files: readonly RoundFileChange[];
+      added: number;
+      removed: number;
+      /** The ids of the findings the round was sent back to answer, in the round that raised them. */
+      findings: readonly string[];
     }
   | {
       kind: 'interaction:checkpoint';

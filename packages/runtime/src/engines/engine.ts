@@ -10,6 +10,8 @@ export {
   type AgentResult,
   type AgentResultPart,
   type AttemptMetadata,
+  type Billing,
+  type CostReceipt,
   type Engine,
   type EngineEventSink,
   type EngineFailureKind,

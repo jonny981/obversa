@@ -24,7 +24,8 @@ record without the command.
 
 - **The header** carries the run's name, when it started and ended, its
   outcome, and the tokens in and out, with how many were read from cache. A
-  run that was killed says so: no end recorded.
+  run that was killed says so: no end recorded. A run stopped by SIGINT or
+  SIGTERM has a line that names the signal.
 - **A section per step**, in the order the steps first ran. A step that ran
   again after a review has a numbered run for each time, and the findings
   that made it run again sit above that run: which step returned them, why,

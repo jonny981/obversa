@@ -6,6 +6,7 @@ import type { RecordedEngineUsage } from '../core/job.js';
 import type { JsonObject } from '../graph/value.js';
 import { cloneFrozenJson } from '../graph/value.js';
 import type { LoopEvent, Outcome, RecordedStage, ResumedStageRecords } from '../core/types.js';
+import type { RestoredEvent } from './record-totals.js';
 
 export type { RecordedStage, ResumedStageRecords } from '../core/types.js';
 
@@ -18,22 +19,30 @@ interface RecorderOptions {
   thin?: boolean;
   /** Append to the existing record instead of truncating it. */
   resume?: boolean;
+  /** Stamp every line with this session number. */
+  session?: number;
 }
 
 /** Read the latest stage state and the engine answers recorded for each stage.
  * A missing record has no stage state, so resume starts fresh. */
 export function readResumeRecord(path: string): {
   readonly receipts: readonly UsageReceipt[];
+  /** Every engine call the record holds, with the cost it recorded, the loop rounds and dag nodes they ran in, and where each session began. */
+  readonly calls: readonly RestoredEvent[];
   readonly outcomes: ResumedStageRecords;
   readonly usage: ReadonlyMap<string, readonly RecordedEngineUsage[]>;
+  /** How many sessions the record holds: one per `run:start`. */
+  readonly sessions: number;
 } {
   const receipts: UsageReceipt[] = [];
+  const calls: RestoredEvent[] = [];
   const interactions = new Map<string, { identity: string; workspace: string; data: JsonObject }>();
   const anchors = new Map<string, { identity: string; workspace: string; recordId: string }>();
   const stages = new Map<string, RecordedStage>();
   const usage = new Map<string, RecordedEngineUsage[]>();
   const started = new Set<string>();
-  if (!existsSync(path)) return { outcomes: { anchors, stages, interactions }, usage, receipts };
+  let sessions = 0;
+  if (!existsSync(path)) return { outcomes: { anchors, stages, interactions }, usage, receipts, calls, sessions };
   const lines = readFileSync(path, 'utf8').split(/\r?\n/);
   for (const [lineNumber, line] of lines.entries()) {
     if (!line) continue;
@@ -43,7 +52,12 @@ export function readResumeRecord(path: string): {
     } catch {
       continue;
     }
-    if (event.kind === 'engine:usage') receipts.push(event.usage);
+    if (event.kind === 'engine:usage') {
+      if (event.failed === undefined || event.usage.kind === 'reported') receipts.push(event.usage);
+      calls.push(event);
+    }
+    if (event.kind === 'run:start' || event.kind === 'loop:iteration' || event.kind === 'workflow:start' || event.kind === 'dag:start' || event.kind === 'dag:node') calls.push(event);
+    if (event.kind === 'run:start') sessions += 1;
     if (event.kind === 'interaction:checkpoint') {
       const key = event.path.join('/');
       if (event.data === null) interactions.delete(key);
@@ -82,7 +96,7 @@ export function readResumeRecord(path: string): {
       } else if (event.outcome !== undefined) {
         stages.set(key, { kind: 'completed', outcome: event.outcome });
       }
-    } else if (event.kind === 'engine:usage' && event.role !== undefined && event.stage !== undefined) {
+    } else if (event.kind === 'engine:usage' && event.failed === undefined && event.role !== undefined && event.stage !== undefined) {
       for (let index = event.path.length; index > 0; index -= 1) {
         if (event.path[index - 1] !== event.stage) continue;
         const key = event.path.slice(0, index).join('/');
@@ -94,7 +108,7 @@ export function readResumeRecord(path: string): {
       }
     }
   }
-  return { outcomes: { anchors, stages, interactions }, usage, receipts };
+  return { outcomes: { anchors, stages, interactions }, usage, receipts, calls, sessions };
 }
 
 function ensureDir(path: string): void {
@@ -111,10 +125,11 @@ export function makeRecorder(
   if (options.resume !== true) writeFileSync(path, '');
   return (event) => {
     if (NOISE.has(event.kind)) return;
+    const line = options.thin ? thinEvent(event) : event;
     try {
       appendFileSync(
         path,
-        `${JSON.stringify(options.thin ? thinEvent(event) : event)}\n`,
+        `${JSON.stringify(options.session === undefined ? line : { ...(line as object), session: options.session })}\n`,
       );
     } catch {
       // Recording is best-effort until the durable event store arrives in D3.
@@ -160,6 +175,7 @@ function thinOutcome(outcome: Outcome): Outcome {
   if (outcome.revision !== undefined) thin.revision = outcome.revision;
   if (outcome.discarded !== undefined) thin.discarded = outcome.discarded;
   if (outcome.openFindings !== undefined) thin.openFindings = outcome.openFindings;
+  if (outcome.command !== undefined) thin.command = outcome.command;
   return thin;
 }
 

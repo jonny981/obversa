@@ -278,6 +278,11 @@ export function summarizeRecord(events: readonly LoopEvent[]): RecordSummary {
       case 'monitor':
         monitor = event.url;
         break;
+      case 'heartbeat':
+        break;
+      case 'run:abort':
+        lines.push({ kind: event.kind, text: `Stopped by ${event.signal}.` });
+        break;
       case 'dag:kickback':
         if (event.accepted) {
           const run = runFor(event.to, event.count + 1);

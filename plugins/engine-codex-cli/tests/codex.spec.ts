@@ -1,4 +1,4 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, onTestFinished, vi } from 'vitest';
 import {
   chmodSync,
   mkdtempSync,
@@ -201,6 +201,10 @@ writeFileSync(args[args.indexOf('-o') + 1], 'stub final');
   });
 
   it('reports terminal JSONL usage without double-counting cached input', async () => {
+    // The person's own shell may set either key; the test decides them.
+    vi.stubEnv('CODEX_API_KEY', '');
+    vi.stubEnv('OPENAI_API_KEY', '');
+    onTestFinished(() => { vi.unstubAllEnvs(); });
     const dir = mkdtempSync(join(tmpdir(), 'lines-codex-stub-'));
     const bin = join(dir, 'codex-stub.mjs');
     writeFileSync(
@@ -243,9 +247,19 @@ process.stdout.write(JSON.stringify({
           cacheReadInputTokens: 30,
         },
         model: 'codex',
+        billing: 'subscription',
       },
     ]);
+    expect(result.billing).toBe('subscription');
 
+    // A key the process can see decides the billing, when it is one Codex runs on.
+    const billingWith = async (env: Record<string, string>) => (await new CodexEngine({ cliBinary: bin }).run(
+      { prompt: 'do the work', env },
+      () => {},
+      new AbortController().signal,
+    )).billing;
+    expect(await billingWith({ CODEX_API_KEY: 'test-key' })).toBe('api');
+    expect(await billingWith({ OPENAI_API_KEY: 'test-key' })).toBe('unknown');
   });
 
   it('preserves a completed result when the subprocess fails during teardown', async () => {
@@ -304,6 +318,53 @@ process.exit(1);
         new AbortController().signal,
       ),
     ).rejects.toMatchObject({ kind: 'unknown' });
+  });
+
+  it('counts a call that fails with no answer under its tokens, configured model and billing', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'lines-codex-stub-'));
+    const failing = join(dir, 'codex-failing.mjs');
+    writeFileSync(
+      failing,
+      `#!/usr/bin/env node
+${VERSION_ONLY}
+process.stdout.write(JSON.stringify({
+  type: 'turn.completed',
+  usage: { input_tokens: 1000, output_tokens: 200 },
+}) + '\\n');
+console.error('stream disconnected before completion');
+process.exit(1);
+`,
+    );
+    const hanging = join(dir, 'codex-hanging.mjs');
+    writeFileSync(hanging, `#!/usr/bin/env node\n${VERSION_ONLY}setTimeout(() => {}, 60_000);\n`);
+    chmodSync(failing, 0o755);
+    chmodSync(hanging, 0o755);
+
+    const usageOf = async (bin: string, timeoutMs?: number) => {
+      const events: Array<{ type: string }> = [];
+      const engine = new CodexEngine({ cliBinary: bin, defaultModel: 'gpt-5.4' });
+      // The version check takes the call's timeout too; run it first so the timeout lands on the call.
+      await engine.admit({}, new AbortController().signal);
+      await expect(engine.run(
+        { prompt: 'do the work', env: { CODEX_API_KEY: 'test-key' }, ...(timeoutMs ? { timeoutMs, timeoutGraceMs: 100 } : {}) },
+        (event) => events.push(event),
+        new AbortController().signal,
+      )).rejects.toBeInstanceOf(Error);
+      return events.filter((event) => event.type === 'usage');
+    };
+
+    expect(await usageOf(failing)).toEqual([{
+      type: 'usage',
+      usage: { kind: 'reported', inputTokens: 1000, outputTokens: 200 },
+      model: 'gpt-5.4',
+      billing: 'api',
+    }]);
+    expect(await usageOf(hanging, 200)).toEqual([{
+      type: 'usage',
+      usage: { kind: 'unknown' },
+      model: 'gpt-5.4',
+      billing: 'api',
+    }]);
   });
 
   it('retains a trailing redacted Codex configuration diagnostic', async () => {

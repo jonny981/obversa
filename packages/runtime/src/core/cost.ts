@@ -11,22 +11,36 @@
  *    counterfactual, not a measured alternative run, and consumers should say
  *    so when they print it.
  *
- * Prices are supplied by the caller (a JSON file via `--prices`, or a table
- * in code). The library ships none: hardcoded prices go stale, and a wrong
- * price is worse than no price.
+ * The run report's prices are supplied by the caller (a JSON file via
+ * `--prices`, or a table in code). The per-call estimate on each
+ * `engine:usage` event reads the table the runtime ships in `prices.json`,
+ * with the run's `prices` option laid over it, and names the entry it used.
  */
 
+import type { CostReceipt, UsageReceipt } from '@obversa/api';
+
 import type { StatsSnapshot } from './stats.js';
+import shippedPrices from './prices.json' with { type: 'json' };
 
 export interface ModelPrice {
   /** Dollars per million input tokens. */
   inputPerMTokUsd: number;
   /** Dollars per million output tokens. */
   outputPerMTokUsd: number;
+  /** Dollars per million tokens written to the cache. */
+  cacheWritePerMTokUsd?: number;
+  /** Dollars per million tokens read from the cache. */
+  cacheReadPerMTokUsd?: number;
 }
 
-/** Model id → price. Keys match exactly first, then by longest prefix, so
- *  `"claude-sonnet-5"` covers dated ids like `claude-sonnet-5-20250929`. */
+/** The price table the runtime ships, read from `prices.json`. */
+export const SHIPPED_PRICES: PriceTable = shippedPrices;
+
+/** Model id → price. The run report (`priceFor`) matches a key exactly first,
+ *  then by longest prefix. The per-call estimate (`estimateCost`) matches only
+ *  the exact id or the id less a release date at its end, so
+ *  `"claude-sonnet-5"` covers `claude-sonnet-5-20250929` but `"gpt-5"` does
+ *  not cover `gpt-5.6`. */
 export type PriceTable = Record<string, ModelPrice>;
 
 export interface ModelCost {
@@ -72,6 +86,52 @@ export function priceFor(
     if (!best || key.length > best.key.length) best = { key, price };
   }
   return best?.price;
+}
+
+/** A release date at the end of a model id: `-20250929` or `-2025-08-07`. */
+const DATED_SUFFIX = /-(\d{8}|\d{4}-\d{2}-\d{2})$/;
+
+/** The entry named by the exact model id, or by the id without its release date. */
+function exactEntryFor(
+  table: PriceTable,
+  model: string,
+): { key: string; price: ModelPrice } | undefined {
+  for (const key of [model, model.replace(DATED_SUFFIX, '')]) {
+    if (Object.hasOwn(table, key)) return { key, price: table[key]! };
+  }
+  return undefined;
+}
+
+/**
+ * One call's tokens priced by the table entry for its model: the entry with
+ * the exact id, or with the id less a release date at its end. A model the
+ * table does not list gives `unknown`, even when a listed id starts its name.
+ * Input tokens include cache writes and reads, so those are taken out and
+ * priced at their own rates. Cached tokens with no cache rate in the entry, or no
+ * entry at all, give `unknown` rather than a guess.
+ */
+export function estimateCost(
+  usage: UsageReceipt,
+  model: string,
+  table: PriceTable,
+): CostReceipt {
+  if (usage.kind !== 'reported') return { kind: 'unknown' };
+  const match = exactEntryFor(table, model);
+  if (!match) return { kind: 'unknown' };
+  const { price } = match;
+  const written = usage.cacheCreationInputTokens ?? 0;
+  const read = usage.cacheReadInputTokens ?? 0;
+  const fresh = usage.inputTokens - written - read;
+  if (fresh < 0) return { kind: 'unknown' };
+  if (written > 0 && price.cacheWritePerMTokUsd === undefined) return { kind: 'unknown' };
+  if (read > 0 && price.cacheReadPerMTokUsd === undefined) return { kind: 'unknown' };
+  const usd =
+    (fresh * price.inputPerMTokUsd +
+      written * (price.cacheWritePerMTokUsd ?? 0) +
+      read * (price.cacheReadPerMTokUsd ?? 0) +
+      usage.outputTokens * price.outputPerMTokUsd) /
+    1_000_000;
+  return { kind: 'estimated', usd: round(usd), entry: match.key };
 }
 
 function usdFor(

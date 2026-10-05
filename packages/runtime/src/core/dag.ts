@@ -46,6 +46,7 @@ import { mergeLock, mergeSynthesis } from './merge.js';
 import type { EnvHandle } from '../env/environment.js';
 import { LoopError } from './errors.js';
 import { revisionFromOutcome } from './feedback.js';
+import { answeredFindingIds, watchRoundChange, type RoundChange } from './round-change.js';
 import { consultJudge, countBySeverity, hasBlockFinding, isJudge, judgedFindings, lastRoundAnswered, productDecisionFeedback, type JudgeRound, type JudgeState, type SkippedFinding } from './judge.js';
 import { checkpointInteraction, interactionDeclaration, interactionIdentity, jsonSnapshot, outcomeSnapshot, savedInteraction, type InteractionResponse } from './interaction.js';
 import { DEFAULT_FANOUT_CONCURRENCY } from './concurrency.js';
@@ -340,6 +341,7 @@ export function dag(config: DagConfig): Job {
     const forkNodeJob = async (
       name: string,
       node: DagNode,
+      change: RoundChange | undefined,
     ): Promise<Outcome> => {
       const base = parent.workspace;
       // An interrupted earlier run leaves its fork branch behind for recovery,
@@ -355,6 +357,9 @@ export function dag(config: DagConfig): Job {
         signal: parent.signal,
       });
       const wtWs: Workspace = { dir: wt.dir, branch };
+      // The node edits its worktree, and only a pass lands those edits, so
+      // its change is read there before the worktree goes.
+      const recordChange = change === undefined ? undefined : await watchRoundChange(parent, wtWs.dir);
       // Each team gets its own environment, named after its branch — born with
       // the worktree, torn down with it. A failed start propagates and the node
       // is recorded as failed; the worktree is still cleaned up in `finally`.
@@ -394,8 +399,9 @@ export function dag(config: DagConfig): Job {
               };
             }
             try {
+              // At the node's path, so the merge's engine calls count in the node's totals.
               await mergeLock(() =>
-                mergeSynthesis(parent, {
+                mergeSynthesis(childContext(parent, { depth, path: [...path, name] }), {
                   branch,
                   message: `merge: ${branch} (node ${name}, synthesis)`,
                 }),
@@ -424,6 +430,7 @@ export function dag(config: DagConfig): Job {
         outcome = await attempt();
         threw = false;
       } finally {
+        await recordChange?.(change!);
         if (envHandle)
           await envHandle.down(parent.signal).catch(() => {});
         if (threw) parent.log(`kept the branch ${wt.branch}: node "${name}" threw before its work could land`, 'warn');
@@ -441,11 +448,20 @@ export function dag(config: DagConfig): Job {
     const runNodeJob = async (
       name: string,
       node: DagNode,
+      change: RoundChange | undefined,
     ): Promise<Outcome> => {
       const retrySafe = node.retrySafe === true;
       const shared = resumeGuard(node.job, resumeIdentity, name, retrySafe, prior);
+      const inPlace = async (): Promise<Outcome> => {
+        const recordChange = change === undefined ? undefined : await watchRoundChange(parent);
+        try {
+          return await shared(nodeCtx(name, shared));
+        } finally {
+          await recordChange?.(change!);
+        }
+      };
       const isolated = node.isolate ?? config.isolation === 'worktree';
-      if (!isolated) return shared(nodeCtx(name, shared));
+      if (!isolated) return inPlace();
 
       const base = parent.workspace;
       if (!(await isRepo({ cwd: base.dir, signal: parent.signal }))) {
@@ -453,10 +469,10 @@ export function dag(config: DagConfig): Job {
           `node "${name}" requested worktree isolation but ${base.dir} is not a git repo; running in the shared workspace`,
           'warn',
         );
-        return shared(nodeCtx(name, shared));
+        return inPlace();
       }
 
-      const fork = resumeGuard(() => forkNodeJob(name, node), resumeIdentity, name, retrySafe, prior, true);
+      const fork = resumeGuard(() => forkNodeJob(name, node, change), resumeIdentity, name, retrySafe, prior, true);
       return fork(nodeCtx(name, fork));
     };
 
@@ -574,7 +590,10 @@ export function dag(config: DagConfig): Job {
                 attempt: attempts.get(name),
                 timeoutMs: node.timeoutMs,
               });
-              return { outcome: await runNodeJob(name, node), phase: 'done' };
+              // A node a kickback runs again records what it changed.
+              const attempt = attempts.get(name) ?? 1;
+              const change = attempt > 1 ? { path, node: name, round: attempt, findings: answeredFindingIds(pendingKickback.get(name)) } : undefined;
+              return { outcome: await runNodeJob(name, node, change), phase: 'done' };
             },
           );
           return record(name, result.outcome, result.phase);

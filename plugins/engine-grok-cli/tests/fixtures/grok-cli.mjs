@@ -264,6 +264,16 @@ if (scenario === 'model-unavailable-after-init') {
   process.exit(1);
 }
 
+if (scenario === 'error-result-usage') {
+  emit({
+    type: 'result', subtype: 'error_during_execution', is_error: true,
+    errors: ['503 service unavailable'], session_id: 'fixture-session',
+    uuid: 'fixture-error-result',
+    usage: { input_tokens: 2, output_tokens: 5, cache_read_input_tokens: 3, cache_creation_input_tokens: 0 },
+  });
+  process.exit(1);
+}
+
 if (scenario === 'cancellation') {
   emit({
     type: 'assistant',

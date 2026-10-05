@@ -16,7 +16,7 @@ import { join } from 'node:path';
 import pLimit from 'p-limit';
 
 import type { JobContext } from './types.js';
-import type { EngineRef } from '../engines/engine.js';
+import type { Engine, EngineRef } from '../engines/engine.js';
 import {
   mergeNoCommit,
   mergeAbort,
@@ -50,6 +50,23 @@ export interface MergeSynthesisResult {
 function stripFence(s: string): string {
   const m = /^```[^\n]*\n([\s\S]*?)\n```$/.exec(s.trim());
   return `${(m ? m[1]! : s).replace(/\s+$/, '')}\n`;
+}
+
+/** Put each call's usage, cost and billing in the record, as every other engine call does. */
+function recordUsage(ctx: JobContext): Parameters<Engine['run']>[1] {
+  return (event) => {
+    if (event.type !== 'usage') return;
+    ctx.emit({
+      kind: 'engine:usage',
+      ts: Date.now(),
+      path: [...ctx.path],
+      model: event.model,
+      usage: event.usage,
+      ...(event.cost === undefined ? {} : { cost: event.cost }),
+      ...(event.billing === undefined ? {} : { billing: event.billing }),
+      ...(event.failed === undefined ? {} : { failed: event.failed }),
+    });
+  };
 }
 
 function firstLine(s: string): string {
@@ -92,7 +109,7 @@ export async function mergeSynthesis(
             model: config.model,
             maxTokens: 4000,
           },
-          () => {},
+          recordUsage(ctx),
           ctx.signal,
         );
         const resolved = stripFence(requireFinalResultText(out));
@@ -150,7 +167,7 @@ async function synthesiseBody(
       model: config.model,
       maxTokens: 600,
     },
-    () => {},
+    recordUsage(ctx),
     ctx.signal,
   );
   return requireFinalResultText(out).trim();

@@ -2,9 +2,9 @@
 
 import { createHash } from 'node:crypto';
 import { mkdtempSync, rmSync } from 'node:fs';
-import { lstat, readFile, readlink, realpath } from 'node:fs/promises';
+import { copyFile, lstat, readFile, readlink, realpath } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
-import { join, relative, resolve } from 'node:path';
+import { basename, dirname, join, relative, resolve } from 'node:path';
 import { processText, runRuntimeProcess } from './process.js';
 
 interface GitOpts {
@@ -722,4 +722,73 @@ export async function mergeAbort(
   opts: { signal?: AbortSignal } = {},
 ): Promise<void> {
   await git(['merge', '--abort'], { cwd: repoDir, signal: opts.signal });
+}
+
+/**
+ * The work tree's files, tracked and untracked, written as a git tree object
+ * through a copy of the index, so the real index stays as it was. Ignored
+ * files and `excludePaths` are left out. Undefined outside a git work tree
+ * or when git fails. Never throws.
+ */
+export async function workTreeSnapshot(
+  opts: GitOpts,
+): Promise<{ readonly root: string; readonly tree: string } | undefined> {
+  const scratch = mkdtempSync(join(tmpdir(), 'obversa-round-'));
+  try {
+    const root = await gitRoot(opts);
+    if (!root) return undefined;
+    const index = join(scratch, 'index');
+    const realIndex = await git(['rev-parse', '--path-format=absolute', '--git-path', 'index'], { ...opts, cwd: root });
+    if (realIndex.exitCode === 0) {
+      // Starting from the real index keeps git's file stat cache, so only
+      // changed files are read again.
+      await copyFile(realIndex.stdout.trim(), index).catch(() => {});
+    }
+    // Git names the root by its real path, so each excluded path is read the
+    // same way before it is made relative to it.
+    const excluded = (await Promise.all((opts.excludePaths ?? []).map(async (p) => {
+      const absolute = resolve(opts.cwd, p);
+      const real = await realpath(dirname(absolute)).then((dir) => join(dir, basename(absolute)), () => absolute);
+      return relative(root, real).replace(/\\/g, '/');
+    }))).filter((p) => p && !p.startsWith('..') && p !== '.');
+    const run = async (args: string[]) => {
+      const result = await runRuntimeProcess({
+        executable: 'git',
+        args,
+        cwd: root,
+        signal: opts.signal,
+        env: { GIT_INDEX_FILE: index },
+      });
+      if (result.exitCode !== 0) throw new Error(`git ${args[0]} failed`);
+      return processText(result.stdout).trim();
+    };
+    await run(['add', '-A', '--', '.', ...excluded.map((p) => `:(exclude)${p}`)]);
+    return { root, tree: await run(['write-tree']) };
+  } catch {
+    return undefined;
+  } finally {
+    rmSync(scratch, { recursive: true, force: true });
+  }
+}
+
+/**
+ * The lines added and removed in each file between two trees, by path. A
+ * binary file counts 0 lines. Throws when git fails.
+ */
+export async function treeChanges(
+  root: string,
+  from: string,
+  to: string,
+  signal?: AbortSignal,
+): Promise<{ path: string; added: number; removed: number }[]> {
+  const result = await git(['diff', '--numstat', '-z', '--no-renames', from, to], { cwd: root, signal });
+  if (result.exitCode !== 0) throw new Error('git diff failed');
+  return result.stdout.split('\0').filter(Boolean).map((record) => {
+    const [added = '-', removed = '-', path = ''] = record.split('\t');
+    return {
+      path,
+      added: added === '-' ? 0 : Number(added),
+      removed: removed === '-' ? 0 : Number(removed),
+    };
+  });
 }

@@ -14,6 +14,7 @@ import { RESUME_IDENTITY } from './core/resume.js';
 import { LoopError } from './core/errors.js';
 import { loop } from './core/loop.js';
 import { kickback, revisionFromOutcome } from './core/feedback.js';
+import { answeredFindingIds, watchRoundChange } from './core/round-change.js';
 import { reviewPanel } from './core/synthesis.js';
 import { consultJudge, countBySeverity, hasBlockFinding, isJudge, judgedFindings, lastRoundAnswered, productDecisionFeedback, type JudgeRound, type JudgeState, type SkippedFinding } from './core/judge.js';
 import type { ConditionInput, DagConfig, Job, JobContext, Judge, Outcome } from './core/types.js';
@@ -638,6 +639,16 @@ function unchangedNoteGuard(
   };
 }
 
+/** A refine loop's build round, followed by a record of what it changed. */
+function recordRoundChange(job: Job): Job {
+  return copyJobMeta(async (ctx) => {
+    const recordChange = await watchRoundChange(ctx);
+    const outcome = await job(ctx);
+    await recordChange?.({ path: ctx.path, round: ctx.iteration, findings: answeredFindingIds(ctx.lastReview) });
+    return outcome;
+  }, job);
+}
+
 /** Lines added or removed since the previous round (a set difference, not a true diff, cheap and enough to show trend). */
 function lineDiffCount(before: string | undefined, after: string): number {
   if (before === undefined) return after.split('\n').length;
@@ -790,12 +801,13 @@ function stageJob(
       ? guarded
       : unchangedNoteGuard(named.name, guarded, writes);
     if (config.reviewedBy === undefined) return job;
+    const built = recordRoundChange(job);
     const reviewRole = role(roles, config.reviewedBy);
     if (!Array.isArray(reviewRole) && 'kind' in reviewRole && reviewRole.kind === 'person') {
       if (!reviewRole.interaction) throw new TypeError('a human reviewer needs an interaction binding');
       const humanCap = refineCap(refineOf(config));
       const humanLoop = loop({
-        name: `${named.name}-review`, body: job, max: humanCap === undefined ? undefined : humanCap + 1,
+        name: `${named.name}-review`, body: built, max: humanCap === undefined ? undefined : humanCap + 1,
         review: humanReview(named.name, {
           question: reviewRole.question, interaction: reviewRole.interaction,
           input: async (ctx) => Object.fromEntries(await Promise.all(writes.map(async (file) => [file, await readFile(join(ctx.workspace.dir, file), 'utf8')]))),
@@ -824,7 +836,7 @@ function stageJob(
       });
     const reviewLoop = loop({
       name: `${named.name}-review`,
-      body: job,
+      body: built,
       until: predicate(async (ctx) => {
         const writes = writesOf(config);
         for (const file of writes) {
