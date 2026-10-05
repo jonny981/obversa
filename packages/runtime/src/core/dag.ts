@@ -474,7 +474,9 @@ export function dag(config: DagConfig): Job {
     // needs last finished, in the record or in this run: that work is newer.
     const needsFinished = (name: string): number => Math.max(0, ...normalizeNeeds(nodes.get(name)!.needs)
       .map((need) => (ranAgain.has(need) ? Infinity : recordLine(need))));
-    const memo = new Map<string, Promise<Outcome>>([...results].map(([name, outcome]) => [name, Promise.resolve(outcome)]));
+    const memo = new Map<string, Promise<Outcome>>();
+    // The steps the saved rounds reuse, until the graph reaches them.
+    const restored = new Set(results.keys());
     // A step the saved rounds reuse does not run again: its recorded model
     // answers come back from the record, as a reused step's do.
     for (const name of results.keys()) restoreRecordedUsage({ state: parent.state, path: [...path, name], [ROUNDS]: nodeRounds(name) } as Pick<JobContext, 'state' | 'path'>);
@@ -835,6 +837,31 @@ export function dag(config: DagConfig): Job {
       if (existing) return existing;
       const node = nodes.get(name)!;
       const promise = (async (): Promise<Outcome> => {
+        if (restored.delete(name)) {
+          // A step the saved rounds reuse does not run again. Once the steps
+          // it needs are reached, a step whose record holds its pass writes
+          // only a done line, which repeats that pass in this run.
+          await Promise.all(normalizeNeeds(node.needs).map(run));
+          const outcome = results.get(name)!;
+          const recorded = stages?.get(nodeKey(name));
+          if (recorded?.kind === 'completed' && recorded.outcome.status === 'pass') {
+            const wrote = wroteFiles(node, outcome);
+            parent.emit({
+              kind: 'dag:node',
+              ts: ts(),
+              path,
+              node: name,
+              phase: 'done',
+              ...nodeContext(name),
+              outcome,
+              attempt: attempts.get(name),
+              timeoutMs: node.timeoutMs,
+              ...recordedRounds(nodeRounds(name), path.length + 1),
+              ...(wrote.length ? { wrote } : {}),
+            });
+          }
+          return outcome;
+        }
         // This node's run count: 1 the first time, +1 each kickback re-run (the
         // memo/results were cleared for the dirty subgraph, so run() re-enters).
         attempts.set(name, (attempts.get(name) ?? 0) + 1);

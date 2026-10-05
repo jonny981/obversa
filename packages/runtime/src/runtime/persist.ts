@@ -113,7 +113,16 @@ export function readResumeRecord(path: string): {
         const outcome = event.phase === 'skip'
           ? { ...event.outcome, data: { ...(event.outcome.data as JsonObject | undefined), skipped: true } }
           : event.outcome;
-        stages.set(key, { kind: 'completed', outcome, line: lineNumber, ...(event.wrote === undefined ? {} : { wrote: event.wrote }) });
+        // A pass that follows the pass the record holds, with no start that
+        // set it aside, is a resume repeating that pass. It keeps the line
+        // of the work it repeats, so the steps that need it still read as
+        // newer.
+        const prior = stages.get(key);
+        const repeats = event.phase === 'done' && outcome.status === 'pass'
+          && (outcome.data as { skipped?: boolean } | undefined)?.skipped !== true
+          && prior?.kind === 'completed' && prior.outcome.status === 'pass'
+          && (prior.outcome.data as { skipped?: boolean } | undefined)?.skipped !== true;
+        stages.set(key, { kind: 'completed', outcome, line: repeats ? prior.line : lineNumber, ...(event.wrote === undefined ? {} : { wrote: event.wrote }) });
       }
     } else if (event.kind === 'engine:usage' && event.failed === undefined && event.role !== undefined && event.stage !== undefined) {
       for (let index = event.path.length; index > 0; index -= 1) {
