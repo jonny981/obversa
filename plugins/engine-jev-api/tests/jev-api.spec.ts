@@ -278,8 +278,9 @@ describe('the wire call', () => {
     expect(result.parts).toEqual([{ kind: 'structured', value: answers, final: true }]);
     expect(result.usage).toEqual({ kind: 'reported', inputTokens: 5, outputTokens: 3 });
     expect(events.filter((event) => event.type === 'usage')).toEqual([
-      { type: 'usage', usage: result.usage, model: 'jev-fixture' },
+      { type: 'usage', usage: result.usage, model: 'jev-fixture', billing: 'api' },
     ]);
+    expect(result.billing).toBe('api');
     expect(result.effective.model).toBe('jev-fixture-effective');
     expect(result.effective.modelFamily).toBe('jev');
     expect(result.requested.adapter).toBe('jev-api');
@@ -371,7 +372,7 @@ describe('usage receipts', () => {
     const result = await engine(stubServer.url).run(request(), (event) => events.push(event), new AbortController().signal);
     expect(result.usage).toEqual({ kind: 'unknown' });
     expect(events.filter((event) => event.type === 'usage')).toEqual([
-      { type: 'usage', usage: { kind: 'unknown' }, model: 'jev-fixture' },
+      { type: 'usage', usage: { kind: 'unknown' }, model: 'jev-fixture', billing: 'api' },
     ]);
   });
 
@@ -388,7 +389,7 @@ describe('usage receipts', () => {
     expect(result.usage).toEqual({ kind: 'unknown' });
     expect(result.parts[0]).toEqual({ kind: 'structured', value: answers, final: true });
     expect(events.filter((event) => event.type === 'usage')).toEqual([
-      { type: 'usage', usage: { kind: 'unknown' }, model: 'jev-fixture' },
+      { type: 'usage', usage: { kind: 'unknown' }, model: 'jev-fixture', billing: 'api' },
     ]);
   });
 });
@@ -424,6 +425,19 @@ describe('failure mapping', () => {
     ));
     expect(error.kind).toBe('rate-limit');
     expect(error.retryAfterMs).toBe(2000);
+  });
+
+  it('counts a failed call under its configured model and API billing', async () => {
+    const stubServer = await stub();
+    stubServer.respond(429, { error: 'synthetic failure body' });
+    const events: EngineStreamEvent[] = [];
+    const error = await failureOf(() => engine(stubServer.url, { model: 'jev-configured' }).run(
+      request({ model: undefined }), (event) => events.push(event), new AbortController().signal,
+    ));
+    expect(error.kind).toBe('rate-limit');
+    expect(events).toEqual([
+      { type: 'usage', usage: { kind: 'unknown' }, model: 'jev-configured', billing: 'api' },
+    ]);
   });
 
   it('fails the attempt as transient when the endpoint is unreachable', async () => {

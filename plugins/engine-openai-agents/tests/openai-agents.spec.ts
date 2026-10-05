@@ -183,13 +183,14 @@ describe('openai agent engine run', () => {
     })));
     const usage = { kind: 'reported', inputTokens: 30, outputTokens: 7, cacheReadInputTokens: 10 };
     expect(outcome.usage).toEqual(usage);
-    expect(events).toEqual([{ type: 'usage', usage, model: 'gpt-5' }]);
+    expect(outcome.billing).toBe('api');
+    expect(events).toEqual([{ type: 'usage', usage, model: 'gpt-5', billing: 'api' }]);
   });
 
   it('reports unknown usage when the SDK counted no request', async () => {
     const { result: outcome, events } = await run(standIn(async () => result('ok')));
     expect(outcome.usage).toEqual({ kind: 'unknown' });
-    expect(events).toEqual([{ type: 'usage', usage: { kind: 'unknown' }, model: 'gpt-5' }]);
+    expect(events).toEqual([{ type: 'usage', usage: { kind: 'unknown' }, model: 'gpt-5', billing: 'api' }]);
   });
 
   it('aborts the run when the request signal aborts', async () => {
@@ -240,6 +241,16 @@ describe('openai agent engine run', () => {
     expect(error.cause).toBe(thrown);
   });
 
+  it('counts a failed call under the agent\'s model and API billing', async () => {
+    const events: EngineStreamEvent[] = [];
+    const runner = standIn(async () => { throw apiError(429, 'Rate limit reached'); });
+    const error = await failure(openaiAgent(agent, { runner }).engine.run(request, (event) => events.push(event), new AbortController().signal));
+    expect(error.kind).toBe('rate-limit');
+    expect(events).toEqual([
+      { type: 'usage', usage: { kind: 'unknown' }, model: 'gpt-5', billing: 'api' },
+    ]);
+  });
+
   it('maps a 429 with the insufficient_quota code to a quota', async () => {
     const thrown = apiError(429, 'You exceeded your current quota, please check your plan and billing details.', { code: 'insufficient_quota' });
     const error = await failure(run(standIn(async () => { throw thrown; })));
@@ -266,6 +277,17 @@ describe('openai agent engine run', () => {
 
   it('fails when the run ends with no final output', async () => {
     expect((await failure(run(standIn(async () => result(undefined))))).kind).toBe('unknown');
+  });
+
+  it('counts the tokens of a run that returns with no answer', async () => {
+    const counted = { requests: 1, inputTokens: 1000, outputTokens: 200, totalTokens: 1200 };
+    const approval = new RunToolApprovalItem({ type: 'function_call', callId: 'call-1', name: 'deploy', arguments: '{}' }, agent);
+    const usage = { type: 'usage', usage: { kind: 'reported', inputTokens: 1000, outputTokens: 200 }, model: 'gpt-5', billing: 'api' };
+    for (const returned of [result(undefined, counted), result(undefined, counted, [approval])]) {
+      const events: EngineStreamEvent[] = [];
+      await failure(openaiAgent(agent, { runner: standIn(async () => returned) }).engine.run(request, (event) => events.push(event), new AbortController().signal));
+      expect(events).toEqual([usage]);
+    }
   });
 
   it('refuses a read workspace with no declared tool, as the contract requires', async () => {

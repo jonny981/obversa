@@ -889,7 +889,7 @@ export function judgedFindings(
   const next = [...skipped];
   for (const [index, finding] of findings.entries()) {
     const item = decision.findings[index]!;
-    if (item.decision === 'act') acted.push({ ...finding, judgeReason: item.reason });
+    if (item.decision === 'act') acted.push({ ...finding, judgeReason: item.reason, id: item.id });
     else if (!next.some((entry) => entry.finding.evidence === finding.evidence)) next.push({ round, finding, reason: item.reason });
   }
   return { acted, skipped: next };

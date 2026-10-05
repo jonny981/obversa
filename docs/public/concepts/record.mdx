@@ -42,7 +42,9 @@ A run appends `run:start` when it begins and `run:end` only if it finishes,
 with the same outcome and token usage that `run()` returns. A record still
 being written has a start and no end, and so does one whose process was
 killed. A resumed record keeps the earlier start too. Between them, every
-step, review, pause and engine call is a line.
+step, review, pause and engine call is a line. A run stopped by SIGINT or
+SIGTERM writes `run:abort` before it stops. While a run is going, it writes
+a `heartbeat` line at a fixed interval.
 
 `examples/offline-review.ts` writes its record to
 `.obversa/records/offline-review.jsonl`. In it, a writer drafts a config, the
@@ -50,26 +52,173 @@ review fails it for a missing timeout, the writer runs again with that
 finding, and the second review passes:
 
 ```text Example record
-{"kind":"run:start","ts":1790363702222,"path":[],"recordPath":".obversa/records/offline-review.jsonl"}
-{"kind":"loop:start","ts":1790363702222,"path":["write-config"],"depth":1,"max":4}
-{"kind":"loop:iteration","ts":1790363702223,"path":["write-config"],"iteration":1}
-{"kind":"job:start","ts":1790363702223,"path":["write-config"],"label":"author"}
-{"kind":"job:end","ts":1790363702223,"path":["write-config"],"label":"author","outcome":{"status":"pass","summary":"wrote the base config"}}
-{"kind":"loop:condition","ts":1790363702223,"path":["write-config"],"which":"until","iteration":1,"result":{"met":true,"reason":"a draft exists: true"}}
-{"kind":"job:start","ts":1790363702223,"path":["write-config"],"label":"review"}
-{"kind":"job:end","ts":1790363702223,"path":["write-config"],"label":"review","outcome":{"status":"fail","summary":"Missing a request timeout.","revision":{"reason":"Missing a request timeout.","findings":[{"reviewer":"correctness","evidence":"No timeout set; a hung upstream call blocks forever."}]}}}
-{"kind":"loop:review","ts":1790363702223,"path":["write-config"],"outcome":{"status":"fail","summary":"Missing a request timeout.","revision":{"reason":"Missing a request timeout.","findings":[{"reviewer":"correctness","evidence":"No timeout set; a hung upstream call blocks forever."}]}},"accepted":true}
-{"kind":"log","ts":1790363702223,"path":[],"level":"warn","message":"review did not pass (Missing a request timeout.); re-entering write-config"}
-{"kind":"loop:iteration","ts":1790363702223,"path":["write-config"],"iteration":2}
-{"kind":"job:start","ts":1790363702223,"path":["write-config"],"label":"author"}
-{"kind":"job:end","ts":1790363702224,"path":["write-config"],"label":"author","outcome":{"status":"pass","summary":"added a timeout after: Missing a request timeout."}}
-{"kind":"loop:condition","ts":1790363702224,"path":["write-config"],"which":"until","iteration":2,"result":{"met":true,"reason":"a draft exists: true"}}
-{"kind":"job:start","ts":1790363702224,"path":["write-config"],"label":"review"}
-{"kind":"job:end","ts":1790363702224,"path":["write-config"],"label":"review","outcome":{"status":"pass","summary":"config is complete"}}
-{"kind":"loop:review","ts":1790363702224,"path":["write-config"],"outcome":{"status":"pass","summary":"config is complete"},"accepted":false}
-{"kind":"loop:end","ts":1790363702224,"path":["write-config"],"outcome":{"status":"pass","summary":"config is complete"},"iterations":2}
-{"kind":"run:end","ts":1790363702224,"path":[],"outcome":{"status":"pass","summary":"config is complete"},"usage":{"inputTokens":0,"outputTokens":0,"cacheReadInputTokens":0,"cacheCreationInputTokens":0,"unmeasuredCalls":0},"recordPath":".obversa/records/offline-review.jsonl"}
+{"kind":"run:start","ts":1791103213294,"path":[],"recordPath":".obversa/records/offline-review.jsonl","session":1}
+{"kind":"loop:start","ts":1791103213295,"path":["write-config"],"depth":1,"max":4,"session":1}
+{"kind":"loop:iteration","ts":1791103213295,"path":["write-config"],"iteration":1,"session":1}
+{"kind":"job:start","ts":1791103213296,"path":["write-config"],"label":"author","session":1}
+{"kind":"job:end","ts":1791103213296,"path":["write-config"],"label":"author","outcome":{"status":"pass","summary":"wrote the base config"},"durationMs":0,"session":1}
+{"kind":"loop:condition","ts":1791103213296,"path":["write-config"],"which":"until","iteration":1,"result":{"met":true,"reason":"a draft exists: true"},"session":1}
+{"kind":"job:start","ts":1791103213296,"path":["write-config"],"label":"review","session":1}
+{"kind":"job:end","ts":1791103213296,"path":["write-config"],"label":"review","outcome":{"status":"fail","summary":"Missing a request timeout.","revision":{"reason":"Missing a request timeout.","findings":[{"reviewer":"correctness","evidence":"No timeout set; a hung upstream call blocks forever."}]}},"durationMs":0,"session":1}
+{"kind":"loop:review","ts":1791103213296,"path":["write-config"],"outcome":{"status":"fail","summary":"Missing a request timeout.","revision":{"reason":"Missing a request timeout.","findings":[{"reviewer":"correctness","evidence":"No timeout set; a hung upstream call blocks forever."}]}},"accepted":true,"usage":{"inputTokens":0,"outputTokens":0,"cacheReadInputTokens":0,"cacheCreationInputTokens":0,"unmeasuredCalls":0},"cost":{"usd":0,"reportedUsd":0,"estimatedUsd":0,"unknownCalls":0,"unknownModels":[]},"session":1}
+{"kind":"log","ts":1791103213296,"path":[],"level":"warn","message":"review did not pass (Missing a request timeout.); re-entering write-config","session":1}
+{"kind":"loop:iteration","ts":1791103213296,"path":["write-config"],"iteration":2,"session":1}
+{"kind":"job:start","ts":1791103213297,"path":["write-config"],"label":"author","session":1}
+{"kind":"job:end","ts":1791103213297,"path":["write-config"],"label":"author","outcome":{"status":"pass","summary":"added a timeout after: Missing a request timeout."},"durationMs":0,"session":1}
+{"kind":"loop:condition","ts":1791103213297,"path":["write-config"],"which":"until","iteration":2,"result":{"met":true,"reason":"a draft exists: true"},"session":1}
+{"kind":"job:start","ts":1791103213297,"path":["write-config"],"label":"review","session":1}
+{"kind":"job:end","ts":1791103213297,"path":["write-config"],"label":"review","outcome":{"status":"pass","summary":"config is complete"},"durationMs":0,"session":1}
+{"kind":"loop:review","ts":1791103213297,"path":["write-config"],"outcome":{"status":"pass","summary":"config is complete"},"accepted":false,"usage":{"inputTokens":0,"outputTokens":0,"cacheReadInputTokens":0,"cacheCreationInputTokens":0,"unmeasuredCalls":0},"cost":{"usd":0,"reportedUsd":0,"estimatedUsd":0,"unknownCalls":0,"unknownModels":[]},"session":1}
+{"kind":"loop:end","ts":1791103213297,"path":["write-config"],"outcome":{"status":"pass","summary":"config is complete"},"iterations":2,"session":1}
+{"kind":"run:end","ts":1791103213297,"path":[],"outcome":{"status":"pass","summary":"config is complete"},"usage":{"inputTokens":0,"outputTokens":0,"cacheReadInputTokens":0,"cacheCreationInputTokens":0,"unmeasuredCalls":0},"cost":{"usd":0,"reportedUsd":0,"estimatedUsd":0,"unknownCalls":0,"unknownModels":[]},"totalUsage":{"inputTokens":0,"outputTokens":0,"cacheReadInputTokens":0,"cacheCreationInputTokens":0,"unmeasuredCalls":0},"recordPath":".obversa/records/offline-review.jsonl","session":1}
 ```
+
+## Comparing runs
+
+A record holds what you need to tell whether a workflow got better or worse
+from one run to the next: what each call cost, how long each step took,
+which version of the workflow ran, and what each round changed.
+
+### Cost per call
+
+Each `engine:usage` line carries `cost` and `billing`. `cost` has one of
+three kinds:
+
+- **`reported`**: the engine's own figure in US dollars, in `usd`. The
+  Claude CLI and the Claude Agent SDK report one. OpenCode reports one when
+  its figure is above 0, because it writes 0 when it has no price.
+- **`estimated`**: the call's tokens priced by the runtime's price table, in
+  `usd`. `entry` names the table entry it used.
+- **`unknown`**: no figure. The engine reported no tokens, or the table has
+  no price for the model.
+
+`billing` says how the call was paid for:
+
+- **`subscription`**: the call ran on the person's own CLI plan. The figure
+  is what the same work would cost through the API, not a bill.
+- **`api`**: the call ran on an API key. The figure is the bill.
+- **`unknown`**: the engine cannot tell.
+
+An API engine records `api`. The Claude CLI and the Claude Agent SDK record
+`api` when their process gets `ANTHROPIC_API_KEY`, `ANTHROPIC_AUTH_TOKEN`,
+`CLAUDE_CODE_USE_BEDROCK` or `CLAUDE_CODE_USE_VERTEX`, and `subscription`
+otherwise. Codex records `api` with `CODEX_API_KEY`, `unknown` with only
+`OPENAI_API_KEY`, and `subscription` with neither. Grok, Devin and OpenCode
+record `unknown`.
+
+A job that calls an engine through `ctx.resolveEngine()` gets the same
+`cost` and `billing` on the result the engine returns.
+
+### Price table
+
+The runtime ships its price table in `src/core/prices.json` and never
+fetches prices. Each entry is US dollars per million tokens:
+
+```json prices.json (one entry)
+{
+  "claude-sonnet-4-5": { "inputPerMTokUsd": 3, "outputPerMTokUsd": 15, "cacheWritePerMTokUsd": 3.75, "cacheReadPerMTokUsd": 0.3 }
+}
+```
+
+A model uses the entry with its exact name. If there is none, it uses the
+entry with its name less a release date at the end, such as `-20250929` or
+`-2025-08-07`. So `claude-sonnet-4-5-20250929` uses `claude-sonnet-4-5`. A
+model with no entry of either name gets `unknown`, even when the name of a
+listed model starts its own: `gpt-5.6` does not use `gpt-5`. Tokens
+read from or written to the cache need their own rate in the entry. When
+the entry has no such rate, the figure is `unknown`.
+
+To change a price without a new release, pass `prices` to `run()` with
+entries of the same shape, such as
+`prices: { 'claude-sonnet-4-5': { inputPerMTokUsd: 3, outputPerMTokUsd: 15, cacheWritePerMTokUsd: 3.75, cacheReadPerMTokUsd: 0.3 } }`.
+An entry you pass replaces the shipped entry with the same name, so give
+every rate the model needs, the cache rates included. A new name adds an
+entry.
+
+### Totals
+
+- **`run:end`** carries `cost` for the calls of every session of the
+  record: `usd` is every figure added up, split into `reportedUsd` and
+  `estimatedUsd`. `unknownCalls` counts the calls with no figure, and
+  `unknownModels` names their models. A call that failed before it
+  reported usage still counts once, as a call with no figure unless the
+  failure carried its tokens. The `engine:usage` line of every failed call
+  carries `failed: true`. An API engine's failed call names the model it
+  called and `api` billing. The Claude CLI, Codex, Grok, OpenCode, Mastra
+  and OpenAI Agents engines keep the tokens a failed call had reported when
+  it stopped, and Codex names its model and billing on it too. This holds
+  for each engine a `fallbackEngine` chain tries. The run's token `budget` counts the tokens of a failed call
+  that reported them. It leaves out a failed call with no tokens, so a call
+  the provider refused does not stop a fallback route. A resumed run counts each earlier call once,
+  at the figure the record holds for it. `totalUsage` holds the tokens of
+  the calls of every session, and `usage` holds the tokens of this
+  session's calls only. Both count the calls that reported no tokens in
+  `unmeasuredCalls`.
+- **Each `dag:node` done line** carries the `usage` and `cost` of the node's
+  calls in that attempt, the calls of its `when` check included. When the
+  node runs in its own worktree and an agent resolves the merge back, the
+  calls of that merge count too. When a judge accepts a review that failed,
+  the review gets a second done line for the same attempt. That line
+  carries the same `usage`, `cost` and `durationMs` as the first. When a
+  resume of the same workflow skips a node that finished, the node's new
+  done line carries the `usage`, `cost` and `durationMs` of the attempt
+  that finished it. When a resume finishes an attempt that a stop cut
+  short, or runs it again at the same attempt number, the done line also
+  counts the calls that attempt made before the stop.
+- **Each `loop:review` line** carries the `usage` and `cost` of its round:
+  the build and the review. When a resumed run finishes a round's review,
+  the line still counts the build calls of the earlier session. Each round
+  of a `workflow()` stage with `reviewedBy` is one of these.
+
+### Time, version and session
+
+- **`durationMs`** is on each `job:end`, from its `job:start`, and on each
+  `dag:node` done line that follows a start, from that start. A done line
+  for a node that a resume skips repeats the time of the attempt that
+  finished it.
+- **`source`** is a `run()` option: a file path or a file URL, such as your
+  launcher's `import.meta.url`. `run:start` records the file's `path` and
+  `sha256`, so a score can be tied to the exact file that ran. A file the
+  run cannot read stops the run before it starts.
+- **`session`** is on `run:start` and on every line after it: 1 for a fresh
+  record, and one more each time a run resumes the same record.
+
+### Why a record stops
+
+- **`run:abort`** records the `signal`, `SIGINT` or `SIGTERM`. If no other
+  code in the process listens for that signal, the process then stops as
+  it would have without the run. If your own code listens for it, your
+  code decides what happens next.
+- **`heartbeat`** is written every `heartbeatMs` while the run is going.
+  The default is 60000, and 0 writes none. A record that ends with neither
+  `run:end` nor `run:abort` stopped soon after its last heartbeat.
+
+### A red check
+
+A `commandJob` outcome carries `command`, pass or fail: the executable in
+`command`, its `args`, its `exitCode` and its `durationMs`. `exitCode` is
+null when the command did not run, and `timedOut` is set when it ran past
+its timeout. The compact record that `recordTo: 'auto'` writes keeps it.
+
+### What each round changed
+
+In a git workspace, a `round:change` line follows each build round of a
+`workflow()` stage with `reviewedBy`, and each node run that a `dag()`
+kickback causes. For a kickback, `node` names the node and `round` is its
+attempt. The line carries:
+
+- **`files`**: each file that changed since the round began, with the
+  lines `added` and `removed`. A binary file counts 0 lines.
+- **`added` and `removed`**: the totals over those files.
+- **`findings`**: the ids of the findings the round was sent back to
+  answer, in the review round that raised them. An id is `finding-` and
+  the finding's place in that review's list, so the first is `finding-1`.
+  A judge's `refine:judge` line uses the same ids.
+
+A node's change is written whether its run passed, failed or threw. A node
+that runs in its own worktree has its change read in that worktree. Otherwise the change counts everything in
+the workspace that changed while the round ran, including the work of a
+step that ran beside it. The record file itself is left out. Outside a git repository, no `round:change` is written.
 
 ## Recovery
 

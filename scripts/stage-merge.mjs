@@ -149,6 +149,8 @@ export const stageBranches = {
   F195: 'fix/proc-scan-skips-exited',
   F189: 'feat/judge-full-context',
   F188: 'feat/one-round-rule',
+  F196: 'fix/devin-read-mode',
+  F185: 'feat/records-for-improvement',
   F178: 'release/0.2.4',
   F181: 'release/0.2.5',
   F174: 'feat/engine-effort',

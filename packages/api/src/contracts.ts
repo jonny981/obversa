@@ -37,6 +37,24 @@ export type UsageReceipt =
   | { readonly kind: 'unknown' }
   | ({ readonly kind: 'reported' } & Usage);
 
+/**
+ * What one engine call cost, in US dollars. `reported` is the engine's own
+ * figure. `estimated` is the call's reported tokens priced by one entry of a
+ * price table, which `entry` names. `unknown` means there is no figure: the
+ * engine reported no tokens, or the table has no price for the model.
+ */
+export type CostReceipt =
+  | { readonly kind: 'unknown' }
+  | { readonly kind: 'reported'; readonly usd: number }
+  | { readonly kind: 'estimated'; readonly usd: number; readonly entry: string };
+
+/**
+ * How the call was paid for. `subscription` is the person's own CLI plan, so
+ * a figure is what the same work would cost through the API. `api` is an API
+ * key, so a figure is the bill. `unknown` means the engine cannot tell.
+ */
+export type Billing = 'subscription' | 'api' | 'unknown';
+
 export type AgentResultPart =
   | {
       readonly kind: 'assistant';
@@ -137,6 +155,10 @@ export interface AgentResult {
   /** Ordered assistant continuations with exactly one marked final part. */
   readonly parts: readonly AgentResultPart[];
   readonly usage: UsageReceipt;
+  /** What the call cost, when the engine reports a figure. */
+  readonly cost?: CostReceipt;
+  /** How the call was paid for, when the engine can tell. */
+  readonly billing?: Billing;
   readonly requested: EngineSelectionRecord;
   readonly effective: EngineSelectionRecord;
   readonly stopReason?: string;
@@ -163,7 +185,17 @@ export type EngineStreamEvent =
        */
       target?: string;
     }
-  | { type: 'usage'; usage: UsageReceipt; model: string };
+  | {
+      type: 'usage';
+      usage: UsageReceipt;
+      model: string;
+      /** What the call cost, when the engine reports a figure. */
+      cost?: CostReceipt;
+      /** How the call was paid for, when the engine can tell. */
+      billing?: Billing;
+      /** The call failed; `usage` holds the tokens its failure carried, or unknown. */
+      failed?: true;
+    };
 
 export type EngineEventSink = (event: EngineStreamEvent) => void;
 

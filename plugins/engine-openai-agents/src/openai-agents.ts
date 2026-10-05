@@ -211,6 +211,12 @@ export class OpenAIAgentsEngine implements Engine {
         }, hardTimeout)
       : undefined;
     const timeout = () => new EngineError({ kind: 'timeout', message: 'openai agent run timed out' });
+    // A failed call still counts once, under the model and billing it ran
+    // with, and with the tokens the SDK counted when the run returned.
+    const failed = (error: EngineError, usage: UsageReceipt = { kind: 'unknown' }): EngineError => {
+      onEvent({ type: 'usage', usage, model: this.selection.model!, billing: 'api' });
+      return error;
+    };
 
     // Appended system text is one system message before the prompt; replaced
     // system text becomes the instructions of a copy of the agent.
@@ -225,26 +231,27 @@ export class OpenAIAgentsEngine implements Engine {
     try {
       output = await this.runner.run(agent, input, { signal: controller.signal });
     } catch (error) {
-      if (signal.aborted) throw aborted();
-      if (timedOut) throw timeout();
-      throw engineFailure(error);
+      if (signal.aborted) throw failed(aborted());
+      if (timedOut) throw failed(timeout());
+      throw failed(engineFailure(error));
     } finally {
       clearTimeout(timer);
       signal.removeEventListener('abort', onAbort);
     }
-    if (signal.aborted) throw aborted();
-    if (timedOut) throw timeout();
+    const usage = usageOf(output.runContext.usage);
+    if (signal.aborted) throw failed(aborted(), usage);
+    if (timedOut) throw failed(timeout(), usage);
     if (output.finalOutput === undefined) {
-      throw new EngineError(output.interruptions.length > 0
+      throw failed(new EngineError(output.interruptions.length > 0
         ? { kind: 'invalid-config', message: 'openai agent stopped to wait for a tool approval, which the engine cannot give' }
-        : { kind: 'unknown', message: 'openai agent finished with no final output' });
+        : { kind: 'unknown', message: 'openai agent finished with no final output' }), usage);
     }
 
-    const usage = usageOf(output.runContext.usage);
-    onEvent({ type: 'usage', usage, model: this.selection.model! });
+    onEvent({ type: 'usage', usage, model: this.selection.model!, billing: 'api' });
     return assistantResult({
       text: finalText(output.finalOutput),
       usage,
+      billing: 'api',
       requested: this.selection,
     });
   }

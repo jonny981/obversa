@@ -146,13 +146,14 @@ describe('mastra engine run', () => {
     })));
     const usage = { kind: 'reported', inputTokens: 30, outputTokens: 7, cacheReadInputTokens: 10 };
     expect(result.usage).toEqual(usage);
-    expect(events).toEqual([{ type: 'usage', usage, model: 'gpt-5' }]);
+    expect(result.billing).toBe('api');
+    expect(events).toEqual([{ type: 'usage', usage, model: 'gpt-5', billing: 'api' }]);
   });
 
   it('reports unknown usage when Mastra reports none', async () => {
     const { result, events } = await run(standIn(async () => ({ text: 'ok' })));
     expect(result.usage).toEqual({ kind: 'unknown' });
-    expect(events).toEqual([{ type: 'usage', usage: { kind: 'unknown' }, model: 'gpt-5' }]);
+    expect(events).toEqual([{ type: 'usage', usage: { kind: 'unknown' }, model: 'gpt-5', billing: 'api' }]);
   });
 
   it('aborts the agent call when the request signal aborts', async () => {
@@ -197,6 +198,17 @@ describe('mastra engine run', () => {
     expect(error.cause).toBe(thrown);
   });
 
+  it('counts a failed call under the agent\'s model and API billing', async () => {
+    const thrown = Object.assign(new Error('the provider refused the request'), { statusCode: 429 });
+    const events: EngineStreamEvent[] = [];
+    const agent = standIn(async () => { throw thrown; }, 'anthropic/claude-sonnet-4-5');
+    const error = await failure(mastra(agent).engine.run(request, (event) => events.push(event), new AbortController().signal));
+    expect(error.kind).toBe('rate-limit');
+    expect(events).toEqual([
+      { type: 'usage', usage: { kind: 'unknown' }, model: 'claude-sonnet-4-5', billing: 'api' },
+    ]);
+  });
+
   it('maps quota and other provider errors through the shared classification', async () => {
     const quota = await failure(run(standIn(async () => { throw new Error('monthly usage limit reached'); })));
     expect(quota.kind).toBe('quota');
@@ -210,6 +222,19 @@ describe('mastra engine run', () => {
   it('fails when Mastra resolves with an error', async () => {
     const error = await failure(run(standIn(async () => ({ text: '', error: new Error('503 service unavailable') }))));
     expect(error.kind).toBe('transient');
+  });
+
+  it('counts the tokens of a call that resolves with an error', async () => {
+    const events: EngineStreamEvent[] = [];
+    const agent = standIn(async () => ({
+      text: '',
+      totalUsage: { inputTokens: 1000, outputTokens: 200, totalTokens: 1200 },
+      error: new Error('503 service unavailable'),
+    }));
+    await failure(mastra(agent).engine.run(request, (event) => events.push(event), new AbortController().signal));
+    expect(events).toEqual([
+      { type: 'usage', usage: { kind: 'reported', inputTokens: 1000, outputTokens: 200 }, model: 'gpt-5', billing: 'api' },
+    ]);
   });
 
   it('refuses a read workspace with no declared tool, as the contract requires', async () => {

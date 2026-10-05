@@ -15,6 +15,7 @@ import { roundRule } from './core/rounds.js';
 import { LoopError } from './core/errors.js';
 import { loop } from './core/loop.js';
 import { kickback, revisionFromOutcome } from './core/feedback.js';
+import { answeredFindingIds, watchRoundChange } from './core/round-change.js';
 import { reviewPanel } from './core/synthesis.js';
 import { consultJudge, goalVerdicts, isJudge, judgedFindings, judgeRound, judgeState, lastRoundAnswered, productDecisionFeedback, readJudgedWork, type JudgeState } from './core/judge.js';
 import type { ConditionInput, DagConfig, Job, JobContext, Judge, Outcome } from './core/types.js';
@@ -634,6 +635,16 @@ interface JudgedRun {
   readonly base: number;
 }
 
+/** A refine loop's build round, followed by a record of what it changed. */
+function recordRoundChange(job: Job): Job {
+  return copyJobMeta(async (ctx) => {
+    const recordChange = await watchRoundChange(ctx);
+    const outcome = await job(ctx);
+    await recordChange?.({ path: ctx.path, round: ctx.iteration, findings: answeredFindingIds(ctx.lastReview) });
+    return outcome;
+  }, job);
+}
+
 /** The brief's `Use case:` paragraph, on one line. */
 function briefUseCase(brief: BriefSource): string | undefined {
   return /^Use case:\s*([\s\S]*?)\n\s*\n/m.exec(brief.brief)?.[1]?.replace(/\s+/g, ' ').trim();
@@ -835,6 +846,7 @@ function stageJob(
     const writes = writesOf(config);
     const job = guardedAgent(brief, named, seatRole(roles, config.agent), files, declaredFiles);
     if (config.reviewedBy === undefined) return job;
+    const built = recordRoundChange(job);
     const reviewRole = role(roles, config.reviewedBy);
     if (!Array.isArray(reviewRole) && 'kind' in reviewRole && reviewRole.kind === 'person') {
       if (!reviewRole.interaction) throw new TypeError('a human reviewer needs an interaction binding');
@@ -844,7 +856,7 @@ function stageJob(
       });
       // `max` counts builds: the first, and one per refinement left.
       const rounds = (body: Job, stageReview: Job, max: number | undefined) => loop({ name: `${named.name}-review`, body, max, review: stageReview });
-      return stageRounds(rounds, job, brief, named, review);
+      return stageRounds(rounds, built, brief, named, review);
     }
     const reviewers = panelRole(roles, config.reviewedBy);
     const panel = reviewerPanel(brief, named, reviewers, files, declaredFiles, undefined, undefined, config.agree, config.synthesise);
@@ -898,7 +910,7 @@ function stageJob(
     // The goal check runs ahead of the panel each round. With a judge, it
     // runs inside the judge's round, so a run that resumes at the judge's
     // question does not check the goal again.
-    const reviewLoop = stageRounds(rounds, job, brief, named, reviewed, goalGate);
+    const reviewLoop = stageRounds(rounds, built, brief, named, reviewed, goalGate);
     return copyJobMeta(
       recordedFamilyGate(
         reviewLoop,

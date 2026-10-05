@@ -67,12 +67,22 @@ if (scenario) {
   });
   process.exit(scenario === 'late-final' ? 7 : 0);
 }
+if (process.env.OBVERSA_TEST_CLAUDE_STALL === '1') {
+  // A turn that reports its tokens, then a call that never finishes.
+  process.stdout.write(`${JSON.stringify({
+    type: 'assistant',
+    message: { model, content: [{ type: 'text', text: 'working' }], usage: { input_tokens: 7, output_tokens: 2 } },
+  })}\n`);
+  await new Promise(() => { setInterval(() => {}, 1_000); });
+}
 process.stdout.write(`${JSON.stringify({
   type: 'assistant',
   message: { model, content: [{ type: 'text', text: 'PONG' }] },
 })}\n`);
+const costUsd = process.env.OBVERSA_TEST_CLAUDE_COST_USD;
 process.stdout.write(`${JSON.stringify({
   type: 'result', result: 'PONG',
   usage: { input_tokens: 3, output_tokens: 1 },
+  ...(costUsd ? { total_cost_usd: Number(costUsd) } : {}),
 })}\n`);
 process.exit(Number(process.env.OBVERSA_TEST_CLAUDE_MODEL_EXIT ?? '0'));

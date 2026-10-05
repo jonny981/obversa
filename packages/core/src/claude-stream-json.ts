@@ -9,6 +9,8 @@
 
 import type {
   AgentResultPart,
+  Billing,
+  CostReceipt,
   EngineEventSink,
   Usage,
   UsageReceipt,
@@ -24,6 +26,8 @@ export interface Accumulator {
   sawDelta: boolean;
   /** Set only when the backend emits a terminal result message. */
   terminal: boolean;
+  /** The dollar figure the result message reports, when it reports one. */
+  costUsd?: number;
 }
 
 export function newAccumulator(model?: string): Accumulator {
@@ -146,6 +150,8 @@ export function mapMessage(
       // `subtype` is the result *classification* (success / error_max_turns …),
       // not the model stop reason; that is the sibling `stop_reason` field.
       if (typeof msg.stop_reason === 'string') acc.stopReason = msg.stop_reason;
+      const costUsd = optionalNum(msg.total_cost_usd);
+      if (costUsd !== undefined && costUsd >= 0) acc.costUsd = costUsd;
       const usage = msg.usage as AnyRecord | undefined;
       const reported = usage ? usageFrom(usage) : undefined;
       if (usage && reported) {
@@ -177,6 +183,30 @@ export function mapMessage(
       break;
     }
   }
+}
+
+/** The figure the result message reported, as a cost receipt. */
+export function reportedCost(acc: Accumulator): { cost: CostReceipt } | Record<string, never> {
+  return acc.costUsd === undefined ? {} : { cost: { kind: 'reported', usd: acc.costUsd } };
+}
+
+/**
+ * Variables that make Claude Code bill an API account rather than the
+ * person's own plan: an API key, a gateway token, or a cloud provider.
+ */
+const API_BILLING_VARIABLES = [
+  'ANTHROPIC_API_KEY',
+  'ANTHROPIC_AUTH_TOKEN',
+  'CLAUDE_CODE_USE_BEDROCK',
+  'CLAUDE_CODE_USE_VERTEX',
+] as const;
+
+/**
+ * `api` when the environment the Claude process gets sets one of the
+ * variables above, and `subscription` otherwise: the person's own login.
+ */
+export function claudeBilling(env: Readonly<Record<string, string | undefined>>): Billing {
+  return API_BILLING_VARIABLES.some((name) => (env[name] ?? '') !== '') ? 'api' : 'subscription';
 }
 
 function usageFrom(usage: AnyRecord): ({ kind: 'reported' } & Usage) | undefined {

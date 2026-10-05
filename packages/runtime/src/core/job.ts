@@ -301,8 +301,12 @@ async function runAdvisorConsult(
           path: [...ctx.path],
           model: event.model,
           usage: event.usage,
+          ...(event.cost === undefined ? {} : { cost: event.cost }),
+          ...(event.billing === undefined ? {} : { billing: event.billing }),
+          ...(event.failed === undefined ? {} : { failed: event.failed }),
         });
-        recordEngineUsage(ctx, event.model, ctx.path);
+        // A failed call is counted in the totals but gave no answer.
+        if (event.failed === undefined) recordEngineUsage(ctx, event.model, ctx.path);
       } else if (event.type === 'tool') {
         ctx.emit({
           kind: 'engine:tool',
@@ -479,9 +483,13 @@ export function agentJob(config: AgentJobConfig): Job {
                     path,
                     model: e.model,
                     usage: e.usage,
+                    ...(e.cost === undefined ? {} : { cost: e.cost }),
+                    ...(e.billing === undefined ? {} : { billing: e.billing }),
+                    ...(e.failed === undefined ? {} : { failed: e.failed }),
                     ...recordAs,
                   });
-                  recordEngineUsage(ctx, e.model, path, recordAs);
+                  // A failed call is counted in the totals but gave no answer.
+                  if (e.failed === undefined) recordEngineUsage(ctx, e.model, path, recordAs);
                   break;
               }
             },

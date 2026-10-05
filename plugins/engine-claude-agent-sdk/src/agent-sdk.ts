@@ -23,7 +23,7 @@ import {
   type EngineEventSink,
 } from '@obversa/api';
 import { claudeToolOptions } from '@obversa/core/claude-tools';
-import { mapMessage, newAccumulator } from '@obversa/core/claude-stream-json';
+import { claudeBilling, mapMessage, newAccumulator, reportedCost } from '@obversa/core/claude-stream-json';
 import { attemptEnvironment, scrubCapture } from '@obversa/core/command';
 
 /** Whether a run leaves out the person's own setup when `clean` is not set. */
@@ -238,6 +238,8 @@ export class AgentSdkEngine implements Engine {
       effort,
     });
     const env = attemptEnvironment(req);
+    // The SDK's process gets this process's environment with the request's laid over it.
+    const billing = claudeBilling({ ...process.env, ...env });
     const abort = new AbortController();
     const onAbort = () => abort.abort();
     if (signal.aborted) abort.abort();
@@ -314,11 +316,21 @@ export class AgentSdkEngine implements Engine {
           })
         : consume);
     } catch (e) {
-      if (signal.aborted)
+      const spent = {
+        type: 'usage',
+        usage: acc.usage,
+        model: acc.model ?? model ?? 'agent-sdk',
+        ...reportedCost(acc),
+        billing,
+      } as const;
+      if (signal.aborted) {
+        // A cancelled call still spent the tokens it reported.
+        onEvent(spent);
         throw new EngineError({
           kind: 'aborted',
           message: 'agent-sdk run aborted',
         });
+      }
       if (acc.terminal && acc.parts.some((part) => part.final)) {
         const requested = engineSelection({
           adapter: 'agent-sdk',
@@ -334,14 +346,12 @@ export class AgentSdkEngine implements Engine {
           capabilities: Array.isArray(toolOptions.tools) ? toolOptions.tools : [],
           effort,
         });
-        onEvent({
-          type: 'usage',
-          usage: acc.usage,
-          model: acc.model ?? model ?? 'agent-sdk',
-        });
+        onEvent(spent);
         return validateAgentResult({
           parts: acc.parts,
           usage: acc.usage,
+          ...reportedCost(acc),
+          billing,
           requested,
           effective,
           ...(acc.stopReason === undefined
@@ -361,6 +371,8 @@ export class AgentSdkEngine implements Engine {
           },
         });
       }
+      // An unfinished call still spent the tokens it reported.
+      onEvent(spent);
       const limit = classifySdkLimit(e, env);
       if (limit) throw limit;
       if (e instanceof EngineError) {
@@ -400,6 +412,8 @@ export class AgentSdkEngine implements Engine {
       type: 'usage',
       usage: acc.usage,
       model: acc.model ?? model ?? 'agent-sdk',
+      ...reportedCost(acc),
+      billing,
     });
     const requested = engineSelection({
       adapter: 'agent-sdk',
@@ -414,6 +428,8 @@ export class AgentSdkEngine implements Engine {
     return validateAgentResult({
       parts: acc.parts,
       usage: acc.usage,
+      ...reportedCost(acc),
+      billing,
       requested,
       effective,
       ...(acc.stopReason === undefined

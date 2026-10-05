@@ -352,7 +352,7 @@ describe('waiting for a callback in the run', () => {
       outcome: { status: 'paused', data: { requestId: request!.requestId } },
     });
     expect((await readFile(recordTo, 'utf8')).trim().split('\n').map((line) => JSON.parse(line)))
-      .toContainEqual(event);
+      .toContainEqual({ ...event, session: 1 });
     expect(events.some((entry) => entry.kind === 'dag:end')).toBe(false);
     await expect(readFile(join(cwd, 'sent.txt'), 'utf8')).rejects.toMatchObject({ code: 'ENOENT' });
     await answer(client, request!);

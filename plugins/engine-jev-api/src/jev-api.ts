@@ -195,6 +195,11 @@ export class JevApiEngine implements Engine {
       : AbortSignal.any([signal, AbortSignal.timeout(deadlineMs)]);
 
     const call = this.#options.fetch ?? fetch;
+    // A failed call still counts once, under the model and billing it ran with.
+    const failed = (error: EngineError): EngineError => {
+      onEvent({ type: 'usage', usage: { kind: 'unknown' }, model: requested.model ?? DEFAULT_MODEL, billing: 'api' });
+      return error;
+    };
     let response: Response;
     let text: string;
     try {
@@ -209,36 +214,37 @@ export class JevApiEngine implements Engine {
       });
       text = await readBounded(response, request.maxOutputBytes, signal);
     } catch (error) {
-      if (error instanceof EngineError) throw error;
-      if (signal.aborted) throw new EngineError({ kind: 'aborted', message: 'jev call aborted', cause: error });
+      if (error instanceof EngineError) throw failed(error);
+      if (signal.aborted) throw failed(new EngineError({ kind: 'aborted', message: 'jev call aborted', cause: error }));
       if (error instanceof Error && error.name === 'TimeoutError') {
-        throw new EngineError({ kind: 'timeout', message: `jev call exceeded ${deadlineMs}ms`, cause: error });
+        throw failed(new EngineError({ kind: 'timeout', message: `jev call exceeded ${deadlineMs}ms`, cause: error }));
       }
-      throw new EngineError({ kind: 'transient', message: 'jev endpoint unreachable', cause: error });
+      throw failed(new EngineError({ kind: 'transient', message: 'jev endpoint unreachable', cause: error }));
     }
-    if (!response.ok) throw statusFailure(response, text);
+    if (!response.ok) throw failed(statusFailure(response, text));
 
     let parsed: unknown;
     try {
       parsed = JSON.parse(text);
     } catch (error) {
-      throw new EngineError({
+      throw failed(new EngineError({
         kind: 'unknown',
         message: 'jev response was not JSON',
         cause: error,
-      });
+      }));
     }
     if (!isPlainObject(parsed) || !isPlainObject(parsed.answers)) {
-      throw new EngineError({ kind: 'unknown', message: 'jev response carried no answers object' });
+      throw failed(new EngineError({ kind: 'unknown', message: 'jev response carried no answers object' }));
     }
 
     const usage = readUsage(parsed.usage);
-    onEvent({ type: 'usage', usage, model: requested.model ?? DEFAULT_MODEL });
+    onEvent({ type: 'usage', usage, model: requested.model ?? DEFAULT_MODEL, billing: 'api' });
 
     const effective = effectiveSelection(requested, parsed.model);
     return validateAgentResult({
       parts: [{ kind: 'structured', value: parsed.answers, final: true }],
       usage,
+      billing: 'api',
       requested,
       effective,
       raw: parsed,
