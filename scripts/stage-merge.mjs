@@ -147,6 +147,7 @@ export const stageBranches = {
   F165: 'fix/opencode-free-models',
   F194: 'fix/grok-engine-answers',
   F195: 'fix/proc-scan-skips-exited',
+  F196: 'fix/devin-read-mode',
   F178: 'release/0.2.4',
   F181: 'release/0.2.5',
   F174: 'feat/engine-effort',

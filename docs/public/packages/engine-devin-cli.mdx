@@ -114,10 +114,19 @@ A step that names no workspace mode runs as `read`. The plugin never passes
 `smart` or `dangerous`.
 
 In print mode Devin cannot ask you. When Devin wants a tool that its
-permission mode does not approve, it refuses the tool and does not wait. If
-Devin then ends without an answer, the attempt fails with
-`EngineIncompleteResultError`. The message names the permission mode and
-repeats Devin's warning.
+permission mode does not approve, it refuses the tool and does not wait.
+Devin then ends the whole run without an answer.
+
+Read-only holds in a `read` step. A read step that only reads answers
+normally. A read step whose model tries to write gets the write refused, and
+no file changes. Devin then stops the run, so the attempt fails with
+`EngineIncompleteResultError`. The message says that Devin refused a tool in
+read mode, which ends its run without an answer, and that no file changed.
+It also repeats Devin's warning. A run in either mode that exits 0 and
+writes its conversation export, but has no final answer for any other
+reason, fails with the same error, and its message names the permission
+mode. A timeout, a non-zero exit or a missing export fails with its own
+error instead.
 
 ## What Devin cannot do through the plugin
 
@@ -160,7 +169,11 @@ to leave them out.
 - **`EngineError` of kind `invalid-config`** for a step without a folder, a
   step with `tools: []`, a step that sets `effort`, or a `devin --version`
   output the plugin cannot read.
-- **`EngineIncompleteResultError`** when Devin exits without a final answer.
+- **`EngineIncompleteResultError`** when Devin exits 0 and writes its
+  conversation export, but has no final answer, for example after it
+  refuses a write in a read step.
+- **`EngineError`** when Devin times out, exits with another code, or
+  writes no readable conversation export, and has no final answer.
 - **Other `EngineError` kinds**, such as `auth` or `rate-limit`, are read
   from Devin's own error message.
 
