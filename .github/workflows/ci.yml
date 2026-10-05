@@ -13,6 +13,26 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  consumer-diagnostic:
+    if: github.head_ref == 'fix/linux-attended-consumer'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: corepack enable
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm build
+      - name: Repeat the packed consumer until failure, at most five times
+        run: |
+          for attempt in 1 2 3 4 5; do
+            echo "Packed consumer attempt $attempt"
+            pnpm check:consumer
+          done
   verify:
     runs-on: ubuntu-latest
     steps:
