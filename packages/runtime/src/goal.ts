@@ -113,14 +113,16 @@ export function goalCheckJob(
     }
     ctx.emit({ kind: 'goal:check', ts: Date.now(), path: [...ctx.path], label, round: round(ctx), requirements });
     const unmet = requirements.filter((requirement) => requirement.verdict === 'unmet');
+    // The target rides with the verdicts, so a judge of that target reads them.
+    const data = { requirements, ...(target !== undefined ? { target } : {}) };
     if (!unmet.length) {
-      return { status: 'pass', summary: `every requirement is met (${requirements.length})`, data: { requirements } };
+      return { status: 'pass', summary: `every requirement is met (${requirements.length})`, data };
     }
     const outcome = revisionRequest({
       target,
       reason: `${unmet.length} of ${requirements.length} requirements are not met`,
       findings: unmet.map(({ requirement, evidence }) => ({ severity: 'block', evidence: `${requirement}: ${evidence}` })),
-    }, { data: { requirements } });
+    }, { data });
     return { ...outcome, revision: { ...outcome.revision!, skipJudge: true } };
   };
 }

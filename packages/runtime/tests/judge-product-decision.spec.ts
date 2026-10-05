@@ -62,7 +62,11 @@ async function worker(kind: ProductCaller, fixture: Awaited<ReturnType<typeof se
 }
 function choices(cwd: string) { return productCalls(cwd).map((call) => call.kind); }
 function judgeStates(cwd: string) {
-  return productCalls(cwd).filter((call) => call.kind === 'judge').map((call) => JSON.parse(call.prompt!).state);
+  // Where the rounds stand, with a person's product answers from the why.
+  return productCalls(cwd).filter((call) => call.kind === 'judge').map((call) => {
+    const { why, when } = JSON.parse(call.prompt!).state;
+    return { ...when, productFeedback: why.productFeedback };
+  });
 }
 
 describe('the judge can request a product decision', () => {

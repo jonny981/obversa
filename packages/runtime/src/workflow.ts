@@ -9,14 +9,14 @@ import { agentJob, fnJob, RECORDED_ENGINE_USAGE, type RecordedEngineUsage } from
 import { approval } from './core/approval-job.js';
 import { commandJob, predicate } from './core/condition.js';
 import { copyJobMeta } from './core/describe.js';
-import { dag, TARGET_ROUNDS, type TargetRounds } from './core/dag.js';
+import { dag, JUDGED_NODES, TARGET_ROUNDS, type TargetRounds } from './core/dag.js';
 import { RESUME_IDENTITY } from './core/resume.js';
 import { roundRule } from './core/rounds.js';
 import { LoopError } from './core/errors.js';
 import { loop } from './core/loop.js';
 import { kickback, revisionFromOutcome } from './core/feedback.js';
 import { reviewPanel } from './core/synthesis.js';
-import { consultJudge, isJudge, judgedFindings, judgeRound, judgeState, lastRoundAnswered, productDecisionFeedback, readJudgedFile, type JudgeState, type JudgeWork } from './core/judge.js';
+import { consultJudge, goalVerdicts, isJudge, judgedFindings, judgeRound, judgeState, lastRoundAnswered, productDecisionFeedback, readJudgedWork, type JudgeState } from './core/judge.js';
 import type { ConditionInput, DagConfig, Job, JobContext, Judge, Outcome } from './core/types.js';
 import { checkpointInteraction, hasSavedInteraction, humanReview, interactionIdentity, jsonSnapshot, outcomeSnapshot, requestInteraction, savedInteraction, type InteractionBinding } from './core/interaction.js';
 
@@ -640,23 +640,14 @@ function briefUseCase(brief: BriefSource): string | undefined {
 }
 
 /**
- * What the judge of a stage's work reads about it: the use case from the
- * brief, and the first file the stage writes. A send-back to the stage from a
- * later one gives its judge the same.
- */
-function judgedWork(brief: BriefSource, named: NamedStage): JudgeWork {
-  const useCase = briefUseCase(brief);
-  const file = writesOf(named.config)[0];
-  return { ...(useCase !== undefined ? { useCase } : {}), ...(file !== undefined ? { file } : {}) };
-}
-
-/**
  * A review with a judge between its verdict and the send-back, for every
  * finding, a block included. The judge's history, the findings it skipped
  * and a person's product answers live in `run`, which belongs to one run of
- * the workflow. The judge sees the use case, the latest findings,
- * the findings it skipped before, every round so far, and the file being
- * refined when the stage declares one. Its answer either lets the review
+ * the workflow. The judge reads what the graph gives a judge of this stage
+ * (`shared.work`: the brief, the use case, the stage's `desc` and `gate`,
+ * its file and the workspace when the work began), this round's checks
+ * and goal check verdicts (`shared.evidence()`), the latest findings, the
+ * findings it skipped before, and every round so far. Its answer either lets the review
  * stand (a synthesised pass), sends it back with its reasoning folded into
  * the existing rejection, or stops the rounds with the review's failure.
  * When it decides each finding, the send-back carries only the findings it
@@ -667,13 +658,13 @@ function judgedWork(brief: BriefSource, named: NamedStage): JudgeWork {
  */
 function judgedReview(brief: BriefSource, named: NamedStage, cfgJudge: Judge, review: Job, run: JudgedRun, before?: Job): Job {
   const config = named.config;
-  const work = judgedWork(brief, named);
   const shared = run.shared;
+  const work = shared.work;
   const identity = interactionIdentity({ brief, config, cfgJudge });
   return async (ctx) => {
     const checkpointPath = [...ctx.path, '@judge-review'];
     let saved = savedInteraction(ctx, checkpointPath, identity);
-    const { draft, changedLines } = await readJudgedFile(ctx.workspace.dir, work.file, shared.previousDraft);
+    const { draft, changedLines, tree } = await readJudgedWork(ctx.workspace.dir, work, { draft: shared.previousDraft, tree: shared.rounds.at(-1)?.tree }, ctx.fingerprintExcludePaths);
     if (saved && (saved.state as unknown as JudgeState).draft !== draft) saved = undefined;
     if (saved) {
       shared.rounds = (saved.state as unknown as JudgeState).rounds;
@@ -684,6 +675,7 @@ function judgedReview(brief: BriefSource, named: NamedStage, cfgJudge: Judge, re
     if (!saved && before) {
       const checked = await before(ctx);
       if (checked.status !== 'pass') return checked;
+      shared.goal = goalVerdicts(checked);
     }
     const reviewOutcome: Outcome = saved ? saved.panel as unknown as Outcome : await review({
       ...ctx,
@@ -697,7 +689,7 @@ function judgedReview(brief: BriefSource, named: NamedStage, cfgJudge: Judge, re
     // run of it, and the loop's iteration in this one.
     const round = roundRule(run.base + ctx.iteration, cfgJudge.cap);
     const state: JudgeState = saved ? saved.state as unknown as JudgeState : judgeState({
-      work, draft, productFeedback: shared.productFeedback, latestFindings: findings, skipped: shared.skipped, rounds: shared.rounds, round: round.judge,
+      work, draft, tree, ...shared.evidence(), productFeedback: shared.productFeedback, latestFindings: findings, skipped: shared.skipped, rounds: shared.rounds, round: round.judge,
     });
     const result = await consultJudge(cfgJudge, state, ctx, ctx.path, {
       target: named.name, identity, pending: saved !== undefined,
@@ -706,7 +698,7 @@ function judgedReview(brief: BriefSource, named: NamedStage, cfgJudge: Judge, re
     if ('paused' in result) return result.paused;
     checkpointInteraction(ctx, checkpointPath, identity, null);
     shared.productFeedback = result.state.productFeedback ?? [];
-    shared.rounds = [...shared.rounds, judgeRound(state.round, findings, changedLines)];
+    shared.rounds = [...shared.rounds, judgeRound(state, changedLines, result)];
     shared.previousDraft = draft;
     // The review's failure stands, with its findings and why the rounds
     // stopped. A thrown error is the only way a review ends a loop with a
@@ -1178,11 +1170,13 @@ export function workflow(name: string, config: WorkflowConfig): Job {
       ...(timeoutMs === undefined ? {} : { timeoutMs }),
     }];
   }));
-  const graphConfig: DagConfig & { [RESUME_IDENTITY]: string } = {
+  const graphConfig: DagConfig & { [RESUME_IDENTITY]: string; [JUDGED_NODES]: boolean } = {
     name: workflowName,
     nodes,
     [RESUME_IDENTITY]: stageJobIdentity,
+    [JUDGED_NODES]: config.stages.some((named) => isJudge(named.config.refine)),
     ...(Object.keys(maxKickbacks).length ? { maxKickbacks } : {}),
+    brief: brief.brief,
     ...(useCase === undefined ? {} : { useCase }),
   };
   const graph = dag(graphConfig);

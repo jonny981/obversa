@@ -134,6 +134,12 @@ export interface RunOptions {
   /** Ceiling on a single interruptible limit-wait, in ms. Default 300000. */
   maxWaitMs?: number;
   /**
+   * How many characters, counted as JSON, a judge reads: its whole input
+   * but the questions. Long parts are cut to fit, and the judge is told
+   * what was cut. The findings to decide are never cut. Default 50000.
+   */
+  judgeContextLimit?: number;
+  /**
    * Price the run's measured token usage (`RunResult.cost`). Prices are
    * caller-supplied — the library hardcodes none. `baselineModel` adds the
    * reconstructed counterfactual: the same token stream at that model's rates.
@@ -184,6 +190,9 @@ export async function run(
 ): Promise<RunResult> {
   if (options.onCallback !== undefined && options.onCallback !== 'wait' && options.onCallback !== 'exit') {
     throw new TypeError('onCallback must be wait or exit');
+  }
+  if (options.judgeContextLimit !== undefined && (!Number.isSafeInteger(options.judgeContextLimit) || options.judgeContextLimit < 1)) {
+    throw new TypeError('judgeContextLimit must be a whole number of characters, 1 or more');
   }
   const paramsInput: unknown = options.params === undefined ? {} : options.params;
   if (
@@ -396,6 +405,7 @@ export async function run(
     budget,
     onLimit: options.onLimit ?? 'auto',
     maxWaitMs: options.maxWaitMs ?? DEFAULT_MAX_WAIT_MS,
+    ...(options.judgeContextLimit !== undefined ? { judgeContextLimit: options.judgeContextLimit } : {}),
     iteration: 0,
     depth: 0,
     path: [],

@@ -346,6 +346,8 @@ export interface JobContext {
   readonly onLimit: LimitPolicy;
   /** Cap on an interruptible limit-wait under `auto`/`wait`. */
   readonly maxWaitMs: number;
+  /** How many characters, counted as JSON, a judge reads. Default 50000. */
+  readonly judgeContextLimit?: number;
   log(message: string, level?: LogLevel): void;
 }
 
@@ -639,6 +641,8 @@ export interface DagConfig {
   maxKickbacks?: KickbackBudget;
   /** What the work is for, in a sentence or two. A judge in `maxKickbacks` reads it. */
   useCase?: string;
+  /** The brief or ticket text the work answers. A judge in `maxKickbacks` reads it. */
+  brief?: string;
 }
 
 /** Per-node disposition within a DAG run. */
@@ -924,6 +928,9 @@ export type LoopEvent =
       // The findings still open when the judge lets the work stand after
       // the last review its cap allows.
       openFindings?: readonly FeedbackFinding[];
+      // How many characters the judge read, and what the size limit cut,
+      // when it cut anything.
+      packet?: { readonly size: number; readonly cut?: readonly string[] };
     }
   | {
       // A review panel's synthesis: each finding after the merge and the

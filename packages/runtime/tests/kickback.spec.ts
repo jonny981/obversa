@@ -941,8 +941,8 @@ describe('a judge as a dag() maxKickbacks budget, with no cap or at its cap', ()
     expect(round).toBe(2);
     expect(judgeCalls).toBe(2);
     expect(outcome.data).toMatchObject({ review: { status: 'pass', summary: 'the judge chose holds', openFindings: shouldFix } });
-    const first = JSON.parse(prompts[0]!).state as Record<string, unknown>;
-    const last = JSON.parse(prompts[1]!).state as Record<string, unknown>;
+    const first = JSON.parse(prompts[0]!).state.when as Record<string, unknown>;
+    const last = JSON.parse(prompts[1]!).state.when as Record<string, unknown>;
     expect(first.lastRound).toBeUndefined();
     expect(last).toMatchObject({ cap: 1, lastRound: true });
     expect(last.limit).toBe('This is the last round the cap of 1 allows (1 refinement after the first build): no build round follows, so your answer decides how this ends.');

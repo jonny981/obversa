@@ -118,16 +118,69 @@ When the judge decides each finding, skipping every finding lets the work
 stand, and acting on any finding fails the run. A block in the last round
 goes to the judge too, with the same rules.
 
-## The questions
+## What the judge sees
 
-The judge sees the latest findings, the findings it skipped in earlier
-rounds with its reasons, the round number and the cap. It sees every
-earlier round it was asked about, with that round's counts and the size of
-that round's change. It also sees the use case and the current draft. A
-`workflow()` takes the use case from the brief's `Use case:` paragraph and
-the draft from the first file the stage `writes`. A `dag()` takes them from
-its `useCase` and the target node's `file`.
-Each judge entry in the record names the target and the round.
+The judge reads no file itself. The runtime puts together what it reads, in
+code, with no extra model call. For the same rounds, a `workflow()` stage
+and a `dag()` give the judge the same input. The judge reads it in four
+labelled parts, always in this order, and then the questions. The four
+parts, and `cut` when the size limit cut something, are the `state` of the
+judge's `{ state, questions }` prompt.
+
+- **`why`: what the work is for.** The brief, the use case, and the
+  target's `desc` and `gate`. A `workflow()` passes its `brief`, and takes
+  the use case from the brief's `Use case:` paragraph. A `dag()` passes its
+  own `brief` and `useCase`. A person's answers to the judge's earlier
+  product decisions are here too.
+- **`what`: the change.** In a git workspace, each file changed since the
+  run of the workflow or dag began, with the lines added and removed. For
+  each changed file and line a finding cites, such as `src/app.ts:42`, the
+  parts of the diff within ten lines of that line. A finding that cites a
+  file with no line gets that file's whole diff. When the target writes a
+  file, the judge also gets its content: the first file a stage `writes`,
+  or a dag node's `file`.
+- **`how`: this round's evidence.** The latest result of each check step
+  in the graph, a `run:` stage or a `commandJob`: its command, its status
+  and, when it did not pass, its output. The verdicts of the target's own
+  goal check, when it has one. Each finding, with the id its question uses, who
+  raised it and its severity. When the panel synthesised, each finding
+  also carries the other reviewers' votes and their reasons.
+- **`when`: where the rounds stand.** The round number, the cap, and
+  whether this is the last round. Every earlier round, with its findings,
+  the judge's decision on each and its reason, and how many lines that
+  round changed. The findings the judge skipped, with its reasons. In a git
+  workspace, the files changed since the last round.
+
+### The size limit
+
+What the judge reads can be large, so it is kept to 50000 characters,
+counted as JSON. Set another limit with the `judgeContextLimit` option of
+`run()`, for example `run(job, { judgeContextLimit: 20000 })`.
+
+When the four parts are over the limit, the runtime cuts every long part
+down to one shared length, set so that the whole fits. A short part is cut
+only when cutting the long ones is not enough. These parts can be cut:
+
+- **Texts.** The brief, the use case, the `desc`, the `gate`, each diff,
+  the file's content and each check's output. A text keeps its start.
+- **Lists.** A person's earlier answers, the changed files, the goal
+  check's verdicts, the earlier rounds, the findings skipped before and
+  the files changed since the last round. A list keeps whole items. The
+  earlier rounds, the skipped findings and the answers keep the latest.
+  The other lists keep their first items.
+
+The findings to decide are never cut. When they, with the names, numbers
+and commands around them, are over the limit on their own, what the judge
+reads stays over it, and the last note says so.
+
+When the limit cuts something, `cut`, after the four parts, names each
+cut, for example
+`the content of page.md: kept the first 20000 of 31250 characters`.
+Each judge entry in the record names the target and the round. It also
+gives the size of what the judge read, in characters, and the same list of
+cuts.
+
+## The questions
 
 For each finding in the round, the judge gets one `choice` question, keyed
 `finding-1`, `finding-2` and so on in the order of the round's findings. It

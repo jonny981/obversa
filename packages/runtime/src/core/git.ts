@@ -2,7 +2,7 @@
 
 import { createHash } from 'node:crypto';
 import { mkdtempSync, rmSync } from 'node:fs';
-import { lstat, readdir, readFile, readlink, realpath } from 'node:fs/promises';
+import { copyFile, lstat, readdir, readFile, readlink, realpath } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join, relative, resolve, sep } from 'node:path';
 import { processText, runRuntimeProcess } from './process.js';
@@ -18,6 +18,7 @@ async function git(
   args: string[],
   { cwd, signal }: GitOpts,
   input?: string,
+  env?: Readonly<Record<string, string>>,
 ): Promise<{ stdout: string; stderr: string; exitCode: number }> {
   const r = await runRuntimeProcess({
     executable: 'git',
@@ -25,6 +26,7 @@ async function git(
     cwd,
     signal,
     ...(input === undefined ? {} : { stdin: input }),
+    ...(env === undefined ? {} : { env }),
   });
   return {
     stdout: processText(r.stdout).replace(/\r?\n$/u, ''),
@@ -534,6 +536,61 @@ export async function compareGitWorkspaceSnapshots(
     filesChanged: changedPaths.length,
     linesChanged,
   });
+}
+
+/**
+ * The workspace's files as a git tree, staged or not, untracked files
+ * included and ignored files left out, without touching the repository's
+ * own index. Two calls on the same files give the same tree. Undefined
+ * outside a git work tree. Never throws.
+ */
+export async function workTree(opts: GitOpts): Promise<string | undefined> {
+  const dir = mkdtempSync(join(tmpdir(), 'obversa-tree-'));
+  try {
+    if (!(await isRepo(opts))) return undefined;
+    // A copy of the real index, so git re-reads only the files that changed.
+    const index = join(dir, 'index');
+    const real = await git(['rev-parse', '--git-path', 'index'], opts);
+    if (real.exitCode === 0) await copyFile(resolve(opts.cwd, real.stdout.trim()), index).catch(() => undefined);
+    const env = { GIT_INDEX_FILE: index };
+    const excluded = (opts.excludePaths ?? [])
+      .map((p) => relative(opts.cwd, resolve(opts.cwd, p)).replace(/\\/g, '/'))
+      .filter((p) => p && !p.startsWith('..') && p !== '.');
+    const added = await git(['add', '-A', '--', '.', ...excluded.map((p) => `:(exclude)${p}`)], opts, undefined, env);
+    if (added.exitCode !== 0) return undefined;
+    const tree = await git(['write-tree'], opts, undefined, env);
+    return tree.exitCode === 0 ? tree.stdout.trim() || undefined : undefined;
+  } catch {
+    return undefined;
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+}
+
+/** One file changed between two trees, with lines added and removed (none for a binary file). */
+export interface TreeChange {
+  readonly path: string;
+  readonly added?: number;
+  readonly removed?: number;
+}
+
+/** The files that differ between two trees, by path from the top of the repository. Empty when git cannot compare them. */
+export async function treeChanges(opts: GitOpts, from: string, to: string): Promise<TreeChange[]> {
+  const r = await git(['diff', '--no-renames', '--numstat', '-z', from, to], opts);
+  if (r.exitCode !== 0) return [];
+  return r.stdout.split('\0').filter(Boolean).map((record) => {
+    const [added, removed, path] = record.split('\t') as [string, string, string];
+    return added === '-' ? { path } : { path, added: Number(added), removed: Number(removed) };
+  });
+}
+
+/**
+ * The unified diff of one file between two trees, with `path` from the top
+ * of the repository, as `treeChanges` gives it. Empty when it did not change.
+ */
+export async function treeDiff(opts: GitOpts, from: string, to: string, path: string): Promise<string> {
+  const r = await git(['diff', '--no-color', '--no-renames', from, to, '--', `:(top,literal)${path}`], opts);
+  return r.exitCode === 0 ? r.stdout : '';
 }
 
 export interface CommitInput {

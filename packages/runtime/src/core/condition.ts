@@ -903,7 +903,7 @@ export function commandJob(
   } = {},
 ): Job {
   const [executable, ...args] = splitCommand(command);
-  return gateJob(
+  const job = gateJob(
     label,
     commandSucceeds(executable, args, {
       ...(opts.cwd !== undefined ? { cwd: opts.cwd } : {}),
@@ -913,6 +913,8 @@ export function commandJob(
     }),
     opts.target !== undefined ? { target: opts.target } : {},
   );
+  // The command line, so a judge reading the round can say what ran.
+  return setMeta(job, { kind: 'gate', name: label, command: [executable, ...args].join(' ') });
 }
 
 function splitCommand(command: string | readonly string[]): [string, ...string[]] {

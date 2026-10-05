@@ -134,8 +134,10 @@ the limit: a number is the send-backs allowed in the whole graph, and a map
 gives each target its own number of
 [refinements](/concepts/feedback-loops#counting-rounds).
 A target's number can be a [`judge()`](/patterns/judge-stops-the-loop)
-instead. The judge reads the dag's `useCase` (what the work is for) and the
-file the target node names in `file`.
+instead. The judge reads the dag's `brief` (the brief or ticket text the work
+answers) and `useCase` (what the work is for), the target node's `desc` and
+`gate`, and the file the target node names in `file`. `brief` and
+`useCase` are optional strings on the dag's config.
 
 The target's next run reads the send-back as `ctx.lastReview`, once. A
 writing `agentJob` that runs again after a send-back and leaves its node's
@@ -365,6 +367,7 @@ variables for a job and every job beneath it.
 | `runId` | `string` | generated | The registry id, `[a-z0-9][a-z0-9-]*`. |
 | `onLimit` | `LimitPolicy` | `'auto'` | What a rate limit, quota or budget does: `auto`, `wait`, `exit` or `fail`. |
 | `maxWaitMs` | `number` | `300000` | Ceiling on one interruptible limit wait. |
+| `judgeContextLimit` | `number` | `50000` | How many characters, counted as JSON, a [judge](/patterns/judge-stops-the-loop#the-size-limit) reads. Long parts are cut to fit. |
 | `cost` | `{ prices, baselineModel? }` | none | Price the measured usage; `baselineModel` adds the counterfactual. |
 
 ### Stage keys
