@@ -18,4 +18,4 @@ install separately: `npm install @obversa/engine-jev-api`,
 This package has no runtime API of its own.
 
 The docs list every public package, including ones this package does not
-install, at [docs.obversa.ai/packages/obversa](https://docs.obversa.ai/packages/obversa).
+install, at [obversa.ai/docs/packages/obversa](https://obversa.ai/docs/packages/obversa).

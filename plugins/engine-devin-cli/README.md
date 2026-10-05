@@ -33,4 +33,4 @@ folder and no flag for a list of named tools. The plugin passes
 `--respect-workspace-trust false`, because print mode cannot show Devin's
 folder trust prompt.
 
-See [Devin CLI Engine](https://docs.obversa.ai/packages/engine-devin-cli).
+See [Devin CLI Engine](https://obversa.ai/docs/packages/engine-devin-cli).

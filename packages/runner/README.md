@@ -26,7 +26,7 @@ Run the offline example from the workspace root:
 pnpm --filter @obversa/runner exec tsx ../../examples/supervised-run.ts
 ```
 
-See the [runner guide](https://docs.obversa.ai/runtime/runner) for the start,
+See the [runner guide](https://obversa.ai/docs/driving/runner) for the start,
 status, resume, and stop APIs, host module contract, and stored run bounds.
 
 ## Limits

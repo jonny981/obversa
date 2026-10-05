@@ -35,4 +35,4 @@ It ships no command and chooses no model. Every seat comes from an engine
 plugin you install.
 
 The full pages, with a complete file and its captured output for each team,
-are at [docs.obversa.ai/workflows](https://docs.obversa.ai/workflows).
+are at [obversa.ai/docs/workflows](https://obversa.ai/docs/workflows).

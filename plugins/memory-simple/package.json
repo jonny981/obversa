@@ -47,7 +47,7 @@
     "type": "git",
     "url": "git+https://github.com/jonny981/obversa.git"
   },
-  "homepage": "https://docs.obversa.ai",
+  "homepage": "https://obversa.ai/docs",
   "bugs": {
     "url": "https://github.com/jonny981/obversa/issues"
   }
