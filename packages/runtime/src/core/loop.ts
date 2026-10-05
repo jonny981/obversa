@@ -30,16 +30,21 @@ import type {
   Outcome,
   Job,
 } from './types.js';
-import { childContext } from './context.js';
+import { childContext, rebuildUntil } from './context.js';
 import { prepareCondition } from './condition.js';
-import { setMeta, jobMeta, describeConditions } from './describe.js';
+import { setMeta, jobMeta, describeConditions, declaredWrites, declareWrites } from './describe.js';
 import { LoopError, type LoopPhase } from './errors.js';
 import { isLimitError, waitMsFor } from './limits.js';
 import { ProgressTracker, resolveNoProgress } from './progress.js';
 import { roundRule } from './rounds.js';
 import { workspaceFingerprint } from './git.js';
-import { checkpointInteraction, interactionDeclaration, interactionIdentity, jsonSnapshot, outcomeSnapshot, savedInteraction } from './interaction.js';
+import { checkpointInteraction, interactionDeclaration, interactionIdentity, jsonSnapshot, outcomeSnapshot, savedInteraction, savedLine, savedProgressLine } from './interaction.js';
+import { missingFiles, missingNote, recordedRound, restoreWrote, reusedWrote } from './resume.js';
 import type { ProgressSample } from './progress.js';
+
+/** The files each result a loop returned wrote, by its last body and the
+ * review that let it pass. */
+const WROTE = new WeakMap<Outcome, readonly string[]>();
 
 const VALID_STATUS = new Set<Outcome['status']>([
   'pass',
@@ -102,6 +107,14 @@ export function loop(config: LoopConfig): Job {
   const onError = config.retry?.onError ?? 'continue';
   const noProgress = resolveNoProgress(config.noProgress);
 
+  // The files a body's result shows it wrote, or, for one a resume
+  // reused, the files the record says it wrote.
+  const bodyWrote = (outcome: Outcome | undefined): readonly string[] =>
+    reusedWrote(outcome) ?? declaredWrites(config.body, outcome);
+  // The same for the review that let the loop pass.
+  const reviewWrote = (outcome: Outcome | undefined): readonly string[] =>
+    outcome === undefined || !config.review ? [] : reusedWrote(outcome) ?? declaredWrites(config.review, outcome);
+
   const job: Job = async (parent: JobContext): Promise<Outcome> => {
     const path = [...parent.path, config.name];
     const depth = parent.depth + 1;
@@ -111,15 +124,52 @@ export function loop(config: LoopConfig): Job {
     const identity = interactionIdentity({ config, params: parent.params });
     const saved = savedInteraction(parent, checkpointPath, identity);
     let checkpointed = saved !== undefined;
+    // Where this loop stood when its last body finished.
+    let bodyDone = saved?.phase === 'review' ? saved : undefined;
     let resumePhase = saved?.phase as 'body' | 'review' | undefined;
     let lastReview = (saved?.lastReview as unknown as Outcome | undefined) ?? parent.lastReview;
     let lastGate = saved?.lastGate as unknown as ConditionResult | undefined;
     let iteration = typeof saved?.iteration === 'number' ? saved.iteration : 0;
+    const savedLast = saved?.last as unknown as Outcome | undefined;
+    restoreWrote(savedLast, saved?.lastWrote);
+    let last = savedLast;
+    let passedReview: Outcome | undefined;
+    // A round whose body finished is reused, unless a file the body writes
+    // is gone, or the step around the loop runs again in place of the run
+    // that saved these rounds: then the body runs again, in the same round.
+    const missing = resumePhase === 'review' ? missingFiles(parent.workspace.dir, bodyWrote(savedLast)) : [];
+    if (missing.length) parent.log(missingNote(`the body of loop "${config.name}" in round ${iteration}`, missing), 'warn');
+    const rebuild = missing.length > 0
+      || (resumePhase === 'review' && savedLine(parent, checkpointPath, identity) <= rebuildUntil(parent));
+    if (rebuild) {
+      resumePhase = 'body';
+      bodyDone = undefined;
+    }
     if (resumePhase === 'body') iteration -= 1;
-    const ctxAt = (iter: number, lastOutcome?: Outcome): JobContext =>
+    // A loop that passed returns that result again while every file it wrote
+    // is there. A review whose files are gone runs again.
+    let passed = rebuild ? undefined : saved?.passed as unknown as Outcome | undefined;
+    if (passed) {
+      passedReview = { status: 'pass' };
+      restoreWrote(passedReview, saved?.reviewWrote);
+      const gone = missingFiles(parent.workspace.dir, reviewWrote(passedReview));
+      if (gone.length) {
+        parent.log(missingNote(`the review of loop "${config.name}" in round ${iteration}`, gone), 'warn');
+        passed = undefined;
+        passedReview = undefined;
+      }
+    }
+    // The review reuses nothing the record holds from before its round's
+    // body last finished: the record line where the saved rounds last
+    // advanced when the review resumes, and all of it once the body ran in
+    // this run.
+    let reviewStale = 0;
+    const ctxAt = (iter: number, lastOutcome?: Outcome, staleUntil?: number): JobContext =>
       childContext(parent, {
         depth,
         path,
+        round: iter,
+        staleUntil,
         iteration: iter,
         lastOutcome,
         lastReview,
@@ -132,7 +182,18 @@ export function loop(config: LoopConfig): Job {
       outcome: Outcome,
       iterations: number,
     ): Promise<Outcome> => {
-      if (checkpointed && outcome.status !== 'paused' && outcome.status !== 'aborted') checkpointInteraction(parent, checkpointPath, identity, null);
+      // A loop that passed keeps its result and the round its last body
+      // finished in, so a resume returns that result, or, when a file it
+      // wrote is gone, builds that round again rather than starting at round 1.
+      if (checkpointed && outcome.status !== 'paused' && outcome.status !== 'aborted') {
+        const keep = outcome.status === 'pass' && bodyDone
+          ? jsonSnapshot({ ...bodyDone, passed: outcomeSnapshot(outcome), reviewWrote: [...reviewWrote(passedReview)] })
+          : undefined;
+        checkpointInteraction(parent, checkpointPath, identity, keep ?? null, keep !== undefined);
+      }
+      // The loop wrote what its last body and the review that let it pass
+      // wrote; its result carries only the body's data.
+      WROTE.set(outcome, [...new Set([...bodyWrote(last), ...reviewWrote(passedReview)])]);
       parent.emit({ kind: 'loop:end', ts: ts(), path, outcome, iterations });
       if (config.onComplete) {
         try {
@@ -181,6 +242,7 @@ export function loop(config: LoopConfig): Job {
           { status: 'aborted', summary: 'aborted by signal' },
           0,
         );
+      if (passed) return finish(passed, iteration);
       const entryContext = ctxAt(0);
       const [start, until, stopOn] = await Promise.all([
         config.start ? prepareCondition(config.start, entryContext) : undefined,
@@ -206,7 +268,6 @@ export function loop(config: LoopConfig): Job {
           );
       }
 
-      let last = saved?.last as unknown as Outcome | undefined;
       let consecutiveErrors = Number(saved?.consecutiveErrors ?? 0);
       let consecutiveReviewFails = Number(saved?.consecutiveReviewFails ?? 0);
       // The last review this loop rejected, for an exhausted outcome's findings.
@@ -219,17 +280,30 @@ export function loop(config: LoopConfig): Job {
       const samples = [...((saved?.samples ?? []) as unknown as ProgressSample[])];
       for (const sample of samples) tracker?.record(sample);
       let warnedInert = false;
+      // Save where this loop is: before a deliberate pause for a person, and
+      // as its rounds advance (`progress`), so a resume continues in the
+      // round and at the phase it reached.
+      const save = (phase: 'body' | 'review', progress: boolean): void => {
+        checkpointed = true;
+        parent.interactionCheckpoint?.(progress);
+        const data = jsonSnapshot({
+          phase, iteration, consecutiveErrors, consecutiveReviewFails, samples,
+          ...(last ? { last: outcomeSnapshot(last) } : {}),
+          // The saved copy of `last` may not show the files the body wrote.
+          ...(last && bodyWrote(last).length ? { lastWrote: [...bodyWrote(last)] } : {}),
+          ...(lastReview ? { lastReview: outcomeSnapshot(lastReview) } : {}),
+          ...(lastGate ? { lastGate: Object.fromEntries(Object.entries(lastGate).filter(([, value]) => value !== undefined)) } : {}),
+        });
+        if (phase === 'review' && progress) bodyDone = data;
+        checkpointInteraction(parent, checkpointPath, identity, data, progress);
+      };
       const checkpointContext = (ctx: JobContext, phase: 'body' | 'review'): JobContext => ({
         ...ctx,
-        interactionCheckpoint() {
-          checkpointed = true;
-          parent.interactionCheckpoint?.();
-          checkpointInteraction(parent, checkpointPath, identity, jsonSnapshot({
-            phase, iteration, consecutiveErrors, consecutiveReviewFails, samples,
-            ...(last ? { last: outcomeSnapshot(last) } : {}),
-            ...(lastReview ? { lastReview: outcomeSnapshot(lastReview) } : {}),
-            ...(lastGate ? { lastGate: Object.fromEntries(Object.entries(lastGate).filter(([, value]) => value !== undefined)) } : {}),
-          }));
+        interactionCheckpoint(progress) {
+          // The review's own rounds advancing leave where this loop stands, so
+          // a resume still reuses the review steps finished after its body.
+          if (phase === 'review' && progress === true) parent.interactionCheckpoint?.(true);
+          else save(phase, progress === true);
         },
       });
 
@@ -297,7 +371,7 @@ export function loop(config: LoopConfig): Job {
 
         let reviewOutcome: Outcome;
         try {
-          reviewOutcome = await config.review(checkpointContext(ctxAt(at, bodyOutcome), 'review'));
+          reviewOutcome = await config.review(checkpointContext(ctxAt(at, bodyOutcome, reviewStale), 'review'));
         } catch (e) {
           throw LoopError.from(e, {
             code: 'VALIDATION',
@@ -346,6 +420,7 @@ export function loop(config: LoopConfig): Job {
               terminal: { status: 'aborted', summary: 'aborted by signal' },
             };
           }
+          passedReview = reviewOutcome;
           return {
             conv,
             terminal: {
@@ -444,12 +519,16 @@ export function loop(config: LoopConfig): Job {
 
         const resumingReview = resumePhase === 'review';
         resumePhase = undefined;
+        reviewStale = resumingReview ? savedProgressLine(parent, checkpointPath, identity) : Infinity;
         if (!resumingReview) iteration += 1;
         const ctx = ctxAt(iteration, last);
         // The review outcome of THIS turn, when one ran and rejected — feeds the
         // no-progress sample (its confidence/summary gated the continuation).
         let turnReview: Outcome | undefined;
         if (!resumingReview) parent.emit({ kind: 'loop:iteration', ts: ts(), path, iteration });
+        // A round after the first, or a body run again because its files are
+        // gone, starts from the saved rounds on a resume.
+        if (!resumingReview && (iteration > 1 || rebuild)) save('body', true);
 
         // run the body (fresh context this turn)
         let bodyThrew = false;
@@ -607,6 +686,9 @@ export function loop(config: LoopConfig): Job {
             );
         }
 
+        // The body finished: a resume from here reuses it and goes on to the
+        // gate and the review. A body stopped by the signal may not have.
+        if (!resumingReview && !parent.signal.aborted) save('review', true);
         const convergence = await evaluateConvergence(iteration, ctx, last);
         const { conv } = convergence;
         turnReview = convergence.turnReview;
@@ -722,6 +804,14 @@ export function loop(config: LoopConfig): Job {
     }
   };
 
+  // A compact record drops the body's result, so a graph body, and a graph
+  // review, read their steps from the record of the loop's last round.
+  declareWrites(job, (outcome) => {
+    const wrote = outcome && WROTE.get(outcome);
+    if (wrote) return wrote;
+    const round = recordedRound(outcome, config.name);
+    return round === undefined ? bodyWrote(outcome) : [...new Set([...bodyWrote(round), ...reviewWrote(round)])];
+  });
   return interactionDeclaration(setMeta(job, {
     kind: 'loop',
     name: config.name,

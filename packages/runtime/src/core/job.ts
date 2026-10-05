@@ -71,7 +71,7 @@ import {
 } from './engine-meta.js';
 import { cloneFrozenJson, type JsonValue } from '../graph/value.js';
 import { workspaceContent } from './git.js';
-import { NODE_FILE } from './context.js';
+import { NODE_FILE, recordedRounds, roundsOf } from './context.js';
 import { oneLine } from './text.js';
 import { requireFinalResultText } from '../runtime/result-parts.js';
 
@@ -480,6 +480,7 @@ export function agentJob(config: AgentJobConfig): Job {
                     model: e.model,
                     usage: e.usage,
                     ...recordAs,
+                    ...(recordAs === undefined ? {} : recordedRounds(roundsOf(ctx), path.length)),
                   });
                   recordEngineUsage(ctx, e.model, path, recordAs);
                   break;

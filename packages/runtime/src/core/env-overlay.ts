@@ -19,7 +19,7 @@ import type { Job, JobContext } from './types.js';
 import { childContext } from './context.js';
 import { delegateNodeJob } from './approval-job.js';
 import { LoopError } from './errors.js';
-import { jobMeta, setMeta } from './describe.js';
+import { declaredWrites, declareWrites, jobMeta, setMeta } from './describe.js';
 
 /**
  * Layer env sources least- to most-specific into one record for a subprocess.
@@ -102,6 +102,8 @@ export function withEnv(overlay: Record<string, string>, job: Job): Job {
         envOverlay: { ...ctx.envOverlay, ...overlay },
       }),
     );
+  // Carry the files the wrapped job writes, so a resume checks them.
+  declareWrites(wrapper, (outcome) => declaredWrites(job, outcome));
   // Carry the wrapped job's meta so `describe`/`validate` show the inner shape.
   const meta = jobMeta(job);
   return meta ? setMeta(wrapper, meta) : wrapper;

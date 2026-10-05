@@ -212,22 +212,24 @@ describe('dag resume', () => {
 
     // Run 1: two passes, three kicks back, two starts attempt 2 — then the
     // worker died (the record is cut right after that start).
-    const first = await result(build(), { recordTo: path });
-    expect(first.outcome.status).toBe('pass');
-    expect(counts.two).toBe(2);
-    const lines = (await readFile(path, 'utf8')).trim().split('\n');
-    let cut = -1;
-    for (const [index, line] of lines.entries()) {
-      const event = JSON.parse(line) as LoopEvent;
-      if (event.kind === 'dag:node' && event.node === 'two' && event.phase === 'start' && event.attempt === 2) {
-        cut = index;
+    const interrupted = async (retrySafe: boolean, record: string) => {
+      sendBack = true;
+      const first = await result(build(retrySafe), { recordTo: record });
+      expect(first.outcome.status).toBe('pass');
+      const lines = (await readFile(record, 'utf8')).trim().split('\n');
+      let cut = -1;
+      for (const [index, line] of lines.entries()) {
+        const event = JSON.parse(line) as LoopEvent;
+        if (event.kind === 'dag:node' && event.node === 'two' && event.phase === 'start' && event.attempt === 2) {
+          cut = index;
+        }
       }
-    }
-    expect(cut).toBeGreaterThanOrEqual(0);
-    await writeFile(path, `${lines.slice(0, cut + 1).join('\n')}\n`);
-
-    counts.two = 0;
-    sendBack = false;
+      expect(cut).toBeGreaterThanOrEqual(0);
+      await writeFile(record, `${lines.slice(0, cut + 1).join('\n')}\n`);
+      counts.two = 0;
+      sendBack = false;
+    };
+    await interrupted(false, path);
     const callbacks = createCallbackClient();
     const paused = await result(build(), { recordTo: path, resume: true, callbacks });
     expect(paused.outcome.status).toBe('paused');
@@ -235,7 +237,7 @@ describe('dag resume', () => {
     expect(counts.two).toBe(0);
 
     const safePath = recordTo('safe.jsonl');
-    await writeFile(safePath, `${lines.slice(0, cut + 1).join('\n')}\n`);
+    await interrupted(true, safePath);
     const safe = await result(build(true), { recordTo: safePath, resume: true });
     expect(safe.outcome.status).toBe('pass');
     expect(counts.two).toBe(1);
@@ -374,7 +376,7 @@ describe('dag resume', () => {
     expect(await branchExists(cwd, 'lines/trio-two-2')).toBe(false);
   });
 
-  it('reuses the record only on the first pass of a loop around the dag', async () => {
+  it('reuses the record in every pass of a loop around the dag', async () => {
     const { counts, node } = counters();
     const build = () => loop({
       name: 'again',
@@ -393,9 +395,9 @@ describe('dag resume', () => {
     expect((await result(build(), { recordTo: path })).outcome.status).toBe('exhausted');
     expect(counts).toEqual({ one: 2, two: 2, three: 2 });
 
-    // The first pass reuses the record; the second pass does new work.
+    // Each pass reuses what it finished in its own round.
     expect((await result(build(), { recordTo: path, resume: true })).outcome.status).toBe('exhausted');
-    expect(counts).toEqual({ one: 3, two: 3, three: 3 });
+    expect(counts).toEqual({ one: 2, two: 2, three: 2 });
   });
 
   it('keeps the refinements spent and the judge history when the worker dies after a send-back', async () => {
@@ -765,8 +767,16 @@ describe('dag resume', () => {
     await result(build(), { recordTo: path });
     expect(builds).toBe(4);
 
-    // The first pass counts on from the saved rounds and builds nothing; the
-    // second pass has its own refinement to spend.
+    // The worker dies as the second pass starts. The first pass ran out of
+    // rounds and is not built again; the second pass has its own refinement
+    // to spend.
+    const lines = (await readFile(path, 'utf8')).trim().split('\n');
+    const cut = lines.findIndex((line) => {
+      const event = JSON.parse(line) as LoopEvent;
+      return event.kind === 'loop:iteration' && event.iteration === 2;
+    });
+    expect(cut).toBeGreaterThan(0);
+    await writeFile(path, `${lines.slice(0, cut + 1).join('\n')}\n`);
     builds = 0;
     await result(build(), { recordTo: path, resume: true });
     expect(builds).toBe(2);

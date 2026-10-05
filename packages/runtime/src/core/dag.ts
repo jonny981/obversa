@@ -30,10 +30,10 @@ import type {
   ResumedStageRecords,
   Workspace,
 } from './types.js';
-import { childContext, NODE_FILE } from './context.js';
+import { childContext, NODE_FILE, rebuildUntil, recordedRounds, recordKey, ROUNDS, roundsOf, type Rounds } from './context.js';
 import { nodeJobContext } from './approval-job.js';
 import { needDecisionsOf, toCondition } from './condition.js';
-import { setMeta, jobMeta, describeConditions } from './describe.js';
+import { setMeta, jobMeta, describeConditions, declaredWrites, declareWrites } from './describe.js';
 import {
   isRepo,
   stageAll,
@@ -50,7 +50,7 @@ import { revisionFromOutcome } from './feedback.js';
 import { consultJudge, isJudge, judgedFindings, judgeRound, judgeState, lastRoundAnswered, productDecisionFeedback, readJudgedFile, type JudgeRound, type JudgeState, type SkippedFinding } from './judge.js';
 import { checkpointInteraction, interactionDeclaration, interactionIdentity, jsonSnapshot, outcomeSnapshot, savedInteraction, type InteractionResponse } from './interaction.js';
 import { DEFAULT_FANOUT_CONCURRENCY } from './concurrency.js';
-import { dagResumeIdentity, restoreRecordedUsage, resumeGuard, RESUME_IDENTITY, RESUME_STAGE_OUTCOMES } from './resume.js';
+import { dagResumeIdentity, missingFiles, recordedSteps, restoreRecordedUsage, restoreWrote, resumeGuard, reusedWrote, RESUME_IDENTITY, RESUME_STAGE_OUTCOMES } from './resume.js';
 import { roundRule } from './rounds.js';
 
 /**
@@ -133,6 +133,21 @@ function validateKickbackBudget(
       });
     }
   }
+}
+
+/** The files a node declares it writes: its job's, as far as `outcome`, its
+ * recorded result, shows, and its `file`. */
+function nodeWrites(node: DagNode, outcome?: Outcome): string[] {
+  return [...new Set([...declaredWrites(node.job, outcome), ...(node.file === undefined ? [] : [node.file])])];
+}
+
+/** The files a node wrote, by its recorded result: none unless it passed
+ * without being skipped. A result a resume reused wrote what its record
+ * says. */
+function wroteFiles(node: DagNode, outcome: Outcome | undefined): string[] {
+  return outcome?.status === 'pass' && (outcome.data as { skipped?: boolean } | undefined)?.skipped !== true
+    ? [...(reusedWrote(outcome) ?? nodeWrites(node, outcome))]
+    : [];
 }
 
 export function dag(config: DagConfig): Job {
@@ -293,15 +308,18 @@ export function dag(config: DagConfig): Job {
     const path = [...parent.path, config.name];
     const depth = parent.depth + 1;
     const ts = () => Date.now();
-    // The resume anchor: a dag records it at start, so a resumed run can
-    // match its finished nodes against the same declared shape. Only the
-    // graph's first invocation in a run takes it: a later loop pass, or a rerun
-    // of the node that holds this graph, runs every node again.
+    // The resume anchor: a dag records it at start, with the rounds it runs
+    // in, so a resumed run can match its finished nodes against the same
+    // declared shape in the same round. Each round's first invocation takes
+    // its own anchor: a later loop round, or a rerun of the node that holds
+    // this graph, reads that round's record. A second invocation in the same
+    // round runs every node again.
     const anchors = (parent.state[RESUME_STAGE_OUTCOMES] as ResumedStageRecords | undefined)?.anchors;
-    const prior = anchors?.get(path.join('/'));
-    if (anchors instanceof Map) anchors.delete(path.join('/'));
-    // The saved rounds belong to the same invocation: a later loop pass
-    // starts its rounds afresh, even after a pass that failed.
+    const rounds = recordedRounds(roundsOf(parent), path.length);
+    const anchorKey = recordKey(path, rounds.rounds);
+    const prior = anchors?.get(anchorKey);
+    if (anchors instanceof Map) anchors.delete(anchorKey);
+    // The saved rounds belong to the same invocation in the same round.
     const checkpointPath = [...path, '@judge-kickback'];
     const saved = prior === undefined ? undefined : savedInteraction(parent, checkpointPath, identity);
     let pending = saved?.pending as unknown as { from: string; count: number; state: JudgeState } | undefined;
@@ -324,18 +342,68 @@ export function dag(config: DagConfig): Job {
       recordId: prior?.identity === resumeIdentity && prior.workspace === parent.workspace.dir
         ? prior.recordId ?? randomUUID()
         : randomUUID(),
+      ...rounds,
     });
     parent.emit({ kind: 'dag:start', ts: ts(), path, depth, nodes: names });
 
     const concurrency = pLimit(limitN);
     const results = new Map<string, Outcome>(Object.entries(saved?.results ?? {}) as unknown as [string, Outcome][]);
-    const memo = new Map<string, Promise<Outcome>>([...results].map(([name, outcome]) => [name, Promise.resolve(outcome)]));
-    // A step the saved rounds reuse does not run again: its recorded model
-    // answers come back from the record, as a reused step's do.
-    for (const name of results.keys()) restoreRecordedUsage({ state: parent.state, path: [...path, name] });
+    const savedWrote = (saved?.wrote ?? {}) as Record<string, unknown>;
+    for (const [name, outcome] of results) restoreWrote(outcome, savedWrote[name]);
     // How many times each node has run (1 on the first pass, +1 per kickback
     // re-run). Stamped onto its dag:node events so records can tell rounds apart.
     const attempts = new Map<string, number>(Object.entries(saved?.attempts ?? {}) as [string, number][]);
+    // The rounds a node runs in: this graph's, and its own attempt.
+    const nodeRounds = (name: string): Rounds => {
+      const attempt = attempts.get(name) ?? 1;
+      return attempt > 1 ? { ...roundsOf(parent), [path.length]: attempt } : roundsOf(parent);
+    };
+    // A saved node whose files are gone from the workspace, that the record
+    // shows started again after it was saved, that a step it needs finished
+    // after, or that the record holds from a run the step around this graph
+    // runs again in place of, is not reused: it runs as the same attempt, so its
+    // resume guard finds its record in its own round and runs it again or
+    // asks a person. Every saved node that needs one of them runs again too,
+    // on what it rebuilds.
+    const stages = (parent.state[RESUME_STAGE_OUTCOMES] as ResumedStageRecords | undefined)?.stages;
+    const nodeKey = (name: string): string =>
+      recordKey([...path, name], recordedRounds(nodeRounds(name), path.length + 1).rounds);
+    // Where the record holds a node's run in its current round; 0 for none.
+    const recordLine = (name: string): number => {
+      const recorded = stages?.get(nodeKey(name));
+      return recorded === undefined ? 0 : recorded.kind === 'completed' ? recorded.line : recorded.startLine;
+    };
+    // The send-back each node's last finished run read, so a run again in
+    // the same round reads it too.
+    const readKickback = new Map<string, Outcome>(Object.entries(saved?.readKickbacks ?? {}) as unknown as [string, Outcome][]);
+    const rerun = new Set<string>();
+    const savedLines = new Map(names.map((name) => [name, recordLine(name)]));
+    for (const name of results.keys()) {
+      if (stages?.get(nodeKey(name))?.kind !== 'interrupted'
+        && !(rebuildUntil(parent) > 0 && savedLines.get(name)! <= rebuildUntil(parent))
+        && !normalizeNeeds(nodes.get(name)!.needs).some((need) => savedLines.get(need)! > savedLines.get(name)!)
+        && missingFiles(parent.workspace.dir, wroteFiles(nodes.get(name)!, results.get(name))).length === 0) continue;
+      results.delete(name);
+      attempts.set(name, (attempts.get(name) ?? 1) - 1);
+      rerun.add(name);
+    }
+    for (const name of order) {
+      if (!results.has(name) || !normalizeNeeds(nodes.get(name)!.needs).some((need) => rerun.has(need))) continue;
+      results.delete(name);
+      attempts.set(name, (attempts.get(name) ?? 1) - 1);
+      rerun.add(name);
+    }
+    // The nodes that ran in this invocation instead of reusing their record:
+    // a node that needs one of them does not reuse its own.
+    const ranAgain = new Set<string>();
+    // A node reuses nothing the record holds under it from before a step it
+    // needs last finished, in the record or in this run: that work is newer.
+    const needsFinished = (name: string): number => Math.max(0, ...normalizeNeeds(nodes.get(name)!.needs)
+      .map((need) => (ranAgain.has(need) ? Infinity : recordLine(need))));
+    const memo = new Map<string, Promise<Outcome>>([...results].map(([name, outcome]) => [name, Promise.resolve(outcome)]));
+    // A step the saved rounds reuse does not run again: its recorded model
+    // answers come back from the record, as a reused step's do.
+    for (const name of results.keys()) restoreRecordedUsage({ state: parent.state, path: [...path, name], [ROUNDS]: nodeRounds(name) } as Pick<JobContext, 'state' | 'path'>);
     let stopped = false;
     // When a node is kicked back to, the reason rides into its next run as
     // `lastReview` — the same channel a loop's failed `review` uses, so the next
@@ -344,6 +412,10 @@ export function dag(config: DagConfig): Job {
     // A node's first run reads the feedback the dag itself was given, such as
     // the enclosing loop's rejection when the dag is a loop's body.
     const pendingKickback = new Map<string, Outcome>(Object.entries(saved?.kickbacks ?? {}) as unknown as [string, Outcome][]);
+    for (const name of rerun) {
+      const read = readKickback.get(name);
+      if (read !== undefined && !pendingKickback.has(name)) pendingKickback.set(name, read);
+    }
     const feedbackFor = (name: string): Outcome | undefined =>
       pendingKickback.get(name) ?? (attempts.get(name) === 1 ? parent.lastReview : undefined);
     const skippedFor = (name: string): readonly SkippedFinding[] | undefined => {
@@ -371,29 +443,32 @@ export function dag(config: DagConfig): Job {
     // How many runs of each node finished: a node that paused, was aborted or
     // was still running runs again on a resume, as the same attempt.
     const finished = new Map(attempts);
-    const ran = new Set<string>();
     let used = Number(saved?.used ?? 0);
     const rejected = new Set<string>((saved?.rejected ?? []) as string[]);
     // The rounds so far belong to this run. Once a node has been sent back to
     // or judged, the graph saves them, with the passed outcomes, whenever a
     // node finishes, a send-back is accepted, or the graph pauses. A resume
-    // after a pause, an abort, a crash or a failure counts on from the same round, with
+    // after a pause, an abort, a crash, a failure or a pass counts on from the same round, with
     // the same judge history. A node that did not pass runs again on the
     // resume, as the same attempt.
-    let checkpointed = saved !== undefined;
     // A skipped node is not kept: the resume asks its condition again.
     const kept = (o: Outcome): boolean =>
       o.status === 'pass' && (o.data as { skipped?: boolean } | undefined)?.skipped !== true;
+    // The saved copy of a result may not show the files its node wrote.
+    const wroteSoFar = () => Object.fromEntries([...results]
+      .map(([name, o]) => [name, wroteFiles(nodes.get(name)!, o)] as const)
+      .filter(([, files]) => files.length));
     const saveRounds = (): void => {
       if (targetCounts.size === 0 && judgeHistory.size === 0) return;
-      checkpointed = true;
       checkpointInteraction(parent, checkpointPath, identity, jsonSnapshot({
         results: Object.fromEntries([...results].filter(([, o]) => kept(o)).map(([name, o]) => [name, outcomeSnapshot(o)])),
+        wrote: wroteSoFar(),
         attempts: Object.fromEntries([...finished].map(([name, n]) => {
           const outcome = results.get(name);
           return [name, outcome === undefined || kept(outcome) || outcome.status === 'paused' || outcome.status === 'aborted' ? n : n - 1];
         })),
         kickbacks: Object.fromEntries([...pendingKickback].map(([name, o]) => [name, outcomeSnapshot(o)])),
+        readKickbacks: Object.fromEntries([...readKickback].map(([name, o]) => [name, outcomeSnapshot(o)])),
         targetCounts: Object.fromEntries(targetCounts),
         history: Object.fromEntries(judgeHistory), skipped: Object.fromEntries(judgeSkipped), productFeedback: Object.fromEntries(productFeedback), drafts: Object.fromEntries(judgeDrafts), used, rejected: [...rejected],
       }), true);
@@ -419,6 +494,8 @@ export function dag(config: DagConfig): Job {
       Object.assign(nodeJobContext(childContext(parent, {
         depth,
         path: [...path, name],
+        round: attempts.get(name) ?? 1,
+        staleUntil: needsFinished(name),
         workspace,
         environment,
         lastReview: feedbackFor(name),
@@ -564,10 +641,24 @@ export function dag(config: DagConfig): Job {
     const runNodeJob = async (
       name: string,
       node: DagNode,
-      restored: boolean,
+    ): Promise<Outcome> => {
+      const outcome = await guardedNodeJob(name, node);
+      const recorded = stages?.get(nodeKey(name));
+      if (recorded?.kind !== 'completed' || recorded.outcome !== outcome) ranAgain.add(name);
+      return outcome;
+    };
+
+    const guardedNodeJob = async (
+      name: string,
+      node: DagNode,
     ): Promise<Outcome> => {
       const retrySafe = node.retrySafe === true;
-      const shared = resumeGuard(node.job, resumeIdentity, name, retrySafe, prior, false, restored);
+      const files = (outcome: Outcome | undefined) => nodeWrites(node, outcome);
+      // The steps it needs that ran again after it finished: in this run, or
+      // in one the record holds that stopped before it ran again.
+      const own = recordLine(name);
+      const changed = normalizeNeeds(node.needs).filter((need) => ranAgain.has(need) || recordLine(need) > own);
+      const shared = resumeGuard(node.job, resumeIdentity, name, retrySafe, prior, false, files, changed);
       const isolated = node.isolate ?? config.isolation === 'worktree';
       if (!isolated) return shared(nodeCtx(name, shared));
 
@@ -580,7 +671,7 @@ export function dag(config: DagConfig): Job {
         return shared(nodeCtx(name, shared));
       }
 
-      const fork = resumeGuard(() => forkNodeJob(name, node), resumeIdentity, name, retrySafe, prior, true, restored);
+      const fork = resumeGuard(() => forkNodeJob(name, node), resumeIdentity, name, retrySafe, prior, true, files, changed);
       return fork(nodeCtx(name, fork));
     };
 
@@ -590,9 +681,15 @@ export function dag(config: DagConfig): Job {
       phase: 'done' | 'skip',
     ): Outcome => {
       results.set(name, outcome);
+      // The record keeps the files the node wrote, as a compact record
+      // drops the result data they are read from.
+      const wrote = phase === 'done' ? wroteFiles(nodes.get(name)!, outcome) : [];
       // A paused or aborted node has not finished with its send-back: it
       // reads it again when it runs again.
       if (outcome.status !== 'paused' && outcome.status !== 'aborted') {
+        const read = pendingKickback.get(name);
+        if (read === undefined) readKickback.delete(name);
+        else readKickback.set(name, read);
         pendingKickback.delete(name);
         finished.set(name, attempts.get(name) ?? 1);
       }
@@ -606,6 +703,8 @@ export function dag(config: DagConfig): Job {
         outcome,
         attempt: attempts.get(name),
         timeoutMs: nodes.get(name)!.timeoutMs,
+        ...recordedRounds(nodeRounds(name), path.length + 1),
+        ...(wrote.length ? { wrote } : {}),
       });
       if (outcome.status !== 'paused' && outcome.status !== 'aborted') saveRounds();
       // A paused node is a deliberate halt, not a failure: stop scheduling nodes
@@ -635,9 +734,6 @@ export function dag(config: DagConfig): Job {
         // This node's run count: 1 the first time, +1 each kickback re-run (the
         // memo/results were cleared for the dirty subgraph, so run() re-enters).
         attempts.set(name, (attempts.get(name) ?? 0) + 1);
-        // A later attempt that the saved rounds resume: its first run here.
-        const restored = (finished.get(name) ?? 0) > 0 && !ran.has(name);
-        ran.add(name);
         // A node that runs again, a failed one on a resume included, earns a
         // fresh verdict; its target's rounds and judge history stay.
         rejected.delete(name);
@@ -710,8 +806,9 @@ export function dag(config: DagConfig): Job {
                 ...nodeContext(name),
                 attempt: attempts.get(name),
                 timeoutMs: node.timeoutMs,
+                ...recordedRounds(nodeRounds(name), path.length + 1),
               });
-              return { outcome: await runNodeJob(name, node, restored), phase: 'done' };
+              return { outcome: await runNodeJob(name, node), phase: 'done' };
             },
           );
           return record(name, result.outcome, result.phase);
@@ -847,6 +944,8 @@ export function dag(config: DagConfig): Job {
             save: (questionState) => checkpointInteraction(parent, checkpointPath, identity, jsonSnapshot({
               pending: { from, count, state: questionState },
               results: Object.fromEntries([...results].map(([name, outcome]) => [name, outcomeSnapshot(outcome)])),
+              wrote: wroteSoFar(),
+              readKickbacks: Object.fromEntries([...readKickback].map(([name, o]) => [name, outcomeSnapshot(o)])),
               attempts: Object.fromEntries(attempts), targetCounts: Object.fromEntries(targetCounts),
               history: Object.fromEntries(judgeHistory), skipped: Object.fromEntries(judgeSkipped), productFeedback: Object.fromEntries(productFeedback), drafts: Object.fromEntries(judgeDrafts), used, rejected: [...rejected],
             })),
@@ -1032,16 +1131,19 @@ export function dag(config: DagConfig): Job {
         data,
       };
     }
-    // A paused, aborted or failed graph keeps its rounds, so a resume counts
-    // on from them and never builds past the limit; a graph that passed is
-    // done with them.
+    // A graph keeps its rounds however it ended, so a resume counts on from
+    // them and never builds past the limit, and a passed graph whose files
+    // are gone rebuilds them in the round it passed in.
     if (outcome.status === 'paused' && !judgePaused) saveRounds();
-    else if (outcome.status === 'pass' && checkpointed) {
-      checkpointInteraction(parent, checkpointPath, identity, null);
-    }
     parent.emit({ kind: 'dag:end', ts: ts(), path, outcome });
     return outcome;
   };
+  // A graph wrote the files of the steps its recorded result shows passed,
+  // or, where a compact record dropped them, the steps' own records show.
+  declareWrites(job, (outcome) => {
+    const ran = (outcome?.data ?? recordedSteps(outcome, config.name)) as Record<string, Outcome | undefined> | undefined;
+    return [...new Set([...nodes].flatMap(([name, node]) => wroteFiles(node, ran?.[name])))];
+  });
 
   return interactionDeclaration(setMeta(job, {
     kind: 'dag',

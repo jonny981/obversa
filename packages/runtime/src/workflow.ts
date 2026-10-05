@@ -8,7 +8,7 @@ import { join } from 'node:path';
 import { agentJob, fnJob, RECORDED_ENGINE_USAGE, type RecordedEngineUsage } from './core/job.js';
 import { approval } from './core/approval-job.js';
 import { commandJob, predicate } from './core/condition.js';
-import { copyJobMeta } from './core/describe.js';
+import { copyJobMeta, declareWrites } from './core/describe.js';
 import { dag, TARGET_ROUNDS, type TargetRounds } from './core/dag.js';
 import { RESUME_IDENTITY } from './core/resume.js';
 import { roundRule } from './core/rounds.js';
@@ -439,7 +439,9 @@ function recordedFamilyGate(
     try {
       const all = recordedUsage(ctx);
       const beforeLength = all.length;
-      const resumingInteraction = hasSavedInteraction(ctx, ctx.path);
+      // A resume that continues the stage from its saved rounds may not run
+      // the writer again: its recorded answers came back with the rounds.
+      const resumingInteraction = hasSavedInteraction(ctx, ctx.path, true);
       const writerSide = (records: readonly RecordedEngineUsage[]) => records.filter(
         (record) => record.role === 'writer'
           && record.stage !== undefined
@@ -764,8 +766,8 @@ function judgedReview(brief: BriefSource, named: NamedStage, cfgJudge: Judge, re
  * when set, runs ahead of the review each round, and a result that is not a
  * pass is the round's outcome with no review. A stop the judge decides
  * becomes the stage's outcome. The builds this run of the stage started
- * from are saved whenever anything in the stage pauses for a person, and a
- * resume starts from them. Each rejected round that another build follows
+ * from are saved whenever anything in the stage pauses for a person or its
+ * rounds advance, and a resume starts from them. Each rejected round that another build follows
  * saves the rounds so far with its feedback, so a resume after a pause, an
  * abort or a crash runs the stage again from the next round, with the
  * judge's history, the findings it skipped and the draft it last read.
@@ -812,16 +814,19 @@ function stageRounds(
     }, job);
     const max = refinements === undefined ? undefined : refinements + 1 - base;
     let checkpointed = saved !== undefined;
-    const outcome = await rounds(counted(body), counted(saveRejected(isJudge(refine) ? judgedReview(brief, named, refine, review, run, before) : plain)), max)({
+    const outcome = await rounds(declareWrites(counted(body), writesOf(named.config)), counted(saveRejected(isJudge(refine) ? judgedReview(brief, named, refine, review, run, before) : plain)), max)({
       ...ctx,
-      interactionCheckpoint() {
-        ctx.interactionCheckpoint?.();
+      interactionCheckpoint(progress) {
+        ctx.interactionCheckpoint?.(progress);
         checkpointed = true;
-        checkpointInteraction(ctx, checkpointPath, identity, jsonSnapshot({ base }));
+        checkpointInteraction(ctx, checkpointPath, identity, jsonSnapshot({ base }), progress === true);
       },
     });
     if (outcome.status === 'paused' || outcome.status === 'aborted') return outcome;
-    if (checkpointed) checkpointInteraction(ctx, checkpointPath, identity, null);
+    // A stage that passed keeps the builds it started from, so a resume that
+    // runs it again, because its file is gone, can build the round it passed
+    // in again.
+    if (checkpointed) checkpointInteraction(ctx, checkpointPath, identity, outcome.status === 'pass' ? jsonSnapshot({ base }) : null, outcome.status === 'pass');
     shared.builds = base + latest - 1;
     const stop = outcome.status === 'fail' && outcome.error ? judgeStops.get(outcome.error) : undefined;
     return stop ? { ...outcome, ...stop } : outcome;
@@ -1166,7 +1171,7 @@ export function workflow(name: string, config: WorkflowConfig): Job {
     );
     const file = writesOf(stageConfig)[0];
     return [named.name, {
-      job: innerStage,
+      job: declareWrites(innerStage, writesOf(stageConfig)),
       ...(file === undefined ? {} : { file }),
       ...(named.config.retrySafe === undefined ? {} : { retrySafe: named.config.retrySafe }),
       needs: stageDependencies(config.stages, index),
