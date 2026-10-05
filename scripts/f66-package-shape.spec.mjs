@@ -82,6 +82,22 @@ test('the proof chain reaches package shape, clean consumer, and retired-name ch
   const releaseWorkflow = readFileSync('.github/workflows/release.yml', 'utf8');
   assert.equal(scripts['verify:f108'], 'pnpm verify:d15');
   assert.match(releaseWorkflow, /run: node scripts\/check-release-commit\.mjs/);
+  // One job: the release starts one runner and installs once. The release
+  // commit check is its first step after install, before anything builds or
+  // publishes.
+  const jobs = releaseWorkflow.slice(releaseWorkflow.indexOf('\njobs:\n'));
+  assert.deepEqual([...jobs.matchAll(/^ {2}([\w-]+):$/gm)].map((m) => m[1]), ['publish']);
+  const steps = jobs.split(/\n {6}- /).slice(1);
+  const install = steps.findIndex((step) => /run: pnpm install --frozen-lockfile/.test(step));
+  assert.ok(install >= 0, 'the job installs');
+  assert.match(steps[install + 1], /run: node scripts\/check-release-commit\.mjs/);
+  assert.ok(steps.findIndex((step) => /pnpm changeset publish/.test(step)) > install + 1);
+  // The job does not wait for npm to show the versions: the tag step pushes
+  // the tags this run's publish created, and no registry read-back follows.
+  const before = steps.findIndex((step) => /git tag --list > "\$RUNNER_TEMP\/tags-before-publish"/.test(step));
+  assert.ok(before >= 0 && before < steps.findIndex((step) => /pnpm changeset publish/.test(step)), 'the tags are listed before the publish');
+  assert.match(releaseWorkflow, /run: node scripts\/tag-published\.mjs --tags-before "\$RUNNER_TEMP\/tags-before-publish"/);
+  assert.ok(!steps.some((step) => /run: node scripts\/verify-published/.test(step)), 'no registry read-back step');
   assert.match(scripts['verify:d15'], /node --test scripts\/f66-package-shape\.spec\.mjs/);
   assert.match(scripts['verify:d15'], /pnpm test:retired-names/);
   assert.match(scripts['verify:d15'], /pnpm check:retired-names/);

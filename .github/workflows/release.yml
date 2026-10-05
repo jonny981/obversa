@@ -1,13 +1,18 @@
 name: Release
 
 # The release act is a manual dispatch on main. Before dispatch, create the
-# `release` environment and require Jonny as its reviewer. Verification runs
-# first; the publish job then waits for that approval. Verification checks the
-# release commit instead of running the proof chain again: its parent passed
-# CI on GitHub, and it changes only versions, changelogs, the package table and
-# deleted changesets (scripts/check-release-commit.mjs). `changeset publish`
-# releases every workspace version that is not yet on the registry and tags
-# each published package `name@version`; the job pushes those tags.
+# `release` environment and require a reviewer for it. The one job waits for
+# that approval, installs, then checks the release commit before anything
+# builds or publishes. The check replaces a second run of the proof chain: the
+# commit's parent passed CI on GitHub, and the commit changes only versions,
+# changelogs, the package table and deleted changesets
+# (scripts/check-release-commit.mjs). `changeset publish` releases every
+# workspace version that is not yet on the registry and tags each published
+# package `name@version`; the job pushes those tags.
+#
+# The job does not wait for npm to show the new versions, which takes
+# minutes. Confirm the release afterwards by reading every version back from
+# the registry: node scripts/verify-published.mjs
 #
 # Credentials: the publish job holds the only OIDC grant (`id-token: write`)
 # for npm trusted publishing. Until a trusted publisher is configured for a
@@ -26,32 +31,13 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
-  verify:
-    runs-on: ubuntu-latest
-    permissions:
-      contents: read
-      actions: read # read the parent commit's CI run
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          fetch-depth: 2 # the release commit and its parent
-      - uses: actions/setup-node@v4
-        with:
-          node-version: 22
-      - run: corepack enable
-      - run: pnpm install --frozen-lockfile
-      - name: Check the release commit changes only release files and its parent passed CI
-        run: node scripts/check-release-commit.mjs
-        env:
-          GITHUB_TOKEN: ${{ github.token }}
-
   publish:
-    needs: verify
     if: github.ref_name == 'main'
     runs-on: ubuntu-latest
     environment: release
     permissions:
       contents: write # push the name@version tags changesets creates
+      actions: read # read the parent commit's CI run
       id-token: write # npm trusted publishing
     env:
       # The explicit release act the prepublishOnly hook requires.
@@ -70,6 +56,10 @@ jobs:
           registry-url: https://registry.npmjs.org/
       - run: corepack enable
       - run: pnpm install --frozen-lockfile
+      - name: Check the release commit changes only release files and its parent passed CI
+        run: node scripts/check-release-commit.mjs
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
       # The checkout is fresh: the tarballs pnpm packs need the built output.
       - run: pnpm build
       - name: Prove the publish client is the pinned npm on a trusted-publishing-capable Node
@@ -89,6 +79,10 @@ jobs:
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898341+github-actions[bot]@users.noreply.github.com"
+      # The tag step pushes a tag missing from this list without reading the
+      # registry: this run's publish created it.
+      - name: List the tags that exist before the publish
+        run: git tag --list > "$RUNNER_TEMP/tags-before-publish"
       - name: Publish the unpublished workspace versions
         run: pnpm changeset publish
         env:
@@ -96,12 +90,10 @@ jobs:
           # before its trusted publisher can exist — npm uses this if the
           # repository carries the secret; otherwise the OIDC exchange runs.
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
-      # Every intended name@version tag — created by changesets during this
-      # run's publish — is pushed by name, never --tags. A registry-confirmed
-      # version whose tag is missing (a retried publish skips them) fails
-      # here with its recovery: tag the commit that published it, never a
-      # moved HEAD.
+      # Every intended name@version tag is pushed by name, never --tags. A
+      # tag this run's publish created is pushed at once; any other tag waits
+      # until the registry shows its version. A registry-confirmed version
+      # whose tag is missing (a retried publish skips them) fails here with its
+      # recovery: tag the commit that published it, never a moved HEAD.
       - name: Push every published version's tag
-        run: node scripts/tag-published.mjs
-      - name: Verify every intended name and version reached the registry
-        run: node scripts/verify-published.mjs
+        run: node scripts/tag-published.mjs --tags-before "$RUNNER_TEMP/tags-before-publish"

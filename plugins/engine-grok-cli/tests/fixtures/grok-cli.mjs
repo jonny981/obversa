@@ -255,7 +255,14 @@ emit({
     ...(scenario === 'extra-capability' || scenario === 'extra-capability-empty-session'
       ? ['write_file']
       : []),
+    // Grok 1.0.44 lists the tools of a person's own MCP server that connected
+    // before the start frame, even when `--deny MCPTool` keeps them from the model.
+    ...(scenario === 'mcp-tool-listed' ? ['analytics__exec'] : []),
+    ...(scenario === 'unlisted-server-tool' ? ['other__exec'] : []),
   ],
+  ...(scenario === 'mcp-tool-listed' || scenario === 'unlisted-server-tool'
+    ? { mcp_servers: [{ name: 'analytics', status: 'pending' }] }
+    : {}),
   uuid: 'fixture-init',
 });
 

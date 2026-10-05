@@ -104,6 +104,14 @@ can't leave your Grok home out and keep your own login.
 Its row in the [engines table](/packages/engines#the-engines): runs on your
 setup, no clean mode, read-only held on your setup.
 
+### Your MCP servers and write steps
+
+Grok starts your own MCP servers in every run, from its own settings and
+from `~/.claude.json`. A step that declares no MCP tool keeps their tools
+from the model. A write step runs in Grok's workspace sandbox, which also
+lets the model change files outside the repository: in Grok's own home
+folder, `~/.grok`, and in temporary folders.
+
 ### The rest
 
 | Field | Type | Default | Description |

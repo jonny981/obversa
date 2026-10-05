@@ -554,9 +554,17 @@ function consumeLine(
         accumulator.model = nonEmptyText(frame.model, 'Grok init model');
       }
       if (Array.isArray(frame.tools)) {
+        // Grok lists the tools of the person's own MCP servers that connected
+        // before this frame, even when `--deny MCPTool` keeps them from the
+        // model, so the check leaves out the tools of a server it names.
+        const servers = Array.isArray(frame.mcp_servers)
+          ? frame.mcp_servers.flatMap((server) =>
+            typeof server === 'object' && server !== null && !Array.isArray(server)
+              && typeof server.name === 'string' ? [`${server.name}__`] : [])
+          : [];
         const reported = frame.tools.map((tool, index) =>
           nonEmptyText(tool, `Grok init tools[${index}]`),
-        );
+        ).filter((tool) => !servers.some((prefix) => tool.startsWith(prefix)));
         const expected = reportedTools(expectedCapabilities);
         const undeclared = reported.find((tool) => !expected.includes(tool));
         if (undeclared !== undefined) {

@@ -14,8 +14,9 @@ yours, so your OpenCode settings stay out. Set `clean: false` to run it the
 way you run it, with your own config folder too. OpenCode loads the
 repository's instruction files under its own rules. The plugin adds only what the step
 needs, through OpenCode's own config: the tools and permission rules the
-step declares, with every other tool turned off, no autoupdate and no
-sharing.
+step declares, no autoupdate and no sharing. Every other tool is set to
+`ask`, so OpenCode turns down each call to it and the tool doesn't run.
+[Free models](#free-models) explains why.
 
 ## Install
 
@@ -40,11 +41,27 @@ Included in `@obversa/obversa`.
   version.
 - OpenCode signed in to your model's provider, or login data you pass in
   `auth`.
-- A model on a paid login. OpenCode's free models refuse any run that turns
-  a tool off, with the message "OpenCode's free tier can only be used from
-  within OpenCode". The plugin turns off every tool a step doesn't declare,
-  so a free model can't serve a step. A model on your paid OpenCode login
-  can.
+- Any model OpenCode runs, free models such as `opencode/big-pickle`
+  included. [Free models](#free-models) says what they cost.
+
+## Free models
+
+OpenCode's free models refuse any run whose config turns a tool off or
+denies a permission. Their message is "OpenCode's free tier can only be
+used from within OpenCode". So the plugin does neither. It sets each tool the
+step doesn't declare to `ask`. A declared tool the step limits to a
+pattern, such as `Bash(git status)`, is set to `ask` for everything else.
+
+A free model gives up nothing for this. `opencode run` turns down every
+`ask`, because nobody is there to answer it. The plugin never passes the
+flags that would approve them, such as `--auto`. So a tool the step doesn't
+declare never runs, and a step's limits hold the same way on a free model
+as on a paid one.
+
+What it costs: the model sees all of OpenCode's tools, not only the ones
+the step declares. When it calls one the step doesn't declare, OpenCode
+turns the call down and tells the model, and the model carries on with
+the step.
 
 ## Identity
 
@@ -110,8 +127,7 @@ folder, which holds your login, stays yours.
 `opencode(model, options)` takes the same `clean` option.
 
 Its row in the [engines table](/packages/engines#the-engines): runs on your
-setup, clean mode available, read-only not proven, because the proof needs a paid model and free
-models refuse a tool-limited run. Clean
+setup, clean mode available, read-only held in both modes. Clean
 mode moves the whole config folder (`XDG_CONFIG_HOME`), so commands the
 step runs also start without their settings in it, such as the GitHub
 CLI's login. A config folder you set in `OPENCODE_CONFIG_DIR` stays out

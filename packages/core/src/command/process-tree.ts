@@ -315,7 +315,8 @@ async function readMarkerProcessIds(
       environment = await readFile(join(procRoot, entry.name, 'environ'));
     } catch (error) {
       const code = (error as NodeJS.ErrnoException).code;
-      if (code === 'ENOENT' || code === 'EACCES' || code === 'EPERM') continue;
+      // ESRCH: the process exited after the listing, so it is gone like ENOENT.
+      if (code === 'ENOENT' || code === 'ESRCH' || code === 'EACCES' || code === 'EPERM') continue;
       throw error;
     }
 

@@ -101,10 +101,10 @@ purpose of the work and the revisions so far. `judge()` from
 `@obversa/runtime` sets that stopping rule inside a `dag()` workflow:
 
 ```ts examples/teams/feature-delivery.ts (excerpt)
-  maxKickbacks: { implement: judge(judgeSeat) },
+      maxKickbacks: { build: judge(judgeSeat) },
 ```
 
-Here Jev makes the judgement, and the returns to the writer end when Jev
+Here Jev makes the judgement, and the returns to the builder end when Jev
 stops them or the review passes. Jev decides a blocking finding too. To
 bound the returns as well, pass
 `judge(judgeSeat, { cap: 4 })`: it allows four returns to the writer, Jev
@@ -209,11 +209,42 @@ A real use case combines these patterns around an outcome:
 | [Read research papers](https://docs.obversa.ai/workflows/research/literature-watch) | A model summarises supplied papers, a person selects the notes to keep, and those notes inform an answer. |
 | [Handle support tickets](https://docs.obversa.ai/workflows/support/triage-with-escalation) | Classify each ticket, draft a reply, and refer uncertain or sensitive cases to a person. |
 | [Prepare a shortlist](https://docs.obversa.ai/workflows/hiring/shortlist) | Apply rules in code, compare rankings from two models, and ask a person to choose the shortlist. |
-| [Deliver a feature](https://docs.obversa.ai/workflows/feature-team) | Plan, implement, test, review and ask a person to approve the change. |
+| [Deliver a feature](https://docs.obversa.ai/workflows/feature-team) | Build and test the change, check every requirement, review it with three model families and approve the exact bytes. |
 
-The feature delivery file is `examples/teams/feature-delivery.ts`.
 [Browse the workflows](https://docs.obversa.ai/workflows) for the full
 files and examples from other fields.
+
+### Deliver a feature
+
+The feature team takes a ticket through seven steps:
+
+1. **Build.** One seat builds the change from the ticket.
+2. **Checks.** The ticket's tests run. A red test goes back to the
+   builder with its output.
+3. **Goal check.** A seat from another model family confirms that every
+   requirement in the ticket was met.
+4. **Review battery.** Three reviewers from three model families review
+   the change at the same time.
+5. **Synthesis.** Their reviews become one list.
+6. **Judge.** Jev decides each finding, and the builder gets only the
+   findings Jev acts on.
+7. **Approval.** Attended, a person approves the exact bytes of every
+   file the change adds, changes or deletes. With `--unattended`, the
+   change lands without asking.
+
+```ts examples/teams/feature-delivery.ts (excerpt)
+      nodes: {
+        build: { job: build(ticket.brief, files, tests) },
+        goal: { needs: 'build', acceptsKickbackTo: ['build'], job: goalCheck(goalSeat, { target: 'build', text: ticket.brief }) },
+        review: { needs: 'goal', acceptsKickbackTo: ['build'], job: review(ticket.brief, files) },
+        ...(attended ? { approve: { needs: 'review', job: approve(start!) } } : {}),
+      },
+```
+
+Each ticket runs in its own worktree, and the change lands on your branch
+when the run passes. `examples/teams/feature-team-backlog.ts` points the
+same team at a folder of tickets and delivers them one at a time. The
+feature delivery file is `examples/teams/feature-delivery.ts`.
 
 ## Engines
 
