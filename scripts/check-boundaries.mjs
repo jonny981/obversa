@@ -232,7 +232,7 @@ export function moduleSpecifiers(text, fileName = 'module.ts', { hatches = !isTe
     process: new Set([
       'env', 'argv', 'execArgv', 'exit', 'exitCode', 'cwd', 'chdir', 'execPath', 'stdout', 'stderr', 'stdin',
       'platform', 'arch', 'pid', 'ppid', 'version', 'versions', 'release', 'title', 'umask',
-      'on', 'once', 'off', 'emit', 'addListener', 'removeListener', 'removeAllListeners', 'listenerCount',
+      'on', 'once', 'off', 'emit', 'addListener', 'prependListener', 'removeListener', 'removeAllListeners', 'listenerCount',
       'kill', 'hrtime', 'nextTick', 'uptime', 'memoryUsage', 'cpuUsage', 'resourceUsage', 'emitWarning', 'abort',
     ]),
     globalThis: globalDataMembers,

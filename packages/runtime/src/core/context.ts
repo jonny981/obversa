@@ -148,6 +148,7 @@ export function childContext(
     budget: parent.budget,
     onLimit: parent.onLimit,
     maxWaitMs: parent.maxWaitMs,
+    judgeContextLimit: parent.judgeContextLimit,
     log: parent.log,
     depth: over.depth,
     path: over.path,

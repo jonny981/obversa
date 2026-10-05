@@ -255,6 +255,8 @@ export class AnthropicApiEngine implements Engine {
           })
         : pending);
     } catch (e) {
+      // A failed call still counts once, under the model and billing it ran with.
+      onEvent({ type: 'usage', usage: { kind: 'unknown' }, model, billing: 'api' });
       if (signal.aborted)
         throw new EngineError({
           kind: 'aborted',
@@ -285,12 +287,13 @@ export class AnthropicApiEngine implements Engine {
       inputTokens: message.usage.input_tokens,
       outputTokens: message.usage.output_tokens,
     });
-    onEvent({ type: 'usage', usage, model });
+    onEvent({ type: 'usage', usage, model, billing: 'api' });
     const late =
       typeof req.timeoutMs === 'number' && Date.now() - startedAt > req.timeoutMs;
     return assistantResult({
       text,
       usage,
+      billing: 'api',
       requested: selection,
       stopReason: message.stop_reason ?? undefined,
       ...(late

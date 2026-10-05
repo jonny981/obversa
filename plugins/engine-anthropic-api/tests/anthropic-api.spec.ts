@@ -39,13 +39,17 @@ describe('AnthropicApiEngine', () => {
       },
     });
 
-    await engine.run(
+    const events: unknown[] = [];
+    const result = await engine.run(
       { prompt: 'judge', model: 'request-model' },
-      () => {},
+      (event) => events.push(event),
       new AbortController().signal,
     );
 
     expect(body).toMatchObject({ model: 'request-model' });
+    // An API key pays for the call, so the bill is the API's.
+    expect(result.billing).toBe('api');
+    expect(events).toContainEqual(expect.objectContaining({ type: 'usage', billing: 'api' }));
   });
 
   it('preserves provider-limit errors when timeoutMs is configured', async () => {
@@ -78,6 +82,35 @@ describe('AnthropicApiEngine', () => {
         new AbortController().signal,
       ),
     ).rejects.toMatchObject({ kind: 'rate-limit', retryAfterMs: 7_000 });
+  });
+
+  it('counts a failed call under its configured model and API billing', async () => {
+    const error = Object.assign(new Error('too many requests'), { status: 429 });
+    const engine = new AnthropicApiEngine({ apiKey: 'test-key', defaultModel: 'default-model' });
+    (
+      engine as unknown as {
+        clientPromise: Promise<{
+          messages: { stream: () => { on: () => void; finalMessage: () => Promise<never> } };
+        }>;
+      }
+    ).clientPromise = Promise.resolve({
+      messages: {
+        stream: () => ({
+          on: () => {},
+          finalMessage: async () => {
+            throw error;
+          },
+        }),
+      },
+    });
+
+    const events: unknown[] = [];
+    await expect(
+      engine.run({ prompt: 'judge' }, (event) => events.push(event), new AbortController().signal),
+    ).rejects.toMatchObject({ kind: 'rate-limit' });
+    expect(events).toEqual([
+      { type: 'usage', usage: { kind: 'unknown' }, model: 'default-model', billing: 'api' },
+    ]);
   });
 
   it('marks successful responses after the soft timeout as late', async () => {

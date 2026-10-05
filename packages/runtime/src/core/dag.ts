@@ -21,6 +21,7 @@ import toposort from 'toposort';
 
 import type {
   DagConfig,
+  GoalRequirement,
   KickbackBudget,
   DagNode,
   Job,
@@ -41,13 +42,15 @@ import {
   addWorktree,
   branchExists,
   mergeBranch,
+  workTree,
 } from './git.js';
 import { closeFork } from './isolated.js';
 import { mergeLock, mergeSynthesis } from './merge.js';
 import type { EnvHandle } from '../env/environment.js';
 import { LoopError } from './errors.js';
 import { revisionFromOutcome } from './feedback.js';
-import { consultJudge, isJudge, judgedFindings, judgeRound, judgeState, lastRoundAnswered, productDecisionFeedback, readJudgedFile, type JudgeRound, type JudgeState, type SkippedFinding } from './judge.js';
+import { answeredFindingIds, watchRoundChange, type RoundChange } from './round-change.js';
+import { checkResult, consultJudge, goalVerdicts, isJudge, judgedFindings, judgeRound, judgeState, lastRoundAnswered, productDecisionFeedback, readJudgedWork, type JudgeCheck, type JudgeRound, type JudgeState, type JudgeWork, type SkippedFinding } from './judge.js';
 import { checkpointInteraction, interactionDeclaration, interactionIdentity, jsonSnapshot, outcomeSnapshot, savedInteraction, type InteractionResponse } from './interaction.js';
 import { DEFAULT_FANOUT_CONCURRENCY } from './concurrency.js';
 import { dagResumeIdentity, missingFiles, recordedSteps, restoreRecordedUsage, restoreWrote, resumeGuard, reusedWrote, RESUME_IDENTITY, RESUME_STAGE_OUTCOMES } from './resume.js';
@@ -61,6 +64,13 @@ import { roundRule } from './rounds.js';
  * exported from the package.
  */
 export const TARGET_ROUNDS = Symbol('obversa:target-rounds');
+
+/**
+ * Internal config key: some node runs its own judge (a `workflow()` stage
+ * with `refine: judge(...)`), so the graph keeps the workspace as it was
+ * when the work began, as it does for a judge in `maxKickbacks`.
+ */
+export const JUDGED_NODES = Symbol('obversa:judged-nodes');
 
 /** One node's rounds in one run of a graph, under `TARGET_ROUNDS`. */
 export interface TargetRounds {
@@ -77,6 +87,12 @@ export interface TargetRounds {
   productFeedback: readonly InteractionResponse[];
   /** The node's file as its judge last read it. */
   previousDraft: string | undefined;
+  /** What the node's judge reads about the work, the same as a judge in `maxKickbacks` for it. */
+  readonly work: JudgeWork;
+  /** The goal check's latest verdicts on the node's work, when it has a goal check. */
+  goal: readonly GoalRequirement[] | undefined;
+  /** This round's evidence for the node's judge, the same as for a judge in `maxKickbacks` for it. */
+  evidence(): { readonly checks: readonly JudgeCheck[]; readonly goal: readonly GoalRequirement[] };
 }
 
 /** Sanitise a name into a git-ref-safe slug. */
@@ -333,6 +349,57 @@ export function dag(config: DagConfig): Job {
     // run as `ctx.skippedFindings`.
     const judgeSkipped = new Map<string, SkippedFinding[]>(Object.entries(saved?.skipped ?? {}) as unknown as [string, SkippedFinding[]][]);
     const productFeedback = new Map<string, readonly InteractionResponse[]>(Object.entries(saved?.productFeedback ?? {}) as unknown as [string, InteractionResponse[]][]);
+    // The goal check verdicts of a node that runs its own goal check, saved as
+    // they come, so a judge reads them after a resume reuses the node.
+    const goalPath = [...path, '@judge-goal'];
+    const savedGoals = prior === undefined ? undefined : savedInteraction(parent, goalPath, identity)?.goals;
+    const goals = new Map<string, readonly GoalRequirement[]>(Object.entries(savedGoals ?? {}) as unknown as [string, GoalRequirement[]][]);
+    let goalsSaved = savedGoals !== undefined;
+    // The git workspace as it was when the work began, which a judge compares
+    // the work with. It is saved as soon as it is taken, so a resume compares
+    // with it too, even after a pause before any round.
+    const judges = (typeof maxKickbacks !== 'number' && Object.values(maxKickbacks).some(isJudge))
+      || (config as DagConfig & { [JUDGED_NODES]?: boolean })[JUDGED_NODES] === true;
+    const basePath = [...path, '@judge-base'];
+    const savedBase = prior === undefined ? undefined : savedInteraction(parent, basePath, identity)?.tree;
+    const base = typeof savedBase === 'string' ? savedBase
+      : judges ? await workTree({ cwd: parent.workspace.dir, signal: parent.signal, ...(parent.fingerprintExcludePaths ? { excludePaths: parent.fingerprintExcludePaths } : {}) }) : undefined;
+    // The outcome a node gave itself, by the outcome a judge put in its place:
+    // a check the judge let stand, or stopped the rounds on, still reads as
+    // the command's own result.
+    const ownOutcome = new WeakMap<Outcome, Outcome>();
+    // The outcomes of nodes that never started (a failed dependency, or a
+    // stop before their turn), which are no evidence about the work.
+    const unstarted = new WeakSet<Outcome>();
+    const notStarted = (summary: string): Outcome => {
+      const outcome: Outcome = { status: 'aborted', summary };
+      unstarted.add(outcome);
+      return outcome;
+    };
+    // A round's evidence for a target's judge: every check's latest result,
+    // and the goal check's verdicts, from the target's own goal check or a
+    // goal node for the same target.
+    const roundEvidence = (target: string) => ({
+      checks: order.flatMap((name) => {
+        const latest = results.get(name);
+        if (latest && unstarted.has(latest)) return [];
+        const outcome = latest && (ownOutcome.get(latest) ?? latest);
+        const check = outcome && checkResult(name, nodes.get(name)!.job, outcome);
+        return check ? [check] : [];
+      }),
+      goal: [...(goals.get(target) ?? []), ...order.flatMap((name) => goalVerdicts(results.get(name), target) ?? [])],
+    });
+    const targetWork = (name: string): JudgeWork => {
+      const node = nodes.get(name)!;
+      return {
+        ...(config.brief !== undefined ? { brief: config.brief } : {}),
+        ...(config.useCase !== undefined ? { useCase: config.useCase } : {}),
+        ...(node.desc !== undefined ? { desc: node.desc } : {}),
+        ...(node.gate !== undefined ? { gate: node.gate } : {}),
+        ...(node.file !== undefined ? { file: node.file } : {}),
+        ...(base !== undefined ? { base } : {}),
+      };
+    };
     parent.emit({
       kind: 'workflow:start',
       ts: ts(),
@@ -345,11 +412,18 @@ export function dag(config: DagConfig): Job {
       ...rounds,
     });
     parent.emit({ kind: 'dag:start', ts: ts(), path, depth, nodes: names });
+    // After the start, which a record reader takes as the point to forget
+    // an earlier run's checkpoints from.
+    if (base !== undefined && base !== savedBase) checkpointInteraction(parent, basePath, identity, { tree: base }, true);
 
     const concurrency = pLimit(limitN);
     const results = new Map<string, Outcome>(Object.entries(saved?.results ?? {}) as unknown as [string, Outcome][]);
     const savedWrote = (saved?.wrote ?? {}) as Record<string, unknown>;
     for (const [name, outcome] of results) restoreWrote(outcome, savedWrote[name]);
+    for (const [name, own] of Object.entries(saved?.own ?? {}) as unknown as [string, Outcome][]) {
+      const outcome = results.get(name);
+      if (outcome !== undefined) ownOutcome.set(outcome, own);
+    }
     // How many times each node has run (1 on the first pass, +1 per kickback
     // re-run). Stamped onto its dag:node events so records can tell rounds apart.
     const attempts = new Map<string, number>(Object.entries(saved?.attempts ?? {}) as [string, number][]);
@@ -439,6 +513,14 @@ export function dag(config: DagConfig): Job {
       set productFeedback(value) { productFeedback.set(name, value); },
       get previousDraft() { return judgeDrafts.get(name); },
       set previousDraft(value) { if (value === undefined) judgeDrafts.delete(name); else judgeDrafts.set(name, value); },
+      work: targetWork(name),
+      get goal() { return goals.get(name); },
+      set goal(value) {
+        if (value === undefined) goals.delete(name); else goals.set(name, value);
+        goalsSaved = true;
+        checkpointInteraction(parent, goalPath, identity, jsonSnapshot({ goals: Object.fromEntries(goals) }), true);
+      },
+      evidence: () => roundEvidence(name),
     });
     // How many runs of each node finished: a node that paused, was aborted or
     // was still running runs again on a resume, as the same attempt.
@@ -458,11 +540,17 @@ export function dag(config: DagConfig): Job {
     const wroteSoFar = () => Object.fromEntries([...results]
       .map(([name, o]) => [name, wroteFiles(nodes.get(name)!, o)] as const)
       .filter(([, files]) => files.length));
+    // The outcome each saved node gave itself, where a judge put another in its place.
+    const ownOutcomes = (saving: readonly string[]) => Object.fromEntries(saving.flatMap((name) => {
+      const own = ownOutcome.get(results.get(name)!);
+      return own === undefined ? [] : [[name, outcomeSnapshot(own)]];
+    }));
     const saveRounds = (): void => {
       if (targetCounts.size === 0 && judgeHistory.size === 0) return;
       checkpointInteraction(parent, checkpointPath, identity, jsonSnapshot({
         results: Object.fromEntries([...results].filter(([, o]) => kept(o)).map(([name, o]) => [name, outcomeSnapshot(o)])),
         wrote: wroteSoFar(),
+        own: ownOutcomes([...results].filter(([, o]) => kept(o)).map(([name]) => name)),
         attempts: Object.fromEntries([...finished].map(([name, n]) => {
           const outcome = results.get(name);
           return [name, outcome === undefined || kept(outcome) || outcome.status === 'paused' || outcome.status === 'aborted' ? n : n - 1];
@@ -540,6 +628,7 @@ export function dag(config: DagConfig): Job {
     const forkNodeJob = async (
       name: string,
       node: DagNode,
+      change: RoundChange | undefined,
     ): Promise<Outcome> => {
       const base = parent.workspace;
       // An interrupted earlier run leaves its fork branch behind for recovery,
@@ -555,6 +644,9 @@ export function dag(config: DagConfig): Job {
         signal: parent.signal,
       });
       const wtWs: Workspace = { dir: wt.dir, branch };
+      // The node edits its worktree, and only a pass lands those edits, so
+      // its change is read there before the worktree goes.
+      const recordChange = change === undefined ? undefined : await watchRoundChange(parent, wtWs.dir);
       // Each team gets its own environment, named after its branch — born with
       // the worktree, torn down with it. A failed start propagates and the node
       // is recorded as failed; the worktree is still cleaned up in `finally`.
@@ -594,8 +686,9 @@ export function dag(config: DagConfig): Job {
               };
             }
             try {
+              // At the node's path, so the merge's engine calls count in the node's totals.
               await mergeLock(() =>
-                mergeSynthesis(parent, {
+                mergeSynthesis(childContext(parent, { depth, path: [...path, name] }), {
                   branch,
                   message: `merge: ${branch} (node ${name}, synthesis)`,
                 }),
@@ -624,6 +717,7 @@ export function dag(config: DagConfig): Job {
         outcome = await attempt();
         threw = false;
       } finally {
+        await recordChange?.(change!);
         if (envHandle)
           await envHandle.down(parent.signal).catch(() => {});
         if (threw) parent.log(`kept the branch ${wt.branch}: node "${name}" threw before its work could land`, 'warn');
@@ -641,8 +735,9 @@ export function dag(config: DagConfig): Job {
     const runNodeJob = async (
       name: string,
       node: DagNode,
+      change: RoundChange | undefined,
     ): Promise<Outcome> => {
-      const outcome = await guardedNodeJob(name, node);
+      const outcome = await guardedNodeJob(name, node, change);
       const recorded = stages?.get(nodeKey(name));
       if (recorded?.kind !== 'completed' || recorded.outcome !== outcome) ranAgain.add(name);
       return outcome;
@@ -651,6 +746,7 @@ export function dag(config: DagConfig): Job {
     const guardedNodeJob = async (
       name: string,
       node: DagNode,
+      change: RoundChange | undefined,
     ): Promise<Outcome> => {
       const retrySafe = node.retrySafe === true;
       const files = (outcome: Outcome | undefined) => nodeWrites(node, outcome);
@@ -659,8 +755,16 @@ export function dag(config: DagConfig): Job {
       const own = recordLine(name);
       const changed = normalizeNeeds(node.needs).filter((need) => ranAgain.has(need) || recordLine(need) > own);
       const shared = resumeGuard(node.job, resumeIdentity, name, retrySafe, prior, false, files, changed);
+      const inPlace = async (): Promise<Outcome> => {
+        const recordChange = change === undefined ? undefined : await watchRoundChange(parent);
+        try {
+          return await shared(nodeCtx(name, shared));
+        } finally {
+          await recordChange?.(change!);
+        }
+      };
       const isolated = node.isolate ?? config.isolation === 'worktree';
-      if (!isolated) return shared(nodeCtx(name, shared));
+      if (!isolated) return inPlace();
 
       const base = parent.workspace;
       if (!(await isRepo({ cwd: base.dir, signal: parent.signal }))) {
@@ -668,10 +772,10 @@ export function dag(config: DagConfig): Job {
           `node "${name}" requested worktree isolation but ${base.dir} is not a git repo; running in the shared workspace`,
           'warn',
         );
-        return shared(nodeCtx(name, shared));
+        return inPlace();
       }
 
-      const fork = resumeGuard(() => forkNodeJob(name, node), resumeIdentity, name, retrySafe, prior, true, files, changed);
+      const fork = resumeGuard(() => forkNodeJob(name, node, change), resumeIdentity, name, retrySafe, prior, true, files, changed);
       return fork(nodeCtx(name, fork));
     };
 
@@ -754,13 +858,13 @@ export function dag(config: DagConfig): Job {
           if (blocked)
             return record(
               name,
-              { status: 'aborted', summary: 'blocked by a failed dependency' },
+              notStarted('blocked by a failed dependency'),
               'done',
             );
           if (parent.signal.aborted || stopped)
             return record(
               name,
-              { status: 'aborted', summary: 'aborted before start' },
+              notStarted('aborted before start'),
               'done',
             );
 
@@ -770,10 +874,7 @@ export function dag(config: DagConfig): Job {
             async (): Promise<{ outcome: Outcome; phase: 'done' | 'skip' }> => {
               if (parent.signal.aborted || stopped)
                 return {
-                  outcome: {
-                    status: 'aborted',
-                    summary: 'aborted before start',
-                  },
+                  outcome: notStarted('aborted before start'),
                   phase: 'done',
                 };
               if (node.when) {
@@ -808,7 +909,10 @@ export function dag(config: DagConfig): Job {
                 timeoutMs: node.timeoutMs,
                 ...recordedRounds(nodeRounds(name), path.length + 1),
               });
-              return { outcome: await runNodeJob(name, node), phase: 'done' };
+              // A node a kickback runs again records what it changed.
+              const attempt = attempts.get(name) ?? 1;
+              const change = attempt > 1 ? { path, node: name, round: attempt, findings: answeredFindingIds(pendingKickback.get(name)) } : undefined;
+              return { outcome: await runNodeJob(name, node, change), phase: 'done' };
             },
           );
           return record(name, result.outcome, result.phase);
@@ -932,10 +1036,10 @@ export function dag(config: DagConfig): Job {
         let productDecision: Outcome | undefined;
         if (cfgJudge !== undefined) {
           const history = judgeHistory.get(to) ?? [];
-          const work = { ...(config.useCase !== undefined ? { useCase: config.useCase } : {}), ...(nodes.get(to)!.file !== undefined ? { file: nodes.get(to)!.file } : {}) };
-          const { draft, changedLines } = await readJudgedFile(parent.workspace.dir, work.file, judgeDrafts.get(to));
+          const work = targetWork(to);
+          const { draft, changedLines, tree } = await readJudgedWork(parent.workspace.dir, work, { draft: judgeDrafts.get(to), tree: history.at(-1)?.tree }, parent.fingerprintExcludePaths);
           const state: JudgeState = pending?.from === from ? pending.state : judgeState({
-            work, draft, productFeedback: productFeedback.get(to) ?? [], latestFindings: requestFindings, skipped: judgeSkipped.get(to) ?? [], rounds: history, round: round.judge,
+            work, draft, tree, ...roundEvidence(to), productFeedback: productFeedback.get(to) ?? [], latestFindings: requestFindings, skipped: judgeSkipped.get(to) ?? [], rounds: history, round: round.judge,
           });
           // The judge runs as part of the node that sent the work back:
           // inside that node's timeout and the graph's concurrency limit.
@@ -946,6 +1050,7 @@ export function dag(config: DagConfig): Job {
               results: Object.fromEntries([...results].map(([name, outcome]) => [name, outcomeSnapshot(outcome)])),
               wrote: wroteSoFar(),
               readKickbacks: Object.fromEntries([...readKickback].map(([name, o]) => [name, outcomeSnapshot(o)])),
+              own: ownOutcomes([...results.keys()]),
               attempts: Object.fromEntries(attempts), targetCounts: Object.fromEntries(targetCounts),
               history: Object.fromEntries(judgeHistory), skipped: Object.fromEntries(judgeSkipped), productFeedback: Object.fromEntries(productFeedback), drafts: Object.fromEntries(judgeDrafts), used, rejected: [...rejected],
             })),
@@ -953,7 +1058,7 @@ export function dag(config: DagConfig): Job {
           if ('paused' in result) { judgePaused = true; record(from, result.paused, 'done'); break; }
           pending = undefined;
           productFeedback.set(to, result.state.productFeedback ?? []);
-          judgeHistory.set(to, [...history, judgeRound(count, requestFindings, changedLines)]);
+          judgeHistory.set(to, [...history, judgeRound(state, changedLines, result)]);
           if (draft === undefined) judgeDrafts.delete(to); else judgeDrafts.set(to, draft);
           // The decision replaces the saved question: a resume keeps the round.
           saveRounds();
@@ -962,11 +1067,13 @@ export function dag(config: DagConfig): Job {
           // says why the run stopped there.
           const stopWith = (why: string) => {
             const failed = results.get(from)!;
-            memo.set(from, Promise.resolve(record(from, {
+            const stood = record(from, {
               ...failed,
               summary: `${failed.summary ?? reason} (${why})`,
               revision: { ...request, reason: `${reason} (${why})` },
-            }, 'done')));
+            }, 'done');
+            ownOutcome.set(stood, ownOutcome.get(failed) ?? failed);
+            memo.set(from, Promise.resolve(stood));
             rejected.add(from);
           };
           if ('answer' in result && lastRound) {
@@ -997,13 +1104,15 @@ export function dag(config: DagConfig): Job {
               // failure is replaced with a pass carrying the judge's reason,
               // and everything downstream of it (blocked by that failure in
               // the wave that already ran) gets to run fresh against it.
+              const failed = results.get(from)!;
               const shipped = record(from, {
                 status: 'pass',
-                confidence: results.get(from)!.confidence,
+                confidence: failed.confidence,
                 summary: decision.reason,
-                data: results.get(from)!.data,
+                data: failed.data,
                 ...(lastRound ? { openFindings: requestFindings } : {}),
               }, 'done');
+              ownOutcome.set(shipped, ownOutcome.get(failed) ?? failed);
               // `memo` holds the settled promise every dependant already
               // awaits or will await; without this, `from`'s stale failing
               // promise still answers for it and nothing downstream unblocks.
@@ -1135,6 +1244,8 @@ export function dag(config: DagConfig): Job {
     // them and never builds past the limit, and a passed graph whose files
     // are gone rebuilds them in the round it passed in.
     if (outcome.status === 'paused' && !judgePaused) saveRounds();
+    if (outcome.status === 'pass' && base !== undefined) checkpointInteraction(parent, basePath, identity, null);
+    if (outcome.status === 'pass' && goalsSaved) checkpointInteraction(parent, goalPath, identity, null);
     parent.emit({ kind: 'dag:end', ts: ts(), path, outcome });
     return outcome;
   };

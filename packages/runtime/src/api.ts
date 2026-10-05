@@ -309,6 +309,9 @@ export type {
   ProofArtifact,
   ProofRecord,
   UsageTotals,
+  CostTotals,
+  CommandRun,
+  RoundFileChange,
 } from './core/types.js';
 
 export { loop } from './core/loop.js';
@@ -430,6 +433,8 @@ export type {
   EngineStreamEvent,
   Usage,
   UsageReceipt,
+  CostReceipt,
+  Billing,
 } from './engines/engine.js';
 export { EngineError, EngineIncompleteResultError } from './engines/engine.js';
 export {

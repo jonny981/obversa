@@ -210,6 +210,12 @@ export class MastraEngine implements Engine {
         }, hardTimeout)
       : undefined;
     const timeout = () => new EngineError({ kind: 'timeout', message: 'mastra run timed out' });
+    // A failed call still counts once, under the model and billing it ran
+    // with, and with the tokens Mastra counted when the call returned.
+    const failed = (error: EngineError, usage: UsageReceipt = { kind: 'unknown' }): EngineError => {
+      onEvent({ type: 'usage', usage, model: this.selection.model!, billing: 'api' });
+      return error;
+    };
 
     let output: Awaited<ReturnType<MastraAgent['generate']>>;
     try {
@@ -222,23 +228,24 @@ export class MastraEngine implements Engine {
         abortSignal: controller.signal,
       });
     } catch (error) {
-      if (signal.aborted) throw aborted();
-      if (timedOut) throw timeout();
-      throw engineFailure(error);
+      if (signal.aborted) throw failed(aborted());
+      if (timedOut) throw failed(timeout());
+      throw failed(engineFailure(error));
     } finally {
       clearTimeout(timer);
       signal.removeEventListener('abort', onAbort);
     }
     // An aborted Mastra call resolves with empty text rather than throwing.
-    if (signal.aborted) throw aborted();
-    if (timedOut) throw timeout();
-    if (output.error !== undefined) throw engineFailure(output.error);
-
     const usage = usageOf(output.totalUsage);
-    onEvent({ type: 'usage', usage, model: this.selection.model! });
+    if (signal.aborted) throw failed(aborted(), usage);
+    if (timedOut) throw failed(timeout(), usage);
+    if (output.error !== undefined) throw failed(engineFailure(output.error), usage);
+
+    onEvent({ type: 'usage', usage, model: this.selection.model!, billing: 'api' });
     return assistantResult({
       text: output.text,
       usage,
+      billing: 'api',
       requested: this.selection,
       ...(typeof output.finishReason === 'string' ? { stopReason: output.finishReason } : {}),
     });

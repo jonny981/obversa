@@ -1098,6 +1098,20 @@ export class GrokCliEngine implements Engine {
             && Object.hasOwn(terminal, 'structuredOutput')
           : terminal.subtype === 'success' && terminal.is_error !== true
       );
+      if (!succeeded) {
+        // A call that ends with no answer still spent the tokens its result
+        // line reported. A result line it cannot read counts as unknown, so
+        // the failure keeps its own kind.
+        let spent: UsageReceipt = { kind: 'unknown' };
+        try {
+          if (terminal !== null) spent = usageFromTerminal(terminal);
+        } catch { /* unknown */ }
+        onEvent({
+          type: 'usage',
+          usage: spent,
+          model: effective.model ?? requested.model ?? 'unknown',
+        });
+      }
       if (aborted && !succeeded) {
         throw loopError('aborted', 'Grok attempt was aborted');
       }

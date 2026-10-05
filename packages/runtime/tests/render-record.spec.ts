@@ -350,3 +350,17 @@ describe('obversa-record bin', () => {
     expect(run.stderr).toContain('usage: obversa-record');
   });
 });
+
+describe('renderRecord on a stopped run', () => {
+  it('prints the stop signal and no line per heartbeat', () => {
+    const events: LoopEvent[] = [
+      { kind: 'run:start', ts: 0, path: [], runId: 'stopped' },
+      { kind: 'heartbeat', ts: 60_000, path: [] },
+      { kind: 'heartbeat', ts: 120_000, path: [] },
+      { kind: 'run:abort', ts: 130_000, path: [], signal: 'SIGTERM' },
+    ];
+    const page = renderRecord(events);
+    expect(page).toContain('- Stopped by SIGTERM.');
+    expect(page).not.toContain('heartbeat');
+  });
+});

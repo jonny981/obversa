@@ -1227,6 +1227,39 @@ describe('Grok CLI adapter', () => {
     });
   });
 
+  it('counts the tokens and model of an attempt that fails or is aborted', async () => {
+    const usageOf = async (scenario: string) => {
+      const controller = new AbortController();
+      const events: EngineStreamEvent[] = [];
+      await expect(new GrokCliEngine({
+        ...options(),
+        environment: { OBVERSA_TEST_GROK_SCENARIO: scenario },
+      }).run(request(), (event) => {
+        events.push(event);
+        if (scenario === 'cancellation') controller.abort();
+      }, controller.signal)).rejects.toBeInstanceOf(EngineError);
+      return events.filter((event) => event.type === 'usage');
+    };
+
+    expect(await usageOf('error-result-usage')).toEqual([{
+      type: 'usage',
+      usage: {
+        kind: 'reported',
+        inputTokens: 5,
+        outputTokens: 5,
+        cacheCreationInputTokens: 0,
+        cacheReadInputTokens: 3,
+      },
+      model: 'grok-4-fixture-effective',
+    }]);
+    // An aborted attempt has no result line, so its tokens are unknown.
+    expect(await usageOf('cancellation')).toEqual([{
+      type: 'usage',
+      usage: { kind: 'unknown' },
+      model: 'grok-4-fixture-effective',
+    }]);
+  });
+
   it.each([
     ['quota', 'quota'],
     ['ambiguous-limit', 'rate-limit'],

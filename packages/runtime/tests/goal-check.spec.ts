@@ -141,8 +141,10 @@ describe('workflow(): goal on an agent stage', () => {
     expect(writerCalls).toHaveLength(2);
     expect(reviewCalls).toHaveLength(1);
     expect(judgeCalls).toHaveLength(1);
-    expect(judgeCalls[0]!.prompt).toContain('REVIEW: the title is vague');
-    expect(judgeCalls[0]!.prompt).not.toContain('opening hours');
+    // The brief names the opening hours too, so only the findings and the rounds are read.
+    const { how, when } = JSON.parse(judgeCalls[0]!.prompt).state;
+    expect(JSON.stringify(how.findings)).toContain('REVIEW: the title is vague');
+    expect(JSON.stringify([how.findings, when])).not.toContain('opening hours');
   });
 
   it('runs the goal check again in the next round, after a fix for a reviewer', async () => {

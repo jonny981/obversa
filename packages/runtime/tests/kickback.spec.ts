@@ -668,7 +668,7 @@ describe('a judge as a dag() maxKickbacks budget', () => {
     expect(outcome.status).toBe('pass');
     expect(round).toBe(2);
     expect(judgeCalls).toBe(1);
-    expect(seen[0]!.revision!.findings).toEqual([{ evidence: 'REAL: the build fails', severity: 'block', judgeReason: 'it breaks the build' }]);
+    expect(seen[0]!.revision!.findings).toEqual([{ id: 'finding-1', evidence: 'REAL: the build fails', severity: 'block', judgeReason: 'it breaks the build' }]);
     expect(kbEvents(events).map((e) => e.accepted)).toEqual([true]);
     const judgeEvents = events.filter((e): e is Extract<LoopEvent, { kind: 'refine:judge' }> => e.kind === 'refine:judge');
     expect(judgeEvents.map((e) => e.rule)).toEqual(['findings: 1 act, 0 skip']);
@@ -737,7 +737,7 @@ describe('a judge as a dag() maxKickbacks budget', () => {
     expect(round).toBe(2);
     expect(seen).toHaveLength(1);
     expect(seen[0]!.revision!.findings).toEqual([
-      { evidence: 'REAL: the build fails', severity: 'should-fix', judgeReason: 'it breaks the build' },
+      { evidence: 'REAL: the build fails', severity: 'should-fix', judgeReason: 'it breaks the build', id: 'finding-1' },
     ]);
     const judgeEvents = events.filter((e): e is Extract<LoopEvent, { kind: 'refine:judge' }> => e.kind === 'refine:judge');
     expect(judgeEvents.map((e) => e.rule)).toEqual(['findings: 1 act, 1 skip', 'findings: 0 act, 1 skip']);
@@ -941,8 +941,8 @@ describe('a judge as a dag() maxKickbacks budget, with no cap or at its cap', ()
     expect(round).toBe(2);
     expect(judgeCalls).toBe(2);
     expect(outcome.data).toMatchObject({ review: { status: 'pass', summary: 'the judge chose holds', openFindings: shouldFix } });
-    const first = JSON.parse(prompts[0]!).state as Record<string, unknown>;
-    const last = JSON.parse(prompts[1]!).state as Record<string, unknown>;
+    const first = JSON.parse(prompts[0]!).state.when as Record<string, unknown>;
+    const last = JSON.parse(prompts[1]!).state.when as Record<string, unknown>;
     expect(first.lastRound).toBeUndefined();
     expect(last).toMatchObject({ cap: 1, lastRound: true });
     expect(last.limit).toBe('This is the last round the cap of 1 allows (1 refinement after the first build): no build round follows, so your answer decides how this ends.');

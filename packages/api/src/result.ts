@@ -3,6 +3,8 @@ import { isAbsolute } from 'node:path';
 import type {
   AgentResult,
   AgentResultPart,
+  Billing,
+  CostReceipt,
   EngineIncompleteResultEvidence,
   EngineSelectionRecord,
   EngineTransportFailure,
@@ -80,6 +82,35 @@ function validateUsage(value: UsageReceipt): UsageReceipt {
         }),
   };
   return Object.freeze(receipt);
+}
+
+function dollars(value: unknown, field: string): number {
+  if (typeof value !== 'number' || !Number.isFinite(value) || value < 0) {
+    throw new TypeError(`${field} must be a non-negative finite number`);
+  }
+  return value;
+}
+
+function validateCost(value: CostReceipt): CostReceipt {
+  if (value.kind === 'unknown') return Object.freeze({ kind: 'unknown' });
+  if (value.kind === 'reported') {
+    return Object.freeze({ kind: 'reported', usd: dollars(value.usd, 'cost.usd') });
+  }
+  if (value.kind === 'estimated') {
+    return Object.freeze({
+      kind: 'estimated',
+      usd: dollars(value.usd, 'cost.usd'),
+      entry: nonEmptyText(value.entry, 'cost.entry'),
+    });
+  }
+  throw new TypeError('cost.kind must be unknown, reported or estimated');
+}
+
+const BILLINGS = new Set<Billing>(['subscription', 'api', 'unknown']);
+
+function validateBilling(value: Billing): Billing {
+  if (!BILLINGS.has(value)) throw new TypeError('billing must be subscription, api or unknown');
+  return value;
 }
 
 function validateSelection(
@@ -162,6 +193,8 @@ export function validateIncompleteResultEvidence(
   return Object.freeze({
     parts: Object.freeze(parts),
     usage: validateUsage(result.usage),
+    ...(result.cost === undefined ? {} : { cost: validateCost(result.cost) }),
+    ...(result.billing === undefined ? {} : { billing: validateBilling(result.billing) }),
     requested: validateSelection(result.requested, 'requested'),
     effective: validateSelection(result.effective, 'effective'),
     ...(result.stopReason === undefined
@@ -213,6 +246,8 @@ export function reportedUsage(usage: {
 export function assistantResult(input: {
   text: string;
   usage: UsageReceipt;
+  cost?: CostReceipt;
+  billing?: Billing;
   requested: EngineSelectionRecord;
   effective?: EngineSelectionRecord;
   stopReason?: string;
@@ -222,6 +257,8 @@ export function assistantResult(input: {
   return validateAgentResult({
     parts: [{ kind: 'assistant', text: input.text, final: true }],
     usage: input.usage,
+    ...(input.cost === undefined ? {} : { cost: input.cost }),
+    ...(input.billing === undefined ? {} : { billing: input.billing }),
     requested: input.requested,
     effective: input.effective ?? input.requested,
     ...(input.stopReason === undefined

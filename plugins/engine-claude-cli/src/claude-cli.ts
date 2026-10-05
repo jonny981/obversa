@@ -21,7 +21,7 @@ import {
   type EngineSelectionRecord,
 } from '@obversa/api';
 import { claudeToolOptions } from '@obversa/core/claude-tools';
-import { mapMessage, newAccumulator } from '@obversa/core/claude-stream-json';
+import { claudeBilling, mapMessage, newAccumulator, reportedCost } from '@obversa/core/claude-stream-json';
 import {
   attemptEnvironment,
   scrubCapture,
@@ -465,6 +465,8 @@ export class ClaudeCliEngine implements Engine {
     const model = modelFor(req, this.opts);
     const args = buildClaudeArgs(req, this.opts);
     const env = attemptEnvironment(req);
+    // The child gets this process's environment with the request's laid over it.
+    const billing = claudeBilling({ ...process.env, ...env });
     const startedAt = Date.now();
     const owner = ownedCommandIdentity({
       adapter: 'claude-cli',
@@ -519,11 +521,20 @@ export class ClaudeCliEngine implements Engine {
 
     const aborted = result.aborted || signal.aborted;
     const completed = acc.terminal && acc.parts.some((part) => part.final);
-    if (aborted && !completed)
+    if (aborted && !completed) {
+      // A cancelled call still spent the tokens it reported.
+      onEvent({
+        type: 'usage',
+        usage: acc.usage,
+        model: acc.model ?? model ?? 'claude-cli',
+        ...reportedCost(acc),
+        billing,
+      });
       throw new EngineError({
         kind: 'aborted',
         message: 'claude-cli run aborted',
       });
+    }
     const late =
       typeof req.timeoutMs === 'number' && Date.now() - startedAt > req.timeoutMs;
     const failed = aborted || result.timedOut || result.exitCode !== 0;
@@ -545,10 +556,14 @@ export class ClaudeCliEngine implements Engine {
           type: 'usage',
           usage: acc.usage,
           model: acc.model ?? model ?? 'claude-cli',
+          ...reportedCost(acc),
+          billing,
         });
         return validateAgentResult({
           parts: acc.parts,
           usage: acc.usage,
+          ...reportedCost(acc),
+          billing,
           requested,
           effective,
           ...(acc.stopReason === undefined
@@ -563,6 +578,14 @@ export class ClaudeCliEngine implements Engine {
           },
         });
       }
+      // An unfinished call still spent the tokens it reported.
+      onEvent({
+        type: 'usage',
+        usage: acc.usage,
+        model: acc.model ?? model ?? 'claude-cli',
+        ...reportedCost(acc),
+        billing,
+      });
       // An unfinished failure can land on either stream. Classify only
       // redacted text, retaining limit reset times and billing's quota kind.
       const stdout = scrubCapture(
@@ -585,6 +608,8 @@ export class ClaudeCliEngine implements Engine {
       type: 'usage',
       usage: acc.usage,
       model: acc.model ?? model ?? 'claude-cli',
+      ...reportedCost(acc),
+      billing,
     });
     const effective = engineSelection({
       ...requested, model: acc.model, capabilities: claudeToolOptions(req).tools ?? [],
@@ -592,6 +617,8 @@ export class ClaudeCliEngine implements Engine {
     return validateAgentResult({
       parts: acc.parts,
       usage: acc.usage,
+      ...reportedCost(acc),
+      billing,
       requested,
       effective,
       ...(acc.stopReason === undefined

@@ -22,6 +22,7 @@ import {
   reportedUsage,
   type AgentRequest,
   type AgentResult,
+  type Billing,
   type Engine,
   type EngineEventSink,
   type EngineSelectionRecord,
@@ -276,6 +277,17 @@ function codexCommandError(error: unknown, executable?: string): unknown {
   return error;
 }
 
+
+/**
+ * `api` when the Codex process gets `CODEX_API_KEY`, which `codex exec`
+ * runs on. `unknown` when it gets only `OPENAI_API_KEY`, since its own login
+ * may be the one it uses. `subscription` otherwise: the person's own login.
+ */
+function codexBilling(env: Readonly<Record<string, string | undefined>>): Billing {
+  if ((env.CODEX_API_KEY ?? '') !== '') return 'api';
+  if ((env.OPENAI_API_KEY ?? '') !== '') return 'unknown';
+  return 'subscription';
+}
 export class CodexEngine implements Engine {
   readonly name = 'codex';
   private executable: string | undefined;
@@ -399,6 +411,8 @@ export class CodexEngine implements Engine {
     const args = buildCodexArgs(req, this.opts, outFile);
     const env = attemptEnvironment(req);
     const prompt = req.system ? `${req.system}\n\n---\n\n${req.prompt}` : req.prompt;
+    // The child gets this process's environment with the request's laid over it.
+    const billing = codexBilling({ ...process.env, ...env });
     const owner = ownedCommandIdentity({
       adapter: 'codex',
       runId: req.attempt?.runId,
@@ -425,20 +439,29 @@ export class CodexEngine implements Engine {
             req.maxMemoryBytes ?? DEFAULT_OWNED_COMMAND_LIMITS.maxMemoryBytes,
         },
         signal,
-      ).catch((error: unknown) => { throw codexCommandError(error, executable); });
+      ).catch((error: unknown) => {
+        // A call that never ran to an exit still counts once, under its model and billing.
+        onEvent({ type: 'usage', usage: { kind: 'unknown' }, model: model ?? 'codex', billing });
+        throw codexCommandError(error, executable);
+      });
       let text = '';
       try {
         text = readFileSync(outFile, 'utf8').trim();
       } catch {
         /* no final message written */
       }
-      const aborted = sub.aborted || signal.aborted;
-      if (aborted && !text)
-        throw new EngineError({ kind: 'aborted', message: 'codex run aborted' });
       const stdout = new TextDecoder().decode(sub.stdout);
       const stderr = new TextDecoder().decode(sub.stderr);
+      // `cached_input_tokens` is a subset of Codex `input_tokens`, so the
+      // terminal total is already normalized for the run budget.
+      const usage = usageFromJsonl(stdout);
+      const aborted = sub.aborted || signal.aborted;
       const timedOut = sub.timedOut;
       const failed = aborted || timedOut || sub.exitCode !== 0;
+      // A call that ends with no answer still spent the tokens it reported.
+      if (failed && !text) onEvent({ type: 'usage', usage, model: model ?? 'codex', billing });
+      if (aborted && !text)
+        throw new EngineError({ kind: 'aborted', message: 'codex run aborted' });
       const diagnostic = diagnosticCapture(stderr, stdout, env);
       let transportFailure: AgentResult['transportFailure'];
       if (failed && !text)
@@ -462,14 +485,12 @@ export class CodexEngine implements Engine {
         };
       }
 
-      // `cached_input_tokens` is a subset of Codex `input_tokens`, so the
-      // terminal total is already normalized for the run budget.
-      const usage = usageFromJsonl(stdout);
       if (text) onEvent({ type: 'text', delta: text });
-      onEvent({ type: 'usage', usage, model: model ?? 'codex' });
+      onEvent({ type: 'usage', usage, model: model ?? 'codex', billing });
       return assistantResult({
         text,
         usage,
+        billing,
         requested,
         stopReason: 'end_turn',
         ...(transportFailure ? { transportFailure } : {}),

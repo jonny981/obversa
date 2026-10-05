@@ -381,9 +381,57 @@ describe('workflow synthesise', () => {
     expect(result.outcome.status).toBe('pass');
     expect(mergeCalls).toHaveLength(1);
     expect(judgeCalls).toHaveLength(1);
-    const state = (JSON.parse(judgeCalls[0]!.prompt) as { state: { latestFindings: FeedbackFinding[] } }).state;
-    expect(state.latestFindings).toEqual([
+    const state = (JSON.parse(judgeCalls[0]!.prompt) as { state: { how: { findings: FeedbackFinding[] } } }).state;
+    expect(state.how.findings).toEqual([
       expect.objectContaining({ raisedBy: ['write-1', 'write-2'], evidence: 'The opening paragraph runs on.' }),
+    ]);
+  });
+
+  it('gives the judge who raised each finding, its severity, and the other reviewers\' votes with their reasons', async () => {
+    const judgeCalls: AgentRequest[] = [];
+    const writer = new MockEngine((req) => {
+      writeFileSync(join(req.cwd!, 'page.md'), 'draft');
+      return JSON.stringify({ status: 'pass', summary: 'wrote it' });
+    });
+    // Each reviewer raises one finding, and agrees with the other's in the cross-review round.
+    const reviewerSeat = (severity: string, evidence: string, reason: string) => new MockEngine((req) => {
+      if (!req.prompt.startsWith('{')) return JSON.stringify({ status: 'revise', summary: 'one finding', findings: [{ severity, evidence }] });
+      const step = (JSON.parse(req.prompt) as { step: string }).step;
+      if (step === 'merge') return JSON.stringify({ groups: [] });
+      return JSON.stringify({ votes: promptFindings(req).map((finding) => ({ id: finding.id, vote: 'agree', reason })) });
+    });
+    const judgeEngine = new MockEngine((req) => {
+      judgeCalls.push(req);
+      return JSON.stringify({ stop_reason: { choice: 'holds' } });
+    });
+    const dir = mkdtempSync(join(tmpdir(), 'panel-synthesis-'));
+    dirs.push(dir);
+    const result = await run(workflow('synthesis-votes', {
+      brief: 'Use case: a short page.\n\nWrite the page.',
+      roles: {
+        writer: seat(writer, 'writer-mock', ['Write']),
+        reviewers: [
+          seat(reviewerSeat('block', 'The page never says who it is for.', 'a reader needs to know'), 'first-mock', ['Read']),
+          seat(reviewerSeat('nice-to-have', 'The title could be shorter.', 'shorter reads faster'), 'second-mock', ['Read']),
+        ],
+      },
+      stages: [
+        stage('write', { agent: 'writer', writes: 'page.md', reviewedBy: 'reviewers', synthesise: true, refine: judge(seat(judgeEngine, 'judge-mock')) }),
+      ],
+    }), { cwd: dir });
+
+    expect(result.outcome.status).toBe('pass');
+    expect(judgeCalls).toHaveLength(1);
+    const { how } = (JSON.parse(judgeCalls[0]!.prompt) as { state: { how: { findings: unknown[] } } }).state;
+    expect(how.findings).toEqual([
+      expect.objectContaining({
+        id: 'finding-1', severity: 'block', evidence: 'The page never says who it is for.', raisedBy: ['write-1'],
+        votes: [{ reviewer: 'write-2', vote: 'agree', reason: 'shorter reads faster' }],
+      }),
+      expect.objectContaining({
+        id: 'finding-2', severity: 'nice-to-have', evidence: 'The title could be shorter.', raisedBy: ['write-2'],
+        votes: [{ reviewer: 'write-1', vote: 'agree', reason: 'a reader needs to know' }],
+      }),
     ]);
   });
 

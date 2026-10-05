@@ -408,8 +408,8 @@ describe('dag resume', () => {
       maxKickbacks: {
         write: judge({
           engine: new MockEngine((request) => {
-            const { state } = JSON.parse(request.prompt) as { state: { round: number; rounds: unknown[] } };
-            judgeRounds.push({ round: state.round, rounds: state.rounds });
+            const { when } = (JSON.parse(request.prompt) as { state: { when: { round: number; rounds: unknown[] } } }).state;
+            judgeRounds.push({ round: when.round, rounds: when.rounds });
             return JSON.stringify({ stop_reason: { choice: 'continue' } });
           }),
           identity: { adapter: 'mock', provider: 'mock', modelFamily: 'judge', model: 'judge', tools: [] },
@@ -869,7 +869,7 @@ describe('dag resume', () => {
     expect(writerCalls[0]!.prompt).not.toContain(tone.evidence);
     expect(reviewCalls[0]!.prompt).toContain(tone.evidence);
     expect(reviewCalls[0]!.prompt).toContain('a matter of taste');
-    const { state } = JSON.parse(judgeCalls[0]!.prompt) as { state: { round: number; rounds: { round: number }[]; skipped?: unknown } };
+    const state = (JSON.parse(judgeCalls[0]!.prompt) as { state: { when: { round: number; rounds: { round: number }[]; skipped?: unknown } } }).state.when;
     expect(state.round).toBe(2);
     expect(state.rounds.map((r) => r.round)).toEqual([1]);
     expect(state.skipped).toMatchObject([{ round: 1, finding: tone, reason: 'a matter of taste' }]);

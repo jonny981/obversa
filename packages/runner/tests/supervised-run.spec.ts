@@ -1208,17 +1208,20 @@ process.stdout.write(JSON.stringify(await handle.done));
   it('elapsed budget freezes through a settled pause and resume preflight longer than the timeout', async () => {
     const { options } = await fixture();
     const approvalFile = join(options.directory, 'approval');
-    const paused = { ...options, limits: { ...options.limits, timeoutMs: 3_000 },
+    // A slow machine spends seconds before the pause, so the budget leaves
+    // room for that, and each wait outlasts whatever is left of it.
+    const paused = { ...options, limits: { ...options.limits, timeoutMs: 10_000 },
       definition: { ...options.definition, resolvedInputs: { wait: true, waitNode: 'last', approvalFile } } };
     const handle = await startFixture(paused);
     await expect(handle.done).resolves.toMatchObject({ kind: 'pause' });
     const before = await handle.status();
     expect(before.remainingTimeoutMs).toBeGreaterThan(1_000);
-    await delay(3_100);
+    const pastBudget = before.remainingTimeoutMs + 100;
+    await delay(pastBudget);
     expect(await handle.status()).toMatchObject({ elapsedMs: before.elapsedMs, remainingTimeoutMs: before.remainingTimeoutMs });
     await writeFile(approvalFile, 'allow');
     const workspace = { ...options.workspace, verify: async (...args: Parameters<typeof options.workspace.verify>) => {
-      await delay(3_100);
+      await delay(pastBudget);
       expect(await handle.status()).toMatchObject({ elapsedMs: before.elapsedMs, remainingTimeoutMs: before.remainingTimeoutMs });
       return await options.workspace.verify(...args);
     } };

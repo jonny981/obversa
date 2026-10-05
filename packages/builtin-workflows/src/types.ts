@@ -27,3 +27,14 @@ export interface FeatureDeliveryConfig extends TeamInput {
   readonly approve: TeamSeat;
   readonly maxKickbacks?: KickbackBudget;
 }
+
+export interface ImproveWorkflowConfig {
+  /** The record a run of the workflow wrote with `recordTo` and the `source` run option. */
+  readonly record: string;
+  /** The workflow file the record names as its `source`. */
+  readonly workflow: string;
+  /** The seat that reads the record and proposes one change. */
+  readonly proposer: TeamSeat;
+  /** A seat from another model family that checks the proposal. */
+  readonly reviewer: TeamSeat;
+}

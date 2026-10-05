@@ -1,5 +1,24 @@
 # @obversa/runtime
 
+## 0.2.12
+
+### Patch Changes
+
+- 6ea2ab2: A judge decides each finding with the whole picture: why the work exists, what changed, how the round went and where the rounds stand. The runtime builds this in code, with no extra model call, and a `workflow()` stage and a `dag()` give the judge the same input for the same rounds.
+
+  - **Why.** The judge reads the brief, the use case, and the target's `desc` and `gate`. A `dag()` takes an optional `brief`, as a `workflow()` does.
+  - **What.** In a git workspace, the judge reads each file changed since the run began, with the lines added and removed, and the diff around each file and line a finding cites. When the target names a file, the judge also reads its content.
+  - **How.** The judge reads each check step's command, its status and, when it did not pass, its output. It reads the verdicts of the target's own goal check, and for each finding who raised it, its severity, and the other reviewers' votes and reasons when the panel synthesised.
+  - **When.** The judge reads the round, the cap and whether this is the last round, every earlier round with its own decision on each finding and its reason, and the files changed since the last round.
+  - **A size limit.** What the judge reads is kept to 50000 characters, counted as JSON. Set another limit with `run(job, { judgeContextLimit })`. The longest parts are cut first, and the findings to decide are never cut. The judge is told what the limit cut, and each `refine:judge` event records the size of what the judge read and the same list of cuts.
+
+  The judge's prompt keeps the `{ state, questions }` shape. Its `state` holds four labelled parts, `why`, `what`, `how` and `when`, always in that order, then `cut` when the size limit cut something. The questions and the routing are unchanged.
+
+- 229276b: A run's record now holds what you need to tell whether a workflow got better or worse between two runs. Each engine call records what it cost in US dollars: the engine's own figure, an estimate from a price table the runtime ships (which you can override with the `prices` run option, with no new release), or unknown. Each call also records whether it ran on the person's own plan or on an API key, and the result an engine returns to a job carries the same figure. `run:end` (across every session of a resumed record), each `dag:node` done line and each review round carry their total tokens and dollars, and name the models with no figure. A call that failed is counted too, each engine a `fallbackEngine` chain tried included, and marked `failed`, an API engine's failed call names the model it called and `api` billing, and the Claude CLI, Codex, Grok, OpenCode, Mastra and OpenAI Agents engines keep the tokens a failed call had reported; the token budget counts the tokens a failed call reported and leaves out a failed call with no tokens, so a refused call does not stop a fallback route. The calls of a merge an agent resolves count too. The `source` run option records the workflow file's path and SHA-256 on `run:start`. A SIGINT or SIGTERM writes `run:abort` before the process stops, and a `heartbeat` line every minute shows roughly when a killed run died. Each job and node records how long it took, and a `commandJob` outcome records the command, its arguments, its exit code and its duration. Every line carries the number of the session that wrote it. In a git workspace, each refine round and each node run a kickback causes records the files and lines it changed (in the node's own worktree when it has one, pass or fail), and the ids of the findings it was sent back to answer.
+- Updated dependencies [229276b]
+  - @obversa/api@0.2.12
+  - @obversa/core@0.2.12
+
 ## 0.2.11
 
 ### Patch Changes

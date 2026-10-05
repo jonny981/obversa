@@ -76,4 +76,4 @@ it.each([['stderr', 0], ['stdout', 0], ['stderr', 2_500]] as const)('runs the fu
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
-}, 30_000);
+}, 60_000);

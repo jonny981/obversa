@@ -11,17 +11,42 @@
  * thrown. A subsequent call with every engine skipped reports no live engine.
  */
 
-import type {
-  AgentRequest,
-  AgentResult,
-  Engine,
-  EngineEventSink,
+import {
+  EngineError,
+  EngineIncompleteResultError,
+  type AgentRequest,
+  type AgentResult,
+  type Engine,
+  type EngineEventSink,
+  type EngineStreamEvent,
 } from './engine.js';
 import {
   classifyEngineFailure,
   LANE_DEAD_FAILURES,
   type EngineFailureKind,
 } from './failure.js';
+
+/**
+ * The usage event that counts a call which failed before it reported usage:
+ * the tokens its failure carried, or unknown.
+ */
+export function failedCallUsage(
+  error: unknown,
+  request: AgentRequest,
+): Extract<EngineStreamEvent, { type: 'usage' }> {
+  const evidence = error instanceof EngineIncompleteResultError ? error.evidence : undefined;
+  return {
+    type: 'usage',
+    usage: evidence?.usage ?? { kind: 'unknown' },
+    model: evidence?.effective.model
+      ?? (error instanceof EngineError ? error.effective?.model : undefined)
+      ?? request.model
+      ?? '',
+    ...(evidence?.cost === undefined ? {} : { cost: evidence.cost }),
+    ...(evidence?.billing === undefined ? {} : { billing: evidence.billing }),
+    failed: true,
+  };
+}
 
 export interface FallbackInfo {
   /** The lane that just died. */
@@ -64,9 +89,20 @@ export function fallbackEngine(
       for (let i = 0; i < lanes.length; i++) {
         const lane = lanes[i]!;
         if (lane.dead) continue;
+        // A lane's usage waits for its call to end, so a failed lane's usage
+        // can be marked failed.
+        const usage: Extract<EngineStreamEvent, { type: 'usage' }>[] = [];
         try {
-          return await lane.engine.run(req, onEvent, signal);
+          const result = await lane.engine.run(req, (event) => {
+            if (event.type === 'usage') usage.push(event);
+            else onEvent(event);
+          }, signal);
+          for (const event of usage) onEvent(event);
+          return result;
         } catch (error) {
+          // Each lane's call is counted once, the failed ones included.
+          if (usage.length === 0) onEvent(failedCallUsage(error, req));
+          for (const event of usage) onEvent({ ...event, failed: true });
           lastError = error;
           if (signal.aborted) throw error;
           const failure = classifyEngineFailure(error);

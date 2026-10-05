@@ -148,8 +148,8 @@ describe('refine: judge()', () => {
     // consultations, never more: the last one is told it is the last
     // round, and its continue fails the stage.
     expect(judgeCalls).toHaveLength(3);
-    expect(JSON.parse(judgeCalls[1]!.prompt).state.lastRound).toBeUndefined();
-    expect(JSON.parse(judgeCalls[2]!.prompt).state.lastRound).toBe(true);
+    expect(JSON.parse(judgeCalls[1]!.prompt).state.when.lastRound).toBeUndefined();
+    expect(JSON.parse(judgeCalls[2]!.prompt).state.when.lastRound).toBe(true);
     expect(judgeCalls.every((call) => JSON.parse(call.prompt).questions !== undefined)).toBe(true);
   });
 
@@ -331,8 +331,8 @@ describe('refine: judge() decides each finding', () => {
     expect(reviewCalls[2]!.prompt).toContain(TONE.evidence);
     expect(reviewCalls[2]!.prompt).toContain(TITLE.evidence);
     expect(judgeCalls).toHaveLength(2);
-    const firstState = JSON.parse(judgeCalls[0]!.prompt).state as { skipped?: unknown };
-    const secondState = JSON.parse(judgeCalls[1]!.prompt).state as { skipped?: unknown };
+    const firstState = JSON.parse(judgeCalls[0]!.prompt).state.when as { skipped?: unknown };
+    const secondState = JSON.parse(judgeCalls[1]!.prompt).state.when as { skipped?: unknown };
     expect(firstState.skipped).toBeUndefined();
     expect(secondState.skipped).toMatchObject([
       { round: 1, finding: TONE, reason: 'a matter of taste' },
@@ -350,8 +350,8 @@ describe('refine: judge() decides each finding', () => {
     expect(result.outcome.status).toBe('pass');
     expect(judgeCalls).toHaveLength(1);
     // The block keeps its severity in what the judge sees, and its question sets the higher bar.
-    const sent = JSON.parse(judgeCalls[0]!.prompt) as { state: { latestFindings: { severity: string }[] }; questions: Record<string, { instructions: string; criteria: Record<string, string> }> };
-    expect(sent.state.latestFindings[0]).toMatchObject({ severity: 'block' });
+    const sent = JSON.parse(judgeCalls[0]!.prompt) as { state: { how: { findings: { severity: string }[] } }; questions: Record<string, { instructions: string; criteria: Record<string, string> }> };
+    expect(sent.state.how.findings[0]).toMatchObject({ severity: 'block' });
     const [blockId, titleId] = findingQuestions(judgeCalls[0]!);
     expect(sent.questions[blockId!]!.instructions).toContain(`Finding [block]: ${block.evidence}`);
     expect(sent.questions[blockId!]!.instructions).toContain('Skip it only when the case it names is outside how the work is really used');
@@ -458,7 +458,7 @@ describe('refine: judge() with no cap', () => {
     expect((result.outcome.data as Record<string, Outcome>).write).toMatchObject({ status: 'pass', summary: 'the judge chose holds' });
     expect(writerCalls).toHaveLength(3);
     expect(judgeCalls).toHaveLength(3);
-    const state = JSON.parse(judgeCalls[0]!.prompt).state as Record<string, unknown>;
+    const state = JSON.parse(judgeCalls[0]!.prompt).state.when as Record<string, unknown>;
     expect('cap' in state).toBe(false);
     expect(state.limit).toBe('No round limit: the rounds end when you stop them or the review passes.');
   });
@@ -526,8 +526,8 @@ describe('refine: judge() at its cap', () => {
     // A cap of 1 is one refinement: two builds, and the judge reads both reviews.
     expect(writerCalls).toHaveLength(2);
     expect(judgeCalls).toHaveLength(2);
-    expect(JSON.parse(judgeCalls[0]!.prompt).state.lastRound).toBeUndefined();
-    const state = JSON.parse(judgeCalls[1]!.prompt).state as Record<string, unknown>;
+    expect(JSON.parse(judgeCalls[0]!.prompt).state.when.lastRound).toBeUndefined();
+    const state = JSON.parse(judgeCalls[1]!.prompt).state.when as Record<string, unknown>;
     expect(state).toMatchObject({ round: 2, cap: 1, lastRound: true });
     expect(state.limit).toBe('This is the last round the cap of 1 allows (1 refinement after the first build): no build round follows, so your answer decides how this ends.');
     const event = judgeEventsOf(events)[1];
@@ -566,7 +566,7 @@ describe('refine: judge() at its cap', () => {
     });
     expect(writerCalls).toHaveLength(2);
     expect(judgeCalls).toHaveLength(2);
-    expect(JSON.parse(judgeCalls[1]!.prompt).state).toMatchObject({ cap: 1, lastRound: true });
+    expect(JSON.parse(judgeCalls[1]!.prompt).state.when).toMatchObject({ cap: 1, lastRound: true });
     expect(judgeEventsOf(events)[1]).toMatchObject({
       route: 'stop', status: 'pass', findings: [{ decision: 'skip', reason: 'a matter of taste' }], openFindings: [{ ...block, reviewer: expect.any(String) }],
     });

@@ -1,0 +1,16 @@
+{
+  "claude-opus-4-5": { "inputPerMTokUsd": 5, "outputPerMTokUsd": 25, "cacheWritePerMTokUsd": 6.25, "cacheReadPerMTokUsd": 0.5 },
+  "claude-opus-4-1": { "inputPerMTokUsd": 15, "outputPerMTokUsd": 75, "cacheWritePerMTokUsd": 18.75, "cacheReadPerMTokUsd": 1.5 },
+  "claude-opus-4-20250514": { "inputPerMTokUsd": 15, "outputPerMTokUsd": 75, "cacheWritePerMTokUsd": 18.75, "cacheReadPerMTokUsd": 1.5 },
+  "claude-sonnet-4-5": { "inputPerMTokUsd": 3, "outputPerMTokUsd": 15, "cacheWritePerMTokUsd": 3.75, "cacheReadPerMTokUsd": 0.3 },
+  "claude-sonnet-4-20250514": { "inputPerMTokUsd": 3, "outputPerMTokUsd": 15, "cacheWritePerMTokUsd": 3.75, "cacheReadPerMTokUsd": 0.3 },
+  "claude-haiku-4-5": { "inputPerMTokUsd": 1, "outputPerMTokUsd": 5, "cacheWritePerMTokUsd": 1.25, "cacheReadPerMTokUsd": 0.1 },
+  "gpt-5": { "inputPerMTokUsd": 1.25, "outputPerMTokUsd": 10, "cacheReadPerMTokUsd": 0.125 },
+  "gpt-5-mini": { "inputPerMTokUsd": 0.25, "outputPerMTokUsd": 2, "cacheReadPerMTokUsd": 0.025 },
+  "gpt-5-nano": { "inputPerMTokUsd": 0.05, "outputPerMTokUsd": 0.4, "cacheReadPerMTokUsd": 0.005 },
+  "gpt-5-pro": { "inputPerMTokUsd": 15, "outputPerMTokUsd": 120 },
+  "grok-4": { "inputPerMTokUsd": 3, "outputPerMTokUsd": 15, "cacheReadPerMTokUsd": 0.75 },
+  "grok-4-fast": { "inputPerMTokUsd": 0.2, "outputPerMTokUsd": 0.5, "cacheReadPerMTokUsd": 0.05 },
+  "grok-4-1-fast": { "inputPerMTokUsd": 0.2, "outputPerMTokUsd": 0.5, "cacheReadPerMTokUsd": 0.05 },
+  "grok-code-fast-1": { "inputPerMTokUsd": 0.2, "outputPerMTokUsd": 1.5, "cacheReadPerMTokUsd": 0.02 }
+}
