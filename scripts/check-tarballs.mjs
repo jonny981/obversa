@@ -507,6 +507,7 @@ export const EXPECTED_FILES = {
     'package/LICENSE',
     'package/README.md',
     'package/dist/feature-delivery.d.ts',
+    'package/dist/improve-workflow.d.ts',
     'package/dist/index.d.ts',
     'package/dist/index.js',
     'package/dist/index.js.map',

@@ -286,7 +286,8 @@ CrewAI, Temporal, Claude Code subagents and eve.
 product: `@obversa/runtime` runs a workflow, `@obversa/api` holds the
 engine and memory contracts, `@obversa/core` runs bounded child processes,
 `@obversa/runner` supervises stored runs, `@obversa/builtin-workflows`
-ships three ready-made teams, `@obversa/obversa` is the install above,
+ships three ready-made teams and a workflow that proposes changes to a
+workflow from its record, `@obversa/obversa` is the install above,
 and `@obversa/surface` with `@obversa/surface-diff` is the local review
 page. `plugins/` holds the fourteen adapters: the ten engines above, three
 memories, and a notifier that posts run events to a URL.
