@@ -48,6 +48,15 @@ describe('@obversa/engine-devin-cli', () => {
     expect(opts(devin('swe-2-max')).clean).toBeUndefined();
   });
 
+  it('passes the permission mode to the engine, and leaves the default to the engine', () => {
+    const opts = (seat: ReturnType<typeof devin>) =>
+      (seat.engine as unknown as { opts: DevinCliEngineOptions }).opts;
+
+    expect(opts(devin('swe-2-max', { permissionMode: 'dangerous' })).permissionMode).toBe('dangerous');
+    expect(opts(devin(undefined, { permissionMode: 'smart' })).permissionMode).toBe('smart');
+    expect(opts(devin('swe-2-max')).permissionMode).toBeUndefined();
+  });
+
   it('refuses an empty model name', () => {
     expect(() => devin(' ')).toThrow(TypeError);
   });
