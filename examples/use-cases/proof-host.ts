@@ -254,12 +254,13 @@ const PAGE = /http:\/\/127\.0\.0\.1:\d+\//;
  * Run an example the way a person meets it. Spawn it, find the page address
  * it prints, poll the page until a question is pending, answer it there with
  * the same request the page's own buttons send, and wait for the process to
- * end. A run that ends before it asks anything is returned unanswered.
+ * end. A run that ends before it asks anything is returned unanswered. With
+ * `beforeAnswer`, the host runs it once a question is pending, then answers.
  */
 export async function runAnswering(
   file: string,
   args: readonly string[],
-  options: { cwd: string; env: NodeJS.ProcessEnv; timeoutMs: number; answer: Readonly<Record<string, unknown>> },
+  options: { cwd: string; env: NodeJS.ProcessEnv; timeoutMs: number; answer: Readonly<Record<string, unknown>>; beforeAnswer?: () => Promise<void> },
 ): Promise<SpawnedRun> {
   const child = spawn(file, [...args], { cwd: options.cwd, env: options.env, stdio: ['ignore', 'pipe', 'pipe'] });
   let stdout = '';
@@ -278,7 +279,7 @@ export async function runAnswering(
       const page = PAGE.exec(stdout)?.[0];
       if (page !== undefined) {
         try {
-          question = await answerOnPage(page, options.answer);
+          question = await answerOnPage(page, options.answer, options.beforeAnswer);
         } catch (error) {
           // The run may end between a look at the page and the next; only a
           // page that refuses while the run is still going is a failure.
@@ -302,10 +303,11 @@ export async function runAnswering(
 }
 
 /** Answer the first pending question on the page and return its text, or nothing while none is pending. */
-async function answerOnPage(page: string, response: Readonly<Record<string, unknown>>): Promise<string | undefined> {
+async function answerOnPage(page: string, response: Readonly<Record<string, unknown>>, beforeAnswer?: () => Promise<void>): Promise<string | undefined> {
   const state = await (await fetch(`${page}state`)).json() as { pending: Array<{ requestId: string; decisionText: string }> };
   const asked = state.pending[0];
   if (asked === undefined) return undefined;
+  await beforeAnswer?.();
   const reply = await fetch(`${page}answer`, {
     method: 'POST',
     headers: { 'content-type': 'application/json' },

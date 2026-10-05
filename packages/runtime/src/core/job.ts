@@ -70,6 +70,8 @@ import {
   logEngineTransportFailure,
 } from './engine-meta.js';
 import { cloneFrozenJson, type JsonValue } from '../graph/value.js';
+import { workspaceContent } from './git.js';
+import { NODE_FILE } from './context.js';
 import { oneLine } from './text.js';
 import { requireFinalResultText } from '../runtime/result-parts.js';
 
@@ -104,7 +106,20 @@ export interface AgentJobConfig {
   maxTokens?: number;
   tools?: string[];
   allowedTools?: string[];
+  /**
+   * What the turn may do to the workspace. A `write` turn that runs after a
+   * review sent the work back (`ctx.lastReview` is not a pass) and leaves
+   * the workspace as it was fails: it returned the reviewed work unchanged.
+   */
   workspaceMode?: AgentRequest['workspaceMode'];
+  /**
+   * Files the turn is declared to write. When given, the check for unchanged
+   * work reads only these files, even when Git ignores them: a change to any
+   * other file does not count as a change to the work. Without it, a turn
+   * that a dag node with a `file` runs reads that file alone.
+   * @internal
+   */
+  writes?: readonly string[];
   /**
    * Mark this turn a leaf: forbid spawning sub-agents (the engine disallows the sub-agent
    * tool), so a branch bottoms out here. Falls back to the agent def's `leaf`.
@@ -338,6 +353,15 @@ export function agentJob(config: AgentJobConfig): Job {
       label,
       timeoutMs: defaultTimeoutMs,
     });
+    // A writer sent back with feedback must change the work: the same
+    // workspace after its turn fails the step, whichever form sent it back.
+    const cwd = config.cwd ?? ctx.workspace.dir;
+    const nodeFile = (ctx as JobContext & { [NODE_FILE]?: string })[NODE_FILE];
+    const paths = config.writes ?? (nodeFile === undefined ? undefined : [nodeFile]);
+    const contentOpts = { cwd, signal: ctx.signal, excludePaths: ctx.fingerprintExcludePaths, paths };
+    const reviewed = config.workspaceMode === 'write' && ctx.lastReview !== undefined && ctx.lastReview.status !== 'pass'
+      ? await workspaceContent(contentOpts)
+      : undefined;
 
     const userPrompt =
       typeof config.prompt === 'function'
@@ -569,10 +593,16 @@ export function agentJob(config: AgentJobConfig): Job {
     const outcome = config.outcome
       ? await config.outcome(text, ctx)
       : TERMINAL(text);
-    const finalOutcome =
+    const timed =
       result.transportFailure?.kind === 'timeout' && outcome.late !== true
       ? { ...outcome, late: true }
       : outcome;
+    const unchanged = reviewed !== undefined && timed.status === 'pass'
+      && reviewed === await workspaceContent(contentOpts);
+    const summary = `${label} returned the reviewed work unchanged after feedback`;
+    const finalOutcome: Outcome = unchanged
+      ? { status: 'fail', summary, error: new LoopError({ code: 'VALIDATION', phase: 'body', path: ctx.path, message: summary }) }
+      : timed;
     ctx.emit({
       kind: 'job:end',
       ts: Date.now(),

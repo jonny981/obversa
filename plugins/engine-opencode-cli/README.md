@@ -8,16 +8,34 @@ your OpenCode login, but with an empty config folder in place of yours, so
 your OpenCode settings stay out. Set `clean: false` to run it the way you
 run it, with your own config folder too. It adds only what the
 step needs, through OpenCode's own config: the tools and permission rules
-the step declares, with every other tool turned off, no autoupdate and no
-sharing.
+the step declares, no autoupdate and no sharing. Every other tool is set
+to `ask`, so OpenCode turns down each call to it and the tool doesn't run.
 
 ## Requirements
 
 - Node.js 22.12 or later
 - OpenCode CLI 1.18.23, the version the plugin is tested with
 - OpenCode signed in to your model's provider, or login data passed as `auth`
-- A model on a paid login: OpenCode's free models refuse any run that turns
-  a tool off, and the plugin turns off every tool a step doesn't declare
+- Any model OpenCode runs, free models such as `opencode/big-pickle`
+  included. [Free models](#free-models) says what they cost.
+
+## Free models
+
+OpenCode's free models refuse any run whose config turns a tool off or
+denies a permission. So the plugin does neither. It sets each tool the
+step doesn't declare to `ask`. A declared tool the step limits to a
+pattern, such as `Bash(git status)`, is set to `ask` for everything else.
+
+A free model gives up nothing for this. `opencode run` turns down every
+`ask`, because nobody is there to answer it, and the plugin never passes
+the flags that would approve them, such as `--auto`. So a tool the step doesn't
+declare never runs, and a step's limits hold the same way on a free model
+as on a paid one.
+
+What it costs: the model sees all of OpenCode's tools, not only the ones
+the step declares. When it calls one the step doesn't declare, OpenCode
+turns the call down and tells the model, and the model carries on with the
+step.
 
 ## Install
 

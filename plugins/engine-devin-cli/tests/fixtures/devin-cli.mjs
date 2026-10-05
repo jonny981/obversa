@@ -71,6 +71,11 @@ if (scenario === 'tool-events') {
     tool_calls: [{ tool_call_id: 'write:0', function_name: 'write', arguments: { file_path: 'created.txt' } }],
     observation: { results: [{ source_call_id: 'write:0', content: 'Tool execution was rejected by the user' }] },
   }));
+} else if (scenario === 'no-answer') {
+  steps.push(agent(3, '', {
+    tool_calls: [{ tool_call_id: 'read:0', function_name: 'read', arguments: { file_path: 'a.js' } }],
+    observation: { results: [{ source_call_id: 'read:0', content: 'export const a = 1;' }] },
+  }));
 } else {
   steps.push(agent(3, 'draft'));
   steps.push(agent(4, scenario === 'structured-result'

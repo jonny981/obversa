@@ -18,6 +18,7 @@ import { childContext } from './context.js';
 import {
   isRepo,
   addWorktree,
+  branchExists,
   mergeBranch,
   stageAll,
   commit,
@@ -85,7 +86,13 @@ export function tournament(config: TournamentConfig): Job {
     const attempts = await Promise.all(
       Array.from({ length: config.n }, (_, i) =>
         limit(async (): Promise<Attempt> => {
-          const branch = `lines/${slug(config.name)}-cand-${i}`;
+          // An interrupted earlier run leaves its candidate branches behind
+          // for recovery, and every run uses the same names, so skip any name
+          // that is already taken.
+          let branch = `lines/${slug(config.name)}-cand-${i}`;
+          for (let k = 2; await branchExists(base.dir, branch, { signal: parent.signal }); k += 1) {
+            branch = `lines/${slug(config.name)}-cand-${i}-${k}`;
+          }
           const wt = await addWorktree(base.dir, {
             branch,
             base: 'HEAD',

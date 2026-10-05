@@ -47,7 +47,7 @@ Replacement: struck; exclusivity of any kind is never signed.
 `;
 
 // The checker sends the redlines back once: two never-sign clauses had no
-// redline, a block the judge is never asked about. On the second set the
+// redline, two blocks the judge acts on. On the second set the
 // checker has only a taste note, and the judge stops the loop; the
 // positions note follows and is checked in its turn, and the run waits for
 // the lawyer, who answers on the run's page. The note is reviewed because deciding what to concede is the most
@@ -85,9 +85,8 @@ await withExample({
 
   const events = await recordEvents(run, 'records/contract-playbook.jsonl');
   const judged = events.filter((event) => event.kind === 'refine:judge');
-  assert.equal(judged.length, 1, 'the judge is asked once: a block went back on its own');
-  assert.equal(judged[0]!.reason, 'the judge chose holds');
-  assert.ok((judged[0]!.path as string[]).includes('redline'), 'the judged round is the redline stage');
+  assert.deepEqual(judged.map((event) => event.reason), ['the judge acts on 2 of 2 findings', 'the judge chose holds'], 'the judge is asked on both rounds: it acts on the blocks, then chooses holds');
+  assert.ok(judged.every((event) => (event.path as string[]).includes('redline')), 'both judged rounds are the redline stage');
   const negotiate = events.filter((event) => event.kind === 'dag:node' && event.node === 'negotiate' && event.phase === 'done');
   assert.deepEqual(negotiate.map((event) => (event.outcome as { status: string }).status), ['paused', 'pass'], 'the run pauses at the lawyer, then the answer passes the step');
   const starts = events.filter((event) => event.kind === 'dag:node' && event.phase === 'start').map((event) => event.node);
@@ -99,8 +98,7 @@ await withExample({
     clauses: 7,
     redlineRounds: 2,
     checkerKickbacks: 1,
-    judge: ['holds'],
-    blockWentBackWithoutTheJudge: true,
+    judge: ['act', 'holds'],
     answeredOnPage: 'negotiate',
     mode: run.mode,
   }, null, 2));

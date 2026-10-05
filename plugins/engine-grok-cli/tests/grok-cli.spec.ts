@@ -32,6 +32,7 @@ import {
 } from '@obversa/api/testing';
 import {
   buildGrokArgs,
+  grok,
   GrokCliEngine,
   type GrokCliEngineOptions,
 } from '../src/index.ts';
@@ -959,6 +960,23 @@ describe('Grok CLI adapter', () => {
     )).rejects.toThrow('undeclared capability');
   });
 
+  it('answers when Grok lists a tool of the person\'s own MCP server the step denies', async () => {
+    const result = await new GrokCliEngine({
+      ...options(),
+      environment: { OBVERSA_TEST_GROK_SCENARIO: 'mcp-tool-listed' },
+    }).run(request(), () => {}, new AbortController().signal);
+    expect(result.parts.at(-1)).toMatchObject({ kind: 'assistant', final: true });
+    expect(result.effective.capabilities).toEqual(['read_file', 'grep']);
+  });
+
+  it('rejects a server-named tool from a server Grok did not list', async () => {
+    await expect(new GrokCliEngine({
+      ...options(),
+      environment: { OBVERSA_TEST_GROK_SCENARIO: 'unlisted-server-tool' },
+    }).run(request(), () => {}, new AbortController().signal))
+      .rejects.toThrow('undeclared capability other__exec');
+  });
+
   it('runs Grok with the person\'s own home and environment', async () => {
     const personHome = temporaryDirectory('lines-grok-person-home-');
     const recordPath = join(temporaryDirectory('lines-grok-record-'), 'call.json');
@@ -1335,5 +1353,53 @@ describe('Grok CLI adapter', () => {
       { type: 'tool', name: 'read_file', phase: 'use', target: 'README.md' },
       { type: 'tool', name: 'read_file', phase: 'result' },
     ]);
+  });
+});
+
+describe('grok(model, options)', () => {
+  it('returns the engine and the identity of the seat', () => {
+    const seat = grok('grok-4-fixture', { executable: executable() });
+
+    expect(seat.engine).toBeInstanceOf(GrokCliEngine);
+    expect(seat.identity).toEqual({
+      adapter: 'grok-cli',
+      provider: 'xai',
+      modelFamily: 'grok',
+      model: 'grok-4-fixture',
+      tools: ['read_file', 'grep', 'list_dir'],
+    });
+    expect(grok('grok-4-fixture', { executable: '/bin/echo', tools: ['read_file'] }).identity.tools)
+      .toEqual(['read_file']);
+  });
+
+  it('runs a step with its tools given as both tools and permission rules, and passes its effort', async () => {
+    // A workflow role gives the seat's tools to the engine as its tools and
+    // as its permission rules.
+    const recordPath = join(temporaryDirectory('lines-grok-seat-'), 'call.json');
+    vi.stubEnv('OBVERSA_TEST_GROK_RECORD', recordPath);
+    vi.stubEnv('OBVERSA_TEST_GROK_SCENARIO', 'invocation');
+    const seat = grok('grok-4-fixture', { executable: executable(), effort: 'high' });
+
+    await seat.engine.run(request({
+      model: seat.identity.model,
+      tools: [...seat.identity.tools],
+      allowedTools: [...seat.identity.tools],
+    }), () => {}, new AbortController().signal);
+
+    const call = JSON.parse(readFileSync(recordPath, 'utf8')) as { args: string[] };
+    expect(valuesAfter(call.args, '--model')).toEqual(['grok-4-fixture']);
+    expect(valuesAfter(call.args, '--tools')).toEqual(['read_file,grep,list_dir']);
+    expect(valuesAfter(call.args, '--allow')).toEqual(['Read', 'Grep']);
+    expect(valuesAfter(call.args, '--reasoning-effort')).toEqual(['high']);
+  });
+
+  it('reads a Grok tool given as a permission rule as the rule for that tool', () => {
+    const args = buildGrokArgs(request({
+      tools: ['read_file', 'grep', 'search_replace', 'run_terminal_command'],
+      allowedTools: ['read_file', 'grep', 'search_replace', 'run_terminal_command'],
+      workspaceMode: 'write',
+    }), options('/bin/echo'), '/tmp/lines-grok-prompt.md');
+
+    expect(valuesAfter(args, '--allow')).toEqual(['Read', 'Grep', 'Edit', 'Bash']);
   });
 });

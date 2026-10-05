@@ -22,7 +22,7 @@ export const featureDelivery = pipeline(
     { name: 'analyse', job: analyse },
     { name: 'implement', job: implement },
     { name: 'test', job: testStage },
-    { name: 'review', job: review },
+    { name: 'review', job: review, acceptsKickbackTo: ['implement'] },
     { name: 'approve', job: approve },
   ],
   { maxKickbacks: 2 },
@@ -31,11 +31,11 @@ export const featureDelivery = pipeline(
 
 `review` is a panel of three that passes on two and names `implement` as
 its target, so a failing review runs the implementer again with the
-findings. `approve` is a person's question. `maxKickbacks` caps how often
+findings. The `review` stage declares that target in `acceptsKickbackTo`. `approve` is a person's question. `maxKickbacks` caps how often
 the review can do that; when the budget runs out, the run fails with the
 last findings instead of looping. The excerpt comes from a scripted test
 of the workflow shape. [Feature delivery](/workflows/feature-team) uses
-Claude and Codex for the work.
+Claude, Codex and Gemini for the work.
 
 ## The three parts
 

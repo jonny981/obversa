@@ -271,6 +271,7 @@ describe('totals', () => {
         implement: fnJob('implement', () => 'built'),
         review: {
           needs: 'implement',
+          acceptsKickbackTo: ['implement'],
           job: fnJob('review', async (ctx) => {
             reviewRuns += 1;
             ctx.emit({ kind: 'engine:usage', ts: Date.now(), path: [...ctx.path], model: SONNET, usage: reportedUsage({ inputTokens: 10, outputTokens: 5 }), cost: { kind: 'reported', usd: 2 } });
@@ -508,6 +509,7 @@ describe('totals', () => {
         }),
         check: {
           needs: 'implement',
+          acceptsKickbackTo: ['implement'],
           job: fnJob('check', () => (checks++ === 0
             ? revisionRequest({ target: 'implement', reason: 'red', findings: [{ evidence: 'add(2, 2) returned 0' }] })
             : 'green')),
@@ -1074,6 +1076,7 @@ describe('what each round changed', () => {
         }),
         check: {
           needs: 'implement',
+          acceptsKickbackTo: ['implement'],
           job: fnJob('check', () => (checks++ === 0
             ? revisionRequest({ target: 'implement', reason: 'red', findings: [{ evidence: 'add(2, 2) returned 0' }] })
             : 'green')),
@@ -1104,6 +1107,7 @@ describe('what each round changed', () => {
         }),
         check: {
           needs: 'implement',
+          acceptsKickbackTo: ['implement'],
           job: fnJob('check', () => (checks++ === 0
             ? revisionRequest({ target: 'implement', reason: 'red', findings: [{ evidence: 'add(2, 2) returned 0' }] })
             : 'green')),
@@ -1133,6 +1137,7 @@ describe('what each round changed', () => {
         },
         check: {
           needs: 'implement',
+          acceptsKickbackTo: ['implement'],
           job: fnJob('check', () => (checks++ === 0
             ? revisionRequest({ target: 'implement', reason: 'red', findings: [{ evidence: 'add(2, 2) returned 0' }] })
             : 'green')),

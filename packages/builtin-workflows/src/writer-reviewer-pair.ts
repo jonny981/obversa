@@ -60,6 +60,7 @@ export function writerReviewerPair(config: PairConfig) {
         desc: 'Read the code and the test result and accept or send the work back.',
         gate: 'A different model family has accepted the change.',
         needs: ['test'],
+        acceptsKickbackTo: ['writer'],
       },
     },
   });

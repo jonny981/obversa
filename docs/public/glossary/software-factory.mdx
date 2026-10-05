@@ -17,18 +17,21 @@ The process is one file. Named roles, one engine each, from more than one
 provider, and a person for the last word:
 
 ```ts examples/teams/feature-delivery.ts (excerpt)
-const writer = claude('claude-sonnet-4-5');
-const implementer = codex('gpt-5.6-luna');
-const secondReviewer = opencode('opencode/big-pickle', { executable: resolveCommandExecutable('opencode') });
+const builder = claude('claude-sonnet-4-5');
+const goalSeat = codex('gpt-5.6-luna');
+const reviewers: Record<string, TeamSeat> = {
+  claude: claude('claude-sonnet-4-5'),
+  codex: codex('gpt-5.6-luna'),
+  gemini: openCode('google/gemini-2.5-pro'),
+};
 ```
 
-Seven steps follow, from a ticket to a change a person is asked to ship: a
-cheap model types the ticket, a plan is reviewed by another model family,
-two seats implement in their own worktrees and the tests pick the winner,
-a test command and a review panel hold the code to green with a judge
-saying when another round stops being worth it, and the person approves
-the exact bytes. The whole file and what a run of it did are on
-[Feature delivery](/workflows/feature-team), and
+Seven steps follow, from a ticket to a change that lands. One seat builds
+it, and a red test goes back to the builder with its output. A seat from
+another model family checks that every requirement was met. Three
+reviewers review at the same time, and their reviews become one list. A
+judge decides each finding, and a person approves the exact bytes. The
+whole file is on [Feature delivery](/workflows/feature-team), and
 [Shipping through GitHub](/workflows/forge-helper) is the step after the
 person says yes: push, one pull request, a strict gate, a squash merge.
 

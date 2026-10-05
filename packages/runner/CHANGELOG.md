@@ -1,5 +1,52 @@
 # @obversa/runner
 
+## 0.2.11
+
+### Patch Changes
+
+- Updated dependencies [b24059a]
+  - @obversa/runtime@0.2.11
+  - @obversa/api@0.2.11
+  - @obversa/core@0.2.11
+
+## 0.2.10
+
+### Patch Changes
+
+- Updated dependencies [3cd2d5c]
+  - @obversa/core@0.2.10
+  - @obversa/runtime@0.2.10
+  - @obversa/api@0.2.10
+
+## 0.2.9
+
+### Patch Changes
+
+- Updated dependencies [9b9e01c]
+  - @obversa/runtime@0.2.9
+  - @obversa/api@0.2.9
+  - @obversa/core@0.2.9
+
+## 0.2.8
+
+### Patch Changes
+
+- Updated dependencies [afdce94]
+- Updated dependencies [afdce94]
+  - @obversa/runtime@0.2.8
+  - @obversa/api@0.2.8
+  - @obversa/core@0.2.8
+
+## 0.2.7
+
+### Patch Changes
+
+- Updated dependencies [da3fb0f]
+- Updated dependencies [9721b9c]
+  - @obversa/runtime@0.2.7
+  - @obversa/api@0.2.7
+  - @obversa/core@0.2.7
+
 ## 0.2.6
 
 ### Patch Changes

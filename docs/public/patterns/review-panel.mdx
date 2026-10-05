@@ -24,8 +24,7 @@ flowchart LR
   review -->|every finding| merge["merge: the first reviewer's seat"]
   merge -->|one finding per problem| cross["cross-review: each reviewer votes once"]
   cross -->|votes applied by rule| left{"what is left"}
-  left -->|a block| write
-  left -->|other findings| judge{"judge: Jev decides each finding"}
+  left -->|findings| judge{"judge: Jev decides each finding"}
   judge -->|the findings it acts on| write
   judge -->|it skips every finding| done((pass))
   left -->|nothing| done
@@ -61,7 +60,11 @@ and puts a judge on `refine`:
 
 ## The steps
 
-Each round runs these steps in order.
+Each round runs these steps in order. When the stage sets `goal`, a goal
+check runs before them, every round. When it finds a requirement of the
+brief unmet, the round goes back to the writer, and none of these steps
+run. The judge never decides an unmet requirement.
+[Check the brief was met](/patterns/check-the-brief) shows it.
 
 1. **Review.** The three reviewers read the page at the same time. Each one
    passes it or asks for a revision, and tags each finding `block`,
@@ -98,15 +101,16 @@ Each round runs these steps in order.
    marked `disputed`. Votes also never drop a finding shown to a reviewer
    whose seat failed or sent no readable reply in this step. It stays,
    marked `disputed`.
-5. **Judge.** A `block` goes straight back to the writer, and the judge is
-   not asked. Otherwise the judge reads each finding that is left, with who
-   raised it and how the others voted. It decides each one, `act` or
+5. **Judge.** When a judge is set, it decides every finding that is left,
+   a `block` included. It reads each one with who raised it and how the
+   others voted. It decides each one, `act` or
    `skip`, with a one-line reason. The writer gets only the findings the
    judge acts on, each with the judge's reason. The next round's reviewers
    are told which findings it skipped and why. When the judge acts on any
    finding, another round runs. When it skips every finding, the page
    stands as a pass. With no cap on the judge, the rounds end when it skips
-   every finding or every reviewer passes.
+   every finding or every reviewer passes. A `block` goes straight back to
+   the writer without a judge only when there is no judge.
    [Know when to stop](/patterns/judge-stops-the-loop) has the judge's
    questions.
 
@@ -404,7 +408,8 @@ default is all of them. Set it to the number of reviewers when one dissent
 must be enough to fail the step; below that, the change can pass despite a
 dissent, and the dissent is still on the record. A panel below the
 threshold carries its findings to `implement`, which runs again with them,
-as many times as that stage's `refine` allows.
+as many times as that stage's `refine` allows. When those rounds run out,
+the run fails with the last findings.
 
 `workflow()` refuses the team before any model runs if a reviewer shares a
 model family with the seat it reviews, or two reviewers share one: two
@@ -581,8 +586,8 @@ console.log(JSON.stringify(result.outcome, null, 2));
 
 ## Next steps
 
-- [Feature delivery](/workflows/feature-team): a panel as one stage of a
-  nine-stage team.
+- [Feature delivery](/workflows/feature-team): a synthesised panel of
+  three as one of seven steps.
 - [Review loop](/reviewing/review-loop): the same idea as a graph form, with
   a quorum and `requireDiversity` you set yourself.
 - [Runtime](/packages/runtime): `workflow`, `stage`, `panel` and `agree`.

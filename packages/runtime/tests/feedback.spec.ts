@@ -118,6 +118,7 @@ describe('feedback protocol', () => {
           }),
           review: {
             needs: ['implementation'],
+            acceptsKickbackTo: ['implementation'],
             job: fnJob('review', async () => {
               seen.push('review');
               reviewRuns += 1;

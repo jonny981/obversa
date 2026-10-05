@@ -394,7 +394,7 @@ describe('declarative teams', () => {
     expect(reviewed.max).toBe(4);
   });
 
-  it('defaults a reviewed stage to one review restart', () => {
+  it('defaults a reviewed stage to one refinement: two builds', () => {
     const input = workflowInput();
     const job = workflow('default-review-refine', {
       ...input,
@@ -408,7 +408,7 @@ describe('declarative teams', () => {
     const reviewed = nodeMeta(node.job);
 
     expect(reviewed.max).toBe(2);
-    expect(reviewed.maxReviewRestarts).toBe(1);
+    expect(reviewed.maxReviewRestarts).toBeUndefined();
   });
 
   it('rejects an agent that changes another declared file', async () => {

@@ -2,9 +2,9 @@
 
 import { createHash } from 'node:crypto';
 import { mkdtempSync, rmSync } from 'node:fs';
-import { copyFile, lstat, readFile, readlink, realpath } from 'node:fs/promises';
+import { copyFile, lstat, readdir, readFile, readlink, realpath } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
-import { basename, dirname, join, relative, resolve } from 'node:path';
+import { basename, dirname, join, relative, resolve, sep } from 'node:path';
 import { processText, runRuntimeProcess } from './process.js';
 
 interface GitOpts {
@@ -165,6 +165,62 @@ export async function workspaceFingerprint(
         `untracked-content:${i}`,
         await output(['hash-object', '--', ...chunk]),
       );
+    }
+    return hash.digest('hex');
+  } catch {
+    return undefined;
+  }
+}
+
+/**
+ * A hash of the content of a workspace's files, to tell whether a step
+ * changed them. Git's own records do not count: staging or committing the
+ * same files leaves the hash as it was. With `paths`, only those files
+ * (and the files under those directories) count, even when Git ignores
+ * them, so a change anywhere else leaves the hash as it was. Otherwise, in
+ * a git workspace the files are the ones Git tracks or would track; any
+ * other directory hashes every file under it. `.git` and `excludePaths`
+ * aside. Undefined when the workspace cannot be read.
+ */
+export async function workspaceContent(
+  opts: GitOpts & { readonly paths?: readonly string[] },
+): Promise<string | undefined> {
+  try {
+    const excluded = (opts.excludePaths ?? []).map((p) => resolve(opts.cwd, p));
+    const skipped = (path: string) =>
+      excluded.some((p) => path === p || path.startsWith(`${p}${sep}`));
+    const files = new Set<string>();
+    const add = async (path: string): Promise<void> => {
+      if (skipped(path) || relative(opts.cwd, path).split(sep).includes('.git')) return;
+      const stat = await lstat(path).catch(() => undefined);
+      if (stat?.isDirectory()) {
+        for (const name of await readdir(path)) await add(join(path, name));
+      } else {
+        files.add(path);
+      }
+    };
+    if (opts.paths !== undefined) {
+      for (const path of opts.paths) await add(resolve(opts.cwd, path));
+    } else if (await isRepo(opts)) {
+      const listed = await git(['ls-files', '-z', '--cached', '--others', '--exclude-standard'], opts);
+      if (listed.exitCode !== 0) return undefined;
+      for (const path of listed.stdout.split('\0')) {
+        if (path) await add(resolve(opts.cwd, path));
+      }
+    } else {
+      await add(resolve(opts.cwd));
+    }
+    const hash = createHash('sha256');
+    for (const path of [...files].sort()) {
+      hash.update(relative(opts.cwd, path));
+      hash.update('\x1f');
+      const stat = await lstat(path).catch(() => undefined);
+      hash.update(
+        stat === undefined ? 'missing'
+          : stat.isSymbolicLink() ? `link:${await readlink(path)}`
+            : await readFile(path),
+      );
+      hash.update('\x1e');
     }
     return hash.digest('hex');
   } catch {

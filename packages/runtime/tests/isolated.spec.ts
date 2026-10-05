@@ -209,4 +209,34 @@ describe('isolated() — worktree as a composable Job wrapper', () => {
     expect(outcome.status).toBe('fail');
     expect(existsSync(join(repo, 'bad.ts'))).toBe(false); // discarded with the worktree
   });
+
+  it('skips a fork name an interrupted earlier run left behind, and keeps that branch', async () => {
+    const repo = await tmpRepo();
+    // What a run that died mid-attempt leaves: its fork branch, checked out in
+    // its own worktree, with work committed on it.
+    const leftDir = mkdtempSync(join(tmpdir(), 'lines-leftover-'));
+    const git = (cwd: string, ...args: string[]) => execFileSync('git', ['-C', cwd, ...args], { encoding: 'utf8' }).trim();
+    git(repo, 'worktree', 'add', '-b', 'lines/resume-1', leftDir, 'HEAD');
+    write(leftDir, 'old.ts', 'old\n');
+    git(leftDir, 'add', '-A');
+    git(leftDir, 'commit', '-m', 'old attempt');
+    const leftSha = git(repo, 'rev-parse', 'lines/resume-1');
+
+    // A new run counts forks from zero again, so load the module fresh.
+    vi.resetModules();
+    const fresh = await import('../src/core/isolated.ts');
+    const job = fresh.isolated(
+      fnJob('build', async (ctx) => {
+        write(ctx.workspace.dir, 'out.ts', 'built\n');
+        return { status: 'pass', summary: 'built' };
+      }),
+      { label: 'resume' },
+    );
+    const { outcome } = await run(job, { ...base, cwd: repo });
+
+    expect(outcome.status).toBe('pass');
+    expect(existsSync(join(repo, 'out.ts'))).toBe(true);
+    expect(existsSync(join(repo, 'old.ts'))).toBe(false);
+    expect(git(repo, 'rev-parse', 'lines/resume-1')).toBe(leftSha);
+  });
 });

@@ -24,8 +24,7 @@ and set the writer's revision limit.
 ```mermaid
 flowchart LR
   write["write: Claude seat"] -->|the page| read["read: Codex seat"]
-  read -->|a block| write
-  read -->|other findings| judge{"judge: Jev"}
+  read -->|findings| judge{"judge: Jev"}
   judge -->|the findings it acts on| write
   judge -->|skips every finding| approve["approve: a person"]
   read -->|nothing fails| approve
@@ -59,12 +58,12 @@ The judge sits on the `write` stage. The reader reviews the page, and
 
 The brief tells the reader to tag each finding `block`, `should-fix` or
 `nice-to-have`. A block is a false claim or a sentence a person would not
-understand. A block always goes back to the writer, and the judge is not
-asked. In that round, every finding goes back with the block.
+understand.
 
-In a round with no block, the judge decides each finding on its own: `act`
-or `skip`, with a one-line reason. A taste note does not cost a round, and a
-real finding is not waved through because the rest of the list was trivial.
+When a judge is set, it decides every finding on its own, a block included:
+`act` or `skip`, with a one-line reason. A taste note does not cost a round,
+and a real finding is not waved through because the rest of the list was
+trivial.
 
 - **The judge acts on at least one finding.** The page goes back. The writer
   gets only the findings the judge acts on, each with the judge's reason.
@@ -74,8 +73,16 @@ real finding is not waved through because the rest of the list was trivial.
   skipped and why, so it does not raise them again.
 
 With no cap, the rounds end when the judge stops them or the reader finds
-nothing that fails. A block goes back every round, without the judge, until
-the reader stops raising it.
+nothing that fails. A reader that tags every finding block does not decide
+alone how long the run goes on, because the judge still weighs each block.
+A block is sent back without a judge only when there is no judge: a plain
+number on `refine` or `maxKickbacks`.
+
+When the stage also sets `goal`, a goal check runs before the reader,
+every round. A requirement of the brief that it finds unmet goes straight
+back to the writer. The reader does not run that round, and the judge is
+not asked, because a requirement in the brief is never skipped as polish.
+[Check the brief was met](/patterns/check-the-brief) shows it.
 
 The approval is a plain function. It reads the page, puts its sha256 in the
 question and sends a person's no back to the writer.
@@ -91,12 +98,12 @@ list, with who raised it and how the others voted.
 ## A cap as a backstop
 
 To bound the rounds as well, pass a cap: `judge(judgeSeat, { cap: 3 })`.
-On a `workflow()` stage, a cap of 3 gives the writer at most three rounds
-with the reader, its first draft included. On a `dag()`'s `maxKickbacks`, a
-cap of 3 allows three returns to the target.
+A cap of 3 allows three [refinements](/concepts/feedback-loops#counting-rounds):
+the first draft and three more, four builds in all. It means the same on a
+`workflow()` stage's `refine` and on a `dag()`'s `maxKickbacks`.
 
-When the last review the cap allows does not pass, the judge is asked once
-more and told that this is the last round. Its answer decides the outcome:
+When the review of the last build does not pass, the judge is asked about
+it too and told that this is the last round. Its answer decides the outcome:
 
 - **`holds` or `over_polishing`.** The work stands as a pass with the
   judge's reason. The findings still open are on the outcome as
@@ -109,18 +116,26 @@ more and told that this is the last round. Its answer decides the outcome:
 
 When the judge decides each finding, skipping every finding lets the work
 stand, and acting on any finding fails the run. A block in the last round
-fails the run without asking the judge.
+goes to the judge too, with the same rules.
 
 ## The questions
 
-The judge sees the use case from the brief, the draft, the latest findings,
-the findings it skipped in earlier rounds with its reasons, and every earlier
-round it was asked about, with that round's counts and the size of its
-change. A round that went back for a block is not in that list.
+The judge sees the latest findings, the findings it skipped in earlier
+rounds with its reasons, the round number and the cap. It sees every
+earlier round it was asked about, with that round's counts and the size of
+that round's change. It also sees the use case and the current draft. A
+`workflow()` takes the use case from the brief's `Use case:` paragraph and
+the draft from the first file the stage `writes`. A `dag()` takes them from
+its `useCase` and the target node's `file`.
+Each judge entry in the record names the target and the round.
 
 For each finding in the round, the judge gets one `choice` question, keyed
 `finding-1`, `finding-2` and so on in the order of the round's findings. It
-chooses `act` or `skip`. When an answer carries no reason of its own, the
+chooses `act` or `skip`. A block keeps its severity in what the judge sees,
+and its question sets a higher bar: skip it only when the case it names is
+outside how the work is really used, or the same class of finding keeps
+returning after it was answered. Otherwise the judge acts on it. When an
+answer carries no reason of its own, the
 reason is the text of the chosen option. The judge
 answers these in the same call as the questions about the whole round. The
 default set of those is `stopQuestions()` from
@@ -147,7 +162,12 @@ answer follows the round answer: it goes back when that answer is
 
 A `dag()` takes the same `judge()` value on `maxKickbacks`. The target that
 the work goes back to gets only the findings the judge acts on, and a stop
-means the same thing at both levels.
+means the same thing at both levels. The judge runs as part of the node that
+sent the work back, inside that node's time limit. The unmet requirements a
+`goalCheck()` node sends back go to the target without the judge.
+
+A stage a person reviews takes the same judge. Each refusal goes to the
+judge with the person's note as a finding, as a reviewer's findings do.
 
 Pass your own set as `judge(seat, { questions })` when this wording
 does not fit your use case. With your own set, the judge is not asked about
@@ -190,8 +210,8 @@ printed:
 }
 ```
 
-Three rounds. The first reader pass found two blocks, so the page went back
-without asking the judge. The second found a `should-fix` (the page never
+Three rounds. The first reader pass found two blocks. The judge acted on
+both, so the page went back. The second found a `should-fix` (the page never
 says where to run the command) and a `nice-to-have`. The judge acted on the
 first and skipped the second, so the writer got only the first. The third
 pass found one `nice-to-have`, and the judge skipped it, so the page stood.

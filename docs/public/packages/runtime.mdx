@@ -113,19 +113,38 @@ for a dependency graph, `sequence` and `parallel` for the two plain cases,
 you can run or nest. The steps are `fnJob` for a function, `agentJob` for a
 prompt to an engine, `commandJob` for a command whose exit code decides:
 
-```ts examples/feature-team.ts (excerpt) {10}
+```ts examples/feature-team.ts (excerpt) {7,10}
 export const featureDelivery = pipeline(
   'feature-delivery',
   [
     { name: 'analyse', job: analyse },
     { name: 'implement', job: implement },
     { name: 'test', job: testStage },
-    { name: 'review', job: review },
+    { name: 'review', job: review, acceptsKickbackTo: ['implement'] },
     { name: 'approve', job: approve },
   ],
   { maxKickbacks: 2 },
 );
 ```
+
+A step that sends work back lists its targets in `acceptsKickbackTo`, and
+each must be a step it depends on. A send-back to a step it does not list
+fails the sender with an error that names both steps. `maxKickbacks` sets
+the limit: a number is the send-backs allowed in the whole graph, and a map
+gives each target its own number of
+[refinements](/concepts/feedback-loops#counting-rounds).
+A target's number can be a [`judge()`](/patterns/judge-stops-the-loop)
+instead. The judge reads the dag's `useCase` (what the work is for) and the
+file the target node names in `file`.
+
+The target's next run reads the send-back as `ctx.lastReview`, once. A
+writing `agentJob` that runs again after a send-back and leaves its node's
+`file` as it was fails: it returned the work unchanged, whatever else it
+wrote. With no `file`, a change to any file in the workspace counts. When a
+graph is a `loop()`'s body, each step's first run in a round reads the
+loop's last review the same way. A step that fails with an error a retry
+cannot fix fails the graph with that error, so a loop around the graph
+stops, as it does around the step alone.
 
 A `fnJob` function returns a full outcome, a one-line summary (a pass) or
 nothing (a pass with the label as its summary); a throw is a fail carrying
@@ -133,7 +152,8 @@ the error. `commandJob` passes on exit 0 and otherwise fails with the
 output as evidence, and `target` names the step that owns the fix.
 `passed(name)` and `failed(name)` are conditions for a node's `when` that
 read a named dependency's outcome, so an exit code chooses the branch; the
-node `failed` reads must be `optional: true`. `isolated(job)` runs a step
+node `failed` reads must be `optional: true`. A node that ran out of
+rounds meets `failed`. `isolated(job)` runs a step
 in its own worktree and branch and lands the change on pass. `jobMeta`,
 `copyJobMeta` and `renderPlan` read a job's declared shape and render it.
 
@@ -357,15 +377,17 @@ variables for a job and every job beneath it.
 | `panel` | A role that is a list of seats. `agree` is how many must accept; the default is all of them. |
 | `input` | A person role. The stage asks the question and waits. |
 | `fn` | A plain function job: regular code, not another agent or command. The same `writes` rule as `run`; a fail with no target of its own goes to `sendsBackTo`. |
-| `writes` | The files this stage writes, relative to the workspace. For an agent stage, a missing or empty one fails the stage by name. |
+| `writes` | The files this stage writes, relative to the workspace. For an agent stage, a missing or empty one fails the stage by name, and only these files count when the stage checks for work left unchanged after feedback. |
 | `desc`, `gate` | What the stage does and what must be true for it to count. Both go into the writing seat's prompt, the plan and the record. |
-| `reviewedBy` | A panel role that reads this stage's work. A rejection runs the stage again with the findings; the same bytes back fails the stage. The stage and its review are one step, so a run that dies mid-review runs the whole step again. |
-| `sendsBackTo` | The earlier stage a rejection or a red run goes to. A stage takes `reviewedBy` or `sendsBackTo`, not both. |
+| `reviewedBy` | A panel or a person role that reads this stage's work. A rejection runs the stage again with the findings; a writer that leaves the work unchanged after feedback fails the stage. A run that dies mid-review runs the round in flight again. The earlier rounds stay used, and the next build reads the findings of the last rejected round. |
+| `agree` | On a stage a panel reviews: how many reviewers must accept; the default is all of them. |
+| `sendsBackTo` | The earlier stage a rejection or a red run goes to. A stage takes `reviewedBy` or `sendsBackTo`, not both. It declares the target when the graph is built, so a send-back to any other stage fails this stage with an error that names both. |
 | `synthesise` | On a stage whose `reviewedBy` or `panel` role has more than one seat: a seat, or `true` for the first reviewer's seat, that merges the findings naming the same problem. Each reviewer then votes once on the merged findings it did not raise, and the votes drop, replace or dispute findings by rule. Off unless set. [Ask a panel](/patterns/review-panel) has the steps. |
-| `refine` | How many rounds this stage gets: a count, default 1, or `judge(seat)`. On a stage that a panel reviews, the count is every round with the reviewer, the first included, so `refine: 1` is one review and no second round. On a stage a person reviews, or that a later stage's `sendsBackTo` names, the count is how many times the work can come back. With `judge()`, a seat such as `jev()` from [`@obversa/engine-jev-api`](/packages/engine-jev-api) decides between a panel's verdict or a send-back and the next round. A person's review is not judged; only `cap` counts there, and with no cap it has no limit. A block finding goes back without the judge. Otherwise the judge decides each finding, `act` or `skip`, with a one-line reason. The builder gets only the findings it acts on, each with the judge's reason; when the judge gives no reason of its own, as with `jev()`, the reason is what the chosen option means. The next round's reviewers are told which findings it skipped and why. When it acts on any finding, another round runs. When it skips every finding, the work stands as a pass, whatever its round answers say. Its `product_decision` asks a person. With your own `questions`, the whole round goes back or stands on the judge's answers to your questions, unless you add `perFinding: true`. With no `cap`, the rounds end when the judge stops them or the review passes, and a block goes back each round until the review passes. `judge(seat, { cap })` adds an optional backstop that takes the place of the count. After the last review the cap allows, the judge is asked once more and told it is the last round: `holds` or `over_polishing` (or skipping every finding) passes, with the open findings on the outcome as `openFindings`; `product_decision` asks a person and records the answer, but no further round runs, so the stage fails; anything else fails with the cap named in the reason. A block in that review fails without the judge. It belongs to the stage that repeats. |
+| `goal` | On a stage a panel reviews: a seat, ideally from another model family than the builder's, that checks the brief was met before the reviews. Each round, it reads the brief, `desc`, `gate` and the work, and marks each requirement met or unmet with evidence. Any unmet requirement sends the round back to the builder with its evidence: the reviewers do not run that round, and a judge does not decide it. Each round adds a `goal:check` event to the record. [Check the brief was met](/patterns/check-the-brief) has the steps. |
+| `refine` | How many [refinements](/concepts/feedback-loops#counting-rounds) this stage gets: rounds of rework after the first build. A count, default 1, or `judge(seat)`. `refine: N` allows N+1 builds in all, so `refine: 0` is one build and no second. This holds on a stage a panel or a person reviews and on a stage a later stage's `sendsBackTo` names. When the refinements run out before the review passes, the run fails with the last review's findings. With `judge()`, a seat such as `jev()` from [`@obversa/engine-jev-api`](/packages/engine-jev-api) decides between a review's verdict, a person's refusal included, or a send-back and the next round. The judge decides each finding, a block included, `act` or `skip`, with a one-line reason; a block's question sets a higher bar to skip it. The builder gets only the findings it acts on, each with the judge's reason; when the judge gives no reason of its own, as with `jev()`, the reason is what the chosen option means. The next round's reviewers are told which findings it skipped and why. When it acts on any finding, another round runs. When it skips every finding, the work stands as a pass, whatever its round answers say. Its `product_decision` asks a person. With your own `questions`, the whole round goes back or stands on the judge's answers to your questions, unless you add `perFinding: true`. With no `cap`, the rounds end when the judge stops them or the review passes. `judge(seat, { cap: N })` adds an optional backstop that takes the place of the count: at most N refinements. The judge reads the review of the last build too, and is told it is the last round: `holds` or `over_polishing` (or skipping every finding) passes, with the open findings on the outcome as `openFindings`; `product_decision` asks a person and records the answer, but no further round runs, so the stage fails; anything else fails with the cap named in the reason. A block in that review goes to the judge too. It belongs to the stage that repeats. |
 | `retrySafe` | `true` when the stage may run again after an interruption without a person reconciling it. |
 | `when` | A condition read before the stage runs: `passed(name)`, `failed(name)`, or a predicate over `ctx`. A stage whose `when` is not met is recorded as skipped and counts as passed. |
-| `optional` | A red run of this stage doesn't fail the workflow. `failed(name)` on a later stage needs the named stage optional. |
+| `optional` | A red run of this stage doesn't fail the workflow. `failed(name)` on a later stage needs the named stage optional, and is met when that stage fails or runs out of rounds. |
 | `needs` | Earlier stage names this stage also depends on, so a condition can read further back. |
 
 ### Workflow keys
@@ -410,7 +432,7 @@ export keeps the exact `Job` type), `defineAgent`, `defineAgentFromMarkdown`,
 `sampled`, `ratchet`, `agentCheck`, `confidenceCondition`, `minConfidence`,
 `confidenceFromText`, `lastDecisionLine`, `lastGateBrief`, `reviewContext`.
 
-**Review.** `reviewPanel`, `tournament`, `kickback`, `revisionRequest`, `judge`, `isJudge`, `stopQuestions`,
+**Review.** `reviewPanel`, `goalCheck`, `tournament`, `kickback`, `revisionRequest`, `judge`, `isJudge`, `stopQuestions`,
 `RECORDED_ENGINE_USAGE`, `RESUME_STAGE_OUTCOMES`.
 
 **Ask a person.** `approval`, `createCallbackGate`, `createCallbackClient`,

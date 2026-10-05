@@ -192,13 +192,33 @@ describe.runIf(process.platform !== 'win32')('Devin process', () => {
     ]);
   });
 
-  it('fails clearly when a refused tool leaves Devin with no answer', async () => {
+  it('answers a read step whose model only reads', async () => {
+    const f = fixture('tool-events');
+    const result = await f.engine.run(f.request, () => {}, signal());
+    expect(flag(f.models()[0]!.args, '--permission-mode')).toBe('auto');
+    expect(finalResultText(result)).toBe('answer');
+  });
+
+  it('says why a read step ends without an answer after Devin refuses a tool', async () => {
     const f = fixture('refused-tool');
     const error = await f.engine.run(f.request, () => {}, signal()).catch((caught: unknown) => caught);
     expect(error).toBeInstanceOf(EngineIncompleteResultError);
-    expect((error as Error).message).toContain('without a final answer under permission mode auto');
+    expect((error as Error).message).toMatch(
+      /^devin refused a tool in read mode, which ends its run without an answer; no file changed: /,
+    );
     expect((error as Error).message).toContain('rejected a tool call that requires confirmation');
     expect((error as EngineIncompleteResultError).evidence.parts).toEqual([]);
+  });
+
+  it.each([
+    ['a read step with no refused tool', 'no-answer', 'read', 'auto'],
+    ['a write step', 'refused-tool', 'write', 'accept-edits'],
+  ] as const)('keeps the general error when %s ends without an answer', async (_case, scenario, mode, permission) => {
+    const f = fixture(scenario);
+    const error = await f.engine.run({ ...f.request, workspaceMode: mode }, () => {}, signal())
+      .catch((caught: unknown) => caught);
+    expect(error).toBeInstanceOf(EngineIncompleteResultError);
+    expect((error as Error).message).toContain(`devin ended without a final answer under permission mode ${permission}`);
   });
 
   it.each([

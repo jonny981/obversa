@@ -121,6 +121,7 @@ describe('a run cleans up the forks it made', () => {
         }),
         review: {
           needs: ['build'],
+          acceptsKickbackTo: ['build'],
           job: fnJob('review', async () => {
             reviews += 1;
             return reviews === 1 ? kickback('build', 'tighten it') : { status: 'pass' };

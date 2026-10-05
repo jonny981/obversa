@@ -127,7 +127,7 @@ describe('OpenCode static admission', () => {
     expect(fixture.calls()).toHaveLength(1);
     expect(fixture.calls()[0]).toMatchObject({
       kind: 'version', executable: fixture.bin, args: ['--version'], stdin: '',
-      config: { tools: { '*': false, read: true, grep: true }, model: input.model },
+      config: { tools: { read: true, grep: true }, model: input.model },
       home: process.env.HOME,
     });
     expect(await fixture.engine.admit(admissionRequest(input), new AbortController().signal, selected))
@@ -505,6 +505,7 @@ function invocationConfig(value: ReturnType<typeof buildOpenCodeInvocation>) {
     default_agent: string;
     tools: Record<string, boolean>;
     permission: Record<string, unknown>;
+    experimental: Record<string, unknown>;
     agent: {
       'obversa-step': {
         prompt: string;
@@ -557,6 +558,10 @@ describe('OpenCode CLI adapter', () => {
         '--variant', 'low', '--dir', input.cwd]);
     expect(buildOpenCodeInvocation({ ...input, effort: 'max' }, { ...options('/bin/echo'), effort: 'low' }, emptyConfig)
       .args).toContain('max');
+    // Each of these makes `opencode run` approve an `ask` permission.
+    for (const flag of ['--auto', '--yolo', '--dangerously-skip-permissions']) {
+      expect(invocation.args).not.toContain(flag);
+    }
     expect(invocation.args).not.toEqual(expect.arrayContaining([
       '--auto',
       '--share',
@@ -591,17 +596,16 @@ describe('OpenCode CLI adapter', () => {
       default_agent: 'obversa-step',
       tools: config.tools,
       permission: config.permission,
+      experimental: { continue_loop_on_deny: true },
       agent: { 'obversa-step': config.agent['obversa-step'] },
     });
-    expect(config.tools).toEqual({ '*': false, read: true, grep: true });
-    expect(Object.keys(config.permission)[0]).toBe('*');
-    expect(config.permission).toEqual({
-      '*': 'deny',
-      read: { '*': 'deny', 'src/**': 'allow' },
+    expect(config.tools).toEqual({ read: true, grep: true });
+    expect(config.permission).toEqual({ '*': 'ask' });
+    expect(config.agent['obversa-step'].permission).toEqual({
+      read: { '*': 'ask', 'src/**': 'allow' },
       grep: 'allow',
     });
     expect(config.agent['obversa-step'].tools).toEqual(config.tools);
-    expect(config.agent['obversa-step'].permission).toEqual(config.permission);
     expect(config.agent['obversa-step'].prompt).toContain('Follow the fixture rules.');
   });
 
@@ -923,8 +927,9 @@ describe('OpenCode CLI adapter', () => {
       options('/bin/echo'),
       emptyConfig,
     ));
-    expect(none.tools).toEqual({ '*': false });
-    expect(none.permission).toEqual({ '*': 'deny' });
+    expect(none.tools).toEqual({});
+    expect(none.permission).toEqual({ '*': 'ask' });
+    expect(none.agent['obversa-step'].permission).toEqual({});
 
     const write = invocationConfig(buildOpenCodeInvocation(
       request({
@@ -942,18 +947,57 @@ describe('OpenCode CLI adapter', () => {
       emptyConfig,
     ));
     expect(write.tools).toEqual({
-      '*': false,
       edit: true,
       bash: true,
       webfetch: true,
       task: true,
     });
-    expect(write.permission).toEqual({
-      '*': 'deny',
-      edit: { '*': 'deny', 'src/**': 'allow' },
-      bash: { '*': 'deny', 'git status': 'allow' },
+    expect(write.permission).toEqual({ '*': 'ask' });
+    expect(write.agent['obversa-step'].permission).toEqual({
+      edit: { '*': 'ask', 'src/**': 'allow' },
+      bash: { '*': 'ask', 'git status': 'allow' },
       webfetch: 'allow',
-      task: { '*': 'deny', worker: 'allow' },
+      task: { '*': 'ask', worker: 'allow' },
+    });
+  });
+
+  // OpenCode's free models refuse a run whose config turns a tool off or
+  // denies a permission. `opencode run` turns down every `ask`, so an
+  // undeclared tool still never runs.
+  it.each([
+    { tools: [], allowedTools: [], workspaceMode: 'none' as const },
+    { tools: ['read', 'grep'], allowedTools: ['Read(src/**)', 'Grep'], workspaceMode: 'read' as const },
+    {
+      tools: ['edit', 'bash', 'task'],
+      allowedTools: ['Edit(src/**)', 'Bash(git status)', 'Task(worker)'],
+      workspaceMode: 'write' as const,
+      leaf: false,
+    },
+  ])('never turns a tool off or denies a permission ($workspaceMode)', (shape) => {
+    const config = invocationConfig(buildOpenCodeInvocation(
+      request(shape),
+      options('/bin/echo'),
+      emptyConfig,
+    ));
+    const encoded = JSON.stringify([config.tools, config.permission, config.agent]);
+    expect(encoded).not.toContain('false');
+    expect(encoded).not.toContain('"deny"');
+    expect(config.experimental).toEqual({ continue_loop_on_deny: true });
+  });
+
+  // OpenCode moves a `*` rule after every named tool in the same block, and
+  // its last matching rule wins, so a `*` beside the step's rules would
+  // override them. It reads the top-level block before the agent's own.
+  it('keeps the catch-all out of the step agent, where it would override the step', () => {
+    const config = invocationConfig(buildOpenCodeInvocation(
+      request({ tools: ['read', 'bash'], allowedTools: ['Read', 'Bash(git status)'], workspaceMode: 'write' }),
+      options('/bin/echo'),
+      emptyConfig,
+    ));
+    expect(config.permission).toEqual({ '*': 'ask' });
+    expect(config.agent['obversa-step'].permission).toEqual({
+      read: 'allow',
+      bash: { '*': 'ask', 'git status': 'allow' },
     });
   });
 
@@ -968,7 +1012,6 @@ describe('OpenCode CLI adapter', () => {
       emptyConfig,
     ));
     expect(none.tools).toEqual({
-      '*': false,
       webfetch: true,
       todowrite: true,
     });
@@ -982,7 +1025,7 @@ describe('OpenCode CLI adapter', () => {
       options('/bin/echo'),
       emptyConfig,
     ));
-    expect(read.tools).toEqual({ '*': false, read: true, webfetch: true });
+    expect(read.tools).toEqual({ read: true, webfetch: true });
   });
 
   it('refuses a read workspace whose only capability is web access', () => {
@@ -1255,6 +1298,21 @@ describe('OpenCode CLI adapter', () => {
       () => {},
       new AbortController().signal,
     )).rejects.toThrow('undeclared tool bash');
+  });
+
+  it('carries on past a call to an undeclared tool that OpenCode turned down', async () => {
+    const events: EngineStreamEvent[] = [];
+    await expect(new OpenCodeCliEngine({
+      ...options(),
+      environment: { OBVERSA_TEST_OPENCODE_SCENARIO: 'undeclared-tool-turned-down' },
+    }).run(
+      request({ tools: ['read'], allowedTools: ['Read(src/**)'] }),
+      (event) => events.push(event),
+      new AbortController().signal,
+    )).resolves.toMatchObject({
+      parts: [{ kind: 'assistant', text: 'answer', final: true }],
+    });
+    expect(events.filter((event) => event.type === 'tool')).toEqual([]);
   });
 
   it('accepts OpenCode write and apply_patch observations as edit capability', async () => {

@@ -211,6 +211,14 @@ function devinCommandError(error: unknown, executable?: string): unknown {
   return error;
 }
 
+/** What Devin prints when its permission mode refuses a tool in print mode. */
+const REFUSED_TOOL_WARNING = 'rejected a tool call that requires confirmation';
+
+function output(sub: { readonly stdout: Uint8Array; readonly stderr: Uint8Array }): string {
+  return [new TextDecoder().decode(sub.stderr), new TextDecoder().decode(sub.stdout)]
+    .filter((text) => text.length > 0).join('\n');
+}
+
 function readExport(path: string): DevinConversation | undefined {
   let text: string;
   try {
@@ -363,8 +371,7 @@ export class DevinCliEngine implements Engine {
       const aborted = sub.aborted || signal.aborted;
       if (aborted && !answered) throw new EngineError({ kind: 'aborted', message: 'devin run aborted' });
       const diagnostic = scrubCapture(
-        [new TextDecoder().decode(sub.stderr), new TextDecoder().decode(sub.stdout)]
-          .filter((text) => text.length > 0).join('\n'),
+        output(sub),
         env,
         DIAGNOSTIC_MAX,
       ).trim();
@@ -402,10 +409,14 @@ export class DevinCliEngine implements Engine {
       for (const text of conversation.messages) onEvent({ type: 'text', delta: text });
       for (const event of conversation.toolEvents) onEvent(event);
       if (!answered) {
-        // A tool the permission mode does not approve is refused, and Devin
-        // can then end with no answer and exit 0.
+        // In print mode, Devin ends the whole run with exit 0 and no answer
+        // when its permission mode refuses a tool, such as a write in a read step.
+        const refusedInRead = permissionMode(req) === 'auto'
+          && output(sub).includes(REFUSED_TOOL_WARNING);
         throw new EngineIncompleteResultError(
-          `devin ended without a final answer under permission mode ${permissionMode(req)}${
+          `${refusedInRead
+            ? 'devin refused a tool in read mode, which ends its run without an answer; no file changed'
+            : `devin ended without a final answer under permission mode ${permissionMode(req)}`}${
             diagnostic ? `: ${diagnostic}` : ''
           }`,
           { parts, usage: conversation.usage, requested, effective },

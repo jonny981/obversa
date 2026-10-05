@@ -145,6 +145,7 @@ describe('public runtime API', () => {
       'formatPreflight',
       'fromFile',
       'gateJob',
+      'goalCheck',
       'humanReview',
       'interruptRunPreflight',
       'isJudge',

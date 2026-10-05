@@ -62,7 +62,7 @@ function createContractPlaybook(judgeSeat: TeamSeat, engines: ContractPlaybookEn
         reviewedBy: 'playbook-check',
         // The judge. After a round the checker did not pass, Jev reads the
         // findings and the rounds so far and says whether another round is
-        // worth it; a finding tagged block goes back without asking. With no
+        // worth it, for a finding tagged block too. With no
         // cap, the rounds end when the judge stops them or the review passes.
         refine: judge(judgeSeat),
       }),
@@ -73,7 +73,7 @@ function createContractPlaybook(judgeSeat: TeamSeat, engines: ContractPlaybookEn
         desc: 'Write the negotiating note: what to hold, what to concede and to what, and what is a walk-away.',
         gate: 'Every redline has a position, and a reviewer from another family has accepted them.',
         reviewedBy: 'playbook-check',
-        // Three attempts: the allowance matches how open-ended the work is.
+        // Three refinements: the allowance matches how open-ended the work is.
         // Deciding what to hold, what to concede and what is a walk-away is
         // the most judgement-heavy step here, and it had none while listing
         // clauses had three.

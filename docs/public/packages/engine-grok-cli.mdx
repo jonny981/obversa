@@ -46,8 +46,15 @@ if the version differs from `version`.
 
 ## Quickstart
 
-Construct the engine with the executable, its version and the identity it
-serves, then run one request:
+`grok(model, { executable })` is the seat helper a `workflow()` role takes,
+as `claude(model)` is for Claude. `grok('grok-4', { executable: '/usr/local/bin/grok' })`
+is a seat on `grok-4` that reads with `read_file`, `grep` and `list_dir`.
+The seat serves the provider `xai` and the model family read from the model
+name, `grok` here.
+
+`new GrokCliEngine(options)` is the same engine without the seat identity.
+Construct it with the executable, its version and the identity it serves,
+then run one request:
 
 ```ts examples/safe-node-attempt.ts (excerpt) {2-5}
   const grok = validateAgentResult(await new GrokCliEngine({
@@ -79,6 +86,15 @@ plugin copies that file into a temporary Grok home folder for each attempt,
 because Grok's sandbox reads no login outside its home folder. Grok then
 reads no settings from your own Grok home folder.
 
+### Tools and permission rules
+
+A step names Grok's own tools, such as `read_file` and `search_replace`, and
+the permission rules that allow them, such as `Read` and `Edit`. A workflow
+role gives the seat's tools as both. A Grok tool named as a rule is read as
+the rule for that tool: `read_file` and `list_dir` as `Read`, `grep` as
+`Grep`, `search_replace` as `Edit`, `run_terminal_command` as `Bash`,
+`web_fetch` as `WebFetch` and `use_tool` as `MCPTool`.
+
 ### `clean`
 
 Grok has no clean mode, so `clean: true` throws an error that says why.
@@ -88,15 +104,24 @@ can't leave your Grok home out and keep your own login.
 Its row in the [engines table](/packages/engines#the-engines): runs on your
 setup, no clean mode, read-only held on your setup.
 
+### Your MCP servers and write steps
+
+Grok starts your own MCP servers in every run, from its own settings and
+from `~/.claude.json`. A step that declares no MCP tool keeps their tools
+from the model. A write step runs in Grok's workspace sandbox, which also
+lets the model change files outside the repository: in Grok's own home
+folder, `~/.grok`, and in temporary folders.
+
 ### The rest
 
 | Field | Type | Default | Description |
 | --- | --- | --- | --- |
-| `executable` | `string` | required | Absolute path to the Grok CLI. |
-| `version` | `string` | required | The version the CLI must report. |
+| `executable` | `string` | required | Absolute path to the Grok CLI. Also a `GrokSeatOptions` field. |
+| `version` | `string` | required | The version the CLI must report. Also a `GrokSeatOptions` field, `1.0.44` by default. |
 | `identity` | `{ provider, modelFamily }` | required | What this instance serves; either may be `null`. |
+| `tools` | `readonly string[]` | `read_file`, `grep`, `list_dir` | `GrokSeatOptions` only: the tools the seat may use. |
 | `permissionMode` | `PermissionMode` | none | The CLI's permission mode. |
-| `effort` | `string` | none | Passed as `--reasoning-effort <level>`. A request's `effort` wins. See [Reasoning effort](/packages/engines#reasoning-effort). |
+| `effort` | `string` | none | Passed as `--reasoning-effort <level>`. A request's `effort` wins. Also a `GrokSeatOptions` field. See [Reasoning effort](/packages/engines#reasoning-effort). |
 | `clean` | `boolean` | [See the default](/packages/engines#the-default) | `true` throws: Grok has no clean mode. [`clean`](#clean). |
 
 ## Errors
@@ -108,8 +133,10 @@ setup, no clean mode, read-only held on your setup.
 
 ## API
 
-- **`GrokCliEngine`**: the engine class. [Quickstart](#quickstart).
-- **`GrokCliEngineOptions`**, **`GrokCliIdentity`**: its types.
+- **`grok(model, options)`**: a `TeamSeat` for a workflow role.
+  [Quickstart](#quickstart).
+- **`GrokCliEngine`**: the engine class. **`GrokCliEngineOptions`**,
+  **`GrokCliIdentity`**, **`GrokSeat`**, **`GrokSeatOptions`**: its types.
 - **`buildGrokArgs`**: the argument builder, exported for tests.
 
 ## Next steps

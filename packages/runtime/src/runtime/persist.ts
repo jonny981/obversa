@@ -36,7 +36,7 @@ export function readResumeRecord(path: string): {
 } {
   const receipts: UsageReceipt[] = [];
   const calls: RestoredEvent[] = [];
-  const interactions = new Map<string, { identity: string; workspace: string; data: JsonObject }>();
+  const interactions = new Map<string, { identity: string; workspace: string; data: JsonObject; progress?: boolean }>();
   const anchors = new Map<string, { identity: string; workspace: string; recordId: string }>();
   const stages = new Map<string, RecordedStage>();
   const usage = new Map<string, RecordedEngineUsage[]>();
@@ -61,7 +61,7 @@ export function readResumeRecord(path: string): {
     if (event.kind === 'interaction:checkpoint') {
       const key = event.path.join('/');
       if (event.data === null) interactions.delete(key);
-      else interactions.set(key, { identity: event.identity, workspace: event.workspace, data: cloneFrozenJson(event.data) });
+      else interactions.set(key, { identity: event.identity, workspace: event.workspace, data: cloneFrozenJson(event.data), ...(event.progress === true ? { progress: true } : {}) });
     } else if (event.kind === 'workflow:start') {
       const key = event.path.join('/');
       const prior = anchors.get(key);

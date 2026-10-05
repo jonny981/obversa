@@ -580,12 +580,17 @@ function permissionRule(
   return Object.freeze({ permission, pattern: match[2] ?? null });
 }
 
+/**
+ * The step's own rules. Every other tool is `ask` (see `configFor`), never
+ * turned off or denied: OpenCode's free models refuse a run whose config
+ * does either.
+ */
 function permissions(request: AgentRequest): PermissionBuild {
   const capabilities = requestedCapabilities(request);
-  const toolValues: Record<string, JsonValue> = { '*': false };
+  const toolValues: Record<string, JsonValue> = {};
   for (const capability of capabilities) toolValues[capability] = true;
 
-  const permissionValues: Record<string, JsonValue> = { '*': 'deny' };
+  const permissionValues: Record<string, JsonValue> = {};
   const seen = new Set<string>();
   for (const raw of request.allowedTools ?? []) {
     if (seen.has(raw)) throw new TypeError('allowedTools must be unique');
@@ -617,7 +622,7 @@ function permissions(request: AgentRequest): PermissionBuild {
       );
     }
     const patterns: Record<string, JsonValue> = current === undefined
-      ? { '*': 'deny' as JsonValue }
+      ? { '*': 'ask' as JsonValue }
       : { ...(current as JsonObject) };
     if (Object.hasOwn(patterns, rule.pattern)) {
       throw new TypeError(`OpenCode permission rule ${raw} is duplicated`);
@@ -669,7 +674,15 @@ function configFor(
     small_model: selectedModel.value,
     default_agent: STEP_AGENT,
     tools: built.tools,
-    permission: built.permission,
+    // OpenCode moves a `*` rule after every tool it knows by name in the same
+    // block and its last matching rule wins, so the catch-all goes here,
+    // which OpenCode reads before the step agent's own rules. `opencode run`
+    // turns down every `ask` unless it is given `--auto`, `--yolo` or
+    // `--dangerously-skip-permissions`, which the plugin never passes.
+    permission: { '*': 'ask' },
+    // A turned-down `ask` would otherwise end the run; the model is told the
+    // call was refused and carries on.
+    experimental: { continue_loop_on_deny: true },
     agent: { [STEP_AGENT]: agent },
   });
 }
@@ -936,12 +949,14 @@ function consumeLine(
       const capability = name === 'write' || name === 'apply_patch'
         ? 'edit'
         : name;
-      if (!capabilities.includes(capability)) {
-        throw new TypeError(`OpenCode emitted undeclared tool ${name}`);
-      }
       const state = object(part.state, 'OpenCode tool state');
       if (state.status !== 'completed' && state.status !== 'error') {
         throw new TypeError('OpenCode tool terminal state must be completed or error');
+      }
+      if (!capabilities.includes(capability)) {
+        // OpenCode turned down the call, so the tool never ran.
+        if (state.status === 'error') return;
+        throw new TypeError(`OpenCode emitted undeclared tool ${name}`);
       }
       // One already-parsed frame carries both phases, so the same input is
       // available for each; nothing here waits for a later message to learn it.

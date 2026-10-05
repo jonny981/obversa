@@ -162,8 +162,8 @@ Reply with JSON: status "pass" when the module shape is correct, or status "revi
       { name: 'analyse', job: analyse },
       { name: 'implement', job: implement },
       { name: 'test', job: test },
-      { name: 'review', job: review },
-      { name: 'approve', job: approve },
+      { name: 'review', job: review, acceptsKickbackTo: ['implement'] },
+      { name: 'approve', job: approve, acceptsKickbackTo: ['implement'] },
     ],
     { maxKickbacks: 2 },
   );

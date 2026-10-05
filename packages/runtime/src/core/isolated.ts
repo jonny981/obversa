@@ -33,6 +33,7 @@ import { childContext } from './context.js';
 import { LoopError } from './errors.js';
 import {
   addWorktree,
+  branchExists,
   removeWorktree,
   deleteBranch,
   mergeBranch,
@@ -119,7 +120,13 @@ export function isolated(job: Job, opts: IsolatedOptions = {}): Job {
       return job(parent);
     }
 
-    const branch = `lines/${slug(label)}-${(forkSeq += 1)}`;
+    // An interrupted earlier run leaves its fork branch behind for recovery,
+    // and a new run counts forks from zero again, so skip any name that is
+    // already taken.
+    let branch = `lines/${slug(label)}-${(forkSeq += 1)}`;
+    while (await branchExists(base.dir, branch, { signal: parent.signal })) {
+      branch = `lines/${slug(label)}-${(forkSeq += 1)}`;
+    }
     const wt = await addWorktree(base.dir, {
       branch,
       base: 'HEAD',

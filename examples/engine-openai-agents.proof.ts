@@ -51,9 +51,17 @@ try {
     { save: { path: 'docs/getting-started.md', text: draft2 } },
     { text: reply('Changed the two sentences the findings named.') },
   ], null, 2)}\n`);
-  // The judge is asked only when a round has no block: here, round 2, where
-  // the one finding left is taste and the judge chooses `holds`.
+  // The judge is asked every round. Round 1: it acts on both blocks. Round 2:
+  // the one finding left is taste, and the judge chooses `holds`.
   await writeFile(join(workspace, 'judge.json'), `${JSON.stringify([
+    {
+      holds: { type: 'noul', noul: 0.1 },
+      worth_doing: { type: 'noul', noul: 0.9 },
+      worth_another_round: { type: 'noul', noul: 0.9 },
+      stop_reason: { type: 'choice', choice: 'continue', confidence: 0.8 },
+      'finding-1': { type: 'choice', choice: 'act', confidence: 0.9 },
+      'finding-2': { type: 'choice', choice: 'act', confidence: 0.9 },
+    },
     {
       holds: { type: 'noul', noul: 0.9 },
       worth_doing: { type: 'noul', noul: 0.2 },
@@ -135,7 +143,7 @@ try {
     readonly model?: string;
     readonly usage?: unknown;
     readonly answers?: { readonly stop_reason?: { readonly choice?: string } };
-    readonly outcome?: { status: string; summary?: string };
+    readonly outcome?: { status: string; summary?: string; revision?: { findings?: readonly { severity?: string }[] } };
   }
   const record = (await readFile(join(workspace, 'records/openai-agents-writer.jsonl'), 'utf8'))
     .trim().split('\n').map((line) => JSON.parse(line) as RecordedEvent);
@@ -149,9 +157,9 @@ try {
   );
   const kickbacks = record.filter((event) => event.kind === 'loop:review' && event.accepted === true);
   assert.equal(kickbacks.length, 1, 'the one round with blocks goes back once');
-  assert.match(kickbacks[0]!.outcome!.summary ?? '', /\[block\]/, 'the round that went back carried block findings');
+  assert.deepEqual(kickbacks[0]!.outcome!.revision?.findings?.map((finding) => finding.severity), ['block', 'block'], 'the round that went back carried the two block findings');
   const judged = record.filter((event) => event.kind === 'refine:judge');
-  assert.deepEqual(judged.map((event) => event.answers?.stop_reason?.choice), ['holds'], 'the judge is asked once, on the round with no block, and chooses holds');
+  assert.deepEqual(judged.map((event) => event.answers?.stop_reason?.choice), ['continue', 'holds'], 'the judge is asked on both rounds: it acts on the blocks, then chooses holds');
 
   assert.equal(await readFile(join(workspace, 'docs/getting-started.md'), 'utf8'), draft2, 'the page is the one the agent saved with its own tool');
 

@@ -24,13 +24,41 @@ the count against the limit, so you can read why a run stopped.
   command, or a person. Each returns a pass or a fail with findings.
 - **The target.** The step that owns the fix. A fail carries the findings
   to it, and it runs again with them, not from the start of the run.
-- **The stopping rule.** A count of how many times a target may run
-  again, or a judge that reads the findings and the rounds so far and says
-  whether another round is worth it. A judge needs no count: the run ends
-  when it stops the rounds or the review passes. When a count runs out, the
-  run stops with the last findings instead of looping. A judge can take an
-  optional cap as a backstop; after the last review the cap allows, the
-  judge's answer decides how the run ends.
+- **The stopping rule.** A number of
+  [refinements](#counting-rounds), or a judge that reads the findings and
+  the rounds so far and says whether another round is worth it. A judge
+  needs no number: the run ends when it stops the rounds or the review
+  passes. When the refinements run out, the run fails with the last
+  findings instead of looping. A judge can take an optional cap as a
+  backstop; the judge's answer about the last round the cap allows decides
+  how the run ends.
+
+## Counting rounds
+
+A round is one build and the check of it. The first build is round 1.
+
+- **`refine: N` allows N refinements.** A refinement is one more build
+  after the first, with the findings. So `refine: N` allows N+1 builds in
+  all, and `refine: 0` allows one build and no second. The default is 1.
+- **The same number means the same in every form.** `refine: N` on a
+  stage a panel or a person reviews, `refine: N` on a stage another stage
+  sends work back to, `maxKickbacks: { target: N }` in a `dag()`, and a
+  judge's `cap: N` each allow N refinements.
+- **A reviewed stage that is also sent work back to has one count.** Its
+  own reviews and the send-backs from later stages share its refinements
+  and its judge's rounds in one run. With `refine: 1`, a review that
+  rejects the first build uses the one refinement, so a later send-back
+  fails the run.
+- **A judge with no cap sets no limit.** The judge or a passing review ends
+  the rounds.
+- **A judge with a cap reads the last round too.** With `cap: N`, the judge
+  is asked about the review of build N+1. Only an answer that lets the work
+  stand passes; any other answer fails the step.
+- **An unmet requirement from a goal check counts as a round.** It goes
+  back to the builder without the reviews or the judge.
+- **A `loop()` counts its body runs.** Its `max` is the total number of
+  runs, the first included, so `max: N + 1` allows the same rounds as
+  `refine: N`.
 
 ## Shapes
 
@@ -61,11 +89,12 @@ the count against the limit, so you can read why a run stopped.
   reviewer found and how the rounds have gone, and decides each finding:
   act on it or skip it. The builder gets only the findings it acts on, each
   with the judge's reason. When the judge gives no reason of its own, as
-  with `jev()`, the reason is what the option it chose means. The review
-  that sent the work back is told what the judge skipped and why: an agent
-  reviewer reads the list in its prompt, and your own review code reads it
-  as `ctx.skippedFindings`. When the judge skips every finding, the work
-  stands. A block finding always goes back without the judge.
+  with `jev()`, the reason is what the option it chose means. Every review
+  that can send work back to that step is told what the judge skipped and
+  why: an agent reviewer reads the list in its prompt, and your own review
+  code reads it as `ctx.skippedFindings`. When the judge skips every finding, the work
+  stands. The judge decides a block finding too. A block goes back without
+  a judge only when there is no judge.
   [A judge stops the loop](/patterns/judge-stops-the-loop).
 - **A draft refined over rounds.** Translate, reflect, revise, then a person
   reads the result. That page calls it a refinement loop.
@@ -102,17 +131,21 @@ Two of the three reviewers fail the first attempt, so their findings go to
 
 - **A panel needs a target.** Without one, a failing panel fails the run
   instead of running a step again.
+- **A step declares where it sends work back.** In a `dag()` or a
+  `pipeline()`, the step that sends work back lists its targets in
+  `acceptsKickbackTo`, and each must be a step it depends on. A send-back
+  to a step it does not list fails the sender with an error that names
+  both. In `workflow()`, a stage's `sendsBackTo` declares it.
 - **`maxKickbacks` sets the limit.** Without it, a graph or pipeline never
   runs a step again on a fail. `workflow()` sets it for you from each
   target's `refine`, which defaults to 1; a target with
   `refine: judge(seat)` asks the judge before each round and sends back
   only the findings it acts on. With no cap, its rounds end when the judge
-  stops them or the review passes. With `judge(seat, { cap })`, the judge
-  is asked once more after the last review the cap allows, and its answer
-  decides how the run ends. A number is one budget for the
-  whole graph. A map, `{ plan: 3, 'tests-first': 3 }`, gives each target
-  its own, so a review that spends its budget on one step can't starve
-  another. A target the map doesn't name gets none.
+  stops them or the review passes. A number is one budget for the whole
+  graph: N send-backs in all, to any target. A map,
+  `{ plan: 3, 'tests-first': 3 }`, gives each target its own N
+  [refinements](#counting-rounds), so a review that spends its budget on
+  one step can't starve another. A target the map doesn't name gets none.
 - **Every round is recorded.** Each request to run again is in the record
   with its count, and with its limit when the budget has one.
 

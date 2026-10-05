@@ -363,15 +363,15 @@ describe('formatEvent renders every event kind as a line a person can read', () 
     })).toBe('⏸ paused (QUOTA): out of budget');
   });
 
-  it('refine:judge says the route, the rule and the status a stop gives the node', () => {
+  it('refine:judge says the target, the round, the route, the rule and the status a stop gives the node', () => {
     expect(formatEvent({
-      kind: 'refine:judge', ts: 1, path: ['write'], answers: {},
+      kind: 'refine:judge', ts: 1, path: ['write'], target: 'write', round: 1, answers: {},
       reason: 'the judge chose continue', route: 'again', rule: 'stop_reason: continue',
-    })).toBe('write ◆ again on stop_reason: continue: the judge chose continue');
+    })).toBe('write ◆ write round 1: again on stop_reason: continue: the judge chose continue');
     expect(formatEvent({
-      kind: 'refine:judge', ts: 1, path: ['write'], answers: {},
+      kind: 'refine:judge', ts: 1, path: ['write'], target: 'write', round: 2, answers: {},
       reason: 'the judge says another round is not worth it (0.30)', route: 'stop', rule: 'worth_another_round: 0.30', status: 'fail',
-    })).toBe('write ◆ stop as fail on worth_another_round: 0.30: the judge says another round is not worth it (0.30)');
+    })).toBe('write ◆ write round 2: stop as fail on worth_another_round: 0.30: the judge says another round is not worth it (0.30)');
   });
 
   it('dag:start, dag:node, dag:end, monitor', () => {

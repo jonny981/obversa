@@ -9,9 +9,8 @@ interface AgentDecision {
 
 export const INVALID_TEAM_DECISION = 'The engine response was not a valid team decision JSON object.';
 
-function firstObject(text: string): string | undefined {
-  const start = text.indexOf('{');
-  if (start === -1) return undefined;
+/** The balanced `{...}` that opens at `start`, or undefined when it never closes. */
+export function objectAt(text: string, start: number): string | undefined {
   let depth = 0;
   let inString = false;
   let escaped = false;
@@ -30,25 +29,38 @@ function firstObject(text: string): string | undefined {
   return undefined;
 }
 
+/**
+ * A reply can show code, a JSON example or a braced aside before its answer,
+ * and the prompt asks for the answer at the end. So the decision is the last
+ * object in the reply with a `status` of pass or revise and a non-empty
+ * `summary`. An object inside another object that parses is part of that
+ * object, never a decision of its own.
+ */
 function parseDecision(text: string): AgentDecision | undefined {
-  const trimmed = text.trim();
-  const object = firstObject(trimmed);
-  if (!object) return undefined;
-  try {
-    const value: unknown = JSON.parse(object);
-    if (typeof value !== 'object' || value === null || Array.isArray(value)) return undefined;
+  let last: Partial<AgentDecision> | undefined;
+  for (let start = text.indexOf('{'); start !== -1; start = text.indexOf('{', start + 1)) {
+    const object = objectAt(text, start);
+    if (!object) continue;
+    let value: unknown;
+    try {
+      value = JSON.parse(object);
+    } catch {
+      continue;
+    }
+    start += object.length - 1;
+    if (typeof value !== 'object' || value === null || Array.isArray(value)) continue;
     const candidate = value as Partial<AgentDecision>;
-    if (candidate.status !== 'pass' && candidate.status !== 'revise') return undefined;
-    if (typeof candidate.summary !== 'string' || !candidate.summary.trim()) return undefined;
-    if (candidate.findings !== undefined && !Array.isArray(candidate.findings)) return undefined;
-    return {
-      status: candidate.status,
-      summary: candidate.summary,
-      findings: candidate.findings ? [...candidate.findings] : undefined,
-    };
-  } catch {
-    return undefined;
+    if (candidate.status !== 'pass' && candidate.status !== 'revise') continue;
+    if (typeof candidate.summary !== 'string' || !candidate.summary.trim()) continue;
+    last = candidate;
   }
+  if (!last) return undefined;
+  if (last.findings !== undefined && !Array.isArray(last.findings)) return undefined;
+  return {
+    status: last.status!,
+    summary: last.summary!,
+    findings: last.findings ? [...last.findings] : undefined,
+  };
 }
 
 export function outcomeFromAgentText(text: string, target?: string): Outcome {

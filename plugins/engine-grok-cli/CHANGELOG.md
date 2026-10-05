@@ -1,5 +1,22 @@
 # @obversa/engine-grok-cli
 
+## 0.1.7
+
+### Patch Changes
+
+- 61323ee: A Grok step answers when one of your own MCP servers connects before Grok starts its reply. Grok lists that server's tools in its start message even though the plugin keeps them from the model. The engine leaves a listed server's tools out of its tool check, so such a run answers instead of failing with `Grok returned an invalid JSON stream`. Write steps hit this most often.
+- Updated dependencies [3cd2d5c]
+  - @obversa/core@0.2.10
+  - @obversa/api@0.2.10
+
+## 0.1.6
+
+### Patch Changes
+
+- da3fb0f: `grok(model, { executable })` makes a Grok seat for a workflow role in one line, as `claude(model)` does for Claude. It returns the engine and its identity, reads with `read_file`, `grep` and `list_dir` unless you pass `tools`, and takes `version` and `effort`. A Grok tool named as a permission rule is read as the rule for that tool, such as `read_file` as `Read`, so a seat's tools work as its rules in a workflow.
+  - @obversa/api@0.2.7
+  - @obversa/core@0.2.7
+
 ## 0.1.5
 
 ### Patch Changes

@@ -12,6 +12,7 @@ passage or a code change.
 | When you want to... | Read |
 | --- | --- |
 | Give a writer useful notes from another model | [Get a Second Opinion](/patterns/writer-and-reviewer) |
+| Make sure every requirement in the brief is done before the reviews | [Check the Brief Was Met](/patterns/check-the-brief) |
 | Decide whether another review round is worth it | [Know When to Stop](/patterns/judge-stops-the-loop) |
 | Hear from several reviewers before accepting work | [Ask a Panel](/patterns/review-panel) |
 | Try several approaches and keep the best-scoring pass | [Compare Different Approaches](/patterns/tournament) |
@@ -27,18 +28,18 @@ The [feature team](/workflows/feature-team) gives Jev the decision about
 another revision. `judge()` from `@obversa/runtime` sets the stopping rule:
 
 ```ts examples/teams/feature-delivery.ts (excerpt)
-  maxKickbacks: { implement: judge(judgeSeat) },
+      maxKickbacks: { build: judge(judgeSeat) },
 ```
 
-Blocking findings go back without asking the judge. The judge weighs the
-other findings against the work and its revision history, and the run ends
-when it stops the rounds or the review passes. [Know when to stop](/patterns/judge-stops-the-loop)
+The judge weighs every finding, a blocking one included, against the work
+and its revision history, and the run ends when it stops the rounds or the
+review passes. [Know when to stop](/patterns/judge-stops-the-loop)
 shows the questions and a complete writing example.
 
 The [literature watch](/workflows/research/literature-watch) combines
 summaries, a person's selection and a question answered from the kept
-notes. [Feature delivery](/workflows/feature-team) combines triage,
-competing attempts, review and approval. Start with the patterns that fit
+notes. [Feature delivery](/workflows/feature-team) combines tests, a goal
+check, a review battery, a judge and approval. Start with the patterns that fit
 your work and combine them around the result you need.
 
 ## Next steps

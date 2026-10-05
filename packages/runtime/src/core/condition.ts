@@ -981,16 +981,17 @@ export function passed(name: string): Condition {
 
 /**
  * Met when the named dependency ran and failed: the other branch of `passed`.
- * A dependency that never got to decide (blocked by a failure upstream, or
- * aborted) meets neither, so a branch runs only on a decision. The deciding
- * node must be `optional: true`: a required node's failure blocks its
- * dependents before any `when` runs, so a branch on `failed` would never be
- * reached. `dag` refuses the graph at build time when it is not.
+ * A dependency that ran out of rounds or stalled (`exhausted`) never passed,
+ * so it counts as failed. A dependency that never got to decide (blocked by a
+ * failure upstream, or aborted) meets neither, so a branch runs only on a
+ * decision. The deciding node must be `optional: true`: a required node's
+ * failure blocks its dependents before any `when` runs, so a branch on
+ * `failed` would never be reached. `dag` refuses the graph at build time when it is not.
  */
 export function failed(name: string): Condition {
   const cond: Condition = async (ctx) => {
     const outcome = needOutcome(ctx, name, 'failed');
-    const met = outcome.status === 'fail';
+    const met = outcome.status === 'fail' || outcome.status === 'exhausted';
     return { met, reason: `${name} ${outcome.status}` };
   };
   setMeta(cond, { kind: 'condition', name: 'failed', need: name });

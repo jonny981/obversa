@@ -57,7 +57,7 @@ function createTranslateReflect(judgeSeat: TeamSeat, engines: TranslateEngines =
         reviewedBy: 'reflect',
         // The judge. After a round the reflection did not pass, Jev reads the
         // findings and the rounds so far and says whether another round is
-        // worth it; a finding tagged block goes back without asking. With no
+        // worth it, for a finding tagged block too. With no
         // cap, the rounds end when the judge stops them or the review passes.
         refine: judge(judgeSeat),
       }),

@@ -56,7 +56,7 @@ function createBacklogGroom(judgeSeat: TeamSeat, engines: BacklogGroomEngines = 
         reviewedBy: 'story-review',
         // The judge. After a round the reviewer did not pass, Jev reads the
         // findings and the rounds so far and says whether another round is
-        // worth it; a finding tagged block goes back without asking. With no
+        // worth it, for a finding tagged block too. With no
         // cap, the rounds end when the judge stops them or the review passes.
         refine: judge(judgeSeat),
       }),
@@ -67,7 +67,7 @@ function createBacklogGroom(judgeSeat: TeamSeat, engines: BacklogGroomEngines = 
         desc: 'For each story, list the questions that must be answered before anyone writes code, with a proposed answer for each.',
         gate: 'Every story has its questions, or the line "no open questions", and a reviewer has accepted them.',
         reviewedBy: 'story-review',
-        // Three attempts, not two: the allowance matches how open-ended the
+        // Three refinements, not two: the allowance matches how open-ended the
         // work is. Grooming a backlog has many defensible answers, so a strict
         // reviewer and a writer need room to meet. Work with one right answer
         // needs less.

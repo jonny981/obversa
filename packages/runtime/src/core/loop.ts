@@ -9,6 +9,7 @@
  *        if `until` is met and there's a `review`, run it:
  *          review `pass`  => loop completes `pass`
  *          review !pass   => re-enter the loop  ← "review fails, run main loop again"
+ *          review !pass on the last round `max` allows => `fail`
  *      with no `until`, a `pass` body ends the loop; `max` reached => `exhausted`.
  *   3. `onComplete` post-action runs once, whatever the status.
  *
@@ -35,6 +36,7 @@ import { setMeta, jobMeta, describeConditions } from './describe.js';
 import { LoopError, type LoopPhase } from './errors.js';
 import { isLimitError, waitMsFor } from './limits.js';
 import { ProgressTracker, resolveNoProgress } from './progress.js';
+import { roundRule } from './rounds.js';
 import { workspaceFingerprint } from './git.js';
 import { checkpointInteraction, interactionDeclaration, interactionIdentity, jsonSnapshot, outcomeSnapshot, savedInteraction } from './interaction.js';
 import type { ProgressSample } from './progress.js';
@@ -74,6 +76,17 @@ function decideLimit(error: LoopError, ctx: JobContext): LimitAction {
   };
 }
 const yieldToLoop = (): Promise<void> => new Promise((r) => setImmediate(r));
+
+/**
+ * The last rejected review's revision, kept on the outcome of a loop that
+ * ran out so it says what was still wrong. Its target is dropped: a loop that ran out sends
+ * nothing back.
+ */
+function lastFindings(review: Outcome | undefined): Pick<Outcome, 'revision'> {
+  if (!review?.revision) return {};
+  const { target: _target, rerun: _rerun, ...revision } = review.revision;
+  return { revision };
+}
 
 export function loop(config: LoopConfig): Job {
   if (!config.name)
@@ -196,6 +209,8 @@ export function loop(config: LoopConfig): Job {
       let last = saved?.last as unknown as Outcome | undefined;
       let consecutiveErrors = Number(saved?.consecutiveErrors ?? 0);
       let consecutiveReviewFails = Number(saved?.consecutiveReviewFails ?? 0);
+      // The last review this loop rejected, for an exhausted outcome's findings.
+      let rejectedReview: Outcome | undefined;
       // Per-invocation, so a re-run of the same Job (a kickback, a nested loop's
       // second pass) starts with a clean novelty set.
       const tracker = noProgress
@@ -312,7 +327,9 @@ export function loop(config: LoopConfig): Job {
         const restartsExhausted =
           config.maxReviewRestarts != null &&
           consecutiveReviewFails + 1 >= config.maxReviewRestarts;
-        const iterationsRemain = config.max == null || at < config.max;
+        // `max` counts every body run, so it allows `max - 1` refinements
+        // after the first.
+        const iterationsRemain = roundRule(at, config.max == null ? undefined : config.max - 1).another;
         const willReenter =
           !reviewPassed && !restartsExhausted && iterationsRemain;
         parent.emit({
@@ -350,6 +367,7 @@ export function loop(config: LoopConfig): Job {
         // cross-contaminate) and bound the restart cycle.
         consecutiveReviewFails += 1;
         lastReview = reviewOutcome;
+        rejectedReview = reviewOutcome;
         parent.log(
           `review did not pass (${reviewOutcome.summary ?? reviewOutcome.status}); re-entering ${config.name}`,
           'warn',
@@ -365,6 +383,25 @@ export function loop(config: LoopConfig): Job {
                 ? { late: true }
                 : {}),
               data: bodyOutcome?.data,
+              ...lastFindings(reviewOutcome),
+            },
+          };
+        }
+        if (!iterationsRemain) {
+          // The review of the last round `max` allows rejected the work: the
+          // loop fails with its findings, as a graph does when its
+          // send-backs run out.
+          return {
+            conv,
+            turnReview: reviewOutcome,
+            terminal: {
+              status: 'fail',
+              summary: `review rejected round ${at} with no refinements left: ${reviewOutcome.summary ?? 'no reason given'}`,
+              ...(bodyOutcome?.late || reviewOutcome.late
+                ? { late: true }
+                : {}),
+              data: bodyOutcome?.data,
+              ...lastFindings(reviewOutcome),
             },
           };
         }
@@ -399,6 +436,7 @@ export function loop(config: LoopConfig): Job {
               confidence: last?.confidence,
               ...(last?.late ? { late: true } : {}),
               data: last?.data,
+              ...lastFindings(rejectedReview),
             },
             iteration,
           );
@@ -649,6 +687,7 @@ export function loop(config: LoopConfig): Job {
                 ...(last.late ? { late: true } : {}),
                 data: last.data,
                 stall: report,
+                ...lastFindings(rejectedReview),
               },
               iteration,
             );

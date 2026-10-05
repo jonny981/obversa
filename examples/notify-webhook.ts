@@ -49,7 +49,7 @@ const brief = dag({
   maxKickbacks: 1,
   nodes: {
     draft: { desc: 'Write the brief.', gate: 'A draft exists.', job: draft },
-    review: { needs: 'draft', desc: 'Check every claim carries a figure.', gate: 'The review returned a verdict.', job: review },
+    review: { needs: 'draft', acceptsKickbackTo: ['draft'], desc: 'Check every claim carries a figure.', gate: 'The review returned a verdict.', job: review },
   },
 });
 

@@ -1,5 +1,36 @@
 # @obversa/core
 
+## 0.2.11
+
+### Patch Changes
+
+- @obversa/api@0.2.11
+
+## 0.2.10
+
+### Patch Changes
+
+- 3cd2d5c: On Linux, finding the processes a command started survives one of them exiting during the scan: a process that is gone by the time its environment is read is skipped, as one whose folder has already disappeared is.
+  - @obversa/api@0.2.10
+
+## 0.2.9
+
+### Patch Changes
+
+- @obversa/api@0.2.9
+
+## 0.2.8
+
+### Patch Changes
+
+- @obversa/api@0.2.8
+
+## 0.2.7
+
+### Patch Changes
+
+- @obversa/api@0.2.7
+
 ## 0.2.6
 
 ### Patch Changes

@@ -1,3 +1,4 @@
+import { writeFileSync } from 'node:fs';
 import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -5,8 +6,8 @@ import { join } from 'node:path';
 import { execa } from 'execa';
 import { afterAll, afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-import { createCallbackClient, dag, fnJob, judge, kickback, loop, predicate, run, stage, workflow } from '../src/api.ts';
-import type { CallbackRequest, DagNode, Job, LoopEvent, RunCallbacks, RunOptions, RunResult } from '../src/api.ts';
+import { createCallbackClient, dag, fnJob, judge, kickback, loop, predicate, revisionRequest, run, stage, workflow } from '../src/api.ts';
+import type { AgentRequest, CallbackRequest, DagNode, Job, LoopEvent, RunCallbacks, RunOptions, RunResult } from '../src/api.ts';
 import { MockEngine } from '../src/testing.ts';
 import { tmpRepo, cleanupRepos } from './git-helpers.ts';
 
@@ -203,6 +204,7 @@ describe('dag resume', () => {
             return { status: 'pass', summary: 'done' };
           }),
           needs: 'two',
+          acceptsKickbackTo: ['two'],
         },
       },
     });
@@ -394,6 +396,473 @@ describe('dag resume', () => {
     // The first pass reuses the record; the second pass does new work.
     expect((await result(build(), { recordTo: path, resume: true })).outcome.status).toBe('exhausted');
     expect(counts).toEqual({ one: 3, two: 3, three: 3 });
+  });
+
+  it('keeps the refinements spent and the judge history when the worker dies after a send-back', async () => {
+    let builds = 0;
+    const judgeRounds: { round: number; rounds: unknown[] }[] = [];
+    const build = () => dag({
+      name: 'rounds',
+      maxKickbacks: {
+        write: judge({
+          engine: new MockEngine((request) => {
+            const { state } = JSON.parse(request.prompt) as { state: { round: number; rounds: unknown[] } };
+            judgeRounds.push({ round: state.round, rounds: state.rounds });
+            return JSON.stringify({ stop_reason: { choice: 'continue' } });
+          }),
+          identity: { adapter: 'mock', provider: 'mock', modelFamily: 'judge', model: 'judge', tools: [] },
+        }, { cap: 1 }),
+      },
+      nodes: {
+        write: { job: fnJob('write', () => { builds += 1; }) },
+        review: {
+          needs: 'write', acceptsKickbackTo: ['write'], retrySafe: true,
+          job: fnJob('review', () => revisionRequest({ target: 'write', reason: 'not yet', findings: [{ evidence: 'x', severity: 'should-fix' }] })),
+        },
+      },
+    });
+    const path = recordTo();
+    expect((await result(build(), { recordTo: path })).outcome.status).toBe('fail');
+    expect(builds).toBe(2);
+    expect(judgeRounds.map((r) => r.round)).toEqual([1, 2]);
+
+    // The worker dies during the review of the second build.
+    const lines = (await readFile(path, 'utf8')).trim().split('\n');
+    const cut = lines.findIndex((line) => {
+      const event = JSON.parse(line) as LoopEvent;
+      return event.kind === 'dag:node' && event.node === 'review' && event.phase === 'start' && event.attempt === 2;
+    });
+    expect(cut).toBeGreaterThanOrEqual(0);
+    await writeFile(path, `${lines.slice(0, cut + 1).join('\n')}\n`);
+
+    // The resume keeps the second build, reviews it again, and the judge sees
+    // the second round with the first in its history: no third build.
+    judgeRounds.length = 0;
+    const resumed = await result(build(), { recordTo: path, resume: true });
+    expect(resumed.outcome.status).toBe('fail');
+    expect(builds).toBe(2);
+    expect(judgeRounds).toEqual([{ round: 2, rounds: [expect.objectContaining({ round: 1 })] }]);
+  });
+
+  it('consults the judge of every target again when a failed review runs again on a resume', async () => {
+    let choice = 'not_converging';
+    const consulted: string[] = [];
+    const judgeFor = (target: string) => judge({
+      engine: new MockEngine(() => {
+        consulted.push(target);
+        return JSON.stringify({ stop_reason: { choice } });
+      }),
+      identity: { adapter: 'mock', provider: 'mock', modelFamily: 'judge', model: 'judge', tools: [] },
+    }, { cap: 2 });
+    const reviewOf = (target: string): DagNode => ({
+      needs: target, acceptsKickbackTo: [target], retrySafe: true,
+      job: fnJob(`review-${target}`, () => revisionRequest({ target, reason: 'not yet', findings: [{ evidence: 'x', severity: 'should-fix' }] })),
+    });
+    const build = () => dag({
+      name: 'rounds',
+      stopOnError: false,
+      maxKickbacks: { a: judgeFor('a'), b: judgeFor('b') },
+      nodes: {
+        a: { job: fnJob('a', () => undefined) },
+        b: { job: fnJob('b', () => undefined) },
+        'review-a': reviewOf('a'),
+        'review-b': reviewOf('b'),
+      },
+    });
+    const path = recordTo();
+    expect((await result(build(), { recordTo: path })).outcome.status).toBe('fail');
+    expect(consulted.sort()).toEqual(['a', 'b']);
+
+    // Both reviews failed, so both run again on the resume. Each judge is
+    // asked again, and both let the work stand.
+    choice = 'holds';
+    consulted.length = 0;
+    const resumed = await result(build(), { recordTo: path, resume: true });
+    expect(consulted.sort()).toEqual(['a', 'b']);
+    expect(resumed.outcome.status).toBe('pass');
+  });
+
+  it('asks about an interrupted parent step when the graph inside it saved its rounds', async () => {
+    let actions = 0;
+    let builds = 0;
+    const inner = dag({
+      name: 'rounds',
+      maxKickbacks: 1,
+      nodes: {
+        write: { job: fnJob('write', () => { builds += 1; }) },
+        review: {
+          needs: 'write', acceptsKickbackTo: ['write'], retrySafe: true,
+          job: fnJob('review', () => revisionRequest({ target: 'write', reason: 'not yet' })),
+        },
+      },
+    });
+    const build = (retrySafe = false) => dag({
+      name: 'outer',
+      nodes: {
+        parent: {
+          retrySafe,
+          job: async (ctx) => {
+            actions += 1;
+            return inner(ctx);
+          },
+        },
+      },
+    });
+    const path = recordTo();
+    expect((await result(build(), { recordTo: path })).outcome.status).toBe('fail');
+    expect({ actions, builds }).toEqual({ actions: 1, builds: 2 });
+
+    // The worker dies during the review of the second build, after the
+    // graph inside the parent saved its rounds.
+    const lines = (await readFile(path, 'utf8')).trim().split('\n');
+    const cut = lines.findIndex((line) => {
+      const event = JSON.parse(line) as LoopEvent;
+      return event.kind === 'dag:node' && event.node === 'review' && event.phase === 'start' && event.attempt === 2;
+    });
+    expect(cut).toBeGreaterThanOrEqual(0);
+    expect(lines.slice(0, cut).some((line) => (JSON.parse(line) as LoopEvent).kind === 'interaction:checkpoint')).toBe(true);
+    await writeFile(path, `${lines.slice(0, cut + 1).join('\n')}\n`);
+
+    // The parent is not retrySafe: the resume asks before its action runs again.
+    const paused = await result(build(), { recordTo: path, resume: true, callbacks: createCallbackClient() });
+    expect(paused.outcome.status).toBe('paused');
+    expect(paused.outcome.summary).toMatch(/Did stage "parent" finish/);
+    expect({ actions, builds }).toEqual({ actions: 1, builds: 2 });
+
+    // A retrySafe parent runs again, and the graph inside it counts on from
+    // its saved rounds: no third build.
+    const safePath = recordTo('safe.jsonl');
+    await writeFile(safePath, `${lines.slice(0, cut + 1).join('\n')}\n`);
+    expect((await result(build(true), { recordTo: safePath, resume: true })).outcome.status).toBe('fail');
+    expect({ actions, builds }).toEqual({ actions: 2, builds: 2 });
+  });
+
+  it('builds again on a resume when the worker dies between a send-back and the build', async () => {
+    let builds = 0;
+    const feedback: (string | undefined)[] = [];
+    const build = () => dag({
+      name: 'rounds',
+      maxKickbacks: { write: 1 },
+      nodes: {
+        write: { job: fnJob('write', (ctx) => { builds += 1; feedback.push(ctx.lastReview?.summary); }) },
+        review: {
+          needs: 'write', acceptsKickbackTo: ['write'], retrySafe: true,
+          job: fnJob('review', () => kickback('write', 'not yet')),
+        },
+      },
+    });
+    const path = recordTo();
+    expect((await result(build(), { recordTo: path })).outcome.status).toBe('fail');
+    expect(builds).toBe(2);
+
+    // The worker dies after the send-back, before the second build starts.
+    const lines = (await readFile(path, 'utf8')).trim().split('\n');
+    const cut = lines.findIndex((line) => {
+      const event = JSON.parse(line) as LoopEvent;
+      return event.kind === 'dag:node' && event.node === 'write' && event.phase === 'start' && event.attempt === 2;
+    });
+    expect(cut).toBeGreaterThan(0);
+    await writeFile(path, `${lines.slice(0, cut).join('\n')}\n`);
+
+    // The first build's result never stands for the second: the resume
+    // builds again with the send-back, and the refinement stays spent.
+    builds = 0;
+    feedback.length = 0;
+    const resumed = await result(build(), { recordTo: path, resume: true });
+    expect(resumed.outcome.status).toBe('fail');
+    expect(builds).toBe(1);
+    expect(feedback).toEqual([expect.stringContaining('not yet')]);
+  });
+
+  it('runs a failed step again on a resume after a send-back', async () => {
+    const runs = { write: 0, review: 0, check: 0 };
+    let checkFails = true;
+    const build = () => dag({
+      name: 'rounds',
+      maxKickbacks: { write: 1 },
+      nodes: {
+        write: { job: fnJob('write', () => { runs.write += 1; }) },
+        review: {
+          needs: 'write', acceptsKickbackTo: ['write'],
+          job: fnJob('review', () => { runs.review += 1; return runs.review === 1 ? kickback('write', 'not yet') : undefined; }),
+        },
+        check: {
+          needs: 'review',
+          job: fnJob('check', () => { runs.check += 1; return checkFails ? { status: 'fail' as const, summary: 'red' } : undefined; }),
+        },
+      },
+    });
+    const path = recordTo();
+    expect((await result(build(), { recordTo: path })).outcome.status).toBe('fail');
+    expect(runs).toEqual({ write: 2, review: 2, check: 1 });
+
+    // The worker dies once the check's failure is saved, before the graph ended.
+    const lines = (await readFile(path, 'utf8')).trim().split('\n');
+    const failed = lines.findIndex((line) => {
+      const event = JSON.parse(line) as LoopEvent;
+      return event.kind === 'dag:node' && event.node === 'check' && event.outcome?.status === 'fail';
+    });
+    expect(failed).toBeGreaterThan(0);
+    const saved = JSON.parse(lines[failed + 1]!) as LoopEvent;
+    expect(saved.kind === 'interaction:checkpoint' && saved.data !== null).toBe(true);
+    await writeFile(path, `${lines.slice(0, failed + 2).join('\n')}\n`);
+
+    checkFails = false;
+    const resumed = await result(build(), { recordTo: path, resume: true });
+    expect(resumed.outcome.status).toBe('pass');
+    expect(runs).toEqual({ write: 2, review: 2, check: 2 });
+  });
+
+  it('checks a skipped step\'s condition again on a resume after a send-back', async () => {
+    const runs = { write: 0, review: 0, extra: 0, check: 0 };
+    let extraWanted = false;
+    let checkFails = true;
+    const build = () => dag({
+      name: 'rounds',
+      maxKickbacks: { write: 1 },
+      nodes: {
+        write: { job: fnJob('write', () => { runs.write += 1; }) },
+        review: {
+          needs: 'write', acceptsKickbackTo: ['write'],
+          job: fnJob('review', () => { runs.review += 1; return runs.review === 1 ? kickback('write', 'not yet') : undefined; }),
+        },
+        extra: { needs: 'review', when: () => extraWanted, job: fnJob('extra', () => { runs.extra += 1; }) },
+        check: {
+          needs: ['review', 'extra'],
+          job: fnJob('check', () => { runs.check += 1; return checkFails ? { status: 'fail' as const, summary: 'red' } : undefined; }),
+        },
+      },
+    });
+    const path = recordTo();
+    expect((await result(build(), { recordTo: path })).outcome.status).toBe('fail');
+    expect(runs).toEqual({ write: 2, review: 2, extra: 0, check: 1 });
+
+    // The worker dies once the check's failure is saved, after the extra
+    // step was skipped.
+    const lines = (await readFile(path, 'utf8')).trim().split('\n');
+    const failed = lines.findIndex((line) => {
+      const event = JSON.parse(line) as LoopEvent;
+      return event.kind === 'dag:node' && event.node === 'check' && event.outcome?.status === 'fail';
+    });
+    expect(failed).toBeGreaterThan(0);
+    await writeFile(path, `${lines.slice(0, failed + 2).join('\n')}\n`);
+
+    // The resume asks the skipped step's condition again, and runs it.
+    extraWanted = true;
+    checkFails = false;
+    const resumed = await result(build(), { recordTo: path, resume: true });
+    expect(resumed.outcome.status).toBe('pass');
+    expect(runs).toEqual({ write: 2, review: 2, extra: 1, check: 2 });
+  });
+
+  it('saves the rounds when an earlier step\'s data holds a date', async () => {
+    let builds = 0;
+    let reviews = 0;
+    const createdAt = new Date('2026-01-02T03:04:05.000Z');
+    const build = () => dag({
+      name: 'rounds',
+      maxKickbacks: { write: 1 },
+      nodes: {
+        lookup: { job: fnJob('lookup', () => ({ status: 'pass' as const, summary: 'found', data: { createdAt } })) },
+        write: { needs: 'lookup', job: fnJob('write', () => { builds += 1; }) },
+        review: {
+          needs: 'write', acceptsKickbackTo: ['write'],
+          job: fnJob('review', () => { reviews += 1; return reviews === 1 ? kickback('write', 'not yet') : undefined; }),
+        },
+      },
+    });
+    const events: LoopEvent[] = [];
+    const done = await result(build(), { onEvent: (event) => { events.push(event); } });
+    expect(done.outcome.status).toBe('pass');
+    expect(builds).toBe(2);
+
+    // The saved rounds hold the date as the record writes it.
+    const saved = events.find((event) => event.kind === 'interaction:checkpoint' && event.data !== null);
+    expect(saved?.kind === 'interaction:checkpoint' && (saved.data?.results as Record<string, { data?: unknown }>).lookup?.data)
+      .toEqual({ createdAt: createdAt.toISOString() });
+  });
+
+  it('keeps the refinements spent when the run is aborted after a send-back', async () => {
+    let builds = 0;
+    let reviews = 0;
+    const controller = new AbortController();
+    const build = () => dag({
+      name: 'rounds',
+      maxKickbacks: { write: 1 },
+      nodes: {
+        write: { job: fnJob('write', () => { builds += 1; }) },
+        review: {
+          needs: 'write', acceptsKickbackTo: ['write'], retrySafe: true,
+          job: fnJob('review', () => {
+            reviews += 1;
+            if (reviews === 2) {
+              controller.abort();
+              return { status: 'aborted' as const, summary: 'stopped' };
+            }
+            return kickback('write', 'not yet');
+          }),
+        },
+      },
+    });
+    const path = recordTo();
+    const first = await run(build(), { cwd, signal: controller.signal, recordTo: path });
+    expect(first.outcome.status).toBe('aborted');
+    expect(builds).toBe(2);
+
+    // The one refinement is spent: the resumed review's send-back is refused.
+    const resumed = await result(build(), { recordTo: path, resume: true });
+    expect(resumed.outcome.status).toBe('fail');
+    expect(builds).toBe(2);
+    expect(reviews).toBe(3);
+  });
+
+  it('keeps the refinements spent when a run that ran out of rounds is resumed', async () => {
+    let builds = 0;
+    let reviews = 0;
+    const build = () => dag({
+      name: 'rounds',
+      maxKickbacks: { write: 1 },
+      nodes: {
+        write: { job: fnJob('write', () => { builds += 1; }) },
+        review: {
+          needs: 'write', acceptsKickbackTo: ['write'], retrySafe: true,
+          job: fnJob('review', () => { reviews += 1; return kickback('write', 'not yet'); }),
+        },
+      },
+    });
+    const path = recordTo();
+    expect((await result(build(), { recordTo: path })).outcome.status).toBe('fail');
+    expect(builds).toBe(2);
+    expect((await recordEvents(path)).some((event) => event.kind === 'dag:end')).toBe(true);
+
+    // The whole failed record is resumed: the review runs again, and its
+    // send-back is refused, because the one refinement is spent.
+    const resumed = await result(build(), { recordTo: path, resume: true });
+    expect(resumed.outcome.status).toBe('fail');
+    expect(builds).toBe(2);
+    expect(reviews).toBe(3);
+  });
+
+  it('starts the rounds afresh on a later loop pass after a pass that ran out of rounds', async () => {
+    let builds = 0;
+    const build = () => loop({
+      name: 'again',
+      max: 2,
+      until: predicate(() => false, 'never met'),
+      body: dag({
+        name: 'rounds',
+        maxKickbacks: { write: 1 },
+        nodes: {
+          write: { job: fnJob('write', () => { builds += 1; }) },
+          review: {
+            needs: 'write', acceptsKickbackTo: ['write'], retrySafe: true,
+            job: fnJob('review', () => kickback('write', 'not yet')),
+          },
+        },
+      }),
+    });
+    const path = recordTo();
+    await result(build(), { recordTo: path });
+    expect(builds).toBe(4);
+
+    // The first pass counts on from the saved rounds and builds nothing; the
+    // second pass has its own refinement to spend.
+    builds = 0;
+    await result(build(), { recordTo: path, resume: true });
+    expect(builds).toBe(2);
+  });
+
+  it('runs only the last round again when a reviewed stage that ran out of rounds is resumed', async () => {
+    let builds = 0;
+    const writer = new MockEngine((request) => {
+      builds += 1;
+      writeFileSync(join(request.cwd!, 'page.md'), `draft ${builds}`);
+      return JSON.stringify({ status: 'pass', summary: 'wrote it' });
+    });
+    const reviewer = new MockEngine(() => JSON.stringify({
+      status: 'revise', summary: 'not yet', findings: [{ severity: 'should-fix', evidence: 'the page never says who it is for' }],
+    }));
+    const seat = (engine: MockEngine, model: string, tools: readonly string[] = []) =>
+      ({ engine, identity: { adapter: 'mock', provider: 'mock', modelFamily: model, model, tools } });
+    const build = () => workflow('rounds', {
+      brief: 'Write the page.',
+      roles: { writer: seat(writer, 'writer-mock', ['Write']), reviewer: [seat(reviewer, 'reviewer-mock', ['Read'])] },
+      stages: [stage('write', { agent: 'writer', writes: 'page.md', reviewedBy: 'reviewer', retrySafe: true, refine: 1 })],
+    });
+    const path = recordTo();
+    expect((await result(build(), { recordTo: path })).outcome.status).toBe('fail');
+    expect(builds).toBe(2);
+
+    // The failed stage runs again from its last round: one build, its
+    // review refused, and no refinement past the one allowed.
+    const resumed = await result(build(), { recordTo: path, resume: true });
+    expect(resumed.outcome.status).toBe('fail');
+    expect(builds).toBe(3);
+  });
+
+  it('keeps a reviewed stage\'s judge history and skipped findings when the run is aborted between its rounds', async () => {
+    const controller = new AbortController();
+    const writerCalls: AgentRequest[] = [];
+    const reviewCalls: AgentRequest[] = [];
+    const judgeCalls: AgentRequest[] = [];
+    const real = { severity: 'should-fix', evidence: 'REAL: the page never says who it is for' };
+    const tone = { severity: 'nice-to-have', evidence: 'taste: prefer a warmer tone' };
+    const writer = new MockEngine((request) => {
+      writerCalls.push(request);
+      writeFileSync(join(request.cwd!, 'page.md'), `draft ${writerCalls.length}`);
+      // The run is stopped while the second build is under way.
+      if (writerCalls.length === 2) controller.abort();
+      return JSON.stringify({ status: 'pass', summary: 'wrote it' });
+    });
+    const reviewer = new MockEngine((request) => {
+      reviewCalls.push(request);
+      return JSON.stringify(reviewCalls.length === 1
+        ? { status: 'revise', summary: 'two findings', findings: [real, tone] }
+        : { status: 'revise', summary: 'one finding', findings: [{ ...real, evidence: 'REAL: the second section is empty' }] });
+    });
+    // Acts on a finding marked REAL and skips the rest; says continue.
+    const judgeEngine = new MockEngine((request) => {
+      judgeCalls.push(request);
+      const { questions } = JSON.parse(request.prompt) as { questions: Record<string, { instructions: string; criteria: Record<string, string> }> };
+      const answers: Record<string, unknown> = { stop_reason: { choice: 'continue' } };
+      for (const [key, question] of Object.entries(questions)) {
+        if (!('act' in question.criteria)) continue;
+        answers[key] = question.instructions.includes('REAL')
+          ? { choice: 'act', reason: 'a reader cannot tell who the page is for' }
+          : { choice: 'skip', reason: 'a matter of taste' };
+      }
+      return JSON.stringify(answers);
+    });
+    const seat = (engine: MockEngine, model: string, tools: readonly string[] = []) =>
+      ({ engine, identity: { adapter: 'mock', provider: 'mock', modelFamily: model, model, tools } });
+    const build = () => workflow('rounds', {
+      brief: 'Use case: a reader gets a clear, short page.\n\nWrite the page.',
+      roles: { writer: seat(writer, 'writer-mock', ['Write']), reviewer: [seat(reviewer, 'reviewer-mock', ['Read'])] },
+      stages: [stage('write', {
+        agent: 'writer', writes: 'page.md', reviewedBy: 'reviewer', retrySafe: true,
+        refine: judge(seat(judgeEngine, 'judge-mock'), { cap: 3 }),
+      })],
+    });
+    const path = recordTo();
+    const first = await run(build(), { cwd, signal: controller.signal, recordTo: path });
+    expect(first.outcome.status).toBe('aborted');
+    expect(judgeCalls).toHaveLength(1);
+
+    // The resume builds the second round again with the judge's send-back.
+    // Its reviewer hears what the judge skipped, and the judge reads round
+    // two with round one in its history.
+    writerCalls.length = 0;
+    reviewCalls.length = 0;
+    judgeCalls.length = 0;
+    await result(build(), { recordTo: path, resume: true });
+    expect(writerCalls[0]!.prompt).toContain(real.evidence);
+    expect(writerCalls[0]!.prompt).not.toContain(tone.evidence);
+    expect(reviewCalls[0]!.prompt).toContain(tone.evidence);
+    expect(reviewCalls[0]!.prompt).toContain('a matter of taste');
+    const { state } = JSON.parse(judgeCalls[0]!.prompt) as { state: { round: number; rounds: { round: number }[]; skipped?: unknown } };
+    expect(state.round).toBe(2);
+    expect(state.rounds.map((r) => r.round)).toEqual([1]);
+    expect(state.skipped).toMatchObject([{ round: 1, finding: tone, reason: 'a matter of taste' }]);
   });
 
   it('puts effective isolation in the identity', async () => {
